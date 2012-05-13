@@ -790,6 +790,269 @@ bigStepEvalStateMachine(StateMachine *rootMachine,
 	}
 }
 
+struct EvalPathConsumer {
+	virtual void crash(IRExpr *assumption, IRExpr *accAssumption) = 0;
+	virtual void survive(IRExpr *assumption, IRExpr *accAssumption) = 0;
+	virtual void escape(IRExpr *assumption, IRExpr *accAssumption) = 0;
+	virtual void badMachine() {
+		abort();
+	}
+	bool collectOrderingConstraints;
+	bool needsAccAssumptions;
+	EvalPathConsumer()
+		: collectOrderingConstraints(false),
+		  needsAccAssumptions(false)
+	{}
+};
+
+/* Note that this is stack-allocated but live across GCes! */
+class EvalContext {
+	enum trool {tr_true, tr_false, tr_unknown};
+	trool evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt);
+	void evalSideEffect(StateMachine *sm, Oracle *oracle, bool collectOrderingConstraints,
+			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
+			    const AllowableOptimisations &opt);
+
+	VexPtr<IRExpr, &ir_heap> assumption;
+	VexPtr<IRExpr, &ir_heap> accumulatedAssumption;
+	threadState state;
+	memLogT memlog;
+
+	EvalContext(const EvalContext &o, StateMachineState *sms)
+		: assumption(o.assumption),
+		  accumulatedAssumption(o.accumulatedAssumption),
+		  state(o.state),
+		  memlog(o.memlog),
+		  currentState(sms)
+	{}
+	/* Create a new context which is like this one, but with an
+	   extra assumption. */
+	EvalContext(const EvalContext &o, StateMachineState *sms, IRExpr *assume)
+		: assumption(o.assumption ? IRExpr_Binop(Iop_And1, o.assumption, assume) : NULL),
+		  accumulatedAssumption(o.accumulatedAssumption
+					? IRExpr_Binop(Iop_And1, o.accumulatedAssumption, assume)
+					: NULL),
+		  state(o.state),
+		  memlog(o.memlog),
+		  currentState(sms)
+	{}
+	EvalContext(const EvalContext &o, const threadState &_state,
+		    const memLogT &_memlog, IRExpr *_assumption,
+		    IRExpr *_accAssumption)
+		: assumption(_assumption),
+		  accumulatedAssumption(_accAssumption),
+		  state(_state),
+		  memlog(_memlog),
+		  currentState(o.currentState)
+	{}
+public:
+	VexPtr<StateMachineState, &ir_heap> currentState;
+	void advance(Oracle *oracle, const AllowableOptimisations &opt,
+		     std::vector<EvalContext> &pendingStates,
+		     StateMachine *sm,
+		     EvalPathConsumer &consumer);
+	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions)
+		: assumption(initialAssumption),
+		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
+		  currentState(sm->root)
+	{}
+	EvalContext(const EvalContext &o)
+		: assumption(o.assumption),
+		  accumulatedAssumption(o.accumulatedAssumption),
+		  state(o.state),
+		  memlog(o.memlog),
+		  currentState(o.currentState)
+	{}
+};
+
+EvalContext::trool
+EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt)
+{
+	assert(what->type() == Ity_I1);
+	what = simplifyIRExpr(internIRExpr(specialiseIRExpr(what, state)), opt);
+	IRExpr *e;
+	if (what->tag == Iex_Const) {
+		IRExprConst *iec = (IRExprConst *)what;
+		if (iec->con->Ico.U1)
+			return tr_true;
+		else
+			return tr_false;
+	}
+
+	e = simplifyIRExpr(
+		IRExpr_Binop(
+			Iop_And1,
+			assumption,
+			what),
+		opt);
+	if (e->tag == Iex_Const) {
+		IRExprConst *iec = (IRExprConst *)e;
+		if (iec->con->Ico.U1) {
+			/* We just proved that the assumption is
+			 * definitely true. */
+			printf("Path assumption reduces to true?\n");
+			dbg_break("Path assumption reduces to true?\n");
+			assumption = e;
+			return tr_true;
+		} else {
+			return tr_false;
+		}
+	}
+
+	e = simplifyIRExpr(
+		IRExpr_Binop(
+			Iop_And1,
+			assumption,
+			IRExpr_Unop(
+				Iop_Not1,
+				what)),
+		opt);
+	if (e->tag == Iex_Const) {
+		IRExprConst *iec = (IRExprConst *)e;
+		if (iec->con->Ico.U1) {
+			/* So X & ~Y is definitely true, where X is
+			   our assumption and Y is the thing which
+			   we're after.  That tells us that the
+			   assumption is definitely true, and
+			   therefore useless, and that @what is
+			   definitely false. */
+			printf("Path assumption is definitely true in way 2?\n");
+			dbg_break("Path assumption is definitely true in way 2?\n");
+			assumption = e;
+			return tr_false;
+		} else {
+			return tr_true;
+		}
+	}
+
+	/* Give up on this one and just accept that we don't know. */
+	return tr_unknown;
+}
+
+void
+EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, bool collectOrderingConstraints,
+			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
+			    const AllowableOptimisations &opt)
+{
+	NdChooser chooser;
+
+	do {
+		IRExpr *assumption = this->assumption;
+		IRExpr *accAssumption = this->accumulatedAssumption;
+		threadState state(this->state);
+		memLogT memlog(this->memlog);
+		if (!evalStateMachineSideEffect(sm, smse, chooser, oracle,
+						state, memlog,
+						collectOrderingConstraints,
+						opt,
+						&assumption, &accAssumption)) {
+			pendingStates.push_back(
+				EvalContext(*this, StateMachineNoCrash::get()));
+		} else {
+			pendingStates.push_back(
+				EvalContext(*this, state, memlog, assumption, accAssumption));
+		}
+	} while (chooser.advance());
+}
+
+/* You might that we could stash things like @oracle, @opt, and @sm in
+   the EvalContext itself and not have to pass them around all the
+   time.  That'd work, but it'd mean duplicating those pointers in
+   every item in the pending state queue, which would make that queue
+   much bigger, which'd be kind of annoying. */
+void
+EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
+		     std::vector<EvalContext> &pendingStates,
+		     StateMachine *sm,
+		     EvalPathConsumer &consumer)
+{
+	switch (currentState->type) {
+	case StateMachineState::Crash:
+		consumer.crash(assumption, accumulatedAssumption);
+		break;
+	case StateMachineState::NoCrash:
+		consumer.survive(assumption, accumulatedAssumption);
+		break;
+	case StateMachineState::Stub:
+		consumer.escape(assumption, accumulatedAssumption);
+		break;
+	case StateMachineState::Unreached:
+		consumer.badMachine();
+		break;
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState.get();
+		currentState = sme->target;
+		if (sme->sideEffect)
+			evalSideEffect(sm, oracle, consumer.collectOrderingConstraints,
+				       pendingStates, sme->sideEffect, opt);
+		break;
+	}
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState.get();
+		trool res = evalBooleanExpression(smb->condition, opt);
+		switch (res) {
+		case tr_true:
+			pendingStates.push_back(EvalContext(
+							*this,
+							smb->trueTarget));
+			break;
+		case tr_false:
+			pendingStates.push_back(EvalContext(
+							*this,
+							smb->falseTarget));
+			break;
+		case tr_unknown:
+			pendingStates.push_back(EvalContext(
+							*this,
+							smb->falseTarget,
+							IRExpr_Unop(
+								Iop_Not1,
+								smb->condition)));
+			pendingStates.push_back(EvalContext(
+							*this,
+							smb->trueTarget,
+							smb->condition));
+			break;
+		}
+		break;
+	}
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smnd = (StateMachineNdChoice *)currentState.get();
+		if (smnd->successors.size() == 0) {
+			consumer.badMachine();
+		} else {
+			pendingStates.reserve(pendingStates.size() + smnd->successors.size() - 1);
+			for (auto it = smnd->successors.begin();
+			     it != smnd->successors.end();
+			     it++)
+				pendingStates.push_back(EvalContext(*this, *it));
+		}
+		return;
+	}
+	}
+}
+
+static void
+enumEvalPaths(VexPtr<StateMachine, &ir_heap> &sm,
+	      VexPtr<IRExpr, &ir_heap> &assumption,
+	      VexPtr<Oracle> &oracle,
+	      const AllowableOptimisations &opt,
+	      struct EvalPathConsumer &consumer,
+	      GarbageCollectionToken &token)
+{
+	std::vector<EvalContext> pendingStates;
+
+	pendingStates.push_back(EvalContext(sm, assumption, consumer.needsAccAssumptions));
+
+	while (!pendingStates.empty()) {
+		LibVEX_maybe_gc(token);
+
+		EvalContext ctxt(pendingStates.back());
+		pendingStates.pop_back();
+		ctxt.advance(oracle, opt, pendingStates, sm, consumer);
+	}
+}
+
 /* Assume that @sm executes atomically.  Figure out a constraint on
    the initial state which will lead to it not crashing. */
 IRExpr *
@@ -800,27 +1063,16 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 				       GarbageCollectionToken token)
 {
 	__set_profiling(survivalConstraintIfExecutedAtomically);
-	NdChooser chooser;
 
-	VexPtr<IRExpr, &ir_heap> res(assumption);
-	do {
-		if (TIMEOUT)
-			return NULL;
-
-		LibVEX_maybe_gc(token);
-		StateMachineEvalContext ctxt;
-		ctxt.pathConstraint =
-			assumption ? assumption.get() : IRExpr_Const(IRConst_U1(1));
-		ctxt.justPathConstraint =
-			assumption ? IRExpr_Const(IRConst_U1(1)) : NULL;
-		ctxt.currentState = sm->root;
-		bool crashes;
-		bigStepEvalStateMachine(sm, &crashes, chooser, oracle, opt, ctxt);
-		if (crashes) {
+	struct _ : public EvalPathConsumer {
+		VexPtr<IRExpr, &ir_heap> res;
+		VexPtr<IRExpr, &ir_heap> &assumption;
+		const AllowableOptimisations &opt;
+		void crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			IRExpr *component =
 				IRExpr_Unop(
 					Iop_Not1,
-					assumption ? ctxt.justPathConstraint : ctxt.pathConstraint);
+					justPathConstraint ? justPathConstraint : pathConstraint);
 			if (res)
 				res = IRExpr_Binop(
 					Iop_And1,
@@ -830,11 +1082,25 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 				res = component;
 			res = simplifyIRExpr(res, opt);
 		}
-	} while (chooser.advance());
+		void survive(IRExpr *, IRExpr *) {}
+		void escape(IRExpr *, IRExpr *) {}
+		_(VexPtr<IRExpr, &ir_heap> &_assumption,
+		  const AllowableOptimisations &_opt)
+			: res(NULL), assumption(_assumption), opt(_opt)
+		{}
+	} consumeEvalPath(assumption, opt);
+	if (assumption)
+		consumeEvalPath.needsAccAssumptions = true;
+	else
+		assumption = IRExpr_Const(IRConst_U1(1));
+	enumEvalPaths(sm, assumption, oracle, opt, consumeEvalPath, token);
 
-	if (!res)
-		res = IRExpr_Const(IRConst_U1(1));
-	return res;
+	if (TIMEOUT)
+		return NULL;
+	else if (consumeEvalPath.res)
+		return consumeEvalPath.res;
+	else
+		return IRExpr_Const(IRConst_U1(1));
 }
 
 bool

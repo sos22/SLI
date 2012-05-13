@@ -106,7 +106,6 @@ exploreForStartingRip(Oracle *oracle,
 				if (debug_exploration)
 					printf("Need to backtrack further up the stack to get predecessors of %s\n",
 					       vr.name());
-				dbg_break("Need to backtrack further up the stack");
 				std::vector<unsigned long> callers;
 				oracle->getPossibleStackTruncations(vr, callers);
 				if (callers.size() != 0) {
