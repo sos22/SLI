@@ -869,7 +869,6 @@ EvalContext::trool
 EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt)
 {
 	assert(what->type() == Ity_I1);
-	what = simplifyIRExpr(internIRExpr(specialiseIRExpr(what, state)), opt);
 	IRExpr *e;
 	if (what->tag == Iex_Const) {
 		IRExprConst *iec = (IRExprConst *)what;
@@ -985,7 +984,12 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState.get();
-		trool res = evalBooleanExpression(smb->condition, opt);
+		IRExpr *cond =
+			simplifyIRExpr(
+				internIRExpr(
+					specialiseIRExpr(smb->condition, state)),
+				opt);
+		trool res = evalBooleanExpression(cond, opt);
 		switch (res) {
 		case tr_true:
 			pendingStates.push_back(EvalContext(
@@ -1003,11 +1007,11 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 							smb->falseTarget,
 							IRExpr_Unop(
 								Iop_Not1,
-								smb->condition)));
+								cond)));
 			pendingStates.push_back(EvalContext(
 							*this,
 							smb->trueTarget,
-							smb->condition));
+							cond));
 			break;
 		}
 		return true;
