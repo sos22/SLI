@@ -3,6 +3,7 @@
 #include "state_machine.hpp"
 #include "cfgnode.hpp"
 #include "oracle.hpp"
+#include "alloc_mai.hpp"
 
 namespace _probeCFGsToMachine {
 
@@ -59,8 +60,11 @@ getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 }
 
 static StateMachineState *
-cfgNodeToState(Oracle *oracle, unsigned tid, CFGNode *target,
+cfgNodeToState(Oracle *oracle,
+	       unsigned tid,
+	       CFGNode *target,
 	       bool storeLike,
+	       MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier,
 	       std::vector<reloc_t> &pendingRelocs)
 {
 	ThreadRip tr(tid, target->my_rip);
@@ -110,7 +114,7 @@ cfgNodeToState(Oracle *oracle, unsigned tid, CFGNode *target,
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					MemoryAccessIdentifier(tr, MemoryAccessIdentifier::static_generation));
+					getMemoryAccessIdentifier(tr));
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->my_rip,
@@ -141,7 +145,7 @@ cfgNodeToState(Oracle *oracle, unsigned tid, CFGNode *target,
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],
-					MemoryAccessIdentifier(tr, MemoryAccessIdentifier::static_generation),
+					getMemoryAccessIdentifier(tr),
 					ity);
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
@@ -256,10 +260,12 @@ static void
 probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		   const DynAnalysisRip &proximalRip,
 		   StateMachineState *proximal,
+		   MemoryAccessIdentifierAllocator &mai,
 		   std::set<StateMachine *> &out)
 {
 	struct _ : public cfg_translator {
 		const DynAnalysisRip &proximalRip;
+		MemoryAccessIdentifierAllocator &mai;		
 		StateMachineState *proximal;
 		StateMachineState *operator()(CFGNode *e,
 					      Oracle *oracle,
@@ -268,14 +274,15 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 			if (DynAnalysisRip(e->my_rip) == proximalRip) {
 				return proximal;
 			} else {
-				return cfgNodeToState(oracle, tid, e, false, pendingRelocations);
+				return cfgNodeToState(oracle, tid, e, false, mai, pendingRelocations);
 			}
 		}
 		_(const DynAnalysisRip &_proximalRip,
+		  MemoryAccessIdentifierAllocator &_mai,
 		  StateMachineState *_proximal)
-			: proximalRip(_proximalRip), proximal(_proximal)
+			: proximalRip(_proximalRip), mai(_mai), proximal(_proximal)
 		{}
-	} doOne(proximalRip, proximal);
+	} doOne(proximalRip, mai, proximal);
 
 	std::map<CFGNode *, StateMachineState *> results;
 	for (auto it = roots.begin(); it != roots.end(); it++)
@@ -293,17 +300,19 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 }
 
 static StateMachine *
-storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root)
+storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root, MemoryAccessIdentifierAllocator &mai)
 {
 	struct _ : public cfg_translator {
+		MemoryAccessIdentifierAllocator *mai;
 		StateMachineState *operator()(CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations)
 		{
-			return cfgNodeToState(oracle, tid, e, true, pendingRelocations);
+			return cfgNodeToState(oracle, tid, e, true, *mai, pendingRelocations);
 		}
 	} doOne;
+	doOne.mai = &mai;
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<std::pair<unsigned, VexRip> > origin;
 	origin.push_back(std::pair<unsigned, VexRip>(tid, root->my_rip));
@@ -319,15 +328,17 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid,
 		   std::set<CFGNode *> &roots,
 		   const DynAnalysisRip &targetRip,
 		   StateMachineState *proximal,
+		   MemoryAccessIdentifierAllocator &mai,
 		   std::set<StateMachine *> &out)
 {
-	return _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, proximal, out);
+	return _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, proximal, mai, out);
 }
 
 StateMachine *
 storeCFGToMachine(Oracle *oracle,
 		  unsigned tid,
-		  CFGNode *root)
+		  CFGNode *root,
+		  MemoryAccessIdentifierAllocator &mai)
 {
-	return _probeCFGsToMachine::storeCFGsToMachine(oracle, tid, root);
+	return _probeCFGsToMachine::storeCFGsToMachine(oracle, tid, root, mai);
 }

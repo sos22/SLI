@@ -183,7 +183,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 }
 
 static bool
-buildCED(DNF_Conjunction &c, FreeVariableMap &fv,
+buildCED(DNF_Conjunction &c,
 	 std::map<unsigned, ThreadRip> &roots,
 	 AddressSpace *as, crashEnforcementData *out,
 	 int &next_hb_id,
@@ -318,19 +318,16 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	roots[summary->loadMachine->origin[0].first] = ThreadRip::mk(summary->loadMachine->origin[0].first,
 								     summary->loadMachine->origin[0].second);
 	
-	FreeVariableMap m(summary->loadMachine->freeVariables);
-	zapBindersAndFreeVariables(m, summary->loadMachine);
+	zapBindersAndFreeVariables(summary->loadMachine);
 	for (unsigned x = 0; x < summary->storeMachines.size(); x++) {
-		FreeVariableMap n(summary->storeMachines[x]->machine->freeVariables);
-		zapBindersAndFreeVariables(n, summary->storeMachines[x]->machine);
-		m.merge(n);
+		zapBindersAndFreeVariables(summary->storeMachines[x]->machine);
 		assert(summary->storeMachines[x]->machine->origin.size() == 1);
 		roots[summary->storeMachines[x]->machine->origin[0].first] =
 			ThreadRip::mk(summary->storeMachines[x]->machine->origin[0].first,
 				      summary->storeMachines[x]->machine->origin[0].second);
 	}
 
-	requirement = internIRExpr(zapFreeVariables(requirement, m));
+	requirement = internIRExpr(zapFreeVariables(requirement));
 	requirement = simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations);
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
@@ -372,7 +369,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
-		if (buildCED(d[x], m, roots, oracle->ms->addressSpace, &tmp, next_hb_id, next_slot))
+		if (buildCED(d[x], roots, oracle->ms->addressSpace, &tmp, next_hb_id, next_slot))
 			accumulator |= tmp;
 	}
 	return accumulator;

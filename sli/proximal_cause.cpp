@@ -3,11 +3,14 @@
 #include "sli.h"
 #include "offline_analysis.hpp"
 #include "libvex_prof.hpp"
+#include "alloc_mai.hpp"
 
 namespace ProximalCause {
 
 static StateMachineState *
-getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
+getProximalCause(MachineState *ms, const ThreadRip &rip,
+		 Thread *thr,
+		 MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier)
 {
 	IRSB *irsb;
 	try {
@@ -86,7 +89,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation)));
+					getMemoryAccessIdentifier(rip)));
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, ist->addr),
 					  StateMachineCrash::get());
 			break;
@@ -154,7 +157,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 						new StateMachineSideEffectLoad(
 							tr,
 							cas->addr,
-							MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation),
+							getMemoryAccessIdentifier(rip),
 							ty),
 						new StateMachineBifurcate(
 							rip.rip,
@@ -167,7 +170,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 								new StateMachineSideEffectStore(
 									cas->addr,
 									cas->dataLo,
-									MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation)),
+									getMemoryAccessIdentifier(rip)),
 								work),
 							work)));
 
@@ -191,7 +194,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],
-					MemoryAccessIdentifier(rip, MemoryAccessIdentifier::static_generation),
+					getMemoryAccessIdentifier(rip),
 					ity));
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, dirty->args[0]),
 					  StateMachineCrash::get());
@@ -216,7 +219,8 @@ getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
 }
 
 StateMachineState *
-getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr)
+getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr,
+		 MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier)
 {
-	return ProximalCause::getProximalCause(ms, rip, thr);
+	return ProximalCause::getProximalCause(ms, rip, thr, getMemoryAccessIdentifier);
 }

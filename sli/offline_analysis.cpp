@@ -13,6 +13,7 @@
 #include "ssa.hpp"
 #include "libvex_prof.hpp"
 #include "cfgnode.hpp"
+#include "alloc_mai.hpp"
 
 #define DEBUG_BUILD_STORE_CFGS 0
 
@@ -23,6 +24,7 @@ static StateMachine *CFGtoCrashReason(unsigned tid,
 				      AllowableOptimisations &opt,
 				      bool simple_calls,
 				      VexPtr<Oracle> &oracle,
+				      MemoryAccessIdentifierAllocator &mai,
 				      GarbageCollectionToken token);
 
 static CFGNode *buildCFGForRipSet(AddressSpace *as,
@@ -345,10 +347,10 @@ instructionIsInteresting(const InstructionSet &i, const VexRip &r)
 }
 
 static StateMachine *
-CFGtoStoreMachine(unsigned tid, VexPtr<Oracle> &oracle, VexPtr<CFGNode, &ir_heap> &cfg,
-		  AllowableOptimisations &opt, GarbageCollectionToken token)
+CFGtoStoreMachine(unsigned tid, Oracle *oracle, CFGNode *cfg,
+		  AllowableOptimisations &opt, MemoryAccessIdentifierAllocator &mai)
 {
-	StateMachine *sm = storeCFGToMachine(oracle, tid, cfg);
+	StateMachine *sm = storeCFGToMachine(oracle, tid, cfg, mai);
 	canonicaliseRbp(sm, oracle);
 	return sm;
 }
@@ -521,6 +523,7 @@ static StateMachine *
 expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				 VexPtr<Oracle> &oracle,
 				 AllowableOptimisations &opt,
+				 MemoryAccessIdentifierAllocator &mai,
 				 GarbageCollectionToken token)
 {
 	__set_profiling(expandStateMachineToFunctionHead);
@@ -572,6 +575,7 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 				      opt,
 				      true,
 				      oracle,
+				      mai,
 				      token);
 	}
 	if (!cr) {
@@ -608,13 +612,14 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		 bool needRemoteMacroSections,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
+		 MemoryAccessIdentifierAllocator &mai,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
 	AllowableOptimisations opt =
 		optIn
 		.enableassumeNoInterferingStores();
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, opt, token));
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, opt, mai));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
@@ -630,7 +635,7 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 
 	/* If it might crash with that machine, try expanding it to
 	   include a bit more context and see if it still goes. */
-	sm = expandStateMachineToFunctionHead(sm, oracle, opt, token);
+	sm = expandStateMachineToFunctionHead(sm, oracle, opt, mai, token);
 	if (!sm) {
 		fprintf(_logfile, "\t\tCannot expand store machine!\n");
 		return true;
@@ -687,6 +692,7 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 		  const AllowableOptimisations &optIn,
 		  StateMachine ***out,
 		  unsigned *nr_out_machines,
+		  MemoryAccessIdentifierAllocator &mai,
 		  GarbageCollectionToken token)
 {
 	__set_profiling(buildProbeMachine);
@@ -706,7 +712,7 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 			return false;
 		}
 		std::set<StateMachine *> machines;
-		probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, proximal, machines);
+		probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, proximal, mai, machines);
 		sms = (StateMachine **)__LibVEX_Alloc_Ptr_Array(&ir_heap, machines.size());
 		nr_sms = 0;
 		for (auto it = machines.begin(); it != machines.end(); it++) {
@@ -786,6 +792,7 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		      bool needRemoteMacroSections,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
 		      const AllowableOptimisations &optIn,
+		      const MemoryAccessIdentifierAllocator &mai,
 		      GarbageCollectionToken token)
 {
 	assert(potentiallyConflictingStores.size() > 0);
@@ -819,6 +826,7 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		}
 
 		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
+		MemoryAccessIdentifierAllocator storeMai(mai);
 		foundRace |= considerStoreCFG(storeCFG,
 					      oracle,
 					      survive,
@@ -828,6 +836,7 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 					      needRemoteMacroSections,
 					      STORING_THREAD + i,
 					      optIn,
+					      storeMai,
 					      token);
 	}
 
@@ -840,6 +849,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<MachineState> &ms,
 	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
+	      const MemoryAccessIdentifierAllocator &mai,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(diagnoseCrash);
@@ -911,6 +921,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 					       summary, needRemoteMacroSections,
 					       potentiallyConflictingStores,
 					       optIn,
+					       mai,
 					       token);
 	if (TIMEOUT)
 		return NULL;
@@ -1106,10 +1117,9 @@ CFGtoCrashReason(unsigned tid,
 		 AllowableOptimisations &opt,
 		 bool simple_calls,
 		 VexPtr<Oracle> &oracle,
+		 MemoryAccessIdentifierAllocator &mai,
 		 GarbageCollectionToken token)
 {
-	std::map<ThreadRip, unsigned> accessGenerationNumbers;
-
 	class State {
 		typedef std::pair<StateMachineState **, CFGNode *> reloc_t;
 		std::vector<CFGNode *> pending;
@@ -1172,24 +1182,6 @@ CFGtoCrashReason(unsigned tid,
 	} fetchIrsb(oracle->ms->addressSpace, tid);
 
 	class BuildStateForCfgNode {
-		MemoryAccessIdentifier getAccessIdentifier(const ThreadRip &rip)
-		{
-			/* Yay, compiler bug.  You might think that
-			   we'd be better off copying the value of foo
-			   into its only use, and you'd be right,
-			   except that if you do that then gcc 4.4
-			   forgets that first_dynamic_generation is a
-			   static const and gets upset that it can't
-			   find a definition anywhere.  This only
-			   seems to happen with optimisations off;
-			   with optimisations on either variant
-			   compiles just fine. */
-			unsigned foo = MemoryAccessIdentifier::first_dynamic_generation;
-			auto it = accessGenerationNumbers.insert(
-				std::pair<ThreadRip, unsigned>(rip, foo)).first;
-			return MemoryAccessIdentifier(rip, it->second++);
-		}
-
 		StateMachineState *backtrackOneStatement(IRStmt *stmt,
 							 const ThreadRip &rip,
 							 CFGNode *branchTarget,
@@ -1212,7 +1204,7 @@ CFGtoCrashReason(unsigned tid,
 				se = new StateMachineSideEffectStore(
 					((IRStmtStore *)stmt)->addr,
 					((IRStmtStore *)stmt)->data,
-					getAccessIdentifier(rip));
+					mai(rip));
 				break;
 			case Ist_Dirty: {
 				IRType ity;
@@ -1234,7 +1226,7 @@ CFGtoCrashReason(unsigned tid,
 				se = new StateMachineSideEffectLoad(
 					((IRStmtDirty *)stmt)->details->tmp,
 					((IRStmtDirty *)stmt)->details->args[0],
-					getAccessIdentifier(rip),
+					mai(rip),
 					ity);
 				break;
 			}
@@ -1339,7 +1331,7 @@ CFGtoCrashReason(unsigned tid,
 								new StateMachineSideEffectLoad(
 									details->tmp,
 									details->args[0],
-									getAccessIdentifier(site),
+									mai(site),
 									Ity_I64),
 								headState);
 					} else {
@@ -1366,13 +1358,12 @@ CFGtoCrashReason(unsigned tid,
 		State &state;
 		StateMachineState *escapeState;
 		Oracle *oracle;
-		std::map<ThreadRip, unsigned> &accessGenerationNumbers;
+		MemoryAccessIdentifierAllocator &mai;
 		BuildStateForCfgNode(bool _simple_calls, unsigned _tid, State &_state,
 				     StateMachineState *_escapeState, Oracle *_oracle,
-				     std::map<ThreadRip, unsigned> &_accessGenerationNumbers)
+				     MemoryAccessIdentifierAllocator &_mai)
 			: simple_calls(_simple_calls), tid(_tid), state(_state),
-			  escapeState(_escapeState), oracle(_oracle),
-			  accessGenerationNumbers(_accessGenerationNumbers)
+			  escapeState(_escapeState), oracle(_oracle), mai(_mai)
 		{}
 		StateMachineState *operator()(CFGNode *cfg,
 					      IRSB *irsb) {
@@ -1435,7 +1426,7 @@ CFGtoCrashReason(unsigned tid,
 				lastState->target = escapeState;
 			return res;
 		}
-	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle, accessGenerationNumbers);
+	} buildStateForCfgNode(simple_calls, tid, state, escapeState, oracle, mai);
 
 	VexRip original_rip = cfg->my_rip;
 	StateMachineState *root = NULL;
@@ -1540,7 +1531,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				FixConsumer &df,
 				GarbageCollectionToken token)
 {
-	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), targetRip.toVexRip()), thr));
+	MemoryAccessIdentifierAllocator mai;
+	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), targetRip.toVexRip()), thr, mai));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
 		return;
@@ -1554,14 +1546,14 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	unsigned nrProbeMachines;
 	{
 		StateMachine **_probeMachines;
-		if (!buildProbeMachine(oracle, targetRip, proximal, thr->tid, opt, &_probeMachines, &nrProbeMachines, token))
+		if (!buildProbeMachine(oracle, targetRip, proximal, thr->tid, opt, &_probeMachines, &nrProbeMachines, mai, token))
 			return;
 		probeMachines = _probeMachines;
 	}
 	for (unsigned x = 0; x < nrProbeMachines; x++) {
 		VexPtr<CrashSummary, &ir_heap> summary;
 		VexPtr<StateMachine, &ir_heap> probeMachine(probeMachines[x]);
-		summary = diagnoseCrash(probeMachine, oracle, ms, false, opt, token);
+		summary = diagnoseCrash(probeMachine, oracle, ms, false, opt, mai, token);
 		if (summary)
 			df(summary, token);
 	}

@@ -61,6 +61,7 @@ public:
 };
 
 void printCFG(const CFGNode *cfg, const char *prefix, FILE *f);
+class MemoryAccessIdentifierAllocator;
 void getStoreCFGs(const std::set<DynAnalysisRip> &, Oracle *,
 		  CFGNode ***, int *);
 bool getProbeCFGs(Oracle *oracle, const DynAnalysisRip &vr,

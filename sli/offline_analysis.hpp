@@ -194,7 +194,9 @@ public:
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
 void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out);
-StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr);
+class MemoryAccessIdentifierAllocator;
+StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr,
+				    MemoryAccessIdentifierAllocator &);
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
 				   VexPtr<Oracle> &oracle,

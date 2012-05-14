@@ -7,6 +7,7 @@
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
 #include "offline_analysis.hpp"
+#include "alloc_mai.hpp"
 
 #include "libvex_parse.h"
 
@@ -954,3 +955,12 @@ StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
 	return this;
 }
 
+MemoryAccessIdentifier
+MemoryAccessIdentifierAllocator::operator()(const ThreadRip &rip)
+{
+	auto it_and_did_something = ids.insert(std::pair<ThreadRip, unsigned>(rip, 1));
+	auto it = it_and_did_something.first;
+	unsigned gen = it->second;
+	it->second++;
+	return MemoryAccessIdentifier(rip, gen);
+}
