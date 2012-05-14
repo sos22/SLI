@@ -112,6 +112,7 @@ protected:
 	}
 	virtual IRExpr *transformIex(IRExprHappensBefore *e) { return NULL; }
 	virtual IRExpr *transformIex(IRExprPhi *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExprFreeVariable *e) { return NULL; }
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 public:
 	IRExpr *doit(IRExpr *e, bool *done_something) { return transformIRExpr(e, done_something); }

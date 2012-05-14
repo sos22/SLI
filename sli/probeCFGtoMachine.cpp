@@ -64,7 +64,7 @@ cfgNodeToState(Oracle *oracle,
 	       unsigned tid,
 	       CFGNode *target,
 	       bool storeLike,
-	       MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier,
+	       MemoryAccessIdentifierAllocator &mai,
 	       std::vector<reloc_t> &pendingRelocs)
 {
 	ThreadRip tr(tid, target->my_rip);
@@ -114,7 +114,7 @@ cfgNodeToState(Oracle *oracle,
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					getMemoryAccessIdentifier(tr));
+					mai(tr));
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->my_rip,
@@ -130,23 +130,31 @@ cfgNodeToState(Oracle *oracle,
 		case Ist_Dirty: {
 			IRDirty *dirty = ((IRStmtDirty *)stmt)->details;
 			IRType ity = Ity_INVALID;
-			if (!strcmp(dirty->cee->name, "helper_load_8"))
-				ity = Ity_I8;
-			else if (!strcmp(dirty->cee->name, "helper_load_16"))
-				ity = Ity_I16;
-			else if (!strcmp(dirty->cee->name, "helper_load_32"))
-				ity = Ity_I32;
-			else if (!strcmp(dirty->cee->name, "helper_load_64"))
-				ity = Ity_I64;
-			else
-				abort();
-			assert(ity != Ity_INVALID);
-			StateMachineSideEffect *se =
-				new StateMachineSideEffectLoad(
+			StateMachineSideEffect *se;
+			if (!strncmp(dirty->cee->name, "helper_load_", strlen("helper_load_"))) {
+				if (!strcmp(dirty->cee->name, "helper_load_8"))
+					ity = Ity_I8;
+				else if (!strcmp(dirty->cee->name, "helper_load_16"))
+					ity = Ity_I16;
+				else if (!strcmp(dirty->cee->name, "helper_load_32"))
+					ity = Ity_I32;
+				else if (!strcmp(dirty->cee->name, "helper_load_64"))
+					ity = Ity_I64;
+				else
+					abort();
+				assert(ity != Ity_INVALID);
+				se = new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],
-					getMemoryAccessIdentifier(tr),
+					mai(tr),
 					ity);
+			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
+				se = new StateMachineSideEffectCopy(
+					dirty->tmp,
+					mai.freeVariable(Ity_I64, tr));
+			} else {
+				abort();
+			}
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->my_rip,

@@ -274,6 +274,7 @@ public:
 	static const unsigned first_dynamic_generation = 2;
 	ThreadRip rip;
 	unsigned generation;
+	unsigned long hash() const { return rip.hash() * 200010011 + generation * 200021863; }
 	void sanity_check() const { rip.sanity_check(); }
 	bool operator==(const MemoryAccessIdentifier &other) const {
 		return rip == other.rip && generation == other.generation;
@@ -1213,6 +1214,7 @@ typedef
       Iex_Load,
       Iex_HappensBefore,
       Iex_Phi,
+      Iex_FreeVariable,
    }
    IRExprTag;
 
@@ -1783,6 +1785,25 @@ struct IRExprPhi : public IRExpr {
     }
 };
 
+struct IRExprFreeVariable : public IRExpr {
+    MemoryAccessIdentifier id;
+    IRType ty;
+    IRExprFreeVariable(const MemoryAccessIdentifier _id, IRType _ty)
+	: IRExpr(Iex_FreeVariable), id(_id), ty(_ty)
+    {}
+    void visit(HeapVisitor &hv) {}
+    unsigned long hashval() const { return 1045239 * id.hash(); }
+    void prettyPrint(FILE *f) const {
+	fprintf(f, "Free%s:", id.name());
+	ppIRType(ty, f);
+    }
+    IRType type() const { return ty; }
+    void sanity_check() const {
+	id.sanity_check();
+	sanity_check_irtype(ty);
+    }
+};
+
 /* Expression constructors. */
 extern IRExpr* IRExpr_Get    ( Int off, IRType ty, unsigned tid, unsigned generation );
 extern IRExpr* IRExpr_Get    ( threadAndRegister r, IRType ty );
@@ -1812,6 +1833,9 @@ static inline IRExpr *IRExpr_Phi (const threadAndRegister &r,
 				  const std::vector<unsigned> &generations,
 				  IRType ty) {
     return new IRExprPhi(r, generations, ty);
+}
+static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty) {
+    return new IRExprFreeVariable(id, ty);
 }
 
 /* Pretty-print an IRExpr. */

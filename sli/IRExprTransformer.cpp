@@ -30,6 +30,7 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 		do_case(ClientCallFailed);
 		do_case(HappensBefore);
 		do_case(Phi);
+		do_case(FreeVariable);
 #undef do_case
 	}
 	/* res == e shouldn't really happen, but it's just about

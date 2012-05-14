@@ -75,6 +75,9 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 	hdr(Get)
 		return threadAndRegister::fullEq(a->reg, b->reg) && a->ty == b->ty;
 	footer()
+	hdr(FreeVariable)
+		return a->id == b->id && a->ty == b->ty;
+	footer()
 	hdr(GetI)
 		return a->bias == b->bias &&
 			physicallyEqual(a->descr,
@@ -485,6 +488,11 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 			return equal_to;
 	hdr(GetI)
 		return _sortIRExprs(a->ix, b->ix);
+	hdr(FreeVariable)
+		if ((s = _sortIntegers(a->id, b->id)) != equal_to)
+			return s;
+		else
+			return _sortIntegers(a->ty, b->ty);
 	hdr(Qop)
 		if (a->op < b->op)
 			return less_than;

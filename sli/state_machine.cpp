@@ -964,3 +964,9 @@ MemoryAccessIdentifierAllocator::operator()(const ThreadRip &rip)
 	it->second++;
 	return MemoryAccessIdentifier(rip, gen);
 }
+
+IRExpr *
+MemoryAccessIdentifierAllocator::freeVariable(IRType ty, const ThreadRip &rip)
+{
+	return IRExpr_FreeVariable((*this)(rip), ty);
+}

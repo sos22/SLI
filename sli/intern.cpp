@@ -54,6 +54,8 @@ shallow_hash(const IRExpr *e)
 		return 100234427;
 	case Iex_Phi:
 		return 100029499 + ((IRExprPhi *)e)->reg.hash() * 1000014181;
+	case Iex_FreeVariable:
+		return 100039411 + ((IRExprFreeVariable *)e)->id.hash() * 100044913;
 	}
 	abort();
 }
@@ -71,6 +73,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	case Iex_Const:
 	case Iex_HappensBefore:
 	case Iex_Phi:
+	case Iex_FreeVariable:
 		break;
 	case Iex_GetI:
 		((IRExprGetI *)e)->ix = internIRExpr(((IRExprGetI *)e)->ix, lookupTable);
@@ -235,6 +238,13 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			IRExprPhi *op = (IRExprPhi *)other;
 			if (!threadAndRegister::fullEq(ep->reg, op->reg) ||
 			    ep->generations != op->generations || ep->ty != op->ty)
+				continue;
+			break;
+		}
+		case Iex_FreeVariable: {
+			IRExprFreeVariable *ef = (IRExprFreeVariable *)e;
+			IRExprFreeVariable *of = (IRExprFreeVariable *)other;
+			if (ef->id != of->id || ef->ty != of->ty)
 				continue;
 			break;
 		}
