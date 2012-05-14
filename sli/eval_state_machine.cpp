@@ -1316,6 +1316,229 @@ findCrossMachineRacingInstructions(StateMachine *probeMachine,
 		oracle->findRacingRips(opt, *it, storeMachineRacingInstructions);
 }
 
+static StateMachineState *
+shallowCloneState(StateMachineState *s)
+{
+	switch (s->type) {
+#define do_case(name)					\
+	case StateMachineState:: name :			\
+		return StateMachine ## name ::get()
+		do_case(Unreached);
+		do_case(Crash);
+		do_case(NoCrash);
+#undef do_case
+#define do_case(name)							\
+		case StateMachineState:: name :				\
+			return new StateMachine ## name			\
+				(*(StateMachine ## name *)s)
+		do_case(Stub);
+		do_case(Bifurcate);
+		do_case(SideEffecting);
+		do_case(NdChoice);
+#undef do_case
+	}
+	abort();
+}
+
+/* A state in a cross machine.  p is the state of the probe
+   machine and s the state of the store machine.  We also
+   track whether the probe machine has issued a load and the
+   store machine a store, because that allows us to optimise
+   when we consider context switches slightly. */
+struct crossStateT {
+	StateMachineState *p;
+	StateMachineState *s;
+	bool probe_issued_load;
+	bool store_issued_store;
+	crossStateT(StateMachineState *_p,
+		    StateMachineState *_s,
+		    bool _pil,
+		    bool _sis)
+		: p(_p), s(_s), probe_issued_load(_pil),
+		  store_issued_store(_sis)
+	{}
+	bool operator<(const crossStateT &o) const {
+#define do_field(n)				\
+		if (n < o.n)			\
+			return true;		\
+		if (n > o.n)			\
+			return false
+		do_field(p);
+		do_field(s);
+		do_field(probe_issued_load);
+		do_field(store_issued_store);
+#undef do_field
+		return false;
+	}
+};
+
+static bool
+definitelyDoesntRace(StateMachineSideEffectLoad *smsel, StateMachineState *machine,
+		     const AllowableOptimisations &opt, Oracle *oracle,
+		     std::set<StateMachineState *> &memo)
+{
+	if (!memo.insert(machine).second)
+		return true;
+	StateMachineSideEffect *otherEffect = machine->getSideEffect();
+	if (otherEffect && otherEffect->type == StateMachineSideEffect::Store) {
+		StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)otherEffect;
+		if (oracle->memoryAccessesMightAlias(opt, smsel, s))
+			return false;
+	}
+	std::vector<StateMachineState *> targets;
+	machine->targets(targets);
+	for (auto it = targets.begin(); it != targets.end(); it++)
+		if (!definitelyDoesntRace(smsel, *it, opt, oracle, memo))
+			return false;
+	return true;
+}
+
+/* Returns true if there are any stores in @machine which might
+   conceivably race with @smsel. */
+static bool
+definitelyDoesntRace(StateMachineSideEffectLoad *smsel, StateMachineState *machine,
+		     const AllowableOptimisations &opt, Oracle *oracle)
+{
+	std::set<StateMachineState *> memo;
+	return definitelyDoesntRace(smsel, machine, opt, oracle, memo);
+}
+
+static StateMachine *
+buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
+			 Oracle *oracle, const AllowableOptimisations &opt)
+{
+	std::map<crossStateT, StateMachineState *> results;
+
+	typedef std::pair<StateMachineState **, crossStateT> relocT;
+	std::vector<relocT> pendingRelocs;
+
+	StateMachineState *crossMachineRoot;
+	crossMachineRoot = NULL;
+	pendingRelocs.push_back(
+		relocT(&crossMachineRoot, crossStateT(probeMachine->root, storeMachine->root, false, false)));
+	while (!pendingRelocs.empty()) {
+		relocT r(pendingRelocs.back());
+		pendingRelocs.pop_back();
+
+		assert(!*r.first);
+		if (results.count(r.second)) {
+			*r.first = results[r.second];
+			continue;
+		}
+
+		crossStateT crossState(r.second);
+		StateMachineSideEffectLoad *probe_effect =
+			dynamic_cast<StateMachineSideEffectLoad *>(crossState.p->getSideEffect());
+		StateMachineSideEffectStore *store_effect =
+			dynamic_cast<StateMachineSideEffectStore *>(crossState.s->getSideEffect());
+		StateMachineState *newState;
+
+		struct {
+			StateMachineState *operator()(const crossStateT &crossState,
+						      std::vector<relocT> &pendingRelocs) {
+				StateMachineState *res = shallowCloneState(crossState.p);
+				std::vector<StateMachineState **> targets;
+				res->targets(targets);
+				bool isLoad = false;
+				if (StateMachineSideEffect *se = crossState.p->getSideEffect())
+					isLoad = se->type == StateMachineSideEffect::Load;
+				for (auto it = targets.begin(); it != targets.end(); it++) {
+					pendingRelocs.push_back(
+						relocT(*it,
+						       crossStateT(
+							       **it,
+							       crossState.s,
+							       isLoad || crossState.probe_issued_load,
+							       crossState.store_issued_store
+							       )));
+					**it = NULL;
+				}
+				return res;
+			}
+		} advanceProbeMachine;
+		struct {
+			StateMachineState *operator()(const crossStateT &crossState,
+						      std::vector<relocT> &pendingRelocs) {
+				StateMachineState *res = shallowCloneState(crossState.s);
+				std::vector<StateMachineState **> targets;
+				res->targets(targets);
+				bool isStore = false;
+				if (StateMachineSideEffect *se = crossState.s->getSideEffect())
+					isStore = se->type == StateMachineSideEffect::Store;
+				for (auto it = targets.begin(); it != targets.end(); it++) {
+					pendingRelocs.push_back(
+						relocT(*it,
+						       crossStateT(
+							       crossState.p,
+							       **it,
+							       crossState.probe_issued_load,
+							       isStore || crossState.store_issued_store
+							       )));
+					**it = NULL;
+				}
+				return res;
+			}
+		} advanceStoreMachine;
+		if (crossState.p->isTerminal()) {
+			/* The probe machine has reached its end.  The
+			   result is the result of the whole
+			   machine. */
+			/* Exception: we don't consider the case where
+			   the probe machine completes before the
+			   store machine has issued any stores, so
+			   that just turns into Unreached. */
+			if (crossState.store_issued_store)
+				newState = crossState.p;
+			else
+				newState = StateMachineUnreached::get();
+		} else if (crossState.s->isTerminal()) {
+			/* If the store machine terminates at
+			   <survive> or <unreached> then we should
+			   ignore this path.  If it terminates at
+			   <crash> then we need to run the probe
+			   machine to completion to see what's
+			   what. */
+			/* Another exception: we don't want to
+			   consider the case where the store machine
+			   completes before the load machine has
+			   issued any loads, so turn that into
+			   <unreached> as well. */
+			if (crossState.probe_issued_load &&
+			    crossState.s->type == StateMachineState::Crash)
+				newState = advanceProbeMachine(crossState, pendingRelocs);
+			else
+				newState = StateMachineUnreached::get();
+		} else if (!probe_effect ||
+			   definitelyDoesntRace(probe_effect, crossState.s, opt, oracle)) {
+			/* If the probe effect definitely cannot race
+			   with anything left in the store machine
+			   then we should issue it unconditionally. */
+			newState = advanceProbeMachine(crossState, pendingRelocs);
+		} else if (!store_effect) {
+			/* Likewise, if a store effect isn't a memory
+			 * access then it's definitely not going to
+			 * race, so we can issue it
+			 * unconditionally. */
+			newState = advanceStoreMachine(crossState, pendingRelocs);
+		} else {
+			/* Both machines want to issue memory
+			   accesses, and there's some possibility of
+			   an interesting race.  Pick a
+			   non-deterministic interleaving. */
+			std::vector<StateMachineState *> possible;
+			possible.push_back(advanceProbeMachine(crossState, pendingRelocs));
+			possible.push_back(advanceStoreMachine(crossState, pendingRelocs));
+			newState = new StateMachineNdChoice(VexRip(), possible);
+		}
+		results[r.second] = newState;
+		*r.first = newState;
+	}
+
+	std::vector<std::pair<unsigned, VexRip> > origin(probeMachine->origin);
+        origin.insert(origin.end(), storeMachine->origin.begin(), storeMachine->origin.end());
+        return new StateMachine(crossMachineRoot, origin);
+}
+
 bool
 evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			VexPtr<StateMachine, &ir_heap> &storeMachine,
@@ -1327,64 +1550,35 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			GarbageCollectionToken token)
 {
 	__set_profiling(evalCrossProductMachine);
-	NdChooser chooser;
 
-	*mightSurvive = false;
-	*mightCrash = false;
+	VexPtr<StateMachine, &ir_heap> crossProductMachine(
+		buildCrossProductMachine(
+			probeMachine,
+			storeMachine,
+			oracle,
+			opt));
 
-	std::set<DynAnalysisRip> probeMachineRacingInstructions;
-	std::set<DynAnalysisRip> storeMachineRacingInstructions;
-	findCrossMachineRacingInstructions(probeMachine, storeMachine, oracle,
-					   opt,
-					   probeMachineRacingInstructions,
-					   storeMachineRacingInstructions);
+	crossProductMachine =
+		optimiseStateMachine(
+			crossProductMachine,
+			opt
+			    .enableassumeExecutesAtomically()
+			    .enableignoreSideEffects()
+			    .enableassumeNoInterferingStores()
+			    .enablenoExtend(),
+			oracle,
+			true,
+			false,
+			token);
 
-	AllowableOptimisations loadMachineOpt = opt.setnonLocalLoads(&probeMachineRacingInstructions);
-	probeMachine = duplicateStateMachine(probeMachine);
-	probeMachine = optimiseStateMachine(probeMachine, loadMachineOpt, oracle,
-					    true, true, token);
-
-	while (!*mightCrash || !*mightSurvive) {
-		if (TIMEOUT)
-			return false;
-
-		LibVEX_maybe_gc(token);
-
-		CrossMachineEvalContext ctxt(probeMachineRacingInstructions, storeMachineRacingInstructions);
-		ctxt.pathConstraint = initialStateCondition;
-		CrossEvalState s1(probeMachine);
-		CrossEvalState s2(storeMachine);
-		ctxt.loadMachine = &s1;
-		ctxt.storeMachine = &s2;
-		while (!TIMEOUT && !s1.finished && !s2.finished)
-			ctxt.advanceMachine(chooser,
-					    oracle,
-					    opt,
-					    chooser.nd_choice(2));
-		while (!TIMEOUT && !s1.finished)
-			ctxt.advanceMachine(chooser, oracle, opt, true);
-		if (s1.crashed) {
-#if 0
-			if (!*mightCrash) {
-				printf("First crashing history:\n");
-				ctxt.dumpHistory();
-			}
-#endif
-			*mightCrash = true;
-		} else {
-#if 0
-			if (!*mightSurvive) {
-				printf("First surviving history:\n");
-				ctxt.dumpHistory();
-			}
-#endif
-			*mightSurvive = true;
-		}
-		if (!chooser.advance())
-			break;
-	}
-
-	return true;
+	return evalMachineUnderAssumption(
+		crossProductMachine,
+		oracle,
+		initialStateCondition,
+		opt,
+		mightSurvive,
+		mightCrash,
+		token);
 }
 
 struct findRemoteMacroSectionsState {
