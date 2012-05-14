@@ -284,10 +284,9 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		StateMachineState *root = results[*it];
 		assert(root);
-		FreeVariableMap fvm;
 		std::vector<std::pair<unsigned, VexRip> > origin;
 		origin.push_back(std::pair<unsigned, VexRip>(tid, root->origin));
-		StateMachine *sm = new StateMachine(root, origin, fvm);
+		StateMachine *sm = new StateMachine(root, origin);
 		sm->sanityCheck();
 		out.insert(sm);
 	}
@@ -308,10 +307,8 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root)
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<std::pair<unsigned, VexRip> > origin;
 	origin.push_back(std::pair<unsigned, VexRip>(tid, root->my_rip));
-	FreeVariableMap fvm;
 	return new StateMachine(performTranslation(results, root, oracle, tid, doOne),
-				origin,
-				fvm);
+				origin);
 }
 
 /* End of namespace */

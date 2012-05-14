@@ -205,13 +205,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 
 	rewriteMachine(sm, stateRewrites);
 
-	/* The state machine proper has now been fully rewritten.  All
-	   that remains is to transform the free variable map and
-	   return. */
-	FreeVariableMap fvm = sm->freeVariables;
 	bool b = false;
-	transformFreeVariables(&fvm, &b);
-	*done_something |= b;
 
 	StateMachineState *newRoot;
 	if (stateRewrites.count(sm->root))
@@ -219,15 +213,13 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 	else
 		newRoot = sm->root;
 
-	if (!b && newRoot == sm->root && fvDelta.size() == 0) {
+	if (!b && newRoot == sm->root) {
 		/* All transformations are in-place */
 		return sm;
 	}
 
 	/* Construct new machine */
-	for (auto it = fvDelta.begin(); it != fvDelta.end(); it++)
-		fvm.content->set(it->first, it->second);
-	return new StateMachine(newRoot, sm->origin, fvm);
+	return new StateMachine(newRoot, sm->origin);
 }
 
 StateMachineSideEffectPhi *

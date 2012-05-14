@@ -172,12 +172,6 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 			ctxt(&res->contents[j], i->contents[j], rawDupe);
 		return res;
 	}
-	case Iex_FreeVariable: {
-		const IRExprFreeVariable *i = (const IRExprFreeVariable *)inp;
-		IRExprFreeVariable *res = new IRExprFreeVariable();
-		res->key = i->key;
-		return res;
-	}
 	case Iex_ClientCall: {
 		const IRExprClientCall *i = (const IRExprClientCall *)inp;
 		IRExprClientCall *res = new IRExprClientCall();
@@ -332,12 +326,9 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 static StateMachine *
 rawDupe(duplication_context &ctxt, const StateMachine *inp)
 {
-	assert(inp->freeVariables.empty());
-	FreeVariableMap fv;
 	StateMachine *res = new StateMachine(
 		NULL,
-		inp->origin,
-		fv);
+		inp->origin);
 	ctxt(&res->root, inp->root, rawDupe);
 	return res;
 }
@@ -346,7 +337,6 @@ static StateMachine *
 duplicateStateMachine(const StateMachine *inp)
 {
 	duplication_context ctxt;
-	assert(inp->freeVariables.empty());
 	StateMachine *res;
 	ctxt(&res, inp, rawDupe);
 	ctxt.doit();

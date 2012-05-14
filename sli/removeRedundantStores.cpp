@@ -16,7 +16,6 @@ static bool storeMightBeLoadedAfterState(StateMachineState *sme,
 					 const AllowableOptimisations &opt,
 					 StateMachineSideEffectStore *smses,
 					 const Oracle::RegisterAliasingConfiguration *alias,
-					 bool freeVariablesMightAccessStack,
 					 Oracle *oracle,
 					 std::set<StateMachineState *> &memo);
 
@@ -25,7 +24,6 @@ storeMightBeLoadedByState(StateMachineState *sm,
 			  StateMachineSideEffectStore *smses,
 			  const AllowableOptimisations &opt,
 			  const Oracle::RegisterAliasingConfiguration *alias,
-			  bool freeVariablesMightAccessStack,
 			  Oracle *oracle,
 			  std::set<StateMachineState *> &memo)
 {
@@ -46,13 +44,13 @@ storeMightBeLoadedByState(StateMachineState *sm,
 				StateMachineSideEffectLoad *smsel =
 					dynamic_cast<StateMachineSideEffectLoad *>(se);
 				assert(smsel);
-				if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, freeVariablesMightAccessStack)) &&
+				if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr)) &&
 				    oracle->memoryAccessesMightAlias(opt, smsel, smses))
 					return true;
 			}
 		}
 	}
-	return storeMightBeLoadedAfterState(sm, opt, smses, alias, freeVariablesMightAccessStack, oracle, memo);
+	return storeMightBeLoadedAfterState(sm, opt, smses, alias, oracle, memo);
 }
 
 static bool
@@ -60,14 +58,13 @@ storeMightBeLoadedAfterState(StateMachineState *sm,
 			     const AllowableOptimisations &opt,
 			     StateMachineSideEffectStore *smses,
 			     const Oracle::RegisterAliasingConfiguration *alias,
-			     bool freeVariablesMightAccessStack,
 			     Oracle *oracle,
 			     std::set<StateMachineState *> &memo)
 {
 	std::vector<StateMachineState *> edges;
 	sm->targets(edges);
 	for (auto it = edges.begin(); it != edges.end(); it++)
-		if (storeMightBeLoadedByState(*it, smses, opt, alias, freeVariablesMightAccessStack, oracle, memo))
+		if (storeMightBeLoadedByState(*it, smses, opt, alias, oracle, memo))
 			return true;
 	return false;
 }
@@ -77,11 +74,10 @@ storeMightBeLoadedAfterState(StateMachineState *sm,
 			     const AllowableOptimisations &opt,
 			     StateMachineSideEffectStore *smses,
 			     const Oracle::RegisterAliasingConfiguration *alias,
-			     bool freeVariablesMightAccessStack,
 			     Oracle *oracle)
 {
 	std::set<StateMachineState *> memo;
-	return storeMightBeLoadedAfterState(sm, opt, smses, alias, freeVariablesMightAccessStack, oracle, memo);
+	return storeMightBeLoadedAfterState(sm, opt, smses, alias, oracle, memo);
 }
 
 
@@ -118,7 +114,7 @@ removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_somethin
 				}
 
 				if (canRemove &&
-				    !storeMightBeLoadedAfterState(se, opt, smses, alias, !opt.freeVariablesNeverAccessStack(), oracle)) {
+				    !storeMightBeLoadedAfterState(se, opt, smses, alias, oracle)) {
 					se->sideEffect =
 						new StateMachineSideEffectAssertFalse(
 							IRExpr_Unop(

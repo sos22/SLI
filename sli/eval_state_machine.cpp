@@ -1739,8 +1739,7 @@ concatenateStateMachines(const StateMachine *machine, const StateMachine *to)
 #error write me
 #endif
 	return new StateMachine(rewriteRules[machine->root],
-				neworigin,
-				machine->freeVariables);
+				neworigin);
 }
 
 IRExpr *

@@ -213,14 +213,6 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 	std::set<StateMachineState *> allStates;
 	findAllStates(sm, allStates);
 
-	/* Stuff referenced by the free variables map is considered to
-	   be live everywhere in the program. */
-	LivenessEntry alwaysLive;
-	for (auto it = sm->freeVariables.content->begin();
-	     it != sm->freeVariables.content->end();
-	     it++)
-		alwaysLive.useExpression(it.value());
-
 	LivenessMap livenessMap(sm, allStates);
 
 	if (TIMEOUT)
@@ -236,9 +228,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 
 	class _ {
 		LivenessMap &livenessMap;
-		LivenessEntry &alwaysLive;
 		bool *done_something;
-		FreeVariableMap &fvm;
 		const AllowableOptimisations &opt;
 
 		StateMachineSideEffect *doit(StateMachineSideEffect *e,
@@ -250,8 +240,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			case StateMachineSideEffect::Load: {
 				StateMachineSideEffectLoad *smsel =
 					(StateMachineSideEffectLoad *)e;
-				if (!alwaysLive.registerLive(smsel->target) &&
-				    !alive.registerLive(smsel->target))
+				if (!alive.registerLive(smsel->target))
 					newEffect = new StateMachineSideEffectAssertFalse(
 						IRExpr_Unop(Iop_BadPtr, smsel->addr));
 				break;
@@ -281,16 +270,14 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 					   might say. */
 					dead = true;
 				} else {
-					dead = !alive.registerLive(smsec->target) &&
-						!alwaysLive.registerLive(smsec->target);
+					dead = !alive.registerLive(smsec->target);
 				}
 				break;
 			}
 			case StateMachineSideEffect::Phi: {
 				StateMachineSideEffectPhi *p =
 					(StateMachineSideEffectPhi *)e;
-				if (!alive.registerLive(p->reg) &&
-				    !alwaysLive.registerLive(p->reg))
+				if (!alive.registerLive(p->reg))
 					dead = true;
 				break;
 			}
@@ -329,14 +316,10 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			abort();
 		}
 
-		_(LivenessMap &_livenessMap, LivenessEntry &_alwaysLive,
-		  bool *_done_something, FreeVariableMap &_fvm,
-		  const AllowableOptimisations &_opt)
-			: livenessMap(_livenessMap), alwaysLive(_alwaysLive),
-			  done_something(_done_something), fvm(_fvm),
-			  opt(_opt)
+		_(LivenessMap &_livenessMap, bool *_done_something, const AllowableOptimisations &_opt)
+			: livenessMap(_livenessMap), done_something(_done_something), opt(_opt)
 		{}
-	} eliminateDeadCode(livenessMap, alwaysLive, done_something, sm->freeVariables, opt);
+	} eliminateDeadCode(livenessMap, done_something, opt);
 
 	for (auto it = allStates.begin();
 	     it != allStates.end();

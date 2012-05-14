@@ -144,9 +144,6 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 				return false;
 		return true;
 	footer()
-	hdr(FreeVariable)
-		return a->key == b->key;
-	footer()
 	hdr(ClientCall)
 		if (a->calledRip != b->calledRip ||
 		    a->callSite != b->callSite)
@@ -408,8 +405,7 @@ isVariableLike(const IRExpr *a)
 {
 	return a->tag == Iex_Get || a->tag == Iex_Load ||
 		a->tag == Iex_ClientCall ||
-		a->tag == Iex_ClientCallFailed ||
-		a->tag == Iex_FreeVariable;
+		a->tag == Iex_ClientCallFailed;
 }
 
 /* Simple sort function.  Ordering looks like this:
@@ -589,8 +585,6 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 			x++;
 		}
 	}
-	hdr(FreeVariable)
-		return _sortIntegers(a->key, b->key);
 	hdr(ClientCall)
 		if (a->callSite < b->callSite)
 			return less_than;

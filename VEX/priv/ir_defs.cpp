@@ -1151,16 +1151,6 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
   return true;
 }
 
-static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **suffix)
-{
-  FreeVariableKey key;
-  if (!parseThisString("free", str, &str) ||
-      !parseDecimalInt(&key.val, str, suffix))
-    return false;
-  *res = IRExpr_FreeVariable(key);
-  return true;
-}
-
 static bool parseIRExprClientCall(IRExpr **res, const char *str, const char **suffix)
 {
   VexRip addr;
@@ -1257,7 +1247,6 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
   do_form(CCall);
   do_form(Mux0X);
   do_form(Associative);
-  do_form(FreeVariable);
   do_form(ClientCall);
   do_form(FailedCall);
   do_form(HappensBefore);
@@ -1366,11 +1355,6 @@ IRExprAssociative::prettyPrint(FILE *f) const
 	}
 	fprintf(f, ")");
       }
-}
-void
-IRExprFreeVariable::prettyPrint(FILE *f) const
-{
-      fprintf(f, "free%d", key.val);
 }
 void
 IRExprClientCall::prettyPrint(FILE *f) const
@@ -1940,21 +1924,6 @@ IRExprAssociative* IRExpr_Associative(int nr_arguments, IROp op)
 			 &__las);
   e->sanity_check();
   return e;
-}
-IRExpr* IRExpr_FreeVariable ( FreeVariableKey key )
-{
-   IRExprFreeVariable *e = new IRExprFreeVariable();
-   e->key = key;
-   e->sanity_check();
-   return e;
-}
-IRExpr* IRExpr_FreeVariable ( )
-{
-   static FreeVariableKey next_key;
-   IRExpr *res = IRExpr_FreeVariable(next_key);
-   next_key.val++;
-   res->sanity_check();
-   return res;
 }
 IRExpr* IRExpr_ClientCall ( const VexRip &r, const ThreadRip &site, IRExpr **args )
 {

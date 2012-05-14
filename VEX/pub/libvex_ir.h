@@ -1210,30 +1210,11 @@ typedef
       Iex_Associative, /* n-ary associative operator */
       Iex_ClientCall,
       Iex_ClientCallFailed,
-      Iex_FreeVariable,
       Iex_Load,
       Iex_HappensBefore,
       Iex_Phi,
    }
    IRExprTag;
-
-class FreeVariableKey {
-public:
-   int val;
-   bool operator < (FreeVariableKey x) const {
-      return val < x.val;
-   }
-   bool operator !=(FreeVariableKey x) const {
-      return *this < x || x < *this;
-   }
-   bool operator ==(FreeVariableKey x) const {
-      return !(*this != x);
-   }
-   unsigned long hash() const { return val * 900000323; }
-   void sanity_check() const {
-      assert(val >= 0);
-   }
-};
 
 /* An expression.  Stored as a tagged union.  'tag' indicates what kind
    of expression this is.  'Iex' is the union that holds the fields.  If
@@ -1722,20 +1703,6 @@ struct IRExprAssociative : public IRExpr {
    }
 };
 
-struct IRExprFreeVariable : public IRExpr {
-   FreeVariableKey key;
-   IRExprFreeVariable() : IRExpr(Iex_FreeVariable) {}
-   void visit(HeapVisitor &hv) {}
-   unsigned long hashval() const {
-       return key.val * 12357743;
-   }
-   void prettyPrint(FILE *f) const;
-   IRType type() const { return Ity_I64; }
-   void sanity_check() const {
-      key.sanity_check();
-   }
-};
-
 struct IRExprClientCall : public IRExpr {
    VexRip calledRip;
    ThreadRip callSite;
@@ -1837,8 +1804,6 @@ extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 extern IRExpr* IRExpr_Associative (IRExprAssociative *);
 extern IRExprAssociative* IRExpr_Associative (int nr_arguments, IROp op);
-extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
-extern IRExpr* IRExpr_FreeVariable ( );
 extern IRExpr* IRExpr_ClientCall (const VexRip &r, const ThreadRip &callSite, IRExpr **args);
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
 extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,

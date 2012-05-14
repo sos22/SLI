@@ -99,10 +99,6 @@ protected:
 	}
 	virtual IRExpr *transformIex(IRExprCCall *);
 	virtual IRExpr *transformIex(IRExprAssociative *);
-	virtual IRExpr *transformIex(IRExprFreeVariable *e)
-	{
-		return NULL;
-	}
 	virtual IRExpr *transformIex(IRExprClientCall *);
 	virtual IRExpr *transformIex(IRExprClientCallFailed *e)
 	{
@@ -124,7 +120,6 @@ public:
 
 class StateMachineTransformer : public IRExprTransformer {
 protected:
-	std::vector<std::pair<FreeVariableKey, IRExpr *> > fvDelta;
 	virtual StateMachineSideEffectLoad *transformOneSideEffect(
 		StateMachineSideEffectLoad *, bool *);
 	virtual StateMachineSideEffectStore *transformOneSideEffect(
@@ -191,12 +186,6 @@ public:
 	virtual StateMachineState *transformState(StateMachineState *, bool *);
 	virtual StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,
 							    bool *);
-	virtual void transformFreeVariables(FreeVariableMap *fvm, bool *done_something = NULL)
-	{
-		bool b;
-		if (!done_something) done_something = &b;
-		fvm->applyTransformation(*this, done_something);
-	}
 	static void rewriteMachine(const StateMachine *sm,
 				   std::map<const StateMachineState *, StateMachineState *> &rewriteRules);
 
@@ -225,9 +214,6 @@ StateMachine *availExpressionAnalysis(StateMachine *sm,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt);
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
-
-StateMachine *introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something);
-StateMachine *optimiseFreeVariables(StateMachine *sm, bool *done_something);
 
 void breakCycles(StateMachine *);
 

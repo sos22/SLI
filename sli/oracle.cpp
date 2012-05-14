@@ -903,7 +903,6 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 static Oracle::PointerAliasingSet
 irexprAliasingClass(IRExpr *expr,
 		    const Oracle::RegisterAliasingConfiguration &config,
-		    bool freeVariablesCannotAccessStack,
 		    std::map<threadAndRegister, Oracle::PointerAliasingSet, threadAndRegister::fullCompare> *temps)
 {
 	if (expr->type() != Ity_I64)
@@ -950,12 +949,10 @@ irexprAliasingClass(IRExpr *expr,
 		Oracle::PointerAliasingSet a1 = irexprAliasingClass(
 			e->arg1,
 			config,
-			freeVariablesCannotAccessStack,
 			temps);
 		Oracle::PointerAliasingSet a2 = irexprAliasingClass(
 			e->arg2,
 			config,
-			freeVariablesCannotAccessStack,
 			temps);
 		switch (e->op) {
 		case Iop_Sub64:
@@ -1000,11 +997,9 @@ irexprAliasingClass(IRExpr *expr,
 		IRExprMux0X *e = (IRExprMux0X *)expr;
 		return irexprAliasingClass(e->expr0,
 					   config,
-					   freeVariablesCannotAccessStack,
 					   temps) |
 			irexprAliasingClass(e->exprX,
 					    config,
-					    freeVariablesCannotAccessStack,
 					    temps);
 	}
 	case Iex_Associative: {
@@ -1018,14 +1013,12 @@ irexprAliasingClass(IRExpr *expr,
 					Oracle::PointerAliasingSet res = 
 						irexprAliasingClass(e->contents[i],
 								    config,
-								    freeVariablesCannotAccessStack,
 								    temps);
 					for (int j = i + 1; j < e->nr_arguments; j++) {
 						if (e->contents[j]->tag != Iex_Const)
 							res = res | 
 								irexprAliasingClass(e->contents[j],
 										    config,
-										    freeVariablesCannotAccessStack,
 										    temps);
 					}
 					if (!(res & Oracle::PointerAliasingSet::anything))
@@ -1054,20 +1047,12 @@ irexprAliasingClass(IRExpr *expr,
 		break;
 	}
 
-	case Iex_FreeVariable:
-		if (freeVariablesCannotAccessStack)
-			return Oracle::PointerAliasingSet::notAPointer |
-				Oracle::PointerAliasingSet::nonStackPointer;
-		else
-			return Oracle::PointerAliasingSet::anything;
-
 	case Iex_ClientCall: {
 		IRExprClientCall *e = (IRExprClientCall *)expr;
 		bool mightReturnStack = false;
 		for (int x = 0; !mightReturnStack && e->args[x]; x++) {
 			if (irexprAliasingClass(e->args[x],
 						config,
-						freeVariablesCannotAccessStack,
 						temps) &
 			    Oracle::PointerAliasingSet::stackPointer)
 				mightReturnStack = true;
@@ -1091,7 +1076,7 @@ irexprAliasingClass(IRExpr *expr,
 bool
 Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a) const
 {
-	PointerAliasingSet as = irexprAliasingClass(a, *this, false, NULL);
+	PointerAliasingSet as = irexprAliasingClass(a, *this, NULL);
 	if (as & PointerAliasingSet::nonStackPointer)
 		return true;
 	else
@@ -1099,10 +1084,10 @@ Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a) const
 }
 
 bool
-Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, bool fvcas) const
+Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b) const
 {
-	return irexprAliasingClass(a, *this, fvcas, NULL) &
-		irexprAliasingClass(b, *this, fvcas, NULL) &
+	return irexprAliasingClass(a, *this, NULL) &
+		irexprAliasingClass(b, *this, NULL) &
 		~PointerAliasingSet::notAPointer;
 }
 
@@ -2285,14 +2270,12 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				config.set(p->target,
 					   irexprAliasingClass(p->data,
 							       config,
-							       false,
 							       &temporaryAliases));
 			} else {
 				temporaryAliases.insert(
 					std::pair<threadAndRegister, PointerAliasingSet>(p->target,
 											 irexprAliasingClass(p->data,
 													     config,
-													     false,
 													     &temporaryAliases)));
 			}
 			break;
@@ -2304,11 +2287,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			if (!tconfig.stackHasLeaked) {
 				PointerAliasingSet addr = irexprAliasingClass(((IRStmtStore *)st)->data,
 									      config,
-									      false,
 									      &temporaryAliases);
 				PointerAliasingSet data = irexprAliasingClass(((IRStmtStore *)st)->data,
 									      config,
-									      false,
 									      &temporaryAliases);
 				if ((addr & PointerAliasingSet::nonStackPointer) &&
 				    (data & PointerAliasingSet::stackPointer)) {

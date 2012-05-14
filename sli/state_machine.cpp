@@ -27,22 +27,17 @@ StateMachine::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *
 {
 	bool b = false;
 	std::set<StateMachineState *> done;
-	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables, done);
-	FreeVariableMap fv(freeVariables);
-	fv.optimise(opt, &b);
+	StateMachineState *new_root = root->optimise(opt, oracle, &b, done);
 	if (b) {
 		*done_something = true;
-		StateMachine *sm = new StateMachine(*this);
-		sm->root = new_root;
-		sm->freeVariables = fv;
-		return sm;
+		return new StateMachine(new_root, origin);
 	} else {
 		return this;
 	}
 }
 
 StateMachineState *
-StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
+StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something,
 				std::set<StateMachineState *> &done)
 {
 	if (done.count(this))
@@ -53,11 +48,11 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 		if (falseTarget == StateMachineUnreached::get())
 			return StateMachineUnreached::get();
 		else
-			return falseTarget->optimise(opt, oracle, done_something, fv, done);
+			return falseTarget->optimise(opt, oracle, done_something, done);
 	}
 	if (falseTarget == StateMachineUnreached::get()) {
 		*done_something = true;
-		return trueTarget->optimise(opt, oracle, done_something, fv, done);
+		return trueTarget->optimise(opt, oracle, done_something, done);
 	}
 	if (trueTarget == falseTarget) {
 		*done_something = true;
@@ -67,12 +62,12 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracl
 	if (condition->tag == Iex_Const) {
 		*done_something = true;
 		if (((IRExprConst *)condition)->con->Ico.U1)
-			return trueTarget->optimise(opt, oracle, done_something, fv, done);
+			return trueTarget->optimise(opt, oracle, done_something, done);
 		else
-			return falseTarget->optimise(opt, oracle, done_something, fv, done);
+			return falseTarget->optimise(opt, oracle, done_something, done);
 	}
-	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv, done);
-	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv, done);
+	trueTarget = trueTarget->optimise(opt, oracle, done_something, done);
+	falseTarget = falseTarget->optimise(opt, oracle, done_something, done);
 
 	if (falseTarget->type == StateMachineState::Bifurcate) {
 		StateMachineBifurcate *falseBifur = (StateMachineBifurcate *)falseTarget;
@@ -243,7 +238,6 @@ printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineSt
 		(*it)->prettyPrint(f, labels);
 		fprintf(f, "\n");
 	}
-	sm->freeVariables.print(f);
 }
 
 void
@@ -550,11 +544,9 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 	   returns true. */
 	root = (StateMachineState *)0xf001deadbeeful; 
 
-	if (!parseStateMachine(&root, str, &str))
+	if (!parseStateMachine(&root, str, suffix))
 		return false;
 	*out = new StateMachine(root, origin);
-	if (!(*out)->freeVariables.parse(str, suffix))
-		return false;
 	return true;
 }
 bool
@@ -814,7 +806,7 @@ StateMachineSideEffecting::prependSideEffect(StateMachineSideEffect *se)
 }
 
 StateMachineState *
-StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
+StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something,
 				    std::set<StateMachineState *> &done)
 {
 	if (done.count(this))
@@ -823,7 +815,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, Oracle *o
 
 	if (!sideEffect) {
 		*done_something = true;
-		return target->optimise(opt, oracle, done_something, fv, done);
+		return target->optimise(opt, oracle, done_something, done);
 	}
 
 	if (target == StateMachineUnreached::get()) {
@@ -837,7 +829,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, Oracle *o
 		}
 		sideEffect = sideEffect->optimise(opt, oracle, done_something);
 	}
-	target = target->optimise(opt, oracle, done_something, fv, done);
+	target = target->optimise(opt, oracle, done_something, done);
 	return this;
 }
 
@@ -915,14 +907,13 @@ StateMachineState *
 StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
 			       Oracle *oracle,
 			       bool *done_something,
-			       FreeVariableMap &fvm,
 			       std::set<StateMachineState *> &memo)
 {
 	if (successors.size() == 0) {
 		*done_something = true;
 		return StateMachineUnreached::get();
 	}
-	successors[0] = successors[0]->optimise(opt, oracle, done_something, fvm, memo);
+	successors[0] = successors[0]->optimise(opt, oracle, done_something, memo);
 
 	/* Remove duplicates.  Note that we don't want to sort
 	   successors here, since that would involve a dependency on
@@ -939,7 +930,7 @@ StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
 				*done_something = true;
 				it2 = successors.erase(it2);
 			} else if ( it1 == successors.begin() ) {
-				*it2 = (*it2)->optimise(opt, oracle, done_something, fvm, memo);
+				*it2 = (*it2)->optimise(opt, oracle, done_something, memo);
 				if ( *it1 == *it2 ) {
 					*done_something = true;
 					it2 = successors.erase(it2);
@@ -958,7 +949,7 @@ StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
 	}
 	if (successors.size() == 1) {
 		*done_something = true;
-		return successors[0]->optimise(opt, oracle, done_something, fvm, memo);
+		return successors[0]->optimise(opt, oracle, done_something, memo);
 	}
 	return this;
 }

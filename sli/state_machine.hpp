@@ -42,13 +42,6 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
                                 from other threads which interfere
                                 with the machine we're currently
 
-   freeVariablesNeverAccessStack -- If true, assume that free
- 				    variables can never point at the
- 				    current stack frame.  This is
- 				    appropriate for state machines
- 				    generated at function heads, for
- 				    instance.
-
    noExtend -- If true, assume that the machine will never be
                expanded.  This means that we can discard some
                assertions which would otherwise be quite useful.
@@ -76,7 +69,6 @@ class AllowableOptimisations {
 	f(assumeExecutesAtomically, bool)				\
 	f(ignoreSideEffects, bool)					\
 	f(assumeNoInterferingStores, bool)				\
-	f(freeVariablesNeverAccessStack,bool)				\
 	f(noExtend,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
@@ -216,76 +208,29 @@ public:
 
 class IRExprTransformer;
 
-/* Caution: needs someone external to visit it! */
-class FreeVariableMap {
-	typedef gc_heap_map<FreeVariableKey, IRExpr, &ir_heap>::type map_t;
-public:
-	map_t *content;
-	FreeVariableMap()
-		: content(new map_t())
-	{}
-	FreeVariableMap(const FreeVariableMap &p)
-		: content(new map_t(*p.content))
-	{}
-	FreeVariableMap(const FreeVariableMap &p, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
-		: content(new map_t(*p.content))
-	{
-		for (unsigned x = 0; x < delta.size(); x++) {
-			assert(delta[x].second);
-			content->set(delta[x].first, delta[x].second);
-		}
-	}
-	void merge(FreeVariableMap &other) {
-		for (map_t::iterator it = other.content->begin();
-		     it != other.content->end();
-		     it++) {
-			assert(!content->get(it.key()));
-			content->set(it.key(), it.value());
-		}
-	}
-	IRExpr *get(FreeVariableKey k) { IRExpr *res = content->get(k); assert(res); return res; }
-	void visit(HeapVisitor &hv) { hv(content); }
-	void applyTransformation(IRExprTransformer &t, bool *done_something);
-	void print(FILE *f) const;
-	bool parse(const char *str, const char **succ);
-	bool empty() const { return content->empty(); }
-	void optimise(const AllowableOptimisations &opt, bool *done_something);
-};
-
 class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
+public:
+	StateMachineState *root;
+	std::vector<std::pair<unsigned, VexRip> > origin;
+
+	static bool parse(StateMachine **out, const char *str, const char **suffix);
+
 	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin)
 		: root(_root), origin(_origin)
 	{
 	}
-public:
-	StateMachineState *root;
-	std::vector<std::pair<unsigned, VexRip> > origin;
-	FreeVariableMap freeVariables;
-
-	static bool parse(StateMachine **out, const char *str, const char **suffix);
-
-	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin,
-		     const FreeVariableMap &fv)
-		: root(_root), origin(_origin), freeVariables(fv)
-	{
-	}
 	StateMachine(StateMachine *parent, const std::vector<std::pair<unsigned, VexRip> > &_origin, StateMachineState *new_root)
-		: root(new_root), origin(_origin), freeVariables(parent->freeVariables)
+		: root(new_root), origin(_origin)
 	{}
 	StateMachine(StateMachine *parent)
-		: root(parent->root), origin(parent->origin), freeVariables(parent->freeVariables)
-	{}
-	StateMachine(StateMachine *parent, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
-		: root(parent->root),
-		  origin(parent->origin),
-		  freeVariables(parent->freeVariables, delta)
+		: root(parent->root), origin(parent->origin)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       Oracle *oracle,
 			       bool *done_something);
-	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
+	void visit(HeapVisitor &hv) { hv(root); }
 #ifdef NDEBUG
 	void sanityCheck() const {}
 	void assertAcyclic() const {}
@@ -330,7 +275,7 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
+	virtual StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *,
 					    std::set<StateMachineState *> &done) = 0;
 	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
 	bool canCrash(std::set<const StateMachineState *> &memo) const {
@@ -410,7 +355,7 @@ protected:
 	virtual void prettyPrint(FILE *f) const = 0;
 	StateMachineTerminal(const VexRip &rip, StateMachineState::stateType type) : StateMachineState(rip, type) {}
 public:
-	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
+	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *,
 				    std::set<StateMachineState *> &) { return this; }
 	virtual void visit(HeapVisitor &hv) {}
 	void targets(std::vector<StateMachineState **> &) { }
@@ -478,7 +423,7 @@ public:
 	}
 	void prependSideEffect(StateMachineSideEffect *sideEffect);
 
-	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
+	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something,
 				    std::set<StateMachineState *> &done);
 	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
@@ -521,7 +466,7 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
+	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something,
 				    std::set<StateMachineState *> &);
 	void targets(std::vector<StateMachineState **> &out) {
 		out.push_back(&falseTarget);
@@ -570,7 +515,7 @@ public:
 			hv(*it);
 	}
 
-	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
+	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something,
 				    std::set<StateMachineState *> &);
 	void targets(std::vector<StateMachineState **> &out) {
 		out.reserve(out.size() + successors.size());

@@ -46,8 +46,6 @@ shallow_hash(const IRExpr *e)
 		return 100146091;
 	case Iex_Associative:
 		return ((IRExprAssociative *)e)->op * 100161727 + ((IRExprAssociative *)e)->nr_arguments * 100268423 + 100176877;
-	case Iex_FreeVariable:
-		return ((IRExprFreeVariable *)e)->key.val * 100190957;
 	case Iex_ClientCallFailed:
 		return 100213697;
 	case Iex_ClientCall:
@@ -71,7 +69,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	switch (e->tag) {
 	case Iex_Get:
 	case Iex_Const:
-	case Iex_FreeVariable:
 	case Iex_HappensBefore:
 	case Iex_Phi:
 		break;
@@ -164,9 +161,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			do_field(Mux0X, cond);
 			do_field(Mux0X, expr0);
 			do_field(Mux0X, exprX);
-			break;
-		case Iex_FreeVariable:
-			do_field(FreeVariable, key);
 			break;
 		case Iex_ClientCallFailed:
 			do_field(ClientCallFailed, target);
@@ -268,15 +262,6 @@ internIRExpr(IRExpr *x)
 	__set_profiling(internIRExpr);
 	internIRExprTable t;
 	return internIRExpr(x, t);
-}
-
-static void
-internFreeVariables(FreeVariableMap &fvm, internIRExprTable &t)
-{
-	for (auto it = fvm.content->begin();
-	     it != fvm.content->end();
-	     it++)
-		it.set_value(internIRExpr(it.value(), t));
 }
 
 static StateMachineSideEffect *
@@ -472,7 +457,6 @@ internStateMachine(StateMachine *sm)
 {
 	__set_profiling(internStateMachine);
 	internStateMachineTable t;
-	internFreeVariables(sm->freeVariables, t);
 	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }

@@ -312,13 +312,6 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		}
 		sm = sm->optimise(opt, oracle, &done_something);
 		sm = bisimilarityReduction(sm, opt);
-		if (noExtendContext) {
-			sm->assertAcyclic();
-			sm = introduceFreeVariables(sm, aliasp, opt, oracle, &done_something);
-			sm = introduceFreeVariablesForRegisters(sm, &done_something);
-			sm = optimiseFreeVariables(sm, &done_something);
-			sm->assertAcyclic();
-		}
 		if (is_ssa)
 			sm = optimiseSSA(sm, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
@@ -538,7 +531,6 @@ expandStateMachineToFunctionHead(VexPtr<StateMachine, &ir_heap> sm,
 	VexRip origin(sm->origin[0].second);
 	unsigned tid(sm->origin[0].first);
 
-	assert(sm->freeVariables.empty());
 	std::vector<VexRip> previousInstructions;
 	oracle->findPreviousInstructions(previousInstructions, origin);
 	if (previousInstructions.size() == 0) {
@@ -643,8 +635,6 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		fprintf(_logfile, "\t\tCannot expand store machine!\n");
 		return true;
 	}
-
-	opt = opt.enablefreeVariablesNeverAccessStack();
 
 	sm = convertToSSA(sm);
 	if (!sm)
@@ -872,7 +862,6 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		AllowableOptimisations opt =
 			optIn
 			.enableignoreSideEffects()
-			.enablefreeVariablesNeverAccessStack()
 			.enableassumeNoInterferingStores()
 			.enableassumeExecutesAtomically();
 		VexPtr<StateMachine, &ir_heap> atomicProbeMachine;
@@ -1471,10 +1460,9 @@ CFGtoCrashReason(unsigned tid,
 		}
 	}
 
-	FreeVariableMap fv;
 	std::vector<std::pair<unsigned, VexRip> > origin;
 	origin.push_back(std::pair<unsigned, VexRip>(tid, original_rip));
-	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, origin, fv));
+	VexPtr<StateMachine, &ir_heap> sm(new StateMachine(root, origin));
 	canonicaliseRbp(sm, oracle);
 	sm = optimiseStateMachine(sm, opt, oracle, false, false, token);
 	if (crashReasons)
