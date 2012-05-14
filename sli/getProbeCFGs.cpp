@@ -455,6 +455,14 @@ getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
 	std::set<CFGNode *> nodes;
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++)
 		nodes.insert(it->second);
+
+	if (debug_exploration) {
+		std::set<CFGNode *> roots;
+		findRoots(nodes, roots);
+		printf("Roots before loop unrolling:\n");
+		debug_dump(roots, "\t");
+	}
+
 	unrollAndCycleBreak(nodes, maxPathLength2);
 
 	if (debug_exploration) {
