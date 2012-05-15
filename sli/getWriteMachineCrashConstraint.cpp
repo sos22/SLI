@@ -109,7 +109,7 @@ setTemporary(const threadAndRegister &reg, IRExpr *value, IRExpr *input)
 		{}
 		IRExpr *transformIex(IRExprGet *ieg) {
 			if (threadAndRegister::fullEq(reg, ieg->reg))
-				return value;
+				return coerceTypes(ieg->type(), value);
 			else
 				return NULL;
 		}
