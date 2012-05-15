@@ -2098,6 +2098,59 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 			}
 
+			/* Another special case: if we have k == -X +
+			   Y then we turn it into -k == X + -Y
+			   (i.e. normalise so that the leading term of
+			   additions isn't negated, if possible). */
+			if (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64 &&
+			    l->tag == Iex_Const && r->tag == Iex_Associative) {
+				IRExprAssociative *ra = (IRExprAssociative *)r;
+				if (ra->op >= Iop_Add8 && ra->op <= Iop_Add64 &&
+				    ra->nr_arguments > 0 &&
+				    ra->contents[0]->tag == Iex_Unop) {
+					IRExprUnop *leader = (IRExprUnop *)ra->contents[0];
+					if (leader->op >= Iop_Neg8 && leader->op <= Iop_Neg64) {
+						/* Do it */
+						IRExprAssociative *new_r = new IRExprAssociative(*ra);
+						for (int i = 0; i < new_r->nr_arguments; i++) {
+							IRExpr *a = new_r->contents[i];
+							if (a->tag == Iex_Unop &&
+							    ((IRExprUnop *)a)->op == leader->op)
+								new_r->contents[i] = ((IRExprUnop *)a)->arg;
+							else
+								new_r->contents[i] =
+									IRExpr_Unop(
+										leader->op,
+										a);
+						}
+						IRConst *new_l;
+						IRConst *lc = ((IRExprConst *)l)->con;
+						switch (e->op) {
+						case Iop_CmpEQ8:
+							new_l = IRConst_U8(
+								-lc->Ico.U8);
+							break;
+						case Iop_CmpEQ16:
+							new_l = IRConst_U16(
+								-lc->Ico.U16);
+							break;
+						case Iop_CmpEQ32:
+							new_l = IRConst_U32(
+								-lc->Ico.U32);
+							break;
+						case Iop_CmpEQ64:
+							new_l = IRConst_U64(
+								-lc->Ico.U64);
+							break;
+						default:
+							abort();
+						}
+						l = e->arg1 = IRExpr_Const(new_l);
+						r = e->arg2 = new_r;
+						*done_something = true;
+					}
+				}
+			}
 			/* 0 == x -> !x if we're at the type U1. 1 == x is just x. */
 			if (e->op == Iop_CmpEQ1 &&
 			    l->tag == Iex_Const) {
