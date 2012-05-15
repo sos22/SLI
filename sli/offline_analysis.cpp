@@ -149,7 +149,6 @@ StateMachine *
 optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		     const AllowableOptimisations &opt,
 		     VexPtr<Oracle> &oracle,
-		     bool noExtendContext,
 		     bool is_ssa,
 		     GarbageCollectionToken token,
 		     bool *progress)
@@ -293,7 +292,6 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 				     VexPtr<Oracle> &oracle,
 				     VexPtr<IRExpr, &ir_heap> assumption,
 				     const AllowableOptimisations &opt,
-				     bool noExtendContext,
 				     GarbageCollectionToken token,
 				     IRExpr **assumptionOut,
 				     StateMachine **newStoreMachine)
@@ -304,7 +302,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	   appropriate. */
 	VexPtr<StateMachine, &ir_heap> sm;
 	sm = duplicateStateMachine(storeMachine);
-	sm = optimiseStateMachine(sm, opt, oracle, noExtendContext, true, token);
+	sm = optimiseStateMachine(sm, opt, oracle, true, token);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we
@@ -419,7 +417,7 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		return true;
 	}
 	opt = opt.setinterestingStores(&is);
-	sm = optimiseStateMachine(sm, opt, oracle, false, false, token);
+	sm = optimiseStateMachine(sm, opt, oracle, false, token);
 
 	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(sm));
 	if (!sm_ssa)
@@ -427,7 +425,7 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 
 	IRExpr *_newAssumption;
 	StateMachine *_sm;
-	if (!determineWhetherStoreMachineCanCrash(sm_ssa, probeMachine, oracle, assumption, opt, true, token, &_newAssumption, &_sm)) {
+	if (!determineWhetherStoreMachineCanCrash(sm_ssa, probeMachine, oracle, assumption, opt, token, &_newAssumption, &_sm)) {
 		fprintf(_logfile, "\t\tExpanded store machine cannot crash\n");
 		return false;
 	}
@@ -510,7 +508,6 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 		sm = optimiseStateMachine(sm,
 					  opt,
 					  oracle,
-					  true,
 					  false,
 					  token);
 
@@ -521,7 +518,6 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 		sm = optimiseStateMachine(sm,
 					  opt,
 					  oracle,
-					  true,
 					  true,
 					  token);
 
@@ -674,7 +670,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			reducedProbeMachine = optimiseStateMachine(
 				reducedProbeMachine,
 				optIn.enableignoreSideEffects(),
-				oracle, true, true, token, &done_something);
+				oracle, true, token, &done_something);
 			if (!done_something)
 				break;
 		}
@@ -701,7 +697,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		VexPtr<StateMachine, &ir_heap> atomicProbeMachine;
 		atomicProbeMachine = duplicateStateMachine(probeMachine);
 		atomicProbeMachine = optimiseStateMachine(atomicProbeMachine, opt, oracle,
-							  true, true, token);
+							  true, token);
 		VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
 		survive = survivalConstraintIfExecutedAtomically(atomicProbeMachine, nullexpr, oracle, opt, token);
 		if (!survive) {

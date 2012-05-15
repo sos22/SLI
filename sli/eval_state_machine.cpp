@@ -1611,7 +1611,6 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			    .enableassumeNoInterferingStores()
 			    .enablenoExtend(),
 			oracle,
-			true,
 			false,
 			token);
 
@@ -2002,7 +2001,6 @@ writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 					          .enableassumeNoInterferingStores()
 					          .enablenoExtend(),
 					       oracle,
-					       true,
 					       true,
 					       token);
 	return survivalConstraintIfExecutedAtomically(

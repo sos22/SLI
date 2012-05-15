@@ -201,7 +201,6 @@ StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip, Thre
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
 				   VexPtr<Oracle> &oracle,
-				   bool noExtendContext,
 				   bool is_ssa,
 				   GarbageCollectionToken token,
 				   bool *progress = NULL);
