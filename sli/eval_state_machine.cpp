@@ -1435,20 +1435,18 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 
 		struct {
 			StateMachineState *operator()(const crossStateT &crossState,
-						      std::vector<relocT> &pendingRelocs) {
+						      std::vector<relocT> &pendingRelocs,
+						      bool racingLoad) {
 				StateMachineState *res = shallowCloneState(crossState.p);
 				std::vector<StateMachineState **> targets;
 				res->targets(targets);
-				bool isLoad = false;
-				if (StateMachineSideEffect *se = crossState.p->getSideEffect())
-					isLoad = se->type == StateMachineSideEffect::Load;
 				for (auto it = targets.begin(); it != targets.end(); it++) {
 					pendingRelocs.push_back(
 						relocT(*it,
 						       crossStateT(
 							       **it,
 							       crossState.s,
-							       isLoad || crossState.probe_issued_load,
+							       racingLoad || crossState.probe_issued_load,
 							       crossState.store_issued_store
 							       )));
 					**it = NULL;
@@ -1505,7 +1503,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 			   <unreached> as well. */
 			if (crossState.probe_issued_load &&
 			    crossState.s->type == StateMachineState::Crash)
-				newState = advanceProbeMachine(crossState, pendingRelocs);
+				newState = advanceProbeMachine(crossState, pendingRelocs, false);
 			else
 				newState = StateMachineUnreached::get();
 		} else if (!probe_effect ||
@@ -1513,7 +1511,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 			/* If the probe effect definitely cannot race
 			   with anything left in the store machine
 			   then we should issue it unconditionally. */
-			newState = advanceProbeMachine(crossState, pendingRelocs);
+			newState = advanceProbeMachine(crossState, pendingRelocs, false);
 		} else if (!store_effect) {
 			/* Likewise, if a store effect isn't a memory
 			 * access then it's definitely not going to
@@ -1526,7 +1524,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 			   an interesting race.  Pick a
 			   non-deterministic interleaving. */
 			std::vector<StateMachineState *> possible;
-			possible.push_back(advanceProbeMachine(crossState, pendingRelocs));
+			possible.push_back(advanceProbeMachine(crossState, pendingRelocs, true));
 			possible.push_back(advanceStoreMachine(crossState, pendingRelocs));
 			newState = new StateMachineNdChoice(VexRip(), possible);
 		}
