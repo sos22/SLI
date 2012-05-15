@@ -3,9 +3,9 @@
 
 class cfgRootSetT : public std::set<Instruction<ThreadRip> *> {
 public:
-	cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred, happensAfterMapT &happensAfter);
+	cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred);
 };
-cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred, happensAfterMapT &happensBefore)
+cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred)
 {
 	std::set<Instruction<ThreadRip> *> toEmit;
 	for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
@@ -83,7 +83,7 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 	}
 
 	/* Start by assuming that everything dominates everything */
-	cfgRootSetT entryPoints(cfg, predecessors, happensAfter);
+	cfgRootSetT entryPoints(cfg, predecessors);
 	std::set<Instruction<ThreadRip> *> needingRecompute;
 	std::set<Instruction<ThreadRip> *> empty;
 	for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();

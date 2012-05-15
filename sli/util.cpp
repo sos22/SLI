@@ -33,7 +33,7 @@ log_bytes(const char *buf, Int nbytes)
 }
 
 static void
-handle_sigusr1(int ignore)
+handle_sigusr1(int )
 {
 	/* So that we can get profiling results etc. */
 	exit(1);

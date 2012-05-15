@@ -17,8 +17,7 @@ MemoryChunk *MemoryChunk::dupeSelf() const
 	return r;
 }
 
-void MemoryChunk::write(unsigned offset, const unsigned long *source, unsigned nr_bytes,
-			unsigned long sa)
+void MemoryChunk::write(unsigned offset, const unsigned long *source, unsigned nr_bytes)
 {
 	assert(!frozen);
 	assert(offset < size);

@@ -158,7 +158,7 @@ class LivenessMap {
 	}
 
 public:
-	LivenessMap(StateMachine *sm, std::set<StateMachineState *> &allStates) {
+	LivenessMap(std::set<StateMachineState *> &allStates) {
 		bool progress;
 		do {
 			progress = false;
@@ -213,7 +213,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 	std::set<StateMachineState *> allStates;
 	findAllStates(sm, allStates);
 
-	LivenessMap livenessMap(sm, allStates);
+	LivenessMap livenessMap(allStates);
 
 	if (TIMEOUT)
 		return sm;

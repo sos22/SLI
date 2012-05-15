@@ -5,6 +5,9 @@
 int
 main(int argc, char *argv[])
 {
+	if (argc < 2)
+		errx(1, "need filename of core");
+
 	init_sli();
 
 	MachineState *ms = MachineState::readCoredump(argv[1]);

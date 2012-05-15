@@ -35,11 +35,11 @@ findAllTypedSideEffects(StateMachine *sm, std::set<t *> &out)
 {
 	class _ : public StateMachineTransformer {
 		std::set<t *> &out;
-		t *transformOneSideEffect(t *smse, bool *done_something) {
+		t *transformOneSideEffect(t *smse, bool *) {
 			out.insert(smse);
 			return NULL;
 		}
-		IRExpr *transformIRExpr(IRExpr *a, bool *done_something) {
+		IRExpr *transformIRExpr(IRExpr *a, bool *) {
 			return a;
 		}
 	public:
@@ -175,7 +175,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			return sm;
 		done_something = false;
 		sm = internStateMachine(sm);
-		sm = sm->optimise(opt, oracle, &done_something);
+		sm = sm->optimise(opt, &done_something);
 		if (opt.ignoreSideEffects())
 			removeSurvivingStates(sm, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
@@ -190,13 +190,13 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				done_something |= d;
 			} while (d);
 		}
-		sm = sm->optimise(opt, oracle, &done_something);
+		sm = sm->optimise(opt, &done_something);
 		sm = bisimilarityReduction(sm, opt);
 		if (is_ssa)
 			sm = optimiseSSA(sm, &done_something);
 		if (opt.noExtend())
 			sm = useInitialMemoryLoads(sm, opt, oracle, &done_something);
-		sm = sm->optimise(opt, oracle, &done_something);
+		sm = sm->optimise(opt, &done_something);
 		if (progress)
 			*progress |= done_something;
 	} while (done_something);
@@ -224,7 +224,7 @@ getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> 
 
 static StateMachine *
 CFGtoStoreMachine(unsigned tid, Oracle *oracle, CFGNode *cfg,
-		  AllowableOptimisations &opt, MemoryAccessIdentifierAllocator &mai)
+		  MemoryAccessIdentifierAllocator &mai)
 {
 	StateMachine *sm = storeCFGToMachine(oracle, tid, cfg, mai);
 	canonicaliseRbp(sm, oracle);
@@ -411,7 +411,7 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 	AllowableOptimisations opt =
 		optIn
 		.enableassumeNoInterferingStores();
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, opt, mai));
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, mai));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
@@ -630,7 +630,7 @@ duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
 				return NULL;
 			}
 		}
-		IRExpr *transformIRExpr(IRExpr *e, bool *d) {
+		IRExpr *transformIRExpr(IRExpr *, bool *) {
 			return NULL;
 		}
 	} doit;
@@ -640,7 +640,6 @@ duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
 CrashSummary *
 diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<Oracle> &oracle,
-	      VexPtr<MachineState> &ms,
 	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
 	      const MemoryAccessIdentifierAllocator &mai,
@@ -813,7 +812,7 @@ remoteMacroSectionsT::iterator::operator!=(const iterator &other) const
 }
 
 void
-remoteMacroSectionsT::iterator::operator++(int ign)
+remoteMacroSectionsT::iterator::operator++(int)
 {
 	this->idx++;
 }
@@ -865,14 +864,13 @@ remoteMacroSectionsT::visit(HeapVisitor &hv)
 
 void
 checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
-				VexPtr<MachineState> &ms,
-				VexPtr<Thread> &thr,
+				unsigned tid,
 				VexPtr<Oracle> &oracle,
 				FixConsumer &df,
 				GarbageCollectionToken token)
 {
 	MemoryAccessIdentifierAllocator mai;
-	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(thr->tid._tid(), targetRip.toVexRip()), thr, mai));
+	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(oracle->ms, ThreadRip::mk(tid, targetRip.toVexRip()), mai));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
 		return;
@@ -886,14 +884,14 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	unsigned nrProbeMachines;
 	{
 		StateMachine **_probeMachines;
-		if (!buildProbeMachine(oracle, targetRip, proximal, thr->tid, opt, &_probeMachines, &nrProbeMachines, mai, token))
+		if (!buildProbeMachine(oracle, targetRip, proximal, tid, opt, &_probeMachines, &nrProbeMachines, mai, token))
 			return;
 		probeMachines = _probeMachines;
 	}
 	for (unsigned x = 0; x < nrProbeMachines; x++) {
 		VexPtr<CrashSummary, &ir_heap> summary;
 		VexPtr<StateMachine, &ir_heap> probeMachine(probeMachines[x]);
-		summary = diagnoseCrash(probeMachine, oracle, ms, false, opt, mai, token);
+		summary = diagnoseCrash(probeMachine, oracle, false, opt, mai, token);
 		if (summary)
 			df(summary, token);
 	}

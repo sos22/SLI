@@ -75,9 +75,9 @@ class AllowableOptimisations {
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\
 	f(nonLocalLoads, std::set<DynAnalysisRip> *)
 
-	/* The value of @d doesn't matter, it's just there so that we
-	   can select this constructor. */
-	AllowableOptimisations(double d)
+	/* The value of the argument doesn't matter, it's just there
+	   so that we can select this constructor. */
+	AllowableOptimisations(double)
 		:
 #define default_flag(name, type)		\
 		_ ## name(false),
@@ -221,14 +221,10 @@ public:
 		: root(_root), origin(_origin)
 	{
 	}
-	StateMachine(StateMachine *parent, const std::vector<std::pair<unsigned, VexRip> > &_origin, StateMachineState *new_root)
-		: root(new_root), origin(_origin)
-	{}
 	StateMachine(StateMachine *parent)
 		: root(parent->root), origin(parent->origin)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
-			       Oracle *oracle,
 			       bool *done_something);
 	void visit(HeapVisitor &hv) { hv(root); }
 #ifdef NDEBUG
@@ -275,7 +271,7 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *,
+	virtual StateMachineState *optimise(const AllowableOptimisations &, bool *,
 					    std::set<StateMachineState *> &done) = 0;
 	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
 	bool canCrash(std::set<const StateMachineState *> &memo) const {
@@ -343,7 +339,7 @@ protected:
 		: type(_type)
 	{}
 public:
-	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
+	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
@@ -355,9 +351,9 @@ protected:
 	virtual void prettyPrint(FILE *f) const = 0;
 	StateMachineTerminal(const VexRip &rip, StateMachineState::stateType type) : StateMachineState(rip, type) {}
 public:
-	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *,
+	StateMachineState *optimise(const AllowableOptimisations &, bool *,
 				    std::set<StateMachineState *> &) { return this; }
-	virtual void visit(HeapVisitor &hv) {}
+	virtual void visit(HeapVisitor &) {}
 	void targets(std::vector<StateMachineState **> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
@@ -423,7 +419,7 @@ public:
 	}
 	void prependSideEffect(StateMachineSideEffect *sideEffect);
 
-	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something,
+	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something,
 				    std::set<StateMachineState *> &done);
 	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
@@ -466,7 +462,7 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something,
+	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something,
 				    std::set<StateMachineState *> &);
 	void targets(std::vector<StateMachineState **> &out) {
 		out.push_back(&falseTarget);
@@ -515,7 +511,7 @@ public:
 			hv(*it);
 	}
 
-	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something,
+	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something,
 				    std::set<StateMachineState *> &);
 	void targets(std::vector<StateMachineState **> &out) {
 		out.reserve(out.size() + successors.size());
@@ -547,7 +543,7 @@ public:
 	{
 		fprintf(f, "<%s: jmp %s>", origin.name(), target.name());
 	}
-	void visit(HeapVisitor &hv) { }
+	void visit(HeapVisitor &) { }
 };
 
 
@@ -560,11 +556,11 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
-	void visit(HeapVisitor &hv) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void visit(HeapVisitor &) {}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {}
-	bool definesRegister(threadAndRegister &reg) const {
+	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
 };
@@ -607,13 +603,13 @@ public:
 		StateMachineSideEffectMemoryAccess::visit(hv);
 		hv(data);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
 		sanityCheckIRExpr(data, live);
 	}
-	bool definesRegister(threadAndRegister &reg) const {
+	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
 };
@@ -647,7 +643,7 @@ public:
 		ppIRExpr(addr, f);
 		fprintf(f, ")@%s", rip.name());
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(addr);
 	}
@@ -674,8 +670,8 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 	}
@@ -700,13 +696,13 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 		assert(value->type() == Ity_I1);
 	}
-	bool definesRegister(threadAndRegister &reg) const {
+	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
 };
@@ -761,10 +757,10 @@ public:
 		}
 		fprintf(f, ")");
 	}
-	void visit(HeapVisitor &hv) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	void visit(HeapVisitor &) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
 		assert(generations.size() != 0);
 	}
 	bool definesRegister(threadAndRegister &reg) const {

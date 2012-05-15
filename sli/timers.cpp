@@ -114,7 +114,7 @@ retry:
 }
 
 static void
-signal_handler(int signr)
+signal_handler(int )
 {
 	if (timers_suspended) {
 		lost_timer_event = true;

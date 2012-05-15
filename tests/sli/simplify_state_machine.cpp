@@ -1,4 +1,5 @@
 #include <sys/fcntl.h>
+#include <err.h>
 #include <unistd.h>
 
 #include "sli.h"
@@ -10,6 +11,9 @@
 int
 main(int argc, char *argv[])
 {
+	if (argc < 4)
+		errx(1, "not enough arguments");
+
 	init_sli();
 
 	VexPtr<StateMachine, &ir_heap> sm(readStateMachine(0));
@@ -22,7 +26,7 @@ main(int argc, char *argv[])
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack();
-	sm = optimiseStateMachine(sm, opt, oracle, true, true, ALLOW_GC);
+	sm = optimiseStateMachine(sm, opt, oracle, true, ALLOW_GC);
 	printStateMachine(sm, stdout);
 
 	return 0;

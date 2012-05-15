@@ -181,9 +181,7 @@ IRSB* bb_to_IR ( unsigned                tid,
                  /*IN*/ VexAbiInfo*      abiinfo_both,
                  /*IN*/ IRType           guest_word_type,
                  /*IN*/ Bool             do_self_check,
-                 /*IN*/ Bool             (*preamble_function)(void*,IRSB*),
-                 /*IN*/ Int              offB_TISTART,
-                 /*IN*/ Int              offB_TILEN );
+                 /*IN*/ Bool             (*preamble_function)(void*,IRSB*));
 
 
 #endif /* ndef __VEX_GUEST_GENERIC_BB_TO_IR_H */

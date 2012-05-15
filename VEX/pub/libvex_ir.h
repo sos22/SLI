@@ -522,7 +522,7 @@ struct _IRConst : public GarbageCollected<_IRConst, &ir_heap>{
          UShort V128;   /* 16-bit value; see Ico_V128 comment above */
       } Ico;
       unsigned long hashval() const { return tag * 103 + Ico.U64 * 607; }
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       void sanity_check() const {
 	 assert(tag >= Ico_U1 && tag <= Ico_V128);
       }
@@ -1040,7 +1040,11 @@ typedef
    }
    IROp;
 
-static inline void sanity_check_irop(IROp op)
+static inline void sanity_check_irop(IROp op
+#ifdef NDEBUG
+				     __attribute__((unused))
+#endif
+	)
 {
    assert(op <= Iop_Perm8x16 && op > Iop_INVALID);
 }
@@ -1106,7 +1110,11 @@ typedef
    }
    IRType;
 
-static inline void sanity_check_irtype(IRType i)
+static inline void sanity_check_irtype(IRType i
+#ifdef NDEBUG
+				       __attribute__((unused))
+#endif
+	)
 {
    assert(i > Ity_INVALID && i <= Ity_V128);
 }
@@ -1128,7 +1136,7 @@ extern Int sizeofIRType ( IRType );
 typedef
 struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
       Int     types_used;
-      void visit(HeapVisitor &hv) { }
+      void visit(HeapVisitor &) { }
       NAMED_CLASS
    }
    IRTypeEnv;
@@ -1163,7 +1171,7 @@ typedef
       const char* name;
       void*  addr;
       UInt   mcx_mask;
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
       void sanity_check() const {}
       NAMED_CLASS
@@ -1187,7 +1195,7 @@ struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
       Int    base;   /* guest state offset of start of indexed area */
       IRType elemTy; /* type of each element in the indexed area */
       Int    nElems; /* number of elements in the indexed area */
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
       void sanity_check() const {
 	 assert(base < nElems);
@@ -1281,7 +1289,7 @@ struct IRExprGet : public IRExpr {
    IRExprGet(threadAndRegister _reg, IRType _ty)
 	   : IRExpr(Iex_Get), reg(_reg), ty(_ty)
    {}
-   void visit(HeapVisitor &hv) {}
+   void visit(HeapVisitor &) {}
    unsigned long hashval() const { return reg.hash() + ty * 3; }
    void prettyPrint(FILE *f) const {
       if (ty == Ity_I64 && !reg.isTemp()) {
@@ -1769,7 +1777,7 @@ struct IRExprHappensBefore : public IRExpr {
 	  before(_before),
 	  after(_after)
     {}
-    void visit(HeapVisitor &hv) {}
+    void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 19; }
     void prettyPrint(FILE *f) const;
     IRType type() const { return Ity_I1; }
@@ -1791,7 +1799,7 @@ struct IRExprPhi : public IRExpr {
 	  generations(_generations),
 	  ty(_ty)
     {}
-    void visit(HeapVisitor &hv) {}
+    void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 27; }
     void prettyPrint(FILE *f) const;
     IRType type() const { return ty; }
@@ -1809,7 +1817,7 @@ struct IRExprFreeVariable : public IRExpr {
     IRExprFreeVariable(const MemoryAccessIdentifier _id, IRType _ty)
 	: IRExpr(Iex_FreeVariable), id(_id), ty(_ty)
     {}
-    void visit(HeapVisitor &hv) {}
+    void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 1045239 * id.hash(); }
     void prettyPrint(FILE *f) const {
 	fprintf(f, "Free%s:", id.name());
@@ -2222,7 +2230,7 @@ class IRStmtNoOp : public IRStmt {
       IRStmtNoOp() : IRStmt(Ist_NoOp) {}
 public:
       static IRStmtNoOp singleton;
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const { fprintf(f, "IR-NoOp"); }
 };
 struct IRStmtIMark : public IRStmt {
@@ -2231,7 +2239,7 @@ struct IRStmtIMark : public IRStmt {
       IRStmtIMark(const ThreadRip &_addr, Int _len)
 	      : IRStmt(Ist_IMark), addr(_addr), len(_len)
       {}
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const {
          fprintf(f,  "------ IMark(%s, %d) ------", 
 		 addr.name(), len);
@@ -2393,7 +2401,7 @@ struct IRStmtMBE : public IRStmt {
       IRStmtMBE(IRMBusEvent _event)
 	      : IRStmt(Ist_MBE), event(_event)
       {}
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const {
          fprintf(f, "IR-");
          ppIRMBusEvent(event, f);

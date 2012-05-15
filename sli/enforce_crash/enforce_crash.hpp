@@ -113,7 +113,7 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 				isGood = false;
 			return NULL;
 		}
-		IRExpr *transformIex(IRExprHappensBefore *e) {
+		IRExpr *transformIex(IRExprHappensBefore *) {
 			isGood = false;
 			return NULL;
 		}
@@ -980,7 +980,7 @@ public:
 		else
 			return false;
 	}
-	bool exploreFunction(ThreadRip rip) {
+	bool exploreFunction(ThreadRip) {
 		return true;
 	}
 	EnforceCrashCFG(AddressSpace *as,

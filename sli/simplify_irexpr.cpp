@@ -189,9 +189,7 @@ optimise_condition_calculation(
 	IRExpr *_cond,
 	IRExpr *cc_op,
 	IRExpr *dep1,
-	IRExpr *dep2,
-	IRExpr *ndep,
-	const AllowableOptimisations &opt)
+	IRExpr *dep2)
 {
 	unsigned long cond;
 	IRExpr *res;
@@ -1277,9 +1275,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					e->args[0],
 					e->args[1],
 					e->args[2],
-					e->args[3],
-					e->args[4],
-					opt);
+					e->args[3]);
 			}
 			return res;
 		}
@@ -2619,33 +2615,29 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 }
 
 bool
-isBadAddress(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
+isBadAddress(IRExpr *e)
 {
 	return e->tag == Iex_Const &&
 		(long)((IRExprConst *)e)->con->Ico.U64 < 4096;
 }
 
 bool
-definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
+definitelyUnevaluatable(IRExpr *e)
 {
 	if (TIMEOUT)
 		return false;
 	class _ : public IRExprTransformer {
 	public:
 		bool res;
-		const AllowableOptimisations &opt;
-		Oracle *oracle;
 
 		IRExpr *transformIex(IRExprLoad *e) {
-			if (isBadAddress(e->addr, opt, oracle))
+			if (isBadAddress(e->addr))
 				res = true;
 			return IRExprTransformer::transformIex(e);
 		}
-		_(const AllowableOptimisations &_opt,
-		  Oracle *_oracle)
-			: res(false), opt(_opt), oracle(_oracle)
+		_() : res (false)
 		{}
-	} t(opt, oracle);
+	} t;
 	t.doit(e);
 	return t.res;
 }

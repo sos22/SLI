@@ -545,7 +545,6 @@ instrStoreSlotToMessage(Instruction<ClientRip> *start,
 static void
 instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 			    Instruction<ClientRip> *start,
-			    slotMapT &exprsToSlots,
 			    ClientRip nextRip,
 			    std::vector<relocEntryT> &relocs,
 			    int &rx_message_site_id)
@@ -1107,7 +1106,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 						relevantEdges.insert(hb);
 					}
 				}
-				instrHappensBeforeEdgeAfter(relevantEdges, newInstr, data.exprsToSlots, cr, relocs, next_rx_site_id);
+				instrHappensBeforeEdgeAfter(relevantEdges, newInstr, cr, relocs, next_rx_site_id);
 			} else {
 				relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::original_instruction),
 							     &newInstr->defaultNextI));
@@ -1401,6 +1400,9 @@ loadCrashEnforcementData(crashEnforcementData &ced, int fd)
 int
 main(int argc, char *argv[])
 {
+	if (argc < 3)
+		errx(1, "not enough arguments");
+
 	init_sli();
 
 	AtExit::init();

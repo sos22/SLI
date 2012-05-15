@@ -13,8 +13,8 @@
 
 #define mk_helper_load(typ, suffix)                            \
 static typ                                                     \
- helper_load_ ## suffix (const typ *ptr, unsigned long rsp,    \
-			 unsigned long rip)		       \
+ helper_load_ ## suffix (const typ *, unsigned long ,	       \
+			 unsigned long )		       \
 {							       \
 	/* Placeholder, never actually called. */	       \
 	abort();					       \
@@ -172,12 +172,12 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 
 IRSB *
 instrument_func(unsigned tid,
-		void *closure,
+		void *,
 		IRSB *sb_in,
-		VexGuestLayout *layout,
-		VexGuestExtents *vge,
-		IRType gWordTy,
-		IRType hWordTy)
+		VexGuestLayout *,
+		VexGuestExtents *,
+		IRType ,
+		IRType )
 {
 	IRStmt **in_stmts = sb_in->stmts;
 	int nr_in_stmts = sb_in->stmts_used;

@@ -832,7 +832,7 @@ buildNewStateMachineWithLoadsEliminated(
 									      &d, edgeLabels);
 	if (d) {
 		*done_something = true;
-		return new StateMachine(sm, sm->origin, new_root);
+		return new StateMachine(new_root, sm->origin);
 	} else {
 		return sm;
 	}

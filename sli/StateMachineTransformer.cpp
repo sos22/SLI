@@ -238,6 +238,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectPhi *phi,
 	}
 	if (x == phi->generations.size())
 		return NULL;
+	*done_something = true;
 	StateMachineSideEffectPhi *newPhi = new StateMachineSideEffectPhi(*phi);
 	newPhi->generations[x].second = newE;
 

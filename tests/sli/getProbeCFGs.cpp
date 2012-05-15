@@ -1,3 +1,5 @@
+#include <err.h>
+
 #include "sli.h"
 #include "oracle.hpp"
 #include "cfgnode.hpp"
@@ -6,6 +8,9 @@
 int
 main(int argc, char *argv[])
 {
+	if (argc < 4)
+		errx(1, "not enough arguments");
+
 	init_sli();
 
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));

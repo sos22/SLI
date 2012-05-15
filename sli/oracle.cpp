@@ -135,7 +135,7 @@ const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::nonStackPointer(4);
 const Oracle::PointerAliasingSet Oracle::PointerAliasingSet::anything(7);
 
 Oracle::ThreadRegisterAliasingConfiguration Oracle::ThreadRegisterAliasingConfiguration::functionEntryConfiguration(5.3f);
-Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration(float f)
+Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration(float)
 {
 	/* On function entry, the only pointer to the current stack
 	   frame should be in RSP.  Anythign else indicates that the
@@ -530,7 +530,7 @@ Oracle::memoryAccessesMightAlias(const AllowableOptimisations &opt,
 }
 
 void
-Oracle::findRacingRips(const AllowableOptimisations &opt, StateMachineSideEffectLoad *smsel, std::set<DynAnalysisRip> &out)
+Oracle::findRacingRips(StateMachineSideEffectLoad *smsel, std::set<DynAnalysisRip> &out)
 {
 	findConflictingStores(smsel, out);
 }
@@ -825,7 +825,7 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 			LibVEX_maybe_gc(token);
 			bool this_did_something = false;
 			Function f(*it);
-			f.calculateRegisterLiveness(ths->ms->addressSpace, &this_did_something, ths);
+			f.calculateRegisterLiveness(ths->ms->addressSpace, &this_did_something);
 			if (this_did_something)
 				changed++;
 			else
@@ -870,7 +870,7 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 		Function f(*it);
 		do {
 			done_something = false;
-			f.calculateAliasing(ths->ms->addressSpace, &done_something, ths);
+			f.calculateAliasing(ths->ms->addressSpace, &done_something);
 		} while (done_something);
 		f.setAliasingConfigCorrect(true);
 		printf("Aliasing: Done %zd/%zd functions\n",
@@ -1773,7 +1773,7 @@ Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
 }
 
 void
-Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_something, Oracle *oracle)
+Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_something)
 {
 	bool changed;
 
@@ -1794,7 +1794,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 		     it != instrsToRecalculate1.end();
 		     it++) {
 			bool t = false;
-			updateLiveOnEntry(*it, as, &t, oracle);
+			updateLiveOnEntry(*it, as, &t);
 			if (t)
 				addPredecessorsNonCall(*it, instrsToRecalculate2);
 		}
@@ -1807,7 +1807,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 		     it != instrsToRecalculate2.end();
 		     it++) {
 			bool t = false;
-			updateLiveOnEntry(*it, as, &t, oracle);
+			updateLiveOnEntry(*it, as, &t);
 			if (t)
 				addPredecessorsNonCall(*it, instrsToRecalculate1);
 		}
@@ -1822,7 +1822,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 	if (changed) {
 		*done_something = true;
 		std::vector<StaticRip> callers;
-		getFunctionCallers(callers, oracle);
+		getFunctionCallers(callers);
 		for (auto it = callers.begin();
 		     it != callers.end();
 		     it++)
@@ -1831,7 +1831,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 }
 
 void
-Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Oracle *oracle)
+Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 {
 	if (aliasingConfigCorrect())
 		return;
@@ -1856,16 +1856,16 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something, Orac
 	for (auto it = allInstrs.begin();
 	     it != allInstrs.end();
 	     it++)
-		updateSuccessorInstructionsAliasing(*it, as, &needsUpdating, done_something, oracle);
+		updateSuccessorInstructionsAliasing(*it, as, &needsUpdating, done_something);
 	while (!needsUpdating.empty()) {
 		StaticRip rip(needsUpdating.back());
 		needsUpdating.pop_back();
-		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, done_something, oracle);
+		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, done_something);
 	}
 }
 
 void
-Oracle::Function::updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool *changed, Oracle *oracle)
+Oracle::Function::updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool *changed)
 {
 	LivenessSet res;
 
@@ -1888,7 +1888,7 @@ Oracle::Function::updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool
 			if (irsb->next_is_const)
 				callees.push_back(StaticRip(irsb->next_const.rip));
 			else
-				getInstructionCallees(rip, callees, oracle);
+				getInstructionCallees(rip, callees);
 		} else {
 			if (irsb->next_is_const)
 				fallThroughRips.push_back(StaticRip(irsb->next_const.rip));
@@ -2237,8 +2237,7 @@ void
 Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 						      AddressSpace *as,
 						      std::vector<StaticRip> *changed,
-						      bool *done_something,
-						      Oracle *oracle)
+						      bool *done_something)
 {
 	RegisterAliasingConfiguration config;
 	config.addConfig(STATIC_THREAD, aliasConfigOnEntryToInstruction(rip));
@@ -2345,7 +2344,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 	}
 
 	std::vector<StaticRip> callees;
-	getInstructionCallees(rip, callees, oracle);
+	getInstructionCallees(rip, callees);
 	if (!callees.empty())
 		tconfig.v[0] = PointerAliasingSet::notAPointer;
 	for (auto it = callees.begin();
@@ -2629,7 +2628,7 @@ Oracle::Function::addInstruction(const StaticRip &rip,
 }
 
 void
-Oracle::Function::getInstructionCallees(const StaticRip &rip, std::vector<StaticRip> &out, Oracle *oracle)
+Oracle::Function::getInstructionCallees(const StaticRip &rip, std::vector<StaticRip> &out)
 {
 	static sqlite3_stmt *stmt;
 
@@ -2640,7 +2639,7 @@ Oracle::Function::getInstructionCallees(const StaticRip &rip, std::vector<Static
 }
 
 void
-Oracle::Function::getFunctionCallers(std::vector<StaticRip> &out, Oracle *oracle)
+Oracle::Function::getFunctionCallers(std::vector<StaticRip> &out)
 {
 	static sqlite3_stmt *stmt;
 
@@ -2954,7 +2953,7 @@ Oracle::getInstrCallees(const VexRip &vr, std::vector<VexRip> &out)
 {
 	StaticRip sr(vr);
 	std::vector<StaticRip> outSr;
-	Function(sr).getInstructionCallees(sr, outSr, this);
+	Function(sr).getInstructionCallees(sr, outSr);
 	VexRip vrEnd = vr + getInstructionSize(ms->addressSpace, sr);
 	for (auto it = outSr.begin(); it != outSr.end(); it++) {
 		VexRip newVr(vrEnd);

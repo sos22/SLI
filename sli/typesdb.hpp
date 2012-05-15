@@ -137,7 +137,7 @@ public:
 	void findOffsets(const DynAnalysisRip &vr, std::vector<unsigned long> &out) const;
 	all_instrs_iterator *enumerateAllInstructions() const;
 	unsigned long nrDistinctInstructions() const;
-	void visit(HeapVisitor &hv) {}
+	void visit(HeapVisitor &) {}
 
 	/* Parse a vexrip which has already been canonicalised. */
 	static void parse_vexrip_canon(DynAnalysisRip *out, const Mapping &mapping,

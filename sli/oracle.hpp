@@ -132,18 +132,18 @@ public:
 		void *operator new(size_t s); /* DNI */
 		char *mkName() const { return my_asprintf("function_%s", rip.name()); }
 		void getInstructionsInFunction(std::vector<StaticRip> &out) const;
-		void updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
+		void updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool *changed);
 		void updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
 		void addPredecessorsDirect(const StaticRip &rip, std::vector<StaticRip> &out);
 		void addPredecessorsNonCall(const StaticRip &rip, std::vector<StaticRip> &out);
 		void addPredecessorsCall(const StaticRip &rip, std::vector<StaticRip> &out);
 		void addPredecessorsReturn(const StaticRip &rip, std::vector<StaticRip> &out);
 		void updateSuccessorInstructionsAliasing(const StaticRip &rip, AddressSpace *as, std::vector<StaticRip> *changed,
-							 bool *done_something, Oracle *oracle);
+							 bool *done_something);
 		void getInstructionFallThroughs(const StaticRip &rip, std::vector<StaticRip> &out);
-		void getInstructionCallees(const StaticRip &rip, std::vector<StaticRip> &out, Oracle *oracle);
+		void getInstructionCallees(const StaticRip &rip, std::vector<StaticRip> &out);
 		void getSuccessors(const StaticRip &rip, std::vector<StaticRip> &succ);
-		void getFunctionCallers(std::vector<StaticRip> &out, Oracle *oracle);
+		void getFunctionCallers(std::vector<StaticRip> &out);
 		bool registerLivenessCorrect() const;
 		void setRegisterLivenessCorrect(bool v);
 		bool rbpToRspOffsetsCorrect() const;
@@ -167,11 +167,11 @@ public:
 				    const std::vector<StaticRip> &fallThrough,
 				    const std::vector<StaticRip> &callSucc,
 				    const std::vector<StaticRip> &branch);
-		void calculateRegisterLiveness(AddressSpace *as, bool *done_something, Oracle *oracle);
+		void calculateRegisterLiveness(AddressSpace *as, bool *done_something);
 		void calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle);
-		void calculateAliasing(AddressSpace *as, bool *done_something, Oracle *oracle);
+		void calculateAliasing(AddressSpace *as, bool *done_something);
 
-		void visit(HeapVisitor &hv) { }
+		void visit(HeapVisitor &) { }
 		NAMED_CLASS
 	};
 
@@ -363,7 +363,7 @@ public:
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
         bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store);
-        void findRacingRips(const AllowableOptimisations &, StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
+        void findRacingRips(StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
 	void findRacingRips(StateMachineSideEffectStore *, std::set<DynAnalysisRip> &);
 	bool functionCanReturn(const VexRip &rip);
 

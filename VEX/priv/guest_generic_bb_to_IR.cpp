@@ -54,7 +54,7 @@
 
 
 /* Small helpers */
-static Bool const_False ( void* callback_opaque, Addr64 a ) { 
+static Bool const_False ( void*, Addr64 ) { 
    return False; 
 }
 
@@ -101,9 +101,7 @@ IRSB* bb_to_IR ( unsigned tid,
                  /*IN*/ VexAbiInfo*      abiinfo_both,
                  /*IN*/ IRType           guest_word_type,
                  /*IN*/ Bool             do_self_check,
-                 /*IN*/ Bool             (*preamble_function)(void*,IRSB*),
-                 /*IN*/ Int              offB_TISTART,
-                 /*IN*/ Int              offB_TILEN )
+                 /*IN*/ Bool             (*preamble_function)(void*,IRSB*))
 {
    Long       delta;
    Int        i, n_instrs, first_stmt_idx;

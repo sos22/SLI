@@ -76,7 +76,6 @@ bool buildProbeMachine(VexPtr<Oracle> &oracle,
 		       GarbageCollectionToken token);
 CrashSummary *diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			    VexPtr<Oracle> &oracle,
-			    VexPtr<MachineState> &ms,
 			    bool needRemoteMacroSections,
 			    const AllowableOptimisations &opt,
 			    const MemoryAccessIdentifierAllocator &mai,

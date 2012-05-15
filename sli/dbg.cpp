@@ -4,6 +4,9 @@
 int
 main(int argc, char *argv[])
 {
+	if (argc < 2)
+		err(1, "need a logfile");
+
 	init_sli();
 
 	LogReaderPtr ptr;

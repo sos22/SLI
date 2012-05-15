@@ -45,7 +45,7 @@ public:
 	}
 };
 
-static IRRegArray *rawDupe(duplication_context &ctxt, const IRRegArray *inp)
+static IRRegArray *rawDupe(duplication_context &, const IRRegArray *inp)
 {
 	IRRegArray *res = new IRRegArray();
 	res->base = inp->base;
@@ -54,7 +54,7 @@ static IRRegArray *rawDupe(duplication_context &ctxt, const IRRegArray *inp)
 	return res;
 }
 
-static IRConst *rawDupe(duplication_context &ctxt, const IRConst *inp)
+static IRConst *rawDupe(duplication_context &, const IRConst *inp)
 {
 	IRConst *res = new IRConst();
 	res->tag = inp->tag;
@@ -62,7 +62,7 @@ static IRConst *rawDupe(duplication_context &ctxt, const IRConst *inp)
 	return res;
 }
 
-static IRCallee *rawDupe(duplication_context &ctxt, const IRCallee *inp)
+static IRCallee *rawDupe(duplication_context &, const IRCallee *inp)
 {
 	IRCallee *res = new IRCallee();
 	res->regparms = inp->regparms;
@@ -231,7 +231,7 @@ rawDupe(duplication_context &ctxt, const StateMachineSideEffectStore *l)
 }
 
 static StateMachineSideEffectUnreached *
-rawDupe(duplication_context &ctxt, const StateMachineSideEffectUnreached *l)
+rawDupe(duplication_context &, const StateMachineSideEffectUnreached *)
 {
 	return StateMachineSideEffectUnreached::get();
 }

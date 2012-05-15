@@ -235,7 +235,7 @@ _LibVEX_free(Heap *h, const void *_ptr)
 }
 
 static void
-LibVEX_gc(Heap *h, GarbageCollectionToken t)
+LibVEX_gc(Heap *h, GarbageCollectionToken )
 {
 	struct arena *old_arena;
 	struct arena *next_old;
@@ -427,7 +427,7 @@ alloc_bytes(Heap *h, VexAllocType *type, unsigned long size)
 
 static VexAllocType byte_alloc_type = { -1, NULL, NULL, NULL, "<bytes>" };
 void *
-__LibVEX_Alloc_Bytes(Heap *h, unsigned long nbytes, struct libvex_allocation_site *site)
+__LibVEX_Alloc_Bytes(Heap *h, unsigned long nbytes, struct libvex_allocation_site *)
 {
 	return alloc_bytes(h, &byte_alloc_type, nbytes);
 }
@@ -628,7 +628,11 @@ __LibVEX_Alloc_Ptr_Array(Heap *h, unsigned long len)
 }
 
 static void
-sanity_check_arena(struct arena *a, Heap *heap)
+sanity_check_arena(struct arena *a, Heap *heap
+#ifdef NDEBUG
+		   __attribute__((unused))
+#endif
+		   )
 {
 	unsigned offset;
 	struct allocation_header *ah;
@@ -674,7 +678,11 @@ _LibVEX_alloc_sanity_check(Heap *h)
 }
 
 void
-LibVEX_alloc_sanity_check(Heap *h)
+LibVEX_alloc_sanity_check(Heap *h
+#ifdef NDEBUG
+			  __attribute__((unused))
+#endif
+			  )
 {
 #ifndef NDEBUG
 	static int counter;
@@ -687,7 +695,11 @@ LibVEX_alloc_sanity_check(Heap *h)
 }
 
 void
-assert_gc_allocated(const void *ptr)
+assert_gc_allocated(const void *ptr
+#ifdef NDEBUG
+		    __attribute__((unused))
+#endif
+		    )
 {
 #ifndef NDEBUG
 	struct allocation_header *ah = alloc_to_header(ptr);

@@ -1316,7 +1316,6 @@ static void
 findCrossMachineRacingInstructions(StateMachine *probeMachine,
 				   StateMachine *storeMachine,
 				   Oracle *oracle,
-				   const AllowableOptimisations &opt,
 				   std::set<DynAnalysisRip> &probeMachineRacingInstructions,
 				   std::set<DynAnalysisRip> &storeMachineRacingInstructions)
 {
@@ -1328,7 +1327,7 @@ findCrossMachineRacingInstructions(StateMachine *probeMachine,
 	std::set<StateMachineSideEffectLoad *> probeMachineLoads;
 	findAllLoads(probeMachine, probeMachineLoads);
 	for (auto it = probeMachineLoads.begin(); it != probeMachineLoads.end(); it++)
-		oracle->findRacingRips(opt, *it, storeMachineRacingInstructions);
+		oracle->findRacingRips(*it, storeMachineRacingInstructions);
 }
 
 static StateMachineState *
@@ -1869,7 +1868,6 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	std::set<DynAnalysisRip> probeMachineRacingInstructions;
 	std::set<DynAnalysisRip> storeMachineRacingInstructions;
 	findCrossMachineRacingInstructions(probeMachine, storeMachine, oracle,
-					   opt,
 					   probeMachineRacingInstructions,
 					   storeMachineRacingInstructions);
 

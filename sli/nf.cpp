@@ -14,6 +14,8 @@ namespace __nf {
 
 static Maybe<bool> convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
 
+static bool insert_term_destruct(NF_Term &src, NF_Expression &out) __attribute__((warn_unused_result));
+
 /* The ordering we use for NF disjunctions works like this:
 
    -- If a is a subset of b (i.e. a implies b) then a is less than b.
@@ -243,7 +245,11 @@ sanity_check(const NF_Expression &a)
 }
 
 static void
-extra_sanity(const NF_Term &a)
+extra_sanity(const NF_Term &a
+#ifndef EXTRA_SANITY
+	     __attribute__((unused))
+#endif
+	     )
 {
 #ifdef EXTRA_SANITY
 	sanity_check(a);
@@ -251,7 +257,11 @@ extra_sanity(const NF_Term &a)
 }
 
 static void
-extra_sanity(const NF_Expression &a)
+extra_sanity(const NF_Expression &a
+#ifndef EXTRA_SANITY
+	     __attribute__((unused))
+#endif
+	     )
 {
 #ifdef EXTRA_SANITY
 	sanity_check(a);
@@ -300,8 +310,6 @@ merge_terms(const NF_Term &src1,
 	extra_sanity(out);
 	return true;
 }
-
-static bool insert_term_destruct(NF_Term &src, NF_Expression &out) __attribute__((warn_unused_result));
 
 /* Insert @src, which must contain a single atom, into @out.  Returns
    false if @out already contains !@src, in which case we have a
@@ -400,7 +408,6 @@ top:
 
 /* Set @out to @src & @out, destroying @src as we do so.  Returns
    false if that results in a contradiction and true otherwise. */
-static bool insert_term_destruct(NF_Term &src, NF_Expression &out) __attribute__((warn_unused_result));
 static bool
 insert_term_destruct(NF_Term &src, NF_Expression &out)
 {

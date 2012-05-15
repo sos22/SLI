@@ -14,7 +14,7 @@ class IRExprTransformer {
 	IRExpr *_currentIRExpr;
 protected:
 	IRExpr *currentIRExpr() { return _currentIRExpr; }
-	virtual IRExpr *transformIex(IRExprGet *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExprGet *) { return NULL; }
 	virtual IRExpr *transformIex(IRExprGetI *e)
 	{
 		bool t = false;
@@ -81,7 +81,7 @@ protected:
 		else
 			return IRExpr_Load(e->ty, addr, e->rip);
 	}
-	virtual IRExpr *transformIex(IRExprConst *e)
+	virtual IRExpr *transformIex(IRExprConst *)
 	{
 		return NULL;
 	}
@@ -110,9 +110,9 @@ protected:
 		else
 			return IRExpr_ClientCallFailed(a1);
 	}
-	virtual IRExpr *transformIex(IRExprHappensBefore *e) { return NULL; }
-	virtual IRExpr *transformIex(IRExprPhi *e) { return NULL; }
-	virtual IRExpr *transformIex(IRExprFreeVariable *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExprHappensBefore *) { return NULL; }
+	virtual IRExpr *transformIex(IRExprPhi *) { return NULL; }
+	virtual IRExpr *transformIex(IRExprFreeVariable *) { return NULL; }
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 public:
 	IRExpr *doit(IRExpr *e, bool *done_something) { return transformIRExpr(e, done_something); }
@@ -144,8 +144,8 @@ protected:
 	virtual StateMachineNoCrash *transformOneState(StateMachineNoCrash *,
 						       bool *)
 	{ return NULL; }
-	virtual StateMachineStub *transformOneState(StateMachineStub *s,
-						    bool *done_something)
+	virtual StateMachineStub *transformOneState(StateMachineStub *,
+						    bool *)
 	{ return NULL; }
 	virtual StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
 							     bool *done_something)
@@ -177,8 +177,8 @@ protected:
 			return NULL;
 		}
 	}
-	virtual StateMachineNdChoice *transformOneState(StateMachineNdChoice *s,
-							bool *done_something)
+	virtual StateMachineNdChoice *transformOneState(StateMachineNdChoice *,
+							bool *)
 	{
 		return NULL;
 	}
@@ -196,7 +196,7 @@ public:
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
 void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out);
 class MemoryAccessIdentifierAllocator;
-StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr,
+StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip,
 				    MemoryAccessIdentifierAllocator &);
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
@@ -226,8 +226,7 @@ void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
 class FixConsumer;
 void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
-				     VexPtr<MachineState> &ms,
-				     VexPtr<Thread> &thr,
+				     unsigned tid,
 				     VexPtr<Oracle> &oracle,
 				     FixConsumer &df,
 				     GarbageCollectionToken token);

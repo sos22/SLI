@@ -9,7 +9,6 @@ namespace ProximalCause {
 
 static StateMachineState *
 getProximalCause(MachineState *ms, const ThreadRip &rip,
-		 Thread *thr,
 		 MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier)
 {
 	IRSB *irsb;
@@ -219,8 +218,8 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 }
 
 StateMachineState *
-getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr,
+getProximalCause(MachineState *ms, const ThreadRip &rip,
 		 MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier)
 {
-	return ProximalCause::getProximalCause(ms, rip, thr, getMemoryAccessIdentifier);
+	return ProximalCause::getProximalCause(ms, rip, getMemoryAccessIdentifier);
 }

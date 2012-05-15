@@ -1,4 +1,5 @@
 #include <sys/fcntl.h>
+#include <err.h>
 #include <unistd.h>
 
 #include "sli.h"
@@ -9,6 +10,9 @@
 int
 main(int argc, char *argv[])
 {
+	if (argc < 1)
+		errx(1, "need to know where to read the state machine from");
+
 	init_sli();
 
 	VexPtr<Oracle> oracle(new Oracle(NULL, NULL, NULL));

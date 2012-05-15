@@ -3,7 +3,7 @@
 #include "offline_analysis.hpp"
 
 void
-zapBindersAndFreeVariables(StateMachine *sm)
+zapBindersAndFreeVariables(StateMachine *)
 {
 }
 

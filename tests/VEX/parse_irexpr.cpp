@@ -14,11 +14,14 @@ static void log_bytes(const char *buf, Int nbytes)
 	fwrite(buf, nbytes, 1, stdout);
 }
 
-void dbg_break(const char *msg, ...) {}
+void dbg_break(const char *msg __attribute__((unused)), ...) {}
 
 int
 main(int argc, char *argv[])
 {
+	if (argc < 1)
+		errx(1, "need something to parse!");
+
 	VexControl vcon;
 	IRExpr *ir;
 

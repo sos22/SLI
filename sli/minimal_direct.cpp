@@ -33,7 +33,7 @@ public:
 
 void
 DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
-		    GarbageCollectionToken token)
+		    GarbageCollectionToken )
 {
 	__set_profiling(dumpfix);
 
@@ -80,8 +80,7 @@ static TimeoutTimer timeoutTimer;
 
 static void
 consider_rip(const DynAnalysisRip &my_rip,
-	     VexPtr<MachineState> &ms,
-	     VexPtr<Thread> &thr,
+	     unsigned tid,
 	     VexPtr<Oracle> &oracle,
 	     DumpFix &df,
 	     FILE *timings,
@@ -99,7 +98,7 @@ consider_rip(const DynAnalysisRip &my_rip,
 	struct timeval start;
 	gettimeofday(&start, NULL);
 
-	checkWhetherInstructionCanCrash(my_rip, ms, thr, oracle, df, token);
+	checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, token);
 
 	struct timeval end;
 	gettimeofday(&end, NULL);
@@ -133,11 +132,12 @@ main(int argc, char *argv[])
 
 	__set_profiling(root);
 
-	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
-	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
 	VexPtr<Oracle> oracle;
-
-	oracle = new Oracle(ms, thr, argv[2]);
+	{
+		MachineState *ms = MachineState::readELFExec(argv[1]);
+		Thread *thr = ms->findThread(ThreadId(1));
+		oracle = new Oracle(ms, thr, argv[2]);
+	}
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
 	FILE *output = fopen("generated_patch.c", "w");
@@ -155,7 +155,7 @@ main(int argc, char *argv[])
 		DynAnalysisRip vr;
 		const char *succ;
 		if (parseDynAnalysisRip(&vr, argv[4], &succ)) {
-			consider_rip(vr, ms, thr, oracle, df, NULL, ALLOW_GC);
+			consider_rip(vr, 1, oracle, df, NULL, ALLOW_GC);
 			df.finish();
 			return 0;
 		}
@@ -199,7 +199,7 @@ main(int argc, char *argv[])
 		printf("Considering %s, log logs/%ld\n", dar.name(), cntr + start_instr);
 		fprintf(_logfile, "Log for %s:\n", dar.name());
 		cntr++;
-		consider_rip(dar, ms, thr, oracle, df, timings, ALLOW_GC);
+		consider_rip(dar, 1, oracle, df, timings, ALLOW_GC);
 		fclose(_logfile);
 		_logfile = stdout;
 
