@@ -218,6 +218,8 @@ StateMachine *availExpressionAnalysis(StateMachine *sm,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt);
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
+StateMachine *useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
+				    Oracle *oracle, bool *done_something);
 
 void breakCycles(StateMachine *);
 
