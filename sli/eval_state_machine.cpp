@@ -1524,8 +1524,38 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 			   an interesting race.  Pick a
 			   non-deterministic interleaving. */
 			std::vector<StateMachineState *> possible;
+
+			/* There are three interesting possibilities here:
+
+			   -- The two addresses don't alias at all.
+			   -- The two addresses do match, and the
+			      probe machine goes first.
+			   -- The two addresses do match, and the
+			      store machine goes first.
+
+			   In the first case, it really doesn't matter
+			   which order we issue the operations in, so
+			   we arbitrarily decide that the probe
+			   machine goes first.  That means we can
+			   treat that case as basically the same as
+			   the second one, and it's given the same
+			   state.  In the final case we assert that
+			   the addresses do match and then advance the
+			   store machine. */
 			possible.push_back(advanceProbeMachine(crossState, pendingRelocs, true));
-			possible.push_back(advanceStoreMachine(crossState, pendingRelocs));
+			StateMachineState *s = advanceStoreMachine(crossState, pendingRelocs);
+			possible.push_back(
+				new StateMachineSideEffecting(
+					s->origin,
+					new StateMachineSideEffectAssertFalse(
+						IRExpr_Unop(
+							Iop_Not1, /* Remember, it's assertfalse,
+								     so need to invert the condition. */
+							IRExpr_Binop(
+								Iop_CmpEQ64,
+								probe_effect->addr,
+								store_effect->addr))),
+					s));
 			newState = new StateMachineNdChoice(VexRip(), possible);
 		}
 		results[r.second] = newState;
