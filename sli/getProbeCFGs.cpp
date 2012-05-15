@@ -25,12 +25,6 @@ debug_dump(const CFGNode *n)
 	printCFG(n, "\t", stdout);
 }
 
-static void
-debug_dump(int x)
-{
-	printf("%d", x);
-}
-
 template <typename k, typename v> static void
 debug_dump(const std::map<k, v> &what, const char *prefix)
 {
