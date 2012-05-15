@@ -273,7 +273,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		     VexPtr<Oracle> &oracle,
 		     bool noExtendContext,
 		     bool is_ssa,
-		     GarbageCollectionToken token)
+		     GarbageCollectionToken token,
+		     bool *progress)
 {
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck();
@@ -317,6 +318,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		if (is_ssa)
 			sm = optimiseSSA(sm, &done_something);
 		sm = sm->optimise(opt, oracle, &done_something);
+		if (progress)
+			*progress |= done_something;
 	} while (done_something);
 	sm->sanityCheck();
 	if (is_ssa)
@@ -843,6 +846,27 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	return foundRace;
 }
 
+static StateMachine *
+duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
+{
+	struct : public StateMachineTransformer {
+		StateMachineSideEffecting *transformOneState(
+			StateMachineSideEffecting *a, bool *done_something)
+		{
+			if (a->sideEffect && a->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+				*done_something = true;
+				return new StateMachineSideEffecting(a->origin, NULL, a->target);
+			} else {
+				return NULL;
+			}
+		}
+		IRExpr *transformIRExpr(IRExpr *e, bool *d) {
+			return NULL;
+		}
+	} doit;
+	return doit.transform(inp, done_something);
+}
+
 CrashSummary *
 diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<Oracle> &oracle,
@@ -858,7 +882,32 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	fprintf(_logfile, "\n");
 
 	std::set<DynAnalysisRip> potentiallyConflictingStores;
-	getConflictingStores(probeMachine, oracle, potentiallyConflictingStores);
+	{
+		/* If the only reason a load is live is to evaluate a
+		   later assertion, it doesn't count for the purposes
+		   of computing potentiallyConflictingStores.  The
+		   easy way of dealing with that is just to remove
+		   them and then re-optimise the machine. */
+		VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
+		/* Iterate to make sure we get rid of any assertions
+		   introduced by the optimiser itself. */
+		while (!TIMEOUT) {
+			bool done_something = false;
+			reducedProbeMachine = duplicateStateMachineNoAssertions(reducedProbeMachine, &done_something);
+			if (!done_something)
+				break;
+			done_something = false;
+			reducedProbeMachine = optimiseStateMachine(
+				reducedProbeMachine,
+				optIn.enableignoreSideEffects().enablenoExtend(),
+				oracle, true, true, token, &done_something);
+			if (!done_something)
+				break;
+		}
+		if (TIMEOUT)
+			return NULL;
+		getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
+	}
 	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 		return NULL;

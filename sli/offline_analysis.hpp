@@ -203,7 +203,8 @@ StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   VexPtr<Oracle> &oracle,
 				   bool noExtendContext,
 				   bool is_ssa,
-				   GarbageCollectionToken token);
+				   GarbageCollectionToken token,
+				   bool *progress = NULL);
 
 /* Individual optimisation passes. */
 void removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
