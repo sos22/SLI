@@ -59,7 +59,7 @@ physicallyEqual(const IRCallee *a, const IRCallee *b)
 	return a->addr == b->addr;
 }
 
-static bool
+bool
 physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 {
 	if (_a == _b)
@@ -74,6 +74,9 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 #define footer() }
 	hdr(Get)
 		return threadAndRegister::fullEq(a->reg, b->reg) && a->ty == b->ty;
+	footer()
+	hdr(FreeVariable)
+		return a->id == b->id && a->ty == b->ty;
 	footer()
 	hdr(GetI)
 		return a->bias == b->bias &&
@@ -144,9 +147,6 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 				return false;
 		return true;
 	footer()
-	hdr(FreeVariable)
-		return a->key == b->key;
-	footer()
 	hdr(ClientCall)
 		if (a->calledRip != b->calledRip ||
 		    a->callSite != b->callSite)
@@ -173,6 +173,11 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 		return a->before == b->before &&
 			a->after == b->after;
 	footer()
+	hdr(Phi)
+		return threadAndRegister::partialEq(a->reg, b->reg) &&
+		        a->generations == b->generations &&
+		        a->ty == b->ty;
+	footer()
 #undef footer
 #undef hdr
 	}
@@ -184,9 +189,7 @@ optimise_condition_calculation(
 	IRExpr *_cond,
 	IRExpr *cc_op,
 	IRExpr *dep1,
-	IRExpr *dep2,
-	IRExpr *ndep,
-	const AllowableOptimisations &opt)
+	IRExpr *dep2)
 {
 	unsigned long cond;
 	IRExpr *res;
@@ -365,7 +368,7 @@ _sortIntegers(t a, t b)
 }
 
 static sort_ordering
-_sortIRConsts(IRConst *a, IRConst *b)
+_sortIRConsts(const IRConst *a, const IRConst *b)
 {
 	if (a->tag < b->tag)
 		return less_than;
@@ -388,15 +391,46 @@ _sortIRConsts(IRConst *a, IRConst *b)
 	abort();
 }
 
-/* Simple sort function: constants go at the front, and then
-   everything goes afterwards.  We arrange that identical expressions
-   are always sorted together.  Returns true if @a should be before
-   @b. */
+static bool
+isEqualityTest(const IRExpr *a)
+{
+	if (a->tag != Iex_Binop)
+		return false;
+	const IRExprBinop *ab = (const IRExprBinop *)a;
+	return (ab->op >= Iop_CmpEQ8 && ab->op <= Iop_CmpEQ64) ||
+		ab->op == Iop_CmpEQ1;
+}
+
+static bool
+isVariableLike(const IRExpr *a)
+{
+	return a->tag == Iex_Get || a->tag == Iex_Load ||
+		a->tag == Iex_ClientCall ||
+		a->tag == Iex_ClientCallFailed;
+}
+
+/* Simple sort function.  Ordering looks like this:
+
+   Constants
+   Equality tests
+   Other boolean expressions
+   Variable-like expressions:
+     Registers and temporaries
+     Loads
+     Call expressions
+     Failed call expressions
+   Everything else.
+
+   We arrange that equal expressions are always sorted together.
+   Returns true if @a should be before @b. */
 static sort_ordering
-_sortIRExprs(IRExpr *_a, IRExpr *_b)
+_sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 {
 	if (_a == _b)
 		return equal_to;
+
+	sort_ordering s;
+
 	if (_a->tag == Iex_Const && _b->tag == Iex_Const) {
 		IRExprConst *a = (IRExprConst *)_a;
 		IRExprConst *b = (IRExprConst *)_b;
@@ -406,12 +440,36 @@ _sortIRExprs(IRExpr *_a, IRExpr *_b)
 		return less_than;
 	if (_b->tag == Iex_Const)
 		return greater_than;
-	if (_a->tag < _b->tag)
-		return less_than;
-	if (_a->tag > _b->tag)
-		return greater_than;
+	{
+		bool a_is_eq_test = isEqualityTest(_a);
+		bool b_is_eq_test = isEqualityTest(_b);
+		if (a_is_eq_test && !b_is_eq_test)
+			return less_than;
+		if (b_is_eq_test && !a_is_eq_test)
+			return greater_than;
+	}
+	{
+		IRType a_type = _a->type();
+		IRType b_type = _b->type();
+		if (a_type == Ity_I1 && b_type != Ity_I1)
+			return less_than;
+		if (b_type == Ity_I1 && a_type != Ity_I1)
+			return greater_than;
+	}
+	{
+		bool a_is_var_like = isVariableLike(_a);
+		bool b_is_var_like = isVariableLike(_b);
+		if (a_is_var_like && !b_is_var_like)
+			return less_than;
+		if (b_is_var_like && !a_is_var_like)
+			return greater_than;
+	}
 
-	sort_ordering s;
+	/* None of the special rules fired -> use fallback
+	 * ordering. */
+	s = _sortIntegers(_a->tag, _b->tag);
+	if (s != equal_to)
+		return s;
 
 	switch (_a->tag) {
 #define hdr1(t)								\
@@ -428,6 +486,11 @@ _sortIRExprs(IRExpr *_a, IRExpr *_b)
 			return equal_to;
 	hdr(GetI)
 		return _sortIRExprs(a->ix, b->ix);
+	hdr(FreeVariable)
+		if ((s = _sortIntegers(a->id, b->id)) != equal_to)
+			return s;
+		else
+			return _sortIntegers(a->ty, b->ty);
 	hdr(Qop)
 		if (a->op < b->op)
 			return less_than;
@@ -457,10 +520,22 @@ _sortIRExprs(IRExpr *_a, IRExpr *_b)
 			return less_than;
 		if (a->op > b->op)
 			return greater_than;
-		if ((s = _sortIRExprs(a->arg1, b->arg1)) != equal_to)
-			return s;
-		else
-			return _sortIRExprs(a->arg2, b->arg2);
+		/* Special case: if we're comparing two equality
+		   tests, and both have a constant on the LHS, sort on
+		   the RHS.  Otherwise, we'd sort on the value of the
+		   constant, which is a bit useless. */
+		if (a->op >= Iop_CmpEQ8 && a->op <= Iop_CmpEQ64 &&
+		    a->arg1->tag == Iex_Const && b->arg1->tag == Iex_Const) {
+			if ((s = _sortIRExprs(a->arg2, b->arg2)) != equal_to)
+				return s;
+			else
+				return _sortIRExprs(a->arg1, b->arg1);
+		} else {
+			if ((s = _sortIRExprs(a->arg1, b->arg1)) != equal_to)
+				return s;
+			else
+				return _sortIRExprs(a->arg2, b->arg2);
+		}
 	hdr(Unop)
 		if (a->op < b->op)
 			return less_than;
@@ -516,8 +591,6 @@ _sortIRExprs(IRExpr *_a, IRExpr *_b)
 			x++;
 		}
 	}
-	hdr(FreeVariable)
-		return _sortIntegers(a->key, b->key);
 	hdr(ClientCall)
 		if (a->callSite < b->callSite)
 			return less_than;
@@ -535,17 +608,31 @@ _sortIRExprs(IRExpr *_a, IRExpr *_b)
 		}
 	hdr(ClientCallFailed)
 		return _sortIRExprs(a->target,
-				   b->target);
+				    b->target);
 	hdr(HappensBefore)
 		if ((s = _sortIntegers(a->before, b->before)) != equal_to)
 			return s;
 	        return _sortIntegers(a->after, b->after);
-	}
+
+	hdr(Phi)
+		if (threadAndRegister::partialCompare()(a->reg, b->reg))
+			return less_than;
+		if (threadAndRegister::partialCompare()(b->reg, a->reg))
+			return greater_than;
+	        if ((s = _sortIntegers(a->ty, b->ty)) != equal_to)
+			return s;
+		for (unsigned x = 0; x < a->generations.size() && x < b->generations.size(); x++) {
+			if ((s = _sortIntegers(a->generations[x], b->generations[x])) != equal_to)
+				return equal_to;
+		}
+		return _sortIntegers(a->generations.size(),
+				     b->generations.size());
 #undef hdr
 	}
-
+        }
 	abort();
 }
+
 void
 addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg)
 {
@@ -590,7 +677,11 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 	e->sanity_check();
 #endif
 	progress = false;
-	e = optimiseIRExpr(e, opt, &progress);
+	IRExpr *e2;
+	e2 = optimiseIRExpr(e, opt, &progress);
+	if (e2 != e)
+		progress = true;
+	e = e2;
 	if (progress) {
 		*done_something = true;
 		while (progress) {
@@ -601,7 +692,10 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 				return e;
 			}
 			progress = false;
-			e = optimiseIRExpr(e, opt, &progress);
+			e2 = optimiseIRExpr(e, opt, &progress);
+			if (e2 != e)
+				progress = true;
+			e = e2;
 		}
 	}
 	e->optimisationsApplied |= opt.asUnsigned();
@@ -618,7 +712,7 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 	return e;
 }
 
-template <bool ordering(IRExpr *, IRExpr *)> static void
+template <bool ordering(const IRExpr *, const IRExpr *)> static void
 performInsertion(IRExpr **list, int nr_items, IRExpr *newItem)
 {
         /* Linear scan to find the place to insert.  Could use a
@@ -635,7 +729,7 @@ performInsertion(IRExpr **list, int nr_items, IRExpr *newItem)
         list[idx] = newItem;
 }
 
-template <bool ordering(IRExpr *, IRExpr *)> static void
+template <bool ordering(const IRExpr *, const IRExpr *)> static void
 _sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 {
         /* All indexes [0, first_unsorted) are definitely already sorted */
@@ -657,39 +751,72 @@ _sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 }
 
 static sort_ordering
-_cnf_disjunction_sort(IRExpr *a, IRExpr *b)
+_arith_addition_sort(const IRExpr *a1, const IRExpr *b1)
+{
+	/* Strip off Iop_Neg operators when sorting addition
+	   associative operations, which helps a bit with
+	   normalisation. */
+	const IRExpr *a = a1, *b = b1;
+	bool inv_a = false;
+	bool inv_b = false;
+
+	while (a->tag == Iex_Unop) {
+		const IRExprUnop *ua = (IRExprUnop *)a;
+		if (ua->op < Iop_Neg8 || ua->op > Iop_Neg64)
+			break;
+		inv_a = !inv_a;
+		a = ua->arg;
+	}
+	while (b->tag == Iex_Unop) {
+		const IRExprUnop *ub = (IRExprUnop *)b;
+		if (ub->op < Iop_Neg8 || ub->op > Iop_Neg64)
+			break;
+		inv_b = !inv_b;
+		b = ub->arg;
+	}
+	sort_ordering order = _sortIRExprs(a, b);
+	if (order == equal_to)
+		return _sortIntegers(inv_b, inv_a);
+	else
+		return order;
+}
+
+static sort_ordering
+_cnf_disjunction_sort(const IRExpr *a1, const IRExpr *b1)
 {
 	/* The disjunction order is essentially the same as the normal
 	   sortIRExprs order, except that we strip off leading
 	   Iop_Not1 operations, so that A and ~A always sort together,
 	   and then do a little bit extra so that ~A is always after
 	   A. */
+	const IRExpr *a = a1;
+	const IRExpr *b = b1;
 	bool inv_a = false;
 	bool inv_b = false;
 	while (a->tag == Iex_Unop) {
-		IRExprUnop *ua = (IRExprUnop *)a;
+		const IRExprUnop *ua = (IRExprUnop *)a;
 		if (ua->op != Iop_Not1)
 			break;
-		inv_a = true;
+		inv_a = !inv_a;
 		a = ua->arg;
 	}
 	while (b->tag == Iex_Unop) {
-		IRExprUnop *ub = (IRExprUnop *)b;
+		const IRExprUnop *ub = (IRExprUnop *)b;
 		if (ub->op != Iop_Not1)
 			break;
-		inv_b = true;
+		inv_b = !inv_b;
 		b = ub->arg;
 	}
 	sort_ordering order = _sortIRExprs(a, b);
 	if (order == equal_to) {
 		return _sortIntegers(inv_a, inv_b);
 	} else {
-		return order;
+		return _sortIRExprs(a1, b1);
 	}
 }
 
 static sort_ordering
-_cnf_conjunction_sort(IRExpr *a, IRExpr *b)
+_cnf_conjunction_sort(const IRExpr *a, const IRExpr *b)
 {
 	/* Conjunction ordering treats every argument as an Iop_Or1
 	   disjunction (if it isn't one already, we treat it as a
@@ -709,7 +836,7 @@ _cnf_conjunction_sort(IRExpr *a, IRExpr *b)
 	   relation, the second two as the size relation, and the
 	   final one as the dictionary relation.
 	*/
-	IRExprAssociative *ae, *be;
+	const IRExprAssociative *ae, *be;
 	ae = NULL;
 	be = NULL;
 	if (a->tag == Iex_Associative) {
@@ -837,19 +964,24 @@ _cnf_conjunction_sort(IRExpr *a, IRExpr *b)
 /* These are only non-static because they're used as template
  * arguments; sigh. */
 bool
-sortIRExprs(IRExpr *a, IRExpr *b)
+sortIRExprs(const IRExpr *a, const IRExpr *b)
 {
 	return _sortIRExprs(a, b) == less_than;
 }
 bool
-cnf_disjunction_sort(IRExpr *a, IRExpr *b)
+cnf_disjunction_sort(const IRExpr *a, const IRExpr *b)
 {
 	return _cnf_disjunction_sort(a, b) == less_than;
 }
 bool
-cnf_conjunction_sort(IRExpr *a, IRExpr *b)
+cnf_conjunction_sort(const IRExpr *a, const IRExpr *b)
 {
 	return _cnf_conjunction_sort(a, b) == less_than;
+}
+bool
+arith_addition_sort(const IRExpr *a, const IRExpr *b)
+{
+	return _arith_addition_sort(a, b) == less_than;
 }
 
 static void
@@ -873,6 +1005,8 @@ sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 		_sortAssociativeArguments<cnf_disjunction_sort>(ae, done_something);
 	else if (ae->op == Iop_And1)
 		_sortAssociativeArguments<cnf_conjunction_sort>(ae, done_something);
+	else if (ae->op >= Iop_Add8 && ae->op <= Iop_Add64)
+		_sortAssociativeArguments<arith_addition_sort>(ae, done_something);
 	else
 		_sortAssociativeArguments<sortIRExprs>(ae, done_something);
 }
@@ -881,9 +1015,9 @@ sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
  * only care about the case where @a and @b are CNF disjunctions
  * here. */
 static bool
-isCnfSubset(IRExpr *a, IRExpr *b)
+isCnfSubset(const IRExpr *a, const IRExpr *b)
 {
-	IRExprAssociative *a_disjunct, *b_disjunct;
+	const IRExprAssociative *a_disjunct, *b_disjunct;
 top:
 	a_disjunct = NULL;
 	if (a->tag == Iex_Associative) {
@@ -968,12 +1102,12 @@ top2:
    and with fairly high probability @iex is a CNF disjunction.
    Optimise under that assumption. */
 static IRExpr *
-optimiseAssuming(IRExpr *iex, IRExpr *assumption, bool *done_something)
+optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 {
 	bool invertAssumption;
 	invertAssumption = false;
 	if (assumption->tag == Iex_Unop) {
-		IRExprUnop *u = (IRExprUnop *)assumption;
+		const IRExprUnop *u = (IRExprUnop *)assumption;
 		if (u->op == Iop_Not1) {
 			assumption = u->arg;
 			invertAssumption = true;
@@ -985,7 +1119,7 @@ optimiseAssuming(IRExpr *iex, IRExpr *assumption, bool *done_something)
 		return IRExpr_Const(IRConst_U1(invertAssumption ? 0 : 1));
 	}
 	if (iex->tag == Iex_Unop) {
-		IRExprUnop *u = (IRExprUnop *)iex;
+		const IRExprUnop *u = (IRExprUnop *)iex;
 		if (u->op == Iop_Not1 &&
 		    _sortIRExprs(u->arg, assumption) == equal_to) {
 			*done_something = true;
@@ -1141,9 +1275,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					e->args[0],
 					e->args[1],
 					e->args[2],
-					e->args[3],
-					e->args[4],
-					opt);
+					e->args[3]);
 			}
 			return res;
 		}
@@ -1367,6 +1499,24 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				}
 			}
 
+			if (e->op == Iop_Or1) {
+				for (int idx1 = 0; idx1 < e->nr_arguments - 1; idx1++)
+					for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; idx2++)
+						e->contents[idx2] = rewriteBoolean(e->contents[idx1],
+										   false,
+										   e->contents[idx2],
+										   done_something);
+			}
+
+			if (e->op == Iop_And1) {
+				for (int idx1 = 0; idx1 < e->nr_arguments - 1; idx1++)
+					for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; idx2++)
+						e->contents[idx2] = rewriteBoolean(e->contents[idx1],
+										   true,
+										   e->contents[idx2],
+										   done_something);
+			}
+
 			/* x + -x -> 0, for any plus-like operator, so remove
 			 * both x and -x from the list. */
 			/* Also do x & ~x -> 0, x ^ x -> 0, while we're here. */
@@ -1419,34 +1569,47 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 							if (purge) {
 								*done_something = true;
+								IRConst *result;
+								switch (e->op) {
+								case Iop_And8:
+								case Iop_Xor8:
+								case Iop_Add8:
+									result = IRConst_U8(0);
+									break;
+								case Iop_And16:
+								case Iop_Xor16:
+								case Iop_Add16:
+									result = IRConst_U16(0);
+									break;
+								case Iop_And32:
+								case Iop_Xor32:
+								case Iop_Add32:
+									result = IRConst_U32(0);
+									break;
+								case Iop_And64:
+								case Iop_Xor64:
+								case Iop_Add64:
+									result = IRConst_U64(0);
+									break;
+								case Iop_And1:
+									result = IRConst_U1(0);
+									break;
+								default:
+									abort();
+								}
 								if (and_like) {
 									/* x & ~x -> 0 and eliminates the entire expression. */
-									switch (e->op) {
-									case Iop_And8:
-										return IRExpr_Const(IRConst_U8(0));
-									case Iop_And16:
-										return IRExpr_Const(IRConst_U16(0));
-									case Iop_And32:
-										return IRExpr_Const(IRConst_U32(0));
-									case Iop_And64:
-										return IRExpr_Const(IRConst_U64(0));
-									case Iop_And1:
-										return IRExpr_Const(IRConst_U1(0));
-									default:
-										abort();
-									}
+									return IRExpr_Const(result);
 								}
 
 								/* Careful: do the largest index first so that the
 								   other index remains valid. */
 								if (it1 < it2) {
 									purgeAssocArgument(e, it2);
-									e->contents[it1] =
-										IRExpr_Const(IRConst_U64(0));
+									e->contents[it1] = IRExpr_Const(result);
 								} else {
 									purgeAssocArgument(e, it1);
-									e->contents[it2] =
-										IRExpr_Const(IRConst_U64(0));
+									e->contents[it2] = IRExpr_Const(result);
 								}
 								break;
 							}
@@ -1931,6 +2094,59 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 			}
 
+			/* Another special case: if we have k == -X +
+			   Y then we turn it into -k == X + -Y
+			   (i.e. normalise so that the leading term of
+			   additions isn't negated, if possible). */
+			if (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64 &&
+			    l->tag == Iex_Const && r->tag == Iex_Associative) {
+				IRExprAssociative *ra = (IRExprAssociative *)r;
+				if (ra->op >= Iop_Add8 && ra->op <= Iop_Add64 &&
+				    ra->nr_arguments > 0 &&
+				    ra->contents[0]->tag == Iex_Unop) {
+					IRExprUnop *leader = (IRExprUnop *)ra->contents[0];
+					if (leader->op >= Iop_Neg8 && leader->op <= Iop_Neg64) {
+						/* Do it */
+						IRExprAssociative *new_r = new IRExprAssociative(*ra);
+						for (int i = 0; i < new_r->nr_arguments; i++) {
+							IRExpr *a = new_r->contents[i];
+							if (a->tag == Iex_Unop &&
+							    ((IRExprUnop *)a)->op == leader->op)
+								new_r->contents[i] = ((IRExprUnop *)a)->arg;
+							else
+								new_r->contents[i] =
+									IRExpr_Unop(
+										leader->op,
+										a);
+						}
+						IRConst *new_l;
+						IRConst *lc = ((IRExprConst *)l)->con;
+						switch (e->op) {
+						case Iop_CmpEQ8:
+							new_l = IRConst_U8(
+								-lc->Ico.U8);
+							break;
+						case Iop_CmpEQ16:
+							new_l = IRConst_U16(
+								-lc->Ico.U16);
+							break;
+						case Iop_CmpEQ32:
+							new_l = IRConst_U32(
+								-lc->Ico.U32);
+							break;
+						case Iop_CmpEQ64:
+							new_l = IRConst_U64(
+								-lc->Ico.U64);
+							break;
+						default:
+							abort();
+						}
+						l = e->arg1 = IRExpr_Const(new_l);
+						r = e->arg2 = new_r;
+						*done_something = true;
+					}
+				}
+			}
 			/* 0 == x -> !x if we're at the type U1. 1 == x is just x. */
 			if (e->op == Iop_CmpEQ1 &&
 			    l->tag == Iex_Const) {
@@ -1938,6 +2154,23 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return r;
 				else
 					return IRExpr_Unop(Iop_Not1, r);
+			}
+			/* Slight generalisation of that:
+			   0:X == 1UtoX(x) -> !x for any type X, and
+			   1:X == 1UtoX(x) -> x */
+			if (l->tag == Iex_Const &&
+			    e->op >= Iop_CmpEQ8 &&
+			    e->op <= Iop_CmpEQ64 &&
+			    r->tag == Iex_Unop &&
+			    ((IRExprUnop *)r)->op >= Iop_1Uto8 &&
+			    ((IRExprUnop *)r)->op <= Iop_1Uto64) {
+				IRExprConst *lc = (IRExprConst *)l;
+				IRExprUnop *ru = (IRExprUnop *)r;
+				*done_something = true;
+				if (lc->con->Ico.U1)
+					return ru->arg;
+				else
+					return IRExpr_Unop(Iop_Not1, ru->arg);
 			}
 
 			/* And another one: -x == c -> x == -c if c is a constant. */
@@ -1956,7 +2189,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			   in the sense that it doesn't alias with any global
 			   variables, and is therefore never equal to any
 			   constants which are present in the machine code. */
-			if (opt.assumePrivateStack &&
+			if (opt.assumePrivateStack() &&
 			    e->op == Iop_CmpEQ64 &&
 			    r->tag == Iex_Get &&
 			    !((IRExprGet *)r)->reg.isTemp() &&
@@ -2057,6 +2290,60 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			return res;
 		}
 
+		IRExpr *rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something) {
+			struct : public IRExprTransformer {
+				IRExpr *from;
+				bool to;
+				IRExpr *_to;
+				IRExpr *rewriteFrom;
+				IRExpr *rewriteTo;
+				IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+					if (physicallyEqual(e, from)) {
+						if (!_to)
+							_to = IRExpr_Const(IRConst_U1(to));
+						*done_something = true;
+						return _to;
+					}
+					if (rewriteFrom && physicallyEqual(e, rewriteFrom)) {
+						*done_something = true;
+						return rewriteTo;
+					}
+					return IRExprTransformer::transformIRExpr(e, done_something);
+				}
+			} doit;
+			if (expr->tag == Iex_Unop) {
+				IRExprUnop *e = (IRExprUnop *)expr;
+				if (e->op == Iop_Not1) {
+					val = !val;
+					expr = e->arg;
+				}
+			}
+			doit.from = expr;
+			doit.to = val;
+			doit._to = NULL;
+			doit.rewriteFrom = NULL;
+			doit.rewriteTo = NULL;
+			if (val && expr->tag == Iex_Binop) {
+				IRExprBinop *ieb = (IRExprBinop *)expr;
+				if (ieb->op >= Iop_CmpEQ8 &&
+				    ieb->op <= Iop_CmpEQ64) {
+					/* CmpEQ is always sorted so
+					   that the thing on the left
+					   is before the thing on the
+					   right in the expression
+					   sort order.  That tends to
+					   mean that the thing on the
+					   left is simpler than the
+					   thing on the right, so
+					   rewriting from right to
+					   left is generally
+					   worthwhile. */
+					doit.rewriteFrom = ieb->arg2;
+					doit.rewriteTo = ieb->arg1;
+				}
+			}
+			return doit.doit(inp, done_something);
+		}
 		IRExpr *transformIex(IRExprMux0X *e) {
 			hdr(Mux0X)
 			if (e->cond->tag == Iex_Const) {
@@ -2066,6 +2353,181 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				else
 					return e->expr0;
 			}
+
+			if (_sortIRExprs(e->exprX, e->expr0) == equal_to) {
+				*done_something = true;
+				return e->exprX;
+			}
+
+			if (e->type() == Ity_I1) {
+				/* If we're working at boolean type
+				   then the whole thing turns into a
+				   sequence of boolean operations. */
+				*done_something = true;
+				return IRExpr_Binop(
+					Iop_Or1,
+					IRExpr_Binop(
+						Iop_And1,
+						IRExpr_Unop(
+							Iop_Not1,
+							e->cond),
+						e->expr0),
+					IRExpr_Binop(
+						Iop_And1,
+						e->cond,
+						e->exprX));
+			}
+
+			if (e->exprX->tag == Iex_Associative &&
+			    e->expr0->tag == Iex_Associative &&
+			    ((IRExprAssociative *)e->exprX)->op ==
+			    ((IRExprAssociative *)e->expr0)->op) {
+				IRExprAssociative *eX = (IRExprAssociative *)e->exprX;
+				IRExprAssociative *e0 = (IRExprAssociative *)e->expr0;
+				IROp op = eX->op;
+				if ((op >= Iop_Add8 && op <= Iop_Add64) ||
+				    (op >= Iop_And8 && op <= Iop_And64) ||
+				    (op >= Iop_Or8 && op <= Iop_Or64)) {
+					/* Factorise the expression.  If we
+					   have Mux0X(a, b + c, b + d),
+					   we can turn that into
+					   b + Mux0X(a, c, d). */
+					/* We take advantage of the
+					   fact that the operators are
+					   all commutative and that
+					   they're therefore
+					   sorted. */
+					int idx_x = 0;
+					int idx_0 = 0;
+					int nr_dupes = 0;
+					while (idx_x < eX->nr_arguments &&
+					       idx_0 < e0->nr_arguments) {
+						sort_ordering s = _sortIRExprs(eX->contents[idx_x],
+									       e0->contents[idx_0]);
+						if (s == less_than) {
+							idx_x++;
+						} else if (s == greater_than) {
+							idx_0++;
+						} else {
+							nr_dupes++;
+							idx_x++;
+							idx_0++;
+						}
+					}
+					if (nr_dupes != 0) {
+						*done_something = true;
+						IRExprAssociative *newRoot =
+							IRExpr_Associative(nr_dupes + 1,
+									   op);
+						IRExprAssociative *newX =
+							IRExpr_Associative(
+								eX->nr_arguments - nr_dupes,
+								eX->op);
+						IRExprAssociative *new0 =
+							IRExpr_Associative(
+								e0->nr_arguments - nr_dupes,
+								e0->op);
+						int idx_out;
+						int idx_x_out;
+						int idx_0_out;
+
+						idx_x = 0;
+						idx_0 = 0;
+						idx_x_out = 0;
+						idx_0_out = 0;
+						idx_out = 0;
+						while (idx_x < eX->nr_arguments &&
+						       idx_0 < e0->nr_arguments) {
+							sort_ordering s = _sortIRExprs(eX->contents[idx_x],
+										       e0->contents[idx_0]);
+							if (s == less_than) {
+								newX->contents[idx_x_out] =
+									eX->contents[idx_x];
+								idx_x++;
+								idx_x_out++;
+							} else if (s == greater_than) {
+								new0->contents[idx_0_out] =
+									e0->contents[idx_0];
+								idx_0++;
+								idx_0_out++;
+							} else {
+								newRoot->contents[idx_out] =
+									e0->contents[idx_0];
+								idx_0++;
+								idx_x++;
+								idx_out++;
+							}
+						}
+						while (idx_x < eX->nr_arguments) {
+							newX->contents[idx_x_out] =
+								eX->contents[idx_x];
+							idx_x++;
+							idx_x_out++;
+						}
+						while (idx_0 < e0->nr_arguments) {
+							new0->contents[idx_0_out] =
+								e0->contents[idx_0];
+							idx_0++;
+							idx_0_out++;
+						}
+						assert(idx_0 == e0->nr_arguments);
+						assert(idx_x == eX->nr_arguments);
+						assert(idx_0_out == e0->nr_arguments - nr_dupes);
+						assert(idx_x_out == eX->nr_arguments - nr_dupes);
+						assert(idx_out == nr_dupes);
+						newRoot->contents[idx_out] =
+							IRExpr_Mux0X(
+								e->cond,
+								new0,
+								newX);
+						newRoot->nr_arguments = idx_out + 1;
+						newX->nr_arguments = idx_x_out;
+						new0->nr_arguments = idx_0_out;
+						return newRoot;
+					}
+				}
+			}
+
+
+			if (e->expr0->tag == Iex_Mux0X &&
+			    e->exprX->tag == Iex_Mux0X) {
+				IRExprMux0X *e0 = (IRExprMux0X *)e->expr0;
+				IRExprMux0X *eX = (IRExprMux0X *)e->exprX;
+				if (physicallyEqual(e0->expr0, eX->expr0) &&
+				    physicallyEqual(e0->exprX, eX->exprX)) {
+					/* Rewrite Mux0X(a, Mux0X(b, x, y), Mux0X(c, x, y))
+					   to Mux0X( (!a && !b) || (a && !c), x, y) */
+					*done_something = true;
+					return IRExpr_Mux0X(
+						IRExpr_Binop(
+							Iop_Or1,
+							IRExpr_Binop(
+								Iop_And1,
+								IRExpr_Unop(
+									Iop_Not1,
+									e->cond),
+								IRExpr_Unop(
+									Iop_Not1,
+									e0->cond)),
+							IRExpr_Binop(
+								Iop_And1,
+								e->cond,
+								IRExpr_Unop(
+									Iop_Not1,
+									eX->cond))),
+						e0->expr0,
+						e0->exprX);
+				}
+			}
+
+			return res;
+		}
+
+		IRExpr *transformIex(IRExprPhi *e) {
+			hdr(Phi);
+			if (e->generations.size() == 1)
+				return IRExpr_Get(e->reg.setGen(e->generations[0]),
+						  e->ty);
 			return res;
 		}
 #undef hdr
@@ -2153,33 +2615,29 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 }
 
 bool
-isBadAddress(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
+isBadAddress(IRExpr *e)
 {
 	return e->tag == Iex_Const &&
 		(long)((IRExprConst *)e)->con->Ico.U64 < 4096;
 }
 
 bool
-definitelyUnevaluatable(IRExpr *e, const AllowableOptimisations &opt, Oracle *oracle)
+definitelyUnevaluatable(IRExpr *e)
 {
 	if (TIMEOUT)
 		return false;
 	class _ : public IRExprTransformer {
 	public:
 		bool res;
-		const AllowableOptimisations &opt;
-		Oracle *oracle;
 
 		IRExpr *transformIex(IRExprLoad *e) {
-			if (isBadAddress(e->addr, opt, oracle))
+			if (isBadAddress(e->addr))
 				res = true;
 			return IRExprTransformer::transformIex(e);
 		}
-		_(const AllowableOptimisations &_opt,
-		  Oracle *_oracle)
-			: res(false), opt(_opt), oracle(_oracle)
+		_() : res (false)
 		{}
-	} t(opt, oracle);
+	} t;
 	t.doit(e);
 	return t.res;
 }

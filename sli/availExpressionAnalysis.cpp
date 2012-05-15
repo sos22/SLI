@@ -10,11 +10,10 @@
 #ifdef NDEBUG
 #define dump_avail_table 0 /* Dump the available expression table
 			    * after we build it */
-#define debug_build_table 0 /* Debug to do with building the table */
 #define debug_substitutions 0 /* Debug to do with actually using the
 				 table. */
 #else
-static int dump_avail_table = 0, debug_build_table = 0, debug_substitutions = 0;
+static int dump_avail_table = 0, debug_substitutions = 0;
 #endif
 
 namespace _availExpressionAnalysis {
@@ -91,10 +90,10 @@ public:
 	void clear() { sideEffects.clear(); assertFalse.clear(); _registers.clear(); }
 	void makeFalse(IRExpr *expr, const AllowableOptimisations &opt);
 	void dereference(IRExpr *ptr, const AllowableOptimisations &opt);
-	/* Go through and remove anything which isn't also present in
-	   other.  Returns true if we did anything, and false
-	   otherwise. */
-	bool intersect(const avail_t &other, const AllowableOptimisations &opt);
+	/* Merge @other into the current availability set.  Returns
+	   true if we do anything, and false otherwise. */
+	bool merge(const avail_t &other, const AllowableOptimisations &opt,
+		   bool is_ssa);
 
 	void calcRegisterMap(const AllowableOptimisations &opt);
 
@@ -197,11 +196,76 @@ intersectSets(std::set<a> &x, const std::set<a> &y)
 }
 
 bool
-avail_t::intersect(const avail_t &other, const AllowableOptimisations &opt)
+avail_t::merge(const avail_t &other,
+	       const AllowableOptimisations &opt,
+	       bool is_ssa)
 {
 	bool res;
 
-	res = intersectSets(sideEffects, other.sideEffects);
+	/* The merge rules are a little bit tricky.  The obvious
+	   answer is an intersection, but that's a bit more
+	   conservative than we need, at least for registers.  The
+	   observation is that if a parent doesn't define a register
+	   at all then it must be that if we came from that parent
+	   then we will never use that register, because otherwise
+	   we'd have a use-without-initialisation bug.  Therefore, if
+	   one parent defines a register and the other doesn't, we can
+	   just take the value from whichever parent *does* define it.
+
+	   i.e. the output is the *union* of inputs for
+	   register-defining side effects, unless we have conflicting
+	   definitions for the same register.
+
+	   In SSA form, we can't ever have conflicting definitions for
+	   a single register, because that would violate the SSA
+	   property, so this cunningness is safe in SSA form but not
+	   otherwise. */
+	/* We only do this for copies and phis, since those are the
+	   only ones for which it's safe. */
+	struct {
+		bool operator()(StateMachineSideEffect::sideEffectType t) {
+			return t == StateMachineSideEffect::Copy ||
+				t == StateMachineSideEffect::Phi;
+		}
+	} ssa_cunningness_safe;
+	res = false;
+	if (is_ssa) {
+		for (auto it = other.sideEffects.begin(); it != other.sideEffects.end(); it++) {
+			StateMachineSideEffect *smse = *it;
+			if (ssa_cunningness_safe(smse->type))
+				res |= sideEffects.insert(*it).second;
+		}
+	}
+
+	std::set<StateMachineSideEffect *> newEffectsToIntroduce;
+	auto it1 = sideEffects.begin();
+	auto it2 = other.sideEffects.begin();
+	while (it1 != sideEffects.end() && it2 != other.sideEffects.end()) {
+		if (*it1 == *it2) {
+			it1++;
+			it2++;
+		} else if (*it1 < *it2) {
+			if ( is_ssa && ssa_cunningness_safe((*it1)->type) ) {
+				it1++;
+			} else {
+				sideEffects.erase(it1++);
+			}
+			res = true;
+		} else {
+			assert(*it2 < *it1);
+			if ( is_ssa && ssa_cunningness_safe( (*it2)->type) )
+				newEffectsToIntroduce.insert(*it2);
+			it2++;
+		}
+	}
+	while (it1 != sideEffects.end()) {
+		res = true;
+		if ( is_ssa && ssa_cunningness_safe((*it1)->type) )
+			it1++;
+		else
+			sideEffects.erase(it1++);
+	}
+	sideEffects.insert(newEffectsToIntroduce.begin(), newEffectsToIntroduce.end());
 
 	for (auto it = assertFalse.begin();
 	     it != assertFalse.end();
@@ -326,7 +390,7 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 			if (smsep->generations.size() == 0) {
 				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(-1));
 			} else if (smsep->generations.size() == 1) {
-				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(smsep->generations[0]));
+				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(smsep->generations[0].first));
 			}
 		}
 	}
@@ -363,7 +427,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				addr = NULL;
 
 			if ( addr &&
-			     (!alias || alias->ptrsMightAlias(addr, smses->addr, opt.freeVariablesMightAccessStack)) &&
+			     (!alias || alias->ptrsMightAlias(addr, smses->addr)) &&
 			     ((smses2 && oracle->memoryAccessesMightAlias(opt, smses2, smses)) ||
 			      (smsel2 && oracle->memoryAccessesMightAlias(opt, smsel2, smses))) &&
 			     !definitelyNotEqual( addr,
@@ -374,7 +438,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				it++;
 		}
 		/* Introduce the store which was generated. */
-		if (opt.assumeNoInterferingStores || !oracle->hasConflictingRemoteStores(smses))
+		if (opt.assumeNoInterferingStores() || !oracle->hasConflictingRemoteStores(smses))
 			outputAvail.insertSideEffect(smses);
 		outputAvail.dereference(smses->addr, opt);
 		break;
@@ -384,7 +448,6 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
 		outputAvail.insertSideEffect(smsec);
-		outputAvail.invalidateRegister(smsec->target, smsec);
 		break;
 	}
 	case StateMachineSideEffect::Load: {
@@ -392,7 +455,6 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		outputAvail.insertSideEffect(smsel);
 		outputAvail.dereference(smsel->addr, opt);
-		outputAvail.invalidateRegister(smsel->target, smsel);
 		break;
 	}
 	case StateMachineSideEffect::AssertFalse: {
@@ -407,11 +469,14 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		StateMachineSideEffectPhi *p =
 			(StateMachineSideEffectPhi *)smse;
 		outputAvail.insertSideEffect(p);
-		outputAvail.invalidateRegister(p->reg, smse);
 		break;
 	}
 		
 	}
+
+	threadAndRegister r(threadAndRegister::invalid());
+	if (smse->definesRegister(r))
+		outputAvail.invalidateRegister(r, smse);
 }
 
 class applyAvailTransformer : public IRExprTransformer {
@@ -468,167 +533,218 @@ static StateMachineState *buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *aliasing,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineEdge *, int> &edgeLabels
+	std::map<const StateMachineState *, int> &edgeLabels
 	);
-static StateMachineEdge *
-buildNewStateMachineWithLoadsEliminated(
-	StateMachineEdge *sme,
-	const avail_t &initialAvail,
-	std::map<StateMachineState *, avail_t> &availMap,
-	std::map<StateMachineState *, StateMachineState *> &memo,
-	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration *aliasing,
-	Oracle *oracle,
-	bool *done_something,
-	std::map<const StateMachineEdge *, int> &edgeLabels
-)
+static StateMachineSideEffect *
+buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
+					avail_t &currentlyAvailable,
+					Oracle *oracle,
+					bool *done_something,
+					const Oracle::RegisterAliasingConfiguration *aliasing,
+					const AllowableOptimisations &opt)
 {
-	if (TIMEOUT)
-		return sme;
-	StateMachineEdge *res =
-		new StateMachineEdge(buildNewStateMachineWithLoadsEliminated(sme->target, availMap, memo, opt, aliasing, oracle,
-									     done_something, edgeLabels));
-
-	avail_t currentlyAvailable(initialAvail);
-	currentlyAvailable.calcRegisterMap(opt);
+	StateMachineSideEffect *newEffect;
 
 	if (debug_substitutions) {
-		printf("Looking at edge %d\n", edgeLabels[sme]);
-		printf("Available:\n");
+		printf("Side effect ");
+		smse->prettyPrint(stdout);
+		printf("\n");
+	}
+
+	newEffect = NULL;
+	switch (smse->type) {
+	case StateMachineSideEffect::Store: {
+		StateMachineSideEffectStore *smses =
+			dynamic_cast<StateMachineSideEffectStore *>(smse);
+		IRExpr *newAddr, *newData;
+		bool doit = false;
+		newAddr = applyAvailSet(currentlyAvailable, smses->addr, false, &doit, opt);
+		newData = applyAvailSet(currentlyAvailable, smses->data, false, &doit, opt);
+		if (doit) {
+			newEffect = new StateMachineSideEffectStore(
+				newAddr, newData, smses->rip);
+			*done_something = true;
+		} else {
+			newEffect = smses;
+		}
+		break;
+	}
+	case StateMachineSideEffect::Load: {
+		StateMachineSideEffectLoad *smsel =
+			dynamic_cast<StateMachineSideEffectLoad *>(smse);
+		IRExpr *newAddr;
+		bool doit = false;
+		newAddr = applyAvailSet(currentlyAvailable, smsel->addr, false, &doit, opt);
+		for (auto it2 = currentlyAvailable.beginSideEffects();
+		     !newEffect && it2 != currentlyAvailable.endSideEffects();
+		     it2++) {
+			StateMachineSideEffectStore *smses2 =
+				dynamic_cast<StateMachineSideEffectStore *>(*it2);
+			StateMachineSideEffectLoad *smsel2 =
+				dynamic_cast<StateMachineSideEffectLoad *>(*it2);
+			if ( smses2 &&
+			     (!aliasing || aliasing->ptrsMightAlias(smses2->addr, newAddr)) &&
+			     definitelyEqual(smses2->addr, newAddr, opt) ) {
+				newEffect =
+					new StateMachineSideEffectCopy(
+						smsel->target,
+						smses2->data);
+			} else if ( smsel2 &&
+				    (!aliasing || aliasing->ptrsMightAlias(smsel2->addr, newAddr)) &&
+				    definitelyEqual(smsel2->addr, newAddr, opt) ) {
+				newEffect =
+					new StateMachineSideEffectCopy(
+						smsel->target,
+						new IRExprGet(smsel2->target, Ity_I64));
+			}
+		}
+		if (!newEffect && doit)
+			newEffect = new StateMachineSideEffectLoad(
+				smsel->target, newAddr, smsel->rip, smsel->type);
+		if (!newEffect)
+			newEffect = smse;
+		if (newEffect != smse)
+			*done_something = true;
+		break;
+	}
+	case StateMachineSideEffect::Copy: {
+		StateMachineSideEffectCopy *smsec =
+			dynamic_cast<StateMachineSideEffectCopy *>(smse);
+		IRExpr *newValue;
+		bool doit = false;
+		newValue = applyAvailSet(currentlyAvailable, smsec->value, false, &doit, opt);
+		if (doit) {
+			*done_something = true;
+			newEffect = new StateMachineSideEffectCopy(
+				smsec->target, newValue);
+		} else
+			newEffect = smse;
+		break;
+	}
+	case StateMachineSideEffect::Unreached:
+		newEffect = smse;
+		break;
+	case StateMachineSideEffect::AssertFalse: {
+		StateMachineSideEffectAssertFalse *smseaf =
+			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
+		IRExpr *newVal;
+		bool doit = false;
+		if (currentlyAvailable.nr_asserts() < MAX_LIVE_ASSERTIONS) {
+			newVal = applyAvailSet(currentlyAvailable, smseaf->value, true, &doit, opt);
+		} else {
+			/* We have too many live assertions.
+			   That can lead to them holding
+			   enormous number of variables live,
+			   which isn't much use, so turn this
+			   one into a no-op.  It'll get
+			   optimised out again later. */
+			newVal = IRExpr_Const(IRConst_U1(0));
+			doit = true;
+		}
+		if (doit) {
+			newEffect = new StateMachineSideEffectAssertFalse(newVal);
+			*done_something = true;
+		} else
+			newEffect = smse;
+		break;
+	}
+	case StateMachineSideEffect::Phi: {
+		StateMachineSideEffectPhi *phi =
+			(StateMachineSideEffectPhi *)smse;
+		StateMachineSideEffectPhi *newPhi = NULL;
+		bool needSort = false;
+		for (auto it = currentlyAvailable._registers.begin();
+		     it != currentlyAvailable._registers.end();
+		     it++) {
+			if (threadAndRegister::partialEq(phi->reg, it->first)) {
+				for (unsigned x = 0; x < phi->generations.size(); x++) {
+					if (phi->generations[x].first == it->first.gen()) {
+						if (it->second.e) {
+							if (phi->generations[x].second &&
+							    physicallyEqual(phi->generations[x].second,
+									    it->second.e))
+								break;
+							if (!newPhi)
+								newPhi = new StateMachineSideEffectPhi(*phi);
+							newPhi->generations[x].second = it->second.e;
+						} else {
+							if (!newPhi)
+								newPhi = new StateMachineSideEffectPhi(*phi);
+							assert(threadAndRegister::partialEq(phi->reg,
+											    it->second.phiFrom));
+							newPhi->generations[x].first = it->second.phiFrom.gen();
+							newPhi->generations[x].second = NULL;
+							needSort = true;
+						}
+					}
+				}
+			}
+		}
+		for (unsigned x = 0; x < phi->generations.size(); x++) {
+			IRExpr *e;
+			e = (newPhi ? newPhi : phi)->generations[x].second;
+			if (e) {
+				bool t = false;
+				IRExpr *e2 = applyAvailSet(currentlyAvailable,
+							   e,
+							   false,
+							   &t,
+							   opt);
+				if (t) {
+					assert(e != e2);
+					if (!newPhi)
+						newPhi = new StateMachineSideEffectPhi(*phi);
+					newPhi->generations[x].second = e2;
+					*done_something = true;
+				}
+			}
+		}
+		if (needSort) {
+			assert(newPhi);
+			std::sort(newPhi->generations.begin(), newPhi->generations.end());
+			for (unsigned x = 0; x + 1 < newPhi->generations.size(); ) {
+				if (newPhi->generations[x].first ==
+				    newPhi->generations[x+1].first) {
+					IRExpr *v = newPhi->generations[x].second;
+					if (!v) {
+						v = newPhi->generations[x+1].second;
+					} else {
+						assert(!newPhi->generations[x+1].second ||
+						       v == newPhi->generations[x+1].second);
+					}
+					newPhi->generations[x].second = v;
+					newPhi->generations.erase(newPhi->generations.begin() + x + 1);
+				} else {
+					x++;
+				}
+			}
+		}
+		if (newPhi) {
+			newEffect = newPhi;
+			*done_something = true;
+		} else {
+			newEffect = phi;
+		}
+		break;
+	}
+	}
+	if (debug_substitutions) {
+		printf("New side effect ");
+		newEffect->prettyPrint(stdout);
+		printf("\n");
+	}
+	assert(newEffect);
+	if (!*done_something) assert(newEffect == smse);
+	updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
+	currentlyAvailable.calcRegisterMap(opt);
+	if (debug_substitutions) {
+		printf("New available set:\n");
 		currentlyAvailable.print(stdout);
 	}
 
-	for (std::vector<StateMachineSideEffect *>::const_iterator it =
-		     sme->sideEffects.begin();
-	     !TIMEOUT && it != sme->sideEffects.end();
-	     it++) {
-		StateMachineSideEffect *newEffect;
-
-		newEffect = NULL;
-
-		if (debug_substitutions) {
-			printf("Side effect ");
-			(*it)->prettyPrint(stdout);
-			printf("\n");
-		}
-
-		switch ((*it)->type) {
-		case StateMachineSideEffect::Store: {
-			StateMachineSideEffectStore *smses =
-				dynamic_cast<StateMachineSideEffectStore *>(*it);
-			IRExpr *newAddr, *newData;
-			bool doit = false;
-			newAddr = applyAvailSet(currentlyAvailable, smses->addr, false, &doit, opt);
-			newData = applyAvailSet(currentlyAvailable, smses->data, false, &doit, opt);
-			if (doit) {
-				newEffect = new StateMachineSideEffectStore(
-					newAddr, newData, smses->rip);
-				*done_something = true;
-			} else {
-				newEffect = smses;
-			}
-			break;
-		}
-		case StateMachineSideEffect::Load: {
-			StateMachineSideEffectLoad *smsel =
-				dynamic_cast<StateMachineSideEffectLoad *>(*it);
-			IRExpr *newAddr;
-			bool doit = false;
-			newAddr = applyAvailSet(currentlyAvailable, smsel->addr, false, &doit, opt);
-			for (auto it2 = currentlyAvailable.beginSideEffects();
-			     !newEffect && it2 != currentlyAvailable.endSideEffects();
-			     it2++) {
-				StateMachineSideEffectStore *smses2 =
-					dynamic_cast<StateMachineSideEffectStore *>(*it2);
-				StateMachineSideEffectLoad *smsel2 =
-					dynamic_cast<StateMachineSideEffectLoad *>(*it2);
-				if ( smses2 &&
-				     (!aliasing || aliasing->ptrsMightAlias(smses2->addr, newAddr, opt.freeVariablesMightAccessStack)) &&
-				     definitelyEqual(smses2->addr, newAddr, opt) ) {
-					newEffect =
-						new StateMachineSideEffectCopy(
-							smsel->target,
-							smses2->data);
-				} else if ( smsel2 &&
-					    (!aliasing || aliasing->ptrsMightAlias(smsel2->addr, newAddr, opt.freeVariablesMightAccessStack)) &&
-					    definitelyEqual(smsel2->addr, newAddr, opt) ) {
-					newEffect =
-						new StateMachineSideEffectCopy(
-							smsel->target,
-							new IRExprGet(smsel2->target, Ity_I64));
-				}
-			}
-			if (!newEffect && doit)
-				newEffect = new StateMachineSideEffectLoad(
-					smsel->target, newAddr, smsel->rip, smsel->type);
-			if (!newEffect)
-				newEffect = *it;
-			if (newEffect != *it)
-				*done_something = true;
-			break;
-		}
-		case StateMachineSideEffect::Copy: {
-			StateMachineSideEffectCopy *smsec =
-				dynamic_cast<StateMachineSideEffectCopy *>(*it);
-			IRExpr *newValue;
-			bool doit = false;
-			newValue = applyAvailSet(currentlyAvailable, smsec->value, false, &doit, opt);
-			if (doit) {
-				*done_something = true;
-				newEffect = new StateMachineSideEffectCopy(
-					smsec->target, newValue);
-			} else
-				newEffect = *it;
-			break;
-		}
-		case StateMachineSideEffect::Unreached:
-			newEffect = *it;
-			break;
-		case StateMachineSideEffect::AssertFalse: {
-			StateMachineSideEffectAssertFalse *smseaf =
-				dynamic_cast<StateMachineSideEffectAssertFalse *>(*it);
-			IRExpr *newVal;
-			bool doit = false;
-			if (currentlyAvailable.nr_asserts() < MAX_LIVE_ASSERTIONS) {
-				newVal = applyAvailSet(currentlyAvailable, smseaf->value, true, &doit, opt);
-			} else {
-				/* We have too many live assertions.
-				   That can lead to them holding
-				   enormous number of variables live,
-				   which isn't much use, so turn this
-				   one into a no-op.  It'll get
-				   optimised out again later. */
-				newVal = IRExpr_Const(IRConst_U1(0));
-				doit = true;
-			}
-			if (doit) {
-				newEffect = new StateMachineSideEffectAssertFalse(newVal);
-				*done_something = true;
-			} else
-				newEffect = *it;
-			break;
-		}
-		case StateMachineSideEffect::Phi:
-			newEffect = *it;
-			break;
-		}
-		if (debug_substitutions) {
-			printf("New side effect ");
-			newEffect->prettyPrint(stdout);
-			printf("\n");
-		}
-		assert(newEffect);
-		if (!*done_something) assert(newEffect == *it);
-		updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
-		currentlyAvailable.calcRegisterMap(opt);
-		res->sideEffects.push_back(newEffect);
-		if (debug_substitutions) {
-			printf("New available set:\n");
-			currentlyAvailable.print(stdout);
-		}
-	}
-	return res;
+	return newEffect;
 }
+
 static StateMachineState *
 buildNewStateMachineWithLoadsEliminated(
 	StateMachineState *sm,
@@ -638,12 +754,9 @@ buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *alias,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineEdge *, int> &edgeLabels)
+	std::map<const StateMachineState *, int> &edgeLabels)
 {
-	if (dynamic_cast<StateMachineCrash *>(sm) ||
-	    dynamic_cast<StateMachineNoCrash *>(sm) ||
-	    dynamic_cast<StateMachineStub *>(sm) ||
-	    dynamic_cast<StateMachineUnreached *>(sm))
+	if (sm->isTerminal())
 		return sm;
 	if (memo.count(sm)) {
 		/* We rely on whoever it was that set memo[sm] having
@@ -652,36 +765,55 @@ buildNewStateMachineWithLoadsEliminated(
 	}
 	avail_t avail(availMap[sm]);
 
-	if (StateMachineBifurcate *smb =
-	    dynamic_cast<StateMachineBifurcate *>(sm)) {
-		StateMachineBifurcate *res;
-		bool doit = false;
+	StateMachineState *res;
+	switch (sm->type) {
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
 		avail.calcRegisterMap(opt);
 		res = new StateMachineBifurcate(
 			sm->origin,
-			applyAvailSet(avail, smb->condition, true, &doit, opt),
-			(StateMachineEdge *)NULL, NULL);
-		*done_something |= doit;
-		memo[sm] = res;
-		res->trueTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->trueTarget, avail, availMap, memo, opt, alias, oracle,
-			done_something, edgeLabels);
-		res->falseTarget = buildNewStateMachineWithLoadsEliminated(
-			smb->falseTarget, avail, availMap, memo, opt, alias, oracle,
-			done_something, edgeLabels);
-		return res;
-	} if (StateMachineProxy *smp =
-	      dynamic_cast<StateMachineProxy *>(sm)) {
-		StateMachineProxy *res;
-		res = new StateMachineProxy(sm->origin, (StateMachineEdge *)NULL);
-		memo[sm] = res;
-		res->target = buildNewStateMachineWithLoadsEliminated(
-			smp->target, avail, availMap, memo, opt, alias, oracle,
-			done_something, edgeLabels);
-		return res;
-	} else {
+			applyAvailSet(avail, smb->condition, true, done_something, opt),
+			smb->trueTarget, smb->falseTarget);
+		break;
+	}
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *smp = (StateMachineSideEffecting *)sm;
+		StateMachineSideEffect *newEffect;
+		avail.calcRegisterMap(opt);
+		if (smp->sideEffect)
+			newEffect = buildNewStateMachineWithLoadsEliminated(smp->sideEffect,
+									    avail,
+									    oracle,
+									    done_something,
+									    alias,
+									    opt);
+		else
+			newEffect = NULL;
+		res = new StateMachineSideEffecting(sm->origin, newEffect, smp->target);
+		break;
+	}
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smnd = (StateMachineNdChoice *)sm;
+		res = new StateMachineNdChoice(smnd->origin,
+					       smnd->successors);
+		break;
+	}
+	case StateMachineState::Unreached:
+	case StateMachineState::Crash:
+	case StateMachineState::NoCrash:
+	case StateMachineState::Stub:
 		abort();
 	}
+
+	memo[sm] = res;
+	std::vector<StateMachineState **> targets;
+	res->targets(targets);
+	for (auto it = targets.begin(); it != targets.end(); it++) {
+		**it = buildNewStateMachineWithLoadsEliminated(
+			**it, availMap, memo, opt, alias, oracle,
+			done_something, edgeLabels);
+	}
+	return res;
 }
 
 static StateMachine *
@@ -692,7 +824,7 @@ buildNewStateMachineWithLoadsEliminated(
 	const Oracle::RegisterAliasingConfiguration *alias,
 	Oracle *oracle,
 	bool *done_something,
-	std::map<const StateMachineEdge *, int> &edgeLabels)
+	std::map<const StateMachineState *, int> &edgeLabels)
 {
 	std::map<StateMachineState *, StateMachineState *> memo;
 	bool d = false;
@@ -700,7 +832,7 @@ buildNewStateMachineWithLoadsEliminated(
 									      &d, edgeLabels);
 	if (d) {
 		*done_something = true;
-		return new StateMachine(sm, sm->origin, new_root);
+		return new StateMachine(new_root, sm->origin);
 	} else {
 		return sm;
 	}
@@ -728,7 +860,7 @@ avail_t::findAllPotentiallyAvailable(StateMachine *sm,
 	/* If we're not executing atomically, stores to
 	   non-thread-local memory locations are never considered to
 	   be available. */
-	if (!opt.assumeNoInterferingStores) {
+	if (!opt.assumeNoInterferingStores()) {
 		for (auto it = sideEffects.begin();
 		     !TIMEOUT && it != sideEffects.end();
 			) {
@@ -744,12 +876,15 @@ avail_t::findAllPotentiallyAvailable(StateMachine *sm,
 }
 
 static StateMachine *
-availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
+availExpressionAnalysis(StateMachine *sm,
+			const AllowableOptimisations &opt,
+			const Oracle::RegisterAliasingConfiguration *alias,
+			bool is_ssa,
+			Oracle *oracle,
 			bool *done_something)
 {
-	std::map<const StateMachineEdge *, int> edgeLabels;
-	if (dump_avail_table || debug_build_table || debug_substitutions) {
+	std::map<const StateMachineState *, int> edgeLabels;
+	if (dump_avail_table || debug_substitutions) {
 		printf("Avail analysis on state machine:\n");
 		printStateMachine(sm, stdout, edgeLabels);
 	}
@@ -777,145 +912,52 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 	 * start of the very first state nothing is available, and
 	 * then use a Tarski iteration to make everything
 	 * consistent. */
-	std::set<StateMachineEdge *> allEdges;
 	std::set<StateMachineState *> allStates;
-	findAllEdges(sm, allEdges);
 	findAllStates(sm, allStates);
 	std::map<StateMachineState *, avail_t> availOnEntry;
-	std::map<StateMachineEdge *, avail_t> availOnExit;
-	for (std::set<StateMachineEdge *>::iterator it = allEdges.begin();
-	     !TIMEOUT && it != allEdges.end();
-	     it++)
-		availOnExit[*it] = potentiallyAvailable;
-	for (std::set<StateMachineState *>::iterator it = allStates.begin();
+	for (auto it = allStates.begin();
 	     !TIMEOUT && it != allStates.end();
 	     it++)
 		availOnEntry[*it] = potentiallyAvailable;
 	availOnEntry[sm->root].clear();
 
-	if (debug_build_table) {
-		printf("Initial state exit availability map:\n");
-		for (auto it = availOnExit.begin();
-		     it != availOnExit.end();
-		     it++) {
-			printf("Edge %d:\n", edgeLabels[it->first]);
-			it->second.print(stdout);
-		}
-	}
-	std::set<StateMachineState *> statesNeedingRefresh(allStates);
-	std::set<StateMachineEdge *> edgesNeedingRefresh(allEdges);
+	std::queue<StateMachineState *> statesNeedingRefresh;
 
 	/* Tarski iteration.  */
-	statesNeedingRefresh.insert(sm->root);
-	while (1) {
-		if (TIMEOUT)
-			return sm;
+	for (auto it = allStates.begin(); it != allStates.end(); it++)
+		statesNeedingRefresh.push(*it);
+	while (!statesNeedingRefresh.empty() && !TIMEOUT) {
+		StateMachineState *state = statesNeedingRefresh.front();
+		statesNeedingRefresh.pop();
 
-		if (debug_build_table)
-			printf("Start table building pass\n");
-
-		if (statesNeedingRefresh.empty())
-			break;
-
-		/* Now go through and update the avail-on-exit set.
-		   Use a slightly weird-looking iteration over states
-		   instead of over edges because that makes things a
-		   bit easier. */
-		for (std::set<StateMachineState *>::iterator it = statesNeedingRefresh.begin();
-		     it != statesNeedingRefresh.end();
-		     it++) {
-			if (dynamic_cast<StateMachineCrash *>(*it) ||
-			    dynamic_cast<StateMachineNoCrash *>(*it) ||
-			    dynamic_cast<StateMachineStub *>(*it) ||
-			    dynamic_cast<StateMachineUnreached *>(*it))
-				continue;
-			StateMachineEdge *edges[2];
-			int nr_edges;
-			if (StateMachineBifurcate *smb =
-			    dynamic_cast<StateMachineBifurcate *>(*it)) {
-				edges[0] = smb->trueTarget;
-				edges[1] = smb->falseTarget;
-				nr_edges = 2;
-			} else if (StateMachineProxy *smp =
-				   dynamic_cast<StateMachineProxy *>(*it)) {
-				edges[0] = smp->target;
-				nr_edges = 1;
-			} else {
-				abort();
-			}
-			for (int x = 0; x < nr_edges; x++) {
-				StateMachineEdge *edge = edges[x];
-				assert(availOnEntry.count(*it));
-				avail_t outputAvail(availOnEntry[*it]);
-
-				if (debug_build_table)
-					printf("Consider edge %d\n", edgeLabels[edge]);
-#warning Why not introduce an assertion on the relevant edge?
-
-				/* Build the output set. */
-				for (std::vector<StateMachineSideEffect *>::const_iterator it2 =
-					     edge->sideEffects.begin();
-				     !TIMEOUT && it2 != edge->sideEffects.end();
-				     it2++)
-					updateAvailSetForSideEffect(outputAvail, *it2,
-								    opt, alias, oracle);
-				if (availOnExit[edge].intersect(outputAvail, opt)) {
-					if (debug_build_table)
-						printf("Made progress; edge %d needs refresh\n",
-						       edgeLabels[edge]);
-					edgesNeedingRefresh.insert(edge);
-				} else if (debug_build_table) {
-					printf("State is unchanged\n");
-				}
-			}
+		avail_t outputAvail(availOnEntry[state]);
+		if ( state->type == StateMachineState::SideEffecting ) {
+			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
+			if (se)
+				updateAvailSetForSideEffect(outputAvail, se, opt,
+							    alias, oracle);
 		}
-		statesNeedingRefresh.clear();
 
-		if (edgesNeedingRefresh.empty())
-			break;
-
-		/* Update the set of things which are available on
-		   entry.  This means walking the set of edges and
-		   looking at the targets.  If there's something which
-		   is available at the start of the target, but not at
-		   the end of this edge, remove it from the target. */
-		for (std::set<StateMachineEdge *>::iterator it = edgesNeedingRefresh.begin();
-		     it != edgesNeedingRefresh.end();
-		     it++) {
-			StateMachineEdge *edge = *it;
-			if (debug_build_table)
-				printf("Refresh edge %d\n",
-				       edgeLabels[*it]);
-			StateMachineState *target = edge->target;
-			avail_t &avail_at_end_of_edge(availOnExit[edge]);
-			avail_t &avail_at_start_of_target(availOnEntry[target]);
-			if (avail_at_start_of_target.intersect(avail_at_end_of_edge, opt))
-				statesNeedingRefresh.insert(target);
-		}
-		edgesNeedingRefresh.clear();
-
-		if (debug_build_table) {
-			printf("Availability at end of pass:\n");
-			for (auto it = availOnExit.begin();
-			     it != availOnExit.end();
-			     it++) {
-				printf("Edge %d:\n", edgeLabels[it->first]);
-				it->second.print(stdout);
-				printf("State entry availability:\n");
-				availOnEntry[it->first->target].print(stdout);
-			}
+		std::vector<StateMachineState *> edges;
+		state->targets(edges);
+		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
+			if (availOnEntry[*it2].merge(outputAvail, opt, is_ssa))
+				statesNeedingRefresh.push(*it2);
 		}
 	}
 
 	if (dump_avail_table) {
-		printf("Final (edge exit) availability map:\n");
-		for (auto it = availOnExit.begin();
-		     it != availOnExit.end();
+		printf("Final entry availability map:\n");
+		for (auto it = availOnEntry.begin();
+		     it != availOnEntry.end();
 		     it++) {
 			printf("Edge %d:\n", edgeLabels[it->first]);
 			it->second.print(stdout);
 		}
 	}
+
+	if (TIMEOUT)
+		return sm;
 
 	/* So after all that we now have a complete map of what's
 	   available where.  Given that, we should be able to
@@ -935,10 +977,19 @@ availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
 }
 
 StateMachine *
-availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
+availExpressionAnalysis(StateMachine *sm,
+			const AllowableOptimisations &opt,
+			const Oracle::RegisterAliasingConfiguration *alias,
+			bool is_ssa,
+			Oracle *oracle,
 			bool *done_something)
 {
 	sm->sanityCheck();
-	return _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, oracle, done_something);
+	if (is_ssa)
+		sm->assertSSA();
+	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, is_ssa, oracle, done_something);
+	res->sanityCheck();
+	if (is_ssa)
+		res->assertSSA();
+	return res;
 }

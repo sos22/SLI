@@ -99,8 +99,7 @@ AddressSpace::writeMemory(unsigned long _start, unsigned size,
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
-			mc->write(mc_start, contents, to_copy_this_time,
-				  _start + off);
+			mc->write(mc_start, contents, to_copy_this_time);
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;

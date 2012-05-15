@@ -16,14 +16,13 @@ HBOrdering::operator()(const IRExprHappensBefore *a, const IRExprHappensBefore *
 		return a->after < b->after;
 }
 
-class canonMemAccessT : public std::map<ThreadRip, unsigned> {
+class canonMemAccessT : public std::map<MemoryAccessIdentifier, unsigned> {
 public:
 	unsigned next_idx;
 	canonMemAccessT()
-		: std::map<ThreadRip, unsigned>(),
-		  next_idx(0)
+		: next_idx(0)
 	{}
-	void addEvent(ThreadRip evt)
+	void addEvent(const MemoryAccessIdentifier &evt)
 	{
 		if (!count(evt))
 			(*this)[evt] = next_idx++;
@@ -41,7 +40,7 @@ public:
 			addEdge(*it);
 	}
 
-	ThreadRip inverse_lookup(unsigned x) const {
+	const MemoryAccessIdentifier &inverse_lookup(unsigned x) const {
 		for (const_iterator it = begin();
 		     it != end();
 		     it++)
@@ -252,56 +251,47 @@ simplifyOrdering(std::set<IRExprHappensBefore *, HBOrdering> &relations,
 }
 
 static void extractImplicitOrder(StateMachineState *sm,
-				 std::vector<ThreadRip> &eventsSoFar,
+				 std::vector<MemoryAccessIdentifier> &eventsSoFar,
 				 std::set<IRExprHappensBefore *, HBOrdering> &out);
+
 static void
-extractImplicitOrder(StateMachineEdge *sme,
-		     std::vector<ThreadRip> &eventsSoFar,
+extractImplicitOrder(StateMachineSideEffect *se,
+		     std::vector<MemoryAccessIdentifier> &eventsSoFar,
 		     std::set<IRExprHappensBefore *, HBOrdering> &out)
 {
-	if (sme->sideEffects.size() == 0) {
-		extractImplicitOrder(sme->target, eventsSoFar, out);
+	if (!se)
 		return;
+	StateMachineSideEffectMemoryAccess *smsema =
+		dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
+	if (!se)
+		return;
+
+	for (unsigned y = 0; y < eventsSoFar.size(); y++) {
+		IRExprHappensBefore *hb =
+			(IRExprHappensBefore *)
+			IRExpr_HappensBefore(eventsSoFar[y], smsema->rip);
+		out.insert(hb);
 	}
 
-	unsigned startSize = eventsSoFar.size();
-	eventsSoFar.reserve(startSize + sme->sideEffects.size());
-	for (unsigned x = 0; x < sme->sideEffects.size(); x++) {
-		StateMachineSideEffectMemoryAccess *smsema =
-			dynamic_cast<StateMachineSideEffectMemoryAccess *>(sme->sideEffects[x]);
-		if (!smsema)
-			continue;
-
-		for (unsigned y = 0; y < eventsSoFar.size(); y++) {
-			IRExprHappensBefore *hb =
-				(IRExprHappensBefore *)
-				IRExpr_HappensBefore(eventsSoFar[y], smsema->rip);
-			out.insert(hb);
-		}
-
-		eventsSoFar.push_back(smsema->rip);
-	}
-	extractImplicitOrder(sme->target, eventsSoFar, out);
-	eventsSoFar.resize(startSize);
+	eventsSoFar.push_back(smsema->rip);
 }
 
 static void
 extractImplicitOrder(StateMachineState *sm,
-		     std::vector<ThreadRip> &eventsSoFar,
+		     std::vector<MemoryAccessIdentifier> &eventsSoFar,
 		     std::set<IRExprHappensBefore *, HBOrdering> &out)
 {
-	if (dynamic_cast<const StateMachineTerminal *>(sm))
-		return;
-	if (StateMachineProxy *smp =
-	    dynamic_cast<StateMachineProxy *>(sm)) {
-		extractImplicitOrder(smp->target, eventsSoFar, out);
-		return;
-	}
-	StateMachineBifurcate *smb =
-		dynamic_cast<StateMachineBifurcate *>(sm);
-	assert(smb);
-	extractImplicitOrder(smb->trueTarget, eventsSoFar, out);
-	extractImplicitOrder(smb->falseTarget, eventsSoFar, out);
+	unsigned startSize = eventsSoFar.size();
+	extractImplicitOrder(sm->getSideEffect(), eventsSoFar, out);
+	std::vector<StateMachineState *> succ;
+	sm->targets(succ);
+	for (auto it = succ.begin(); it != succ.end(); it++)
+		extractImplicitOrder(*it, eventsSoFar, out);
+
+	/* This doesn't actually create any new uninitialised slots,
+	   because it can only ever shrink the vector. */
+	assert(eventsSoFar.size() >= startSize);
+	eventsSoFar.resize(startSize, MemoryAccessIdentifier::uninitialised());
 }
 
 /* Walk the state machine and extract all of the happens-before
@@ -309,6 +299,6 @@ extractImplicitOrder(StateMachineState *sm,
 void
 extractImplicitOrder(StateMachine *sm, std::set<IRExprHappensBefore *, HBOrdering> &out)
 {
-	std::vector<ThreadRip> eventsSoFar;
+	std::vector<MemoryAccessIdentifier> eventsSoFar;
 	extractImplicitOrder(sm->root, eventsSoFar, out);
 }

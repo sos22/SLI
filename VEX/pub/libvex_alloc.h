@@ -109,7 +109,7 @@ extern struct libvex_alloc_type *__LibVEX_Alloc(Heap *h, VexAllocType *t);
 extern struct libvex_alloc_type *__LibVEX_Alloc_Ptr_Array(Heap *h, unsigned long len);
 extern void _LibVEX_free(Heap *h, const void *_ptr);
 template <typename t, Heap *h> void
-__LibVEX_free(const GarbageCollected<t, h> *ign, void *ptr)
+__LibVEX_free(const GarbageCollected<t, h> *, void *ptr)
 {
 	_LibVEX_free(h, ptr);
 }
@@ -144,9 +144,9 @@ public:
 		root = x;
 		vexRegisterGCRoot(heap, x);
 	}
-	VexGcRoot(void **x, const char *name)
+	VexGcRoot(void **x, const char *)
 	{
-		init(x);		
+		init(x);
 	}
 	void destruct()
 	{
@@ -217,7 +217,7 @@ public:
 	}
 	virtual void visit(HeapVisitor &hv) = 0;
 	virtual void destruct() { this->~GarbageCollected(); }
-	virtual void relocate(t *target, size_t sz) { }
+	virtual void relocate(t *, size_t) { }
 };
 template <typename t, Heap *heap> VexAllocType GarbageCollected<t,heap>::type = {-1, relocate_object<t>, visit_object<t>, destruct_object<t>, NULL, get_name<t> };
 template <typename t, Heap *_heap> Heap *const GarbageCollected<t,_heap>::heap = _heap;
@@ -263,7 +263,7 @@ public:
 	void set(t *newTarg) { assert((unsigned long)newTarg != 0x93939393939393b3); core.content = (void *)newTarg; }
 	t *get() { return (t *)core.content; }
 
-	void visit(HeapVisitor &hv) {
+	void visit(HeapVisitor &) {
 		if (core.content) {
 			assert(core.content != (void *)0x93939393939393b3);
 			core.next = heap->headVisitedWeakRef;
@@ -278,6 +278,7 @@ void LibVEX_alloc_sanity_check(Heap *h);
 char *vex_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 char *vex_vasprintf(const char *fmt, va_list args);
 
+static inline char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 static inline char *my_asprintf(const char *fmt, ...)
 {
 	va_list args;
@@ -288,6 +289,5 @@ static inline char *my_asprintf(const char *fmt, ...)
 	va_end(args);
 	return r;
 }
-static char *my_asprintf(const char *fmt, ...) __attribute__((__format__ (__printf__, 1, 2)));
 
 #endif /* !__LIBVEX_ALLOC_H */

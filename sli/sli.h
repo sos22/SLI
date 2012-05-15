@@ -249,7 +249,7 @@ public:
 
 	void visit(HeapVisitor &hv);
 
-	void relocate(Thread *thr, size_t s) {
+	void relocate(Thread *thr, size_t) {
 		currentIRSB.relocate(&thr->currentIRSB);
 	}
 
@@ -381,8 +381,7 @@ public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
 	static MemoryChunk *allocate();
 
-	void write(unsigned offset, const unsigned long *source, unsigned nr_bytes,
-		   unsigned long sa);
+	void write(unsigned offset, const unsigned long *source, unsigned nr_bytes);
 	void read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
 		  unsigned long *sa = NULL) const;
 
@@ -390,7 +389,7 @@ public:
 
 	PhysicalAddress base;
 	unsigned serial;
-	void visit(HeapVisitor &hv) {}
+	void visit(HeapVisitor &) {}
 
 	NAMED_CLASS
 
@@ -476,7 +475,7 @@ public:
 	virtual unsigned marshal_size() const = 0;
 	virtual void *marshal(unsigned *size) const = 0;
 	virtual ~LogRecord() {};
-	virtual void visit(HeapVisitor &hv) {}
+	virtual void visit(HeapVisitor &) {}
 	NAMED_CLASS
 };
 
@@ -524,7 +523,7 @@ public:
 	~LogReader();
 	static LogReader *open(const char *path, LogReaderPtr *initial_ptr);
 	LogReader *truncate(LogReaderPtr eof);
-	void visit(HeapVisitor &hv){}
+	void visit(HeapVisitor &){}
 	NAMED_CLASS
 };
 
@@ -656,7 +655,7 @@ public:
 	void append(LogRecord *lr);
 	static LogFileWriter *open(const char *fname);
 	~LogFileWriter();
-	void visit(HeapVisitor &hv) {}
+	void visit(HeapVisitor &) {}
 };
 
 class ThreadEvent : public Named, public GarbageCollected<ThreadEvent, &ir_heap> {
@@ -668,7 +667,7 @@ public:
 	virtual ThreadEvent *replay(LogRecord *lr, MachineState **ms,
 					 bool &consumedRecord, LogReaderPtr ptr) = 0;
 
-	virtual void visit(HeapVisitor &hv){}
+	virtual void visit(HeapVisitor &){}
 
 	NAMED_CLASS
 };
@@ -840,13 +839,13 @@ class EventRecorder : public GarbageCollected<EventRecorder> {
 protected:
 	virtual ~EventRecorder() {}
 public:
-	virtual void instruction(Thread *thr, unsigned long rip, MachineState *ms)
+	virtual void instruction(Thread *, unsigned long , MachineState *)
 	{
 	}
-	virtual void store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms)
+	virtual void store(Thread *, unsigned long , unsigned long , MachineState *)
 	{
 	}
-	virtual void load(Thread *thr, unsigned long addr)
+	virtual void load(Thread *, unsigned long)
 	{
 	}
 	NAMED_CLASS
@@ -1265,7 +1264,6 @@ ThreadEvent *interpretStatement(IRStmt *stmt,
 				Thread *thr,
 				EventRecorder *er,
 				MachineState *ms,
-				IRSB *irsb,
 				ReplayEngineTimer &ret);
 
 void HandleMallocFree(Thread *thr, AddressSpace *as);

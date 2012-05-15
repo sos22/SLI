@@ -3,10 +3,9 @@
 
 #include "libvex_ir.h"
 
-class FreeVariableMap;
 class StateMachine;
 
-void zapBindersAndFreeVariables(FreeVariableMap &m, StateMachine *sm);
-IRExpr *zapFreeVariables(IRExpr *src, FreeVariableMap &fv);
+void zapBindersAndFreeVariables(StateMachine *sm);
+IRExpr *zapFreeVariables(IRExpr *src);
 
 #endif /* !zapBindersAndFreeVariables_hpp__ */

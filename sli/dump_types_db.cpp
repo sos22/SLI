@@ -8,6 +8,9 @@
 int
 main(int argc, char *argv[])
 {
+	if (argc < 3)
+		errx(1, "not enough arguments");
+
 	init_sli();
 
 	TypesDb *types = new TypesDb(argv[1]);

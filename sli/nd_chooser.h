@@ -81,6 +81,10 @@ public:
 	}
 	~NdChooser();
 
+	template <typename t> t nd_choice(const std::vector<t> &options) {
+		assert(options.size() != 0);
+		return options[nd_choice(options.size())];
+	}
 	int nd_choice(int nr_options, bool *isNew = NULL);
 	bool advance(void);
 };

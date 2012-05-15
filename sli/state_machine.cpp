@@ -7,155 +7,128 @@
 #include "oracle.hpp"
 #include "simplify_irexpr.hpp"
 #include "offline_analysis.hpp"
+#include "alloc_mai.hpp"
 
 #include "libvex_parse.h"
 
-static void findUsedRegisters(IRExpr *e, std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
+#ifndef NDEBUG
+#define debug_state_machine_sanity_checks 0
+#else
+static int debug_state_machine_sanity_checks = 0;
+#endif
 
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
-AllowableOptimisations AllowableOptimisations::defaultOptimisations(false, false, false, false, true, NULL);
+AllowableOptimisations AllowableOptimisations::defaultOptimisations(7.3);
 
 StateMachine *
-StateMachine::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	bool b = false;
 	std::set<StateMachineState *> done;
-	StateMachineState *new_root = root->optimise(opt, oracle, &b, freeVariables, done);
-	FreeVariableMap fv(freeVariables);
-	fv.optimise(opt, &b);
+	StateMachineState *new_root = root->optimise(opt, &b, done);
 	if (b) {
 		*done_something = true;
-		StateMachine *sm = new StateMachine(*this);
-		sm->root = new_root;
-		sm->freeVariables = fv;
-		return sm;
+		return new StateMachine(new_root, origin);
 	} else {
 		return this;
 	}
 }
 
 StateMachineState *
-StateMachineProxy::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
-			    std::set<StateMachineState *> &done)
-{
-	if (done.count(this))
-		return this;
-	done.insert(this);
-
-	if (target->target == StateMachineUnreached::get()) {
-		*done_something = true;
-		return target->target;
-	}
-	if (target->sideEffects.size() == 0) {
-		*done_something = true;
-		return target->target->optimise(opt, oracle, done_something, fv, done);
-	}
-	target = target->optimise(opt, oracle, done_something, fv, done);
-	return this;
-}
-
-StateMachineState *
-StateMachineBifurcate::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
+StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_something,
 				std::set<StateMachineState *> &done)
 {
 	if (done.count(this))
 		return this;
 	done.insert(this);
-	if (trueTarget->target == StateMachineUnreached::get()) {
+	if (trueTarget == StateMachineUnreached::get()) {
 		*done_something = true;
-		if (falseTarget->target == StateMachineUnreached::get())
+		if (falseTarget == StateMachineUnreached::get())
 			return StateMachineUnreached::get();
 		else
-			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv, done));
+			return falseTarget->optimise(opt, done_something, done);
 	}
-	if (falseTarget->target == StateMachineUnreached::get()) {
+	if (falseTarget == StateMachineUnreached::get()) {
 		*done_something = true;
-		return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv, done));
+		return trueTarget->optimise(opt, done_something, done);
+	}
+	if (trueTarget == falseTarget) {
+		*done_something = true;
+		return trueTarget;
 	}
 	condition = optimiseIRExprFP(condition, opt, done_something);
 	if (condition->tag == Iex_Const) {
 		*done_something = true;
 		if (((IRExprConst *)condition)->con->Ico.U1)
-			return new StateMachineProxy(origin, trueTarget->optimise(opt, oracle, done_something, fv, done));
+			return trueTarget->optimise(opt, done_something, done);
 		else
-			return new StateMachineProxy(origin, falseTarget->optimise(opt, oracle, done_something, fv, done));
+			return falseTarget->optimise(opt, done_something, done);
 	}
-	trueTarget = trueTarget->optimise(opt, oracle, done_something, fv, done);
-	falseTarget = falseTarget->optimise(opt, oracle, done_something, fv, done);
+	trueTarget = trueTarget->optimise(opt, done_something, done);
+	falseTarget = falseTarget->optimise(opt, done_something, done);
 
-	if (falseTarget->sideEffects.size() == 0 &&
-	    trueTarget->sideEffects.size() == 0) {
-		if (trueTarget->target == falseTarget->target) {
+	if (falseTarget->type == StateMachineState::Bifurcate) {
+		StateMachineBifurcate *falseBifur = (StateMachineBifurcate *)falseTarget;
+		if (falseTarget != falseBifur->falseTarget &&
+		    trueTarget == falseBifur->trueTarget) {
+			falseTarget = falseBifur->falseTarget;
+			condition = IRExpr_Binop(
+				Iop_Or1,
+				condition,
+				falseBifur->condition);
 			*done_something = true;
-			return trueTarget->target;
+			return this;
 		}
-
-		if (StateMachineBifurcate *falseBifur = dynamic_cast<StateMachineBifurcate *>(falseTarget->target)) {
-			if (trueTarget == falseBifur->trueTarget) {
-				falseTarget = falseBifur->falseTarget;
-				condition = IRExpr_Binop(
-					Iop_Or1,
-					condition,
-					falseBifur->condition);
-				*done_something = true;
-				return this;
-			}
-			if (trueTarget == falseBifur->falseTarget) {
-				falseTarget = falseBifur->trueTarget;
-				condition = IRExpr_Binop(
-					Iop_Or1,
-					condition,
-					IRExpr_Unop(
-						Iop_Not1,
-						falseBifur->condition));
-				*done_something = true;
-				return this;
-			}
+		if (falseTarget != falseBifur->trueTarget &&
+		    trueTarget == falseBifur->falseTarget) {
+			falseTarget = falseBifur->trueTarget;
+			condition = IRExpr_Binop(
+				Iop_Or1,
+				condition,
+				IRExpr_Unop(
+					Iop_Not1,
+					falseBifur->condition));
+			*done_something = true;
+			return this;
 		}
-		if (StateMachineBifurcate *trueBifur = dynamic_cast<StateMachineBifurcate *>(trueTarget->target)) {
-			if (falseTarget == trueBifur->falseTarget) {
-				trueTarget = trueBifur->trueTarget;
-				condition = IRExpr_Binop(
-					Iop_And1,
-					condition,
-					trueBifur->condition);
-				*done_something = true;
-				return this;
-			}
-			if (falseTarget == trueBifur->trueTarget) {
-				trueTarget = trueBifur->falseTarget;
-				condition = IRExpr_Binop(
-					Iop_And1,
-					condition,
-					IRExpr_Unop(
-						Iop_Not1,
-						trueBifur->condition));
-				*done_something = true;
-				return this;
-			}
+	}
+	if (trueTarget->type == StateMachineState::Bifurcate) {
+		StateMachineBifurcate *trueBifur = (StateMachineBifurcate *)trueTarget;
+		if (trueTarget != trueBifur->trueTarget &&
+		    falseTarget == trueBifur->falseTarget) {
+			trueTarget = trueBifur->trueTarget;
+			condition = IRExpr_Binop(
+				Iop_And1,
+				condition,
+				trueBifur->condition);
+			*done_something = true;
+			return this;
+		}
+		if (trueTarget != trueBifur->falseTarget &&
+		    falseTarget == trueBifur->trueTarget) {
+			trueTarget = trueBifur->falseTarget;
+			condition = IRExpr_Binop(
+				Iop_And1,
+				condition,
+				IRExpr_Unop(
+					Iop_Not1,
+					trueBifur->condition));
+			*done_something = true;
+			return this;
 		}
 	}
 	return this;
 }
 
-void
-StateMachineBifurcate::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	trueTarget->findUsedRegisters(s, opt);
-	falseTarget->findUsedRegisters(s, opt);
-	::findUsedRegisters(condition, s, opt);
-}
-
 StateMachineSideEffect *
-StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	addr = optimiseIRExprFP(addr, opt, done_something);
 	data = optimiseIRExprFP(data, opt, done_something);
-	if (isBadAddress(addr, opt, oracle) ||
-	    definitelyUnevaluatable(data, opt, oracle)) {
+	if (isBadAddress(addr) || definitelyUnevaluatable(data)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
@@ -173,71 +146,39 @@ StateMachineSideEffectStore::updateLoadedAddresses(std::set<IRExpr *> &l, const 
 			it++;
 	}
 }
-void
-StateMachineSideEffectStore::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	::findUsedRegisters(addr, s, opt);
-	::findUsedRegisters(data, s, opt);
-}
 
-void
-StateMachineSideEffectLoad::constructed()
-{
-	if (addr) {
-		bool ign;
-		addr = optimiseIRExprFP(addr, AllowableOptimisations::defaultOptimisations, &ign);
-	}
-}
 StateMachineSideEffect *
-StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	addr = optimiseIRExprFP(addr, opt, done_something);
-	if (isBadAddress(addr, opt, oracle)) {
+	if (isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
-	constructed();
 	return this;
-}
-void
-StateMachineSideEffectLoad::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	s.erase(target);
-	::findUsedRegisters(addr, s, opt);
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
-	if (definitelyUnevaluatable(value, opt, oracle)) {
+	if (definitelyUnevaluatable(value)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
 	return this;
 }
-void
-StateMachineSideEffectCopy::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	s.erase(target);
-	::findUsedRegisters(value, s, opt);
-}
 
 StateMachineSideEffect *
-StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something)
+StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
 	if ((value->tag == Iex_Const && ((IRExprConst *)value)->con->Ico.U1) ||
-	    definitelyUnevaluatable(value, opt, oracle)) {
+	    definitelyUnevaluatable(value)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
 	return this;
-}
-void
-StateMachineSideEffectAssertFalse::findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt)
-{
-	::findUsedRegisters(value, s, opt);
 }
 
 struct availEntry {
@@ -256,88 +197,15 @@ struct availEntry {
 		return false;
 	}
 };
-StateMachineEdge *
-StateMachineEdge::optimise(const AllowableOptimisations &opt,
-			   Oracle *oracle,
-			   bool *done_something,
-			   FreeVariableMap &freeVariables,
-			   std::set<StateMachineState *> &done)
-{
-	target = target->optimise(opt, oracle, done_something, freeVariables, done);
- top:
-	if (TIMEOUT)
-		return this;
-	if (StateMachineProxy *smp =
-	    dynamic_cast<StateMachineProxy *>(target)) {
-		StateMachineEdge *other = smp->target;
-		if (other->target != target) {
-			/* Can't duplicate Phi side effects. */
-			bool havePhi = false;
-			for (auto it = other->sideEffects.begin();
-			     !havePhi && it != other->sideEffects.end();
-			     it++)
-				if ((*it)->type == StateMachineSideEffect::Phi)
-					havePhi = true;
-			if (!havePhi) {
-				sideEffects.insert(sideEffects.end(),
-						   other->sideEffects.begin(),
-						   other->sideEffects.end());
-				target = other->target;
-				*done_something = true;
-				goto top;
-			}
-		}
-	}
-
-	for (auto it = sideEffects.begin(); !TIMEOUT && it != sideEffects.end(); it++) {
-		if ((*it)->type == StateMachineSideEffect::Unreached) {
-			*done_something = true;
-			target = StateMachineUnreached::get();
-			return this;
-		}
-		*it = (*it)->optimise(opt, oracle, done_something);
-	}
-
-	return this;
-}
 
 static void
-findUsedRegisters(IRExpr *e, std::set<threadAndRegister, threadAndRegister::fullCompare> &out, const AllowableOptimisations &opt)
+buildStateLabelTable(const StateMachine *sm,
+		     std::map<const StateMachineState *, int> &table,
+		     std::vector<const StateMachineState *> &states)
 {
-	class _ : public IRExprTransformer {
-	public:
-		std::set<threadAndRegister, threadAndRegister::fullCompare> &out;
-		_(std::set<threadAndRegister, threadAndRegister::fullCompare> &_out)
-			: out(_out)
-		{}
-		IRExpr *transformIex(IRExprGet *e) {
-			out.insert(e->reg);
-			return IRExprTransformer::transformIex(e);
-		}
-	} t(out);
-	t.doit(e);
-}
-
-static void
-buildEdgeLabelTable(const StateMachineState *sm,
-		    std::map<const StateMachineEdge *, int> &table,
-		    std::vector<const StateMachineEdge *> &states)
-{
-	std::vector<const StateMachineEdge *> toEmit;
-	int next_label;
-
-	sm->targets(toEmit);
-	next_label = 1;
-	while (!toEmit.empty()) {
-		const StateMachineEdge *sme = toEmit.back();
-		toEmit.pop_back();
-		if (!sme || table.count(sme))
-			continue;
-		states.push_back(sme);
-		table[sme] = next_label;
-		next_label++;
-		sme->target->targets(toEmit);
-	}
+	enumStates(sm, &states);
+	for (unsigned x = 0; x < states.size(); x++)
+		table[states[x]] = x + 1;
 }
 
 template <typename cont, void printer(const typename cont::value_type, FILE *)> static void
@@ -353,14 +221,19 @@ printContainer(const cont &v, FILE *f)
 }
 
 void
-printStateMachine(const StateMachineState *sm, FILE *f, std::map<const StateMachineEdge *, int> &labels)
+printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
 {
-	std::vector<const StateMachineEdge *> edges;
+	std::vector<const StateMachineState *> states;
 
-	buildEdgeLabelTable(sm, labels, edges);
-	sm->prettyPrint(f, labels);
-	fprintf(f, "\n");
-	for (auto it = edges.begin(); it != edges.end(); it++) {
+	fprintf(f, "Machine for ");
+	for (auto it = sm->origin.begin(); it != sm->origin.end(); it++) {
+		if (it != sm->origin.begin())
+			fprintf(f, ", ");
+		fprintf(f, "%s:%d", it->second.name(), it->first);
+	}
+	fprintf(f, ":\n");
+	buildStateLabelTable(sm, labels, states);
+	for (auto it = states.begin(); it != states.end(); it++) {
 		fprintf(f, "l%d: ", labels[*it]);
 		(*it)->prettyPrint(f, labels);
 		fprintf(f, "\n");
@@ -368,24 +241,9 @@ printStateMachine(const StateMachineState *sm, FILE *f, std::map<const StateMach
 }
 
 void
-printStateMachine(const StateMachineState *sm, FILE *f)
-{
-	std::map<const StateMachineEdge *, int> labels;
-	printStateMachine(sm, f, labels);
-}
-
-void
-printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineEdge *, int> &labels)
-{
-	fprintf(f, "Machine for %s:%d\n", sm->origin.name(), sm->tid);
-	printStateMachine(sm->root, f, labels);
-	sm->freeVariables.print(f);
-}
-
-void
 printStateMachine(const StateMachine *sm, FILE *f)
 {
-	std::map<const StateMachineEdge *, int> labels;
+	std::map<const StateMachineState *, int> labels;
 	printStateMachine(sm, f, labels);
 }
 
@@ -394,6 +252,10 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		     StateMachineSideEffect *smse2,
 		     const AllowableOptimisations &opt)
 {
+	if (smse1 == NULL && smse2 == NULL)
+		return true;
+	if (smse1 == NULL || smse2 == NULL)
+		return false;
 	if (smse1->type != smse2->type)
 		return false;
 	switch (smse1->type) {
@@ -457,14 +319,14 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	}
 	IRExpr *addr;
 	IRExpr *data;
-	ThreadVexRip rip;
+	MemoryAccessIdentifier where(MemoryAccessIdentifier::uninitialised());
 	if (parseThisString("*(", str, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(") <- ", str2, &str2) &&
 	    parseIRExpr(&data, str2, &str2) &&
 	    parseThisString(" @ ", str2, &str2) &&
-	    parseThreadRip(&rip, str2, suffix)) {
-		*out = new StateMachineSideEffectStore(addr, data, rip);
+	    parseMemoryAccessIdentifier(&where, str2, suffix)) {
+		*out = new StateMachineSideEffectStore(addr, data, where);
 		return true;
 	}
 	threadAndRegister key(threadAndRegister::invalid());
@@ -476,8 +338,8 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	    parseThisString(" <- *(", str2, &str2) &&
 	    parseIRExpr(&addr, str2, &str2) &&
 	    parseThisString(")@", str2, &str2) &&
-	    parseThreadRip(&rip, str2, suffix)) {
-	  *out = new StateMachineSideEffectLoad(key, addr, rip, type);
+	    parseMemoryAccessIdentifier(&where, str2, suffix)) {
+		*out = new StateMachineSideEffectLoad(key, addr, where, type);
 		return true;
 	}
 	if (parseThisString("COPY ", str, &str2) &&
@@ -544,12 +406,15 @@ parseStateMachineState(StateMachineState **out,
 		return true;
 	}
 	int target1;
-	if (parseThisChar('{', str, &str2) &&
+	StateMachineSideEffect *sme;
+	if (parseThisString("{:", str, &str2) &&
 	    parseVexRip(&origin, str2, &str2) &&
-	    parseThisString(":l", str2, &str2) &&
+	    parseThisChar(':', str2, &str2) &&
+	    parseStateMachineSideEffect(&sme, str2, &str2) &&
+	    parseThisString(" then l", str2, &str2) &&
 	    parseDecimalInt(&target1, str2, &str2) &&
-	    parseThisChar('}', str2, suffix)) {
-		*out = new StateMachineProxy(origin, (StateMachineEdge *)(unsigned long)target1);
+	    parseThisChar('}', str2, &str2)) {
+		*out = new StateMachineSideEffecting(origin, sme, (StateMachineState *)target1);
 		return true;
 	}
 	IRExpr *condition;
@@ -562,46 +427,47 @@ parseStateMachineState(StateMachineState **out,
 	    parseThisString(" else l", str2, &str2) &&
 	    parseDecimalInt(&target2, str2, suffix)) {
 		*out = new StateMachineBifurcate(origin, condition,
-						 (StateMachineEdge *)(int)target1,
-						 (StateMachineEdge *)(int)target2);
+						 (StateMachineState *)target1,
+						 (StateMachineState *)target2);
 		return true;
 	}
+
+	if (parseVexRip(&origin, str, &str2) &&
+	    parseThisString(": ND {", str2, &str2)) {
+		std::vector<StateMachineState *> successors;
+		while (1) {
+			if (parseThisChar('}', str2, suffix))
+				break;
+			if (successors.size() != 0 && !parseThisString(", ", str2, &str2))
+				return false;
+			if (!parseThisChar('l', str2, &str2))
+				return false;
+			int l;
+			if (!parseDecimalInt(&l, str2, &str2))
+				return false;
+			successors.push_back((StateMachineState *)l);
+		}
+		*out = new StateMachineNdChoice(origin, successors);
+		return true;
+	}
+
 	return false;
 }
 
 static bool
-parseStateMachineEdge(StateMachineEdge **out,
-		      const char *str,
-		      const char **suffix)
-{
-	StateMachineEdge *work = new StateMachineEdge(NULL);
-	while (1) {
-		StateMachineSideEffect *se;
-		if (!parseStateMachineSideEffect(&se, str, &str))
-			break;
-		work->sideEffects.push_back(se);
-		parseThisChar('\n', str, &str);
-	}
-	if (!parseStateMachineState(&work->target, str, suffix))
-		return false;
-	*out = work;
-	return true;
-}
-
-static bool
-parseOneEdge(std::map<int, StateMachineEdge *> &out,
-	     const char *str,
-	     const char **suffix)
+parseOneState(std::map<int, StateMachineState *> &out,
+	      const char *str,
+	      const char **suffix)
 {
 	int label;
-	StateMachineEdge *res;
+	StateMachineState *res;
 
-	res = (StateMachineEdge *)0xf001; /* shut the compiler up */
+	res = (StateMachineState *)0xf001; /* shut the compiler up */
 
 	if (!parseThisChar('l', str, &str) ||
 	    !parseDecimalInt(&label, str, &str) ||
 	    !parseThisString(": ", str, &str) ||
-	    !parseStateMachineEdge(&res, str, &str) ||
+	    !parseStateMachineState(&res, str, &str) ||
 	    !parseThisChar('\n', str, &str))
 		return false;
 	if (out.count(label))
@@ -620,37 +486,32 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 	if (!parseThisChar('\n', str, &str))
 		return false;
 
-	std::map<int, StateMachineEdge *> labelToEdge;
+	std::map<int, StateMachineState *> labelToState;
 	while (*str) {
-		if (!parseOneEdge(labelToEdge, str, &str))
+		if (!parseOneState(labelToState, str, &str))
 			break;
 	}
 	class _ {
 	public:
-		std::map<int, StateMachineEdge *> &labelToEdge;
-		_(std::map<int, StateMachineEdge *> &_labelToEdge)
-			: labelToEdge(_labelToEdge)
+		std::map<int, StateMachineState *> &labelToState;
+		_(std::map<int, StateMachineState *> &_labelToState)
+			: labelToState(_labelToState)
 		{}
 		bool operator()(StateMachineState *s) {
-			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(s)) {
-				smp->target = labelToEdge[(int)(unsigned long)smp->target];
-				if (!smp->target)
+			std::vector<StateMachineState **> targets;
+			s->targets(targets);
+			for (auto it = targets.begin(); it != targets.end(); it++) {
+				**it = labelToState[(int)(unsigned long)*it];
+				if (!**it)
 					return false;
-			} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s)) {
-				smb->trueTarget = labelToEdge[(int)(unsigned long)smb->trueTarget];
-				smb->falseTarget = labelToEdge[(int)(unsigned long)smb->falseTarget];
-				if (!smb->trueTarget || !smb->falseTarget)
-					return false;
-			} else {
-				assert(dynamic_cast<StateMachineTerminal *>(s));
 			}
 			return true;
 		}
-	} doOneState(labelToEdge);
+	} doOneState(labelToState);
 	if (!doOneState(root))
 		return false;
-	for (auto it = labelToEdge.begin(); it != labelToEdge.end(); it++)
-		if (!doOneState(it->second->target))
+	for (auto it = labelToState.begin(); it != labelToState.end(); it++)
+		if (!doOneState(it->second))
 			return false;
 	*suffix = str;
 	*out = root;
@@ -660,13 +521,21 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 bool
 StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 {
-	VexRip origin;
-	int tid;
-	if (!parseThisString("Machine for ", str, &str) ||
-	    !parseVexRip(&origin, str, &str) ||
-	    !parseThisChar(':', str, &str) ||
-	    !parseDecimalInt(&tid, str, &str) ||
-	    !parseThisChar('\n', str, &str))
+	std::vector<std::pair<unsigned, VexRip> > origin;
+	if (!parseThisString("Machine for ", str, &str))
+		return false;
+	while (1) {
+		if (parseThisChar(':', str, &str))
+			break;
+		std::pair<unsigned, VexRip> e;
+		if (!parseVexRip(&e.second, str, &str) ||
+		    !parseThisChar(':', str, &str) ||
+		    !parseDecimalUInt(&e.first, str, &str))
+			return false;
+		parseThisChar(' ', str, &str);
+		origin.push_back(e);
+	}
+	if (!parseThisChar('\n', str, &str))
 		return false;
 	StateMachineState *root;
 
@@ -675,11 +544,9 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 	   returns true. */
 	root = (StateMachineState *)0xf001deadbeeful; 
 
-	if (!parseStateMachine(&root, str, &str))
+	if (!parseStateMachine(&root, str, suffix))
 		return false;
-	*out = new StateMachine(root, origin, tid);
-	if (!(*out)->freeVariables.parse(str, suffix))
-		return false;
+	*out = new StateMachine(root, origin);
 	return true;
 }
 bool
@@ -700,19 +567,19 @@ readStateMachine(int fd)
 	return res;
 }
 
-void
-StateMachineEdge::assertAcyclic(std::vector<const StateMachineEdge *> &stack,
-				std::set<const StateMachineEdge *> &clean) const
-{
 #ifndef NDEBUG
+void
+StateMachineState::assertAcyclic(std::vector<const StateMachineState *> &stack,
+				std::set<const StateMachineState *> &clean) const
+{
 	if (clean.count(this))
 		return;
 	if (std::find(stack.begin(), stack.end(), this) != stack.end())
 		goto found_cycle;
 	stack.push_back(this);
 	{
-		std::vector<const StateMachineEdge *> targ;
-		target->targets(targ);
+		std::vector<const StateMachineState *> targ;
+		targets(targ);
 		for (auto it = targ.begin(); it != targ.end(); it++)
 			(*it)->assertAcyclic(stack, clean);
 	}
@@ -724,7 +591,7 @@ StateMachineEdge::assertAcyclic(std::vector<const StateMachineEdge *> &stack,
 found_cycle:
 	printf("Unexpected cycle in state machine!\n");
 	printf("Found at %p\n", this);
-	std::map<const StateMachineEdge *, int> labels;
+	std::map<const StateMachineState *, int> labels;
 	prettyPrint(stdout, labels);
 	printf("Path: \n");
 	for (auto it = stack.begin(); it != stack.end(); it++)
@@ -734,60 +601,56 @@ found_cycle:
 #endif
 }
 
-void
-StateMachineEdge::assertAcyclic() const
-{
 #ifndef NDEBUG
-	std::vector<const StateMachineEdge *> stack;
-	std::set<const StateMachineEdge *> clean;
-	assertAcyclic(stack, clean);
-#endif
+void
+StateMachine::assertAcyclic() const
+{
+	std::vector<const StateMachineState *> stack;
+	std::set<const StateMachineState *> clean;
+	root->assertAcyclic(stack, clean);
 }
+#endif
 
 void
 StateMachineState::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 {
-	std::vector<StateMachineEdge *> targ;
+	std::vector<StateMachineState *> targ;
+	if (type == SideEffecting) {
+		StateMachineSideEffecting *se = (StateMachineSideEffecting *)this;
+		if (se->sideEffect) {
+			StateMachineSideEffectMemoryAccess *smse =
+				dynamic_cast<StateMachineSideEffectMemoryAccess *>(se->sideEffect);
+			if (smse)
+				instrs.insert(smse->rip.rip.rip);
+		}
+	}
 	targets(targ);
 	for (auto it = targ.begin(); it != targ.end(); it++)
 		(*it)->enumerateMentionedMemoryAccesses(instrs);
 }
 
-void
-StateMachineEdge::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
-{
-	for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
-	     it != sideEffects.end();
-	     it++) {
-		StateMachineSideEffect *smse = *it;
-		if (StateMachineSideEffectLoad *smsel =
-		    dynamic_cast<StateMachineSideEffectLoad *>(smse)) {
-			instrs.insert(smsel->rip.rip);
-		} else if (StateMachineSideEffectStore *smses =
-			   dynamic_cast<StateMachineSideEffectStore *>(smse)) {
-			instrs.insert(smses->rip.rip);
-		}
-	}
-	target->enumerateMentionedMemoryAccesses(instrs);
-}
-
 StateMachineState::RoughLoadCount
-StateMachineEdge::roughLoadCount(StateMachineState::RoughLoadCount acc) const
+StateMachineState::roughLoadCount(StateMachineState::RoughLoadCount acc) const
 {
 	if (acc == StateMachineState::multipleLoads)
 		return StateMachineState::multipleLoads;
 
-	for (std::vector<StateMachineSideEffect *>::const_iterator it = sideEffects.begin();
-	     it != sideEffects.end();
-	     it++) {
-		if (dynamic_cast<StateMachineSideEffectLoad *>(*it)) {
-			if (acc == StateMachineState::noLoads)
-				acc = StateMachineState::singleLoad;
+	if (type == SideEffecting) {
+		StateMachineSideEffecting *se = (StateMachineSideEffecting *)this;
+		if (se->sideEffect && dynamic_cast<StateMachineSideEffectLoad *>(se->sideEffect)) {
+			if (acc == noLoads)
+				acc = singleLoad;
 			else
-				return StateMachineState::multipleLoads;
+				acc = multipleLoads;
 		}
 	}
-	return target->roughLoadCount(acc);
+	std::vector<const StateMachineState *> targ;
+	targets(targ);
+	for (auto it = targ.begin();
+	     acc != multipleLoads && it != targ.end();
+	     it++)
+		acc = (*it)->roughLoadCount(acc);
+	return acc;
 }
 
 void
@@ -796,58 +659,10 @@ ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema,
 	fprintf(f, "{%s}", smsema->rip.name());
 }
 
-#ifndef NDEBUG
 void
-StateMachine::sanityCheck() const
+StateMachineState::targets(std::queue<StateMachineState *> &out)
 {
-	std::vector<const StateMachineEdge *> path;
-	std::set<threadAndRegister, threadAndRegister::fullCompare> live;
-	root->sanityCheck(&live, path);
-}
-#endif
-
-void
-StateMachineState::targets(std::set<StateMachineState *> &out)
-{
-	std::vector<StateMachineEdge *> edges;
-	targets(edges);
-	for (auto it = edges.begin(); it != edges.end(); it++)
-		out.insert((*it)->target);
-}
-
-void
-StateMachineState::targets(std::set<const StateMachineState *> &out) const
-{
-	std::vector<const StateMachineEdge *> edges;
-	targets(edges);
-	for (auto it = edges.begin(); it != edges.end(); it++)
-		out.insert((*it)->target);
-}
-
-void
-StateMachineState::targets(std::vector<StateMachineState *> &out)
-{
-	std::vector<StateMachineEdge *> edges;
-	targets(edges);
-	out.reserve(out.size() + edges.size());
-	for (auto it = edges.begin(); it != edges.end(); it++)
-		out.push_back((*it)->target);
-}
-
-void
-StateMachineState::targets(std::vector<const StateMachineState *> &out) const
-{
-	std::vector<const StateMachineEdge *> edges;
-	targets(edges);
-	out.reserve(out.size() + edges.size());
-	for (auto it = edges.begin(); it != edges.end(); it++)
-		out.push_back((*it)->target);
-}
-
-void
-StateMachineState::targets(std::queue<StateMachineEdge *> &out)
-{
-	std::vector<StateMachineEdge *> edges;
+	std::vector<StateMachineState *> edges;
 	targets(edges);
 	for (auto it = edges.begin(); it != edges.end(); it++)
 		out.push(*it);
@@ -856,7 +671,7 @@ StateMachineState::targets(std::queue<StateMachineEdge *> &out)
 void
 StateMachineState::findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt)
 {
-	std::vector<StateMachineEdge *> edges;
+	std::vector<StateMachineState *> edges;
 	targets(edges);
 	/* It might look like we can do this by just calling
 	   findLoadedAddresses on the @out set for each edge in turn.
@@ -870,27 +685,289 @@ StateMachineState::findLoadedAddresses(std::set<IRExpr *> &out, const AllowableO
 		for (auto it = t.begin(); it != t.end(); it++)
 			out.insert(*it);
 	}
-}
-
-StateMachineState::RoughLoadCount
-StateMachineState::roughLoadCount(RoughLoadCount acc) const
-{
-	if (acc == multipleLoads)
-		return multipleLoads;
-	std::vector<const StateMachineEdge *> edges;
-	targets(edges);
-	for (auto it = edges.begin(); acc != multipleLoads && it != edges.end(); it++)
-		acc = (*it)->roughLoadCount(acc);
-	return acc;
+	if (type == SideEffecting) {
+		StateMachineSideEffect *se = ((StateMachineSideEffecting *)this)->sideEffect;
+		if (se)
+			se->updateLoadedAddresses(out, opt);
+	}
 }
 
 #ifndef NDEBUG
 void
-StateMachine::assertAcyclic() const
+StateMachine::assertSSA() const
 {
-	std::vector<const StateMachineEdge *> roots;
-	root->targets(roots);
-	for (auto it = roots.begin(); it != roots.end(); it++)
-		(*it)->assertAcyclic();
+	std::set<const StateMachineSideEffecting *> states;
+	enumStates(this, &states);
+	std::set<threadAndRegister, threadAndRegister::fullCompare> discoveredAssignments;
+	for (auto it = states.begin(); it != states.end(); it++) {
+		StateMachineSideEffect *smse = (*it)->sideEffect;
+		if (!smse)
+			continue;
+		switch (smse->type) {
+		case StateMachineSideEffect::Load: {
+			StateMachineSideEffectLoad *smsel = (StateMachineSideEffectLoad *)smse;
+			assert(smsel->target.gen() != 0);
+			assert(smsel->target.gen() != (unsigned)-1);
+			if (!discoveredAssignments.insert(smsel->target).second)
+				abort();
+			break;
+		}
+		case StateMachineSideEffect::Copy: {
+			StateMachineSideEffectCopy *smsec = (StateMachineSideEffectCopy *)smse;
+			assert(smsec->target.gen() != 0);
+			assert(smsec->target.gen() != (unsigned)-1);
+			if (!discoveredAssignments.insert(smsec->target).second)
+				abort();
+			break;
+		}
+		case StateMachineSideEffect::Phi: {
+			StateMachineSideEffectPhi *smsep = (StateMachineSideEffectPhi *)smse;
+			assert(smsep->reg.gen() != 0);
+			assert(smsep->reg.gen() != (unsigned)-1);
+			if (!discoveredAssignments.insert(smsep->reg).second)
+					abort();
+			break;
+		}
+		case StateMachineSideEffect::Store:
+		case StateMachineSideEffect::AssertFalse:
+		case StateMachineSideEffect::Unreached:
+			break;
+		}
+	}
+
+	struct : public StateMachineTransformer {
+		IRExpr *transformIex(IRExprGet *ieg) {
+			assert(ieg->reg.gen() != 0);
+			return NULL;
+		}
+		IRExpr *transformIex(IRExprPhi *phi) {
+			for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
+				assert(*it != 0);
+			return IRExprTransformer::transformIex(phi);
+		}
+	} checkForNonSSAVars;
+	checkForNonSSAVars.transform(const_cast<StateMachine *>(this));
 }
 #endif
+
+#if 0
+StateMachineEdge::StateMachineEdge(const std::vector<StateMachineSideEffect *> &sideEffects,
+				   const VexRip &vr,
+				   StateMachineState *target)
+{
+	if (sideEffects.size() == 0) {
+		this->target = target;
+		return;
+	}
+	if (sideEffects.size() == 1) {
+		this->sideEffect = sideEffects[0];
+		this->target = target;
+		return;
+	}
+	StateMachineState **cursor;
+	StateMachineState *root;
+	cursor = &root;
+	for (unsigned x = 1; x < sideEffects.size(); x++) {
+		StateMachineEdge *t = new StateMachineEdge(sideEffects[x], NULL);
+		StateMachineProxy *p = new StateMachineProxy(vr, t);
+		*cursor = p;
+		cursor = &t->target;
+	}
+	*cursor = target;
+	this->target = root;
+}
+
+void
+StateMachineEdge::prependSideEffect(const VexRip &vr, StateMachineSideEffect *smse,
+				    StateMachineState ***endOfTheLine)
+{
+	assert(endOfTheLine || target);
+	if (!sideEffect) {
+		if (endOfTheLine)
+			assert(*endOfTheLine == &target);
+		sideEffect = smse;
+	} else {
+		StateMachineProxy *smp = new StateMachineProxy(vr, target);
+		smp->target->sideEffect = sideEffect;
+		target = smp;
+		sideEffect = smse;
+		if (endOfTheLine && *endOfTheLine == &target)
+			*endOfTheLine = &smp->target->target;
+	}
+}
+#endif
+
+void
+StateMachineSideEffecting::prependSideEffect(StateMachineSideEffect *se)
+{
+	if (sideEffect)
+		target = new StateMachineSideEffecting(origin, sideEffect, target);
+	sideEffect = se;
+}
+
+StateMachineState *
+StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *done_something,
+				    std::set<StateMachineState *> &done)
+{
+	if (done.count(this))
+		return this;
+	done.insert(this);
+
+	if (!sideEffect) {
+		*done_something = true;
+		return target->optimise(opt, done_something, done);
+	}
+
+	if (target == StateMachineUnreached::get()) {
+		*done_something = true;
+		return target;
+	}
+	if (sideEffect) {
+		if (sideEffect->type == StateMachineSideEffect::Unreached) {
+			*done_something = true;
+			return StateMachineUnreached::get();
+		}
+		sideEffect = sideEffect->optimise(opt, done_something);
+	}
+	target = target->optimise(opt, done_something, done);
+	return this;
+}
+
+template <typename t, typename s> static bool
+intersectSets(std::set<t, s> &out, const std::set<t, s> &inp)
+{
+	bool res = false;
+	for (auto it1 = out.begin(); it1 != out.end(); ) {
+		if (inp.count(*it1)) {
+			it1++;
+		} else {
+			out.erase(it1++);
+			res = true;
+		}
+	}
+	return res;
+}
+
+void
+StateMachine::sanityCheck() const
+{
+	/* These are expensive enough that we don't want them on
+	   unconditionally even in !NDEBUG builds. */
+	if (!debug_state_machine_sanity_checks)
+		return;
+
+	std::map<const StateMachineState *, std::set<threadAndRegister, threadAndRegister::fullCompare> > definedAtTopOfState;
+	std::set<threadAndRegister, threadAndRegister::fullCompare> allDefinedRegisters;
+	std::set<const StateMachineState *> allStates;
+
+	enumStates(this, &allStates);
+	for (auto it = allStates.begin(); it != allStates.end(); it++) {
+		const StateMachineSideEffect *se = (*it)->getSideEffect();
+		threadAndRegister r(threadAndRegister::invalid());
+		if (se && se->definesRegister(r))
+			allDefinedRegisters.insert(r);
+	}
+	for (auto it = allStates.begin(); it != allStates.end(); it++)
+		definedAtTopOfState[*it] = allDefinedRegisters;
+	definedAtTopOfState[root].clear();
+
+	bool progress = true;
+	while (progress && !TIMEOUT) {
+		progress = false;
+		for (auto it = definedAtTopOfState.begin();
+		     it != definedAtTopOfState.end();
+		     it++) {
+			std::set<threadAndRegister, threadAndRegister::fullCompare> *definedAtEndOfState = &it->second;
+			std::set<threadAndRegister, threadAndRegister::fullCompare> ts;
+			const StateMachineSideEffect *se = it->first->getSideEffect();
+			threadAndRegister definedHere(threadAndRegister::invalid());
+			if (se && se->definesRegister(definedHere)) {
+				ts = *definedAtEndOfState;
+				ts.insert(definedHere);
+				definedAtEndOfState = &ts;
+			}
+
+			std::vector<const StateMachineState *> exits;
+			it->first->targets(exits);
+			for (auto it = exits.begin(); it != exits.end(); it++) {
+				std::set<threadAndRegister, threadAndRegister::fullCompare> &other(definedAtTopOfState[*it]);
+				if (intersectSets(other, *definedAtEndOfState))
+					progress = true;
+			}
+		}
+	}
+
+	for (auto it = definedAtTopOfState.begin();
+	     it != definedAtTopOfState.end();
+	     it++)
+		it->first->sanityCheck(&definedAtTopOfState[it->first]);
+}
+
+StateMachineState *
+StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
+			       bool *done_something,
+			       std::set<StateMachineState *> &memo)
+{
+	if (successors.size() == 0) {
+		*done_something = true;
+		return StateMachineUnreached::get();
+	}
+	successors[0] = successors[0]->optimise(opt, done_something, memo);
+
+	/* Remove duplicates.  Note that we don't want to sort
+	   successors here, since that would involve a dependency on
+	   pointer ordering, which causes problems for determinacy. */
+	for (auto it1 = successors.begin(); it1 != successors.end(); ) {
+		if ((*it1)->type == StateMachineState::Unreached) {
+			/* Unreached nodes can be safely removed */
+			it1 = successors.erase(it1);
+			*done_something = true;
+			continue;
+		}
+		for (auto it2 = it1 + 1; it2 != successors.end(); ) {
+			if ( *it1 == *it2 ) {
+				*done_something = true;
+				it2 = successors.erase(it2);
+			} else if ( it1 == successors.begin() ) {
+				*it2 = (*it2)->optimise(opt, done_something, memo);
+				if ( *it1 == *it2 ) {
+					*done_something = true;
+					it2 = successors.erase(it2);
+				} else {
+					it2++;
+				}
+			} else {
+				it2++;
+			}
+		}
+		it1++;
+	}
+	if (successors.size() == 0) {
+		*done_something = true;
+		return StateMachineUnreached::get();
+	}
+	if (successors.size() == 1) {
+		*done_something = true;
+		return successors[0]->optimise(opt, done_something, memo);
+	}
+	return this;
+}
+
+MemoryAccessIdentifier
+MemoryAccessIdentifierAllocator::operator()(const ThreadRip &rip)
+{
+	/* I'm not sure why, but inlining the definition of dflt into
+	   its only use leads to a link error. */
+	unsigned dflt = MemoryAccessIdentifier::first_dynamic_generation;
+	auto it_and_did_something = ids.insert(std::pair<ThreadRip, unsigned>(rip, dflt));
+	auto it = it_and_did_something.first;
+	unsigned gen = it->second;
+	it->second++;
+	return MemoryAccessIdentifier(rip, gen);
+}
+
+IRExpr *
+MemoryAccessIdentifierAllocator::freeVariable(IRType ty, const ThreadRip &rip)
+{
+	return IRExpr_FreeVariable((*this)(rip), ty);
+}

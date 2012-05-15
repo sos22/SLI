@@ -33,7 +33,7 @@ log_bytes(const char *buf, Int nbytes)
 }
 
 static void
-handle_sigusr1(int ignore)
+handle_sigusr1(int )
 {
 	/* So that we can get profiling results etc. */
 	exit(1);
@@ -146,7 +146,9 @@ sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister
 		class _ : public IRExprTransformer {
 			const std::set<threadAndRegister, threadAndRegister::fullCompare> *live;
 			IRExpr *transformIex(IRExprGet *g) {
-				if (g->reg.isTemp())
+				if (g->reg.isTemp() ||
+				    (g->reg.gen() != (unsigned)-1 &&
+				     g->reg.gen() != 0))
 					assert(live->count(g->reg));
 				return NULL;
 			}

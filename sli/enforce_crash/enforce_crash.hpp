@@ -109,11 +109,11 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 			return NULL;
 		}
 		IRExpr *transformIex(IRExprLoad *e) {
-			if (!isAvail(e->rip))
+			if (!isAvail(e->rip.rip))
 				isGood = false;
 			return NULL;
 		}
-		IRExpr *transformIex(IRExprHappensBefore *e) {
+		IRExpr *transformIex(IRExprHappensBefore *) {
 			isGood = false;
 			return NULL;
 		}
@@ -198,7 +198,7 @@ public:
 			} else if (e->tag == Iex_ClientCall) {
 				rip = ((IRExprClientCall *)e)->callSite;
 			} else if (e->tag == Iex_Load) {
-				rip = ((IRExprLoad *)e)->rip;
+				rip = ((IRExprLoad *)e)->rip.rip;
 			} else if (e->tag == Iex_HappensBefore) {
 				/* These don't really get stashed in any useful sense */
 				doit = false;
@@ -328,8 +328,8 @@ public:
 			  CFG<ThreadRip> *cfg,
 			  expressionStashMapT &stashMap,
 			  unsigned _msg_id)
-		: before(invert ? hb->after : hb->before),
-		  after(invert ? hb->before : hb->after),
+		: before(invert ? hb->after.rip : hb->before.rip),
+		  after(invert ? hb->before.rip : hb->after.rip),
 		  msg_id(_msg_id)
 	{
 		printf("%x: HBE %s -> %s\n",
@@ -980,7 +980,7 @@ public:
 		else
 			return false;
 	}
-	bool exploreFunction(ThreadRip rip) {
+	bool exploreFunction(ThreadRip) {
 		return true;
 	}
 	EnforceCrashCFG(AddressSpace *as,

@@ -26,10 +26,11 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 		do_case(CCall);
 		do_case(Mux0X);
 		do_case(Associative);
-		do_case(FreeVariable);
 		do_case(ClientCall);
 		do_case(ClientCallFailed);
 		do_case(HappensBefore);
+		do_case(Phi);
+		do_case(FreeVariable);
 #undef do_case
 	}
 	/* res == e shouldn't really happen, but it's just about

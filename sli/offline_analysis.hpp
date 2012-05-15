@@ -14,7 +14,7 @@ class IRExprTransformer {
 	IRExpr *_currentIRExpr;
 protected:
 	IRExpr *currentIRExpr() { return _currentIRExpr; }
-	virtual IRExpr *transformIex(IRExprGet *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExprGet *) { return NULL; }
 	virtual IRExpr *transformIex(IRExprGetI *e)
 	{
 		bool t = false;
@@ -81,7 +81,7 @@ protected:
 		else
 			return IRExpr_Load(e->ty, addr, e->rip);
 	}
-	virtual IRExpr *transformIex(IRExprConst *e)
+	virtual IRExpr *transformIex(IRExprConst *)
 	{
 		return NULL;
 	}
@@ -99,10 +99,6 @@ protected:
 	}
 	virtual IRExpr *transformIex(IRExprCCall *);
 	virtual IRExpr *transformIex(IRExprAssociative *);
-	virtual IRExpr *transformIex(IRExprFreeVariable *e)
-	{
-		return NULL;
-	}
 	virtual IRExpr *transformIex(IRExprClientCall *);
 	virtual IRExpr *transformIex(IRExprClientCallFailed *e)
 	{
@@ -114,7 +110,9 @@ protected:
 		else
 			return IRExpr_ClientCallFailed(a1);
 	}
-	virtual IRExpr *transformIex(IRExprHappensBefore *e) { return NULL; }
+	virtual IRExpr *transformIex(IRExprHappensBefore *) { return NULL; }
+	virtual IRExpr *transformIex(IRExprPhi *) { return NULL; }
+	virtual IRExpr *transformIex(IRExprFreeVariable *) { return NULL; }
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 public:
 	IRExpr *doit(IRExpr *e, bool *done_something) { return transformIRExpr(e, done_something); }
@@ -123,7 +121,6 @@ public:
 
 class StateMachineTransformer : public IRExprTransformer {
 protected:
-	std::vector<std::pair<FreeVariableKey, IRExpr *> > fvDelta;
 	virtual StateMachineSideEffectLoad *transformOneSideEffect(
 		StateMachineSideEffectLoad *, bool *);
 	virtual StateMachineSideEffectStore *transformOneSideEffect(
@@ -137,9 +134,7 @@ protected:
 		return NULL;
 	}
 	virtual StateMachineSideEffectPhi *transformOneSideEffect(
-		StateMachineSideEffectPhi *, bool *) {
-		return NULL;
-	}
+		StateMachineSideEffectPhi *, bool *);
 	virtual StateMachineUnreached *transformOneState(StateMachineUnreached *,
 							 bool *)
 	{ return NULL; }
@@ -149,73 +144,89 @@ protected:
 	virtual StateMachineNoCrash *transformOneState(StateMachineNoCrash *,
 						       bool *)
 	{ return NULL; }
-	virtual StateMachineStub *transformOneState(StateMachineStub *s,
-						    bool *done_something)
+	virtual StateMachineStub *transformOneState(StateMachineStub *,
+						    bool *)
 	{ return NULL; }
-	virtual StateMachineProxy *transformOneState(StateMachineProxy *p,
-						     bool *done_something)
+	virtual StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
+							     bool *done_something)
 	{
-		return NULL;
+		bool b = false;
+		StateMachineSideEffect *e =
+			smse->sideEffect ? transformSideEffect(smse->sideEffect, &b) : NULL;
+		if (b) {
+			*done_something = true;
+			return new StateMachineSideEffecting(smse->origin,
+							     e,
+							     smse->target);
+		} else {
+			return NULL;
+		}
 	}
 	virtual StateMachineBifurcate *transformOneState(StateMachineBifurcate *s,
 							 bool *done_something)
 	{
 		bool b = false;
 		IRExpr *c = doit(s->condition, &b);
-		if (b)
+		if (b) {
+			*done_something = true;
 			return new StateMachineBifurcate(s->origin,
 							 c,
-							 (StateMachineEdge *)NULL,
-							 (StateMachineEdge *)NULL);
-		else
+							 s->trueTarget,
+							 s->falseTarget);
+		} else {
 			return NULL;
+		}
 	}
-	virtual StateMachineEdge *transformOneEdge(StateMachineEdge *, bool *);
-	virtual StateMachineState *transformState(StateMachineState *, bool *);
+	virtual StateMachineNdChoice *transformOneState(StateMachineNdChoice *,
+							bool *)
+	{
+		return NULL;
+	}
+
 public:
+	virtual StateMachineState *transformState(StateMachineState *, bool *);
 	virtual StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,
 							    bool *);
-	virtual void transformFreeVariables(FreeVariableMap *fvm, bool *done_something = NULL)
-	{
-		bool b;
-		if (!done_something) done_something = &b;
-		fvm->applyTransformation(*this, done_something);
-	}
+	static void rewriteMachine(const StateMachine *sm,
+				   std::map<const StateMachineState *, StateMachineState *> &rewriteRules);
+
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL);
 };
 
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
 void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out);
-StateMachineEdge *getProximalCause(MachineState *ms, const ThreadRip &rip, Thread *thr);
+class MemoryAccessIdentifierAllocator;
+StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip,
+				    MemoryAccessIdentifierAllocator &);
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
 				   VexPtr<Oracle> &oracle,
-				   bool noExtendContext,
 				   bool is_ssa,
-				   GarbageCollectionToken token);
+				   GarbageCollectionToken token,
+				   bool *progress = NULL);
 
 /* Individual optimisation passes. */
 void removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 			   const Oracle::RegisterAliasingConfiguration *alias,
 			   const AllowableOptimisations &opt);
-StateMachine *availExpressionAnalysis(StateMachine *sm, const AllowableOptimisations &opt,
-				      const Oracle::RegisterAliasingConfiguration *alias, Oracle *oracle,
+StateMachine *availExpressionAnalysis(StateMachine *sm,
+				      const AllowableOptimisations &opt,
+				      const Oracle::RegisterAliasingConfiguration *alias,
+				      bool is_ssa,
+				      Oracle *oracle,
 				      bool *done_something);
-StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something);
+StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt);
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
-
-StateMachine *introduceFreeVariablesForRegisters(StateMachine *sm, bool *done_something);
-StateMachine *optimiseFreeVariables(StateMachine *sm, bool *done_something);
+StateMachine *useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
+				    Oracle *oracle, bool *done_something);
 
 void breakCycles(StateMachine *);
 
-void findAllEdges(StateMachine *sm, std::set<StateMachineEdge *> &out);
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
 class FixConsumer;
-void checkWhetherInstructionCanCrash(const VexRip &rip,
-				     VexPtr<MachineState> &ms,
-				     VexPtr<Thread> &thr,
+void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
+				     unsigned tid,
 				     VexPtr<Oracle> &oracle,
 				     FixConsumer &df,
 				     GarbageCollectionToken token);

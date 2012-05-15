@@ -9,6 +9,12 @@ namespace _deadCode {
 }
 #endif
 
+#ifdef NDEBUG
+#define debug_dump_liveness_map 0
+#else
+static int debug_dump_liveness_map = 0;
+#endif
+
 class LivenessEntry : public std::set<threadAndRegister, threadAndRegister::fullCompare> {
 	void killRegister(threadAndRegister r)
 	{
@@ -67,8 +73,11 @@ public:
 			killRegister(smsep->reg);
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
-			     it++)
-				this->insert(smsep->reg.setGen(*it));
+			     it++) {
+				if (it->second)
+					useExpression(it->second);
+				this->insert(smsep->reg.setGen(it->first));
+			}
 			return;
 		}
 		}
@@ -82,177 +91,235 @@ public:
 			insert(*it);
 	}
 
-	bool registerLive(threadAndRegister reg) { return count(reg); }
-	bool assertionLive(IRExpr *assertion) {
+	bool registerLive(threadAndRegister reg) const { return count(reg); }
+	bool assertionLive(IRExpr *assertion, const AllowableOptimisations &opt) const {
 		if (assertion->tag == Iex_Const)
 			return false;
-		else
+
+		if (!opt.noExtend())
 			return true;
+
+		/* If we're in noExtend mode, we only keep an
+		   assertion around if it mentions a register which is
+		   live after it. */
+		struct : public IRExprTransformer {
+			bool res;
+			const LivenessEntry *_this;
+			IRExpr *transformIex(IRExprGet *ieg) {
+				if (_this->registerLive(ieg->reg))
+					res = true;
+				return NULL;
+			}
+		} doit;
+		doit.res = false;
+		doit._this = this;
+		doit.doit(assertion);
+		return doit.res;
+	}
+
+	void print() const {
+		for (auto it = begin(); it != end(); it++) {
+			if (it != begin())
+				printf(", ");
+			printf("%s", it->name());
+		}
+	}
+};
+
+class LivenessMap {
+	/* Map from states to what's live at the *start* of the state */
+	std::map<const StateMachineState *, LivenessEntry> content;
+
+	void updateState(StateMachineState *sm, bool *progress)
+	{
+		LivenessEntry res(liveAtEndOfState(sm));
+		switch (sm->type) {
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
+			if (sme->sideEffect)
+				res.useSideEffect(sme->sideEffect);
+			break;
+		}
+		case StateMachineState::Bifurcate: {
+			StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
+			res.useExpression(smb->condition);
+			break;
+		}
+		case StateMachineState::NdChoice:
+		case StateMachineState::Unreached:
+		case StateMachineState::Stub:
+		case StateMachineState::Crash:
+		case StateMachineState::NoCrash:
+			/* Nothing needed */
+			break;
+		}
+		if (expandSet(content[sm], res))
+			*progress = true;
+	}
+
+public:
+	LivenessMap(std::set<StateMachineState *> &allStates) {
+		bool progress;
+		do {
+			progress = false;
+			for (auto it = allStates.begin();
+			     it != allStates.end();
+			     it++)
+				updateState(*it, &progress);
+		} while (progress && !TIMEOUT);
+	}
+	LivenessEntry liveAtStartOfState(const StateMachineState *sm) const {
+		auto it = content.find(sm);
+		/* The base case for the Tarski iteration is that
+		   nothing is live anywhere. */
+		if (it == content.end())
+			return LivenessEntry();
+		else
+			return it->second;
+	}
+	LivenessEntry liveAtEndOfState(const StateMachineState * sm) const {
+		std::vector<const StateMachineState *> exits;
+		sm->targets(exits);
+		LivenessEntry res;
+		if (exits.size() == 0)
+			return res;
+		res = liveAtStartOfState(exits[0]);
+		for (unsigned x = 1; x < exits.size(); x++)
+			res.merge(liveAtStartOfState(exits[x]));
+		return res;
+	}
+	void print(const std::map<const StateMachineState *, int> &labels) const {
+		printf("At starts of states:\n");
+		for (auto it = content.begin(); it != content.end(); it++) {
+			auto it2 = labels.find(it->first);
+			assert(it2 != labels.end());
+			printf("l%d: ", it2->second);
+			it->second.print();
+			printf("\n");
+		}
 	}
 };
 
 static StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something)
+deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt)
 {
+	std::map<const StateMachineState *, int> stateLabels;
+
+	if (debug_dump_liveness_map) {
+		printf("Input to deadCodeElimination:\n");
+		printStateMachine(sm, stdout, stateLabels);
+	}
+
 	std::set<StateMachineState *> allStates;
 	findAllStates(sm, allStates);
 
-	/* Stuff referenced by the free variables map is considered to
-	   be live everywhere in the program. */
-	LivenessEntry alwaysLive;
-	for (auto it = sm->freeVariables.content->begin();
-	     it != sm->freeVariables.content->end();
-	     it++)
-		alwaysLive.useExpression(it.value());
+	LivenessMap livenessMap(allStates);
 
 	if (TIMEOUT)
 		return sm;
 
-	class LivenessMap : public std::map<StateMachineState *, LivenessEntry> {
-		void buildResForEdge(LivenessEntry &out, StateMachineEdge *edge)
-		{
-			out = (*this)[edge->target];
-			for (auto it = edge->sideEffects.rbegin();
-			     it != edge->sideEffects.rend();
-			     it++)
-				out.useSideEffect(*it);
-		}
-
-		void updateState(StateMachineState *sm, bool *progress)
-		{
-			LivenessEntry res;
-			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(sm)) {
-				buildResForEdge(res, smp->target);
-			} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(sm)) {
-				buildResForEdge(res, smb->trueTarget);
-				LivenessEntry res_false;
-				buildResForEdge(res_false, smb->falseTarget);
-				res.merge(res_false);
-				res.useExpression(smb->condition);
-			} else if (dynamic_cast<StateMachineTerminal *>(sm)) {
-				/* Nothing needed */
-			} else {
-				abort();
-			}
-			LivenessEntry &outputSlot( (*this)[sm] );
-			if (expandSet(outputSlot, res))
-				*progress = true;
-		}
-
-	public:
-		LivenessMap(StateMachine *sm, std::set<StateMachineState *> &allStates) {
-			bool progress;
-			do {
-				progress = false;
-				for (auto it = allStates.begin();
-				     it != allStates.end();
-				     it++)
-					updateState(*it, &progress);
-			} while (progress && !TIMEOUT);
-		}
-	} livenessMap(sm, allStates);
-
 	if (TIMEOUT)
 		return sm;
+
+	if (debug_dump_liveness_map) {
+		printf("Liveness map:\n");
+		livenessMap.print(stateLabels);
+	}
 
 	class _ {
 		LivenessMap &livenessMap;
-		LivenessEntry &alwaysLive;
 		bool *done_something;
-		FreeVariableMap &fvm;
+		const AllowableOptimisations &opt;
 
-		void doit(StateMachineEdge *edge, FreeVariableMap &fvm) {
-			LivenessEntry alive = livenessMap[edge->target];
-			/* Surprise! vector::erase doesn't work with a
-			   reverse_iterator, so use a raw index. */
-			for (int x = edge->sideEffects.size() - 1;
-			     x >= 0;
-			     x--) {
-				StateMachineSideEffect *newEffect = NULL;
-				StateMachineSideEffect *e = edge->sideEffects[x];
-				bool dead = false;
-				switch (e->type) {
-				case StateMachineSideEffect::Load: {
-					StateMachineSideEffectLoad *smsel =
-						(StateMachineSideEffectLoad *)e;
-					if (!alwaysLive.registerLive(smsel->target) &&
-					    !alive.registerLive(smsel->target))
-						newEffect = new StateMachineSideEffectAssertFalse(
-							IRExpr_Unop(Iop_BadPtr, smsel->addr));
-					break;
-				}
-				case StateMachineSideEffect::Store:
-				case StateMachineSideEffect::Unreached:
-					break;
-				case StateMachineSideEffect::AssertFalse: {
-					StateMachineSideEffectAssertFalse *a =
-						(StateMachineSideEffectAssertFalse *)e;
-					if (dynamic_cast<StateMachineTerminal *>(edge->target) ||
-					    !alive.assertionLive(a->value))
-						dead = true;
-					break;
-				}
-				case StateMachineSideEffect::Copy: {
-					StateMachineSideEffectCopy *smsec =
-						(StateMachineSideEffectCopy *)e;
-					if (smsec->value->tag == Iex_Get &&
-					    threadAndRegister::fullEq(((IRExprGet *)smsec->value)->reg, smsec->target)) {
-						/* Copying a register
-						   or temporary back
-						   to itself is always
-						   dead, regardless of
-						   what liveness
-						   analysis proper
-						   might say. */
-						dead = true;
-					} else {
-						dead = !alive.registerLive(smsec->target) &&
-							!alwaysLive.registerLive(smsec->target);
-					}
-					break;
-				}
-				case StateMachineSideEffect::Phi: {
-					StateMachineSideEffectPhi *p =
-						(StateMachineSideEffectPhi *)e;
-					if (!alive.registerLive(p->reg) &&
-					    !alwaysLive.registerLive(p->reg))
-						dead = true;
-					break;
-				}
-				}
-
-				if (dead) {
-					*done_something = true;
-					edge->sideEffects.erase(edge->sideEffects.begin() + x);
-				} else if (newEffect) {
-					*done_something = true;
-					edge->sideEffects[x] = newEffect;
-					alive.useSideEffect(newEffect);
+		StateMachineSideEffect *doit(StateMachineSideEffect *e,
+					     bool targetIsTerminal,
+					     const LivenessEntry &alive) {
+			StateMachineSideEffect *newEffect = NULL;
+			bool dead = false;
+			switch (e->type) {
+			case StateMachineSideEffect::Load: {
+				StateMachineSideEffectLoad *smsel =
+					(StateMachineSideEffectLoad *)e;
+				if (!alive.registerLive(smsel->target))
+					newEffect = new StateMachineSideEffectAssertFalse(
+						IRExpr_Unop(Iop_BadPtr, smsel->addr));
+				break;
+			}
+			case StateMachineSideEffect::Store:
+			case StateMachineSideEffect::Unreached:
+				break;
+			case StateMachineSideEffect::AssertFalse: {
+				StateMachineSideEffectAssertFalse *a =
+					(StateMachineSideEffectAssertFalse *)e;
+				if (targetIsTerminal ||
+				    !alive.assertionLive(a->value, opt))
+					dead = true;
+				break;
+			}
+			case StateMachineSideEffect::Copy: {
+				StateMachineSideEffectCopy *smsec =
+					(StateMachineSideEffectCopy *)e;
+				if (smsec->value->tag == Iex_Get &&
+				    threadAndRegister::fullEq(((IRExprGet *)smsec->value)->reg, smsec->target)) {
+					/* Copying a register
+					   or temporary back
+					   to itself is always
+					   dead, regardless of
+					   what liveness
+					   analysis proper
+					   might say. */
+					dead = true;
 				} else {
-					alive.useSideEffect(e);
+					dead = !alive.registerLive(smsec->target);
 				}
+				break;
+			}
+			case StateMachineSideEffect::Phi: {
+				StateMachineSideEffectPhi *p =
+					(StateMachineSideEffectPhi *)e;
+				if (!alive.registerLive(p->reg))
+					dead = true;
+				break;
+			}
+			}
+
+			if (dead) {
+				*done_something = true;
+				return NULL;
+			} else if (newEffect) {
+				*done_something = true;
+				return newEffect;
+			} else {
+				return e;
 			}
 		}
 	public:
 		void operator()(StateMachineState *state) {
-			if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(state)) {
-				doit(smp->target, fvm);
-			} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(state)) {
-				doit(smb->trueTarget, fvm);
-				doit(smb->falseTarget, fvm);
-			} else if (dynamic_cast<StateMachineTerminal *>(state)) {
+			switch (state->type) {
+			case StateMachineState::SideEffecting: {
+				StateMachineSideEffecting *smse = (StateMachineSideEffecting *)state;
+				if (smse->sideEffect)
+					smse->sideEffect = doit(smse->sideEffect,
+								false,
+								livenessMap.liveAtEndOfState(smse));
+				return;
+			}
+			case StateMachineState::NdChoice:
+			case StateMachineState::Bifurcate:
+			case StateMachineState::Crash:
+			case StateMachineState::NoCrash:
+			case StateMachineState::Stub:
+			case StateMachineState::Unreached:
 				/* Nothing needed */
-			} else {
-				abort();
-			}			
+				return;
+			}
+			abort();
 		}
 
-		_(LivenessMap &_livenessMap, LivenessEntry &_alwaysLive,
-		  bool *_done_something, FreeVariableMap &_fvm)
-			: livenessMap(_livenessMap), alwaysLive(_alwaysLive),
-			  done_something(_done_something), fvm(_fvm)
+		_(LivenessMap &_livenessMap, bool *_done_something, const AllowableOptimisations &_opt)
+			: livenessMap(_livenessMap), done_something(_done_something), opt(_opt)
 		{}
-	} eliminateDeadCode(livenessMap, alwaysLive, done_something, sm->freeVariables);
+	} eliminateDeadCode(livenessMap, done_something, opt);
 
 	for (auto it = allStates.begin();
 	     it != allStates.end();
@@ -262,6 +329,10 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 		eliminateDeadCode(*it);
 	}
 
+	if (debug_dump_liveness_map) {
+		printf("Final result:\n");
+		printStateMachine(sm, stdout);
+	}
 	return sm;
 }
 
@@ -269,8 +340,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 }
 
 StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something)
+deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt)
 {
-	return _deadCode::deadCodeElimination(sm, done_something);
+	return _deadCode::deadCodeElimination(sm, done_something, opt);
 }
 

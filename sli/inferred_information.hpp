@@ -64,16 +64,21 @@ public:
 };
 
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
-StateMachine *buildProbeMachine(std::vector<VexRip> &previousInstructions,
-				VexPtr<InferredInformation, &ir_heap> &ii,
-				VexPtr<Oracle> &oracle,
-				const VexRip &interestingRip,
-				ThreadId tid,
-				GarbageCollectionToken token);
+class MemoryAccessIdentifierAllocator;
+bool buildProbeMachine(VexPtr<Oracle> &oracle,
+		       const DynAnalysisRip &interestingRip,
+		       VexPtr<StateMachineState, &ir_heap> &proximal,
+		       ThreadId tid,
+		       const AllowableOptimisations &opt,
+		       StateMachine ***out,
+		       unsigned *nr_out_machines,
+		       MemoryAccessIdentifierAllocator &mai,
+		       GarbageCollectionToken token);
 CrashSummary *diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			    VexPtr<Oracle> &oracle,
-			    VexPtr<MachineState> &ms,
 			    bool needRemoteMacroSections,
+			    const AllowableOptimisations &opt,
+			    const MemoryAccessIdentifierAllocator &mai,
 			    GarbageCollectionToken token);
 void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 VexPtr<Oracle> &oracle,

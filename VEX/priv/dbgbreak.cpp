@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 static void
-dbg_brk(const char *msg)
+dbg_brk(const char *msg __attribute__((unused)))
 {
 }
 

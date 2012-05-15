@@ -140,7 +140,7 @@ public:
 			}
 		}
 
-		void operator++(int ign) { this->operator++(); }
+		void operator++(int ) { this->operator++(); }
 		bool operator!=(const iterator &i) const {
 			return cursor.get() != i.cursor.get();
 		}

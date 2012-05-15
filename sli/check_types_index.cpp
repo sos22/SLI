@@ -10,6 +10,9 @@
 int
 main(int argc, char *argv[])
 {
+	if (argc < 2)
+		errx(1, "not enough arguments");
+
 	Mapping mapping;
 	if (mapping.init(argv[1]) < 0)
 		err(1, "loading %s", argv[1]);

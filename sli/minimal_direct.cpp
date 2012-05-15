@@ -33,7 +33,7 @@ public:
 
 void
 DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
-		    GarbageCollectionToken token)
+		    GarbageCollectionToken )
 {
 	__set_profiling(dumpfix);
 
@@ -79,9 +79,8 @@ public:
 static TimeoutTimer timeoutTimer;
 
 static void
-consider_rip(const VexRip &my_rip,
-	     VexPtr<MachineState> &ms,
-	     VexPtr<Thread> &thr,
+consider_rip(const DynAnalysisRip &my_rip,
+	     unsigned tid,
 	     VexPtr<Oracle> &oracle,
 	     DumpFix &df,
 	     FILE *timings,
@@ -99,7 +98,7 @@ consider_rip(const VexRip &my_rip,
 	struct timeval start;
 	gettimeofday(&start, NULL);
 
-	checkWhetherInstructionCanCrash(my_rip, ms, thr, oracle, df, token);
+	checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, token);
 
 	struct timeval end;
 	gettimeofday(&end, NULL);
@@ -133,11 +132,12 @@ main(int argc, char *argv[])
 
 	__set_profiling(root);
 
-	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
-	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
 	VexPtr<Oracle> oracle;
-
-	oracle = new Oracle(ms, thr, argv[2]);
+	{
+		MachineState *ms = MachineState::readELFExec(argv[1]);
+		Thread *thr = ms->findThread(ThreadId(1));
+		oracle = new Oracle(ms, thr, argv[2]);
+	}
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
 	FILE *output = fopen("generated_patch.c", "w");
@@ -152,10 +152,10 @@ main(int argc, char *argv[])
 	end_percentage = 100;
 
 	if (argc == 5) {
-		VexRip vr;
+		DynAnalysisRip vr;
 		const char *succ;
-		if (parseVexRip(&vr, argv[4], &succ)) {
-			consider_rip(vr, ms, thr, oracle, df, NULL, ALLOW_GC);
+		if (parseDynAnalysisRip(&vr, argv[4], &succ)) {
+			consider_rip(vr, 1, oracle, df, NULL, ALLOW_GC);
 			df.finish();
 			return 0;
 		}
@@ -196,11 +196,10 @@ main(int argc, char *argv[])
 		instrIterator->fetch(&dar);
 		_logfile = fopenf("w", "logs/%ld", cntr + start_instr);
 		if (!_logfile) err(1, "opening logs/%ld", cntr + start_instr);
-		VexRip rip = dar.toVexRip();
-		printf("Considering %s, log logs/%ld\n", rip.name(), cntr + start_instr);
-		fprintf(_logfile, "Log for %s:\n", rip.name());
+		printf("Considering %s, log logs/%ld\n", dar.name(), cntr + start_instr);
+		fprintf(_logfile, "Log for %s:\n", dar.name());
 		cntr++;
-		consider_rip(rip, ms, thr, oracle, df, timings, ALLOW_GC);
+		consider_rip(dar, 1, oracle, df, timings, ALLOW_GC);
 		fclose(_logfile);
 		_logfile = stdout;
 

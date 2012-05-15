@@ -92,8 +92,8 @@ happensAfterMapT::init(DNF_Conjunction &c, CFG<ThreadRip> *cfg)
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
 			IRExprHappensBefore *e = (IRExprHappensBefore *)c[x].second;
-			ThreadRip beforeRip = e->before;
-			ThreadRip afterRip = e->after;
+			ThreadRip beforeRip = e->before.rip;
+			ThreadRip afterRip = e->after.rip;
 			Instruction<ThreadRip> *before = cfg->ripToInstr->get(beforeRip);
 			Instruction<ThreadRip> *after = cfg->ripToInstr->get(afterRip);
 			if (!before || !after) {

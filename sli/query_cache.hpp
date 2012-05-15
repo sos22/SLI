@@ -45,7 +45,7 @@ public:
 		       nr_queries, nr_hits, (double)nr_hits / nr_queries, nr_assoc_discards);
 	}
 
-	void runGc(HeapVisitor &hv) {
+	void runGc(HeapVisitor &) {
 		printf("%s cache: %d queries, %d hits, rate %e; %d associativity discards\n",
 		       name, nr_queries, nr_hits, (double)nr_hits / nr_queries,
 		       nr_assoc_discards);

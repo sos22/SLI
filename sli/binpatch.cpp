@@ -47,7 +47,7 @@ AddExitCallPatch::generateEpilogue(ThreadRip exitRip)
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
 
-	emitCallSequence("(unsigned long)release_lock", true);
+	emitCallSequence("(unsigned long)release_lock");
 	emitJmpToRipHost(exitRip.rip.unwrap_vexrip());
 }
 

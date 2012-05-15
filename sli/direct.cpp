@@ -171,7 +171,7 @@ protected:
 	}
 	virtual unsigned long _hash() const = 0;
 	virtual bool _eq(const CrashExpression *o) const = 0;
-	virtual CrashExpression *_simplify(unsigned hardness) { return this; }
+	virtual CrashExpression *_simplify(unsigned) { return this; }
 	void rehash() {
 		clearName();
 		if (!have_hash)
@@ -250,7 +250,7 @@ public:
 		}
 		return hashval;
 	}
-	virtual bool isConstant(unsigned long &l) { return false; }
+	virtual bool isConstant(unsigned long &) { return false; }
 	bool isConstant() { unsigned long ign; return isConstant(ign); }
 	bool isTrue() { unsigned long r; if (isConstant(r) && r) return !!r; else return false; }
 	static CrashExpression *get(IRExpr *e);
@@ -292,6 +292,7 @@ public:
 	
 	void relocate(CrashExpression *target, size_t sz)
 	{
+		assert(sz == sizeof(*this));
 		if (target->next_intern)
 			target->next_intern->prev_intern = target;
 		if (target->prev_intern)
@@ -317,7 +318,7 @@ class CrashExpressionTemp : public CrashExpression {
 	CrashExpressionTemp(IRTemp t) : tmp(t) {}
 protected:
 	const char *_mkName() const { return vex_asprintf("t%d", tmp); }
-	void _visit(HeapVisitor &hv) {}
+	void _visit(HeapVisitor &) {}
 
 	bool _eq(const CrashExpression *o) const {
 		if (const CrashExpressionTemp *t =
@@ -335,10 +336,10 @@ public:
 	CrashExpression *map(CPMapper &m) { return m(this); }
 	unsigned complexity() const { return 2; }
 
-	void build_relevant_address_list(Thread *thr,
-					 MachineState *ms,
-					 gc_map<unsigned long, bool> *addresses,
-					 const concreteStoresT &stores) {
+	void build_relevant_address_list(Thread *,
+					 MachineState *,
+					 gc_map<unsigned long, bool> *,
+					 const concreteStoresT &) {
 		/* This can't happen, because we shouldn't be building
 		   the address list until all temporaries have been
 		   resolved. */
@@ -346,7 +347,7 @@ public:
 	}
 
 	unsigned long eval(Thread *thr,
-			   MachineState *ms,
+			   MachineState *,
 			   const std::vector<concrete_store> &)
 	{
 		return thr->temporaries[tmp].lo;
@@ -354,7 +355,7 @@ public:
 	unsigned long discoverRelevantMallocs(Thread *thr,
 					      MachineState *ms,
 					      const std::vector<concrete_store> &cs,
-					      std::set<unsigned long> &out)
+					      std::set<unsigned long> &)
 	{
 		return eval(thr, ms, cs);
 	}
@@ -364,7 +365,7 @@ class CrashExpressionRegister : public CrashExpression {
 	CrashExpressionRegister(Int o) : offset(o) {}
 protected:
 	const char *_mkName() const { return vex_asprintf("r%d", offset); }
-	void _visit(HeapVisitor &hv) {}
+	void _visit(HeapVisitor &) {}
 	bool _eq(const CrashExpression *o) const {
 		if (const CrashExpressionRegister *t =
 		    dynamic_cast<const CrashExpressionRegister *>(o))
@@ -383,14 +384,14 @@ public:
 	bool pointsAtStack() const {
 		return offset == OFFSET_amd64_RSP;
 	}
-	void build_relevant_address_list(Thread *thr,
-					 MachineState *ms,
-					 gc_map<unsigned long, bool> *addresses,
-					 const concreteStoresT &stores)
+	void build_relevant_address_list(Thread *,
+					 MachineState *,
+					 gc_map<unsigned long, bool> *,
+					 const concreteStoresT &)
 	{
 	}
 	unsigned long eval(Thread *thr,
-			   MachineState *ms,
+			   MachineState *,
 			   const std::vector<concrete_store> &)
 
 	{
@@ -399,7 +400,7 @@ public:
 	unsigned long discoverRelevantMallocs(Thread *thr,
 					      MachineState *ms,
 					      const std::vector<concrete_store> &cs,
-					      std::set<unsigned long> &out)
+					      std::set<unsigned long> &)
 	{
 		return eval(thr, ms, cs);
 	}
@@ -409,7 +410,7 @@ class CrashExpressionConst : public CrashExpression {
 	CrashExpressionConst(unsigned long v) : value(v) {}
 protected:
 	const char *_mkName() const { return vex_asprintf("0x%lx", value); }
-	void _visit(HeapVisitor &hv) {}
+	void _visit(HeapVisitor &) {}
 	bool _eq(const CrashExpression *o) const {
 		if (const CrashExpressionConst *t =
 		    dynamic_cast<const CrashExpressionConst *>(o))
@@ -426,14 +427,14 @@ public:
 	CrashExpression *map(CPMapper &m) { return m(this); }
 	unsigned complexity() const { return 1; }
 	bool isConstant(unsigned long &l) { l = value; return true; }
-	void build_relevant_address_list(Thread *thr,
-					 MachineState *ms,
-					 gc_map<unsigned long, bool> *addresses,
-					 const concreteStoresT &stores)
+	void build_relevant_address_list(Thread *,
+					 MachineState *,
+					 gc_map<unsigned long, bool> *,
+					 const concreteStoresT &)
 	{
 	}
-	unsigned long eval(Thread *thr,
-			   MachineState *ms,
+	unsigned long eval(Thread *,
+			   MachineState *,
 			   const std::vector<concrete_store> &)
 	{
 		return value;
@@ -441,7 +442,7 @@ public:
 	unsigned long discoverRelevantMallocs(Thread *thr,
 					      MachineState *ms,
 					      const std::vector<concrete_store> &cs,
-					      std::set<unsigned long> &out)
+					      std::set<unsigned long> &)
 	{
 		return eval(thr, ms, cs);
 	}
@@ -485,14 +486,14 @@ public:
 	/* Give failed nodes a very high complexity, so that the
 	   simplification eliminates them whenever possible. */
 	unsigned complexity() const { return (unsigned)-1; }
-	void build_relevant_address_list(Thread *thr,
-					 MachineState *ms,
-					 gc_map<unsigned long, bool> *addresses,
-					 const concreteStoresT &stores)
+	void build_relevant_address_list(Thread *,
+					 MachineState *,
+					 gc_map<unsigned long, bool> *,
+					 const concreteStoresT &)
 	{
 	}
-	unsigned long eval(Thread *thr,
-			   MachineState *ms,
+	unsigned long eval(Thread *,
+			   MachineState *,
 			   const std::vector<concrete_store> &)
 	{
 		/* Guess wildly. */
@@ -501,7 +502,7 @@ public:
 	unsigned long discoverRelevantMallocs(Thread *thr,
 					      MachineState *ms,
 					      const std::vector<concrete_store> &cs,
-					      std::set<unsigned long> &out)
+					      std::set<unsigned long> &)
 	{
 		return eval(thr, ms, cs);
 	}
@@ -616,7 +617,7 @@ public:
 
 class CrashExpressionBinop : public CrashExpression {
 protected:
-	virtual void __visit(HeapVisitor &hv) {}
+	virtual void __visit(HeapVisitor &) {}
 	virtual const char *__mkName() const = 0;
 	void _visit(HeapVisitor &hv) { hv(l); hv(r); __visit(hv); }
 	const char *_mkName() const { return vex_asprintf("%s(%s, %s)",
@@ -1386,8 +1387,8 @@ public:
 			d->complexity() + 
 			e->complexity();
 	}
-	unsigned long eval(Thread *thr, MachineState *ms,
-			   const concreteStoresT &stores)
+	unsigned long eval(Thread *, MachineState *,
+			   const concreteStoresT &)
 	{
 		/* If the simplifier doesn't know what to do with
 		   this, we're pretty much boned. */
@@ -1487,8 +1488,8 @@ public:
 			c->complexity() + 
 			d->complexity();
 	}
-	unsigned long eval(Thread *thr, MachineState *ms,
-			   const concreteStoresT &stores)
+	unsigned long eval(Thread *, MachineState *,
+			   const concreteStoresT &)
 	{
 		/* If the simplifier doesn't know what to do with
 		   this, we're pretty much boned. */
@@ -2140,7 +2141,7 @@ static bool cmns_bisimilar(CrashMachineNode *cmn1, CrashMachineNode *cmn2);
 class CrashMachine : public GarbageCollected<CrashMachine> {
 	friend class CRAEventRecorder;
 
-	static void visit_content_fn(CrashTimestamp &ts,
+	static void visit_content_fn(CrashTimestamp &,
 				     std::pair<std::vector<CrashMachineNode *>,
 				               gc_map<unsigned long, bool> *> &v,
 				     HeapVisitor &hv)
@@ -2873,7 +2874,7 @@ failed:
 }
 
 static CrashMachineNode *
-exprToCrashReason(const CrashTimestamp &when, IRExpr *expr)
+exprToCrashReason(const CrashTimestamp &, IRExpr *)
 {
 	return NULL;
 }
@@ -3013,7 +3014,7 @@ public:
 		bool operator!=(const RipTraceIterator &b) {
 			return !(*this == b);
 		}
-		void operator++(int i) {
+		void operator++(int) {
 			it++;
 		}
 	};
@@ -3136,7 +3137,7 @@ public:
 	{
 	}
 	void store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms);
-	void visit(HeapVisitor &hv) {}
+	void visit(HeapVisitor &) {}
 };
 void
 CIALEventRecorder::store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms)
@@ -4277,10 +4278,10 @@ public:
 	MemTraceExtractor(Oracle *o) : oracle(o) {}
 	void store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms);
 	void load(Thread *thr, unsigned long addr);
-	void visit(HeapVisitor &hv) {}
+	void visit(HeapVisitor &) {}
 };
 void
-MemTraceExtractor::store(Thread *thr, unsigned long addr, unsigned long val, MachineState *ms)
+MemTraceExtractor::store(Thread *thr, unsigned long addr, unsigned long, MachineState *)
 {
 	unsigned long rsp;
 	if (thr->tid != oracle->crashingTid)
@@ -4465,7 +4466,6 @@ public:
 
 static void
 findRemoteCriticalSections(std::vector<CrashMachineNode *> &cmns,
-			   const CrashTimestamp &when,
 			   const Oracle &oracle,
 			   MachineState *ms,
 			   std::set<SuggestedFix> &out)
@@ -4757,6 +4757,9 @@ count_states(CrashMachineNode *cmn)
 int
 main(int argc, char *argv[])
 {
+	if (argc < 2)
+		errx(1, "need a logfile");
+
 	timing("start");
 	init_sli();
 
@@ -5150,7 +5153,7 @@ main(int argc, char *argv[])
 		LibVEX_maybe_gc(ALLOW_GC);
 		timing("calculating critical sections for %s",
 		       cmn_it.key().name());
-		findRemoteCriticalSections(cmn_it.value().first, cmn_it.key(), oracle, ms,
+		findRemoteCriticalSections(cmn_it.value().first, oracle, ms,
 					   csectPool);
 		timing("calculated critical sections for %s",
 		       cmn_it.key().name());

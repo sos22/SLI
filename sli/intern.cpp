@@ -8,16 +8,16 @@
 
 struct internStateMachineTable : public internIRExprTable {
 	std::map<StateMachineSideEffect *, StateMachineSideEffect *> sideEffects;
-	std::map<StateMachineEdge *, StateMachineEdge *> edges;
 	std::map<StateMachineState *, StateMachineState *> states;
 	std::set<StateMachineSideEffectStore *> stores;
 	std::set<StateMachineSideEffectLoad *> loads;
 	std::set<StateMachineSideEffectCopy *> copies;
 	std::set<StateMachineSideEffectPhi *> phis;
 	std::set<StateMachineSideEffectAssertFalse *> asserts;
-	std::set<StateMachineProxy *> states_proxy;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
+	std::set<StateMachineSideEffecting *> states_side_effect;
+	std::set<StateMachineNdChoice *> states_ndchoice;
 };
 
 static unsigned
@@ -46,14 +46,16 @@ shallow_hash(const IRExpr *e)
 		return 100146091;
 	case Iex_Associative:
 		return ((IRExprAssociative *)e)->op * 100161727 + ((IRExprAssociative *)e)->nr_arguments * 100268423 + 100176877;
-	case Iex_FreeVariable:
-		return ((IRExprFreeVariable *)e)->key.val * 100190957;
 	case Iex_ClientCallFailed:
 		return 100213697;
 	case Iex_ClientCall:
 		return 100256371 + ((IRExprClientCall *)e)->callSite.rip.hash() * 50013641;
 	case Iex_HappensBefore:
 		return 100234427;
+	case Iex_Phi:
+		return 100029499 + ((IRExprPhi *)e)->reg.hash() * 1000014181;
+	case Iex_FreeVariable:
+		return 100039411 + ((IRExprFreeVariable *)e)->id.hash() * 100044913;
 	}
 	abort();
 }
@@ -69,8 +71,9 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	switch (e->tag) {
 	case Iex_Get:
 	case Iex_Const:
-	case Iex_FreeVariable:
 	case Iex_HappensBefore:
+	case Iex_Phi:
+	case Iex_FreeVariable:
 		break;
 	case Iex_GetI:
 		((IRExprGetI *)e)->ix = internIRExpr(((IRExprGetI *)e)->ix, lookupTable);
@@ -162,9 +165,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			do_field(Mux0X, expr0);
 			do_field(Mux0X, exprX);
 			break;
-		case Iex_FreeVariable:
-			do_field(FreeVariable, key);
-			break;
 		case Iex_ClientCallFailed:
 			do_field(ClientCallFailed, target);
 			break;
@@ -232,6 +232,22 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			    ((IRExprHappensBefore *)e)->after != ((IRExprHappensBefore *)other)->after)
 				continue;
 			break;
+
+		case Iex_Phi: {
+			IRExprPhi *ep = (IRExprPhi *)e;
+			IRExprPhi *op = (IRExprPhi *)other;
+			if (!threadAndRegister::fullEq(ep->reg, op->reg) ||
+			    ep->generations != op->generations || ep->ty != op->ty)
+				continue;
+			break;
+		}
+		case Iex_FreeVariable: {
+			IRExprFreeVariable *ef = (IRExprFreeVariable *)e;
+			IRExprFreeVariable *of = (IRExprFreeVariable *)other;
+			if (ef->id != of->id || ef->ty != of->ty)
+				continue;
+			break;
+		}
 		}
 
 		/* If we get here, they match and we're done. */
@@ -256,15 +272,6 @@ internIRExpr(IRExpr *x)
 	__set_profiling(internIRExpr);
 	internIRExprTable t;
 	return internIRExpr(x, t);
-}
-
-static void
-internFreeVariables(FreeVariableMap &fvm, internIRExprTable &t)
-{
-	for (auto it = fvm.content->begin();
-	     it != fvm.content->end();
-	     it++)
-		it.set_value(internIRExpr(it.value(), t));
 }
 
 static StateMachineSideEffect *
@@ -335,6 +342,9 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *phi = dynamic_cast<StateMachineSideEffectPhi *>(s);
 		assert(phi);
+		for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
+			if (it->second)
+				it->second = internIRExpr(it->second, t);
 		for (auto it = t.phis.begin(); it != t.phis.end(); it++) {
 			StateMachineSideEffectPhi *o = *it;
 			if (threadAndRegister::fullEq(o->reg, phi->reg)) {
@@ -367,57 +377,41 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 
 static StateMachineState *internStateMachineState(StateMachineState *start, internStateMachineTable &t);
 
-static StateMachineEdge *
-internStateMachineEdge(StateMachineEdge *start, internStateMachineTable &t)
-{
-	if (TIMEOUT)
-		return start;
-	if (t.edges.count(start))
-		return t.edges[start];
-	start->target = internStateMachineState(start->target, t);
-	for (auto it = start->sideEffects.begin();
-	     it != start->sideEffects.end();
-	     it++)
-		*it = internStateMachineSideEffect(*it, t);
-	for (auto it = t.edges.begin(); it != t.edges.end(); it++) {
-		StateMachineEdge *o = it->second;
-		if (o->target == start->target && o->sideEffects == start->sideEffects) {
-			t.edges[start] = o;
-			return o;
-		}
-	}
-	t.edges[start] = start;
-	return start;
-}
-
 static StateMachineState *
 internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 {
 	if (t.states.count(start))
 		return t.states[start];
 	t.states[start] = start; /* Cycle breaking */
-	if (dynamic_cast<StateMachineCrash *>(start) ||
-	    dynamic_cast<StateMachineNoCrash *>(start) ||
-	    dynamic_cast<StateMachineUnreached *>(start)) {
+	switch (start->type) {
+	case StateMachineState::Crash:
+	case StateMachineState::NoCrash:
+	case StateMachineState::Unreached:
 		t.states[start] = start;
 		return start;
-	} else if (StateMachineProxy *smp = dynamic_cast<StateMachineProxy *>(start)) {
-		smp->target = internStateMachineEdge(smp->target, t);
-		for (auto it = t.states_proxy.begin();
-		     it != t.states_proxy.end();
+	case StateMachineState::SideEffecting: {
+		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)start;
+		if (smse->sideEffect)
+			smse->sideEffect = internStateMachineSideEffect(smse->sideEffect, t);
+		smse->target = internStateMachineState(smse->target, t);
+		for (auto it = t.states_side_effect.begin();
+		     it != t.states_side_effect.end();
 		     it++) {
-			if ((*it)->target == smp->target) {
+			if ( (*it)->sideEffect == smse->sideEffect &&
+			     (*it)->target == smse->target ) {
 				t.states[start] = *it;
 				return *it;
 			}
 		}
 		t.states[start] = start;
-		t.states_proxy.insert(smp);
+		t.states_side_effect.insert(smse);
 		return start;
-	} else if (StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(start)) {
+	}
+	case StateMachineState::Bifurcate: {
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)start;
 		smb->condition = internIRExpr(smb->condition, t);
-		smb->trueTarget = internStateMachineEdge(smb->trueTarget, t);
-		smb->falseTarget = internStateMachineEdge(smb->falseTarget, t);
+		smb->trueTarget = internStateMachineState(smb->trueTarget, t);
+		smb->falseTarget = internStateMachineState(smb->falseTarget, t);
 		for (auto it = t.states_bifurcate.begin();
 		     it != t.states_bifurcate.end();
 		     it++) {
@@ -432,7 +426,9 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		t.states[start] = start;
 		t.states_bifurcate.insert(smb);
 		return start;
-	} else if (StateMachineStub *sms = dynamic_cast<StateMachineStub *>(start)) {
+	}
+	case StateMachineState::Stub: {
+		StateMachineStub *sms = (StateMachineStub *)start;
 		for (auto it = t.states_stub.begin();
 		     it != t.states_stub.end();
 		     it++) {
@@ -444,9 +440,26 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		t.states[start] = start;
 		t.states_stub.insert(sms);
 		return start;
-	} else {
-		abort();
 	}
+	case StateMachineState::NdChoice: {
+		StateMachineNdChoice *smnd = (StateMachineNdChoice *)start;
+		for (auto it = smnd->successors.begin(); it != smnd->successors.end(); it++)
+			*it = internStateMachineState(*it, t);
+		for (auto it = t.states_ndchoice.begin();
+		     it != t.states_ndchoice.end();
+		     it++) {
+			StateMachineNdChoice *o = *it;
+			if (smnd->successors == o->successors) {
+				t.states[start] = o;
+				return o;
+			}
+		}
+		t.states[start] = start;
+		t.states_ndchoice.insert(smnd);
+		return start;
+	}
+	}
+	abort();
 }
 
 StateMachine *
@@ -454,7 +467,6 @@ internStateMachine(StateMachine *sm)
 {
 	__set_profiling(internStateMachine);
 	internStateMachineTable t;
-	internFreeVariables(sm->freeVariables, t);
 	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }

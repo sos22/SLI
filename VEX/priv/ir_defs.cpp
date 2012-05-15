@@ -1028,13 +1028,13 @@ static bool parseIRExprLoad(IRExpr **res, const char *str, const char **suffix)
 {
   IRType ty;
   IRExpr *addr;
-  ThreadRip rip;
+  MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
   if (!parseThisString("LD:", str, &str) ||
       !parseIRType(&ty, str, &str) ||
       !parseThisChar('(', str, &str) ||
       !parseIRExpr(&addr, str, &str) ||
       !parseThisString(")@", str, &str) ||
-      !parseThreadRip(&rip, str, suffix))
+      !parseMemoryAccessIdentifier(&rip, str, suffix))
     return false;
   *res = IRExpr_Load(ty, addr, rip);
   return true;
@@ -1151,16 +1151,6 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
   return true;
 }
 
-static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **suffix)
-{
-  FreeVariableKey key;
-  if (!parseThisString("free", str, &str) ||
-      !parseDecimalInt(&key.val, str, suffix))
-    return false;
-  *res = IRExpr_FreeVariable(key);
-  return true;
-}
-
 static bool parseIRExprClientCall(IRExpr **res, const char *str, const char **suffix)
 {
   VexRip addr;
@@ -1204,16 +1194,41 @@ static bool parseIRExprFailedCall(IRExpr **res, const char *str, const char **su
 
 static bool parseIRExprHappensBefore(IRExpr **res, const char *str, const char **suffix)
 {
-  ThreadRip before;
-  ThreadRip after;
+  MemoryAccessIdentifier before(MemoryAccessIdentifier::uninitialised());
+  MemoryAccessIdentifier after(MemoryAccessIdentifier::uninitialised());
   if (!parseThisChar('(', str, &str) ||
-      !parseThreadRip(&before, str, &str) ||
+      !parseMemoryAccessIdentifier(&before, str, &str) ||
       !parseThisString(" <-< ", str, &str) ||
-      !parseThreadRip(&after, str, &str) ||
+      !parseMemoryAccessIdentifier(&after, str, &str) ||
       !parseThisChar(')', str, suffix))
     return false;
   *res = IRExpr_HappensBefore(before, after);
   return true;
+}
+
+static bool parseIRExprPhi(IRExpr **res, const char *str, const char **suffix)
+{
+    threadAndRegister reg(threadAndRegister::invalid());
+    if (!parseThisString("(Phi ", str, &str) ||
+	!parseThreadAndRegister(&reg, str, &str) ||
+	!parseThisString(":(", str, &str))
+	return false;
+    std::vector<unsigned> generations;
+    while (1) {
+	if (parseThisChar(')', str, &str))
+	    break;
+	unsigned i;
+	if (!parseDecimalUInt(&i, str, &str))
+	    return false;
+	generations.push_back(i);
+	parseThisString(", ", str, &str);
+    }
+    IRType ty;
+    if (!parseIRType(&ty, str, &str) ||
+	!parseThisChar(')', str, suffix))
+	return false;
+    *res = IRExpr_Phi(reg, generations, ty);
+    return true;
 }
 
 bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
@@ -1232,10 +1247,10 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
   do_form(CCall);
   do_form(Mux0X);
   do_form(Associative);
-  do_form(FreeVariable);
   do_form(ClientCall);
   do_form(FailedCall);
   do_form(HappensBefore);
+  do_form(Phi);
 #undef do_form
   return false;
 }
@@ -1342,11 +1357,6 @@ IRExprAssociative::prettyPrint(FILE *f) const
       }
 }
 void
-IRExprFreeVariable::prettyPrint(FILE *f) const
-{
-      fprintf(f, "free%d", key.val);
-}
-void
 IRExprClientCall::prettyPrint(FILE *f) const
 {
       fprintf(f, "call0x%s@%s(", calledRip.name(), callSite.name());
@@ -1370,6 +1380,19 @@ IRExprHappensBefore::prettyPrint(FILE *f) const
       fprintf(f, "(%s <-< %s)",
 	      before.name(),
 	      after.name());
+}
+void
+IRExprPhi::prettyPrint(FILE *f) const
+{
+      fprintf(f, "(Phi %s:(", reg.name());
+      for (auto it = generations.begin(); it != generations.end(); it++) {
+	  if (it != generations.begin())
+	      fprintf(f, ", ");
+	  fprintf(f, "%d", *it);
+      }
+      fprintf(f, ")");
+      ppIRType(ty, f);
+      fprintf(f, ")");
 }
 
 
@@ -1666,6 +1689,8 @@ IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1,
    return e;
 }
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
+   assert(arg1);
+   assert(arg2);
    if (operationAssociates(op))
      return IRExpr_Associative(op, arg1, arg2, NULL);
 
@@ -1751,12 +1776,11 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    e->sanity_check();
    return e;
 }
-IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, ThreadRip rip ) {
-   IRExprLoad* e        = new IRExprLoad();
+IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, const MemoryAccessIdentifier &rip ) {
+   IRExprLoad* e        = new IRExprLoad(rip);
    assert(addr->type() == Ity_I64);
    e->ty   = ty;
    e->addr = addr;
-   e->rip  = rip;
    e->sanity_check();
    return e;
 }
@@ -1886,20 +1910,20 @@ IRExpr* IRExpr_Associative(IRExprAssociative *src)
    e->sanity_check();
    return e;
 }
-IRExpr* IRExpr_FreeVariable ( FreeVariableKey key )
+IRExprAssociative* IRExpr_Associative(int nr_arguments, IROp op)
 {
-   IRExprFreeVariable *e = new IRExprFreeVariable();
-   e->key = key;
-   e->sanity_check();
-   return e;
-}
-IRExpr* IRExpr_FreeVariable ( )
-{
-   static FreeVariableKey next_key;
-   IRExpr *res = IRExpr_FreeVariable(next_key);
-   next_key.val++;
-   res->sanity_check();
-   return res;
+  IRExprAssociative *e = new IRExprAssociative();
+  e->op = op;
+  e->nr_arguments = 0;
+  e->nr_arguments_allocated = nr_arguments;
+  static libvex_allocation_site __las = {0, __FILE__, __LINE__};
+  e->contents = (IRExpr **)
+    __LibVEX_Alloc_Bytes(&ir_heap,
+			 sizeof(e->contents[0]) *
+			 e->nr_arguments_allocated,
+			 &__las);
+  e->sanity_check();
+  return e;
 }
 IRExpr* IRExpr_ClientCall ( const VexRip &r, const ThreadRip &site, IRExpr **args )
 {
@@ -1917,11 +1941,10 @@ IRExpr* IRExpr_ClientCallFailed ( IRExpr *t )
    e->sanity_check();
    return e;
 }
-IRExpr* IRExpr_HappensBefore ( ThreadRip before, ThreadRip after )
+IRExpr* IRExpr_HappensBefore ( const MemoryAccessIdentifier &before,
+			       const MemoryAccessIdentifier &after )
 {
-   IRExprHappensBefore *e = new IRExprHappensBefore();
-   e->before = before;
-   e->after = after;
+   IRExprHappensBefore *e = new IRExprHappensBefore(before, after);
    e->sanity_check();
    return e;
 }

@@ -10,7 +10,6 @@
 #include "typesdb.hpp"
 
 class StateMachine;
-class StateMachineEdge;
 class StateMachineSideEffect;
 
 #ifdef NDEBUG
@@ -23,136 +22,173 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
 ;
 #endif
 
+/* Flags:
+
+   assumePrivateStack -- Assume that the stack is ``private'', in the
+                         sense that no constant expressions can ever
+                         alias with rsp.
+
+   assumeExecutesAtomically -- Assume that the state machine executes
+                               atomically.  This is useful for the
+                               read-side machine, but not for the
+                               write-side ones.
+
+   ignoreSideEffects -- Effectively assume that the program terminates
+  	                as soon as the machine completes, so that
+  	                stores which aren't loaded by this machine are
+  	                necessarily redundant.
+
+   assumeNoInterferingStores -- Assume that there will be no stores
+                                from other threads which interfere
+                                with the machine we're currently
+
+   noExtend -- If true, assume that the machine will never be
+               expanded.  This means that we can discard some
+               assertions which would otherwise be quite useful.
+
+   Other fields:
+
+   interestingStores -- Bit of a hack: sometimes, only some side
+	                effects are interesting, so allow them to be
+	                listed here.  If haveInterestingStoresSet is
+	                false then we don't look at interestingStores
+	                at all, and instead rely on ignoreSideEffects.
+
+   nonLocalLoads -- If this is non-NULL then rather than using the
+                    oracle to check whether loads might possibly
+                    conflict with stuff outside of the current
+                    machine, we just look in here.
+
+   as -- if non-NULL, used to resolve BadPtr expressions with a
+         constant address.
+
+*/
 class AllowableOptimisations {
-public:
-	static AllowableOptimisations defaultOptimisations;
-	AllowableOptimisations(bool s, bool a, bool i, bool as, bool fvmas,
-			       AddressSpace *_as)
-		: assumePrivateStack(s), assumeExecutesAtomically(a),
-		  ignoreSideEffects(i), assumeNoInterferingStores(as),
-		  freeVariablesMightAccessStack(fvmas), as(_as), haveInterestingStoresSet(false),
-		  nonLocalLoads(NULL)
-	{
-	}
-	AllowableOptimisations(const AllowableOptimisations &o)
-		: assumePrivateStack(o.assumePrivateStack),
-		  assumeExecutesAtomically(o.assumeExecutesAtomically),
-		  ignoreSideEffects(o.ignoreSideEffects),
-		  assumeNoInterferingStores(o.assumeNoInterferingStores),
-		  freeVariablesMightAccessStack(o.freeVariablesMightAccessStack),
-		  as(o.as),
-		  haveInterestingStoresSet(o.haveInterestingStoresSet),
-		  interestingStores(o.interestingStores),
-		  nonLocalLoads(o.nonLocalLoads)
+#define _optimisation_flags(f)						\
+	f(assumePrivateStack, bool)					\
+	f(assumeExecutesAtomically, bool)				\
+	f(ignoreSideEffects, bool)					\
+	f(assumeNoInterferingStores, bool)				\
+	f(noExtend,bool)
+#define optimisation_flags(f)						\
+	_optimisation_flags(f)						\
+	f(interestingStores, const std::set<DynAnalysisRip> *)		\
+	f(nonLocalLoads, std::set<DynAnalysisRip> *)
+
+	/* The value of the argument doesn't matter, it's just there
+	   so that we can select this constructor. */
+	AllowableOptimisations(double)
+		:
+#define default_flag(name, type)		\
+		_ ## name(false),
+		_optimisation_flags(default_flag)
+#undef default_flag
+		_interestingStores(NULL),
+		_nonLocalLoads(NULL),
+		_as(NULL)
 	{}
 
-	/* Assume that the stack is ``private'', in the sense that no
-	   constant expressions can ever alias with rsp. */
-	bool assumePrivateStack;
-
-	/* Assume that the state machine executes atomically.  This is
-	   useful for the read-side machine, but not for the
-	   write-side ones. */
-	bool assumeExecutesAtomically;
-
-	/* Effectively assume that the program terminates as soon as
-	   the machine completes, so that stores which aren't loaded
-	   by this machine are necessarily redundant. */
-	bool ignoreSideEffects;
-
-	/* Assume that there will be no stores from other threads
-	   which interfere with the machine we're currently
-	   examining. */
-	bool assumeNoInterferingStores;
-
-	/* If false, assume that free variables can never point at the
-	   current stack frame.  This is appropriate for state
-	   machines generated at function heads, for instance. */
-	bool freeVariablesMightAccessStack;
+#define mk_field(name, type) type _ ## name;
+	optimisation_flags(mk_field)
+#undef mk_field
 
 	/* If non-NULL, use this to resolve BadPtr expressions where
 	   the address is a constant. */
-	VexPtr<AddressSpace> as;
+	VexPtr<AddressSpace> _as;
 
-	/* Bit of a hack: sometimes, only some side effects are
-	   interesting, so allow them to be listed here.  If
-	   haveInterestingStoresSet is false then we don't look at
-	   interestingStores at all, and instead rely on
-	   ignoreSideEffects. */
-	bool haveInterestingStoresSet;
-	std::set<DynAnalysisRip> interestingStores;
+public:
+	static AllowableOptimisations defaultOptimisations;
+	AllowableOptimisations(
+#define mk_arg(name, type) type __ ## name,
+		optimisation_flags(mk_arg)
+#undef mk_arg
+		AddressSpace *__as)
+		:
+#define mk_init(name, type) _ ## name(__ ## name),
+		optimisation_flags(mk_init)
+#undef mk_init
+		_as(__as)
+	{
+	}
+	AllowableOptimisations(const AllowableOptimisations &o)
+		:
+#define mk_init(name, type) _ ## name(o._ ## name),
+		optimisation_flags(mk_init)
+#undef mk_init
+		_as(o._as)
+	{}
 
-	/* If this is non-NULL then rather than using the oracle to
-	   check whether loads might possibly load, we just look in
-	   here. */
-	std::set<DynAnalysisRip> *nonLocalLoads;
+#define mk_set_value(name, type)				\
+	AllowableOptimisations set ## name (type value) const	\
+	{							\
+		AllowableOptimisations res(*this);		\
+		res._ ## name = value;				\
+		return res;					\
+	}
+	optimisation_flags(mk_set_value);
+#undef mk_set_value
 
-	AllowableOptimisations enableassumePrivateStack() const
-	{
-		return AllowableOptimisations(true, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
+#define mk_get_value(name, type)				\
+	type name() const					\
+	{							\
+		return _ ## name ;				\
 	}
-	AllowableOptimisations enableassumeExecutesAtomically() const
-	{
-		return AllowableOptimisations(assumePrivateStack, true, ignoreSideEffects,
-					      true /* If we're running atomically then there are definitely
-						      no interfering stores */,
-					      freeVariablesMightAccessStack, as);
+	optimisation_flags(mk_get_value)
+#undef mk_get_value
+#define mk_set_flags(name, type)				\
+	AllowableOptimisations enable ## name () const		\
+	{							\
+		return set ## name(true);			\
+	}							\
+	AllowableOptimisations disable ## name () const		\
+	{							\
+		return set ## name(false);			\
 	}
-	AllowableOptimisations enableignoreSideEffects() const
-	{
-		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, true,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
-	}
-	AllowableOptimisations enableassumeNoInterferingStores() const
-	{
-		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      true, freeVariablesMightAccessStack, as);
-	}
-	AllowableOptimisations disablefreeVariablesMightAccessStack() const
-	{
-		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, false, as);
-	}
+	_optimisation_flags(mk_set_flags)
+#undef mk_set_flags
+
 	AllowableOptimisations setAddressSpace(AddressSpace *as) const
 	{
-		return AllowableOptimisations(assumePrivateStack, assumeExecutesAtomically, ignoreSideEffects,
-					      assumeNoInterferingStores, freeVariablesMightAccessStack, as);
+		AllowableOptimisations res(*this);
+		res._as = as;
+		return res;
 	}
-	unsigned asUnsigned() const {
-		unsigned x = 64; /* turning off all of the optional
-				    optimisations doesn't turn off the
-				    ones which are always available, so
-				    have an implicit bit for them.
-				    i.e. 0 means no optimisations at
-				    all, and 64 means only the most
-				    basic ones which are always
-				    safe. */
 
-		if (assumePrivateStack)
-			x |= 2;
-		if (assumeExecutesAtomically)
-			x |= 3;
-		if (ignoreSideEffects)
-			x |= 4;
-		if (assumeNoInterferingStores)
-			x |= 8;
-		if (freeVariablesMightAccessStack)
-			x |= 16;
-		if (as != NULL)
-			x |= 32;
+	AddressSpace *getAddressSpace()
+	{
+		return _as;
+	}
+
+	unsigned asUnsigned() const {
+		unsigned x = 1; /* turning off all of the optional
+				   optimisations doesn't turn off the
+				   ones which are always available, so
+				   have an implicit bit for them.
+				   i.e. 0 means no optimisations at
+				   all, and 1 means only the most
+				   basic ones which are always
+				   safe. */
+
+		unsigned acc = 2;
+
+#define do_flag(name, type)			\
+		if ( _ ## name )			\
+			x |= acc;		\
+		acc *= 2;
+		_optimisation_flags(do_flag)
+#undef do_flag
+		if (_as != NULL)
+			x |= acc;
 		return x;
 	}
 
 	bool ignoreStore(const VexRip &rip) const {
-		if (ignoreSideEffects)
+		if (_ignoreSideEffects)
 			return true;
-		if (!haveInterestingStoresSet)
-			return false;
-		if (interestingStores.count(DynAnalysisRip(rip)))
-			return false;
-		else
+		if (_interestingStores &&
+		    !_interestingStores->count(DynAnalysisRip(rip)))
 			return true;
+		return false;
 	}
 
 	/* If @addr is definitely accessible, set *@res to true and
@@ -160,144 +196,133 @@ public:
 	   to false and return true.  If we can't be sure, return
 	   false. */
 	bool addressAccessible(unsigned long addr, bool *res) const {
-		if (!as)
+		if (!_as)
 			return false;
-		*res = as->isReadable(addr, 1);
+		*res = _as->isReadable(addr, 1);
 		return true;
 	}
+
+#undef _optimisation_flags
+#undef optimisation_flags
 };
 
 class IRExprTransformer;
 
-/* Caution: needs someone external to visit it! */
-class FreeVariableMap {
-	typedef gc_heap_map<FreeVariableKey, IRExpr, &ir_heap>::type map_t;
-public:
-	map_t *content;
-	FreeVariableMap()
-		: content(new map_t())
-	{}
-	FreeVariableMap(const FreeVariableMap &p)
-		: content(new map_t(*p.content))
-	{}
-	FreeVariableMap(const FreeVariableMap &p, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
-		: content(new map_t(*p.content))
-	{
-		for (unsigned x = 0; x < delta.size(); x++) {
-			assert(delta[x].second);
-			content->set(delta[x].first, delta[x].second);
-		}
-	}
-	void merge(FreeVariableMap &other) {
-		for (map_t::iterator it = other.content->begin();
-		     it != other.content->end();
-		     it++) {
-			assert(!content->get(it.key()));
-			content->set(it.key(), it.value());
-		}
-	}
-	IRExpr *get(FreeVariableKey k) { IRExpr *res = content->get(k); assert(res); return res; }
-	void visit(HeapVisitor &hv) { hv(content); }
-	void applyTransformation(IRExprTransformer &t, bool *done_something);
-	void print(FILE *f) const;
-	bool parse(const char *str, const char **succ);
-	bool empty() const { return content->empty(); }
-	void optimise(const AllowableOptimisations &opt, bool *done_something);
-};
-
 class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
-	StateMachine(StateMachineState *_root, const VexRip &_origin, unsigned _tid)
-		: root(_root), origin(_origin), tid(_tid)
-	{
-	}
 public:
 	StateMachineState *root;
-	VexRip origin;
-	FreeVariableMap freeVariables;
-	unsigned tid;
+	std::vector<std::pair<unsigned, VexRip> > origin;
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
-	StateMachine(StateMachineState *_root, const VexRip &_origin, const FreeVariableMap &fv, unsigned _tid)
-		: root(_root), origin(_origin), freeVariables(fv), tid(_tid)
+	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin)
+		: root(_root), origin(_origin)
 	{
 	}
-	StateMachine(StateMachine *parent, const VexRip &_origin, StateMachineState *new_root)
-		: root(new_root), origin(_origin), freeVariables(parent->freeVariables),
-		  tid(parent->tid)
-	{}
 	StateMachine(StateMachine *parent)
-		: root(parent->root), origin(parent->origin), freeVariables(parent->freeVariables),
-		  tid(parent->tid)
-	{}
-	StateMachine(StateMachine *parent, std::vector<std::pair<FreeVariableKey, IRExpr *> > &delta)
-		: root(parent->root),
-		  origin(parent->origin),
-		  freeVariables(parent->freeVariables, delta),
-		  tid(parent->tid)
+		: root(parent->root), origin(parent->origin)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
-			       Oracle *oracle,
 			       bool *done_something);
-	void visit(HeapVisitor &hv) { hv(root); freeVariables.visit(hv); }
+	void visit(HeapVisitor &hv) { hv(root); }
 #ifdef NDEBUG
 	void sanityCheck() const {}
 	void assertAcyclic() const {}
+	void assertSSA() const {}
 #else
 	void sanityCheck() const;
 	void assertAcyclic() const;
+	void assertSSA() const;
 #endif
 
 	NAMED_CLASS
 };
 
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
-protected:
-	StateMachineState(const VexRip &_origin) : origin(_origin) {}
 public:
+#define all_state_types(f)						\
+	f(Unreached) f(Crash) f(NoCrash) f(Stub) f(Bifurcate) f(SideEffecting) f(NdChoice)
+#define mk_state_type(name) name ,
+	enum stateType {
+		all_state_types(mk_state_type)
+	};
+#undef mk_state_type
+	static bool stateTypeIsTerminal(enum stateType t) {
+		return t == Unreached || t == Crash || t == NoCrash || t == Stub;
+	}
+protected:
+	StateMachineState(const VexRip &_origin,
+			  enum stateType _type)
+		: type(_type), origin(_origin)
+	{}
+public:
+	stateType type;
 	VexRip origin; /* RIP we were looking at when we constructed
 			* the thing.  Not very meaningful, but
 			* occasionally provides useful hints for
 			* debugging.*/
 
+	bool isTerminal() const {
+		return stateTypeIsTerminal(type);
+	}
+
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
+	virtual StateMachineState *optimise(const AllowableOptimisations &, bool *,
 					    std::set<StateMachineState *> &done) = 0;
 	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
-	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
-	virtual bool canCrash(std::vector<StateMachineEdge *> &) = 0;
-	virtual void targets(std::vector<StateMachineEdge *> &) = 0;
-	virtual void targets(std::vector<const StateMachineEdge *> &) const = 0;
-	void targets(std::set<StateMachineEdge *> &out) {
-		std::vector<StateMachineEdge *> r;
+	bool canCrash(std::set<const StateMachineState *> &memo) const {
+		if (type == Crash)
+			return true;
+		if (!memo.insert(this).second)
+			return false;
+		std::vector<const StateMachineState *> s;
+		targets(s);
+		for (auto it = s.begin(); it != s.end(); it++)
+			if ((*it)->canCrash(memo))
+				return true;
+		return false;
+	}
+	virtual void targets(std::vector<StateMachineState **> &) = 0;
+	virtual void targets(std::vector<const StateMachineState *> &) const = 0;
+	void targets(std::vector<StateMachineState *> &out) {
+		std::vector<StateMachineState **> r;
+		targets(r);
+		out.reserve(r.size());
+		for (auto it = r.begin(); it != r.end(); it++)
+			out.push_back(**it);
+	}
+	void targets(std::set<StateMachineState *> &out) {
+		std::vector<StateMachineState *> r;
 		targets(r);
 		for (auto it = r.begin(); it != r.end(); it++)
 			out.insert(*it);
 	}
-	void targets(std::set<const StateMachineEdge *> &out) const {
-		std::vector<const StateMachineEdge *> r;
+	void targets(std::set<const StateMachineState *> &out) const {
+		std::vector<const StateMachineState *> r;
 		targets(r);
 		for (auto it = r.begin(); it != r.end(); it++)
 			out.insert(*it);
 	}
-	void targets(std::set<StateMachineState *> &out);
-	void targets(std::set<const StateMachineState *> &out) const;
-	void targets(std::vector<StateMachineState *> &out);
-	void targets(std::vector<const StateMachineState *> &out) const;
-	void targets(std::queue<StateMachineEdge *> &out);
+	void targets(std::queue<StateMachineState *> &out);
 	enum RoughLoadCount { noLoads, singleLoad, multipleLoads };
 	RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const;
 	void enumerateMentionedMemoryAccesses(std::set<VexRip> &out);
-	virtual void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const = 0;
+	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
 
-#ifdef NDEBUG
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live, std::vector<const StateMachineEdge *> &done) const {}
-#else
-	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live, std::vector<const StateMachineEdge *> &done) const = 0;
+	virtual StateMachineSideEffect *getSideEffect() = 0;
+	virtual const StateMachineSideEffect *getSideEffect() const {
+		return const_cast<StateMachineState *>(this)->getSideEffect();
+	}
+
+	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const = 0;
+
+#ifndef NDEBUG
+	void assertAcyclic(std::vector<const StateMachineState *> &stack,
+			   std::set<const StateMachineState *> &clean) const;
 #endif
 
 	NAMED_CLASS
@@ -314,142 +339,30 @@ protected:
 		: type(_type)
 	{}
 public:
-	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) = 0;
+	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
-	virtual void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) = 0;
-	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
-	NAMED_CLASS
-};
-
-class StateMachineEdge : public GarbageCollected<StateMachineEdge, &ir_heap> {
-	void assertAcyclic(std::vector<const StateMachineEdge *> &,
-			   std::set<const StateMachineEdge *> &) const;
-public:
-	void assertAcyclic() const;
-	StateMachineEdge(StateMachineState *t) : target(t) {}
-	StateMachineEdge(const std::vector<StateMachineSideEffect *> &_sideEffects,
-			 StateMachineState *t)
-		: target(t), sideEffects(_sideEffects)
-	{}
-	StateMachineState *target;
-	std::vector<StateMachineSideEffect *> sideEffects;
-
-	void prependSideEffect(StateMachineSideEffect *k) {
-		std::vector<StateMachineSideEffect *> n;
-		n.reserve(sideEffects.size() + 1);
-		n.push_back(k);
-		for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
-		     it != sideEffects.end();
-		     it++)
-			n.push_back(*it);
-		sideEffects = n;
-	}
-
-	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
-		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
-			fprintf(f, "\t");
-			(*it)->prettyPrint(f);
-			fprintf(f, "\n");
-		}
-		target->prettyPrint(f, labels);
-		fprintf(f, "\n");
-	}
-	void visit(HeapVisitor &hv) {
-		hv(target);
-		for (std::vector<StateMachineSideEffect *>::iterator it = sideEffects.begin();
-		     it != sideEffects.end();
-		     it++)
-			hv(*it);
-	}
-	StateMachineEdge *optimise(const AllowableOptimisations &, Oracle *, bool *done_something, FreeVariableMap &,
-				   std::set<StateMachineState *> &);
-	void findLoadedAddresses(std::set<IRExpr *> &s, const AllowableOptimisations &opt) {
-		if (TIMEOUT)
-			return;
-		target->findLoadedAddresses(s, opt);
-		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
-		     it != sideEffects.rend();
-		     it++)
-			(*it)->updateLoadedAddresses(s, opt);
-	}
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt) {
-		if (TIMEOUT)
-			return;
-		target->findUsedRegisters(s, opt);
-		for (std::vector<StateMachineSideEffect *>::reverse_iterator it = sideEffects.rbegin();
-		     it != sideEffects.rend();
-		     it++)
-			(*it)->findUsedRegisters(s, opt);
-	}
-	void enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs);
-	bool canCrash(std::vector<StateMachineEdge *> &memo) {
-		for (auto it = memo.begin(); it != memo.end(); it++)
-			if (*it == this)
-				return false;
-		memo.push_back(this);
-		unsigned sz = memo.size();
-		bool res = target->canCrash(memo);
-		assert(sz == memo.size());
-		assert(memo[sz - 1] == this);
-		memo.pop_back();
-		return res;
-	}
-	StateMachineState::RoughLoadCount roughLoadCount(StateMachineState::RoughLoadCount acc) const;
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
-			 std::vector<const StateMachineEdge *> &done) const {
-#ifndef NDEBUG
-		for (auto it = done.begin(); it != done.end(); it++)
-			if (*it == this)
-				return;
-		std::set<threadAndRegister, threadAndRegister::fullCompare> *live2;
-		std::set<threadAndRegister, threadAndRegister::fullCompare> _live2;
-		if (live) {
-			live2 = &_live2;
-			_live2 = *live;
-		} else {
-			live2 = NULL;
-		}
-		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
-			if ((*it)->type == StateMachineSideEffect::Unreached) {
-				/* Don't want to check past these,
-				   because they often lead to bad
-				   areas of the machine. */
-				return;
-			}
-			(*it)->sanityCheck(live2);
-		}
-		if (TIMEOUT)
-			return;
-		unsigned sz = done.size();
-		done.push_back(this);
-		target->sanityCheck(live2, done);
-		assert(done.back() == this);
-		done.pop_back();
-		assert(done.size() == sz);
-#endif
-	}
-
+	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
+	virtual bool definesRegister(threadAndRegister &res) const = 0;
 	NAMED_CLASS
 };
 
 class StateMachineTerminal : public StateMachineState {
 protected:
 	virtual void prettyPrint(FILE *f) const = 0;
-	StateMachineTerminal(const VexRip &rip) : StateMachineState(rip) {}
+	StateMachineTerminal(const VexRip &rip, StateMachineState::stateType type) : StateMachineState(rip, type) {}
 public:
-	StateMachineState *optimise(const AllowableOptimisations &, Oracle *, bool *, FreeVariableMap &,
+	StateMachineState *optimise(const AllowableOptimisations &, bool *,
 				    std::set<StateMachineState *> &) { return this; }
-	virtual void visit(HeapVisitor &hv) {}
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
-	void targets(std::vector<StateMachineEdge *> &) { }
-	void targets(std::vector<const StateMachineEdge *> &) const { }
-	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &) const { prettyPrint(f); }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
-			 std::vector<const StateMachineEdge *> &) const { return; }
+	virtual void visit(HeapVisitor &) {}
+	void targets(std::vector<StateMachineState **> &) { }
+	void targets(std::vector<const StateMachineState *> &) const { }
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
+	StateMachineSideEffect *getSideEffect() { return NULL; }
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const { return; }
 };
 
 class StateMachineUnreached : public StateMachineTerminal {
-	StateMachineUnreached() : StateMachineTerminal(VexRip()) {}
+	StateMachineUnreached() : StateMachineTerminal(VexRip(), StateMachineState::Unreached) {}
 	static VexPtr<StateMachineUnreached, &ir_heap> _this;
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
 public:
@@ -457,11 +370,10 @@ public:
 		if (!_this) _this = new StateMachineUnreached();
 		return _this;
 	}
-	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
 };
 
 class StateMachineCrash : public StateMachineTerminal {
-	StateMachineCrash() : StateMachineTerminal(VexRip()) {}
+	StateMachineCrash() : StateMachineTerminal(VexRip(), StateMachineState::Crash) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
 public:
 	static StateMachineCrash *get() {
@@ -469,11 +381,10 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
-	bool canCrash(std::vector<StateMachineEdge *> &) { return true; }
 };
 
 class StateMachineNoCrash : public StateMachineTerminal {
-	StateMachineNoCrash() : StateMachineTerminal(VexRip()) {}
+	StateMachineNoCrash() : StateMachineTerminal(VexRip(), StateMachineState::NoCrash) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
 public:
 	static StateMachineNoCrash *get() {
@@ -481,46 +392,42 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
-	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
 };
 
-/* A state machine node which always advances to another one.  These
-   can be safely eliminated, but they're sometimes kind of handy when
-   you're building the machine. */
-class StateMachineProxy : public StateMachineState {
+class StateMachineSideEffecting : public StateMachineState {
 public:
-	StateMachineEdge *target;
+	StateMachineState *target;
+	StateMachineSideEffect *sideEffect;
 
-	StateMachineProxy(const VexRip &origin, StateMachineState *t)
-		: StateMachineState(origin),
-		  target(new StateMachineEdge(t))		  
+	StateMachineSideEffecting(const VexRip &origin, StateMachineSideEffect *smse, StateMachineState *t)
+		: StateMachineState(origin, StateMachineState::SideEffecting),
+		  target(t),
+		  sideEffect(smse)
 	{
 	}
-	StateMachineProxy(const VexRip &origin, StateMachineEdge *t)
-		: StateMachineState(origin),
-		  target(t)
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
 	{
-	}
-	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const
-	{
-		fprintf(f, "{%s:l%d}", origin.name(), labels[target]);
+		fprintf(f, "{%s:", origin.name());
+		if (sideEffect)
+			sideEffect->prettyPrint(f);
+		fprintf(f, " then l%d}", labels[target]);
 	}
 	void visit(HeapVisitor &hv)
 	{
 		hv(target);
+		hv(sideEffect);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &fv,
+	void prependSideEffect(StateMachineSideEffect *sideEffect);
+
+	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something,
 				    std::set<StateMachineState *> &done);
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt) {
-		target->findUsedRegisters(s, opt);
-	}
-	bool canCrash(std::vector<StateMachineEdge *> &memo) { return target->canCrash(memo); }
-	void targets(std::vector<StateMachineEdge *> &out) { out.push_back(target); }
-	void targets(std::vector<const StateMachineEdge *> &out) const { out.push_back(target); }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
-			 std::vector<const StateMachineEdge *> &done) const
+	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
+	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
+	StateMachineSideEffect *getSideEffect() { return sideEffect; }
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const
 	{
-		target->sanityCheck(live, done);
+		if (sideEffect)
+			sideEffect->sanityCheck(live);
 	}
 };
 
@@ -528,32 +435,22 @@ class StateMachineBifurcate : public StateMachineState {
 public:
 	StateMachineBifurcate(const VexRip &origin,
 			      IRExpr *_condition,
-			      StateMachineEdge *t,
-			      StateMachineEdge *f)
-		: StateMachineState(origin),
+			      StateMachineState *t,
+			      StateMachineState *f)
+		: StateMachineState(origin, StateMachineState::Bifurcate),
 		  condition(_condition),
 		  trueTarget(t),
 		  falseTarget(f)
-	{
-	}	
-	StateMachineBifurcate(const VexRip &origin,
-			      IRExpr *_condition,
-			      StateMachineState *t,
-			      StateMachineState *f)
-		: StateMachineState(origin),
-		  condition(_condition),
-		  trueTarget(new StateMachineEdge(t)),
-		  falseTarget(new StateMachineEdge(f))
 	{
 	}
 
 	IRExpr *condition; /* Should be typed Ity_I1.  If zero, we go
 			      to the false target.  Otherwise, we go
 			      to the true one. */
-	StateMachineEdge *trueTarget;
-	StateMachineEdge *falseTarget;
+	StateMachineState *trueTarget;
+	StateMachineState *falseTarget;
 
-	void prettyPrint(FILE *f, std::map<const StateMachineEdge *, int> &labels) const {
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
 		fprintf(f, "%s: if (", origin.name());
 		ppIRExpr(condition, f);
 		fprintf(f, ") then l%d else l%d",
@@ -565,28 +462,73 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something, FreeVariableMap &,
+	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something,
 				    std::set<StateMachineState *> &);
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &s, const AllowableOptimisations &opt);
-	bool canCrash(std::vector<StateMachineEdge *> &memo) {
-		return trueTarget->canCrash(memo) || falseTarget->canCrash(memo);
+	void targets(std::vector<StateMachineState **> &out) {
+		out.push_back(&falseTarget);
+		out.push_back(&trueTarget);
 	}
-	void targets(std::vector<StateMachineEdge *> &out) {
+	void targets(std::vector<const StateMachineState *> &out) const {
 		out.push_back(falseTarget);
 		out.push_back(trueTarget);
 	}
-	void targets(std::vector<const StateMachineEdge *> &out) const {
-		out.push_back(falseTarget);
-		out.push_back(trueTarget);
-	}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live,
-			 std::vector<const StateMachineEdge *> &done) const
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const
 	{
 		sanityCheckIRExpr(condition, live);
 		assert(condition->type() == Ity_I1);
-		trueTarget->sanityCheck(live, done);
-		falseTarget->sanityCheck(live, done);
 	}
+	StateMachineSideEffect *getSideEffect() { return NULL; }
+};
+
+/* A special state which arbitrarily picks one of N possible successor
+   states.  Used to model things like loop unrolling, where we use an
+   ND choice to decide how many iterations we want to take. */
+class StateMachineNdChoice : public StateMachineState {
+public:
+	std::vector<StateMachineState *> successors;
+	StateMachineNdChoice(const VexRip &origin,
+			     const std::vector<StateMachineState *> &content)
+		: StateMachineState(origin, StateMachineState::NdChoice),
+		  successors(content)
+	{}
+	StateMachineNdChoice(const VexRip &origin)
+		: StateMachineState(origin, StateMachineState::NdChoice)
+	{}
+
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
+		fprintf(f, "%s: ND {", origin.name());
+		for (auto it = successors.begin(); it != successors.end(); it++) {
+			if (it != successors.begin())
+				fprintf(f, ", ");
+			fprintf(f, "l%d", labels[*it]);
+		}
+		fprintf(f, "}");
+	}
+
+	void visit(HeapVisitor &hv)
+	{
+		for (auto it = successors.begin(); it != successors.end(); it++)
+			hv(*it);
+	}
+
+	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something,
+				    std::set<StateMachineState *> &);
+	void targets(std::vector<StateMachineState **> &out) {
+		out.reserve(out.size() + successors.size());
+		for (auto it = successors.begin(); it != successors.end(); it++)
+			out.push_back(&*it);
+	}
+	void targets(std::vector<const StateMachineState *> &out) const {
+		out.insert(out.end(), successors.begin(), successors.end());
+	}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const
+	{
+		for (auto it = successors.begin(); it != successors.end(); it++) {
+			assert(*it);
+			(*it)->sanityCheck(live);
+		}
+	}
+	StateMachineSideEffect *getSideEffect() { return NULL; }	
 };
 
 /* A node in the state machine representing a bit of code which we
@@ -595,14 +537,13 @@ class StateMachineStub : public StateMachineTerminal {
 public:
 	VexRip target;
 
-	StateMachineStub(const VexRip &origin, const VexRip &t) : StateMachineTerminal(origin), target(t) {}
+	StateMachineStub(const VexRip &origin, const VexRip &t) : StateMachineTerminal(origin, StateMachineState::Stub), target(t) {}
 
 	void prettyPrint(FILE *f) const
 	{
 		fprintf(f, "<%s: jmp %s>", origin.name(), target.name());
 	}
-	void visit(HeapVisitor &hv) { }
-	bool canCrash(std::vector<StateMachineEdge *> &) { return false; }
+	void visit(HeapVisitor &) { }
 };
 
 
@@ -615,17 +556,20 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, Oracle *, bool *) { return this; }
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &) {}
-	void visit(HeapVisitor &hv) {}
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void visit(HeapVisitor &) {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {}
+	bool definesRegister(threadAndRegister &) const {
+		return false;
+	}
 };
+
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
 public:
 	IRExpr *addr;
-	ThreadVexRip rip;
-	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const ThreadVexRip &_rip,
+	MemoryAccessIdentifier rip;
+	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const MemoryAccessIdentifier &_rip,
 					   StateMachineSideEffect::sideEffectType _type)
 		: StateMachineSideEffect(_type), addr(_addr), rip(_rip)
 	{
@@ -635,14 +579,14 @@ public:
 	virtual void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
-	virtual void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(addr, live);
 		assert(addr->type() == Ity_I64);
 	}
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const ThreadVexRip &_rip)
+	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const MemoryAccessIdentifier &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
 		  data(_data)
 	{
@@ -659,12 +603,14 @@ public:
 		StateMachineSideEffectMemoryAccess::visit(hv);
 		hv(data);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
 		sanityCheckIRExpr(data, live);
+	}
+	bool definesRegister(threadAndRegister &) const {
+		return false;
 	}
 };
 
@@ -675,19 +621,16 @@ public:
 };
 typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
-	void constructed();
 public:
-	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const ThreadVexRip &_rip, IRType _type)
+	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(alloc()), type(_type)
 	{
-		constructed();
 	}
-	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const ThreadVexRip &_rip, IRType _type)
+	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
 		  target(reg), type(_type)
 	{
-		constructed();
 	}
 	threadAndRegister target;
 	IRType type;
@@ -700,15 +643,13 @@ public:
 		ppIRExpr(addr, f);
 		fprintf(f, ")@%s", rip.name());
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(addr);
 	}
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
-		StateMachineSideEffectMemoryAccess::sanityCheck(live);
-		if (live)
-			live->insert(target);
+	bool definesRegister(threadAndRegister &reg) const {
+		reg = target;
+		return true;
 	}
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
@@ -729,13 +670,14 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
-		if (live)
-			live->insert(target);
+	}
+	bool definesRegister(threadAndRegister &reg) const {
+		reg = target;
+		return true;
 	}
 };
 class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
@@ -754,33 +696,52 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) { }
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &, const AllowableOptimisations &);
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(value, live);
 		assert(value->type() == Ity_I1);
+	}
+	bool definesRegister(threadAndRegister &) const {
+		return false;
 	}
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
 public:
+	threadAndRegister reg;
+	std::vector<std::pair<unsigned, IRExpr *> > generations;
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  const std::set<unsigned> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
 		  reg(_reg)
 	{
 		generations.reserve(_generations.size());
-		for (auto it = _generations.begin(); it != _generations.end(); it++)
-			generations.push_back(*it);
+		for (auto it = _generations.begin(); it != _generations.end(); it++) {
+			std::pair<unsigned, IRExpr *> item;
+			item.first = *it;
+			item.second = NULL;
+			generations.push_back(item);
+		}
 	}
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  const std::vector<unsigned> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
+		  reg(_reg)
+	{
+		generations.reserve(_generations.size());
+		for (auto it = _generations.begin(); it != _generations.end(); it++) {
+			std::pair<unsigned, IRExpr *> item;
+			item.first = *it;
+			item.second = NULL;
+			generations.push_back(item);
+		}
+	}
+	StateMachineSideEffectPhi(const threadAndRegister &_reg,
+				  const std::vector<std::pair<unsigned, IRExpr *> > &_generations)
+		: StateMachineSideEffect(StateMachineSideEffect::Phi),
 		  reg(_reg), generations(_generations)
 	{
 	}
-	threadAndRegister reg;
-	std::vector<unsigned> generations;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Phi");
 		reg.prettyPrint(f);
@@ -788,31 +749,55 @@ public:
 		for (auto it = generations.begin(); it != generations.end(); it++) {
 			if (it != generations.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%d", *it);
+			fprintf(f, "%d", it->first);
+			if (it->second) {
+				fprintf(f, "=");
+				ppIRExpr(it->second, f);
+			}
 		}
 		fprintf(f, ")");
 	}
-	void visit(HeapVisitor &hv) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, Oracle *oracle, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {}
-	void findUsedRegisters(std::set<threadAndRegister, threadAndRegister::fullCompare> &a, const AllowableOptimisations &) { a.erase(reg); }
-	void sanityCheck(std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
-		if (live)
-			live->insert(reg);
+	void visit(HeapVisitor &) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
+		assert(generations.size() != 0);
+	}
+	bool definesRegister(threadAndRegister &reg) const {
+		reg = this->reg;
+		return true;
 	}
 };
 
+class FreeVariableTable {
+public:
+	IRExpr *alloc(IRType ty, const MemoryAccessIdentifier &);
+};
+
 void printStateMachine(const StateMachine *sm, FILE *f);
-void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineEdge *, int> &labels);
+void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
 bool parseStateMachine(StateMachine **out, const char *str, const char **suffix);
 StateMachine *readStateMachine(int fd);
 
+class CFGNode;
+class MemoryAccessIdentifierAllocator;
+void probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
+			const DynAnalysisRip &proximalRip,
+			StateMachineState *proximalCause,
+			MemoryAccessIdentifierAllocator &mai,
+			std::set<StateMachine *> &out);
+StateMachine *storeCFGToMachine(Oracle *oracle,
+				unsigned tid,
+				CFGNode *root,
+				MemoryAccessIdentifierAllocator &mai);
+
 bool parseStateMachineSideEffect(StateMachineSideEffect **out,
 				 const char *str,
 				 const char **suffix);
+StateMachine *duplicateStateMachine(const StateMachine *inp);
 
 template <typename t> t
 pop(std::set<t> &x)
@@ -825,9 +810,7 @@ pop(std::set<t> &x)
 }
 
 template <typename stateType> void
-enumStatesAndEdges(StateMachine *sm,
-		   std::set<stateType *> *states,
-		   std::set<StateMachineEdge *> *edges)
+enumStates(StateMachine *sm, std::set<stateType *> *states)
 {
 	std::set<StateMachineState *> toVisit;
 	std::set<StateMachineState *> visited;
@@ -835,6 +818,7 @@ enumStatesAndEdges(StateMachine *sm,
 	toVisit.insert(sm->root);
 	while (!toVisit.empty()) {
 		StateMachineState *s = pop(toVisit);
+		assert(s);
 		if (!visited.insert(s).second)
 			continue;
 		if (states) {
@@ -842,16 +826,61 @@ enumStatesAndEdges(StateMachine *sm,
 			if (ss)
 				states->insert(ss);
 		}
-		if (edges) {
-			std::vector<StateMachineEdge *> targets;
-			s->targets(targets);
-			for (auto it = targets.begin(); it != targets.end(); it++) {
-				if (edges->insert(*it).second)
-					toVisit.insert((*it)->target);
-			}
-		} else {
-			s->targets(toVisit);
+		s->targets(toVisit);
+	}
+}
+
+template <typename stateType> void
+enumStates(const StateMachine *sm, std::set<const stateType *> *states)
+{
+	std::set<const StateMachineState *> toVisit;
+	std::set<const StateMachineState *> visited;
+
+	toVisit.insert(sm->root);
+	while (!toVisit.empty()) {
+		const StateMachineState *s = pop(toVisit);
+		if (!visited.insert(s).second)
+			continue;
+		if (states) {
+			const stateType *ss = dynamic_cast<const stateType *>(s);
+			if (ss)
+				states->insert(ss);
 		}
+		s->targets(toVisit);
+	}
+}
+
+template <typename stateType> void
+enumStates(const StateMachine *sm, std::vector<const stateType *> *states)
+{
+	std::set<const StateMachineState *> toVisit;
+	std::set<const StateMachineState *> visited;
+
+	toVisit.insert(sm->root);
+	while (!toVisit.empty()) {
+		const StateMachineState *s = pop(toVisit);
+		if (!visited.insert(s).second)
+			continue;
+		if (states) {
+			const stateType *ss = dynamic_cast<const stateType *>(s);
+			if (ss)
+				states->push_back(ss);
+		}
+		s->targets(toVisit);
+	}
+}
+
+template <typename seType> void
+enumSideEffects(StateMachine *sm, std::set<seType *> &out)
+{
+	std::set<StateMachineSideEffecting *> states;
+	enumStates(sm, &states);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		if ( !(*it)->sideEffect )
+			continue;
+		seType *se = dynamic_cast<seType *>( (*it)->sideEffect );
+		if (se)
+			out.insert(se);
 	}
 }
 

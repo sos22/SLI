@@ -40,9 +40,9 @@ class VexRip : public Named {
 		assert(cursor - buf < (int)stack.size() * 20 + 2);
 		return buf;
 	}
-	std::vector<unsigned long> stack;
 	void changed() { clearName(); }
 public:
+	std::vector<unsigned long> stack;
 	bool fullCompareLt(const VexRip &other) const {
 		for (unsigned idx = 0;
 		     idx < stack.size() && idx < other.stack.size();
@@ -203,6 +203,10 @@ public:
 		return false;
 	}
 
+	void prepend(unsigned long what) {
+		stack.insert(stack.begin(), what);
+	}
+
 	bool isPrefix(const VexRip &vr) const {
 		if (stack.size() >= vr.stack.size())
 			return false;
@@ -213,6 +217,18 @@ public:
 	}
 
 	void sanity_check() const {
+	}
+
+	/* Check whether this is a strict truncation of @vr (i.e.  vr
+	   with some elements removed from the top) */
+	bool isTruncationOf(const VexRip &vr) const {
+		if (stack.size() >= vr.stack.size())
+			return false;
+		for (unsigned x = 0; x < stack.size(); x++)
+			if (stack[stack.size() - x - 1] !=
+			    vr.stack[vr.stack.size() - x - 1])
+				return false;
+		return true;
 	}
 };
 

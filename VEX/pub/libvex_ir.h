@@ -264,6 +264,56 @@ public:
 };
 extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
+class MemoryAccessIdentifier : public Named {
+	char *mkName() const {
+		return my_asprintf("%s:%d", rip.name(), generation);
+	}
+	MemoryAccessIdentifier() : generation(-1) {}
+public:
+	static const unsigned static_generation = 1;
+	static const unsigned initial_value_generation = 2;
+	static const unsigned first_dynamic_generation = 3;
+	ThreadRip rip;
+	unsigned generation;
+	unsigned long hash() const { return rip.hash() * 200010011 + generation * 200021863; }
+	void sanity_check() const {
+		assert(generation != 0);
+		rip.sanity_check();
+		if (generation != initial_value_generation) {
+			assert(rip.thread != 0);
+			assert(rip.rip.isValid());
+		}
+	}
+	bool operator==(const MemoryAccessIdentifier &other) const {
+		return rip == other.rip && generation == other.generation;
+	}
+	bool operator<(const MemoryAccessIdentifier &other) const {
+		return rip < other.rip ||
+			(rip == other.rip && generation < other.generation);
+	}
+	bool operator<=(const MemoryAccessIdentifier &other) const {
+		return rip < other.rip ||
+			(rip == other.rip && generation <= other.generation);
+	}
+	bool operator>(const MemoryAccessIdentifier &other) const {
+		return other < *this;
+	}
+	bool operator!=(const MemoryAccessIdentifier &other) const {
+		return !(*this == other);
+	}
+	explicit MemoryAccessIdentifier(const ThreadRip &r, unsigned _generation)
+		: rip(r), generation(_generation)
+	{}
+
+	static MemoryAccessIdentifier uninitialised(void) {
+		return MemoryAccessIdentifier();
+	}
+	static MemoryAccessIdentifier initial_value(void) {
+		return MemoryAccessIdentifier(ThreadRip(), initial_value_generation);
+	}
+};
+bool parseMemoryAccessIdentifier(MemoryAccessIdentifier *, const char *, const char **);
+
 extern Heap ir_heap;
 
 /*---------------------------------------------------------------*/
@@ -472,7 +522,7 @@ struct _IRConst : public GarbageCollected<_IRConst, &ir_heap>{
          UShort V128;   /* 16-bit value; see Ico_V128 comment above */
       } Ico;
       unsigned long hashval() const { return tag * 103 + Ico.U64 * 607; }
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       void sanity_check() const {
 	 assert(tag >= Ico_U1 && tag <= Ico_V128);
       }
@@ -990,7 +1040,11 @@ typedef
    }
    IROp;
 
-static inline void sanity_check_irop(IROp op)
+static inline void sanity_check_irop(IROp op
+#ifdef NDEBUG
+				     __attribute__((unused))
+#endif
+	)
 {
    assert(op <= Iop_Perm8x16 && op > Iop_INVALID);
 }
@@ -1056,7 +1110,11 @@ typedef
    }
    IRType;
 
-static inline void sanity_check_irtype(IRType i)
+static inline void sanity_check_irtype(IRType i
+#ifdef NDEBUG
+				       __attribute__((unused))
+#endif
+	)
 {
    assert(i > Ity_INVALID && i <= Ity_V128);
 }
@@ -1078,7 +1136,7 @@ extern Int sizeofIRType ( IRType );
 typedef
 struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
       Int     types_used;
-      void visit(HeapVisitor &hv) { }
+      void visit(HeapVisitor &) { }
       NAMED_CLASS
    }
    IRTypeEnv;
@@ -1113,7 +1171,7 @@ typedef
       const char* name;
       void*  addr;
       UInt   mcx_mask;
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
       void sanity_check() const {}
       NAMED_CLASS
@@ -1137,7 +1195,7 @@ struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
       Int    base;   /* guest state offset of start of indexed area */
       IRType elemTy; /* type of each element in the indexed area */
       Int    nElems; /* number of elements in the indexed area */
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
       void sanity_check() const {
 	 assert(base < nElems);
@@ -1166,35 +1224,18 @@ typedef
       Iex_Triop,
       Iex_Binop,
       Iex_Unop,
-      Iex_Load,
       Iex_Const,
       Iex_Mux0X,
       Iex_CCall,
       Iex_Associative, /* n-ary associative operator */
-      Iex_FreeVariable,
       Iex_ClientCall,
       Iex_ClientCallFailed,
+      Iex_Load,
       Iex_HappensBefore,
+      Iex_Phi,
+      Iex_FreeVariable,
    }
    IRExprTag;
-
-class FreeVariableKey {
-public:
-   int val;
-   bool operator < (FreeVariableKey x) const {
-      return val < x.val;
-   }
-   bool operator !=(FreeVariableKey x) const {
-      return *this < x || x < *this;
-   }
-   bool operator ==(FreeVariableKey x) const {
-      return !(*this != x);
-   }
-   unsigned long hash() const { return val * 900000323; }
-   void sanity_check() const {
-      assert(val >= 0);
-   }
-};
 
 /* An expression.  Stored as a tagged union.  'tag' indicates what kind
    of expression this is.  'Iex' is the union that holds the fields.  If
@@ -1248,7 +1289,7 @@ struct IRExprGet : public IRExpr {
    IRExprGet(threadAndRegister _reg, IRType _ty)
 	   : IRExpr(Iex_Get), reg(_reg), ty(_ty)
    {}
-   void visit(HeapVisitor &hv) {}
+   void visit(HeapVisitor &) {}
    unsigned long hashval() const { return reg.hash() + ty * 3; }
    void prettyPrint(FILE *f) const {
       if (ty == Ity_I64 && !reg.isTemp()) {
@@ -1514,9 +1555,12 @@ struct IRExprUnop : public IRExpr {
 struct IRExprLoad : public IRExpr {
    IRType    ty;     /* Type of the loaded value */
    IRExpr*   addr;   /* Address being loaded from */
-   ThreadRip rip; /* Address of load instruction */
+   MemoryAccessIdentifier rip; /* Address of load instruction */
 
-   IRExprLoad() : IRExpr(Iex_Load) {}
+   IRExprLoad(const MemoryAccessIdentifier &_rip)
+       : IRExpr(Iex_Load),
+	 rip(_rip)
+   {}
    void visit(HeapVisitor &hv) { hv(addr); }
    unsigned long hashval() const {
        return ty + addr->hashval() * 97;
@@ -1535,7 +1579,14 @@ struct IRExprLoad : public IRExpr {
 */
 struct IRExprConst : public IRExpr {
    IRConst* con;     /* The constant itself */
-   IRExprConst() : IRExpr(Iex_Const) {}
+   IRExprConst()
+       : IRExpr(Iex_Const)
+   {
+       /* There's not much point in attempting to optimise constants,
+	  so just set the flag saying that it's already been fully
+	  optimised. */
+       optimisationsApplied = ~0u;
+   }
    void visit(HeapVisitor &hv) { hv(con); }
    unsigned long hashval() const { return con->hashval(); }
    void prettyPrint(FILE *f) const;
@@ -1680,20 +1731,6 @@ struct IRExprAssociative : public IRExpr {
    }
 };
 
-struct IRExprFreeVariable : public IRExpr {
-   FreeVariableKey key;
-   IRExprFreeVariable() : IRExpr(Iex_FreeVariable) {}
-   void visit(HeapVisitor &hv) {}
-   unsigned long hashval() const {
-       return key.val * 12357743;
-   }
-   void prettyPrint(FILE *f) const;
-   IRType type() const { return Ity_I64; }
-   void sanity_check() const {
-      key.sanity_check();
-   }
-};
-
 struct IRExprClientCall : public IRExpr {
    VexRip calledRip;
    ThreadRip callSite;
@@ -1732,17 +1769,65 @@ struct IRExprClientCallFailed : public IRExpr {
 };
 
 struct IRExprHappensBefore : public IRExpr {
-   ThreadRip before;
-   ThreadRip after;
-   IRExprHappensBefore() : IRExpr(Iex_HappensBefore) {}
-   void visit(HeapVisitor &hv) {}
-   unsigned long hashval() const { return 19; }
-   void prettyPrint(FILE *f) const;
-   IRType type() const { return Ity_I1; }
-   void sanity_check() const {
-      before.sanity_check();
-      after.sanity_check();
-   }
+    MemoryAccessIdentifier before;
+    MemoryAccessIdentifier after;
+    IRExprHappensBefore(const MemoryAccessIdentifier &_before,
+			const MemoryAccessIdentifier &_after)
+	: IRExpr(Iex_HappensBefore),
+	  before(_before),
+	  after(_after)
+    {}
+    void visit(HeapVisitor &) {}
+    unsigned long hashval() const { return 19; }
+    void prettyPrint(FILE *f) const;
+    IRType type() const { return Ity_I1; }
+    void sanity_check() const {
+	before.sanity_check();
+	after.sanity_check();
+    }
+};
+
+struct IRExprPhi : public IRExpr {
+    threadAndRegister reg;
+    std::vector<unsigned> generations;
+    IRType ty;
+    IRExprPhi(const threadAndRegister _reg,
+	      std::vector<unsigned> _generations,
+	      IRType _ty)
+	: IRExpr(Iex_Phi),
+	  reg(_reg),
+	  generations(_generations),
+	  ty(_ty)
+    {}
+    void visit(HeapVisitor &) {}
+    unsigned long hashval() const { return 27; }
+    void prettyPrint(FILE *f) const;
+    IRType type() const { return ty; }
+    void sanity_check() const {
+	reg.sanity_check();
+	assert(generations.size() >= 1);
+	sanity_check_irtype(ty);
+	assert(reg.gen() == 0);
+    }
+};
+
+struct IRExprFreeVariable : public IRExpr {
+    MemoryAccessIdentifier id;
+    IRType ty;
+    IRExprFreeVariable(const MemoryAccessIdentifier _id, IRType _ty)
+	: IRExpr(Iex_FreeVariable), id(_id), ty(_ty)
+    {}
+    void visit(HeapVisitor &) {}
+    unsigned long hashval() const { return 1045239 * id.hash(); }
+    void prettyPrint(FILE *f) const {
+	fprintf(f, "Free%s:", id.name());
+	ppIRType(ty, f);
+    }
+    IRType type() const { return ty; }
+    void sanity_check() const {
+	id.sanity_check();
+	sanity_check_irtype(ty);
+    }
 };
 
 /* Expression constructors. */
@@ -1759,17 +1844,25 @@ extern IRExpr* IRExpr_Binop  ( IROp op, IRExpr* arg1, IRExpr* arg2 );
 extern bool shortCircuitableUnops(IROp a, IROp b, IROp *c);
 extern bool inverseUnops(IROp a, IROp b);
 extern IRExpr* IRExpr_Unop   ( IROp op, IRExpr* arg );
-extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr, ThreadRip rip );
+extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr, const MemoryAccessIdentifier &rip );
 extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 extern IRExpr* IRExpr_Associative (IRExprAssociative *);
-extern IRExpr* IRExpr_FreeVariable ( FreeVariableKey key );
-extern IRExpr* IRExpr_FreeVariable ( );
+extern IRExprAssociative* IRExpr_Associative (int nr_arguments, IROp op);
 extern IRExpr* IRExpr_ClientCall (const VexRip &r, const ThreadRip &callSite, IRExpr **args);
 extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
-extern IRExpr* IRExpr_HappensBefore (ThreadRip before, ThreadRip after);
+extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,
+				     const MemoryAccessIdentifier &after);
+static inline IRExpr *IRExpr_Phi (const threadAndRegister &r,
+				  const std::vector<unsigned> &generations,
+				  IRType ty) {
+    return new IRExprPhi(r, generations, ty);
+}
+static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty) {
+    return new IRExprFreeVariable(id, ty);
+}
 
 /* Pretty-print an IRExpr. */
 static inline void ppIRExpr ( IRExpr*e, FILE *f ) { e->prettyPrint(f); }
@@ -2137,7 +2230,7 @@ class IRStmtNoOp : public IRStmt {
       IRStmtNoOp() : IRStmt(Ist_NoOp) {}
 public:
       static IRStmtNoOp singleton;
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const { fprintf(f, "IR-NoOp"); }
 };
 struct IRStmtIMark : public IRStmt {
@@ -2146,7 +2239,7 @@ struct IRStmtIMark : public IRStmt {
       IRStmtIMark(const ThreadRip &_addr, Int _len)
 	      : IRStmt(Ist_IMark), addr(_addr), len(_len)
       {}
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const {
          fprintf(f,  "------ IMark(%s, %d) ------", 
 		 addr.name(), len);
@@ -2308,7 +2401,7 @@ struct IRStmtMBE : public IRStmt {
       IRStmtMBE(IRMBusEvent _event)
 	      : IRStmt(Ist_MBE), event(_event)
       {}
-      void visit(HeapVisitor &hv) {}
+      void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const {
          fprintf(f, "IR-");
          ppIRMBusEvent(event, f);

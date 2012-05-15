@@ -129,7 +129,7 @@ TypesDb::parse_vexrip_canon(DynAnalysisRip *out, const Mapping &mapping, unsigne
 	}
 
 	const unsigned long *body = mapping.get<unsigned long>(offset + 12, hdr->nr_entries);
-	out->nr_rips = hdr->nr_entries;
+	out->nr_rips = hdr->nr_entries + 1;
 	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH - 1)
 		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
 	for (int x = 0; x < out->nr_rips - 1; x++)
@@ -214,11 +214,13 @@ parseDynAnalysisRip(DynAnalysisRip *out, const char *inp, const char **suffix)
 {
 	if (!parseThisString("DynRip[", inp, &inp))
 		return false;
-	DynAnalysisRip work;
 
+	DynAnalysisRip work;
 	while (1) {
-		if (parseThisChar(']', inp, suffix))
+		if (parseThisChar(']', inp, suffix)) {
+			*out = work;
 			return true;
+		}
 		if (work.nr_rips == DynAnalysisRip::DATABASE_RIP_DEPTH)
 			return false;
 		unsigned long x;

@@ -14,7 +14,7 @@
 #define PAGE_SIZE (4096ul)
 
 static bool
-read_rip(FILE *f, bool *is_private, AddressSpace *as, DynAnalysisRip *out)
+read_rip(FILE *f, bool *is_private, DynAnalysisRip *out)
 {
 	TypesDb::read_vexrip_canon(f, out, is_private);
 	return true;
@@ -74,9 +74,7 @@ struct mapped_file {
 
 struct tag_file_foreach_closure {
 	virtual void operator()(const DynAnalysisRip &vr,
-				unsigned long offset,
-				bool is_load,
-				bool is_private) = 0;
+				unsigned long offset) = 0;
 };
 static void
 tag_file_foreach(const char *fname, AddressSpace *as, tag_file_foreach_closure &consumer)
@@ -99,17 +97,17 @@ tag_file_foreach(const char *fname, AddressSpace *as, tag_file_foreach_closure &
 			tag_file_foreach_closure *consumer;
 			unsigned long offset;
 			AddressSpace *as;
-			void operator()(int nr_items, bool is_load) {
+			void operator()(int nr_items) {
 				for (int x = 0; x < nr_items; x++) {
 					DynAnalysisRip rip;
 					bool is_private;
-					if (read_rip(inp, &is_private, as, &rip))
-						(*consumer)(rip, offset, true, is_private);
+					if (read_rip(inp, &is_private, &rip))
+						(*consumer)(rip, offset);
 				}
 			}
 		} doit = {inp, &consumer, offset, as};
-		doit(hdr.nr_loads, true);
-		doit(hdr.nr_stores, false);
+		doit(hdr.nr_loads);
+		doit(hdr.nr_stores);
 	}
 	fclose(inp);
 }
@@ -208,7 +206,7 @@ main(int argc, char *argv[])
 
 	struct _ : public tag_file_foreach_closure {
 		mapped_file *output;
-		void operator()(const DynAnalysisRip &vr, unsigned long offset, bool, bool) {
+		void operator()(const DynAnalysisRip &vr, unsigned long offset) {
 			insert_rip_into_output(output, vr, offset);
 		}
 		_(mapped_file *_output)

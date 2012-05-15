@@ -1,4 +1,5 @@
 #include <sys/fcntl.h>
+#include <err.h>
 #include <unistd.h>
 
 #include "sli.h"
@@ -9,19 +10,23 @@
 int
 main(int argc, char *argv[])
 {
+	if (argc < 1)
+		errx(1, "need to know where to read the state machine from");
+
 	init_sli();
 
 	VexPtr<Oracle> oracle(new Oracle(NULL, NULL, NULL));
 
 	VexPtr<StateMachine, &ir_heap> sm(readStateMachine(open(argv[1], O_RDONLY)));
 	VexPtr<IRExpr, &ir_heap> survive;
-	
+	VexPtr<IRExpr, &ir_heap> nullExpr(NULL);
+
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.enableignoreSideEffects();
 
-	survive = survivalConstraintIfExecutedAtomically(sm, oracle, opt, ALLOW_GC);
+	survive = survivalConstraintIfExecutedAtomically(sm, nullExpr, oracle, opt, ALLOW_GC);
 
 	survive = simplifyIRExpr(survive, opt);
 

@@ -185,7 +185,7 @@ public:
 			bool operator!=(const iterator &other) const {
 				return content != other.content;
 			}
-			void operator++(int ign) {
+			void operator++(int) {
 				content++;
 			}
 			Instruction<ripType> *value() const { return content.value(); }
@@ -243,10 +243,10 @@ public:
 	 * instruction will be explored; indirect ones will not be
 	 * (i.e. we only consider branches whose target is statically
 	 * constant). */
-	virtual bool exploreInstruction(Instruction<ripType> *i) { return true; }
+	virtual bool exploreInstruction(Instruction<ripType> *) { return true; }
 	/* We've discovered a direct-called function.  Should we
 	 * explore the callee?  Indirect calls are never explored. */
-	virtual bool exploreFunction(ripType rip) { return false; }
+	virtual bool exploreFunction(ripType ) { return false; }
 	/* Is this instruction useful?  Once the CFG is built, we do a
 	 * post-pass which walks the list of instructions, and uses
 	 * this to decide whether instructions are useful.  We then
@@ -255,7 +255,7 @@ public:
 	 * itself.  Finally, any non-useful instructions are replaced
 	 * with branches back into the original code.
 	 */
-	virtual bool instructionUseful(Instruction<ripType> *i) { return true; }
+	virtual bool instructionUseful(Instruction<ripType> *) { return true; }
 };
 
 template <typename ripType>
@@ -306,7 +306,7 @@ protected:
 
 	void emitLea(const ModRM &modrm, RegisterIdx reg);
 
-	void emitCallSequence(const char *target, bool allowRedirection);
+	void emitCallSequence(const char *target);
 	void skipRedZone();
 	void restoreRedZone();
 	void emitPushQ(RegisterIdx);
@@ -372,7 +372,7 @@ public:
 	EarlyRelocation(unsigned _offset, unsigned _size)
 		: offset(_offset), size(_size) {}
 	virtual void doit(PatchFragment<ripType> *pf) = 0;
-	void visit(HeapVisitor &hv) {}
+	void visit(HeapVisitor &) {}
 	void destruct() {}
 	NAMED_CLASS
 };
@@ -1310,7 +1310,7 @@ PatchFragment<r>::emitCallReg(RegisterIdx reg)
 }
 
 template <typename r> void
-PatchFragment<r>::emitCallSequence(const char *target, bool allowRedirection)
+PatchFragment<r>::emitCallSequence(const char *target)
 {
 	skipRedZone();
 

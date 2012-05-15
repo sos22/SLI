@@ -18,7 +18,7 @@
 
 static bool loud_mode;
 
-static Bool chase_into_ok(void *ignore1, Addr64 ignore2)
+static Bool chase_into_ok(void *, Addr64 )
 {
 	return False;
 }
@@ -1442,7 +1442,7 @@ class DecodeCache : public GarbageCollected<DecodeCache, &ir_heap> {
 		ThreadRip key;
 		IRSB *irsb;
 
-		void visit(HeapVisitor &hv) { abort(); }
+		void visit(HeapVisitor &) { abort(); }
 
 		NAMED_CLASS
 	};
@@ -1460,7 +1460,7 @@ class DecodeCache : public GarbageCollected<DecodeCache, &ir_heap> {
 public:
 	IRSB **search(const ThreadRip &tr);
 
-	void visit(HeapVisitor &hv) { abort(); }
+	void visit(HeapVisitor &) { abort(); }
 	NAMED_CLASS
 };
 IRSB **
@@ -1526,9 +1526,7 @@ AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 				&abiinfo_both,
 				Ity_I64, /* guest word type */
 				False, /* do_self_check */
-				NULL, /* preamble */
-				0, /* self check start */
-				0); /* self check len */
+				NULL);
 		if (!irsb)
 			throw InstructionDecodeFailedException();
 
@@ -1677,7 +1675,6 @@ interpretStatement(IRStmt *stmt,
 		   Thread *thr,
 		   EventRecorder *er,
 		   MachineState *ms,
-		   IRSB *irsb,
 		   ReplayEngineTimer &ret)
 {
 	switch (stmt->tag) {
@@ -1822,7 +1819,7 @@ Thread::runToEvent(VexPtr<Thread > &ths,
 			IRStmt *stmt = ths->currentIRSB->stmts[ths->currentIRSBOffset];
 			ths->currentIRSBOffset++;
 
-			ThreadEvent *evt = interpretStatement(stmt, ths, er, ms, ths->currentIRSB, ret);
+			ThreadEvent *evt = interpretStatement(stmt, ths, er, ms, ret);
 			if (evt == DUMMY_EVENT)
 				return NULL;
 			else if (evt == FINISHED_BLOCK)

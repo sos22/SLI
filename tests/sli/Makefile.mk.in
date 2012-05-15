@@ -1,4 +1,6 @@
-sli_tests="pmap vamap nd_chooser parse_state_machine survival_constraint wm_suitability eval_cross_product simplify_irexpr find_remote_sections simplify_state_machine"
+sli_tests="pmap vamap nd_chooser parse_state_machine survival_constraint wm_suitability eval_cross_product simplify_irexpr"
+sli_tests="$sli_tests find_remote_sections simplify_state_machine testgetStoreCFGs getProbeCFGs"
+
 targets=$(echo $sli_tests | sed "s%\<%${input_base}/%g")
 
 rules() {
