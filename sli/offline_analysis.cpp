@@ -873,7 +873,8 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			optIn
 			.enableignoreSideEffects()
 			.enableassumeNoInterferingStores()
-			.enableassumeExecutesAtomically();
+			.enableassumeExecutesAtomically()
+			.enablenoExtend();
 		VexPtr<StateMachine, &ir_heap> atomicProbeMachine;
 		atomicProbeMachine = duplicateStateMachine(probeMachine);
 		atomicProbeMachine = optimiseStateMachine(atomicProbeMachine, opt, oracle,
