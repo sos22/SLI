@@ -842,7 +842,7 @@ class EvalContext {
 		if (assumption)
 			assumption = simplifyIRExpr(assumption, opt);
 		if (accumulatedAssumption)
-			accumulatedAssumption = simplifyIRExpr(assumption, opt);
+			accumulatedAssumption = simplifyIRExpr(accumulatedAssumption, opt);
 	}
 	EvalContext(const EvalContext &o, const threadState &_state,
 		    const memLogT &_memlog, IRExpr *_assumption,
@@ -1088,7 +1088,6 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 
 	struct _ : public EvalPathConsumer {
 		VexPtr<IRExpr, &ir_heap> res;
-		VexPtr<IRExpr, &ir_heap> &assumption;
 		const AllowableOptimisations &opt;
 		bool crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			IRExpr *component =
@@ -1109,7 +1108,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 		bool escape(IRExpr *, IRExpr *) { return true; }
 		_(VexPtr<IRExpr, &ir_heap> &_assumption,
 		  const AllowableOptimisations &_opt)
-			: res(NULL), assumption(_assumption), opt(_opt)
+			: res(_assumption), opt(_opt)
 		{}
 	} consumeEvalPath(assumption, opt);
 	if (assumption) {
@@ -1498,10 +1497,11 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 			   result is the result of the whole
 			   machine. */
 			/* Exception: we don't consider the case where
-			   the probe machine completes before the
-			   store machine has issued any stores, so
-			   that just turns into Unreached. */
-			if (crossState.store_issued_store)
+			   the probe machine crashes before the store
+			   machine has issued any stores, so that just
+			   turns into Unreached. */
+			if (crossState.p->type == StateMachineState::NoCrash ||
+			    crossState.store_issued_store)
 				newState = crossState.p;
 			else
 				newState = StateMachineUnreached::get();
