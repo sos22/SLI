@@ -656,7 +656,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		if (satisfier) {
 			val = coerceTypes(smsel->type, satisfier->data);
 		} else {
-			val = IRExpr_Load(smsel->type, addr, smsel->rip);
+			val = IRExpr_Load(smsel->type, addr, MemoryAccessIdentifier::initial_value());
 		}
 		if (collectOrderingConstraints)
 			memLog.push_back(

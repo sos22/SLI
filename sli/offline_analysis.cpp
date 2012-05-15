@@ -899,7 +899,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			done_something = false;
 			reducedProbeMachine = optimiseStateMachine(
 				reducedProbeMachine,
-				optIn.enableignoreSideEffects().enablenoExtend(),
+				optIn.enableignoreSideEffects(),
 				oracle, true, true, token, &done_something);
 			if (!done_something)
 				break;

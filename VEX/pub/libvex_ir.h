@@ -271,11 +271,19 @@ class MemoryAccessIdentifier : public Named {
 	MemoryAccessIdentifier() : generation(-1) {}
 public:
 	static const unsigned static_generation = 1;
-	static const unsigned first_dynamic_generation = 2;
+	static const unsigned initial_value_generation = 2;
+	static const unsigned first_dynamic_generation = 3;
 	ThreadRip rip;
 	unsigned generation;
 	unsigned long hash() const { return rip.hash() * 200010011 + generation * 200021863; }
-	void sanity_check() const { rip.sanity_check(); }
+	void sanity_check() const {
+		assert(generation != 0);
+		rip.sanity_check();
+		if (generation != initial_value_generation) {
+			assert(rip.thread != 0);
+			assert(rip.rip.isValid());
+		}
+	}
 	bool operator==(const MemoryAccessIdentifier &other) const {
 		return rip == other.rip && generation == other.generation;
 	}
@@ -299,6 +307,9 @@ public:
 
 	static MemoryAccessIdentifier uninitialised(void) {
 		return MemoryAccessIdentifier();
+	}
+	static MemoryAccessIdentifier initial_value(void) {
+		return MemoryAccessIdentifier(ThreadRip(), initial_value_generation);
 	}
 };
 bool parseMemoryAccessIdentifier(MemoryAccessIdentifier *, const char *, const char **);

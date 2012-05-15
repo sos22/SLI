@@ -958,7 +958,10 @@ StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
 MemoryAccessIdentifier
 MemoryAccessIdentifierAllocator::operator()(const ThreadRip &rip)
 {
-	auto it_and_did_something = ids.insert(std::pair<ThreadRip, unsigned>(rip, 1));
+	/* I'm not sure why, but inlining the definition of dflt into
+	   its only use leads to a link error. */
+	unsigned dflt = MemoryAccessIdentifier::first_dynamic_generation;
+	auto it_and_did_something = ids.insert(std::pair<ThreadRip, unsigned>(rip, dflt));
 	auto it = it_and_did_something.first;
 	unsigned gen = it->second;
 	it->second++;
