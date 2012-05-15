@@ -194,6 +194,8 @@ top_exploration_iter:
 	std::set<VexRip> new_roots;
 	for (auto it = doneSoFar.begin(); !TIMEOUT && it != doneSoFar.end(); it++) {
 		const VexRip &discoveredRip(it->first);
+		if (TIMEOUT)
+			return;
 		if (vr_roots.count(discoveredRip))
 			continue;
 		for (auto it2 = vr_roots.begin(); !TIMEOUT && it2 != vr_roots.end(); it2++) {
@@ -510,6 +512,8 @@ buildCFG(const std::set<DynAnalysisRip> &dyn_roots, unsigned maxPathLength,
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
 	initialExploration(dyn_roots, maxPathLength, oracle, ripsToCFGNodes);
+	if (TIMEOUT)
+		return;
 	resolveReferences(ripsToCFGNodes);
 
 	if (debug_initial_exploration) {
