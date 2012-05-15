@@ -824,18 +824,26 @@ class EvalContext {
 		  state(o.state),
 		  memlog(o.memlog),
 		  currentState(sms)
-	{}
+	{
+		assert(assumption->optimisationsApplied != 0);
+	}
 	/* Create a new context which is like this one, but with an
 	   extra assumption. */
-	EvalContext(const EvalContext &o, StateMachineState *sms, IRExpr *assume)
-		: assumption(o.assumption ? IRExpr_Binop(Iop_And1, o.assumption, assume) : NULL),
+	EvalContext(const EvalContext &o, StateMachineState *sms, IRExpr *assume,
+		    const AllowableOptimisations &opt)
+		: assumption(o.assumption ? IRExpr_Binop(Iop_And1, o.assumption, assume) : assume),
 		  accumulatedAssumption(o.accumulatedAssumption
 					? IRExpr_Binop(Iop_And1, o.accumulatedAssumption, assume)
 					: NULL),
 		  state(o.state),
 		  memlog(o.memlog),
 		  currentState(sms)
-	{}
+	{
+		if (assumption)
+			assumption = simplifyIRExpr(assumption, opt);
+		if (accumulatedAssumption)
+			accumulatedAssumption = simplifyIRExpr(assumption, opt);
+	}
 	EvalContext(const EvalContext &o, const threadState &_state,
 		    const memLogT &_memlog, IRExpr *_assumption,
 		    IRExpr *_accAssumption)
@@ -844,7 +852,9 @@ class EvalContext {
 		  state(_state),
 		  memlog(_memlog),
 		  currentState(o.currentState)
-	{}
+	{
+		assert(assumption->optimisationsApplied != 0);
+	}
 public:
 	VexPtr<StateMachineState, &ir_heap> currentState;
 	bool advance(Oracle *oracle, const AllowableOptimisations &opt,
@@ -855,14 +865,18 @@ public:
 		: assumption(initialAssumption),
 		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
 		  currentState(sm->root)
-	{}
+	{
+		assert(assumption->optimisationsApplied != 0);
+	}
 	EvalContext(const EvalContext &o)
 		: assumption(o.assumption),
 		  accumulatedAssumption(o.accumulatedAssumption),
 		  state(o.state),
 		  memlog(o.memlog),
 		  currentState(o.currentState)
-	{}
+	{
+		assert(assumption->optimisationsApplied != 0);
+	}	
 };
 
 EvalContext::trool
@@ -1007,11 +1021,13 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 							smb->falseTarget,
 							IRExpr_Unop(
 								Iop_Not1,
-								cond)));
+								cond),
+							opt));
 			pendingStates.push_back(EvalContext(
 							*this,
 							smb->trueTarget,
-							cond));
+							cond,
+							opt));
 			break;
 		}
 		return true;
@@ -1096,10 +1112,12 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 			: res(NULL), assumption(_assumption), opt(_opt)
 		{}
 	} consumeEvalPath(assumption, opt);
-	if (assumption)
+	if (assumption) {
 		consumeEvalPath.needsAccAssumptions = true;
-	else
+	} else {
 		assumption = IRExpr_Const(IRConst_U1(1));
+		assumption->optimisationsApplied = 1;
+	}
 	enumEvalPaths(sm, assumption, oracle, opt, consumeEvalPath, token);
 
 	if (TIMEOUT)
