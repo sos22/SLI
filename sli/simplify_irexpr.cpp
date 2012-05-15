@@ -753,6 +753,37 @@ _sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 }
 
 static sort_ordering
+_arith_addition_sort(const IRExpr *a1, const IRExpr *b1)
+{
+	/* Strip off Iop_Neg operators when sorting addition
+	   associative operations, which helps a bit with
+	   normalisation. */
+	const IRExpr *a = a1, *b = b1;
+	bool inv_a = false;
+	bool inv_b = false;
+
+	while (a->tag == Iex_Unop) {
+		const IRExprUnop *ua = (IRExprUnop *)a;
+		if (ua->op < Iop_Neg8 || ua->op > Iop_Neg64)
+			break;
+		inv_a = !inv_a;
+		a = ua->arg;
+	}
+	while (b->tag == Iex_Unop) {
+		const IRExprUnop *ub = (IRExprUnop *)b;
+		if (ub->op < Iop_Neg8 || ub->op > Iop_Neg64)
+			break;
+		inv_b = !inv_b;
+		b = ub->arg;
+	}
+	sort_ordering order = _sortIRExprs(a, b);
+	if (order == equal_to)
+		return _sortIntegers(inv_b, inv_a);
+	else
+		return order;
+}
+
+static sort_ordering
 _cnf_disjunction_sort(const IRExpr *a1, const IRExpr *b1)
 {
 	/* The disjunction order is essentially the same as the normal
@@ -949,6 +980,11 @@ cnf_conjunction_sort(const IRExpr *a, const IRExpr *b)
 {
 	return _cnf_conjunction_sort(a, b) == less_than;
 }
+bool
+arith_addition_sort(const IRExpr *a, const IRExpr *b)
+{
+	return _arith_addition_sort(a, b) == less_than;
+}
 
 static void
 sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
@@ -971,6 +1007,8 @@ sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 		_sortAssociativeArguments<cnf_disjunction_sort>(ae, done_something);
 	else if (ae->op == Iop_And1)
 		_sortAssociativeArguments<cnf_conjunction_sort>(ae, done_something);
+	else if (ae->op >= Iop_Add8 && ae->op <= Iop_Add64)
+		_sortAssociativeArguments<arith_addition_sort>(ae, done_something);
 	else
 		_sortAssociativeArguments<sortIRExprs>(ae, done_something);
 }
