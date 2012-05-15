@@ -33,15 +33,15 @@
 #endif
 
 #ifndef STORE_CLUSTER_THRESHOLD
-#define STORE_CLUSTER_THRESHOLD 50
+#define STORE_CLUSTER_THRESHOLD 20
 #endif
 
 /* We always reach threshold1, and we can expand up to threshold2 if
    that looks like it'll reach a convenient place in the program to do
    analysis from. */
 #ifndef PROBE_CLUSTER_THRESHOLD1
-#define PROBE_CLUSTER_THRESHOLD1 5
+#define PROBE_CLUSTER_THRESHOLD1 20
 #endif
 #ifndef PROBE_CLUSTER_THRESHOLD2
-#define PROBE_CLUSTER_THRESHOLD2 10
+#define PROBE_CLUSTER_THRESHOLD2 20
 #endif
