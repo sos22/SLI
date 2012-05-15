@@ -1114,10 +1114,8 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 	} consumeEvalPath(assumption, opt);
 	if (assumption) {
 		consumeEvalPath.needsAccAssumptions = true;
-	} else {
+	} else
 		assumption = IRExpr_Const(IRConst_U1(1));
-		assumption->optimisationsApplied = 1;
-	}
 	enumEvalPaths(sm, assumption, oracle, opt, consumeEvalPath, token);
 
 	if (TIMEOUT)

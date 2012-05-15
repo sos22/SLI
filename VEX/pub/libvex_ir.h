@@ -1560,7 +1560,14 @@ struct IRExprLoad : public IRExpr {
 */
 struct IRExprConst : public IRExpr {
    IRConst* con;     /* The constant itself */
-   IRExprConst() : IRExpr(Iex_Const) {}
+   IRExprConst()
+       : IRExpr(Iex_Const)
+   {
+       /* There's not much point in attempting to optimise constants,
+	  so just set the flag saying that it's already been fully
+	  optimised. */
+       optimisationsApplied = ~0u;
+   }
    void visit(HeapVisitor &hv) { hv(con); }
    unsigned long hashval() const { return con->hashval(); }
    void prettyPrint(FILE *f) const;
