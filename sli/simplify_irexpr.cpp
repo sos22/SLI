@@ -1904,9 +1904,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Const(IRConst_U1(c->Ico.U32 & 1));
 				case Iop_16to8:
 					return IRExpr_Const(IRConst_U8(c->Ico.U16));
-					/* VEX has no 16to1 operation, for some reason. */
+				case Iop_16to1:
+					return IRExpr_Const(IRConst_U1(c->Ico.U16 & 1));
 				case Iop_8to1:
 					return IRExpr_Const(IRConst_U1(c->Ico.U8 & 1));
+				case Iop_8Sto16:
+					return IRExpr_Const(IRConst_U16( (char)c->Ico.U8));
 				case Iop_BadPtr:
 					if (c->Ico.U64 < 4096) {
 						return IRExpr_Const(IRConst_U1(1));
