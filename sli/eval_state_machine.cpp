@@ -1383,8 +1383,10 @@ struct crossStateT {
 };
 
 static bool
-definitelyDoesntRace(StateMachineSideEffectLoad *smsel, StateMachineState *machine,
-		     const AllowableOptimisations &opt, Oracle *oracle,
+definitelyDoesntRace(StateMachineSideEffectMemoryAccess *probeEffect,
+		     StateMachineState *machine,
+		     const AllowableOptimisations &opt,
+		     Oracle *oracle,
 		     std::set<StateMachineState *> &memo)
 {
 	if (!memo.insert(machine).second)
@@ -1392,25 +1394,33 @@ definitelyDoesntRace(StateMachineSideEffectLoad *smsel, StateMachineState *machi
 	StateMachineSideEffect *otherEffect = machine->getSideEffect();
 	if (otherEffect && otherEffect->type == StateMachineSideEffect::Store) {
 		StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)otherEffect;
-		if (oracle->memoryAccessesMightAlias(opt, smsel, s))
+		if (probeEffect->type == StateMachineSideEffect::Load ?
+		    oracle->memoryAccessesMightAlias(
+			    opt,
+			    (StateMachineSideEffectLoad *)probeEffect,
+			    s) :
+		    oracle->memoryAccessesMightAlias(
+			    opt,
+			    (StateMachineSideEffectStore *)probeEffect,
+			    s))
 			return false;
 	}
 	std::vector<StateMachineState *> targets;
 	machine->targets(targets);
 	for (auto it = targets.begin(); it != targets.end(); it++)
-		if (!definitelyDoesntRace(smsel, *it, opt, oracle, memo))
+		if (!definitelyDoesntRace(probeEffect, *it, opt, oracle, memo))
 			return false;
 	return true;
 }
 
 /* Returns true if there are any stores in @machine which might
-   conceivably race with @smsel. */
+   conceivably race with @probeEffect. */
 static bool
-definitelyDoesntRace(StateMachineSideEffectLoad *smsel, StateMachineState *machine,
+definitelyDoesntRace(StateMachineSideEffectMemoryAccess *probeEffect, StateMachineState *machine,
 		     const AllowableOptimisations &opt, Oracle *oracle)
 {
 	std::set<StateMachineState *> memo;
-	return definitelyDoesntRace(smsel, machine, opt, oracle, memo);
+	return definitelyDoesntRace(probeEffect, machine, opt, oracle, memo);
 }
 
 static StateMachine *
@@ -1437,8 +1447,8 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 		}
 
 		crossStateT crossState(r.second);
-		StateMachineSideEffectLoad *probe_effect =
-			dynamic_cast<StateMachineSideEffectLoad *>(crossState.p->getSideEffect());
+		StateMachineSideEffectMemoryAccess *probe_effect =
+			dynamic_cast<StateMachineSideEffectMemoryAccess *>(crossState.p->getSideEffect());
 		StateMachineSideEffectStore *store_effect =
 			dynamic_cast<StateMachineSideEffectStore *>(crossState.s->getSideEffect());
 		StateMachineState *newState;
