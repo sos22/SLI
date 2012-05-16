@@ -1691,6 +1691,11 @@ IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1,
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
    assert(arg1);
    assert(arg2);
+
+   /* Turn cas cmp operations into ordinary cmps. */
+   if (op >= Iop_CasCmpEQ8 && op <= Iop_CasCmpNE64)
+     op = (IROp)(Iop_CmpEQ8 + (op - Iop_CasCmpEQ8));
+
    if (operationAssociates(op))
      return IRExpr_Associative(op, arg1, arg2, NULL);
 
