@@ -21,6 +21,7 @@ public:
 	VexPtr<Oracle> &oracle;
 	int cntr;
 	FILE *output;
+	DynAnalysisRip dr;
 	DumpFix(VexPtr<Oracle> &_oracle, FILE *_output)
 		: oracle(_oracle), cntr(0), output(_output)
 	{
@@ -56,6 +57,7 @@ DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 	if (!f)
 		err(1, "fdopen()");
 
+	fprintf(f, "summary from dyn rip %s\n", dr.name());
 	printCrashSummary(summary, f);
 	fclose(f);
 }
@@ -87,6 +89,8 @@ consider_rip(const DynAnalysisRip &my_rip,
 	     GarbageCollectionToken token)
 {
 	__set_profiling(consider_rip);
+
+	df.dr = my_rip;
 
 	LibVEX_maybe_gc(token);
 
