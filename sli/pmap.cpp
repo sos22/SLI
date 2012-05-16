@@ -187,7 +187,7 @@ void PMap::visit(HeapVisitor &hv)
 void
 PMapEntry::relocate(PMapEntry *target, size_t sz)
 {
-	assert(sz == sizeof(*this));
+	assert(sz >= sizeof(*this));
 	if (target->next)
 		target->next->pprev = &target->next;
 	*target->pprev = target;
@@ -197,7 +197,7 @@ PMapEntry::relocate(PMapEntry *target, size_t sz)
 void
 PMap::relocate(PMap *target, size_t sz)
 {
-	assert(sz == sizeof(*this));
+	assert(sz >= sizeof(*this));
 	/* The pmap head pointers are slightly weak, in the sense that
 	   just being in the pmap isn't enough to keep them live (for
 	   which you need an external reference from a vamap).  That
