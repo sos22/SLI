@@ -299,7 +299,7 @@ optimise_condition_calculation(
 			coerce(dep1),				\
 			IRExpr_Const(IRConst_U ## type (0)));	\
 		of = IRExpr_Const(IRConst_U1(0))
-#define do_logic(type) _do_logic(type, coerce ## 8)
+#define do_logic(type) _do_logic(type, coerce ## type)
 	case AMD64G_CC_OP_LOGICB:
 		do_logic(8);
 		break;
