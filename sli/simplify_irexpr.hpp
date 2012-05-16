@@ -15,6 +15,7 @@ void addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg);
 bool physicallyEqual(const IRConst *a, const IRConst *b);
 bool physicallyEqual(const IRExpr *a, const IRExpr *b);
 IRExpr *coerceTypes(IRType, IRExpr *);
+IRExpr *expr_eq(IRExpr *, IRExpr *);
 
 void sanity_check_irexpr_sorter(void);
 void sanity_check_optimiser(void);

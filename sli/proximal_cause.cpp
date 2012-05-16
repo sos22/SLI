@@ -4,6 +4,7 @@
 #include "offline_analysis.hpp"
 #include "libvex_prof.hpp"
 #include "alloc_mai.hpp"
+#include "simplify_irexpr.hpp"
 
 namespace ProximalCause {
 
@@ -126,20 +127,6 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 			threadAndRegister tr = threadAndRegister::temp(rip.thread, t, 0);
 			IRType ty = cas->expdLo->type();
 			IRExpr *t_expr = IRExpr_Get(tr, ty);
-			IROp op;
-			switch (ty) {
-#define do_size(sz)						\
-				case Ity_I ## sz :		\
-					op = Iop_CmpEQ ## sz;	\
-				break
-				do_size(8);
-				do_size(16);
-				do_size(32);
-				do_size(64);
-#undef do_size
-			default:
-				abort();
-			}
 			work = new StateMachineSideEffecting(
 				rip.rip,
 				new StateMachineSideEffectCopy(
@@ -160,10 +147,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 							ty),
 						new StateMachineBifurcate(
 							rip.rip,
-							IRExpr_Binop(
-								op,
-								t_expr,
-								cas->expdLo),
+							expr_eq(t_expr, cas->expdLo),
 							new StateMachineSideEffecting(
 								rip.rip,
 								new StateMachineSideEffectStore(

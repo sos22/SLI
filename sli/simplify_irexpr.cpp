@@ -2548,7 +2548,7 @@ simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
 	return optimiseIRExprFP(a, opt, &progress);
 }
 
-static IRExpr *
+IRExpr *
 expr_eq(IRExpr *a, IRExpr *b)
 {
 	assert(a->type() == b->type());

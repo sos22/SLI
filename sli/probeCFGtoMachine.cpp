@@ -124,9 +124,62 @@ cfgNodeToState(Oracle *oracle,
 			cursor = &smse->target;
 			break;
 		}
-		case Ist_CAS:
-			abort();
+		case Ist_CAS: {
+			IRCAS *cas = ((IRStmtCAS *)stmt)->details;
+			/* This is a bit tricky.  We take a
+
+			   CAS *x : expd -> b
+
+			   and we turn it into
+
+			   l1: t <- *x then l2
+			   l2: if (t == expd) then l3 else l4
+			   l3: *x <- data
+			   l4: old <- t
+			*/
+#warning This breaks the atomicity of the CAS
+			/* Breaking the atomicity of the CAS like that
+			   means that we'll sometimes report a crash
+			   which can't happen, but we'll never miss a
+			   crash which can. */
+			IRTemp t = newIRTemp(irsb->tyenv);
+			threadAndRegister tempreg = threadAndRegister::temp(tid, t, 0);
+			IRType ty = cas->expdLo->type();
+			IRExpr *t_expr = IRExpr_Get(tempreg, ty);
+			StateMachineSideEffecting *l4 =
+				new StateMachineSideEffecting(
+					target->my_rip,
+					new StateMachineSideEffectCopy(
+						cas->oldLo,
+						t_expr),
+					NULL);
+			StateMachineState *l3 =
+				new StateMachineSideEffecting(
+					target->my_rip,
+					new StateMachineSideEffectStore(
+						cas->addr,
+						cas->dataLo,
+						mai(tr)),
+					l4);
+			StateMachineState *l2 =
+				new StateMachineBifurcate(
+					target->my_rip,
+					expr_eq(t_expr, cas->expdLo),
+					l3,
+					l4);
+			StateMachineState *l1 =
+				new StateMachineSideEffecting(
+					target->my_rip,
+					new StateMachineSideEffectLoad(
+						tempreg,
+						cas->addr,
+						mai(tr),
+						ty),
+					l2);
+			*cursor = l1;
+			cursor = &l4->target;
 			break;
+		}
 		case Ist_Dirty: {
 			IRDirty *dirty = ((IRStmtDirty *)stmt)->details;
 			IRType ity = Ity_INVALID;
