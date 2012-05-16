@@ -825,7 +825,6 @@ class EvalContext {
 		  memlog(o.memlog),
 		  currentState(sms)
 	{
-		assert(assumption->optimisationsApplied != 0);
 	}
 	/* Create a new context which is like this one, but with an
 	   extra assumption. */
@@ -853,7 +852,6 @@ class EvalContext {
 		  memlog(_memlog),
 		  currentState(o.currentState)
 	{
-		assert(assumption->optimisationsApplied != 0);
 	}
 public:
 	VexPtr<StateMachineState, &ir_heap> currentState;
@@ -866,7 +864,6 @@ public:
 		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
 		  currentState(sm->root)
 	{
-		assert(assumption->optimisationsApplied != 0);
 	}
 	EvalContext(const EvalContext &o)
 		: assumption(o.assumption),
@@ -875,7 +872,6 @@ public:
 		  memlog(o.memlog),
 		  currentState(o.currentState)
 	{
-		assert(assumption->optimisationsApplied != 0);
 	}	
 };
 
