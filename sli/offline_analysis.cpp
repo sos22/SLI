@@ -339,7 +339,7 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 		sm,
 		probeMachine,
 		oracle,
-		assumption,
+		writeMachineConstraint,
 		opt,
 		token);
 
