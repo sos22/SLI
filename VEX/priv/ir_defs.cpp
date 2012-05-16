@@ -1696,6 +1696,13 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
    if (op >= Iop_CasCmpEQ8 && op <= Iop_CasCmpNE64)
      op = (IROp)(Iop_CmpEQ8 + (op - Iop_CasCmpEQ8));
 
+   /* Turn x != y into !(x == y) */
+   if (op >= Iop_CmpNE8 && op <= Iop_CmpNE64)
+     return IRExpr_Unop(Iop_Not1,
+			IRExpr_Binop((IROp)(op - Iop_CmpNE8 + Iop_CmpEQ8),
+				     arg1,
+				     arg2));
+
    if (operationAssociates(op))
      return IRExpr_Associative(op, arg1, arg2, NULL);
 
