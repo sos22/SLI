@@ -208,6 +208,34 @@ optimise_condition_calculation(
 	sf = cf = zf = of = NULL;
 
 	switch (op) {
+	case AMD64G_CC_OP_COPY:
+		sf = IRExpr_Unop(
+			Iop_64to1,
+			IRExpr_Binop(
+				Iop_Shr64,
+				dep1,
+				IRExpr_Const(
+					IRConst_U8(
+						7))));
+		cf = IRExpr_Unop(
+			Iop_64to1, dep1);
+		zf = IRExpr_Unop(
+			Iop_64to1,
+			IRExpr_Binop(
+				Iop_Shr64,
+				dep1,
+				IRExpr_Const(
+					IRConst_U8(
+						6))));
+		of = IRExpr_Unop(
+			Iop_64to1,
+			IRExpr_Binop(
+				Iop_Shr64,
+				dep1,
+				IRExpr_Const(
+					IRConst_U8(
+						11))));
+		break;
 #define coerce8(x) IRExpr_Unop(Iop_64to8, (x))
 #define coerce16(x) IRExpr_Unop(Iop_64to16, (x))
 #define coerce32(x) IRExpr_Unop(Iop_64to32, (x))
