@@ -4,6 +4,7 @@
 #include "cfgnode.hpp"
 #include "oracle.hpp"
 #include "alloc_mai.hpp"
+#include "offline_analysis.hpp"
 
 namespace _probeCFGsToMachine {
 
@@ -317,6 +318,57 @@ performTranslation(std::map<CFGNode *, StateMachineState *> &results,
 	return root;
 }
 
+/* The rest of the analysis can't use any more than four slots of RIP
+   context, so there's not really much point in maintaining them. */
+static StateMachine *
+truncateRips(StateMachine *sm)
+{
+	struct : public StateMachineTransformer {
+		bool truncateVexRip(const VexRip &in, VexRip *out) {
+			if (in.stack.size() <= (unsigned)DynAnalysisRip::DATABASE_RIP_DEPTH)
+				return false;
+			std::vector<unsigned long> c;
+			c.reserve(DynAnalysisRip::DATABASE_RIP_DEPTH);
+			for (auto it = in.stack.rbegin(); it != in.stack.rend(); it++)
+				c.push_back(*it);
+			*out= VexRip(c);
+			return true;
+		}
+		StateMachineSideEffectLoad *transformOneSideEffect(
+			StateMachineSideEffectLoad *smsel, bool *done_something)
+		{
+			VexRip t;
+			if (truncateVexRip(smsel->rip.rip.rip, &t)) {
+				*done_something = true;
+				return new StateMachineSideEffectLoad(
+					smsel->target,
+					smsel->addr,
+					MemoryAccessIdentifier(
+						ThreadRip(smsel->rip.rip.thread, t),
+						smsel->rip.generation),
+					smsel->type);
+			} else {
+				return NULL;
+			}
+		}
+		StateMachineSideEffectStore *transformOneSideEffect(
+			StateMachineSideEffectStore *smses, bool *done_something)
+		{
+			VexRip t;
+			if (truncateVexRip(smses->rip.rip.rip, &t)) {
+				*done_something = true;
+				return new StateMachineSideEffectStore(
+					smses->addr,
+					smses->data,
+					MemoryAccessIdentifier(ThreadRip(smses->rip.rip.thread, t), smses->rip.generation));
+			} else {
+				return NULL;
+			}
+		}
+	} doit;
+	return doit.transform(sm);
+}
+
 static void
 probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		   const DynAnalysisRip &proximalRip,
@@ -356,7 +408,7 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		origin.push_back(std::pair<unsigned, VexRip>(tid, root->origin));
 		StateMachine *sm = new StateMachine(root, origin);
 		sm->sanityCheck();
-		out.insert(sm);
+		out.insert(truncateRips(sm));
 	}
 }
 
@@ -377,8 +429,9 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root, MemoryAccessIden
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<std::pair<unsigned, VexRip> > origin;
 	origin.push_back(std::pair<unsigned, VexRip>(tid, root->my_rip));
-	return new StateMachine(performTranslation(results, root, oracle, tid, doOne),
-				origin);
+	StateMachine *sm = new StateMachine(performTranslation(results, root, oracle, tid, doOne),
+					    origin);
+	return truncateRips(sm);
 }
 
 /* End of namespace */
