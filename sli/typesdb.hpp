@@ -26,7 +26,7 @@ class DynAnalysisRip : public Named {
 		return a2;
 	}
 public:
-	static const int DATABASE_RIP_DEPTH = 4;
+	static const int DATABASE_RIP_DEPTH = CONFIG_DATABASE_RIP_DEPTH;
 	int nr_rips;
 	unsigned long rips[DATABASE_RIP_DEPTH];
 
