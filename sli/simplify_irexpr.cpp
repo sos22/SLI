@@ -1350,6 +1350,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						case Iop_Or1:
 							res = IRExpr_Const(IRConst_U1(l->Ico.U1 | r->Ico.U1));
 							break;
+						case Iop_Xor1:
+							res = IRExpr_Const(IRConst_U1(l->Ico.U1 ^ r->Ico.U1));
+							break;
 						default:
 							printf("Warning: can't constant-fold associative op %d\n", e->op);
 							res = NULL;
@@ -1805,6 +1808,14 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Const(IRConst_U32(-c->Ico.U32));
 				case Iop_Neg64:
 					return IRExpr_Const(IRConst_U64(-c->Ico.U64));
+				case Iop_Not8:
+					return IRExpr_Const(IRConst_U8(~c->Ico.U8));
+				case Iop_Not16:
+					return IRExpr_Const(IRConst_U16(~c->Ico.U16));
+				case Iop_Not32:
+					return IRExpr_Const(IRConst_U32(~c->Ico.U32));
+				case Iop_Not64:
+					return IRExpr_Const(IRConst_U64(~c->Ico.U64));
 				case Iop_Not1:
 					return IRExpr_Const(IRConst_U1(!c->Ico.U1));
 				case Iop_8Uto16:
@@ -2276,6 +2287,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Const(
 						IRConst_U1(
 							((a ^ b) & (a ^ (a - b))) >> 63));
+				}
+				case Iop_CmpLT8S: {
+					char a = ((IRExprConst *)l)->con->Ico.U8;
+					char b = ((IRExprConst *)r)->con->Ico.U8;
+					return IRExpr_Const(
+						IRConst_U1(a < b));
 				}
 				case Iop_32HLto64:
 					return IRExpr_Const(
