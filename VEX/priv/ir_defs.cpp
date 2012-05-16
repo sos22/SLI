@@ -313,6 +313,7 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 						\
 	     iter(Not1)				\
 	     iter(8to1)				\
+	     iter(16to1)			\
 	     iter(32to1)			\
 	     iter(64to1)			\
 	     iter(1Uto8)			\
@@ -331,7 +332,6 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(CmpEQF64)			\
 	     iter(CmpEQI128)			\
 	     iter(CmpEQV128)			\
-	     iter(CC_OverflowSub)		\
 						\
 	     iter(MullS8)			\
 	     iter(MullS16)			\
@@ -348,6 +348,9 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(Ctz32)			\
 						\
 	     iter(CmpLT8S)			\
+	     iter(CmpLT8U)			\
+						\
+	     iter(CmpLT16U)			\
 						\
 	     iter(CmpLT32S)			\
 	     iter(CmpLE32S)			\
@@ -2260,9 +2263,6 @@ void typeOfPrimop ( IROp op,
       case Iop_Shl64: case Iop_Shr64: case Iop_Sar64:
          BINARY(Ity_I64,Ity_I8, Ity_I64);
 
-      case Iop_CC_OverflowSub:
-	BINARY(Ity_I64, Ity_I64, Ity_I1);
-
       case Iop_Not8:
       case Iop_Neg8:
          UNARY(Ity_I8, Ity_I8);
@@ -2279,11 +2279,11 @@ void typeOfPrimop ( IROp op,
 
       case Iop_CmpEQ8: case Iop_CmpNE8:
       case Iop_CasCmpEQ8: case Iop_CasCmpNE8:
-      case Iop_CmpLT8S:
+      case Iop_CmpLT8S: case Iop_CmpLT8U:
          COMPARISON(Ity_I8);
       case Iop_CmpEQ16: case Iop_CmpNE16:
       case Iop_CasCmpEQ16: case Iop_CasCmpNE16:
-      case Iop_CmpLT16S:
+      case Iop_CmpLT16S: case Iop_CmpLT16U:
          COMPARISON(Ity_I16);
       case Iop_CmpEQ32: case Iop_CmpNE32:
       case Iop_CasCmpEQ32: case Iop_CasCmpNE32:
@@ -2360,6 +2360,7 @@ void typeOfPrimop ( IROp op,
       case Iop_1Uto32: case Iop_1Sto32: UNARY(Ity_I1, Ity_I32);
       case Iop_1Sto64: case Iop_1Uto64: UNARY(Ity_I1, Ity_I64);
       case Iop_8to1:   UNARY(Ity_I8, Ity_I1);
+      case Iop_16to1:  UNARY(Ity_I16, Ity_I1);
       case Iop_32to1:  UNARY(Ity_I32, Ity_I1);
       case Iop_64to1:  UNARY(Ity_I64, Ity_I1);
       case Iop_CmpEQ1: case Iop_And1: case Iop_Or1: case Iop_Xor1: BINARY(Ity_I1, Ity_I1, Ity_I1);

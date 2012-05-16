@@ -594,8 +594,6 @@ typedef
       Iop_CmpEQ1, Iop_CmpEQI128, Iop_CmpEQV128, Iop_CmpEQF32,
       Iop_CmpEQF64,
 
-      Iop_CC_OverflowSub,
-
       /* Widening multiplies */
       Iop_MullS8, Iop_MullS16, Iop_MullS32, Iop_MullS64,
       Iop_MullU8, Iop_MullU16, Iop_MullU32, Iop_MullU64,
@@ -610,7 +608,7 @@ typedef
       /* Standard integer comparisons */
       Iop_CmpLT8S, Iop_CmpLT16S, Iop_CmpLT32S, Iop_CmpLT64S,
       Iop_CmpLE32S, Iop_CmpLE64S,
-      Iop_CmpLT32U, Iop_CmpLT64U,
+      Iop_CmpLT8U, Iop_CmpLT16U, Iop_CmpLT32U, Iop_CmpLT64U,
       Iop_CmpLE32U, Iop_CmpLE64U,
 
       /* As a sop to Valgrind-Memcheck, the following are useful. */
@@ -677,6 +675,7 @@ typedef
       /* 1-bit stuff */
       Iop_Not1,   /* :: Ity_Bit -> Ity_Bit */
       Iop_8to1,   /* :: Ity_I8 -> Ity_Bit, just select bit[0] */
+      Iop_16to1,  /* :: Ity_I16 -> Ity_Bit, just select bit[0] */
       Iop_32to1,  /* :: Ity_I32 -> Ity_Bit, just select bit[0] */
       Iop_64to1,  /* :: Ity_I64 -> Ity_Bit, just select bit[0] */
       Iop_1Uto8,  /* :: Ity_Bit -> Ity_I8,  unsigned widen */

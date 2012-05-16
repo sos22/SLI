@@ -208,62 +208,88 @@ optimise_condition_calculation(
 	sf = cf = zf = of = NULL;
 
 	switch (op) {
+#define coerce8(x) IRExpr_Unop(Iop_64to8, (x))
+#define coerce16(x) IRExpr_Unop(Iop_64to16, (x))
+#define coerce32(x) IRExpr_Unop(Iop_64to32, (x))
+#define coerce64(x) (x)
+#define _do_sub(type, coerce)						\
+		zf = IRExpr_Binop(					\
+			Iop_CmpEQ ## type,				\
+			coerce(dep1),					\
+			coerce(dep2));					\
+		cf = IRExpr_Binop(					\
+			Iop_CmpLT ## type ## U,				\
+			coerce(dep1),					\
+			coerce(dep2));					\
+		sf = IRExpr_Binop(					\
+			Iop_CmpLT ## type ## S,				\
+			coerce(dep1),					\
+			coerce(dep2));					\
+		of = IRExpr_Unop(					\
+			Iop_ ## type ## to1,				\
+			IRExpr_Binop(					\
+				Iop_Shr ## type,			\
+				IRExpr_Binop(				\
+					Iop_And ## type ,		\
+					IRExpr_Binop(			\
+						Iop_Xor ## type ,	\
+						coerce(dep1),		\
+						coerce(dep2)),		\
+					IRExpr_Binop(			\
+						Iop_Xor ## type,	\
+						coerce(dep1),		\
+						IRExpr_Binop(		\
+							Iop_Add ## type, \
+							coerce(dep1),	\
+							IRExpr_Unop(	\
+								Iop_Neg ## type , \
+								coerce(dep2))))), \
+				IRExpr_Const(				\
+					IRConst_U8(type - 1))))
+#define do_sub(type) _do_sub(type, coerce ## type)
 	case AMD64G_CC_OP_SUBB:
+		do_sub(8);
+		break;
 	case AMD64G_CC_OP_SUBW:
-		zf = IRExpr_Binop(Iop_CmpEQ64, dep1, dep2);
-		cf = IRExpr_Binop(
-			Iop_CmpLT64U,
-			dep1,
-			dep2);
+		do_sub(16);
 		break;
 	case AMD64G_CC_OP_SUBL:
-	case AMD64G_CC_OP_SUBQ:
-		zf = IRExpr_Binop(
-			Iop_CmpEQ64,
-			dep1,
-			dep2);
-		cf = IRExpr_Binop(
-			Iop_CmpLT64U,
-			dep1,
-			dep2);
-		sf = IRExpr_Binop(
-			Iop_CmpLT64S,
-			dep1,
-			dep2);
-		of = IRExpr_Binop(
-			Iop_CC_OverflowSub,
-			dep1,
-			dep2);
+		do_sub(32);
 		break;
-#define do_logic(type)						\
+	case AMD64G_CC_OP_SUBQ:
+		do_sub(64);
+		break;
+#undef do_sub
+#undef _do_sub
+#define _do_logic(type, coerce)					\
 		zf = IRExpr_Binop(				\
 			Iop_CmpEQ ## type ,			\
-			IRExpr_Unop(Iop_64to ## type, dep1),	\
+			coerce(dep1),				\
 			IRExpr_Const(IRConst_U ## type (0)));	\
 		sf = IRExpr_Binop(				\
 			Iop_CmpLT ## type ## S,			\
-			IRExpr_Unop(Iop_64to ## type, dep1),	\
+			coerce(dep1),				\
 			IRExpr_Const(IRConst_U ## type (0)));	\
-		of = IRExpr_Const(IRConst_U1(0));		\
-		break;
+		of = IRExpr_Const(IRConst_U1(0))
+#define do_logic(type) _do_logic(type, coerce ## 8)
 	case AMD64G_CC_OP_LOGICB:
 		do_logic(8);
+		break;
 	case AMD64G_CC_OP_LOGICW:
 		do_logic(16);
+		break;
 	case AMD64G_CC_OP_LOGICL:
 		do_logic(32);
-#undef do_logic
-	case AMD64G_CC_OP_LOGICQ:
-		zf = IRExpr_Binop(				
-			Iop_CmpEQ64,			
-			dep1,					
-			IRExpr_Const(IRConst_U64(0)));	
-		sf = IRExpr_Binop(				
-			Iop_CmpLT64S,			
-			dep1,					
-			IRExpr_Const(IRConst_U64(0)));	
-		of = IRExpr_Const(IRConst_U1(0));		
 		break;
+	case AMD64G_CC_OP_LOGICQ:
+		do_logic(64);
+		break;
+#undef do_logic
+#undef _do_logic
+#undef coerce64
+#undef coerce32
+#undef coerce16
+#undef coerce8
 	case AMD64G_CC_OP_ADDW:
 		sf = IRExpr_Binop(
 			Iop_CmpLT32S,
@@ -2281,13 +2307,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						IRConst_U64(
 							((IRExprConst *)l)->con->Ico.U64 <<
 							((IRExprConst *)r)->con->Ico.U8));
-				case Iop_CC_OverflowSub: {
-					unsigned long a = ((IRExprConst *)l)->con->Ico.U64;
-					unsigned long b = ((IRExprConst *)r)->con->Ico.U64;
-					return IRExpr_Const(
-						IRConst_U1(
-							((a ^ b) & (a ^ (a - b))) >> 63));
-				}
 				case Iop_CmpLT8S: {
 					char a = ((IRExprConst *)l)->con->Ico.U8;
 					char b = ((IRExprConst *)r)->con->Ico.U8;
