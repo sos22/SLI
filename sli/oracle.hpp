@@ -268,7 +268,7 @@ public:
 	public:
 		std::vector<std::pair<unsigned, ThreadRegisterAliasingConfiguration> > content;
 
-		PointerAliasingSet lookupRegister(const threadAndRegister &r) const;
+		PointerAliasingSet lookupRegister(const threadAndRegister &r, bool buildingAliasTable) const;
 		void set(const threadAndRegister &, const PointerAliasingSet &);
 		void addConfig(unsigned tid, const ThreadRegisterAliasingConfiguration &config);
 
