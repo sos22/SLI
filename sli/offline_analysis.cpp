@@ -270,10 +270,20 @@ singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachi
 		}
 	}
 
-	/* There must be *some* races in here, or else machine
-	   construction must have gone wrong. */
-	assert(racingStore != NULL);
-	assert(racingLoad != NULL);
+	/* We can sometimes find that there are no races possible
+	   between the two machines.  The most common reason for this
+	   is that the dynamic aliasing analysis divides memory up
+	   into 8-byte chunks, and considers two operations to alias
+	   if they hit the same chunk.  That's not completely valid
+	   for sub-word accesses, and so we can end up with the
+	   aliasing table saying that two accesses alias even when
+	   they provably can't.  That shows up here when we generate
+	   two machines which provably don't interact. */
+	if (!racingStore) {
+		assert(!racingLoad);
+		return true;
+	}
+	assert(racingLoad);
 
 	for (auto it = probeMachineLoads.begin(); it != probeMachineLoads.end(); it++) {
 		StateMachineSideEffectLoad *load = *it;
