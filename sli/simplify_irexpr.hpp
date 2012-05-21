@@ -20,4 +20,6 @@ IRExpr *expr_eq(IRExpr *, IRExpr *);
 void sanity_check_irexpr_sorter(void);
 void sanity_check_optimiser(void);
 
+void quickcheck_exprs_eq(const IRExpr *a, const IRExpr *b);
+
 #endif /* !SIMPLIFY_IREXPR_HPP__ */

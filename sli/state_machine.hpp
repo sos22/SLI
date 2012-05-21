@@ -46,6 +46,12 @@ void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndReg
                expanded.  This means that we can discard some
                assertions which would otherwise be quite useful.
 
+   noSanityChecking -- Disable various extra assertions in the
+                       optimiser.  These don't actually do anything in
+                       NDEBUG builds, so this should normally be
+                       turned on unless you're calling the optimiser
+                       from a sanity check routine.
+
    Other fields:
 
    interestingStores -- Bit of a hack: sometimes, only some side
@@ -69,7 +75,8 @@ class AllowableOptimisations {
 	f(assumeExecutesAtomically, bool)				\
 	f(ignoreSideEffects, bool)					\
 	f(assumeNoInterferingStores, bool)				\
-	f(noExtend,bool)
+	f(noExtend,bool)						\
+	f(noSanityChecking,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\

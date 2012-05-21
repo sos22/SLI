@@ -1864,7 +1864,7 @@ static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRTy
 }
 
 /* Pretty-print an IRExpr. */
-static inline void ppIRExpr ( IRExpr*e, FILE *f ) { e->prettyPrint(f); }
+static inline void ppIRExpr ( const IRExpr*e, FILE *f ) { e->prettyPrint(f); }
 extern bool parseIRExpr(IRExpr **out, const char *str, const char **suffix);
 
 /* NULL-terminated IRExpr vector constructors, suitable for
