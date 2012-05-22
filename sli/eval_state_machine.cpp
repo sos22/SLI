@@ -1667,15 +1667,13 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
         return new StateMachine(crossMachineRoot, origin);
 }
 
-bool
-evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
-			VexPtr<StateMachine, &ir_heap> &storeMachine,
-			VexPtr<Oracle> &oracle,
-			VexPtr<IRExpr, &ir_heap> &initialStateCondition,
-			const AllowableOptimisations &opt,
-			bool *mightSurvive,
-			bool *mightCrash,
-			GarbageCollectionToken token)
+IRExpr *
+crossProductSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &probeMachine,
+			       VexPtr<StateMachine, &ir_heap> &storeMachine,
+			       VexPtr<Oracle> &oracle,
+			       VexPtr<IRExpr, &ir_heap> &initialStateCondition,
+			       const AllowableOptimisations &opt,
+			       GarbageCollectionToken token)
 {
 	__set_profiling(evalCrossProductMachine);
 
@@ -1698,13 +1696,11 @@ evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			false,
 			token);
 
-	return evalMachineUnderAssumption(
+	return survivalConstraintIfExecutedAtomically(
 		crossProductMachine,
-		oracle,
 		initialStateCondition,
+		oracle,
 		opt,
-		mightSurvive,
-		mightCrash,
 		token);
 }
 

@@ -50,14 +50,12 @@ bool evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracl
 				const AllowableOptimisations &opt,
 				bool *mightSurvive, bool *mightCrash,
 				GarbageCollectionToken token);
-bool evalCrossProductMachine(VexPtr<StateMachine, &ir_heap> &probeMachine,
-			     VexPtr<StateMachine, &ir_heap> &storeMachine,
-			     VexPtr<Oracle> &oracle,
-			     VexPtr<IRExpr, &ir_heap> &initialStateCondition,
-			     const AllowableOptimisations &opt,
-			     bool *mightSurvive,
-			     bool *mightCrash,
-			     GarbageCollectionToken token);
+IRExpr *crossProductSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &probeMachine,
+				       VexPtr<StateMachine, &ir_heap> &storeMachine,
+				       VexPtr<Oracle> &oracle,
+				       VexPtr<IRExpr, &ir_heap> &initialStateCondition,
+				       const AllowableOptimisations &opt,
+				       GarbageCollectionToken token);
 bool findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			     VexPtr<StateMachine, &ir_heap> &writeMachine,
 			     VexPtr<IRExpr, &ir_heap> &assumption,

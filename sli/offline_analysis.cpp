@@ -362,40 +362,44 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 	ppIRExpr(assumption, _logfile);
 	fprintf(_logfile, "\n");
 
-	/* Now try running that in parallel with the probe machine,
-	   and see if it might lead to a crash. */
-	bool mightSurvive;
-	bool mightCrash;
-	if (!evalCrossProductMachine(probeMachine,
-				     sm,
-				     oracle,
-				     assumption,
-				     opt,
-				     &mightSurvive,
-				     &mightCrash,
-				     token)) {
-		fprintf(_logfile, "Failed to run cross product machine\n");
+	/* Figure out when the cross product machine will be at risk
+	 * of crashing. */
+	IRExpr *crash_constraint =
+		crossProductSurvivalConstraint(
+			probeMachine,
+			sm,
+			oracle,
+			assumption,
+			opt,
+			token);
+	if (!crash_constraint) {
+		fprintf(_logfile, "\t\tfailed to build crash constraint\n");
 		return false;
 	}
-	fprintf(_logfile,
-		"\t\tRun in parallel with the probe machine, might survive %d, might crash %d\n",
-		mightSurvive, mightCrash);
+
+	/* And we hope that that will lead to a contradiction when
+	   combined with the assumption.  The verification condition
+	   is (assumption) & ~(crash_condition), and is 1 in precisely
+	   those states which might suffer a bug of the desired
+	   kind. */
+	IRExpr *verification_condition =
+		IRExpr_Binop(
+			Iop_And1,
+			assumption,
+			IRExpr_Unop(
+				Iop_Not1,
+				crash_constraint));
+	verification_condition = simplifyIRExpr(verification_condition, opt);
+	if (verification_condition->tag == Iex_Const &&
+	    ((IRExprConst *)verification_condition)->con->Ico.U1 == 0) {
+		fprintf(_logfile, "\t\tRun in parallel with probe machine -> definitely no crash\n");
+		return false;
+	}
+
+	fprintf(_logfile, "\t\tCannot eliminate possibility of a crash.  Verification condition is ");
+	ppIRExpr(verification_condition, _logfile);
+	fprintf(_logfile, "\n");
 	
-	/* We know that mightSurvive is true when the load machine is
-	 * run atomically, so if mightSurvive is now false then that
-	 * means that evalCrossProductMachine didn't consider that
-	 * case, which is a bug. */
-	if (!mightSurvive) {
-		assert(_timed_out);
-		return false;
-	}
-
-	if (!mightCrash) {
-		fprintf(_logfile,
-			"\t\tDefinitely cannot crash\n");
-		return false;
-	}
-
 	if (assumptionOut)
 		*assumptionOut = assumption;
 	if (newStoreMachine)
