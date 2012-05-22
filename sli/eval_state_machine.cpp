@@ -9,6 +9,14 @@
 #include "libvex_prof.hpp"
 #include "typesdb.hpp"
 
+#ifdef NDEBUG
+#define debug_dump_state_traces 0
+#define debug_dump_crash_reasons 0
+#else
+static bool debug_dump_state_traces = false;
+static bool debug_dump_crash_reasons = false;
+#endif
+
 /* All of the state needed to evaluate a single pure IRExpr. */
 class threadState {
 	/* This is a little bit tricky, because we need to support
@@ -818,13 +826,28 @@ class EvalContext {
 	threadState state;
 	memLogT memlog;
 
+	void advance_state_trace()
+	{
+#ifndef NDEBUG
+		if (!debug_dump_state_traces)
+			return;
+		assert(stateLabels.count(currentState));
+		assert(stateLabels[currentState] != 0);
+		statePath.push_back(stateLabels[currentState]);
+#endif
+	}
 	EvalContext(const EvalContext &o, StateMachineState *sms)
 		: assumption(o.assumption),
 		  accumulatedAssumption(o.accumulatedAssumption),
 		  state(o.state),
 		  memlog(o.memlog),
 		  currentState(sms)
+#ifndef NDEBUG
+		, statePath(o.statePath)
+		, stateLabels(o.stateLabels)
+#endif
 	{
+		advance_state_trace();
 	}
 	/* Create a new context which is like this one, but with an
 	   extra assumption. */
@@ -837,11 +860,16 @@ class EvalContext {
 		  state(o.state),
 		  memlog(o.memlog),
 		  currentState(sms)
+#ifndef NDEBUG
+		, statePath(o.statePath)
+		, stateLabels(o.stateLabels)
+#endif
 	{
 		if (assumption)
 			assumption = simplifyIRExpr(assumption, opt);
 		if (accumulatedAssumption)
 			accumulatedAssumption = simplifyIRExpr(accumulatedAssumption, opt);
+		advance_state_trace();
 	}
 	EvalContext(const EvalContext &o, const threadState &_state,
 		    const memLogT &_memlog, IRExpr *_assumption,
@@ -851,19 +879,35 @@ class EvalContext {
 		  state(_state),
 		  memlog(_memlog),
 		  currentState(o.currentState)
+#ifndef NDEBUG
+		, statePath(o.statePath)
+		, stateLabels(o.stateLabels)
+#endif
 	{
+		advance_state_trace();
 	}
 public:
 	VexPtr<StateMachineState, &ir_heap> currentState;
+#ifndef NDEBUG
+private:
+	std::vector<int> statePath;
+	std::map<const StateMachineState *, int> stateLabels;
+public:
+#endif
 	bool advance(Oracle *oracle, const AllowableOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer) __attribute__((warn_unused_result));
-	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions)
+	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
+		    std::map<const StateMachineState*, int> &_stateLabels)
 		: assumption(initialAssumption),
 		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
 		  currentState(sm->root)
+#ifndef NDEBUG
+		, stateLabels(_stateLabels)
+#endif
 	{
+		advance_state_trace();
 	}
 	EvalContext(const EvalContext &o)
 		: assumption(o.assumption),
@@ -871,6 +915,10 @@ public:
 		  state(o.state),
 		  memlog(o.memlog),
 		  currentState(o.currentState)
+#ifndef NDEBUG
+		, statePath(o.statePath),
+		  stateLabels(o.stateLabels)
+#endif
 	{
 	}	
 };
@@ -975,8 +1023,29 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer)
 {
+	if (debug_dump_state_traces && currentState->isTerminal()) {
+#ifndef NDEBUG
+		assert(stateLabels.count(currentState));
+		printf("Reached state %d, trace: ", stateLabels[currentState]);
+		for (auto it = statePath.begin(); it != statePath.end(); it++) {
+			if (it != statePath.begin())
+				printf(", ");
+			printf("%d", *it);
+		}
+		printf("\n");
+#endif
+	}
 	switch (currentState->type) {
 	case StateMachineState::Crash:
+		if (debug_dump_crash_reasons) {
+			printf("Found a crash, assumption ");
+			ppIRExpr(assumption, stdout);
+			if (accumulatedAssumption) {
+				printf(", accumulated assumption ");
+				ppIRExpr(accumulatedAssumption, stdout);
+			}
+			printf("\n");
+		}
 		return consumer.crash(assumption, accumulatedAssumption);
 	case StateMachineState::NoCrash:
 		return consumer.survive(assumption, accumulatedAssumption);
@@ -990,6 +1059,7 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 		if (sme->sideEffect)
 			evalSideEffect(sm, oracle, consumer.collectOrderingConstraints,
 				       pendingStates, sme->sideEffect, opt);
+		advance_state_trace();
 		return true;
 	}
 	case StateMachineState::Bifurcate: {
@@ -1054,8 +1124,17 @@ enumEvalPaths(VexPtr<StateMachine, &ir_heap> &sm,
 	      GarbageCollectionToken &token)
 {
 	std::vector<EvalContext> pendingStates;
+	std::map<const StateMachineState *, int> stateLabels;
 
-	pendingStates.push_back(EvalContext(sm, assumption, consumer.needsAccAssumptions));
+	if (debug_dump_state_traces) {
+		printf("Eval machine:\n");
+		printStateMachine(sm, stdout, stateLabels);
+		printf("Under assumption ");
+		ppIRExpr(assumption, stdout);
+		printf("\n");
+	}
+
+	pendingStates.push_back(EvalContext(sm, assumption, consumer.needsAccAssumptions, stateLabels));
 
 	while (!pendingStates.empty()) {
 		if (TIMEOUT)
