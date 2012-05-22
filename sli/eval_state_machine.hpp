@@ -81,5 +81,12 @@ IRExpr *writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeM
 					  VexPtr<IRExpr, &ir_heap> &assumption,
 					  const AllowableOptimisations &opt,
 					  GarbageCollectionToken token);
+IRExpr *getCrossMachineCrashRequirement(
+	VexPtr<StateMachine, &ir_heap> &readMachine,
+	VexPtr<StateMachine, &ir_heap> &writeMachine,
+	VexPtr<Oracle> &oracle,
+	VexPtr<IRExpr, &ir_heap> &assumption,
+	const AllowableOptimisations &opt,
+	GarbageCollectionToken token);
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */

@@ -32,6 +32,7 @@ TypesDb::findOffsets(const DynAnalysisRip &vr, std::vector<unsigned long> &out) 
 	     ol_offset != 0;
 		) {
 		ol = mapping.get<offsets_list>(ol_offset);
+		assert(ol->nr_entries != 0);
 		for (unsigned x = 0; x < ol->nr_entries; x++)
 			out.push_back(ol->offsets[x]);
 		ol_offset = ol->chain;
@@ -207,6 +208,26 @@ TypesDb::read_vexrip_noncanon(FILE *f, DynAnalysisRip *out, AddressSpace *as, bo
 	for (int x = 0; x < out->nr_rips; x++)
 		out->rips[out->nr_rips - x - 1] = stack[stack.size() - x - 1];
 	return res;
+}
+
+bool
+TypesDb::ripPresent(const DynAnalysisRip &vr) const
+{
+	unsigned long hash = vr.hash();
+	const struct hash_head *heads = mapping.get<hash_head>(0, NR_HASH_HEADS);
+	const struct hash_head *head = &heads[hash % NR_HASH_HEADS];
+
+	unsigned long he_offset;
+	const hash_entry *he;
+	he = NULL;
+	for (he_offset = head->offset; he_offset != 0; ) {
+		he = mapping.get<hash_entry>(he_offset);
+		if (he->for_rip(vr))
+			return true;
+		he_offset = he->chain;
+	}
+	/* Nothing found */
+	return false;
 }
 
 bool

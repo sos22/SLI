@@ -139,6 +139,7 @@ public:
 	unsigned long nrDistinctInstructions() const;
 	void visit(HeapVisitor &) {}
 
+	bool ripPresent(const DynAnalysisRip &vr) const;
 	/* Parse a vexrip which has already been canonicalised. */
 	static void parse_vexrip_canon(DynAnalysisRip *out, const Mapping &mapping,
 				       unsigned long offset, bool *is_private,

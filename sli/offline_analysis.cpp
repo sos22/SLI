@@ -296,53 +296,146 @@ singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachi
 	return true;
 }
 
-static bool
-determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachine,
-				     VexPtr<StateMachine, &ir_heap> &probeMachine,
-				     VexPtr<Oracle> &oracle,
-				     VexPtr<IRExpr, &ir_heap> assumption,
-				     const AllowableOptimisations &opt,
-				     GarbageCollectionToken token,
-				     IRExpr **assumptionOut,
-				     StateMachine **newStoreMachine)
+
+static IRExpr *
+atomicSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &machine,
+			 StateMachine **_atomicMachine,
+			 VexPtr<Oracle> &oracle,
+			 const AllowableOptimisations &opt,
+			 GarbageCollectionToken token)
 {
-	__set_profiling(determineWhetherStoreMachineCanCrash);
+	VexPtr<StateMachine, &ir_heap> atomicMachine;
+	atomicMachine = duplicateStateMachine(machine);
+	atomicMachine = optimiseStateMachine(atomicMachine, opt, oracle, true, token);
+	VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
+	IRExpr *survive = survivalConstraintIfExecutedAtomically(atomicMachine, nullexpr, oracle, opt, token);
+	if (!survive) {
+		fprintf(_logfile, "\tTimed out computing survival constraint\n");
+		return NULL;
+	}
+	survive = simplifyIRExpr(survive, opt);
+
+	if (_atomicMachine)
+		*_atomicMachine = atomicMachine;
+	return survive;
+}
+
+static AllowableOptimisations
+atomicSurvivalOptimisations(const AllowableOptimisations &opt)
+{
+	return opt
+		.enableignoreSideEffects()
+		.enableassumeNoInterferingStores()
+		.enableassumeExecutesAtomically()
+		.enablenoExtend();
+}
+
+static StateMachine *
+duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
+{
+	struct : public StateMachineTransformer {
+		StateMachineSideEffecting *transformOneState(
+			StateMachineSideEffecting *a, bool *done_something)
+		{
+			if (a->sideEffect && a->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+				*done_something = true;
+				return new StateMachineSideEffecting(a->origin, NULL, a->target);
+			} else {
+				return NULL;
+			}
+		}
+		IRExpr *transformIRExpr(IRExpr *, bool *) {
+			return NULL;
+		}
+	} doit;
+	return doit.transform(inp, done_something);
+}
+
+static StateMachine *
+removeAssertions(StateMachine *_sm, const AllowableOptimisations &opt, VexPtr<Oracle> &oracle,
+		 GarbageCollectionToken token)
+{
+	VexPtr<StateMachine, &ir_heap> sm(_sm);
+	/* Iterate to make sure we get rid of any assertions
+	   introduced by the optimiser itself. */
+	while (1) {
+		if (TIMEOUT)
+			return NULL;
+		bool done_something = false;
+		sm = duplicateStateMachineNoAssertions(sm, &done_something);
+		if (!done_something)
+			break;
+		done_something = false;
+		sm = optimiseStateMachine(sm, opt, oracle, true,
+					  token, &done_something);
+		if (!done_something)
+			break;
+	}
+	return sm;
+}
+      
+static IRExpr *
+verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachine,
+				     VexPtr<StateMachine, &ir_heap> probeMachine,
+				     VexPtr<Oracle> &oracle,
+				     const AllowableOptimisations &optIn,
+				     GarbageCollectionToken token)
+{
+	__set_profiling(verificationConditionForStoreMachine);
+	AllowableOptimisations storeOptimisations =
+		optIn.
+		   enableassumeExecutesAtomically().
+		   enableassumeNoInterferingStores();
+	AllowableOptimisations probeOptimisations =
+		optIn.
+		   enableignoreSideEffects();
+
 	/* Specialise the state machine down so that we only consider
 	   the interesting stores, and introduce free variables as
 	   appropriate. */
 	VexPtr<StateMachine, &ir_heap> sm;
 	sm = duplicateStateMachine(storeMachine);
-	sm = optimiseStateMachine(sm, opt, oracle, true, token);
+	sm = optimiseStateMachine(sm, storeOptimisations, oracle, true, token);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we
 		 * don't have the machine code for the relevant
 		 * library */
 		fprintf(_logfile, "\t\tStore machine is unusable\n");
-		return false;
+		return NULL;
 	}
 
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
 
+	probeMachine = optimiseStateMachine(probeMachine, probeOptimisations, oracle, true, token);
+	probeMachine = removeAssertions(probeMachine, probeOptimisations, oracle, token);
+
+	fprintf(_logfile, "\t\tAssertion-free probe machine:\n");
+	printStateMachine(probeMachine, _logfile);
+
 	/* Special case: if the only possible interaction between the
 	   probe machine and the store machine is a single load in the
 	   probe machine and a single store in the store machine then
 	   we don't need to do anything. */
-	if (singleLoadVersusSingleStore(storeMachine, probeMachine, opt, oracle)) {
+	if (singleLoadVersusSingleStore(storeMachine, probeMachine, optIn, oracle)) {
 		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
-		return false;
+		return NULL;
 	}
+
+	VexPtr<IRExpr, &ir_heap> assumption;
+	assumption = atomicSurvivalConstraint(probeMachine, NULL, oracle,
+					      atomicSurvivalOptimisations(probeOptimisations), token);
 
 	VexPtr<IRExpr, &ir_heap> writeMachineConstraint(
 		writeMachineCrashConstraint(sm,
 					    IRExpr_Const(IRConst_U1(0)),
 					    assumption,
 					    IRExpr_Const(IRConst_U1(0)),
-					    opt));
+					    storeOptimisations));
 	if (!writeMachineConstraint) {
 		fprintf(_logfile, "\t\tCannot derive write machine crash constraint\n");
-		return false;
+		return NULL;
 	}
 
 	assumption = writeMachineSuitabilityConstraint(
@@ -350,17 +443,13 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 		probeMachine,
 		oracle,
 		writeMachineConstraint,
-		opt,
+		optIn,
 		token);
 
 	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
-		return false;
+		return NULL;
 	}
-
-	fprintf(_logfile, "\t\tWrite machine suitability constraint: ");
-	ppIRExpr(assumption, _logfile);
-	fprintf(_logfile, "\n");
 
 	/* Figure out when the cross product machine will be at risk
 	 * of crashing. */
@@ -370,11 +459,11 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 			sm,
 			oracle,
 			assumption,
-			opt,
+			optIn,
 			token);
 	if (!crash_constraint) {
 		fprintf(_logfile, "\t\tfailed to build crash constraint\n");
-		return false;
+		return NULL;
 	}
 
 	/* And we hope that that will lead to a contradiction when
@@ -389,32 +478,54 @@ determineWhetherStoreMachineCanCrash(VexPtr<StateMachine, &ir_heap> &storeMachin
 			IRExpr_Unop(
 				Iop_Not1,
 				crash_constraint));
-	verification_condition = simplifyIRExpr(verification_condition, opt);
-	if (verification_condition->tag == Iex_Const &&
-	    ((IRExprConst *)verification_condition)->con->Ico.U1 == 0) {
-		fprintf(_logfile, "\t\tRun in parallel with probe machine -> definitely no crash\n");
-		return false;
-	}
-
-	fprintf(_logfile, "\t\tCannot eliminate possibility of a crash.  Verification condition is ");
-	ppIRExpr(verification_condition, _logfile);
-	fprintf(_logfile, "\n");
+	verification_condition = simplifyIRExpr(verification_condition, optIn);
 	
-	if (assumptionOut)
-		*assumptionOut = assumption;
-	if (newStoreMachine)
-		*newStoreMachine = sm;
+	return verification_condition;
+}
 
-	return true;
+static StateMachine *
+truncateStateMachine(StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
+{
+	StateMachineBifurcate *smb =
+		new StateMachineBifurcate(
+			truncateAt->rip.rip.rip,
+			IRExpr_Unop(
+				Iop_BadPtr,
+				truncateAt->addr),
+			StateMachineCrash::get(),
+			StateMachineNoCrash::get());
+	std::map<const StateMachineState *, StateMachineState *> rewriteRules;
+	std::set<StateMachineSideEffecting *> s;
+	enumStates(sm, &s);
+	for (auto it = s.begin(); it != s.end(); it++) {
+		if ((*it)->getSideEffect() == truncateAt)
+			rewriteRules[*it] = smb;
+	}
+	StateMachineTransformer::rewriteMachine(sm, rewriteRules);
+	assert(rewriteRules.count(sm->root));
+	assert(rewriteRules[sm->root] != sm->root);
+	return new StateMachine(rewriteRules[sm->root], sm->origin);
+}
+
+static void
+logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
+{
+	static FILE *inductionLog;
+	if (!inductionLog) {
+		inductionLog = fopen("induction.log", "a");
+		if (!inductionLog)
+			err(1, "cannot open induction log");
+		setlinebuf(inductionLog);
+	}
+	fprintf(inductionLog, "%s -> %s\n", used.name(), used_in.name());
 }
 
 static bool
-considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
+considerStoreCFG(const DynAnalysisRip &target_rip,
+		 VexPtr<CFGNode, &ir_heap> cfg,
 		 VexPtr<Oracle> &oracle,
-		 VexPtr<IRExpr, &ir_heap> assumption,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
 		 VexPtr<CrashSummary, &ir_heap> &summary,
-		 const std::set<DynAnalysisRip> &is,
 		 bool needRemoteMacroSections,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
@@ -422,44 +533,138 @@ considerStoreCFG(VexPtr<CFGNode, &ir_heap> cfg,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
-	AllowableOptimisations opt =
-		optIn
-		.enableassumeNoInterferingStores();
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, mai));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return true;
 	}
-	opt = opt.setinterestingStores(&is);
-	sm = optimiseStateMachine(sm, opt, oracle, false, token);
+	sm = optimiseStateMachine(
+		sm,
+		optIn.
+		       enableassumeNoInterferingStores().
+		       enableassumeExecutesAtomically(),
+		oracle,
+		false,
+		token);
 
 	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(sm));
 	if (!sm_ssa)
 		return false;
 
-	IRExpr *_newAssumption;
-	StateMachine *_sm;
-	if (!determineWhetherStoreMachineCanCrash(sm_ssa, probeMachine, oracle, assumption, opt, token, &_newAssumption, &_sm)) {
-		fprintf(_logfile, "\t\tExpanded store machine cannot crash\n");
+	VexPtr<IRExpr, &ir_heap> base_verification_condition(
+		verificationConditionForStoreMachine(
+			sm_ssa,
+			probeMachine,
+			oracle,
+			optIn,
+			token));
+	if (!base_verification_condition)
+		return false;
+
+	fprintf(_logfile, "\t\tBase verification condition: ");
+	ppIRExpr(base_verification_condition, _logfile);
+	fprintf(_logfile, "\n");
+
+	if (base_verification_condition->tag == Iex_Const &&
+	    ((IRExprConst *)base_verification_condition.get())->con->Ico.U1 == 0) {
+		fprintf(_logfile, "\t\tCrash impossible.\n");
 		return false;
 	}
-	sm = _sm;
-	VexPtr<IRExpr, &ir_heap> newAssumption(_newAssumption);
 
-	fprintf(_logfile, "\t\tExpanded assumption: ");
-	ppIRExpr(newAssumption, _logfile);
-	fprintf(_logfile, "\n");
+	/* Now have a look at whether we have anything we can use the
+	 * induction rule on.  That means look at the probe machine
+	 * and pulling out all of the loads which are present in the
+	 * type index and then just assuming that we won't generate
+	 * any crash summaries for them.  Once we've processed every
+	 * instruction we have to go back and look for any cycles. */
+	VexPtr<StateMachineSideEffectMemoryAccess *, &ir_heap> inductionAccesses;
+	unsigned nrInductionAccesses;
+	{
+		std::set<StateMachineSideEffectMemoryAccess *> probeAccesses;
+		enumSideEffects(probeMachine, probeAccesses);
+		std::set<StateMachineSideEffectMemoryAccess *> typeDbProbeAccesses;
+		for (auto it = probeAccesses.begin(); it != probeAccesses.end(); it++) {
+			DynAnalysisRip dr((*it)->rip.rip.rip);
+			if (oracle->type_index->ripPresent(dr))
+				typeDbProbeAccesses.insert(*it);
+		}
+		inductionAccesses = (StateMachineSideEffectMemoryAccess **)__LibVEX_Alloc_Ptr_Array(&ir_heap, typeDbProbeAccesses.size());
+		auto it = typeDbProbeAccesses.begin();
+		nrInductionAccesses = 0;
+		while (it != typeDbProbeAccesses.end()) {
+			inductionAccesses[nrInductionAccesses] = *it;
+			nrInductionAccesses++;
+			it++;
+		}
+		assert(nrInductionAccesses == typeDbProbeAccesses.size());
+	}
+	VexPtr<IRExpr, &ir_heap> residual_verification_condition(base_verification_condition);
+	std::set<DynAnalysisRip> inductionRips;
+	for (unsigned x = 0; x < nrInductionAccesses; x++) {
+		if (TIMEOUT)
+			return true;
+		VexPtr<StateMachine, &ir_heap> truncatedMachine(
+			truncateStateMachine(
+				probeMachine,
+				inductionAccesses[x]));
+		truncatedMachine = removeAssertions(truncatedMachine, optIn, oracle, token);
+		truncatedMachine = optimiseStateMachine(truncatedMachine, optIn, oracle, true, token);
+		truncatedMachine = removeAssertions(truncatedMachine, optIn, oracle, token);
+		IRExpr *t = verificationConditionForStoreMachine(
+			sm_ssa,
+			truncatedMachine,
+			oracle,
+			optIn,
+			token);
+		if (!t || t == residual_verification_condition ||
+		    (t->tag == Iex_Const &&
+		     ((IRExprConst *)t)->con->Ico.U1 == 0))
+			continue;
+		fprintf(_logfile, "Induction probe machine:\n");
+		printStateMachine(truncatedMachine, _logfile);
+		fprintf(_logfile, "Induction rule: ");
+		ppIRExpr(t, _logfile);
+		fprintf(_logfile, "\n");
+		fprintf(_logfile, "Residual:       ");
+		ppIRExpr(residual_verification_condition, _logfile);
+		fprintf(_logfile, "\n");
+		residual_verification_condition =
+			IRExpr_Binop(
+				Iop_And1,
+				residual_verification_condition,
+				IRExpr_Unop(
+					Iop_Not1,
+					t));
+		residual_verification_condition =
+			simplifyIRExpr(residual_verification_condition, optIn);
+		fprintf(_logfile, "After simplification: ");
+		ppIRExpr(residual_verification_condition, _logfile);
+		fprintf(_logfile, "\n");
+		logUseOfInduction(
+			target_rip,
+			DynAnalysisRip(inductionAccesses[x]->rip.rip.rip));
+		if (residual_verification_condition->tag == Iex_Const &&
+		    ((IRExprConst *)residual_verification_condition.get())->con->Ico.U1 == 0) {
+			fprintf(_logfile, "\t\tCrash impossible.\n");
+			return false;
+		}
+	}
+
+	/* Nope, we're definitely going to have to generate a summary
+	 * for this one. */
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
-	CrashSummary::StoreMachineData *smd = new CrashSummary::StoreMachineData(sm, newAssumption);
+	CrashSummary::StoreMachineData *smd = new CrashSummary::StoreMachineData(sm, residual_verification_condition);
 	if (needRemoteMacroSections) {
 		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
-		if (!findRemoteMacroSections(probeMachine, sm, newAssumption, oracle, opt, remoteMacroSections, token)) {
+		if (!findRemoteMacroSections(probeMachine, sm, residual_verification_condition,
+					     oracle, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tChose a bad write machine...\n");
 			return true;
 		}
-		if (!fixSufficient(sm, probeMachine, newAssumption, oracle, opt, remoteMacroSections, token)) {
+		if (!fixSufficient(sm, probeMachine, residual_verification_condition,
+				   oracle, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
 			return true;
 		}
@@ -572,9 +777,9 @@ machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, Oracle *oracle)
 }
 
 static bool
-probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
+probeMachineToSummary(const DynAnalysisRip &targetRip,
+		      VexPtr<StateMachine, &ir_heap> &probeMachine,
 		      VexPtr<Oracle> &oracle,
-		      VexPtr<IRExpr, &ir_heap> &survive,
 		      VexPtr<CrashSummary, &ir_heap> &summary,
 		      bool needRemoteMacroSections,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
@@ -614,15 +819,14 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 		MemoryAccessIdentifierAllocator storeMai(mai);
-		foundRace |= considerStoreCFG(storeCFG,
+		foundRace |= considerStoreCFG(targetRip,
+					      storeCFG,
 					      oracle,
-					      survive,
 					      probeMachine,
 					      summary,
-					      potentiallyConflictingStores,
 					      needRemoteMacroSections,
 					      STORING_THREAD + i,
-					      optIn,
+					      optIn.setinterestingStores(&potentiallyConflictingStores),
 					      storeMai,
 					      token);
 	}
@@ -630,29 +834,9 @@ probeMachineToSummary(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	return foundRace;
 }
 
-static StateMachine *
-duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
-{
-	struct : public StateMachineTransformer {
-		StateMachineSideEffecting *transformOneState(
-			StateMachineSideEffecting *a, bool *done_something)
-		{
-			if (a->sideEffect && a->sideEffect->type == StateMachineSideEffect::AssertFalse) {
-				*done_something = true;
-				return new StateMachineSideEffecting(a->origin, NULL, a->target);
-			} else {
-				return NULL;
-			}
-		}
-		IRExpr *transformIRExpr(IRExpr *, bool *) {
-			return NULL;
-		}
-	} doit;
-	return doit.transform(inp, done_something);
-}
-
 CrashSummary *
-diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
+diagnoseCrash(const DynAnalysisRip &targetRip,
+	      VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<Oracle> &oracle,
 	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
@@ -660,6 +844,7 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(diagnoseCrash);
+
 	fprintf(_logfile, "Probe machine:\n");
 	printStateMachine(probeMachine, _logfile);
 	fprintf(_logfile, "\n");
@@ -672,22 +857,8 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		   easy way of dealing with that is just to remove
 		   them and then re-optimise the machine. */
 		VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
-		/* Iterate to make sure we get rid of any assertions
-		   introduced by the optimiser itself. */
-		while (!TIMEOUT) {
-			bool done_something = false;
-			reducedProbeMachine = duplicateStateMachineNoAssertions(reducedProbeMachine, &done_something);
-			if (!done_something)
-				break;
-			done_something = false;
-			reducedProbeMachine = optimiseStateMachine(
-				reducedProbeMachine,
-				optIn.enableignoreSideEffects(),
-				oracle, true, token, &done_something);
-			if (!done_something)
-				break;
-		}
-		if (TIMEOUT)
+		reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, token);
+		if (!reducedProbeMachine)
 			return NULL;
 		getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
 	}
@@ -696,61 +867,9 @@ diagnoseCrash(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		return NULL;
 	}
 
-	VexPtr<IRExpr, &ir_heap> survive;
-
-	{
-		/* We start by figuring out some properties of the
-		   probe machine when it's run atomically. */
-		AllowableOptimisations opt =
-			optIn
-			.enableignoreSideEffects()
-			.enableassumeNoInterferingStores()
-			.enableassumeExecutesAtomically()
-			.enablenoExtend();
-		VexPtr<StateMachine, &ir_heap> atomicProbeMachine;
-		atomicProbeMachine = duplicateStateMachine(probeMachine);
-		atomicProbeMachine = optimiseStateMachine(atomicProbeMachine, opt, oracle,
-							  true, token);
-		VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
-		survive = survivalConstraintIfExecutedAtomically(atomicProbeMachine, nullexpr, oracle, opt, token);
-		if (!survive) {
-			fprintf(_logfile, "\tTimed out computing survival constraint\n");
-			return NULL;
-		}
-		survive = simplifyIRExpr(survive, opt);
-
-		fprintf(_logfile, "\tComputed survival constraint ");
-		ppIRExpr(survive, _logfile);
-		fprintf(_logfile, "\n");
-
-		/* Quick check that that vaguely worked.  If this
-		   reports mightCrash == true then that probably means
-		   that the theorem prover bits need more work.  If it
-		   reports mightSurvive == false then the program is
-		   doomed and it's not possible to fix it from this
-		   point. */
-		bool mightSurvive, mightCrash;
-		if (!evalMachineUnderAssumption(atomicProbeMachine, oracle, survive, opt, &mightSurvive, &mightCrash, token)) {
-			fprintf(_logfile, "Timed out sanity checking machine survival constraint\n");
-			return NULL;
-		}
-		if (TIMEOUT)
-			return NULL;
-		if (!mightSurvive) {
-			fprintf(_logfile, "\tCan never survive...\n");
-			return NULL;
-		}
-		if (mightCrash) {
-			fprintf(_logfile, "WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
-			printf("WARNING: Cannot determine any condition which will definitely ensure that we don't crash, even when executed atomically -> probably won't be able to fix this\n");
-			dbg_break("Bad things are happening\n");
-			return NULL;
-		}
-	}
-
 	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));
 
-	bool foundRace = probeMachineToSummary(probeMachine, oracle, survive,
+	bool foundRace = probeMachineToSummary(targetRip, probeMachine, oracle,
 					       summary, needRemoteMacroSections,
 					       potentiallyConflictingStores,
 					       optIn,
@@ -905,7 +1024,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	for (unsigned x = 0; x < nrProbeMachines; x++) {
 		VexPtr<CrashSummary, &ir_heap> summary;
 		VexPtr<StateMachine, &ir_heap> probeMachine(probeMachines[x]);
-		summary = diagnoseCrash(probeMachine, oracle, false, opt, mai, token);
+		summary = diagnoseCrash(targetRip, probeMachine, oracle, false, opt, mai, token);
 		if (summary)
 			df(summary, token);
 	}

@@ -552,16 +552,10 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
 		addr = specialiseIRExpr(smsema->addr, state);
-		IRExpr *v = IRExpr_Unop(Iop_Not1,
-					IRExpr_Unop(Iop_BadPtr, addr));
-		*assumption = simplifyIRExpr(
-			IRExpr_Binop(Iop_And1, *assumption, v),
-			opt);
-		if (!collectOrderingConstraints && accumulatedAssumptions && *accumulatedAssumptions)
-			*accumulatedAssumptions =
-				simplifyIRExpr(
-					IRExpr_Binop(Iop_And1, *accumulatedAssumptions, v),
-					opt);
+		IRExpr *v = IRExpr_Unop(Iop_BadPtr, addr);
+		if (expressionIsTrue(v, chooser, state, opt, assumption,
+				     accumulatedAssumptions))
+			return false;
 	}
 
 	switch (smse->type) {
@@ -1209,6 +1203,9 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 {
 	__set_profiling(evalMachineUnderAssumption);
 
+	*mightSurvive = false;
+	*mightCrash = false;
+
 	struct : public EvalPathConsumer {
 		bool *mightSurvive, *mightCrash;
 
@@ -1230,6 +1227,7 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 	} consumer;
 	consumer.mightSurvive = mightSurvive;
 	consumer.mightCrash = mightCrash;
+	consumer.needsAccAssumptions = true;
 
 	enumEvalPaths(sm, assumption, oracle, opt, consumer, token);
 
@@ -1672,30 +1670,30 @@ crossProductSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			       VexPtr<StateMachine, &ir_heap> &storeMachine,
 			       VexPtr<Oracle> &oracle,
 			       VexPtr<IRExpr, &ir_heap> &initialStateCondition,
-			       const AllowableOptimisations &opt,
+			       const AllowableOptimisations &optIn,
 			       GarbageCollectionToken token)
 {
 	__set_profiling(evalCrossProductMachine);
 
+	AllowableOptimisations opt =
+		optIn
+		    .enableassumeExecutesAtomically()
+		    .enableignoreSideEffects()
+		    .enableassumeNoInterferingStores()
+		    .enablenoExtend();
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
 			probeMachine,
 			storeMachine,
 			oracle,
 			opt));
-
 	crossProductMachine =
 		optimiseStateMachine(
 			crossProductMachine,
-			opt
-			    .enableassumeExecutesAtomically()
-			    .enableignoreSideEffects()
-			    .enableassumeNoInterferingStores()
-			    .enablenoExtend(),
+			opt,
 			oracle,
 			false,
 			token);
-
 	return survivalConstraintIfExecutedAtomically(
 		crossProductMachine,
 		initialStateCondition,
@@ -2088,4 +2086,78 @@ writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 		oracle,
 		opt,
 		token);
+}
+
+/* Build an expression P such that if P is true then running
+   @readMachine and @writeMachine in parallel might crash, for some
+   possible interleaving.  P itself does not include any
+   happens-before constraints, so it's not sufficient to prove that
+   the machine will definitely crash.  It's just sufficient to prove
+   that there is some interleaving which leads to a crash. */
+IRExpr *
+getCrossMachineCrashRequirement(
+	VexPtr<StateMachine, &ir_heap> &readMachine,
+	VexPtr<StateMachine, &ir_heap> &writeMachine,
+	VexPtr<Oracle> &oracle,
+	VexPtr<IRExpr, &ir_heap> &assumption,
+	const AllowableOptimisations &optIn,
+	GarbageCollectionToken token)
+{
+	__set_profiling(getCrossMachineCrashRequirement);
+
+	AllowableOptimisations opt =
+		optIn
+		    .enableassumeExecutesAtomically()
+		    .enableignoreSideEffects()
+		    .enableassumeNoInterferingStores()
+		    .enablenoExtend();
+	VexPtr<StateMachine, &ir_heap> crossProductMachine(
+		buildCrossProductMachine(
+			readMachine,
+			writeMachine,
+			oracle,
+			opt));
+	crossProductMachine =
+		optimiseStateMachine(
+			crossProductMachine,
+			opt,
+			oracle,
+			false,
+			token);
+
+	struct : public EvalPathConsumer {
+		VexPtr<IRExpr, &ir_heap> accumulator;
+		const AllowableOptimisations *opt;
+
+		bool crash(IRExpr *, IRExpr *accAssumption) {
+			if (accumulator) {
+				accumulator =
+					IRExpr_Binop(
+						Iop_Or1,
+						accumulator,
+						accAssumption);
+				accumulator = simplifyIRExpr(
+					accumulator,
+					*opt);
+			} else {
+				accumulator = accAssumption;
+			}
+			return true;
+		}
+		bool survive(IRExpr *, IRExpr *) {
+			return true;
+		}
+		bool escape(IRExpr *, IRExpr *) {
+			return true;
+		}
+	} consumer;
+	consumer.opt = &opt;
+	consumer.needsAccAssumptions = true;
+
+	enumEvalPaths(crossProductMachine, assumption, oracle, opt, consumer, token);
+
+	if (TIMEOUT)
+		return NULL;
+
+	return consumer.accumulator;
 }
