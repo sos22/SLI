@@ -20,6 +20,7 @@ static struct stats {
 	unsigned anf_resolved;
 	unsigned cnf_resolved;
 	unsigned dnf_resolved;
+	unsigned exhaustive_resolved;
 	unsigned failed;
 	~stats() {
 		printf("Sat checker invoked %d times.  Results:\n", nr_invoked);
@@ -29,6 +30,7 @@ static struct stats {
 		do_field(anf_resolved);
 		do_field(cnf_resolved);
 		do_field(dnf_resolved);
+		do_field(exhaustive_resolved);
 		do_field(failed);
 #undef do_field
 	}
@@ -568,6 +570,63 @@ disjunctive_normal_form(IRExpr *what)
 }
 
 static bool
+evalExpression(IRExpr *e, NdChooser &chooser, std::map<IRExpr *, std::pair<bool, bool> > &memo)
+{
+	assert(e->type() == Ity_I1);
+	if (e->tag == Iex_Const)
+		return ((IRExprConst *)e)->con->Ico.U1 != 0;
+
+	std::pair<bool, bool> falsefalse = std::pair<bool, bool>(false, false);
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, std::pair<bool, bool> >(e, falsefalse));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		if (e->tag == Iex_Unop &&
+		    ((IRExprUnop *)e)->op == Iop_Not1) {
+			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, memo);
+		} else if (e->tag == Iex_Associative &&
+			   ((IRExprAssociative *)e)->op == Iop_And1) {
+			IRExprAssociative *a = (IRExprAssociative *)e;
+			bool acc = true;
+			for (int i = 0; i < a->nr_arguments && acc; i++)
+				acc &= evalExpression(a->contents[i], chooser, memo);
+			it->second.first = acc;
+		} else if (e->tag == Iex_Associative &&
+			   ((IRExprAssociative *)e)->op == Iop_Or1) {
+			IRExprAssociative *a = (IRExprAssociative *)e;
+			bool acc = false;
+			for (int i = 0; i < a->nr_arguments && !acc; i++)
+				acc |= evalExpression(a->contents[i], chooser, memo);
+			it->second.first = acc;
+		} else {
+			it->second.first = !!chooser.nd_choice(2);
+			it->second.second = true;
+		}
+	}
+	return it->second.first;
+}
+
+static bool
+evalExpression(IRExpr *e, NdChooser &chooser)
+{
+	std::map<IRExpr *, std::pair<bool, bool> > memo;
+	bool r = evalExpression(e, chooser, memo);
+	if (r) {
+		fprintf(_logfile, "Satisfying assignment:\n");
+		for (auto it = memo.begin(); it != memo.end(); it++) {
+			if (it->second.second) {
+				fprintf(_logfile, "\t");
+				ppIRExpr(it->first, _logfile);
+				fprintf(_logfile, "\t-> %s\n",
+					it->second.first ? "true" : "false");
+			}
+		}
+		dbg_break("HELLO\n");
+	}
+	return r;
+}
+
+static bool
 satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 {
 	sat_checker_counters.nr_invoked++;
@@ -604,7 +663,16 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 		return res.content;
 	}
 
-	sat_checker_counters.failed++;
+	/* Okay, that's about as far as we can push that.  Fall back
+	   to an exhaustive search. */
+	NdChooser chooser;
+	do {
+		if (evalExpression(norm3, chooser)) {
+			sat_checker_counters.failed++;
+			return true;
+		}
+	} while (chooser.advance());
+	sat_checker_counters.exhaustive_resolved++;
 	return true;
 }
 
