@@ -14,8 +14,7 @@
 #include "libvex_prof.hpp"
 #include "cfgnode.hpp"
 #include "alloc_mai.hpp"
-
-#define DEBUG_BUILD_STORE_CFGS 0
+#include "sat_checker.hpp"
 
 static void
 enumerateCFG(CFGNode *root, std::map<VexRip, CFGNode *> &rips)
@@ -650,8 +649,11 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		}
 	}
 
-	/* Nope, we're definitely going to have to generate a summary
-	 * for this one. */
+	/* Okay, final check: is the verification condition satisfiable? */
+	if (!satisfiable(residual_verification_condition, optIn)) {
+		fprintf(_logfile, "\t\tVerification condition is unsatisfiable -> no bug\n");
+		return false;
+	}
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */

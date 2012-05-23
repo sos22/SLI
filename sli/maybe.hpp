@@ -10,8 +10,8 @@ template <typename t> class Maybe {
 		: valid(false), content()
 	{}
 public:
-	const bool valid;
-	const t content;
+	bool valid;
+	t content;
 	static Maybe just(const t &x)
 	{ return Maybe(x); }
 	static Maybe nothing()
