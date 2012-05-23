@@ -542,8 +542,11 @@ conjunctive_normal_form(IRExpr *what)
 {
 	NF_Expression ne;
 	Maybe<bool> res = convert_to_nf(what, ne, Iop_And1, Iop_Or1);
-	if (res == Maybe<bool>::just(true))
+	if (res == Maybe<bool>::just(true)) {
+		if (ne.size() == 0)
+			return IRExpr_Const(IRConst_U1(1));
 		return convert_from_nf(ne, Iop_And1, Iop_Or1);
+	}
 	if (res == Maybe<bool>::just(false))
 		return IRExpr_Const(IRConst_U1(0));
 	return what;
@@ -554,8 +557,11 @@ disjunctive_normal_form(IRExpr *what)
 {
 	NF_Expression ne;
 	Maybe<bool> res = convert_to_nf(what, ne, Iop_Or1, Iop_And1);
-	if (res == Maybe<bool>::just(true))
+	if (res == Maybe<bool>::just(true)) {
+		if (ne.size() == 0)
+			return IRExpr_Const(IRConst_U1(0));
 		return convert_from_nf(ne, Iop_Or1, Iop_And1);
+	}
 	if (res == Maybe<bool>::just(false))
 		return IRExpr_Const(IRConst_U1(1));
 	return what;
