@@ -638,7 +638,10 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 		sat_checker_counters.initial_constant++;
 		return res.content;
 	}
+
 	internIRExprTable intern;
+	e = internIRExpr(e, intern);
+
 	IRExpr *norm1 = and_normal_form(e, intern);
 	check_and_normal_form(norm1);
 	norm1 = anf_simplify(norm1, intern);
@@ -648,6 +651,7 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 		sat_checker_counters.anf_resolved++;
 		return res.content;
 	}
+
 	IRExpr *norm2 = conjunctive_normal_form(norm1);
 	norm2 = simplifyIRExpr(norm2, opt);
 	res = isTrue(norm2);
