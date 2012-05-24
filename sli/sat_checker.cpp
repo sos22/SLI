@@ -540,6 +540,15 @@ anf_simplify(IRExpr *a, internIRExprTable &intern)
 }
 
 static IRExpr *
+simplify_via_anf(IRExpr *a)
+{
+	internIRExprTable table;
+	a = internIRExpr(a, table);
+	IRExpr *normed = and_normal_form(a, table);
+	return anf_simplify(normed, table);
+}
+
+static IRExpr *
 conjunctive_normal_form(IRExpr *what)
 {
 	NF_Expression ne;
@@ -688,3 +697,10 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 {
 	return _sat_checker::satisfiable(e, opt);
 }
+
+IRExpr *
+simplify_via_anf(IRExpr *a)
+{
+	return _sat_checker::simplify_via_anf(a);
+}
+

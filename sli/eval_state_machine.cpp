@@ -9,6 +9,7 @@
 #include "libvex_prof.hpp"
 #include "typesdb.hpp"
 #include "allowable_optimisations.hpp"
+#include "sat_checker.hpp"
 
 #ifdef NDEBUG
 #define debug_dump_state_traces 0
@@ -1290,7 +1291,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 	if (TIMEOUT)
 		return NULL;
 	else if (consumeEvalPath.res)
-		return consumeEvalPath.res;
+		return simplifyIRExpr(simplify_via_anf(consumeEvalPath.res), opt);
 	else
 		return IRExpr_Const(IRConst_U1(1));
 }
