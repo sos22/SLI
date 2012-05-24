@@ -829,9 +829,9 @@ struct EvalPathConsumer {
 class EvalContext {
 	enum trool {tr_true, tr_false, tr_unknown};
 	trool evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt);
-	void evalSideEffect(StateMachine *sm, Oracle *oracle, bool collectOrderingConstraints,
+	bool evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &consumer,
 			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
-			    const AllowableOptimisations &opt);
+			    const AllowableOptimisations &opt) __attribute__((warn_unused_result));
 
 	VexPtr<IRExpr, &ir_heap> assumption;
 	VexPtr<IRExpr, &ir_heap> accumulatedAssumption;
@@ -998,8 +998,8 @@ EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &o
 	return tr_unknown;
 }
 
-void
-EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, bool collectOrderingConstraints,
+bool
+EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &consumer,
 			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt)
 {
@@ -1013,7 +1013,7 @@ EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, bool collectOrderi
 		evalStateMachineSideEffectRes res =
 			evalStateMachineSideEffect(sm, smse, chooser, oracle,
 						   state, memlog,
-						   collectOrderingConstraints,
+						   consumer.collectOrderingConstraints,
 						   opt,
 						   &assumption, &accAssumption);
 		switch (res) {
@@ -1024,11 +1024,12 @@ EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, bool collectOrderi
 		case esme_ignore_path:
 			break;
 		case esme_escape:
-			pendingStates.push_back(
-				EvalContext(*this, StateMachineNoCrash::get()));
+			if (!consumer.escape(assumption, accumulatedAssumption))
+				return false;
 			break;
 		}
 	} while (chooser.advance());
+	return true;
 }
 
 /* You might that we could stash things like @oracle, @opt, and @sm in
@@ -1076,8 +1077,9 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState.get();
 		currentState = sme->target;
 		if (sme->sideEffect)
-			evalSideEffect(sm, oracle, consumer.collectOrderingConstraints,
-				       pendingStates, sme->sideEffect, opt);
+			if (!evalSideEffect(sm, oracle, consumer, pendingStates,
+					    sme->sideEffect, opt))
+				return false;
 		advance_state_trace();
 		return true;
 	}
