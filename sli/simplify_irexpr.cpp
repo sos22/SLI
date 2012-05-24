@@ -6,6 +6,7 @@
 #include "simplify_irexpr.hpp"
 #include "offline_analysis.hpp"
 #include "query_cache.hpp"
+#include "allowable_optimisations.hpp"
 
 #include "libvex_guest_offsets.h"
 #include "libvex_prof.hpp"

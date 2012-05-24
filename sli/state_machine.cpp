@@ -8,6 +8,7 @@
 #include "simplify_irexpr.hpp"
 #include "offline_analysis.hpp"
 #include "alloc_mai.hpp"
+#include "allowable_optimisations.hpp"
 
 #include "libvex_parse.h"
 

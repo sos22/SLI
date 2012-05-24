@@ -2,6 +2,7 @@
    never accessed after being set and eliminate them. */
 #include "sli.h"
 #include "offline_analysis.hpp"
+#include "allowable_optimisations.hpp"
 
 namespace _deadCode {
 /* unconfuse emacs */

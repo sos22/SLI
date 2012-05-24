@@ -8,6 +8,7 @@
 #include "intern.hpp"
 #include "libvex_prof.hpp"
 #include "typesdb.hpp"
+#include "allowable_optimisations.hpp"
 
 #ifdef NDEBUG
 #define debug_dump_state_traces 0

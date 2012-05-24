@@ -6,6 +6,7 @@
 #include "sli.h"
 #include "simplify_irexpr.hpp"
 #include "offline_analysis.hpp"
+#include "allowable_optimisations.hpp"
 
 namespace _quickcheckexpr {
 

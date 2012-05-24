@@ -13,6 +13,7 @@
 #include "simplify_ordering.hpp"
 #include "zapBindersAndFreeVariables.hpp"
 #include "enforce_crash.hpp"
+#include "allowable_optimisations.hpp"
 
 void
 instrToInstrSetMap::print(FILE *f)

@@ -3,6 +3,7 @@
    copies of initial-memory expressions. */
 #include "sli.h"
 #include "offline_analysis.hpp"
+#include "allowable_optimisations.hpp"
 
 namespace _useInitialMemoryLoads {
 

@@ -5,6 +5,7 @@
 #include "offline_analysis.hpp"
 #include "oracle.hpp"
 #include "libvex_prof.hpp"
+#include "allowable_optimisations.hpp"
 
 namespace _removeRedundantStores {
 /* Unconfuse emacs */

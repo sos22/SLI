@@ -13,6 +13,7 @@
 #include "offline_analysis.hpp"
 #include "typesdb.hpp"
 #include "query_cache.hpp"
+#include "allowable_optimisations.hpp"
 
 #include "libvex_prof.hpp"
 #include "libvex_parse.h"

@@ -15,6 +15,7 @@
 #include "cfgnode.hpp"
 #include "alloc_mai.hpp"
 #include "sat_checker.hpp"
+#include "allowable_optimisations.hpp"
 
 static void
 enumerateCFG(CFGNode *root, std::map<VexRip, CFGNode *> &rips)
