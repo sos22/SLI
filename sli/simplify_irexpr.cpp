@@ -1879,6 +1879,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Const(IRConst_U64(~c->Ico.U64));
 				case Iop_Not1:
 					return IRExpr_Const(IRConst_U1(!c->Ico.U1));
+				case Iop_1Uto8:
+					return IRExpr_Const(IRConst_U8(c->Ico.U1));
+				case Iop_1Uto32:
+					return IRExpr_Const(IRConst_U32(c->Ico.U1));
+				case Iop_1Uto64:
+					return IRExpr_Const(IRConst_U64(c->Ico.U1));
 				case Iop_8Uto16:
 					return IRExpr_Const(IRConst_U16(c->Ico.U8));
 				case Iop_8Uto32:
@@ -1893,8 +1899,6 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Const(IRConst_U64(c->Ico.U32));
 				case Iop_32Sto64:
 					return IRExpr_Const(IRConst_U64((int)c->Ico.U32));
-				case Iop_1Uto8:
-					return IRExpr_Const(IRConst_U8(c->Ico.U1));
 				case Iop_64to32:
 					return IRExpr_Const(IRConst_U32(c->Ico.U64));
 				case Iop_64to16:
@@ -2297,6 +2301,22 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						IRConst_U1(
 							((IRExprConst *)l)->con->Ico.U64 <
 							((IRExprConst *)r)->con->Ico.U64));
+				case Iop_CmpLT16U:
+					return IRExpr_Const(
+						IRConst_U1(((IRExprConst *)l)->con->Ico.U16 <
+							   ((IRExprConst *)r)->con->Ico.U16));
+				case Iop_CmpLT16S:
+					return IRExpr_Const(
+						IRConst_U1((short)((IRExprConst *)l)->con->Ico.U16 <
+							   (short)((IRExprConst *)r)->con->Ico.U16));
+				case Iop_CmpLT32U:
+					return IRExpr_Const(
+						IRConst_U1(((IRExprConst *)l)->con->Ico.U32 <
+							   ((IRExprConst *)r)->con->Ico.U32));
+				case Iop_CmpLT32S:
+					return IRExpr_Const(
+						IRConst_U1((int)((IRExprConst *)l)->con->Ico.U32 <
+							   (int)((IRExprConst *)r)->con->Ico.U32));
 				case Iop_CmpEQ8:
 					*done_something = true;
 					return IRExpr_Const(
