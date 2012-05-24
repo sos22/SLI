@@ -308,7 +308,7 @@ atomicSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &machine,
 	atomicMachine = duplicateStateMachine(machine);
 	atomicMachine = optimiseStateMachine(atomicMachine, opt, oracle, true, token);
 	VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
-	IRExpr *survive = survivalConstraintIfExecutedAtomically(atomicMachine, nullexpr, oracle, opt, token);
+	IRExpr *survive = survivalConstraintIfExecutedAtomically(atomicMachine, nullexpr, oracle, false, opt, token);
 	if (!survive) {
 		fprintf(_logfile, "\tTimed out computing survival constraint\n");
 		return NULL;

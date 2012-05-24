@@ -1177,6 +1177,7 @@ IRExpr *
 survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 				       VexPtr<IRExpr, &ir_heap> &assumption,
 				       VexPtr<Oracle> &oracle,
+				       bool escapingStatesSurvive,
 				       const AllowableOptimisations &opt,
 				       GarbageCollectionToken token)
 {
@@ -1185,6 +1186,7 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 	struct _ : public EvalPathConsumer {
 		VexPtr<IRExpr, &ir_heap> res;
 		const AllowableOptimisations &opt;
+		bool escapingStatesSurvive;
 		bool crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			IRExpr *component =
 				IRExpr_Unop(
@@ -1201,12 +1203,18 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 			return true;
 		}
 		bool survive(IRExpr *, IRExpr *) { return true; }
-		bool escape(IRExpr *, IRExpr *) { return true; }
+		bool escape(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+			if (escapingStatesSurvive)
+				return survive(pathConstraint, justPathConstraint);
+			else
+				return crash(pathConstraint, justPathConstraint);
+		}
 		_(VexPtr<IRExpr, &ir_heap> &_assumption,
-		  const AllowableOptimisations &_opt)
-			: res(_assumption), opt(_opt)
+		  const AllowableOptimisations &_opt,
+		  bool _escapingStatesSurvive)
+			: res(_assumption), opt(_opt), escapingStatesSurvive(_escapingStatesSurvive)
 		{}
-	} consumeEvalPath(assumption, opt);
+	} consumeEvalPath(assumption, opt, escapingStatesSurvive);
 	if (assumption) {
 		consumeEvalPath.needsAccAssumptions = true;
 	} else
@@ -1728,6 +1736,7 @@ crossProductSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		crossProductMachine,
 		initialStateCondition,
 		oracle,
+		true,
 		opt,
 		token);
 }
@@ -2114,6 +2123,7 @@ writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 		combinedMachine,
 		assumption,
 		oracle,
+		false,
 		opt,
 		token);
 }

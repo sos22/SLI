@@ -6,6 +6,7 @@
 #include "oracle.hpp"
 #include "state_machine.hpp"
 #include "eval_state_machine.hpp"
+#include "allowable_optimisations.hpp"
 
 int
 main(int argc, char *argv[])

@@ -43,6 +43,7 @@ public:
 IRExpr *survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 					       VexPtr<IRExpr, &ir_heap> &assumption,
 					       VexPtr<Oracle> &oracle,
+					       bool escapingStateSurvive,
 					       const AllowableOptimisations &opt,
 					       GarbageCollectionToken token);
 bool evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &oracle,

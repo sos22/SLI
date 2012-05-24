@@ -6,6 +6,7 @@
 #include "oracle.hpp"
 #include "state_machine.hpp"
 #include "eval_state_machine.hpp"
+#include "allowable_optimisations.hpp"
 
 int
 main(int argc, char *argv[])
@@ -26,7 +27,7 @@ main(int argc, char *argv[])
 		.enableassumePrivateStack()
 		.enableignoreSideEffects();
 
-	survive = survivalConstraintIfExecutedAtomically(sm, nullExpr, oracle, opt, ALLOW_GC);
+	survive = survivalConstraintIfExecutedAtomically(sm, nullExpr, oracle, false, opt, ALLOW_GC);
 
 	survive = simplifyIRExpr(survive, opt);
 
