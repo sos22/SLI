@@ -179,6 +179,10 @@ StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, b
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
+	if (value->tag == Iex_Const && !((IRExprConst *)value)->con->Ico.U1) {
+		*done_something = true;
+		return NULL;
+	}
 	return this;
 }
 
@@ -831,14 +835,16 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		*done_something = true;
 		return target;
 	}
-	if (sideEffect) {
-		if (sideEffect->type == StateMachineSideEffect::Unreached) {
-			*done_something = true;
-			return StateMachineUnreached::get();
-		}
-		sideEffect = sideEffect->optimise(opt, done_something);
+	if (sideEffect->type == StateMachineSideEffect::Unreached) {
+		*done_something = true;
+		return StateMachineUnreached::get();
 	}
+	sideEffect = sideEffect->optimise(opt, done_something);
 	target = target->optimise(opt, done_something, done);
+	if (!sideEffect) {
+		assert(*done_something);
+		return target;
+	}
 	return this;
 }
 
