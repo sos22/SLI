@@ -251,5 +251,7 @@ quickcheck_exprs_eq(const IRExpr *a, const IRExpr *b)
 void
 quickcheck_exprs_eq(const IRExpr *a, const IRExpr *b)
 {
+#if 0
 	return _quickcheckexpr::quickcheck_exprs_eq(a, b);
+#endif
 }
