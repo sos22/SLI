@@ -243,7 +243,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 					(StateMachineSideEffectLoad *)e;
 				if (!alive.registerLive(smsel->target))
 					newEffect = new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(Iop_BadPtr, smsel->addr));
+						IRExpr_Unop(Iop_BadPtr, smsel->addr),
+						true);
 				break;
 			}
 			case StateMachineSideEffect::Store:

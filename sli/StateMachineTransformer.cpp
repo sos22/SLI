@@ -35,7 +35,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFals
 	IRExpr *v = doit(a->value, &b);
 	if (b) {
 		*d = true;
-		return new StateMachineSideEffectAssertFalse(v);
+		return new StateMachineSideEffectAssertFalse(v, a->reflectsActualProgram);
 	} else {
 		return NULL;
 	}

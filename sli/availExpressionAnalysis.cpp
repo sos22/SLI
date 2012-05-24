@@ -643,7 +643,7 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 			doit = true;
 		}
 		if (doit) {
-			newEffect = new StateMachineSideEffectAssertFalse(newVal);
+			newEffect = new StateMachineSideEffectAssertFalse(newVal, smseaf->reflectsActualProgram);
 			*done_something = true;
 		} else
 			newEffect = smse;

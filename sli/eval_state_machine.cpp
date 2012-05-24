@@ -1653,7 +1653,8 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 							IRExpr_Binop(
 								Iop_CmpEQ64,
 								probe_effect->addr,
-								store_effect->addr))),
+								store_effect->addr)),
+						false),
 					s));
 			newState = new StateMachineNdChoice(VexRip(), possible);
 		}

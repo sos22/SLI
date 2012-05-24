@@ -352,8 +352,16 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	}
 	if (parseThisString("Assert !(", str, &str2) &&
 	    parseIRExpr(&data, str2, &str2) &&
-	    parseThisChar(')', str2, suffix)) {
-		*out = new StateMachineSideEffectAssertFalse(data);
+	    parseThisChar(')', str2, &str2)) {
+		bool isReal;
+		if (parseThisString(" REAL", str2, suffix)) {
+			isReal = true;
+		} else if (parseThisString(" FAKE", str2, suffix)) {
+			isReal = false;
+		} else {
+			return false;
+		}
+		*out = new StateMachineSideEffectAssertFalse(data, isReal);
 		return true;
 	}
 	if (parseThisString("Phi", str, &str2) &&

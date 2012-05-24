@@ -239,7 +239,7 @@ rawDupe(duplication_context &, const StateMachineSideEffectUnreached *)
 static StateMachineSideEffectAssertFalse *
 rawDupe(duplication_context &ctxt, const StateMachineSideEffectAssertFalse *l)
 {
-	StateMachineSideEffectAssertFalse *res = new StateMachineSideEffectAssertFalse(NULL);
+	StateMachineSideEffectAssertFalse *res = new StateMachineSideEffectAssertFalse(NULL, l->reflectsActualProgram);
 	ctxt(&res->value, l->value, rawDupe);
 	return res;
 }

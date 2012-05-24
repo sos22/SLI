@@ -497,16 +497,18 @@ public:
 };
 class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
 public:
-	StateMachineSideEffectAssertFalse(IRExpr *_value)
+	StateMachineSideEffectAssertFalse(IRExpr *_value, bool _reflectsActualProgram)
 		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
-		  value(_value)
+		  value(_value),
+		  reflectsActualProgram(_reflectsActualProgram)
 	{
 	}
 	IRExpr *value;
+	bool reflectsActualProgram;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Assert !(");
 		ppIRExpr(value, f);
-		fprintf(f, ")");
+		fprintf(f, ") %s", reflectsActualProgram ? "REAL" : "FAKE");
 	}
 	void visit(HeapVisitor &hv) {
 		hv(value);
@@ -514,6 +516,8 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+		assert(reflectsActualProgram == true ||
+		       reflectsActualProgram == false);
 		sanityCheckIRExpr(value, live);
 		assert(value->type() == Ity_I1);
 	}

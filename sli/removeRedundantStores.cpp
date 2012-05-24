@@ -120,7 +120,8 @@ removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_somethin
 						new StateMachineSideEffectAssertFalse(
 							IRExpr_Unop(
 								Iop_BadPtr,
-								smses->addr));
+								smses->addr),
+							true);
 					*done_something = true;
 				}
 			}
