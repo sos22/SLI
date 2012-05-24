@@ -534,6 +534,30 @@ addOrderingConstraint(const MemoryAccessIdentifier &before,
 				       opt);
 }
 
+/* Build an expression which evaluates to true precisely when
+   dereferencing @e requires us to dereference a bad pointer in an LD
+   expression. */
+static IRExpr *
+dereferencesBadPointerIf(IRExpr *e)
+{
+	struct : public IRExprTransformer {
+		std::set<IRExpr *> addrs;
+		IRExpr *transformIex(IRExprLoad *iel) {
+			addrs.insert(iel->addr);
+			return IRExprTransformer::transformIex(iel);
+		}
+	} collectAddresses;
+	collectAddresses.doit(e);
+	IRExprAssociative *derefsBadPointer = IRExpr_Associative(collectAddresses.addrs.size(), Iop_Or1);
+	for (auto it = collectAddresses.addrs.begin(); it != collectAddresses.addrs.end(); it++) {
+		derefsBadPointer->contents[derefsBadPointer->nr_arguments++] =
+			IRExpr_Unop(
+				Iop_BadPtr,
+				*it);
+	}
+	return derefsBadPointer;
+}
+
 enum evalStateMachineSideEffectRes {
 	esme_normal,
 	esme_escape,
@@ -559,7 +583,10 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
 		addr = specialiseIRExpr(smsema->addr, state);
-		IRExpr *v = IRExpr_Unop(Iop_BadPtr, addr);
+		IRExpr *v = IRExpr_Binop(
+			Iop_Or1,
+			IRExpr_Unop(Iop_BadPtr, addr),
+			dereferencesBadPointerIf(addr));
 		if (expressionIsTrue(v, chooser, state, opt, assumption,
 				     accumulatedAssumptions))
 			return esme_escape;
@@ -694,8 +721,13 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 	case StateMachineSideEffect::AssertFalse: {
 		StateMachineSideEffectAssertFalse *smseaf =
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
-		if (expressionIsTrue(smseaf->value, chooser, state, opt,
-				     assumption, accumulatedAssumptions)) {
+		if (expressionIsTrue(
+			    IRExpr_Binop(
+				    Iop_Or1,
+				    smseaf->value,
+				    dereferencesBadPointerIf(smseaf->value)),
+			    chooser, state, opt, assumption,
+			    accumulatedAssumptions)) {
 			if (smseaf->reflectsActualProgram)
 				return esme_escape;
 			else
@@ -827,7 +859,7 @@ struct EvalPathConsumer {
 
 /* Note that this is stack-allocated but live across GCes! */
 class EvalContext {
-	enum trool {tr_true, tr_false, tr_unknown};
+	enum trool { tr_true, tr_false, tr_unknown };
 	trool evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt);
 	bool evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &consumer,
 			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
@@ -1076,10 +1108,10 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState.get();
 		currentState = sme->target;
-		if (sme->sideEffect)
-			if (!evalSideEffect(sm, oracle, consumer, pendingStates,
-					    sme->sideEffect, opt))
-				return false;
+		if (sme->sideEffect &&
+		    !evalSideEffect(sm, oracle, consumer, pendingStates,
+				    sme->sideEffect, opt))
+			return false;
 		advance_state_trace();
 		return true;
 	}
@@ -1090,7 +1122,41 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 				internIRExpr(
 					specialiseIRExpr(smb->condition, state)),
 				opt);
-		trool res = evalBooleanExpression(cond, opt);
+		IRExpr *derefBad = dereferencesBadPointerIf(cond);
+		trool res = evalBooleanExpression(derefBad, opt);
+		switch (res) {
+		case tr_true:
+			return consumer.escape(assumption, accumulatedAssumption);
+		case tr_unknown: {
+			IRExpr *a = simplifyIRExpr(internIRExpr(IRExpr_Binop(Iop_And1, assumption, derefBad)), opt);
+			IRExpr *a2;
+			assert(a->tag != Iex_Const);
+			if (accumulatedAssumption)
+				a2 = simplifyIRExpr(
+					internIRExpr(
+						IRExpr_Binop(
+							Iop_And1,
+							accumulatedAssumption,
+							derefBad)),
+					opt);
+			else
+				a2 = NULL;
+			if (!consumer.escape(a, a2))
+				return false;
+			assumption = IRExpr_Binop(Iop_And1, assumption,
+						  IRExpr_Unop(Iop_Not1, derefBad));
+			if (accumulatedAssumption)
+				accumulatedAssumption =
+					IRExpr_Binop(Iop_And1, accumulatedAssumption,
+						     IRExpr_Unop(Iop_Not1, derefBad));
+			assumption = simplifyIRExpr(internIRExpr(assumption), opt);
+			accumulatedAssumption = simplifyIRExpr(internIRExpr(assumption), opt);
+			break;
+		}
+		case tr_false:
+			break;
+		}
+		res = evalBooleanExpression(cond, opt);
 		switch (res) {
 		case tr_true:
 			pendingStates.push_back(EvalContext(
