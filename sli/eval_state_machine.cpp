@@ -1057,7 +1057,7 @@ EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &
 		case esme_ignore_path:
 			break;
 		case esme_escape:
-			if (!consumer.escape(assumption, accumulatedAssumption))
+			if (!consumer.escape(assumption, accAssumption))
 				return false;
 			break;
 		}
@@ -1085,6 +1085,8 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 				printf(", ");
 			printf("%d", *it);
 		}
+		printf("; assumption ");
+		ppIRExpr(assumption, stdout);
 		printf("\n");
 #endif
 	}
@@ -1151,7 +1153,8 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 					IRExpr_Binop(Iop_And1, accumulatedAssumption,
 						     IRExpr_Unop(Iop_Not1, derefBad));
 			assumption = simplifyIRExpr(internIRExpr(assumption), opt);
-			accumulatedAssumption = simplifyIRExpr(internIRExpr(assumption), opt);
+			if (accumulatedAssumption)
+				accumulatedAssumption = simplifyIRExpr(internIRExpr(accumulatedAssumption), opt);
 			break;
 		}
 		case tr_false:
