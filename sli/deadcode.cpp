@@ -93,30 +93,6 @@ public:
 	}
 
 	bool registerLive(threadAndRegister reg) const { return count(reg); }
-	bool assertionLive(IRExpr *assertion, const AllowableOptimisations &opt) const {
-		if (assertion->tag == Iex_Const)
-			return false;
-
-		if (!opt.noExtend())
-			return true;
-
-		/* If we're in noExtend mode, we only keep an
-		   assertion around if it mentions a register which is
-		   live after it. */
-		struct : public IRExprTransformer {
-			bool res;
-			const LivenessEntry *_this;
-			IRExpr *transformIex(IRExprGet *ieg) {
-				if (_this->registerLive(ieg->reg))
-					res = true;
-				return NULL;
-			}
-		} doit;
-		doit.res = false;
-		doit._this = this;
-		doit.doit(assertion);
-		return doit.res;
-	}
 
 	void print() const {
 		for (auto it = begin(); it != end(); it++) {
@@ -250,14 +226,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			case StateMachineSideEffect::Store:
 			case StateMachineSideEffect::Unreached:
 				break;
-			case StateMachineSideEffect::AssertFalse: {
-				StateMachineSideEffectAssertFalse *a =
-					(StateMachineSideEffectAssertFalse *)e;
-				if (targetIsTerminal ||
-				    !alive.assertionLive(a->value, opt))
-					dead = true;
+			case StateMachineSideEffect::AssertFalse:
 				break;
-			}
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec =
 					(StateMachineSideEffectCopy *)e;
