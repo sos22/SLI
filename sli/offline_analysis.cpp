@@ -409,7 +409,6 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	printStateMachine(sm, _logfile);
 
 	probeMachine = optimiseStateMachine(probeMachine, probeOptimisations, oracle, true, token);
-	probeMachine = removeAssertions(probeMachine, probeOptimisations, oracle, token);
 
 	fprintf(_logfile, "\t\tAssertion-free probe machine:\n");
 	printStateMachine(probeMachine, _logfile);
@@ -607,9 +606,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 			truncateStateMachine(
 				probeMachine,
 				inductionAccesses[x]));
-		truncatedMachine = removeAssertions(truncatedMachine, optIn, oracle, token);
 		truncatedMachine = optimiseStateMachine(truncatedMachine, optIn, oracle, true, token);
-		truncatedMachine = removeAssertions(truncatedMachine, optIn, oracle, token);
 		IRExpr *t = verificationConditionForStoreMachine(
 			sm_ssa,
 			truncatedMachine,
