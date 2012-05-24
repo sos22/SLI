@@ -2189,6 +2189,14 @@ writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 					       oracle,
 					       true,
 					       token);
+	if (combinedMachine->root == StateMachineUnreached::get()) {
+		/* This means that running the store machine and then
+		   running the load machine is guaranteed to never
+		   survive.  That tells us that the store machine is
+		   never suitable, so the suitability constraint is
+		   just 0. */
+		return IRExpr_Const(IRConst_U1(0));
+	}
 	return survivalConstraintIfExecutedAtomically(
 		combinedMachine,
 		assumption,
