@@ -534,7 +534,13 @@ addOrderingConstraint(const MemoryAccessIdentifier &before,
 				       opt);
 }
 
-static bool
+enum evalStateMachineSideEffectRes {
+	esme_normal,
+	esme_escape,
+	esme_ignore_path
+};
+
+static evalStateMachineSideEffectRes
 evalStateMachineSideEffect(StateMachine *thisMachine,
 			   StateMachineSideEffect *smse,
 			   NdChooser &chooser,
@@ -556,7 +562,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		IRExpr *v = IRExpr_Unop(Iop_BadPtr, addr);
 		if (expressionIsTrue(v, chooser, state, opt, assumption,
 				     accumulatedAssumptions))
-			return false;
+			return esme_escape;
 	}
 
 	switch (smse->type) {
@@ -689,8 +695,12 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		StateMachineSideEffectAssertFalse *smseaf =
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
 		if (expressionIsTrue(smseaf->value, chooser, state, opt,
-				     assumption, accumulatedAssumptions))
-			return false;
+				     assumption, accumulatedAssumptions)) {
+			if (smseaf->reflectsActualProgram)
+				return esme_escape;
+			else
+				return esme_ignore_path;
+		}
 		break;
 	}
 	case StateMachineSideEffect::Phi: {
@@ -700,7 +710,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		break;
 	}
 	}
-	return true;
+	return esme_normal;
 }
 
 /* Walk the state machine and figure out whether it's going to crash.
@@ -727,25 +737,31 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 		*crashes = true;
 		return NULL;
 	case StateMachineState::NoCrash:
-	case StateMachineState::Stub:
 		*crashes = false;
+		return NULL;
+	case StateMachineState::Stub:
 		return NULL;
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
-		if (!evalStateMachineSideEffect(rootMachine,
-						sme->sideEffect,
-						chooser,
-						oracle,
-						ctxt.state,
-						ctxt.memLog,
-						ctxt.collectOrderingConstraints,
-						opt,
-						&ctxt.pathConstraint,
-						&ctxt.justPathConstraint)) {
-			*crashes = false;
+		evalStateMachineSideEffectRes res =
+			evalStateMachineSideEffect(rootMachine,
+						   sme->sideEffect,
+						   chooser,
+						   oracle,
+						   ctxt.state,
+						   ctxt.memLog,
+						   ctxt.collectOrderingConstraints,
+						   opt,
+						   &ctxt.pathConstraint,
+						   &ctxt.justPathConstraint);
+		switch (res) {
+		case esme_escape:
+		case esme_ignore_path:
 			return NULL;
+		case esme_normal:
+			return sme->target;
 		}
-		return sme->target;
+		abort();
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
@@ -764,7 +780,6 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 	case StateMachineState::Unreached:
 		/* Whoops... */
 		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
-		*crashes = false;
 		return NULL;
 	}
 
@@ -774,11 +789,13 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 static void
 bigStepEvalStateMachine(StateMachine *rootMachine,
 			bool *crashes,
+			bool preferred_result,
 			NdChooser &chooser,
 			Oracle *oracle,
 			const AllowableOptimisations &opt,
 			StateMachineEvalContext &ctxt)
 {
+	*crashes = preferred_result;
 	while (1) {
 		ctxt.currentState =
 			smallStepEvalStateMachine(rootMachine,
@@ -993,16 +1010,23 @@ EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, bool collectOrderi
 		IRExpr *accAssumption = this->accumulatedAssumption;
 		threadState state(this->state);
 		memLogT memlog(this->memlog);
-		if (!evalStateMachineSideEffect(sm, smse, chooser, oracle,
-						state, memlog,
-						collectOrderingConstraints,
-						opt,
-						&assumption, &accAssumption)) {
-			pendingStates.push_back(
-				EvalContext(*this, StateMachineNoCrash::get()));
-		} else {
+		evalStateMachineSideEffectRes res =
+			evalStateMachineSideEffect(sm, smse, chooser, oracle,
+						   state, memlog,
+						   collectOrderingConstraints,
+						   opt,
+						   &assumption, &accAssumption);
+		switch (res) {
+		case esme_normal:
 			pendingStates.push_back(
 				EvalContext(*this, state, memlog, assumption, accAssumption));
+			break;
+		case esme_ignore_path:
+			break;
+		case esme_escape:
+			pendingStates.push_back(
+				EvalContext(*this, StateMachineNoCrash::get()));
+			break;
 		}
 	} while (chooser.advance());
 }
@@ -1347,8 +1371,10 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 					machine->currentState = smse->target;
 					return se;
 				}
-				if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
-								collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint)) {
+				evalStateMachineSideEffectRes res =
+					evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
+								   collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint);
+				if (res != esme_normal) {
 					/* Found a contradiction -> get out */
 					machine->finished = true;
 					return NULL;
@@ -1378,8 +1404,8 @@ CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
 	if (!se)
 		return;
 
-	if (!evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
-					collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint)) {
+	if (evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
+				       collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint) != esme_normal) {
 		machine->finished = true;
 	} else {
 		history.push_back(se);
@@ -1757,11 +1783,11 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 			if (se) {
 				if (se->type == StateMachineSideEffect::Store)
 					smses = (StateMachineSideEffectStore *)se;
-				if (!evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerContext.state,
-								writerContext.memLog,
-								writerContext.collectOrderingConstraints, opt,
-								&writerContext.pathConstraint,
-								&writerContext.justPathConstraint)) {
+				if (evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerContext.state,
+							       writerContext.memLog,
+							       writerContext.collectOrderingConstraints, opt,
+							       &writerContext.pathConstraint,
+							       &writerContext.justPathConstraint) != esme_normal) {
 					/* Found a contradiction -> get out */
 					writer_failed = true;
 					return NULL;
@@ -1825,7 +1851,7 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			StateMachineEvalContext readEvalCtxt = state.writerContext;
 			readEvalCtxt.currentState = readMachine->root;
 			bool crashes;
-			bigStepEvalStateMachine(readMachine, &crashes, chooser,
+			bigStepEvalStateMachine(readMachine, &crashes, false, chooser,
 						oracle, opt, readEvalCtxt);
 			if (crashes) {
 				if (!sectionStart) {
@@ -1916,7 +1942,7 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			StateMachineEvalContext readEvalCtxt = state.writerContext;
 			readEvalCtxt.currentState = probeMachine->root;
 			bool crashes;
-			bigStepEvalStateMachine(probeMachine, &crashes, chooser, oracle, opt, readEvalCtxt);
+			bigStepEvalStateMachine(probeMachine, &crashes, false, chooser, oracle, opt, readEvalCtxt);
 			if (crashes) {
 				fprintf(_logfile, "Fix is insufficient, witness: ");
 				ppIRExpr(readEvalCtxt.pathConstraint, _logfile);
