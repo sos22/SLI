@@ -202,6 +202,7 @@ main(int argc, char *argv[])
 		if (!_logfile) err(1, "opening logs/%ld", cntr + start_instr);
 		printf("Considering %s, log logs/%ld\n", dar.name(), cntr + start_instr);
 		fprintf(_logfile, "Log for %s:\n", dar.name());
+		fflush(0);
 		cntr++;
 		consider_rip(dar, 1, oracle, df, timings, ALLOW_GC);
 		fclose(_logfile);
