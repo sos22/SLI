@@ -1305,10 +1305,12 @@ public:
 		head = this;
 	}
 	bool operator()() {
-		cntr++;
+		if (cntr > 10)
+			return false;
 		if (cntr == 10)
 			fprintf(_logfile, "suppress further messages: ");
-		return cntr <= 10;
+		cntr++;
+		return true;
 	}
 	static void reset() {
 		for (auto it = head; it; it = it->next)
@@ -1319,8 +1321,8 @@ public:
 	({								\
 		static __timer_message_filter filter;			\
 		if (_timed_out && filter())				\
-			fprintf(_logfile, "%s timed out at %d\n",	\
-				__func__, __LINE__);			\
+			fprintf(_logfile, "%s timed out at %s:%d\n",	\
+				__func__, __FILE__, __LINE__);		\
 		_timed_out;						\
 	})
 

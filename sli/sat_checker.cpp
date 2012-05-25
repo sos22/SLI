@@ -162,11 +162,16 @@ check_and_normal_form(const IRExpr *e)
 static IRExpr *
 and_normal_form(IRExpr *e, internIRExprTable &intern)
 {
+	if (TIMEOUT)
+		return NULL;
+
 	e = internIRExpr(e, intern);
 	if (e->tag == Iex_Unop) {
 		IRExprUnop *ieu = (IRExprUnop *)e;
 		if (ieu->op == Iop_Not1) {
 			IRExpr *arg2 = and_normal_form(ieu->arg, intern);
+			if (!arg2)
+				return NULL;
 			if (arg2->tag == Iex_Unop) {
 				IRExprUnop *ieu2 = (IRExprUnop *)arg2;
 				if (ieu2->op == Iop_Not1)
@@ -185,6 +190,8 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 			IRExpr *newArgs[iea->nr_arguments];
 			for (int x = 0; x < iea->nr_arguments; x++)
 				newArgs[x] = and_normal_form(iea->contents[x], intern);
+			if (TIMEOUT)
+				return NULL;
 			IRExprAssociative *res = IRExpr_Associative(iea->nr_arguments, iea->op);
 			res->nr_arguments = iea->nr_arguments;
 			memcpy(res->contents, newArgs, sizeof(IRExpr *) * iea->nr_arguments);
@@ -199,6 +206,8 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 							Iop_Not1,
 							iea->contents[x]),
 						intern);
+			if (TIMEOUT)
+				return NULL;
 			res->nr_arguments = iea->nr_arguments;
 			sort_and_arguments(res->contents, res->nr_arguments);
 			e = internIRExpr(IRExpr_Unop(Iop_Not1, res), intern);
@@ -217,6 +226,8 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 			IRExpr *negative_terms[iea->nr_arguments];
 			for (int i = 0; i < iea->nr_arguments; i++) {
 				positive_terms[i] = and_normal_form(iea->contents[i], intern);
+				if (!positive_terms[i])
+					return NULL;
 				if (positive_terms[i]->tag == Iex_Unop &&
 				    ((IRExprUnop *)positive_terms[i])->op == Iop_Not1)
 					negative_terms[i] =
@@ -539,6 +550,9 @@ anf_context::simplify(IRExpr *a)
 	if (0)
 		prettyPrint(stdout);
 
+	if (TIMEOUT)
+		return a;
+
 	a = pureSimplify(a, intern);
 
 	/* If we have a == k, for any constant k, go and do the
@@ -661,13 +675,14 @@ static IRExpr *
 anf_simplify(IRExpr *a, internIRExprTable &intern)
 {
 	a = internIRExpr(a, intern);
-	while (1) {
+	while (!TIMEOUT) {
 		anf_context ctxt(intern);
 		IRExpr *a2 = ctxt.simplify(a);
 		if (a == a2)
-			return a2;
+			break;
 		a = a2;
 	}
+	return a;
 }
 
 static IRExpr *
@@ -676,6 +691,8 @@ simplify_via_anf(IRExpr *a)
 	internIRExprTable table;
 	a = internIRExpr(a, table);
 	IRExpr *normed = and_normal_form(a, table);
+	if (!normed)
+		return a;
 	return anf_simplify(normed, table);
 }
 
@@ -783,6 +800,8 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 	e = internIRExpr(e, intern);
 
 	IRExpr *norm1 = and_normal_form(e, intern);
+	if (!norm1)
+		return true;
 	check_and_normal_form(norm1);
 	norm1 = anf_simplify(norm1, intern);
 	norm1 = simplifyIRExpr(norm1, opt);
