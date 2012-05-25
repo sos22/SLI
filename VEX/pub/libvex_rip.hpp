@@ -205,6 +205,7 @@ public:
 
 	void prepend(unsigned long what) {
 		stack.insert(stack.begin(), what);
+		clearName();
 	}
 
 	bool isPrefix(const VexRip &vr) const {
