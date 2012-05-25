@@ -1450,7 +1450,7 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads
 			if (visited.count(head))
 				continue;
 			visited.insert(head);
-			ths->discoverFunctionHead(head, heads, callgraph);
+			ths->discoverFunctionHead(head, heads, visited, callgraph);
 			if (cntr++ % 100 == 0) {
 				struct timeval now;
 				gettimeofday(&now, NULL);
@@ -1645,7 +1645,9 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip)
 }
 
 void
-Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, const callgraph_t &callgraph_table)
+Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads,
+			     std::set<StaticRip> &visited,
+			     const callgraph_t &callgraph_table)
 {
 	Function work(x);
 
@@ -1660,6 +1662,9 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, 
 		if (explored.count(rip))
 			continue;
 
+		if (rip != x && visited.count(rip))
+			continue;
+
 		IRSB *irsb = getIRSBForRip(ms->addressSpace, rip);
 		if (!irsb)
 			continue;
@@ -1671,6 +1676,8 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, 
 			assert(stmt->tag == Ist_IMark);
 			StaticRip r(((IRStmtIMark *)stmt)->addr.rip);
 			if (explored.count(r))
+				break;
+			if (r != x && visited.count(r))
 				break;
 
 			std::vector<StaticRip> branch;
@@ -1733,8 +1740,29 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, 
 			if (!work.addInstruction(r, isReturn, callees, fallThrough, callSucc, branch)) {
 				/* Already explored this instruction
 				 * as part of some other function.
-				 * Meh. */
-				break;
+				 * That means we have some kind of
+				 * tail call going on. */
+
+				/* This is a bit messy.  We need to
+				 * purge everything we've done so far,
+				 * plus whatever instruction
+				 * previously discovered r, introduce
+				 * a new head for r, and then make
+				 * sure that we re-process this
+				 * function and whatever previously
+				 * discovered r. */
+				purgeFunction(x);
+				StaticRip old_head(functionHeadForInstruction(r));
+				purgeFunction(old_head);
+				/* Processed in stack order, so push
+				 * in the inverse of the order we want
+				 * the dealt with. */
+				heads.push_back(x);
+				heads.push_back(old_head);
+				heads.push_back(r);
+				visited.erase(x);
+				visited.erase(old_head);
+				return;
 			}
 
 			start_of_instruction = end_of_instruction;
@@ -2639,6 +2667,62 @@ Oracle::Function::addInstruction(const StaticRip &rip,
 	return true;
 }
 
+class prepared_stmt {
+public:
+	sqlite3_stmt *stmt;
+	prepared_stmt(const char *content) {
+		stmt = prepare_statement(content);
+	}
+	~prepared_stmt() {
+		sqlite3_finalize(stmt);
+	}
+	void bindOracleRip(int idx, const StaticRip &sr) {
+		bind_oraclerip(stmt, idx, sr);
+	}
+	void run() {
+		int r;
+		do {
+			r = sqlite3_step(stmt);
+		} while (r == SQLITE_ROW);
+		assert(r == SQLITE_DONE);
+		sqlite3_reset(stmt);
+	}
+};
+
+void
+Oracle::purgeFunction(const StaticRip &functionHead)
+{
+	Function f(functionHead);
+	std::vector<StaticRip> rips;
+
+	f.getInstructionsInFunction(rips);
+
+	static prepared_stmt purgeInstrAttributes("DELETE FROM instructionAttributes WHERE functionHead = ?");
+	purgeInstrAttributes.bindOracleRip(1, functionHead);
+	purgeInstrAttributes.run();
+
+	struct {
+		void operator()(const char *tableName, std::vector<StaticRip> &rips) {
+			char *p = my_asprintf("DELETE FROM %sRips WHERE rip = ? OR dest = ?", tableName);
+			prepared_stmt stmt(p);
+			for (auto it = rips.begin(); it != rips.end(); it++) {
+				stmt.bindOracleRip(1, *it);
+				stmt.bindOracleRip(2, *it);
+				stmt.run();
+			}
+			free(p);
+		}
+	} doit;
+	doit("fallThrough", rips);
+	doit("callSucc", rips);
+	doit("branch", rips);
+	doit("call", rips);
+	doit("return", rips);
+	static prepared_stmt purge_function_attribs("DELETE FROM functionAttribs WHERE functionHead = ?");
+	purge_function_attribs.bindOracleRip(1, functionHead);
+	purge_function_attribs.run();
+}
+
 void
 Oracle::Function::getInstructionCallees(const StaticRip &rip, std::vector<StaticRip> &out)
 {
@@ -3118,9 +3202,8 @@ parseThreadVexRip(ThreadVexRip *tr, const char *str, const char **suffix)
 /* Returns true if @vr is believed to be the first instruction in a
  * function. */
 bool
-Oracle::isFunctionHead(const VexRip &vr)
+Oracle::isFunctionHead(const StaticRip &sr)
 {
-	StaticRip sr(vr);
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
@@ -3130,6 +3213,11 @@ Oracle::isFunctionHead(const VexRip &vr)
 	extract_int64_column(stmt, 0, a);
 	assert(a.size() == 1);
 	return a[0];
+}
+bool
+Oracle::isFunctionHead(const VexRip &vr)
+{
+	return isFunctionHead(StaticRip(vr));
 }
 
 /* The call stack for @vr is possibly truncated.  Examine our

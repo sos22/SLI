@@ -311,7 +311,8 @@ public:
 
 private:
 
-	void discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads, const callgraph_t &callgraph_table);
+	void discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads,
+				  std::set<StaticRip> &visited, const callgraph_t &callgraph_table);
 	void buildReturnAddressTable();
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token);
@@ -319,6 +320,7 @@ private:
 	void loadTagTable(const char *path);
 	void findPossibleJumpTargets(const StaticRip &from, const callgraph_t &callgraph_table, std::vector<StaticRip> &targets);
 	StaticRip functionHeadForInstruction(const StaticRip &rip);
+	void purgeFunction(const StaticRip &head);
 
 	enum RbpToRspOffsetState {
 		RbpToRspOffsetStateImpossible,
@@ -390,6 +392,7 @@ public:
 	void getInstrFallThroughs(const VexRip &vr, std::vector<VexRip> &out);
 
 	bool isFunctionHead(const VexRip &vr);
+	bool isFunctionHead(const StaticRip &vr);
 	void getPossibleStackTruncations(const VexRip &vr,
 					 std::vector<unsigned long> &callers);
 	void findPredecessors(const VexRip &vr, bool includeCallPredecessors, std::vector<VexRip> &out);
