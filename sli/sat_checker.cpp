@@ -265,20 +265,8 @@ class anf_context {
 	std::set<std::pair<IRExpr *, IRExpr *> > eqRules;
 	std::set<IRExpr *> definitelyTrue;
 	std::set<IRExpr *> definitelyFalse;
-	void directlyIntroduceExpression(IRExpr *a, bool isTrue);
-	void directlyIntroduceExpression(std::set<IRExpr *>::iterator begin,
-					 std::set<IRExpr *>::iterator end,
-					 bool isTrue)
-	{
-		for (auto it = begin; it != end; it++)
-			directlyIntroduceExpression(*it, isTrue);
-	}
+	bool matches(const IRExpr *a, const IRExpr *b) const;
 	void addAssumption(IRExpr *a);
-	void saturateAndAdd(bool isTrue, IRExpr *what);
-	void saturateAndAdd(std::set<IRExpr *> &out,
-			    IRExpr *input,
-			    IRExpr *a,
-			    IRExpr *b);
 	void introduceEqRule(IRExpr *a, IRExpr *b);
 public:
 	anf_context(internIRExprTable &_intern)
@@ -312,6 +300,82 @@ anf_context::prettyPrint(FILE *f)
 		ppIRExpr(it->second, f);
 		fprintf(f, "\n");
 	}
+}
+
+bool
+anf_context::matches(const IRExpr *a, const IRExpr *b) const
+{
+	if (a == b)
+		return true;
+	for (auto it = eqRules.begin(); it != eqRules.end(); it++) {
+		if ((it->first == a && it->second == b) ||
+		    (it->first == b && it->second == a))
+			return true;
+	}
+	if (a->tag != b->tag)
+		return false;
+	switch (a->tag) {
+#define hdr1(name)							\
+		case Iex_ ## name : {					\
+			IRExpr ## name *ai = (IRExpr ## name *)a;	\
+			IRExpr ## name *bi = (IRExpr ## name *)b
+#define hdr(name) } hdr1(name)
+		hdr1(GetI);
+		return ai->descr == bi->descr && ai->bias == bi->bias && ai->tid == bi->tid && matches(ai->ix, bi->ix);
+		hdr(Qop);
+		return ai->op == bi->op && matches(ai->arg1, bi->arg1) && matches(ai->arg2, bi->arg2) &&
+			matches(ai->arg3, bi->arg3) && matches(ai->arg4, bi->arg4);
+		hdr(Triop);
+		return ai->op == bi->op && matches(ai->arg1, bi->arg1) && matches(ai->arg2, bi->arg2) &&
+			matches(ai->arg3, bi->arg3);
+		hdr(Binop);
+		return ai->op == bi->op && matches(ai->arg1, bi->arg1) && matches(ai->arg2, bi->arg2);
+		hdr(Unop);
+		return ai->op == bi->op && matches(ai->arg, bi->arg);
+		hdr(Load);
+		return ai->ty == bi->ty && ai->rip == bi->rip && matches(ai->addr, bi->addr);
+		hdr(CCall);
+		if (!(ai->cee == bi->cee && ai->retty == bi->retty))
+			return false;
+		int i;
+		for (i = 0; ai->args[i] && bi->args[i]; i++)
+			if (!matches(ai->args[i], bi->args[i]))
+				return false;
+		if (ai->args[i] || bi->args[i])
+			return false;
+		return true;
+		hdr(Mux0X);
+		return matches(ai->cond, bi->cond) && matches(ai->expr0, bi->expr0) && matches(ai->exprX, bi->exprX);
+		hdr(Associative);
+		if (ai->op != bi->op || ai->nr_arguments != bi->nr_arguments)
+			return false;
+		for (int i = 0; i < ai->nr_arguments; i++)
+			if (!matches(ai->contents[i], bi->contents[i]))
+				return false;
+		return true;
+		hdr(ClientCall);
+		if (ai->calledRip != bi->calledRip || ai->callSite != bi->callSite)
+			return false;
+		int i;
+		for (i = 0; ai->args[i] && bi->args[i]; i++)
+			if (!matches(ai->args[i], bi->args[i]))
+				return false;
+		if (ai->args[i] || bi->args[i])
+			return false;
+		return true;
+		hdr(ClientCallFailed);
+		return matches(ai->target, bi->target);
+	}
+#undef hdr
+#undef hdr1
+        case Iex_Phi:
+        case Iex_FreeVariable:
+	case Iex_HappensBefore:
+	case Iex_Const:
+	case Iex_Get:
+		return false; /* by internment property */
+        }
+        abort();
 }
 
 static IRExpr *
@@ -404,27 +468,6 @@ rewriteIRExpr(IRExpr *what, IRExpr *from, IRExpr *to, internIRExprTable &internT
 }
 
 void
-anf_context::directlyIntroduceExpression(IRExpr *what, bool isTrue)
-{
-	what = pureSimplify(what, intern);
-	if (what->tag == Iex_Const)
-		return;
-	std::set<IRExpr *> newTrue;
-	IRExpr *val = IRExpr_Const(IRConst_U1(isTrue));
-	for (auto it = definitelyTrue.begin(); it != definitelyTrue.end(); it++)
-		newTrue.insert(rewriteIRExpr(*it, what, val, intern));
-	std::set<IRExpr *> newFalse;
-	for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++)
-		newFalse.insert(rewriteIRExpr(*it, what, val, intern));
-	if (isTrue)
-		newTrue.insert(what);
-	else
-		newFalse.insert(what);
-	definitelyTrue = newTrue;
-	definitelyFalse = newFalse;
-}
-
-void
 anf_context::introduceEqRule(IRExpr *a, IRExpr *b)
 {
 	if (a == b)
@@ -436,16 +479,6 @@ anf_context::introduceEqRule(IRExpr *a, IRExpr *b)
 	}
 	if (!eqRules.insert(std::pair<IRExpr *, IRExpr *>(a, b)).second)
 		return;
-
-	/* Generate new definitely-true and definitely-false terms, if necessary */
-	std::set<IRExpr *> newDefinitelyTrue;
-	for (auto it = definitelyTrue.begin(); it != definitelyTrue.end(); it++)
-		saturateAndAdd(newDefinitelyTrue, *it, a, b);
-	directlyIntroduceExpression(newDefinitelyTrue.begin(), newDefinitelyTrue.end(), true);
-	std::set<IRExpr *> newDefinitelyFalse;
-	for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++)
-		saturateAndAdd(newDefinitelyFalse, *it, a, b);
-	directlyIntroduceExpression(newDefinitelyFalse.begin(), newDefinitelyFalse.end(), false);
 
 	/* Now take the transitive closure. */
 	std::set<std::pair<IRExpr *, IRExpr *> > oldEqRules(eqRules);
@@ -462,63 +495,10 @@ anf_context::introduceEqRule(IRExpr *a, IRExpr *b)
 }
 
 void
-anf_context::saturateAndAdd(std::set<IRExpr *> &out,
-			    IRExpr *what,
-			    IRExpr *rule_a,
-			    IRExpr *rule_b)
-{
-	NdChooser chooser;
-	do {
-		struct : public IRExprTransformer {
-			IRExpr *a;
-			IRExpr *b;
-			NdChooser *chooser;
-			IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
-				if (e == a || e == b) {
-					if (chooser->nd_choice(2)) {
-						if (e != a)
-							*done_something = true;
-						return a;
-					} else {
-						if (e != b)
-							*done_something = true;
-						return b;
-					}
-				}
-				return IRExprTransformer::transformIRExpr(e, done_something);
-			}
-		} doit;
-		doit.a = (IRExpr *)rule_a;
-		doit.b = (IRExpr *)rule_b;
-		doit.chooser = &chooser;
-		out.insert(internIRExpr(doit.doit((IRExpr *)what), intern));
-	} while (chooser.advance());
-}
-
-void
-anf_context::saturateAndAdd(bool isTrue, IRExpr *what)
-{
-	std::set<IRExpr *> saturated;
-	saturated.insert(what);
-	for (auto it = eqRules.begin(); it != eqRules.end(); it++) {
-		std::set<IRExpr *> newSat;
-		for (auto it2 = saturated.begin(); it2 != saturated.end(); it2++)
-			saturateAndAdd(newSat, *it2, it->first, it->second);
-		saturated = newSat;
-	}
-	directlyIntroduceExpression(saturated.begin(), saturated.end(), isTrue);
-}
-
-void
 anf_context::addAssumption(IRExpr *a)
 {
 	if (a->tag == Iex_Const)
 		return;
-	if (a->tag == Iex_Unop &&
-	    ((IRExprUnop *)a)->op == Iop_Not1)
-		saturateAndAdd(false, ((IRExprUnop *)a)->arg);
-	else
-		saturateAndAdd(true, a);
 	if (a->tag == Iex_Binop) {
 		IRExprBinop *ieb = (IRExprBinop *)a;
 		if (ieb->op == Iop_CmpEQ64) {
@@ -534,21 +514,73 @@ anf_context::addAssumption(IRExpr *a)
 			} else {
 				introduceEqRule(ieb->arg1, ieb->arg2);
 			}
+			return;
 		}
 	}
+	if (a->tag == Iex_Associative &&
+	    ((IRExprAssociative *)a)->op == Iop_And1) {
+		IRExprAssociative *aa = (IRExprAssociative *)a;
+		for (int i = 0; i < aa->nr_arguments; i++)
+			addAssumption(aa->contents[i]);
+		return;
+	}
+	if (a->tag == Iex_Unop &&
+	    ((IRExprUnop *)a)->op == Iop_Not1)
+		definitelyFalse.insert( ((IRExprUnop *)a)->arg );
+	else
+		definitelyTrue.insert(a);
 }
 
 IRExpr *
 anf_context::simplify(IRExpr *a)
 {
+	/* Silly hack to make sure that prettyPrint is always
+	 * available to the debugger. */
 	if (0)
 		prettyPrint(stdout);
+
+	a = pureSimplify(a, intern);
+
+	/* If we have a == k, for any constant k, go and do the
+	 * rewrite. */
+	for (auto it = eqRules.begin(); it != eqRules.end(); it++) {
+		if (it->second->tag == Iex_Const)
+			a = rewriteIRExpr(a, it->first, it->second, intern);
+		if (it->first->tag == Iex_Const)
+			a = rewriteIRExpr(a, it->second, it->first, intern);
+	}
+
+	/* Icky special case: rewrite a + -b to just 0 if we know that
+	 * a == b,  */
+	if (a->tag == Iex_Associative) {
+		IRExprAssociative *ieb = (IRExprAssociative *)a;
+		if (ieb->op == Iop_Add64 &&
+		    ieb->nr_arguments == 2 &&
+		    ieb->contents[1]->tag == Iex_Unop) {
+			IRExprUnop *ieu = (IRExprUnop *)ieb->contents[1];
+			if (ieu->op == Iop_Neg64) {
+				for (auto it = eqRules.begin(); it != eqRules.end(); it++) {
+					if ( (it->first == ieb->contents[0] && it->second == ieu->arg) ||
+					     (it->second == ieb->contents[0] && it->first == ieu->arg) )
+						return internIRExpr(IRExpr_Const(IRConst_U64(0)), intern);
+				}
+			}
+		}
+	}
+
 	if (a->type() != Ity_I1)
 		return a;
 	if (definitelyTrue.count(a))
 		return internIRExpr(IRExpr_Const(IRConst_U1(1)), intern);
 	if (definitelyFalse.count(a))
 		return internIRExpr(IRExpr_Const(IRConst_U1(0)), intern);
+	for (auto it = definitelyTrue.begin(); it != definitelyTrue.end(); it++)
+		if (matches(a, *it))
+			return internIRExpr(IRExpr_Const(IRConst_U1(1)), intern);
+	for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++)
+		if (matches(a, *it))
+			return internIRExpr(IRExpr_Const(IRConst_U1(0)), intern);
+
 	if (a->tag == Iex_Unop) {
 		IRExprUnop *ieu = (IRExprUnop *)a;
 		if (ieu->op != Iop_Not1)
@@ -563,6 +595,13 @@ anf_context::simplify(IRExpr *a)
 			return ((IRExprUnop *)arg)->arg;
 		if (arg == ieu->arg)
 			return a;
+		/* Don't need to check whether the result matches the
+		   definitely true or definitely false lists.  If it
+		   matched with definitely true, arg would have
+		   matched with definitely false and we wouldn't be
+		   here.  Likewise, if it matched with definitely
+		   false, arg would have matched with definitely
+		   true. */
 		return internIRExpr(
 			IRExpr_Unop(
 				Iop_Not1,
@@ -571,6 +610,7 @@ anf_context::simplify(IRExpr *a)
 	} else if (a->tag == Iex_Associative) {
 		IRExprAssociative *iea = (IRExprAssociative *)a;
 		assert(iea->op != Iop_Or1);
+		assert(iea->op != Iop_Xor1);
 		if (iea->op != Iop_And1)
 			return a;
 		anf_context sub_context(*this);
@@ -598,7 +638,17 @@ anf_context::simplify(IRExpr *a)
 		if (res->nr_arguments == 0)
 			return internIRExpr(IRExpr_Const(IRConst_U1(1)), intern);
 		sort_and_arguments(res->contents, res->nr_arguments);
-		return internIRExpr(res, intern);
+		a = internIRExpr(res, intern);
+
+		/* Don't need to check against the definitely true
+		   list, because this is an and expression and they
+		   never get introduced into the list (components are
+		   added instead).  Do need to check against
+		   definitely false, though. */
+		for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++)
+			if (matches(a, *it))
+				return internIRExpr(IRExpr_Const(IRConst_U1(0)), intern);
+		return a;
 	} else {
 		return a;
 	}
