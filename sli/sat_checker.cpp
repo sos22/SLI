@@ -273,7 +273,35 @@ pureSimplify(IRExpr *what, internIRExprTable &internTable)
 			    ((IRExprUnop *)ieb->contents[1])->op == Iop_Neg64 &&
 			    ((IRExprUnop *)ieb->contents[1])->arg == ieb->contents[0])
 				return IRExpr_Const(IRConst_U64(0));
+			if (ieb->op == Iop_And1) {
+				IRExpr *new_args[ieb->nr_arguments];
+				int new_nr_args = 0;
+				for (int i = 0; i < ieb->nr_arguments; i++) {
+					if (ieb->contents[i]->tag == Iex_Const) {
+						IRExprConst *iec = (IRExprConst *)ieb->contents[i];
+						if (!iec->con->Ico.U1)
+							return IRExpr_Const(IRConst_U1(0));
+					} else {
+						new_args[new_nr_args++] = ieb->contents[i];
+					}
+				}
+				if (new_nr_args == 1)
+					return new_args[0];
+				if (new_nr_args != ieb->nr_arguments) {
+					IRExprAssociative *iea = IRExpr_Associative(new_nr_args, Iop_And1);
+					memcpy(iea->contents, new_args, sizeof(IRExpr *) * new_nr_args);
+					iea->nr_arguments = new_nr_args;
+					return iea;
+				}
+			}
 			return IRExprTransformer::transformIex(ieb);
+		}
+		IRExpr *transformIex(IRExprUnop *ieu) {
+			if (ieu->op == Iop_Not1 &&
+			    ieu->arg->tag == Iex_Const) {
+				return IRExpr_Const(IRConst_U1(!((IRExprConst *)ieu->arg)->con->Ico.U1));
+			}
+			return IRExprTransformer::transformIex(ieu);
 		}
 		IRExpr *transformIex(IRExprBinop *ieb) {
 			if (ieb->op == Iop_CmpEQ64 &&
