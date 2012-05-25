@@ -425,6 +425,8 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	VexPtr<IRExpr, &ir_heap> assumption;
 	assumption = atomicSurvivalConstraint(probeMachine, NULL, oracle,
 					      atomicSurvivalOptimisations(probeOptimisations), token);
+	if (!assumption)
+		return NULL;
 
 	VexPtr<IRExpr, &ir_heap> writeMachineConstraint(
 		writeMachineCrashConstraint(sm,
