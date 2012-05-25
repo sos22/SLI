@@ -351,6 +351,7 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(CmpLT8U)			\
 						\
 	     iter(CmpLT16U)			\
+	     iter(CmpLT16S)			\
 						\
 	     iter(CmpLT32S)			\
 	     iter(CmpLE32S)			\
