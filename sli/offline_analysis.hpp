@@ -220,8 +220,6 @@ StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisatio
 StateMachine *useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
 				    Oracle *oracle, bool *done_something);
 
-void breakCycles(StateMachine *);
-
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
 class FixConsumer;
