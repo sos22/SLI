@@ -182,11 +182,12 @@ initialExploration(Oracle *oracle, const DynAnalysisRip &targetRip,
 static bool
 selectEdgeForCycleBreak(CFGNode *start,
 			std::map<CFGNode *, std::set<CFGNode *> > &predecessorMap,
+			std::set<CFGNode *> &cycle_free,
 			CFGNode **edge_start, CFGNode **edge_end,
 			int *discoveryDepth,
 			std::set<CFGNode *> &clean, std::set<CFGNode *> &path)
 {
-	if (clean.count(start))
+	if (clean.count(start) || cycle_free.count(start))
 		return false;
 	assert(!path.count(start));
 	clean.insert(start);
@@ -199,23 +200,26 @@ selectEdgeForCycleBreak(CFGNode *start,
 			*discoveryDepth = path.size();
 			return true;
 		}
-		if (selectEdgeForCycleBreak(*it, predecessorMap, edge_start, edge_end,
-					    discoveryDepth, clean, path))
+		if (selectEdgeForCycleBreak(*it, predecessorMap, cycle_free,
+					    edge_start, edge_end, discoveryDepth,
+					    clean, path))
 			return true;
 	}
 	path.erase(start);
+	cycle_free.insert(start);
 	return false;
 }
 static bool
 selectEdgeForCycleBreak(CFGNode *start,
 			std::map<CFGNode *, std::set<CFGNode *> > &predecessors,
+			std::set<CFGNode *> &cycle_free,
 			CFGNode **cycle_edge_start,
 			CFGNode **cycle_edge_end,
 			int *discoveryDepth)
 {
 	std::set<CFGNode *> clean;
 	std::set<CFGNode *> path;
-	return selectEdgeForCycleBreak(start, predecessors,
+	return selectEdgeForCycleBreak(start, predecessors, cycle_free,
 				       cycle_edge_start, cycle_edge_end,
 				       discoveryDepth,
 				       clean, path);
@@ -243,11 +247,13 @@ unrollAndCycleBreak(std::set<CFGNode *> &instrs, int maxPathLength)
 
 	for (auto it = startNodes.begin(); it != startNodes.end(); it++) {
 		CFGNode *startNode = *it;
+		std::set<CFGNode *> cycle_free;
 		while (1) {
 			CFGNode *cycle_edge_start, *cycle_edge_end;
 			int discoveryDepth;
 			if (!selectEdgeForCycleBreak(startNode,
 						     predecessorMap,
+						     cycle_free,
 						     &cycle_edge_start,
 						     &cycle_edge_end,
 						     &discoveryDepth)) {
