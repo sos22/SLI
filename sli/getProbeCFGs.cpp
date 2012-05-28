@@ -260,6 +260,30 @@ unrollAndCycleBreak(std::set<CFGNode *> &instrs, int maxPathLength)
 				/* No cycles left in the graph.  Yay. */
 				break;
 			}
+			if (cycle_edge_start->my_rip == cycle_edge_end->my_rip)
+				dbg_break("break self-edge");
+
+			/* Remove the dead edge before we duplicate
+			 * incoming edges.  This only makes a
+			 * difference for self-edges.  In the case of
+			 * self-edges, it's to not duplicate the edge
+			 * we just killed into the new node, because
+			 * that leads to an exponential blow-up in
+			 * edges which are just going to get removed
+			 * later on anyway. */
+			if (cycle_edge_start->fallThrough.second == cycle_edge_end) {
+				cycle_edge_start->fallThrough.second = NULL;
+			} else {
+				for (auto it = cycle_edge_start->branches.begin();
+				     it != cycle_edge_start->branches.end();
+				     it++) {
+					if (it->second == cycle_edge_end) {
+						it->second = NULL;
+						break;
+					}
+				}
+			}
+			predecessorMap[cycle_edge_end].erase(cycle_edge_start);
 
 			if (discoveryDepth < maxPathLength) {
 				/* The edge from cycle_edge_start to
@@ -300,21 +324,6 @@ unrollAndCycleBreak(std::set<CFGNode *> &instrs, int maxPathLength)
 
 				instrs.insert(new_node);
 			}
-
-			/* Remove the edge we just killed. */
-			if (cycle_edge_start->fallThrough.second == cycle_edge_end) {
-				cycle_edge_start->fallThrough.second = NULL;
-			} else {
-				for (auto it = cycle_edge_start->branches.begin();
-				     it != cycle_edge_start->branches.end();
-				     it++) {
-					if (it->second == cycle_edge_end) {
-						it->second = NULL;
-						break;
-					}
-				}
-			}
-			predecessorMap[cycle_edge_end].erase(cycle_edge_start);
 		}
 	}
 		
