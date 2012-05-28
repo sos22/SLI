@@ -124,7 +124,19 @@ exploreForStartingRip(Oracle *oracle,
 						       vr.name());
 				}
 			}
-			oracle->findPredecessors(vr, depth < maxPathLength1, neededAtNextDepth);
+			if (depth < maxPathLength1) {
+				oracle->findPredecessors(vr, true, neededAtNextDepth);
+			} else {
+				std::vector<VexRip> pred;
+				oracle->findPredecessors(vr, true, pred);
+				/* If we're past the intended max
+				   depth then we only consider
+				   unambiguous non-call
+				   predecessors. */
+				if (pred.size() == 1 &&
+				    pred[0].stack.size() == vr.stack.size())
+					neededAtNextDepth.push_back(pred[0]);
+			}
 		}
 		depth++;
 		pendingAtCurrentDepth = neededAtNextDepth;

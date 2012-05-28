@@ -32,8 +32,15 @@
 #define __STACK_CHK_FAILED 0x4ffe80ul
 #endif
 
+/* We do an initial clustering using @STORE_CLUSTER_THRESHOLD, and
+   then backtrack by up to @CONFIG_MAX_STORE_BACKTRACK instructions to
+   find a nice place to start the analysis from (where that's
+   unambiguous). */
 #ifndef STORE_CLUSTER_THRESHOLD
 #define STORE_CLUSTER_THRESHOLD 20
+#endif
+#ifndef CONFIG_MAX_STORE_BACKTRACK
+#define CONFIG_MAX_STORE_BACKTRACK 10
 #endif
 
 /* We always reach threshold1, and we can expand up to threshold2 if
@@ -43,7 +50,7 @@
 #define PROBE_CLUSTER_THRESHOLD1 20
 #endif
 #ifndef PROBE_CLUSTER_THRESHOLD2
-#define PROBE_CLUSTER_THRESHOLD2 20
+#define PROBE_CLUSTER_THRESHOLD2 30
 #endif
 
 #ifndef CONFIG_DATABASE_RIP_DEPTH

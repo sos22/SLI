@@ -501,6 +501,32 @@ performUnrollAndCycleBreak(std::set<CFGNode *> &roots, unsigned maxPathLength)
 }
 
 static void
+backtrackWhereUnambiguous(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
+			  Oracle *oracle)
+{
+	std::set<CFGNode *> roots;
+	for (auto it = roots.begin(); it != roots.end(); it++) {
+		CFGNode *n = *it;
+		for (unsigned cntr = 0; cntr < CONFIG_MAX_STORE_BACKTRACK; cntr++) {
+			std::vector<VexRip> predecessors;
+			oracle->findPredecessors(n->my_rip, true, predecessors);
+			if (predecessors.size() != 1)
+				break;
+			if (predecessors[0].stack.size() != n->my_rip.stack.size())
+				break;
+			VexRip &predecessor(predecessors[0]);
+			if (ripsToCFGNodes.count(predecessor))
+				break;
+			CFGNode *work = CFGNode::forRip(oracle, predecessor, CFGNode::ordinary_instr);
+			if (!work)
+				break;
+			ripsToCFGNodes[predecessor] = work;
+			n = work;
+		}
+	}
+}
+
+static void
 buildCFG(const std::set<DynAnalysisRip> &dyn_roots, unsigned maxPathLength,
 	 Oracle *oracle, std::set<CFGNode *> &roots)
 {
@@ -521,9 +547,11 @@ buildCFG(const std::set<DynAnalysisRip> &dyn_roots, unsigned maxPathLength,
 		debug_dump(ripsToCFGNodes, "\t");
 	}
 
+	backtrackWhereUnambiguous(ripsToCFGNodes, oracle);
+
 	findRoots(ripsToCFGNodes, roots);
 	if (debug_find_roots) {
-		printf("Initial root set:\n");
+		printf("After backtracking:\n");
 		debug_dump(roots, "\t");
 	}
 	if (removeRedundantRoots(ripsToCFGNodes, roots)) {
