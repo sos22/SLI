@@ -3298,12 +3298,18 @@ Oracle::findPredecessors(const VexRip &vr, bool includeCallPredecessors, std::ve
 bool
 Oracle::isPltCall(const VexRip &vr)
 {
-#warning These numbers are correct for mysqld; not for anything else.
 	unsigned long r = vr.unwrap_vexrip();
-	if (r >= 0x5364c0 && r <= 0x537570)
-		return true;
-	else
+	if (!ms->elfData ||
+	    r < ms->elfData->plt_start ||
+	    r >= ms->elfData->plt_end)
 		return false;
+
+	/* Bit of a hack: we know what a PLT entry looks like, so we
+	 * can do the symbol lookup. */
+	unsigned idx = ms->addressSpace->fetch<unsigned>(r + 7, NULL);
+	printf("PLT idx %d -> %s\n", idx,
+	       ms->elfData->lookupPltSymbol(idx));
+	return true;
 }
 
 Oracle::PointerAliasingSet

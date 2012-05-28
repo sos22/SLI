@@ -527,7 +527,16 @@ public:
 	NAMED_CLASS
 };
 
-class MachineState : public GarbageCollected<MachineState > {
+class ElfData : public GarbageCollected<ElfData> {
+public:
+	unsigned long plt_start, plt_end;
+	std::vector<std::pair<unsigned, char *> > plt_symbol_names;
+	const char *lookupPltSymbol(unsigned idx) const;
+	void visit(HeapVisitor &) {}
+	NAMED_CLASS
+};
+
+class MachineState : public GarbageCollected<MachineState> {
 public:
 	std::vector<Thread *> threads;
 
@@ -542,6 +551,8 @@ public:
 	AddressSpace *addressSpace;
 	SignalHandlers signalHandlers;
 	unsigned long nrEvents;
+	ElfData *elfData;
+
 	static MachineState *initialMachineState(VexPtr<LogReader> &lf,
 						 LogReaderPtr startPtr,
 						 LogReaderPtr *endPtr,
