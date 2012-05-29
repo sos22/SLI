@@ -25,6 +25,9 @@ template <typename t> struct SMBPtr {
 	explicit SMBPtr(const t *_content)
 		: content(_content)
 	{}
+	SMBPtr()
+		: content((t *)0xf001dead)
+	{}
 };
 
 /* ------------------ Stuff for building up expressions ---------------- */

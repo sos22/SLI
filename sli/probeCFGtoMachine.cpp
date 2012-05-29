@@ -63,6 +63,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	threadAndRegister rax(threadAndRegister::reg(tid, OFFSET_amd64_RAX, 0));
 	threadAndRegister arg1(threadAndRegister::reg(tid, OFFSET_amd64_RDI, 0));
 	threadAndRegister arg2(threadAndRegister::reg(tid, OFFSET_amd64_RSI, 0));
+	threadAndRegister arg3(threadAndRegister::reg(tid, OFFSET_amd64_RDX, 0));
 	SMBPtr<SMBState> end(Proxy(cfgnode->fallThrough.second));
 	SMBPtr<SMBState> acc(NULL);
 	switch (cfgnode->libraryFunction) {
@@ -71,20 +72,19 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		break;
 	}
 	case LibraryFunctionTemplate::bzero: {
-		int i, j;
+		SMBPtr<SMBState> states[9];
+		states[8] = end;
+		for (int i = 7; i >= 0; i--)
+			states[i] =
+				(*(smb_reg(arg1, Ity_I64) + smb_const64((7 - i) * 8)) <<= smb_const64(0)) >>
+				states[i+1];
 		acc = end;
-		for (j = 0; j < 64; j += 8) {
-			SMBPtr<SMBState> acc2(end);
-			for (i = j - 8; i >= 0; i -= 8)
-				acc2 =
-					(*(smb_reg(arg1, Ity_I64) + smb_const64(i)) <<= smb_const64(0)) >>
-					acc2;
-			acc = If(j == 56 ?
-					smb_const64(j) <= smb_reg(arg2, Ity_I64) :
-				        smb_const64(j) == smb_reg(arg2, Ity_I64),
-				  acc2,
-				  acc);
-		}
+		for (int i = 0; i < 9; i++)
+			acc = If(i == 8 ?
+					smb_const64(i * 8) <= smb_reg(arg2, Ity_I64) :
+				        smb_const64(i * 8) == smb_reg(arg2, Ity_I64),
+				 states[8-i],
+				 acc);
 		break;
 	}
 	case LibraryFunctionTemplate::strlen: {
@@ -99,6 +99,25 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 				   (!rax <<= smb_const64(i)) >> end,
 				   acc);
 		}
+		break;
+	}
+	case LibraryFunctionTemplate::memcpy: {
+		SMBPtr<SMBState> states[9];
+		threadAndRegister tmp1(threadAndRegister::temp(tid, 0, 0));
+		acc = states[8] = (!rax <<= smb_reg(arg1, Ity_I64)) >> end;
+		for (int i = 7; i >= 0; i--)
+			states[i] =
+				Load(!tmp1,
+				     *(smb_reg(arg2, Ity_I64) + smb_const64((7 - i) * 8)),
+				     Ity_I64) >>
+				((*(smb_reg(arg1, Ity_I64) + smb_const64((7 - i) * 8)) <<= smb_reg(tmp1, Ity_I64)) >>
+				 states[i+1]);
+		for (int i = 0; i < 9; i++)
+			acc = If(i == 8 ?
+					smb_const64(i * 8) <= smb_reg(arg3, Ity_I64) :
+				        smb_const64(i * 8) == smb_reg(arg3, Ity_I64),
+				 states[8-i],
+				 acc);
 		break;
 	}
 	case LibraryFunctionTemplate::none:
