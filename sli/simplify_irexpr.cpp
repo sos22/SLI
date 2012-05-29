@@ -2301,6 +2301,12 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						IRConst_U1(
 							((IRExprConst *)l)->con->Ico.U64 <
 							((IRExprConst *)r)->con->Ico.U64));
+				case Iop_CmpLE64U:
+					*done_something = true;
+					return IRExpr_Const(
+						IRConst_U1(
+							((IRExprConst *)l)->con->Ico.U64 <=
+							((IRExprConst *)r)->con->Ico.U64));
 				case Iop_CmpLT16U:
 					return IRExpr_Const(
 						IRConst_U1(((IRExprConst *)l)->con->Ico.U16 <
