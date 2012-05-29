@@ -511,7 +511,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	threadAndRegister arg1(threadAndRegister::reg(tid, OFFSET_amd64_RDI, 0));
 	threadAndRegister arg2(threadAndRegister::reg(tid, OFFSET_amd64_RSI, 0));
 	const SMBState *end = new SMBStateProxy(cfgnode->fallThrough.second);;
-	const SMBState *acc;
+	const SMBState *acc = NULL;
 	switch (cfgnode->libraryFunction) {
 	case LibraryFunctionTemplate::__cxa_atexit: {
 		acc = &( (*(new SMBRegisterReference(rax)) = *(new SMBExpression((uint64_t)0))) >> *end);
@@ -555,6 +555,13 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		break;
 	}
 	case LibraryFunctionTemplate::none:
+		abort();
+	}
+	if (!acc) {
+		printf("Need to add support for library function %d (",
+		       (int)cfgnode->libraryFunction);
+		LibraryFunctionTemplate::pp(cfgnode->libraryFunction, stdout);
+		printf(")\n");
 		abort();
 	}
 	return acc->compile(ThreadRip(tid, cfgnode->my_rip), pendingRelocs);
