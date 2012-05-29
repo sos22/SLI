@@ -14,7 +14,7 @@ CFGNode::forRip(Oracle *oracle, const VexRip &vr, CFGNode::flavour_t flavour)
 	IRSB *irsb = oracle->getIRSBForRip(vr);
 	if (!irsb)
 		return NULL;
-	CFGNode *work = new CFGNode(vr, flavour);
+	CFGNode *work = new CFGNode(vr, flavour, LibraryFunctionTemplate::none);
 	int x;
 	for (x = 1; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 		if (irsb->stmts[x]->tag == Ist_Exit)
@@ -29,6 +29,7 @@ CFGNode::forRip(Oracle *oracle, const VexRip &vr, CFGNode::flavour_t flavour)
 		} else if (irsb->jumpkind == Ijk_Call) {
 			if (irsb->next_is_const) {
 				if (oracle->isPltCall(irsb->next_const.rip)) {
+					work->libraryFunction = oracle->identifyLibraryCall(irsb->next_const.rip);
 					work->fallThrough.first = extract_call_follower(irsb);
 				} else {
 					work->branches.push_back(

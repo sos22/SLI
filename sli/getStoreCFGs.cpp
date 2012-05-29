@@ -509,7 +509,9 @@ backtrackWhereUnambiguous(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 		CFGNode *n = *it;
 		for (unsigned cntr = 0; cntr < CONFIG_MAX_STORE_BACKTRACK; cntr++) {
 			std::vector<VexRip> predecessors;
-			oracle->findPredecessors(n->my_rip, true, predecessors);
+			oracle->findPredecessors(n->my_rip, true,
+						 n->libraryFunction != LibraryFunctionTemplate::none,
+						 predecessors);
 			if (predecessors.size() != 1)
 				break;
 			if (predecessors[0].stack.size() != n->my_rip.stack.size())

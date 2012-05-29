@@ -124,11 +124,16 @@ exploreForStartingRip(Oracle *oracle,
 						       vr.name());
 				}
 			}
+			bool isLibraryCall = node->libraryFunction != LibraryFunctionTemplate::none;
 			if (depth < maxPathLength1) {
-				oracle->findPredecessors(vr, true, neededAtNextDepth);
+				oracle->findPredecessors(vr, true,
+							 isLibraryCall,
+							 neededAtNextDepth);
 			} else {
 				std::vector<VexRip> pred;
-				oracle->findPredecessors(vr, true, pred);
+				oracle->findPredecessors(vr, true,
+							 isLibraryCall,
+							 pred);
 				/* If we're past the intended max
 				   depth then we only consider
 				   unambiguous non-call
@@ -304,7 +309,9 @@ unrollAndCycleBreak(std::set<CFGNode *> &instrs, int maxPathLength)
 				   maxPathLength. */
 				CFGNode *new_node;
 				/* Create new node */
-				new_node = new CFGNode(cycle_edge_start->my_rip, CFGNode::ordinary_instr);
+				new_node = new CFGNode(cycle_edge_start->my_rip,
+						       CFGNode::ordinary_instr,
+						       cycle_edge_start->libraryFunction);
 				/* Maintain the edge to cycle_edge_end */
 				new_node->fallThrough.first = cycle_edge_end->my_rip;
 				new_node->fallThrough.second = cycle_edge_end;

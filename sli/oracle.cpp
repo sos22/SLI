@@ -3245,7 +3245,8 @@ Oracle::getPossibleStackTruncations(const VexRip &vr,
 /* Find all of the instructions which might have executed immediately
  * before @vr. */
 void
-Oracle::findPredecessors(const VexRip &vr, bool includeCallPredecessors, std::vector<VexRip> &out)
+Oracle::findPredecessors(const VexRip &vr, bool includeCallPredecessors,
+			 bool expectedLibraryCall, std::vector<VexRip> &out)
 {
 	StaticRip sr(vr);
 	Function f(sr);
@@ -3287,7 +3288,8 @@ Oracle::findPredecessors(const VexRip &vr, bool includeCallPredecessors, std::ve
 		extract_oraclerip_column(stmt, 0, callSucc);
 
 		if (!callSucc.empty()) {
-			printf("Warning: ignoring library call at %s\n", sr.name());
+			if (!expectedLibraryCall)
+				printf("Warning: ignoring library call at %s\n", sr.name());
 			for (auto it = callSucc.begin(); it != callSucc.end(); it++) {
 				out.push_back(it->makeVexRip(vr));
 			}
@@ -3303,13 +3305,29 @@ Oracle::isPltCall(const VexRip &vr)
 	    r < ms->elfData->plt_start ||
 	    r >= ms->elfData->plt_end)
 		return false;
+	return true;
+}
 
+LibraryFunctionType
+Oracle::identifyLibraryCall(const VexRip &vr)
+{
 	/* Bit of a hack: we know what a PLT entry looks like, so we
 	 * can do the symbol lookup. */
+	unsigned long r = vr.unwrap_vexrip();
 	unsigned idx = ms->addressSpace->fetch<unsigned>(r + 7, NULL);
-	printf("PLT idx %d -> %s\n", idx,
-	       ms->elfData->lookupPltSymbol(idx));
-	return true;
+	const char *name;
+
+	name = ms->elfData->lookupPltSymbol(idx);
+	if (!name) {
+		printf("Warning: don't know what library function to call at %s\n",
+		       vr.name());
+		return LibraryFunctionTemplate::none;
+	}
+	LibraryFunctionType res = LibraryFunctionTemplate::parse(name);
+	if (res == LibraryFunctionTemplate::none)
+		printf("Warning: Ignoring call to %s at %s\n",
+		       name, vr.name());
+	return res;
 }
 
 Oracle::PointerAliasingSet

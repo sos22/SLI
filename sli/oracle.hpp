@@ -4,6 +4,7 @@
 #include <set>
 #include "state_machine.hpp"
 #include "mapping.hpp"
+#include "library.hpp"
 
 #include "libvex_guest_offsets.h"
 
@@ -395,9 +396,11 @@ public:
 	bool isFunctionHead(const StaticRip &vr);
 	void getPossibleStackTruncations(const VexRip &vr,
 					 std::vector<unsigned long> &callers);
-	void findPredecessors(const VexRip &vr, bool includeCallPredecessors, std::vector<VexRip> &out);
+	void findPredecessors(const VexRip &vr, bool includeCallPredecessors,
+			      bool expectedLibraryCall, std::vector<VexRip> &out);
 
 	bool isPltCall(const VexRip &vr);
+	LibraryFunctionType identifyLibraryCall(const VexRip &vr);
 
 	~Oracle() { }
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)

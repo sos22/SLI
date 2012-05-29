@@ -1,4 +1,5 @@
 #include "typesdb.hpp"
+#include "library.hpp"
 
 class Oracle;
 
@@ -19,17 +20,21 @@ public:
 	successor_t fallThrough;
 	std::vector<successor_t> branches;
 
+	LibraryFunctionType libraryFunction;
 	VexRip my_rip;
 
 	CFGNode(const VexRip &rip,
-		flavour_t _flavour)
+		flavour_t _flavour,
+		LibraryFunctionType _libraryFunction)
 		: flavour(_flavour),
+		  libraryFunction(_libraryFunction),
 		  my_rip(rip)
 	{}
 
 	CFGNode *dupe() {
 		CFGNode *r = new CFGNode(my_rip,
-					 flavour == true_target_instr ? dupe_target_instr : flavour);
+					 flavour == true_target_instr ? dupe_target_instr : flavour,
+					 libraryFunction);
 		r->fallThrough = fallThrough;
 		r->branches = branches;
 		return r;
@@ -47,6 +52,11 @@ public:
 			}
 			fprintf(f, "}");
 		}
+		if (libraryFunction != LibraryFunctionTemplate::none) {
+			fprintf(f, " (");
+			LibraryFunctionTemplate::pp(libraryFunction, f);
+			fprintf(f, ")");
+		}
 		fprintf(f, "\n");
 	}
 	void visit(HeapVisitor &hv) {
@@ -61,7 +71,6 @@ public:
 };
 
 void printCFG(const CFGNode *cfg, const char *prefix, FILE *f);
-class MemoryAccessIdentifierAllocator;
 void getStoreCFGs(const std::set<DynAnalysisRip> &, Oracle *,
 		  CFGNode ***, int *);
 bool getProbeCFGs(Oracle *oracle, const DynAnalysisRip &vr,

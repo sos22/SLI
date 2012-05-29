@@ -6,6 +6,8 @@
 #include "alloc_mai.hpp"
 #include "offline_analysis.hpp"
 
+#include "libvex_guest_offsets.h"
+
 namespace _probeCFGsToMachine {
 
 struct reloc_t {
@@ -61,6 +63,33 @@ getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 }
 
 static StateMachineState *
+getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
+		       std::vector<reloc_t> &pendingRelocs)
+{
+	assert(cfgnode->fallThrough.second);
+	assert(cfgnode->branches.empty());
+	switch (cfgnode->libraryFunction) {
+	case LibraryFunctionTemplate::__cxa_atexit: {
+		StateMachineSideEffecting *s =
+			new StateMachineSideEffecting(
+				cfgnode->my_rip,
+				new StateMachineSideEffectCopy(
+					threadAndRegister(threadAndRegister::reg(
+								  tid,
+								  OFFSET_amd64_RAX,
+								  0)),
+					IRExpr_Const(IRConst_U64(0))),
+				NULL);
+		pendingRelocs.push_back(reloc_t(&s->target, cfgnode->fallThrough.second));
+		return s;
+	}
+	case LibraryFunctionTemplate::none:
+		abort();
+	}
+	abort();
+}
+
+static StateMachineState *
 cfgNodeToState(Oracle *oracle,
 	       unsigned tid,
 	       CFGNode *target,
@@ -69,6 +98,10 @@ cfgNodeToState(Oracle *oracle,
 	       std::vector<reloc_t> &pendingRelocs)
 {
 	ThreadRip tr(tid, target->my_rip);
+
+	if (target->libraryFunction)
+		return getLibraryStateMachine(target, tid, pendingRelocs);
+
 	IRSB *irsb;
 	try {
 		irsb = oracle->ms->addressSpace->getIRSBForAddress(tr);
