@@ -111,6 +111,8 @@ public:
 			default:
 				abort();
 			}
+		case Iex_Get:
+			return new SMBExpression(IRExpr_Get(((IRExprGet *)what)->reg, ty));
 		default:
 			abort();
 		}
@@ -219,6 +221,37 @@ const SMBStatementStore &
 SMBMemoryReference::operator=(const SMBExpression &value) const
 {
 	return *Store(this, &value);
+}
+
+class SMBStatementLoad : public SMBStatement {
+	StateMachineSideEffect *compile(const ThreadRip &vr) const {
+		return new StateMachineSideEffectLoad(
+			target->compile(),
+			addr->compile(),
+			MemoryAccessIdentifier(vr,
+					       MemoryAccessIdentifier::static_generation),
+			type);
+	}
+public:
+	const SMBRegisterReference *target;
+	const SMBMemoryReference *addr;
+	IRType type;
+
+	void visit(HeapVisitor &hv) {
+		hv(target);
+		hv(addr);
+	}
+	explicit SMBStatementLoad(const SMBRegisterReference *_target,
+				  const SMBMemoryReference *_addr,
+				  IRType _type)
+		: target(_target), addr(_addr), type(_type)
+	{
+	}
+};
+static const SMBStatementLoad *
+Load(const SMBRegisterReference *target, const SMBMemoryReference *addr, IRType ty)
+{
+	return new SMBStatementLoad(target, addr, ty);
 }
 
 static const SMBExpression &operator+(const SMBExpression &a, const SMBExpression &b)
@@ -498,6 +531,26 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 			acc = &If(j == 56 ? *j_expr <= *arg2_expr : *arg2_expr == *j_expr,
 				  *acc2,
 				  *acc);
+		}
+		break;
+	}
+	case LibraryFunctionTemplate::strlen: {
+		int i;
+		threadAndRegister tmp1(threadAndRegister::temp(tid, 0, 0));
+		const SMBExpression *arg1_expr = new SMBExpression(arg1);
+		const SMBRegisterReference *rax_ref = new SMBRegisterReference(rax);
+		const SMBRegisterReference *tmp1_ref = new SMBRegisterReference(tmp1);
+		const SMBExpression *tmp1_expr = new SMBExpression(tmp1);
+		const SMBExpression *zero_byte = new SMBExpression((uint8_t)0);
+		acc = &( (*rax_ref = *(new SMBExpression((uint64_t)64))) >> *end);
+		for (i = 63; i >= 0; i--) {
+			const SMBExpression *i_expr = new SMBExpression((uint64_t)i);
+			acc = &(*Load(tmp1_ref,
+				      &*(*arg1_expr + *i_expr),
+				      Ity_I8) >>
+				If(*tmp1_expr == *zero_byte,
+				   (*rax_ref = *i_expr) >> *end,
+				   *acc));
 		}
 		break;
 	}

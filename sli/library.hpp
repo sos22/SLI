@@ -4,7 +4,8 @@
 namespace LibraryFunctionTemplate {
 #define enum_library_function_templates(f)	\
 	f(__cxa_atexit)				\
-	f(bzero)
+	f(bzero)				\
+	f(strlen)
 
 	enum __type {
 		none = 0,
