@@ -3,7 +3,8 @@
 
 namespace LibraryFunctionTemplate {
 #define enum_library_function_templates(f)	\
-	f(__cxa_atexit)
+	f(__cxa_atexit)				\
+	f(bzero)
 
 	enum __type {
 		none = 0,

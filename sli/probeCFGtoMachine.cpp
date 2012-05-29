@@ -62,31 +62,449 @@ getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 			targets.push_back(it->second);
 }
 
+/* State machine builder types to make it a bit easier to define state
+ * machines. */
+class SMBExpression : public GarbageCollected<SMBExpression, &ir_heap> {
+public:
+	const IRExpr *what;
+	IRExpr *compile() const {
+		return (IRExpr *)what;
+	}
+	bool allowRetyping;
+	SMBExpression(const IRExpr *_what)
+		: what(_what), allowRetyping(false)
+	{}
+	explicit SMBExpression(uint8_t k)
+		: what(IRExpr_Const(IRConst_U8(k))),
+		  allowRetyping(false)
+	{
+	}
+	explicit SMBExpression(int k)
+		: what(IRExpr_Const(IRConst_U64(k))),
+		  allowRetyping(true)
+	{
+	}
+	explicit SMBExpression(unsigned long k)
+		: what(IRExpr_Const(IRConst_U64(k))),
+		  allowRetyping(false)
+	{
+	}
+	explicit SMBExpression(const threadAndRegister &tr)
+		: what(IRExpr_Get(tr, Ity_I64)),
+		  allowRetyping(true)
+	{
+	}
+	const SMBExpression *retype(IRType ty) const {
+		if (what->type() == ty)
+			return this;
+		assert(allowRetyping);
+		assert(what->type() == Ity_I64);
+		switch (what->tag) {
+		case Iex_Const:
+			switch (ty) {
+			case Ity_I8:
+				return new SMBExpression(IRExpr_Const(IRConst_U8( ((IRExprConst *)what)->con->Ico.U64)));
+			case Ity_I16:
+				return new SMBExpression(IRExpr_Const(IRConst_U8( ((IRExprConst *)what)->con->Ico.U64)));
+			case Ity_I32:
+				return new SMBExpression(IRExpr_Const(IRConst_U8( ((IRExprConst *)what)->con->Ico.U64)));
+			default:
+				abort();
+			}
+		default:
+			abort();
+		}
+	}
+	void visit(HeapVisitor &hv) {
+		hv(what);
+	}
+	NAMED_CLASS
+};
+
+class SMBStatement : public GarbageCollected<SMBStatement, &ir_heap> {
+public:
+	virtual StateMachineSideEffect *compile(const ThreadRip &vr) const = 0;
+	NAMED_CLASS
+};
+
+class SMBStatementCopy;
+class SMBRegisterReference : public GarbageCollected<SMBRegisterReference, &ir_heap> {
+public:
+	threadAndRegister compile() const {
+		return tr;
+	}
+	threadAndRegister tr;
+	explicit SMBRegisterReference(const threadAndRegister &_tr)
+		: tr(_tr)
+	{
+	}
+	const SMBStatementCopy &operator=(const SMBExpression &value) const;
+	void visit(HeapVisitor &) {}
+	NAMED_CLASS
+};
+class SMBStatementCopy : public SMBStatement {
+	StateMachineSideEffect *compile(const ThreadRip &) const {
+		return new StateMachineSideEffectCopy(
+			lvalue->compile(),
+			rvalue->compile());
+	}
+public:
+	const SMBRegisterReference *lvalue;
+	const SMBExpression *rvalue;
+	void visit(HeapVisitor &hv) {
+		hv(lvalue);
+		hv(rvalue);
+	}
+	explicit SMBStatementCopy(const SMBRegisterReference *_lvalue, const SMBExpression *_rvalue)
+		: lvalue(_lvalue), rvalue(_rvalue)
+	{}
+};
+static const SMBStatementCopy *
+Copy(const SMBRegisterReference *addr, const SMBExpression *value)
+{
+	return new SMBStatementCopy(addr, value);
+}
+const SMBStatementCopy &
+SMBRegisterReference::operator=(const SMBExpression &value) const
+{
+	return *Copy(this, &value);
+}
+
+class SMBStatementStore;
+class SMBMemoryReference : public GarbageCollected<SMBMemoryReference, &ir_heap> {
+public:
+	const SMBExpression *addr;
+	IRExpr *compile() const {
+		return addr->compile();
+	}
+	explicit SMBMemoryReference(const SMBExpression *a)
+		: addr(a->retype(Ity_I64))
+	{
+	}
+	void visit(HeapVisitor &hv)
+	{
+		hv(addr);
+	}
+	const SMBStatementStore &operator=(const SMBExpression &value) const;
+	NAMED_CLASS
+};
+class SMBStatementStore : public SMBStatement {
+	StateMachineSideEffect *compile(const ThreadRip &vr) const {
+		return new StateMachineSideEffectStore(
+			addr->compile(),
+			value->compile(),
+			MemoryAccessIdentifier(vr,
+					       MemoryAccessIdentifier::static_generation));
+	}
+public:
+	const SMBMemoryReference *addr;
+	const SMBExpression *value;
+
+	void visit(HeapVisitor &hv) {
+		hv(addr);
+		hv(value);
+	}
+	explicit SMBStatementStore(const SMBMemoryReference *_addr, const SMBExpression *_value)
+		: addr(_addr), value(_value)
+	{
+		assert(!value->allowRetyping);
+	}
+};
+static const SMBStatementStore *
+Store(const SMBMemoryReference *addr, const SMBExpression *value)
+{
+	return new SMBStatementStore(addr, value);
+}
+const SMBStatementStore &
+SMBMemoryReference::operator=(const SMBExpression &value) const
+{
+	return *Store(this, &value);
+}
+
+static const SMBExpression &operator+(const SMBExpression &a, const SMBExpression &b)
+{
+	if (a.what->type() != b.what->type()) {
+		if (a.allowRetyping && !b.allowRetyping)
+			return *a.retype(b.what->type()) + b;
+		assert(!a.allowRetyping && b.allowRetyping);
+		return *b.retype(a.what->type()) + a;
+	}
+	IROp op;
+	switch (a.what->type()) {
+	case Ity_I1:
+		op = Iop_Xor1;
+		break;
+	case Ity_I8:
+		op = Iop_Add8;
+		break;
+	case Ity_I16:
+		op = Iop_Add16;
+		break;
+	case Ity_I32:
+		op = Iop_Add32;
+		break;
+	case Ity_I64:
+		op = Iop_Add64;
+		break;
+	case Ity_I128:
+		abort();
+	case Ity_F32:
+		abort();
+	case Ity_F64:
+		op = Iop_AddF64;
+		break;
+	case Ity_V128:
+		abort();
+	case Ity_INVALID:
+		abort();
+	}
+	SMBExpression *res = new SMBExpression(IRExpr_Binop(op, (IRExpr *)a.what, (IRExpr *)b.what));
+	if (a.allowRetyping && b.allowRetyping)
+		res->allowRetyping = true;
+	return *res;
+				     
+}
+static const SMBExpression &operator==(const SMBExpression &a, const SMBExpression &b)
+{
+	if (a.what->type() != b.what->type()) {
+		if (a.allowRetyping && !b.allowRetyping)
+			return *a.retype(b.what->type()) == b;
+		assert(!a.allowRetyping && b.allowRetyping);
+		return *b.retype(a.what->type()) == a;
+	}
+	IROp op;
+	switch (a.what->type()) {
+	case Ity_I1:
+		op = Iop_CmpEQ1;
+		break;
+	case Ity_I8:
+		op = Iop_CmpEQ8;
+		break;
+	case Ity_I16:
+		op = Iop_CmpEQ16;
+		break;
+	case Ity_I32:
+		op = Iop_CmpEQ32;
+		break;
+	case Ity_I64:
+		op = Iop_CmpEQ64;
+		break;
+	case Ity_I128:
+		op = Iop_CmpEQI128;
+		break;
+	case Ity_V128:
+		op = Iop_CmpEQV128;
+		break;
+	case Ity_F32:
+		op = Iop_CmpEQF32;
+		break;
+	case Ity_F64:
+		op = Iop_CmpEQF64;
+		break;
+	case Ity_INVALID:
+		abort();
+	}
+	return *(new SMBExpression(IRExpr_Binop(op, (IRExpr *)a.what, (IRExpr *)b.what)));
+}
+static const SMBExpression &operator<=(const SMBExpression &a, const SMBExpression &b)
+{
+	if (a.what->type() != b.what->type()) {
+		if (a.allowRetyping && !b.allowRetyping)
+			return *a.retype(b.what->type()) == b;
+		assert(!a.allowRetyping && b.allowRetyping);
+		return *b.retype(a.what->type()) == a;
+	}
+	IROp op;
+	switch (a.what->type()) {
+	case Ity_I1:
+		abort();
+	case Ity_I8:
+		abort();
+	case Ity_I16:
+		abort();
+	case Ity_I32:
+		op = Iop_CmpLE32U;
+		break;
+	case Ity_I64:
+		op = Iop_CmpLE64U;
+		break;
+	case Ity_I128:
+	case Ity_V128:
+	case Ity_F32:
+	case Ity_F64:
+		abort();
+	case Ity_INVALID:
+		abort();
+	}
+	return *(new SMBExpression(IRExpr_Binop(op, (IRExpr *)a.what, (IRExpr *)b.what)));
+}
+
+static const SMBMemoryReference &operator*(const SMBExpression &a)
+{
+	return *(new SMBMemoryReference(&a));
+}
+
+class SMBState : public GarbageCollected<SMBState, &ir_heap> {
+protected:
+	struct reloc2 {
+		const SMBState *target;
+		StateMachineState **t;
+		reloc2(const SMBState *_target, StateMachineState **_t)
+			: target(_target), t(_t)
+		{}
+	};
+	virtual StateMachineState *_compile(const ThreadRip &vr,
+					    std::vector<reloc_t> &relocs,
+					    std::vector<reloc2> &relocs2) const = 0;
+private:
+	StateMachineState *compile(const ThreadRip &vr,
+				   std::map<const SMBState *, StateMachineState *> &m,
+				   std::vector<reloc_t> &relocs,
+				   std::vector<reloc2> &relocs2) const {
+		auto it_did_insert = m.insert(std::pair<const SMBState *, StateMachineState *>(this, (StateMachineState *)NULL));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (did_insert)
+			it->second = _compile(vr, relocs, relocs2);
+		return it->second;
+	}
+public:
+	StateMachineState *compile(const ThreadRip &vr, std::vector<reloc_t> &relocs) const {
+		std::map<const SMBState *, StateMachineState *> m;
+		std::vector<reloc2> relocs2;
+		StateMachineState *res;
+		res = NULL;
+		relocs2.push_back(reloc2(this, &res));
+		while (!relocs2.empty()) {
+			reloc2 r2(relocs2.back());
+			relocs2.pop_back();
+			assert(!*r2.t);
+			*r2.t = r2.target->compile(vr, m, relocs, relocs2);
+			assert(*r2.t);
+		}
+		assert(res);
+		return res;
+	}
+	NAMED_CLASS
+};
+class SMBStateStatement : public SMBState {
+	StateMachineState *_compile(const ThreadRip &vr,
+				    std::vector<reloc_t> &,
+				    std::vector<reloc2> &relocs2) const {
+		StateMachineSideEffecting *smse =
+			new StateMachineSideEffecting(
+				vr.rip,
+				first->compile(vr),
+				NULL);
+		relocs2.push_back(reloc2(second, &smse->target));
+		return smse;
+	}
+public:
+	const SMBStatement *first;
+	const SMBState *second;
+	explicit SMBStateStatement(const SMBStatement *_first, const SMBState *_second)
+		: first(_first), second(_second)
+	{}
+	void visit(HeapVisitor &hv)
+	{
+		hv(first);
+		hv(second);
+	}
+};
+static const SMBState &operator>>(const SMBStatement &a, const SMBState &b)
+{
+	return *(new SMBStateStatement(&a, &b));
+}
+class SMBStateIf : public SMBState {
+	StateMachineState *_compile(const ThreadRip &tr,
+				    std::vector<reloc_t> &,
+				    std::vector<reloc2> &relocs2) const {
+		StateMachineBifurcate *smb =
+			new StateMachineBifurcate(tr.rip,
+						  cond->compile(),
+						  NULL,
+						  NULL);
+		relocs2.push_back(reloc2(trueTarg, &smb->trueTarget));
+		relocs2.push_back(reloc2(falseTarg, &smb->falseTarget));
+		return smb;
+	}
+public:
+	const SMBExpression *cond;
+	const SMBState *trueTarg;
+	const SMBState *falseTarg;
+	explicit SMBStateIf(const SMBExpression *_cond, const SMBState *_trueTarg, const SMBState *_falseTarg)
+		: cond(_cond), trueTarg(_trueTarg), falseTarg(_falseTarg)
+	{}
+	void visit(HeapVisitor &hv)
+	{
+		hv(cond);
+		hv(trueTarg);
+		hv(falseTarg);
+	}	
+};
+static SMBState &If(const SMBExpression &a, const SMBState &trueTarg, const SMBState &falseTarg)
+{
+	return *(new SMBStateIf(&a, &trueTarg, &falseTarg));
+}
+class SMBStateProxy : public SMBState {
+	StateMachineState *_compile(const ThreadRip &tr,
+				    std::vector<reloc_t> &relocs,
+				    std::vector<reloc2> &) const {
+		StateMachineSideEffecting *smse =
+			new StateMachineSideEffecting(tr.rip, NULL, NULL);
+		relocs.push_back(reloc_t(&smse->target, target));
+		return smse;
+	}
+public:
+	CFGNode *target;
+	explicit SMBStateProxy(CFGNode *_target)
+		: target(_target)
+	{
+		assert(target);
+	}
+	void visit(HeapVisitor &hv)
+	{
+		hv(target);
+	}
+};
+
 static StateMachineState *
 getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		       std::vector<reloc_t> &pendingRelocs)
 {
 	assert(cfgnode->fallThrough.second);
 	assert(cfgnode->branches.empty());
+	threadAndRegister rax(threadAndRegister::reg(tid, OFFSET_amd64_RAX, 0));
+	threadAndRegister arg1(threadAndRegister::reg(tid, OFFSET_amd64_RDI, 0));
+	threadAndRegister arg2(threadAndRegister::reg(tid, OFFSET_amd64_RSI, 0));
+	const SMBState *end = new SMBStateProxy(cfgnode->fallThrough.second);;
+	const SMBState *acc;
 	switch (cfgnode->libraryFunction) {
 	case LibraryFunctionTemplate::__cxa_atexit: {
-		StateMachineSideEffecting *s =
-			new StateMachineSideEffecting(
-				cfgnode->my_rip,
-				new StateMachineSideEffectCopy(
-					threadAndRegister(threadAndRegister::reg(
-								  tid,
-								  OFFSET_amd64_RAX,
-								  0)),
-					IRExpr_Const(IRConst_U64(0))),
-				NULL);
-		pendingRelocs.push_back(reloc_t(&s->target, cfgnode->fallThrough.second));
-		return s;
+		acc = &( (*(new SMBRegisterReference(rax)) = *(new SMBExpression((uint64_t)0))) >> *end);
+		break;
+	}
+	case LibraryFunctionTemplate::bzero: {
+		int i, j;
+		acc = end;
+		const SMBExpression *zero_word = new SMBExpression((uint64_t)0);
+		const SMBExpression *arg1_expr = new SMBExpression(arg1);
+		const SMBExpression *arg2_expr = new SMBExpression(arg2);
+		for (j = 0; j < 64; j += 8) {
+			const SMBExpression *j_expr = new SMBExpression(j);
+			const SMBState *acc2 = new SMBStateProxy(cfgnode->fallThrough.second);
+			for (i = j - 8; i >= 0; i -= 8)
+				acc2 = &((*(*arg1_expr + *(new SMBExpression(i))) = *zero_word) >> *acc2);
+			acc = &If(j == 56 ? *j_expr <= *arg2_expr : *arg2_expr == *j_expr,
+				  *acc2,
+				  *acc);
+		}
+		break;
 	}
 	case LibraryFunctionTemplate::none:
 		abort();
 	}
-	abort();
+	return acc->compile(ThreadRip(tid, cfgnode->my_rip), pendingRelocs);
 }
 
 static StateMachineState *
