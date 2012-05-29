@@ -22,6 +22,7 @@ static struct stats {
 	unsigned dnf_resolved;
 	unsigned exhaustive_resolved;
 	unsigned failed;
+	unsigned timeout;
 	~stats() {
 		printf("Sat checker invoked %d times.  Results:\n", nr_invoked);
 #define do_field(name)							\
@@ -31,6 +32,7 @@ static struct stats {
 		do_field(cnf_resolved);
 		do_field(dnf_resolved);
 		do_field(exhaustive_resolved);
+		do_field(timeout);
 		do_field(failed);
 #undef do_field
 	}
@@ -835,7 +837,10 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 			return true;
 		}
 	} while (chooser.advance());
-	sat_checker_counters.exhaustive_resolved++;
+	if (TIMEOUT)
+		sat_checker_counters.timeout++;
+	else
+		sat_checker_counters.exhaustive_resolved++;
 	return true;
 }
 
