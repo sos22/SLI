@@ -1235,6 +1235,27 @@ static bool parseIRExprPhi(IRExpr **res, const char *str, const char **suffix)
     return true;
 }
 
+static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **suffix)
+{
+    MemoryAccessIdentifier ma(MemoryAccessIdentifier::uninitialised());
+    IRType ty;
+    bool isUnique;
+    if (!parseThisString("Free", str, &str) ||
+	!parseMemoryAccessIdentifier(&ma, str, &str) ||
+	!parseThisChar(':', str, &str) ||
+	!parseIRType(&ty, str, &str) ||
+	!parseThisChar(':', str, &str))
+	return false;
+    if (parseThisString("UNIQUE", str, suffix))
+	isUnique = true;
+    else if (parseThisString("NONUNIQUE", str, suffix))
+	isUnique = false;
+    else
+	return false;
+    *res = IRExpr_FreeVariable(ma, ty, isUnique);
+    return true;
+}
+
 bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 {
 #define do_form(name)					\
@@ -1255,6 +1276,7 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
   do_form(FailedCall);
   do_form(HappensBefore);
   do_form(Phi);
+  do_form(FreeVariable);
 #undef do_form
   return false;
 }
