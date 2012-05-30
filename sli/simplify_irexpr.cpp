@@ -2681,20 +2681,17 @@ QueryCache<IRExpr, IRExpr, bool> definitelyNotEqualCache("Definitely not equal")
 bool
 definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 {
+	if (a == b)
+		return true;
 	assert(a->type() == b->type());
 	int idx = definitelyEqualCache.hash(a, b);
 	bool res;
-	if (definitelyEqualCache.query(a, b, idx, &res)) {
-		assert(a != b || res == true);
+	if (definitelyEqualCache.query(a, b, idx, &res))
 		return res;
-	}
 	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
 	res = (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1);
-	if (!TIMEOUT) {
-#warning This assertion could turn into a simple optimisation
-		assert(a != b || res == true);
+	if (!TIMEOUT)
 		definitelyEqualCache.set(a, b, idx, res);
-	}
 	return res;
 }
 bool
