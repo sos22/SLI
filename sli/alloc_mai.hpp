@@ -5,7 +5,7 @@ class MemoryAccessIdentifierAllocator {
 	std::map<ThreadRip, unsigned> ids;
 public:
 	MemoryAccessIdentifier operator()(const ThreadRip &rip);
-	IRExpr *freeVariable(IRType ty, const ThreadRip &rip);
+	IRExpr *freeVariable(IRType ty, const ThreadRip &rip, bool isUnique);
 };
 
 #endif /* !ALLOC_MAI_HPP__ */

@@ -1813,19 +1813,22 @@ struct IRExprPhi : public IRExpr {
 struct IRExprFreeVariable : public IRExpr {
     MemoryAccessIdentifier id;
     IRType ty;
-    IRExprFreeVariable(const MemoryAccessIdentifier _id, IRType _ty)
-	: IRExpr(Iex_FreeVariable), id(_id), ty(_ty)
+    bool isUnique;
+    IRExprFreeVariable(const MemoryAccessIdentifier _id, IRType _ty, bool _isUnique)
+	: IRExpr(Iex_FreeVariable), id(_id), ty(_ty), isUnique(_isUnique)
     {}
     void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 1045239 * id.hash(); }
     void prettyPrint(FILE *f) const {
 	fprintf(f, "Free%s:", id.name());
 	ppIRType(ty, f);
+	fprintf(f, ":%s", isUnique ? "UNIQUE" : "NONUNIQUE");
     }
     IRType type() const { return ty; }
     void sanity_check() const {
 	id.sanity_check();
 	sanity_check_irtype(ty);
+	assert(isUnique == true || isUnique == false);
     }
 };
 
@@ -1859,8 +1862,8 @@ static inline IRExpr *IRExpr_Phi (const threadAndRegister &r,
 				  IRType ty) {
     return new IRExprPhi(r, generations, ty);
 }
-static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty) {
-    return new IRExprFreeVariable(id, ty);
+static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty, bool isUnique) {
+    return new IRExprFreeVariable(id, ty, isUnique);
 }
 
 /* Pretty-print an IRExpr. */

@@ -999,7 +999,7 @@ MemoryAccessIdentifierAllocator::operator()(const ThreadRip &rip)
 }
 
 IRExpr *
-MemoryAccessIdentifierAllocator::freeVariable(IRType ty, const ThreadRip &rip)
+MemoryAccessIdentifierAllocator::freeVariable(IRType ty, const ThreadRip &rip, bool isUnique)
 {
-	return IRExpr_FreeVariable((*this)(rip), ty);
+	return IRExpr_FreeVariable((*this)(rip), ty, isUnique);
 }

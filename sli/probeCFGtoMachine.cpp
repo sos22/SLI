@@ -147,10 +147,15 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 				 acc);
 		break;
 	}
+	case LibraryFunctionTemplate::malloc: {
+		acc = (!rax <<= smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->my_rip), true))) >>
+			(AssertFalse(smb_expr(IRExpr_Unop(Iop_BadPtr, IRExpr_Get(rax, Ity_I64)))) >> end);
+		break;
+	}
 	case LibraryFunctionTemplate::free: {
 		acc = end;
 		for (int i = 0; i < 8; i++) {
-			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->my_rip))));
+			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->my_rip), false)));
 			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
 				acc;
 		}
@@ -350,7 +355,7 @@ cfgNodeToState(Oracle *oracle,
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 				se = new StateMachineSideEffectCopy(
 					dirty->tmp,
-					mai.freeVariable(Ity_I64, tr));
+					mai.freeVariable(Ity_I64, tr, false));
 			} else {
 				abort();
 			}

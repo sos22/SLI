@@ -202,7 +202,7 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_FreeVariable: {
 		const IRExprFreeVariable *i = (const IRExprFreeVariable *)inp;
-		return new IRExprFreeVariable(i->id, i->ty);
+		return new IRExprFreeVariable(i->id, i->ty, i->isUnique);
 	}
 	}
 	abort();

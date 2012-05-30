@@ -8,6 +8,7 @@ namespace LibraryFunctionTemplate {
 	f(strlen)				\
 	f(memcpy)				\
 	f(memset)				\
+	f(malloc)				\
 	f(free)					\
 	f(pthread_mutex_lock)			\
 	f(pthread_mutex_unlock)
