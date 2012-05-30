@@ -74,6 +74,7 @@ SMBPtr<SMBExpression> operator&(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b
 SMBPtr<SMBExpression> operator|(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 SMBPtr<SMBExpression> operator<<(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 SMBPtr<SMBExpression> operator==(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
+SMBPtr<SMBExpression> operator!=(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 SMBPtr<SMBExpression> operator<=(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 
 /* --------------------------- Memory references ------------------------------------ */
@@ -126,6 +127,7 @@ operator!(const threadAndRegister &tr)
 }
 
 /* ------------------------------ Statements ------------------------------------- */
+/* These correspond to side effects in the state machines we generate */
 class SMBStatement : public GarbageCollected<SMBStatement, &ir_heap> {
 public:
 	virtual StateMachineSideEffect *compile(const ThreadRip &vr,
@@ -196,6 +198,50 @@ public:
 	{
 	}
 };
+class SMBStatementAssertFalse : public SMBStatement {
+	StateMachineSideEffect *compile(const ThreadRip &,
+					MemoryAccessIdentifierAllocator &) const {
+		return new StateMachineSideEffectAssertFalse(
+			expr.content->compile(),
+			realAssertion);
+	}
+public:
+	SMBPtr<SMBExpression> expr;
+	bool realAssertion;
+
+	void visit(HeapVisitor &hv) {
+		hv(expr.content);
+	}
+	explicit SMBStatementAssertFalse(SMBPtr<SMBExpression> _expr,
+					 bool _realAssertion)
+		: expr(_expr), realAssertion(_realAssertion)
+	{
+	}
+};
+class SMBStatementStartAtomic : public SMBStatement {
+	StateMachineSideEffect *compile(const ThreadRip &,
+					MemoryAccessIdentifierAllocator &) const {
+		return StateMachineSideEffectStartAtomic::get();
+	}
+public:
+	void visit(HeapVisitor &) {
+	}
+	explicit SMBStatementStartAtomic()
+	{
+	}
+};
+class SMBStatementEndAtomic : public SMBStatement {
+	StateMachineSideEffect *compile(const ThreadRip &,
+					MemoryAccessIdentifierAllocator &) const {
+		return StateMachineSideEffectEndAtomic::get();
+	}
+public:
+	void visit(HeapVisitor &) {
+	}
+	explicit SMBStatementEndAtomic()
+	{
+	}
+};
 
 /* Introductions */
 /* Assign a value to a register.  I'd like to use = for this, but C++
@@ -218,6 +264,22 @@ static inline SMBPtr<SMBStatement>
 Load(SMBPtr<SMBRegisterReference> target, SMBPtr<SMBMemoryReference> addr, IRType ty)
 {
 	return SMBPtr<SMBStatement>(new SMBStatementLoad(target, addr, ty));
+}
+/* Assert that x is false */
+static inline SMBPtr<SMBStatement>
+AssertFalse(SMBPtr<SMBExpression> expr, bool isRealAssertion = true)
+{
+	return SMBPtr<SMBStatement>(new SMBStatementAssertFalse(expr, isRealAssertion));
+}
+static inline SMBPtr<SMBStatement>
+StartAtomic()
+{
+	return SMBPtr<SMBStatement>(new SMBStatementStartAtomic());
+}
+static inline SMBPtr<SMBStatement>
+EndAtomic()
+{
+	return SMBPtr<SMBStatement>(new SMBStatementEndAtomic());
 }
 
 /* ------------------------------------ States ----------------------------------- */

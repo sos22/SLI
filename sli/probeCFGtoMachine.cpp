@@ -159,6 +159,28 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 			 acc);
 		break;
 	}
+	case LibraryFunctionTemplate::pthread_mutex_lock: {
+		threadAndRegister tmp1(threadAndRegister::temp(tid, 0, 0));
+		acc = StartAtomic() >>
+			(Load(!tmp1,
+			      *smb_reg(arg1, Ity_I64),
+			      Ity_I8) >>
+			 (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(0)) >>
+			  ((*smb_reg(arg1, Ity_I64) <<= smb_const8(1)) >>
+			   (EndAtomic() >> end))));
+		break;
+	}
+	case LibraryFunctionTemplate::pthread_mutex_unlock: {
+		threadAndRegister tmp1(threadAndRegister::temp(tid, 0, 0));
+		acc = StartAtomic() >>
+			(Load(!tmp1,
+			      *smb_reg(arg1, Ity_I64),
+			      Ity_I8) >>
+			 (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(1)) >>
+			  ((*smb_reg(arg1, Ity_I64) <<= smb_const8(0)) >>
+			   (EndAtomic() >> end))));
+		break;
+	}
 	case LibraryFunctionTemplate::none:
 		abort();
 	}

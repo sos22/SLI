@@ -8,7 +8,9 @@ namespace LibraryFunctionTemplate {
 	f(strlen)				\
 	f(memcpy)				\
 	f(memset)				\
-	f(free)
+	f(free)					\
+	f(pthread_mutex_lock)			\
+	f(pthread_mutex_unlock)
 
 	enum __type {
 		none = 0,

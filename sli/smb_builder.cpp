@@ -1,6 +1,7 @@
 #include "sli.h"
 #include "smb_builder.hpp"
 #include "state_machine.hpp"
+#include "simplify_irexpr.hpp"
 
 SMBPtr<SMBExpression>
 operator+(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
@@ -158,41 +159,20 @@ SMBPtr<SMBExpression>
 operator==(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 {
 	assert(a.content->what->type() == b.content->what->type());
-	IROp op;
-	switch (a.content->what->type()) {
-	case Ity_I1:
-		op = Iop_CmpEQ1;
-		break;
-	case Ity_I8:
-		op = Iop_CmpEQ8;
-		break;
-	case Ity_I16:
-		op = Iop_CmpEQ16;
-		break;
-	case Ity_I32:
-		op = Iop_CmpEQ32;
-		break;
-	case Ity_I64:
-		op = Iop_CmpEQ64;
-		break;
-	case Ity_I128:
-		op = Iop_CmpEQI128;
-		break;
-	case Ity_V128:
-		op = Iop_CmpEQV128;
-		break;
-	case Ity_F32:
-		op = Iop_CmpEQF32;
-		break;
-	case Ity_F64:
-		op = Iop_CmpEQF64;
-		break;
-	case Ity_INVALID:
-		abort();
-	}
 	return SMBPtr<SMBExpression>(
-		new SMBExpression(IRExpr_Binop(op, (IRExpr *)a.content->what,
-					       (IRExpr *)b.content->what)));
+		new SMBExpression(expr_eq((IRExpr *)a.content->what,
+					  (IRExpr *)b.content->what)));
+}
+
+SMBPtr<SMBExpression>
+operator!=(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
+{
+	return SMBPtr<SMBExpression>(
+		new SMBExpression(
+			IRExpr_Unop(
+				Iop_Not1,
+				expr_eq((IRExpr *)a.content->what,
+					(IRExpr *)b.content->what))));
 }
 
 SMBPtr<SMBExpression>
