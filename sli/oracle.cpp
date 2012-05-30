@@ -1074,7 +1074,12 @@ irexprAliasingClass(IRExpr *expr,
 			return Oracle::PointerAliasingSet::notAPointer |
 				Oracle::PointerAliasingSet::nonStackPointer;
 	}
-						
+
+	case Iex_Load:
+		/* We don't track aliasing information for memory, so
+		   this could be anything. */
+		return Oracle::PointerAliasingSet::anything;
+
 	default:
 		break;
 	}
