@@ -62,6 +62,12 @@ smb_reg(const threadAndRegister &tr, IRType ty)
 {
 	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Get(tr, ty)));
 }
+static inline SMBPtr<SMBExpression>
+smb_expr(const IRExpr *a)
+{
+	return SMBPtr<SMBExpression>(new SMBExpression(a));
+}
+
 /* Builders */
 SMBPtr<SMBExpression> operator+(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 SMBPtr<SMBExpression> operator&(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);

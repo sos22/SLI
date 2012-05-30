@@ -7,7 +7,8 @@ namespace LibraryFunctionTemplate {
 	f(bzero)				\
 	f(strlen)				\
 	f(memcpy)				\
-	f(memset)
+	f(memset)				\
+	f(free)
 
 	enum __type {
 		none = 0,

@@ -147,6 +147,18 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 				 acc);
 		break;
 	}
+	case LibraryFunctionTemplate::free: {
+		acc = end;
+		for (int i = 0; i < 8; i++) {
+			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->my_rip))));
+			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
+				acc;
+		}
+		acc = If(smb_reg(arg1, Ity_I64) == smb_const64(0),
+			 end,
+			 acc);
+		break;
+	}
 	case LibraryFunctionTemplate::none:
 		abort();
 	}
