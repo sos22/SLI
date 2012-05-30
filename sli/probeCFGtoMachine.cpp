@@ -56,7 +56,8 @@ getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 
 static StateMachineState *
 getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
-		       std::vector<reloc_t> &pendingRelocs)
+		       std::vector<reloc_t> &pendingRelocs,
+		       MemoryAccessIdentifierAllocator &mai)
 {
 	assert(cfgnode->fallThrough.second);
 	assert(cfgnode->branches.empty());
@@ -156,7 +157,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		printf(")\n");
 		abort();
 	}
-	return acc.content->compile(ThreadRip(tid, cfgnode->my_rip), pendingRelocs);
+	return acc.content->compile(ThreadRip(tid, cfgnode->my_rip), pendingRelocs, mai);
 }
 
 static StateMachineState *
@@ -170,7 +171,7 @@ cfgNodeToState(Oracle *oracle,
 	ThreadRip tr(tid, target->my_rip);
 
 	if (target->libraryFunction)
-		return getLibraryStateMachine(target, tid, pendingRelocs);
+		return getLibraryStateMachine(target, tid, pendingRelocs, mai);
 
 	IRSB *irsb;
 	try {

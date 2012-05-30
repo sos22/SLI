@@ -230,18 +230,20 @@ StateMachineState *
 SMBState::compile(const ThreadRip &tr,
 		  std::map<const SMBState *, StateMachineState *> &m,
 		  std::vector<reloc_t> &relocs,
-		  std::vector<reloc2> &relocs2) const
+		  std::vector<reloc2> &relocs2,
+		  MemoryAccessIdentifierAllocator &mai) const
 {
 	auto it_did_insert = m.insert(std::pair<const SMBState *, StateMachineState *>(this, (StateMachineState *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
-		it->second = _compile(tr, relocs, relocs2);
+		it->second = _compile(tr, relocs, relocs2, mai);
 	return it->second;
 }
 
 StateMachineState *
-SMBState::compile(const ThreadRip &vr, std::vector<reloc_t> &relocs) const
+SMBState::compile(const ThreadRip &vr, std::vector<reloc_t> &relocs,
+		  MemoryAccessIdentifierAllocator &mai) const
 {
 	std::map<const SMBState *, StateMachineState *> m;
 	std::vector<reloc2> relocs2;
@@ -252,7 +254,7 @@ SMBState::compile(const ThreadRip &vr, std::vector<reloc_t> &relocs) const
 		reloc2 r2(relocs2.back());
 		relocs2.pop_back();
 		assert(!*r2.t);
-		*r2.t = r2.target->compile(vr, m, relocs, relocs2);
+		*r2.t = r2.target->compile(vr, m, relocs, relocs2, mai);
 		assert(*r2.t);
 	}
 	assert(res);
