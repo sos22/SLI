@@ -20,6 +20,9 @@ static bool debug_dump_crash_reasons = false;
 #endif
 
 /* All of the state needed to evaluate a single pure IRExpr. */
+/* Note that this is not GCed, but contains bare pointers to GCed
+   objects, so needs to be manually visited if live across GC
+   points. */
 class threadState {
 	/* This is a little bit tricky, because we need to support
 	   sub-word writes to registers, but in the vast majority of
@@ -60,6 +63,12 @@ class threadState {
 		register_val()
 			: val8(NULL), val16(NULL), val32(NULL), val64(NULL)
 		{}
+		void visit(HeapVisitor &hv) {
+			hv(val8);
+			hv(val16);
+			hv(val32);
+			hv(val64);
+		}
 	};
 
 	/* The values of all of the registers */
@@ -325,6 +334,14 @@ public:
 			*assumption = setTemporary(phi->reg, *assumption, opt);
 		bump_register_in_assignment_order(phi->reg);
 	}
+
+	void visit(HeapVisitor &hv) {
+		for (auto it = registers.begin();
+		     it != registers.end();
+		     it++) {
+			it->second.visit(hv);
+		}
+	}
 };
 
 /* Rewrite @e now that we know the value of @reg */
@@ -347,7 +364,16 @@ threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const Allowab
 	return simplifyIRExpr(doit.doit(e), opt);
 }
 
-typedef std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > memLogT;
+class memLogT : public std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > {
+public:
+	void visit(HeapVisitor &hv) {
+		for (auto it = begin(); it != end(); it++) {
+			hv(it->first);
+			hv(it->second);
+		}
+	}
+};
+
 class StateMachineEvalContext {
 public:
 	StateMachineEvalContext()
@@ -871,19 +897,43 @@ struct EvalPathConsumer {
 	{}
 };
 
-/* Note that this is stack-allocated but live across GCes! */
-class EvalContext {
+class EvalContext : public GcCallback<&ir_heap> {
 	enum trool { tr_true, tr_false, tr_unknown };
+	IRExpr *assumption;
+	IRExpr *accumulatedAssumption;
+	threadState state;
+	memLogT memlog;
+	bool atomic;
+public:
+	StateMachineState *currentState;
+private:
+#ifndef NDEBUG
+	std::vector<int> statePath;
+	std::map<const StateMachineState *, int> stateLabels;
+#endif
+
+	void runGc(HeapVisitor &hv) {
+		hv(assumption);
+		hv(accumulatedAssumption);
+		state.visit(hv);
+		memlog.visit(hv);
+		hv(currentState);
+#ifndef NDEBUG
+		std::vector<std::pair<const StateMachineState *, int> > vectStateLabels(stateLabels.begin(), stateLabels.end());
+		for (auto it = vectStateLabels.begin();
+		     it != vectStateLabels.end();
+		     it++)
+			hv(it->first);
+		stateLabels.clear();
+		stateLabels.insert(vectStateLabels.begin(), vectStateLabels.end());
+#endif
+	}
+
 	trool evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt);
 	bool evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &consumer,
 			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt) __attribute__((warn_unused_result));
 
-	VexPtr<IRExpr, &ir_heap> assumption;
-	VexPtr<IRExpr, &ir_heap> accumulatedAssumption;
-	threadState state;
-	memLogT memlog;
-	bool atomic;
 
 	void advance_state_trace()
 	{
@@ -949,13 +999,6 @@ class EvalContext {
 		advance_state_trace();
 	}
 public:
-	VexPtr<StateMachineState, &ir_heap> currentState;
-#ifndef NDEBUG
-private:
-	std::vector<int> statePath;
-	std::map<const StateMachineState *, int> stateLabels;
-public:
-#endif
 	bool advance(Oracle *oracle, const AllowableOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
@@ -1129,7 +1172,7 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 	case StateMachineState::Unreached:
 		return consumer.badMachine();
 	case StateMachineState::SideEffecting: {
-		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState.get();
+		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
 		if (sme->sideEffect &&
 		    !evalSideEffect(sm, oracle, consumer, pendingStates,
@@ -1139,7 +1182,7 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 		return true;
 	}
 	case StateMachineState::Bifurcate: {
-		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState.get();
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
 		IRExpr *cond =
 			simplifyIRExpr(
 				internIRExpr(
@@ -1210,7 +1253,7 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 		return true;
 	}
 	case StateMachineState::NdChoice: {
-		StateMachineNdChoice *smnd = (StateMachineNdChoice *)currentState.get();
+		StateMachineNdChoice *smnd = (StateMachineNdChoice *)currentState;
 		if (smnd->successors.size() == 0) {
 			return consumer.badMachine();
 		} else {
