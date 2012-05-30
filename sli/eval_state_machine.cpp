@@ -1644,32 +1644,62 @@ struct crossStateT {
 };
 
 static bool
-definitelyDoesntRace(StateMachineSideEffectMemoryAccess *probeEffect,
-		     StateMachineState *machine,
+definitelyDoesntRace(StateMachineSideEffect *probeEffect,
+		     StateMachineState *storeMachine,
 		     const AllowableOptimisations &opt,
+		     bool allowStoreLoadRaces,
 		     Oracle *oracle,
 		     std::set<StateMachineState *> &memo)
 {
-	if (!memo.insert(machine).second)
+	if (!memo.insert(storeMachine).second)
 		return true;
-	StateMachineSideEffect *otherEffect = machine->getSideEffect();
-	if (otherEffect && otherEffect->type == StateMachineSideEffect::Store) {
-		StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)otherEffect;
-		if (probeEffect->type == StateMachineSideEffect::Load ?
-		    oracle->memoryAccessesMightAlias(
-			    opt,
-			    (StateMachineSideEffectLoad *)probeEffect,
-			    s) :
-		    oracle->memoryAccessesMightAlias(
-			    opt,
-			    (StateMachineSideEffectStore *)probeEffect,
-			    s))
-			return false;
+	StateMachineSideEffect *otherEffect = storeMachine->getSideEffect();
+	if (otherEffect) {
+		switch (probeEffect->type) {
+		case StateMachineSideEffect::StartAtomic:
+			if (otherEffect->type == StateMachineSideEffect::StartAtomic)
+				return false;
+			break;
+		case StateMachineSideEffect::Load:
+			if (otherEffect->type == StateMachineSideEffect::Store &&
+			    oracle->memoryAccessesMightAlias(
+				    opt,
+				    (StateMachineSideEffectLoad *)probeEffect,
+				    (StateMachineSideEffectStore *)otherEffect))
+				return false;
+			break;
+		case StateMachineSideEffect::Store:
+			if (otherEffect->type == StateMachineSideEffect::Load &&
+			    allowStoreLoadRaces) {
+				if (oracle->memoryAccessesMightAlias(
+					    opt,
+					    (StateMachineSideEffectLoad *)otherEffect,
+					    (StateMachineSideEffectStore *)probeEffect))
+					return false;
+			} else if (otherEffect->type == StateMachineSideEffect::Store) {
+				if (oracle->memoryAccessesMightAlias(
+					    opt,
+					    (StateMachineSideEffectStore *)otherEffect,
+					    (StateMachineSideEffectStore *)probeEffect))
+					return false;
+			}
+			break;
+
+			/* Purely local side-effects never race.
+			   These should arguably be filtered out
+			   before we get here; nevermind. */
+		case StateMachineSideEffect::AssertFalse:
+		case StateMachineSideEffect::EndAtomic:
+		case StateMachineSideEffect::Copy:
+		case StateMachineSideEffect::Phi:
+		case StateMachineSideEffect::Unreached:
+			return true;
+		}
 	}
 	std::vector<StateMachineState *> targets;
-	machine->targets(targets);
+	storeMachine->targets(targets);
 	for (auto it = targets.begin(); it != targets.end(); it++)
-		if (!definitelyDoesntRace(probeEffect, *it, opt, oracle, memo))
+		if (!definitelyDoesntRace(probeEffect, *it, opt, allowStoreLoadRaces, oracle, memo))
 			return false;
 	return true;
 }
@@ -1677,11 +1707,18 @@ definitelyDoesntRace(StateMachineSideEffectMemoryAccess *probeEffect,
 /* Returns true if there are any stores in @machine which might
    conceivably race with @probeEffect. */
 static bool
-definitelyDoesntRace(StateMachineSideEffectMemoryAccess *probeEffect, StateMachineState *machine,
-		     const AllowableOptimisations &opt, Oracle *oracle)
+probeDefinitelyDoesntRace(StateMachineSideEffect *probeEffect, StateMachineState *storeMachine,
+			  const AllowableOptimisations &opt, Oracle *oracle)
 {
 	std::set<StateMachineState *> memo;
-	return definitelyDoesntRace(probeEffect, machine, opt, oracle, memo);
+	return definitelyDoesntRace(probeEffect, storeMachine, opt, false, oracle, memo);
+}
+static bool
+storeDefinitelyDoesntRace(StateMachineSideEffect *storeEffect, StateMachineState *probeMachine,
+			  const AllowableOptimisations &opt, Oracle *oracle)
+{
+	std::set<StateMachineState *> memo;
+	return definitelyDoesntRace(storeEffect, probeMachine, opt, true, oracle, memo);
 }
 
 static StateMachine *
@@ -1789,10 +1826,8 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 		} else {
 			/* Neither machine is in an atomic block, need
 			 * to race them. */
-			StateMachineSideEffectMemoryAccess *probe_effect =
-				dynamic_cast<StateMachineSideEffectMemoryAccess *>(crossState.p->getSideEffect());
-			StateMachineSideEffectStore *store_effect =
-				dynamic_cast<StateMachineSideEffectStore *>(crossState.s->getSideEffect());
+			StateMachineSideEffect *probe_effect = crossState.p->getSideEffect();
+			StateMachineSideEffect *store_effect = crossState.s->getSideEffect();
 
 			if (crossState.p->isTerminal()) {
 				/* The probe machine has reached its
@@ -1827,49 +1862,52 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 				else
 					newState = StateMachineUnreached::get();
 			} else if (!probe_effect ||
-				   definitelyDoesntRace(probe_effect, crossState.s, opt, oracle)) {
+				   probeDefinitelyDoesntRace(probe_effect, crossState.s, opt, oracle)) {
 				/* If the probe effect definitely
 				   cannot race with anything left in
 				   the store machine then we should
 				   issue it unconditionally. */
 				newState = advanceProbeMachine(crossState, pendingRelocs, false);
-			} else if (!store_effect) {
+			} else if (!store_effect ||
+				   storeDefinitelyDoesntRace(store_effect, crossState.p, opt, oracle)) {
 				/* Likewise, if a store effect isn't a
 				 * memory access then it's definitely
 				 * not going to race, so we can issue
 				 * it unconditionally. */
 				newState = advanceStoreMachine(crossState, pendingRelocs);
 			} else {
-				/* Both machines want to issue memory
-				   accesses, and there's some
+				StateMachineSideEffectMemoryAccess *probe_access =
+					dynamic_cast<StateMachineSideEffectMemoryAccess *>(probe_effect);
+				StateMachineSideEffectMemoryAccess *store_access =
+					dynamic_cast<StateMachineSideEffectMemoryAccess *>(store_effect);
+				/* Both machines want to issue side
+				   effects, and there's some
 				   possibility of an interesting race.
 				   Pick a non-deterministic
 				   interleaving. */
 				std::vector<StateMachineState *> possible;
-
-				/* There are three interesting possibilities here:
-				   
-				   -- The two addresses don't alias at all.
-				   -- The two addresses do match, and the
-				      probe machine goes first.
-				   -- The two addresses do match, and the
-				      store machine goes first.
-				   
-				   In the first case, it really
-				   doesn't matter which order we issue
-				   the operations in, so we
-				   arbitrarily decide that the probe
-				   machine goes first.  That means we
-				   can treat that case as basically
-				   the same as the second one, and
-				   it's given the same state.  In the
-				   final case we assert that the
-				   addresses do match and then advance
-				   the store machine. */
+				/* First possibility: let the probe
+				 * machine go first */
 				possible.push_back(advanceProbeMachine(crossState, pendingRelocs, true));
+				/* Second possibility: let the store
+				   machine go first. */
 				StateMachineState *s = advanceStoreMachine(crossState, pendingRelocs);
-				possible.push_back(
-					new StateMachineSideEffecting(
+				if (probe_access && store_access) {
+					/* If we're racing memory
+					   accesses against each
+					   other, then when the two
+					   addresses are different
+					   then it doesn't matter
+					   which we decide to issue
+					   first.  We therefore only
+					   need to consider issuing
+					   the store first when they
+					   do match.  Equivalent, we
+					   can have the
+					   store-goes-first case
+					   assert that they're equal,
+					   and that's what we do. */
+					s = new StateMachineSideEffecting(
 						s->origin,
 						new StateMachineSideEffectAssertFalse(
 							IRExpr_Unop(
@@ -1877,10 +1915,19 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 									     so need to invert the condition. */
 								IRExpr_Binop(
 									Iop_CmpEQ64,
-									probe_effect->addr,
-									store_effect->addr)),
+									probe_access->addr,
+									store_access->addr)),
 							false),
-						s));
+						s);
+				} else {
+					/* Other case is that we race
+					   a START_ATOMIC against
+					   something, for which
+					   there's nothing to assert,
+					   which makes things a bit
+					   easier. */
+				}
+				possible.push_back(s);
 				newState = new StateMachineNdChoice(VexRip(), possible);
 			}
 		}
