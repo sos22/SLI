@@ -257,6 +257,10 @@ instrument_func(unsigned tid,
 			o->guard = log_reads_expr(tid, sb_out, o->guard);
 			break;
 		}
+		case Ist_StartAtomic:
+			break;
+		case Ist_EndAtomic:
+			break;
 		}
 		addStmtToIRSB(sb_out, out_stmt);
 	}

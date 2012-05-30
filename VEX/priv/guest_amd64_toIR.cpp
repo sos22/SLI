@@ -2790,36 +2790,18 @@ ULong dis_op2_G_E ( unsigned tid,
       assign(src,  getIRegG( size,pfx,rm));
 
       if (addSubCarry && op8 == Iop_Add8) {
-         if (pfx & PFX_LOCK) {
-            /* cas-style store */
-            helper_ADC(tid,  size, dst1, dst0, src,
-                        /*store*/addr, dst0/*expVal*/, guest_RIP_curr_instr );
-         } else {
-            /* normal store */
-            helper_ADC(tid,  size, dst1, dst0, src,
-		       /*store*/addr, IRTemp_INVALID, ThreadRip() );
-         }
+         /* normal store */
+         helper_ADC(tid,  size, dst1, dst0, src,
+	            /*store*/addr, IRTemp_INVALID, ThreadRip() );
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
-         if (pfx & PFX_LOCK) {
-            /* cas-style store */
-            helper_SBB(tid,  size, dst1, dst0, src,
-                        /*store*/addr, dst0/*expVal*/, guest_RIP_curr_instr );
-         } else {
-            /* normal store */
-            helper_SBB(tid,  size, dst1, dst0, src,
-		       /*store*/addr, IRTemp_INVALID, ThreadRip() );
-         }
+         /* normal store */
+         helper_SBB(tid,  size, dst1, dst0, src,
+		    /*store*/addr, IRTemp_INVALID, ThreadRip() );
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (keep) {
-            if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid, Ity_I64),
-                      mkexpr(dst0, tid, ty)/*expval*/, 
-                      mkexpr(dst1, tid, ty)/*newval*/, guest_RIP_curr_instr, tid );
-            } else {
-               storeLE(mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty));
-            }
+	   storeLE(mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty));
          }
          if (isAddSub(op8))
             setFlags_DEP1_DEP2(tid, op8, dst0, src, ty);
@@ -3152,37 +3134,18 @@ ULong dis_Grp1 ( unsigned tid,
       assign(src, mkU(ty,d64 & mask));
 
       if (gregLO3ofRM(modrm) == 2 /* ADC */) {
-         if (pfx & PFX_LOCK) {
-            /* cas-style store */
-            helper_ADC(tid,  sz, dst1, dst0, src,
-                       /*store*/addr, dst0/*expVal*/, guest_RIP_curr_instr );
-         } else {
-            /* normal store */
-            helper_ADC(tid,  sz, dst1, dst0, src,
-                        /*store*/addr, IRTemp_INVALID, ThreadRip() );
-         }
+	/* normal store */
+	helper_ADC(tid,  sz, dst1, dst0, src,
+		   /*store*/addr, IRTemp_INVALID, ThreadRip() );
       } else 
       if (gregLO3ofRM(modrm) == 3 /* SBB */) {
-         if (pfx & PFX_LOCK) {
-            /* cas-style store */
-            helper_SBB(tid,  sz, dst1, dst0, src,
-                       /*store*/addr, dst0/*expVal*/, guest_RIP_curr_instr );
-         } else {
-            /* normal store */
-            helper_SBB(tid,  sz, dst1, dst0, src,
-                        /*store*/addr, IRTemp_INVALID, ThreadRip() );
-         }
+	 /* normal store */
+	 helper_SBB(tid,  sz, dst1, dst0, src,
+		    /*store*/addr, IRTemp_INVALID, ThreadRip() );
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (gregLO3ofRM(modrm) < 7) {
-            if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(dst0, tid, ty)/*expVal*/, 
-                                    mkexpr(dst1, tid, ty)/*newVal*/,
-		      guest_RIP_curr_instr,
-		      tid );
-            } else {
-               storeLE(mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty));
-            }
+	    storeLE(mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty));
          }
          if (isAddSub(op8))
             setFlags_DEP1_DEP2(tid, op8, dst0, src, ty);
@@ -3577,15 +3540,7 @@ ULong dis_Grp8_Imm ( unsigned tid,
       if (epartIsReg(modrm)) {
 	  putIRegE(sz, pfx, modrm, narrowTo(ty, mkexpr(t2m, tid, Ity_I64)));
       } else {
-         if (pfx & PFX_LOCK) {
-            casLE( mkexpr(t_addr, tid, Ity_I64),
-                   narrowTo(ty, mkexpr(t2, tid, Ity_I64))/*expd*/,
-                   narrowTo(ty, mkexpr(t2m, tid, Ity_I64))/*new*/,
-                   guest_RIP_curr_instr,
-		   tid );
-         } else {
-	     storeLE(mkexpr(t_addr, tid, Ity_I64), narrowTo(ty, mkexpr(t2m, tid, Ity_I64)));
-         }
+	 storeLE(mkexpr(t_addr, tid, Ity_I64), narrowTo(ty, mkexpr(t2m, tid, Ity_I64)));
       }
    }
 
@@ -3802,12 +3757,7 @@ ULong dis_Grp3 ( unsigned tid,
          case 2: /* NOT */
             dst1 = newTemp();
             assign(dst1, unop(mkSizedOp(ty,Iop_Not8), mkexpr(t1, tid, ty)));
-            if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(t1, tid, ty)/*expd*/, mkexpr(dst1, tid, ty)/*new*/,
-		      guest_RIP_curr_instr, tid );
-            } else {
-               storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty) );
-            }
+	    storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty) );
             DIP("not%c %s\n", nameISize(sz), dis_buf);
             break;
          case 3: /* NEG */
@@ -3818,12 +3768,7 @@ ULong dis_Grp3 ( unsigned tid,
             assign(src,  mkexpr(t1, tid, ty));
             assign(dst1, binop(mkSizedOp(ty,Iop_Sub8), mkexpr(dst0, tid, ty),
                                                        mkexpr(src, tid, ty)));
-            if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(t1, tid, ty)/*expd*/, mkexpr(dst1, tid, ty)/*new*/,
-		      guest_RIP_curr_instr, tid );
-            } else {
-               storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty) );
-            }
+	    storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty) );
             setFlags_DEP1_DEP2(tid, Iop_Sub8, dst0, src, ty);
             DIP("neg%c %s\n", nameISize(sz), dis_buf);
             break;
@@ -3891,22 +3836,12 @@ ULong dis_Grp4 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
       switch (gregLO3ofRM(modrm)) {
          case 0: /* INC */
             assign(t2, binop(Iop_Add8, mkexpr(t1, tid, ty), mkU8(1)));
-            if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(t1, tid, ty)/*expd*/, mkexpr(t2, tid, ty)/*new*/, 
-                      guest_RIP_curr_instr, tid );
-            } else {
-               storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(t2, tid, ty) );
-            }
+	    storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(t2, tid, ty) );
             setFlags_INC_DEC(tid,  True, t2, ty );
             break;
          case 1: /* DEC */
             assign(t2, binop(Iop_Sub8, mkexpr(t1, tid, ty), mkU8(1)));
-            if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid, Ity_I64), mkexpr(t1, tid, ty)/*expd*/, mkexpr(t2, tid, ty)/*new*/, 
-                      guest_RIP_curr_instr, tid );
-            } else {
-               storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(t2, tid, ty) );
-            }
+	    storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(t2, tid, ty) );
             setFlags_INC_DEC(tid,  False, t2, ty );
             break;
          default: 
@@ -4000,26 +3935,14 @@ ULong dis_Grp5 ( unsigned tid, GuestMemoryFetcher &guest_code, VexAbiInfo* vbi,
             t2 = newTemp();
             assign(t2, binop(mkSizedOp(ty,Iop_Add8),
                              mkexpr(t1, tid, ty), mkU(ty,1)));
-            if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid, Ity_I64),
-                      mkexpr(t1, tid, ty), mkexpr(t2, tid, ty), guest_RIP_curr_instr,
-		      tid );
-            } else {
-               storeLE(mkexpr(addr, tid, Ity_I64),mkexpr(t2, tid, ty));
-            }
+	    storeLE(mkexpr(addr, tid, Ity_I64),mkexpr(t2, tid, ty));
             setFlags_INC_DEC(tid,  True, t2, ty );
             break;
          case 1: /* DEC */ 
             t2 = newTemp();
             assign(t2, binop(mkSizedOp(ty,Iop_Sub8),
                              mkexpr(t1, tid, ty), mkU(ty,1)));
-            if (pfx & PFX_LOCK) {
-               casLE( mkexpr(addr, tid, Ity_I64),
-                      mkexpr(t1, tid, ty), mkexpr(t2, tid, ty), guest_RIP_curr_instr,
-		      tid );
-            } else {
-               storeLE(mkexpr(addr, tid, Ity_I64),mkexpr(t2, tid, ty));
-            }
+	    storeLE(mkexpr(addr, tid, Ity_I64),mkexpr(t2, tid, ty));
             setFlags_INC_DEC(tid,  False, t2, ty );
             break;
          case 2: /* call Ev */
@@ -7308,14 +7231,7 @@ ULong dis_bt_G_E ( unsigned tid,
          default: 
             vpanic("dis_bt_G_E(amd64)");
       }
-      if ((pfx & PFX_LOCK) && !epartIsReg(modrm)) {
-         casLE( mkexpr(t_addr1, tid, Ity_I64), mkexpr(t_fetched, tid, Ity_I8)/*expd*/,
-                                 mkexpr(t_new, tid, Ity_I8)/*new*/,
-		guest_RIP_curr_instr,
-		tid );
-      } else {
-         storeLE( mkexpr(t_addr1, tid, Ity_I64), mkexpr(t_new, tid, Ity_I8) );
-      }
+      storeLE( mkexpr(t_addr1, tid, Ity_I64), mkexpr(t_new, tid, Ity_I8) );
    }
   
    /* Side effect done; now get selected bit into Carry flag */
@@ -7588,7 +7504,7 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
       *ok = False;
       return delta0;
    } 
-   else if (!epartIsReg(rm) && !(pfx & PFX_LOCK)) {
+   else if (!epartIsReg(rm)) {
       /* case 2 */
       addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign( dest, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
@@ -7600,26 +7516,6 @@ ULong dis_cmpxchg_G_E ( unsigned tid,
       assign( acc2,  IRExpr_Mux0X(cond, mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
       putIRegRAX(size, mkexpr(acc2, tid, ty));
       storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(dest2, tid, ty) );
-      DIP("cmpxchg%c %s,%s\n", nameISize(size), 
-                               nameIRegG(size,pfx,rm), dis_buf);
-   }
-   else if (!epartIsReg(rm) && (pfx & PFX_LOCK)) {
-      /* case 3 */
-      /* src is new value.  acc is expected value.  dest is old value.
-         Compute success from the output of the IRCAS, and steer the
-         new value for RAX accordingly: in case of success, RAX is
-         unchanged. */
-      addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
-      delta0 += len;
-      assign( src, getIRegG( size, pfx, rm) );
-      assign( acc, getIRegRAX(tid, size) );
-      stmt( IRStmt_CAS( 
-	    mkIRCAS( threadAndRegister::invalid(), threadAndRegister::temp(tid, dest, 0),
-		     mkexpr(addr, tid, Ity_I64), NULL, mkexpr(acc, tid, ty), NULL, mkexpr(src, tid, ty) )
-      ));
-      setFlags_DEP1_DEP2(tid, Iop_Sub8, acc, dest, ty);
-      assign( acc2,  IRExpr_Mux0X(cond, mkexpr(dest, tid, ty), mkexpr(acc, tid, ty)) );
-      putIRegRAX(size, mkexpr(acc2, tid, ty));
       DIP("cmpxchg%c %s,%s\n", nameISize(size), 
                                nameIRegG(size,pfx,rm), dis_buf);
    }
@@ -7731,7 +7627,7 @@ ULong dis_xadd_G_E ( unsigned tid,
       return delta0;
       /* Currently we don't handle xadd_G_E with register operand. */
    }
-   else if (!epartIsReg(rm) && !(pfx & PFX_LOCK)) {
+   else if (!epartIsReg(rm)) {
       /* case 2 */
       IRTemp addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
       assign( tmpd,  loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
@@ -7746,23 +7642,7 @@ ULong dis_xadd_G_E ( unsigned tid,
       *decode_ok = True;
       return len+delta0;
    }
-   else if (!epartIsReg(rm) && (pfx & PFX_LOCK)) {
-      /* case 3 */
-      IRTemp addr = disAMode ( tid, guest_code, &len, vbi, pfx, delta0, dis_buf, 0 );
-      assign( tmpd,  loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
-      assign( tmpt0, getIRegG( sz, pfx, rm) );
-      assign( tmpt1, binop(mkSizedOp(ty,Iop_Add8), 
-                           mkexpr(tmpd, tid, ty), mkexpr(tmpt0, tid, ty)) );
-      casLE( mkexpr(addr, tid, Ity_I64), mkexpr(tmpd, tid, ty)/*expVal*/,
-	     mkexpr(tmpt1, tid, ty)/*newVal*/, guest_RIP_curr_instr,
-	     tid );
-      setFlags_DEP1_DEP2(tid,  Iop_Add8, tmpd, tmpt0, ty );
-      putIRegG(sz, pfx, rm, mkexpr(tmpd, tid, ty));
-      DIP("xadd%c %s, %s\n",
-          nameISize(sz), nameIRegG(sz,pfx,rm), dis_buf);
-      *decode_ok = True;
-      return len+delta0;
-   }
+
    /*UNREACHED*/
    vassert(0);
    return 0; /* shut compiler up */
@@ -8839,7 +8719,6 @@ static
 DisResult disInstr_AMD64_WRK ( 
 			      unsigned tid,
     GuestMemoryFetcher &guest_code, 
-             /*OUT*/Bool* expect_CAS,
              Bool         put_IP,
              Bool         (*resteerOkFn) ( /*opaque*/void*, Addr64 ),
              void*        callback_opaque,
@@ -8875,8 +8754,6 @@ DisResult disInstr_AMD64_WRK (
    /* Set result defaults. */
    dres.whatNext   = DisResult::Dis_Continue;
    dres.len        = 0;
-
-   *expect_CAS = False;
 
    vassert(guest_RIP_next_mustcheck == False);
 
@@ -8954,7 +8831,7 @@ DisResult disInstr_AMD64_WRK (
          case 0x67: pfx |= PFX_ASO; break;
          case 0xF2: pfx |= PFX_F2; break;
          case 0xF3: pfx |= PFX_F3; break;
-         case 0xF0: pfx |= PFX_LOCK; *expect_CAS = True; break;
+         case 0xF0: pfx |= PFX_LOCK; break;
          case 0x2E: pfx |= PFX_CS; break;
          case 0x3E: pfx |= PFX_DS; break;
          case 0x26: pfx |= PFX_ES; break;
@@ -9016,7 +8893,6 @@ DisResult disInstr_AMD64_WRK (
       if (can_be_used_with_LOCK_prefix( guest_code, delta)) {
          DIP("lock ");
       } else {
-         *expect_CAS = False;
          goto decode_failure;
       }
    }
@@ -13698,6 +13574,9 @@ DisResult disInstr_AMD64_WRK (
    /* We get here if the current insn isn't SSE, or this CPU doesn't
       support SSE. */
 
+   if (pfx & PFX_LOCK)
+      stmt(IRStmt_StartAtomic());
+
    switch (opc) {
 
    /* ------------------------ Control flow --------------- */
@@ -15060,7 +14939,6 @@ DisResult disInstr_AMD64_WRK (
              nameISize(sz), nameIRegG(sz, pfx, modrm), 
                             nameIRegE(sz, pfx, modrm));
       } else {
-         *expect_CAS = True;
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          assign( t1, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          assign( t2, getIRegG( sz, pfx, modrm) );
@@ -15575,7 +15453,6 @@ DisResult disInstr_AMD64_WRK (
             prefix.  Life is too short to bother with generating two
             different translations for the with/without-LOCK-prefix
             cases. */
-         *expect_CAS = True;
 
 	 /* Decode, and generate address. */
          if (have66orF2orF3(pfx)) goto decode_failure;
@@ -16109,17 +15986,14 @@ DisResult disInstr_AMD64_WRK (
    jmp_lit(Ijk_NoDecode, guest_RIP_curr_instr);
    dres.whatNext = DisResult::Dis_StopHere;
    dres.len      = 0;
-   /* We also need to say that a CAS is not expected now, regardless
-      of what it might have been set to at the start of the function,
-      since the IR that we've emitted just above (to synthesis a
-      SIGILL) does not involve any CAS, and presumably no other IR has
-      been emitted for this (non-decoded) insn. */
-   *expect_CAS = False;
    return dres;
 
    } /* switch (opc) for the main (primary) opcode switch. */
 
   decode_success:
+   if (pfx & PFX_LOCK)
+      stmt(IRStmt_EndAtomic());
+
    /* All decode successes end up here. */
    DIP("\n");
    dres.len = (Int)toUInt(delta - delta_start);
@@ -16150,8 +16024,7 @@ DisResult disInstr_AMD64 ( unsigned tid,
                            VexAbiInfo*  abiinfo,
                            Bool         host_bigendian_IN )
 {
-   Int       i, x1, x2;
-   Bool      expect_CAS, has_CAS;
+   Int       x1, x2;
    DisResult dres;
 
    /* Set globals (see top of this file) */
@@ -16166,8 +16039,7 @@ DisResult disInstr_AMD64 ( unsigned tid,
    guest_RIP_next_mustcheck = False;
 
    x1 = irsb_IN->stmts_used;
-   expect_CAS = False;
-   dres = disInstr_AMD64_WRK ( tid, guest_code_IN, &expect_CAS, put_IP, resteerOkFn,
+   dres = disInstr_AMD64_WRK ( tid, guest_code_IN, put_IP, resteerOkFn,
                                callback_opaque,
                                delta, archinfo, abiinfo );
    x2 = irsb_IN->stmts_used;
@@ -16180,32 +16052,6 @@ DisResult disInstr_AMD64 ( unsigned tid,
        && guest_RIP_next_assumed != guest_RIP_curr_instr + dres.len) {
       vex_panic("disInstr_AMD64: disInstr miscalculated next rip (assumed %s, actual %s)\n",
 		guest_RIP_next_assumed.name(), (guest_RIP_curr_instr + dres.len).name() );
-   }
-
-   /* See comment at the top of disInstr_AMD64_WRK for meaning of
-      expect_CAS.  Here, we (sanity-)check for the presence/absence of
-      IRCAS as directed by the returned expect_CAS value. */
-   has_CAS = False;
-   for (i = x1; i < x2; i++) {
-      if (irsb_IN->stmts[i]->tag == Ist_CAS)
-         has_CAS = True;
-   }
-
-   if (expect_CAS != has_CAS) {
-      /* inconsistency detected.  re-disassemble the instruction so as
-         to generate a useful error message; then assert. */
-      vex_traceflags |= VEX_TRACE_FE;
-      dres = disInstr_AMD64_WRK ( tid, guest_code_IN, &expect_CAS, put_IP, resteerOkFn,
-                                  callback_opaque,
-                                  delta, archinfo, abiinfo );
-      for (i = x1; i < x2; i++) {
-	 fprintf(stderr, "\t\t");
-         ppIRStmt(irsb_IN->stmts[i], stderr);
-         fprintf(stderr, "\n");
-      }
-      /* Failure of this assertion is serious and denotes a bug in
-         disInstr. */
-      vpanic("disInstr_AMD64: inconsistency in LOCK prefix handling");
    }
 
    return dres;

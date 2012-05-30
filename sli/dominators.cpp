@@ -191,6 +191,11 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 				break;
 			}
 
+			case Ist_StartAtomic:
+				break;
+
+			case Ist_EndAtomic:
+				break;
 			}
 		}
 

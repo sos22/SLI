@@ -195,6 +195,10 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 			conditionalBranch(ise->guard, StateMachineNoCrash::get());
 			break;
 		}
+		case Ist_StartAtomic:
+			break;
+		case Ist_EndAtomic:
+			break;
 		}
 	}
 

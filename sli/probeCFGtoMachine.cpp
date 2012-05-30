@@ -390,6 +390,27 @@ cfgNodeToState(Oracle *oracle,
 			cursor = &smb->falseTarget;
 			break;
 		}
+		case Ist_StartAtomic: {
+			StateMachineSideEffecting *s =
+				new StateMachineSideEffecting(
+					target->my_rip,
+					StateMachineSideEffectStartAtomic::get(),
+					NULL);
+			*cursor = s;
+			cursor = &s->target;
+			break;
+		}
+		case Ist_EndAtomic: {
+			StateMachineSideEffecting *s =
+				new StateMachineSideEffecting(
+					target->my_rip,
+					StateMachineSideEffectEndAtomic::get(),
+					NULL);
+			*cursor = s;
+			cursor = &s->target;
+			break;
+		}
+			
 		}
 	}
 

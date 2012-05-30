@@ -62,6 +62,8 @@ Heap ir_heap;
 #include "libvex_prof.hpp"
 
 IRStmtNoOp IRStmtNoOp::singleton;
+IRStmtStartAtomic IRStmtStartAtomic::singleton;
+IRStmtEndAtomic IRStmtEndAtomic::singleton;
 
 /* Returns true if the operation definitely associates in the sense
  * that (a op b) op c == a op (b op c), or false if we're not sure. */
@@ -2107,6 +2109,14 @@ IRCAS* mkIRCAS ( threadAndRegister oldHi,
 IRStmt* IRStmt_NoOp ( void )
 {
    return &IRStmtNoOp::singleton;
+}
+IRStmt* IRStmt_StartAtomic ( void )
+{
+   return &IRStmtStartAtomic::singleton;
+}
+IRStmt* IRStmt_EndAtomic ( void )
+{
+   return &IRStmtEndAtomic::singleton;
 }
 IRStmt* IRStmt_IMark ( const ThreadRip &addr, Int len ) {
    return new IRStmtIMark(addr, len);

@@ -2206,7 +2206,9 @@ typedef
       Ist_CAS,
       Ist_Dirty,
       Ist_MBE,       /* META (maybe) */
-      Ist_Exit
+      Ist_Exit,
+      Ist_StartAtomic,
+      Ist_EndAtomic
    } 
    IRStmtTag;
 
@@ -2431,6 +2433,22 @@ struct IRStmtExit : public IRStmt {
       }
 };
 
+class IRStmtStartAtomic : public IRStmt {
+      IRStmtStartAtomic() : IRStmt(Ist_StartAtomic) {}
+public:
+      static IRStmtStartAtomic singleton;
+      void visit(HeapVisitor &) {}
+      void prettyPrint(FILE *f) const { fprintf(f, "IR-StartAtomic"); }
+};
+
+class IRStmtEndAtomic : public IRStmt {
+      IRStmtEndAtomic() : IRStmt(Ist_EndAtomic) {}
+public:
+      static IRStmtEndAtomic singleton;
+      void visit(HeapVisitor &) {}
+      void prettyPrint(FILE *f) const { fprintf(f, "IR-EndAtomic"); }
+};
+
 /* Statement constructors. */
 extern IRStmt* IRStmt_NoOp    ( void );
 extern IRStmt* IRStmt_IMark   ( const ThreadRip &addr, Int len );
@@ -2444,6 +2462,8 @@ extern IRStmt* IRStmt_CAS     ( IRCAS* details );
 extern IRStmt* IRStmt_Dirty   ( IRDirty* details );
 extern IRStmt* IRStmt_MBE     ( IRMBusEvent event );
 extern IRStmt* IRStmt_Exit    ( IRExpr* guard, IRJumpKind jk, const ThreadRip &dst );
+extern IRStmt* IRStmt_StartAtomic ( void );
+extern IRStmt* IRStmt_EndAtomic ( void );
 
 /* Pretty-print an IRStmt. */
 extern void ppIRStmt ( IRStmt*, FILE* );
