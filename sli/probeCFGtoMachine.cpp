@@ -172,7 +172,9 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 			      Ity_I8) >>
 			 (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(0)) >>
 			  ((*smb_reg(arg1, Ity_I64) <<= smb_const8(1)) >>
-			   (EndAtomic() >> end))));
+			   (EndAtomic() >>
+			    ((!rax <<= smb_const64(0)) >>
+			     end)))));
 		break;
 	}
 	case LibraryFunctionTemplate::pthread_mutex_unlock: {
@@ -183,7 +185,9 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 			      Ity_I8) >>
 			 (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(1)) >>
 			  ((*smb_reg(arg1, Ity_I64) <<= smb_const8(0)) >>
-			   (EndAtomic() >> end))));
+			   (EndAtomic() >>
+			    ((!rax <<= smb_const64(0)) >>
+			     end)))));
 		break;
 	}
 	case LibraryFunctionTemplate::none:
