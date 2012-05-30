@@ -482,10 +482,10 @@ truncateRips(StateMachine *sm)
 			if (in.stack.size() <= (unsigned)DynAnalysisRip::DATABASE_RIP_DEPTH)
 				return false;
 			std::vector<unsigned long> c;
-			c.reserve(DynAnalysisRip::DATABASE_RIP_DEPTH);
-			for (auto it = in.stack.rbegin(); it != in.stack.rend(); it++)
-				c.push_back(*it);
-			*out= VexRip(c);
+			c.resize(DynAnalysisRip::DATABASE_RIP_DEPTH);
+			for (int x = 0; x < DynAnalysisRip::DATABASE_RIP_DEPTH; x++)
+				c[x] = in.stack[x + in.stack.size() - DynAnalysisRip::DATABASE_RIP_DEPTH];
+			*out = VexRip(c);
 			return true;
 		}
 		StateMachineSideEffectLoad *transformOneSideEffect(
