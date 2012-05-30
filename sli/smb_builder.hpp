@@ -63,6 +63,9 @@ smb_reg(const threadAndRegister &tr, IRType ty)
 }
 /* Builders */
 SMBPtr<SMBExpression> operator+(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
+SMBPtr<SMBExpression> operator&(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
+SMBPtr<SMBExpression> operator|(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
+SMBPtr<SMBExpression> operator<<(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 SMBPtr<SMBExpression> operator==(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 SMBPtr<SMBExpression> operator<=(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 

@@ -120,6 +120,32 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 				 acc);
 		break;
 	}
+	case LibraryFunctionTemplate::memset: {
+		SMBPtr<SMBExpression> arg2_byte =
+			smb_reg(arg2, Ity_I64) & smb_const64(0xff);
+		SMBPtr<SMBExpression> writeVal =
+			arg2_byte                     |
+			(arg2_byte << smb_const8(8))  |
+			(arg2_byte << smb_const8(16)) |
+			(arg2_byte << smb_const8(24)) |
+			(arg2_byte << smb_const8(32)) |
+			(arg2_byte << smb_const8(40)) |
+			(arg2_byte << smb_const8(48)) |
+			(arg2_byte << smb_const8(56));
+		SMBPtr<SMBState> states[9];
+		acc = states[8] = (!rax <<= smb_reg(arg1, Ity_I64)) >> end;
+		for (int i = 7; i >= 0; i--)
+			states[i] =
+				(*(smb_reg(arg1, Ity_I64) + smb_const64((7 - i) * 8)) <<= writeVal) >>
+				states[i+1];
+		for (int i = 0; i < 9; i++)
+			acc = If(i == 8 ?
+					smb_const64(i * 8) <= smb_reg(arg3, Ity_I64) :
+				        smb_const64(i * 8) == smb_reg(arg3, Ity_I64),
+				 states[8-i],
+				 acc);
+		break;
+	}
 	case LibraryFunctionTemplate::none:
 		abort();
 	}

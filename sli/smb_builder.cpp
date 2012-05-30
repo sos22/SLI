@@ -42,6 +42,119 @@ operator+(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 }
 
 SMBPtr<SMBExpression>
+operator&(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
+{
+	assert(a.content->what->type() == b.content->what->type());
+	IROp op;
+	switch (a.content->what->type()) {
+	case Ity_I1:
+		op = Iop_And1;
+		break;
+	case Ity_I8:
+		op = Iop_And8;
+		break;
+	case Ity_I16:
+		op = Iop_And16;
+		break;
+	case Ity_I32:
+		op = Iop_And32;
+		break;
+	case Ity_I64:
+		op = Iop_And64;
+		break;
+	case Ity_I128:
+		abort();
+	case Ity_F32:
+		abort();
+	case Ity_F64:
+		abort();
+	case Ity_V128:
+		op = Iop_AndV128;
+		break;
+	case Ity_INVALID:
+		abort();
+	}
+	return SMBPtr<SMBExpression>(
+		new SMBExpression(IRExpr_Binop(op, (IRExpr *)a.content->what,
+					       (IRExpr *)b.content->what)));
+}
+
+SMBPtr<SMBExpression>
+operator|(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
+{
+	assert(a.content->what->type() == b.content->what->type());
+	IROp op;
+	switch (a.content->what->type()) {
+	case Ity_I1:
+		op = Iop_Or1;
+		break;
+	case Ity_I8:
+		op = Iop_Or8;
+		break;
+	case Ity_I16:
+		op = Iop_Or16;
+		break;
+	case Ity_I32:
+		op = Iop_Or32;
+		break;
+	case Ity_I64:
+		op = Iop_Or64;
+		break;
+	case Ity_I128:
+		abort();
+	case Ity_F32:
+		abort();
+	case Ity_F64:
+		abort();
+	case Ity_V128:
+		op = Iop_OrV128;
+		break;
+	case Ity_INVALID:
+		abort();
+	}
+	return SMBPtr<SMBExpression>(
+		new SMBExpression(IRExpr_Binop(op, (IRExpr *)a.content->what,
+					       (IRExpr *)b.content->what)));
+}
+
+SMBPtr<SMBExpression>
+operator<<(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
+{
+	assert(b.content->what->type() == Ity_I8);
+	IROp op;
+	switch (a.content->what->type()) {
+	case Ity_I1:
+		abort();
+	case Ity_I8:
+		op = Iop_Shl8;
+		break;
+	case Ity_I16:
+		op = Iop_Shl16;
+		break;
+	case Ity_I32:
+		op = Iop_Shl32;
+		break;
+	case Ity_I64:
+		op = Iop_Shl64;
+		break;
+	case Ity_I128:
+		abort();
+	case Ity_F32:
+		abort();
+	case Ity_F64:
+		abort();
+	case Ity_V128:
+		op = Iop_ShlV128;
+		break;
+	case Ity_INVALID:
+		abort();
+	}
+	return SMBPtr<SMBExpression>(
+		new SMBExpression(IRExpr_Binop(op, (IRExpr *)a.content->what,
+					       (IRExpr *)b.content->what)));
+}
+
+SMBPtr<SMBExpression>
 operator==(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 {
 	assert(a.content->what->type() == b.content->what->type());
