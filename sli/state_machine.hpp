@@ -588,11 +588,6 @@ public:
 	}
 };
 
-class FreeVariableTable {
-public:
-	IRExpr *alloc(IRType ty, const MemoryAccessIdentifier &);
-};
-
 void printStateMachine(const StateMachine *sm, FILE *f);
 void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
