@@ -69,6 +69,8 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 		do_type(Copy);
 		do_type(Unreached);
 		do_type(Phi);
+		do_type(StartAtomic);
+		do_type(EndAtomic);
 #undef do_type
 	}
 	abort();

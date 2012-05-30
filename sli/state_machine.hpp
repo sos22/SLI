@@ -147,7 +147,7 @@ class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &
 	StateMachineSideEffect(); /* DNE */
 public:
 	enum sideEffectType {
-		Load, Store, Copy, Unreached, AssertFalse, Phi
+		Load, Store, Copy, Unreached, AssertFalse, Phi, StartAtomic, EndAtomic
 	} type;
 protected:
 	StateMachineSideEffect(enum sideEffectType _type)
@@ -520,6 +520,58 @@ public:
 		       reflectsActualProgram == false);
 		sanityCheckIRExpr(value, live);
 		assert(value->type() == Ity_I1);
+	}
+	bool definesRegister(threadAndRegister &) const {
+		return false;
+	}
+};
+class StateMachineSideEffectStartAtomic : public StateMachineSideEffect {
+	StateMachineSideEffectStartAtomic()
+		: StateMachineSideEffect(StateMachineSideEffect::StartAtomic)
+	{}
+	static VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> singleton;
+public:
+	static StateMachineSideEffectStartAtomic *get() {
+		if (!singleton)
+			singleton = new StateMachineSideEffectStartAtomic();
+		return singleton;
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "START_ATOMIC");
+	}
+	void visit(HeapVisitor &) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *)
+	{
+		return this;
+	}
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
+	}
+	bool definesRegister(threadAndRegister &) const {
+		return false;
+	}
+};
+class StateMachineSideEffectEndAtomic : public StateMachineSideEffect {
+	StateMachineSideEffectEndAtomic()
+		: StateMachineSideEffect(StateMachineSideEffect::EndAtomic)
+	{}
+	static VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> singleton;
+public:
+	static StateMachineSideEffectEndAtomic *get() {
+		if (!singleton)
+			singleton = new StateMachineSideEffectEndAtomic();
+		return singleton;
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "END_ATOMIC");
+	}
+	void visit(HeapVisitor &) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *)
+	{
+		return this;
+	}
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;

@@ -61,6 +61,8 @@ public:
 			return;
 		}
 		case StateMachineSideEffect::Unreached:
+		case StateMachineSideEffect::StartAtomic:
+		case StateMachineSideEffect::EndAtomic:
 			return;
 		case StateMachineSideEffect::AssertFalse: {
 			StateMachineSideEffectAssertFalse *smseaf =
@@ -225,6 +227,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			}
 			case StateMachineSideEffect::Store:
 			case StateMachineSideEffect::Unreached:
+			case StateMachineSideEffect::StartAtomic:
+			case StateMachineSideEffect::EndAtomic:
 				break;
 			case StateMachineSideEffect::AssertFalse:
 				break;

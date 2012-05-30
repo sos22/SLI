@@ -133,6 +133,14 @@ protected:
 		StateMachineSideEffectUnreached *, bool *) {
 		return NULL;
 	}
+	virtual StateMachineSideEffectStartAtomic *transformOneSideEffect(
+		StateMachineSideEffectStartAtomic *, bool *) {
+		return NULL;
+	}
+	virtual StateMachineSideEffectEndAtomic *transformOneSideEffect(
+		StateMachineSideEffectEndAtomic *, bool *) {
+		return NULL;
+	}
 	virtual StateMachineSideEffectPhi *transformOneSideEffect(
 		StateMachineSideEffectPhi *, bool *);
 	virtual StateMachineUnreached *transformOneState(StateMachineUnreached *,

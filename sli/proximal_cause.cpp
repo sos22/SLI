@@ -102,61 +102,64 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 
 			   and we turn it into
 
-			   if (BadPtr(x)) { crash }
-			   else { t <- *x
-			          if (t == expd) {
-				      *x <- data;
-				      old <- t
-				      r
-				  } else {
-				      old <- t
-				      r
-				  }
-                           }
-
-			   where r is a freshly-allocated proxy state
-			   which goes to a freshly-allocated edge, and
-			   then we set the current work edge to that
-			   freshly-allocated one. */
-#warning This breaks the atomicity of the CAS
-			/* Breaking the atomicity of the CAS like that
-			   means that we'll sometimes report a crash
-			   which can't happen, but we'll never miss a
-			   crash which can. */
+			   l1: if (BadPtr(x)) then <crash> else l2
+			   l2: START_ATOMIC
+			   l3: t <- *x then l4
+			   l4: if (t == expd) then l5 else l6
+			   l5: *x <- data
+			   l6: END_ATOMIC
+			   l7: old <- t
+			*/
 			IRTemp t = newIRTemp(irsb->tyenv);
 			threadAndRegister tr = threadAndRegister::temp(rip.thread, t, 0);
 			IRType ty = cas->expdLo->type();
 			IRExpr *t_expr = IRExpr_Get(tr, ty);
-			work = new StateMachineSideEffecting(
-				rip.rip,
-				new StateMachineSideEffectCopy(
-					cas->oldLo,
-					t_expr),
-				work);
-			work =
+			StateMachineSideEffecting *l7 =
+				new StateMachineSideEffecting(
+					rip.rip,
+					new StateMachineSideEffectCopy(
+						cas->oldLo,
+						t_expr),
+					work);
+			StateMachineSideEffecting *l6 =
+				new StateMachineSideEffecting(
+					rip.rip,
+					StateMachineSideEffectEndAtomic::get(),
+					l7);
+			StateMachineSideEffecting *l5 =
+				new StateMachineSideEffecting(
+					rip.rip,
+					new StateMachineSideEffectCopy(
+						cas->oldLo,
+						t_expr),
+					l6);
+			StateMachineBifurcate *l4 =
+				new StateMachineBifurcate(
+					rip.rip,
+					expr_eq(t_expr, cas->expdLo),
+					l5,
+					l6);
+			StateMachineSideEffecting *l3 =
+				new StateMachineSideEffecting(
+					rip.rip,
+					new StateMachineSideEffectLoad(
+						tr,
+						cas->addr,
+						getMemoryAccessIdentifier(rip),
+						ty),
+					l4);
+			StateMachineSideEffecting *l2 =
+				new StateMachineSideEffecting(
+					rip.rip,
+					StateMachineSideEffectStartAtomic::get(),
+					l3);
+			StateMachineBifurcate *l1 =
 				new StateMachineBifurcate(
 					rip.rip,
 					IRExpr_Unop(Iop_BadPtr, cas->addr),
 					StateMachineCrash::get(),
-					new StateMachineSideEffecting(
-						rip.rip,
-						new StateMachineSideEffectLoad(
-							tr,
-							cas->addr,
-							getMemoryAccessIdentifier(rip),
-							ty),
-						new StateMachineBifurcate(
-							rip.rip,
-							expr_eq(t_expr, cas->expdLo),
-							new StateMachineSideEffecting(
-								rip.rip,
-								new StateMachineSideEffectStore(
-									cas->addr,
-									cas->dataLo,
-									getMemoryAccessIdentifier(rip)),
-								work),
-							work)));
-
+					l2);
+			work = l1;
 			break;
 		}
 		case Ist_Dirty: {

@@ -574,6 +574,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			   memLogT &memLog,
 			   bool collectOrderingConstraints,
 			   const AllowableOptimisations &opt,
+			   bool *atomic,
 			   IRExpr **assumption,
 			   IRExpr **accumulatedAssumptions)
 {
@@ -742,6 +743,14 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		state.eval_phi(smsep, assumption, opt);
 		break;
 	}
+	case StateMachineSideEffect::StartAtomic:
+		assert(!*atomic);
+		*atomic = true;
+		break;
+	case StateMachineSideEffect::EndAtomic:
+		assert(*atomic);
+		*atomic = false;
+		break;
 	}
 	return esme_normal;
 }
@@ -757,6 +766,7 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 			  bool *crashes,
 			  NdChooser &chooser,
 			  Oracle *oracle,
+			  bool *atomic,
 			  const AllowableOptimisations &opt,
 			  StateMachineEvalContext &ctxt)
 {
@@ -785,6 +795,7 @@ smallStepEvalStateMachine(StateMachine *rootMachine,
 						   ctxt.memLog,
 						   ctxt.collectOrderingConstraints,
 						   opt,
+						   atomic,
 						   &ctxt.pathConstraint,
 						   &ctxt.justPathConstraint);
 		switch (res) {
@@ -828,6 +839,7 @@ bigStepEvalStateMachine(StateMachine *rootMachine,
 			const AllowableOptimisations &opt,
 			StateMachineEvalContext &ctxt)
 {
+	bool atomic = false;
 	*crashes = preferred_result;
 	while (1) {
 		ctxt.currentState =
@@ -836,6 +848,7 @@ bigStepEvalStateMachine(StateMachine *rootMachine,
 						  crashes,
 						  chooser,
 						  oracle,
+						  &atomic,
 						  opt,
 						  ctxt);
 		if (!ctxt.currentState)
@@ -870,6 +883,7 @@ class EvalContext {
 	VexPtr<IRExpr, &ir_heap> accumulatedAssumption;
 	threadState state;
 	memLogT memlog;
+	bool atomic;
 
 	void advance_state_trace()
 	{
@@ -886,6 +900,7 @@ class EvalContext {
 		  accumulatedAssumption(o.accumulatedAssumption),
 		  state(o.state),
 		  memlog(o.memlog),
+		  atomic(o.atomic),
 		  currentState(sms)
 #ifndef NDEBUG
 		, statePath(o.statePath)
@@ -904,6 +919,7 @@ class EvalContext {
 					: NULL),
 		  state(o.state),
 		  memlog(o.memlog),
+		  atomic(o.atomic),
 		  currentState(sms)
 #ifndef NDEBUG
 		, statePath(o.statePath)
@@ -918,11 +934,12 @@ class EvalContext {
 	}
 	EvalContext(const EvalContext &o, const threadState &_state,
 		    const memLogT &_memlog, IRExpr *_assumption,
-		    IRExpr *_accAssumption)
+		    IRExpr *_accAssumption, bool _atomic)
 		: assumption(_assumption),
 		  accumulatedAssumption(_accAssumption),
 		  state(_state),
 		  memlog(_memlog),
+		  atomic(_atomic),
 		  currentState(o.currentState)
 #ifndef NDEBUG
 		, statePath(o.statePath)
@@ -947,6 +964,7 @@ public:
 		    std::map<const StateMachineState*, int> &_stateLabels)
 		: assumption(initialAssumption),
 		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
+		  atomic(false),
 		  currentState(sm->root)
 #ifndef NDEBUG
 		, stateLabels(_stateLabels)
@@ -959,6 +977,7 @@ public:
 		  accumulatedAssumption(o.accumulatedAssumption),
 		  state(o.state),
 		  memlog(o.memlog),
+		  atomic(o.atomic),
 		  currentState(o.currentState)
 #ifndef NDEBUG
 		, statePath(o.statePath),
@@ -1039,6 +1058,7 @@ EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &
 	NdChooser chooser;
 
 	do {
+		bool atomic = this->atomic;
 		IRExpr *assumption = this->assumption;
 		IRExpr *accAssumption = this->accumulatedAssumption;
 		threadState state(this->state);
@@ -1047,12 +1067,12 @@ EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &
 			evalStateMachineSideEffect(sm, smse, chooser, oracle,
 						   state, memlog,
 						   consumer.collectOrderingConstraints,
-						   opt,
+						   opt, &atomic,
 						   &assumption, &accAssumption);
 		switch (res) {
 		case esme_normal:
 			pendingStates.push_back(
-				EvalContext(*this, state, memlog, assumption, accAssumption));
+				EvalContext(*this, state, memlog, assumption, accAssumption, atomic));
 			break;
 		case esme_ignore_path:
 			break;
@@ -1360,7 +1380,9 @@ public:
 class CrossMachineEvalContext {
 	StateMachineSideEffect *advanceToSideEffect(CrossEvalState *machine, NdChooser &chooser, Oracle *oracle,
 						    const AllowableOptimisations &opt,
-						    std::set<DynAnalysisRip> &usefulRips, bool wantLoad);
+						    std::set<DynAnalysisRip> &usefulRips,
+						    bool *atomic,
+						    bool wantLoad);
 public:
 	bool collectOrderingConstraints;
 	IRExpr *pathConstraint;
@@ -1371,13 +1393,13 @@ public:
 	std::vector<StateMachineSideEffect *> history;
 	std::set<DynAnalysisRip> &probeMachineRacingInstructions;
 	std::set<DynAnalysisRip> &storeMachineRacingInstructions;
-	void advanceMachine(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt, bool doLoad);
+	void advanceMachine(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt, bool *atomic, bool doLoad);
 	void dumpHistory(FILE *f) const;
-	StateMachineSideEffect *advanceToLoad(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
-		return advanceToSideEffect(loadMachine, chooser, oracle, opt, probeMachineRacingInstructions, true);
+	StateMachineSideEffect *advanceToLoad(NdChooser &chooser, Oracle *oracle, bool *atomic, const AllowableOptimisations &opt) {
+		return advanceToSideEffect(loadMachine, chooser, oracle, opt, probeMachineRacingInstructions, atomic, true);
 	}
-	StateMachineSideEffect *advanceToStore(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt) {
-		return advanceToSideEffect(storeMachine, chooser, oracle, opt, storeMachineRacingInstructions, false);
+	StateMachineSideEffect *advanceToStore(NdChooser &chooser, Oracle *oracle, bool *atomic, const AllowableOptimisations &opt) {
+		return advanceToSideEffect(storeMachine, chooser, oracle, opt, storeMachineRacingInstructions, atomic, false);
 	}
 	CrossMachineEvalContext(std::set<DynAnalysisRip> &_probeMachineRacingInstructions,
 				std::set<DynAnalysisRip> &_storeMachineRacingInstructions)
@@ -1407,6 +1429,7 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 					     Oracle *oracle,
 					     const AllowableOptimisations &opt,
 					     std::set<DynAnalysisRip> &interestingRips,
+					     bool *atomic,
 					     bool wantLoad)
 {
 	while (!TIMEOUT) {
@@ -1453,7 +1476,7 @@ CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
 				}
 				evalStateMachineSideEffectRes res =
 					evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
-								   collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint);
+								   collectOrderingConstraints, opt, atomic, &pathConstraint, &justPathConstraint);
 				if (res != esme_normal) {
 					/* Found a contradiction -> get out */
 					machine->finished = true;
@@ -1472,20 +1495,21 @@ void
 CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
 					Oracle *oracle,
 					const AllowableOptimisations &opt,
+					bool *atomic,
 					bool doLoad)
 {
 	CrossEvalState *machine = doLoad ? loadMachine : storeMachine;
 	StateMachineSideEffect *se;
 
 	if (doLoad)
-		se = advanceToLoad(chooser, oracle, opt);
+		se = advanceToLoad(chooser, oracle, atomic, opt);
 	else
-		se = advanceToStore(chooser, oracle, opt);
+		se = advanceToStore(chooser, oracle, atomic, opt);
 	if (!se)
 		return;
 
 	if (evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
-				       collectOrderingConstraints, opt, &pathConstraint, &justPathConstraint) != esme_normal) {
+				       collectOrderingConstraints, opt, atomic, &pathConstraint, &justPathConstraint) != esme_normal) {
 		machine->finished = true;
 	} else {
 		history.push_back(se);
@@ -1544,12 +1568,20 @@ struct crossStateT {
 	StateMachineState *s;
 	bool probe_issued_load;
 	bool store_issued_store;
+	bool probe_is_atomic;
+	bool store_is_atomic;
 	crossStateT(StateMachineState *_p,
 		    StateMachineState *_s,
 		    bool _pil,
-		    bool _sis)
-		: p(_p), s(_s), probe_issued_load(_pil),
-		  store_issued_store(_sis)
+		    bool _sis,
+		    bool _pia,
+		    bool _sia)
+		: p(_p),
+		  s(_s),
+		  probe_issued_load(_pil),
+		  store_issued_store(_sis),
+		  probe_is_atomic(_pia),
+		  store_is_atomic(_sia)
 	{}
 	bool operator<(const crossStateT &o) const {
 #define do_field(n)				\
@@ -1561,6 +1593,8 @@ struct crossStateT {
 		do_field(s);
 		do_field(probe_issued_load);
 		do_field(store_issued_store);
+		do_field(probe_is_atomic);
+		do_field(store_is_atomic);
 #undef do_field
 		return false;
 	}
@@ -1619,7 +1653,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 	StateMachineState *crossMachineRoot;
 	crossMachineRoot = NULL;
 	pendingRelocs.push_back(
-		relocT(&crossMachineRoot, crossStateT(probeMachine->root, storeMachine->root, false, false)));
+		relocT(&crossMachineRoot, crossStateT(probeMachine->root, storeMachine->root, false, false, false, false)));
 	while (!pendingRelocs.empty()) {
 		relocT r(pendingRelocs.back());
 		pendingRelocs.pop_back();
@@ -1631,17 +1665,19 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 		}
 
 		crossStateT crossState(r.second);
-		StateMachineSideEffectMemoryAccess *probe_effect =
-			dynamic_cast<StateMachineSideEffectMemoryAccess *>(crossState.p->getSideEffect());
-		StateMachineSideEffectStore *store_effect =
-			dynamic_cast<StateMachineSideEffectStore *>(crossState.s->getSideEffect());
-		StateMachineState *newState;
 
 		struct {
 			StateMachineState *operator()(const crossStateT &crossState,
 						      std::vector<relocT> &pendingRelocs,
 						      bool racingLoad) {
+				assert(!crossState.store_is_atomic);
 				StateMachineState *res = shallowCloneState(crossState.p);
+				bool lockState =
+					(crossState.probe_is_atomic ||
+					 (crossState.p->getSideEffect() &&
+					  crossState.p->getSideEffect()->type == StateMachineSideEffect::StartAtomic)) &&
+					!(crossState.p->getSideEffect() &&
+					  crossState.p->getSideEffect()->type == StateMachineSideEffect::EndAtomic);
 				std::vector<StateMachineState **> targets;
 				res->targets(targets);
 				for (auto it = targets.begin(); it != targets.end(); it++) {
@@ -1651,7 +1687,9 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 							       **it,
 							       crossState.s,
 							       racingLoad || crossState.probe_issued_load,
-							       crossState.store_issued_store
+							       crossState.store_issued_store,
+							       lockState,
+							       crossState.store_is_atomic
 							       )));
 					**it = NULL;
 				}
@@ -1661,12 +1699,22 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 		struct {
 			StateMachineState *operator()(const crossStateT &crossState,
 						      std::vector<relocT> &pendingRelocs) {
+				assert(!crossState.probe_is_atomic);
 				StateMachineState *res = shallowCloneState(crossState.s);
-				std::vector<StateMachineState **> targets;
-				res->targets(targets);
+
+				bool lockState =
+					(crossState.store_is_atomic ||
+					 (crossState.s->getSideEffect() &&
+					  crossState.s->getSideEffect()->type == StateMachineSideEffect::StartAtomic)) &&
+					!(crossState.s->getSideEffect() &&
+					  crossState.s->getSideEffect()->type == StateMachineSideEffect::EndAtomic);
+
 				bool isStore = false;
 				if (StateMachineSideEffect *se = crossState.s->getSideEffect())
 					isStore = se->type == StateMachineSideEffect::Store;
+
+				std::vector<StateMachineState **> targets;
+				res->targets(targets);
 				for (auto it = targets.begin(); it != targets.end(); it++) {
 					pendingRelocs.push_back(
 						relocT(*it,
@@ -1674,95 +1722,124 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 							       crossState.p,
 							       **it,
 							       crossState.probe_issued_load,
-							       isStore || crossState.store_issued_store
-							       )));
+							       isStore || crossState.store_issued_store,
+							       crossState.probe_is_atomic,
+							       lockState)));
 					**it = NULL;
 				}
 				return res;
 			}
 		} advanceStoreMachine;
-		if (crossState.p->isTerminal()) {
-			/* The probe machine has reached its end.  The
-			   result is the result of the whole
-			   machine. */
-			/* Exception: we don't consider the case where
-			   the probe machine crashes before the store
-			   machine has issued any stores, so that just
-			   turns into Unreached. */
-			if (crossState.p->type == StateMachineState::NoCrash ||
-			    crossState.store_issued_store)
-				newState = crossState.p;
-			else
-				newState = StateMachineUnreached::get();
-		} else if (crossState.s->isTerminal()) {
-			/* If the store machine terminates at
-			   <survive> or <unreached> then we should
-			   ignore this path.  If it terminates at
-			   <crash> then we need to run the probe
-			   machine to completion to see what's
-			   what. */
-			/* Another exception: we don't want to
-			   consider the case where the store machine
-			   completes before the load machine has
-			   issued any loads, so turn that into
-			   <unreached> as well. */
-			if (crossState.probe_issued_load &&
-			    crossState.s->type == StateMachineState::Crash)
-				newState = advanceProbeMachine(crossState, pendingRelocs, false);
-			else
-				newState = StateMachineUnreached::get();
-		} else if (!probe_effect ||
-			   definitelyDoesntRace(probe_effect, crossState.s, opt, oracle)) {
-			/* If the probe effect definitely cannot race
-			   with anything left in the store machine
-			   then we should issue it unconditionally. */
+
+		StateMachineState *newState;
+		if (crossState.probe_is_atomic) {
+			/* We have to issue probe effects until we get
+			 * to an EndAtomic side effect. */
+			assert(!crossState.store_is_atomic);
+			assert(!crossState.p->isTerminal());
 			newState = advanceProbeMachine(crossState, pendingRelocs, false);
-		} else if (!store_effect) {
-			/* Likewise, if a store effect isn't a memory
-			 * access then it's definitely not going to
-			 * race, so we can issue it
-			 * unconditionally. */
+		} else if (crossState.store_is_atomic) {
+			/* Likewise, if the store machine is currently
+			   atomic then we need to advance it. */
+			assert(!crossState.s->isTerminal());
 			newState = advanceStoreMachine(crossState, pendingRelocs);
 		} else {
-			/* Both machines want to issue memory
-			   accesses, and there's some possibility of
-			   an interesting race.  Pick a
-			   non-deterministic interleaving. */
-			std::vector<StateMachineState *> possible;
+			/* Neither machine is in an atomic block, need
+			 * to race them. */
+			StateMachineSideEffectMemoryAccess *probe_effect =
+				dynamic_cast<StateMachineSideEffectMemoryAccess *>(crossState.p->getSideEffect());
+			StateMachineSideEffectStore *store_effect =
+				dynamic_cast<StateMachineSideEffectStore *>(crossState.s->getSideEffect());
 
-			/* There are three interesting possibilities here:
+			if (crossState.p->isTerminal()) {
+				/* The probe machine has reached its
+				   end.  The result is the result of
+				   the whole machine. */
+				/* Exception: we don't consider the
+				   case where the probe machine
+				   crashes before the store machine
+				   has issued any stores, so that just
+				   turns into Unreached. */
+				if (crossState.p->type == StateMachineState::NoCrash ||
+				    crossState.store_issued_store)
+					newState = crossState.p;
+				else
+					newState = StateMachineUnreached::get();
+			} else if (crossState.s->isTerminal()) {
+				/* If the store machine terminates at
+				   <survive> or <unreached> then we
+				   should ignore this path.  If it
+				   terminates at <crash> then we need
+				   to run the probe machine to
+				   completion to see what's what. */
+				/* Another exception: we don't want to
+				   consider the case where the store
+				   machine completes before the load
+				   machine has issued any loads, so
+				   turn that into <unreached> as
+				   well. */
+				if (crossState.probe_issued_load &&
+				    crossState.s->type == StateMachineState::Crash)
+					newState = advanceProbeMachine(crossState, pendingRelocs, false);
+				else
+					newState = StateMachineUnreached::get();
+			} else if (!probe_effect ||
+				   definitelyDoesntRace(probe_effect, crossState.s, opt, oracle)) {
+				/* If the probe effect definitely
+				   cannot race with anything left in
+				   the store machine then we should
+				   issue it unconditionally. */
+				newState = advanceProbeMachine(crossState, pendingRelocs, false);
+			} else if (!store_effect) {
+				/* Likewise, if a store effect isn't a
+				 * memory access then it's definitely
+				 * not going to race, so we can issue
+				 * it unconditionally. */
+				newState = advanceStoreMachine(crossState, pendingRelocs);
+			} else {
+				/* Both machines want to issue memory
+				   accesses, and there's some
+				   possibility of an interesting race.
+				   Pick a non-deterministic
+				   interleaving. */
+				std::vector<StateMachineState *> possible;
 
-			   -- The two addresses don't alias at all.
-			   -- The two addresses do match, and the
-			      probe machine goes first.
-			   -- The two addresses do match, and the
-			      store machine goes first.
-
-			   In the first case, it really doesn't matter
-			   which order we issue the operations in, so
-			   we arbitrarily decide that the probe
-			   machine goes first.  That means we can
-			   treat that case as basically the same as
-			   the second one, and it's given the same
-			   state.  In the final case we assert that
-			   the addresses do match and then advance the
-			   store machine. */
-			possible.push_back(advanceProbeMachine(crossState, pendingRelocs, true));
-			StateMachineState *s = advanceStoreMachine(crossState, pendingRelocs);
-			possible.push_back(
-				new StateMachineSideEffecting(
-					s->origin,
-					new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(
-							Iop_Not1, /* Remember, it's assertfalse,
-								     so need to invert the condition. */
-							IRExpr_Binop(
-								Iop_CmpEQ64,
-								probe_effect->addr,
-								store_effect->addr)),
-						false),
-					s));
-			newState = new StateMachineNdChoice(VexRip(), possible);
+				/* There are three interesting possibilities here:
+				   
+				   -- The two addresses don't alias at all.
+				   -- The two addresses do match, and the
+				      probe machine goes first.
+				   -- The two addresses do match, and the
+				      store machine goes first.
+				   
+				   In the first case, it really
+				   doesn't matter which order we issue
+				   the operations in, so we
+				   arbitrarily decide that the probe
+				   machine goes first.  That means we
+				   can treat that case as basically
+				   the same as the second one, and
+				   it's given the same state.  In the
+				   final case we assert that the
+				   addresses do match and then advance
+				   the store machine. */
+				possible.push_back(advanceProbeMachine(crossState, pendingRelocs, true));
+				StateMachineState *s = advanceStoreMachine(crossState, pendingRelocs);
+				possible.push_back(
+					new StateMachineSideEffecting(
+						s->origin,
+						new StateMachineSideEffectAssertFalse(
+							IRExpr_Unop(
+								Iop_Not1, /* Remember, it's assertfalse,
+									     so need to invert the condition. */
+								IRExpr_Binop(
+									Iop_CmpEQ64,
+									probe_effect->addr,
+									store_effect->addr)),
+							false),
+						s));
+				newState = new StateMachineNdChoice(VexRip(), possible);
+			}
 		}
 		results[r.second] = newState;
 		*r.first = newState;
@@ -1821,6 +1898,7 @@ struct findRemoteMacroSectionsState {
 	StateMachineSideEffectStore *advanceWriteMachine(StateMachine *writeMachine,
 							 NdChooser &chooser,
 							 Oracle *oracle,
+							 bool *atomic,
 							 const AllowableOptimisations &opt);
 };
 
@@ -1828,6 +1906,7 @@ StateMachineSideEffectStore *
 findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 						  NdChooser &chooser,
 						  Oracle *oracle,
+						  bool *atomic,
 						  const AllowableOptimisations &opt)
 {
 	StateMachineSideEffectStore *smses = NULL;
@@ -1867,6 +1946,7 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 				if (evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerContext.state,
 							       writerContext.memLog,
 							       writerContext.collectOrderingConstraints, opt,
+							       atomic,
 							       &writerContext.pathConstraint,
 							       &writerContext.justPathConstraint) != esme_normal) {
 					/* Found a contradiction -> get out */
@@ -1917,10 +1997,14 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 		sectionStart = NULL;
 		state.finished = false;
 		state.writer_failed = false;
+		bool writer_atomic = false;
 
 		while (!state.writer_failed && !TIMEOUT && !state.finished) {
-			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
+			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, &writer_atomic, opt);
 
+			if (writer_atomic)
+				continue;
+			
 			/* The writer just issued a store, so we
 			   should now try running the reader
 			   atomically.  We discard any stores issued
@@ -1993,14 +2077,18 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 		state.writerContext.pathConstraint = assumption;
 		state.writerState = writeMachine->root;
 		state.skipFirstSideEffect = false;
+		bool writer_atomic = false;
 		while (!TIMEOUT) {
-			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
+			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, &writer_atomic, opt);
 
 			if (state.writer_failed) {
 				/* Contradiction in the writer -> give
 				 * up. */
 				break;
 			}
+
+			if (writer_atomic)
+				continue;
 
 			/* Did we just leave a critical section? */
 			if (incompleteSections.count(smses))
@@ -2065,6 +2153,8 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 		LibVEX_maybe_gc(token);
 
+		bool s1_atomic = false;
+		bool s2_atomic = false;
 		CrossMachineEvalContext ctxt(probeMachineRacingInstructions,
 					     storeMachineRacingInstructions);
 		ctxt.collectOrderingConstraints = true;
@@ -2074,15 +2164,27 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 		CrossEvalState s2(storeMachine);
 		ctxt.loadMachine = &s1;
 		ctxt.storeMachine = &s2;
-		while (!TIMEOUT && !s1.finished && !s2.finished)
-			ctxt.advanceMachine(chooser,
-					    oracle,
-					    opt,
-					    chooser.nd_choice(2));
+		while (!TIMEOUT && !s1.finished && !s2.finished) {
+			assert(!(s1_atomic && s2_atomic));
+			if (s1_atomic ||
+			    (!s2_atomic && chooser.nd_choice(2) == 0)) {
+				ctxt.advanceMachine(chooser,
+						    oracle,
+						    opt,
+						    &s1_atomic,
+						    false);
+			} else {
+				ctxt.advanceMachine(chooser,
+						    oracle,
+						    opt,
+						    &s2_atomic,
+						    true);
+			}
+		}
 		while (!TIMEOUT && !s1.finished)
-			ctxt.advanceMachine(chooser, oracle, opt, true);
+			ctxt.advanceMachine(chooser, oracle, opt, &s1_atomic, true);
 		while (!TIMEOUT && !s2.finished)
-			ctxt.advanceMachine(chooser, oracle, opt, false);
+			ctxt.advanceMachine(chooser, oracle, opt, &s2_atomic, false);
 		if (s1.crashed) {
 			newCondition =
 				IRExpr_Binop(

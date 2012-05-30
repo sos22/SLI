@@ -236,6 +236,18 @@ rawDupe(duplication_context &, const StateMachineSideEffectUnreached *)
 	return StateMachineSideEffectUnreached::get();
 }
 
+static StateMachineSideEffectStartAtomic *
+rawDupe(duplication_context &, const StateMachineSideEffectStartAtomic *)
+{
+	return StateMachineSideEffectStartAtomic::get();
+}
+
+static StateMachineSideEffectEndAtomic *
+rawDupe(duplication_context &, const StateMachineSideEffectEndAtomic *)
+{
+	return StateMachineSideEffectEndAtomic::get();
+}
+
 static StateMachineSideEffectAssertFalse *
 rawDupe(duplication_context &ctxt, const StateMachineSideEffectAssertFalse *l)
 {
@@ -275,6 +287,8 @@ rawDupe(duplication_context &ctxt, const StateMachineSideEffect *smse)
 		do_case(Load);
 		do_case(Store);
 		do_case(Unreached);
+		do_case(StartAtomic);
+		do_case(EndAtomic);
 		do_case(AssertFalse);
 		do_case(Copy);
 		do_case(Phi);

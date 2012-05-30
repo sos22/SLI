@@ -472,7 +472,14 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		outputAvail.insertSideEffect(p);
 		break;
 	}
-		
+	case StateMachineSideEffect::StartAtomic:
+	case StateMachineSideEffect::EndAtomic:
+		/* XXX we could be a bit more cunning here and keep
+		   loads to shared locations available until the end
+		   of the atomic section, but that's a bit tricky and
+		   doesn't actually make much difference in any of the
+		   places where we use atomic blocks. */
+		break;
 	}
 
 	threadAndRegister r(threadAndRegister::invalid());
@@ -623,6 +630,8 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
+	case StateMachineSideEffect::StartAtomic:
+	case StateMachineSideEffect::EndAtomic:
 		newEffect = smse;
 		break;
 	case StateMachineSideEffect::AssertFalse: {

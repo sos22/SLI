@@ -152,6 +152,9 @@ sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc, crash_const
 	case StateMachineSideEffect::Phi:
 		acc = insertPhi((StateMachineSideEffectPhi *)smse, acc);
 		break;
+	case StateMachineSideEffect::StartAtomic:
+	case StateMachineSideEffect::EndAtomic:
+		break;
 	}
 
 	return acc;

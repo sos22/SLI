@@ -19,6 +19,8 @@ static int debug_state_machine_sanity_checks = 0;
 #endif
 
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
+VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> StateMachineSideEffectStartAtomic::singleton;
+VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> StateMachineSideEffectEndAtomic::singleton;
 VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
 VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
 VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
@@ -257,7 +259,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		     StateMachineSideEffect *smse2,
 		     const AllowableOptimisations &opt)
 {
-	if (smse1 == NULL && smse2 == NULL)
+	if (smse1 == smse2)
 		return true;
 	if (smse1 == NULL || smse2 == NULL)
 		return false;
@@ -308,6 +310,11 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		return threadAndRegister::fullEq(smsep1->reg, smsep2->reg) &&
 			smsep1->generations == smsep2->generations;
 	}
+	case StateMachineSideEffect::StartAtomic:
+	case StateMachineSideEffect::EndAtomic:
+		/* These are singletons, so should have been handled
+		   by the smse1 == smse2 test above. */
+		abort();
 	}
 	abort();
 }
@@ -382,6 +389,14 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 		if (!parseThisString(")", str2, suffix))
 			return false;
 		*out = new StateMachineSideEffectPhi(key, generations);
+		return true;
+	}
+	if (parseThisString("START_ATOMIC", str, suffix)) {
+		*out = StateMachineSideEffectStartAtomic::get();
+		return true;
+	}
+	if (parseThisString("END_ATOMIC", str, suffix)) {
+		*out = StateMachineSideEffectEndAtomic::get();
 		return true;
 	}
 	return false;
@@ -744,6 +759,8 @@ StateMachine::assertSSA() const
 		case StateMachineSideEffect::Store:
 		case StateMachineSideEffect::AssertFalse:
 		case StateMachineSideEffect::Unreached:
+		case StateMachineSideEffect::StartAtomic:
+		case StateMachineSideEffect::EndAtomic:
 			break;
 		}
 	}

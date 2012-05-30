@@ -281,6 +281,8 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		return t.sideEffects[s];
 	switch (s->type) {
 	case StateMachineSideEffect::Unreached:
+	case StateMachineSideEffect::StartAtomic:
+	case StateMachineSideEffect::EndAtomic:
 		t.sideEffects[s] = s;
 		return s;
 	case StateMachineSideEffect::Load:

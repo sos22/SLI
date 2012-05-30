@@ -249,27 +249,29 @@ cfgNodeToState(Oracle *oracle,
 
 			   and we turn it into
 
+			   l0: START_ATOMIC then l1
 			   l1: t <- *x then l2
 			   l2: if (t == expd) then l3 else l4
-			   l3: *x <- data
-			   l4: old <- t
+			   l3: *x <- data then l4
+			   l4: END_ATOMIC then l5
+			   l5: old <- t
 			*/
-#warning This breaks the atomicity of the CAS
-			/* Breaking the atomicity of the CAS like that
-			   means that we'll sometimes report a crash
-			   which can't happen, but we'll never miss a
-			   crash which can. */
 			IRTemp t = newIRTemp(irsb->tyenv);
 			threadAndRegister tempreg = threadAndRegister::temp(tid, t, 0);
 			IRType ty = cas->expdLo->type();
 			IRExpr *t_expr = IRExpr_Get(tempreg, ty);
-			StateMachineSideEffecting *l4 =
+			StateMachineSideEffecting *l5 =
 				new StateMachineSideEffecting(
 					target->my_rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
 						t_expr),
 					NULL);
+			StateMachineSideEffecting *l4 =
+				new StateMachineSideEffecting(
+					target->my_rip,
+					StateMachineSideEffectEndAtomic::get(),
+					l5);
 			StateMachineState *l3 =
 				new StateMachineSideEffecting(
 					target->my_rip,
@@ -293,8 +295,13 @@ cfgNodeToState(Oracle *oracle,
 						mai(tr),
 						ty),
 					l2);
-			*cursor = l1;
-			cursor = &l4->target;
+			StateMachineState *l0 =
+				new StateMachineSideEffecting (
+					target->my_rip,
+					StateMachineSideEffectStartAtomic::get(),
+					l1);
+			*cursor = l0;
+			cursor = &l5->target;
 			break;
 		}
 		case Ist_Dirty: {
