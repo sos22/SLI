@@ -118,5 +118,9 @@ parseMemoryAccessIdentifier(MemoryAccessIdentifier *out,
 			    const char *str,
 			    const char **suffix)
 {
-	return parseThreadRip(&out->rip, str, suffix);
+	if (!parseThreadRip(&out->rip, str, &str) ||
+	    !parseThisChar(':', str, &str) ||
+	    !parseDecimalUInt(&out->generation, str, suffix))
+		return false;
+	return true;
 }

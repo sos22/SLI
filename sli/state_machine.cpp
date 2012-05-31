@@ -455,13 +455,13 @@ parseStateMachineState(StateMachineState **out,
 	}
 	int target1;
 	StateMachineSideEffect *sme;
-	if (parseThisString("{:", str, &str2) &&
+	if (parseThisString("{", str, &str2) &&
 	    parseVexRip(&origin, str2, &str2) &&
 	    parseThisChar(':', str2, &str2) &&
 	    parseStateMachineSideEffect(&sme, str2, &str2) &&
 	    parseThisString(" then l", str2, &str2) &&
 	    parseDecimalInt(&target1, str2, &str2) &&
-	    parseThisChar('}', str2, &str2)) {
+	    parseThisChar('}', str2, suffix)) {
 		*out = new StateMachineSideEffecting(origin, sme, (StateMachineState *)target1);
 		return true;
 	}
@@ -528,12 +528,6 @@ parseOneState(std::map<int, StateMachineState *> &out,
 static bool
 parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 {
-	StateMachineState *root;
-	if (!parseStateMachineState(&root, str, &str))
-		return false;
-	if (!parseThisChar('\n', str, &str))
-		return false;
-
 	std::map<int, StateMachineState *> labelToState;
 	while (*str) {
 		if (!parseOneState(labelToState, str, &str))
@@ -549,20 +543,20 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 			std::vector<StateMachineState **> targets;
 			s->targets(targets);
 			for (auto it = targets.begin(); it != targets.end(); it++) {
-				**it = labelToState[(int)(unsigned long)*it];
+				**it = labelToState[(int)(unsigned long)**it];
 				if (!**it)
 					return false;
 			}
 			return true;
 		}
 	} doOneState(labelToState);
-	if (!doOneState(root))
-		return false;
 	for (auto it = labelToState.begin(); it != labelToState.end(); it++)
 		if (!doOneState(it->second))
 			return false;
+	if (!labelToState.count(1))
+		return false;
 	*suffix = str;
-	*out = root;
+	*out = labelToState[1];
 	return true;
 }
 
