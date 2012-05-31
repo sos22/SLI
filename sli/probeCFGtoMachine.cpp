@@ -60,7 +60,8 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		       MemoryAccessIdentifierAllocator &mai)
 {
 	assert(cfgnode->fallThrough.second);
-	assert(cfgnode->branches.empty());
+	for (auto it = cfgnode->branches.begin(); it != cfgnode->branches.end(); it++)
+		assert(!it->second);
 	threadAndRegister rax(threadAndRegister::reg(tid, OFFSET_amd64_RAX, 0));
 	threadAndRegister arg1(threadAndRegister::reg(tid, OFFSET_amd64_RDI, 0));
 	threadAndRegister arg2(threadAndRegister::reg(tid, OFFSET_amd64_RSI, 0));
