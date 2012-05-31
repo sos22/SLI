@@ -96,7 +96,7 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 /* Find all of the states which definitely reach <survive> rather than
    <crash> and reduce them to just <survive> */
 static void
-removeSurvivingStates(StateMachine *sm, bool *done_something)
+removeSurvivingStates(StateMachine *sm, const AllowableOptimisations &opt, bool *done_something)
 {
 	std::set<StateMachineState *> survivingStates;
 	std::set<StateMachineState *> allStates;
@@ -110,6 +110,10 @@ removeSurvivingStates(StateMachine *sm, bool *done_something)
 			bool definitely_survives = true;
 			if (dynamic_cast<StateMachineCrash *>(s) ||
 			    dynamic_cast<StateMachineUnreached *>(s))
+				definitely_survives = false;
+			if (s->getSideEffect() &&
+			    s->getSideEffect()->type == StateMachineSideEffect::AssertFalse &&
+			    opt.preferCrash())
 				definitely_survives = false;
 			if (definitely_survives) {
 				std::vector<StateMachineState *> targets;
@@ -177,7 +181,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, &done_something);
 		if (opt.ignoreSideEffects())
-			removeSurvivingStates(sm, &done_something);
+			removeSurvivingStates(sm, opt, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
 		LibVEX_maybe_gc(token);
 		sm = availExpressionAnalysis(sm, opt, aliasp, is_ssa, oracle, &done_something);
@@ -424,7 +428,8 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 
 	VexPtr<IRExpr, &ir_heap> assumption;
 	assumption = atomicSurvivalConstraint(probeMachine, NULL, oracle,
-					      atomicSurvivalOptimisations(probeOptimisations), token);
+					      atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
+					      token);
 	if (!assumption)
 		return NULL;
 
@@ -444,7 +449,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 		probeMachine,
 		oracle,
 		writeMachineConstraint,
-		optIn,
+		optIn.enablepreferCrash(),
 		token);
 
 	if (!assumption) {
@@ -460,7 +465,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 			sm,
 			oracle,
 			assumption,
-			optIn,
+			optIn.disablepreferCrash(),
 			token);
 	if (!crash_constraint) {
 		fprintf(_logfile, "\t\tfailed to build crash constraint\n");
