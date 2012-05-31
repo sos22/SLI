@@ -1609,19 +1609,16 @@ shallowCloneState(StateMachineState *s)
 struct crossStateT {
 	StateMachineState *p;
 	StateMachineState *s;
-	bool probe_issued_load;
 	bool store_issued_store;
 	bool probe_is_atomic;
 	bool store_is_atomic;
 	crossStateT(StateMachineState *_p,
 		    StateMachineState *_s,
-		    bool _pil,
 		    bool _sis,
 		    bool _pia,
 		    bool _sia)
 		: p(_p),
 		  s(_s),
-		  probe_issued_load(_pil),
 		  store_issued_store(_sis),
 		  probe_is_atomic(_pia),
 		  store_is_atomic(_sia)
@@ -1634,7 +1631,6 @@ struct crossStateT {
 			return false
 		do_field(p);
 		do_field(s);
-		do_field(probe_issued_load);
 		do_field(store_issued_store);
 		do_field(probe_is_atomic);
 		do_field(store_is_atomic);
@@ -1733,7 +1729,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 	StateMachineState *crossMachineRoot;
 	crossMachineRoot = NULL;
 	pendingRelocs.push_back(
-		relocT(&crossMachineRoot, crossStateT(probeMachine->root, storeMachine->root, false, false, false, false)));
+		relocT(&crossMachineRoot, crossStateT(probeMachine->root, storeMachine->root, false, false, false)));
 	while (!pendingRelocs.empty()) {
 		relocT r(pendingRelocs.back());
 		pendingRelocs.pop_back();
@@ -1748,8 +1744,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 
 		struct {
 			StateMachineState *operator()(const crossStateT &crossState,
-						      std::vector<relocT> &pendingRelocs,
-						      bool racingLoad) {
+						      std::vector<relocT> &pendingRelocs) {
 				assert(!crossState.store_is_atomic);
 				StateMachineState *res = shallowCloneState(crossState.p);
 				bool lockState =
@@ -1766,7 +1761,6 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 						       crossStateT(
 							       **it,
 							       crossState.s,
-							       racingLoad || crossState.probe_issued_load,
 							       crossState.store_issued_store,
 							       lockState,
 							       crossState.store_is_atomic
@@ -1789,10 +1783,6 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 					!(crossState.s->getSideEffect() &&
 					  crossState.s->getSideEffect()->type == StateMachineSideEffect::EndAtomic);
 
-				bool isStore = false;
-				if (StateMachineSideEffect *se = crossState.s->getSideEffect())
-					isStore = se->type == StateMachineSideEffect::Store;
-
 				std::vector<StateMachineState **> targets;
 				res->targets(targets);
 				for (auto it = targets.begin(); it != targets.end(); it++) {
@@ -1801,8 +1791,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 						       crossStateT(
 							       crossState.p,
 							       **it,
-							       crossState.probe_issued_load,
-							       isStore || crossState.store_issued_store,
+							       true,
 							       crossState.probe_is_atomic,
 							       lockState)));
 					**it = NULL;
@@ -1817,7 +1806,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 			 * to an EndAtomic side effect. */
 			assert(!crossState.store_is_atomic);
 			assert(!crossState.p->isTerminal());
-			newState = advanceProbeMachine(crossState, pendingRelocs, false);
+			newState = advanceProbeMachine(crossState, pendingRelocs);
 		} else if (crossState.store_is_atomic) {
 			/* Likewise, if the store machine is currently
 			   atomic then we need to advance it. */
@@ -1856,9 +1845,8 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 				   machine has issued any loads, so
 				   turn that into <unreached> as
 				   well. */
-				if (crossState.probe_issued_load &&
-				    crossState.s->type == StateMachineState::Crash)
-					newState = advanceProbeMachine(crossState, pendingRelocs, false);
+				if (crossState.s->type == StateMachineState::Crash)
+					newState = advanceProbeMachine(crossState, pendingRelocs);
 				else
 					newState = StateMachineUnreached::get();
 			} else if (!probe_effect ||
@@ -1867,7 +1855,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 				   cannot race with anything left in
 				   the store machine then we should
 				   issue it unconditionally. */
-				newState = advanceProbeMachine(crossState, pendingRelocs, false);
+				newState = advanceProbeMachine(crossState, pendingRelocs);
 			} else if (!store_effect ||
 				   storeDefinitelyDoesntRace(store_effect, crossState.p, opt, oracle)) {
 				/* Likewise, if a store effect isn't a
@@ -1888,7 +1876,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 				std::vector<StateMachineState *> possible;
 				/* First possibility: let the probe
 				 * machine go first */
-				possible.push_back(advanceProbeMachine(crossState, pendingRelocs, true));
+				possible.push_back(advanceProbeMachine(crossState, pendingRelocs));
 				/* Second possibility: let the store
 				   machine go first. */
 				StateMachineState *s = advanceStoreMachine(crossState, pendingRelocs);
