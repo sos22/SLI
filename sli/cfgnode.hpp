@@ -76,6 +76,7 @@ void getStoreCFGs(const std::set<DynAnalysisRip> &, Oracle *,
 bool getProbeCFGs(Oracle *oracle, const DynAnalysisRip &vr,
 		  std::set<CFGNode *> &out);
 
+void resolveReferences(const std::map<VexRip, CFGNode *> &m, CFGNode *what);
 void resolveReferences(std::map<VexRip, CFGNode *> &m);
 void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			       const std::set<DynAnalysisRip> &roots);

@@ -66,13 +66,12 @@ CFGNode::forRip(Oracle *oracle, const VexRip &vr, CFGNode::flavour_t flavour)
 }
 
 void
-resolveReferences(std::map<VexRip, CFGNode *> &m)
+resolveReferences(const std::map<VexRip, CFGNode *> &m, CFGNode *what)
 {
-	if (TIMEOUT)
-		return;
+	assert(what);
 
 	struct {
-		std::map<VexRip, CFGNode *> *m;
+		const std::map<VexRip, CFGNode *> *m;
 		CFGNode *operator()(const VexRip &vr) {
 			if (!vr.isValid())
 				return NULL;
@@ -83,13 +82,19 @@ resolveReferences(std::map<VexRip, CFGNode *> &m)
 				return NULL;
 		}
 	} resolveBranch = {&m};
-	for (auto it = m.begin(); it != m.end(); it++) {
-		CFGNode *n = it->second;
-		assert(n);
-		n->fallThrough.second = resolveBranch(n->fallThrough.first);
-		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
-			it->second = resolveBranch(it->first);
-	}
+
+	what->fallThrough.second = resolveBranch(what->fallThrough.first);
+	for (auto it = what->branches.begin(); it != what->branches.end(); it++)
+		it->second = resolveBranch(it->first);
+}
+
+void
+resolveReferences(std::map<VexRip, CFGNode *> &m)
+{
+	if (TIMEOUT)
+		return;
+	for (auto it = m.begin(); it != m.end(); it++)
+		resolveReferences(m, it->second);
 }
 
 static void

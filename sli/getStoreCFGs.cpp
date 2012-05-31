@@ -505,6 +505,8 @@ backtrackWhereUnambiguous(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 			  Oracle *oracle)
 {
 	std::set<CFGNode *> roots;
+	findRoots(ripsToCFGNodes, roots);
+	std::set<CFGNode *> newNodes;
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		CFGNode *n = *it;
 		for (unsigned cntr = 0; cntr < CONFIG_MAX_STORE_BACKTRACK; cntr++) {
@@ -523,9 +525,12 @@ backtrackWhereUnambiguous(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 			if (!work)
 				break;
 			ripsToCFGNodes[predecessor] = work;
+			newNodes.insert(work);
 			n = work;
 		}
 	}
+	for (auto it = newNodes.begin(); it != newNodes.end(); it++)
+		resolveReferences(ripsToCFGNodes, *it);
 }
 
 static void
