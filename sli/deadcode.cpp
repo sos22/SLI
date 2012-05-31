@@ -211,7 +211,6 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 		const AllowableOptimisations &opt;
 
 		StateMachineSideEffect *doit(StateMachineSideEffect *e,
-					     bool targetIsTerminal,
 					     const LivenessEntry &alive) {
 			StateMachineSideEffect *newEffect = NULL;
 			bool dead = false;
@@ -276,7 +275,6 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 				StateMachineSideEffecting *smse = (StateMachineSideEffecting *)state;
 				if (smse->sideEffect)
 					smse->sideEffect = doit(smse->sideEffect,
-								false,
 								livenessMap.liveAtEndOfState(smse));
 				return;
 			}
