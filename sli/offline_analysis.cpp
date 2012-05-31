@@ -1014,7 +1014,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
-		.setAddressSpace(oracle->ms->addressSpace);
+		.setAddressSpace(oracle->ms->addressSpace)
+		.enablenoExtend();
 	VexPtr<StateMachine *, &ir_heap> probeMachines;
 	unsigned nrProbeMachines;
 	{
