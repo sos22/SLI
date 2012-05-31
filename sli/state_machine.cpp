@@ -188,6 +188,26 @@ StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, b
 	return this;
 }
 
+StateMachineSideEffect *
+StateMachineSideEffectStartAtomic::optimise(const AllowableOptimisations &opt, bool *done_something)
+{
+	if (opt.assumeExecutesAtomically()) {
+		*done_something = true;
+		return NULL;
+	}
+	return this;
+}
+
+StateMachineSideEffect *
+StateMachineSideEffectEndAtomic::optimise(const AllowableOptimisations &opt, bool *done_something)
+{
+	if (opt.assumeExecutesAtomically()) {
+		*done_something = true;
+		return NULL;
+	}
+	return this;
+}
+
 struct availEntry {
 	IRExpr *addr;
 	IRExpr *value;

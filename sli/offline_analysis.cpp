@@ -96,7 +96,7 @@ canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 /* Find all of the states which definitely reach <survive> rather than
    <crash> and reduce them to just <survive> */
 static void
-removeSurvivingStates(StateMachine *sm, bool *done_something)
+removeSurvivingStates(StateMachine *sm, const AllowableOptimisations &opt, bool *done_something)
 {
 	std::set<StateMachineState *> survivingStates;
 	std::set<StateMachineState *> allStates;
@@ -110,6 +110,10 @@ removeSurvivingStates(StateMachine *sm, bool *done_something)
 			bool definitely_survives = true;
 			if (dynamic_cast<StateMachineCrash *>(s) ||
 			    dynamic_cast<StateMachineUnreached *>(s))
+				definitely_survives = false;
+			if (s->getSideEffect() &&
+			    s->getSideEffect()->type == StateMachineSideEffect::AssertFalse &&
+			    opt.preferCrash())
 				definitely_survives = false;
 			if (definitely_survives) {
 				std::vector<StateMachineState *> targets;
@@ -177,7 +181,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, &done_something);
 		if (opt.ignoreSideEffects())
-			removeSurvivingStates(sm, &done_something);
+			removeSurvivingStates(sm, opt, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
 		LibVEX_maybe_gc(token);
 		sm = availExpressionAnalysis(sm, opt, aliasp, is_ssa, oracle, &done_something);
@@ -424,7 +428,8 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 
 	VexPtr<IRExpr, &ir_heap> assumption;
 	assumption = atomicSurvivalConstraint(probeMachine, NULL, oracle,
-					      atomicSurvivalOptimisations(probeOptimisations), token);
+					      atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
+					      token);
 	if (!assumption)
 		return NULL;
 
@@ -444,7 +449,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 		probeMachine,
 		oracle,
 		writeMachineConstraint,
-		optIn,
+		optIn.enablepreferCrash(),
 		token);
 
 	if (!assumption) {
@@ -460,7 +465,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 			sm,
 			oracle,
 			assumption,
-			optIn,
+			optIn.disablepreferCrash(),
 			token);
 	if (!crash_constraint) {
 		fprintf(_logfile, "\t\tfailed to build crash constraint\n");
@@ -781,6 +786,7 @@ machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, Oracle *oracle)
 static bool
 probeMachineToSummary(const DynAnalysisRip &targetRip,
 		      VexPtr<StateMachine, &ir_heap> &probeMachine,
+		      VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      VexPtr<Oracle> &oracle,
 		      VexPtr<CrashSummary, &ir_heap> &summary,
 		      bool needRemoteMacroSections,
@@ -802,7 +808,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 		return false;
 	assert(nrStoreCfgs != 0);
 
-	auto roughLoadCount = probeMachine->root->roughLoadCount();
+	auto roughLoadCount = assertionFreeProbeMachine->root->roughLoadCount();
 
 	bool foundRace;
 	foundRace = false;
@@ -814,7 +820,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 		}
 
 		if (singleNodeCfg &&
-		    machineHasOneRacingLoad(probeMachine, storeCFGs[i]->my_rip, oracle)) {
+		    machineHasOneRacingLoad(assertionFreeProbeMachine, storeCFGs[i]->my_rip, oracle)) {
 			fprintf(_logfile, "Single store versus single shared load -> no race possible\n");
 			continue;
 		}
@@ -852,18 +858,16 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 	fprintf(_logfile, "\n");
 
 	std::set<DynAnalysisRip> potentiallyConflictingStores;
-	{
-		/* If the only reason a load is live is to evaluate a
-		   later assertion, it doesn't count for the purposes
-		   of computing potentiallyConflictingStores.  The
-		   easy way of dealing with that is just to remove
-		   them and then re-optimise the machine. */
-		VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
-		reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, token);
-		if (!reducedProbeMachine)
-			return NULL;
-		getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
-	}
+	/* If the only reason a load is live is to evaluate a later
+	   assertion, it doesn't count for the purposes of computing
+	   potentiallyConflictingStores.  The easy way of dealing with
+	   that is just to remove them and then re-optimise the
+	   machine. */
+	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
+	reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, token);
+	if (!reducedProbeMachine)
+		return NULL;
+	getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
 	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 		return NULL;
@@ -871,7 +875,9 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 
 	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));
 
-	bool foundRace = probeMachineToSummary(targetRip, probeMachine, oracle,
+	bool foundRace = probeMachineToSummary(targetRip, probeMachine,
+					       reducedProbeMachine,
+					       oracle,
 					       summary, needRemoteMacroSections,
 					       potentiallyConflictingStores,
 					       optIn,
@@ -1014,7 +1020,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
-		.setAddressSpace(oracle->ms->addressSpace);
+		.setAddressSpace(oracle->ms->addressSpace)
+		.enablenoExtend();
 	VexPtr<StateMachine *, &ir_heap> probeMachines;
 	unsigned nrProbeMachines;
 	{

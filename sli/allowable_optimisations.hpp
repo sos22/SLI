@@ -31,6 +31,13 @@
                        turned on unless you're calling the optimiser
                        from a sanity check routine.
 
+   preferCrash -- If true, we try to optimise to make the machine
+                  crash when we have discretion (e.g. AssertFalse).
+                  Otherwise, we try to make it survive.  You generally
+                  want the former behaviour when you're deriving
+                  validity predicates and the latter for crash
+                  predicates.
+
    Other fields:
 
    interestingStores -- Bit of a hack: sometimes, only some side
@@ -55,7 +62,8 @@ class AllowableOptimisations {
 	f(ignoreSideEffects, bool)					\
 	f(assumeNoInterferingStores, bool)				\
 	f(noExtend,bool)						\
-	f(noSanityChecking,bool)
+	f(noSanityChecking,bool)					\
+	f(preferCrash,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\

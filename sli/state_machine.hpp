@@ -540,10 +540,7 @@ public:
 		fprintf(f, "START_ATOMIC");
 	}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *)
-	{
-		return this;
-	}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
 	}
@@ -566,10 +563,7 @@ public:
 		fprintf(f, "END_ATOMIC");
 	}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *)
-	{
-		return this;
-	}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
 	}
