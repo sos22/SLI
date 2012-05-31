@@ -1697,6 +1697,7 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads,
 					branch.push_back(StaticRip(((IRStmtExit *)stmt)->dst.rip));
 			}
 
+			rip = StaticRip( ((IRStmtIMark *)irsb->stmts[start_of_instruction])->addr.rip );
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
 					if (!irsb->next_is_const ||
