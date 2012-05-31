@@ -786,6 +786,7 @@ machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, Oracle *oracle)
 static bool
 probeMachineToSummary(const DynAnalysisRip &targetRip,
 		      VexPtr<StateMachine, &ir_heap> &probeMachine,
+		      VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      VexPtr<Oracle> &oracle,
 		      VexPtr<CrashSummary, &ir_heap> &summary,
 		      bool needRemoteMacroSections,
@@ -807,7 +808,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 		return false;
 	assert(nrStoreCfgs != 0);
 
-	auto roughLoadCount = probeMachine->root->roughLoadCount();
+	auto roughLoadCount = assertionFreeProbeMachine->root->roughLoadCount();
 
 	bool foundRace;
 	foundRace = false;
@@ -819,7 +820,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 		}
 
 		if (singleNodeCfg &&
-		    machineHasOneRacingLoad(probeMachine, storeCFGs[i]->my_rip, oracle)) {
+		    machineHasOneRacingLoad(assertionFreeProbeMachine, storeCFGs[i]->my_rip, oracle)) {
 			fprintf(_logfile, "Single store versus single shared load -> no race possible\n");
 			continue;
 		}
@@ -857,18 +858,16 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 	fprintf(_logfile, "\n");
 
 	std::set<DynAnalysisRip> potentiallyConflictingStores;
-	{
-		/* If the only reason a load is live is to evaluate a
-		   later assertion, it doesn't count for the purposes
-		   of computing potentiallyConflictingStores.  The
-		   easy way of dealing with that is just to remove
-		   them and then re-optimise the machine. */
-		VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
-		reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, token);
-		if (!reducedProbeMachine)
-			return NULL;
-		getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
-	}
+	/* If the only reason a load is live is to evaluate a later
+	   assertion, it doesn't count for the purposes of computing
+	   potentiallyConflictingStores.  The easy way of dealing with
+	   that is just to remove them and then re-optimise the
+	   machine. */
+	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
+	reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, token);
+	if (!reducedProbeMachine)
+		return NULL;
+	getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
 	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 		return NULL;
@@ -876,7 +875,9 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 
 	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));
 
-	bool foundRace = probeMachineToSummary(targetRip, probeMachine, oracle,
+	bool foundRace = probeMachineToSummary(targetRip, probeMachine,
+					       reducedProbeMachine,
+					       oracle,
 					       summary, needRemoteMacroSections,
 					       potentiallyConflictingStores,
 					       optIn,
