@@ -137,44 +137,6 @@
    No prefixes may precede a "Special" instruction.
 */
 
-/* casLE (implementation of lock-prefixed insns) and rep-prefixed
-   insns: the side-exit back to the start of the insn is done with
-   Ijk_Boring.  This is quite wrong, it should be done with
-   Ijk_NoRedir, since otherwise the side exit, which is intended to
-   restart the instruction for whatever reason, could go somewhere
-   entirely else.  Doing it right (with Ijk_NoRedir jumps) would make
-   no-redir jumps performance critical, at least for rep-prefixed
-   instructions, since all iterations thereof would involve such a
-   jump.  It's not such a big deal with casLE since the side exit is
-   only taken if the CAS fails, that is, the location is contended,
-   which is relatively unlikely.
-
-   Note also, the test for CAS success vs failure is done using
-   Iop_CasCmp{EQ,NE}{8,16,32,64} rather than the ordinary
-   Iop_Cmp{EQ,NE} equivalents.  This is so as to tell Memcheck that it
-   shouldn't definedness-check these comparisons.  See
-   COMMENT_ON_CasCmpEQ in memcheck/mc_translate.c for
-   background/rationale.
-*/
-
-/* LOCK prefixed instructions.  These are translated using IR-level
-   CAS statements (IRCAS) and are believed to preserve atomicity, even
-   from the point of view of some other process racing against a
-   simulated one (presumably they communicate via a shared memory
-   segment).
-
-   Handlers which are aware of LOCK prefixes are:
-      dis_op2_G_E      (add, or, adc, sbb, and, sub, xor)
-      dis_cmpxchg_G_E  (cmpxchg)
-      dis_Grp1         (add, or, adc, sbb, and, sub, xor)
-      dis_Grp3         (not, neg)
-      dis_Grp4         (inc, dec)
-      dis_Grp5         (inc, dec)
-      dis_Grp8_Imm     (bts, btc, btr)
-      dis_bt_G_E       (bts, btc, btr)
-      dis_xadd_G_E     (xadd)
-*/
-
 
 #include "libvex_basictypes.h"
 #include "libvex_ir.h"
@@ -1407,35 +1369,6 @@ static IRExpr* mkAnd1 ( IRExpr* x, IRExpr* y )
                      unop(Iop_1Uto64,y)));
 }
 
-/* Generate a compare-and-swap operation, operating on memory at
-   'addr'.  The expected value is 'expVal' and the new value is
-   'newVal'.  If the operation fails, then transfer control (with a
-   no-redir jump (XXX no -- see comment at top of this file)) to
-   'restart_point', which is presumably the address of the guest
-   instruction again -- retrying, essentially. */
-static void casLE ( IRExpr* addr, IRExpr* expVal, IRExpr* newVal,
-                    const ThreadRip &restart_point, unsigned tid )
-{
-   IRCAS* cas;
-   IRType tyE    = expVal->type();
-   IRTemp oldTmp = newTemp();
-   IRTemp expTmp = newTemp();
-   vassert(tyE == Ity_I64 || tyE == Ity_I32
-           || tyE == Ity_I16 || tyE == Ity_I8);
-   assign(expTmp, expVal);
-   cas = mkIRCAS( threadAndRegister::invalid(),
-		  threadAndRegister::temp(tid, oldTmp, 0),
-		  addr, NULL, mkexpr(expTmp, tid, tyE), NULL, newVal );
-   stmt( IRStmt_CAS(cas) );
-   stmt( IRStmt_Exit(
-            binop( mkSizedOp(tyE,Iop_CasCmpNE8),
-                   mkexpr(oldTmp, tid, tyE), mkexpr(expTmp, tid, tyE) ),
-            Ijk_Boring, /*Ijk_NoRedir*/
-            restart_point
-         ));
-}
-
-
 /*------------------------------------------------------------*/
 /*--- Helpers for %rflags.                                 ---*/
 /*------------------------------------------------------------*/
@@ -1802,7 +1735,7 @@ static void helper_ADC ( unsigned tid,
 			 Int sz,
                          IRTemp tres, IRTemp ta1, IRTemp ta2,
                          /* info about optional store: */
-                         IRTemp taddr, IRTemp texpVal, const ThreadRip &restart_point)
+                         IRTemp taddr, const ThreadRip &restart_point)
 {
    UInt    thunkOp;
    IRType  ty    = szToITy(sz);
@@ -1834,15 +1767,8 @@ static void helper_ADC ( unsigned tid,
    /* Possibly generate a store of 'tres' to 'taddr'.  See comment at
       start of this function. */
    if (taddr != IRTemp_INVALID) {
-      if (texpVal == IRTemp_INVALID) {
-	 vassert(!restart_point.rip.isValid());
-         storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
-      } else {
-         /* .. and hence 'texpVal' has the same type as 'tres'. */
-         casLE( mkexpr(taddr, tid, Ity_I64),
-                mkexpr(texpVal, tid, ty), mkexpr(tres, tid, ty), restart_point,
-		tid);
-      }
+      vassert(!restart_point.rip.isValid());
+      storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
    }
 
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
@@ -1861,7 +1787,7 @@ static void helper_SBB ( unsigned tid,
 			 Int sz,
                          IRTemp tres, IRTemp ta1, IRTemp ta2,
                          /* info about optional store: */
-                         IRTemp taddr, IRTemp texpVal, const ThreadRip &restart_point)
+                         IRTemp taddr, const ThreadRip &restart_point)
 {
    UInt    thunkOp;
    IRType  ty    = szToITy(sz);
@@ -1893,15 +1819,8 @@ static void helper_SBB ( unsigned tid,
    /* Possibly generate a store of 'tres' to 'taddr'.  See comment at
       start of this function. */
    if (taddr != IRTemp_INVALID) {
-      if (texpVal == IRTemp_INVALID) {
-         vassert(!restart_point.rip.isValid());
-         storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
-      } else {
-         /* .. and hence 'texpVal' has the same type as 'tres'. */
-         casLE( mkexpr(taddr, tid, Ity_I64),
-                mkexpr(texpVal, tid, ty), mkexpr(tres, tid, ty), restart_point,
-		tid );
-      }
+      vassert(!restart_point.rip.isValid());
+      storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
    }
 
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
@@ -2644,12 +2563,12 @@ ULong dis_op2_E_G ( unsigned tid,
 
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID, ThreadRip() );
          putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          helper_SBB(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID, ThreadRip() );
          putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else {
          assign( dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)) );
@@ -2673,12 +2592,12 @@ ULong dis_op2_E_G ( unsigned tid,
 
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID, ThreadRip() );
          putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          helper_SBB(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID, ThreadRip() );
          putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else {
          assign( dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)) );
@@ -2760,12 +2679,12 @@ ULong dis_op2_G_E ( unsigned tid,
 
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID, ThreadRip() );
          putIRegE(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          helper_SBB(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID, ThreadRip() );
          putIRegE(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
@@ -2792,12 +2711,12 @@ ULong dis_op2_G_E ( unsigned tid,
       if (addSubCarry && op8 == Iop_Add8) {
          /* normal store */
          helper_ADC(tid,  size, dst1, dst0, src,
-	            /*store*/addr, IRTemp_INVALID, ThreadRip() );
+	            /*store*/addr, ThreadRip() );
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          /* normal store */
          helper_SBB(tid,  size, dst1, dst0, src,
-		    /*store*/addr, IRTemp_INVALID, ThreadRip() );
+		    /*store*/addr, ThreadRip() );
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (keep) {
@@ -2945,12 +2864,12 @@ ULong dis_op_imm_A ( unsigned tid,
    else
    if (op8 == Iop_Add8 && carrying) {
       helper_ADC(tid,  size, dst1, dst0, src,
-		 /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+		 /*no store*/IRTemp_INVALID, ThreadRip() );
    }
    else
    if (op8 == Iop_Sub8 && carrying) {
       helper_SBB(tid,  size, dst1, dst0, src,
-                  /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+                  /*no store*/IRTemp_INVALID, ThreadRip() );
    }
    else
       vpanic("dis_op_imm_A(amd64,guest)");
@@ -3107,11 +3026,11 @@ ULong dis_Grp1 ( unsigned tid,
 
       if (gregLO3ofRM(modrm) == 2 /* ADC */) {
          helper_ADC(tid,  sz, dst1, dst0, src,
-                     /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+                     /*no store*/IRTemp_INVALID, ThreadRip() );
       } else 
       if (gregLO3ofRM(modrm) == 3 /* SBB */) {
          helper_SBB(tid,  sz, dst1, dst0, src,
-                     /*no store*/IRTemp_INVALID, IRTemp_INVALID, ThreadRip() );
+                     /*no store*/IRTemp_INVALID, ThreadRip() );
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (isAddSub(op8))
@@ -3136,12 +3055,12 @@ ULong dis_Grp1 ( unsigned tid,
       if (gregLO3ofRM(modrm) == 2 /* ADC */) {
 	/* normal store */
 	helper_ADC(tid,  sz, dst1, dst0, src,
-		   /*store*/addr, IRTemp_INVALID, ThreadRip() );
+		   /*store*/addr, ThreadRip() );
       } else 
       if (gregLO3ofRM(modrm) == 3 /* SBB */) {
 	 /* normal store */
 	 helper_SBB(tid,  sz, dst1, dst0, src,
-		    /*store*/addr, IRTemp_INVALID, ThreadRip() );
+		    /*store*/addr, ThreadRip() );
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (gregLO3ofRM(modrm) < 7) {
@@ -14939,16 +14858,16 @@ DisResult disInstr_AMD64_WRK (
              nameISize(sz), nameIRegG(sz, pfx, modrm), 
                             nameIRegE(sz, pfx, modrm));
       } else {
+	 stmt(IRStmt_StartAtomic());
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
          assign( t1, loadLE(ty, mkexpr(addr, tid, Ity_I64), guest_code.rip) );
          assign( t2, getIRegG( sz, pfx, modrm) );
-         casLE( mkexpr(addr, tid, Ity_I64),
-                mkexpr(t1, tid, ty), mkexpr(t2, tid, ty), guest_RIP_curr_instr,
-		tid );
+	 storeLE(mkexpr(addr, tid, Ity_I64), mkexpr(t2, tid, ty) );
          putIRegG( sz, pfx, modrm, mkexpr(t1, tid, ty) );
          delta += alen;
          DIP("xchg%c %s, %s\n", nameISize(sz), 
                                 nameIRegG(sz, pfx, modrm), dis_buf);
+	 stmt(IRStmt_EndAtomic());
       }
       break;
 
