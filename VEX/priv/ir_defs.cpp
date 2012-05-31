@@ -1560,9 +1560,11 @@ void ppIRSB ( IRSB* bb, FILE* f )
    fprintf(f,  "} ");
    if ( bb->next_is_const ) {
      fprintf(f, "const %s\n}\n", bb->next_const.name());
-   } else {
+   } else if ( bb->next_nonconst ) {
      ppIRExpr( bb->next_nonconst, f );
      fprintf(f,  "\n}\n");
+   } else {
+     fprintf(f, "<null>\n}\n");
    }
 }
 
