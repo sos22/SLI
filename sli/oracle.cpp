@@ -1998,8 +1998,10 @@ Oracle::Function::updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool
 			res = irexprUsedValues(res, ((IRStmtExit *)stmt)->guard);
 			break;
 		}
-		default:
-			abort();
+		case Ist_StartAtomic:
+			break;
+		case Ist_EndAtomic:
+			break;
 		}
 	}
 
@@ -2384,8 +2386,10 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			}
 			break;
 		}
-		default:
-			abort();
+		case Ist_StartAtomic:
+			break;
+		case Ist_EndAtomic:
+			break;
 		}
 	}
 
