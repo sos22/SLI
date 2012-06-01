@@ -589,19 +589,6 @@ public:
 		}
 	}
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
-				  const std::vector<unsigned> &_generations)
-		: StateMachineSideEffect(StateMachineSideEffect::Phi),
-		  reg(_reg)
-	{
-		generations.reserve(_generations.size());
-		for (auto it = _generations.begin(); it != _generations.end(); it++) {
-			std::pair<unsigned, IRExpr *> item;
-			item.first = *it;
-			item.second = NULL;
-			generations.push_back(item);
-		}
-	}
-	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  const std::vector<std::pair<unsigned, IRExpr *> > &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
 		  reg(_reg), generations(_generations)

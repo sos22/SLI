@@ -398,16 +398,26 @@ parseStateMachineSideEffect(StateMachineSideEffect **out,
 	if (parseThisString("Phi", str, &str2) &&
 	    parseThreadAndRegister(&key, str2, &str2) &&
 	    parseThisString("(", str2, &str2)) {
-		std::vector<unsigned> generations;
-		while (1) {
-			int x;
-			if (!parseDecimalInt(&x, str2, &str2) ||
-			    !parseThisString(", ", str2, &str2))
-				break;
-			generations.push_back(x);
+		std::vector<std::pair<unsigned, IRExpr *> > generations;
+		if (!parseThisChar(')', str2, suffix)) {
+			while (1) {
+				int x;
+				IRExpr *val;
+				if (!parseDecimalInt(&x, str2, &str2))
+					return false;
+				if (parseThisChar('=', str2, &str2)) {
+					if (!parseIRExpr(&val, str2, &str2))
+						return false;
+				} else {
+					val = NULL;
+				}
+				generations.push_back(std::pair<unsigned, IRExpr *>(x, val));
+				if (parseThisChar(')', str2, suffix))
+					break;
+				if (!parseThisString(", ", str2, &str2))
+					return false;
+			}
 		}
-		if (!parseThisString(")", str2, suffix))
-			return false;
 		*out = new StateMachineSideEffectPhi(key, generations);
 		return true;
 	}
