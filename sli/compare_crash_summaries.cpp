@@ -11,7 +11,8 @@
 static bool
 localSimilarity(IRExpr *a, IRExpr *b)
 {
-	return definitelyEqual(a, b, AllowableOptimisations::defaultOptimisations);
+	return a->type() == b->type() &&
+		definitelyEqual(a, b, AllowableOptimisations::defaultOptimisations);
 }
 
 static bool
