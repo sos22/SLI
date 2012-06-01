@@ -7,6 +7,7 @@
 #include "libvex_prof.hpp"
 #include "oracle.hpp"
 #include "offline_analysis.hpp"
+#include "intern.hpp"
 
 static CrashSummary *
 read_crash_summary(const char *name, char **first_line)
@@ -96,6 +97,7 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 class SplitSsaGenerations : public StateMachineTransformer {
 	std::set<threadAndRegister, threadAndRegister::fullCompare> &phiRegs;
 	std::map<threadAndRegister, threadAndRegister, threadAndRegister::fullCompare> canonTable;
+	std::map<IRExprLoad *, threadAndRegister> canonLoadTable;
 	std::map<unsigned, unsigned> next_temp_id;
 	unsigned alloc_temp_id(unsigned tid) {
 		auto it_did_insert = next_temp_id.insert(std::pair<unsigned, unsigned>(tid, 1));
@@ -114,9 +116,21 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			it->second = threadAndRegister::temp(input.tid(), alloc_temp_id(input.tid()), 0);
 		return it->second;
 	}
+	threadAndRegister canon_load(IRExprLoad *iel)
+	{
+		auto it_did_insert = canonLoadTable.insert(std::pair<IRExprLoad *, threadAndRegister>(iel, threadAndRegister::invalid()));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (did_insert)
+			it->second = threadAndRegister::temp(-1, alloc_temp_id(-1), 0);
+		return it->second;
+	}
 
 	IRExpr *transformIex(IRExprGet *ieg) {
 		return IRExpr_Get(canon_reg(ieg->reg), ieg->ty);
+	}
+	IRExpr *transformIex(IRExprLoad *iel) {
+		return IRExpr_Get(canon_load(iel), iel->ty);
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
 		StateMachineSideEffectLoad *smsel, bool *done_something)
@@ -151,6 +165,15 @@ public:
 static CrashSummary *
 canonicalise_crash_summary(CrashSummary *input)
 {
+	internStateMachineTable t;
+	input->loadMachine = internStateMachine(input->loadMachine, t);
+	for (auto it = input->storeMachines.begin();
+	     it != input->storeMachines.end();
+	     it++) {
+		(*it)->assumption = internIRExpr((*it)->assumption, t);
+		(*it)->machine = internStateMachine((*it)->machine, t);
+	}
+
 	struct : public StateMachineTransformer {
 		std::set<threadAndRegister, threadAndRegister::fullCompare> res;
 		IRExpr *transformIexPhi(IRExprPhi *phi) {

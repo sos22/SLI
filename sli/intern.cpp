@@ -6,20 +6,6 @@
 #include "state_machine.hpp"
 #include "libvex_prof.hpp"
 
-struct internStateMachineTable : public internIRExprTable {
-	std::map<StateMachineSideEffect *, StateMachineSideEffect *> sideEffects;
-	std::map<StateMachineState *, StateMachineState *> states;
-	std::set<StateMachineSideEffectStore *> stores;
-	std::set<StateMachineSideEffectLoad *> loads;
-	std::set<StateMachineSideEffectCopy *> copies;
-	std::set<StateMachineSideEffectPhi *> phis;
-	std::set<StateMachineSideEffectAssertFalse *> asserts;
-	std::set<StateMachineBifurcate *> states_bifurcate;
-	std::set<StateMachineStub *> states_stub;
-	std::set<StateMachineSideEffecting *> states_side_effect;
-	std::set<StateMachineNdChoice *> states_ndchoice;
-};
-
 static unsigned
 shallow_hash(const IRExpr *e)
 {
@@ -465,10 +451,16 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 }
 
 StateMachine *
-internStateMachine(StateMachine *sm)
+internStateMachine(StateMachine *sm, internStateMachineTable &t)
 {
 	__set_profiling(internStateMachine);
-	internStateMachineTable t;
 	sm->root = internStateMachineState(sm->root, t);
 	return sm;
+}
+
+StateMachine *
+internStateMachine(StateMachine *sm)
+{
+	internStateMachineTable t;
+	return internStateMachine(sm, t);
 }
