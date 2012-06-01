@@ -274,7 +274,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	std::vector<CrashSummary *> summaries;
+	std::vector<std::pair<char *, CrashSummary *> > summaries;
 	DIR *d = opendir(".");
 	if (!d)
 		err(1, "opening ./");
@@ -290,15 +290,16 @@ main(int argc, char *argv[])
 			continue;
 		CrashSummary *summary = read_crash_summary(de->d_name);
 		bool found_dupe = false;
-		for (auto it = summaries.begin(); !found_dupe && it != summaries.end(); it++)
-			found_dupe |= crashSummariesTheSame(summary, *it);
+		auto it = summaries.begin();
+		for (; !found_dupe && it != summaries.end(); it++)
+			found_dupe |= crashSummariesTheSame(summary, it->second);
 		if (found_dupe) {
-			printf("%s is a dupe\n", de->d_name);
+			printf("%s is a dupe of %s\n", de->d_name, it->first);
 			unlink(de->d_name);
 			continue;
 		}
 		printf("%s is unique\n", de->d_name);
-		summaries.push_back(summary);
+		summaries.push_back(std::pair<char *, CrashSummary *>(strdup(de->d_name), summary));
 	}
 	return 0;	
 }
