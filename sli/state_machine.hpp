@@ -147,8 +147,19 @@ public:
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap>, public PrettyPrintable {
 	StateMachineSideEffect(); /* DNE */
 public:
+#define all_side_effect_types(f)		\
+	f(Load)					\
+	f(Store)				\
+	f(Copy)					\
+	f(Unreached)				\
+	f(AssertFalse)				\
+	f(Phi)					\
+	f(StartAtomic)				\
+	f(EndAtomic)
 	enum sideEffectType {
-		Load, Store, Copy, Unreached, AssertFalse, Phi, StartAtomic, EndAtomic
+#define mk_one(n) n,
+		all_side_effect_types(mk_one)
+#undef mk_one
 	} type;
 protected:
 	StateMachineSideEffect(enum sideEffectType _type)
@@ -474,6 +485,14 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
+	static bool parse(StateMachineSideEffectUnreached **out, const char *str, const char **suffix)
+	{
+		if (parseThisString("<unreached>", str, suffix)) {
+			*out = StateMachineSideEffectUnreached::get();
+			return true;
+		}
+		return false;
+	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &) {}
@@ -516,6 +535,22 @@ public:
 		fprintf(f, ") <- ");
 		ppIRExpr(data, f);
 		fprintf(f, " @ %s", rip.name());
+	}
+	static bool parse(StateMachineSideEffectStore **out, const char *str, const char **suffix)
+	{
+		IRExpr *addr;
+		IRExpr *data;
+		MemoryAccessIdentifier where(MemoryAccessIdentifier::uninitialised());
+		if (parseThisString("*(", str, &str) &&
+		    parseIRExpr(&addr, str, &str) &&
+		    parseThisString(") <- ", str, &str) &&
+		    parseIRExpr(&data, str, &str) &&
+		    parseThisString(" @ ", str, &str) &&
+		    parseMemoryAccessIdentifier(&where, str, suffix)) {
+			*out = new StateMachineSideEffectStore(addr, data, where);
+			return true;
+		}
+		return false;
 	}
 	void visit(HeapVisitor &hv) {
 		StateMachineSideEffectMemoryAccess::visit(hv);
@@ -561,6 +596,25 @@ public:
 		ppIRExpr(addr, f);
 		fprintf(f, ")@%s", rip.name());
 	}
+	static bool parse(StateMachineSideEffectLoad **out, const char *str, const char **suffix)
+	{
+		IRExpr *addr;
+		threadAndRegister key(threadAndRegister::invalid());
+		MemoryAccessIdentifier where(MemoryAccessIdentifier::uninitialised());
+		IRType type;
+		if (parseThisString("LOAD ", str, &str) &&
+		    parseThreadAndRegister(&key, str, &str) &&
+		    parseThisString(":", str, &str) &&
+		    parseIRType(&type, str, &str) &&
+		    parseThisString(" <- *(", str, &str) &&
+		    parseIRExpr(&addr, str, &str) &&
+		    parseThisString(")@", str, &str) &&
+		    parseMemoryAccessIdentifier(&where, str, suffix)) {
+			*out = new StateMachineSideEffectLoad(key, addr, where, type);
+			return true;
+		}
+		return false;
+	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
 		l.insert(addr);
@@ -584,6 +638,19 @@ public:
 		target.prettyPrint(f);
 		fprintf(f, " = ");
 		ppIRExpr(value, f);
+	}
+	static bool parse(StateMachineSideEffectCopy **out, const char *str, const char **suffix)
+	{
+		IRExpr *data;
+		threadAndRegister key(threadAndRegister::invalid());
+		if (parseThisString("COPY ", str, &str) &&
+		    parseThreadAndRegister(&key, str, &str) &&
+		    parseThisString(" = ", str, &str) &&
+		    parseIRExpr(&data, str, suffix)) {
+			*out = new StateMachineSideEffectCopy(key, data);
+			return true;
+		}
+		return false;
 	}
 	void visit(HeapVisitor &hv) {
 		hv(value);
@@ -612,6 +679,25 @@ public:
 		fprintf(f, "Assert !(");
 		ppIRExpr(value, f);
 		fprintf(f, ") %s", reflectsActualProgram ? "REAL" : "FAKE");
+	}
+	static bool parse(StateMachineSideEffectAssertFalse **out, const char *str, const char **suffix)
+	{
+		IRExpr *data;
+		if (parseThisString("Assert !(", str, &str) &&
+		    parseIRExpr(&data, str, &str) &&
+		    parseThisChar(')', str, &str)) {
+			bool isReal;
+			if (parseThisString(" REAL", str, suffix)) {
+				isReal = true;
+			} else if (parseThisString(" FAKE", str, suffix)) {
+				isReal = false;
+			} else {
+				return false;
+			}
+			*out = new StateMachineSideEffectAssertFalse(data, isReal);
+			return true;
+		}
+		return false;
 	}
 	void visit(HeapVisitor &hv) {
 		hv(value);
@@ -642,6 +728,14 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "START_ATOMIC");
 	}
+	static bool parse(StateMachineSideEffectStartAtomic **out, const char *str, const char **suffix)
+	{
+		if (parseThisString("START_ATOMIC", str, suffix)) {
+			*out = StateMachineSideEffectStartAtomic::get();
+			return true;
+		}
+		return false;
+	}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
@@ -664,6 +758,14 @@ public:
 	}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "END_ATOMIC");
+	}
+	static bool parse(StateMachineSideEffectEndAtomic **out, const char *str, const char **suffix)
+	{
+		if (parseThisString("END_ATOMIC", str, suffix)) {
+			*out = StateMachineSideEffectEndAtomic::get();
+			return true;
+		}
+		return false;
 	}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
@@ -711,6 +813,37 @@ public:
 			}
 		}
 		fprintf(f, ")");
+	}
+	static bool parse(StateMachineSideEffectPhi **out, const char *str, const char **suffix)
+	{
+		threadAndRegister key(threadAndRegister::invalid());
+		if (parseThisString("Phi", str, &str) &&
+		    parseThreadAndRegister(&key, str, &str) &&
+		    parseThisString("(", str, &str)) {
+			std::vector<std::pair<unsigned, IRExpr *> > generations;
+			if (!parseThisChar(')', str, suffix)) {
+				while (1) {
+					int x;
+					IRExpr *val;
+					if (!parseDecimalInt(&x, str, &str))
+						return false;
+					if (parseThisChar('=', str, &str)) {
+						if (!parseIRExpr(&val, str, &str))
+							return false;
+					} else {
+						val = NULL;
+					}
+					generations.push_back(std::pair<unsigned, IRExpr *>(x, val));
+					if (parseThisChar(')', str, suffix))
+						break;
+					if (!parseThisString(", ", str, &str))
+						return false;
+				}
+			}
+			*out = new StateMachineSideEffectPhi(key, generations);
+			return true;
+		}
+		return false;
 	}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);

@@ -344,91 +344,16 @@ StateMachineSideEffect::parse(StateMachineSideEffect **out,
 			      const char *str,
 			      const char **suffix)
 {
-	const char *str2;
-	if (parseThisString("<unreached>", str, suffix)) {
-		*out = StateMachineSideEffectUnreached::get();
-		return true;
+#define do_one(n)							\
+	{								\
+		StateMachineSideEffect ## n *res;			\
+		if (StateMachineSideEffect ## n :: parse(&res, str, suffix) ) {	\
+			*out = res;					\
+			return true;					\
+		}							\
 	}
-	IRExpr *addr;
-	IRExpr *data;
-	MemoryAccessIdentifier where(MemoryAccessIdentifier::uninitialised());
-	if (parseThisString("*(", str, &str2) &&
-	    parseIRExpr(&addr, str2, &str2) &&
-	    parseThisString(") <- ", str2, &str2) &&
-	    parseIRExpr(&data, str2, &str2) &&
-	    parseThisString(" @ ", str2, &str2) &&
-	    parseMemoryAccessIdentifier(&where, str2, suffix)) {
-		*out = new StateMachineSideEffectStore(addr, data, where);
-		return true;
-	}
-	threadAndRegister key(threadAndRegister::invalid());
-	IRType type;
-	if (parseThisString("LOAD ", str, &str2) &&
-	    parseThreadAndRegister(&key, str2, &str2) &&
-	    parseThisString(":", str2, &str2) &&
-	    parseIRType(&type, str2, &str2) &&
-	    parseThisString(" <- *(", str2, &str2) &&
-	    parseIRExpr(&addr, str2, &str2) &&
-	    parseThisString(")@", str2, &str2) &&
-	    parseMemoryAccessIdentifier(&where, str2, suffix)) {
-		*out = new StateMachineSideEffectLoad(key, addr, where, type);
-		return true;
-	}
-	if (parseThisString("COPY ", str, &str2) &&
-	    parseThreadAndRegister(&key, str2, &str2) &&
-	    parseThisString(" = ", str2, &str2) &&
-	    parseIRExpr(&data, str2, suffix)) {
-		*out = new StateMachineSideEffectCopy(key, data);
-		return true;
-	}
-	if (parseThisString("Assert !(", str, &str2) &&
-	    parseIRExpr(&data, str2, &str2) &&
-	    parseThisChar(')', str2, &str2)) {
-		bool isReal;
-		if (parseThisString(" REAL", str2, suffix)) {
-			isReal = true;
-		} else if (parseThisString(" FAKE", str2, suffix)) {
-			isReal = false;
-		} else {
-			return false;
-		}
-		*out = new StateMachineSideEffectAssertFalse(data, isReal);
-		return true;
-	}
-	if (parseThisString("Phi", str, &str2) &&
-	    parseThreadAndRegister(&key, str2, &str2) &&
-	    parseThisString("(", str2, &str2)) {
-		std::vector<std::pair<unsigned, IRExpr *> > generations;
-		if (!parseThisChar(')', str2, suffix)) {
-			while (1) {
-				int x;
-				IRExpr *val;
-				if (!parseDecimalInt(&x, str2, &str2))
-					return false;
-				if (parseThisChar('=', str2, &str2)) {
-					if (!parseIRExpr(&val, str2, &str2))
-						return false;
-				} else {
-					val = NULL;
-				}
-				generations.push_back(std::pair<unsigned, IRExpr *>(x, val));
-				if (parseThisChar(')', str2, suffix))
-					break;
-				if (!parseThisString(", ", str2, &str2))
-					return false;
-			}
-		}
-		*out = new StateMachineSideEffectPhi(key, generations);
-		return true;
-	}
-	if (parseThisString("START_ATOMIC", str, suffix)) {
-		*out = StateMachineSideEffectStartAtomic::get();
-		return true;
-	}
-	if (parseThisString("END_ATOMIC", str, suffix)) {
-		*out = StateMachineSideEffectEndAtomic::get();
-		return true;
-	}
+	all_side_effect_types(do_one)
+#undef do_one
 	return false;
 }
 
