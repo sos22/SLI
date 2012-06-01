@@ -7,60 +7,60 @@
 #include "offline_analysis.hpp"
 
 static bool
-localSimilarity(IRExpr *a, IRExpr *b, Oracle *)
+localSimilarity(IRExpr *a, IRExpr *b)
 {
 	return definitelyEqual(a, b, AllowableOptimisations::defaultOptimisations);
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectLoad *smsel1, StateMachineSideEffectLoad *smsel2, Oracle *oracle)
+localSimilarity2(StateMachineSideEffectLoad *smsel1, StateMachineSideEffectLoad *smsel2)
 {
-	return localSimilarity(smsel1->addr, smsel2->addr, oracle) &&
+	return localSimilarity(smsel1->addr, smsel2->addr) &&
 		threadAndRegister::fullEq(smsel1->target, smsel2->target) &&
 		smsel1->type == smsel2->type;
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectStore *smsel1, StateMachineSideEffectStore *smsel2, Oracle *oracle)
+localSimilarity2(StateMachineSideEffectStore *smsel1, StateMachineSideEffectStore *smsel2)
 {
-	return localSimilarity(smsel1->addr, smsel2->addr, oracle) &&
-		localSimilarity(smsel1->data, smsel2->data, oracle);
+	return localSimilarity(smsel1->addr, smsel2->addr) &&
+		localSimilarity(smsel1->data, smsel2->data);
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectCopy *smsel1, StateMachineSideEffectCopy *smsel2, Oracle *oracle)
+localSimilarity2(StateMachineSideEffectCopy *smsel1, StateMachineSideEffectCopy *smsel2)
 {
-	return localSimilarity(smsel1->value, smsel2->value, oracle) &&
+	return localSimilarity(smsel1->value, smsel2->value) &&
 		threadAndRegister::fullEq(smsel1->target, smsel2->target);
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectAssertFalse *smsel1, StateMachineSideEffectAssertFalse *smsel2, Oracle *oracle)
+localSimilarity2(StateMachineSideEffectAssertFalse *smsel1, StateMachineSideEffectAssertFalse *smsel2)
 {
-	return localSimilarity(smsel1->value, smsel2->value, oracle) &&
+	return localSimilarity(smsel1->value, smsel2->value) &&
 		smsel1->reflectsActualProgram == smsel2->reflectsActualProgram;
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectStartAtomic *, StateMachineSideEffectStartAtomic *, Oracle *)
+localSimilarity2(StateMachineSideEffectStartAtomic *, StateMachineSideEffectStartAtomic *)
 {
 	return true;
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectEndAtomic *, StateMachineSideEffectEndAtomic *, Oracle *)
+localSimilarity2(StateMachineSideEffectEndAtomic *, StateMachineSideEffectEndAtomic *)
 {
 	return true;
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectUnreached *, StateMachineSideEffectUnreached *, Oracle *)
+localSimilarity2(StateMachineSideEffectUnreached *, StateMachineSideEffectUnreached *)
 {
 	return true;
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2, Oracle *)
+localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2)
 {
 	if (!threadAndRegister::fullEq(e1->reg, e2->reg))
 		return false;
@@ -84,7 +84,7 @@ localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2, O
 }
 
 static bool
-localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2, Oracle *oracle)
+localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2)
 {
 	if (smse1->type != smse2->type)
 		return false;
@@ -92,8 +92,7 @@ localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2, Or
 #define do_case(n)							\
 		case StateMachineSideEffect::n:				\
 			return localSimilarity2( (StateMachineSideEffect ## n *)smse1, \
-						 (StateMachineSideEffect ## n *)smse2, \
-						 oracle )
+						 (StateMachineSideEffect ## n *)smse2 )
 		do_case(Load);
 		do_case(Store);
 		do_case(Copy);
@@ -107,47 +106,47 @@ localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2, Or
 }
 
 static bool
-localSimilarity(StateMachineUnreached *, StateMachineUnreached *, Oracle *)
+localSimilarity(StateMachineUnreached *, StateMachineUnreached *)
 {
 	return true;
 }
 
 static bool
-localSimilarity(StateMachineCrash *, StateMachineCrash *, Oracle *)
+localSimilarity(StateMachineCrash *, StateMachineCrash *)
 {
 	return true;
 }
 
 static bool
-localSimilarity(StateMachineNoCrash *, StateMachineNoCrash *, Oracle *)
+localSimilarity(StateMachineNoCrash *, StateMachineNoCrash *)
 {
 	return true;
 }
 
 static bool
-localSimilarity(StateMachineSideEffecting *sm1, StateMachineSideEffecting *sm2, Oracle *oracle)
+localSimilarity(StateMachineSideEffecting *sm1, StateMachineSideEffecting *sm2)
 {
 	if (!sm1->sideEffect && !sm2->sideEffect)
 		return true;
 	if (!sm1->sideEffect || !sm2->sideEffect)
 		return false;
-	return localSimilarity(sm1->sideEffect, sm2->sideEffect, oracle);
+	return localSimilarity(sm1->sideEffect, sm2->sideEffect);
 }
 
 static bool
-localSimilarity(StateMachineBifurcate *sm1, StateMachineBifurcate *sm2, Oracle *oracle)
+localSimilarity(StateMachineBifurcate *sm1, StateMachineBifurcate *sm2)
 {
-	return localSimilarity(sm1->condition, sm2->condition, oracle);
+	return localSimilarity(sm1->condition, sm2->condition);
 }
 
 static bool
-localSimilarity(StateMachineNdChoice *, StateMachineNdChoice *, Oracle *)
+localSimilarity(StateMachineNdChoice *, StateMachineNdChoice *)
 {
 	return true;
 }
 
 static bool
-localSimilarity(StateMachineStub *sm1, StateMachineStub *sm2, Oracle *)
+localSimilarity(StateMachineStub *sm1, StateMachineStub *sm2)
 {
 	return sm1->target == sm2->target;
 }
@@ -155,8 +154,7 @@ localSimilarity(StateMachineStub *sm1, StateMachineStub *sm2, Oracle *)
 static bool
 stateMachineStatesTheSame(std::set<std::pair<StateMachineState *, StateMachineState *> > &memo,
 			  StateMachineState *sm1,
-			  StateMachineState *sm2,
-			  Oracle *oracle)
+			  StateMachineState *sm2)
 {
 	if (!memo.insert(std::pair<StateMachineState *, StateMachineState *>(sm1, sm2)).second)
 		return true;
@@ -166,8 +164,7 @@ stateMachineStatesTheSame(std::set<std::pair<StateMachineState *, StateMachineSt
 #define do_state_type(t)						\
 		case StateMachineState:: t :				\
 			if (!localSimilarity((StateMachine ## t *)sm1,	\
-					     (StateMachine ## t *)sm2,	\
-					     oracle))			\
+					     (StateMachine ## t *)sm2))	\
 				return false;				\
 			break;
 		all_state_types(do_state_type)
@@ -180,25 +177,24 @@ stateMachineStatesTheSame(std::set<std::pair<StateMachineState *, StateMachineSt
 	if (targets1.size() != targets2.size())
 		return false;
 	for (unsigned x = 0; x < targets1.size(); x++)
-		if (!stateMachineStatesTheSame(memo, targets1[x], targets2[x], oracle))
+		if (!stateMachineStatesTheSame(memo, targets1[x], targets2[x]))
 			return false;
 	return true;
 }
 
 static bool
-stateMachinesTheSame(StateMachine *sm1, StateMachine *sm2, Oracle *oracle)
+stateMachinesTheSame(StateMachine *sm1, StateMachine *sm2)
 {
 	std::set<std::pair<StateMachineState *, StateMachineState *> > memo;
-	return stateMachineStatesTheSame(memo, sm1->root, sm2->root, oracle);
+	return stateMachineStatesTheSame(memo, sm1->root, sm2->root);
 }
 
 static bool
 crashSummariesTheSame(VexPtr<CrashSummary, &ir_heap> &summary1,
 		      VexPtr<CrashSummary, &ir_heap> &summary2,
-		      Oracle *oracle,
 		      GarbageCollectionToken )
 {
-	if (!stateMachinesTheSame(summary1->loadMachine, summary2->loadMachine, oracle))
+	if (!stateMachinesTheSame(summary1->loadMachine, summary2->loadMachine))
 		return false;
 	for (auto it = summary1->storeMachines.begin();
 	     it != summary1->storeMachines.end();
@@ -207,7 +203,7 @@ crashSummariesTheSame(VexPtr<CrashSummary, &ir_heap> &summary1,
 		for (auto it2 = summary2->storeMachines.begin();
 		     !found_one && it2 != summary2->storeMachines.end();
 		     it2++) {
-			if (stateMachinesTheSame((*it)->machine, (*it2)->machine, oracle))
+			if (stateMachinesTheSame((*it)->machine, (*it2)->machine))
 				found_one = true;
 		}
 		if (!found_one)
@@ -220,7 +216,7 @@ crashSummariesTheSame(VexPtr<CrashSummary, &ir_heap> &summary1,
 		for (auto it2 = summary1->storeMachines.begin();
 		     !found_one && it2 != summary1->storeMachines.end();
 		     it2++) {
-			if (stateMachinesTheSame((*it)->machine, (*it2)->machine, oracle))
+			if (stateMachinesTheSame((*it)->machine, (*it2)->machine))
 				found_one = true;
 		}
 		if (!found_one)
@@ -422,23 +418,17 @@ main(int argc, char *argv[])
 	__set_profiling(root);
 
 	VexPtr<Oracle> oracle;
-	{
-		MachineState *ms = MachineState::readELFExec(argv[1]);
-		Thread *thr = ms->findThread(ThreadId(1));
-		oracle = new Oracle(ms, thr, argv[2]);
-	}
-	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
 	VexPtr<CrashSummary, &ir_heap> summary1;
 	VexPtr<CrashSummary, &ir_heap> summary2;
 
-	summary1 = read_crash_summary(argv[4]);
-	summary2 = read_crash_summary(argv[5]);
+	summary1 = read_crash_summary(argv[1]);
+	summary2 = read_crash_summary(argv[2]);
 
 	summary1 = canonicalise_crash_summary(summary1);
 	summary2 = canonicalise_crash_summary(summary2);
 
-	if (crashSummariesTheSame(summary1, summary2, oracle, ALLOW_GC)) {
+	if (crashSummariesTheSame(summary1, summary2, ALLOW_GC)) {
 		printf("The same\n");
 	} else {
 		printf("Different\n");
