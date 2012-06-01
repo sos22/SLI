@@ -826,41 +826,70 @@ static const char *irOpSimpleChar(IROp op)
   }
 }
 
-static bool parseIROpSimple(IROp *out, const char *str, const char **suffix)
+static bool parseIROpSimple(IROp *out, IRType ty, const char *str, const char **suffix)
 {
+  int delta;
+  switch (ty) {
+  case Ity_I8:
+    delta = 0;
+    break;
+  case Ity_I16:
+    delta = 1;
+    break;
+  case Ity_I32:
+    delta = 2;
+    break;
+  case Ity_I64:
+    delta = 3;
+    break;
+  case Ity_I1:
+    delta = -1;
+    break;
+  default:
+    return false;
+  }
   if (parseThisChar('+', str, suffix)) {
-    *out = Iop_Add64;
+    if (delta == -1) return false;
+    *out = (IROp)(Iop_Add8 + delta);
     return true;
   }
   if (parseThisString("&&", str, suffix)) {
+    if (delta != -1) return false;
     *out = Iop_And1;
     return true;
   }
   if (parseThisString("||", str, suffix)) {
+    if (delta != -1) return false;
     *out = Iop_Or1;
     return true;
   }
   if (parseThisString("^^", str, suffix)) {
+    if (delta != -1) return false;
     *out = Iop_Xor1;
     return true;
   }
   if (parseThisChar('&', str, suffix)) {
-    *out = Iop_And64;
+    if (delta == -1) return false;
+    *out = (IROp)(Iop_And8 + delta);
     return true;
   }
   if (parseThisChar('|', str, suffix)) {
-    *out = Iop_Or64;
+    if (delta == -1) return false;
+    *out = (IROp)(Iop_Or8 + delta);
     return true;
   }
   if (parseThisString("==", str, suffix)) {
-    *out = Iop_CmpEQ64;
+    if (delta == -1) return false;
+    *out = (IROp)(Iop_CmpEQ8 + delta);
     return true;
   }
   if (parseThisChar('!', str, suffix)) {
+    if (delta != -1) return false;
     *out = Iop_Not1;
     return true;
   }
   if (parseThisString("BadPtr", str, suffix)) {
+    if (delta != -1) return false;
     *out = Iop_BadPtr;
     return true;
   }
@@ -996,7 +1025,7 @@ static bool parseIRExprBinop(IRExpr **res, const char *str, const char **suffix)
   if (parseThisChar('(', str, &str)) {
     if (!parseIRExpr(&arg1, str, &str) ||
 	!parseThisChar(' ', str, &str) ||
-	!parseIROpSimple(&op, str, &str) ||
+	!parseIROpSimple(&op, arg1->type(), str, &str) ||
 	!parseThisChar(' ', str, &str) ||
 	!parseIRExpr(&arg2, str, &str) ||
 	!parseThisChar(')', str, suffix))
@@ -1019,7 +1048,7 @@ static bool parseIRExprUnop(IRExpr **res, const char *str, const char **suffix)
   IROp op;
   IRExpr *arg;
 
-  if (!parseIROpSimple(&op, str, &str) &&
+  if (!parseIROpSimple(&op, Ity_I1, str, &str) &&
       !parseIROp(&op, str, &str))
     return false;
   if (!parseThisChar('(', str, &str) ||
@@ -1116,7 +1145,7 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
 	break;
       if (!parseThisChar(' ', str, &str))
 	return false;
-      if (!parseIROpSimple(&op2, str, &str))
+      if (!parseIROpSimple(&op2, arg->type(), str, &str))
 	return false;
       if (op != (IROp)-1 && op != op2)
 	return false;
