@@ -349,7 +349,7 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		{
 			bool ignore;
 			res = false;
-			transformIRExpr(e, &ignore);
+			doit(e, &ignore);
 			return res;
 		}
 	} isPresent(reg, preserve);
@@ -488,7 +488,6 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 }
 
 class applyAvailTransformer : public IRExprTransformer {
-public:
 	const avail_t &avail;
 	const bool use_assumptions;
 	const AllowableOptimisations &opt;
@@ -517,6 +516,7 @@ public:
 		}
 		return IRExprTransformer::transformIRExpr(e, done_something);
 	}
+public:
 	applyAvailTransformer(const avail_t &_avail, bool _use_assumptions,
 			      const AllowableOptimisations &_opt)
 		: avail(_avail), use_assumptions(_use_assumptions), opt(_opt)
@@ -527,7 +527,7 @@ applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_assumptions, bool *do
 	      const AllowableOptimisations &opt)
 {
 	applyAvailTransformer aat(avail, use_assumptions, opt);
-	return aat.transformIRExpr(expr, done_something);
+	return aat.doit(expr, done_something);
 }
 
 /* Slightly misnamed: this also propagates copy operations.  Also, it

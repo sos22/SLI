@@ -185,6 +185,8 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 StateMachine *
 StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 {
+	aborted = false;
+
 	bool _b;
 	if (!done_something) done_something = &_b;
 	std::set<StateMachineState *> allStates;
@@ -203,6 +205,8 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 			stateRewrites[s] = res;
 			*done_something = true;
 		}
+		if (aborted)
+			return NULL;
 	}
 
 	rewriteMachine(sm, stateRewrites);

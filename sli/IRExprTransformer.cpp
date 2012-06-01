@@ -7,6 +7,8 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 {
 	if (TIMEOUT)
 		return e;
+	if (aborted)
+		return NULL;
 	IRExpr *oldCurrent = _currentIRExpr;
 	_currentIRExpr = e;
 	IRExpr *res = NULL;

@@ -13,6 +13,8 @@
 class IRExprTransformer {
 	IRExpr *_currentIRExpr;
 protected:
+	bool aborted;
+	void abortTransform() { aborted = true; }
 	IRExpr *currentIRExpr() { return _currentIRExpr; }
 	virtual IRExpr *transformIex(IRExprGet *) { return NULL; }
 	virtual IRExpr *transformIex(IRExprGetI *e)
@@ -115,7 +117,7 @@ protected:
 	virtual IRExpr *transformIex(IRExprFreeVariable *) { return NULL; }
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 public:
-	IRExpr *doit(IRExpr *e, bool *done_something) { return transformIRExpr(e, done_something); }
+	IRExpr *doit(IRExpr *e, bool *done_something) { aborted = false; return transformIRExpr(e, done_something); }
 	IRExpr *doit(IRExpr *e) { bool t; return doit(e, &t); }
 };
 
