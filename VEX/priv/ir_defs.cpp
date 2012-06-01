@@ -981,11 +981,19 @@ static bool parseIRExprGetI(IRExpr **res, const char *str, const char **suffix)
   return true;
 }
 
+static bool opHasFourArguments(IROp op)
+{
+  IRType dst, arg1, arg2, arg3, arg4;
+  typeOfPrimop(op, &dst, &arg1, &arg2, &arg3, &arg4);
+  return arg4 != Ity_INVALID;
+}
+
 static bool parseIRExprQop(IRExpr **res, const char *str, const char **suffix)
 {
   IROp op;
   IRExpr *arg1, *arg2, *arg3, *arg4;
   if (!parseIROp(&op, str, &str) ||
+      !opHasFourArguments(op) ||
       !parseThisChar('(', str, &str) ||
       !parseIRExpr(&arg1, str, &str) ||
       !parseThisChar(',', str, &str) ||
@@ -1000,11 +1008,19 @@ static bool parseIRExprQop(IRExpr **res, const char *str, const char **suffix)
   return true;
 }
 
+static bool opHasThreeArguments(IROp op)
+{
+  IRType dst, arg1, arg2, arg3, arg4;
+  typeOfPrimop(op, &dst, &arg1, &arg2, &arg3, &arg4);
+  return arg3 != Ity_INVALID && arg4 == Ity_INVALID;
+}
+
 static bool parseIRExprTriop(IRExpr **res, const char *str, const char **suffix)
 {
   IROp op;
   IRExpr *arg1, *arg2, *arg3;
   if (!parseIROp(&op, str, &str) ||
+      !opHasThreeArguments(op) ||
       !parseThisChar('(', str, &str) ||
       !parseIRExpr(&arg1, str, &str) ||
       !parseThisChar(',', str, &str) ||
@@ -1015,6 +1031,13 @@ static bool parseIRExprTriop(IRExpr **res, const char *str, const char **suffix)
     return false;
   *res = IRExpr_Triop(op, arg1, arg2, arg3);
   return true;
+}
+
+static bool opHasTwoArguments(IROp op)
+{
+  IRType dst, arg1, arg2, arg3, arg4;
+  typeOfPrimop(op, &dst, &arg1, &arg2, &arg3, &arg4);
+  return arg2 != Ity_INVALID && arg3 == Ity_INVALID && arg4 == Ity_INVALID;
 }
 
 static bool parseIRExprBinop(IRExpr **res, const char *str, const char **suffix)
@@ -1032,6 +1055,7 @@ static bool parseIRExprBinop(IRExpr **res, const char *str, const char **suffix)
       return false;
   } else {
     if (!parseIROp(&op, str, &str) ||
+	!opHasTwoArguments(op) ||
 	!parseThisChar('(', str, &str) ||
 	!parseIRExpr(&arg1, str, &str) ||
 	!parseThisChar(',', str, &str) ||
@@ -1145,7 +1169,8 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
 	break;
       if (!parseThisChar(' ', str, &str))
 	return false;
-      if (!parseIROpSimple(&op2, arg->type(), str, &str))
+      if (!parseIROpSimple(&op2, arg->type(), str, &str) ||
+	  !operationAssociates(op2))
 	return false;
       if (op != (IROp)-1 && op != op2)
 	return false;
