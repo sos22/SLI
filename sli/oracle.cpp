@@ -267,11 +267,15 @@ Oracle::notInTagTable(StateMachineSideEffectMemoryAccess *access)
 }
 
 bool
-Oracle::hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access)
+Oracle::hasConflictingRemoteStores(const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access)
 {
 	__set_profiling(hasConflictingRemoteStores);
+	if (opt.assumeNoInterferingStores())
+		return false;
 	std::vector<unsigned long> offsets;
 	DynAnalysisRip dr(access->rip.rip.rip);
+	if (opt.nonLocalLoads() && !opt.nonLocalLoads()->count(dr))
+		return false;
 	type_index->findOffsets(dr, offsets);
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		unsigned long offset = *it;

@@ -360,7 +360,7 @@ public:
 	 * entry. */
 	/* i.e. this is true if there's some possibility that @access
 	 * might alias with a store in a remote thread. */
-	bool hasConflictingRemoteStores(StateMachineSideEffectMemoryAccess *access);
+	bool hasConflictingRemoteStores(const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access);
 
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);

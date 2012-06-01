@@ -54,20 +54,7 @@ ReachingMap::initialise(StateMachine *sm, const AllowableOptimisations &opt,
 		const AllowableOptimisations *opt;
 		Oracle *oracle;
 		bool operator()(StateMachineSideEffectStore *store) {
-			/* Optimisation: we can only perform the final
-			   optimisation and eliminate a load if we
-			   know that there are no stores from outside
-			   the machine.  That means that either the
-			   load needs to be local or we need to have
-			   assumeNoInterferingStores() set.  That in
-			   turn means that if
-			   assumeNoInterferingStores() is clear we'll
-			   only ever use the results of this analysis
-			   for local loads, and so we don't need to
-			   compute them for more complex cases. */
-			if (opt->assumeNoInterferingStores())
-				return true;
-			if (!oracle->hasConflictingRemoteStores(store))
+			if (!oracle->hasConflictingRemoteStores(*opt, store))
 				return true;
 			return false;
 		}
@@ -170,7 +157,7 @@ UseReachingMap::transformOneState(StateMachineSideEffecting *smse, bool *done_so
 	if (!smse->sideEffect || smse->sideEffect->type != StateMachineSideEffect::Load)
 		return NULL;
 	StateMachineSideEffectLoad *load = (StateMachineSideEffectLoad *)smse->sideEffect;
-	if (!opt.assumeNoInterferingStores() && oracle->hasConflictingRemoteStores(load))
+	if (oracle->hasConflictingRemoteStores(opt, load))
 		return NULL;
 	const std::set<const StateMachineSideEffectStore *> &potentiallyRelevantStores(rm.get(smse));
 	for (auto it = potentiallyRelevantStores.begin();

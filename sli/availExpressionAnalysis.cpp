@@ -439,7 +439,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				it++;
 		}
 		/* Introduce the store which was generated. */
-		if (opt.assumeNoInterferingStores() || !oracle->hasConflictingRemoteStores(smses))
+		if (!oracle->hasConflictingRemoteStores(opt, smses))
 			outputAvail.insertSideEffect(smses);
 		outputAvail.dereference(smses->addr, opt);
 		break;
@@ -876,7 +876,7 @@ avail_t::findAllPotentiallyAvailable(StateMachine *sm,
 			) {
 			StateMachineSideEffectMemoryAccess *smsema =
 				dynamic_cast<StateMachineSideEffectMemoryAccess *>(*it);
-			if ( smsema && oracle->hasConflictingRemoteStores(smsema) ) {
+			if ( smsema && oracle->hasConflictingRemoteStores(opt, smsema) ) {
 				sideEffects.erase(it++);
 			} else {
 				it++;
