@@ -340,9 +340,9 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 }
 
 bool
-parseStateMachineSideEffect(StateMachineSideEffect **out,
-			    const char *str,
-			    const char **suffix)
+StateMachineSideEffect::parse(StateMachineSideEffect **out,
+			      const char *str,
+			      const char **suffix)
 {
 	const char *str2;
 	if (parseThisString("<unreached>", str, suffix)) {
@@ -440,75 +440,16 @@ parseStateMachineState(StateMachineState **out,
 		       const char *str,
 		       const char **suffix)
 {
-	if (parseThisString("<unreached>", str, suffix)) {
-		*out = StateMachineUnreached::get();
-		return true;
+#define try_state_type(t)						\
+	{								\
+		StateMachine ## t *res;					\
+		if (StateMachine ## t :: parse(&res, str, suffix)) {	\
+			*out = res;					\
+			return true;					\
+		}							\
 	}
-	if (parseThisString("<crash>", str, suffix)) {
-		*out = StateMachineCrash::get();
-		return true;
-	}
-	if (parseThisString("<survive>", str, suffix)) {
-		*out = StateMachineNoCrash::get();
-		return true;
-	}
-	VexRip origin;
-	VexRip target;
-	const char *str2;
-	if (parseThisChar('<', str, &str2) &&
-	    parseVexRip(&origin, str2, &str2) &&
-	    parseThisString(": jmp ", str2, &str2) &&
-	    parseVexRip(&target, str2, &str2) &&
-	    parseThisChar('>', str2, suffix)) {
-		*out = new StateMachineStub(origin, target);
-		return true;
-	}
-	int target1;
-	StateMachineSideEffect *sme;
-	if (parseThisString("{", str, &str2) &&
-	    parseVexRip(&origin, str2, &str2) &&
-	    parseThisChar(':', str2, &str2) &&
-	    parseStateMachineSideEffect(&sme, str2, &str2) &&
-	    parseThisString(" then l", str2, &str2) &&
-	    parseDecimalInt(&target1, str2, &str2) &&
-	    parseThisChar('}', str2, suffix)) {
-		*out = new StateMachineSideEffecting(origin, sme, (StateMachineState *)target1);
-		return true;
-	}
-	IRExpr *condition;
-	int target2;
-	if (parseVexRip(&origin, str, &str2) &&
-	    parseThisString(": if (", str2, &str2) &&
-	    parseIRExpr(&condition, str2, &str2) &&
-	    parseThisString(") then l", str2, &str2) &&
-	    parseDecimalInt(&target1, str2, &str2) &&
-	    parseThisString(" else l", str2, &str2) &&
-	    parseDecimalInt(&target2, str2, suffix)) {
-		*out = new StateMachineBifurcate(origin, condition,
-						 (StateMachineState *)target1,
-						 (StateMachineState *)target2);
-		return true;
-	}
-
-	if (parseVexRip(&origin, str, &str2) &&
-	    parseThisString(": ND {", str2, &str2)) {
-		std::vector<StateMachineState *> successors;
-		while (1) {
-			if (parseThisChar('}', str2, suffix))
-				break;
-			if (successors.size() != 0 && !parseThisString(", ", str2, &str2))
-				return false;
-			if (!parseThisChar('l', str2, &str2))
-				return false;
-			int l;
-			if (!parseDecimalInt(&l, str2, &str2))
-				return false;
-			successors.push_back((StateMachineState *)l);
-		}
-		*out = new StateMachineNdChoice(origin, successors);
-		return true;
-	}
-
+	all_state_types(try_state_type)
+#undef try_state_type
 	return false;
 }
 

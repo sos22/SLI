@@ -82,12 +82,12 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 				StateMachineSideEffect *start, *end;
 				const char *m;
 				if (!parseThisChar('\t', buf, &m) ||
-				    !parseStateMachineSideEffect(&start, m, &m) ||
+				    !StateMachineSideEffect::parse(&start, m, &m) ||
 				    !parseThisString(" to ", m, &m))
 					break;
 				if (parseThisString("<null>", m, &m)) {
 					end = NULL;
-				} else if (!parseStateMachineSideEffect(&end, m, &m)) {
+				} else if (!StateMachineSideEffect::parse(&end, m, &m)) {
 					break;
 				}
 				if (!parseThisChar('\n', m, &m))

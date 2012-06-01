@@ -8,6 +8,7 @@
 #include "simplify_irexpr.hpp"
 #include "oracle_rip.hpp"
 #include "typesdb.hpp"
+#include "libvex_parse.h"
 
 class StateMachine;
 class StateMachineSideEffect;
@@ -158,6 +159,7 @@ public:
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
+	static bool parse(StateMachineSideEffect **out, const char *str, const char **suffix);
 	NAMED_CLASS
 };
 
@@ -185,6 +187,14 @@ public:
 		if (!_this) _this = new StateMachineUnreached();
 		return _this;
 	}
+	static bool parse(StateMachineUnreached **out, const char *str, const char **suffix)
+	{
+		if (parseThisString("<unreached>", str, suffix)) {
+			*out = StateMachineUnreached::get();
+			return true;
+		}
+		return false;
+	}
 };
 
 class StateMachineCrash : public StateMachineTerminal {
@@ -196,6 +206,14 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
+	static bool parse(StateMachineCrash **out, const char *str, const char **suffix)
+	{
+		if (parseThisString("<crash>", str, suffix)) {
+			*out = StateMachineCrash::get();
+			return true;
+		}
+		return false;
+	}
 };
 
 class StateMachineNoCrash : public StateMachineTerminal {
@@ -207,6 +225,14 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
+	static bool parse(StateMachineNoCrash **out, const char *str, const char **suffix)
+	{
+		if (parseThisString("<survive>", str, suffix)) {
+			*out = StateMachineNoCrash::get();
+			return true;
+		}
+		return false;
+	}
 };
 
 class StateMachineSideEffecting : public StateMachineState {
@@ -226,6 +252,23 @@ public:
 		if (sideEffect)
 			sideEffect->prettyPrint(f);
 		fprintf(f, " then l%d}", labels[target]);
+	}
+	static bool parse(StateMachineSideEffecting **out, const char *str, const char **suffix)
+	{
+		VexRip origin;
+		int target;
+		StateMachineSideEffect *sme;
+		if (parseThisString("{", str, &str) &&
+		    parseVexRip(&origin, str, &str) &&
+		    parseThisChar(':', str, &str) &&
+		    StateMachineSideEffect::parse(&sme, str, &str) &&
+		    parseThisString(" then l", str, &str) &&
+		    parseDecimalInt(&target, str, &str) &&
+		    parseThisChar('}', str, suffix)) {
+			*out = new StateMachineSideEffecting(origin, sme, (StateMachineState *)target);
+			return true;
+		}
+		return false;
 	}
 	void visit(HeapVisitor &hv)
 	{
@@ -265,12 +308,34 @@ public:
 	StateMachineState *trueTarget;
 	StateMachineState *falseTarget;
 
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
+	{
 		fprintf(f, "%s: if (", origin.name());
 		ppIRExpr(condition, f);
 		fprintf(f, ") then l%d else l%d",
 			labels[trueTarget], labels[falseTarget]);
 	}
+	static bool parse(StateMachineBifurcate **out, const char *str, const char **suffix)
+	{
+		VexRip origin;
+		IRExpr *condition;
+		int target1;
+		int target2;
+		if (parseVexRip(&origin, str, &str) &&
+		    parseThisString(": if (", str, &str) &&
+		    parseIRExpr(&condition, str, &str) &&
+		    parseThisString(") then l", str, &str) &&
+		    parseDecimalInt(&target1, str, &str) &&
+		    parseThisString(" else l", str, &str) &&
+		    parseDecimalInt(&target2, str, suffix)) {
+			*out = new StateMachineBifurcate(origin, condition,
+							 (StateMachineState *)target1,
+							 (StateMachineState *)target2);
+			return true;
+		}
+		return false;
+	}
+
 	void visit(HeapVisitor &hv)
 	{
 		hv(trueTarget);
@@ -310,7 +375,8 @@ public:
 		: StateMachineState(origin, StateMachineState::NdChoice)
 	{}
 
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const {
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
+	{
 		fprintf(f, "%s: ND {", origin.name());
 		for (auto it = successors.begin(); it != successors.end(); it++) {
 			if (it != successors.begin())
@@ -318,6 +384,29 @@ public:
 			fprintf(f, "l%d", labels[*it]);
 		}
 		fprintf(f, "}");
+	}
+	static bool parse(StateMachineNdChoice **out, const char *str, const char **suffix)
+	{
+		VexRip origin;
+		if (parseVexRip(&origin, str, &str) &&
+		    parseThisString(": ND {", str, &str)) {
+			std::vector<StateMachineState *> successors;
+			while (1) {
+				if (parseThisChar('}', str, suffix))
+					break;
+				if (successors.size() != 0 && !parseThisString(", ", str, &str))
+					return false;
+				if (!parseThisChar('l', str, &str))
+					return false;
+				int l;
+				if (!parseDecimalInt(&l, str, &str))
+					return false;
+				successors.push_back((StateMachineState *)l);
+			}
+			*out = new StateMachineNdChoice(origin, successors);
+			return true;
+		}
+		return false;
 	}
 
 	void visit(HeapVisitor &hv)
@@ -357,6 +446,20 @@ public:
 	void prettyPrint(FILE *f) const
 	{
 		fprintf(f, "<%s: jmp %s>", origin.name(), target.name());
+	}
+	static bool parse(StateMachineStub **out, const char *str, const char **suffix)
+	{
+		VexRip origin;
+		VexRip target;
+		if (parseThisChar('<', str, &str) &&
+		    parseVexRip(&origin, str, &str) &&
+		    parseThisString(": jmp ", str, &str) &&
+		    parseVexRip(&target, str, &str) &&
+		    parseThisChar('>', str, suffix)) {
+			*out = new StateMachineStub(origin, target);
+			return true;
+		}
+		return false;
 	}
 	void visit(HeapVisitor &) { }
 };
@@ -641,9 +744,6 @@ StateMachine *storeCFGToMachine(Oracle *oracle,
 				CFGNode *root,
 				MemoryAccessIdentifierAllocator &mai);
 
-bool parseStateMachineSideEffect(StateMachineSideEffect **out,
-				 const char *str,
-				 const char **suffix);
 StateMachine *duplicateStateMachine(const StateMachine *inp);
 
 template <typename t> t
