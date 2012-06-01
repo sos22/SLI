@@ -1,5 +1,7 @@
 /* Compare two (canonicalised) crash summaries and try to guess
    whether they represent the same underlying bug. */
+#include <dirent.h>
+
 #include "sli.h"
 #include "oracle.hpp"
 #include "allowable_optimisations.hpp"
@@ -258,15 +260,45 @@ main(int argc, char *argv[])
 
 	__set_profiling(root);
 
-	CrashSummary *summary1, *summary2;
+	if (argc == 3) {
+		CrashSummary *summary1, *summary2;
+		summary1 = read_crash_summary(argv[1]);
+		summary2 = read_crash_summary(argv[2]);
 
-	summary1 = read_crash_summary(argv[1]);
-	summary2 = read_crash_summary(argv[2]);
+		if (crashSummariesTheSame(summary1, summary2)){
+			printf("The same\n");
+			return 0;
+		} else {
+			printf("Different\n");
+			return 1;
+		}
+	}
 
-	if (crashSummariesTheSame(summary1, summary2))
-		printf("The same\n");
-	else
-		printf("Different\n");
-
-	return 0;
+	std::vector<CrashSummary *> summaries;
+	DIR *d = opendir(".");
+	if (!d)
+		err(1, "opening ./");
+	while (1) {
+		errno = 0;
+		struct dirent *de = readdir(d);
+		if (!de) {
+			if (errno)
+				err(1, "reading current directory");
+			break;
+		}
+		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
+			continue;
+		CrashSummary *summary = read_crash_summary(de->d_name);
+		bool found_dupe = false;
+		for (auto it = summaries.begin(); !found_dupe && it != summaries.end(); it++)
+			found_dupe |= crashSummariesTheSame(summary, *it);
+		if (found_dupe) {
+			printf("%s is a dupe\n", de->d_name);
+			unlink(de->d_name);
+			continue;
+		}
+		printf("%s is unique\n", de->d_name);
+		summaries.push_back(summary);
+	}
+	return 0;	
 }
