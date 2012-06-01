@@ -247,6 +247,7 @@ read_crash_summary(const char *name)
 	if (!parseCrashSummary(&res, real_start, (const char **)&real_start))
 		errx(1, "cannot parse %s as crash summary", name);
 	free(content);
+	close(fd);
 	return res;
 }
 
