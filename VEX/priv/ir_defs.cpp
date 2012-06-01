@@ -313,11 +313,6 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(64to16)			\
 	     iter(64to8)			\
 						\
-	     iter(Not1)				\
-	     iter(8to1)				\
-	     iter(16to1)			\
-	     iter(32to1)			\
-	     iter(64to1)			\
 	     iter(1Uto8)			\
 	     iter(1Uto32)			\
 	     iter(1Uto64)			\
@@ -325,9 +320,6 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(1Sto16)			\
 	     iter(1Sto32)			\
 	     iter(1Sto64)			\
-	     iter(And1)				\
-	     iter(Or1)				\
-	     iter(Xor1)				\
 	     iter(BadPtr)			\
 	     iter(CmpEQ1)			\
 	     iter(CmpEQF32)			\
@@ -737,7 +729,19 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(InterleaveLO32x4)		\
 	     iter(InterleaveLO64x2)		\
 						\
-	     iter(Perm8x16)
+ 	     iter(Perm8x16)			\
+	   /* Things which end in 1 should be */\
+	   /* at the end of the list, to avoid*/\
+	   /* confusion with things which end*/	\
+	   /* in 16 */				\
+	     iter(Not1)				\
+	     iter(8to1)				\
+	     iter(16to1)			\
+	     iter(32to1)			\
+	     iter(64to1)			\
+	     iter(And1)				\
+	     iter(Or1)				\
+	     iter(Xor1)				\
 
 void ppIROp ( IROp op, FILE* f )
 {
