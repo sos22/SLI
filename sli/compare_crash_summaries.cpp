@@ -291,15 +291,17 @@ main(int argc, char *argv[])
 		CrashSummary *summary = read_crash_summary(de->d_name);
 		bool found_dupe = false;
 		auto it = summaries.begin();
-		for (; !found_dupe && it != summaries.end(); it++)
-			found_dupe |= crashSummariesTheSame(summary, it->second);
-		if (found_dupe) {
-			printf("%s is a dupe of %s\n", de->d_name, it->first);
-			unlink(de->d_name);
-			continue;
+		for (; !found_dupe && it != summaries.end(); it++) {
+			if (crashSummariesTheSame(summary, it->second)) {
+				printf("%s is a dupe of %s\n", de->d_name, it->first);
+				unlink(de->d_name);
+				found_dupe = true;
+			}
 		}
-		printf("%s is unique\n", de->d_name);
-		summaries.push_back(std::pair<char *, CrashSummary *>(strdup(de->d_name), summary));
+		if (!found_dupe) {
+			printf("%s is unique\n", de->d_name);
+			summaries.push_back(std::pair<char *, CrashSummary *>(strdup(de->d_name), summary));
+		}
 	}
 	return 0;	
 }
