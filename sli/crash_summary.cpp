@@ -56,6 +56,31 @@ readCrashSummary(int fd)
 	return r;
 }
 
+CrashSummary *
+readBugReport(const char *name, char **metadata)
+{
+	int fd = open(name, O_RDONLY);
+	if (fd < 0)
+		err(1, "opening %s", name);
+	char *content = readfile(fd);
+
+	/* First line is metadata */
+	char *real_start = strchr(content, '\n');
+	if (!real_start)
+		errx(1, "%s is empty", name);
+	*real_start = 0;
+	if (metadata)
+		*metadata = strdup(content);
+
+	real_start++;
+	/* And use the rest */
+	CrashSummary *res;
+	if (!parseCrashSummary(&res, real_start, (const char **)&real_start))
+		errx(1, "cannot parse %s as crash summary", name);
+	free(content);
+	return res;
+}
+
 bool
 parseCrashSummary(CrashSummary **out, const char *buf,
 		  const char **succ)

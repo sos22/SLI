@@ -229,30 +229,6 @@ crashSummariesTheSame(CrashSummary *summary1,
 	return true;
 }
 
-static CrashSummary *
-read_crash_summary(const char *name)
-{
-	__set_profiling(read_crash_summary);
-
-	int fd = open(name, O_RDONLY);
-	if (fd < 0)
-		err(1, "opening %s", name);
-	char *content = readfile(fd);
-
-	/* First line is metadata */
-	char *real_start = strchr(content, '\n');
-	if (!real_start)
-		errx(1, "%s is empty", name);
-	real_start++;
-	/* And use the rest */
-	CrashSummary *res;
-	if (!parseCrashSummary(&res, real_start, (const char **)&real_start))
-		errx(1, "cannot parse %s as crash summary", name);
-	free(content);
-	close(fd);
-	return res;
-}
-
 int
 main(int argc, char *argv[])
 {
@@ -262,8 +238,8 @@ main(int argc, char *argv[])
 
 	if (argc == 3) {
 		CrashSummary *summary1, *summary2;
-		summary1 = read_crash_summary(argv[1]);
-		summary2 = read_crash_summary(argv[2]);
+		summary1 = readBugReport(argv[1], NULL);
+		summary2 = readBugReport(argv[2], NULL);
 
 		if (crashSummariesTheSame(summary1, summary2)){
 			printf("The same\n");
@@ -288,7 +264,7 @@ main(int argc, char *argv[])
 		}
 		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
 			continue;
-		CrashSummary *summary = read_crash_summary(de->d_name);
+		CrashSummary *summary = readBugReport(de->d_name, NULL);
 		bool found_dupe = false;
 		auto it = summaries.begin();
 		for (; !found_dupe && it != summaries.end(); it++) {

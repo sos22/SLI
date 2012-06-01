@@ -54,6 +54,7 @@ public:
 void printCrashSummary(CrashSummary *cs, FILE *f);
 CrashSummary *readCrashSummary(int fd);
 bool parseCrashSummary(CrashSummary **out, const char *buf, const char **succ);
+CrashSummary *readBugReport(const char *name, char **metadata);
 
 char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident);
 

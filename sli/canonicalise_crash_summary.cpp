@@ -9,32 +9,6 @@
 #include "offline_analysis.hpp"
 #include "intern.hpp"
 
-static CrashSummary *
-read_crash_summary(const char *name, char **first_line)
-{
-	__set_profiling(read_crash_summary);
-
-	int fd = open(name, O_RDONLY);
-	if (fd < 0)
-		err(1, "opening %s", name);
-	char *content = readfile(fd);
-
-	/* First line is metadata */
-	char *real_start = strchr(content, '\n');
-	if (!real_start)
-		errx(1, "%s is empty", name);
-	*real_start = 0;
-	*first_line = strdup(content);
-
-	real_start++;
-	/* And use the rest */
-	CrashSummary *res;
-	if (!parseCrashSummary(&res, real_start, (const char **)&real_start))
-		errx(1, "cannot parse %s as crash summary", name);
-	free(content);
-	return res;
-}
-
 class RegisterCanonicaliser : public StateMachineTransformer {
 	std::map<threadAndRegister, threadAndRegister, threadAndRegister::partialCompare> canonTable;
 	std::map<unsigned, unsigned> next_temp_id;
@@ -232,7 +206,7 @@ main(int argc, char *argv[])
 	CrashSummary *summary;
 	char *first_line;
 
-	summary = read_crash_summary(argv[1], &first_line);
+	summary = readBugReport(argv[1], &first_line);
 
 	summary = canonicalise_crash_summary(summary);
 
