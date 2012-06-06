@@ -419,15 +419,13 @@ intersect_sorted_vectors(std::vector<unsigned long> &out, const std::vector<unsi
 }
 
 bool
-Oracle::memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store)
+Oracle::memoryAccessesMightAliasCrossThread(const DynAnalysisRip &smsel_dr, const DynAnalysisRip &smses_dr)
 {
 	__set_profiling(might_alias_cross_thread);
 	std::vector<unsigned long> offsets_store;
-	DynAnalysisRip smses_dr(store);
 	type_index->findOffsets(smses_dr, offsets_store);
 	if (offsets_store.size() == 0)
 		return false;
-	DynAnalysisRip smsel_dr(load);
 	std::vector<unsigned long> offsets_load;
 	type_index->findOffsets(smsel_dr, offsets_load);
 	if (offsets_load.size() == 0)
@@ -468,6 +466,13 @@ Oracle::memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &st
 			return true;
 	}
 	return false;
+}
+
+bool
+Oracle::memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store)
+{
+	return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load),
+						   DynAnalysisRip(store));
 }
 
 bool
