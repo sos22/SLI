@@ -68,6 +68,25 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 	}
 };
 
+static bool
+expressionIsClosed(IRExpr *a)
+{
+	struct : public IRExprTransformer {
+		bool res;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			if (!ieg->reg.isReg() &&
+			    ieg->reg.tid() != (unsigned)-1) {
+				res = false;
+				abortTransform();
+			}
+			return IRExprTransformer::transformIex(ieg);
+		}
+	} doit;
+	doit.res = true;
+	doit.doit(a);
+	return doit.res;
+}
+
 class SplitSsaGenerations : public StateMachineTransformer {
 	std::set<threadAndRegister, threadAndRegister::fullCompare> &phiRegs;
 	std::map<threadAndRegister, threadAndRegister, threadAndRegister::fullCompare> canonTable;
@@ -104,7 +123,10 @@ class SplitSsaGenerations : public StateMachineTransformer {
 		return IRExpr_Get(canon_reg(ieg->reg), ieg->ty);
 	}
 	IRExpr *transformIex(IRExprLoad *iel) {
-		return IRExpr_Get(canon_load(iel), iel->ty);
+		if (expressionIsClosed(iel->addr))
+			return IRExpr_Get(canon_load(iel), iel->ty);
+		else
+			return IRExprTransformer::transformIex(iel);
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
 		StateMachineSideEffectLoad *smsel, bool *done_something)
