@@ -24,6 +24,8 @@ static struct stats {
 	unsigned failed;
 	unsigned timeout;
 	~stats() {
+		if (nr_invoked == 0)
+			return;
 		printf("Sat checker invoked %d times.  Results:\n", nr_invoked);
 #define do_field(name)							\
 		printf("\t" # name ":\t%f%%\n", 100.0 * name / nr_invoked)

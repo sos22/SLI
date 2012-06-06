@@ -40,9 +40,10 @@ public:
 		  
 	~QueryCache()
 	{
-		printf("%s cache: %d queries, %d hits, rate %e; %d associativity discards\n",
-		       name,
-		       nr_queries, nr_hits, (double)nr_hits / nr_queries, nr_assoc_discards);
+		if (nr_queries != 0)
+			printf("%s cache: %d queries, %d hits, rate %e; %d associativity discards\n",
+			       name,
+			       nr_queries, nr_hits, (double)nr_hits / nr_queries, nr_assoc_discards);
 	}
 
 	void runGc(HeapVisitor &) {
