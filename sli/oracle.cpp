@@ -274,7 +274,9 @@ Oracle::hasConflictingRemoteStores(const AllowableOptimisations &opt, StateMachi
 		return false;
 	std::vector<unsigned long> offsets;
 	DynAnalysisRip dr(access->rip.rip.rip);
-	if (opt.nonLocalLoads() && !opt.nonLocalLoads()->count(dr))
+	if (access->type == StateMachineSideEffect::Load &&
+	    opt.nonLocalLoads() &&
+	    !opt.nonLocalLoads()->count(dr))
 		return false;
 	type_index->findOffsets(dr, offsets);
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
