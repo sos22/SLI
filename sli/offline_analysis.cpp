@@ -523,6 +523,74 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 	fprintf(inductionLog, "%s -> %s\n", used.name(), used_in.name());
 }
 
+static StateMachine *
+localiseLoads(VexPtr<StateMachine, &ir_heap> &probeMachine,
+	      VexPtr<StateMachine, &ir_heap> &storeMachine,
+	      const AllowableOptimisations &opt,
+	      VexPtr<Oracle> &oracle,
+	      GarbageCollectionToken token,
+	      bool *done_something = NULL)
+{
+	std::set<DynAnalysisRip> nonLocalLoads;
+	{
+		std::set<StateMachineSideEffectStore *> stores;
+		enumSideEffects(storeMachine, stores);
+		std::set<StateMachineSideEffectLoad *> loads;
+		enumSideEffects(probeMachine, loads);
+		for (auto it = loads.begin(); it != loads.end(); it++) {
+			StateMachineSideEffectLoad *load = *it;
+			bool found_one = false;
+			for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
+				StateMachineSideEffectStore *store = *it2;
+				if (oracle->memoryAccessesMightAlias(opt, load, store))
+					found_one = true;
+			}
+			if (found_one)
+				nonLocalLoads.insert(DynAnalysisRip(load->rip.rip.rip));
+		}
+	}
+	return optimiseStateMachine(
+		probeMachine,
+		opt.setnonLocalLoads(&nonLocalLoads),
+		oracle,
+		true,
+		token,
+		done_something);
+}
+
+static StateMachine *
+localiseLoads(VexPtr<StateMachine, &ir_heap> &probeMachine,
+	      const std::set<DynAnalysisRip> &stores,
+	      const AllowableOptimisations &opt,
+	      VexPtr<Oracle> &oracle,
+	      GarbageCollectionToken token,
+	      bool *done_something = NULL)
+{
+	std::set<DynAnalysisRip> nonLocalLoads;
+	{
+		std::set<StateMachineSideEffectLoad *> loads;
+		enumSideEffects(probeMachine, loads);
+		for (auto it = loads.begin(); it != loads.end(); it++) {
+			StateMachineSideEffectLoad *load = *it;
+			bool found_one = false;
+			for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
+				DynAnalysisRip store = *it2;
+				if (oracle->memoryAccessesMightAliasCrossThread(DynAnalysisRip(load->rip.rip.rip), store))
+					found_one = true;
+			}
+			if (found_one)
+				nonLocalLoads.insert(DynAnalysisRip(load->rip.rip.rip));
+		}
+	}
+	return optimiseStateMachine(
+		probeMachine,
+		opt.setnonLocalLoads(&nonLocalLoads),
+		oracle,
+		true,
+		token,
+		done_something);
+}
+
 static CrashSummary *
 considerStoreCFG(const DynAnalysisRip &target_rip,
 		 VexPtr<CFGNode, &ir_heap> cfg,
@@ -551,7 +619,19 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 
 	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(sm));
 	if (!sm_ssa)
-		return false;
+		return NULL;
+
+	sm_ssa = optimiseStateMachine(
+		sm_ssa,
+		optIn.enableassumeExecutesAtomically().enableassumeNoInterferingStores(),
+		oracle,
+		true,
+		token);
+	probeMachine = localiseLoads(probeMachine,
+				     sm_ssa,
+				     optIn.enableignoreSideEffects(),
+				     oracle,
+				     token);
 
 	VexPtr<IRExpr, &ir_heap> base_verification_condition(
 		verificationConditionForStoreMachine(
@@ -855,13 +935,29 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 	printStateMachine(probeMachine, _logfile);
 	fprintf(_logfile, "\n");
 
+	/* We now need to figure out which stores are potentially
+	   conflicting, and hence which loads can be safely localised.
+	   The conflicting stores are those which might alias with
+	   loads issued by the probe machine, and loads can be
+	   localised if they do not conflict with stores issued by the
+	   probe machine.
+
+	   Subtlty: we want to exclude loads of values which are only
+	   used to satisfy assertions when we're calculating the
+	   potentially conflicting store set (the later analysis
+	   phases should be able to avoid generating summaries for
+	   them, but it's faster to filter them out now).  The easiest
+	   way of doing so is simply to remove the assertions and
+	   optimise the probe machine before calculating it.
+
+	   Subtlty 2: localisation can sometimes enable other
+	   simplifications in the state machine optimiser, which can
+	   (very occasionally) show that a particular load is not
+	   interesting, and hence change the conflicting stores set.
+	   Avoid the issue by just iterating to a fixed point. */
 	std::set<DynAnalysisRip> potentiallyConflictingStores;
-	/* If the only reason a load is live is to evaluate a later
-	   assertion, it doesn't count for the purposes of computing
-	   potentiallyConflictingStores.  The easy way of dealing with
-	   that is just to remove them and then re-optimise the
-	   machine. */
 	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
+
 	reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, token);
 	if (!reducedProbeMachine)
 		return NULL;
@@ -869,6 +965,36 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 		return NULL;
+	}
+	bool localised_loads = false;
+	probeMachine = localiseLoads(probeMachine,
+				     potentiallyConflictingStores,
+				     optIn.enableignoreSideEffects(),
+				     oracle,
+				     token,
+				     &localised_loads);
+	if (localised_loads) {
+		std::set<DynAnalysisRip> newPotentiallyConflictingStores;
+		while (1) {
+			reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, token);
+			if (!reducedProbeMachine)
+				return NULL;
+			getConflictingStores(reducedProbeMachine, oracle, newPotentiallyConflictingStores);
+			if (potentiallyConflictingStores.size() == 0) {
+				fprintf(_logfile, "\t\tNo available conflicting stores?\n");
+				return NULL;
+			}
+			if (newPotentiallyConflictingStores == potentiallyConflictingStores)
+				break;
+			potentiallyConflictingStores = newPotentiallyConflictingStores;
+			localised_loads = false;
+			probeMachine = localiseLoads(probeMachine,
+						     potentiallyConflictingStores,
+						     optIn.enableignoreSideEffects(),
+						     oracle, token, &localised_loads);
+			if (!localised_loads)
+				break;
+		}
 	}
 
 	return probeMachineToSummary(targetRip,
