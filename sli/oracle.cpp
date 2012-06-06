@@ -3079,7 +3079,7 @@ Oracle::getInstrFallThroughs(const VexRip &vr, std::vector<VexRip> &out)
 	VexRip vrEnd = vr + getInstructionSize(ms->addressSpace, sr);
 	for (auto it = outSr.begin(); it != outSr.end(); it++) {
 		VexRip newVr(vrEnd);
-		newVr.call(it->rip);
+		newVr.jump(it->rip);
 		out.push_back(newVr);
 	}
 }
