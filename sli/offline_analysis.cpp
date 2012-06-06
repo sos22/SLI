@@ -997,6 +997,11 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 		}
 	}
 
+	if (potentiallyConflictingStores.size() == 0) {
+		fprintf(_logfile, "\t\tNo available conflicting stores after localisation?\n");
+		return NULL;
+	}
+
 	return probeMachineToSummary(targetRip,
 				     probeMachine,
 				     reducedProbeMachine,
