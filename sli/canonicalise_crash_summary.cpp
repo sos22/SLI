@@ -146,14 +146,14 @@ canonicalise_crash_summary(CrashSummary *input)
 
 	struct : public StateMachineTransformer {
 		std::set<threadAndRegister, threadAndRegister::fullCompare> res;
-		IRExpr *transformIexPhi(IRExprPhi *phi) {
+		IRExpr *transformIex(IRExprPhi *phi) {
 			for (auto it = phi->generations.begin();
 			     it != phi->generations.end();
 			     it++)
 				res.insert(phi->reg.setGen(*it));
 			return IRExprTransformer::transformIex(phi);
 		}
-		StateMachineSideEffectPhi *trasnformOneSideEffect(
+		StateMachineSideEffectPhi *transformOneSideEffect(
 			StateMachineSideEffectPhi *smsep, bool *done_something)
 		{
 			for (auto it = smsep->generations.begin();
