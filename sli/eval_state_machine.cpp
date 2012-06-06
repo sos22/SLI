@@ -2293,12 +2293,10 @@ findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
 	__set_profiling(findHappensBeforeRelations);
 	VexPtr<IRExpr, &ir_heap> res(IRExpr_Const(IRConst_U1(0)));
 	VexPtr<StateMachine, &ir_heap> probeMachine(summary->loadMachine);
-	for (unsigned x = 0; x < summary->storeMachines.size(); x++) {
-		LibVEX_maybe_gc(token);
-		VexPtr<StateMachine, &ir_heap> storeMachine(summary->storeMachines[x]->machine);
-		VexPtr<IRExpr, &ir_heap> assumption(summary->storeMachines[x]->assumption);
-		findHappensBeforeRelations(probeMachine, storeMachine, res, oracle, assumption, opt, token);
-	}
+	VexPtr<StateMachine, &ir_heap> storeMachine(summary->storeMachine);
+	VexPtr<IRExpr, &ir_heap> assumption(summary->verificationCondition);
+	findHappensBeforeRelations(probeMachine, storeMachine, res, oracle, assumption, opt, token);
+
 	return res;
 }
 

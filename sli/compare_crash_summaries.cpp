@@ -198,35 +198,8 @@ static bool
 crashSummariesTheSame(CrashSummary *summary1,
 		      CrashSummary *summary2)
 {
-	if (!stateMachinesTheSame(summary1->loadMachine, summary2->loadMachine))
-		return false;
-	for (auto it = summary1->storeMachines.begin();
-	     it != summary1->storeMachines.end();
-	     it++) {
-		bool found_one = false;
-		for (auto it2 = summary2->storeMachines.begin();
-		     !found_one && it2 != summary2->storeMachines.end();
-		     it2++) {
-			if (stateMachinesTheSame((*it)->machine, (*it2)->machine))
-				found_one = true;
-		}
-		if (!found_one)
-			return false;
-	}
-	for (auto it = summary2->storeMachines.begin();
-	     it != summary2->storeMachines.end();
-	     it++) {
-		bool found_one = false;
-		for (auto it2 = summary1->storeMachines.begin();
-		     !found_one && it2 != summary1->storeMachines.end();
-		     it2++) {
-			if (stateMachinesTheSame((*it)->machine, (*it2)->machine))
-				found_one = true;
-		}
-		if (!found_one)
-			return false;
-	}
-	return true;
+	return stateMachinesTheSame(summary1->loadMachine, summary2->loadMachine) &&
+		stateMachinesTheSame(summary1->storeMachine, summary2->storeMachine);
 }
 
 int

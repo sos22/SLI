@@ -15,24 +15,16 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 {
 	internStateMachineTable t;
 	input->loadMachine = internStateMachine(input->loadMachine, t);
-	for (auto it = input->storeMachines.begin();
-	     it != input->storeMachines.end();
-	     it++) {
-		(*it)->assumption = internIRExpr((*it)->assumption, t);
-		(*it)->machine = internStateMachine((*it)->machine, t);
-	}
+	input->storeMachine = internStateMachine(input->storeMachine, t);
+	input->verificationCondition = internIRExpr(input->verificationCondition, t);
 
 	std::set<DynAnalysisRip> nonLocalLoads;
 	{
 		std::set<StateMachineSideEffectLoad *> loads;
 		std::set<StateMachineSideEffectStore *> stores;
 		enumSideEffects(input->loadMachine, loads);
-		for (auto it = input->storeMachines.begin();
-		     it != input->storeMachines.end();
-		     it++) {
-			enumSideEffects((*it)->machine, loads);
-			enumSideEffects((*it)->machine, stores);
-		}
+		enumSideEffects(input->storeMachine, loads);
+		enumSideEffects(input->storeMachine, stores);
 
 		for (auto it = loads.begin(); it != loads.end(); it++) {
 			StateMachineSideEffectLoad *smsel = *it;
@@ -57,15 +49,13 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 						  oracle,
 						  false,
 						  token);
-	for (unsigned x = 0; x < input->storeMachines.size(); x++) {
-		VexPtr<StateMachine, &ir_heap> sm(input->storeMachines[x]->machine);
-		input->storeMachines[x]->machine =
-			optimiseStateMachine(sm,
-					     opt,
-					     oracle,
-					     false,
-					     token);
-	}
+	sm = input->storeMachine;
+	input->storeMachine = 
+		optimiseStateMachine(sm,
+				     opt,
+				     oracle,
+				     false,
+				     token);
 	return input;
 }
 

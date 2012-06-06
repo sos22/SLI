@@ -10,43 +10,39 @@ class Oracle;
 
 class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
 public:
-	class StoreMachineData : public GarbageCollected<StoreMachineData, &ir_heap> {
-	public:
-		StateMachine *machine;
-		typedef std::pair<StateMachineSideEffectStore *, StateMachineSideEffectStore *> macroSectionT;
-		std::vector<macroSectionT> macroSections;
-		IRExpr *assumption;
-		StoreMachineData(StateMachine *_machine, IRExpr *_assumption)
-			: machine(_machine), assumption(_assumption)
-		{}
-		StoreMachineData(StateMachine *_machine, IRExpr *_assumption, std::vector<macroSectionT> &macros)
-			: machine(_machine), macroSections(macros), assumption(_assumption)
-		{}
-		void visit(HeapVisitor &hv) {
-			hv(machine);
-			hv(assumption);
-			for (std::vector<macroSectionT>::iterator it = macroSections.begin();
-			     it != macroSections.end();
-			     it++) {
-				hv(it->first);
-				hv(it->second);
-			}
-		}
-		NAMED_CLASS
-	};
-
-	CrashSummary(StateMachine *_loadMachine)
-		: loadMachine(_loadMachine)
-	{}
-	CrashSummary(StateMachine *_loadMachine, std::vector<StoreMachineData *> &_storeMachines)
-		: loadMachine(_loadMachine), storeMachines(_storeMachines)
-	{}
-
 	StateMachine *loadMachine;
-	std::vector<StoreMachineData *> storeMachines;
+	StateMachine *storeMachine;
+	IRExpr *verificationCondition;
+	typedef std::pair<StateMachineSideEffectStore *, StateMachineSideEffectStore *> macroSectionT;
+	std::vector<macroSectionT> macroSections;
+
+	CrashSummary(StateMachine *_loadMachine, StateMachine *_storeMachine,
+		     IRExpr *_verificationCondition)
+		: loadMachine(_loadMachine),
+		  storeMachine(_storeMachine),
+		  verificationCondition(_verificationCondition)
+	{}
+
+	CrashSummary(StateMachine *_loadMachine,
+		     StateMachine *_storeMachine,
+		     IRExpr *_verificationCondition,
+		     std::vector<macroSectionT> &_macroSections)
+		: loadMachine(_loadMachine),
+		  storeMachine(_storeMachine),
+		  verificationCondition(_verificationCondition),
+		  macroSections(_macroSections)
+	{}
+
 	void visit(HeapVisitor &hv) {
 		hv(loadMachine);
-		visit_container(storeMachines, hv);
+		hv(storeMachine);
+		hv(verificationCondition);
+		for (auto it = macroSections.begin();
+		     it != macroSections.end();
+		     it++) {
+			hv(it->first);
+			hv(it->second);
+		}
 	}
 	NAMED_CLASS
 };
@@ -75,13 +71,13 @@ bool buildProbeMachine(VexPtr<Oracle> &oracle,
 		       unsigned *nr_out_machines,
 		       MemoryAccessIdentifierAllocator &mai,
 		       GarbageCollectionToken token);
-CrashSummary *diagnoseCrash(const DynAnalysisRip &,
-			    VexPtr<StateMachine, &ir_heap> &probeMachine,
-			    VexPtr<Oracle> &oracle,
-			    bool needRemoteMacroSections,
-			    const AllowableOptimisations &opt,
-			    const MemoryAccessIdentifierAllocator &mai,
-			    GarbageCollectionToken token);
+bool diagnoseCrash(const DynAnalysisRip &,
+		   VexPtr<StateMachine, &ir_heap> &probeMachine,
+		   VexPtr<Oracle> &oracle,
+		   bool needRemoteMacroSections,
+		   const AllowableOptimisations &opt,
+		   const MemoryAccessIdentifierAllocator &mai,
+		   GarbageCollectionToken token);
 void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 VexPtr<Oracle> &oracle,
 				 VexPtr<MachineState> &ms,

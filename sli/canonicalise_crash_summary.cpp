@@ -141,12 +141,8 @@ canonicalise_crash_summary(CrashSummary *input)
 {
 	internStateMachineTable t;
 	input->loadMachine = internStateMachine(input->loadMachine, t);
-	for (auto it = input->storeMachines.begin();
-	     it != input->storeMachines.end();
-	     it++) {
-		(*it)->assumption = internIRExpr((*it)->assumption, t);
-		(*it)->machine = internStateMachine((*it)->machine, t);
-	}
+	input->storeMachine = internStateMachine(input->storeMachine, t);
+	input->verificationCondition = internIRExpr(input->verificationCondition, t);
 
 	struct : public StateMachineTransformer {
 		std::set<threadAndRegister, threadAndRegister::fullCompare> res;
@@ -169,30 +165,19 @@ canonicalise_crash_summary(CrashSummary *input)
 		}
 	} phiRegs;
 	phiRegs.transform(input->loadMachine);
-	for (auto it = input->storeMachines.begin();
-	     it != input->storeMachines.end();
-	     it++) {
-		phiRegs.doit((*it)->assumption);
-		phiRegs.transform((*it)->machine);
-	}
+	phiRegs.transform(input->storeMachine);
+	phiRegs.doit(input->verificationCondition);
 
 	SplitSsaGenerations splitter(phiRegs.res);
 	input->loadMachine = splitter.transform(input->loadMachine);
-	for (auto it = input->storeMachines.begin();
-	     it != input->storeMachines.end();
-	     it++) {
-		(*it)->assumption = splitter.doit((*it)->assumption);
-		(*it)->machine = splitter.transform((*it)->machine);
-	}
+	input->storeMachine = splitter.transform(input->storeMachine);
+	input->verificationCondition = splitter.doit(input->verificationCondition);
 
 	RegisterCanonicaliser canon;
 	input->loadMachine = canon.transform(input->loadMachine);
-	for (auto it = input->storeMachines.begin();
-	     it != input->storeMachines.end();
-	     it++) {
-		(*it)->assumption = canon.doit((*it)->assumption);
-		(*it)->machine = canon.transform((*it)->machine);
-	}
+	input->storeMachine = canon.transform(input->storeMachine);
+	input->verificationCondition = canon.doit(input->verificationCondition);
+
 	return input;
 }
 

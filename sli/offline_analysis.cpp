@@ -394,9 +394,6 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 		optIn.
 		   enableignoreSideEffects();
 
-	/* Specialise the state machine down so that we only consider
-	   the interesting stores, and introduce free variables as
-	   appropriate. */
 	VexPtr<StateMachine, &ir_heap> sm;
 	sm = duplicateStateMachine(storeMachine);
 	sm = optimiseStateMachine(sm, storeOptimisations, oracle, true, token);
@@ -526,12 +523,11 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 	fprintf(inductionLog, "%s -> %s\n", used.name(), used_in.name());
 }
 
-static bool
+static CrashSummary *
 considerStoreCFG(const DynAnalysisRip &target_rip,
 		 VexPtr<CFGNode, &ir_heap> cfg,
 		 VexPtr<Oracle> &oracle,
 		 VexPtr<StateMachine, &ir_heap> &probeMachine,
-		 VexPtr<CrashSummary, &ir_heap> &summary,
 		 bool needRemoteMacroSections,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
@@ -542,7 +538,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, mai));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
-		return true;
+		return NULL;
 	}
 	sm = optimiseStateMachine(
 		sm,
@@ -565,16 +561,15 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 			optIn,
 			token));
 	if (!base_verification_condition)
-		return false;
+		return NULL;
 
 	fprintf(_logfile, "\t\tBase verification condition: ");
 	ppIRExpr(base_verification_condition, _logfile);
 	fprintf(_logfile, "\n");
 
-	if (base_verification_condition->tag == Iex_Const &&
-	    ((IRExprConst *)base_verification_condition.get())->con->Ico.U1 == 0) {
+	if (!satisfiable(base_verification_condition, optIn)) {
 		fprintf(_logfile, "\t\tCrash impossible.\n");
-		return false;
+		return NULL;
 	}
 
 	/* Now have a look at whether we have anything we can use the
@@ -608,7 +603,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 	std::set<DynAnalysisRip> inductionRips;
 	for (unsigned x = 0; x < nrInductionAccesses; x++) {
 		if (TIMEOUT)
-			return true;
+			return NULL;
 		VexPtr<StateMachine, &ir_heap> truncatedMachine(
 			truncateStateMachine(
 				probeMachine,
@@ -650,39 +645,38 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		if (residual_verification_condition->tag == Iex_Const &&
 		    ((IRExprConst *)residual_verification_condition.get())->con->Ico.U1 == 0) {
 			fprintf(_logfile, "\t\tCrash impossible.\n");
-			return false;
+			return NULL;
 		}
 	}
 
 	/* Okay, final check: is the verification condition satisfiable? */
 	if (!satisfiable(residual_verification_condition, optIn)) {
 		fprintf(_logfile, "\t\tVerification condition is unsatisfiable -> no bug\n");
-		return false;
+		return NULL;
 	}
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
-	CrashSummary::StoreMachineData *smd = new CrashSummary::StoreMachineData(sm, residual_verification_condition);
+	VexPtr<CrashSummary, &ir_heap> res(new CrashSummary(probeMachine, sm, residual_verification_condition));
 	if (needRemoteMacroSections) {
 		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
 		if (!findRemoteMacroSections(probeMachine, sm, residual_verification_condition,
 					     oracle, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tChose a bad write machine...\n");
-			return true;
+			return NULL;
 		}
 		if (!fixSufficient(sm, probeMachine, residual_verification_condition,
 				   oracle, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
-			return true;
+			return NULL;
 		}
 		for (remoteMacroSectionsT::iterator it = remoteMacroSections->begin();
 		     it != remoteMacroSections->end();
 		     it++)
-			smd->macroSections.push_back(CrashSummary::StoreMachineData::macroSectionT(it->start, it->end));
+			res->macroSections.push_back(CrashSummary::macroSectionT(it->start, it->end));
 	}
 
-	summary->storeMachines.push_back(smd);
-	return true;
+	return res;
 }
 
 bool
@@ -788,7 +782,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 		      VexPtr<StateMachine, &ir_heap> &probeMachine,
 		      VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      VexPtr<Oracle> &oracle,
-		      VexPtr<CrashSummary, &ir_heap> &summary,
+		      FixConsumer &df,
 		      bool needRemoteMacroSections,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
 		      const AllowableOptimisations &optIn,
@@ -827,25 +821,29 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 
 		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 		MemoryAccessIdentifierAllocator storeMai(mai);
-		foundRace |= considerStoreCFG(targetRip,
-					      storeCFG,
-					      oracle,
-					      probeMachine,
-					      summary,
-					      needRemoteMacroSections,
-					      STORING_THREAD + i,
-					      optIn.setinterestingStores(&potentiallyConflictingStores),
-					      storeMai,
-					      token);
+		VexPtr<CrashSummary, &ir_heap> summary;
+
+		summary = considerStoreCFG(targetRip,
+					   storeCFG,
+					   oracle,
+					   probeMachine,
+					   needRemoteMacroSections,
+					   STORING_THREAD + i,
+					   optIn.setinterestingStores(&potentiallyConflictingStores),
+					   storeMai,
+					   token);
+		if (summary)
+			df(summary, token);
 	}
 
 	return foundRace;
 }
 
-CrashSummary *
+bool
 diagnoseCrash(const DynAnalysisRip &targetRip,
 	      VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<Oracle> &oracle,
+	      FixConsumer &df,
 	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
 	      const MemoryAccessIdentifierAllocator &mai,
@@ -873,32 +871,16 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 		return NULL;
 	}
 
-	VexPtr<CrashSummary, &ir_heap> summary(new CrashSummary(probeMachine));
-
-	bool foundRace = probeMachineToSummary(targetRip, probeMachine,
-					       reducedProbeMachine,
-					       oracle,
-					       summary, needRemoteMacroSections,
-					       potentiallyConflictingStores,
-					       optIn,
-					       mai,
-					       token);
-	if (TIMEOUT)
-		return NULL;
-
-	if (!foundRace) {
-		fprintf(_logfile, "\t\tCouldn't find any relevant-looking races\n");
-		return NULL;
-	}
-
-	fprintf(_logfile, "\t\tFound relevant-looking races\n");
-
-	if (summary->storeMachines.size() == 0) {
-		fprintf(_logfile, "\t\t...but no store machines?\n");
-		return NULL;
-	}
-
-	return summary;
+	return probeMachineToSummary(targetRip,
+				     probeMachine,
+				     reducedProbeMachine,
+				     oracle,
+				     df,
+				     needRemoteMacroSections,
+				     potentiallyConflictingStores,
+				     optIn,
+				     mai,
+				     token);
 }
 			    
 void
@@ -1031,11 +1013,9 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		probeMachines = _probeMachines;
 	}
 	for (unsigned x = 0; x < nrProbeMachines; x++) {
-		VexPtr<CrashSummary, &ir_heap> summary;
 		VexPtr<StateMachine, &ir_heap> probeMachine(probeMachines[x]);
-		summary = diagnoseCrash(targetRip, probeMachine, oracle, false, opt, mai, token);
-		if (summary)
-			df(summary, token);
+		diagnoseCrash(targetRip, probeMachine, oracle,
+			      df, false, opt, mai, token);
 	}
 }
 

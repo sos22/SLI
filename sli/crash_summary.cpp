@@ -11,32 +11,28 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 	fprintf(f, "Load machine:\n");
 	printStateMachine(summary->loadMachine, f);
 
-	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
-	     it != summary->storeMachines.end();
-	     it++) {
-		CrashSummary::StoreMachineData *smd = *it;
-		fprintf(f, "Store machine:\n");
-		printStateMachine(smd->machine, f);
-		fprintf(f, "Assumption: ");
-		ppIRExpr(smd->assumption, f);
-		fprintf(f, "\n");
-		if (smd->macroSections.size() == 0) {
-			fprintf(f, "No remote macro sections\n");
-		} else {
-			fprintf(f, "Remote macro sections:\n");
-			for (std::vector<CrashSummary::StoreMachineData::macroSectionT>::iterator it2 = 
-				     smd->macroSections.begin();
-			     it2 != smd->macroSections.end();
-			     it2++) {
-				fprintf(f, "\t");
-				it2->first->prettyPrint(f);
-				fprintf(f, " to ");
-				if (it2->second)
-					it2->second->prettyPrint(f);
-				else
-					fprintf(f, "<null>");
-				fprintf(f, "\n");
-			}
+	fprintf(f, "Store machine:\n");
+	printStateMachine(summary->storeMachine, f);
+
+	fprintf(f, "Verification condition: ");
+	ppIRExpr(summary->verificationCondition, f);
+	fprintf(f, "\n");
+
+	if (summary->macroSections.size() == 0) {
+		fprintf(f, "No remote macro sections\n");
+	} else {
+		fprintf(f, "Remote macro sections:\n");
+		for (auto it = summary->macroSections.begin();
+		     it != summary->macroSections.end();
+		     it++) {
+			fprintf(f, "\t");
+			it->first->prettyPrint(f);
+			fprintf(f, " to ");
+			if (it->second)
+				it->second->prettyPrint(f);
+			else
+				fprintf(f, "<null>");
+			fprintf(f, "\n");
 		}
 	}
 }
@@ -86,53 +82,43 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 		  const char **succ)
 {
 	StateMachine *loadMachine;
+	StateMachine *storeMachine;
+	IRExpr *verificationCondition;
 	if (!parseThisString("Load machine:\n", buf, &buf) ||
-	    !parseStateMachine(&loadMachine, buf, &buf))
+	    !parseStateMachine(&loadMachine, buf, &buf) ||
+	    !parseThisString("Store machine:\n", buf, &buf) ||
+	    !parseStateMachine(&storeMachine, buf, &buf) ||
+	    !parseThisString("Verification condition: ", buf, &buf) ||
+	    !parseIRExpr(&verificationCondition, buf, &buf) ||
+	    !parseThisChar('\n', buf, &buf))
 		return false;
-	std::vector<CrashSummary::StoreMachineData *> storeMachines;
-	while (1) {
-		StateMachine *storeMachine;
-		IRExpr *assumption;
-		if (!parseThisString("Store machine:\n", buf, &buf) ||
-		    !parseStateMachine(&storeMachine, buf, &buf) ||
-		    !parseThisString("Assumption: ", buf, &buf) ||
-		    !parseIRExpr(&assumption, buf, &buf) ||
-		    !parseThisChar('\n', buf, &buf))
-			break;
-		std::vector<CrashSummary::StoreMachineData::macroSectionT> macros;
-		if (parseThisString("No remote macro sections\n", buf, &buf)) {
-			/* Nothing */
-		} else if (parseThisString("Remote macro sections:\n", buf, &buf)) {
-			while (1) {
-				StateMachineSideEffect *start, *end;
-				const char *m;
-				if (!parseThisChar('\t', buf, &m) ||
-				    !StateMachineSideEffect::parse(&start, m, &m) ||
-				    !parseThisString(" to ", m, &m))
-					break;
-				if (parseThisString("<null>", m, &m)) {
-					end = NULL;
-				} else if (!StateMachineSideEffect::parse(&end, m, &m)) {
-					break;
-				}
-				if (!parseThisChar('\n', m, &m))
-					break;
-				StateMachineSideEffectStore *starts = dynamic_cast<StateMachineSideEffectStore *>(start);
-				StateMachineSideEffectStore *ends = dynamic_cast<StateMachineSideEffectStore *>(end);
-				if (!starts || (end && !ends) )
-					return false;
-				buf = m;
-				macros.push_back(CrashSummary::StoreMachineData::macroSectionT(starts, ends));
+	std::vector<CrashSummary::macroSectionT> macros;
+	if (parseThisString("No remote macro sections\n", buf, &buf)) {
+		/* Nothing */
+	} else if (parseThisString("Remote macro sections:\n", buf, &buf)) {
+		while (1) {
+			StateMachineSideEffect *start, *end;
+			const char *m;
+			if (!parseThisChar('\t', buf, &m) ||
+			    !StateMachineSideEffect::parse(&start, m, &m) ||
+			    !parseThisString(" to ", m, &m))
+				break;
+			if (parseThisString("<null>", m, &m)) {
+				end = NULL;
+			} else if (!StateMachineSideEffect::parse(&end, m, &m)) {
+				break;
 			}
+			if (!parseThisChar('\n', m, &m))
+					break;
+			StateMachineSideEffectStore *starts = dynamic_cast<StateMachineSideEffectStore *>(start);
+			StateMachineSideEffectStore *ends = dynamic_cast<StateMachineSideEffectStore *>(end);
+			if (!starts || (end && !ends) )
+				return false;
+			buf = m;
+			macros.push_back(CrashSummary::macroSectionT(starts, ends));
 		}
-		storeMachines.push_back(new CrashSummary::StoreMachineData(
-						storeMachine,
-						assumption,
-						macros));
 	}
-	if (storeMachines.size() == 0)
-		return false;
 	*succ = buf;
-	*out = new CrashSummary(loadMachine, storeMachines);
+	*out = new CrashSummary(loadMachine, storeMachine, verificationCondition, macros);
 	return true;
 }

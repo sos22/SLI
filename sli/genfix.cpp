@@ -46,10 +46,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 		fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
 		return NULL;
 	}
-	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
-	     it != summary->storeMachines.end();
-	     it++)
-		(*it)->machine->root->enumerateMentionedMemoryAccesses(neededInstructions);
+	summary->storeMachine->root->enumerateMentionedMemoryAccesses(neededInstructions);
 
 	DcdCFG *cfg = new DcdCFG(as, neededInstructions);
 
@@ -57,20 +54,18 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	/* What are the entry points of the patch? */
 	cfg->add_root(root, 100);
 	roots.insert(root);
-	for (std::vector<CrashSummary::StoreMachineData *>::iterator it = summary->storeMachines.begin();
-	     it != summary->storeMachines.end();
-	     it++) {
-		std::set<VexRip> instrs;
-		(*it)->machine->root->enumerateMentionedMemoryAccesses(instrs);
-		assert( (*it)->machine->origin.size() == 1);
-		ThreadVexRip r((*it)->machine->origin[0].first, oracle->dominator(instrs, as, 5));
-		if (!r.rip.isValid()) {
-			fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
-			return NULL;
-		}
-		cfg->add_root(r, 100);
-		roots.insert(r);
+
+	std::set<VexRip> instrs;
+	summary->storeMachine->root->enumerateMentionedMemoryAccesses(instrs);
+	assert( summary->storeMachine->origin.size() == 1);
+	ThreadVexRip r(summary->storeMachine->origin[0].first, oracle->dominator(instrs, as, 5));
+	if (!r.rip.isValid()) {
+	  fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
+	  return NULL;
 	}
+	cfg->add_root(r, 100);
+	roots.insert(r);
+
 	try {
 		cfg->doit();
 	} catch (NotImplementedException &e) {

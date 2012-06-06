@@ -261,8 +261,7 @@ analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
 	std::set<IRExprHappensBefore *, HBOrdering> assumption;
 
 	extractImplicitOrder(summary->loadMachine, assumption);
-	for (unsigned x = 0; x < summary->storeMachines.size(); x++)
-		extractImplicitOrder(summary->storeMachines[x]->machine, assumption);
+	extractImplicitOrder(summary->storeMachine, assumption);
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
 			IRExprHappensBefore *g = (IRExprHappensBefore *)c[x].second;
@@ -320,13 +319,11 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 								     summary->loadMachine->origin[0].second);
 	
 	zapBindersAndFreeVariables(summary->loadMachine);
-	for (unsigned x = 0; x < summary->storeMachines.size(); x++) {
-		zapBindersAndFreeVariables(summary->storeMachines[x]->machine);
-		assert(summary->storeMachines[x]->machine->origin.size() == 1);
-		roots[summary->storeMachines[x]->machine->origin[0].first] =
-			ThreadRip::mk(summary->storeMachines[x]->machine->origin[0].first,
-				      summary->storeMachines[x]->machine->origin[0].second);
-	}
+	zapBindersAndFreeVariables(summary->storeMachine);
+	assert(summary->storeMachine->origin.size() == 1);
+	roots[summary->storeMachine->origin[0].first] =
+		ThreadRip::mk(summary->storeMachine->origin[0].first,
+			      summary->storeMachine->origin[0].second);
 
 	requirement = internIRExpr(zapFreeVariables(requirement));
 	requirement = simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations);
