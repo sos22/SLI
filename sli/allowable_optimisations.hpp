@@ -38,6 +38,17 @@
                   validity predicates and the latter for crash
                   predicates.
 
+   noLocalSurvival -- If true, convert any tests of entirely local
+                      state which lead to survival into assertions.
+                      i.e.  if you've got if (x) <survive>, and x
+                      depends only on information which is entirely
+                      local to this state, turn it into assert !x.
+                      The idea is that, for most probe machines, we're
+                      only really interested in the interactions with
+                      remote machines, so if a test on local state
+                      would mean that we skip the interesting bit we
+                      should just require that the test fail.
+		  
    Other fields:
 
    interestingStores -- Bit of a hack: sometimes, only some side
@@ -63,7 +74,8 @@ class AllowableOptimisations {
 	f(assumeNoInterferingStores, bool)				\
 	f(noExtend,bool)						\
 	f(noSanityChecking,bool)					\
-	f(preferCrash,bool)
+	f(preferCrash,bool)						\
+	f(noLocalSurvival,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\

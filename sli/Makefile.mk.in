@@ -14,7 +14,7 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{bisimilarity,nf,typesdb,timers}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{getStoreCFGs,getWriteMachineCrashConstraint,dupeStateMachine}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{cfgnode,getProbeCFGs,probeCFGtoMachine,useInitialMemoryLoads}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{quickcheck_expr,sat_checker,smb_builder}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{quickcheck_expr,sat_checker,smb_builder,remove_local_survival}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 ifeq (\$(SELECTIVE_PROFILING),y)

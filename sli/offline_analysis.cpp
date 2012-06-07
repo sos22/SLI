@@ -200,6 +200,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			sm = optimiseSSA(sm, &done_something);
 		if (opt.noExtend())
 			sm = useInitialMemoryLoads(sm, opt, oracle, &done_something);
+		if (opt.noLocalSurvival())
+			sm = removeLocalSurvival(sm, opt, &done_something);
 		sm = sm->optimise(opt, &done_something);
 		if (progress)
 			*progress |= done_something;
@@ -1134,7 +1136,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.setAddressSpace(oracle->ms->addressSpace)
-		.enablenoExtend();
+		.enablenoExtend()
+		.enablenoLocalSurvival();
 	VexPtr<StateMachine *, &ir_heap> probeMachines;
 	unsigned nrProbeMachines;
 	{

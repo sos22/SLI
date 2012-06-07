@@ -229,6 +229,9 @@ StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const 
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
 StateMachine *useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
 				    Oracle *oracle, bool *done_something);
+StateMachine *removeLocalSurvival(StateMachine *sm,
+				  const AllowableOptimisations &opt,
+				  bool *done_something);
 
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
