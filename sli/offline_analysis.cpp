@@ -42,6 +42,7 @@ findAllTypedSideEffects(StateMachine *sm, std::set<t *> &out)
 		IRExpr *transformIRExpr(IRExpr *a, bool *) {
 			return a;
 		}
+		bool rewriteNewStates() const { return false; }
 	public:
 		_(std::set<t *> &_out)
 			: out(_out)
@@ -159,6 +160,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 {
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck();
+	sm->assertAcyclic();
 	Oracle::RegisterAliasingConfiguration alias, *aliasp;
 
 	/* Careful here.  We can only use the aliasing configuration
@@ -206,6 +208,7 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		if (progress)
 			*progress |= done_something;
 	} while (done_something);
+	sm->assertAcyclic();
 	sm->sanityCheck();
 	if (is_ssa)
 		sm->assertSSA();
@@ -353,6 +356,7 @@ duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
 		IRExpr *transformIRExpr(IRExpr *, bool *) {
 			return NULL;
 		}
+		bool rewriteNewStates() const { return false; }
 	} doit;
 	return doit.transform(inp, done_something);
 }
@@ -506,7 +510,7 @@ truncateStateMachine(StateMachine *sm, StateMachineSideEffectMemoryAccess *trunc
 		if ((*it)->getSideEffect() == truncateAt)
 			rewriteRules[*it] = smb;
 	}
-	StateMachineTransformer::rewriteMachine(sm, rewriteRules);
+	StateMachineTransformer::rewriteMachine(sm, rewriteRules, false);
 	assert(rewriteRules.count(sm->root));
 	assert(rewriteRules[sm->root] != sm->root);
 	return new StateMachine(rewriteRules[sm->root], sm->origin);
@@ -1136,8 +1140,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
 		.setAddressSpace(oracle->ms->addressSpace)
-		.enablenoExtend()
-		.enablenoLocalSurvival();
+		.enablenoExtend();
 	VexPtr<StateMachine *, &ir_heap> probeMachines;
 	unsigned nrProbeMachines;
 	{
@@ -1149,7 +1152,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	for (unsigned x = 0; x < nrProbeMachines; x++) {
 		VexPtr<StateMachine, &ir_heap> probeMachine(probeMachines[x]);
 		diagnoseCrash(targetRip, probeMachine, oracle,
-			      df, false, opt, mai, token);
+			      df, false, opt.enablenoLocalSurvival(),
+			      mai, token);
 	}
 }
 

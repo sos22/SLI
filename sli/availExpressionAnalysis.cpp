@@ -46,6 +46,7 @@ class findAllSideEffectsVisitor : public StateMachineTransformer {
 	{
 		return e;
 	}
+	bool rewriteNewStates() const { return false; }
 public:
 	std::set<StateMachineSideEffect *> &out;
 	findAllSideEffectsVisitor(std::set<StateMachineSideEffect *> &o)
@@ -334,6 +335,7 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 			}
 			return StateMachineTransformer::transformOneSideEffect(l, done_something);
 		}
+		bool rewriteNewStates() const { return false; }
 	public:
 		_(threadAndRegister _reg, StateMachineSideEffect *_preserve)
 			: reg(_reg), preserve(_preserve)

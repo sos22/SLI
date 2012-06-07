@@ -665,6 +665,7 @@ StateMachine::assertSSA() const
 				assert(*it != 0);
 			return IRExprTransformer::transformIex(phi);
 		}
+		bool rewriteNewStates() const { return false; }
 	} checkForNonSSAVars;
 	checkForNonSSAVars.transform(const_cast<StateMachine *>(this));
 }

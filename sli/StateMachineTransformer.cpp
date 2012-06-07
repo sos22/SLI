@@ -102,13 +102,15 @@ enumStates(const StateMachineState *start, std::set<const StateMachineState *> *
 
 void
 StateMachineTransformer::rewriteMachine(const StateMachine *sm,
-					std::map<const StateMachineState *, StateMachineState *> &stateRewrites)
+					std::map<const StateMachineState *, StateMachineState *> &stateRewrites,
+					bool rewriteNewStates)
 {
 	std::set<const StateMachineState *> allStates;
 	enumStates(sm, &allStates);
 
-	for (auto it = stateRewrites.begin(); it != stateRewrites.end(); it++)
-		enumStates(it->second, &allStates);
+	if (rewriteNewStates)
+		for (auto it = stateRewrites.begin(); it != stateRewrites.end(); it++)
+			enumStates(it->second, &allStates);
 
 	/* Step 2 of state machine transformation: If we're rewriting
 	   a state, we have to rewrite all of the edges which target
@@ -223,7 +225,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 			return NULL;
 	}
 
-	rewriteMachine(sm, stateRewrites);
+	rewriteMachine(sm, stateRewrites, rewriteNewStates());
 
 	bool b = false;
 

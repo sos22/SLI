@@ -541,6 +541,7 @@ truncateRips(StateMachine *sm)
 				return NULL;
 			}
 		}
+		bool rewriteNewStates() const { return false; }
 	} doit;
 	return doit.transform(sm);
 }

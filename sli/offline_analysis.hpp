@@ -193,12 +193,14 @@ protected:
 		return NULL;
 	}
 
+	virtual bool rewriteNewStates() const = 0;
 public:
 	virtual StateMachineState *transformState(StateMachineState *, bool *);
 	virtual StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,
 							    bool *);
 	static void rewriteMachine(const StateMachine *sm,
-				   std::map<const StateMachineState *, StateMachineState *> &rewriteRules);
+				   std::map<const StateMachineState *, StateMachineState *> &rewriteRules,
+				   bool rewriteNewStates);
 
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL);
 };

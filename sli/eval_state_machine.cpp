@@ -2319,7 +2319,7 @@ concatenateStateMachines(const StateMachine *machine, const StateMachine *to)
 	rewriteRules[StateMachineNoCrash::get()] = StateMachineNoCrash::get();
 	rewriteRules[StateMachineUnreached::get()] = StateMachineUnreached::get();
 
-	StateMachineTransformer::rewriteMachine(machine, rewriteRules);
+	StateMachineTransformer::rewriteMachine(machine, rewriteRules, false);
 	assert(rewriteRules.count(machine->root));
 #ifndef NDEBUG
 	std::map<unsigned, VexRip> newOrigin;
@@ -2355,9 +2355,12 @@ writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 
 	VexPtr<StateMachine, &ir_heap> combinedMachine;
 
+	writeMachine->assertAcyclic();
+	readMachine->assertAcyclic();
 	combinedMachine = concatenateStateMachines(
 		writeMachine,
 		readMachine);
+	combinedMachine->assertAcyclic();
 	combinedMachine = optimiseStateMachine(combinedMachine,
 					       opt
 					          .enableassumeExecutesAtomically()
