@@ -89,12 +89,26 @@ StateMachineTransformer::transformState(StateMachineState *s, bool *done_somethi
 	abort();
 }
 
+static void
+enumStates(const StateMachineState *start, std::set<const StateMachineState *> *out)
+{
+	if (!out->insert(start).second)
+		return;
+	std::vector<const StateMachineState *> targets;
+	start->targets(targets);
+	for (auto it = targets.begin(); it != targets.end(); it++)
+		enumStates(*it, out);
+}
+
 void
 StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 					std::map<const StateMachineState *, StateMachineState *> &stateRewrites)
 {
 	std::set<const StateMachineState *> allStates;
 	enumStates(sm, &allStates);
+
+	for (auto it = stateRewrites.begin(); it != stateRewrites.end(); it++)
+		enumStates(it->second, &allStates);
 
 	/* Step 2 of state machine transformation: If we're rewriting
 	   a state, we have to rewrite all of the edges which target
