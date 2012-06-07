@@ -591,21 +591,21 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 			StateMachineSideEffectLoad *smsel2 =
 				dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 			if ( smses2 &&
-			     smsel->type == smses2->data->type() &&
+			     smsel->type <= smses2->data->type() &&
 			     (!aliasing || aliasing->ptrsMightAlias(smses2->addr, newAddr)) &&
 			     definitelyEqual(smses2->addr, newAddr, opt) ) {
 				newEffect =
 					new StateMachineSideEffectCopy(
 						smsel->target,
-						smses2->data);
+						coerceTypes(smsel->type, smses2->data));
 			} else if ( smsel2 &&
-				    smsel->type == smsel2->type &&
+				    smsel->type <= smsel2->type &&
 				    (!aliasing || aliasing->ptrsMightAlias(smsel2->addr, newAddr)) &&
 				    definitelyEqual(smsel2->addr, newAddr, opt) ) {
 				newEffect =
 					new StateMachineSideEffectCopy(
 						smsel->target,
-						new IRExprGet(smsel2->target, Ity_I64));
+						new IRExprGet(smsel2->target, smsel->type));
 			}
 		}
 		if (!newEffect && doit)
