@@ -357,9 +357,9 @@ duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
 	return doit.transform(inp, done_something);
 }
 
-static StateMachine *
+StateMachine *
 removeAssertions(StateMachine *_sm, const AllowableOptimisations &opt, VexPtr<Oracle> &oracle,
-		 GarbageCollectionToken token)
+		 bool is_ssa, GarbageCollectionToken token)
 {
 	VexPtr<StateMachine, &ir_heap> sm(_sm);
 	/* Iterate to make sure we get rid of any assertions
@@ -372,7 +372,7 @@ removeAssertions(StateMachine *_sm, const AllowableOptimisations &opt, VexPtr<Or
 		if (!done_something)
 			break;
 		done_something = false;
-		sm = optimiseStateMachine(sm, opt, oracle, true,
+		sm = optimiseStateMachine(sm, opt, oracle, is_ssa,
 					  token, &done_something);
 		if (!done_something)
 			break;
@@ -960,7 +960,7 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 	std::set<DynAnalysisRip> potentiallyConflictingStores;
 	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
 
-	reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, token);
+	reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, true, token);
 	if (!reducedProbeMachine)
 		return NULL;
 	getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
@@ -978,7 +978,7 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 	if (localised_loads) {
 		std::set<DynAnalysisRip> newPotentiallyConflictingStores;
 		while (1) {
-			reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, token);
+			reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, true, token);
 			if (!reducedProbeMachine)
 				return NULL;
 			getConflictingStores(reducedProbeMachine, oracle, newPotentiallyConflictingStores);

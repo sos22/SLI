@@ -233,6 +233,9 @@ StateMachine *removeLocalSurvival(StateMachine *sm,
 				  const AllowableOptimisations &opt,
 				  bool *done_something);
 
+StateMachine *removeAssertions(StateMachine *_sm, const AllowableOptimisations &opt, VexPtr<Oracle> &oracle,
+			       bool is_ssa, GarbageCollectionToken token);
+
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
 class FixConsumer;
