@@ -91,6 +91,7 @@ class SplitSsaGenerations : public StateMachineTransformer {
 	std::set<threadAndRegister, threadAndRegister::fullCompare> &phiRegs;
 	std::map<threadAndRegister, threadAndRegister, threadAndRegister::fullCompare> canonTable;
 	std::map<IRExprLoad *, threadAndRegister> canonLoadTable;
+	std::map<IRConst *, threadAndRegister> canonConstTable;
 	std::map<unsigned, unsigned> next_temp_id;
 	unsigned alloc_temp_id(unsigned tid) {
 		auto it_did_insert = next_temp_id.insert(std::pair<unsigned, unsigned>(tid, 1));
@@ -118,6 +119,15 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			it->second = threadAndRegister::temp(-1, alloc_temp_id(-1), 0);
 		return it->second;
 	}
+	threadAndRegister canon_const(IRConst *iec)
+	{
+		auto it_did_insert = canonConstTable.insert(std::pair<IRConst *, threadAndRegister>(iec, threadAndRegister::invalid()));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (did_insert)
+			it->second = threadAndRegister::temp(-2, alloc_temp_id(-2), 0);
+		return it->second;
+	}
 
 	IRExpr *transformIex(IRExprGet *ieg) {
 		return IRExpr_Get(canon_reg(ieg->reg), ieg->ty);
@@ -127,6 +137,9 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			return IRExpr_Get(canon_load(iel), iel->ty);
 		else
 			return IRExprTransformer::transformIex(iel);
+	}
+	IRExpr *transformIex(IRExprConst *iec) {
+		return IRExpr_Get(canon_const(iec->con), iec->type());
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
 		StateMachineSideEffectLoad *smsel, bool *done_something)

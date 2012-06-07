@@ -171,7 +171,7 @@ removeLocalSurvival(StateMachine *sm, const AllowableOptimisations &opt, bool *d
 		return sm;
 	*done_something = true;
 
-	StateMachineTransformer::rewriteMachine(sm, rewriteRules);
+	StateMachineTransformer::rewriteMachine(sm, rewriteRules, true);
 	assert(rewriteRules.count(sm->root));
 	return new StateMachine(rewriteRules[sm->root], sm->origin);
 }

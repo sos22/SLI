@@ -143,6 +143,7 @@ class UseReachingMap : public StateMachineTransformer {
 	Oracle *oracle;
 	StateMachineSideEffecting *transformOneState(
 		StateMachineSideEffecting *, bool *);
+	bool rewriteNewStates() const { return false; }
 public:
 	UseReachingMap(ReachingMap &_rm,
 		       const AllowableOptimisations &_opt,

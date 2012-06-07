@@ -41,6 +41,9 @@ assertNonSsa(StateMachine *inp)
 		StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *, bool *) {
 			abort();
 		}
+		bool rewriteNewStates() const {
+			return false;
+		}
 	} t;
 	t.StateMachineTransformer::transform(inp);
 #endif
@@ -98,6 +101,9 @@ assignLabelsToDefinitions(StateMachine *sm,
 		_(std::map<threadAndRegister, unsigned, threadAndRegister::partialCompare> &_lastGeneration)
 			: lastGeneration(_lastGeneration)
 		{}
+		bool rewriteNewStates() const {
+			return false;
+		}
 	} doit(lastGeneration);
 	return doit.transform(sm);
 }
@@ -228,6 +234,7 @@ ReachingTable::initialReachingSet(const StateMachine *sm)
 				res[ieg->reg].insert((unsigned)-1);
 			return IRExprTransformer::transformIex(ieg);
 		}
+		bool rewriteNewStates() const { return false; }
 	} doit;
 	doit.transform(const_cast<StateMachine *>(sm));
 	return doit.res;
@@ -310,6 +317,7 @@ resolveDependencies(StateMachine *sm,
 			  currentStateReaching(NULL),			  
 			  currentState(NULL)
 		{}
+		bool rewriteNewStates() const { return false; }
 	} doit(reachingTable, needsPhi);
 	return doit.transform(sm);
 }
@@ -328,6 +336,7 @@ findUnresolvedReferences(StateMachineState *s, std::set<threadAndRegister, threa
 			std::set<threadAndRegister, threadAndRegister::partialCompare> &_out)
 			: out(_out)
 		{}
+		bool rewriteNewStates() const { return false; }
 	} t(out);
 	bool d;
 	t.transformState(s, &d);
@@ -472,6 +481,7 @@ class optimiseSSATransformer : public StateMachineTransformer {
 		return smse;
 	}
 	IRExpr *transformIRExpr(IRExpr *, bool *) { return NULL; }
+	bool rewriteNewStates() const { return false; }
 public:
 	optimiseSSATransformer(StateMachine *inp)
 		: reaching(inp, false)
