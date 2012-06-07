@@ -1838,6 +1838,15 @@ bool shortCircuitableUnops(IROp a, IROp b, IROp *c)
   rule(Iop_64to8, Iop_16Uto64, Iop_16to8);
   rule(Iop_64to8, Iop_32Uto64, Iop_32to8);
   rule(Iop_64to16, Iop_32Uto64, Iop_32to16);
+
+  rule(Iop_64to16, Iop_8Uto64, Iop_8Uto16);
+  rule(Iop_64to32, Iop_8Uto64, Iop_8Uto32);
+  rule(Iop_64to32, Iop_16Uto64, Iop_16Uto32);
+
+  rule(Iop_32to8, Iop_64to32, Iop_64to8);
+  rule(Iop_32to16, Iop_64to32, Iop_64to16);
+  rule(Iop_16to8, Iop_64to16, Iop_64to8);
+
 #undef rule
 
   return false;
@@ -1846,16 +1855,31 @@ bool shortCircuitableUnops(IROp a, IROp b, IROp *c)
 /* Return true if a(b(x)) == x */
 bool inverseUnops(IROp a, IROp b)
 {
-  if (a == Iop_64to1 && b == Iop_1Uto64)
-    return true;
-  if (a == Iop_64to8 && b == Iop_8Uto64)
-    return true;
-  if (a == Iop_64to16 && b == Iop_16Uto64)
-    return true;
-  if (a == Iop_64to32 && b == Iop_32Uto64)
-    return true;
-  if (a == Iop_Not1 && b == Iop_Not1)
-    return true;
+#define rule(_a, _b)				\
+  if (a == Iop_ ## _a && b == Iop_ ## _b)	\
+    return true
+  rule(64to1, 1Uto64);
+  rule(64to8, 8Uto64);
+  rule(64to16, 16Uto64);
+  rule(64to32, 32Uto64);
+
+  rule(32to1, 1Uto32);
+  rule(32to8, 8Uto32);
+  rule(32to16, 16Uto32);
+
+  /* 1Uto16 doesn't exist */
+  //rule(16to1, 1Uto16);
+  rule(16to8, 8Uto16);
+
+  rule(8to1, 1Uto8);
+
+  rule(Not1, Not1);
+  rule(Not8, Not8);
+  rule(Not16, Not16);
+  rule(Not32, Not32);
+  rule(Not64, Not64);
+#undef rule
+
   return false;
 }
 
