@@ -1787,14 +1787,23 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						a->op = Iop_And1;
 					return a;
 				}
-				if ((arga->op == Iop_Or8 || arga->op == Iop_Or16 || arga->op == Iop_Or32 || arga->op == Iop_Or64 ||
-				     arga->op == Iop_And8 || arga->op == Iop_And16 || arga->op == Iop_And32 || arga->op == Iop_And64 ||
-				     arga->op == Iop_Xor8 || arga->op == Iop_Xor16 || arga->op == Iop_Xor32 || arga->op == Iop_Xor64 ||
-				     arga->op == Iop_Add8 || arga->op == Iop_Add16 || arga->op == Iop_Add32 || arga->op == Iop_Add64) &&
-				    (e->op == Iop_64to32 || e->op == Iop_64to16 || e->op == Iop_64to8 ||
-				                            e->op == Iop_32to16 || e->op == Iop_32to8 ||
-				                                                   e->op == Iop_16to8)) {
-					/* Push downcasts through and/or operations. */
+				bool isOr = arga->op >= Iop_Or8 && arga->op <= Iop_Or64;
+				bool isAnd = arga->op >= Iop_And8 && arga->op <= Iop_And64;
+				bool isXor = arga->op >= Iop_Xor8 && arga->op <= Iop_Xor64;
+				bool isAdd = arga->op >= Iop_Add8 && arga->op <= Iop_Add64;
+				bool isDowncast = 
+					e->op == Iop_64to32 || e->op == Iop_64to16 || e->op == Iop_64to8 ||
+					                       e->op == Iop_32to16 || e->op == Iop_32to8 ||
+					                                              e->op == Iop_16to8;
+				bool isUnsignedUpcast =
+					e->op == Iop_8Uto64  || e->op == Iop_8Uto32  || e->op == Iop_8Uto16 ||
+					e->op == Iop_16Uto64 || e->op == Iop_16Uto32 ||
+					e->op == Iop_32Uto64;
+
+				if ( (isDowncast && (isOr || isAnd || isXor || isAdd) ) ||
+				     (isUnsignedUpcast && (isOr || isAnd || isXor) ) ) {
+					/* Push downcasts through and/or/xor/add operations,
+					   and unsigned upcasts through and/or/xor ones. */
 					IRExprAssociative *a =
 						(IRExprAssociative *)IRExpr_Associative(arga);
 					for (int i = 0; i < a->nr_arguments; i++)
@@ -1827,6 +1836,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					case Ity_I32:
 						op = (IROp)(base_op + 2);
 						break;
+					case Ity_I64:
+						op = (IROp)(base_op + 3);
+						break;						
 					default:
 						break;
 					}
