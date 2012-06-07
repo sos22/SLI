@@ -591,6 +591,7 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 			StateMachineSideEffectLoad *smsel2 =
 				dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 			if ( smses2 &&
+			     smsel->type == smses2->data->type() &&
 			     (!aliasing || aliasing->ptrsMightAlias(smses2->addr, newAddr)) &&
 			     definitelyEqual(smses2->addr, newAddr, opt) ) {
 				newEffect =
@@ -598,6 +599,7 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 						smsel->target,
 						smses2->data);
 			} else if ( smsel2 &&
+				    smsel->type == smsel2->type &&
 				    (!aliasing || aliasing->ptrsMightAlias(smsel2->addr, newAddr)) &&
 				    definitelyEqual(smsel2->addr, newAddr, opt) ) {
 				newEffect =
