@@ -93,7 +93,7 @@ getExprLocalPart(IRExpr *input, IRExpr **localPart, IRExpr **remotePart, IROp sp
 	localAssoc = IRExpr_Associative(nrLocalArgs, inp->op);
 	memcpy(localAssoc->contents, localArgs, sizeof(IRExpr *) * nrLocalArgs);
 	localAssoc->nr_arguments = nrLocalArgs;
-	remoteAssoc = IRExpr_Associative(nrLocalArgs, inp->op);
+	remoteAssoc = IRExpr_Associative(nrRemoteArgs, inp->op);
 	memcpy(remoteAssoc->contents, remoteArgs, sizeof(IRExpr *) * nrRemoteArgs);
 	remoteAssoc->nr_arguments = nrRemoteArgs;
 
