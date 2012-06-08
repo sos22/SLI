@@ -173,6 +173,152 @@ public:
 	{}
 };
 
+class CanonicaliseThreadIds : public StateMachineTransformer {
+	std::map<unsigned, unsigned> canon;
+	unsigned next_id;
+public:
+	unsigned canonTid(unsigned tid) {
+		auto it_did_insert = canon.insert(std::pair<unsigned, unsigned>(tid, next_id));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (did_insert)
+			next_id++;
+		return it->second;
+	}
+private:
+	ThreadRip canon_threadrip(const ThreadRip &tr)
+	{
+		return ThreadRip::mk(canonTid(tr.thread), tr.rip);
+	}
+	MemoryAccessIdentifier canon_memoryaccessidentifier(const MemoryAccessIdentifier &mai)
+	{
+		return MemoryAccessIdentifier(canon_threadrip(mai.rip), mai.generation);
+	}
+	threadAndRegister canon_reg(const threadAndRegister &input)
+	{
+		if (!input.isValid())
+			return input;
+		if (input.isTemp())
+			return threadAndRegister::temp(canonTid(input.tid()),
+						       input.asTemp(),
+						       input.gen());
+		assert(input.isReg());
+		return threadAndRegister::reg(canonTid(input.tid()),
+					      input.asReg(),
+					      input.gen());
+	}
+	IRExpr *transformIex(IRExprGet *ieg)
+	{
+		return IRExpr_Get(canon_reg(ieg->reg), ieg->ty);
+	}
+	IRExpr *transformIex(IRExprPhi *iep)
+	{
+		return IRExpr_Phi(canon_reg(iep->reg), iep->generations, iep->ty);
+	}
+	IRExpr *transformIex(IRExprClientCall *iec)
+	{
+		int nr_args;
+		for (nr_args = 0; iec->args[nr_args]; nr_args++)
+			;
+		IRExpr **args = alloc_irexpr_array(nr_args + 1);
+		for (int i = 0; i < nr_args; i++) {
+			bool ign;
+			args[i] = transformIRExpr(iec->args[i], &ign);
+			if (!args[i])
+				args[i] = iec->args[i];
+		}
+		return IRExpr_ClientCall(iec->calledRip, canon_threadrip(iec->callSite), args);
+	}
+	IRExpr *transformIex(IRExprLoad *iel)
+	{
+		bool ign;
+		IRExpr *arg = transformIRExpr(iel->addr, &ign);
+		if (!arg)
+			arg = iel->addr;
+		return IRExpr_Load(iel->ty, arg, canon_memoryaccessidentifier(iel->rip));
+	}
+	IRExpr *transformIex(IRExprHappensBefore *ieh)
+	{
+		return IRExpr_HappensBefore(
+			canon_memoryaccessidentifier(ieh->before),
+			canon_memoryaccessidentifier(ieh->after));
+	}
+	IRExpr *transformIex(IRExprFreeVariable *ief)
+	{
+		return new IRExprFreeVariable(
+			canon_memoryaccessidentifier(ief->id),
+			ief->ty,
+			ief->isUnique);
+	}
+	StateMachineSideEffectLoad *transformOneSideEffect(
+		StateMachineSideEffectLoad *l, bool *done_something)
+	{
+		bool ign;
+		IRExpr *addr = doit(l->addr, &ign);
+		if (!addr)
+			addr = l->addr;
+		*done_something = true;
+		return new StateMachineSideEffectLoad(
+			canon_reg(l->target),
+			addr,
+			canon_memoryaccessidentifier(l->rip),
+			l->type);
+	}
+	StateMachineSideEffectStore *transformOneSideEffect(
+		StateMachineSideEffectStore *l, bool *done_something)
+	{
+		bool ign;
+		IRExpr *addr = doit(l->addr, &ign);
+		if (!addr)
+			addr = l->addr;
+		IRExpr *data = doit(l->data, &ign);
+		if (!data)
+			data = l->data;
+		*done_something = true;
+		return new StateMachineSideEffectStore(
+			addr,
+			data,
+			canon_memoryaccessidentifier(l->rip));
+	}
+	StateMachineSideEffectCopy *transformOneSideEffect(
+		StateMachineSideEffectCopy *l, bool *done_something)
+	{
+		bool ign;
+		IRExpr *value = doit(l->value, &ign);
+		if (!value)
+			value = l->value;
+		*done_something = true;
+		return new StateMachineSideEffectCopy(
+			canon_reg(l->target),
+			value);
+	}
+	StateMachineSideEffectPhi *transformOneSideEffect(
+		StateMachineSideEffectPhi *p, bool *done_something)
+	{
+		StateMachineSideEffectPhi *p2 = StateMachineTransformer::transformOneSideEffect(p, done_something);
+		if (p2)
+			p = p2;
+		*done_something = true;
+		return new StateMachineSideEffectPhi(
+			canon_reg(p->reg),
+			p->generations);
+	}
+	bool rewriteNewStates() const { return false; };
+public:
+	CanonicaliseThreadIds()
+		: next_id(0)
+	{}
+};
+
+static CrashSummary *
+transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans)
+{
+	input->loadMachine = trans.transform(input->loadMachine);
+	input->storeMachine = trans.transform(input->storeMachine);
+	input->verificationCondition = trans.doit(input->verificationCondition);
+	return input;
+}
+
 static CrashSummary *
 canonicalise_crash_summary(CrashSummary *input)
 {
@@ -180,6 +326,13 @@ canonicalise_crash_summary(CrashSummary *input)
 	input->loadMachine = internStateMachine(input->loadMachine, t);
 	input->storeMachine = internStateMachine(input->storeMachine, t);
 	input->verificationCondition = internIRExpr(input->verificationCondition, t);
+
+	CanonicaliseThreadIds thread_canon;
+	for (auto it = input->loadMachine->origin.begin(); it != input->loadMachine->origin.end(); it++)
+		it->first = thread_canon.canonTid(it->first);
+	for (auto it = input->storeMachine->origin.begin(); it != input->storeMachine->origin.end(); it++)
+		it->first = thread_canon.canonTid(it->first);
+	input = transformCrashSummary(input, thread_canon);
 
 	struct : public StateMachineTransformer {
 		std::set<threadAndRegister, threadAndRegister::fullCompare> res;
@@ -207,14 +360,10 @@ canonicalise_crash_summary(CrashSummary *input)
 	phiRegs.doit(input->verificationCondition);
 
 	SplitSsaGenerations splitter(phiRegs.res);
-	input->loadMachine = splitter.transform(input->loadMachine);
-	input->storeMachine = splitter.transform(input->storeMachine);
-	input->verificationCondition = splitter.doit(input->verificationCondition);
+	input = transformCrashSummary(input, splitter);
 
-	RegisterCanonicaliser canon;
-	input->loadMachine = canon.transform(input->loadMachine);
-	input->storeMachine = canon.transform(input->storeMachine);
-	input->verificationCondition = canon.doit(input->verificationCondition);
+	RegisterCanonicaliser reg_canon;
+	input = transformCrashSummary(input, reg_canon);
 
 	return input;
 }

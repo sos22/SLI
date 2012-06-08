@@ -150,6 +150,51 @@ removeSurvivingStates(StateMachine *sm, const AllowableOptimisations &opt, bool 
 	}
 }
 
+static StateMachine *
+enforceMustStoreBeforeCrash(StateMachine *sm, bool *progress)
+{
+	/* We're not allowed to branch from state X to state Crash if
+	   there's no way for the machine to issue a store before
+	   reaching X.  Turn all such branches into branches to state
+	   Survive. */
+	std::set<StateMachineState *> storeStates;
+	std::vector<StateMachineState *> todo;
+	{
+		std::set<StateMachineSideEffecting *> s;
+		enumStates(sm, &s);
+		for (auto it = s.begin(); it != s.end(); it++) {
+			if ( (*it)->getSideEffect() &&
+			     (*it)->getSideEffect()->type == StateMachineSideEffect::Store )
+				todo.push_back(*it);
+		}
+	}
+	while (!todo.empty()) {
+		StateMachineState *s = todo.back();
+		todo.pop_back();
+		if (!storeStates.insert(s).second)
+			continue;
+		std::vector<StateMachineState *> targets;
+		s->targets(targets);
+		todo.insert(todo.end(), targets.begin(), targets.end());
+	}
+	std::set<StateMachineState *> allStates;
+	enumStates(sm, &allStates);
+	for (auto it = allStates.begin(); it != allStates.end(); it++) {
+		StateMachineState *s = *it;
+		if (storeStates.count(s))
+			continue;
+		std::vector<StateMachineState **> targets;
+		s->targets(targets);
+		for (auto it = targets.begin(); it != targets.end(); it++) {
+			if (**it == StateMachineCrash::get()) {
+				*progress = true;
+				**it = StateMachineNoCrash::get();
+			}
+		}
+	}
+	return sm;
+}
+
 StateMachine *
 optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		     const AllowableOptimisations &opt,
@@ -204,6 +249,8 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 			sm = useInitialMemoryLoads(sm, opt, oracle, &done_something);
 		if (opt.noLocalSurvival())
 			sm = removeLocalSurvival(sm, opt, &done_something);
+		if (opt.mustStoreBeforeCrash())
+			sm = enforceMustStoreBeforeCrash(sm, &done_something);
 		sm = sm->optimise(opt, &done_something);
 		if (progress)
 			*progress |= done_something;
@@ -614,11 +661,17 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return NULL;
 	}
+	AllowableOptimisations storeOptimisations =
+		optIn.
+			enableassumeNoInterferingStores().
+			enableassumeExecutesAtomically().
+			enablemustStoreBeforeCrash();
+	AllowableOptimisations probeOptimisations =
+		optIn.
+			enableignoreSideEffects();
 	sm = optimiseStateMachine(
 		sm,
-		optIn.
-		       enableassumeNoInterferingStores().
-		       enableassumeExecutesAtomically(),
+		storeOptimisations,
 		oracle,
 		false,
 		token);
@@ -629,14 +682,14 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 
 	sm_ssa = optimiseStateMachine(
 		sm_ssa,
-		optIn.enableassumeExecutesAtomically().enableassumeNoInterferingStores(),
+		storeOptimisations,
 		oracle,
 		true,
 		token);
 	probeMachine = duplicateStateMachine(probeMachine);
 	probeMachine = localiseLoads(probeMachine,
 				     sm_ssa,
-				     optIn.enableignoreSideEffects(),
+				     probeOptimisations,
 				     oracle,
 				     token);
 
@@ -744,10 +797,10 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
-	VexPtr<CrashSummary, &ir_heap> res(new CrashSummary(probeMachine, sm, residual_verification_condition));
+	VexPtr<CrashSummary, &ir_heap> res(new CrashSummary(probeMachine, sm_ssa, residual_verification_condition));
 	if (needRemoteMacroSections) {
 		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
-		if (!findRemoteMacroSections(probeMachine, sm, residual_verification_condition,
+		if (!findRemoteMacroSections(probeMachine, sm_ssa, residual_verification_condition,
 					     oracle, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tChose a bad write machine...\n");
 			return NULL;

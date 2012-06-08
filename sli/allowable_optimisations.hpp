@@ -48,6 +48,14 @@
                       remote machines, so if a test on local state
                       would mean that we skip the interesting bit we
                       should just require that the test fail.
+
+   mustStoreBeforeCrash -- If true, the machine must issue a store
+                           before it crashes.  If we encounter
+			   a branch early in the machine, where it
+			   definitely can't have issued a store, and
+			   one of the targets of the branch is <crash>,
+			   turn it into an assertion that we don't go
+			   to <crash>.
 		  
    Other fields:
 
@@ -75,7 +83,8 @@ class AllowableOptimisations {
 	f(noExtend,bool)						\
 	f(noSanityChecking,bool)					\
 	f(preferCrash,bool)						\
-	f(noLocalSurvival,bool)
+	f(noLocalSurvival,bool)						\
+	f(mustStoreBeforeCrash,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\

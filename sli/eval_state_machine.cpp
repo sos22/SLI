@@ -1957,6 +1957,17 @@ crossProductSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			oracle,
 			false,
 			token);
+	if (crossProductMachine->root->type == StateMachineState::Unreached) {
+		/* This indicates that the store machine and probe
+		   machine assert incompatible things.  e.g. suppose
+		   the probe machine amounts to saying we'll crash if
+		   some global variable is a bad pointer, but the
+		   store machine unconditionally dereferences it.
+		   Easy to deal with: just return the constant 1, so
+		   that we don't report a bug. */
+		return IRExpr_Const(IRConst_U1(1));
+	}
+
 	return survivalConstraintIfExecutedAtomically(
 		crossProductMachine,
 		initialStateCondition,

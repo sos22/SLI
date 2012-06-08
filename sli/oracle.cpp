@@ -1077,10 +1077,26 @@ irexprAliasingClass(IRExpr *expr,
 				Oracle::PointerAliasingSet::nonStackPointer;
 	}
 
-	case Iex_Load:
-		/* We don't track aliasing information for memory, so
-		   this could be anything. */
-		return Oracle::PointerAliasingSet::anything;
+	case Iex_Load: {
+		IRExprLoad *iel = (IRExprLoad *)expr;
+		bool anyStackHasLeaked = false;
+		for (auto it = config.content.begin();
+		     !anyStackHasLeaked && it != config.content.end();
+		     it++)
+			if (it->second.stackHasLeaked)
+				anyStackHasLeaked = true;
+		if (anyStackHasLeaked)
+			return Oracle::PointerAliasingSet::anything;
+		/* No stacks have leaked, and therefore if the
+		   argument isn't a stack pointer then neither is our
+		   result. */
+		Oracle::PointerAliasingSet addrType =
+			irexprAliasingClass(iel->addr, config, temps, buildingAliasTable);
+		if (addrType & Oracle::PointerAliasingSet::stackPointer)
+			return Oracle::PointerAliasingSet::anything;
+		else
+			return Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer;
+	}
 
 	default:
 		break;
