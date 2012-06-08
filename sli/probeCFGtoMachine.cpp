@@ -608,6 +608,44 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root, MemoryAccessIden
 	origin.push_back(std::pair<unsigned, VexRip>(tid, root->my_rip));
 	StateMachine *sm = new StateMachine(performTranslation(results, root, oracle, tid, doOne),
 					    origin);
+
+	/* We're not allowed to branch from state X to state Crash if
+	   there's no way for the machine to issue a store before
+	   reaching X.  Turn all such branches into branches to state
+	   Survive. */
+	std::set<StateMachineState *> storeStates;
+	std::vector<StateMachineState *> todo;
+	{
+		std::set<StateMachineSideEffecting *> s;
+		enumStates(sm, &s);
+		for (auto it = s.begin(); it != s.end(); it++) {
+			if ( (*it)->getSideEffect() &&
+			     (*it)->getSideEffect()->type == StateMachineSideEffect::Store )
+				todo.push_back(*it);
+		}
+	}
+	while (!todo.empty()) {
+		StateMachineState *s = todo.back();
+		todo.pop_back();
+		if (!storeStates.insert(s).second)
+			continue;
+		std::vector<StateMachineState *> targets;
+		s->targets(targets);
+		todo.insert(todo.end(), targets.begin(), targets.end());
+	}
+	std::set<StateMachineState *> allStates;
+	enumStates(sm, &allStates);
+	for (auto it = allStates.begin(); it != allStates.end(); it++) {
+		StateMachineState *s = *it;
+		if (storeStates.count(s))
+			continue;
+		std::vector<StateMachineState **> targets;
+		s->targets(targets);
+		for (auto it = targets.begin(); it != targets.end(); it++)
+			if (**it == StateMachineCrash::get())
+				**it = StateMachineNoCrash::get();
+	}
+
 	return truncateRips(sm);
 }
 
