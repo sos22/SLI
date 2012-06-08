@@ -744,10 +744,10 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
-	VexPtr<CrashSummary, &ir_heap> res(new CrashSummary(probeMachine, sm, residual_verification_condition));
+	VexPtr<CrashSummary, &ir_heap> res(new CrashSummary(probeMachine, sm_ssa, residual_verification_condition));
 	if (needRemoteMacroSections) {
 		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
-		if (!findRemoteMacroSections(probeMachine, sm, residual_verification_condition,
+		if (!findRemoteMacroSections(probeMachine, sm_ssa, residual_verification_condition,
 					     oracle, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tChose a bad write machine...\n");
 			return NULL;
