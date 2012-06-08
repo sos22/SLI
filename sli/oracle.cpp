@@ -3057,7 +3057,21 @@ Oracle::getRbpToRspDelta(const StaticRip &rip, long *out)
 bool
 Oracle::getRbpToRspDelta(const VexRip &rip, long *out)
 {
-	return getRbpToRspDelta(StaticRip(rip), out);
+	if (getRbpToRspDelta(StaticRip(rip), out))
+		return true;
+	/* Bit of a hack, but not really.  If we're at the start of a
+	   function, and the enclosing function has a known delta, we
+	   can quite easily calculate the delta for this function from
+	   the delta for the enclosing one. */
+	if (rip.stack.size() <= 1 || !isFunctionHead(StaticRip(rip)))
+		return false;
+	long d2;
+	VexRip parentVr(rip);
+	parentVr.rtrn();
+	if (!getRbpToRspDelta(StaticRip(parentVr), &d2))
+		return false;
+	*out = d2 - 8;
+	return true;
 }
 
 Oracle::LivenessSet
