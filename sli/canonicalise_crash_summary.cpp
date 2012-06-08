@@ -183,6 +183,7 @@ public:
 		auto did_insert = it_did_insert.second;
 		if (did_insert)
 			next_id++;
+		assert(it->second != 0);
 		return it->second;
 	}
 private:
@@ -306,7 +307,7 @@ private:
 	bool rewriteNewStates() const { return false; };
 public:
 	CanonicaliseThreadIds()
-		: next_id(0)
+		: next_id(1)
 	{}
 };
 
