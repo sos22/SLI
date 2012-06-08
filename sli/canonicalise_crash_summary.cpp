@@ -66,6 +66,7 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 			canon_reg(smsep->reg),
 			smsep->generations);
 	}
+	bool rewriteNewStates() const { return false; }
 };
 
 static bool
@@ -165,6 +166,7 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			canon_reg(smsec->target),
 			smsec->value);
 	}
+	bool rewriteNewStates() const { return false; }
 public:
 	SplitSsaGenerations(std::set<threadAndRegister, threadAndRegister::fullCompare> &_phiRegs)
 		: phiRegs(_phiRegs)
@@ -198,6 +200,7 @@ canonicalise_crash_summary(CrashSummary *input)
 			res.insert(smsep->reg);
 			return StateMachineTransformer::transformOneSideEffect(smsep, done_something);
 		}
+		bool rewriteNewStates() const { return false; }
 	} phiRegs;
 	phiRegs.transform(input->loadMachine);
 	phiRegs.transform(input->storeMachine);
