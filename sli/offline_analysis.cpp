@@ -601,7 +601,7 @@ static CrashSummary *
 considerStoreCFG(const DynAnalysisRip &target_rip,
 		 VexPtr<CFGNode, &ir_heap> cfg,
 		 VexPtr<Oracle> &oracle,
-		 VexPtr<StateMachine, &ir_heap> &probeMachine,
+		 VexPtr<StateMachine, &ir_heap> probeMachine,
 		 bool needRemoteMacroSections,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
@@ -633,6 +633,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		oracle,
 		true,
 		token);
+	probeMachine = duplicateStateMachine(probeMachine);
 	probeMachine = localiseLoads(probeMachine,
 				     sm_ssa,
 				     optIn.enableignoreSideEffects(),
