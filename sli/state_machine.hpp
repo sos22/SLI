@@ -889,65 +889,96 @@ pop(std::set<t> &x)
 	return res;
 }
 
-template <typename stateType> void
-enumStates(StateMachine *sm, std::set<stateType *> *states)
+template <typename t>
+class __enumStatesAdaptSet {
+public:
+	std::set<t> &underlying;
+	__enumStatesAdaptSet(std::set<t> &_underlying)
+		: underlying(_underlying)
+	{}
+	void insert(const t &what) {
+		underlying.insert(what);
+	}
+};
+
+template <typename t>
+class __enumStatesAdaptVector {
+public:
+	std::vector<t> &underlying;
+	__enumStatesAdaptVector(std::vector<t> &_underlying)
+		: underlying(_underlying)
+	{}
+	void insert(const t &what) {
+		underlying.push_back(what);
+	}
+};
+
+template <typename stateType, typename containerType> void
+__enumStates(StateMachine *sm, containerType &states)
 {
-	std::set<StateMachineState *> toVisit;
+	std::vector<StateMachineState *> toVisit;
 	std::set<StateMachineState *> visited;
 
-	toVisit.insert(sm->root);
+	toVisit.push_back(sm->root);
 	while (!toVisit.empty()) {
-		StateMachineState *s = pop(toVisit);
+		StateMachineState *s = toVisit.back();
+		toVisit.pop_back();
 		assert(s);
 		if (!visited.insert(s).second)
 			continue;
-		if (states) {
-			stateType *ss = dynamic_cast<stateType *>(s);
-			if (ss)
-				states->insert(ss);
-		}
+		stateType *ss = dynamic_cast<stateType *>(s);
+		if (ss)
+			states.insert(ss);
 		s->targets(toVisit);
 	}
+}
+
+template <typename stateType, typename containerType> void
+__enumStates(const StateMachine *sm, containerType &states)
+{
+	std::vector<const StateMachineState *> toVisit;
+	std::set<const StateMachineState *> visited;
+
+	toVisit.push_back(sm->root);
+	while (!toVisit.empty()) {
+		const StateMachineState *s = toVisit.back();
+		toVisit.pop_back();
+		assert(s);
+		if (!visited.insert(s).second)
+			continue;
+		const stateType *ss = dynamic_cast<stateType *>(s);
+		if (ss)
+			states.insert(ss);
+		s->targets(toVisit);
+	}
+}
+
+template <typename stateType> void
+enumStates(StateMachine *sm, std::set<stateType *> *states)
+{
+	__enumStatesAdaptSet<stateType *> s(*states);
+	__enumStates<stateType, __enumStatesAdaptSet<stateType *> >(sm, s);
 }
 
 template <typename stateType> void
 enumStates(const StateMachine *sm, std::set<const stateType *> *states)
 {
-	std::set<const StateMachineState *> toVisit;
-	std::set<const StateMachineState *> visited;
+	__enumStatesAdaptSet<const stateType *> s(*states);
+	__enumStates<const stateType, __enumStatesAdaptSet<const stateType *> >(sm, s);
+}
 
-	toVisit.insert(sm->root);
-	while (!toVisit.empty()) {
-		const StateMachineState *s = pop(toVisit);
-		if (!visited.insert(s).second)
-			continue;
-		if (states) {
-			const stateType *ss = dynamic_cast<const stateType *>(s);
-			if (ss)
-				states->insert(ss);
-		}
-		s->targets(toVisit);
-	}
+template <typename stateType> void
+enumStates(StateMachine *sm, std::vector<stateType *> *states)
+{
+	__enumStatesAdaptVector<stateType *> s(*states);
+	__enumStates<stateType, __enumStatesAdaptVector<stateType *> >(sm, s);
 }
 
 template <typename stateType> void
 enumStates(const StateMachine *sm, std::vector<const stateType *> *states)
 {
-	std::set<const StateMachineState *> toVisit;
-	std::set<const StateMachineState *> visited;
-
-	toVisit.insert(sm->root);
-	while (!toVisit.empty()) {
-		const StateMachineState *s = pop(toVisit);
-		if (!visited.insert(s).second)
-			continue;
-		if (states) {
-			const stateType *ss = dynamic_cast<const stateType *>(s);
-			if (ss)
-				states->push_back(ss);
-		}
-		s->targets(toVisit);
-	}
+	__enumStatesAdaptVector<const stateType *> s(*states);
+	__enumStates<const stateType, __enumStatesAdaptVector<const stateType *> >(sm, s);
 }
 
 template <typename seType> void
