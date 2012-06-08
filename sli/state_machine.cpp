@@ -70,6 +70,13 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		else
 			return falseTarget->optimise(opt, done_something, done);
 	}
+	if (condition->tag == Iex_Unop && ((IRExprUnop *)condition)->op == Iop_Not1) {
+		*done_something = true;
+		condition = ((IRExprUnop *)condition)->arg;
+		StateMachineState *t = trueTarget;
+		trueTarget = falseTarget;
+		falseTarget = t;
+	}
 	trueTarget = trueTarget->optimise(opt, done_something, done);
 	falseTarget = falseTarget->optimise(opt, done_something, done);
 
