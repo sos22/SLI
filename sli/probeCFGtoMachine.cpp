@@ -204,6 +204,80 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	return acc.content->compile(ThreadRip(tid, cfgnode->my_rip), pendingRelocs, mai);
 }
 
+static void
+canonicaliseRbp(StateMachineState *root, const VexRip &rip, Oracle *oracle)
+{
+	long delta;
+	if (oracle->getRbpToRspDelta(rip, &delta)) {
+		/* Rewrite any references to RBP to be references to
+		   RSP-delta wherever possible. */
+		struct : public StateMachineTransformer {
+			long delta;
+			IRExpr *canonedRbp;
+			IRExpr *transformIex(IRExprGet *ieg) {
+				if (ieg->ty == Ity_I64 &&
+				    ieg->reg.isReg() &&
+				    ieg->reg.asReg() == OFFSET_amd64_RBP) {
+					if (!canonedRbp)
+						canonedRbp =
+							IRExpr_Binop(
+								Iop_Add64,
+								IRExpr_Const(
+									IRConst_U64(-delta)),
+								IRExpr_Get(
+									threadAndRegister::reg(
+										ieg->reg.tid(),
+										OFFSET_amd64_RSP,
+										0),
+									Ity_I64));
+					return canonedRbp;
+				}
+				return IRExprTransformer::transformIex(ieg);
+			}
+			bool rewriteNewStates() const { return false; }
+		} doit;
+		doit.delta = delta;
+		doit.canonedRbp = NULL;
+
+		/* Can't use normal state machine transformer because
+		   some of the targets are still NULL pointers. */
+		std::vector<StateMachineState *> pendingStates;
+		pendingStates.push_back(root);
+		while (!pendingStates.empty()) {
+			StateMachineState *s = pendingStates.back();
+			pendingStates.pop_back();
+			if (!s)
+				continue;
+			s->targets(pendingStates);
+			switch (s->type) {
+			case StateMachineState::Bifurcate: {
+				StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
+				smb->condition = doit.doit(smb->condition);
+				break;
+			}
+			case StateMachineState::Crash:
+			case StateMachineState::NoCrash:
+			case StateMachineState::Unreached:
+			case StateMachineState::NdChoice:
+			case StateMachineState::Stub:
+				break;
+			case StateMachineState::SideEffecting: {
+				StateMachineSideEffect *smse = s->getSideEffect();
+				if (smse) {
+					bool b;
+					StateMachineSideEffect *new_smse =
+						doit.transformSideEffect(smse, &b);
+					if (new_smse)
+						((StateMachineSideEffecting *)s)->sideEffect =
+							new_smse;
+				}
+				break;
+			}
+			}
+		}
+	}
+}
+
 static StateMachineState *
 cfgNodeToState(Oracle *oracle,
 	       unsigned tid,
@@ -432,6 +506,8 @@ cfgNodeToState(Oracle *oracle,
 	}
 
 	assert(*cursor == NULL);
+
+	canonicaliseRbp(root, target->my_rip, oracle);
 
 	std::vector<CFGNode *> targets;
 	if (i == irsb->stmts_used) {
