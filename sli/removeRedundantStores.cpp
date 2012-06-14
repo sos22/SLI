@@ -13,6 +13,61 @@ namespace _removeRedundantStores {
 }
 #endif
 
+/* We only handle the case where @rsp and @ptr are either RSP or
+   k+RSP, where k is a constant.  We don't consider the overflow case
+   here; the stack pointer underflowing through 0 or overflowing
+   through 2**64 is just too weird to worry about.  */
+static bool
+stackPointerDead(IRExpr *ptr, IRExpr *rsp)
+{
+	assert(ptr->type() == Ity_I64);
+	assert(rsp->type() == Ity_I64);
+
+	IRExprGet *ptrGet, *rspGet;
+	IRExprConst *ptrConst, *rspConst;
+	if (ptr->tag == Iex_Get) {
+		ptrGet = (IRExprGet *)ptr;
+		ptrConst = NULL;
+	} else if (ptr->tag == Iex_Associative &&
+		   ((IRExprAssociative *)ptr)->op == Iop_Add64 &&
+		   ((IRExprAssociative *)ptr)->nr_arguments == 2 &&
+		   ((IRExprAssociative *)ptr)->contents[0]->tag == Iex_Const &&
+		   ((IRExprAssociative *)ptr)->contents[1]->tag == Iex_Get) {
+		ptrConst = (IRExprConst *)((IRExprAssociative *)ptr)->contents[0];
+		ptrGet = (IRExprGet *)((IRExprAssociative *)ptr)->contents[1];
+	} else {
+		return false;
+	}
+	if (rsp->tag == Iex_Get) {
+		rspGet = (IRExprGet *)rsp;
+		rspConst = NULL;
+	} else if (rsp->tag == Iex_Associative &&
+		   ((IRExprAssociative *)rsp)->op == Iop_Add64 &&
+		   ((IRExprAssociative *)rsp)->nr_arguments == 2 &&
+		   ((IRExprAssociative *)rsp)->contents[0]->tag == Iex_Const &&
+		   ((IRExprAssociative *)rsp)->contents[1]->tag == Iex_Get) {
+		rspConst = (IRExprConst *)((IRExprAssociative *)rsp)->contents[0];
+		rspGet = (IRExprGet *)((IRExprAssociative *)rsp)->contents[1];
+	} else {
+		return false;
+	}
+	assert(rspGet);
+	assert(ptrGet);
+	if (!threadAndRegister::fullEq(rspGet->reg, ptrGet->reg))
+		return false;
+
+	long ptrDelta, rspDelta;
+	if (ptrConst)
+		ptrDelta = (long)ptrConst->con->Ico.U64;
+	else
+		ptrDelta = 0;
+	if (rspConst)
+		rspDelta = (long)rspConst->con->Ico.U64;
+	else
+		rspDelta = 0;
+	return ptrDelta < rspDelta;
+}
+
 static bool storeMightBeLoadedAfterState(StateMachineState *sme,
 					 const AllowableOptimisations &opt,
 					 StateMachineSideEffectStore *smses,
@@ -48,6 +103,24 @@ storeMightBeLoadedByState(StateMachineState *sm,
 				if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr)) &&
 				    oracle->memoryAccessesMightAlias(opt, smsel, smses))
 					return true;
+			}
+			if (se->type == StateMachineSideEffect::EndFunction) {
+				auto s = (StateMachineSideEffectEndFunction *)se;
+				/* Bit of a hack: we rely on the fact
+				   that we can only say that X is
+				   definitely less than Y if X and Y
+				   are both offsets from the same
+				   value, so that this does what we
+				   want. */
+				if (stackPointerDead(smses->addr, s->rsp)) {
+					/* This store is to the
+					   current function's frame,
+					   and now we've hit the end
+					   of the function, so it's
+					   not possible for anything
+					   to load the value. */
+					return false;
+				}
 			}
 		}
 	}
