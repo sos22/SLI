@@ -41,6 +41,32 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFals
 	}
 }
 
+StateMachineSideEffectStartFunction *
+StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStartFunction *a, bool *d)
+{
+	bool b = false;
+	IRExpr *v = doit(a->rsp, &b);
+	if (b) {
+		*d = true;
+		return new StateMachineSideEffectStartFunction(v, a->frameId);
+	} else {
+		return NULL;
+	}
+}
+
+StateMachineSideEffectEndFunction *
+StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectEndFunction *a, bool *d)
+{
+	bool b = false;
+	IRExpr *v = doit(a->rsp, &b);
+	if (b) {
+		*d = true;
+		return new StateMachineSideEffectEndFunction(v, a->frameId);
+	} else {
+		return NULL;
+	}
+}
+
 StateMachineSideEffectCopy *
 StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectCopy *c, bool *d)
 {
@@ -62,15 +88,8 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 		case StateMachineSideEffect:: t:			\
 			return transformOneSideEffect(			\
 				(StateMachineSideEffect ## t *)se,	\
-				done_something)
-		do_type(Load);
-		do_type(Store);
-		do_type(AssertFalse);
-		do_type(Copy);
-		do_type(Unreached);
-		do_type(Phi);
-		do_type(StartAtomic);
-		do_type(EndAtomic);
+				done_something);
+		all_side_effect_types(do_type);
 #undef do_type
 	}
 	abort();

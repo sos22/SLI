@@ -777,6 +777,9 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		assert(*atomic);
 		*atomic = false;
 		break;
+	case StateMachineSideEffect::StartFunction:
+	case StateMachineSideEffect::EndFunction:
+		break;
 	}
 	return esme_normal;
 }
@@ -1321,8 +1324,8 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 		const AllowableOptimisations &opt;
 		bool escapingStatesSurvive;
 		bool crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
-#warning Think hard about what we're doing here.  Should we constraint it to never reach a crashing node, or merely to always reach a surviving one?
-#warning Makes a difference due to incompleteness of simplifier and also presence of ND choice states. '
+#warning Think hard about what we're doing here.  Should we constraint it to never reach a crashing node, or merely to always reach a surviving one?'
+#warning Makes a difference due to incompleteness of simplifier and also presence of ND choice states.
 			IRExpr *component =
 				IRExpr_Unop(
 					Iop_Not1,
@@ -1691,6 +1694,8 @@ definitelyDoesntRace(StateMachineSideEffect *probeEffect,
 		case StateMachineSideEffect::Copy:
 		case StateMachineSideEffect::Phi:
 		case StateMachineSideEffect::Unreached:
+		case StateMachineSideEffect::StartFunction:
+		case StateMachineSideEffect::EndFunction:
 			return true;
 		}
 	}

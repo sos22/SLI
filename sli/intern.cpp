@@ -359,6 +359,33 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		t.asserts.insert(af);
 		return s;
 	}
+	case StateMachineSideEffect::StartFunction: {
+		StateMachineSideEffectStartFunction *sf = (StateMachineSideEffectStartFunction *)s;
+		sf->rsp = internIRExpr(sf->rsp, t);
+		for (auto it = t.StartFunction.begin(); it != t.StartFunction.end(); it++) {
+			if (*sf == **it) {
+				t.sideEffects[s] = *it;
+				return *it;
+			}
+		}
+		t.sideEffects[s] = s;
+		t.StartFunction.insert(sf);
+		return s;
+	}
+	case StateMachineSideEffect::EndFunction: {
+		StateMachineSideEffectEndFunction *sf = (StateMachineSideEffectEndFunction *)s;
+		sf->rsp = internIRExpr(sf->rsp, t);
+		for (auto it = t.EndFunction.begin(); it != t.EndFunction.end(); it++) {
+			if (*sf == **it) {
+				t.sideEffects[s] = *it;
+				return *it;
+			}
+		}
+		t.sideEffects[s] = s;
+		t.EndFunction.insert(sf);
+		return s;
+	}
+
 	}
 	abort();
 }

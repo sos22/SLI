@@ -145,6 +145,10 @@ protected:
 	}
 	virtual StateMachineSideEffectPhi *transformOneSideEffect(
 		StateMachineSideEffectPhi *, bool *);
+	virtual StateMachineSideEffectStartFunction *transformOneSideEffect(
+		StateMachineSideEffectStartFunction *, bool *);
+	virtual StateMachineSideEffectEndFunction *transformOneSideEffect(
+		StateMachineSideEffectEndFunction *, bool *);
 	virtual StateMachineUnreached *transformOneState(StateMachineUnreached *,
 							 bool *)
 	{ return NULL; }

@@ -89,6 +89,20 @@ localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2)
 }
 
 static bool
+localSimilarity2(StateMachineSideEffectStartFunction *smsesf1, StateMachineSideEffectStartFunction *smsesf2)
+{
+	return localSimilarity(smsesf1->rsp, smsesf2->rsp) &&
+		smsesf1->frameId == smsesf2->frameId;
+}
+
+static bool
+localSimilarity2(StateMachineSideEffectEndFunction *smsesf1, StateMachineSideEffectEndFunction *smsesf2)
+{
+	return localSimilarity(smsesf1->rsp, smsesf2->rsp) &&
+		smsesf1->frameId == smsesf2->frameId;
+}
+
+static bool
 localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2)
 {
 	if (smse1->type != smse2->type)
@@ -97,17 +111,11 @@ localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2)
 #define do_case(n)							\
 		case StateMachineSideEffect::n:				\
 			return localSimilarity2( (StateMachineSideEffect ## n *)smse1, \
-						 (StateMachineSideEffect ## n *)smse2 )
-		do_case(Load);
-		do_case(Store);
-		do_case(Copy);
-		do_case(Unreached);
-		do_case(AssertFalse);
-		do_case(Phi);
-		do_case(StartAtomic);
-		do_case(EndAtomic);
+						 (StateMachineSideEffect ## n *)smse2 );
+		all_side_effect_types(do_case);
 #undef do_case
 	}
+	abort();
 }
 
 static bool

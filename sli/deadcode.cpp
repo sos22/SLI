@@ -83,6 +83,18 @@ public:
 			}
 			return;
 		}
+		case StateMachineSideEffect::StartFunction: {
+			StateMachineSideEffectStartFunction *sf =
+				(StateMachineSideEffectStartFunction *)smse;
+			useExpression(sf->rsp);
+			return;
+		}
+		case StateMachineSideEffect::EndFunction: {
+			StateMachineSideEffectEndFunction *sf =
+				(StateMachineSideEffectEndFunction *)smse;
+			useExpression(sf->rsp);
+			return;
+		}
 		}
 		abort();
 	}
@@ -228,6 +240,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			case StateMachineSideEffect::Unreached:
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
+			case StateMachineSideEffect::StartFunction:
+			case StateMachineSideEffect::EndFunction:
 				break;
 			case StateMachineSideEffect::AssertFalse:
 				break;

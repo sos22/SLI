@@ -92,6 +92,8 @@ assignLabelsToDefinitions(StateMachine *sm,
 				case StateMachineSideEffect::Unreached:
 				case StateMachineSideEffect::StartAtomic:
 				case StateMachineSideEffect::EndAtomic:
+				case StateMachineSideEffect::StartFunction:
+				case StateMachineSideEffect::EndFunction:
 					/* These shouldn't define registers */
 					abort();
 				}

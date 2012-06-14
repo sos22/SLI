@@ -155,7 +155,9 @@ public:
 	f(AssertFalse)				\
 	f(Phi)					\
 	f(StartAtomic)				\
-	f(EndAtomic)
+	f(EndAtomic)				\
+	f(StartFunction)			\
+	f(EndFunction)
 	enum sideEffectType {
 #define mk_one(n) n,
 		all_side_effect_types(mk_one)
@@ -856,6 +858,94 @@ public:
 		return true;
 	}
 };
+class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
+public:
+	StateMachineSideEffectStartFunction(IRExpr *_rsp, int _frameId)
+		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
+		  rsp(_rsp),
+		  frameId(_frameId)
+	{
+	}
+	IRExpr *rsp;
+	int frameId;
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "StartFunction %d, rsp = ", frameId);
+		ppIRExpr(rsp, f);
+	}
+	static bool parse(StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
+	{
+		IRExpr *data;
+		int frameId;
+		if (parseThisString("StartFunction ", str, &str) &&
+		    parseDecimalInt(&frameId, str, &str) &&
+		    parseThisString(", rsp = ", str, &str) &&
+		    parseIRExpr(&data, str, suffix)) {
+			*out = new StateMachineSideEffectStartFunction(data, frameId);
+			return true;
+		}
+		return false;
+	}
+	void visit(HeapVisitor &hv) {
+		hv(rsp);
+	}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+		assert(frameId > 0);
+		sanityCheckIRExpr(rsp, live);
+		assert(rsp->type() == Ity_I64);
+	}
+	bool definesRegister(threadAndRegister &) const {
+		return false;
+	}
+	bool operator==(const StateMachineSideEffectStartFunction &o) const {
+		return frameId == o.frameId && rsp == o.rsp;
+	}
+};
+class StateMachineSideEffectEndFunction : public StateMachineSideEffect {
+public:
+	StateMachineSideEffectEndFunction(IRExpr *_rsp, int _frameId)
+		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
+		  rsp(_rsp),
+		  frameId(_frameId)
+	{
+	}
+	IRExpr *rsp;
+	int frameId;
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "EndFunction %d, rsp = ", frameId);
+		ppIRExpr(rsp, f);
+	}
+	static bool parse(StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
+	{
+		IRExpr *rsp;
+		int frameId;
+		if (parseThisString("EndFunction ", str, &str) &&
+		    parseDecimalInt(&frameId, str, &str) &&
+		    parseThisString(", rsp = ", str, &str) &&
+		    parseIRExpr(&rsp, str, suffix)) {
+			*out = new StateMachineSideEffectEndFunction(rsp, frameId);
+			return true;
+		}
+		return false;
+	}
+	void visit(HeapVisitor &hv) {
+		hv(rsp);
+	}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+		assert(frameId > 0);
+		sanityCheckIRExpr(rsp, live);
+		assert(rsp->type() == Ity_I64);
+	}
+	bool definesRegister(threadAndRegister &) const {
+		return false;
+	}
+	bool operator==(const StateMachineSideEffectEndFunction &o) const {
+		return frameId == o.frameId && rsp == o.rsp;
+	}
+};
 
 void printStateMachine(const StateMachine *sm, FILE *f);
 void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels);
@@ -871,11 +961,13 @@ void probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots
 			const DynAnalysisRip &proximalRip,
 			StateMachineState *proximalCause,
 			MemoryAccessIdentifierAllocator &mai,
+			int *nextFrameId,
 			std::set<StateMachine *> &out);
 StateMachine *storeCFGToMachine(Oracle *oracle,
 				unsigned tid,
 				CFGNode *root,
-				MemoryAccessIdentifierAllocator &mai);
+				MemoryAccessIdentifierAllocator &mai,
+				int *nextFrameId);
 
 StateMachine *duplicateStateMachine(const StateMachine *inp);
 

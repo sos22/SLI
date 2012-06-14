@@ -11,6 +11,8 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineSideEffectCopy *> copies;
 	std::set<StateMachineSideEffectPhi *> phis;
 	std::set<StateMachineSideEffectAssertFalse *> asserts;
+	std::set<StateMachineSideEffectStartFunction *> StartFunction;
+	std::set<StateMachineSideEffectEndFunction *> EndFunction;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
 	std::set<StateMachineSideEffecting *> states_side_effect;

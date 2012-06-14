@@ -196,6 +196,20 @@ StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, b
 }
 
 StateMachineSideEffect *
+StateMachineSideEffectStartFunction::optimise(const AllowableOptimisations &opt, bool *done_something)
+{
+	rsp = optimiseIRExprFP(rsp, opt, done_something);
+	return this;
+}
+
+StateMachineSideEffect *
+StateMachineSideEffectEndFunction::optimise(const AllowableOptimisations &opt, bool *done_something)
+{
+	rsp = optimiseIRExprFP(rsp, opt, done_something);
+	return this;
+}
+
+StateMachineSideEffect *
 StateMachineSideEffectStartAtomic::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	if (opt.assumeExecutesAtomically()) {
@@ -336,6 +350,22 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			(StateMachineSideEffectPhi *)smse2;
 		return threadAndRegister::fullEq(smsep1->reg, smsep2->reg) &&
 			smsep1->generations == smsep2->generations;
+	}
+	case StateMachineSideEffect::StartFunction: {
+		StateMachineSideEffectStartFunction *smsep1 =
+			(StateMachineSideEffectStartFunction *)smse1;
+		StateMachineSideEffectStartFunction *smsep2 =
+			(StateMachineSideEffectStartFunction *)smse2;
+		return smsep1->frameId == smsep2->frameId &&
+			definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
+	}
+	case StateMachineSideEffect::EndFunction: {
+		StateMachineSideEffectEndFunction *smsep1 =
+			(StateMachineSideEffectEndFunction *)smse1;
+		StateMachineSideEffectEndFunction *smsep2 =
+			(StateMachineSideEffectEndFunction *)smse2;
+		return smsep1->frameId == smsep2->frameId &&
+			definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
 	}
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
@@ -628,37 +658,12 @@ StateMachine::assertSSA() const
 		StateMachineSideEffect *smse = (*it)->sideEffect;
 		if (!smse)
 			continue;
-		switch (smse->type) {
-		case StateMachineSideEffect::Load: {
-			StateMachineSideEffectLoad *smsel = (StateMachineSideEffectLoad *)smse;
-			assert(smsel->target.gen() != 0);
-			assert(smsel->target.gen() != (unsigned)-1);
-			if (!discoveredAssignments.insert(smsel->target).second)
+		threadAndRegister tr(threadAndRegister::invalid());
+		if (smse->definesRegister(tr)) {
+			assert(tr.gen() != 0);
+			assert(tr.gen() != (unsigned)-1);
+			if (!discoveredAssignments.insert(tr).second)
 				abort();
-			break;
-		}
-		case StateMachineSideEffect::Copy: {
-			StateMachineSideEffectCopy *smsec = (StateMachineSideEffectCopy *)smse;
-			assert(smsec->target.gen() != 0);
-			assert(smsec->target.gen() != (unsigned)-1);
-			if (!discoveredAssignments.insert(smsec->target).second)
-				abort();
-			break;
-		}
-		case StateMachineSideEffect::Phi: {
-			StateMachineSideEffectPhi *smsep = (StateMachineSideEffectPhi *)smse;
-			assert(smsep->reg.gen() != 0);
-			assert(smsep->reg.gen() != (unsigned)-1);
-			if (!discoveredAssignments.insert(smsep->reg).second)
-					abort();
-			break;
-		}
-		case StateMachineSideEffect::Store:
-		case StateMachineSideEffect::AssertFalse:
-		case StateMachineSideEffect::Unreached:
-		case StateMachineSideEffect::StartAtomic:
-		case StateMachineSideEffect::EndAtomic:
-			break;
 		}
 	}
 

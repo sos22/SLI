@@ -280,9 +280,10 @@ getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> 
 
 static StateMachine *
 CFGtoStoreMachine(unsigned tid, Oracle *oracle, CFGNode *cfg,
-		  MemoryAccessIdentifierAllocator &mai)
+		  MemoryAccessIdentifierAllocator &mai,
+		  int *nextFrameId)
 {
-	StateMachine *sm = storeCFGToMachine(oracle, tid, cfg, mai);
+	StateMachine *sm = storeCFGToMachine(oracle, tid, cfg, mai, nextFrameId);
 	canonicaliseRbp(sm, oracle);
 	return sm;
 }
@@ -653,10 +654,11 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
 		 MemoryAccessIdentifierAllocator &mai,
+		 int *nextFrameId,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, mai));
+	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, mai, nextFrameId));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return NULL;
@@ -828,6 +830,7 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 		  StateMachine ***out,
 		  unsigned *nr_out_machines,
 		  MemoryAccessIdentifierAllocator &mai,
+		  int *nextFrameId,
 		  GarbageCollectionToken token)
 {
 	__set_profiling(buildProbeMachine);
@@ -847,7 +850,8 @@ buildProbeMachine(VexPtr<Oracle> &oracle,
 			return false;
 		}
 		std::set<StateMachine *> machines;
-		probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, proximal, mai, machines);
+		probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, proximal, mai,
+				   nextFrameId, machines);
 		sms = (StateMachine **)__LibVEX_Alloc_Ptr_Array(&ir_heap, machines.size());
 		nr_sms = 0;
 		for (auto it = machines.begin(); it != machines.end(); it++) {
@@ -927,6 +931,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
 		      const AllowableOptimisations &optIn,
 		      const MemoryAccessIdentifierAllocator &mai,
+		      int nextFrameId,
 		      GarbageCollectionToken token)
 {
 	assert(potentiallyConflictingStores.size() > 0);
@@ -961,6 +966,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 
 		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 		MemoryAccessIdentifierAllocator storeMai(mai);
+		int storeFrame(nextFrameId);
 		VexPtr<CrashSummary, &ir_heap> summary;
 
 		summary = considerStoreCFG(targetRip,
@@ -971,6 +977,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 					   STORING_THREAD + i,
 					   optIn.setinterestingStores(&potentiallyConflictingStores),
 					   storeMai,
+					   &storeFrame,
 					   token);
 		if (summary)
 			df(summary, token);
@@ -987,6 +994,7 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
 	      const MemoryAccessIdentifierAllocator &mai,
+	      int nextFrameId,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(diagnoseCrash);
@@ -1071,6 +1079,7 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 				     potentiallyConflictingStores,
 				     optIn,
 				     mai,
+				     nextFrameId,
 				     token);
 }
 			    
@@ -1184,6 +1193,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				GarbageCollectionToken token)
 {
 	MemoryAccessIdentifierAllocator mai;
+	int nextFrameId = 1;
 	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(oracle->ms, ThreadRip::mk(tid, targetRip.toVexRip()), mai));
 	if (!proximal) {
 		fprintf(_logfile, "No proximal cause -> can't do anything\n");
@@ -1199,7 +1209,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	unsigned nrProbeMachines;
 	{
 		StateMachine **_probeMachines;
-		if (!buildProbeMachine(oracle, targetRip, proximal, tid, opt, &_probeMachines, &nrProbeMachines, mai, token))
+		if (!buildProbeMachine(oracle, targetRip, proximal, tid, opt, &_probeMachines, &nrProbeMachines, mai,
+				       &nextFrameId, token))
 			return;
 		probeMachines = _probeMachines;
 	}
@@ -1207,7 +1218,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		VexPtr<StateMachine, &ir_heap> probeMachine(probeMachines[x]);
 		diagnoseCrash(targetRip, probeMachine, oracle,
 			      df, false, opt.enablenoLocalSurvival(),
-			      mai, token);
+			      mai, nextFrameId, token);
 	}
 }
 

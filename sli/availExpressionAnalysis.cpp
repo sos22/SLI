@@ -482,6 +482,11 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 		   doesn't actually make much difference in any of the
 		   places where we use atomic blocks. */
 		break;
+	case StateMachineSideEffect::StartFunction:
+	case StateMachineSideEffect::EndFunction:
+		/* This is going to need to become more cunning in
+		 * future. */
+		break;
 	}
 
 	threadAndRegister r(threadAndRegister::invalid());
@@ -738,6 +743,34 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 			*done_something = true;
 		} else {
 			newEffect = phi;
+		}
+		break;
+	}
+	case StateMachineSideEffect::StartFunction: {
+		StateMachineSideEffectStartFunction *sf =
+			(StateMachineSideEffectStartFunction *)smse;
+		bool doit = false;
+		IRExpr *newRsp;
+		newRsp = applyAvailSet(currentlyAvailable, sf->rsp, false, &doit, opt);
+		if (doit) {
+			newEffect = new StateMachineSideEffectStartFunction(newRsp, sf->frameId);
+			*done_something = true;
+		} else {
+			newEffect = smse;
+		}
+		break;
+	}
+	case StateMachineSideEffect::EndFunction: {
+		StateMachineSideEffectEndFunction *sf =
+			(StateMachineSideEffectEndFunction *)smse;
+		bool doit = false;
+		IRExpr *newRsp;
+		newRsp = applyAvailSet(currentlyAvailable, sf->rsp, false, &doit, opt);
+		if (doit) {
+			newEffect = new StateMachineSideEffectEndFunction(newRsp, sf->frameId);
+			*done_something = true;
+		} else {
+			newEffect = smse;
 		}
 		break;
 	}

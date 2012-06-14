@@ -154,6 +154,8 @@ sideEffectCrashConstraint(StateMachineSideEffect *smse, IRExpr *acc, crash_const
 		break;
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
+	case StateMachineSideEffect::StartFunction:
+	case StateMachineSideEffect::EndFunction:
 		break;
 	}
 
