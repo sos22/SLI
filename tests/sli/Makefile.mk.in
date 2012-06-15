@@ -1,6 +1,6 @@
 sli_tests="pmap vamap nd_chooser parse_state_machine survival_constraint wm_suitability simplify_irexpr"
 sli_tests="$sli_tests find_remote_sections simplify_state_machine testgetStoreCFGs getProbeCFGs"
-sli_tests="$sli_tests sat_checker"
+sli_tests="$sli_tests sat_checker nf"
 
 targets=$(echo $sli_tests | sed "s%\<%${input_base}/%g")
 
