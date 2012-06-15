@@ -770,9 +770,25 @@ evalExpression(IRExpr *e, NdChooser &chooser)
 					it->second.first ? "true" : "false");
 			}
 		}
-		dbg_break("HELLO\n");
 	}
 	return r;
+}
+
+static bool
+exhaustive_satisfiable(IRExpr *e)
+{
+	NdChooser chooser;
+	do {
+		if (evalExpression(e, chooser)) {
+			sat_checker_counters.failed++;
+			return true;
+		}
+	} while (chooser.advance());
+	if (TIMEOUT)
+		sat_checker_counters.timeout++;
+	else
+		sat_checker_counters.exhaustive_resolved++;
+	return false;
 }
 
 static bool
@@ -820,18 +836,7 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 
 	/* Okay, that's about as far as we can push that.  Fall back
 	   to an exhaustive search. */
-	NdChooser chooser;
-	do {
-		if (evalExpression(norm3, chooser)) {
-			sat_checker_counters.failed++;
-			return true;
-		}
-	} while (chooser.advance());
-	if (TIMEOUT)
-		sat_checker_counters.timeout++;
-	else
-		sat_checker_counters.exhaustive_resolved++;
-	return true;
+	return exhaustive_satisfiable(norm3);
 }
 
 /* End of namespace */
