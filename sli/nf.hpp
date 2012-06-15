@@ -74,9 +74,10 @@ public:
 class NF_Expression : public std::vector<NF_Term> {
 public:
 	void prettyPrint(FILE *f, const char *, const char *) const;
+	bool isContradiction() const;
 };
 
-Maybe<bool> convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
+bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
 IRExpr *convert_from_nf(NF_Expression &inp, IROp expressionOp, IROp termOp);
 
 #endif /* !NF_HPP__ */
