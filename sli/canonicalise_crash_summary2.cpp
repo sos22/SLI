@@ -7,14 +7,36 @@
 #include "allowable_optimisations.hpp"
 #include "offline_analysis.hpp"
 
+static StateMachine *
+removeMarkers(VexPtr<StateMachine, &ir_heap> sm,
+	      const AllowableOptimisations &opt,
+	      VexPtr<Oracle> &oracle,
+	      GarbageCollectionToken token)
+{
+	std::vector<StateMachineSideEffecting *> states;
+	enumStates(sm, &states);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		auto s = *it;
+		if (s->sideEffect &&
+		    (s->sideEffect->type == StateMachineSideEffect::StartFunction ||
+		     s->sideEffect->type == StateMachineSideEffect::EndFunction))
+			s->sideEffect = NULL;
+	}
+	return optimiseStateMachine(sm, opt, oracle, false, token);
+}
+
 static CrashSummary *
 canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 			   VexPtr<Oracle> oracle,
 			   const AllowableOptimisations &optIn,
 			   GarbageCollectionToken token)
 {
+	VexPtr<StateMachine, &ir_heap> sm(input->loadMachine);
+	input->loadMachine = removeMarkers(sm, optIn, oracle, token);
 	input->loadMachine = removeAssertions(input->loadMachine, optIn, oracle, false, token);
+	sm = input->storeMachine;
 	input->storeMachine = removeAssertions(input->storeMachine, optIn, oracle, false, token);
+	input->storeMachine = removeMarkers(sm, optIn, oracle, token);
 
 	return input;
 }
