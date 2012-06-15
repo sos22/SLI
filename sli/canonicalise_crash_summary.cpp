@@ -140,6 +140,24 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			return IRExprTransformer::transformIex(iel);
 	}
 	IRExpr *transformIex(IRExprConst *iec) {
+		switch (iec->con->tag) {
+		case Ico_U1:
+			return iec;
+#define do_type(n)						\
+			case Ico_U ## n :			\
+				if (iec->con->Ico.U ## n  == 0)	\
+					return iec;		\
+				break
+			do_type(8);
+			do_type(16);
+			do_type(32);
+			do_type(64);
+#undef do_type
+		case Ico_F64:
+		case Ico_F64i:
+		case Ico_V128:
+			break;
+		}
 		return IRExpr_Get(canon_const(iec->con), iec->type());
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
