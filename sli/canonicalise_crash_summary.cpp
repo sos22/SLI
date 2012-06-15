@@ -94,6 +94,8 @@ class SplitSsaGenerations : public StateMachineTransformer {
 	std::map<IRExprLoad *, threadAndRegister> canonLoadTable;
 	std::map<IRConst *, threadAndRegister> canonConstTable;
 	std::map<unsigned, unsigned> next_temp_id;
+	internIRExprTable &internTable;
+
 	unsigned alloc_temp_id(unsigned tid) {
 		auto it_did_insert = next_temp_id.insert(std::pair<unsigned, unsigned>(tid, 1));
 		auto it = it_did_insert.first;
@@ -160,6 +162,12 @@ class SplitSsaGenerations : public StateMachineTransformer {
 		}
 		return IRExpr_Get(canon_const(iec->con), iec->type());
 	}
+	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+		IRExpr *res = IRExprTransformer::transformIRExpr(e, done_something);
+		if (!res)
+			return NULL;
+		return internIRExpr(res, internTable);
+	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
 		StateMachineSideEffectLoad *smsel, bool *done_something)
 	{
@@ -186,8 +194,10 @@ class SplitSsaGenerations : public StateMachineTransformer {
 	}
 	bool rewriteNewStates() const { return false; }
 public:
-	SplitSsaGenerations(std::set<threadAndRegister, threadAndRegister::fullCompare> &_phiRegs)
-		: phiRegs(_phiRegs)
+	SplitSsaGenerations(
+		std::set<threadAndRegister, threadAndRegister::fullCompare> &_phiRegs,
+		internIRExprTable &_internTable)
+		: phiRegs(_phiRegs), internTable(_internTable)
 	{}
 };
 
@@ -341,11 +351,6 @@ transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans)
 static CrashSummary *
 canonicalise_crash_summary(CrashSummary *input)
 {
-	internStateMachineTable t;
-	input->loadMachine = internStateMachine(input->loadMachine, t);
-	input->storeMachine = internStateMachine(input->storeMachine, t);
-	input->verificationCondition = internIRExpr(input->verificationCondition, t);
-
 	CanonicaliseThreadIds thread_canon;
 	for (auto it = input->loadMachine->origin.begin(); it != input->loadMachine->origin.end(); it++)
 		it->first = thread_canon.canonTid(it->first);
@@ -378,7 +383,12 @@ canonicalise_crash_summary(CrashSummary *input)
 	phiRegs.transform(input->storeMachine);
 	phiRegs.doit(input->verificationCondition);
 
-	SplitSsaGenerations splitter(phiRegs.res);
+	internStateMachineTable t;
+	input->loadMachine = internStateMachine(input->loadMachine, t);
+	input->storeMachine = internStateMachine(input->storeMachine, t);
+	input->verificationCondition = internIRExpr(input->verificationCondition, t);
+
+	SplitSsaGenerations splitter(phiRegs.res, t);
 	input = transformCrashSummary(input, splitter);
 
 	RegisterCanonicaliser reg_canon;
