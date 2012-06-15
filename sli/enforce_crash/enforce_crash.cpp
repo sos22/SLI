@@ -336,19 +336,9 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		exit(1);
 	}
 	DNF_Disjunction d;
-	auto dnfres(dnf(requirement, d));
-	if (!dnfres.valid) {
+	if (!dnf(requirement, d)) {
 		fprintf(_logfile, "failed to convert to DNF\n");
 		exit(1);
-	}
-	if (!dnfres.content) {
-		/* Okay, so once we've converted to DNF we find that
-		   the expression is always true and that the program
-		   will always crash.  That seems kind of unlikely,
-		   but it's fortunately easy to handle: just don't add
-		   any more enforcement infrastructure. */
-		fprintf(_logfile, "program is doomed to die?\n");
-		return crashEnforcementData();
 	}
 
 	for (unsigned x = 0; x < d.size(); ) {
