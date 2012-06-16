@@ -493,6 +493,19 @@ private:
 		advance_state_trace();
 	}
 
+	enum evalStateMachineSideEffectRes {
+		esme_normal,
+		esme_escape,
+		esme_ignore_path
+	};
+	evalStateMachineSideEffectRes evalStateMachineSideEffect(
+		StateMachine *thisMachine,
+		StateMachineSideEffect *smse,
+		NdChooser &chooser,
+		Oracle *oracle,
+		bool collectOrderingConstraints,
+		const AllowableOptimisations &opt);
+
 public:
 	bool advance(Oracle *oracle, const AllowableOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
@@ -732,24 +745,13 @@ dereferencesBadPointerIf(IRExpr *e)
 	return derefsBadPointer;
 }
 
-enum evalStateMachineSideEffectRes {
-	esme_normal,
-	esme_escape,
-	esme_ignore_path
-};
-
-static evalStateMachineSideEffectRes
-evalStateMachineSideEffect(StateMachine *thisMachine,
-			   StateMachineSideEffect *smse,
-			   NdChooser &chooser,
-			   Oracle *oracle,
-			   threadState &state,
-			   memLogT &memLog,
-			   bool collectOrderingConstraints,
-			   const AllowableOptimisations &opt,
-			   bool *atomic,
-			   IRExpr **assumption,
-			   IRExpr **accumulatedAssumptions)
+EvalContext::evalStateMachineSideEffectRes
+EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
+					StateMachineSideEffect *smse,
+					NdChooser &chooser,
+					Oracle *oracle,
+					bool collectOrderingConstraints,
+					const AllowableOptimisations &opt)
 {
 	IRExpr *addr = NULL;
 	if (smse->type == StateMachineSideEffect::Load ||
@@ -762,8 +764,9 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			Iop_Or1,
 			IRExpr_Unop(Iop_BadPtr, addr),
 			dereferencesBadPointerIf(addr));
-		if (expressionIsTrue(v, chooser, state, opt, assumption,
-				     accumulatedAssumptions))
+		if (expressionIsTrue(v, chooser, state, opt,
+				     &assumption,
+				     &accumulatedAssumption))
 			return esme_escape;
 	}
 
@@ -774,8 +777,8 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		assert(smses);
 		assert(addr);
 		if (collectOrderingConstraints) {
-			for (memLogT::reverse_iterator it = memLog.rbegin();
-			     it != memLog.rend();
+			for (memLogT::reverse_iterator it = memlog.rbegin();
+			     it != memlog.rend();
 			     it++) {
 				if (it->first == thisMachine)
 					continue;
@@ -786,17 +789,17 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 				assert(smsel);
 				if (!oracle->memoryAccessesMightAlias(opt, smsel, smses))
 					continue;
-				if (evalExpressionsEqual(addr, smsel->addr, chooser, state, opt, assumption, accumulatedAssumptions))
+				if (evalExpressionsEqual(addr, smsel->addr, chooser, state, opt, &assumption, &accumulatedAssumption))
 					addOrderingConstraint(
 						smsel->rip,
 						smses->rip,
 						opt,
-						assumption,
-						accumulatedAssumptions);
+						&assumption,
+						&accumulatedAssumption);
 			}
 		}
 		IRExpr *data = specialiseIRExpr(smses->data, state);
-		memLog.push_back(
+		memlog.push_back(
 			std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>
 			(thisMachine,
 			 new StateMachineSideEffectStore(
@@ -816,8 +819,8 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		StateMachine *satisfierMachine;
 		satisfier = NULL;
 		satisfierMachine = NULL;
-		for (memLogT::reverse_iterator it = memLog.rbegin();
-		     it != memLog.rend();
+		for (memLogT::reverse_iterator it = memlog.rbegin();
+		     it != memlog.rend();
 		     it++) {
 			StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(it->second);
 			if (!smses)
@@ -835,7 +838,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 
 			if (!oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				continue;
-			if (evalExpressionsEqual(smses->addr, addr, chooser, state, opt, assumption, accumulatedAssumptions)) {
+			if (evalExpressionsEqual(smses->addr, addr, chooser, state, opt, &assumption, &accumulatedAssumption)) {
 				if (!collectOrderingConstraints) {
 					satisfier = smses;
 					satisfierMachine = it->first;
@@ -847,16 +850,16 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 								smses->rip,
 								satisfier->rip,
 								opt,
-								assumption,
-								accumulatedAssumptions);
+								&assumption,
+								&accumulatedAssumption);
 					} else {
 						if (it->first != thisMachine)
 							addOrderingConstraint(
 								smses->rip,
 								smsel->rip,
 								opt,
-								assumption,
-								accumulatedAssumptions);
+								&assumption,
+								&accumulatedAssumption);
 						satisfier = smses;
 						satisfierMachine = it->first;
 					}
@@ -870,7 +873,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 			val = IRExpr_Load(smsel->type, addr, MemoryAccessIdentifier::initial_value());
 		}
 		if (collectOrderingConstraints)
-			memLog.push_back(
+			memlog.push_back(
 				std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>(
 					thisMachine,
 					new StateMachineSideEffectLoad(
@@ -878,7 +881,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 						specialiseIRExpr(addr, state),
 						smsel->rip,
 						smsel->type)));
-		state.set_register(smsel->target, val, assumption, opt);
+		state.set_register(smsel->target, val, &assumption, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -887,7 +890,7 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 		assert(smsec);
 		state.set_register(smsec->target,
 				   specialiseIRExpr(smsec->value, state),
-				   assumption,
+				   &assumption,
 				   opt);
 		break;
 	}
@@ -901,8 +904,8 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 				    Iop_Or1,
 				    smseaf->value,
 				    dereferencesBadPointerIf(smseaf->value)),
-			    chooser, state, opt, assumption,
-			    accumulatedAssumptions)) {
+			    chooser, state, opt, &assumption,
+			    &accumulatedAssumption)) {
 			if (smseaf->reflectsActualProgram)
 				return esme_escape;
 			else
@@ -913,16 +916,16 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *smsep =
 			(StateMachineSideEffectPhi *)(smse);
-		state.eval_phi(smsep, assumption, opt);
+		state.eval_phi(smsep, &assumption, opt);
 		break;
 	}
 	case StateMachineSideEffect::StartAtomic:
-		assert(!*atomic);
-		*atomic = true;
+		assert(!atomic);
+		atomic = true;
 		break;
 	case StateMachineSideEffect::EndAtomic:
-		assert(*atomic);
-		*atomic = false;
+		assert(atomic);
+		atomic = false;
 		break;
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
@@ -962,13 +965,8 @@ EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 						   sme->sideEffect,
 						   chooser,
 						   oracle,
-						   state,
-						   memlog,
 						   collectOrderingConstraints,
-						   opt,
-						   &atomic,
-						   &assumption,
-						   &accumulatedAssumption);
+						   opt);
 		switch (res) {
 		case esme_escape:
 			return ssr_escape;
@@ -1110,26 +1108,19 @@ EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &
 	NdChooser chooser;
 
 	do {
-		bool atomic = this->atomic;
-		IRExpr *assumption = this->assumption;
-		IRExpr *accAssumption = this->accumulatedAssumption;
-		threadState state(this->state);
-		memLogT memlog(this->memlog);
+		EvalContext newContext(*this);
 		evalStateMachineSideEffectRes res =
-			evalStateMachineSideEffect(sm, smse, chooser, oracle,
-						   state, memlog,
-						   consumer.collectOrderingConstraints,
-						   opt, &atomic,
-						   &assumption, &accAssumption);
+			newContext.evalStateMachineSideEffect(sm, smse, chooser, oracle,
+							      consumer.collectOrderingConstraints,
+							      opt);
 		switch (res) {
 		case esme_normal:
-			pendingStates.push_back(
-				EvalContext(*this, state, memlog, assumption, accAssumption, atomic));
+			pendingStates.push_back(newContext);
 			break;
 		case esme_ignore_path:
 			break;
 		case esme_escape:
-			if (!consumer.escape(assumption, accAssumption))
+			if (!consumer.escape(newContext.assumption, newContext.accumulatedAssumption))
 				return false;
 			break;
 		}
