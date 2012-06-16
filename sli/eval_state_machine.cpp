@@ -1416,178 +1416,6 @@ evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &o
 	return true;
 }
 
-class CrossEvalState {
-public:
-	StateMachine *rootMachine;
-	StateMachineState *currentState;
-	bool finished;
-	bool crashed;
-	threadState state;
-	CrossEvalState(StateMachine *_rootMachine)
-		: rootMachine(_rootMachine),
-		  currentState(_rootMachine->root),
-		  finished(false),
-		  crashed(false)
-	{}
-};
-
-class CrossMachineEvalContext {
-	StateMachineSideEffect *advanceToSideEffect(CrossEvalState *machine, NdChooser &chooser, Oracle *oracle,
-						    const AllowableOptimisations &opt,
-						    std::set<DynAnalysisRip> &usefulRips,
-						    bool *atomic,
-						    bool wantLoad);
-public:
-	bool collectOrderingConstraints;
-	IRExpr *pathConstraint;
-	IRExpr *justPathConstraint;
-	memLogT memLog;
-	CrossEvalState *loadMachine;
-	CrossEvalState *storeMachine;
-	std::vector<StateMachineSideEffect *> history;
-	std::set<DynAnalysisRip> &probeMachineRacingInstructions;
-	std::set<DynAnalysisRip> &storeMachineRacingInstructions;
-	void advanceMachine(NdChooser &chooser, Oracle *oracle, const AllowableOptimisations &opt, bool *atomic, bool doLoad);
-	void dumpHistory(FILE *f) const;
-	StateMachineSideEffect *advanceToLoad(NdChooser &chooser, Oracle *oracle, bool *atomic, const AllowableOptimisations &opt) {
-		return advanceToSideEffect(loadMachine, chooser, oracle, opt, probeMachineRacingInstructions, atomic, true);
-	}
-	StateMachineSideEffect *advanceToStore(NdChooser &chooser, Oracle *oracle, bool *atomic, const AllowableOptimisations &opt) {
-		return advanceToSideEffect(storeMachine, chooser, oracle, opt, storeMachineRacingInstructions, atomic, false);
-	}
-	CrossMachineEvalContext(std::set<DynAnalysisRip> &_probeMachineRacingInstructions,
-				std::set<DynAnalysisRip> &_storeMachineRacingInstructions)
-		: collectOrderingConstraints(false),
-		  pathConstraint(NULL),
-		  justPathConstraint(NULL),
-		  probeMachineRacingInstructions(_probeMachineRacingInstructions),
-		  storeMachineRacingInstructions(_storeMachineRacingInstructions)
-	{}
-};
-
-void
-CrossMachineEvalContext::dumpHistory(FILE *f) const
-{
-	for (std::vector<StateMachineSideEffect *>::const_iterator it = history.begin();
-	     it != history.end();
-	     it++) {
-		fprintf(f, "\t");
-		(*it)->prettyPrint(f);
-		fprintf(f, "\n");
-	}
-}
-
-StateMachineSideEffect *
-CrossMachineEvalContext::advanceToSideEffect(CrossEvalState *machine,
-					     NdChooser &chooser,
-					     Oracle *oracle,
-					     const AllowableOptimisations &opt,
-					     std::set<DynAnalysisRip> &interestingRips,
-					     bool *atomic,
-					     bool wantLoad)
-{
-	while (!TIMEOUT) {
-		StateMachineState *s = machine->currentState;
-		switch (s->type) {
-		case StateMachineState::Unreached:
-			abort();
-		case StateMachineState::Crash:
-			machine->finished = true;
-			machine->crashed = true;
-			return NULL;
-		case StateMachineState::NoCrash:
-		case StateMachineState::Stub:
-			machine->finished = true;
-			return NULL;
-		case StateMachineState::Bifurcate: {
-			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-			if (expressionIsTrue(smb->condition, chooser, machine->state, opt, &pathConstraint, &justPathConstraint))
-				machine->currentState = smb->trueTarget;
-			else
-				machine->currentState = smb->falseTarget;
-			break;
-		}
-		case StateMachineState::NdChoice: {
-			StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
-			machine->currentState = chooser.nd_choice(smnd->successors);
-			break;
-		}
-		case StateMachineState::SideEffecting: {
-			StateMachineSideEffecting *smse = (StateMachineSideEffecting *)s;
-			if (smse->sideEffect) {
-				StateMachineSideEffect *se = smse->sideEffect;
-				bool acceptable = se->type == StateMachineSideEffect::Store;
-				if (wantLoad)
-					acceptable |= se->type == StateMachineSideEffect::Load;
-				if (acceptable) {
-					StateMachineSideEffectMemoryAccess *smea = dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
-					if (smea)
-						acceptable &= interestingRips.count(DynAnalysisRip(smea->rip.rip.rip));
-				}
-				if (acceptable) {
-					machine->currentState = smse->target;
-					return se;
-				}
-				evalStateMachineSideEffectRes res =
-					evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
-								   collectOrderingConstraints, opt, atomic, &pathConstraint, &justPathConstraint);
-				if (res != esme_normal) {
-					/* Found a contradiction -> get out */
-					machine->finished = true;
-					return NULL;
-				}
-				history.push_back(se);
-			}
-			machine->currentState = smse->target;
-		}
-		}
-	}
-	return NULL;
-}
-
-void
-CrossMachineEvalContext::advanceMachine(NdChooser &chooser,
-					Oracle *oracle,
-					const AllowableOptimisations &opt,
-					bool *atomic,
-					bool doLoad)
-{
-	CrossEvalState *machine = doLoad ? loadMachine : storeMachine;
-	StateMachineSideEffect *se;
-
-	if (doLoad)
-		se = advanceToLoad(chooser, oracle, atomic, opt);
-	else
-		se = advanceToStore(chooser, oracle, atomic, opt);
-	if (!se)
-		return;
-
-	if (evalStateMachineSideEffect(machine->rootMachine, se, chooser, oracle, machine->state, memLog,
-				       collectOrderingConstraints, opt, atomic, &pathConstraint, &justPathConstraint) != esme_normal) {
-		machine->finished = true;
-	} else {
-		history.push_back(se);
-	}
-}
-
-static void
-findCrossMachineRacingInstructions(StateMachine *probeMachine,
-				   StateMachine *storeMachine,
-				   Oracle *oracle,
-				   std::set<DynAnalysisRip> &probeMachineRacingInstructions,
-				   std::set<DynAnalysisRip> &storeMachineRacingInstructions)
-{
-	std::set<StateMachineSideEffectStore *> storeMachineStores;
-	findAllStores(storeMachine, storeMachineStores);
-	for (auto it = storeMachineStores.begin(); it != storeMachineStores.end(); it++)
-		oracle->findRacingRips(*it, probeMachineRacingInstructions);
-
-	std::set<StateMachineSideEffectLoad *> probeMachineLoads;
-	findAllLoads(probeMachine, probeMachineLoads);
-	for (auto it = probeMachineLoads.begin(); it != probeMachineLoads.end(); it++)
-		oracle->findRacingRips(*it, storeMachineRacingInstructions);
-}
-
 static StateMachineState *
 shallowCloneState(StateMachineState *s)
 {
@@ -1812,7 +1640,6 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 				return res;
 			}
 		} advanceStoreMachine;
-
 		StateMachineState *newState;
 		if (crossState.probe_is_atomic) {
 			/* We have to issue probe effects until we get
@@ -1889,7 +1716,10 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 				std::vector<StateMachineState *> possible;
 				/* First possibility: let the probe
 				 * machine go first */
-				possible.push_back(advanceProbeMachine(crossState, pendingRelocs));
+				StateMachineState *nextProbe =
+					advanceProbeMachine(crossState, pendingRelocs);
+				possible.push_back(nextProbe);
+
 				/* Second possibility: let the store
 				   machine go first. */
 				StateMachineState *s = advanceStoreMachine(crossState, pendingRelocs);
@@ -2227,71 +2057,45 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			   const AllowableOptimisations &opt,
 			   GarbageCollectionToken token)
 {
-	NdChooser chooser;
-	VexPtr<IRExpr, &ir_heap> newCondition(IRExpr_Const(IRConst_U1(0)));
-
-	std::set<DynAnalysisRip> probeMachineRacingInstructions;
-	std::set<DynAnalysisRip> storeMachineRacingInstructions;
-	findCrossMachineRacingInstructions(probeMachine, storeMachine, oracle,
-					   probeMachineRacingInstructions,
-					   storeMachineRacingInstructions);
-
-	while (1) {
-		if (TIMEOUT)
-			return;
-
-		LibVEX_maybe_gc(token);
-
-		bool s1_atomic = false;
-		bool s2_atomic = false;
-		CrossMachineEvalContext ctxt(probeMachineRacingInstructions,
-					     storeMachineRacingInstructions);
-		ctxt.collectOrderingConstraints = true;
-		ctxt.pathConstraint = initialStateCondition;
-		ctxt.justPathConstraint = IRExpr_Const(IRConst_U1(1));
-		CrossEvalState s1(probeMachine);
-		CrossEvalState s2(storeMachine);
-		ctxt.loadMachine = &s1;
-		ctxt.storeMachine = &s2;
-		while (!TIMEOUT && !s1.finished && !s2.finished) {
-			assert(!(s1_atomic && s2_atomic));
-			if (s1_atomic ||
-			    (!s2_atomic && chooser.nd_choice(2) == 0)) {
-				ctxt.advanceMachine(chooser,
-						    oracle,
-						    opt,
-						    &s1_atomic,
-						    false);
-			} else {
-				ctxt.advanceMachine(chooser,
-						    oracle,
-						    opt,
-						    &s2_atomic,
-						    true);
-			}
-		}
-		while (!TIMEOUT && !s1.finished)
-			ctxt.advanceMachine(chooser, oracle, opt, &s1_atomic, true);
-		while (!TIMEOUT && !s2.finished)
-			ctxt.advanceMachine(chooser, oracle, opt, &s2_atomic, false);
-		if (s1.crashed) {
+	struct : public EvalPathConsumer {
+		VexPtr<IRExpr, &ir_heap> newCondition;
+		const AllowableOptimisations *opt;
+		bool crash(IRExpr *, IRExpr *justPathConstraint) {
 			newCondition =
 				IRExpr_Binop(
 					Iop_Or1,
 					newCondition,
-					ctxt.justPathConstraint);
+					justPathConstraint);
 			newCondition = simplifyIRExpr(newCondition,
-						      opt);
+						      *opt);
+			return true;
 		}
-		if (!chooser.advance())
-			break;
-	}	
+		bool survive(IRExpr *, IRExpr *) { return true; }
+		bool escape(IRExpr *, IRExpr *) { return true; }
+	} consumer;
+	consumer.needsAccAssumptions = true;
+	consumer.collectOrderingConstraints = true;
+	consumer.newCondition = IRExpr_Const(IRConst_U1(0));
+	consumer.opt = &opt;
+
+	VexPtr<StateMachine, &ir_heap> combinedMachine;
+	combinedMachine = buildCrossProductMachine(probeMachine, storeMachine,
+						   oracle, opt);
+	combinedMachine =
+		optimiseStateMachine(
+			combinedMachine,
+			opt,
+			oracle,
+			false,
+			token);
+	if (!enumEvalPaths(combinedMachine, initialStateCondition, oracle, opt, consumer, token))
+		return;
 
 	result = simplifyIRExpr(
 		IRExpr_Binop(
 			Iop_Or1,
 			result,
-			newCondition),
+			consumer.newCondition),
 		opt);
 }
 
