@@ -335,6 +335,8 @@ public:
 		bump_register_in_assignment_order(phi->reg);
 	}
 
+	IRExpr *specialiseIRExpr(IRExpr *iex);
+
 	void visit(HeapVisitor &hv) {
 		for (auto it = registers.begin();
 		     it != registers.end();
@@ -362,6 +364,27 @@ threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const Allowab
 		}
 	} doit(reg, this);
 	return simplifyIRExpr(doit.doit(e), opt);
+}
+
+
+IRExpr *
+threadState::specialiseIRExpr(IRExpr *iex)
+{
+	class SpecialiseIRExpr : public IRExprTransformer {
+		threadState &state;
+		IRExpr *transformIex(IRExprGet *e) {
+			IRExpr *e2 = state.register_value(e->reg, e->type());
+			if (e2)
+				return coerceTypes(e->type(), e2);
+			return IRExprTransformer::transformIex(e);
+		}
+	public:
+		SpecialiseIRExpr(threadState &_state)
+			: state(_state)
+		{}
+	};
+	SpecialiseIRExpr s(*this);
+	return s.doit(iex);
 }
 
 class memLogT : public std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > {
@@ -476,22 +499,6 @@ private:
 			accumulatedAssumption = simplifyIRExpr(accumulatedAssumption, opt);
 		advance_state_trace();
 	}
-	EvalContext(const EvalContext &o, const threadState &_state,
-		    const memLogT &_memlog, IRExpr *_assumption,
-		    IRExpr *_accAssumption, bool _atomic)
-		: assumption(_assumption),
-		  accumulatedAssumption(_accAssumption),
-		  state(_state),
-		  memlog(_memlog),
-		  atomic(_atomic),
-		  currentState(o.currentState)
-#ifndef NDEBUG
-		, statePath(o.statePath)
-		, stateLabels(o.stateLabels)
-#endif
-	{
-		advance_state_trace();
-	}
 
 	enum evalStateMachineSideEffectRes {
 		esme_normal,
@@ -554,34 +561,13 @@ public:
 	}	
 };
 
-class SpecialiseIRExpr : public IRExprTransformer {
-	threadState &state;
-	IRExpr *transformIex(IRExprGet *e) {
-		IRExpr *e2 = state.register_value(e->reg, e->type());
-		if (e2)
-			return coerceTypes(e->type(), e2);
-		return IRExprTransformer::transformIex(e);
-	}
-public:
-	SpecialiseIRExpr(threadState &_state)
-		: state(_state)
-	{}
-};
-
-static IRExpr *
-specialiseIRExpr(IRExpr *iex, threadState &state)
-{
-	SpecialiseIRExpr s(state);
-	return s.doit(iex);
-}
-
 bool
 EvalContext::expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOptimisations &opt)
 {
 	if (TIMEOUT)
 		return true;
 
-	exp = simplifyIRExpr(internIRExpr(specialiseIRExpr(exp, state)), opt);
+	exp = simplifyIRExpr(internIRExpr(state.specialiseIRExpr(exp)), opt);
 
 	/* Combine the path constraint with the new expression and see
 	   if that produces a contradiction.  If it does then we know
@@ -756,7 +742,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 		StateMachineSideEffectMemoryAccess *smsema =
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
-		addr = specialiseIRExpr(smsema->addr, state);
+		addr = state.specialiseIRExpr(smsema->addr);
 		IRExpr *v = IRExpr_Binop(
 			Iop_Or1,
 			IRExpr_Unop(Iop_BadPtr, addr),
@@ -793,13 +779,12 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 						&accumulatedAssumption);
 			}
 		}
-		IRExpr *data = specialiseIRExpr(smses->data, state);
 		memlog.push_back(
 			std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>
 			(thisMachine,
 			 new StateMachineSideEffectStore(
-				 specialiseIRExpr(addr, state),
-				 specialiseIRExpr(data, state),
+				 state.specialiseIRExpr(addr),
+				 state.specialiseIRExpr(smses->data),
 				 smses->rip
 				 )
 				));
@@ -873,7 +858,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 					thisMachine,
 					new StateMachineSideEffectLoad(
 						smsel->target,
-						specialiseIRExpr(addr, state),
+						state.specialiseIRExpr(addr),
 						smsel->rip,
 						smsel->type)));
 		state.set_register(smsel->target, val, &assumption, opt);
@@ -884,7 +869,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
 		state.set_register(smsec->target,
-				   specialiseIRExpr(smsec->value, state),
+				   state.specialiseIRExpr(smsec->value),
 				   &assumption,
 				   opt);
 		break;
@@ -1180,7 +1165,7 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 		IRExpr *cond =
 			simplifyIRExpr(
 				internIRExpr(
-					specialiseIRExpr(smb->condition, state)),
+					state.specialiseIRExpr(smb->condition)),
 				opt);
 		IRExpr *derefBad = dereferencesBadPointerIf(cond);
 		trool res = evalBooleanExpression(derefBad, opt);
