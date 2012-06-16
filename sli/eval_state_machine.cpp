@@ -374,22 +374,169 @@ public:
 	}
 };
 
-class StateMachineEvalContext {
-public:
-	StateMachineEvalContext()
-		: collectOrderingConstraints(false),
-		  justPathConstraint(NULL)
-	{}
-	memLogT memLog;
-	threadState state;
+struct EvalPathConsumer {
+	virtual bool crash(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
+	virtual bool survive(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
+	virtual bool escape(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
+	virtual bool badMachine() __attribute__((warn_unused_result)) {
+		abort();
+	}
 	bool collectOrderingConstraints;
-	StateMachineState *currentState;
+	bool needsAccAssumptions;
+	EvalPathConsumer()
+		: collectOrderingConstraints(false),
+		  needsAccAssumptions(false)
+	{}
+};
 
-	/* justPathConstraint contains all of the assumptions we've
-	   made using the ND chooser.  pathConstraint is that plus the
-	   initial assumption. */
-	IRExpr *pathConstraint;
-	IRExpr *justPathConstraint;
+class EvalContext : public GcCallback<&ir_heap> {
+	enum trool { tr_true, tr_false, tr_unknown };
+	IRExpr *assumption;
+public:
+	IRExpr *accumulatedAssumption;
+private:
+	threadState state;
+	memLogT memlog;
+public:
+	bool atomic;
+	StateMachineState *currentState;
+private:
+#ifndef NDEBUG
+	std::vector<int> statePath;
+	std::map<const StateMachineState *, int> stateLabels;
+#endif
+
+	void runGc(HeapVisitor &hv) {
+		hv(assumption);
+		hv(accumulatedAssumption);
+		state.visit(hv);
+		memlog.visit(hv);
+		hv(currentState);
+#ifndef NDEBUG
+		std::vector<std::pair<const StateMachineState *, int> > vectStateLabels(stateLabels.begin(), stateLabels.end());
+		for (auto it = vectStateLabels.begin();
+		     it != vectStateLabels.end();
+		     it++)
+			hv(it->first);
+		stateLabels.clear();
+		stateLabels.insert(vectStateLabels.begin(), vectStateLabels.end());
+#endif
+	}
+
+	trool evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt);
+	bool evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &consumer,
+			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
+			    const AllowableOptimisations &opt) __attribute__((warn_unused_result));
+
+
+	void advance_state_trace()
+	{
+#ifndef NDEBUG
+		if (!debug_dump_state_traces)
+			return;
+		assert(stateLabels.count(currentState));
+		assert(stateLabels[currentState] != 0);
+		statePath.push_back(stateLabels[currentState]);
+#endif
+	}
+	EvalContext(const EvalContext &o, StateMachineState *sms)
+		: assumption(o.assumption),
+		  accumulatedAssumption(o.accumulatedAssumption),
+		  state(o.state),
+		  memlog(o.memlog),
+		  atomic(o.atomic),
+		  currentState(sms)
+#ifndef NDEBUG
+		, statePath(o.statePath)
+		, stateLabels(o.stateLabels)
+#endif
+	{
+		advance_state_trace();
+	}
+	/* Create a new context which is like this one, but with an
+	   extra assumption. */
+	EvalContext(const EvalContext &o, StateMachineState *sms, IRExpr *assume,
+		    const AllowableOptimisations &opt)
+		: assumption(o.assumption ? IRExpr_Binop(Iop_And1, o.assumption, assume) : assume),
+		  accumulatedAssumption(o.accumulatedAssumption
+					? IRExpr_Binop(Iop_And1, o.accumulatedAssumption, assume)
+					: NULL),
+		  state(o.state),
+		  memlog(o.memlog),
+		  atomic(o.atomic),
+		  currentState(sms)
+#ifndef NDEBUG
+		, statePath(o.statePath)
+		, stateLabels(o.stateLabels)
+#endif
+	{
+		if (assumption)
+			assumption = simplifyIRExpr(assumption, opt);
+		if (accumulatedAssumption)
+			accumulatedAssumption = simplifyIRExpr(accumulatedAssumption, opt);
+		advance_state_trace();
+	}
+	EvalContext(const EvalContext &o, const threadState &_state,
+		    const memLogT &_memlog, IRExpr *_assumption,
+		    IRExpr *_accAssumption, bool _atomic)
+		: assumption(_assumption),
+		  accumulatedAssumption(_accAssumption),
+		  state(_state),
+		  memlog(_memlog),
+		  atomic(_atomic),
+		  currentState(o.currentState)
+#ifndef NDEBUG
+		, statePath(o.statePath)
+		, stateLabels(o.stateLabels)
+#endif
+	{
+		advance_state_trace();
+	}
+
+public:
+	bool advance(Oracle *oracle, const AllowableOptimisations &opt,
+		     std::vector<EvalContext> &pendingStates,
+		     StateMachine *sm,
+		     EvalPathConsumer &consumer) __attribute__((warn_unused_result));
+	enum smallStepResult { ssr_crash, ssr_survive, ssr_escape,
+			       ssr_ignore_path, ssr_failed, ssr_continue };
+	smallStepResult smallStepEvalStateMachine(StateMachine *rootMachine,
+						  NdChooser &chooser,
+						  Oracle *oracle,
+						  bool collectOrderingConstraints,
+						  const AllowableOptimisations &opt);
+	enum bigStepResult { bsr_crash, bsr_survive, bsr_failed };
+	bigStepResult bigStepEvalStateMachine(StateMachine *rootMachine,
+					      bigStepResult preferred_result,
+					      NdChooser &chooser,
+					      Oracle *oracle,
+					      bool collectOrderingConstraints,
+					      const AllowableOptimisations &opt);
+	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
+		    std::map<const StateMachineState*, int> &_stateLabels)
+		: assumption(initialAssumption),
+		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
+		  atomic(false),
+		  currentState(sm->root)
+#ifndef NDEBUG
+		, stateLabels(_stateLabels)
+#endif
+	{
+		advance_state_trace();
+	}
+	EvalContext(const EvalContext &o)
+		: assumption(o.assumption),
+		  accumulatedAssumption(o.accumulatedAssumption),
+		  state(o.state),
+		  memlog(o.memlog),
+		  atomic(o.atomic),
+		  currentState(o.currentState)
+#ifndef NDEBUG
+		, statePath(o.statePath),
+		  stateLabels(o.stateLabels)
+#endif
+	{
+	}	
 };
 
 class SpecialiseIRExpr : public IRExprTransformer {
@@ -789,249 +936,108 @@ evalStateMachineSideEffect(StateMachine *thisMachine,
    oracle, ask the chooser which way we should go, and then emit a
    path constraint saying which way we went.  Stubs are assumed to
    never crash. */
-static StateMachineState *
-smallStepEvalStateMachine(StateMachine *rootMachine,
-			  StateMachineState *sm,
-			  bool *crashes,
-			  NdChooser &chooser,
-			  Oracle *oracle,
-			  bool *atomic,
-			  const AllowableOptimisations &opt,
-			  StateMachineEvalContext &ctxt)
+/* Returns tr_true if we crash, tr_false if we survive, and tr_unknown
+   if the machine isn't finished yet. */
+EvalContext::smallStepResult
+EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
+				       NdChooser &chooser,
+				       Oracle *oracle,
+				       bool collectOrderingConstraints,
+				       const AllowableOptimisations &opt)
 {
-	if (TIMEOUT) {
-		*crashes = false; /* Lacking any better ideas */
-		return NULL;
-	}
+	if (TIMEOUT)
+		return ssr_failed;
 
-	switch (sm->type) {
+	switch (currentState->type) {
 	case StateMachineState::Crash:
-		*crashes = true;
-		return NULL;
+		return ssr_crash;
 	case StateMachineState::NoCrash:
-		*crashes = false;
-		return NULL;
+		return ssr_survive;
 	case StateMachineState::Stub:
-		return NULL;
+		return ssr_escape;
 	case StateMachineState::SideEffecting: {
-		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)sm;
+		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		evalStateMachineSideEffectRes res =
 			evalStateMachineSideEffect(rootMachine,
 						   sme->sideEffect,
 						   chooser,
 						   oracle,
-						   ctxt.state,
-						   ctxt.memLog,
-						   ctxt.collectOrderingConstraints,
+						   state,
+						   memlog,
+						   collectOrderingConstraints,
 						   opt,
-						   atomic,
-						   &ctxt.pathConstraint,
-						   &ctxt.justPathConstraint);
+						   &atomic,
+						   &assumption,
+						   &accumulatedAssumption);
 		switch (res) {
 		case esme_escape:
+			return ssr_escape;
 		case esme_ignore_path:
-			return NULL;
+			return ssr_ignore_path;
 		case esme_normal:
-			return sme->target;
+			currentState = sme->target;
+			return ssr_continue;
 		}
 		abort();
 	}
 	case StateMachineState::Bifurcate: {
-		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-		if (expressionIsTrue(smb->condition, chooser, ctxt.state, opt, &ctxt.pathConstraint, &ctxt.justPathConstraint))
-			return smb->trueTarget;
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
+		if (expressionIsTrue(smb->condition, chooser, state, opt, &assumption, &accumulatedAssumption))
+			currentState = smb->trueTarget;
 		else
-			return smb->falseTarget;
+			currentState = smb->falseTarget;
+		return ssr_continue;
 	}
 	case StateMachineState::NdChoice: {
-		StateMachineNdChoice *smnd = (StateMachineNdChoice *)sm;
-		if (smnd->successors.size() != 0)
-			return chooser.nd_choice(smnd->successors);
+		StateMachineNdChoice *smnd = (StateMachineNdChoice *)currentState;
+		if (smnd->successors.size() != 0) {
+			currentState = chooser.nd_choice(smnd->successors);
+			return ssr_continue;
+		}
 		/* Fall through to the Unreached case if we have no
 		 * available successors. */
 	}
 	case StateMachineState::Unreached:
 		/* Whoops... */
 		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
-		return NULL;
+		return ssr_failed;
 	}
 
 	abort();
 }
 
-static void
-bigStepEvalStateMachine(StateMachine *rootMachine,
-			bool *crashes,
-			bool preferred_result,
-			NdChooser &chooser,
-			Oracle *oracle,
-			const AllowableOptimisations &opt,
-			StateMachineEvalContext &ctxt)
+EvalContext::bigStepResult
+EvalContext::bigStepEvalStateMachine(StateMachine *rootMachine,
+				     bigStepResult preferred_result,
+				     NdChooser &chooser,
+				     Oracle *oracle,
+				     bool collectOrderingConstraints,
+				     const AllowableOptimisations &opt)
 {
-	bool atomic = false;
-	*crashes = preferred_result;
 	while (1) {
-		ctxt.currentState =
+		smallStepResult res =
 			smallStepEvalStateMachine(rootMachine,
-						  ctxt.currentState,
-						  crashes,
 						  chooser,
 						  oracle,
-						  &atomic,
-						  opt,
-						  ctxt);
-		if (!ctxt.currentState)
-			return;
-	}
-}
-
-struct EvalPathConsumer {
-	virtual bool crash(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
-	virtual bool survive(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
-	virtual bool escape(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
-	virtual bool badMachine() __attribute__((warn_unused_result)) {
+						  collectOrderingConstraints,
+						  opt);
+		switch (res) {
+		case EvalContext::ssr_crash:
+			return bsr_crash;
+		case ssr_survive:
+			return bsr_survive;
+		case ssr_escape:
+			return preferred_result;
+		case ssr_ignore_path:
+			return preferred_result;
+		case ssr_failed:
+			return bsr_failed;
+		case ssr_continue:
+			continue;
+		}
 		abort();
 	}
-	bool collectOrderingConstraints;
-	bool needsAccAssumptions;
-	EvalPathConsumer()
-		: collectOrderingConstraints(false),
-		  needsAccAssumptions(false)
-	{}
-};
-
-class EvalContext : public GcCallback<&ir_heap> {
-	enum trool { tr_true, tr_false, tr_unknown };
-	IRExpr *assumption;
-	IRExpr *accumulatedAssumption;
-	threadState state;
-	memLogT memlog;
-	bool atomic;
-public:
-	StateMachineState *currentState;
-private:
-#ifndef NDEBUG
-	std::vector<int> statePath;
-	std::map<const StateMachineState *, int> stateLabels;
-#endif
-
-	void runGc(HeapVisitor &hv) {
-		hv(assumption);
-		hv(accumulatedAssumption);
-		state.visit(hv);
-		memlog.visit(hv);
-		hv(currentState);
-#ifndef NDEBUG
-		std::vector<std::pair<const StateMachineState *, int> > vectStateLabels(stateLabels.begin(), stateLabels.end());
-		for (auto it = vectStateLabels.begin();
-		     it != vectStateLabels.end();
-		     it++)
-			hv(it->first);
-		stateLabels.clear();
-		stateLabels.insert(vectStateLabels.begin(), vectStateLabels.end());
-#endif
-	}
-
-	trool evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt);
-	bool evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &consumer,
-			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
-			    const AllowableOptimisations &opt) __attribute__((warn_unused_result));
-
-
-	void advance_state_trace()
-	{
-#ifndef NDEBUG
-		if (!debug_dump_state_traces)
-			return;
-		assert(stateLabels.count(currentState));
-		assert(stateLabels[currentState] != 0);
-		statePath.push_back(stateLabels[currentState]);
-#endif
-	}
-	EvalContext(const EvalContext &o, StateMachineState *sms)
-		: assumption(o.assumption),
-		  accumulatedAssumption(o.accumulatedAssumption),
-		  state(o.state),
-		  memlog(o.memlog),
-		  atomic(o.atomic),
-		  currentState(sms)
-#ifndef NDEBUG
-		, statePath(o.statePath)
-		, stateLabels(o.stateLabels)
-#endif
-	{
-		advance_state_trace();
-	}
-	/* Create a new context which is like this one, but with an
-	   extra assumption. */
-	EvalContext(const EvalContext &o, StateMachineState *sms, IRExpr *assume,
-		    const AllowableOptimisations &opt)
-		: assumption(o.assumption ? IRExpr_Binop(Iop_And1, o.assumption, assume) : assume),
-		  accumulatedAssumption(o.accumulatedAssumption
-					? IRExpr_Binop(Iop_And1, o.accumulatedAssumption, assume)
-					: NULL),
-		  state(o.state),
-		  memlog(o.memlog),
-		  atomic(o.atomic),
-		  currentState(sms)
-#ifndef NDEBUG
-		, statePath(o.statePath)
-		, stateLabels(o.stateLabels)
-#endif
-	{
-		if (assumption)
-			assumption = simplifyIRExpr(assumption, opt);
-		if (accumulatedAssumption)
-			accumulatedAssumption = simplifyIRExpr(accumulatedAssumption, opt);
-		advance_state_trace();
-	}
-	EvalContext(const EvalContext &o, const threadState &_state,
-		    const memLogT &_memlog, IRExpr *_assumption,
-		    IRExpr *_accAssumption, bool _atomic)
-		: assumption(_assumption),
-		  accumulatedAssumption(_accAssumption),
-		  state(_state),
-		  memlog(_memlog),
-		  atomic(_atomic),
-		  currentState(o.currentState)
-#ifndef NDEBUG
-		, statePath(o.statePath)
-		, stateLabels(o.stateLabels)
-#endif
-	{
-		advance_state_trace();
-	}
-public:
-	bool advance(Oracle *oracle, const AllowableOptimisations &opt,
-		     std::vector<EvalContext> &pendingStates,
-		     StateMachine *sm,
-		     EvalPathConsumer &consumer) __attribute__((warn_unused_result));
-	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
-		    std::map<const StateMachineState*, int> &_stateLabels)
-		: assumption(initialAssumption),
-		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
-		  atomic(false),
-		  currentState(sm->root)
-#ifndef NDEBUG
-		, stateLabels(_stateLabels)
-#endif
-	{
-		advance_state_trace();
-	}
-	EvalContext(const EvalContext &o)
-		: assumption(o.assumption),
-		  accumulatedAssumption(o.accumulatedAssumption),
-		  state(o.state),
-		  memlog(o.memlog),
-		  atomic(o.atomic),
-		  currentState(o.currentState)
-#ifndef NDEBUG
-		, statePath(o.statePath),
-		  stateLabels(o.stateLabels)
-#endif
-	{
-	}	
-};
+}
 
 EvalContext::trool
 EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt)
@@ -1985,73 +1991,52 @@ crossProductSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &probeMachine,
 }
 
 struct findRemoteMacroSectionsState {
-	bool skipFirstSideEffect;
-	StateMachineState *writerState;
-	StateMachineEvalContext writerContext;
+	EvalContext writerContext;
 	bool finished;
 	bool writer_failed;
 
 	StateMachineSideEffectStore *advanceWriteMachine(StateMachine *writeMachine,
 							 NdChooser &chooser,
 							 Oracle *oracle,
-							 bool *atomic,
 							 const AllowableOptimisations &opt);
+	findRemoteMacroSectionsState(StateMachine *sm,
+				     IRExpr *initialAssumption,
+				     bool accumulateAssumptions,
+				     std::map<const StateMachineState *, int> &stateLabels)
+		: writerContext(sm, initialAssumption, accumulateAssumptions,
+				stateLabels)
+	{}
 };
 
 StateMachineSideEffectStore *
 findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 						  NdChooser &chooser,
 						  Oracle *oracle,
-						  bool *atomic,
 						  const AllowableOptimisations &opt)
 {
 	StateMachineSideEffectStore *smses = NULL;
 
-	while (!TIMEOUT && !smses) {
-		StateMachineState *s = writerState;
-		switch (s->type) {
-		case StateMachineState::Unreached:
-			abort();
-		case StateMachineState::Crash:
+	while (!TIMEOUT && (!smses || writerContext.atomic)) {
+		StateMachineSideEffect *sideEffect = writerContext.currentState->getSideEffect();
+		if (sideEffect && sideEffect->type == StateMachineSideEffect::Store)
+			smses = (StateMachineSideEffectStore *)sideEffect;
+		switch (writerContext.smallStepEvalStateMachine(
+				writeMachine,
+				chooser,
+				oracle,
+				false,
+				opt)) {
+		case EvalContext::ssr_crash:
+		case EvalContext::ssr_escape:
+		case EvalContext::ssr_failed:
 			writer_failed = true;
 			return NULL;
-		case StateMachineState::NoCrash:
-		case StateMachineState::Stub:
+		case EvalContext::ssr_survive:
+		case EvalContext::ssr_ignore_path:
 			finished = true;
 			return NULL;
-		case StateMachineState::Bifurcate: {
-			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-			if (expressionIsTrue(smb->condition, chooser, writerContext.state, opt,
-					     &writerContext.pathConstraint, &writerContext.justPathConstraint))
-				writerState = smb->trueTarget;
-			else
-				writerState = smb->falseTarget;
+		case EvalContext::ssr_continue:
 			break;
-		}
-		case StateMachineState::NdChoice: {
-			StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
-			writerState = chooser.nd_choice(smnd->successors);
-			break;
-		}
-		case StateMachineState::SideEffecting: {
-			StateMachineSideEffecting *smse = (StateMachineSideEffecting *)s;
-			StateMachineSideEffect *se = smse->sideEffect;
-			if (se) {
-				if (se->type == StateMachineSideEffect::Store)
-					smses = (StateMachineSideEffectStore *)se;
-				if (evalStateMachineSideEffect(writeMachine, se, chooser, oracle, writerContext.state,
-							       writerContext.memLog,
-							       writerContext.collectOrderingConstraints, opt,
-							       atomic,
-							       &writerContext.pathConstraint,
-							       &writerContext.justPathConstraint) != esme_normal) {
-					/* Found a contradiction -> get out */
-					writer_failed = true;
-					return NULL;
-				}
-			}
-			writerState = smse->target;
-		}
 		}
 	}
 	return smses;
@@ -2079,28 +2064,24 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 	__set_profiling(findRemoteMacroSections);
 	NdChooser chooser;
 
+	std::map<const StateMachineState *, int> stateLabels;
+
 	do {
 		if (TIMEOUT)
 			return false;
 
 		LibVEX_maybe_gc(token);
 
-		findRemoteMacroSectionsState state;
+		findRemoteMacroSectionsState state(writeMachine, assumption, false, stateLabels);
 		StateMachineSideEffectStore *sectionStart;
 
-		state.writerContext.pathConstraint = assumption;
-		state.writerState = writeMachine->root;
 		sectionStart = NULL;
 		state.finished = false;
 		state.writer_failed = false;
-		bool writer_atomic = false;
 
 		while (!state.writer_failed && !TIMEOUT && !state.finished) {
-			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, &writer_atomic, opt);
+			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
 
-			if (writer_atomic)
-				continue;
-			
 			/* The writer just issued a store, so we
 			   should now try running the reader
 			   atomically.  We discard any stores issued
@@ -2109,12 +2090,16 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			   need a fresh eval ctxt and a fresh copy of
 			   the stores list every time around the
 			   loop. */
-			StateMachineEvalContext readEvalCtxt = state.writerContext;
+			EvalContext readEvalCtxt = state.writerContext;
 			readEvalCtxt.currentState = readMachine->root;
-			bool crashes;
-			bigStepEvalStateMachine(readMachine, &crashes, false, chooser,
-						oracle, opt, readEvalCtxt);
-			if (crashes) {
+			switch (readEvalCtxt.bigStepEvalStateMachine(
+					readMachine,
+					sectionStart ? EvalContext::bsr_crash : EvalContext::bsr_survive,
+					chooser,
+					oracle,
+					false,
+					opt)) {
+			case EvalContext::bsr_crash:
 				if (!sectionStart) {
 					/* The previous attempt at
 					   evaluating the read machine
@@ -2126,7 +2111,8 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 					/* Critical section
 					 * continues. */
 				}
-			} else {
+				break;
+			case EvalContext::bsr_survive:
 				if (sectionStart) {
 					/* Previous attempt did crash
 					   -> this is the end of the
@@ -2134,6 +2120,9 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 					output->insert(sectionStart, smses);
 					sectionStart = NULL;
 				}
+				break;
+			case EvalContext::bsr_failed:
+				return false;
 			}
 		}
 
@@ -2160,6 +2149,8 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 	__set_profiling(fixSufficient);
 	NdChooser chooser;
 
+	std::map<const StateMachineState *, int> stateLabels;
+
 	do {
 		if (TIMEOUT)
 			return false;
@@ -2168,23 +2159,16 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 
 		std::set<StateMachineSideEffectStore *> incompleteSections;
 
-		findRemoteMacroSectionsState state;
-
-		state.writerContext.pathConstraint = assumption;
-		state.writerState = writeMachine->root;
-		state.skipFirstSideEffect = false;
-		bool writer_atomic = false;
+		findRemoteMacroSectionsState state(writeMachine, assumption, false, stateLabels);
+		state.writerContext.accumulatedAssumption = IRExpr_Const(IRConst_U1(1));
 		while (!TIMEOUT) {
-			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, &writer_atomic, opt);
+			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
 
 			if (state.writer_failed) {
 				/* Contradiction in the writer -> give
 				 * up. */
 				break;
 			}
-
-			if (writer_atomic)
-				continue;
 
 			/* Did we just leave a critical section? */
 			if (incompleteSections.count(smses))
@@ -2204,15 +2188,24 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 			/* The writer just issued a store and is not
 			   in a critical section, so we should now try
 			   running the reader atomically.  */
-			StateMachineEvalContext readEvalCtxt = state.writerContext;
+			EvalContext readEvalCtxt = state.writerContext;
 			readEvalCtxt.currentState = probeMachine->root;
-			bool crashes;
-			bigStepEvalStateMachine(probeMachine, &crashes, false, chooser, oracle, opt, readEvalCtxt);
-			if (crashes) {
+			switch (readEvalCtxt.bigStepEvalStateMachine(
+					probeMachine,
+					EvalContext::bsr_survive,
+					chooser,
+					oracle,
+					false,
+					opt)) {
+			case EvalContext::bsr_crash:
 				fprintf(_logfile, "Fix is insufficient, witness: ");
-				ppIRExpr(readEvalCtxt.pathConstraint, _logfile);
+				ppIRExpr(readEvalCtxt.accumulatedAssumption, _logfile);
 				fprintf(_logfile, "\n");
 				return false; 
+			case EvalContext::bsr_survive:
+				break;
+			case EvalContext::bsr_failed:
+				return false;
 			}
 		}
 	} while (chooser.advance());
