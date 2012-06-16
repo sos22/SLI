@@ -505,6 +505,8 @@ private:
 		Oracle *oracle,
 		bool collectOrderingConstraints,
 		const AllowableOptimisations &opt);
+	bool expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOptimisations &opt);
+	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const AllowableOptimisations &opt);
 
 public:
 	bool advance(Oracle *oracle, const AllowableOptimisations &opt,
@@ -573,9 +575,8 @@ specialiseIRExpr(IRExpr *iex, threadState &state)
 	return s.doit(iex);
 }
 
-static bool
-expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const AllowableOptimisations &opt, 
-		 IRExpr **assumption, IRExpr **accumulatedAssumptions)
+bool
+EvalContext::expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOptimisations &opt)
 {
 	if (TIMEOUT)
 		return true;
@@ -589,7 +590,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 		simplifyIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
-				*assumption,
+				assumption,
 				exp),
 			opt);
 	if (e->tag == Iex_Const) {
@@ -601,7 +602,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 		   earlier.  Consider that a lucky break and simplify
 		   it now. */
 		if (((IRExprConst *)e)->con->Ico.U1) {
-			*assumption = e;
+			assumption = e;
 			return true;
 		} else {
 			return false;
@@ -616,7 +617,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 		simplifyIRExpr(
 			IRExpr_Binop(
 				Iop_And1,
-				*assumption,
+				assumption,
 				IRExpr_Unop(
 					Iop_Not1,
 					exp)),
@@ -625,7 +626,7 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 		/* If X & ¬Y is definitely true, Y is definitely
 		 * false and X is definitely true. */
 		if (((IRExprConst *)e2)->con->Ico.U1) {
-			*assumption = IRExpr_Const(IRConst_U1(1));
+			assumption = IRExpr_Const(IRConst_U1(1));
 			return false;
 		}
 
@@ -654,24 +655,24 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 #endif
 
 	if (res == 0) {
-		*assumption = e;
-		if (accumulatedAssumptions && *accumulatedAssumptions)
-			*accumulatedAssumptions =
+		assumption = e;
+		if (accumulatedAssumption)
+			accumulatedAssumption =
 				simplifyIRExpr(
 					IRExpr_Binop(
 						Iop_And1,
-						*accumulatedAssumptions,
+						accumulatedAssumption,
 						exp),
 					opt);
 		return true;
 	} else {
-		*assumption = e2;
-		if (accumulatedAssumptions && *accumulatedAssumptions)
-			*accumulatedAssumptions =
+		assumption = e2;
+		if (accumulatedAssumption)
+			accumulatedAssumption =
 				simplifyIRExpr(
 					IRExpr_Binop(
 						Iop_And1,
-						*accumulatedAssumptions,
+						accumulatedAssumption,
 						IRExpr_Unop(
 							Iop_Not1,
 							exp)),
@@ -680,19 +681,15 @@ expressionIsTrue(IRExpr *exp, NdChooser &chooser, threadState &state, const Allo
 	}
 }
 
-static bool
-evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, threadState &state,
-		     const AllowableOptimisations &opt, IRExpr **assumption, IRExpr **accAssumptions)
+bool
+EvalContext::evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const AllowableOptimisations &opt)
 {
 	return expressionIsTrue(IRExpr_Binop(
 					Iop_CmpEQ64,
 					exp1,
 					exp2),
 				chooser,
-				state,
-				opt,
-				assumption,
-				accAssumptions);
+				opt);
 }
 
 static void
@@ -764,9 +761,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 			Iop_Or1,
 			IRExpr_Unop(Iop_BadPtr, addr),
 			dereferencesBadPointerIf(addr));
-		if (expressionIsTrue(v, chooser, state, opt,
-				     &assumption,
-				     &accumulatedAssumption))
+		if (expressionIsTrue(v, chooser, opt))
 			return esme_escape;
 	}
 
@@ -789,7 +784,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 				assert(smsel);
 				if (!oracle->memoryAccessesMightAlias(opt, smsel, smses))
 					continue;
-				if (evalExpressionsEqual(addr, smsel->addr, chooser, state, opt, &assumption, &accumulatedAssumption))
+				if (evalExpressionsEqual(addr, smsel->addr, chooser, opt))
 					addOrderingConstraint(
 						smsel->rip,
 						smses->rip,
@@ -838,7 +833,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 
 			if (!oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				continue;
-			if (evalExpressionsEqual(smses->addr, addr, chooser, state, opt, &assumption, &accumulatedAssumption)) {
+			if (evalExpressionsEqual(smses->addr, addr, chooser, opt)) {
 				if (!collectOrderingConstraints) {
 					satisfier = smses;
 					satisfierMachine = it->first;
@@ -904,8 +899,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 				    Iop_Or1,
 				    smseaf->value,
 				    dereferencesBadPointerIf(smseaf->value)),
-			    chooser, state, opt, &assumption,
-			    &accumulatedAssumption)) {
+			    chooser, opt)) {
 			if (smseaf->reflectsActualProgram)
 				return esme_escape;
 			else
@@ -980,7 +974,7 @@ EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
-		if (expressionIsTrue(smb->condition, chooser, state, opt, &assumption, &accumulatedAssumption))
+		if (expressionIsTrue(smb->condition, chooser, opt))
 			currentState = smb->trueTarget;
 		else
 			currentState = smb->falseTarget;
