@@ -484,22 +484,11 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	if (!assumption)
 		return NULL;
 
-	VexPtr<IRExpr, &ir_heap> writeMachineConstraint(
-		writeMachineCrashConstraint(sm,
-					    IRExpr_Const(IRConst_U1(0)),
-					    assumption,
-					    IRExpr_Const(IRConst_U1(0)),
-					    storeOptimisations));
-	if (!writeMachineConstraint) {
-		fprintf(_logfile, "\t\tCannot derive write machine crash constraint\n");
-		return NULL;
-	}
-
 	assumption = writeMachineSuitabilityConstraint(
 		sm,
 		probeMachine,
 		oracle,
-		writeMachineConstraint,
+		assumption,
 		optIn.enablepreferCrash(),
 		token);
 

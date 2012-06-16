@@ -71,11 +71,6 @@ bool fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 		   const AllowableOptimisations &opt,
 		   VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
 		   GarbageCollectionToken token);
-IRExpr *writeMachineCrashConstraint(StateMachine *sm,
-				    IRExpr *surviveExpression,
-				    IRExpr *crashExpression,
-				    IRExpr *escapeExpression,
-				    const AllowableOptimisations &opt);
 IRExpr *writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 					  VexPtr<StateMachine, &ir_heap> &readMachine,
 					  VexPtr<Oracle> &oracle,
