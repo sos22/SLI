@@ -56,8 +56,12 @@ public:
 		unsigned long acc = (unsigned long)second;
 		return (acc ^ (acc >> 32)) * (first ? 1 : 2);
 	}
+	void visit(HeapVisitor &hv) {
+		hv(second);
+	}
 };
 class NF_Term : public std::vector<NF_Atom> {
+	void insert(); /* DNI */
 public:
 	bloom_filter<64, NF_Atom> bloom;
 	void push_back(const NF_Atom &x) {
@@ -70,8 +74,19 @@ public:
 	}
 	void prettyPrint(FILE *f, const char *) const;
 	iterator findMatchingAtom(const NF_Atom &a);
+	void visit(HeapVisitor &hv) {
+		for (auto it = begin(); it != end(); it++)
+			it->visit(hv);
+		bloom.clear();
+		for (auto it = begin(); it != end(); it++)
+			bloom.set(*it);
+	}
 };
-class NF_Expression : public std::vector<NF_Term> {
+class NF_Expression : public std::vector<NF_Term>, GcCallback<&ir_heap> {
+	void runGc(HeapVisitor &hv) {
+		for (auto it = begin(); it != end(); it++)
+			it->visit(hv);
+	}
 public:
 	void prettyPrint(FILE *f, const char *, const char *) const;
 	bool isContradiction() const;
