@@ -1,5 +1,6 @@
 /* Try to convert crash summaries into a more canonical form.  At the
-   moment, that pretty much means normalising variable identifiers. */
+   moment, that pretty much means normalising variable identifiers and
+   converting the verification condition to CNF. */
 #include "sli.h"
 #include "state_machine.hpp"
 #include "allowable_optimisations.hpp"
@@ -8,6 +9,8 @@
 #include "oracle.hpp"
 #include "offline_analysis.hpp"
 #include "intern.hpp"
+#include "sat_checker.hpp"
+#include "nf.hpp"
 
 class RegisterCanonicaliser : public StateMachineTransformer {
 	std::map<threadAndRegister, threadAndRegister, threadAndRegister::partialCompare> canonTable;
@@ -348,9 +351,22 @@ transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans)
 	return input;
 }
 
+static IRExpr *
+canonicaliseIRExpr(IRExpr *input)
+{
+	input = simplify_via_anf(input);
+	IRExpr *inp2 = convert_to_cnf(input);
+	if (inp2)
+		return inp2;
+	else
+		return input;
+}
+
 static CrashSummary *
 canonicalise_crash_summary(CrashSummary *input)
 {
+	input->verificationCondition = canonicaliseIRExpr(input->verificationCondition);
+
 	CanonicaliseThreadIds thread_canon;
 	for (auto it = input->loadMachine->origin.begin(); it != input->loadMachine->origin.end(); it++)
 		it->first = thread_canon.canonTid(it->first);
