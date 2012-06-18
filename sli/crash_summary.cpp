@@ -148,6 +148,8 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 				break;
 			aliasing.push_back(thing);
 		}
+	} else {
+		return false;
 	}
 	*succ = buf;
 	*out = new CrashSummary(loadMachine, storeMachine, verificationCondition, macros, aliasing);
