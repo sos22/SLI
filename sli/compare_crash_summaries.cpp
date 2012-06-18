@@ -207,7 +207,8 @@ crashSummariesTheSame(CrashSummary *summary1,
 		      CrashSummary *summary2)
 {
 	return stateMachinesTheSame(summary1->loadMachine, summary2->loadMachine) &&
-		stateMachinesTheSame(summary1->storeMachine, summary2->storeMachine);
+		stateMachinesTheSame(summary1->storeMachine, summary2->storeMachine) &&
+		localSimilarity(summary1->verificationCondition, summary2->verificationCondition);
 }
 
 int
