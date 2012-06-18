@@ -51,11 +51,29 @@ public:
 	unsigned long rip;
 };
 
+class OracleInterface : public GarbageCollected<OracleInterface> {
+public:
+	virtual bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *) = 0;
+	virtual bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *) = 0;
+	virtual bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *) = 0;
+	virtual bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) = 0;
+        virtual bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store) = 0;
+	/* True if any table entry which includes @access as a
+	 * non-private entry also includes a non-private store
+	 * entry. */
+	/* i.e. this is true if there's some possibility that @access
+	 * might alias with a store in a remote thread. */
+	virtual bool hasConflictingRemoteStores(const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access) = 0;
+
+	virtual ~OracleInterface() {}
+	NAMED_CLASS
+};
+
 /* All of the information from sources other than the main crash dump.
  * Information from the oracle will be true of some executions but not
  * necessarily all of them, so should only really be used where static
  * analysis is insufficient. */
-class Oracle : public GarbageCollected<Oracle> {
+class Oracle : public OracleInterface {
 public:
 	static const int NR_REGS = 16;
 
@@ -355,11 +373,6 @@ public:
 	   table.  This usually indicates that the relevant
 	   instruction is accessing the stack. */
 	bool notInTagTable(StateMachineSideEffectMemoryAccess *access);
-	/* True if any table entry which includes @access as a
-	 * non-private entry also includes a non-private store
-	 * entry. */
-	/* i.e. this is true if there's some possibility that @access
-	 * might alias with a store in a remote thread. */
 	bool hasConflictingRemoteStores(const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access);
 
 	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
@@ -410,8 +423,6 @@ public:
 		if (tags)
 			loadTagTable(tags);
 	}
-
-	NAMED_CLASS
 };
 
 template <typename a, typename b> unsigned long

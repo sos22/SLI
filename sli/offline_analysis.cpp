@@ -198,7 +198,7 @@ enforceMustStoreBeforeCrash(StateMachine *sm, bool *progress)
 StateMachine *
 optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		     const AllowableOptimisations &opt,
-		     VexPtr<Oracle> &oracle,
+		     VexPtr<OracleInterface> &oracle,
 		     bool is_ssa,
 		     GarbageCollectionToken token,
 		     bool *progress)
@@ -214,7 +214,11 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 	   turn means that a single aliasing configuration is valid
 	   for the entire machine. */
 	if (is_ssa && sm->origin.size() == 1) {
-		alias = oracle->getAliasingConfiguration(sm->origin);
+		/* You need to supply a real oracle if you want to set
+		   is_ssa. */
+		Oracle *o = dynamic_cast<Oracle *>(oracle.get());
+		assert(o);
+		alias = o->getAliasingConfiguration(sm->origin);
 		aliasp = &alias;
 		sm->assertSSA();
 	} else {
@@ -261,6 +265,17 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 		sm->assertSSA();
 	return sm;
 }
+StateMachine *
+optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
+		     const AllowableOptimisations &opt,
+		     VexPtr<Oracle> &oracle,
+		     bool is_ssa,
+		     GarbageCollectionToken token,
+		     bool *progress)
+{
+	VexPtr<OracleInterface> oracleI(oracle);
+	return optimiseStateMachine(sm, opt, oracle, is_ssa, token, progress);
+}
 
 static void
 getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores)
@@ -293,7 +308,7 @@ CFGtoStoreMachine(unsigned tid, Oracle *oracle, CFGNode *cfg,
  * becomes very easy. */
 static bool
 singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachine,
-			    const AllowableOptimisations &opt, Oracle *oracle)
+			    const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineSideEffectStore *> storeMachineStores;
 	std::set<StateMachineSideEffectLoad *> probeMachineLoads;
@@ -357,7 +372,7 @@ singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachi
 static IRExpr *
 atomicSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &machine,
 			 StateMachine **_atomicMachine,
-			 VexPtr<Oracle> &oracle,
+			 VexPtr<OracleInterface> &oracle,
 			 const AllowableOptimisations &opt,
 			 GarbageCollectionToken token)
 {
@@ -410,8 +425,11 @@ duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
 }
 
 StateMachine *
-removeAssertions(StateMachine *_sm, const AllowableOptimisations &opt, VexPtr<Oracle> &oracle,
-		 bool is_ssa, GarbageCollectionToken token)
+removeAssertions(StateMachine *_sm,
+		 const AllowableOptimisations &opt,
+		 VexPtr<OracleInterface> &oracle,
+		 bool is_ssa,
+		 GarbageCollectionToken token)
 {
 	VexPtr<StateMachine, &ir_heap> sm(_sm);
 	/* Iterate to make sure we get rid of any assertions
@@ -435,7 +453,7 @@ removeAssertions(StateMachine *_sm, const AllowableOptimisations &opt, VexPtr<Or
 static IRExpr *
 verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachine,
 				     VexPtr<StateMachine, &ir_heap> probeMachine,
-				     VexPtr<Oracle> &oracle,
+				     VexPtr<OracleInterface> &oracle,
 				     const AllowableOptimisations &optIn,
 				     GarbageCollectionToken token)
 {
@@ -570,7 +588,7 @@ static StateMachine *
 localiseLoads(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<StateMachine, &ir_heap> &storeMachine,
 	      const AllowableOptimisations &opt,
-	      VexPtr<Oracle> &oracle,
+	      VexPtr<OracleInterface> &oracle,
 	      GarbageCollectionToken token,
 	      bool *done_something = NULL)
 {
@@ -605,7 +623,7 @@ static StateMachine *
 localiseLoads(VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      const std::set<DynAnalysisRip> &stores,
 	      const AllowableOptimisations &opt,
-	      VexPtr<Oracle> &oracle,
+	      VexPtr<OracleInterface> &oracle,
 	      GarbageCollectionToken token,
 	      bool *done_something = NULL)
 {
@@ -660,6 +678,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 	AllowableOptimisations probeOptimisations =
 		optIn.
 			enableignoreSideEffects();
+	VexPtr<OracleInterface> oracleI(oracle);
 	sm = optimiseStateMachine(
 		sm,
 		storeOptimisations,
@@ -681,14 +700,14 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 	probeMachine = localiseLoads(probeMachine,
 				     sm_ssa,
 				     probeOptimisations,
-				     oracle,
+				     oracleI,
 				     token);
 
 	VexPtr<IRExpr, &ir_heap> base_verification_condition(
 		verificationConditionForStoreMachine(
 			sm_ssa,
 			probeMachine,
-			oracle,
+			oracleI,
 			optIn,
 			token));
 	if (!base_verification_condition)
@@ -743,7 +762,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		IRExpr *t = verificationConditionForStoreMachine(
 			sm_ssa,
 			truncatedMachine,
-			oracle,
+			oracleI,
 			optIn,
 			token);
 		if (!t || t == residual_verification_condition ||
@@ -792,12 +811,12 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 	if (needRemoteMacroSections) {
 		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
 		if (!findRemoteMacroSections(probeMachine, sm_ssa, residual_verification_condition,
-					     oracle, optIn, remoteMacroSections, token)) {
+					     oracleI, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tChose a bad write machine...\n");
 			return NULL;
 		}
 		if (!fixSufficient(sm, probeMachine, residual_verification_condition,
-				   oracle, optIn, remoteMacroSections, token)) {
+				   oracleI, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
 			return NULL;
 		}
@@ -891,7 +910,7 @@ isSingleNodeCfg(CFGNode *root)
 }
 
 static bool
-machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, Oracle *oracle)
+machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, OracleInterface *oracle)
 {
 	std::set<StateMachineSideEffectLoad *> loads;
 	enumSideEffects(sm, loads);
@@ -1015,7 +1034,8 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 	std::set<DynAnalysisRip> potentiallyConflictingStores;
 	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
 
-	reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, true, token);
+	VexPtr<OracleInterface> oracleI(oracle);
+	reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 	if (!reducedProbeMachine)
 		return NULL;
 	getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
@@ -1027,13 +1047,13 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 	probeMachine = localiseLoads(probeMachine,
 				     potentiallyConflictingStores,
 				     optIn.enableignoreSideEffects(),
-				     oracle,
+				     oracleI,
 				     token,
 				     &localised_loads);
 	if (localised_loads) {
 		std::set<DynAnalysisRip> newPotentiallyConflictingStores;
 		while (1) {
-			reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracle, true, token);
+			reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 			if (!reducedProbeMachine)
 				return NULL;
 			getConflictingStores(reducedProbeMachine, oracle, newPotentiallyConflictingStores);
@@ -1048,7 +1068,7 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 			probeMachine = localiseLoads(probeMachine,
 						     potentiallyConflictingStores,
 						     optIn.enableignoreSideEffects(),
-						     oracle, token, &localised_loads);
+						     oracleI, token, &localised_loads);
 			if (!localised_loads)
 				break;
 		}

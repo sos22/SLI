@@ -72,7 +72,7 @@ static bool storeMightBeLoadedAfterState(StateMachineState *sme,
 					 const AllowableOptimisations &opt,
 					 StateMachineSideEffectStore *smses,
 					 const Oracle::RegisterAliasingConfiguration *alias,
-					 Oracle *oracle,
+					 OracleInterface *oracle,
 					 std::set<StateMachineState *> &memo);
 
 static bool
@@ -80,7 +80,7 @@ storeMightBeLoadedByState(StateMachineState *sm,
 			  StateMachineSideEffectStore *smses,
 			  const AllowableOptimisations &opt,
 			  const Oracle::RegisterAliasingConfiguration *alias,
-			  Oracle *oracle,
+			  OracleInterface *oracle,
 			  std::set<StateMachineState *> &memo)
 {
 	if (memo.count(sm))
@@ -132,7 +132,7 @@ storeMightBeLoadedAfterState(StateMachineState *sm,
 			     const AllowableOptimisations &opt,
 			     StateMachineSideEffectStore *smses,
 			     const Oracle::RegisterAliasingConfiguration *alias,
-			     Oracle *oracle,
+			     OracleInterface *oracle,
 			     std::set<StateMachineState *> &memo)
 {
 	std::vector<StateMachineState *> edges;
@@ -148,20 +148,20 @@ storeMightBeLoadedAfterState(StateMachineState *sm,
 			     const AllowableOptimisations &opt,
 			     StateMachineSideEffectStore *smses,
 			     const Oracle::RegisterAliasingConfiguration *alias,
-			     Oracle *oracle)
+			     OracleInterface *oracle)
 {
 	std::set<StateMachineState *> memo;
 	return storeMightBeLoadedAfterState(sm, opt, smses, alias, oracle, memo);
 }
 
 
-static void removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_something,
+static void removeRedundantStores(StateMachineState *sm, OracleInterface *oracle, bool *done_something,
 				  const Oracle::RegisterAliasingConfiguration *alias,
 				  std::set<StateMachineState *> &visited,
 				  const AllowableOptimisations &opt);
 
 static void
-removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_something,
+removeRedundantStores(StateMachineState *sm, OracleInterface *oracle, bool *done_something,
 		      const Oracle::RegisterAliasingConfiguration *alias,
 		      std::set<StateMachineState *> &visited,
 		      const AllowableOptimisations &opt)
@@ -209,7 +209,7 @@ removeRedundantStores(StateMachineState *sm, Oracle *oracle, bool *done_somethin
 }
 
 static void
-removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
 		      const Oracle::RegisterAliasingConfiguration *alias,
 		      const AllowableOptimisations &opt)
 {
@@ -222,7 +222,7 @@ removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
 }
 
 void
-removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
 		      const Oracle::RegisterAliasingConfiguration *alias,
 		      const AllowableOptimisations &opt)
 {

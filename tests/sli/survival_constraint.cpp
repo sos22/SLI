@@ -16,7 +16,7 @@ main(int argc, char *argv[])
 
 	init_sli();
 
-	VexPtr<Oracle> oracle(new Oracle(NULL, NULL, NULL));
+	VexPtr<OracleInterface> oracle(new Oracle(NULL, NULL, NULL));
 
 	VexPtr<StateMachine, &ir_heap> sm(readStateMachine(open(argv[1], O_RDONLY)));
 	VexPtr<IRExpr, &ir_heap> survive;

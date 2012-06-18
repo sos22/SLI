@@ -305,8 +305,9 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printf("Machines to enforce:\n");
 	printCrashSummary(summary, stdout);
 
+	VexPtr<OracleInterface> oracleI(oracle);
 	IRExpr *requirement =
-		findHappensBeforeRelations(summary, oracle,
+		findHappensBeforeRelations(summary, oracleI,
 					   AllowableOptimisations::defaultOptimisations,
 					   token);
 	fprintf(_logfile, "Crash requirement:\n");

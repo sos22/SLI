@@ -11,7 +11,7 @@
 static StateMachine *
 removeMarkers(VexPtr<StateMachine, &ir_heap> sm,
 	      const AllowableOptimisations &opt,
-	      VexPtr<Oracle> &oracle,
+	      VexPtr<OracleInterface> &oracle,
 	      GarbageCollectionToken token)
 {
 	std::vector<StateMachineSideEffecting *> states;
@@ -69,7 +69,7 @@ optimiseStateMachineAssuming(StateMachine *sm,
 
 static CrashSummary *
 canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
-			   VexPtr<Oracle> oracle,
+			   VexPtr<OracleInterface> oracle,
 			   const AllowableOptimisations &optIn,
 			   GarbageCollectionToken token)
 {
@@ -108,7 +108,7 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
-	VexPtr<Oracle> oracle;
+	VexPtr<OracleInterface> oracle;
 	{
 		MachineState *ms = MachineState::readELFExec(argv[1]);
 		Thread *thr = ms->findThread(ThreadId(1));

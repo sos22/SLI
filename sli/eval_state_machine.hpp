@@ -2,6 +2,7 @@
 #define EVAL_STATE_MACHINE_HPP__
 
 class AllowableOptimisations;
+class OracleInterface;
 
 class remoteMacroSectionsT : public GarbageCollected<remoteMacroSectionsT, &ir_heap> {
 	typedef std::vector<std::pair<StateMachineSideEffectStore *,
@@ -42,45 +43,45 @@ public:
 
 IRExpr *survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 					       VexPtr<IRExpr, &ir_heap> &assumption,
-					       VexPtr<Oracle> &oracle,
+					       VexPtr<OracleInterface> &oracle,
 					       bool escapingStateSurvive,
 					       const AllowableOptimisations &opt,
 					       GarbageCollectionToken token);
-bool evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &oracle,
+bool evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<OracleInterface> &oracle,
 				VexPtr<IRExpr, &ir_heap> assumption,
 				const AllowableOptimisations &opt,
 				bool *mightSurvive, bool *mightCrash,
 				GarbageCollectionToken token);
 IRExpr *crossProductSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				       VexPtr<StateMachine, &ir_heap> &storeMachine,
-				       VexPtr<Oracle> &oracle,
+				       VexPtr<OracleInterface> &oracle,
 				       VexPtr<IRExpr, &ir_heap> &initialStateCondition,
 				       const AllowableOptimisations &opt,
 				       GarbageCollectionToken token);
 bool findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			     VexPtr<StateMachine, &ir_heap> &writeMachine,
 			     VexPtr<IRExpr, &ir_heap> &assumption,
-			     VexPtr<Oracle> &oracle,
+			     VexPtr<OracleInterface> &oracle,
 			     const AllowableOptimisations &opt,
 			     VexPtr<remoteMacroSectionsT, &ir_heap> &output,
 			     GarbageCollectionToken token);
 bool fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 		   VexPtr<StateMachine, &ir_heap> &probeMachine,
 		   VexPtr<IRExpr, &ir_heap> &assumption,
-		   VexPtr<Oracle> &oracle,
+		   VexPtr<OracleInterface> &oracle,
 		   const AllowableOptimisations &opt,
 		   VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
 		   GarbageCollectionToken token);
 IRExpr *writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 					  VexPtr<StateMachine, &ir_heap> &readMachine,
-					  VexPtr<Oracle> &oracle,
+					  VexPtr<OracleInterface> &oracle,
 					  VexPtr<IRExpr, &ir_heap> &assumption,
 					  const AllowableOptimisations &opt,
 					  GarbageCollectionToken token);
 IRExpr *getCrossMachineCrashRequirement(
 	VexPtr<StateMachine, &ir_heap> &readMachine,
 	VexPtr<StateMachine, &ir_heap> &writeMachine,
-	VexPtr<Oracle> &oracle,
+	VexPtr<OracleInterface> &oracle,
 	VexPtr<IRExpr, &ir_heap> &assumption,
 	const AllowableOptimisations &opt,
 	GarbageCollectionToken token);

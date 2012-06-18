@@ -7,6 +7,7 @@
 #include "state_machine.hpp"
 
 class Oracle;
+class OracleInterface;
 
 class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
 	void buildAliasingTable(Oracle *);
@@ -92,7 +93,7 @@ void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 bool considerEverything,
 				 GarbageCollectionToken token);
 IRExpr *findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
-				   VexPtr<Oracle> &oracle,
+				   VexPtr<OracleInterface> &oracle,
 				   const AllowableOptimisations &opt,
 				   GarbageCollectionToken token);
 

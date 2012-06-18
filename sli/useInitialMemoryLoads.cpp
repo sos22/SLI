@@ -42,17 +42,17 @@ class ReachingMap {
 	std::set<const StateMachineSideEffectStore *> nothingReaching;
 public:
 	bool initialise(StateMachine *sm, const AllowableOptimisations &opt,
-			Oracle *oracle);
+			OracleInterface *oracle);
 	const std::set<const StateMachineSideEffectStore *> &get(const StateMachineState *s) const;
 };
 
 bool
 ReachingMap::initialise(StateMachine *sm, const AllowableOptimisations &opt,
-			Oracle *oracle)
+			OracleInterface *oracle)
 {
 	struct {
 		const AllowableOptimisations *opt;
-		Oracle *oracle;
+		OracleInterface *oracle;
 		bool operator()(StateMachineSideEffectStore *store) {
 			if (!oracle->hasConflictingRemoteStores(*opt, store))
 				return true;
@@ -140,14 +140,14 @@ ReachingMap::get(const StateMachineState *s) const
 class UseReachingMap : public StateMachineTransformer {
 	ReachingMap &rm;
 	const AllowableOptimisations &opt;
-	Oracle *oracle;
+	OracleInterface *oracle;
 	StateMachineSideEffecting *transformOneState(
 		StateMachineSideEffecting *, bool *);
 	bool rewriteNewStates() const { return false; }
 public:
 	UseReachingMap(ReachingMap &_rm,
 		       const AllowableOptimisations &_opt,
-		       Oracle *_oracle)
+		       OracleInterface *_oracle)
 		: rm(_rm), opt(_opt), oracle(_oracle)
 	{}
 };
@@ -181,7 +181,7 @@ UseReachingMap::transformOneState(StateMachineSideEffecting *smse, bool *done_so
 
 static StateMachine *
 useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
-		      Oracle *oracle, bool *done_something)
+		      OracleInterface *oracle, bool *done_something)
 {
 	ReachingMap rm;
 	if (!rm.initialise(sm, opt, oracle))
@@ -195,7 +195,7 @@ useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
 
 StateMachine *
 useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
-		      Oracle *oracle, bool *done_something)
+		      OracleInterface *oracle, bool *done_something)
 {
 	return _useInitialMemoryLoads::useInitialMemoryLoads(sm, opt, oracle, done_something);
 }

@@ -447,7 +447,7 @@ private:
 	}
 
 	trool evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt);
-	bool evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &consumer,
+	bool evalSideEffect(StateMachine *sm, OracleInterface *oracle, EvalPathConsumer &consumer,
 			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt) __attribute__((warn_unused_result));
 
@@ -509,14 +509,14 @@ private:
 		StateMachine *thisMachine,
 		StateMachineSideEffect *smse,
 		NdChooser &chooser,
-		Oracle *oracle,
+		OracleInterface *oracle,
 		bool collectOrderingConstraints,
 		const AllowableOptimisations &opt);
 	bool expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOptimisations &opt);
 	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const AllowableOptimisations &opt);
 
 public:
-	bool advance(Oracle *oracle, const AllowableOptimisations &opt,
+	bool advance(OracleInterface *oracle, const AllowableOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer) __attribute__((warn_unused_result));
@@ -524,14 +524,14 @@ public:
 			       ssr_ignore_path, ssr_failed, ssr_continue };
 	smallStepResult smallStepEvalStateMachine(StateMachine *rootMachine,
 						  NdChooser &chooser,
-						  Oracle *oracle,
+						  OracleInterface *oracle,
 						  bool collectOrderingConstraints,
 						  const AllowableOptimisations &opt);
 	enum bigStepResult { bsr_crash, bsr_survive, bsr_failed };
 	bigStepResult bigStepEvalStateMachine(StateMachine *rootMachine,
 					      bigStepResult preferred_result,
 					      NdChooser &chooser,
-					      Oracle *oracle,
+					      OracleInterface *oracle,
 					      bool collectOrderingConstraints,
 					      const AllowableOptimisations &opt);
 	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
@@ -732,7 +732,7 @@ EvalContext::evalStateMachineSideEffectRes
 EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
 					NdChooser &chooser,
-					Oracle *oracle,
+					OracleInterface *oracle,
 					bool collectOrderingConstraints,
 					const AllowableOptimisations &opt)
 {
@@ -923,7 +923,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 EvalContext::smallStepResult
 EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 				       NdChooser &chooser,
-				       Oracle *oracle,
+				       OracleInterface *oracle,
 				       bool collectOrderingConstraints,
 				       const AllowableOptimisations &opt)
 {
@@ -987,7 +987,7 @@ EvalContext::bigStepResult
 EvalContext::bigStepEvalStateMachine(StateMachine *rootMachine,
 				     bigStepResult preferred_result,
 				     NdChooser &chooser,
-				     Oracle *oracle,
+				     OracleInterface *oracle,
 				     bool collectOrderingConstraints,
 				     const AllowableOptimisations &opt)
 {
@@ -1080,7 +1080,7 @@ EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &o
 }
 
 bool
-EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &consumer,
+EvalContext::evalSideEffect(StateMachine *sm, OracleInterface *oracle, EvalPathConsumer &consumer,
 			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt)
 {
@@ -1113,7 +1113,7 @@ EvalContext::evalSideEffect(StateMachine *sm, Oracle *oracle, EvalPathConsumer &
    every item in the pending state queue, which would make that queue
    much bigger, which'd be kind of annoying. */
 bool
-EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
+EvalContext::advance(OracleInterface *oracle, const AllowableOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer)
@@ -1251,7 +1251,7 @@ EvalContext::advance(Oracle *oracle, const AllowableOptimisations &opt,
 static bool
 enumEvalPaths(VexPtr<StateMachine, &ir_heap> &sm,
 	      VexPtr<IRExpr, &ir_heap> &assumption,
-	      VexPtr<Oracle> &oracle,
+	      VexPtr<OracleInterface> &oracle,
 	      const AllowableOptimisations &opt,
 	      struct EvalPathConsumer &consumer,
 	      GarbageCollectionToken &token)
@@ -1288,7 +1288,7 @@ enumEvalPaths(VexPtr<StateMachine, &ir_heap> &sm,
 IRExpr *
 survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 				       VexPtr<IRExpr, &ir_heap> &assumption,
-				       VexPtr<Oracle> &oracle,
+				       VexPtr<OracleInterface> &oracle,
 				       bool escapingStatesSurvive,
 				       const AllowableOptimisations &opt,
 				       GarbageCollectionToken token)
@@ -1344,7 +1344,8 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 }
 
 bool
-evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm, VexPtr<Oracle> &oracle,
+evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm,
+			   VexPtr<OracleInterface> &oracle,
 			   VexPtr<IRExpr, &ir_heap> assumption,
 			   const AllowableOptimisations &opt,
 			   bool *mightSurvive, bool *mightCrash,
@@ -1453,7 +1454,7 @@ definitelyDoesntRace(StateMachineSideEffect *probeEffect,
 		     StateMachineState *storeMachine,
 		     const AllowableOptimisations &opt,
 		     bool allowStoreLoadRaces,
-		     Oracle *oracle,
+		     OracleInterface *oracle,
 		     std::set<StateMachineState *> &memo)
 {
 	if (!memo.insert(storeMachine).second)
@@ -1515,14 +1516,14 @@ definitelyDoesntRace(StateMachineSideEffect *probeEffect,
    conceivably race with @probeEffect. */
 static bool
 probeDefinitelyDoesntRace(StateMachineSideEffect *probeEffect, StateMachineState *storeMachine,
-			  const AllowableOptimisations &opt, Oracle *oracle)
+			  const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineState *> memo;
 	return definitelyDoesntRace(probeEffect, storeMachine, opt, false, oracle, memo);
 }
 static bool
 storeDefinitelyDoesntRace(StateMachineSideEffect *storeEffect, StateMachineState *probeMachine,
-			  const AllowableOptimisations &opt, Oracle *oracle)
+			  const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineState *> memo;
 	return definitelyDoesntRace(storeEffect, probeMachine, opt, true, oracle, memo);
@@ -1530,7 +1531,7 @@ storeDefinitelyDoesntRace(StateMachineSideEffect *storeEffect, StateMachineState
 
 static StateMachine *
 buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
-			 Oracle *oracle, const AllowableOptimisations &opt)
+			 OracleInterface *oracle, const AllowableOptimisations &opt)
 {
 	std::map<crossStateT, StateMachineState *> results;
 
@@ -1744,7 +1745,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 IRExpr *
 crossProductSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			       VexPtr<StateMachine, &ir_heap> &storeMachine,
-			       VexPtr<Oracle> &oracle,
+			       VexPtr<OracleInterface> &oracle,
 			       VexPtr<IRExpr, &ir_heap> &initialStateCondition,
 			       const AllowableOptimisations &optIn,
 			       GarbageCollectionToken token)
@@ -1797,7 +1798,7 @@ struct findRemoteMacroSectionsState {
 
 	StateMachineSideEffectStore *advanceWriteMachine(StateMachine *writeMachine,
 							 NdChooser &chooser,
-							 Oracle *oracle,
+							 OracleInterface *oracle,
 							 const AllowableOptimisations &opt);
 	findRemoteMacroSectionsState(StateMachine *sm,
 				     IRExpr *initialAssumption,
@@ -1811,7 +1812,7 @@ struct findRemoteMacroSectionsState {
 StateMachineSideEffectStore *
 findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 						  NdChooser &chooser,
-						  Oracle *oracle,
+						  OracleInterface *oracle,
 						  const AllowableOptimisations &opt)
 {
 	StateMachineSideEffectStore *smses = NULL;
@@ -1856,7 +1857,7 @@ bool
 findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 			VexPtr<StateMachine, &ir_heap> &writeMachine,
 			VexPtr<IRExpr, &ir_heap> &assumption,
-			VexPtr<Oracle> &oracle,
+			VexPtr<OracleInterface> &oracle,
 			const AllowableOptimisations &opt,
 			VexPtr<remoteMacroSectionsT, &ir_heap> &output,
 			GarbageCollectionToken token)
@@ -1941,7 +1942,7 @@ bool
 fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 	      VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      VexPtr<IRExpr, &ir_heap> &assumption,
-	      VexPtr<Oracle> &oracle,
+	      VexPtr<OracleInterface> &oracle,
 	      const AllowableOptimisations &opt,
 	      VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
 	      GarbageCollectionToken token)
@@ -2022,7 +2023,7 @@ static void
 findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 			   VexPtr<StateMachine, &ir_heap> &storeMachine,
 			   VexPtr<IRExpr, &ir_heap> &result,
-			   VexPtr<Oracle> &oracle,
+			   VexPtr<OracleInterface> &oracle,
 			   VexPtr<IRExpr, &ir_heap> &initialStateCondition,
 			   const AllowableOptimisations &opt,
 			   GarbageCollectionToken token)
@@ -2071,7 +2072,7 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 IRExpr *
 findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
-			   VexPtr<Oracle> &oracle,
+			   VexPtr<OracleInterface> &oracle,
 			   const AllowableOptimisations &opt,
 			   GarbageCollectionToken token)
 {
@@ -2131,7 +2132,7 @@ concatenateStateMachines(const StateMachine *machine, const StateMachine *to)
 IRExpr *
 writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
 				  VexPtr<StateMachine, &ir_heap> &readMachine,
-				  VexPtr<Oracle> &oracle,
+				  VexPtr<OracleInterface> &oracle,
 				  VexPtr<IRExpr, &ir_heap> &assumption,
 				  const AllowableOptimisations &opt,
 				  GarbageCollectionToken token)
@@ -2182,7 +2183,7 @@ IRExpr *
 getCrossMachineCrashRequirement(
 	VexPtr<StateMachine, &ir_heap> &readMachine,
 	VexPtr<StateMachine, &ir_heap> &writeMachine,
-	VexPtr<Oracle> &oracle,
+	VexPtr<OracleInterface> &oracle,
 	VexPtr<IRExpr, &ir_heap> &assumption,
 	const AllowableOptimisations &optIn,
 	GarbageCollectionToken token)

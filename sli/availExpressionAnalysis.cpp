@@ -101,7 +101,7 @@ public:
 
 	void invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve);
 
-	void findAllPotentiallyAvailable(StateMachine *sm, const AllowableOptimisations &opt, Oracle *oracle);
+	void findAllPotentiallyAvailable(StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle);
 
 	int nr_asserts() const {
 		int cntr = 0;
@@ -403,7 +403,7 @@ static void
 updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt,
 			    const Oracle::RegisterAliasingConfiguration *alias,
-			    Oracle *oracle)
+			    OracleInterface *oracle)
 {
 	if (TIMEOUT)
 		return;
@@ -546,14 +546,14 @@ static StateMachineState *buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration *aliasing,
-	Oracle *oracle,
+	OracleInterface *oracle,
 	bool *done_something,
 	std::map<const StateMachineState *, int> &edgeLabels
 	);
 static StateMachineSideEffect *
 buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 					avail_t &currentlyAvailable,
-					Oracle *oracle,
+					OracleInterface *oracle,
 					bool *done_something,
 					const Oracle::RegisterAliasingConfiguration *aliasing,
 					const AllowableOptimisations &opt)
@@ -799,7 +799,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration *alias,
-	Oracle *oracle,
+	OracleInterface *oracle,
 	bool *done_something,
 	std::map<const StateMachineState *, int> &edgeLabels)
 {
@@ -869,7 +869,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
 	const Oracle::RegisterAliasingConfiguration *alias,
-	Oracle *oracle,
+	OracleInterface *oracle,
 	bool *done_something,
 	std::map<const StateMachineState *, int> &edgeLabels)
 {
@@ -888,7 +888,7 @@ buildNewStateMachineWithLoadsEliminated(
 void
 avail_t::findAllPotentiallyAvailable(StateMachine *sm,
 				     const AllowableOptimisations &opt,
-				     Oracle *oracle)
+				     OracleInterface *oracle)
 {
 	findAllSideEffects(sm, sideEffects);
 	for (auto it = sideEffects.begin();
@@ -927,7 +927,7 @@ availExpressionAnalysis(StateMachine *sm,
 			const AllowableOptimisations &opt,
 			const Oracle::RegisterAliasingConfiguration *alias,
 			bool is_ssa,
-			Oracle *oracle,
+			OracleInterface *oracle,
 			bool *done_something)
 {
 	std::map<const StateMachineState *, int> edgeLabels;
@@ -1028,7 +1028,7 @@ availExpressionAnalysis(StateMachine *sm,
 			const AllowableOptimisations &opt,
 			const Oracle::RegisterAliasingConfiguration *alias,
 			bool is_ssa,
-			Oracle *oracle,
+			OracleInterface *oracle,
 			bool *done_something)
 {
 	sm->sanityCheck();

@@ -216,30 +216,37 @@ StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip,
 				    MemoryAccessIdentifierAllocator &);
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 				   const AllowableOptimisations &opt,
+				   VexPtr<OracleInterface> &oracle,
+				   bool is_ssa,
+				   GarbageCollectionToken token,
+				   bool *progress = NULL);
+StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
+				   const AllowableOptimisations &opt,
 				   VexPtr<Oracle> &oracle,
 				   bool is_ssa,
 				   GarbageCollectionToken token,
 				   bool *progress = NULL);
 
 /* Individual optimisation passes. */
-void removeRedundantStores(StateMachine *sm, Oracle *oracle, bool *done_something,
+void removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
 			   const Oracle::RegisterAliasingConfiguration *alias,
 			   const AllowableOptimisations &opt);
 StateMachine *availExpressionAnalysis(StateMachine *sm,
 				      const AllowableOptimisations &opt,
 				      const Oracle::RegisterAliasingConfiguration *alias,
 				      bool is_ssa,
-				      Oracle *oracle,
+				      OracleInterface *oracle,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt);
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
 StateMachine *useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
-				    Oracle *oracle, bool *done_something);
+				    OracleInterface *oracle, bool *done_something);
 StateMachine *removeLocalSurvival(StateMachine *sm,
 				  const AllowableOptimisations &opt,
 				  bool *done_something);
 
-StateMachine *removeAssertions(StateMachine *_sm, const AllowableOptimisations &opt, VexPtr<Oracle> &oracle,
+StateMachine *removeAssertions(StateMachine *_sm, const AllowableOptimisations &opt,
+			       VexPtr<OracleInterface> &oracle,
 			       bool is_ssa, GarbageCollectionToken token);
 
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
