@@ -1037,3 +1037,21 @@ convert_from_nf(NF_Expression &inp, IROp expressionOp, IROp termOp)
 {
 	return __nf::convert_from_nf(inp, expressionOp, termOp);
 }
+
+IRExpr *
+convert_to_cnf(IRExpr *input)
+{
+	NF_Expression cnf;
+	if (!convert_to_nf(input, cnf, Iop_And1, Iop_Or1))
+		return NULL;
+	return convert_from_nf(cnf, Iop_And1, Iop_Or1);
+}
+
+IRExpr *
+convert_to_dnf(IRExpr *input)
+{
+	NF_Expression cnf;
+	if (!convert_to_nf(input, cnf, Iop_Or1, Iop_And1))
+		return NULL;
+	return convert_from_nf(cnf, Iop_Or1, Iop_And1);
+}

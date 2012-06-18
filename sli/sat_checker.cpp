@@ -703,19 +703,21 @@ simplify_via_anf(IRExpr *a)
 static IRExpr *
 conjunctive_normal_form(IRExpr *what)
 {
-	NF_Expression ne;
-	if (!convert_to_nf(what, ne, Iop_And1, Iop_Or1))
+	IRExpr *res = convert_to_cnf(what);
+	if (res)
+		return res;
+	else
 		return what;
-	return convert_from_nf(ne, Iop_And1, Iop_Or1);
 }
 
 static IRExpr *
 disjunctive_normal_form(IRExpr *what)
 {
-	NF_Expression ne;
-	if (!convert_to_nf(what, ne, Iop_Or1, Iop_And1))
+	IRExpr *res = convert_to_dnf(what);
+	if (res)
+		return res;
+	else
 		return what;
-	return convert_from_nf(ne, Iop_Or1, Iop_And1);
 }
 
 static bool

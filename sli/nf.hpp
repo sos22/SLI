@@ -80,4 +80,7 @@ public:
 bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
 IRExpr *convert_from_nf(NF_Expression &inp, IROp expressionOp, IROp termOp);
 
+IRExpr *convert_to_cnf(IRExpr *e);
+IRExpr *convert_to_dnf(IRExpr *e);
+
 #endif /* !NF_HPP__ */
