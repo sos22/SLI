@@ -103,22 +103,68 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 	return input;
 }
 
+class DummyOracle : public OracleInterface {
+	CrashSummary *summary;
+	void visit(HeapVisitor &hv) {
+		hv(summary);
+	}
+	bool memoryAccessesMightAlias(const MemoryAccessIdentifier &mai1,
+				      const MemoryAccessIdentifier &mai2)
+	{
+		if (summary->aliasing.empty())
+			return true;
+		for (auto it = summary->aliasing.begin(); it != summary->aliasing.end(); it++) {
+			if ((it->first == mai1 && it->second == mai2) ||
+			    (it->first == mai2 && it->second == mai1))
+				return true;
+		}
+		return false;
+	}
+
+public:
+	DummyOracle(CrashSummary *_summary)
+		: summary(_summary)
+	{}
+	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectLoad *l2) {
+		return memoryAccessesMightAlias(l1->rip, l2->rip);
+	}
+	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectStore *l2) {
+		return memoryAccessesMightAlias(l1->rip, l2->rip);
+	}
+	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *l1, StateMachineSideEffectStore *l2) {
+		return memoryAccessesMightAlias(l1->rip, l2->rip);
+	}
+	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) {
+		if (summary->aliasing.empty())
+			return true;
+		for (auto it = summary->aliasing.begin();
+		     it != summary->aliasing.end();
+		     it++) {
+			if ((load == DynAnalysisRip(it->first.rip.rip) && store == DynAnalysisRip(it->second.rip.rip)) ||
+			    (store == DynAnalysisRip(it->first.rip.rip) && load == DynAnalysisRip(it->second.rip.rip)))
+				return true;
+		}
+		return false;
+	}
+        bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store) {
+		return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load),
+							   DynAnalysisRip(store));
+	}
+	bool hasConflictingRemoteStores(const AllowableOptimisations &, StateMachineSideEffectMemoryAccess *) {
+		return true;
+	}
+};
+
 int
 main(int argc, char *argv[])
 {
 	init_sli();
 
-	VexPtr<OracleInterface> oracle;
-	{
-		MachineState *ms = MachineState::readELFExec(argv[1]);
-		Thread *thr = ms->findThread(ThreadId(1));
-		oracle = new Oracle(ms, thr, argv[2]);
-	}
-
 	VexPtr<CrashSummary, &ir_heap> summary;
 	char *first_line;
 
-	summary = readBugReport(argv[3], &first_line);
+	summary = readBugReport(argv[1], &first_line);
+	VexPtr<OracleInterface> oracle(new DummyOracle(summary));
 
 	summary = canonicalise_crash_summary(
 		summary,
@@ -128,7 +174,7 @@ main(int argc, char *argv[])
 			enablenoExtend(),
 		ALLOW_GC);
 
-	FILE *f = fopen(argv[4], "w");
+	FILE *f = fopen(argv[2], "w");
 	fprintf(f, "%s\n", first_line);
 	printCrashSummary(summary, f);
 	fclose(f);
