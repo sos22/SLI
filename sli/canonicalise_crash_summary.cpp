@@ -362,9 +362,73 @@ canonicaliseIRExpr(IRExpr *input)
 		return input;
 }
 
+static void
+canonicaliseAliasingInformation(CrashSummary *cs)
+{
+	std::set<StateMachineSideEffectLoad *> loadLoads;
+	std::set<StateMachineSideEffectLoad *> storeLoads;
+	std::set<StateMachineSideEffectStore *> loadStores;
+	std::set<StateMachineSideEffectStore *> storeStores;
+	enumSideEffects(cs->loadMachine, loadLoads);
+	enumSideEffects(cs->storeMachine, storeLoads);
+	enumSideEffects(cs->loadMachine, loadStores);
+	enumSideEffects(cs->storeMachine, storeStores);
+	std::set<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > aliases
+		(cs->aliasing.begin(), cs->aliasing.end());
+	std::set<std::pair<IRExpr *, IRExpr *> > definitelyNotEqual;
+
+#define do_set(s)							\
+	for (auto it2 = s.begin(); it2 != s.end(); it2++) {		\
+		if ( (*it)->rip == (*it2)->rip )			\
+			continue;					\
+		std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> p \
+			(std::min( (*it)->rip, (*it2)->rip),		\
+			 std::max( (*it)->rip, (*it2)->rip));		\
+		if (!aliases.count(p))					\
+			definitelyNotEqual.insert(			\
+				std::pair<IRExpr *, IRExpr *>(		\
+					(*it)->addr,			\
+					(*it2)->addr));			\
+	}
+
+	for (auto it = loadStores.begin(); it != loadStores.end(); it++) {
+		do_set(loadLoads);
+	}
+	for (auto it = storeStores.begin(); it != storeStores.end(); it++) {
+		do_set(loadLoads);
+		do_set(loadStores);
+		do_set(storeLoads);
+		do_set(storeStores);
+	}
+#undef do_set
+
+	if (!definitelyNotEqual.empty()) {
+		IRExprAssociative *assoc = IRExpr_Associative(
+			definitelyNotEqual.size() + 1,
+			Iop_And1);
+		for (auto it = definitelyNotEqual.begin();
+		     it != definitelyNotEqual.end();
+		     it++) {
+			assoc->contents[assoc->nr_arguments++] =
+				IRExpr_Unop(
+					Iop_Not1,
+					IRExpr_Binop(
+						Iop_CmpEQ64,
+						it->first,
+						it->second));
+		}
+		assoc->contents[assoc->nr_arguments++] =
+			cs->verificationCondition;
+		cs->verificationCondition = assoc;
+	}
+
+	cs->aliasing.clear();
+}
+
 static CrashSummary *
 canonicalise_crash_summary(CrashSummary *input)
 {
+	canonicaliseAliasingInformation(input);
 	input->verificationCondition = canonicaliseIRExpr(input->verificationCondition);
 
 	CanonicaliseThreadIds thread_canon;
