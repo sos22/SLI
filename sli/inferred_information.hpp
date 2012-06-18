@@ -9,28 +9,33 @@
 class Oracle;
 
 class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
+	void buildAliasingTable(Oracle *);
 public:
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
 	IRExpr *verificationCondition;
 	typedef std::pair<StateMachineSideEffectStore *, StateMachineSideEffectStore *> macroSectionT;
 	std::vector<macroSectionT> macroSections;
-
+	std::vector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > aliasing;
 	CrashSummary(StateMachine *_loadMachine, StateMachine *_storeMachine,
-		     IRExpr *_verificationCondition)
+		     IRExpr *_verificationCondition, Oracle *oracle)
 		: loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
 		  verificationCondition(_verificationCondition)
-	{}
+	{
+		buildAliasingTable(oracle);
+	}
 
 	CrashSummary(StateMachine *_loadMachine,
 		     StateMachine *_storeMachine,
 		     IRExpr *_verificationCondition,
-		     std::vector<macroSectionT> &_macroSections)
+		     const std::vector<macroSectionT> &_macroSections,
+		     const std::vector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > &_aliasing)
 		: loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
 		  verificationCondition(_verificationCondition),
-		  macroSections(_macroSections)
+		  macroSections(_macroSections),
+		  aliasing(_aliasing)
 	{}
 
 	void visit(HeapVisitor &hv) {

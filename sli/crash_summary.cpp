@@ -3,6 +3,8 @@
 #include "sli.h"
 #include "inferred_information.hpp"
 #include "state_machine.hpp"
+#include "oracle.hpp"
+#include "allowable_optimisations.hpp"
 #include "libvex_parse.h"
 
 void
@@ -34,6 +36,15 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 				fprintf(f, "<null>");
 			fprintf(f, "\n");
 		}
+	}
+	if (summary->aliasing.size() == 0) {
+		fprintf(f, "No aliasing information\n");
+	} else {
+		fprintf(f, "Aliasing:\n");
+		for (auto it = summary->aliasing.begin();
+		     it != summary->aliasing.end();
+		     it++)
+			fprintf(f, "\t%s <-> %s\n", it->first.name(), it->second.name());
 	}
 }
 
@@ -118,8 +129,75 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 			buf = m;
 			macros.push_back(CrashSummary::macroSectionT(starts, ends));
 		}
+	} else {
+		return false;
+	}
+	std::vector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > aliasing;
+	if (parseThisString("No aliasing information\n", buf, &buf)) {
+		/* Nothing */
+	} else if (parseThisString("Aliasing:\n", buf, &buf)) {
+		while (1) {
+			std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> thing(
+				MemoryAccessIdentifier::uninitialised(),
+				MemoryAccessIdentifier::uninitialised())
+;
+			if (!parseMemoryAccessIdentifier(&thing.first, buf, &buf) ||
+			    !parseThisString(" <-> ", buf, &buf) ||
+			    !parseMemoryAccessIdentifier(&thing.second, buf, &buf) ||
+			    !parseThisChar('\n', buf, &buf))
+				break;
+			aliasing.push_back(thing);
+		}
 	}
 	*succ = buf;
-	*out = new CrashSummary(loadMachine, storeMachine, verificationCondition, macros);
+	*out = new CrashSummary(loadMachine, storeMachine, verificationCondition, macros, aliasing);
 	return true;
+}
+
+void
+CrashSummary::buildAliasingTable(Oracle *oracle)
+{
+	std::set<StateMachineSideEffectLoad *> loadLoads;
+	std::set<StateMachineSideEffectLoad *> storeLoads;
+	std::set<StateMachineSideEffectStore *> loadStores;
+	std::set<StateMachineSideEffectStore *> storeStores;
+	enumSideEffects(loadMachine, loadLoads);
+	enumSideEffects(storeMachine, storeLoads);
+	enumSideEffects(loadMachine, loadStores);
+	enumSideEffects(storeMachine, storeStores);
+	std::set<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > res;
+
+	/* The aliasing table needs to contain complete information for the following
+	   interference classes:
+
+	   -- loadLoad vs loadStore
+	   -- loadLoad vs storeStore
+	   -- loadStore vs storeStore
+	   -- storeLoad vs storeStore
+	   -- storeStore vs storeStore
+	*/
+#define do_set(s)							\
+	for (auto it2 = s.begin(); it2 != s.end(); it2++) {		\
+		if (oracle->memoryAccessesMightAlias(			\
+			    AllowableOptimisations::defaultOptimisations, \
+			    *it2, *it)) {				\
+			if ((*it)->rip < (*it2)->rip)			\
+				res.insert(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>((*it)->rip, (*it2)->rip)); \
+			else if ((*it)->rip != (*it2)->rip)		\
+				res.insert(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>((*it2)->rip, (*it)->rip)); \
+		}							\
+	}
+
+	for (auto it = loadStores.begin(); it != loadStores.end(); it++) {
+		do_set(loadLoads);
+	}
+	for (auto it = storeStores.begin(); it != storeStores.end(); it++) {
+		do_set(loadLoads);
+		do_set(loadStores);
+		do_set(storeLoads);
+		do_set(storeStores);
+	}
+#undef do_set
+	assert(aliasing.empty());
+	aliasing.insert(aliasing.end(), res.begin(), res.end());
 }
