@@ -133,8 +133,10 @@ expressionIsClosed(IRExpr *a)
 	return doit.res;
 }
 
+/* Caution: this is done partly in-place. */
 class SplitSsaGenerations : public StateMachineTransformer {
 	std::set<threadAndRegister, threadAndRegister::fullCompare> &phiRegs;
+	std::set<threadAndRegister, threadAndRegister::fullCompare> &generatedRegisters;
 	std::map<threadAndRegister, threadAndRegister, threadAndRegister::fullCompare> canonTable;
 	std::map<IRExprLoad *, threadAndRegister> canonLoadTable;
 	std::map<IRConst *, threadAndRegister> canonConstTable;
@@ -237,12 +239,31 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			canon_reg(smsec->target),
 			smsec->value);
 	}
+	StateMachineSideEffectPhi *transformOneSideEffect(
+		StateMachineSideEffectPhi *smsep, bool *done_something)
+	{
+		StateMachineSideEffectPhi *smsep2 = StateMachineTransformer::transformOneSideEffect(smsep, done_something);
+		if (smsep2)
+			smsep = smsep2;
+		for (auto it = smsep->generations.begin(); it != smsep->generations.end(); ) {
+			if (!generatedRegisters.count( smsep->reg.setGen(it->first) ) ) {
+				*done_something = true;
+				it = smsep->generations.erase(it);
+			} else {
+				it++;
+			}
+		}
+		return smsep2;
+	}
 	bool rewriteNewStates() const { return false; }
 public:
 	SplitSsaGenerations(
 		std::set<threadAndRegister, threadAndRegister::fullCompare> &_phiRegs,
+		std::set<threadAndRegister, threadAndRegister::fullCompare> &_generatedRegisters,
 		internIRExprTable &_internTable)
-		: phiRegs(_phiRegs), internTable(_internTable)
+		: phiRegs(_phiRegs),
+		  generatedRegisters(_generatedRegisters),
+		  internTable(_internTable)
 	{}
 };
 
@@ -513,7 +534,17 @@ canonicalise_crash_summary(CrashSummary *input)
 	input->storeMachine = internStateMachine(input->storeMachine, t);
 	input->verificationCondition = internIRExpr(input->verificationCondition, t);
 
-	SplitSsaGenerations splitter(phiRegs.res, t);
+	std::set<threadAndRegister, threadAndRegister::fullCompare> generatedRegisters;
+	std::set<StateMachineSideEffect *> sideEffects;
+	enumSideEffects(input->loadMachine, sideEffects);
+	enumSideEffects(input->storeMachine, sideEffects);
+	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+		threadAndRegister r(threadAndRegister::invalid());
+		if ((*it)->definesRegister(r))
+			generatedRegisters.insert(r);
+	}
+
+	SplitSsaGenerations splitter(phiRegs.res, generatedRegisters, t);
 	input = transformCrashSummary(input, splitter);
 
 	RegisterCanonicaliser reg_canon;
