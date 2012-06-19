@@ -407,6 +407,9 @@ canonicaliseIRExpr(IRExpr *input)
 static void
 canonicaliseAliasingInformation(CrashSummary *cs)
 {
+	if (cs->aliasing.empty())
+		return;
+
 	std::set<StateMachineSideEffectLoad *> loadLoads;
 	std::set<StateMachineSideEffectLoad *> storeLoads;
 	std::set<StateMachineSideEffectStore *> loadStores;
