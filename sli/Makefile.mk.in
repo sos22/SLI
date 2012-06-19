@@ -1,7 +1,7 @@
 subdirs="enforce_crash"
 targets="crop binpatch dbg chunk direct dbg_core get_dominator dbg_exec minimal_direct build_types_db dump_types_db check_types_index"
 targets="${targets} canonicalise_types_table canonicalise_crash_summary compare_crash_summaries canonicalise_crash_summary2"
-targets="${targets} remove_non_badptrs"
+targets="${targets} remove_non_badptrs canonicalise_crash_summary3"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{ssa,transform_expr,logwriter,thread,machinestate}.cpp

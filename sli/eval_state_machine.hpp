@@ -3,6 +3,9 @@
 
 class AllowableOptimisations;
 class OracleInterface;
+class StateMachine;
+class StateMachineSideEffectStore;
+class CrashSummary;
 
 class remoteMacroSectionsT : public GarbageCollected<remoteMacroSectionsT, &ir_heap> {
 	typedef std::vector<std::pair<StateMachineSideEffectStore *,
