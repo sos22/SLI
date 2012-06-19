@@ -130,8 +130,8 @@ __fail(const char *file, unsigned line, const char *fmt, ...)
 	(void)r;
 	va_end(args);
 
-	fprintf(_logfile, "%s:%d: Failed: %s", file, line, msg);
-	fprintf(stderr, "%s:%d: Failed: %s", file, line, msg);
+	fprintf(_logfile, "%s:%d: Failed: %s\n", file, line, msg);
+	fprintf(stderr, "%s:%d: Failed: %s\n", file, line, msg);
 	fflush(0);
 #undef abort
 	abort();
