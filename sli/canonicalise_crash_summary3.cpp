@@ -9,6 +9,8 @@
 #include "offline_analysis.hpp"
 #include "timers.hpp"
 
+typedef std::set<threadAndRegister, threadAndRegister::fullCompare> reg_set_t;
+
 class TimeoutTimer : public Timer {
 public:
 	void fired() {
@@ -70,10 +72,10 @@ public:
 };
 
 static void
-enumRegisters(const IRExpr *input, std::set<threadAndRegister, threadAndRegister::fullCompare> *out)
+enumRegisters(const IRExpr *input, reg_set_t *out)
 {
 	struct : public IRExprTransformer {
-		std::set<threadAndRegister, threadAndRegister::fullCompare> *out;
+		reg_set_t *out;
 		IRExpr *transformIex(IRExprGet *ieg) {
 			out->insert(ieg->reg);
 			return ieg;
@@ -124,10 +126,18 @@ operator |=(std::set<t, comp> &out, const std::set<t, comp> &a)
 		it1 = out.insert(it1, *it2);
 }
 
+template <typename t, typename comp>
+static void
+operator -=(std::set<t, comp> &out, const std::set<t, comp> &a)
+{
+	for (auto it = a.begin(); it != a.end(); it++)
+		out.erase(*it);
+}
+
 static IRExpr *
 removeRedundantClauses(IRExpr *verificationCondition,
 		       internIRExprTable &intern,
-		       const std::set<threadAndRegister, threadAndRegister::fullCompare> &targetRegisters)
+		       const reg_set_t &targetRegisters)
 {
 	verificationCondition = simplify_via_anf(verificationCondition);
 	verificationCondition = convert_to_cnf(verificationCondition);
@@ -148,7 +158,7 @@ removeRedundantClauses(IRExpr *verificationCondition,
 	bool precious[nr_verification_clauses];
 	for (int i = 0; i < nr_verification_clauses; i++)
 		precious[i] = false;
-	std::set<threadAndRegister, threadAndRegister::fullCompare> preciousVariables;
+	reg_set_t preciousVariables;
 	preciousVariables = targetRegisters;
 	int nr_kept = 0;
 	bool progress;
@@ -158,7 +168,7 @@ removeRedundantClauses(IRExpr *verificationCondition,
 		for (int i = 0; i < nr_verification_clauses; i++) {
 			if (precious[i])
 				continue;
-			std::set<threadAndRegister, threadAndRegister::fullCompare> vars;
+			reg_set_t vars;
 			enumRegisters(verification_clauses[i], &vars);
 			if (!(vars & preciousVariables).empty()) {
 				precious[i] = true;
@@ -201,7 +211,7 @@ static bool
 findTargetRegisters(CrashSummary *summary,
 		    OracleInterface *oracle,
 		    internIRExprTable &intern,
-		    std::set<threadAndRegister, threadAndRegister::fullCompare> *targetRegisters)
+		    reg_set_t *targetRegisters)
 {
 	IRExpr *reducedSurvivalConstraint =
 		crossProductSurvivalConstraint(
