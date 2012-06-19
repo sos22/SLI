@@ -41,9 +41,22 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 		if (smsel2)
 			smsel = smsel2;
 		*done_something = true;
+		IRExpr *addr = smsel->addr;
+		if (addr->tag != Iex_Get) {
+			auto it = freshVariables.find(addr);
+			if (it != freshVariables.end()) {
+				addr = IRExpr_Get(it->second, Ity_I64);
+			} else {
+				threadAndRegister r(threadAndRegister::temp(smsel2->target.tid(),
+									    alloc_temp_id(smsel2->target.tid()),
+									    0));
+				freshVariables.insert(std::pair<IRExpr *,threadAndRegister>(addr, r));
+				addr = IRExpr_Get(r, Ity_I64);
+			}
+		}
 		return new StateMachineSideEffectLoad(
 			canon_reg(smsel->target),
-			smsel->addr,
+			addr,
 			smsel->rip,
 			smsel->type);
 	}
@@ -69,7 +82,36 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 			canon_reg(smsep->reg),
 			smsep->generations);
 	}
+	StateMachineSideEffectStore *transformOneSideEffect(
+		StateMachineSideEffectStore *store, bool *done_something)
+	{
+		StateMachineSideEffectStore *store2 = StateMachineTransformer::transformOneSideEffect(store, done_something);
+		if (!store2)
+			store2 = store;
+		if (store2->addr->tag != Iex_Get) {
+			*done_something = true;
+			IRExpr *addr;
+			auto it = freshVariables.find(store2->addr);
+			if (it != freshVariables.end()) {
+				addr = IRExpr_Get(it->second, Ity_I64);
+			} else {
+				threadAndRegister r(threadAndRegister::temp(store2->rip.rip.thread,
+									    alloc_temp_id(store2->rip.rip.thread),
+									    0));
+				freshVariables.insert(std::pair<IRExpr *, threadAndRegister>(store2->addr, r));
+				addr = IRExpr_Get(r, Ity_I64);
+			}
+			return new StateMachineSideEffectStore(
+				addr,
+				store2->data,
+				store2->rip);
+		}
+		return store2;
+	}
+
 	bool rewriteNewStates() const { return false; }
+public:
+	std::map<IRExpr *, threadAndRegister> freshVariables;
 };
 
 static bool
@@ -473,6 +515,21 @@ canonicalise_crash_summary(CrashSummary *input)
 
 	RegisterCanonicaliser reg_canon;
 	input = transformCrashSummary(input, reg_canon);
+	if (!reg_canon.freshVariables.empty()) {
+		IRExprAssociative *newCond = IRExpr_Associative(reg_canon.freshVariables.size() + 1,
+								Iop_And1);
+		for (auto it = reg_canon.freshVariables.begin();
+		     it != reg_canon.freshVariables.end();
+		     it++) {
+			newCond->contents[newCond->nr_arguments++] =
+				IRExpr_Binop(
+					Iop_CmpEQ64,
+					IRExpr_Get(it->second, Ity_I64),
+					it->first);
+		}
+		newCond->contents[newCond->nr_arguments++] = input->verificationCondition;
+		input->verificationCondition = newCond;
+	}
 
 	return input;
 }
