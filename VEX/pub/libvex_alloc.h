@@ -229,7 +229,7 @@ class VexPtr {
 public:
 	VexPtr() : content(NULL), root((void **)&content, "VexPtr") {}
 	VexPtr(p *_content) : content(_content), root((void **)&content, "VexPtr") {}
-	VexPtr(VexPtr<p,heap> &c) : content(c.content), root((void **)&content, "VexPtr") {}
+	VexPtr(const VexPtr<p,heap> &c) : content(c.content), root((void **)&content, "VexPtr") {}
 	const VexPtr<p,heap> &operator=(const VexPtr<p,heap> &x) { content = x.content; return *this; }
 	const VexPtr<p,heap> &operator=(p *x) { content = x; return *this; }
 	p &operator*() const { return *content; }

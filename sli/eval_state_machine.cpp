@@ -1249,9 +1249,9 @@ EvalContext::advance(OracleInterface *oracle, const AllowableOptimisations &opt,
 }
 
 static bool
-enumEvalPaths(VexPtr<StateMachine, &ir_heap> &sm,
-	      VexPtr<IRExpr, &ir_heap> &assumption,
-	      VexPtr<OracleInterface> &oracle,
+enumEvalPaths(const VexPtr<StateMachine, &ir_heap> &sm,
+	      const VexPtr<IRExpr, &ir_heap> &assumption,
+	      const VexPtr<OracleInterface> &oracle,
 	      const AllowableOptimisations &opt,
 	      struct EvalPathConsumer &consumer,
 	      GarbageCollectionToken &token)
@@ -1286,9 +1286,9 @@ enumEvalPaths(VexPtr<StateMachine, &ir_heap> &sm,
 /* Assume that @sm executes atomically.  Figure out a constraint on
    the initial state which will lead to it not crashing. */
 IRExpr *
-survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
-				       VexPtr<IRExpr, &ir_heap> &assumption,
-				       VexPtr<OracleInterface> &oracle,
+survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
+				       VexPtr<IRExpr, &ir_heap> assumption,
+				       const VexPtr<OracleInterface> &oracle,
 				       bool escapingStatesSurvive,
 				       const AllowableOptimisations &opt,
 				       GarbageCollectionToken token)
@@ -1323,15 +1323,15 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 			else
 				return crash(pathConstraint, justPathConstraint);
 		}
-		_(VexPtr<IRExpr, &ir_heap> &_assumption,
+		_(const VexPtr<IRExpr, &ir_heap> &_assumption,
 		  const AllowableOptimisations &_opt,
 		  bool _escapingStatesSurvive)
 			: res(_assumption), opt(_opt), escapingStatesSurvive(_escapingStatesSurvive)
 		{}
 	} consumeEvalPath(assumption, opt, escapingStatesSurvive);
-	if (assumption) {
+	if (assumption)
 		consumeEvalPath.needsAccAssumptions = true;
-	} else
+	else
 		assumption = IRExpr_Const(IRConst_U1(1));
 	enumEvalPaths(sm, assumption, oracle, opt, consumeEvalPath, token);
 
@@ -1344,9 +1344,9 @@ survivalConstraintIfExecutedAtomically(VexPtr<StateMachine, &ir_heap> &sm,
 }
 
 bool
-evalMachineUnderAssumption(VexPtr<StateMachine, &ir_heap> &sm,
-			   VexPtr<OracleInterface> &oracle,
-			   VexPtr<IRExpr, &ir_heap> assumption,
+evalMachineUnderAssumption(const VexPtr<StateMachine, &ir_heap> &sm,
+			   const VexPtr<OracleInterface> &oracle,
+			   const VexPtr<IRExpr, &ir_heap> &assumption,
 			   const AllowableOptimisations &opt,
 			   bool *mightSurvive, bool *mightCrash,
 			   GarbageCollectionToken token)
@@ -1743,10 +1743,10 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 }
 
 IRExpr *
-crossProductSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &probeMachine,
-			       VexPtr<StateMachine, &ir_heap> &storeMachine,
-			       VexPtr<OracleInterface> &oracle,
-			       VexPtr<IRExpr, &ir_heap> &initialStateCondition,
+crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachine,
+			       const VexPtr<StateMachine, &ir_heap> &storeMachine,
+			       const VexPtr<OracleInterface> &oracle,
+			       const VexPtr<IRExpr, &ir_heap> &initialStateCondition,
 			       const AllowableOptimisations &optIn,
 			       GarbageCollectionToken token)
 {
@@ -1854,10 +1854,10 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 /* Returns false if we discover something which suggests that this is
  * a bad choice of write machine, or true otherwise. */
 bool
-findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
-			VexPtr<StateMachine, &ir_heap> &writeMachine,
-			VexPtr<IRExpr, &ir_heap> &assumption,
-			VexPtr<OracleInterface> &oracle,
+findRemoteMacroSections(const VexPtr<StateMachine, &ir_heap> &readMachine,
+			const VexPtr<StateMachine, &ir_heap> &writeMachine,
+			const VexPtr<IRExpr, &ir_heap> &assumption,
+			const VexPtr<OracleInterface> &oracle,
 			const AllowableOptimisations &opt,
 			VexPtr<remoteMacroSectionsT, &ir_heap> &output,
 			GarbageCollectionToken token)
@@ -1939,12 +1939,12 @@ findRemoteMacroSections(VexPtr<StateMachine, &ir_heap> &readMachine,
 }
 
 bool
-fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
-	      VexPtr<StateMachine, &ir_heap> &probeMachine,
-	      VexPtr<IRExpr, &ir_heap> &assumption,
-	      VexPtr<OracleInterface> &oracle,
+fixSufficient(const VexPtr<StateMachine, &ir_heap> &writeMachine,
+	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
+	      const VexPtr<IRExpr, &ir_heap> &assumption,
+	      const VexPtr<OracleInterface> &oracle,
 	      const AllowableOptimisations &opt,
-	      VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
+	      const VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(fixSufficient);
@@ -2020,13 +2020,14 @@ fixSufficient(VexPtr<StateMachine, &ir_heap> &writeMachine,
 }
 
 static void
-findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
-			   VexPtr<StateMachine, &ir_heap> &storeMachine,
-			   VexPtr<IRExpr, &ir_heap> &result,
-			   VexPtr<OracleInterface> &oracle,
-			   VexPtr<IRExpr, &ir_heap> &initialStateCondition,
-			   const AllowableOptimisations &opt,
-			   GarbageCollectionToken token)
+findHappensBeforeRelations(
+	const VexPtr<StateMachine, &ir_heap> &probeMachine,
+	const VexPtr<StateMachine, &ir_heap> &storeMachine,
+	VexPtr<IRExpr, &ir_heap> &result,
+	const VexPtr<OracleInterface> &oracle,
+	const VexPtr<IRExpr, &ir_heap> &initialStateCondition,
+	const AllowableOptimisations &opt,
+	GarbageCollectionToken token)
 {
 	struct : public EvalPathConsumer {
 		VexPtr<IRExpr, &ir_heap> newCondition;
@@ -2071,8 +2072,8 @@ findHappensBeforeRelations(VexPtr<StateMachine, &ir_heap> &probeMachine,
 }
 
 IRExpr *
-findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
-			   VexPtr<OracleInterface> &oracle,
+findHappensBeforeRelations(const VexPtr<CrashSummary, &ir_heap> &summary,
+			   const VexPtr<OracleInterface> &oracle,
 			   const AllowableOptimisations &opt,
 			   GarbageCollectionToken token)
 {
@@ -2130,10 +2131,10 @@ concatenateStateMachines(const StateMachine *machine, const StateMachine *to)
 }
 
 IRExpr *
-writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
-				  VexPtr<StateMachine, &ir_heap> &readMachine,
-				  VexPtr<OracleInterface> &oracle,
-				  VexPtr<IRExpr, &ir_heap> &assumption,
+writeMachineSuitabilityConstraint(const VexPtr<StateMachine, &ir_heap> &writeMachine,
+				  const VexPtr<StateMachine, &ir_heap> &readMachine,
+				  const VexPtr<OracleInterface> &oracle,
+				  const VexPtr<IRExpr, &ir_heap> &assumption,
 				  const AllowableOptimisations &opt,
 				  GarbageCollectionToken token)
 {
@@ -2181,10 +2182,10 @@ writeMachineSuitabilityConstraint(VexPtr<StateMachine, &ir_heap> &writeMachine,
    that there is some interleaving which leads to a crash. */
 IRExpr *
 getCrossMachineCrashRequirement(
-	VexPtr<StateMachine, &ir_heap> &readMachine,
-	VexPtr<StateMachine, &ir_heap> &writeMachine,
-	VexPtr<OracleInterface> &oracle,
-	VexPtr<IRExpr, &ir_heap> &assumption,
+	const VexPtr<StateMachine, &ir_heap> &readMachine,
+	const VexPtr<StateMachine, &ir_heap> &writeMachine,
+	const VexPtr<OracleInterface> &oracle,
+	const VexPtr<IRExpr, &ir_heap> &assumption,
 	const AllowableOptimisations &optIn,
 	GarbageCollectionToken token)
 {

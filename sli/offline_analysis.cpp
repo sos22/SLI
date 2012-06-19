@@ -196,9 +196,9 @@ enforceMustStoreBeforeCrash(StateMachine *sm, bool *progress)
 }
 
 StateMachine *
-optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
+optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
-		     VexPtr<OracleInterface> &oracle,
+		     const VexPtr<OracleInterface> &oracle,
 		     bool is_ssa,
 		     GarbageCollectionToken token,
 		     bool *progress)
@@ -266,9 +266,9 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
 	return sm;
 }
 StateMachine *
-optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
+optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
-		     VexPtr<Oracle> &oracle,
+		     const VexPtr<Oracle> &oracle,
 		     bool is_ssa,
 		     GarbageCollectionToken token,
 		     bool *progress)
@@ -425,13 +425,12 @@ duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
 }
 
 StateMachine *
-removeAssertions(StateMachine *_sm,
+removeAssertions(VexPtr<StateMachine, &ir_heap> sm,
 		 const AllowableOptimisations &opt,
-		 VexPtr<OracleInterface> &oracle,
+		 const VexPtr<OracleInterface> &oracle,
 		 bool is_ssa,
 		 GarbageCollectionToken token)
 {
-	VexPtr<StateMachine, &ir_heap> sm(_sm);
 	/* Iterate to make sure we get rid of any assertions
 	   introduced by the optimiser itself. */
 	while (1) {
@@ -585,10 +584,10 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 }
 
 static StateMachine *
-localiseLoads(VexPtr<StateMachine, &ir_heap> &probeMachine,
-	      VexPtr<StateMachine, &ir_heap> &storeMachine,
+localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
+	      const VexPtr<StateMachine, &ir_heap> &storeMachine,
 	      const AllowableOptimisations &opt,
-	      VexPtr<OracleInterface> &oracle,
+	      const VexPtr<OracleInterface> &oracle,
 	      GarbageCollectionToken token,
 	      bool *done_something = NULL)
 {
@@ -620,10 +619,10 @@ localiseLoads(VexPtr<StateMachine, &ir_heap> &probeMachine,
 }
 
 static StateMachine *
-localiseLoads(VexPtr<StateMachine, &ir_heap> &probeMachine,
+localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      const std::set<DynAnalysisRip> &stores,
 	      const AllowableOptimisations &opt,
-	      VexPtr<OracleInterface> &oracle,
+	      const VexPtr<OracleInterface> &oracle,
 	      GarbageCollectionToken token,
 	      bool *done_something = NULL)
 {
@@ -654,8 +653,8 @@ localiseLoads(VexPtr<StateMachine, &ir_heap> &probeMachine,
 
 static CrashSummary *
 considerStoreCFG(const DynAnalysisRip &target_rip,
-		 VexPtr<CFGNode, &ir_heap> cfg,
-		 VexPtr<Oracle> &oracle,
+		 const VexPtr<CFGNode, &ir_heap> cfg,
+		 const VexPtr<Oracle> &oracle,
 		 VexPtr<StateMachine, &ir_heap> probeMachine,
 		 bool needRemoteMacroSections,
 		 unsigned tid,
@@ -830,9 +829,9 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 }
 
 bool
-buildProbeMachine(VexPtr<Oracle> &oracle,
+buildProbeMachine(const VexPtr<Oracle> &oracle,
 		  const DynAnalysisRip &targetRip,
-		  VexPtr<StateMachineState, &ir_heap> &proximal,
+		  const VexPtr<StateMachineState, &ir_heap> &proximal,
 		  ThreadId tid,
 		  const AllowableOptimisations &optIn,
 		  StateMachine ***out,
@@ -931,9 +930,9 @@ machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, OracleInterface *ora
 
 static bool
 probeMachineToSummary(const DynAnalysisRip &targetRip,
-		      VexPtr<StateMachine, &ir_heap> &probeMachine,
-		      VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
-		      VexPtr<Oracle> &oracle,
+		      const VexPtr<StateMachine, &ir_heap> &probeMachine,
+		      const VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
+		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
 		      bool needRemoteMacroSections,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
@@ -996,8 +995,8 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 
 bool
 diagnoseCrash(const DynAnalysisRip &targetRip,
-	      VexPtr<StateMachine, &ir_heap> &probeMachine,
-	      VexPtr<Oracle> &oracle,
+	      VexPtr<StateMachine, &ir_heap> probeMachine,
+	      const VexPtr<Oracle> &oracle,
 	      FixConsumer &df,
 	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
@@ -1197,7 +1196,7 @@ remoteMacroSectionsT::visit(HeapVisitor &hv)
 void
 checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				unsigned tid,
-				VexPtr<Oracle> &oracle,
+				const VexPtr<Oracle> &oracle,
 				FixConsumer &df,
 				GarbageCollectionToken token)
 {

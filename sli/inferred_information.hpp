@@ -68,9 +68,9 @@ public:
 
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
 class MemoryAccessIdentifierAllocator;
-bool buildProbeMachine(VexPtr<Oracle> &oracle,
+bool buildProbeMachine(const VexPtr<Oracle> &oracle,
 		       const DynAnalysisRip &interestingRip,
-		       VexPtr<StateMachineState, &ir_heap> &proximal,
+		       const VexPtr<StateMachineState, &ir_heap> &proximal,
 		       ThreadId tid,
 		       const AllowableOptimisations &opt,
 		       StateMachine ***out,
@@ -79,8 +79,8 @@ bool buildProbeMachine(VexPtr<Oracle> &oracle,
 		       int *nextFrameId,
 		       GarbageCollectionToken token);
 bool diagnoseCrash(const DynAnalysisRip &,
-		   VexPtr<StateMachine, &ir_heap> &probeMachine,
-		   VexPtr<Oracle> &oracle,
+		   VexPtr<StateMachine, &ir_heap> probeMachine,
+		   const VexPtr<Oracle> &oracle,
 		   bool needRemoteMacroSections,
 		   const AllowableOptimisations &opt,
 		   const MemoryAccessIdentifierAllocator &mai,
@@ -92,8 +92,8 @@ void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 FixConsumer &haveAFix,
 				 bool considerEverything,
 				 GarbageCollectionToken token);
-IRExpr *findHappensBeforeRelations(VexPtr<CrashSummary, &ir_heap> &summary,
-				   VexPtr<OracleInterface> &oracle,
+IRExpr *findHappensBeforeRelations(const VexPtr<CrashSummary, &ir_heap> &summary,
+				   const VexPtr<OracleInterface> &oracle,
 				   const AllowableOptimisations &opt,
 				   GarbageCollectionToken token);
 

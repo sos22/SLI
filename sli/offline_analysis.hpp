@@ -214,15 +214,15 @@ void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &ou
 class MemoryAccessIdentifierAllocator;
 StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip,
 				    MemoryAccessIdentifierAllocator &);
-StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
+StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
-				   VexPtr<OracleInterface> &oracle,
+				   const VexPtr<OracleInterface> &oracle,
 				   bool is_ssa,
 				   GarbageCollectionToken token,
 				   bool *progress = NULL);
-StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> &sm,
+StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
-				   VexPtr<Oracle> &oracle,
+				   const VexPtr<Oracle> &oracle,
 				   bool is_ssa,
 				   GarbageCollectionToken token,
 				   bool *progress = NULL);
@@ -245,16 +245,18 @@ StateMachine *removeLocalSurvival(StateMachine *sm,
 				  const AllowableOptimisations &opt,
 				  bool *done_something);
 
-StateMachine *removeAssertions(StateMachine *_sm, const AllowableOptimisations &opt,
-			       VexPtr<OracleInterface> &oracle,
-			       bool is_ssa, GarbageCollectionToken token);
+StateMachine *removeAssertions(VexPtr<StateMachine, &ir_heap> sm,
+			       const AllowableOptimisations &opt,
+			       const VexPtr<OracleInterface> &oracle,
+			       bool is_ssa,
+			       GarbageCollectionToken token);
 
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
 class FixConsumer;
 void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     unsigned tid,
-				     VexPtr<Oracle> &oracle,
+				     const VexPtr<Oracle> &oracle,
 				     FixConsumer &df,
 				     GarbageCollectionToken token);
 
