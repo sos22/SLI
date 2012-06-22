@@ -413,7 +413,6 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 	}
 
 	reducedSurvivalConstraint = simplify_via_anf(reducedSurvivalConstraint);
-	reducedSurvivalConstraint = convert_to_cnf(reducedSurvivalConstraint);
 	if (!reducedSurvivalConstraint) {
 		fprintf(stderr, "can't convert reduced survival constraint to CNF\n");
 		return false;
