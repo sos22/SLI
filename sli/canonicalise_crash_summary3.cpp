@@ -359,13 +359,8 @@ removeUnderspecifiedClauses(IRExpr *input,
 	int nr_kept = 0;
 	IRExpr *kept[nr_clauses];
 	for (int i = 0; i < nr_clauses; i++) {
-		if (clauseUnderspecified(clauses[i], mult)) {
-			printf("Kill underspecified clause ");
-			ppIRExpr(clauses[i], stdout);
-			printf("\n");
-		} else {
+		if (!clauseUnderspecified(clauses[i], mult))
 			kept[nr_kept++] = clauses[i];
-		}
 	}
 	if (nr_kept == nr_clauses)
 		return input;
@@ -485,28 +480,21 @@ substituteEqualities(IRExpr *input,
 	}
 	things_we_can_remove -= targetRegisters;
 
-	if (things_we_can_remove.empty()) {
-		printf("Can't remove anything\n");
+	if (things_we_can_remove.empty())
 		return input;
-	}
 
 	auto it = things_we_can_remove.begin();
 	threadAndRegister bestReg(*it);
 	int bestMultiplicity = findRegisterMultiplicity(input, bestReg);
-	printf("Could remove %s; mult %d\n", bestReg.name(),
-	       bestMultiplicity);
 	it++;
 	while (it != things_we_can_remove.end()) {
 		int m = findRegisterMultiplicity(input, *it);
-		printf("Could remove %s; mult %d\n", it->name(), m);
 		if (m > bestMultiplicity) {
 			bestReg = *it;
 			bestMultiplicity = m;
 		}
 		it++;
 	}
-
-	printf("Choose to remove %s\n", bestReg.name());
 
 	IRExpr *rewriteResult = NULL;
 	IRExpr *rewriteClause = NULL;
@@ -606,10 +594,6 @@ substituteEqualities(IRExpr *input,
 	}
 	assert(rewriteResult != NULL);
 	assert(rewriteClause != NULL);
-
-	printf("Rewrite to: ");
-	ppIRExpr(rewriteResult, stdout);
-	printf("\n");
 
 	bool p = false;
 	IRExprAssociative *res = IRExpr_Associative(nr_clauses, Iop_And1);
