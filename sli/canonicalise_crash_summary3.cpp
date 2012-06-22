@@ -159,6 +159,9 @@ removeRedundantClauses(IRExpr *verificationCondition,
 		       const reg_set_t &targetRegisters,
 		       bool *done_something)
 {
+	if (verificationCondition->tag == Iex_Const)
+		return verificationCondition;
+
 	verificationCondition = simplify_via_anf(verificationCondition);
 	verificationCondition = convert_to_cnf(verificationCondition);
 	if (!verificationCondition) {
@@ -353,37 +356,30 @@ removeUnderspecifiedClauses(IRExpr *input,
 		clauses = &input;
 	}
 
-	int nr_killed = 0;
+	int nr_kept = 0;
+	IRExpr *kept[nr_clauses];
 	for (int i = 0; i < nr_clauses; i++) {
 		if (clauseUnderspecified(clauses[i], mult)) {
 			printf("Kill underspecified clause ");
 			ppIRExpr(clauses[i], stdout);
 			printf("\n");
-			clauses[i] = NULL;
-			nr_killed++;
+		} else {
+			kept[nr_kept++] = clauses[i];
 		}
 	}
-	if (nr_killed == 0)
+	if (nr_kept == nr_clauses)
 		return input;
 	*done_something = true;
-	if (nr_killed == nr_clauses)
+	if (nr_kept == 0)
 		return IRExpr_Const(IRConst_U1(1));
 	assert(nr_clauses != 1);
-	if (nr_killed == nr_clauses - 1) {
-		for (int i = 0; i < nr_clauses; i++)
-			if (clauses[i])
-				return clauses[i];
-		abort();
+	if (nr_kept == 1) {
+		return kept[0];
 	}
-	int i = 0;
-	int j = 0;
-	while (j < nr_clauses) {
-		while (j < nr_clauses && !clauses[j])
-			j++;
-		clauses[i++] = clauses[j++];
-	}
-	((IRExprAssociative *)input)->nr_arguments = i;
-	return internIRExpr(input, intern);
+	IRExprAssociative *res = IRExpr_Associative(nr_kept, Iop_And1);
+	memcpy(res->contents, kept, sizeof(IRExpr *) * nr_kept);
+	res->nr_arguments = nr_kept;
+	return internIRExpr(res, intern);
 }
 	
 static bool
@@ -418,6 +414,247 @@ findTargetRegisters(CrashSummary *summary,
 	return true;
 }
 
+static IRExpr *
+substituteEqualities(IRExpr *input,
+		     internIRExprTable &intern,
+		     const reg_set_t &targetRegisters,
+		     bool *progress)
+{
+	int nr_clauses;
+	IRExpr **clauses;
+	if (input->tag == Iex_Associative &&
+	    ((IRExprAssociative *)input)->op == Iop_And1) {
+		nr_clauses = ((IRExprAssociative *)input)->nr_arguments;
+		clauses = ((IRExprAssociative *)input)->contents;		
+	} else {
+		nr_clauses = 1;
+		clauses = &input;
+	}
+
+	/* Now we see if there are any equalities we can use to remove
+	   some variables. */
+	reg_set_t things_we_can_remove;
+	for (int i = 0; i < nr_clauses; i++) {
+		if (clauses[i]->tag != Iex_Binop)
+			continue;
+		IRExprBinop *clause = (IRExprBinop *)clauses[i];
+		if (clause->op != Iop_CmpEQ64)
+			continue;
+		/* We assume that the expression is of the form
+		   const == x + y + z + ....  We can then eliminate
+		   R1 if one of the things on the right is R1 and
+		   R1 occurs precisely once on the RHS. */
+		reg_set_t topLevelRegisters;
+		struct {
+			bool f(IRExpr *a, reg_set_t &out) {
+				if (a->tag == Iex_Get) {
+					out.insert( ((IRExprGet *)a)->reg );
+					return true;
+				} else if (a->tag == Iex_Unop &&
+					   ((IRExprUnop *)a)->op == Iop_Neg64 &&
+					   ((IRExprUnop *)a)->arg->tag == Iex_Get) {
+					out.insert( ((IRExprGet *)((IRExprUnop *)a)->arg)->reg );
+					return true;
+				} else {
+					return false;
+				}
+			}
+			void operator()(IRExpr *a, reg_set_t &out) {
+				if (f(a, out))
+					return;
+				if (a->tag == Iex_Associative &&
+				    ((IRExprAssociative *)a)->op == Iop_Add64) {
+					IRExprAssociative *aa = (IRExprAssociative *)a;
+					for (int i = 0; i < aa->nr_arguments; i++)
+						f(aa->contents[i], out);
+				}
+			}
+		} findTopLevelRegisters;
+		findTopLevelRegisters(clause->arg1, topLevelRegisters);
+		findTopLevelRegisters(clause->arg2, topLevelRegisters);
+		for (auto it = topLevelRegisters.begin(); it != topLevelRegisters.end(); ) {
+			int multiplicity = findRegisterMultiplicity(clause, *it);
+			assert(multiplicity != 0);
+			if (multiplicity != 1) {
+				topLevelRegisters.erase(it++);
+			} else {
+				it++;
+			}
+		}
+		things_we_can_remove |= topLevelRegisters;
+	}
+	things_we_can_remove -= targetRegisters;
+
+	if (things_we_can_remove.empty()) {
+		printf("Can't remove anything\n");
+		return input;
+	}
+
+	auto it = things_we_can_remove.begin();
+	threadAndRegister bestReg(*it);
+	int bestMultiplicity = findRegisterMultiplicity(input, bestReg);
+	printf("Could remove %s; mult %d\n", bestReg.name(),
+	       bestMultiplicity);
+	it++;
+	while (it != things_we_can_remove.end()) {
+		int m = findRegisterMultiplicity(input, *it);
+		printf("Could remove %s; mult %d\n", it->name(), m);
+		if (m > bestMultiplicity) {
+			bestReg = *it;
+			bestMultiplicity = m;
+		}
+		it++;
+	}
+
+	printf("Choose to remove %s\n", bestReg.name());
+
+	IRExpr *rewriteResult = NULL;
+	IRExpr *rewriteClause = NULL;
+	for (int i = 0; i < nr_clauses; i++) {
+		if (clauses[i]->tag != Iex_Binop ||
+		    ((IRExprBinop *)clauses[i])->op != Iop_CmpEQ64)
+			continue;
+		if (findRegisterMultiplicity(clauses[i], bestReg) != 1)
+			continue;
+		IRExprBinop *clause = (IRExprBinop *)clauses[i];
+		int nr_left_terms;
+		int nr_right_terms;
+		IRExpr **left_terms;
+		IRExpr **right_terms;
+		if (clause->arg1->tag == Iex_Associative &&
+		    ((IRExprAssociative *)clause->arg1)->op == Iop_Add64) {
+			nr_left_terms = ((IRExprAssociative *)clause->arg1)->nr_arguments;
+			left_terms = ((IRExprAssociative *)clause->arg1)->contents;
+		} else {
+			nr_left_terms = 1;
+			left_terms = &clause->arg1;
+		}
+		if (clause->arg2->tag == Iex_Associative &&
+		    ((IRExprAssociative *)clause->arg2)->op == Iop_Add64) {
+			nr_right_terms = ((IRExprAssociative *)clause->arg2)->nr_arguments;
+			right_terms = ((IRExprAssociative *)clause->arg2)->contents;
+		} else {
+			nr_right_terms = 1;
+			right_terms = &clause->arg2;
+		}
+
+		bool targetIsOnLeft = false;
+		bool targetIsOnRight = false;
+		for (int i = 0; i < nr_left_terms; i++) {
+			if (left_terms[i]->tag == Iex_Get &&
+			    threadAndRegister::fullEq(((IRExprGet *)left_terms[i])->reg, bestReg)) {
+				assert(!targetIsOnLeft);
+				targetIsOnLeft = true;
+			}
+			if (left_terms[i]->tag == Iex_Unop &&
+			    ((IRExprUnop *)left_terms[i])->op == Iop_Neg64 &&
+			    ((IRExprUnop *)left_terms[i])->arg->tag == Iex_Get &&
+			    threadAndRegister::fullEq(((IRExprGet *)((IRExprUnop *)left_terms[i])->arg)->reg, bestReg)) {
+				assert(!targetIsOnRight);
+				targetIsOnRight = true;
+			}
+		}
+		for (int i = 0; i < nr_right_terms; i++) {
+			if (right_terms[i]->tag == Iex_Get &&
+			    threadAndRegister::fullEq(((IRExprGet *)right_terms[i])->reg, bestReg)) {
+				assert(!targetIsOnRight);
+				targetIsOnRight = true;
+			}
+			if (right_terms[i]->tag == Iex_Unop &&
+			    ((IRExprUnop *)right_terms[i])->op == Iop_Neg64 &&
+			    ((IRExprUnop *)right_terms[i])->arg->tag == Iex_Get &&
+			    threadAndRegister::fullEq(((IRExprGet *)((IRExprUnop *)right_terms[i])->arg)->reg, bestReg)) {
+				assert(!targetIsOnLeft);
+				targetIsOnLeft = true;
+			}
+		}
+		assert(targetIsOnLeft == !targetIsOnRight);
+
+		rewriteClause = clause;
+		IRExprAssociative *res = IRExpr_Associative(nr_left_terms + nr_right_terms, Iop_Add64);
+		for (int i = 0; i < nr_left_terms; i++) {
+			if (left_terms[i]->tag == Iex_Get &&
+			    threadAndRegister::fullEq(((IRExprGet *)left_terms[i])->reg, bestReg))
+				continue;
+			if (left_terms[i]->tag == Iex_Unop &&
+			    ((IRExprUnop *)left_terms[i])->op == Iop_Neg64 &&
+			    ((IRExprUnop *)left_terms[i])->arg->tag == Iex_Get &&
+			    threadAndRegister::fullEq(((IRExprGet *)((IRExprUnop *)left_terms[i])->arg)->reg, bestReg))
+				continue;
+			res->contents[res->nr_arguments++] =
+				targetIsOnLeft ?
+				IRExpr_Unop(Iop_Neg64, left_terms[i]) :
+				left_terms[i];
+		}
+		for (int i = 0; i < nr_right_terms; i++) {
+			if (right_terms[i]->tag == Iex_Get &&
+			    threadAndRegister::fullEq(((IRExprGet *)right_terms[i])->reg, bestReg))
+				continue;
+			if (right_terms[i]->tag == Iex_Unop &&
+			    ((IRExprUnop *)right_terms[i])->op == Iop_Neg64 &&
+			    ((IRExprUnop *)right_terms[i])->arg->tag == Iex_Get &&
+			    threadAndRegister::fullEq(((IRExprGet *)((IRExprUnop *)right_terms[i])->arg)->reg, bestReg))
+				continue;
+			res->contents[res->nr_arguments++] =
+				!targetIsOnLeft ?
+				IRExpr_Unop(Iop_Neg64, right_terms[i]) :
+				right_terms[i];
+		}
+
+		rewriteResult = res;
+		break;
+	}
+	assert(rewriteResult != NULL);
+	assert(rewriteClause != NULL);
+
+	printf("Rewrite to: ");
+	ppIRExpr(rewriteResult, stdout);
+	printf("\n");
+
+	bool p = false;
+	IRExprAssociative *res = IRExpr_Associative(nr_clauses, Iop_And1);
+	for (int i = 0; i < nr_clauses; i++) {
+		if (rewriteClause == clauses[i]) {
+			res->contents[res->nr_arguments++] = clauses[i];
+			continue;
+		}
+		struct _ : public IRExprTransformer {
+			bool *done_something;
+			const threadAndRegister &bestReg;
+			IRExpr *rewriteResult;
+			IRExpr *transformIex(IRExprGet *ieg) {
+				if (threadAndRegister::fullEq(ieg->reg, bestReg)) {
+					*done_something = true;
+					return rewriteResult;
+				}
+				return ieg;
+			}
+			_(bool *_done_something,
+			  const threadAndRegister &_bestReg,
+			  IRExpr *_rewriteResult)
+				: done_something(_done_something),
+				  bestReg(_bestReg),
+				  rewriteResult(_rewriteResult)
+			{}
+		} doit(&p, bestReg, rewriteResult);
+		res->contents[res->nr_arguments++] = doit.doit(clauses[i]);
+	}
+
+	*progress = p;
+	if (p)
+		return internIRExpr(simplifyIRExpr(res, AllowableOptimisations::defaultOptimisations),
+				    intern);
+	else
+		return input;
+}
+
+void
+printIRExpr(IRExpr *e)
+{
+	ppIRExpr(e, stdout);
+	printf("\n");
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -433,11 +670,11 @@ main(int argc, char *argv[])
 	OracleInterface *oracle = new DummyOracle(summary);
 
 	internIRExprTable intern;
-	std::set<threadAndRegister, threadAndRegister::fullCompare> targetRegisters;
+	reg_set_t targetRegisters;
 	if (findTargetRegisters(summary, oracle, intern, &targetRegisters)) {
 		bool progress;
 		progress = true;
-		while (progress) {
+		while (!TIMEOUT && progress) {
 			progress = false;
 			summary->verificationCondition =
 				removeRedundantClauses(
@@ -447,6 +684,12 @@ main(int argc, char *argv[])
 					&progress);
 			summary->verificationCondition =
 				removeUnderspecifiedClauses(
+					summary->verificationCondition,
+					intern,
+					targetRegisters,
+					&progress);
+			summary->verificationCondition =
+				substituteEqualities(
 					summary->verificationCondition,
 					intern,
 					targetRegisters,

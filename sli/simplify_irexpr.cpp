@@ -1765,9 +1765,9 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 
 			if (e->arg->tag == Iex_Associative) {
 				IRExprAssociative *arga = (IRExprAssociative *)e->arg;
-				if (e->op == Iop_Not1 &&
-				    (arga->op == Iop_And1 || arga->op == Iop_Or1)) {
-					/* Convert ~(x & y) to ~x | ~y */
+				if ((e->op == Iop_Not1 && (arga->op == Iop_And1 || arga->op == Iop_Or1)) ||
+				    (e->op == Iop_Neg64 && arga->op == Iop_Add64)) {
+					/* Convert ~(x & y) to ~x | ~y and -(x + y) to -x + -y. */
 					IRExprAssociative *a =
 						(IRExprAssociative *)IRExpr_Associative(arga);
 					for (int i = 0;
@@ -1776,15 +1776,19 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						a->contents[i] =
 							optimiseIRExprFP(
 								IRExpr_Unop(
-									Iop_Not1,
+									e->op,
 									a->contents[i]),
 								opt,
 								done_something);
 					}
 					if (a->op == Iop_And1)
 						a->op = Iop_Or1;
-					else
+					else if (a->op == Iop_Or1)
 						a->op = Iop_And1;
+					else if (a->op == Iop_Add64)
+						a->op = Iop_Add64;
+					else
+						abort();
 					return a;
 				}
 				bool isOr = arga->op >= Iop_Or8 && arga->op <= Iop_Or64;
