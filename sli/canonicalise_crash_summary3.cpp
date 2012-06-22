@@ -12,8 +12,10 @@
 
 #ifndef NDEBUG
 static bool debug_subst_equalities = false;
+static bool debug_simplify_assuming_survive = false;
 #else
 #define debug_subst_equalities false
+#define debug_simplify_assuming_survive false
 #endif
 
 typedef std::set<threadAndRegister, threadAndRegister::fullCompare> reg_set_t;
@@ -685,6 +687,131 @@ substituteEqualities(CrashSummary *input,
 	return input;
 }
 
+static void
+extractDefinitelyTrueFalse(std::set<IRExpr *> *definitelyTrue,
+			   std::set<IRExpr *> *definitelyFalse,
+			   bool exprIsTrue,
+			   IRExpr *expr)
+{
+	if (expr->tag == Iex_Unop &&
+	    ((IRExprUnop *)expr)->op == Iop_Not1) {
+		extractDefinitelyTrueFalse(definitelyTrue,
+					   definitelyFalse,
+					   !exprIsTrue,
+					   ((IRExprUnop *)expr)->arg);
+		return;
+	}
+	if (expr->tag == Iex_Associative &&
+	    ((IRExprAssociative *)expr)->op == (exprIsTrue ? Iop_And1 : Iop_Or1) ) {
+		IRExprAssociative *a = (IRExprAssociative *)expr;
+		for (int i = 0; i < a->nr_arguments; i++)
+			extractDefinitelyTrueFalse(definitelyTrue,
+						   definitelyFalse,
+						   exprIsTrue,
+						   a->contents[i]);
+		return;
+	}
+
+	if (expr->tag == Iex_Const) {
+		assert(((IRExprConst *)expr)->con->Ico.U1 == exprIsTrue);
+		return;
+	}
+
+	if (exprIsTrue)
+		definitelyTrue->insert(expr);
+	else
+		definitelyFalse->insert(expr);
+}
+
+static IRExpr *
+simplifyAssumingMachineSurvives(const VexPtr<StateMachine, &ir_heap> &machine,
+				const VexPtr<IRExpr, &ir_heap> &expr,
+				const VexPtr<OracleInterface> &oracle,
+				bool *progress,
+				GarbageCollectionToken token)
+{
+	if (debug_simplify_assuming_survive) {
+		printf("%s input:\nmachine = ", __func__);
+		printStateMachine(machine, stdout);
+		printf("expr = ");
+		ppIRExpr(expr, stdout);
+		printf("\n");
+	}
+
+	IRExpr *survival_constraint =
+		survivalConstraintIfExecutedAtomically(
+			machine,
+			IRExpr_Const(IRConst_U1(1)),
+			oracle,
+			false,
+			AllowableOptimisations::defaultOptimisations,
+			token);
+	if (!survival_constraint) {
+		printf("Cannot derive survival constraint for %s\n", __func__);
+		return expr;
+	}
+
+	if (debug_simplify_assuming_survive) {
+		printf("survival_constraint: ");
+		ppIRExpr(survival_constraint, stdout);
+		printf("\n");
+	}
+
+	internIRExprTable intern;
+	IRExpr *expri = internIRExpr(expr.get(), intern);
+	survival_constraint = internIRExpr(survival_constraint, intern);
+
+	std::set<IRExpr *> definitelyTrue;
+	std::set<IRExpr *> definitelyFalse;
+	extractDefinitelyTrueFalse(&definitelyTrue,
+				   &definitelyFalse,
+				   true,
+				   survival_constraint);
+
+	if (debug_simplify_assuming_survive) {
+		printf("Definitely true:");
+		for (auto it = definitelyTrue.begin(); it != definitelyTrue.end(); it++) {
+			printf("\n\t");
+			ppIRExpr(*it, stdout);
+		}
+		printf("\nDefinitely false:");
+		for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++) {
+			printf("\n\t");
+			ppIRExpr(*it, stdout);
+		}
+		printf("\n");
+	}
+
+	struct _ : public IRExprTransformer {
+		const std::set<IRExpr *> &definitelyTrue;
+		const std::set<IRExpr *> &definitelyFalse;
+		IRExpr *transformIRExpr(IRExpr *what, bool *done_something) {
+			if (definitelyTrue.count(what)) {
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(1));
+			}
+			if (definitelyFalse.count(what)) {
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(0));
+			}
+			return IRExprTransformer::transformIRExpr(what, done_something);
+		}
+		_(const std::set<IRExpr *> &_definitelyTrue,
+		  const std::set<IRExpr *> &_definitelyFalse)
+			: definitelyTrue(_definitelyTrue),
+			  definitelyFalse(_definitelyFalse)
+		{}
+	} doit(definitelyTrue, definitelyFalse);
+
+	IRExpr *res = doit.doit(expri, progress);
+	if (debug_simplify_assuming_survive) {
+		printf("Final result: ");
+		ppIRExpr(res, stdout);
+		printf("\n");
+	}
+	return res;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -729,6 +856,18 @@ main(int argc, char *argv[])
 				substituteEqualities(
 					summary,
 					&p);
+			progress |= p;
+		}
+		p = true;
+		while (p) {
+			p = false;
+			summary->verificationCondition =
+				simplifyAssumingMachineSurvives(
+					summary->loadMachine,
+					summary->verificationCondition,
+					oracle,
+					&p,
+					ALLOW_GC);
 			progress |= p;
 		}
 	}
