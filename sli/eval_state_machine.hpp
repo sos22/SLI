@@ -45,7 +45,13 @@ public:
 };
 
 IRExpr *survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
-					       VexPtr<IRExpr, &ir_heap> assumption,
+					       const VexPtr<IRExpr, &ir_heap> &assumption,
+					       const VexPtr<OracleInterface> &oracle,
+					       bool escapingStateSurvive,
+					       const AllowableOptimisations &opt,
+					       GarbageCollectionToken token);
+IRExpr *crashingConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
+					       const VexPtr<IRExpr, &ir_heap> &assumption,
 					       const VexPtr<OracleInterface> &oracle,
 					       bool escapingStateSurvive,
 					       const AllowableOptimisations &opt,

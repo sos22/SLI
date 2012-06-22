@@ -725,6 +725,7 @@ extractDefinitelyTrueFalse(std::set<IRExpr *> *definitelyTrue,
 
 static IRExpr *
 simplifyAssumingMachineSurvives(const VexPtr<StateMachine, &ir_heap> &machine,
+				bool doesSurvive,
 				const VexPtr<IRExpr, &ir_heap> &expr,
 				const VexPtr<OracleInterface> &oracle,
 				bool *progress,
@@ -733,19 +734,30 @@ simplifyAssumingMachineSurvives(const VexPtr<StateMachine, &ir_heap> &machine,
 	if (debug_simplify_assuming_survive) {
 		printf("%s input:\nmachine = ", __func__);
 		printStateMachine(machine, stdout);
+		printf("doesSurvive = %s\n", doesSurvive ? "true" : "false");
 		printf("expr = ");
 		ppIRExpr(expr, stdout);
 		printf("\n");
 	}
 
-	IRExpr *survival_constraint =
-		survivalConstraintIfExecutedAtomically(
+	IRExpr *survival_constraint;
+	if (doesSurvive) {
+		survival_constraint = survivalConstraintIfExecutedAtomically(
 			machine,
 			IRExpr_Const(IRConst_U1(1)),
 			oracle,
 			false,
 			AllowableOptimisations::defaultOptimisations,
 			token);
+	} else {
+		survival_constraint = crashingConstraintIfExecutedAtomically(
+			machine,
+			IRExpr_Const(IRConst_U1(1)),
+			oracle,
+			true,
+			AllowableOptimisations::defaultOptimisations,
+			token);
+	}
 	if (!survival_constraint) {
 		printf("Cannot derive survival constraint for %s\n", __func__);
 		return expr;
@@ -864,6 +876,15 @@ main(int argc, char *argv[])
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
 					summary->loadMachine,
+					true,
+					summary->verificationCondition,
+					oracle,
+					&p,
+					ALLOW_GC);
+			summary->verificationCondition =
+				simplifyAssumingMachineSurvives(
+					summary->storeMachine,
+					false,
 					summary->verificationCondition,
 					oracle,
 					&p,

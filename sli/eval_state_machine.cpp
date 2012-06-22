@@ -1283,15 +1283,14 @@ enumEvalPaths(const VexPtr<StateMachine, &ir_heap> &sm,
 	return true;
 }
 
-/* Assume that @sm executes atomically.  Figure out a constraint on
-   the initial state which will lead to it not crashing. */
-IRExpr *
-survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
-				       VexPtr<IRExpr, &ir_heap> assumption,
-				       const VexPtr<OracleInterface> &oracle,
-				       bool escapingStatesSurvive,
-				       const AllowableOptimisations &opt,
-				       GarbageCollectionToken token)
+static IRExpr *
+_survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
+					VexPtr<IRExpr, &ir_heap> assumption,
+					const VexPtr<OracleInterface> &oracle,
+					bool escapingStatesSurvive,
+					bool wantCrash,
+					const AllowableOptimisations &opt,
+					GarbageCollectionToken token)
 {
 	__set_profiling(survivalConstraintIfExecutedAtomically);
 
@@ -1299,7 +1298,8 @@ survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
 		VexPtr<IRExpr, &ir_heap> res;
 		const AllowableOptimisations &opt;
 		bool escapingStatesSurvive;
-		bool crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		bool wantCrash;
+		void addComponent(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 #warning Think hard about what we're doing here.  Should we constraint it to never reach a crashing node, or merely to always reach a surviving one?'
 #warning Makes a difference due to incompleteness of simplifier and also presence of ND choice states.
 			IRExpr *component =
@@ -1314,9 +1314,17 @@ survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
 			else
 				res = component;
 			res = simplifyIRExpr(res, opt);
+		}
+		bool crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+			if (!wantCrash)
+				addComponent(pathConstraint, justPathConstraint);
 			return true;
 		}
-		bool survive(IRExpr *, IRExpr *) { return true; }
+		bool survive(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+			if (wantCrash)
+				addComponent(pathConstraint, justPathConstraint);
+			return true;
+		}
 		bool escape(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			if (escapingStatesSurvive)
 				return survive(pathConstraint, justPathConstraint);
@@ -1325,10 +1333,12 @@ survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
 		}
 		_(const VexPtr<IRExpr, &ir_heap> &_assumption,
 		  const AllowableOptimisations &_opt,
-		  bool _escapingStatesSurvive)
-			: res(_assumption), opt(_opt), escapingStatesSurvive(_escapingStatesSurvive)
+		  bool _escapingStatesSurvive,
+		  bool _wantCrash)
+			: res(_assumption), opt(_opt), escapingStatesSurvive(_escapingStatesSurvive),
+			  wantCrash(_wantCrash)
 		{}
-	} consumeEvalPath(assumption, opt, escapingStatesSurvive);
+	} consumeEvalPath(assumption, opt, escapingStatesSurvive, wantCrash);
 	if (assumption)
 		consumeEvalPath.needsAccAssumptions = true;
 	else
@@ -1341,6 +1351,46 @@ survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
 		return simplifyIRExpr(simplify_via_anf(consumeEvalPath.res), opt);
 	else
 		return IRExpr_Const(IRConst_U1(1));
+}
+
+/* Assume that @sm executes atomically.  Figure out a constraint on
+   the initial state which will lead to it not crashing. */
+IRExpr *
+survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
+				       const VexPtr<IRExpr, &ir_heap> &assumption,
+				       const VexPtr<OracleInterface> &oracle,
+				       bool escapingStatesSurvive,
+				       const AllowableOptimisations &opt,
+				       GarbageCollectionToken token)
+{
+	return _survivalConstraintIfExecutedAtomically(
+		sm,
+		assumption,
+		oracle,
+		escapingStatesSurvive,
+		false,
+		opt,
+		token);
+}
+
+/* Assume that @sm executes atomically.  Figure out a constraint on
+   the initial state which will lead to it not surviving. */
+IRExpr *
+crashingConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
+				       const VexPtr<IRExpr, &ir_heap> &assumption,
+				       const VexPtr<OracleInterface> &oracle,
+				       bool escapingStatesSurvive,
+				       const AllowableOptimisations &opt,
+				       GarbageCollectionToken token)
+{
+	return _survivalConstraintIfExecutedAtomically(
+		sm,
+		assumption,
+		oracle,
+		escapingStatesSurvive,
+		true,
+		opt,
+		token);
 }
 
 bool
