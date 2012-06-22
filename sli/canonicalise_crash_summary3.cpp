@@ -516,7 +516,8 @@ substituteEqualities(CrashSummary *input,
 		return input;
 	}
 
-	printf("Calc multiplicities:\n");
+	if (debug_subst_equalities)
+		printf("Calc multiplicities:\n");
 	auto it = things_we_can_remove.begin();
 	threadAndRegister bestReg(*it);
 	int bestMultiplicity = findRegisterMultiplicity(input, bestReg);
@@ -633,6 +634,9 @@ substituteEqualities(CrashSummary *input,
 		rewriteResult = res;
 		break;
 	}
+	if (TIMEOUT)
+		return input;
+
 	assert(rewriteResult != NULL);
 	assert(rewriteClause != NULL);
 	if (debug_subst_equalities) {
@@ -661,8 +665,10 @@ substituteEqualities(CrashSummary *input,
 		}
 		IRExpr *transformIRExpr(IRExpr *e, bool *done_something)
 		{
-			if (e == rewriteClause)
-				return e;
+			if (e == rewriteClause) {
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(1));
+			}
 			return StateMachineTransformer::transformIRExpr(e, done_something);
 		}
 		bool rewriteNewStates() const { return false; }
