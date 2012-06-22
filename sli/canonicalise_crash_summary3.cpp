@@ -8,6 +8,13 @@
 #include "nf.hpp"
 #include "offline_analysis.hpp"
 #include "timers.hpp"
+#include "intern.hpp"
+
+#ifndef NDEBUG
+static bool debug_subst_equalities = false;
+#else
+#define debug_subst_equalities false
+#endif
 
 typedef std::set<threadAndRegister, threadAndRegister::fullCompare> reg_set_t;
 
@@ -134,23 +141,44 @@ operator -=(std::set<t, comp> &out, const std::set<t, comp> &a)
 		out.erase(*it);
 }
 
+struct _findRegisterMultiplicity : public StateMachineTransformer {
+	const threadAndRegister &r;
+	int multiplicity;
+	IRExpr *transformIex(IRExprGet *ieg) {
+		if (threadAndRegister::fullEq(ieg->reg, r))
+			multiplicity++;
+		return ieg;
+	}
+	bool rewriteNewStates() const { return false; }
+	_findRegisterMultiplicity(const threadAndRegister &_r)
+		: r(_r), multiplicity(0)
+	{}
+};
+
 static int
 findRegisterMultiplicity(const IRExpr *iex, const threadAndRegister &r)
 {
-	struct _ : public IRExprTransformer {
-		const threadAndRegister &r;
-		int multiplicity;
-		IRExpr *transformIex(IRExprGet *ieg) {
-			if (threadAndRegister::fullEq(ieg->reg, r))
-				multiplicity++;
-			return ieg;
-		}
-		_(const threadAndRegister &_r)
-			: r(_r), multiplicity(0)
-		{}
-	} doit(r);
+	_findRegisterMultiplicity doit(r);
 	doit.doit(const_cast<IRExpr *>(iex));
 	return doit.multiplicity;
+}
+
+
+static int
+findRegisterMultiplicity(const CrashSummary *sm, const threadAndRegister &r)
+{
+	_findRegisterMultiplicity doit(r);
+	transformCrashSummary(const_cast<CrashSummary *>(sm), doit);
+	return doit.multiplicity;
+}
+
+static CrashSummary *
+internCrashSummary(CrashSummary *cs, internStateMachineTable &intern)
+{
+	cs->loadMachine = internStateMachine(cs->loadMachine, intern);
+	cs->storeMachine = internStateMachine(cs->storeMachine, intern);
+	cs->verificationCondition = internIRExpr(cs->verificationCondition, intern);
+	return cs;
 }
 
 static IRExpr *
@@ -409,21 +437,26 @@ findTargetRegisters(CrashSummary *summary,
 	return true;
 }
 
-static IRExpr *
-substituteEqualities(IRExpr *input,
-		     internIRExprTable &intern,
-		     const reg_set_t &targetRegisters,
+static CrashSummary *
+substituteEqualities(CrashSummary *input,
+		     internStateMachineTable &intern,
 		     bool *progress)
 {
+	if (debug_subst_equalities) {
+		printf("Input to substituteEqualities:\n");
+		printCrashSummary(input, stdout);
+	}
+
+	IRExpr *verificationCondition = input->verificationCondition;
 	int nr_clauses;
-	IRExpr **clauses;
-	if (input->tag == Iex_Associative &&
-	    ((IRExprAssociative *)input)->op == Iop_And1) {
-		nr_clauses = ((IRExprAssociative *)input)->nr_arguments;
-		clauses = ((IRExprAssociative *)input)->contents;		
+	IRExpr *const *clauses;
+	if (verificationCondition->tag == Iex_Associative &&
+	    ((IRExprAssociative *)verificationCondition)->op == Iop_And1) {
+		nr_clauses = ((IRExprAssociative *)verificationCondition)->nr_arguments;
+		clauses = ((IRExprAssociative *)verificationCondition)->contents;		
 	} else {
 		nr_clauses = 1;
-		clauses = &input;
+		clauses = &verificationCondition;
 	}
 
 	/* Now we see if there are any equalities we can use to remove
@@ -478,23 +511,44 @@ substituteEqualities(IRExpr *input,
 		}
 		things_we_can_remove |= topLevelRegisters;
 	}
-	things_we_can_remove -= targetRegisters;
 
-	if (things_we_can_remove.empty())
+	if (debug_subst_equalities) {
+		printf("Things we can remove: {");
+		for (auto it = things_we_can_remove.begin();
+		     it != things_we_can_remove.end();
+		     it++) {
+			if (it != things_we_can_remove.begin())
+				printf(", ");
+			printf("%s", it->name());
+		}
+		printf("}\n");
+	}
+	if (things_we_can_remove.empty()) {
+		if (debug_subst_equalities)
+			printf("Cannot remove anything.\n");
 		return input;
+	}
 
+	printf("Calc multiplicities:\n");
 	auto it = things_we_can_remove.begin();
 	threadAndRegister bestReg(*it);
 	int bestMultiplicity = findRegisterMultiplicity(input, bestReg);
+	if (debug_subst_equalities)
+		printf("\t%s -> %d\n", bestReg.name(), bestMultiplicity);
 	it++;
 	while (it != things_we_can_remove.end()) {
 		int m = findRegisterMultiplicity(input, *it);
+		if (debug_subst_equalities)
+			printf("\t%s -> %d\n", it->name(), m);
 		if (m > bestMultiplicity) {
 			bestReg = *it;
 			bestMultiplicity = m;
 		}
 		it++;
 	}
+	if (debug_subst_equalities)
+		printf("Best register: %s, with mult %d\n",
+		       bestReg.name(), bestMultiplicity);
 
 	IRExpr *rewriteResult = NULL;
 	IRExpr *rewriteClause = NULL;
@@ -594,42 +648,56 @@ substituteEqualities(IRExpr *input,
 	}
 	assert(rewriteResult != NULL);
 	assert(rewriteClause != NULL);
-
-	bool p = false;
-	IRExprAssociative *res = IRExpr_Associative(nr_clauses, Iop_And1);
-	for (int i = 0; i < nr_clauses; i++) {
-		if (rewriteClause == clauses[i]) {
-			res->contents[res->nr_arguments++] = clauses[i];
-			continue;
-		}
-		struct _ : public IRExprTransformer {
-			bool *done_something;
-			const threadAndRegister &bestReg;
-			IRExpr *rewriteResult;
-			IRExpr *transformIex(IRExprGet *ieg) {
-				if (threadAndRegister::fullEq(ieg->reg, bestReg)) {
-					*done_something = true;
-					return rewriteResult;
-				}
-				return ieg;
-			}
-			_(bool *_done_something,
-			  const threadAndRegister &_bestReg,
-			  IRExpr *_rewriteResult)
-				: done_something(_done_something),
-				  bestReg(_bestReg),
-				  rewriteResult(_rewriteResult)
-			{}
-		} doit(&p, bestReg, rewriteResult);
-		res->contents[res->nr_arguments++] = doit.doit(clauses[i]);
+	if (debug_subst_equalities) {
+		printf("Rewrite clause: ");
+		ppIRExpr(rewriteClause, stdout);
+		printf("\n");
+		printf("Rewrite result: ");
+		ppIRExpr(rewriteResult, stdout);
+		printf("\n");
 	}
+	rewriteResult = simplifyIRExpr(rewriteResult, AllowableOptimisations::defaultOptimisations);
 
-	*progress = p;
-	if (p)
-		return internIRExpr(simplifyIRExpr(res, AllowableOptimisations::defaultOptimisations),
-				    intern);
-	else
-		return input;
+	if (debug_subst_equalities) {
+		printf("Rewrite result after optimisation: ");
+		ppIRExpr(rewriteResult, stdout);
+		printf("\n");
+	}
+	struct _ : public StateMachineTransformer {
+		IRExpr *rewriteClause;
+		IRExpr *rewriteResult;
+		const threadAndRegister &rewriteReg;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			if (threadAndRegister::fullEq(ieg->reg, rewriteReg))
+				return rewriteResult;
+			return ieg;
+		}
+		IRExpr *transformIRExpr(IRExpr *e, bool *done_something)
+		{
+			if (e == rewriteClause)
+				return e;
+			return StateMachineTransformer::transformIRExpr(e, done_something);
+		}
+		bool rewriteNewStates() const { return false; }
+		_(IRExpr *_rewriteClause,
+		  IRExpr *_rewriteResult,
+		  const threadAndRegister &_rewriteReg)
+			: rewriteClause(_rewriteClause),
+			  rewriteResult(_rewriteResult),
+			  rewriteReg(_rewriteReg)
+		{}
+	} doit(rewriteClause, rewriteResult, bestReg);
+
+	input = transformCrashSummary(input, doit, progress);
+	input->verificationCondition = simplifyIRExpr(
+		input->verificationCondition,
+		AllowableOptimisations::defaultOptimisations);
+	if (debug_subst_equalities) {
+		printf("Result of rewrite:\n");
+		printCrashSummary(input, stdout);
+		printf("\n");
+	}
+	return internCrashSummary(input, intern);
 }
 
 int
@@ -646,31 +714,40 @@ main(int argc, char *argv[])
 	summary = readBugReport(argv[1], &first_line);
 	OracleInterface *oracle = new DummyOracle(summary);
 
-	internIRExprTable intern;
-	reg_set_t targetRegisters;
-	if (findTargetRegisters(summary, oracle, intern, &targetRegisters)) {
-		bool progress;
-		progress = true;
-		while (!TIMEOUT && progress) {
-			progress = false;
-			summary->verificationCondition =
-				removeRedundantClauses(
-					summary->verificationCondition,
-					intern,
-					targetRegisters,
-					&progress);
-			summary->verificationCondition =
-				removeUnderspecifiedClauses(
-					summary->verificationCondition,
-					intern,
-					targetRegisters,
-					&progress);
-			summary->verificationCondition =
+	internStateMachineTable intern;
+	bool progress;
+	progress = true;
+	while (!TIMEOUT && progress) {
+		progress = false;
+		reg_set_t targetRegisters;
+		if (findTargetRegisters(summary, oracle, intern, &targetRegisters)) {
+			bool p = true;
+			while (p) {
+				p = false;
+				summary->verificationCondition =
+					removeRedundantClauses(
+						summary->verificationCondition,
+						intern,
+						targetRegisters,
+						&p);
+				summary->verificationCondition =
+					removeUnderspecifiedClauses(
+						summary->verificationCondition,
+						intern,
+						targetRegisters,
+						&p);
+				progress |= p;
+			}
+		}
+		bool p = true;
+		while (p) {
+			p = false;
+			summary =
 				substituteEqualities(
-					summary->verificationCondition,
+					summary,
 					intern,
-					targetRegisters,
 					&progress);
+			progress |= p;
 		}
 	}
 
