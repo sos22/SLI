@@ -172,18 +172,8 @@ findRegisterMultiplicity(const CrashSummary *sm, const threadAndRegister &r)
 	return doit.multiplicity;
 }
 
-static CrashSummary *
-internCrashSummary(CrashSummary *cs, internStateMachineTable &intern)
-{
-	cs->loadMachine = internStateMachine(cs->loadMachine, intern);
-	cs->storeMachine = internStateMachine(cs->storeMachine, intern);
-	cs->verificationCondition = internIRExpr(cs->verificationCondition, intern);
-	return cs;
-}
-
 static IRExpr *
 removeRedundantClauses(IRExpr *verificationCondition,
-		       internIRExprTable &intern,
 		       const reg_set_t &targetRegisters,
 		       bool *done_something)
 {
@@ -197,7 +187,6 @@ removeRedundantClauses(IRExpr *verificationCondition,
 		return verificationCondition;
 	}
 
-	verificationCondition = internIRExpr(verificationCondition, intern);
 	if (verificationCondition->tag != Iex_Associative ||
 	    ((IRExprAssociative *)verificationCondition)->op != Iop_And1)
 		verificationCondition = IRExpr_Associative(Iop_And1, verificationCondition, NULL);
@@ -361,7 +350,6 @@ clauseUnderspecified(IRExpr *clause,
 
 static IRExpr *
 removeUnderspecifiedClauses(IRExpr *input,
-			    internIRExprTable &intern,
 			    const reg_set_t &targetRegisters,
 			    bool *done_something)
 {
@@ -402,14 +390,14 @@ removeUnderspecifiedClauses(IRExpr *input,
 	IRExprAssociative *res = IRExpr_Associative(nr_kept, Iop_And1);
 	memcpy(res->contents, kept, sizeof(IRExpr *) * nr_kept);
 	res->nr_arguments = nr_kept;
-	return internIRExpr(res, intern);
+	return res;
 }
 	
 static bool
-findTargetRegisters(CrashSummary *summary,
-		    OracleInterface *oracle,
-		    internIRExprTable &intern,
-		    reg_set_t *targetRegisters)
+findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
+		    const VexPtr<OracleInterface> &oracle,
+		    reg_set_t *targetRegisters,
+		    GarbageCollectionToken token)
 {
 	IRExpr *reducedSurvivalConstraint =
 		crossProductSurvivalConstraint(
@@ -418,7 +406,7 @@ findTargetRegisters(CrashSummary *summary,
 			oracle,
 			IRExpr_Const(IRConst_U1(1)),
 			AllowableOptimisations::defaultOptimisations,
-			ALLOW_GC);
+			token);
 	if (!reducedSurvivalConstraint) {
 		fprintf(stderr, "can't build cross product survival constraint\n");
 		return false;
@@ -430,7 +418,6 @@ findTargetRegisters(CrashSummary *summary,
 		fprintf(stderr, "can't convert reduced survival constraint to CNF\n");
 		return false;
 	}
-	reducedSurvivalConstraint = internIRExpr(reducedSurvivalConstraint, intern);
 
 	enumRegisters(reducedSurvivalConstraint, targetRegisters);
 
@@ -439,7 +426,6 @@ findTargetRegisters(CrashSummary *summary,
 
 static CrashSummary *
 substituteEqualities(CrashSummary *input,
-		     internStateMachineTable &intern,
 		     bool *progress)
 {
 	if (debug_subst_equalities) {
@@ -697,7 +683,7 @@ substituteEqualities(CrashSummary *input,
 		printCrashSummary(input, stdout);
 		printf("\n");
 	}
-	return internCrashSummary(input, intern);
+	return input;
 }
 
 int
@@ -712,41 +698,38 @@ main(int argc, char *argv[])
 	timeoutTimer.schedule();
 
 	summary = readBugReport(argv[1], &first_line);
-	OracleInterface *oracle = new DummyOracle(summary);
+	VexPtr<OracleInterface> oracle(new DummyOracle(summary));
 
-	internStateMachineTable intern;
 	bool progress;
 	progress = true;
 	while (!TIMEOUT && progress) {
 		progress = false;
 		reg_set_t targetRegisters;
-		if (findTargetRegisters(summary, oracle, intern, &targetRegisters)) {
-			bool p = true;
+		bool p;
+		if (findTargetRegisters(summary, oracle, &targetRegisters, ALLOW_GC)) {
+			p = true;
 			while (p) {
 				p = false;
 				summary->verificationCondition =
 					removeRedundantClauses(
 						summary->verificationCondition,
-						intern,
 						targetRegisters,
 						&p);
 				summary->verificationCondition =
 					removeUnderspecifiedClauses(
 						summary->verificationCondition,
-						intern,
 						targetRegisters,
 						&p);
 				progress |= p;
 			}
 		}
-		bool p = true;
+		p = true;
 		while (p) {
 			p = false;
 			summary =
 				substituteEqualities(
 					summary,
-					intern,
-					&progress);
+					&p);
 			progress |= p;
 		}
 	}
