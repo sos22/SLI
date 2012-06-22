@@ -277,12 +277,33 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_Neg32:
 		case Iop_Neg64:
 		case Iop_BadPtr:
+		case Iop_128HIto64:
+		case Iop_16to8:
+		case Iop_32to8:
+		case Iop_32to16:
+		case Iop_64to1:
+		case Iop_64to8:
+		case Iop_64to16:
+		case Iop_64to32:
+		case Iop_128to64:
 			return clauseUnderspecified(ieu->arg, mult);
+		case Iop_8Uto16:
+		case Iop_8Uto32:
+		case Iop_8Uto64:
+		case Iop_16Uto32:
+		case Iop_16Uto64:
 		case Iop_32Uto64:
+		case Iop_8Sto16:
+		case Iop_8Sto32:
+		case Iop_8Sto64:
+		case Iop_16Sto32:
+		case Iop_16Sto64:
+		case Iop_32Sto64:
 			return false;
 		default:
-			abort();
+			break;
 		}
+		break;
 	}
 	case Iex_Binop: {
 		IRExprBinop *ieb = (IRExprBinop *)clause;
@@ -295,14 +316,28 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_CmpLT16U:
 		case Iop_CmpLT32U:
 		case Iop_CmpLT64U:
+		case Iop_CmpLT8S:
+		case Iop_CmpLT16S:
+		case Iop_CmpLT32S:
+		case Iop_CmpLT64S:
+		case Iop_CmpLE32U:
+		case Iop_CmpLE64U:
 			return clauseUnderspecified(ieb->arg1, mult) ||
 				clauseUnderspecified(ieb->arg2, mult);
 		case Iop_Shl64:
+		case Iop_Shr64:
+		case Iop_Sar64:
+		case Iop_MullU64:
+		case Iop_Mul64:
+		case Iop_Mul32:
+		case Iop_DivModU128to64:
+		case Iop_64HLto128:
 			return clauseUnderspecified(ieb->arg1, mult) &&
 				clauseUnderspecified(ieb->arg2, mult);
 		default:
-			abort();
+			break;
 		}
+		break;
 	}
 	case Iex_Associative: {
 		IRExprAssociative *iea = (IRExprAssociative *)clause;
@@ -314,10 +349,14 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_Add16:
 		case Iop_Add32:
 		case Iop_Add64:
+		case Iop_Xor8:
+		case Iop_Xor16:
+		case Iop_Xor32:
+		case Iop_Xor64:
 			acc = false;
 			for (int i = 0; i < iea->nr_arguments; i++)
 				acc |= clauseUnderspecified(iea->contents[i], mult);
-			break;
+			return acc;
 		case Iop_And1:
 		case Iop_And8:
 		case Iop_And16:
@@ -331,11 +370,11 @@ clauseUnderspecified(IRExpr *clause,
 			acc = true;
 			for (int i = 0; i < iea->nr_arguments; i++)
 				acc &= clauseUnderspecified(iea->contents[i], mult);
-			break;
+			return acc;
 		default:
-			abort();
+			break;
 		}
-		return acc;
+		break;
 	}
 	case Iex_Get: {
 		IRExprGet *ieg = (IRExprGet *)clause;
@@ -344,9 +383,47 @@ clauseUnderspecified(IRExpr *clause,
 		assert(it->second != 0);
 		return it->second == 1;
 	}
-	default:
+	case Iex_Const:
+	case Iex_GetI:
+		return false;
+	case Iex_Qop:
+		break;
+	case Iex_Triop:
+		break;
+	case Iex_Mux0X: {
+		IRExprMux0X *m = (IRExprMux0X *)clause;
+		return clauseUnderspecified(m->expr0, mult) &&
+			clauseUnderspecified(m->exprX, mult);
+	}
+	case Iex_ClientCall:
+		return false;
+	case Iex_CCall:
+		return false;
+	case Iex_ClientCallFailed:
+		return false;
+	case Iex_Load:
+		return false;
+	case Iex_HappensBefore:
+		return false;
+	case Iex_Phi: {
+		IRExprPhi *iep = (IRExprPhi *)clause;
+		for (auto it = iep->generations.begin();
+		     it != iep->generations.end();
+		     it++) {
+			auto it2 = mult.find(iep->reg.setGen(*it));
+			assert(it2 != mult.end());
+			assert(it2->second != 0);
+			if (it2->second != 1)
+				return false;
+		}
+		return true;
+	}
+	case Iex_FreeVariable:
 		return false;
 	}
+	fprintf(stderr, "%s: ", __func__);
+	ppIRExpr(clause, stderr);
+	fprintf(stderr, "\n");
 	abort();
 }
 
@@ -489,6 +566,8 @@ substituteEqualities(CrashSummary *input,
 		findTopLevelRegisters(clause->arg2, topLevelRegisters);
 		for (auto it = topLevelRegisters.begin(); it != topLevelRegisters.end(); ) {
 			int multiplicity = findRegisterMultiplicity(clause, *it);
+			if (TIMEOUT)
+				return input;
 			assert(multiplicity != 0);
 			if (multiplicity != 1) {
 				topLevelRegisters.erase(it++);
@@ -852,7 +931,7 @@ main(int argc, char *argv[])
 		bool p;
 		if (findTargetRegisters(summary, oracle, &targetRegisters, ALLOW_GC)) {
 			p = true;
-			while (p) {
+			while (!TIMEOUT && p) {
 				p = false;
 				summary->verificationCondition =
 					removeRedundantClauses(
@@ -868,7 +947,7 @@ main(int argc, char *argv[])
 			}
 		}
 		p = true;
-		while (p) {
+		while (!TIMEOUT && p) {
 			p = false;
 			summary =
 				substituteEqualities(
@@ -877,7 +956,7 @@ main(int argc, char *argv[])
 			progress |= p;
 		}
 		p = true;
-		while (p) {
+		while (!TIMEOUT && p) {
 			p = false;
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
@@ -899,9 +978,10 @@ main(int argc, char *argv[])
 		}
 	}
 
-	if (TIMEOUT)
+	if (TIMEOUT) {
 		fprintf(stderr, "timeout processing %s\n", argv[1]);
-
+		return 1;
+	}
 	FILE *f = fopen(argv[2], "w");
 	fprintf(f, "%s\n", first_line);
 	printCrashSummary(summary, f);
