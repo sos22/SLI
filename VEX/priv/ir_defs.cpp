@@ -1878,6 +1878,11 @@ bool inverseUnops(IROp a, IROp b)
   rule(Not16, Not16);
   rule(Not32, Not32);
   rule(Not64, Not64);
+
+  rule(Neg8, Neg8);
+  rule(Neg16, Neg16);
+  rule(Neg32, Neg32);
+  rule(Neg64, Neg64);
 #undef rule
 
   return false;
