@@ -405,15 +405,6 @@ public:
 	{}
 };
 
-static CrashSummary *
-transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans)
-{
-	input->loadMachine = trans.transform(input->loadMachine);
-	input->storeMachine = trans.transform(input->storeMachine);
-	input->verificationCondition = trans.doit(input->verificationCondition);
-	return input;
-}
-
 static IRExpr *
 canonicaliseIRExpr(IRExpr *input)
 {

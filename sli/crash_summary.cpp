@@ -6,6 +6,7 @@
 #include "oracle.hpp"
 #include "allowable_optimisations.hpp"
 #include "libvex_parse.h"
+#include "offline_analysis.hpp"
 
 void
 printCrashSummary(CrashSummary *summary, FILE *f)
@@ -202,4 +203,15 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 #undef do_set
 	assert(aliasing.empty());
 	aliasing.insert(aliasing.end(), res.begin(), res.end());
+}
+
+CrashSummary *
+transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans, bool *done_something)
+{
+	bool b;
+	if (!done_something) done_something = &b;
+	input->loadMachine = trans.transform(input->loadMachine, done_something);
+	input->storeMachine = trans.transform(input->storeMachine, done_something);
+	input->verificationCondition = trans.doit(input->verificationCondition, done_something);
+	return input;
 }
