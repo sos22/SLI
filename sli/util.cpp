@@ -161,3 +161,11 @@ sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister
 	}
 }
 #endif
+
+/* This is mostly for the benefit of the debugger. */
+void
+printIRExpr(IRExpr *e)
+{
+	ppIRExpr(e, stdout);
+	printf("\n");
+}

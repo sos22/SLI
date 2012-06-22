@@ -1220,6 +1220,7 @@ void init_sli(void);
 void gdb_concrete(const MachineState *ms);
 void gdb(void);
 void dbg_break(const char *msg, ...);
+void printIRExpr(IRExpr *e);
 
 /* force some functions to be included even when they're not needed,
    so that they're available for calling from the debugger. */
@@ -1228,6 +1229,7 @@ static void
 force_linkage()
 {
 	gdb_concrete(NULL);
+	printIRExpr(NULL);
 }
 
 VexRip extract_call_follower(IRSB *irsb);

@@ -648,13 +648,6 @@ substituteEqualities(IRExpr *input,
 		return input;
 }
 
-void
-printIRExpr(IRExpr *e)
-{
-	ppIRExpr(e, stdout);
-	printf("\n");
-}
-
 int
 main(int argc, char *argv[])
 {
