@@ -1419,6 +1419,16 @@ IRExprMux0X::prettyPrint(FILE *f) const
 void
 IRExprAssociative::prettyPrint(FILE *f) const
 {
+      /* Bit of a hack: our parser can't handle expressions with
+	 redundant brackets, which is what you get if print an assoc
+	 with a single argument.  The ``fix'' (if that's the right
+	 word) is to just avoid printing such things, by just printing
+	 the single assoc argument instead. */
+      if (nr_arguments == 1) {
+	ppIRExpr(contents[0], f);
+	return;
+      }
+
       if (irOpSimpleChar(op))
       {
 	fprintf(f, "(");
