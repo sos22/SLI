@@ -313,16 +313,6 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_CmpEQ16:
 		case Iop_CmpEQ32:
 		case Iop_CmpEQ64:
-		case Iop_CmpLT8U:
-		case Iop_CmpLT16U:
-		case Iop_CmpLT32U:
-		case Iop_CmpLT64U:
-		case Iop_CmpLT8S:
-		case Iop_CmpLT16S:
-		case Iop_CmpLT32S:
-		case Iop_CmpLT64S:
-		case Iop_CmpLE32U:
-		case Iop_CmpLE64U:
 			return clauseUnderspecified(ieb->arg1, mult) ||
 				clauseUnderspecified(ieb->arg2, mult);
 		case Iop_Shl64:
@@ -334,6 +324,16 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_DivModU128to64:
 		case Iop_DivModS128to64:
 		case Iop_64HLto128:
+		case Iop_CmpLT8U:
+		case Iop_CmpLT16U:
+		case Iop_CmpLT32U:
+		case Iop_CmpLT64U:
+		case Iop_CmpLT8S:
+		case Iop_CmpLT16S:
+		case Iop_CmpLT32S:
+		case Iop_CmpLT64S:
+		case Iop_CmpLE32U:
+		case Iop_CmpLE64U:
 			return clauseUnderspecified(ieb->arg1, mult) &&
 				clauseUnderspecified(ieb->arg2, mult);
 		default:
