@@ -741,7 +741,7 @@ substituteEqualities(CrashSummary *input,
 		const threadAndRegister &rewriteReg;
 		IRExpr *transformIex(IRExprGet *ieg) {
 			if (threadAndRegister::fullEq(ieg->reg, rewriteReg))
-				return rewriteResult;
+				return coerceTypes(ieg->ty, rewriteResult);
 			return ieg;
 		}
 		IRExpr *transformIRExpr(IRExpr *e, bool *done_something)
