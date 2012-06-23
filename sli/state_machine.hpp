@@ -172,6 +172,7 @@ public:
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
+	virtual void inputExpressions(std::vector<IRExpr *> &exprs) = 0;
 	static bool parse(StateMachineSideEffect **out, const char *str, const char **suffix);
 	NAMED_CLASS
 };
@@ -481,6 +482,7 @@ public:
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {
 	static VexPtr<StateMachineSideEffectUnreached, &ir_heap> _this;
 	StateMachineSideEffectUnreached() : StateMachineSideEffect(StateMachineSideEffect::Unreached) {}
+	void inputExpressions(std::vector<IRExpr *> &) {}
 public:
 	static StateMachineSideEffectUnreached *get() {
 		if (!_this) _this = new StateMachineSideEffectUnreached();
@@ -505,6 +507,9 @@ public:
 };
 
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
+	virtual void _inputExpressions(std::vector<IRExpr *> &exprs) = 0;
+protected:
+	void inputExpressions(std::vector<IRExpr *> &exprs) { _inputExpressions(exprs); exprs.push_back(addr); }
 public:
 	IRExpr *addr;
 	MemoryAccessIdentifier rip;
@@ -524,6 +529,7 @@ public:
 	}
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
+	void _inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(data); }
 public:
 	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const MemoryAccessIdentifier &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
@@ -576,6 +582,7 @@ public:
 };
 typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
+	void _inputExpressions(std::vector<IRExpr *> &) {}
 public:
 	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
@@ -627,6 +634,7 @@ public:
 	}
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
+	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(value); }
 public:
 	StateMachineSideEffectCopy(threadAndRegister k, IRExpr *_value)
 		: StateMachineSideEffect(StateMachineSideEffect::Copy),
@@ -668,6 +676,7 @@ public:
 	}
 };
 class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
+	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(value); }
 public:
 	StateMachineSideEffectAssertFalse(IRExpr *_value, bool _reflectsActualProgram)
 		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
@@ -721,6 +730,7 @@ class StateMachineSideEffectStartAtomic : public StateMachineSideEffect {
 		: StateMachineSideEffect(StateMachineSideEffect::StartAtomic)
 	{}
 	static VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> singleton;
+	void inputExpressions(std::vector<IRExpr *> &) { }
 public:
 	static StateMachineSideEffectStartAtomic *get() {
 		if (!singleton)
@@ -752,6 +762,7 @@ class StateMachineSideEffectEndAtomic : public StateMachineSideEffect {
 		: StateMachineSideEffect(StateMachineSideEffect::EndAtomic)
 	{}
 	static VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> singleton;
+	void inputExpressions(std::vector<IRExpr *> &) { }
 public:
 	static StateMachineSideEffectEndAtomic *get() {
 		if (!singleton)
@@ -779,6 +790,10 @@ public:
 	}
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
+	void inputExpressions(std::vector<IRExpr *> &exprs) {
+		for (auto it = generations.begin(); it != generations.end(); it++)
+			exprs.push_back(it->second);
+	}
 public:
 	threadAndRegister reg;
 	std::vector<std::pair<unsigned, IRExpr *> > generations;
@@ -859,6 +874,7 @@ public:
 	}
 };
 class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
+	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(rsp); }
 public:
 	StateMachineSideEffectStartFunction(IRExpr *_rsp, int _frameId)
 		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
@@ -903,6 +919,7 @@ public:
 	}
 };
 class StateMachineSideEffectEndFunction : public StateMachineSideEffect {
+	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(rsp); }
 public:
 	StateMachineSideEffectEndFunction(IRExpr *_rsp, int _frameId)
 		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
