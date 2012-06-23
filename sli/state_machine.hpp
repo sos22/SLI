@@ -792,7 +792,8 @@ public:
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
 	void inputExpressions(std::vector<IRExpr *> &exprs) {
 		for (auto it = generations.begin(); it != generations.end(); it++)
-			exprs.push_back(it->second);
+			if (it->second)
+				exprs.push_back(it->second);
 	}
 public:
 	threadAndRegister reg;
