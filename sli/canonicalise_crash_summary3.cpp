@@ -929,23 +929,6 @@ main(int argc, char *argv[])
 		progress = false;
 		reg_set_t targetRegisters;
 		bool p;
-		if (findTargetRegisters(summary, oracle, &targetRegisters, ALLOW_GC)) {
-			p = true;
-			while (!TIMEOUT && p) {
-				p = false;
-				summary->verificationCondition =
-					removeRedundantClauses(
-						summary->verificationCondition,
-						targetRegisters,
-						&p);
-				summary->verificationCondition =
-					removeUnderspecifiedClauses(
-						summary->verificationCondition,
-						targetRegisters,
-						&p);
-				progress |= p;
-			}
-		}
 		p = true;
 		while (!TIMEOUT && p) {
 			p = false;
@@ -975,6 +958,23 @@ main(int argc, char *argv[])
 					&p,
 					ALLOW_GC);
 			progress |= p;
+		}
+		if (findTargetRegisters(summary, oracle, &targetRegisters, ALLOW_GC)) {
+			p = true;
+			while (!TIMEOUT && p) {
+				p = false;
+				summary->verificationCondition =
+					removeRedundantClauses(
+						summary->verificationCondition,
+						targetRegisters,
+						&p);
+				summary->verificationCondition =
+					removeUnderspecifiedClauses(
+						summary->verificationCondition,
+						targetRegisters,
+						&p);
+				progress |= p;
+			}
 		}
 	}
 
