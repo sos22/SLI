@@ -980,10 +980,9 @@ main(int argc, char *argv[])
 		}
 	}
 
-	if (TIMEOUT) {
+	if (TIMEOUT)
 		fprintf(stderr, "timeout processing %s\n", argv[1]);
-		return 1;
-	}
+
 	FILE *f = fopen(argv[2], "w");
 	fprintf(f, "%s\n", first_line);
 	printCrashSummary(summary, f);
