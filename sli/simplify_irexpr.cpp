@@ -1311,6 +1311,25 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 	return expr;
 }
 
+static bool
+isZero(const IRConst *iec)
+{
+	switch (iec->tag) {
+#define do_tag(n)				\
+		case Ico_ ## n :		\
+			return iec->Ico. n == 0
+		do_tag(U1);
+		do_tag(U8);
+		do_tag(U16);
+		do_tag(U32);
+		do_tag(U64);
+		do_tag(F64);
+		do_tag(F64i);
+		do_tag(V128);
+	}
+	abort();
+}
+
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
 {
@@ -2297,6 +2316,29 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			    l->tag == Iex_Const) {
 				*done_something = true;
 				return IRExpr_Const(IRConst_U1(0));
+			}
+
+			/* A couple of special rules: cmp_ltXu(0, x)
+			   is just x != 0, and cmp_ltXu(x, 0) is just
+			   false. */
+			if (e->op >= Iop_CmpLT8U && e->op <= Iop_CmpLT64U) {
+				if (e->arg1->tag == Iex_Const &&
+				    isZero( ((IRExprConst *)e->arg1)->con ) ) {
+					*done_something = true;
+					return IRExpr_Unop(
+						Iop_Not1,
+						IRExpr_Binop(
+							(IROp)((int)Iop_CmpEQ8 +
+							       (int)e->op -
+							       (int)Iop_CmpLT8U),
+							e->arg1,
+							e->arg2));
+				}
+				if (e->arg2->tag == Iex_Const &&
+				    isZero( ((IRExprConst *)e->arg2)->con ) ) {
+					*done_something = true;
+					return IRExpr_Const(IRConst_U1(0));
+				}
 			}
 
 			/* If both arguments are constant, try to constant
