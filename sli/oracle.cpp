@@ -3041,37 +3041,92 @@ Oracle::dominator(const std::set<VexRip> &instrs,
 	return dominators[x].makeVexRip(*instrs.begin());
 }
 
+/* Hackety hackety hack: getRbpToRspDelta() returns the RBP->RSP delta
+   at the *start* of an instruction, whereas getRbpToRspOffset()
+   returns it at the end. */
 bool
 Oracle::getRbpToRspDelta(const StaticRip &rip, long *out)
 {
-	RbpToRspOffsetState state;
-	unsigned long o;
-	getRbpToRspOffset(rip, &state, &o);
-	if (state == RbpToRspOffsetStateValid) {
-		*out = o;
-		return true;
-	} else {
+	std::vector<StaticRip> pred;
+	Function(StaticRip(rip)).addPredecessorsNonCall(rip, pred);
+	if (pred.size() == 0) {
+		/* Can't do anything if we don't have any
+		 * predecessors. */
 		return false;
 	}
+	RbpToRspOffsetState state;
+	unsigned long o;
+	getRbpToRspOffset(pred[0], &state, &o);
+	if (state != RbpToRspOffsetStateValid)
+		return false;
+	for (unsigned x = 1; x < pred.size(); x++) {
+		unsigned long o2;
+		getRbpToRspOffset(pred[x], &state, &o2);
+		if (state != RbpToRspOffsetStateValid ||
+		    o2 != o)
+			return false;
+	}
+	*out = o;
+	return true;
 }
 bool
 Oracle::getRbpToRspDelta(const VexRip &rip, long *out)
 {
 	if (getRbpToRspDelta(StaticRip(rip), out))
 		return true;
+
 	/* Bit of a hack, but not really.  If we're at the start of a
 	   function, and the enclosing function has a known delta, we
 	   can quite easily calculate the delta for this function from
 	   the delta for the enclosing one. */
-	if (rip.stack.size() <= 1 || !isFunctionHead(StaticRip(rip)))
-		return false;
-	long d2;
-	VexRip parentVr(rip);
-	parentVr.rtrn();
-	if (!getRbpToRspDelta(StaticRip(parentVr), &d2))
-		return false;
-	*out = d2 - 8;
-	return true;
+	if (rip.stack.size() > 1 && isFunctionHead(StaticRip(rip))) {
+		long d2;
+		VexRip parentVr(rip);
+		parentVr.rtrn();
+		if (!getRbpToRspDelta(StaticRip(parentVr), &d2))
+			return false;
+		*out = d2 - 8;
+		return true;
+	}
+	/* Another hack: if we're right at the end of a function
+	   (i.e. right on the ret instruction) then we can also grab
+	   the caller's delta. */
+	if (rip.stack.size() > 1) {
+		IRSB *irsb = getIRSBForRip(rip);
+		assert(irsb);
+		int nr_marks = 0;
+		for (int i = 0; i < irsb->stmts_used && nr_marks < 2; i++)
+			if (irsb->stmts[i]->tag == Ist_IMark)
+				nr_marks++;
+		if (irsb->jumpkind == Ijk_Ret && nr_marks == 1) {
+			VexRip parentVr(rip);
+			long d2;
+			parentVr.rtrn();
+			if (!getRbpToRspDelta(StaticRip(parentVr), &d2))
+				return false;
+			*out = d2 - 8;
+			return true;
+		}
+	}
+	/* One more hack: try to do something sensible for the initial
+	 * ``push rbp'' instruction. */
+	StaticRip head(functionHeadForInstruction(StaticRip(rip)));
+	if (rip.unwrap_vexrip() == head.rip + 1 &&
+	    ms->addressSpace->fetch<unsigned char>(head.rip, NULL) == 0x55) {
+		/* The first instruction in the function is push rbp,
+		   and we're the second instruction -> can calculate
+		   our delta from the parent function's delta. */
+		VexRip parentVr(rip);
+		long d2;
+		parentVr.rtrn();
+		if (!getRbpToRspDelta(StaticRip(parentVr), &d2))
+			return false;
+		*out = d2 - 16;
+		return true;
+	}
+
+	/* Give up */
+	return false;
 }
 
 Oracle::LivenessSet

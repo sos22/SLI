@@ -397,7 +397,9 @@ public:
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const StaticRip &rip);
 	LivenessSet liveOnEntryToFunction(const StaticRip &rip);
 
+private:
 	bool getRbpToRspDelta(const StaticRip &rip, long *out);
+public:
 
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const VexRip &rip);
 	bool getRbpToRspDelta(const VexRip &rip, long *out);
