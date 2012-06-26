@@ -767,12 +767,30 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 	}
 
 	if (sideEffect->type == StateMachineSideEffect::StartAtomic &&
-	    target->type == StateMachineState::SideEffecting &&
-	    ((StateMachineSideEffecting *)target)->sideEffect &&
-	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic) {
-		/* Remove empty atomic section */
-		*done_something = true;
-		return ((StateMachineSideEffecting *)target)->target;
+	    target->type == StateMachineState::SideEffecting) {
+		StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
+		if (t->sideEffect &&
+		    t->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+			/* Remove empty atomic section */
+			*done_something = true;
+			return t->target;
+		}
+		
+		if (t->target->type == StateMachineState::SideEffecting) {
+			StateMachineSideEffecting *t2 = (StateMachineSideEffecting *)t->target;
+			if (t2->sideEffect &&
+			    t2->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+				/* Individual side effects are always
+				   atomic, so an atomic block with a
+				   single side effect in is a bit
+				   pointless. */
+				*done_something = true;
+				return new StateMachineSideEffecting(
+					t->origin,
+					t->sideEffect,
+					t2->target);
+			}
+		}
 	}
 
 	return this;
