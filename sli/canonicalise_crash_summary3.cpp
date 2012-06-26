@@ -187,10 +187,14 @@ removeRedundantClauses(IRExpr *verificationCondition,
 		return verificationCondition;
 
 	verificationCondition = simplify_via_anf(verificationCondition);
-	verificationCondition = convert_to_cnf(verificationCondition);
-	if (!verificationCondition) {
-		fprintf(stderr, "can't convert verification constraint to CNF\n");
-		return verificationCondition;
+	{
+		IRExpr *v;
+		v = convert_to_cnf(verificationCondition);
+		if (!v) {
+			fprintf(stderr, "can't convert verification constraint to CNF\n");
+			return verificationCondition;
+		}
+		verificationCondition = v;
 	}
 	if (verificationCondition->tag == Iex_Const)
 		return verificationCondition;
