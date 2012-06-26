@@ -453,6 +453,13 @@ removeUnderspecifiedClauses(IRExpr *input,
 	for (auto it = targetRegisters.begin(); it != targetRegisters.end(); it++)
 		mult[*it]++;
 
+	if (TIMEOUT) {
+		/* Need to check here because if we've timed out then
+		   mult will be wrong, which will then screw up
+		   clauseUnderspecified. */
+		return input;
+	}
+
 	int nr_clauses;
 	IRExpr **clauses;
 	if (input->tag == Iex_Associative &&
