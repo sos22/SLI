@@ -765,6 +765,16 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		assert(*done_something);
 		return target;
 	}
+
+	if (sideEffect->type == StateMachineSideEffect::StartAtomic &&
+	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect &&
+	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+		/* Remove empty atomic section */
+		*done_something = true;
+		return ((StateMachineSideEffecting *)target)->target;
+	}
+
 	return this;
 }
 
