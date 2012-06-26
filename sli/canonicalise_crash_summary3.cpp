@@ -1088,6 +1088,12 @@ functionalUnderspecification(IRExpr *input,
 		underspecExpression,
 		&p);
 
+	if (TIMEOUT) {
+		if (debug_functional_underspecification)
+			printf("%d: Timed out!\n", depth);
+		return input;
+	}
+
 	if (assumingTrue == underspecExpression ||
 	    assumingFalse == underspecExpression) {
 		if (assumingFalse == underspecExpression &&
