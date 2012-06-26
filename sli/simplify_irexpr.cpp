@@ -2318,6 +2318,27 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				return IRExpr_Const(IRConst_U1(0));
 			}
 
+			/* Convert CmpLE into CmpLT and CmpEQ */
+			if (e->op == Iop_CmpLE32S || e->op == Iop_CmpLE64S ||
+			    e->op == Iop_CmpLE32U || e->op == Iop_CmpLE64U) {
+				*done_something = true;
+				return IRExpr_Binop(
+					Iop_Or1,
+					IRExpr_Binop(
+						(e->op == Iop_CmpLE32S ||
+						 e->op == Iop_CmpLE32U) ?
+							Iop_CmpEQ32 : Iop_CmpEQ64,
+						e->arg1,
+						e->arg2),
+					IRExpr_Binop(
+						e->op == Iop_CmpLE32S ? Iop_CmpLT32S :
+						(e->op == Iop_CmpLE32U ? Iop_CmpLE32U :
+						 (e->op == Iop_CmpLE64S ? Iop_CmpLT64S :
+						  Iop_CmpLT64U)),
+						e->arg1,
+						e->arg2));
+			}
+
 			/* A couple of special rules: cmp_ltXu(0, x)
 			   is just x != 0, and cmp_ltXu(x, 0) is just
 			   false. */
