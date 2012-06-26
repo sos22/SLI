@@ -686,7 +686,9 @@ substituteEqualities(CrashSummary *input,
 				targetIsOnLeft = true;
 			}
 		}
-		assert(targetIsOnLeft == !targetIsOnRight);
+		if (!targetIsOnLeft && !targetIsOnRight)
+			continue;
+		assert(targetIsOnLeft || targetIsOnRight);
 
 		rewriteClause = clause;
 		IRExprAssociative *res = IRExpr_Associative(nr_left_terms + nr_right_terms, Iop_Add64);
