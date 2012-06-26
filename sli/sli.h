@@ -1299,6 +1299,8 @@ struct internIRExprTable {
 };
 IRExpr *internIRExpr(IRExpr *e, internIRExprTable &lookupTable);
 
+char *nameIRExpr(IRExpr *a);
+
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */
 #define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)

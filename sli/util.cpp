@@ -169,3 +169,39 @@ printIRExpr(IRExpr *e)
 	ppIRExpr(e, stdout);
 	printf("\n");
 }
+
+/* Format an IRExpr into a string allocated on the IR heap. */
+struct __nameIRExpr_context {
+	size_t buffer_used;
+	char *buffer;
+};
+static ssize_t
+__nameIRExpr_write(void *cookie, const char *buffer, size_t sz)
+{
+	struct __nameIRExpr_context *c = (struct __nameIRExpr_context *)cookie;
+	static struct libvex_allocation_site site = {0, __FILE__, __LINE__};
+	if (!c->buffer)
+		c->buffer = (char *)__LibVEX_Alloc_Bytes(&ir_heap, sz * 2, &site);
+	else
+		c->buffer = (char *)LibVEX_realloc(&ir_heap, c->buffer, c->buffer_used + sz);
+	memcpy(c->buffer + c->buffer_used, buffer, sz);
+	c->buffer_used += sz;
+	return sz;
+}
+char *
+nameIRExpr(IRExpr *a)
+{
+	cookie_io_functions_t functionTable;
+	memset(&functionTable, 0, sizeof(functionTable));
+	functionTable.write = __nameIRExpr_write;
+	struct __nameIRExpr_context ctxt;
+	ctxt.buffer_used = 0;
+	ctxt.buffer = NULL;
+	FILE *f = fopencookie(&ctxt, "w", functionTable);
+	if (!f)
+		err(1, "fopencookie() returned NULL?");
+	ppIRExpr(a, f);
+	fclose(f);
+	return ctxt.buffer;
+}
+

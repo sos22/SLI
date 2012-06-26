@@ -13,10 +13,14 @@
 #ifndef NDEBUG
 static bool debug_subst_equalities = false;
 static bool debug_simplify_assuming_survive = false;
+static bool debug_functional_underspecification = false;
 #else
 #define debug_subst_equalities false
 #define debug_simplify_assuming_survive false
+#define debug_funcal_underspecification false
 #endif
+
+#define underspecExpression ((IRExpr *)3)
 
 typedef std::set<threadAndRegister, threadAndRegister::fullCompare> reg_set_t;
 
@@ -188,6 +192,8 @@ removeRedundantClauses(IRExpr *verificationCondition,
 		fprintf(stderr, "can't convert verification constraint to CNF\n");
 		return verificationCondition;
 	}
+	if (verificationCondition->tag == Iex_Const)
+		return verificationCondition;
 
 	if (verificationCondition->tag != Iex_Associative ||
 	    ((IRExprAssociative *)verificationCondition)->op != Iop_And1)
@@ -432,6 +438,7 @@ clauseUnderspecified(IRExpr *clause,
 static IRExpr *
 removeUnderspecifiedClauses(IRExpr *input,
 			    const reg_set_t &targetRegisters,
+			    IRExpr *underspecifiedResult,
 			    bool *done_something)
 {
 	std::map<threadAndRegister, int, threadAndRegister::fullCompare> mult;
@@ -463,7 +470,7 @@ removeUnderspecifiedClauses(IRExpr *input,
 		return input;
 	*done_something = true;
 	if (nr_kept == 0)
-		return IRExpr_Const(IRConst_U1(1));
+		return underspecifiedResult;
 	assert(nr_clauses != 1);
 	if (nr_kept == 1) {
 		return kept[0];
@@ -811,6 +818,58 @@ extractDefinitelyTrueFalse(std::set<IRExpr *> *definitelyTrue,
 }
 
 static IRExpr *
+simplifyAssuming(IRExpr *expr,
+		 IRExpr *assumption,
+		 bool debug,
+		 bool isTrue,
+		 bool *progress)
+{
+	std::set<IRExpr *> definitelyTrue;
+	std::set<IRExpr *> definitelyFalse;
+	extractDefinitelyTrueFalse(&definitelyTrue,
+				   &definitelyFalse,
+				   isTrue,
+				   assumption);
+
+	if (debug) {
+		printf("Definitely true:");
+		for (auto it = definitelyTrue.begin(); it != definitelyTrue.end(); it++) {
+			printf("\n\t");
+			ppIRExpr(*it, stdout);
+		}
+		printf("\nDefinitely false:");
+		for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++) {
+			printf("\n\t");
+			ppIRExpr(*it, stdout);
+		}
+		printf("\n");
+	}
+
+	struct _ : public IRExprTransformer {
+		const std::set<IRExpr *> &definitelyTrue;
+		const std::set<IRExpr *> &definitelyFalse;
+		IRExpr *transformIRExpr(IRExpr *what, bool *done_something) {
+			if (definitelyTrue.count(what)) {
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(1));
+			}
+			if (definitelyFalse.count(what)) {
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(0));
+			}
+			return IRExprTransformer::transformIRExpr(what, done_something);
+		}
+		_(const std::set<IRExpr *> &_definitelyTrue,
+		  const std::set<IRExpr *> &_definitelyFalse)
+			: definitelyTrue(_definitelyTrue),
+			  definitelyFalse(_definitelyFalse)
+		{}
+	} doit(definitelyTrue, definitelyFalse);
+
+	return doit.doit(expr, progress);
+}
+
+static IRExpr *
 simplifyAssumingMachineSurvives(const VexPtr<StateMachine, &ir_heap> &machine,
 				bool doesSurvive,
 				const VexPtr<IRExpr, &ir_heap> &expr,
@@ -860,49 +919,9 @@ simplifyAssumingMachineSurvives(const VexPtr<StateMachine, &ir_heap> &machine,
 	IRExpr *expri = internIRExpr(expr.get(), intern);
 	survival_constraint = internIRExpr(survival_constraint, intern);
 
-	std::set<IRExpr *> definitelyTrue;
-	std::set<IRExpr *> definitelyFalse;
-	extractDefinitelyTrueFalse(&definitelyTrue,
-				   &definitelyFalse,
-				   true,
-				   survival_constraint);
-
-	if (debug_simplify_assuming_survive) {
-		printf("Definitely true:");
-		for (auto it = definitelyTrue.begin(); it != definitelyTrue.end(); it++) {
-			printf("\n\t");
-			ppIRExpr(*it, stdout);
-		}
-		printf("\nDefinitely false:");
-		for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++) {
-			printf("\n\t");
-			ppIRExpr(*it, stdout);
-		}
-		printf("\n");
-	}
-
-	struct _ : public IRExprTransformer {
-		const std::set<IRExpr *> &definitelyTrue;
-		const std::set<IRExpr *> &definitelyFalse;
-		IRExpr *transformIRExpr(IRExpr *what, bool *done_something) {
-			if (definitelyTrue.count(what)) {
-				*done_something = true;
-				return IRExpr_Const(IRConst_U1(1));
-			}
-			if (definitelyFalse.count(what)) {
-				*done_something = true;
-				return IRExpr_Const(IRConst_U1(0));
-			}
-			return IRExprTransformer::transformIRExpr(what, done_something);
-		}
-		_(const std::set<IRExpr *> &_definitelyTrue,
-		  const std::set<IRExpr *> &_definitelyFalse)
-			: definitelyTrue(_definitelyTrue),
-			  definitelyFalse(_definitelyFalse)
-		{}
-	} doit(definitelyTrue, definitelyFalse);
-
-	IRExpr *res = doit.doit(expri, progress);
+	IRExpr *res = simplifyAssuming(expri, survival_constraint,
+				       debug_simplify_assuming_survive,
+				       true, progress);
 	if (debug_simplify_assuming_survive) {
 		printf("Final result: ");
 		ppIRExpr(res, stdout);
@@ -911,25 +930,250 @@ simplifyAssumingMachineSurvives(const VexPtr<StateMachine, &ir_heap> &machine,
 	return res;
 }
 
-int
-main(int argc, char *argv[])
+static IRExpr *
+simplifyUsingUnderspecification(
+	IRExpr *expr,
+	const reg_set_t &targetRegisters,
+	IRExpr *underspecified_result,
+	bool *progress)
 {
-	init_sli();
+	bool p;
+	p = true;
+	while (!TIMEOUT && p && expr != underspecified_result) {
+		p = false;
+		expr = removeRedundantClauses(
+			expr,
+			targetRegisters,
+			&p);
+		expr = removeUnderspecifiedClauses(
+			expr,
+			targetRegisters,
+			underspecified_result,
+			&p);
+		*progress |= p;
+	}
+	return expr;
+}
 
-	VexPtr<CrashSummary, &ir_heap> summary;
-	char *first_line;
+static void
+findBooleanMultiplicity(IRExpr *input, std::map<IRExpr *, int> &r)
+{
+	assert(input->type() == Ity_I1);
+	assert(input->tag != Iex_Const);
+	if (input->tag == Iex_Associative) {
+		IRExprAssociative *iex = (IRExprAssociative *)input;
+		assert(iex->op == Iop_And1 || iex->op == Iop_Or1);
+		for (int i = 0; i < iex->nr_arguments; i++)
+			findBooleanMultiplicity(iex->contents[i], r);
+		return;
+	} else if (input->tag == Iex_Unop) {
+		IRExprUnop *iex = (IRExprUnop *)input;
+		if (iex->op == Iop_Not1) {
+			findBooleanMultiplicity(iex->arg, r);
+			return;
+		}
+	}
+	r[input]++;
+}
 
-	timeoutTimer.nextDue = now() + 30;
-	timeoutTimer.schedule();
+/* Try to simplify @input a bit by re-expressing it as a nested set of
+ * functions. */
+/* i.e. pick some variable in @input, say Q, and perform a case split
+ * on Q.  That'll give us a version of @input assuming Q is true, call
+ * it T, and another version assuming it's false, call it F.  We then
+ * rewrite @input to be (Q && T) || (!Q && F).
+ */
+static IRExpr *
+functionalUnderspecification(IRExpr *input,
+			     internIRExprTable &intern,
+			     const reg_set_t &targetRegisters,
+			     int depth)
+{
+	if (debug_functional_underspecification) {
+		printf("%d: %s(", depth, __func__);
+		ppIRExpr(input, stdout);
+		printf(", {");
+		for (auto it = targetRegisters.begin(); it != targetRegisters.end(); it++) {
+			if (it != targetRegisters.begin())
+				printf(", ");
+			printf("%s", it->name());
+		}
+		printf("})\n");
+	}
 
-	summary = readBugReport(argv[1], &first_line);
-	VexPtr<OracleInterface> oracle(new DummyOracle(summary));
+	if (input->tag == Iex_Const) {
+		/* Can't really do anything if we already have a
+		 * constant. */
+		if (debug_functional_underspecification)
+			printf("%d: Input is constant -> nothing to do\n", depth);
+		return input;
+	}
 
+	input = internIRExpr(input, intern);
+
+	/* Decide what we're going to case split on. */
+	IRExpr *splitOn;
+	{
+		std::map<IRExpr *, int> booleanMultiplicity;
+		findBooleanMultiplicity(input, booleanMultiplicity);
+		if (debug_functional_underspecification) {
+			printf("%d: Multiplicities:\n", depth);
+			for (auto it = booleanMultiplicity.begin();
+			     it != booleanMultiplicity.end();
+			     it++)
+				printf("%d: \t%s\t -> %d\n", depth, nameIRExpr(it->first), it->second);
+		}
+		assert(!booleanMultiplicity.empty());
+		if (booleanMultiplicity.size() == 1) {
+			/* No point in doing a case split if we only
+			 * have one input clause. */
+			if (debug_functional_underspecification)
+				printf("%d: Input has single variable -> nothing to do\n", depth);
+			return input;
+		}
+		IRExpr *bestExpr;
+		bestExpr = (IRExpr *)0xf001; /* Shut the compiler up */
+		int bestMultiplicity = -1;
+		for (auto it = booleanMultiplicity.begin();
+		     it != booleanMultiplicity.end();
+		     it++) {
+			if (it->second > bestMultiplicity) {
+				bestExpr = it->first;
+				bestMultiplicity = it->second;
+			}
+		}
+		assert(bestMultiplicity > 0);
+		if (debug_functional_underspecification)
+			printf("%d: Split on %s, mult %d\n",
+			       depth,
+			       nameIRExpr(bestExpr), bestMultiplicity);
+		splitOn = bestExpr;
+	}
+
+	/* splitOn is now Q.  Calculate T and F expressions */
+	bool p;
+	IRExpr *assumingTrue = simplifyAssuming(input, splitOn, false, true, &p);
+	IRExpr *assumingFalse = simplifyAssuming(input, splitOn, false, false, &p);
+
+	if (debug_functional_underspecification)
+		printf("%d: T = %s, F = %s\n",
+		       depth, nameIRExpr(assumingTrue), nameIRExpr(assumingFalse));
+
+	/* We can now do the full underspecification analysis on each
+	   one independently, treating the thing we just split on as
+	   being fully specified. */
+	reg_set_t newTargets(targetRegisters);
+	enumRegisters(splitOn, &newTargets);
+	assumingTrue = simplifyUsingUnderspecification(
+		assumingTrue,
+		newTargets,
+		underspecExpression,
+		&p);
+	assumingFalse = simplifyUsingUnderspecification(
+		assumingFalse,
+		newTargets,
+		underspecExpression,
+		&p);
+
+	if (assumingTrue == underspecExpression ||
+	    assumingFalse == underspecExpression) {
+		if (assumingFalse == underspecExpression &&
+		    assumingTrue == underspecExpression) {
+			/* We're going to turn input into
+			   (Q && T) || (~Q && F), and
+			   we can set T and F to whatever the
+			   hell we like.  That means that we can
+			   make the final result be whatever
+			   we like, so we get a nice
+			   underspecification. */
+			if (debug_functional_underspecification)
+				printf("%d: Result is underspecified\n", depth);
+			return underspecExpression;
+		}
+
+		/* We're going to expression the input as
+		   (Q && T) || (~Q && F), and one of T and F
+		   are underspecified, so we can set it to be
+		   whatever we want.  Suppose that T is
+		   underspecified and F is fully specified.
+		   Then we set T = F, and get the
+		   result (Q && F) || (~Q && F) i.e.
+		   just F. */
+		IRExpr *i = assumingTrue;
+		if (i == underspecExpression)
+			i = assumingFalse;
+		assert(i != underspecExpression);
+
+		if (debug_functional_underspecification)
+			printf("%d: %s underspecified; take %s\n",
+			       depth,
+			       i == assumingTrue ? "F" : "T",
+			       nameIRExpr(i));
+
+		i = functionalUnderspecification(i,
+						 intern,
+						 newTargets,
+						 depth + 1);
+
+		if (debug_functional_underspecification)
+			printf("%d: After recursive simplify: %s\n",
+			       depth, nameIRExpr(i));
+		i = simplifyIRExpr(i, AllowableOptimisations::defaultOptimisations);
+		if (debug_functional_underspecification)
+			printf("%d: After final simplify: %s\n",
+			       depth, nameIRExpr(i));
+		return i;
+	}
+	if (debug_functional_underspecification)
+		printf("%d: After first simplify: T = %s, F = %s\n",
+		       depth, nameIRExpr(assumingTrue), nameIRExpr(assumingFalse));
+
+	/* Recursively consider doing another case split. */
+	assumingTrue = functionalUnderspecification(assumingTrue,
+						    intern,
+						    newTargets,
+						    depth + 1);
+	assumingFalse = functionalUnderspecification(assumingFalse,
+						     intern,
+						     newTargets,
+						     depth + 1);
+
+	if (debug_functional_underspecification)
+		printf("%d: After second simplify: T = %s, F = %s\n",
+		       depth, nameIRExpr(assumingTrue), nameIRExpr(assumingFalse));
+
+	IRExpr *res = IRExpr_Binop(
+		Iop_Or1,
+		IRExpr_Binop(
+			Iop_And1,
+			splitOn,
+			assumingTrue),
+		IRExpr_Binop(
+			Iop_And1,
+			IRExpr_Unop(
+				Iop_Not1,
+				splitOn),
+			assumingFalse));
+	res = internIRExpr(
+		simplifyIRExpr(res, AllowableOptimisations::defaultOptimisations),
+		intern);
+
+	if (debug_functional_underspecification)
+		printf("%d: Final result: %s\n\n", depth, nameIRExpr(res));
+
+	return res;
+}
+
+static CrashSummary *
+nonFunctionalSimplifications(
+	VexPtr<CrashSummary, &ir_heap> summary,
+	const VexPtr<OracleInterface> &oracle,
+	GarbageCollectionToken token)
+{
 	bool progress;
 	progress = true;
 	while (!TIMEOUT && progress) {
 		progress = false;
-		reg_set_t targetRegisters;
 		bool p;
 		p = true;
 		while (!TIMEOUT && p) {
@@ -950,7 +1194,7 @@ main(int argc, char *argv[])
 					summary->verificationCondition,
 					oracle,
 					&p,
-					ALLOW_GC);
+					token);
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
 					summary->storeMachine,
@@ -958,27 +1202,67 @@ main(int argc, char *argv[])
 					summary->verificationCondition,
 					oracle,
 					&p,
-					ALLOW_GC);
+					token);
 			progress |= p;
 		}
-		if (findTargetRegisters(summary, oracle, &targetRegisters, ALLOW_GC)) {
-			p = true;
-			while (!TIMEOUT && p) {
-				p = false;
-				summary->verificationCondition =
-					removeRedundantClauses(
-						summary->verificationCondition,
-						targetRegisters,
-						&p);
-				summary->verificationCondition =
-					removeUnderspecifiedClauses(
-						summary->verificationCondition,
-						targetRegisters,
-						&p);
-				progress |= p;
-			}
+		reg_set_t targetRegisters;
+		if (findTargetRegisters(summary, oracle, &targetRegisters, token)) {
+			summary->verificationCondition =
+				simplifyUsingUnderspecification(
+					summary->verificationCondition,
+					targetRegisters,
+					IRExpr_Const(IRConst_U1(1)),
+					&progress);
 		}
 	}
+
+	return summary;
+}
+
+static CrashSummary *
+functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
+			  const VexPtr<OracleInterface> &oracle,
+			  GarbageCollectionToken token)
+{
+	reg_set_t targetRegisters;
+	if (findTargetRegisters(summary, oracle, &targetRegisters, token)) {
+		internIRExprTable intern;
+		IRExpr *e = 
+			functionalUnderspecification(
+				summary->verificationCondition,
+				intern,
+				targetRegisters,
+				1);
+		if (e == underspecExpression)
+			summary->verificationCondition = IRExpr_Const(IRConst_U1(1));
+		else
+			summary->verificationCondition = simplify_via_anf(e);
+	}
+	return summary;
+}
+
+int
+main(int argc, char *argv[])
+{
+	init_sli();
+
+	VexPtr<CrashSummary, &ir_heap> summary;
+	char *first_line;
+
+	timeoutTimer.nextDue = now() + 30;
+	timeoutTimer.schedule();
+
+	summary = readBugReport(argv[1], &first_line);
+	VexPtr<OracleInterface> oracle(new DummyOracle(summary));
+
+	summary = nonFunctionalSimplifications(summary, oracle, ALLOW_GC);
+	if (!TIMEOUT)
+		summary = functionalSimplifications(summary, oracle, ALLOW_GC);
+	if (!TIMEOUT)
+		summary = nonFunctionalSimplifications(
+			summary,
+			oracle,
+			ALLOW_GC);
 
 	if (TIMEOUT)
 		fprintf(stderr, "timeout processing %s\n", argv[1]);
