@@ -195,8 +195,8 @@ enforceMustStoreBeforeCrash(StateMachine *sm, bool *progress)
 	return sm;
 }
 
-StateMachine *
-optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
+static StateMachine *
+_optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
 		     const VexPtr<OracleInterface> &oracle,
 		     bool is_ssa,
@@ -268,13 +268,23 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 StateMachine *
 optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
+		     const VexPtr<OracleInterface> &oracle,
+		     bool is_ssa,
+		     GarbageCollectionToken token,
+		     bool *progress)
+{
+	return _optimiseStateMachine(sm, opt, oracle, is_ssa, token, progress);
+}
+StateMachine *
+optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
+		     const AllowableOptimisations &opt,
 		     const VexPtr<Oracle> &oracle,
 		     bool is_ssa,
 		     GarbageCollectionToken token,
 		     bool *progress)
 {
 	VexPtr<OracleInterface> oracleI(oracle);
-	return optimiseStateMachine(sm, opt, oracle, is_ssa, token, progress);
+	return _optimiseStateMachine(sm, opt, oracleI, is_ssa, token, progress);
 }
 
 static void
