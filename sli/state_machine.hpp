@@ -875,7 +875,10 @@ public:
 	}
 };
 class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(rsp); }
+	void inputExpressions(std::vector<IRExpr *> &exprs) {
+		if (rsp)
+			exprs.push_back(rsp);
+	}
 public:
 	StateMachineSideEffectStartFunction(IRExpr *_rsp, int _frameId)
 		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
@@ -887,7 +890,10 @@ public:
 	int frameId;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "StartFunction %d, rsp = ", frameId);
-		ppIRExpr(rsp, f);
+		if (rsp)
+			ppIRExpr(rsp, f);
+		else
+			fprintf(f, "<inf>");
 	}
 	static bool parse(StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
 	{
@@ -895,9 +901,13 @@ public:
 		int frameId;
 		if (parseThisString("StartFunction ", str, &str) &&
 		    parseDecimalInt(&frameId, str, &str) &&
-		    parseThisString(", rsp = ", str, &str) &&
-		    parseIRExpr(&data, str, suffix)) {
-			*out = new StateMachineSideEffectStartFunction(data, frameId);
+		    parseThisString(", rsp = ", str, &str)) {
+			if (parseThisString("<inf>", str, suffix))
+				*out = new StateMachineSideEffectStartFunction(NULL, frameId);
+			else if (parseIRExpr(&data, str, suffix))
+				*out = new StateMachineSideEffectStartFunction(data, frameId);
+			else
+				return false;
 			return true;
 		}
 		return false;
@@ -909,8 +919,10 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		assert(frameId > 0);
-		sanityCheckIRExpr(rsp, live);
-		assert(rsp->type() == Ity_I64);
+		if (rsp) {
+			sanityCheckIRExpr(rsp, live);
+			assert(rsp->type() == Ity_I64);
+		}
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;

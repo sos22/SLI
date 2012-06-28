@@ -247,8 +247,10 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		}
 		sm = sm->optimise(opt, &done_something);
 		sm = bisimilarityReduction(sm, opt);
-		if (is_ssa)
+		if (is_ssa) {
 			sm = optimiseSSA(sm, &done_something);
+			sm = functionAliasAnalysis(sm, opt, oracle, &done_something);
+		}
 		if (opt.noExtend())
 			sm = useInitialMemoryLoads(sm, opt, oracle, &done_something);
 		if (opt.noLocalSurvival())

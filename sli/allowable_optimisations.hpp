@@ -20,6 +20,7 @@
    assumeNoInterferingStores -- Assume that there will be no stores
                                 from other threads which interfere
                                 with the machine we're currently
+				examining.
 
    noExtend -- If true, assume that the machine will never be
                expanded.  This means that we can discard some
