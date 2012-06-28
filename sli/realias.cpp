@@ -1067,8 +1067,7 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 		    (*it)->getSideEffect()->type != StateMachineSideEffect::Store)
 			continue;
 		StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)(*it)->getSideEffect();
-		if (!opt.ignoreSideEffects() &&
-		    oracle->hasConflictingRemoteStores(opt, s))
+		if (!opt.ignoreStore(s->rip.rip.rip))
 			continue;
 		bool noConflictingLoads = true;
 		for (auto it2 = at.content.begin(); noConflictingLoads && it2 != at.content.end(); it2++) {
