@@ -2,6 +2,7 @@
 #include "state_machine.hpp"
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
+#include "maybe.hpp"
 
 namespace _realias {
 
@@ -69,6 +70,35 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 	return res;
 }
 
+class FrameId : public Named {
+	char *mkName() const {
+		return my_asprintf("f%d", id);
+	}
+	int id;
+public:
+	FrameId(int _id)
+		: id(_id)
+	{}
+	FrameId()
+		: id(-9999999)
+	{}
+	bool operator<(const FrameId &o) const {
+		return id < o.id;
+	}
+	bool operator!=(const FrameId &o) const {
+		return *this < o || o < *this;
+	}
+	bool operator==(const FrameId &o) const {
+		return !(*this != o);
+	}
+	void sanity_check() const {
+	}
+	static FrameId root_function;
+};
+
+FrameId
+FrameId::root_function(-1);
+
 class PointsToSet : public Named {
 	char *mkName() const {
 		std::vector<const char *> fragments;
@@ -82,14 +112,14 @@ class PointsToSet : public Named {
 			if (m)
 				fragments.push_back(", ");
 			m = true;
-			fragments.push_back(vex_asprintf("%d", (*it)->frameId));
+			fragments.push_back(it->name());
 		}
 		fragments.push_back(")");
 		return flattenStringFragmentsMalloc(fragments);
 	}
 public:
 	PointsToSet(bool _mightPointOutsideStack,
-		    const std::set<StateMachineSideEffectStartFunction *> &_targets)
+		    const std::set<FrameId> &_targets)
 		: mightPointOutsideStack(_mightPointOutsideStack),
 		  targets(_targets)
 	{}
@@ -97,10 +127,12 @@ public:
 		: mightPointOutsideStack(false)
 	{}
 	bool mightPointOutsideStack;
-	std::set<StateMachineSideEffectStartFunction *> targets;
+	std::set<FrameId> targets;
 	void sanity_check() const {
 		assert(mightPointOutsideStack == true ||
 		       mightPointOutsideStack == false);
+		for (auto it = targets.begin(); it != targets.end(); it++)
+			it->sanity_check();
 	}
 	bool operator!=(const PointsToSet &o) const {
 		return mightPointOutsideStack != o.mightPointOutsideStack ||
@@ -126,13 +158,13 @@ class StackLayout : public Named {
 		auto it1 = rsps.rbegin();
 		auto it2 = functions.rbegin();
 		while (it1 != rsps.rend()) {
-			fragments.push_back(vex_asprintf("%d <%s> ",
-							 (*it2)->frameId,
+			fragments.push_back(vex_asprintf("%s <%s> ",
+							 it2->name(),
 							 nameIRExpr(*it1)));
 			it1++;
 			it2++;
 		}
-		fragments.push_back(vex_asprintf("%d", (*it2)->frameId));
+		fragments.push_back(it2->name());
 		return flattenStringFragmentsMalloc(fragments);
 	}
 	/* A stack layout looks like this:
@@ -149,17 +181,16 @@ class StackLayout : public Named {
 	   the function vector and rsp1 is the last thing in the rsps
 	   vector).
 	*/
-	std::vector<StateMachineSideEffectStartFunction *> functions;
-	std::vector<IRExpr *> rsps;
 public:
-
+	std::vector<FrameId> functions;
+	std::vector<IRExpr *> rsps;
 	void sanity_check() const {
 		assert(functions.size() == rsps.size() + 1);
 		/* No dupes */
 		for (auto it1 = functions.begin();
 		     it1 != functions.end();
 		     it1++) {
-			assert(*it1);
+			it1->sanity_check();
 			for (auto it2 = it1 + 1;
 			     it2 != functions.end();
 			     it2++)
@@ -169,31 +200,38 @@ public:
 			assert(*it);
 	}
 
-	explicit StackLayout(StateMachineSideEffectStartFunction *s)
+	explicit StackLayout(const FrameId &s)
 	{
 		functions.push_back(s);
 	}
+	StackLayout()
+	{}
 
-	bool operator==(const StackLayout &o)
+	bool operator==(const StackLayout &o) const
 	{
 		return o.functions == functions && o.rsps == rsps;
 	}
-
-	void startFunction(StateMachineSideEffectStartFunction *se)
+	bool operator!=(const StackLayout &o) const
 	{
-		functions.push_back(se);
-		rsps.push_back(se->rsp);
+		return !(*this == o);
+	}
+
+	void startFunction(const FrameId &s, IRExpr *rsp)
+	{
+		functions.push_back(s);
+		rsps.push_back(rsp);
 	}
 	void endFunction()
 	{
 		functions.pop_back();
 		rsps.pop_back();
 	}
-	void enumFrames(std::set<StateMachineSideEffectStartFunction *> &out)
+	void enumFrames(std::set<FrameId> &out)
 	{
 		out.insert(functions.begin(), functions.end());
 	}
-	StateMachineSideEffectStartFunction *identifyFrameFromPtr(IRExpr *ptr);
+	Maybe<FrameId> identifyFrameFromPtr(IRExpr *ptr);
+	size_t size() { return rsps.size(); }
 };
 
 enum compare_expressions_res {
@@ -242,7 +280,7 @@ compare_expressions(IRExpr *a, IRExpr *b)
 }
 
 
-StateMachineSideEffectStartFunction *
+Maybe<FrameId>
 StackLayout::identifyFrameFromPtr(IRExpr *ptr)
 {
 	assert(ptr->type() == Ity_I64);
@@ -252,30 +290,29 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr)
 		switch (compare_expressions(ptr, rsp)) {
 		case compare_expressions_lt:
 		case compare_expressions_eq:
-			return *it2;
+			return Maybe<FrameId>::just(*it2);
 		case compare_expressions_gt:
 			continue;
 		case compare_expressions_unknown:
-			return NULL;
+			return Maybe<FrameId>::nothing();
 		}
 		it2++;
 	}
-	return NULL;
+	return Maybe<FrameId>::nothing();
 }
 
 class StackLayoutTable {
-	std::map<StateMachineState *, StackLayout> content;
+	std::map<StateMachineState *, Maybe<StackLayout> > content;
+	bool build(StateMachine *inp, stateLabelT &labels,
+		   StackLayout &rootLayout);
 public:
-	StateMachineSideEffectStartFunction *rootFunction;
-	StackLayoutTable()
-		: rootFunction(NULL)
-	{}
-	bool build(StateMachine *inp);
+	bool build(StateMachine *inp, stateLabelT &labels);
 	void prettyPrint(FILE *f, const stateLabelT &labels) const {
 		for (auto it = content.begin(); it != content.end(); it++) {
 			auto i = labels.find(it->first);
 			assert(i != labels.end());
-			fprintf(f, "%d: %s\n", i->second, it->second.name());
+			fprintf(f, "%d: %s\n", i->second,
+				it->second.valid ? it->second.content.name() : "<none>");
 		}
 	}
 	void sanity_check() const {
@@ -283,11 +320,12 @@ public:
 		     it != content.end();
 		     it++) {
 			assert(it->first);
-			it->second.sanity_check();
+			if (it->second.valid)
+				it->second.content.sanity_check();
 		}
 	}
 	PointsToSet pointsToAnything();
-	StackLayout &forState(StateMachineState *s)
+	Maybe<StackLayout> &forState(StateMachineState *s)
 	{
 		auto it = content.find(s);
 		assert(it != content.end());
@@ -296,38 +334,103 @@ public:
 };
 
 bool
-StackLayoutTable::build(StateMachine *inp)
+StackLayoutTable::build(StateMachine *inp, stateLabelT &labels,
+			StackLayout &rootLayout)
 {
-	assert(!rootFunction);
-	rootFunction = new StateMachineSideEffectStartFunction(NULL, -1);
-	typedef std::pair<StateMachineState *, StackLayout> q_entry;
-
-	/* This does actually need to be BFS, for correctness. */
+	typedef std::pair<StateMachineState *, Maybe<StackLayout> > q_entry;
+	std::map<StateMachineSideEffectStartFunction *, FrameId> frameIds;
 	std::queue<q_entry> pending;
-	pending.push(q_entry(inp->root, StackLayout(rootFunction)));
+	int nextId = 1;
+	pending.push(q_entry(inp->root, Maybe<StackLayout>::just(rootLayout)));
 	while (!pending.empty()) {
 		q_entry q(pending.front());
 		pending.pop();
-		auto it_did_insert = content.insert(q);
+		if (debug_build_stack_layout)
+			printf("\tl%d -> %s\n",
+			       labels[q.first],
+			       q.second.valid ? q.second.content.name() : "<nothing>");
+		auto it_did_insert = content.insert(std::pair<StateMachineState *, Maybe<StackLayout> >
+						    (q.first, q.second));
 		auto it = it_did_insert.first;
 		auto did_insert = it_did_insert.second;
 		if (!did_insert) {
-			assert(it->second == q.second);
-			continue;
+			if (it->second == q.second) {
+				if (debug_build_stack_layout)
+					printf("\tl%d -> already converged\n",
+					       labels[q.first]);
+				continue;
+			}
+			if (!q.second.valid) {
+				if (debug_build_stack_layout)
+					printf("\tl%d -> set to Nothing\n",
+					       labels[q.first]);
+				it->second = q.second;
+			} else if (!it->second.valid) {
+				if (debug_build_stack_layout)
+					printf("\tl%d -> was already Nothing\n",
+					       labels[q.first]);
+				q.second = it->second;
+			} else {
+				if (debug_build_stack_layout)
+					printf("\tl%d: Stack mismatch: %s != %s\n",
+					       labels[q.first], q.second.content.name(),
+					       it->second.content.name());
+				it->second = q.second = Maybe<StackLayout>::nothing();
+			}
+		}
+		StateMachineSideEffect *smse = q.first->getSideEffect();
+		if (q.second.valid) {
+			if (smse && smse->type == StateMachineSideEffect::StartFunction) {
+				StateMachineSideEffectStartFunction *s = (StateMachineSideEffectStartFunction *)smse;
+				auto it_did_insert = frameIds.insert(
+					std::pair<StateMachineSideEffectStartFunction *, FrameId>(
+						s, FrameId(-99)));
+				auto it = it_did_insert.first;
+				auto did_insert = it_did_insert.second;
+				if (did_insert)
+					it->second = FrameId(nextId++);
+				q.second.content.startFunction(it->second, s->rsp);
+				if (debug_build_stack_layout)
+					printf("\tl%d: called %s\n", labels[q.first], it->second.name());
+			} else if (smse && smse->type == StateMachineSideEffect::EndFunction) {
+				StateMachineSideEffectEndFunction *e = (StateMachineSideEffectEndFunction *)smse;
+				if (q.second.content.rsps.size() == 0) {
+					rootLayout.rsps.insert(rootLayout.rsps.begin(),
+							       e->rsp);
+					rootLayout.functions.insert(rootLayout.functions.begin() + 1,
+								    FrameId(nextId++));
+					rootLayout.clearName();
+					if (debug_build_stack_layout)
+						printf("\tl%d: return from empty stack %s\n", labels[q.first], q.second.content.name());
+					return false;
+				}
+				q.second.content.endFunction();
+			}
 		}
 		std::vector<StateMachineState *> targets;
 		q.first->targets(targets);
-		StackLayout exitLayout(q.second);
-		if (q.first->getSideEffect()) {
-			if (q.first->getSideEffect()->type == StateMachineSideEffect::StartFunction)
-				exitLayout.startFunction((StateMachineSideEffectStartFunction *)
-							 q.first->getSideEffect());
-			else if (q.first->getSideEffect()->type == StateMachineSideEffect::EndFunction)
-				exitLayout.endFunction();
-		}
 		for (auto it = targets.begin(); it != targets.end(); it++)
-			pending.push(q_entry(*it, exitLayout));
+			pending.push(q_entry(*it, q.second));
 	}
+	return true;
+}
+
+bool
+StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
+{
+	StackLayout root_layout(FrameId::root_function);
+	if (debug_build_stack_layout)
+		printf("Building stack layout with root %s\n",
+		       root_layout.name());
+	while (1) {
+		if (build(inp, labels, root_layout))
+			break;
+		content.clear();
+		if (debug_build_stack_layout)
+			printf("Stack build failed; retrying with root %s\n",
+			       root_layout.name());
+	}
+	
 	sanity_check();
 	return true;
 }
@@ -335,9 +438,11 @@ StackLayoutTable::build(StateMachine *inp)
 PointsToSet
 StackLayoutTable::pointsToAnything()
 {
-	std::set<StateMachineSideEffectStartFunction *> allFunctions;
-	for (auto it = content.begin(); it != content.end(); it++)
-		it->second.enumFrames(allFunctions);
+	std::set<FrameId> allFunctions;
+	for (auto it = content.begin(); it != content.end(); it++) {
+		if (it->second.valid)
+			it->second.content.enumFrames(allFunctions);
+	}
 	return PointsToSet(true, allFunctions);
 }
 
@@ -345,7 +450,7 @@ class PointsToTable {
 	std::map<threadAndRegister, PointsToSet, threadAndRegister::fullCompare> content;
 public:
 	PointsToSet pointsToSetForExpr(IRExpr *e,
-				       StackLayout &sl,
+				       Maybe<StackLayout> &sl,
 				       StackLayoutTable &slt);
 	bool build(StateMachine *sm, StackLayoutTable &slt);
 	void prettyPrint(FILE *f);
@@ -361,7 +466,7 @@ public:
 
 PointsToSet
 PointsToTable::pointsToSetForExpr(IRExpr *e,
-				  StackLayout &sl,
+				  Maybe<StackLayout> &sl,
 				  StackLayoutTable &slt)
 {
 	if (e->type() != Ity_I64)
@@ -373,14 +478,14 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 			assert(content.count(iex->reg));
 			return content[iex->reg];
 		}
-		if (iex->reg.isReg() &&
+		if (sl.valid &&
+		    iex->reg.isReg() &&
 		    iex->reg.asReg() == OFFSET_amd64_RSP) {
-			StateMachineSideEffectStartFunction *f;
-			f = sl.identifyFrameFromPtr(iex);
-			if (f) {
+			Maybe<FrameId> f(sl.content.identifyFrameFromPtr(iex));
+			if (f.valid) {
 				PointsToSet p;
 				p.mightPointOutsideStack = false;
-				p.targets.insert(f);
+				p.targets.insert(f.content);
 				return p;
 			} else {
 				break;
@@ -391,7 +496,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 	case Iex_Load: {
 		PointsToSet p;
 		p.mightPointOutsideStack = true;
-		p.targets.insert(slt.rootFunction);
+		p.targets.insert(FrameId::root_function);
 		return p;
 	}
 	case Iex_Const: {
@@ -401,18 +506,18 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 	}
 	case Iex_Associative: {
 		IRExprAssociative *iex = (IRExprAssociative *)e;
-		if (iex->op == Iop_Add64 &&
+		if (sl.valid &&
+		    iex->op == Iop_Add64 &&
 		    iex->nr_arguments == 2 &&
 		    iex->contents[0]->tag == Iex_Const &&
 		    iex->contents[1]->tag == Iex_Get &&
 		    ((IRExprGet *)iex->contents[1])->reg.isReg() &&
 		    ((IRExprGet *)iex->contents[1])->reg.asReg() == OFFSET_amd64_RSP) {
-			StateMachineSideEffectStartFunction *f;
-			f = sl.identifyFrameFromPtr(iex);
-			if (f) {
+			Maybe<FrameId> f(sl.content.identifyFrameFromPtr(iex));
+			if (f.valid) {
 				PointsToSet p;
 				p.mightPointOutsideStack = false;
-				p.targets.insert(f);
+				p.targets.insert(f.content);
 				return p;
 			}
 		}
@@ -768,13 +873,13 @@ PointsToTable::refine(AliasTable &at,
 		StateMachineSideEffect *effect = smse->getSideEffect();
 		assert(effect);
 		PointsToSet newPts;
-		StackLayout &sl(slt.forState(smse));
+		Maybe<StackLayout> &sl(slt.forState(smse));
 		switch (effect->type) {
 		case StateMachineSideEffect::Load: {
 			const AliasTableEntry &e(at.storesForLoad(smse));
 			if (e.mightLoadInitial || e.mightHaveExternalStores) {
 				newPts.mightPointOutsideStack = true;
-				newPts.targets.insert(slt.rootFunction);
+				newPts.targets.insert(FrameId::root_function);
 			}
 			for (auto it2 = e.beginStores(); it2 != e.endStores(); it2++)
 				newPts |= pointsToSetForExpr(it2->data, sl, slt);
@@ -821,17 +926,15 @@ AliasTable::refine(PointsToTable &ptt, StackLayoutTable &slt, bool *done_somethi
 	     it != content.end();
 	     it++) {
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
-		StackLayout loadSl(slt.forState(it->first));
-		PointsToSet loadPts(ptt.pointsToSetForExpr(l->addr, loadSl, slt));
+		PointsToSet loadPts(ptt.pointsToSetForExpr(l->addr, slt.forState(it->first), slt));
 		if (debug_refine_alias_table)
 			printf("Examining alias table for state %d\n",
 			       labels[it->first]);
 		for (auto it2 = it->second.stores.begin();
 		     it2 != it->second.stores.end();
 			) {
-			StackLayout storeSl(slt.forState(*it2));
 			PointsToSet storePts(ptt.pointsToSetForExpr( ((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
-								     storeSl,
+								     slt.forState(*it2),
 								     slt));
 			if (storePts & loadPts) {
 				if (debug_refine_alias_table)
@@ -860,7 +963,7 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 		printf("%s, input:\n", __func__);
 		printStateMachine(sm, stdout, stateLabels);
 	}
-	if (!stackLayout.build(sm)) {
+	if (!stackLayout.build(sm, stateLabels)) {
 		if (any_debug)
 			printf("Failed to build stack layout!\n");
 		return sm;
