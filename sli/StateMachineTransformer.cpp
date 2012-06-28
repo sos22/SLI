@@ -48,7 +48,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStartFunct
 	IRExpr *v = doit(a->rsp, &b);
 	if (b) {
 		*d = true;
-		return new StateMachineSideEffectStartFunction(v, a->frameId);
+		return new StateMachineSideEffectStartFunction(v);
 	} else {
 		return NULL;
 	}
@@ -61,7 +61,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectEndFunctio
 	IRExpr *v = doit(a->rsp, &b);
 	if (b) {
 		*d = true;
-		return new StateMachineSideEffectEndFunction(v, a->frameId);
+		return new StateMachineSideEffectEndFunction(v);
 	} else {
 		return NULL;
 	}

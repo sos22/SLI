@@ -356,16 +356,14 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			(StateMachineSideEffectStartFunction *)smse1;
 		StateMachineSideEffectStartFunction *smsep2 =
 			(StateMachineSideEffectStartFunction *)smse2;
-		return smsep1->frameId == smsep2->frameId &&
-			definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
+		return definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
 	}
 	case StateMachineSideEffect::EndFunction: {
 		StateMachineSideEffectEndFunction *smsep1 =
 			(StateMachineSideEffectEndFunction *)smse1;
 		StateMachineSideEffectEndFunction *smsep2 =
 			(StateMachineSideEffectEndFunction *)smse2;
-		return smsep1->frameId == smsep2->frameId &&
-			definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
+		return definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
 	}
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:

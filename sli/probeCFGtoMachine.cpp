@@ -284,7 +284,6 @@ cfgNodeToState(Oracle *oracle,
 	       CFGNode *target,
 	       bool storeLike,
 	       MemoryAccessIdentifierAllocator &mai,
-	       int *nextFrameId,
 	       std::vector<reloc_t> &pendingRelocs)
 {
 	ThreadRip tr(tid, target->my_rip);
@@ -522,8 +521,7 @@ cfgNodeToState(Oracle *oracle,
 								tid,
 								OFFSET_amd64_RSP,
 								0),
-							Ity_I64),
-						(*nextFrameId)++),
+							Ity_I64)),
 					NULL);
 			*cursor = smp;
 			cursor = &smp->target;
@@ -537,8 +535,7 @@ cfgNodeToState(Oracle *oracle,
 								tid,
 								OFFSET_amd64_RSP,
 								0),
-							Ity_I64),
-						(*nextFrameId)++),
+							Ity_I64)),
 					NULL);
 			*cursor = smp;
 			cursor = &smp->target;
@@ -660,14 +657,12 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		   const DynAnalysisRip &proximalRip,
 		   StateMachineState *proximal,
 		   MemoryAccessIdentifierAllocator &mai,
-		   int *nextFrameId,
 		   std::set<StateMachine *> &out)
 {
 	struct _ : public cfg_translator {
 		const DynAnalysisRip &proximalRip;
 		MemoryAccessIdentifierAllocator &mai;		
 		StateMachineState *proximal;
-		int *nextFrameId;
 		StateMachineState *operator()(CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
@@ -675,17 +670,15 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 			if (DynAnalysisRip(e->my_rip) == proximalRip) {
 				return proximal;
 			} else {
-				return cfgNodeToState(oracle, tid, e, false, mai, nextFrameId, pendingRelocations);
+				return cfgNodeToState(oracle, tid, e, false, mai, pendingRelocations);
 			}
 		}
 		_(const DynAnalysisRip &_proximalRip,
 		  MemoryAccessIdentifierAllocator &_mai,
-		  StateMachineState *_proximal,
-		  int *_nextFrameId)
-			: proximalRip(_proximalRip), mai(_mai), proximal(_proximal),
-			  nextFrameId(_nextFrameId)
+		  StateMachineState *_proximal)
+			: proximalRip(_proximalRip), mai(_mai), proximal(_proximal)
 		{}
-	} doOne(proximalRip, mai, proximal, nextFrameId);
+	} doOne(proximalRip, mai, proximal);
 
 	std::map<CFGNode *, StateMachineState *> results;
 	for (auto it = roots.begin(); it != roots.end(); it++)
@@ -704,22 +697,19 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 
 static StateMachine *
 storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
-		   MemoryAccessIdentifierAllocator &mai,
-		   int *nextFrameId)
+		   MemoryAccessIdentifierAllocator &mai)
 {
 	struct _ : public cfg_translator {
 		MemoryAccessIdentifierAllocator *mai;
-		int *nextFrameId;
 		StateMachineState *operator()(CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations)
 		{
-			return cfgNodeToState(oracle, tid, e, true, *mai, nextFrameId, pendingRelocations);
+			return cfgNodeToState(oracle, tid, e, true, *mai, pendingRelocations);
 		}
 	} doOne;
 	doOne.mai = &mai;
-	doOne.nextFrameId = nextFrameId;
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<std::pair<unsigned, VexRip> > origin;
 	origin.push_back(std::pair<unsigned, VexRip>(tid, root->my_rip));
@@ -738,18 +728,16 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid,
 		   const DynAnalysisRip &targetRip,
 		   StateMachineState *proximal,
 		   MemoryAccessIdentifierAllocator &mai,
-		   int *nextFrameId,
 		   std::set<StateMachine *> &out)
 {
-	_probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, proximal, mai, nextFrameId, out);
+	_probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, proximal, mai, out);
 }
 
 StateMachine *
 storeCFGToMachine(Oracle *oracle,
 		  unsigned tid,
 		  CFGNode *root,
-		  MemoryAccessIdentifierAllocator &mai,
-		  int *nextFrameId)
+		  MemoryAccessIdentifierAllocator &mai)
 {
-	return _probeCFGsToMachine::storeCFGsToMachine(oracle, tid, root, mai, nextFrameId);
+	return _probeCFGsToMachine::storeCFGsToMachine(oracle, tid, root, mai);
 }

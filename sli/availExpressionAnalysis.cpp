@@ -753,7 +753,7 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 		IRExpr *newRsp;
 		newRsp = applyAvailSet(currentlyAvailable, sf->rsp, false, &doit, opt);
 		if (doit) {
-			newEffect = new StateMachineSideEffectStartFunction(newRsp, sf->frameId);
+			newEffect = new StateMachineSideEffectStartFunction(newRsp);
 			*done_something = true;
 		} else {
 			newEffect = smse;
@@ -767,7 +767,7 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 		IRExpr *newRsp;
 		newRsp = applyAvailSet(currentlyAvailable, sf->rsp, false, &doit, opt);
 		if (doit) {
-			newEffect = new StateMachineSideEffectEndFunction(newRsp, sf->frameId);
+			newEffect = new StateMachineSideEffectEndFunction(newRsp);
 			*done_something = true;
 		} else {
 			newEffect = smse;

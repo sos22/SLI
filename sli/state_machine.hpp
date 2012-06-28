@@ -880,16 +880,14 @@ class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
 			exprs.push_back(rsp);
 	}
 public:
-	StateMachineSideEffectStartFunction(IRExpr *_rsp, int _frameId)
+	StateMachineSideEffectStartFunction(IRExpr *_rsp)
 		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
-		  rsp(_rsp),
-		  frameId(_frameId)
+		  rsp(_rsp)
 	{
 	}
 	IRExpr *rsp;
-	int frameId;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "StartFunction %d, rsp = ", frameId);
+		fprintf(f, "StartFunction rsp = ");
 		if (rsp)
 			ppIRExpr(rsp, f);
 		else
@@ -898,14 +896,11 @@ public:
 	static bool parse(StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *data;
-		int frameId;
-		if (parseThisString("StartFunction ", str, &str) &&
-		    parseDecimalInt(&frameId, str, &str) &&
-		    parseThisString(", rsp = ", str, &str)) {
+		if (parseThisString("StartFunction rsp = ", str, &str)) {
 			if (parseThisString("<inf>", str, suffix))
-				*out = new StateMachineSideEffectStartFunction(NULL, frameId);
+				*out = new StateMachineSideEffectStartFunction(NULL);
 			else if (parseIRExpr(&data, str, suffix))
-				*out = new StateMachineSideEffectStartFunction(data, frameId);
+				*out = new StateMachineSideEffectStartFunction(data);
 			else
 				return false;
 			return true;
@@ -918,7 +913,6 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
-		assert(frameId > 0);
 		if (rsp) {
 			sanityCheckIRExpr(rsp, live);
 			assert(rsp->type() == Ity_I64);
@@ -928,33 +922,28 @@ public:
 		return false;
 	}
 	bool operator==(const StateMachineSideEffectStartFunction &o) const {
-		return frameId == o.frameId && rsp == o.rsp;
+		return rsp == o.rsp;
 	}
 };
 class StateMachineSideEffectEndFunction : public StateMachineSideEffect {
 	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(rsp); }
 public:
-	StateMachineSideEffectEndFunction(IRExpr *_rsp, int _frameId)
+	StateMachineSideEffectEndFunction(IRExpr *_rsp)
 		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
-		  rsp(_rsp),
-		  frameId(_frameId)
+		  rsp(_rsp)
 	{
 	}
 	IRExpr *rsp;
-	int frameId;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "EndFunction %d, rsp = ", frameId);
+		fprintf(f, "EndFunction rsp = ");
 		ppIRExpr(rsp, f);
 	}
 	static bool parse(StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *rsp;
-		int frameId;
-		if (parseThisString("EndFunction ", str, &str) &&
-		    parseDecimalInt(&frameId, str, &str) &&
-		    parseThisString(", rsp = ", str, &str) &&
+		if (parseThisString("EndFunction rsp = ", str, &str) &&
 		    parseIRExpr(&rsp, str, suffix)) {
-			*out = new StateMachineSideEffectEndFunction(rsp, frameId);
+			*out = new StateMachineSideEffectEndFunction(rsp);
 			return true;
 		}
 		return false;
@@ -965,7 +954,6 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
-		assert(frameId > 0);
 		sanityCheckIRExpr(rsp, live);
 		assert(rsp->type() == Ity_I64);
 	}
@@ -973,7 +961,7 @@ public:
 		return false;
 	}
 	bool operator==(const StateMachineSideEffectEndFunction &o) const {
-		return frameId == o.frameId && rsp == o.rsp;
+		return rsp == o.rsp;
 	}
 };
 
@@ -991,13 +979,11 @@ void probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots
 			const DynAnalysisRip &proximalRip,
 			StateMachineState *proximalCause,
 			MemoryAccessIdentifierAllocator &mai,
-			int *nextFrameId,
 			std::set<StateMachine *> &out);
 StateMachine *storeCFGToMachine(Oracle *oracle,
 				unsigned tid,
 				CFGNode *root,
-				MemoryAccessIdentifierAllocator &mai,
-				int *nextFrameId);
+				MemoryAccessIdentifierAllocator &mai);
 
 StateMachine *duplicateStateMachine(const StateMachine *inp);
 

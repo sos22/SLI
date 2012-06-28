@@ -279,7 +279,7 @@ rawDupeS(duplication_context &ctxt, const StateMachineSideEffectPhi *l)
 static StateMachineSideEffectStartFunction *
 rawDupeS(duplication_context &ctxt, const StateMachineSideEffectStartFunction *l)
 {
-	auto *res = new StateMachineSideEffectStartFunction(NULL, l->frameId);
+	auto *res = new StateMachineSideEffectStartFunction(NULL);
 	ctxt(&res->rsp, l->rsp, rawDupe);
 	return res;
 }
@@ -287,7 +287,7 @@ rawDupeS(duplication_context &ctxt, const StateMachineSideEffectStartFunction *l
 static StateMachineSideEffectEndFunction *
 rawDupeS(duplication_context &ctxt, const StateMachineSideEffectEndFunction *l)
 {
-	auto *res = new StateMachineSideEffectEndFunction(NULL, l->frameId);
+	auto *res = new StateMachineSideEffectEndFunction(NULL);
 	ctxt(&res->rsp, l->rsp, rawDupe);
 	return res;
 }
