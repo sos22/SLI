@@ -91,15 +91,13 @@ localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2)
 static bool
 localSimilarity2(StateMachineSideEffectStartFunction *smsesf1, StateMachineSideEffectStartFunction *smsesf2)
 {
-	return localSimilarity(smsesf1->rsp, smsesf2->rsp) &&
-		smsesf1->frameId == smsesf2->frameId;
+	return localSimilarity(smsesf1->rsp, smsesf2->rsp);
 }
 
 static bool
 localSimilarity2(StateMachineSideEffectEndFunction *smsesf1, StateMachineSideEffectEndFunction *smsesf2)
 {
-	return localSimilarity(smsesf1->rsp, smsesf2->rsp) &&
-		smsesf1->frameId == smsesf2->frameId;
+	return localSimilarity(smsesf1->rsp, smsesf2->rsp);
 }
 
 static bool
