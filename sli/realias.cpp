@@ -542,21 +542,16 @@ bool
 PointsToTable::build(StateMachine *sm, StackLayoutTable &slt)
 {
 	PointsToSet defaultTmpPointsTo(slt.pointsToAnything());
-	struct : public StateMachineTransformer {
-		PointsToSet *pts;
-		PointsToTable *ptt;
-		IRExpr *transformIex(IRExprGet *ieg) {
-			if (ieg->reg.isTemp())
-				ptt->content.insert(std::pair<threadAndRegister, PointsToSet>(ieg->reg, *pts));
-			return ieg;
-		}
-		bool rewriteNewStates() const { return false; }
-	} doit;
-	doit.pts = &defaultTmpPointsTo;
-	doit.ptt = this;
-	doit.transform(sm);
+	std::set<StateMachineSideEffect *> sideEffects;
+	enumSideEffects(sm, sideEffects);
 	if (TIMEOUT)
 		return false;
+	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+		threadAndRegister tr(threadAndRegister::invalid());
+		if ( (*it)->definesRegister(tr) &&
+		     tr.isTemp() )
+			content.insert(std::pair<threadAndRegister, PointsToSet>(tr, defaultTmpPointsTo));
+	}
 	sanity_check();
 	return true;
 }
