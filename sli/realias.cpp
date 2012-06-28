@@ -304,7 +304,7 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr)
 class StackLayoutTable {
 	std::map<StateMachineState *, Maybe<StackLayout> > content;
 	bool build(StateMachine *inp, stateLabelT &labels,
-		   StackLayout &rootLayout);
+		   int *nextRootId, StackLayout &rootLayout);
 public:
 	bool build(StateMachine *inp, stateLabelT &labels);
 	void prettyPrint(FILE *f, const stateLabelT &labels) const {
@@ -335,12 +335,13 @@ public:
 
 bool
 StackLayoutTable::build(StateMachine *inp, stateLabelT &labels,
+			int *rootNextId,
 			StackLayout &rootLayout)
 {
 	typedef std::pair<StateMachineState *, Maybe<StackLayout> > q_entry;
 	std::map<StateMachineSideEffectStartFunction *, FrameId> frameIds;
 	std::queue<q_entry> pending;
-	int nextId = 1;
+	int nextId = *rootNextId;
 	pending.push(q_entry(inp->root, Maybe<StackLayout>::just(rootLayout)));
 	while (!pending.empty()) {
 		q_entry q(pending.front());
@@ -398,7 +399,7 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels,
 					rootLayout.rsps.insert(rootLayout.rsps.begin(),
 							       e->rsp);
 					rootLayout.functions.insert(rootLayout.functions.begin() + 1,
-								    FrameId(nextId++));
+								    FrameId((*rootNextId)++));
 					rootLayout.clearName();
 					if (debug_build_stack_layout)
 						printf("\tl%d: return from empty stack %s\n", labels[q.first], q.second.content.name());
@@ -422,8 +423,9 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 	if (debug_build_stack_layout)
 		printf("Building stack layout with root %s\n",
 		       root_layout.name());
+	int nextRootId = 1;
 	while (1) {
-		if (build(inp, labels, root_layout))
+		if (build(inp, labels, &nextRootId, root_layout))
 			break;
 		content.clear();
 		if (debug_build_stack_layout)
