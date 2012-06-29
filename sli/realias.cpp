@@ -1053,7 +1053,14 @@ AliasTable::refine(StateMachine *sm,
 
 static StateMachine *
 functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
-{	
+{
+	/* This analysis relies on identifying when accesses are part
+	   of particular stack frames, but it's not good at
+	   distinguishing between the stacks of different threads.
+	   Easy fix: only appply it to single-threaded machines. */
+	if (sm->origin.size() != 1)
+		return sm;
+
 	StackLayoutTable stackLayout;
 	stateLabelT stateLabels;
 	if (any_debug) {
