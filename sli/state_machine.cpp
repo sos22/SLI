@@ -30,8 +30,7 @@ StateMachine *
 StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	bool b = false;
-	std::set<StateMachineState *> done;
-	StateMachineState *new_root = root->optimise(opt, &b, done);
+	StateMachineState *new_root = root->optimise(opt, &b);
 	if (b) {
 		*done_something = true;
 		return new StateMachine(new_root, origin);
@@ -41,22 +40,18 @@ StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 }
 
 StateMachineState *
-StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_something,
-				std::set<StateMachineState *> &done)
+StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
-	if (done.count(this))
-		return this;
-	done.insert(this);
 	if (trueTarget == StateMachineUnreached::get()) {
 		*done_something = true;
 		if (falseTarget == StateMachineUnreached::get())
 			return StateMachineUnreached::get();
 		else
-			return falseTarget->optimise(opt, done_something, done);
+			return falseTarget->optimise(opt, done_something);
 	}
 	if (falseTarget == StateMachineUnreached::get()) {
 		*done_something = true;
-		return trueTarget->optimise(opt, done_something, done);
+		return trueTarget->optimise(opt, done_something);
 	}
 	if (trueTarget == falseTarget) {
 		*done_something = true;
@@ -66,9 +61,9 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 	if (condition->tag == Iex_Const) {
 		*done_something = true;
 		if (((IRExprConst *)condition)->con->Ico.U1)
-			return trueTarget->optimise(opt, done_something, done);
+			return trueTarget->optimise(opt, done_something);
 		else
-			return falseTarget->optimise(opt, done_something, done);
+			return falseTarget->optimise(opt, done_something);
 	}
 	if (condition->tag == Iex_Unop && ((IRExprUnop *)condition)->op == Iop_Not1) {
 		*done_something = true;
@@ -77,8 +72,8 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		trueTarget = falseTarget;
 		falseTarget = t;
 	}
-	trueTarget = trueTarget->optimise(opt, done_something, done);
-	falseTarget = falseTarget->optimise(opt, done_something, done);
+	trueTarget = trueTarget->optimise(opt, done_something);
+	falseTarget = falseTarget->optimise(opt, done_something);
 
 	if (falseTarget->type == StateMachineState::Bifurcate) {
 		StateMachineBifurcate *falseBifur = (StateMachineBifurcate *)falseTarget;
@@ -737,16 +732,11 @@ StateMachineSideEffecting::prependSideEffect(StateMachineSideEffect *se)
 }
 
 StateMachineState *
-StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *done_something,
-				    std::set<StateMachineState *> &done)
+StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
-	if (done.count(this))
-		return this;
-	done.insert(this);
-
 	if (!sideEffect) {
 		*done_something = true;
-		return target->optimise(opt, done_something, done);
+		return target->optimise(opt, done_something);
 	}
 
 	if (target == StateMachineUnreached::get()) {
@@ -758,7 +748,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		return StateMachineUnreached::get();
 	}
 	sideEffect = sideEffect->optimise(opt, done_something);
-	target = target->optimise(opt, done_something, done);
+	target = target->optimise(opt, done_something);
 	if (!sideEffect) {
 		assert(*done_something);
 		return target;
@@ -767,8 +757,8 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 	if (sideEffect->type == StateMachineSideEffect::StartAtomic &&
 	    target->type == StateMachineState::SideEffecting) {
 		StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
-		if (t->sideEffect &&
-		    t->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+		assert(t->sideEffect);
+		if (t->sideEffect->type == StateMachineSideEffect::EndAtomic) {
 			/* Remove empty atomic section */
 			*done_something = true;
 			return t->target;
@@ -776,17 +766,17 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		
 		if (t->target->type == StateMachineState::SideEffecting) {
 			StateMachineSideEffecting *t2 = (StateMachineSideEffecting *)t->target;
-			if (t2->sideEffect &&
-			    t2->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+			assert(t2->sideEffect);
+			if (t2->sideEffect->type == StateMachineSideEffect::EndAtomic) {
 				/* Individual side effects are always
 				   atomic, so an atomic block with a
 				   single side effect in is a bit
 				   pointless. */
 				*done_something = true;
-				return new StateMachineSideEffecting(
-					t->origin,
-					t->sideEffect,
-					t2->target);
+				return (new StateMachineSideEffecting(
+						t->origin,
+						t->sideEffect,
+						t2->target))->optimise(opt, done_something);
 			}
 		}
 	}
@@ -866,14 +856,13 @@ StateMachine::sanityCheck() const
 
 StateMachineState *
 StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
-			       bool *done_something,
-			       std::set<StateMachineState *> &memo)
+			       bool *done_something)
 {
 	if (successors.size() == 0) {
 		*done_something = true;
 		return StateMachineUnreached::get();
 	}
-	successors[0] = successors[0]->optimise(opt, done_something, memo);
+	successors[0] = successors[0]->optimise(opt, done_something);
 
 	/* Remove duplicates.  Note that we don't want to sort
 	   successors here, since that would involve a dependency on
@@ -890,7 +879,7 @@ StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
 				*done_something = true;
 				it2 = successors.erase(it2);
 			} else if ( it1 == successors.begin() ) {
-				*it2 = (*it2)->optimise(opt, done_something, memo);
+				*it2 = (*it2)->optimise(opt, done_something);
 				if ( *it1 == *it2 ) {
 					*done_something = true;
 					it2 = successors.erase(it2);
@@ -909,7 +898,7 @@ StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
 	}
 	if (successors.size() == 1) {
 		*done_something = true;
-		return successors[0]->optimise(opt, done_something, memo);
+		return successors[0];
 	}
 	return this;
 }

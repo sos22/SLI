@@ -87,8 +87,7 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachineState *optimise(const AllowableOptimisations &, bool *,
-					    std::set<StateMachineState *> &done) = 0;
+	virtual StateMachineState *optimise(const AllowableOptimisations &, bool *) = 0;
 	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
 	bool canCrash(std::set<const StateMachineState *> &memo) const {
 		if (type == Crash)
@@ -182,8 +181,8 @@ protected:
 	virtual void prettyPrint(FILE *f) const = 0;
 	StateMachineTerminal(const VexRip &rip, StateMachineState::stateType type) : StateMachineState(rip, type) {}
 public:
-	StateMachineState *optimise(const AllowableOptimisations &, bool *,
-				    std::set<StateMachineState *> &) { return this; }
+	StateMachineState *optimise(const AllowableOptimisations &, bool *)
+	{ return this; }
 	virtual void visit(HeapVisitor &) {}
 	void targets(std::vector<StateMachineState **> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
@@ -291,8 +290,7 @@ public:
 	}
 	void prependSideEffect(StateMachineSideEffect *sideEffect);
 
-	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something,
-				    std::set<StateMachineState *> &done);
+	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
 	StateMachineSideEffect *getSideEffect() { return sideEffect; }
@@ -356,8 +354,7 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something,
-				    std::set<StateMachineState *> &);
+	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void targets(std::vector<StateMachineState **> &out) {
 		out.push_back(&falseTarget);
 		out.push_back(&trueTarget);
@@ -429,8 +426,7 @@ public:
 			hv(*it);
 	}
 
-	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something,
-				    std::set<StateMachineState *> &);
+	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void targets(std::vector<StateMachineState **> &out) {
 		out.reserve(out.size() + successors.size());
 		for (auto it = successors.begin(); it != successors.end(); it++)
