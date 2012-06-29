@@ -589,7 +589,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 	}
 
 	case Iex_Load: {
-		IRExprLoad *iex = (IRExprLoad *)iex;
+		IRExprLoad *iex = (IRExprLoad *)e;
 		PointsToSet p;
 		p.mightPointOutsideStack = true;
 		if (stackMightHaveLeaked(sm))
