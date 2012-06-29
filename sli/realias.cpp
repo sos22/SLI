@@ -1082,7 +1082,12 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 			if (debug_use_alias_table)
 				printf("Remove store l%d\n",
 				       stateLabels[*it]);
-			(*it)->sideEffect = NULL;
+			(*it)->sideEffect = 
+				new StateMachineSideEffectAssertFalse(
+					IRExpr_Unop(
+						Iop_BadPtr,
+						s->addr),
+					true);
 			progress = true;
 		}
 	}
