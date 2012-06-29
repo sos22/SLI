@@ -229,8 +229,8 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		if (TIMEOUT)
 			return sm;
 		done_something = false;
-		sm = internStateMachine(sm);
 		sm = sm->optimise(opt, &done_something);
+		sm = internStateMachine(sm);
 		if (opt.ignoreSideEffects())
 			removeSurvivingStates(sm, opt, &done_something);
 		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
@@ -257,7 +257,6 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 			sm = removeLocalSurvival(sm, opt, &done_something);
 		if (opt.mustStoreBeforeCrash())
 			sm = enforceMustStoreBeforeCrash(sm, &done_something);
-		sm = sm->optimise(opt, &done_something);
 		if (progress)
 			*progress |= done_something;
 	} while (done_something);
