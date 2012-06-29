@@ -863,7 +863,10 @@ public:
 		}
 		return false;
 	}
-	void visit(HeapVisitor &) {}
+	void visit(HeapVisitor &hv) {
+		for (auto it = generations.begin(); it != generations.end(); it++)
+			hv(it->second);
+	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
