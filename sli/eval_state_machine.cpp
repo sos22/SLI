@@ -255,6 +255,10 @@ public:
 			rv.val64 = res;
 			return res;
 		}
+		case Ity_F64:
+			return IRExpr_Unop(
+				Iop_ReinterpI64asF64,
+				register_value(reg, Ity_I64));
 		default:
 			abort();
 		}
