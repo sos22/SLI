@@ -93,11 +93,7 @@ public:
 	}
 	void sanity_check() const {
 	}
-	static FrameId root_function;
 };
-
-FrameId
-FrameId::root_function(-1);
 
 class PointsToSet : public Named {
 	char *mkName() const {
@@ -283,6 +279,7 @@ compare_expressions(IRExpr *a, IRExpr *b)
 Maybe<FrameId>
 StackLayout::identifyFrameFromPtr(IRExpr *ptr)
 {
+	bool definitelyStack = false;
 	assert(ptr->type() == Ity_I64);
 	auto it2 = functions.rbegin();
 	for (auto it = rsps.rbegin(); it != rsps.rend(); it++) {
@@ -292,20 +289,29 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr)
 		case compare_expressions_eq:
 			return Maybe<FrameId>::just(*it2);
 		case compare_expressions_gt:
+			definitelyStack = true;
 			continue;
 		case compare_expressions_unknown:
 			return Maybe<FrameId>::nothing();
 		}
 		it2++;
 	}
+	if (rsps.size() == 0 || definitelyStack) {
+		/* It's definitely on the stack, and it doesn't fit
+		   into any of the delimited frames -> it must be the
+		   root frame. */
+		return Maybe<FrameId>::just(functions[0]);
+	}
+	
 	return Maybe<FrameId>::nothing();
 }
 
 class StackLayoutTable {
 	std::map<StateMachineState *, Maybe<StackLayout> > content;
 	bool build(StateMachine *inp, stateLabelT &labels,
-		   int *nextRootId, StackLayout &rootLayout);
+		   int *nextRootId, StackLayout &rootStack);
 public:
+	std::set<FrameId> rootFrames;
 	bool build(StateMachine *inp, stateLabelT &labels);
 	void prettyPrint(FILE *f, const stateLabelT &labels) const {
 		for (auto it = content.begin(); it != content.end(); it++) {
@@ -335,14 +341,13 @@ public:
 
 bool
 StackLayoutTable::build(StateMachine *inp, stateLabelT &labels,
-			int *rootNextId,
-			StackLayout &rootLayout)
+			int *rootNextId, StackLayout &rootStack)
 {
 	typedef std::pair<StateMachineState *, Maybe<StackLayout> > q_entry;
 	std::map<StateMachineSideEffectStartFunction *, FrameId> frameIds;
 	std::queue<q_entry> pending;
 	int nextId = *rootNextId;
-	pending.push(q_entry(inp->root, Maybe<StackLayout>::just(rootLayout)));
+	pending.push(q_entry(inp->root, Maybe<StackLayout>::just(rootStack)));
 	while (!pending.empty()) {
 		q_entry q(pending.front());
 		pending.pop();
@@ -396,11 +401,11 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels,
 			} else if (smse && smse->type == StateMachineSideEffect::EndFunction) {
 				StateMachineSideEffectEndFunction *e = (StateMachineSideEffectEndFunction *)smse;
 				if (q.second.content.rsps.size() == 0) {
-					rootLayout.rsps.insert(rootLayout.rsps.begin(),
-							       e->rsp);
-					rootLayout.functions.insert(rootLayout.functions.begin() + 1,
-								    FrameId((*rootNextId)++));
-					rootLayout.clearName();
+					rootStack.rsps.insert(rootStack.rsps.begin(),
+							      e->rsp);
+					rootStack.functions.insert(rootStack.functions.begin() + 1,
+								   FrameId((*rootNextId)++));
+					rootStack.clearName();
 					if (debug_build_stack_layout)
 						printf("\tl%d: return from empty stack %s\n", labels[q.first], q.second.content.name());
 					return false;
@@ -419,20 +424,24 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels,
 bool
 StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 {
-	StackLayout root_layout(FrameId::root_function);
+	StackLayout rootStack(FrameId(0));
 	if (debug_build_stack_layout)
 		printf("Building stack layout with root %s\n",
-		       root_layout.name());
+		       rootStack.name());
 	int nextRootId = 1;
 	while (1) {
-		if (build(inp, labels, &nextRootId, root_layout))
+		if (build(inp, labels, &nextRootId, rootStack))
 			break;
 		content.clear();
 		if (debug_build_stack_layout)
 			printf("Stack build failed; retrying with root %s\n",
-			       root_layout.name());
+			       rootStack.name());
 	}
-	
+	if (debug_build_stack_layout)
+		printf("Built stack layout, root stack %s\n",
+		       rootStack.name());
+	for (auto it = rootStack.functions.begin(); it != rootStack.functions.end(); it++)
+		rootFrames.insert(*it);
 	sanity_check();
 	return true;
 }
@@ -452,6 +461,7 @@ class PointsToTable {
 	std::map<threadAndRegister, PointsToSet, threadAndRegister::fullCompare> content;
 public:
 	PointsToSet pointsToSetForExpr(IRExpr *e,
+				       StateMachine *sm,
 				       Maybe<StackLayout> &sl,
 				       StackLayoutTable &slt);
 	bool build(StateMachine *sm, StackLayoutTable &slt);
@@ -466,8 +476,61 @@ public:
 	PointsToTable refine(AliasTable &at, StateMachine *sm, StackLayoutTable &slt, bool *done_something);
 };
 
+static bool
+aliasConfigForThread(StateMachine *sm, unsigned tid,
+		     Oracle::ThreadRegisterAliasingConfiguration *config)
+{
+	VexRip origin;
+	bool have_origin = false;
+	for (auto it = sm->origin.begin();
+	     !have_origin && it != sm->origin.end();
+	     it++) {
+		if (it->first == tid) {
+			origin = it->second;
+			have_origin = true;
+		}
+	}
+	assert(have_origin);
+	StaticRip rip(origin);
+	Oracle::Function f(rip);
+	return f.aliasConfigOnEntryToInstruction(rip, config);
+}
+
+static bool
+aliasConfigForReg(StateMachine *sm, const threadAndRegister &reg,
+		  Oracle::PointerAliasingSet *alias)
+{
+	assert(reg.isReg());
+	assert(reg.gen() == (unsigned)-1);
+	if (reg.asReg() >= Oracle::NR_REGS * 8)
+		return false;
+	assert(reg.asReg() % 8 == 0);
+
+	Oracle::ThreadRegisterAliasingConfiguration config;
+	if (!aliasConfigForThread(sm, reg.tid(), &config))
+		return false;
+	*alias = config.v[reg.asReg() / 8];
+	return true;
+}
+
+static bool
+stackMightHaveLeaked(StateMachine *sm)
+{
+	for (auto it = sm->origin.begin(); it != sm->origin.end(); it++) {
+		Oracle::ThreadRegisterAliasingConfiguration config;
+		StaticRip rip(it->second);
+		Oracle::Function f(rip);
+		if (!f.aliasConfigOnEntryToInstruction(rip, &config))
+			return true;
+		if (config.stackHasLeaked)
+			return true;
+	}
+	return false;
+}
+
 PointsToSet
 PointsToTable::pointsToSetForExpr(IRExpr *e,
+				  StateMachine *sm,
 				  Maybe<StackLayout> &sl,
 				  StackLayoutTable &slt)
 {
@@ -499,14 +562,38 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 			}
 		}
 
-		if (iex->reg.gen() != (unsigned)-1)
+		if (iex->reg.gen() != (unsigned)-1) {
+			/* Non-initial registers might point anywhere,
+			   including into any stack frame, and we
+			   can't say anything interesting about
+			   them. */
 			break;
+		}
+
+		Oracle::PointerAliasingSet alias(-1);
+		if (aliasConfigForReg(sm, iex->reg, &alias)) {
+			PointsToSet res;
+			if (alias & Oracle::PointerAliasingSet::nonStackPointer)
+				res.mightPointOutsideStack = true;
+			else
+				res.mightPointOutsideStack = false;
+			if (alias & Oracle::PointerAliasingSet::stackPointer)
+				res.targets = slt.rootFrames;
+			return res;
+		}
+		/* Give up and return something conservative.  We know
+		   it can't point at any stack frames which weren't
+		   live when we started, because it's a gen -1
+		   register. */
+		return PointsToSet(true, slt.rootFrames);
 	}
-		/* Fall through */
+
 	case Iex_Load: {
+		IRExprLoad *iex = (IRExprLoad *)iex;
 		PointsToSet p;
 		p.mightPointOutsideStack = true;
-		p.targets.insert(FrameId::root_function);
+		if (stackMightHaveLeaked(sm))
+			p.targets = slt.rootFrames;
 		return p;
 	}
 	case Iex_Const: {
@@ -534,7 +621,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		if (iex->op == Iop_Add64) {
 			PointsToSet res;
 			for (int i = 0; i < iex->nr_arguments; i++)
-				res |= pointsToSetForExpr(iex->contents[i], sl, slt);
+				res |= pointsToSetForExpr(iex->contents[i], sm, sl, slt);
 			return res;
 		}
 
@@ -672,7 +759,8 @@ public:
 		assert(it != content.end());
 		return it->second;
 	}
-	void refine(PointsToTable &ptt, StackLayoutTable &slt, bool *done_something,
+	void refine(StateMachine *sm, PointsToTable &ptt,
+		    StackLayoutTable &slt, bool *done_something,
 		    stateLabelT &labels);
 };
 
@@ -884,15 +972,15 @@ PointsToTable::refine(AliasTable &at,
 			const AliasTableEntry &e(at.storesForLoad(smse));
 			if (e.mightLoadInitial || e.mightHaveExternalStores) {
 				newPts.mightPointOutsideStack = true;
-				newPts.targets.insert(FrameId::root_function);
+				newPts.targets = slt.rootFrames;
 			}
 			for (auto it2 = e.beginStores(); it2 != e.endStores(); it2++)
-				newPts |= pointsToSetForExpr(it2->data, sl, slt);
+				newPts |= pointsToSetForExpr(it2->data, sm, sl, slt);
 			break;
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(c->value, sl, slt);
+			newPts = pointsToSetForExpr(c->value, sm, sl, slt);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
@@ -924,14 +1012,17 @@ PointsToTable::refine(AliasTable &at,
 }
 
 void
-AliasTable::refine(PointsToTable &ptt, StackLayoutTable &slt, bool *done_something,
+AliasTable::refine(StateMachine *sm,
+		   PointsToTable &ptt,
+		   StackLayoutTable &slt,
+		   bool *done_something,
 		   stateLabelT &labels)
 {
 	for (auto it = content.begin();
 	     it != content.end();
 	     it++) {
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
-		PointsToSet loadPts(ptt.pointsToSetForExpr(l->addr, slt.forState(it->first), slt));
+		PointsToSet loadPts(ptt.pointsToSetForExpr(l->addr, sm, slt.forState(it->first), slt));
 		if (debug_refine_alias_table)
 			printf("Examining alias table for state %d\n",
 			       labels[it->first]);
@@ -939,6 +1030,7 @@ AliasTable::refine(PointsToTable &ptt, StackLayoutTable &slt, bool *done_somethi
 		     it2 != it->second.stores.end();
 			) {
 			PointsToSet storePts(ptt.pointsToSetForExpr( ((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
+								     sm,
 								     slt.forState(*it2),
 								     slt));
 			if (storePts & loadPts) {
@@ -961,7 +1053,7 @@ AliasTable::refine(PointsToTable &ptt, StackLayoutTable &slt, bool *done_somethi
 
 static StateMachine *
 functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
-{
+{	
 	StackLayoutTable stackLayout;
 	stateLabelT stateLabels;
 	if (any_debug) {
@@ -1003,16 +1095,13 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 	while (1) {
 		bool p = false;
 		PointsToTable ptt2 = ptt.refine(at, sm, stackLayout, &p);
-		if (!p)
-			break;
-		if (debug_refine_points_to_table) {
+		if (p && debug_refine_points_to_table) {
 			printf("Refined points-to table:\n");
 			ptt2.prettyPrint(stdout);
 		}
 		ptt = ptt2;
 
-		p = false;
-		at.refine(ptt, stackLayout, &p, stateLabels);
+		at.refine(sm, ptt, stackLayout, &p, stateLabels);
 		if (!p)
 			break;
 		if (debug_refine_alias_table) {
