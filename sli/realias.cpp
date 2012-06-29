@@ -480,19 +480,27 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 			assert(content.count(iex->reg));
 			return content[iex->reg];
 		}
-		if (sl.valid &&
-		    iex->reg.isReg() &&
+		if (iex->reg.isReg() &&
 		    iex->reg.asReg() == OFFSET_amd64_RSP) {
-			Maybe<FrameId> f(sl.content.identifyFrameFromPtr(iex));
-			if (f.valid) {
-				PointsToSet p;
-				p.mightPointOutsideStack = false;
-				p.targets.insert(f.content);
-				return p;
+			if (sl.valid) {
+				Maybe<FrameId> f(sl.content.identifyFrameFromPtr(iex));
+				if (f.valid) {
+					PointsToSet p;
+					p.mightPointOutsideStack = false;
+					p.targets.insert(f.content);
+					return p;
+				} else {
+					break;
+				}
 			} else {
-				break;
+				PointsToSet p(slt.pointsToAnything());
+				p.mightPointOutsideStack = false;
+				return p;
 			}
 		}
+
+		if (iex->reg.gen() != (unsigned)-1)
+			break;
 	}
 		/* Fall through */
 	case Iex_Load: {
