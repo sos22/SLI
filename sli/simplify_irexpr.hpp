@@ -11,6 +11,7 @@ bool definitelyUnevaluatable(IRExpr *e);
 bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
 bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
 IRExpr *simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt);
+IRExpr *optimiseAssuming(IRExpr *iex, const IRExpr *assumption);
 void addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg);
 bool physicallyEqual(const IRConst *a, const IRConst *b);
 bool physicallyEqual(const IRExpr *a, const IRExpr *b);

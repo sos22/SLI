@@ -1240,6 +1240,17 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 	return assoc;
 }
 
+IRExpr *
+optimiseAssuming(IRExpr *iex, const IRExpr *assumption)
+{
+	bool p = true;
+	while (p) {
+		p = false;
+		iex = optimiseAssuming(iex, assumption, &p);
+	}
+	return iex;
+}
+
 /* Down-cast @expr so that it is of type @desiredType. */
 IRExpr *
 coerceTypes(IRType desiredType, IRExpr *expr)

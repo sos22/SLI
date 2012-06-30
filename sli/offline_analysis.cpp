@@ -250,6 +250,7 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		if (is_ssa) {
 			sm = optimiseSSA(sm, &done_something);
 			sm = functionAliasAnalysis(sm, opt, oracle, &done_something);
+			sm = phiElimination(sm, opt, &done_something);
 		}
 		if (opt.noExtend())
 			sm = useInitialMemoryLoads(sm, opt, oracle, &done_something);

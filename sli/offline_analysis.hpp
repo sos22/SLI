@@ -248,6 +248,8 @@ StateMachine *functionAliasAnalysis(StateMachine *machine,
 				    const AllowableOptimisations &opt,
 				    OracleInterface *oracle,
 				    bool *done_something);
+StateMachine *phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
+			     bool *done_something);
 
 StateMachine *removeAssertions(VexPtr<StateMachine, &ir_heap> sm,
 			       const AllowableOptimisations &opt,
