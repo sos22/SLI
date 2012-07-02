@@ -218,6 +218,8 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 			     end)))));
 		break;
 	}
+	case LibraryFunctionTemplate::__stack_chk_fail:
+		return StateMachineUnreached::get();
 	case LibraryFunctionTemplate::none:
 		abort();
 	}
