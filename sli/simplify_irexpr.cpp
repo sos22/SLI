@@ -1168,6 +1168,12 @@ top2:
 static IRExpr *
 optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 {
+	if (iex->tag == Iex_Const) {
+		/* Nothing to do in this case, and an early exit means
+		   that we won't set *done_something and cause an
+		   infinite loop. */
+		return iex;
+	}
 	bool invertAssumption;
 	invertAssumption = false;
 	if (assumption->tag == Iex_Unop) {
