@@ -462,6 +462,7 @@ static IRExpr *
 verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachine,
 				     VexPtr<StateMachine, &ir_heap> probeMachine,
 				     VexPtr<OracleInterface> &oracle,
+				     const MemoryAccessIdentifierAllocator &mai,
 				     const AllowableOptimisations &optIn,
 				     GarbageCollectionToken token)
 {
@@ -532,6 +533,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 			oracle,
 			assumption,
 			optIn.disablepreferCrash(),
+			mai,
 			token);
 	if (!crash_constraint) {
 		fprintf(_logfile, "\t\tfailed to build crash constraint\n");
@@ -715,6 +717,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 			sm_ssa,
 			probeMachine,
 			oracleI,
+			mai,
 			optIn,
 			token));
 	if (!base_verification_condition)
@@ -770,6 +773,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 			sm_ssa,
 			truncatedMachine,
 			oracleI,
+			mai,
 			optIn,
 			token);
 		if (!t || t == residual_verification_condition ||

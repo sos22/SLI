@@ -59,7 +59,7 @@ public:
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 public:
 #define all_state_types(f)						\
-	f(Unreached) f(Crash) f(NoCrash) f(Stub) f(Bifurcate) f(SideEffecting) f(NdChoice)
+	f(Unreached) f(Crash) f(NoCrash) f(Stub) f(Bifurcate) f(SideEffecting)
 #define mk_state_type(name) name ,
 	enum stateType {
 		all_state_types(mk_state_type)
@@ -369,80 +369,6 @@ public:
 		assert(condition->type() == Ity_I1);
 	}
 	StateMachineSideEffect *getSideEffect() { return NULL; }
-};
-
-/* A special state which arbitrarily picks one of N possible successor
-   states.  Used to model things like loop unrolling, where we use an
-   ND choice to decide how many iterations we want to take. */
-class StateMachineNdChoice : public StateMachineState {
-public:
-	std::vector<StateMachineState *> successors;
-	StateMachineNdChoice(const VexRip &origin,
-			     const std::vector<StateMachineState *> &content)
-		: StateMachineState(origin, StateMachineState::NdChoice),
-		  successors(content)
-	{}
-	StateMachineNdChoice(const VexRip &origin)
-		: StateMachineState(origin, StateMachineState::NdChoice)
-	{}
-
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
-	{
-		fprintf(f, "%s: ND {", origin.name());
-		for (auto it = successors.begin(); it != successors.end(); it++) {
-			if (it != successors.begin())
-				fprintf(f, ", ");
-			fprintf(f, "l%d", labels[*it]);
-		}
-		fprintf(f, "}");
-	}
-	static bool parse(StateMachineNdChoice **out, const char *str, const char **suffix)
-	{
-		VexRip origin;
-		if (parseVexRip(&origin, str, &str) &&
-		    parseThisString(": ND {", str, &str)) {
-			std::vector<StateMachineState *> successors;
-			while (1) {
-				if (parseThisChar('}', str, suffix))
-					break;
-				if (successors.size() != 0 && !parseThisString(", ", str, &str))
-					return false;
-				if (!parseThisChar('l', str, &str))
-					return false;
-				int l;
-				if (!parseDecimalInt(&l, str, &str))
-					return false;
-				successors.push_back((StateMachineState *)l);
-			}
-			*out = new StateMachineNdChoice(origin, successors);
-			return true;
-		}
-		return false;
-	}
-
-	void visit(HeapVisitor &hv)
-	{
-		for (auto it = successors.begin(); it != successors.end(); it++)
-			hv(*it);
-	}
-
-	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void targets(std::vector<StateMachineState **> &out) {
-		out.reserve(out.size() + successors.size());
-		for (auto it = successors.begin(); it != successors.end(); it++)
-			out.push_back(&*it);
-	}
-	void targets(std::vector<const StateMachineState *> &out) const {
-		out.insert(out.end(), successors.begin(), successors.end());
-	}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const
-	{
-		for (auto it = successors.begin(); it != successors.end(); it++) {
-			assert(*it);
-			(*it)->sanityCheck(live);
-		}
-	}
-	StateMachineSideEffect *getSideEffect() { return NULL; }	
 };
 
 /* A node in the state machine representing a bit of code which we

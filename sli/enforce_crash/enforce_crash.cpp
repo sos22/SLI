@@ -14,6 +14,7 @@
 #include "zapBindersAndFreeVariables.hpp"
 #include "enforce_crash.hpp"
 #include "allowable_optimisations.hpp"
+#include "alloc_mai.hpp"
 
 void
 instrToInstrSetMap::print(FILE *f)
@@ -309,6 +310,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	IRExpr *requirement =
 		findHappensBeforeRelations(summary, oracleI,
 					   AllowableOptimisations::defaultOptimisations,
+					   MemoryAccessIdentifierAllocator(),
 					   token);
 	fprintf(_logfile, "Crash requirement:\n");
 	ppIRExpr(requirement, _logfile);

@@ -6,6 +6,7 @@ class OracleInterface;
 class StateMachine;
 class StateMachineSideEffectStore;
 class CrashSummary;
+class MemoryAccessIdentifierAllocator;
 
 class remoteMacroSectionsT : public GarbageCollected<remoteMacroSectionsT, &ir_heap> {
 	typedef std::vector<std::pair<StateMachineSideEffectStore *,
@@ -67,6 +68,7 @@ IRExpr *crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &pro
 				       const VexPtr<OracleInterface> &oracle,
 				       const VexPtr<IRExpr, &ir_heap> &initialStateCondition,
 				       const AllowableOptimisations &opt,
+				       MemoryAccessIdentifierAllocator mai,
 				       GarbageCollectionToken token);
 bool findRemoteMacroSections(const VexPtr<StateMachine, &ir_heap> &readMachine,
 			     const VexPtr<StateMachine, &ir_heap> &writeMachine,
@@ -94,6 +96,7 @@ IRExpr *getCrossMachineCrashRequirement(
 	const VexPtr<OracleInterface> &oracle,
 	const VexPtr<IRExpr, &ir_heap> &assumption,
 	const AllowableOptimisations &opt,
+	MemoryAccessIdentifierAllocator mai,
 	GarbageCollectionToken token);
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */

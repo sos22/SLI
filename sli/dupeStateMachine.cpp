@@ -328,14 +328,6 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 		ctxt(&res->target, sme->target, rawDupe);
 		return res;
 	}
-	case StateMachineState::NdChoice: {
-		StateMachineNdChoice *smnd = (StateMachineNdChoice *)inp;
-		std::vector<StateMachineState *> s(smnd->successors);
-		StateMachineNdChoice *res = new StateMachineNdChoice(inp->origin, s);
-		for (auto it = res->successors.begin(); it != res->successors.end(); it++)
-			ctxt(&*it, *it, rawDupe);
-		return res;
-	}
 	case StateMachineState::Unreached:
 		return StateMachineUnreached::get();
 	case StateMachineState::Crash:

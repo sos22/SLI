@@ -13,9 +13,10 @@ namespace _probeCFGsToMachine {
 
 static void
 ndChoiceState(StateMachineState **slot,
-	      const VexRip &vr,
+	      const ThreadRip &vr,
 	      std::vector<reloc_t> &pendingRelocs,
 	      std::vector<CFGNode *> &targets,
+	      MemoryAccessIdentifierAllocator &mai,
 	      bool storeLike,
 	      std::set<CFGNode *> *usedExits)
 {
@@ -30,16 +31,41 @@ ndChoiceState(StateMachineState **slot,
 		pendingRelocs.push_back(
 			reloc_t(slot, targets[0]));
 	} else {
-		StateMachineNdChoice *nd =
-			new StateMachineNdChoice(vr);
-		nd->successors.resize(targets.size());
-		for (unsigned x = 0; x < targets.size(); x++) {
+		IRExpr *fv = mai.freeVariable(Ity_I64, vr, false);
+		StateMachineSideEffecting *r =
+			new StateMachineSideEffecting(
+				vr.rip,
+				new StateMachineSideEffectAssertFalse(
+					IRExpr_Unop(
+						Iop_Not1,
+						IRExpr_Binop(
+							Iop_CmpEQ64,
+							fv,
+							IRExpr_Const(
+								IRConst_U64(0)))),
+					true),
+				NULL);
+		pendingRelocs.push_back(
+			reloc_t(&r->target, targets[0]));
+		if (usedExits)
+			usedExits->insert(targets[0]);
+		StateMachineState *acc = r;
+		for (unsigned x = 1; x < targets.size(); x++) {
+			StateMachineBifurcate *b = 
+				new StateMachineBifurcate(
+					vr.rip,
+					IRExpr_Binop(
+						Iop_CmpEQ64,
+						fv,
+						IRExpr_Const(IRConst_U64(x))),
+					NULL,
+					acc);
+			pendingRelocs.push_back(
+				reloc_t(&b->trueTarget, targets[x]));
 			if (usedExits)
 				usedExits->insert(targets[x]);
-			pendingRelocs.push_back(
-				reloc_t(&nd->successors[x], targets[x]));
 		}
-		*slot = nd;
+		*slot = acc;
 	}
 }
 
@@ -258,7 +284,6 @@ canonicaliseRbp(StateMachineState *root, const VexRip &rip, Oracle *oracle)
 			case StateMachineState::Crash:
 			case StateMachineState::NoCrash:
 			case StateMachineState::Unreached:
-			case StateMachineState::NdChoice:
 			case StateMachineState::Stub:
 				break;
 			case StateMachineState::SideEffecting: {
@@ -459,8 +484,8 @@ cfgNodeToState(Oracle *oracle,
 				stmt->guard,
 				NULL,
 				NULL);
-			ndChoiceState(&smb->trueTarget, target->my_rip,
-				      pendingRelocs, targets, storeLike, &usedExits);
+			ndChoiceState(&smb->trueTarget, tr, pendingRelocs,
+				      targets, mai, storeLike, &usedExits);
 			*cursor = smb;
 			cursor = &smb->falseTarget;
 			break;
@@ -558,7 +583,7 @@ cfgNodeToState(Oracle *oracle,
 		IRStmtIMark *mark = (IRStmtIMark *)irsb->stmts[i];
 		getTargets(target, mark->addr.rip, targets);
 	}
-	ndChoiceState(cursor, target->my_rip, pendingRelocs, targets, storeLike, NULL);
+	ndChoiceState(cursor, tr, pendingRelocs, targets, mai, storeLike, NULL);
 
 	return root;
 }

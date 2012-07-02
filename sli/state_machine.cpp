@@ -854,55 +854,6 @@ StateMachine::sanityCheck() const
 		it->first->sanityCheck(&definedAtTopOfState[it->first]);
 }
 
-StateMachineState *
-StateMachineNdChoice::optimise(const AllowableOptimisations &opt,
-			       bool *done_something)
-{
-	if (successors.size() == 0) {
-		*done_something = true;
-		return StateMachineUnreached::get();
-	}
-	successors[0] = successors[0]->optimise(opt, done_something);
-
-	/* Remove duplicates.  Note that we don't want to sort
-	   successors here, since that would involve a dependency on
-	   pointer ordering, which causes problems for determinacy. */
-	for (auto it1 = successors.begin(); it1 != successors.end(); ) {
-		if ((*it1)->type == StateMachineState::Unreached) {
-			/* Unreached nodes can be safely removed */
-			it1 = successors.erase(it1);
-			*done_something = true;
-			continue;
-		}
-		for (auto it2 = it1 + 1; it2 != successors.end(); ) {
-			if ( *it1 == *it2 ) {
-				*done_something = true;
-				it2 = successors.erase(it2);
-			} else if ( it1 == successors.begin() ) {
-				*it2 = (*it2)->optimise(opt, done_something);
-				if ( *it1 == *it2 ) {
-					*done_something = true;
-					it2 = successors.erase(it2);
-				} else {
-					it2++;
-				}
-			} else {
-				it2++;
-			}
-		}
-		it1++;
-	}
-	if (successors.size() == 0) {
-		*done_something = true;
-		return StateMachineUnreached::get();
-	}
-	if (successors.size() == 1) {
-		*done_something = true;
-		return successors[0];
-	}
-	return this;
-}
-
 MemoryAccessIdentifier
 MemoryAccessIdentifierAllocator::operator()(const ThreadRip &rip)
 {

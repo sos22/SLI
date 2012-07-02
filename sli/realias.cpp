@@ -481,7 +481,7 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 	assert(inp->origin.size() == 1);
 	const VexRip &origin(inp->origin[0].second);
 	assert(rootStack.functions.size() <= origin.stack.size());
-	for (int x = 0; x < rootStack.functions.size() - 1; x++) {
+	for (int x = 0; x < (int)rootStack.functions.size() - 1; x++) {
 		StaticRip rtrnRip(origin.stack[origin.stack.size() - x - 2]);
 		FrameId fid(rootStack.functions[rootStack.functions.size() - x - 2]);
 		Oracle::Function f(rtrnRip);

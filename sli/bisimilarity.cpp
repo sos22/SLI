@@ -127,7 +127,6 @@ statesLocallyBisimilar(StateMachineState *sm1,
 	case StateMachineState::Unreached:
 	case StateMachineState::Crash:
 	case StateMachineState::NoCrash:
-	case StateMachineState::NdChoice:
 		return true;
 
 	case StateMachineState::Stub: {

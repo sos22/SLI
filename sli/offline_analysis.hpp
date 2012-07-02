@@ -191,11 +191,6 @@ protected:
 			return NULL;
 		}
 	}
-	virtual StateMachineNdChoice *transformOneState(StateMachineNdChoice *,
-							bool *)
-	{
-		return NULL;
-	}
 
 	virtual bool rewriteNewStates() const = 0;
 public:

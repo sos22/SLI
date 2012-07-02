@@ -839,12 +839,6 @@ buildNewStateMachineWithLoadsEliminated(
 		res = new StateMachineSideEffecting(sm->origin, newEffect, smp->target);
 		break;
 	}
-	case StateMachineState::NdChoice: {
-		StateMachineNdChoice *smnd = (StateMachineNdChoice *)sm;
-		res = new StateMachineNdChoice(smnd->origin,
-					       smnd->successors);
-		break;
-	}
 	case StateMachineState::Unreached:
 	case StateMachineState::Crash:
 	case StateMachineState::NoCrash:

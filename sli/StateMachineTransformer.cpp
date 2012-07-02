@@ -175,12 +175,6 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 									  smb->falseTarget);
 					break;
 				}
-				case StateMachineState::NdChoice: {
-					StateMachineNdChoice *smnd = (StateMachineNdChoice *)s;
-					stateRewrites[s] =
-						new StateMachineNdChoice(smnd->origin, smnd->successors);
-					break;
-				}
 
 				case StateMachineState::Unreached:
 				case StateMachineState::Crash:

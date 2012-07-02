@@ -10,6 +10,7 @@
 #include "typesdb.hpp"
 #include "allowable_optimisations.hpp"
 #include "sat_checker.hpp"
+#include "alloc_mai.hpp"
 
 #ifdef NDEBUG
 #define debug_dump_state_traces 0
@@ -969,15 +970,6 @@ EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 			currentState = smb->falseTarget;
 		return ssr_continue;
 	}
-	case StateMachineState::NdChoice: {
-		StateMachineNdChoice *smnd = (StateMachineNdChoice *)currentState;
-		if (smnd->successors.size() != 0) {
-			currentState = chooser.nd_choice(smnd->successors);
-			return ssr_continue;
-		}
-		/* Fall through to the Unreached case if we have no
-		 * available successors. */
-	}
 	case StateMachineState::Unreached:
 		/* Whoops... */
 		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
@@ -1235,19 +1227,6 @@ EvalContext::advance(OracleInterface *oracle, const AllowableOptimisations &opt,
 		}
 		return true;
 	}
-	case StateMachineState::NdChoice: {
-		StateMachineNdChoice *smnd = (StateMachineNdChoice *)currentState;
-		if (smnd->successors.size() == 0) {
-			return consumer.badMachine();
-		} else {
-			pendingStates.reserve(pendingStates.size() + smnd->successors.size() - 1);
-			for (auto it = smnd->successors.begin();
-			     it != smnd->successors.end();
-			     it++)
-				pendingStates.push_back(EvalContext(*this, *it));
-		}
-		return true;
-	}
 	}
 	abort();
 }
@@ -1459,7 +1438,6 @@ shallowCloneState(StateMachineState *s)
 		do_case(Stub);
 		do_case(Bifurcate);
 		do_case(SideEffecting);
-		do_case(NdChoice);
 #undef do_case
 	}
 	abort();
@@ -1585,7 +1563,10 @@ storeDefinitelyDoesntRace(StateMachineSideEffect *storeEffect, StateMachineState
 
 static StateMachine *
 buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
-			 OracleInterface *oracle, const AllowableOptimisations &opt)
+			 OracleInterface *oracle,
+			 MemoryAccessIdentifierAllocator &mai,
+			 int *next_fake_free_variable,
+			 const AllowableOptimisations &opt)
 {
 	std::map<crossStateT, StateMachineState *> results;
 
@@ -1738,16 +1719,15 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 				   possibility of an interesting race.
 				   Pick a non-deterministic
 				   interleaving. */
-				std::vector<StateMachineState *> possible;
+
 				/* First possibility: let the probe
 				 * machine go first */
 				StateMachineState *nextProbe =
 					advanceProbeMachine(crossState, pendingRelocs);
-				possible.push_back(nextProbe);
 
 				/* Second possibility: let the store
 				   machine go first. */
-				StateMachineState *s = advanceStoreMachine(crossState, pendingRelocs);
+				StateMachineState *nextStore = advanceStoreMachine(crossState, pendingRelocs);
 				if (probe_access && store_access) {
 					/* If we're racing memory
 					   accesses against each
@@ -1763,8 +1743,8 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 					   store-goes-first case
 					   assert that they're equal,
 					   and that's what we do. */
-					s = new StateMachineSideEffecting(
-						s->origin,
+					nextStore = new StateMachineSideEffecting(
+						nextStore->origin,
 						new StateMachineSideEffectAssertFalse(
 							IRExpr_Unop(
 								Iop_Not1, /* Remember, it's assertfalse,
@@ -1774,7 +1754,7 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 									probe_access->addr,
 									store_access->addr)),
 							false),
-						s);
+						nextStore);
 				} else {
 					/* Other case is that we race
 					   a START_ATOMIC against
@@ -1783,8 +1763,16 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 					   which makes things a bit
 					   easier. */
 				}
-				possible.push_back(s);
-				newState = new StateMachineNdChoice(VexRip(), possible);
+				ThreadRip tr(-1, VexRip::invent_vex_rip((*next_fake_free_variable)++));
+				IRExpr *fv = mai.freeVariable(
+					Ity_I1,
+					tr,
+					false);
+				newState = new StateMachineBifurcate(
+					VexRip(),
+					fv,
+					nextProbe,
+					nextStore);
 			}
 		}
 		results[r.second] = newState;
@@ -1802,8 +1790,10 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
 			       const VexPtr<OracleInterface> &oracle,
 			       const VexPtr<IRExpr, &ir_heap> &initialStateCondition,
 			       const AllowableOptimisations &optIn,
+			       MemoryAccessIdentifierAllocator mai,
 			       GarbageCollectionToken token)
 {
+	int fake_cntr = 0; /* a counter of fakes, not a fake counter */
 	__set_profiling(evalCrossProductMachine);
 
 	AllowableOptimisations opt =
@@ -1817,6 +1807,8 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
 			probeMachine,
 			storeMachine,
 			oracle,
+			mai,
+			&fake_cntr,
 			opt));
 	crossProductMachine =
 		optimiseStateMachine(
@@ -2080,9 +2072,11 @@ findHappensBeforeRelations(
 	VexPtr<IRExpr, &ir_heap> &result,
 	const VexPtr<OracleInterface> &oracle,
 	const VexPtr<IRExpr, &ir_heap> &initialStateCondition,
+	MemoryAccessIdentifierAllocator mai,
 	const AllowableOptimisations &opt,
 	GarbageCollectionToken token)
 {
+	int cntr = 0;
 	struct : public EvalPathConsumer {
 		VexPtr<IRExpr, &ir_heap> newCondition;
 		const AllowableOptimisations *opt;
@@ -2106,7 +2100,7 @@ findHappensBeforeRelations(
 
 	VexPtr<StateMachine, &ir_heap> combinedMachine;
 	combinedMachine = buildCrossProductMachine(probeMachine, storeMachine,
-						   oracle, opt);
+						   oracle, mai, &cntr, opt);
 	combinedMachine =
 		optimiseStateMachine(
 			combinedMachine,
@@ -2129,6 +2123,7 @@ IRExpr *
 findHappensBeforeRelations(const VexPtr<CrashSummary, &ir_heap> &summary,
 			   const VexPtr<OracleInterface> &oracle,
 			   const AllowableOptimisations &opt,
+			   const MemoryAccessIdentifierAllocator &mai,
 			   GarbageCollectionToken token)
 {
 	__set_profiling(findHappensBeforeRelations);
@@ -2136,7 +2131,7 @@ findHappensBeforeRelations(const VexPtr<CrashSummary, &ir_heap> &summary,
 	VexPtr<StateMachine, &ir_heap> probeMachine(summary->loadMachine);
 	VexPtr<StateMachine, &ir_heap> storeMachine(summary->storeMachine);
 	VexPtr<IRExpr, &ir_heap> assumption(summary->verificationCondition);
-	findHappensBeforeRelations(probeMachine, storeMachine, res, oracle, assumption, opt, token);
+	findHappensBeforeRelations(probeMachine, storeMachine, res, oracle, assumption, mai, opt, token);
 
 	return res;
 }
@@ -2241,8 +2236,10 @@ getCrossMachineCrashRequirement(
 	const VexPtr<OracleInterface> &oracle,
 	const VexPtr<IRExpr, &ir_heap> &assumption,
 	const AllowableOptimisations &optIn,
+	MemoryAccessIdentifierAllocator mai,
 	GarbageCollectionToken token)
 {
+	int cntr = 0;
 	__set_profiling(getCrossMachineCrashRequirement);
 
 	AllowableOptimisations opt =
@@ -2256,6 +2253,8 @@ getCrossMachineCrashRequirement(
 			readMachine,
 			writeMachine,
 			oracle,
+			mai,
+			&cntr,
 			opt));
 	crossProductMachine =
 		optimiseStateMachine(

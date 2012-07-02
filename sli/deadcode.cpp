@@ -136,7 +136,6 @@ class LivenessMap {
 			res.useExpression(smb->condition);
 			break;
 		}
-		case StateMachineState::NdChoice:
 		case StateMachineState::Unreached:
 		case StateMachineState::Stub:
 		case StateMachineState::Crash:
@@ -292,7 +291,6 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 								livenessMap.liveAtEndOfState(smse));
 				return;
 			}
-			case StateMachineState::NdChoice:
 			case StateMachineState::Bifurcate:
 			case StateMachineState::Crash:
 			case StateMachineState::NoCrash:

@@ -179,12 +179,6 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 			discoverPathToState(effecting->target, exprAtExit);
 			break;
 		}
-		case StateMachineState::NdChoice: {
-			StateMachineNdChoice *n = (StateMachineNdChoice *)s;
-			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
-				discoverPathToState(*it, exprAtEntry);
-			break;
-		}
 		}
 	}
 

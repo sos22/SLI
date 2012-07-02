@@ -16,7 +16,6 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
 	std::set<StateMachineSideEffecting *> states_side_effect;
-	std::set<StateMachineNdChoice *> states_ndchoice;
 };
 
 IRExpr *internIRExpr(IRExpr *x);

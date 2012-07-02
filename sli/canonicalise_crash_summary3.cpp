@@ -9,6 +9,7 @@
 #include "offline_analysis.hpp"
 #include "timers.hpp"
 #include "intern.hpp"
+#include "alloc_mai.hpp"
 
 #ifndef NDEBUG
 static bool debug_subst_equalities = false;
@@ -505,6 +506,7 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 			oracle,
 			IRExpr_Const(IRConst_U1(1)),
 			AllowableOptimisations::defaultOptimisations,
+			MemoryAccessIdentifierAllocator(),
 			token);
 	if (!reducedSurvivalConstraint) {
 		fprintf(stderr, "can't build cross product survival constraint\n");

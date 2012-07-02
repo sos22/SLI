@@ -151,12 +151,6 @@ localSimilarity(StateMachineBifurcate *sm1, StateMachineBifurcate *sm2)
 }
 
 static bool
-localSimilarity(StateMachineNdChoice *, StateMachineNdChoice *)
-{
-	return true;
-}
-
-static bool
 localSimilarity(StateMachineStub *sm1, StateMachineStub *sm2)
 {
 	return sm1->target == sm2->target;
