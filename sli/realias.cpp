@@ -311,7 +311,8 @@ class StackLayoutTable {
 	bool build(StateMachine *inp, stateLabelT &labels,
 		   int *nextRootId, StackLayout &rootStack);
 public:
-	std::set<FrameId> rootFrames;
+	FrameId initialFuncFrame;
+	std::set<FrameId> initialRegFrames;
 	bool build(StateMachine *inp, stateLabelT &labels);
 	void prettyPrint(FILE *f, const stateLabelT &labels) const {
 		for (auto it = content.begin(); it != content.end(); it++) {
@@ -440,8 +441,55 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 	if (debug_build_stack_layout)
 		printf("Built stack layout, root stack %s\n",
 		       rootStack.name());
-	for (auto it = rootStack.functions.begin(); it != rootStack.functions.end(); it++)
-		rootFrames.insert(*it);
+
+	/* Calculate the initial registers frame set.  This is the set
+	   of stack frames which initial-register-value expressions
+	   might point at.  That is the set of frames which escape at
+	   the point where we do the relevant call in the initial
+	   stack.
+
+	   i.e. if we have something like this:
+
+	   func1() {
+	        ...;
+		func2();
+		...;
+	   }
+
+	   func2() {
+	        ...;
+		func3();
+		...;
+	   }
+	   
+	   func3() {
+	        ...;
+	   }
+
+	   and we start in func3, func2's frame will be in the initial
+	   set if the static analysis of func2 reports that the stack
+	   might have escaped at the call to func3.  Likewise, func1's
+	   frame will be in the initial set if the stack might have
+	   escaped at the call to func2.
+
+	   We cheat just a little bit here and simplify by saying that
+	   the stack has escaped at the start of a function call
+	   precisely when the stack contaminates the return value of
+	   that function call.  That happens to interact with some
+	   implementation details of the static analysis to give us
+	   precisely what we want. */
+	assert(inp->origin.size() == 1);
+	const VexRip &origin(inp->origin[0].second);
+	assert(rootStack.functions.size() == origin.stack.size());
+	for (int x = origin.stack.size() - 2; x >= 0; x--) {
+		StaticRip rtrnRip(origin.stack[x]);
+		Oracle::Function f(rtrnRip);
+		Oracle::ThreadRegisterAliasingConfiguration config;
+		if (!f.aliasConfigOnEntryToInstruction(rtrnRip, &config) ||
+		    (config.v[0] & Oracle::PointerAliasingSet::stackPointer))
+			initialRegFrames.insert(rootStack.functions[x]);
+	}
+	initialFuncFrame = rootStack.functions[rootStack.functions.size() - 1];
 	sanity_check();
 	return true;
 }
@@ -473,7 +521,8 @@ public:
 			it->second.sanity_check();
 		}
 	}
-	PointsToTable refine(AliasTable &at, StateMachine *sm, StackLayoutTable &slt, bool *done_something);
+	PointsToTable refine(AliasTable &at, StateMachine *sm, StackLayoutTable &slt,
+			     bool *done_something);
 };
 
 static bool
@@ -571,29 +620,26 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		}
 
 		Oracle::PointerAliasingSet alias(-1);
-		if (aliasConfigForReg(sm, iex->reg, &alias)) {
-			PointsToSet res;
-			if (alias & Oracle::PointerAliasingSet::nonStackPointer)
-				res.mightPointOutsideStack = true;
-			else
-				res.mightPointOutsideStack = false;
-			if (alias & Oracle::PointerAliasingSet::stackPointer)
-				res.targets = slt.rootFrames;
-			return res;
+		if (!aliasConfigForReg(sm, iex->reg, &alias))
+			alias = Oracle::PointerAliasingSet::anything;
+		PointsToSet res;
+		if (alias & Oracle::PointerAliasingSet::nonStackPointer) {
+			res.mightPointOutsideStack = true;
+			res.targets = slt.initialRegFrames;
+		} else {
+			res.mightPointOutsideStack = false;
 		}
-		/* Give up and return something conservative.  We know
-		   it can't point at any stack frames which weren't
-		   live when we started, because it's a gen -1
-		   register. */
-		return PointsToSet(true, slt.rootFrames);
+		if (alias & Oracle::PointerAliasingSet::stackPointer)
+			res.targets.insert(slt.initialFuncFrame);
+		return res;
 	}
 
 	case Iex_Load: {
-		IRExprLoad *iex = (IRExprLoad *)e;
 		PointsToSet p;
 		p.mightPointOutsideStack = true;
+		p.targets = slt.initialRegFrames;
 		if (stackMightHaveLeaked(sm))
-			p.targets = slt.rootFrames;
+			p.targets.insert(slt.initialFuncFrame);
 		return p;
 	}
 	case Iex_Const: {
@@ -760,7 +806,8 @@ public:
 		return it->second;
 	}
 	void refine(StateMachine *sm, PointsToTable &ptt,
-		    StackLayoutTable &slt, bool *done_something,
+		    StackLayoutTable &slt,
+		    bool *done_something,
 		    stateLabelT &labels);
 };
 
@@ -970,9 +1017,18 @@ PointsToTable::refine(AliasTable &at,
 		switch (effect->type) {
 		case StateMachineSideEffect::Load: {
 			const AliasTableEntry &e(at.storesForLoad(smse));
-			if (e.mightLoadInitial || e.mightHaveExternalStores) {
+			if (e.mightLoadInitial || e.mightHaveExternalStores)
 				newPts.mightPointOutsideStack = true;
-				newPts.targets = slt.rootFrames;
+			if (e.mightLoadInitial) {
+				/* This load might pick up the initial
+				   value of memory i.e. it might pick
+				   up something which was accessible
+				   when the machine starts.  That's
+				   basically the same as you might get
+				   in an initial register. */
+				newPts.targets = slt.initialRegFrames;
+				if (stackMightHaveLeaked(sm))
+					newPts.targets.insert(slt.initialFuncFrame);
 			}
 			for (auto it2 = e.beginStores(); it2 != e.endStores(); it2++)
 				newPts |= pointsToSetForExpr(it2->data, sm, sl, slt);
@@ -1022,7 +1078,11 @@ AliasTable::refine(StateMachine *sm,
 	     it != content.end();
 	     it++) {
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
-		PointsToSet loadPts(ptt.pointsToSetForExpr(l->addr, sm, slt.forState(it->first), slt));
+		PointsToSet loadPts(ptt.pointsToSetForExpr(
+					    l->addr,
+					    sm,
+					    slt.forState(it->first),
+					    slt));
 		if (debug_refine_alias_table)
 			printf("Examining alias table for state %d\n",
 			       labels[it->first]);
