@@ -1915,6 +1915,19 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					return IRExpr_Const(IRConst_U1(0));
 				}
 			}
+
+			if (e->arg->tag == Iex_Mux0X) {
+				IRExprMux0X *arg = (IRExprMux0X *)e->arg;
+				*done_something = true;
+				return IRExpr_Mux0X(arg->cond,
+						    IRExpr_Unop(
+							    e->op,
+							    arg->expr0),
+						    IRExpr_Unop(
+							    e->op,
+							    arg->exprX));
+			}
+
 			if (e->arg->tag == Iex_Const) {
 				IRConst *c = ((IRExprConst *)e->arg)->con;
 				switch (e->op) {
@@ -2377,6 +2390,49 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					*done_something = true;
 					return IRExpr_Const(IRConst_U1(0));
 				}
+			}
+
+			if (l->tag == Iex_Mux0X) {
+				IRExprMux0X *lm = (IRExprMux0X *)l;
+				if (r->tag == Iex_Mux0X) {
+					IRExprMux0X *rm = (IRExprMux0X *)r;
+					if (physicallyEqual(lm->cond, rm->cond)) {
+						*done_something = true;
+						return IRExpr_Mux0X(
+							lm->cond,
+							IRExpr_Binop(e->op,
+								     lm->expr0,
+								     rm->expr0),
+							IRExpr_Binop(e->op,
+								     lm->exprX,
+								     rm->exprX));
+					}
+				} else {
+					*done_something = true;
+					return IRExpr_Mux0X(
+						lm->cond,
+						IRExpr_Binop(
+							e->op,
+							lm->expr0,
+							r),
+						IRExpr_Binop(
+							e->op,
+							lm->exprX,
+							r));
+				}
+			} else if (r->tag == Iex_Mux0X) {
+				IRExprMux0X *rm = (IRExprMux0X *)r;
+				*done_something = true;
+				return IRExpr_Mux0X(
+					rm->cond,
+					IRExpr_Binop(
+						e->op,
+						l,
+						rm->expr0),
+					IRExpr_Binop(
+						e->op,
+						l,
+						rm->exprX));
 			}
 
 			/* If both arguments are constant, try to constant
