@@ -42,7 +42,7 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 		{}
 	} buildPhiRegs(phiRegs);
 	buildPhiRegs.transform(sm);
-	if (phiRegs.empty())
+	if (phiRegs.empty() || TIMEOUT)
 		return sm;
 
 	stateLabelT stateLabels;
@@ -104,7 +104,7 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 		{}
 	} discoverPathToState(opt, dominatingExpressions, needsUpdate);
 
-	while (!needsUpdate.empty()) {
+	while (!needsUpdate.empty() && !TIMEOUT) {
 		StateMachineState *s = needsUpdate.front();
 		needsUpdate.pop();
 		/* Build the exprAtExit starting from the expression
@@ -187,6 +187,8 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 		}
 		}
 	}
+	if (TIMEOUT)
+		return sm;
 
 	if (debug_state_domination) {
 		printf("State domination table:\n");
