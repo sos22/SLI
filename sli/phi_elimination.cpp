@@ -247,19 +247,28 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 		assert(stateDominator != NULL);
 		std::vector<IRExpr *> pRegDominators;
 		pRegDominators.resize(s->generations.size());
-		for (unsigned x = 0; x < s->generations.size(); x++)
-			pRegDominators[x] =
-				simplifyIRExpr(
-					simplify_via_anf(
-						optimiseAssuming(
-							regDominators[s->reg.setGen(s->generations[x].first)],
-							stateDominator)),
-					opt);
+		bool haveGenM1 = false;
+		for (unsigned x = 0; x < s->generations.size(); x++) {
+			if (s->generations[x].first == (unsigned)-1) {
+				assert(!haveGenM1);
+				haveGenM1 = true;
+			} else {
+				pRegDominators[x] =
+					simplifyIRExpr(
+						simplify_via_anf(
+							optimiseAssuming(
+								regDominators[s->reg.setGen(s->generations[x].first)],
+								stateDominator)),
+						opt);
+			}
+		}
 		if (debug_use_domination) {
 			printf("State domination: %s\n", nameIRExpr(stateDominator));
 			printf("Register dominators:\n");
 			for (unsigned x = 0; x < s->generations.size(); x++)
 				printf("%d -> %s\n", s->generations[x].first, nameIRExpr(pRegDominators[x]));
+			if (haveGenM1)
+				printf("Have gen m1\n");
 		}
 
 		/* In order for this to be valid, we need to be able
@@ -273,9 +282,13 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 		for (unsigned i = 0;
 		     !ambiguous_resolution && i < s->generations.size();
 		     i++) {
+			if (s->generations[i].first == (unsigned)-1)
+				continue;
 			for (unsigned j = i + 1;
 			     !ambiguous_resolution && j < s->generations.size();
 			     j++) {
+				if (s->generations[j].first == (unsigned)-1)
+					continue;
 				if (satisfiable(
 					    IRExpr_Binop(
 						    Iop_And1,
@@ -292,8 +305,8 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 		}
 		if (ambiguous_resolution)
 			continue;
-		/* Next: at least one must always be true. */
-		{
+		/* Next: at least one must always be true, unless we have gen -1 */
+		if (!haveGenM1) {
 			IRExprAssociative *checker =
 				IRExpr_Associative(
 					s->generations.size(),
@@ -317,8 +330,12 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 		   expressions will always be true, so we can replace
 		   this Phi with a simple Mux and copy.  Do so. */
 		IRExpr *acc = NULL;
+		if (haveGenM1)
+			acc = IRExpr_Get(s->reg.setGen(-1), ty);
 		for (unsigned x = 0; x < s->generations.size(); x++) {
 			IRExpr *component;
+			if (s->generations[x].first == (unsigned)-1)
+				continue;
 			if (s->generations[x].second)
 				component = s->generations[x].second;
 			else
