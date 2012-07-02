@@ -64,6 +64,7 @@ ndChoiceState(StateMachineState **slot,
 				reloc_t(&b->trueTarget, targets[x]));
 			if (usedExits)
 				usedExits->insert(targets[x]);
+			acc = b;
 		}
 		*slot = acc;
 	}
