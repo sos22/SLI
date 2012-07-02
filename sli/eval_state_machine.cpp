@@ -540,7 +540,11 @@ public:
 					      bool collectOrderingConstraints,
 					      const AllowableOptimisations &opt);
 	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
-		    std::map<const StateMachineState*, int> &_stateLabels)
+		    std::map<const StateMachineState*, int> &
+#ifndef NDEBUG
+		    _stateLabels
+#endif
+		)
 		: assumption(initialAssumption),
 		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
 		  atomic(false),
@@ -2173,7 +2177,9 @@ concatenateStateMachines(const StateMachine *machine, const StateMachine *to)
 	}
 	std::vector<std::pair<unsigned, VexRip> > neworigin(newOrigin.begin(), newOrigin.end());
 #else
-#error write me
+	auto i = machine->origin.begin();
+	std::vector<std::pair<unsigned, VexRip> > neworigin(i, machine->origin.end());
+	neworigin.insert(neworigin.end(), to->origin.begin(), to->origin.end());
 #endif
 	return new StateMachine(rewriteRules[machine->root],
 				neworigin);

@@ -1521,10 +1521,8 @@ AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 				tr,
 				chase_into_ok,
 				False, /* host bigendian */
-				VexArchAMD64,
 				&archinfo_guest,
 				&abiinfo_both,
-				Ity_I64, /* guest word type */
 				False, /* do_self_check */
 				NULL);
 		if (!irsb)

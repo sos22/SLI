@@ -3,7 +3,7 @@
 #include "oracle.hpp"
 
 #ifdef NDEBUG
-#define debug_find_roots
+#define debug_find_roots 0
 #else
 static int debug_find_roots = 0;
 #endif

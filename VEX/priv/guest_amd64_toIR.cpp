@@ -1735,7 +1735,7 @@ static void helper_ADC ( unsigned tid,
 			 Int sz,
                          IRTemp tres, IRTemp ta1, IRTemp ta2,
                          /* info about optional store: */
-                         IRTemp taddr, const ThreadRip &restart_point)
+                         IRTemp taddr)
 {
    UInt    thunkOp;
    IRType  ty    = szToITy(sz);
@@ -1766,10 +1766,8 @@ static void helper_ADC ( unsigned tid,
 
    /* Possibly generate a store of 'tres' to 'taddr'.  See comment at
       start of this function. */
-   if (taddr != IRTemp_INVALID) {
-      vassert(!restart_point.rip.isValid());
+   if (taddr != IRTemp_INVALID)
       storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
-   }
 
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid, ty))  ));
@@ -1787,7 +1785,7 @@ static void helper_SBB ( unsigned tid,
 			 Int sz,
                          IRTemp tres, IRTemp ta1, IRTemp ta2,
                          /* info about optional store: */
-                         IRTemp taddr, const ThreadRip &restart_point)
+                         IRTemp taddr )
 {
    UInt    thunkOp;
    IRType  ty    = szToITy(sz);
@@ -1818,10 +1816,8 @@ static void helper_SBB ( unsigned tid,
 
    /* Possibly generate a store of 'tres' to 'taddr'.  See comment at
       start of this function. */
-   if (taddr != IRTemp_INVALID) {
-      vassert(!restart_point.rip.isValid());
+   if (taddr != IRTemp_INVALID)
       storeLE( mkexpr(taddr, tid, Ity_I64), mkexpr(tres, tid, ty) );
-   }
 
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid, ty) )) );
@@ -2563,12 +2559,12 @@ ULong dis_op2_E_G ( unsigned tid,
 
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID );
          putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          helper_SBB(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID );
          putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else {
          assign( dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)) );
@@ -2592,12 +2588,12 @@ ULong dis_op2_E_G ( unsigned tid,
 
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID );
          putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          helper_SBB(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID );
          putIRegG(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else {
          assign( dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)) );
@@ -2679,12 +2675,12 @@ ULong dis_op2_G_E ( unsigned tid,
 
       if (addSubCarry && op8 == Iop_Add8) {
          helper_ADC(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID );
          putIRegE(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          helper_SBB(tid,  size, dst1, dst0, src,
-		    /*no store*/IRTemp_INVALID, ThreadRip() );
+		    /*no store*/IRTemp_INVALID );
          putIRegE(size, pfx, rm, mkexpr(dst1, tid, ty));
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
@@ -2711,12 +2707,12 @@ ULong dis_op2_G_E ( unsigned tid,
       if (addSubCarry && op8 == Iop_Add8) {
          /* normal store */
          helper_ADC(tid,  size, dst1, dst0, src,
-	            /*store*/addr, ThreadRip() );
+	            /*store*/addr );
       } else
       if (addSubCarry && op8 == Iop_Sub8) {
          /* normal store */
          helper_SBB(tid,  size, dst1, dst0, src,
-		    /*store*/addr, ThreadRip() );
+		    /*store*/addr );
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (keep) {
@@ -2864,12 +2860,12 @@ ULong dis_op_imm_A ( unsigned tid,
    else
    if (op8 == Iop_Add8 && carrying) {
       helper_ADC(tid,  size, dst1, dst0, src,
-		 /*no store*/IRTemp_INVALID, ThreadRip() );
+		 /*no store*/IRTemp_INVALID );
    }
    else
    if (op8 == Iop_Sub8 && carrying) {
       helper_SBB(tid,  size, dst1, dst0, src,
-                  /*no store*/IRTemp_INVALID, ThreadRip() );
+                  /*no store*/IRTemp_INVALID );
    }
    else
       vpanic("dis_op_imm_A(amd64,guest)");
@@ -3026,11 +3022,11 @@ ULong dis_Grp1 ( unsigned tid,
 
       if (gregLO3ofRM(modrm) == 2 /* ADC */) {
          helper_ADC(tid,  sz, dst1, dst0, src,
-                     /*no store*/IRTemp_INVALID, ThreadRip() );
+                     /*no store*/IRTemp_INVALID );
       } else 
       if (gregLO3ofRM(modrm) == 3 /* SBB */) {
          helper_SBB(tid,  sz, dst1, dst0, src,
-                     /*no store*/IRTemp_INVALID, ThreadRip() );
+                     /*no store*/IRTemp_INVALID );
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (isAddSub(op8))
@@ -3055,12 +3051,12 @@ ULong dis_Grp1 ( unsigned tid,
       if (gregLO3ofRM(modrm) == 2 /* ADC */) {
 	/* normal store */
 	helper_ADC(tid,  sz, dst1, dst0, src,
-		   /*store*/addr, ThreadRip() );
+		   /*store*/addr );
       } else 
       if (gregLO3ofRM(modrm) == 3 /* SBB */) {
 	 /* normal store */
 	 helper_SBB(tid,  sz, dst1, dst0, src,
-		    /*store*/addr, ThreadRip() );
+		    /*store*/addr );
       } else {
          assign(dst1, binop(mkSizedOp(ty,op8), mkexpr(dst0, tid, ty), mkexpr(src, tid, ty)));
          if (gregLO3ofRM(modrm) < 7) {
@@ -3942,12 +3938,11 @@ void dis_string_op_increment ( unsigned tid, Int sz, IRTemp t_inc )
 
 static
 void dis_string_op( unsigned tid, void (*dis_OP)( unsigned, Int, IRTemp, const ThreadRip &rip ), 
-                    Int sz, const char* name, Prefix pfx, const ThreadRip &rip )
+                    Int sz, const char* name, const ThreadRip &rip )
 {
    IRTemp t_inc = newTemp();
    /* Really we ought to inspect the override prefixes, but we don't.
       The following assertion catches any resulting sillyness. */
-   vassert(pfx == clearSegBits(pfx));
    dis_string_op_increment(tid, sz, t_inc);
    dis_OP( tid, sz, t_inc, rip );
    DIP("%s%c\n", name, nameISize(sz));
@@ -4048,15 +4043,10 @@ void dis_SCAS ( unsigned tid, Int sz, IRTemp t_inc, const ThreadRip &rip )
 static 
 void dis_REP_op ( unsigned tid, AMD64Condcode cond,
                   void (*dis_OP)(unsigned tid, Int, IRTemp, const ThreadRip &),
-                  Int sz, const ThreadRip &rip, const ThreadRip &rip_next, const char* name,
-                  Prefix pfx )
+                  Int sz, const ThreadRip &rip, const ThreadRip &rip_next, const char* name )
 {
    IRTemp t_inc = newTemp();
    IRTemp tc    = newTemp();  /*  RCX  */
-
-   /* Really we ought to inspect the override prefixes, but we don't.
-      The following assertion catches any resulting sillyness. */
-   vassert(pfx == clearSegBits(pfx));
 
    assign( tc, getIReg64(R_RCX) );
 
@@ -14640,7 +14630,7 @@ DisResult disInstr_AMD64_WRK (
 //.. //--    
     case 0xAC: /* LODS, no REP prefix */
     case 0xAD:
-       dis_string_op( tid, dis_LODS, ( opc == 0xAC ? 1 : sz ), "lods", pfx, guest_code.rip );
+       dis_string_op( tid, dis_LODS, ( opc == 0xAC ? 1 : sz ), "lods", guest_code.rip );
        break;
 //.. 
 //..    case 0xAE: /* SCAS, no REP prefix */
@@ -14741,7 +14731,7 @@ DisResult disInstr_AMD64_WRK (
             sz = 1;
          dis_REP_op ( tid, AMD64CondNZ, dis_SCAS, sz, 
                       guest_RIP_curr_instr,
-                      guest_RIP_bbstart+delta, "repne scas", pfx );
+                      guest_RIP_bbstart+delta, "repne scas" );
          dres.whatNext = DisResult::Dis_StopHere;
          break;
       }
@@ -14753,7 +14743,7 @@ DisResult disInstr_AMD64_WRK (
             sz = 1;
          dis_REP_op ( tid, AMD64CondZ, dis_SCAS, sz, 
                       guest_RIP_curr_instr,
-                      guest_RIP_bbstart+delta, "repe scas", pfx );
+                      guest_RIP_bbstart+delta, "repe scas" );
          dres.whatNext = DisResult::Dis_StopHere;
          break;
       }
@@ -14761,7 +14751,7 @@ DisResult disInstr_AMD64_WRK (
       if (!haveF2(pfx) && !haveF3(pfx)) {
          if (opc == 0xAE)
             sz = 1;
-         dis_string_op( tid, dis_SCAS, sz, "scas", pfx, guest_code.rip );
+         dis_string_op( tid, dis_SCAS, sz, "scas", guest_code.rip );
          break;
       }
       goto decode_failure;
@@ -14777,7 +14767,7 @@ DisResult disInstr_AMD64_WRK (
             sz = 1;
          dis_REP_op ( tid, AMD64CondZ, dis_CMPS, sz, 
                       guest_RIP_curr_instr,
-                      guest_RIP_bbstart+delta, "repe cmps", pfx );
+                      guest_RIP_bbstart+delta, "repe cmps" );
          dres.whatNext = DisResult::Dis_StopHere;
          break;
       }
@@ -14794,7 +14784,7 @@ DisResult disInstr_AMD64_WRK (
             sz = 1;
          dis_REP_op ( tid, AMD64CondAlways, dis_STOS, sz,
                       guest_RIP_curr_instr,
-                      guest_RIP_bbstart+delta, "rep stos", pfx );
+                      guest_RIP_bbstart+delta, "rep stos" );
         dres.whatNext = DisResult::Dis_StopHere;
         break;
       }
@@ -14802,7 +14792,7 @@ DisResult disInstr_AMD64_WRK (
       if (!haveF3(pfx) && !haveF2(pfx)) {
          if (opc == 0xAA)
             sz = 1;
-         dis_string_op( tid, dis_STOS, sz, "stos", pfx, guest_code.rip );
+         dis_string_op( tid, dis_STOS, sz, "stos", guest_code.rip );
          break;
       }
       goto decode_failure;
@@ -14818,7 +14808,7 @@ DisResult disInstr_AMD64_WRK (
             sz = 1;
          dis_REP_op ( tid, AMD64CondAlways, dis_MOVS, sz,
                       guest_RIP_curr_instr,
-                      guest_RIP_bbstart+delta, "rep movs", pfx );
+                      guest_RIP_bbstart+delta, "rep movs" );
         dres.whatNext = DisResult::Dis_StopHere;
         break;
       }
@@ -14826,7 +14816,7 @@ DisResult disInstr_AMD64_WRK (
       if (!haveF3(pfx) && !haveF2(pfx)) {
          if (opc == 0xA4)
             sz = 1;
-         dis_string_op( tid, dis_MOVS, sz, "movs", pfx, guest_code.rip );
+         dis_string_op( tid, dis_MOVS, sz, "movs", guest_code.rip );
          break;
       }
       goto decode_failure;
@@ -15938,7 +15928,6 @@ DisResult disInstr_AMD64 ( unsigned tid,
                            GuestMemoryFetcher &guest_code_IN,
                            Long         delta,
                            const ThreadRip& guest_IP,
-                           VexArch      guest_arch,
                            VexArchInfo* archinfo,
                            VexAbiInfo*  abiinfo,
                            Bool         host_bigendian_IN )
@@ -15947,7 +15936,6 @@ DisResult disInstr_AMD64 ( unsigned tid,
    DisResult dres;
 
    /* Set globals (see top of this file) */
-   vassert(guest_arch == VexArchAMD64);
    irsb                 = irsb_IN;
    host_is_bigendian    = host_bigendian_IN;
    guest_RIP_curr_instr = guest_IP;

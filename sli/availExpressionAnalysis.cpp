@@ -813,6 +813,8 @@ buildNewStateMachineWithLoadsEliminated(
 	avail_t avail(availMap[sm]);
 
 	StateMachineState *res;
+	/* Shut compiler up */
+	res = (StateMachineState *)0xf001ul;
 	switch (sm->type) {
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;

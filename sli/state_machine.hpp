@@ -16,7 +16,7 @@ class StateMachineSideEffect;
 #ifdef NDEBUG
 static inline
 #endif
-void sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister, threadAndRegister::fullCompare> *live)
+void sanityCheckIRExpr(IRExpr *, const std::set<threadAndRegister, threadAndRegister::fullCompare> *)
 #ifdef NDEBUG
 {}
 #else

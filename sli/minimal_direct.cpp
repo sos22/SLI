@@ -192,6 +192,8 @@ main(int argc, char *argv[])
 	double start = now();
 	double low_end_time;
 	double high_end_time;
+	/* Shut compiler up */
+	high_end_time = low_end_time = -99999;
 	bool first = true;
 	unsigned long cntr = 0;
 	while (cntr < instructions_to_process) {

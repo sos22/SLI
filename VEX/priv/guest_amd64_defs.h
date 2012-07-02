@@ -65,7 +65,6 @@ DisResult disInstr_AMD64 ( unsigned     tid,
                            GuestMemoryFetcher &guest_code,
                            Long         delta,
                            const ThreadRip &guest_IP,
-                           VexArch      guest_arch,
                            VexArchInfo* archinfo,
                            VexAbiInfo*  abiinfo,
                            Bool         host_bigendian );

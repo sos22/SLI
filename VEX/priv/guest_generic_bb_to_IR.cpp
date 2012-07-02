@@ -96,10 +96,8 @@ IRSB* bb_to_IR ( unsigned tid,
                  /*IN*/ const ThreadRip &guest_IP_bbstart,
                  /*IN*/ Bool             (*chase_into_ok)(void*,Addr64),
                  /*IN*/ Bool             host_bigendian,
-                 /*IN*/ VexArch          arch_guest,
                  /*IN*/ VexArchInfo*     archinfo_guest,
                  /*IN*/ VexAbiInfo*      abiinfo_both,
-                 /*IN*/ IRType           guest_word_type,
                  /*IN*/ Bool             do_self_check,
                  /*IN*/ Bool             (*preamble_function)(void*,IRSB*))
 {
@@ -131,7 +129,6 @@ IRSB* bb_to_IR ( unsigned tid,
    vassert(vex_control.guest_max_insns < 100);
    vassert(vex_control.guest_chase_thresh >= 0);
    vassert(vex_control.guest_chase_thresh < vex_control.guest_max_insns);
-   vassert(guest_word_type == Ity_I32 || guest_word_type == Ity_I64);
 
    /* And a new IR superblock to dump the result into. */
    irsb = emptyIRSB();
@@ -209,7 +206,6 @@ IRSB* bb_to_IR ( unsigned tid,
                             guest_code,
                             delta,
                             guest_IP_curr_instr,
-                            arch_guest,
                             archinfo_guest,
                             abiinfo_both,
                             host_bigendian );

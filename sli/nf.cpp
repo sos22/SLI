@@ -243,21 +243,25 @@ compare_nf_terms(const NF_Term &a, const NF_Term &b)
 	abort();
 }
 
+#ifndef NDEBUG
 static void
 sanity_check(const NF_Term &a)
 {
-#ifndef NDEBUG
 	if (a.size() == 0)
 		return;
 	for (unsigned x = 0; x < a.size() - 1; x++) {
 		assert(a[x].second != a[x+1].second);
 		assert(a[x].second < a[x+1].second);
 	}
-#endif
 }
+#endif
 
 static void
-sanity_check(const NF_Expression &a)
+sanity_check(const NF_Expression &
+#ifndef NDEBUG
+	     a
+#endif
+	)
 {
 #ifndef NDEBUG
 	if (a.size() == 0)

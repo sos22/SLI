@@ -22,7 +22,11 @@ static int debug_optimise_ssa = 0;
 /* Assert that the machine does not currently reference and tAR
    structures with non-zero generation number. */
 static void
-assertNonSsa(StateMachine *inp)
+assertNonSsa(StateMachine *
+#ifndef NDEBUG
+	     inp
+#endif
+	)
 {
 #ifndef NDEBUG
 	class : public StateMachineTransformer {

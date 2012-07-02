@@ -12,7 +12,7 @@
 
 #include "libvex_parse.h"
 
-#ifndef NDEBUG
+#ifdef NDEBUG
 #define debug_state_machine_sanity_checks 0
 #else
 static int debug_state_machine_sanity_checks = 0;
@@ -377,6 +377,8 @@ StateMachineSideEffect::parse(StateMachineSideEffect **out,
 #define do_one(n)							\
 	{								\
 		StateMachineSideEffect ## n *res;			\
+		/* shut compiler up */					\
+		res = (StateMachineSideEffect ## n *)0xf001deadul;	\
 		if (StateMachineSideEffect ## n :: parse(&res, str, suffix) ) {	\
 			*out = res;					\
 			return true;					\
@@ -398,6 +400,8 @@ parseStateMachineState(StateMachineState **out,
 #define try_state_type(t)						\
 	{								\
 		StateMachine ## t *res;					\
+		/* shut compiler up */					\
+		res = (StateMachine ## t *)0xf001deadul;		\
 		if (StateMachine ## t :: parse(&res, str, suffix)) {	\
 			*out = res;					\
 			return true;					\
@@ -546,8 +550,8 @@ found_cycle:
 		printf("\t%d\n", labels[*it]);
 	printf("End\n");
 	assert(0);
-#endif
 }
+#endif
 
 #ifndef NDEBUG
 void
@@ -799,6 +803,7 @@ intersectSets(std::set<t, s> &out, const std::set<t, s> &inp)
 	return res;
 }
 
+#ifndef NDEBUG
 void
 StateMachine::sanityCheck() const
 {
@@ -853,6 +858,7 @@ StateMachine::sanityCheck() const
 	     it++)
 		it->first->sanityCheck(&definedAtTopOfState[it->first]);
 }
+#endif
 
 MemoryAccessIdentifier
 MemoryAccessIdentifierAllocator::operator()(const ThreadRip &rip)

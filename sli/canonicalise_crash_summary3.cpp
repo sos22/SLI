@@ -18,7 +18,7 @@ static bool debug_functional_underspecification = false;
 #else
 #define debug_subst_equalities false
 #define debug_simplify_assuming_survive false
-#define debug_funcal_underspecification false
+#define debug_functional_underspecification false
 #endif
 
 #define underspecExpression ((IRExpr *)3)
