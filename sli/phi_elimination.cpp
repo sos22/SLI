@@ -18,6 +18,27 @@ static bool debug_use_domination = false;
 #endif
 #define any_debug (debug_state_domination || debug_reg_domination || debug_use_domination)
 
+static void
+computeMaxDistanceMap(StateMachine *sm, std::map<StateMachineState *, int> &distanceMap)
+{
+	std::priority_queue<std::pair<int, StateMachineState *> > pending;
+	pending.push(std::pair<int, StateMachineState *>(0, sm->root));
+	while (!pending.empty()) {
+		std::pair<int, StateMachineState *> p(pending.top());
+		pending.pop();
+		auto it_did_insert = distanceMap.insert(std::pair<StateMachineState *, int>(p.second, p.first));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (!did_insert && it->second >= p.first)
+			continue;
+		it->second = p.first;
+		std::vector<StateMachineState *> targets;
+		p.second->targets(targets);
+		for (auto it = targets.begin(); it != targets.end(); it++)
+			pending.push(std::pair<int, StateMachineState *>(p.first + 1, *it));
+	}
+}
+
 static StateMachine *
 phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 	       bool *done_something)
@@ -69,15 +90,30 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 	 * interested in machines which might conceivably reach
 	 * <crash>, but that's a bit harder to think about, and we
 	 * don't implement it.) */
+
+	/* We try to process states so that we pick whatever is
+	 * ``closest'' to the root first, where we measure distance
+	 * according to the *longest* path from the root to the state.
+	 * This means that by the time we want to calculate the
+	 * condition for a state all of its inputs are available and
+	 * we never have to do any recomputation, which helps to make
+	 * things a bit faster. */
+	std::map<StateMachineState *, int> stateDistances;
+	computeMaxDistanceMap(sm, stateDistances);
+
 	std::map<StateMachineState *, IRExpr *> dominatingExpressions;
-	/* States whose successors might need updating */
-	std::queue<StateMachineState *> needsUpdate;
+	/* States whose successors might need updating. The first
+	   argument is just a depth argument to make sure we handle
+	   states in the right order. */
+	typedef std::pair<int, StateMachineState *> needsUpdateEntryT;
+	std::priority_queue<needsUpdateEntryT> needsUpdate;
 	dominatingExpressions[sm->root] = IRExpr_Const(IRConst_U1(1));
-	needsUpdate.push(sm->root);
+	needsUpdate.push(needsUpdateEntryT(0, sm->root));
 	struct _ {
 		const AllowableOptimisations &opt;
 		std::map<StateMachineState *, IRExpr *> &dominatingExpressions;
-		std::queue<StateMachineState *> &needsUpdate;
+		std::map<StateMachineState *, int> &stateDistances;
+		std::priority_queue<needsUpdateEntryT> &needsUpdate;
 		void operator()(StateMachineState *s, IRExpr *cond) {
 			cond = simplifyIRExpr(cond, opt);
 			auto it_did_insert = dominatingExpressions.insert(
@@ -85,30 +121,36 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 			auto it = it_did_insert.first;
 			auto did_insert = it_did_insert.second;
 			if (did_insert) {
-				needsUpdate.push(s);
+				needsUpdate.push(needsUpdateEntryT(-stateDistances[s], s));
 				return;
 			}
 			IRExpr *oldCond = it->second;
 			it->second = IRExpr_Binop(Iop_Or1,
 						  oldCond,
 						  cond);
-			it->second = simplifyIRExpr(it->second, opt);
+			it->second = simplify_via_anf(simplifyIRExpr(it->second, opt));
 			if (!definitelyEqual(it->second, oldCond, opt))
-				needsUpdate.push(s);
+				needsUpdate.push(needsUpdateEntryT(-stateDistances[s], s));
 		}
 		_(const AllowableOptimisations &_opt,
 		  std::map<StateMachineState *, IRExpr *> &_dominatingExpressions,
-		  std::queue<StateMachineState *> &_needsUpdate)
-			: opt(_opt), dominatingExpressions(_dominatingExpressions),
+		  std::map<StateMachineState *, int> &_stateDistances,
+		  std::priority_queue<needsUpdateEntryT> &_needsUpdate)
+			: opt(_opt),
+			  dominatingExpressions(_dominatingExpressions),
+			  stateDistances(_stateDistances),
 			  needsUpdate(_needsUpdate)
 		{}
-	} discoverPathToState(opt, dominatingExpressions, needsUpdate);
+	} discoverPathToState(opt, dominatingExpressions, stateDistances, needsUpdate);
 
 	while (!needsUpdate.empty() && !TIMEOUT) {
-		StateMachineState *s = needsUpdate.front();
+		StateMachineState *s = needsUpdate.top().second;
 		needsUpdate.pop();
 		/* Build the exprAtExit starting from the expression
 		   at entry to the state. */
+		if (debug_state_domination)
+			printf("Recompute domination condition for l%d\n",
+			       stateLabels[s]);
 		IRExpr *exprAtEntry = dominatingExpressions[s];
 		assert(exprAtEntry); /* should definitely have been
 					populated by now */
