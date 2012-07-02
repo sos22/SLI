@@ -213,16 +213,14 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 	   there won't be any writes to gen -1 registers, which in
 	   turn means that a single aliasing configuration is valid
 	   for the entire machine. */
+	aliasp = NULL;
 	if (is_ssa && sm->origin.size() == 1) {
-		/* You need to supply a real oracle if you want to set
-		   is_ssa. */
 		Oracle *o = dynamic_cast<Oracle *>(oracle.get());
-		assert(o);
-		alias = o->getAliasingConfiguration(sm->origin);
-		aliasp = &alias;
+		if (o) {
+			alias = o->getAliasingConfiguration(sm->origin);
+			aliasp = &alias;
+		}
 		sm->assertSSA();
-	} else {
-		aliasp = NULL;
 	}
 	bool done_something;
 	do {
