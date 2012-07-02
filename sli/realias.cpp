@@ -480,14 +480,15 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 	   precisely what we want. */
 	assert(inp->origin.size() == 1);
 	const VexRip &origin(inp->origin[0].second);
-	assert(rootStack.functions.size() == origin.stack.size());
-	for (int x = origin.stack.size() - 2; x >= 0; x--) {
-		StaticRip rtrnRip(origin.stack[x]);
+	assert(rootStack.functions.size() <= origin.stack.size());
+	for (int x = 0; x < rootStack.functions.size() - 1; x++) {
+		StaticRip rtrnRip(origin.stack[origin.stack.size() - x - 2]);
+		FrameId fid(rootStack.functions[rootStack.functions.size() - x - 2]);
 		Oracle::Function f(rtrnRip);
 		Oracle::ThreadRegisterAliasingConfiguration config;
 		if (!f.aliasConfigOnEntryToInstruction(rtrnRip, &config) ||
 		    (config.v[0] & Oracle::PointerAliasingSet::stackPointer))
-			initialRegFrames.insert(rootStack.functions[x]);
+			initialRegFrames.insert(fid);
 	}
 	initialFuncFrame = rootStack.functions[rootStack.functions.size() - 1];
 	sanity_check();
