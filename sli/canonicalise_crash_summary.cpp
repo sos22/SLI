@@ -253,7 +253,7 @@ class SplitSsaGenerations : public StateMachineTransformer {
 				it++;
 			}
 		}
-		return smsep2;
+		return smsep;
 	}
 	bool rewriteNewStates() const { return false; }
 public:
