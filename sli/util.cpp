@@ -8,8 +8,6 @@
 #include "timers.hpp"
 #include "profile.hpp"
 
-__timer_message_filter *__timer_message_filter::head;
-
 void
 debugger_attach(void)
 {

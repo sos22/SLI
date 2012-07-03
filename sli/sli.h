@@ -1306,41 +1306,6 @@ char *nameIRExpr(IRExpr *a);
 #define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
 #define DBG_PRINT(fmt, ...) do { printf(fmt, ## __VA_ARGS__ ); } while (0)
 
-/* Set by the SIGALRM (or whatever) signal handler when it wants us to
-   finish what we're doing and get out quickly. */
-extern volatile bool _timed_out;
-extern FILE *_logfile;
-class __timer_message_filter {
-	static __timer_message_filter *head;
-	__timer_message_filter *next;
-	int cntr;
-public:
-	__timer_message_filter() : cntr(0) {
-		next = head;
-		head = this;
-	}
-	bool operator()() {
-		if (cntr > 10)
-			return false;
-		if (cntr == 10)
-			fprintf(_logfile, "suppress further messages: ");
-		cntr++;
-		return true;
-	}
-	static void reset() {
-		for (auto it = head; it; it = it->next)
-			it->cntr = 0;
-	}
-};
-#define TIMEOUT								\
-	({								\
-		static __timer_message_filter filter;			\
-		if (_timed_out && filter())				\
-			fprintf(_logfile, "%s timed out at %s:%d\n",	\
-				__func__, __FILE__, __LINE__);		\
-		_timed_out;						\
-	})
-
 void __fail(const char *file, unsigned line, const char *fmt, ...)
 	__attribute__((noreturn, __format__(__printf__, 3, 4)));
 #define fail(...) __fail(__FILE__, __LINE__, __VA_ARGS__)

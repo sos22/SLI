@@ -75,6 +75,7 @@ Bool vex_valgrind_support = False;
 /* Max # guest insns per bb */
 VexControl vex_control = { 0,0,False,0,0,0 };
 
+__timer_message_filter *__timer_message_filter::head;
 
 
 /*---------------------------------------------------------------*/
