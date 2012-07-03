@@ -22,14 +22,6 @@ exprIsLocal(IRExpr *input)
 			stop();
 			return ieg;
 		}
-		IRExpr *transformIex(IRExprClientCall *ieg) {
-			stop();
-			return ieg;
-		}
-		IRExpr *transformIex(IRExprClientCallFailed *ieg) {
-			stop();
-			return ieg;
-		}
 		IRExpr *transformIex(IRExprHappensBefore *ieg) {
 			stop();
 			return ieg;

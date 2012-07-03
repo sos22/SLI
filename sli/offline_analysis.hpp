@@ -101,17 +101,6 @@ protected:
 	}
 	virtual IRExpr *transformIex(IRExprCCall *);
 	virtual IRExpr *transformIex(IRExprAssociative *);
-	virtual IRExpr *transformIex(IRExprClientCall *);
-	virtual IRExpr *transformIex(IRExprClientCallFailed *e)
-	{
-		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->target, &t);
-		
-		if (!t)
-			return NULL;
-		else
-			return IRExpr_ClientCallFailed(a1);
-	}
 	virtual IRExpr *transformIex(IRExprHappensBefore *) { return NULL; }
 	virtual IRExpr *transformIex(IRExprPhi *) { return NULL; }
 	virtual IRExpr *transformIex(IRExprFreeVariable *) { return NULL; }

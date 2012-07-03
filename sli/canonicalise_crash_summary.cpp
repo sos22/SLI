@@ -310,20 +310,6 @@ private:
 	{
 		return IRExpr_Phi(canon_reg(iep->reg), iep->generations, iep->ty);
 	}
-	IRExpr *transformIex(IRExprClientCall *iec)
-	{
-		int nr_args;
-		for (nr_args = 0; iec->args[nr_args]; nr_args++)
-			;
-		IRExpr **args = alloc_irexpr_array(nr_args + 1);
-		for (int i = 0; i < nr_args; i++) {
-			bool ign;
-			args[i] = transformIRExpr(iec->args[i], &ign);
-			if (!args[i])
-				args[i] = iec->args[i];
-		}
-		return IRExpr_ClientCall(iec->calledRip, canon_threadrip(iec->callSite), args);
-	}
 	IRExpr *transformIex(IRExprLoad *iel)
 	{
 		bool ign;

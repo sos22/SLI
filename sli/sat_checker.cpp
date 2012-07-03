@@ -368,18 +368,6 @@ anf_context::matches(const IRExpr *a, const IRExpr *b) const
 			if (!matches(ai->contents[i], bi->contents[i]))
 				return false;
 		return true;
-		hdr(ClientCall);
-		if (ai->calledRip != bi->calledRip || ai->callSite != bi->callSite)
-			return false;
-		int i;
-		for (i = 0; ai->args[i] && bi->args[i]; i++)
-			if (!matches(ai->args[i], bi->args[i]))
-				return false;
-		if (ai->args[i] || bi->args[i])
-			return false;
-		return true;
-		hdr(ClientCallFailed);
-		return matches(ai->target, bi->target);
 	}
 #undef hdr
 #undef hdr1

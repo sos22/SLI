@@ -1060,8 +1060,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 						newInstr->defaultNextI =
 							instrMovRegToSlot(RegisterIdx::fromVexOffset(((IRExprGet *)e)->reg.asReg()), s);
 						newInstr = newInstr->defaultNextI;
-					} else if (e->tag == Iex_ClientCall) {
-						/* Do this after emitting the instruction */
 					} else if (e->tag == Iex_Load) {
 						switch (instrOpcode(underlying)) {
 						case 0x3B: { /* 32 bit compare rm32, r32.  Handle this by converting
@@ -1165,12 +1163,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 					if (e->tag == Iex_Get) {
 						dbg("\tGets already handled\n");
 						/* Already handled */
-					} else if (e->tag == Iex_ClientCall) {
-						/* The result of the call should now be in %rax */
-						dbg("\tClient call\n");
-						simulationSlotT s = data.exprsToSlots(it->first, e);
-						newInstr->defaultNextI = instrMovRegToSlot(RegisterIdx::RAX, s);
-						newInstr = newInstr->defaultNextI;
 					} else {
 						assert(e->tag == Iex_Load);
 						switch (instrOpcode(underlying)) {

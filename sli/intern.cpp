@@ -32,10 +32,6 @@ shallow_hash(const IRExpr *e)
 		return 100146091;
 	case Iex_Associative:
 		return ((IRExprAssociative *)e)->op * 100161727 + ((IRExprAssociative *)e)->nr_arguments * 100268423 + 100176877;
-	case Iex_ClientCallFailed:
-		return 100213697;
-	case Iex_ClientCall:
-		return 100256371 + ((IRExprClientCall *)e)->callSite.rip.hash() * 50013641;
 	case Iex_HappensBefore:
 		return 100234427;
 	case Iex_Phi:
@@ -91,15 +87,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			((IRExprAssociative *)e)->contents[x] =
 				internIRExpr(((IRExprAssociative *)e)->contents[x], lookupTable);
 		break;
-	case Iex_ClientCall:
-		for (int x = 0; ((IRExprClientCall *)e)->args[x]; x++)
-			((IRExprClientCall *)e)->args[x] =
-				internIRExpr(((IRExprClientCall *)e)->args[x], lookupTable);
-		break;
-	case Iex_ClientCallFailed:
-		((IRExprClientCallFailed *)e)->target =
-			internIRExpr(((IRExprClientCallFailed *)e)->target, lookupTable);
-		break;
 	}
 	for (std::map<IRExpr *, IRExpr *>::iterator it = lookupTable.lookups[h].begin();
 	     it != lookupTable.lookups[h].end();
@@ -151,9 +138,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 			do_field(Mux0X, expr0);
 			do_field(Mux0X, exprX);
 			break;
-		case Iex_ClientCallFailed:
-			do_field(ClientCallFailed, target);
-			break;
 		case Iex_Load:
 			do_field(Load, ty);
 			do_field(Load, addr);
@@ -195,23 +179,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 					     ((IRExprConst *)other)->con))
 				continue;
 			break;
-
-		case Iex_ClientCall: {
-			bool bad;
-			if (((IRExprClientCall *)other)->calledRip != ((IRExprClientCall *)e)->calledRip ||
-			    ((IRExprClientCall *)other)->callSite != ((IRExprClientCall *)e)->callSite)
-				continue;
-			bad = false;
-			for (int x = 0; !bad; x++) {
-				if (((IRExprClientCall *)e)->args[x] != ((IRExprClientCall *)other)->args[x])
-					bad = true;
-				if (((IRExprClientCall *)e)->args[x] == NULL)
-					break;
-			}
-			if (bad)
-				continue;
-			break;
-		}
 
 		case Iex_HappensBefore:
 			if (((IRExprHappensBefore *)e)->before != ((IRExprHappensBefore *)other)->before ||

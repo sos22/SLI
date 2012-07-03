@@ -408,11 +408,7 @@ clauseUnderspecified(IRExpr *clause,
 		return clauseUnderspecified(m->expr0, mult) &&
 			clauseUnderspecified(m->exprX, mult);
 	}
-	case Iex_ClientCall:
-		return false;
 	case Iex_CCall:
-		return false;
-	case Iex_ClientCallFailed:
 		return false;
 	case Iex_Load:
 		return false;

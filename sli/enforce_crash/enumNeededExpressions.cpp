@@ -28,10 +28,6 @@ public:
 		   side-effects. */
 		return NULL;
 	}
-	IRExpr *transformIex(IRExprClientCall *) {
-		out.insert(currentIRExpr());
-		return NULL;
-	}
 };
 void
 enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out)

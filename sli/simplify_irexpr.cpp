@@ -151,28 +151,6 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 				return false;
 		return true;
 	footer()
-	hdr(ClientCall)
-		if (a->calledRip != b->calledRip ||
-		    a->callSite != b->callSite)
-			return false;
-		for (int i = 0; ; i++) {
-			if (!a->args[i]) {
-				if (!b->args[i])
-					return true;
-				else
-					return false;
-			} else if (!b->args[i])
-				return false;
-			if (!physicallyEqual(a->args[i],
-					     b->args[i]))
-				return false;
-		}
-		abort();
-	footer()
-	hdr(ClientCallFailed)
-		return physicallyEqual(a->target,
-				       b->target);
-	footer()
 	hdr(HappensBefore)
 		return a->before == b->before &&
 			a->after == b->after;
@@ -462,9 +440,7 @@ isEqualityTest(const IRExpr *a)
 static bool
 isVariableLike(const IRExpr *a)
 {
-	return a->tag == Iex_Get || a->tag == Iex_Load ||
-		a->tag == Iex_ClientCall ||
-		a->tag == Iex_ClientCallFailed;
+	return a->tag == Iex_Get || a->tag == Iex_Load;
 }
 
 /* Simple sort function.  Ordering looks like this:
@@ -649,24 +625,6 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 			x++;
 		}
 	}
-	hdr(ClientCall)
-		if (a->callSite < b->callSite)
-			return less_than;
-		else if (a->callSite > b->callSite)
-			return greater_than;
-		for (int x = 0; 1; x++) {
-			if (!a->args[x] && !b->args[x])
-				return equal_to;
-			if (!a->args[x])
-				return less_than;
-			if (!b->args[x])
-				return greater_than;
-			if ((s = _sortIRExprs(a->args[x], b->args[x])) != equal_to)
-				return s;
-		}
-	hdr(ClientCallFailed)
-		return _sortIRExprs(a->target,
-				    b->target);
 	hdr(HappensBefore)
 		if ((s = _sortIntegers(a->before, b->before)) != equal_to)
 			return s;

@@ -172,26 +172,6 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 			ctxt(&res->contents[j], i->contents[j], rawDupe);
 		return res;
 	}
-	case Iex_ClientCall: {
-		const IRExprClientCall *i = (const IRExprClientCall *)inp;
-		IRExprClientCall *res = new IRExprClientCall();
-		res->calledRip = i->calledRip;
-		res->callSite = i->callSite;
-		int nr_args;
-		for (nr_args = 0; i->args[nr_args]; nr_args++)
-			;
-		res->args = alloc_irexpr_array(nr_args + 1);
-		for (nr_args = 0; i->args[nr_args]; nr_args++)
-			ctxt(&res->args[nr_args], i->args[nr_args], rawDupe);
-		res->args[nr_args] = NULL;
-		return res;
-	}
-	case Iex_ClientCallFailed: {
-		const IRExprClientCallFailed *i = (const IRExprClientCallFailed *)inp;
-		IRExprClientCallFailed *res = new IRExprClientCallFailed();
-		ctxt(&res->target, i->target, rawDupe);
-		return res;
-	}
 	case Iex_HappensBefore: {
 		const IRExprHappensBefore *i = (const IRExprHappensBefore *)inp;
 		return new IRExprHappensBefore(i->before, i->after);

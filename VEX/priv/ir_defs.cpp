@@ -1215,47 +1215,6 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
   return true;
 }
 
-static bool parseIRExprClientCall(IRExpr **res, const char *str, const char **suffix)
-{
-  VexRip addr;
-  ThreadRip site;
-  if (!parseThisString("call0x", str, &str) ||
-      !parseVexRip(&addr, str, &str) ||
-      !parseThisChar('@', str, &str) ||
-      !parseThreadRip(&site, str, &str) ||
-      !parseThisChar('(', str, &str))
-    return false;
-  std::vector<IRExpr *> args;
-  while (1) {
-    if (parseThisChar(')', str, suffix))
-      break;
-    if (args.size() != 0 &&
-	!parseThisString(", ", str, &str))
-      return false;
-    IRExpr *arg;
-    if (!parseIRExpr(&arg, str, &str))
-      return false;
-    args.push_back(arg);
-  }
-  IRExpr **a = alloc_irexpr_array(args.size() + 1);
-  for (unsigned x = 0; x < args.size(); x++)
-    a[x] = args[x];
-  a[args.size()] = NULL;
-  *res = IRExpr_ClientCall(addr, site, a);
-  return true;
-}
-
-static bool parseIRExprFailedCall(IRExpr **res, const char *str, const char **suffix)
-{
-  IRExpr *target;
-  if (!parseThisString("failedCall(", str, &str) ||
-      !parseIRExpr(&target, str, &str) ||
-      !parseThisChar(')', str, suffix))
-    return false;
-  *res = IRExpr_ClientCallFailed(target);
-  return true;
-}
-
 static bool parseIRExprHappensBefore(IRExpr **res, const char *str, const char **suffix)
 {
   MemoryAccessIdentifier before(MemoryAccessIdentifier::uninitialised());
@@ -1332,8 +1291,6 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
   do_form(CCall);
   do_form(Mux0X);
   do_form(Associative);
-  do_form(ClientCall);
-  do_form(FailedCall);
   do_form(HappensBefore);
   do_form(Phi);
   do_form(FreeVariable);
@@ -1451,24 +1408,6 @@ IRExprAssociative::prettyPrint(FILE *f) const
 	}
 	fprintf(f, ")");
       }
-}
-void
-IRExprClientCall::prettyPrint(FILE *f) const
-{
-      fprintf(f, "call0x%s@%s(", calledRip.name(), callSite.name());
-      for (int x = 0; args[x]; x++) {
-	if (x != 0)
-	  fprintf(f, ", ");
-	ppIRExpr(args[x], f);
-      }
-      fprintf(f, ")");
-}
-void
-IRExprClientCallFailed::prettyPrint(FILE *f) const
-{
-      fprintf(f, "failedCall(");
-      ppIRExpr(target, f);
-      fprintf(f, ")");
 }
 void
 IRExprHappensBefore::prettyPrint(FILE *f) const
@@ -2063,22 +2002,6 @@ IRExprAssociative* IRExpr_Associative(int nr_arguments, IROp op)
 			 &__las);
   e->sanity_check();
   return e;
-}
-IRExpr* IRExpr_ClientCall ( const VexRip &r, const ThreadRip &site, IRExpr **args )
-{
-   IRExprClientCall *e = new IRExprClientCall();
-   e->calledRip = r;
-   e->callSite = site;
-   e->args = args;
-   e->sanity_check();
-   return e;
-}
-IRExpr* IRExpr_ClientCallFailed ( IRExpr *t )
-{
-   IRExprClientCallFailed *e = new IRExprClientCallFailed();
-   e->target = t;
-   e->sanity_check();
-   return e;
 }
 IRExpr* IRExpr_HappensBefore ( const MemoryAccessIdentifier &before,
 			       const MemoryAccessIdentifier &after )

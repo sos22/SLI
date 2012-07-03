@@ -1059,24 +1059,6 @@ irexprAliasingClass(IRExpr *expr,
 		break;
 	}
 
-	case Iex_ClientCall: {
-		IRExprClientCall *e = (IRExprClientCall *)expr;
-		bool mightReturnStack = false;
-		for (int x = 0; !mightReturnStack && e->args[x]; x++) {
-			if (irexprAliasingClass(e->args[x],
-						config,
-						temps,
-						buildingAliasTable) &
-			    Oracle::PointerAliasingSet::stackPointer)
-				mightReturnStack = true;
-		}
-		if (mightReturnStack)
-			return Oracle::PointerAliasingSet::anything;
-		else
-			return Oracle::PointerAliasingSet::notAPointer |
-				Oracle::PointerAliasingSet::nonStackPointer;
-	}
-
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)expr;
 		bool anyStackHasLeaked = false;

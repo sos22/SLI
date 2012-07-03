@@ -19,12 +19,6 @@ class RandomEvalContext {
 		IRExpr *transformIex(IRExprLoad *iel) {
 			return _this->get(iel);
 		}
-		IRExpr *transformIex(IRExprClientCall *iec) {
-			return _this->get(iec);
-		}
-		IRExpr *transformIex(IRExprClientCallFailed *iec) {
-			return _this->get(iec);
-		}
 		IRExpr *transformIex(IRExprUnop *ieu) {
 			/* Special case: BadPtr(RSP) is always just 0.
 			   That's not strictly sound, so it's kind of

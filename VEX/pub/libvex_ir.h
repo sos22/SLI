@@ -1262,8 +1262,6 @@ typedef
       Iex_Mux0X,
       Iex_CCall,
       Iex_Associative, /* n-ary associative operator */
-      Iex_ClientCall,
-      Iex_ClientCallFailed,
       Iex_Load,
       Iex_HappensBefore,
       Iex_Phi,
@@ -1767,43 +1765,6 @@ struct IRExprAssociative : public IRExpr {
    }
 };
 
-struct IRExprClientCall : public IRExpr {
-   VexRip calledRip;
-   ThreadRip callSite;
-   IRExpr **args;
-   IRExprClientCall() : IRExpr(Iex_ClientCall) {}
-   void visit(HeapVisitor &hv) { hv(args); }
-   unsigned long hashval() const {
-       unsigned long h = calledRip.hash() * 3940631;
-       for (unsigned x = 0; args[x]; x++)
-	   h = h * 7940641 + args[x]->hashval();
-       return h;
-   }
-   void prettyPrint(FILE *f) const;
-   IRType type() const { return Ity_I64; }
-   void sanity_check() const {
-      calledRip.sanity_check();
-      callSite.sanity_check();
-      for (unsigned x = 0; args[x]; x++)
-	 args[x]->sanity_check();
-   }
-};
-
-struct IRExprClientCallFailed : public IRExpr {
-   IRExpr *target;
-   IRExprClientCallFailed() : IRExpr(Iex_ClientCallFailed) {}
-   void visit(HeapVisitor &hv) { hv(target); }
-   unsigned long hashval() const {
-       return target->hashval() * 65537;
-   }
-   void prettyPrint(FILE *f) const;
-   IRType type() const { return Ity_I64; }
-   void sanity_check() const {
-      target->sanity_check();
-      assert(target->type() == Ity_I64);
-   }
-};
-
 struct IRExprHappensBefore : public IRExpr {
     MemoryAccessIdentifier before;
     MemoryAccessIdentifier after;
@@ -1890,8 +1851,6 @@ extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
 extern IRExpr* IRExpr_Associative (IRExprAssociative *);
 extern IRExprAssociative* IRExpr_Associative (int nr_arguments, IROp op);
-extern IRExpr* IRExpr_ClientCall (const VexRip &r, const ThreadRip &callSite, IRExpr **args);
-extern IRExpr* IRExpr_ClientCallFailed (IRExpr *t);
 extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,
 				     const MemoryAccessIdentifier &after);
 static inline IRExpr *IRExpr_Phi (const threadAndRegister &r,
