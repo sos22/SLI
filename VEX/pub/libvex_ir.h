@@ -85,6 +85,41 @@ public:
 
 #include "libvex_rip.hpp"
 
+/* Set by the SIGALRM (or whatever) signal handler when it wants us to
+   finish what we're doing and get out quickly. */
+extern volatile bool _timed_out;
+extern FILE *_logfile;
+class __timer_message_filter {
+	static __timer_message_filter *head;
+	__timer_message_filter *next;
+	int cntr;
+public:
+	__timer_message_filter() : cntr(0) {
+		next = head;
+		head = this;
+	}
+	bool operator()() {
+		if (cntr > 10)
+			return false;
+		if (cntr == 10)
+			fprintf(_logfile, "suppress further messages: ");
+		cntr++;
+		return true;
+	}
+	static void reset() {
+		for (auto it = head; it; it = it->next)
+			it->cntr = 0;
+	}
+};
+#define TIMEOUT								\
+	({								\
+		static __timer_message_filter filter;			\
+		if (_timed_out && filter())				\
+			fprintf(_logfile, "%s timed out at %s:%d\n",	\
+				__func__, __FILE__, __LINE__);		\
+		_timed_out;						\
+	})
+
 class threadAndRegister : public Named {
 	std::pair<unsigned, int> content;
 	bool valid;
@@ -1716,6 +1751,8 @@ struct IRExprAssociative : public IRExpr {
       return a;
    }
    void sanity_check() const {
+      if (TIMEOUT)
+	 return;
       sanity_check_irop(op);
       assert(nr_arguments >= 0);
       assert(nr_arguments_allocated >= 0);
