@@ -1866,19 +1866,21 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					IRExprConst *cnst = (IRExprConst *)assoc->contents[0];
 					unsigned long old_delta = cnst->con->Ico.U64;
 					unsigned long new_delta = old_delta & ~((1ul << 22) - 1);
-					*done_something = true;
+					if (old_delta != new_delta) {
+						*done_something = true;
 
-					if (new_delta == 0)
-						e->arg = assoc->contents[1];
-					else
-						e->arg =
-							IRExpr_Binop(
-								Iop_Add64,
-								IRExpr_Const(
-									IRConst_U64(
-										cnst->con->Ico.U64 & ~((1ul << 22) - 1))),
-								assoc->contents[1]);
-					return e;
+						if (new_delta == 0)
+							e->arg = assoc->contents[1];
+						else
+							e->arg =
+								IRExpr_Binop(
+									Iop_Add64,
+									IRExpr_Const(
+										IRConst_U64(
+											cnst->con->Ico.U64 & ~((1ul << 22) - 1))),
+									assoc->contents[1]);
+						return e;
+					}
 				}
 				if (e->arg->tag == Iex_Get &&
 				    !((IRExprGet *)e->arg)->reg.isTemp() &&
