@@ -7,6 +7,7 @@
 #include "allowable_optimisations.hpp"
 #include "libvex_parse.h"
 #include "offline_analysis.hpp"
+#include "intern.hpp"
 
 void
 printCrashSummary(CrashSummary *summary, FILE *f)
@@ -214,4 +215,14 @@ transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans, bool 
 	input->storeMachine = trans.transform(input->storeMachine, done_something);
 	input->verificationCondition = trans.doit(input->verificationCondition, done_something);
 	return input;
+}
+
+CrashSummary *
+internCrashSummary(CrashSummary *cs)
+{
+	internStateMachineTable t;
+	cs->loadMachine = internStateMachine(cs->loadMachine, t);
+	cs->storeMachine = internStateMachine(cs->storeMachine, t);
+	cs->verificationCondition = internIRExpr(cs->verificationCondition, t);
+	return cs;
 }

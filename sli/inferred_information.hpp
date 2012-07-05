@@ -60,6 +60,7 @@ CrashSummary *readBugReport(const char *name, char **metadata);
 class StateMachineTransformer;
 CrashSummary *transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans,
 				    bool *done_something = NULL);
+CrashSummary *internCrashSummary(CrashSummary *cs);
 
 char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident);
 

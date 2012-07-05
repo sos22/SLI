@@ -162,7 +162,8 @@ check_and_normal_form(const IRExpr *e)
 }
 
 /* And normal form means that we can use Iop_And1 and Iop_Not1, but
-   not Iop_Or1. */
+   not Iop_Or1.  It's not quite as powerful as CNF, but converting to
+   it is *much* cheaper. */
 static IRExpr *
 and_normal_form(IRExpr *e, internIRExprTable &intern)
 {
@@ -284,9 +285,12 @@ class anf_context {
 	void addAssumption(IRExpr *a);
 	void introduceEqRule(IRExpr *a, IRExpr *b);
 public:
-	anf_context(internIRExprTable &_intern)
+	anf_context(internIRExprTable &_intern, IRExpr *assumption)
 		: intern(_intern)
-	{}
+	{
+		if (assumption)
+			addAssumption(assumption);
+	}
 	IRExpr *simplify(IRExpr *input);
 	void prettyPrint(FILE *);
 };
@@ -664,11 +668,11 @@ anf_context::simplify(IRExpr *a)
  * and Iop_Not1 operators, but not Iop_Or1).  See if there are any
  * interesting simplifications we can do based on that. */
 static IRExpr *
-anf_simplify(IRExpr *a, internIRExprTable &intern)
+anf_simplify(IRExpr *a, IRExpr *assumption, internIRExprTable &intern)
 {
 	a = internIRExpr(a, intern);
 	while (!TIMEOUT) {
-		anf_context ctxt(intern);
+		anf_context ctxt(intern, assumption);
 		IRExpr *a2 = ctxt.simplify(a);
 		if (a == a2)
 			break;
@@ -678,14 +682,17 @@ anf_simplify(IRExpr *a, internIRExprTable &intern)
 }
 
 static IRExpr *
-simplify_via_anf(IRExpr *a)
+simplify_via_anf(IRExpr *a, IRExpr *assumption = NULL)
 {
 	internIRExprTable table;
 	a = internIRExpr(a, table);
 	IRExpr *normed = and_normal_form(a, table);
 	if (!normed)
 		return a;
-	return anf_simplify(normed, table);
+	IRExpr *normed_ass = NULL;
+	if (assumption)
+		normed_ass = and_normal_form(internIRExpr(assumption, table), table);
+	return anf_simplify(normed, normed_ass, table);
 }
 
 static IRExpr *
@@ -801,7 +808,7 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 	if (!norm1)
 		return true;
 	check_and_normal_form(norm1);
-	norm1 = anf_simplify(norm1, intern);
+	norm1 = anf_simplify(norm1, NULL, intern);
 	norm1 = simplifyIRExpr(norm1, opt);
 	res = isTrue(norm1);
 	if (res.valid) {
@@ -839,8 +846,8 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 }
 
 IRExpr *
-simplify_via_anf(IRExpr *a)
+simplify_via_anf(IRExpr *a, IRExpr *assumption)
 {
-	return _sat_checker::simplify_via_anf(a);
+	return _sat_checker::simplify_via_anf(a, assumption);
 }
 

@@ -241,8 +241,7 @@ main(int argc, char *argv[])
 			continue;
 		CrashSummary *summary = readBugReport(de->d_name, NULL);
 		bool found_dupe = false;
-		auto it = summaries.begin();
-		for (; !found_dupe && it != summaries.end(); it++) {
+		for (auto it = summaries.begin(); !found_dupe && it != summaries.end(); it++) {
 			if (crashSummariesTheSame(summary, it->second)) {
 				printf("%s is a dupe of %s\n", de->d_name, it->first);
 				unlink(de->d_name);

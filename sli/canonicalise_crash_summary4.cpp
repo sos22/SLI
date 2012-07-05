@@ -352,16 +352,6 @@ introduceCandidateFunction(IRExpr *e, std::map<Function *, int> &functions, cons
 }
 
 static CrashSummary *
-internCrashSummary(CrashSummary *cs)
-{
-	internStateMachineTable t;
-	cs->loadMachine = internStateMachine(cs->loadMachine, t);
-	cs->storeMachine = internStateMachine(cs->storeMachine, t);
-	cs->verificationCondition = internIRExpr(cs->verificationCondition, t);
-	return cs;
-}
-
-static CrashSummary *
 introduceCompoundFunctions(CrashSummary *summary,
 			   int *f_cntr,
 			   bool *done_something)

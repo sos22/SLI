@@ -1850,7 +1850,6 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
 }
 IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, const MemoryAccessIdentifier &rip ) {
    IRExprLoad* e        = new IRExprLoad(rip);
-   assert(addr->type() == Ity_I64);
    e->ty   = ty;
    e->addr = addr;
    return e;
