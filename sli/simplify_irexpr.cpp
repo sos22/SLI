@@ -1851,16 +1851,33 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 				    ((IRExprAssociative *)e->arg)->op == Iop_Add64 &&
 				    ((IRExprAssociative *)e->arg)->nr_arguments == 2 &&
 				    ((IRExprAssociative *)e->arg)->contents[0]->tag == Iex_Const) {
-					/* BadPtr(k + x) -> BadPtr(x) if k is
-					 * a constant.  That's not strictly
-					 * speaking true, because it's always
-					 * possible that k is enough to push
-					 * you over the boundary between valid
-					 * and invalid memory, but that's so
-					 * rare that I'm willing to ignore
-					 * it. */
+					/* Simplify BadPtr(k+x) a
+					 * little bit if k is a
+					 * constant.  The basic rule
+					 * is to round k down to a
+					 * multiple of 4MiB.  The idea
+					 * is that if X is a valid
+					 * pointer then X+8, say, is
+					 * probably also a valid
+					 * pointer to the same
+					 * structure, so we can mosh
+					 * them together. */
+					IRExprAssociative *assoc = (IRExprAssociative *)e->arg;
+					IRExprConst *cnst = (IRExprConst *)assoc->contents[0];
+					unsigned long old_delta = cnst->con->Ico.U64;
+					unsigned long new_delta = old_delta & ~((1ul << 22) - 1);
 					*done_something = true;
-					e->arg = ((IRExprAssociative *)e->arg)->contents[1];
+
+					if (new_delta == 0)
+						e->arg = assoc->contents[1];
+					else
+						e->arg =
+							IRExpr_Binop(
+								Iop_Add64,
+								IRExpr_Const(
+									IRConst_U64(
+										cnst->con->Ico.U64 & ~((1ul << 22) - 1))),
+								assoc->contents[1]);
 					return e;
 				}
 				if (e->arg->tag == Iex_Get &&
