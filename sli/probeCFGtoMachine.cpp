@@ -553,6 +553,23 @@ cfgNodeToState(Oracle *oracle,
 					NULL);
 			*cursor = smp;
 			cursor = &smp->target;
+			if (irsb->next_is_const &&
+			    target->fallThrough.second &&
+			    target->fallThrough.second->my_rip != irsb->next_const.rip) {
+				targets.push_back(target->fallThrough.second);
+				smp = new StateMachineSideEffecting(
+					target->my_rip,
+					new StateMachineSideEffectEndFunction(
+						IRExpr_Get(
+							threadAndRegister::reg(
+								tid,
+								OFFSET_amd64_RSP,
+								0),
+							Ity_I64)),
+					NULL);
+				*cursor = smp;
+				cursor = &smp->target;
+			}
 		} else if (irsb->jumpkind == Ijk_Ret) {
 			StateMachineSideEffecting *smp =
 				new StateMachineSideEffecting(
