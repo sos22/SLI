@@ -250,25 +250,29 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 				IRExpr_Associative(new_nr_args, Iop_And1);
 			for (int i = 0; i < new_nr_args * 2; i++) {
 				int nr_bits_set = 0;
-				for (int j = 0; j < 32; j++)
-					if (i && (1 << j))
+				for (int j = 0; j < iea->nr_arguments; j++)
+					if (i & (1 << j))
 						nr_bits_set++;
 				if (nr_bits_set % 2 == 0)
 					continue;
 				IRExprAssociative *arg = IRExpr_Associative(
 					iea->nr_arguments, Iop_And1);
-				for (int j = 0; j < 32; j++) {
-					if (i && (1 << j))
-						arg->contents[i] = positive_terms[i];
+				for (int j = 0; j < iea->nr_arguments; j++) {
+					if (i & (1 << j))
+						arg->contents[j] = positive_terms[j];
 					else
-						arg->contents[i] = negative_terms[i];
+						arg->contents[j] = negative_terms[j];
 				}
 				arg->nr_arguments = iea->nr_arguments;
+				arg = (IRExprAssociative *)internIRExpr(arg, intern);
+				sort_and_arguments(arg->contents, arg->nr_arguments);
 				newAssoc->contents[newAssoc->nr_arguments++] =
 					IRExpr_Unop(
 						Iop_Not1,
 						arg);
 			}
+			newAssoc = (IRExprAssociative *)internIRExpr(newAssoc, intern);
+			sort_and_arguments(newAssoc->contents, newAssoc->nr_arguments);
 			e = internIRExpr(IRExpr_Unop(Iop_Not1, newAssoc), intern);
 		}
 	}
