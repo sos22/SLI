@@ -13,11 +13,13 @@
 #include "alloc_mai.hpp"
 
 #ifdef NDEBUG
-#define debug_dump_state_traces 0
-#define debug_dump_crash_reasons 0
+#define debug_dump_state_traces false
+#define debug_dump_crash_reasons false
+#define debug_survival_constraint false
 #else
 static bool debug_dump_state_traces = false;
 static bool debug_dump_crash_reasons = false;
+static bool debug_survival_constraint = false;
 #endif
 
 /* All of the state needed to evaluate a single pure IRExpr. */
@@ -1281,12 +1283,22 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm
 {
 	__set_profiling(survivalConstraintIfExecutedAtomically);
 
+	if (debug_survival_constraint) {
+		printf("%s(sm = ..., assumption = %s, escapingStatesSurvive = %s, wantCrash = %s, opt = %s)\n",
+		       __func__,
+		       assumption ? nameIRExpr(assumption) : "<null>",
+		       escapingStatesSurvive ? "true" : "false",
+		       wantCrash ? "true" : "false",
+		       opt.name());
+		printStateMachine(sm, stdout);
+	}
+
 	struct _ : public EvalPathConsumer {
 		VexPtr<IRExpr, &ir_heap> res;
 		const AllowableOptimisations &opt;
 		bool escapingStatesSurvive;
 		bool wantCrash;
-		void addComponent(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		void addComponent(const char *label, IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 #warning Think hard about what we're doing here.  Should we constraint it to never reach a crashing node, or merely to always reach a surviving one?'
 #warning Makes a difference due to incompleteness of simplifier and also presence of ND choice states.
 			IRExpr *component =
@@ -1301,22 +1313,28 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm
 			else
 				res = component;
 			res = simplifyIRExpr(res, opt);
+			if (debug_survival_constraint)
+				printf("%s: add %s, got %s\n",
+				       label,
+				       nameIRExpr(component),
+				       nameIRExpr(res));
 		}
 		bool crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			if (!wantCrash)
-				addComponent(pathConstraint, justPathConstraint);
+				addComponent("crash", pathConstraint, justPathConstraint);
 			return true;
 		}
 		bool survive(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			if (wantCrash)
-				addComponent(pathConstraint, justPathConstraint);
+				addComponent("survive", pathConstraint, justPathConstraint);
 			return true;
 		}
 		bool escape(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
-			if (escapingStatesSurvive)
-				return survive(pathConstraint, justPathConstraint);
-			else
-				return crash(pathConstraint, justPathConstraint);
+			if (escapingStatesSurvive && wantCrash)
+				addComponent("escape", pathConstraint, justPathConstraint);
+			else if (!escapingStatesSurvive && !wantCrash)
+				addComponent("escape", pathConstraint, justPathConstraint);
+			return true;
 		}
 		_(const VexPtr<IRExpr, &ir_heap> &_assumption,
 		  const AllowableOptimisations &_opt,
@@ -1332,11 +1350,19 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm
 		assumption = IRExpr_Const(IRConst_U1(1));
 	enumEvalPaths(sm, assumption, oracle, opt, consumeEvalPath, token);
 
+	if (debug_survival_constraint)
+		printf("%s: result %s\n", __func__,
+		       consumeEvalPath.res ? nameIRExpr(consumeEvalPath.res) : "const(1)");
+	
 	if (TIMEOUT)
 		return NULL;
-	else if (consumeEvalPath.res)
-		return simplifyIRExpr(simplify_via_anf(consumeEvalPath.res), opt);
-	else
+	else if (consumeEvalPath.res) {
+		IRExpr *res = simplifyIRExpr(simplify_via_anf(consumeEvalPath.res), opt);
+		if (debug_survival_constraint)
+			printf("%s: after optimisation, result %s\n",
+			       __func__, nameIRExpr(res));
+		return res;
+	} else
 		return IRExpr_Const(IRConst_U1(1));
 }
 
