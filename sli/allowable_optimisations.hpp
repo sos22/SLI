@@ -75,7 +75,7 @@
          constant address.
 
 */
-class AllowableOptimisations {
+class AllowableOptimisations : public Named {
 #define _optimisation_flags(f)						\
 	f(assumePrivateStack, bool)					\
 	f(assumeExecutesAtomically, bool)				\
@@ -112,6 +112,29 @@ class AllowableOptimisations {
 	   the address is a constant. */
 	VexPtr<AddressSpace> _as;
 
+	char *mkName() const {
+		std::vector<const char *> fragments;
+		fragments.push_back("opt{");
+#define do_one_flag(name, ign)					\
+		if ( _ ## name ) {				\
+			if (fragments.size() != 1)		\
+				fragments.push_back(", ");	\
+			fragments.push_back( #name );		\
+		}
+		optimisation_flags(do_one_flag);
+#undef do_one_flag
+		if (_as)
+			fragments.push_back("as");
+		fragments.push_back("}");
+		size_t sz = 1; /* nul terminator */
+		for (auto it = fragments.begin(); it != fragments.end(); it++)
+			sz += strlen(*it);
+		char *res = (char *)malloc(sz);
+		res[0] = 0;
+		for (auto it = fragments.begin(); it != fragments.end(); it++)
+			strcat(res, *it);
+		return res;
+	}
 public:
 	static AllowableOptimisations defaultOptimisations;
 	AllowableOptimisations(
