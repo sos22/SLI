@@ -83,6 +83,10 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		trueTarget = falseTarget;
 		falseTarget = t;
 	}
+	if (definitelyUnevaluatable(condition)) {
+		*done_something = true;
+		return StateMachineUnreached::get();
+	}
 	trueTarget = trueTarget->optimise(opt, done_something);
 	falseTarget = falseTarget->optimise(opt, done_something);
 
