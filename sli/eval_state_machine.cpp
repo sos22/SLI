@@ -2144,8 +2144,13 @@ findHappensBeforeRelations(const VexPtr<CrashSummary, &ir_heap> &summary,
    StateMachineCrash it will now branch to the root of @to.  If @from
    is a store state then this effectively concatenates the two
    machines together.  We duplicate both machines in the process. */
+/* Slightly non-obvious: we make the composite machine branch to
+   <crash> if the first machine branches to <survive>.  The idea is
+   that the composite machine runs the first machine to completion and
+   then, if that predicts a crash, runs the second machine to
+   completion. */
 static StateMachine *
-concatenateStateMachines(const StateMachine *machine, const StateMachine *to)
+concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine *to)
 {
 	std::map<const StateMachineState *, StateMachineState *> rewriteRules;
 
@@ -2156,7 +2161,7 @@ concatenateStateMachines(const StateMachine *machine, const StateMachine *to)
 	   to duplicate every state, because it duplicates any state
 	   which can ultimately reach a state which it has a rule for. */
 	rewriteRules[StateMachineCrash::get()] = to->root;
-	rewriteRules[StateMachineNoCrash::get()] = StateMachineNoCrash::get();
+	rewriteRules[StateMachineNoCrash::get()] = StateMachineCrash::get();
 	rewriteRules[StateMachineUnreached::get()] = StateMachineUnreached::get();
 
 	StateMachineTransformer::rewriteMachine(machine, rewriteRules, false);
@@ -2199,7 +2204,7 @@ writeMachineSuitabilityConstraint(const VexPtr<StateMachine, &ir_heap> &writeMac
 
 	writeMachine->assertAcyclic();
 	readMachine->assertAcyclic();
-	combinedMachine = concatenateStateMachines(
+	combinedMachine = concatenateStateMachinesCrashing(
 		writeMachine,
 		readMachine);
 	combinedMachine->assertAcyclic();
