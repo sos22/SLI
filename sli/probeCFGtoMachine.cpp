@@ -577,6 +577,25 @@ cfgNodeToState(Oracle *oracle,
 					NULL);
 				*cursor = smp;
 				cursor = &smp->target;
+				smp = new StateMachineSideEffecting(
+					target->my_rip,
+					new StateMachineSideEffectCopy(
+						threadAndRegister::reg(
+							tid,
+							OFFSET_amd64_RSP,
+							0),
+						IRExpr_Binop(
+							Iop_Add64,
+							IRExpr_Const(IRConst_U64(8)),
+							IRExpr_Get(
+								threadAndRegister::reg(
+									tid,
+									OFFSET_amd64_RSP,
+									0),
+								Ity_I64))),
+					NULL);
+				*cursor = smp;
+				cursor = &smp->target;
 			}
 		} else if (irsb->jumpkind == Ijk_Ret) {
 			StateMachineSideEffecting *smp =
