@@ -1866,6 +1866,16 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					IRExprConst *cnst = (IRExprConst *)assoc->contents[0];
 					unsigned long old_delta = cnst->con->Ico.U64;
 					unsigned long new_delta = old_delta & ~((1ul << 22) - 1);
+					if (assoc->contents[1]->tag == Iex_Get &&
+					    ((IRExprGet *)assoc->contents[1])->reg.isReg() &&
+					    (((IRExprGet *)assoc->contents[1])->reg.asReg() == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
+					     ((IRExprGet *)assoc->contents[1])->reg.asReg() == offsetof(VexGuestAMD64State, guest_RSP))) {
+						/* Special case: BadPtr(k+x) is always false
+						   if x == RSP or x == FS_ZERO */
+						*done_something = true;
+						return IRExpr_Const(IRConst_U1(0));
+					}
+
 					if (old_delta != new_delta) {
 						*done_something = true;
 
