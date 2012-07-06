@@ -323,7 +323,25 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode
  * root.  We find all of the nodes of flavour true_target_instr and
  * call them true targets.  Then, for each true target T and node N,
  * we find the length of the shortest path from T to N. */
-class nodeLabelling : public std::map<CFGNode *, unsigned> {
+class nodeLabelling : public std::map<CFGNode *, unsigned>, public Named {
+	char *mkName() const {
+		std::vector<char *> v;
+		for (auto it = begin(); it != end(); it++) {
+			if (it != begin())
+				v.push_back(strdup(", "));
+			v.push_back(my_asprintf("%p -> %d", it->first, it->second));
+		}
+		size_t sz = 0;
+		for (auto it = v.begin(); it != v.end(); it++)
+			sz += strlen(*it);
+		char *res = (char *)malloc(sz + 1);
+		res[0] = 0;
+		for (auto it = v.begin(); it != v.end(); it++) {
+			strcat(res, *it);
+			free(*it);
+		}
+		return res;
+	}
 public:
 	bool merge(nodeLabelling &other);
 	void successor(unsigned maxPathLength);
@@ -331,13 +349,13 @@ public:
 class nodeLabellingMap : public std::map<CFGNode *, nodeLabelling> {
 public:
 	nodeLabellingMap(std::set<CFGNode *> &roots, unsigned maxPathLength);
+	void prettyPrint(FILE *f) const;
 };
-
 void
-debug_dump(const nodeLabelling &nl)
+nodeLabellingMap::prettyPrint(FILE *f) const
 {
-	for (auto it = nl.begin(); it != nl.end(); it++)
-		printf("%p -> %d, ", it->first, it->second);
+	for (auto it = begin(); it != end(); it++)
+		fprintf(f, "%p -> %s\n", it->first, it->second.name());
 }
 
 bool
