@@ -181,7 +181,7 @@ main(int argc, char *argv[])
 	*/
 	unsigned long start_instr = total_instructions / 100 * start_percentage;
 	unsigned long end_instr = end_percentage == 100 ? total_instructions : total_instructions / 100 * end_percentage - 1;
-	unsigned long instructions_to_process = end_instr - start_instr + 1;
+	unsigned long instructions_to_process = end_instr - start_instr;
 
 	printf("Processing instructions %ld to %ld\n", start_instr, end_instr);
 
