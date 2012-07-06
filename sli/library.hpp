@@ -12,7 +12,8 @@ namespace LibraryFunctionTemplate {
 	f(free)					\
 	f(pthread_mutex_lock)			\
 	f(pthread_mutex_unlock)			\
-	f(__stack_chk_fail)
+	f(__stack_chk_fail)			\
+	f(time)
 
 	enum __type {
 		none = 0,

@@ -220,6 +220,14 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	}
 	case LibraryFunctionTemplate::__stack_chk_fail:
 		return StateMachineUnreached::get();
+	case LibraryFunctionTemplate::time: {
+		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->my_rip), false)));
+		acc = (!rax <<= fv) >> end;
+		If(smb_reg(arg1, Ity_I64) == smb_const64(0),
+		   acc,
+		   (*smb_reg(arg1, Ity_I64) <<= fv) >> acc);
+		break;
+	}
 	case LibraryFunctionTemplate::none:
 		abort();
 	}
