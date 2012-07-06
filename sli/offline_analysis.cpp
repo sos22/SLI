@@ -17,6 +17,12 @@
 #include "sat_checker.hpp"
 #include "allowable_optimisations.hpp"
 
+#ifndef NDEBUG
+static bool debugOptimiseStateMachine = false;
+#else
+#define debugOptimiseStateMachine false
+#endif
+
 static void
 enumerateCFG(CFGNode *root, std::map<VexRip, CFGNode *> &rips)
 {
@@ -208,6 +214,12 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 	sm->assertAcyclic();
 	Oracle::RegisterAliasingConfiguration alias, *aliasp;
 
+	if (debugOptimiseStateMachine) {
+		printf("%s(sm=..., opt = %s, is_ssa = %s)\n",
+		       __func__, opt.name(), is_ssa ? "true" : "false");
+		printStateMachine(sm, stdout);
+	}
+
 	/* Careful here.  We can only use the aliasing configuration
 	   if the machine is in SSA form, because that guarantees that
 	   there won't be any writes to gen -1 registers, which in
@@ -227,35 +239,122 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		if (TIMEOUT)
 			return sm;
 		done_something = false;
-		sm = sm->optimise(opt, &done_something);
+
+		bool p = false;
+		sm = sm->optimise(opt, &p);
+		if (debugOptimiseStateMachine && p) {
+			printf("Local optimise 1:\n");
+			printStateMachine(sm, stdout);
+		}
+		done_something |= p;
+
 		sm = internStateMachine(sm);
-		if (opt.ignoreSideEffects())
-			removeSurvivingStates(sm, opt, &done_something);
-		removeRedundantStores(sm, oracle, &done_something, aliasp, opt);
+		if (opt.ignoreSideEffects()) {
+			p = false;
+			removeSurvivingStates(sm, opt, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("Remove surviving stores:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+		}
+
+		p = false;
+		removeRedundantStores(sm, oracle, &p, aliasp, opt);
+		if (debugOptimiseStateMachine && p) {
+			printf("removeRedundantStores:\n");
+			printStateMachine(sm, stdout);
+		}
+		done_something |= p;
+
 		LibVEX_maybe_gc(token);
-		sm = availExpressionAnalysis(sm, opt, aliasp, is_ssa, oracle, &done_something);
+
+		p = false;
+		sm = availExpressionAnalysis(sm, opt, aliasp, is_ssa, oracle, &p);
+		if (debugOptimiseStateMachine && p) {
+			printf("availExpressionAnalysis:\n");
+			printStateMachine(sm, stdout);
+		}
+		done_something |= p;
+
 		LibVEX_maybe_gc(token);
 		{
 			bool d;
+			p = false;
 			do {
 				d = false;
 				sm = deadCodeElimination(sm, &d, opt);
-				done_something |= d;
+				p |= d;
 			} while (d);
+			if (debugOptimiseStateMachine && p) {
+				printf("deadCodeElimination:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
 		}
-		sm = sm->optimise(opt, &done_something);
+		p = false;
+		sm = sm->optimise(opt, &p);
+		if (debugOptimiseStateMachine && p) {
+			printf("Local optimise 2:\n");
+			printStateMachine(sm, stdout);
+		}
+		done_something |= p;
+
 		sm = bisimilarityReduction(sm, opt);
+
 		if (is_ssa) {
-			sm = optimiseSSA(sm, &done_something);
-			sm = functionAliasAnalysis(sm, opt, oracle, &done_something);
-			sm = phiElimination(sm, opt, &done_something);
+			p = false;
+			sm = optimiseSSA(sm, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("optimiseSSA:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+
+			p = false;
+			sm = functionAliasAnalysis(sm, opt, oracle, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("functionAliasAnalysis:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+
+			p = false;
+			sm = phiElimination(sm, opt, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("phiElimination:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
 		}
-		if (opt.noExtend())
-			sm = useInitialMemoryLoads(sm, opt, oracle, &done_something);
-		if (opt.noLocalSurvival())
-			sm = removeLocalSurvival(sm, opt, &done_something);
-		if (opt.mustStoreBeforeCrash())
-			sm = enforceMustStoreBeforeCrash(sm, &done_something);
+		if (opt.noExtend()) {
+			p = false;
+			sm = useInitialMemoryLoads(sm, opt, oracle, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("useInitialMemoryLoads:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+		}
+		if (opt.noLocalSurvival()) {
+			p = false;
+			sm = removeLocalSurvival(sm, opt, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("removeLocalSurvival:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+		}
+		if (opt.mustStoreBeforeCrash()) {
+			p = false;
+			sm = enforceMustStoreBeforeCrash(sm, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("enforceMustStoreBeforeCrash:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+		}
+
 		if (progress)
 			*progress |= done_something;
 	} while (done_something);
