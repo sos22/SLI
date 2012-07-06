@@ -720,7 +720,8 @@ disjunctive_normal_form(IRExpr *what)
 }
 
 static bool
-evalExpression(IRExpr *e, NdChooser &chooser, std::map<IRExpr *, std::pair<bool, bool> > &memo)
+evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
+	       std::map<IRExpr *, std::pair<bool, bool> > &memo)
 {
 	assert(e->type() == Ity_I1);
 	if (e->tag == Iex_Const)
@@ -733,23 +734,25 @@ evalExpression(IRExpr *e, NdChooser &chooser, std::map<IRExpr *, std::pair<bool,
 	if (did_insert) {
 		if (e->tag == Iex_Unop &&
 		    ((IRExprUnop *)e)->op == Iop_Not1) {
-			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, memo);
+			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, !preferred_result, memo);
 		} else if (e->tag == Iex_Associative &&
 			   ((IRExprAssociative *)e)->op == Iop_And1) {
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = true;
 			for (int i = 0; i < a->nr_arguments && acc; i++)
-				acc &= evalExpression(a->contents[i], chooser, memo);
+				acc &= evalExpression(a->contents[i], chooser, preferred_result, memo);
 			it->second.first = acc;
 		} else if (e->tag == Iex_Associative &&
 			   ((IRExprAssociative *)e)->op == Iop_Or1) {
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = false;
 			for (int i = 0; i < a->nr_arguments && !acc; i++)
-				acc |= evalExpression(a->contents[i], chooser, memo);
+				acc |= evalExpression(a->contents[i], chooser, preferred_result, memo);
 			it->second.first = acc;
 		} else {
 			it->second.first = !!chooser.nd_choice(2);
+			if (preferred_result == true)
+				it->second.first = !it->second.first;
 			it->second.second = true;
 		}
 	}
@@ -757,10 +760,10 @@ evalExpression(IRExpr *e, NdChooser &chooser, std::map<IRExpr *, std::pair<bool,
 }
 
 static bool
-evalExpression(IRExpr *e, NdChooser &chooser)
+evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result)
 {
 	std::map<IRExpr *, std::pair<bool, bool> > memo;
-	bool r = evalExpression(e, chooser, memo);
+	bool r = evalExpression(e, chooser, preferred_result, memo);
 	if (r) {
 		fprintf(_logfile, "Satisfying assignment:\n");
 		for (auto it = memo.begin(); it != memo.end(); it++) {
@@ -780,7 +783,7 @@ exhaustive_satisfiable(IRExpr *e)
 {
 	NdChooser chooser;
 	do {
-		if (evalExpression(e, chooser)) {
+		if (evalExpression(e, chooser, true)) {
 			sat_checker_counters.failed++;
 			return true;
 		}
