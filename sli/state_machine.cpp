@@ -46,12 +46,23 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		*done_something = true;
 		if (falseTarget == StateMachineUnreached::get())
 			return StateMachineUnreached::get();
-		else
-			return falseTarget->optimise(opt, done_something);
+		return (new StateMachineSideEffecting(
+				origin,
+				new StateMachineSideEffectAssertFalse(
+					condition,
+					true),
+				falseTarget))->optimise(opt, done_something);
 	}
 	if (falseTarget == StateMachineUnreached::get()) {
 		*done_something = true;
-		return trueTarget->optimise(opt, done_something);
+		return (new StateMachineSideEffecting(
+				origin,
+				new StateMachineSideEffectAssertFalse(
+					IRExpr_Unop(
+						Iop_Not1,
+						condition),
+					true),
+				trueTarget))->optimise(opt, done_something);
 	}
 	if (trueTarget == falseTarget) {
 		*done_something = true;
