@@ -400,26 +400,44 @@ nodeLabelling::successor(unsigned maxPathLength)
 nodeLabellingMap::nodeLabellingMap(std::set<CFGNode *> &roots, unsigned maxPathLength)
 {
 	std::queue<CFGNode *> pending;
-	CFGNode *root;
 
+	/* Initial pending set is all of the true target instructions. */
+	std::set<CFGNode *> visited;
 	for (auto it = roots.begin(); it != roots.end(); it++) {
-		root = *it;
-		pending.push(root);
-		while (!pending.empty()) {
-			CFGNode *n = pending.front();
-			pending.pop();
-			if (n->flavour == CFGNode::true_target_instr)
-				(*this)[n][n] = 0;
-			if (!n->fallThrough.second && n->branches.empty())
+		std::queue<CFGNode *> p2;
+		p2.push(*it);
+		while (!p2.empty()) {
+			CFGNode *n = p2.front();
+			p2.pop();
+			if (!visited.insert(n).second)
 				continue;
-			nodeLabelling exitMap((*this)[n]);
-			exitMap.successor(maxPathLength);
-			if (n->fallThrough.second && (*this)[n->fallThrough.second].merge(exitMap))
-				pending.push(n->fallThrough.second);
-			for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
-				if (it2->second && (*this)[it2->second].merge(exitMap))
-					pending.push(it2->second);			
+			if (n->flavour == CFGNode::true_target_instr)
+				pending.push(n);
+			if (n->fallThrough.second)
+				p2.push(n->fallThrough.second);
+			for (auto it2 = n->branches.begin();
+			     it2 != n->branches.end();
+			     it2++) {
+				if (it2->second)
+					p2.push(it2->second);
+			}
 		}
+	}
+
+	while (!pending.empty()) {
+		CFGNode *n = pending.front();
+		pending.pop();
+		if (n->flavour == CFGNode::true_target_instr)
+			(*this)[n][n] = 0;
+		if (!n->fallThrough.second && n->branches.empty())
+			continue;
+		nodeLabelling exitMap((*this)[n]);
+		exitMap.successor(maxPathLength);
+		if (n->fallThrough.second && (*this)[n->fallThrough.second].merge(exitMap))
+			pending.push(n->fallThrough.second);
+		for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
+			if (it2->second && (*this)[it2->second].merge(exitMap))
+				pending.push(it2->second);			
 	}
 }
 
