@@ -253,25 +253,33 @@ removeReachable(std::set<CFGNode *> &out, const std::set<CFGNode *> &roots)
 }
 
 static int
-nrSuccessors(const std::set<CFGNode *> &interesting, const CFGNode *n)
+distanceToTrueInstr(const CFGNode *n)
 {
 	std::set<const CFGNode *> successors;
-	std::queue<const CFGNode *> pending;
-	pending.push(n);
-	while (!pending.empty()) {
-		const CFGNode *n = pending.front();
-		pending.pop();
-		if (!interesting.count(const_cast<CFGNode *>(n)))
-			continue;
-		if (!successors.insert(n).second)
-			continue;
-		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
-			if (it->second)
-				pending.push(it->second);
-		if (n->fallThrough.second)
-			pending.push(n->fallThrough.second);
+	std::queue<const CFGNode *> pendingAtCurrentDepth;
+	int depth = 0;
+	pendingAtCurrentDepth.push(n);
+	while (1) {
+		std::queue<const CFGNode *> pendingAtNextDepth;
+		assert(pendingAtNextDepth.empty());
+		while (!pendingAtCurrentDepth.empty()) {
+			const CFGNode *n = pendingAtCurrentDepth.front();
+			pendingAtCurrentDepth.pop();
+			if (n->flavour == CFGNode::true_target_instr)
+				return depth;
+			if (!successors.insert(n).second)
+				continue;
+			for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+				if (it->second)
+					pendingAtNextDepth.push(it->second);
+			if (n->fallThrough.second)
+				pendingAtNextDepth.push(n->fallThrough.second);
+		}
+		pendingAtCurrentDepth = pendingAtNextDepth;
+		depth++;
 	}
-	return successors.size();
+	/* Can't reach any true instructions -> shouldn't happen. */
+	abort();
 }
 
 template <typename t> static void
@@ -338,34 +346,28 @@ findRoots(const std::set<CFGNode *> &allNodes, std::set<CFGNode *> &roots)
 	roots |= newRoots;
 	while (!TIMEOUT && !currentlyUnrooted.empty()) {
 		/* Nasty case: everything in @currentlyUnrooted is
-		   part of a cycle in @currentlyUnrooted.  Grab
-		   whichever node reaches the largest number of
-		   successor nodes, breaking ties by according to the
-		   node flavour. */
-		/* (i.e. if we have a choice, we prefer to take
-		   true_target_instr nodes as roots in preference to
-		   ordinary_instr ones) */
+		   part of a cycle in @currentlyUnrooted.  Try to grab
+		   something which is as far as possible away from the
+		   first true-flavoured instruction.  That tends to
+		   give us the most useful information. */
 		CFGNode *best_node;
-		int best_nr_succ;
+		int best_distance;
 		best_node = NULL;
-		best_nr_succ = -1;
+		best_distance = -1;
 		for (auto it = currentlyUnrooted.begin(); it != currentlyUnrooted.end(); it++) {
 			/* Shouldn't be any dupe nodes at this stage of the pipeline. */
 			assert((*it)->flavour != CFGNode::dupe_target_instr);
 
-			int n = nrSuccessors(currentlyUnrooted, *it);
-			if (n > best_nr_succ ||
-			    (n == best_nr_succ &&
-			     best_node->flavour == CFGNode::ordinary_instr &&
-			     (*it)->flavour == CFGNode::true_target_instr)) {
-				best_nr_succ = n;
+			int n = distanceToTrueInstr(*it);
+			if (n > best_distance) {
+				best_distance = n;
 				best_node = *it;
 			}
 		}
 
 		if (debug_find_roots)
 			printf("Selected cycle-breaking root %p (%d)\n",
-			       best_node, best_nr_succ);
+			       best_node, best_distance);
 		assert(best_node != NULL);
 		roots.insert(best_node);
 		removeReachable(currentlyUnrooted, best_node);
