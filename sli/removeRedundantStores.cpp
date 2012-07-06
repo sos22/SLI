@@ -104,6 +104,21 @@ storeMightBeLoadedByState(StateMachineState *sm,
 				    oracle->memoryAccessesMightAlias(opt, smsel, smses))
 					return true;
 			}
+			if (se->type == StateMachineSideEffect::Store) {
+				StateMachineSideEffectStore *smses2 =
+					dynamic_cast<StateMachineSideEffectStore *>(se);
+				assert(smses2);
+				/* If this store will definitely
+				   clobber the value we're looking for
+				   then the original store will
+				   definitely not be loaded on this
+				   path. */
+				if (smses2->data->type() == smses->data->type() &&
+				    (!alias || alias->ptrsMightAlias(smses2->addr, smses->addr)) &&
+				    oracle->memoryAccessesMightAlias(opt, smses2, smses) &&
+				    definitelyEqual(smses2->addr, smses->addr, opt))
+					return false;
+			}
 			if (se->type == StateMachineSideEffect::EndFunction) {
 				auto s = (StateMachineSideEffectEndFunction *)se;
 				/* Bit of a hack: we rely on the fact
