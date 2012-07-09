@@ -1,29 +1,33 @@
+#ifndef CFGNODE_HPP__
+#define CFGNODE_HPP__
+
 #include "typesdb.hpp"
 #include "library.hpp"
 
 class Oracle;
 
-class CFGNode : public GarbageCollected<CFGNode, &ir_heap>, public PrettyPrintable {
+template <typename key_type = VexRip>
+class _CFGNode : public GarbageCollected<_CFGNode<key_type>, &ir_heap>, public PrettyPrintable {
 public:
 	enum flavour_t { true_target_instr, dupe_target_instr, ordinary_instr } flavour;
-	struct successor_t : public std::pair<VexRip, CFGNode *> {
+	struct successor_t : public std::pair<key_type, _CFGNode<key_type> *> {
 		void prettyPrint(FILE *f) const {
-			fprintf(f, "%s(%p)", first.name(), second);
+			fprintf(f, "%s(%p)", this->first.name(), this->second);
 		}
-		successor_t(const VexRip &vr, CFGNode *cfg)
-			: std::pair<VexRip, CFGNode *> (vr, cfg)
+		successor_t(const key_type &vr, _CFGNode<key_type> *cfg)
+			: std::pair<key_type, _CFGNode<key_type> *> (vr, cfg)
 		{}
 		successor_t()
-			: std::pair<VexRip, CFGNode *> ()
+			: std::pair<key_type, _CFGNode<key_type> *> ()
 		{}
 	};
 	successor_t fallThrough;
 	std::vector<successor_t> branches;
 
 	LibraryFunctionType libraryFunction;
-	VexRip my_rip;
+	key_type my_rip;
 
-	CFGNode(const VexRip &rip,
+	_CFGNode(const key_type &rip,
 		flavour_t _flavour,
 		LibraryFunctionType _libraryFunction)
 		: flavour(_flavour),
@@ -31,10 +35,10 @@ public:
 		  my_rip(rip)
 	{}
 
-	CFGNode *dupe() {
-		CFGNode *r = new CFGNode(my_rip,
-					 flavour == true_target_instr ? dupe_target_instr : flavour,
-					 libraryFunction);
+	_CFGNode *dupe() {
+		_CFGNode *r = new _CFGNode(my_rip,
+					   flavour == true_target_instr ? dupe_target_instr : flavour,
+					   libraryFunction);
 		r->fallThrough = fallThrough;
 		r->branches = branches;
 		return r;
@@ -65,27 +69,34 @@ public:
 			hv(it->second);
 	}
 
-	static CFGNode *forRip(Oracle *oracle, const VexRip &vr, flavour_t flavour);
+	static _CFGNode *forRip(Oracle *oracle, const VexRip &vr, flavour_t flavour);
 
 	NAMED_CLASS
 };
 
-void printCFG(const CFGNode *cfg, const char *prefix, FILE *f);
+typedef _CFGNode<VexRip> CFGNode;
+
 void getStoreCFGs(const std::set<DynAnalysisRip> &, Oracle *,
 		  CFGNode ***, int *);
 bool getProbeCFGs(Oracle *oracle, const DynAnalysisRip &vr,
 		  std::set<CFGNode *> &out);
 
-void resolveReferences(const std::map<VexRip, CFGNode *> &m, CFGNode *what);
-void resolveReferences(std::map<VexRip, CFGNode *> &m);
 void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			       const std::set<DynAnalysisRip> &roots);
 void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			       const DynAnalysisRip &target);
-void trimUninterestingCFGNodes(std::set<CFGNode *> &roots);
-void findRoots(const std::map<VexRip, CFGNode *> &m,
-	       std::set<CFGNode *> &roots);
-void findRoots(const std::set<CFGNode *> &allNodes,
-	       std::set<CFGNode *> &roots);
 
-void dumpCFGToDot(const std::set<CFGNode *> &roots, FILE *f);
+class StateMachine;
+class MemoryAccessIdentifierAllocator;
+class StateMachineState;
+StateMachine *storeCFGToMachine(Oracle *oracle,
+				unsigned tid,
+				CFGNode *root,
+				MemoryAccessIdentifierAllocator &mai);
+void probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
+			const DynAnalysisRip &proximalRip,
+			StateMachineState *proximalCause,
+			MemoryAccessIdentifierAllocator &mai,
+			std::set<StateMachine *> &out);
+
+#endif /* !CFGNODE_HPP__ */

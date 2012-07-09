@@ -4,6 +4,8 @@
 #include "oracle.hpp"
 #include "cfgnode.hpp"
 
+#include "cfgnode_tmpl.cpp"
+
 namespace _getProbeCFGs {
 
 #ifdef NDEBUG
@@ -22,7 +24,7 @@ debug_dump(const VexRip &vr)
 static void
 debug_dump(const CFGNode *n)
 {
-	printCFG(n, "\t", stdout);
+	printCFG(n, stdout);
 }
 
 template <typename k, typename v> static void

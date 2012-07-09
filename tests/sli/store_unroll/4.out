@@ -1,0 +1,42 @@
+A true
+B ordinary
+C true
+A2 dupe
+B2 ordinary
+C2 dupe
+A3 dupe
+B3 ordinary
+B4 ordinary
+C3 dupe
+A4 dupe
+B5 ordinary
+C4 dupe
+B6 ordinary
+B7 ordinary
+B8 ordinary
+B9 ordinary
+B10 ordinary
+A -> B
+B -> C
+B -> B7
+C -> A2
+A2 -> B2
+B2 -> C2
+B2 -> B4
+C2 -> A3
+A3 -> B3
+B4 -> C3
+B4 -> B5
+C3 -> A4
+B5 -> C4
+B5 -> B6
+B7 -> C
+B7 -> B8
+B8 -> C
+B8 -> B9
+B9 -> C
+B9 -> B10
+B10 -> C
+Roots:
+A
+End of roots

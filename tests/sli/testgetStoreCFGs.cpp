@@ -2,6 +2,8 @@
 #include "oracle.hpp"
 #include "cfgnode.hpp"
 
+#include "cfgnode_tmpl.cpp"
+
 int
 main(int argc, char *argv[])
 {
@@ -29,7 +31,7 @@ main(int argc, char *argv[])
 	printf("Results:\n");
 	for (int x = 0; x < nr_roots; x++) {
 		printf("%d/%d:\n", x, nr_roots);
-		printCFG(roots[x], "\t", stdout);
+		printCFG(roots[x], stdout);
 	}
 
 	return 0;

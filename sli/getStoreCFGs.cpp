@@ -1,3 +1,5 @@
+/* Careful: this gets #include'd into store_unroll_cycle_break.cpp so
+ * that we can unit test some static functions. */
 #include "sli.h"
 #include "cfgnode.hpp"
 #include "typesdb.hpp"
@@ -6,6 +8,8 @@
 #include <map>
 #include <queue>
 #include <set>
+
+#include "cfgnode_tmpl.cpp"
 
 namespace _getStoreCFGs {
 
@@ -36,7 +40,7 @@ debug_dump(const VexRip &vr)
 static void
 debug_dump(const CFGNode *n)
 {
-	printCFG(n, "\t", stdout);
+	printCFG(n, stdout);
 }
 
 template <typename k, typename v> static void
@@ -323,11 +327,12 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode
  * root.  We find all of the nodes of flavour true_target_instr and
  * call them true targets.  Then, for each true target T and node N,
  * we find the length of the shortest path from T to N. */
-class nodeLabelling : public std::map<CFGNode *, unsigned>, public Named {
+template <typename t>
+class nodeLabelling : public std::map<_CFGNode<t> *, unsigned>, public Named {
 	char *mkName() const {
 		std::vector<char *> v;
-		for (auto it = begin(); it != end(); it++) {
-			if (it != begin())
+		for (auto it = this->begin(); it != this->end(); it++) {
+			if (it != this->begin())
 				v.push_back(strdup(", "));
 			v.push_back(my_asprintf("%p -> %d", it->first, it->second));
 		}
@@ -343,27 +348,28 @@ class nodeLabelling : public std::map<CFGNode *, unsigned>, public Named {
 		return res;
 	}
 public:
-	bool merge(nodeLabelling &other);
+	bool merge(nodeLabelling<t> &other);
 	void successor(unsigned maxPathLength);
 };
-class nodeLabellingMap : public std::map<CFGNode *, nodeLabelling> {
+template <typename t>
+class nodeLabellingMap : public std::map<_CFGNode<t> *, nodeLabelling<t> > {
 public:
-	nodeLabellingMap(std::set<CFGNode *> &roots, unsigned maxPathLength);
+	nodeLabellingMap(std::set<_CFGNode<t> *> &roots, unsigned maxPathLength);
 	void prettyPrint(FILE *f) const;
 };
-void
-nodeLabellingMap::prettyPrint(FILE *f) const
+template <typename t> void
+nodeLabellingMap<t>::prettyPrint(FILE *f) const
 {
-	for (auto it = begin(); it != end(); it++)
+	for (auto it = this->begin(); it != this->end(); it++)
 		fprintf(f, "%p -> %s\n", it->first, it->second.name());
 }
 
-bool
-nodeLabelling::merge(nodeLabelling &other)
+template <typename t> bool
+nodeLabelling<t>::merge(nodeLabelling<t> &other)
 {
 	bool did_something = false;
 	for (auto it = other.begin(); it != other.end(); it++) {
-		auto it_did_insert = insert(std::pair<CFGNode *, unsigned>(it->first, it->second));
+		auto it_did_insert = insert(std::pair<_CFGNode<t> *, unsigned>(it->first, it->second));
 		auto it2 = it_did_insert.first;
 		bool did_insert = it_did_insert.second;
 
@@ -385,10 +391,10 @@ nodeLabelling::merge(nodeLabelling &other)
 	return did_something;
 }
 
-void
-nodeLabelling::successor(unsigned maxPathLength)
+template <typename t> void
+nodeLabelling<t>::successor(unsigned maxPathLength)
 {
-	for (auto it = begin(); it != end(); ) {
+	for (auto it = this->begin(); it != this->end(); ) {
 		it->second++;
 		if (it->second > maxPathLength)
 			erase(it++);
@@ -397,21 +403,22 @@ nodeLabelling::successor(unsigned maxPathLength)
 	}
 }
 
-nodeLabellingMap::nodeLabellingMap(std::set<CFGNode *> &roots, unsigned maxPathLength)
+template <typename t>
+nodeLabellingMap<t>::nodeLabellingMap(std::set<_CFGNode<t> *> &roots, unsigned maxPathLength)
 {
-	std::queue<CFGNode *> pending;
+	std::queue<_CFGNode<t> *> pending;
 
 	/* Initial pending set is all of the true target instructions. */
-	std::set<CFGNode *> visited;
+	std::set<_CFGNode<t> *> visited;
 	for (auto it = roots.begin(); it != roots.end(); it++) {
-		std::queue<CFGNode *> p2;
+		std::queue<_CFGNode<t> *> p2;
 		p2.push(*it);
 		while (!p2.empty()) {
-			CFGNode *n = p2.front();
+			_CFGNode<t> *n = p2.front();
 			p2.pop();
 			if (!visited.insert(n).second)
 				continue;
-			if (n->flavour == CFGNode::true_target_instr)
+			if (n->flavour == _CFGNode<t>::true_target_instr)
 				pending.push(n);
 			if (n->fallThrough.second)
 				p2.push(n->fallThrough.second);
@@ -425,13 +432,13 @@ nodeLabellingMap::nodeLabellingMap(std::set<CFGNode *> &roots, unsigned maxPathL
 	}
 
 	while (!pending.empty()) {
-		CFGNode *n = pending.front();
+		_CFGNode<t> *n = pending.front();
 		pending.pop();
-		if (n->flavour == CFGNode::true_target_instr)
+		if (n->flavour == _CFGNode<t>::true_target_instr)
 			(*this)[n][n] = 0;
 		if (!n->fallThrough.second && n->branches.empty())
 			continue;
-		nodeLabelling exitMap((*this)[n]);
+		nodeLabelling<t> exitMap((*this)[n]);
 		exitMap.successor(maxPathLength);
 		if (n->fallThrough.second && (*this)[n->fallThrough.second].merge(exitMap))
 			pending.push(n->fallThrough.second);
@@ -443,9 +450,11 @@ nodeLabellingMap::nodeLabellingMap(std::set<CFGNode *> &roots, unsigned maxPathL
 
 /* Look through @root until we find a cycle.  Report the edge which
    completes the cycle in *@edge_start and *@edge_end. */
-static bool
-selectEdgeForCycleBreak(CFGNode *root, CFGNode **edge_start, CFGNode **edge_end,
-			std::set<CFGNode *> &clean, std::set<CFGNode *> &path)
+template <typename t> static bool
+selectEdgeForCycleBreak(_CFGNode<t> *root,
+			_CFGNode<t> **edge_start,
+			_CFGNode<t> **edge_end,
+			std::set<_CFGNode<t> *> &clean, std::set<_CFGNode<t> *> &path)
 {
 	if (!root->fallThrough.second && root->branches.empty())
 		return false;
@@ -479,12 +488,12 @@ selectEdgeForCycleBreak(CFGNode *root, CFGNode **edge_start, CFGNode **edge_end,
 	path.erase(root);
 	return false;
 }
-static bool
-selectEdgeForCycleBreak(CFGNode *root, CFGNode **edge_start, CFGNode **edge_end)
+template <typename t> static bool
+selectEdgeForCycleBreak(_CFGNode<t> *root, _CFGNode<t> **edge_start, _CFGNode<t> **edge_end)
 {
-	std::set<CFGNode *> clean; /* Anything in here definitely
+	std::set<_CFGNode<t> *> clean; /* Anything in here definitely
 				      cannot reach a cycle. */
-	std::set<CFGNode *> path; /* All the nodes between @root and
+	std::set<_CFGNode<t> *> path; /* All the nodes between @root and
 				     the node we're currently looking
 				     at. */
 	return selectEdgeForCycleBreak(root, edge_start, edge_end, clean, path);
@@ -496,21 +505,21 @@ selectEdgeForCycleBreak(CFGNode *root, CFGNode **edge_start, CFGNode **edge_end)
    This will usually involve duplicating some nodes, and the duplicate
    of a true_target_instr is a dupe_target_instr, so this does
    actually terminate. */
-static void
-performUnrollAndCycleBreak(std::set<CFGNode *> &roots, unsigned maxPathLength)
+template <typename t> static void
+performUnrollAndCycleBreak(std::set<_CFGNode<t> *> &roots, unsigned maxPathLength)
 {
-	nodeLabellingMap nlm(roots, maxPathLength);
+	nodeLabellingMap<t> nlm(roots, maxPathLength);
 
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		while (!TIMEOUT) {
-			CFGNode *cycle_edge_start, *cycle_edge_end;
+			_CFGNode<t> *cycle_edge_start, *cycle_edge_end;
 			if (!selectEdgeForCycleBreak(*it, &cycle_edge_start, &cycle_edge_end)) {
 				/* No cycles left in the graph rooted
 				 * at *it.  Yay. */
 				break;
 			}
-			nodeLabelling label(nlm[cycle_edge_start]);
-			CFGNode *new_node;
+			nodeLabelling<t> label(nlm[cycle_edge_start]);
+			_CFGNode<t> *new_node;
 			label.successor(maxPathLength);
 			if (label.size() == 0) {
 				new_node = NULL;
@@ -684,7 +693,7 @@ getStoreCFGs(const std::set<DynAnalysisRip> &conflictingStores,
 		printf("Results:\n");
 		for (int x = 0; x < *nr_roots; x++) {
 			printf("%d/%d:\n", x, *nr_roots);
-			printCFG( (*roots)[x], "\t", stdout);
+			printCFG( (*roots)[x], stdout);
 		}
 	}
 }

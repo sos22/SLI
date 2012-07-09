@@ -5,8 +5,7 @@
 
 #include "state_machine.hpp"
 #include "alloc_mai.hpp"
-
-class CFGNode;
+#include "cfgnode.hpp"
 
 /* XXX doesn't really belong here */
 struct reloc_t {

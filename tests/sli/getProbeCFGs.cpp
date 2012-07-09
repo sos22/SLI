@@ -5,6 +5,8 @@
 #include "cfgnode.hpp"
 #include "typesdb.hpp"
 
+#include "cfgnode_tmpl.cpp"
+
 int
 main(int argc, char *argv[])
 {
@@ -29,7 +31,7 @@ main(int argc, char *argv[])
 	int cntr = 0;
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		printf("Root %d/%zd:\n", cntr, roots.size());
-		printCFG(*it, "\t", stdout);
+		printCFG(*it, stdout);
 		cntr++;
 	}
 

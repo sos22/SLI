@@ -898,17 +898,7 @@ bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 bool parseStateMachine(StateMachine **out, const char *str, const char **suffix);
 StateMachine *readStateMachine(int fd);
 
-class CFGNode;
 class MemoryAccessIdentifierAllocator;
-void probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
-			const DynAnalysisRip &proximalRip,
-			StateMachineState *proximalCause,
-			MemoryAccessIdentifierAllocator &mai,
-			std::set<StateMachine *> &out);
-StateMachine *storeCFGToMachine(Oracle *oracle,
-				unsigned tid,
-				CFGNode *root,
-				MemoryAccessIdentifierAllocator &mai);
 
 StateMachine *duplicateStateMachine(const StateMachine *inp);
 

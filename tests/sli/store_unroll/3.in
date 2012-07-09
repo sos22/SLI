@@ -1,0 +1,8 @@
+depth = 5
+A true
+B true
+A -> B
+B -> A
+Roots:
+A
+End of roots

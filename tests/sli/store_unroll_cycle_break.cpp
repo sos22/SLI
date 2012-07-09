@@ -1,0 +1,209 @@
+#include <ctype.h>
+#include <queue>
+
+#include "sli.h"
+#include "cfgnode.hpp"
+#include "libvex_parse.h"
+#include "oracle.hpp"
+
+#include "getStoreCFGs.cpp"
+
+class named_string : public std::string, public Named {
+	char *mkName() const {
+		return strdup(c_str());
+	}
+};
+
+typedef _CFGNode<named_string> cfg_node;
+
+static bool
+parseCfgFlavour(cfg_node::flavour_t *out, const char *buf, const char **suffix)
+{
+	if (parseThisString("true", buf, suffix)) {
+		*out = cfg_node::true_target_instr;
+		return true;
+	}
+	if (parseThisString("dupe", buf, suffix)) {
+		*out = cfg_node::dupe_target_instr;
+		return true;
+	}
+	if (parseThisString("ordinary", buf, suffix)) {
+		*out = cfg_node::ordinary_instr;
+		return true;
+	}
+	return false;
+}
+
+static bool
+parseWord(named_string *out, const char *buf, const char **suffix)
+{
+	while (!isspace(buf[0])) {
+		out->push_back(buf[0]);
+		buf++;
+	}
+	if (out->length() == 0)
+		return false;
+	*suffix = buf;
+	return true;
+}
+
+static bool
+parseNodeDecl(std::map<named_string, cfg_node *> &nodes, const char *buf,
+	      const char **suffix)
+{
+	named_string label;
+	cfg_node::flavour_t flavour;
+	if (!parseWord(&label, buf, &buf) ||
+	    !parseThisChar(' ', buf, &buf) ||
+	    !parseCfgFlavour(&flavour, buf, &buf) ||
+	    !parseThisChar('\n', buf, suffix))
+		return false;
+	if (nodes.count(label))
+		return false;
+	nodes[label] = new cfg_node(label, flavour,  LibraryFunctionTemplate::none);
+	return true;
+}
+
+static bool
+parseEdgeDecl(std::map<named_string, cfg_node *> &nodes,
+	      const char *buf,
+	      const char **suffix)
+{
+	while (1) {
+		named_string start, end;
+		const char *p;
+		if (!parseWord(&start, buf, &p) ||
+		    !parseThisString(" -> ", p, &p) ||
+		    !parseWord(&end, p, &p) ||
+		    !parseThisChar('\n', p, &buf))
+			break;
+		cfg_node *s = nodes[start];
+		cfg_node *e = nodes[end];
+		if (!s || !e)
+			return false;
+		if (s->fallThrough.second == NULL)
+			s->fallThrough = cfg_node::successor_t(end, e);
+		else
+			s->branches.push_back(cfg_node::successor_t(end, e));
+	}
+	*suffix = buf;
+	return true;
+}
+
+static bool
+parseCFG(std::set<cfg_node *> &roots, const char *buf, const char **suffix)
+{
+	std::map<named_string, cfg_node *> nodes;
+	while (1) {
+		if (!parseNodeDecl(nodes, buf, &buf))
+			break;
+	}
+	if (!parseEdgeDecl(nodes, buf, &buf))
+		return false;
+	if (!parseThisString("Roots:\n", buf, &buf))
+		return false;
+	while (!parseThisString("End of roots\n", buf, suffix)) {
+		if (!*buf)
+			return false;
+		named_string key;
+		if (!parseWord(&key, buf, &buf) ||
+		    !parseThisChar('\n', buf, &buf))
+			return false;
+		if (!nodes.count(key))
+			return false;
+		roots.insert(nodes[key]);
+	}
+	return true;
+}
+
+static void
+read_cfg_and_depth(std::set<cfg_node *> &roots, int *maxDepth, int fd)
+{
+	char *buf = readfile(fd);
+	const char *suffix;
+	const char *p = buf;
+	if (!parseThisString("depth = ", p, &p) ||
+	    !parseDecimalInt(maxDepth, p, &p) ||
+	    !parseThisChar('\n', p, &p) ||
+	    !parseCFG(roots, p, &suffix))
+		errx(1, "cannot parse %s as test specification", buf);
+	if (*suffix)
+		warnx("trailing garbage after cfg: %s", suffix);
+	free(buf);
+}
+
+static void
+uniqueify_labels(std::set<cfg_node *> &roots)
+{
+	std::set<cfg_node *> allNodes;
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		enumerateCFG(*it, allNodes);
+	std::map<named_string, int> counters;
+	for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+		auto it2 = counters.insert(std::pair<named_string, int>( (*it)->my_rip, 0) ).first;
+		it2->second++;
+		if (it2->second != 1) {
+			int c = 1;
+			while (c <= it2->second)
+				c *= 10;
+			c /= 10;
+			while (c != 0) {
+				(*it)->my_rip.push_back( ((it2->second / c) % 10) + '0' );
+				c /= 10;
+			}
+		}
+	}
+}
+
+static void
+printCFG(std::set<cfg_node *> &roots, FILE *f)
+{
+	std::set<cfg_node *> allNodes;
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		enumerateCFG(*it, allNodes);
+	std::set<cfg_node *> defined;
+	for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+		const char *fl = NULL;
+		switch ( (*it)->flavour ) {
+		case cfg_node::true_target_instr:
+			fl = "true";
+			break;
+		case cfg_node::dupe_target_instr:
+			fl = "dupe";
+			break;
+		case cfg_node::ordinary_instr:
+			fl = "ordinary";
+			break;
+		}
+		assert(fl != NULL);
+		fprintf(f, "%s %s\n", (*it)->my_rip.c_str(), fl);
+	}
+	for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+		cfg_node *n = *it;
+		if (n->fallThrough.second)
+			fprintf(f, "%s -> %s\n", n->my_rip.c_str(), n->fallThrough.second->my_rip.c_str());
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++) {
+			if (it->second)
+				fprintf(f, "%s -> %s\n", n->my_rip.c_str(), it->second->my_rip.c_str());
+		}
+	}
+	fprintf(f, "Roots:\n");
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		fprintf(f, "%s\n", (*it)->my_rip.c_str());
+	fprintf(f, "End of roots\n");
+}
+
+int
+main()
+{
+	init_sli();
+
+	std::set<cfg_node *> roots;
+	int maxPathLength;
+	read_cfg_and_depth(roots, &maxPathLength, 0);
+	_getStoreCFGs::performUnrollAndCycleBreak(roots, maxPathLength);
+	uniqueify_labels(roots);
+	printCFG(roots, stdout);
+
+	return 0;
+}

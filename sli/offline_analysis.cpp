@@ -1196,46 +1196,6 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 				     token);
 }
 			    
-void
-printCFG(const CFGNode *cfg, const char *prefix, FILE *f)
-{
-	std::vector<const CFGNode *> pending;
-	std::set<const CFGNode *> done;
-
-	pending.push_back(cfg);
-	while (!pending.empty()) {
-		cfg = pending.back();
-		pending.pop_back();
-		if (done.count(cfg))
-			continue;
-		const char *flavour = (const char *)0xf001;
-		switch (cfg->flavour) {
-		case CFGNode::true_target_instr:
-			flavour = "true";
-			break;
-		case CFGNode::dupe_target_instr:
-			flavour = "dupe";
-			break;
-		case CFGNode::ordinary_instr:
-			flavour = "boring";
-			break;
-		}
-		fprintf(f, "%s%p(%s): ", prefix, cfg, flavour);
-		cfg->prettyPrint(f);
-		fprintf(f, "\n");
-		if (cfg->fallThrough.second)
-			pending.push_back(cfg->fallThrough.second);
-		for (auto it = cfg->branches.begin();
-		     it != cfg->branches.end();
-		     it++)
-			if (it->second)
-				pending.push_back(it->second);
-		done.insert(cfg);
-	}
-}
-/* Make it more visible to the debugger. */
-void __printCFG(const CFGNode *cfg) { printCFG(cfg, "", stdout); }
-
 remoteMacroSectionsT::iterator::iterator(const remoteMacroSectionsT *_owner, unsigned _idx)
 	: idx(_idx), owner(_owner)
 {}

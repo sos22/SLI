@@ -31,10 +31,10 @@ main()
 
 	int t;
 	while (time(NULL) < start_time + 10) {
+		global_ptr = &t;
 		int cntr;
 		for (cntr = 0; cntr < 100; cntr++)
 			asm ("nop");
-		global_ptr = &t;
 		usleep(1000000);
 		global_ptr = NULL;
 	}

@@ -1,0 +1,11 @@
+depth = 5
+A true
+B ordinary
+C true
+A -> B
+B -> C
+C -> A
+B -> B
+Roots:
+A
+End of roots
