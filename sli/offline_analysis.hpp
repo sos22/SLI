@@ -81,7 +81,7 @@ protected:
 		if (!t)
 			return NULL;
 		else
-			return IRExpr_Load(e->ty, addr, e->rip);
+			return IRExpr_Load(e->ty, addr);
 	}
 	virtual IRExpr *transformIex(IRExprConst *)
 	{

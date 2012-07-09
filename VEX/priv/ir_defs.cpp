@@ -1096,10 +1096,9 @@ static bool parseIRExprLoad(IRExpr **res, const char *str, const char **suffix)
       !parseIRType(&ty, str, &str) ||
       !parseThisChar('(', str, &str) ||
       !parseIRExpr(&addr, str, &str) ||
-      !parseThisString(")@", str, &str) ||
-      !parseMemoryAccessIdentifier(&rip, str, suffix))
+      !parseThisString(")", str, suffix))
     return false;
-  *res = IRExpr_Load(ty, addr, rip);
+  *res = IRExpr_Load(ty, addr);
   return true;
 }
 
@@ -1342,7 +1341,7 @@ IRExprLoad::prettyPrint(FILE *f) const
       ppIRType(ty, f);
       fprintf(f,  "(" );
       ppIRExpr(addr, f);
-      fprintf(f,  ")@%s", rip.name() );
+      fprintf(f,  ")" );
 }
 void
 IRExprConst::prettyPrint(FILE *f) const
@@ -1848,8 +1847,8 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    e->arg = arg;
    return e;
 }
-IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr, const MemoryAccessIdentifier &rip ) {
-   IRExprLoad* e        = new IRExprLoad(rip);
+IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
+   IRExprLoad* e        = new IRExprLoad();
    e->ty   = ty;
    e->addr = addr;
    return e;

@@ -108,11 +108,6 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 				isGood = false;
 			return NULL;
 		}
-		IRExpr *transformIex(IRExprLoad *e) {
-			if (!isAvail(e->rip.rip))
-				isGood = false;
-			return NULL;
-		}
 		IRExpr *transformIex(IRExprHappensBefore *) {
 			isGood = false;
 			return NULL;
@@ -191,7 +186,8 @@ public:
 			if (e->tag == Iex_Get) {
 				rip = roots[((IRExprGet *)e)->reg.tid()];
 			} else if (e->tag == Iex_Load) {
-				rip = ((IRExprLoad *)e)->rip.rip;
+				/* Stash rules for these are a bit special */
+				doit = false;
 			} else if (e->tag == Iex_HappensBefore) {
 				/* These don't really get stashed in any useful sense */
 				doit = false;

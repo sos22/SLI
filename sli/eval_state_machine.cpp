@@ -783,7 +783,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 		if (satisfier) {
 			val = coerceTypes(smsel->type, satisfier->data);
 		} else {
-			val = IRExpr_Load(smsel->type, addr, MemoryAccessIdentifier::initial_value());
+			val = IRExpr_Load(smsel->type, addr);
 		}
 		state.set_register(smsel->target, val, &assumption, opt);
 		break;

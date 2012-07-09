@@ -254,7 +254,6 @@ Function::matches(IRExpr *what, IRExpr *tmpl, std::map<int, IRExpr *> &argVals)
 		IRExprLoad *whatI = (IRExprLoad *)what;
 		IRExprLoad *tmplI = (IRExprLoad *)tmpl;
 		return whatI->ty == tmplI->ty &&
-			whatI->rip == tmplI->rip &&
 			matches(whatI->addr, tmplI->addr, argVals);
 	}
 	case Iex_CCall: {

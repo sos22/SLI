@@ -205,7 +205,6 @@ buildCED(DNF_Conjunction &c,
 		if (e->tag == Iex_Get) {
 			neededRips.insert(roots[((IRExprGet *)e)->reg.tid()]);
 		} else if (e->tag == Iex_Load) {
-			neededRips.insert(((IRExprLoad *)e)->rip.rip);
 		} else if (e->tag == Iex_HappensBefore) {
 			neededRips.insert(((IRExprHappensBefore *)e)->before.rip);
 			neededRips.insert(((IRExprHappensBefore *)e)->after.rip);

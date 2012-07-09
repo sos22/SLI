@@ -316,7 +316,7 @@ private:
 		IRExpr *arg = transformIRExpr(iel->addr, &ign);
 		if (!arg)
 			arg = iel->addr;
-		return IRExpr_Load(iel->ty, arg, canon_memoryaccessidentifier(iel->rip));
+		return IRExpr_Load(iel->ty, arg);
 	}
 	IRExpr *transformIex(IRExprHappensBefore *ieh)
 	{

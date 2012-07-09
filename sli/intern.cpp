@@ -141,7 +141,6 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		case Iex_Load:
 			do_field(Load, ty);
 			do_field(Load, addr);
-			do_field(Load, rip);
 			break;
 #undef do_field
 

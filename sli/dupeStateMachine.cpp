@@ -124,7 +124,7 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Load: {
 		const IRExprLoad *i = (const IRExprLoad *)inp;
-		IRExprLoad *res = new IRExprLoad(i->rip);
+		IRExprLoad *res = new IRExprLoad();
 		res->ty = i->ty;
 		ctxt(&res->addr, i->addr, rawDupe);
 		return res;

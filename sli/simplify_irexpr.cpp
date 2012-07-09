@@ -1754,7 +1754,7 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			if (e->arg->tag == Iex_Load) {
 				IRExprLoad *argl = (IRExprLoad *)e->arg;
 				if (e->op == Iop_64to32)
-					return IRExpr_Load(Ity_I32, argl->addr, argl->rip);
+					return IRExpr_Load(Ity_I32, argl->addr);
 			}
 
 			if (e->arg->tag == Iex_Associative) {

@@ -356,7 +356,7 @@ anf_context::matches(const IRExpr *a, const IRExpr *b) const
 		hdr(Unop);
 		return ai->op == bi->op && matches(ai->arg, bi->arg);
 		hdr(Load);
-		return ai->ty == bi->ty && ai->rip == bi->rip && matches(ai->addr, bi->addr);
+		return ai->ty == bi->ty && matches(ai->addr, bi->addr);
 		hdr(CCall);
 		if (!(ai->cee == bi->cee && ai->retty == bi->retty))
 			return false;

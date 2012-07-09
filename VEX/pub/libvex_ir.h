@@ -1587,11 +1587,9 @@ struct IRExprUnop : public IRExpr {
 struct IRExprLoad : public IRExpr {
    IRType    ty;     /* Type of the loaded value */
    IRExpr*   addr;   /* Address being loaded from */
-   MemoryAccessIdentifier rip; /* Address of load instruction */
 
-   IRExprLoad(const MemoryAccessIdentifier &_rip)
-       : IRExpr(Iex_Load),
-	 rip(_rip)
+   IRExprLoad()
+       : IRExpr(Iex_Load)
    {}
    void visit(HeapVisitor &hv) { hv(addr); }
    unsigned long hashval() const {
@@ -1602,7 +1600,6 @@ struct IRExprLoad : public IRExpr {
    void sanity_check() const {
       sanity_check_irtype(ty);
       addr->sanity_check();
-      rip.sanity_check();
    }
 };
 
@@ -1844,7 +1841,7 @@ extern IRExpr* IRExpr_Binop  ( IROp op, IRExpr* arg1, IRExpr* arg2 );
 extern bool shortCircuitableUnops(IROp a, IROp b, IROp *c);
 extern bool inverseUnops(IROp a, IROp b);
 extern IRExpr* IRExpr_Unop   ( IROp op, IRExpr* arg );
-extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr, const MemoryAccessIdentifier &rip );
+extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr );
 extern IRExpr* IRExpr_Const  ( IRConst* con );
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );

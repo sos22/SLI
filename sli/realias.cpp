@@ -1202,8 +1202,7 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 					l->target,
 					IRExpr_Load(
 						l->type,
-						l->addr,
-						MemoryAccessIdentifier::initial_value()));
+						l->addr));
 		} else if (it->second.stores.size() == 1 &&
 			   !it->second.mightLoadInitial) {
 			StateMachineSideEffecting *s_state = *it->second.stores.begin();

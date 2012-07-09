@@ -175,7 +175,7 @@ UseReachingMap::transformOneState(StateMachineSideEffecting *smse, bool *done_so
 		smse->origin,
 		new StateMachineSideEffectCopy(
 			load->target,
-			IRExpr_Load(load->type, load->addr, MemoryAccessIdentifier::initial_value())),
+			IRExpr_Load(load->type, load->addr)),
 		smse->target);
 }
 
