@@ -394,7 +394,7 @@ threadState::specialiseIRExpr(IRExpr *iex)
 	return s.doit(iex);
 }
 
-class memLogT : public std::vector<std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *> > {
+class memLogT : public std::vector<std::pair<StateMachine *, StateMachineSideEffectStore *> > {
 public:
 	void visit(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
@@ -411,11 +411,9 @@ struct EvalPathConsumer {
 	virtual bool badMachine() __attribute__((warn_unused_result)) {
 		abort();
 	}
-	bool collectOrderingConstraints;
 	bool needsAccAssumptions;
 	EvalPathConsumer()
-		: collectOrderingConstraints(false),
-		  needsAccAssumptions(false)
+		: needsAccAssumptions(false)
 	{}
 };
 
@@ -517,7 +515,6 @@ private:
 		StateMachineSideEffect *smse,
 		NdChooser &chooser,
 		OracleInterface *oracle,
-		bool collectOrderingConstraints,
 		const AllowableOptimisations &opt);
 	bool expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOptimisations &opt);
 	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const AllowableOptimisations &opt);
@@ -532,14 +529,12 @@ public:
 	smallStepResult smallStepEvalStateMachine(StateMachine *rootMachine,
 						  NdChooser &chooser,
 						  OracleInterface *oracle,
-						  bool collectOrderingConstraints,
 						  const AllowableOptimisations &opt);
 	enum bigStepResult { bsr_crash, bsr_survive, bsr_failed };
 	bigStepResult bigStepEvalStateMachine(StateMachine *rootMachine,
 					      bigStepResult preferred_result,
 					      NdChooser &chooser,
 					      OracleInterface *oracle,
-					      bool collectOrderingConstraints,
 					      const AllowableOptimisations &opt);
 	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
 		    std::map<const StateMachineState*, int> &
@@ -689,32 +684,6 @@ EvalContext::evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser
 				opt);
 }
 
-static void
-addOrderingConstraint(const MemoryAccessIdentifier &before,
-		      const MemoryAccessIdentifier &after,
-		      const AllowableOptimisations &opt,
-		      IRExpr **assumption,
-		      IRExpr **accumulatedAssumptions)
-{
-	IRExpr *edge;
-	if (before <= after)
-		edge = IRExpr_HappensBefore(before, after);
-	else
-		edge = IRExpr_Unop(Iop_Not1,
-				   IRExpr_HappensBefore(after, before));
-	*assumption =
-		simplifyIRExpr(IRExpr_Binop(Iop_And1,
-					    edge,
-					    *assumption),
-			       opt);
-	if (accumulatedAssumptions && *accumulatedAssumptions)
-		*accumulatedAssumptions =
-			simplifyIRExpr(IRExpr_Binop(Iop_And1,
-						    edge,
-						    *accumulatedAssumptions),
-				       opt);
-}
-
 /* Build an expression which evaluates to true precisely when
    dereferencing @e requires us to dereference a bad pointer in an LD
    expression. */
@@ -744,7 +713,6 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
 					NdChooser &chooser,
 					OracleInterface *oracle,
-					bool collectOrderingConstraints,
 					const AllowableOptimisations &opt)
 {
 	IRExpr *addr = NULL;
@@ -768,30 +736,8 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 			dynamic_cast<StateMachineSideEffectStore *>(smse);
 		assert(smses);
 		assert(addr);
-		if (collectOrderingConstraints) {
-			for (memLogT::reverse_iterator it = memlog.rbegin();
-			     it != memlog.rend();
-			     it++) {
-				if (it->first == thisMachine)
-					continue;
-				if (it->second->type != StateMachineSideEffect::Load)
-					continue;
-				StateMachineSideEffectLoad *smsel =
-					dynamic_cast<StateMachineSideEffectLoad *>(it->second);
-				assert(smsel);
-				if (!oracle->memoryAccessesMightAlias(opt, smsel, smses))
-					continue;
-				if (evalExpressionsEqual(addr, smsel->addr, chooser, opt))
-					addOrderingConstraint(
-						smsel->rip,
-						smses->rip,
-						opt,
-						&assumption,
-						&accumulatedAssumption);
-			}
-		}
 		memlog.push_back(
-			std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>
+			std::pair<StateMachine *, StateMachineSideEffectStore *>
 			(thisMachine,
 			 new StateMachineSideEffectStore(
 				 state.specialiseIRExpr(addr),
@@ -813,9 +759,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 		for (memLogT::reverse_iterator it = memlog.rbegin();
 		     it != memlog.rend();
 		     it++) {
-			StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(it->second);
-			if (!smses)
-				continue;
+			StateMachineSideEffectStore *smses = it->second;
 			/* We only accept stores which define the
 			 * entire thing which we're looking for.  If
 			 * something's stored as 64 bits then we'll
@@ -830,31 +774,9 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 			if (!oracle->memoryAccessesMightAlias(opt, smsel, smses))
 				continue;
 			if (evalExpressionsEqual(smses->addr, addr, chooser, opt)) {
-				if (!collectOrderingConstraints) {
-					satisfier = smses;
-					satisfierMachine = it->first;
-					break;
-				} else {
-					if (satisfier) {
-						if (it->first != satisfierMachine)
-							addOrderingConstraint(
-								smses->rip,
-								satisfier->rip,
-								opt,
-								&assumption,
-								&accumulatedAssumption);
-					} else {
-						if (it->first != thisMachine)
-							addOrderingConstraint(
-								smses->rip,
-								smsel->rip,
-								opt,
-								&assumption,
-								&accumulatedAssumption);
-						satisfier = smses;
-						satisfierMachine = it->first;
-					}
-				}
+				satisfier = smses;
+				satisfierMachine = it->first;
+				break;
 			}
 		}
 		IRExpr *val;
@@ -863,15 +785,6 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 		} else {
 			val = IRExpr_Load(smsel->type, addr, MemoryAccessIdentifier::initial_value());
 		}
-		if (collectOrderingConstraints)
-			memlog.push_back(
-				std::pair<StateMachine *, StateMachineSideEffectMemoryAccess *>(
-					thisMachine,
-					new StateMachineSideEffectLoad(
-						smsel->target,
-						state.specialiseIRExpr(addr),
-						smsel->rip,
-						smsel->type)));
 		state.set_register(smsel->target, val, &assumption, opt);
 		break;
 	}
@@ -935,7 +848,6 @@ EvalContext::smallStepResult
 EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 				       NdChooser &chooser,
 				       OracleInterface *oracle,
-				       bool collectOrderingConstraints,
 				       const AllowableOptimisations &opt)
 {
 	if (TIMEOUT)
@@ -955,7 +867,6 @@ EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 						   sme->sideEffect,
 						   chooser,
 						   oracle,
-						   collectOrderingConstraints,
 						   opt);
 		switch (res) {
 		case esme_escape:
@@ -990,7 +901,6 @@ EvalContext::bigStepEvalStateMachine(StateMachine *rootMachine,
 				     bigStepResult preferred_result,
 				     NdChooser &chooser,
 				     OracleInterface *oracle,
-				     bool collectOrderingConstraints,
 				     const AllowableOptimisations &opt)
 {
 	while (1) {
@@ -998,7 +908,6 @@ EvalContext::bigStepEvalStateMachine(StateMachine *rootMachine,
 			smallStepEvalStateMachine(rootMachine,
 						  chooser,
 						  oracle,
-						  collectOrderingConstraints,
 						  opt);
 		switch (res) {
 		case EvalContext::ssr_crash:
@@ -1092,7 +1001,6 @@ EvalContext::evalSideEffect(StateMachine *sm, OracleInterface *oracle, EvalPathC
 		EvalContext newContext(*this);
 		evalStateMachineSideEffectRes res =
 			newContext.evalStateMachineSideEffect(sm, smse, chooser, oracle,
-							      consumer.collectOrderingConstraints,
 							      opt);
 		switch (res) {
 		case esme_normal:
@@ -1793,11 +1701,18 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 					   which makes things a bit
 					   easier. */
 				}
-				ThreadRip tr(-1, VexRip::invent_vex_rip((*next_fake_free_variable)++));
-				IRExpr *fv = mai.freeVariable(
-					Ity_I1,
-					tr,
-					false);
+				IRExpr *fv;
+				if (probe_access && store_access) {
+					fv = IRExpr_HappensBefore(
+						probe_access->rip,
+						store_access->rip);
+				} else {
+					ThreadRip tr(-1, VexRip::invent_vex_rip((*next_fake_free_variable)++));
+					fv = mai.freeVariable(
+						Ity_I1,
+						tr,
+						false);
+				}
 				newState = new StateMachineBifurcate(
 					VexRip(),
 					fv,
@@ -1901,7 +1816,6 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 				writeMachine,
 				chooser,
 				oracle,
-				false,
 				opt)) {
 		case EvalContext::ssr_crash:
 		case EvalContext::ssr_escape:
@@ -1974,7 +1888,6 @@ findRemoteMacroSections(const VexPtr<StateMachine, &ir_heap> &readMachine,
 					sectionStart ? EvalContext::bsr_crash : EvalContext::bsr_survive,
 					chooser,
 					oracle,
-					false,
 					opt)) {
 			case EvalContext::bsr_crash:
 				if (!sectionStart) {
@@ -2072,7 +1985,6 @@ fixSufficient(const VexPtr<StateMachine, &ir_heap> &writeMachine,
 					EvalContext::bsr_survive,
 					chooser,
 					oracle,
-					false,
 					opt)) {
 			case EvalContext::bsr_crash:
 				fprintf(_logfile, "Fix is insufficient, witness: ");
@@ -2124,7 +2036,6 @@ findHappensBeforeRelations(
 		bool escape(IRExpr *, IRExpr *) { return true; }
 	} consumer;
 	consumer.needsAccAssumptions = true;
-	consumer.collectOrderingConstraints = true;
 	consumer.newCondition = IRExpr_Const(IRConst_U1(0));
 	consumer.opt = &opt;
 
