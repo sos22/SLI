@@ -37,6 +37,8 @@ main()
 			asm ("nop");
 		usleep(1000000);
 		global_ptr = NULL;
+		for (cntr = 0; cntr < 100; cntr++)
+			asm ("nop");
 	}
 
 	return 0;
