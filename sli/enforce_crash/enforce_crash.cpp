@@ -307,7 +307,8 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	VexPtr<OracleInterface> oracleI(oracle);
 	IRExpr *requirement =
 		findHappensBeforeRelations(summary, oracleI,
-					   AllowableOptimisations::defaultOptimisations,
+					   AllowableOptimisations::defaultOptimisations
+						.setAddressSpace(oracle->ms->addressSpace),
 					   MemoryAccessIdentifierAllocator(),
 					   token);
 	fprintf(_logfile, "Crash requirement:\n");

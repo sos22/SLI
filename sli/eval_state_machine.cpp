@@ -2045,7 +2045,11 @@ findHappensBeforeRelations(
 	combinedMachine =
 		optimiseStateMachine(
 			combinedMachine,
-			opt,
+			opt
+			    .enableassumeExecutesAtomically()
+			    .enableignoreSideEffects()
+			    .enableassumeNoInterferingStores()
+			    .enablenoExtend(),
 			oracle,
 			false,
 			token);
