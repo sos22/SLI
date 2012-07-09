@@ -614,14 +614,24 @@ performUnrollAndCycleBreak(std::set<_CFGNode<t> *> &roots, unsigned maxPathLengt
 	}
 }
 
+/* The roots of the graph start off as the true target instructions,
+   and then we move them backwards a little bit as long as that's
+   unambiguous.  The idea is that including a bit more context can
+   give the later analysis phases a bit more information, and it's
+   safe as long as you know that you really did go down that path,
+   which means its safe as long as you only ever backtrack
+   instructions which have a unique predecessor. */
 static void
-backtrackWhereUnambiguous(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
-			  Oracle *oracle)
+findRootsAndBacktrack(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
+		      std::set<CFGNode *> &roots,
+		      Oracle *oracle)
 {
-	std::set<CFGNode *> roots;
-	findRoots(ripsToCFGNodes, roots);
+	std::set<CFGNode *> targetInstrs;
+	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++)
+		if ( it->second->flavour == CFGNode::true_target_instr )
+			targetInstrs.insert(it->second);
 	std::set<CFGNode *> newNodes;
-	for (auto it = roots.begin(); it != roots.end(); it++) {
+	for (auto it = targetInstrs.begin(); it != targetInstrs.end(); it++) {
 		CFGNode *n = *it;
 		for (unsigned cntr = 0; cntr < CONFIG_MAX_STORE_BACKTRACK; cntr++) {
 			std::vector<VexRip> predecessors;
@@ -631,9 +641,13 @@ backtrackWhereUnambiguous(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 						 predecessors);
 			if (predecessors.size() != 1)
 				break;
-			if (predecessors[0].stack.size() != n->my_rip.stack.size())
-				break;
 			VexRip &predecessor(predecessors[0]);
+			/* The starts and ends of functions are often
+			   nice places to analyse, so stop
+			   backtracking if it looks like we've reached
+			   one. */
+			if (predecessor.stack.size() != n->my_rip.stack.size())
+				break;
 			if (ripsToCFGNodes.count(predecessor))
 				break;
 			CFGNode *work = CFGNode::forRip(oracle, predecessor, CFGNode::ordinary_instr);
@@ -643,6 +657,7 @@ backtrackWhereUnambiguous(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 			newNodes.insert(work);
 			n = work;
 		}
+		roots.insert(n);
 	}
 	for (auto it = newNodes.begin(); it != newNodes.end(); it++)
 		resolveReferences(ripsToCFGNodes, *it);
@@ -669,9 +684,7 @@ buildCFG(const std::set<DynAnalysisRip> &dyn_roots, unsigned maxPathLength,
 		debug_dump(ripsToCFGNodes, "\t");
 	}
 
-	backtrackWhereUnambiguous(ripsToCFGNodes, oracle);
-
-	findRoots(ripsToCFGNodes, roots);
+	findRootsAndBacktrack(ripsToCFGNodes, roots, oracle);
 	if (debug_find_roots) {
 		printf("After backtracking:\n");
 		debug_dump(roots, "\t");
