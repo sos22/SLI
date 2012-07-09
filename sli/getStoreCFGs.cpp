@@ -648,14 +648,16 @@ findRootsAndBacktrack(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 			   one. */
 			if (predecessor.stack.size() != n->my_rip.stack.size())
 				break;
-			if (ripsToCFGNodes.count(predecessor))
-				break;
-			CFGNode *work = CFGNode::forRip(oracle, predecessor, CFGNode::ordinary_instr);
-			if (!work)
-				break;
-			ripsToCFGNodes[predecessor] = work;
-			newNodes.insert(work);
-			n = work;
+			if (ripsToCFGNodes.count(predecessor)) {
+				n = ripsToCFGNodes[predecessor];
+			} else {
+				CFGNode *work = CFGNode::forRip(oracle, predecessor, CFGNode::ordinary_instr);
+				if (!work)
+					break;
+				ripsToCFGNodes[predecessor] = work;
+				newNodes.insert(work);
+				n = work;
+			}
 		}
 		roots.insert(n);
 	}
