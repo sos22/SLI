@@ -290,6 +290,7 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_BadPtr:
 		case Iop_128HIto64:
 		case Iop_16to8:
+		case Iop_32to1:
 		case Iop_32to8:
 		case Iop_32to16:
 		case Iop_64to1:
@@ -326,6 +327,7 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_CmpEQ64:
 			return clauseUnderspecified(ieb->arg1, mult) ||
 				clauseUnderspecified(ieb->arg2, mult);
+		case Iop_Shr32:
 		case Iop_Shl64:
 		case Iop_Shr64:
 		case Iop_Sar64:
