@@ -323,12 +323,24 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode
 	}
 }
 
-/* The node labelling map tells you how far each node is from each
- * root.  We find all of the nodes of flavour true_target_instr and
- * call them true targets.  Then, for each true target T and node N,
- * we find the length of the shortest path from T to N. */
+/* The node labelling map tells you where nodes can occur on paths.
+   The idea is that we only need to care about paths which start on a
+   true target instruction, end on a true or dupe target instruction,
+   and which contain at most @depth instructions.  We therefore
+   track, for each pair of (instruction, true target instruction):
+
+   -- The minimum distance from the true target to the instruction of
+      interest.  This is the from distance.
+   -- The minimum distance from the instruction of interest to the
+      true target or any dupes of it.  This is the to distance.
+
+   In both cases, distance is measured as the number of edges on the
+   path (so the distance from a target to itself is zero).  Either
+   entry in the label might be empty, if we there are no paths of the
+   right type.
+*/
 template <typename t>
-class nodeLabelling : public std::map<_CFGNode<t> *, unsigned>, public Named {
+class nodeLabellingComponent : public std::map<_CFGNode<t> *, int>, public Named {
 	char *mkName() const {
 		std::vector<char *> v;
 		for (auto it = this->begin(); it != this->end(); it++) {
@@ -348,13 +360,24 @@ class nodeLabelling : public std::map<_CFGNode<t> *, unsigned>, public Named {
 		return res;
 	}
 public:
-	bool merge(nodeLabelling<t> &other);
-	void successor(unsigned maxPathLength);
+	void successor(int maxDepth);
+	bool merge(nodeLabellingComponent<t> &other);
+};
+template <typename t>
+class nodeLabelling : public Named {
+	char *mkName() const {
+		return my_asprintf("{from = %s, to = %s}",
+				   min_from.name(), min_to.name());
+	}
+public:
+	nodeLabellingComponent<t> min_from;
+	nodeLabellingComponent<t> min_to;
+	bool dead(int maxDepth) const;
 };
 template <typename t>
 class nodeLabellingMap : public std::map<_CFGNode<t> *, nodeLabelling<t> > {
 public:
-	nodeLabellingMap(std::set<_CFGNode<t> *> &roots, unsigned maxPathLength);
+	nodeLabellingMap(std::set<_CFGNode<t> *> &roots, int maxPathLength);
 	void prettyPrint(FILE *f) const;
 };
 template <typename t> void
@@ -365,7 +388,7 @@ nodeLabellingMap<t>::prettyPrint(FILE *f) const
 }
 
 template <typename t> bool
-nodeLabelling<t>::merge(nodeLabelling<t> &other)
+nodeLabellingComponent<t>::merge(nodeLabellingComponent<t> &other)
 {
 	bool did_something = false;
 	for (auto it = other.begin(); it != other.end(); it++) {
@@ -392,19 +415,35 @@ nodeLabelling<t>::merge(nodeLabelling<t> &other)
 }
 
 template <typename t> void
-nodeLabelling<t>::successor(unsigned maxPathLength)
+nodeLabellingComponent<t>::successor(int maxDepth)
 {
 	for (auto it = this->begin(); it != this->end(); ) {
 		it->second++;
-		if (it->second > maxPathLength)
-			erase(it++);
+		if (it->second > maxDepth)
+			this->erase(it++);
 		else
 			it++;
 	}
 }
 
+template <typename t> bool
+nodeLabelling<t>::dead(int maxDepth) const
+{
+	if (min_from.empty() || min_to.empty())
+		return true;
+	int min_from_true_target = maxDepth + 1;
+	int min_to_dupe_target = maxDepth + 1;
+	for (auto it = min_from.begin(); it != min_from.end(); it++)
+		if (it->second < min_from_true_target)
+			min_from_true_target = it->second;
+	for (auto it = min_to.begin(); it != min_to.end(); it++)
+		if (it->second < min_from_true_target)
+			min_to_dupe_target = it->second;
+	return min_from_true_target + min_to_dupe_target > maxDepth;
+}
+
 template <typename t>
-nodeLabellingMap<t>::nodeLabellingMap(std::set<_CFGNode<t> *> &roots, unsigned maxPathLength)
+nodeLabellingMap<t>::nodeLabellingMap(std::set<_CFGNode<t> *> &roots, int maxPathLength)
 {
 	std::queue<_CFGNode<t> *> pending;
 
@@ -435,16 +474,45 @@ nodeLabellingMap<t>::nodeLabellingMap(std::set<_CFGNode<t> *> &roots, unsigned m
 		_CFGNode<t> *n = pending.front();
 		pending.pop();
 		if (n->flavour == _CFGNode<t>::true_target_instr)
-			(*this)[n][n] = 0;
+			(*this)[n].min_to[n] = 0;
+		assert(n->flavour != _CFGNode<t>::dupe_target_instr);
 		if (!n->fallThrough.second && n->branches.empty())
 			continue;
-		nodeLabelling<t> exitMap((*this)[n]);
+		nodeLabellingComponent<t> exitMap((*this)[n].min_to);
 		exitMap.successor(maxPathLength);
-		if (n->fallThrough.second && (*this)[n->fallThrough.second].merge(exitMap))
+		if (n->fallThrough.second && (*this)[n->fallThrough.second].min_to.merge(exitMap))
 			pending.push(n->fallThrough.second);
 		for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
-			if (it2->second && (*this)[it2->second].merge(exitMap))
+			if (it2->second && (*this)[it2->second].min_to.merge(exitMap))
 				pending.push(it2->second);			
+	}
+	bool progress = true;
+	while (progress) {
+		progress = false;
+		for (auto it = this->begin(); it != this->end(); it++) {
+			nodeLabellingComponent<t> &entryMap(it->second.min_from);
+			_CFGNode<t> *n = it->first;
+			if (n->flavour == _CFGNode<t>::true_target_instr) {
+				if (!entryMap.count(n)) {
+					progress = true;
+					entryMap[n] = 0;
+				} else {
+					assert(entryMap[n] == 0);
+				}
+			}
+			if (n->fallThrough.second) {
+				nodeLabellingComponent<t> m((*this)[n->fallThrough.second].min_from);
+				m.successor(maxPathLength);
+				progress |= entryMap.merge(m);
+			}
+			for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++) {
+				if (it2->second) {
+					nodeLabellingComponent<t> m ((*this)[it2->second].min_from);
+					m.successor(maxPathLength);
+					progress |= entryMap.merge(m);
+				}
+			}
+		}
 	}
 }
 
@@ -520,8 +588,9 @@ performUnrollAndCycleBreak(std::set<_CFGNode<t> *> &roots, unsigned maxPathLengt
 			}
 			nodeLabelling<t> label(nlm[cycle_edge_start]);
 			_CFGNode<t> *new_node;
-			label.successor(maxPathLength);
-			if (label.size() == 0) {
+			label.min_from.successor(maxPathLength);
+			label.min_to = nlm[cycle_edge_end].min_to;
+			if (label.dead(maxPathLength)) {
 				new_node = NULL;
 			} else {
 				new_node = cycle_edge_end->dupe();
