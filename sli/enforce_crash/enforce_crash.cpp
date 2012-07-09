@@ -378,12 +378,7 @@ main(int argc, char *argv[])
 	simulationSlotT next_slot(1);
 	crashEnforcementData accumulator;
 	for (int i = 5; i < argc; i++) {
-		int fd = open(argv[i], O_RDONLY);
-		if (fd < 0)
-			err(1, "opening %s", argv[i]);
-		VexPtr<CrashSummary, &ir_heap> summary(readCrashSummary(fd));
-		close(fd);
-
+		VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[i], NULL));
 		accumulator |= enforceCrashForMachine(summary, oracle, ALLOW_GC, next_hb_id, next_slot);
 	}
 
