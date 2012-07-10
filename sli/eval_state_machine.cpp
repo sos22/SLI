@@ -2048,8 +2048,7 @@ findHappensBeforeRelations(
 			opt
 			    .enableassumeExecutesAtomically()
 			    .enableignoreSideEffects()
-			    .enableassumeNoInterferingStores()
-			    .enablenoExtend(),
+			    .enableassumeNoInterferingStores(),
 			oracle,
 			false,
 			token);
