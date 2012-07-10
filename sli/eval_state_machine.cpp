@@ -412,8 +412,10 @@ struct EvalPathConsumer {
 		abort();
 	}
 	bool needsAccAssumptions;
+	bool useInitialMemoryValues;
 	EvalPathConsumer()
-		: needsAccAssumptions(false)
+		: needsAccAssumptions(false),
+		  useInitialMemoryValues(true)
 	{}
 };
 
@@ -513,6 +515,7 @@ private:
 	evalStateMachineSideEffectRes evalStateMachineSideEffect(
 		StateMachine *thisMachine,
 		StateMachineSideEffect *smse,
+		bool useInitialMemoryValues,
 		NdChooser &chooser,
 		OracleInterface *oracle,
 		const AllowableOptimisations &opt);
@@ -528,11 +531,13 @@ public:
 			       ssr_ignore_path, ssr_failed, ssr_continue };
 	smallStepResult smallStepEvalStateMachine(StateMachine *rootMachine,
 						  NdChooser &chooser,
+						  bool useInitialMemoryValues,
 						  OracleInterface *oracle,
 						  const AllowableOptimisations &opt);
 	enum bigStepResult { bsr_crash, bsr_survive, bsr_failed };
 	bigStepResult bigStepEvalStateMachine(StateMachine *rootMachine,
 					      bigStepResult preferred_result,
+					      bool useInitialMemoryValues,
 					      NdChooser &chooser,
 					      OracleInterface *oracle,
 					      const AllowableOptimisations &opt);
@@ -711,6 +716,7 @@ dereferencesBadPointerIf(IRExpr *e)
 EvalContext::evalStateMachineSideEffectRes
 EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
+					bool useInitialMemoryValues,
 					NdChooser &chooser,
 					OracleInterface *oracle,
 					const AllowableOptimisations &opt)
@@ -782,8 +788,18 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 		IRExpr *val;
 		if (satisfier) {
 			val = coerceTypes(smsel->type, satisfier->data);
-		} else {
+		} else if (useInitialMemoryValues) {
 			val = IRExpr_Load(smsel->type, addr);
+		} else {
+			/* Using an IRExpr_Load() means that we lose
+			   track of where precisely the memory was
+			   loaded from.  That then makes building
+			   crash enforcement data much more difficult,
+			   so if we're ultimately going to build CED
+			   then we need to avoid Load expressions.
+			   Just retaining the Get expression is good
+			   enough. */
+			val = IRExpr_Get(smsel->target, smsel->type);
 		}
 		state.set_register(smsel->target, val, &assumption, opt);
 		break;
@@ -847,6 +863,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 EvalContext::smallStepResult
 EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 				       NdChooser &chooser,
+				       bool useInitialMemoryValues,
 				       OracleInterface *oracle,
 				       const AllowableOptimisations &opt)
 {
@@ -865,6 +882,7 @@ EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 		evalStateMachineSideEffectRes res =
 			evalStateMachineSideEffect(rootMachine,
 						   sme->sideEffect,
+						   useInitialMemoryValues,
 						   chooser,
 						   oracle,
 						   opt);
@@ -899,6 +917,7 @@ EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 EvalContext::bigStepResult
 EvalContext::bigStepEvalStateMachine(StateMachine *rootMachine,
 				     bigStepResult preferred_result,
+				     bool useInitialMemoryValues,
 				     NdChooser &chooser,
 				     OracleInterface *oracle,
 				     const AllowableOptimisations &opt)
@@ -907,6 +926,7 @@ EvalContext::bigStepEvalStateMachine(StateMachine *rootMachine,
 		smallStepResult res =
 			smallStepEvalStateMachine(rootMachine,
 						  chooser,
+						  useInitialMemoryValues,
 						  oracle,
 						  opt);
 		switch (res) {
@@ -1000,8 +1020,8 @@ EvalContext::evalSideEffect(StateMachine *sm, OracleInterface *oracle, EvalPathC
 	do {
 		EvalContext newContext(*this);
 		evalStateMachineSideEffectRes res =
-			newContext.evalStateMachineSideEffect(sm, smse, chooser, oracle,
-							      opt);
+			newContext.evalStateMachineSideEffect(sm, smse, consumer.useInitialMemoryValues,
+							      chooser, oracle, opt);
 		switch (res) {
 		case esme_normal:
 			pendingStates.push_back(newContext);
@@ -1815,6 +1835,7 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 		switch (writerContext.smallStepEvalStateMachine(
 				writeMachine,
 				chooser,
+				true,
 				oracle,
 				opt)) {
 		case EvalContext::ssr_crash:
@@ -1886,6 +1907,7 @@ findRemoteMacroSections(const VexPtr<StateMachine, &ir_heap> &readMachine,
 			switch (readEvalCtxt.bigStepEvalStateMachine(
 					readMachine,
 					sectionStart ? EvalContext::bsr_crash : EvalContext::bsr_survive,
+					true,
 					chooser,
 					oracle,
 					opt)) {
@@ -1983,6 +2005,7 @@ fixSufficient(const VexPtr<StateMachine, &ir_heap> &writeMachine,
 			switch (readEvalCtxt.bigStepEvalStateMachine(
 					probeMachine,
 					EvalContext::bsr_survive,
+					true,
 					chooser,
 					oracle,
 					opt)) {
@@ -2038,6 +2061,7 @@ findHappensBeforeRelations(
 	consumer.needsAccAssumptions = true;
 	consumer.newCondition = IRExpr_Const(IRConst_U1(0));
 	consumer.opt = &opt;
+	consumer.useInitialMemoryValues = false;
 
 	VexPtr<StateMachine, &ir_heap> combinedMachine;
 	combinedMachine = buildCrossProductMachine(probeMachine, storeMachine,
