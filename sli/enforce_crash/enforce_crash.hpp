@@ -175,27 +175,50 @@ class expressionStashMapT : public std::map<unsigned long, std::set<std::pair<un
 public:
 	expressionStashMapT() {}
 	expressionStashMapT(std::set<IRExpr *> &neededExpressions,
+			    StateMachine *probeMachine,
+			    StateMachine *storeMachine,
 			    std::map<unsigned, ThreadRip> &roots)
 	{
-		for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
+		std::set<IRExprGet *> neededTemporaries;
+		for (auto it = neededExpressions.begin();
 		     it != neededExpressions.end();
 		     it++) {
-			bool doit = true;
 			IRExpr *e = *it;
 			ThreadRip rip;
 			if (e->tag == Iex_Get) {
-				rip = roots[((IRExprGet *)e)->reg.tid()];
-			} else if (e->tag == Iex_Load) {
-				/* Stash rules for these are a bit special */
-				doit = false;
+				IRExprGet *ieg = (IRExprGet *)e;
+				if (ieg->reg.isReg()) {
+					rip = roots[ieg->reg.tid()];
+					(*this)[rip.rip.unwrap_vexrip()].insert(std::pair<unsigned, IRExpr *>(rip.thread, e));
+				} else {
+					neededTemporaries.insert(ieg);
+				}
 			} else if (e->tag == Iex_HappensBefore) {
 				/* These don't really get stashed in any useful sense */
-				doit = false;
 			} else {
 				abort();
 			}
-			if (doit)
-				(*this)[rip.rip.unwrap_vexrip()].insert(std::pair<unsigned, IRExpr *>(rip.thread, e));
+		}
+		if (!neededTemporaries.empty()) {
+			std::set<StateMachineSideEffectLoad *> loads;
+			enumSideEffects(probeMachine, loads);
+			enumSideEffects(storeMachine, loads);
+			for (auto it = neededTemporaries.begin();
+			     it != neededTemporaries.end();
+			     it++) {
+				StateMachineSideEffectLoad *l = NULL;
+				for (auto it2 = loads.begin(); it2 != loads.end(); it2++) {
+					if ( threadAndRegister::fullEq((*it2)->target, (*it)->reg) ) {
+						assert(!l);
+						l = *it2;
+					}
+				}
+				assert(l);
+				(*this)[l->rip.rip.rip.unwrap_vexrip()].insert(
+					std::pair<unsigned, IRExpr *>(
+						l->rip.rip.thread,
+						*it));
+			}
 		}
 	}
 	void operator|=(const expressionStashMapT &esm) {
@@ -1119,12 +1142,14 @@ public:
 	crashEnforcementData(std::set<IRExpr *> &neededExpressions,
 			     std::map<unsigned, ThreadRip> &_roots,
 			     expressionDominatorMapT &exprDominatorMap,
+			     StateMachine *probeMachine,
+			     StateMachine *storeMachine,
 			     DNF_Conjunction &conj,
 			     EnforceCrashCFG *cfg,
 			     int &next_hb_id,
 			     simulationSlotT &next_slot)
 		: roots(_roots),
-		  exprStashPoints(neededExpressions, _roots),
+		  exprStashPoints(neededExpressions, probeMachine, storeMachine, _roots),
 		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),

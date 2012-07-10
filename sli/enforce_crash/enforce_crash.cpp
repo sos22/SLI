@@ -187,7 +187,10 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 static bool
 buildCED(DNF_Conjunction &c,
 	 std::map<unsigned, ThreadRip> &roots,
-	 AddressSpace *as, crashEnforcementData *out,
+	 AddressSpace *as,
+	 StateMachine *probeMachine,
+	 StateMachine *storeMachine,
+	 crashEnforcementData *out,
 	 int &next_hb_id,
 	 simulationSlotT &next_slot)
 {
@@ -248,7 +251,7 @@ buildCED(DNF_Conjunction &c,
 	if (!exprDominatorMap.init(c, cfg, neededRips))
 		return false;
 
-	*out = crashEnforcementData(neededExpressions, roots, exprDominatorMap, c, cfg, next_hb_id, next_slot);
+	*out = crashEnforcementData(neededExpressions, roots, exprDominatorMap, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
 	return true;
 }
 
@@ -300,6 +303,8 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       int &next_hb_id,
 		       simulationSlotT &next_slot)
 {
+	summary = internCrashSummary(summary);
+
 	printf("Machines to enforce:\n");
 	printCrashSummary(summary, stdout);
 
@@ -358,7 +363,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
-		if (buildCED(d[x], roots, oracle->ms->addressSpace, &tmp, next_hb_id, next_slot))
+		if (buildCED(d[x], roots, oracle->ms->addressSpace, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
 			accumulator |= tmp;
 	}
 	return accumulator;
