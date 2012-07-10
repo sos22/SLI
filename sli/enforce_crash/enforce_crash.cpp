@@ -15,6 +15,12 @@
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
 
+#ifndef NDEBUG
+static bool debug_build_cfg = false;
+#else
+#define debug_build_cfg false
+#endif
+
 void
 instrToInstrSetMap::print(FILE *f)
 {
@@ -200,18 +206,45 @@ buildCED(DNF_Conjunction &c,
 
 	/* and where the needed expressions are calculated */
 	std::set<ThreadRip> neededRips;
-	for (std::set<IRExpr *>::iterator it = neededExpressions.begin();
-	     it != neededExpressions.end();
-	     it++) {
-		IRExpr *e = *it;
-		if (e->tag == Iex_Get) {
-			neededRips.insert(roots[((IRExprGet *)e)->reg.tid()]);
-		} else if (e->tag == Iex_Load) {
-		} else if (e->tag == Iex_HappensBefore) {
-			neededRips.insert(((IRExprHappensBefore *)e)->before.rip);
-			neededRips.insert(((IRExprHappensBefore *)e)->after.rip);
-		} else {
-			abort();
+	{
+		/* XXX keep this in sync with
+		 * expressionStashMapT::expressionStashMapT() */
+		std::set<IRExprGet *> neededTemporaries;
+		for (auto it = neededExpressions.begin();
+		     it != neededExpressions.end();
+		     it++) {
+			IRExpr *e = *it;
+			if (e->tag == Iex_Get) {
+				IRExprGet *ieg = (IRExprGet *)e;
+				if (ieg->reg.isReg()) {
+					neededRips.insert(roots[ieg->reg.tid()]);
+				} else {
+					neededTemporaries.insert(ieg);
+				}
+			} else {
+				assert(e->tag == Iex_HappensBefore);
+				IRExprHappensBefore *ieh = (IRExprHappensBefore *)e;
+				neededRips.insert(ieh->before.rip);
+				neededRips.insert(ieh->after.rip);
+			}
+		}
+		if (!neededTemporaries.empty()) {
+			std::set<StateMachineSideEffectLoad *> loads;
+			enumSideEffects(probeMachine, loads);
+			enumSideEffects(storeMachine, loads);
+			for (auto it = neededTemporaries.begin();
+			     it != neededTemporaries.end();
+			     it++) {
+				StateMachineSideEffectLoad *l = NULL;
+				for (auto it2 = loads.begin(); it2 != loads.end(); it2++) {
+					if ( threadAndRegister::fullEq((*it2)->target, (*it)->reg) ) {
+						assert(!l);
+						l = *it2;
+					}
+				}
+				assert(l);
+				neededRips.insert(l->rip.rip);
+			}
 		}
 	}
 
@@ -242,6 +275,14 @@ buildCED(DNF_Conjunction &c,
 			printf("Failed to build sufficiently complete CFG!\n");
 			return false;
 		}
+	}
+
+	if (debug_build_cfg) {
+		printf("Needed RIPs:\n");
+		for (auto it = neededRips.begin(); it != neededRips.end(); it++)
+			printf("\t%s\n", it->name());
+		printf("CFG:\n");
+		cfg->print(stdout);
 	}
 
 	/* Figure out where the various expressions should be
@@ -308,7 +349,6 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printCrashSummary(summary, stdout);
 
 	VexPtr<OracleInterface> oracleI(oracle);
-	assert(summary->loadMachine->origin.size() == 1);
 
 	IRExpr *requirement =
 		findHappensBeforeRelations(summary, oracleI,
@@ -344,10 +384,11 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		return crashEnforcementData();
 
 	std::map<unsigned, ThreadRip> roots;
-	roots[summary->loadMachine->origin[0].first] = ThreadRip::mk(summary->loadMachine->origin[0].first,
-								     summary->loadMachine->origin[0].second);
-	
+	assert(summary->loadMachine->origin.size() == 1);
 	assert(summary->storeMachine->origin.size() == 1);
+	roots[summary->loadMachine->origin[0].first] =
+		ThreadRip::mk(summary->loadMachine->origin[0].first,
+			      summary->loadMachine->origin[0].second);
 	roots[summary->storeMachine->origin[0].first] =
 		ThreadRip::mk(summary->storeMachine->origin[0].first,
 			      summary->storeMachine->origin[0].second);
