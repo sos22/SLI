@@ -1053,14 +1053,15 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 					printf("\n");
 #endif
 					IRExpr *e = it->second;
-					if (e->tag == Iex_Get) {
+					assert(e->tag == Iex_Get);
+					IRExprGet *ieg = (IRExprGet *)e;
+					if (ieg->reg.isReg()) {
 						/* Easy case: just store the register in its slot */
 						simulationSlotT s = data.exprsToSlots(it->first, e);
-						assert(!((IRExprGet *)e)->reg.isTemp());
 						newInstr->defaultNextI =
-							instrMovRegToSlot(RegisterIdx::fromVexOffset(((IRExprGet *)e)->reg.asReg()), s);
+							instrMovRegToSlot(RegisterIdx::fromVexOffset(ieg->reg.asReg()), s);
 						newInstr = newInstr->defaultNextI;
-					} else if (e->tag == Iex_Load) {
+					} else {
 						switch (instrOpcode(underlying)) {
 						case 0x3B: { /* 32 bit compare rm32, r32.  Handle this by converting
 								it into:
@@ -1079,8 +1080,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 							/* Do these after emitting the instruction. */
 							break;
 						}
-					} else {
-						abort();
 					}
 				}
 			}
@@ -1392,18 +1391,21 @@ loadCrashEnforcementData(crashEnforcementData &ced, int fd)
 int
 main(int argc, char *argv[])
 {
-	if (argc < 3)
+	if (argc != 5)
 		errx(1, "not enough arguments");
-
+	const char *binary = argv[1];
+	const char *ced_path = argv[2];
+	const char *topdir = argv[3];
+	const char *output = argv[4];
 	init_sli();
 
 	AtExit::init();
 
-	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
+	VexPtr<MachineState> ms(MachineState::readELFExec(binary));
 
-	int fd = open(argv[2], O_RDONLY);
+	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
-		err(1, "open(%s)", argv[2]);
+		err(1, "open(%s)", ced_path);
 	crashEnforcementData ced;
 	loadCrashEnforcementData(ced, fd);
 	close(fd);
@@ -1434,6 +1436,7 @@ main(int argc, char *argv[])
 	if (fclose(f) == EOF)
 		err(1, "closing %s", tmpfile);
 
+	char *real_inp = realpath(binary, NULL);
 	my_system(
 		"gcc",
 		"-Wall",
@@ -1442,10 +1445,10 @@ main(int argc, char *argv[])
 		"-g",
 		"-I.",
 		vex_asprintf("-Dthe_patch=\"%s\"", tmpfile),
-		"-Dprogram_to_patch=\"/local/scratch/sos22/mysql-5.5.6-rc/sql/mysqld\"",
-		"../sli/enforce_crash/patch_core.c",
+		vex_asprintf("-Dprogram_to_patch=\"%s\"", real_inp),
+		vex_asprintf("%s/sli/enforce_crash/patch_core.c", topdir),
 		"-o",
-		argv[3],
+		output,
 		NULL);
 
 	return 0;

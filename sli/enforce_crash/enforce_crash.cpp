@@ -11,7 +11,6 @@
 #include "genfix.hpp"
 #include "dnf.hpp"
 #include "simplify_ordering.hpp"
-#include "zapBindersAndFreeVariables.hpp"
 #include "enforce_crash.hpp"
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
@@ -309,34 +308,18 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printCrashSummary(summary, stdout);
 
 	VexPtr<OracleInterface> oracleI(oracle);
+	assert(summary->loadMachine->origin.size() == 1);
+
 	IRExpr *requirement =
 		findHappensBeforeRelations(summary, oracleI,
 					   AllowableOptimisations::defaultOptimisations
 						.setAddressSpace(oracle->ms->addressSpace),
 					   MemoryAccessIdentifierAllocator(),
 					   token);
-	fprintf(_logfile, "Crash requirement:\n");
-	ppIRExpr(requirement, _logfile);
-	fprintf(_logfile, "\n");
-
-	assert(summary->loadMachine->origin.size() == 1);
-	std::map<unsigned, ThreadRip> roots;
-	roots[summary->loadMachine->origin[0].first] = ThreadRip::mk(summary->loadMachine->origin[0].first,
-								     summary->loadMachine->origin[0].second);
-	
-	zapBindersAndFreeVariables(summary->loadMachine);
-	zapBindersAndFreeVariables(summary->storeMachine);
-	assert(summary->storeMachine->origin.size() == 1);
-	roots[summary->storeMachine->origin[0].first] =
-		ThreadRip::mk(summary->storeMachine->origin[0].first,
-			      summary->storeMachine->origin[0].second);
-
-	requirement = internIRExpr(zapFreeVariables(requirement));
-	requirement = simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations);
+	requirement = internIRExpr(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");
-
 	if (TIMEOUT) {
 		fprintf(_logfile, "Killed by a timeout during simplification\n");
 		exit(1);
@@ -359,6 +342,15 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
        
 	if (d.size() == 0)
 		return crashEnforcementData();
+
+	std::map<unsigned, ThreadRip> roots;
+	roots[summary->loadMachine->origin[0].first] = ThreadRip::mk(summary->loadMachine->origin[0].first,
+								     summary->loadMachine->origin[0].second);
+	
+	assert(summary->storeMachine->origin.size() == 1);
+	roots[summary->storeMachine->origin[0].first] =
+		ThreadRip::mk(summary->storeMachine->origin[0].first,
+			      summary->storeMachine->origin[0].second);
 
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
