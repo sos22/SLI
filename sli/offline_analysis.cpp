@@ -942,7 +942,6 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 bool
 buildProbeMachine(const VexPtr<Oracle> &oracle,
 		  const DynAnalysisRip &targetRip,
-		  const VexPtr<StateMachineState, &ir_heap> &proximal,
 		  ThreadId tid,
 		  const AllowableOptimisations &optIn,
 		  StateMachine ***out,
@@ -967,7 +966,7 @@ buildProbeMachine(const VexPtr<Oracle> &oracle,
 			return false;
 		}
 		std::set<StateMachine *> machines;
-		probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, proximal, mai,
+		probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, mai,
 				   machines);
 		sms = (StateMachine **)__LibVEX_Alloc_Ptr_Array(&ir_heap, machines.size());
 		nr_sms = 0;
@@ -1266,11 +1265,6 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				GarbageCollectionToken token)
 {
 	MemoryAccessIdentifierAllocator mai;
-	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(oracle->ms, ThreadRip::mk(tid, targetRip.toVexRip()), mai));
-	if (!proximal) {
-		fprintf(_logfile, "No proximal cause -> can't do anything\n");
-		return;
-	}
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
@@ -1281,7 +1275,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	unsigned nrProbeMachines;
 	{
 		StateMachine **_probeMachines;
-		if (!buildProbeMachine(oracle, targetRip, proximal, tid, opt, &_probeMachines, &nrProbeMachines, mai,
+		if (!buildProbeMachine(oracle, targetRip, tid, opt, &_probeMachines, &nrProbeMachines, mai,
 				       token))
 			return;
 		probeMachines = _probeMachines;

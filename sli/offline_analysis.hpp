@@ -196,8 +196,6 @@ public:
 void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
 void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out);
 class MemoryAccessIdentifierAllocator;
-StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip,
-				    MemoryAccessIdentifierAllocator &);
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
 				   const VexPtr<OracleInterface> &oracle,
@@ -249,5 +247,8 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     const VexPtr<Oracle> &oracle,
 				     FixConsumer &df,
 				     GarbageCollectionToken token);
+
+StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip,
+				    MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

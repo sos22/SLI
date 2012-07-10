@@ -95,7 +95,6 @@ StateMachine *storeCFGToMachine(Oracle *oracle,
 				MemoryAccessIdentifierAllocator &mai);
 void probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 			const DynAnalysisRip &proximalRip,
-			StateMachineState *proximalCause,
 			MemoryAccessIdentifierAllocator &mai,
 			std::set<StateMachine *> &out);
 

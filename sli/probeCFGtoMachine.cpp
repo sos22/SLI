@@ -727,30 +727,29 @@ truncateRips(StateMachine *sm)
 static void
 probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		   const DynAnalysisRip &proximalRip,
-		   StateMachineState *proximal,
 		   MemoryAccessIdentifierAllocator &mai,
 		   std::set<StateMachine *> &out)
 {
 	struct _ : public cfg_translator {
 		const DynAnalysisRip &proximalRip;
-		MemoryAccessIdentifierAllocator &mai;		
-		StateMachineState *proximal;
+		MemoryAccessIdentifierAllocator &mai;
 		StateMachineState *operator()(CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations) {
 			if (DynAnalysisRip(e->my_rip) == proximalRip) {
-				return proximal;
+				return getProximalCause(oracle->ms,
+							ThreadRip(tid, e->my_rip),
+							mai);
 			} else {
 				return cfgNodeToState(oracle, tid, e, false, mai, pendingRelocations);
 			}
 		}
 		_(const DynAnalysisRip &_proximalRip,
-		  MemoryAccessIdentifierAllocator &_mai,
-		  StateMachineState *_proximal)
-			: proximalRip(_proximalRip), mai(_mai), proximal(_proximal)
+		  MemoryAccessIdentifierAllocator &_mai)
+			: proximalRip(_proximalRip), mai(_mai)
 		{}
-	} doOne(proximalRip, mai, proximal);
+	} doOne(proximalRip, mai);
 
 	std::map<CFGNode *, StateMachineState *> results;
 	for (auto it = roots.begin(); it != roots.end(); it++)
@@ -798,11 +797,10 @@ void
 probeCFGsToMachine(Oracle *oracle, unsigned tid,
 		   std::set<CFGNode *> &roots,
 		   const DynAnalysisRip &targetRip,
-		   StateMachineState *proximal,
 		   MemoryAccessIdentifierAllocator &mai,
 		   std::set<StateMachine *> &out)
 {
-	_probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, proximal, mai, out);
+	_probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, mai, out);
 }
 
 StateMachine *
