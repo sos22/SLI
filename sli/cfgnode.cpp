@@ -113,4 +113,8 @@ dumpCFGToDot(const std::set<CFGNode *> &allNodes, const char *fname)
 	dumpCFGToDot(allNodes, fname);
 }
 
-
+void
+____force_compile()
+{
+	printCFG<VexRip>(NULL, NULL);
+}

@@ -28,6 +28,7 @@ ndChoiceState(StateMachineState **slot,
 	} else if (targets.size() == 1) {
 		if (usedExits)
 			usedExits->insert(targets[0]);
+		assert(targets[0] != NULL);
 		pendingRelocs.push_back(
 			reloc_t(slot, targets[0]));
 	} else {
@@ -45,6 +46,7 @@ ndChoiceState(StateMachineState **slot,
 								IRConst_U64(0)))),
 					true),
 				NULL);
+		assert(targets[0] != NULL);
 		pendingRelocs.push_back(
 			reloc_t(&r->target, targets[0]));
 		if (usedExits)
@@ -62,6 +64,7 @@ ndChoiceState(StateMachineState **slot,
 					acc);
 			pendingRelocs.push_back(
 				reloc_t(&b->trueTarget, targets[x]));
+			assert(targets[x] != NULL);
 			if (usedExits)
 				usedExits->insert(targets[x]);
 			acc = b;
@@ -74,7 +77,7 @@ static void
 getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 {
 	for (auto it = node->successors.begin(); it != node->successors.end(); it++)
-		if (it->rip == vr)
+		if (it->instr && it->rip == vr)
 			targets.push_back(it->instr);
 }
 

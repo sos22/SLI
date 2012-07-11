@@ -367,6 +367,7 @@ class SMBStateProxy : public SMBState {
 				    MemoryAccessIdentifierAllocator &) const {
 		StateMachineSideEffecting *smse =
 			new StateMachineSideEffecting(tr.rip, NULL, NULL);
+		assert(target != NULL);
 		relocs.push_back(reloc_t(&smse->target, target));
 		return smse;
 	}
