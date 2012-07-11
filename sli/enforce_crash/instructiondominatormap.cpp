@@ -52,10 +52,11 @@ cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred)
 
 			toEmit.erase(purge);
 			if (toEmit.count(purge)) {
-				if (purge->branchNextI)
-					toPurge.push_back(purge->branchNextI);
-				if (purge->defaultNextI)
-					toPurge.push_back(purge->defaultNextI);
+				for (auto it = purge->successors.begin();
+				     it != purge->successors.end();
+				     it++)
+					if (it->instr)
+						toPurge.push_back(it->instr);
 			}
 			donePurge.insert(purge);
 		}
@@ -169,10 +170,9 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 
 		if (newDominators != slot) {
 			slot = newDominators;
-			if (i->branchNextI)
-				needingRecompute.insert(i->branchNextI);
-			if (i->defaultNextI)
-				needingRecompute.insert(i->defaultNextI);
+			for (auto it = i->successors.begin(); it != i->successors.end(); it++)
+				if (it->instr)
+					needingRecompute.insert(it->instr);
 			if (happensAfter.happensAfter.count(i)) {
 				std::set<Instruction<ThreadRip> *> &orderedAfter(happensAfter.happensAfter[i]);
 				for (std::set<Instruction<ThreadRip> *>::iterator it = orderedAfter.begin();

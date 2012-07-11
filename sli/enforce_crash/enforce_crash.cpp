@@ -73,28 +73,21 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 			instrT *i = it.value();
 			if (!i)
 				continue;
-			instrT *successors[2];
-			int nr_successors;
-			nr_successors = 0;
-			if (i->defaultNextI)
-				successors[nr_successors++] = i->defaultNextI;
-			if (i->branchNextI)
-				successors[nr_successors++] = i->branchNextI;
-			if (nr_successors == 0)
-				continue;
 
 			/* Forward reachability: look at our
 			   successors, and make sure that anything
 			   which they can reach is reachable from us
 			   as well. */
 			std::set<instrT *> &f(forwardReachable[i]);
-			for (int j = 0; j < nr_successors; j++) {
-				instrT *successor = successors[j];
+			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
+				instrT *successor = it2->instr;
+				if (!successor)
+					continue;
 				std::set<instrT *> &f2(forwardReachable[successor]);
-				for (auto it2 = f2.begin(); it2 != f2.end(); it2++) {
-					if (!f.count(*it2)) {
+				for (auto it3 = f2.begin(); it3 != f2.end(); it3++) {
+					if (!f.count(*it3)) {
 						progress = true;
-						f.insert(*it2);
+						f.insert(*it3);
 					}
 				}
 			}
@@ -177,14 +170,14 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 	for (auto it = instructionPresence.begin(); it != instructionPresence.end(); it++) {
 		instrT *i = *it;
 
-		if (i->defaultNextI && !instructionPresence.count(i->defaultNextI))
-			(*this)[i->defaultNextI->rip.rip.unwrap_vexrip()].insert(i->rip.thread);
-		if (i->defaultNext.rip.isValid() && !i->defaultNextI)
-			(*this)[i->defaultNext.rip.unwrap_vexrip()].insert(i->rip.thread);
-		if (i->branchNextI && !instructionPresence.count(i->branchNextI))
-			(*this)[i->branchNextI->rip.rip.unwrap_vexrip()].insert(i->rip.thread);
-		if (!i->isCall && i->branchNext.rip.isValid() && !i->branchNextI)
-			(*this)[i->branchNext.rip.unwrap_vexrip()].insert(i->rip.thread);
+		for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
+			if (it2->type == instrT::successor_t::succ_call)
+				continue;
+			if (it2->instr && !instructionPresence.count(it2->instr))
+				(*this)[it2->instr->rip.rip.unwrap_vexrip()].insert(i->rip.thread);
+			if (it2->rip.rip.isValid() && !it2->instr)
+				(*this)[it2->rip.rip.unwrap_vexrip()].insert(i->rip.thread);
+		}
 	}
 
 }

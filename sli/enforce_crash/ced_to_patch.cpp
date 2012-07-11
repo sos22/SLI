@@ -15,7 +15,7 @@
    never sends any messages or introduces any delays. */
 #define STASH_ONLY_PATCH 0
 
-typedef std::pair<ClientRip, Instruction<ClientRip> **> relocEntryT;
+typedef std::pair<ClientRip, Instruction<ClientRip>::successor_t *> relocEntryT;
 
 #undef LOUD
 #ifdef LOUD
@@ -86,7 +86,7 @@ public:
 static Instruction<ClientRip> *
 instrNoImmediatesNoModrm(unsigned opcode)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	if (opcode >= 0x100) {
 		assert((opcode & 0xff00) == 0x0f00);
 		work->emit(0x0f);
@@ -100,7 +100,7 @@ instrNoImmediatesNoModrm(unsigned opcode)
 static Instruction<ClientRip> *
 instrImm32NoModrm(unsigned opcode, int val)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	if (opcode >= 0x100) {
 		assert((opcode & 0xff00) == 0x0f00);
 		work->emit(0x0f);
@@ -113,7 +113,7 @@ instrImm32NoModrm(unsigned opcode, int val)
 }
 
 static Instruction<ClientRip> *
-instrNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, const ModRM &rm, RexPrefix rex, bool isCall = false)
+instrNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, const ModRM &rm, RexPrefix rex)
 {
 	assert(!rex.b);
 	if (reg.isOpcodeExtension && reg.opcodeExtension >= 8) {
@@ -130,7 +130,7 @@ instrNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, con
 		opcode_bytes++;
 	if (opcode >= 0x100)
 		opcode_bytes++;
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(opcode_bytes, isCall);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(opcode_bytes);
 	if (rex.emit())
 		work->emit(rex.asByte());
 	if (opcode >= 0x100) {
@@ -174,7 +174,7 @@ jcc_code jcc_code::nonzero(0x85);
 static Instruction<ClientRip> *
 instrPushReg(RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	if (reg.idx >= 8) {
 		work->emit(0x41);
 		reg.idx -= 8;
@@ -185,7 +185,7 @@ instrPushReg(RegisterIdx reg)
 static Instruction<ClientRip> *
 instrPopReg(RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	if (reg.idx >= 8) {
 		work->emit(0x41);
 		reg.idx -= 8;
@@ -254,7 +254,7 @@ instrLea(const ModRM &modrm, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrMovImm64ToReg(unsigned long val, RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	if (reg.idx < 8) {
 		work->emit(0x48);
 	} else {
@@ -287,7 +287,7 @@ instrMovImmediateToReg(unsigned long imm, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrCallModrm(const ModRM &mrm)
 {
-	return instrNoImmediatesModrmOpcode(0xff, RegisterOrOpcodeExtension::opcode(2), mrm, RexPrefix::none(), true);
+	return instrNoImmediatesModrmOpcode(0xff, RegisterOrOpcodeExtension::opcode(2), mrm, RexPrefix::none());
 }
 
 static Instruction<ClientRip> *
@@ -366,7 +366,7 @@ instrNegModrm(const ModRM &mrm)
 static Instruction<ClientRip> *
 instrSetEqAl(void)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	work->emit(0x0f);
 	work->emit(0x94);
 	work->emit(0xc0);
@@ -432,21 +432,25 @@ instrMovLabelToRegister(const char *label, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrJcc(ClientRip target, jcc_code branchType, std::vector<relocEntryT> &relocs)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	work->emit(0x0f);
 	work->emit(branchType.code);
 	work->relocs.push_back(new RipRelativeBranchRelocation<ClientRip>(work->len,
 									  4,
 									  target));
 	work->len += 4;
-	relocs.push_back(relocEntryT(target, &work->branchNextI));
+	work->successors.push_back(
+		Instruction<ClientRip>::successor_t(
+			Instruction<ClientRip>::successor_t::succ_branch,
+			target));
+	relocs.push_back(relocEntryT(target, &work->successors[0]));
 	return work;
 }
 
 static Instruction<ClientRip> *
 instrJmpToHost(unsigned long rip)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1, false);
+	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
 	work->emit(0xe9);
 	work->emit(0);
 	work->emit(0);
@@ -466,10 +470,10 @@ instrSaveRflags(Instruction<ClientRip> *start, slotMapT &exprsToSlots)
 {
 	Instruction<ClientRip> *cursor = start;
 
-	cursor = cursor->defaultNextI = instrSkipRedZone();
-	cursor = cursor->defaultNextI = instrPushf();
-	cursor = cursor->defaultNextI = instrPopSlot(exprsToSlots.rflagsSlot());
-	cursor = cursor->defaultNextI = instrRestoreRedZone();
+	cursor = cursor->addDefault(instrSkipRedZone());
+	cursor = cursor->addDefault(instrPushf());
+	cursor = cursor->addDefault(instrPopSlot(exprsToSlots.rflagsSlot()));
+	cursor = cursor->addDefault(instrRestoreRedZone());
 	return cursor;
 }
 static Instruction<ClientRip> *
@@ -477,10 +481,10 @@ instrRestoreRflags(Instruction<ClientRip> *start, slotMapT &exprsToSlots)
 {
 	Instruction<ClientRip> *cursor = start;
 
-	cursor = cursor->defaultNextI = instrSkipRedZone();
-	cursor = cursor->defaultNextI = instrPushSlot(exprsToSlots.rflagsSlot());
-	cursor = cursor->defaultNextI = instrPopf();
-	cursor = cursor->defaultNextI = instrRestoreRedZone();
+	cursor = cursor->addDefault(instrSkipRedZone());
+	cursor = cursor->addDefault(instrPushSlot(exprsToSlots.rflagsSlot()));
+	cursor = cursor->addDefault(instrPopf());
+	cursor = cursor->addDefault(instrRestoreRedZone());
 	return cursor;
 }
 
@@ -488,10 +492,10 @@ static Instruction<ClientRip> *
 instrCallSequence(Instruction<ClientRip> *start, const char *name)
 {
 	Instruction<ClientRip> *cursor = start;
-	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RSI);
-	cursor = cursor->defaultNextI = instrMovLabelToRegister(name, RegisterIdx::RSI);
-	cursor = cursor->defaultNextI = instrCallModrm(ModRM::directRegister(RegisterIdx::RSI));
-	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RSI);
+	cursor = cursor->addDefault(instrPushReg(RegisterIdx::RSI));
+	cursor = cursor->addDefault(instrMovLabelToRegister(name, RegisterIdx::RSI));
+	cursor = cursor->addDefault(instrCallModrm(ModRM::directRegister(RegisterIdx::RSI)));
+	cursor = cursor->addDefault(instrPopReg(RegisterIdx::RSI));
 	return cursor;
 }
 
@@ -499,13 +503,13 @@ static Instruction<ClientRip> *
 instrMovModrmToSlot(Instruction<ClientRip> *start, const ModRM &modrm, simulationSlotT slot, simulationSlotT spill)
 {
 	if (modrm.isRegister()) {
-		return start->defaultNextI = instrMovRegToSlot(modrm.getRegister(), slot);
+		return start->addDefault(instrMovRegToSlot(modrm.getRegister(), slot));
 	} else {
 		RegisterIdx tmp = modrm.selectNonConflictingRegister();
-		start = start->defaultNextI = instrMovRegToSlot(tmp, spill);
-		start = start->defaultNextI = instrMovModrmToRegister(modrm, tmp);
-		start = start->defaultNextI = instrMovRegToSlot(tmp, slot);
-		start = start->defaultNextI = instrMovSlotToReg(spill, tmp);
+		start = start->addDefault(instrMovRegToSlot(tmp, spill));
+		start = start->addDefault(instrMovModrmToRegister(modrm, tmp));
+		start = start->addDefault(instrMovRegToSlot(tmp, slot));
+		start = start->addDefault(instrMovSlotToReg(spill, tmp));
 		return start;
 	}
 }
@@ -518,11 +522,11 @@ instrLoadMessageToSlot(Instruction<ClientRip> *start,
 		       RegisterIdx spill)
 {
 	Instruction<ClientRip> *cursor = start;
-	cursor = cursor->defaultNextI = instrMovLabelToRegister(
+	cursor = cursor->addDefault(instrMovLabelToRegister(
 		vex_asprintf("(unsigned long)&__msg_%d_slot_%d", msg_id, msg_slot),
-		spill);
-	cursor = cursor->defaultNextI = instrMovModrmToRegister(ModRM::memAtRegister(spill), spill);
-	cursor = cursor->defaultNextI = instrMovRegToSlot(spill, simslot);
+		spill));
+	cursor = cursor->addDefault(instrMovModrmToRegister(ModRM::memAtRegister(spill), spill));
+	cursor = cursor->addDefault(instrMovRegToSlot(spill, simslot));
 	return cursor;
 }
 
@@ -534,11 +538,11 @@ instrStoreSlotToMessage(Instruction<ClientRip> *start,
 			RegisterIdx spill1,
 			RegisterIdx spill2)
 {
-	start = start->defaultNextI = instrMovLabelToRegister(
+	start = start->addDefault(instrMovLabelToRegister(
 		vex_asprintf("(unsigned long)&__msg_%d_slot_%d", msg_id, msg_slot),
-		spill1);
-	start = start->defaultNextI = instrMovSlotToReg(simslot, spill2);
-	start = start->defaultNextI = instrMovRegisterToModrm(spill2, ModRM::memAtRegister(spill1));
+		spill1));
+	start = start->addDefault(instrMovSlotToReg(simslot, spill2));
+	start = start->addDefault(instrMovRegisterToModrm(spill2, ModRM::memAtRegister(spill1)));
 	return start;
 }
 
@@ -550,31 +554,33 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 			    int &rx_message_site_id)
 {
 	if (hb.size() == 0) {
+		assert(start->successors.size() == 0);
+		start->addDefault(NULL);
 		relocs.push_back(relocEntryT(ClientRip(nextRip, ClientRip::original_instruction),
-					     &start->defaultNextI));
+					     &start->successors[0]));
 		return;
 	}
 
 	Instruction<ClientRip> *cursor;
 
 	cursor = start;
-	cursor = cursor->defaultNextI = instrSkipRedZone();
-	cursor = cursor->defaultNextI = instrPushf();
+	cursor = cursor->addDefault(instrSkipRedZone());
+	cursor = cursor->addDefault(instrPushf());
 
-	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RAX);
-	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RDI);
-	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RDX);
+	cursor = cursor->addDefault(instrPushReg(RegisterIdx::RAX));
+	cursor = cursor->addDefault(instrPushReg(RegisterIdx::RDI));
+	cursor = cursor->addDefault(instrPushReg(RegisterIdx::RDX));
 
 	for (auto it = hb.begin(); it != hb.end(); it++)
-		cursor = cursor->defaultNextI = instrPushImm32((*it)->msg_id);
+		cursor = cursor->addDefault(instrPushImm32((*it)->msg_id));
 
-	cursor = cursor->defaultNextI = instrMovImmediateToReg(hb.size(), RegisterIdx::RDI);
-	cursor = cursor->defaultNextI = instrMovImmediateToReg(rx_message_site_id++, RegisterIdx::RDX);
+	cursor = cursor->addDefault(instrMovImmediateToReg(hb.size(), RegisterIdx::RDI));
+	cursor = cursor->addDefault(instrMovImmediateToReg(rx_message_site_id++, RegisterIdx::RDX));
 	cursor = instrCallSequence(cursor, "(unsigned long)happensBeforeEdge__after");
 
-	cursor = cursor->defaultNextI = instrAddImm32ToModrm(hb.size() * 8, ModRM::directRegister(RegisterIdx::RSP));
-	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RDX);
-	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RDI);
+	cursor = cursor->addDefault(instrAddImm32ToModrm(hb.size() * 8, ModRM::directRegister(RegisterIdx::RSP)));
+	cursor = cursor->addDefault(instrPopReg(RegisterIdx::RDX));
+	cursor = cursor->addDefault(instrPopReg(RegisterIdx::RDI));
 
 	for (auto it = hb.begin(); it != hb.end(); it++) {
 		ClientRip dest = nextRip;
@@ -589,8 +595,8 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 		dest.completed_edge = *it;
 		dest.clearName();
 		dbg("\tSuccess destination: %s\n", dest.name());
-		cursor = cursor->defaultNextI = instrCmpImm32ToModrm((*it)->msg_id, ModRM::directRegister(RegisterIdx::RAX));
-		cursor = cursor->defaultNextI = instrJcc(dest, jcc_code::zero, relocs);
+		cursor = cursor->addDefault(instrCmpImm32ToModrm((*it)->msg_id, ModRM::directRegister(RegisterIdx::RAX)));
+		cursor = cursor->addDefault(instrJcc(dest, jcc_code::zero, relocs));
 	}
 
 	ClientRip dest = nextRip;
@@ -600,7 +606,8 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 		dest.exit_threads.insert((*it)->after.thread);
 	}
 	dest.type = ClientRip::exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction;
-	relocs.push_back(relocEntryT(dest, &cursor->defaultNextI));
+	cursor->addDefault(NULL);
+	relocs.push_back(relocEntryT(dest, &cursor->successors[0]));
 	dest.clearName();
 	dbg("\tFailure destination: %s\n", dest.name());
 }
@@ -610,9 +617,9 @@ instrHappensBeforeEdgeBefore(Instruction<ClientRip> *start, const happensBeforeE
 			     slotMapT &exprsToSlots, simulationSlotT &next_slot)
 {
 	simulationSlotT rdi = exprsToSlots.allocateSlot(next_slot);
-	start = start->defaultNextI = instrMovRegToSlot(RegisterIdx::RDI, rdi);
+	start = start->addDefault(instrMovRegToSlot(RegisterIdx::RDI, rdi));
 	simulationSlotT r13 = exprsToSlots.allocateSlot(next_slot);
-	start = start->defaultNextI = instrMovRegToSlot(RegisterIdx::R13, r13);
+	start = start->addDefault(instrMovRegToSlot(RegisterIdx::R13, r13));
 
 	dbg("\tTemporary slot for RDI %d, R13 %d\n", rdi.idx, r13.idx);
 	for (unsigned x = 0; x < hb->content.size(); x++) {
@@ -624,12 +631,12 @@ instrHappensBeforeEdgeBefore(Instruction<ClientRip> *start, const happensBeforeE
 #endif
 		start = instrStoreSlotToMessage(start, hb->msg_id, x, s, RegisterIdx::RDI, RegisterIdx::R13);
 	}
-	start = start->defaultNextI = instrMovImm64ToReg(hb->msg_id, RegisterIdx::RDI);
-	start = start->defaultNextI = instrSkipRedZone();
+	start = start->addDefault(instrMovImm64ToReg(hb->msg_id, RegisterIdx::RDI));
+	start = start->addDefault(instrSkipRedZone());
 	start = instrCallSequence(start, "(unsigned long)happensBeforeEdge__before");
-	start = start->defaultNextI = instrRestoreRedZone();
-	start = start->defaultNextI = instrMovSlotToReg(r13, RegisterIdx::R13);
-	start = start->defaultNextI = instrMovSlotToReg(rdi, RegisterIdx::RDI);
+	start = start->addDefault(instrRestoreRedZone());
+	start = start->addDefault(instrMovSlotToReg(r13, RegisterIdx::R13));
+	start = start->addDefault(instrMovSlotToReg(rdi, RegisterIdx::RDI));
 	return start;
 }
 
@@ -640,7 +647,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 	{
 		slotMapT::iterator it = exprsToSlots.find(std::pair<unsigned, IRExpr *>(thread, e));
 		if (it != exprsToSlots.end()) {
-			start = start->defaultNextI = instrMovSlotToReg(it->second, reg);
+			start = start->addDefault(instrMovSlotToReg(it->second, reg));
 			return start;
 		}
 	}
@@ -649,7 +656,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 
 	switch (e->tag) {
 	case Iex_Const:
-		start = start->defaultNextI = instrMovImm64ToReg(((IRExprConst *)e)->con->Ico.U64, reg);
+		start = start->addDefault(instrMovImm64ToReg(((IRExprConst *)e)->con->Ico.U64, reg));
 		return start;
 
 	case Iex_Unop:
@@ -658,7 +665,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 			cursor = instrEvalExpr(start, thread, ((IRExprUnop *)e)->arg, reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
-			cursor = cursor->defaultNextI = instrNegModrm(ModRM::directRegister(reg));
+			cursor = cursor->addDefault(instrNegModrm(ModRM::directRegister(reg)));
 			return cursor;
 		default:
 			fprintf(stderr, "WARNING: Cannot evaluate unop ");
@@ -672,28 +679,28 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 		switch (((IRExprBinop *)e)->op) {
 		case Iop_CmpEQ64: {
 			simulationSlotT old_rax = exprsToSlots.allocateSlot(next_slot);
-			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1, false);
+			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1);
 			Instruction<ClientRip> *cursor;
 
 			cursor = instrEvalExpr(head, thread, ((IRExprBinop *)e)->arg1, reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
 			simulationSlotT t = exprsToSlots.allocateSlot(next_slot);
-			cursor = cursor->defaultNextI = instrMovRegToSlot(reg, t);
+			cursor = cursor->addDefault(instrMovRegToSlot(reg, t));
 			cursor = instrEvalExpr(cursor, thread, ((IRExprBinop *)e)->arg2, reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
-			cursor = cursor->defaultNextI = instrCmpRegToSlot(reg, t);
+			cursor = cursor->addDefault(instrCmpRegToSlot(reg, t));
 
 			if (reg != RegisterIdx::RAX)
-				cursor = cursor->defaultNextI = instrMovRegToSlot(RegisterIdx::RAX, old_rax);
-			cursor = cursor->defaultNextI = instrMovImm64ToReg(0, RegisterIdx::RAX);
-			cursor = cursor->defaultNextI = instrSetEqAl();
+				cursor = cursor->addDefault(instrMovRegToSlot(RegisterIdx::RAX, old_rax));
+			cursor = cursor->addDefault(instrMovImm64ToReg(0, RegisterIdx::RAX));
+			cursor = cursor->addDefault(instrSetEqAl());
 			if (reg != RegisterIdx::RAX) {
-				cursor = cursor->defaultNextI = instrMovRegisterToModrm(RegisterIdx::RAX, ModRM::directRegister(reg));
-				cursor = cursor->defaultNextI = instrMovSlotToReg(old_rax, RegisterIdx::RAX);
+				cursor = cursor->addDefault(instrMovRegisterToModrm(RegisterIdx::RAX, ModRM::directRegister(reg)));
+				cursor = cursor->addDefault(instrMovSlotToReg(old_rax, RegisterIdx::RAX));
 			}
-			start->defaultNextI = head->defaultNextI;
+			start->addDefault(head);
 			return cursor;
 		}
 		default:
@@ -706,30 +713,30 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 	case Iex_Associative:
 		switch (((IRExprAssociative *)e)->op) {
 		case Iop_Add64: {
-			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1, false);
+			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1);
 			Instruction<ClientRip> *cursor;
 			cursor = instrEvalExpr(head, thread, ((IRExprAssociative *)e)->contents[0], reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
 			if (((IRExprAssociative *)e)->nr_arguments == 1) {
-				start->defaultNextI = head->defaultNextI;
+				start->addDefault(head);
 				return cursor;
 			}
 
 			simulationSlotT acc = exprsToSlots.allocateSlot(next_slot);
-			cursor = cursor->defaultNextI = instrMovRegToSlot(reg, acc);
+			cursor = cursor->addDefault(instrMovRegToSlot(reg, acc));
 			for (int x = 1; x < ((IRExprAssociative *)e)->nr_arguments - 1; x++) {
 				cursor = instrEvalExpr(cursor, thread, ((IRExprAssociative *)e)->contents[x], reg, exprsToSlots, next_slot);
 				if (!cursor)
 					return NULL;
-				cursor = cursor->defaultNextI = instrAddRegToSlot(reg, acc);
+				cursor = cursor->addDefault(instrAddRegToSlot(reg, acc));
 			}
 			cursor = instrEvalExpr(cursor, thread, ((IRExprAssociative *)e)->contents[((IRExprAssociative *)e)->nr_arguments - 1],
 					       reg, exprsToSlots, next_slot);
 			if (!cursor)
 				return NULL;
-			cursor = cursor->defaultNextI = instrAddSlotToReg(acc, reg);
-			start->defaultNextI = head->defaultNextI;
+			cursor = cursor->addDefault(instrAddSlotToReg(acc, reg));
+			start->addDefault(head);
 			return cursor;
 		}
 		default:
@@ -761,9 +768,9 @@ instrCompareExprToZero(Instruction<ClientRip> *start, unsigned thread, IRExpr *e
 	cursor = instrEvalExpr(cursor, thread, expr, reg, exprsToSlots, next_slot);
 	if (!cursor)
 		return NULL;
-	cursor = cursor->defaultNextI = instrTestRegModrm(reg, ModRM::directRegister(reg));
-	cursor = cursor->defaultNextI = instrMovSlotToReg(spill, reg);
-	start->defaultNextI = first;
+	cursor = cursor->addDefault(instrTestRegModrm(reg, ModRM::directRegister(reg)));
+	cursor = cursor->addDefault(instrMovSlotToReg(spill, reg));
+	start->addDefault(first);
 	return cursor;
 }
 
@@ -802,7 +809,7 @@ instrCheckExpressionOrEscape(Instruction<ClientRip> *start,
 	failTarget.exit_threads.clear();
 	failTarget.exit_threads.insert(e.thread);
 	failTarget.type = ClientRip::exit_threads_and_restore_flags_and_branch_post_instr_checks;
-	cursor = cursor->defaultNextI = instrJcc(failTarget, branch_type, relocs);
+	cursor = cursor->addDefault(instrJcc(failTarget, branch_type, relocs));
 	return cursor;
 }
 
@@ -820,16 +827,16 @@ exitThreadSequence(Instruction<ClientRip> *cursor, const std::set<int> &threads,
 		}
 	}
 
-	cursor = cursor->defaultNextI = instrSkipRedZone();
-	cursor = cursor->defaultNextI = instrPushReg(RegisterIdx::RDI);
+	cursor = cursor->addDefault(instrSkipRedZone());
+	cursor = cursor->addDefault(instrPushReg(RegisterIdx::RDI));
 	for (auto it = msg_ids.begin(); it != msg_ids.end(); it++)
-		cursor = cursor->defaultNextI = instrPushImm32(*it);
-	cursor = cursor->defaultNextI = instrMovImmediateToReg(msg_ids.size(), RegisterIdx::RDI);
+		cursor = cursor->addDefault(instrPushImm32(*it));
+	cursor = cursor->addDefault(instrMovImmediateToReg(msg_ids.size(), RegisterIdx::RDI));
 	cursor = instrCallSequence(cursor, "(unsigned long)clearMessage");
-	cursor = cursor->defaultNextI = instrAddImm32ToModrm(msg_ids.size() * 8,
-							     ModRM::directRegister(RegisterIdx::RSP));
-	cursor = cursor->defaultNextI = instrPopReg(RegisterIdx::RDI);
-	cursor = cursor->defaultNextI = instrRestoreRedZone();
+	cursor = cursor->addDefault(instrAddImm32ToModrm(msg_ids.size() * 8,
+							 ModRM::directRegister(RegisterIdx::RSP)));
+	cursor = cursor->addDefault(instrPopReg(RegisterIdx::RDI));
+	cursor = cursor->addDefault(instrRestoreRedZone());
 	return cursor;
 }
 
@@ -934,13 +941,20 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 		assert(i);
 		while (1) {
 			std::set<unsigned> empty;
-			Instruction<ClientRip> *i2 = new Instruction<ClientRip>(i->modrm_start, i->isCall);
+			Instruction<ClientRip> *i2 = new Instruction<ClientRip>(i->modrm_start);
 			ClientRip cr(i->rip.rip, empty, ClientRip::start_of_instruction);
 			i2->rip = cr;
 
-			if (i->branchNext.rip) {
-				i2->branchNext = ClientRip(cr, i->branchNext.rip, ClientRip::start_of_instruction);
-				relocs.push_back(relocEntryT(i2->branchNext, &i2->branchNextI));
+			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
+				if (it2->rip.rip &&
+				    it2->type != Instruction<DirectRip>::successor_t::succ_default) {
+					ClientRip cr2(cr, it->rip.rip, ClientRip::start_of_instruction);
+					i2->successors.push_back(
+						Instruction<ClientRip>::successor_t(
+							Instruction<ClientRip>::successor_t::succ_type(it2->type),
+							cr2));
+					relocs.push_back(relocEntryT(cr2, &i2->successors.back()));
+				}
 			}
 			memcpy(i2->content, i->content, i->len);
 			i2->len = i->len;
@@ -952,17 +966,25 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 			res->ripToInstr->set(cr, i2);
 			res->ripToInstr->set(ClientRip(cr, ClientRip::restore_flags_and_branch_post_instr_checks), i2);
 
-			if (!i->defaultNext.rip)
+			Instruction<DirectRip>::successor_t *defaultNext = NULL;
+			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
+				if (it2->type == Instruction<DirectRip>::successor_t::succ_default) {
+					assert(!defaultNext);
+					defaultNext = &*it2;
+				}
+			}
+			if (!defaultNext || !defaultNext->rip.rip)
 				break;
-			if (i->defaultNext.rip - startOfJumpInstruction.rip >= 5) {
-				i2->defaultNextI = instrJmpToHost(i->defaultNext.rip);
+			if (defaultNext->rip.rip - startOfJumpInstruction.rip >= 5) {
+				i2->addDefault(instrJmpToHost(defaultNext->rip.rip));
 				break;
 			}
-			relocs.push_back(relocEntryT(ClientRip(i->defaultNext.rip,
+			i2->addDefault(NULL);
+			relocs.push_back(relocEntryT(ClientRip(defaultNext->rip.rip,
 							       empty,
 							       ClientRip::start_of_instruction),
-						     &i2->defaultNextI));
-			i = decoder(i->defaultNext.rip);
+						     &i2->successors.back()));
+			i = decoder(defaultNext->rip.rip);
 			assert(i);
 		}
 	}
@@ -972,7 +994,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 	for (unsigned x = 0; x < relocs.size(); x++) {
 		relocEntryT re = relocs[x];
 		if (res->ripToInstr->hasKey(re.first)) {
-			*re.second = res->ripToInstr->get(re.first);
+			re.second->instr = res->ripToInstr->get(re.first);
 		}
 	}
 	relocs.clear();
@@ -988,7 +1010,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 				) {
 				relocEntryT re = relocs[x];
 				if (res->ripToInstr->hasKey(re.first)) {
-					*re.second = res->ripToInstr->get(re.first);
+					re.second->instr = res->ripToInstr->get(re.first);
 					relocs.erase(relocs.begin() + x);
 				} else {
 					neededRips.push_back(re.first);
@@ -1006,7 +1028,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 		if (res->ripToInstr->hasKey(cr))
 			continue;
 
-		Instruction<ClientRip> *newInstr = new Instruction<ClientRip>(-1, false);
+		Instruction<ClientRip> *newInstr = new Instruction<ClientRip>(-1);
 
 		res->ripToInstr->set(cr, newInstr);
 
@@ -1018,8 +1040,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 		case ClientRip::start_of_instruction: {
 			Instruction<DirectRip> *underlying = decoder(cr.rip);
 			assert(underlying);
-			assert(!underlying->defaultNextI);
-			assert(!underlying->branchNextI);
 			/* If we're supposed to be dropping out of a thread here then do so. */
 			{
 				auto it = data.threadExitPoints.find(cr.rip);
@@ -1034,7 +1054,8 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 						}
 					}
 					if (doit) {
-						relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+						newInstr->addDefault(NULL);
+						relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
 						break;
 					}
 				}
@@ -1058,9 +1079,8 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 					if (ieg->reg.isReg()) {
 						/* Easy case: just store the register in its slot */
 						simulationSlotT s = data.exprsToSlots(it->first, e);
-						newInstr->defaultNextI =
-							instrMovRegToSlot(RegisterIdx::fromVexOffset(ieg->reg.asReg()), s);
-						newInstr = newInstr->defaultNextI;
+						newInstr = newInstr->addDefault(
+							instrMovRegToSlot(RegisterIdx::fromVexOffset(ieg->reg.asReg()), s));
 					} else {
 						switch (instrOpcode(underlying)) {
 						case 0x3B: { /* 32 bit compare rm32, r32.  Handle this by converting
@@ -1072,7 +1092,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 							simulationSlotT slot = data.exprsToSlots(it->first, e);
 							simulationSlotT spill = data.exprsToSlots.allocateSlot(next_slot);
 							newInstr = instrMovModrmToSlot(newInstr, instrModrm(underlying), slot, spill);
-							newInstr = newInstr->defaultNextI = instrCmpRegToSlot(instrModrmReg(underlying), slot);
+							newInstr = newInstr->addDefault(instrCmpRegToSlot(instrModrmReg(underlying), slot));
 							cr.skip_orig = true;
 							break;
 						}
@@ -1083,8 +1103,9 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 					}
 				}
 			}
+			newInstr->addDefault(NULL);
 			relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::receive_messages),
-						     &newInstr->defaultNextI));
+						     &newInstr->successors.back()));
 			break;
 		}
 
@@ -1105,28 +1126,43 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 				}
 				instrHappensBeforeEdgeAfter(relevantEdges, newInstr, cr, relocs, next_rx_site_id);
 			} else {
+				newInstr->addDefault(NULL);
 				relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::original_instruction),
-							     &newInstr->defaultNextI));
+							     &newInstr->successors.back()));
 			}
 			newInstr = NULL;
 			break;
 		case ClientRip::original_instruction: {
 			Instruction<DirectRip> *underlying = decoder(cr.rip);
 			assert(underlying);
-			if (underlying->defaultNext.rip) {
-				ClientRip c(cr, ClientRip::post_instr_generate);
-				relocs.push_back(relocEntryT(c, &newInstr->defaultNextI));
-			}
-
-			/* XXX we pretty much assume that branches
-			   can't have post-instruction events
-			   (generate value, eval expression, or
-			   originate message), because otherwise we
-			   won't bother generating them when the
-			   branch is taken. */
-			if (underlying->branchNext.rip) {
-				newInstr->branchNext = ClientRip(cr, underlying->branchNext.rip, ClientRip::start_of_instruction);
-				relocs.push_back(relocEntryT(newInstr->branchNext, &newInstr->branchNextI));
+			for (auto it = underlying->successors.begin(); it != underlying->successors.end(); it++) {
+				switch (it->type) {
+				case Instruction<DirectRip>::successor_t::succ_default: {
+					ClientRip c(cr, ClientRip::post_instr_generate);
+					newInstr->addDefault(NULL);
+					relocs.push_back(relocEntryT(c, &newInstr->successors.back()));
+					break;
+				}
+				/* XXX we pretty much assume that
+				   branches can't have
+				   post-instruction events (generate
+				   value, eval expression, or
+				   originate message), because
+				   otherwise we won't bother
+				   generating them when the branch is
+				   taken. */
+				case Instruction<DirectRip>::successor_t::succ_branch:
+				case Instruction<DirectRip>::successor_t::succ_call: {
+					ClientRip c(cr, it->rip.rip, ClientRip::start_of_instruction);
+					newInstr->successors.push_back(
+						Instruction<ClientRip>::successor_t(
+							Instruction<ClientRip>::successor_t::succ_type(
+								it->type),
+							c));
+					relocs.push_back(relocEntryT(c, &newInstr->successors.back()));
+					break;
+				}
+				}
 			}
 			if (!cr.skip_orig) {
 				memcpy(newInstr->content, underlying->content, underlying->len);
@@ -1180,8 +1216,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 						{
 							dbg("\tstash as load\n");
 							simulationSlotT s = data.exprsToSlots(it->first, e);
-							newInstr->defaultNextI = instrMovRegToSlot(instrModrmReg(underlying), s);
-							newInstr = newInstr->defaultNextI;
+							newInstr = newInstr->addDefault(instrMovRegToSlot(instrModrmReg(underlying), s));
 							break;
 						}
 						default:
@@ -1190,10 +1225,12 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 					}
 				}
 			}
+			newInstr->addDefault(NULL);
 			relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::post_instr_checks),
-						     &newInstr->defaultNextI));
+						     &newInstr->successors.back()));
 			break;
 		case ClientRip::post_instr_checks:
+			assert(!newInstr->getDefault());
 			if (!NO_OP_PATCH && !STASH_ONLY_PATCH && data.expressionEvalPoints.count(cr.rip)) {
 				std::set<exprEvalPoint> &expressionsToEval(data.expressionEvalPoints[cr.rip]);
 				
@@ -1205,6 +1242,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 						doit = true;
 				if (doit) {
 					newInstr = instrSaveRflags(newInstr, data.exprsToSlots);
+					assert(!newInstr->getDefault());
 					for (std::set<exprEvalPoint>::iterator it = expressionsToEval.begin();
 					     it != expressionsToEval.end();
 					     it++) {
@@ -1215,12 +1253,15 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 #endif
 						newInstr = instrCheckExpressionOrEscape(newInstr, *it, cr, data.exprsToSlots,
 											relocs, next_slot);
+						assert(!newInstr->getDefault());
 					}
 					newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
+					assert(!newInstr->getDefault());
 				}
 			}
+			newInstr->addDefault(NULL);
 			relocs.push_back(relocEntryT(ClientRip(cr, ClientRip::generate_messages),
-						     &newInstr->defaultNextI));
+						     &newInstr->successors.back()));
 			break;
 		case ClientRip::generate_messages:
 			if (!NO_OP_PATCH && !STASH_ONLY_PATCH && data.happensBeforePoints.count(cr.rip)) {
@@ -1240,9 +1281,16 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 			/* Where do we go next? */
 			{
 				Instruction<DirectRip> *underlying = decoder(cr.rip);
-				if (underlying->defaultNext.rip) {
-					ClientRip c(cr, underlying->defaultNext.rip, ClientRip::start_of_instruction);
-					relocs.push_back(relocEntryT(c, &newInstr->defaultNextI));
+				Instruction<DirectRip>::successor_t *defaultNext = NULL;
+				for (auto it = underlying->successors.begin(); it != underlying->successors.end(); it++)
+					if (it->type == Instruction<DirectRip>::successor_t::succ_default) {
+						assert(!defaultNext);
+						defaultNext = &*it;
+					}
+				if (defaultNext && defaultNext->rip.rip) {
+					ClientRip c(cr, defaultNext->rip.rip, ClientRip::start_of_instruction);
+					newInstr->addDefault(NULL);
+					relocs.push_back(relocEntryT(c, &newInstr->successors.back()));
 				}
 			}
 			break;
@@ -1251,14 +1299,16 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 			assert(cr.exit_threads_valid());
 			newInstr = exitThreadSequence(newInstr, cr.exit_threads, data);
 			cr.type = ClientRip::restore_flags_and_branch_post_instr_checks;
-			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			newInstr->addDefault(NULL);
+			relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
 			break;
 		}
 
 		case ClientRip::restore_flags_and_branch_post_instr_checks:
 			newInstr = instrRestoreRflags(newInstr, data.exprsToSlots);
 			cr.type = ClientRip::post_instr_checks;
-			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			newInstr->addDefault(NULL);
+			relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
 			cr.clearName();
 			dbg("\tRestored flags, going to %s\n", cr.name());
 			break;
@@ -1267,7 +1317,8 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 			assert(cr.exit_threads_valid());
 			newInstr = exitThreadSequence(newInstr, cr.exit_threads, data);
 			cr.type = ClientRip::rx_message;
-			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			newInstr->addDefault(NULL);
+			relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
 			break;
 		}
 		case ClientRip::rx_message: {
@@ -1277,7 +1328,8 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 				newInstr = instrLoadMessageToSlot(newInstr, hb->msg_id, x, s, RegisterIdx::RAX);
 			}
 			cr.type = ClientRip::pop_regs_restore_flags_and_branch_orig_instruction;
-			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			newInstr->addDefault(NULL);
+			relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
 			cr.clearName();
 			dbg("\tAfter receiving message, go to %s\n", cr.name());
 			break;
@@ -1287,15 +1339,17 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 			assert(cr.exit_threads_valid());
 			newInstr = exitThreadSequence(newInstr, cr.exit_threads, data);
 			cr.type = ClientRip::pop_regs_restore_flags_and_branch_orig_instruction;
-			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			newInstr->addDefault(NULL);
+			relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
 			break;
 		}
 		case ClientRip::pop_regs_restore_flags_and_branch_orig_instruction:
-			newInstr = newInstr->defaultNextI = instrPopReg(RegisterIdx::RAX);
-			newInstr = newInstr->defaultNextI = instrPopf();
-			newInstr = newInstr->defaultNextI = instrRestoreRedZone();
+			newInstr = newInstr->addDefault(instrPopReg(RegisterIdx::RAX));
+			newInstr = newInstr->addDefault(instrPopf());
+			newInstr = newInstr->addDefault(instrRestoreRedZone());
 			cr.type = ClientRip::original_instruction;
-			relocs.push_back(relocEntryT(cr, &newInstr->defaultNextI));
+			newInstr->addDefault(NULL);
+			relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
 			cr.clearName();
 			dbg("\tRestore flags etc. then go to %s\n", cr.name());
 			break;

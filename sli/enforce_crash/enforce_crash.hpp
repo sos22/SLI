@@ -56,10 +56,9 @@ public:
 			Instruction<ThreadRip> *v = it.value();
 			if (!count(v))
 				(*this)[v];
-			if (v->defaultNextI)
-				(*this)[v->defaultNextI].insert(v);
-			if (v->branchNextI)
-				(*this)[v->branchNextI].insert(v);
+			for (auto it2 = v->successors.begin(); it2 != v->successors.end(); it2++)
+				if (it2->instr)
+					(*this)[it2->instr].insert(v);
 		}
 	}
 };

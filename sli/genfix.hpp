@@ -110,15 +110,48 @@ class Instruction : public GarbageCollected<Instruction<ripType> > {
 	void immediate(unsigned size, AddressSpace *as);
 	int modrmExtension(AddressSpace *as);
 	Instruction() : modrm_start(-1) {}
+	void addBranch(const ripType &r) {
+		successors.push_back(successor_t(successor_t::succ_branch, r));
+	}
+	void addCall(const ripType &r) {
+		successors.push_back(successor_t(successor_t::succ_call, r));
+	}
+	void addDefault(const ripType &r) {
+		assert(!getDefault());
+		successors.push_back(successor_t(successor_t::succ_default, r));
+	}
 public:
-	Instruction(int _modrm_start, bool _isCall) : modrm_start(_modrm_start), isCall(_isCall) {}
+	Instruction *addDefault(Instruction *r) {
+		assert(!getDefault());
+		successors.push_back(successor_t(successor_t::succ_default, r));
+		return r;
+	}
+	Instruction(int _modrm_start) : modrm_start(_modrm_start) { successors.reserve(2); }
 	ripType rip;
 
-	ripType defaultNext;
-	Instruction *defaultNextI;
-	ripType branchNext;
-	Instruction *branchNextI;
+	struct successor_t {
+		enum succ_type { succ_default, succ_branch, succ_call } type;
+		ripType rip;
+		Instruction *instr;
+		successor_t(succ_type _type, const ripType &_rip)
+			: type(_type), rip(_rip), instr(NULL)
+		{}
+		successor_t(succ_type _type, Instruction *_instr)
+			: type(_type), rip(), instr(_instr)
+		{}
+	};
+	std::vector<successor_t> successors;
 
+	successor_t *getDefault() {
+		successor_t *res = NULL;
+		for (auto it = successors.begin(); it != successors.end(); it++) {
+			if (it->type == successor_t::succ_default) {
+				assert(!res);
+				res = &*it;
+			}
+		}
+		return res;
+	}
 	/* Doesn't really belong here, but it'll do for now. */
 	unsigned offsetInPatch;
 	bool presentInPatch;
@@ -132,7 +165,6 @@ public:
 	std::vector<LateRelocation *> lateRelocs;
 
 	bool useful;
-	bool isCall;
 
 	static Instruction<ripType> *decode(AddressSpace *as,
 					    ripType rip,
@@ -147,8 +179,8 @@ public:
 	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
 		visit_container(lateRelocs, hv);
-		hv(defaultNextI);
-		hv(branchNextI);
+		for (auto it = successors.begin(); it != successors.end(); it++)
+			hv(it->instr);
 	}
 	void destruct() { this->~Instruction(); }
 	NAMED_CLASS
@@ -625,16 +657,18 @@ top:
 		/* Two-byte instructions */
 		b = i->byte(as);
 		switch (b) {
-		case 0x80 ... 0x8f: /* 32 bit conditional jumps. */
+		case 0x80 ... 0x8f: { /* 32 bit conditional jumps. */
 			delta32 = i->int32(as);
-			i->branchNext = i->rip + i->len + delta32;
-			i->relocs.push_back(new RipRelativeBranchRelocation<r>(i->len - 4, 4, i->branchNext));
+			r target = i->rip + i->len + delta32;
+			i->addBranch(target);
+			i->relocs.push_back(new RipRelativeBranchRelocation<r>(i->len - 4, 4, target));
 			/* Unlike 8 bit jumps, we don't need to set
 			   fallsThrough here, because the normal
 			   defaultNext calculation will do the right
 			   thing, because the output instruction is
 			   the same size as the input one. */
 			break;
+		}
 
 		case 0x30 ... 0x3f: /* wrmsr, rdmsr, sysenter, etc.
 				     * An opcode with no operands. */
@@ -688,8 +722,12 @@ top:
 		break;
 
 	case 0xff: /* Group 5 */
-		if (i->modrmExtension(as) == 2)
-			i->isCall = true;
+		if (i->modrmExtension(as) == 2) {
+			i->successors.push_back(
+				Instruction<r>::successor_t(
+					Instruction<r>::successor_t::succ_call,
+					r()));
+		}
 		i->_modrm(0, as);
 		break;
 
@@ -705,27 +743,29 @@ top:
 			i->immediate(4, as);
 		break;
 
-	case 0x70 ... 0x7f:
+	case 0x70 ... 0x7f: {
 		/* 8 bit conditional jumps are handled specially, by
-		   turning them into 32 conditional jumps, because
+		   turning them into 32-bit conditional jumps, because
 		   that simplifies a lot of relocation-related
 		   stuff. */
 		/* Decode the instruction... */
 		delta = i->byte(as);
-		i->defaultNext = i->rip + i->len;
-		i->branchNext = i->defaultNext + delta;
+		r fallThrough = i->rip + i->len;
+		r target = fallThrough + delta;
+		i->addDefault(fallThrough);
+		i->addBranch(target);
 
 		/* Now rewind and emit the 32 bit version. */
 		i->len = 0;
 		i->emit(0x0f);
 		i->emit(b + 0x10);
-		i->relocs.push_back(new RipRelativeBranchRelocation<r>(i->len, 4, i->branchNext));
+		i->relocs.push_back(new RipRelativeBranchRelocation<r>(i->len, 4, target));
 		i->len += 4;
 
 		/* Don't let the tail update defaultNext */
 		fallsThrough = false;
 		break;
-
+	}
 	case 0x69: /* imul gv,ev,iz */
 	case 0x81:
 	case 0xc7:
@@ -782,20 +822,19 @@ top:
 								 target,
 								 0));
 		if (cfg && cfg->exploreFunction(target))
-			i->branchNext = target;
-		i->isCall = true;
+			i->addCall(target);
 		break;
 	}
 	case 0xe9: /* jmp rel32 */
 		delta32 = i->int32(as);
-		i->defaultNext = i->rip + i->len + delta32;
+		i->addDefault(i->rip + i->len + delta32);
 		i->len = 0;
 		fallsThrough = false;
 		break;
 
 	case 0xeb: /* jmp rel8 */
 		delta = i->byte(as);
-		i->defaultNext = i->rip + i->len + delta;
+		i->addDefault(i->rip + i->len + delta);
 
 		/* Don't emit this instruction at all; if it's useful,
 		 * we'll synthesise an appropriate jump later on.
@@ -837,7 +876,7 @@ top:
 	}
 
 	if (fallsThrough)
-		i->defaultNext = i->rip + i->len;
+		i->addDefault(i->rip + i->len);
 
 	return i;
 }
@@ -853,12 +892,9 @@ CFG<r>::decodeInstruction(r rip, unsigned max_depth)
 	assert(i->rip == rip);
 	registerInstruction(i);
 	if (exploreInstruction(i)) {
-		if (i->branchNext.rip.isValid())
+		for (auto it = i->successors.begin(); it != i->successors.end(); it++)
 			pendingRips.push_back(std::pair<r, unsigned>(
-						      i->branchNext, max_depth - 1));
-		if (i->defaultNext.rip.isValid())
-			pendingRips.push_back(std::pair<r, unsigned>(
-						      i->defaultNext, max_depth - 1));
+						      it->rip, max_depth - 1));
 	}
 }
 
@@ -877,19 +913,14 @@ CFG<r>::doit()
 	     it++) {
 		Instruction<r> *ins = it.value();
 		ins->useful = instructionUseful(ins);
-		if (ins->defaultNext.rip.isValid() && ripToInstr->hasKey(ins->defaultNext)) {
-			Instruction<r> *dn = ripToInstr->get(ins->defaultNext);
-			ins->defaultNext = r();
-			ins->defaultNextI = dn;
-			if (dn->useful)
-				ins->useful = true;
-		}
-		if (ins->branchNext.rip.isValid() && ripToInstr->hasKey(ins->branchNext)) {
-			Instruction<r> *bn = ripToInstr->get(ins->branchNext);
-			ins->branchNext = r();
-			ins->branchNextI = bn;
-			if (bn->useful)
-				bn->useful = true;
+		for (auto it2 = ins->successors.begin(); it2 != ins->successors.end(); it2++) {
+			if (ripToInstr->hasKey(it2->rip)) {
+				Instruction<r> *dn = ripToInstr->get(it2->rip);
+				it2->rip = r();
+				it2->instr = dn;
+				if (dn->useful)
+					ins->useful = true;
+			}
 		}
 	}
 
@@ -902,13 +933,11 @@ CFG<r>::doit()
 			Instruction<r> *i = it.value();
 			if (i->useful)
 				continue;
-			if (i->defaultNextI && i->defaultNextI->useful) {
-				i->useful = true;
-				progress = true;
-			}
-			if (i->branchNextI && i->branchNextI->useful) {
-				i->useful = true;
-				progress = true;
+			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
+				if (it2->instr && it2->instr->useful) {
+					i->useful = true;
+					progress = true;
+				}
 			}
 		}
 	} while (progress);
@@ -922,13 +951,11 @@ CFG<r>::doit()
 		Instruction<r> *i = it.value();
 
 		if (i->useful) {
-			if (i->defaultNextI && !i->defaultNextI->useful) {
-				i->defaultNext = i->defaultNextI->rip;
-				i->defaultNextI = NULL;
-			}
-			if (i->branchNextI && !i->branchNextI->useful) {
-				i->branchNext = i->branchNextI->rip;
-				i->branchNextI = NULL;
+			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
+				if (it2->instr && !it2->instr->useful) {
+					it2->rip = it2->instr->rip;
+					it2->instr = NULL;
+				}
 			}
 			it++;
 		} else {
@@ -985,8 +1012,13 @@ PatchFragment<r>::nextInstr(CFG<r> *cfg)
 	for (typename std::map<Instruction<r> *, bool>::iterator it = pendingInstructions.begin();
 	     it != pendingInstructions.end();
 	     it++) {
-		if (it->first->defaultNextI)
-			pendingInstructions[it->first->defaultNextI] = false;
+		for (auto it2 = it->first->successors.begin(); it2 != it->first->successors.end(); it2++) {
+			if (it2->type == Instruction<r>::successor_t::succ_default &&
+			    it2->instr) {
+				pendingInstructions[it2->instr] = false;
+				break;
+			}
+		}
 	}
 	for (typename std::map<Instruction<r> *, bool>::iterator it = pendingInstructions.begin();
 	     it != pendingInstructions.end();
@@ -1348,12 +1380,19 @@ PatchFragment<r>::emitStraightLine(Instruction<r> *i)
 		registerInstruction(i, offset);
 
 		emitInstruction(i);
-			
-		if (!i->defaultNextI) {
+		
+		typename Instruction<r>::successor_t *next = NULL;
+		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
+			if (it->type == Instruction<r>::successor_t::succ_default) {
+				assert(!next);
+				next = &*it;
+			}
+		}
+		if (!next || !next->instr) {
 			/* Hit end of block, and don't want to go any
 			 * further.  Return to the original code. */
-			if (i->defaultNext.rip.isValid()) {
-				emitJmpToRipClient(i->defaultNext);
+			if (next && next->rip.rip.isValid()) {
+				emitJmpToRipClient(next->rip);
 			} else {
 				/* Last instruction in the block was
 				   an unpredictable branch, which
@@ -1363,7 +1402,7 @@ PatchFragment<r>::emitStraightLine(Instruction<r> *i)
 			return;
 		}
 
-		i = i->defaultNextI;
+		i = next->instr;
 	}
 }
 
@@ -1453,13 +1492,31 @@ CFG<r>::print(FILE *f)
 	for (typename ripToInstrT::iterator it = ripToInstr->begin();
 	     it != ripToInstr->end();
 	     it++) {
-		fprintf(f, "%s[%p] -> %s[%p], %s[%p]\n",
+		fprintf(f, "%s[%p] -> ",
 			it.key().name(),
-			it.value(),
-			it.value()->defaultNext.name(),
-			it.value()->defaultNextI,
-			it.value()->branchNext.name(),
-			it.value()->branchNextI);
+			it.value());
+		for (auto it2 = it.value()->successors.begin();
+		     it2 != it.value()->successors.end();
+		     it2++) {
+			const char *t = NULL;
+			switch (it2->type) {
+			case Instruction<r>::successor_t::succ_default:
+				t = "default";
+				break;
+			case Instruction<r>::successor_t::succ_branch:
+				t = "branch";
+				break;
+			case Instruction<r>::successor_t::succ_call:
+				t = "call";
+				break;
+			}
+			if (t == NULL)
+				t = "BAD";
+			if (it2 != it.value()->successors.begin())
+				fprintf(f, ", ");
+			fprintf(f, "%s:%s[%p]", t, it2->rip.name(), it2->instr);
+		}
+		fprintf(f, "\n");
 	}
 }
 
