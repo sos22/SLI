@@ -23,19 +23,6 @@ static bool debugOptimiseStateMachine = false;
 #define debugOptimiseStateMachine false
 #endif
 
-static void
-enumerateCFG(CFGNode *root, std::map<VexRip, CFGNode *> &rips)
-{
-	if (!root)
-		return;
-	if (rips.count(root->my_rip))
-		return;
-	rips[root->my_rip] = root;
-	enumerateCFG(root->fallThrough.second, rips);
-	for (auto it = root->branches.begin(); it != root->branches.end(); it++)
-		enumerateCFG(it->second, rips);
-}
-
 template <typename t> static void
 findAllTypedSideEffects(StateMachine *sm, std::set<t *> &out)
 {
@@ -1014,7 +1001,7 @@ buildProbeMachine(const VexPtr<Oracle> &oracle,
 static bool
 isSingleNodeCfg(CFGNode *root)
 {
-	return root->fallThrough.second == NULL && root->branches.empty();
+	return root->successors.empty();
 }
 
 static bool
@@ -1074,7 +1061,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 		}
 
 		if (singleNodeCfg &&
-		    machineHasOneRacingLoad(assertionFreeProbeMachine, storeCFGs[i]->my_rip, oracle)) {
+		    machineHasOneRacingLoad(assertionFreeProbeMachine, storeCFGs[i]->rip, oracle)) {
 			fprintf(_logfile, "Single store versus single shared load -> no race possible\n");
 			continue;
 		}

@@ -5,6 +5,7 @@
 #include "cfgnode.hpp"
 #include "typesdb.hpp"
 
+#include "cfgnode.hpp"
 #include "cfgnode_tmpl.cpp"
 
 int
@@ -35,9 +36,7 @@ main(int argc, char *argv[])
 		cntr++;
 	}
 
-	FILE *f = fopen("probecfg.dot", "w");
-	dumpCFGToDot(roots, f);
-	fclose(f);
+	dumpCFGToDot(roots, "probecfg.dot");
 
 	return 0;
 }

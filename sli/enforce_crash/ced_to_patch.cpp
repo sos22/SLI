@@ -440,9 +440,7 @@ instrJcc(ClientRip target, jcc_code branchType, std::vector<relocEntryT> &relocs
 									  target));
 	work->len += 4;
 	work->successors.push_back(
-		Instruction<ClientRip>::successor_t(
-			Instruction<ClientRip>::successor_t::succ_branch,
-			target));
+		Instruction<ClientRip>::successor_t::branch(target));
 	relocs.push_back(relocEntryT(target, &work->successors[0]));
 	return work;
 }
@@ -949,10 +947,24 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 				if (it2->rip.rip &&
 				    it2->type != Instruction<DirectRip>::successor_t::succ_default) {
 					ClientRip cr2(cr, it->rip.rip, ClientRip::start_of_instruction);
-					i2->successors.push_back(
-						Instruction<ClientRip>::successor_t(
-							Instruction<ClientRip>::successor_t::succ_type(it2->type),
-							cr2));
+					switch (it2->type) {
+					case Instruction<DirectRip>::successor_t::succ_default:
+						i2->successors.push_back(
+							Instruction<ClientRip>::successor_t::dflt(cr2, it2->calledFunction));
+						break;
+					case Instruction<DirectRip>::successor_t::succ_branch:
+						i2->successors.push_back(
+							Instruction<ClientRip>::successor_t::branch(cr2));
+						break;
+					case Instruction<DirectRip>::successor_t::succ_call:
+						i2->successors.push_back(
+							Instruction<ClientRip>::successor_t::call(cr2));
+						break;
+					case Instruction<DirectRip>::successor_t::succ_unroll:
+						i2->successors.push_back(
+							Instruction<ClientRip>::successor_t::unroll(cr2));
+						break;
+					}
 					relocs.push_back(relocEntryT(cr2, &i2->successors.back()));
 				}
 			}
@@ -1151,14 +1163,24 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 				   otherwise we won't bother
 				   generating them when the branch is
 				   taken. */
-				case Instruction<DirectRip>::successor_t::succ_branch:
+				case Instruction<DirectRip>::successor_t::succ_branch: {
+					ClientRip c(cr, it->rip.rip, ClientRip::start_of_instruction);
+					newInstr->successors.push_back(
+						Instruction<ClientRip>::successor_t::branch(c));
+					relocs.push_back(relocEntryT(c, &newInstr->successors.back()));
+					break;
+				}
 				case Instruction<DirectRip>::successor_t::succ_call: {
 					ClientRip c(cr, it->rip.rip, ClientRip::start_of_instruction);
 					newInstr->successors.push_back(
-						Instruction<ClientRip>::successor_t(
-							Instruction<ClientRip>::successor_t::succ_type(
-								it->type),
-							c));
+						Instruction<ClientRip>::successor_t::call(c));
+					relocs.push_back(relocEntryT(c, &newInstr->successors.back()));
+					break;
+				}
+				case Instruction<DirectRip>::successor_t::succ_unroll: {
+					ClientRip c(cr, it->rip.rip, ClientRip::post_instr_generate);
+					newInstr->successors.push_back(
+						Instruction<ClientRip>::successor_t::unroll(c));
 					relocs.push_back(relocEntryT(c, &newInstr->successors.back()));
 					break;
 				}

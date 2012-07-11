@@ -34,10 +34,8 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			if (interesting.count(n))
 				continue;
 			bool isInteresting = false;
-			if ( n->fallThrough.second && interesting.count(n->fallThrough.second) )
-				isInteresting = true;
-			for (auto it = n->branches.begin(); !isInteresting && it != n->branches.end(); it++)
-				if (it->second && interesting.count(it->second))
+			for (auto it = n->successors.begin(); !isInteresting && it != n->successors.end(); it++)
+				if (it->instr && interesting.count(it->instr))
 					isInteresting = true;
 			if (isInteresting) {
 				interesting.insert(n);
@@ -54,11 +52,9 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			m.erase(it++);
 			continue;
 		}
-		if (n->fallThrough.second && !interesting.count(n->fallThrough.second))
-			n->fallThrough.second = NULL;
-		for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
-			if (it2->second && !interesting.count(it2->second))
-				it2->second = NULL;
+		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
+			if (it2->instr && !interesting.count(it2->instr))
+				it2->instr = NULL;
 		it++;
 	}
 }
@@ -75,15 +71,15 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 #include "cfgnode_tmpl.cpp"
 
 template <typename t> static void
-dumpCFGToDot(const std::set<_CFGNode<t> *> &roots, FILE *f)
+dumpCFGToDot(const std::set<Instruction<t> *> &roots, FILE *f)
 {
-	std::set<_CFGNode<t> *> allNodes;
+	std::set<Instruction<t> *> allNodes;
 	for (auto it = roots.begin(); it != roots.end(); it++)
 		enumerateCFG(*it, allNodes);
 
 	fprintf(f, "digraph {\n");
 	for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
-		_CFGNode<t> *n = *it;
+		Instruction<t> *n = *it;
 		fprintf(f, "n%p [label=\"%p\"", n, n);
 		if (roots.count(n))
 			fprintf(f, ", shape=box");
@@ -100,7 +96,7 @@ dumpCFGToDot(const std::set<_CFGNode<t> *> &roots, FILE *f)
 }
 
 template <typename t> static void
-dumpCFGToDot(const std::set<_CFGNode<t> *> &allNodes, const char *fname)
+dumpCFGToDot(const std::set<Instruction<t> *> &allNodes, const char *fname)
 {
 	FILE *f = fopen(fname, "w");
 	if (!f) {

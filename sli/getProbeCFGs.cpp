@@ -80,7 +80,7 @@ exploreForStartingRip(Oracle *oracle,
 			pendingAtCurrentDepth.pop_back();
 			if (out.count(vr))
 				continue;
-			CFGNode *node = CFGNode::forRip(oracle, vr);
+			CFGNode *node = CfgNodeForRip<VexRip>(oracle, vr);
 			if (!*targetNode)
 				*targetNode = node;
 			if (!node) {
@@ -129,7 +129,9 @@ exploreForStartingRip(Oracle *oracle,
 						       vr.name());
 				}
 			}
-			bool isLibraryCall = node->libraryFunction != LibraryFunctionTemplate::none;
+			bool isLibraryCall = false;
+			for (auto it = node->successors.begin(); it != node->successors.end(); it++)
+				isLibraryCall |= (it->calledFunction != LibraryFunctionTemplate::none);
 			if (depth < maxPathLength1) {
 				oracle->findPredecessors(vr, true,
 							 isLibraryCall,
@@ -194,28 +196,39 @@ initialExploration(Oracle *oracle, const DynAnalysisRip &targetRip,
 
 static bool
 selectEdgeForCycleBreak(CFGNode *start,
-			std::map<CFGNode *, std::set<CFGNode *> > &predecessorMap,
+			std::map<CFGNode *, std::set<std::pair<CFGNode *, int> > > &predecessorMap,
 			std::set<CFGNode *> &cycle_free,
-			CFGNode **edge_start, CFGNode **edge_end,
+			CFGNode **edge_start,
+			int *edge_idx,
 			int *discoveryDepth,
-			std::set<CFGNode *> &clean, std::set<CFGNode *> &path)
+			std::set<CFGNode *> &clean,
+			std::set<CFGNode *> &path)
 {
 	if (clean.count(start) || cycle_free.count(start))
 		return false;
 	assert(!path.count(start));
 	clean.insert(start);
 	path.insert(start);
-	std::set<CFGNode *> &predecessors(predecessorMap[start]);
+	std::set<std::pair<CFGNode *, int> > &predecessors(predecessorMap[start]);
 	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
-		if (path.count(*it)) {
-			*edge_start = *it;
-			*edge_end = start;
+		CFGNode *pred = it->first;
+		assert(it->second < (int)pred->successors.size());
+		CFGNode::successor_t *predEdge = &pred->successors[it->second];
+		assert(predEdge->instr == start);
+		if (path.count(pred)) {
+			*edge_start = pred;
+			*edge_idx = it->second;
 			*discoveryDepth = path.size();
 			return true;
 		}
-		if (selectEdgeForCycleBreak(*it, predecessorMap, cycle_free,
-					    edge_start, edge_end, discoveryDepth,
-					    clean, path))
+		if (selectEdgeForCycleBreak(pred,
+					    predecessorMap,
+					    cycle_free,
+					    edge_start,
+					    edge_idx,
+					    discoveryDepth,
+					    clean,
+					    path))
 			return true;
 	}
 	path.erase(start);
@@ -224,10 +237,10 @@ selectEdgeForCycleBreak(CFGNode *start,
 }
 static bool
 selectEdgeForCycleBreak(CFGNode *start,
-			std::map<CFGNode *, std::set<CFGNode *> > &predecessors,
+			std::map<CFGNode *, std::set<std::pair<CFGNode *, int> > > &predecessors,
 			std::set<CFGNode *> &cycle_free,
 			CFGNode **cycle_edge_start,
-			CFGNode **cycle_edge_end,
+			int *cycle_edge_end,
 			int *discoveryDepth)
 {
 	std::set<CFGNode *> clean;
@@ -240,109 +253,92 @@ selectEdgeForCycleBreak(CFGNode *start,
 
 static void
 unrollAndCycleBreak(std::set<CFGNode *> &instrs,
-		    const CFGNode *targetInstr,
+		    CFGNode *targetInstr,
 		    int maxPathLength)
 {
-	std::map<CFGNode *, std::set<CFGNode *> > predecessorMap;
-	std::set<CFGNode *> startNodes;
+	std::map<CFGNode *, std::set<std::pair<CFGNode *, int> > > predecessorMap;
 
 	for (auto it = instrs.begin(); it != instrs.end(); it++) {
 		CFGNode *n = *it;
-		if (n->fallThrough.second)
-			predecessorMap[n->fallThrough.second].insert(n);
-		for (auto it = n->branches.begin();
-		     it != n->branches.end();
-		     it++)
-			if (it->second)
-				predecessorMap[it->second].insert(n);
-		if (n == targetInstr)
-			startNodes.insert(n);
+		for (unsigned x = 0; x < n->successors.size(); x++)
+			if (n->successors[x].instr)
+				predecessorMap[n->successors[x].instr].insert(
+					std::pair<CFGNode *, int>(n, x));
 	}
-	assert(!startNodes.empty());
+	assert(instrs.count(targetInstr));
 
-	for (auto it = startNodes.begin(); it != startNodes.end(); it++) {
-		CFGNode *startNode = *it;
-		std::set<CFGNode *> cycle_free;
-		while (1) {
-			CFGNode *cycle_edge_start, *cycle_edge_end;
-			int discoveryDepth;
-			if (!selectEdgeForCycleBreak(startNode,
-						     predecessorMap,
-						     cycle_free,
-						     &cycle_edge_start,
-						     &cycle_edge_end,
-						     &discoveryDepth)) {
-				/* No cycles left in the graph.  Yay. */
-				break;
+	std::set<CFGNode *> cycle_free;
+	while (1) {
+		CFGNode *cycle_edge_start;
+		int cycle_edge_idx;
+		int discoveryDepth;
+		if (!selectEdgeForCycleBreak(targetInstr,
+					     predecessorMap,
+					     cycle_free,
+					     &cycle_edge_start,
+					     &cycle_edge_idx,
+					     &discoveryDepth)) {
+			/* No cycles left in the graph.  Yay. */
+			break;
+		}
+		assert(cycle_edge_idx < (int)cycle_edge_start->successors.size());
+		CFGNode *cycle_edge_end = cycle_edge_start->successors[cycle_edge_idx].instr;
+		assert(cycle_edge_end);
+		if (cycle_edge_start->rip == cycle_edge_end->rip)
+			dbg_break("break self-edge");
+		
+		/* Remove the dead edge before we duplicate incoming
+		 * edges.  This only makes a difference for
+		 * self-edges.  In the case of self-edges, it's to not
+		 * duplicate the edge we just killed into the new
+		 * node, because that leads to an exponential blow-up
+		 * in edges which are just going to get removed later
+		 * on anyway. */
+		predecessorMap[cycle_edge_end].erase(std::pair<CFGNode *, int>(cycle_edge_start, cycle_edge_idx));
+		cycle_edge_start->successors[cycle_edge_idx].instr = NULL;
+
+		if (discoveryDepth < maxPathLength) {
+			/* The edge from cycle_edge_start to
+			   cycle_edge_end closes a cycle, and we want
+			   to get rid of that cycle.  We do so by
+			   duplicating cycle_edge_start along with all
+			   of its *incoming* edges, plus the one edge
+			   to cycle_edge_end.  We then remove
+			   cycle_edge_end from the old node's outgoing
+			   list.  The effect is that the old node is
+			   no longer on the cycle.  The new node is
+			   part of a cycle, but it's a cycle further
+			   from the start node, and so if we iterate
+			   long enough the cycle will eventually be
+			   broken by maxPathLength. */
+			CFGNode *new_node;
+			/* Create new node */
+			new_node = cycle_edge_start->dupe();
+			
+			/* Maintain only edge to cycle_edge_end */
+			new_node->successors.clear();
+			CFGNode::successor_t succ = cycle_edge_start->successors[cycle_edge_idx];
+			new_node->successors.push_back(succ);
+			predecessorMap[cycle_edge_end].insert(std::pair<CFGNode *, int>(new_node, 0));
+			
+			/* Clone all the incoming edges */
+			std::set<std::pair<CFGNode *, int> > &oldNodePredecessors(predecessorMap[cycle_edge_start]);
+			std::set<std::pair<CFGNode *, int> > &newNodePredecessors(predecessorMap[new_node]);
+			for (auto it = oldNodePredecessors.begin();
+			     it != oldNodePredecessors.end();
+			     it++) {
+				CFGNode *pred = it->first;
+				pred->successors.push_back(
+					CFGNode::successor_t::unroll(new_node));
+				newNodePredecessors.insert(
+					std::pair<CFGNode *, int>(
+						pred,
+						pred->successors.size() - 1));
 			}
-			if (cycle_edge_start->my_rip == cycle_edge_end->my_rip)
-				dbg_break("break self-edge");
-
-			/* Remove the dead edge before we duplicate
-			 * incoming edges.  This only makes a
-			 * difference for self-edges.  In the case of
-			 * self-edges, it's to not duplicate the edge
-			 * we just killed into the new node, because
-			 * that leads to an exponential blow-up in
-			 * edges which are just going to get removed
-			 * later on anyway. */
-			if (cycle_edge_start->fallThrough.second == cycle_edge_end) {
-				cycle_edge_start->fallThrough.second = NULL;
-			} else {
-				for (auto it = cycle_edge_start->branches.begin();
-				     it != cycle_edge_start->branches.end();
-				     it++) {
-					if (it->second == cycle_edge_end) {
-						it->second = NULL;
-						break;
-					}
-				}
-			}
-			predecessorMap[cycle_edge_end].erase(cycle_edge_start);
-
-			if (discoveryDepth < maxPathLength) {
-				/* The edge from cycle_edge_start to
-				   cycle_edge_end closes a cycle, and
-				   we want to get rid of that cycle.
-				   We do so by duplicating
-				   cycle_edge_start along with all of
-				   its *incoming* edges, plus the one
-				   edge to cycle_edge_end.  We then
-				   remove cycle_edge_end from the old
-				   node's outgoing list.  The effect
-				   is that the old node is no longer
-				   on the cycle.  The new node is part
-				   of a cycle, but it's a cycle
-				   further from the start node, and so
-				   if we iterate long enough the cycle
-				   will eventually be broken by
-				   maxPathLength. */
-				CFGNode *new_node;
-				/* Create new node */
-				new_node = new CFGNode(cycle_edge_start->my_rip,
-						       cycle_edge_start->libraryFunction);
-				/* Maintain the edge to cycle_edge_end */
-				new_node->fallThrough.first = cycle_edge_end->my_rip;
-				new_node->fallThrough.second = cycle_edge_end;
-				predecessorMap[cycle_edge_end].insert(new_node);
-
-				/* Clone all the incoming edges */
-				std::set<CFGNode *> &oldNodePredecessors(predecessorMap[cycle_edge_start]);
-				std::set<CFGNode *> &newNodePredecessors(predecessorMap[new_node]);
-				for (auto it = oldNodePredecessors.begin();
-				     it != oldNodePredecessors.end();
-				     it++) {
-					CFGNode *pred = *it;
-					pred->branches.push_back(
-						CFGNode::successor_t(new_node->my_rip, new_node));
-					newNodePredecessors.insert(pred);
-				}
-
-				instrs.insert(new_node);
-			}
+			
+			instrs.insert(new_node);
 		}
 	}
-		
 }
 
 /* Find any nodes in @nodes which:
@@ -381,13 +377,10 @@ trimExcessNodes(Oracle *oracle,
 			CFGNode *n = *it;
 			int distance;
 			distance = distanceToTargetInstr[n];
-			if (n->fallThrough.second &&
-			    distance > distanceToTargetInstr[n->fallThrough.second] + 1)
-				distance = distanceToTargetInstr[n->fallThrough.second] + 1;
-			for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
-				if ( it2->second &&
-				     distance > distanceToTargetInstr[it2->second] + 1)
-					distance = distanceToTargetInstr[it2->second] + 1;
+			for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
+				if ( it2->instr &&
+				     distance > distanceToTargetInstr[it2->instr] + 1)
+					distance = distanceToTargetInstr[it2->instr] + 1;
 			if (!progress && distanceToTargetInstr[n] != distance)
 				progress = true;
 			distanceToTargetInstr[n] = distance;
@@ -398,7 +391,7 @@ trimExcessNodes(Oracle *oracle,
 	std::set<CFGNode *> pending;
 	for (auto it = nodes.begin(); it != nodes.end(); it++) {
 		CFGNode *n = *it;
-		if (oracle->isFunctionHead(n->my_rip))
+		if (oracle->isFunctionHead(n->rip))
 			pending.insert(n);
 	}
 	while (!pending.empty()) {
@@ -406,11 +399,9 @@ trimExcessNodes(Oracle *oracle,
 		for (auto it = pending.begin(); it != pending.end(); it++) {
 			CFGNode *n = *it;
 			if (reachableFromFunctionHead.insert(n).second) {
-				if (n->fallThrough.second)
-					newPending.insert(n->fallThrough.second);
-				for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
-					if (it2->second)
-						newPending.insert(it2->second);
+				for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
+					if (it2->instr)
+						newPending.insert(it2->instr);
 			}
 		}
 		pending = newPending;
@@ -456,13 +447,11 @@ trimExcessNodes(Oracle *oracle,
 		if (nodesToKill.count(n)) {
 			nodes.erase(it++);
 		} else {
-			if (n->fallThrough.second && nodesToKill.count(n->fallThrough.second))
-				n->fallThrough.second = NULL;
-			for (auto it2 = n->branches.begin();
-			     it2 != n->branches.end();
+			for (auto it2 = n->successors.begin();
+			     it2 != n->successors.end();
 			     it2++) {
-				if (it2->second && nodesToKill.count(it2->second))
-					it2->second = NULL;
+				if (it2->instr && nodesToKill.count(it2->instr))
+					it2->instr = NULL;
 			}
 			it++;
 		}
@@ -486,11 +475,9 @@ distanceToTrueInstr(const CFGNode *n, const CFGNode *targetInstr)
 				return depth;
 			if (!successors.insert(n).second)
 				continue;
-			for (auto it = n->branches.begin(); it != n->branches.end(); it++)
-				if (it->second)
-					pendingAtNextDepth.push(it->second);
-			if (n->fallThrough.second)
-				pendingAtNextDepth.push(n->fallThrough.second);
+			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+				if (it->instr)
+					pendingAtNextDepth.push(it->instr);
 		}
 		pendingAtCurrentDepth = pendingAtNextDepth;
 		depth++;
@@ -513,11 +500,9 @@ removeReachable(std::set<CFGNode *> &out, const CFGNode *n)
 			/* Already not-present */
 			continue;
 		}
-		if (n->fallThrough.second)
-			pending.push_back(n->fallThrough.second);
-		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
-			if (it->second)
-				pending.push_back(it->second);
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+			if (it->instr)
+				pending.push_back(it->instr);
 	}
 }
 
@@ -550,12 +535,10 @@ findRoots(const std::set<CFGNode *> &allNodes,
 		printf("findRoots():\n");
 		for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
 			printf("\t%p -> ", *it);
-			if ((*it)->fallThrough.second)
-				printf("%p, ", (*it)->fallThrough.second);
-			for (auto it2 = (*it)->branches.begin();
-			     it2 != (*it)->branches.end();
+			for (auto it2 = (*it)->successors.begin();
+			     it2 != (*it)->successors.end();
 			     it2++)
-				printf("%p, ", it2->second);
+				printf("%p, ", it2->instr);
 			printf("\n");
 		}
 	}
@@ -568,18 +551,12 @@ findRoots(const std::set<CFGNode *> &allNodes,
 	     it != allNodes.end();
 	     it++) {
 		CFGNode *n = *it;
-		if (n->fallThrough.second) {
-			newRoots.erase(n->fallThrough.second);
-			if (debug_find_roots)
-				printf("%p is not a root because of %p\n", n->fallThrough.second,
-				       n);
-		}
-		for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
-			if (it2->second) {
+		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
+			if (it2->instr) {
 				if (debug_find_roots)
 					printf("%p is not a root because of %p\n",
-					       it2->second, n);
-				newRoots.erase(it2->second);
+					       it2->instr, n);
+				newRoots.erase(it2->instr);
 			}
 	}
 

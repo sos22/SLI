@@ -5,6 +5,7 @@
 
 #include "libvex_ir.h"
 #include "libvex_guest_offsets.h"
+#include "library.hpp"
 
 #include <set>
 #include <map>
@@ -110,35 +111,80 @@ class Instruction : public GarbageCollected<Instruction<ripType> > {
 	void immediate(unsigned size, AddressSpace *as);
 	int modrmExtension(AddressSpace *as);
 	Instruction() : modrm_start(-1) {}
+public:
 	void addBranch(const ripType &r) {
-		successors.push_back(successor_t(successor_t::succ_branch, r));
+		successors.push_back(successor_t::branch(r));
 	}
 	void addCall(const ripType &r) {
-		successors.push_back(successor_t(successor_t::succ_call, r));
+		successors.push_back(successor_t::call(r));
 	}
-	void addDefault(const ripType &r) {
+	void addDefault(const ripType &r, LibraryFunctionType t = LibraryFunctionTemplate::none) {
 		assert(!getDefault());
-		successors.push_back(successor_t(successor_t::succ_default, r));
+		successors.push_back(successor_t::dflt(r, t));
 	}
-public:
 	Instruction *addDefault(Instruction *r) {
 		assert(!getDefault());
-		successors.push_back(successor_t(successor_t::succ_default, r));
+		successors.push_back(successor_t::dflt(r));
+		return r;
+	}
+	Instruction *addBranch(Instruction *r) {
+		successors.push_back(successor_t::branch(r));
 		return r;
 	}
 	Instruction(int _modrm_start) : modrm_start(_modrm_start) { successors.reserve(2); }
 	ripType rip;
 
-	struct successor_t {
-		enum succ_type { succ_default, succ_branch, succ_call } type;
+	class successor_t {
+	public:
+		enum succ_type { succ_default, succ_branch, succ_call, succ_unroll };
+	private:
+		successor_t(succ_type _type,
+			    const ripType &_rip,
+			    Instruction *_instr,
+			    LibraryFunctionType _calledFunction)
+			: type(_type), rip(_rip), instr(_instr),
+			  calledFunction(_calledFunction)
+		{}
+	public:
+		succ_type type;
 		ripType rip;
 		Instruction *instr;
-		successor_t(succ_type _type, const ripType &_rip)
-			: type(_type), rip(_rip), instr(NULL)
-		{}
-		successor_t(succ_type _type, Instruction *_instr)
-			: type(_type), rip(), instr(_instr)
-		{}
+		LibraryFunctionType calledFunction;
+		static successor_t call(const ripType _rip)
+		{
+			return successor_t(succ_call, _rip,
+					   NULL, LibraryFunctionTemplate::none);
+		}
+		static successor_t branch(const ripType _rip)
+		{
+			return successor_t(succ_branch, _rip, NULL,
+					   LibraryFunctionTemplate::none);
+		}
+		static successor_t branch(Instruction *i)
+		{
+			return successor_t(succ_branch, ripType(), i,
+					   LibraryFunctionTemplate::none);
+		}
+		static successor_t dflt(const ripType _rip, LibraryFunctionType _calledFunction = LibraryFunctionTemplate::none)
+		{
+			return successor_t(succ_default, _rip, NULL,
+					   _calledFunction);
+		}
+		static successor_t dflt(Instruction *i)
+		{
+			return successor_t(succ_default, ripType(), i,
+					   LibraryFunctionTemplate::none);
+		}
+		static successor_t unroll(Instruction *i)
+		{
+			return successor_t(succ_unroll, ripType(), i,
+					   LibraryFunctionTemplate::none);
+		}
+		static successor_t unroll(const ripType &_rip)
+		{
+			return successor_t(succ_unroll, _rip, NULL,
+					   LibraryFunctionTemplate::none);
+		}
 	};
 	std::vector<successor_t> successors;
 
@@ -166,6 +212,12 @@ public:
 
 	bool useful;
 
+	Instruction *dupe()
+	{
+		Instruction *w = new Instruction();
+		*w = *this;
+		return w;
+	}
 	static Instruction<ripType> *decode(AddressSpace *as,
 					    ripType rip,
 					    CFG<ripType> *cfg);
@@ -175,6 +227,8 @@ public:
 	void emitDword(unsigned);
 	void emitQword(unsigned long);
 	void emitModrm(const ModRM &mrm, RegisterOrOpcodeExtension reg);
+
+	void prettyPrint(FILE *f) const;
 
 	void visit(HeapVisitor &hv) {
 		visit_container(relocs, hv);
@@ -724,9 +778,7 @@ top:
 	case 0xff: /* Group 5 */
 		if (i->modrmExtension(as) == 2) {
 			i->successors.push_back(
-				Instruction<r>::successor_t(
-					Instruction<r>::successor_t::succ_call,
-					r()));
+				Instruction<r>::successor_t::call(r()));
 		}
 		i->_modrm(0, as);
 		break;
@@ -1518,6 +1570,41 @@ CFG<r>::print(FILE *f)
 		}
 		fprintf(f, "\n");
 	}
+}
+
+template <typename r> void
+Instruction<r>::prettyPrint(FILE *f) const
+{
+	fprintf(f, "instr(%s, %d bytes content, %s, %s, successors = {",
+		rip.name(),
+		len,
+		useful ? "useful" : "useless",
+		presentInPatch ? "in patch" : "not in patch");
+	for (auto it = successors.begin();
+	     it != successors.end();
+	     it++) {
+		if (it != successors.begin())
+			fprintf(f, ", ");
+		const char *t = NULL;
+		switch (it->type) {
+		case successor_t::succ_default:
+			t = "default";
+			break;
+		case successor_t::succ_branch:
+			t = "branch";
+			break;
+		case successor_t::succ_call:
+			t = "call";
+			break;
+		case successor_t::succ_unroll:
+			t = "unroll";
+			break;
+		}
+		fprintf(f, "%s:%s:%p", it->rip.name(), t, it->instr);
+		if (it->calledFunction != LibraryFunctionTemplate::none)
+			LibraryFunctionTemplate::pp(it->calledFunction, f);
+	}
+	fprintf(f, "}\n");
 }
 
 #endif /* !GENFIX_H__ */

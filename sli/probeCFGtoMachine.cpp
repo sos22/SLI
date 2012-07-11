@@ -73,12 +73,9 @@ ndChoiceState(StateMachineState **slot,
 static void
 getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 {
-	if (node->fallThrough.second &&
-	    node->fallThrough.first == vr)
-		targets.push_back(node->fallThrough.second);
-	for (auto it = node->branches.begin(); it != node->branches.end(); it++)
-		if (it->second && it->first == vr)
-			targets.push_back(it->second);
+	for (auto it = node->successors.begin(); it != node->successors.end(); it++)
+		if (it->rip == vr)
+			targets.push_back(it->instr);
 }
 
 static StateMachineState *
@@ -86,16 +83,25 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		       std::vector<reloc_t> &pendingRelocs,
 		       MemoryAccessIdentifierAllocator &mai)
 {
-	assert(cfgnode->fallThrough.second);
-	for (auto it = cfgnode->branches.begin(); it != cfgnode->branches.end(); it++)
-		assert(!it->second);
 	threadAndRegister rax(threadAndRegister::reg(tid, OFFSET_amd64_RAX, 0));
 	threadAndRegister arg1(threadAndRegister::reg(tid, OFFSET_amd64_RDI, 0));
 	threadAndRegister arg2(threadAndRegister::reg(tid, OFFSET_amd64_RSI, 0));
 	threadAndRegister arg3(threadAndRegister::reg(tid, OFFSET_amd64_RDX, 0));
-	SMBPtr<SMBState> end(Proxy(cfgnode->fallThrough.second));
+	CFGNode *fallThrough = NULL;
+	LibraryFunctionType lib = LibraryFunctionTemplate::none;
+	for (auto it = cfgnode->successors.begin(); it != cfgnode->successors.end(); it++) {
+		if (it->type == CFGNode::successor_t::succ_default) {
+			assert(!fallThrough);
+			fallThrough = it->instr;
+			lib = it->calledFunction;
+		}
+	}
+	if (lib == LibraryFunctionTemplate::none)
+		return NULL;
+	assert(fallThrough);
+	SMBPtr<SMBState> end(Proxy(fallThrough));
 	SMBPtr<SMBState> acc(NULL);
-	switch (cfgnode->libraryFunction) {
+	switch (lib) {
 	case LibraryFunctionTemplate::__cxa_atexit: {
 		acc = (!rax <<= smb_const64(0)) >> end;
 		break;
@@ -176,14 +182,14 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		break;
 	}
 	case LibraryFunctionTemplate::malloc: {
-		acc = (!rax <<= smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->my_rip), true))) >>
+		acc = (!rax <<= smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->rip), true))) >>
 			(AssertFalse(smb_expr(IRExpr_Unop(Iop_BadPtr, IRExpr_Get(rax, Ity_I64)))) >> end);
 		break;
 	}
 	case LibraryFunctionTemplate::free: {
 		acc = end;
 		for (int i = 0; i < 8; i++) {
-			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->my_rip), false)));
+			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->rip), false)));
 			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
 				acc;
 		}
@@ -221,7 +227,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	case LibraryFunctionTemplate::__stack_chk_fail:
 		return StateMachineUnreached::get();
 	case LibraryFunctionTemplate::time: {
-		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->my_rip), false)));
+		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->rip), false)));
 		acc = (!rax <<= fv) >> end;
 		If(smb_reg(arg1, Ity_I64) == smb_const64(0),
 		   acc,
@@ -232,13 +238,12 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		abort();
 	}
 	if (!acc.content) {
-		printf("Need to add support for library function %d (",
-		       (int)cfgnode->libraryFunction);
-		LibraryFunctionTemplate::pp(cfgnode->libraryFunction, stdout);
+		printf("Need to add support for library function %d (", (int)lib);
+		LibraryFunctionTemplate::pp(lib, stdout);
 		printf(")\n");
 		abort();
 	}
-	return acc.content->compile(ThreadRip(tid, cfgnode->my_rip), pendingRelocs, mai);
+	return acc.content->compile(ThreadRip(tid, cfgnode->rip), pendingRelocs, mai);
 }
 
 static void
@@ -322,10 +327,12 @@ cfgNodeToState(Oracle *oracle,
 	       MemoryAccessIdentifierAllocator &mai,
 	       std::vector<reloc_t> &pendingRelocs)
 {
-	ThreadRip tr(tid, target->my_rip);
+	ThreadRip tr(tid, target->rip);
 
-	if (target->libraryFunction)
-		return getLibraryStateMachine(target, tid, pendingRelocs, mai);
+	StateMachineState *root;
+	root = getLibraryStateMachine(target, tid, pendingRelocs, mai);
+	if (root)
+		return root;
 
 	IRSB *irsb;
 	try {
@@ -334,7 +341,6 @@ cfgNodeToState(Oracle *oracle,
 		return StateMachineUnreached::get();
 	}
 	std::set<CFGNode *> usedExits;
-	StateMachineState *root = NULL;
 	StateMachineState **cursor = &root;
 	int i;
 	for (i = 1; i < irsb->stmts_used && irsb->stmts[i]->tag != Ist_IMark; i++) {
@@ -355,7 +361,7 @@ cfgNodeToState(Oracle *oracle,
 					isp->data);
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					se,
 					NULL);
 			*cursor = smse;
@@ -376,7 +382,7 @@ cfgNodeToState(Oracle *oracle,
 					mai(tr));
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					se,
 					NULL);
 			*cursor = smse;
@@ -404,19 +410,19 @@ cfgNodeToState(Oracle *oracle,
 			IRExpr *t_expr = IRExpr_Get(tempreg, ty);
 			StateMachineSideEffecting *l5 =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
 						t_expr),
 					NULL);
 			StateMachineSideEffecting *l4 =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					StateMachineSideEffectEndAtomic::get(),
 					l5);
 			StateMachineState *l3 =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					new StateMachineSideEffectStore(
 						cas->addr,
 						cas->dataLo,
@@ -424,13 +430,13 @@ cfgNodeToState(Oracle *oracle,
 					l4);
 			StateMachineState *l2 =
 				new StateMachineBifurcate(
-					target->my_rip,
+					target->rip,
 					expr_eq(t_expr, cas->expdLo),
 					l3,
 					l4);
 			StateMachineState *l1 =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					new StateMachineSideEffectLoad(
 						tempreg,
 						cas->addr,
@@ -439,7 +445,7 @@ cfgNodeToState(Oracle *oracle,
 					l2);
 			StateMachineState *l0 =
 				new StateMachineSideEffecting (
-					target->my_rip,
+					target->rip,
 					StateMachineSideEffectStartAtomic::get(),
 					l1);
 			*cursor = l0;
@@ -476,7 +482,7 @@ cfgNodeToState(Oracle *oracle,
 			}
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					se,
 					NULL);
 			*cursor = smse;
@@ -491,7 +497,7 @@ cfgNodeToState(Oracle *oracle,
 			getTargets(target, stmt->dst.rip, targets);
 			StateMachineBifurcate *smb;
 			smb = new StateMachineBifurcate(
-				target->my_rip,
+				target->rip,
 				stmt->guard,
 				NULL,
 				NULL);
@@ -504,7 +510,7 @@ cfgNodeToState(Oracle *oracle,
 		case Ist_StartAtomic: {
 			StateMachineSideEffecting *s =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					StateMachineSideEffectStartAtomic::get(),
 					NULL);
 			*cursor = s;
@@ -514,7 +520,7 @@ cfgNodeToState(Oracle *oracle,
 		case Ist_EndAtomic: {
 			StateMachineSideEffecting *s =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					StateMachineSideEffectEndAtomic::get(),
 					NULL);
 			*cursor = s;
@@ -534,7 +540,7 @@ cfgNodeToState(Oracle *oracle,
 		   create a proxy state here. */
 		StateMachineSideEffecting *smp =
 			new StateMachineSideEffecting(
-				target->my_rip,
+				target->rip,
 				NULL,
 				NULL);
 		root = smp;
@@ -543,14 +549,14 @@ cfgNodeToState(Oracle *oracle,
 
 	assert(*cursor == NULL);
 
-	canonicaliseRbp(root, target->my_rip, oracle);
+	canonicaliseRbp(root, target->rip, oracle);
 
 	std::vector<CFGNode *> targets;
 	if (i == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Call) {
 			StateMachineSideEffecting *smp =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					new StateMachineSideEffectStartFunction(
 						IRExpr_Get(
 							threadAndRegister::reg(
@@ -562,11 +568,12 @@ cfgNodeToState(Oracle *oracle,
 			*cursor = smp;
 			cursor = &smp->target;
 			if (irsb->next_is_const &&
-			    target->fallThrough.second &&
-			    target->fallThrough.second->my_rip != irsb->next_const.rip) {
-				targets.push_back(target->fallThrough.second);
+			    target->getDefault() &&
+			    target->getDefault()->instr &&
+			    target->getDefault()->instr->rip != irsb->next_const.rip) {
+				targets.push_back(target->getDefault()->instr);
 				smp = new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					new StateMachineSideEffectEndFunction(
 						IRExpr_Get(
 							threadAndRegister::reg(
@@ -578,7 +585,7 @@ cfgNodeToState(Oracle *oracle,
 				*cursor = smp;
 				cursor = &smp->target;
 				smp = new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					new StateMachineSideEffectCopy(
 						threadAndRegister::reg(
 							tid,
@@ -600,7 +607,7 @@ cfgNodeToState(Oracle *oracle,
 		} else if (irsb->jumpkind == Ijk_Ret) {
 			StateMachineSideEffecting *smp =
 				new StateMachineSideEffecting(
-					target->my_rip,
+					target->rip,
 					new StateMachineSideEffectEndFunction(
 						IRExpr_Get(
 							threadAndRegister::reg(
@@ -616,15 +623,12 @@ cfgNodeToState(Oracle *oracle,
 		if (irsb->next_is_const) {
 			getTargets(target, irsb->next_const.rip, targets);
 		} else {
-			if (target->fallThrough.second &&
-			    !usedExits.count(target->fallThrough.second))
-				targets.push_back(target->fallThrough.second);
-			for (auto it = target->branches.begin();
-			     it != target->branches.end();
+			for (auto it = target->successors.begin();
+			     it != target->successors.end();
 			     it++)
-				if (it->second &&
-				    !usedExits.count(it->second))
-					targets.push_back(it->second);
+				if (it->instr &&
+				    !usedExits.count(it->instr))
+					targets.push_back(it->instr);
 		}
 	} else {
 		IRStmtIMark *mark = (IRStmtIMark *)irsb->stmts[i];
@@ -737,9 +741,9 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations) {
-			if (DynAnalysisRip(e->my_rip) == proximalRip) {
+			if (DynAnalysisRip(e->rip) == proximalRip) {
 				return getProximalCause(oracle->ms,
-							ThreadRip(tid, e->my_rip),
+							ThreadRip(tid, e->rip),
 							mai);
 			} else {
 				return cfgNodeToState(oracle, tid, e, false, mai, pendingRelocations);
@@ -783,7 +787,7 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 	doOne.mai = &mai;
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<std::pair<unsigned, VexRip> > origin;
-	origin.push_back(std::pair<unsigned, VexRip>(tid, root->my_rip));
+	origin.push_back(std::pair<unsigned, VexRip>(tid, root->rip));
 	StateMachine *sm = new StateMachine(performTranslation(results, root, oracle, tid, doOne),
 					    origin);
 

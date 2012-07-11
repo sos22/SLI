@@ -3,13 +3,13 @@
 namespace cfgnode_tmpl {
 
 template <typename t> static void
-resolveReferences(const std::map<t, _CFGNode<t> *> &m, _CFGNode<t> *what)
+resolveReferences(const std::map<t, Instruction<t> *> &m, Instruction<t> *what)
 {
 	assert(what);
 
 	struct {
 		const std::map<t, CFGNode *> *m;
-		CFGNode *operator()(const t &vr) {
+		Instruction<t> *operator()(const t &vr) {
 			if (!vr.isValid())
 				return NULL;
 			auto it = m->find(vr);
@@ -20,13 +20,12 @@ resolveReferences(const std::map<t, _CFGNode<t> *> &m, _CFGNode<t> *what)
 		}
 	} resolveBranch = {&m};
 
-	what->fallThrough.second = resolveBranch(what->fallThrough.first);
-	for (auto it = what->branches.begin(); it != what->branches.end(); it++)
-		it->second = resolveBranch(it->first);
+	for (auto it = what->successors.begin(); it != what->successors.end(); it++)
+		it->instr = resolveBranch(it->rip);
 }
 
 template <typename t> static void
-resolveReferences(std::map<t, _CFGNode<t> *> &m)
+resolveReferences(std::map<t, Instruction<t> *> &m)
 {
 	if (TIMEOUT)
 		return;
@@ -35,28 +34,26 @@ resolveReferences(std::map<t, _CFGNode<t> *> &m)
 }
 
 template <typename t> static void
-enumerateCFG(_CFGNode<t> *start, std::set<_CFGNode<t> *> &out)
+enumerateCFG(Instruction<t> *start, std::set<Instruction<t> *> &out)
 {
-	std::vector<_CFGNode<t> *> pending;
+	std::vector<Instruction<t> *> pending;
 	pending.push_back(start);
 	while (!pending.empty()) {
-		_CFGNode<t> *n = pending.back();
+		Instruction<t> *n = pending.back();
 		pending.pop_back();
 		if (!out.insert(n).second)
 			continue;
-		if (n->fallThrough.second)
-			pending.push_back(n->fallThrough.second);
-		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
-			if (it->second)
-				pending.push_back(it->second);
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+			if (it->instr)
+				pending.push_back(it->instr);
 	}
 }
 
 template <typename t> static void
-printCFG(const _CFGNode<t> *cfg, FILE *f)
+printCFG(const Instruction<t> *cfg, FILE *f)
 {
-	std::vector<const _CFGNode<t> *> pending;
-	std::set<const _CFGNode<t> *> done;
+	std::vector<const Instruction<t> *> pending;
+	std::set<const Instruction<t> *> done;
 
 	pending.push_back(cfg);
 	while (!pending.empty()) {
@@ -66,13 +63,11 @@ printCFG(const _CFGNode<t> *cfg, FILE *f)
 			continue;
 		fprintf(f, "%p: ", cfg);
 		cfg->prettyPrint(f);
-		if (cfg->fallThrough.second)
-			pending.push_back(cfg->fallThrough.second);
-		for (auto it = cfg->branches.begin();
-		     it != cfg->branches.end();
+		for (auto it = cfg->successors.begin();
+		     it != cfg->successors.end();
 		     it++)
-			if (it->second)
-				pending.push_back(it->second);
+			if (it->instr)
+				pending.push_back(it->instr);
 		done.insert(cfg);
 	}
 }
@@ -80,43 +75,40 @@ printCFG(const _CFGNode<t> *cfg, FILE *f)
 /* End of namespace cfgnode_tmpl */
 }
 
-template <typename t> _CFGNode<t> *
-_CFGNode<t>::forRip(Oracle *oracle, const VexRip &vr)
+template <typename t> Instruction<t> *
+CfgNodeForRip(Oracle *oracle, const VexRip &vr)
 {
 	IRSB *irsb = oracle->getIRSBForRip(vr);
 	if (!irsb)
 		return NULL;
-	_CFGNode *work = new _CFGNode(vr, LibraryFunctionTemplate::none);
+	Instruction<t> *work = new Instruction<t>(-1);
+	work->rip = vr;
 	int x;
 	for (x = 1; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 		if (irsb->stmts[x]->tag == Ist_Exit)
-			work->branches.push_back(
-				_CFGNode::successor_t(((IRStmtExit *)irsb->stmts[x])->dst.rip,
-						     NULL));
+			work->addBranch(((IRStmtExit *)irsb->stmts[x])->dst.rip);
 	}
 	if (x == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Ret) {
-			work->fallThrough.first = vr;
-			work->fallThrough.first.rtrn();
+			VexRip r(vr);
+			r.rtrn();
+			work->addDefault(r);
 		} else if (irsb->jumpkind == Ijk_Call) {
 			if (irsb->next_is_const) {
 				if (oracle->isPltCall(irsb->next_const.rip)) {
-					work->libraryFunction = oracle->identifyLibraryCall(irsb->next_const.rip);
-					work->fallThrough.first = extract_call_follower(irsb);
+					LibraryFunctionType tmpl = oracle->identifyLibraryCall(irsb->next_const.rip);
+					work->addDefault(extract_call_follower(irsb), tmpl);
 				} else {
-					work->branches.push_back(
-						_CFGNode::successor_t(irsb->next_const.rip,
-								     NULL));
+					work->addCall(irsb->next_const.rip);
 				}
 			} else {
 				std::vector<VexRip> b;
 				oracle->getInstrCallees(vr, b);
 				for (auto it = b.begin(); it != b.end(); it++)
-					work->branches.push_back(
-						_CFGNode::successor_t(*it, NULL));
+					work->addCall(*it);
 			}
 		} else if (irsb->next_is_const) {
-			work->fallThrough.first = irsb->next_const.rip;
+			work->addDefault(irsb->next_const.rip);
 		} else {
 			/* Note that the oracle has a slightly
 			   different idea of fall-throughs to
@@ -127,36 +119,35 @@ _CFGNode<t>::forRip(Oracle *oracle, const VexRip &vr)
 			std::vector<VexRip> b;
 			oracle->getInstrFallThroughs(vr, b);
 			for (auto it = b.begin(); it != b.end(); it++)
-				work->branches.push_back(
-					_CFGNode::successor_t(*it, NULL));
+				work->addBranch(*it);
 		}
 	} else {
 		assert(irsb->stmts[x]->tag == Ist_IMark);
-		work->fallThrough.first = ((IRStmtIMark *)irsb->stmts[x])->addr.rip;
+		work->addDefault(((IRStmtIMark *)irsb->stmts[x])->addr.rip);
 	}
 	return work;
 }
 
 template <typename t> void
-resolveReferences(const std::map<t, _CFGNode<t> *> &m, _CFGNode<t> *what)
+resolveReferences(const std::map<t, Instruction<t> *> &m, Instruction<t> *what)
 {
 	cfgnode_tmpl::resolveReferences(m, what);
 }
 
 template <typename t> void
-resolveReferences(std::map<t, _CFGNode<t> *> &m)
+resolveReferences(std::map<t, Instruction<t> *> &m)
 {
 	cfgnode_tmpl::resolveReferences(m);
 }
 
 template <typename t> void
-printCFG(const _CFGNode<t> *cfg, FILE *f)
+printCFG(const Instruction<t> *cfg, FILE *f)
 {
 	cfgnode_tmpl::printCFG(cfg, f);
 }
 
 template <typename t> void
-enumerateCFG(_CFGNode<t> *start, std::set<_CFGNode<t> *> &out)
+enumerateCFG(Instruction<t> *start, std::set<Instruction<t> *> &out)
 {
 	return cfgnode_tmpl::enumerateCFG(start, out);
 }
