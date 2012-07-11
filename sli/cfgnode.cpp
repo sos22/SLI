@@ -75,9 +75,9 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 #include "cfgnode_tmpl.cpp"
 
 void
-dumpCFGToDot(const std::set<CFGNode *> &allNodes, const char *fname, bool useTheseRoots)
+dumpCFGToDot(const std::set<CFGNode *> &allNodes, const char *fname)
 {
-	cfgnode_tmpl::dumpCFGToDot(allNodes, fname, useTheseRoots);
+	cfgnode_tmpl::dumpCFGToDot(allNodes, fname);
 }
 
 

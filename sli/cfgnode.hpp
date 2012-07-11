@@ -9,7 +9,6 @@ class Oracle;
 template <typename key_type = VexRip>
 class _CFGNode : public GarbageCollected<_CFGNode<key_type>, &ir_heap>, public PrettyPrintable {
 public:
-	enum flavour_t { true_target_instr, dupe_target_instr, ordinary_instr } flavour;
 	struct successor_t : public std::pair<key_type, _CFGNode<key_type> *> {
 		void prettyPrint(FILE *f) const {
 			fprintf(f, "%s(%p)", this->first.name(), this->second);
@@ -28,16 +27,13 @@ public:
 	key_type my_rip;
 
 	_CFGNode(const key_type &rip,
-		flavour_t _flavour,
-		LibraryFunctionType _libraryFunction)
-		: flavour(_flavour),
-		  libraryFunction(_libraryFunction),
+		 LibraryFunctionType _libraryFunction)
+		: libraryFunction(_libraryFunction),
 		  my_rip(rip)
 	{}
 
 	_CFGNode *dupe() {
 		_CFGNode *r = new _CFGNode(my_rip,
-					   flavour == true_target_instr ? dupe_target_instr : flavour,
 					   libraryFunction);
 		r->fallThrough = fallThrough;
 		r->branches = branches;
@@ -69,10 +65,12 @@ public:
 			hv(it->second);
 	}
 
-	static _CFGNode *forRip(Oracle *oracle, const VexRip &vr, flavour_t flavour);
+	static _CFGNode *forRip(Oracle *oracle, const VexRip &vr);
 
 	NAMED_CLASS
 };
+
+enum cfgflavour_t { cfg_flavour_true, cfg_flavour_dupe, cfg_flavour_ordinary };
 
 typedef _CFGNode<VexRip> CFGNode;
 

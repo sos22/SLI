@@ -59,7 +59,8 @@ enumerateCFG(_CFGNode<t> *start, std::set<_CFGNode<t> *> &out)
 }
 
 template <typename t> static void
-trimUninterestingCFGNodes(std::set<_CFGNode<t> *> &roots)
+trimUninterestingCFGNodes(std::set<_CFGNode<t> *> &roots,
+			  const std::map<const _CFGNode<t> *, cfgflavour_t> &flavours)
 {
 	std::set<_CFGNode<t> *> interesting(roots);
 	std::set<_CFGNode<t> *> allCFGNodes;
@@ -73,8 +74,10 @@ trimUninterestingCFGNodes(std::set<_CFGNode<t> *> &roots)
 			if (interesting.count(n))
 				continue;
 			bool isInteresting = false;
-			if ( n->flavour == CFGNode::true_target_instr ||
-			     n->flavour == CFGNode::dupe_target_instr ||
+			auto fl_it = flavours.find(n);
+			assert(fl_it != flavours.end());
+			if ( fl_it->second == cfg_flavour_true ||
+			     fl_it->second == cfg_flavour_dupe ||
 			     (n->fallThrough.second && interesting.count(n->fallThrough.second)))
 				isInteresting = true;
 			for (auto it2 = n->branches.begin(); !isInteresting && it2 != n->branches.end(); it2++)
@@ -126,7 +129,7 @@ removeReachable(std::set<_CFGNode<t> *> &out, const std::set<_CFGNode<t> *> &roo
 }
 
 template <typename t> static int
-distanceToTrueInstr(const _CFGNode<t> *n)
+distanceToTrueInstr(const _CFGNode<t> *n, const std::map<const _CFGNode<t> *, cfgflavour_t> &flavours)
 {
 	std::set<const _CFGNode<t> *> successors;
 	std::queue<const _CFGNode<t> *> pendingAtCurrentDepth;
@@ -138,7 +141,9 @@ distanceToTrueInstr(const _CFGNode<t> *n)
 		while (!pendingAtCurrentDepth.empty()) {
 			const _CFGNode<t> *n = pendingAtCurrentDepth.front();
 			pendingAtCurrentDepth.pop();
-			if (n->flavour == CFGNode::true_target_instr)
+			auto it = flavours.find(n);
+			assert(it != flavours.end());
+			if (it->second == cfg_flavour_true)
 				return depth;
 			if (!successors.insert(n).second)
 				continue;
@@ -167,7 +172,9 @@ operator|=(std::set<t> &a, const std::set<t> &b)
    make @roots as small as possible, but ony guarantee to produce a
    minimal result if @m is acyclic. */
 template <typename t> static void
-findRoots(const std::set<_CFGNode<t> *> &allNodes, std::set<_CFGNode<t> *> &roots)
+findRoots(const std::set<_CFGNode<t> *> &allNodes,
+	  const std::map<const _CFGNode<t> *, cfgflavour_t> &cfgFlavours,
+	  std::set<_CFGNode<t> *> &roots)
 {
 	std::set<_CFGNode<t> *> currentlyUnrooted(allNodes);
 
@@ -228,10 +235,7 @@ findRoots(const std::set<_CFGNode<t> *> &allNodes, std::set<_CFGNode<t> *> &root
 		best_node = NULL;
 		best_distance = -1;
 		for (auto it = currentlyUnrooted.begin(); it != currentlyUnrooted.end(); it++) {
-			/* Shouldn't be any dupe nodes at this stage of the pipeline. */
-			assert((*it)->flavour != CFGNode::dupe_target_instr);
-
-			int n = distanceToTrueInstr(*it);
+			int n = distanceToTrueInstr(*it, cfgFlavours);
 			if (n > best_distance) {
 				best_distance = n;
 				best_node = *it;
@@ -269,16 +273,6 @@ dumpCFGToDot(const std::set<_CFGNode<t> *> &roots, FILE *f)
 		fprintf(f, "n%p [label=\"%p\"", n, n);
 		if (roots.count(n))
 			fprintf(f, ", shape=box");
-		switch (n->flavour) {
-		case CFGNode::true_target_instr:
-			fprintf(f, ", color=green");
-			break;
-		case CFGNode::dupe_target_instr:
-			fprintf(f, ", color=yellow");
-			break;
-		case CFGNode::ordinary_instr:
-			break;
-		}
 		fprintf(f, "]\n");
 		if (n->fallThrough.second)
 			fprintf(f, "n%p -> n%p [color=blue]\n", n, n->fallThrough.second);
@@ -292,20 +286,14 @@ dumpCFGToDot(const std::set<_CFGNode<t> *> &roots, FILE *f)
 }
 
 template <typename t> static void
-dumpCFGToDot(const std::set<_CFGNode<t> *> &allNodes, const char *fname, bool useTheseRoots)
+dumpCFGToDot(const std::set<_CFGNode<t> *> &allNodes, const char *fname)
 {
 	FILE *f = fopen(fname, "w");
 	if (!f) {
 		printf("can't open %s\n", fname);
 		return;
 	}
-	if (useTheseRoots) {
-		cfgnode_tmpl::dumpCFGToDot(allNodes, f);
-	} else {
-		std::set<_CFGNode<t> *> roots;
-		cfgnode_tmpl::findRoots(allNodes, roots);
-		cfgnode_tmpl::dumpCFGToDot(roots, f);
-	}
+	cfgnode_tmpl::dumpCFGToDot(allNodes, f);
 	fclose(f);
 }
 
@@ -321,19 +309,7 @@ printCFG(const _CFGNode<t> *cfg, FILE *f)
 		pending.pop_back();
 		if (done.count(cfg))
 			continue;
-		const char *flavour = (const char *)0xf001;
-		switch (cfg->flavour) {
-		case _CFGNode<t>::true_target_instr:
-			flavour = "true";
-			break;
-		case _CFGNode<t>::dupe_target_instr:
-			flavour = "dupe";
-			break;
-		case _CFGNode<t>::ordinary_instr:
-			flavour = "boring";
-			break;
-		}
-		fprintf(f, "%p(%s): ", cfg, flavour);
+		fprintf(f, "%p: ", cfg);
 		cfg->prettyPrint(f);
 		if (cfg->fallThrough.second)
 			pending.push_back(cfg->fallThrough.second);
@@ -350,12 +326,12 @@ printCFG(const _CFGNode<t> *cfg, FILE *f)
 }
 
 template <typename t> _CFGNode<t> *
-_CFGNode<t>::forRip(Oracle *oracle, const VexRip &vr, _CFGNode<t>::flavour_t flavour)
+_CFGNode<t>::forRip(Oracle *oracle, const VexRip &vr)
 {
 	IRSB *irsb = oracle->getIRSBForRip(vr);
 	if (!irsb)
 		return NULL;
-	_CFGNode *work = new _CFGNode(vr, flavour, LibraryFunctionTemplate::none);
+	_CFGNode *work = new _CFGNode(vr, LibraryFunctionTemplate::none);
 	int x;
 	for (x = 1; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 		if (irsb->stmts[x]->tag == Ist_Exit)
@@ -413,9 +389,9 @@ findRoots(const std::map<t, _CFGNode<t> *> &m, std::set<_CFGNode<t> *> &roots)
 }
 
 template <typename t> void
-findRoots(const std::set<_CFGNode<t> *> &allNodes, std::set<_CFGNode<t> *> &roots)
+findRoots(const std::set<_CFGNode<t> *> &allNodes, const std::map<const _CFGNode<t> *, cfgflavour_t> &cfgFlavours, std::set<_CFGNode<t> *> &roots)
 {
-	cfgnode_tmpl::findRoots(allNodes, roots);
+	cfgnode_tmpl::findRoots(allNodes, cfgFlavours, roots);
 }
 
 template <typename t> void
@@ -431,9 +407,10 @@ resolveReferences(std::map<t, _CFGNode<t> *> &m)
 }
 
 template <typename t> void
-trimUninterestingCFGNodes(std::set<_CFGNode<t> *> &roots)
+trimUninterestingCFGNodes(std::set<_CFGNode<t> *> &roots,
+			  const std::map<const _CFGNode<t> *, cfgflavour_t> &flavours)
 {
-	cfgnode_tmpl::trimUninterestingCFGNodes(roots);
+	cfgnode_tmpl::trimUninterestingCFGNodes(roots, flavours);
 }
 
 template <typename t> void
@@ -443,9 +420,9 @@ printCFG(const _CFGNode<t> *cfg, FILE *f)
 }
 
 template <typename t> void
-dumpCFGToDot(const std::set<_CFGNode<t> *> &allNodes, const char *fname, bool useTheseRoots)
+dumpCFGToDot(const std::set<_CFGNode<t> *> &allNodes, const char *fname)
 {
-	cfgnode_tmpl::dumpCFGToDot(allNodes, fname, useTheseRoots);
+	cfgnode_tmpl::dumpCFGToDot(allNodes, fname);
 }
 
 template <typename t> void
