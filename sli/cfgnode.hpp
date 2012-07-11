@@ -70,8 +70,6 @@ public:
 	NAMED_CLASS
 };
 
-enum cfgflavour_t { cfg_flavour_true, cfg_flavour_dupe, cfg_flavour_ordinary };
-
 typedef _CFGNode<VexRip> CFGNode;
 
 void getStoreCFGs(const std::set<DynAnalysisRip> &, Oracle *,

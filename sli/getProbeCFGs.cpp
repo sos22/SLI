@@ -11,9 +11,12 @@ namespace _getProbeCFGs {
 #ifdef NDEBUG
 #define debug_exploration 0
 #define debug_trim 0
+#define debug_find_roots 0
 #else
-static int debug_exploration = 0, debug_trim = 0;
+static int debug_exploration = 0, debug_trim = 0, debug_find_roots = 0;
 #endif
+
+enum cfgflavour_probe_t { cfgp_flavour_true, cfgp_flavour_ordinary };
 
 static void
 debug_dump(const VexRip &vr)
@@ -56,7 +59,7 @@ static bool
 exploreForStartingRip(Oracle *oracle,
 		      const VexRip &startingVexRip,
 		      std::map<VexRip, CFGNode *> &out,
-		      std::map<const CFGNode *, cfgflavour_t> &cfgFlavours,
+		      std::map<const CFGNode *, cfgflavour_probe_t> &cfgFlavours,
 		      std::set<VexRip> &newStartingRips,
 		      unsigned maxPathLength1,
 		      unsigned maxPathLength2)
@@ -68,7 +71,7 @@ exploreForStartingRip(Oracle *oracle,
 
 	if (debug_exploration)
 		printf("Exploring from %s...\n", startingVexRip.name());
-	cfgflavour_t flavour = cfg_flavour_true;
+	cfgflavour_probe_t flavour = cfgp_flavour_true;
 	pendingAtCurrentDepth.push_back(startingVexRip);
 	depth = 0;
 	while (depth < maxPathLength2) {
@@ -81,7 +84,7 @@ exploreForStartingRip(Oracle *oracle,
 				continue;
 			CFGNode *node = CFGNode::forRip(oracle, vr);
 			cfgFlavours[node] = flavour;
-			flavour = cfg_flavour_ordinary;
+			flavour = cfgp_flavour_ordinary;
 			if (!node) {
 				if (debug_exploration)
 					printf("\t\t%s doesn't exist?\n", vr.name());
@@ -161,7 +164,7 @@ exploreForStartingRip(Oracle *oracle,
 static void
 initialExploration(Oracle *oracle, const DynAnalysisRip &targetRip,
 		   std::map<VexRip, CFGNode *> &out,
-		   std::map<const CFGNode *, cfgflavour_t> &cfgFlavours,
+		   std::map<const CFGNode *, cfgflavour_probe_t> &cfgFlavours,
 		   unsigned maxPathLength1, unsigned maxPathLength2)
 {
 	std::set<VexRip> startingRips;
@@ -239,7 +242,7 @@ selectEdgeForCycleBreak(CFGNode *start,
 
 static void
 unrollAndCycleBreak(std::set<CFGNode *> &instrs,
-		    std::map<const CFGNode *, cfgflavour_t> &cfgFlavours,
+		    std::map<const CFGNode *, cfgflavour_probe_t> &cfgFlavours,
 		    int maxPathLength)
 {
 	std::map<CFGNode *, std::set<CFGNode *> > predecessorMap;
@@ -256,7 +259,7 @@ unrollAndCycleBreak(std::set<CFGNode *> &instrs,
 				predecessorMap[it->second].insert(n);
 		auto it_fl = cfgFlavours.find(n);
 		assert(it_fl != cfgFlavours.end());
-		if (it_fl->second == cfg_flavour_true)
+		if (it_fl->second == cfgp_flavour_true)
 			startNodes.insert(n);
 	}
 	assert(!startNodes.empty());
@@ -322,7 +325,7 @@ unrollAndCycleBreak(std::set<CFGNode *> &instrs,
 				/* Create new node */
 				new_node = new CFGNode(cycle_edge_start->my_rip,
 						       cycle_edge_start->libraryFunction);
-				cfgFlavours[new_node] = cfg_flavour_ordinary;
+				cfgFlavours[new_node] = cfgp_flavour_ordinary;
 				/* Maintain the edge to cycle_edge_end */
 				new_node->fallThrough.first = cycle_edge_end->my_rip;
 				new_node->fallThrough.second = cycle_edge_end;
@@ -361,7 +364,7 @@ unrollAndCycleBreak(std::set<CFGNode *> &instrs,
 static void
 trimExcessNodes(Oracle *oracle,
 		std::set<CFGNode *> &nodes,
-		const std::map<const CFGNode *, cfgflavour_t> &cfgFlavours,
+		const std::map<const CFGNode *, cfgflavour_probe_t> &cfgFlavours,
 		int maxPathLength)
 {
 	/* This is not an efficient algorithm for doing this.
@@ -372,7 +375,7 @@ trimExcessNodes(Oracle *oracle,
 		int v;
 		auto it_fl = cfgFlavours.find(n);
 		assert(it_fl != cfgFlavours.end());
-		if (it_fl->second == cfg_flavour_true)
+		if (it_fl->second == cfgp_flavour_true)
 			v = 0;
 		else
 			v = nodes.size();
@@ -473,6 +476,158 @@ trimExcessNodes(Oracle *oracle,
 	}
 }
 
+template <typename t> static int
+distanceToTrueInstr(const _CFGNode<t> *n, const std::map<const _CFGNode<t> *, cfgflavour_probe_t> &flavours)
+{
+	std::set<const _CFGNode<t> *> successors;
+	std::queue<const _CFGNode<t> *> pendingAtCurrentDepth;
+	int depth = 0;
+	pendingAtCurrentDepth.push(n);
+	while (1) {
+		std::queue<const _CFGNode<t> *> pendingAtNextDepth;
+		assert(pendingAtNextDepth.empty());
+		while (!pendingAtCurrentDepth.empty()) {
+			const _CFGNode<t> *n = pendingAtCurrentDepth.front();
+			pendingAtCurrentDepth.pop();
+			auto it = flavours.find(n);
+			assert(it != flavours.end());
+			if (it->second == cfgp_flavour_true)
+				return depth;
+			if (!successors.insert(n).second)
+				continue;
+			for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+				if (it->second)
+					pendingAtNextDepth.push(it->second);
+			if (n->fallThrough.second)
+				pendingAtNextDepth.push(n->fallThrough.second);
+		}
+		pendingAtCurrentDepth = pendingAtNextDepth;
+		depth++;
+	}
+	/* Can't reach any true instructions -> shouldn't happen. */
+	abort();
+}
+
+template <typename t> static void
+removeReachable(std::set<_CFGNode<t> *> &out, const _CFGNode<t> *n)
+{
+	std::vector<const _CFGNode<t> *> pending;
+	pending.push_back(n);
+	while (!pending.empty()) {
+		const _CFGNode<t> *n = pending.back();
+		pending.pop_back();
+		if (TIMEOUT)
+			return;
+		if (!out.erase(const_cast<CFGNode *>(n))) {
+			/* Already not-present */
+			continue;
+		}
+		if (n->fallThrough.second)
+			pending.push_back(n->fallThrough.second);
+		for (auto it = n->branches.begin(); it != n->branches.end(); it++)
+			if (it->second)
+				pending.push_back(it->second);
+	}
+}
+
+template <typename t> static void
+removeReachable(std::set<_CFGNode<t> *> &out, const std::set<_CFGNode<t> *> &roots)
+{
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		removeReachable(out, *it);
+}
+
+template <typename t> static void
+operator|=(std::set<t> &a, const std::set<t> &b)
+{
+	for (auto it = b.begin(); it != b.end(); it++)
+		a.insert(*it);
+}
+
+/* Populate @roots with nodes such that, for every node in @m, there
+   is a path from something in @roots which reaches @m.  We try to
+   make @roots as small as possible, but ony guarantee to produce a
+   minimal result if @m is acyclic. */
+template <typename t> static void
+findRoots(const std::set<_CFGNode<t> *> &allNodes,
+	  const std::map<const _CFGNode<t> *, cfgflavour_probe_t> &cfgFlavours,
+	  std::set<_CFGNode<t> *> &roots)
+{
+	std::set<_CFGNode<t> *> currentlyUnrooted(allNodes);
+
+	if (debug_find_roots) {
+		printf("findRoots():\n");
+		for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+			printf("\t%p -> ", *it);
+			if ((*it)->fallThrough.second)
+				printf("%p, ", (*it)->fallThrough.second);
+			for (auto it2 = (*it)->branches.begin();
+			     it2 != (*it)->branches.end();
+			     it2++)
+				printf("%p, ", it2->second);
+			printf("\n");
+		}
+	}
+
+	/* First rule: if something in @currentlyUnrooted cannot be
+	   reached from any node in @currentlyUnrooted then that node
+	   should definitely be a root. */
+	std::set<_CFGNode<t> *> newRoots = currentlyUnrooted;
+	for (auto it = allNodes.begin();
+	     it != allNodes.end();
+	     it++) {
+		_CFGNode<t> *n = *it;
+		if (n->fallThrough.second) {
+			newRoots.erase(n->fallThrough.second);
+			if (debug_find_roots)
+				printf("%p is not a root because of %p\n", n->fallThrough.second,
+				       n);
+		}
+		for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
+			if (it2->second) {
+				if (debug_find_roots)
+					printf("%p is not a root because of %p\n",
+					       it2->second, n);
+				newRoots.erase(it2->second);
+			}
+	}
+
+	if (debug_find_roots) {
+		printf("Basic root set: ");
+		for (auto it = newRoots.begin(); it != newRoots.end(); it++)
+			printf("%p, ", *it);
+		printf("\n");
+	}
+
+	removeReachable(currentlyUnrooted, newRoots);
+	roots |= newRoots;
+	while (!TIMEOUT && !currentlyUnrooted.empty()) {
+		/* Nasty case: everything in @currentlyUnrooted is
+		   part of a cycle in @currentlyUnrooted.  Try to grab
+		   something which is as far as possible away from the
+		   first true-flavoured instruction.  That tends to
+		   give us the most useful information. */
+		_CFGNode<t> *best_node;
+		int best_distance;
+		best_node = NULL;
+		best_distance = -1;
+		for (auto it = currentlyUnrooted.begin(); it != currentlyUnrooted.end(); it++) {
+			int n = distanceToTrueInstr(*it, cfgFlavours);
+			if (n > best_distance) {
+				best_distance = n;
+				best_node = *it;
+			}
+		}
+
+		if (debug_find_roots)
+			printf("Selected cycle-breaking root %p (%d)\n",
+			       best_node, best_distance);
+		assert(best_node != NULL);
+		roots.insert(best_node);
+		removeReachable(currentlyUnrooted, best_node);
+	}
+}
+
 static bool
 getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
 	    std::set<CFGNode *> &out, unsigned maxPathLength1,
@@ -484,7 +639,7 @@ getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
 	VexRip dominator;
 
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
-	std::map<const CFGNode *, cfgflavour_t> cfgFlavours;
+	std::map<const CFGNode *, cfgflavour_probe_t> cfgFlavours;
 	initialExploration(oracle, targetInstr, ripsToCFGNodes, cfgFlavours, maxPathLength1, maxPathLength2);
 
 	if (debug_exploration) {

@@ -31,6 +31,8 @@ debug_flags(mk_debug_flag)
 #undef debug_flags
 #undef mk_debug_flag
 
+enum cfgflavour_store_t { cfgs_flavour_true, cfgs_flavour_dupe, cfgs_flavour_ordinary };
+
 static void
 debug_dump(const VexRip &vr)
 {
@@ -67,7 +69,7 @@ debug_dump(const std::set<t> &what, const char *prefix)
 
 static void
 initialExploration(const std::set<DynAnalysisRip> &roots,
-		   std::map<const CFGNode *, cfgflavour_t> &flavours,
+		   std::map<const CFGNode *, cfgflavour_store_t> &flavours,
 		   unsigned maxPathLength,
 		   Oracle *oracle,
 		   std::map<VexRip, CFGNode *> &results)
@@ -119,7 +121,7 @@ top_exploration_iter:
 				it->second.first = item.first;
 
 				if (item.first == maxPathLength)
-					flavours[n] = cfg_flavour_true;
+					flavours[n] = cfgs_flavour_true;
 			} else {
 				/* We've already explored this at
 				   a better depth, so don't need to
@@ -135,9 +137,9 @@ top_exploration_iter:
 			continue;
 		}
 		if (item.first == maxPathLength)
-			flavours[work] = cfg_flavour_true;
+			flavours[work] = cfgs_flavour_true;
 		else
-			flavours[work] = cfg_flavour_ordinary;
+			flavours[work] = cfgs_flavour_ordinary;
 		if (item.first != 1) {
 			if (work->fallThrough.first.isValid())
 				pending.push(std::pair<unsigned, VexRip>(
@@ -381,7 +383,7 @@ template <typename t>
 class nodeLabellingMap : public std::map<_CFGNode<t> *, nodeLabelling<t> > {
 public:
 	nodeLabellingMap(std::set<_CFGNode<t> *> &roots,
-			 const std::map<const _CFGNode<t> *, cfgflavour_t> &cfgFlavours,
+			 const std::map<const _CFGNode<t> *, cfgflavour_store_t> &cfgFlavours,
 			 int maxPathLength);
 	void prettyPrint(FILE *f) const;
 };
@@ -449,7 +451,7 @@ nodeLabelling<t>::dead(int maxDepth) const
 
 template <typename t>
 nodeLabellingMap<t>::nodeLabellingMap(std::set<_CFGNode<t> *> &roots,
-				      const std::map<const _CFGNode<t> *, cfgflavour_t> &cfgFlavours,
+				      const std::map<const _CFGNode<t> *, cfgflavour_store_t> &cfgFlavours,
 				      int maxPathLength)
 {
 	std::queue<_CFGNode<t> *> pending;
@@ -466,7 +468,7 @@ nodeLabellingMap<t>::nodeLabellingMap(std::set<_CFGNode<t> *> &roots,
 				continue;
 			auto it_fl = cfgFlavours.find(n);
 			assert(it_fl != cfgFlavours.end());
-			if (it_fl->second == cfg_flavour_true)
+			if (it_fl->second == cfgs_flavour_true)
 				pending.push(n);
 			if (n->fallThrough.second)
 				p2.push(n->fallThrough.second);
@@ -484,9 +486,9 @@ nodeLabellingMap<t>::nodeLabellingMap(std::set<_CFGNode<t> *> &roots,
 		pending.pop();
 		auto it_fl = cfgFlavours.find(n);
 		assert(it_fl != cfgFlavours.end());
-		if (it_fl->second == cfg_flavour_true)
+		if (it_fl->second == cfgs_flavour_true)
 			(*this)[n].min_to[n] = 0;
-		assert(it_fl->second != cfg_flavour_dupe);
+		assert(it_fl->second != cfgs_flavour_dupe);
 		if (!n->fallThrough.second && n->branches.empty())
 			continue;
 		nodeLabellingComponent<t> exitMap((*this)[n].min_to);
@@ -505,7 +507,7 @@ nodeLabellingMap<t>::nodeLabellingMap(std::set<_CFGNode<t> *> &roots,
 			_CFGNode<t> *n = it->first;
 			auto it_fl = cfgFlavours.find(n);
 			assert(it_fl != cfgFlavours.end());
-			if (it_fl->second == cfg_flavour_true) {
+			if (it_fl->second == cfgs_flavour_true) {
 				if (!entryMap.count(n)) {
 					progress = true;
 					entryMap[n] = 0;
@@ -588,7 +590,7 @@ selectEdgeForCycleBreak(_CFGNode<t> *root, _CFGNode<t> **edge_start, _CFGNode<t>
    actually terminate. */
 template <typename t> static void
 performUnrollAndCycleBreak(std::set<_CFGNode<t> *> &roots,
-			   std::map<const _CFGNode<t> *, cfgflavour_t> &cfgFlavours,
+			   std::map<const _CFGNode<t> *, cfgflavour_store_t> &cfgFlavours,
 			   unsigned maxPathLength)
 {
 	nodeLabellingMap<t> nlm(roots, cfgFlavours, maxPathLength);
@@ -611,10 +613,10 @@ performUnrollAndCycleBreak(std::set<_CFGNode<t> *> &roots,
 				new_node = cycle_edge_end->dupe();
 				auto it_fl = cfgFlavours.find(cycle_edge_end);
 				assert(it_fl != cfgFlavours.end());
-				if (it_fl->second == cfg_flavour_true)
-					cfgFlavours[new_node] = cfg_flavour_dupe;
+				if (it_fl->second == cfgs_flavour_true)
+					cfgFlavours[new_node] = cfgs_flavour_dupe;
 				else
-					cfgFlavours[new_node] = cfg_flavour_ordinary;
+					cfgFlavours[new_node] = cfgs_flavour_ordinary;
 				nlm[new_node] = label;
 			}
 			if (cycle_edge_start->fallThrough.second == cycle_edge_end) {
@@ -644,7 +646,7 @@ performUnrollAndCycleBreak(std::set<_CFGNode<t> *> &roots,
    instructions which have a unique predecessor. */
 static void
 findRootsAndBacktrack(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
-		      std::map<const CFGNode *, cfgflavour_t> &flavours,
+		      std::map<const CFGNode *, cfgflavour_store_t> &flavours,
 		      std::set<CFGNode *> &roots,
 		      Oracle *oracle)
 {
@@ -652,7 +654,7 @@ findRootsAndBacktrack(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++) {
 		auto it_fl = flavours.find(it->second);
 		assert(it_fl != flavours.end());
-		if (it_fl->second == cfg_flavour_true)
+		if (it_fl->second == cfgs_flavour_true)
 			targetInstrs.insert(it->second);
 	}
 	std::set<CFGNode *> newNodes;
@@ -679,7 +681,7 @@ findRootsAndBacktrack(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 				CFGNode *work = CFGNode::forRip(oracle, predecessor);
 				if (!work)
 					break;
-				flavours[work] = cfg_flavour_ordinary;
+				flavours[work] = cfgs_flavour_ordinary;
 				ripsToCFGNodes[predecessor] = work;
 				newNodes.insert(work);
 				n = work;
@@ -691,12 +693,53 @@ findRootsAndBacktrack(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 		resolveReferences(ripsToCFGNodes, *it);
 }
 
+template <typename t> static void
+trimUninterestingCFGNodes(std::set<_CFGNode<t> *> &roots,
+			  const std::map<const _CFGNode<t> *, cfgflavour_store_t> &flavours)
+{
+	std::set<_CFGNode<t> *> interesting(roots);
+	std::set<_CFGNode<t> *> allCFGNodes;
+	for (auto it = roots.begin(); !TIMEOUT && it != roots.end(); it++)
+		cfgnode_tmpl::enumerateCFG(*it, allCFGNodes);
+	bool progress = true;
+	while (!TIMEOUT && progress) {
+		progress = false;
+		for (auto it = allCFGNodes.rbegin(); it != allCFGNodes.rend(); it++) {
+			_CFGNode<t> *n = *it;
+			if (interesting.count(n))
+				continue;
+			bool isInteresting = false;
+			auto fl_it = flavours.find(n);
+			assert(fl_it != flavours.end());
+			if ( fl_it->second == cfgs_flavour_true ||
+			     fl_it->second == cfgs_flavour_dupe ||
+			     (n->fallThrough.second && interesting.count(n->fallThrough.second)))
+				isInteresting = true;
+			for (auto it2 = n->branches.begin(); !isInteresting && it2 != n->branches.end(); it2++)
+				if (it2->second && interesting.count(it2->second))
+					isInteresting = true;
+			if (isInteresting) {
+				interesting.insert(n);
+				progress = true;
+			}
+		}
+	}
+	for (auto it = allCFGNodes.begin(); !TIMEOUT && it != allCFGNodes.end(); it++) {
+		_CFGNode<t> *n = *it;
+		if (n->fallThrough.second && !interesting.count(n->fallThrough.second))
+			n->fallThrough.second = NULL;
+		for (auto it2 = n->branches.begin(); it2 != n->branches.end(); it2++)
+			if (it2->second && !interesting.count(it2->second))
+				it2->second = NULL;
+	}
+}
+
 static void
 buildCFG(const std::set<DynAnalysisRip> &dyn_roots, unsigned maxPathLength,
 	 Oracle *oracle, std::set<CFGNode *> &roots)
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
-	std::map<const CFGNode *, cfgflavour_t> cfgFlavours;
+	std::map<const CFGNode *, cfgflavour_store_t> cfgFlavours;
 	initialExploration(dyn_roots, cfgFlavours, maxPathLength, oracle, ripsToCFGNodes);
 	if (TIMEOUT)
 		return;
