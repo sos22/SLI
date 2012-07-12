@@ -30,7 +30,7 @@ public:
 
 class AddExitCallPatch : public PatchFragment<ThreadRip> {
 protected:
-	void generateEpilogue(ThreadRip exitRip);
+	void generateEpilogue(const CfgLabel &l, ThreadRip exitRip);
 	/* XXX should really override emitInstruction here to catch
 	   indirect jmp and ret instructions; oh well. */
 public:
@@ -40,9 +40,9 @@ public:
 };
 
 void
-AddExitCallPatch::generateEpilogue(ThreadRip exitRip)
+AddExitCallPatch::generateEpilogue(const CfgLabel &l, ThreadRip exitRip)
 {
-	Instruction<ThreadRip> *i = Instruction<ThreadRip>::pseudo(exitRip);
+	Instruction<ThreadRip> *i = Instruction<ThreadRip>::pseudo(l, exitRip);
 
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
@@ -67,10 +67,11 @@ mkPatch(AddressSpace *as, struct CriticalSection *csects, unsigned nr_csects)
 		cfg->add_root(r, 50);
 		cfg->add_sink(csects[x].exit);
 	}
-	cfg->doit();
+	CfgLabelAllocator alloc;
+	cfg->doit(alloc);
 
 	PatchFragment<ThreadRip> *pf = new AddExitCallPatch(roots);
-	pf->fromCFG(cfg);
+	pf->fromCFG(alloc, cfg);
 
 	char *ign;
 	char *res = pf->asC("patch", &ign, &ign, &ign);

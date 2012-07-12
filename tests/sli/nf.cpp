@@ -122,16 +122,16 @@ build_truth_table(IRExpr *what, int nr_vars)
 }
 
 static void
-test_expression(IRExpr *what, int nr_vars)
+test_expression(IRExpr *what, const std::map<const CFGNode *, int> &labels, int nr_vars)
 {
 	truth_table reference = build_truth_table(what, nr_vars);
 	IRExpr *normed = disjunctive_normal_form(what);
 	truth_table alternate = build_truth_table(normed, nr_vars);
 	if (alternate != reference) {
 		printf("\nTest failed!\nPre:");
-		ppIRExpr(what, stdout);
+		ppIRExpr(what, labels, stdout);
 		printf("\nDNF: ");
-		ppIRExpr(normed, stdout);
+		ppIRExpr(normed, labels, stdout);
 		printf("\nTruth tables:\n");
 		for (int i = 0; i < (1 << nr_vars); i++) {
 			if (reference.results[i] == alternate.results[i])
@@ -155,6 +155,7 @@ test_at_size(int nr_vars)
 {
 	static internIRExprTable intern;
 	static std::set<IRExpr *> alreadyDone;
+	std::map<const CFGNode *, int> cfgLabels;
 
 	printf("Test with %d variables...\r", nr_vars);
 	for (int i = 0; i < (1 << nr_vars) * iters_per_test_size; i++) {
@@ -168,7 +169,7 @@ test_at_size(int nr_vars)
 			i--;
 			continue;
 		}
-		test_expression(e, nr_vars);
+		test_expression(e, cfgLabels, nr_vars);
 	}
 	printf("\n");
 }

@@ -454,9 +454,10 @@ private:
 	}
 
 	trool evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt);
-	bool evalSideEffect(StateMachine *sm, OracleInterface *oracle, EvalPathConsumer &consumer,
-			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
-			    const AllowableOptimisations &opt) __attribute__((warn_unused_result));
+	bool evalSideEffect(CfgDecode &decode, StateMachine *sm, OracleInterface *oracle,
+			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
+			    StateMachineSideEffect *smse, const AllowableOptimisations &opt)
+		__attribute__((warn_unused_result));
 
 
 	void advance_state_trace()
@@ -513,6 +514,7 @@ private:
 		esme_ignore_path
 	};
 	evalStateMachineSideEffectRes evalStateMachineSideEffect(
+		CfgDecode &decode,
 		StateMachine *thisMachine,
 		StateMachineSideEffect *smse,
 		bool useInitialMemoryValues,
@@ -523,19 +525,23 @@ private:
 	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const AllowableOptimisations &opt);
 
 public:
-	bool advance(OracleInterface *oracle, const AllowableOptimisations &opt,
+	bool advance(CfgDecode &decode,
+		     OracleInterface *oracle,
+		     const AllowableOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer) __attribute__((warn_unused_result));
 	enum smallStepResult { ssr_crash, ssr_survive, ssr_escape,
 			       ssr_ignore_path, ssr_failed, ssr_continue };
-	smallStepResult smallStepEvalStateMachine(StateMachine *rootMachine,
+	smallStepResult smallStepEvalStateMachine(CfgDecode &decode,
+						  StateMachine *rootMachine,
 						  NdChooser &chooser,
 						  bool useInitialMemoryValues,
 						  OracleInterface *oracle,
 						  const AllowableOptimisations &opt);
 	enum bigStepResult { bsr_crash, bsr_survive, bsr_failed };
-	bigStepResult bigStepEvalStateMachine(StateMachine *rootMachine,
+	bigStepResult bigStepEvalStateMachine(CfgDecode &decode,
+					      StateMachine *rootMachine,
 					      bigStepResult preferred_result,
 					      bool useInitialMemoryValues,
 					      NdChooser &chooser,
@@ -565,8 +571,8 @@ public:
 		  atomic(o.atomic),
 		  currentState(o.currentState)
 #ifndef NDEBUG
-		, statePath(o.statePath),
-		  stateLabels(o.stateLabels)
+		, statePath(o.statePath)
+		, stateLabels(o.stateLabels)
 #endif
 	{
 	}	
@@ -714,7 +720,8 @@ dereferencesBadPointerIf(IRExpr *e)
 }
 
 EvalContext::evalStateMachineSideEffectRes
-EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
+EvalContext::evalStateMachineSideEffect(CfgDecode &decode,
+					StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
 					bool useInitialMemoryValues,
 					NdChooser &chooser,
@@ -777,7 +784,7 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 				continue;
 			}
 
-			if (!oracle->memoryAccessesMightAlias(opt, smsel, smses))
+			if (!oracle->memoryAccessesMightAlias(decode, opt, smsel, smses))
 				continue;
 			if (evalExpressionsEqual(smses->addr, addr, chooser, opt)) {
 				satisfier = smses;
@@ -861,7 +868,8 @@ EvalContext::evalStateMachineSideEffect(StateMachine *thisMachine,
 /* Returns tr_true if we crash, tr_false if we survive, and tr_unknown
    if the machine isn't finished yet. */
 EvalContext::smallStepResult
-EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
+EvalContext::smallStepEvalStateMachine(CfgDecode &decode,
+				       StateMachine *rootMachine,
 				       NdChooser &chooser,
 				       bool useInitialMemoryValues,
 				       OracleInterface *oracle,
@@ -880,7 +888,8 @@ EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		evalStateMachineSideEffectRes res =
-			evalStateMachineSideEffect(rootMachine,
+			evalStateMachineSideEffect(decode,
+						   rootMachine,
 						   sme->sideEffect,
 						   useInitialMemoryValues,
 						   chooser,
@@ -915,7 +924,8 @@ EvalContext::smallStepEvalStateMachine(StateMachine *rootMachine,
 }
 
 EvalContext::bigStepResult
-EvalContext::bigStepEvalStateMachine(StateMachine *rootMachine,
+EvalContext::bigStepEvalStateMachine(CfgDecode &decode,
+				     StateMachine *rootMachine,
 				     bigStepResult preferred_result,
 				     bool useInitialMemoryValues,
 				     NdChooser &chooser,
@@ -924,7 +934,8 @@ EvalContext::bigStepEvalStateMachine(StateMachine *rootMachine,
 {
 	while (1) {
 		smallStepResult res =
-			smallStepEvalStateMachine(rootMachine,
+			smallStepEvalStateMachine(decode,
+						  rootMachine,
 						  chooser,
 						  useInitialMemoryValues,
 						  oracle,
@@ -1011,16 +1022,17 @@ EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &o
 }
 
 bool
-EvalContext::evalSideEffect(StateMachine *sm, OracleInterface *oracle, EvalPathConsumer &consumer,
-			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
-			    const AllowableOptimisations &opt)
+EvalContext::evalSideEffect(CfgDecode &decode, StateMachine *sm, OracleInterface *oracle,
+			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
+			    StateMachineSideEffect *smse, const AllowableOptimisations &opt)
 {
 	NdChooser chooser;
 
 	do {
 		EvalContext newContext(*this);
 		evalStateMachineSideEffectRes res =
-			newContext.evalStateMachineSideEffect(sm, smse, consumer.useInitialMemoryValues,
+			newContext.evalStateMachineSideEffect(decode,
+							      sm, smse, consumer.useInitialMemoryValues,
 							      chooser, oracle, opt);
 		switch (res) {
 		case esme_normal:
@@ -1043,7 +1055,9 @@ EvalContext::evalSideEffect(StateMachine *sm, OracleInterface *oracle, EvalPathC
    every item in the pending state queue, which would make that queue
    much bigger, which'd be kind of annoying. */
 bool
-EvalContext::advance(OracleInterface *oracle, const AllowableOptimisations &opt,
+EvalContext::advance(CfgDecode &decode,
+		     OracleInterface *oracle,
+		     const AllowableOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer)
@@ -1084,7 +1098,7 @@ EvalContext::advance(OracleInterface *oracle, const AllowableOptimisations &opt,
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
 		if (sme->sideEffect &&
-		    !evalSideEffect(sm, oracle, consumer, pendingStates,
+		    !evalSideEffect(decode, sm, oracle, consumer, pendingStates,
 				    sme->sideEffect, opt))
 			return false;
 		advance_state_trace();
@@ -1175,7 +1189,9 @@ enumEvalPaths(const VexPtr<StateMachine, &ir_heap> &sm,
 {
 	std::vector<EvalContext> pendingStates;
 	std::map<const StateMachineState *, int> stateLabels;
-
+	CfgDecode decode;
+	decode.addMachine(sm);
+	
 	if (debug_dump_state_traces) {
 		printf("Eval machine:\n");
 		printStateMachine(sm, stdout, stateLabels);
@@ -1194,7 +1210,7 @@ enumEvalPaths(const VexPtr<StateMachine, &ir_heap> &sm,
 
 		EvalContext ctxt(pendingStates.back());
 		pendingStates.pop_back();
-		if (!ctxt.advance(oracle, opt, pendingStates, sm, consumer))
+		if (!ctxt.advance(decode, oracle, opt, pendingStates, sm, consumer))
 			return false;
 	}
 	return true;
@@ -1440,7 +1456,8 @@ struct crossStateT {
 };
 
 static bool
-definitelyDoesntRace(StateMachineSideEffect *probeEffect,
+definitelyDoesntRace(CfgDecode &decode,
+		     StateMachineSideEffect *probeEffect,
 		     StateMachineState *storeMachine,
 		     const AllowableOptimisations &opt,
 		     bool allowStoreLoadRaces,
@@ -1459,6 +1476,7 @@ definitelyDoesntRace(StateMachineSideEffect *probeEffect,
 		case StateMachineSideEffect::Load:
 			if (otherEffect->type == StateMachineSideEffect::Store &&
 			    oracle->memoryAccessesMightAlias(
+				    decode,
 				    opt,
 				    (StateMachineSideEffectLoad *)probeEffect,
 				    (StateMachineSideEffectStore *)otherEffect))
@@ -1468,12 +1486,14 @@ definitelyDoesntRace(StateMachineSideEffect *probeEffect,
 			if (otherEffect->type == StateMachineSideEffect::Load &&
 			    allowStoreLoadRaces) {
 				if (oracle->memoryAccessesMightAlias(
+					    decode,
 					    opt,
 					    (StateMachineSideEffectLoad *)otherEffect,
 					    (StateMachineSideEffectStore *)probeEffect))
 					return false;
 			} else if (otherEffect->type == StateMachineSideEffect::Store) {
 				if (oracle->memoryAccessesMightAlias(
+					    decode,
 					    opt,
 					    (StateMachineSideEffectStore *)otherEffect,
 					    (StateMachineSideEffectStore *)probeEffect))
@@ -1497,7 +1517,7 @@ definitelyDoesntRace(StateMachineSideEffect *probeEffect,
 	std::vector<StateMachineState *> targets;
 	storeMachine->targets(targets);
 	for (auto it = targets.begin(); it != targets.end(); it++)
-		if (!definitelyDoesntRace(probeEffect, *it, opt, allowStoreLoadRaces, oracle, memo))
+		if (!definitelyDoesntRace(decode, probeEffect, *it, opt, allowStoreLoadRaces, oracle, memo))
 			return false;
 	return true;
 }
@@ -1505,29 +1525,32 @@ definitelyDoesntRace(StateMachineSideEffect *probeEffect,
 /* Returns true if there are any stores in @machine which might
    conceivably race with @probeEffect. */
 static bool
-probeDefinitelyDoesntRace(StateMachineSideEffect *probeEffect, StateMachineState *storeMachine,
+probeDefinitelyDoesntRace(CfgDecode &decode, StateMachineSideEffect *probeEffect,
+			  StateMachineState *storeMachine,
 			  const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineState *> memo;
-	return definitelyDoesntRace(probeEffect, storeMachine, opt, false, oracle, memo);
+	return definitelyDoesntRace(decode, probeEffect, storeMachine, opt, false, oracle, memo);
 }
 static bool
-storeDefinitelyDoesntRace(StateMachineSideEffect *storeEffect, StateMachineState *probeMachine,
+storeDefinitelyDoesntRace(CfgDecode &decode, StateMachineSideEffect *storeEffect,
+			  StateMachineState *probeMachine,
 			  const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineState *> memo;
-	return definitelyDoesntRace(storeEffect, probeMachine, opt, true, oracle, memo);
+	return definitelyDoesntRace(decode, storeEffect, probeMachine, opt, true, oracle, memo);
 }
 
 static StateMachine *
-buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
+buildCrossProductMachine(CfgDecode &decode,
+			 StateMachine *probeMachine,
+			 StateMachine *storeMachine,
 			 OracleInterface *oracle,
 			 MemoryAccessIdentifierAllocator &mai,
 			 int *next_fake_free_variable,
 			 const AllowableOptimisations &opt)
 {
 	std::map<crossStateT, StateMachineState *> results;
-
 	typedef std::pair<StateMachineState **, crossStateT> relocT;
 	std::vector<relocT> pendingRelocs;
 
@@ -1654,14 +1677,14 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 				else
 					newState = StateMachineUnreached::get();
 			} else if (!probe_effect ||
-				   probeDefinitelyDoesntRace(probe_effect, crossState.s, opt, oracle)) {
+				   probeDefinitelyDoesntRace(decode, probe_effect, crossState.s, opt, oracle)) {
 				/* If the probe effect definitely
 				   cannot race with anything left in
 				   the store machine then we should
 				   issue it unconditionally. */
 				newState = advanceProbeMachine(crossState, pendingRelocs);
 			} else if (!store_effect ||
-				   storeDefinitelyDoesntRace(store_effect, crossState.p, opt, oracle)) {
+				   storeDefinitelyDoesntRace(decode, store_effect, crossState.p, opt, oracle)) {
 				/* Likewise, if a store effect isn't a
 				 * memory access then it's definitely
 				 * not going to race, so we can issue
@@ -1730,7 +1753,8 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 					ThreadRip tr(-1, VexRip::invent_vex_rip((*next_fake_free_variable)++));
 					fv = mai.freeVariable(
 						Ity_I1,
-						tr,
+						-1,
+						CfgLabel::noncfg(),
 						false);
 				}
 				newState = new StateMachineBifurcate(
@@ -1746,7 +1770,16 @@ buildCrossProductMachine(StateMachine *probeMachine, StateMachine *storeMachine,
 
 	std::vector<std::pair<unsigned, VexRip> > origin(probeMachine->origin);
         origin.insert(origin.end(), storeMachine->origin.begin(), storeMachine->origin.end());
-        return new StateMachine(crossMachineRoot, origin);
+	std::vector<const CFGNode *> cfg_roots(probeMachine->cfg_roots);
+	for (auto it = storeMachine->cfg_roots.begin(); it != storeMachine->cfg_roots.end(); it++) {
+		bool already_present = false;
+		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++)
+			if (*it2 == *it)
+				already_present = true;
+		if (!already_present)
+			cfg_roots.push_back(*it);
+	}
+        return new StateMachine(crossMachineRoot, origin, cfg_roots);
 }
 
 IRExpr *
@@ -1761,6 +1794,9 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
 	int fake_cntr = 0; /* a counter of fakes, not a fake counter */
 	__set_profiling(evalCrossProductMachine);
 
+	CfgDecode decode;
+	decode.addMachine(probeMachine);
+	decode.addMachine(storeMachine);
 	AllowableOptimisations opt =
 		optIn
 		    .enableassumeExecutesAtomically()
@@ -1769,6 +1805,7 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
 		    .enablenoExtend();
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
+			decode,
 			probeMachine,
 			storeMachine,
 			oracle,
@@ -1807,7 +1844,8 @@ struct findRemoteMacroSectionsState {
 	bool finished;
 	bool writer_failed;
 
-	StateMachineSideEffectStore *advanceWriteMachine(StateMachine *writeMachine,
+	StateMachineSideEffectStore *advanceWriteMachine(CfgDecode &decode,
+							 StateMachine *writeMachine,
 							 NdChooser &chooser,
 							 OracleInterface *oracle,
 							 const AllowableOptimisations &opt);
@@ -1821,7 +1859,8 @@ struct findRemoteMacroSectionsState {
 };
 
 StateMachineSideEffectStore *
-findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
+findRemoteMacroSectionsState::advanceWriteMachine(CfgDecode &decode,
+						  StateMachine *writeMachine,
 						  NdChooser &chooser,
 						  OracleInterface *oracle,
 						  const AllowableOptimisations &opt)
@@ -1833,6 +1872,7 @@ findRemoteMacroSectionsState::advanceWriteMachine(StateMachine *writeMachine,
 		if (sideEffect && sideEffect->type == StateMachineSideEffect::Store)
 			smses = (StateMachineSideEffectStore *)sideEffect;
 		switch (writerContext.smallStepEvalStateMachine(
+				decode,
 				writeMachine,
 				chooser,
 				true,
@@ -1877,6 +1917,9 @@ findRemoteMacroSections(const VexPtr<StateMachine, &ir_heap> &readMachine,
 	NdChooser chooser;
 
 	std::map<const StateMachineState *, int> stateLabels;
+	CfgDecode decode;
+	decode.addMachine(readMachine);
+	decode.addMachine(writeMachine);
 
 	do {
 		if (TIMEOUT)
@@ -1892,7 +1935,7 @@ findRemoteMacroSections(const VexPtr<StateMachine, &ir_heap> &readMachine,
 		state.writer_failed = false;
 
 		while (!state.writer_failed && !TIMEOUT && !state.finished) {
-			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
+			StateMachineSideEffectStore *smses = state.advanceWriteMachine(decode, writeMachine, chooser, oracle, opt);
 
 			/* The writer just issued a store, so we
 			   should now try running the reader
@@ -1905,6 +1948,7 @@ findRemoteMacroSections(const VexPtr<StateMachine, &ir_heap> &readMachine,
 			EvalContext readEvalCtxt = state.writerContext;
 			readEvalCtxt.currentState = readMachine->root;
 			switch (readEvalCtxt.bigStepEvalStateMachine(
+					decode,
 					readMachine,
 					sectionStart ? EvalContext::bsr_crash : EvalContext::bsr_survive,
 					true,
@@ -1962,6 +2006,9 @@ fixSufficient(const VexPtr<StateMachine, &ir_heap> &writeMachine,
 	NdChooser chooser;
 
 	std::map<const StateMachineState *, int> stateLabels;
+	CfgDecode decode;
+	decode.addMachine(writeMachine);
+	decode.addMachine(probeMachine);
 
 	do {
 		if (TIMEOUT)
@@ -1974,7 +2021,7 @@ fixSufficient(const VexPtr<StateMachine, &ir_heap> &writeMachine,
 		findRemoteMacroSectionsState state(writeMachine, assumption, false, stateLabels);
 		state.writerContext.accumulatedAssumption = IRExpr_Const(IRConst_U1(1));
 		while (!TIMEOUT) {
-			StateMachineSideEffectStore *smses = state.advanceWriteMachine(writeMachine, chooser, oracle, opt);
+			StateMachineSideEffectStore *smses = state.advanceWriteMachine(decode, writeMachine, chooser, oracle, opt);
 
 			if (state.writer_failed) {
 				/* Contradiction in the writer -> give
@@ -2003,6 +2050,7 @@ fixSufficient(const VexPtr<StateMachine, &ir_heap> &writeMachine,
 			EvalContext readEvalCtxt = state.writerContext;
 			readEvalCtxt.currentState = probeMachine->root;
 			switch (readEvalCtxt.bigStepEvalStateMachine(
+					decode,
 					probeMachine,
 					EvalContext::bsr_survive,
 					true,
@@ -2063,8 +2111,13 @@ findHappensBeforeRelations(
 	consumer.opt = &opt;
 	consumer.useInitialMemoryValues = false;
 
+	CfgDecode decode;
+	decode.addMachine(probeMachine);
+	decode.addMachine(storeMachine);
+
 	VexPtr<StateMachine, &ir_heap> combinedMachine;
-	combinedMachine = buildCrossProductMachine(probeMachine, storeMachine,
+	combinedMachine = buildCrossProductMachine(decode,
+						   probeMachine, storeMachine,
 						   oracle, mai, &cntr, opt);
 	combinedMachine =
 		optimiseStateMachine(
@@ -2150,8 +2203,18 @@ concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine
 	std::vector<std::pair<unsigned, VexRip> > neworigin(i, machine->origin.end());
 	neworigin.insert(neworigin.end(), to->origin.begin(), to->origin.end());
 #endif
+	std::vector<const CFGNode *> cfg_roots(machine->cfg_roots);
+	for (auto it = to->cfg_roots.begin(); it != to->cfg_roots.end(); it++) {
+		bool already_present = false;
+		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++)
+			if (*it2 == *it)
+				already_present = true;
+		if (!already_present)
+			cfg_roots.push_back(*it);
+	}
 	return new StateMachine(rewriteRules[machine->root],
-				neworigin);
+				neworigin,
+				cfg_roots);
 }
 
 IRExpr *
@@ -2217,6 +2280,10 @@ getCrossMachineCrashRequirement(
 	int cntr = 0;
 	__set_profiling(getCrossMachineCrashRequirement);
 
+	CfgDecode decode;
+	decode.addMachine(readMachine);
+	decode.addMachine(writeMachine);
+
 	AllowableOptimisations opt =
 		optIn
 		    .enableassumeExecutesAtomically()
@@ -2225,6 +2292,7 @@ getCrossMachineCrashRequirement(
 		    .enablenoExtend();
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
+			decode,
 			readMachine,
 			writeMachine,
 			oracle,

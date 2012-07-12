@@ -8,6 +8,7 @@
 #include "genfix.hpp"
 #include "dnf.hpp"
 #include "offline_analysis.hpp"
+#include "intern.hpp"
 
 void enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out);
 
@@ -17,7 +18,7 @@ class happensBeforeEdge;
 class internmentState {
 public:
 	std::set<happensBeforeEdge *> hbes;
-	internIRExprTable exprs;
+	internStateMachineTable exprs;
 	IRExpr *intern(IRExpr *e) { return internIRExpr(e, exprs); }
 	unsigned intern(unsigned x) { return x; }
 	exprEvalPoint intern(const exprEvalPoint &);
@@ -71,7 +72,7 @@ public:
 	instrToInstrSetMap happensBefore;
 	/* happensBefore[i] -> the set of all instructions ordered after i */
 	instrToInstrSetMap happensAfter;
-	bool init(DNF_Conjunction &c, CFG<ThreadRip> *cfg) __attribute__((warn_unused_result));
+	bool init(CfgDecode &decode, DNF_Conjunction &c, CFG<ThreadRip> *cfg) __attribute__((warn_unused_result));
 	void print(FILE *f) {
 		fprintf(f, "before:\n");
 		happensBefore.print(f);
@@ -124,7 +125,7 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 	}
 public:
 	instructionDominatorMapT idom;
-	bool init(DNF_Conjunction &, CFG<ThreadRip> *, const std::set<ThreadRip> &neededRips) __attribute__((warn_unused_result));
+	bool init(CfgDecode &decode, DNF_Conjunction &, CFG<ThreadRip> *, const std::set<ThreadRip> &neededRips) __attribute__((warn_unused_result));
 };
 
 class simulationSlotT {
@@ -173,11 +174,13 @@ class expressionStashMapT : public std::map<unsigned long, std::set<std::pair<un
 	}
 public:
 	expressionStashMapT() {}
-	expressionStashMapT(std::set<IRExpr *> &neededExpressions,
+	expressionStashMapT(CfgDecode &decode,
+			    std::set<IRExpr *> &neededExpressions,
 			    StateMachine *probeMachine,
 			    StateMachine *storeMachine,
 			    std::map<unsigned, ThreadRip> &roots)
 	{
+		/* XXX keep this in sync with buildCED */
 		std::set<IRExprGet *> neededTemporaries;
 		for (auto it = neededExpressions.begin();
 		     it != neededExpressions.end();
@@ -213,9 +216,9 @@ public:
 					}
 				}
 				assert(l);
-				(*this)[l->rip.rip.rip.unwrap_vexrip()].insert(
+				(*this)[decode(l->rip.where)->rip.unwrap_vexrip()].insert(
 					std::pair<unsigned, IRExpr *>(
-						l->rip.rip.thread,
+						l->rip.tid,
 						*it));
 			}
 		}
@@ -279,29 +282,20 @@ public:
 	}
 };
 
-class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>,
-			  public Named {
-	happensBeforeEdge() {}
-	happensBeforeEdge(const ThreadRip &_before,
-			  const ThreadRip &_after,
+class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
+	happensBeforeEdge(const MemoryAccessIdentifier &_before,
+			  const MemoryAccessIdentifier &_after,
 			  const std::vector<IRExpr *> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
 	{}
-	static char *nameIRExpr(IRExpr *a) {
-		char *ptr;
-		size_t buf_size;
-		FILE *f = open_memstream(&ptr, &buf_size);
-		ppIRExpr(a, f);
-		fclose(f);
-		return ptr;
-	}
 	char *mkName() const {
 		std::vector<const char *> fragments;
-
 		fragments.push_back(my_asprintf(
-					    "%d: %s <-< %s {", msg_id,
-					    before.name(), after.name()));
+					    "%d: %s <-< %s {",
+					    msg_id,
+					    before.name(),
+					    after.name()));
 		for (auto it = content.begin(); it != content.end(); it++) {
 			fragments.push_back(nameIRExpr(*it));
 			fragments.push_back(", ");
@@ -314,11 +308,11 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>,
 		free((void *)fragments[0]);
 		for (unsigned x = 1; x < fragments.size() - 1; x += 2)
 			free((void *)fragments[x]);
-		return res_malloc;		
+		return res_malloc;
 	}
 public:
-	ThreadRip before;
-	ThreadRip after;
+	MemoryAccessIdentifier before;
+	MemoryAccessIdentifier after;
 	std::vector<IRExpr *> content;
 	unsigned msg_id;
 
@@ -334,21 +328,19 @@ public:
 		state.hbes.insert(this);
 		return this;
 	}
-	happensBeforeEdge(bool invert, IRExprHappensBefore *hb,
+	happensBeforeEdge(CfgDecode &decode,
+			  bool invert,
+			  IRExprHappensBefore *hb,
 			  instructionDominatorMapT &idom,
 			  CFG<ThreadRip> *cfg,
 			  expressionStashMapT &stashMap,
 			  unsigned _msg_id)
-		: before(invert ? hb->after.rip : hb->before.rip),
-		  after(invert ? hb->before.rip : hb->after.rip),
+		: before(invert ? hb->after : hb->before),
+		  after(invert ? hb->before : hb->after),
 		  msg_id(_msg_id)
 	{
-		printf("%x: HBE %s -> %s\n",
-		       msg_id,
-		       before.name(),
-		       after.name());
 		std::set<Instruction<ThreadRip> *> &liveInstructions(
-			idom[cfg->ripToInstr->get(before)]);
+			idom[cfg->ripToInstr->get(ThreadRip(before.tid, decode(before.where)->rip))]);
 		for (std::set<Instruction<ThreadRip> *>::iterator it = liveInstructions.begin();
 		     it != liveInstructions.end();
 		     it++) {
@@ -368,26 +360,29 @@ public:
 	}
 	static happensBeforeEdge *parse(const char *str, const char **suffix)
 	{
-		happensBeforeEdge *work = new happensBeforeEdge();
-		if (!parseDecimalUInt(&work->msg_id, str, &str) ||
+		MemoryAccessIdentifier before(MemoryAccessIdentifier::uninitialised());
+		MemoryAccessIdentifier after(MemoryAccessIdentifier::uninitialised());
+		unsigned msg_id;
+		if (!parseDecimalUInt(&msg_id, str, &str) ||
 		    !parseThisString(": ", str, &str) ||
-		    !parseThreadRip(&work->before, str, &str) ||
+		    !parseMemoryAccessIdentifier(&before, str, &str) ||
 		    !parseThisString(" <-< ", str, &str) ||
-		    !parseThreadRip(&work->after, str, &str) ||
+		    !parseMemoryAccessIdentifier(&after, str, &str) ||
 		    !parseThisString(" {", str, &str))
 			return NULL;
+		std::vector<IRExpr *> content;
 		while (1) {
 			IRExpr *a;
 			if (!parseIRExpr(&a, str, &str))
 				break;
 			if (!parseThisString(", ", str, &str))
 				return NULL;
-			work->content.push_back(a);
+			content.push_back(a);
 		}
 		if (!parseThisChar('}', str, &str))
 			return NULL;
 		*suffix = str;
-		return work;
+		return new happensBeforeEdge(before, after, content, msg_id);
 	}
 	void visit(HeapVisitor &hv) {
 		visit_container(content, hv);
@@ -469,7 +464,7 @@ public:
 			     it2++) {
 				happensBeforeEdge *hb = *it2;
 				for (unsigned x = 0; x < hb->content.size(); x++)
-					mk_slot(hb->after.thread, hb->content[x], next_slot);
+					mk_slot(hb->after.tid, hb->content[x], next_slot);
 			}
 		}
 	}
@@ -914,7 +909,7 @@ public:
 class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
 	std::set<happensBeforeEdge *> edges;
 
-	void generateEpilogue(ClientRip rip);
+	void generateEpilogue(const CfgLabel &l, ClientRip rip);
 
 public:
 	EnforceCrashPatchFragment(std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBeforePoints,
@@ -1008,7 +1003,8 @@ class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeE
 	}
 public:
 	happensBeforeMapT() {}
-	happensBeforeMapT(DNF_Conjunction &c,
+	happensBeforeMapT(CfgDecode &decode,
+			  DNF_Conjunction &c,
 			  expressionDominatorMapT &exprDominatorMap,
 			  EnforceCrashCFG *cfg,
 			  expressionStashMapT &exprStashPoints,
@@ -1019,10 +1015,11 @@ public:
 			bool invert = c[x].first;
 			if (e->tag == Iex_HappensBefore) {
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
-				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, exprDominatorMap.idom,
+				happensBeforeEdge *hbe = new happensBeforeEdge(decode,
+									       invert, hb, exprDominatorMap.idom,
 									       cfg, exprStashPoints, next_hb_id++);
-				(*this)[hbe->before.rip.unwrap_vexrip()].insert(hbe);
-				(*this)[hbe->after.rip.unwrap_vexrip()].insert(hbe);
+				(*this)[decode(hbe->before.where)->rip.unwrap_vexrip()].insert(hbe);
+				(*this)[decode(hbe->after.where)->rip.unwrap_vexrip()].insert(hbe);
 			}
 		}
 	}
@@ -1082,7 +1079,7 @@ public:
 class abstractThreadExitPointsT : public std::map<unsigned long, std::set<unsigned> > {
 public:
 	abstractThreadExitPointsT() {}
-	abstractThreadExitPointsT(EnforceCrashCFG *cfg, happensBeforeMapT &);
+	abstractThreadExitPointsT(CfgDecode &decode, EnforceCrashCFG *cfg, happensBeforeMapT &);
 	void operator|=(const abstractThreadExitPointsT &atet) {
 		for (auto it = atet.begin(); it != atet.end(); it++)
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
@@ -1138,7 +1135,8 @@ public:
 	expressionEvalMapT expressionEvalPoints;
 	abstractThreadExitPointsT threadExitPoints;
 
-	crashEnforcementData(std::set<IRExpr *> &neededExpressions,
+	crashEnforcementData(CfgDecode &decode,
+			     std::set<IRExpr *> &neededExpressions,
 			     std::map<unsigned, ThreadRip> &_roots,
 			     expressionDominatorMapT &exprDominatorMap,
 			     StateMachine *probeMachine,
@@ -1148,11 +1146,11 @@ public:
 			     int &next_hb_id,
 			     simulationSlotT &next_slot)
 		: roots(_roots),
-		  exprStashPoints(neededExpressions, probeMachine, storeMachine, _roots),
-		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints, next_hb_id),
+		  exprStashPoints(decode, neededExpressions, probeMachine, storeMachine, _roots),
+		  happensBeforePoints(decode, conj, exprDominatorMap, cfg, exprStashPoints, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
-		  threadExitPoints(cfg, happensBeforePoints)
+		  threadExitPoints(decode, cfg, happensBeforePoints)
 	{}
 
 	bool parse(const char *str, const char **suffix) {

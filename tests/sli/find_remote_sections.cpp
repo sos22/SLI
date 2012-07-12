@@ -37,7 +37,7 @@ main(int argc, char *argv[])
 		it->start->prettyPrint(stdout);
 		printf(" -> ");
 		it->end->prettyPrint(stdout);
-		printf("\n");		
+		printf("\n");
 	}
 	if (!fixSufficient(readMachine, writeMachine, assumption, oracle,
 			   AllowableOptimisations::defaultOptimisations,

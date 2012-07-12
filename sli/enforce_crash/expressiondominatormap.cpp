@@ -2,12 +2,13 @@
 #include "enforce_crash.hpp"
 
 bool
-expressionDominatorMapT::init(DNF_Conjunction &c,
+expressionDominatorMapT::init(CfgDecode &decode,
+			      DNF_Conjunction &c,
 			      CFG<ThreadRip> *cfg,
 			      const std::set<ThreadRip> &neededRips)
 {
 	happensAfterMapT happensBefore;
-	if (!happensBefore.init(c, cfg))
+	if (!happensBefore.init(decode, c, cfg))
 		return false;
 
 	predecessorMapT pred(cfg);
@@ -87,13 +88,13 @@ expressionDominatorMapT::init(DNF_Conjunction &c,
 }
 
 bool
-happensAfterMapT::init(DNF_Conjunction &c, CFG<ThreadRip> *cfg)
+happensAfterMapT::init(CfgDecode &decode, DNF_Conjunction &c, CFG<ThreadRip> *cfg)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
 			IRExprHappensBefore *e = (IRExprHappensBefore *)c[x].second;
-			ThreadRip beforeRip = e->before.rip;
-			ThreadRip afterRip = e->after.rip;
+			ThreadRip beforeRip(e->before.tid, decode(e->before.where)->rip);
+			ThreadRip afterRip(e->after.tid, decode(e->after.where)->rip);
 			Instruction<ThreadRip> *before = cfg->ripToInstr->get(beforeRip);
 			Instruction<ThreadRip> *after = cfg->ripToInstr->get(afterRip);
 			if (!before || !after) {

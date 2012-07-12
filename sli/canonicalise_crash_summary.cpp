@@ -95,8 +95,8 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 			if (it != freshVariables.end()) {
 				addr = IRExpr_Get(it->second, Ity_I64);
 			} else {
-				threadAndRegister r(threadAndRegister::temp(store2->rip.rip.thread,
-									    alloc_temp_id(store2->rip.rip.thread),
+				threadAndRegister r(threadAndRegister::temp(store2->rip.tid,
+									    alloc_temp_id(store2->rip.tid),
 									    0));
 				freshVariables.insert(std::pair<IRExpr *, threadAndRegister>(store2->addr, r));
 				addr = IRExpr_Get(r, Ity_I64);
@@ -287,7 +287,7 @@ private:
 	}
 	MemoryAccessIdentifier canon_memoryaccessidentifier(const MemoryAccessIdentifier &mai)
 	{
-		return MemoryAccessIdentifier(canon_threadrip(mai.rip), mai.generation);
+		return MemoryAccessIdentifier(mai.where, canonTid(mai.tid), mai.generation);
 	}
 	threadAndRegister canon_reg(const threadAndRegister &input)
 	{

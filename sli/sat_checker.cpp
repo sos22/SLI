@@ -545,11 +545,6 @@ anf_context::addAssumption(IRExpr *a)
 IRExpr *
 anf_context::simplify(IRExpr *a)
 {
-	/* Silly hack to make sure that prettyPrint is always
-	 * available to the debugger. */
-	if (0)
-		prettyPrint(stdout);
-
 	if (TIMEOUT)
 		return a;
 

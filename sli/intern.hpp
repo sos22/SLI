@@ -6,6 +6,7 @@
 struct internStateMachineTable : public internIRExprTable {
 	std::map<StateMachineSideEffect *, StateMachineSideEffect *> sideEffects;
 	std::map<StateMachineState *, StateMachineState *> states;
+	std::map<const CFGNode *, const CFGNode *> cfgNodes;
 	std::set<StateMachineSideEffectStore *> stores;
 	std::set<StateMachineSideEffectLoad *> loads;
 	std::set<StateMachineSideEffectCopy *> copies;
@@ -16,8 +17,10 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
 	std::set<StateMachineSideEffecting *> states_side_effect;
+	std::set<const CFGNode *> cfgNodesS;
 };
 
+const CFGNode *internCFG(const CFGNode *n, internStateMachineTable &t);
 IRExpr *internIRExpr(IRExpr *x);
 StateMachine *internStateMachine(StateMachine *sm);
 StateMachine *internStateMachine(

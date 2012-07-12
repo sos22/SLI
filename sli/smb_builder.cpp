@@ -214,23 +214,26 @@ operator<=(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 }
 
 StateMachineState *
-SMBState::compile(const ThreadRip &tr,
-		  std::map<const SMBState *, StateMachineState *> &m,
+SMBState::compile(std::map<const SMBState *, StateMachineState *> &m,
 		  std::vector<reloc_t> &relocs,
 		  std::vector<reloc2> &relocs2,
-		  MemoryAccessIdentifierAllocator &mai) const
+		  MemoryAccessIdentifierAllocator &mai,
+		  CFGNode *where,
+		  int tid) const
 {
 	auto it_did_insert = m.insert(std::pair<const SMBState *, StateMachineState *>(this, (StateMachineState *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
-		it->second = _compile(tr, relocs, relocs2, mai);
+		it->second = _compile(relocs, relocs2, mai, where, tid);
 	return it->second;
 }
 
 StateMachineState *
-SMBState::compile(const ThreadRip &vr, std::vector<reloc_t> &relocs,
-		  MemoryAccessIdentifierAllocator &mai) const
+SMBState::compile(std::vector<reloc_t> &relocs,
+		  MemoryAccessIdentifierAllocator &mai,
+		  CFGNode *where,
+		  int tid) const
 {
 	std::map<const SMBState *, StateMachineState *> m;
 	std::vector<reloc2> relocs2;
@@ -241,7 +244,7 @@ SMBState::compile(const ThreadRip &vr, std::vector<reloc_t> &relocs,
 		reloc2 r2(relocs2.back());
 		relocs2.pop_back();
 		assert(!*r2.t);
-		*r2.t = r2.target->compile(vr, m, relocs, relocs2, mai);
+		*r2.t = r2.target->compile(m, relocs, relocs2, mai, where, tid);
 		assert(*r2.t);
 	}
 	assert(res);

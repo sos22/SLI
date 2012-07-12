@@ -33,7 +33,7 @@ StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 	StateMachineState *new_root = root->optimise(opt, &b);
 	if (b) {
 		*done_something = true;
-		return new StateMachine(new_root, origin);
+		return new StateMachine(new_root, origin, cfg_roots);
 	} else {
 		return this;
 	}
@@ -278,6 +278,57 @@ printContainer(const cont &v, FILE *f)
 	fprintf(f, "]");
 }
 
+static void
+printCFGRootedAt(const CFGNode *root, FILE *f,
+		 std::set<const CFGNode *> &done,
+		 const std::vector<const CFGNode *> &roots)
+{
+	if (!done.insert(root).second)
+		return;
+	bool is_root = false;
+	for (auto it = roots.begin(); !is_root && it != roots.end(); it++)
+		if (root == *it)
+			is_root = true;
+	fprintf(f, "%s%s: %s",
+		is_root ? "-->" : ".  ",
+		root->label.name(),
+		root->rip.name());
+	std::vector<CFGNode *> successors;
+	bool done_one = false;
+	for (auto it = root->successors.begin(); it != root->successors.end(); it++) {
+		if (it->instr == NULL)
+			continue;
+		if (done_one)
+			fprintf(f, ", ");
+		else
+			fprintf(f, " -> ");
+		done_one = true;
+		fprintf(f, "%s:", it->instr->label.name());
+		switch (it->type) {
+		case CFGNode::successor_t::succ_default:
+			fprintf(f, "default");
+			break;
+		case CFGNode::successor_t::succ_branch:
+			fprintf(f, "branch");
+			break;
+		case CFGNode::successor_t::succ_call:
+			fprintf(f, "call");
+			break;
+		case CFGNode::successor_t::succ_unroll:
+			fprintf(f, "unroll");
+			break;
+		}
+		if (it->calledFunction != LibraryFunctionTemplate::none) {
+			fprintf(f, ":");
+			LibraryFunctionTemplate::pp(it->calledFunction, f);
+		}
+		successors.push_back(it->instr);
+	}
+	fprintf(f, "\n");
+	for (auto it = successors.begin(); it != successors.end(); it++)
+		printCFGRootedAt(*it, f, done, roots);
+}
+
 void
 printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
 {
@@ -290,6 +341,10 @@ printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineSt
 		fprintf(f, "%s:%d", it->second.name(), it->first);
 	}
 	fprintf(f, ":\n");
+	fprintf(f, "CFG:\n");
+	std::set<const CFGNode *> done_cfg;
+	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
+		printCFGRootedAt(*it, f, done_cfg, sm->cfg_roots);
 	buildStateLabelTable(sm, labels, states);
 	for (auto it = states.begin(); it != states.end(); it++) {
 		fprintf(f, "l%d: ", labels[*it]);
@@ -408,9 +463,7 @@ StateMachineSideEffect::parse(StateMachineSideEffect **out,
  * labels in the target fields of state machine states until we have
  * find the state we're actually supposed to point at. */
 static bool
-parseStateMachineState(StateMachineState **out,
-		       const char *str,
-		       const char **suffix)
+parseStateMachineState(StateMachineState **out, const char *str, const char **suffix)
 {
 #define try_state_type(t)						\
 	{								\
@@ -451,7 +504,9 @@ parseOneState(std::map<int, StateMachineState *> &out,
 }
 
 static bool
-parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
+parseStateMachine(StateMachineState **out,
+		  const char *str,
+		  const char **suffix)
 {
 	std::map<int, StateMachineState *> labelToState;
 	while (*str) {
@@ -485,6 +540,99 @@ parseStateMachine(StateMachineState **out, const char *str, const char **suffix)
 	return true;
 }
 
+struct succ {
+	succ() : label(CfgLabel::uninitialised()) {}
+	CfgLabel label;
+	CFGNode::successor_t::succ_type type;
+	LibraryFunctionType l;
+	static bool parse(succ *out, const char *str, const char **suffix)
+	{
+		if (!out->label.parse(str, &str) ||
+		    !parseThisChar(':', str, &str))
+			return false;
+		if (parseThisString("default", str, &str)) {
+			out->type = CFGNode::successor_t::succ_default;
+		} else if (parseThisString("branch", str, &str)) {
+			out->type = CFGNode::successor_t::succ_branch;
+		} else if (parseThisString("call", str, &str)) {
+			out->type = CFGNode::successor_t::succ_call;
+		} else if (parseThisString("unroll", str, &str)) {
+			out->type = CFGNode::successor_t::succ_unroll;
+		} else {
+			return false;
+		}
+		if (parseThisChar(':', str, &str)) {
+			if (!LibraryFunctionTemplate::parse(&out->l, str, &str))
+				return false;
+		} else {
+			out->l = LibraryFunctionTemplate::none;
+		}
+		*suffix = str;
+		return true;
+	}
+};
+
+static bool
+parseCFG(std::vector<const CFGNode *> &roots,
+	 const char *str, const char **suffix)
+{
+	std::map<CfgLabel, CFGNode *> cfg_labels;
+	std::vector<std::pair<CFGNode **, CfgLabel> > relocations;
+	while (1) {
+		bool is_root;
+		if (parseThisString(". ", str, &str)) {
+			is_root = false;
+		} else if (parseThisString("-->", str, &str)) {
+			is_root = true;
+		} else {
+			break;
+		}
+		VexRip rip;
+		CfgLabel label(CfgLabel::uninitialised());
+		if (!label.parse(str, &str) ||
+		    !parseThisString(": ", str, &str) ||
+		    !parseVexRip(&rip, str, &str))
+			return false;
+		std::vector<succ> successors;
+		if (parseThisString(" -> ", str, &str)) {
+			succ l;
+			if (!succ::parse(&l, str, &str))
+				return false;
+			successors.push_back(l);
+			while (1) {
+				if (!parseThisString(", ", str, &str))
+					break;
+				if (!succ::parse(&l, str, &str))
+					return false;
+				successors.push_back(l);
+			}
+		}
+		if (!parseThisChar('\n', str, &str))
+			return false;
+		CFGNode *work = new CFGNode(-1, label);
+		work->rip = rip;
+		work->successors.resize(successors.size());
+		for (unsigned x = 0; x < successors.size(); x++) {
+			work->successors[x].type = successors[x].type;
+			work->successors[x].calledFunction = successors[x].l;
+			relocations.push_back(std::pair<CFGNode **, CfgLabel>(&work->successors[x].instr, successors[x].label));
+		}
+		if (cfg_labels.count(label))
+			return false;
+		cfg_labels[label] = work;
+		if (is_root)
+			roots.push_back(work);
+	}
+	for (auto it = relocations.begin(); it != relocations.end(); it++) {
+		auto it2 = cfg_labels.find(it->second);
+		if (it2 == cfg_labels.end())
+			return false;
+		*it->first = it2->second;
+	}
+	*suffix = str;
+	return true;
+}
+
 bool
 StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 {
@@ -511,9 +659,12 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 	   returns true. */
 	root = (StateMachineState *)0xf001deadbeeful; 
 
-	if (!parseStateMachine(&root, str, suffix))
+	std::vector<const CFGNode *> cfg_roots;
+	if (!parseThisString("CFG:\n", str, &str) ||
+	    !parseCFG(cfg_roots, str, &str) ||
+	    !parseStateMachine(&root, str, suffix))
 		return false;
-	*out = new StateMachine(root, origin);
+	*out = new StateMachine(root, origin, cfg_roots);
 	return true;
 }
 bool
@@ -579,7 +730,7 @@ StateMachine::assertAcyclic() const
 #endif
 
 void
-StateMachineState::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
+StateMachineState::enumerateMentionedMemoryAccesses(std::set<MemoryAccessIdentifier> &instrs)
 {
 	std::vector<StateMachineState *> targ;
 	if (type == SideEffecting) {
@@ -588,7 +739,7 @@ StateMachineState::enumerateMentionedMemoryAccesses(std::set<VexRip> &instrs)
 			StateMachineSideEffectMemoryAccess *smse =
 				dynamic_cast<StateMachineSideEffectMemoryAccess *>(se->sideEffect);
 			if (smse)
-				instrs.insert(smse->rip.rip.rip);
+				instrs.insert(smse->rip);
 		}
 	}
 	targets(targ);
@@ -618,12 +769,6 @@ StateMachineState::roughLoadCount(StateMachineState::RoughLoadCount acc) const
 	     it++)
 		acc = (*it)->roughLoadCount(acc);
 	return acc;
-}
-
-void
-ppStateMachineSideEffectMemoryAccess(StateMachineSideEffectMemoryAccess *smsema, FILE *f)
-{
-	fprintf(f, "{%s}", smsema->rip.name());
 }
 
 void
@@ -872,24 +1017,55 @@ StateMachine::sanityCheck() const
 	     it != definedAtTopOfState.end();
 	     it++)
 		it->first->sanityCheck(&definedAtTopOfState[it->first]);
+
+	struct : public StateMachineTransformer {
+		std::set<CfgLabel> neededLabels;
+		IRExpr *transformIex(IRExprHappensBefore *hb) {
+			neededLabels.insert(hb->before.where);
+			neededLabels.insert(hb->after.where);
+			return hb;
+		}
+		StateMachineSideEffectLoad *transformOneSideEffect(
+			StateMachineSideEffectLoad *smse, bool *done_something)
+		{
+			neededLabels.insert(smse->rip.where);
+			return StateMachineTransformer::transformOneSideEffect(smse, done_something);
+		}
+		StateMachineSideEffectStore *transformOneSideEffect(
+			StateMachineSideEffectStore *smse, bool *done_something)
+		{
+			neededLabels.insert(smse->rip.where);
+			return StateMachineTransformer::transformOneSideEffect(smse, done_something);
+		}
+		bool rewriteNewStates() const { return false; }
+	} findNeededLabels;
+	findNeededLabels.transform(const_cast<StateMachine *>(this));
+	std::queue<const CFGNode *> pending;
+	for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++)
+		pending.push(*it);
+	while (!pending.empty()) {
+		const CFGNode *n = pending.front();
+		pending.pop();
+		findNeededLabels.neededLabels.erase(n->label);
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+			if (it->instr)
+				pending.push(it->instr);
+	}
+	assert(findNeededLabels.neededLabels.empty());
 }
 #endif
 
 MemoryAccessIdentifier
-MemoryAccessIdentifierAllocator::operator()(const ThreadRip &rip)
+MemoryAccessIdentifierAllocator::operator()(const CfgLabel &node, int tid)
 {
-	/* I'm not sure why, but inlining the definition of dflt into
-	   its only use leads to a link error. */
-	unsigned dflt = MemoryAccessIdentifier::first_dynamic_generation;
-	auto it_and_did_something = ids.insert(std::pair<ThreadRip, unsigned>(rip, dflt));
-	auto it = it_and_did_something.first;
-	unsigned gen = it->second;
+	auto it_did_insert = ids.insert(std::pair<std::pair<int, CfgLabel>, unsigned>(std::pair<int, CfgLabel>(tid, node), -1));
+	auto it = it_did_insert.first;
 	it->second++;
-	return MemoryAccessIdentifier(rip, gen);
+	return MemoryAccessIdentifier(node, tid, it->second);
 }
 
 IRExpr *
-MemoryAccessIdentifierAllocator::freeVariable(IRType ty, const ThreadRip &rip, bool isUnique)
+MemoryAccessIdentifierAllocator::freeVariable(IRType ty, int tid, const CfgLabel &node, bool isUnique)
 {
-	return IRExpr_FreeVariable((*this)(rip), ty, isUnique);
+	return IRExpr_FreeVariable((*this)(node, tid), ty, isUnique);
 }

@@ -26,7 +26,9 @@ main(int argc, char *argv[])
 	if (!parseDynAnalysisRip(&vr, argv[4], &suffix) || *suffix)
 		err(1, "cannot parse %s as VexRip", argv[4]);
 	std::set<CFGNode *> roots;
-	if (!getProbeCFGs(oracle, vr, roots))
+	std::set<const CFGNode *> targets;
+	CfgLabelAllocator allocLabel;
+	if (!getProbeCFGs(allocLabel, oracle, vr, roots, targets))
 		err(1, "cannot build root set");
 
 	int cntr = 0;

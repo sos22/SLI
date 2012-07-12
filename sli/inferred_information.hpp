@@ -17,7 +17,8 @@ public:
 	IRExpr *verificationCondition;
 	typedef std::pair<StateMachineSideEffectStore *, StateMachineSideEffectStore *> macroSectionT;
 	std::vector<macroSectionT> macroSections;
-	std::vector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > aliasing;
+	typedef std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> aliasingEntryT;
+	std::vector<aliasingEntryT> aliasing;
 	CrashSummary(StateMachine *_loadMachine, StateMachine *_storeMachine,
 		     IRExpr *_verificationCondition, Oracle *oracle)
 		: loadMachine(_loadMachine),
@@ -31,7 +32,7 @@ public:
 		     StateMachine *_storeMachine,
 		     IRExpr *_verificationCondition,
 		     const std::vector<macroSectionT> &_macroSections,
-		     const std::vector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > &_aliasing)
+		     const std::vector<aliasingEntryT> &_aliasing)
 		: loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
 		  verificationCondition(_verificationCondition),
@@ -62,7 +63,8 @@ CrashSummary *transformCrashSummary(CrashSummary *input, StateMachineTransformer
 				    bool *done_something = NULL);
 CrashSummary *internCrashSummary(CrashSummary *cs);
 
-char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident);
+char *buildPatchForCrashSummary(const std::map<const CFGNode *, int> &,
+				Oracle *oracle, CrashSummary *summary, const char *ident);
 
 class FixConsumer {
 public:
@@ -72,7 +74,8 @@ public:
 
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
 class MemoryAccessIdentifierAllocator;
-bool buildProbeMachine(const VexPtr<Oracle> &oracle,
+bool buildProbeMachine(CfgLabelAllocator &allocLabel,
+		       const VexPtr<Oracle> &oracle,
 		       const DynAnalysisRip &interestingRip,
 		       const VexPtr<StateMachineState, &ir_heap> &proximal,
 		       ThreadId tid,
@@ -82,7 +85,8 @@ bool buildProbeMachine(const VexPtr<Oracle> &oracle,
 		       MemoryAccessIdentifierAllocator &mai,
 		       int *nextFrameId,
 		       GarbageCollectionToken token);
-bool diagnoseCrash(const DynAnalysisRip &,
+bool diagnoseCrash(CfgLabelAllocator &allocLabel,
+		   const DynAnalysisRip &,
 		   VexPtr<StateMachine, &ir_heap> probeMachine,
 		   const VexPtr<Oracle> &oracle,
 		   bool needRemoteMacroSections,

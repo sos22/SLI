@@ -41,20 +41,25 @@ class ReachingMap {
 	std::map<const StateMachineState *, std::set<const StateMachineSideEffectStore *> > content;
 	std::set<const StateMachineSideEffectStore *> nothingReaching;
 public:
-	bool initialise(StateMachine *sm, const AllowableOptimisations &opt,
+	bool initialise(CfgDecode &decode,
+			StateMachine *sm,
+			const AllowableOptimisations &opt,
 			OracleInterface *oracle);
 	const std::set<const StateMachineSideEffectStore *> &get(const StateMachineState *s) const;
 };
 
 bool
-ReachingMap::initialise(StateMachine *sm, const AllowableOptimisations &opt,
+ReachingMap::initialise(CfgDecode &decode,
+			StateMachine *sm,
+			const AllowableOptimisations &opt,
 			OracleInterface *oracle)
 {
 	struct {
 		const AllowableOptimisations *opt;
 		OracleInterface *oracle;
+		CfgDecode *decode;
 		bool operator()(StateMachineSideEffectStore *store) {
-			if (!oracle->hasConflictingRemoteStores(*opt, store))
+			if (!oracle->hasConflictingRemoteStores(*decode, *opt, store))
 				return true;
 			return false;
 		}
@@ -67,7 +72,7 @@ ReachingMap::initialise(StateMachine *sm, const AllowableOptimisations &opt,
 				return NULL;
 			return store;
 		}
-	} interestingStore = {&opt, oracle};
+	} interestingStore = {&opt, oracle, &decode};
 
 	/* Start by saying that every state needs updating. */
 	std::vector<const StateMachineState *> needsUpdate;
@@ -142,7 +147,7 @@ class UseReachingMap : public StateMachineTransformer {
 	const AllowableOptimisations &opt;
 	OracleInterface *oracle;
 	StateMachineSideEffecting *transformOneState(
-		StateMachineSideEffecting *, bool *);
+		CfgDecode &, StateMachineSideEffecting *, bool *);
 	bool rewriteNewStates() const { return false; }
 public:
 	UseReachingMap(ReachingMap &_rm,
@@ -153,18 +158,18 @@ public:
 };
 
 StateMachineSideEffecting *
-UseReachingMap::transformOneState(StateMachineSideEffecting *smse, bool *done_something)
+UseReachingMap::transformOneState(CfgDecode &decode, StateMachineSideEffecting *smse, bool *done_something)
 {
 	if (!smse->sideEffect || smse->sideEffect->type != StateMachineSideEffect::Load)
 		return NULL;
 	StateMachineSideEffectLoad *load = (StateMachineSideEffectLoad *)smse->sideEffect;
-	if (oracle->hasConflictingRemoteStores(opt, load))
+	if (oracle->hasConflictingRemoteStores(decode, opt, load))
 		return NULL;
 	const std::set<const StateMachineSideEffectStore *> &potentiallyRelevantStores(rm.get(smse));
 	for (auto it = potentiallyRelevantStores.begin();
 	     it != potentiallyRelevantStores.end();
 	     it++) {
-		if (oracle->memoryAccessesMightAlias(opt, load, (StateMachineSideEffectStore *)*it))
+		if (oracle->memoryAccessesMightAlias(decode, opt, load, (StateMachineSideEffectStore *)*it))
 			return NULL;
 	}
 	/* If we get here then there are definitely no stores which
@@ -183,8 +188,10 @@ static StateMachine *
 useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
 		      OracleInterface *oracle, bool *done_something)
 {
+	CfgDecode decode;
+	decode.addMachine(sm);
 	ReachingMap rm;
-	if (!rm.initialise(sm, opt, oracle))
+	if (!rm.initialise(decode, sm, opt, oracle))
 		return sm;
 	UseReachingMap urm(rm, opt, oracle);
 	return urm.transform(sm, done_something);

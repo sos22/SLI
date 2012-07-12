@@ -3,6 +3,7 @@
 
 class DummyOracle : public OracleInterface {
 	CrashSummary *summary;
+	CfgDecode *decode;
 	void visit(HeapVisitor &hv) {
 		hv(summary);
 	}
@@ -20,16 +21,16 @@ class DummyOracle : public OracleInterface {
 	}
 
 public:
-	DummyOracle(CrashSummary *_summary)
-		: summary(_summary)
+	DummyOracle(CrashSummary *_summary, CfgDecode *_decode)
+		: summary(_summary), decode(_decode)
 	{}
-	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectLoad *l2) {
+	bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectLoad *l2) {
 		return memoryAccessesMightAlias(l1->rip, l2->rip);
 	}
-	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectStore *l2) {
+	bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectStore *l2) {
 		return memoryAccessesMightAlias(l1->rip, l2->rip);
 	}
-	bool memoryAccessesMightAlias(const AllowableOptimisations &, StateMachineSideEffectStore *l1, StateMachineSideEffectStore *l2) {
+	bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectStore *l1, StateMachineSideEffectStore *l2) {
 		return memoryAccessesMightAlias(l1->rip, l2->rip);
 	}
 	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) {
@@ -38,8 +39,8 @@ public:
 		for (auto it = summary->aliasing.begin();
 		     it != summary->aliasing.end();
 		     it++) {
-			if ((load == DynAnalysisRip(it->first.rip.rip) && store == DynAnalysisRip(it->second.rip.rip)) ||
-			    (store == DynAnalysisRip(it->first.rip.rip) && load == DynAnalysisRip(it->second.rip.rip)))
+			if ((load == decode->dr(it->first.where) && store == decode->dr(it->second.where)) ||
+			    (store == decode->dr(it->first.where) && load == decode->dr(it->second.where)))
 				return true;
 		}
 		return false;
@@ -48,7 +49,7 @@ public:
 		return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load),
 							   DynAnalysisRip(store));
 	}
-	bool hasConflictingRemoteStores(const AllowableOptimisations &, StateMachineSideEffectMemoryAccess *) {
+	bool hasConflictingRemoteStores(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectMemoryAccess *) {
 		return true;
 	}
 };

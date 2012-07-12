@@ -54,7 +54,8 @@ debug_dump(const std::set<t> &what, const char *prefix)
    up to maxPathLength2 provided that doing so doesn't cross any
    function heads. */
 static bool
-exploreForStartingRip(Oracle *oracle,
+exploreForStartingRip(CfgLabelAllocator &allocLabel,
+		      Oracle *oracle,
 		      const VexRip &startingVexRip,
 		      std::map<VexRip, CFGNode *> &out,
 		      std::set<const CFGNode *> &targetNodes,
@@ -80,7 +81,7 @@ exploreForStartingRip(Oracle *oracle,
 			pendingAtCurrentDepth.pop_back();
 			if (out.count(vr))
 				continue;
-			CFGNode *node = CfgNodeForRip<VexRip>(oracle, vr);
+			CFGNode *node = CfgNodeForRip<VexRip>(allocLabel(), oracle, vr);
 			if (firstInstr)
 				targetNodes.insert(node);
 			firstInstr = false;
@@ -163,23 +164,30 @@ exploreForStartingRip(Oracle *oracle,
 }
 
 static void
-initialExploration(Oracle *oracle, const DynAnalysisRip &targetRip,
+initialExploration(CfgLabelAllocator &allocLabel,
+		   Oracle *oracle,
+		   const DynAnalysisRip &targetRip,
 		   std::map<VexRip, CFGNode *> &out,
 		   std::set<const CFGNode *> &targetInstrs,
-		   unsigned maxPathLength1, unsigned maxPathLength2)
+		   unsigned maxPathLength1,
+		   unsigned maxPathLength2)
 {
 	std::set<VexRip> startingRips;
 	startingRips.insert(targetRip.toVexRip());
 	while (1) {
 		out.clear();
 		targetInstrs.clear();
+		allocLabel.reset();
 		std::set<VexRip> newStartingRips;
 		bool failed = false;
 		if (debug_exploration)
 			printf("initialExploration with %zd RIPs available\n",
 			       startingRips.size());
 		for (auto it = startingRips.begin(); it != startingRips.end(); it++) {
-			if (exploreForStartingRip(oracle, *it, out,
+			if (exploreForStartingRip(allocLabel,
+						  oracle,
+						  *it,
+						  out,
 						  targetInstrs,
 						  newStartingRips,
 						  maxPathLength1,
@@ -253,7 +261,8 @@ selectEdgeForCycleBreak(const CFGNode *start,
 }
 
 static void
-unrollAndCycleBreak(std::set<CFGNode *> &instrs,
+unrollAndCycleBreak(CfgLabelAllocator &allocLabel,
+		    std::set<CFGNode *> &instrs,
 		    const std::set<const CFGNode *> &targetInstrs,
 		    int maxPathLength)
 {
@@ -316,7 +325,7 @@ unrollAndCycleBreak(std::set<CFGNode *> &instrs,
 				   broken by maxPathLength. */
 				CFGNode *new_node;
 				/* Create new node */
-				new_node = cycle_edge_start->dupe();
+				new_node = cycle_edge_start->dupe(allocLabel());
 			
 				/* Maintain only edge to cycle_edge_end */
 				new_node->successors.clear();
@@ -602,8 +611,12 @@ findRoots(const std::set<CFGNode *> &allNodes,
 }
 
 static bool
-getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
-	    std::set<CFGNode *> &out, unsigned maxPathLength1,
+getProbeCFG(CfgLabelAllocator &allocLabel,
+	    Oracle *oracle,
+	    const DynAnalysisRip &targetInstr,
+	    std::set<CFGNode *> &out,
+	    std::set<const CFGNode *> &targetNodes,
+	    unsigned maxPathLength1,
 	    unsigned maxPathLength2)
 {
 	/* Step one: build a CFG backwards from @targetInstr until the
@@ -612,8 +625,7 @@ getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
 	VexRip dominator;
 
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
-	std::set<const CFGNode *> targetNodes;
-	initialExploration(oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength1, maxPathLength2);
+	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength1, maxPathLength2);
 
 	if (debug_exploration) {
 		printf("Initial ripsToCFGNodes table:\n");
@@ -634,7 +646,7 @@ getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
 		debug_dump(roots, "\t");
 	}
 
-	unrollAndCycleBreak(nodes, targetNodes, maxPathLength2);
+	unrollAndCycleBreak(allocLabel, nodes, targetNodes, maxPathLength2);
 
 	if (debug_exploration) {
 		std::set<CFGNode *> initialRoots;
@@ -658,7 +670,8 @@ getProbeCFG(Oracle *oracle, const DynAnalysisRip &targetInstr,
 };
 
 bool
-getProbeCFGs(Oracle *oracle, const DynAnalysisRip &vr, std::set<CFGNode *> &out)
+getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const DynAnalysisRip &vr, std::set<CFGNode *> &out,
+	     std::set<const CFGNode *> &targetNodes)
 {
-	return _getProbeCFGs::getProbeCFG(oracle, vr, out, PROBE_CLUSTER_THRESHOLD1, PROBE_CLUSTER_THRESHOLD2);
+	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, PROBE_CLUSTER_THRESHOLD1, PROBE_CLUSTER_THRESHOLD2);
 }

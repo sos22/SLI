@@ -134,21 +134,19 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 	} else {
 		return false;
 	}
-	std::vector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > aliasing;
+	std::vector<CrashSummary::aliasingEntryT> aliasing;
 	if (parseThisString("No aliasing information\n", buf, &buf)) {
 		/* Nothing */
 	} else if (parseThisString("Aliasing:\n", buf, &buf)) {
 		while (1) {
-			std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> thing(
-				MemoryAccessIdentifier::uninitialised(),
-				MemoryAccessIdentifier::uninitialised())
-;
-			if (!parseMemoryAccessIdentifier(&thing.first, buf, &buf) ||
+			MemoryAccessIdentifier w1(MemoryAccessIdentifier::uninitialised());
+			MemoryAccessIdentifier w2(MemoryAccessIdentifier::uninitialised());
+			if (!parseMemoryAccessIdentifier(&w1, buf, &buf) ||
 			    !parseThisString(" <-> ", buf, &buf) ||
-			    !parseMemoryAccessIdentifier(&thing.second, buf, &buf) ||
+			    !parseMemoryAccessIdentifier(&w2, buf, &buf) ||
 			    !parseThisChar('\n', buf, &buf))
 				break;
-			aliasing.push_back(thing);
+			aliasing.push_back(CrashSummary::aliasingEntryT(w1, w2));
 		}
 	} else {
 		return false;
@@ -161,6 +159,9 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 void
 CrashSummary::buildAliasingTable(Oracle *oracle)
 {
+	CfgDecode decode;
+	decode.addMachine(loadMachine);
+	decode.addMachine(storeMachine);
 	std::set<StateMachineSideEffectLoad *> loadLoads;
 	std::set<StateMachineSideEffectLoad *> storeLoads;
 	std::set<StateMachineSideEffectStore *> loadStores;
@@ -169,7 +170,7 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 	enumSideEffects(storeMachine, storeLoads);
 	enumSideEffects(loadMachine, loadStores);
 	enumSideEffects(storeMachine, storeStores);
-	std::set<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > res;
+	std::set<aliasingEntryT> res;
 
 	/* The aliasing table needs to contain complete information for the following
 	   interference classes:
@@ -183,12 +184,15 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 #define do_set(s)							\
 	for (auto it2 = s.begin(); it2 != s.end(); it2++) {		\
 		if (oracle->memoryAccessesMightAlias(			\
+			    decode,					\
 			    AllowableOptimisations::defaultOptimisations, \
 			    *it2, *it)) {				\
 			if ((*it)->rip < (*it2)->rip)			\
-				res.insert(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>((*it)->rip, (*it2)->rip)); \
+				res.insert(aliasingEntryT		\
+					   ((*it)->rip, (*it2)->rip));	\
 			else if ((*it)->rip != (*it2)->rip)		\
-				res.insert(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>((*it2)->rip, (*it)->rip)); \
+				res.insert(aliasingEntryT		\
+					   ((*it2)->rip, (*it)->rip));	\
 		}							\
 	}
 

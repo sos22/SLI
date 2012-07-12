@@ -118,9 +118,22 @@ parseMemoryAccessIdentifier(MemoryAccessIdentifier *out,
 			    const char *str,
 			    const char **suffix)
 {
-	if (!parseThreadRip(&out->rip, str, &str) ||
+	CfgLabel l(CfgLabel::uninitialised());
+	int tid;
+	int generation;
+	if (!l.parse(str, &str) ||
 	    !parseThisChar(':', str, &str) ||
-	    !parseDecimalUInt(&out->generation, str, suffix))
+	    !parseDecimalInt(&tid, str, &str) ||
+	    !parseThisChar(':', str, &str) ||
+	    !parseDecimalInt(&generation, str, suffix))
 		return false;
+	*out = MemoryAccessIdentifier(l, tid, generation);
 	return true;
+}
+
+bool
+CfgLabel::parse(const char *str, const char **suffix)
+{
+	return parseThisString("cfg", str, &str) &&
+		parseDecimalInt(&label, str, suffix);
 }

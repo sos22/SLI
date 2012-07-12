@@ -50,11 +50,8 @@ public:
 	}
 	void print(FILE *f) const
 	{
-		for (const_iterator it = begin();
-		     it != end();
-		     it++) {
+		for (auto it = begin(); it != end(); it++)
 			fprintf(f, "%s\t\t%d\n", it->first.name(), it->second);
-		}
 	}
 };
 

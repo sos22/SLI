@@ -102,7 +102,7 @@ IRSB* bb_to_IR ( unsigned tid,
                  /*IN*/ Bool             (*preamble_function)(void*,IRSB*))
 {
    Long       delta;
-   Int        i, n_instrs, first_stmt_idx;
+   Int        n_instrs, first_stmt_idx;
    Bool       resteerOK, need_to_put_IP, debug_print;
    DisResult  dres;
    IRStmt*    imark;
@@ -225,32 +225,6 @@ IRSB* bb_to_IR ( unsigned tid,
       vassert(imark->tag == Ist_IMark);
       vassert(((IRStmtIMark *)imark)->len == 0);
       ((IRStmtIMark *)imark)->len = toUInt(dres.len);
-
-      /* Print the resulting IR, if needed. */
-      if (vex_traceflags & VEX_TRACE_FE) {
-         for (i = first_stmt_idx; i < irsb->stmts_used; i++) {
-	    printf("              ");
-            ppIRStmt(irsb->stmts[i], stdout);
-            printf("\n");
-         }
-      }
-
-      /* If dis_instr_fn terminated the BB at this point, check it
-	 also filled in the irsb->next field. */
-      if (dres.whatNext == DisResult::Dis_StopHere) {
-         if (debug_print) {
-            printf("              ");
-            printf( "goto {");
-            ppIRJumpKind(irsb->jumpkind, stdout);
-            printf( "} ");
-	    if (irsb->next_is_const) {
-	      printf("const %s\n", irsb->next_const.name());
-	    } else {
-	      ppIRExpr( irsb->next_nonconst, stdout );
-	      printf( "\n");
-	    }
-         }
-      }
 
       n_instrs++;
       if (debug_print) 

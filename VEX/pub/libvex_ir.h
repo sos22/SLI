@@ -85,6 +85,40 @@ public:
 
 #include "libvex_rip.hpp"
 
+class CfgLabel : public Named {
+	friend class CfgLabelAllocator;
+	char *mkName() const { return my_asprintf("cfg%d", label); }
+	int label;
+	CfgLabel(int _label)
+		: label(_label)
+	{}
+public:
+	unsigned long hash() const { return (unsigned long)label * 300051181ul; }
+	static CfgLabel uninitialised() {
+		return CfgLabel(-1);
+	}
+	static CfgLabel noncfg() {
+		return CfgLabel(0);
+	}
+	bool operator<(const CfgLabel &o) const {
+		return label < o.label;
+	}
+	bool operator==(const CfgLabel &o) const {
+		return !(o < *this || *this < o);
+	}
+	bool parse(const char *str, const char **suffix);
+};
+
+class CfgLabelAllocator {
+	int cntr;
+public:
+	CfgLabelAllocator()
+		: cntr(1)
+	{}
+	CfgLabel operator()();
+	void reset();
+};
+
 /* Set by the SIGALRM (or whatever) signal handler when it wants us to
    finish what we're doing and get out quickly. */
 extern volatile bool _timed_out;
@@ -301,34 +335,26 @@ extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
 class MemoryAccessIdentifier : public Named {
 	char *mkName() const {
-		return my_asprintf("%s:%d", rip.name(), generation);
+		return my_asprintf("%s:%d:%d", where.name(), tid, generation);
 	}
-	MemoryAccessIdentifier() : generation(-1) {}
 public:
-	static const unsigned static_generation = 1;
-	static const unsigned initial_value_generation = 2;
-	static const unsigned first_dynamic_generation = 3;
-	ThreadRip rip;
-	unsigned generation;
-	unsigned long hash() const { return rip.hash() * 200010011 + generation * 200021863; }
+	CfgLabel where;
+	int tid;
+	int generation;
+	unsigned long hash() const { return (unsigned long)where.hash() * 200010011 + tid * 200021863 + generation * 200030681; }
 	void sanity_check() const {
-		assert(generation != 0);
-		rip.sanity_check();
-		if (generation != initial_value_generation) {
-			assert(rip.thread != 0);
-			assert(rip.rip.isValid());
-		}
+		assert(generation >= 0);
 	}
 	bool operator==(const MemoryAccessIdentifier &other) const {
-		return rip == other.rip && generation == other.generation;
+		return where == other.where && tid == other.tid && generation == other.generation;
 	}
 	bool operator<(const MemoryAccessIdentifier &other) const {
-		return rip < other.rip ||
-			(rip == other.rip && generation < other.generation);
+		return tid < other.tid ||
+			(tid == other.tid && generation < other.generation) ||
+			(tid == other.tid && generation == other.generation && where < other.where);
 	}
 	bool operator<=(const MemoryAccessIdentifier &other) const {
-		return rip < other.rip ||
-			(rip == other.rip && generation <= other.generation);
+		return !(other < *this);
 	}
 	bool operator>(const MemoryAccessIdentifier &other) const {
 		return other < *this;
@@ -336,15 +362,11 @@ public:
 	bool operator!=(const MemoryAccessIdentifier &other) const {
 		return !(*this == other);
 	}
-	explicit MemoryAccessIdentifier(const ThreadRip &r, unsigned _generation)
-		: rip(r), generation(_generation)
+	MemoryAccessIdentifier(const CfgLabel &_where, int _tid, int _generation)
+		: where(_where), tid(_tid), generation(_generation)
 	{}
-
 	static MemoryAccessIdentifier uninitialised(void) {
-		return MemoryAccessIdentifier();
-	}
-	static MemoryAccessIdentifier initial_value(void) {
-		return MemoryAccessIdentifier(ThreadRip(), initial_value_generation);
+		return MemoryAccessIdentifier(CfgLabel::uninitialised(), -1, -1);
 	}
 };
 bool parseMemoryAccessIdentifier(MemoryAccessIdentifier *, const char *, const char **);
@@ -1776,8 +1798,8 @@ struct IRExprHappensBefore : public IRExpr {
     void prettyPrint(FILE *f) const;
     IRType type() const { return Ity_I1; }
     void sanity_check() const {
-	before.sanity_check();
-	after.sanity_check();
+	    before.sanity_check();
+	    after.sanity_check();
     }
 };
 
@@ -2360,7 +2382,7 @@ struct IRStmtCAS : public IRStmt{
       {}
       void visit(HeapVisitor &hv) { hv(details); }
       void prettyPrint(FILE *f) const {
-         ppIRCAS(details, f);
+	 ppIRCAS(details, f);
       }
 };
 
@@ -2382,7 +2404,7 @@ struct IRStmtDirty : public IRStmt {
       {}
       void visit(HeapVisitor &hv) {hv(details);}
       void prettyPrint(FILE *f) const {
-         ppIRDirty(details, f);
+	  ppIRDirty(details, f);
       }
 };
 

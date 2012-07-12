@@ -248,6 +248,7 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 
 		p = false;
 		removeRedundantStores(sm, oracle, &p, aliasp, opt);
+		sm->sanityCheck();
 		if (debugOptimiseStateMachine && p) {
 			printf("removeRedundantStores:\n");
 			printStateMachine(sm, stdout);
@@ -382,10 +383,12 @@ getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> 
 		fprintf(_logfile, "\t\tNo loads left in store machine?\n");
 		return;
 	}
+	CfgDecode decode;
+	decode.addMachine(sm);
 	for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 	     it != allLoads.end();
 	     it++) {
-		oracle->findConflictingStores(*it, potentiallyConflictingStores);
+		oracle->findConflictingStores(decode, *it, potentiallyConflictingStores);
 	}
 }
 
@@ -410,6 +413,10 @@ singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachi
 	enumSideEffects(storeMachine, storeMachineStores);
 	enumSideEffects(probeMachine, probeMachineLoads);
 
+	CfgDecode decode;
+	decode.addMachine(storeMachine);
+	decode.addMachine(probeMachine);
+
 	StateMachineSideEffectStore *racingStore = NULL;
 	StateMachineSideEffectLoad *racingLoad = NULL;
 	for (auto it = storeMachineStores.begin(); it != storeMachineStores.end(); it++) {
@@ -419,7 +426,7 @@ singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachi
 		     !races && it2 != probeMachineLoads.end();
 		     it2++) {
 			StateMachineSideEffectLoad *load = *it2;
-			if (oracle->memoryAccessesMightAlias(opt, load, store)) {
+			if (oracle->memoryAccessesMightAlias(decode, opt, load, store)) {
 				if (racingLoad) {
 					/* Multiple racing loads */
 					return false;
@@ -456,7 +463,7 @@ singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachi
 		StateMachineSideEffectLoad *load = *it;
 		if (racingLoad == load)
 			continue;
-		if (oracle->memoryAccessesMightAlias(opt, load, racingStore))
+		if (oracle->memoryAccessesMightAlias(decode, opt, load, racingStore))
 			return false;
 	}
 
@@ -646,9 +653,11 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 static StateMachine *
 truncateStateMachine(StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
 {
+	CfgDecode decode;
+	decode.addMachine(sm);
 	StateMachineBifurcate *smb =
 		new StateMachineBifurcate(
-			truncateAt->rip.rip.rip,
+			decode(truncateAt->rip.where)->rip,
 			IRExpr_Unop(
 				Iop_BadPtr,
 				truncateAt->addr),
@@ -664,7 +673,7 @@ truncateStateMachine(StateMachine *sm, StateMachineSideEffectMemoryAccess *trunc
 	StateMachineTransformer::rewriteMachine(sm, rewriteRules, false);
 	assert(rewriteRules.count(sm->root));
 	assert(rewriteRules[sm->root] != sm->root);
-	return new StateMachine(rewriteRules[sm->root], sm->origin);
+	return new StateMachine(rewriteRules[sm->root], sm->origin, sm->cfg_roots);
 }
 
 static void
@@ -690,6 +699,9 @@ localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 {
 	std::set<DynAnalysisRip> nonLocalLoads;
 	{
+		CfgDecode decode;
+		decode.addMachine(probeMachine);
+		decode.addMachine(storeMachine);
 		std::set<StateMachineSideEffectStore *> stores;
 		enumSideEffects(storeMachine, stores);
 		std::set<StateMachineSideEffectLoad *> loads;
@@ -699,11 +711,11 @@ localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 			bool found_one = false;
 			for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
 				StateMachineSideEffectStore *store = *it2;
-				if (oracle->memoryAccessesMightAlias(opt, load, store))
+				if (oracle->memoryAccessesMightAlias(decode, opt, load, store))
 					found_one = true;
 			}
 			if (found_one)
-				nonLocalLoads.insert(DynAnalysisRip(load->rip.rip.rip));
+				nonLocalLoads.insert(decode.dr(load->rip.where));
 		}
 	}
 	return optimiseStateMachine(
@@ -725,6 +737,8 @@ localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 {
 	std::set<DynAnalysisRip> nonLocalLoads;
 	{
+		CfgDecode decode;
+		decode.addMachine(probeMachine);
 		std::set<StateMachineSideEffectLoad *> loads;
 		enumSideEffects(probeMachine, loads);
 		for (auto it = loads.begin(); it != loads.end(); it++) {
@@ -732,11 +746,11 @@ localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 			bool found_one = false;
 			for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
 				DynAnalysisRip store = *it2;
-				if (oracle->memoryAccessesMightAliasCrossThread(DynAnalysisRip(load->rip.rip.rip), store))
+				if (oracle->memoryAccessesMightAliasCrossThread(decode.dr(load->rip.where), store))
 					found_one = true;
 			}
 			if (found_one)
-				nonLocalLoads.insert(DynAnalysisRip(load->rip.rip.rip));
+				nonLocalLoads.insert(decode.dr(load->rip.where));
 		}
 	}
 	return optimiseStateMachine(
@@ -818,6 +832,10 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		return NULL;
 	}
 
+	CfgDecode decode;
+	decode.addMachine(probeMachine);
+	decode.addMachine(sm_ssa);
+
 	/* Now have a look at whether we have anything we can use the
 	 * induction rule on.  That means look at the probe machine
 	 * and pulling out all of the loads which are present in the
@@ -831,7 +849,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		enumSideEffects(probeMachine, probeAccesses);
 		std::set<StateMachineSideEffectMemoryAccess *> typeDbProbeAccesses;
 		for (auto it = probeAccesses.begin(); it != probeAccesses.end(); it++) {
-			DynAnalysisRip dr((*it)->rip.rip.rip);
+			DynAnalysisRip dr(decode.dr((*it)->rip.where));
 			if (oracle->type_index->ripPresent(dr))
 				typeDbProbeAccesses.insert(*it);
 		}
@@ -884,11 +902,11 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		residual_verification_condition =
 			simplifyIRExpr(residual_verification_condition, optIn);
 		fprintf(_logfile, "After simplification: ");
-		ppIRExpr(residual_verification_condition, _logfile);
+		ppIRExpr(residual_verification_condition,  _logfile);
 		fprintf(_logfile, "\n");
 		logUseOfInduction(
 			target_rip,
-			DynAnalysisRip(inductionAccesses[x]->rip.rip.rip));
+			decode.dr(inductionAccesses[x]->rip.where));
 		if (residual_verification_condition->tag == Iex_Const &&
 		    ((IRExprConst *)residual_verification_condition.get())->con->Ico.U1 == 0) {
 			fprintf(_logfile, "\t\tCrash impossible.\n");
@@ -927,7 +945,8 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 }
 
 bool
-buildProbeMachine(const VexPtr<Oracle> &oracle,
+buildProbeMachine(CfgLabelAllocator &allocLabel,
+		  const VexPtr<Oracle> &oracle,
 		  const DynAnalysisRip &targetRip,
 		  ThreadId tid,
 		  const AllowableOptimisations &optIn,
@@ -948,12 +967,16 @@ buildProbeMachine(const VexPtr<Oracle> &oracle,
 	unsigned nr_sms;
 	{
 		std::set<CFGNode *> roots;
-		if (!getProbeCFGs(oracle, targetRip, roots)) {
+		std::set<const CFGNode *> proximalNodes;
+		if (!getProbeCFGs(allocLabel, oracle, targetRip, roots, proximalNodes)) {
 			fprintf(_logfile, "Cannot get probe CFGs!\n");
 			return false;
 		}
 		std::set<StateMachine *> machines;
-		probeCFGsToMachine(oracle, tid._tid(), roots, targetRip, mai,
+		probeCFGsToMachine(oracle, tid._tid(),
+				   roots,
+				   proximalNodes,
+				   mai,
 				   machines);
 		sms = (StateMachine **)__LibVEX_Alloc_Ptr_Array(&ir_heap, machines.size());
 		nr_sms = 0;
@@ -1007,12 +1030,14 @@ isSingleNodeCfg(CFGNode *root)
 static bool
 machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, OracleInterface *oracle)
 {
+	CfgDecode decode;
+	decode.addMachine(sm);
 	std::set<StateMachineSideEffectLoad *> loads;
 	enumSideEffects(sm, loads);
 	bool got_one = false;
 	for (auto it = loads.begin(); it != loads.end(); it++) {
 		StateMachineSideEffectLoad *load = *it;
-		if (oracle->memoryAccessesMightAliasCrossThread(load->rip.rip.rip, vr)) {
+		if (oracle->memoryAccessesMightAliasCrossThread(decode(load->rip.where)->rip, vr)) {
 			if (got_one)
 				return false;
 			got_one = true;
@@ -1025,7 +1050,8 @@ machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, OracleInterface *ora
 }
 
 static bool
-probeMachineToSummary(const DynAnalysisRip &targetRip,
+probeMachineToSummary(CfgLabelAllocator &allocLabel,
+		      const DynAnalysisRip &targetRip,
 		      const VexPtr<StateMachine, &ir_heap> &probeMachine,
 		      const VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      const VexPtr<Oracle> &oracle,
@@ -1042,7 +1068,7 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 	int nrStoreCfgs;
 	{
 		CFGNode **n;
-		getStoreCFGs(potentiallyConflictingStores, oracle, &n, &nrStoreCfgs);
+		getStoreCFGs(allocLabel, potentiallyConflictingStores, oracle, &n, &nrStoreCfgs);
 		storeCFGs = n;
 	}
 	if (TIMEOUT)
@@ -1087,7 +1113,8 @@ probeMachineToSummary(const DynAnalysisRip &targetRip,
 }
 
 bool
-diagnoseCrash(const DynAnalysisRip &targetRip,
+diagnoseCrash(CfgLabelAllocator &allocLabel,
+	      const DynAnalysisRip &targetRip,
 	      VexPtr<StateMachine, &ir_heap> probeMachine,
 	      const VexPtr<Oracle> &oracle,
 	      FixConsumer &df,
@@ -1170,7 +1197,8 @@ diagnoseCrash(const DynAnalysisRip &targetRip,
 		return NULL;
 	}
 
-	return probeMachineToSummary(targetRip,
+	return probeMachineToSummary(allocLabel,
+				     targetRip,
 				     probeMachine,
 				     reducedProbeMachine,
 				     oracle,
@@ -1260,16 +1288,18 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		.enablenoExtend();
 	VexPtr<StateMachine *, &ir_heap> probeMachines;
 	unsigned nrProbeMachines;
+	CfgLabelAllocator allocLabel;
 	{
 		StateMachine **_probeMachines;
-		if (!buildProbeMachine(oracle, targetRip, tid, opt, &_probeMachines, &nrProbeMachines, mai,
+		if (!buildProbeMachine(allocLabel, oracle, targetRip, tid, opt,
+				       &_probeMachines, &nrProbeMachines, mai,
 				       token))
 			return;
 		probeMachines = _probeMachines;
 	}
 	for (unsigned x = 0; x < nrProbeMachines; x++) {
 		VexPtr<StateMachine, &ir_heap> probeMachine(probeMachines[x]);
-		diagnoseCrash(targetRip, probeMachine, oracle,
+		diagnoseCrash(allocLabel, targetRip, probeMachine, oracle,
 			      df, false, opt.enablenoLocalSurvival(),
 			      mai, token);
 	}

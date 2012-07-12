@@ -35,18 +35,28 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 {
 	AddressSpace *as = oracle->ms->addressSpace;
 
+	CfgDecode decode;
+	decode.addMachine(summary->loadMachine);
+
 	/* What instructions do we need to cover? */
-	std::set<VexRip> neededInstructions;
-	summary->loadMachine->root->enumerateMentionedMemoryAccesses(neededInstructions);
+	std::set<MemoryAccessIdentifier> neededMais;
+	summary->loadMachine->root->enumerateMentionedMemoryAccesses(neededMais);
 	assert(summary->loadMachine->origin.size() == 1);
 	unsigned tid = summary->loadMachine->origin[0].first;
+	std::set<VexRip> neededInstructions;
+	for (auto it = neededMais.begin(); it != neededMais.end(); it++)
+		neededInstructions.insert(decode(it->where)->rip);
 	/* 5 bytes is the size of a 32-bit relative jump. */
 	ThreadVexRip root(tid, oracle->dominator(neededInstructions, as, 5));
 	if (!root.rip.isValid()) {
 		fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
 		return NULL;
 	}
-	summary->storeMachine->root->enumerateMentionedMemoryAccesses(neededInstructions);
+
+	decode.addMachine(summary->storeMachine);
+	summary->storeMachine->root->enumerateMentionedMemoryAccesses(neededMais);
+	for (auto it = neededMais.begin(); it != neededMais.end(); it++)
+		neededInstructions.insert(decode(it->where)->rip);
 
 	DcdCFG *cfg = new DcdCFG(as, neededInstructions);
 
@@ -55,8 +65,11 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	cfg->add_root(root, 100);
 	roots.insert(root);
 
+	std::set<MemoryAccessIdentifier> mais;
+	summary->storeMachine->root->enumerateMentionedMemoryAccesses(mais);
 	std::set<VexRip> instrs;
-	summary->storeMachine->root->enumerateMentionedMemoryAccesses(instrs);
+	for (auto it = mais.begin(); it != mais.end(); it++)
+		instrs.insert(decode(it->where)->rip);
 	assert( summary->storeMachine->origin.size() == 1);
 	ThreadVexRip r(summary->storeMachine->origin[0].first, oracle->dominator(instrs, as, 5));
 	if (!r.rip.isValid()) {
@@ -66,8 +79,9 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 	cfg->add_root(r, 100);
 	roots.insert(r);
 
+	CfgLabelAllocator allocLabel;
 	try {
-		cfg->doit();
+		cfg->doit(allocLabel);
 	} catch (NotImplementedException &e) {
 		/* This means that there's some instruction we can't
 		   decode.  Dump a diagnostic and just continue on. */
@@ -77,7 +91,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 		return NULL;
 	}
 	PatchFragment<ThreadRip> *pf = new PatchFragment<ThreadRip>(roots);
-	pf->fromCFG(cfg);
+	pf->fromCFG(allocLabel, cfg);
 
 	return pf->asC(ident);
 }

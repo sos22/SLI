@@ -113,7 +113,10 @@ main(int argc, char *argv[])
 	char *first_line;
 
 	summary = readBugReport(argv[1], &first_line);
-	VexPtr<OracleInterface> oracle(new DummyOracle(summary));
+	CfgDecode decode;
+	decode.addMachine(summary->loadMachine);
+	decode.addMachine(summary->storeMachine);
+	VexPtr<OracleInterface> oracle(new DummyOracle(summary, &decode));
 
 	summary = canonicalise_crash_summary(
 		summary,

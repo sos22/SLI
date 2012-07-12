@@ -9,6 +9,7 @@
 #include "oracle_rip.hpp"
 #include "typesdb.hpp"
 #include "libvex_parse.h"
+#include "cfgnode.hpp"
 
 class StateMachine;
 class StateMachineSideEffect;
@@ -30,19 +31,25 @@ class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 public:
 	StateMachineState *root;
 	std::vector<std::pair<unsigned, VexRip> > origin;
+	std::vector<const CFGNode *> cfg_roots;
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
-	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin)
-		: root(_root), origin(_origin)
+	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin,
+		     const std::vector<const CFGNode *> &_cfg_roots)
+		: root(_root), origin(_origin), cfg_roots(_cfg_roots)
 	{
 	}
 	StateMachine(StateMachine *parent)
-		: root(parent->root), origin(parent->origin)
+		: root(parent->root), origin(parent->origin), cfg_roots(parent->cfg_roots)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       bool *done_something);
-	void visit(HeapVisitor &hv) { hv(root); }
+	void visit(HeapVisitor &hv) {
+		hv(root);
+		for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++)
+			hv(*it);
+	}
 #ifdef NDEBUG
 	void sanityCheck() const {}
 	void assertAcyclic() const {}
@@ -125,8 +132,10 @@ public:
 	void targets(std::queue<StateMachineState *> &out);
 	enum RoughLoadCount { noLoads, singleLoad, multipleLoads };
 	RoughLoadCount roughLoadCount(RoughLoadCount acc = noLoads) const;
-	void enumerateMentionedMemoryAccesses(std::set<VexRip> &out);
-	virtual void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const = 0;
+	void enumerateMentionedMemoryAccesses(std::set<MemoryAccessIdentifier> &out);
+	virtual void prettyPrint(
+		FILE *f,
+		std::map<const StateMachineState *, int> &labels) const = 0;
 
 	virtual StateMachineSideEffect *getSideEffect() = 0;
 	virtual const StateMachineSideEffect *getSideEffect() const {
@@ -143,7 +152,7 @@ public:
 	NAMED_CLASS
 };
 
-class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap>, public PrettyPrintable {
+class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap> {
 	StateMachineSideEffect(); /* DNE */
 public:
 #define all_side_effect_types(f)		\
@@ -172,6 +181,7 @@ public:
 	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
 	virtual void inputExpressions(std::vector<IRExpr *> &exprs) = 0;
+	virtual void prettyPrint(FILE *f) const = 0;
 	static bool parse(StateMachineSideEffect **out, const char *str, const char **suffix);
 	NAMED_CLASS
 };
@@ -213,12 +223,12 @@ public:
 class StateMachineCrash : public StateMachineTerminal {
 	StateMachineCrash() : StateMachineTerminal(VexRip(), StateMachineState::Crash) {}
 	static VexPtr<StateMachineCrash, &ir_heap> _this;
+	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
 public:
 	static StateMachineCrash *get() {
 		if (!_this) _this = new StateMachineCrash();
 		return _this;
 	}
-	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
 	static bool parse(StateMachineCrash **out, const char *str, const char **suffix)
 	{
 		if (parseThisString("<crash>", str, suffix)) {
@@ -232,12 +242,12 @@ public:
 class StateMachineNoCrash : public StateMachineTerminal {
 	StateMachineNoCrash() : StateMachineTerminal(VexRip(), StateMachineState::NoCrash) {}
 	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
+	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
 public:
 	static StateMachineNoCrash *get() {
 		if (!_this) _this = new StateMachineNoCrash();
 		return _this;
 	}
-	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
 	static bool parse(StateMachineNoCrash **out, const char *str, const char **suffix)
 	{
 		if (parseThisString("<survive>", str, suffix)) {
@@ -448,6 +458,7 @@ public:
 	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
 		sanityCheckIRExpr(addr, live);
 		assert(addr->type() == Ity_I64);
+		rip.sanity_check();
 	}
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
@@ -455,6 +466,11 @@ class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 public:
 	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const MemoryAccessIdentifier &_rip)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
+		  data(_data)
+	{
+	}
+	StateMachineSideEffectStore(const StateMachineSideEffectStore *base, IRExpr *_addr, IRExpr *_data)
+		: StateMachineSideEffectMemoryAccess(_addr, base->rip, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
@@ -466,18 +482,20 @@ public:
 		ppIRExpr(data, f);
 		fprintf(f, " @ %s", rip.name());
 	}
-	static bool parse(StateMachineSideEffectStore **out, const char *str, const char **suffix)
+	static bool parse(StateMachineSideEffectStore **out,
+			  const char *str,
+			  const char **suffix)
 	{
 		IRExpr *addr;
 		IRExpr *data;
-		MemoryAccessIdentifier where(MemoryAccessIdentifier::uninitialised());
+		MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
 		if (parseThisString("*(", str, &str) &&
 		    parseIRExpr(&addr, str, &str) &&
 		    parseThisString(") <- ", str, &str) &&
 		    parseIRExpr(&data, str, &str) &&
 		    parseThisString(" @ ", str, &str) &&
-		    parseMemoryAccessIdentifier(&where, str, suffix)) {
-			*out = new StateMachineSideEffectStore(addr, data, where);
+		    parseMemoryAccessIdentifier(&rip, str, suffix)) {
+			*out = new StateMachineSideEffectStore(addr, data, rip);
 			return true;
 		}
 		return false;
@@ -516,6 +534,14 @@ public:
 		  target(reg), type(_type)
 	{
 	}
+	StateMachineSideEffectLoad(StateMachineSideEffectLoad *base, const threadAndRegister &_reg)
+		: StateMachineSideEffectMemoryAccess(base->addr, base->rip, StateMachineSideEffect::Load),
+		  target(_reg), type(base->type)
+	{}
+	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, IRExpr *_addr)
+		: StateMachineSideEffectMemoryAccess(_addr, base->rip, StateMachineSideEffect::Load),
+		  target(base->target), type(base->type)
+	{}
 	threadAndRegister target;
 	IRType type;
 	void prettyPrint(FILE *f) const {
@@ -527,12 +553,14 @@ public:
 		ppIRExpr(addr, f);
 		fprintf(f, ")@%s", rip.name());
 	}
-	static bool parse(StateMachineSideEffectLoad **out, const char *str, const char **suffix)
+	static bool parse(StateMachineSideEffectLoad **out,
+			  const char *str,
+			  const char **suffix)
 	{
 		IRExpr *addr;
 		threadAndRegister key(threadAndRegister::invalid());
-		MemoryAccessIdentifier where(MemoryAccessIdentifier::uninitialised());
 		IRType type;
+		MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
 		if (parseThisString("LOAD ", str, &str) &&
 		    parseThreadAndRegister(&key, str, &str) &&
 		    parseThisString(":", str, &str) &&
@@ -540,8 +568,8 @@ public:
 		    parseThisString(" <- *(", str, &str) &&
 		    parseIRExpr(&addr, str, &str) &&
 		    parseThisString(")@", str, &str) &&
-		    parseMemoryAccessIdentifier(&where, str, suffix)) {
-			*out = new StateMachineSideEffectLoad(key, addr, where, type);
+		    parseMemoryAccessIdentifier(&rip, str, suffix)) {
+			*out = new StateMachineSideEffectLoad(key, addr, rip, type);
 			return true;
 		}
 		return false;
@@ -891,11 +919,13 @@ public:
 };
 
 void printStateMachine(const StateMachine *sm, FILE *f);
-void printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels);
+void printStateMachine(const StateMachine *sm, FILE *f,
+		       std::map<const StateMachineState *, int> &labels);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
-bool parseStateMachine(StateMachine **out, const char *str, const char **suffix);
+bool parseStateMachine(StateMachine **out,
+		       const char *str, const char **suffix);
 StateMachine *readStateMachine(int fd);
 
 class MemoryAccessIdentifierAllocator;

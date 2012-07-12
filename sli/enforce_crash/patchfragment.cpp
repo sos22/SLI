@@ -2,9 +2,9 @@
 #include "enforce_crash.hpp"
 
 void
-EnforceCrashPatchFragment::generateEpilogue(ClientRip exitRip)
+EnforceCrashPatchFragment::generateEpilogue(const CfgLabel &l, ClientRip exitRip)
 {
-	Instruction<ClientRip> *i = Instruction<ClientRip>::pseudo(exitRip);
+	Instruction<ClientRip> *i = Instruction<ClientRip>::pseudo(l, exitRip);
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
 
@@ -13,7 +13,7 @@ EnforceCrashPatchFragment::generateEpilogue(ClientRip exitRip)
 	     it != edges.end();
 	     it++) {
 		const happensBeforeEdge *hb = *it;
-		if (exitRip.origThreads.count(hb->before.thread))
+		if (exitRip.origThreads.count(hb->before.tid))
 			msg_ids.insert(hb->msg_id);
 	}
 

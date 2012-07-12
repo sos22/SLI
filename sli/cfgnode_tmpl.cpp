@@ -76,12 +76,12 @@ printCFG(const Instruction<t> *cfg, FILE *f)
 }
 
 template <typename t> Instruction<t> *
-CfgNodeForRip(Oracle *oracle, const VexRip &vr)
+CfgNodeForRip(const CfgLabel &label, Oracle *oracle, const VexRip &vr)
 {
 	IRSB *irsb = oracle->getIRSBForRip(vr);
 	if (!irsb)
 		return NULL;
-	Instruction<t> *work = new Instruction<t>(-1);
+	Instruction<t> *work = new Instruction<t>(-1, label);
 	work->rip = vr;
 	int x;
 	for (x = 1; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {

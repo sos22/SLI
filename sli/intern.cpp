@@ -430,6 +430,8 @@ StateMachine *
 internStateMachine(StateMachine *sm, internStateMachineTable &t)
 {
 	__set_profiling(internStateMachine);
+	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
+		*it = internCFG(*it, t);
 	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }
@@ -439,4 +441,30 @@ internStateMachine(StateMachine *sm)
 {
 	internStateMachineTable t;
 	return internStateMachine(sm, t);
+}
+
+const CFGNode *
+internCFG(const CFGNode *inp, internStateMachineTable &t)
+{
+	auto it_did_insert = t.cfgNodes.insert(std::pair<const CFGNode *, const CFGNode *>(inp, inp));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert)
+		return it->second;
+	/* We modify a const structure here.  That's fine, because the
+	   new structure is semantically the same as the old one. */
+	for (auto it = inp->successors.begin(); it != inp->successors.end(); it++)
+		if (it->instr)
+			(const_cast<CFGNode::successor_t *>(&*it))->instr = const_cast<CFGNode *>(internCFG(it->instr, t));
+	for (auto it2 = t.cfgNodesS.begin(); it2 != t.cfgNodesS.end(); it2++) {
+		const CFGNode *other = *it2;
+		if (other->label == inp->label &&
+		    other->rip == inp->rip &&
+		    other->successors == inp->successors) {
+			it->second = other;
+			return other;
+		}
+	}
+	t.cfgNodesS.insert(inp);
+	return inp;
 }

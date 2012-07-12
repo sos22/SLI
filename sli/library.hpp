@@ -1,6 +1,8 @@
 #ifndef LIBRARY_HPP__
 #define LIBRARY_HPP__
 
+#include "libvex_parse.h"
+
 namespace LibraryFunctionTemplate {
 #define enum_library_function_templates(f)	\
 	f(__cxa_atexit)				\
@@ -46,6 +48,17 @@ namespace LibraryFunctionTemplate {
 		enum_library_function_templates(do_one);
 #undef do_one
 		return none;
+	}
+
+	static inline bool parse(enum __type *out, const char *str, const char **suffix) {
+#define do_one(n)						\
+		if (parseThisString(#n, str, suffix)) {		\
+			*out = n;				\
+			return true;				\
+		}
+		enum_library_function_templates(do_one);
+#undef do_one
+		return false;
 	}
 #undef enum_library_function_templates
 };

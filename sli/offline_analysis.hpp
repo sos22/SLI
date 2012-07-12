@@ -248,7 +248,6 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     FixConsumer &df,
 				     GarbageCollectionToken token);
 
-StateMachineState *getProximalCause(MachineState *ms, const ThreadRip &rip,
-				    MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier);
+StateMachineState *getProximalCause(MachineState *ms, MemoryAccessIdentifierAllocator &mai, const CfgLabel &where, const VexRip &rip, int tid);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

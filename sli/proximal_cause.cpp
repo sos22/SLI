@@ -9,12 +9,14 @@
 namespace ProximalCause {
 
 static StateMachineState *
-getProximalCause(MachineState *ms, const ThreadRip &rip,
-		 MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier)
+getProximalCause(MachineState *ms,
+		 const VexRip &rip,
+		 MemoryAccessIdentifierAllocator &mai,
+		 const CfgLabel &where, int tid)
 {
 	IRSB *irsb;
 	try {
-		irsb = ms->addressSpace->getIRSBForAddress(rip);
+		irsb = ms->addressSpace->getIRSBForAddress(ThreadRip(tid, rip));
 	} catch (BadMemoryException &e) {
 		/* If we can't decode the block then we assume the
 		   problem was an instruction fetch fault, and produce
@@ -30,29 +32,29 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 
 	class _ {
 	public:
-		const ThreadRip &rip;
+		const VexRip &rip;
 		StateMachineState *&work;
 		void operator()(IRExpr *condition, StateMachineState *target) {
 			work = new StateMachineBifurcate(
-				rip.rip,
+				rip,
 				condition,
 				target,
 				work);
 		}
-		_(const ThreadRip &_rip, StateMachineState *&_work)
+		_(const VexRip &_rip, StateMachineState *&_work)
 			: rip(_rip), work(_work)
 		{}
 	} conditionalBranch(rip, work);
 	struct _2 {
-		const ThreadRip &rip;
+		const VexRip &rip;
 		StateMachineState *&work;
 		void operator()(StateMachineSideEffect *se) {
 			work = new StateMachineSideEffecting(
-				rip.rip,
+				rip,
 				se,
 				work);
 		}
-		_2(const ThreadRip &_rip, StateMachineState *&_work)
+		_2(const VexRip &_rip, StateMachineState *&_work)
 			: rip(_rip), work(_work)
 		{}
 	} prependSideEffect(rip, work);
@@ -89,7 +91,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					getMemoryAccessIdentifier(rip)));
+					mai(where, tid)));
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, ist->addr),
 					  StateMachineCrash::get());
 			break;
@@ -111,51 +113,51 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 			   l7: old <- t
 			*/
 			IRTemp t = newIRTemp(irsb->tyenv);
-			threadAndRegister tr = threadAndRegister::temp(rip.thread, t, 0);
+			threadAndRegister tr = threadAndRegister::temp(tid, t, 0);
 			IRType ty = cas->expdLo->type();
 			IRExpr *t_expr = IRExpr_Get(tr, ty);
 			StateMachineSideEffecting *l7 =
 				new StateMachineSideEffecting(
-					rip.rip,
+					rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
 						t_expr),
 					work);
 			StateMachineSideEffecting *l6 =
 				new StateMachineSideEffecting(
-					rip.rip,
+					rip,
 					StateMachineSideEffectEndAtomic::get(),
 					l7);
 			StateMachineSideEffecting *l5 =
 				new StateMachineSideEffecting(
-					rip.rip,
+					rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
 						t_expr),
 					l6);
 			StateMachineBifurcate *l4 =
 				new StateMachineBifurcate(
-					rip.rip,
+					rip,
 					expr_eq(t_expr, cas->expdLo),
 					l5,
 					l6);
 			StateMachineSideEffecting *l3 =
 				new StateMachineSideEffecting(
-					rip.rip,
+					rip,
 					new StateMachineSideEffectLoad(
 						tr,
 						cas->addr,
-						getMemoryAccessIdentifier(rip),
+						mai(where, tid),
 						ty),
 					l4);
 			StateMachineSideEffecting *l2 =
 				new StateMachineSideEffecting(
-					rip.rip,
+					rip,
 					StateMachineSideEffectStartAtomic::get(),
 					l3);
 			StateMachineBifurcate *l1 =
 				new StateMachineBifurcate(
-					rip.rip,
+					rip,
 					IRExpr_Unop(Iop_BadPtr, cas->addr),
 					StateMachineCrash::get(),
 					l2);
@@ -180,7 +182,7 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],
-					getMemoryAccessIdentifier(rip),
+					mai(where, tid),
 					ity));
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, dirty->args[0]),
 					  StateMachineCrash::get());
@@ -209,8 +211,11 @@ getProximalCause(MachineState *ms, const ThreadRip &rip,
 }
 
 StateMachineState *
-getProximalCause(MachineState *ms, const ThreadRip &rip,
-		 MemoryAccessIdentifierAllocator &getMemoryAccessIdentifier)
+getProximalCause(MachineState *ms,
+		 MemoryAccessIdentifierAllocator &mai,
+		 const CfgLabel &where,
+		 const VexRip &rip,
+		 int tid)
 {
-	return ProximalCause::getProximalCause(ms, rip, getMemoryAccessIdentifier);
+	return ProximalCause::getProximalCause(ms, rip, mai, where, tid);
 }

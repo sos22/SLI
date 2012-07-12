@@ -101,7 +101,7 @@ public:
 
 	void invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve);
 
-	void findAllPotentiallyAvailable(StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle);
+	void findAllPotentiallyAvailable(CfgDecode &decode, StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle);
 
 	int nr_asserts() const {
 		int cntr = 0;
@@ -400,7 +400,9 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 }
 
 static void
-updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
+updateAvailSetForSideEffect(CfgDecode &decode,
+			    avail_t &outputAvail,
+			    StateMachineSideEffect *smse,
 			    const AllowableOptimisations &opt,
 			    const Oracle::RegisterAliasingConfiguration *alias,
 			    OracleInterface *oracle)
@@ -431,8 +433,8 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 
 			if ( addr &&
 			     (!alias || alias->ptrsMightAlias(addr, smses->addr)) &&
-			     ((smses2 && oracle->memoryAccessesMightAlias(opt, smses2, smses)) ||
-			      (smsel2 && oracle->memoryAccessesMightAlias(opt, smsel2, smses))) &&
+			     ((smses2 && oracle->memoryAccessesMightAlias(decode, opt, smses2, smses)) ||
+			      (smsel2 && oracle->memoryAccessesMightAlias(decode, opt, smsel2, smses))) &&
 			     !definitelyNotEqual( addr,
 						  smses->addr,
 						  opt) )
@@ -441,7 +443,7 @@ updateAvailSetForSideEffect(avail_t &outputAvail, StateMachineSideEffect *smse,
 				it++;
 		}
 		/* Introduce the store which was generated. */
-		if (!oracle->hasConflictingRemoteStores(opt, smses))
+		if (!oracle->hasConflictingRemoteStores(decode, opt, smses))
 			outputAvail.insertSideEffect(smses);
 		outputAvail.dereference(smses->addr, opt);
 		break;
@@ -540,18 +542,9 @@ applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_assumptions, bool *do
 /* Slightly misnamed: this also propagates copy operations.  Also, it
    doesn't so much eliminate loads are replace them with copies of
    already-loaded values. */
-static StateMachineState *buildNewStateMachineWithLoadsEliminated(
-	StateMachineState *sm,
-	std::map<StateMachineState *, avail_t> &availMap,
-	std::map<StateMachineState *, StateMachineState *> &memo,
-	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration *aliasing,
-	OracleInterface *oracle,
-	bool *done_something,
-	std::map<const StateMachineState *, int> &edgeLabels
-	);
 static StateMachineSideEffect *
-buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
+buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
+					StateMachineSideEffect *smse,
 					avail_t &currentlyAvailable,
 					OracleInterface *oracle,
 					bool *done_something,
@@ -616,8 +609,7 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 			}
 		}
 		if (!newEffect && doit)
-			newEffect = new StateMachineSideEffectLoad(
-				smsel->target, newAddr, smsel->rip, smsel->type);
+			newEffect = new StateMachineSideEffectLoad(smsel, newAddr);
 		if (!newEffect)
 			newEffect = smse;
 		if (newEffect != smse)
@@ -782,7 +774,7 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 	}
 	assert(newEffect);
 	if (!*done_something) assert(newEffect == smse);
-	updateAvailSetForSideEffect(currentlyAvailable, newEffect, opt, aliasing, oracle);
+	updateAvailSetForSideEffect(decode, currentlyAvailable, newEffect, opt, aliasing, oracle);
 	currentlyAvailable.calcRegisterMap(opt);
 	if (debug_substitutions) {
 		printf("New available set:\n");
@@ -794,6 +786,7 @@ buildNewStateMachineWithLoadsEliminated(StateMachineSideEffect *smse,
 
 static StateMachineState *
 buildNewStateMachineWithLoadsEliminated(
+	CfgDecode &decode,
 	StateMachineState *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
 	std::map<StateMachineState *, StateMachineState *> &memo,
@@ -830,7 +823,8 @@ buildNewStateMachineWithLoadsEliminated(
 		StateMachineSideEffect *newEffect;
 		avail.calcRegisterMap(opt);
 		if (smp->sideEffect)
-			newEffect = buildNewStateMachineWithLoadsEliminated(smp->sideEffect,
+			newEffect = buildNewStateMachineWithLoadsEliminated(decode,
+									    smp->sideEffect,
 									    avail,
 									    oracle,
 									    done_something,
@@ -853,7 +847,7 @@ buildNewStateMachineWithLoadsEliminated(
 	res->targets(targets);
 	for (auto it = targets.begin(); it != targets.end(); it++) {
 		**it = buildNewStateMachineWithLoadsEliminated(
-			**it, availMap, memo, opt, alias, oracle,
+			decode, **it, availMap, memo, opt, alias, oracle,
 			done_something, edgeLabels);
 	}
 	return res;
@@ -861,6 +855,7 @@ buildNewStateMachineWithLoadsEliminated(
 
 static StateMachine *
 buildNewStateMachineWithLoadsEliminated(
+	CfgDecode &decode,
 	StateMachine *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
@@ -871,18 +866,20 @@ buildNewStateMachineWithLoadsEliminated(
 {
 	std::map<StateMachineState *, StateMachineState *> memo;
 	bool d = false;
-	StateMachineState *new_root = buildNewStateMachineWithLoadsEliminated(sm->root, availMap, memo, opt, alias, oracle,
+	StateMachineState *new_root = buildNewStateMachineWithLoadsEliminated(decode, sm->root, availMap, memo,
+									      opt, alias, oracle,
 									      &d, edgeLabels);
 	if (d) {
 		*done_something = true;
-		return new StateMachine(new_root, sm->origin);
+		return new StateMachine(new_root, sm->origin, sm->cfg_roots);
 	} else {
 		return sm;
 	}
 }
 
 void
-avail_t::findAllPotentiallyAvailable(StateMachine *sm,
+avail_t::findAllPotentiallyAvailable(CfgDecode &decode,
+				     StateMachine *sm,
 				     const AllowableOptimisations &opt,
 				     OracleInterface *oracle)
 {
@@ -909,7 +906,7 @@ avail_t::findAllPotentiallyAvailable(StateMachine *sm,
 			) {
 			StateMachineSideEffectMemoryAccess *smsema =
 				dynamic_cast<StateMachineSideEffectMemoryAccess *>(*it);
-			if ( smsema && oracle->hasConflictingRemoteStores(opt, smsema) ) {
+			if ( smsema && oracle->hasConflictingRemoteStores(decode, opt, smsema) ) {
 				sideEffects.erase(it++);
 			} else {
 				it++;
@@ -932,6 +929,9 @@ availExpressionAnalysis(StateMachine *sm,
 		printStateMachine(sm, stdout, edgeLabels);
 	}
 
+	CfgDecode decode;
+	decode.addMachine(sm);
+
 	__set_profiling(availExpressionAnalysis);
 	/* Fairly standard available expression analysis.  Each edge
 	   in the state machine has two sets of
@@ -948,7 +948,7 @@ availExpressionAnalysis(StateMachine *sm,
 
 	/* build the set of potentially-available expressions. */
 	avail_t potentiallyAvailable;
-	potentiallyAvailable.findAllPotentiallyAvailable(sm, opt, oracle);
+	potentiallyAvailable.findAllPotentiallyAvailable(decode, sm, opt, oracle);
 
 	/* build the initial availability map.  We start by assuming
 	 * that everything is available everywhere, except that at the
@@ -977,7 +977,7 @@ availExpressionAnalysis(StateMachine *sm,
 		if ( state->type == StateMachineState::SideEffecting ) {
 			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
 			if (se)
-				updateAvailSetForSideEffect(outputAvail, se, opt,
+				updateAvailSetForSideEffect(decode, outputAvail, se, opt,
 							    alias, oracle);
 		}
 
@@ -1007,6 +1007,7 @@ availExpressionAnalysis(StateMachine *sm,
 	   construct a new state machine with redundant loads replaced
 	   with copy side effects. */
 	return buildNewStateMachineWithLoadsEliminated(
+		decode,
 		sm,
 		availOnEntry,
 		opt,

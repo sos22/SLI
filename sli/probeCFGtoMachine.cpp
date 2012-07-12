@@ -14,6 +14,7 @@ namespace _probeCFGsToMachine {
 static void
 ndChoiceState(StateMachineState **slot,
 	      const ThreadRip &vr,
+	      CFGNode *node,
 	      std::vector<reloc_t> &pendingRelocs,
 	      std::vector<CFGNode *> &targets,
 	      MemoryAccessIdentifierAllocator &mai,
@@ -32,7 +33,7 @@ ndChoiceState(StateMachineState **slot,
 		pendingRelocs.push_back(
 			reloc_t(slot, targets[0]));
 	} else {
-		IRExpr *fv = mai.freeVariable(Ity_I64, vr, false);
+		IRExpr *fv = mai.freeVariable(Ity_I64, vr.thread, node->label, false);
 		StateMachineSideEffecting *r =
 			new StateMachineSideEffecting(
 				vr.rip,
@@ -185,14 +186,14 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		break;
 	}
 	case LibraryFunctionTemplate::malloc: {
-		acc = (!rax <<= smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->rip), true))) >>
+		acc = (!rax <<= smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode->label, true))) >>
 			(AssertFalse(smb_expr(IRExpr_Unop(Iop_BadPtr, IRExpr_Get(rax, Ity_I64)))) >> end);
 		break;
 	}
 	case LibraryFunctionTemplate::free: {
 		acc = end;
 		for (int i = 0; i < 8; i++) {
-			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->rip), false)));
+			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode->label, false)));
 			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
 				acc;
 		}
@@ -230,7 +231,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	case LibraryFunctionTemplate::__stack_chk_fail:
 		return StateMachineUnreached::get();
 	case LibraryFunctionTemplate::time: {
-		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, ThreadRip(tid, cfgnode->rip), false)));
+		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode->label, false)));
 		acc = (!rax <<= fv) >> end;
 		If(smb_reg(arg1, Ity_I64) == smb_const64(0),
 		   acc,
@@ -246,7 +247,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		printf(")\n");
 		abort();
 	}
-	return acc.content->compile(ThreadRip(tid, cfgnode->rip), pendingRelocs, mai);
+	return acc.content->compile(pendingRelocs, mai, cfgnode, tid);
 }
 
 static void
@@ -382,7 +383,7 @@ cfgNodeToState(Oracle *oracle,
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					mai(tr));
+					mai(target->label, tid));
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -429,7 +430,7 @@ cfgNodeToState(Oracle *oracle,
 					new StateMachineSideEffectStore(
 						cas->addr,
 						cas->dataLo,
-						mai(tr)),
+						mai(target->label, tid)),
 					l4);
 			StateMachineState *l2 =
 				new StateMachineBifurcate(
@@ -443,7 +444,7 @@ cfgNodeToState(Oracle *oracle,
 					new StateMachineSideEffectLoad(
 						tempreg,
 						cas->addr,
-						mai(tr),
+						mai(target->label, tid),
 						ty),
 					l2);
 			StateMachineState *l0 =
@@ -474,12 +475,12 @@ cfgNodeToState(Oracle *oracle,
 				se = new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],
-					mai(tr),
+					mai(target->label, tid),
 					ity);
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 				se = new StateMachineSideEffectCopy(
 					dirty->tmp,
-					mai.freeVariable(Ity_I64, tr, false));
+					mai.freeVariable(Ity_I64, tid, target->label, false));
 			} else {
 				abort();
 			}
@@ -504,7 +505,7 @@ cfgNodeToState(Oracle *oracle,
 				stmt->guard,
 				NULL,
 				NULL);
-			ndChoiceState(&smb->trueTarget, tr, pendingRelocs,
+			ndChoiceState(&smb->trueTarget, tr, target, pendingRelocs,
 				      targets, mai, storeLike, &usedExits);
 			*cursor = smb;
 			cursor = &smb->falseTarget;
@@ -637,7 +638,7 @@ cfgNodeToState(Oracle *oracle,
 		IRStmtIMark *mark = (IRStmtIMark *)irsb->stmts[i];
 		getTargets(target, mark->addr.rip, targets);
 	}
-	ndChoiceState(cursor, tr, pendingRelocs, targets, mai, storeLike, NULL);
+	ndChoiceState(cursor, tr, target, pendingRelocs, targets, mai, storeLike, NULL);
 
 	return root;
 }
@@ -679,84 +680,36 @@ performTranslation(std::map<CFGNode *, StateMachineState *> &results,
 	return root;
 }
 
-/* The rest of the analysis can't use any more than four slots of RIP
-   context, so there's not really much point in maintaining them. */
-static StateMachine *
-truncateRips(StateMachine *sm)
-{
-	struct : public StateMachineTransformer {
-		bool truncateVexRip(const VexRip &in, VexRip *out) {
-			if (in.stack.size() <= (unsigned)DynAnalysisRip::DATABASE_RIP_DEPTH)
-				return false;
-			std::vector<unsigned long> c;
-			c.resize(DynAnalysisRip::DATABASE_RIP_DEPTH);
-			for (int x = 0; x < DynAnalysisRip::DATABASE_RIP_DEPTH; x++)
-				c[x] = in.stack[x + in.stack.size() - DynAnalysisRip::DATABASE_RIP_DEPTH];
-			*out = VexRip(c);
-			return true;
-		}
-		StateMachineSideEffectLoad *transformOneSideEffect(
-			StateMachineSideEffectLoad *smsel, bool *done_something)
-		{
-			VexRip t;
-			if (truncateVexRip(smsel->rip.rip.rip, &t)) {
-				*done_something = true;
-				return new StateMachineSideEffectLoad(
-					smsel->target,
-					smsel->addr,
-					MemoryAccessIdentifier(
-						ThreadRip(smsel->rip.rip.thread, t),
-						smsel->rip.generation),
-					smsel->type);
-			} else {
-				return NULL;
-			}
-		}
-		StateMachineSideEffectStore *transformOneSideEffect(
-			StateMachineSideEffectStore *smses, bool *done_something)
-		{
-			VexRip t;
-			if (truncateVexRip(smses->rip.rip.rip, &t)) {
-				*done_something = true;
-				return new StateMachineSideEffectStore(
-					smses->addr,
-					smses->data,
-					MemoryAccessIdentifier(ThreadRip(smses->rip.rip.thread, t), smses->rip.generation));
-			} else {
-				return NULL;
-			}
-		}
-		bool rewriteNewStates() const { return false; }
-	} doit;
-	return doit.transform(sm);
-}
-
 static void
-probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
-		   const DynAnalysisRip &proximalRip,
+probeCFGsToMachine(Oracle *oracle,
+		   unsigned tid,
+		   std::set<CFGNode *> &roots,
+		   std::set<const CFGNode *> &proximalNodes,
 		   MemoryAccessIdentifierAllocator &mai,
 		   std::set<StateMachine *> &out)
 {
 	struct _ : public cfg_translator {
-		const DynAnalysisRip &proximalRip;
 		MemoryAccessIdentifierAllocator &mai;
+		std::set<const CFGNode *> &proximalNodes;
 		StateMachineState *operator()(CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations) {
-			if (DynAnalysisRip(e->rip) == proximalRip) {
+			if (proximalNodes.count(e)) {
 				return getProximalCause(oracle->ms,
-							ThreadRip(tid, e->rip),
-							mai);
+							mai,
+							e->label,
+							e->rip,
+							tid);
 			} else {
 				return cfgNodeToState(oracle, tid, e, false, mai, pendingRelocations);
 			}
 		}
-		_(const DynAnalysisRip &_proximalRip,
-		  MemoryAccessIdentifierAllocator &_mai)
-			: proximalRip(_proximalRip), mai(_mai)
+		_(MemoryAccessIdentifierAllocator &_mai,
+		  std::set<const CFGNode *> &_proximalNodes)
+			: mai(_mai), proximalNodes(_proximalNodes)
 		{}
-	} doOne(proximalRip, mai);
+	} doOne(mai, proximalNodes);
 
 	std::map<CFGNode *, StateMachineState *> results;
 	for (auto it = roots.begin(); it != roots.end(); it++)
@@ -767,9 +720,11 @@ probeCFGsToMachine(Oracle *oracle, unsigned tid, std::set<CFGNode *> &roots,
 		assert(root);
 		std::vector<std::pair<unsigned, VexRip> > origin;
 		origin.push_back(std::pair<unsigned, VexRip>(tid, root->origin));
-		StateMachine *sm = new StateMachine(root, origin);
+		std::vector<const CFGNode *> roots_this_sm;
+		roots_this_sm.push_back(*it);
+		StateMachine *sm = new StateMachine(root, origin, roots_this_sm);
 		sm->sanityCheck();
-		out.insert(truncateRips(sm));
+		out.insert(sm);
 	}
 }
 
@@ -791,23 +746,27 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<std::pair<unsigned, VexRip> > origin;
 	origin.push_back(std::pair<unsigned, VexRip>(tid, root->rip));
+	std::vector<const CFGNode *> roots;
+	roots.push_back(root);
 	StateMachine *sm = new StateMachine(performTranslation(results, root, oracle, tid, doOne),
-					    origin);
+					    origin,
+					    roots);
 
-	return truncateRips(sm);
+	return sm;
 }
 
 /* End of namespace */
 };
 
 void
-probeCFGsToMachine(Oracle *oracle, unsigned tid,
+probeCFGsToMachine(Oracle *oracle,
+		   unsigned tid,
 		   std::set<CFGNode *> &roots,
-		   const DynAnalysisRip &targetRip,
+		   std::set<const CFGNode *> &proximalNodes,
 		   MemoryAccessIdentifierAllocator &mai,
 		   std::set<StateMachine *> &out)
 {
-	_probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, targetRip, mai, out);
+	_probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai, out);
 }
 
 StateMachine *

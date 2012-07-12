@@ -1276,7 +1276,7 @@ static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **
 
 bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 {
-#define do_form(name)					\
+#define do_form(name)							\
   if (parseIRExpr ## name (out, str, suffix))		\
     return true;
   do_form(Get);
@@ -1411,9 +1411,7 @@ IRExprAssociative::prettyPrint(FILE *f) const
 void
 IRExprHappensBefore::prettyPrint(FILE *f) const
 {
-      fprintf(f, "(%s <-< %s)",
-	      before.name(),
-	      after.name());
+      fprintf(f, "(%s <-< %s)", before.name(), after.name());
 }
 void
 IRExprPhi::prettyPrint(FILE *f) const
@@ -1990,9 +1988,9 @@ IRExprAssociative* IRExpr_Associative(int nr_arguments, IROp op)
 }
 IRExpr* IRExpr_HappensBefore ( const MemoryAccessIdentifier &before,
 			       const MemoryAccessIdentifier &after )
+
 {
-   IRExprHappensBefore *e = new IRExprHappensBefore(before, after);
-   return e;
+  return new IRExprHappensBefore(before, after);
 }
 
 /* Constructors for NULL-terminated IRExpr expression vectors,
@@ -2790,6 +2788,18 @@ IRExpr* mkIRExprCCall ( IRType retty,
 {
    return IRExpr_CCall ( mkIRCallee ( regparms, name, addr ), 
                          retty, args );
+}
+
+CfgLabel
+CfgLabelAllocator::operator()()
+{
+	return CfgLabel(++cntr);
+}
+
+void
+CfgLabelAllocator::reset()
+{
+	cntr = 1;
 }
 
 /*---------------------------------------------------------------*/

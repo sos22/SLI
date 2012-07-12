@@ -211,7 +211,7 @@ public:
 	{
 		return !(*this == o);
 	}
-
+	
 	void startFunction(const FrameId &s, IRExpr *rsp)
 	{
 		functions.push_back(s);
@@ -775,7 +775,8 @@ public:
 class AliasTable {
 public:
 	std::map<StateMachineSideEffecting *, AliasTableEntry> content;
-	bool build(StateMachine *sm,
+	bool build(CfgDecode &decode,
+		   StateMachine *sm,
 		   stateLabelT &labels,
 		   const AllowableOptimisations &opt,
 		   OracleInterface *oracle);
@@ -845,7 +846,8 @@ mightLoadInitialValue(StateMachineSideEffecting *smse, StateMachine *sm,
 }
 
 bool
-AliasTable::build(StateMachine *sm,
+AliasTable::build(CfgDecode &decode,
+		  StateMachine *sm,
 		  stateLabelT &labels,
 		  const AllowableOptimisations &opt,
 		  OracleInterface *oracle)
@@ -930,7 +932,7 @@ AliasTable::build(StateMachine *sm,
 			assert(o->getSideEffect()->type == StateMachineSideEffect::Store);
 			StateMachineSideEffectStore *smses =
 				(StateMachineSideEffectStore *)o->getSideEffect();
-			if (oracle->memoryAccessesMightAlias(opt, smsel, smses)) {
+			if (oracle->memoryAccessesMightAlias(decode, opt, smsel, smses)) {
 				it2++;
 			} else {
 				it->second.erase(it2++);
@@ -962,7 +964,7 @@ AliasTable::build(StateMachine *sm,
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)se;
 		bool mightHaveExternalStores =
 			!opt.assumeNoInterferingStores() &&
-			oracle->hasConflictingRemoteStores(opt, l);
+			oracle->hasConflictingRemoteStores(decode, opt, l);
 		content.insert(std::pair<StateMachineSideEffecting *, AliasTableEntry>(
 				       smse,
 				       AliasTableEntry(it->second,
@@ -1149,8 +1151,10 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 		ptt.prettyPrint(stdout);
 	}
 
+	CfgDecode decode;
+	decode.addMachine(sm);
 	AliasTable at;
-	if (!at.build(sm, stateLabels, opt, oracle)) {
+	if (!at.build(decode, sm, stateLabels, opt, oracle)) {
 		if (any_debug)
 			printf("Failed to build alias table!\n");
 		return sm;
@@ -1231,7 +1235,7 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 		    (*it)->getSideEffect()->type != StateMachineSideEffect::Store)
 			continue;
 		StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)(*it)->getSideEffect();
-		if (!opt.ignoreStore(s->rip.rip.rip))
+		if (!opt.ignoreStore(decode(s->rip.where)->rip))
 			continue;
 		bool noConflictingLoads = true;
 		for (auto it2 = at.content.begin(); noConflictingLoads && it2 != at.content.end(); it2++) {

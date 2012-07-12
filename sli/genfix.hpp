@@ -104,13 +104,15 @@ public:
 };
 
 template <typename ripType>
-class Instruction : public GarbageCollected<Instruction<ripType> > {
+class Instruction : public GarbageCollected<Instruction<ripType>, &ir_heap > {
 	unsigned char byte(AddressSpace *as);
 	int int32(AddressSpace *as);
 	void _modrm(unsigned nrImmediates, AddressSpace *as);
 	void immediate(unsigned size, AddressSpace *as);
 	int modrmExtension(AddressSpace *as);
-	Instruction() : modrm_start(-1) {}
+	Instruction(const CfgLabel &_label)
+		: label(_label), modrm_start(-1)
+	{}
 public:
 	void addBranch(const ripType &r) {
 		successors.push_back(successor_t::branch(r));
@@ -131,8 +133,12 @@ public:
 		successors.push_back(successor_t::branch(r));
 		return r;
 	}
-	Instruction(int _modrm_start) : modrm_start(_modrm_start) { successors.reserve(2); }
+	Instruction(int _modrm_start, const CfgLabel &_label)
+		: label(_label),
+		  modrm_start(_modrm_start)
+	{ successors.reserve(2); }
 	ripType rip;
+	CfgLabel label;
 
 	class successor_t {
 	public:
@@ -150,6 +156,11 @@ public:
 		ripType rip;
 		Instruction *instr;
 		LibraryFunctionType calledFunction;
+		bool operator==(const successor_t &o) const {
+			return type == o.type && rip == o.rip &&
+				instr == o.instr && calledFunction == o.calledFunction;
+		}
+		successor_t() : type((succ_type)-1) {}
 		static successor_t call(const ripType _rip)
 		{
 			return successor_t(succ_call, _rip,
@@ -212,16 +223,18 @@ public:
 
 	bool useful;
 
-	Instruction *dupe()
+	Instruction *dupe(const CfgLabel &l)
 	{
-		Instruction *w = new Instruction();
+		Instruction *w = new Instruction(l);
 		*w = *this;
+		w->label = l;
 		return w;
 	}
-	static Instruction<ripType> *decode(AddressSpace *as,
+	static Instruction<ripType> *decode(const CfgLabel &label,
+					    AddressSpace *as,
 					    ripType rip,
 					    CFG<ripType> *cfg);
-	static Instruction<ripType> *pseudo(ripType rip);
+	static Instruction<ripType> *pseudo(const CfgLabel &label, ripType rip);
 
 	void emit(unsigned char);
 	void emitDword(unsigned);
@@ -248,18 +261,18 @@ unsigned long __trivial_hash_function(const DirectRip &k);
 unsigned long __trivial_hash_function(const ClientRip &k);
 
 template <typename ripType>
-class CFG : public GarbageCollected<CFG<ripType> > {
+class CFG : public GarbageCollected<CFG<ripType>, &ir_heap > {
 public:
 	AddressSpace *as;
 	/* Bad things happen if NULL gets into ripToInstr maps, so in
 	   DEBUG builds assert that that doesn't happen. */
 #ifdef NDEBUG
 	typedef gc_map<ripType, Instruction<ripType> *, __trivial_hash_function,
-		       __default_eq_function, __visit_function_heap> ripToInstrT;
+		       __default_eq_function, __visit_function_heap, &ir_heap> ripToInstrT;
 #else
-	class ripToInstrT : public GarbageCollected<ripToInstrT> {
+	class ripToInstrT : public GarbageCollected<ripToInstrT, &ir_heap> {
 		typedef gc_map<ripType, Instruction<ripType> *, __trivial_hash_function,
-			       __default_eq_function, __visit_function_heap> contentT;
+			       __default_eq_function, __visit_function_heap, &ir_heap> contentT;
 		contentT *content;
 	public:
 		class iterator {
@@ -302,14 +315,14 @@ public:
 private:
 	std::vector<std::pair<ripType, unsigned> > pendingRips;
 	std::vector<ripType> neededRips;
-	void decodeInstruction(ripType rip, unsigned max_depth);
+	void decodeInstruction(const CfgLabel &l, ripType rip, unsigned max_depth);
 public:
 	CFG(AddressSpace *_as) : as(_as), ripToInstr(new ripToInstrT()) {}
 	void add_root(ripType root, unsigned max_depth)
 	{
 		pendingRips.push_back(std::pair<ripType, unsigned>(root, max_depth));
 	}
-	void doit();
+	void doit(CfgLabelAllocator &);
 	void visit(HeapVisitor &hv) {
 		hv(ripToInstr);
 		hv(as);
@@ -345,7 +358,7 @@ public:
 };
 
 template <typename ripType>
-class PatchFragment : public GarbageCollected<PatchFragment<ripType> > {
+class PatchFragment : public GarbageCollected<PatchFragment<ripType>, &ir_heap > {
 	std::vector<Instruction<ripType> *> registeredInstrs;
 	std::set<ripType> entryPoints;
 
@@ -405,7 +418,7 @@ public:
 		: entryPoints(_entryPoints)
 	{}
 
-	void fromCFG(CFG<ripType> *cfg);
+	void fromCFG(CfgLabelAllocator &, CFG<ripType> *cfg);
 
 	bool ripToOffset(ripType rip, unsigned *res);
 	void writeBytes(const void *bytes, unsigned size, unsigned offset);
@@ -429,7 +442,7 @@ public:
 	 * you want to do anything with non-constant branches then
 	 * you'll need to override emitInstruction() as well.
 	 */
-	virtual void generateEpilogue(ripType exitRip);
+	virtual void generateEpilogue(const CfgLabel &l, ripType exitRip);
 
 protected:
 
@@ -451,19 +464,19 @@ protected:
    relocations are done statically while building the patch.  Late
    relocations are done afterwards, when the patch is loaded. */
 template <typename ripType>
-class EarlyRelocation : public GarbageCollected<EarlyRelocation<ripType> > {
+class EarlyRelocation : public GarbageCollected<EarlyRelocation<ripType>, &ir_heap > {
 public:
 	unsigned offset;
 	unsigned size;
 	EarlyRelocation(unsigned _offset, unsigned _size)
 		: offset(_offset), size(_size) {}
-	virtual void doit(PatchFragment<ripType> *pf) = 0;
+	virtual void doit(CfgLabelAllocator &, PatchFragment<ripType> *pf) = 0;
 	void visit(HeapVisitor &) {}
 	void destruct() {}
 	NAMED_CLASS
 };
 
-class LateRelocation : public GarbageCollected<LateRelocation> {
+class LateRelocation : public GarbageCollected<LateRelocation, &ir_heap> {
 public:
 	unsigned offset;
 	unsigned size;
@@ -584,7 +597,7 @@ public:
 	r target;
 	unsigned nrImmediateBytes;
 
-	void doit(PatchFragment<r> *pf);
+	void doit(CfgLabelAllocator &, PatchFragment<r> *pf);
 
 	RipRelativeRelocation(unsigned _offset,
 			      unsigned _size,
@@ -601,7 +614,7 @@ template <typename r>
 class RipRelativeBranchRelocation : public EarlyRelocation<r> {
 public:
 	r target;
-	void doit(PatchFragment<r> *pf);
+	void doit(CfgLabelAllocator &, PatchFragment<r> *pf);
 	RipRelativeBranchRelocation(unsigned _offset,
 				    unsigned _size,
 				    r _target)
@@ -652,19 +665,20 @@ Instruction<r>::_modrm(unsigned nrImmediates, AddressSpace *as)
 }
 
 template <typename r> Instruction<r> *
-Instruction<r>::pseudo(r rip)
+Instruction<r>::pseudo(const CfgLabel &label, r rip)
 {
-	Instruction<r> *i = new Instruction<r>();
+	Instruction<r> *i = new Instruction<r>(label);
 	i->rip = rip;
 	return i;
 }
 
 template <typename r> Instruction<r> *
-Instruction<r>::decode(AddressSpace *as,
+Instruction<r>::decode(const CfgLabel &label,
+		       AddressSpace *as,
 		       r start,
 		       CFG<r> *cfg)
 {
-	Instruction<r> *i = new Instruction<r>();
+	Instruction<r> *i = new Instruction<r>(label);
 	i->rip = start;
 	Byte b;
 	while (1) {
@@ -934,11 +948,11 @@ top:
 }
 
 template <typename r> void
-CFG<r>::decodeInstruction(r rip, unsigned max_depth)
+CFG<r>::decodeInstruction(const CfgLabel &l, r rip, unsigned max_depth)
 {
 	if (!max_depth)
 		return;
-	Instruction<r> *i = Instruction<r>::decode(as, rip, this);
+	Instruction<r> *i = Instruction<r>::decode(l, as, rip, this);
 	if (!i)
 		return;
 	assert(i->rip == rip);
@@ -951,13 +965,13 @@ CFG<r>::decodeInstruction(r rip, unsigned max_depth)
 }
 
 template <typename r> void
-CFG<r>::doit()
+CFG<r>::doit(CfgLabelAllocator &allocLabel)
 {
 	while (!pendingRips.empty()) {
 		std::pair<r, unsigned> p = pendingRips.back();
 		pendingRips.pop_back();
 		if (!ripToInstr->hasKey(p.first))
-			decodeInstruction(p.first, p.second);
+			decodeInstruction(allocLabel(), p.first, p.second);
 	}
 
 	for (typename ripToInstrT::iterator it = ripToInstr->begin();
@@ -1017,7 +1031,7 @@ CFG<r>::doit()
 }
 
 template <typename r> void
-RipRelativeRelocation<r>::doit(PatchFragment<r> *pf)
+RipRelativeRelocation<r>::doit(CfgLabelAllocator &, PatchFragment<r> *pf)
 {
 	unsigned targetOffset;
 	if (pf->ripToOffset(target, &targetOffset)) {
@@ -1031,11 +1045,11 @@ RipRelativeRelocation<r>::doit(PatchFragment<r> *pf)
 }
 
 template <typename r> void
-RipRelativeBranchRelocation<r>::doit(PatchFragment<r> *pf)
+RipRelativeBranchRelocation<r>::doit(CfgLabelAllocator &allocLabel, PatchFragment<r> *pf)
 {
 	unsigned targetOffset;
 	if (!pf->ripToOffset(target, &targetOffset))
-		pf->generateEpilogue(target);
+		pf->generateEpilogue(allocLabel(), target);
 	if (!pf->ripToOffset(target, &targetOffset))
 		fail("Failed to generate epilogue for 0x%lx\n", target.rip.unwrap_vexrip());
 	int delta = targetOffset - this->offset - this->size;
@@ -1113,7 +1127,7 @@ PatchFragment<r>::writeBytes(const void *_bytes, unsigned size, unsigned offset)
 }
 
 template <typename r> void
-PatchFragment<r>::fromCFG(CFG<r> *_cfg)
+PatchFragment<r>::fromCFG(CfgLabelAllocator &allocLabel, CFG<r> *_cfg)
 {
 	cfg = _cfg;
 	while (1) {
@@ -1129,7 +1143,7 @@ PatchFragment<r>::fromCFG(CFG<r> *_cfg)
 		assert(re);
 		assert(re->offset + re->size <= content.size());
 
-		re->doit(this);
+		re->doit(allocLabel, this);
 	}
 }
 
@@ -1492,9 +1506,9 @@ PatchFragment<r>::asC(const char *ident, char **relocs_name, char **trans_name, 
 }
 
 template <typename r> void
-PatchFragment<r>::generateEpilogue(r exitRip)
+PatchFragment<r>::generateEpilogue(const CfgLabel &l, r exitRip)
 {
-	Instruction<r> *i = Instruction<r>::pseudo(exitRip);
+	Instruction<r> *i = Instruction<r>::pseudo(l, exitRip);
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
 	emitJmpToRipHost(exitRip.rip.unwrap_vexrip());
@@ -1561,6 +1575,9 @@ CFG<r>::print(FILE *f)
 			case Instruction<r>::successor_t::succ_call:
 				t = "call";
 				break;
+			case Instruction<r>::successor_t::succ_unroll:
+				t = "unroll";
+				break;
 			}
 			if (t == NULL)
 				t = "BAD";
@@ -1575,7 +1592,8 @@ CFG<r>::print(FILE *f)
 template <typename r> void
 Instruction<r>::prettyPrint(FILE *f) const
 {
-	fprintf(f, "instr(%s, %d bytes content, %s, %s, successors = {",
+	fprintf(f, "instr(%s, %s, %d bytes content, %s, %s, successors = {",
+		label.name(),
 		rip.name(),
 		len,
 		useful ? "useful" : "useless",
@@ -1600,7 +1618,7 @@ Instruction<r>::prettyPrint(FILE *f) const
 			t = "unroll";
 			break;
 		}
-		fprintf(f, "%s:%s:%p", it->rip.name(), t, it->instr);
+		fprintf(f, "%s:%s:%p", it->instr ? it->instr->label.name() : "<null>", t, it->instr);
 		if (it->calledFunction != LibraryFunctionTemplate::none)
 			LibraryFunctionTemplate::pp(it->calledFunction, f);
 	}

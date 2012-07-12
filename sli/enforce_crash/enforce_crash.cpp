@@ -42,8 +42,10 @@ unsigned long __trivial_hash_function(const ClientRip &k)
 	return k.rip;
 }
 
-abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
-						     happensBeforeMapT &happensBeforePoints)
+abstractThreadExitPointsT::abstractThreadExitPointsT(
+	CfgDecode &decode,
+	EnforceCrashCFG *cfg,
+	happensBeforeMapT &happensBeforePoints)
 {
 	/* We need to exit thread X if we reach instruction Y and
 	   there is some message which is needed by thread X such that
@@ -105,7 +107,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 		if (!i)
 			continue;
 
-		unsigned thread = it.key().thread;
+		int thread = it.key().thread;
 
 		/* Should @i be present in thread @thread? */
 		bool should_be_present = false;
@@ -117,14 +119,14 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 			     it4 != it3->second.end();
 			     it4++) {
 				happensBeforeEdge *hbe = *it4;
-				if (hbe->before.thread == thread) {
+				if (hbe->before.tid == thread) {
 					/* Can we send this message? */
-					instrT *sender = cfg->ripToInstr->get(hbe->before);
+					instrT *sender = cfg->ripToInstr->get(ThreadRip(hbe->before.tid, decode(hbe->before.where)->rip));
 					if (forwardReachable[i].count(sender))
 						should_be_present = true;
-				} else if (hbe->after.thread == thread) {
+				} else if (hbe->after.tid == thread) {
 					/* Can we receive this message? */
-					instrT *receiver = cfg->ripToInstr->get(hbe->after);
+					instrT *receiver = cfg->ripToInstr->get(ThreadRip(hbe->after.tid, decode(hbe->after.where)->rip));
 					if (forwardReachable[i].count(receiver))
 						should_be_present = true;
 				}
@@ -141,8 +143,8 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 			     it4 != it3->second.end();
 			     it4++) {
 				happensBeforeEdge *hbe = *it4;
-				if (hbe->after.thread == thread) {
-					instrT *receiver = cfg->ripToInstr->get(hbe->after);
+				if (hbe->after.tid == thread) {
+					instrT *receiver = cfg->ripToInstr->get(ThreadRip(hbe->after.tid, decode(hbe->after.where)->rip));
 					if (!forwardReachable[i].count(receiver) &&
 					    !backwardReachable[i].count(receiver)) {
 						/* No path between this instruction and this
@@ -183,7 +185,9 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(EnforceCrashCFG *cfg,
 }
 
 static bool
-buildCED(DNF_Conjunction &c,
+buildCED(CfgLabelAllocator &allocLabel,
+	 CfgDecode &decode,
+	 DNF_Conjunction &c,
 	 std::map<unsigned, ThreadRip> &roots,
 	 AddressSpace *as,
 	 StateMachine *probeMachine,
@@ -217,8 +221,8 @@ buildCED(DNF_Conjunction &c,
 			} else {
 				assert(e->tag == Iex_HappensBefore);
 				IRExprHappensBefore *ieh = (IRExprHappensBefore *)e;
-				neededRips.insert(ieh->before.rip);
-				neededRips.insert(ieh->after.rip);
+				neededRips.insert(ThreadRip(ieh->before.tid, decode(ieh->before.where)->rip));
+				neededRips.insert(ThreadRip(ieh->after.tid, decode(ieh->after.where)->rip));
 			}
 		}
 		if (!neededTemporaries.empty()) {
@@ -236,7 +240,7 @@ buildCED(DNF_Conjunction &c,
 					}
 				}
 				assert(l);
-				neededRips.insert(l->rip.rip);
+				neededRips.insert(ThreadRip(l->rip.tid, decode(l->rip.where)->rip));
 			}
 		}
 	}
@@ -256,7 +260,7 @@ buildCED(DNF_Conjunction &c,
 		printf("Root %s\n", it->second.name());
 		cfg->add_root(it->second, 1000);
 	}
-	cfg->doit();
+	cfg->doit(allocLabel);
 	
 	if (cfg->ripToInstr->size() > 1000) {
 		printf("CFG is too big to work with\n");
@@ -281,10 +285,10 @@ buildCED(DNF_Conjunction &c,
 	/* Figure out where the various expressions should be
 	 * evaluated. */
 	expressionDominatorMapT exprDominatorMap;
-	if (!exprDominatorMap.init(c, cfg, neededRips))
+	if (!exprDominatorMap.init(decode, c, cfg, neededRips))
 		return false;
 
-	*out = crashEnforcementData(neededExpressions, roots, exprDominatorMap, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
+	*out = crashEnforcementData(decode, neededExpressions, roots, exprDominatorMap, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
 	return true;
 }
 
@@ -341,6 +345,10 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printf("Machines to enforce:\n");
 	printCrashSummary(summary, stdout);
 
+	CfgDecode decode;
+	decode.addMachine(summary->loadMachine);
+	decode.addMachine(summary->storeMachine);
+
 	VexPtr<OracleInterface> oracleI(oracle);
 
 	IRExpr *requirement =
@@ -386,10 +394,12 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		ThreadRip::mk(summary->storeMachine->origin[0].first,
 			      summary->storeMachine->origin[0].second);
 
+	CfgLabelAllocator allocLabel;
+
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
-		if (buildCED(d[x], roots, oracle->ms->addressSpace, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
+		if (buildCED(allocLabel, decode, d[x], roots, oracle->ms->addressSpace, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
 			accumulator |= tmp;
 	}
 	return accumulator;

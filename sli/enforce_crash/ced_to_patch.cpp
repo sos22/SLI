@@ -84,9 +84,15 @@ public:
 };
 
 static Instruction<ClientRip> *
+newInstruction(int modrm_bytes)
+{
+	return new Instruction<ClientRip>(modrm_bytes, CfgLabel::uninitialised());
+}
+
+static Instruction<ClientRip> *
 instrNoImmediatesNoModrm(unsigned opcode)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = newInstruction(-1);
 	if (opcode >= 0x100) {
 		assert((opcode & 0xff00) == 0x0f00);
 		work->emit(0x0f);
@@ -100,7 +106,7 @@ instrNoImmediatesNoModrm(unsigned opcode)
 static Instruction<ClientRip> *
 instrImm32NoModrm(unsigned opcode, int val)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = newInstruction(-1);
 	if (opcode >= 0x100) {
 		assert((opcode & 0xff00) == 0x0f00);
 		work->emit(0x0f);
@@ -130,7 +136,7 @@ instrNoImmediatesModrmOpcode(unsigned opcode, RegisterOrOpcodeExtension reg, con
 		opcode_bytes++;
 	if (opcode >= 0x100)
 		opcode_bytes++;
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(opcode_bytes);
+	Instruction<ClientRip> *work = newInstruction(opcode_bytes);
 	if (rex.emit())
 		work->emit(rex.asByte());
 	if (opcode >= 0x100) {
@@ -174,7 +180,7 @@ jcc_code jcc_code::nonzero(0x85);
 static Instruction<ClientRip> *
 instrPushReg(RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = newInstruction(-1);
 	if (reg.idx >= 8) {
 		work->emit(0x41);
 		reg.idx -= 8;
@@ -185,7 +191,7 @@ instrPushReg(RegisterIdx reg)
 static Instruction<ClientRip> *
 instrPopReg(RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = newInstruction(-1);
 	if (reg.idx >= 8) {
 		work->emit(0x41);
 		reg.idx -= 8;
@@ -254,7 +260,7 @@ instrLea(const ModRM &modrm, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrMovImm64ToReg(unsigned long val, RegisterIdx reg)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = newInstruction(-1);
 	if (reg.idx < 8) {
 		work->emit(0x48);
 	} else {
@@ -366,7 +372,7 @@ instrNegModrm(const ModRM &mrm)
 static Instruction<ClientRip> *
 instrSetEqAl(void)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = newInstruction(-1);
 	work->emit(0x0f);
 	work->emit(0x94);
 	work->emit(0xc0);
@@ -432,7 +438,7 @@ instrMovLabelToRegister(const char *label, RegisterIdx reg)
 static Instruction<ClientRip> *
 instrJcc(ClientRip target, jcc_code branchType, std::vector<relocEntryT> &relocs)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = newInstruction(-1);
 	work->emit(0x0f);
 	work->emit(branchType.code);
 	work->relocs.push_back(new RipRelativeBranchRelocation<ClientRip>(work->len,
@@ -448,7 +454,7 @@ instrJcc(ClientRip target, jcc_code branchType, std::vector<relocEntryT> &relocs
 static Instruction<ClientRip> *
 instrJmpToHost(unsigned long rip)
 {
-	Instruction<ClientRip> *work = new Instruction<ClientRip>(-1);
+	Instruction<ClientRip> *work = newInstruction(-1);
 	work->emit(0xe9);
 	work->emit(0);
 	work->emit(0);
@@ -584,14 +590,14 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 		ClientRip dest = nextRip;
 		dest.exit_threads.clear();
 		for (auto it2 = hb.begin(); it2 != hb.end(); it2++) {
-			dest.threads.erase((*it2)->after.thread);
-			dest.exit_threads.insert((*it2)->after.thread);
+			dest.threads.erase((*it2)->after.tid);
+			dest.exit_threads.insert((*it2)->after.tid);
 		}
-		dest.threads.insert((*it)->after.thread);
-		dest.exit_threads.erase((*it)->after.thread);
+		dest.threads.insert((*it)->after.tid);
+		dest.exit_threads.erase((*it)->after.tid);
 		dest.type = ClientRip::exit_threads_and_rx_message;
 		dest.completed_edge = *it;
-		dest.clearName();
+
 		dbg("\tSuccess destination: %s\n", dest.name());
 		cursor = cursor->addDefault(instrCmpImm32ToModrm((*it)->msg_id, ModRM::directRegister(RegisterIdx::RAX)));
 		cursor = cursor->addDefault(instrJcc(dest, jcc_code::zero, relocs));
@@ -600,13 +606,12 @@ instrHappensBeforeEdgeAfter(std::set<const happensBeforeEdge *> &hb,
 	ClientRip dest = nextRip;
 	dest.exit_threads.clear();
 	for (auto it = hb.begin(); it != hb.end(); it++) {
-		dest.threads.erase((*it)->after.thread);
-		dest.exit_threads.insert((*it)->after.thread);
+		dest.threads.erase((*it)->after.tid);
+		dest.exit_threads.insert((*it)->after.tid);
 	}
 	dest.type = ClientRip::exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction;
 	cursor->addDefault(NULL);
 	relocs.push_back(relocEntryT(dest, &cursor->successors[0]));
-	dest.clearName();
 	dbg("\tFailure destination: %s\n", dest.name());
 }
 
@@ -621,7 +626,7 @@ instrHappensBeforeEdgeBefore(Instruction<ClientRip> *start, const happensBeforeE
 
 	dbg("\tTemporary slot for RDI %d, R13 %d\n", rdi.idx, r13.idx);
 	for (unsigned x = 0; x < hb->content.size(); x++) {
-		simulationSlotT s = exprsToSlots(hb->before.thread, hb->content[x]);
+		simulationSlotT s = exprsToSlots(hb->before.tid, hb->content[x]);
 #ifdef LOUD
 		printf("\tStore slot %d (", s.idx);
 		ppIRExpr(hb->content[x], stdout);
@@ -639,8 +644,12 @@ instrHappensBeforeEdgeBefore(Instruction<ClientRip> *start, const happensBeforeE
 }
 
 static Instruction<ClientRip> *
-instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, RegisterIdx reg,
-	      slotMapT &exprsToSlots, simulationSlotT &next_slot)
+instrEvalExpr(Instruction<ClientRip> *start,
+	      unsigned thread,
+	      IRExpr *e,
+	      RegisterIdx reg,
+	      slotMapT &exprsToSlots,
+	      simulationSlotT &next_slot)
 {
 	{
 		slotMapT::iterator it = exprsToSlots.find(std::pair<unsigned, IRExpr *>(thread, e));
@@ -677,7 +686,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 		switch (((IRExprBinop *)e)->op) {
 		case Iop_CmpEQ64: {
 			simulationSlotT old_rax = exprsToSlots.allocateSlot(next_slot);
-			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1);
+			Instruction<ClientRip> *head = newInstruction(-1);
 			Instruction<ClientRip> *cursor;
 
 			cursor = instrEvalExpr(head, thread, ((IRExprBinop *)e)->arg1, reg, exprsToSlots, next_slot);
@@ -711,7 +720,7 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 	case Iex_Associative:
 		switch (((IRExprAssociative *)e)->op) {
 		case Iop_Add64: {
-			Instruction<ClientRip> *head = new Instruction<ClientRip>(-1);
+			Instruction<ClientRip> *head = newInstruction(-1);
 			Instruction<ClientRip> *cursor;
 			cursor = instrEvalExpr(head, thread, ((IRExprAssociative *)e)->contents[0], reg, exprsToSlots, next_slot);
 			if (!cursor)
@@ -756,8 +765,11 @@ instrEvalExpr(Instruction<ClientRip> *start, unsigned thread, IRExpr *e, Registe
 }
 
 static Instruction<ClientRip> *
-instrCompareExprToZero(Instruction<ClientRip> *start, unsigned thread, IRExpr *expr,
-		       slotMapT &exprsToSlots, simulationSlotT &next_slot)
+instrCompareExprToZero(Instruction<ClientRip> *start,
+		       unsigned thread,
+		       IRExpr *expr,
+		       slotMapT &exprsToSlots,
+		       simulationSlotT &next_slot)
 {
 	RegisterIdx reg = RegisterIdx::RAX;
 	simulationSlotT spill = exprsToSlots.allocateSlot(next_slot);
@@ -820,7 +832,7 @@ exitThreadSequence(Instruction<ClientRip> *cursor, const std::set<int> &threads,
 	for (auto it = data.happensBeforePoints.begin(); it != data.happensBeforePoints.end(); it++) {
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
 			auto hb = *it2;
-			if (threads.count(hb->before.thread))
+			if (threads.count(hb->before.tid))
 				msg_ids.insert(hb->msg_id);
 		}
 	}
@@ -913,13 +925,17 @@ instrModrmReg(Instruction<DirectRip> *i)
 }
 
 static CFG<ClientRip> *
-enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next_slot, int &next_rx_site_id)
+enforceCrash(crashEnforcementData &data,
+	     CfgDecode &decode,
+	     AddressSpace *as,
+	     simulationSlotT &next_slot,
+	     int &next_rx_site_id)
 {
 	class __decoder {
 	public:
 		AddressSpace *as;
 		Instruction<DirectRip> *operator()(unsigned long r) {
-			return Instruction<DirectRip>::decode(as, r, NULL);
+			return Instruction<DirectRip>::decode(CfgLabel::uninitialised(), as, r, NULL);
 		}
 		__decoder(AddressSpace *_as)
 			: as(_as)
@@ -939,7 +955,7 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 		assert(i);
 		while (1) {
 			std::set<unsigned> empty;
-			Instruction<ClientRip> *i2 = new Instruction<ClientRip>(i->modrm_start);
+			Instruction<ClientRip> *i2 = newInstruction(i->modrm_start);
 			ClientRip cr(i->rip.rip, empty, ClientRip::start_of_instruction);
 			i2->rip = cr;
 
@@ -1040,13 +1056,12 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 		if (res->ripToInstr->hasKey(cr))
 			continue;
 
-		Instruction<ClientRip> *newInstr = new Instruction<ClientRip>(-1);
+		Instruction<ClientRip> *newInstr = newInstruction(-1);
 
 		res->ripToInstr->set(cr, newInstr);
 
 		newInstr->rip = cr;
 
-		cr.clearName();
 		dbg("Considering instruction %s\n", cr.name());
 		switch (cr.type) {
 		case ClientRip::start_of_instruction: {
@@ -1130,8 +1145,8 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 				     it != hbEdges->end();
 				     it++) {
 					const happensBeforeEdge *hb = *it;
-					if (hb->after.rip.unwrap_vexrip() == cr.rip &&
-					    cr.threadLive(hb->after.thread)) {
+					if (decode(hb->after.where)->rip.unwrap_vexrip() == cr.rip &&
+					    cr.threadLive(hb->after.tid)) {
 						dbg("\tReceive message: %s\n", hb->name());
 						relevantEdges.insert(hb);
 					}
@@ -1292,8 +1307,8 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 				     it != hbEdges->end();
 				     it++) {
 					happensBeforeEdge *hb = *it;
-					if (hb->before.rip.unwrap_vexrip() == cr.rip &&
-					    cr.threadLive(hb->before.thread)) {
+					if (decode(hb->before.where)->rip.unwrap_vexrip() == cr.rip &&
+					    cr.threadLive(hb->before.tid)) {
 						dbg("\tGenerate %s\n", hb->name());
 						newInstr = instrHappensBeforeEdgeBefore(newInstr, hb, data.exprsToSlots, next_slot);
 					}
@@ -1331,7 +1346,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 			cr.type = ClientRip::post_instr_checks;
 			newInstr->addDefault(NULL);
 			relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
-			cr.clearName();
 			dbg("\tRestored flags, going to %s\n", cr.name());
 			break;
 
@@ -1346,13 +1360,12 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 		case ClientRip::rx_message: {
 			auto hb = cr.completed_edge;
 			for (unsigned x = 0; x < hb->content.size(); x++) {
-				simulationSlotT s = data.exprsToSlots(hb->after.thread, hb->content[x]);
+				simulationSlotT s = data.exprsToSlots(hb->after.tid, hb->content[x]);
 				newInstr = instrLoadMessageToSlot(newInstr, hb->msg_id, x, s, RegisterIdx::RAX);
 			}
 			cr.type = ClientRip::pop_regs_restore_flags_and_branch_orig_instruction;
 			newInstr->addDefault(NULL);
 			relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
-			cr.clearName();
 			dbg("\tAfter receiving message, go to %s\n", cr.name());
 			break;
 		}
@@ -1372,7 +1385,6 @@ enforceCrash(crashEnforcementData &data, AddressSpace *as, simulationSlotT &next
 			cr.type = ClientRip::original_instruction;
 			newInstr->addDefault(NULL);
 			relocs.push_back(relocEntryT(cr, &newInstr->successors.back()));
-			cr.clearName();
 			dbg("\tRestore flags etc. then go to %s\n", cr.name());
 			break;
 
@@ -1493,11 +1505,14 @@ main(int argc, char *argv[])
 		if (it->second.idx >= next_slot.idx)
 			next_slot.idx = it->second.idx + 1;
 
+	CfgDecode decode;
+
 	/* Now build the patch */
 	int next_rx_site_id = 0;
-	CFG<ClientRip> *cfg = enforceCrash(ced, ms->addressSpace, next_slot, next_rx_site_id);
+	CFG<ClientRip> *cfg = enforceCrash(ced, decode, ms->addressSpace, next_slot, next_rx_site_id);
 	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(ced.happensBeforePoints, ced.roots);
-	pf->fromCFG(cfg);
+	CfgLabelAllocator alloc;
+	pf->fromCFG(alloc, cfg);
 	char *patch = pf->asC("ident", next_rx_site_id);
 
 	/* Dump it to a file and build it. */

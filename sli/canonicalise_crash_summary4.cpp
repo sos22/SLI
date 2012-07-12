@@ -93,11 +93,13 @@ operator &=(std::set<t, c> &a, const complement_set<t, c> &b)
 }
 
 class Function : public GarbageCollected<Function>, public Named {
-	char *mkName() const { return my_asprintf("func(%d) ==> %s",
-						  nr_arguments,
-						  nameIRExpr(result)); }
 	static bool matches(IRExpr *what, IRExpr *tmpl, std::map<int, IRExpr *> &argVals);
 	static int complexity(const IRExpr *what);
+	char *mkName() const {
+		return my_asprintf("func(%d) ==> %s",
+				    nr_arguments,
+				    nameIRExpr(result));
+	}
 public:
 	int nr_arguments;
 	IRExpr *result;

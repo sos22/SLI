@@ -2,10 +2,10 @@
 #define ALLOC_MAI_HPP__
 
 class MemoryAccessIdentifierAllocator {
-	std::map<ThreadRip, unsigned> ids;
+	std::map<std::pair<int, CfgLabel>, unsigned> ids;
 public:
-	MemoryAccessIdentifier operator()(const ThreadRip &rip);
-	IRExpr *freeVariable(IRType ty, const ThreadRip &rip, bool isUnique);
+	MemoryAccessIdentifier operator()(const CfgLabel &, int);
+	IRExpr *freeVariable(IRType ty, int tid, const CfgLabel &node, bool isUnique);
 };
 
 #endif /* !ALLOC_MAI_HPP__ */

@@ -72,10 +72,8 @@ assignLabelsToDefinitions(StateMachine *sm,
 					StateMachineSideEffectLoad *smsel =
 						(StateMachineSideEffectLoad *)se;
 					se = new StateMachineSideEffectLoad(
-						tr,
-						smsel->addr,
-						smsel->rip,
-						smsel->type);
+						smsel,
+						tr);
 					*done_something = true;
 					break;
 				}

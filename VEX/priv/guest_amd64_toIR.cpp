@@ -1837,14 +1837,6 @@ static const char* nameGrp1 ( Int opc_aux )
    return grp1_names[opc_aux];
 }
 
-static const char* nameGrp2 ( Int opc_aux )
-{
-   static const char* grp2_names[8] 
-     = { "rol", "ror", "rcl", "rcr", "shl", "shr", "shl", "sar" };
-   if (opc_aux < 0 || opc_aux > 7) vpanic("nameGrp2(amd64)");
-   return grp2_names[opc_aux];
-}
-
 static const char* nameGrp4 ( Int opc_aux )
 {
    static const char* grp4_names[8] 
@@ -3098,7 +3090,7 @@ ULong dis_Grp2 ( unsigned tid,
                  Prefix pfx,
                  Long delta, UChar modrm,
                  Int am_sz, Int d_sz, Int sz, IRExpr* shift_expr,
-                 const char* shift_expr_txt, Bool* decode_OK )
+                 Bool* decode_OK )
 {
    /* delta on entry points at the modrm byte. */
    char  dis_buf[50];
@@ -3342,26 +3334,8 @@ ULong dis_Grp2 ( unsigned tid,
    /* Save result, and finish up. */
    if (epartIsReg(modrm)) {
       putIRegE(sz, pfx, modrm, mkexpr(dst1, tid, ty));
-      if (vex_traceflags & VEX_TRACE_FE) {
-	 printf("%s%c ",
-		nameGrp2(gregLO3ofRM(modrm)), nameISize(sz) );
-         if (shift_expr_txt)
-            printf("%s", shift_expr_txt);
-         else
-	    ppIRExpr(shift_expr, stdout);
-         printf(", %s\n", nameIRegE(sz,pfx,modrm));
-      }
    } else {
       storeLE(mkexpr(addr, tid, Ity_I64), mkexpr(dst1, tid, ty));
-      if (vex_traceflags & VEX_TRACE_FE) {
-         printf("%s%c ",
-                    nameGrp2(gregLO3ofRM(modrm)), nameISize(sz) );
-         if (shift_expr_txt)
-            printf("%s", shift_expr_txt);
-         else
-	    ppIRExpr(shift_expr, stdout);
-         printf(", %s\n", dis_buf);
-      }
    }
    return delta;
 }
@@ -15050,7 +15024,7 @@ DisResult disInstr_AMD64_WRK (
       d64   = getUChar(guest_code, delta + am_sz);
       sz    = 1;
       delta = dis_Grp2 ( tid, guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
-                         mkU8(d64 & 0xFF), NULL, &decode_OK );
+                         mkU8(d64 & 0xFF), &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }
@@ -15062,7 +15036,7 @@ DisResult disInstr_AMD64_WRK (
       d_sz  = 1;
       d64   = getUChar(guest_code, delta + am_sz);
       delta = dis_Grp2 ( tid, guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
-                         mkU8(d64 & 0xFF), NULL, &decode_OK );
+                         mkU8(d64 & 0xFF), &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }
@@ -15075,7 +15049,7 @@ DisResult disInstr_AMD64_WRK (
       d64   = 1;
       sz    = 1;
       delta = dis_Grp2 ( tid, guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
-                         mkU8(d64), NULL, &decode_OK );
+                         mkU8(d64), &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }
@@ -15087,7 +15061,7 @@ DisResult disInstr_AMD64_WRK (
       d_sz  = 0;
       d64   = 1;
       delta = dis_Grp2 ( tid, guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
-                         mkU8(d64), NULL, &decode_OK );
+                         mkU8(d64), &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }
@@ -15099,7 +15073,7 @@ DisResult disInstr_AMD64_WRK (
       d_sz  = 0;
       sz    = 1;
       delta = dis_Grp2 ( tid, guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
-                         getIRegCL(tid), "%cl", &decode_OK );
+                         getIRegCL(tid), &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }
@@ -15110,7 +15084,7 @@ DisResult disInstr_AMD64_WRK (
       am_sz = lengthAMode(guest_code, delta);
       d_sz  = 0;
       delta = dis_Grp2 ( tid, guest_code, vbi, pfx, delta, modrm, am_sz, d_sz, sz, 
-                         getIRegCL(tid), "%cl", &decode_OK );
+                         getIRegCL(tid), &decode_OK );
       if (!decode_OK) goto decode_failure;
       break;
    }

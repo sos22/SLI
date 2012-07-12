@@ -26,7 +26,8 @@ main(int argc, char *argv[])
 	
 	CFGNode **roots;
 	int nr_roots;
-	getStoreCFGs(input, oracle, &roots, &nr_roots);
+	CfgLabelAllocator alloc;
+	getStoreCFGs(alloc, input, oracle, &roots, &nr_roots);
 
 	printf("Results:\n");
 	for (int x = 0; x < nr_roots; x++) {

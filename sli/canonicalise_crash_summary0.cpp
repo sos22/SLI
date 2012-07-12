@@ -49,7 +49,10 @@ main(int argc, char *argv[])
 
 	summary = readBugReport(argv[1], &first_line);
 
-	summary = optimise_crash_summary(summary, new DummyOracle(summary), ALLOW_GC);
+	CfgDecode decode;
+	decode.addMachine(summary->loadMachine);
+	decode.addMachine(summary->storeMachine);
+	summary = optimise_crash_summary(summary, new DummyOracle(summary, &decode), ALLOW_GC);
 
 	FILE *f = fopen(argv[2], "w");
 	fprintf(f, "%s\n", first_line);

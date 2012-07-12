@@ -70,6 +70,7 @@ debug_dump(const std::set<t> &what, const char *prefix)
 static void
 initialExploration(const std::set<DynAnalysisRip> &roots,
 		   std::map<const CFGNode *, cfgflavour_store_t> &flavours,
+		   CfgLabelAllocator &allocLabel,
 		   unsigned maxPathLength,
 		   Oracle *oracle,
 		   std::map<VexRip, CFGNode *> &results)
@@ -126,7 +127,7 @@ top_exploration_iter:
 			continue;
 		}
 
-		CFGNode *work = CfgNodeForRip<VexRip>(oracle, item.second);
+		CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, item.second);
 		if (!work) {
 			if (debug_initial_exploration)
 				printf("Cannot get IRSB for %s\n", item.second.name());
@@ -561,7 +562,8 @@ selectEdgeForCycleBreak(Instruction<t> *root, Instruction<t> **edge_start, Instr
    of a true_target_instr is a dupe_target_instr, so this does
    actually terminate. */
 template <typename t> static void
-performUnrollAndCycleBreak(std::set<Instruction<t> *> &roots,
+performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
+			   std::set<Instruction<t> *> &roots,
 			   std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours,
 			   unsigned maxPathLength)
 {
@@ -582,7 +584,7 @@ performUnrollAndCycleBreak(std::set<Instruction<t> *> &roots,
 			if (label.dead(maxPathLength)) {
 				new_node = NULL;
 			} else {
-				new_node = cycle_edge_end->dupe();
+				new_node = cycle_edge_end->dupe(allocLabel());
 				auto it_fl = cfgFlavours.find(cycle_edge_end);
 				assert(it_fl != cfgFlavours.end());
 				if (it_fl->second == cfgs_flavour_true)
@@ -613,7 +615,8 @@ performUnrollAndCycleBreak(std::set<Instruction<t> *> &roots,
    which means its safe as long as you only ever backtrack
    instructions which have a unique predecessor. */
 static void
-findRootsAndBacktrack(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
+findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
+		      std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 		      std::map<const CFGNode *, cfgflavour_store_t> &flavours,
 		      std::set<CFGNode *> &roots,
 		      Oracle *oracle)
@@ -650,7 +653,7 @@ findRootsAndBacktrack(std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 			if (ripsToCFGNodes.count(predecessor)) {
 				n = ripsToCFGNodes[predecessor];
 			} else {
-				CFGNode *work = CfgNodeForRip<VexRip>(oracle, predecessor);
+				CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, predecessor);
 				if (!work)
 					break;
 				flavours[work] = cfgs_flavour_ordinary;
@@ -704,12 +707,12 @@ trimUninterestingCFGNodes(std::set<Instruction<t> *> &roots,
 }
 
 static void
-buildCFG(const std::set<DynAnalysisRip> &dyn_roots, unsigned maxPathLength,
-	 Oracle *oracle, std::set<CFGNode *> &roots)
+buildCFG(CfgLabelAllocator &allocLabel, const std::set<DynAnalysisRip> &dyn_roots,
+	 unsigned maxPathLength, Oracle *oracle, std::set<CFGNode *> &roots)
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
 	std::map<const CFGNode *, cfgflavour_store_t> cfgFlavours;
-	initialExploration(dyn_roots, cfgFlavours, maxPathLength, oracle, ripsToCFGNodes);
+	initialExploration(dyn_roots, cfgFlavours, allocLabel, maxPathLength, oracle, ripsToCFGNodes);
 	if (TIMEOUT)
 		return;
 	resolveReferences(ripsToCFGNodes);
@@ -725,7 +728,7 @@ buildCFG(const std::set<DynAnalysisRip> &dyn_roots, unsigned maxPathLength,
 		debug_dump(ripsToCFGNodes, "\t");
 	}
 
-	findRootsAndBacktrack(ripsToCFGNodes, cfgFlavours, roots, oracle);
+	findRootsAndBacktrack(allocLabel, ripsToCFGNodes, cfgFlavours, roots, oracle);
 	if (debug_find_roots) {
 		printf("After backtracking:\n");
 		debug_dump(roots, "\t");
@@ -757,7 +760,7 @@ buildCFG(const std::set<DynAnalysisRip> &dyn_roots, unsigned maxPathLength,
 	   dynamic root D, every path from D to the current
 	   instruction is at least $N instructions long.
 	*/
-	performUnrollAndCycleBreak(roots, cfgFlavours, maxPathLength);
+	performUnrollAndCycleBreak(allocLabel, roots, cfgFlavours, maxPathLength);
 	if (debug_unroll_and_cycle_break) {
 		printf("after unrolling and cycle breaking:\n");
 		debug_dump(roots, "\t");
@@ -775,13 +778,14 @@ buildCFG(const std::set<DynAnalysisRip> &dyn_roots, unsigned maxPathLength,
 
 /* Build all of the store machines */
 static void
-getStoreCFGs(const std::set<DynAnalysisRip> &conflictingStores,
+getStoreCFGs(CfgLabelAllocator &allocLabel,
+	     const std::set<DynAnalysisRip> &conflictingStores,
 	     Oracle *oracle,
 	     CFGNode ***roots,
 	     int *nr_roots)
 {
 	std::set<CFGNode *> cfgRoots;
-	buildCFG(conflictingStores, STORE_CLUSTER_THRESHOLD, oracle, cfgRoots);
+	buildCFG(allocLabel, conflictingStores, STORE_CLUSTER_THRESHOLD, oracle, cfgRoots);
 
 	/* Need to copy that out to something in the IR heap, so that
 	   we can do garbage collection. */
@@ -798,7 +802,8 @@ getStoreCFGs(const std::set<DynAnalysisRip> &conflictingStores,
 }
 
 void
-getStoreCFGs(const std::set<DynAnalysisRip> &conflictingStores,
+getStoreCFGs(CfgLabelAllocator &allocLabel,
+	     const std::set<DynAnalysisRip> &conflictingStores,
 	     Oracle *oracle,
 	     CFGNode ***roots,
 	     int *nr_roots)
@@ -810,7 +815,7 @@ getStoreCFGs(const std::set<DynAnalysisRip> &conflictingStores,
 		printf("\n");
 	}
 
-	_getStoreCFGs::getStoreCFGs(conflictingStores, oracle, roots, nr_roots);
+	_getStoreCFGs::getStoreCFGs(allocLabel, conflictingStores, oracle, roots, nr_roots);
 
 	if (!TIMEOUT && _getStoreCFGs::debug_top_level) {
 		printf("Results:\n");
