@@ -1,4 +1,16 @@
-all: bug1.summary
+all: bug1.summary.canon3
+
+bug1.summary.canon3: ../../canonicalise_crash_summary3 bug1.summary.canon2
+	$^ $@
+
+bug1.summary.canon2: ../../canonicalise_crash_summary2 bug1.summary.canon1
+	$^ $@
+
+bug1.summary.canon1: ../../canonicalise_crash_summary bug1.summary.canon0
+	$^ $@
+
+bug1.summary.canon0: ../../canonicalise_crash_summary0 bug1.summary 
+	$^ $@
 
 bug1.summary: bug1.summaries
 	! [ -e bug1.summaries/1 ] && [ -e bug1.summaries/0 ] && cp bug1.summaries/0 bug1.summary
