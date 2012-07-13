@@ -1,22 +1,22 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 
-class cfgRootSetT : public std::set<Instruction<ThreadRip> *> {
+class cfgRootSetT : public std::set<Instruction<ThreadCfgLabel> *> {
 public:
-	cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred);
+	cfgRootSetT(ThreadCfgDecode &cfg, predecessorMapT &pred);
 };
-cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred)
+cfgRootSetT::cfgRootSetT(ThreadCfgDecode &cfg, predecessorMapT &pred)
 {
-	std::set<Instruction<ThreadRip> *> toEmit;
-	for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
-	     it != cfg->ripToInstr->end();
+	std::set<Instruction<ThreadCfgLabel> *> toEmit;
+	for (auto it = cfg.begin();
+	     it != cfg.end();
 	     it++)
 		if (it.value())
 			toEmit.insert(it.value());
 	while (!toEmit.empty()) {
 		/* Find one with no predecessors and emit that */
-		std::set<Instruction<ThreadRip> *>::iterator it;
-		for (it = toEmit.begin(); it != toEmit.end(); it++) {
+		auto it = toEmit.begin();
+		for ( ; it != toEmit.end(); it++) {
 			assert(pred.count(*it));
 			if (pred[*it].size() == 0)
 				break;
@@ -29,16 +29,16 @@ cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred)
 			assert(it != toEmit.end());
 		}
 
-		Instruction<ThreadRip> *next = *it;
+		auto *next = *it;
 
 		/* We're going to use *it as a root.  Purge it and
 		   everything reachable from it from the toEmit
 		   set. */
-		std::vector<Instruction<ThreadRip> *> toPurge;
-		std::set<Instruction<ThreadRip> *> donePurge;
+		std::vector<Instruction<ThreadCfgLabel> *> toPurge;
+		std::set<Instruction<ThreadCfgLabel> *> donePurge;
 		toPurge.push_back(*it);
 		while (!toPurge.empty()) {
-			Instruction<ThreadRip> *purge = toPurge.back();
+			auto purge = toPurge.back();
 			toPurge.pop_back();
 			if (donePurge.count(purge))
 				continue;
@@ -70,14 +70,14 @@ cfgRootSetT::cfgRootSetT(CFG<ThreadRip> *cfg, predecessorMapT &pred)
 	}
 }
 
-instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
+instructionDominatorMapT::instructionDominatorMapT(ThreadCfgDecode &cfg,
 						   predecessorMapT &predecessors,
 						   happensAfterMapT &happensAfter,
-						   const std::set<ThreadRip> &neededRips)
+						   const std::set<ThreadCfgLabel> &neededRips)
 {
-	std::set<Instruction<ThreadRip> *> neededInstructions;
-	for (auto it = cfg->ripToInstr->begin();
-	     it != cfg->ripToInstr->end();
+	std::set<Instruction<ThreadCfgLabel> *> neededInstructions;
+	for (auto it = cfg.begin();
+	     it != cfg.end();
 	     it++) {
 		assert(it.value());
 		neededInstructions.insert(it.value());
@@ -85,14 +85,14 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 
 	/* Start by assuming that everything dominates everything */
 	cfgRootSetT entryPoints(cfg, predecessors);
-	std::set<Instruction<ThreadRip> *> needingRecompute;
-	std::set<Instruction<ThreadRip> *> empty;
-	for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
-	     it != cfg->ripToInstr->end();
+	std::set<Instruction<ThreadCfgLabel> *> needingRecompute;
+	std::set<Instruction<ThreadCfgLabel> *> empty;
+	for (auto it = cfg.begin();
+	     it != cfg.end();
 	     it++) {
 		if (!it.value())
 			continue;
-		insert(std::pair<Instruction<ThreadRip> *, std::set<Instruction<ThreadRip> *> >(
+		insert(std::pair<Instruction<ThreadCfgLabel> *, std::set<Instruction<ThreadCfgLabel> *> >(
 			       it.value(),
 			       empty));
 		needingRecompute.insert(it.value());
@@ -100,33 +100,32 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 
 	/* Now iterate to a fixed point. */
 	while (!needingRecompute.empty()) {
-		Instruction<ThreadRip> *i;
+		Instruction<ThreadCfgLabel> *i;
 		{
-			std::set<Instruction<ThreadRip> *>::iterator it = needingRecompute.begin();
+			auto it = needingRecompute.begin();
 			i = *it;
 			needingRecompute.erase(it);
 		}
 
 		assert(i);
 
-		std::set<Instruction<ThreadRip> *> &slot( (*this)[i] );
+		std::set<Instruction<ThreadCfgLabel> *> &slot( (*this)[i] );
 
 		/* new entry domination set is intersection of all of
 		 * the predecessors' exit sets.  If there are no
 		 * predecessor sets then the entry domination set is
 		 * empty. */
-		std::set<Instruction<ThreadRip> *> newDominators;
-		std::set<Instruction<ThreadRip> *> &allPreds(predecessors[i]);
+		std::set<Instruction<ThreadCfgLabel> *> newDominators;
+		std::set<Instruction<ThreadCfgLabel> *> &allPreds(predecessors[i]);
 		if (!allPreds.empty()) {
-
 			auto predIt = allPreds.begin();
 			assert(count(*predIt));
 			newDominators = (*this)[*predIt];
 			for (predIt++ ; predIt != allPreds.end(); predIt++) {
-				Instruction<ThreadRip> *predecessor = *predIt;
+				auto predecessor = *predIt;
 				assert(count(predecessor));
-				std::set<Instruction<ThreadRip> *> &pred_dominators((*this)[predecessor]);
-				for (std::set<Instruction<ThreadRip> *>::iterator it2 = newDominators.begin();
+				std::set<Instruction<ThreadCfgLabel> *> &pred_dominators((*this)[predecessor]);
+				for (auto it2 = newDominators.begin();
 				     it2 != newDominators.end();
 					) {
 					if (pred_dominators.count(*it2)) {
@@ -157,12 +156,12 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 		   happens-before edges are always satisfied, whereas
 		   for ordinary control edges only one per instruction
 		   will be satisfied. */
-		std::set<Instruction<ThreadRip> *> &orderedBefore(happensAfter.happensBefore[i]);
-		for (std::set<Instruction<ThreadRip> *>::iterator it = orderedBefore.begin();
+		std::set<Instruction<ThreadCfgLabel> *> &orderedBefore(happensAfter.happensBefore[i]);
+		for (auto it = orderedBefore.begin();
 		     it != orderedBefore.end();
 		     it++) {
-			std::set<Instruction<ThreadRip> *> &predecessor_dominates( (*this)[*it] );
-			for (std::set<Instruction<ThreadRip> *>::iterator it2 = predecessor_dominates.begin();
+			std::set<Instruction<ThreadCfgLabel> *> &predecessor_dominates( (*this)[*it] );
+			for (auto it2 = predecessor_dominates.begin();
 			     it2 != predecessor_dominates.end();
 			     it2++)
 				newDominators.insert(*it2);
@@ -174,8 +173,8 @@ instructionDominatorMapT::instructionDominatorMapT(CFG<ThreadRip> *cfg,
 				if (it->instr)
 					needingRecompute.insert(it->instr);
 			if (happensAfter.happensAfter.count(i)) {
-				std::set<Instruction<ThreadRip> *> &orderedAfter(happensAfter.happensAfter[i]);
-				for (std::set<Instruction<ThreadRip> *>::iterator it = orderedAfter.begin();
+				std::set<Instruction<ThreadCfgLabel> *> &orderedAfter(happensAfter.happensAfter[i]);
+				for (auto it = orderedAfter.begin();
 				     it != orderedAfter.end();
 				     it++) {
 					if (*it)

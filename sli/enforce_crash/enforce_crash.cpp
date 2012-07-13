@@ -15,18 +15,12 @@
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
 
-#ifndef NDEBUG
-static bool debug_build_cfg = false;
-#else
-#define debug_build_cfg false
-#endif
-
 void
 instrToInstrSetMap::print(FILE *f)
 {
 	for (iterator it = begin(); it != end(); it++) {
 		fprintf(f, "%s[%p] -> {", it->first->rip.name(), it->first);
-		for (std::set<Instruction<ThreadRip> *>::iterator it2 = it->second.begin();
+		for (auto it2 = it->second.begin();
 		     it2 != it->second.end();
 		     it2++) {
 			if (it2 != it->second.begin())
@@ -43,8 +37,7 @@ unsigned long __trivial_hash_function(const ClientRip &k)
 }
 
 abstractThreadExitPointsT::abstractThreadExitPointsT(
-	CfgDecode &decode,
-	EnforceCrashCFG *cfg,
+	ThreadCfgDecode &cfg,
 	happensBeforeMapT &happensBeforePoints)
 {
 	/* We need to exit thread X if we reach instruction Y and
@@ -53,7 +46,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 	   subsequently send it.  We also exit if Y can neither send
 	   nor receive any further messages. */
 
-	typedef Instruction<ThreadRip> instrT;
+	typedef Instruction<ThreadCfgLabel> instrT;
 
 	/* Step one: build control-flow reachability maps */
 
@@ -64,14 +57,14 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 	   there's some control flow path from y to x */
 	instrToInstrSetMap backwardReachable;
 
-	for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++)
+	for (auto it = cfg.begin(); it != cfg.end(); it++)
 		if (it.value())
 			forwardReachable[it.value()].insert(it.value());
 
 	bool progress;
 	do {
 		progress = false;
-		for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
+		for (auto it = cfg.begin(); it != cfg.end(); it++) {
 			instrT *i = it.value();
 			if (!i)
 				continue;
@@ -102,12 +95,12 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 
 	/* Figure out which instructions should be present. */
 	std::set<instrT *> instructionPresence;
-	for (auto it = cfg->ripToInstr->begin(); it != cfg->ripToInstr->end(); it++) {
+	for (auto it = cfg.begin(); it != cfg.end(); it++) {
 		instrT *i = it.value();
 		if (!i)
 			continue;
 
-		int thread = it.key().thread;
+		int thread = it.thread();
 
 		/* Should @i be present in thread @thread? */
 		bool should_be_present = false;
@@ -121,12 +114,12 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 				happensBeforeEdge *hbe = *it4;
 				if (hbe->before.tid == thread) {
 					/* Can we send this message? */
-					instrT *sender = cfg->ripToInstr->get(ThreadRip(hbe->before.tid, decode(hbe->before.where)->rip));
+					instrT *sender = cfg(hbe->before);
 					if (forwardReachable[i].count(sender))
 						should_be_present = true;
 				} else if (hbe->after.tid == thread) {
 					/* Can we receive this message? */
-					instrT *receiver = cfg->ripToInstr->get(ThreadRip(hbe->after.tid, decode(hbe->after.where)->rip));
+					instrT *receiver = cfg(hbe->after);
 					if (forwardReachable[i].count(receiver))
 						should_be_present = true;
 				}
@@ -144,7 +137,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 			     it4++) {
 				happensBeforeEdge *hbe = *it4;
 				if (hbe->after.tid == thread) {
-					instrT *receiver = cfg->ripToInstr->get(ThreadRip(hbe->after.tid, decode(hbe->after.where)->rip));
+					instrT *receiver = cfg(hbe->after);
 					if (!forwardReachable[i].count(receiver) &&
 					    !backwardReachable[i].count(receiver)) {
 						/* No path between this instruction and this
@@ -176,20 +169,16 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 			if (it2->type == instrT::successor_t::succ_call)
 				continue;
 			if (it2->instr && !instructionPresence.count(it2->instr))
-				(*this)[it2->instr->rip.rip.unwrap_vexrip()].insert(i->rip.thread);
-			if (it2->rip.rip.isValid() && !it2->instr)
-				(*this)[it2->rip.rip.unwrap_vexrip()].insert(i->rip.thread);
+				(*this)[it2->instr->label].insert(i->rip.thread);
 		}
 	}
 
 }
 
 static bool
-buildCED(CfgLabelAllocator &allocLabel,
-	 CfgDecode &decode,
+buildCED(CfgDecode &decode,
 	 DNF_Conjunction &c,
-	 std::map<unsigned, ThreadRip> &roots,
-	 AddressSpace *as,
+	 std::map<unsigned, CfgLabel> &rootsCfg,
 	 StateMachine *probeMachine,
 	 StateMachine *storeMachine,
 	 crashEnforcementData *out,
@@ -202,7 +191,7 @@ buildCED(CfgLabelAllocator &allocLabel,
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
 	/* and where the needed expressions are calculated */
-	std::set<ThreadRip> neededRips;
+	std::set<ThreadCfgLabel> neededRips;
 	{
 		/* XXX keep this in sync with
 		 * expressionStashMapT::expressionStashMapT() */
@@ -214,15 +203,17 @@ buildCED(CfgLabelAllocator &allocLabel,
 			if (e->tag == Iex_Get) {
 				IRExprGet *ieg = (IRExprGet *)e;
 				if (ieg->reg.isReg()) {
-					neededRips.insert(roots[ieg->reg.tid()]);
+					auto it_r = rootsCfg.find(ieg->reg.tid());
+					assert(it_r != rootsCfg.end());
+					neededRips.insert(ThreadCfgLabel(ieg->reg.tid(), it_r->second));
 				} else {
 					neededTemporaries.insert(ieg);
 				}
 			} else {
 				assert(e->tag == Iex_HappensBefore);
 				IRExprHappensBefore *ieh = (IRExprHappensBefore *)e;
-				neededRips.insert(ThreadRip(ieh->before.tid, decode(ieh->before.where)->rip));
-				neededRips.insert(ThreadRip(ieh->after.tid, decode(ieh->after.where)->rip));
+				neededRips.insert(ieh->before);
+				neededRips.insert(ieh->after);
 			}
 		}
 		if (!neededTemporaries.empty()) {
@@ -240,55 +231,20 @@ buildCED(CfgLabelAllocator &allocLabel,
 					}
 				}
 				assert(l);
-				neededRips.insert(ThreadRip(l->rip.tid, decode(l->rip.where)->rip));
+				neededRips.insert(l->rip);
 			}
 		}
 	}
 
-	/* and which threads are relevant */
-	std::set<unsigned> neededThreads;
-	for (std::set<ThreadRip>::iterator it = neededRips.begin();
-	     it != neededRips.end();
-	     it++)
-		neededThreads.insert(it->thread);
-
-	/* Build the CFG */
-	EnforceCrashCFG *cfg = new EnforceCrashCFG(as, neededRips);
-	for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
-	     it != roots.end();
-	     it++) {
-		printf("Root %s\n", it->second.name());
-		cfg->add_root(it->second, 1000);
-	}
-	cfg->doit(allocLabel);
-	
-	if (cfg->ripToInstr->size() > 1000) {
-		printf("CFG is too big to work with\n");
-		return false;
-	}
-
-	for (auto it = neededRips.begin(); it != neededRips.end(); it++) {
-		if (!cfg->ripToInstr->hasKey(*it)) {
-			printf("Failed to build sufficiently complete CFG!\n");
-			return false;
-		}
-	}
-
-	if (debug_build_cfg) {
-		printf("Needed RIPs:\n");
-		for (auto it = neededRips.begin(); it != neededRips.end(); it++)
-			printf("\t%s\n", it->name());
-		printf("CFG:\n");
-		cfg->print(stdout);
-	}
+	ThreadCfgDecode cfg;
+	cfg.addMachine(probeMachine);
+	cfg.addMachine(storeMachine);
 
 	/* Figure out where the various expressions should be
 	 * evaluated. */
-	expressionDominatorMapT exprDominatorMap;
-	if (!exprDominatorMap.init(decode, c, cfg, neededRips))
-		return false;
+	expressionDominatorMapT exprDominatorMap(c, cfg, neededRips);
 
-	*out = crashEnforcementData(decode, neededExpressions, roots, exprDominatorMap, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
+	*out = crashEnforcementData(decode, neededExpressions, rootsCfg, exprDominatorMap, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
 	return true;
 }
 
@@ -384,22 +340,22 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	if (d.size() == 0)
 		return crashEnforcementData();
 
-	std::map<unsigned, ThreadRip> roots;
+	std::map<unsigned, CfgLabel> rootsCfg;
 	assert(summary->loadMachine->origin.size() == 1);
 	assert(summary->storeMachine->origin.size() == 1);
-	roots[summary->loadMachine->origin[0].first] =
-		ThreadRip::mk(summary->loadMachine->origin[0].first,
-			      summary->loadMachine->origin[0].second);
-	roots[summary->storeMachine->origin[0].first] =
-		ThreadRip::mk(summary->storeMachine->origin[0].first,
-			      summary->storeMachine->origin[0].second);
-
-	CfgLabelAllocator allocLabel;
+	assert(summary->loadMachine->cfg_roots.size() == 1);
+	assert(summary->storeMachine->cfg_roots.size() == 1);
+	rootsCfg.insert(std::pair<unsigned, CfgLabel>(
+				summary->loadMachine->origin[0].first,
+				summary->loadMachine->cfg_roots[0]->label));
+	rootsCfg.insert(std::pair<unsigned, CfgLabel>(
+				summary->storeMachine->origin[0].first,
+				summary->storeMachine->cfg_roots[0]->label));
 
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
-		if (buildCED(allocLabel, decode, d[x], roots, oracle->ms->addressSpace, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
+		if (buildCED(decode, d[x], rootsCfg, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
 			accumulator |= tmp;
 	}
 	return accumulator;

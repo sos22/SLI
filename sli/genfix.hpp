@@ -120,6 +120,9 @@ public:
 	void addCall(const ripType &r) {
 		successors.push_back(successor_t::call(r));
 	}
+	void addCall(Instruction *r) {
+		successors.push_back(successor_t::call(r));
+	}
 	void addDefault(const ripType &r, LibraryFunctionType t = LibraryFunctionTemplate::none) {
 		assert(!getDefault());
 		successors.push_back(successor_t::dflt(r, t));
@@ -165,6 +168,11 @@ public:
 		{
 			return successor_t(succ_call, _rip,
 					   NULL, LibraryFunctionTemplate::none);
+		}
+		static successor_t call(Instruction *i)
+		{
+			return successor_t(succ_call, ripType(), i,
+					   LibraryFunctionTemplate::none);
 		}
 		static successor_t branch(const ripType _rip)
 		{
@@ -259,6 +267,8 @@ unsigned long __trivial_hash_function(const ThreadRip &k);
 struct DirectRip;
 unsigned long __trivial_hash_function(const DirectRip &k);
 unsigned long __trivial_hash_function(const ClientRip &k);
+struct ThreadCfgLabel;
+unsigned long __trivial_hash_function(const ThreadCfgLabel &x);
 
 template <typename ripType>
 class CFG : public GarbageCollected<CFG<ripType>, &ir_heap > {

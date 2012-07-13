@@ -10,6 +10,59 @@
 #include "offline_analysis.hpp"
 #include "intern.hpp"
 
+class ThreadCfgLabel : public Named {
+	char *mkName() const {
+		return my_asprintf("%s:%d", label.name(), thread);
+	}
+public:
+	unsigned thread;
+	CfgLabel label;
+	ThreadCfgLabel(unsigned _thread, const CfgLabel &_label)
+		: thread(_thread), label(_label)
+	{}
+	ThreadCfgLabel()
+		: thread(-1), label(CfgLabel::uninitialised())
+	{}
+	ThreadCfgLabel(const MemoryAccessIdentifier &mai)
+		: thread(mai.tid), label(mai.where)
+	{}
+	bool operator==(const ThreadCfgLabel &o) const {
+		return thread == o.thread && label == o.label;
+	}
+	bool operator <(const ThreadCfgLabel &o) const {
+		return thread < o.thread ||
+			(thread == o.thread && label < o.label);
+	}
+};
+
+class ThreadCfgDecode {
+	Instruction<ThreadCfgLabel> *addCfg(int tid, const CFGNode *root);
+	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
+public:
+	Instruction<ThreadCfgLabel> *operator()(const ThreadCfgLabel &l) {
+		auto it = content.find(l);
+		assert(it != content.end());
+		return it->second;
+	}
+
+	class iterator {
+		std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>::iterator val;
+	public:
+		void operator++(int) { val++; }
+		Instruction<ThreadCfgLabel> *value() { return val->second; }
+		int thread() const { return val->first.thread; }
+		bool operator!=(const iterator &o) const { return val != o.val; }
+		iterator(const std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>::iterator &_val)
+			: val(_val)
+		{}
+	};
+
+	iterator begin() { return iterator(content.begin()); }
+	iterator end() { return iterator(content.end()); }
+
+	void addMachine(StateMachine *sm);
+};
+
 void enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out);
 
 struct exprEvalPoint;
@@ -40,7 +93,7 @@ public:
 	}
 };
 
-class instrToInstrSetMap : public std::map<Instruction<ThreadRip> *, std::set<Instruction<ThreadRip> *> > {
+class instrToInstrSetMap : public std::map<Instruction<ThreadCfgLabel> *, std::set<Instruction<ThreadCfgLabel> *> > {
 public:
 	void print(FILE *f);
 };
@@ -50,11 +103,11 @@ public:
    relationships. */
 class predecessorMapT : public instrToInstrSetMap {
 public:
-	predecessorMapT(CFG<ThreadRip> *cfg) {
-		for (CFG<ThreadRip>::ripToInstrT::iterator it = cfg->ripToInstr->begin();
-		     it != cfg->ripToInstr->end();
+	predecessorMapT(ThreadCfgDecode &cfg) {
+		for (auto it = cfg.begin();
+		     it != cfg.end();
 		     it++) {
-			Instruction<ThreadRip> *v = it.value();
+			auto *v = it.value();
 			if (!count(v))
 				(*this)[v];
 			for (auto it2 = v->successors.begin(); it2 != v->successors.end(); it2++)
@@ -72,7 +125,7 @@ public:
 	instrToInstrSetMap happensBefore;
 	/* happensBefore[i] -> the set of all instructions ordered after i */
 	instrToInstrSetMap happensAfter;
-	bool init(CfgDecode &decode, DNF_Conjunction &c, CFG<ThreadRip> *cfg) __attribute__((warn_unused_result));
+	happensAfterMapT(DNF_Conjunction &c, ThreadCfgDecode &cfg);
 	void print(FILE *f) {
 		fprintf(f, "before:\n");
 		happensBefore.print(f);
@@ -87,22 +140,15 @@ public:
 class instructionDominatorMapT : public instrToInstrSetMap {
 	friend class expressionDominatorMapT;
 	instructionDominatorMapT() {}
-	instructionDominatorMapT(CFG<ThreadRip> *cfg,
+	instructionDominatorMapT(ThreadCfgDecode &cfg,
 				 predecessorMapT &predecessors,
 				 happensAfterMapT &happensAfter,
-				 const std::set<ThreadRip> &neededInstructions);
+				 const std::set<ThreadCfgLabel> &neededInstructions);
 };
 
-class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::set<std::pair<bool, IRExpr *> > > {
+class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > {
 	class trans1 : public IRExprTransformer {
-		std::set<Instruction<ThreadRip> *> &avail;
 		std::set<unsigned> &availThreads;
-		CFG<ThreadRip> *cfg;
-		bool isAvail(ThreadRip rip) {
-			Instruction<ThreadRip> *i = cfg->ripToInstr->get(rip);
-			assert(i);
-			return avail.count(i) != 0;
-		}
 		IRExpr *transformIex(IRExprGet *e) {
 			if (!availThreads.count(e->reg.tid()))
 				isGood = false;
@@ -114,18 +160,18 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadRip> *, std::s
 		}
 	public:
 		bool isGood;
-		trans1(std::set<Instruction<ThreadRip> *> &_avail, std::set<unsigned> &_availThreads, CFG<ThreadRip> *_cfg)
-			: avail(_avail), availThreads(_availThreads), cfg(_cfg), isGood(true) 
+		trans1(std::set<unsigned> &_availThreads)
+			: availThreads(_availThreads), isGood(true)
 		{}
 	};
-	static bool evaluatable(IRExpr *e, std::set<Instruction<ThreadRip> *> &avail, std::set<unsigned> &availThreads, CFG<ThreadRip> *cfg) {
-		trans1 t(avail, availThreads, cfg);
+	static bool evaluatable(IRExpr *e, std::set<unsigned> &availThreads) {
+		trans1 t(availThreads);
 		t.doit(e);
 		return t.isGood;
 	}
 public:
 	instructionDominatorMapT idom;
-	bool init(CfgDecode &decode, DNF_Conjunction &, CFG<ThreadRip> *, const std::set<ThreadRip> &neededRips) __attribute__((warn_unused_result));
+	expressionDominatorMapT(DNF_Conjunction &, ThreadCfgDecode &, const std::set<ThreadCfgLabel> &neededRips);
 };
 
 class simulationSlotT {
@@ -159,26 +205,23 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 		s.insert(*it2);
 }
 
-class expressionStashMapT : public std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > >,
+class expressionStashMapT : public std::map<CfgLabel, std::set<std::pair<unsigned, IRExpr *> > >,
 			    private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
-			std::vector<std::pair<unsigned, IRExpr *> > n;
-			setToVector(it->second, n);
-			it->second.clear();
-			for (auto it2 = n.begin(); it2 != n.end(); it2++) {
+			std::vector<std::pair<unsigned, IRExpr *> > f(it->second.begin(), it->second.end());
+			for (auto it2 = f.begin(); it2 != f.end(); it2++)
 				hv(it2->second);
-				it->second.insert(*it2);
-			}
+			it->second.clear();
+			it->second.insert(f.begin(), f.end());
 		}
 	}
 public:
 	expressionStashMapT() {}
-	expressionStashMapT(CfgDecode &decode,
-			    std::set<IRExpr *> &neededExpressions,
+	expressionStashMapT(std::set<IRExpr *> &neededExpressions,
 			    StateMachine *probeMachine,
 			    StateMachine *storeMachine,
-			    std::map<unsigned, ThreadRip> &roots)
+			    std::map<unsigned, CfgLabel> &roots)
 	{
 		/* XXX keep this in sync with buildCED */
 		std::set<IRExprGet *> neededTemporaries;
@@ -186,12 +229,12 @@ public:
 		     it != neededExpressions.end();
 		     it++) {
 			IRExpr *e = *it;
-			ThreadRip rip;
 			if (e->tag == Iex_Get) {
 				IRExprGet *ieg = (IRExprGet *)e;
 				if (ieg->reg.isReg()) {
-					rip = roots[ieg->reg.tid()];
-					(*this)[rip.rip.unwrap_vexrip()].insert(std::pair<unsigned, IRExpr *>(rip.thread, e));
+					auto it_r = roots.find(ieg->reg.tid());
+					assert(it_r != roots.end());
+					(*this)[it_r->second].insert(std::pair<unsigned, IRExpr *>(ieg->reg.tid(), e));
 				} else {
 					neededTemporaries.insert(ieg);
 				}
@@ -216,7 +259,7 @@ public:
 					}
 				}
 				assert(l);
-				(*this)[decode(l->rip.where)->rip.unwrap_vexrip()].insert(
+				(*this)[l->rip.where].insert(
 					std::pair<unsigned, IRExpr *>(
 						l->rip.tid,
 						*it));
@@ -234,8 +277,8 @@ public:
 			return false;
 		clear();
 		while (1) {
-			unsigned long a;
-			if (!parseHexUlong(&a, str, &str) ||
+			CfgLabel where(CfgLabel::uninitialised());
+			if (!where.parse(str, &str) ||
 			    !parseThisString(" -> {", str, &str))
 				break;
 			std::set<std::pair<unsigned, IRExpr *> > b;
@@ -251,7 +294,7 @@ public:
 			if (!parseThisString("}\n", str, &str))
 				return false;
 			assert(b.size() > 0);
-			(*this)[a] = b;
+			(*this)[where] = b;
 		}
 		*suffix = str;
 		return true;
@@ -259,7 +302,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tStash map:\n");
 		for (auto it = begin(); it != end(); it++) {
-			fprintf(f, "\t\t%lx -> {", it->first);
+			fprintf(f, "\t\t%s -> {", it->first.name());
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
 				fprintf(f, "%d:", it2->first);
 				it2->second->prettyPrint(f);
@@ -307,7 +350,7 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 		_LibVEX_free(&main_heap, res_vex);
 		free((void *)fragments[0]);
 		for (unsigned x = 1; x < fragments.size() - 1; x += 2)
-			free((void *)fragments[x]);
+			_LibVEX_free(&main_heap, (void *)fragments[x]);
 		return res_malloc;
 	}
 public:
@@ -328,24 +371,23 @@ public:
 		state.hbes.insert(this);
 		return this;
 	}
-	happensBeforeEdge(CfgDecode &decode,
-			  bool invert,
+	happensBeforeEdge(bool invert,
 			  IRExprHappensBefore *hb,
 			  instructionDominatorMapT &idom,
-			  CFG<ThreadRip> *cfg,
+			  ThreadCfgDecode &cfg,
 			  expressionStashMapT &stashMap,
 			  unsigned _msg_id)
 		: before(invert ? hb->after : hb->before),
 		  after(invert ? hb->before : hb->after),
 		  msg_id(_msg_id)
 	{
-		std::set<Instruction<ThreadRip> *> &liveInstructions(
-			idom[cfg->ripToInstr->get(ThreadRip(before.tid, decode(before.where)->rip))]);
-		for (std::set<Instruction<ThreadRip> *>::iterator it = liveInstructions.begin();
+		std::set<Instruction<ThreadCfgLabel> *> &liveInstructions(
+			idom[cfg(before)]);
+		for (auto it = liveInstructions.begin();
 		     it != liveInstructions.end();
 		     it++) {
-			Instruction<ThreadRip> *i = *it;
-			std::set<std::pair<unsigned, IRExpr *> > &exprs(stashMap[i->rip.rip.unwrap_vexrip()]);
+			auto *i = *it;
+			std::set<std::pair<unsigned, IRExpr *> > &exprs(stashMap[i->label]);
 			for (std::set<std::pair<unsigned, IRExpr *> >::iterator it2 = exprs.begin();
 			     it2 != exprs.end();
 			     it2++) {
@@ -438,13 +480,13 @@ public:
 
 	slotMapT() { }
 
-	slotMapT(std::map<unsigned long, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
-		 std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBefore,
+	slotMapT(std::map<CfgLabel, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
+		 std::map<CfgLabel, std::set<happensBeforeEdge *> > &happensBefore,
 		 simulationSlotT &next_slot)
 	{
 		/* Allocate slots for expressions which we know we're
 		 * going to have to stash at some point. */
-		for (std::map<unsigned long, std::set<key_t> >::iterator it = neededExpressions.begin();
+		for (auto it = neededExpressions.begin();
 		     it != neededExpressions.end();
 		     it++) {
 			std::set<key_t> &s((*it).second);
@@ -455,7 +497,7 @@ public:
 		}
 		/* And the ones which we're going to receive in
 		 * messages */
-		for (std::map<unsigned long, std::set<happensBeforeEdge *> >::iterator it = happensBefore.begin();
+		for (auto it = happensBefore.begin();
 		     it != happensBefore.end();
 		     it++) {
 			std::set<happensBeforeEdge *> &s(it->second);
@@ -823,7 +865,7 @@ public:
 	}
 };
 
-class expressionEvalMapT : public std::map<unsigned long, std::set<exprEvalPoint> >,
+class expressionEvalMapT : public std::map<CfgLabel, std::set<exprEvalPoint> >,
 			   private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
@@ -850,7 +892,7 @@ public:
 			for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = it->second.begin();
 			     it2 != it->second.end();
 			     it2++)
-				(*this)[it->first->rip.rip.unwrap_vexrip()].insert(
+				(*this)[it->first->label].insert(
 					exprEvalPoint(
 						it2->first,
 						it->first->rip.thread,
@@ -867,7 +909,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tEval map:\n");
 		for (auto it = begin(); it != end(); it++) {
-			fprintf(f, "\t\t%lx -> {", it->first);
+			fprintf(f, "\t\t%s -> {", it->first.name());
 			for (auto it2 = it->second.begin();
 			     it2 != it->second.end();
 			     it2++) {
@@ -882,10 +924,10 @@ public:
 			return false;
 		clear();
 		while (1) {
-			unsigned long key;
+			CfgLabel key(CfgLabel::uninitialised());
 			std::set<exprEvalPoint> value;
 			const char *a;
-			if (!parseHexUlong(&key, str, &a) ||
+			if (!key.parse(str, &a) ||
 			    !parseThisString(" -> {", a, &str))
 				break;
 			while (1) {
@@ -933,17 +975,13 @@ class crashEnforcementRoots : public std::set<ClientRip> {
 public:
 	crashEnforcementRoots() {}
 
-	crashEnforcementRoots(std::map<unsigned, ThreadRip> &roots) {
+	crashEnforcementRoots(CfgDecode &decode, std::map<unsigned, CfgLabel> &roots) {
 		std::map<unsigned long, std::set<unsigned> > threadsRelevantAtEachEntryPoint;
-		for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
-		     it != roots.end();
-		     it++)
-			threadsRelevantAtEachEntryPoint[it->second.rip.unwrap_vexrip()].insert(it->first);
-		for (std::map<unsigned, ThreadRip>::iterator it = roots.begin();
-		     it != roots.end();
-		     it++) {
-			std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[it->second.rip.unwrap_vexrip()]);
-			insert(ClientRip(it->second.rip.unwrap_vexrip(), threads, ClientRip::start_of_instruction));
+		for (auto it = roots.begin(); it != roots.end(); it++)
+			threadsRelevantAtEachEntryPoint[decode(it->second)->rip.unwrap_vexrip()].insert(it->first);
+		for (auto it = roots.begin(); it != roots.end(); it++) {
+			std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[decode(it->second)->rip.unwrap_vexrip()]);
+			insert(ClientRip(decode(it->second)->rip.unwrap_vexrip(), threads, ClientRip::start_of_instruction));
 		}
 	}
 
@@ -977,10 +1015,10 @@ public:
 	}
 };
 
-class EnforceCrashCFG : public CFG<ThreadRip> {
+class EnforceCrashCFG : public CFG<ThreadCfgLabel> {
 public:
-	std::set<ThreadRip> usefulInstrs;
-	bool instructionUseful(Instruction<ThreadRip> *i) {
+	std::set<ThreadCfgLabel> usefulInstrs;
+	bool instructionUseful(Instruction<ThreadCfgLabel> *i) {
 		if (usefulInstrs.count(i->rip))
 			return true;
 		else
@@ -990,12 +1028,12 @@ public:
 		return true;
 	}
 	EnforceCrashCFG(AddressSpace *as,
-			const std::set<ThreadRip> &_usefulInstrs)
-		: CFG<ThreadRip>(as), usefulInstrs(_usefulInstrs)
+			const std::set<ThreadCfgLabel> &_usefulInstrs)
+		: CFG<ThreadCfgLabel>(as), usefulInstrs(_usefulInstrs)
 	{}
 };
 
-class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeEdge *> >,
+class happensBeforeMapT : public std::map<CfgLabel, std::set<happensBeforeEdge *> >,
 			  private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++)
@@ -1003,10 +1041,9 @@ class happensBeforeMapT : public std::map<unsigned long, std::set<happensBeforeE
 	}
 public:
 	happensBeforeMapT() {}
-	happensBeforeMapT(CfgDecode &decode,
-			  DNF_Conjunction &c,
+	happensBeforeMapT(DNF_Conjunction &c,
 			  expressionDominatorMapT &exprDominatorMap,
-			  EnforceCrashCFG *cfg,
+			  ThreadCfgDecode &cfg,
 			  expressionStashMapT &exprStashPoints,
 			  int &next_hb_id)
 	{
@@ -1015,11 +1052,10 @@ public:
 			bool invert = c[x].first;
 			if (e->tag == Iex_HappensBefore) {
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
-				happensBeforeEdge *hbe = new happensBeforeEdge(decode,
-									       invert, hb, exprDominatorMap.idom,
+				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, exprDominatorMap.idom,
 									       cfg, exprStashPoints, next_hb_id++);
-				(*this)[decode(hbe->before.where)->rip.unwrap_vexrip()].insert(hbe);
-				(*this)[decode(hbe->after.where)->rip.unwrap_vexrip()].insert(hbe);
+				(*this)[hbe->before.where].insert(hbe);
+				(*this)[hbe->after.where].insert(hbe);
 			}
 		}
 	}
@@ -1032,7 +1068,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tHappens before map:\n");
 		for (auto it = begin(); it != end(); it++) {
-			fprintf(f, "\t\t%lx -> {", it->first);
+			fprintf(f, "\t\t%s -> {", it->first.name());
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
 				(*it2)->prettyPrint(f);
 				fprintf(f, ", ");
@@ -1045,9 +1081,9 @@ public:
 			return false;
 		clear();
 		while (1) {
-			unsigned long addr;
+			CfgLabel addr(CfgLabel::uninitialised());
 			std::set<happensBeforeEdge *> edges;
-			if (!parseHexUlong(&addr, str, &str) ||
+			if (!addr.parse(str, &str) ||
 			    !parseThisString(" -> {", str, &str))
 				break;
 			while (1) {
@@ -1076,10 +1112,10 @@ public:
 };
 
 /* Map that tells us where the various threads have to exit. */
-class abstractThreadExitPointsT : public std::map<unsigned long, std::set<unsigned> > {
+class abstractThreadExitPointsT : public std::map<CfgLabel, std::set<unsigned> > {
 public:
 	abstractThreadExitPointsT() {}
-	abstractThreadExitPointsT(CfgDecode &decode, EnforceCrashCFG *cfg, happensBeforeMapT &);
+	abstractThreadExitPointsT(ThreadCfgDecode &cfg, happensBeforeMapT &);
 	void operator|=(const abstractThreadExitPointsT &atet) {
 		for (auto it = atet.begin(); it != atet.end(); it++)
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
@@ -1088,7 +1124,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tAbstract thread exit points:\n");
 		for (auto it = begin(); it != end(); it++) {
-			fprintf(f, "\t\t%lx -> {", it->first);
+			fprintf(f, "\t\t%s -> {", it->first.name());
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
 				fprintf(f, "%d, ", *it2);
 			fprintf(f, "}\n");
@@ -1099,9 +1135,9 @@ public:
 			return false;
 		clear();
 		while (1) {
-			unsigned long key;
+			CfgLabel key(CfgLabel::uninitialised());
 			std::set<unsigned> value;
-			if (!parseHexUlong(&key, str, &str) ||
+			if (!key.parse(str, &str) ||
 			    !parseThisString(" -> {", str, &str))
 				break;
 			while (1) {
@@ -1137,20 +1173,20 @@ public:
 
 	crashEnforcementData(CfgDecode &decode,
 			     std::set<IRExpr *> &neededExpressions,
-			     std::map<unsigned, ThreadRip> &_roots,
+			     std::map<unsigned, CfgLabel> &_roots,
 			     expressionDominatorMapT &exprDominatorMap,
 			     StateMachine *probeMachine,
 			     StateMachine *storeMachine,
 			     DNF_Conjunction &conj,
-			     EnforceCrashCFG *cfg,
+			     ThreadCfgDecode &cfg,
 			     int &next_hb_id,
 			     simulationSlotT &next_slot)
-		: roots(_roots),
-		  exprStashPoints(decode, neededExpressions, probeMachine, storeMachine, _roots),
-		  happensBeforePoints(decode, conj, exprDominatorMap, cfg, exprStashPoints, next_hb_id),
+		: roots(decode, _roots),
+		  exprStashPoints(neededExpressions, probeMachine, storeMachine, _roots),
+		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
-		  threadExitPoints(decode, cfg, happensBeforePoints)
+		  threadExitPoints(cfg, happensBeforePoints)
 	{}
 
 	bool parse(const char *str, const char **suffix) {

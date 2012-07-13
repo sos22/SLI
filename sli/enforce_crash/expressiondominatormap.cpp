@@ -1,15 +1,11 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 
-bool
-expressionDominatorMapT::init(CfgDecode &decode,
-			      DNF_Conjunction &c,
-			      CFG<ThreadRip> *cfg,
-			      const std::set<ThreadRip> &neededRips)
+expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
+						 ThreadCfgDecode &cfg,
+						 const std::set<ThreadCfgLabel> &neededRips)
 {
-	happensAfterMapT happensBefore;
-	if (!happensBefore.init(decode, c, cfg))
-		return false;
+	happensAfterMapT happensBefore(c, cfg);
 
 	predecessorMapT pred(cfg);
 
@@ -20,18 +16,18 @@ expressionDominatorMapT::init(CfgDecode &decode,
 
 	/* First, figure out where the various expressions could in
 	   principle be evaluated. */
-	std::map<Instruction<ThreadRip> *, std::set<std::pair<bool, IRExpr *> > > evalable;
+	std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > evalable;
 	for (instructionDominatorMapT::iterator it = idom.begin();
 	     it != idom.end();
 	     it++) {
 		evalable[it->first].clear();
 		for (unsigned x = 0; x < c.size(); x++) {
 			std::set<unsigned> availThreads;
-			for (std::set<Instruction<ThreadRip> *>::iterator it2 = it->second.begin();
+			for (auto it2 = it->second.begin();
 			     it2 != it->second.end();
 			     it2++)
 				availThreads.insert((*it2)->rip.thread);
-			if (evaluatable(c[x].second, it->second, availThreads, cfg))
+			if (evaluatable(c[x].second, availThreads))
 				evalable[it->first].insert(c[x]);
 		}
 	}
@@ -41,14 +37,14 @@ expressionDominatorMapT::init(CfgDecode &decode,
 	   not at some of X's predecessors, for any instruction X.  I'm
 	   not entirely convinced that that's *precisely* what we're
 	   after, but it's a pretty reasonable approximation. */
-	for (std::map<Instruction<ThreadRip> *, std::set<std::pair<bool, IRExpr *> > >::iterator it = evalable.begin();
+	for (auto it = evalable.begin();
 	     it != evalable.end();
 	     it++) {
-		Instruction<ThreadRip> *i = it->first;
+		auto i = it->first;
 		std::set<std::pair<bool, IRExpr *> > &theoreticallyEvaluatable(evalable[i]);
 		std::set<std::pair<bool, IRExpr *> > &actuallyEvalHere((*this)[i]);
-		std::set<Instruction<ThreadRip> *> &predecessors(pred[i]);
-		std::set<Instruction<ThreadRip> *> *orderingPredecessors = NULL;
+		std::set<Instruction<ThreadCfgLabel> *> &predecessors(pred[i]);
+		std::set<Instruction<ThreadCfgLabel> *> *orderingPredecessors = NULL;
 
 		if (happensBefore.happensBefore.count(i))
 			orderingPredecessors = &happensBefore.happensBefore[i];
@@ -56,10 +52,10 @@ expressionDominatorMapT::init(CfgDecode &decode,
 		     it2 != theoreticallyEvaluatable.end();
 		     it2++) {
 			bool takeIt = false;
-			for (std::set<Instruction<ThreadRip> *>::iterator it3 = predecessors.begin();
+			for (auto it3 = predecessors.begin();
 			     !takeIt && it3 != predecessors.end();
 			     it3++) {
-				Instruction<ThreadRip> *predecessor = *it3;
+				auto *predecessor = *it3;
 				if (!evalable[predecessor].count(*it2))
 					takeIt = true;
 			}
@@ -69,7 +65,7 @@ expressionDominatorMapT::init(CfgDecode &decode,
 			   satisfied and it's therefore certain that
 			   it will have already been evaluated. */
 			if (takeIt && orderingPredecessors) {
-				for (std::set<Instruction<ThreadRip> *>::iterator it3 = orderingPredecessors->begin();
+				for (auto it3 = orderingPredecessors->begin();
 				     takeIt && it3 != orderingPredecessors->end();
 				     it3++) {
 					if (evalable[*it3].count(*it2))
@@ -84,25 +80,19 @@ expressionDominatorMapT::init(CfgDecode &decode,
 			}
 		}
 	}
-	return true;
 }
 
-bool
-happensAfterMapT::init(CfgDecode &decode, DNF_Conjunction &c, CFG<ThreadRip> *cfg)
+happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadCfgDecode &cfg)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
 			IRExprHappensBefore *e = (IRExprHappensBefore *)c[x].second;
-			ThreadRip beforeRip(e->before.tid, decode(e->before.where)->rip);
-			ThreadRip afterRip(e->after.tid, decode(e->after.where)->rip);
-			Instruction<ThreadRip> *before = cfg->ripToInstr->get(beforeRip);
-			Instruction<ThreadRip> *after = cfg->ripToInstr->get(afterRip);
-			if (!before || !after) {
-				printf("Failed to build happensAfterMapT because CFG is incomplete.\n");
-				return false;
-			}
+			ThreadCfgLabel beforeRip(e->before);
+			ThreadCfgLabel afterRip(e->after);
+			auto before = cfg(beforeRip);
+			auto after = cfg(afterRip);
 			if (c[x].first) {
-				Instruction<ThreadRip> *t = before;
+				auto *t = before;
 				before = after;
 				after = t;
 			}
@@ -110,5 +100,4 @@ happensAfterMapT::init(CfgDecode &decode, DNF_Conjunction &c, CFG<ThreadRip> *cf
 			happensBefore[after].insert(before);
 		}
 	}
-	return true;
 }
