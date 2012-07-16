@@ -184,6 +184,10 @@ buildCED(DNF_Conjunction &c,
 	 int &next_hb_id,
 	 simulationSlotT &next_slot)
 {
+	ThreadCfgDecode cfg;
+	cfg.addMachine(probeMachine);
+	cfg.addMachine(storeMachine);
+
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
 	for (unsigned x = 0; x < c.size(); x++)
@@ -234,10 +238,6 @@ buildCED(DNF_Conjunction &c,
 			}
 		}
 	}
-
-	ThreadCfgDecode cfg;
-	cfg.addMachine(probeMachine);
-	cfg.addMachine(storeMachine);
 
 	/* Figure out where the various expressions should be
 	 * evaluated. */
@@ -331,9 +331,9 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	}
 
 	printDnf(d, _logfile);
-       
+
 	if (d.size() == 0)
-		return crashEnforcementData();
+		return crashEnforcementData(summary);
 
 	std::map<unsigned, CfgLabel> rootsCfg;
 	assert(summary->loadMachine->origin.size() == 1);
@@ -347,7 +347,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 				summary->storeMachine->origin[0].first,
 				summary->storeMachine->cfg_roots[0]->label));
 
-	crashEnforcementData accumulator;
+	crashEnforcementData accumulator(summary);
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
 		if (buildCED(d[x], rootsCfg, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
@@ -368,11 +368,9 @@ main(int argc, char *argv[])
 
 	int next_hb_id = 0xaabb;
 	simulationSlotT next_slot(1);
-	crashEnforcementData accumulator;
-	for (int i = 5; i < argc; i++) {
-		VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[i], NULL));
-		accumulator |= enforceCrashForMachine(summary, oracle, ALLOW_GC, next_hb_id, next_slot);
-	}
+
+	VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[5], NULL));
+	crashEnforcementData accumulator = enforceCrashForMachine(summary, oracle, ALLOW_GC, next_hb_id, next_slot);
 
 	FILE *f = fopen(argv[4], "w");
 	accumulator.prettyPrint(f);

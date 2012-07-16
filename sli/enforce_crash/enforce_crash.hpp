@@ -9,6 +9,7 @@
 #include "dnf.hpp"
 #include "offline_analysis.hpp"
 #include "intern.hpp"
+#include "inferred_information.hpp"
 
 class ThreadCfgLabel : public Named {
 	char *mkName() const {
@@ -50,8 +51,8 @@ public:
 
 class ThreadCfgDecode {
 	Instruction<ThreadCfgLabel> *addCfg(int tid, const CFGNode *root);
-	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
 public:
+	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
 	Instruction<ThreadCfgLabel> *operator()(const ThreadCfgLabel &l) {
 		auto it = content.find(l);
 		assert(it != content.end());
@@ -1130,6 +1131,59 @@ public:
 	}
 };
 
+class ThreadCfg {
+	std::map<ThreadCfgLabel, Instruction<VexRip> *> content;
+public:
+	ThreadCfg() {};
+	ThreadCfg(CrashSummary *summary) {
+		assert(summary->loadMachine->origin.size() == 1);
+		assert(summary->storeMachine->origin.size() == 1);
+		std::queue<std::pair<unsigned, Instruction<VexRip> *> > pending;
+		pending.push(std::pair<unsigned, Instruction<VexRip> *>
+			     (summary->loadMachine->origin[0].first,
+			      const_cast<Instruction<VexRip> *>(summary->loadMachine->cfg_roots[0])));
+		pending.push(std::pair<unsigned, Instruction<VexRip> *>
+			     (summary->storeMachine->origin[0].first,
+			      const_cast<Instruction<VexRip> *>(summary->storeMachine->cfg_roots[0])));
+		while (!pending.empty()) {
+			std::pair<unsigned, Instruction<VexRip> *> p(pending.front());
+			pending.pop();
+			auto it_did_insert = content.insert(
+				std::pair<ThreadCfgLabel, Instruction<VexRip> *>(
+					ThreadCfgLabel(p.first, p.second->label),
+					p.second));
+			auto did_insert = it_did_insert.second;
+			if (did_insert) {
+				for (auto it = p.second->successors.begin();
+				     it != p.second->successors.end();
+				     it++) {
+					if (it->instr)
+						pending.push(std::pair<unsigned, Instruction<VexRip> *>(p.first, it->instr));
+				}
+			}
+		}
+	}
+	bool parse(const char *str, const char **suffix);
+	void prettyPrint(FILE *f) {
+		fprintf(f, "\tCFG:\n");
+		for (auto it = content.begin(); it != content.end(); it++) {
+			fprintf(f, "\t\t%s: %s {", it->first.name(), it->second->rip.name());
+			bool done_one = false;
+			for (auto it2 = it->second->successors.begin();
+			     it2 != it->second->successors.end();
+			     it2++) {
+				if (!it2->instr)
+					continue;
+				if (done_one)
+					fprintf(f, ", ");
+				fprintf(f, "%s", ThreadCfgLabel(it->first.thread, it2->instr->label).name());
+				done_one = true;
+			}
+			fprintf(f, "}\n");
+		}
+	}
+};
+
 class crashEnforcementData {
 	void internSelf(internmentState &state) {
 		exprStashPoints.internSelf(state);
@@ -1144,6 +1198,7 @@ public:
 	slotMapT exprsToSlots;
 	expressionEvalMapT expressionEvalPoints;
 	abstractThreadExitPointsT threadExitPoints;
+	ThreadCfg threadCfg;
 
 	crashEnforcementData(std::set<IRExpr *> &neededExpressions,
 			     std::map<unsigned, CfgLabel> &_roots,
@@ -1169,14 +1224,19 @@ public:
 		    !happensBeforePoints.parse(str, &str) ||
 		    !exprsToSlots.parse(str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||
-		    !threadExitPoints.parse(str, &str))
+		    !threadExitPoints.parse(str, &str) ||
+		    !threadCfg.parse(str, &str))
 			return false;
 		internmentState state;
 		internSelf(state);
 		*suffix = str;
 		return true;
 	}
-	crashEnforcementData() {}
+	crashEnforcementData(CrashSummary *summary)
+		: threadCfg(summary)
+	{}
+	crashEnforcementData()
+	{}
 
 	void prettyPrint(FILE *f) {
 		fprintf(f, "Crash enforcement data:\n");
@@ -1186,6 +1246,7 @@ public:
 		exprsToSlots.prettyPrint(f);
 		expressionEvalPoints.prettyPrint(f);
 		threadExitPoints.prettyPrint(f);
+		threadCfg.prettyPrint(f);
 	}
 
 	void operator|=(const crashEnforcementData &ced) {
