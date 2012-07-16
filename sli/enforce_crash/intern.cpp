@@ -2,5 +2,5 @@
 #include "enforce_crash.hpp"
 
 exprEvalPoint internmentState::intern(const exprEvalPoint &x) {
-	return exprEvalPoint(x.invert, x.thread, intern(x.e));
+	return exprEvalPoint(x.invert, intern(x.e));
 }

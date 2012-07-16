@@ -218,13 +218,13 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 		s.insert(*it2);
 }
 
-class expressionStashMapT : public std::map<CfgLabel, std::set<std::pair<unsigned, IRExpr *> > >,
+class expressionStashMapT : public std::map<ThreadCfgLabel, std::set<IRExpr *> >,
 			    private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
-			std::vector<std::pair<unsigned, IRExpr *> > f(it->second.begin(), it->second.end());
+			std::vector<IRExpr *> f(it->second.begin(), it->second.end());
 			for (auto it2 = f.begin(); it2 != f.end(); it2++)
-				hv(it2->second);
+				hv(*it2);
 			it->second.clear();
 			it->second.insert(f.begin(), f.end());
 		}
@@ -247,7 +247,7 @@ public:
 				if (ieg->reg.isReg()) {
 					auto it_r = roots.find(ieg->reg.tid());
 					assert(it_r != roots.end());
-					(*this)[it_r->second].insert(std::pair<unsigned, IRExpr *>(ieg->reg.tid(), e));
+					(*this)[ThreadCfgLabel(ieg->reg.tid(), it_r->second)].insert(e);
 				} else {
 					neededTemporaries.insert(ieg);
 				}
@@ -272,10 +272,7 @@ public:
 					}
 				}
 				assert(l);
-				(*this)[l->rip.where].insert(
-					std::pair<unsigned, IRExpr *>(
-						l->rip.tid,
-						*it));
+				(*this)[ThreadCfgLabel(l->rip.tid, l->rip.where)].insert(*it);
 			}
 		}
 	}
@@ -290,16 +287,14 @@ public:
 			return false;
 		clear();
 		while (1) {
-			CfgLabel where(CfgLabel::uninitialised());
+			ThreadCfgLabel where;
 			if (!where.parse(str, &str) ||
 			    !parseThisString(" -> {", str, &str))
 				break;
-			std::set<std::pair<unsigned, IRExpr *> > b;
+			std::set<IRExpr *> b;
 			while (1) {
-				std::pair<unsigned, IRExpr *> s;
-				if (!parseDecimalUInt(&s.first, str, &str) ||
-				    !parseThisChar(':', str, &str) ||
-				    !parseIRExpr(&s.second, str, &str) ||
+				IRExpr * s;
+				if (!parseIRExpr(&s, str, &str) ||
 				    !parseThisString(", ", str, &str))
 					break;
 				b.insert(s);
@@ -317,8 +312,7 @@ public:
 		for (auto it = begin(); it != end(); it++) {
 			fprintf(f, "\t\t%s -> {", it->first.name());
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
-				fprintf(f, "%d:", it2->first);
-				it2->second->prettyPrint(f);
+				(*it2)->prettyPrint(f);
 				fprintf(f, ", ");
 			}
 			fprintf(f, "}\n");
@@ -326,13 +320,9 @@ public:
 	}
 	void internSelf(internmentState &state) {
 		for (auto it = begin(); it != end(); it++) {
-			std::set<std::pair<unsigned, IRExpr *> > out;
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
-				std::pair<unsigned, IRExpr *> a;
-				a.first = it2->first;
-				a.second = state.intern(it2->second);
-				out.insert(a);
-			}
+			std::set<IRExpr *> out;
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				out.insert(state.intern(*it2));
 			it->second = out;
 		}
 	}
@@ -400,13 +390,11 @@ public:
 		     it != liveInstructions.end();
 		     it++) {
 			auto *i = *it;
-			std::set<std::pair<unsigned, IRExpr *> > &exprs(stashMap[i->label]);
-			for (std::set<std::pair<unsigned, IRExpr *> >::iterator it2 = exprs.begin();
+			std::set<IRExpr *> &exprs(stashMap[i->rip]);
+			for (auto it2 = exprs.begin();
 			     it2 != exprs.end();
-			     it2++) {
-				if (it2->first == i->rip.thread)
-					content.push_back(it2->second);
-			}
+			     it2++)
+				content.push_back(*it2);
 		}
 	}
 
@@ -493,8 +481,8 @@ public:
 
 	slotMapT() { }
 
-	slotMapT(std::map<CfgLabel, std::set<std::pair<unsigned, IRExpr *> > > &neededExpressions,
-		 std::map<CfgLabel, std::set<happensBeforeEdge *> > &happensBefore,
+	slotMapT(std::map<ThreadCfgLabel, std::set<IRExpr *> > &neededExpressions,
+		 std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore,
 		 simulationSlotT &next_slot)
 	{
 		/* Allocate slots for expressions which we know we're
@@ -502,11 +490,9 @@ public:
 		for (auto it = neededExpressions.begin();
 		     it != neededExpressions.end();
 		     it++) {
-			std::set<key_t> &s((*it).second);
-			for (std::set<key_t>::iterator it2 = s.begin();
-			     it2 != s.end();
-			     it2++)
-				mk_slot(it2->first, it2->second, next_slot);
+			std::set<IRExpr *> &s((*it).second);
+			for (auto it2 = s.begin(); it2 != s.end(); it2++)
+				mk_slot(it->first.thread, *it2, next_slot);
 		}
 		/* And the ones which we're going to receive in
 		 * messages */
@@ -563,7 +549,6 @@ public:
  * not being GC allocated itself! */
 struct exprEvalPoint {
 	bool invert;
-	unsigned thread;
 	IRExpr *e;
 
 	void visit(HeapVisitor &hv) {
@@ -571,34 +556,28 @@ struct exprEvalPoint {
 	}
 
 	exprEvalPoint(bool _invert,
-		      unsigned _thread,
 		      IRExpr *_e)
-		: invert(_invert), thread(_thread), e(_e)
+		: invert(_invert), e(_e)
 	{}
 	bool operator <(const exprEvalPoint &o) const {
 		if (invert < o.invert)
 			return true;
 		if (o.invert < invert)
 			return false;
-		if (thread < o.thread)
-			return true;
-		if (o.thread < thread)
-			return false;
 		return e < o.e;
 	}
 
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "%s%d:", invert ? "!" : "", thread);
+		fprintf(f, "%s", invert ? "!" : "");
 		e->prettyPrint(f);
 	}
 	bool parse(const char *str, const char **suffix) {
-		invert = false;
+		bool inv = false;
 		if (parseThisChar('!', str, &str))
-			invert = true;
-		if (!parseDecimalUInt(&thread, str, &str) ||
-		    !parseThisChar(':', str, &str) ||
-		    !parseIRExpr(&e, str, &str))
+			inv = true;
+		if (!parseIRExpr(&e, str, &str))
 			return false;
+		invert = inv;
 		*suffix = str;
 		return true;
 	}
@@ -878,7 +857,7 @@ public:
 	}
 };
 
-class expressionEvalMapT : public std::map<CfgLabel, std::set<exprEvalPoint> >,
+class expressionEvalMapT : public std::map<ThreadCfgLabel, std::set<exprEvalPoint> >,
 			   private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
@@ -905,10 +884,9 @@ public:
 			for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = it->second.begin();
 			     it2 != it->second.end();
 			     it2++)
-				(*this)[it->first->label].insert(
+				(*this)[it->first->rip].insert(
 					exprEvalPoint(
 						it2->first,
-						it->first->rip.thread,
 						it2->second));
 		}
 	}
@@ -937,7 +915,7 @@ public:
 			return false;
 		clear();
 		while (1) {
-			CfgLabel key(CfgLabel::uninitialised());
+			ThreadCfgLabel key;
 			std::set<exprEvalPoint> value;
 			const char *a;
 			if (!key.parse(str, &a) ||
@@ -1050,7 +1028,7 @@ public:
 	{}
 };
 
-class happensBeforeMapT : public std::map<CfgLabel, std::set<happensBeforeEdge *> >,
+class happensBeforeMapT : public std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> >,
 			  private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++)
@@ -1071,8 +1049,8 @@ public:
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
 				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, exprDominatorMap.idom,
 									       cfg, exprStashPoints, next_hb_id++);
-				(*this)[hbe->before.where].insert(hbe);
-				(*this)[hbe->after.where].insert(hbe);
+				(*this)[ThreadCfgLabel(hbe->before.tid, hbe->before.where)].insert(hbe);
+				(*this)[ThreadCfgLabel(hbe->after.tid, hbe->after.where)].insert(hbe);
 			}
 		}
 	}
@@ -1098,7 +1076,7 @@ public:
 			return false;
 		clear();
 		while (1) {
-			CfgLabel addr(CfgLabel::uninitialised());
+			ThreadCfgLabel addr;
 			std::set<happensBeforeEdge *> edges;
 			if (!addr.parse(str, &str) ||
 			    !parseThisString(" -> {", str, &str))
@@ -1129,46 +1107,42 @@ public:
 };
 
 /* Map that tells us where the various threads have to exit. */
-class abstractThreadExitPointsT : public std::map<CfgLabel, std::set<unsigned> > {
+class abstractThreadExitPointsT : public std::set<ThreadCfgLabel> {
 public:
 	abstractThreadExitPointsT() {}
 	abstractThreadExitPointsT(ThreadCfgDecode &cfg, happensBeforeMapT &);
 	void operator|=(const abstractThreadExitPointsT &atet) {
 		for (auto it = atet.begin(); it != atet.end(); it++)
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-				(*this)[it->first].insert(*it2);
+			this->insert(*it);
 	}
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "\tAbstract thread exit points:\n");
+		fprintf(f, "\tAbstract thread exit points: {");
 		for (auto it = begin(); it != end(); it++) {
-			fprintf(f, "\t\t%s -> {", it->first.name());
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-				fprintf(f, "%d, ", *it2);
-			fprintf(f, "}\n");
+			if (it != begin())
+				fprintf(f, ", ");
+			fprintf(f, "%s", it->name());
 		}
+		fprintf(f, "}\n");
 	}
 	bool parse(const char *str, const char **suffix) {
-		if (!parseThisString("Abstract thread exit points:\n", str, &str))
+		if (!parseThisString("Abstract thread exit points: {", str, &str))
 			return false;
-		clear();
-		while (1) {
-			CfgLabel key(CfgLabel::uninitialised());
-			std::set<unsigned> value;
-			if (!key.parse(str, &str) ||
-			    !parseThisString(" -> {", str, &str))
-				break;
+		std::set<ThreadCfgLabel> res;
+		if (!parseThisString("}", str, &str)) {
 			while (1) {
-				unsigned v;
-				if (!parseDecimalUInt(&v, str, &str) ||
-				    !parseThisString(", ", str, &str))
+				ThreadCfgLabel l;
+				if (!l.parse(str, &str))
+					return false;
+				if (parseThisString("}", str, &str))
 					break;
-				value.insert(v);
+				if (!parseThisString(", ", str, &str))
+					return false;
 			}
-			if (!parseThisString("}\n", str, &str))
-				return false;
-			(*this)[key] = value;
 		}
 		*suffix = str;
+		clear();
+		for (auto it = res.begin(); it != res.end(); it++)
+			insert(*it);
 		return true;
 	}
 };

@@ -169,7 +169,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 			if (it2->type == instrT::successor_t::succ_call)
 				continue;
 			if (it2->instr && !instructionPresence.count(it2->instr))
-				(*this)[it2->instr->label].insert(i->rip.thread);
+				insert(it2->instr->rip);
 		}
 	}
 
