@@ -589,23 +589,6 @@ struct exprEvalPoint {
 	exprEvalPoint(const YesIReallyMeanIt &) {}
 };
 
-struct DirectRip : public Named {
-	char *mkName() const { return my_asprintf("0x%lx", rip.rip); }
-
-	struct _ {
-		unsigned long rip;
-		_(unsigned long r) : rip(r) {}
-		_() {}
-		operator unsigned long() const { return rip; }
-		unsigned long unwrap_vexrip() const { return rip; }
-		bool isValid() const { return rip != 0; }
-	} rip;
-	DirectRip(unsigned long _rip) : rip(_rip) {}
-	DirectRip() : rip(0) {}
-	bool operator==(const DirectRip &d) const { return rip == d.rip; }
-	DirectRip operator+(long offset) const { return DirectRip(rip + offset); }
-};
-
 class ClientRip : public Named {
 #define client_rip_types_iter(f)					\
 	f(start_of_instruction)						\
