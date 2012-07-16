@@ -176,8 +176,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 }
 
 static bool
-buildCED(CfgDecode &decode,
-	 DNF_Conjunction &c,
+buildCED(DNF_Conjunction &c,
 	 std::map<unsigned, CfgLabel> &rootsCfg,
 	 StateMachine *probeMachine,
 	 StateMachine *storeMachine,
@@ -244,7 +243,7 @@ buildCED(CfgDecode &decode,
 	 * evaluated. */
 	expressionDominatorMapT exprDominatorMap(c, cfg, neededRips);
 
-	*out = crashEnforcementData(decode, neededExpressions, rootsCfg, exprDominatorMap, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
+	*out = crashEnforcementData(neededExpressions, rootsCfg, exprDominatorMap, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
 	return true;
 }
 
@@ -301,10 +300,6 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printf("Machines to enforce:\n");
 	printCrashSummary(summary, stdout);
 
-	CfgDecode decode;
-	decode.addMachine(summary->loadMachine);
-	decode.addMachine(summary->storeMachine);
-
 	VexPtr<OracleInterface> oracleI(oracle);
 
 	IRExpr *requirement =
@@ -355,7 +350,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
-		if (buildCED(decode, d[x], rootsCfg, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
+		if (buildCED(d[x], rootsCfg, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
 			accumulator |= tmp;
 	}
 	return accumulator;

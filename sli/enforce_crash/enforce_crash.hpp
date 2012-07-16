@@ -33,6 +33,19 @@ public:
 		return thread < o.thread ||
 			(thread == o.thread && label < o.label);
 	}
+	bool parse(const char *str, const char **suffix) {
+		CfgLabel l(CfgLabel::uninitialised());
+		int t;
+		if (l.parse(str, &str) &&
+		    parseThisChar(':', str, &str) &&
+		    parseDecimalInt(&t, str, suffix)) {
+			label = l;
+			thread = t;
+			clearName();
+			return true;
+		}
+		return false;
+	}
 };
 
 class ThreadCfgDecode {
@@ -971,17 +984,18 @@ public:
 	char *asC(const char *ident, int max_rx_site_id);
 };
 
-class crashEnforcementRoots : public std::set<ClientRip> {
+class crashEnforcementRoots : public std::set<ThreadCfgLabel> {
 public:
 	crashEnforcementRoots() {}
 
-	crashEnforcementRoots(CfgDecode &decode, std::map<unsigned, CfgLabel> &roots) {
-		std::map<unsigned long, std::set<unsigned> > threadsRelevantAtEachEntryPoint;
+	crashEnforcementRoots(std::map<unsigned, CfgLabel> &roots) {
+		std::map<CfgLabel, std::set<unsigned> > threadsRelevantAtEachEntryPoint;
 		for (auto it = roots.begin(); it != roots.end(); it++)
-			threadsRelevantAtEachEntryPoint[decode(it->second)->rip.unwrap_vexrip()].insert(it->first);
+			threadsRelevantAtEachEntryPoint[it->second].insert(it->first);
 		for (auto it = roots.begin(); it != roots.end(); it++) {
-			std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[decode(it->second)->rip.unwrap_vexrip()]);
-			insert(ClientRip(decode(it->second)->rip.unwrap_vexrip(), threads, ClientRip::start_of_instruction));
+			std::set<unsigned> &threads(threadsRelevantAtEachEntryPoint[it->second]);
+			for (auto it2 = threads.begin(); it2 != threads.end(); it2++)
+				insert(ThreadCfgLabel(*it2, it->second));
 		}
 	}
 
@@ -994,22 +1008,25 @@ public:
 		clear();
 		if (!parseThisString("Roots: ", str, &str))
 			return false;
-		ClientRip r;
 		while (1) {
-			if (!r.parse(str, &str))
+			ThreadCfgLabel tcl;
+			if (!tcl.parse(str, &str))
 				break;
-			if (!parseThisChar(' ', str, &str))
-				return false;
-			insert(r);
+			if (!parseThisString(", ", str, &str))
+				break;
+			insert(tcl);
 		}
+		if (!parseThisChar('\n', str, &str))
+			return false;
 		*suffix = str;
 		return true;
 	}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tRoots: ");
 		for (auto it = begin(); it != end(); it++) {
-			it->prettyPrint(f);
-			fprintf(f, " ");
+			if (it != begin())
+				fprintf(f, ", ");
+			fprintf(f, "%s", it->name());
 		}
 		fprintf(f, "\n");
 	}
@@ -1171,8 +1188,7 @@ public:
 	expressionEvalMapT expressionEvalPoints;
 	abstractThreadExitPointsT threadExitPoints;
 
-	crashEnforcementData(CfgDecode &decode,
-			     std::set<IRExpr *> &neededExpressions,
+	crashEnforcementData(std::set<IRExpr *> &neededExpressions,
 			     std::map<unsigned, CfgLabel> &_roots,
 			     expressionDominatorMapT &exprDominatorMap,
 			     StateMachine *probeMachine,
@@ -1181,7 +1197,7 @@ public:
 			     ThreadCfgDecode &cfg,
 			     int &next_hb_id,
 			     simulationSlotT &next_slot)
-		: roots(decode, _roots),
+		: roots(_roots),
 		  exprStashPoints(neededExpressions, probeMachine, storeMachine, _roots),
 		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
