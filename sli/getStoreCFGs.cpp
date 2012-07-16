@@ -587,7 +587,7 @@ performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 				new_node = cycle_edge_end->dupe(allocLabel());
 				auto it_fl = cfgFlavours.find(cycle_edge_end);
 				assert(it_fl != cfgFlavours.end());
-				if (it_fl->second == cfgs_flavour_true)
+				if (it_fl->second == cfgs_flavour_true || it_fl->second == cfgs_flavour_dupe)
 					cfgFlavours[new_node] = cfgs_flavour_dupe;
 				else
 					cfgFlavours[new_node] = cfgs_flavour_ordinary;

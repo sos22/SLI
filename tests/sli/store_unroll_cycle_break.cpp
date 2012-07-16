@@ -62,7 +62,7 @@ parseNodeDecl(std::map<named_string, cfg_node *> &nodes,
 		return false;
 	if (nodes.count(label))
 		return false;
-	cfg_node *n = new cfg_node(-1);
+	cfg_node *n = new cfg_node(-1, CfgLabel::uninitialised());
 	n->rip = label;
 	nodes[label] = n;
 	cfgFlavours[n] = flavour;
@@ -205,8 +205,9 @@ main()
 	std::set<cfg_node *> roots;
 	std::map<const cfg_node *, _getStoreCFGs::cfgflavour_store_t> flavours;
 	int maxPathLength;
+	CfgLabelAllocator allocLabel;
 	read_cfg_and_depth(roots, flavours, &maxPathLength, 0);
-	_getStoreCFGs::performUnrollAndCycleBreak(roots, flavours, maxPathLength);
+	_getStoreCFGs::performUnrollAndCycleBreak(allocLabel, roots, flavours, maxPathLength);
 	uniqueify_labels(roots);
 	printCFG(roots, flavours, stdout);
 

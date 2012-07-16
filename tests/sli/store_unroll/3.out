@@ -4,13 +4,11 @@ A2 dupe
 B2 dupe
 A3 dupe
 B3 dupe
-A4 dupe
 A -> B
 B -> A2
 A2 -> B2
 B2 -> A3
 A3 -> B3
-B3 -> A4
 Roots:
 A
 End of roots
