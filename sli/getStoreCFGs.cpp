@@ -320,6 +320,60 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode
 	}
 }
 
+template <typename t>
+class predecessorMap {
+public:
+	std::map<Instruction<t> *, std::set<Instruction<t> *> > content;
+	predecessorMap(const std::set<Instruction<t> *> &roots);
+	void erase_edge(Instruction<t> *src, Instruction<t> *dest) {
+		assert(content.count(dest));
+		assert(content.count(src));
+		assert(content[dest].count(src));
+		content[dest].erase(src);
+	}
+	void insert_edge(Instruction<t> *src, Instruction<t> *dest) {
+		assert(content.count(dest));
+		assert(content.count(src));
+		assert(!content[dest].count(src));
+		content[dest].insert(src);
+	}
+	void new_node(Instruction<t> *n) {
+		assert(!content.count(n));
+		content[n].clear(); /* kind of a no-op, but makes sure
+				       that the slot in content is
+				       actually allocated. */
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
+			if (it->instr) {
+				assert(content.count(it->instr));
+				content[it->instr].insert(n);
+			}
+		}
+	}
+	void findPredecessors(Instruction<t> *n, std::set<Instruction<t> *> &out) {
+		assert(content.count(n));
+		out = content[n];
+	}
+};
+
+template <typename t>
+predecessorMap<t>::predecessorMap(const std::set<Instruction<t> *> &roots)
+{
+	std::queue<Instruction<t> *> pending;
+	for (auto it = roots.begin(); it != roots.end(); it++) {
+		content[*it].clear();
+		pending.push(*it);
+	}
+	while (!pending.empty()) {
+		Instruction<t> *n = pending.front();
+		pending.pop();
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
+			if (it->instr &&content[it->instr].insert(n).second)
+				pending.push(it->instr);
+		}
+	}
+}
+
+
 /* The node labelling map tells you where nodes can occur on paths.
    The idea is that we only need to care about paths which start on a
    true target instruction, end on a true or dupe target instruction,
@@ -373,10 +427,15 @@ public:
 };
 template <typename t>
 class nodeLabellingMap : public std::map<Instruction<t> *, nodeLabelling<t> > {
+	predecessorMap<t> &predecessors;
+	const std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours;
+	int maxDepth;
 public:
 	nodeLabellingMap(std::set<Instruction<t> *> &roots,
+			 predecessorMap<t> &predecessors,
 			 const std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours,
 			 int maxPathLength);
+	void recalculate_min_from(Instruction<t> *n);
 	void prettyPrint(FILE *f) const;
 };
 template <typename t> void
@@ -443,12 +502,15 @@ nodeLabelling<t>::dead(int maxDepth) const
 
 template <typename t>
 nodeLabellingMap<t>::nodeLabellingMap(std::set<Instruction<t> *> &roots,
-				      const std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours,
+				      predecessorMap<t> &_predecessors,
+				      const std::map<const Instruction<t> *, cfgflavour_store_t> &_cfgFlavours,
 				      int maxPathLength)
+	: predecessors(_predecessors), cfgFlavours(_cfgFlavours),
+	  maxDepth(maxPathLength)
 {
-	std::queue<Instruction<t> *> pending;
-
-	/* Initial pending set is all of the true target instructions. */
+	/* Initial pending set is all of the true target instructions,
+	 * for both min_to and min_from calculations. */
+	std::queue<Instruction<t> *> initial_pending;
 	std::set<Instruction<t> *> visited;
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		std::queue<Instruction<t> *> p2;
@@ -461,7 +523,7 @@ nodeLabellingMap<t>::nodeLabellingMap(std::set<Instruction<t> *> &roots,
 			auto it_fl = cfgFlavours.find(n);
 			assert(it_fl != cfgFlavours.end());
 			if (it_fl->second == cfgs_flavour_true)
-				pending.push(n);
+				initial_pending.push(n);
 			for (auto it2 = n->successors.begin();
 			     it2 != n->successors.end();
 			     it2++) {
@@ -471,45 +533,94 @@ nodeLabellingMap<t>::nodeLabellingMap(std::set<Instruction<t> *> &roots,
 		}
 	}
 
+	std::queue<Instruction<t> *> pending(initial_pending);
+
+	/* First we calculate min_to */
 	while (!pending.empty()) {
 		Instruction<t> *n = pending.front();
 		pending.pop();
+
 		auto it_fl = cfgFlavours.find(n);
 		assert(it_fl != cfgFlavours.end());
 		if (it_fl->second == cfgs_flavour_true)
 			(*this)[n].min_to[n] = 0;
 		assert(it_fl->second != cfgs_flavour_dupe);
+
 		if (n->successors.empty())
 			continue;
+
 		nodeLabellingComponent<t> exitMap((*this)[n].min_to);
 		exitMap.successor(maxPathLength);
 		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
 			if (it2->instr && (*this)[it2->instr].min_to.merge(exitMap))
 				pending.push(it2->instr);			
 	}
-	bool progress = true;
-	while (progress) {
-		progress = false;
-		for (auto it = this->begin(); it != this->end(); it++) {
-			nodeLabellingComponent<t> &entryMap(it->second.min_from);
-			Instruction<t> *n = it->first;
-			auto it_fl = cfgFlavours.find(n);
-			assert(it_fl != cfgFlavours.end());
-			if (it_fl->second == cfgs_flavour_true) {
-				if (!entryMap.count(n)) {
-					progress = true;
-					entryMap[n] = 0;
-				} else {
-					assert(entryMap[n] == 0);
-				}
-			}
-			for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++) {
-				if (it2->instr) {
-					nodeLabellingComponent<t> m ((*this)[it2->instr].min_from);
-					m.successor(maxPathLength);
-					progress |= entryMap.merge(m);
-				}
-			}
+
+	/* Now we calculate min_from using essentially the same
+	 * algorithm, but using predecessors rather than
+	 * successors. */
+	pending = initial_pending;
+	while (!pending.empty()) {
+		Instruction<t> *n = pending.front();
+		pending.pop();
+
+		auto it_fl = cfgFlavours.find(n);
+		assert(it_fl != cfgFlavours.end());
+		if (it_fl->second == cfgs_flavour_true)
+			(*this)[n].min_from[n] = 0;
+		assert(it_fl->second != cfgs_flavour_dupe);
+
+		std::set<Instruction<t> *> pred;
+		predecessors.findPredecessors(n, pred);
+		if (pred.empty())
+			continue;
+
+		nodeLabellingComponent<t> entryMap((*this)[n].min_from);
+		entryMap.successor(maxPathLength);
+		for (auto it2 = pred.begin(); it2 != pred.end(); it2++)
+			if ( (*this)[*it2].min_from.merge(entryMap) )
+				pending.push(*it2);
+	}
+}
+
+/* One of the edges to @node was just broken and replaced by something.
+   That might change the minimum distance from a root to @n.
+   Recalculate min_from as appropriate. */
+template <typename t> void
+nodeLabellingMap<t>::recalculate_min_from(Instruction<t> *node)
+{
+	std::queue<Instruction<t> *> pending;
+	pending.push(node);
+	while (!pending.empty()) {
+		Instruction<t> *p = pending.front();
+		pending.pop();
+
+		/* This is a bit fiddly.  Because the label on the
+		   node may have increased, we can't rely on our usual
+		   merge operation (which works when things are
+		   monotone descending) and have to recompute the
+		   label on the node starting from just its
+		   predecessor nodes, without reference to the node's
+		   own label. */
+		std::set<Instruction<t> *> pred;
+		nodeLabellingComponent<t> newEntryMap;
+		predecessors.findPredecessors(p, pred);
+		for (auto it = pred.begin(); it != pred.end(); it++)
+			newEntryMap.merge((*this)[*it].min_from);
+		nodeLabellingComponent<t> newExitMap(newEntryMap);
+		newExitMap.successor(maxDepth);
+		auto it_fl = cfgFlavours.find(p);
+		assert(it_fl != cfgFlavours.end());
+		if (it_fl->second == cfgs_flavour_true)
+			newExitMap[p] = 0;
+		if (newExitMap != (*this)[p].min_from) {
+			/* The min_from label on this node has
+			 * changed.  Set the new label and propagate
+			 * it to successors. */
+			(*this)[p].min_from = newExitMap;
+			for (auto it = p->successors.begin(); it != p->successors.end(); it++)
+				if (it->instr)
+					pending.push(it->instr);
 		}
 	}
 }
@@ -567,7 +678,8 @@ performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 			   std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours,
 			   unsigned maxPathLength)
 {
-	nodeLabellingMap<t> nlm(roots, cfgFlavours, maxPathLength);
+	predecessorMap<t> pred(roots);
+	nodeLabellingMap<t> nlm(roots, pred, cfgFlavours, maxPathLength);
 
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		while (!TIMEOUT) {
@@ -591,6 +703,7 @@ performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 					cfgFlavours[new_node] = cfgs_flavour_dupe;
 				else
 					cfgFlavours[new_node] = cfgs_flavour_ordinary;
+				pred.new_node(new_node);
 				nlm[new_node] = label;
 			}
 			bool found_it = false;
@@ -603,6 +716,10 @@ performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 				}
 			}
 			assert(found_it);
+			pred.erase_edge(cycle_edge_start, cycle_edge_end);
+			if (new_node)
+				pred.insert_edge(cycle_edge_start, new_node);
+			nlm.recalculate_min_from(cycle_edge_end);
 		}
 	}
 }
