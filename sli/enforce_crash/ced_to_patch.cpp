@@ -16,15 +16,17 @@
 #define STASH_ONLY_PATCH 0
 
 #ifndef NDEBUG
-static bool debug_main_loop = true;
-static bool debug_find_successors = true;
-static bool debug_receive_messages = true;
-static bool debug_send_messages = true;
+static bool debug_main_loop = false;
+static bool debug_find_successors = false;
+static bool debug_receive_messages = false;
+static bool debug_send_messages = false;
+static bool debug_compile_cfg = false;
 #else
 #define debug_main_loop false
 #define debug_find_successors false
 #define debug_receive_messages false
 #define debug_send_messages false
+#define debug_compile_cfg false
 #endif
 
 #undef LOUD
@@ -1795,6 +1797,185 @@ printDetailedCfg(Instruction<C2PRip> *root, std::set<Instruction<C2PRip> *> &pri
 			printDetailedCfg(it->instr, printed, f);
 }
 
+class CompiledCfg {
+	std::vector<unsigned char> content;
+	std::vector<LateRelocation *> lateRelocs;
+public:
+	unsigned currentSize() const {
+		assert(content.size() < (1u << 31));
+		return content.size();
+	}
+	void addInstr(unsigned sz, const unsigned char *bytes) {
+		for (unsigned x = 0; x < sz; x++)
+			content.push_back(bytes[x]);
+	}
+	void addLateReloc(LateRelocation *reloc) {
+		lateRelocs.push_back(reloc);
+	}
+	void writeBytes(unsigned offset, unsigned sz, const void *bytes) {
+		assert(content.size() >= offset + sz);
+		for (unsigned x = 0; x < sz; x++)
+			content[x + offset] = ((const unsigned char *)bytes)[x];
+	}
+	void dumpToFile(const char *path) const {
+		FILE *f = fopen(path, "w");
+		if (!f) err(1, "opening %s");
+		for (unsigned x = 0; x < content.size(); x++)
+			fputc(content[x], f);
+		fclose(f);
+	}
+};
+
+class LookupCfgNode {
+	CFG<C2PRip> *cfg;
+public:	
+	LookupCfgNode(CFG<C2PRip> *_cfg)
+		: cfg(_cfg)
+	{}
+	const Instruction<C2PRip> *operator()(const C2PRip &l) const {
+		assert(cfg->ripToInstr->hasKey(l));
+		return cfg->ripToInstr->get(l);
+	}
+};
+
+static void
+compileCfg(const Instruction<C2PRip> *root,
+	   std::map<const Instruction<C2PRip> *, unsigned> &offsetInCompiledPatch,
+	   std::queue<RipRelativeBranchRelocation<C2PRip> *> &earlyRelocs,
+	   LookupCfgNode &lookupNode,
+	   CompiledCfg &result)
+{
+	if (offsetInCompiledPatch.count(root))
+		return;
+top:
+	unsigned offset = result.currentSize();
+	offsetInCompiledPatch[root] = offset;
+
+	if (debug_compile_cfg)
+		printf("Compile %s -> %x\n", root->label.name(), offset);
+
+	/* Emit the instruction itself. */
+	if (root->len != 0) {
+		result.addInstr(root->len, root->content);
+		/* Early relocations */
+		for (auto it = root->relocs.begin();
+		     it != root->relocs.end();
+		     it++) {
+			const EarlyRelocation<C2PRip> *earlyReloc = *it;
+			if (dynamic_cast<const RipRelativeRelocation<C2PRip> *>(earlyReloc)) {
+				abort(); /* shouldn't be any of these here */
+			} else if (auto rrdr = dynamic_cast<const RipRelativeDataRelocation<C2PRip> *>(earlyReloc)) {
+				result.addLateReloc(new LateRelocation(rrdr->offset + offset,
+								       rrdr->size,
+								       vex_asprintf("0x%lx", rrdr->target),
+								       rrdr->nrImmediateBytes,
+								       true));
+			} else if (auto rrbr = dynamic_cast<const RipRelativeBranchRelocation<C2PRip> *>(earlyReloc)) {
+				auto it_o = offsetInCompiledPatch.find(lookupNode(rrbr->target));
+				if (it_o == offsetInCompiledPatch.end()) {
+					earlyRelocs.push(new RipRelativeBranchRelocation<C2PRip>(
+								 rrbr->offset + offset,
+								 rrbr->size,
+								 rrbr->target));
+				} else {
+					int delta = it_o->second - offset - rrbr->offset - rrbr->size;
+					result.writeBytes(offset + rrbr->offset,
+							  rrbr->size,
+							  &delta);
+				}
+			} else {
+				abort();
+			}
+		}
+		/* Late relocations */
+		for (auto it = root->lateRelocs.begin();
+		     it != root->lateRelocs.end();
+		     it++) {
+			const LateRelocation *inp = *it;
+			result.addLateReloc(new LateRelocation(inp->offset + offset,
+							       inp->size,
+							       inp->target,
+							       inp->nrImmediateBytes,
+							       inp->relative));
+		}
+	} else {
+		assert(root->relocs.empty());
+		assert(root->lateRelocs.empty());
+	}
+
+	/* Now make sure that the successors get emitted. */
+	Instruction<C2PRip> *nextInstr = NULL;
+	for (auto it = root->successors.begin(); it != root->successors.end(); it++) {
+		if (it->instr) {
+			if (it->type == Instruction<C2PRip>::successor_t::succ_default) {
+				/* Should only have one default exit */
+				assert(nextInstr == NULL);
+				nextInstr = it->instr;
+			} else {
+				/* Branches should be handled as early relocs */
+				assert(it->type == Instruction<C2PRip>::successor_t::succ_branch);
+				assert(!root->relocs.empty());
+			}
+		}
+	}
+	if (!nextInstr) {
+		/* This instruction never falls through, so we're
+		 * fine. */
+		return;
+	}
+	if (offsetInCompiledPatch.count(nextInstr)) {
+		/* The desired fall-through has already been emitted
+		 * somewhere else.  Have to emit a branch to make it
+		 * work nicely. */
+		unsigned delta = (unsigned)((int)offsetInCompiledPatch[nextInstr] - (int)result.currentSize() - 5);
+		unsigned char branchInstr[5];
+		/* jmp rel32 instruction */
+		branchInstr[0] = 0xe9;
+		branchInstr[1] = delta & 0xff;
+		branchInstr[2] = (delta >> 8) & 0xff;
+		branchInstr[3] = (delta >> 16) & 0xff;
+		branchInstr[4] = (delta >> 24) & 0xff;
+		result.addInstr(5, branchInstr);
+		return;
+	}
+
+	/* The fall-through instruction hasn't been emitted yet, so
+	 * let's just emit it here. */
+	root = nextInstr;
+	goto top;
+}
+
+static void
+compileCfg(CFG<C2PRip> *cfg,
+	   const std::map<VexRip, Instruction<C2PRip> *> &roots,
+	   CompiledCfg &result)
+{
+	std::map<const Instruction<C2PRip> *, unsigned> offsetInCompiledPatch;
+	std::queue<RipRelativeBranchRelocation<C2PRip> *> earlyRelocs;
+	LookupCfgNode lookupNode(cfg);
+
+	for (auto it = roots.begin(); it != roots.end(); it++) {
+		compileCfg(it->second, offsetInCompiledPatch, earlyRelocs, lookupNode, result);
+		while (!earlyRelocs.empty()) {
+			RipRelativeBranchRelocation<C2PRip> *r = earlyRelocs.front();
+			earlyRelocs.pop();
+			const Instruction<C2PRip> *targetInstr = lookupNode(r->target);
+			auto it_f = offsetInCompiledPatch.find(targetInstr);
+			if (it_f == offsetInCompiledPatch.end()) {
+				compileCfg(targetInstr, offsetInCompiledPatch, earlyRelocs, lookupNode, result);
+				it_f = offsetInCompiledPatch.find(targetInstr);
+				assert(it_f != offsetInCompiledPatch.end());
+			}
+			int delta = it_f->second - r->offset - r->size;
+			result.writeBytes(r->offset,
+					  r->size,
+					  &delta);
+		}
+	}
+	
+	
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1842,6 +2023,12 @@ main(int argc, char *argv[])
 		printf("Root %s:\n", it->first.name());
 		printDetailedCfg(it->second, printed, stdout);
 	}
+
+	CompiledCfg result;
+	compileCfg(cfg, patchPoints, result);
+
+	result.dumpToFile(output);
+
 #if 0
 	CfgDecode decode;
 
