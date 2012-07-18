@@ -167,7 +167,7 @@ public:
 	VexRip operator+(long delta) const {
 		VexRip r(*this);
 		r.stack.back() += delta;
-		clearName();
+		r.clearName();
 		return r;
 	}
 

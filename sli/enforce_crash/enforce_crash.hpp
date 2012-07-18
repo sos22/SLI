@@ -27,12 +27,18 @@ public:
 	ThreadCfgLabel(const MemoryAccessIdentifier &mai)
 		: thread(mai.tid), label(mai.where)
 	{}
-	bool operator==(const ThreadCfgLabel &o) const {
-		return thread == o.thread && label == o.label;
-	}
 	bool operator <(const ThreadCfgLabel &o) const {
 		return thread < o.thread ||
 			(thread == o.thread && label < o.label);
+	}
+	bool operator!=(const ThreadCfgLabel &o) const {
+		return (*this < o) || (o < *this);
+	}
+	bool operator==(const ThreadCfgLabel &o) const {
+		return !(*this != o);
+	}
+	unsigned long hash() const {
+		return thread * 874109 + label.hash() * 877939;
 	}
 	bool parse(const char *str, const char **suffix) {
 		CfgLabel l(CfgLabel::uninitialised());
@@ -193,6 +199,7 @@ public:
 	int idx;
 	simulationSlotT(int _idx) : idx(_idx) {}
 	simulationSlotT() : idx(-10000) {}
+	bool operator<(const simulationSlotT &o) const { return idx < o.idx; }
 };
 
 template <typename src, typename dest> void
@@ -590,257 +597,6 @@ struct exprEvalPoint {
 	exprEvalPoint(const YesIReallyMeanIt &) {}
 };
 
-class ClientRip : public Named {
-#define client_rip_types_iter(f)					\
-	f(start_of_instruction)						\
-	f(receive_messages)						\
-	f(original_instruction)						\
-	f(post_instr_generate)						\
-	f(post_instr_checks)						\
-	f(generate_messages)						\
-	f(restore_flags_and_branch_post_instr_checks)			\
-	f(pop_regs_restore_flags_and_branch_orig_instruction)		\
-	f(rx_message)							\
-	f(exit_threads_and_rx_message)					\
-	f(exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction) \
-	f(exit_threads_and_restore_flags_and_branch_post_instr_checks)	\
-	f(uninitialised)
-
-	char *mkName() const {
-		std::vector<const char *> fragments;
-		const char *label;
-		bool free_label = false;
-		switch (type) {
-#define do_case(n) case n: label = #n; break;
-			client_rip_types_iter(do_case)
-#undef do_case
-		default:
-			label = my_asprintf("<bad%d>", type);
-			free_label = true;
-			break;
-		}
-		fragments.push_back(my_asprintf("%lx:%s{", (unsigned long)rip, label));
-		if (free_label)
-			free((void *)label);
-		for (auto it = threads.begin(); it != threads.end(); it++)
-			fragments.push_back(my_asprintf("%d,", *it));
-		fragments.push_back(strdup("}"));
-		if (type == rx_message)
-			fragments.push_back(my_asprintf("hbe(%s)", completed_edge->name()));
-		if (exit_threads_valid()) {
-			fragments.push_back(strdup("thr{"));
-			for (auto it = exit_threads.begin();
-			     it != exit_threads.end();
-			     it++)
-				fragments.push_back(my_asprintf("%d, ", *it));
-			fragments.push_back(strdup("}"));
-		}
-		if (skip_orig_valid())
-			fragments.push_back(strdup(skip_orig ? "skip_orig" : "no_skip_orig"));
-		char *res_vex = flattenStringFragments(fragments);
-		char *res_malloc = strdup(res_vex);
-		_LibVEX_free(&main_heap, res_vex);
-		for (unsigned x = 0; x < fragments.size(); x++)
-			free((void *)fragments[x]);
-		return res_malloc;
-	}
-public:
-	struct _{
-		unsigned long rip;
-		unsigned long unwrap_vexrip() const {
-			return rip;
-		}
-		_(unsigned long r) : rip(r) {}
-		_() {}
-		operator unsigned long() const {
-			return rip;
-		}
-		bool isValid() const { return rip != 0; }
-	} rip;
-	const happensBeforeEdge *completed_edge; /* Only valid for rx_message */
-	bool skip_orig; /* Only valid for if skip_orig_valid() is true */
-	std::set<int> exit_threads; /* Only for
-				       exit_threads_and_rx_message and
-				       exit_threads_and_pop_regs_... */
-
-	bool skip_orig_valid() const {
-		return type == receive_messages ||
-			type == original_instruction ||
-			type == rx_message ||
-			type == pop_regs_restore_flags_and_branch_orig_instruction ||
-			type == exit_threads_and_rx_message ||
-			type == exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction;
-	}
-
-	bool exit_threads_valid() const {
-		return type == exit_threads_and_rx_message ||
-			type == exit_threads_and_pop_regs_restore_flags_and_branch_orig_instruction ||
-			type == exit_threads_and_restore_flags_and_branch_post_instr_checks;
-	}
-
-	/* CAUTION! This comment is badly out of date! CAUTION! */
-	/* Each original instruction (used to) expand into a sequence
-	 * of psuedo-instructions:
-	 *
-	 * start_of_instruction:
-	 * <generate anything which is generated at the start of the instruction>
-	 * receive_messages:
-	 * <receive any incoming messages>
-	 * original_instruction:
-	 * <the original instruction>
-	 * <store any newly-generated expressions>
-	 * post_instr_checks:
-	 * <rest of checks>
-	 * generate_messages:
-	 * <generate any necessary messages>
-	 *
-	 * When we degrade from thread rips to client rips, we
-	 * introduce appropriate zero-length instructions for each of
-	 * the new steps.
-	 *
-	 * We also have a special type of alternative instruction,
-	 * restore_flags_and_branch_{post_instr_checks,receive_messages},
-	 * which just restores rflags and then jumps to either
-	 * post_instr_checks or receive_messages, with the same RIP.
-	 */
-	enum instruction_type {
-#define do_case(x) x,
-		client_rip_types_iter(do_case)
-#undef do_case
-	};
-private:
-	bool parseType(instruction_type *res, const char *str, const char **suffix) {
-#define do_case(n) if (parseThisString(#n, str, suffix)) { *res = n; return true; }
-		client_rip_types_iter(do_case);
-#undef do_case
-		return false;
-	}
-public:
-	bool parse(const char *str, const char **suffix) {
-		if (!parseHexUlong(&rip.rip, str, &str) ||
-		    !parseThisChar(':', str, &str) ||
-		    !parseType(&type, str, &str) ||
-		    !parseThisChar('{', str, &str))
-			return false;
-		int thread;
-		threads.clear();
-		while (1) {
-			if (!parseDecimalInt(&thread, str, &str))
-				break;
-			if (!parseThisChar(',', str, &str))
-				return false;
-			threads.insert(thread);
-		}
-		if (!parseThisChar('}', str, &str))
-			return false;
-		if (type == rx_message) {
-			if (!parseThisString("hbe(", str, &str))
-				return false;
-			completed_edge = happensBeforeEdge::parse(str, &str);
-			if (!completed_edge)
-				return false;
-			if (!parseThisString(")", str, &str))
-				return false;
-		}
-		if (exit_threads_valid()) {
-			if (!parseThisString("thr{", str, &str))
-				return false;
-			exit_threads.clear();
-			while (1) {
-				int i;
-				if (!parseDecimalInt(&i, str, &str))
-					break;
-				if (!parseThisString(", ", str, &str))
-					return false;
-				exit_threads.insert(i);
-			}
-			if (!parseThisString("}", str, &str))
-				return false;
-				
-		}
-		if (skip_orig_valid()) {
-			if (parseThisString("skip_orig", str, &str))
-				skip_orig = true;
-			else if (parseThisString("no_skip_orig", str, &str))
-				skip_orig = false;
-			else
-				return false;
-		}
-		*suffix = str;
-		return true;
-	}
-
-	instruction_type type;
-
-	std::set<unsigned> threads;
-	std::set<unsigned> origThreads;
-
-	ClientRip(unsigned long _rip, instruction_type _type)
-		: rip(_rip), completed_edge(NULL), skip_orig(false), type(_type)
-	{}
-	ClientRip()
-		: type(uninitialised)
-	{}
-	ClientRip(unsigned long _rip, const std::set<unsigned> &_threads, instruction_type _type)
-		: rip(_rip), completed_edge(NULL), skip_orig(false), type(_type), threads(_threads), origThreads(_threads)
-	{}
-	ClientRip(const ClientRip &orig, instruction_type t)
-		: rip(orig.rip), completed_edge(NULL), skip_orig(false), type(t), threads(orig.threads), origThreads(orig.origThreads)
-	{}
-	ClientRip(const ClientRip &orig, unsigned long _rip, instruction_type t)
-		: rip(_rip), completed_edge(NULL), skip_orig(false), type(t), threads(orig.threads), origThreads(orig.origThreads)
-	{}
-	/* This ordering doesn't mean much, but it means that we can
-	   use ClientRips as keys in std::map. */
-	bool operator<(const ClientRip &k) const {
-		if (type < k.type)
-			return true;
-		if (type > k.type)
-			return false;
-		if (rip < k.rip)
-			return true;
-		else if (rip > k.rip)
-			return false;
-		else if (threads < k.threads)
-			return true;
-
-		if (type == rx_message) {
-			if (completed_edge < k.completed_edge)
-				return true;
-			if (completed_edge > k.completed_edge)
-				return false;
-		}
-		if (skip_orig_valid()) {
-			if (skip_orig > k.skip_orig)
-				return true;
-			if (skip_orig < k.skip_orig)
-				return false;
-		}
-		if (exit_threads_valid()) {
-			if (exit_threads < k.exit_threads)
-				return true;
-			if (exit_threads > k.exit_threads)
-				return true;
-		}
-		return false;
-	}
-	bool operator!=(const ClientRip &k) const { return *this < k || k < *this; }
-	bool operator==(const ClientRip &k) const { return !(*this != k); }
-
-	bool threadLive(unsigned tid) const {
-		return threads.count(tid) != 0;
-	}
-	bool noThreadsLive() const {
-		return threads.empty();
-	}
-	void eraseThread(unsigned tid) {
-		threads.erase(tid);
-	}
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "%s", name());
-	}
-};
-
 class expressionEvalMapT : public std::map<ThreadCfgLabel, std::set<exprEvalPoint> >,
 			   private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
@@ -923,29 +679,6 @@ public:
 	}
 };
 
-class EnforceCrashPatchFragment : public PatchFragment<ClientRip> {
-	std::set<happensBeforeEdge *> edges;
-
-	void generateEpilogue(const CfgLabel &l, ClientRip rip);
-
-public:
-	EnforceCrashPatchFragment(std::map<unsigned long, std::set<happensBeforeEdge *> > &happensBeforePoints,
-				  const std::set<ClientRip> &roots)
-		: PatchFragment<ClientRip>(roots)
-	{
-		for (std::map<unsigned long, std::set<happensBeforeEdge *> >::iterator it = happensBeforePoints.begin();
-		     it != happensBeforePoints.end();
-		     it++) {
-			for (std::set<happensBeforeEdge *>::iterator it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++)
-				edges.insert(*it2);
-		}
-	}
-
-	char *asC(const char *ident, int max_rx_site_id);
-};
-
 class crashEnforcementRoots : public std::set<ThreadCfgLabel> {
 public:
 	crashEnforcementRoots() {}
@@ -974,9 +707,9 @@ public:
 			ThreadCfgLabel tcl;
 			if (!tcl.parse(str, &str))
 				break;
+			insert(tcl);
 			if (!parseThisString(", ", str, &str))
 				break;
-			insert(tcl);
 		}
 		if (!parseThisChar('\n', str, &str))
 			return false;
@@ -1123,6 +856,8 @@ public:
 					return false;
 			}
 		}
+		if (!parseThisChar('\n', str, &str))
+			return false;
 		*suffix = str;
 		clear();
 		for (auto it = res.begin(); it != res.end(); it++)
@@ -1132,24 +867,40 @@ public:
 };
 
 class ThreadCfg {
-	std::map<ThreadCfgLabel, Instruction<VexRip> *> content;
+	std::map<ThreadCfgLabel, CFGNode *> content;
+	std::map<ThreadCfgLabel, CFGNode *> insertAfterPoints;
 public:
+	CFGNode *findInstr(const ThreadCfgLabel &label) {
+		auto it = content.find(label);
+		if (it == content.end())
+			return NULL;
+		else
+			return it->second;
+	}
+	void addInstr(unsigned thread, CFGNode *node) {
+		assert(!content.count(ThreadCfgLabel(thread, node->label)));
+		content[ThreadCfgLabel(thread, node->label)] = node;
+	}
+	void prepLabelAllocator(CfgLabelAllocator &alloc) {
+		for (auto it = content.begin(); it != content.end(); it++)
+			alloc.reserve(it->first.label);
+	}
 	ThreadCfg() {};
 	ThreadCfg(CrashSummary *summary) {
 		assert(summary->loadMachine->origin.size() == 1);
 		assert(summary->storeMachine->origin.size() == 1);
-		std::queue<std::pair<unsigned, Instruction<VexRip> *> > pending;
-		pending.push(std::pair<unsigned, Instruction<VexRip> *>
+		std::queue<std::pair<unsigned, CFGNode *> > pending;
+		pending.push(std::pair<unsigned, CFGNode *>
 			     (summary->loadMachine->origin[0].first,
-			      const_cast<Instruction<VexRip> *>(summary->loadMachine->cfg_roots[0])));
-		pending.push(std::pair<unsigned, Instruction<VexRip> *>
+			      const_cast<CFGNode *>(summary->loadMachine->cfg_roots[0])));
+		pending.push(std::pair<unsigned, CFGNode *>
 			     (summary->storeMachine->origin[0].first,
-			      const_cast<Instruction<VexRip> *>(summary->storeMachine->cfg_roots[0])));
+			      const_cast<CFGNode *>(summary->storeMachine->cfg_roots[0])));
 		while (!pending.empty()) {
-			std::pair<unsigned, Instruction<VexRip> *> p(pending.front());
+			std::pair<unsigned, CFGNode *> p(pending.front());
 			pending.pop();
 			auto it_did_insert = content.insert(
-				std::pair<ThreadCfgLabel, Instruction<VexRip> *>(
+				std::pair<ThreadCfgLabel, CFGNode *>(
 					ThreadCfgLabel(p.first, p.second->label),
 					p.second));
 			auto did_insert = it_did_insert.second;
@@ -1158,30 +909,17 @@ public:
 				     it != p.second->successors.end();
 				     it++) {
 					if (it->instr)
-						pending.push(std::pair<unsigned, Instruction<VexRip> *>(p.first, it->instr));
+						pending.push(std::pair<unsigned, CFGNode *>(p.first, it->instr));
 				}
 			}
 		}
 	}
-	bool parse(const char *str, const char **suffix);
-	void prettyPrint(FILE *f) {
-		fprintf(f, "\tCFG:\n");
-		for (auto it = content.begin(); it != content.end(); it++) {
-			fprintf(f, "\t\t%s: %s {", it->first.name(), it->second->rip.name());
-			bool done_one = false;
-			for (auto it2 = it->second->successors.begin();
-			     it2 != it->second->successors.end();
-			     it2++) {
-				if (!it2->instr)
-					continue;
-				if (done_one)
-					fprintf(f, ", ");
-				fprintf(f, "%s", ThreadCfgLabel(it->first.thread, it2->instr->label).name());
-				done_one = true;
-			}
-			fprintf(f, "}\n");
-		}
-	}
+	bool parse(AddressSpace *as, const char *str, const char **suffix);
+	void prettyPrint(FILE *f, bool verbose = false);
+	void insertBefore(const ThreadCfgLabel &existingInstr, CFGNode *newInstr);
+	void insertAfter(const ThreadCfgLabel &exitsingInstr, CFGNode *newInstr);
+	void insertAfter(const ThreadCfgLabel &exitsingInstr, CFGNode *newInstr, CFGNode *newInstrEnd);
+	void rewriteBranches(CFGNode *existingInstr, CFGNode *newInstr);
 };
 
 class crashEnforcementData {
@@ -1217,7 +955,7 @@ public:
 		  threadExitPoints(cfg, happensBeforePoints)
 	{}
 
-	bool parse(const char *str, const char **suffix) {
+	bool parse(AddressSpace *as, const char *str, const char **suffix) {
 		if (!parseThisString("Crash enforcement data:\n", str, &str) ||
 		    !roots.parse(str, &str) ||
 		    !exprStashPoints.parse(str, &str) ||
@@ -1225,7 +963,7 @@ public:
 		    !exprsToSlots.parse(str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||
 		    !threadExitPoints.parse(str, &str) ||
-		    !threadCfg.parse(str, &str))
+		    !threadCfg.parse(as, str, &str))
 			return false;
 		internmentState state;
 		internSelf(state);
@@ -1238,7 +976,7 @@ public:
 	crashEnforcementData()
 	{}
 
-	void prettyPrint(FILE *f) {
+	void prettyPrint(FILE *f, bool verbose = false) {
 		fprintf(f, "Crash enforcement data:\n");
 		roots.prettyPrint(f);
 		exprStashPoints.prettyPrint(f);
@@ -1246,7 +984,7 @@ public:
 		exprsToSlots.prettyPrint(f);
 		expressionEvalPoints.prettyPrint(f);
 		threadExitPoints.prettyPrint(f);
-		threadCfg.prettyPrint(f);
+		threadCfg.prettyPrint(f, verbose);
 	}
 
 	void operator|=(const crashEnforcementData &ced) {

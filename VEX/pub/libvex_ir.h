@@ -117,6 +117,10 @@ public:
 	{}
 	CfgLabel operator()();
 	void reset();
+	void reserve(const CfgLabel &i) {
+		if (cntr <= i.label)
+			cntr = i.label + 1;
+	}
 };
 
 /* Set by the SIGALRM (or whatever) signal handler when it wants us to

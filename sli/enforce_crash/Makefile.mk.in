@@ -1,7 +1,7 @@
 targets="enforce_crash ced_to_patch"
 # foo={a,b,c} turns out not to do brace expansion; not sure why.  $()
 # expansion does, though, so use that instead.  Meh.
-sources=$(echo {simplify_ordering,enumNeededExpressions,expressiondominatormap,instructiondominatormap,patchfragment,intern,thread_cfg_decode}.cpp)
+sources=$(echo {simplify_ordering,enumNeededExpressions,expressiondominatormap,instructiondominatormap,intern,thread_cfg_decode}.cpp)
 
 defvars() {
     cat <<EOF

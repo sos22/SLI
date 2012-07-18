@@ -24,6 +24,11 @@ public:
 		     rex_b(false)
 	{
 	}
+	static Prefixes rex_wide() {
+		Prefixes r;
+		r.rex_w = true;
+		return r;
+	}
 	void rexByte(unsigned char b) {
 		assert(b >= 0x40);
 		assert(b < 0x50);
@@ -31,6 +36,21 @@ public:
 		rex_x = !!(b & 2);
 		rex_r = !!(b & 4);
 		rex_w = !!(b & 8);
+	}
+	bool anything_set() const {
+		return rex_w || rex_r || rex_x || rex_b;
+	}
+	unsigned char asByte() const {
+		unsigned char res = 0x40;
+		if (rex_w)
+			res |= 8;
+		if (rex_r)
+			res |= 4;
+		if (rex_x)
+			res |= 2;
+		if (rex_b)
+			res |= 1;
+		return res;
 	}
 };
 
@@ -59,6 +79,7 @@ public:
 	static RegisterIdx fromVexOffset(unsigned offset);
 	static RegisterIdx fromRaw(unsigned offset) { return RegisterIdx(offset); }
 	bool operator !=(const RegisterIdx &k) const { return idx != k.idx; }
+	bool operator <(const RegisterIdx &o) const { return idx < o.idx; }
 };
 
 class RegisterOrOpcodeExtension {
@@ -171,8 +192,7 @@ public:
 		}
 		static successor_t call(Instruction *i)
 		{
-			return successor_t(succ_call, ripType(), i,
-					   LibraryFunctionTemplate::none);
+			return successor_t(succ_call, ripType(), i, LibraryFunctionTemplate::none);
 		}
 		static successor_t branch(const ripType _rip)
 		{
@@ -267,8 +287,11 @@ unsigned long __trivial_hash_function(const ThreadRip &k);
 struct DirectRip;
 unsigned long __trivial_hash_function(const DirectRip &k);
 unsigned long __trivial_hash_function(const ClientRip &k);
+unsigned long __trivial_hash_function(const VexRip &k);
 struct ThreadCfgLabel;
 unsigned long __trivial_hash_function(const ThreadCfgLabel &x);
+class C2PRip;
+unsigned long __trivial_hash_function(const C2PRip &x);
 
 template <typename ripType>
 class CFG : public GarbageCollected<CFG<ripType>, &ir_heap > {
@@ -474,7 +497,8 @@ protected:
    relocations are done statically while building the patch.  Late
    relocations are done afterwards, when the patch is loaded. */
 template <typename ripType>
-class EarlyRelocation : public GarbageCollected<EarlyRelocation<ripType>, &ir_heap > {
+class EarlyRelocation : public GarbageCollected<EarlyRelocation<ripType>, &ir_heap >,
+			public Named {
 public:
 	unsigned offset;
 	unsigned size;
@@ -486,7 +510,16 @@ public:
 	NAMED_CLASS
 };
 
-class LateRelocation : public GarbageCollected<LateRelocation, &ir_heap> {
+class LateRelocation : public GarbageCollected<LateRelocation, &ir_heap>,
+		       public Named {
+	char *mkName() const {
+		return my_asprintf("lr(offset = %d, size = %d, target = %s, nrImmediate = %d, %s)",
+				   offset,
+				   size,
+				   target,
+				   nrImmediateBytes,
+				   relative ? "relative" : "absolute");
+	}
 public:
 	unsigned offset;
 	unsigned size;
@@ -568,7 +601,7 @@ Instruction<r>::byte(AddressSpace *as)
 {
 	unsigned long t;
 	t = 0;
-	as->readMemory(rip.rip.unwrap_vexrip() + len, 1, &t, false, NULL);
+	as->readMemory(rip.unwrap_vexrip() + len, 1, &t, false, NULL);
 	Byte b = t;
 	emit(b);
 	return b;
@@ -578,7 +611,7 @@ template <typename r> int
 Instruction<r>::int32(AddressSpace *as)
 {
 	unsigned long t[4];
-	as->readMemory(rip.rip.unwrap_vexrip() + len, 4, t, false, NULL);
+	as->readMemory(rip.unwrap_vexrip() + len, 4, t, false, NULL);
 	emit(t[0]);
 	emit(t[1]);
 	emit(t[2]);
@@ -603,6 +636,13 @@ Instruction<r>::modrmExtension(AddressSpace *as)
 
 template <typename r>
 class RipRelativeRelocation : public EarlyRelocation<r> {
+	char *mkName() const {
+		return my_asprintf("rrr(offset = %d, size = %d, target = %s, nrImmediate = %d)",
+				   this->offset,
+				   this->size,
+				   target.name(),
+				   nrImmediateBytes);
+	}
 public:
 	r target;
 	unsigned nrImmediateBytes;
@@ -621,7 +661,37 @@ public:
 };
 
 template <typename r>
+class RipRelativeDataRelocation : public EarlyRelocation<r> {
+	char *mkName() const {
+		return my_asprintf("rrdr(offset = %d, size = %d, target = 0x%lx, nrImmediate = %d)",
+				   this->offset,
+				   this->size,
+				   target,
+				   nrImmediateBytes);
+	}
+public:
+	unsigned long target;
+	unsigned nrImmediateBytes;
+	void doit(CfgLabelAllocator &, PatchFragment<r> *pf);
+	RipRelativeDataRelocation(unsigned _offset,
+				  unsigned _size,
+				  unsigned long _target,
+				  unsigned _nrImmediateBytes)
+		: EarlyRelocation<r>(_offset, _size),
+		  target(_target),
+		  nrImmediateBytes(_nrImmediateBytes)
+	{
+	}
+};
+
+template <typename r>
 class RipRelativeBranchRelocation : public EarlyRelocation<r> {
+	char *mkName() const {
+		return my_asprintf("rrbr(offset = %d, size = %d, target = %s)",
+				   this->offset,
+				   this->size,
+				   target.name());
+	}
 public:
 	r target;
 	void doit(CfgLabelAllocator &, PatchFragment<r> *pf);
@@ -1049,9 +1119,19 @@ RipRelativeRelocation<r>::doit(CfgLabelAllocator &, PatchFragment<r> *pf)
 		pf->writeBytes(&delta, this->size, this->offset);
 	} else {
 		pf->addLateReloc(new LateRelocation(this->offset, this->size,
-						    vex_asprintf("0x%lx",target.rip.unwrap_vexrip()),
+						    vex_asprintf("0x%lx",target.unwrap_vexrip()),
 						    nrImmediateBytes, true));
 	}
+}
+
+template <typename r> void
+RipRelativeDataRelocation<r>::doit(CfgLabelAllocator &, PatchFragment<r> *pf)
+{
+	pf->addLateReloc(new LateRelocation(this->offset,
+					    this->size,
+					    vex_asprintf("0x%lx",target),
+					    nrImmediateBytes,
+					    true));
 }
 
 template <typename r> void
@@ -1061,7 +1141,7 @@ RipRelativeBranchRelocation<r>::doit(CfgLabelAllocator &allocLabel, PatchFragmen
 	if (!pf->ripToOffset(target, &targetOffset))
 		pf->generateEpilogue(allocLabel(), target);
 	if (!pf->ripToOffset(target, &targetOffset))
-		fail("Failed to generate epilogue for 0x%lx\n", target.rip.unwrap_vexrip());
+		fail("Failed to generate epilogue for %s\n", target.name());
 	int delta = targetOffset - this->offset - this->size;
 	pf->writeBytes(&delta, this->size, this->offset);
 }
@@ -1467,7 +1547,7 @@ PatchFragment<r>::emitStraightLine(Instruction<r> *i)
 		if (!next || !next->instr) {
 			/* Hit end of block, and don't want to go any
 			 * further.  Return to the original code. */
-			if (next && next->rip.rip.isValid()) {
+			if (next && next->rip.isValid()) {
 				emitJmpToRipClient(next->rip);
 			} else {
 				/* Last instruction in the block was
@@ -1508,7 +1588,7 @@ PatchFragment<r>::asC(const char *ident, char **relocs_name, char **trans_name, 
 	     it != registeredInstrs.end();
 	     it++)
 		fragments.push_back(vex_asprintf("\t{0x%lx, 0x%x}, /* %s */\n",
-						 (*it)->rip.rip.unwrap_vexrip(),
+						 (*it)->rip.unwrap_vexrip(),
 						 (*it)->offsetInPatch,
 						 (*it)->rip.name()));
 	fragments.push_back("};\n");
@@ -1521,7 +1601,7 @@ PatchFragment<r>::generateEpilogue(const CfgLabel &l, r exitRip)
 	Instruction<r> *i = Instruction<r>::pseudo(l, exitRip);
 	cfg->registerInstruction(i);
 	registerInstruction(i, content.size());
-	emitJmpToRipHost(exitRip.rip.unwrap_vexrip());
+	emitJmpToRipHost(exitRip.unwrap_vexrip());
 }
 
 void __genfix_add_array_summary(std::vector<const char *> &out,
