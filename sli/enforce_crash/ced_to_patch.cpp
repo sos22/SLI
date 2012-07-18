@@ -285,7 +285,15 @@ public:
 		if (phase)
 			delete phase;
 	}
-
+	void operator=(const C2PRip &o) {
+		if (phase)
+			delete phase;
+		crossMachineState = o.crossMachineState;
+		if (o.phase)
+			phase = new C2PPhase(*o.phase);
+		else
+			phase = NULL;
+	}
 	bool isNil() const {
 		return crossMachineState.empty() && phase == NULL;
 	}
