@@ -1630,11 +1630,45 @@ receivedMessage(const C2PRip &c2p_rip,
 	if (debug_receive_messages)
 		printf("%s(%s)\n", __func__, c2p_rip.name());
 
+	const happensBeforeEdge *edge = c2p_rip.phase->msgReceived();
+
 	Instruction<C2PRip> *start;
 	Instruction<C2PRip> *cursor;
+	Instruction<C2PRip> *n;
 
-	/* Undo the stash operations we did in receiveMessages() */
-	start = cursor = instrPopReg64(allocLabel, RegisterIdx::RAX);
+	start = cursor = NULL;
+	/* Pull any ancillary data out of the message */
+	/* XXX should arguably only do this in threads where the
+	   message receive succeeded, but that requires a bit of
+	   refactoring which I don't want to do right now. */
+	for (unsigned x = 0; x < edge->content.size(); x++) {
+		n = instrMovLabelToRegister(
+				allocLabel,
+				vex_asprintf("(unsigned long)&__msg_%d_slot_%d", 
+					     edge->msg_id, x),
+				RegisterIdx::RAX);
+		if (cursor == NULL)
+			start = cursor = n;
+		else
+			cursor = cursor->addDefault(n);
+		cursor = cursor->addDefault(
+			instrMovModrmToRegister(
+				allocLabel,
+				ModRM::memAtRegister(RegisterIdx::RAX),
+				RegisterIdx::RAX));
+		cursor = cursor->addDefault(
+			instrMovRegToSlot(
+				allocLabel,
+				RegisterIdx::RAX,
+				ced.exprsToSlots(edge->after.tid, edge->content[x])));
+	}
+
+	/* Undo the spill operations we did in receiveMessages() */
+	n = instrPopReg64(allocLabel, RegisterIdx::RAX);
+	if (cursor == NULL)
+		start = cursor = n;
+	else
+		cursor = cursor->addDefault(n);
 	cursor = cursor->addDefault(instrPopf(allocLabel));
 	cursor = cursor->addDefault(instrRestoreRedZone(allocLabel));
 
@@ -1827,7 +1861,7 @@ public:
 	}
 	void dumpToFile(const char *path) const {
 		FILE *f = fopen(path, "w");
-		if (!f) err(1, "opening %s");
+		if (!f) err(1, "opening %s", path);
 		for (unsigned x = 0; x < content.size(); x++)
 			fputc(content[x], f);
 		fclose(f);
