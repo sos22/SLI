@@ -123,6 +123,7 @@ happensBeforeEdge__after_c(int nr_codes, long *codes)
 static void
 clearMessage_c(int code)
 {
+	usleep(10000);
 	debug("Clear %x", code);
 	messages[code - MESSAGE_ID_BASE] = 0;
 }
