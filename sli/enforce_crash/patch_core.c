@@ -10,11 +10,6 @@ struct relocation {
 	unsigned long target;
 };
 
-struct trans_table_entry {
-	unsigned long rip;
-	unsigned offset;
-};
-
 struct patch_entry_point {
 	unsigned long orig_rip;
 	unsigned offset_in_patch;
@@ -23,8 +18,6 @@ struct patch_entry_point {
 struct patch {
 	const struct relocation *relocations;
 	int nr_relocations;
-	const struct trans_table_entry *trans_table;
-	int nr_translations;
 	struct patch_entry_point *entry_points;
 	int nr_entry_points;
 	const unsigned char *content;

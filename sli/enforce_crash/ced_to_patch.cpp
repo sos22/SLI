@@ -1930,8 +1930,6 @@ public:
 		fprintf(f, "static struct patch ident = {\n");
 		fprintf(f, "\t.relocations = __ident_relocations,\n");
 		fprintf(f, "\t.nr_relocations = %zd,\n", lateRelocs.size());
-		fprintf(f, "\t.trans_table = __ident_trans_table,\n");
-		fprintf(f, "\t.nr_translations = %d,\n", 0);
 		fprintf(f, "\t.entry_points = __ident_entry_points,\n");
 		fprintf(f, "\t.nr_entry_points = %zd,\n", entryPoints.size());
 		fprintf(f, "\t.content = __ident_content,\n");
