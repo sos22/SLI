@@ -22,16 +22,16 @@ __trivial_hash_function(const VexRip &vr)
 }
 
 void
-instrToInstrSetMap::print(FILE *f)
+instrToInstrSetMap::print(FILE *f) const
 {
-	for (iterator it = begin(); it != end(); it++) {
-		fprintf(f, "%s[%p] -> {", it->first->rip.name(), it->first);
+	for (auto it = begin(); it != end(); it++) {
+		fprintf(f, "%s -> {", it->first->label.name());
 		for (auto it2 = it->second.begin();
 		     it2 != it->second.end();
 		     it2++) {
 			if (it2 != it->second.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%s[%p]", (*it2)->rip.name(), *it2);
+			fprintf(f, "%s", (*it2)->label.name());
 		}
 		fprintf(f, "}\n");
 	}
@@ -194,55 +194,9 @@ buildCED(DNF_Conjunction &c,
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	/* and where the needed expressions are calculated */
-	std::set<ThreadCfgLabel> neededRips;
-	{
-		/* XXX keep this in sync with
-		 * expressionStashMapT::expressionStashMapT() */
-		std::set<IRExprGet *> neededTemporaries;
-		for (auto it = neededExpressions.begin();
-		     it != neededExpressions.end();
-		     it++) {
-			IRExpr *e = *it;
-			if (e->tag == Iex_Get) {
-				IRExprGet *ieg = (IRExprGet *)e;
-				if (ieg->reg.isReg()) {
-					auto it_r = rootsCfg.find(ieg->reg.tid());
-					assert(it_r != rootsCfg.end());
-					neededRips.insert(ThreadCfgLabel(ieg->reg.tid(), it_r->second));
-				} else {
-					neededTemporaries.insert(ieg);
-				}
-			} else {
-				assert(e->tag == Iex_HappensBefore);
-				IRExprHappensBefore *ieh = (IRExprHappensBefore *)e;
-				neededRips.insert(ieh->before);
-				neededRips.insert(ieh->after);
-			}
-		}
-		if (!neededTemporaries.empty()) {
-			std::set<StateMachineSideEffectLoad *> loads;
-			enumSideEffects(probeMachine, loads);
-			enumSideEffects(storeMachine, loads);
-			for (auto it = neededTemporaries.begin();
-			     it != neededTemporaries.end();
-			     it++) {
-				StateMachineSideEffectLoad *l = NULL;
-				for (auto it2 = loads.begin(); it2 != loads.end(); it2++) {
-					if ( threadAndRegister::fullEq((*it2)->target, (*it)->reg) ) {
-						assert(!l);
-						l = *it2;
-					}
-				}
-				assert(l);
-				neededRips.insert(l->rip);
-			}
-		}
-	}
-
 	/* Figure out where the various expressions should be
 	 * evaluated. */
-	expressionDominatorMapT exprDominatorMap(c, cfg, neededRips);
+	expressionDominatorMapT exprDominatorMap(c, cfg);
 
 	*out = crashEnforcementData(neededExpressions, rootsCfg, exprDominatorMap, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
 	return true;

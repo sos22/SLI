@@ -115,7 +115,7 @@ public:
 
 class instrToInstrSetMap : public std::map<Instruction<ThreadCfgLabel> *, std::set<Instruction<ThreadCfgLabel> *> > {
 public:
-	void print(FILE *f);
+	void print(FILE *f) const;
 };
 
 /* Map from instructions to instructions which happen immediately
@@ -162,8 +162,7 @@ class instructionDominatorMapT : public instrToInstrSetMap {
 	instructionDominatorMapT() {}
 	instructionDominatorMapT(ThreadCfgDecode &cfg,
 				 predecessorMapT &predecessors,
-				 happensAfterMapT &happensAfter,
-				 const std::set<ThreadCfgLabel> &neededInstructions);
+				 happensAfterMapT &happensAfter);
 };
 
 class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > {
@@ -189,9 +188,11 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, s
 		t.doit(e);
 		return t.isGood;
 	}
+	expressionDominatorMapT() {};
 public:
 	instructionDominatorMapT idom;
-	expressionDominatorMapT(DNF_Conjunction &, ThreadCfgDecode &, const std::set<ThreadCfgLabel> &neededRips);
+	expressionDominatorMapT(DNF_Conjunction &, ThreadCfgDecode &);
+	void prettyPrint(FILE *f) const;
 };
 
 class simulationSlotT {

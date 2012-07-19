@@ -2,8 +2,7 @@
 #include "enforce_crash.hpp"
 
 expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
-						 ThreadCfgDecode &cfg,
-						 const std::set<ThreadCfgLabel> &neededRips)
+						 ThreadCfgDecode &cfg)
 {
 	happensAfterMapT happensBefore(c, cfg);
 
@@ -11,12 +10,12 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 
 	/* Figure out where the various instructions become
 	 * available. */
-	instructionDominatorMapT idom(cfg, pred, happensBefore, neededRips);
+	instructionDominatorMapT idom(cfg, pred, happensBefore);
 	this->idom = idom;
 
 	/* First, figure out where the various expressions could in
 	   principle be evaluated. */
-	std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > evalable;
+	expressionDominatorMapT evalable;
 	for (instructionDominatorMapT::iterator it = idom.begin();
 	     it != idom.end();
 	     it++) {
@@ -31,7 +30,6 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 				evalable[it->first].insert(c[x]);
 		}
 	}
-
 
 	/* Just find all of the things which are evaluatable at X but
 	   not at some of X's predecessors, for any instruction X.  I'm
@@ -101,5 +99,21 @@ happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadCfgDecode &cfg)
 			happensAfter[before].insert(after);
 			happensBefore[after].insert(before);
 		}
+	}
+}
+
+void
+expressionDominatorMapT::prettyPrint(FILE *f) const
+{
+	for (auto it = begin(); it != end(); it++) {
+		fprintf(f, "%s -> {", it->first->label.name());
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			if (it2 != it->second.begin())
+				fprintf(f, ", ");
+			if (it2->first)
+				fprintf(f, "!");
+			ppIRExpr(it2->second, f);
+		}
+		fprintf(f, "}\n");
 	}
 }

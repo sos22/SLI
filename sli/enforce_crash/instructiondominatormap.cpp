@@ -72,8 +72,7 @@ cfgRootSetT::cfgRootSetT(ThreadCfgDecode &cfg, predecessorMapT &pred)
 
 instructionDominatorMapT::instructionDominatorMapT(ThreadCfgDecode &cfg,
 						   predecessorMapT &predecessors,
-						   happensAfterMapT &happensAfter,
-						   const std::set<ThreadCfgLabel> &neededRips)
+						   happensAfterMapT &happensAfter)
 {
 	std::set<Instruction<ThreadCfgLabel> *> neededInstructions;
 	for (auto it = cfg.begin();
@@ -184,22 +183,6 @@ instructionDominatorMapT::instructionDominatorMapT(ThreadCfgDecode &cfg,
 		}
 	}
 
-	/* Now filter things back down to the actually interesting
-	 * instructions. */
-	for (auto it = begin(); it != end(); ) {
-		if (!neededRips.count(it->first->rip)) {
-			erase(it++);
-			continue;
-		}
-		for (auto it2 = it->second.begin(); it2 != it->second.end(); ) {
-			if (!neededRips.count((*it2)->rip)) {
-				it->second.erase(it2++);
-			} else {
-				it2++;
-			}
-		}
-		it++;
-	}
 #if 0
 	printf("Instruction dominator map:\n");
 	print(stdout);
