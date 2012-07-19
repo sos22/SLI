@@ -955,7 +955,7 @@ startThread(const C2PRip &c2p_rip,
 
 	n = noopRelocation(allocLabel,
 			   C2PRip(newCrossMachineState,
-				  C2PPhase::receiveMessages()),
+				  C2PPhase::checkForThreadStart()),
 			   relocs);
 	if (cursor)
 		cursor->addDefault(n);
