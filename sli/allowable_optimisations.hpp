@@ -121,10 +121,39 @@ class AllowableOptimisations : public Named {
 				fragments.push_back(", ");	\
 			fragments.push_back( #name );		\
 		}
-		optimisation_flags(do_one_flag);
+		_optimisation_flags(do_one_flag);
 #undef do_one_flag
-		if (_as)
+		if (_interestingStores) {
+			if (fragments.size() != 1)
+				fragments.push_back(", ");
+			fragments.push_back("interestingStores = {");
+			for (auto it = _interestingStores->begin();
+			     it != _interestingStores->end();
+			     it++) {
+				if (it != _interestingStores->begin())
+					fragments.push_back(";");
+				fragments.push_back(it->name());
+			}
+			fragments.push_back("}");
+		}
+		if (_nonLocalLoads) {
+			if (fragments.size() != 1)
+				fragments.push_back(", ");
+			fragments.push_back(", nonLocalLoads = {");
+			for (auto it = _nonLocalLoads->begin();
+			     it != _nonLocalLoads->end();
+			     it++) {
+				if (it != _nonLocalLoads->begin())
+					fragments.push_back(";");
+				fragments.push_back(it->name());
+			}
+			fragments.push_back("}");
+		}
+		if (_as) {
+			if (fragments.size() != 1)
+				fragments.push_back(", ");
 			fragments.push_back("as");
+		}
 		fragments.push_back("}");
 		size_t sz = 1; /* nul terminator */
 		for (auto it = fragments.begin(); it != fragments.end(); it++)
