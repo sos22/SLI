@@ -913,6 +913,7 @@ static Oracle::PointerAliasingSet
 irexprAliasingClass(IRExpr *expr,
 		    const Oracle::RegisterAliasingConfiguration &config,
 		    std::map<threadAndRegister, Oracle::PointerAliasingSet, threadAndRegister::fullCompare> *temps,
+		    const AllowableOptimisations &opt,
 		    bool buildingAliasTable)
 {
 	if (expr->type() != Ity_I64)
@@ -932,8 +933,16 @@ irexprAliasingClass(IRExpr *expr,
 			return config.lookupRegister(e->reg, buildingAliasTable);
 		}
 	}
-	case Iex_Const:
-		return Oracle::PointerAliasingSet::notAPointer | Oracle::PointerAliasingSet::nonStackPointer;
+	case Iex_Const: {
+		IRConst *con = ((IRExprConst *)expr)->con;
+		if (con->Ico.U64 < 4096)
+			return Oracle::PointerAliasingSet::notAPointer;
+		bool t;
+		if (opt.addressAccessible(((IRExprConst *)expr)->con->Ico.U64, &t) && !t)
+			return Oracle::PointerAliasingSet::notAPointer;
+		else
+			return Oracle::PointerAliasingSet::nonStackPointer | Oracle::PointerAliasingSet::notAPointer;
+	}
 	case Iex_Unop:
 		switch (((IRExprUnop *)expr)->op) {
 		case Iop_1Uto8:
@@ -960,11 +969,13 @@ irexprAliasingClass(IRExpr *expr,
 			e->arg1,
 			config,
 			temps,
+			opt,
 			buildingAliasTable);
 		Oracle::PointerAliasingSet a2 = irexprAliasingClass(
 			e->arg2,
 			config,
 			temps,
+			opt,
 			buildingAliasTable);
 		switch (e->op) {
 		case Iop_Sub64:
@@ -1010,10 +1021,12 @@ irexprAliasingClass(IRExpr *expr,
 		return irexprAliasingClass(e->expr0,
 					   config,
 					   temps,
+					   opt,
 					   buildingAliasTable) |
 			irexprAliasingClass(e->exprX,
 					    config,
 					    temps,
+					    opt,
 					    buildingAliasTable);
 	}
 	case Iex_Associative: {
@@ -1022,28 +1035,22 @@ irexprAliasingClass(IRExpr *expr,
 		case Iop_Add64:
 		case Iop_And64:
 		{
-			for (int i = 0; i < e->nr_arguments; i++) {
-				if (e->contents[i]->tag != Iex_Const) {
-					Oracle::PointerAliasingSet res = 
-						irexprAliasingClass(e->contents[i],
-								    config,
-								    temps,
-								    buildingAliasTable);
-					for (int j = i + 1; j < e->nr_arguments; j++) {
-						if (e->contents[j]->tag != Iex_Const)
-							res = res | 
-								irexprAliasingClass(e->contents[j],
-										    config,
-										    temps,
-										    buildingAliasTable);
-					}
-					if (!(res & Oracle::PointerAliasingSet::anything))
-						return Oracle::PointerAliasingSet::notAPointer;
-					else
-						return res;
-				}
-			}
-			return Oracle::PointerAliasingSet::notAPointer;
+			if (e->nr_arguments == 0)
+				return Oracle::PointerAliasingSet::notAPointer;
+			Oracle::PointerAliasingSet res = 
+				irexprAliasingClass(e->contents[0],
+						    config,
+						    temps,
+						    opt,
+						    buildingAliasTable);
+			for (int i = 1; i < e->nr_arguments; i++)
+				res = res | irexprAliasingClass(e->contents[i],
+								config,
+								temps,
+								opt,
+								buildingAliasTable);
+			assert(res & Oracle::PointerAliasingSet::anything);
+			return res;
 		}
 		case Iop_Add32:
 		case Iop_And32:
@@ -1077,7 +1084,7 @@ irexprAliasingClass(IRExpr *expr,
 		   argument isn't a stack pointer then neither is our
 		   result. */
 		Oracle::PointerAliasingSet addrType =
-			irexprAliasingClass(iel->addr, config, temps, buildingAliasTable);
+			irexprAliasingClass(iel->addr, config, temps, opt, buildingAliasTable);
 		if (addrType & Oracle::PointerAliasingSet::stackPointer)
 			return Oracle::PointerAliasingSet::anything;
 		else
@@ -1094,9 +1101,9 @@ irexprAliasingClass(IRExpr *expr,
 }
 
 bool
-Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a) const
+Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a, const AllowableOptimisations &opt) const
 {
-	PointerAliasingSet as = irexprAliasingClass(a, *this, NULL, false);
+	PointerAliasingSet as = irexprAliasingClass(a, *this, NULL, opt, false);
 	if (as & PointerAliasingSet::nonStackPointer)
 		return true;
 	else
@@ -1104,10 +1111,10 @@ Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a) const
 }
 
 bool
-Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b) const
+Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt) const
 {
-	return irexprAliasingClass(a, *this, NULL, false) &
-		irexprAliasingClass(b, *this, NULL, false) &
+	return irexprAliasingClass(a, *this, NULL, opt, false) &
+		irexprAliasingClass(b, *this, NULL, opt, false) &
 		~PointerAliasingSet::notAPointer;
 }
 
@@ -2283,6 +2290,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 						      std::vector<StaticRip> *changed,
 						      bool *done_something)
 {
+	const AllowableOptimisations &opt(AllowableOptimisations::defaultOptimisations);
 	RegisterAliasingConfiguration config;
 	config.addConfig(STATIC_THREAD, aliasConfigOnEntryToInstruction(rip));
 	ThreadRegisterAliasingConfiguration &tconfig(config.content[0].second);
@@ -2314,6 +2322,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 					   irexprAliasingClass(p->data,
 							       config,
 							       &temporaryAliases,
+							       opt,
 							       true));
 			} else {
 				temporaryAliases.insert(
@@ -2321,6 +2330,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 											 irexprAliasingClass(p->data,
 													     config,
 													     &temporaryAliases,
+													     opt,
 													     true)));
 			}
 			break;
@@ -2333,10 +2343,12 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				PointerAliasingSet addr = irexprAliasingClass(((IRStmtStore *)st)->data,
 									      config,
 									      &temporaryAliases,
+									      opt,
 									      true);
 				PointerAliasingSet data = irexprAliasingClass(((IRStmtStore *)st)->data,
 									      config,
 									      &temporaryAliases,
+									      opt,
 									      true);
 				if ((addr & PointerAliasingSet::nonStackPointer) &&
 				    (data & PointerAliasingSet::stackPointer)) {

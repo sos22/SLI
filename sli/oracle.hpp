@@ -307,11 +307,11 @@ public:
 		   configuration.  Note that this assumes that both @a
 		   and @b are pointers i.e. it's not just asking
 		   whether @a and @b might be equal. */
-		bool ptrsMightAlias(IRExpr *a, IRExpr *b) const;
+		bool ptrsMightAlias(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt) const;
 
 		/* Check whether there's any possibility of @a being a
 		   pointer to a non-stack location. */
-		bool mightPointOutsideStack(IRExpr *a) const;
+		bool mightPointOutsideStack(IRExpr *a, const AllowableOptimisations &opt) const;
 	};
 
 	RegisterAliasingConfiguration getAliasingConfiguration(const std::vector<std::pair<unsigned, VexRip> > &rips);

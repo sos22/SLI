@@ -102,7 +102,7 @@ storeMightBeLoadedByState(CfgDecode &decode,
 				StateMachineSideEffectLoad *smsel =
 					dynamic_cast<StateMachineSideEffectLoad *>(se);
 				assert(smsel);
-				if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr)) &&
+				if ((!alias || alias->ptrsMightAlias(smsel->addr, smses->addr, opt)) &&
 				    oracle->memoryAccessesMightAlias(decode, opt, smsel, smses))
 					return true;
 			}
@@ -116,7 +116,7 @@ storeMightBeLoadedByState(CfgDecode &decode,
 				   definitely not be loaded on this
 				   path. */
 				if (smses2->data->type() == smses->data->type() &&
-				    (!alias || alias->ptrsMightAlias(smses2->addr, smses->addr)) &&
+				    (!alias || alias->ptrsMightAlias(smses2->addr, smses->addr, opt)) &&
 				    oracle->memoryAccessesMightAlias(decode, opt, smses2, smses) &&
 				    definitelyEqual(smses2->addr, smses->addr, opt))
 					return false;
@@ -204,7 +204,7 @@ removeRedundantStores(CfgDecode &decode,
 			if (StateMachineSideEffectStore *smses = dynamic_cast<StateMachineSideEffectStore *>(se->sideEffect)) {
 				bool canRemove = opt.ignoreStore(decode(smses->rip.where)->rip);
 				if (!canRemove && opt.assumePrivateStack() && alias &&
-				    !alias->mightPointOutsideStack(smses->addr)) {
+				    !alias->mightPointOutsideStack(smses->addr, opt)) {
 					/* If we have assumePrivateStack set,
 					   and this is definitely a stack
 					   store, it's worth considering
