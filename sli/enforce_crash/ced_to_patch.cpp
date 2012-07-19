@@ -941,6 +941,14 @@ startThread(const C2PRip &c2p_rip,
 
 	Instruction<C2PRip> *start = NULL;
 	Instruction<C2PRip> *cursor = NULL;
+
+	CFGNode *cfgNode = ced.threadCfg.findInstr(newThread);
+	assert(cfgNode);
+
+	/* At the moment, we don't support starting in the middle of a
+	 * function. */
+	assert(cfgNode->rip.stack.size() == 1);
+
 	Instruction<C2PRip> *n = NULL;
 	for (auto it = stashRegisters.begin(); it != stashRegisters.end(); it++) {
 		n = instrMovRegToSlot(allocLabel,
