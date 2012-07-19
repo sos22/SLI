@@ -334,6 +334,9 @@ public:
 	void sanity_check() const {
 		rip.sanity_check();
 	}
+
+	unsigned long unwrap_vexrip() const { return rip.unwrap_vexrip(); }
+	bool isValid() const { return rip.isValid(); }
 };
 extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
