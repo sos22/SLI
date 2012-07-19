@@ -1,3 +1,5 @@
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <err.h>
 #include <signal.h>
 #include <unistd.h>
@@ -220,3 +222,44 @@ flattenStringFragments(std::vector<const char *> fragments)
 	return res;
 }
 
+void
+my_system(const char *arg1, ...)
+{
+	pid_t pid = fork();
+	if (pid == -1)
+		err(1, "fork(%s)", arg1);
+	if (pid == 0) {
+		va_list va;
+		unsigned nr_args;
+
+		va_start(va, arg1);
+		for (nr_args = 1; va_arg(va, const char *); nr_args++)
+			;
+		va_end(va);
+
+		const char **args = (const char **)calloc(sizeof(args[0]), nr_args + 1);
+		args[0] = arg1;
+		va_start(va, arg1);
+		for (nr_args = 1; ; nr_args++) {
+			args[nr_args] = va_arg(va, const char *);
+			if (!args[nr_args])
+				break;
+		}
+		execvp(arg1, (char *const *)args);
+		err(1, "execvp(%s)", arg1);
+	}
+
+	int status;
+	pid_t opid;
+	opid = waitpid(pid, &status, 0);
+	if (opid < 0) err(1, "waitpid() for %s", arg1);
+	assert(opid == pid);
+	if (WIFEXITED(status)) {
+		if (WEXITSTATUS(status) == 0)
+			return;
+		errx(1, "%s returned %d", arg1, WEXITSTATUS(status));
+	}
+	if (WIFSIGNALED(status))
+		errx(1, "%s died with signal %d", arg1, WTERMSIG(status));
+	errx(1, "unknown wait status %x from %s", status, arg1);
+}

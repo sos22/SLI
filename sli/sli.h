@@ -1300,6 +1300,7 @@ struct internIRExprTable {
 IRExpr *internIRExpr(IRExpr *e, internIRExprTable &lookupTable);
 
 char *nameIRExpr(IRExpr *a);
+void my_system(const char *arg1, ...);
 
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */

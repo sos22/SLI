@@ -1859,12 +1859,26 @@ public:
 		for (unsigned x = 0; x < sz; x++)
 			content[x + offset] = ((const unsigned char *)bytes)[x];
 	}
-	void dumpToFile(const char *path) const {
-		FILE *f = fopen(path, "w");
-		if (!f) err(1, "opening %s", path);
-		for (unsigned x = 0; x < content.size(); x++)
-			fputc(content[x], f);
-		fclose(f);
+	void dumpToFile(FILE *f) const {
+		fprintf(f, "static const unsigned char __ident_content[] = {\n");
+		for (unsigned x = 0; x < content.size(); x++) {
+			fprintf(f, "0x%02x", content[x]);
+			if (x != content.size() - 1)
+				fprintf(f, ", ");
+			if (x % 30 == 29)
+				fprintf(f, "\n");
+		}
+		fprintf(f, "};\n\n");
+		fprintf(f, "static struct patch ident = {\n");
+		fprintf(f, "\t.relocations = __ident_relocations,\n");
+		fprintf(f, "\t.nr_relocations = %zd,\n", lateRelocs.size());
+		fprintf(f, "\t.trans_table = __ident_trans_table,\n");
+		fprintf(f, "\t.nr_translations = %d,\n", 0);
+		fprintf(f, "\t.entry_points = __ident_entry_points,\n");
+		fprintf(f, "\t.nr_entry_points = %d,\n", 0);
+		fprintf(f, "\t.content = __ident_content,\n");
+		fprintf(f, "\t.content_size = %zd\n", content.size());
+		fprintf(f, "};\n\n");
 	}
 };
 
@@ -2069,30 +2083,16 @@ main(int argc, char *argv[])
 	CompiledCfg result;
 	compileCfg(cfg, patchPoints, result);
 
-	result.dumpToFile(output);
+	char tmpfile[] = "enforce_crash_XXXXXX";
+	int tmp_fd = mkstemp(tmpfile);
+	if (tmp_fd < 0)
+		err(1, "mkstemp(%s)", tmpfile);
+	FILE *f = fdopen(tmp_fd, "w");
+	if (!f)
+		err(1, "fdopen(%d) (from %s)", tmp_fd, tmpfile);
 
-#if 0
-	CfgDecode decode;
-
-	/* Now build the patch */
-	int next_rx_site_id = 0;
-	CFG<ClientRip> *cfg = enforceCrash(ced, decode, ms->addressSpace, next_slot, next_rx_site_id);
-	EnforceCrashPatchFragment *pf = new EnforceCrashPatchFragment(ced.happensBeforePoints, ced.roots);
-	CfgLabelAllocator alloc;
-	pf->fromCFG(alloc, cfg);
-	char *patch = pf->asC("ident", next_rx_site_id);
-
-	/* Dump it to a file and build it. */
-	char *tmpfile = my_asprintf("enforce_crash_XXXXXX");
-	fd = mkstemp(tmpfile);
-	if (fd < 0) err(1, "mkstemp(%s)", tmpfile);
-	DeleteTmpFile __df(tmpfile);
-	FILE *f = fdopen(fd, "w");
-	if (!f) err(1, "fdopen(%d) (from %s)", fd, tmpfile);
-	if (fputs(patch, f) == EOF)
-		err(1, "writing to %s", tmpfile);
-	if (fclose(f) == EOF)
-		err(1, "closing %s", tmpfile);
+	result.dumpToFile(f);
+	fclose(f);
 
 	char *real_inp = realpath(binary, NULL);
 	my_system(
@@ -2108,7 +2108,5 @@ main(int argc, char *argv[])
 		"-o",
 		output,
 		NULL);
-#endif
-
 	return 0;
 }
