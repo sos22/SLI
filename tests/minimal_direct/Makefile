@@ -44,8 +44,8 @@ all: bug1.so
 	rm -f $@ ; \
 	../../build_types_db ./$< $<.types.canon $@
 
-bug1: bug1.c
-	gcc -pthread -Wall -g bug1.c -o bug1
+%: %.c
+	gcc -pthread -Wall -g $< -o $@
 
 clean:
 	rm -f bug1 *.idx *.canon *.types *.bcg *~ static.db timings.txt generated_patch.c \
