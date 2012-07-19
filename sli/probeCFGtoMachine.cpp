@@ -78,7 +78,7 @@ static void
 getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 {
 	for (auto it = node->successors.begin(); it != node->successors.end(); it++)
-		if (it->instr && it->rip == vr)
+		if (it->instr && it->instr->rip == vr)
 			targets.push_back(it->instr);
 }
 
