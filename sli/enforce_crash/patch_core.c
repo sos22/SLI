@@ -1,3 +1,5 @@
+#undef DEBUG
+
 void happensBeforeEdge__before(int code);
 long happensBeforeEdge__after(int nr_codes, long *codes);
 void clearMessage(int code);
@@ -55,9 +57,37 @@ static long happensBeforeEdge__after_c(int nr_codes, long *codes) __attribute__(
 static void clearMessage_c(int code) __attribute__((unused));
 static void clone_hook_c(int (*fn)(void *), void *fn_arg) __attribute__((unused));
 
+#ifdef DEBUG
+#define _GNU_SOURCE
+#include <sys/syscall.h>
+static int
+gettid(void)
+{
+	return syscall(__NR_gettid);
+}
+static double
+now(void)
+{
+	static double start;
+	struct timeval t;
+	double res;
+	gettimeofday(&t, NULL);
+	res = t.tv_sec + t.tv_usec * 1e-06;
+	if (start == 0)
+		start = res;
+	return res - start;
+}
+#define debug(fmt, ...)				\
+	printf("%f: %d: " fmt "\n",		\
+		now(), gettid(),		\
+	       ##__VA_ARGS__)
+#else
+#define debug(...) do {} while(0)
+#endif
 static void
 happensBeforeEdge__before_c(int code)
 {
+	debug("Send %x", code);
 	messages[code - MESSAGE_ID_BASE] = 1;
 }
 static long
@@ -67,6 +97,9 @@ happensBeforeEdge__after_c(int nr_codes, long *codes)
 	int max;
 	int i;
 
+	debug("Receive %d messages", nr_codes);
+	for (i = 0; i < nr_codes; i++)
+		debug("\t%lx", codes[i]);
 	if (!have_cloned)
 		return 0;
 
@@ -75,18 +108,22 @@ happensBeforeEdge__after_c(int nr_codes, long *codes)
 		for (i = 0; i < nr_codes; i++) {
 			if (codes[i] < MESSAGE_ID_BASE || codes[i] >= MESSAGE_ID_END)
 				abort();
-			if (messages[codes[i] - MESSAGE_ID_BASE])
+			if (messages[codes[i] - MESSAGE_ID_BASE]) {
+				debug("Received %lx", codes[i]);
 				return codes[i];
+			}
 		}
 		if (cntr != max - 1)
 			usleep(100);
 	}
+	debug("Failed to receive messages");
 
 	return 0;
 }
 static void
 clearMessage_c(int code)
 {
+	debug("Clear %x", code);
 	messages[code - MESSAGE_ID_BASE] = 0;
 }
 
