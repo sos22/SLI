@@ -1,4 +1,10 @@
-all: bug1.summary.canon4
+all: bug1.so
+
+bug1.so: ../../ced_to_patch ./bug1 ./bug1.ced ../../sli/enforce_crash/patch_core.c
+	../../ced_to_patch ./bug1 ./bug1.ced ../../ $@
+
+bug1.ced: bug1.summary.canon4  ../../enforce_crash ./bug1 bug1.types.canon bug1.types.canon.idx bug1.bcg
+	../../enforce_crash ./bug1 bug1.types.canon bug1.bcg $@ $<
 
 bug1.summary.canon4: ../../canonicalise_crash_summary0 bug1.summary.canon3
 	$^ $@
@@ -42,5 +48,6 @@ bug1: bug1.c
 	gcc -pthread -Wall -g bug1.c -o bug1
 
 clean:
-	rm -f bug1 *.idx *.canon *.types *.bcg *~ static.db timings.txt generated_patch.c ;\
+	rm -f bug1 *.idx *.canon *.types *.bcg *~ static.db timings.txt generated_patch.c \
+	      bug1.ced *.so bug1.summary* core enforce_crash_*; \
 	rm -rf bug1.summaries logs
