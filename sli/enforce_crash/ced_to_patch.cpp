@@ -21,12 +21,14 @@ static bool debug_find_successors = false;
 static bool debug_receive_messages = false;
 static bool debug_send_messages = false;
 static bool debug_compile_cfg = false;
+static bool debug_side_conditions = false;
 #else
 #define debug_main_loop false
 #define debug_find_successors false
 #define debug_receive_messages false
 #define debug_send_messages false
 #define debug_compile_cfg false
+#define debug_side_conditions false
 #endif
 
 #undef LOUD
@@ -140,6 +142,7 @@ public:
 		FindSuccessors,
 		ReceivedMessage,
 		ExitThreads,
+		SideConditionFailed,
 	} phase;
 	
 	static C2PPhase *checkForThreadStart() {
@@ -155,12 +158,6 @@ public:
 	static C2PPhase *checkSideConditions() {
 		C2PPhase *work = new C2PPhase();
 		work->phase = CheckSideConditions;
-		return work;
-	}
-	static C2PPhase *checkSideConditions(const std::set<ThreadCfgLabel> &threadsProcessed) {
-		C2PPhase *work = new C2PPhase();
-		work->phase = CheckSideConditions;
-		work->_threads = threadsProcessed;
 		return work;
 	}
 	static C2PPhase *origInstrAndStash() {
@@ -200,21 +197,21 @@ public:
 		work->_escapeRip = escapeRip;
 		return work;
 	}
+	static C2PPhase *sideConditionFailed(const std::set<CrossLabel> threadsToExit) {
+		C2PPhase *work = new C2PPhase();
+		work->phase = SideConditionFailed;
+		work->_threadsToExit = threadsToExit;
+		return work;
+	}
 
 	~C2PPhase() {
 		if (phase == ExitThreads)
 			delete _exitTo;
 	}
 
-	/* Only for CheckSideConditions state */
-	const std::set<ThreadCfgLabel> &threadsProcessed() const {
-		assert(phase == CheckSideConditions);
-		return _threads;
-	}
-
-	/* Only for ExitThreads state */
+	/* Only for ExitThreads and SideConditionFailed states */
 	const std::set<CrossLabel> &threadsToExit() const {
-		assert(phase == ExitThreads);
+		assert(phase == ExitThreads || phase == SideConditionFailed);
 		return _threadsToExit;
 	}
 	C2PPhase *exitTo() {
@@ -239,7 +236,6 @@ public:
 	}
 
 	ThreadCfgLabel _thread;
-	std::set<ThreadCfgLabel> _threads;
 	std::set<CrossLabel> _threadsToExit;
 	const happensBeforeEdge *_edge;
 	C2PPhase *_exitTo;
@@ -334,7 +330,6 @@ __trivial_hash_function(const C2PRip &r)
 C2PPhase::C2PPhase(const C2PPhase &o)
 	: phase(o.phase),
 	  _thread(o._thread),
-	  _threads(o._threads),
 	  _threadsToExit(o._threadsToExit),
 	  _edge(o._edge),
 	  _escapeRip(o._escapeRip)
@@ -356,7 +351,7 @@ C2PPhase::operator==(const C2PPhase &o) const
 	case ReceiveMessages:
 		return true;
 	case CheckSideConditions:
-		return _threads == o._threads;
+		return true;
 	case OrigInstrAndStash:
 		return true;
 	case SendMessages:
@@ -367,6 +362,8 @@ C2PPhase::operator==(const C2PPhase &o) const
 		return _edge == o._edge;
 	case ExitThreads:
 		return _threadsToExit == o._threadsToExit && _escapeRip == o._escapeRip && *_exitTo == *o._exitTo;
+	case SideConditionFailed:
+		return _threadsToExit == o._threadsToExit;
 	}
 	abort();
 }
@@ -383,8 +380,6 @@ C2PPhase::hash() const
 	case ReceiveMessages:
 		return acc;
 	case CheckSideConditions:
-		for (auto it = _threads.begin(); it != _threads.end(); it++)
-			acc = acc * 679033 + it->hash() * 681673;
 		return acc;
 	case OrigInstrAndStash:
 		return acc;
@@ -398,6 +393,8 @@ C2PPhase::hash() const
 		acc = hash_set(_threadsToExit) + _exitTo->hash();
 		acc = acc * 12841 + _escapeRip * 14831;
 		return acc;
+	case SideConditionFailed:
+		return acc + hash_set(_threadsToExit);
 	}
 	abort();
 }
@@ -411,10 +408,9 @@ C2PPhase::mkName() const
 		return my_asprintf("StartThread(%s)",
 				   _thread.name());
 	case ReceiveMessages:
-		return my_asprintf("ReceiveMessages");
+		return strdup("ReceiveMessages");
 	case CheckSideConditions:
-		return my_asprintf("CheckSideConditions(%s)",
-				   name_set(_threads));
+		return strdup("CheckSideConditions");
 	case ExitThreads:
 		return my_asprintf("ExitThreads(%s, 0x%lx, %s)",
 				   name_set(_threadsToExit), _escapeRip, _exitTo->name());
@@ -426,6 +422,9 @@ C2PPhase::mkName() const
 		return strdup("FindSuccessors");
 	case ReceivedMessage:
 		return my_asprintf("ReceivedMessage(%d)", _edge->msg_id);
+	case SideConditionFailed:
+		return my_asprintf("SideConditionFailed(%s)",
+				   name_set(_threadsToExit));
 	}
 	abort();
 }
@@ -534,6 +533,10 @@ public:
 	Byte code;
 	static jcc_code nonzero;
 	static jcc_code zero;
+	jcc_code invert() const {
+		return jcc_code(code ^ 1);
+	}
+	jcc_code() : code(0xff) {}
 };
 
 jcc_code jcc_code::zero(0x84);
@@ -661,6 +664,17 @@ instrCmpImm32ToModrm(CfgLabelAllocator &allocLabel, int imm32, const ModRM &mrm)
 	return work;
 }
 
+static Instruction<C2PRip> *
+instrTestReg64Modrm64(CfgLabelAllocator &allocLabel, RegisterIdx reg, const ModRM &mrm)
+{
+	return instrNoImmediatesModrmOpcode(
+		allocLabel,
+		0x85,
+		RegisterOrOpcodeExtension(reg),
+		mrm,
+		Prefixes::rex_wide());
+}
+	
 static Instruction<C2PRip> *
 instrSkipRedZone(CfgLabelAllocator &allocLabel)
 {
@@ -1138,36 +1152,170 @@ origInstrAndStash(const C2PRip &c2p_rip,
 }
 
 static Instruction<C2PRip> *
+evalExpressionToReg(CfgLabelAllocator &allocLabel,
+		    unsigned thread,
+		    Instruction<C2PRip> *cursor,
+		    crashEnforcementData &ced,
+		    IRExpr *expr,
+		    RegisterIdx target)
+{
+	switch (expr->tag) {
+	case Iex_Get:
+		cursor = cursor->addDefault(
+			instrMovSlotToReg(
+				allocLabel,
+				ced.exprsToSlots(thread, expr),
+				target));
+		break;
+	default:
+		abort();
+	}
+	return cursor;
+}
+
+static Instruction<C2PRip> *
+evalBooleanCondition(CfgLabelAllocator &allocLabel,
+		     unsigned thread,
+		     Instruction<C2PRip> *cursor,
+		     crashEnforcementData &ced,
+		     const exprEvalPoint &expr,
+		     std::queue<reloc> &relocs,
+		     const C2PRip &escapeRip)
+{
+	switch (expr.e->tag) {
+	case Iex_Binop: {
+		jcc_code j_code;
+		const IRExprBinop *e = (const IRExprBinop *)expr.e;
+		switch (e->op) {
+		case Iop_CmpEQ64:
+			if (e->arg1->tag == Iex_Const) {
+				const IRExprConst *cnst = (const IRExprConst *)e->arg1;
+				cursor = evalExpressionToReg(allocLabel,
+							     thread,
+							     cursor,
+							     ced,
+							     e->arg2,
+							     RegisterIdx::RAX);
+				if (cnst->con->Ico.U64 == 0) {
+					cursor = cursor->addDefault(
+						instrTestReg64Modrm64(
+							allocLabel,
+							RegisterIdx::RAX,
+							ModRM::directRegister(RegisterIdx::RAX)));
+					j_code = jcc_code::zero;
+				} else {
+					abort();
+				}
+			} else {
+				abort();
+			}
+			break;
+		default:
+			abort();
+		}
+		if (!expr.invert)
+			j_code = j_code.invert();
+		cursor = cursor->addDefault(instrJcc(allocLabel, escapeRip,
+						     j_code, relocs));
+		break;
+	}
+	default:
+		abort();
+	}
+	return cursor;
+}
+
+static Instruction<C2PRip> *
 checkSideConditions(const C2PRip &c2p_rip,
 		    std::queue<reloc> &relocs,
 		    crashEnforcementData &ced,
 		    AncillaryData &ad,
 		    CfgLabelAllocator &allocLabel)
 {
-	std::set<ThreadCfgLabel> threadsProcessed(c2p_rip.phase->threadsProcessed());
-	std::map<ThreadCfgLabel, std::set<exprEvalPoint> > thingsToEval;
+	std::map<std::pair<unsigned, exprEvalPoint>,
+		 std::set<std::pair<CfgLabel, std::set<unsigned> > > > thingsToEval;
 
+	if (debug_side_conditions)
+		printf("%s(%s)\n", __func__, c2p_rip.name());
 	for (auto it = c2p_rip.crossMachineState.begin();
 	     it != c2p_rip.crossMachineState.end();
 	     it++) {
 		const ThreadCfgLabel &label(it->label);
-		if (threadsProcessed.count(label))
-			continue;
 		const std::set<exprEvalPoint> &thingsToEvalHere(ced.expressionEvalPoints[label]);
-		if (!thingsToEvalHere.empty())
-			thingsToEval[label] = thingsToEvalHere;
+		for (auto it2 = thingsToEvalHere.begin(); it2 != thingsToEvalHere.end(); it2++)
+			thingsToEval[std::pair<unsigned, exprEvalPoint>(label.thread, *it2)].
+				insert(std::pair<CfgLabel, std::set<unsigned> > (label.label,
+										 it->sent_messages));
 	}
 
 	if (thingsToEval.empty()) {
 		/* Nothing to do */
+		if (debug_side_conditions)
+			printf("\tNo side conditions to check\n");
 		return noopRelocation(allocLabel,
 				      C2PRip(c2p_rip.crossMachineState,
 					     C2PPhase::sendMessages()),
 				      relocs);
 	}
 
-	/* Not implemented yet */
-	abort();
+	if (debug_side_conditions) {
+		printf("\tExpressions to evaluate:\n");
+		for (auto it = thingsToEval.begin(); it != thingsToEval.end(); it++) {
+			printf("\t%d:%s%s -> {",
+			       it->first.first,
+			       it->first.second.invert ? "!" : "",
+			       nameIRExpr(it->first.second.e));
+			for (auto it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++) {
+				if (it2 != it->second.begin())
+					printf(", ");
+				printf("%s:{", it2->first.name());
+				for (auto it3 = it2->second.begin();
+				     it3 != it2->second.end();
+				     it3++) {
+					if (it3 != it2->second.begin())
+						printf(";");
+					printf("%d", *it3);
+				}
+				printf("}");
+			}
+			printf("}\n");
+		}
+	}
+
+	Instruction<C2PRip> *start;
+	Instruction<C2PRip> *cursor;
+	cursor = start = instrSkipRedZone(allocLabel);
+	cursor = cursor->addDefault(instrPushf(allocLabel));
+	cursor = cursor->addDefault(instrPushReg64(allocLabel, RegisterIdx::RAX));
+
+	for (auto it = thingsToEval.begin(); it != thingsToEval.end(); it++) {
+		C2PPhase *escapePhase;
+		std::set<CrossLabel> threadsToExit;
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+			threadsToExit.insert(CrossLabel(ThreadCfgLabel(it->first.first,
+								       it2->first),
+							it2->second));
+		escapePhase = C2PPhase::sideConditionFailed(threadsToExit);
+		cursor = evalBooleanCondition(allocLabel,
+					      it->first.first,
+					      cursor,
+					      ced,
+					      it->first.second,
+					      relocs,
+					      C2PRip(c2p_rip.crossMachineState,
+						     escapePhase));
+	}
+
+	cursor = cursor->addDefault(instrPopReg64(allocLabel, RegisterIdx::RAX));
+	cursor = cursor->addDefault(instrPopf(allocLabel));
+	cursor = cursor->addDefault(instrRestoreRedZone(allocLabel));
+	cursor->addDefault(noopRelocation(allocLabel,
+					  C2PRip(c2p_rip.crossMachineState,
+						 C2PPhase::sendMessages()),
+					  relocs));
+	return start;
 }
 
 static Instruction<C2PRip> *
@@ -1720,6 +1868,40 @@ receivedMessage(const C2PRip &c2p_rip,
 }
 
 static Instruction<C2PRip> *
+sideConditionFailed(const C2PRip &c2p_rip,
+		    std::queue<reloc> &relocs,
+		    crashEnforcementData &ced,
+		    AncillaryData &ad,
+		    CfgLabelAllocator &allocLabel)
+{
+	Instruction<C2PRip> *start;
+	Instruction<C2PRip> *cursor;
+	CFGNode *cn = ad.decodeUnderlyingInstr(c2p_rip.vexrip(ced));
+	/* This gets ridiculously confusing if you have multiple
+	   successors.  Ignore that case. */
+	assert(cn->successors.size() == 1);
+	unsigned long next_rip = cn->successors[0].rip.unwrap_vexrip();
+
+	cursor = start = instrPopReg64(allocLabel, RegisterIdx::RAX);
+	cursor = cursor->addDefault(instrPopf(allocLabel));
+	cursor = cursor->addDefault(instrRestoreRedZone(allocLabel));
+	/* Note that we go back to checkSideCondition() here.  That
+	   might mean re-evaluating some side conditions
+	   unnecessarily, which is potentially a bit inefficient, but
+	   calculating precisely which ones to redo is tricky and
+	   missing one is very bad.  Redoing everything is the least
+	   bad answer. */
+	cursor->addDefault(noopRelocation(allocLabel,
+					  C2PRip(c2p_rip.crossMachineState,
+						 C2PPhase::exitThreads(
+							 c2p_rip.phase->threadsToExit(),
+							 C2PPhase::checkSideConditions(),
+							 next_rip)),
+					  relocs));
+	return start;
+}
+
+static Instruction<C2PRip> *
 generateInstruction(const C2PRip &c2p_rip,
 		    std::queue<reloc> &relocs,
 		    crashEnforcementData &ced,
@@ -1748,6 +1930,8 @@ generateInstruction(const C2PRip &c2p_rip,
 		return exitThreads(c2p_rip, relocs, ced, ad, allocLabel);
 	case C2PPhase::ReceivedMessage:
 		return receivedMessage(c2p_rip, relocs, ced, ad, allocLabel);
+	case C2PPhase::SideConditionFailed:
+		return sideConditionFailed(c2p_rip, relocs, ced, ad, allocLabel);
 	}
 	abort();
 }
@@ -1965,7 +2149,6 @@ top:
 
 	if (debug_compile_cfg)
 		printf("Compile %s -> %x\n", root->label.name(), offset);
-
 	/* Emit the instruction itself. */
 	if (root->len != 0) {
 		result.addInstr(root->len, root->content);
