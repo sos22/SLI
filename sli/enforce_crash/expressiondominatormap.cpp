@@ -59,6 +59,8 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 				if (!evalable[predecessor].count(*it2))
 					takeIt = true;
 			}
+			if (predecessors.empty())
+				takeIt = true;
 			/* If it's evaluatable at *any* happens-before
 			   predecessor then we don't want to take it,
 			   because happens-before edges are always
