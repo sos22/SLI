@@ -1850,6 +1850,8 @@ printDetailedCfg(Instruction<C2PRip> *root, std::set<Instruction<C2PRip> *> &pri
 class CompiledCfg {
 	std::vector<unsigned char> content;
 	std::vector<LateRelocation *> lateRelocs;
+	std::vector<std::pair<unsigned long, unsigned> > entryPoints;
+	std::set<const happensBeforeEdge *> edges;
 public:
 	unsigned currentSize() const {
 		assert(content.size() < (1u << 31));
@@ -1867,7 +1869,36 @@ public:
 		for (unsigned x = 0; x < sz; x++)
 			content[x + offset] = ((const unsigned char *)bytes)[x];
 	}
+	void addEntryPoint(unsigned long rip, unsigned offset) {
+		entryPoints.push_back(std::pair<unsigned long, unsigned>(rip, offset));
+	}
+	void addEdge(const happensBeforeEdge *e) {
+		edges.insert(e);
+	}
 	void dumpToFile(FILE *f) const {
+		unsigned msg_id_base;
+		unsigned msg_id_end;
+		if (edges.empty()) {
+			msg_id_base = msg_id_end = 0;
+		} else {
+			auto it = edges.begin();
+			msg_id_base = msg_id_end = (*it)->msg_id;
+			for (it++; it != edges.end(); it++) {
+				if ((*it)->msg_id < msg_id_base)
+					msg_id_base = (*it)->msg_id;
+				if ((*it)->msg_id > msg_id_end)
+					msg_id_end = (*it)->msg_id;
+			}
+		}
+		fprintf(f, "#define MESSAGE_ID_BASE %d\n", msg_id_base);
+		fprintf(f, "#define MESSAGE_ID_END %d\n", msg_id_end + 1);
+		for (auto it = edges.begin(); it != edges.end(); it++)
+			for (unsigned x = 0; x < (*it)->content.size(); x++)
+				fprintf(f,
+					"static unsigned long __msg_%d_slot_%d;\n",
+					(*it)->msg_id,
+					x);
+		fprintf(f, "\n");
 		fprintf(f, "static const unsigned char __ident_content[] = {\n");
 		for (unsigned x = 0; x < content.size(); x++) {
 			fprintf(f, "0x%02x", content[x]);
@@ -1877,13 +1908,32 @@ public:
 				fprintf(f, "\n");
 		}
 		fprintf(f, "};\n\n");
+		fprintf(f, "static struct patch_entry_point __ident_entry_points[] = {\n");
+		for (auto it = entryPoints.begin(); it != entryPoints.end(); it++)
+			fprintf(f,
+				"\t{.orig_rip = 0x%lx, .offset_in_patch = 0x%x},\n",
+				it->first,
+				it->second);
+		fprintf(f, "};\n\n");
+		fprintf(f, "static const struct relocation __ident_relocations[] = {\n");
+		for (auto it = lateRelocs.begin(); it != lateRelocs.end(); it++) {
+			LateRelocation *r = *it;
+			fprintf(f,
+				"\t{.offset = %d, .size = %d, .addend = %d, .relative = %d, .target = %s},\n",
+				r->offset,
+				r->size,
+				r->relative ? -r->nrImmediateBytes - r->size : 0,
+				r->relative,
+				r->target);
+		}
+		fprintf(f, "};\n\n");
 		fprintf(f, "static struct patch ident = {\n");
 		fprintf(f, "\t.relocations = __ident_relocations,\n");
 		fprintf(f, "\t.nr_relocations = %zd,\n", lateRelocs.size());
 		fprintf(f, "\t.trans_table = __ident_trans_table,\n");
 		fprintf(f, "\t.nr_translations = %d,\n", 0);
 		fprintf(f, "\t.entry_points = __ident_entry_points,\n");
-		fprintf(f, "\t.nr_entry_points = %d,\n", 0);
+		fprintf(f, "\t.nr_entry_points = %zd,\n", entryPoints.size());
 		fprintf(f, "\t.content = __ident_content,\n");
 		fprintf(f, "\t.content_size = %zd\n", content.size());
 		fprintf(f, "};\n\n");
@@ -2037,7 +2087,11 @@ compileCfg(CFG<C2PRip> *cfg,
 		}
 	}
 	
-	
+	for (auto it = roots.begin(); it != roots.end(); it++) {
+		auto it2 = offsetInCompiledPatch.find(it->second);
+		assert(it2 != offsetInCompiledPatch.end());
+		result.addEntryPoint(it->first.unwrap_vexrip(), it2->second);
+	}
 }
 
 int
@@ -2090,6 +2144,10 @@ main(int argc, char *argv[])
 
 	CompiledCfg result;
 	compileCfg(cfg, patchPoints, result);
+
+	for (auto it = ced.happensBeforePoints.begin(); it != ced.happensBeforePoints.end(); it++)
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+			result.addEdge(*it2);
 
 	char tmpfile[] = "enforce_crash_XXXXXX";
 	int tmp_fd = mkstemp(tmpfile);
