@@ -1,35 +1,35 @@
 all: bug1.so
 
-bug1.so: ../../ced_to_patch ./bug1 ./bug1.ced ../../sli/enforce_crash/patch_core.c
-	../../ced_to_patch ./bug1 ./bug1.ced ../../ $@
+%.so: ../../ced_to_patch % %.ced ../../sli/enforce_crash/patch_core.c
+	../../ced_to_patch $* $*.ced ../../ $@
 
-bug1.ced: bug1.summary.canon4  ../../enforce_crash ./bug1 bug1.types.canon bug1.types.canon.idx bug1.bcg
-	../../enforce_crash ./bug1 bug1.types.canon bug1.bcg $@ $<
+%.ced: %.summary.canon4  ../../enforce_crash % %.types.canon %.types.canon.idx %.bcg
+	../../enforce_crash $* $*.types.canon $*.bcg $@ $<
 
-bug1.summary.canon4: ../../canonicalise_crash_summary0 bug1.summary.canon3
+%.summary.canon4: ../../canonicalise_crash_summary0 %.summary.canon3
 	$^ $@
 
-bug1.summary.canon3: ../../canonicalise_crash_summary3 bug1.summary.canon2
+%.summary.canon3: ../../canonicalise_crash_summary3 %.summary.canon2
 	$^ $@
 
-bug1.summary.canon2: ../../canonicalise_crash_summary2 bug1.summary.canon0
+%.summary.canon2: ../../canonicalise_crash_summary2 %.summary.canon0
 	$^ $@
 
-bug1.summary.canon1: ../../canonicalise_crash_summary bug1.summary.canon0
+%.summary.canon1: ../../canonicalise_crash_summary %.summary.canon0
 	$^ $@
 
-bug1.summary.canon0: ../../canonicalise_crash_summary0 bug1.summary 
+%.summary.canon0: ../../canonicalise_crash_summary0 %.summary 
 	$^ $@
 
-bug1.summary: bug1.summaries
-	! [ -e bug1.summaries/1 ] && [ -e bug1.summaries/0 ] && cp bug1.summaries/0 bug1.summary
+%.summary: %.summaries
+	! [ -e $</1 ] && [ -e $</0 ] && cp $</0 $@
 
-bug1.summaries: ../../minimal_direct ./bug1 ./bug1.types.canon ./bug1.types.canon.idx bug1.bcg
-	rm -rf bug1.summaries crash_summaries induction.log logs generated_patch.c static.db && \
+%.summaries: ../../minimal_direct % %.types.canon %.types.canon.idx %.bcg
+	rm -rf $@ crash_summaries induction.log logs generated_patch.c static.db && \
 	mkdir logs && \
 	mkdir crash_summaries && \
-	../../minimal_direct ./bug1 ./bug1.types.canon ./bug1.bcg && \
-	mv crash_summaries bug1.summaries
+	../../minimal_direct $* $*.types.canon $*.bcg && \
+	mv crash_summaries $*.summaries
 
 %.types: % ./build_types_table.sh
 	./build_types_table.sh ./$<
@@ -49,5 +49,5 @@ bug1: bug1.c
 
 clean:
 	rm -f bug1 *.idx *.canon *.types *.bcg *~ static.db timings.txt generated_patch.c \
-	      bug1.ced *.so bug1.summary* core enforce_crash_*; \
-	rm -rf bug1.summaries logs
+	      *.ced *.so *.summary* core enforce_crash_*; \
+	rm -rf *.summaries logs
