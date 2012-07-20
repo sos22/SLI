@@ -655,7 +655,7 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 		debug_dump(initialRoots, "\t");
 	}
 
-	trimExcessNodes(oracle, nodes, targetNodes, maxPathLength1);
+	trimExcessNodes(oracle, nodes, targetNodes, maxPathLength2);
 
 	findRoots(nodes, targetNodes, out);
 	if (debug_exploration) {
