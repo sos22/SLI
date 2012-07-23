@@ -264,6 +264,7 @@ static void
 unrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 		    std::set<CFGNode *> &instrs,
 		    const std::set<const CFGNode *> &targetInstrs,
+		    std::set<CFGNode *> &roots,
 		    int maxPathLength)
 {
 	std::map<const CFGNode *, std::set<std::pair<CFGNode *, int> > > predecessorMap;
@@ -350,6 +351,8 @@ unrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 				}
 		
 				instrs.insert(new_node);
+			} else {
+				roots.insert(cycle_edge_end);
 			}
 		}
 	}
@@ -625,7 +628,7 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	VexRip dominator;
 
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
-	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength1, maxPathLength2);
+	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength2, maxPathLength2);
 
 	if (debug_exploration) {
 		printf("Initial ripsToCFGNodes table:\n");
@@ -639,20 +642,17 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++)
 		nodes.insert(it->second);
 
+	findRoots(nodes, targetNodes, out);
 	if (debug_exploration) {
-		std::set<CFGNode *> roots;
-		findRoots(nodes, targetNodes, roots);
 		printf("Roots before loop unrolling:\n");
-		debug_dump(roots, "\t");
+		debug_dump(out, "\t");
 	}
 
-	unrollAndCycleBreak(allocLabel, nodes, targetNodes, maxPathLength2);
+	unrollAndCycleBreak(allocLabel, nodes, targetNodes, out, maxPathLength2);
 
 	if (debug_exploration) {
-		std::set<CFGNode *> initialRoots;
-		findRoots(nodes, targetNodes, initialRoots);
 		printf("Before trimming:\n");
-		debug_dump(initialRoots, "\t");
+		debug_dump(out, "\t");
 	}
 
 	trimExcessNodes(oracle, nodes, targetNodes, maxPathLength2);
