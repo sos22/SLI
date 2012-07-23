@@ -9,7 +9,7 @@ all: bug1.so
 %.summary.canon4: ../../canonicalise_crash_summary0 %.summary.canon3
 	$^ $@
 
-%.summary.canon3: ../../canonicalise_crash_summary3 %.summary.canon2
+%.summary.canon3: ../../canonicalise_crash_summary3 %.summary.canon2 % %.types.canon
 	$^ $@
 
 %.summary.canon2: ../../canonicalise_crash_summary2 %.summary.canon0

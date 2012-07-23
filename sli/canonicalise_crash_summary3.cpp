@@ -1250,7 +1250,7 @@ class LoadCanonicaliser : public GarbageCollected<LoadCanonicaliser, &ir_heap> {
 		{}
 	};
 public:
-	LoadCanonicaliser(CrashSummary *cs);
+	LoadCanonicaliser(Oracle *oracle, CrashSummary *cs);
 	CrashSummary *canonicalise(CrashSummary *cs);
 	CrashSummary *decanonicalise(CrashSummary *cs);
 
@@ -1265,7 +1265,7 @@ public:
 	NAMED_CLASS
 };
 
-LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
+LoadCanonicaliser::LoadCanonicaliser(Oracle *oracle, CrashSummary *cs)
 {
 	int cntr = 0;
 
@@ -1278,6 +1278,12 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 		bool rewriteNewStates() const { return false; }
 	} findAllLoads;
 	transformCrashSummary(cs, findAllLoads);
+
+	std::vector<std::pair<unsigned, VexRip> > origins(cs->loadMachine->origin);
+	origins.insert(origins.end(),
+		       cs->storeMachine->origin.begin(),
+		       cs->storeMachine->origin.end());
+	Oracle::RegisterAliasingConfiguration rac(oracle->getAliasingConfiguration(origins));
 
 	/* We can degrade a load X to a free variable if we can
 	 * disambiguate every LD wrt X.  i.e. a LD X can be converted
@@ -1297,11 +1303,12 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 		     it++) {
 			if (*it == k)
 				continue;
-			if (definitelyEqual(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations)) {
+			if (definitelyEqual(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
 				assert(!definitelyAliasLds.count(*it));
 				definitelyAliasLds.insert(*it);
 				assert((*it)->ty == k->ty);
-			} else if (!definitelyNotEqual(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations)) {
+			} else if (rac.ptrsMightAlias(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack()) &&
+				   !definitelyNotEqual(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
 				allowSubst = false;
 				/* If *it and k might alias then
 				   neither *it nor k can be converted
@@ -1386,28 +1393,31 @@ main(int argc, char *argv[])
 
 	summary = readBugReport(argv[1], &first_line);
 	CfgDecode decode;
+	MachineState *ms = MachineState::readELFExec(argv[2]);
+	Thread *thr = ms->findThread(ThreadId(1));
 	decode.addMachine(summary->loadMachine);
 	decode.addMachine(summary->storeMachine);
-	VexPtr<OracleInterface> oracle(new DummyOracle(summary, &decode));
+	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[3]));
 
 	summary = internCrashSummary(summary);
 
-	VexPtr<LoadCanonicaliser, &ir_heap> lc(new LoadCanonicaliser(summary));
+	VexPtr<LoadCanonicaliser, &ir_heap> lc(new LoadCanonicaliser(oracle, summary));
 	summary = lc->canonicalise(summary);
-	summary = nonFunctionalSimplifications(summary, oracle, ALLOW_GC);
+	VexPtr<OracleInterface> oracleI(oracle);
+	summary = nonFunctionalSimplifications(summary, oracleI, ALLOW_GC);
 	if (!TIMEOUT)
-		summary = functionalSimplifications(summary, oracle, ALLOW_GC);
+		summary = functionalSimplifications(summary, oracleI, ALLOW_GC);
 	if (!TIMEOUT)
 		summary = nonFunctionalSimplifications(
 			summary,
-			oracle,
+			oracleI,
 			ALLOW_GC);
 	summary = lc->decanonicalise(summary);
 
 	if (TIMEOUT)
 		fprintf(stderr, "timeout processing %s\n", argv[1]);
 
-	FILE *f = fopen(argv[2], "w");
+	FILE *f = fopen(argv[4], "w");
 	fprintf(f, "%s\n", first_line);
 	printCrashSummary(summary, f);
 	fclose(f);
