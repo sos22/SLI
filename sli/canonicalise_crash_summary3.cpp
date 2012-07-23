@@ -24,7 +24,45 @@ static bool debug_functional_underspecification = false;
 
 #define underspecExpression ((IRExpr *)3)
 
-typedef std::set<threadAndRegister, threadAndRegister::fullCompare> reg_set_t;
+class reg_or_free_var : public Named {
+	char *mkName() const {
+		if (is_reg)
+			return strdup(reg.name());
+		else
+			return strdup(fv.name());
+	}
+public:
+	bool is_reg;
+	threadAndRegister reg;
+	MemoryAccessIdentifier fv;
+	reg_or_free_var(const threadAndRegister &_reg)
+		: is_reg(true), reg(_reg), fv(MemoryAccessIdentifier::uninitialised())
+	{}
+	reg_or_free_var(const MemoryAccessIdentifier &_fv)
+		: is_reg(false), reg(threadAndRegister::invalid()), fv(_fv)
+	{}
+	bool operator<(const reg_or_free_var &o) const {
+		if (is_reg < o.is_reg)
+			return true;
+		if (o.is_reg < is_reg)
+			return false;
+		if (is_reg)
+			return threadAndRegister::fullCompare()(reg, o.reg);
+		else
+			return fv < o.fv;
+	}
+};
+static bool
+operator==(const IRExpr *a, const reg_or_free_var &b)
+{
+	if (a->tag == Iex_Get && b.is_reg && threadAndRegister::fullEq( ((IRExprGet *)a)->reg, b.reg))
+		return true;
+	if (a->tag == Iex_FreeVariable && !b.is_reg && ((IRExprFreeVariable *)a)->id == b.fv)
+		return true;
+	return false;
+}
+
+typedef std::set<reg_or_free_var> reg_set_t;
 
 class TimeoutTimer : public Timer {
 public:
@@ -40,7 +78,11 @@ enumRegisters(const IRExpr *input, reg_set_t *out)
 	struct : public IRExprTransformer {
 		reg_set_t *out;
 		IRExpr *transformIex(IRExprGet *ieg) {
-			out->insert(ieg->reg);
+			out->insert(reg_or_free_var(ieg->reg));
+			return ieg;
+		}
+		IRExpr *transformIex(IRExprFreeVariable *ieg) {
+			out->insert(reg_or_free_var(ieg->id));
 			return ieg;
 		}
 	} doit;
@@ -98,21 +140,26 @@ operator -=(std::set<t, comp> &out, const std::set<t, comp> &a)
 }
 
 struct _findRegisterMultiplicity : public StateMachineTransformer {
-	const threadAndRegister &r;
+	const reg_or_free_var &r;
 	int multiplicity;
 	IRExpr *transformIex(IRExprGet *ieg) {
-		if (threadAndRegister::fullEq(ieg->reg, r))
+		if (ieg == r)
+			multiplicity++;
+		return ieg;
+	}
+	IRExpr *transformIex(IRExprFreeVariable *ieg) {
+		if (ieg == r)
 			multiplicity++;
 		return ieg;
 	}
 	bool rewriteNewStates() const { return false; }
-	_findRegisterMultiplicity(const threadAndRegister &_r)
+	_findRegisterMultiplicity(const reg_or_free_var &_r)
 		: r(_r), multiplicity(0)
 	{}
 };
 
 static int
-findRegisterMultiplicity(const IRExpr *iex, const threadAndRegister &r)
+findRegisterMultiplicity(const IRExpr *iex, const reg_or_free_var &r)
 {
 	_findRegisterMultiplicity doit(r);
 	doit.doit(const_cast<IRExpr *>(iex));
@@ -121,7 +168,7 @@ findRegisterMultiplicity(const IRExpr *iex, const threadAndRegister &r)
 
 
 static int
-findRegisterMultiplicity(const CrashSummary *sm, const threadAndRegister &r)
+findRegisterMultiplicity(const CrashSummary *sm, const reg_or_free_var &r)
 {
 	_findRegisterMultiplicity doit(r);
 	transformCrashSummary(const_cast<CrashSummary *>(sm), doit);
@@ -221,7 +268,7 @@ removeRedundantClauses(IRExpr *verificationCondition,
  * anything, and so we might as well remove it. */
 static bool
 clauseUnderspecified(IRExpr *clause,
-		     const std::map<threadAndRegister, int, threadAndRegister::fullCompare> &mult)
+		     const std::map<reg_or_free_var, int> &mult)
 {
 	switch (clause->tag) {
 	case Iex_Unop: {
@@ -342,7 +389,14 @@ clauseUnderspecified(IRExpr *clause,
 	}
 	case Iex_Get: {
 		IRExprGet *ieg = (IRExprGet *)clause;
-		auto it = mult.find(ieg->reg);
+		auto it = mult.find(reg_or_free_var(ieg->reg));
+		assert(it != mult.end());
+		assert(it->second != 0);
+		return it->second == 1;
+	}
+	case Iex_FreeVariable: {
+		IRExprFreeVariable *ieg = (IRExprFreeVariable *)clause;
+		auto it = mult.find(reg_or_free_var(ieg->id));
 		assert(it != mult.end());
 		assert(it->second != 0);
 		return it->second == 1;
@@ -379,8 +433,6 @@ clauseUnderspecified(IRExpr *clause,
 		}
 		return true;
 	}
-	case Iex_FreeVariable:
-		return false;
 	}
 	fprintf(stderr, "%s: ", __func__);
 	ppIRExpr(clause, stderr);
@@ -394,7 +446,7 @@ removeUnderspecifiedClauses(IRExpr *input,
 			    IRExpr *underspecifiedResult,
 			    bool *done_something)
 {
-	std::map<threadAndRegister, int, threadAndRegister::fullCompare> mult;
+	std::map<reg_or_free_var, int> mult;
 	reg_set_t allRegisters;
 	enumRegisters(input, &allRegisters);
 	for (auto it = allRegisters.begin(); it != allRegisters.end(); it++)
@@ -568,7 +620,7 @@ substituteEqualities(CrashSummary *input,
 	if (debug_subst_equalities)
 		printf("Calc multiplicities:\n");
 	auto it = things_we_can_remove.begin();
-	threadAndRegister bestReg(*it);
+	reg_or_free_var bestReg(*it);
 	int bestMultiplicity = findRegisterMultiplicity(input, bestReg);
 	if (debug_subst_equalities)
 		printf("\t%s -> %d\n", bestReg.name(), bestMultiplicity);
@@ -620,47 +672,41 @@ substituteEqualities(CrashSummary *input,
 		bool targetIsOnLeft = false;
 		bool targetIsOnRight = false;
 		for (int i = 0; i < nr_left_terms; i++) {
-			if (left_terms[i]->tag == Iex_Get &&
-			    threadAndRegister::fullEq(((IRExprGet *)left_terms[i])->reg, bestReg)) {
+			if (left_terms[i] == bestReg) {
 				assert(!targetIsOnLeft);
 				targetIsOnLeft = true;
 			}
 			if (left_terms[i]->tag == Iex_Unop &&
 			    ((IRExprUnop *)left_terms[i])->op == Iop_Neg64 &&
-			    ((IRExprUnop *)left_terms[i])->arg->tag == Iex_Get &&
-			    threadAndRegister::fullEq(((IRExprGet *)((IRExprUnop *)left_terms[i])->arg)->reg, bestReg)) {
+			    ((IRExprUnop *)left_terms[i])->arg == bestReg) {
 				assert(!targetIsOnRight);
 				targetIsOnRight = true;
 			}
 		}
 		for (int i = 0; i < nr_right_terms; i++) {
-			if (right_terms[i]->tag == Iex_Get &&
-			    threadAndRegister::fullEq(((IRExprGet *)right_terms[i])->reg, bestReg)) {
+			if (right_terms[i] == bestReg) {
 				assert(!targetIsOnRight);
 				targetIsOnRight = true;
 			}
 			if (right_terms[i]->tag == Iex_Unop &&
 			    ((IRExprUnop *)right_terms[i])->op == Iop_Neg64 &&
-			    ((IRExprUnop *)right_terms[i])->arg->tag == Iex_Get &&
-			    threadAndRegister::fullEq(((IRExprGet *)((IRExprUnop *)right_terms[i])->arg)->reg, bestReg)) {
+			    ((IRExprUnop *)right_terms[i])->arg == bestReg) {
 				assert(!targetIsOnLeft);
 				targetIsOnLeft = true;
 			}
 		}
 		if (!targetIsOnLeft && !targetIsOnRight)
 			continue;
-		assert(targetIsOnLeft || targetIsOnRight);
+		assert(!targetIsOnLeft || !targetIsOnRight);
 
 		rewriteClause = clause;
 		IRExprAssociative *res = IRExpr_Associative(nr_left_terms + nr_right_terms, Iop_Add64);
 		for (int i = 0; i < nr_left_terms; i++) {
-			if (left_terms[i]->tag == Iex_Get &&
-			    threadAndRegister::fullEq(((IRExprGet *)left_terms[i])->reg, bestReg))
+			if (left_terms[i] == bestReg)
 				continue;
 			if (left_terms[i]->tag == Iex_Unop &&
 			    ((IRExprUnop *)left_terms[i])->op == Iop_Neg64 &&
-			    ((IRExprUnop *)left_terms[i])->arg->tag == Iex_Get &&
-			    threadAndRegister::fullEq(((IRExprGet *)((IRExprUnop *)left_terms[i])->arg)->reg, bestReg))
+			    ((IRExprUnop *)left_terms[i])->arg == bestReg)
 				continue;
 			res->contents[res->nr_arguments++] =
 				targetIsOnLeft ?
@@ -668,13 +714,11 @@ substituteEqualities(CrashSummary *input,
 				left_terms[i];
 		}
 		for (int i = 0; i < nr_right_terms; i++) {
-			if (right_terms[i]->tag == Iex_Get &&
-			    threadAndRegister::fullEq(((IRExprGet *)right_terms[i])->reg, bestReg))
+			if (right_terms[i] == bestReg)
 				continue;
 			if (right_terms[i]->tag == Iex_Unop &&
 			    ((IRExprUnop *)right_terms[i])->op == Iop_Neg64 &&
-			    ((IRExprUnop *)right_terms[i])->arg->tag == Iex_Get &&
-			    threadAndRegister::fullEq(((IRExprGet *)((IRExprUnop *)right_terms[i])->arg)->reg, bestReg))
+			    ((IRExprUnop *)right_terms[i])->arg == bestReg)
 				continue;
 			res->contents[res->nr_arguments++] =
 				!targetIsOnLeft ?
@@ -708,9 +752,14 @@ substituteEqualities(CrashSummary *input,
 	struct _ : public StateMachineTransformer {
 		IRExpr *rewriteClause;
 		IRExpr *rewriteResult;
-		const threadAndRegister &rewriteReg;
+		const reg_or_free_var &rewriteReg;
 		IRExpr *transformIex(IRExprGet *ieg) {
-			if (threadAndRegister::fullEq(ieg->reg, rewriteReg))
+			if (ieg == rewriteReg)
+				return coerceTypes(ieg->ty, rewriteResult);
+			return ieg;
+		}
+		IRExpr *transformIex(IRExprFreeVariable *ieg) {
+			if (ieg == rewriteReg)
 				return coerceTypes(ieg->ty, rewriteResult);
 			return ieg;
 		}
@@ -725,7 +774,7 @@ substituteEqualities(CrashSummary *input,
 		bool rewriteNewStates() const { return false; }
 		_(IRExpr *_rewriteClause,
 		  IRExpr *_rewriteResult,
-		  const threadAndRegister &_rewriteReg)
+		  const reg_or_free_var &_rewriteReg)
 			: rewriteClause(_rewriteClause),
 			  rewriteResult(_rewriteResult),
 			  rewriteReg(_rewriteReg)
