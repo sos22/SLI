@@ -1210,6 +1210,169 @@ functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
 	return summary;
 }
 
+class LoadCanonicaliser : public GarbageCollected<LoadCanonicaliser, &ir_heap> {
+	std::vector<std::pair<IRExprLoad *, IRExprFreeVariable *> > canonMap;
+
+	StateMachine *canonicalise(StateMachine *sm);
+	IRExpr *canonicalise(IRExpr *iex);
+	StateMachine *decanonicalise(StateMachine *sm);
+	IRExpr *decanonicalise(IRExpr *iex);
+	class canon_transformer : public StateMachineTransformer {
+		LoadCanonicaliser *_this;
+		IRExpr *transformIex(IRExprLoad *e) {
+			for (auto it = _this->canonMap.begin();
+			     it != _this->canonMap.end();
+			     it++)
+				if (it->first == e)
+					return it->second;
+			return StateMachineTransformer::transformIex(e);
+		}
+		bool rewriteNewStates() const { return false; }
+	public:
+		canon_transformer(LoadCanonicaliser *__this)
+			: _this(__this)
+		{}
+	};
+	class decanon_transformer : public StateMachineTransformer {
+		LoadCanonicaliser *_this;
+		IRExpr *transformIex(IRExprFreeVariable *e) {
+			for (auto it = _this->canonMap.begin();
+			     it != _this->canonMap.end();
+			     it++)
+				if (it->second == e)
+					return it->first;
+			return StateMachineTransformer::transformIex(e);
+		}
+		bool rewriteNewStates() const { return false; }
+	public:
+		decanon_transformer(LoadCanonicaliser *__this)
+			: _this(__this)
+		{}
+	};
+public:
+	LoadCanonicaliser(CrashSummary *cs);
+	CrashSummary *canonicalise(CrashSummary *cs);
+	CrashSummary *decanonicalise(CrashSummary *cs);
+
+	void visit(HeapVisitor &hv) {
+		for (auto it = canonMap.begin();
+		     it != canonMap.end();
+		     it++) {
+			hv(it->first);
+			hv(it->second);
+		}
+	}
+	NAMED_CLASS
+};
+
+LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
+{
+	int cntr = 0;
+
+	struct : public StateMachineTransformer {
+		std::set<IRExprLoad *> res;
+		IRExpr *transformIex(IRExprLoad *iex) {
+			res.insert(iex);
+			return StateMachineTransformer::transformIex(iex);
+		}
+		bool rewriteNewStates() const { return false; }
+	} findAllLoads;
+	transformCrashSummary(cs, findAllLoads);
+
+	/* We can degrade a load X to a free variable if we can
+	 * disambiguate every LD wrt X.  i.e. a LD X can be converted
+	 * to a free variable if, for every other LD Y, either X
+	 * definitely aliases with Y (in which case X and Y must have
+	 * the same free variable) or X and Y definitely don't alias.
+	 */
+	std::set<IRExprLoad *> pendingLoads(findAllLoads.res);
+	while (!pendingLoads.empty()) {
+		IRExprLoad *k = *pendingLoads.begin();
+
+		bool allowSubst = true;
+		std::set<IRExprLoad *> definitelyAliasLds;
+		definitelyAliasLds.insert(k);
+		for (auto it = findAllLoads.res.begin();
+		     allowSubst && it != findAllLoads.res.end();
+		     it++) {
+			if (*it == k)
+				continue;
+			if (definitelyEqual(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations)) {
+				assert(!definitelyAliasLds.count(*it));
+				definitelyAliasLds.insert(*it);
+				assert((*it)->ty == k->ty);
+			} else if (!definitelyNotEqual(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations)) {
+				allowSubst = false;
+				/* If *it and k might alias then
+				   neither *it nor k can be converted
+				   to free variables. */
+				pendingLoads.erase(*it);
+				pendingLoads.erase(k);
+			}
+		}
+		if (!allowSubst)
+			continue;
+		IRExprFreeVariable *fv = new IRExprFreeVariable(
+			MemoryAccessIdentifier(CfgLabel::uninitialised(),
+					       -1,
+					       cntr++), k->ty, false);
+		for (auto it = definitelyAliasLds.begin();
+		     it != definitelyAliasLds.end();
+		     it++) {
+			pendingLoads.erase(*it);
+			canonMap.push_back(std::pair<IRExprLoad *, IRExprFreeVariable *>(k, fv));
+		}
+	}
+}
+
+StateMachine *
+LoadCanonicaliser::canonicalise(StateMachine *sm)
+{
+	canon_transformer t(this);
+	return t.transform(sm);
+}
+
+IRExpr *
+LoadCanonicaliser::canonicalise(IRExpr *iex)
+{
+	canon_transformer t(this);
+	return t.doit(iex);
+}
+
+StateMachine *
+LoadCanonicaliser::decanonicalise(StateMachine *sm)
+{
+	decanon_transformer t(this);
+	return t.transform(sm);
+}
+
+IRExpr *
+LoadCanonicaliser::decanonicalise(IRExpr *iex)
+{
+	decanon_transformer t(this);
+	return t.doit(iex);
+}
+
+CrashSummary *
+LoadCanonicaliser::canonicalise(CrashSummary *cs)
+{
+	return new CrashSummary(canonicalise(cs->loadMachine),
+				canonicalise(cs->storeMachine),
+				canonicalise(cs->verificationCondition),
+				cs->macroSections,
+				cs->aliasing);
+}
+
+CrashSummary *
+LoadCanonicaliser::decanonicalise(CrashSummary *cs)
+{
+	return new CrashSummary(decanonicalise(cs->loadMachine),
+				decanonicalise(cs->storeMachine),
+				decanonicalise(cs->verificationCondition),
+				cs->macroSections,
+				cs->aliasing);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1227,6 +1390,10 @@ main(int argc, char *argv[])
 	decode.addMachine(summary->storeMachine);
 	VexPtr<OracleInterface> oracle(new DummyOracle(summary, &decode));
 
+	summary = internCrashSummary(summary);
+
+	VexPtr<LoadCanonicaliser, &ir_heap> lc(new LoadCanonicaliser(summary));
+	summary = lc->canonicalise(summary);
 	summary = nonFunctionalSimplifications(summary, oracle, ALLOW_GC);
 	if (!TIMEOUT)
 		summary = functionalSimplifications(summary, oracle, ALLOW_GC);
@@ -1235,6 +1402,7 @@ main(int argc, char *argv[])
 			summary,
 			oracle,
 			ALLOW_GC);
+	summary = lc->decanonicalise(summary);
 
 	if (TIMEOUT)
 		fprintf(stderr, "timeout processing %s\n", argv[1]);
