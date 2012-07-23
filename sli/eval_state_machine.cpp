@@ -413,9 +413,11 @@ struct EvalPathConsumer {
 	}
 	bool needsAccAssumptions;
 	bool useInitialMemoryValues;
+	bool noImplicitBadPtrs;
 	EvalPathConsumer()
 		: needsAccAssumptions(false),
-		  useInitialMemoryValues(true)
+		  useInitialMemoryValues(true),
+		  noImplicitBadPtrs(false)
 	{}
 };
 
@@ -518,11 +520,12 @@ private:
 		StateMachine *thisMachine,
 		StateMachineSideEffect *smse,
 		bool useInitialMemoryValues,
+		bool noImplicitBadPtrs,
 		NdChooser &chooser,
 		OracleInterface *oracle,
 		const AllowableOptimisations &opt);
-	bool expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOptimisations &opt);
-	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const AllowableOptimisations &opt);
+	bool expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const AllowableOptimisations &opt);
+	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const AllowableOptimisations &opt);
 
 public:
 	bool advance(CfgDecode &decode,
@@ -537,6 +540,7 @@ public:
 						  StateMachine *rootMachine,
 						  NdChooser &chooser,
 						  bool useInitialMemoryValues,
+						  bool noImplicitBadPtrs,
 						  OracleInterface *oracle,
 						  const AllowableOptimisations &opt);
 	enum bigStepResult { bsr_crash, bsr_survive, bsr_failed };
@@ -544,6 +548,7 @@ public:
 					      StateMachine *rootMachine,
 					      bigStepResult preferred_result,
 					      bool useInitialMemoryValues,
+					      bool noImplicitBadPtrs,
 					      NdChooser &chooser,
 					      OracleInterface *oracle,
 					      const AllowableOptimisations &opt);
@@ -579,7 +584,7 @@ public:
 };
 
 bool
-EvalContext::expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOptimisations &opt)
+EvalContext::expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const AllowableOptimisations &opt)
 {
 	if (TIMEOUT)
 		return true;
@@ -659,7 +664,7 @@ EvalContext::expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOp
 
 	if (res == 0) {
 		assumption = e;
-		if (accumulatedAssumption)
+		if (addToAccConstraint && accumulatedAssumption)
 			accumulatedAssumption =
 				simplifyIRExpr(
 					IRExpr_Binop(
@@ -670,7 +675,7 @@ EvalContext::expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOp
 		return true;
 	} else {
 		assumption = e2;
-		if (accumulatedAssumption)
+		if (addToAccConstraint && accumulatedAssumption)
 			accumulatedAssumption =
 				simplifyIRExpr(
 					IRExpr_Binop(
@@ -685,12 +690,13 @@ EvalContext::expressionIsTrue(IRExpr *exp, NdChooser &chooser, const AllowableOp
 }
 
 bool
-EvalContext::evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const AllowableOptimisations &opt)
+EvalContext::evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const AllowableOptimisations &opt)
 {
 	return expressionIsTrue(IRExpr_Binop(
 					Iop_CmpEQ64,
 					exp1,
 					exp2),
+				addToAccConstraint,
 				chooser,
 				opt);
 }
@@ -724,6 +730,7 @@ EvalContext::evalStateMachineSideEffect(CfgDecode &decode,
 					StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
 					bool useInitialMemoryValues,
+					bool noImplicitBadPtrs,
 					NdChooser &chooser,
 					OracleInterface *oracle,
 					const AllowableOptimisations &opt)
@@ -739,7 +746,7 @@ EvalContext::evalStateMachineSideEffect(CfgDecode &decode,
 			Iop_Or1,
 			IRExpr_Unop(Iop_BadPtr, addr),
 			dereferencesBadPointerIf(addr));
-		if (expressionIsTrue(v, chooser, opt))
+		if (expressionIsTrue(v, !noImplicitBadPtrs, chooser, opt))
 			return esme_escape;
 	}
 
@@ -786,7 +793,7 @@ EvalContext::evalStateMachineSideEffect(CfgDecode &decode,
 
 			if (!oracle->memoryAccessesMightAlias(decode, opt, smsel, smses))
 				continue;
-			if (evalExpressionsEqual(smses->addr, addr, chooser, opt)) {
+			if (evalExpressionsEqual(smses->addr, addr, true, chooser, opt)) {
 				satisfier = smses;
 				satisfierMachine = it->first;
 				break;
@@ -831,6 +838,7 @@ EvalContext::evalStateMachineSideEffect(CfgDecode &decode,
 				    Iop_Or1,
 				    smseaf->value,
 				    dereferencesBadPointerIf(smseaf->value)),
+			    true,
 			    chooser, opt)) {
 			if (smseaf->reflectsActualProgram)
 				return esme_escape;
@@ -872,6 +880,7 @@ EvalContext::smallStepEvalStateMachine(CfgDecode &decode,
 				       StateMachine *rootMachine,
 				       NdChooser &chooser,
 				       bool useInitialMemoryValues,
+				       bool noImplicitBadPtrs,
 				       OracleInterface *oracle,
 				       const AllowableOptimisations &opt)
 {
@@ -892,6 +901,7 @@ EvalContext::smallStepEvalStateMachine(CfgDecode &decode,
 						   rootMachine,
 						   sme->sideEffect,
 						   useInitialMemoryValues,
+						   noImplicitBadPtrs,
 						   chooser,
 						   oracle,
 						   opt);
@@ -908,7 +918,7 @@ EvalContext::smallStepEvalStateMachine(CfgDecode &decode,
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
-		if (expressionIsTrue(smb->condition, chooser, opt))
+		if (expressionIsTrue(smb->condition, true, chooser, opt))
 			currentState = smb->trueTarget;
 		else
 			currentState = smb->falseTarget;
@@ -928,6 +938,7 @@ EvalContext::bigStepEvalStateMachine(CfgDecode &decode,
 				     StateMachine *rootMachine,
 				     bigStepResult preferred_result,
 				     bool useInitialMemoryValues,
+				     bool noImplicitBadPtrs,
 				     NdChooser &chooser,
 				     OracleInterface *oracle,
 				     const AllowableOptimisations &opt)
@@ -938,6 +949,7 @@ EvalContext::bigStepEvalStateMachine(CfgDecode &decode,
 						  rootMachine,
 						  chooser,
 						  useInitialMemoryValues,
+						  noImplicitBadPtrs,
 						  oracle,
 						  opt);
 		switch (res) {
@@ -1032,8 +1044,13 @@ EvalContext::evalSideEffect(CfgDecode &decode, StateMachine *sm, OracleInterface
 		EvalContext newContext(*this);
 		evalStateMachineSideEffectRes res =
 			newContext.evalStateMachineSideEffect(decode,
-							      sm, smse, consumer.useInitialMemoryValues,
-							      chooser, oracle, opt);
+							      sm,
+							      smse,
+							      consumer.useInitialMemoryValues,
+							      consumer.noImplicitBadPtrs,
+							      chooser,
+							      oracle,
+							      opt);
 		switch (res) {
 		case esme_normal:
 			pendingStates.push_back(newContext);
@@ -1876,6 +1893,7 @@ findRemoteMacroSectionsState::advanceWriteMachine(CfgDecode &decode,
 				writeMachine,
 				chooser,
 				true,
+				false,
 				oracle,
 				opt)) {
 		case EvalContext::ssr_crash:
@@ -1952,6 +1970,7 @@ findRemoteMacroSections(const VexPtr<StateMachine, &ir_heap> &readMachine,
 					readMachine,
 					sectionStart ? EvalContext::bsr_crash : EvalContext::bsr_survive,
 					true,
+					false,
 					chooser,
 					oracle,
 					opt)) {
@@ -2054,6 +2073,7 @@ fixSufficient(const VexPtr<StateMachine, &ir_heap> &writeMachine,
 					probeMachine,
 					EvalContext::bsr_survive,
 					true,
+					false,
 					chooser,
 					oracle,
 					opt)) {
@@ -2107,6 +2127,7 @@ findHappensBeforeRelations(
 		bool escape(IRExpr *, IRExpr *) { return true; }
 	} consumer;
 	consumer.needsAccAssumptions = true;
+	consumer.noImplicitBadPtrs = true;
 	consumer.newCondition = IRExpr_Const(IRConst_U1(0));
 	consumer.opt = &opt;
 	consumer.useInitialMemoryValues = false;
