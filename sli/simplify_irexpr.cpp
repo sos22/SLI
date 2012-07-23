@@ -2228,6 +2228,34 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 					}
 				}
 
+				/* Another special case: const =
+				   rsp:t1 - rsp:t2 is always false, if
+				   t1 != t2 and we have
+				   assumePrivateStacks set. */
+				if (opt.assumePrivateStack() &&
+				    l->tag == Iex_Const &&
+				    r->tag == Iex_Associative) {
+					IRExprAssociative *ra = (IRExprAssociative *)r;
+					if (ra->op == Iop_Add64 &&
+					    ra->nr_arguments == 2 &&
+					    ra->contents[0]->tag == Iex_Get &&
+					    ra->contents[1]->tag == Iex_Unop) {
+						IRExprGet *ra0 = (IRExprGet *)ra->contents[0];
+						IRExprUnop *ra1 = (IRExprUnop *)ra->contents[1];
+						if (ra0->reg.isReg() &&
+						    ra0->reg.asReg() == OFFSET_amd64_RSP &&
+						    ra1->op == Iop_Neg64 &&
+						    ra1->arg->tag == Iex_Get) {
+							IRExprGet *ra1a = (IRExprGet *)ra1->arg;
+							if (ra1a->reg.isReg() &&
+							    ra1a->reg.asReg() == OFFSET_amd64_RSP &&
+							    ra1a->reg.tid() != ra0->reg.tid()) {
+								return IRExpr_Const(IRConst_U1(0));
+							}
+						}
+					}
+				}
+					    
 			}
 
 			/* Another special case: if we have k == -X +
