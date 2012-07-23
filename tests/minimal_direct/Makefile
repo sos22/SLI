@@ -40,6 +40,7 @@ all: bug1.so
 %.types.canon: % %.types ../../canonicalise_types_table
 	../../canonicalise_types_table ./$< $<.types $@
 
+.PRECIOUS: bug1.types bug1.bcg bug2.types bug2.bcg
 %.types.canon.idx: % %.types.canon ../../build_types_db
 	rm -f $@ ; \
 	../../build_types_db ./$< $<.types.canon $@
