@@ -177,6 +177,98 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 }
 
 static bool
+exprUsesRegister(IRExpr *e, const threadAndRegister &reg)
+{
+	struct : public IRExprTransformer {
+		const threadAndRegister *reg;
+		bool res;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			if (threadAndRegister::fullEq(*reg, ieg->reg))
+				res = true;
+			return ieg;
+		}
+	} doit;
+	doit.reg = &reg;
+	doit.res = false;
+	doit.doit(e);
+	return doit.res;
+}
+
+static bool
+instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcementData &ced)
+{
+	{
+		auto it = ced.happensBeforePoints.find(instr->rip);
+		if (it != ced.happensBeforePoints.end()) {
+			for (auto it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++) {
+				happensBeforeEdge *hbe = *it2;
+				if (hbe->before.tid == (int)instr->rip.thread &&
+				    hbe->before.where == instr->rip.label) {
+					for (auto it3 = hbe->content.begin();
+					     it3 != hbe->content.end();
+					     it3++) {
+						if (threadAndRegister::fullEq((*it3)->reg,expr->reg))
+							return true;
+					}
+				}
+			}
+		}
+	}
+
+	{
+		auto it = ced.expressionEvalPoints.find(instr->rip);
+		if (it != ced.expressionEvalPoints.end()) {
+			for (auto it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++) {
+				if (exprUsesRegister(it2->e, expr->reg))
+					return true;
+			}
+		}
+	}
+	return false;
+}
+
+static void
+optimiseHBContent(crashEnforcementData &ced,
+		  ThreadCfgDecode &decode)
+{
+	std::set<happensBeforeEdge *> hbEdges;
+	for (auto it = ced.happensBeforePoints.begin();
+	     it != ced.happensBeforePoints.end();
+	     it++)
+		hbEdges.insert(it->second.begin(), it->second.end());
+	bool progress = true;
+	while (progress) {
+		progress = false;
+		for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
+			happensBeforeEdge *hbe = *it;
+			for (unsigned x = 0; x < hbe->content.size(); ) {
+				bool must_keep = false;
+				std::queue<Instruction<ThreadCfgLabel> *> pending;
+				pending.push(decode(ThreadCfgLabel(hbe->after.tid, hbe->after.where)));
+				while (!must_keep && !pending.empty()) {
+					Instruction<ThreadCfgLabel> *l = pending.front();
+					pending.pop();
+					if (instrUsesExpr(l, hbe->content[x], ced))
+						must_keep = true;
+					for (unsigned y = 0; y < l->successors.size(); l++)
+						pending.push(l->successors[y].instr);
+				}
+				if (must_keep) {
+					x++;
+				} else {
+					hbe->content.erase(hbe->content.begin() + x);
+					progress = true;
+				}
+			}
+		}
+	}
+}
+
+static bool
 buildCED(DNF_Conjunction &c,
 	 std::map<unsigned, CfgLabel> &rootsCfg,
 	 StateMachine *probeMachine,
@@ -195,6 +287,7 @@ buildCED(DNF_Conjunction &c,
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
 	*out = crashEnforcementData(neededExpressions, rootsCfg, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
+	optimiseHBContent(*out, cfg);
 	return true;
 }
 
