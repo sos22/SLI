@@ -123,6 +123,7 @@ public:
    relationships. */
 class predecessorMapT : public instrToInstrSetMap {
 public:
+	predecessorMapT() {}
 	predecessorMapT(ThreadCfgDecode &cfg) {
 		for (auto it = cfg.begin();
 		     it != cfg.end();
@@ -146,6 +147,7 @@ public:
 	/* happensBefore[i] -> the set of all instructions ordered after i */
 	instrToInstrSetMap happensAfter;
 	happensAfterMapT(DNF_Conjunction &c, ThreadCfgDecode &cfg);
+	happensAfterMapT() {}
 	void print(FILE *f) {
 		fprintf(f, "before:\n");
 		happensBefore.print(f);
@@ -158,74 +160,12 @@ public:
  * complete before that instruction, based purely on the control flow
  * graph. */
 class instructionDominatorMapT : public instrToInstrSetMap {
-	friend class expressionDominatorMapT;
-	instructionDominatorMapT() {}
+public:
 	instructionDominatorMapT(ThreadCfgDecode &cfg,
 				 predecessorMapT &predecessors,
 				 happensAfterMapT &happensAfter);
+	instructionDominatorMapT() {}
 };
-
-class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > {
-	class trans1 : public IRExprTransformer {
-		std::set<unsigned> &availThreads;
-		IRExpr *transformIex(IRExprGet *e) {
-			if (!availThreads.count(e->reg.tid()))
-				isGood = false;
-			return NULL;
-		}
-		IRExpr *transformIex(IRExprHappensBefore *) {
-			isGood = false;
-			return NULL;
-		}
-	public:
-		bool isGood;
-		trans1(std::set<unsigned> &_availThreads)
-			: availThreads(_availThreads), isGood(true)
-		{}
-	};
-	static bool evaluatable(IRExpr *e, std::set<unsigned> &availThreads) {
-		trans1 t(availThreads);
-		t.doit(e);
-		return t.isGood;
-	}
-	expressionDominatorMapT() {};
-public:
-	instructionDominatorMapT idom;
-	expressionDominatorMapT(DNF_Conjunction &, ThreadCfgDecode &);
-	void prettyPrint(FILE *f) const;
-};
-
-class simulationSlotT {
-public:
-	int idx;
-	simulationSlotT(int _idx) : idx(_idx) {}
-	simulationSlotT() : idx(-10000) {}
-	bool operator<(const simulationSlotT &o) const { return idx < o.idx; }
-};
-
-template <typename src, typename dest> void
-setToVector(const std::set<src> &in, std::vector<dest> &out)
-{
-	out.reserve(in.size());
-	for (typename std::set<src>::iterator it = in.begin();
-	     it != in.end();
-	     it++)
-		out.push_back(*it);
-}
-
-template <typename t> void
-visit_set(std::set<t> &s, HeapVisitor &hv)
-{
-	/* Ugg, can't just visit a set of GC'd
-	   pointers because it rearranges them, so
-	   have to do it via a vector. */
-	std::vector<t> n;
-	setToVector(s, n);
-	visit_container(n, hv);
-	s.clear();
-	for (auto it2 = n.begin(); it2 != n.end(); it2++)
-		s.insert(*it2);
-}
 
 class expressionStashMapT : public std::map<ThreadCfgLabel, std::set<IRExpr *> >,
 			    private GcCallback<&ir_heap> {
@@ -336,6 +276,73 @@ public:
 		}
 	}
 };
+
+class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > {
+	class trans1 : public IRExprTransformer {
+		std::set<threadAndRegister, threadAndRegister::fullCompare> &availRegs;
+		IRExpr *transformIex(IRExprGet *e) {
+			if (!availRegs.count(e->reg))
+				isGood = false;
+			return NULL;
+		}
+		IRExpr *transformIex(IRExprHappensBefore *) {
+			isGood = false;
+			return NULL;
+		}
+	public:
+		bool isGood;
+		trans1(std::set<threadAndRegister, threadAndRegister::fullCompare> &_availRegs)
+			: availRegs(_availRegs),
+			  isGood(true)
+		{}
+	};
+	static bool evaluatable(IRExpr *e,
+				std::set<threadAndRegister, threadAndRegister::fullCompare> &availRegs) {
+		trans1 t(availRegs);
+		t.doit(e);
+		return t.isGood;
+	}
+public:
+	expressionDominatorMapT() {};
+	expressionDominatorMapT(DNF_Conjunction &,
+				expressionStashMapT &,
+				instructionDominatorMapT &,
+				predecessorMapT &,
+				happensAfterMapT &);
+	void prettyPrint(FILE *f) const;
+};
+
+class simulationSlotT {
+public:
+	int idx;
+	simulationSlotT(int _idx) : idx(_idx) {}
+	simulationSlotT() : idx(-10000) {}
+	bool operator<(const simulationSlotT &o) const { return idx < o.idx; }
+};
+
+template <typename src, typename dest> void
+setToVector(const std::set<src> &in, std::vector<dest> &out)
+{
+	out.reserve(in.size());
+	for (typename std::set<src>::iterator it = in.begin();
+	     it != in.end();
+	     it++)
+		out.push_back(*it);
+}
+
+template <typename t> void
+visit_set(std::set<t> &s, HeapVisitor &hv)
+{
+	/* Ugg, can't just visit a set of GC'd
+	   pointers because it rearranges them, so
+	   have to do it via a vector. */
+	std::vector<t> n;
+	setToVector(s, n);
+	visit_container(n, hv);
+	s.clear();
+	for (auto it2 = n.begin(); it2 != n.end(); it2++)
+		s.insert(*it2);
+}
 
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
 	happensBeforeEdge(const MemoryAccessIdentifier &_before,
@@ -755,7 +762,7 @@ class happensBeforeMapT : public std::map<ThreadCfgLabel, std::set<happensBefore
 public:
 	happensBeforeMapT() {}
 	happensBeforeMapT(DNF_Conjunction &c,
-			  expressionDominatorMapT &exprDominatorMap,
+			  instructionDominatorMapT &idom,
 			  ThreadCfgDecode &cfg,
 			  expressionStashMapT &exprStashPoints,
 			  int &next_hb_id)
@@ -765,7 +772,7 @@ public:
 			bool invert = c[x].first;
 			if (e->tag == Iex_HappensBefore) {
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
-				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, exprDominatorMap.idom,
+				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, idom,
 									       cfg, exprStashPoints, next_hb_id++);
 				(*this)[ThreadCfgLabel(hbe->before.tid, hbe->before.where)].insert(hbe);
 				(*this)[ThreadCfgLabel(hbe->after.tid, hbe->after.where)].insert(hbe);
@@ -932,7 +939,11 @@ class crashEnforcementData {
 	}
 public:
 	crashEnforcementRoots roots;
+	happensAfterMapT happensBefore;
+	predecessorMapT predecessorMap;
+	instructionDominatorMapT idom;
 	expressionStashMapT exprStashPoints;
+	expressionDominatorMapT exprDominatorMap;
 	happensBeforeMapT happensBeforePoints;
 	slotMapT exprsToSlots;
 	expressionEvalMapT expressionEvalPoints;
@@ -941,7 +952,6 @@ public:
 
 	crashEnforcementData(std::set<IRExpr *> &neededExpressions,
 			     std::map<unsigned, CfgLabel> &_roots,
-			     expressionDominatorMapT &exprDominatorMap,
 			     StateMachine *probeMachine,
 			     StateMachine *storeMachine,
 			     DNF_Conjunction &conj,
@@ -949,8 +959,12 @@ public:
 			     int &next_hb_id,
 			     simulationSlotT &next_slot)
 		: roots(_roots),
+		  happensBefore(conj, cfg),
+		  predecessorMap(cfg),
+		  idom(cfg, predecessorMap, happensBefore),
 		  exprStashPoints(neededExpressions, probeMachine, storeMachine, _roots),
-		  happensBeforePoints(conj, exprDominatorMap, cfg, exprStashPoints, next_hb_id),
+		  exprDominatorMap(conj, exprStashPoints, idom, predecessorMap, happensBefore),
+		  happensBeforePoints(conj, idom, cfg, exprStashPoints, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
 		  threadExitPoints(cfg, happensBeforePoints)

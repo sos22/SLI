@@ -2,17 +2,11 @@
 #include "enforce_crash.hpp"
 
 expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
-						 ThreadCfgDecode &cfg)
+						 expressionStashMapT &stash,
+						 instructionDominatorMapT &idom,
+						 predecessorMapT &pred,
+						 happensAfterMapT &happensBefore)
 {
-	happensAfterMapT happensBefore(c, cfg);
-
-	predecessorMapT pred(cfg);
-
-	/* Figure out where the various instructions become
-	 * available. */
-	instructionDominatorMapT idom(cfg, pred, happensBefore);
-	this->idom = idom;
-
 	/* First, figure out where the various expressions could in
 	   principle be evaluated. */
 	expressionDominatorMapT evalable;
@@ -20,15 +14,22 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	     it != idom.end();
 	     it++) {
 		evalable[it->first].clear();
-		for (unsigned x = 0; x < c.size(); x++) {
-			std::set<unsigned> availThreads;
-			for (auto it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++)
-				availThreads.insert((*it2)->rip.thread);
-			if (evaluatable(c[x].second, availThreads))
-				evalable[it->first].insert(c[x]);
+		std::set<threadAndRegister, threadAndRegister::fullCompare> availRegs;
+		for (auto it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++) {
+			Instruction<ThreadCfgLabel> *dominating = *it2;
+			std::set<IRExpr *> stashed(stash[dominating->rip]);
+			for (auto it = stashed.begin();
+			     it != stashed.end();
+			     it++) {
+				if ( (*it)->tag == Iex_Get)
+					availRegs.insert( ((IRExprGet *)*it)->reg );
+			}
 		}
+		for (unsigned x = 0; x < c.size(); x++)
+			if (evaluatable(c[x].second, availRegs))
+				evalable[it->first].insert(c[x]);
 	}
 
 	/* Just find all of the things which are evaluatable at X but

@@ -194,11 +194,7 @@ buildCED(DNF_Conjunction &c,
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	/* Figure out where the various expressions should be
-	 * evaluated. */
-	expressionDominatorMapT exprDominatorMap(c, cfg);
-
-	*out = crashEnforcementData(neededExpressions, rootsCfg, exprDominatorMap, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
+	*out = crashEnforcementData(neededExpressions, rootsCfg, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
 	return true;
 }
 
