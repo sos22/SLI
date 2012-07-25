@@ -533,6 +533,8 @@ public:
 	Byte code;
 	static jcc_code nonzero;
 	static jcc_code zero;
+	static jcc_code less_or_equal;
+	static jcc_code greater;
 	jcc_code invert() const {
 		return jcc_code(code ^ 1);
 	}
@@ -541,6 +543,8 @@ public:
 
 jcc_code jcc_code::zero(0x84);
 jcc_code jcc_code::nonzero(0x85);
+jcc_code jcc_code::less_or_equal(0x8e);
+jcc_code jcc_code::greater(0x8f);
 
 /* Basic instructions */
 static Instruction<C2PRip> *
@@ -582,9 +586,16 @@ instrPushImm32(CfgLabelAllocator &allocLabel, int val)
 }
 
 static Instruction<C2PRip> *
-instrMovModrmToRegister(CfgLabelAllocator &allocLabel, const ModRM &rm, RegisterIdx reg)
+instrMovModrmToRegister(CfgLabelAllocator &allocLabel, const ModRM &rm, RegisterIdx reg, IRType ty)
 {
-	return instrNoImmediatesModrmOpcode(allocLabel, 0x8B, reg, rm, Prefixes::rex_wide());
+	switch (ty) {
+	case Ity_I32:
+		return instrNoImmediatesModrmOpcode(allocLabel, 0x8B, reg, rm, Prefixes());
+	case Ity_I64:
+		return instrNoImmediatesModrmOpcode(allocLabel, 0x8B, reg, rm, Prefixes::rex_wide());
+	default:
+		abort();
+	}
 }
 
 static Instruction<C2PRip> *
@@ -663,6 +674,28 @@ instrCmpImm32ToModrm(CfgLabelAllocator &allocLabel, int imm32, const ModRM &mrm)
 	work->emitDword(imm32);
 	return work;
 }
+static Instruction<C2PRip> *
+instrCmpModrmToRegister(CfgLabelAllocator &allocLabel, const ModRM &mrm, RegisterIdx reg, IRType ty)
+{
+	unsigned opcode;
+	switch (ty) {
+	case Ity_I8:
+		opcode = 0x38;
+		break;
+	case Ity_I32:
+	case Ity_I64:
+		opcode = 0x39;
+		break;
+	default:
+		abort();
+	}
+	return instrNoImmediatesModrmOpcode(
+		allocLabel,
+		opcode,
+		RegisterOrOpcodeExtension(reg),
+		mrm,
+		ty == Ity_I64 ? Prefixes::rex_wide() : Prefixes());
+}
 
 static Instruction<C2PRip> *
 instrTestReg64Modrm64(CfgLabelAllocator &allocLabel, RegisterIdx reg, const ModRM &mrm)
@@ -699,9 +732,9 @@ instrMovRegToSlot(CfgLabelAllocator &allocLabel, RegisterIdx offset, simulationS
 }
 
 static Instruction<C2PRip> *
-instrMovSlotToReg(CfgLabelAllocator &allocLabel, simulationSlotT slot, RegisterIdx offset)
+instrMovSlotToReg(CfgLabelAllocator &allocLabel, simulationSlotT slot, RegisterIdx offset, IRType ty)
 {
-	Instruction<C2PRip> *work = instrMovModrmToRegister(allocLabel, modrmForSlot(slot), offset);
+	Instruction<C2PRip> *work = instrMovModrmToRegister(allocLabel, modrmForSlot(slot), offset, ty);
 	addGsPrefix(work);
 	return work;
 }
@@ -832,6 +865,8 @@ getJccCode(CFGNode *instr)
 	switch (instrOpcode(instr)) {
 	case 0xf84:
 		return jcc_code::zero;
+	case 0xf8e:
+		return jcc_code::less_or_equal;
 	default:
 		abort();
 	}
@@ -943,7 +978,7 @@ static Instruction<C2PRip> *
 startThread(const C2PRip &c2p_rip,
 	    std::queue<reloc> &relocs,
 	    crashEnforcementData &ced,
-	    AncillaryData &ad,
+	    AncillaryData &,
 	    CfgLabelAllocator &allocLabel)
 {
 	const ThreadCfgLabel &newThread(c2p_rip.phase->threadToStart());
@@ -990,7 +1025,7 @@ static Instruction<C2PRip> *
 receiveMessages(const C2PRip &c2p_rip,
 		std::queue<reloc> &relocs,
 		crashEnforcementData &ced,
-		AncillaryData &ad,
+		AncillaryData &,
 		CfgLabelAllocator &allocLabel)
 {
 	if (debug_receive_messages)
@@ -1119,6 +1154,7 @@ origInstrAndStash(const C2PRip &c2p_rip,
 			cursor = cursor->addDefault(instrMovRegToSlot(allocLabel, instrModrmReg(underlyingInstr), *it));
 		break;
 	}
+	case 0x81: /* cmp const, modrm */
 	case 0x83: /* cmp reg, modrm */
 		/* These can generate stashes, but that's not
 		 * currently implemented */
@@ -1127,6 +1163,8 @@ origInstrAndStash(const C2PRip &c2p_rip,
 		break;
 
 	case 0x89: /* mov reg, modrm */
+	case 0x90: /* nop */
+	case 0x98: /* cltq */
 	case 0xc7: /* mov imm, modrm */
 		/* These shouldn't generate any stashes */
 		assert(stashSlots.empty());
@@ -1135,11 +1173,12 @@ origInstrAndStash(const C2PRip &c2p_rip,
 
 	case 0xf84: /* Conditional branches.  These get special
 		       handling in findSuccessors() */
+	case 0xf8e:
 		cursor = start = instrNoop(allocLabel);
 		break;
 	default:
-		fail("don't know how to stash for opcode 0x%x\n",
-		     instrOpcode(underlyingInstr));
+		fail("don't know how to stash for opcode 0x%x in %s",
+		     instrOpcode(underlyingInstr), c2p_rip.name());
 	}
 
 	/* Done; move on to next phase. */
@@ -1149,6 +1188,46 @@ origInstrAndStash(const C2PRip &c2p_rip,
 				      C2PPhase::checkSideConditions()),
 			       relocs));
 	return start;
+}
+
+static Instruction<C2PRip> *evalExpressionToReg(CfgLabelAllocator &allocLabel,
+						unsigned thread,
+						Instruction<C2PRip> *cursor,
+						crashEnforcementData &ced,
+						IRExpr *expr,
+						RegisterIdx target);
+
+static Instruction<C2PRip> *
+expressionToModrm(CfgLabelAllocator &allocLabel,
+		  unsigned thread,
+		  Instruction<C2PRip> *cursor,
+		  crashEnforcementData &ced,
+		  IRExpr *expr,
+		  RegisterIdx target,
+		  ModRM *out)
+{
+	if (expr->tag == Iex_Associative &&
+	    ((IRExprAssociative *)expr)->op == Iop_Add64 &&
+	    ((IRExprAssociative *)expr)->nr_arguments == 2 &&
+	    ((IRExprAssociative *)expr)->contents[0]->tag == Iex_Const &&
+	    (int)((IRExprConst *)((IRExprAssociative *)expr)->contents[0])->con->Ico.U64 ==
+			(long)((IRExprConst *)((IRExprAssociative *)expr)->contents[0])->con->Ico.U64) {
+		cursor = evalExpressionToReg(allocLabel,
+					     thread,
+					     cursor,
+					     ced,
+					     ((IRExprAssociative *)expr)->contents[1],
+					     target);
+		*out = ModRM::memAtRegisterPlusOffset(
+			target,
+			(int)((IRExprConst *)((IRExprAssociative *)expr)->contents[0])->con->Ico.U64);
+		return cursor;
+	}
+
+	switch (expr->tag) {
+	default:
+		abort();
+	}
 }
 
 static Instruction<C2PRip> *
@@ -1165,8 +1244,61 @@ evalExpressionToReg(CfgLabelAllocator &allocLabel,
 			instrMovSlotToReg(
 				allocLabel,
 				ced.exprsToSlots(thread, expr),
-				target));
+				target,
+				expr->type()));
 		break;
+	case Iex_Load: {
+		ModRM mrm(ModRM::absoluteAddress(0));
+		cursor = expressionToModrm(
+			allocLabel,
+			thread,
+			cursor,
+			ced,
+			((IRExprLoad *)expr)->addr,
+			target,
+			&mrm);
+		cursor = cursor->addDefault(
+			instrMovModrmToRegister(
+				allocLabel,
+				mrm,
+				target,
+				expr->type()));
+		break;
+	}
+	default:
+		abort();
+	}
+	return cursor;
+}
+
+static Instruction<C2PRip> *
+compareExpressionToReg(CfgLabelAllocator &allocLabel,
+		       unsigned thread,
+		       Instruction<C2PRip> *cursor,
+		       crashEnforcementData &ced,
+		       IRExpr *expr,
+		       RegisterIdx target,
+		       RegisterIdx scratch)
+{
+	switch (expr->tag) {
+	case Iex_Load: {
+		ModRM mrm(ModRM::absoluteAddress(0));
+		cursor = expressionToModrm(
+			allocLabel,
+			thread,
+			cursor,
+			ced,
+			((IRExprLoad *)expr)->addr,
+			scratch,
+			&mrm);
+		cursor = cursor->addDefault(
+			instrCmpModrmToRegister(
+				allocLabel,
+				mrm,
+				target,
+				expr->type()));
+		break;
+	}
 	default:
 		abort();
 	}
@@ -1180,7 +1312,9 @@ evalBooleanCondition(CfgLabelAllocator &allocLabel,
 		     crashEnforcementData &ced,
 		     const exprEvalPoint &expr,
 		     std::queue<reloc> &relocs,
-		     const C2PRip &escapeRip)
+		     const C2PRip &escapeRip,
+		     RegisterIdx scratch1,
+		     RegisterIdx scratch2)
 {
 	switch (expr.e->tag) {
 	case Iex_Binop: {
@@ -1195,13 +1329,13 @@ evalBooleanCondition(CfgLabelAllocator &allocLabel,
 							     cursor,
 							     ced,
 							     e->arg2,
-							     RegisterIdx::RAX);
+							     scratch1);
 				if (cnst->con->Ico.U64 == 0) {
 					cursor = cursor->addDefault(
 						instrTestReg64Modrm64(
 							allocLabel,
-							RegisterIdx::RAX,
-							ModRM::directRegister(RegisterIdx::RAX)));
+							scratch1,
+							ModRM::directRegister(scratch1)));
 					j_code = jcc_code::zero;
 				} else {
 					abort();
@@ -1209,6 +1343,22 @@ evalBooleanCondition(CfgLabelAllocator &allocLabel,
 			} else {
 				abort();
 			}
+			break;
+		case Iop_CmpEQ32:
+			cursor = evalExpressionToReg(allocLabel,
+						     thread,
+						     cursor,
+						     ced,
+						     e->arg1,
+						     scratch1);
+			cursor = compareExpressionToReg(allocLabel,
+							thread,
+							cursor,
+							ced,
+							e->arg2,
+							scratch1,
+							scratch2);
+			j_code = jcc_code::zero;
 			break;
 		default:
 			abort();
@@ -1289,6 +1439,7 @@ checkSideConditions(const C2PRip &c2p_rip,
 	cursor = start = instrSkipRedZone(allocLabel);
 	cursor = cursor->addDefault(instrPushf(allocLabel));
 	cursor = cursor->addDefault(instrPushReg64(allocLabel, RegisterIdx::RAX));
+	cursor = cursor->addDefault(instrPushReg64(allocLabel, RegisterIdx::RDX));
 
 	for (auto it = thingsToEval.begin(); it != thingsToEval.end(); it++) {
 		C2PPhase *escapePhase;
@@ -1305,9 +1456,12 @@ checkSideConditions(const C2PRip &c2p_rip,
 					      it->first.second,
 					      relocs,
 					      C2PRip(c2p_rip.crossMachineState,
-						     escapePhase));
+						     escapePhase),
+					      RegisterIdx::RAX,
+					      RegisterIdx::RDX);
 	}
 
+	cursor = cursor->addDefault(instrPopReg64(allocLabel, RegisterIdx::RDX));
 	cursor = cursor->addDefault(instrPopReg64(allocLabel, RegisterIdx::RAX));
 	cursor = cursor->addDefault(instrPopf(allocLabel));
 	cursor = cursor->addDefault(instrRestoreRedZone(allocLabel));
@@ -1379,7 +1533,7 @@ sendMessages(const C2PRip &c2p_rip,
 					allocLabel,
 					vex_asprintf("(unsigned long)&__msg_%d_slot_%d", hb->msg_id, x),
 					RegisterIdx::RSI));
-			cursor = cursor->addDefault(instrMovSlotToReg(allocLabel, slot, RegisterIdx::RDI));
+			cursor = cursor->addDefault(instrMovSlotToReg(allocLabel, slot, RegisterIdx::RDI, Ity_I64));
 			cursor = cursor->addDefault(instrMovRegisterToModrm(
 							    allocLabel,
 							    RegisterIdx::RDI,
@@ -1811,7 +1965,8 @@ receivedMessage(const C2PRip &c2p_rip,
 			instrMovModrmToRegister(
 				allocLabel,
 				ModRM::memAtRegister(RegisterIdx::RAX),
-				RegisterIdx::RAX));
+				RegisterIdx::RAX,
+				Ity_I64));
 		cursor = cursor->addDefault(
 			instrMovRegToSlot(
 				allocLabel,
@@ -1882,7 +2037,8 @@ sideConditionFailed(const C2PRip &c2p_rip,
 	assert(cn->successors.size() == 1);
 	unsigned long next_rip = cn->successors[0].rip.unwrap_vexrip();
 
-	cursor = start = instrPopReg64(allocLabel, RegisterIdx::RAX);
+	cursor = start = instrPopReg64(allocLabel, RegisterIdx::RDX);
+	cursor = cursor->addDefault(instrPopReg64(allocLabel, RegisterIdx::RAX));
 	cursor = cursor->addDefault(instrPopf(allocLabel));
 	cursor = cursor->addDefault(instrRestoreRedZone(allocLabel));
 	/* Note that we go back to checkSideCondition() here.  That
