@@ -243,6 +243,90 @@ analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
 	return true;
 }
 
+/* Munge a side condition to make it easier to evaluate.  This is
+   allowed to slightly change the value of the condition if that makes
+   the eval much easier, but shouldn't push things too far. */
+/* Generally, taking a true expression and making it false is more
+   dangerous than taking a false expression and making it true */
+static IRExpr *
+heuristicSimplify(IRExpr *e)
+{
+	bool done_something = false;
+	if (e->tag != Iex_Binop ||
+	    ((IRExprBinop *)e)->op != Iop_CmpEQ64)
+		return e;
+
+	/* First rule: 0 == a - b -> a == b */
+	IRExprBinop *ieb = (IRExprBinop *)e;
+	if (ieb->arg1->tag == Iex_Const &&
+	    ((IRExprConst *)ieb->arg1)->con->Ico.U64 == 0 &&
+	    ieb->arg2->tag == Iex_Associative &&
+	    ((IRExprAssociative *)ieb->arg2)->op == Iop_Add64 &&
+	    ((IRExprAssociative *)ieb->arg2)->nr_arguments == 2 &&
+	    ((IRExprAssociative *)ieb->arg2)->contents[1]->tag == Iex_Unop &&
+	    ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->op == Iop_Neg64) {
+		ieb->arg1 = ((IRExprAssociative *)ieb->arg2)->contents[0];
+		ieb->arg2 = ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->arg;
+		done_something = true;
+	}
+
+	/* Second rule: f(a) == f(b) -> a == b, if f is sufficiently
+	   injective. */
+	if (ieb->arg1->tag == ieb->arg2->tag) {
+		switch (ieb->arg1->tag) {
+		case Iex_Binop: {
+			IRExprBinop *l = (IRExprBinop *)ieb->arg1;
+			IRExprBinop *r = (IRExprBinop *)ieb->arg2;
+			if (l->op != r->op)
+				break;
+			switch (l->op) {
+			case Iop_Shl64: /* x << k is treated as
+					 * injective if k is a small
+					 * constant, because most of
+					 * the time you don't get
+					 * overflow. */
+				if (r->arg2->tag == Iex_Const &&
+				    l->arg2->tag == Iex_Const &&
+				    ((IRExprConst *)r->arg2)->con->Ico.U8 ==
+				         ((IRExprConst *)l->arg2)->con->Ico.U8 &&
+				    ((IRExprConst *)l->arg2)->con->Ico.U8 < 8) {
+					ieb->arg1 = l->arg1;
+					ieb->arg2 = r->arg1;
+					done_something = true;
+				}
+				break;
+			default:
+				break;
+			}
+			break;
+		}
+		case Iex_Unop: {
+			IRExprUnop *l = (IRExprUnop *)ieb->arg1;
+			IRExprUnop *r = (IRExprUnop *)ieb->arg2;
+			if (l->op != r->op)
+				break;
+			switch (l->op) {
+			case Iop_32Sto64:
+				/* This one actually is injective */
+				ieb->arg1 = l->arg;
+				ieb->arg2 = r->arg;
+				done_something = true;
+				break;
+			default:
+				break;
+			}
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	if (done_something)
+		return heuristicSimplify(e);
+	return e;
+}
+
 static crashEnforcementData
 enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
@@ -277,6 +361,10 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		fprintf(_logfile, "failed to convert to DNF\n");
 		exit(1);
 	}
+
+	for (unsigned x = 0; x < d.size(); x++)
+		for (unsigned y = 0; y < d[x].size(); y++)
+			d[x][y].second = heuristicSimplify(d[x][y].second);
 
 	for (unsigned x = 0; x < d.size(); ) {
 		if (analyseHbGraph(d[x], summary)) {
