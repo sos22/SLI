@@ -396,6 +396,84 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	return accumulator;
 }
 
+/* Try to delay stashing registers until we actually need to do so.
+   We start off trying to stash them at the roots of the CFG and we
+   can delay if:
+
+   -- The node has an unambiguous successor
+   -- The node doesn't modify the register
+   -- We don't try to eval anything at the node.
+   -- The node isn't the before end of a happens-before edge
+*/
+static void
+optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
+{
+	expressionStashMapT newMap;
+	for (auto it = ced.exprStashPoints.begin();
+	     it != ced.exprStashPoints.end();
+	     it++) {
+		ThreadCfgLabel label = it->first;
+		CFGNode *node = ced.threadCfg.findInstr(label);
+
+		while (1) {
+			/* Must have an unambiguous successor */
+			if (node->successors.size() != 1)
+				break;
+
+			/* Can't be an eval point */
+			if (ced.expressionEvalPoints.count(label))
+				break;
+
+			/* Can't be a happens-before before point */
+			{
+				auto it2 = ced.happensBeforePoints.find(label);
+				if (it2 != ced.happensBeforePoints.end()) {
+					bool b = false;
+					for (auto it3 = it2->second.begin();
+					     !b && it3 != it2->second.end();
+					     it3++)
+						if ( (*it3)->before.tid == (int)label.thread &&
+						     (*it3)->before.where == label.label )
+							b = true;
+					if (b)
+						break;
+				}
+			}
+
+
+			/* Can't stash a register which this
+			 * instruction might modify */
+			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(label.thread, node->rip));
+			std::set<threadAndRegister, threadAndRegister::partialCompare> modified_regs;
+			for (int x = 0; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
+				if (irsb->stmts[x]->tag == Ist_Put)
+					modified_regs.insert( ((IRStmtPut *)irsb->stmts[x])->target );
+			}
+			bool b = false;
+			for (auto it2 = it->second.begin();
+			     !b && it2 != it->second.end();
+			     it2++) {
+				if (modified_regs.count((*it2)->reg))
+					b = true;
+			}
+			if (b)
+				break;
+
+			/* Advance this stash point */
+			node = node->successors[0].instr;
+			label.label = node->label;
+		}
+
+		std::set<IRExprGet *> newStash(newMap[label]);
+		for (auto it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++)
+			newMap[label].insert(*it2);
+	}
+
+	ced.exprStashPoints = newMap;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -411,6 +489,8 @@ main(int argc, char *argv[])
 
 	VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[5], NULL));
 	crashEnforcementData accumulator = enforceCrashForMachine(summary, oracle, ALLOW_GC, next_hb_id, next_slot);
+
+	optimiseStashPoints(accumulator, oracle);
 
 	FILE *f = fopen(argv[4], "w");
 	accumulator.prettyPrint(f);

@@ -767,6 +767,7 @@ instrJcc(CfgLabelAllocator &allocLabel, const C2PRip &target, jcc_code branchTyp
 	return work;
 }
 
+/* This must return a single instruction! */
 static Instruction<C2PRip> *
 convertSimpleInstr(CfgLabelAllocator &allocLabel, CFGNode *simple)
 {
@@ -957,22 +958,6 @@ checkForThreadStart(const C2PRip &c2p_rip,
 			      relocs);
 }
 
-std::set<std::pair<RegisterIdx, simulationSlotT> >
-registersToStash(const ThreadCfgLabel &label,
-		 crashEnforcementData &ced)
-{
-	std::set<std::pair<RegisterIdx, simulationSlotT> > res;
-	const std::set<IRExprGet *> &exprs(ced.exprStashPoints[label]);
-	for (auto it = exprs.begin(); it != exprs.end(); it++) {
-		IRExprGet *ieg = *it;
-		if (ieg->reg.isReg())
-			res.insert(std::pair<RegisterIdx, simulationSlotT>(
-					   RegisterIdx::fromVexOffset(ieg->reg.asReg()),
-					   ced.exprsToSlots(label.thread, ieg)));
-	}
-	return res;
-}
-
 static Instruction<C2PRip> *
 startThread(const C2PRip &c2p_rip,
 	    std::queue<reloc> &relocs,
@@ -981,43 +966,23 @@ startThread(const C2PRip &c2p_rip,
 	    CfgLabelAllocator &allocLabel)
 {
 	const ThreadCfgLabel &newThread(c2p_rip.phase->threadToStart());
-	std::set<std::pair<RegisterIdx, simulationSlotT> > stashRegisters(registersToStash(newThread, ced));
 	std::set<CrossLabel> newCrossMachineState(c2p_rip.crossMachineState);
 	bool did_insert =
 		newCrossMachineState.insert(CrossLabel(newThread)).second;
 	assert(did_insert);
 
-	Instruction<C2PRip> *start = NULL;
-	Instruction<C2PRip> *cursor = NULL;
-
 	CFGNode *cfgNode = ced.threadCfg.findInstr(newThread);
 	assert(cfgNode);
 
 	/* At the moment, we don't support starting in the middle of a
-	 * function. */
+	 * function.  This will eventually generate gubbins to check
+	 * that the stack context is correct. */
 	assert(cfgNode->rip.stack.size() == 1);
 
-	Instruction<C2PRip> *n = NULL;
-	for (auto it = stashRegisters.begin(); it != stashRegisters.end(); it++) {
-		n = instrMovRegToSlot(allocLabel,
-				      it->first,
-				      it->second);
-		if (cursor) {
-			cursor = cursor->addDefault(n);
-		} else {
-			start = cursor = n;
-		}
-	}
-
-	n = noopRelocation(allocLabel,
-			   C2PRip(newCrossMachineState,
-				  C2PPhase::checkForThreadStart()),
-			   relocs);
-	if (cursor)
-		cursor->addDefault(n);
-	else
-		start = n;
-	return start;
+	return noopRelocation(allocLabel,
+			      C2PRip(newCrossMachineState,
+				     C2PPhase::checkForThreadStart()),
+			      relocs);
 }
 
 static Instruction<C2PRip> *
@@ -1124,6 +1089,10 @@ origInstrAndStash(const C2PRip &c2p_rip,
 {
 	std::set<simulationSlotT> stashSlots;
 
+	Instruction<C2PRip> *start;
+	Instruction<C2PRip> *cursor;
+	Instruction<C2PRip> *n;
+	start = cursor = NULL;
 	for (auto it = c2p_rip.crossMachineState.begin();
 	     it != c2p_rip.crossMachineState.end();
 	     it++) {
@@ -1131,8 +1100,18 @@ origInstrAndStash(const C2PRip &c2p_rip,
 		if (it2 != ced.exprStashPoints.end()) {
 			for (auto it3 = it2->second.begin(); it3 != it2->second.end(); it3++) {
 				IRExprGet *e = *it3;
-				if (!e->reg.isReg())
+				printf("Need to stash %s at %s\n", nameIRExpr(e), it->label.name());
+				if (e->reg.isReg()) {
+					n = instrMovRegToSlot(allocLabel,
+							      RegisterIdx::fromVexOffset(e->reg.asReg()),
+							      ced.exprsToSlots(it->label.thread, e));
+					if (cursor)
+						cursor = cursor->addDefault(n);
+					else
+						cursor = start = n;
+				} else {
 					stashSlots.insert(ced.exprsToSlots(it->label.thread, e));
+				}
 			}
 		}
 	}
@@ -1143,11 +1122,13 @@ origInstrAndStash(const C2PRip &c2p_rip,
 	 * just arbitrarily pick the first one. */
 	CFGNode *underlyingInstr = ced.threadCfg.findInstr(c2p_rip.crossMachineState.begin()->label);
 	assert(underlyingInstr);
-	Instruction<C2PRip> *start;
-	Instruction<C2PRip> *cursor;
 	switch (instrOpcode(underlyingInstr)) {
 	case 0x8b: { /* mov modrm, reg */
-		cursor = start = convertSimpleInstr(allocLabel, underlyingInstr);
+		n = convertSimpleInstr(allocLabel, underlyingInstr);
+		if (cursor)
+			cursor = cursor->addDefault(n);
+		else
+			start = cursor = n;
 		for (auto it = stashSlots.begin(); it != stashSlots.end(); it++)
 			cursor = cursor->addDefault(instrMovRegToSlot(allocLabel, instrModrmReg(underlyingInstr), *it));
 		break;
@@ -1155,10 +1136,10 @@ origInstrAndStash(const C2PRip &c2p_rip,
 	case 0x81: /* cmp const, modrm */
 	case 0x83: /* cmp reg, modrm */
 		/* These can generate stashes, but that's not
-		 * currently implemented */
-		assert(stashSlots.empty());
-		cursor = start = convertSimpleInstr(allocLabel, underlyingInstr);
-		break;
+		 * currently implemented, so just fall through to
+		 * instructions which never generate stashes. */
+		if (!stashSlots.empty())
+			abort();
 
 	case 0x89: /* mov reg, modrm */
 	case 0x90: /* nop */
@@ -1166,13 +1147,16 @@ origInstrAndStash(const C2PRip &c2p_rip,
 	case 0xc7: /* mov imm, modrm */
 		/* These shouldn't generate any stashes */
 		assert(stashSlots.empty());
-		cursor = start = convertSimpleInstr(allocLabel, underlyingInstr);
+		n = convertSimpleInstr(allocLabel, underlyingInstr);
+		if (cursor)
+			cursor = cursor->addDefault(n);
+		else
+			cursor = start = n;
 		break;
 
 	case 0xf84: /* Conditional branches.  These get special
 		       handling in findSuccessors() */
 	case 0xf8e:
-		cursor = start = instrNoop(allocLabel);
 		break;
 	default:
 		fail("don't know how to stash for opcode 0x%x in %s",
@@ -1180,11 +1164,14 @@ origInstrAndStash(const C2PRip &c2p_rip,
 	}
 
 	/* Done; move on to next phase. */
-	cursor->addDefault(
-		noopRelocation(allocLabel,
-			       C2PRip(c2p_rip.crossMachineState,
-				      C2PPhase::checkSideConditions()),
-			       relocs));
+	n = noopRelocation(allocLabel,
+			   C2PRip(c2p_rip.crossMachineState,
+				  C2PPhase::checkSideConditions()),
+			   relocs);
+	if (cursor)
+		cursor->addDefault(n);
+	else
+		start = n;
 	return start;
 }
 
