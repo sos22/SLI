@@ -474,6 +474,39 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	ced.exprStashPoints = newMap;
 }
 
+/* We sometimes find that the CFG has a prefix which is completely
+   irrelevant.  Try to remove it. */
+static void
+optimiseCfg(crashEnforcementData &ced)
+{
+	crashEnforcementRoots newRoots;
+	for (auto it = ced.roots.begin();
+	     it != ced.roots.end();
+	     it++) {
+		CFGNode *n = ced.threadCfg.findInstr(*it);
+		while (1) {
+			/* We can advance a root if it has a single
+			   successor, and it has no stash points, and
+			   it has no HB points, and it has no eval
+			   points, and it isn't an exit point. */
+			if (n->successors.size() != 1)
+				break;
+			ThreadCfgLabel l(it->thread, n->label);
+			if (ced.exprStashPoints.count(l) != 0)
+				break;
+			if (ced.happensBeforePoints.count(l) != 0)
+				break;
+			if (ced.expressionEvalPoints.count(l) != 0)
+				break;
+			if (ced.threadExitPoints.count(l) != 0)
+				break;
+			n = n->successors[0].instr;
+		}
+		newRoots.insert(ThreadCfgLabel(it->thread, n->label));
+	}
+	ced.roots = newRoots;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -491,6 +524,7 @@ main(int argc, char *argv[])
 	crashEnforcementData accumulator = enforceCrashForMachine(summary, oracle, ALLOW_GC, next_hb_id, next_slot);
 
 	optimiseStashPoints(accumulator, oracle);
+	optimiseCfg(accumulator);
 
 	FILE *f = fopen(argv[4], "w");
 	accumulator.prettyPrint(f);
