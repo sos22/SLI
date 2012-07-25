@@ -93,6 +93,11 @@ public:
 	std::set<happensBeforeEdge *> hbes;
 	internStateMachineTable exprs;
 	IRExpr *intern(IRExpr *e) { return internIRExpr(e, exprs); }
+	IRExprGet *intern(IRExprGet *e) {
+		IRExpr *res = internIRExpr(e, exprs);
+		assert(res->tag == Iex_Get);
+		return (IRExprGet *)res;
+	}
 	unsigned intern(unsigned x) { return x; }
 	exprEvalPoint intern(const exprEvalPoint &);
 	template <typename a, typename b> std::pair<a, b> intern(const std::pair<a, b> &x) {
@@ -167,11 +172,11 @@ public:
 	instructionDominatorMapT() {}
 };
 
-class expressionStashMapT : public std::map<ThreadCfgLabel, std::set<IRExpr *> >,
+class expressionStashMapT : public std::map<ThreadCfgLabel, std::set<IRExprGet *> >,
 			    private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
-			std::vector<IRExpr *> f(it->second.begin(), it->second.end());
+			std::vector<IRExprGet *> f(it->second.begin(), it->second.end());
 			for (auto it2 = f.begin(); it2 != f.end(); it2++)
 				hv(*it2);
 			it->second.clear();
@@ -196,7 +201,7 @@ public:
 				if (ieg->reg.isReg()) {
 					auto it_r = roots.find(ieg->reg.tid());
 					assert(it_r != roots.end());
-					(*this)[ThreadCfgLabel(ieg->reg.tid(), it_r->second)].insert(e);
+					(*this)[ThreadCfgLabel(ieg->reg.tid(), it_r->second)].insert(ieg);
 				} else {
 					neededTemporaries.insert(ieg);
 				}
@@ -240,13 +245,15 @@ public:
 			if (!where.parse(str, &str) ||
 			    !parseThisString(" -> {", str, &str))
 				break;
-			std::set<IRExpr *> b;
+			std::set<IRExprGet *> b;
 			while (1) {
 				IRExpr * s;
 				if (!parseIRExpr(&s, str, &str) ||
 				    !parseThisString(", ", str, &str))
 					break;
-				b.insert(s);
+				if (s->tag != Iex_Get)
+					return false;
+				b.insert((IRExprGet *)s);
 			}
 			if (!parseThisString("}\n", str, &str))
 				return false;
@@ -269,7 +276,7 @@ public:
 	}
 	void internSelf(internmentState &state) {
 		for (auto it = begin(); it != end(); it++) {
-			std::set<IRExpr *> out;
+			std::set<IRExprGet *> out;
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
 				out.insert(state.intern(*it2));
 			it->second = out;
@@ -347,7 +354,7 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
 	happensBeforeEdge(const MemoryAccessIdentifier &_before,
 			  const MemoryAccessIdentifier &_after,
-			  const std::vector<IRExpr *> &_content,
+			  const std::vector<IRExprGet *> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
 	{}
@@ -375,7 +382,7 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 public:
 	MemoryAccessIdentifier before;
 	MemoryAccessIdentifier after;
-	std::vector<IRExpr *> content;
+	std::vector<IRExprGet *> content;
 	unsigned msg_id;
 
 	happensBeforeEdge *intern(internmentState &state) {
@@ -406,7 +413,7 @@ public:
 		     it != liveInstructions.end();
 		     it++) {
 			auto *i = *it;
-			std::set<IRExpr *> &exprs(stashMap[i->rip]);
+			std::set<IRExprGet *> &exprs(stashMap[i->rip]);
 			for (auto it2 = exprs.begin();
 			     it2 != exprs.end();
 			     it2++)
@@ -429,14 +436,16 @@ public:
 		    !parseMemoryAccessIdentifier(&after, str, &str) ||
 		    !parseThisString(" {", str, &str))
 			return NULL;
-		std::vector<IRExpr *> content;
+		std::vector<IRExprGet *> content;
 		while (1) {
 			IRExpr *a;
 			if (!parseIRExpr(&a, str, &str))
 				break;
 			if (!parseThisString(", ", str, &str))
 				return NULL;
-			content.push_back(a);
+			if (a->tag != Iex_Get)
+				return NULL;
+			content.push_back((IRExprGet *)a);
 		}
 		if (!parseThisChar('}', str, &str))
 			return NULL;
@@ -449,10 +458,10 @@ public:
 	NAMED_CLASS
 };
 
-class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT>,
+class slotMapT : public std::map<std::pair<unsigned, IRExprGet *>, simulationSlotT>,
 		 private GcCallback<&ir_heap> {
-	typedef std::pair<unsigned, IRExpr *> key_t;
-	void mk_slot(unsigned thr, IRExpr *e, simulationSlotT &next_slot) {
+	typedef std::pair<unsigned, IRExprGet *> key_t;
+	void mk_slot(unsigned thr, IRExprGet *e, simulationSlotT &next_slot) {
 		key_t key(thr, e);
 		if (!count(key)) {
 			simulationSlotT s = allocateSlot(next_slot);
@@ -463,7 +472,7 @@ class slotMapT : public std::map<std::pair<unsigned, IRExpr *>, simulationSlotT>
 		slotMapT n(*this);
 		clear();
 		for (auto it = n.begin(); it != n.end(); it++) {
-			std::pair<std::pair<unsigned, IRExpr *>, simulationSlotT> a = *it;
+			std::pair<key_t, simulationSlotT> a = *it;
 			hv(a.first.second);
 			insert(a);
 		}
@@ -478,16 +487,16 @@ public:
 		return r;
 	}
 
-	simulationSlotT operator()(unsigned thr, IRExpr *e) {
-		iterator it = find(std::pair<unsigned, IRExpr *>(thr, e));
+	simulationSlotT operator()(unsigned thr, IRExprGet *e) {
+		iterator it = find(std::pair<unsigned, IRExprGet *>(thr, e));
 		assert(it != end());
 		return it->second;
 	}
 
 	void internSelf(internmentState &state) {
-		std::map<std::pair<unsigned, IRExpr *>, simulationSlotT> work;
+		std::map<key_t, simulationSlotT> work;
 		for (auto it = begin(); it != end(); it++) {
-			std::pair<unsigned, IRExpr *> key;
+			key_t key;
 			work[state.intern(it->first)] = it->second;
 		}
 		clear();
@@ -497,7 +506,7 @@ public:
 
 	slotMapT() { }
 
-	slotMapT(std::map<ThreadCfgLabel, std::set<IRExpr *> > &neededExpressions,
+	slotMapT(std::map<ThreadCfgLabel, std::set<IRExprGet *> > &neededExpressions,
 		 std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore,
 		 simulationSlotT &next_slot)
 	{
@@ -506,7 +515,7 @@ public:
 		for (auto it = neededExpressions.begin();
 		     it != neededExpressions.end();
 		     it++) {
-			std::set<IRExpr *> &s((*it).second);
+			std::set<IRExprGet *> &s((*it).second);
 			for (auto it2 = s.begin(); it2 != s.end(); it2++)
 				mk_slot(it->first.thread, *it2, next_slot);
 		}
@@ -545,15 +554,19 @@ public:
 			return false;
 		clear();
 		while (1) {
-			std::pair<unsigned, IRExpr *> key;
+			key_t key;
 			simulationSlotT value;
+			IRExpr *k;
 			if (!parseDecimalUInt(&key.first, str, &str) ||
 			    !parseThisChar(':', str, &str) ||
-			    !parseIRExpr(&key.second, str, &str) ||
+			    !parseIRExpr(&k, str, &str) ||
 			    !parseThisString(" -> ", str, &str) ||
 			    !parseDecimalInt(&value.idx, str, &str) ||
 			    !parseThisChar('\n', str, &str))
 				break;
+			if (k->tag != Iex_Get)
+				return false;
+			key.second = (IRExprGet *)k;
 			(*this)[key] = value;
 		}
 		*suffix = str;

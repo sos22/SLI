@@ -19,12 +19,11 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 		     it2 != it->second.end();
 		     it2++) {
 			Instruction<ThreadCfgLabel> *dominating = *it2;
-			std::set<IRExpr *> stashed(stash[dominating->rip]);
+			std::set<IRExprGet *> stashed(stash[dominating->rip]);
 			for (auto it = stashed.begin();
 			     it != stashed.end();
 			     it++) {
-				if ( (*it)->tag == Iex_Get)
-					availRegs.insert( ((IRExprGet *)*it)->reg );
+				availRegs.insert( (*it)->reg );
 			}
 		}
 		for (unsigned x = 0; x < c.size(); x++)

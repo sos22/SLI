@@ -962,10 +962,9 @@ registersToStash(const ThreadCfgLabel &label,
 		 crashEnforcementData &ced)
 {
 	std::set<std::pair<RegisterIdx, simulationSlotT> > res;
-	const std::set<IRExpr *> &exprs(ced.exprStashPoints[label]);
+	const std::set<IRExprGet *> &exprs(ced.exprStashPoints[label]);
 	for (auto it = exprs.begin(); it != exprs.end(); it++) {
-		assert((*it)->tag == Iex_Get);
-		IRExprGet *ieg = (IRExprGet *)*it;
+		IRExprGet *ieg = *it;
 		if (ieg->reg.isReg())
 			res.insert(std::pair<RegisterIdx, simulationSlotT>(
 					   RegisterIdx::fromVexOffset(ieg->reg.asReg()),
@@ -1131,9 +1130,8 @@ origInstrAndStash(const C2PRip &c2p_rip,
 		auto it2 = ced.exprStashPoints.find(it->label);
 		if (it2 != ced.exprStashPoints.end()) {
 			for (auto it3 = it2->second.begin(); it3 != it2->second.end(); it3++) {
-				IRExpr *e = *it3;
-				assert(e->tag == Iex_Get);
-				if (!((IRExprGet *)e)->reg.isReg())
+				IRExprGet *e = *it3;
+				if (!e->reg.isReg())
 					stashSlots.insert(ced.exprsToSlots(it->label.thread, e));
 			}
 		}
@@ -1243,7 +1241,7 @@ evalExpressionToReg(CfgLabelAllocator &allocLabel,
 		cursor = cursor->addDefault(
 			instrMovSlotToReg(
 				allocLabel,
-				ced.exprsToSlots(thread, expr),
+				ced.exprsToSlots(thread, (IRExprGet *)expr),
 				target,
 				expr->type()));
 		break;
