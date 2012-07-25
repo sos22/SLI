@@ -263,6 +263,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 						.setAddressSpace(oracle->ms->addressSpace),
 					   MemoryAccessIdentifierAllocator(),
 					   token);
+	requirement = IRExpr_Binop(Iop_And1, requirement, summary->verificationCondition);
 	requirement = internIRExpr(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
