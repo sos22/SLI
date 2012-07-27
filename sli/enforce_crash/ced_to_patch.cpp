@@ -15,6 +15,9 @@
    never sends any messages or introduces any delays. */
 #define STASH_ONLY_PATCH 0
 
+/* Generate a patch which doesn't check any side conditions. */
+#define DEBUG_SKIP_SIDE_CONDITIONS 0
+
 #ifndef NDEBUG
 static bool debug_main_loop = false;
 static bool debug_find_successors = false;
@@ -1372,6 +1375,7 @@ checkSideConditions(const C2PRip &c2p_rip,
 
 	if (debug_side_conditions)
 		printf("%s(%s)\n", __func__, c2p_rip.name());
+#if DEBUG_SKIP_SIDE_CONDITIONS == 0
 	for (auto it = c2p_rip.crossMachineState.begin();
 	     it != c2p_rip.crossMachineState.end();
 	     it++) {
@@ -1382,6 +1386,7 @@ checkSideConditions(const C2PRip &c2p_rip,
 				insert(std::pair<CfgLabel, std::set<unsigned> > (label.label,
 										 it->sent_messages));
 	}
+#endif
 
 	if (thingsToEval.empty()) {
 		/* Nothing to do */
