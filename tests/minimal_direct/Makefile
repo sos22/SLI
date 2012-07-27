@@ -3,6 +3,14 @@ all: bug1.so bug2.so bug3.so
 %.so: ../../ced_to_patch % %.ced ../../sli/enforce_crash/patch_core.c
 	../../ced_to_patch $* $*.ced ../../ $@
 
+%.cep.o: %.cep.c ../../sli/enforce_crash/cep_interpreter.h
+	gcc -g -I ../../sli/enforce_crash -c -fPIC -Wall -Werror $< -o $@
+
+%.cep.c: %.ced ../../ced_to_cep
+	../../ced_to_cep $* $< > $@
+%.interp.so: %.cep.o ../../cep_interpreter.o
+	gcc -shared $^ -o $@
+
 %.ced: %.summary.canon4  ../../enforce_crash % %.types.canon %.types.canon.idx %.bcg
 	../../enforce_crash $* $*.types.canon $*.bcg $@ $<
 

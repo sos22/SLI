@@ -261,7 +261,8 @@ public:
 	static Instruction<ripType> *decode(const CfgLabel &label,
 					    AddressSpace *as,
 					    ripType rip,
-					    CFG<ripType> *cfg);
+					    CFG<ripType> *cfg,
+					    bool expandJcc);
 	static Instruction<ripType> *pseudo(const CfgLabel &label, ripType rip);
 
 	void emit(unsigned char);
@@ -348,14 +349,14 @@ public:
 private:
 	std::vector<std::pair<ripType, unsigned> > pendingRips;
 	std::vector<ripType> neededRips;
-	void decodeInstruction(const CfgLabel &l, ripType rip, unsigned max_depth);
+	void decodeInstruction(const CfgLabel &l, ripType rip, unsigned max_depth, bool expandJcc);
 public:
 	CFG(AddressSpace *_as) : as(_as), ripToInstr(new ripToInstrT()) {}
 	void add_root(ripType root, unsigned max_depth)
 	{
 		pendingRips.push_back(std::pair<ripType, unsigned>(root, max_depth));
 	}
-	void doit(CfgLabelAllocator &);
+	void doit(CfgLabelAllocator &, bool expandJcc);
 	void visit(HeapVisitor &hv) {
 		hv(ripToInstr);
 		hv(as);
@@ -756,7 +757,8 @@ template <typename r> Instruction<r> *
 Instruction<r>::decode(const CfgLabel &label,
 		       AddressSpace *as,
 		       r start,
-		       CFG<r> *cfg)
+		       CFG<r> *cfg,
+		       bool expandJcc)
 {
 	Instruction<r> *i = new Instruction<r>(label);
 	i->rip = start;
@@ -890,26 +892,30 @@ top:
 		break;
 
 	case 0x70 ... 0x7f: {
-		/* 8 bit conditional jumps are handled specially, by
-		   turning them into 32-bit conditional jumps, because
-		   that simplifies a lot of relocation-related
-		   stuff. */
 		/* Decode the instruction... */
 		delta = i->byte(as);
 		r fallThrough = i->rip + i->len;
 		r target = fallThrough + delta;
-		i->addDefault(fallThrough);
 		i->addBranch(target);
+		if (expandJcc) {
+			/* 8 bit conditional jumps are handled
+			   specially, by turning them into 32-bit
+			   conditional jumps, because that simplifies
+			   a lot of relocation-related stuff. */
 
-		/* Now rewind and emit the 32 bit version. */
-		i->len = 0;
-		i->emit(0x0f);
-		i->emit(b + 0x10);
-		i->relocs.push_back(new RipRelativeBranchRelocation<r>(i->len, 4, target));
-		i->len += 4;
+			/* Now rewind and emit the 32 bit version. */
+			i->len = 0;
+			i->emit(0x0f);
+			i->emit(b + 0x10);
+			i->relocs.push_back(new RipRelativeBranchRelocation<r>(i->len, 4, target));
+			i->len += 4;
 
-		/* Don't let the tail update defaultNext */
-		fallsThrough = false;
+			/* Don't let the tail update defaultNext */
+			i->addDefault(fallThrough);
+			fallsThrough = false;
+		} else {
+			i->relocs.push_back(new RipRelativeBranchRelocation<r>(i->len - 1, 1, target));
+		}
 		break;
 	}
 	case 0x69: /* imul gv,ev,iz */
@@ -1028,11 +1034,11 @@ top:
 }
 
 template <typename r> void
-CFG<r>::decodeInstruction(const CfgLabel &l, r rip, unsigned max_depth)
+CFG<r>::decodeInstruction(const CfgLabel &l, r rip, unsigned max_depth, bool expandJcc)
 {
 	if (!max_depth)
 		return;
-	Instruction<r> *i = Instruction<r>::decode(l, as, rip, this);
+	Instruction<r> *i = Instruction<r>::decode(l, as, rip, this, expandJcc);
 	if (!i)
 		return;
 	assert(i->rip == rip);
@@ -1045,13 +1051,13 @@ CFG<r>::decodeInstruction(const CfgLabel &l, r rip, unsigned max_depth)
 }
 
 template <typename r> void
-CFG<r>::doit(CfgLabelAllocator &allocLabel)
+CFG<r>::doit(CfgLabelAllocator &allocLabel, bool expandJcc)
 {
 	while (!pendingRips.empty()) {
 		std::pair<r, unsigned> p = pendingRips.back();
 		pendingRips.pop_back();
 		if (!ripToInstr->hasKey(p.first))
-			decodeInstruction(allocLabel(), p.first, p.second);
+			decodeInstruction(allocLabel(), p.first, p.second, expandJcc);
 	}
 
 	for (typename ripToInstrT::iterator it = ripToInstr->begin();

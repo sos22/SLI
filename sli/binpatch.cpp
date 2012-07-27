@@ -68,7 +68,7 @@ mkPatch(AddressSpace *as, struct CriticalSection *csects, unsigned nr_csects)
 		cfg->add_sink(csects[x].exit);
 	}
 	CfgLabelAllocator alloc;
-	cfg->doit(alloc);
+	cfg->doit(alloc, true);
 
 	PatchFragment<ThreadRip> *pf = new AddExitCallPatch(roots);
 	pf->fromCFG(alloc, cfg);

@@ -167,6 +167,5 @@ MachineState::readELFExec(const char *path)
 	thr->regs.set_reg(REGISTER_IDX(RCX), 1);
 
 	work->registerThread(thr);
-	printf("Psuedo thread has id %d\n", thr->tid._tid());
 	return work;
 }

@@ -890,6 +890,7 @@ public:
 class ThreadCfg {
 	std::map<ThreadCfgLabel, CFGNode *> content;
 	std::map<ThreadCfgLabel, CFGNode *> insertAfterPoints;
+	bool expandJcc;
 public:
 	CFGNode *findInstr(const ThreadCfgLabel &label) {
 		auto it = content.find(label);
@@ -906,8 +907,10 @@ public:
 		for (auto it = content.begin(); it != content.end(); it++)
 			alloc.reserve(it->first.label);
 	}
-	ThreadCfg() {};
-	ThreadCfg(CrashSummary *summary) {
+	ThreadCfg(bool _expandJcc) : expandJcc(_expandJcc) {};
+	ThreadCfg(CrashSummary *summary, bool _expandJcc)
+		: expandJcc(_expandJcc)
+	{
 		assert(summary->loadMachine->origin.size() == 1);
 		assert(summary->storeMachine->origin.size() == 1);
 		std::queue<std::pair<unsigned, CFGNode *> > pending;
@@ -970,7 +973,8 @@ public:
 			     DNF_Conjunction &conj,
 			     ThreadCfgDecode &cfg,
 			     int &next_hb_id,
-			     simulationSlotT &next_slot)
+			     simulationSlotT &next_slot,
+			     bool expandJcc)
 		: roots(_roots),
 		  happensBefore(conj, cfg),
 		  predecessorMap(cfg),
@@ -980,7 +984,8 @@ public:
 		  happensBeforePoints(conj, idom, cfg, exprStashPoints, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
-		  threadExitPoints(cfg, happensBeforePoints)
+		  threadExitPoints(cfg, happensBeforePoints),
+		  threadCfg(expandJcc)
 	{}
 
 	bool parse(AddressSpace *as, const char *str, const char **suffix) {
@@ -998,10 +1003,11 @@ public:
 		*suffix = str;
 		return true;
 	}
-	crashEnforcementData(CrashSummary *summary)
-		: threadCfg(summary)
+	crashEnforcementData(CrashSummary *summary, bool expandJcc)
+		: threadCfg(summary, expandJcc)
 	{}
-	crashEnforcementData()
+	crashEnforcementData(bool expandJcc)
+		: threadCfg(expandJcc)
 	{}
 
 	void prettyPrint(FILE *f, bool verbose = false) {

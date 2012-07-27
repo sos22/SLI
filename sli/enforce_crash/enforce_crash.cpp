@@ -286,7 +286,7 @@ buildCED(DNF_Conjunction &c,
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	*out = crashEnforcementData(neededExpressions, rootsCfg, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot);
+	*out = crashEnforcementData(neededExpressions, rootsCfg, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot, true);
 	optimiseHBContent(*out, cfg);
 	return true;
 }
@@ -466,7 +466,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printDnf(d, _logfile);
 
 	if (d.size() == 0)
-		return crashEnforcementData(summary);
+		return crashEnforcementData(summary, true);
 
 	std::map<unsigned, CfgLabel> rootsCfg;
 	assert(summary->loadMachine->origin.size() == 1);
@@ -480,9 +480,9 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 				summary->storeMachine->origin[0].first,
 				summary->storeMachine->cfg_roots[0]->label));
 
-	crashEnforcementData accumulator(summary);
+	crashEnforcementData accumulator(summary, true);
 	for (unsigned x = 0; x < d.size(); x++) {
-		crashEnforcementData tmp;
+		crashEnforcementData tmp(true);
 		if (buildCED(d[x], rootsCfg, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
 			accumulator |= tmp;
 	}

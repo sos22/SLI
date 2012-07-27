@@ -149,7 +149,8 @@ ThreadCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 			it->first.label,
 			as,
 			it->second.first,
-			NULL);
+			NULL,
+			expandJcc);
 	}
 	for (auto it = content.begin(); it != content.end(); it++) {
 		auto it2 = this->content.find(it->first);

@@ -923,7 +923,8 @@ public:
 		return CFGNode::decode(CfgLabel::uninitialised(),
 				       as,
 				       vr,
-				       NULL);
+				       NULL,
+				       true);
 	}
 };
 
@@ -2437,7 +2438,7 @@ main(int argc, char *argv[])
 	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
 		err(1, "open(%s)", ced_path);
-	crashEnforcementData ced;
+	crashEnforcementData ced(true);
 	loadCrashEnforcementData(ced, ms->addressSpace, fd);
 	close(fd);
 
