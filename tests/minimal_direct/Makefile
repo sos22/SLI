@@ -1,4 +1,4 @@
-all: bug1.so
+all: bug1.so bug2.so bug3.so
 
 %.so: ../../ced_to_patch % %.ced ../../sli/enforce_crash/patch_core.c
 	../../ced_to_patch $* $*.ced ../../ $@
@@ -50,5 +50,5 @@ all: bug1.so
 
 clean:
 	rm -f bug1 *.idx *.canon *.types *.bcg *~ static.db timings.txt generated_patch.c \
-	      *.ced *.so *.summary* core enforce_crash_*; \
+	      *.ced *.so *.summary* core enforce_crash_* static.db timings.txt; \
 	rm -rf *.summaries logs
