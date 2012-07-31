@@ -137,50 +137,10 @@ add_empty_array(FILE *f,
 	fprintf(f,"%s.%s = 0,\n", prefix, sz_field);
 }
 
-static void
-emit_message_structures(FILE *f,
-			const std::set<happensBeforeEdge *> &messages,
-			crashEnforcementData &ced,
-			const ThreadCfgLabel &oldLabel,
-			int newLabel,
-			const char *msgType)
-{
-	int cntr;
-	cntr = 0;
-	for (auto it2 = messages.begin(); it2 != messages.end(); it2++) {
-		happensBeforeEdge *hb = *it2;
-		cntr++;
-		if (hb->content.size() != 0) {
-			fprintf(f, "static const simslot_t instr_%d_%s_payload_%d[] = {",
-				newLabel, msgType, cntr);
-			for (unsigned x = 0; x < hb->content.size(); x++) {
-				if (x != 0)
-					fprintf(f, ", ");
-				fprintf(f, "%d", ced.exprsToSlots(oldLabel.thread, hb->content[x]).idx);
-			}
-			fprintf(f, "};\n");
-		}
-	}
-	cntr = 0;
-	fprintf(f, "static const struct cfg_instr_msg instr_%d_%s[] = {\n", newLabel, msgType);
-	for (auto it2 = messages.begin(); it2 != messages.end(); it2++) {
-		happensBeforeEdge *hb = *it2;
-		cntr++;
-		fprintf(f, "    { .msg_id = 0x%x,\n", hb->msg_id);
-		fprintf(f, "      .payload_size = %zd,\n", hb->content.size());
-		if (hb->content.size() != 0)
-			fprintf(f, "      .payload = instr_%d_%s_payload_%d,", newLabel, msgType, cntr);
-		else
-			fprintf(f, "      .payload = NULL,");
-		fprintf(f, "    },\n");
-	}
-	fprintf(f, "};\n");
-}
-
 struct cfg_annotation_summary {
 	bool have_stash;
-	bool have_rx_msg;
-	bool have_tx_msg;
+	unsigned tx_msg;
+	unsigned rx_msg;
 	unsigned long rip;
 };
 
@@ -269,12 +229,12 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 			assert(!(rxMsg.empty() && txMsg.empty()));
 			if (!rxMsg.empty()) {
-				emit_message_structures(f, rxMsg, ced, oldLabel, newLabel, "rx");
-				summary.have_rx_msg = true;
+				assert(rxMsg.size() == 1);
+				summary.rx_msg = (*rxMsg.begin())->msg_id;
 			}
 			if (!txMsg.empty()) {
-				emit_message_structures(f, txMsg, ced, oldLabel, newLabel, "tx");
-				summary.have_tx_msg = true;
+				assert(txMsg.size() == 1);
+				summary.tx_msg = (*txMsg.begin())->msg_id;
 			}
 		}
 		if (ced.expressionEvalPoints.count(oldLabel)) {
@@ -284,6 +244,37 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		summary.rip = instr->rip.unwrap_vexrip();
 		summaries[newLabel] = summary;
 		fprintf(f, "\n");
+	}
+
+	/* Now for the message templates. */
+	std::set<happensBeforeEdge *> allHbEdges;
+	for (auto it = ced.happensBeforePoints.begin(); it != ced.happensBeforePoints.end(); it++)
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+			allHbEdges.insert(*it2);
+	for (auto it = allHbEdges.begin(); it != allHbEdges.end(); it++) {
+		happensBeforeEdge *hb = *it;
+		unsigned beforeTid = hb->before.tid;
+		unsigned afterTid = hb->after.tid;
+		fprintf(f, "static struct msg_template msg_template_%x_rx = {\n", hb->msg_id);
+		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);
+		fprintf(f, "    .payload_size = %zd,\n", hb->content.size());
+		fprintf(f, "    .payload = {");
+		for (unsigned x = 0; x < hb->content.size(); x++) {
+			if (x != 0)
+				fprintf(f, ", ");
+			fprintf(f, "%d", ced.exprsToSlots(afterTid, hb->content[x]).idx);
+		}
+		fprintf(f, "}\n};\n");
+		fprintf(f, "static struct msg_template msg_template_%x_tx = {\n", hb->msg_id);
+		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);
+		fprintf(f, "    .payload_size = %zd,\n", hb->content.size());
+		fprintf(f, "    .payload = {");
+		for (unsigned x = 0; x < hb->content.size(); x++) {
+			if (x != 0)
+				fprintf(f, ", ");
+			fprintf(f, "%d", ced.exprsToSlots(beforeTid, hb->content[x]).idx);
+		}
+		fprintf(f, "}\n};\n");
 	}
 
 	/* Now dump out the actual CFG table. */
@@ -300,14 +291,14 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			add_simple_array(f, "        ", "stash", "stash", "nr_stash", it->first);
 		else
 			add_empty_array(f, "        ", "stash", "nr_stash");
-		if (it->second.have_rx_msg)
-			add_simple_array(f, "        ", "rx", "rx_msg", "nr_rx_msg", it->first);
+		if (it->second.rx_msg)
+			fprintf(f, "        .rx_msg = &msg_template_%x_rx,\n", it->second.rx_msg);
 		else
-			add_empty_array(f, "        ", "rx_msg", "nr_rx_msg");
-		if (it->second.have_tx_msg)
-			add_simple_array(f, "        ", "tx", "tx_msg", "nr_tx_msg", it->first);
+			fprintf(f, "        .rx_msg = NULL,\n");
+		if (it->second.tx_msg)
+			fprintf(f, "        .tx_msg = &msg_template_%x_tx,\n", it->second.tx_msg);
 		else
-			add_empty_array(f, "        ", "tx_msg", "nr_tx_msg");
+			fprintf(f, "        .tx_msg = NULL,\n");
 	}
 	fprintf(f, "    }\n};\n");
 }

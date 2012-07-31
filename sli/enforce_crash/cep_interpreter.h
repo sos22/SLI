@@ -4,10 +4,10 @@
 typedef int cfg_label_t;
 
 typedef int simslot_t;
-struct cfg_instr_msg {
+struct msg_template {
 	int msg_id;
 	unsigned payload_size;
-	const simslot_t *payload;
+	const simslot_t payload[];
 };
 
 struct cfg_instr_stash {
@@ -23,10 +23,8 @@ struct cfg_instr {
 	int nr_successors;
 	const struct cfg_instr_stash *stash;
 	int nr_stash;
-	const struct cfg_instr_msg *rx_msg;
-	int nr_rx_msg;
-	const struct cfg_instr_msg *tx_msg;
-	int nr_tx_msg;
+	const struct msg_template *rx_msg;
+	const struct msg_template *tx_msg;
 };
 
 struct cep_entry_ctxt {

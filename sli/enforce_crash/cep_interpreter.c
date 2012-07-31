@@ -240,7 +240,7 @@ new_low_level_state(int nr_simslots)
 }
 
 static struct message *
-new_message(struct low_level_state *lls, const struct cfg_instr_msg *template)
+new_message(struct low_level_state *lls, const struct msg_template *template)
 {
 	struct message *res = malloc(sizeof(*res) + template->payload_size * sizeof(res->payload[0]));
 	res->refcount = 1;
@@ -528,7 +528,7 @@ static void
 rendezvous_threads_rx(struct low_level_state_array *llsa,
 		      struct low_level_state *rx_lls,
 		      struct message *msg,
-		      const struct cfg_instr_msg *template)
+		      const struct msg_template *template)
 {
 	struct low_level_state *tx_lls = msg->sender;
 	int x;
@@ -630,18 +630,17 @@ receive_messages(struct high_level_state *hls)
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-		const struct cfg_instr_msg *msg;
+		const struct msg_template *msg;
 		struct msg_slot *slot;
 		struct message *rxed_msg;
 
-		if (instr->nr_rx_msg == 0) {
+		if (!instr->rx_msg) {
 			/* Threads which don't receive any messages
 			 * don't need to do anything. */
 			continue;
 		}
 
-		assert(instr->nr_rx_msg == 1);
-		msg = &instr->rx_msg[0];
+		msg = instr->rx_msg;
 
 		debug("Trying to receive %x\n", msg->msg_id);
 		if (lls->bound_lls) {
@@ -710,10 +709,10 @@ receive_messages(struct high_level_state *hls)
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-		const struct cfg_instr_msg *msg;
+		const struct msg_template *msg;
 		struct msg_slot *slot;
 
-		if (instr->nr_rx_msg == 0) {
+		if (!instr->rx_msg) {
 			low_level_state_push(&new_llsa, lls);
 			hls->ll_states.content[i] = NULL;
 			continue;
@@ -736,7 +735,7 @@ receive_messages(struct high_level_state *hls)
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr;
-		const struct cfg_instr_msg *msg;
+		const struct msg_template *msg;
 		int rx_succeeded;
 
 		if (!lls)
@@ -880,10 +879,10 @@ send_messages(struct high_level_state *hls)
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-		const struct cfg_instr_msg *msg;
+		const struct msg_template *msg;
 		struct message *tx_msg;
 
-		if (instr->nr_tx_msg == 0)
+		if (!instr->tx_msg)
 			continue;
 
 		have_sends = 1;
@@ -893,8 +892,7 @@ send_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		assert(instr->nr_tx_msg == 1);
-		msg = &instr->tx_msg[0];
+		msg = instr->tx_msg;
 		tx_msg = new_message(lls, msg);
 		debug("Send %x via %p\n", tx_msg->id, tx_msg);
 		for (j = 0; j < msg->payload_size; j++) {
@@ -945,7 +943,7 @@ send_messages(struct high_level_state *hls)
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
 
-		if (instr->nr_tx_msg != 0 && !lls->done_tx) {
+		if (instr->tx_msg && !lls->done_tx) {
 			debug("Send failed\n");
 			exit_thread(lls);
 			low_level_state_erase_idx(&hls->ll_states, i);
