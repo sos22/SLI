@@ -137,6 +137,46 @@ add_empty_array(FILE *f,
 	fprintf(f,"%s.%s = 0,\n", prefix, sz_field);
 }
 
+static void
+emit_message_structures(FILE *f,
+			const std::set<happensBeforeEdge *> &messages,
+			crashEnforcementData &ced,
+			const ThreadCfgLabel &oldLabel,
+			int newLabel,
+			const char *msgType)
+{
+	int cntr;
+	cntr = 0;
+	for (auto it2 = messages.begin(); it2 != messages.end(); it2++) {
+		happensBeforeEdge *hb = *it2;
+		cntr++;
+		if (hb->content.size() != 0) {
+			fprintf(f, "static const simslot_t instr_%d_%s_payload_%d[] = {",
+				newLabel, msgType, cntr);
+			for (unsigned x = 0; x < hb->content.size(); x++) {
+				if (x != 0)
+					fprintf(f, ", ");
+				fprintf(f, "%d", ced.exprsToSlots(oldLabel.thread, hb->content[x]).idx);
+			}
+			fprintf(f, "};\n");
+		}
+	}
+	cntr = 0;
+	fprintf(f, "static const struct cfg_instr_msg instr_%d_%s[] = {\n", newLabel, msgType);
+	for (auto it2 = messages.begin(); it2 != messages.end(); it2++) {
+		happensBeforeEdge *hb = *it2;
+		cntr++;
+		fprintf(f, "    { .msg_id = 0x%x,\n", hb->msg_id);
+		fprintf(f, "      .payload_size = %zd,\n", hb->content.size());
+		if (hb->content.size() != 0)
+			fprintf(f, "      .payload = instr_%d_%s_payload_%d,", newLabel, msgType, cntr);
+		else
+			fprintf(f, "      .payload = NULL,");
+		fprintf(f, "    },\n");
+	}
+	fprintf(f, "};\n");
+}
+
 struct cfg_annotation_summary {
 	bool have_stash;
 	bool have_rx_msg;
@@ -229,37 +269,11 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 			assert(!(rxMsg.empty() && txMsg.empty()));
 			if (!rxMsg.empty()) {
-				fprintf(f, "static const struct cfg_instr_msg instr_%d_rx[] = {\n", newLabel);
-				for (auto it2 = rxMsg.begin(); it2 != rxMsg.end(); it2++) {
-					happensBeforeEdge *hb = *it2;
-					fprintf(f, "    { .msg_id = 0x%x,\n", hb->msg_id);
-					fprintf(f, "      .payload_size = %zd,\n", hb->content.size());
-					fprintf(f, "      .payload = {");
-					for (unsigned x = 0; x < hb->content.size(); x++) {
-						if (x != 0)
-							fprintf(f, ", ");
-						fprintf(f, "%d", ced.exprsToSlots(oldLabel.thread, hb->content[x]).idx);
-					}
-					fprintf(f, "}\n    },\n");
-				}
-				fprintf(f, "};\n");
+				emit_message_structures(f, rxMsg, ced, oldLabel, newLabel, "rx");
 				summary.have_rx_msg = true;
 			}
 			if (!txMsg.empty()) {
-				fprintf(f, "static const struct cfg_instr_msg instr_%d_tx[] = {\n", newLabel);
-				for (auto it2 = txMsg.begin(); it2 != txMsg.end(); it2++) {
-					happensBeforeEdge *hb = *it2;
-					fprintf(f, "    { .msg_id = 0x%x,\n", hb->msg_id);
-					fprintf(f, "      .payload_size = %zd,\n", hb->content.size());
-					fprintf(f, "      .payload = {");
-					for (unsigned x = 0; x < hb->content.size(); x++) {
-						if (x != 0)
-							fprintf(f, ", ");
-						fprintf(f, "%d", ced.exprsToSlots(oldLabel.thread, hb->content[x]).idx);
-					}
-					fprintf(f, "}\n    },\n");
-				}
-				fprintf(f, "};\n");
+				emit_message_structures(f, txMsg, ced, oldLabel, newLabel, "tx");
 				summary.have_tx_msg = true;
 			}
 		}

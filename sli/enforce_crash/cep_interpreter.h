@@ -7,7 +7,7 @@ typedef int simslot_t;
 struct cfg_instr_msg {
 	int msg_id;
 	unsigned payload_size;
-	const simslot_t payload[];
+	const simslot_t *payload;
 };
 
 struct cfg_instr_stash {
