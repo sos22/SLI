@@ -84,7 +84,6 @@ struct reg_struct {
 	__DECL_REG(dx);
 	__DECL_REG(cx);
 	__DECL_REG(bx);
-	__DECL_REG(sp);
 	__DECL_REG(bp);
 	__DECL_REG(si);
 	__DECL_REG(di);
@@ -97,6 +96,7 @@ struct reg_struct {
 	unsigned long r14;
 	unsigned long r15;
 	__DECL_REG(flags);
+	__DECL_REG(sp);
 };
 
 /* One of the messages which is actually sent. */
@@ -119,6 +119,22 @@ struct msg_rx_struct {
 	struct message_array messages;
 };
 mk_flex_array(msg_rx_struct);
+
+/* All of the state which we need to maintain for each physical client
+ * thread.  Pointed to by GS_BASE. */
+struct per_thread_state {
+	/* The initial interpreter rsp is the rsp field of
+	   client_regs.  The trampoline will transition to this stack,
+	   push all the other registers, and then jump into the
+	   interpreter proper, so we end up with the interpreter
+	   running on the interpreter stack and the client regs
+	   stashed in client_regs. */
+	unsigned long initial_interpreter_rsp;
+	/* -16 rather than the more obvious -8 because that gives us
+            better stack alignment. */
+	unsigned char interpreter_stack[PAGE_SIZE - 16 - sizeof(struct reg_struct)];
+	struct reg_struct client_regs;
+};
 
 /* Rendezvous points for unbound low-level threads.  When an unbound
  * thread wants to send or receive a message it will register itself
@@ -386,16 +402,32 @@ release_message(struct message *msg)
 	}
 }
 
-static void
-exit_interpreter(struct high_level_state *hls, struct reg_struct *regs)
+static struct per_thread_state *
+find_pts(void)
 {
+	unsigned long initial_interpreter_stack;
+	struct per_thread_state *res;
+	asm("movq %%gs:0, %0\n"
+	    : "=r" (initial_interpreter_stack)
+		);
+	res = (struct per_thread_state *)(initial_interpreter_stack - offsetof(struct per_thread_state, client_regs.rsp));
+	assert(res->initial_interpreter_rsp == initial_interpreter_stack);
+	return res;
+}
+
+static void
+exit_interpreter(void)
+{
+	struct per_thread_state *pts = find_pts();
 	exit_routine_t *exit_routine;
 
-	exit_routine = find_exit_stub(regs->rip);
-	debug("Exit stub for %lx is at %p (regs %p)\n", regs->rip, exit_routine, regs);
-	debug("Exit to %lx, rax %lx, rbp %lx\n", regs->rip, regs->rax, regs->rbp);
+	exit_routine = find_exit_stub(pts->client_regs.rip);
+	debug("Exit to %lx, rax %lx, rbp %lx\n",
+	      pts->client_regs.rip,
+	      pts->client_regs.rax,
+	      pts->client_regs.rbp);
 	release_big_lock();
-	exit_routine(regs);
+	exit_routine(&pts->client_regs);
 	/* shouldn't get here */
 	abort();
 }
@@ -604,9 +636,11 @@ receive_messages(struct high_level_state *hls)
 				assert(lls->bound_lls->bound_lls == lls);
 				if (lls->bound_lls->outgoing_msg) {
 #warning apply message filter here
+					debug("Receive from bound thread\n");
 					lls->incoming_msg = lls->bound_lls->outgoing_msg;
 					lls->bound_lls->outgoing_msg = NULL;
 				} else {
+					debug("Bound thread with nothing outstanding; go to RX state\n");
 					lls->bound_rx = 1;
 					need_delay = 1;
 				}
@@ -718,8 +752,10 @@ receive_messages(struct high_level_state *hls)
 				}
 			}
 		}
-		if (!rx_succeeded)
+		if (!rx_succeeded) {
+			debug("rx failed\n");
 			exit_thread(lls);
+		}
 	}
 
 	/* And now we're done. */
@@ -767,8 +803,11 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 				       rip);
 			}
 		}
-		if (!preserve)
+		if (!preserve) {
+			if (current_cfg_node->nr_successors == 0)
+				debug("successfully finished this CFG\n");
 			exit_thread(lls);
+		}
 	}
 	hls->ll_states.sz -= r;
 	memmove(hls->ll_states.content, hls->ll_states.content + r, sizeof(hls->ll_states.content[0]) * hls->ll_states.sz);
@@ -909,48 +948,50 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 {
 	check_for_ll_thread_start(hls, regs);
 	if (hls->ll_states.sz == 0)
-		exit_interpreter(hls, regs);
+		exit_interpreter();
 
 	receive_messages(hls);
 	if (hls->ll_states.sz == 0)
-		exit_interpreter(hls, regs);
+		exit_interpreter();
 
 	emulate_underlying_instruction(hls, regs);
 
 	send_messages(hls);
 	if (hls->ll_states.sz == 0)
-		exit_interpreter(hls, regs);
+		exit_interpreter();
 
 	advance_through_cfg(hls, regs->rip);
 }
 
 static void
-start_interpreting(int entrypoint_idx, struct reg_struct *regs)
+start_interpreting(int entrypoint_idx)
 {
-	struct high_level_state hls;
 	const struct cep_entry_point *entry_point = plan.entry_points[entrypoint_idx];
+	struct per_thread_state *pts = find_pts();
+	struct high_level_state hls;
 
-	debug("Start interpreting idx %d, regs at %p\n", entrypoint_idx, regs);
+	debug("Start interpreting idx %d, pts at %p, regs at %p\n",
+	      entrypoint_idx,
+	      pts,
+	      &pts->client_regs);
 	init_high_level_state(&hls);
-	regs->rip = entry_point->orig_rip;
-	regs->rsp = (unsigned long)regs + sizeof(regs) + 0x80;
+	pts->client_regs.rip = entry_point->orig_rip;
 	while (1) {
 		acquire_big_lock();
-		advance_hl_interpreter(&hls, regs);
+		advance_hl_interpreter(&hls, &pts->client_regs);
 		release_big_lock();
 	}
 	abort();
 }
-
-#warning the trampolines should really switch to another stack!
 
 /* We have two types of trampolines, one for transitioning from client
    code into the interpreter and one for going from the interpreter to
    client code. */
 asm(
 "__trampoline_client_to_interp_start:\n"
-"    lea -0x80(%rsp), %rsp\n"
-"    pushf\n"
+"    mov %rsp, %gs:4088\n" /* Stash client RSP */
+"    mov %gs:0, %rsp\n"    /* Switch to interpreter stack */
+"    pushf\n"              /* Save other client registers */
 "    push %r15\n"
 "    push %r14\n"
 "    push %r13\n"
@@ -962,14 +1003,11 @@ asm(
 "    push %rdi\n"
 "    push %rsi\n"
 "    push %rbp\n"
-"    push %rsp\n" /* Gets fixed up later */
 "    push %rbx\n"
 "    push %rcx\n"
 "    push %rdx\n"
 "    push %rax\n"
-"    push %rax\n" /* Leave space for rip */
-"    movq %rsp, %rsi\n"
-"    lea -0x8(%rsp), %rsp\n"
+"    push %rax\n"          /* Leave space for rip */
 "__trampoline_client_to_interp_load_edi:\n"
 "    mov $0x11223344, %edi\n"
 "__trampoline_client_to_interp_load_rdx:\n"
@@ -979,12 +1017,11 @@ asm(
 "\n"
 "__trampoline_interp_to_client_start:\n"
 "    movq %rdi, %rsp\n"
-"    popq %rax\n" /* RIP, but we have another plan for restoring that */
+"    popq %rax\n"          /* RIP, but we have another plan for restoring that */
 "    popq %rax\n"
 "    popq %rdx\n"
 "    popq %rcx\n"
 "    popq %rbx\n"
-"    popq %rbp\n" /* RSP, but we have another plan for restoring that */
 "    popq %rbp\n"
 "    popq %rsi\n"
 "    popq %rdi\n"
@@ -997,7 +1034,7 @@ asm(
 "    popq %r14\n"
 "    popq %r15\n"
 "    popf\n"
-"    lea 0x80(%rsp), %rsp\n"
+"    popq %rsp\n"
 "__trampoline_interp_to_client_jmp_client:\n"
 ".byte 0xe9\n"
 ".byte 0\n"
@@ -1069,6 +1106,16 @@ find_exit_stub(unsigned long rip)
 	return (exit_routine_t *)(cursor + 1);
 }
 
+static void
+alloc_thread_state_area(void)
+{
+	struct per_thread_state *pts;
+	pts = mmap(NULL, PAGE_SIZE * 1024, PROT_READ|PROT_WRITE,
+		     MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+	pts->initial_interpreter_rsp =
+		(unsigned long)&pts->client_regs.rsp;
+	arch_prctl(ARCH_SET_GS, (unsigned long)pts);
+}
 /* This is hooked into clone() so that we're called instead of the
    usual child thread function.  The child thread function and its
    sole argument are passed in as @fn and @fn_arg.  Create our
@@ -1078,12 +1125,9 @@ find_exit_stub(unsigned long rip)
 static void
 clone_hook_c(int (*fn)(void *), void *fn_arg)
 {
-	void *state;
 	int res;
 
-	state = mmap(NULL, PAGE_SIZE * 1024, PROT_READ|PROT_WRITE,
-		     MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-	arch_prctl(ARCH_SET_GS, (unsigned long)state);
+	alloc_thread_state_area();
 
 	have_cloned = 1;
 
@@ -1147,7 +1191,6 @@ activate(void)
 {
 	unsigned x;
 	long delta;
-	void *state;
 	char buf[4096];
 	ssize_t s;
 
@@ -1165,9 +1208,7 @@ activate(void)
 
 	msg_slots = calloc(sizeof(msg_slots[0]), plan.msg_id_limit - plan.base_msg_id);
 
-	state = mmap(NULL, PAGE_SIZE * 1024, PROT_READ|PROT_WRITE,
-		     MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-	arch_prctl(ARCH_SET_GS, (unsigned long)state);
+	alloc_thread_state_area();
 
 	/* We need to patch each entry point so that it turns into a
 	   jump instruction which targets the patch.  Do so. */
