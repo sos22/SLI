@@ -49,6 +49,8 @@ struct low_level_state {
 
 	cfg_label_t cfg_node;
 
+	int nr_simslots;
+
 	/* Once we've received a message from an LLS, we become bound
 	 * to that LLS and in future will only receive messages from
 	 * them.  Can be BOUND_LLS_EXITED if we've bound to a thread
@@ -66,6 +68,8 @@ struct low_level_state {
 
 	struct message *incoming_msg;
 	struct message *outgoing_msg;
+
+	unsigned long simslots[];
 };
 
 mk_flex_array(low_level_state);
@@ -227,10 +231,11 @@ ctxt_matches(const struct cep_entry_ctxt *ctxt, const struct reg_struct *regs)
 }
 
 static struct low_level_state *
-new_low_level_state(void)
+new_low_level_state(int nr_simslots)
 {
-	struct low_level_state *lls = calloc(sizeof(struct low_level_state), 1);
+	struct low_level_state *lls = calloc(sizeof(struct low_level_state) + nr_simslots * sizeof(lls->simslots[0]), 1);
 	lls->refcount = 1;
+	lls->nr_simslots = nr_simslots;
 	return lls;
 }
 
@@ -247,9 +252,9 @@ new_message(struct low_level_state *lls, const struct cfg_instr_msg *template)
 }
 
 static void
-start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label)
+start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label, int nr_simslots)
 {
-	struct low_level_state *lls = new_low_level_state();
+	struct low_level_state *lls = new_low_level_state(nr_simslots);
 	lls->cfg_node = starting_label;
 	lls->hls = hls;
 	low_level_state_push(&hls->ll_states, lls);
@@ -447,20 +452,22 @@ exit_thread(struct low_level_state *ll)
 static struct low_level_state *
 clone_lls(struct low_level_state *lls)
 {
-	struct low_level_state *new_lls = new_low_level_state();
+	struct low_level_state *new_lls = new_low_level_state(lls->nr_simslots);
 	new_lls->hls = lls->hls;
 	new_lls->cfg_node = lls->cfg_node;
+	memcpy(new_lls->simslots, lls->simslots, sizeof(new_lls->simslots[0]) * new_lls->nr_simslots);
 	assert(!lls->bound_rx);
 	assert(!lls->outgoing_msg);
 	assert(!lls->incoming_msg);
 
 	if (lls->bound_lls && lls->bound_lls != BOUND_LLS_EXITED) {
-		struct low_level_state *new_bound_lls = new_low_level_state();
+		struct low_level_state *new_bound_lls = new_low_level_state(lls->bound_lls->nr_simslots);
 		new_bound_lls->hls = lls->bound_lls->hls;
 		new_bound_lls->cfg_node = lls->bound_lls->cfg_node;
 		new_bound_lls->bound_lls = new_lls;
 		new_bound_lls->bound_rx = lls->bound_lls->bound_rx;
 		new_bound_lls->done_tx = lls->bound_lls->done_tx;
+		memcpy(new_bound_lls->simslots, lls->bound_lls->simslots, sizeof(new_bound_lls->simslots[0]) * new_bound_lls->nr_simslots);
 		if (lls->bound_lls->incoming_msg) {
 			/* Old bound LLS was in the process of
 			   receiving a message from the old LLS -> new
@@ -520,9 +527,12 @@ clone_lls(struct low_level_state *lls)
 static void
 rendezvous_threads_rx(struct low_level_state_array *llsa,
 		      struct low_level_state *rx_lls,
-		      struct message *msg)
+		      struct message *msg,
+		      const struct cfg_instr_msg *template)
 {
 	struct low_level_state *tx_lls = msg->sender;
+	int x;
+
 	assert(tx_lls);
 
 	if (tx_lls->bound_lls && tx_lls->bound_lls != rx_lls) {
@@ -537,9 +547,10 @@ rendezvous_threads_rx(struct low_level_state_array *llsa,
 		   of send_message(), which can't receive messages. */
 		assert(!tx_lls->incoming_msg);
 
-		dupe_tx_lls = new_low_level_state();
+		dupe_tx_lls = new_low_level_state(tx_lls->nr_simslots);
 		dupe_tx_lls->hls = tx_lls->hls;
 		dupe_tx_lls->cfg_node = tx_lls->cfg_node;
+		memcpy(dupe_tx_lls->simslots, tx_lls->simslots, sizeof(dupe_tx_lls->simslots[0]) * tx_lls->nr_simslots);
 
 		tx_lls = dupe_tx_lls;
 		low_level_state_push(&tx_lls->hls->ll_states, tx_lls);
@@ -551,9 +562,10 @@ rendezvous_threads_rx(struct low_level_state_array *llsa,
 
 		struct low_level_state *dupe_rx_lls;
 		assert(rx_lls->bound_lls != BOUND_LLS_EXITED);
-		dupe_rx_lls = new_low_level_state();
+		dupe_rx_lls = new_low_level_state(rx_lls->nr_simslots);
 		dupe_rx_lls->hls = rx_lls->hls;
 		dupe_rx_lls->cfg_node = rx_lls->cfg_node;
+		memcpy(dupe_rx_lls->simslots, rx_lls->simslots, sizeof(dupe_rx_lls->simslots[0]) * rx_lls->nr_simslots);
 
 		/* Note that rx_lls is not registered with an HLS at
 		   this point. */
@@ -572,7 +584,11 @@ rendezvous_threads_rx(struct low_level_state_array *llsa,
 
 	tx_lls->done_tx = 1;
 
-#warning unpack message here
+	assert(msg->payload_sz == template->payload_size);
+	for (x = 0; x < msg->payload_sz; x++) {
+		assert(template->payload[x] < rx_lls->nr_simslots);
+		rx_lls->simslots[template->payload[x]] = msg->payload[x];
+	}
 
 	low_level_state_push(llsa, rx_lls);
 }
@@ -735,7 +751,7 @@ receive_messages(struct high_level_state *hls)
 				debug("Bound rendezvous via %p\n", rxed_msg);
 #warning apply message filter here
 				lls->incoming_msg = NULL;
-				rendezvous_threads_rx(&new_llsa, lls, rxed_msg);
+				rendezvous_threads_rx(&new_llsa, lls, rxed_msg, msg);
 				release_message(rxed_msg);
 				rx_succeeded = 1;
 			}
@@ -747,7 +763,7 @@ receive_messages(struct high_level_state *hls)
 #warning apply message filter here
 					debug("Rendezvousing via message %p (%d, %d/%d)\n",
 					       rxed_msg, i, j, msg_rx.messages.sz);
-					rendezvous_threads_rx(&new_llsa, lls, rxed_msg);
+					rendezvous_threads_rx(&new_llsa, lls, rxed_msg, msg);
 					rx_succeeded = 1;
 				}
 			}
@@ -822,7 +838,10 @@ check_for_ll_thread_start(struct high_level_state *hls, const struct reg_struct 
 			continue;
 		for (j = 0; j < plan.entry_points[i]->nr_entry_ctxts; j++) {
 			if (ctxt_matches(plan.entry_points[i]->ctxts[j], regs))
-				start_low_level_thread(hls, plan.entry_points[i]->ctxts[j]->cfg_label);
+				start_low_level_thread(
+					hls,
+					plan.entry_points[i]->ctxts[j]->cfg_label,
+					plan.entry_points[i]->ctxts[j]->nr_simslots);
 		}
 	}
 }
@@ -878,7 +897,10 @@ send_messages(struct high_level_state *hls)
 		msg = &instr->tx_msg[0];
 		tx_msg = new_message(lls, msg);
 		debug("Send %x via %p\n", tx_msg->id, tx_msg);
-#warning actually populate the message payload
+		for (j = 0; j < msg->payload_size; j++) {
+			assert(msg->payload[j] < lls->nr_simslots);
+			tx_msg->payload[j] = lls->simslots[msg->payload[j]];
+		}
 		if (lls->bound_lls) {
 			if (lls->bound_lls->bound_rx) {
 				assert(!lls->bound_lls->incoming_msg);
