@@ -31,6 +31,7 @@ struct cfg_instr {
 
 struct cep_entry_ctxt {
 	cfg_label_t cfg_label;
+	unsigned nr_simslots;
 	unsigned nr_stack_slots;
 	struct {
 		unsigned offset;

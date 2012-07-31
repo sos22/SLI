@@ -44,6 +44,17 @@ public:
 	}
 };
 
+static int
+max_simslot(unsigned tid, const slotMapT &sm)
+{
+	int res = 0;
+	for (auto it = sm.begin(); it != sm.end(); it++)
+		if (it->first.first == tid &&
+		    it->second.idx > res)
+			res = it->second.idx;
+	return res;
+}
+
 static void
 compute_entry_point_list(crashEnforcementData &ced, FILE *f, const CfgRelabeller &cfgLabels, const char *ident)
 {
@@ -65,6 +76,7 @@ compute_entry_point_list(crashEnforcementData &ced, FILE *f, const CfgRelabeller
 		VexRip v(n->rip);
 		fprintf(f, "static const struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
+		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(l.thread, ced.exprsToSlots) + 1);
 		fprintf(f, "    .nr_stack_slots = %zd,\n", v.stack.size() - 1);
 		fprintf(f, "    .stack = {\n");
 #warning need to actually calculate the offsets for stack validation
