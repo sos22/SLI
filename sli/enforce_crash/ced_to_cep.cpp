@@ -220,7 +220,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				fprintf(f, "static const struct cfg_instr_msg instr_%d_rx[] = {\n", newLabel);
 				for (auto it2 = rxMsg.begin(); it2 != rxMsg.end(); it2++) {
 					happensBeforeEdge *hb = *it2;
-					fprintf(f, "    { .msg_id = 0x%d,\n", hb->msg_id);
+					fprintf(f, "    { .msg_id = 0x%x,\n", hb->msg_id);
 					fprintf(f, "      .payload_size = %zd,\n", hb->content.size());
 					fprintf(f, "      .payload = {");
 					for (unsigned x = 0; x < hb->content.size(); x++) {
@@ -237,7 +237,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				fprintf(f, "static const struct cfg_instr_msg instr_%d_tx[] = {\n", newLabel);
 				for (auto it2 = txMsg.begin(); it2 != txMsg.end(); it2++) {
 					happensBeforeEdge *hb = *it2;
-					fprintf(f, "    { .msg_id = 0x%d,\n", hb->msg_id);
+					fprintf(f, "    { .msg_id = 0x%x,\n", hb->msg_id);
 					fprintf(f, "      .payload_size = %zd,\n", hb->content.size());
 					fprintf(f, "      .payload = {");
 					for (unsigned x = 0; x < hb->content.size(); x++) {
@@ -286,6 +286,43 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 	fprintf(f, "    }\n};\n");
 }
 
+static int
+lowest_msg_id(const crashEnforcementData &ced)
+{
+	unsigned res = 0;
+	bool f = false;
+	for (auto it = ced.happensBeforePoints.begin();
+	     it != ced.happensBeforePoints.end();
+	     it++) {
+		for (auto it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++) {
+			if (!f || (*it2)->msg_id < res)
+				res = (*it2)->msg_id;
+			f = true;
+		}
+	}
+	return res;
+}
+static int
+highest_msg_id(const crashEnforcementData &ced)
+{
+	unsigned res = 0;
+	bool f = false;
+	for (auto it = ced.happensBeforePoints.begin();
+	     it != ced.happensBeforePoints.end();
+	     it++) {
+		for (auto it2 = it->second.begin();
+		     it2 != it->second.end();
+		     it2++) {
+			if (!f || (*it2)->msg_id > res)
+				res = (*it2)->msg_id;
+			f = true;
+		}
+	}
+	return res;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -314,6 +351,8 @@ main(int argc, char *argv[])
 	fprintf(stdout, "    .nr_entry_points = sizeof(__entry_points)/sizeof(__entry_points[0]),\n");
 	fprintf(stdout, "    .cfg_nodes = __cfg_nodes,\n");
 	fprintf(stdout, "    .nr_cfg_nodes = sizeof(__cfg_nodes)/sizeof(__cfg_nodes[0]),\n");
+	fprintf(stdout, "    .base_msg_id = 0x%x,\n", lowest_msg_id(ced));
+	fprintf(stdout, "    .msg_id_limit = 0x%x,\n", highest_msg_id(ced) + 1);
 	fprintf(stdout, "};\n");
 
 	fprintf(stdout, "\n");

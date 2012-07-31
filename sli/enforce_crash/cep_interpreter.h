@@ -47,7 +47,64 @@ struct crash_enforcement_plan {
 	const struct cep_entry_point **entry_points;
 	int nr_cfg_nodes;
 	const struct cfg_instr *cfg_nodes;
+	int base_msg_id;
+	int msg_id_limit;
 };
+
+#define mk_flex_array(name)						\
+	struct name ## _array {						\
+		int sz;							\
+		int allocated;						\
+		struct name **content;					\
+	};								\
+	void name ## _push(struct name ## _array *arr,			\
+			   struct name *elem)				\
+	{								\
+		if (arr->sz == arr->allocated) {			\
+			arr->allocated += 8;				\
+			arr->content = realloc(				\
+				arr->content,				\
+				sizeof(arr->content[0])*arr->allocated); \
+		}							\
+		arr->content[arr->sz] = elem;				\
+		arr->sz++;						\
+	}								\
+	void name ## _erase_first(struct name ## _array *arr,		\
+				  struct name *elem)			\
+	{								\
+		int i;							\
+		for (i = 0; i < arr->sz; i++) {				\
+			if (arr->content[i] == elem) {			\
+				memmove(arr->content + i,		\
+					arr->content + i + 1,		\
+					sizeof(arr->content[0]) * (arr->sz - i - 1)); \
+				arr->sz--;				\
+				return;					\
+			}						\
+			abort();					\
+		}							\
+	}								\
+	void name ## _erase_idx(struct name ## _array *arr,		\
+				int idx)				\
+	{								\
+		assert(idx < arr->sz);					\
+		assert(idx >= 0);					\
+		memmove(arr->content + idx,				\
+			arr->content + idx + 1,				\
+			sizeof(arr->content[0]) * (arr->sz - idx - 1));	\
+		arr->sz--;						\
+	}								\
+	void name ## _arr_cleanup(struct name ## _array *arr)		\
+	{								\
+		free(arr->content);					\
+	}								\
+	void name ## _arr_swizzle(struct name ## _array *dest,		\
+				  struct name ## _array *src)		\
+	{								\
+		free(dest->content);					\
+		*dest = *src;						\
+		memset(src, 0, sizeof(*src));				\
+	}
 
 extern const struct crash_enforcement_plan plan;
 extern const char program_to_patch[];
