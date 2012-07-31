@@ -1011,7 +1011,7 @@ start_interpreting(int entrypoint_idx)
    client code. */
 asm(
 "__trampoline_client_to_interp_start:\n"
-"    mov %rsp, %gs:4088\n" /* Stash client RSP */
+"    mov %rsp, %gs:4080\n" /* Stash client RSP */
 "    mov %gs:0, %rsp\n"    /* Switch to interpreter stack */
 "    pushf\n"              /* Save other client registers */
 "    push %r15\n"
