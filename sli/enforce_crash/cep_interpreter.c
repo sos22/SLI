@@ -19,7 +19,13 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Define _PAGE_SIZE and _STACK_SIZE which don't include the ul
+ * suffix, because that makes it easier to use them in inline
+ * assembly. */
+#define _PAGE_SIZE 4096
+#define _STACK_SIZE (_PAGE_SIZE * 4)
 #define PAGE_SIZE 4096ul
+#define STACK_SIZE (PAGE_SIZE * 4)
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define MAX_DELAY_US (100000)
 
@@ -42,14 +48,16 @@ typedef unsigned long uint64_t;
 #define BOUND_LLS_EXITED ((struct low_level_state *)1)
 
 struct low_level_state {
-	int refcount; /* HLS holds a reference, and so do all outgoing
-		       * messages. */
-
-	struct high_level_state *hls;
+	int refcount; /* HLS holds a reference. */
 
 	cfg_label_t cfg_node;
 
 	int nr_simslots;
+
+	int last_operation_is_send;
+	int await_bound_lls_exit;
+
+	struct high_level_state *hls;
 
 	/* Once we've received a message from an LLS, we become bound
 	 * to that LLS and in future will only receive messages from
@@ -58,20 +66,13 @@ struct low_level_state {
 	 * will fail. */
 	struct low_level_state *bound_lls;
 
-	/* True if we're currently trying to receive from @bound_lls. */
-	int bound_rx;
-
-	/* Used by receiving LLSs to indicate to a transmitting LLS
-	   that the TX has succeeded and that the the transmitting LLS
-	   shouldn't exit. */
-	int done_tx;
-
-	struct message *incoming_msg;
-	struct message *outgoing_msg;
+	struct msg_template *bound_sending_message;
+	struct msg_template *unbound_sending_message;
+	struct msg_template *bound_receiving_message;
+	struct msg_template *unbound_receiving_message;
 
 	unsigned long simslots[];
 };
-
 mk_flex_array(low_level_state);
 
 struct high_level_state {
@@ -103,27 +104,6 @@ struct reg_struct {
 	__DECL_REG(sp);
 };
 
-/* One of the messages which is actually sent. */
-struct message {
-	int refcount;
-	unsigned id;
-	struct low_level_state *sender;
-	unsigned payload_sz;
-	unsigned long payload[];
-};
-mk_flex_array(message);
-
-/* A thing which can receive messages.  When a high-level interpreter
- * wants to perform a receive it figures out what it might possibly
- * want to receive and then arranges for all of the
- * potentially-relevant messages to get routed to one of these, and
- * then performs the low-level receives on that message pool. */
-struct msg_rx_struct {
-	/* The messages which have been received so far. */
-	struct message_array messages;
-};
-mk_flex_array(msg_rx_struct);
-
 /* All of the state which we need to maintain for each physical client
  * thread.  Pointed to by GS_BASE. */
 struct per_thread_state {
@@ -136,19 +116,12 @@ struct per_thread_state {
 	unsigned long initial_interpreter_rsp;
 	/* -16 rather than the more obvious -8 because that gives us
             better stack alignment. */
-	unsigned char interpreter_stack[PAGE_SIZE - 16 - sizeof(struct reg_struct)];
+	unsigned char interpreter_stack[STACK_SIZE - 16 - sizeof(struct reg_struct)];
 	struct reg_struct client_regs;
 };
 
-/* Rendezvous points for unbound low-level threads.  When an unbound
- * thread wants to send or receive a message it will register itself
- * in a message slot.  Any matching operation which comes along later
- * will notice it in the slot and rendezvous from there. */
-struct msg_slot {
-	struct message_array outstanding_send;
-	struct msg_rx_struct_array receivers;
-};
-static struct msg_slot *msg_slots;
+static struct low_level_state_array message_senders;
+static struct low_level_state_array message_receivers;
 
 typedef void exit_routine_t(struct reg_struct *);
 static exit_routine_t *find_exit_stub(unsigned long rip);
@@ -177,6 +150,36 @@ now(void)
 	if (start == 0)
 		start = res;
 	return res - start;
+}
+
+static void
+sanity_check_low_level_state(const struct low_level_state *lls, int expected_present)
+{
+	int i;
+	int present;
+	assert(lls->refcount > 0);
+	assert(lls->hls);
+	if (lls->bound_lls && lls->bound_lls != BOUND_LLS_EXITED) {
+		assert(lls->bound_lls->bound_lls == lls);
+		assert(lls->bound_lls->hls != lls->hls);
+	}
+	present = 0;
+	for (i = 0; i < lls->hls->ll_states.sz; i++)
+		if (lls->hls->ll_states.content[i] == lls)
+			present++;
+	assert(present == expected_present);
+}
+
+static void
+sanity_check_high_level_state(const struct high_level_state *hls)
+{
+	int i;
+	assert(hls->ll_states.sz >= 0);
+	assert(hls->ll_states.sz <= hls->ll_states.allocated);
+	for (i = 0; i < hls->ll_states.sz; i++) {
+		assert(hls->ll_states.content[i]);
+		sanity_check_low_level_state(hls->ll_states.content[i], 1);
+	}
 }
 
 /* Allocate some memory which can be both written and executed.  Used
@@ -231,33 +234,23 @@ ctxt_matches(const struct cep_entry_ctxt *ctxt, const struct reg_struct *regs)
 }
 
 static struct low_level_state *
-new_low_level_state(int nr_simslots)
+new_low_level_state(struct high_level_state *hls, int nr_simslots)
 {
 	struct low_level_state *lls = calloc(sizeof(struct low_level_state) + nr_simslots * sizeof(lls->simslots[0]), 1);
 	lls->refcount = 1;
 	lls->nr_simslots = nr_simslots;
+	lls->hls = hls;
+	sanity_check_low_level_state(lls, 0);
 	return lls;
-}
-
-static struct message *
-new_message(struct low_level_state *lls, const struct msg_template *template)
-{
-	struct message *res = malloc(sizeof(*res) + template->payload_size * sizeof(res->payload[0]));
-	res->refcount = 1;
-	res->id = template->msg_id;
-	res->sender = lls;
-	res->payload_sz = template->payload_size;
-	lls->refcount++;
-	return res;
 }
 
 static void
 start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label, int nr_simslots)
 {
-	struct low_level_state *lls = new_low_level_state(nr_simslots);
+	struct low_level_state *lls = new_low_level_state(hls, nr_simslots);
 	lls->cfg_node = starting_label;
-	lls->hls = hls;
 	low_level_state_push(&hls->ll_states, lls);
+	sanity_check_low_level_state(lls, 1);
 }
 
 static void
@@ -397,16 +390,6 @@ release_lls(struct low_level_state *lls)
 		free(lls);
 }
 
-static void
-release_message(struct message *msg)
-{
-	msg->refcount--;
-	if (!msg->refcount) {
-		release_lls(msg->sender);
-		free(msg);
-	}
-}
-
 static struct per_thread_state *
 find_pts(void)
 {
@@ -441,6 +424,7 @@ static void
 exit_thread(struct low_level_state *ll)
 {
 	debug("Exit thread %d\n", ll->cfg_node);
+	sanity_check_low_level_state(ll, 0);
 	if (ll->bound_lls && ll->bound_lls != BOUND_LLS_EXITED) {
 		assert(ll->bound_lls->bound_lls == ll);
 		ll->bound_lls->bound_lls = BOUND_LLS_EXITED;
@@ -452,64 +436,29 @@ exit_thread(struct low_level_state *ll)
 static struct low_level_state *
 clone_lls(struct low_level_state *lls)
 {
-	struct low_level_state *new_lls = new_low_level_state(lls->nr_simslots);
-	new_lls->hls = lls->hls;
+	struct low_level_state *new_lls = new_low_level_state(lls->hls, lls->nr_simslots);
+	sanity_check_low_level_state(lls, 1);
 	new_lls->cfg_node = lls->cfg_node;
 	memcpy(new_lls->simslots, lls->simslots, sizeof(new_lls->simslots[0]) * new_lls->nr_simslots);
-	assert(!lls->bound_rx);
-	assert(!lls->outgoing_msg);
-	assert(!lls->incoming_msg);
+	new_lls->bound_lls = lls->bound_lls;
+	assert(!lls->bound_sending_message);
+	assert(!lls->bound_receiving_message);
+	assert(!lls->unbound_sending_message);
+	assert(!lls->unbound_receiving_message);
 
 	if (lls->bound_lls && lls->bound_lls != BOUND_LLS_EXITED) {
-		struct low_level_state *new_bound_lls = new_low_level_state(lls->bound_lls->nr_simslots);
-		new_bound_lls->hls = lls->bound_lls->hls;
+		struct low_level_state *new_bound_lls = new_low_level_state(lls->hls, lls->bound_lls->nr_simslots);
 		new_bound_lls->cfg_node = lls->bound_lls->cfg_node;
 		new_bound_lls->bound_lls = new_lls;
-		new_bound_lls->bound_rx = lls->bound_lls->bound_rx;
-		new_bound_lls->done_tx = lls->bound_lls->done_tx;
+		new_lls->bound_lls = new_bound_lls;
 		memcpy(new_bound_lls->simslots, lls->bound_lls->simslots, sizeof(new_bound_lls->simslots[0]) * new_bound_lls->nr_simslots);
-		if (lls->bound_lls->incoming_msg) {
-			/* Old bound LLS was in the process of
-			   receiving a message from the old LLS -> new
-			   bound LLS is in the process if receiving a
-			   message from the new LLS */
-			struct message *msg = malloc(sizeof(*msg) + lls->bound_lls->incoming_msg->payload_sz * sizeof(msg->payload[0]));
-			msg->refcount = 1;
-			msg->id = lls->bound_lls->incoming_msg->id;
-			msg->sender = new_lls;
-			new_lls->refcount++;
-			memcpy(msg->payload,
-			       lls->bound_lls->incoming_msg->payload,
-			       lls->bound_lls->incoming_msg->payload_sz * 8);
-			new_bound_lls->incoming_msg = msg;
-		}
-		if (lls->bound_lls->outgoing_msg) {
-			/* Likewise, if the old bound LLS was sending
-			   a message, the new bound LLS must be as
-			   well. */
-			struct message *msg = malloc(sizeof(*msg) + lls->bound_lls->outgoing_msg->payload_sz * sizeof(msg->payload[0]));
-			msg->refcount = 1;
-			msg->id = lls->bound_lls->outgoing_msg->id;
-			msg->sender = new_bound_lls;
-			new_bound_lls->refcount++;
-			memcpy(msg->payload,
-			       lls->bound_lls->outgoing_msg->payload,
-			       lls->bound_lls->outgoing_msg->payload_sz * 8);
-			new_bound_lls->outgoing_msg = msg;
-		}
-		/* We know that the old bound LLS isn't currently
-		   sending any unbound messages, because it's a bound
-		   LLS, and so there can't be any messages in the
-		   message slots. */
-#ifndef NDEBUG
-		{
-			int i, j;
-			for (i = 0; i < plan.msg_id_limit - plan.base_msg_id; i++) {
-				for (j = 0; j < msg_slots[i].outstanding_send.sz; j++)
-					assert(msg_slots[i].outstanding_send.content[j]->sender != lls->bound_lls);
-			}
-		}
-#endif
+		new_bound_lls->bound_receiving_message = lls->bound_lls->bound_receiving_message;
+		new_bound_lls->bound_sending_message = lls->bound_lls->bound_sending_message;
+
+		/* We don't clone unbound_*_messages, or register with
+		 * the global sender and receiver arrays, because the
+		 * new LLS is bound. */
+
 		low_level_state_push(&new_bound_lls->hls->ll_states, new_bound_lls);
 	}
 
@@ -517,80 +466,128 @@ clone_lls(struct low_level_state *lls)
 	return new_lls;
 }
 
-/* @lls is now going to receive message @msg.  Bind the threads
-   together and unpack the message. */
-/* Thread binding is, like most of the message passing logic, a bit
-   fiddly.  The key idea is that we need to set lls->bound_lls ==
-   msg->sender and msg->sender->bound_lls == lls, except that we're
-   not allowed to un-bind any LLSs in order to do so. The workaround
-   is to just duplicate any LLSs which are already bound. */
 static void
-rendezvous_threads_rx(struct low_level_state_array *llsa,
-		      struct low_level_state *rx_lls,
-		      struct message *msg,
-		      const struct msg_template *template)
+discharge_message(struct low_level_state *tx_lls,
+		  struct msg_template *tx_template,
+		  struct low_level_state *rx_lls,
+		  struct msg_template *rx_template)
 {
-	struct low_level_state *tx_lls = msg->sender;
 	int x;
 
-	assert(tx_lls);
+	tx_lls->last_operation_is_send = 1;
+	assert(tx_template->pair == rx_template);
+	assert(rx_template->pair == tx_template);
+	assert(rx_template->payload_size == tx_template->payload_size);
+	for (x = 0; x < rx_template->payload_size; x++) {
+		assert(rx_template->payload[x] < rx_lls->nr_simslots);
+		assert(tx_template->payload[x] < tx_lls->nr_simslots);
+		rx_lls->simslots[rx_template->payload[x]] = tx_lls->simslots[tx_template->payload[x]];
+	}
+}
 
-	if (tx_lls->bound_lls && tx_lls->bound_lls != rx_lls) {
+static void
+rendezvous_threads(struct low_level_state_array *llsa,
+		   int tx_is_local,
+		   struct low_level_state *tx_lls,
+		   struct low_level_state *rx_lls)
+{
+	struct msg_template *rx_template;
+	struct msg_template *tx_template;
+	int x;
+
+	assert(rx_lls->unbound_receiving_message);
+	assert(!rx_lls->unbound_sending_message);
+	assert(tx_lls->unbound_sending_message);
+	assert(!tx_lls->unbound_receiving_message);
+
+	assert(!rx_lls->bound_receiving_message);
+	assert(!rx_lls->bound_sending_message);
+	assert(!tx_lls->bound_sending_message);
+	assert(!tx_lls->bound_receiving_message);
+
+	rx_template = rx_lls->unbound_receiving_message;
+	tx_template = tx_lls->unbound_sending_message;
+	assert(rx_template == tx_template->pair);
+	assert(tx_template == rx_template->pair);
+
+	/* Note that we don't dupe the message send and receive state
+	   here.  That's because we're about to discharge the message
+	   operation in both LLSs. */
+	/* Possibly slightly surprising: we allow re-binding of
+	   threads which have been bound to exited threads.  That's
+	   valid because the thread we're binding to is in a message
+	   send or receive state, and if it's bound to a dead thread
+	   in one of those states it will itself exit shortly.  Given
+	   that, there's no point in duplicating it again, and we can
+	   just rescue the original thread by re-binding it to
+	   ourselves. */
+	if (tx_lls->bound_lls || tx_lls->bound_lls == BOUND_LLS_EXITED) {
 		/* The transmitting LLS is already bound, so dupe it
 		   and bind to the dupe instead. */
-
 		struct low_level_state *dupe_tx_lls;
 
-		assert(tx_lls->bound_lls != BOUND_LLS_EXITED);
+		assert(tx_lls->bound_lls != rx_lls);
 
-		/* Because the TX LLS is supposed to be in the middle
-		   of send_message(), which can't receive messages. */
-		assert(!tx_lls->incoming_msg);
-
-		dupe_tx_lls = new_low_level_state(tx_lls->nr_simslots);
-		dupe_tx_lls->hls = tx_lls->hls;
+		dupe_tx_lls = new_low_level_state(tx_lls->hls, tx_lls->nr_simslots);
 		dupe_tx_lls->cfg_node = tx_lls->cfg_node;
 		memcpy(dupe_tx_lls->simslots, tx_lls->simslots, sizeof(dupe_tx_lls->simslots[0]) * tx_lls->nr_simslots);
 
 		tx_lls = dupe_tx_lls;
-		low_level_state_push(&tx_lls->hls->ll_states, tx_lls);
+		if (!tx_is_local)
+			low_level_state_push(&tx_lls->hls->ll_states, tx_lls);
+		else
+			low_level_state_push(llsa, tx_lls);
 	}
-
-	if (rx_lls->bound_lls && rx_lls->bound_lls != tx_lls) {
+	if (rx_lls->bound_lls || rx_lls->bound_lls == BOUND_LLS_EXITED) {
 		/* We are already bound, so dupe ourselves and have
 		   the dupe bind instead. */
-
 		struct low_level_state *dupe_rx_lls;
-		assert(rx_lls->bound_lls != BOUND_LLS_EXITED);
-		dupe_rx_lls = new_low_level_state(rx_lls->nr_simslots);
-		dupe_rx_lls->hls = rx_lls->hls;
+
+		assert(rx_lls->bound_lls != tx_lls);
+
+		dupe_rx_lls = new_low_level_state(rx_lls->hls, rx_lls->nr_simslots);
 		dupe_rx_lls->cfg_node = rx_lls->cfg_node;
 		memcpy(dupe_rx_lls->simslots, rx_lls->simslots, sizeof(dupe_rx_lls->simslots[0]) * rx_lls->nr_simslots);
 
-		/* Note that rx_lls is not registered with an HLS at
-		   this point. */
+		rx_lls = dupe_rx_lls;
+		if (tx_is_local)
+			low_level_state_push(&rx_lls->hls->ll_states, rx_lls);
+		else
+			low_level_state_push(llsa, rx_lls);
 	}
 
 	/* Both LLSs are now unbound, so we can safely bind them
 	 * together. */
-	if (tx_lls->bound_lls != rx_lls) {
-		assert(!tx_lls->bound_lls);
-		assert(!rx_lls->bound_lls);
-		rx_lls->bound_lls = tx_lls;
-		tx_lls->bound_lls = rx_lls;
-	} else {
-		assert(rx_lls->bound_lls == tx_lls);
+	rx_lls->bound_lls = tx_lls;
+	tx_lls->bound_lls = rx_lls;
+
+	assert(rx_template->payload_size == tx_template->payload_size);
+	for (x = 0; x < rx_template->payload_size; x++) {
+		assert(rx_template->payload[x] < rx_lls->nr_simslots);
+		assert(tx_template->payload[x] < tx_lls->nr_simslots);
+		rx_lls->simslots[rx_template->payload[x]] = tx_lls->simslots[tx_template->payload[x]];
 	}
 
-	tx_lls->done_tx = 1;
+	discharge_message(tx_lls, tx_template, rx_lls, rx_template);
+}
 
-	assert(msg->payload_sz == template->payload_size);
-	for (x = 0; x < msg->payload_sz; x++) {
-		assert(template->payload[x] < rx_lls->nr_simslots);
-		rx_lls->simslots[template->payload[x]] = msg->payload[x];
-	}
-
-	low_level_state_push(llsa, rx_lls);
+static void
+rendezvous_threads_tx(struct low_level_state_array *llsa,
+		      struct low_level_state *tx_lls,
+		      struct low_level_state *rx_lls)
+{
+	sanity_check_low_level_state(rx_lls, 1);
+	sanity_check_low_level_state(tx_lls, 1);
+	rendezvous_threads(llsa, 1, tx_lls, rx_lls);
+}
+static void
+rendezvous_threads_rx(struct low_level_state_array *llsa,
+		      struct low_level_state *rx_lls,
+		      struct low_level_state *tx_lls)
+{
+	sanity_check_low_level_state(rx_lls, 1);
+	sanity_check_low_level_state(tx_lls, 1);
+	rendezvous_threads(llsa, 0, tx_lls, rx_lls);
 }
 
 /* This is quite fiddly.  We have a bunch of low-level threads, some
@@ -617,166 +614,164 @@ receive_messages(struct high_level_state *hls)
 {
 	int i;
 	int j;
-	struct msg_rx_struct msg_rx;
 	int need_delay;
-	int have_bound_rx;
-	int have_unbound_rx;
+	int have_rx;
 	struct low_level_state_array new_llsa;
 
-	memset(&msg_rx, 0, sizeof(msg_rx));
-	need_delay = 0;
-	have_unbound_rx = 0;
-	have_bound_rx = 0;
-	for (i = 0; i < hls->ll_states.sz; i++) {
+	/* Quick escape if we don't have anything to receive. */
+	have_rx = 0;
+	for (i = 0; !have_rx && i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-		const struct msg_template *msg;
-		struct msg_slot *slot;
-		struct message *rxed_msg;
-
-		if (!instr->rx_msg) {
-			/* Threads which don't receive any messages
-			 * don't need to do anything. */
-			continue;
-		}
-
-		msg = instr->rx_msg;
-
-		debug("Trying to receive %x\n", msg->msg_id);
-		if (lls->bound_lls) {
-			if (lls->bound_lls == BOUND_LLS_EXITED) {
-				/* This should fail slightly further
-				 * down. */
-			} else {
-				assert(lls->bound_lls->bound_lls == lls);
-				if (lls->bound_lls->outgoing_msg) {
-#warning apply message filter here
-					debug("Receive from bound thread\n");
-					lls->incoming_msg = lls->bound_lls->outgoing_msg;
-					lls->bound_lls->outgoing_msg = NULL;
-				} else {
-					debug("Bound thread with nothing outstanding; go to RX state\n");
-					lls->bound_rx = 1;
-					need_delay = 1;
-				}
-			}
-			have_bound_rx = 1;
-		} else {
-			slot = &msg_slots[msg->msg_id - plan.base_msg_id];
-			/* Gather up all of the messages which have
-			   already been sent which might be
-			   relevant. */
-			for (j = 0; j < slot->outstanding_send.sz; j++) {
-				rxed_msg = slot->outstanding_send.content[j];
-				rxed_msg->refcount++;
-#warning apply message filter here
-				rxed_msg->sender->done_tx = 1;
-				debug("Picked up msg %p (%d/%d)\n",
-				       rxed_msg,
-				       j,
-				       slot->outstanding_send.sz);
-				message_push(&msg_rx.messages, rxed_msg);
-			}
-			/* And tell any future senders that we're
-			 * available. */
-			/* Note that we might end up attaching the
-			 * msg_rx structure to the same slot multiple
-			 * times.  That's fine; it just means we'll
-			 * receive each message multiple times, and
-			 * then ignore all but one of them later. */
-			msg_rx_struct_push(&slot->receivers, &msg_rx);
-			have_unbound_rx = 1;
-			need_delay = 1;
-		}
+		sanity_check_low_level_state(lls, 1);
+		if (!lls->await_bound_lls_exit && instr->rx_msg)
+			have_rx = 1;
 	}
-
-	if (!have_bound_rx && !have_unbound_rx) {
-		/* No receive operations needed. */
+	if (!have_rx)
 		return;
-	}
-
-	if (need_delay) {
-		debug("Delay for RX\n");
-		release_big_lock();
-		/* XXX could be more cunning here */
-		usleep(MAX_DELAY_US);
-		acquire_big_lock();
-		debug("Back from RX delay\n");
-	}
 
 	memset(&new_llsa, 0, sizeof(new_llsa));
-
+	need_delay = 0;
+	have_rx = 0;
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-		const struct msg_template *msg;
-		struct msg_slot *slot;
+		struct msg_template *msg;
+		int delay_this_side;
 
-		if (!instr->rx_msg) {
+		if (lls->await_bound_lls_exit || !instr->rx_msg) {
+			/* Threads which don't receive any messages
+			 * don't need to do anything. */
 			low_level_state_push(&new_llsa, lls);
 			hls->ll_states.content[i] = NULL;
 			continue;
 		}
 
-		msg = &instr->rx_msg[0];
-		if (lls->bound_lls) {
-			lls->bound_rx = 0;
+		msg = instr->rx_msg;
+
+		if (msg->event_count < msg->pair->event_count) {
+			debug("%p: RX %x, delay is on RX side (%d < %d)\n",
+			      lls, msg->msg_id, msg->event_count, msg->pair->event_count);
+			delay_this_side = 1;
 		} else {
-			debug("Stop trying to receive ID %x\n", msg->msg_id);
-			slot = &msg_slots[msg->msg_id - plan.base_msg_id];
-			/* We are no longer waiting for further messages. */
-			msg_rx_struct_erase_first(&slot->receivers, &msg_rx);
+			debug("%p: RX %x, delay is on TX side (%d >= %d)\n",
+			      lls, msg->msg_id, msg->event_count, msg->pair->event_count);
+			delay_this_side = 0;
+		}
+		msg->event_count++;
+
+		if (lls->bound_lls == BOUND_LLS_EXITED) {
+			debug("Receiving from an exited thread -> fail\n");
+			hls->ll_states.content[i] = NULL;
+			exit_thread(lls);
+		} else if (lls->bound_lls != NULL) {
+			assert(lls->bound_lls->bound_lls == lls);
+			if (lls->bound_lls->bound_sending_message == msg->pair) {
+				debug("%p: Receive from bound thread %p\n", lls, lls->bound_lls);
+#warning apply message filter here and fail out if the message doesn't match. '
+				discharge_message(lls->bound_lls, lls->bound_lls->bound_sending_message,
+						  lls, msg);
+				lls->bound_lls->bound_sending_message = NULL;
+				hls->ll_states.content[i] = NULL;
+				low_level_state_push(&new_llsa, lls);
+			} else if (lls->bound_lls->bound_sending_message != NULL) {
+				debug("%p: Bound thread sent wrong message\n", lls);
+				hls->ll_states.content[i] = NULL;
+				exit_thread(lls);
+			} else {
+				debug("%p: Bound thread %p with nothing outstanding; go to RX state\n",
+				      lls, lls->bound_lls);
+				lls->bound_receiving_message = msg;
+				need_delay = 1;
+				have_rx = 1;
+			}
+		} else {
+			/* Gather up all of the messages which have
+			   already been sent which might be
+			   relevant. */
+			lls->unbound_receiving_message = msg;
+			for (j = 0; j < message_senders.sz; j++) {
+				struct low_level_state *tx_lls = message_senders.content[j];
+#warning apply message filter here and discard anything which doesn't match. '
+				assert(tx_lls->unbound_sending_message);
+				if (tx_lls->unbound_sending_message == msg->pair)
+					rendezvous_threads_rx(&new_llsa, lls, tx_lls);
+			}
+			/* And tell any future senders that we're
+			 * available. */
+			low_level_state_push(&message_receivers, lls);
+			have_rx = 1;
+			need_delay |= delay_this_side;
 		}
 	}
 
-	/* We've now collected all of the possibly-relevant messages
-	   together.  Match them up to low-level threads and perform
-	   the receive. */
+	if (!have_rx) {
+		/* All receives completed fast.  Yay. */
+		debug("All receives completed fast\n");
+		low_level_state_arr_swizzle(&hls->ll_states, &new_llsa);
+		return;
+	}
+
+	if (!need_delay) {
+		/* Some receives failed, but we're not allowed to
+		 * delay here.  Fail the relevant threads. */
+		debug("Received failed, but no delays here\n");
+		for (i = 0; i < hls->ll_states.sz; i++) {
+			struct low_level_state *lls = hls->ll_states.content[i];
+			if (!lls)
+				continue;
+			hls->ll_states.content[i] = NULL;
+			/* Bound receives always either succeed or set
+			   need_delay, and in either case we won't get
+			   here. */
+			assert(!lls->bound_receiving_message);
+			/* ... so we must be doing an unbound receive. */
+			assert(lls->unbound_receiving_message);
+			low_level_state_erase_first(&message_receivers, lls);
+			/* Success of an unbound receive is indicated
+			   by binding the LLS. */
+			if (lls->bound_lls) {
+				debug("%p: unbound RX from %p\n", lls, lls->bound_lls);
+				assert(lls->bound_lls != BOUND_LLS_EXITED);
+				low_level_state_push(&new_llsa, lls);
+			} else {
+				debug("%p: unbound RX failed\n", lls);
+				exit_thread(lls);
+			}
+		}
+		low_level_state_arr_swizzle(&hls->ll_states, &new_llsa);
+		return;
+	}
+
+	/* Some states require a delay.  Do it. */
+	debug("Delay for RX\n");
+	release_big_lock();
+	/* XXX could be more cunning here */
+	usleep(MAX_DELAY_US);
+	acquire_big_lock();
+	debug("Back from RX delay\n");
+
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
-		const struct cfg_instr *instr;
-		const struct msg_template *msg;
-		int rx_succeeded;
-
 		if (!lls)
 			continue;
-		instr = &plan.cfg_nodes[lls->cfg_node];
-
-		msg = &instr->rx_msg[0];
-		rx_succeeded = 0;
-		if (lls->bound_lls) {
-			if (lls->incoming_msg) {
-				struct message *rxed_msg = lls->incoming_msg;
-				debug("Bound rendezvous via %p\n", rxed_msg);
-#warning apply message filter here
-				lls->incoming_msg = NULL;
-				rendezvous_threads_rx(&new_llsa, lls, rxed_msg, msg);
-				release_message(rxed_msg);
-				rx_succeeded = 1;
-			}
-		} else {
-			for (j = 0; j < msg_rx.messages.sz; j++) {
-				struct message *rxed_msg = msg_rx.messages.content[j];
-				if (rxed_msg->id == msg->msg_id &&
-				    (lls->bound_lls == rxed_msg->sender || lls->bound_lls == NULL)) {
-#warning apply message filter here
-					debug("Rendezvousing via message %p (%d, %d/%d)\n",
-					       rxed_msg, i, j, msg_rx.messages.sz);
-					rendezvous_threads_rx(&new_llsa, lls, rxed_msg, msg);
-					rx_succeeded = 1;
-				}
-			}
+		sanity_check_low_level_state(lls, 1);
+		hls->ll_states.content[i] = NULL;
+		if (lls->unbound_receiving_message) {
+			lls->unbound_receiving_message = NULL;
+			low_level_state_erase_first(&message_receivers, lls);
 		}
-		if (!rx_succeeded) {
-			debug("rx failed\n");
+		if (lls->bound_receiving_message) {
+			debug("Bound receive failed\n");
 			exit_thread(lls);
+		} else if (!lls->bound_lls) {
+			debug("Unbound receive failed\n");
+			exit_thread(lls);
+		} else {
+			debug("Receive succeeded.\n");
+			low_level_state_push(&new_llsa, lls);
 		}
 	}
-
-	/* And now we're done. */
-	for (i = 0; i < msg_rx.messages.sz; i++)
-		release_message(msg_rx.messages.content[i]);
-	message_arr_cleanup(&msg_rx.messages);
 
 	low_level_state_arr_swizzle(&hls->ll_states, &new_llsa);
 }
@@ -792,6 +787,7 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 		cfg_label_t cur_label = lls->cfg_node;
 		const struct cfg_instr *current_cfg_node = &plan.cfg_nodes[cur_label];
 		int preserve = 0;
+		debug("Consider successors of %d\n", i);
 		for (j = 0; j < current_cfg_node->nr_successors; j++) {
 			if (rip == plan.cfg_nodes[current_cfg_node->successors[j]].rip) {
 				struct low_level_state *newLls;
@@ -819,9 +815,37 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 			}
 		}
 		if (!preserve) {
-			if (current_cfg_node->nr_successors == 0)
-				debug("successfully finished this CFG\n");
-			exit_thread(lls);
+			debug("%d has no viable successors\n", i);
+			hls->ll_states.content[i] = NULL;
+			if (current_cfg_node->nr_successors == 0) {
+				if (lls->last_operation_is_send) {
+					/* If the last operation in a
+					   thread is a send, that
+					   means, pretty much, that
+					   the last instruction is a
+					   store, and we need the
+					   receiving thread to read
+					   the value which was stored.
+					   That means that we
+					   shouldn't allow this
+					   physical thread to execute
+					   any more instructions until
+					   the receiving thread
+					   executes that load.  Easy
+					   way of implementing that is
+					   simply to stall until the
+					   bound LLS exits. */
+					debug("successfully finished this CFG with a send\n");
+					assert(lls->bound_lls);
+					lls->await_bound_lls_exit = 1;
+					low_level_state_push(&hls->ll_states, lls);
+				} else {
+					debug("successfully finished this CFG; didn't end with a send\n");
+					exit_thread(lls);
+				}
+			} else {
+				exit_thread(lls);
+			}
 		}
 	}
 	hls->ll_states.sz -= r;
@@ -867,120 +891,227 @@ emulate_underlying_instruction(struct high_level_state *hls, struct reg_struct *
 static void
 send_messages(struct high_level_state *hls)
 {
-	struct message_array sent_msgs;
+	struct low_level_state_array new_llsa;
 	int i;
 	int have_sends;
 	int need_delay;
 	int j;
 
-	memset(&sent_msgs, 0, sizeof(sent_msgs));
+	have_sends = 0;
+	for (i = 0; !have_sends && i < hls->ll_states.sz; i++) {
+		struct low_level_state *lls = hls->ll_states.content[i];
+		if (plan.cfg_nodes[lls->cfg_node].tx_msg)
+			have_sends = 1;
+	}
+	if (!have_sends)
+		return;
+
+	debug("start tx\n");
+	memset(&new_llsa, 0, sizeof(new_llsa));
 	have_sends = 0;
 	need_delay = 0;
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-		const struct msg_template *msg;
-		struct message *tx_msg;
+		struct msg_template *msg;
+		int delay_this_side;
 
-		if (!instr->tx_msg)
-			continue;
-
-		have_sends = 1;
-		lls->done_tx = 0;
-		if (lls->bound_lls == BOUND_LLS_EXITED) {
-			debug("Send when bound to a dead thread; doomed\n");
+		if (!instr->tx_msg) {
+			low_level_state_push(&new_llsa, lls);
+			hls->ll_states.content[i] = NULL;
 			continue;
 		}
 
 		msg = instr->tx_msg;
-		tx_msg = new_message(lls, msg);
-		debug("Send %x via %p\n", tx_msg->id, tx_msg);
-		for (j = 0; j < msg->payload_size; j++) {
-			assert(msg->payload[j] < lls->nr_simslots);
-			tx_msg->payload[j] = lls->simslots[msg->payload[j]];
+
+		if (msg->event_count <= msg->pair->event_count) {
+			debug("%p: Send %x, delay is on TX side (%d <= %d)\n",
+			      lls, msg->msg_id, msg->event_count, msg->pair->event_count);
+			delay_this_side = 1;
+		} else {
+			debug("%p: Send %x, delay is on RX side (%d > %d)\n",
+			      lls, msg->msg_id, msg->event_count, msg->pair->event_count);
+			delay_this_side = 0;
 		}
-		if (lls->bound_lls) {
-			if (lls->bound_lls->bound_rx) {
-				assert(!lls->bound_lls->incoming_msg);
-				lls->bound_lls->incoming_msg = tx_msg;
-				tx_msg->refcount++;
-				debug("Bound to a live thread which is in RX state\n");
+		msg->event_count++;
+
+		if (lls->bound_lls == BOUND_LLS_EXITED) {
+			debug("Send when bound to a dead thread; doomed\n");
+			hls->ll_states.content[i] = NULL;
+			exit_thread(lls);
+		} else if (lls->bound_lls) {
+			if (lls->bound_lls->bound_receiving_message) {
+				debug("Transmit to bound thread %p which is already waiting\n",
+				      lls->bound_lls);
+#warning apply message filter here and fail out if it doesn't match. '
+				discharge_message(lls, msg,
+						  lls->bound_lls, lls->bound_lls->bound_receiving_message);
+				lls->bound_lls->bound_receiving_message = NULL;
+				low_level_state_push(&new_llsa, lls);
+				hls->ll_states.content[i] = NULL;
 			} else {
-				debug("Bound to a live thread not in the RX state\n");
-				lls->outgoing_msg = tx_msg;
-				tx_msg->refcount++;
+				debug("Transmit to bound thread %p which isn't yet ready\n",
+				      lls->bound_lls);
+				lls->bound_sending_message = msg;
+				have_sends = 1;
 				need_delay = 1;
 			}
 		} else {
-			struct msg_slot *slot = &msg_slots[msg->msg_id - plan.base_msg_id];
-			debug("Send when %p not bound; %d known receivers\n",
-			       tx_msg, slot->receivers.sz);
-			for (j = 0; j < slot->receivers.sz; j++) {
-				tx_msg->refcount++;
-				message_push(&slot->receivers.content[j]->messages,
-					     tx_msg);
+			/* Perform a general send. */
+			lls->unbound_sending_message = msg;
+			for (j = 0; j < message_receivers.sz; j++) {
+				struct low_level_state *rx_lls = message_receivers.content[j];
+#warning apply message filter here and discard anything which doesn't match. '
+				assert(rx_lls->unbound_receiving_message);
+				if (rx_lls->unbound_receiving_message == msg->pair) {
+					debug("inject message into remote LLS %p\n", rx_lls);
+					rendezvous_threads_tx(&new_llsa, lls, rx_lls);
+				}
 			}
-			message_push(&slot->outstanding_send, tx_msg);
-			tx_msg->refcount++;
-			message_push(&sent_msgs, tx_msg);
-			need_delay = 1;
+			/* And tell any future receivers that we're
+			 * available. */
+			low_level_state_push(&message_senders, lls);
+			have_sends = 1;
+			need_delay |= delay_this_side;
 		}
 	}
 
 	if (!have_sends) {
-		debug("Nothing to send\n");
+		debug("All sends completed without delaying\n");
+		low_level_state_arr_swizzle(&hls->ll_states, &new_llsa);
 		return;
 	}
 
-	if (need_delay) {
-		debug("Delay.\n");
-		release_big_lock();
-		usleep(MAX_DELAY_US);
-		acquire_big_lock();
+	if (!need_delay) {
+		/* Sends failed, but we don't want to delay, so fail
+		 * them all. */
+		debug("Sends outstanding, but no delays here.\n");
+		for (i = 0; i < hls->ll_states.sz; i++) {
+			struct low_level_state *lls = hls->ll_states.content[i];
+			if (!lls)
+				continue;
+			hls->ll_states.content[i] = NULL;
+			/* Bound sends always either succeed or set
+			   need_delay, so we shouldn't see any
+			   incomplete ones here. */
+			assert(!lls->bound_sending_message);
+			/* Since we weren't doing a bound send, we
+			   must have been doing an unbound one. */
+			assert(lls->unbound_sending_message);
+			low_level_state_erase_first(&message_senders, lls);
+			/* If we're now bound then the send succeeded.
+			   Otherwise, it failed and we should exit. */
+			if (lls->bound_lls) {
+				debug("%p: Unbound TX to %p; bind.\n",
+				      lls, lls->bound_lls);
+				assert(lls->bound_lls != BOUND_LLS_EXITED);
+				low_level_state_push(&new_llsa, lls);
+			} else {
+				debug("%p: TX failed\n", lls);
+				exit_thread(lls);
+			}
+		}
+		low_level_state_arr_swizzle(&hls->ll_states, &new_llsa);
+		return;
 	}
+
+	debug("Delay for TX.\n");
+	release_big_lock();
+	usleep(MAX_DELAY_US);
+	acquire_big_lock();
+	debug("Back from TX delay.\n");
 
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
-		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-
-		if (instr->tx_msg && !lls->done_tx) {
-			debug("Send failed\n");
+		if (!lls)
+			continue;
+		hls->ll_states.content[i] = NULL;
+		if (lls->unbound_sending_message) {
+			lls->unbound_sending_message = NULL;
+			low_level_state_erase_first(&message_senders, lls);
+		}
+		if (lls->bound_sending_message) {
+			debug("Bound send failed\n");
 			exit_thread(lls);
-			low_level_state_erase_idx(&hls->ll_states, i);
-			i--;
+		} else if (!lls->bound_lls) {
+			debug("Unbound send failed\n");
+			hls->ll_states.content[i] = NULL;
+			exit_thread(lls);
+		} else {
+			debug("Send succeeded\n");
+			low_level_state_push(&new_llsa, lls);
 		}
 	}
 
-	/* If we went any unbound messages then we need to erase them
-	   from the slot's outstanding send list. */
-	for (i = 0; i < sent_msgs.sz; i++) {
-		struct message *msg = sent_msgs.content[i];
-		struct msg_slot *slot = &msg_slots[msg->id - plan.base_msg_id];
-		message_erase_first(&slot->outstanding_send, msg);
-		release_message(msg);
-	}
+	low_level_state_arr_swizzle(&hls->ll_states, &new_llsa);
+}
 
-	message_arr_cleanup(&sent_msgs);
+static void
+wait_for_bound_exits(struct high_level_state *hls)
+{
+	int i;
+	int waiting_for_bound_exit;
+
+	while (1) {
+		waiting_for_bound_exit = 0;
+		for (i = 0; !waiting_for_bound_exit && i < hls->ll_states.sz; i++) {
+			struct low_level_state *lls = hls->ll_states.content[i];
+			if (lls->await_bound_lls_exit) {
+				if (lls->bound_lls == BOUND_LLS_EXITED) {
+					low_level_state_erase_idx(&hls->ll_states, i);
+					exit_thread(lls);
+					i--;
+				} else {
+					assert(lls->bound_lls);
+					assert(!lls->bound_lls->await_bound_lls_exit);
+					waiting_for_bound_exit++;
+				}
+			}
+		}
+		if (!waiting_for_bound_exit)
+			break;
+		debug("Waiting for %d bound exits\n", waiting_for_bound_exit);
+		release_big_lock();
+		usleep(100);
+		acquire_big_lock();
+	}
+	return;
 }
 
 static void
 advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 {
+	int i;
+
+	sanity_check_high_level_state(hls);
+
+	for (i = 0; i < hls->ll_states.sz; i++)
+		hls->ll_states.content[i]->last_operation_is_send = 0;
+
 	check_for_ll_thread_start(hls, regs);
 	if (hls->ll_states.sz == 0)
 		exit_interpreter();
+	sanity_check_high_level_state(hls);
 
 	receive_messages(hls);
 	if (hls->ll_states.sz == 0)
 		exit_interpreter();
+	sanity_check_high_level_state(hls);
+
+	wait_for_bound_exits(hls);
+	if (hls->ll_states.sz == 0)
+		exit_interpreter();
 
 	emulate_underlying_instruction(hls, regs);
+	sanity_check_high_level_state(hls);
 
 	send_messages(hls);
 	if (hls->ll_states.sz == 0)
 		exit_interpreter();
+	sanity_check_high_level_state(hls);
 
 	advance_through_cfg(hls, regs->rip);
+	sanity_check_high_level_state(hls);
 }
 
 static void
@@ -1004,12 +1135,15 @@ start_interpreting(int entrypoint_idx)
 	abort();
 }
 
+#define str2(x) # x
+#define str(x) str2(x)
+
 /* We have two types of trampolines, one for transitioning from client
    code into the interpreter and one for going from the interpreter to
    client code. */
 asm(
 "__trampoline_client_to_interp_start:\n"
-"    mov %rsp, %gs:4080\n" /* Stash client RSP */
+"    mov %rsp, %gs:(" str(_STACK_SIZE) " - 16)\n" /* Stash client RSP */
 "    mov %gs:0, %rsp\n"    /* Switch to interpreter stack */
 "    pushf\n"              /* Save other client registers */
 "    push %r15\n"
@@ -1225,8 +1359,6 @@ activate(void)
 		       program_to_patch, buf);
 		return;
 	}
-
-	msg_slots = calloc(sizeof(msg_slots[0]), plan.msg_id_limit - plan.base_msg_id);
 
 	alloc_thread_state_area();
 

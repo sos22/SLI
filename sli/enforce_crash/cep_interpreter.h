@@ -7,6 +7,17 @@ typedef int simslot_t;
 struct msg_template {
 	int msg_id;
 	unsigned payload_size;
+
+	/* The number of times this message has been sent (for TX
+	   templates) or received (for RX templates).  This isn't
+	   really part of the CEP, since it's run-time rather than
+	   compile-time, but this is the most convenient place to
+	   stash it. */
+	int event_count;
+
+	/* For RX templates, this is the matching TX template.  For TX
+	   templates, it's the matching RX one. */
+	struct msg_template *pair;
 	const simslot_t payload[];
 };
 
@@ -23,8 +34,8 @@ struct cfg_instr {
 	int nr_successors;
 	const struct cfg_instr_stash *stash;
 	int nr_stash;
-	const struct msg_template *rx_msg;
-	const struct msg_template *tx_msg;
+	struct msg_template *rx_msg;
+	struct msg_template *tx_msg;
 };
 
 struct cep_entry_ctxt {
@@ -100,6 +111,9 @@ struct crash_enforcement_plan {
 	void name ## _arr_swizzle(struct name ## _array *dest,		\
 				  struct name ## _array *src)		\
 	{								\
+		int i;							\
+		for (i = 0; i < dest->sz; i++)				\
+			assert(dest->content[i] == NULL);		\
 		free(dest->content);					\
 		*dest = *src;						\
 		memset(src, 0, sizeof(*src));				\

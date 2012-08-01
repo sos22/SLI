@@ -255,8 +255,11 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		happensBeforeEdge *hb = *it;
 		unsigned beforeTid = hb->before.tid;
 		unsigned afterTid = hb->after.tid;
+		fprintf(f, "static struct msg_template msg_template_%x_tx;\n", hb->msg_id);
 		fprintf(f, "static struct msg_template msg_template_%x_rx = {\n", hb->msg_id);
 		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);
+		fprintf(f, "    .event_count = 0,\n");
+		fprintf(f, "    .pair = &msg_template_%x_tx,\n", hb->msg_id);
 		fprintf(f, "    .payload_size = %zd,\n", hb->content.size());
 		fprintf(f, "    .payload = {");
 		for (unsigned x = 0; x < hb->content.size(); x++) {
@@ -267,6 +270,8 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		fprintf(f, "}\n};\n");
 		fprintf(f, "static struct msg_template msg_template_%x_tx = {\n", hb->msg_id);
 		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);
+		fprintf(f, "    .event_count = 0,\n");
+		fprintf(f, "    .pair = &msg_template_%x_rx,\n", hb->msg_id);
 		fprintf(f, "    .payload_size = %zd,\n", hb->content.size());
 		fprintf(f, "    .payload = {");
 		for (unsigned x = 0; x < hb->content.size(); x++) {
