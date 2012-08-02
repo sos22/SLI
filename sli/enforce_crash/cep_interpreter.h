@@ -2,8 +2,21 @@
 #define CED_INTERPRETER_H__
 
 typedef int cfg_label_t;
-
 typedef int simslot_t;
+
+enum byte_code_op {
+	bcop_push_const,
+	bcop_push_slot,
+
+	bcop_cmp_eq,
+	bcop_add,
+	bcop_load,
+	bcop_not,
+
+	bcop_fail_if,
+	bcop_succeed,
+};
+
 struct msg_template {
 	int msg_id;
 	unsigned payload_size;
@@ -36,6 +49,15 @@ struct cfg_instr {
 	int nr_stash;
 	struct msg_template *rx_msg;
 	struct msg_template *tx_msg;
+	/* Side conditions can be evaluated at one of three points:
+
+	   -- At the very beginning of the instruction.
+	   -- Just after receiving a message.
+	   -- Just after evaluating the original instruction.
+	*/
+	const unsigned short *pre_validate;
+	const unsigned short *rx_validate;
+	const unsigned short *eval_validate;
 };
 
 struct cep_entry_ctxt {

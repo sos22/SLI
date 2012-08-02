@@ -44,6 +44,28 @@ public:
 	}
 };
 
+static bool
+expressionDependsOn(IRExpr *what, const std::set<IRExprGet *> &d, bool includeRegisters)
+{
+	struct : public IRExprTransformer {
+		bool res;
+		const std::set<IRExprGet *> *d;
+		bool includeRegisters;
+		IRExpr *transformIex(IRExprGet *e) {
+			if (e->reg.isReg() && !includeRegisters)
+				return e;
+			if (d->count(e))
+				res = true;
+			return e;
+		}
+	} doit;
+	doit.res = false;
+	doit.d = &d;
+	doit.includeRegisters = includeRegisters;
+	doit.doit(what);
+	return doit.res;
+}
+
 static int
 max_simslot(unsigned tid, const slotMapT &sm)
 {
@@ -137,11 +159,120 @@ add_empty_array(FILE *f,
 	fprintf(f,"%s.%s = 0,\n", prefix, sz_field);
 }
 
+static void
+bytecode_op(FILE *f, const char *op, IRType ty)
+{
+	fprintf(f, "    (unsigned short)(bcop_%s | %d),\n",
+		op,
+		((unsigned)ty - (unsigned)Ity_I1) << 12
+		);
+}
+static void
+bytecode_const64(FILE *f, unsigned long val)
+{
+	fprintf(f, "    %d,\n", (unsigned short)val);
+	fprintf(f, "    %d,\n", (unsigned short)(val >> 16));
+	fprintf(f, "    %d,\n", (unsigned short)(val >> 32));
+	fprintf(f, "    %d,\n", (unsigned short)(val >> 48));
+}
+static void
+bytecode_const32(FILE *f, unsigned val)
+{
+	fprintf(f, "    %d,\n", (unsigned short)val);
+	fprintf(f, "    %d,\n", (unsigned short)(val >> 16));
+}
+
+static void
+bytecode_eval_expr(FILE *f, IRExpr *expr, unsigned thread, crashEnforcementData &ced)
+{
+	switch (expr->tag) {
+	case Iex_Const: {
+		IRExprConst *iec = (IRExprConst *)expr;
+		switch (iec->con->tag) {
+		case Ico_U64:
+			bytecode_op(f, "push_const", Ity_I64);
+			bytecode_const64(f, iec->con->Ico.U64);
+			break;
+		default:
+			abort();
+		}
+		break;
+	}
+	case Iex_Get: {
+		IRExprGet *ieg = (IRExprGet *)expr;
+		simulationSlotT slot = ced.exprsToSlots(thread, ieg);
+		bytecode_op(f, "push_slot", Ity_I64);
+		bytecode_const32(f, slot.idx);
+		break;
+	}
+
+	case Iex_Binop: {
+		IRExprBinop *ieb = (IRExprBinop *)expr;
+		bytecode_eval_expr(f, ieb->arg1, thread, ced);
+		bytecode_eval_expr(f, ieb->arg2, thread, ced);
+		switch (ieb->op) {
+		case Iop_CmpEQ32:
+			bytecode_op(f, "cmp_eq", Ity_I32);
+			break;
+		case Iop_CmpEQ64:
+			bytecode_op(f, "cmp_eq", Ity_I64);
+			break;
+		default:
+			abort();
+		}
+		break;
+	}
+
+	case Iex_Associative: {
+		IRExprAssociative *iea = (IRExprAssociative *)expr;
+		assert(iea->nr_arguments != 0);
+		bytecode_eval_expr(f, iea->contents[0], thread, ced);
+		for (int i = 1; i < iea->nr_arguments; iea++) {
+			bytecode_eval_expr(f, iea->contents[i], thread, ced);
+			switch (iea->op) {
+			case Iop_Add64:
+				bytecode_op(f, "add", iea->type());
+				break;
+			default:
+				abort();
+			}
+		}
+		break;
+	}
+	case Iex_Load: {
+		IRExprLoad *iel = (IRExprLoad *)expr;
+		bytecode_eval_expr(f, iel->addr, thread, ced);
+		bytecode_op(f, "load", iel->ty);
+		break;
+	}
+	default:
+		abort();
+	}
+}
+
+static void
+emit_validation(FILE *f, int ident, const char *name, const std::set<exprEvalPoint> &condition, unsigned thread, crashEnforcementData &ced)
+{
+	fprintf(f, "static const unsigned short instr_%d_%s[] = {\n", ident, name);
+	for (auto it = condition.begin();
+	     it != condition.end();
+	     it++) {
+		bytecode_eval_expr(f, it->e, thread, ced);
+		if (!it->invert)
+			bytecode_op(f, "not", Ity_I1);
+		fprintf(f, "    (unsigned short)bcop_fail_if,\n");
+	}
+	fprintf(f, "    (unsigned short)bcop_succeed\n};\n");
+}
+
 struct cfg_annotation_summary {
 	bool have_stash;
 	unsigned tx_msg;
 	unsigned rx_msg;
 	unsigned long rip;
+	bool has_pre_validate;
+	bool has_rx_validate;
+	bool has_eval_validate;
 };
 
 static void
@@ -238,7 +369,56 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 		}
 		if (ced.expressionEvalPoints.count(oldLabel)) {
-#warning Actually do something about evaluating side conditions
+			const std::set<exprEvalPoint> &sideConditions(ced.expressionEvalPoints[oldLabel]);
+			std::set<exprEvalPoint> pre_validate, rx_validate, eval_validate;
+			std::set<IRExprGet *> rxed, stashed;
+			if (ced.happensBeforePoints.count(oldLabel)) {
+				const std::set<happensBeforeEdge *> &hbEdges(ced.happensBeforePoints[oldLabel]);
+				for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
+					happensBeforeEdge *hb = *it2;
+					if (hb->after.tid == (int)oldLabel.thread &&
+					    hb->after.where == oldLabel.label) {
+						for (unsigned x = 0; x < hb->content.size(); x++)
+							rxed.insert(hb->content[x]);
+					}
+				}
+			}
+			if (ced.exprStashPoints.count(oldLabel)) {
+				const std::set<IRExprGet *> &toStash(ced.exprStashPoints[oldLabel]);
+				for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++)
+					stashed.insert(*it2);
+			}
+			/* We need to decide where in the instruction
+			   cycle to evaluate this side-condition.  The
+			   options are at the very start, during
+			   message RX, or after performing the stash,
+			   and we pick the earliest point at which we
+			   have all necessary information. */
+			/* (The instruction cycle always does RX
+			   before stash.) */
+			for (auto it = sideConditions.begin();
+			     it != sideConditions.end();
+			     it++) {
+				if (expressionDependsOn(it->e, stashed, false))
+					eval_validate.insert(*it);
+				else if (expressionDependsOn(it->e, rxed, true))
+					rx_validate.insert(*it);
+				else
+					pre_validate.insert(*it);
+			}
+			assert(!(pre_validate.empty() && rx_validate.empty() && eval_validate.empty()));
+			if (!pre_validate.empty()) {
+				summary.has_pre_validate = true;
+				emit_validation(f, newLabel, "pre_validate", pre_validate, oldLabel.thread, ced);
+			}
+			if (!rx_validate.empty()) {
+				summary.has_rx_validate = true;
+				emit_validation(f, newLabel, "rx_validate", rx_validate, oldLabel.thread, ced);
+			}
+			if (!eval_validate.empty()) {
+				summary.has_eval_validate = true;
+				emit_validation(f, newLabel, "eval_validate", eval_validate, oldLabel.thread, ced);
+			}
 		}
 
 		summary.rip = instr->rip.unwrap_vexrip();
@@ -304,6 +484,18 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "        .tx_msg = &msg_template_%x_tx,\n", it->second.tx_msg);
 		else
 			fprintf(f, "        .tx_msg = NULL,\n");
+		if (it->second.has_pre_validate)
+			fprintf(f, "        .pre_validate = instr_%d_pre_validate,\n", it->first);
+		else
+			fprintf(f, "        .pre_validate = NULL,\n");
+		if (it->second.has_rx_validate)
+			fprintf(f, "        .rx_validate = instr_%d_rx_validate,\n", it->first);
+		else
+			fprintf(f, "        .rx_validate = NULL,\n");
+		if (it->second.has_eval_validate)
+			fprintf(f, "        .eval_validate = instr_%d_eval_validate,\n", it->first);
+		else
+			fprintf(f, "        .eval_validate = NULL,\n");
 	}
 	fprintf(f, "    }\n};\n");
 }
