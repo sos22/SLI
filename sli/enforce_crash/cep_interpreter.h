@@ -4,14 +4,32 @@
 typedef int cfg_label_t;
 typedef int simslot_t;
 
+/* Top four bits of a byte code op are a type tag, the rest are the
+   operation to perform. */
+#define bytecode_type_shift 12
+#define bytecode_op(x) ((x) & 0xfff)
+#define bytecode_type(x) (((x) >> bytecode_type_shift) & 0xf)
+enum byte_code_type {
+	bct_bit,
+	bct_byte,
+	bct_short,
+	bct_int,
+	bct_long,
+	bct_longlong,
+	bct_float,
+	bct_double,
+	bct_v128
+};
 enum byte_code_op {
 	bcop_push_const,
 	bcop_push_slot,
 
 	bcop_cmp_eq,
 	bcop_add,
-	bcop_load,
+
 	bcop_not,
+
+	bcop_load,
 
 	bcop_fail_if,
 	bcop_succeed,

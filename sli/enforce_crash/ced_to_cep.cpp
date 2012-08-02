@@ -159,12 +159,40 @@ add_empty_array(FILE *f,
 	fprintf(f,"%s.%s = 0,\n", prefix, sz_field);
 }
 
+static const char *
+vex_type_to_bytecode_type(IRType ty)
+{
+	switch (ty) {
+	case Ity_INVALID:
+		abort();
+	case Ity_I1:
+		return "bct_bit";
+	case Ity_I8:
+		return "bct_byte";
+	case Ity_I16:
+		return "bct_short";
+	case Ity_I32:
+		return "bct_int";
+	case Ity_I64:
+		return "bct_long";
+	case Ity_I128:
+		return "bct_longlong";
+	case Ity_F32:
+		return "bct_float";
+	case Ity_F64:
+		return "bct_double";
+	case Ity_V128:
+		return "bct_v128";
+	}
+	abort();
+}
+
 static void
 bytecode_op(FILE *f, const char *op, IRType ty)
 {
-	fprintf(f, "    (unsigned short)(bcop_%s | %d),\n",
+	fprintf(f, "    (unsigned short)(bcop_%s | (%s << bytecode_type_shift)),\n",
 		op,
-		((unsigned)ty - (unsigned)Ity_I1) << 12
+		vex_type_to_bytecode_type(ty)
 		);
 }
 static void

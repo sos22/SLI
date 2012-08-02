@@ -432,6 +432,309 @@ find_pts(void)
 	return res;
 }
 
+static unsigned long
+bytecode_fetch_const(const unsigned short **bytecode,
+		     enum byte_code_type type)
+{
+	unsigned long res;
+
+	switch (type) {
+	case bct_bit:
+		res = (*bytecode)[0] & 1;
+		(*bytecode)++;
+		break;
+	case bct_byte:
+		res = (*bytecode)[0] & 0xff;
+		(*bytecode)++;
+		break;
+	case bct_short:
+		res = (*bytecode)[0];
+		(*bytecode)++;
+		break;
+	case bct_int:
+	case bct_float:
+		res = (*bytecode)[0] | ((unsigned)(*bytecode)[1] << 16);
+		(*bytecode) += 2;
+		break;
+	case bct_long:
+	case bct_double:
+		res = (*bytecode)[0] |
+			((unsigned long)(*bytecode)[1] << 16) |
+			((unsigned long)(*bytecode)[2] << 32) |
+			((unsigned long)(*bytecode)[3] << 48);
+		(*bytecode) += 4;
+		break;
+	case bct_longlong:
+	case bct_v128:
+		/* Can't just return these as longs */
+		abort();
+	}
+	return res;
+}
+
+static unsigned long
+bytecode_mask(unsigned long val, enum byte_code_type type)
+{
+	switch (type) {
+	case bct_bit:
+		return val & 1;
+	case bct_byte:
+		return val & 0xff;
+	case bct_short:
+		return val & 0xffff;
+	case bct_int:
+	case bct_float:
+		return val & 0xffffffff;
+	case bct_long:
+	case bct_double:
+		return val;
+	case bct_longlong:
+	case bct_v128:
+		/* Can't just return these as longs */
+		abort();
+	}
+	abort();
+}
+
+static unsigned long
+bytecode_fetch_slot(const unsigned short **bytecode,
+		    enum byte_code_type type,
+		    const struct low_level_state *lls,
+		    const struct msg_template *rx_template,
+		    const struct msg_template *tx_template,
+		    const struct low_level_state *tx_lls)
+{
+	simslot_t idx = bytecode_fetch_const(bytecode, bct_int);
+	int msg_slot;
+
+	assert(idx < lls->nr_simslots);
+	/* Is the slot overridden by the message? */
+	if (rx_template) {
+		assert(tx_lls);
+		assert(rx_template->payload_size == tx_template->payload_size);
+		for (msg_slot = 0; msg_slot < rx_template->payload_size; msg_slot++) {
+			if (rx_template->payload[msg_slot] == idx) {
+				/* Yes */
+				assert(tx_template->payload[msg_slot] < tx_lls->nr_simslots);
+				return bytecode_mask(
+					tx_lls->simslots[tx_template->payload[msg_slot]],
+					type);
+			}
+		}
+	}
+	return bytecode_mask(lls->simslots[idx], type);
+}
+
+/* malloc()ed bytecode stack regions */
+#define NR_STACK_SLOTS_PER_OVERFLOW 128
+struct stack_overflow {
+	struct stack_overflow *prev;
+	struct stack_overflow *next;
+	unsigned long base[NR_STACK_SLOTS_PER_OVERFLOW];
+};
+/* The part of the bytecode stack which is allocated on the
+ * interpreter stack. */
+#define NR_STACK_SLOTS_INLINE 16
+struct bytecode_stack {
+	unsigned long *ptr;
+	unsigned long *overflow_limit;
+	unsigned long *underflow_limit;
+	unsigned long inlne[NR_STACK_SLOTS_INLINE];
+	struct stack_overflow *overflow;
+};
+
+static void
+init_bytecode_stack(struct bytecode_stack *stack)
+{
+#ifndef NDEBUG
+	memset(stack, 0xab, sizeof(*stack));
+#endif
+	stack->ptr = stack->inlne;
+	stack->underflow_limit = stack->inlne;
+	stack->overflow_limit = stack->inlne + NR_STACK_SLOTS_INLINE;
+	stack->overflow = NULL;
+}
+
+static void
+cleanup_stack(const struct bytecode_stack *_stack)
+{
+	struct bytecode_stack *stack = (struct bytecode_stack *)_stack;
+	struct stack_overflow *a, *b;
+	for (a = stack->overflow; a; a = b) {
+		b = a->next;
+		free(a);
+	}
+}
+
+static void
+bytecode_push(struct bytecode_stack *stack, unsigned long val, enum byte_code_type type)
+{
+	if (stack->ptr == stack->overflow_limit) {
+		struct stack_overflow *o;
+		if (stack->ptr == stack->inlne + NR_STACK_SLOTS_INLINE) {
+			/* Transition from inline stack to overflow
+			 * stack. */
+			if (stack->overflow) {
+				o = stack->overflow;
+			} else {
+				o = malloc(sizeof(*o));
+				o->next = NULL;
+				o->prev = NULL;
+				stack->overflow = o;
+			}
+		} else {
+			/* Just overflowed an overflow stack */
+			struct stack_overflow *old_o =
+				(struct stack_overflow *)((unsigned long)stack->ptr - sizeof(*old_o));
+			if (old_o->next) {
+				o = old_o->next;
+			} else {
+				o = malloc(sizeof(*o));
+				o->next = NULL;
+				o->prev = old_o;
+				old_o->next = o;
+			}
+		}
+		stack->ptr = o->base;
+		stack->overflow_limit = o->base + NR_STACK_SLOTS_PER_OVERFLOW;
+		stack->underflow_limit = o->base;
+	}
+	*stack->ptr = bytecode_mask(val, type);
+	stack->ptr++;
+}
+
+static void
+bytecode_push_longlong(struct bytecode_stack *stack, const unsigned char *bytes)
+{
+	const unsigned long *words = (const unsigned long *)bytes;
+	bytecode_push(stack, words[0], bct_long);
+	bytecode_push(stack, words[1], bct_long);
+}
+
+static unsigned long
+bytecode_pop(struct bytecode_stack *stack, enum byte_code_type type)
+{
+	unsigned long res;
+
+	if (stack->ptr == stack->underflow_limit) {
+		struct stack_overflow *old_o;
+		assert(stack->ptr != stack->inlne); /* otherwise the
+						     * stack really
+						     * has
+						     * underflowed. */
+		old_o = (struct stack_overflow *)((unsigned long)stack->ptr -
+						  offsetof(struct stack_overflow, base[0]));
+		if (old_o->prev) {
+			/* Underflowed from one overflow stack to another. */
+			struct stack_overflow *o = old_o->prev;
+			stack->ptr = o->base + NR_STACK_SLOTS_PER_OVERFLOW;
+			stack->underflow_limit = o->base;
+		} else {
+			/* Underflowed from an overflow stack to the inline stack. */
+			stack->ptr = stack->inlne + NR_STACK_SLOTS_INLINE;
+			stack->underflow_limit = stack->inlne;
+		}
+		stack->overflow_limit = stack->ptr;
+	}
+
+	stack->ptr--;
+	res = *stack->ptr;
+	return bytecode_mask(res, type);
+}
+
+static size_t
+bct_size(enum byte_code_type type)
+{
+	switch (type) {
+	case bct_bit:  abort();
+	case bct_byte: return 1;
+	case bct_short: return 2;
+	case bct_int: return 4;
+	case bct_long: return 8;
+	case bct_longlong: return 16;
+	case bct_float: return 4;
+	case bct_double: return 8;
+	case bct_v128: return 16;
+	}
+	abort();
+}
+
+/* Returns 1 if the bytecode finishes with bcop_succeed and 0
+ * otherwise. */
+static int
+eval_bytecode(const unsigned short *bytecode,
+	      const struct low_level_state *lls,
+	      const struct msg_template *rx_template,
+	      const struct msg_template *tx_message,
+	      const struct low_level_state *tx_lls)
+{
+	struct bytecode_stack stack;
+	enum byte_code_op op;
+	enum byte_code_type type;
+	int res;
+
+	if (!bytecode)
+		return 1;
+
+	init_bytecode_stack(&stack);
+	while (1) {
+		op = bytecode_op(*bytecode);
+		type = bytecode_type(*bytecode);
+		bytecode++;
+		switch (op) {
+		case bcop_push_const:
+			bytecode_push(&stack, bytecode_fetch_const(&bytecode, type), type);
+			break;
+		case bcop_push_slot:
+			bytecode_push(&stack, bytecode_fetch_slot(&bytecode, type, lls, rx_template, tx_message, tx_lls), type);
+			break;
+
+		case bcop_cmp_eq:
+			bytecode_push(&stack, bytecode_pop(&stack, type) == bytecode_pop(&stack, type), bct_bit);
+			break;
+		case bcop_add:
+			bytecode_push(&stack, bytecode_pop(&stack, type) + bytecode_pop(&stack, type), type);
+			break;
+
+		case bcop_not:
+			bytecode_push(&stack, bytecode_pop(&stack, type), type);
+			break;
+
+		case bcop_load: {
+			unsigned long addr = bytecode_pop(&stack, bct_long);
+			unsigned char buf[16];
+			if (!__fetch_guest(bct_size(type), buf, addr)) {
+				debug("fault fetching from %lx!\n", addr);
+				res = 0;
+				goto out;
+			}
+			if (type == bct_longlong || type == bct_v128) {
+				bytecode_push_longlong(&stack, buf);
+			} else {
+				bytecode_push(&stack, *(unsigned long *)buf, type);
+			}
+			break;
+		}
+
+		case bcop_fail_if: {
+			if (bytecode_pop(&stack, bct_bit)) {
+				res = 0;
+				goto out;
+			}
+			break;
+		}
+		case bcop_succeed: {
+			res = 1;
+			goto out;
+		}
+		}
+	}
+
+out:
+	cleanup_stack(&stack);
+	return res;
+}
+
 static void
 exit_interpreter(void)
 {
@@ -619,6 +922,17 @@ rendezvous_threads_rx(struct low_level_state_array *llsa,
 	rendezvous_threads(llsa, 0, tx_lls, rx_lls);
 }
 
+static int
+rx_message_filter(struct low_level_state *rx_lls,
+		  struct msg_template *rx_msg,
+		  struct low_level_state *tx_lls,
+		  struct msg_template *tx_msg)
+{
+	const unsigned short *filter = plan.cfg_nodes[rx_lls->cfg_node].rx_validate;
+	return eval_bytecode(filter, rx_lls, rx_msg,
+			     tx_msg, tx_lls);
+}
+
 /* This is quite fiddly.  We have a bunch of low-level threads, some
  * of which want to perform message receive operations.  The threads
  * which don't want to receive anything are unchanged, so ignore them
@@ -695,18 +1009,20 @@ receive_messages(struct high_level_state *hls)
 			exit_thread(lls);
 		} else if (lls->bound_lls != NULL) {
 			assert(lls->bound_lls->bound_lls == lls);
-			if (lls->bound_lls->bound_sending_message == msg->pair) {
-				debug("%p: Receive from bound thread %p\n", lls, lls->bound_lls);
-#warning apply message filter here and fail out if the message doesn't match. '
-				discharge_message(lls->bound_lls, lls->bound_lls->bound_sending_message,
-						  lls, msg);
-				lls->bound_lls->bound_sending_message = NULL;
-				hls->ll_states.content[i] = NULL;
-				low_level_state_push(&new_llsa, lls);
-			} else if (lls->bound_lls->bound_sending_message != NULL) {
-				debug("%p: Bound thread sent wrong message\n", lls);
-				hls->ll_states.content[i] = NULL;
-				exit_thread(lls);
+			if (lls->bound_lls->bound_sending_message) {
+				if (lls->bound_lls->bound_sending_message == msg->pair &&
+				    rx_message_filter(lls, msg, lls->bound_lls, msg->pair)) {
+					debug("%p: Receive from bound thread %p\n", lls, lls->bound_lls);
+					discharge_message(lls->bound_lls, lls->bound_lls->bound_sending_message,
+							  lls, msg);
+					lls->bound_lls->bound_sending_message = NULL;
+					hls->ll_states.content[i] = NULL;
+					low_level_state_push(&new_llsa, lls);
+				} else {
+					debug("%p: Bound thread sent wrong message\n", lls);
+					hls->ll_states.content[i] = NULL;
+					exit_thread(lls);
+				}
 			} else {
 				debug("%p: Bound thread %p with nothing outstanding; go to RX state\n",
 				      lls, lls->bound_lls);
@@ -721,9 +1037,9 @@ receive_messages(struct high_level_state *hls)
 			lls->unbound_receiving_message = msg;
 			for (j = 0; j < message_senders.sz; j++) {
 				struct low_level_state *tx_lls = message_senders.content[j];
-#warning apply message filter here and discard anything which doesn't match. '
 				assert(tx_lls->unbound_sending_message);
-				if (tx_lls->unbound_sending_message == msg->pair)
+				if (tx_lls->unbound_sending_message == msg->pair &&
+				    rx_message_filter(lls, msg, tx_lls, msg->pair))
 					rendezvous_threads_rx(&new_llsa, lls, tx_lls);
 			}
 			/* And tell any future senders that we're
@@ -970,14 +1286,20 @@ send_messages(struct high_level_state *hls)
 			exit_thread(lls);
 		} else if (lls->bound_lls) {
 			if (lls->bound_lls->bound_receiving_message) {
-				debug("Transmit to bound thread %p which is already waiting\n",
-				      lls->bound_lls);
-#warning apply message filter here and fail out if it doesn't match. '
-				discharge_message(lls, msg,
-						  lls->bound_lls, lls->bound_lls->bound_receiving_message);
-				lls->bound_lls->bound_receiving_message = NULL;
-				low_level_state_push(&new_llsa, lls);
-				hls->ll_states.content[i] = NULL;
+				if (lls->bound_lls->bound_receiving_message == msg->pair &&
+				    rx_message_filter(lls, msg->pair, lls->bound_lls, msg)) {
+					debug("Transmit to bound thread %p which is already waiting\n",
+					      lls->bound_lls);
+					discharge_message(lls, msg,
+							  lls->bound_lls, lls->bound_lls->bound_receiving_message);
+					lls->bound_lls->bound_receiving_message = NULL;
+					low_level_state_push(&new_llsa, lls);
+					hls->ll_states.content[i] = NULL;
+				} else {
+					debug("%p: bound thread received wrong message\n", lls);
+					hls->ll_states.content[i] = NULL;
+					exit_thread(lls);
+				}
 			} else {
 				debug("Transmit to bound thread %p which isn't yet ready\n",
 				      lls->bound_lls);
@@ -990,9 +1312,9 @@ send_messages(struct high_level_state *hls)
 			lls->unbound_sending_message = msg;
 			for (j = 0; j < message_receivers.sz; j++) {
 				struct low_level_state *rx_lls = message_receivers.content[j];
-#warning apply message filter here and discard anything which doesn't match. '
 				assert(rx_lls->unbound_receiving_message);
-				if (rx_lls->unbound_receiving_message == msg->pair) {
+				if (rx_lls->unbound_receiving_message == msg->pair &&
+				    rx_message_filter(rx_lls, msg->pair, lls, msg)) {
 					debug("inject message into remote LLS %p\n", rx_lls);
 					rendezvous_threads_tx(&new_llsa, lls, rx_lls);
 				}
@@ -1117,7 +1439,7 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
 		for (j = 0; j < instr->nr_stash; j++) {
 			if (instr->stash[j].reg != -1) {
-				simslot_t *slot = &lls->simslots[instr->stash[j].slot];
+				unsigned long *slot = &lls->simslots[instr->stash[j].slot];
 				switch (instr->stash[j].reg) {
 #define do_case(idx, r)							\
 					case idx:			\
@@ -1149,6 +1471,49 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 }
 
 static void
+check_conditions(struct high_level_state *hls, const char *message, unsigned offset)
+{
+	int i;
+	int j;
+	int killed;
+
+	killed = 0;
+	for (i = 0; i < hls->ll_states.sz; i++) {
+		struct low_level_state *lls = hls->ll_states.content[i];
+		const struct cfg_instr *cfg = &plan.cfg_nodes[lls->cfg_node];
+		const unsigned short *condition = *(const unsigned short **)((unsigned long)cfg + offset);
+		if (!eval_bytecode(condition, lls, NULL, NULL, NULL)) {
+			debug("%p failed a %s side-condition\n", lls, message);
+			exit_thread(lls);
+			hls->ll_states.content[i] = NULL;
+			killed = 1;
+		}
+	}
+	if (killed) {
+		i = 0;
+		j = 0;
+		while (i < hls->ll_states.sz) {
+			if (hls->ll_states.content[i]) {
+				hls->ll_states.content[j] = hls->ll_states.content[j];
+				j++;
+			}
+			i++;
+		}
+		hls->ll_states.sz = j;
+	}
+}
+static void
+check_pre_conditions(struct high_level_state *hls)
+{
+	check_conditions(hls, "pre", offsetof(struct cfg_instr, pre_validate));
+}
+static void
+check_eval_conditions(struct high_level_state *hls)
+{
+	check_conditions(hls, "eval", offsetof(struct cfg_instr, eval_validate));
+}
+
+static void
 advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 {
 	int i;
@@ -1164,6 +1529,12 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 	sanity_check_high_level_state(hls);
 
 	stash_registers(hls, regs);
+	sanity_check_high_level_state(hls);
+
+	check_pre_conditions(hls);
+	if (hls->ll_states.sz == 0)
+		exit_interpreter();
+	sanity_check_high_level_state(hls);
 
 	receive_messages(hls);
 	if (hls->ll_states.sz == 0)
@@ -1175,6 +1546,11 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 		exit_interpreter();
 
 	emulate_underlying_instruction(hls, regs);
+	sanity_check_high_level_state(hls);
+
+	check_eval_conditions(hls);
+	if (hls->ll_states.sz == 0)
+		exit_interpreter();
 	sanity_check_high_level_state(hls);
 
 	send_messages(hls);
