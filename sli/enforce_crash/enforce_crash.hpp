@@ -352,8 +352,8 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 }
 
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
-	happensBeforeEdge(const MemoryAccessIdentifier &_before,
-			  const MemoryAccessIdentifier &_after,
+	happensBeforeEdge(const ThreadCfgLabel &_before,
+			  const ThreadCfgLabel &_after,
 			  const std::vector<IRExprGet *> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
@@ -380,8 +380,8 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 		return res_malloc;
 	}
 public:
-	MemoryAccessIdentifier before;
-	MemoryAccessIdentifier after;
+	ThreadCfgLabel before;
+	ThreadCfgLabel after;
 	std::vector<IRExprGet *> content;
 	unsigned msg_id;
 
@@ -530,7 +530,7 @@ public:
 			     it2++) {
 				happensBeforeEdge *hb = *it2;
 				for (unsigned x = 0; x < hb->content.size(); x++)
-					mk_slot(hb->after.tid, hb->content[x], next_slot);
+					mk_slot(hb->after.thread, hb->content[x], next_slot);
 			}
 		}
 	}
@@ -787,8 +787,8 @@ public:
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
 				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, idom,
 									       cfg, exprStashPoints, next_hb_id++);
-				(*this)[ThreadCfgLabel(hbe->before.tid, hbe->before.where)].insert(hbe);
-				(*this)[ThreadCfgLabel(hbe->after.tid, hbe->after.where)].insert(hbe);
+				(*this)[hbe->before].insert(hbe);
+				(*this)[hbe->after].insert(hbe);
 			}
 		}
 	}

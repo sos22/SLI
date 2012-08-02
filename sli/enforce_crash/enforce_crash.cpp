@@ -101,7 +101,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 		if (!i)
 			continue;
 
-		int thread = it.thread();
+		unsigned thread = it.thread();
 
 		/* Should @i be present in thread @thread? */
 		bool should_be_present = false;
@@ -113,12 +113,12 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 			     it4 != it3->second.end();
 			     it4++) {
 				happensBeforeEdge *hbe = *it4;
-				if (hbe->before.tid == thread) {
+				if (hbe->before.thread == thread) {
 					/* Can we send this message? */
 					instrT *sender = cfg(hbe->before);
 					if (forwardReachable[i].count(sender))
 						should_be_present = true;
-				} else if (hbe->after.tid == thread) {
+				} else if (hbe->after.thread == thread) {
 					/* Can we receive this message? */
 					instrT *receiver = cfg(hbe->after);
 					if (forwardReachable[i].count(receiver))
@@ -137,7 +137,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 			     it4 != it3->second.end();
 			     it4++) {
 				happensBeforeEdge *hbe = *it4;
-				if (hbe->after.tid == thread) {
+				if (hbe->after.thread == thread) {
 					instrT *receiver = cfg(hbe->after);
 					if (!forwardReachable[i].count(receiver) &&
 					    !backwardReachable[i].count(receiver)) {
@@ -204,8 +204,7 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcem
 			     it2 != it->second.end();
 			     it2++) {
 				happensBeforeEdge *hbe = *it2;
-				if (hbe->before.tid == (int)instr->rip.thread &&
-				    hbe->before.where == instr->rip.label) {
+				if (hbe->before == instr->rip) {
 					for (auto it3 = hbe->content.begin();
 					     it3 != hbe->content.end();
 					     it3++) {
@@ -248,7 +247,7 @@ optimiseHBContent(crashEnforcementData &ced,
 			for (unsigned x = 0; x < hbe->content.size(); ) {
 				bool must_keep = false;
 				std::queue<Instruction<ThreadCfgLabel> *> pending;
-				pending.push(decode(ThreadCfgLabel(hbe->after.tid, hbe->after.where)));
+				pending.push(decode(hbe->after));
 				while (!must_keep && !pending.empty()) {
 					Instruction<ThreadCfgLabel> *l = pending.front();
 					pending.pop();
@@ -552,8 +551,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 					for (auto it3 = it2->second.begin();
 					     !b && it3 != it2->second.end();
 					     it3++)
-						if ( (*it3)->before.tid == (int)label.thread &&
-						     (*it3)->before.where == label.label )
+						if ((*it3)->before == label)
 							b = true;
 					if (b)
 						break;
