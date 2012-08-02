@@ -1,24 +1,24 @@
 all: bug1.so bug2.so bug3.so
 
-%.so: ../../ced_to_patch % %.ced ../../sli/enforce_crash/patch_core.c
-	../../ced_to_patch $* $*.ced ../../ $@
+%.so: ../../ced_to_patch %.exe %.ced ../../sli/enforce_crash/patch_core.c
+	../../ced_to_patch $*.exe $*.ced ../../ $@
 
 %.cep.o: %.cep.c ../../sli/enforce_crash/cep_interpreter.h
 	gcc -g -I ../../sli/enforce_crash -c -fPIC -Wall -Werror $< -o $@
 
 %.cep.c: %.ced ../../ced_to_cep
-	../../ced_to_cep $* $< > $@
+	../../ced_to_cep $*.exe $< > $@
 %.interp.so: %.cep.o ../../cep_interpreter.o
 	gcc -shared $^ -o $@
 
-%.ced: %.summary.canon4  ../../enforce_crash % %.types.canon %.types.canon.idx %.bcg
-	../../enforce_crash $* $*.types.canon $*.bcg $@ $<
+%.ced: %.summary.canon4  ../../enforce_crash %.exe %.types.canon %.types.canon.idx %.bcg
+	../../enforce_crash $*.exe $*.types.canon $*.bcg $@ $<
 
 %.summary.canon4: ../../canonicalise_crash_summary0 %.summary.canon3
 	$^ $@
 
-%.summary.canon3: ../../canonicalise_crash_summary3 %.summary.canon2 % %.types.canon
-	$^ $@
+%.summary.canon3: ../../canonicalise_crash_summary3 %.summary.canon2 %.exe %.types.canon %.types.canon.idx
+	$< $*.summary.canon2 $*.exe $*.types.canon $@
 
 %.summary.canon2: ../../canonicalise_crash_summary2 %.summary.canon0
 	$^ $@
@@ -32,31 +32,31 @@ all: bug1.so bug2.so bug3.so
 %.summary: %.summaries
 	! [ -e $</1 ] && [ -e $</0 ] && cp $</0 $@
 
-%.summaries: ../../minimal_direct % %.types.canon %.types.canon.idx %.bcg
+%.summaries: ../../minimal_direct %.exe %.types.canon %.types.canon.idx %.bcg
 	rm -rf $@ crash_summaries induction.log logs generated_patch.c static.db && \
 	mkdir logs && \
 	mkdir crash_summaries && \
-	../../minimal_direct $* $*.types.canon $*.bcg && \
+	../../minimal_direct $*.exe $*.types.canon $*.bcg && \
 	mv crash_summaries $*.summaries
 
-%.types: % ./build_types_table.sh
+%.types: %.exe ./build_types_table.sh
 	./build_types_table.sh ./$<
 
-%.bcg: % ./build_call_graph.sh
+%.bcg: %.exe ./build_call_graph.sh
 	./build_call_graph.sh ./$<
 
-%.types.canon: % %.types ../../canonicalise_types_table
-	../../canonicalise_types_table ./$< $<.types $@
+%.types.canon: %.exe %.types ../../canonicalise_types_table
+	../../canonicalise_types_table ./$< $*.types $@
 
-.PRECIOUS: bug1.types bug1.bcg bug2.types bug2.bcg bug1.ced bug2.ced
-%.types.canon.idx: % %.types.canon ../../build_types_db
+.PRECIOUS: bug1.types bug1.bcg bug2.types bug2.bcg bug1.ced bug2.ced bug3.types bug3.bcg bug3.ced
+%.types.canon.idx: %.exe %.types.canon ../../build_types_db
 	rm -f $@ ; \
-	../../build_types_db ./$< $<.types.canon $@
+	../../build_types_db ./$< $*.types.canon $@
 
-%: %.c
+%.exe: %.c
 	gcc -pthread -Wall -g $< -o $@
 
 clean:
-	rm -f bug1 *.idx *.canon *.types *.bcg *~ static.db timings.txt generated_patch.c \
-	      *.ced *.so *.summary* core enforce_crash_* static.db timings.txt; \
+	rm -f *.exe *.idx *.canon *.types *.bcg *~ static.db timings.txt generated_patch.c \
+	      *.ced *.cep *.cep.c *.so *.summary* core enforce_crash_* static.db timings.txt; \
 	rm -rf *.summaries logs

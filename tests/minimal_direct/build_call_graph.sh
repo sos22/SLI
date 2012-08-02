@@ -13,4 +13,4 @@ do
     fi
     $valgrind --tool=bcg $program && break
 done
-mv callgraph1.dat ${1}.bcg
+mv callgraph1.dat ${1/.exe/.bcg}

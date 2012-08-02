@@ -15,5 +15,5 @@ do
     script -c "$valgrind --tool=ft2 $program" my_script && break
 done
 path=$(grep "^Dumping results to" my_script | sed 's,Dumping results to \(/tmp/types[0-9]*\.dat\).,\1,')
-mv $path ${1}.types
+mv $path ${1/.exe/.types}
 rm -f my_script
