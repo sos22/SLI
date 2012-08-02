@@ -332,6 +332,32 @@ analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
 	return true;
 }
 
+/* Check whether the ordering in @c is consistent with a total
+   ordering over threads.  Those don't actually enforce any
+   concurrency, so aren't very interesting. */
+static bool
+consistentOrdering(DNF_Conjunction &c)
+{
+	int thread_a;
+	int thread_b;
+	bool found_a_thread;
+	for (auto it = c.begin(); it != c.end(); it++) {
+		if (it->second->tag == Iex_HappensBefore) {
+			IRExprHappensBefore *e = (IRExprHappensBefore *)it->second;
+			if (!found_a_thread) {
+				thread_a = e->before.tid;
+				thread_b = e->after.tid;
+				found_a_thread = true;
+			} else {
+				if (thread_a != e->before.tid ||
+				    thread_b != e->after.tid)
+					return false;
+			}
+		}
+	}
+	return true;
+}
+
 /* Munge a side condition to make it easier to evaluate.  This is
    allowed to slightly change the value of the condition if that makes
    the eval much easier, but shouldn't push things too far. */
@@ -456,7 +482,8 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 			d[x][y].second = heuristicSimplify(d[x][y].second);
 
 	for (unsigned x = 0; x < d.size(); ) {
-		if (analyseHbGraph(d[x], summary)) {
+		if (analyseHbGraph(d[x], summary) &&
+		    !consistentOrdering(d[x])) {
 			x++;
 		} else {
 			d.erase(d.begin() + x);
