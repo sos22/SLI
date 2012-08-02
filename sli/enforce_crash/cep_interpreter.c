@@ -697,7 +697,7 @@ eval_bytecode(const unsigned short *bytecode,
 			break;
 
 		case bcop_not:
-			bytecode_push(&stack, bytecode_pop(&stack, type), type);
+			bytecode_push(&stack, ~bytecode_pop(&stack, type), type);
 			break;
 
 		case bcop_load: {
@@ -711,6 +711,7 @@ eval_bytecode(const unsigned short *bytecode,
 			if (type == bct_longlong || type == bct_v128) {
 				bytecode_push_longlong(&stack, buf);
 			} else {
+				debug("%p: load(%lx) -> %lx\n", lls, addr, *(unsigned long *)buf);
 				bytecode_push(&stack, *(unsigned long *)buf, type);
 			}
 			break;
@@ -929,8 +930,12 @@ rx_message_filter(struct low_level_state *rx_lls,
 		  struct msg_template *tx_msg)
 {
 	const unsigned short *filter = plan.cfg_nodes[rx_lls->cfg_node].rx_validate;
-	return eval_bytecode(filter, rx_lls, rx_msg,
-			     tx_msg, tx_lls);
+	int res;
+	res = eval_bytecode(filter, rx_lls, rx_msg,
+			    tx_msg, tx_lls);
+	if (!res)
+		debug("%p: failed RX message filter!\n", rx_lls);
+	return res;
 }
 
 /* This is quite fiddly.  We have a bunch of low-level threads, some
