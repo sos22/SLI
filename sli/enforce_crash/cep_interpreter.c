@@ -266,7 +266,7 @@ init_high_level_state(struct high_level_state *hls)
 
 struct cep_emulate_ctxt {
 	struct x86_emulate_ctxt ctxt;
-	const struct cfg_instr *current_cfg_node;
+	struct high_level_state *hls;
 };
 
 static int
@@ -274,14 +274,32 @@ emulator_read(enum x86_segment seg,
 	      unsigned long offset,
 	      void *p_data,
 	      unsigned int bytes,
-	      struct x86_emulate_ctxt *ctxt)
+	      struct x86_emulate_ctxt *_ctxt)
 {
 	/* This is where we'd do load stashes, if we were doing load
 	 * stashes. */
 	/* XXX should trap any faults here, so that we can set up a
 	   correct signal frame. XXX */
+	struct cep_emulate_ctxt *ctxt = (struct cep_emulate_ctxt *)_ctxt;
+	struct high_level_state *hls = ctxt->hls;
+	int i, j;
+
 	assert(seg == x86_seg_ds || seg == x86_seg_ss);
 	memcpy(p_data, (const void *)offset, bytes);
+	for (i = 0; i < hls->ll_states.sz; i++) {
+		struct low_level_state *lls = hls->ll_states.content[i];
+		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
+		for (j = 0; j < instr->nr_stash; j++) {
+			if (instr->stash[j].reg == -1) {
+				assert(bytes <= 8);
+				lls->simslots[instr->stash[j].slot] = 0;
+				memcpy(&lls->simslots[instr->stash[j].slot],
+				       p_data,
+				       bytes);
+				break;
+			}
+		}
+	}
 	return X86EMUL_OKAY;
 }
 
@@ -293,11 +311,22 @@ emulator_insn_fetch(enum x86_segment seg,
 		    struct x86_emulate_ctxt *_ctxt)
 {
 	struct cep_emulate_ctxt *ctxt = (struct cep_emulate_ctxt *)_ctxt;
-	int to_copy = ctxt->current_cfg_node->content_sz - offset + ctxt->current_cfg_node->rip;
-	assert(offset >= ctxt->current_cfg_node->rip && offset < ctxt->current_cfg_node->rip + ctxt->current_cfg_node->content_sz);
+	struct high_level_state *hls = ctxt->hls;
+	const struct cfg_instr *current_cfg_node;
+	int to_copy;
+	int i;
+	current_cfg_node = NULL;
+	for (i = 0; i < hls->ll_states.sz; i++) {
+		if (current_cfg_node)
+			assert(current_cfg_node->rip == plan.cfg_nodes[hls->ll_states.content[i]->cfg_node].rip);
+		else
+			current_cfg_node = &plan.cfg_nodes[hls->ll_states.content[i]->cfg_node];
+	}
+	assert(offset >= current_cfg_node->rip && offset < current_cfg_node->rip + current_cfg_node->content_sz);
+	to_copy = current_cfg_node->content_sz - (offset - current_cfg_node->rip);
 	if (to_copy > bytes)
 		to_copy = bytes;
-	memcpy(p_data, ctxt->current_cfg_node->content + offset - ctxt->current_cfg_node->rip, to_copy);
+	memcpy(p_data, current_cfg_node->content + offset - current_cfg_node->rip, to_copy);
 	if (to_copy < bytes)
 		memset(p_data + to_copy, 0x90, bytes - to_copy);
 	return X86EMUL_OKAY;
@@ -883,7 +912,7 @@ emulate_underlying_instruction(struct high_level_state *hls, struct reg_struct *
 	int r;
 
 	debug("Emulate from %lx\n", regs->rip);
-	emul_ctxt.current_cfg_node = &plan.cfg_nodes[hls->ll_states.content[0]->cfg_node];
+	emul_ctxt.hls = hls;
 	r = x86_emulate(&emul_ctxt.ctxt, &emulator_ops);
 	assert(r == X86EMUL_OKAY);
 }
@@ -1079,6 +1108,47 @@ wait_for_bound_exits(struct high_level_state *hls)
 }
 
 static void
+stash_registers(struct high_level_state *hls, struct reg_struct *regs)
+{
+	int i, j;
+
+	for (i = 0; i < hls->ll_states.sz; i++) {
+		struct low_level_state *lls = hls->ll_states.content[i];
+		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
+		for (j = 0; j < instr->nr_stash; j++) {
+			if (instr->stash[j].reg != -1) {
+				simslot_t *slot = &lls->simslots[instr->stash[j].slot];
+				switch (instr->stash[j].reg) {
+#define do_case(idx, r)							\
+					case idx:			\
+						*slot = regs-> r;	\
+						break
+					do_case(0, rax);
+					do_case(1, rcx);
+					do_case(2, rdx);
+					do_case(3, rbx);
+					do_case(4, rsp);
+					do_case(5, rbp);
+					do_case(6, rsi);
+					do_case(7, rdi);
+					do_case(8, r8);
+					do_case(9, r9);
+					do_case(10, r10);
+					do_case(11, r11);
+					do_case(12, r12);
+					do_case(13, r13);
+					do_case(14, r14);
+					do_case(15, r15);
+#undef do_case
+				default:
+					abort();
+				}
+			}
+		}
+	}
+}
+
+static void
 advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 {
 	int i;
@@ -1092,6 +1162,8 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 	if (hls->ll_states.sz == 0)
 		exit_interpreter();
 	sanity_check_high_level_state(hls);
+
+	stash_registers(hls, regs);
 
 	receive_messages(hls);
 	if (hls->ll_states.sz == 0)
