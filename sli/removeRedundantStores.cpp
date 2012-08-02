@@ -68,6 +68,28 @@ stackPointerDead(IRExpr *ptr, IRExpr *rsp)
 	return ptrDelta < rspDelta;
 }
 
+static bool
+sideEffectAltersExpression(StateMachineSideEffect *se,
+			   IRExpr *expr)
+{
+	threadAndRegister tr(threadAndRegister::invalid());
+	if (!se->definesRegister(tr))
+		return false;
+	struct : public IRExprTransformer {
+		threadAndRegister *tr;
+		bool res;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			if (threadAndRegister::fullEq(*tr, ieg->reg))
+				res = true;
+			return ieg;
+		}
+	} doit;
+	doit.tr = &tr;
+	doit.res = false;
+	doit.doit(expr);
+	return doit.res;
+}
+
 static bool storeMightBeLoadedAfterState(CfgDecode &decode,
 					 StateMachineState *sme,
 					 const AllowableOptimisations &opt,
@@ -98,6 +120,18 @@ storeMightBeLoadedByState(CfgDecode &decode,
 				   is clear. */
 				return false;
 			}
+			if (sideEffectAltersExpression(se, smses->addr)) {
+				/* This side-effect modifies one of
+				 * the registers involved in computing
+				 * the address.  That doesn't
+				 * necessarily mean that the store is
+				 * going to be loaded, but it does
+				 * mean that the rest of the analysis
+				 * is unsound, so we're conservative
+				 * and return true. */
+				return true;
+			}
+
 			if (se->type == StateMachineSideEffect::Load) {
 				StateMachineSideEffectLoad *smsel =
 					dynamic_cast<StateMachineSideEffectLoad *>(se);
