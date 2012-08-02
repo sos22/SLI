@@ -254,7 +254,7 @@ optimiseHBContent(crashEnforcementData &ced,
 					pending.pop();
 					if (instrUsesExpr(l, hbe->content[x], ced))
 						must_keep = true;
-					for (unsigned y = 0; y < l->successors.size(); l++)
+					for (unsigned y = 0; y < l->successors.size(); y++)
 						pending.push(l->successors[y].instr);
 				}
 				if (must_keep) {
