@@ -1513,7 +1513,7 @@ check_conditions(struct high_level_state *hls, const char *message, unsigned off
 		j = 0;
 		while (i < hls->ll_states.sz) {
 			if (hls->ll_states.content[i]) {
-				hls->ll_states.content[j] = hls->ll_states.content[j];
+				hls->ll_states.content[j] = hls->ll_states.content[i];
 				j++;
 			}
 			i++;
