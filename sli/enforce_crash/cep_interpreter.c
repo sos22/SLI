@@ -60,6 +60,8 @@ struct low_level_state {
 
 	struct high_level_state *hls;
 
+	int *mbox; /* Futex mbox */
+
 	/* Once we've received a message from an LLS, we become bound
 	 * to that LLS and in future will only receive messages from
 	 * them.  Can be BOUND_LLS_EXITED if we've bound to a thread
@@ -132,8 +134,19 @@ have_cloned;
 
 static int
 big_lock;
+static int
+nr_queued_wakes;
+#define MAX_QUEUED_WAKES 8
+static int *
+queued_wakes[8];
 
 #define debug(fmt, ...) printf("%d:%f: " fmt, gettid(), now(), ##__VA_ARGS__)
+
+static void
+futex(int *ptr, int op, int val, struct timespec *timeout)
+{
+	return syscall(__NR_futex, (unsigned long)ptr, (unsigned long)op, (unsigned long)val, (unsigned long)timeout);
+}
 
 static int
 gettid(void)
@@ -394,10 +407,36 @@ cmpxchg(int *what, int oldval, int newval)
 	return seen;
 }
 
+/* Note that this is non-atomic!  That's okay, because all of the
+ * callers are under the big lock. */
+static int
+na_xchg(int *val, int newval)
+{
+	int oldval = *val;
+	*val = newval;
+	return oldval;
+}
+
 static void
 store_release(int *what, int val)
 {
 	*(volatile int *)what = val;
+}
+
+/* Arrange that we will perform a futex wake on @ptr the next time we
+ * release the big lock. */
+static void
+queue_wake(int *ptr)
+{
+	if (nr_queued_wakes == MAX_QUEUED_WAKES) {
+		/* Too much stuff queued -> do it immediately, even if
+		   that does mean forcing some other poor thread to
+		   spin waiting for the big lock. */
+		futex(ptr, FUTEX_WAKE, 1, NULL);
+	} else {
+		queued_wakes[nr_queued_wakes] = ptr;
+		nr_queued_wakes++;
+	}
 }
 
 static void
@@ -409,7 +448,19 @@ acquire_big_lock(void)
 static void
 release_big_lock(void)
 {
+	/* Release the big lock, and issue a futex wake if
+	 * appropriate.  We only do one wake each time we release the
+	 * lock, because whoever we wake will immediately acquire the
+	 * lock, and so there's no point in having lots of people wake
+	 * up just to contend for the lock. */
+	int *wake = NULL;
+	if (nr_queued_wakes != 0) {
+		nr_queued_wakes--;
+		wake = queued_wakes[nr_queued_wakes];
+	}
 	store_release(&big_lock, 0);
+	if (wake)
+		futex(wake, FUTEX_WAKE, 1, NULL);
 }
 
 static void
@@ -762,6 +813,9 @@ exit_thread(struct low_level_state *ll)
 	if (ll->bound_lls && ll->bound_lls != BOUND_LLS_EXITED) {
 		assert(ll->bound_lls->bound_lls == ll);
 		ll->bound_lls->bound_lls = BOUND_LLS_EXITED;
+		if (ll->bound_lls->mbox &&
+		    !na_xchg(ll->bound_lls->mbox, 1))
+			queue_wake(ll->bound_lls->mbox);
 	}
 	release_lls(ll);
 }
@@ -903,6 +957,17 @@ rendezvous_threads(struct low_level_state_array *llsa,
 	}
 
 	discharge_message(tx_lls, tx_template, rx_lls, rx_template);
+
+	if (rx_lls->mbox) {
+		int x = na_xchg(rx_lls->mbox, 1);
+		if (!x)
+			queue_wake(rx_lls->mbox);
+	}
+	if (tx_lls->mbox) {
+		int x = na_xchg(tx_lls->mbox, 1);
+		if (!x)
+			queue_wake(tx_lls->mbox);
+	}
 }
 
 static void
@@ -939,6 +1004,37 @@ rx_message_filter(struct low_level_state *rx_lls,
 	return res;
 }
 
+static void
+get_max_wait_time(struct timeval *end_wait)
+{
+	gettimeofday(end_wait, NULL);
+	end_wait->tv_usec += MAX_DELAY_US;
+	while (end_wait->tv_usec >= 1000000) {
+		end_wait->tv_sec++;
+		end_wait->tv_usec -= 1000000;
+	}
+}
+
+static int
+get_timeout(const struct timeval *end_wait, struct timespec *timeout)
+{
+	struct timeval now;
+	gettimeofday(&now, NULL);
+	timeout->tv_sec = end_wait->tv_sec - now.tv_sec;
+	timeout->tv_nsec = (end_wait->tv_usec - now.tv_usec) * 1000;
+	while (timeout->tv_nsec < 0) {
+		timeout->tv_sec--;
+		timeout->tv_nsec += 1000000000;
+	}
+	/* Delays of less than 10us get treated as an instance wakeup,
+	   just because you'd probably spend that long going to sleep
+	   and waking up again. */
+	if (timeout->tv_sec < 0 ||
+	    (timeout->tv_sec == 0 && timeout->tv_nsec < 10000))
+		return -1;
+	return 0;
+}
+
 /* This is quite fiddly.  We have a bunch of low-level threads, some
  * of which want to perform message receive operations.  The threads
  * which don't want to receive anything are unchanged, so ignore them
@@ -964,8 +1060,10 @@ receive_messages(struct high_level_state *hls)
 	int i;
 	int j;
 	int need_delay;
+	int need_futex;
 	int have_rx;
 	struct low_level_state_array new_llsa;
+	int mbox;
 
 	/* Quick escape if we don't have anything to receive. */
 	have_rx = 0;
@@ -982,6 +1080,8 @@ receive_messages(struct high_level_state *hls)
 	memset(&new_llsa, 0, sizeof(new_llsa));
 	need_delay = 0;
 	have_rx = 0;
+	need_futex = 0;
+	mbox = 0;
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
@@ -1013,6 +1113,7 @@ receive_messages(struct high_level_state *hls)
 			debug("Receiving from an exited thread -> fail\n");
 			hls->ll_states.content[i] = NULL;
 			lls->exit_after_interpret = 1;
+			low_level_state_push(&new_llsa, lls);
 		} else if (lls->bound_lls != NULL) {
 			assert(lls->bound_lls->bound_lls == lls);
 			if (lls->bound_lls->bound_sending_message) {
@@ -1034,7 +1135,8 @@ receive_messages(struct high_level_state *hls)
 				debug("%p: Bound thread %p with nothing outstanding; go to RX state\n",
 				      lls, lls->bound_lls);
 				lls->bound_receiving_message = msg;
-				need_delay = 1;
+				lls->mbox = &mbox;
+				need_futex = 1;
 				have_rx = 1;
 			}
 		} else {
@@ -1064,45 +1166,76 @@ receive_messages(struct high_level_state *hls)
 		return;
 	}
 
-	if (!need_delay) {
-		/* Some receives failed, but we're not allowed to
-		 * delay here.  Fail the relevant threads. */
-		debug("Received failed, but no delays here\n");
-		for (i = 0; i < hls->ll_states.sz; i++) {
-			struct low_level_state *lls = hls->ll_states.content[i];
-			if (!lls)
-				continue;
-			hls->ll_states.content[i] = NULL;
-			/* Bound receives always either succeed or set
-			   need_delay, and in either case we won't get
-			   here. */
-			assert(!lls->bound_receiving_message);
-			/* ... so we must be doing an unbound receive. */
-			assert(lls->unbound_receiving_message);
-			low_level_state_erase_first(&message_receivers, lls);
-			/* Success of an unbound receive is indicated
-			   by binding the LLS. */
-			if (lls->bound_lls) {
-				debug("%p: unbound RX from %p\n", lls, lls->bound_lls);
-				assert(lls->bound_lls != BOUND_LLS_EXITED);
-			} else {
-				debug("%p: unbound RX failed\n", lls);
-				lls->exit_after_interpret = 1;
+	if (need_delay) {
+		/* Some states require a delay e.g. an unbound
+		   receive, which always waits for a fixed amount of
+		   time, even if someone arrives before the wait is
+		   finished. */
+		debug("Delay for RX\n");
+		release_big_lock();
+		usleep(MAX_DELAY_US);
+		acquire_big_lock();
+		debug("Back from RX delay\n");
+	} else if (need_futex) {
+		/* We have bound receives and no delayable unbound
+		 * ones.  That means waiting until the bound messages
+		 * arrive, but no longer. */
+		struct timeval end_wait;
+		struct timespec timeout;
+		get_max_wait_time(&end_wait);
+		while (1) {
+			if (get_timeout(&end_wait, &timeout) < 0)
+				break;
+			debug("RX delay via futex\n");
+			release_big_lock();
+			futex(&mbox, FUTEX_WAIT, 0, &timeout);
+			acquire_big_lock();
+			debug("Back from futex RX delay\n");
+			int x = na_xchg(&mbox, 0);
+			if (x) {
+				/* One of our receives has completed.
+				 * Process it and check if it was the
+				 * last one. */
+				int have_more_bound_rx = 0;
+				for (i = 0; i < hls->ll_states.sz; i++) {
+					struct low_level_state *lls = hls->ll_states.content[i];
+					if (!lls)
+						continue;
+					if (lls->unbound_receiving_message) {
+						/* We allow unbound
+						   receives to keep
+						   trying while we're
+						   waiting for bound
+						   ones, but don't try
+						   to complete them
+						   until all the bound
+						   ones have
+						   finished. */
+						continue;
+					}
+					if (lls->bound_lls == BOUND_LLS_EXITED) {
+						debug("%p: Unbound receive: peer exited\n", lls);
+						lls->exit_after_interpret = 1;
+						hls->ll_states.content[i] = NULL;
+						lls->mbox = NULL;
+						low_level_state_push(&new_llsa, lls);
+					} else if (lls->bound_receiving_message) {
+						have_more_bound_rx = 1;
+					} else {
+						debug("%p: Unbound receive succeeded\n", lls);
+						hls->ll_states.content[i] = NULL;
+						lls->mbox = NULL;
+						low_level_state_push(&new_llsa, lls);
+					}
+				}
+				if (!have_more_bound_rx)
+					break;
 			}
-			low_level_state_push(&new_llsa, lls);
 		}
-		low_level_state_arr_swizzle(&hls->ll_states, &new_llsa);
-		return;
 	}
 
-	/* Some states require a delay.  Do it. */
-	debug("Delay for RX\n");
-	release_big_lock();
-	/* XXX could be more cunning here */
-	usleep(MAX_DELAY_US);
-	acquire_big_lock();
-	debug("Back from RX delay\n");
-
+	/* That's all the delaying we're allowed.  Process all of the
+	   receive operations we have in one go. */
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		if (!lls)
@@ -1122,6 +1255,7 @@ receive_messages(struct high_level_state *hls)
 		} else {
 			debug("Receive succeeded.\n");
 		}
+		lls->mbox = NULL;
 		low_level_state_push(&new_llsa, lls);
 	}
 
@@ -1248,6 +1382,8 @@ send_messages(struct high_level_state *hls)
 	int have_sends;
 	int need_delay;
 	int j;
+	int need_futex;
+	int mbox;
 
 	have_sends = 0;
 	for (i = 0; !have_sends && i < hls->ll_states.sz; i++) {
@@ -1262,6 +1398,8 @@ send_messages(struct high_level_state *hls)
 	memset(&new_llsa, 0, sizeof(new_llsa));
 	have_sends = 0;
 	need_delay = 0;
+	need_futex = 0;
+	mbox = 0;
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
@@ -1312,7 +1450,8 @@ send_messages(struct high_level_state *hls)
 				      lls->bound_lls);
 				lls->bound_sending_message = msg;
 				have_sends = 1;
-				need_delay = 1;
+				need_futex = 1;
+				lls->mbox = &mbox;
 			}
 		} else {
 			/* Perform a general send. */
@@ -1340,44 +1479,58 @@ send_messages(struct high_level_state *hls)
 		return;
 	}
 
-	if (!need_delay) {
-		/* Sends failed, but we don't want to delay, so fail
-		 * them all. */
-		debug("Sends outstanding, but no delays here.\n");
-		for (i = 0; i < hls->ll_states.sz; i++) {
-			struct low_level_state *lls = hls->ll_states.content[i];
-			if (!lls)
-				continue;
-			hls->ll_states.content[i] = NULL;
-			/* Bound sends always either succeed or set
-			   need_delay, so we shouldn't see any
-			   incomplete ones here. */
-			assert(!lls->bound_sending_message);
-			/* Since we weren't doing a bound send, we
-			   must have been doing an unbound one. */
-			assert(lls->unbound_sending_message);
-			low_level_state_erase_first(&message_senders, lls);
-			/* If we're now bound then the send succeeded.
-			   Otherwise, it failed and we should exit. */
-			if (lls->bound_lls) {
-				debug("%p: Unbound TX to %p; bind.\n",
-				      lls, lls->bound_lls);
-				assert(lls->bound_lls != BOUND_LLS_EXITED);
-				low_level_state_push(&new_llsa, lls);
-			} else {
-				debug("%p: TX failed\n", lls);
-				exit_thread(lls);
+	if (need_delay) {
+		/* We have delay-able unbound transmits.  Those always
+		   stall for a fixed amount of time, even if something
+		   arrives to complete them before the delay is
+		   finished, because they need to bind to *everything*
+		   which arrives during the delay, and not just the
+		   first thing. */
+		debug("Delay for TX.\n");
+		release_big_lock();
+		usleep(MAX_DELAY_US);
+		acquire_big_lock();
+		debug("Back from TX delay.\n");
+	} else if (need_futex) {
+		struct timeval end_wait;
+		struct timespec timeout;
+		get_max_wait_time(&end_wait);
+		while (1) {
+			if (get_timeout(&end_wait, &timeout) < 0)
+				break;
+			debug("TX delay via futex\n");
+			release_big_lock();
+			futex(&mbox, FUTEX_WAIT, 0, &timeout);
+			acquire_big_lock();
+			debug("Back from futex TX delay\n");
+			int x = na_xchg(&mbox, 0);
+			if (x) {
+				int have_more_bound_tx = 0;
+				for (i = 0; i < hls->ll_states.sz; i++) {
+					struct low_level_state *lls = hls->ll_states.content[i];
+					if (!lls)
+						continue;
+					if (lls->unbound_sending_message)
+						continue;
+					if (lls->bound_lls == BOUND_LLS_EXITED) {
+						debug("%p: Unbound transmit, peer exited\n", lls);
+						hls->ll_states.content[i] = NULL;
+						lls->mbox = NULL;
+						exit_thread(lls);
+					} else if (lls->bound_sending_message) {
+						have_more_bound_tx = 1;
+					} else {
+						debug("Unbound transmit succeeded early\n");
+						hls->ll_states.content[i] = NULL;
+						lls->mbox = NULL;
+						low_level_state_push(&new_llsa, lls);
+					}
+				}
+				if (!have_more_bound_tx)
+					break;
 			}
 		}
-		low_level_state_arr_swizzle(&hls->ll_states, &new_llsa);
-		return;
 	}
-
-	debug("Delay for TX.\n");
-	release_big_lock();
-	usleep(MAX_DELAY_US);
-	acquire_big_lock();
-	debug("Back from TX delay.\n");
 
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
@@ -1409,9 +1562,11 @@ wait_for_bound_exits(struct high_level_state *hls)
 {
 	int i;
 	int waiting_for_bound_exit;
+	int mbox;
 
 	while (1) {
 		waiting_for_bound_exit = 0;
+		mbox = 0;
 		for (i = 0; !waiting_for_bound_exit && i < hls->ll_states.sz; i++) {
 			struct low_level_state *lls = hls->ll_states.content[i];
 			if (lls->await_bound_lls_exit) {
@@ -1424,6 +1579,7 @@ wait_for_bound_exits(struct high_level_state *hls)
 					assert(lls->bound_lls);
 					assert(!lls->bound_lls->await_bound_lls_exit);
 					waiting_for_bound_exit++;
+					lls->mbox = &mbox;
 				}
 			}
 		}
@@ -1431,7 +1587,7 @@ wait_for_bound_exits(struct high_level_state *hls)
 			break;
 		debug("Waiting for %d bound exits\n", waiting_for_bound_exit);
 		release_big_lock();
-		usleep(100);
+		futex(&mbox, FUTEX_WAIT, 0, NULL);
 		acquire_big_lock();
 	}
 	return;
