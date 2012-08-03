@@ -101,7 +101,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 		if (!i)
 			continue;
 
-		unsigned thread = it.thread();
+		AbstractThread thread = it.thread();
 
 		/* Should @i be present in thread @thread? */
 		bool should_be_present = false;
@@ -270,22 +270,22 @@ optimiseHBContent(crashEnforcementData &ced,
 static bool
 buildCED(DNF_Conjunction &c,
 	 std::map<unsigned, CfgLabel> &rootsCfg,
-	 StateMachine *probeMachine,
-	 StateMachine *storeMachine,
+	 CrashSummary *summary,
 	 crashEnforcementData *out,
+	 ThreadAbstracter &abs,
 	 int &next_hb_id,
 	 simulationSlotT &next_slot)
 {
 	ThreadCfgDecode cfg;
-	cfg.addMachine(probeMachine);
-	cfg.addMachine(storeMachine);
+	cfg.addMachine(summary->loadMachine, abs);
+	cfg.addMachine(summary->storeMachine, abs);
 
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	*out = crashEnforcementData(neededExpressions, rootsCfg, probeMachine, storeMachine, c, cfg, next_hb_id, next_slot, true);
+	*out = crashEnforcementData(neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, true);
 	optimiseHBContent(*out, cfg);
 	return true;
 }
@@ -445,6 +445,7 @@ static crashEnforcementData
 enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
 		       GarbageCollectionToken token,
+		       ThreadAbstracter &abs,
 		       int &next_hb_id,
 		       simulationSlotT &next_slot)
 {
@@ -492,7 +493,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printDnf(d, _logfile);
 
 	if (d.size() == 0)
-		return crashEnforcementData(summary, true);
+		return crashEnforcementData(true);
 
 	std::map<unsigned, CfgLabel> rootsCfg;
 	assert(summary->loadMachine->origin.size() == 1);
@@ -506,11 +507,14 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 				summary->storeMachine->origin[0].first,
 				summary->storeMachine->cfg_roots[0]->label));
 
-	crashEnforcementData accumulator(summary, true);
+	crashEnforcementData accumulator(true);
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp(true);
-		if (buildCED(d[x], rootsCfg, summary->loadMachine, summary->storeMachine, &tmp, next_hb_id, next_slot))
+		if (buildCED(d[x], rootsCfg, summary, &tmp, abs, next_hb_id, next_slot)) {
+			printf("Intermediate CED:\n");
+			tmp.prettyPrint(stdout, true);
 			accumulator |= tmp;
+		}
 	}
 	return accumulator;
 }
@@ -532,7 +536,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	     it != ced.exprStashPoints.end();
 	     it++) {
 		ThreadCfgLabel label = it->first;
-		CFGNode *node = ced.threadCfg.findInstr(label);
+		CFGNode *node = ced.crashCfg.findInstr(label);
 
 		while (1) {
 			/* Must have an unambiguous successor */
@@ -561,7 +565,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 
 			/* Can't stash a register which this
 			 * instruction might modify */
-			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(label.thread, node->rip));
+			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, node->rip));
 			std::set<threadAndRegister, threadAndRegister::partialCompare> modified_regs;
 			for (int x = 0; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 				if (irsb->stmts[x]->tag == Ist_Put)
@@ -601,7 +605,7 @@ optimiseCfg(crashEnforcementData &ced)
 	for (auto it = ced.roots.begin();
 	     it != ced.roots.end();
 	     it++) {
-		CFGNode *n = ced.threadCfg.findInstr(*it);
+		CFGNode *n = ced.crashCfg.findInstr(*it);
 		while (1) {
 			/* We can advance a root if it has a single
 			   successor, and it has no stash points, and
@@ -639,7 +643,8 @@ main(int argc, char *argv[])
 	simulationSlotT next_slot(1);
 
 	VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[5], NULL));
-	crashEnforcementData accumulator = enforceCrashForMachine(summary, oracle, ALLOW_GC, next_hb_id, next_slot);
+	ThreadAbstracter abs;
+	crashEnforcementData accumulator = enforceCrashForMachine(summary, oracle, ALLOW_GC, abs, next_hb_id, next_slot);
 
 	optimiseStashPoints(accumulator, oracle);
 	optimiseCfg(accumulator);

@@ -18,6 +18,8 @@ loadCrashEnforcementData(crashEnforcementData &ced, AddressSpace *as, int fd)
 	const char *suffix;
 	if (!ced.parse(as, buf, &suffix))
 		errx(1, "cannot parse crash enforcement data");
+	if (*suffix)
+		errx(1, "junk after crash enforcement data: %s", suffix);
 	free(buf);
 }
 
@@ -67,7 +69,7 @@ expressionDependsOn(IRExpr *what, const std::set<IRExprGet *> &d, bool includeRe
 }
 
 static int
-max_simslot(unsigned tid, const slotMapT &sm)
+max_simslot(const AbstractThread &tid, const slotMapT &sm)
 {
 	int res = 0;
 	for (auto it = sm.begin(); it != sm.end(); it++)
@@ -94,7 +96,7 @@ compute_entry_point_list(crashEnforcementData &ced, FILE *f, const CfgRelabeller
 	}
 	for (auto it = ctxts.begin(); it != ctxts.end(); it++) {
 		ThreadCfgLabel l(it->first);
-		CFGNode *n = ced.threadCfg.findInstr(l);
+		CFGNode *n = ced.crashCfg.findInstr(l);
 		VexRip v(n->rip);
 		fprintf(f, "static const struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
@@ -112,7 +114,7 @@ compute_entry_point_list(crashEnforcementData &ced, FILE *f, const CfgRelabeller
 	std::map<unsigned long, std::set<ThreadCfgLabel> > entryPoints;
 	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++) {
 		ThreadCfgLabel l(*it);
-		CFGNode *n = ced.threadCfg.findInstr(l);
+		CFGNode *n = ced.crashCfg.findInstr(l);
 		VexRip v(n->rip);
 		entryPoints[v.unwrap_vexrip()].insert(l);
 	}
@@ -211,12 +213,16 @@ bytecode_const32(FILE *f, unsigned val)
 }
 
 static void
-bytecode_eval_expr(FILE *f, IRExpr *expr, unsigned thread, crashEnforcementData &ced)
+bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnforcementData &ced)
 {
 	switch (expr->tag) {
 	case Iex_Const: {
 		IRExprConst *iec = (IRExprConst *)expr;
 		switch (iec->con->tag) {
+		case Ico_U32:
+			bytecode_op(f, "push_const", Ity_I32);
+			bytecode_const32(f, iec->con->Ico.U32);
+			break;
 		case Ico_U64:
 			bytecode_op(f, "push_const", Ity_I64);
 			bytecode_const64(f, iec->con->Ico.U64);
@@ -229,7 +235,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, unsigned thread, crashEnforcementData 
 	case Iex_Get: {
 		IRExprGet *ieg = (IRExprGet *)expr;
 		simulationSlotT slot = ced.exprsToSlots(thread, ieg);
-		bytecode_op(f, "push_slot", Ity_I64);
+		bytecode_op(f, "push_slot", ieg->ty);
 		bytecode_const32(f, slot.idx);
 		break;
 	}
@@ -279,7 +285,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, unsigned thread, crashEnforcementData 
 }
 
 static void
-emit_validation(FILE *f, int ident, const char *name, const std::set<exprEvalPoint> &condition, unsigned thread, crashEnforcementData &ced)
+emit_validation(FILE *f, int ident, const char *name, const std::set<exprEvalPoint> &condition, const AbstractThread &thread, crashEnforcementData &ced)
 {
 	fprintf(f, "static const unsigned short instr_%d_%s[] = {\n", ident, name);
 	for (auto it = condition.begin();
@@ -306,20 +312,19 @@ struct cfg_annotation_summary {
 static void
 dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller, const char *ident)
 {
-	std::queue<ThreadCfgLabel> pending;
-	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++)
-		pending.push(*it);
-	while (!pending.empty()) {
-		ThreadCfgLabel l(pending.front());
-		pending.pop();
-		if (!relabeller.label(l))
-			continue;
-		CFGNode *n = ced.threadCfg.findInstr(l);
-		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
-			ThreadCfgLabel l2(l);
-			if (it->instr) {
-				l2.label = it->instr->label;
-				pending.push(l2);
+	{
+		std::queue<ThreadCfgLabel> pending;
+		for (auto it = ced.roots.begin(); it != ced.roots.end(); it++)
+			pending.push(*it);
+		while (!pending.empty()) {
+			ThreadCfgLabel l(pending.front());
+			pending.pop();
+			if (!relabeller.label(l))
+				continue;
+			CFGNode *n = ced.crashCfg.findInstr(l);
+			for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
+				if (it->instr)
+					pending.push(ThreadCfgLabel(l.thread, it->instr->label));
 			}
 		}
 	}
@@ -333,7 +338,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		ThreadCfgLabel oldLabel(it->first);
 		int newLabel(it->second);
 
-		CFGNode *instr = ced.threadCfg.findInstr(oldLabel);
+		CFGNode *instr = ced.crashCfg.findInstr(oldLabel);
 		fprintf(f, "static const unsigned char instr_%d_content[] = {", newLabel);
 		for (unsigned x = 0; x < instr->len; x++) {
 			if (x != 0)
@@ -458,8 +463,8 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			allHbEdges.insert(*it2);
 	for (auto it = allHbEdges.begin(); it != allHbEdges.end(); it++) {
 		happensBeforeEdge *hb = *it;
-		unsigned beforeTid = hb->before.thread;
-		unsigned afterTid = hb->after.thread;
+		AbstractThread beforeTid = hb->before.thread;
+		AbstractThread afterTid = hb->after.thread;
 		fprintf(f, "static struct msg_template msg_template_%x_tx;\n", hb->msg_id);
 		fprintf(f, "static struct msg_template msg_template_%x_rx = {\n", hb->msg_id);
 		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);

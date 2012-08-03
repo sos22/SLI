@@ -82,13 +82,13 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	}
 }
 
-happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadCfgDecode &cfg)
+happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, ThreadCfgDecode &cfg)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
 			IRExprHappensBefore *e = (IRExprHappensBefore *)c[x].second;
-			ThreadCfgLabel beforeRip(e->before);
-			ThreadCfgLabel afterRip(e->after);
+			ThreadCfgLabel beforeRip(abs(e->before));
+			ThreadCfgLabel afterRip(abs(e->after));
 			auto before = cfg(beforeRip);
 			auto after = cfg(afterRip);
 			if (c[x].first) {

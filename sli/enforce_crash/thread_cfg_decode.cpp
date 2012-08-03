@@ -2,7 +2,7 @@
 #include "enforce_crash.hpp"
 
 Instruction<ThreadCfgLabel> *
-ThreadCfgDecode::addCfg(int tid, const CFGNode *node)
+ThreadCfgDecode::addCfg(const AbstractThread &tid, const CFGNode *node)
 {
 	ThreadCfgLabel l(tid, node->label);
 	auto it_did_insert = content.insert(std::pair<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>(l, (Instruction<ThreadCfgLabel> *)0xf001ul));
@@ -38,15 +38,15 @@ ThreadCfgDecode::addCfg(int tid, const CFGNode *node)
 }
 
 void
-ThreadCfgDecode::addMachine(StateMachine *sm)
+ThreadCfgDecode::addMachine(StateMachine *sm, ThreadAbstracter &abs)
 {
 	assert(sm->origin.size() == 1);
 	assert(sm->cfg_roots.size() == 1);
-	addCfg(sm->origin[0].first, sm->cfg_roots[0]);
+	addCfg(abs.newThread(sm->origin[0].first), sm->cfg_roots[0]);
 }
 
 void
-ThreadCfg::prettyPrint(FILE *f, bool verbose)
+CrashCfg::prettyPrint(FILE *f, bool verbose)
 {
 	fprintf(f, "\tCFG:\n");
 	for (auto it = content.begin(); it != content.end(); it++) {
@@ -60,7 +60,7 @@ ThreadCfg::prettyPrint(FILE *f, bool verbose)
 				continue;
 			if (done_one)
 				fprintf(f, ", ");
-			fprintf(f, "%s", ThreadCfgLabel(it->first.thread, it2->instr->label).name());
+			fprintf(f, "%s", it2->instr->label.name());
 			done_one = true;
 		}
 		fprintf(f, "}");
@@ -119,22 +119,22 @@ ThreadCfg::prettyPrint(FILE *f, bool verbose)
 }
 
 bool
-ThreadCfg::parse(AddressSpace *as, const char *str, const char **suffix)
+CrashCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 {
 	if (!parseThisString("CFG:\n", str, &str))
 		return false;
 	const char *cursor = str;
-	std::map<ThreadCfgLabel, std::pair<VexRip, std::vector<ThreadCfgLabel> > > content;
+	std::map<ThreadCfgLabel, std::pair<VexRip, std::vector<CfgLabel> > > content;
 	while (1) {
 		ThreadCfgLabel label;
-		std::pair<VexRip, std::vector<ThreadCfgLabel> > value;
+		std::pair<VexRip, std::vector<CfgLabel> > value;
 		if (!label.parse(cursor, &cursor) ||
 		    !parseThisString(": ", cursor, &cursor) ||
 		    !parseVexRip(&value.first, cursor, &cursor) ||
 		    !parseThisString(" {", cursor, &cursor))
 			break;
 		while (1) {
-			ThreadCfgLabel target;
+			CfgLabel target(CfgLabel::uninitialised());
 			if (!target.parse(cursor, &cursor))
 				break;
 			parseThisString(", ", cursor, &cursor);
@@ -159,8 +159,9 @@ ThreadCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 		   decoded up with the successors which are
 		   provided by the parsed CFG. */
 		Instruction<VexRip> *instr = it2->second;
+		const AbstractThread &thread(it->first.thread);
 		assert(instr != NULL);
-		std::vector<ThreadCfgLabel> desiredSuccessors(it->second.second);
+		std::vector<CfgLabel> desiredSuccessors(it->second.second);
 		std::vector<Instruction<VexRip>::successor_t> actualSuccessors(instr->successors);
 		std::vector<bool> actualSuccessorsUsed;
 		actualSuccessorsUsed.resize(actualSuccessors.size(), false);
@@ -168,7 +169,7 @@ ThreadCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 		for (auto it = desiredSuccessors.begin();
 		     it != desiredSuccessors.end();
 		     it++) {
-			auto it3 = this->content.find(*it);
+			auto it3 = this->content.find(ThreadCfgLabel(thread, *it));
 			if (it3 == this->content.end())
 				return false;
 			Instruction<VexRip> *desiredTarget = it3->second;
@@ -219,7 +220,7 @@ ThreadCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 }
 
 void
-ThreadCfg::rewriteBranches(CFGNode *existingInstr, CFGNode *newInstr)
+CrashCfg::rewriteBranches(CFGNode *existingInstr, CFGNode *newInstr)
 {
 	for (auto it = content.begin(); it != content.end(); it++) {
 		for (auto it2 = it->second->successors.begin();
