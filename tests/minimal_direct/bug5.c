@@ -25,6 +25,7 @@ thr_main(void *ign)
 		if (v1 != v2)
 			*(unsigned long *)0xf001 = 5;
 		STOP_ANALYSIS();
+		usleep(10000);
 	}
 	return NULL;
 }
@@ -41,16 +42,16 @@ main()
 	pthread_create(&thr, NULL, thr_main, NULL);
 
 	while (time(NULL) < start_time + 10) {
+		usleep(100000);
 		STOP_ANALYSIS();
 		global1 = 5;
 		global2 = 5;
 		STOP_ANALYSIS();
-		usleep(10000);
+		usleep(100000);
 		STOP_ANALYSIS();
 		global1 = 7;
 		global2 = 7;
 		STOP_ANALYSIS();
-		usleep(10000);
 	}
 
 	force_quit = true;
