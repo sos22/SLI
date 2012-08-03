@@ -35,6 +35,9 @@ main()
 	pthread_t thr;
 	time_t start_time = time(NULL);
 
+	global1 = 99;
+	global2 = 99;
+
 	pthread_create(&thr, NULL, thr_main, NULL);
 
 	while (time(NULL) < start_time + 10) {
