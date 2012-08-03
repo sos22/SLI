@@ -48,7 +48,7 @@ all: bug1.so bug2.so bug3.so
 %.types.canon: %.exe %.types ../../canonicalise_types_table
 	../../canonicalise_types_table ./$< $*.types $@
 
-.PRECIOUS: bug1.types bug1.bcg bug2.types bug2.bcg bug1.ced bug2.ced bug3.types bug3.bcg bug3.ced bug4.types bug4.bcg bug4.ced bug5.types bug5.bcg bug5.ced
+.PRECIOUS: bug1.types bug1.bcg bug2.types bug2.bcg bug1.ced bug2.ced bug3.types bug3.bcg bug3.ced bug4.types bug4.bcg bug4.ced bug5.types bug5.bcg bug5.ced bug6.types bug6.bcg bug6.ced
 %.types.canon.idx: %.exe %.types.canon ../../build_types_db
 	rm -f $@ ; \
 	../../build_types_db ./$< $*.types.canon $@
