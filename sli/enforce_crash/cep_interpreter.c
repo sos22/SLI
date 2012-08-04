@@ -145,7 +145,7 @@ queued_wakes[8];
 static void
 futex(int *ptr, int op, int val, struct timespec *timeout)
 {
-	return syscall(__NR_futex, (unsigned long)ptr, (unsigned long)op, (unsigned long)val, (unsigned long)timeout);
+	syscall(__NR_futex, (unsigned long)ptr, (unsigned long)op, (unsigned long)val, (unsigned long)timeout);
 }
 
 static int
@@ -241,8 +241,11 @@ ctxt_matches(const struct cep_entry_ctxt *ctxt, const struct reg_struct *regs)
 		unsigned long guest_val;
 		if (!fetch_guest(&guest_val, regs->rsp + ctxt->stack[x].offset))
 			return 0;
-		if (guest_val != ctxt->stack[x].expected_value)
+		if (guest_val != ctxt->stack[x].expected_value) {
+			debug("Context mismatch: %lx != %lx\n",
+			      guest_val, ctxt->stack[x].expected_value);
 			return 0;
+		}
 	}
 	return 1;
 }
@@ -281,6 +284,7 @@ init_high_level_state(struct high_level_state *hls)
 struct cep_emulate_ctxt {
 	struct x86_emulate_ctxt ctxt;
 	struct high_level_state *hls;
+	const struct cfg_instr *node;
 };
 
 static int
@@ -300,17 +304,19 @@ emulator_read(enum x86_segment seg,
 
 	assert(seg == x86_seg_ds || seg == x86_seg_ss);
 	memcpy(p_data, (const void *)offset, bytes);
-	for (i = 0; i < hls->ll_states.sz; i++) {
-		struct low_level_state *lls = hls->ll_states.content[i];
-		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-		for (j = 0; j < instr->nr_stash; j++) {
-			if (instr->stash[j].reg == -1) {
-				assert(bytes <= 8);
-				lls->simslots[instr->stash[j].slot] = 0;
-				memcpy(&lls->simslots[instr->stash[j].slot],
-				       p_data,
-				       bytes);
-				break;
+	if (hls) {
+		for (i = 0; i < hls->ll_states.sz; i++) {
+			struct low_level_state *lls = hls->ll_states.content[i];
+			const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
+			for (j = 0; j < instr->nr_stash; j++) {
+				if (instr->stash[j].reg == -1) {
+					assert(bytes <= 8);
+					lls->simslots[instr->stash[j].slot] = 0;
+					memcpy(&lls->simslots[instr->stash[j].slot],
+					       p_data,
+					       bytes);
+					break;
+				}
 			}
 		}
 	}
@@ -328,13 +334,19 @@ emulator_insn_fetch(enum x86_segment seg,
 	struct high_level_state *hls = ctxt->hls;
 	const struct cfg_instr *current_cfg_node;
 	int to_copy;
-	int i;
-	current_cfg_node = NULL;
-	for (i = 0; i < hls->ll_states.sz; i++) {
-		if (current_cfg_node)
-			assert(current_cfg_node->rip == plan.cfg_nodes[hls->ll_states.content[i]->cfg_node].rip);
-		else
-			current_cfg_node = &plan.cfg_nodes[hls->ll_states.content[i]->cfg_node];
+	if (hls) {
+		int i;
+		current_cfg_node = NULL;
+		for (i = 0; i < hls->ll_states.sz; i++) {
+			if (current_cfg_node)
+				assert(current_cfg_node->rip == plan.cfg_nodes[hls->ll_states.content[i]->cfg_node].rip);
+			else
+				current_cfg_node = &plan.cfg_nodes[hls->ll_states.content[i]->cfg_node];
+		}
+		assert(current_cfg_node);
+	} else {
+		assert(ctxt->node);
+		current_cfg_node = ctxt->node;
 	}
 	assert(offset >= current_cfg_node->rip && offset < current_cfg_node->rip + current_cfg_node->content_sz);
 	to_copy = current_cfg_node->content_sz - (offset - current_cfg_node->rip);
@@ -1339,12 +1351,16 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 }
 
 static void
-check_for_ll_thread_start(struct high_level_state *hls, const struct reg_struct *regs)
+check_for_ll_thread_start(struct high_level_state *hls, struct reg_struct *regs)
 {
 	int i, j;
+	const struct cfg_instr *entry_node;
+	entry_node = NULL;
 	for (i = 0; i < plan.nr_entry_points; i++) {
 		if (plan.entry_points[i]->orig_rip != regs->rip)
 			continue;
+		assert(plan.entry_points[i]->nr_entry_ctxts > 0);
+		entry_node = &plan.cfg_nodes[plan.entry_points[i]->ctxts[0]->cfg_label];
 		for (j = 0; j < plan.entry_points[i]->nr_entry_ctxts; j++) {
 			if (ctxt_matches(plan.entry_points[i]->ctxts[j], regs))
 				start_low_level_thread(
@@ -1353,6 +1369,31 @@ check_for_ll_thread_start(struct high_level_state *hls, const struct reg_struct 
 					plan.entry_points[i]->ctxts[j]->nr_simslots);
 		}
 	}
+	if (entry_node && hls->ll_states.sz == 0) {
+		/* If this is an entry RIP then it'll have been
+		 * patched to try to start more LLs, so if we return
+		 * to it we'll come straight back here and won't
+		 * actually achieve anything.  Emulate a single
+		 * instruction to get us out of the immediate danger
+		 * zone.
+		 */
+		struct cep_emulate_ctxt ctxt = {
+			.ctxt = {
+				.regs = regs,
+				.addr_size = 64,
+				.sp_size = 64,
+				.force_writeback = 0
+			},
+			.hls = NULL,
+			.node = entry_node,
+		};
+		int r;
+
+		r = x86_emulate(&ctxt.ctxt, &emulator_ops);
+		assert(r == X86EMUL_OKAY);
+	}
+	if (hls->ll_states.sz == 0)
+		exit_interpreter();
 }
 
 static void
@@ -1365,11 +1406,12 @@ emulate_underlying_instruction(struct high_level_state *hls, struct reg_struct *
 			.sp_size = 64,
 			.force_writeback = 0,
 		},
+		.hls = hls,
+		.node = NULL
 	};
 	int r;
 
 	debug("Emulate from %lx\n", regs->rip);
-	emul_ctxt.hls = hls;
 	r = x86_emulate(&emul_ctxt.ctxt, &emulator_ops);
 	assert(r == X86EMUL_OKAY);
 }
@@ -1699,8 +1741,6 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 		hls->ll_states.content[i]->last_operation_is_send = 0;
 
 	check_for_ll_thread_start(hls, regs);
-	if (hls->ll_states.sz == 0)
-		exit_interpreter();
 	sanity_check_high_level_state(hls);
 
 	stash_registers(hls, regs);

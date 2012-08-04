@@ -79,8 +79,136 @@ max_simslot(const AbstractThread &tid, const slotMapT &sm)
 	return res;
 }
 
+/* Compute the offset from RSP to the function's return address. */
+static unsigned
+stack_offset(Oracle *oracle, unsigned long rip)
+{
+	StaticRip sr(rip);
+	StaticRip head(oracle->functionHeadForInstruction(sr));
+	typedef std::pair<StaticRip, unsigned> q_entry_t;
+	std::map<StaticRip, unsigned> offsets;
+	std::queue<q_entry_t> queue;
+	queue.push(q_entry_t(head, 8));
+
+	while (!queue.empty() && !offsets.count(sr)) {
+		q_entry_t q(queue.front());
+		queue.pop();
+		auto it_did_insert = offsets.insert(q);
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (!did_insert) {
+			assert(it->second == q.second);
+			continue;
+		}
+		IRSB *irsb = Oracle::getIRSBForRip(oracle->ms->addressSpace, q.first);
+		std::map<unsigned, unsigned> tempToOffset;
+		bool overlap = false;
+		bool failed = false;
+		for (int i = 1; !failed && !overlap && i < irsb->stmts_used; i++) {
+			IRStmt *stmt = irsb->stmts[i];
+			switch (stmt->tag) {
+			case Ist_IMark: {
+				IRStmtIMark *i = (IRStmtIMark *)stmt;
+				q.first = StaticRip(i->addr.rip.unwrap_vexrip());
+				it_did_insert = offsets.insert(q);
+				it = it_did_insert.first;
+				did_insert = it_did_insert.second;
+				if (!did_insert) {
+					assert(it->second == q.second);
+					overlap = true;
+				}
+				break;
+			}
+			case Ist_Put: {
+				IRStmtPut *p = (IRStmtPut *)stmt;
+				/* 32 == RSP */
+				if (p->target.isReg() && p->target.asReg() != 32)
+					break;
+				if (!p->target.isReg()) {
+					tempToOffset.erase(p->target.asTemp());
+					switch (p->data->tag) {
+					case Iex_Binop: {
+						IRExprBinop *ieb = (IRExprBinop *)p->data;
+						switch (ieb->op) {
+						case Iop_Sub64:
+							if (ieb->arg2->tag == Iex_Const &&
+							    ieb->arg1->tag == Iex_Get &&
+							    ((IRExprGet *)ieb->arg1)->reg.isReg() &&
+							    ((IRExprGet *)ieb->arg1)->reg.asReg() == 32) {
+								tempToOffset[p->target.asTemp()] =
+									((IRExprConst *)ieb->arg2)->con->Ico.U64;
+							}
+							break;
+						default:
+							break;
+						}
+					}
+					default:
+						break;
+					}
+				} else {
+					switch (p->data->tag) {
+					case Iex_Get: {
+						IRExprGet *ieg = (IRExprGet *)p->data;
+						if (ieg->reg.isReg()) {
+							if (ieg->reg.asReg() == 32) {
+								/* no-op */
+							} else {
+								failed = true;
+							}
+						} else {
+							if (tempToOffset.count(ieg->reg.asTemp()))
+								q.second = tempToOffset[ieg->reg.asTemp()];
+							else
+								failed = true;
+						}
+						break;
+					}
+					default:
+							    failed = true;
+						break;
+					}
+				}
+				break;
+			}
+			case Ist_Exit: {
+				IRStmtExit *e = (IRStmtExit *)stmt;
+				queue.push(q_entry_t(StaticRip(e->dst.rip.unwrap_vexrip()), q.second));
+				break;
+			}
+			default:
+				break;
+			}
+		}
+		if (!failed && !overlap) {
+			if (irsb->next_is_const) {
+				q.first = StaticRip(irsb->next_const.rip.unwrap_vexrip());
+				queue.push(q);
+			} else if (irsb->jumpkind != Ijk_Ret) {
+				/* XXX write me: should query the
+				 * oracle for branch targets. */
+				abort();
+			}
+		}
+	}
+
+	assert(offsets.count(sr));
+	return offsets[sr];
+}
+
 static void
-compute_entry_point_list(crashEnforcementData &ced, FILE *f, const CfgRelabeller &cfgLabels, const char *ident)
+stack_validation_table(Oracle *oracle, FILE *f, const VexRip &vr)
+{
+	unsigned offset = 0;
+	for (unsigned x = 1; x < vr.stack.size(); x++) {
+		offset += stack_offset(oracle, vr.stack[vr.stack.size() - x]);
+		fprintf(f, "         { .offset = %d, .expected_value = 0x%lx },\n",
+			offset, vr.stack[vr.stack.size() - x - 1]);
+	}
+}
+
+static void
+compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, const CfgRelabeller &cfgLabels, const char *ident)
 {
 	std::map<ThreadCfgLabel, int> ctxts;
 	{
@@ -97,17 +225,13 @@ compute_entry_point_list(crashEnforcementData &ced, FILE *f, const CfgRelabeller
 	for (auto it = ctxts.begin(); it != ctxts.end(); it++) {
 		ThreadCfgLabel l(it->first);
 		CFGNode *n = ced.crashCfg.findInstr(l);
-		VexRip v(n->rip);
+		const VexRip &v(n->rip);
 		fprintf(f, "static const struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
 		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(l.thread, ced.exprsToSlots) + 1);
 		fprintf(f, "    .nr_stack_slots = %zd,\n", v.stack.size() - 1);
 		fprintf(f, "    .stack = {\n");
-#warning need to actually calculate the offsets for stack validation
-		for (unsigned x = 1; x < v.stack.size(); x++)
-			fprintf(f,
-				"        { .offset = 99, .expected_value = 0x%lx },\n",
-				v.stack[x]);
+		stack_validation_table(oracle, f, v);
 		fprintf(f, "    },\n");
 		fprintf(f, "};\n");
 	}
@@ -572,9 +696,15 @@ main(int argc, char *argv[])
 {
 	const char *binary = argv[1];
 	const char *ced_path = argv[2];
+	const char *types = argv[3];
+	const char *callgraph = argv[4];
+	const char *output = argv[5];
+
 	init_sli();
 
 	VexPtr<MachineState> ms(MachineState::readELFExec(binary));
+	VexPtr<Oracle> oracle(new Oracle(ms, ms->findThread(ThreadId(1)), types));
+	oracle->loadCallGraph(oracle, callgraph, ALLOW_GC);
 
 	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
@@ -583,25 +713,28 @@ main(int argc, char *argv[])
 	loadCrashEnforcementData(ced, ms->addressSpace, fd);
 	close(fd);
 
+	FILE *f = fopen(output, "w");
 	CfgRelabeller relabeller;
 
-	fprintf(stdout, "#include \"cep_interpreter.h\"\n");
-	fprintf(stdout, "#include <stddef.h>\n"); /* For NULL */
-	fprintf(stdout, "\n");
-	dump_annotated_cfg(ced, stdout, relabeller, "__cfg_nodes");
-	compute_entry_point_list(ced, stdout, relabeller, "__entry_points");
-	fprintf(stdout, "const struct crash_enforcement_plan plan = {\n");
-	fprintf(stdout, "    .entry_points = __entry_points,\n");
-	fprintf(stdout, "    .nr_entry_points = sizeof(__entry_points)/sizeof(__entry_points[0]),\n");
-	fprintf(stdout, "    .cfg_nodes = __cfg_nodes,\n");
-	fprintf(stdout, "    .nr_cfg_nodes = sizeof(__cfg_nodes)/sizeof(__cfg_nodes[0]),\n");
-	fprintf(stdout, "    .base_msg_id = 0x%x,\n", lowest_msg_id(ced));
-	fprintf(stdout, "    .msg_id_limit = 0x%x,\n", highest_msg_id(ced) + 1);
-	fprintf(stdout, "};\n");
+	fprintf(f, "#include \"cep_interpreter.h\"\n");
+	fprintf(f, "#include <stddef.h>\n"); /* For NULL */
+	fprintf(f, "\n");
+	dump_annotated_cfg(ced, f, relabeller, "__cfg_nodes");
+	compute_entry_point_list(oracle, ced, f, relabeller, "__entry_points");
+	fprintf(f, "const struct crash_enforcement_plan plan = {\n");
+	fprintf(f, "    .entry_points = __entry_points,\n");
+	fprintf(f, "    .nr_entry_points = sizeof(__entry_points)/sizeof(__entry_points[0]),\n");
+	fprintf(f, "    .cfg_nodes = __cfg_nodes,\n");
+	fprintf(f, "    .nr_cfg_nodes = sizeof(__cfg_nodes)/sizeof(__cfg_nodes[0]),\n");
+	fprintf(f, "    .base_msg_id = 0x%x,\n", lowest_msg_id(ced));
+	fprintf(f, "    .msg_id_limit = 0x%x,\n", highest_msg_id(ced) + 1);
+	fprintf(f, "};\n");
 
-	fprintf(stdout, "\n");
-	fprintf(stdout,
+	fprintf(f, "\n");
+	fprintf(f,
 		"const char program_to_patch[] = \"%s\";\n",
 		realpath(binary,NULL));
+	fclose(f);
+
 	return 0;
 }

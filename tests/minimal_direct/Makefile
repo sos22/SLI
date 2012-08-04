@@ -7,7 +7,7 @@ all: bug1.so bug2.so bug3.so
 	gcc -g -I ../../sli/enforce_crash -c -fPIC -Wall -Werror $< -o $@
 
 %.cep.c: %.ced ../../ced_to_cep
-	../../ced_to_cep $*.exe $< > $@
+	../../ced_to_cep $*.exe $< $*.types.canon $*.bcg $@
 %.interp.so: %.cep.o ../../cep_interpreter.o
 	gcc -shared $^ -o $@
 

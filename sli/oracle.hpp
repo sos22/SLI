@@ -348,7 +348,9 @@ private:
 	static void calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	void loadTagTable(const char *path);
 	void findPossibleJumpTargets(const StaticRip &from, const callgraph_t &callgraph_table, std::vector<StaticRip> &targets);
+public:
 	StaticRip functionHeadForInstruction(const StaticRip &rip);
+private:
 	void purgeFunction(const StaticRip &head);
 
 	enum RbpToRspOffsetState {
