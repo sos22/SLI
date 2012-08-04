@@ -56,7 +56,6 @@ struct low_level_state {
 
 	int last_operation_is_send;
 	int await_bound_lls_exit;
-	int exit_after_interpret;
 
 	struct high_level_state *hls;
 
@@ -1189,7 +1188,7 @@ receive_messages(struct high_level_state *hls)
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
 		sanity_check_low_level_state(lls, 1);
-		if (!lls->await_bound_lls_exit && !lls->exit_after_interpret && instr->rx_msg)
+		if (!lls->await_bound_lls_exit && instr->rx_msg)
 			have_rx = 1;
 	}
 	if (!have_rx)
@@ -1206,7 +1205,7 @@ receive_messages(struct high_level_state *hls)
 		struct msg_template *msg;
 		int delay_this_side;
 
-		if (lls->await_bound_lls_exit || lls->exit_after_interpret || !instr->rx_msg) {
+		if (lls->await_bound_lls_exit || !instr->rx_msg) {
 			/* Threads which don't receive any messages
 			 * don't need to do anything. */
 			low_level_state_push(&new_llsa, lls);
@@ -1230,8 +1229,7 @@ receive_messages(struct high_level_state *hls)
 		if (lls->bound_lls == BOUND_LLS_EXITED) {
 			debug("Receiving from an exited thread -> fail\n");
 			hls->ll_states.content[i] = NULL;
-			lls->exit_after_interpret = 1;
-			low_level_state_push(&new_llsa, lls);
+			exit_thread(lls);
 		} else if (lls->bound_lls != NULL) {
 			assert(lls->bound_lls->bound_lls == lls);
 			if (lls->bound_lls->bound_sending_message) {
@@ -1246,8 +1244,7 @@ receive_messages(struct high_level_state *hls)
 				} else {
 					debug("%p: Bound thread sent wrong message\n", lls);
 					hls->ll_states.content[i] = NULL;
-					lls->exit_after_interpret = 1;
-					low_level_state_push(&new_llsa, lls);
+					exit_thread(lls);
 				}
 			} else {
 				debug("%p: Bound thread %p with nothing outstanding; go to RX state\n",
@@ -1333,10 +1330,9 @@ receive_messages(struct high_level_state *hls)
 					}
 					if (lls->bound_lls == BOUND_LLS_EXITED) {
 						debug("%p: Unbound receive: peer exited\n", lls);
-						lls->exit_after_interpret = 1;
-						hls->ll_states.content[i] = NULL;
 						lls->mbox = NULL;
-						low_level_state_push(&new_llsa, lls);
+						hls->ll_states.content[i] = NULL;
+						exit_thread(lls);
 					} else if (lls->bound_receiving_message) {
 						have_more_bound_rx = 1;
 					} else {
@@ -1360,21 +1356,21 @@ receive_messages(struct high_level_state *hls)
 			continue;
 		sanity_check_low_level_state(lls, 1);
 		hls->ll_states.content[i] = NULL;
+		lls->mbox = NULL;
 		if (lls->unbound_receiving_message) {
 			lls->unbound_receiving_message = NULL;
 			low_level_state_erase_first(&message_receivers, lls);
 		}
 		if (lls->bound_receiving_message) {
 			debug("Bound receive failed\n");
-			lls->exit_after_interpret = 1;
+			exit_thread(lls);
 		} else if (!lls->bound_lls) {
 			debug("Unbound receive failed\n");
-			lls->exit_after_interpret = 1;
+			exit_thread(lls);
 		} else {
 			debug("Receive succeeded.\n");
+			low_level_state_push(&new_llsa, lls);
 		}
-		lls->mbox = NULL;
-		low_level_state_push(&new_llsa, lls);
 	}
 
 	low_level_state_arr_swizzle(&hls->ll_states, &new_llsa);
@@ -1692,7 +1688,6 @@ wait_for_bound_exits(struct high_level_state *hls)
 		for (i = 0; !waiting_for_bound_exit && i < hls->ll_states.sz; i++) {
 			struct low_level_state *lls = hls->ll_states.content[i];
 			if (lls->await_bound_lls_exit) {
-				assert(!lls->exit_after_interpret);
 				if (lls->bound_lls == BOUND_LLS_EXITED) {
 					low_level_state_erase_idx(&hls->ll_states, i);
 					exit_thread(lls);
@@ -1757,30 +1752,19 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 }
 
 static void
-check_conditions(struct high_level_state *hls, const char *message, unsigned offset, int defer_exit)
+check_conditions(struct high_level_state *hls, const char *message, unsigned offset)
 {
 	int i;
 	int j;
 	int killed;
-	int kill;
 
 	killed = 0;
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *cfg = &plan.cfg_nodes[lls->cfg_node];
 		const unsigned short *condition = *(const unsigned short **)((unsigned long)cfg + offset);
-		kill = 0;
-		if (lls->exit_after_interpret) {
-			assert(!defer_exit);
-			kill = 1;
-		} else if (!eval_bytecode(condition, lls, NULL, NULL, NULL)) {
+		if (!eval_bytecode(condition, lls, NULL, NULL, NULL)) {
 			debug("%p failed a %s side-condition\n", lls, message);
-			if (defer_exit)
-				lls->exit_after_interpret = 1;
-			else
-				kill = 1;
-		}
-		if (kill) {
 			hls->ll_states.content[i] = NULL;
 			exit_thread(lls);
 			killed = 1;
@@ -1802,12 +1786,12 @@ check_conditions(struct high_level_state *hls, const char *message, unsigned off
 static void
 check_pre_conditions(struct high_level_state *hls)
 {
-	check_conditions(hls, "pre", offsetof(struct cfg_instr, pre_validate), 1);
+	check_conditions(hls, "pre", offsetof(struct cfg_instr, pre_validate));
 }
 static void
 check_eval_conditions(struct high_level_state *hls)
 {
-	check_conditions(hls, "eval", offsetof(struct cfg_instr, eval_validate), 0);
+	check_conditions(hls, "eval", offsetof(struct cfg_instr, eval_validate));
 }
 
 static void
