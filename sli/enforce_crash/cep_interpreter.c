@@ -123,6 +123,21 @@ struct per_thread_state {
 	struct reg_struct client_regs;
 };
 
+/* Each of these represents a bit of the underlying program which
+   we've modified to include our entry branches.  Exiting back to a
+   RIP in one of these is bad, so we just interpret for a bit longer
+   if it looks like we're going to have to. */
+struct entry_patch {
+	unsigned long start;
+	unsigned size;
+	/* As it happens, the largest patch we ever put down is 5
+	   bytes, but pad to 13 so as to get better alignment. */
+#define MAX_PATCH_SIZE 13
+	unsigned char content[MAX_PATCH_SIZE];
+};
+static int nr_entry_patches;
+static struct entry_patch *entry_patches;
+
 static struct low_level_state_array message_senders;
 static struct low_level_state_array message_receivers;
 
@@ -284,7 +299,6 @@ init_high_level_state(struct high_level_state *hls)
 struct cep_emulate_ctxt {
 	struct x86_emulate_ctxt ctxt;
 	struct high_level_state *hls;
-	const struct cfg_instr *node;
 };
 
 static int
@@ -304,19 +318,18 @@ emulator_read(enum x86_segment seg,
 
 	assert(seg == x86_seg_ds || seg == x86_seg_ss);
 	memcpy(p_data, (const void *)offset, bytes);
-	if (hls) {
-		for (i = 0; i < hls->ll_states.sz; i++) {
-			struct low_level_state *lls = hls->ll_states.content[i];
-			const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-			for (j = 0; j < instr->nr_stash; j++) {
-				if (instr->stash[j].reg == -1) {
-					assert(bytes <= 8);
-					lls->simslots[instr->stash[j].slot] = 0;
-					memcpy(&lls->simslots[instr->stash[j].slot],
-					       p_data,
-					       bytes);
-					break;
-				}
+	assert(hls);
+	for (i = 0; i < hls->ll_states.sz; i++) {
+		struct low_level_state *lls = hls->ll_states.content[i];
+		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
+		for (j = 0; j < instr->nr_stash; j++) {
+			if (instr->stash[j].reg == -1) {
+				assert(bytes <= 8);
+				lls->simslots[instr->stash[j].slot] = 0;
+				memcpy(&lls->simslots[instr->stash[j].slot],
+				       p_data,
+				       bytes);
+				break;
 			}
 		}
 	}
@@ -334,20 +347,16 @@ emulator_insn_fetch(enum x86_segment seg,
 	struct high_level_state *hls = ctxt->hls;
 	const struct cfg_instr *current_cfg_node;
 	int to_copy;
-	if (hls) {
-		int i;
-		current_cfg_node = NULL;
-		for (i = 0; i < hls->ll_states.sz; i++) {
-			if (current_cfg_node)
-				assert(current_cfg_node->rip == plan.cfg_nodes[hls->ll_states.content[i]->cfg_node].rip);
-			else
-				current_cfg_node = &plan.cfg_nodes[hls->ll_states.content[i]->cfg_node];
-		}
-		assert(current_cfg_node);
-	} else {
-		assert(ctxt->node);
-		current_cfg_node = ctxt->node;
+	int i;
+	assert(hls);
+	current_cfg_node = NULL;
+	for (i = 0; i < hls->ll_states.sz; i++) {
+		if (current_cfg_node)
+			assert(current_cfg_node->rip == plan.cfg_nodes[hls->ll_states.content[i]->cfg_node].rip);
+		else
+			current_cfg_node = &plan.cfg_nodes[hls->ll_states.content[i]->cfg_node];
 	}
+	assert(current_cfg_node);
 	assert(offset >= current_cfg_node->rip && offset < current_cfg_node->rip + current_cfg_node->content_sz);
 	to_copy = current_cfg_node->content_sz - (offset - current_cfg_node->rip);
 	if (to_copy > bytes)
@@ -800,12 +809,109 @@ out:
 	return res;
 }
 
+struct exit_emulation_ctxt {
+	struct x86_emulate_ctxt ctxt;
+	struct entry_patch *patch;
+};
+
+static int
+exit_emulator_read(enum x86_segment seg,
+	      unsigned long offset,
+	      void *p_data,
+	      unsigned int bytes,
+	      struct x86_emulate_ctxt *_ctxt)
+{
+	/* XXX should trap any faults here, so that we can set up a
+	   correct signal frame. XXX */
+	assert(seg == x86_seg_ds || seg == x86_seg_ss);
+	memcpy(p_data, (const void *)offset, bytes);
+	return X86EMUL_OKAY;
+}
+
+static int
+exit_emulator_insn_fetch(enum x86_segment seg,
+			 unsigned long offset,
+			 void *p_data,
+			 unsigned int bytes,
+			 struct x86_emulate_ctxt *_ctxt)
+{
+	struct exit_emulation_ctxt *ctxt = (struct exit_emulation_ctxt *)_ctxt;
+	struct entry_patch *patch = ctxt->patch;
+	int from_patch;
+	from_patch = patch->size - (offset - patch->start);
+	if (from_patch > bytes)
+		from_patch = bytes;
+	memcpy(p_data, patch->content + offset - patch->start, from_patch);
+	if (from_patch < bytes)
+		memcpy(p_data + from_patch, (const void *)(offset + from_patch), bytes - from_patch);
+	return X86EMUL_OKAY;
+}
+
+static const struct x86_emulate_ops
+exit_emulator_ops = {
+	.read = exit_emulator_read,
+	.insn_fetch = exit_emulator_insn_fetch,
+	.write = emulator_write,
+	.cmpxchg = emulator_cmpxchg,
+};
+
+static void
+restart_interpreter(int entry_idx)
+{
+	/* We tried to exit the interpreter and then trod on another
+	 * entry point.  Try that again. */
+	debug("Restart interpreter with idx %d\n", entry_idx);
+	release_big_lock();
+	asm volatile (
+		"    mov %%gs:0, %%rsp\n"              /* Reset the stack */
+		"    jmp start_interpreting\n" /* Restart the interpreter */
+		:
+		: "D" (entry_idx)
+		);
+	debug("Huh?  Restart interpreter didn't work\n");
+	abort();
+}
+
 static void
 exit_interpreter(void)
 {
 	struct per_thread_state *pts = find_pts();
 	exit_routine_t *exit_routine;
-
+	int i;
+	int j;
+	int hit_patch;
+	int r;
+	struct exit_emulation_ctxt ctxt = {
+		.ctxt = {
+			.regs = &pts->client_regs,
+			.addr_size = 64,
+			.sp_size = 64,
+			.force_writeback = 0,
+		}
+	};
+	hit_patch = 1;
+	while (hit_patch) {
+		hit_patch = 0;
+		for (i = 0; i < nr_entry_patches; i++) {
+			while (pts->client_regs.rip >= entry_patches[i].start &&
+			       pts->client_regs.rip < entry_patches[i].start + entry_patches[i].size) {
+				/* We're in danger of exiting into the
+				   middle of an instruction which we
+				   patched.  That's basically never a
+				   good idea, so interpret for another
+				   couple of instructions. */
+				hit_patch = 1;
+				ctxt.patch = &entry_patches[i];
+				r = x86_emulate(&ctxt.ctxt, &exit_emulator_ops);
+				assert(r == X86EMUL_OKAY);
+				/* Check whether we've hit another
+				 * entry point. */
+				for (j = 0; j < plan.nr_entry_points; j++)
+					if (plan.entry_points[j]->orig_rip == pts->client_regs.rip)
+						restart_interpreter(j);
+			}
+		}
+	}
 	exit_routine = find_exit_stub(pts->client_regs.rip);
 	debug("Exit to %lx, rax %lx, rbp %lx\n",
 	      pts->client_regs.rip,
@@ -1369,31 +1475,6 @@ check_for_ll_thread_start(struct high_level_state *hls, struct reg_struct *regs)
 					plan.entry_points[i]->ctxts[j]->nr_simslots);
 		}
 	}
-	if (entry_node && hls->ll_states.sz == 0) {
-		/* If this is an entry RIP then it'll have been
-		 * patched to try to start more LLs, so if we return
-		 * to it we'll come straight back here and won't
-		 * actually achieve anything.  Emulate a single
-		 * instruction to get us out of the immediate danger
-		 * zone.
-		 */
-		struct cep_emulate_ctxt ctxt = {
-			.ctxt = {
-				.regs = regs,
-				.addr_size = 64,
-				.sp_size = 64,
-				.force_writeback = 0
-			},
-			.hls = NULL,
-			.node = entry_node,
-		};
-		int r;
-
-		r = x86_emulate(&ctxt.ctxt, &emulator_ops);
-		assert(r == X86EMUL_OKAY);
-	}
-	if (hls->ll_states.sz == 0)
-		exit_interpreter();
 }
 
 static void
@@ -1406,8 +1487,7 @@ emulate_underlying_instruction(struct high_level_state *hls, struct reg_struct *
 			.sp_size = 64,
 			.force_writeback = 0,
 		},
-		.hls = hls,
-		.node = NULL
+		.hls = hls
 	};
 	int r;
 
@@ -1741,6 +1821,8 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 		hls->ll_states.content[i]->last_operation_is_send = 0;
 
 	check_for_ll_thread_start(hls, regs);
+	if (hls->ll_states.sz == 0)
+		exit_interpreter();
 	sanity_check_high_level_state(hls);
 
 	stash_registers(hls, regs);
@@ -2010,6 +2092,7 @@ activate(void)
 	long delta;
 	char buf[4096];
 	ssize_t s;
+	int nr_entry_patches_alloced;
 
 	s = readlink("/proc/self/exe", buf, sizeof(buf)-1);
 	if (s == -1) {
@@ -2025,9 +2108,21 @@ activate(void)
 
 	alloc_thread_state_area();
 
+	nr_entry_patches_alloced = 0;
 	/* We need to patch each entry point so that it turns into a
 	   jump instruction which targets the patch.  Do so. */
 	for (x = 0; x < plan.nr_entry_points; x++) {
+		if (nr_entry_patches_alloced == nr_entry_patches) {
+			nr_entry_patches_alloced += 8;
+			entry_patches = realloc(entry_patches, sizeof(entry_patches[0]) * nr_entry_patches_alloced);
+		}
+		entry_patches[nr_entry_patches].start = plan.entry_points[x]->orig_rip;
+		entry_patches[nr_entry_patches].size = 5;
+		memcpy(entry_patches[nr_entry_patches].content,
+		       (const void *)plan.entry_points[x]->orig_rip,
+		       5);
+		nr_entry_patches++;
+
 		mprotect((void *)(plan.entry_points[x]->orig_rip & PAGE_MASK),
 			 PAGE_SIZE * 2,
 			 PROT_READ|PROT_WRITE|PROT_EXEC);
