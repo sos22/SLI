@@ -476,7 +476,7 @@ trimExcessNodes(Oracle *oracle,
 }
 
 static int
-distanceToTrueInstr(const CFGNode *n, const std::set<const CFGNode *> &targetInstr)
+distanceToTrueInstr(const CFGNode *n, const std::set<const CFGNode *> &targetInstr, int dflt)
 {
 	std::set<const CFGNode *> successors;
 	std::queue<const CFGNode *> pendingAtCurrentDepth;
@@ -498,8 +498,8 @@ distanceToTrueInstr(const CFGNode *n, const std::set<const CFGNode *> &targetIns
 		pendingAtCurrentDepth = pendingAtNextDepth;
 		depth++;
 	}
-	/* Can't reach any true instructions -> shouldn't happen. */
-	abort();
+	/* Can't reach any true instructions -> return default. */
+	return dflt;
 }
 
 static void
@@ -596,7 +596,7 @@ findRoots(const std::set<CFGNode *> &allNodes,
 		best_node = NULL;
 		best_distance = -1;
 		for (auto it = currentlyUnrooted.begin(); it != currentlyUnrooted.end(); it++) {
-			int n = distanceToTrueInstr(*it, targetInstrs);
+			int n = distanceToTrueInstr(*it, targetInstrs, currentlyUnrooted.size());
 			if (n > best_distance) {
 				best_distance = n;
 				best_node = *it;
