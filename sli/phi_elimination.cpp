@@ -276,6 +276,17 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 				ty = s->generations[x].second->type();
 		if (ty == Ity_INVALID)
 			continue;
+		bool failed = false;
+		for (unsigned x = 0; x < s->generations.size() && !failed; x++)
+			if (s->generations[x].second &&
+			    ty != s->generations[x].second->type())
+				failed = true;
+		if (failed) {
+			if (debug_use_domination)
+				printf("Cannot reduce phi state l%d due to type conflict\n",
+				       stateLabels[*it]);
+			continue;
+		}
 		if (debug_use_domination)
 			printf("Consider reducing phi state l%d\n", stateLabels[*it]);
 		IRExpr *stateDominator =
