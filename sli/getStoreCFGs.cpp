@@ -91,8 +91,10 @@ initialExploration(const std::set<DynAnalysisRip> &roots,
 	for (auto it = roots.begin(); it != roots.end(); it++)
 		vr_roots.insert(it->toVexRip());
 
-	for (auto it = vr_roots.begin(); it != vr_roots.end(); it++)
+	for (auto it = vr_roots.begin(); it != vr_roots.end(); it++) {
+		assert(it->isValid());
 		pending.push(std::pair<unsigned, VexRip>(maxPathLength, *it));
+	}
 top_exploration_iter:
 	while (!pending.empty()) {
 		if (TIMEOUT)
@@ -100,6 +102,7 @@ top_exploration_iter:
 		std::pair<unsigned, VexRip> item(pending.front());
 		pending.pop();
 
+		assert(item.second.isValid());
 		assert(item.first > 0);
 
 		auto it = doneSoFar.find(item.second);
@@ -111,10 +114,12 @@ top_exploration_iter:
 				CFGNode *n = it->second.second;
 				for (auto it2 = n->successors.begin();
 				     it2 != n->successors.end();
-				     it2++)
-					pending.push(std::pair<unsigned, VexRip>(
-							     item.first - 1,
-							     it2->rip));
+				     it2++) {
+					if (it2->rip.isValid())
+						pending.push(std::pair<unsigned, VexRip>(
+								     item.first - 1,
+								     it2->rip));
+				}
 				it->second.first = item.first;
 
 				if (item.first == maxPathLength)
@@ -126,6 +131,8 @@ top_exploration_iter:
 			}
 			continue;
 		}
+
+		assert(item.second.isValid());
 
 		CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, item.second);
 		if (!work) {
@@ -222,6 +229,7 @@ top_exploration_iter:
 
 	if (!new_roots.empty()) {
 		for (auto it = new_roots.begin(); it != new_roots.end(); it++) {
+			assert(it->isValid());
 			vr_roots.insert(*it);
 			pending.push(std::pair<unsigned, VexRip>(maxPathLength, *it));
 		}
