@@ -258,6 +258,11 @@ public:
 			rv.val64 = res;
 			return res;
 		}
+		case Ity_V128:
+			return IRExpr_Binop(
+				Iop_64HLtoV128,
+				register_value(reg, Ity_I64),
+				register_value(reg, Ity_I64));
 		case Ity_F64:
 			return IRExpr_Unop(
 				Iop_ReinterpI64asF64,
