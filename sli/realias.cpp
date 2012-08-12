@@ -816,7 +816,10 @@ public:
 };
 
 static bool
-mightLoadInitialValue(StateMachineSideEffecting *smse, StateMachine *sm,
+mightLoadInitialValue(StateMachineSideEffecting *smse,
+		      StateMachine *sm,
+		      OracleInterface *oracle,
+		      CfgDecode &decode,
 		      const AllowableOptimisations &opt)
 {
 	assert(smse->getSideEffect());
@@ -832,7 +835,14 @@ mightLoadInitialValue(StateMachineSideEffecting *smse, StateMachine *sm,
 		if (s->getSideEffect() &&
 		    s->getSideEffect()->type == StateMachineSideEffect::Store) {
 			StateMachineSideEffectStore *store = (StateMachineSideEffectStore *)s->getSideEffect();
+			/* Note that checking the oracle is
+			   *mandatory* here.  Otherwise, when the
+			   oracle is incomplete we end up with an
+			   inconsistency between here and the alias
+			   table, and that leads to lots of bad things
+			   happening. */
 			if (store->data->type() == load->type &&
+			    oracle->memoryAccessesMightAlias(decode, opt, load, store) &&
 			    definitelyEqual(store->addr, load->addr, opt)) {
 				/* This store will satisfy the load,
 				   so we don't need to explore this
@@ -971,7 +981,7 @@ AliasTable::build(CfgDecode &decode,
 				       smse,
 				       AliasTableEntry(it->second,
 						       mightHaveExternalStores,
-						       mightLoadInitialValue(smse, sm, opt))));
+						       mightLoadInitialValue(smse, sm, oracle, decode, opt))));
 	}
 
 	sanity_check();
