@@ -216,11 +216,13 @@ public:
 	{
 		functions.push_back(s);
 		rsps.push_back(rsp);
+		clearName();
 	}
 	void endFunction()
 	{
 		functions.pop_back();
 		rsps.pop_back();
+		clearName();
 	}
 	void enumFrames(std::set<FrameId> &out)
 	{
