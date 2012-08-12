@@ -482,9 +482,8 @@ distanceToTrueInstr(const CFGNode *n, const std::set<const CFGNode *> &targetIns
 	std::queue<const CFGNode *> pendingAtCurrentDepth;
 	int depth = 0;
 	pendingAtCurrentDepth.push(n);
-	while (1) {
+	while (!pendingAtCurrentDepth.empty()) {
 		std::queue<const CFGNode *> pendingAtNextDepth;
-		assert(pendingAtNextDepth.empty());
 		while (!pendingAtCurrentDepth.empty()) {
 			const CFGNode *n = pendingAtCurrentDepth.front();
 			pendingAtCurrentDepth.pop();
