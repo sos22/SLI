@@ -482,16 +482,19 @@ atomicSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &machine,
 	atomicMachine = duplicateStateMachine(machine);
 	atomicMachine = optimiseStateMachine(atomicMachine, opt, oracle, true, token);
 	VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
+	if (_atomicMachine)
+		*_atomicMachine = atomicMachine;
+	if (atomicMachine->root->type == StateMachineState::Unreached) {
+		/* This machine can definitely never survive if run
+		 * atomically! */
+		return IRExpr_Const(IRConst_U1(0));
+	}
 	IRExpr *survive = survivalConstraintIfExecutedAtomically(atomicMachine, nullexpr, oracle, false, opt, token);
 	if (!survive) {
 		fprintf(_logfile, "\tTimed out computing survival constraint\n");
 		return NULL;
 	}
-	survive = simplifyIRExpr(survive, opt);
-
-	if (_atomicMachine)
-		*_atomicMachine = atomicMachine;
-	return survive;
+	return simplifyIRExpr(survive, opt);
 }
 
 static AllowableOptimisations
