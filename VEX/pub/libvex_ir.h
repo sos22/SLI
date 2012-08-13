@@ -1293,7 +1293,6 @@ typedef
       Iex_Associative, /* n-ary associative operator */
       Iex_Load,
       Iex_HappensBefore,
-      Iex_Phi,
       Iex_FreeVariable,
    }
    IRExprTag;
@@ -1810,30 +1809,6 @@ struct IRExprHappensBefore : public IRExpr {
     }
 };
 
-struct IRExprPhi : public IRExpr {
-    threadAndRegister reg;
-    std::vector<unsigned> generations;
-    IRType ty;
-    IRExprPhi(const threadAndRegister _reg,
-	      std::vector<unsigned> _generations,
-	      IRType _ty)
-	: IRExpr(Iex_Phi),
-	  reg(_reg),
-	  generations(_generations),
-	  ty(_ty)
-    {}
-    void visit(HeapVisitor &) {}
-    unsigned long hashval() const { return 27; }
-    void prettyPrint(FILE *f) const;
-    IRType type() const { return ty; }
-    void sanity_check() const {
-	reg.sanity_check();
-	assert(generations.size() >= 1);
-	sanity_check_irtype(ty);
-	assert(reg.gen() == 0);
-    }
-};
-
 struct IRExprFreeVariable : public IRExpr {
     MemoryAccessIdentifier id;
     IRType ty;
@@ -1879,11 +1854,6 @@ extern IRExpr* IRExpr_Associative (IRExprAssociative *);
 extern IRExprAssociative* IRExpr_Associative (int nr_arguments, IROp op);
 extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,
 				     const MemoryAccessIdentifier &after);
-static inline IRExpr *IRExpr_Phi (const threadAndRegister &r,
-				  const std::vector<unsigned> &generations,
-				  IRType ty) {
-    return new IRExprPhi(r, generations, ty);
-}
 static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty, bool isUnique) {
     return new IRExprFreeVariable(id, ty, isUnique);
 }

@@ -829,11 +829,6 @@ StateMachine::assertSSA() const
 			assert(ieg->reg.gen() != 0);
 			return NULL;
 		}
-		IRExpr *transformIex(IRExprPhi *phi) {
-			for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
-				assert(*it != 0);
-			return IRExprTransformer::transformIex(phi);
-		}
 		bool rewriteNewStates() const { return false; }
 	} checkForNonSSAVars;
 	checkForNonSSAVars.transform(const_cast<StateMachine *>(this));

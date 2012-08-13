@@ -379,7 +379,6 @@ anf_context::matches(const IRExpr *a, const IRExpr *b) const
 	}
 #undef hdr
 #undef hdr1
-        case Iex_Phi:
         case Iex_FreeVariable:
 	case Iex_HappensBefore:
 	case Iex_Const:

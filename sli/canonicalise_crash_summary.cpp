@@ -306,10 +306,6 @@ private:
 	{
 		return IRExpr_Get(canon_reg(ieg->reg), ieg->ty);
 	}
-	IRExpr *transformIex(IRExprPhi *iep)
-	{
-		return IRExpr_Phi(canon_reg(iep->reg), iep->generations, iep->ty);
-	}
 	IRExpr *transformIex(IRExprLoad *iel)
 	{
 		bool ign;
@@ -483,13 +479,6 @@ canonicalise_crash_summary(CrashSummary *input)
 
 	struct : public StateMachineTransformer {
 		std::set<threadAndRegister, threadAndRegister::fullCompare> res;
-		IRExpr *transformIex(IRExprPhi *phi) {
-			for (auto it = phi->generations.begin();
-			     it != phi->generations.end();
-			     it++)
-				res.insert(phi->reg.setGen(*it));
-			return IRExprTransformer::transformIex(phi);
-		}
 		StateMachineSideEffectPhi *transformOneSideEffect(
 			StateMachineSideEffectPhi *smsep, bool *done_something)
 		{

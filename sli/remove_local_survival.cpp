@@ -26,10 +26,6 @@ exprIsLocal(IRExpr *input)
 			stop();
 			return ieg;
 		}
-		IRExpr *transformIex(IRExprPhi *ieg) {
-			stop();
-			return ieg;
-		}
 		IRExpr *transformIex(IRExprFreeVariable *ieg) {
 			stop();
 			return ieg;

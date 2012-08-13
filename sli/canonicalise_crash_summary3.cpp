@@ -420,19 +420,6 @@ clauseUnderspecified(IRExpr *clause,
 		return false;
 	case Iex_HappensBefore:
 		return false;
-	case Iex_Phi: {
-		IRExprPhi *iep = (IRExprPhi *)clause;
-		for (auto it = iep->generations.begin();
-		     it != iep->generations.end();
-		     it++) {
-			auto it2 = mult.find(iep->reg.setGen(*it));
-			assert(it2 != mult.end());
-			assert(it2->second != 0);
-			if (it2->second != 1)
-				return false;
-		}
-		return true;
-	}
 	}
 	fprintf(stderr, "%s: ", __func__);
 	ppIRExpr(clause, stderr);

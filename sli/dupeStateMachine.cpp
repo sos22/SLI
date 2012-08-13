@@ -176,10 +176,6 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 		const IRExprHappensBefore *i = (const IRExprHappensBefore *)inp;
 		return new IRExprHappensBefore(i->before, i->after);
 	}
-	case Iex_Phi: {
-		const IRExprPhi *i = (const IRExprPhi *)inp;
-		return new IRExprPhi(i->reg, i->generations, i->ty);
-	}
 	case Iex_FreeVariable: {
 		const IRExprFreeVariable *i = (const IRExprFreeVariable *)inp;
 		return new IRExprFreeVariable(i->id, i->ty, i->isUnique);

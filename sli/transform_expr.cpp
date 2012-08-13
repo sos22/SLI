@@ -162,7 +162,6 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 				    log_reads_expr(tid, sb, e->exprX));
 	}
 	case Iex_HappensBefore:
-	case Iex_Phi:
 		abort();
 	}
 	throw NotImplementedException("Something bad");

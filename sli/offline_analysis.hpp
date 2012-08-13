@@ -102,7 +102,6 @@ protected:
 	virtual IRExpr *transformIex(IRExprCCall *);
 	virtual IRExpr *transformIex(IRExprAssociative *);
 	virtual IRExpr *transformIex(IRExprHappensBefore *) { return NULL; }
-	virtual IRExpr *transformIex(IRExprPhi *) { return NULL; }
 	virtual IRExpr *transformIex(IRExprFreeVariable *) { return NULL; }
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 public:

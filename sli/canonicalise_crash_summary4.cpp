@@ -168,8 +168,6 @@ Function::complexity(const IRExpr *e)
 		return 1 + complexity(((IRExprLoad *)e)->addr);
 	case Iex_HappensBefore:
 		return 1;
-	case Iex_Phi:
-		return 1 + ((IRExprPhi *)e)->generations.size();
 	case Iex_FreeVariable:
 		return 1;
 	}
@@ -297,8 +295,6 @@ Function::matches(IRExpr *what, IRExpr *tmpl, std::map<int, IRExpr *> &argVals)
 	case Iex_Const:
 		return false;
 	case Iex_HappensBefore:
-		return false;
-	case Iex_Phi:
 		return false;
 	case Iex_FreeVariable:
 		return false;
