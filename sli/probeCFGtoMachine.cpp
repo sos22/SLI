@@ -680,6 +680,29 @@ performTranslation(std::map<CFGNode *, StateMachineState *> &results,
 	return root;
 }
 
+static StateMachineState *
+addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, const VexRip &vr)
+{
+	StateMachineState *cursor = final;
+	long delta;
+	if (oracle->getRbpToRspDelta(vr, &delta)) {
+		cursor = new StateMachineSideEffecting(
+			vr,
+			new StateMachineSideEffectCopy(
+				threadAndRegister::reg(tid, OFFSET_amd64_RBP, 0),
+				IRExpr_Associative(
+					Iop_Add64,
+					IRExpr_Get(
+						threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
+						Ity_I64),
+					IRExpr_Const(
+						IRConst_U64(-delta)),
+					NULL)),
+			cursor);
+	}
+	return cursor;
+}
+
 static void
 probeCFGsToMachine(Oracle *oracle,
 		   unsigned tid,
@@ -722,6 +745,7 @@ probeCFGsToMachine(Oracle *oracle,
 		origin.push_back(std::pair<unsigned, VexRip>(tid, root->origin));
 		std::vector<const CFGNode *> roots_this_sm;
 		roots_this_sm.push_back(*it);
+		root = addEntrySideEffects(oracle, tid, root, root->origin);
 		StateMachine *sm = new StateMachine(root, origin, roots_this_sm);
 		sm->sanityCheck();
 		out.insert(sm);
