@@ -114,12 +114,6 @@ storeMightBeLoadedByState(CfgDecode &decode,
 	if (sm->type == StateMachineState::SideEffecting) {
 		StateMachineSideEffect *se = ((StateMachineSideEffecting *)sm)->sideEffect;
 		if (se) {
-			if (se == smses) {
-				/* We've reached a cycle without hitting a
-				   load of this store, so this path, at least,
-				   is clear. */
-				return false;
-			}
 			if (sideEffectAltersExpression(se, smses->addr)) {
 				/* This side-effect modifies one of
 				 * the registers involved in computing
@@ -206,15 +200,6 @@ storeMightBeLoadedAfterState(CfgDecode &decode,
 	std::set<StateMachineState *> memo;
 	return storeMightBeLoadedAfterState(decode, sm, opt, smses, alias, oracle, memo);
 }
-
-
-static void removeRedundantStores(CfgDecode &decode,
-				  StateMachineState *sm,
-				  OracleInterface *oracle,
-				  bool *done_something,
-				  const Oracle::RegisterAliasingConfiguration *alias,
-				  std::set<StateMachineState *> &visited,
-				  const AllowableOptimisations &opt);
 
 static void
 removeRedundantStores(CfgDecode &decode,
