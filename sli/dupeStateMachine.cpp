@@ -265,6 +265,18 @@ rawDupeS(duplication_context &ctxt, const StateMachineSideEffectEndFunction *l)
 	return res;
 }
 
+static StateMachineSideEffectStackLeaked *
+rawDupeS(duplication_context &, const StateMachineSideEffectStackLeaked *l)
+{
+	return (StateMachineSideEffectStackLeaked *)l;
+}
+
+static StateMachineSideEffectPointerAliasing *
+rawDupeS(duplication_context &, const StateMachineSideEffectPointerAliasing *l)
+{
+	return new StateMachineSideEffectPointerAliasing(l->reg, l->set);
+}
+
 static StateMachineSideEffect *
 rawDupe(duplication_context &ctxt, const StateMachineSideEffect *smse)
 {

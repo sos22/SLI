@@ -314,32 +314,48 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		t.asserts.insert(af);
 		return s;
 	}
+#define do_search(name) do {						\
+			for (auto it = t. name .begin();		\
+			     it != t. name .end();			\
+			     it++) {					\
+				if (*sf == **it) {			\
+					t.sideEffects[s] = *it;		\
+					return *it;			\
+				}					\
+			}						\
+			t.sideEffects[s] = s;				\
+			t.name.insert(sf);				\
+			return s;					\
+		} while (0)
 	case StateMachineSideEffect::StartFunction: {
 		StateMachineSideEffectStartFunction *sf = (StateMachineSideEffectStartFunction *)s;
 		sf->rsp = internIRExpr(sf->rsp, t);
-		for (auto it = t.StartFunction.begin(); it != t.StartFunction.end(); it++) {
-			if (*sf == **it) {
-				t.sideEffects[s] = *it;
-				return *it;
-			}
-		}
-		t.sideEffects[s] = s;
-		t.StartFunction.insert(sf);
-		return s;
+		do_search(StartFunction);
 	}
 	case StateMachineSideEffect::EndFunction: {
 		StateMachineSideEffectEndFunction *sf = (StateMachineSideEffectEndFunction *)s;
 		sf->rsp = internIRExpr(sf->rsp, t);
-		for (auto it = t.EndFunction.begin(); it != t.EndFunction.end(); it++) {
-			if (*sf == **it) {
-				t.sideEffects[s] = *it;
-				return *it;
-			}
-		}
-		t.sideEffects[s] = s;
-		t.EndFunction.insert(sf);
-		return s;
+		do_search(EndFunction);
 	}
+	case StateMachineSideEffect::StackLeaked: {
+		auto sf = (StateMachineSideEffectStackLeaked *)s;
+		if (sf->flag) {
+			if (!t.StackLeakedT)
+				t.StackLeakedT = sf;
+			t.sideEffects[s] = t.StackLeakedT;
+			return t.StackLeakedT;
+		} else {
+			if (!t.StackLeakedF)
+				t.StackLeakedF = sf;
+			t.sideEffects[s] = t.StackLeakedF;
+			return t.StackLeakedF;
+		}
+	}
+	case StateMachineSideEffect::PointerAliasing: {
+		auto sf = (StateMachineSideEffectPointerAliasing *)s;
+		do_search(PointerAliasing);
+	}
+#undef do_search
 
 	}
 	abort();

@@ -430,6 +430,18 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			(StateMachineSideEffectEndFunction *)smse2;
 		return definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
 	}
+	case StateMachineSideEffect::StackLeaked: {
+		auto smsep1 =
+			(StateMachineSideEffectStackLeaked *)smse1;
+		auto smsep2 =
+			(StateMachineSideEffectStackLeaked *)smse2;
+		return smsep1->flag == smsep2->flag;
+	}
+	case StateMachineSideEffect::PointerAliasing: {
+		auto smsep1 = (StateMachineSideEffectPointerAliasing *)smse1;
+		auto smsep2 = (StateMachineSideEffectPointerAliasing *)smse2;
+		return threadAndRegister::fullEq(smsep1->reg, smsep2->reg) && smsep1->set == smsep2->set;
+	}
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
 		/* These are singletons, so should have been handled

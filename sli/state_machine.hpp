@@ -24,6 +24,81 @@ void sanityCheckIRExpr(IRExpr *, const std::set<threadAndRegister, threadAndRegi
 ;
 #endif
 
+/* Pointer aliasing stuff.  Note that ``stack'' in this
+   context means the *current* stack frame: a pointer without
+   the stack bit set could still point into a *calling*
+   functions' stack frame, and that wouldn't be a bug. */
+class PointerAliasingSet : public Named {
+		             
+	int v;
+	char *mkName() const {
+		const char *r;
+		switch (v) {
+		case 0:
+			r = "()";
+			break;
+		case 1:
+			r = "not-a-pointer";
+			break;
+		case 2:
+			r = "stack-pointer";
+			break;
+		case 3:
+			r = "not-a-pointer|stack-pointer";
+			break;
+		case 4:
+			r = "non-stack-pointer";
+			break;
+		case 5:
+			r = "not-a-pointer|non-stack-pointer";
+			break;
+		case 6:
+			r = "stack-pointer|non-stack-pointer";
+			break;
+		case 7:
+			r = "*";
+			break;
+		default:
+			abort();
+		}
+		return strdup(r);
+	}
+public:
+	explicit PointerAliasingSet() : v(0xf001dead) {}
+	PointerAliasingSet(int _v) : v(_v) {}
+
+	static const PointerAliasingSet notAPointer;
+	static const PointerAliasingSet stackPointer;
+	static const PointerAliasingSet nonStackPointer;
+	static const PointerAliasingSet anything;
+
+	PointerAliasingSet operator |(PointerAliasingSet o) const { return PointerAliasingSet(v | o.v); }
+	PointerAliasingSet operator &(PointerAliasingSet o) const { return PointerAliasingSet(v & o.v); }
+	PointerAliasingSet operator ~() const { return PointerAliasingSet(~v); }
+	bool operator !=(PointerAliasingSet o) const { return v != o.v; }
+	bool operator ==(PointerAliasingSet o) const { return v == o.v; }
+	operator bool() const { return v != 0; }
+	operator unsigned long() const { return v; }
+
+	bool parse(const char *str, const char **suffix) {
+#define do_case(val, rep)					\
+		if (parseThisString(rep, str, suffix)) {	\
+			v = val;				\
+			return true;				\
+		}
+		do_case(0, "()");
+		do_case(1, "not-a-pointer");
+		do_case(2, "stack-pointer");
+		do_case(3, "not-a-pointer|stack_pointer");
+		do_case(4, "non-stack-pointer");
+		do_case(5, "not-a-pointer|non-stack-pointer");
+		do_case(6, "stack-pointer|non-stack-pointer");
+		do_case(7, "*");
+#undef do_case
+		return false;
+	}
+};
+
 class IRExprTransformer;
 class StateMachineState;
 
@@ -168,7 +243,9 @@ public:
 	f(StartAtomic)				\
 	f(EndAtomic)				\
 	f(StartFunction)			\
-	f(EndFunction)
+	f(EndFunction)				\
+	f(StackLeaked)				\
+	f(PointerAliasing)
 	enum sideEffectType {
 #define mk_one(n) n,
 		all_side_effect_types(mk_one)
@@ -919,6 +996,83 @@ public:
 	bool operator==(const StateMachineSideEffectEndFunction &o) const {
 		return rsp == o.rsp;
 	}
+};
+class StateMachineSideEffectStackLeaked : public StateMachineSideEffect {
+public:
+	bool flag;
+	StateMachineSideEffectStackLeaked(bool _flag)
+		: StateMachineSideEffect(StateMachineSideEffect::StackLeaked),
+		  flag(_flag)
+	{}
+	void visit(HeapVisitor &) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare>*) const {}
+	bool definesRegister(threadAndRegister &) const { return false; }
+	void inputExpressions(std::vector<IRExpr *> &) {}
+	void prettyPrint(FILE *f) const {
+		if (flag)
+			fprintf(f, "StackLeaked");
+		else
+			fprintf(f, "StackNotLeaked");
+	}
+	static bool parse(StateMachineSideEffectStackLeaked **out,
+			  const char *str,
+			  const char **suffix)
+	{
+		if (parseThisString("StackLeaked", str, suffix))
+			*out = new StateMachineSideEffectStackLeaked(true);
+		else if (parseThisString("StackNotLeaked", str, suffix))
+			*out = new StateMachineSideEffectStackLeaked(false);
+		else
+			return false;
+		return true;
+	}
+	bool operator==(const StateMachineSideEffectStackLeaked &o) const {
+		return flag == o.flag;
+	}
+};
+class StateMachineSideEffectPointerAliasing : public StateMachineSideEffect {
+public:
+	threadAndRegister reg;
+	PointerAliasingSet set;
+	StateMachineSideEffectPointerAliasing(
+		const threadAndRegister &_reg,
+		const PointerAliasingSet &_set)
+		: StateMachineSideEffect(StateMachineSideEffect::PointerAliasing),
+		  reg(_reg), set(_set)
+	{}
+	void visit(HeapVisitor &) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare>*) const {}
+	bool definesRegister(threadAndRegister &tr) const {
+		tr = reg;
+		return true;
+	}
+	void inputExpressions(std::vector<IRExpr *> &) {}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "ALIAS %s = %s",
+			reg.name(), set.name());
+	}
+	static bool parse(StateMachineSideEffectPointerAliasing **out, const char *str, const char **suffix)
+	{
+		threadAndRegister reg(threadAndRegister::invalid());
+		PointerAliasingSet set;
+
+		if (parseThisString("ALIAS ", str, &str) &&
+		    parseThreadAndRegister(&reg, str, &str) &&
+		    parseThisString(" = ", str, &str) &&
+		    set.parse(str, suffix)) {
+			*out = new StateMachineSideEffectPointerAliasing(reg, set);
+			return true;
+		}
+		return false;
+	}
+	bool operator==(const StateMachineSideEffectPointerAliasing &o) const {
+		return threadAndRegister::fullEq(reg, o.reg) && set == o.set;
+	}
+
 };
 
 void printStateMachine(const StateMachine *sm, FILE *f);

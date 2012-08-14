@@ -153,6 +153,8 @@ RandomEvalContext::getReg(const threadAndRegister &tr, IRType ty)
 		return IRExpr_Const(IRConst_V128(it->second & 0xffff));
 	case Ity_INVALID:
 		abort();
+	default:
+		abort();
 	}
 	abort();
 }
@@ -243,7 +245,7 @@ quickcheck_exprs_eq(const IRExpr *a, const IRExpr *b)
 };
 
 void
-quickcheck_exprs_eq(const IRExpr *a, const IRExpr *b)
+quickcheck_exprs_eq(const IRExpr *, const IRExpr *)
 {
 #if 0
 	return _quickcheckexpr::quickcheck_exprs_eq(a, b);

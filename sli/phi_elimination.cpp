@@ -215,6 +215,8 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 				case StateMachineSideEffect::EndAtomic:
 				case StateMachineSideEffect::StartFunction:
 				case StateMachineSideEffect::EndFunction:
+				case StateMachineSideEffect::StackLeaked:
+				case StateMachineSideEffect::PointerAliasing:
 					break;
 				}
 			}

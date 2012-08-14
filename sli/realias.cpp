@@ -489,7 +489,7 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 		Oracle::Function f(rtrnRip);
 		Oracle::ThreadRegisterAliasingConfiguration config;
 		if (!f.aliasConfigOnEntryToInstruction(rtrnRip, &config) ||
-		    (config.v[0] & Oracle::PointerAliasingSet::stackPointer))
+		    (config.v[0] & PointerAliasingSet::stackPointer))
 			initialRegFrames.insert(fid);
 	}
 	initialFuncFrame = rootStack.functions[rootStack.functions.size() - 1];
@@ -550,7 +550,7 @@ aliasConfigForThread(StateMachine *sm, unsigned tid,
 
 static bool
 aliasConfigForReg(StateMachine *sm, const threadAndRegister &reg,
-		  Oracle::PointerAliasingSet *alias)
+		  PointerAliasingSet *alias)
 {
 	assert(reg.isReg());
 	assert(reg.gen() == (unsigned)-1);
@@ -622,17 +622,17 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 			break;
 		}
 
-		Oracle::PointerAliasingSet alias(-1);
+		PointerAliasingSet alias(-1);
 		if (!aliasConfigForReg(sm, iex->reg, &alias))
-			alias = Oracle::PointerAliasingSet::anything;
+			alias = PointerAliasingSet::anything;
 		PointsToSet res;
-		if (alias & Oracle::PointerAliasingSet::nonStackPointer) {
+		if (alias & PointerAliasingSet::nonStackPointer) {
 			res.mightPointOutsideStack = true;
 			res.targets = slt.initialRegFrames;
 		} else {
 			res.mightPointOutsideStack = false;
 		}
-		if (alias & Oracle::PointerAliasingSet::stackPointer)
+		if (alias & PointerAliasingSet::stackPointer)
 			res.targets.insert(slt.initialFuncFrame);
 		return res;
 	}
@@ -1065,6 +1065,8 @@ PointsToTable::refine(AliasTable &at,
 			}
 			break;
 		}
+		case StateMachineSideEffect::PointerAliasing:
+			break;
 		case StateMachineSideEffect::Store:
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::AssertFalse:
@@ -1072,6 +1074,7 @@ PointsToTable::refine(AliasTable &at,
 		case StateMachineSideEffect::EndAtomic:
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
+		case StateMachineSideEffect::StackLeaked:
 			/* These aren't supposed to define registers */
 			abort();
 		}

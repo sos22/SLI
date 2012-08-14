@@ -86,6 +86,15 @@ assignLabelsToDefinitions(StateMachine *sm,
 					*done_something = true;
 					break;
 				}
+				case StateMachineSideEffect::PointerAliasing: {
+					StateMachineSideEffectPointerAliasing *smsespas =
+						(StateMachineSideEffectPointerAliasing *)se;
+					se = new StateMachineSideEffectPointerAliasing(
+						tr,
+						smsespas->set);
+					*done_something = true;
+					break;
+				}
 				case StateMachineSideEffect::Phi:
 					/* Shouldn't be in SSA form yet */
 					abort();
@@ -96,6 +105,7 @@ assignLabelsToDefinitions(StateMachine *sm,
 				case StateMachineSideEffect::EndAtomic:
 				case StateMachineSideEffect::StartFunction:
 				case StateMachineSideEffect::EndFunction:
+				case StateMachineSideEffect::StackLeaked:
 					/* These shouldn't define registers */
 					abort();
 				}

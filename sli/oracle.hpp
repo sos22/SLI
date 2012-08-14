@@ -204,62 +204,6 @@ public:
 		NAMED_CLASS
 	};
 
-	/* Pointer aliasing stuff.  Note that ``stack'' in this
-	   context means the *current* stack frame: a pointer without
-	   the stack bit set could still point into a *calling*
-	   functions' stack frame, and that wouldn't be a bug. */
-	class PointerAliasingSet : public Named {
-		friend class ThreadRegisterAliasingConfiguration;
-		             
-		int v;
-		char *mkName() const {
-			const char *r;
-			switch (v) {
-			case 0:
-				r = "()";
-				break;
-			case 1:
-				r = "not-a-pointer";
-				break;
-			case 2:
-				r = "stack-pointer";
-				break;
-			case 3:
-				r = "not-a-pointer|stack-pointer";
-				break;
-			case 4:
-				r = "non-stack-pointer";
-				break;
-			case 5:
-				r = "not-a-pointer|non-stack-pointer";
-				break;
-			case 6:
-				r = "stack-pointer|non-stack-pointer";
-				break;
-			case 7:
-				r = "*";
-				break;
-			default:
-				abort();
-			}
-			return strdup(r);
-		}
-		PointerAliasingSet() : v(0xf001dead) {}
-	public:
-		PointerAliasingSet(int _v) : v(_v) {}
-
-		static const PointerAliasingSet notAPointer;
-		static const PointerAliasingSet stackPointer;
-		static const PointerAliasingSet nonStackPointer;
-		static const PointerAliasingSet anything;
-
-		PointerAliasingSet operator |(PointerAliasingSet o) const { return PointerAliasingSet(v | o.v); }
-		PointerAliasingSet operator &(PointerAliasingSet o) const { return PointerAliasingSet(v & o.v); }
-		PointerAliasingSet operator ~() const { return PointerAliasingSet(~v); }
-		bool operator !=(PointerAliasingSet o) const { return v != o.v; }
-		operator bool() const { return v != 0; }
-		operator unsigned long() const { return v; }
-	};
 	class ThreadRegisterAliasingConfiguration {
 		friend ThreadRegisterAliasingConfiguration Function::aliasConfigOnEntryToInstruction(const StaticRip &rip,
 											       bool *b);
