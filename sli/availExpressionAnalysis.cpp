@@ -60,6 +60,209 @@ findAllSideEffects(StateMachine *sm, std::set<StateMachineSideEffect *> &out)
 	v.transform(sm);
 }
 
+class MachineAliasingTable {
+	/* Map from state machine states to the aliasing configuration
+	   at the *start* of the state. */
+	std::map<StateMachineState *, Oracle::RegisterAliasingConfiguration> configs;
+
+	static void setStackLeaked(Oracle::RegisterAliasingConfiguration &,
+				   unsigned tid,
+				   bool);
+	static Oracle::ThreadRegisterAliasingConfiguration maximalThreadConfig();
+	static void setRegister(Oracle::RegisterAliasingConfiguration &,
+				const threadAndRegister &tr,
+				const PointerAliasingSet &val);
+	Oracle::RegisterAliasingConfiguration getConfig(StateMachineState *);
+	bool updateStateConfig(StateMachineState *,
+			       const Oracle::RegisterAliasingConfiguration &);
+public:
+	void initialise(StateMachine *sm);
+	bool ptrsMightAlias(StateMachineState *where,
+			    IRExpr *ptr1,
+			    IRExpr *ptr2,
+			    const AllowableOptimisations &opt) const;
+};
+
+Oracle::RegisterAliasingConfiguration
+MachineAliasingTable::getConfig(StateMachineState *s)
+{
+	auto it = configs.find(s);
+	if (it == configs.end())
+		return Oracle::RegisterAliasingConfiguration();
+	else
+		return it->second;
+}
+
+Oracle::ThreadRegisterAliasingConfiguration
+MachineAliasingTable::maximalThreadConfig()
+{
+	Oracle::ThreadRegisterAliasingConfiguration c;
+	c.stackHasLeaked = false;
+	for (int i = 0; i < Oracle::NR_REGS; i++)
+		c.v[i] = PointerAliasingSet::nothing;
+	c.v[OFFSET_amd64_RSP / 8] = PointerAliasingSet::stackPointer;
+	return c;
+}
+
+void
+MachineAliasingTable::setStackLeaked(Oracle::RegisterAliasingConfiguration &config,
+				     unsigned tid,
+				     bool hasLeaked)
+{
+	for (auto it = config.content.begin();
+	     it != config.content.end();
+	     it++) {
+		if (it->first == tid) {
+			it->second.stackHasLeaked = hasLeaked;
+			return;
+		}
+	}
+
+	Oracle::ThreadRegisterAliasingConfiguration c = maximalThreadConfig();
+	c.stackHasLeaked = hasLeaked;
+	config.content.push_back(std::pair<unsigned, Oracle::ThreadRegisterAliasingConfiguration>(tid, c));
+}
+
+void
+MachineAliasingTable::setRegister(Oracle::RegisterAliasingConfiguration &config,
+				  const threadAndRegister &tr,
+				  const PointerAliasingSet &val)
+{
+	if (tr.asReg() >= Oracle::NR_REGS * 8)
+		return;
+	if (tr.asReg() == OFFSET_amd64_RSP)
+		return;
+	for (auto it = config.content.begin();
+	     it != config.content.end();
+	     it++) {
+		if (it->first == tr.tid()) {
+			it->second.v[tr.asReg() / 8] = val;
+			return;
+		}
+	}
+
+	Oracle::ThreadRegisterAliasingConfiguration c = maximalThreadConfig();
+	c.v[tr.asReg() / 8] = val;
+	config.content.push_back(std::pair<unsigned, Oracle::ThreadRegisterAliasingConfiguration>(tr.tid(), c));
+}
+
+bool
+MachineAliasingTable::updateStateConfig(StateMachineState *s,
+					const Oracle::RegisterAliasingConfiguration &newConfig)
+{
+	auto it_did_insert = configs.insert(std::pair<StateMachineState *, Oracle::RegisterAliasingConfiguration>(s, newConfig));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert)
+		return true;
+	bool res = false;
+	Oracle::RegisterAliasingConfiguration &oldConfig(it->second);
+	for (auto newConfigIt = newConfig.content.begin();
+	     newConfigIt != newConfig.content.end();
+	     newConfigIt++) {
+		unsigned tid = newConfigIt->first;
+		const Oracle::ThreadRegisterAliasingConfiguration &newConfigElem(newConfigIt->second);
+		bool done = false;
+		for (auto it = oldConfig.content.begin();
+		     !done && it != oldConfig.content.end();
+		     it++) {
+			if (it->first == tid) {
+				if (newConfigElem.stackHasLeaked &&
+				    !it->second.stackHasLeaked) {
+					it->second.stackHasLeaked = true;
+					res = true;
+				}
+				for (int i = 0; i < Oracle::NR_REGS; i++) {
+					if (newConfigElem.v[i] &
+					    ~it->second.v[i]) {
+						it->second.v[i] |= newConfigElem.v[i];
+						res = true;
+					}
+				}
+				done = true;
+			}
+		}
+		if (!done) {
+			oldConfig.content.push_back(*newConfigIt);
+			res = true;
+		}
+	}
+	return res;
+}
+
+void
+MachineAliasingTable::initialise(StateMachine *sm)
+{
+	/* Queue of states whose input configuration has changed. */
+	std::queue<StateMachineState *> needsUpdate;
+	needsUpdate.push(sm->root);
+	while (!needsUpdate.empty()) {
+		StateMachineState *s = needsUpdate.front();
+		needsUpdate.pop();
+
+		Oracle::RegisterAliasingConfiguration exitConfig;
+		exitConfig = getConfig(s);
+		StateMachineSideEffect *se = s->getSideEffect();
+		if (se) {
+			switch (se->type) {
+			case StateMachineSideEffect::StackLeaked: {
+				auto sl = (StateMachineSideEffectStackLeaked *)se;
+				setStackLeaked(exitConfig, sl->tid, sl->flag);
+				break;
+			}
+			case StateMachineSideEffect::PointerAliasing: {
+				auto sl = (StateMachineSideEffectPointerAliasing *)se;
+				setRegister(exitConfig, sl->reg, sl->set);
+				break;
+			}
+
+				/* This bit of alias analysis only
+				   cares about generation -1, so
+				   side-effects whose only effect is
+				   to modify something which isn't
+				   generation -1 are irrelevant. */
+			case StateMachineSideEffect::Load:
+			case StateMachineSideEffect::Copy:
+			case StateMachineSideEffect::Phi:
+
+				/* Here, the current function means
+				   the function we were in at the
+				   start of the machine, so moving to
+				   a different function doesn't do
+				   anything. */
+			case StateMachineSideEffect::StartFunction:
+			case StateMachineSideEffect::EndFunction:
+
+			case StateMachineSideEffect::Store:
+			case StateMachineSideEffect::Unreached:
+			case StateMachineSideEffect::AssertFalse:
+			case StateMachineSideEffect::StartAtomic:
+			case StateMachineSideEffect::EndAtomic:
+				break;
+			}
+		}
+
+		std::vector<StateMachineState *> succ;
+		s->targets(succ);
+		for (auto it = succ.begin(); it != succ.end(); it++) {
+			if (updateStateConfig(*it, exitConfig))
+				needsUpdate.push(*it);
+		}
+	}
+}
+
+bool
+MachineAliasingTable::ptrsMightAlias(StateMachineState *where,
+				     IRExpr *ptr1,
+				     IRExpr *ptr2,
+				     const AllowableOptimisations &opt) const
+{
+	auto it = configs.find(where);
+	if (it == configs.end())
+		return true;
+	return it->second.ptrsMightAlias(ptr1, ptr2, opt);
+}
+
 class avail_t {
 	std::set<StateMachineSideEffect *> sideEffects;
 public:
@@ -403,8 +606,9 @@ static void
 updateAvailSetForSideEffect(CfgDecode &decode,
 			    avail_t &outputAvail,
 			    StateMachineSideEffect *smse,
+			    StateMachineState *where,
 			    const AllowableOptimisations &opt,
-			    const Oracle::RegisterAliasingConfiguration *alias,
+			    const MachineAliasingTable &alias,
 			    OracleInterface *oracle)
 {
 	if (TIMEOUT)
@@ -432,7 +636,7 @@ updateAvailSetForSideEffect(CfgDecode &decode,
 				addr = NULL;
 
 			if ( addr &&
-			     (!alias || alias->ptrsMightAlias(addr, smses->addr, opt)) &&
+			     alias.ptrsMightAlias(where, addr, smses->addr, opt) &&
 			     ((smses2 && oracle->memoryAccessesMightAlias(decode, opt, smses2, smses)) ||
 			      (smsel2 && oracle->memoryAccessesMightAlias(decode, opt, smsel2, smses))) &&
 			     !definitelyNotEqual( addr,
@@ -544,11 +748,12 @@ applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_assumptions, bool *do
    already-loaded values. */
 static StateMachineSideEffect *
 buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
+					StateMachineState *where,
 					StateMachineSideEffect *smse,
 					avail_t &currentlyAvailable,
 					OracleInterface *oracle,
 					bool *done_something,
-					const Oracle::RegisterAliasingConfiguration *aliasing,
+					const MachineAliasingTable &aliasing,
 					const AllowableOptimisations &opt)
 {
 	StateMachineSideEffect *newEffect;
@@ -592,7 +797,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 				dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 			if ( smses2 &&
 			     smsel->type <= smses2->data->type() &&
-			     (!aliasing || aliasing->ptrsMightAlias(smses2->addr, newAddr, opt)) &&
+			     aliasing.ptrsMightAlias(where, smses2->addr, newAddr, opt) &&
 			     definitelyEqual(smses2->addr, newAddr, opt) ) {
 				newEffect =
 					new StateMachineSideEffectCopy(
@@ -600,7 +805,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 						coerceTypes(smsel->type, smses2->data));
 			} else if ( smsel2 &&
 				    smsel->type <= smsel2->type &&
-				    (!aliasing || aliasing->ptrsMightAlias(smsel2->addr, newAddr, opt)) &&
+				    aliasing.ptrsMightAlias(where, smsel2->addr, newAddr, opt) &&
 				    definitelyEqual(smsel2->addr, newAddr, opt) ) {
 				newEffect =
 					new StateMachineSideEffectCopy(
@@ -776,7 +981,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 	}
 	assert(newEffect);
 	if (!*done_something) assert(newEffect == smse);
-	updateAvailSetForSideEffect(decode, currentlyAvailable, newEffect, opt, aliasing, oracle);
+	updateAvailSetForSideEffect(decode, currentlyAvailable, newEffect, where, opt, aliasing, oracle);
 	currentlyAvailable.calcRegisterMap(opt);
 	if (debug_substitutions) {
 		printf("New available set:\n");
@@ -793,7 +998,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, avail_t> &availMap,
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration *alias,
+	const MachineAliasingTable &alias,
 	OracleInterface *oracle,
 	bool *done_something,
 	std::map<const StateMachineState *, int> &edgeLabels)
@@ -826,6 +1031,7 @@ buildNewStateMachineWithLoadsEliminated(
 		avail.calcRegisterMap(opt);
 		if (smp->sideEffect)
 			newEffect = buildNewStateMachineWithLoadsEliminated(decode,
+									    smp,
 									    smp->sideEffect,
 									    avail,
 									    oracle,
@@ -861,7 +1067,7 @@ buildNewStateMachineWithLoadsEliminated(
 	StateMachine *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration *alias,
+	const MachineAliasingTable &alias,
 	OracleInterface *oracle,
 	bool *done_something,
 	std::map<const StateMachineState *, int> &edgeLabels)
@@ -920,7 +1126,6 @@ avail_t::findAllPotentiallyAvailable(CfgDecode &decode,
 static StateMachine *
 availExpressionAnalysis(StateMachine *sm,
 			const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration *alias,
 			bool is_ssa,
 			OracleInterface *oracle,
 			bool *done_something)
@@ -933,6 +1138,10 @@ availExpressionAnalysis(StateMachine *sm,
 
 	CfgDecode decode;
 	decode.addMachine(sm);
+
+	MachineAliasingTable alias;
+	if (is_ssa)
+		alias.initialise(sm);
 
 	__set_profiling(availExpressionAnalysis);
 	/* Fairly standard available expression analysis.  Each edge
@@ -979,7 +1188,7 @@ availExpressionAnalysis(StateMachine *sm,
 		if ( state->type == StateMachineState::SideEffecting ) {
 			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
 			if (se)
-				updateAvailSetForSideEffect(decode, outputAvail, se, opt,
+				updateAvailSetForSideEffect(decode, outputAvail, se, state, opt,
 							    alias, oracle);
 		}
 
@@ -1025,7 +1234,6 @@ availExpressionAnalysis(StateMachine *sm,
 StateMachine *
 availExpressionAnalysis(StateMachine *sm,
 			const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration *alias,
 			bool is_ssa,
 			OracleInterface *oracle,
 			bool *done_something)
@@ -1033,7 +1241,7 @@ availExpressionAnalysis(StateMachine *sm,
 	sm->sanityCheck();
 	if (is_ssa)
 		sm->assertSSA();
-	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, is_ssa, oracle, done_something);
+	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(sm, opt, is_ssa, oracle, done_something);
 	res->sanityCheck();
 	if (is_ssa)
 		res->assertSSA();

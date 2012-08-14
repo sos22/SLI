@@ -245,7 +245,7 @@ public:
 		void set(const threadAndRegister &, const PointerAliasingSet &);
 		void addConfig(unsigned tid, const ThreadRegisterAliasingConfiguration &config);
 
-		/* Check whether a and b mght point at the same bit of
+		/* Check whether a and b might point at the same bit of
 		   memory (i.e. have intersecting pointer aliasing
 		   sets) given @this's register aliasing
 		   configuration.  Note that this assumes that both @a

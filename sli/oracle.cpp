@@ -130,6 +130,7 @@ Oracle::LivenessSet::isLive(Int offset) const
 		return !!(mask & (1ul << (offset / 8)));
 }
 
+const PointerAliasingSet PointerAliasingSet::nothing(0);
 const PointerAliasingSet PointerAliasingSet::notAPointer(1);
 const PointerAliasingSet PointerAliasingSet::stackPointer(2);
 const PointerAliasingSet PointerAliasingSet::nonStackPointer(4);
@@ -3443,8 +3444,8 @@ Oracle::RegisterAliasingConfiguration::lookupRegister(const threadAndRegister &r
 	}
 
 	/* Don't have an aliasing configuration for this thread ->
-	 * pretty bad. */
-	abort();
+	   could go anywhere. */
+	return PointerAliasingSet::anything;
 }
 
 void

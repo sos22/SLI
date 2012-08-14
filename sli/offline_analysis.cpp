@@ -172,7 +172,6 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck();
 	sm->assertAcyclic();
-	Oracle::RegisterAliasingConfiguration alias, *aliasp;
 
 	if (debugOptimiseStateMachine) {
 		printf("%s(sm=..., opt = %s, is_ssa = %s)\n",
@@ -180,20 +179,6 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		printStateMachine(sm, stdout);
 	}
 
-	/* Careful here.  We can only use the aliasing configuration
-	   if the machine is in SSA form, because that guarantees that
-	   there won't be any writes to gen -1 registers, which in
-	   turn means that a single aliasing configuration is valid
-	   for the entire machine. */
-	aliasp = NULL;
-	if (is_ssa && sm->bad_origin.size() == 1) {
-		Oracle *o = dynamic_cast<Oracle *>(oracle.get());
-		if (o) {
-			alias = o->getAliasingConfiguration(sm->bad_origin);
-			aliasp = &alias;
-		}
-		sm->assertSSA();
-	}
 	bool done_something;
 	do {
 		if (TIMEOUT)
@@ -222,7 +207,7 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		LibVEX_maybe_gc(token);
 
 		p = false;
-		sm = availExpressionAnalysis(sm, opt, aliasp, is_ssa, oracle, &p);
+		sm = availExpressionAnalysis(sm, opt, is_ssa, oracle, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("availExpressionAnalysis:\n");
 			printStateMachine(sm, stdout);

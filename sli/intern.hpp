@@ -14,18 +14,12 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineSideEffectAssertFalse *> asserts;
 	std::set<StateMachineSideEffectStartFunction *> StartFunction;
 	std::set<StateMachineSideEffectEndFunction *> EndFunction;
-	StateMachineSideEffectStackLeaked *StackLeakedT;
-	StateMachineSideEffectStackLeaked *StackLeakedF;
+	std::set<StateMachineSideEffectStackLeaked *> StackLeaked;
 	std::set<StateMachineSideEffectPointerAliasing *> PointerAliasing;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
 	std::set<StateMachineSideEffecting *> states_side_effect;
 	std::set<const CFGNode *> cfgNodesS;
-
-	internStateMachineTable()
-		: StackLeakedT(NULL),
-		  StackLeakedF(NULL)
-	{}
 };
 
 const CFGNode *internCFG(const CFGNode *n, internStateMachineTable &t);

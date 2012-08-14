@@ -339,17 +339,7 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 	}
 	case StateMachineSideEffect::StackLeaked: {
 		auto sf = (StateMachineSideEffectStackLeaked *)s;
-		if (sf->flag) {
-			if (!t.StackLeakedT)
-				t.StackLeakedT = sf;
-			t.sideEffects[s] = t.StackLeakedT;
-			return t.StackLeakedT;
-		} else {
-			if (!t.StackLeakedF)
-				t.StackLeakedF = sf;
-			t.sideEffects[s] = t.StackLeakedF;
-			return t.StackLeakedF;
-		}
+		do_search(StackLeaked);
 	}
 	case StateMachineSideEffect::PointerAliasing: {
 		auto sf = (StateMachineSideEffectPointerAliasing *)s;

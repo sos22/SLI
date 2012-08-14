@@ -705,7 +705,8 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 	cursor = new StateMachineSideEffecting(
 		vr,
 		new StateMachineSideEffectStackLeaked(
-			alias.stackHasLeaked),
+			alias.stackHasLeaked,
+			tid),
 		cursor);
 	for (int i = 0; i < Oracle::NR_REGS; i++)
 		cursor = new StateMachineSideEffecting(

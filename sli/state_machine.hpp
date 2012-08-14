@@ -29,7 +29,6 @@ void sanityCheckIRExpr(IRExpr *, const std::set<threadAndRegister, threadAndRegi
    the stack bit set could still point into a *calling*
    functions' stack frame, and that wouldn't be a bug. */
 class PointerAliasingSet : public Named {
-		             
 	int v;
 	char *mkName() const {
 		const char *r;
@@ -71,12 +70,14 @@ public:
 	static const PointerAliasingSet stackPointer;
 	static const PointerAliasingSet nonStackPointer;
 	static const PointerAliasingSet anything;
+	static const PointerAliasingSet nothing;
 
 	PointerAliasingSet operator |(PointerAliasingSet o) const { return PointerAliasingSet(v | o.v); }
 	PointerAliasingSet operator &(PointerAliasingSet o) const { return PointerAliasingSet(v & o.v); }
 	PointerAliasingSet operator ~() const { return PointerAliasingSet(~v); }
 	bool operator !=(PointerAliasingSet o) const { return v != o.v; }
 	bool operator ==(PointerAliasingSet o) const { return v == o.v; }
+	void operator |=(PointerAliasingSet o) { v |= o.v; }
 	operator bool() const { return v != 0; }
 	operator unsigned long() const { return v; }
 
@@ -1000,9 +1001,10 @@ public:
 class StateMachineSideEffectStackLeaked : public StateMachineSideEffect {
 public:
 	bool flag;
-	StateMachineSideEffectStackLeaked(bool _flag)
+	unsigned tid;
+	StateMachineSideEffectStackLeaked(bool _flag, unsigned _tid)
 		: StateMachineSideEffect(StateMachineSideEffect::StackLeaked),
-		  flag(_flag)
+		  flag(_flag), tid(_tid)
 	{}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
@@ -1012,24 +1014,31 @@ public:
 	void inputExpressions(std::vector<IRExpr *> &) {}
 	void prettyPrint(FILE *f) const {
 		if (flag)
-			fprintf(f, "StackLeaked");
+			fprintf(f, "StackLeaked(%d)", tid);
 		else
-			fprintf(f, "StackNotLeaked");
+			fprintf(f, "StackNotLeaked(%d)", tid);
 	}
 	static bool parse(StateMachineSideEffectStackLeaked **out,
 			  const char *str,
 			  const char **suffix)
 	{
-		if (parseThisString("StackLeaked", str, suffix))
-			*out = new StateMachineSideEffectStackLeaked(true);
-		else if (parseThisString("StackNotLeaked", str, suffix))
-			*out = new StateMachineSideEffectStackLeaked(false);
+		bool flag;
+		if (parseThisString("StackLeaked", str, &str))
+			flag = true;
+		else if (parseThisString("StackNotLeaked", str, &str))
+			flag = false;
 		else
 			return false;
+		unsigned tid;
+		if (!parseThisString("(", str, &str) ||
+		    !parseDecimalUInt(&tid, str, &str) ||
+		    !parseThisString(")", str, suffix))
+			return false;
+		*out = new StateMachineSideEffectStackLeaked(flag, tid);
 		return true;
 	}
 	bool operator==(const StateMachineSideEffectStackLeaked &o) const {
-		return flag == o.flag;
+		return flag == o.flag && tid == o.tid;
 	}
 };
 class StateMachineSideEffectPointerAliasing : public StateMachineSideEffect {
@@ -1046,9 +1055,8 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare>*) const {}
-	bool definesRegister(threadAndRegister &tr) const {
-		tr = reg;
-		return true;
+	bool definesRegister(threadAndRegister &) const {
+		return false;
 	}
 	void inputExpressions(std::vector<IRExpr *> &) {}
 	void prettyPrint(FILE *f) const {

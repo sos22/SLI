@@ -217,7 +217,6 @@ StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 /* Individual optimisation passes. */
 StateMachine *availExpressionAnalysis(StateMachine *sm,
 				      const AllowableOptimisations &opt,
-				      const Oracle::RegisterAliasingConfiguration *alias,
 				      bool is_ssa,
 				      OracleInterface *oracle,
 				      bool *done_something);
