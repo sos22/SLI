@@ -786,9 +786,14 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 	origin.push_back(std::pair<unsigned, VexRip>(tid, root->rip));
 	std::vector<const CFGNode *> roots;
 	roots.push_back(root);
-	StateMachine *sm = new StateMachine(performTranslation(results, root, oracle, tid, doOne),
-					    origin,
-					    roots);
+	StateMachine *sm = new StateMachine(
+		addEntrySideEffects(
+			oracle,
+			tid,
+			performTranslation(results, root, oracle, tid, doOne),
+			root->rip),
+		origin,
+		roots);
 
 	return sm;
 }
