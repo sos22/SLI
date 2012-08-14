@@ -231,6 +231,34 @@ public:
 	NAMED_CLASS
 };
 
+class FrameId : public Named {
+	unsigned id;
+	char *mkName() const {
+		return my_asprintf("frame%d", id);
+	}
+public:
+	explicit FrameId(unsigned _id)
+		: id(_id)
+	{}
+	static FrameId invalid()
+	{
+		return FrameId(-1);
+	}
+	static bool parse(FrameId *out, const char *str, const char **suffix)
+	{
+		unsigned id;
+		if (parseThisString("frame", str, &str) &&
+		    parseDecimalUInt(&id, str, suffix)) {
+			*out = FrameId(id);
+			return true;
+		}
+		return false;
+	}
+	bool operator==(const FrameId &o) const {
+		return id == o.id;
+	}
+};
+
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap> {
 	StateMachineSideEffect(); /* DNE */
 public:
@@ -914,14 +942,15 @@ class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
 			exprs.push_back(rsp);
 	}
 public:
-	StateMachineSideEffectStartFunction(IRExpr *_rsp)
+	StateMachineSideEffectStartFunction(IRExpr *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
-		  rsp(_rsp)
+		  rsp(_rsp), frame(_frame)
 	{
 	}
 	IRExpr *rsp;
+	FrameId frame;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "StartFunction rsp = ");
+		fprintf(f, "StartFunction(%s) rsp = ", frame.name());
 		if (rsp)
 			ppIRExpr(rsp, f);
 		else
@@ -930,11 +959,14 @@ public:
 	static bool parse(StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *data;
-		if (parseThisString("StartFunction rsp = ", str, &str)) {
+		FrameId frame(FrameId::invalid());
+		if (parseThisString("StartFunction( ", str, &str) &&
+		    FrameId::parse(&frame, str, &str) &&
+		    parseThisString(") rsp = ", str, &str)) {
 			if (parseThisString("<inf>", str, suffix))
-				*out = new StateMachineSideEffectStartFunction(NULL);
+				*out = new StateMachineSideEffectStartFunction(NULL, frame);
 			else if (parseIRExpr(&data, str, suffix))
-				*out = new StateMachineSideEffectStartFunction(data);
+				*out = new StateMachineSideEffectStartFunction(data, frame);
 			else
 				return false;
 			return true;
@@ -956,28 +988,32 @@ public:
 		return false;
 	}
 	bool operator==(const StateMachineSideEffectStartFunction &o) const {
-		return rsp == o.rsp;
+		return rsp == o.rsp && frame == o.frame;
 	}
 };
 class StateMachineSideEffectEndFunction : public StateMachineSideEffect {
 	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(rsp); }
 public:
-	StateMachineSideEffectEndFunction(IRExpr *_rsp)
+	StateMachineSideEffectEndFunction(IRExpr *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
-		  rsp(_rsp)
+		  rsp(_rsp), frame(_frame)
 	{
 	}
 	IRExpr *rsp;
+	FrameId frame;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "EndFunction rsp = ");
+		fprintf(f, "EndFunction(%s) rsp = ", frame.name());
 		ppIRExpr(rsp, f);
 	}
 	static bool parse(StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *rsp;
-		if (parseThisString("EndFunction rsp = ", str, &str) &&
+		FrameId frame(FrameId::invalid());
+		if (parseThisString("EndFunction(", str, &str) &&
+		    FrameId::parse(&frame, str, &str) &&
+		    parseThisString(") rsp = ", str, &str) &&
 		    parseIRExpr(&rsp, str, suffix)) {
-			*out = new StateMachineSideEffectEndFunction(rsp);
+			*out = new StateMachineSideEffectEndFunction(rsp, frame);
 			return true;
 		}
 		return false;
@@ -995,7 +1031,7 @@ public:
 		return false;
 	}
 	bool operator==(const StateMachineSideEffectEndFunction &o) const {
-		return rsp == o.rsp;
+		return rsp == o.rsp && frame == o.frame;
 	}
 };
 class StateMachineSideEffectStackLeaked : public StateMachineSideEffect {

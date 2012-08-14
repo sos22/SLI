@@ -567,7 +567,8 @@ cfgNodeToState(Oracle *oracle,
 								tid,
 								OFFSET_amd64_RSP,
 								0),
-							Ity_I64)),
+							Ity_I64),
+						FrameId::invalid()),
 					NULL);
 			*cursor = smp;
 			cursor = &smp->target;
@@ -584,7 +585,8 @@ cfgNodeToState(Oracle *oracle,
 								tid,
 								OFFSET_amd64_RSP,
 								0),
-							Ity_I64)),
+							Ity_I64),
+						FrameId::invalid()),
 					NULL);
 				*cursor = smp;
 				cursor = &smp->target;
@@ -618,7 +620,8 @@ cfgNodeToState(Oracle *oracle,
 								tid,
 								OFFSET_amd64_RSP,
 								0),
-							Ity_I64)),
+							Ity_I64),
+						FrameId::invalid()),
 					NULL);
 			*cursor = smp;
 			cursor = &smp->target;
@@ -718,6 +721,144 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 	return cursor;
 }
 
+typedef std::vector<FrameId *> callStackT;
+
+static void
+assignFrameIds(StateMachineState *root)
+{
+	/* Step one: figure out how many things are on the stack at
+	 * the root state.  The idea here is to simulate every
+	 * possible path through the machine and check for stack
+	 * underflows.  If we get an underflow then we need more stuff
+	 * in the initial stack. */
+	int initialStackDepth;
+	{
+		int worst_underflow = 0;
+		std::map<StateMachineState *, int> stackDepths;
+		std::queue<std::pair<StateMachineState *, int> > pending;
+		pending.push(std::pair<StateMachineState *, int>(root, 0));
+		while (!pending.empty()) {
+			StateMachineState *s = pending.front().first;
+			/* pushedFrames == how many frames we've
+			   pushed minus how many frames we've popped.
+			   Negative if we've underflowed. */
+			int pushedFrames = pending.front().second;
+			auto it_did_insert = stackDepths.insert(pending.front());
+			pending.pop();
+			auto it = it_did_insert.first;
+			auto did_insert = it_did_insert.second;
+			if (!did_insert) {
+				if (it->second != pushedFrames) {
+					/* The layout at @s depends on
+					   the path you take to reach
+					   @s.  Consider every
+					   path. */
+				} else {
+					/* Already done this bit */
+					continue;
+				}
+			}
+			if (pushedFrames < worst_underflow)
+				worst_underflow = pushedFrames;
+			if (s->getSideEffect() && s->getSideEffect()->type == StateMachineSideEffect::StartFunction)
+				pushedFrames++;
+			if (s->getSideEffect() && s->getSideEffect()->type == StateMachineSideEffect::EndFunction)
+				pushedFrames--;
+			std::vector<StateMachineState *> succ;
+			s->targets(succ);
+			for (auto it2 = succ.begin(); it2 != succ.end(); it2++) {
+				pending.push(std::pair<StateMachineState *, int>(*it2, pushedFrames));
+			}
+		}
+		initialStackDepth = -worst_underflow;
+	}
+
+	/* Step two: Set up an initial stack. */
+	std::vector<FrameId> entryFrames;
+	entryFrames.resize(initialStackDepth, FrameId::invalid());
+	callStackT initialStack;
+	initialStack.resize(initialStackDepth);
+	for (int x = 0; x < initialStackDepth; x++)
+		initialStack[x] = &entryFrames[x];
+
+	/* Step three: Explore the machine again, emitting equality
+	 * constraints as we go.  These equality constraints tell you
+	 * that the program's function structure is well-nested. */
+	std::set<std::pair<FrameId *, FrameId *> > eqConstraints;
+	std::set<FrameId *> unlabelledFrames;
+	{
+		std::queue<std::pair<StateMachineState *, callStackT> > pending;
+		pending.push(std::pair<StateMachineState *, callStackT>(root, initialStack));
+		while (!pending.empty()) {
+			StateMachineState *s = pending.front().first;
+			callStackT stack = pending.front().second;
+			pending.pop();
+			StateMachineSideEffect *se = s->getSideEffect();
+			if (se && se->type == StateMachineSideEffect::StartFunction) {
+				auto *l = (StateMachineSideEffectStartFunction *)se;
+				if (l->frame == FrameId::invalid())
+					unlabelledFrames.insert(&l->frame);
+				stack.push_back(&l->frame);
+			}
+			if (se && se->type == StateMachineSideEffect::EndFunction) {
+				/* Should be enough stuff in initial
+				 * stack to avoid underflow. */
+				auto l = (StateMachineSideEffectEndFunction *)se;
+				assert(!stack.empty());
+				FrameId *o = stack.back();
+				if (l->frame == FrameId::invalid())
+					unlabelledFrames.insert(&l->frame);
+				eqConstraints.insert(
+					std::pair<FrameId *, FrameId *>
+					(o, &l->frame));
+			}
+			std::vector<StateMachineState *> succ;
+			s->targets(succ);
+			for (auto it2 = succ.begin(); it2 != succ.end(); it2++)
+				pending.push(std::pair<StateMachineState *, callStackT>(*it2, stack));
+		}
+	}
+
+	/* Step 4: Label the frames, using the maximum number of
+	   distinct labels which is compatible with the eq
+	   constraints. */
+	unsigned nextLabel = 0;
+	while (!unlabelledFrames.empty()) {
+		auto it = unlabelledFrames.begin();
+		FrameId *f = *it;
+		FrameId label(nextLabel);
+		nextLabel++;
+
+		/* Go and label the SCC */
+		std::queue<FrameId *> pending;
+		pending.push(f);
+		while (!pending.empty()) {
+			FrameId *fst = pending.front();
+			pending.pop();
+			if (*fst == label) {
+				/* Already done this one */
+				continue;
+			}
+			assert(*fst == FrameId::invalid());
+			assert(unlabelledFrames.count(fst));
+			*fst = label;
+			unlabelledFrames.erase(fst);
+			for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++) {
+				if (it->first == fst)
+					pending.push(it->second);
+				if (it->second == fst)
+					pending.push(it->first);
+			}
+		}
+	}
+
+	/* Check that the resulting labelling is valid */
+#ifndef NDEBUG
+	for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++)
+		assert(*it->first == *it->second);
+#endif
+}
+
 static void
 probeCFGsToMachine(Oracle *oracle,
 		   unsigned tid,
@@ -761,6 +902,7 @@ probeCFGsToMachine(Oracle *oracle,
 		std::vector<const CFGNode *> roots_this_sm;
 		roots_this_sm.push_back(*it);
 		root = addEntrySideEffects(oracle, tid, root, root->origin);
+		assignFrameIds(root);
 		StateMachine *sm = new StateMachine(root, origin, roots_this_sm);
 		sm->sanityCheck();
 		out.insert(sm);
@@ -787,15 +929,22 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 	origin.push_back(std::pair<unsigned, VexRip>(tid, root->rip));
 	std::vector<const CFGNode *> roots;
 	roots.push_back(root);
-	StateMachine *sm = new StateMachine(
+	StateMachineState *s =
 		addEntrySideEffects(
 			oracle,
 			tid,
-			performTranslation(results, root, oracle, tid, doOne),
-			root->rip),
+			performTranslation(
+				results,
+				root,
+				oracle,
+				tid,
+				doOne),
+			root->rip);
+	assignFrameIds(s);
+	StateMachine *sm = new StateMachine(
+		s,
 		origin,
 		roots);
-
 	return sm;
 }
 
