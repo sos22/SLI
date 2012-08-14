@@ -143,6 +143,9 @@ protected:
 	virtual StateMachineSideEffectPointerAliasing *transformOneSideEffect(
 		StateMachineSideEffectPointerAliasing *, bool *)
 	{ return NULL; }
+	virtual StateMachineSideEffectStackLayout *transformOneSideEffect(
+		StateMachineSideEffectStackLayout *, bool *)
+	{ return NULL; }
 	virtual StateMachineUnreached *transformOneState(StateMachineUnreached *,
 							 bool *)
 	{ return NULL; }

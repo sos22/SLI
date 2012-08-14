@@ -345,6 +345,10 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		auto sf = (StateMachineSideEffectPointerAliasing *)s;
 		do_search(PointerAliasing);
 	}
+	case StateMachineSideEffect::StackLayout: {
+		auto sf = (StateMachineSideEffectStackLayout *)s;
+		do_search(StackLayout);
+	}
 #undef do_search
 
 	}

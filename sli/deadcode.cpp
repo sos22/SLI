@@ -38,67 +38,21 @@ public:
 
 	void useSideEffect(StateMachineSideEffect *smse)
 	{
-		switch (smse->type) {
-		case StateMachineSideEffect::Load: {
-			StateMachineSideEffectLoad *smsel =
-				(StateMachineSideEffectLoad *)smse;
-			killRegister(smsel->target);
-			useExpression(smsel->addr);
-			return;
-		}
-		case StateMachineSideEffect::Copy: {
-			StateMachineSideEffectCopy *smsec =
-				(StateMachineSideEffectCopy *)smse;
-			killRegister(smsec->target);
-			useExpression(smsec->value);
-			return;
-		}
-		case StateMachineSideEffect::Store: {
-			StateMachineSideEffectStore *smses =
-				(StateMachineSideEffectStore *)smse;
-			useExpression(smses->addr);
-			useExpression(smses->data);
-			return;
-		}
-		case StateMachineSideEffect::Unreached:
-		case StateMachineSideEffect::StartAtomic:
-		case StateMachineSideEffect::EndAtomic:
-		case StateMachineSideEffect::PointerAliasing:
-		case StateMachineSideEffect::StackLeaked:
-			return;
-		case StateMachineSideEffect::AssertFalse: {
-			StateMachineSideEffectAssertFalse *smseaf =
-				(StateMachineSideEffectAssertFalse *)smse;
-			useExpression(smseaf->value);
-			return;
-		}
-		case StateMachineSideEffect::Phi: {
+		threadAndRegister def(threadAndRegister::invalid());
+		if (smse->definesRegister(def))
+			killRegister(def);
+		std::vector<IRExpr *> inp;
+		smse->inputExpressions(inp);
+		for (auto it = inp.begin(); it != inp.end(); it++)
+			useExpression(*it);
+		if (smse->type == StateMachineSideEffect::Phi) {
 			StateMachineSideEffectPhi *smsep =
 				(StateMachineSideEffectPhi *)smse;
-			killRegister(smsep->reg);
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
-			     it++) {
-				if (it->second)
-					useExpression(it->second);
+			     it++)
 				this->insert(smsep->reg.setGen(it->first));
-			}
-			return;
 		}
-		case StateMachineSideEffect::StartFunction: {
-			StateMachineSideEffectStartFunction *sf =
-				(StateMachineSideEffectStartFunction *)smse;
-			useExpression(sf->rsp);
-			return;
-		}
-		case StateMachineSideEffect::EndFunction: {
-			StateMachineSideEffectEndFunction *sf =
-				(StateMachineSideEffectEndFunction *)smse;
-			useExpression(sf->rsp);
-			return;
-		}
-		}
-		abort();
 	}
 
 	void merge(const LivenessEntry &other) {
@@ -245,6 +199,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			case StateMachineSideEffect::EndFunction:
 			case StateMachineSideEffect::AssertFalse:
 			case StateMachineSideEffect::StackLeaked:
+			case StateMachineSideEffect::StackLayout:
 				break;
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec =

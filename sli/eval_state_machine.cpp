@@ -872,6 +872,7 @@ EvalContext::evalStateMachineSideEffect(CfgDecode &decode,
 		 /* Todo: could maybe use these to improve aliasing here */
 	case StateMachineSideEffect::StackLeaked:
 	case StateMachineSideEffect::PointerAliasing:
+	case StateMachineSideEffect::StackLayout:
 		break;
 	}
 	return esme_normal;
@@ -1539,6 +1540,7 @@ definitelyDoesntRace(CfgDecode &decode,
 		case StateMachineSideEffect::EndFunction:
 		case StateMachineSideEffect::StackLeaked:
 		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::StackLayout:
 			return true;
 		}
 	}

@@ -257,6 +257,9 @@ public:
 	bool operator==(const FrameId &o) const {
 		return id == o.id;
 	}
+	bool operator!=(const FrameId &o) const {
+		return id != o.id;
+	}
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap> {
@@ -274,7 +277,8 @@ public:
 	f(StartFunction)			\
 	f(EndFunction)				\
 	f(StackLeaked)				\
-	f(PointerAliasing)
+	f(PointerAliasing)			\
+	f(StackLayout)
 	enum sideEffectType {
 #define mk_one(n) n,
 		all_side_effect_types(mk_one)
@@ -1115,6 +1119,71 @@ public:
 	}
 	bool operator==(const StateMachineSideEffectPointerAliasing &o) const {
 		return threadAndRegister::fullEq(reg, o.reg) && set == o.set;
+	}
+
+};
+class StateMachineSideEffectStackLayout : public StateMachineSideEffect {
+public:
+	unsigned tid;
+	std::vector<FrameId> functions;
+	StateMachineSideEffectStackLayout(
+		unsigned _tid,
+		const std::vector<FrameId> &_functions)
+		: StateMachineSideEffect(StateMachineSideEffect::StackLayout),
+		  tid(_tid), functions(_functions)
+	{}
+	void visit(HeapVisitor &) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
+		/* No dupes */
+		for (auto it1 = functions.begin();
+		     it1 != functions.end();
+		     it1++) {
+			for (auto it2 = it1 + 1;
+			     it2 != functions.end();
+			     it2++)
+				assert(*it1 != *it2);
+		}
+	}
+	bool definesRegister(threadAndRegister &) const {
+		return false;
+	}
+	void inputExpressions(std::vector<IRExpr *> &) {
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "STACKLAYOUT(%d) = {", tid);
+		for (auto it = functions.begin(); it != functions.end(); it++) {
+			if (it != functions.begin())
+				fprintf(f, ", ");
+			fprintf(f, "%s", it->name());
+		}
+		fprintf(f, "}");
+	}
+	static bool parse(StateMachineSideEffectStackLayout **out, const char *str, const char **suffix)
+	{
+		unsigned tid;
+		std::vector<FrameId> functions;
+
+		if (!parseThisString("STACKLAYOUT(", str, &str) ||
+		    !parseDecimalUInt(&tid, str, &str) ||
+		    !parseThisString(") = {", str, &str))
+			return false;
+		while (1) {
+			FrameId f(FrameId::invalid());
+			if (!FrameId::parse(&f, str, &str))
+				return false;
+			functions.push_back(f);
+			if (parseThisChar('}', str, suffix))
+				break;
+			if (!parseThisString(", ", str, &str))
+				return false;
+		}
+		*out = new StateMachineSideEffectStackLayout(tid, functions);
+		return true;
+	}
+	bool operator==(const StateMachineSideEffectStackLayout &o) const {
+		return tid == o.tid && functions == o.functions;
 	}
 
 };

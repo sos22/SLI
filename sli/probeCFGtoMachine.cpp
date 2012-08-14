@@ -723,8 +723,10 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 
 typedef std::vector<FrameId *> callStackT;
 
-static void
-assignFrameIds(StateMachineState *root)
+static StateMachineState *
+assignFrameIds(StateMachineState *root,
+	       const VexRip &origin,
+	       unsigned tid)
 {
 	/* Step one: figure out how many things are on the stack at
 	 * the root state.  The idea here is to simulate every
@@ -770,22 +772,27 @@ assignFrameIds(StateMachineState *root)
 				pending.push(std::pair<StateMachineState *, int>(*it2, pushedFrames));
 			}
 		}
-		initialStackDepth = -worst_underflow;
+		/* +1 because we want to have a frame ID for the
+		 * initial function. */
+		initialStackDepth = -worst_underflow + 1;
 	}
+
+	std::set<FrameId *> unlabelledFrames;
 
 	/* Step two: Set up an initial stack. */
 	std::vector<FrameId> entryFrames;
 	entryFrames.resize(initialStackDepth, FrameId::invalid());
 	callStackT initialStack;
 	initialStack.resize(initialStackDepth);
-	for (int x = 0; x < initialStackDepth; x++)
+	for (int x = 0; x < initialStackDepth; x++) {
 		initialStack[x] = &entryFrames[x];
+		unlabelledFrames.insert(&entryFrames[x]);
+	}
 
 	/* Step three: Explore the machine again, emitting equality
 	 * constraints as we go.  These equality constraints tell you
 	 * that the program's function structure is well-nested. */
 	std::set<std::pair<FrameId *, FrameId *> > eqConstraints;
-	std::set<FrameId *> unlabelledFrames;
 	{
 		std::queue<std::pair<StateMachineState *, callStackT> > pending;
 		pending.push(std::pair<StateMachineState *, callStackT>(root, initialStack));
@@ -857,6 +864,15 @@ assignFrameIds(StateMachineState *root)
 	for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++)
 		assert(*it->first == *it->second);
 #endif
+
+	root = new StateMachineSideEffecting(
+		origin,
+		new StateMachineSideEffectStackLayout(
+			tid,
+			entryFrames),
+		root);
+
+	return root;
 }
 
 static void
@@ -902,7 +918,7 @@ probeCFGsToMachine(Oracle *oracle,
 		std::vector<const CFGNode *> roots_this_sm;
 		roots_this_sm.push_back(*it);
 		root = addEntrySideEffects(oracle, tid, root, root->origin);
-		assignFrameIds(root);
+		root = assignFrameIds(root, root->origin, tid);
 		StateMachine *sm = new StateMachine(root, origin, roots_this_sm);
 		sm->sanityCheck();
 		out.insert(sm);
@@ -940,7 +956,7 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 				tid,
 				doOne),
 			root->rip);
-	assignFrameIds(s);
+	s = assignFrameIds(s, root->rip, tid);
 	StateMachine *sm = new StateMachine(
 		s,
 		origin,

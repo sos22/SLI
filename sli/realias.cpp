@@ -163,20 +163,6 @@ class StackLayout : public Named {
 		fragments.push_back(it2->name());
 		return flattenStringFragmentsMalloc(fragments);
 	}
-	/* A stack layout looks like this:
-
-	   func1 <rsp1> func2 <rsp2> func3
-
-	   which indicates that everything below rsp1 is the frame for
-	   function 1, the stuff between rsp1 and rsp2 is the frame
-	   for function 2, and everything above rsp2 is for function
-	   3.
-
-	   Note that the functions and rsps vectors are both reversed
-	   from what you might expect (i.e. func1 is the last thing in
-	   the function vector and rsp1 is the last thing in the rsps
-	   vector).
-	*/
 public:
 	std::vector<FrameId> functions;
 	std::vector<IRExpr *> rsps;
@@ -1066,7 +1052,6 @@ PointsToTable::refine(AliasTable &at,
 			break;
 		}
 		case StateMachineSideEffect::PointerAliasing:
-			break;
 		case StateMachineSideEffect::Store:
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::AssertFalse:
@@ -1075,6 +1060,7 @@ PointsToTable::refine(AliasTable &at,
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
 		case StateMachineSideEffect::StackLeaked:
+		case StateMachineSideEffect::StackLayout:
 			/* These aren't supposed to define registers */
 			abort();
 		}

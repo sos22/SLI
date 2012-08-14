@@ -232,6 +232,7 @@ MachineAliasingTable::initialise(StateMachine *sm)
 				   anything. */
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
+			case StateMachineSideEffect::StackLayout:
 
 			case StateMachineSideEffect::Store:
 			case StateMachineSideEffect::Unreached:
@@ -692,6 +693,7 @@ updateAvailSetForSideEffect(CfgDecode &decode,
 	case StateMachineSideEffect::EndFunction:
 	case StateMachineSideEffect::StackLeaked:
 	case StateMachineSideEffect::PointerAliasing:
+	case StateMachineSideEffect::StackLayout:
 		break;
 	}
 
@@ -839,6 +841,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
 	case StateMachineSideEffect::StackLeaked:
+	case StateMachineSideEffect::StackLayout:
 	case StateMachineSideEffect::PointerAliasing:
 		newEffect = smse;
 		break;
