@@ -215,9 +215,6 @@ StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				   bool *progress = NULL);
 
 /* Individual optimisation passes. */
-void removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
-			   const Oracle::RegisterAliasingConfiguration *alias,
-			   const AllowableOptimisations &opt);
 StateMachine *availExpressionAnalysis(StateMachine *sm,
 				      const AllowableOptimisations &opt,
 				      const Oracle::RegisterAliasingConfiguration *alias,

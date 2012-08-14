@@ -219,15 +219,6 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 			done_something |= p;
 		}
 
-		p = false;
-		removeRedundantStores(sm, oracle, &p, aliasp, opt);
-		sm->sanityCheck();
-		if (debugOptimiseStateMachine && p) {
-			printf("removeRedundantStores:\n");
-			printStateMachine(sm, stdout);
-		}
-		done_something |= p;
-
 		LibVEX_maybe_gc(token);
 
 		p = false;
