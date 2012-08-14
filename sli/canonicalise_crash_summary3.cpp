@@ -1315,10 +1315,10 @@ LoadCanonicaliser::LoadCanonicaliser(Oracle *oracle, CrashSummary *cs)
 	} findAllLoads;
 	transformCrashSummary(cs, findAllLoads);
 
-	std::vector<std::pair<unsigned, VexRip> > origins(cs->loadMachine->origin);
+	std::vector<std::pair<unsigned, VexRip> > origins(cs->loadMachine->bad_origin);
 	origins.insert(origins.end(),
-		       cs->storeMachine->origin.begin(),
-		       cs->storeMachine->origin.end());
+		       cs->storeMachine->bad_origin.begin(),
+		       cs->storeMachine->bad_origin.end());
 	Oracle::RegisterAliasingConfiguration rac(oracle->getAliasingConfiguration(origins));
 
 	/* We can degrade a load X to a free variable if we can

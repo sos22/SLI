@@ -254,7 +254,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 	}
 
 	/* Construct new machine */
-	return new StateMachine(newRoot, sm->origin, sm->cfg_roots);
+	return new StateMachine(sm, newRoot);
 }
 
 StateMachineSideEffectPhi *

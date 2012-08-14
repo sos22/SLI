@@ -981,12 +981,12 @@ public:
 	CrashCfg(CrashSummary *summary, ThreadAbstracter &abs, bool _expandJcc)
 		: expandJcc(_expandJcc)
 	{
-		assert(summary->loadMachine->origin.size() == 1);
-		assert(summary->storeMachine->origin.size() == 1);
+		assert(summary->loadMachine->bad_origin.size() == 1);
+		assert(summary->storeMachine->bad_origin.size() == 1);
 		typedef std::pair<AbstractThread, CFGNode *> q_entry_t;
 		std::queue<q_entry_t> pending;
-		pending.push(q_entry_t(abs(summary->loadMachine->origin[0].first), const_cast<CFGNode *>(summary->loadMachine->cfg_roots[0])));
-		pending.push(q_entry_t(abs(summary->storeMachine->origin[0].first), const_cast<CFGNode *>(summary->storeMachine->cfg_roots[0])));
+		pending.push(q_entry_t(abs(summary->loadMachine->bad_origin[0].first), const_cast<CFGNode *>(summary->loadMachine->cfg_roots[0])));
+		pending.push(q_entry_t(abs(summary->storeMachine->bad_origin[0].first), const_cast<CFGNode *>(summary->storeMachine->cfg_roots[0])));
 		while (!pending.empty()) {
 			q_entry_t p = pending.front();
 			pending.pop();

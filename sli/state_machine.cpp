@@ -33,7 +33,7 @@ StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 	StateMachineState *new_root = root->optimise(opt, &b);
 	if (b) {
 		*done_something = true;
-		return new StateMachine(new_root, origin, cfg_roots);
+		return new StateMachine(new_root, bad_origin, cfg_roots);
 	} else {
 		return this;
 	}
@@ -335,8 +335,8 @@ printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineSt
 	std::vector<const StateMachineState *> states;
 
 	fprintf(f, "Machine for ");
-	for (auto it = sm->origin.begin(); it != sm->origin.end(); it++) {
-		if (it != sm->origin.begin())
+	for (auto it = sm->bad_origin.begin(); it != sm->bad_origin.end(); it++) {
+		if (it != sm->bad_origin.begin())
 			fprintf(f, ", ");
 		fprintf(f, "%s:%d", it->second.name(), it->first);
 	}

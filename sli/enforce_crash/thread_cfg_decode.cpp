@@ -40,9 +40,9 @@ ThreadCfgDecode::addCfg(const AbstractThread &tid, const CFGNode *node)
 void
 ThreadCfgDecode::addMachine(StateMachine *sm, ThreadAbstracter &abs)
 {
-	assert(sm->origin.size() == 1);
+	assert(sm->bad_origin.size() == 1);
 	assert(sm->cfg_roots.size() == 1);
-	addCfg(abs.newThread(sm->origin[0].first), sm->cfg_roots[0]);
+	addCfg(abs.newThread(sm->bad_origin[0].first), sm->cfg_roots[0]);
 }
 
 void

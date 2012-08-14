@@ -471,9 +471,9 @@ canonicalise_crash_summary(CrashSummary *input)
 	input->verificationCondition = canonicaliseIRExpr(input->verificationCondition);
 
 	CanonicaliseThreadIds thread_canon;
-	for (auto it = input->loadMachine->origin.begin(); it != input->loadMachine->origin.end(); it++)
+	for (auto it = input->loadMachine->bad_origin.begin(); it != input->loadMachine->bad_origin.end(); it++)
 		it->first = thread_canon.canonTid(it->first);
-	for (auto it = input->storeMachine->origin.begin(); it != input->storeMachine->origin.end(); it++)
+	for (auto it = input->storeMachine->bad_origin.begin(); it != input->storeMachine->bad_origin.end(); it++)
 		it->first = thread_canon.canonTid(it->first);
 	input = transformCrashSummary(input, thread_canon);
 

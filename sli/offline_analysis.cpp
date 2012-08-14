@@ -63,7 +63,7 @@ findAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
 static void
 canonicaliseRbp(StateMachine *sm, Oracle *oracle)
 {
-	for (auto it = sm->origin.begin(); it != sm->origin.end(); it++) {
+	for (auto it = sm->bad_origin.begin(); it != sm->bad_origin.end(); it++) {
 		long delta;
 		if (!oracle->getRbpToRspDelta(it->second, &delta)) {
 			/* Can't do anything if we don't know the
@@ -213,10 +213,10 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 	   turn means that a single aliasing configuration is valid
 	   for the entire machine. */
 	aliasp = NULL;
-	if (is_ssa && sm->origin.size() == 1) {
+	if (is_ssa && sm->bad_origin.size() == 1) {
 		Oracle *o = dynamic_cast<Oracle *>(oracle.get());
 		if (o) {
-			alias = o->getAliasingConfiguration(sm->origin);
+			alias = o->getAliasingConfiguration(sm->bad_origin);
 			aliasp = &alias;
 		}
 		sm->assertSSA();
@@ -676,7 +676,7 @@ truncateStateMachine(StateMachine *sm, StateMachineSideEffectMemoryAccess *trunc
 	StateMachineTransformer::rewriteMachine(sm, rewriteRules, false);
 	assert(rewriteRules.count(sm->root));
 	assert(rewriteRules[sm->root] != sm->root);
-	return new StateMachine(rewriteRules[sm->root], sm->origin, sm->cfg_roots);
+	return new StateMachine(sm, rewriteRules[sm->root]);
 }
 
 static void

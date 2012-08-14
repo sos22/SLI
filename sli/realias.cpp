@@ -480,8 +480,8 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 	   that function call.  That happens to interact with some
 	   implementation details of the static analysis to give us
 	   precisely what we want. */
-	assert(inp->origin.size() == 1);
-	const VexRip &origin(inp->origin[0].second);
+	assert(inp->bad_origin.size() == 1);
+	const VexRip &origin(inp->bad_origin[0].second);
 	assert(rootStack.functions.size() <= origin.stack.size());
 	for (int x = 0; x < (int)rootStack.functions.size() - 1; x++) {
 		StaticRip rtrnRip(origin.stack[origin.stack.size() - x - 2]);
@@ -534,8 +534,8 @@ aliasConfigForThread(StateMachine *sm, unsigned tid,
 {
 	VexRip origin;
 	bool have_origin = false;
-	for (auto it = sm->origin.begin();
-	     !have_origin && it != sm->origin.end();
+	for (auto it = sm->bad_origin.begin();
+	     !have_origin && it != sm->bad_origin.end();
 	     it++) {
 		if (it->first == tid) {
 			origin = it->second;
@@ -568,7 +568,7 @@ aliasConfigForReg(StateMachine *sm, const threadAndRegister &reg,
 static bool
 stackMightHaveLeaked(StateMachine *sm)
 {
-	for (auto it = sm->origin.begin(); it != sm->origin.end(); it++) {
+	for (auto it = sm->bad_origin.begin(); it != sm->bad_origin.end(); it++) {
 		Oracle::ThreadRegisterAliasingConfiguration config;
 		StaticRip rip(it->second);
 		Oracle::Function f(rip);
@@ -1133,7 +1133,7 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 	   of particular stack frames, but it's not good at
 	   distinguishing between the stacks of different threads.
 	   Easy fix: only appply it to single-threaded machines. */
-	if (sm->origin.size() != 1)
+	if (sm->bad_origin.size() != 1)
 		return sm;
 
 	StackLayoutTable stackLayout;

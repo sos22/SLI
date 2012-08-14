@@ -318,10 +318,7 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 static StateMachine *
 rawDupe(duplication_context &ctxt, const StateMachine *inp)
 {
-	StateMachine *res = new StateMachine(
-		NULL,
-		inp->origin,
-		inp->cfg_roots);
+	StateMachine *res = new StateMachine((StateMachine *)inp, NULL);
 	ctxt(&res->root, inp->root, rawDupe);
 	return res;
 }
