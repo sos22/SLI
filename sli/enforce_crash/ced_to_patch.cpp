@@ -901,9 +901,9 @@ C2PRip::vexrip(crashEnforcementData &ced) const
 {
 	assert(crossMachineState.size() != 0);
 	auto it = crossMachineState.begin();
-	VexRip vr(ced.threadCfg.findInstr(it->label)->rip);
+	VexRip vr(ced.crashCfg.findInstr(it->label)->rip);
 	for (it++; it != crossMachineState.end(); it++)
-		assert(vr == ced.threadCfg.findInstr(it->label)->rip);
+		assert(vr == ced.crashCfg.findInstr(it->label)->rip);
 	return vr;
 }
 
@@ -911,6 +911,7 @@ class AncillaryData {
 	std::map<VexRip, std::set<ThreadCfgLabel> > threadsEnteringAtRip;
 	AddressSpace *as;
 public:
+	ThreadAbstracter abs;
 	AncillaryData(AddressSpace *as, crashEnforcementData &ced);
 	std::set<ThreadCfgLabel> findThreadsEnteringAtRip(const VexRip &vr) {
 		auto it = threadsEnteringAtRip.find(vr);
@@ -932,7 +933,7 @@ AncillaryData::AncillaryData(AddressSpace *_as, crashEnforcementData &ced)
 	: as(_as)
 {
 	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++)
-		threadsEnteringAtRip[ced.threadCfg.findInstr(*it)->rip].insert(*it);
+		threadsEnteringAtRip[ced.crashCfg.findInstr(*it)->rip].insert(*it);
 }
 
 static Instruction<C2PRip> *
@@ -975,7 +976,7 @@ startThread(const C2PRip &c2p_rip,
 		newCrossMachineState.insert(CrossLabel(newThread)).second;
 	assert(did_insert);
 
-	CFGNode *cfgNode = ced.threadCfg.findInstr(newThread);
+	CFGNode *cfgNode = ced.crashCfg.findInstr(newThread);
 	assert(cfgNode);
 
 	/* At the moment, we don't support starting in the middle of a
@@ -1007,8 +1008,7 @@ receiveMessages(const C2PRip &c2p_rip,
 		const std::set<happensBeforeEdge *> &edges(ced.happensBeforePoints[thread]);
 		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
 			const happensBeforeEdge *edge = *it2;
-			if (edge->after.tid == (int)thread.thread &&
-			    edge->after.where == thread.label) {
+			if (edge->after == thread) {
 				if (debug_receive_messages)
 					printf("\tReceive %d for %s\n", edge->msg_id, it->name());
 				messagesToReceive.insert(edge);
@@ -1066,8 +1066,7 @@ receiveMessages(const C2PRip &c2p_rip,
 		const ThreadCfgLabel &tl(it->label);
 		for (auto it2 = messagesToReceive.begin(); it2 != messagesToReceive.end(); it2++) {
 			const happensBeforeEdge *hb = *it2;
-			if (hb->after.tid == (int)tl.thread &&
-			    hb->after.where == tl.label) {
+			if (hb->after == tl) {
 				failedThreads.insert(*it);
 				break;
 			}
@@ -1088,7 +1087,7 @@ static Instruction<C2PRip> *
 origInstrAndStash(const C2PRip &c2p_rip,
 		  std::queue<reloc> &relocs,
 		  crashEnforcementData &ced,
-		  AncillaryData &ad,
+		  AncillaryData &,
 		  CfgLabelAllocator &allocLabel)
 {
 	std::set<simulationSlotT> stashSlots;
@@ -1124,7 +1123,7 @@ origInstrAndStash(const C2PRip &c2p_rip,
 	 * examine the actual instruction to figure out how to get it.
 	 * All of the underlying instructions should be the same, so
 	 * just arbitrarily pick the first one. */
-	CFGNode *underlyingInstr = ced.threadCfg.findInstr(c2p_rip.crossMachineState.begin()->label);
+	CFGNode *underlyingInstr = ced.crashCfg.findInstr(c2p_rip.crossMachineState.begin()->label);
 	assert(underlyingInstr);
 	switch (instrOpcode(underlyingInstr)) {
 	case 0x8b: { /* mov modrm, reg */
@@ -1180,7 +1179,7 @@ origInstrAndStash(const C2PRip &c2p_rip,
 }
 
 static Instruction<C2PRip> *evalExpressionToReg(CfgLabelAllocator &allocLabel,
-						unsigned thread,
+						const AbstractThread &thread,
 						Instruction<C2PRip> *cursor,
 						crashEnforcementData &ced,
 						IRExpr *expr,
@@ -1188,7 +1187,7 @@ static Instruction<C2PRip> *evalExpressionToReg(CfgLabelAllocator &allocLabel,
 
 static Instruction<C2PRip> *
 expressionToModrm(CfgLabelAllocator &allocLabel,
-		  unsigned thread,
+		  const AbstractThread &thread,
 		  Instruction<C2PRip> *cursor,
 		  crashEnforcementData &ced,
 		  IRExpr *expr,
@@ -1221,7 +1220,7 @@ expressionToModrm(CfgLabelAllocator &allocLabel,
 
 static Instruction<C2PRip> *
 evalExpressionToReg(CfgLabelAllocator &allocLabel,
-		    unsigned thread,
+		    const AbstractThread &thread,
 		    Instruction<C2PRip> *cursor,
 		    crashEnforcementData &ced,
 		    IRExpr *expr,
@@ -1262,7 +1261,7 @@ evalExpressionToReg(CfgLabelAllocator &allocLabel,
 
 static Instruction<C2PRip> *
 compareExpressionToReg(CfgLabelAllocator &allocLabel,
-		       unsigned thread,
+		       const AbstractThread &thread,
 		       Instruction<C2PRip> *cursor,
 		       crashEnforcementData &ced,
 		       IRExpr *expr,
@@ -1296,7 +1295,7 @@ compareExpressionToReg(CfgLabelAllocator &allocLabel,
 
 static Instruction<C2PRip> *
 evalBooleanCondition(CfgLabelAllocator &allocLabel,
-		     unsigned thread,
+		     const AbstractThread &thread,
 		     Instruction<C2PRip> *cursor,
 		     crashEnforcementData &ced,
 		     const exprEvalPoint &expr,
@@ -1368,10 +1367,10 @@ static Instruction<C2PRip> *
 checkSideConditions(const C2PRip &c2p_rip,
 		    std::queue<reloc> &relocs,
 		    crashEnforcementData &ced,
-		    AncillaryData &ad,
+		    AncillaryData &,
 		    CfgLabelAllocator &allocLabel)
 {
-	std::map<std::pair<unsigned, exprEvalPoint>,
+	std::map<std::pair<AbstractThread, exprEvalPoint>,
 		 std::set<std::pair<CfgLabel, std::set<unsigned> > > > thingsToEval;
 
 	if (debug_side_conditions)
@@ -1383,7 +1382,7 @@ checkSideConditions(const C2PRip &c2p_rip,
 		const ThreadCfgLabel &label(it->label);
 		const std::set<exprEvalPoint> &thingsToEvalHere(ced.expressionEvalPoints[label]);
 		for (auto it2 = thingsToEvalHere.begin(); it2 != thingsToEvalHere.end(); it2++)
-			thingsToEval[std::pair<unsigned, exprEvalPoint>(label.thread, *it2)].
+			thingsToEval[std::pair<AbstractThread, exprEvalPoint>(label.thread, *it2)].
 				insert(std::pair<CfgLabel, std::set<unsigned> > (label.label,
 										 it->sent_messages));
 	}
@@ -1402,8 +1401,8 @@ checkSideConditions(const C2PRip &c2p_rip,
 	if (debug_side_conditions) {
 		printf("\tExpressions to evaluate:\n");
 		for (auto it = thingsToEval.begin(); it != thingsToEval.end(); it++) {
-			printf("\t%d:%s%s -> {",
-			       it->first.first,
+			printf("\t%s:%s%s -> {",
+			       it->first.first.name(),
 			       it->first.second.invert ? "!" : "",
 			       nameIRExpr(it->first.second.e));
 			for (auto it2 = it->second.begin();
@@ -1467,7 +1466,7 @@ static Instruction<C2PRip> *
 sendMessages(const C2PRip &c2p_rip,
 	     std::queue<reloc> &relocs,
 	     crashEnforcementData &ced,
-	     AncillaryData &ad,
+	     AncillaryData &,
 	     CfgLabelAllocator &allocLabel)
 {
 	if (debug_send_messages)
@@ -1483,8 +1482,7 @@ sendMessages(const C2PRip &c2p_rip,
 		const std::set<happensBeforeEdge *> &edges(ced.happensBeforePoints[thread]);
 		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
 			const happensBeforeEdge *edge = *it2;
-			if (edge->before.tid == (int)thread.thread &&
-			    edge->before.where == thread.label) {
+			if (edge->before == thread) {
 				messagesToSend.insert(edge);
 				messagesSentInEachThread[thread].insert(edge->msg_id);
 				if (debug_send_messages)
@@ -1517,7 +1515,7 @@ sendMessages(const C2PRip &c2p_rip,
 	for (auto it = messagesToSend.begin(); it != messagesToSend.end(); it++) {
 		const happensBeforeEdge *hb = *it;
 		for (unsigned x = 0; x < hb->content.size(); x++) {
-			simulationSlotT slot = ced.exprsToSlots(hb->before.tid,
+			simulationSlotT slot = ced.exprsToSlots(hb->before.thread,
 								hb->content[x]);
 			cursor = cursor->addDefault(
 				instrMovLabelToRegister(
@@ -1588,7 +1586,7 @@ findSuccessors(const C2PRip &c2p_rip,
 		for (auto it = c2p_rip.crossMachineState.begin();
 		     it != c2p_rip.crossMachineState.end();
 		     it++)
-			assert(ced.threadCfg.findInstr(it->label)->successors.size() == 0);
+			assert(ced.crashCfg.findInstr(it->label)->successors.size() == 0);
 		C2PRip next(c2p_rip.crossMachineState,
 			    C2PPhase::exitThreads(c2p_rip.crossMachineState, NULL, 0xf001));
 		if (debug_find_successors)
@@ -1623,7 +1621,7 @@ findSuccessors(const C2PRip &c2p_rip,
 		     it != c2p_rip.crossMachineState.end();
 		     it++) {
 			const ThreadCfgLabel &thisLabel(it->label);
-			CFGNode *thisNode = ced.threadCfg.findInstr(thisLabel);
+			CFGNode *thisNode = ced.crashCfg.findInstr(thisLabel);
 			assert(thisNode);
 			for (auto it = thisNode->successors.begin();
 			     it != thisNode->successors.end();
@@ -1645,7 +1643,7 @@ findSuccessors(const C2PRip &c2p_rip,
 		     it != c2p_rip.crossMachineState.end();
 		     it++) {
 			const ThreadCfgLabel &thisLabel(it->label);
-			CFGNode *thisNode = ced.threadCfg.findInstr(thisLabel);
+			CFGNode *thisNode = ced.crashCfg.findInstr(thisLabel);
 			assert(thisNode);
 			bool hasSuccessors = false;
 			for (auto it2 = thisNode->successors.begin();
@@ -1677,7 +1675,7 @@ findSuccessors(const C2PRip &c2p_rip,
 		for (auto it = c2p_rip.crossMachineState.begin();
 		     it != c2p_rip.crossMachineState.end();
 		     it++) {
-			CFGNode *thisNode = ced.threadCfg.findInstr(it->label);
+			CFGNode *thisNode = ced.crashCfg.findInstr(it->label);
 			assert(thisNode);
 			for (auto it2 = thisNode->successors.begin();
 			     it2 != thisNode->successors.end();
@@ -1740,7 +1738,7 @@ findSuccessors(const C2PRip &c2p_rip,
 			/* Assume that we're at @currentLabel in the
 			   CFG.  What might happen next? */
 			const ThreadCfgLabel &currentLabel(it->label);
-			CFGNode *thisNode = ced.threadCfg.findInstr(currentLabel);
+			CFGNode *thisNode = ced.crashCfg.findInstr(currentLabel);
 
 			/* Where might we go if the branch is taken? */
 			std::set<ThreadCfgLabel> currentBranchTargets;
@@ -1853,8 +1851,8 @@ findSuccessors(const C2PRip &c2p_rip,
 static Instruction<C2PRip> *
 exitThreads(const C2PRip &c2p_rip,
 	    std::queue<reloc> &relocs,
-	    crashEnforcementData &ced,
-	    AncillaryData &ad,
+	    crashEnforcementData &,
+	    AncillaryData &,
 	    CfgLabelAllocator &allocLabel)
 {
 	Instruction<C2PRip> *start;
@@ -1925,7 +1923,7 @@ static Instruction<C2PRip> *
 receivedMessage(const C2PRip &c2p_rip,
 		std::queue<reloc> &relocs,
 		crashEnforcementData &ced,
-		AncillaryData &ad,
+		AncillaryData &,
 		CfgLabelAllocator &allocLabel)
 {
 	if (debug_receive_messages)
@@ -1962,7 +1960,7 @@ receivedMessage(const C2PRip &c2p_rip,
 			instrMovRegToSlot(
 				allocLabel,
 				RegisterIdx::RAX,
-				ced.exprsToSlots(edge->after.tid, edge->content[x])));
+				ced.exprsToSlots(edge->after.thread, edge->content[x])));
 	}
 
 	/* Undo the spill operations we did in receiveMessages() */
@@ -1993,8 +1991,7 @@ receivedMessage(const C2PRip &c2p_rip,
 #endif
 				continue;
 			}
-			if (hb->after.tid == (int)thread.thread &&
-			    hb->after.where == thread.label) {
+			if (hb->after == thread) {
 				failedThreads.insert(*it);
 				break;
 			}
@@ -2091,12 +2088,12 @@ enforce_crash(AddressSpace *as, CfgLabelAllocator &allocLabel, crashEnforcementD
 	std::queue<reloc> relocs;
 
 	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++)
-		patchPoints[ced.threadCfg.findInstr(*it)->rip] = NULL;
+		patchPoints[ced.crashCfg.findInstr(*it)->rip] = NULL;
 	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++) {
 		std::set<CrossLabel> initialCrossMachineState;
 		relocs.push(reloc(C2PRip(initialCrossMachineState,
 					 C2PPhase::startThread(*it)),
-				  &patchPoints[ced.threadCfg.findInstr(*it)->rip]));
+				  &patchPoints[ced.crashCfg.findInstr(*it)->rip]));
 	}
 
 	while (!relocs.empty()) {
@@ -2450,7 +2447,7 @@ main(int argc, char *argv[])
 			next_slot.idx = it->second.idx + 1;
 
 	CfgLabelAllocator allocLabel;
-	ced.threadCfg.prepLabelAllocator(allocLabel);
+	ced.crashCfg.prepLabelAllocator(allocLabel);
 
 	AncillaryData ad(ms->addressSpace, ced);
 
