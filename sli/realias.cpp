@@ -278,7 +278,7 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr)
 			return Maybe<FrameId>::just(*it2);
 		case compare_expressions_gt:
 			definitelyStack = true;
-			continue;
+			break;
 		case compare_expressions_unknown:
 			return Maybe<FrameId>::nothing();
 		}
