@@ -1202,7 +1202,6 @@ IRExpr *
 coerceTypes(IRType desiredType, IRExpr *expr)
 {
 	IRType origType = expr->type();
-	assert(desiredType <= origType);
 	switch (origType) {
 	case Ity_I64:
 		switch (desiredType) {
@@ -1222,6 +1221,16 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 			return IRExpr_Unop(Iop_32to8, expr);
 		case Ity_I16:
 			return IRExpr_Unop(Iop_32to16, expr);
+		case Ity_F32:
+			return IRExpr_Unop(Iop_ReinterpI32asF32, expr);
+		default:
+			break;
+		}
+		break;
+	case Ity_F32:
+		switch (desiredType) {
+		case Ity_I32:
+			return IRExpr_Unop(Iop_ReinterpF32asI32, expr);
 		default:
 			break;
 		}
