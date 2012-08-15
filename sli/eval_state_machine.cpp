@@ -263,6 +263,10 @@ public:
 				Iop_64HLtoV128,
 				register_value(reg, Ity_I64),
 				register_value(reg, Ity_I64));
+		case Ity_F32:
+			return IRExpr_Unop(
+				Iop_ReinterpI32asF32,
+				register_value(reg, Ity_I32));
 		case Ity_F64:
 			return IRExpr_Unop(
 				Iop_ReinterpI64asF64,
@@ -294,6 +298,18 @@ public:
 			rv.val32 = NULL;
 			rv.val64 = e;
 			break;
+		case Ity_F32:
+			set_register(reg, IRExpr_Unop(Iop_ReinterpF32asI32, e), assumption, opt);
+			return;
+		case Ity_F64:
+			set_register(reg, IRExpr_Unop(Iop_ReinterpF64asI64, e), assumption, opt);
+			return;
+		case Ity_V128:
+			/* Bit of a hack.  We only have 64 bit
+			   registers, so if we have to store a 128 bit
+			   value we just truncate it down. */
+			set_register(reg, IRExpr_Unop(Iop_V128to64, e), assumption, opt);
+			return;
 		default:
 			abort();
 		}
