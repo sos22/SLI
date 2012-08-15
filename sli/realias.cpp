@@ -70,31 +70,6 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 	return res;
 }
 
-class FrameId : public Named {
-	char *mkName() const {
-		return my_asprintf("f%d", id);
-	}
-	int id;
-public:
-	FrameId(int _id)
-		: id(_id)
-	{}
-	FrameId()
-		: id(-9999999)
-	{}
-	bool operator<(const FrameId &o) const {
-		return id < o.id;
-	}
-	bool operator!=(const FrameId &o) const {
-		return *this < o || o < *this;
-	}
-	bool operator==(const FrameId &o) const {
-		return !(*this != o);
-	}
-	void sanity_check() const {
-	}
-};
-
 class PointsToSet : public Named {
 	char *mkName() const {
 		std::vector<const char *> fragments;
@@ -127,8 +102,6 @@ public:
 	void sanity_check() const {
 		assert(mightPointOutsideStack == true ||
 		       mightPointOutsideStack == false);
-		for (auto it = targets.begin(); it != targets.end(); it++)
-			it->sanity_check();
 	}
 	bool operator!=(const PointsToSet &o) const {
 		return mightPointOutsideStack != o.mightPointOutsideStack ||
@@ -172,7 +145,6 @@ public:
 		for (auto it1 = functions.begin();
 		     it1 != functions.end();
 		     it1++) {
-			it1->sanity_check();
 			for (auto it2 = it1 + 1;
 			     it2 != functions.end();
 			     it2++)
@@ -214,7 +186,7 @@ public:
 	{
 		out.insert(functions.begin(), functions.end());
 	}
-	Maybe<FrameId> identifyFrameFromPtr(IRExpr *ptr);
+	bool identifyFrameFromPtr(IRExpr *ptr, FrameId *out);
 	size_t size() { return rsps.size(); }
 };
 
@@ -264,9 +236,10 @@ compare_expressions(IRExpr *a, IRExpr *b)
 }
 
 
-Maybe<FrameId>
-StackLayout::identifyFrameFromPtr(IRExpr *ptr)
+bool
+StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
 {
+	*out = FrameId::invalid();
 	bool definitelyStack = false;
 	assert(ptr->type() == Ity_I64);
 	auto it2 = functions.rbegin();
@@ -275,12 +248,13 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr)
 		switch (compare_expressions(ptr, rsp)) {
 		case compare_expressions_lt:
 		case compare_expressions_eq:
-			return Maybe<FrameId>::just(*it2);
+			*out = *it2;
+			return true;
 		case compare_expressions_gt:
 			definitelyStack = true;
 			break;
 		case compare_expressions_unknown:
-			return Maybe<FrameId>::nothing();
+			return false;
 		}
 		it2++;
 	}
@@ -288,10 +262,11 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr)
 		/* It's definitely on the stack, and it doesn't fit
 		   into any of the delimited frames -> it must be the
 		   root frame. */
-		return Maybe<FrameId>::just(functions[0]);
+		*out = functions[0];
+		return true;
 	}
-	
-	return Maybe<FrameId>::nothing();
+
+	return false;
 }
 
 class StackLayoutTable {
@@ -299,6 +274,9 @@ class StackLayoutTable {
 	bool build(StateMachine *inp, stateLabelT &labels,
 		   int *nextRootId, StackLayout &rootStack);
 public:
+	StackLayoutTable()
+		: initialFuncFrame(FrameId::invalid())
+	{}
 	FrameId initialFuncFrame;
 	std::set<FrameId> initialRegFrames;
 	bool build(StateMachine *inp, stateLabelT &labels);
@@ -584,11 +562,11 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		if (iex->reg.isReg() &&
 		    iex->reg.asReg() == OFFSET_amd64_RSP) {
 			if (sl.valid) {
-				Maybe<FrameId> f(sl.content.identifyFrameFromPtr(iex));
-				if (f.valid) {
+				FrameId f(FrameId::invalid());
+				if (sl.content.identifyFrameFromPtr(iex, &f)) {
 					PointsToSet p;
 					p.mightPointOutsideStack = false;
-					p.targets.insert(f.content);
+					p.targets.insert(f);
 					return p;
 				} else {
 					break;
@@ -645,11 +623,11 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		    iex->contents[1]->tag == Iex_Get &&
 		    ((IRExprGet *)iex->contents[1])->reg.isReg() &&
 		    ((IRExprGet *)iex->contents[1])->reg.asReg() == OFFSET_amd64_RSP) {
-			Maybe<FrameId> f(sl.content.identifyFrameFromPtr(iex));
-			if (f.valid) {
+			FrameId f(FrameId::invalid());
+			if (sl.content.identifyFrameFromPtr(iex, &f)) {
 				PointsToSet p;
 				p.mightPointOutsideStack = false;
-				p.targets.insert(f.content);
+				p.targets.insert(f);
 				return p;
 			}
 		}
