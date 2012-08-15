@@ -337,6 +337,9 @@ cfgNodeToState(Oracle *oracle,
 	       MemoryAccessIdentifierAllocator &mai,
 	       std::vector<reloc_t> &pendingRelocs)
 {
+	if (TIMEOUT)
+		return NULL;
+
 	ThreadRip tr(tid, target->rip);
 
 	StateMachineState *root;
@@ -1012,6 +1015,9 @@ probeCFGsToMachine(Oracle *oracle,
 	for (auto it = roots.begin(); it != roots.end(); it++)
 		performTranslation(results, *it, oracle, tid, doOne);
 
+	if (TIMEOUT)
+		return;
+
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		StateMachineState *root = results[*it];
 		assert(root);
@@ -1049,15 +1055,18 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 	std::vector<const CFGNode *> roots;
 	roots.push_back(root);
 	StateMachineState *s =
-		addEntrySideEffects(
+		performTranslation(
+			results,
+			root,
 			oracle,
 			tid,
-			performTranslation(
-				results,
-				root,
-				oracle,
-				tid,
-				doOne),
+			doOne);
+	if (TIMEOUT)
+		return NULL;
+	s = addEntrySideEffects(
+			oracle,
+			tid,
+			s,
 			root->rip);
 	s = assignFrameIds(s, root->rip, tid);
 	StateMachine *sm = new StateMachine(
