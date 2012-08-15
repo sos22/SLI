@@ -260,6 +260,11 @@ public:
 	bool operator!=(const FrameId &o) const {
 		return id != o.id;
 	}
+	bool operator<(const FrameId &o) const {
+		/* Just here so that you can make sets of them; no
+		 * other meaning. */
+		return id < o.id;
+	}
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap> {

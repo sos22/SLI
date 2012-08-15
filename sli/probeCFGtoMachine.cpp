@@ -788,6 +788,7 @@ assignFrameIds(StateMachineState *root,
 
 	std::set<FrameId *> unlabelledFrames;
 	std::set<FrameId *> preLabelledFrames;
+	std::set<FrameId> allocatedFrameIds;
 
 	/* Step two: Set up an initial stack. */
 	std::vector<FrameId> entryFrames;
@@ -866,6 +867,7 @@ assignFrameIds(StateMachineState *root,
 		FrameId *f = *it;
 		const FrameId &label(*f);
 		preLabelledFrames.erase(it);
+		allocatedFrameIds.insert(label);
 
 		if (debug_assign_frame_ids)
 			printf("Propagate %s from %p\n", label.name(), f);
@@ -913,6 +915,12 @@ assignFrameIds(StateMachineState *root,
 		FrameId label(nextLabel);
 		nextLabel++;
 
+		while (allocatedFrameIds.count(label)) {
+			label = FrameId(nextLabel);
+			nextLabel++;
+		}
+		allocatedFrameIds.insert(label);
+
 		if (debug_assign_frame_ids)
 			printf("Assign %s to %p\n", label.name(), f);
 
@@ -954,6 +962,9 @@ assignFrameIds(StateMachineState *root,
 #ifndef NDEBUG
 	for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++)
 		assert(*it->first == *it->second);
+	for (auto it1 = entryFrames.begin(); it1 != entryFrames.end(); it1++)
+		for (auto it2 = it1 + 1; it2 != entryFrames.end(); it2++)
+			assert(*it1 != *it2);
 #endif
 
 	root = new StateMachineSideEffecting(
