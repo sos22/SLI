@@ -9,6 +9,12 @@
 
 #include "libvex_guest_offsets.h"
 
+#ifndef NDEBUG
+static bool debug_assign_frame_ids = false;
+#else
+#define debug_assign_frame_ids false
+#endif
+
 namespace _probeCFGsToMachine {
 
 static void
@@ -777,7 +783,11 @@ assignFrameIds(StateMachineState *root,
 		initialStackDepth = -worst_underflow + 1;
 	}
 
+	if (debug_assign_frame_ids)
+		printf("Initial stack depth %d\n", initialStackDepth);
+
 	std::set<FrameId *> unlabelledFrames;
+	std::set<FrameId *> preLabelledFrames;
 
 	/* Step two: Set up an initial stack. */
 	std::vector<FrameId> entryFrames;
@@ -787,6 +797,16 @@ assignFrameIds(StateMachineState *root,
 	for (int x = 0; x < initialStackDepth; x++) {
 		initialStack[x] = &entryFrames[x];
 		unlabelledFrames.insert(&entryFrames[x]);
+	}
+
+	if (debug_assign_frame_ids) {
+		printf("Initial stack: {");
+		for (int x = 0; x < initialStackDepth; x++) {
+			if (x != 0)
+				printf(", ");
+			printf("%p", initialStack[x]);
+		}
+		printf("}\n");
 	}
 
 	/* Step three: Explore the machine again, emitting equality
@@ -805,6 +825,8 @@ assignFrameIds(StateMachineState *root,
 				auto *l = (StateMachineSideEffectStartFunction *)se;
 				if (l->frame == FrameId::invalid())
 					unlabelledFrames.insert(&l->frame);
+				else
+					preLabelledFrames.insert(&l->frame);
 				stack.push_back(&l->frame);
 			}
 			if (se && se->type == StateMachineSideEffect::EndFunction) {
@@ -815,9 +837,12 @@ assignFrameIds(StateMachineState *root,
 				FrameId *o = stack.back();
 				if (l->frame == FrameId::invalid())
 					unlabelledFrames.insert(&l->frame);
+				else
+					preLabelledFrames.insert(&l->frame);
 				eqConstraints.insert(
 					std::pair<FrameId *, FrameId *>
 					(o, &l->frame));
+				stack.pop_back();
 			}
 			std::vector<StateMachineState *> succ;
 			s->targets(succ);
@@ -826,8 +851,60 @@ assignFrameIds(StateMachineState *root,
 		}
 	}
 
-	/* Step 4: Label the frames, using the maximum number of
-	   distinct labels which is compatible with the eq
+	if (debug_assign_frame_ids) {
+		printf("Frame ID constraints:\n");
+		for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++)
+			printf("\t%p == %p\n", it->first, it->second);
+		printf("Constrained frames:\n");
+		for (auto it = preLabelledFrames.begin(); it != preLabelledFrames.end(); it++)
+			printf("\t%p == %s\n", *it, (*it)->name());
+	}
+
+	/* Step 4: Propagate any labels which might already have been specified. */
+	while (!preLabelledFrames.empty()) {
+		auto it = preLabelledFrames.begin();
+		FrameId *f = *it;
+		const FrameId &label(*f);
+		preLabelledFrames.erase(it);
+
+		if (debug_assign_frame_ids)
+			printf("Propagate %s from %p\n", label.name(), f);
+
+		assert(label != FrameId::invalid());
+		std::queue<FrameId *> pending;
+		std::set<FrameId *> done;
+		pending.push(f);
+		while (!pending.empty()) {
+			f = pending.front();
+			pending.pop();
+			if (!done.insert(f).second)
+				continue;
+			if (debug_assign_frame_ids)
+				printf("\tPropagate %s to %p\n", label.name(), f);
+			if (*f == FrameId::invalid()) {
+				*f = label;
+				assert(unlabelledFrames.count(f));
+				unlabelledFrames.erase(f);
+			} else {
+				assert(*f == label);
+			}
+			for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++) {
+				if (it->first == f) {
+					if (debug_assign_frame_ids)
+						printf("\tEq rule: %p == %p\n", it->first, it->second);
+					pending.push(it->second);
+				}
+				if (it->second == f) {
+					if (debug_assign_frame_ids)
+						printf("\tEq rule: %p == %p\n", it->second, it->first);
+					pending.push(it->first);
+				}
+			}
+		}
+	}
+
+	/* Step 5: Label the remaining frames, using the maximum
+	   number of distinct labels which is compatible with the eq
 	   constraints. */
 	unsigned nextLabel = 0;
 	while (!unlabelledFrames.empty()) {
@@ -836,6 +913,10 @@ assignFrameIds(StateMachineState *root,
 		FrameId label(nextLabel);
 		nextLabel++;
 
+		if (debug_assign_frame_ids)
+			printf("Assign %s to %p\n", label.name(), f);
+
+		assert(*f == FrameId::invalid());
 		/* Go and label the SCC */
 		std::queue<FrameId *> pending;
 		pending.push(f);
@@ -844,17 +925,27 @@ assignFrameIds(StateMachineState *root,
 			pending.pop();
 			if (*fst == label) {
 				/* Already done this one */
+				assert(!unlabelledFrames.count(fst));
 				continue;
 			}
+			if (debug_assign_frame_ids)
+				printf("\tAssign %s to %p for eq rule\n",
+				       label.name(), fst);
 			assert(*fst == FrameId::invalid());
 			assert(unlabelledFrames.count(fst));
 			*fst = label;
 			unlabelledFrames.erase(fst);
 			for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++) {
-				if (it->first == fst)
+				if (it->first == fst) {
+					if (debug_assign_frame_ids)
+						printf("\tEq rule: %p == %p\n", it->first, it->second);
 					pending.push(it->second);
-				if (it->second == fst)
+				}
+				if (it->second == fst) {
+					if (debug_assign_frame_ids)
+						printf("\tEq rule: %p == %p\n", it->second, it->first);
 					pending.push(it->first);
+				}
 			}
 		}
 	}
@@ -918,8 +1009,9 @@ probeCFGsToMachine(Oracle *oracle,
 		std::vector<const CFGNode *> roots_this_sm;
 		roots_this_sm.push_back(*it);
 		root = addEntrySideEffects(oracle, tid, root, root->origin);
-		root = assignFrameIds(root, root->origin, tid);
 		StateMachine *sm = new StateMachine(root, origin, roots_this_sm);
+		root = assignFrameIds(root, root->origin, tid);
+		sm = new StateMachine(root, origin, roots_this_sm);
 		sm->sanityCheck();
 		out.insert(sm);
 	}
