@@ -173,8 +173,7 @@ MachineAliasingTable::updateStateConfig(StateMachineState *s,
 					res = true;
 				}
 				for (int i = 0; i < Oracle::NR_REGS; i++) {
-					if (newConfigElem.v[i] &
-					    ~it->second.v[i]) {
+					if (!newConfigElem.v[i].implies(it->second.v[i])) {
 						it->second.v[i] |= newConfigElem.v[i];
 						res = true;
 					}

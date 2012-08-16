@@ -1301,6 +1301,8 @@ IRExpr *internIRExpr(IRExpr *e, internIRExprTable &lookupTable);
 
 char *nameIRExpr(IRExpr *a);
 void my_system(const char *arg1, ...);
+char *flattenStringFragmentsMalloc(std::vector<const char *> fragments, const char *sep = "",
+				   const char *prefix = "", const char *suffix = "");
 
 /* Do it this way so that we still get format argument checking even
    when a particular type of debug is disabled. */

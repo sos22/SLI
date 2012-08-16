@@ -24,79 +24,186 @@ void sanityCheckIRExpr(IRExpr *, const std::set<threadAndRegister, threadAndRegi
 ;
 #endif
 
+class FrameId : public Named {
+	unsigned id;
+	char *mkName() const {
+		return my_asprintf("frame%d", id);
+	}
+public:
+	explicit FrameId(unsigned _id)
+		: id(_id)
+	{}
+	static FrameId invalid()
+	{
+		return FrameId(-1);
+	}
+	static bool parse(FrameId *out, const char *str, const char **suffix)
+	{
+		unsigned id;
+		if (parseThisString("frame", str, &str) &&
+		    parseDecimalUInt(&id, str, suffix)) {
+			*out = FrameId(id);
+			return true;
+		}
+		return false;
+	}
+	bool operator==(const FrameId &o) const {
+		return id == o.id;
+	}
+	bool operator!=(const FrameId &o) const {
+		return id != o.id;
+	}
+	bool operator<(const FrameId &o) const {
+		/* Just here so that you can make sets of them; no
+		 * other meaning. */
+		return id < o.id;
+	}
+};
+
 /* Pointer aliasing stuff.  Note that ``stack'' in this
    context means the *current* stack frame: a pointer without
    the stack bit set could still point into a *calling*
    functions' stack frame, and that wouldn't be a bug. */
 class PointerAliasingSet : public Named {
-	int v;
+	bool nonPointer;
+	bool nonStckPointer;
+	bool otherStackPointer;
+	bool valid;
+	std::set<FrameId> stackPointers;
 	char *mkName() const {
-		const char *r;
-		switch (v) {
+		if (!valid) {
+			return strdup("(<invalid>)");
+		} else {
+			std::vector<const char *> fragments;
+			if (nonPointer)
+				fragments.push_back("non-pointer");
+			if (nonStckPointer)
+				fragments.push_back("non-stack-pointer");
+			if (otherStackPointer) {
+				fragments.push_back("any-stack");
+			} else {
+				for (auto it = stackPointers.begin();
+				     it != stackPointers.end();
+				     it++)
+					fragments.push_back(it->name());
+			}
+			return flattenStringFragmentsMalloc(fragments, "|", "(", ")");
+		}
+	}
+	/* Only used for setting up the pre-defined default sets */
+	PointerAliasingSet(int k)
+		: valid(true)
+	{
+		nonPointer = nonStckPointer = otherStackPointer = false;
+		switch (k) {
 		case 0:
-			r = "()";
 			break;
 		case 1:
-			r = "not-a-pointer";
+			nonPointer = true;
 			break;
 		case 2:
-			r = "stack-pointer";
+			otherStackPointer = true;
 			break;
 		case 3:
-			r = "not-a-pointer|stack-pointer";
+			nonStckPointer = true;
 			break;
 		case 4:
-			r = "non-stack-pointer";
-			break;
-		case 5:
-			r = "not-a-pointer|non-stack-pointer";
-			break;
-		case 6:
-			r = "stack-pointer|non-stack-pointer";
-			break;
-		case 7:
-			r = "*";
+			nonPointer = otherStackPointer = nonStckPointer = true;
 			break;
 		default:
 			abort();
 		}
-		return strdup(r);
 	}
 public:
-	explicit PointerAliasingSet() : v(0xf001dead) {}
-	PointerAliasingSet(int _v) : v(_v) {}
-
+	PointerAliasingSet()
+		: valid(false)
+	{
+	}
 	static const PointerAliasingSet notAPointer;
-	static const PointerAliasingSet stackPointer;
 	static const PointerAliasingSet nonStackPointer;
+	static const PointerAliasingSet stackPointer;
 	static const PointerAliasingSet anything;
 	static const PointerAliasingSet nothing;
 
-	PointerAliasingSet operator |(PointerAliasingSet o) const { return PointerAliasingSet(v | o.v); }
-	PointerAliasingSet operator &(PointerAliasingSet o) const { return PointerAliasingSet(v & o.v); }
-	PointerAliasingSet operator ~() const { return PointerAliasingSet(~v); }
-	bool operator !=(PointerAliasingSet o) const { return v != o.v; }
-	bool operator ==(PointerAliasingSet o) const { return v == o.v; }
-	void operator |=(PointerAliasingSet o) { v |= o.v; }
-	operator bool() const { return v != 0; }
-	operator unsigned long() const { return v; }
+	PointerAliasingSet operator |(const PointerAliasingSet &o) const;
+	PointerAliasingSet operator &(const PointerAliasingSet &o) const;
+	/* A pointer aliasing set X implies the set Y if anything
+	   which satisfies X would also satisfy Y. */
+	bool implies(const PointerAliasingSet &o) const;
+	bool operator !=(const PointerAliasingSet &o) const { return !(*this == o); }
+	bool operator ==(const PointerAliasingSet &o) const;
+	/* Extend this set such that anything which satisfies @o would
+	   also satisfy this one. */
+	void operator |=(const PointerAliasingSet &o);
 
+	bool mightPointAt(const FrameId fid) const {
+		return !valid || otherStackPointer || stackPointers.count(fid);
+	}
+	bool mightPointAtStack() const {
+		return !valid || otherStackPointer || !stackPointers.empty();
+	}
+	bool mightPointAtNonStack() const {
+		return !valid || nonStckPointer;
+	}
+	bool mightBeNonPointer() const {
+		return !valid || nonPointer;
+	}
+	bool mightPoint() const {
+		return !valid || nonStckPointer || otherStackPointer || !stackPointers.empty();
+	}
+	bool pointsAtFrames() const {
+		return !valid || !stackPointers.empty();
+	}
 	bool parse(const char *str, const char **suffix) {
-#define do_case(val, rep)					\
-		if (parseThisString(rep, str, suffix)) {	\
-			v = val;				\
-			return true;				\
+		bool nonPointer = false;
+		bool nonStackPointer = false;
+		bool anyStack = false;
+		bool valid;
+		std::set<FrameId> stackPointers;
+		if (parseThisString("(<invalid>)", str, suffix)) {
+			valid = false;
+		} else {
+			valid = true;
+			if (!parseThisChar('(', str, &str))
+				return false;
+			if (!parseThisChar(')', str, suffix)) {
+				while (1) {
+					if (parseThisString("non-pointer", str, &str)) {
+						if (nonPointer)
+							return false;
+						nonPointer = true;
+					} else if (parseThisString("non-stack-pointer", str, &str)) {
+						if (nonStackPointer)
+							return false;
+						nonStackPointer = true;
+					} else if (parseThisString("any-stack", str, &str)) {
+						if (anyStack || !stackPointers.empty())
+							return false;
+						anyStack = true;
+					} else {
+						FrameId f(FrameId::invalid());
+						if (FrameId::parse(&f, str, &str)) {
+							if (anyStack || stackPointers.count(f))
+								return false;
+							stackPointers.insert(f);
+						} else {
+							return false;
+						}
+					}
+					if (parseThisChar(')', str, suffix))
+						break;
+					if (!parseThisChar('|', str, &str))
+						return false;
+				}
+			}
 		}
-		do_case(0, "()");
-		do_case(1, "not-a-pointer");
-		do_case(2, "stack-pointer");
-		do_case(3, "not-a-pointer|stack_pointer");
-		do_case(4, "non-stack-pointer");
-		do_case(5, "not-a-pointer|non-stack-pointer");
-		do_case(6, "stack-pointer|non-stack-pointer");
-		do_case(7, "*");
-#undef do_case
-		return false;
+		this->nonPointer = nonPointer;
+		this->nonStckPointer = nonStackPointer;
+		this->otherStackPointer = anyStack;
+		this->stackPointers = stackPointers;
+		this->valid = valid;
+		clearName();
+		return true;
 	}
 };
 
@@ -229,42 +336,6 @@ public:
 #endif
 
 	NAMED_CLASS
-};
-
-class FrameId : public Named {
-	unsigned id;
-	char *mkName() const {
-		return my_asprintf("frame%d", id);
-	}
-public:
-	explicit FrameId(unsigned _id)
-		: id(_id)
-	{}
-	static FrameId invalid()
-	{
-		return FrameId(-1);
-	}
-	static bool parse(FrameId *out, const char *str, const char **suffix)
-	{
-		unsigned id;
-		if (parseThisString("frame", str, &str) &&
-		    parseDecimalUInt(&id, str, suffix)) {
-			*out = FrameId(id);
-			return true;
-		}
-		return false;
-	}
-	bool operator==(const FrameId &o) const {
-		return id == o.id;
-	}
-	bool operator!=(const FrameId &o) const {
-		return id != o.id;
-	}
-	bool operator<(const FrameId &o) const {
-		/* Just here so that you can make sets of them; no
-		 * other meaning. */
-		return id < o.id;
-	}
 };
 
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap> {
@@ -1111,7 +1182,7 @@ public:
 	static bool parse(StateMachineSideEffectPointerAliasing **out, const char *str, const char **suffix)
 	{
 		threadAndRegister reg(threadAndRegister::invalid());
-		PointerAliasingSet set;
+		PointerAliasingSet set(PointerAliasingSet::nothing);
 
 		if (parseThisString("ALIAS ", str, &str) &&
 		    parseThreadAndRegister(&reg, str, &str) &&

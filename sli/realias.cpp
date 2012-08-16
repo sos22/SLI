@@ -453,7 +453,7 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 		Oracle::Function f(rtrnRip);
 		Oracle::ThreadRegisterAliasingConfiguration config;
 		if (!f.aliasConfigOnEntryToInstruction(rtrnRip, &config) ||
-		    (config.v[0] & PointerAliasingSet::stackPointer))
+		    config.v[0].mightPointAt(fid))
 			initialRegFrames.insert(fid);
 	}
 	initialFuncFrame = rootStack.functions[rootStack.functions.size() - 1];
@@ -586,17 +586,17 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 			break;
 		}
 
-		PointerAliasingSet alias(-1);
+		PointerAliasingSet alias;
 		if (!aliasConfigForReg(sm, iex->reg, &alias))
 			alias = PointerAliasingSet::anything;
 		PointsToSet res;
-		if (alias & PointerAliasingSet::nonStackPointer) {
+		if (alias.mightPointAtNonStack()) {
 			res.mightPointOutsideStack = true;
 			res.targets = slt.initialRegFrames;
 		} else {
 			res.mightPointOutsideStack = false;
 		}
-		if (alias & PointerAliasingSet::stackPointer)
+		if (alias.mightPointAt(slt.initialFuncFrame))
 			res.targets.insert(slt.initialFuncFrame);
 		return res;
 	}

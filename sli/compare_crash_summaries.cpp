@@ -113,6 +113,12 @@ localSimilarity2(StateMachineSideEffectPointerAliasing *smsesf1, StateMachineSid
 }
 
 static bool
+localSimilarity2(StateMachineSideEffectStackLayout *smsesf1, StateMachineSideEffectStackLayout *smsesf2)
+{
+	return *smsesf1 == *smsesf2;
+}
+
+static bool
 localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2)
 {
 	if (smse1->type != smse2->type)
