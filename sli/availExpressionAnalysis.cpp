@@ -36,28 +36,10 @@ namespace _availExpressionAnalysis {
  */
 #define MAX_LIVE_ASSERTIONS 5
 
-class findAllSideEffectsVisitor : public StateMachineTransformer {
-	StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *smse, bool *)
-	{
-		out.insert(smse);
-		return smse;
-	}
-	IRExpr *transformIRExpr(IRExpr *e, bool *)
-	{
-		return e;
-	}
-	bool rewriteNewStates() const { return false; }
-public:
-	std::set<StateMachineSideEffect *> &out;
-	findAllSideEffectsVisitor(std::set<StateMachineSideEffect *> &o)
-		: out(o)
-	{}
-};
 static void
 findAllSideEffects(StateMachine *sm, std::set<StateMachineSideEffect *> &out)
 {
-	findAllSideEffectsVisitor v(out);
-	v.transform(sm);
+	enumSideEffects(sm, out);
 }
 
 class MachineAliasingTable {
