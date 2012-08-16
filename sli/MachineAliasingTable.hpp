@@ -23,6 +23,7 @@ public:
 			    IRExpr *ptr1,
 			    IRExpr *ptr2,
 			    const AllowableOptimisations &opt) const;
+	bool findConfig(StateMachineState *, Oracle::RegisterAliasingConfiguration *) const;
 };
 
 #endif /* !MACHINE_ALIASING_TABLE_HPP__ */

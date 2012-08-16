@@ -164,3 +164,12 @@ MachineAliasingTable::ptrsMightAlias(StateMachineState *where,
 	return it->second.ptrsMightAlias(ptr1, ptr2, opt);
 }
 
+bool
+MachineAliasingTable::findConfig(StateMachineState *sms, Oracle::RegisterAliasingConfiguration *rac) const
+{
+	auto it = configs.find(sms);
+	if (it == configs.end())
+		return false;
+	*rac = it->second;
+	return true;
+}
