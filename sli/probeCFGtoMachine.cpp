@@ -589,12 +589,16 @@ cfgNodeToState(Oracle *oracle,
 				smp = new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectEndFunction(
-						IRExpr_Get(
-							threadAndRegister::reg(
-								tid,
-								OFFSET_amd64_RSP,
-								0),
-							Ity_I64),
+						IRExpr_Binop(
+							Iop_Add64,
+							IRExpr_Get(
+								threadAndRegister::reg(
+									tid,
+									OFFSET_amd64_RSP,
+									0),
+								Ity_I64),
+							IRExpr_Const(
+								IRConst_U64(-8))),
 						FrameId::invalid()),
 					NULL);
 				*cursor = smp;
@@ -624,12 +628,16 @@ cfgNodeToState(Oracle *oracle,
 				new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectEndFunction(
-						IRExpr_Get(
-							threadAndRegister::reg(
-								tid,
-								OFFSET_amd64_RSP,
-								0),
-							Ity_I64),
+						IRExpr_Binop(
+							Iop_Add64,
+							IRExpr_Get(
+								threadAndRegister::reg(
+									tid,
+									OFFSET_amd64_RSP,
+									0),
+								Ity_I64),
+							IRExpr_Const(
+								IRConst_U64(-8))),
 						FrameId::invalid()),
 					NULL);
 			*cursor = smp;
