@@ -101,7 +101,7 @@ localSimilarity2(StateMachineSideEffectEndFunction *smsesf1, StateMachineSideEff
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectStackLeaked *smsesf1, StateMachineSideEffectStackLeaked *smsesf2)
+localSimilarity2(StateMachineSideEffectStackUnescaped *smsesf1, StateMachineSideEffectStackUnescaped *smsesf2)
 {
 	return *smsesf1 == *smsesf2;
 }
