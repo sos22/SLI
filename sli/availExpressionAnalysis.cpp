@@ -47,9 +47,6 @@ class MachineAliasingTable {
 	   at the *start* of the state. */
 	std::map<StateMachineState *, Oracle::RegisterAliasingConfiguration> configs;
 
-	static void setStackLeaked(Oracle::RegisterAliasingConfiguration &,
-				   unsigned tid,
-				   bool);
 	static Oracle::ThreadRegisterAliasingConfiguration maximalThreadConfig();
 	static void setRegister(Oracle::RegisterAliasingConfiguration &,
 				const threadAndRegister &tr,
@@ -79,30 +76,11 @@ Oracle::ThreadRegisterAliasingConfiguration
 MachineAliasingTable::maximalThreadConfig()
 {
 	Oracle::ThreadRegisterAliasingConfiguration c;
-	c.stackHasLeaked = false;
+	c.stackHasLeaked = true;
 	for (int i = 0; i < Oracle::NR_REGS; i++)
 		c.v[i] = PointerAliasingSet::nothing;
 	c.v[OFFSET_amd64_RSP / 8] = PointerAliasingSet::stackPointer;
 	return c;
-}
-
-void
-MachineAliasingTable::setStackLeaked(Oracle::RegisterAliasingConfiguration &config,
-				     unsigned tid,
-				     bool hasLeaked)
-{
-	for (auto it = config.content.begin();
-	     it != config.content.end();
-	     it++) {
-		if (it->first == tid) {
-			it->second.stackHasLeaked = hasLeaked;
-			return;
-		}
-	}
-
-	Oracle::ThreadRegisterAliasingConfiguration c = maximalThreadConfig();
-	c.stackHasLeaked = hasLeaked;
-	config.content.push_back(std::pair<unsigned, Oracle::ThreadRegisterAliasingConfiguration>(tid, c));
 }
 
 void
@@ -186,11 +164,13 @@ MachineAliasingTable::initialise(StateMachine *sm)
 		StateMachineSideEffect *se = s->getSideEffect();
 		if (se) {
 			switch (se->type) {
-			case StateMachineSideEffect::StackLeaked: {
-				auto sl = (StateMachineSideEffectStackLeaked *)se;
-				setStackLeaked(exitConfig, sl->tid, sl->flag);
+			case StateMachineSideEffect::StackUnescaped:
+				/* We conservatively assume that all
+				   stack frames are always leaked.
+				   realias does a better job of fixing
+				   these up. */
 				break;
-			}
+
 			case StateMachineSideEffect::PointerAliasing: {
 				auto sl = (StateMachineSideEffectPointerAliasing *)se;
 				setRegister(exitConfig, sl->reg, sl->set);
@@ -672,7 +652,7 @@ updateAvailSetForSideEffect(CfgDecode &decode,
 		break;
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
-	case StateMachineSideEffect::StackLeaked:
+	case StateMachineSideEffect::StackUnescaped:
 	case StateMachineSideEffect::PointerAliasing:
 	case StateMachineSideEffect::StackLayout:
 		break;
@@ -821,7 +801,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 	case StateMachineSideEffect::Unreached:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
-	case StateMachineSideEffect::StackLeaked:
+	case StateMachineSideEffect::StackUnescaped:
 	case StateMachineSideEffect::StackLayout:
 	case StateMachineSideEffect::PointerAliasing:
 		newEffect = smse;

@@ -26,7 +26,9 @@ void sanityCheckIRExpr(IRExpr *, const std::set<threadAndRegister, threadAndRegi
 
 class FrameId : public Named {
 	unsigned id;
+public:
 	unsigned tid;
+private:
 	char *mkName() const {
 		return my_asprintf("frame%d:%d", tid, id);
 	}
@@ -362,7 +364,7 @@ public:
 	f(EndAtomic)				\
 	f(StartFunction)			\
 	f(EndFunction)				\
-	f(StackLeaked)				\
+	f(StackUnescaped)			\
 	f(PointerAliasing)			\
 	f(StackLayout)
 	enum sideEffectType {
@@ -1124,47 +1126,59 @@ public:
 		return rsp == o.rsp && frame == o.frame;
 	}
 };
-class StateMachineSideEffectStackLeaked : public StateMachineSideEffect {
+/* Note that for a particular frame X there are no pointers from
+ * outside X to inside X. */
+class StateMachineSideEffectStackUnescaped : public StateMachineSideEffect {
 public:
-	bool flag;
-	unsigned tid;
-	StateMachineSideEffectStackLeaked(bool _flag, unsigned _tid)
-		: StateMachineSideEffect(StateMachineSideEffect::StackLeaked),
-		  flag(_flag), tid(_tid)
+	std::vector<FrameId> localFrames;
+	StateMachineSideEffectStackUnescaped(std::vector<FrameId> &_localFrames)
+		: StateMachineSideEffect(StateMachineSideEffect::StackUnescaped),
+		  localFrames(_localFrames)
 	{}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
+	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) {
+		if (localFrames.empty())
+			return NULL;
+		else
+			return this;
+	}
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare>*) const {}
 	bool definesRegister(threadAndRegister &) const { return false; }
 	void inputExpressions(std::vector<IRExpr *> &) {}
 	void prettyPrint(FILE *f) const {
-		if (flag)
-			fprintf(f, "StackLeaked(%d)", tid);
-		else
-			fprintf(f, "StackNotLeaked(%d)", tid);
+		fprintf(f, "STACKUNESCAPED(");
+		for (auto it = localFrames.begin(); it != localFrames.end(); it++) {
+			if (it != localFrames.begin())
+				fprintf(f, ", ");
+			fprintf(f, "%s", it->name());
+		}
+		fprintf(f, ")");
 	}
-	static bool parse(StateMachineSideEffectStackLeaked **out,
+	static bool parse(StateMachineSideEffectStackUnescaped **out,
 			  const char *str,
 			  const char **suffix)
 	{
-		bool flag;
-		if (parseThisString("StackLeaked", str, &str))
-			flag = true;
-		else if (parseThisString("StackNotLeaked", str, &str))
-			flag = false;
-		else
+		std::vector<FrameId> frames;
+		if (!parseThisString("STACKUNESCAPED(", str, &str))
 			return false;
-		unsigned tid;
-		if (!parseThisString("(", str, &str) ||
-		    !parseDecimalUInt(&tid, str, &str) ||
-		    !parseThisString(")", str, suffix))
-			return false;
-		*out = new StateMachineSideEffectStackLeaked(flag, tid);
+		if (!parseThisChar(')', str, suffix)) {
+			while (1) {
+				FrameId f(FrameId::invalid());
+				if (!FrameId::parse(&f, str, &str))
+					return false;
+				frames.push_back(f);
+				if (parseThisChar(')', str, suffix))
+					break;
+				if (!parseThisString(", ", str, &str))
+					return false;
+			}
+		}
+		*out = new StateMachineSideEffectStackUnescaped(frames);
 		return true;
 	}
-	bool operator==(const StateMachineSideEffectStackLeaked &o) const {
-		return flag == o.flag && tid == o.tid;
+	bool operator==(const StateMachineSideEffectStackUnescaped &o) const {
+		return localFrames == o.localFrames;
 	}
 };
 class StateMachineSideEffectPointerAliasing : public StateMachineSideEffect {

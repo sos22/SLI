@@ -721,6 +721,14 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 			cursor);
 	}
 
+	/* A frame is private if there's no possibility that a LD
+	   could return a pointer to it.  That's automatically true of
+	   any functions which start in the middle of this machine,
+	   and also true of functions which are live at the start of
+	   the machine and which don't escape. */
+	std::set<FrameId> privateFrames;
+	privateFrames.insert(entryStack.begin(), entryStack.end());
+
 	/* We now need to figure out which stack frames each register
 	 * might point to.  The oracle's static analysis can tell us
 	 * which registers might point to the current function's
@@ -748,8 +756,10 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 		StaticRip rtrnRip(vr.stack[x]);
 		Oracle::ThreadRegisterAliasingConfiguration rtrnConfig =
 			oracle->getAliasingConfigurationForRip(rtrnRip);
-		if (rtrnConfig.v[0].mightPointAtStack())
+		if (rtrnConfig.v[0].mightPointAtStack()) {
 			framesInRegisters |= PointerAliasingSet::frame(entryStack[x]);
+			privateFrames.erase(entryStack[x]);
+		}
 	}
 	/* RSP be used to refer to any frame in this thread. */
 	/* (realias uses refined information than this, but this is
@@ -761,8 +771,10 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 		std::set<StateMachineSideEffectEndFunction *> ends;
 		enumSideEffects(cursor, starts);
 		enumSideEffects(cursor, ends);
-		for (auto it = starts.begin(); it != starts.end(); it++)
+		for (auto it = starts.begin(); it != starts.end(); it++) {
 			rspFrames |= PointerAliasingSet::frame((*it)->frame);
+			privateFrames.insert((*it)->frame);
+		}
 		for (auto it = ends.begin(); it != ends.end(); it++)
 			rspFrames |= PointerAliasingSet::frame((*it)->frame);
 		for (auto it = entryStack.begin(); it != entryStack.end(); it++)
@@ -771,12 +783,17 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 
 	Oracle::ThreadRegisterAliasingConfiguration alias =
 		oracle->getAliasingConfigurationForRip(vr);
-	cursor = new StateMachineSideEffecting(
-		vr,
-		new StateMachineSideEffectStackLeaked(
-			alias.stackHasLeaked,
-			tid),
-		cursor);
+	{
+		std::vector<FrameId> privateFramesVector;
+		privateFramesVector.insert(privateFramesVector.begin(),
+					   privateFrames.begin(),
+					   privateFrames.end());
+		cursor = new StateMachineSideEffecting(
+			vr,
+			new StateMachineSideEffectStackUnescaped(
+				privateFramesVector),
+			cursor);
+	}
 	for (int i = 0; i < Oracle::NR_REGS; i++) {
 		PointerAliasingSet v(alias.v[i]);
 		if (i == 4) {

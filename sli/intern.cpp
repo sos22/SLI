@@ -337,9 +337,9 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		sf->rsp = internIRExpr(sf->rsp, t);
 		do_search(EndFunction);
 	}
-	case StateMachineSideEffect::StackLeaked: {
-		auto sf = (StateMachineSideEffectStackLeaked *)s;
-		do_search(StackLeaked);
+	case StateMachineSideEffect::StackUnescaped: {
+		auto sf = (StateMachineSideEffectStackUnescaped *)s;
+		do_search(StackUnescaped);
 	}
 	case StateMachineSideEffect::PointerAliasing: {
 		auto sf = (StateMachineSideEffectPointerAliasing *)s;

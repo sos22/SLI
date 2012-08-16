@@ -1037,7 +1037,7 @@ PointsToTable::refine(AliasTable &at,
 		case StateMachineSideEffect::EndAtomic:
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
-		case StateMachineSideEffect::StackLeaked:
+		case StateMachineSideEffect::StackUnescaped:
 		case StateMachineSideEffect::StackLayout:
 			/* These aren't supposed to define registers */
 			abort();

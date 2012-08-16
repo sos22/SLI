@@ -14,9 +14,9 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineSideEffectAssertFalse *> asserts;
 	std::set<StateMachineSideEffectStartFunction *> StartFunction;
 	std::set<StateMachineSideEffectEndFunction *> EndFunction;
-	std::set<StateMachineSideEffectStackLeaked *> StackLeaked;
-	std::set<StateMachineSideEffectPointerAliasing *> PointerAliasing;
 	std::set<StateMachineSideEffectStackLayout *> StackLayout;
+	std::set<StateMachineSideEffectPointerAliasing *> PointerAliasing;
+	std::set<StateMachineSideEffectStackUnescaped *> StackUnescaped;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineStub *> states_stub;
 	std::set<StateMachineSideEffecting *> states_side_effect;

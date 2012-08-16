@@ -107,7 +107,7 @@ assignLabelsToDefinitions(StateMachine *sm,
 				case StateMachineSideEffect::EndAtomic:
 				case StateMachineSideEffect::StartFunction:
 				case StateMachineSideEffect::EndFunction:
-				case StateMachineSideEffect::StackLeaked:
+				case StateMachineSideEffect::StackUnescaped:
 				case StateMachineSideEffect::StackLayout:
 					/* These shouldn't define registers */
 					abort();

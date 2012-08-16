@@ -137,8 +137,8 @@ protected:
 		StateMachineSideEffectStartFunction *, bool *);
 	virtual StateMachineSideEffectEndFunction *transformOneSideEffect(
 		StateMachineSideEffectEndFunction *, bool *);
-	virtual StateMachineSideEffectStackLeaked *transformOneSideEffect(
-		StateMachineSideEffectStackLeaked *, bool *)
+	virtual StateMachineSideEffectStackUnescaped *transformOneSideEffect(
+		StateMachineSideEffectStackUnescaped *, bool *)
 	{ return NULL; }
 	virtual StateMachineSideEffectPointerAliasing *transformOneSideEffect(
 		StateMachineSideEffectPointerAliasing *, bool *)

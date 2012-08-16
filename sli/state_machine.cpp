@@ -421,32 +421,29 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			(StateMachineSideEffectStartFunction *)smse1;
 		StateMachineSideEffectStartFunction *smsep2 =
 			(StateMachineSideEffectStartFunction *)smse2;
-		return definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
+		return smsep1->frame == smsep2->frame &&
+			definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
 	}
 	case StateMachineSideEffect::EndFunction: {
 		StateMachineSideEffectEndFunction *smsep1 =
 			(StateMachineSideEffectEndFunction *)smse1;
 		StateMachineSideEffectEndFunction *smsep2 =
 			(StateMachineSideEffectEndFunction *)smse2;
-		return definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
+		return smsep1->frame == smsep2->frame &&
+			definitelyEqual(smsep1->rsp, smsep2->rsp, opt);
 	}
-	case StateMachineSideEffect::StackLeaked: {
-		auto smsep1 =
-			(StateMachineSideEffectStackLeaked *)smse1;
-		auto smsep2 =
-			(StateMachineSideEffectStackLeaked *)smse2;
-		return *smsep1 == *smsep2;
-	}
-	case StateMachineSideEffect::PointerAliasing: {
-		auto smsep1 = (StateMachineSideEffectPointerAliasing *)smse1;
-		auto smsep2 = (StateMachineSideEffectPointerAliasing *)smse2;
-		return *smsep1 == *smsep2;
-	}
-	case StateMachineSideEffect::StackLayout: {
-		auto smsep1 = (StateMachineSideEffectStackLayout *)smse1;
-		auto smsep2 = (StateMachineSideEffectStackLayout *)smse2;
-		return *smsep1 == *smsep2;
-	}
+#define simple(t)							\
+		case StateMachineSideEffect:: t: {			\
+			auto smsep1 =					\
+				(StateMachineSideEffect ## t *)smse1;	\
+			auto smsep2 =					\
+				(StateMachineSideEffect ## t *)smse2;	\
+			return *smsep1 == *smsep2;			\
+		}
+	simple(StackUnescaped)
+	simple(PointerAliasing)
+	simple(StackLayout)
+#undef simple
 
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:

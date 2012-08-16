@@ -265,10 +265,10 @@ rawDupeS(duplication_context &ctxt, const StateMachineSideEffectEndFunction *l)
 	return res;
 }
 
-static StateMachineSideEffectStackLeaked *
-rawDupeS(duplication_context &, const StateMachineSideEffectStackLeaked *l)
+static StateMachineSideEffectStackUnescaped *
+rawDupeS(duplication_context &, const StateMachineSideEffectStackUnescaped *l)
 {
-	return (StateMachineSideEffectStackLeaked *)l;
+	return (StateMachineSideEffectStackUnescaped *)l;
 }
 
 static StateMachineSideEffectPointerAliasing *
