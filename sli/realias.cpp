@@ -357,11 +357,11 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels,
 				StateMachineSideEffectStartFunction *s = (StateMachineSideEffectStartFunction *)smse;
 				auto it_did_insert = frameIds.insert(
 					std::pair<StateMachineSideEffectStartFunction *, FrameId>(
-						s, FrameId(-99)));
+						s, FrameId(FrameId::invalid())));
 				auto it = it_did_insert.first;
 				auto did_insert = it_did_insert.second;
 				if (did_insert)
-					it->second = FrameId(nextId++);
+					it->second = FrameId(nextId++, Oracle::STATIC_THREAD);
 				q.second.content.startFunction(it->second, s->rsp);
 				if (debug_build_stack_layout)
 					printf("\tl%d: called %s\n", labels[q.first], it->second.name());
@@ -371,7 +371,7 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels,
 					rootStack.rsps.insert(rootStack.rsps.begin(),
 							      e->rsp);
 					rootStack.functions.insert(rootStack.functions.begin() + 1,
-								   FrameId((*rootNextId)++));
+								   FrameId((*rootNextId)++, Oracle::STATIC_THREAD));
 					rootStack.clearName();
 					if (debug_build_stack_layout)
 						printf("\tl%d: return from empty stack %s\n", labels[q.first], q.second.content.name());
@@ -391,7 +391,7 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels,
 bool
 StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 {
-	StackLayout rootStack(FrameId(0));
+	StackLayout rootStack(FrameId(0, Oracle::STATIC_THREAD));
 	if (debug_build_stack_layout)
 		printf("Building stack layout with root %s\n",
 		       rootStack.name());

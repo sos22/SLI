@@ -786,6 +786,7 @@ typedef std::vector<FrameId *> callStackT;
 
 static StateMachineState *
 assignFrameIds(StateMachineState *root,
+	       unsigned tid,
 	       std::vector<FrameId> &entryStack)
 {
 	/* Step one: figure out how many things are on the stack at
@@ -966,11 +967,11 @@ assignFrameIds(StateMachineState *root,
 	while (!unlabelledFrames.empty()) {
 		auto it = unlabelledFrames.begin();
 		FrameId *f = *it;
-		FrameId label(nextLabel);
+		FrameId label(nextLabel, tid);
 		nextLabel++;
 
 		while (allocatedFrameIds.count(label)) {
-			label = FrameId(nextLabel);
+			label = FrameId(nextLabel, tid);
 			nextLabel++;
 		}
 		allocatedFrameIds.insert(label);
@@ -1072,7 +1073,7 @@ probeCFGsToMachine(Oracle *oracle,
 		std::vector<const CFGNode *> roots_this_sm;
 		roots_this_sm.push_back(*it);
 		std::vector<FrameId> entryStack;
-		root = assignFrameIds(root, entryStack);
+		root = assignFrameIds(root, tid, entryStack);
 		root = addEntrySideEffects(oracle, tid, root, entryStack, root->origin);
 		StateMachine *sm = new StateMachine(root, origin, roots_this_sm);
 		sm->sanityCheck();
@@ -1110,7 +1111,7 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 	if (TIMEOUT)
 		return NULL;
 	std::vector<FrameId> entryStack;
-	s = assignFrameIds(s, entryStack);
+	s = assignFrameIds(s, tid, entryStack);
 	s = addEntrySideEffects(
 			oracle,
 			tid,

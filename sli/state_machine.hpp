@@ -26,37 +26,41 @@ void sanityCheckIRExpr(IRExpr *, const std::set<threadAndRegister, threadAndRegi
 
 class FrameId : public Named {
 	unsigned id;
+	unsigned tid;
 	char *mkName() const {
-		return my_asprintf("frame%d", id);
+		return my_asprintf("frame%d:%d", tid, id);
 	}
 public:
-	explicit FrameId(unsigned _id)
-		: id(_id)
+	FrameId(unsigned _id, unsigned _tid)
+		: id(_id), tid(_tid)
 	{}
 	static FrameId invalid()
 	{
-		return FrameId(-1);
+		return FrameId(-1, -1);
 	}
 	static bool parse(FrameId *out, const char *str, const char **suffix)
 	{
 		unsigned id;
+		unsigned tid;
 		if (parseThisString("frame", str, &str) &&
+		    parseDecimalUInt(&tid, str, &str) &&
+		    parseThisChar(':', str, &str) &&
 		    parseDecimalUInt(&id, str, suffix)) {
-			*out = FrameId(id);
+			*out = FrameId(id, tid);
 			return true;
 		}
 		return false;
 	}
 	bool operator==(const FrameId &o) const {
-		return id == o.id;
+		return id == o.id && tid == o.tid;
 	}
 	bool operator!=(const FrameId &o) const {
-		return id != o.id;
+		return !(*this == o);
 	}
 	bool operator<(const FrameId &o) const {
 		/* Just here so that you can make sets of them; no
 		 * other meaning. */
-		return id < o.id;
+		return id < o.id || (id == o.id && tid < o.tid);
 	}
 };
 
