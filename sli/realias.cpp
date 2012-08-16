@@ -70,57 +70,6 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 	return res;
 }
 
-class PointsToSet : public Named {
-	char *mkName() const {
-		std::vector<const char *> fragments;
-		fragments.push_back("PTS(");
-		bool m = false;
-		if (mightPointOutsideStack) {
-			fragments.push_back("!stack");
-			m = true;
-		}
-		for (auto it = targets.begin(); it != targets.end(); it++) {
-			if (m)
-				fragments.push_back(", ");
-			m = true;
-			fragments.push_back(it->name());
-		}
-		fragments.push_back(")");
-		return flattenStringFragmentsMalloc(fragments);
-	}
-public:
-	PointsToSet(bool _mightPointOutsideStack,
-		    const std::set<FrameId> &_targets)
-		: mightPointOutsideStack(_mightPointOutsideStack),
-		  targets(_targets)
-	{}
-	PointsToSet()
-		: mightPointOutsideStack(false)
-	{}
-	bool mightPointOutsideStack;
-	std::set<FrameId> targets;
-	void sanity_check() const {
-		assert(mightPointOutsideStack == true ||
-		       mightPointOutsideStack == false);
-	}
-	bool operator!=(const PointsToSet &o) const {
-		return mightPointOutsideStack != o.mightPointOutsideStack ||
-			targets != o.targets;
-	}
-	void operator|=(const PointsToSet &o) {
-		mightPointOutsideStack |= o.mightPointOutsideStack;
-		setUnion(targets, o.targets);
-	}
-	bool operator &(const PointsToSet &o) const {
-		if (mightPointOutsideStack && o.mightPointOutsideStack)
-			return true;
-		for (auto it = targets.begin(); it != targets.end(); it++)
-			if (o.targets.count(*it))
-				return true;
-		return false;
-	}
-};
-
 class StackLayout : public Named {
 	char *mkName() const {
 		std::vector<const char *> fragments;
@@ -297,7 +246,6 @@ public:
 				it->second.content.sanity_check();
 		}
 	}
-	PointsToSet pointsToAnything();
 	Maybe<StackLayout> &forState(StateMachineState *s)
 	{
 		auto it = content.find(s);
@@ -461,31 +409,19 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 	return true;
 }
 
-PointsToSet
-StackLayoutTable::pointsToAnything()
-{
-	std::set<FrameId> allFunctions;
-	for (auto it = content.begin(); it != content.end(); it++) {
-		if (it->second.valid)
-			it->second.content.enumFrames(allFunctions);
-	}
-	return PointsToSet(true, allFunctions);
-}
-
 class PointsToTable {
-	std::map<threadAndRegister, PointsToSet, threadAndRegister::fullCompare> content;
+	std::map<threadAndRegister, PointerAliasingSet, threadAndRegister::fullCompare> content;
 public:
-	PointsToSet pointsToSetForExpr(IRExpr *e,
+	PointerAliasingSet pointsToSetForExpr(IRExpr *e,
 				       StateMachine *sm,
 				       Maybe<StackLayout> &sl,
 				       StackLayoutTable &slt);
-	bool build(StateMachine *sm, StackLayoutTable &slt);
+	bool build(StateMachine *sm);
 	void prettyPrint(FILE *f);
 	void sanity_check() const {
 		for (auto it = content.begin(); it != content.end(); it++) {
 			assert(it->first.isValid());
 			assert(it->first.isTemp());
-			it->second.sanity_check();
 		}
 	}
 	PointsToTable refine(AliasTable &at, StateMachine *sm, StackLayoutTable &slt,
@@ -544,14 +480,14 @@ stackMightHaveLeaked(StateMachine *sm)
 	return false;
 }
 
-PointsToSet
+PointerAliasingSet
 PointsToTable::pointsToSetForExpr(IRExpr *e,
 				  StateMachine *sm,
 				  Maybe<StackLayout> &sl,
 				  StackLayoutTable &slt)
 {
 	if (e->type() != Ity_I64)
-		return PointsToSet();
+		return PointerAliasingSet();
 	switch (e->tag) {
 	case Iex_Get: {
 		IRExprGet *iex = (IRExprGet *)e;
@@ -564,17 +500,12 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 			if (sl.valid) {
 				FrameId f(FrameId::invalid());
 				if (sl.content.identifyFrameFromPtr(iex, &f)) {
-					PointsToSet p;
-					p.mightPointOutsideStack = false;
-					p.targets.insert(f);
-					return p;
+					return PointerAliasingSet::frame(f);
 				} else {
 					break;
 				}
 			} else {
-				PointsToSet p(slt.pointsToAnything());
-				p.mightPointOutsideStack = false;
-				return p;
+				return PointerAliasingSet::stackPointer;
 			}
 		}
 
@@ -589,31 +520,18 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		PointerAliasingSet alias;
 		if (!aliasConfigForReg(sm, iex->reg, &alias))
 			alias = PointerAliasingSet::anything;
-		PointsToSet res;
-		if (alias.mightPointAtNonStack()) {
-			res.mightPointOutsideStack = true;
-			res.targets = slt.initialRegFrames;
-		} else {
-			res.mightPointOutsideStack = false;
-		}
-		if (alias.mightPointAt(slt.initialFuncFrame))
-			res.targets.insert(slt.initialFuncFrame);
-		return res;
+		return alias;
 	}
 
 	case Iex_Load: {
-		PointsToSet p;
-		p.mightPointOutsideStack = true;
-		p.targets = slt.initialRegFrames;
+		PointerAliasingSet p(PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer);
+		p |= PointerAliasingSet(PointerAliasingSet::frames(slt.initialRegFrames));
 		if (stackMightHaveLeaked(sm))
-			p.targets.insert(slt.initialFuncFrame);
+			p |= PointerAliasingSet::frame(slt.initialFuncFrame);
 		return p;
 	}
-	case Iex_Const: {
-		PointsToSet p;
-		p.mightPointOutsideStack = true;
-		return p;
-	}
+	case Iex_Const:
+		return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
 	case Iex_Associative: {
 		IRExprAssociative *iex = (IRExprAssociative *)e;
 		if (sl.valid &&
@@ -624,15 +542,11 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		    ((IRExprGet *)iex->contents[1])->reg.isReg() &&
 		    ((IRExprGet *)iex->contents[1])->reg.asReg() == OFFSET_amd64_RSP) {
 			FrameId f(FrameId::invalid());
-			if (sl.content.identifyFrameFromPtr(iex, &f)) {
-				PointsToSet p;
-				p.mightPointOutsideStack = false;
-				p.targets.insert(f);
-				return p;
-			}
+			if (sl.content.identifyFrameFromPtr(iex, &f))
+				return PointerAliasingSet::frame(f);
 		}
 		if (iex->op == Iop_Add64) {
-			PointsToSet res;
+			PointerAliasingSet res(PointerAliasingSet::nothing);
 			for (int i = 0; i < iex->nr_arguments; i++)
 				res |= pointsToSetForExpr(iex->contents[i], sm, sl, slt);
 			return res;
@@ -643,13 +557,13 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 	default:
 		break;
 	}
-	return slt.pointsToAnything();
+	return PointerAliasingSet::anything;
 }
 
 bool
-PointsToTable::build(StateMachine *sm, StackLayoutTable &slt)
+PointsToTable::build(StateMachine *sm)
 {
-	PointsToSet defaultTmpPointsTo(slt.pointsToAnything());
+	PointerAliasingSet defaultTmpPointsTo(PointerAliasingSet::anything);
 	std::set<StateMachineSideEffect *> sideEffects;
 	enumSideEffects(sm, sideEffects);
 	if (TIMEOUT)
@@ -658,7 +572,7 @@ PointsToTable::build(StateMachine *sm, StackLayoutTable &slt)
 		threadAndRegister tr(threadAndRegister::invalid());
 		if ( (*it)->definesRegister(tr) &&
 		     tr.isTemp() )
-			content.insert(std::pair<threadAndRegister, PointsToSet>(tr, defaultTmpPointsTo));
+			content.insert(std::pair<threadAndRegister, PointerAliasingSet>(tr, defaultTmpPointsTo));
 	}
 	sanity_check();
 	return true;
@@ -991,13 +905,13 @@ PointsToTable::refine(AliasTable &at,
 		StateMachineSideEffecting *smse = sideEffectDefiningRegister(sm, it->first);
 		StateMachineSideEffect *effect = smse->getSideEffect();
 		assert(effect);
-		PointsToSet newPts;
+		PointerAliasingSet newPts(PointerAliasingSet::nothing);
 		Maybe<StackLayout> &sl(slt.forState(smse));
 		switch (effect->type) {
 		case StateMachineSideEffect::Load: {
 			const AliasTableEntry &e(at.storesForLoad(smse));
 			if (e.mightLoadInitial || e.mightHaveExternalStores)
-				newPts.mightPointOutsideStack = true;
+				newPts |= PointerAliasingSet::nonStackPointer;
 			if (e.mightLoadInitial) {
 				/* This load might pick up the initial
 				   value of memory i.e. it might pick
@@ -1005,9 +919,9 @@ PointsToTable::refine(AliasTable &at,
 				   when the machine starts.  That's
 				   basically the same as you might get
 				   in an initial register. */
-				newPts.targets = slt.initialRegFrames;
+				newPts |= PointerAliasingSet::frames(slt.initialRegFrames);
 				if (stackMightHaveLeaked(sm))
-					newPts.targets.insert(slt.initialFuncFrame);
+					newPts |= PointerAliasingSet::frame(slt.initialFuncFrame);
 			}
 			for (auto it2 = e.beginStores(); it2 != e.endStores(); it2++)
 				newPts |= pointsToSetForExpr(it2->data, sm, sl, slt);
@@ -1044,7 +958,7 @@ PointsToTable::refine(AliasTable &at,
 		}
 		if (newPts != it->second)
 			*done_something = true;
-		res.content.insert(std::pair<threadAndRegister, PointsToSet>(it->first, newPts));
+		res.content.insert(std::pair<threadAndRegister, PointerAliasingSet>(it->first, newPts));
 	}
 	return res;
 }
@@ -1060,7 +974,7 @@ AliasTable::refine(StateMachine *sm,
 	     it != content.end();
 	     it++) {
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
-		PointsToSet loadPts(ptt.pointsToSetForExpr(
+		PointerAliasingSet loadPts(ptt.pointsToSetForExpr(
 					    l->addr,
 					    sm,
 					    slt.forState(it->first),
@@ -1071,11 +985,11 @@ AliasTable::refine(StateMachine *sm,
 		for (auto it2 = it->second.stores.begin();
 		     it2 != it->second.stores.end();
 			) {
-			PointsToSet storePts(ptt.pointsToSetForExpr( ((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
-								     sm,
-								     slt.forState(*it2),
-								     slt));
-			if (storePts & loadPts) {
+			PointerAliasingSet storePts(ptt.pointsToSetForExpr( ((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
+									    sm,
+									    slt.forState(*it2),
+									    slt));
+			if (storePts.overlaps(loadPts)) {
 				if (debug_refine_alias_table)
 					printf("\tPreserve l%d: %s vs %s\n",
 					       labels[*it2], storePts.name(),
@@ -1120,7 +1034,7 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 	}
 
 	PointsToTable ptt;
-	if (!ptt.build(sm, stackLayout)) {
+	if (!ptt.build(sm)) {
 		if (any_debug)
 			printf("Failed to build points-to table!\n");
 		return sm;

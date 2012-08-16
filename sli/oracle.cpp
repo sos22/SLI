@@ -3640,6 +3640,26 @@ PointerAliasingSet::implies(const PointerAliasingSet &o) const
 	return true;
 }
 
+bool
+PointerAliasingSet::overlaps(const PointerAliasingSet &o) const
+{
+	if (!valid || !o.valid)
+		return true;
+	if ( (nonPointer && o.nonPointer) ||
+	     (nonStckPointer && o.nonStckPointer) )
+		return true;
+	if (otherStackPointer && o.otherStackPointer)
+		return true;
+	if (otherStackPointer && !o.stackPointers.empty())
+		return true;
+	if (o.otherStackPointer && !stackPointers.empty())
+		return true;
+	for (auto it = stackPointers.begin(); it != stackPointers.end(); it++)
+		if (o.stackPointers.count(*it))
+			return true;
+	return false;
+}
+
 void
 PointerAliasingSet::operator|=(const PointerAliasingSet &o)
 {
@@ -3661,4 +3681,13 @@ PointerAliasingSet::operator|=(const PointerAliasingSet &o)
 			stackPointers.insert(*it);
 	}
 	clearName();
+}
+
+PointerAliasingSet
+PointerAliasingSet::frames(const std::set<FrameId> &inp)
+{
+	PointerAliasingSet res(PointerAliasingSet::nothing);
+	for (auto it = inp.begin(); it != inp.end(); it++)
+		res.stackPointers.insert(*it);
+	return res;
 }

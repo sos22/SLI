@@ -137,11 +137,13 @@ public:
 		res.stackPointers.insert(fid);
 		return res;
 	}
+	static PointerAliasingSet frames(const std::set<FrameId> &inp);
 	PointerAliasingSet operator |(const PointerAliasingSet &o) const;
 	PointerAliasingSet operator &(const PointerAliasingSet &o) const;
 	/* A pointer aliasing set X implies the set Y if anything
 	   which satisfies X would also satisfy Y. */
 	bool implies(const PointerAliasingSet &o) const;
+	bool overlaps(const PointerAliasingSet &o) const;
 	bool operator !=(const PointerAliasingSet &o) const { return !(*this == o); }
 	bool operator ==(const PointerAliasingSet &o) const;
 	/* Extend this set such that anything which satisfies @o would
