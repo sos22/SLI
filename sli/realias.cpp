@@ -73,9 +73,9 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 class StackLayout : public Named {
 	char *mkName() const {
 		std::vector<const char *> fragments;
-		auto it1 = rsps.rbegin();
-		auto it2 = functions.rbegin();
-		while (it1 != rsps.rend()) {
+		auto it1 = rsps.begin();
+		auto it2 = functions.begin();
+		while (it1 != rsps.end()) {
 			fragments.push_back(vex_asprintf("%s <%s> ",
 							 it2->name(),
 							 nameIRExpr(*it1)));
@@ -171,8 +171,8 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
 	*out = FrameId::invalid();
 	bool definitelyStack = false;
 	assert(ptr->type() == Ity_I64);
-	auto it2 = functions.rbegin();
-	for (auto it = rsps.rbegin(); it != rsps.rend(); it++) {
+	auto it2 = functions.begin();
+	for (auto it = rsps.begin(); it != rsps.end(); it++) {
 		IRExpr *rsp = *it;
 		switch (compare_expressions(ptr, rsp)) {
 		case compare_expressions_lt:
@@ -191,7 +191,7 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
 		/* It's definitely on the stack, and it doesn't fit
 		   into any of the delimited frames -> it must be the
 		   root frame. */
-		*out = functions[0];
+		*out = functions.back();
 		return true;
 	}
 
@@ -309,12 +309,12 @@ StackLayoutTable::build(StateMachine *inp)
 			exitLayout.content = StackLayout();
 			exitLayout.content.functions.resize(l->functions.size(), FrameId::invalid());
 			exitLayout.content.rsps.resize(l->functions.size() - 1);
-			for (unsigned x = 0; x < l->functions.size() - 1; x++) {
+			for (unsigned x = 1; x < l->functions.size(); x++) {
 				assert(frameBoundaries.count(l->functions[x].first));
 				exitLayout.content.functions[x] = l->functions[x].first;
-				exitLayout.content.rsps[x] = frameBoundaries[l->functions[x].first];
+				exitLayout.content.rsps[x-1] = frameBoundaries[l->functions[x].first];
 			}
-			exitLayout.content.functions[l->functions.size() - 1] = l->functions.back().first;
+			exitLayout.content.functions[0] = l->functions.front().first;
 		} else {
 			auto it = content.find(s);
 			if (it == content.end()) {
