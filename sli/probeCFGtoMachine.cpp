@@ -1126,8 +1126,8 @@ probeCFGsToMachine(Oracle *oracle,
 		assert(root);
 		std::vector<std::pair<unsigned, VexRip> > origin;
 		origin.push_back(std::pair<unsigned, VexRip>(tid, root->origin));
-		std::vector<const CFGNode *> roots_this_sm;
-		roots_this_sm.push_back(*it);
+		std::vector<std::pair<unsigned, const CFGNode *> > roots_this_sm;
+		roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 		std::vector<FrameId> entryStack;
 		root = assignFrameIds(root, tid, entryStack);
 		root = addEntrySideEffects(oracle, tid, root, entryStack, root->origin);
@@ -1155,8 +1155,8 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<std::pair<unsigned, VexRip> > origin;
 	origin.push_back(std::pair<unsigned, VexRip>(tid, root->rip));
-	std::vector<const CFGNode *> roots;
-	roots.push_back(root);
+	std::vector<std::pair<unsigned, const CFGNode *> > roots;
+	roots.push_back(std::pair<unsigned, const CFGNode *>(tid, root));
 	StateMachineState *s =
 		performTranslation(
 			results,

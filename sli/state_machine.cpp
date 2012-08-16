@@ -281,16 +281,31 @@ printContainer(const cont &v, FILE *f)
 static void
 printCFGRootedAt(const CFGNode *root, FILE *f,
 		 std::set<const CFGNode *> &done,
-		 const std::vector<const CFGNode *> &roots)
+		 const std::vector<std::pair<unsigned, const CFGNode *> > &roots)
 {
 	if (!done.insert(root).second)
 		return;
-	bool is_root = false;
-	for (auto it = roots.begin(); !is_root && it != roots.end(); it++)
-		if (root == *it)
-			is_root = true;
-	fprintf(f, "%s%s: %s",
-		is_root ? "-->" : ".  ",
+	std::set<unsigned> rootOf;
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		if (root == it->second)
+			rootOf.insert(it->first);
+	if (!rootOf.empty()) {
+		int printed = 1;
+		fprintf(f, "-");
+		for (auto it = rootOf.begin(); it != rootOf.end(); it++) {
+			if (it != rootOf.begin())
+				printed += fprintf(f, ",");
+			printed += fprintf(f, "%d", *it);
+		}
+		if (printed < 9) {
+			char buf[] = "----------";
+			fprintf(f, "%.*s", 9 - printed, buf);
+		}
+		fprintf(f, "->");
+	} else {
+		fprintf(f, ".%11s", "");
+	}
+	fprintf(f, "%s: %s",
 		root->label.name(),
 		root->rip.name());
 	std::vector<CFGNode *> successors;
@@ -344,7 +359,7 @@ printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineSt
 	fprintf(f, "CFG:\n");
 	std::set<const CFGNode *> done_cfg;
 	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
-		printCFGRootedAt(*it, f, done_cfg, sm->cfg_roots);
+		printCFGRootedAt(it->second, f, done_cfg, sm->cfg_roots);
 	buildStateLabelTable(sm, labels, states);
 	for (auto it = states.begin(); it != states.end(); it++) {
 		fprintf(f, "l%d: ", labels[*it]);
@@ -588,18 +603,30 @@ struct succ {
 };
 
 static bool
-parseCFG(std::vector<const CFGNode *> &roots,
+parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 	 const char *str, const char **suffix)
 {
 	std::map<CfgLabel, CFGNode *> cfg_labels;
 	std::vector<std::pair<CFGNode **, CfgLabel> > relocations;
 	while (1) {
-		bool is_root;
-		if (parseThisString(". ", str, &str)) {
-			is_root = false;
-		} else if (parseThisString("-->", str, &str)) {
-			is_root = true;
-		} else {
+		std::set<unsigned> rootOf;
+		if (parseThisChar('-', str, &str)) {
+			while (1) {
+				unsigned v;
+				if (!parseDecimalUInt(&v, str, &str))
+					return false;
+				rootOf.insert(v);
+				if (parseThisChar(',', str, &str))
+					continue;
+				if (!parseThisChar('-', str, &str))
+					return false;
+				while (parseThisChar('-', str, &str))
+					;
+				if (!parseThisChar('>', str, &str))
+					return false;
+				break;
+			}
+		} else if (!parseThisString(". ", str, &str)) {
 			break;
 		}
 		VexRip rip;
@@ -635,8 +662,8 @@ parseCFG(std::vector<const CFGNode *> &roots,
 		if (cfg_labels.count(label))
 			return false;
 		cfg_labels[label] = work;
-		if (is_root)
-			roots.push_back(work);
+		for (auto it = rootOf.begin(); it != rootOf.end(); it++)
+			roots.push_back(std::pair<unsigned, const CFGNode *>(*it, work));
 	}
 	for (auto it = relocations.begin(); it != relocations.end(); it++) {
 		auto it2 = cfg_labels.find(it->second);
@@ -674,7 +701,7 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 	   returns true. */
 	root = (StateMachineState *)0xf001deadbeeful; 
 
-	std::vector<const CFGNode *> cfg_roots;
+	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots;
 	if (!parseThisString("CFG:\n", str, &str) ||
 	    !parseCFG(cfg_roots, str, &str) ||
 	    !parseStateMachine(&root, str, suffix))
@@ -1052,7 +1079,7 @@ StateMachine::sanityCheck() const
 	findNeededLabels.transform(const_cast<StateMachine *>(this));
 	std::queue<const CFGNode *> pending;
 	for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++)
-		pending.push(*it);
+		pending.push(it->second);
 	while (!pending.empty()) {
 		const CFGNode *n = pending.front();
 		pending.pop();

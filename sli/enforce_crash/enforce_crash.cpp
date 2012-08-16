@@ -496,16 +496,18 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		return crashEnforcementData(true);
 
 	std::map<unsigned, CfgLabel> rootsCfg;
-	assert(summary->loadMachine->bad_origin.size() == 1);
-	assert(summary->storeMachine->bad_origin.size() == 1);
-	assert(summary->loadMachine->cfg_roots.size() == 1);
-	assert(summary->storeMachine->cfg_roots.size() == 1);
-	rootsCfg.insert(std::pair<unsigned, CfgLabel>(
-				summary->loadMachine->bad_origin[0].first,
-				summary->loadMachine->cfg_roots[0]->label));
-	rootsCfg.insert(std::pair<unsigned, CfgLabel>(
-				summary->storeMachine->bad_origin[0].first,
-				summary->storeMachine->cfg_roots[0]->label));
+	for (auto it = summary->loadMachine->cfg_roots.begin();
+	     it != summary->loadMachine->cfg_roots.end();
+	     it++)
+		rootsCfg.insert(std::pair<unsigned, CfgLabel>(
+					it->first,
+					it->second->label));
+	for (auto it = summary->storeMachine->cfg_roots.begin();
+	     it != summary->storeMachine->cfg_roots.end();
+	     it++)
+		rootsCfg.insert(std::pair<unsigned, CfgLabel>(
+					it->first,
+					it->second->label));
 
 	crashEnforcementData accumulator(true);
 	for (unsigned x = 0; x < d.size(); x++) {

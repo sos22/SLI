@@ -228,12 +228,12 @@ class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 public:
 	StateMachineState *root;
 	std::vector<std::pair<unsigned, VexRip> > bad_origin;
-	std::vector<const CFGNode *> cfg_roots;
+	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots;
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
 	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin,
-		     const std::vector<const CFGNode *> &_cfg_roots)
+		     const std::vector<std::pair<unsigned, const CFGNode *> > &_cfg_roots)
 		: root(_root), bad_origin(_origin), cfg_roots(_cfg_roots)
 	{
 	}
@@ -248,7 +248,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(root);
 		for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++)
-			hv(*it);
+			hv(it->second);
 	}
 #ifdef NDEBUG
 	void sanityCheck() const {}

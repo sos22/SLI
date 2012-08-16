@@ -1816,7 +1816,7 @@ buildCrossProductMachine(CfgDecode &decode,
 
 	std::vector<std::pair<unsigned, VexRip> > origin(probeMachine->bad_origin);
         origin.insert(origin.end(), storeMachine->bad_origin.begin(), storeMachine->bad_origin.end());
-	std::vector<const CFGNode *> cfg_roots(probeMachine->cfg_roots);
+	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots(probeMachine->cfg_roots);
 	for (auto it = storeMachine->cfg_roots.begin(); it != storeMachine->cfg_roots.end(); it++) {
 		bool already_present = false;
 		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++)
@@ -2253,7 +2253,7 @@ concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine
 	std::vector<std::pair<unsigned, VexRip> > neworigin(i, machine->bad_origin.end());
 	neworigin.insert(neworigin.end(), to->bad_origin.begin(), to->bad_origin.end());
 #endif
-	std::vector<const CFGNode *> cfg_roots(machine->cfg_roots);
+	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots(machine->cfg_roots);
 	for (auto it = to->cfg_roots.begin(); it != to->cfg_roots.end(); it++) {
 		bool already_present = false;
 		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++)

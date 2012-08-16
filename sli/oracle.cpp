@@ -3527,7 +3527,7 @@ CfgDecode::operator()(const CfgLabel &cl)
 	std::queue<const CFGNode *> pending;
 	for (auto it = sm.begin(); it != sm.end(); it++) {
 		for (auto it2 = (*it)->cfg_roots.begin(); it2 != (*it)->cfg_roots.end(); it2++)
-			pending.push(*it2);
+			pending.push(it2->second);
 	}
 	std::set<const CFGNode *> visited;
 	while (!pending.empty()) {
