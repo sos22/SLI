@@ -1323,12 +1323,12 @@ public:
 };
 
 template <typename stateType, typename containerType> void
-__enumStates(StateMachine *sm, containerType &states)
+__enumStates(StateMachineState *root, containerType &states)
 {
 	std::vector<StateMachineState *> toVisit;
 	std::set<StateMachineState *> visited;
 
-	toVisit.push_back(sm->root);
+	toVisit.push_back(root);
 	while (!toVisit.empty()) {
 		StateMachineState *s = toVisit.back();
 		toVisit.pop_back();
@@ -1343,12 +1343,12 @@ __enumStates(StateMachine *sm, containerType &states)
 }
 
 template <typename stateType, typename containerType> void
-__enumStates(const StateMachine *sm, containerType &states)
+__enumStates(const StateMachineState *root, containerType &states)
 {
 	std::vector<const StateMachineState *> toVisit;
 	std::set<const StateMachineState *> visited;
 
-	toVisit.push_back(sm->root);
+	toVisit.push_back(root);
 	while (!toVisit.empty()) {
 		const StateMachineState *s = toVisit.back();
 		toVisit.pop_back();
@@ -1366,35 +1366,48 @@ template <typename stateType> void
 enumStates(StateMachine *sm, std::set<stateType *> *states)
 {
 	__enumStatesAdaptSet<stateType *> s(*states);
-	__enumStates<stateType, __enumStatesAdaptSet<stateType *> >(sm, s);
+	__enumStates<stateType, __enumStatesAdaptSet<stateType *> >(sm->root, s);
+}
+template <typename stateType> void
+enumStates(StateMachineState *root, std::set<stateType *> *states)
+{
+	__enumStatesAdaptSet<stateType *> s(*states);
+	__enumStates<stateType, __enumStatesAdaptSet<stateType *> >(root, s);
 }
 
 template <typename stateType> void
 enumStates(const StateMachine *sm, std::set<const stateType *> *states)
 {
 	__enumStatesAdaptSet<const stateType *> s(*states);
-	__enumStates<const stateType, __enumStatesAdaptSet<const stateType *> >(sm, s);
+	__enumStates<const stateType, __enumStatesAdaptSet<const stateType *> >(sm->root, s);
+}
+
+template <typename stateType> void
+enumStates(const StateMachineState *root, std::set<const stateType *> *states)
+{
+	__enumStatesAdaptSet<const stateType *> s(*states);
+	__enumStates<const stateType, __enumStatesAdaptSet<const stateType *> >(root, s);
 }
 
 template <typename stateType> void
 enumStates(StateMachine *sm, std::vector<stateType *> *states)
 {
 	__enumStatesAdaptVector<stateType *> s(*states);
-	__enumStates<stateType, __enumStatesAdaptVector<stateType *> >(sm, s);
+	__enumStates<stateType, __enumStatesAdaptVector<stateType *> >(sm->root, s);
 }
 
 template <typename stateType> void
 enumStates(const StateMachine *sm, std::vector<const stateType *> *states)
 {
 	__enumStatesAdaptVector<const stateType *> s(*states);
-	__enumStates<const stateType, __enumStatesAdaptVector<const stateType *> >(sm, s);
+	__enumStates<const stateType, __enumStatesAdaptVector<const stateType *> >(sm->root, s);
 }
 
 template <typename seType> void
-enumSideEffects(StateMachine *sm, std::set<seType *> &out)
+enumSideEffects(StateMachineState *root, std::set<seType *> &out)
 {
 	std::set<StateMachineSideEffecting *> states;
-	enumStates(sm, &states);
+	enumStates<StateMachineSideEffecting>(root, &states);
 	for (auto it = states.begin(); it != states.end(); it++) {
 		if ( !(*it)->sideEffect )
 			continue;
@@ -1402,6 +1415,12 @@ enumSideEffects(StateMachine *sm, std::set<seType *> &out)
 		if (se)
 			out.insert(se);
 	}
+}
+
+template <typename seType> void
+enumSideEffects(StateMachine *sm, std::set<seType *> &out)
+{
+	enumSideEffects(sm->root, out);
 }
 
 #endif /* !STATEMACHINE_HPP__ */

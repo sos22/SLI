@@ -751,6 +751,24 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 		if (rtrnConfig.v[0].mightPointAtStack())
 			framesInRegisters |= PointerAliasingSet::frame(entryStack[x]);
 	}
+	/* RSP be used to refer to any frame in this thread. */
+	/* (realias uses refined information than this, but this is
+	 * good enough for all of the other analyses, and realias
+	 * derives what it needs when it needs it) */
+	PointerAliasingSet rspFrames(PointerAliasingSet::nothing);
+	{
+		std::set<StateMachineSideEffectStartFunction *> starts;
+		std::set<StateMachineSideEffectEndFunction *> ends;
+		enumSideEffects(cursor, starts);
+		enumSideEffects(cursor, ends);
+		for (auto it = starts.begin(); it != starts.end(); it++)
+			rspFrames |= PointerAliasingSet::frame((*it)->frame);
+		for (auto it = ends.begin(); it != ends.end(); it++)
+			rspFrames |= PointerAliasingSet::frame((*it)->frame);
+		for (auto it = entryStack.begin(); it != entryStack.end(); it++)
+			rspFrames |= PointerAliasingSet::frame(*it);
+	}
+
 	Oracle::ThreadRegisterAliasingConfiguration alias =
 		oracle->getAliasingConfigurationForRip(vr);
 	cursor = new StateMachineSideEffecting(
@@ -761,17 +779,15 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 		cursor);
 	for (int i = 0; i < Oracle::NR_REGS; i++) {
 		PointerAliasingSet v(alias.v[i]);
-		if (v.otherStackPointer) {
-			v.otherStackPointer = false;
-			v |= PointerAliasingSet::frame(entryStack.back());
-		}
-		/* RSP can be used to access any stack frame, and
-		 * nothing else, regardless of what the analysis might
-		 * say. */
-		if (i == 4)
-			v = PointerAliasingSet::stackPointer;
-		else
+		if (i == 4) {
+			v = rspFrames;
+		} else {
+			if (v.otherStackPointer) {
+				v.otherStackPointer = false;
+				v |= PointerAliasingSet::frame(entryStack.back());
+			}
 			v |= framesInRegisters;
+		}
 		cursor = new StateMachineSideEffecting(
 			vr,
 			new StateMachineSideEffectPointerAliasing(
