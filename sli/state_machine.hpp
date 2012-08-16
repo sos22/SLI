@@ -67,7 +67,9 @@ public:
 class PointerAliasingSet : public Named {
 	bool nonPointer;
 	bool nonStckPointer;
+public:
 	bool otherStackPointer;
+private:
 	bool valid;
 	std::set<FrameId> stackPointers;
 	char *mkName() const {
@@ -124,7 +126,11 @@ public:
 	static const PointerAliasingSet stackPointer;
 	static const PointerAliasingSet anything;
 	static const PointerAliasingSet nothing;
-
+	static PointerAliasingSet frame(const FrameId &fid) {
+		PointerAliasingSet res(nothing);
+		res.stackPointers.insert(fid);
+		return res;
+	}
 	PointerAliasingSet operator |(const PointerAliasingSet &o) const;
 	PointerAliasingSet operator &(const PointerAliasingSet &o) const;
 	/* A pointer aliasing set X implies the set Y if anything

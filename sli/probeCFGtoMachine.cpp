@@ -693,10 +693,18 @@ performTranslation(std::map<CFGNode *, StateMachineState *> &results,
 }
 
 static StateMachineState *
-addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, const VexRip &vr)
+addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, const std::vector<FrameId> &entryStack, const VexRip &vr)
 {
 	StateMachineState *cursor = final;
 	long delta;
+
+	cursor = new StateMachineSideEffecting(
+		vr,
+		new StateMachineSideEffectStackLayout(
+			tid,
+			entryStack),
+		cursor);
+
 	if (oracle->getRbpToRspDelta(vr, &delta)) {
 		cursor = new StateMachineSideEffecting(
 			vr,
@@ -712,6 +720,37 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 					NULL)),
 			cursor);
 	}
+
+	/* We now need to figure out which stack frames each register
+	 * might point to.  The oracle's static analysis can tell us
+	 * which registers might point to the current function's
+	 * frames, but not anything about the parent frames.  Suppose
+	 * we have a call stack like this:
+	 *
+	 * func1, frame1
+	 * func2, frame2
+	 * func3, frame3 <--- you are here.
+	 *
+	 * Static analysis tells us whether frame3 is in registers.
+	 * it can also tell us whether frame2 was in any registers or
+	 * non-stack memory when func2 called func3.  If it was then
+	 * we have to assume that it could have reached any registers
+	 * by the time we get to the point of interest in func3.
+	 *
+	 * As a simplification, it happens that this is exactly what
+	 * the static analysis phase does when it's deciding whether
+	 * the return value of func3 might include a pointer to
+	 * frame2, so all we need to do is look at the aliasing
+	 * configuration for RAX at func3's return address and add
+	 * frame2 to everything if it includes the stack. */
+	PointerAliasingSet framesInRegisters(PointerAliasingSet::nothing);
+	for (int x = 0; x < (int)vr.stack.size() - 1; x++) {
+		StaticRip rtrnRip(vr.stack[x]);
+		Oracle::ThreadRegisterAliasingConfiguration rtrnConfig =
+			oracle->getAliasingConfigurationForRip(rtrnRip);
+		if (rtrnConfig.v[0].mightPointAtStack())
+			framesInRegisters |= PointerAliasingSet::frame(entryStack[x]);
+	}
 	Oracle::ThreadRegisterAliasingConfiguration alias =
 		oracle->getAliasingConfigurationForRip(vr);
 	cursor = new StateMachineSideEffecting(
@@ -720,13 +759,26 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 			alias.stackHasLeaked,
 			tid),
 		cursor);
-	for (int i = 0; i < Oracle::NR_REGS; i++)
+	for (int i = 0; i < Oracle::NR_REGS; i++) {
+		PointerAliasingSet v(alias.v[i]);
+		if (v.otherStackPointer) {
+			v.otherStackPointer = false;
+			v |= PointerAliasingSet::frame(entryStack.back());
+		}
+		/* RSP can be used to access any stack frame, and
+		 * nothing else, regardless of what the analysis might
+		 * say. */
+		if (i == 4)
+			v = PointerAliasingSet::stackPointer;
+		else
+			v |= framesInRegisters;
 		cursor = new StateMachineSideEffecting(
 			vr,
 			new StateMachineSideEffectPointerAliasing(
 				threadAndRegister::reg(tid, i * 8, 0),
-				alias.v[i]),
+				v),
 			cursor);
+	}
 	return cursor;
 }
 
@@ -734,8 +786,7 @@ typedef std::vector<FrameId *> callStackT;
 
 static StateMachineState *
 assignFrameIds(StateMachineState *root,
-	       const VexRip &origin,
-	       unsigned tid)
+	       std::vector<FrameId> &entryStack)
 {
 	/* Step one: figure out how many things are on the stack at
 	 * the root state.  The idea here is to simulate every
@@ -970,12 +1021,7 @@ assignFrameIds(StateMachineState *root,
 			assert(*it1 != *it2);
 #endif
 
-	root = new StateMachineSideEffecting(
-		origin,
-		new StateMachineSideEffectStackLayout(
-			tid,
-			entryFrames),
-		root);
+	entryStack = entryFrames;
 
 	return root;
 }
@@ -1025,10 +1071,10 @@ probeCFGsToMachine(Oracle *oracle,
 		origin.push_back(std::pair<unsigned, VexRip>(tid, root->origin));
 		std::vector<const CFGNode *> roots_this_sm;
 		roots_this_sm.push_back(*it);
-		root = addEntrySideEffects(oracle, tid, root, root->origin);
+		std::vector<FrameId> entryStack;
+		root = assignFrameIds(root, entryStack);
+		root = addEntrySideEffects(oracle, tid, root, entryStack, root->origin);
 		StateMachine *sm = new StateMachine(root, origin, roots_this_sm);
-		root = assignFrameIds(root, root->origin, tid);
-		sm = new StateMachine(root, origin, roots_this_sm);
 		sm->sanityCheck();
 		out.insert(sm);
 	}
@@ -1063,12 +1109,14 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 			doOne);
 	if (TIMEOUT)
 		return NULL;
+	std::vector<FrameId> entryStack;
+	s = assignFrameIds(s, entryStack);
 	s = addEntrySideEffects(
 			oracle,
 			tid,
 			s,
+			entryStack,
 			root->rip);
-	s = assignFrameIds(s, root->rip, tid);
 	StateMachine *sm = new StateMachine(
 		s,
 		origin,
