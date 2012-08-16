@@ -706,13 +706,6 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 	StateMachineState *cursor = final;
 	long delta;
 
-	cursor = new StateMachineSideEffecting(
-		vr,
-		new StateMachineSideEffectStackLayout(
-			tid,
-			entryStack),
-		cursor);
-
 	if (oracle->getRbpToRspDelta(vr, &delta)) {
 		cursor = new StateMachineSideEffecting(
 			vr,
@@ -769,6 +762,15 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 			privateFrames.erase(entryStack[x]);
 		}
 	}
+	{
+		StaticRip currentRip(vr.stack.back());
+		Oracle::ThreadRegisterAliasingConfiguration currentConfig =
+			oracle->getAliasingConfigurationForRip(currentRip);
+		if (currentConfig.stackHasLeaked)
+			privateFrames.erase(entryStack.back());
+	}
+
+
 	/* RSP be used to refer to any frame in this thread. */
 	/* (realias uses refined information than this, but this is
 	 * good enough for all of the other analyses, and realias
@@ -787,6 +789,19 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 			rspFrames |= PointerAliasingSet::frame((*it)->frame);
 		for (auto it = entryStack.begin(); it != entryStack.end(); it++)
 			rspFrames |= PointerAliasingSet::frame(*it);
+	}
+
+	/* Set up the initial stack layout */
+	{
+		std::vector<std::pair<FrameId, bool> > stackAndEscape;
+		for (auto it = entryStack.begin(); it != entryStack.end(); it++)
+			stackAndEscape.push_back(std::pair<FrameId, bool>(*it, !privateFrames.count(*it)));
+		cursor = new StateMachineSideEffecting(
+			vr,
+			new StateMachineSideEffectStackLayout(
+				tid,
+				stackAndEscape),
+			cursor);
 	}
 
 	Oracle::ThreadRegisterAliasingConfiguration alias =

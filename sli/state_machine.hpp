@@ -1227,10 +1227,12 @@ public:
 class StateMachineSideEffectStackLayout : public StateMachineSideEffect {
 public:
 	unsigned tid;
-	std::vector<FrameId> functions;
+	/* Second element is whether there could be any pointers to
+	 * that frame in initial memory. */
+	std::vector<std::pair<FrameId, bool> > functions;
 	StateMachineSideEffectStackLayout(
 		unsigned _tid,
-		const std::vector<FrameId> &_functions)
+		const std::vector<std::pair<FrameId, bool> > &_functions)
 		: StateMachineSideEffect(StateMachineSideEffect::StackLayout),
 		  tid(_tid), functions(_functions)
 	{}
@@ -1245,7 +1247,7 @@ public:
 			for (auto it2 = it1 + 1;
 			     it2 != functions.end();
 			     it2++)
-				assert(*it1 != *it2);
+				assert(it1->first != it2->first);
 		}
 	}
 	bool definesRegister(threadAndRegister &) const {
@@ -1258,14 +1260,14 @@ public:
 		for (auto it = functions.begin(); it != functions.end(); it++) {
 			if (it != functions.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%s", it->name());
+			fprintf(f, "%s%s", it->first.name(), it->second ? " <mem>" : "");
 		}
 		fprintf(f, "}");
 	}
 	static bool parse(StateMachineSideEffectStackLayout **out, const char *str, const char **suffix)
 	{
 		unsigned tid;
-		std::vector<FrameId> functions;
+		std::vector<std::pair<FrameId, bool> > functions;
 
 		if (!parseThisString("STACKLAYOUT(", str, &str) ||
 		    !parseDecimalUInt(&tid, str, &str) ||
@@ -1273,9 +1275,14 @@ public:
 			return false;
 		while (1) {
 			FrameId f(FrameId::invalid());
+			bool regs;
 			if (!FrameId::parse(&f, str, &str))
 				return false;
-			functions.push_back(f);
+			if (parseThisString(" <mem>", str, &str))
+				regs = true;
+			else
+				regs = false;
+			functions.push_back(std::pair<FrameId, bool>(f, regs));
 			if (parseThisChar('}', str, suffix))
 				break;
 			if (!parseThisString(", ", str, &str))
@@ -1323,6 +1330,18 @@ public:
 	{}
 	void insert(const t &what) {
 		underlying.insert(what);
+	}
+};
+
+template <typename t>
+class __enumStatesAdaptQueue {
+public:
+	std::queue<t> &underlying;
+	__enumStatesAdaptQueue(std::queue<t> &_underlying)
+		: underlying(_underlying)
+	{}
+	void insert(const t &what) {
+		underlying.push(what);
 	}
 };
 
@@ -1417,6 +1436,13 @@ enumStates(const StateMachine *sm, std::vector<const stateType *> *states)
 {
 	__enumStatesAdaptVector<const stateType *> s(*states);
 	__enumStates<const stateType, __enumStatesAdaptVector<const stateType *> >(sm->root, s);
+}
+
+template <typename stateType> void
+enumStates(StateMachine *sm, std::queue<stateType *> *states)
+{
+	__enumStatesAdaptQueue<stateType *> s(*states);
+	__enumStates<stateType, __enumStatesAdaptQueue<stateType *> >(sm->root, s);
 }
 
 template <typename seType> void
