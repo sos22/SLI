@@ -228,7 +228,8 @@ flattenStringFragmentsMalloc(std::vector<const char *> fragments, const char *se
 	size_t sz = 1;
 	for (unsigned x = 0; x < fragments.size(); x++)
 		sz += strlen(fragments[x]);
-	sz += strlen(sep) * (fragments.size()-1);
+	if (fragments.size() != 0)
+		sz += strlen(sep) * (fragments.size()-1);
 	sz += strlen(prefix);
 	sz += strlen(suffix);
 	char *res = (char *)malloc(sz);
