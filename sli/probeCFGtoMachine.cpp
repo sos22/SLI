@@ -6,13 +6,16 @@
 #include "alloc_mai.hpp"
 #include "offline_analysis.hpp"
 #include "smb_builder.hpp"
+#include "maybe.hpp"
 
 #include "libvex_guest_offsets.h"
 
 #ifndef NDEBUG
 static bool debug_assign_frame_ids = false;
+static bool debug_rsp_canonicalisation = false;
 #else
 #define debug_assign_frame_ids false
+#define debug_rsp_canonicalisation false
 #endif
 
 namespace _probeCFGsToMachine {
@@ -700,6 +703,389 @@ performTranslation(std::map<CFGNode *, StateMachineState *> &results,
 	return root;
 }
 
+struct RspCanonicalisationState : public Named {
+	class eval_res : public Named {
+		eval_res() {}
+		char *mkName() const {
+			switch (tag) {
+			case eval_res_failed:
+				return strdup("<failed>");
+			case eval_res_delta:
+				return my_asprintf("RSP+%ld", val);
+			case eval_res_const:
+				return my_asprintf("%ld", val);
+			}
+			abort();
+		}
+	public:
+		enum {
+			eval_res_failed, /* Can't say anything about value */
+			eval_res_delta, /* Value is a fixed offset from initial RSP */
+			eval_res_const /* Value is a constant */
+		} tag;
+		long val;
+		static eval_res failed() {
+			eval_res r;
+			r.tag = eval_res_failed;
+			return r;
+		}
+		static eval_res delta(long d) {
+			eval_res r;
+			r.tag = eval_res_delta;
+			r.val = d;
+			return r;
+		}
+		static eval_res cnst(long d) {
+			eval_res r;
+			r.tag = eval_res_const;
+			r.val = d;
+			return r;
+		}
+
+		void operator += (const eval_res &o) {
+			switch (tag) {
+			case eval_res_failed:
+				break;
+			case eval_res_delta:
+				switch (o.tag) {
+				case eval_res_failed:
+				case eval_res_delta:
+					tag = eval_res_failed;
+					break;
+				case eval_res_const:
+					val += o.val;
+					break;
+				}
+				break;
+			case eval_res_const:
+				switch (o.tag) {
+				case eval_res_failed:
+					tag = eval_res_failed;
+					break;
+				case eval_res_delta:
+					tag = eval_res_delta;
+					val += o.val;
+					break;
+				case eval_res_const:
+					val += o.val;
+					break;
+				}
+				break;
+			}
+			clearName();
+		}
+
+		eval_res operator - (const eval_res &o) const {
+			switch (tag) {
+			case eval_res_failed:
+				return *this;
+			case eval_res_delta:
+				switch (o.tag) {
+				case eval_res_failed:
+					return o;
+				case eval_res_delta: /* rsp + k - (rsp + k') -> k - k' */
+					return cnst(val - o.val);
+				case eval_res_const:
+					return delta(val - o.val);
+				}
+				break;
+			case eval_res_const:
+				switch (o.tag) {
+				case eval_res_failed:
+					return o;
+				case eval_res_delta: /* k - (rsp + k') -> unrepresentable */
+					return failed();
+				case eval_res_const:
+					return cnst(val - o.val);
+				}
+				break;
+			}
+			abort();
+		}
+
+		bool merge(const eval_res &o) {
+			if (tag == eval_res_failed)
+				return false;
+			if (tag != o.tag || val != o.val) {
+				tag = eval_res_failed;
+				clearName();
+				return true;
+			}
+			return false;
+		}
+	};
+
+	char *mkName() const {
+		std::vector<const char *> fragments;
+		for (auto it = regs.begin(); it != regs.end(); it++)
+			if (it->second.tag != eval_res::eval_res_failed)
+				fragments.push_back(vex_asprintf("r%d=%s", it->first, it->second.name()));
+		for (auto it = temps.begin(); it != temps.end(); it++)
+			if (it->second.tag != eval_res::eval_res_failed)
+				fragments.push_back(vex_asprintf("t%d=%s", it->first, it->second.name()));
+		for (auto it = stackRsps.begin(); it != stackRsps.end(); it++)
+			if (it->second.tag != eval_res::eval_res_failed)
+				fragments.push_back(vex_asprintf("stack%ld=%s", it->first, it->second.name()));
+		return flattenStringFragmentsMalloc(fragments, ", ", "{", "}");
+	}
+
+	std::map<unsigned, eval_res> regs;
+	std::map<unsigned, eval_res> temps;
+	/* When stack pointers have been pushed on the stack, this
+	   tells you where they are and what the appropriate delta
+	   is. */
+	std::map<long, eval_res> stackRsps;
+
+	bool merge(const RspCanonicalisationState &o) {
+		bool res = false;
+		for (auto it = regs.begin(); it != regs.end(); ) {
+			auto it2 = o.regs.find(it->first);
+			if (it2 == o.regs.end()) {
+				regs.erase(it++);
+				res = true;
+			} else {
+				res |= it->second.merge(it2->second);
+				it++;
+			}
+		}
+		for (auto it = temps.begin(); it != temps.end(); ) {
+			auto it2 = o.temps.find(it->first);
+			if (it2 == o.temps.end()) {
+				temps.erase(it++);
+				res = true;
+			} else {
+				res |= it->second.merge(it2->second);
+				it++;
+			}
+		}
+		for (auto it = stackRsps.begin(); it != stackRsps.end(); ) {
+			auto it2 = o.stackRsps.find(it->first);
+			if (it2 == o.stackRsps.end()) {
+				stackRsps.erase(it++);
+				res = true;
+			} else {
+				res |= it->second.merge(it2->second);
+				it++;
+			}
+		}
+		clearName();
+		return res;
+	}
+
+	void set(const threadAndRegister &tr, const eval_res &val) {
+		if (tr.isReg()) {
+			auto it_did_insert = regs.insert(std::pair<unsigned, eval_res>(tr.asReg(), val));
+			it_did_insert.first->second = val;
+		} else {
+			auto it_did_insert = temps.insert(std::pair<unsigned, eval_res>(tr.asTemp(), val));
+			it_did_insert.first->second = val;
+		}
+		clearName();
+	}
+
+	eval_res eval(IRExpr *a) const {
+		eval_res res(eval_res::failed());
+		switch (a->tag) {
+		case Iex_Associative: {
+			IRExprAssociative *iea = (IRExprAssociative *)a;
+			switch (iea->op) {
+			case Iop_Add64:
+				res = eval_res::cnst(0);
+				for (int i = 0; i < iea->nr_arguments; i++)
+					res += eval(iea->contents[i]);
+				break;
+			default:
+				break;
+			}
+			break;
+		}
+		case Iex_Binop: {
+			IRExprBinop *ieb = (IRExprBinop *)a;
+			switch (ieb->op) {
+			case Iop_Add64:
+				abort();
+			case Iop_Sub64:
+				res = eval(ieb->arg1) - eval(ieb->arg2);
+				break;
+			default:
+				break;
+			}
+			break;
+		}
+		case Iex_Const: {
+			IRExprConst *iec = (IRExprConst *)a;
+			if (iec->con->tag == Ico_U64)
+				res = eval_res::cnst(iec->con->Ico.U64);
+			break;
+		}
+		case Iex_Get: {
+			IRExprGet *ieg = (IRExprGet *)a;
+			if (ieg->reg.isReg()) {
+				auto it = regs.find(ieg->reg.asReg());
+				if (it == regs.end())
+					return eval_res::failed();
+				else
+					return it->second;
+			} else {
+				assert(ieg->reg.isTemp());
+				auto it = temps.find(ieg->reg.asTemp());
+				if (it == temps.end())
+					return eval_res::failed();
+				else
+					return it->second;
+			}
+			break;
+		}
+		case Iex_Load: /* Not available yet */
+			abort();
+		default:
+			break;
+		}
+		return res;
+	}
+};
+
+/* Find the delta between the start RSP and the RSP at the final crash
+ * state.  Subtracting that out from RSP at the start tends to make it
+ * much easier to merge machines which start in different places. */
+static bool
+getRspCanonicalisationDelta(StateMachineState *root, long *delta)
+{
+	std::map<const StateMachineState *, int> stateLabels;
+	if (debug_rsp_canonicalisation) {
+		printf("Getting RSP canonicalisation delta for:\n");
+		printStateMachine(root, stdout, stateLabels);
+	}
+
+	std::map<StateMachineState *, RspCanonicalisationState> res;
+	{
+		RspCanonicalisationState init;
+		init.set(threadAndRegister::reg(-1, OFFSET_amd64_RSP, -1),
+			 RspCanonicalisationState::eval_res::delta(0));
+		res.insert(std::pair<StateMachineState *, RspCanonicalisationState>(root, init));
+	}
+	/* States X where we've updated res[X], but not res[X'] for X'
+	 * successors of X. */
+	std::queue<StateMachineState *> pending;
+	pending.push(root);
+	while (!pending.empty()) {
+		StateMachineState *s = pending.front();
+		pending.pop();
+		auto it_s = res.find(s);
+		assert(it_s != res.end());
+		const RspCanonicalisationState &entryState(it_s->second);
+
+		if (debug_rsp_canonicalisation)
+			printf("Consider l%d, entry state %s\n",
+			       stateLabels[s], entryState.name());
+
+		RspCanonicalisationState exitState(entryState);
+		StateMachineSideEffect *se = s->getSideEffect();
+		if (se) {
+			switch (se->type) {
+			case StateMachineSideEffect::Copy: {
+				StateMachineSideEffectCopy *sec = (StateMachineSideEffectCopy *)se;
+				exitState.set(sec->target, entryState.eval(sec->value));
+				break;
+			}
+			case StateMachineSideEffect::Load: {
+				StateMachineSideEffectLoad *sel = (StateMachineSideEffectLoad *)se;
+				RspCanonicalisationState::eval_res loadDelta = entryState.eval(sel->addr);
+				RspCanonicalisationState::eval_res loadedDelta(RspCanonicalisationState::eval_res::failed());
+				if (loadDelta.tag == RspCanonicalisationState::eval_res::eval_res_delta) {
+					auto it = entryState.stackRsps.find(loadDelta.val);
+					if (it != entryState.stackRsps.end())
+						loadedDelta = it->second;
+				}
+				exitState.set(sel->target, loadedDelta);
+				break;
+			}
+			case StateMachineSideEffect::Store: {
+				StateMachineSideEffectStore *ses = (StateMachineSideEffectStore *)se;
+				RspCanonicalisationState::eval_res addr = entryState.eval(ses->addr);
+				if (addr.tag == RspCanonicalisationState::eval_res::eval_res_delta) {
+					RspCanonicalisationState::eval_res data = entryState.eval(ses->data);
+					auto it_did_insert = exitState.stackRsps.insert(std::pair<long, RspCanonicalisationState::eval_res>(addr.val, data));
+					it_did_insert.first->second = data;
+					exitState.clearName();
+				}
+				break;
+			}
+
+			case StateMachineSideEffect::EndFunction: {
+				StateMachineSideEffectEndFunction *see = (StateMachineSideEffectEndFunction *)se;
+				RspCanonicalisationState::eval_res rspDelta = entryState.eval(see->rsp);
+				/* We'd better at least know the deltas to
+				 * end-of-function markers... */
+				assert(rspDelta.tag == RspCanonicalisationState::eval_res::eval_res_delta);
+				/* Clean up any frame pointers which might
+				 * have been pushed by this function. */
+				for (auto it = exitState.stackRsps.begin();
+				     it != exitState.stackRsps.end();
+					) {
+					if (it->first < rspDelta.val)
+						exitState.stackRsps.erase(it++);
+					else
+						it++;
+				}
+				exitState.clearName();
+				break;
+			}
+				/* Most side effects are irrelevant here. */
+			case StateMachineSideEffect::Unreached:
+			case StateMachineSideEffect::StartAtomic:
+			case StateMachineSideEffect::EndAtomic:
+			case StateMachineSideEffect::StackUnescaped:
+			case StateMachineSideEffect::StackLayout:
+			case StateMachineSideEffect::PointerAliasing:
+			case StateMachineSideEffect::AssertFalse:
+			case StateMachineSideEffect::StartFunction:
+				break;
+
+				/* Shouldn't have Phi states yet. */
+			case StateMachineSideEffect::Phi:
+				abort();
+			}
+		}
+
+		if (debug_rsp_canonicalisation)
+			printf("Exit state %s\n", exitState.name());
+
+		std::vector<StateMachineState *> succ;
+		s->targets(succ);
+		for (auto it = succ.begin(); it != succ.end(); it++) {
+			auto it2_did_insert = res.insert(std::pair<StateMachineState *, RspCanonicalisationState>(*it, exitState));
+			auto it2 = it2_did_insert.first;
+			auto did_insert = it2_did_insert.second;
+			if (did_insert || it2->second.merge(exitState))
+				pending.push(*it);
+		}
+	}
+
+	/* So that's as much as we're going to get from that.
+	   Hopefully, it'll be enough to assign a label to <crash>
+	   state, in which case we have our answer. */
+	auto it = res.find(StateMachineCrash::get());
+	if (it == res.end()) {
+		if (debug_rsp_canonicalisation)
+			printf("No RSP delta for crash state\n");
+		return false;
+	}
+	auto it2 = it->second.regs.find(OFFSET_amd64_RSP);
+	if (it2 == it->second.regs.end()) {
+		if (debug_rsp_canonicalisation)
+			printf("Crash state has no delta for RSP\n");
+		return false;
+	}
+	if (debug_rsp_canonicalisation)
+		printf("Crash RSP state %s\n", it2->second.name());
+	if (it2->second.tag != RspCanonicalisationState::eval_res::eval_res_delta)
+		return false;
+	*delta = it2->second.val;
+	return true;
+
+}
+
 static StateMachineState *
 addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, const std::vector<FrameId> &entryStack, const VexRip &vr)
 {
@@ -720,6 +1106,24 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 						IRConst_U64(-delta)),
 					NULL)),
 			cursor);
+	}
+
+	if (getRspCanonicalisationDelta(final, &delta)) {
+		cursor = new StateMachineSideEffecting(
+			vr,
+			new StateMachineSideEffectCopy(
+				threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
+				IRExpr_Associative(
+					Iop_Add64,
+					IRExpr_Get(
+						threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
+						Ity_I64),
+					IRExpr_Const(
+						IRConst_U64(-delta)),
+					NULL)),
+			cursor);
+	} else {
+		abort();
 	}
 
 	/* A frame is private if there's no possibility that a LD

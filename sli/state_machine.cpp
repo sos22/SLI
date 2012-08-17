@@ -257,7 +257,7 @@ struct availEntry {
 };
 
 static void
-buildStateLabelTable(const StateMachine *sm,
+buildStateLabelTable(const StateMachineState *sm,
 		     std::map<const StateMachineState *, int> &table,
 		     std::vector<const StateMachineState *> &states)
 {
@@ -345,20 +345,25 @@ printCFGRootedAt(const CFGNode *root, FILE *f,
 }
 
 void
-printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
+printStateMachine(const StateMachineState *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
 {
 	std::vector<const StateMachineState *> states;
-
-	fprintf(f, "CFG:\n");
-	std::set<const CFGNode *> done_cfg;
-	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
-		printCFGRootedAt(it->second, f, done_cfg, sm->cfg_roots);
 	buildStateLabelTable(sm, labels, states);
 	for (auto it = states.begin(); it != states.end(); it++) {
 		fprintf(f, "l%d: ", labels[*it]);
 		(*it)->prettyPrint(f, labels);
 		fprintf(f, "\n");
 	}
+}
+
+void
+printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
+{
+	fprintf(f, "CFG:\n");
+	std::set<const CFGNode *> done_cfg;
+	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
+		printCFGRootedAt(it->second, f, done_cfg, sm->cfg_roots);
+	printStateMachine(sm->root, f, labels);
 }
 
 void

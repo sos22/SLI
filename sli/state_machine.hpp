@@ -1299,6 +1299,8 @@ public:
 void printStateMachine(const StateMachine *sm, FILE *f);
 void printStateMachine(const StateMachine *sm, FILE *f,
 		       std::map<const StateMachineState *, int> &labels);
+void printStateMachine(const StateMachineState *sm, FILE *f,
+		       std::map<const StateMachineState *, int> &labels);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
@@ -1430,6 +1432,12 @@ enumStates(StateMachine *sm, std::vector<stateType *> *states)
 	__enumStates<stateType, __enumStatesAdaptVector<stateType *> >(sm->root, s);
 }
 
+template <typename stateType> void
+enumStates(const StateMachineState *sm, std::vector<const stateType *> *states)
+{
+	__enumStatesAdaptVector<const stateType *> s(*states);
+	__enumStates<const stateType, __enumStatesAdaptVector<const stateType *> >(sm, s);
+}
 template <typename stateType> void
 enumStates(const StateMachine *sm, std::vector<const stateType *> *states)
 {
