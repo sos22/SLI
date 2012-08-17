@@ -33,7 +33,7 @@ StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 	StateMachineState *new_root = root->optimise(opt, &b);
 	if (b) {
 		*done_something = true;
-		return new StateMachine(new_root, bad_origin, cfg_roots);
+		return new StateMachine(new_root, cfg_roots);
 	} else {
 		return this;
 	}
@@ -349,13 +349,6 @@ printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineSt
 {
 	std::vector<const StateMachineState *> states;
 
-	fprintf(f, "Machine for ");
-	for (auto it = sm->bad_origin.begin(); it != sm->bad_origin.end(); it++) {
-		if (it != sm->bad_origin.begin())
-			fprintf(f, ", ");
-		fprintf(f, "%s:%d", it->second.name(), it->first);
-	}
-	fprintf(f, ":\n");
 	fprintf(f, "CFG:\n");
 	std::set<const CFGNode *> done_cfg;
 	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
@@ -679,21 +672,6 @@ bool
 StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 {
 	std::vector<std::pair<unsigned, VexRip> > origin;
-	if (!parseThisString("Machine for ", str, &str))
-		return false;
-	while (1) {
-		if (parseThisChar(':', str, &str))
-			break;
-		std::pair<unsigned, VexRip> e;
-		if (!parseVexRip(&e.second, str, &str) ||
-		    !parseThisChar(':', str, &str) ||
-		    !parseDecimalUInt(&e.first, str, &str))
-			return false;
-		parseThisChar(' ', str, &str);
-		origin.push_back(e);
-	}
-	if (!parseThisChar('\n', str, &str))
-		return false;
 	StateMachineState *root;
 
 	/* Shut the compiler up: it can't tell that
@@ -706,7 +684,7 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 	    !parseCFG(cfg_roots, str, &str) ||
 	    !parseStateMachine(&root, str, suffix))
 		return false;
-	*out = new StateMachine(root, origin, cfg_roots);
+	*out = new StateMachine(root, cfg_roots);
 	return true;
 }
 bool

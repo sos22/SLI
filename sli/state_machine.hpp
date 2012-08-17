@@ -227,21 +227,20 @@ class StateMachineState;
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 public:
 	StateMachineState *root;
-	std::vector<std::pair<unsigned, VexRip> > bad_origin;
 	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots;
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
-	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin,
+	StateMachine(StateMachineState *_root,
 		     const std::vector<std::pair<unsigned, const CFGNode *> > &_cfg_roots)
-		: root(_root), bad_origin(_origin), cfg_roots(_cfg_roots)
+		: root(_root), cfg_roots(_cfg_roots)
 	{
 	}
 	StateMachine(StateMachine *parent)
-		: root(parent->root), bad_origin(parent->bad_origin), cfg_roots(parent->cfg_roots)
+		: root(parent->root), cfg_roots(parent->cfg_roots)
 	{}
 	StateMachine(StateMachine *parent, StateMachineState *_root)
-		: root(_root), bad_origin(parent->bad_origin), cfg_roots(parent->cfg_roots)
+		: root(_root), cfg_roots(parent->cfg_roots)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       bool *done_something);
