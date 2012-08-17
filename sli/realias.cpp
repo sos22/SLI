@@ -176,11 +176,11 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
 	for (auto it = rsps.begin(); it != rsps.end(); it++) {
 		IRExpr *rsp = *it;
 		switch (compare_expressions(ptr, rsp)) {
-		case compare_expressions_lt:
+		case compare_expressions_gt:
 		case compare_expressions_eq:
 			*out = *it2;
 			return true;
-		case compare_expressions_gt:
+		case compare_expressions_lt:
 			definitelyStack = true;
 			break;
 		case compare_expressions_unknown:
