@@ -1388,7 +1388,8 @@ assignFrameIds(StateMachineState *root,
 					pushIfNotPresent(unlabelledFrames, &l->frame);
 				else
 					preLabelledFrames.insert(&l->frame);
-				printf("Push %p\n", &l->frame);
+				if (debug_assign_frame_ids)
+					printf("Push %p\n", &l->frame);
 				stack.push_back(&l->frame);
 			}
 			if (se && se->type == StateMachineSideEffect::EndFunction) {
@@ -1618,7 +1619,6 @@ probeCFGsToMachine(Oracle *oracle,
 						IRExpr_Const(IRConst_U64(x))),
 					roots_this_sm[x],
 					cursor);
-		out.insert(new StateMachine(cursor, cfg_roots_this_sm));			
 	} else {
 		/* No roots -> no machines */
 	}
