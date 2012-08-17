@@ -1121,18 +1121,56 @@ probeCFGsToMachine(Oracle *oracle,
 	if (TIMEOUT)
 		return;
 
+	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots_this_sm;
+	std::vector<StateMachineState *> roots_this_sm;
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		StateMachineState *root = results[*it];
 		assert(root);
-		std::vector<std::pair<unsigned, const CFGNode *> > roots_this_sm;
-		roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 		std::vector<FrameId> entryStack;
 		root = assignFrameIds(root, tid, entryStack);
 		root = addEntrySideEffects(oracle, tid, root, entryStack, root->origin);
-		StateMachine *sm = new StateMachine(root, roots_this_sm);
-		sm->sanityCheck();
-		out.insert(sm);
+		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
+		roots_this_sm.push_back(root);
 	}
+
+	if (roots_this_sm.empty())
+		return;
+	StateMachineState *cursor;
+	
+	cursor = roots_this_sm[0];
+	if (roots_this_sm.size() > 1) {
+		IRExpr *fv = mai.freeVariable(Ity_I64, tid, (*roots.begin())->label, false);
+		int x = 0;
+		cursor =
+			new StateMachineSideEffecting(
+				cfg_roots_this_sm[x].second->rip,
+				new StateMachineSideEffectAssertFalse(
+					IRExpr_Unop(
+						Iop_Not1,
+						IRExpr_Binop(
+							Iop_CmpEQ64,
+							fv,
+							IRExpr_Const(
+								IRConst_U64(0)))),
+					true),
+				cursor);
+		for (x++;
+		     x < (int)roots_this_sm.size();
+		     x++)
+			cursor = 
+				new StateMachineBifurcate(
+					cfg_roots_this_sm[x].second->rip,
+					IRExpr_Binop(
+						Iop_CmpEQ64,
+						fv,
+						IRExpr_Const(IRConst_U64(x))),
+					roots_this_sm[x],
+					cursor);
+		out.insert(new StateMachine(cursor, cfg_roots_this_sm));			
+	} else {
+		/* No roots -> no machines */
+	}
+	out.insert(new StateMachine(cursor, cfg_roots_this_sm));
 }
 
 static StateMachine *

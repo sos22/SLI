@@ -303,7 +303,7 @@ printCFGRootedAt(const CFGNode *root, FILE *f,
 		}
 		fprintf(f, "->");
 	} else {
-		fprintf(f, ".%11s", "");
+		fprintf(f, ".%10s", "");
 	}
 	fprintf(f, "%s: %s",
 		root->label.name(),
