@@ -1244,6 +1244,34 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 
 typedef std::vector<FrameId *> callStackT;
 
+template <typename t> static bool
+vectContains(const std::vector<t> &a, const t &b)
+{
+	for (auto it = a.begin(); it != a.end(); it++)
+		if (b == *it)
+			return true;
+	return false;
+}
+
+template <typename t> static void
+vectErase(std::vector<t> &a, const t &b)
+{
+	for (auto it = a.begin(); it != a.end(); ) {
+		if (*it == b) {
+			it = a.erase(it);
+		} else {
+			it++;
+		}
+	}
+}
+
+template <typename t> static void
+pushIfNotPresent(std::vector<t> &a, const t &b)
+{
+	if (!vectContains(a, b))
+		a.push_back(b);
+}
+
 static StateMachineState *
 assignFrameIds(StateMachineState *root,
 	       unsigned tid,
@@ -1301,7 +1329,7 @@ assignFrameIds(StateMachineState *root,
 	if (debug_assign_frame_ids)
 		printf("Initial stack depth %d\n", initialStackDepth);
 
-	std::set<FrameId *> unlabelledFrames;
+	std::vector<FrameId *> unlabelledFrames;
 	std::set<FrameId *> preLabelledFrames;
 	std::set<FrameId> allocatedFrameIds;
 
@@ -1312,7 +1340,7 @@ assignFrameIds(StateMachineState *root,
 	initialStack.resize(initialStackDepth);
 	for (int x = 0; x < initialStackDepth; x++) {
 		initialStack[x] = &entryFrames[x];
-		unlabelledFrames.insert(&entryFrames[x]);
+		unlabelledFrames.push_back(&entryFrames[x]);
 	}
 
 	if (debug_assign_frame_ids) {
@@ -1340,7 +1368,7 @@ assignFrameIds(StateMachineState *root,
 			if (se && se->type == StateMachineSideEffect::StartFunction) {
 				auto *l = (StateMachineSideEffectStartFunction *)se;
 				if (l->frame == FrameId::invalid())
-					unlabelledFrames.insert(&l->frame);
+					pushIfNotPresent(unlabelledFrames, &l->frame);
 				else
 					preLabelledFrames.insert(&l->frame);
 				stack.push_back(&l->frame);
@@ -1352,7 +1380,7 @@ assignFrameIds(StateMachineState *root,
 				assert(!stack.empty());
 				FrameId *o = stack.back();
 				if (l->frame == FrameId::invalid())
-					unlabelledFrames.insert(&l->frame);
+					pushIfNotPresent(unlabelledFrames, &l->frame);
 				else
 					preLabelledFrames.insert(&l->frame);
 				eqConstraints.insert(
@@ -1400,8 +1428,8 @@ assignFrameIds(StateMachineState *root,
 				printf("\tPropagate %s to %p\n", label.name(), f);
 			if (*f == FrameId::invalid()) {
 				*f = label;
-				assert(unlabelledFrames.count(f));
-				unlabelledFrames.erase(f);
+				assert(vectContains(unlabelledFrames, f));
+				vectErase(unlabelledFrames, f);
 			} else {
 				assert(*f == label);
 			}
@@ -1425,8 +1453,7 @@ assignFrameIds(StateMachineState *root,
 	   constraints. */
 	unsigned nextLabel = 0;
 	while (!unlabelledFrames.empty()) {
-		auto it = unlabelledFrames.begin();
-		FrameId *f = *it;
+		FrameId *f = unlabelledFrames.back();
 		FrameId label(nextLabel, tid);
 		nextLabel++;
 
@@ -1448,16 +1475,16 @@ assignFrameIds(StateMachineState *root,
 			pending.pop();
 			if (*fst == label) {
 				/* Already done this one */
-				assert(!unlabelledFrames.count(fst));
+				assert(!vectContains(unlabelledFrames, fst));
 				continue;
 			}
 			if (debug_assign_frame_ids)
 				printf("\tAssign %s to %p for eq rule\n",
 				       label.name(), fst);
 			assert(*fst == FrameId::invalid());
-			assert(unlabelledFrames.count(fst));
+			assert(vectContains(unlabelledFrames, fst));
 			*fst = label;
-			unlabelledFrames.erase(fst);
+			vectErase(unlabelledFrames, fst);
 			for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++) {
 				if (it->first == fst) {
 					if (debug_assign_frame_ids)
