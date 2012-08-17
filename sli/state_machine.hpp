@@ -1299,7 +1299,9 @@ public:
 void printStateMachine(const StateMachine *sm, FILE *f);
 void printStateMachine(const StateMachine *sm, FILE *f,
 		       std::map<const StateMachineState *, int> &labels);
-void printStateMachine(const StateMachineState *sm, FILE *f,
+void printStateMachine(const StateMachineState *sm, FILE *f);
+void printStateMachine(const StateMachineState *sm,
+		       FILE *f,
 		       std::map<const StateMachineState *, int> &labels);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,

@@ -1275,8 +1275,15 @@ pushIfNotPresent(std::vector<t> &a, const t &b)
 static StateMachineState *
 assignFrameIds(StateMachineState *root,
 	       unsigned tid,
+	       std::set<FrameId> &allocatedFrameIds,
 	       std::vector<FrameId> &entryStack)
 {
+	std::map<const StateMachineState *, int> stateLabels;
+	if (debug_assign_frame_ids) {
+		printf("Assigning frame IDs in:\n");
+		printStateMachine(root, stdout, stateLabels);
+	}
+
 	/* Step one: figure out how many things are on the stack at
 	 * the root state.  The idea here is to simulate every
 	 * possible path through the machine and check for stack
@@ -1331,7 +1338,6 @@ assignFrameIds(StateMachineState *root,
 
 	std::vector<FrameId *> unlabelledFrames;
 	std::set<FrameId *> preLabelledFrames;
-	std::set<FrameId> allocatedFrameIds;
 
 	/* Step two: Set up an initial stack. */
 	std::vector<FrameId> entryFrames;
@@ -1364,6 +1370,17 @@ assignFrameIds(StateMachineState *root,
 			StateMachineState *s = pending.front().first;
 			callStackT stack = pending.front().second;
 			pending.pop();
+
+			if (debug_assign_frame_ids) {
+				printf("l%d: stack = {", stateLabels[s]);
+				for (auto it = stack.begin(); it != stack.end(); it++) {
+					if (it != stack.begin())
+						printf(", ");
+					printf("%p", *it);
+				}
+				printf("}\n");
+			}
+
 			StateMachineSideEffect *se = s->getSideEffect();
 			if (se && se->type == StateMachineSideEffect::StartFunction) {
 				auto *l = (StateMachineSideEffectStartFunction *)se;
@@ -1371,6 +1388,7 @@ assignFrameIds(StateMachineState *root,
 					pushIfNotPresent(unlabelledFrames, &l->frame);
 				else
 					preLabelledFrames.insert(&l->frame);
+				printf("Push %p\n", &l->frame);
 				stack.push_back(&l->frame);
 			}
 			if (se && se->type == StateMachineSideEffect::EndFunction) {
@@ -1383,6 +1401,8 @@ assignFrameIds(StateMachineState *root,
 					pushIfNotPresent(unlabelledFrames, &l->frame);
 				else
 					preLabelledFrames.insert(&l->frame);
+				if (debug_assign_frame_ids)
+					printf("EQ constraint: %p == %p\n", o, &l->frame);
 				eqConstraints.insert(
 					std::pair<FrameId *, FrameId *>
 					(o, &l->frame));
@@ -1554,11 +1574,12 @@ probeCFGsToMachine(Oracle *oracle,
 
 	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots_this_sm;
 	std::vector<StateMachineState *> roots_this_sm;
+	std::set<FrameId> allocatedFrameIds;
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		StateMachineState *root = results[*it];
 		assert(root);
 		std::vector<FrameId> entryStack;
-		root = assignFrameIds(root, tid, entryStack);
+		root = assignFrameIds(root, tid, allocatedFrameIds, entryStack);
 		root = addEntrySideEffects(oracle, tid, root, entryStack, root->origin);
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 		roots_this_sm.push_back(root);
@@ -1632,7 +1653,8 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 	if (TIMEOUT)
 		return NULL;
 	std::vector<FrameId> entryStack;
-	s = assignFrameIds(s, tid, entryStack);
+	std::set<FrameId> allocatedFrameIds;
+	s = assignFrameIds(s, tid, allocatedFrameIds, entryStack);
 	s = addEntrySideEffects(
 			oracle,
 			tid,

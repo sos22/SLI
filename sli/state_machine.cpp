@@ -357,6 +357,13 @@ printStateMachine(const StateMachineState *sm, FILE *f, std::map<const StateMach
 }
 
 void
+printStateMachine(const StateMachineState *sm, FILE *f)
+{
+	std::map<const StateMachineState *, int> labels;
+	printStateMachine(sm, f, labels);
+}
+
+void
 printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineState *, int> &labels)
 {
 	fprintf(f, "CFG:\n");
