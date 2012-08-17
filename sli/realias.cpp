@@ -267,8 +267,16 @@ StackLayoutTable::build(StateMachine *inp)
 				( (*it)->frame, (*it)->rsp ));
 			auto it2 = it2_did_insert.first;
 			auto did_insert = it2_did_insert.second;
-			if (!did_insert)
-				assert(it2->second == (*it)->rsp);
+			if (!did_insert &&
+			    it2->second != (*it)->rsp) {
+				if (debug_build_stack_layout)
+					printf("Cannot build stack layout because %s(%p) != %s(%p)\n",
+					       nameIRExpr(it2->second),
+					       it2->second,
+					       nameIRExpr( (*it)->rsp),
+					       (*it)->rsp);
+				return false;
+			}
 		}
 		for (auto it = endFunctions.begin(); it != endFunctions.end(); it++) {
 			auto it2_did_insert = frameBoundaries.insert(
