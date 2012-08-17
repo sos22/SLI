@@ -1116,6 +1116,13 @@ Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, cons
 		irexprAliasingClass(b, *this, NULL, opt, false)).mightPoint();
 }
 
+void
+Oracle::RegisterAliasingConfiguration::operator |=(const RegisterAliasingConfiguration &config)
+{
+	for (auto it = config.content.begin(); it != config.content.end(); it++)
+		addConfig(it->first, it->second);
+}
+
 Oracle::ThreadRegisterAliasingConfiguration
 Oracle::getAliasingConfigurationForRip(const StaticRip &rip)
 {

@@ -23,6 +23,11 @@ public:
 			    IRExpr *ptr1,
 			    IRExpr *ptr2,
 			    const AllowableOptimisations &opt) const;
+	bool ptrsMightAlias(StateMachineState *where1,
+			    IRExpr *ptr1,
+			    StateMachineState *where2,
+			    IRExpr *ptr2,
+			    const AllowableOptimisations &opt) const;
 	bool findConfig(StateMachineState *, Oracle::RegisterAliasingConfiguration *) const;
 };
 

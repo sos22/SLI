@@ -165,6 +165,22 @@ MachineAliasingTable::ptrsMightAlias(StateMachineState *where,
 }
 
 bool
+MachineAliasingTable::ptrsMightAlias(StateMachineState *where1,
+				     IRExpr *ptr1,
+				     StateMachineState *where2,
+				     IRExpr *ptr2,
+				     const AllowableOptimisations &opt) const
+{
+	auto it1 = configs.find(where1);
+	auto it2 = configs.find(where2);
+	if (it1 == configs.end() || it2 == configs.end())
+		return true;
+	Oracle::RegisterAliasingConfiguration config(it1->second);
+	config |= it2->second;
+	return config.ptrsMightAlias(ptr1, ptr2, opt);
+}
+
+bool
 MachineAliasingTable::findConfig(StateMachineState *sms, Oracle::RegisterAliasingConfiguration *rac) const
 {
 	auto it = configs.find(sms);

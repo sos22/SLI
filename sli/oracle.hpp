@@ -244,6 +244,7 @@ public:
 		PointerAliasingSet lookupRegister(const threadAndRegister &r, bool buildingAliasTable) const;
 		void set(const threadAndRegister &, const PointerAliasingSet &);
 		void addConfig(unsigned tid, const ThreadRegisterAliasingConfiguration &config);
+		void operator |=(const RegisterAliasingConfiguration &config);
 
 		/* Check whether a and b might point at the same bit of
 		   memory (i.e. have intersecting pointer aliasing

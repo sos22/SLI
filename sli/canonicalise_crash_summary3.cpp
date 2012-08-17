@@ -11,6 +11,7 @@
 #include "intern.hpp"
 #include "alloc_mai.hpp"
 #include "dummy_oracle.hpp"
+#include "MachineAliasingTable.hpp"
 
 #ifndef NDEBUG
 static bool debug_subst_equalities = false;
@@ -1286,7 +1287,7 @@ class LoadCanonicaliser : public GarbageCollected<LoadCanonicaliser, &ir_heap> {
 		{}
 	};
 public:
-	LoadCanonicaliser(Oracle *oracle, CrashSummary *cs);
+	LoadCanonicaliser(CrashSummary *cs);
 	CrashSummary *canonicalise(CrashSummary *cs);
 	CrashSummary *decanonicalise(CrashSummary *cs);
 
@@ -1301,25 +1302,34 @@ public:
 	NAMED_CLASS
 };
 
-LoadCanonicaliser::LoadCanonicaliser(Oracle *oracle, CrashSummary *cs)
+LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 {
 	int cntr = 0;
 
 	struct : public StateMachineTransformer {
-		std::set<IRExprLoad *> res;
+		std::set<std::pair<StateMachineState *, IRExprLoad *> > res;
+		StateMachineState *currentState;
 		IRExpr *transformIex(IRExprLoad *iex) {
-			res.insert(iex);
+			res.insert(std::pair<StateMachineState *, IRExprLoad *>(currentState, iex));
 			return StateMachineTransformer::transformIex(iex);
+		}
+		StateMachineState *transformState(StateMachineState *s, bool *d) {
+			assert(currentState == NULL);
+			assert(!*d);
+			currentState = s;
+			s = StateMachineTransformer::transformState(s, d);
+			assert(!*d);
+			assert(currentState == s);
+			currentState = NULL;
+			return s;
 		}
 		bool rewriteNewStates() const { return false; }
 	} findAllLoads;
 	transformCrashSummary(cs, findAllLoads);
 
-	std::vector<std::pair<unsigned, VexRip> > origins(cs->loadMachine->bad_origin);
-	origins.insert(origins.end(),
-		       cs->storeMachine->bad_origin.begin(),
-		       cs->storeMachine->bad_origin.end());
-	Oracle::RegisterAliasingConfiguration rac(oracle->getAliasingConfiguration(origins));
+	MachineAliasingTable mat;
+	mat.initialise(cs->storeMachine);
+	mat.initialise(cs->loadMachine);
 
 	/* We can degrade a load X to a free variable if we can
 	 * disambiguate every LD wrt X.  i.e. a LD X can be converted
@@ -1327,24 +1337,25 @@ LoadCanonicaliser::LoadCanonicaliser(Oracle *oracle, CrashSummary *cs)
 	 * definitely aliases with Y (in which case X and Y must have
 	 * the same free variable) or X and Y definitely don't alias.
 	 */
-	std::set<IRExprLoad *> pendingLoads(findAllLoads.res);
+	std::set<std::pair<StateMachineState *, IRExprLoad *> > pendingLoads(findAllLoads.res);
 	while (!pendingLoads.empty()) {
-		IRExprLoad *k = *pendingLoads.begin();
+		std::pair<StateMachineState *, IRExprLoad *> k = *pendingLoads.begin();
 
 		bool allowSubst = true;
-		std::set<IRExprLoad *> definitelyAliasLds;
+		std::set<std::pair<StateMachineState *, IRExprLoad *> > definitelyAliasLds;
 		definitelyAliasLds.insert(k);
 		for (auto it = findAllLoads.res.begin();
 		     allowSubst && it != findAllLoads.res.end();
 		     it++) {
 			if (*it == k)
 				continue;
-			if (definitelyEqual(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
+			if (definitelyEqual(k.second->addr, it->second->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
 				assert(!definitelyAliasLds.count(*it));
 				definitelyAliasLds.insert(*it);
-				assert((*it)->ty == k->ty);
-			} else if (rac.ptrsMightAlias(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack()) &&
-				   !definitelyNotEqual(k->addr, (*it)->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
+				assert(it->second->ty == k.second->ty);
+			} else if (mat.ptrsMightAlias(k.first, k.second->addr, it->first, it->second->addr,
+						      AllowableOptimisations::defaultOptimisations.enableassumePrivateStack()) &&
+				   !definitelyNotEqual(k.second->addr, it->second->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
 				allowSubst = false;
 				/* If *it and k might alias then
 				   neither *it nor k can be converted
@@ -1358,12 +1369,12 @@ LoadCanonicaliser::LoadCanonicaliser(Oracle *oracle, CrashSummary *cs)
 		IRExprFreeVariable *fv = new IRExprFreeVariable(
 			MemoryAccessIdentifier(CfgLabel::uninitialised(),
 					       -1,
-					       cntr++), k->ty, false);
+					       cntr++), k.second->ty, false);
 		for (auto it = definitelyAliasLds.begin();
 		     it != definitelyAliasLds.end();
 		     it++) {
 			pendingLoads.erase(*it);
-			canonMap.push_back(std::pair<IRExprLoad *, IRExprFreeVariable *>(k, fv));
+			canonMap.push_back(std::pair<IRExprLoad *, IRExprFreeVariable *>(k.second, fv));
 		}
 	}
 }
@@ -1437,7 +1448,7 @@ main(int argc, char *argv[])
 
 	summary = internCrashSummary(summary);
 
-	VexPtr<LoadCanonicaliser, &ir_heap> lc(new LoadCanonicaliser(oracle, summary));
+	VexPtr<LoadCanonicaliser, &ir_heap> lc(new LoadCanonicaliser(summary));
 	summary = lc->canonicalise(summary);
 	VexPtr<OracleInterface> oracleI(oracle);
 	summary = nonFunctionalSimplifications(summary, oracleI, ALLOW_GC);
