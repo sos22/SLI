@@ -550,7 +550,8 @@ public:
 		     it++) {
 			assert(*it);
 			assert((*it)->getSideEffect());
-			assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store);
+			assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store ||
+			       (*it)->getSideEffect()->type == StateMachineSideEffect::Load);
 		}
 	}
 	AliasTableEntry(const std::set<StateMachineSideEffecting *> &_stores,
@@ -581,25 +582,26 @@ public:
 			m = true;
 		}
 	}
-	struct store_iterator {
+	struct access_iterator {
 		std::set<StateMachineSideEffecting *>::const_iterator it;
-		explicit store_iterator(const std::set<StateMachineSideEffecting *>::const_iterator &_it)
+		explicit access_iterator(const std::set<StateMachineSideEffecting *>::const_iterator &_it)
 			: it(_it)
 		{}
-		StateMachineSideEffectStore *operator->() {
+		StateMachineSideEffectMemoryAccess *operator->() {
 			assert(*it);
 			assert((*it)->getSideEffect());
-			assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store);
-			return (StateMachineSideEffectStore *)(*it)->getSideEffect();
+			assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store ||
+			       (*it)->getSideEffect()->type == StateMachineSideEffect::Load);
+			return (StateMachineSideEffectMemoryAccess *)(*it)->getSideEffect();
 		}
 		void operator++(int) { it++; }
-		bool operator!=(const store_iterator &o)
+		bool operator!=(const access_iterator &o)
 		{
 			return it != o.it;
 		}
 	};
-	store_iterator beginStores() const { return store_iterator(stores.begin()); }
-	store_iterator endStores() const { return store_iterator(stores.end()); }	
+	access_iterator beginAccesses() const { return access_iterator(stores.begin()); }
+	access_iterator endAccesses() const { return access_iterator(stores.end()); }	
 };
 
 class AliasTable {
@@ -693,10 +695,10 @@ AliasTable::build(CfgDecode &decode,
 		  const AllowableOptimisations &opt,
 		  OracleInterface *oracle)
 {
-	/* First figure out where the stores might reach from a
+	/* First figure out where the accesses might reach from a
 	 * simple control-flow perspective. */
-	/* Map from states to all of the store side effect states
-	 * which might happen before that state. */
+	/* Map from states to all of the memory access side effect
+	 * states which might happen before that state. */
 	typedef std::pair<StateMachineState *, std::set<StateMachineSideEffecting *> > reachingEntryT;
 	std::map<StateMachineState *, std::set<StateMachineSideEffecting *> > reaching;
 	std::queue<StateMachineState *> pending;
@@ -709,18 +711,19 @@ AliasTable::build(CfgDecode &decode,
 		assert(this_it != reaching.end());
 		std::set<StateMachineSideEffecting *> exitReaching(this_it->second);
 		if (s->getSideEffect() &&
-		    s->getSideEffect()->type == StateMachineSideEffect::Store) {
-			StateMachineSideEffectStore *store = (StateMachineSideEffectStore *)s->getSideEffect();
+		    (s->getSideEffect()->type == StateMachineSideEffect::Store ||
+		     s->getSideEffect()->type == StateMachineSideEffect::Load)) {
+			StateMachineSideEffectMemoryAccess *acc = (StateMachineSideEffectMemoryAccess *)s->getSideEffect();
 			/* Kill off anything which we definitely clobber */
 			for (auto it = exitReaching.begin();
 			     it != exitReaching.end();
 				) {
 				assert((*it)->getSideEffect());
-				assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store);
-				StateMachineSideEffectStore *other =
-					(StateMachineSideEffectStore *)(*it)->getSideEffect();
-				if (other->data->type() == store->data->type() &&
-				    definitelyEqual(store->addr, other->addr, opt)) {
+				StateMachineSideEffectMemoryAccess *other =
+					dynamic_cast<StateMachineSideEffectMemoryAccess *>((*it)->getSideEffect());
+				assert(other);
+				if (other->_type() == acc->_type() &&
+				    definitelyEqual(acc->addr, other->addr, opt)) {
 					exitReaching.erase(it++);
 				} else {
 					it++;
@@ -770,9 +773,10 @@ AliasTable::build(CfgDecode &decode,
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); ) {
 			StateMachineSideEffecting *o = *it2;
 			assert(o->getSideEffect());
-			assert(o->getSideEffect()->type == StateMachineSideEffect::Store);
-			StateMachineSideEffectStore *smses =
-				(StateMachineSideEffectStore *)o->getSideEffect();
+			assert(o->getSideEffect()->type == StateMachineSideEffect::Store ||
+			       o->getSideEffect()->type == StateMachineSideEffect::Load);
+			StateMachineSideEffectMemoryAccess *smses =
+				(StateMachineSideEffectMemoryAccess *)o->getSideEffect();
 			if (oracle->memoryAccessesMightAlias(decode, opt, smsel, smses)) {
 				it2++;
 			} else {
@@ -866,8 +870,25 @@ PointsToTable::refine(AliasTable &at,
 				newPts |= PointerAliasingSet::nonStackPointer;
 			if (e.mightLoadInitial)
 				newPts |= slt.initialLoadAliasing;
-			for (auto it2 = e.beginStores(); it2 != e.endStores(); it2++)
-				newPts |= pointsToSetForExpr(it2->data, smse, sl, mat, slt);
+			for (auto it2 = e.stores.begin(); it2 != e.stores.end(); it2++) {
+				StateMachineSideEffecting *satisfierState = *it2;
+				StateMachineSideEffect *satisfier = satisfierState->sideEffect;
+				assert(satisfier);
+				if (satisfier->type == StateMachineSideEffect::Load) {
+					auto *l = (StateMachineSideEffectLoad *)satisfier;
+					assert(content.count(l->target));
+					newPts |= content[l->target];
+				} else if (satisfier->type == StateMachineSideEffect::Store) {
+					newPts |= pointsToSetForExpr(
+						((StateMachineSideEffectStore *)satisfier)->data,
+						smse,
+						sl,
+						mat,
+						slt);
+				} else {
+					abort();
+				}
+			}
 			break;
 		}
 		case StateMachineSideEffect::Copy: {
@@ -931,7 +952,7 @@ AliasTable::refine(PointsToTable &ptt,
 		     it2 != it->second.stores.end();
 			) {
 			PointerAliasingSet storePts(
-				ptt.pointsToSetForExpr( ((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
+				ptt.pointsToSetForExpr( ((StateMachineSideEffectMemoryAccess *)(*it2)->getSideEffect())->addr,
 							it->first,
 							slt.forState(*it2),
 							mat,
@@ -1050,12 +1071,22 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 				printf("Replace l%d with forward from l%d\n",
 				       stateLabels[it->first], stateLabels[s_state]);
 			assert(s_state->getSideEffect());
-			assert(s_state->getSideEffect()->type == StateMachineSideEffect::Store);
+			assert(s_state->getSideEffect()->type == StateMachineSideEffect::Store ||
+			       s_state->getSideEffect()->type == StateMachineSideEffect::Load);
 			progress = true;
-			it->first->sideEffect =
-				new StateMachineSideEffectCopy(
-					l->target,
-					((StateMachineSideEffectStore *)s_state->getSideEffect())->data);
+			if (s_state->getSideEffect()->type == StateMachineSideEffect::Store) {
+				it->first->sideEffect =
+					new StateMachineSideEffectCopy(
+						l->target,
+						((StateMachineSideEffectStore *)s_state->getSideEffect())->data);
+			} else {
+				it->first->sideEffect =
+					new StateMachineSideEffectCopy(
+						l->target,
+						IRExpr_Get(
+							((StateMachineSideEffectLoad *)s_state->getSideEffect())->target,
+							l->type));
+			}
 		} else {
 			if (debug_use_alias_table)
 				printf("Can't do anything with load l%d\n",

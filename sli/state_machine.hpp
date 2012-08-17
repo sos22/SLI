@@ -662,6 +662,7 @@ public:
 		assert(addr->type() == Ity_I64);
 		rip.sanity_check();
 	}
+	virtual IRType _type() const = 0;
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 	void _inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(data); }
@@ -715,6 +716,7 @@ public:
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
+	IRType _type() const { return data->type(); }
 };
 
 template <typename ret>
@@ -784,6 +786,7 @@ public:
 		reg = target;
 		return true;
 	}
+	IRType _type() const { return type; }
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
 	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(value); }
