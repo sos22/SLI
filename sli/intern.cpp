@@ -360,6 +360,8 @@ static StateMachineState *internStateMachineState(StateMachineState *start, inte
 static StateMachineState *
 internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 {
+	if (TIMEOUT)
+		return start;
 	if (t.states.count(start))
 		return t.states[start];
 	t.states[start] = start; /* Cycle breaking */
