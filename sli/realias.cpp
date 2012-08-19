@@ -224,11 +224,13 @@ public:
 				it->second.content.sanity_check();
 		}
 	}
-	Maybe<StackLayout> &forState(StateMachineState *s)
+	Maybe<StackLayout> *forState(StateMachineState *s)
 	{
 		auto it = content.find(s);
-		assert(it != content.end());
-		return it->second;
+		if (it == content.end())
+			return NULL;
+		else
+			return &it->second;
 	}
 };
 
@@ -393,6 +395,7 @@ public:
 			     StateMachine *sm,
 			     MachineAliasingTable &mat,
 			     StackLayoutTable &slt,
+			     bool *failed,
 			     bool *done_something);
 };
 
@@ -639,11 +642,11 @@ public:
 		assert(it != content.end());
 		return it->second;
 	}
-	void refine(PointsToTable &ptt,
+	bool refine(PointsToTable &ptt,
 		    MachineAliasingTable &mat,
 		    StackLayoutTable &slt,
 		    bool *done_something,
-		    stateLabelT &labels);
+		    stateLabelT &labels) __attribute__ ((warn_unused_result));
 };
 
 static bool
@@ -852,6 +855,7 @@ PointsToTable::refine(AliasTable &at,
 		      StateMachine *sm,
 		      MachineAliasingTable &mat,
 		      StackLayoutTable &slt,
+		      bool *failed,
 		      bool *done_something)
 {
 	PointsToTable res;
@@ -862,7 +866,11 @@ PointsToTable::refine(AliasTable &at,
 		StateMachineSideEffect *effect = smse->getSideEffect();
 		assert(effect);
 		PointerAliasingSet newPts(PointerAliasingSet::nothing);
-		Maybe<StackLayout> &sl(slt.forState(smse));
+		Maybe<StackLayout> *sl = slt.forState(smse);
+		if (!sl) {
+			*failed = true;
+			return res;
+		}
 		switch (effect->type) {
 		case StateMachineSideEffect::Load: {
 			const AliasTableEntry &e(at.storesForLoad(smse));
@@ -882,7 +890,7 @@ PointsToTable::refine(AliasTable &at,
 					newPts |= pointsToSetForExpr(
 						((StateMachineSideEffectStore *)satisfier)->data,
 						smse,
-						sl,
+						*sl,
 						mat,
 						slt);
 				} else {
@@ -893,7 +901,7 @@ PointsToTable::refine(AliasTable &at,
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(c->value, smse, sl, mat, slt);
+			newPts = pointsToSetForExpr(c->value, smse, *sl, mat, slt);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
@@ -927,7 +935,7 @@ PointsToTable::refine(AliasTable &at,
 	return res;
 }
 
-void
+bool
 AliasTable::refine(PointsToTable &ptt,
 		   MachineAliasingTable &mat,
 		   StackLayoutTable &slt,
@@ -938,11 +946,14 @@ AliasTable::refine(PointsToTable &ptt,
 	     it != content.end();
 	     it++) {
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
+		Maybe<StackLayout> *sl = slt.forState(it->first);
+		if (!sl)
+			return false;
 		PointerAliasingSet loadPts(
 			ptt.pointsToSetForExpr(
 				l->addr,
 				it->first,
-				slt.forState(it->first),
+				*sl,
 				mat,
 				slt));
 		if (debug_refine_alias_table)
@@ -951,10 +962,13 @@ AliasTable::refine(PointsToTable &ptt,
 		for (auto it2 = it->second.stores.begin();
 		     it2 != it->second.stores.end();
 			) {
+			Maybe<StackLayout> *sl2 = slt.forState(*it2);
+			if (!sl2)
+				return false;
 			PointerAliasingSet storePts(
 				ptt.pointsToSetForExpr( ((StateMachineSideEffectMemoryAccess *)(*it2)->getSideEffect())->addr,
 							it->first,
-							slt.forState(*it2),
+							*sl2,
 							mat,
 							slt));
 			if (storePts.overlaps(loadPts)) {
@@ -973,6 +987,7 @@ AliasTable::refine(PointsToTable &ptt,
 			}
 		}
 	}
+	return true;
 }
 
 static StateMachine *
@@ -1023,14 +1038,25 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 
 	while (1) {
 		bool p = false;
-		PointsToTable ptt2 = ptt.refine(at, sm, mat, stackLayout, &p);
+		bool failed = false;
+		PointsToTable ptt2 = ptt.refine(at, sm, mat, stackLayout, &failed, &p);
+		if (failed) {
+			if (any_debug)
+				printf("Failed to refine points-to table\n");
+			return sm;
+		}
+
 		if (p && debug_refine_points_to_table) {
 			printf("Refined points-to table:\n");
 			ptt2.prettyPrint(stdout);
 		}
 		ptt = ptt2;
 
-		at.refine(ptt, mat, stackLayout, &p, stateLabels);
+		if (!at.refine(ptt, mat, stackLayout, &p, stateLabels)) {
+			if (any_debug)
+				printf("Failed to refine alias table\n");
+			return sm;
+		}
 		if (!p)
 			break;
 		if (debug_refine_alias_table) {
