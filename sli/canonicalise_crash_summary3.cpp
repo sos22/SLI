@@ -420,19 +420,6 @@ clauseUnderspecified(IRExpr *clause,
 		return false;
 	case Iex_HappensBefore:
 		return false;
-	case Iex_Phi: {
-		IRExprPhi *iep = (IRExprPhi *)clause;
-		for (auto it = iep->generations.begin();
-		     it != iep->generations.end();
-		     it++) {
-			auto it2 = mult.find(iep->reg.setGen(*it));
-			assert(it2 != mult.end());
-			assert(it2->second != 0);
-			if (it2->second != 1)
-				return false;
-		}
-		return true;
-	}
 	}
 	fprintf(stderr, "%s: ", __func__);
 	ppIRExpr(clause, stderr);
@@ -1328,10 +1315,10 @@ LoadCanonicaliser::LoadCanonicaliser(Oracle *oracle, CrashSummary *cs)
 	} findAllLoads;
 	transformCrashSummary(cs, findAllLoads);
 
-	std::vector<std::pair<unsigned, VexRip> > origins(cs->loadMachine->origin);
+	std::vector<std::pair<unsigned, VexRip> > origins(cs->loadMachine->bad_origin);
 	origins.insert(origins.end(),
-		       cs->storeMachine->origin.begin(),
-		       cs->storeMachine->origin.end());
+		       cs->storeMachine->bad_origin.begin(),
+		       cs->storeMachine->bad_origin.end());
 	Oracle::RegisterAliasingConfiguration rac(oracle->getAliasingConfiguration(origins));
 
 	/* We can degrade a load X to a free variable if we can

@@ -63,6 +63,8 @@ public:
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::StartAtomic:
 		case StateMachineSideEffect::EndAtomic:
+		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::StackLeaked:
 			return;
 		case StateMachineSideEffect::AssertFalse: {
 			StateMachineSideEffectAssertFalse *smseaf =
@@ -241,8 +243,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			case StateMachineSideEffect::EndAtomic:
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
-				break;
 			case StateMachineSideEffect::AssertFalse:
+			case StateMachineSideEffect::StackLeaked:
 				break;
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec =
@@ -265,6 +267,12 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			case StateMachineSideEffect::Phi: {
 				StateMachineSideEffectPhi *p =
 					(StateMachineSideEffectPhi *)e;
+				if (!alive.registerLive(p->reg))
+					dead = true;
+				break;
+			}
+			case StateMachineSideEffect::PointerAliasing: {
+				auto *p = (StateMachineSideEffectPointerAliasing *)e;
 				if (!alive.registerLive(p->reg))
 					dead = true;
 				break;

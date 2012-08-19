@@ -480,8 +480,8 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 	   that function call.  That happens to interact with some
 	   implementation details of the static analysis to give us
 	   precisely what we want. */
-	assert(inp->origin.size() == 1);
-	const VexRip &origin(inp->origin[0].second);
+	assert(inp->bad_origin.size() == 1);
+	const VexRip &origin(inp->bad_origin[0].second);
 	assert(rootStack.functions.size() <= origin.stack.size());
 	for (int x = 0; x < (int)rootStack.functions.size() - 1; x++) {
 		StaticRip rtrnRip(origin.stack[origin.stack.size() - x - 2]);
@@ -489,7 +489,7 @@ StackLayoutTable::build(StateMachine *inp, stateLabelT &labels)
 		Oracle::Function f(rtrnRip);
 		Oracle::ThreadRegisterAliasingConfiguration config;
 		if (!f.aliasConfigOnEntryToInstruction(rtrnRip, &config) ||
-		    (config.v[0] & Oracle::PointerAliasingSet::stackPointer))
+		    (config.v[0] & PointerAliasingSet::stackPointer))
 			initialRegFrames.insert(fid);
 	}
 	initialFuncFrame = rootStack.functions[rootStack.functions.size() - 1];
@@ -534,8 +534,8 @@ aliasConfigForThread(StateMachine *sm, unsigned tid,
 {
 	VexRip origin;
 	bool have_origin = false;
-	for (auto it = sm->origin.begin();
-	     !have_origin && it != sm->origin.end();
+	for (auto it = sm->bad_origin.begin();
+	     !have_origin && it != sm->bad_origin.end();
 	     it++) {
 		if (it->first == tid) {
 			origin = it->second;
@@ -550,7 +550,7 @@ aliasConfigForThread(StateMachine *sm, unsigned tid,
 
 static bool
 aliasConfigForReg(StateMachine *sm, const threadAndRegister &reg,
-		  Oracle::PointerAliasingSet *alias)
+		  PointerAliasingSet *alias)
 {
 	assert(reg.isReg());
 	assert(reg.gen() == (unsigned)-1);
@@ -568,7 +568,7 @@ aliasConfigForReg(StateMachine *sm, const threadAndRegister &reg,
 static bool
 stackMightHaveLeaked(StateMachine *sm)
 {
-	for (auto it = sm->origin.begin(); it != sm->origin.end(); it++) {
+	for (auto it = sm->bad_origin.begin(); it != sm->bad_origin.end(); it++) {
 		Oracle::ThreadRegisterAliasingConfiguration config;
 		StaticRip rip(it->second);
 		Oracle::Function f(rip);
@@ -622,17 +622,17 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 			break;
 		}
 
-		Oracle::PointerAliasingSet alias(-1);
+		PointerAliasingSet alias(-1);
 		if (!aliasConfigForReg(sm, iex->reg, &alias))
-			alias = Oracle::PointerAliasingSet::anything;
+			alias = PointerAliasingSet::anything;
 		PointsToSet res;
-		if (alias & Oracle::PointerAliasingSet::nonStackPointer) {
+		if (alias & PointerAliasingSet::nonStackPointer) {
 			res.mightPointOutsideStack = true;
 			res.targets = slt.initialRegFrames;
 		} else {
 			res.mightPointOutsideStack = false;
 		}
-		if (alias & Oracle::PointerAliasingSet::stackPointer)
+		if (alias & PointerAliasingSet::stackPointer)
 			res.targets.insert(slt.initialFuncFrame);
 		return res;
 	}
@@ -1065,6 +1065,8 @@ PointsToTable::refine(AliasTable &at,
 			}
 			break;
 		}
+		case StateMachineSideEffect::PointerAliasing:
+			break;
 		case StateMachineSideEffect::Store:
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::AssertFalse:
@@ -1072,6 +1074,7 @@ PointsToTable::refine(AliasTable &at,
 		case StateMachineSideEffect::EndAtomic:
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
+		case StateMachineSideEffect::StackLeaked:
 			/* These aren't supposed to define registers */
 			abort();
 		}
@@ -1133,7 +1136,7 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 	   of particular stack frames, but it's not good at
 	   distinguishing between the stacks of different threads.
 	   Easy fix: only appply it to single-threaded machines. */
-	if (sm->origin.size() != 1)
+	if (sm->bad_origin.size() != 1)
 		return sm;
 
 	StackLayoutTable stackLayout;

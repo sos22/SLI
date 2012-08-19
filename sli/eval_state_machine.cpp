@@ -868,6 +868,10 @@ EvalContext::evalStateMachineSideEffect(CfgDecode &decode,
 		break;
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
+
+		 /* Todo: could maybe use these to improve aliasing here */
+	case StateMachineSideEffect::StackLeaked:
+	case StateMachineSideEffect::PointerAliasing:
 		break;
 	}
 	return esme_normal;
@@ -1533,6 +1537,8 @@ definitelyDoesntRace(CfgDecode &decode,
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
+		case StateMachineSideEffect::StackLeaked:
+		case StateMachineSideEffect::PointerAliasing:
 			return true;
 		}
 	}
@@ -1790,8 +1796,8 @@ buildCrossProductMachine(CfgDecode &decode,
 		*r.first = newState;
 	}
 
-	std::vector<std::pair<unsigned, VexRip> > origin(probeMachine->origin);
-        origin.insert(origin.end(), storeMachine->origin.begin(), storeMachine->origin.end());
+	std::vector<std::pair<unsigned, VexRip> > origin(probeMachine->bad_origin);
+        origin.insert(origin.end(), storeMachine->bad_origin.begin(), storeMachine->bad_origin.end());
 	std::vector<const CFGNode *> cfg_roots(probeMachine->cfg_roots);
 	for (auto it = storeMachine->cfg_roots.begin(); it != storeMachine->cfg_roots.end(); it++) {
 		bool already_present = false;
@@ -2211,23 +2217,23 @@ concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine
 	assert(rewriteRules.count(machine->root));
 #ifndef NDEBUG
 	std::map<unsigned, VexRip> newOrigin;
-	for (auto it = machine->origin.begin();
-	     it != machine->origin.end();
+	for (auto it = machine->bad_origin.begin();
+	     it != machine->bad_origin.end();
 	     it++) {
 		assert(!newOrigin.count(it->first));
 		newOrigin.insert(*it);
 	}
-	for (auto it = to->origin.begin();
-	     it != to->origin.end();
+	for (auto it = to->bad_origin.begin();
+	     it != to->bad_origin.end();
 	     it++) {
 		assert(!newOrigin.count(it->first));
 		newOrigin.insert(*it);
 	}
 	std::vector<std::pair<unsigned, VexRip> > neworigin(newOrigin.begin(), newOrigin.end());
 #else
-	auto i = machine->origin.begin();
-	std::vector<std::pair<unsigned, VexRip> > neworigin(i, machine->origin.end());
-	neworigin.insert(neworigin.end(), to->origin.begin(), to->origin.end());
+	auto i = machine->bad_origin.begin();
+	std::vector<std::pair<unsigned, VexRip> > neworigin(i, machine->bad_origin.end());
+	neworigin.insert(neworigin.end(), to->bad_origin.begin(), to->bad_origin.end());
 #endif
 	std::vector<const CFGNode *> cfg_roots(machine->cfg_roots);
 	for (auto it = to->cfg_roots.begin(); it != to->cfg_roots.end(); it++) {

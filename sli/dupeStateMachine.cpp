@@ -176,10 +176,6 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 		const IRExprHappensBefore *i = (const IRExprHappensBefore *)inp;
 		return new IRExprHappensBefore(i->before, i->after);
 	}
-	case Iex_Phi: {
-		const IRExprPhi *i = (const IRExprPhi *)inp;
-		return new IRExprPhi(i->reg, i->generations, i->ty);
-	}
 	case Iex_FreeVariable: {
 		const IRExprFreeVariable *i = (const IRExprFreeVariable *)inp;
 		return new IRExprFreeVariable(i->id, i->ty, i->isUnique);
@@ -269,6 +265,18 @@ rawDupeS(duplication_context &ctxt, const StateMachineSideEffectEndFunction *l)
 	return res;
 }
 
+static StateMachineSideEffectStackLeaked *
+rawDupeS(duplication_context &, const StateMachineSideEffectStackLeaked *l)
+{
+	return (StateMachineSideEffectStackLeaked *)l;
+}
+
+static StateMachineSideEffectPointerAliasing *
+rawDupeS(duplication_context &, const StateMachineSideEffectPointerAliasing *l)
+{
+	return new StateMachineSideEffectPointerAliasing(l->reg, l->set);
+}
+
 static StateMachineSideEffect *
 rawDupe(duplication_context &ctxt, const StateMachineSideEffect *smse)
 {
@@ -322,10 +330,7 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 static StateMachine *
 rawDupe(duplication_context &ctxt, const StateMachine *inp)
 {
-	StateMachine *res = new StateMachine(
-		NULL,
-		inp->origin,
-		inp->cfg_roots);
+	StateMachine *res = new StateMachine((StateMachine *)inp, NULL);
 	ctxt(&res->root, inp->root, rawDupe);
 	return res;
 }

@@ -101,6 +101,18 @@ localSimilarity2(StateMachineSideEffectEndFunction *smsesf1, StateMachineSideEff
 }
 
 static bool
+localSimilarity2(StateMachineSideEffectStackLeaked *smsesf1, StateMachineSideEffectStackLeaked *smsesf2)
+{
+	return *smsesf1 == *smsesf2;
+}
+
+static bool
+localSimilarity2(StateMachineSideEffectPointerAliasing *smsesf1, StateMachineSideEffectPointerAliasing *smsesf2)
+{
+	return *smsesf1 == *smsesf2;
+}
+
+static bool
 localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2)
 {
 	if (smse1->type != smse2->type)

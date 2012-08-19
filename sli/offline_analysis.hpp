@@ -102,7 +102,6 @@ protected:
 	virtual IRExpr *transformIex(IRExprCCall *);
 	virtual IRExpr *transformIex(IRExprAssociative *);
 	virtual IRExpr *transformIex(IRExprHappensBefore *) { return NULL; }
-	virtual IRExpr *transformIex(IRExprPhi *) { return NULL; }
 	virtual IRExpr *transformIex(IRExprFreeVariable *) { return NULL; }
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 public:
@@ -138,6 +137,12 @@ protected:
 		StateMachineSideEffectStartFunction *, bool *);
 	virtual StateMachineSideEffectEndFunction *transformOneSideEffect(
 		StateMachineSideEffectEndFunction *, bool *);
+	virtual StateMachineSideEffectStackLeaked *transformOneSideEffect(
+		StateMachineSideEffectStackLeaked *, bool *)
+	{ return NULL; }
+	virtual StateMachineSideEffectPointerAliasing *transformOneSideEffect(
+		StateMachineSideEffectPointerAliasing *, bool *)
+	{ return NULL; }
 	virtual StateMachineUnreached *transformOneState(StateMachineUnreached *,
 							 bool *)
 	{ return NULL; }

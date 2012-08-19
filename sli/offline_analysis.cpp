@@ -60,33 +60,6 @@ findAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
 	enumStates(sm, &out);
 }
 
-static void
-canonicaliseRbp(StateMachine *sm, Oracle *oracle)
-{
-	for (auto it = sm->origin.begin(); it != sm->origin.end(); it++) {
-		long delta;
-		if (!oracle->getRbpToRspDelta(it->second, &delta)) {
-			/* Can't do anything if we don't know the
-			 * delta */
-			continue;
-		}
-		/* Got RBP->RSP delta, want RSP->RBP */
-		delta = -delta;
-		StateMachineSideEffect *smse =
-			new StateMachineSideEffectCopy(
-				threadAndRegister::reg(it->first, OFFSET_amd64_RBP, 0),
-				IRExpr_Associative(
-					Iop_Add64,
-					IRExpr_Get(
-						threadAndRegister::reg(it->first, OFFSET_amd64_RSP, 0),
-						Ity_I64),
-					IRExpr_Const(
-						IRConst_U64(delta)),
-					NULL));
-		sm->root = new StateMachineSideEffecting(it->second, smse, sm->root);
-	}
-}
-
 /* Find all of the states which definitely reach <survive> rather than
    <crash> and reduce them to just <survive> */
 static void
@@ -213,10 +186,10 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 	   turn means that a single aliasing configuration is valid
 	   for the entire machine. */
 	aliasp = NULL;
-	if (is_ssa && sm->origin.size() == 1) {
+	if (is_ssa && sm->bad_origin.size() == 1) {
 		Oracle *o = dynamic_cast<Oracle *>(oracle.get());
 		if (o) {
-			alias = o->getAliasingConfiguration(sm->origin);
+			alias = o->getAliasingConfiguration(sm->bad_origin);
 			aliasp = &alias;
 		}
 		sm->assertSSA();
@@ -390,15 +363,6 @@ getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> 
 	     it++) {
 		oracle->findConflictingStores(decode, *it, potentiallyConflictingStores);
 	}
-}
-
-static StateMachine *
-CFGtoStoreMachine(unsigned tid, Oracle *oracle, CFGNode *cfg,
-		  MemoryAccessIdentifierAllocator &mai)
-{
-	StateMachine *sm = storeCFGToMachine(oracle, tid, cfg, mai);
-	canonicaliseRbp(sm, oracle);
-	return sm;
 }
 
 /* If there's precisely one interesting store in the store machine and
@@ -676,7 +640,7 @@ truncateStateMachine(StateMachine *sm, StateMachineSideEffectMemoryAccess *trunc
 	StateMachineTransformer::rewriteMachine(sm, rewriteRules, false);
 	assert(rewriteRules.count(sm->root));
 	assert(rewriteRules[sm->root] != sm->root);
-	return new StateMachine(rewriteRules[sm->root], sm->origin, sm->cfg_roots);
+	return new StateMachine(sm, rewriteRules[sm->root]);
 }
 
 static void
@@ -777,7 +741,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
-	VexPtr<StateMachine, &ir_heap> sm(CFGtoStoreMachine(tid, oracle, cfg, mai));
+	VexPtr<StateMachine, &ir_heap> sm(storeCFGToMachine(oracle, tid, cfg, mai));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return NULL;
@@ -997,7 +961,6 @@ buildProbeMachine(CfgLabelAllocator &allocLabel,
 		VexPtr<StateMachine, &ir_heap> sm(sms[x]);
 		sm->sanityCheck();
 
-		canonicaliseRbp(sm, oracle);
 		sm = optimiseStateMachine(sm,
 					  opt,
 					  oracle,

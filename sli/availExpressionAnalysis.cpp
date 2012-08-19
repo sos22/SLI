@@ -486,8 +486,8 @@ updateAvailSetForSideEffect(CfgDecode &decode,
 		break;
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
-		/* This is going to need to become more cunning in
-		 * future. */
+	case StateMachineSideEffect::StackLeaked:
+	case StateMachineSideEffect::PointerAliasing:
 		break;
 	}
 
@@ -633,6 +633,8 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 	case StateMachineSideEffect::Unreached:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
+	case StateMachineSideEffect::StackLeaked:
+	case StateMachineSideEffect::PointerAliasing:
 		newEffect = smse;
 		break;
 	case StateMachineSideEffect::AssertFalse: {
@@ -871,7 +873,7 @@ buildNewStateMachineWithLoadsEliminated(
 									      &d, edgeLabels);
 	if (d) {
 		*done_something = true;
-		return new StateMachine(new_root, sm->origin, sm->cfg_roots);
+		return new StateMachine(sm, new_root);
 	} else {
 		return sm;
 	}
