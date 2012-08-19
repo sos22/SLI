@@ -237,11 +237,11 @@ StateMachine *functionAliasAnalysis(StateMachine *machine,
 StateMachine *phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 			     bool *done_something);
 
-StateMachine *removeAssertions(VexPtr<StateMachine, &ir_heap> sm,
-			       const AllowableOptimisations &opt,
-			       const VexPtr<OracleInterface> &oracle,
-			       bool is_ssa,
-			       GarbageCollectionToken token);
+StateMachine *removeAnnotations(VexPtr<StateMachine, &ir_heap> sm,
+				const AllowableOptimisations &opt,
+				const VexPtr<OracleInterface> &oracle,
+				bool is_ssa,
+				GarbageCollectionToken token);
 
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 

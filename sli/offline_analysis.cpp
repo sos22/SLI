@@ -448,13 +448,33 @@ atomicSurvivalOptimisations(const AllowableOptimisations &opt)
 }
 
 static StateMachine *
-duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
+duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 {
 	struct : public StateMachineTransformer {
+		static bool removeThisOne(StateMachineSideEffect::sideEffectType t) {
+			switch (t) {
+			case StateMachineSideEffect::AssertFalse:
+			case StateMachineSideEffect::StartFunction:
+			case StateMachineSideEffect::EndFunction:
+			case StateMachineSideEffect::StackUnescaped:
+			case StateMachineSideEffect::PointerAliasing:
+			case StateMachineSideEffect::StackLayout:
+				return true;
+			case StateMachineSideEffect::Unreached:
+			case StateMachineSideEffect::Load:
+			case StateMachineSideEffect::Store:
+			case StateMachineSideEffect::Copy:
+			case StateMachineSideEffect::Phi:
+			case StateMachineSideEffect::StartAtomic:
+			case StateMachineSideEffect::EndAtomic:
+				return false;
+			}
+			abort();
+		}
 		StateMachineSideEffecting *transformOneState(
 			StateMachineSideEffecting *a, bool *done_something)
 		{
-			if (a->sideEffect && a->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+			if (a->sideEffect && removeThisOne(a->sideEffect->type)) {
 				*done_something = true;
 				return new StateMachineSideEffecting(a->origin, NULL, a->target);
 			} else {
@@ -470,7 +490,7 @@ duplicateStateMachineNoAssertions(StateMachine *inp, bool *done_something)
 }
 
 StateMachine *
-removeAssertions(VexPtr<StateMachine, &ir_heap> sm,
+removeAnnotations(VexPtr<StateMachine, &ir_heap> sm,
 		 const AllowableOptimisations &opt,
 		 const VexPtr<OracleInterface> &oracle,
 		 bool is_ssa,
@@ -482,7 +502,7 @@ removeAssertions(VexPtr<StateMachine, &ir_heap> sm,
 		if (TIMEOUT)
 			return NULL;
 		bool done_something = false;
-		sm = duplicateStateMachineNoAssertions(sm, &done_something);
+		sm = duplicateStateMachineNoAnnotations(sm, &done_something);
 		if (!done_something)
 			break;
 		done_something = false;
@@ -1095,7 +1115,7 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
 
 	VexPtr<OracleInterface> oracleI(oracle);
-	reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
+	reducedProbeMachine = removeAnnotations(probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 	if (!reducedProbeMachine)
 		return NULL;
 	getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
@@ -1113,7 +1133,7 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 	if (localised_loads) {
 		std::set<DynAnalysisRip> newPotentiallyConflictingStores;
 		while (1) {
-			reducedProbeMachine = removeAssertions(probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
+			reducedProbeMachine = removeAnnotations(probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 			if (!reducedProbeMachine)
 				return NULL;
 			getConflictingStores(reducedProbeMachine, oracle, newPotentiallyConflictingStores);
