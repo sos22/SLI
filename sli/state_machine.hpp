@@ -24,78 +24,200 @@ void sanityCheckIRExpr(IRExpr *, const std::set<threadAndRegister, threadAndRegi
 ;
 #endif
 
+class FrameId : public Named {
+	unsigned id;
+public:
+	unsigned tid;
+private:
+	char *mkName() const {
+		return my_asprintf("frame%d:%d", tid, id);
+	}
+public:
+	FrameId(unsigned _id, unsigned _tid)
+		: id(_id), tid(_tid)
+	{}
+	static FrameId invalid()
+	{
+		return FrameId(-1, -1);
+	}
+	static bool parse(FrameId *out, const char *str, const char **suffix)
+	{
+		unsigned id;
+		unsigned tid;
+		if (parseThisString("frame", str, &str) &&
+		    parseDecimalUInt(&tid, str, &str) &&
+		    parseThisChar(':', str, &str) &&
+		    parseDecimalUInt(&id, str, suffix)) {
+			*out = FrameId(id, tid);
+			return true;
+		}
+		return false;
+	}
+	bool operator==(const FrameId &o) const {
+		return id == o.id && tid == o.tid;
+	}
+	bool operator!=(const FrameId &o) const {
+		return !(*this == o);
+	}
+	bool operator<(const FrameId &o) const {
+		/* Just here so that you can make sets of them; no
+		 * other meaning. */
+		return id < o.id || (id == o.id && tid < o.tid);
+	}
+};
+
 /* Pointer aliasing stuff.  Note that ``stack'' in this
    context means the *current* stack frame: a pointer without
    the stack bit set could still point into a *calling*
    functions' stack frame, and that wouldn't be a bug. */
 class PointerAliasingSet : public Named {
-		             
-	int v;
+	bool nonPointer;
+	bool nonStckPointer;
+public:
+	bool otherStackPointer;
+private:
+	bool valid;
+	std::set<FrameId> stackPointers;
 	char *mkName() const {
-		const char *r;
-		switch (v) {
+		if (!valid) {
+			return strdup("(<invalid>)");
+		} else {
+			std::vector<const char *> fragments;
+			if (nonPointer)
+				fragments.push_back("non-pointer");
+			if (nonStckPointer)
+				fragments.push_back("non-stack-pointer");
+			if (otherStackPointer) {
+				fragments.push_back("any-stack");
+			} else {
+				for (auto it = stackPointers.begin();
+				     it != stackPointers.end();
+				     it++)
+					fragments.push_back(it->name());
+			}
+			return flattenStringFragmentsMalloc(fragments, "|", "(", ")");
+		}
+	}
+	/* Only used for setting up the pre-defined default sets */
+	PointerAliasingSet(int k)
+		: valid(true)
+	{
+		nonPointer = nonStckPointer = otherStackPointer = false;
+		switch (k) {
 		case 0:
-			r = "()";
 			break;
 		case 1:
-			r = "not-a-pointer";
+			nonPointer = true;
 			break;
 		case 2:
-			r = "stack-pointer";
+			otherStackPointer = true;
 			break;
 		case 3:
-			r = "not-a-pointer|stack-pointer";
+			nonStckPointer = true;
 			break;
 		case 4:
-			r = "non-stack-pointer";
-			break;
-		case 5:
-			r = "not-a-pointer|non-stack-pointer";
-			break;
-		case 6:
-			r = "stack-pointer|non-stack-pointer";
-			break;
-		case 7:
-			r = "*";
+			nonPointer = otherStackPointer = nonStckPointer = true;
 			break;
 		default:
 			abort();
 		}
-		return strdup(r);
 	}
 public:
-	explicit PointerAliasingSet() : v(0xf001dead) {}
-	PointerAliasingSet(int _v) : v(_v) {}
-
+	PointerAliasingSet()
+		: valid(false)
+	{
+	}
 	static const PointerAliasingSet notAPointer;
-	static const PointerAliasingSet stackPointer;
 	static const PointerAliasingSet nonStackPointer;
+	static const PointerAliasingSet stackPointer;
 	static const PointerAliasingSet anything;
+	static const PointerAliasingSet nothing;
+	static PointerAliasingSet frame(const FrameId &fid) {
+		PointerAliasingSet res(nothing);
+		res.stackPointers.insert(fid);
+		return res;
+	}
+	static PointerAliasingSet frames(const std::set<FrameId> &inp);
+	PointerAliasingSet operator |(const PointerAliasingSet &o) const;
+	PointerAliasingSet operator &(const PointerAliasingSet &o) const;
+	/* A pointer aliasing set X implies the set Y if anything
+	   which satisfies X would also satisfy Y. */
+	bool implies(const PointerAliasingSet &o) const;
+	bool overlaps(const PointerAliasingSet &o) const;
+	bool operator !=(const PointerAliasingSet &o) const { return !(*this == o); }
+	bool operator ==(const PointerAliasingSet &o) const;
+	/* Extend this set such that anything which satisfies @o would
+	   also satisfy this one. */
+	void operator |=(const PointerAliasingSet &o);
 
-	PointerAliasingSet operator |(PointerAliasingSet o) const { return PointerAliasingSet(v | o.v); }
-	PointerAliasingSet operator &(PointerAliasingSet o) const { return PointerAliasingSet(v & o.v); }
-	PointerAliasingSet operator ~() const { return PointerAliasingSet(~v); }
-	bool operator !=(PointerAliasingSet o) const { return v != o.v; }
-	bool operator ==(PointerAliasingSet o) const { return v == o.v; }
-	operator bool() const { return v != 0; }
-	operator unsigned long() const { return v; }
-
+	bool mightPointAt(const FrameId fid) const {
+		return !valid || otherStackPointer || stackPointers.count(fid);
+	}
+	bool mightPointAtStack() const {
+		return !valid || otherStackPointer || !stackPointers.empty();
+	}
+	bool mightPointAtNonStack() const {
+		return !valid || nonStckPointer;
+	}
+	bool mightBeNonPointer() const {
+		return !valid || nonPointer;
+	}
+	bool mightPoint() const {
+		return !valid || nonStckPointer || otherStackPointer || !stackPointers.empty();
+	}
+	bool pointsAtFrames() const {
+		return !valid || !stackPointers.empty();
+	}
 	bool parse(const char *str, const char **suffix) {
-#define do_case(val, rep)					\
-		if (parseThisString(rep, str, suffix)) {	\
-			v = val;				\
-			return true;				\
+		bool nonPointer = false;
+		bool nonStackPointer = false;
+		bool anyStack = false;
+		bool valid;
+		std::set<FrameId> stackPointers;
+		if (parseThisString("(<invalid>)", str, suffix)) {
+			valid = false;
+		} else {
+			valid = true;
+			if (!parseThisChar('(', str, &str))
+				return false;
+			if (!parseThisChar(')', str, suffix)) {
+				while (1) {
+					if (parseThisString("non-pointer", str, &str)) {
+						if (nonPointer)
+							return false;
+						nonPointer = true;
+					} else if (parseThisString("non-stack-pointer", str, &str)) {
+						if (nonStackPointer)
+							return false;
+						nonStackPointer = true;
+					} else if (parseThisString("any-stack", str, &str)) {
+						if (anyStack || !stackPointers.empty())
+							return false;
+						anyStack = true;
+					} else {
+						FrameId f(FrameId::invalid());
+						if (FrameId::parse(&f, str, &str)) {
+							if (anyStack || stackPointers.count(f))
+								return false;
+							stackPointers.insert(f);
+						} else {
+							return false;
+						}
+					}
+					if (parseThisChar(')', str, suffix))
+						break;
+					if (!parseThisChar('|', str, &str))
+						return false;
+				}
+			}
 		}
-		do_case(0, "()");
-		do_case(1, "not-a-pointer");
-		do_case(2, "stack-pointer");
-		do_case(3, "not-a-pointer|stack_pointer");
-		do_case(4, "non-stack-pointer");
-		do_case(5, "not-a-pointer|non-stack-pointer");
-		do_case(6, "stack-pointer|non-stack-pointer");
-		do_case(7, "*");
-#undef do_case
-		return false;
+		this->nonPointer = nonPointer;
+		this->nonStckPointer = nonStackPointer;
+		this->otherStackPointer = anyStack;
+		this->stackPointers = stackPointers;
+		this->valid = valid;
+		clearName();
+		return true;
 	}
 };
 
@@ -105,28 +227,27 @@ class StateMachineState;
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 public:
 	StateMachineState *root;
-	std::vector<std::pair<unsigned, VexRip> > bad_origin;
-	std::vector<const CFGNode *> cfg_roots;
+	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots;
 
 	static bool parse(StateMachine **out, const char *str, const char **suffix);
 
-	StateMachine(StateMachineState *_root, const std::vector<std::pair<unsigned, VexRip> > &_origin,
-		     const std::vector<const CFGNode *> &_cfg_roots)
-		: root(_root), bad_origin(_origin), cfg_roots(_cfg_roots)
+	StateMachine(StateMachineState *_root,
+		     const std::vector<std::pair<unsigned, const CFGNode *> > &_cfg_roots)
+		: root(_root), cfg_roots(_cfg_roots)
 	{
 	}
 	StateMachine(StateMachine *parent)
-		: root(parent->root), bad_origin(parent->bad_origin), cfg_roots(parent->cfg_roots)
+		: root(parent->root), cfg_roots(parent->cfg_roots)
 	{}
 	StateMachine(StateMachine *parent, StateMachineState *_root)
-		: root(_root), bad_origin(parent->bad_origin), cfg_roots(parent->cfg_roots)
+		: root(_root), cfg_roots(parent->cfg_roots)
 	{}
 	StateMachine *optimise(const AllowableOptimisations &opt,
 			       bool *done_something);
 	void visit(HeapVisitor &hv) {
 		hv(root);
 		for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++)
-			hv(*it);
+			hv(it->second);
 	}
 #ifdef NDEBUG
 	void sanityCheck() const {}
@@ -244,8 +365,9 @@ public:
 	f(EndAtomic)				\
 	f(StartFunction)			\
 	f(EndFunction)				\
-	f(StackLeaked)				\
-	f(PointerAliasing)
+	f(StackUnescaped)			\
+	f(PointerAliasing)			\
+	f(StackLayout)
 	enum sideEffectType {
 #define mk_one(n) n,
 		all_side_effect_types(mk_one)
@@ -540,6 +662,7 @@ public:
 		assert(addr->type() == Ity_I64);
 		rip.sanity_check();
 	}
+	virtual IRType _type() const = 0;
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 	void _inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(data); }
@@ -593,6 +716,7 @@ public:
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
+	IRType _type() const { return data->type(); }
 };
 
 template <typename ret>
@@ -662,6 +786,7 @@ public:
 		reg = target;
 		return true;
 	}
+	IRType _type() const { return type; }
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
 	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(value); }
@@ -913,14 +1038,15 @@ class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
 			exprs.push_back(rsp);
 	}
 public:
-	StateMachineSideEffectStartFunction(IRExpr *_rsp)
+	StateMachineSideEffectStartFunction(IRExpr *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
-		  rsp(_rsp)
+		  rsp(_rsp), frame(_frame)
 	{
 	}
 	IRExpr *rsp;
+	FrameId frame;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "StartFunction rsp = ");
+		fprintf(f, "StartFunction(%s) rsp = ", frame.name());
 		if (rsp)
 			ppIRExpr(rsp, f);
 		else
@@ -929,11 +1055,14 @@ public:
 	static bool parse(StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *data;
-		if (parseThisString("StartFunction rsp = ", str, &str)) {
+		FrameId frame(FrameId::invalid());
+		if (parseThisString("StartFunction( ", str, &str) &&
+		    FrameId::parse(&frame, str, &str) &&
+		    parseThisString(") rsp = ", str, &str)) {
 			if (parseThisString("<inf>", str, suffix))
-				*out = new StateMachineSideEffectStartFunction(NULL);
+				*out = new StateMachineSideEffectStartFunction(NULL, frame);
 			else if (parseIRExpr(&data, str, suffix))
-				*out = new StateMachineSideEffectStartFunction(data);
+				*out = new StateMachineSideEffectStartFunction(data, frame);
 			else
 				return false;
 			return true;
@@ -955,28 +1084,32 @@ public:
 		return false;
 	}
 	bool operator==(const StateMachineSideEffectStartFunction &o) const {
-		return rsp == o.rsp;
+		return rsp == o.rsp && frame == o.frame;
 	}
 };
 class StateMachineSideEffectEndFunction : public StateMachineSideEffect {
 	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(rsp); }
 public:
-	StateMachineSideEffectEndFunction(IRExpr *_rsp)
+	StateMachineSideEffectEndFunction(IRExpr *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
-		  rsp(_rsp)
+		  rsp(_rsp), frame(_frame)
 	{
 	}
 	IRExpr *rsp;
+	FrameId frame;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "EndFunction rsp = ");
+		fprintf(f, "EndFunction(%s) rsp = ", frame.name());
 		ppIRExpr(rsp, f);
 	}
 	static bool parse(StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *rsp;
-		if (parseThisString("EndFunction rsp = ", str, &str) &&
+		FrameId frame(FrameId::invalid());
+		if (parseThisString("EndFunction(", str, &str) &&
+		    FrameId::parse(&frame, str, &str) &&
+		    parseThisString(") rsp = ", str, &str) &&
 		    parseIRExpr(&rsp, str, suffix)) {
-			*out = new StateMachineSideEffectEndFunction(rsp);
+			*out = new StateMachineSideEffectEndFunction(rsp, frame);
 			return true;
 		}
 		return false;
@@ -994,42 +1127,62 @@ public:
 		return false;
 	}
 	bool operator==(const StateMachineSideEffectEndFunction &o) const {
-		return rsp == o.rsp;
+		return rsp == o.rsp && frame == o.frame;
 	}
 };
-class StateMachineSideEffectStackLeaked : public StateMachineSideEffect {
+/* Note that for a particular frame X there are no pointers from
+ * outside X to inside X. */
+class StateMachineSideEffectStackUnescaped : public StateMachineSideEffect {
 public:
-	bool flag;
-	StateMachineSideEffectStackLeaked(bool _flag)
-		: StateMachineSideEffect(StateMachineSideEffect::StackLeaked),
-		  flag(_flag)
+	std::vector<FrameId> localFrames;
+	StateMachineSideEffectStackUnescaped(std::vector<FrameId> &_localFrames)
+		: StateMachineSideEffect(StateMachineSideEffect::StackUnescaped),
+		  localFrames(_localFrames)
 	{}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
+	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) {
+		if (localFrames.empty())
+			return NULL;
+		else
+			return this;
+	}
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare>*) const {}
 	bool definesRegister(threadAndRegister &) const { return false; }
 	void inputExpressions(std::vector<IRExpr *> &) {}
 	void prettyPrint(FILE *f) const {
-		if (flag)
-			fprintf(f, "StackLeaked");
-		else
-			fprintf(f, "StackNotLeaked");
+		fprintf(f, "STACKUNESCAPED(");
+		for (auto it = localFrames.begin(); it != localFrames.end(); it++) {
+			if (it != localFrames.begin())
+				fprintf(f, ", ");
+			fprintf(f, "%s", it->name());
+		}
+		fprintf(f, ")");
 	}
-	static bool parse(StateMachineSideEffectStackLeaked **out,
+	static bool parse(StateMachineSideEffectStackUnescaped **out,
 			  const char *str,
 			  const char **suffix)
 	{
-		if (parseThisString("StackLeaked", str, suffix))
-			*out = new StateMachineSideEffectStackLeaked(true);
-		else if (parseThisString("StackNotLeaked", str, suffix))
-			*out = new StateMachineSideEffectStackLeaked(false);
-		else
+		std::vector<FrameId> frames;
+		if (!parseThisString("STACKUNESCAPED(", str, &str))
 			return false;
+		if (!parseThisChar(')', str, suffix)) {
+			while (1) {
+				FrameId f(FrameId::invalid());
+				if (!FrameId::parse(&f, str, &str))
+					return false;
+				frames.push_back(f);
+				if (parseThisChar(')', str, suffix))
+					break;
+				if (!parseThisString(", ", str, &str))
+					return false;
+			}
+		}
+		*out = new StateMachineSideEffectStackUnescaped(frames);
 		return true;
 	}
-	bool operator==(const StateMachineSideEffectStackLeaked &o) const {
-		return flag == o.flag;
+	bool operator==(const StateMachineSideEffectStackUnescaped &o) const {
+		return localFrames == o.localFrames;
 	}
 };
 class StateMachineSideEffectPointerAliasing : public StateMachineSideEffect {
@@ -1046,9 +1199,8 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare>*) const {}
-	bool definesRegister(threadAndRegister &tr) const {
-		tr = reg;
-		return true;
+	bool definesRegister(threadAndRegister &) const {
+		return false;
 	}
 	void inputExpressions(std::vector<IRExpr *> &) {}
 	void prettyPrint(FILE *f) const {
@@ -1058,7 +1210,7 @@ public:
 	static bool parse(StateMachineSideEffectPointerAliasing **out, const char *str, const char **suffix)
 	{
 		threadAndRegister reg(threadAndRegister::invalid());
-		PointerAliasingSet set;
+		PointerAliasingSet set(PointerAliasingSet::nothing);
 
 		if (parseThisString("ALIAS ", str, &str) &&
 		    parseThreadAndRegister(&reg, str, &str) &&
@@ -1074,9 +1226,85 @@ public:
 	}
 
 };
+class StateMachineSideEffectStackLayout : public StateMachineSideEffect {
+public:
+	unsigned tid;
+	/* Second element is whether there could be any pointers to
+	 * that frame in initial memory. */
+	std::vector<std::pair<FrameId, bool> > functions;
+	StateMachineSideEffectStackLayout(
+		unsigned _tid,
+		const std::vector<std::pair<FrameId, bool> > &_functions)
+		: StateMachineSideEffect(StateMachineSideEffect::StackLayout),
+		  tid(_tid), functions(_functions)
+	{}
+	void visit(HeapVisitor &) {}
+	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
+	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
+		/* No dupes */
+		for (auto it1 = functions.begin();
+		     it1 != functions.end();
+		     it1++) {
+			for (auto it2 = it1 + 1;
+			     it2 != functions.end();
+			     it2++)
+				assert(it1->first != it2->first);
+		}
+	}
+	bool definesRegister(threadAndRegister &) const {
+		return false;
+	}
+	void inputExpressions(std::vector<IRExpr *> &) {
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "STACKLAYOUT(%d) = {", tid);
+		for (auto it = functions.begin(); it != functions.end(); it++) {
+			if (it != functions.begin())
+				fprintf(f, ", ");
+			fprintf(f, "%s%s", it->first.name(), it->second ? " <mem>" : "");
+		}
+		fprintf(f, "}");
+	}
+	static bool parse(StateMachineSideEffectStackLayout **out, const char *str, const char **suffix)
+	{
+		unsigned tid;
+		std::vector<std::pair<FrameId, bool> > functions;
+
+		if (!parseThisString("STACKLAYOUT(", str, &str) ||
+		    !parseDecimalUInt(&tid, str, &str) ||
+		    !parseThisString(") = {", str, &str))
+			return false;
+		while (1) {
+			FrameId f(FrameId::invalid());
+			bool regs;
+			if (!FrameId::parse(&f, str, &str))
+				return false;
+			if (parseThisString(" <mem>", str, &str))
+				regs = true;
+			else
+				regs = false;
+			functions.push_back(std::pair<FrameId, bool>(f, regs));
+			if (parseThisChar('}', str, suffix))
+				break;
+			if (!parseThisString(", ", str, &str))
+				return false;
+		}
+		*out = new StateMachineSideEffectStackLayout(tid, functions);
+		return true;
+	}
+	bool operator==(const StateMachineSideEffectStackLayout &o) const {
+		return tid == o.tid && functions == o.functions;
+	}
+
+};
 
 void printStateMachine(const StateMachine *sm, FILE *f);
 void printStateMachine(const StateMachine *sm, FILE *f,
+		       std::map<const StateMachineState *, int> &labels);
+void printStateMachine(const StateMachineState *sm, FILE *f);
+void printStateMachine(const StateMachineState *sm,
+		       FILE *f,
 		       std::map<const StateMachineState *, int> &labels);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
@@ -1112,6 +1340,18 @@ public:
 };
 
 template <typename t>
+class __enumStatesAdaptQueue {
+public:
+	std::queue<t> &underlying;
+	__enumStatesAdaptQueue(std::queue<t> &_underlying)
+		: underlying(_underlying)
+	{}
+	void insert(const t &what) {
+		underlying.push(what);
+	}
+};
+
+template <typename t>
 class __enumStatesAdaptVector {
 public:
 	std::vector<t> &underlying;
@@ -1124,12 +1364,12 @@ public:
 };
 
 template <typename stateType, typename containerType> void
-__enumStates(StateMachine *sm, containerType &states)
+__enumStates(StateMachineState *root, containerType &states)
 {
 	std::vector<StateMachineState *> toVisit;
 	std::set<StateMachineState *> visited;
 
-	toVisit.push_back(sm->root);
+	toVisit.push_back(root);
 	while (!toVisit.empty()) {
 		StateMachineState *s = toVisit.back();
 		toVisit.pop_back();
@@ -1144,12 +1384,12 @@ __enumStates(StateMachine *sm, containerType &states)
 }
 
 template <typename stateType, typename containerType> void
-__enumStates(const StateMachine *sm, containerType &states)
+__enumStates(const StateMachineState *root, containerType &states)
 {
 	std::vector<const StateMachineState *> toVisit;
 	std::set<const StateMachineState *> visited;
 
-	toVisit.push_back(sm->root);
+	toVisit.push_back(root);
 	while (!toVisit.empty()) {
 		const StateMachineState *s = toVisit.back();
 		toVisit.pop_back();
@@ -1167,35 +1407,61 @@ template <typename stateType> void
 enumStates(StateMachine *sm, std::set<stateType *> *states)
 {
 	__enumStatesAdaptSet<stateType *> s(*states);
-	__enumStates<stateType, __enumStatesAdaptSet<stateType *> >(sm, s);
+	__enumStates<stateType, __enumStatesAdaptSet<stateType *> >(sm->root, s);
+}
+template <typename stateType> void
+enumStates(StateMachineState *root, std::set<stateType *> *states)
+{
+	__enumStatesAdaptSet<stateType *> s(*states);
+	__enumStates<stateType, __enumStatesAdaptSet<stateType *> >(root, s);
 }
 
 template <typename stateType> void
 enumStates(const StateMachine *sm, std::set<const stateType *> *states)
 {
 	__enumStatesAdaptSet<const stateType *> s(*states);
-	__enumStates<const stateType, __enumStatesAdaptSet<const stateType *> >(sm, s);
+	__enumStates<const stateType, __enumStatesAdaptSet<const stateType *> >(sm->root, s);
+}
+
+template <typename stateType> void
+enumStates(const StateMachineState *root, std::set<const stateType *> *states)
+{
+	__enumStatesAdaptSet<const stateType *> s(*states);
+	__enumStates<const stateType, __enumStatesAdaptSet<const stateType *> >(root, s);
 }
 
 template <typename stateType> void
 enumStates(StateMachine *sm, std::vector<stateType *> *states)
 {
 	__enumStatesAdaptVector<stateType *> s(*states);
-	__enumStates<stateType, __enumStatesAdaptVector<stateType *> >(sm, s);
+	__enumStates<stateType, __enumStatesAdaptVector<stateType *> >(sm->root, s);
 }
 
 template <typename stateType> void
-enumStates(const StateMachine *sm, std::vector<const stateType *> *states)
+enumStates(const StateMachineState *sm, std::vector<const stateType *> *states)
 {
 	__enumStatesAdaptVector<const stateType *> s(*states);
 	__enumStates<const stateType, __enumStatesAdaptVector<const stateType *> >(sm, s);
 }
+template <typename stateType> void
+enumStates(const StateMachine *sm, std::vector<const stateType *> *states)
+{
+	__enumStatesAdaptVector<const stateType *> s(*states);
+	__enumStates<const stateType, __enumStatesAdaptVector<const stateType *> >(sm->root, s);
+}
+
+template <typename stateType> void
+enumStates(StateMachine *sm, std::queue<stateType *> *states)
+{
+	__enumStatesAdaptQueue<stateType *> s(*states);
+	__enumStates<stateType, __enumStatesAdaptQueue<stateType *> >(sm->root, s);
+}
 
 template <typename seType> void
-enumSideEffects(StateMachine *sm, std::set<seType *> &out)
+enumSideEffects(StateMachineState *root, std::set<seType *> &out)
 {
 	std::set<StateMachineSideEffecting *> states;
-	enumStates(sm, &states);
+	enumStates<StateMachineSideEffecting>(root, &states);
 	for (auto it = states.begin(); it != states.end(); it++) {
 		if ( !(*it)->sideEffect )
 			continue;
@@ -1203,6 +1469,12 @@ enumSideEffects(StateMachine *sm, std::set<seType *> &out)
 		if (se)
 			out.insert(se);
 	}
+}
+
+template <typename seType> void
+enumSideEffects(StateMachine *sm, std::set<seType *> &out)
+{
+	enumSideEffects(sm->root, out);
 }
 
 #endif /* !STATEMACHINE_HPP__ */

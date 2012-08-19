@@ -263,6 +263,10 @@ public:
 				Iop_64HLtoV128,
 				register_value(reg, Ity_I64),
 				register_value(reg, Ity_I64));
+		case Ity_F32:
+			return IRExpr_Unop(
+				Iop_ReinterpI32asF32,
+				register_value(reg, Ity_I32));
 		case Ity_F64:
 			return IRExpr_Unop(
 				Iop_ReinterpI64asF64,
@@ -294,6 +298,18 @@ public:
 			rv.val32 = NULL;
 			rv.val64 = e;
 			break;
+		case Ity_F32:
+			set_register(reg, IRExpr_Unop(Iop_ReinterpF32asI32, e), assumption, opt);
+			return;
+		case Ity_F64:
+			set_register(reg, IRExpr_Unop(Iop_ReinterpF64asI64, e), assumption, opt);
+			return;
+		case Ity_V128:
+			/* Bit of a hack.  We only have 64 bit
+			   registers, so if we have to store a 128 bit
+			   value we just truncate it down. */
+			set_register(reg, IRExpr_Unop(Iop_V128to64, e), assumption, opt);
+			return;
 		default:
 			abort();
 		}
@@ -870,8 +886,9 @@ EvalContext::evalStateMachineSideEffect(CfgDecode &decode,
 	case StateMachineSideEffect::EndFunction:
 
 		 /* Todo: could maybe use these to improve aliasing here */
-	case StateMachineSideEffect::StackLeaked:
+	case StateMachineSideEffect::StackUnescaped:
 	case StateMachineSideEffect::PointerAliasing:
+	case StateMachineSideEffect::StackLayout:
 		break;
 	}
 	return esme_normal;
@@ -1537,8 +1554,9 @@ definitelyDoesntRace(CfgDecode &decode,
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
-		case StateMachineSideEffect::StackLeaked:
+		case StateMachineSideEffect::StackUnescaped:
 		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::StackLayout:
 			return true;
 		}
 	}
@@ -1796,9 +1814,7 @@ buildCrossProductMachine(CfgDecode &decode,
 		*r.first = newState;
 	}
 
-	std::vector<std::pair<unsigned, VexRip> > origin(probeMachine->bad_origin);
-        origin.insert(origin.end(), storeMachine->bad_origin.begin(), storeMachine->bad_origin.end());
-	std::vector<const CFGNode *> cfg_roots(probeMachine->cfg_roots);
+	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots(probeMachine->cfg_roots);
 	for (auto it = storeMachine->cfg_roots.begin(); it != storeMachine->cfg_roots.end(); it++) {
 		bool already_present = false;
 		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++)
@@ -1807,7 +1823,7 @@ buildCrossProductMachine(CfgDecode &decode,
 		if (!already_present)
 			cfg_roots.push_back(*it);
 	}
-        return new StateMachine(crossMachineRoot, origin, cfg_roots);
+        return new StateMachine(crossMachineRoot, cfg_roots);
 }
 
 IRExpr *
@@ -2215,27 +2231,7 @@ concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine
 
 	StateMachineTransformer::rewriteMachine(machine, rewriteRules, false);
 	assert(rewriteRules.count(machine->root));
-#ifndef NDEBUG
-	std::map<unsigned, VexRip> newOrigin;
-	for (auto it = machine->bad_origin.begin();
-	     it != machine->bad_origin.end();
-	     it++) {
-		assert(!newOrigin.count(it->first));
-		newOrigin.insert(*it);
-	}
-	for (auto it = to->bad_origin.begin();
-	     it != to->bad_origin.end();
-	     it++) {
-		assert(!newOrigin.count(it->first));
-		newOrigin.insert(*it);
-	}
-	std::vector<std::pair<unsigned, VexRip> > neworigin(newOrigin.begin(), newOrigin.end());
-#else
-	auto i = machine->bad_origin.begin();
-	std::vector<std::pair<unsigned, VexRip> > neworigin(i, machine->bad_origin.end());
-	neworigin.insert(neworigin.end(), to->bad_origin.begin(), to->bad_origin.end());
-#endif
-	std::vector<const CFGNode *> cfg_roots(machine->cfg_roots);
+	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots(machine->cfg_roots);
 	for (auto it = to->cfg_roots.begin(); it != to->cfg_roots.end(); it++) {
 		bool already_present = false;
 		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++)
@@ -2245,7 +2241,6 @@ concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine
 			cfg_roots.push_back(*it);
 	}
 	return new StateMachine(rewriteRules[machine->root],
-				neworigin,
 				cfg_roots);
 }
 

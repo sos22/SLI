@@ -95,11 +95,11 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 
 	sm = input->loadMachine;
 	input->loadMachine = removeMarkers(sm, optIn, oracle, token);
-	input->loadMachine = removeAssertions(input->loadMachine, optIn, oracle, false, token);
+	input->loadMachine = removeAnnotations(input->loadMachine, optIn, oracle, false, token);
 
 	sm = input->storeMachine;
 	input->storeMachine = removeMarkers(sm, optIn, oracle, token);
-	input->storeMachine = removeAssertions(input->storeMachine, optIn, oracle, false, token);
+	input->storeMachine = removeAnnotations(input->storeMachine, optIn, oracle, false, token);
 
 	return input;
 }

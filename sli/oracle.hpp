@@ -66,6 +66,21 @@ public:
 	virtual bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *) = 0;
 	virtual bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *) = 0;
 	virtual bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *) = 0;
+	bool memoryAccessesMightAlias(CfgDecode &decode, const AllowableOptimisations &opt,
+				      StateMachineSideEffectMemoryAccess *a,
+				      StateMachineSideEffectMemoryAccess *b) {
+		if (a->type == StateMachineSideEffect::Load) {
+			if (b->type == StateMachineSideEffect::Load)
+				return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)a, (StateMachineSideEffectLoad *)b);
+			else
+				return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)a, (StateMachineSideEffectStore *)b);
+		} else {
+			if (b->type == StateMachineSideEffect::Load)
+				return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)b, (StateMachineSideEffectStore *)a);
+			else
+				return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectStore *)a, (StateMachineSideEffectStore *)b);
+		}
+	}
 	virtual bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) = 0;
         virtual bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store) = 0;
 	/* True if any table entry which includes @access as a
@@ -244,8 +259,9 @@ public:
 		PointerAliasingSet lookupRegister(const threadAndRegister &r, bool buildingAliasTable) const;
 		void set(const threadAndRegister &, const PointerAliasingSet &);
 		void addConfig(unsigned tid, const ThreadRegisterAliasingConfiguration &config);
+		void operator |=(const RegisterAliasingConfiguration &config);
 
-		/* Check whether a and b mght point at the same bit of
+		/* Check whether a and b might point at the same bit of
 		   memory (i.e. have intersecting pointer aliasing
 		   sets) given @this's register aliasing
 		   configuration.  Note that this assumes that both @a

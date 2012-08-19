@@ -6,6 +6,7 @@
 #include "offline_analysis.hpp"
 #include "libvex_prof.hpp"
 #include "allowable_optimisations.hpp"
+#include "MachineAliasingTable.hpp"
 
 /* Debug options: */
 #ifdef NDEBUG
@@ -36,28 +37,10 @@ namespace _availExpressionAnalysis {
  */
 #define MAX_LIVE_ASSERTIONS 5
 
-class findAllSideEffectsVisitor : public StateMachineTransformer {
-	StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *smse, bool *)
-	{
-		out.insert(smse);
-		return smse;
-	}
-	IRExpr *transformIRExpr(IRExpr *e, bool *)
-	{
-		return e;
-	}
-	bool rewriteNewStates() const { return false; }
-public:
-	std::set<StateMachineSideEffect *> &out;
-	findAllSideEffectsVisitor(std::set<StateMachineSideEffect *> &o)
-		: out(o)
-	{}
-};
 static void
 findAllSideEffects(StateMachine *sm, std::set<StateMachineSideEffect *> &out)
 {
-	findAllSideEffectsVisitor v(out);
-	v.transform(sm);
+	enumSideEffects(sm, out);
 }
 
 class avail_t {
@@ -403,8 +386,9 @@ static void
 updateAvailSetForSideEffect(CfgDecode &decode,
 			    avail_t &outputAvail,
 			    StateMachineSideEffect *smse,
+			    StateMachineState *where,
 			    const AllowableOptimisations &opt,
-			    const Oracle::RegisterAliasingConfiguration *alias,
+			    const MachineAliasingTable &alias,
 			    OracleInterface *oracle)
 {
 	if (TIMEOUT)
@@ -432,7 +416,7 @@ updateAvailSetForSideEffect(CfgDecode &decode,
 				addr = NULL;
 
 			if ( addr &&
-			     (!alias || alias->ptrsMightAlias(addr, smses->addr, opt)) &&
+			     alias.ptrsMightAlias(where, addr, smses->addr, opt) &&
 			     ((smses2 && oracle->memoryAccessesMightAlias(decode, opt, smses2, smses)) ||
 			      (smsel2 && oracle->memoryAccessesMightAlias(decode, opt, smsel2, smses))) &&
 			     !definitelyNotEqual( addr,
@@ -486,8 +470,9 @@ updateAvailSetForSideEffect(CfgDecode &decode,
 		break;
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
-	case StateMachineSideEffect::StackLeaked:
+	case StateMachineSideEffect::StackUnescaped:
 	case StateMachineSideEffect::PointerAliasing:
+	case StateMachineSideEffect::StackLayout:
 		break;
 	}
 
@@ -544,11 +529,12 @@ applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_assumptions, bool *do
    already-loaded values. */
 static StateMachineSideEffect *
 buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
+					StateMachineState *where,
 					StateMachineSideEffect *smse,
 					avail_t &currentlyAvailable,
 					OracleInterface *oracle,
 					bool *done_something,
-					const Oracle::RegisterAliasingConfiguration *aliasing,
+					const MachineAliasingTable &aliasing,
 					const AllowableOptimisations &opt)
 {
 	StateMachineSideEffect *newEffect;
@@ -592,7 +578,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 				dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 			if ( smses2 &&
 			     smsel->type <= smses2->data->type() &&
-			     (!aliasing || aliasing->ptrsMightAlias(smses2->addr, newAddr, opt)) &&
+			     aliasing.ptrsMightAlias(where, smses2->addr, newAddr, opt) &&
 			     definitelyEqual(smses2->addr, newAddr, opt) ) {
 				newEffect =
 					new StateMachineSideEffectCopy(
@@ -600,7 +586,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 						coerceTypes(smsel->type, smses2->data));
 			} else if ( smsel2 &&
 				    smsel->type <= smsel2->type &&
-				    (!aliasing || aliasing->ptrsMightAlias(smsel2->addr, newAddr, opt)) &&
+				    aliasing.ptrsMightAlias(where, smsel2->addr, newAddr, opt) &&
 				    definitelyEqual(smsel2->addr, newAddr, opt) ) {
 				newEffect =
 					new StateMachineSideEffectCopy(
@@ -633,7 +619,8 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 	case StateMachineSideEffect::Unreached:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
-	case StateMachineSideEffect::StackLeaked:
+	case StateMachineSideEffect::StackUnescaped:
+	case StateMachineSideEffect::StackLayout:
 	case StateMachineSideEffect::PointerAliasing:
 		newEffect = smse;
 		break;
@@ -747,7 +734,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 		IRExpr *newRsp;
 		newRsp = applyAvailSet(currentlyAvailable, sf->rsp, false, &doit, opt);
 		if (doit) {
-			newEffect = new StateMachineSideEffectStartFunction(newRsp);
+			newEffect = new StateMachineSideEffectStartFunction(newRsp, sf->frame);
 			*done_something = true;
 		} else {
 			newEffect = smse;
@@ -761,7 +748,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 		IRExpr *newRsp;
 		newRsp = applyAvailSet(currentlyAvailable, sf->rsp, false, &doit, opt);
 		if (doit) {
-			newEffect = new StateMachineSideEffectEndFunction(newRsp);
+			newEffect = new StateMachineSideEffectEndFunction(newRsp, sf->frame);
 			*done_something = true;
 		} else {
 			newEffect = smse;
@@ -776,7 +763,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 	}
 	assert(newEffect);
 	if (!*done_something) assert(newEffect == smse);
-	updateAvailSetForSideEffect(decode, currentlyAvailable, newEffect, opt, aliasing, oracle);
+	updateAvailSetForSideEffect(decode, currentlyAvailable, newEffect, where, opt, aliasing, oracle);
 	currentlyAvailable.calcRegisterMap(opt);
 	if (debug_substitutions) {
 		printf("New available set:\n");
@@ -793,7 +780,7 @@ buildNewStateMachineWithLoadsEliminated(
 	std::map<StateMachineState *, avail_t> &availMap,
 	std::map<StateMachineState *, StateMachineState *> &memo,
 	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration *alias,
+	const MachineAliasingTable &alias,
 	OracleInterface *oracle,
 	bool *done_something,
 	std::map<const StateMachineState *, int> &edgeLabels)
@@ -826,6 +813,7 @@ buildNewStateMachineWithLoadsEliminated(
 		avail.calcRegisterMap(opt);
 		if (smp->sideEffect)
 			newEffect = buildNewStateMachineWithLoadsEliminated(decode,
+									    smp,
 									    smp->sideEffect,
 									    avail,
 									    oracle,
@@ -861,7 +849,7 @@ buildNewStateMachineWithLoadsEliminated(
 	StateMachine *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
-	const Oracle::RegisterAliasingConfiguration *alias,
+	const MachineAliasingTable &alias,
 	OracleInterface *oracle,
 	bool *done_something,
 	std::map<const StateMachineState *, int> &edgeLabels)
@@ -920,7 +908,6 @@ avail_t::findAllPotentiallyAvailable(CfgDecode &decode,
 static StateMachine *
 availExpressionAnalysis(StateMachine *sm,
 			const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration *alias,
 			bool is_ssa,
 			OracleInterface *oracle,
 			bool *done_something)
@@ -933,6 +920,10 @@ availExpressionAnalysis(StateMachine *sm,
 
 	CfgDecode decode;
 	decode.addMachine(sm);
+
+	MachineAliasingTable alias;
+	if (is_ssa)
+		alias.initialise(sm);
 
 	__set_profiling(availExpressionAnalysis);
 	/* Fairly standard available expression analysis.  Each edge
@@ -979,7 +970,7 @@ availExpressionAnalysis(StateMachine *sm,
 		if ( state->type == StateMachineState::SideEffecting ) {
 			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
 			if (se)
-				updateAvailSetForSideEffect(decode, outputAvail, se, opt,
+				updateAvailSetForSideEffect(decode, outputAvail, se, state, opt,
 							    alias, oracle);
 		}
 
@@ -1025,7 +1016,6 @@ availExpressionAnalysis(StateMachine *sm,
 StateMachine *
 availExpressionAnalysis(StateMachine *sm,
 			const AllowableOptimisations &opt,
-			const Oracle::RegisterAliasingConfiguration *alias,
 			bool is_ssa,
 			OracleInterface *oracle,
 			bool *done_something)
@@ -1033,7 +1023,7 @@ availExpressionAnalysis(StateMachine *sm,
 	sm->sanityCheck();
 	if (is_ssa)
 		sm->assertSSA();
-	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(sm, opt, alias, is_ssa, oracle, done_something);
+	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(sm, opt, is_ssa, oracle, done_something);
 	res->sanityCheck();
 	if (is_ssa)
 		res->assertSSA();

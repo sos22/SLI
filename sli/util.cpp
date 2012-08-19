@@ -222,6 +222,35 @@ flattenStringFragments(std::vector<const char *> fragments)
 	return res;
 }
 
+char *
+flattenStringFragmentsMalloc(std::vector<const char *> fragments, const char *sep, const char *prefix, const char *suffix)
+{
+	size_t sz = 1;
+	for (unsigned x = 0; x < fragments.size(); x++)
+		sz += strlen(fragments[x]);
+	if (fragments.size() != 0)
+		sz += strlen(sep) * (fragments.size()-1);
+	sz += strlen(prefix);
+	sz += strlen(suffix);
+	char *res = (char *)malloc(sz);
+	char *cursor = res;
+	memcpy(cursor, prefix, strlen(prefix));
+	cursor += strlen(prefix);
+	for (unsigned x = 0; x < fragments.size(); x++) {
+		if (x != 0) {
+			memcpy(cursor, sep, strlen(sep));
+			cursor += strlen(sep);
+		}
+		memcpy(cursor, fragments[x], strlen(fragments[x]));
+		cursor += strlen(fragments[x]);
+	}
+	memcpy(cursor, suffix, strlen(suffix));
+	cursor += strlen(suffix);
+	*cursor = 0;
+	assert(cursor == res + sz-1);
+	return res;
+}
+
 void
 my_system(const char *arg1, ...)
 {

@@ -130,10 +130,11 @@ Oracle::LivenessSet::isLive(Int offset) const
 		return !!(mask & (1ul << (offset / 8)));
 }
 
+const PointerAliasingSet PointerAliasingSet::nothing(0);
 const PointerAliasingSet PointerAliasingSet::notAPointer(1);
 const PointerAliasingSet PointerAliasingSet::stackPointer(2);
-const PointerAliasingSet PointerAliasingSet::nonStackPointer(4);
-const PointerAliasingSet PointerAliasingSet::anything(7);
+const PointerAliasingSet PointerAliasingSet::nonStackPointer(3);
+const PointerAliasingSet PointerAliasingSet::anything(4);
 
 Oracle::ThreadRegisterAliasingConfiguration Oracle::ThreadRegisterAliasingConfiguration::functionEntryConfiguration(5.3f);
 Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration(float)
@@ -983,10 +984,9 @@ irexprAliasingClass(IRExpr *expr,
 			 * pointer to zone A and y is not a pointer of
 			 * any sort.  Otherwise, it's just not a
 			 * pointer. */ {
-			if (a2 & PointerAliasingSet::notAPointer) {
+			if (a2.mightBeNonPointer()) {
 				PointerAliasingSet res = a1;
-				if (a2 & (PointerAliasingSet::stackPointer |
-					  PointerAliasingSet::nonStackPointer))
+				if (a2.mightPoint())
 					res = res | PointerAliasingSet::notAPointer;
 				return res;
 			} else {
@@ -1049,7 +1049,6 @@ irexprAliasingClass(IRExpr *expr,
 								temps,
 								opt,
 								buildingAliasTable);
-			assert(res & PointerAliasingSet::anything);
 			return res;
 		}
 		case Iop_Add32:
@@ -1085,7 +1084,7 @@ irexprAliasingClass(IRExpr *expr,
 		   result. */
 		PointerAliasingSet addrType =
 			irexprAliasingClass(iel->addr, config, temps, opt, buildingAliasTable);
-		if (addrType & PointerAliasingSet::stackPointer)
+		if (addrType.mightPointAtStack())
 			return PointerAliasingSet::anything;
 		else
 			return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
@@ -1104,7 +1103,7 @@ bool
 Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a, const AllowableOptimisations &opt) const
 {
 	PointerAliasingSet as = irexprAliasingClass(a, *this, NULL, opt, false);
-	if (as & PointerAliasingSet::nonStackPointer)
+	if (as.mightPointAtNonStack())
 		return true;
 	else
 		return false;
@@ -1113,9 +1112,15 @@ Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a, const A
 bool
 Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt) const
 {
-	return irexprAliasingClass(a, *this, NULL, opt, false) &
-		irexprAliasingClass(b, *this, NULL, opt, false) &
-		~PointerAliasingSet::notAPointer;
+	return (irexprAliasingClass(a, *this, NULL, opt, false) &
+		irexprAliasingClass(b, *this, NULL, opt, false)).mightPoint();
+}
+
+void
+Oracle::RegisterAliasingConfiguration::operator |=(const RegisterAliasingConfiguration &config)
+{
+	for (auto it = config.content.begin(); it != config.content.end(); it++)
+		addConfig(it->first, it->second);
 }
 
 Oracle::ThreadRegisterAliasingConfiguration
@@ -1598,6 +1603,46 @@ Oracle::Function::liveOnEntry(const StaticRip &rip, bool isHead)
 	return LivenessSet(r);
 }
 
+static PointerAliasingSet
+PointerAliasingSet_from_int(int r)
+{
+	switch (r) {
+	case 0:
+		return PointerAliasingSet::nothing;
+	case 1:
+		return PointerAliasingSet::notAPointer;
+	case 2:
+		return PointerAliasingSet::stackPointer;
+	case 3:
+		return PointerAliasingSet::stackPointer | PointerAliasingSet::notAPointer;
+	case 4:
+		return PointerAliasingSet::nonStackPointer;
+	case 5:
+		return PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
+	case 6:
+		return PointerAliasingSet::nonStackPointer | PointerAliasingSet::stackPointer;
+	case 7:
+		return PointerAliasingSet::anything;
+	default:
+		abort();
+	}
+}
+
+static int
+int_from_PointerAliasingSet(const PointerAliasingSet &r)
+{
+	int acc;
+	assert(!r.pointsAtFrames());
+	acc = 0;
+	if (r.mightBeNonPointer())
+		acc |= 1;
+	if (r.mightPointAtNonStack())
+		acc |= 2;
+	if (r.mightPointAtStack())
+		acc |= 4;
+	return acc;
+}
+
 Oracle::ThreadRegisterAliasingConfiguration
 Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b)
 {
@@ -1625,7 +1670,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b)
 			assert(sqlite3_column_type(stmt, i) == SQLITE_INTEGER);
 			r = sqlite3_column_int64(stmt, i);
 		}
-		res.v[i] = PointerAliasingSet(r);
+		res.v[i] = PointerAliasingSet_from_int(r);
 	}
 	if (sqlite3_column_type(stmt, i) == SQLITE_NULL) {
 		res.stackHasLeaked = false;
@@ -2350,8 +2395,8 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 									      &temporaryAliases,
 									      opt,
 									      true);
-				if ((addr & PointerAliasingSet::nonStackPointer) &&
-				    (data & PointerAliasingSet::stackPointer)) {
+				if (addr.mightPointAtNonStack() &&
+				    data.mightPointAtStack()) {
 					/* Bit of a hack: rely on the
 					   fact that we only have one
 					   relevant thread here. */
@@ -2427,7 +2472,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				continue;
 			if (!(ls.mask & (1 << i)))
 				continue;
-			if (tconfig.v[i] & PointerAliasingSet::stackPointer)
+			if (tconfig.v[i].mightPointAtStack())
 				stackEscapes = true;
 		}
 #undef ARG_REGISTERS
@@ -2588,7 +2633,7 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(const StaticRip &r,
 			"UPDATE instructionAttributes SET alias0 = ?, alias1 = ?, alias2 = ?, alias3 = ?, alias4 = ?, alias5 = ?, alias6 = ?, alias7 = ?, alias8 = ?, alias9 = ?, alias10 = ?, alias11 = ?, alias12 = ?, alias13 = ?, alias14 = ?, alias15 = ?, stackHasLeaked = ? WHERE rip = ?"
 			);
 	for (i = 0; i < NR_REGS; i++)
-		bind_int64(stmt, i + 1, config.v[i]);
+		bind_int64(stmt, i + 1, int_from_PointerAliasingSet(config.v[i]));
 	bind_int64(stmt, NR_REGS + 1, config.stackHasLeaked);
 	bind_oraclerip(stmt, NR_REGS + 2, r);
 	rc = sqlite3_step(stmt);
@@ -3443,8 +3488,8 @@ Oracle::RegisterAliasingConfiguration::lookupRegister(const threadAndRegister &r
 	}
 
 	/* Don't have an aliasing configuration for this thread ->
-	 * pretty bad. */
-	abort();
+	   could go anywhere. */
+	return PointerAliasingSet::anything;
 }
 
 void
@@ -3489,7 +3534,7 @@ CfgDecode::operator()(const CfgLabel &cl)
 	std::queue<const CFGNode *> pending;
 	for (auto it = sm.begin(); it != sm.end(); it++) {
 		for (auto it2 = (*it)->cfg_roots.begin(); it2 != (*it)->cfg_roots.end(); it2++)
-			pending.push(*it2);
+			pending.push(it2->second);
 	}
 	std::set<const CFGNode *> visited;
 	while (!pending.empty()) {
@@ -3523,4 +3568,133 @@ CfgDecode::runGc(HeapVisitor &hv)
 {
 	for (auto it = sm.begin(); it != sm.end(); it++)
 		hv(*it);
+}
+
+PointerAliasingSet
+PointerAliasingSet::operator |(const PointerAliasingSet &o) const
+{
+	PointerAliasingSet res;
+	if (!valid)
+		return *this;
+	if (!o.valid)
+		return o;
+	res.nonPointer = nonPointer | o.nonPointer;
+	res.nonStckPointer = nonStckPointer | o.nonStckPointer;
+	res.otherStackPointer = otherStackPointer | o.otherStackPointer;
+	if (!res.otherStackPointer) {
+		res.stackPointers.insert(stackPointers.begin(), stackPointers.end());
+		res.stackPointers.insert(o.stackPointers.begin(), o.stackPointers.end());
+	}
+	res.valid = true;
+	return res;
+}
+
+PointerAliasingSet
+PointerAliasingSet::operator &(const PointerAliasingSet &o) const
+{
+	PointerAliasingSet res;
+	if (!valid)
+		return o;
+	if (!o.valid)
+		return *this;
+	res.nonPointer = nonPointer & o.nonPointer;
+	res.nonStckPointer = nonStckPointer & o.nonStckPointer;
+	res.otherStackPointer = otherStackPointer & o.otherStackPointer;
+	if (!res.otherStackPointer) {
+		for (auto it = stackPointers.begin(); it != stackPointers.end(); it++)
+			if (o.stackPointers.count(*it))
+				res.stackPointers.insert(*it);
+	}
+	res.valid = true;
+	return res;
+}
+
+bool
+PointerAliasingSet::operator == (const PointerAliasingSet &o) const
+{
+	if (!valid)
+		return !o.valid;
+	if (!o.valid)
+		return false;
+	if (nonPointer != o.nonPointer ||
+	    nonStckPointer != o.nonStckPointer ||
+	    otherStackPointer != o.otherStackPointer)
+		return false;
+	if (!otherStackPointer &&
+	    stackPointers != o.stackPointers)
+		return false;
+	return true;
+}
+
+bool
+PointerAliasingSet::implies(const PointerAliasingSet &o) const
+{
+	if (!valid)
+		return !o.valid;
+	if (!o.valid)
+		return false;
+	if (nonPointer > o.nonPointer ||
+	    nonStckPointer > o.nonStckPointer ||
+	    otherStackPointer > o.otherStackPointer)
+		return false;
+	if (!otherStackPointer) {
+		for (auto it = stackPointers.begin();
+		     it != stackPointers.end();
+		     it++)
+			if (!o.stackPointers.count(*it))
+				return false;
+	}
+	return true;
+}
+
+bool
+PointerAliasingSet::overlaps(const PointerAliasingSet &o) const
+{
+	if (!valid || !o.valid)
+		return true;
+	if ( (nonPointer && o.nonPointer) ||
+	     (nonStckPointer && o.nonStckPointer) )
+		return true;
+	if (otherStackPointer && o.otherStackPointer)
+		return true;
+	if (otherStackPointer && !o.stackPointers.empty())
+		return true;
+	if (o.otherStackPointer && !stackPointers.empty())
+		return true;
+	for (auto it = stackPointers.begin(); it != stackPointers.end(); it++)
+		if (o.stackPointers.count(*it))
+			return true;
+	return false;
+}
+
+void
+PointerAliasingSet::operator|=(const PointerAliasingSet &o)
+{
+	if (!valid)
+		return;
+	if (!o.valid) {
+		*this = o;
+		return;
+	}
+	nonPointer |= o.nonPointer;
+	nonStckPointer |= o.nonStckPointer;
+	otherStackPointer |= o.otherStackPointer;
+	if (otherStackPointer) {
+		stackPointers.clear();
+	} else {
+		for (auto it = o.stackPointers.begin();
+		     it != o.stackPointers.end();
+		     it++)
+			stackPointers.insert(*it);
+	}
+	clearName();
+}
+
+PointerAliasingSet
+PointerAliasingSet::frames(const std::set<FrameId> &inp)
+{
+	PointerAliasingSet res(PointerAliasingSet::nothing);
+	for (auto it = inp.begin(); it != inp.end(); it++)
+		res.stackPointers.insert(*it);
+	return res;
 }

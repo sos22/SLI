@@ -101,13 +101,19 @@ localSimilarity2(StateMachineSideEffectEndFunction *smsesf1, StateMachineSideEff
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectStackLeaked *smsesf1, StateMachineSideEffectStackLeaked *smsesf2)
+localSimilarity2(StateMachineSideEffectStackUnescaped *smsesf1, StateMachineSideEffectStackUnescaped *smsesf2)
 {
 	return *smsesf1 == *smsesf2;
 }
 
 static bool
 localSimilarity2(StateMachineSideEffectPointerAliasing *smsesf1, StateMachineSideEffectPointerAliasing *smsesf2)
+{
+	return *smsesf1 == *smsesf2;
+}
+
+static bool
+localSimilarity2(StateMachineSideEffectStackLayout *smsesf1, StateMachineSideEffectStackLayout *smsesf2)
 {
 	return *smsesf1 == *smsesf2;
 }

@@ -137,11 +137,14 @@ protected:
 		StateMachineSideEffectStartFunction *, bool *);
 	virtual StateMachineSideEffectEndFunction *transformOneSideEffect(
 		StateMachineSideEffectEndFunction *, bool *);
-	virtual StateMachineSideEffectStackLeaked *transformOneSideEffect(
-		StateMachineSideEffectStackLeaked *, bool *)
+	virtual StateMachineSideEffectStackUnescaped *transformOneSideEffect(
+		StateMachineSideEffectStackUnescaped *, bool *)
 	{ return NULL; }
 	virtual StateMachineSideEffectPointerAliasing *transformOneSideEffect(
 		StateMachineSideEffectPointerAliasing *, bool *)
+	{ return NULL; }
+	virtual StateMachineSideEffectStackLayout *transformOneSideEffect(
+		StateMachineSideEffectStackLayout *, bool *)
 	{ return NULL; }
 	virtual StateMachineUnreached *transformOneState(StateMachineUnreached *,
 							 bool *)
@@ -215,12 +218,8 @@ StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				   bool *progress = NULL);
 
 /* Individual optimisation passes. */
-void removeRedundantStores(StateMachine *sm, OracleInterface *oracle, bool *done_something,
-			   const Oracle::RegisterAliasingConfiguration *alias,
-			   const AllowableOptimisations &opt);
 StateMachine *availExpressionAnalysis(StateMachine *sm,
 				      const AllowableOptimisations &opt,
-				      const Oracle::RegisterAliasingConfiguration *alias,
 				      bool is_ssa,
 				      OracleInterface *oracle,
 				      bool *done_something);
@@ -238,11 +237,11 @@ StateMachine *functionAliasAnalysis(StateMachine *machine,
 StateMachine *phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 			     bool *done_something);
 
-StateMachine *removeAssertions(VexPtr<StateMachine, &ir_heap> sm,
-			       const AllowableOptimisations &opt,
-			       const VexPtr<OracleInterface> &oracle,
-			       bool is_ssa,
-			       GarbageCollectionToken token);
+StateMachine *removeAnnotations(VexPtr<StateMachine, &ir_heap> sm,
+				const AllowableOptimisations &opt,
+				const VexPtr<OracleInterface> &oracle,
+				bool is_ssa,
+				GarbageCollectionToken token);
 
 void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 

@@ -89,6 +89,17 @@ public:
 		}
 		abort();
 	}
+	typename underlying_it1::value_type *operator->() {
+		switch (phase) {
+		case ph_1:
+			return &*cursor1;
+		case ph_2:
+			return &*cursor2;
+		case ph_finished:
+			abort();
+		}
+		abort();
+	}
 };
 template <typename a, typename b> concatIterator<a, b>
 concatIterators(const a &a1, const b &b1)
@@ -287,7 +298,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 				       saneIterator(cs->storeMachine->cfg_roots));
 	     !it.finished();
 	     it++)
-		enumerateCFG(const_cast<CFGNode *>(*it), allNodes);
+		enumerateCFG(const_cast<CFGNode *>(it->second), allNodes);
 
 	/* Find references of the first sense */
 	{
@@ -316,7 +327,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 						       saneIterator(cs->storeMachine->cfg_roots));
 			     !it.finished();
 			     it++)
-				needed.insert(*it);
+				needed.insert(it->second);
 		}
 	}
 
@@ -391,7 +402,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 				       saneIterator(cs->storeMachine->cfg_roots));
 	     !it.finished();
 	     it++) {
-		CFGNode *n = const_cast<CFGNode *>(*it);
+		CFGNode *n = const_cast<CFGNode *>(it->second);
 		while (!needed.count(n)) {
 			int nr_successors = 0;
 			for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++) {
@@ -407,7 +418,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 				}
 			}
 		}
-		*it = n;
+		it->second = n;
 	}
 
 	/* Try a bit harder to rationalise the roots.  This version
@@ -429,7 +440,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		   instruction I' is also a dominator then every path
 		   from I' to a needed instruction must pass through
 		   I. */
-		CFGNode *root = const_cast<CFGNode *>(s->cfg_roots[0]);
+		CFGNode *root = const_cast<CFGNode *>(s->cfg_roots[0].second);
 		std::set<CFGNode *> nodes;
 		enumerateCFG(root, nodes);
 
@@ -505,7 +516,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 			if (dominators[*it2].count(result))
 				result = *it2;
 		}
-		s->cfg_roots[0] = result;
+		s->cfg_roots[0].second = result;
 	}
 
 	return cs;

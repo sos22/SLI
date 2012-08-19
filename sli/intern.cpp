@@ -337,23 +337,17 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		sf->rsp = internIRExpr(sf->rsp, t);
 		do_search(EndFunction);
 	}
-	case StateMachineSideEffect::StackLeaked: {
-		auto sf = (StateMachineSideEffectStackLeaked *)s;
-		if (sf->flag) {
-			if (!t.StackLeakedT)
-				t.StackLeakedT = sf;
-			t.sideEffects[s] = t.StackLeakedT;
-			return t.StackLeakedT;
-		} else {
-			if (!t.StackLeakedF)
-				t.StackLeakedF = sf;
-			t.sideEffects[s] = t.StackLeakedF;
-			return t.StackLeakedF;
-		}
+	case StateMachineSideEffect::StackUnescaped: {
+		auto sf = (StateMachineSideEffectStackUnescaped *)s;
+		do_search(StackUnescaped);
 	}
 	case StateMachineSideEffect::PointerAliasing: {
 		auto sf = (StateMachineSideEffectPointerAliasing *)s;
 		do_search(PointerAliasing);
+	}
+	case StateMachineSideEffect::StackLayout: {
+		auto sf = (StateMachineSideEffectStackLayout *)s;
+		do_search(StackLayout);
 	}
 #undef do_search
 
@@ -436,7 +430,7 @@ internStateMachine(StateMachine *sm, internStateMachineTable &t)
 {
 	__set_profiling(internStateMachine);
 	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
-		*it = internCFG(*it, t);
+		it->second = internCFG(it->second, t);
 	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }

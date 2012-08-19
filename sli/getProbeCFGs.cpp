@@ -543,7 +543,8 @@ operator|=(std::set<t> &a, const std::set<t> &b)
 static void
 findRoots(const std::set<CFGNode *> &allNodes,
 	  const std::set<const CFGNode *> &targetInstrs,
-	  std::set<CFGNode *> &roots)
+	  std::set<CFGNode *> &roots,
+	  bool allow_cycles)
 {
 	std::set<CFGNode *> currentlyUnrooted(allNodes);
 
@@ -585,6 +586,11 @@ findRoots(const std::set<CFGNode *> &allNodes,
 
 	removeReachable(currentlyUnrooted, newRoots);
 	roots |= newRoots;
+
+	if (!allow_cycles && !currentlyUnrooted.empty()) {
+		printf("Unexpected cycle in CFG!\n");
+		abort();
+	}
 	while (!TIMEOUT && !currentlyUnrooted.empty()) {
 		/* Nasty case: everything in @currentlyUnrooted is
 		   part of a cycle in @currentlyUnrooted.  Try to grab
@@ -641,7 +647,7 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++)
 		nodes.insert(it->second);
 
-	findRoots(nodes, targetNodes, out);
+	findRoots(nodes, targetNodes, out, true);
 	if (debug_exploration) {
 		printf("Roots before loop unrolling:\n");
 		debug_dump(out, "\t");
@@ -656,7 +662,7 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 
 	trimExcessNodes(oracle, nodes, targetNodes, maxPathLength2);
 
-	findRoots(nodes, targetNodes, out);
+	findRoots(nodes, targetNodes, out, false);
 	if (debug_exploration) {
 		printf("After trimming:\n");
 		debug_dump(out, "\t");
