@@ -802,6 +802,33 @@ struct RspCanonicalisationState : public Named {
 			}
 			abort();
 		}
+		eval_res operator + (const eval_res &o) const {
+			switch (tag) {
+			case eval_res_failed:
+				return *this;
+			case eval_res_delta:
+				switch (o.tag) {
+				case eval_res_failed:
+					return o;
+				case eval_res_delta: /* rsp + k + (rsp + k') -> unrepresentable */
+					return failed();
+				case eval_res_const:
+					return delta(val + o.val);
+				}
+				break;
+			case eval_res_const:
+				switch (o.tag) {
+				case eval_res_failed:
+					return o;
+				case eval_res_delta: /* k + (rsp + k') -> rsp + k + k' */
+					return delta(val + o.val);
+				case eval_res_const:
+					return cnst(val + o.val);
+				}
+				break;
+			}
+			abort();
+		}
 
 		bool merge(const eval_res &o) {
 			if (tag == eval_res_failed)
@@ -903,7 +930,8 @@ struct RspCanonicalisationState : public Named {
 			IRExprBinop *ieb = (IRExprBinop *)a;
 			switch (ieb->op) {
 			case Iop_Add64:
-				abort();
+				res = eval(ieb->arg1) + eval(ieb->arg2);
+				break;
 			case Iop_Sub64:
 				res = eval(ieb->arg1) - eval(ieb->arg2);
 				break;
