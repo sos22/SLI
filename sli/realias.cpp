@@ -315,17 +315,25 @@ StackLayoutTable::build(StateMachine *inp)
 		Maybe<StackLayout> exitLayout(Maybe<StackLayout>::nothing());
 		if (se && se->type == StateMachineSideEffect::StackLayout) {
 			auto l = (StateMachineSideEffectStackLayout *)se;
+			bool failed = false;
 			haveExitLayout = true;
 			exitLayout.valid = true;
 			exitLayout.content = StackLayout();
 			exitLayout.content.functions.resize(l->functions.size(), FrameId::invalid());
 			exitLayout.content.rsps.resize(l->functions.size() - 1);
 			for (unsigned x = 1; x < l->functions.size(); x++) {
-				assert(frameBoundaries.count(l->functions[x].first));
+				if (frameBoundaries.count(l->functions[x].first) == 0) {
+					failed = true;
+					break;
+				}
 				exitLayout.content.functions[x] = l->functions[x].first;
 				exitLayout.content.rsps[x-1] = frameBoundaries[l->functions[x].first];
 			}
-			exitLayout.content.functions[0] = l->functions.front().first;
+			if (failed) {
+				exitLayout.valid = false;
+			} else {
+				exitLayout.content.functions[0] = l->functions.front().first;
+			}
 		} else {
 			auto it = content.find(s);
 			if (it == content.end()) {
