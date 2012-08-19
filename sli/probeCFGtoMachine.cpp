@@ -802,6 +802,16 @@ struct RspCanonicalisationState : public Named {
 			}
 			abort();
 		}
+		eval_res operator - () const {
+			switch (tag) {
+			case eval_res_failed:
+			case eval_res_delta:
+				return failed();
+			case eval_res_const:
+				return cnst(-val);
+			}
+			abort();
+		}
 		eval_res operator + (const eval_res &o) const {
 			switch (tag) {
 			case eval_res_failed:
@@ -964,6 +974,18 @@ struct RspCanonicalisationState : public Named {
 			}
 			break;
 		}
+		case Iex_Unop: {
+			IRExprUnop *ieu = (IRExprUnop *)a;
+			switch (ieu->op) {
+			case Iop_Neg64:
+				res = -eval(ieu->arg);
+				break;
+			default:
+				break;
+			}
+			break;
+		}
+
 		case Iex_Load: /* Not available yet */
 			abort();
 		default:
