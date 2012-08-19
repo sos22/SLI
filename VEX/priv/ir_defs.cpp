@@ -46,6 +46,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 
+#include <algorithm>
 #include <vector>
 
 #include "libvex_basictypes.h"
@@ -774,33 +775,47 @@ void ppIROp ( IROp op, FILE* f )
    }
 }
 
+struct irop_table_entry {
+  const char *asString;
+  IROp op;
+  irop_table_entry(const char *_asString, IROp _op)
+    : asString(_asString), op(_op)
+  {}
+  bool operator<(const irop_table_entry &o) const {
+    return strlen(asString) > strlen(o.asString);
+  }
+};
+
 static bool parseIROp(IROp *out, const char *str, const char **suffix)
 {
-  const char *str2;
-#define __do_op2(name, sz)			\
-  if (parseThisString( # sz , str2, suffix)) {	\
-    *out = Iop_ ## name ## sz ;			\
-    return true;				\
-  }
-#define do_op(name)				\
-  if (parseThisString( #name, str, &str2)) {	\
-    __do_op2(name, 8);				\
-    __do_op2(name, 16);				\
-    __do_op2(name, 32);				\
-    __do_op2(name, 64);				\
-  }
-  foreach_op_sized(do_op)
+  static std::vector<irop_table_entry> irop_table;
+  if (irop_table.empty()) {
+#define __do_op2(name, sz)                                             \
+    irop_table.push_back(irop_table_entry( #name #sz, Iop_ ## name ## sz))
+#define do_op(name) do {                       \
+      __do_op2(name, 8);                       \
+      __do_op2(name, 16);                      \
+      __do_op2(name, 32);                      \
+      __do_op2(name, 64);                      \
+    } while (0);
+    foreach_op_sized(do_op)
 #undef do_op
 #undef __do_op2
 
-#define do_op(name)					\
-    if (parseThisString( #name, str, suffix) ) {	\
-      *out = Iop_ ## name ;				\
-      return true;					\
-    }
+#define do_op(name)                                                    \
+    irop_table.push_back(irop_table_entry( #name , Iop_ ## name));
     foreach_op_unsized(do_op)
 #undef do_op
 
+    std::sort(irop_table.begin(), irop_table.end());
+  }
+
+  for (auto it = irop_table.begin(); it != irop_table.end(); it++) {
+    if (parseThisString(it->asString, str, suffix)) {
+      *out = it->op;
+      return true;
+    }
+  }
   return false;
 }
 
