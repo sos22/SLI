@@ -1065,20 +1065,27 @@ getRspCanonicalisationDelta(StateMachineState *root, long *delta)
 			case StateMachineSideEffect::EndFunction: {
 				StateMachineSideEffectEndFunction *see = (StateMachineSideEffectEndFunction *)se;
 				RspCanonicalisationState::eval_res rspDelta = entryState.eval(see->rsp);
-				/* We'd better at least know the deltas to
-				 * end-of-function markers... */
-				assert(rspDelta.tag == RspCanonicalisationState::eval_res::eval_res_delta);
-				/* Clean up any frame pointers which might
-				 * have been pushed by this function. */
-				for (auto it = exitState.stackRsps.begin();
-				     it != exitState.stackRsps.end();
-					) {
-					if (it->first < rspDelta.val)
-						exitState.stackRsps.erase(it++);
-					else
-						it++;
+				if (rspDelta.tag == RspCanonicalisationState::eval_res::eval_res_delta) {
+					/* Clean up any frame pointers which might
+					 * have been pushed by this function. */
+					for (auto it = exitState.stackRsps.begin();
+					     it != exitState.stackRsps.end();
+						) {
+						if (it->first < rspDelta.val)
+							exitState.stackRsps.erase(it++);
+						else
+							it++;
+					}
+					exitState.clearName();
+				} else {
+					/* Leave the pointers on the
+					   stack, since we have no way
+					   of knowing which are still
+					   live.  This shouldn't ever
+					   make any actual difference,
+					   beyond makign the analysis
+					   a bit slower. */
 				}
-				exitState.clearName();
 				break;
 			}
 				/* Most side effects are irrelevant here. */
