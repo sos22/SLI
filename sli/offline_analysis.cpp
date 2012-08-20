@@ -161,6 +161,69 @@ enforceMustStoreBeforeCrash(StateMachine *sm, bool *progress)
 	return sm;
 }
 
+/* Find any stores which definitely aren't loaded by this machine and
+ * remove them.  This is kind of redundant with realias, except that
+ * here we don't rely on havign access to stack layout information. */
+static StateMachine *
+removeTerminalStores(StateMachine *sm,
+		     const AllowableOptimisations &opt,
+		     OracleInterface *oracle,
+		     bool *done_something)
+{
+	CfgDecode decode;
+	decode.addMachine(sm);
+
+	std::set<StateMachineSideEffecting *> states;
+	enumStates(sm, &states);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		StateMachineSideEffect *se = (*it)->sideEffect;
+		if (!se || se->type != StateMachineSideEffect::Store)
+			continue;
+		StateMachineSideEffectStore *store = (StateMachineSideEffectStore *)se;
+		bool mightBeLoaded = false;
+		std::queue<StateMachineState *> q;
+		((StateMachineState *)(*it))->targets(q);
+		while (!mightBeLoaded && !q.empty()) {
+			StateMachineState *s = q.front();
+			q.pop();
+			if (s->getSideEffect() &&
+			    s->getSideEffect()->type == StateMachineSideEffect::Load &&
+			    oracle->memoryAccessesMightAlias(
+				    decode,
+				    opt,
+				    (StateMachineSideEffectLoad *)s->getSideEffect(),
+				    store) &&
+			    !definitelyNotEqual(store->addr,
+						((StateMachineSideEffectLoad *)s->getSideEffect())->addr,
+						opt)) {
+				/* This load might load the store. */
+				mightBeLoaded = true;
+			} else if (s->getSideEffect() &&
+				   s->getSideEffect()->type == StateMachineSideEffect::Store &&
+				   oracle->memoryAccessesMightAlias(
+					   decode,
+					   opt,
+					   (StateMachineSideEffectStore *)s->getSideEffect(),
+					   store) &&
+				   definitelyEqual(store->addr,
+						   ((StateMachineSideEffectStore *)s->getSideEffect())->addr,
+						   opt)) {
+				/* This store will clobber the results
+				   of the store we're looking at -> it
+				   can't be loaded on this path ->
+				   don't look at successors. */
+			} else {
+				s->targets(q);
+			}
+		}
+		if (!mightBeLoaded) {
+			*done_something = true;
+			(*it)->sideEffect = NULL;
+		}
+	}
+	return sm;
+}
+
 static StateMachine *
 _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
@@ -292,6 +355,15 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 			done_something |= p;
 		}
 
+		if (opt.ignoreSideEffects() && !done_something) {
+			p = false;
+			sm = removeTerminalStores(sm, opt, oracle, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("removeTerminalStores:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+		}
 		if (progress)
 			*progress |= done_something;
 	} while (done_something);
