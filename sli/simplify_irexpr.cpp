@@ -1327,11 +1327,13 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 			}
 			hdr(CCall)
 			if (!strcmp(e->cee->name, "amd64g_calculate_condition")) {
-				return optimise_condition_calculation(
+				IRExpr *a = optimise_condition_calculation(
 					e->args[0],
 					e->args[1],
 					e->args[2],
 					e->args[3]);
+				if (a)
+					res = a;
 			}
 			return res;
 		}
