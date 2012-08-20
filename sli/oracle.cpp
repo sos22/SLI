@@ -3582,8 +3582,11 @@ PointerAliasingSet::operator |(const PointerAliasingSet &o) const
 	res.nonStckPointer = nonStckPointer | o.nonStckPointer;
 	res.otherStackPointer = otherStackPointer | o.otherStackPointer;
 	if (!res.otherStackPointer) {
-		res.stackPointers.insert(stackPointers.begin(), stackPointers.end());
-		res.stackPointers.insert(o.stackPointers.begin(), o.stackPointers.end());
+		res.stackPointers.insert(res.stackPointers.end(), stackPointers.begin(), stackPointers.end());
+		res.stackPointers.insert(res.stackPointers.end(), o.stackPointers.begin(), o.stackPointers.end());
+		std::sort(res.stackPointers.begin(), res.stackPointers.end());
+		auto i = std::unique(res.stackPointers.begin(), res.stackPointers.end());
+		res.stackPointers.erase(i, res.stackPointers.end());
 	}
 	res.valid = true;
 	return res;
@@ -3601,9 +3604,13 @@ PointerAliasingSet::operator &(const PointerAliasingSet &o) const
 	res.nonStckPointer = nonStckPointer & o.nonStckPointer;
 	res.otherStackPointer = otherStackPointer & o.otherStackPointer;
 	if (!res.otherStackPointer) {
-		for (auto it = stackPointers.begin(); it != stackPointers.end(); it++)
-			if (o.stackPointers.count(*it))
-				res.stackPointers.insert(*it);
+		if (!otherStackPointer) {
+			for (auto it = stackPointers.begin(); it != stackPointers.end(); it++)
+				if (o.mightPointAt(*it))
+					res.stackPointers.push_back(*it);
+		} else {
+			res.stackPointers = o.stackPointers;
+		}
 	}
 	res.valid = true;
 	return res;
@@ -3627,27 +3634,6 @@ PointerAliasingSet::operator == (const PointerAliasingSet &o) const
 }
 
 bool
-PointerAliasingSet::implies(const PointerAliasingSet &o) const
-{
-	if (!valid)
-		return !o.valid;
-	if (!o.valid)
-		return false;
-	if (nonPointer > o.nonPointer ||
-	    nonStckPointer > o.nonStckPointer ||
-	    otherStackPointer > o.otherStackPointer)
-		return false;
-	if (!otherStackPointer) {
-		for (auto it = stackPointers.begin();
-		     it != stackPointers.end();
-		     it++)
-			if (!o.stackPointers.count(*it))
-				return false;
-	}
-	return true;
-}
-
-bool
 PointerAliasingSet::overlaps(const PointerAliasingSet &o) const
 {
 	if (!valid || !o.valid)
@@ -3662,39 +3648,68 @@ PointerAliasingSet::overlaps(const PointerAliasingSet &o) const
 	if (o.otherStackPointer && !stackPointers.empty())
 		return true;
 	for (auto it = stackPointers.begin(); it != stackPointers.end(); it++)
-		if (o.stackPointers.count(*it))
+		if (o.mightPointAt(*it))
 			return true;
 	return false;
 }
 
-void
+/* Returns true if anything changes. */
+bool
 PointerAliasingSet::operator|=(const PointerAliasingSet &o)
 {
+	bool res = false;
 	if (!valid)
-		return;
+		return false;
 	if (!o.valid) {
 		*this = o;
-		return;
+		return true;
 	}
-	nonPointer |= o.nonPointer;
-	nonStckPointer |= o.nonStckPointer;
-	otherStackPointer |= o.otherStackPointer;
+
+	//nonPointer |= o.nonPointer;
+	if (o.nonPointer && !nonPointer) {
+		res = true;
+		nonPointer = true;
+	}
+
+	//nonStckPointer |= o.nonStckPointer;
+	if (o.nonStckPointer && !nonStckPointer) {
+		res = true;
+		nonStckPointer = true;
+	}
+
+	//otherStackPointer |= o.otherStackPointer;
+	if (o.otherStackPointer && !otherStackPointer) {
+		res = true;
+		otherStackPointer = true;
+	}
+
 	if (otherStackPointer) {
+		/* stackPointers should be empty if otherStackPointers
+		   is set, so this must be a no-op unless res is
+		   already set. */
+		assert(res || stackPointers.empty());
 		stackPointers.clear();
 	} else {
 		for (auto it = o.stackPointers.begin();
 		     it != o.stackPointers.end();
 		     it++)
-			stackPointers.insert(*it);
+			stackPointers.push_back(*it);
+		std::sort(stackPointers.begin(), stackPointers.end());
+		auto it = std::unique(stackPointers.begin(), stackPointers.end());
+		stackPointers.erase(it, stackPointers.end());
 	}
-	clearName();
+
+	if (res)
+		clearName();
+	return res;
 }
 
 PointerAliasingSet
 PointerAliasingSet::frames(const std::set<FrameId> &inp)
 {
 	PointerAliasingSet res(PointerAliasingSet::nothing);
+	res.stackPointers.reserve(inp.size());
 	for (auto it = inp.begin(); it != inp.end(); it++)
-		res.stackPointers.insert(*it);
+		res.stackPointers.push_back(*it);
 	return res;
 }

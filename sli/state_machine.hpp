@@ -77,7 +77,7 @@ public:
 	bool otherStackPointer;
 private:
 	bool valid;
-	std::set<FrameId> stackPointers;
+	std::vector<FrameId> stackPointers;
 	char *mkName() const {
 		if (!valid) {
 			return strdup("(<invalid>)");
@@ -134,24 +134,27 @@ public:
 	static const PointerAliasingSet nothing;
 	static PointerAliasingSet frame(const FrameId &fid) {
 		PointerAliasingSet res(nothing);
-		res.stackPointers.insert(fid);
+		res.stackPointers.push_back(fid);
 		return res;
 	}
 	static PointerAliasingSet frames(const std::set<FrameId> &inp);
 	PointerAliasingSet operator |(const PointerAliasingSet &o) const;
 	PointerAliasingSet operator &(const PointerAliasingSet &o) const;
-	/* A pointer aliasing set X implies the set Y if anything
-	   which satisfies X would also satisfy Y. */
-	bool implies(const PointerAliasingSet &o) const;
 	bool overlaps(const PointerAliasingSet &o) const;
 	bool operator !=(const PointerAliasingSet &o) const { return !(*this == o); }
 	bool operator ==(const PointerAliasingSet &o) const;
 	/* Extend this set such that anything which satisfies @o would
-	   also satisfy this one. */
-	void operator |=(const PointerAliasingSet &o);
+	   also satisfy this one.  Returns true if we do anything or
+	   false otherwise. */
+	bool operator |=(const PointerAliasingSet &o);
 
 	bool mightPointAt(const FrameId fid) const {
-		return !valid || otherStackPointer || stackPointers.count(fid);
+		if (!valid || otherStackPointer)
+			return true;
+		for (auto it = stackPointers.begin(); it != stackPointers.end(); it++)
+			if (*it == fid)
+				return true;
+		return false;
 	}
 	bool mightPointAtStack() const {
 		return !valid || otherStackPointer || !stackPointers.empty();
@@ -173,7 +176,7 @@ public:
 		bool nonStackPointer = false;
 		bool anyStack = false;
 		bool valid;
-		std::set<FrameId> stackPointers;
+		std::vector<FrameId> stackPointers;
 		if (parseThisString("(<invalid>)", str, suffix)) {
 			valid = false;
 		} else {
@@ -197,9 +200,17 @@ public:
 					} else {
 						FrameId f(FrameId::invalid());
 						if (FrameId::parse(&f, str, &str)) {
-							if (anyStack || stackPointers.count(f))
+							if (anyStack)
 								return false;
-							stackPointers.insert(f);
+							for (auto it = stackPointers.begin();
+							     it != stackPointers.end();
+							     it++)
+								if (*it == f)
+									return false;
+							if (!stackPointers.empty() &&
+							    f < stackPointers.back())
+								return false;
+							stackPointers.push_back(f);
 						} else {
 							return false;
 						}
