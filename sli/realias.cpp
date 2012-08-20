@@ -1120,26 +1120,27 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 		} else if (it->second.stores.size() == 1 &&
 			   !it->second.mightLoadInitial) {
 			StateMachineSideEffecting *s_state = *it->second.stores.begin();
+			StateMachineSideEffect *s_effect = s_state->getSideEffect();
 			if (debug_use_alias_table)
 				printf("Replace l%d with forward from l%d\n",
 				       stateLabels[it->first], stateLabels[s_state]);
-			assert(s_state->getSideEffect());
-			assert(s_state->getSideEffect()->type == StateMachineSideEffect::Store ||
-			       s_state->getSideEffect()->type == StateMachineSideEffect::Load);
+			assert(s_effect);
 			progress = true;
-			if (s_state->getSideEffect()->type == StateMachineSideEffect::Store) {
-				it->first->sideEffect =
-					new StateMachineSideEffectCopy(
-						l->target,
-						((StateMachineSideEffectStore *)s_state->getSideEffect())->data);
+			IRExpr *d;
+			if (s_effect->type == StateMachineSideEffect::Store) {
+				d = ((StateMachineSideEffectStore *)s_effect)->data;
+			} else if (s_effect->type == StateMachineSideEffect::Load) {
+				d = IRExpr_Get(
+					((StateMachineSideEffectLoad *)s_effect)->target,
+					l->type);
+			} else if (s_effect->type == StateMachineSideEffect::Copy) {
+				d = ((StateMachineSideEffectCopy *)s_effect)->value;
 			} else {
-				it->first->sideEffect =
-					new StateMachineSideEffectCopy(
-						l->target,
-						IRExpr_Get(
-							((StateMachineSideEffectLoad *)s_state->getSideEffect())->target,
-							l->type));
+				abort();
 			}
+			it->first->sideEffect =
+				new StateMachineSideEffectCopy(
+					l->target, d);
 		} else {
 			if (debug_use_alias_table)
 				printf("Can't do anything with load l%d\n",
