@@ -1056,7 +1056,7 @@ public:
 	{
 		IRExpr *data;
 		FrameId frame(FrameId::invalid());
-		if (parseThisString("StartFunction( ", str, &str) &&
+		if (parseThisString("StartFunction(", str, &str) &&
 		    FrameId::parse(&frame, str, &str) &&
 		    parseThisString(") rsp = ", str, &str)) {
 			if (parseThisString("<inf>", str, suffix))
