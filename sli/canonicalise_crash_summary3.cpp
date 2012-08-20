@@ -1302,29 +1302,39 @@ public:
 	NAMED_CLASS
 };
 
+/* Should be anonymous and local to
+   LoadCanonicaliser::LoadCanonicaliser(), but that triggers bugs in
+   gdb and then the debugger crashes. */
+struct LCPrivateTransformer : public StateMachineTransformer {
+	std::set<std::pair<StateMachineState *, IRExprLoad *> > res;
+	StateMachineState *currentState;
+	IRExpr *transformIex(IRExprLoad *iex) {
+		res.insert(std::pair<StateMachineState *, IRExprLoad *>(currentState, iex));
+		return StateMachineTransformer::transformIex(iex);
+	}
+	StateMachineState *transformState(StateMachineState *s, bool *d) {
+		assert(currentState == NULL);
+		assert(!*d);
+		currentState = s;
+		StateMachineState *s2 = StateMachineTransformer::transformState(s, d);
+		assert(s2 == NULL);
+		assert(!*d);
+		assert(currentState == s);
+		currentState = NULL;
+		return s2;
+	}
+	bool rewriteNewStates() const { return false; }
+	LCPrivateTransformer()
+		: currentState(NULL)
+	{}
+};
+
 LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 {
 	int cntr = 0;
 
-	struct : public StateMachineTransformer {
-		std::set<std::pair<StateMachineState *, IRExprLoad *> > res;
-		StateMachineState *currentState;
-		IRExpr *transformIex(IRExprLoad *iex) {
-			res.insert(std::pair<StateMachineState *, IRExprLoad *>(currentState, iex));
-			return StateMachineTransformer::transformIex(iex);
-		}
-		StateMachineState *transformState(StateMachineState *s, bool *d) {
-			assert(currentState == NULL);
-			assert(!*d);
-			currentState = s;
-			s = StateMachineTransformer::transformState(s, d);
-			assert(!*d);
-			assert(currentState == s);
-			currentState = NULL;
-			return s;
-		}
-		bool rewriteNewStates() const { return false; }
-	} findAllLoads;
+	LCPrivateTransformer findAllLoads;
+	findAllLoads.currentState = NULL;
 	transformCrashSummary(cs, findAllLoads);
 
 	MachineAliasingTable mat;
