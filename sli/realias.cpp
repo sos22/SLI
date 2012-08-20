@@ -458,8 +458,27 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 	case Iex_Get: {
 		IRExprGet *iex = (IRExprGet *)e;
 		if (iex->reg.isTemp()) {
-			assert(content.count(iex->reg));
-			return content[iex->reg];
+			if (!content.count(iex->reg)) {
+				/* This can actually happen sometimes
+				   during optimisation if, for
+				   instance, we determine that a load
+				   is definitely going to dereference
+				   a bad pointer and is replaced by an
+				   <unreached> side effect.  The
+				   temporary targeted by the load is
+				   then left uninitialised.  The
+				   optimiser will later remove all
+				   references to it, so it's not
+				   actually a problem, but we can
+				   sometimes see the intermediate
+				   state due to phase ordering
+				   problems.  Just do something
+				   vaguely sensible. */
+				fprintf(_logfile, "%s:%s:%d: Use of initialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
+				return PointerAliasingSet::nothing;
+			} else {
+				return content[iex->reg];
+			}
 		}
 		if (iex->reg.isReg() &&
 		    iex->reg.asReg() == OFFSET_amd64_RSP) {
