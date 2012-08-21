@@ -1541,15 +1541,26 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	std::set<std::pair<FrameId *, FrameId *> > frame_eq_constraints;
 	for (auto it = constraints.begin(); it != constraints.end(); it++) {
 		if (debug_assign_frame_ids)
-			printf("Frame constraint: %p == %p for %p == %p:%p\n",
+			printf("Frame constraint: %p == %p for %s\n",
 			       &it->afterExtension->back(),
 			       it->frame,
-			       it->afterExtension,
-			       it->beforeExtension,
-			       it->frame);
+			       it->name());
 		frame_eq_constraints.insert(
 			std::pair<FrameId *, FrameId *>
 			(&it->afterExtension->back(), it->frame));
+		assert(it->afterExtension->size() ==
+		       it->beforeExtension->size() + 1);
+		for (unsigned x = 0; x < it->beforeExtension->size(); x++) {
+			if (debug_assign_frame_ids)
+				printf("Frame constraint2: %p == %p for %s\n",
+				       &(*it->afterExtension)[x],
+				       &(*it->beforeExtension)[x],
+				       it->name());
+			frame_eq_constraints.insert(
+				std::pair<FrameId *, FrameId *>
+				(&(*it->afterExtension)[x],
+				 &(*it->beforeExtension)[x]));
+		}
 	}
 
 	int nextFrameId = 1;
@@ -1566,17 +1577,16 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 		FrameId fid(nextFrameId, tid);
 		if (debug_assign_frame_ids)
 			printf("Assign %s to %p\n", fid.name(), it->first);
-		*it->first = fid;
 		std::queue<FrameId *> toAssign;
-		toAssign.push(it->second);
+		toAssign.push(it->first);
 		while (!toAssign.empty()) {
 			FrameId *f = toAssign.front();
 			toAssign.pop();
 			if (*f == fid)
 				continue;
-			assert(*f == FrameId::invalid());
 			if (debug_assign_frame_ids)
 				printf("\tPropagate to %p\n", f);
+			assert(*f == FrameId::invalid());
 			*f = fid;
 			for (auto it2 = frame_eq_constraints.begin(); it2 != frame_eq_constraints.end(); it2++) {
 				if (it2->first == f)
