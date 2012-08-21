@@ -35,7 +35,7 @@ namespace __nf {
 }
 #endif
 
-#define NF_MAX_EXPRESSION 10000
+#define NF_MAX_EXPRESSION 100
 
 static bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
 static void insert_term_destruct(NF_Term &src, NF_Expression &out);
