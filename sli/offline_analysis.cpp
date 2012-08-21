@@ -16,6 +16,7 @@
 #include "alloc_mai.hpp"
 #include "sat_checker.hpp"
 #include "allowable_optimisations.hpp"
+#include "control_domination_map.hpp"
 
 #ifndef NDEBUG
 static bool debugOptimiseStateMachine = false;
@@ -311,8 +312,19 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 			}
 			done_something |= p;
 
+			/* Note that we use the same CDM for
+			   functionAliasAnalysis and phi elimination,
+			   without trying to recompute it.  That's
+			   fine, because function alias analysis won't
+			   modify the control-flow structure of the
+			   machine. */
+			ControlDominationMap cdm;
+			cdm.init(sm, opt);
+			if (TIMEOUT)
+				break;
+
 			p = false;
-			sm = functionAliasAnalysis(sm, opt, oracle, &p);
+			sm = functionAliasAnalysis(sm, opt, oracle, cdm, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("functionAliasAnalysis:\n");
 				printStateMachine(sm, stdout);
@@ -320,7 +332,7 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 			done_something |= p;
 
 			p = false;
-			sm = phiElimination(sm, opt, &p);
+			sm = phiElimination(sm, opt, cdm, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("phiElimination:\n");
 				printStateMachine(sm, stdout);

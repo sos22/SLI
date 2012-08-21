@@ -1028,7 +1028,8 @@ AliasTable::refine(PointsToTable &ptt,
 }
 
 static StateMachine *
-functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle,
+		      const ControlDominationMap &, bool *done_something)
 {
 	StackLayoutTable stackLayout;
 	stateLabelT stateLabels;
@@ -1207,7 +1208,8 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 }
 
 StateMachine *
-functionAliasAnalysis(StateMachine *machine, const AllowableOptimisations &opt, OracleInterface *oracle, bool *done_something)
+functionAliasAnalysis(StateMachine *machine, const AllowableOptimisations &opt, OracleInterface *oracle,
+		      const ControlDominationMap &cdm, bool *done_something)
 {
-	return _realias::functionAliasAnalysis(machine, opt, oracle, done_something);
+  return _realias::functionAliasAnalysis(machine, opt, oracle, cdm, done_something);
 }

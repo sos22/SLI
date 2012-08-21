@@ -230,12 +230,14 @@ StateMachine *useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisatio
 StateMachine *removeLocalSurvival(StateMachine *sm,
 				  const AllowableOptimisations &opt,
 				  bool *done_something);
+class ControlDominationMap;
 StateMachine *functionAliasAnalysis(StateMachine *machine,
 				    const AllowableOptimisations &opt,
 				    OracleInterface *oracle,
+				    const ControlDominationMap &cdm,
 				    bool *done_something);
 StateMachine *phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
-			     bool *done_something);
+			     const ControlDominationMap &cdm, bool *done_something);
 
 StateMachine *removeAnnotations(VexPtr<StateMachine, &ir_heap> sm,
 				const AllowableOptimisations &opt,

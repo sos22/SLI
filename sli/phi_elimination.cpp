@@ -20,13 +20,9 @@ static bool debug_use_domination = false;
 static StateMachine *
 phiElimination(StateMachine *sm,
 	       const AllowableOptimisations &opt,
+	       const ControlDominationMap &dominatingExpressions,
 	       bool *done_something)
 {
-	ControlDominationMap dominatingExpressions;
-	dominatingExpressions.init(sm, opt);
-	if (TIMEOUT)
-		return sm;
-
 	/* We're only really interested in registers which are input
 	   to Phi expressions. */
 	std::set<threadAndRegister, threadAndRegister::fullCompare> phiRegs;
@@ -248,7 +244,8 @@ phiElimination(StateMachine *sm,
 
 StateMachine *
 phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
+	       const ControlDominationMap &dominatingExpressions,
 	       bool *done_something)
 {
-	return _phi_elimination::phiElimination(sm, opt, done_something);
+	return _phi_elimination::phiElimination(sm, opt, dominatingExpressions, done_something);
 }
