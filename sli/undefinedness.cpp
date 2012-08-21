@@ -136,7 +136,26 @@ class UndefinednessTransformer : public StateMachineTransformer {
 		}
 		return r;
 	}
-
+	IRExpr *transformIex(IRExprMux0X *e) {
+		bool t = false;
+		IRExpr *c = transformIRExpr(e->cond, &t);
+		IRExpr *z = transformIRExpr(e->expr0, &t);
+		IRExpr *x = transformIRExpr(e->exprX, &t);
+		
+		if (c == UNDEFINED_EXPR) {
+			if (z == UNDEFINED_EXPR || x == UNDEFINED_EXPR)
+				return UNDEFINED_EXPR;
+			return z;
+		}
+		if (z == UNDEFINED_EXPR)
+			return x;
+		if (x == UNDEFINED_EXPR)
+			return z;
+		if (!t)
+			return NULL;
+		else
+			return IRExpr_Mux0X(c, z, x);		
+	}
 public:
 	UndefinednessTransformer(const VariableDefinednessMap &_vdm)
 		: vdm(_vdm)
