@@ -694,15 +694,16 @@ mightLoadInitialValue(StateMachineSideEffecting *smse,
 		if (s == smse)
 			return true;
 		if (s->getSideEffect() &&
-		    s->getSideEffect()->type == StateMachineSideEffect::Store) {
-			StateMachineSideEffectStore *store = (StateMachineSideEffectStore *)s->getSideEffect();
+		    (s->getSideEffect()->type == StateMachineSideEffect::Store ||
+		     s->getSideEffect()->type == StateMachineSideEffect::Load)) {
+			StateMachineSideEffectMemoryAccess *store = (StateMachineSideEffectMemoryAccess *)s->getSideEffect();
 			/* Note that checking the oracle is
 			   *mandatory* here.  Otherwise, when the
 			   oracle is incomplete we end up with an
 			   inconsistency between here and the alias
 			   table, and that leads to lots of bad things
 			   happening. */
-			if (store->data->type() == load->type &&
+			if (store->_type() == load->_type() &&
 			    oracle->memoryAccessesMightAlias(decode, opt, load, store) &&
 			    definitelyEqual(store->addr, load->addr, opt)) {
 				/* This store will satisfy the load,
