@@ -807,7 +807,16 @@ AliasTable::build(CfgDecode &decode,
 			       o->getSideEffect()->type == StateMachineSideEffect::Load);
 			StateMachineSideEffectMemoryAccess *smses =
 				(StateMachineSideEffectMemoryAccess *)o->getSideEffect();
-			if (oracle->memoryAccessesMightAlias(decode, opt, smsel, smses)) {
+			/* We preserve stores if there's any
+			   possibility that they overlap, but loads
+			   only if they definitely do.  That's because
+			   we can safely drop loads from the set
+			   without harming correctness, and we ideally
+			   want the set to be as small as possible,
+			   but losing a store is a disaster. */
+			if (oracle->memoryAccessesMightAlias(decode, opt, smsel, smses) &&
+			    (smses->type == StateMachineSideEffect::Store ||
+			     definitelyEqual(smses->addr, smsel->addr, opt))) {
 				it2++;
 			} else {
 				it->second.erase(it2++);
