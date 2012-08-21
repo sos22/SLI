@@ -4,6 +4,8 @@
 #include "allowable_optimisations.hpp"
 #include "maybe.hpp"
 #include "MachineAliasingTable.hpp"
+#include "control_domination_map.hpp"
+#include "sat_checker.hpp"
 
 namespace _realias {
 
@@ -612,26 +614,6 @@ public:
 			m = true;
 		}
 	}
-	struct access_iterator {
-		std::set<StateMachineSideEffecting *>::const_iterator it;
-		explicit access_iterator(const std::set<StateMachineSideEffecting *>::const_iterator &_it)
-			: it(_it)
-		{}
-		StateMachineSideEffectMemoryAccess *operator->() {
-			assert(*it);
-			assert((*it)->getSideEffect());
-			assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store ||
-			       (*it)->getSideEffect()->type == StateMachineSideEffect::Load);
-			return (StateMachineSideEffectMemoryAccess *)(*it)->getSideEffect();
-		}
-		void operator++(int) { it++; }
-		bool operator!=(const access_iterator &o)
-		{
-			return it != o.it;
-		}
-	};
-	access_iterator beginAccesses() const { return access_iterator(stores.begin()); }
-	access_iterator endAccesses() const { return access_iterator(stores.end()); }	
 };
 
 class AliasTable {
@@ -1027,9 +1009,25 @@ AliasTable::refine(PointsToTable &ptt,
 	return true;
 }
 
+static IRExpr *
+dataOfSideEffect(StateMachineSideEffect *s_effect)
+{
+	if (s_effect->type == StateMachineSideEffect::Store) {
+		return ((StateMachineSideEffectStore *)s_effect)->data;
+	} else if (s_effect->type == StateMachineSideEffect::Load) {
+		return IRExpr_Get(
+			((StateMachineSideEffectLoad *)s_effect)->target,
+			((StateMachineSideEffectLoad *)s_effect)->type);
+	} else if (s_effect->type == StateMachineSideEffect::Copy) {
+		return ((StateMachineSideEffectCopy *)s_effect)->value;
+	} else {
+		abort();
+	}
+}
+
 static StateMachine *
 functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle,
-		      const ControlDominationMap &, bool *done_something)
+		      const ControlDominationMap &cdm, bool *done_something)
 {
 	StackLayoutTable stackLayout;
 	stateLabelT stateLabels;
@@ -1137,21 +1135,102 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 				       stateLabels[it->first], stateLabels[s_state]);
 			assert(s_effect);
 			progress = true;
-			IRExpr *d;
-			if (s_effect->type == StateMachineSideEffect::Store) {
-				d = ((StateMachineSideEffectStore *)s_effect)->data;
-			} else if (s_effect->type == StateMachineSideEffect::Load) {
-				d = IRExpr_Get(
-					((StateMachineSideEffectLoad *)s_effect)->target,
-					l->type);
-			} else if (s_effect->type == StateMachineSideEffect::Copy) {
-				d = ((StateMachineSideEffectCopy *)s_effect)->value;
-			} else {
-				abort();
-			}
+			IRExpr *d = dataOfSideEffect(s_effect);
 			it->first->sideEffect =
 				new StateMachineSideEffectCopy(
 					l->target, d);
+		} else if (!it->second.mightLoadInitial) {
+			std::vector<std::pair<StateMachineState *, IRExpr *> > possibleInputs;
+			IRExpr *stateDominator = simplifyIRExpr(simplify_via_anf(cdm.get(it->first)), opt);
+			possibleInputs.reserve(it->second.stores.size());
+			for (auto it2 = it->second.stores.begin(); it2 != it->second.stores.end(); it2++)
+				possibleInputs.push_back(
+					std::pair<StateMachineState *, IRExpr *>(
+						*it2,
+						simplifyIRExpr(
+							simplify_via_anf(
+								optimiseAssuming(
+									cdm.get(*it2),
+									stateDominator)),
+							opt)));
+			if (debug_use_alias_table) {
+				printf("Consider replacing l%d (%s) with control-flow-based mux: ",
+				       stateLabels[it->first],
+				       nameIRExpr(stateDominator));
+				for (auto it2 = possibleInputs.begin();
+				     it2 != possibleInputs.end();
+				     it2++) {
+					if (it2 != possibleInputs.begin())
+						printf(", ");
+					printf("l%d[%s]", stateLabels[it2->first], nameIRExpr(it2->second));
+				}
+				printf("\n");
+			}
+			/* This is valid if it's guaranteed that
+			   precisely one of the input memory accesses
+			   has happened.  Check with a full n^2
+			   comparisons. */
+			bool ambiguous_resolution = false;
+			/* First check that at most one can be
+			   true. */
+			for (unsigned i = 0;
+			     !ambiguous_resolution && i < possibleInputs.size();
+			     i++) {
+				for (unsigned j = i + 1;
+				     !ambiguous_resolution && j < possibleInputs.size();
+				     j++) {
+					IRExpr *check =
+						IRExpr_Binop(
+							Iop_And1,
+							possibleInputs[i].second,
+							possibleInputs[j].second);
+					if (satisfiable(check, opt)) {
+						if (debug_use_alias_table)
+							printf("Ambiguous resolution: %s vs %s\n",
+							       nameIRExpr(possibleInputs[i].second),
+							       nameIRExpr(possibleInputs[j].second));
+						ambiguous_resolution = true;
+					}
+				}
+			}
+
+			if (!ambiguous_resolution) {
+				/* Now at least one must be true */
+				IRExprAssociative *checker =
+					IRExpr_Associative(
+						possibleInputs.size(),
+						Iop_Or1);
+				for (unsigned x = 0; x < possibleInputs.size(); x++)
+					checker->contents[x] = possibleInputs[x].second;
+				checker->nr_arguments = possibleInputs.size();
+				IRExpr *c =
+					IRExpr_Binop(
+						Iop_And1,
+						stateDominator,
+						IRExpr_Unop(Iop_Not1, checker));
+				if (satisfiable(c, opt)) {
+					if (debug_use_alias_table)
+						printf("Potentially null resolution: %s is satisfiable\n",
+						       nameIRExpr(c));
+				} else {
+					IRExpr *acc = dataOfSideEffect(possibleInputs[0].first->getSideEffect());
+					for (unsigned x = 1;
+					     x < possibleInputs.size();
+					     x++)
+						acc = IRExpr_Mux0X(
+							possibleInputs[x].second,
+							acc,
+							dataOfSideEffect(possibleInputs[x].first->getSideEffect()));
+					if (debug_use_alias_table)
+						printf("Replace l%d with mux %s\n",
+						       stateLabels[it->first],
+						       nameIRExpr(acc));
+					it->first->sideEffect =
+						new StateMachineSideEffectCopy(
+							l->target, acc);
+					progress = true;
+				}
+			}
 		} else {
 			if (debug_use_alias_table)
 				printf("Can't do anything with load l%d\n",
