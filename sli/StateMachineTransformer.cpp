@@ -215,6 +215,7 @@ StateMachine *
 StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 {
 	aborted = false;
+	currentState = NULL;
 
 	bool _b;
 	if (!done_something) done_something = &_b;
@@ -228,7 +229,12 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		StateMachineState *s = *it;
+		assert(currentState == NULL);
+		currentState = s;
 		StateMachineState *res = transformState(s, done_something);
+		assert(currentState == s);
+		currentState = NULL;
+
 		if (res != NULL && res != s) {
 			/* This one got rewritten */
 			stateRewrites[s] = res;

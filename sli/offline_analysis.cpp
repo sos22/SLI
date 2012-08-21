@@ -338,6 +338,13 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
+
+			p = false;
+			sm = undefinednessSimplification(sm, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("Undefinedness:\n");
+				printStateMachine(sm, stdout);
+			}
 		}
 		if (opt.noExtend()) {
 			p = false;

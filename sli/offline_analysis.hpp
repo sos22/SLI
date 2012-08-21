@@ -111,6 +111,8 @@ public:
 
 class StateMachineTransformer : public IRExprTransformer {
 protected:
+	StateMachineState *currentState;
+
 	virtual StateMachineSideEffectLoad *transformOneSideEffect(
 		StateMachineSideEffectLoad *, bool *);
 	virtual StateMachineSideEffectStore *transformOneSideEffect(
@@ -238,6 +240,7 @@ StateMachine *functionAliasAnalysis(StateMachine *machine,
 				    bool *done_something);
 StateMachine *phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 			     const ControlDominationMap &cdm, bool *done_something);
+StateMachine *undefinednessSimplification(StateMachine *sm, bool *done_something);
 
 StateMachine *removeAnnotations(VexPtr<StateMachine, &ir_heap> sm,
 				const AllowableOptimisations &opt,
