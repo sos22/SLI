@@ -39,58 +39,32 @@ computeMaxDistanceMap(StateMachine *sm, std::map<StateMachineState *, int> &dist
 	}
 }
 
-static StateMachine *
-phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
-	       bool *done_something)
-{
-	/* We're only really interested in registers which are input
-	   to Phi expressions. */
-	std::set<threadAndRegister, threadAndRegister::fullCompare> phiRegs;
-	struct _2 : public StateMachineTransformer {
-		std::set<threadAndRegister, threadAndRegister::fullCompare> &phiRegs;
-		StateMachineSideEffectPhi *transformOneSideEffect(
-			StateMachineSideEffectPhi *p, bool *done_something) {
-			for (auto it = p->generations.begin(); it != p->generations.end(); it++)
-				phiRegs.insert(p->reg.setGen(it->first));
-			return StateMachineTransformer::transformOneSideEffect(p, done_something);
+class ControlDominationMap {
+	std::map<StateMachineState *, IRExpr *> dominatingExpressions;
+public:
+	void init(StateMachine *sm,
+		  const AllowableOptimisations &opt,
+		  const stateLabelT &labels);
+	void prettyPrint(FILE *f, const stateLabelT &labels) {
+		for (auto it = dominatingExpressions.begin();
+		     it != dominatingExpressions.end();
+		     it++) {
+			auto it2 = labels.find(it->first);
+			fprintf(f, "l%d: %s\n", it2 == labels.end() ? -1 : it2->second, nameIRExpr(it->second));
 		}
-		IRExpr *transformIRExpr(IRExpr *e, bool *) {
-			return e;
-		}
-		bool rewriteNewStates() const { return false; }
-		_2(std::set<threadAndRegister, threadAndRegister::fullCompare> &_phiRegs)
-			: phiRegs(_phiRegs)
-		{}
-	} buildPhiRegs(phiRegs);
-	buildPhiRegs.transform(sm);
-	if (phiRegs.empty() || TIMEOUT)
-		return sm;
-
-	stateLabelT stateLabels;
-	if (any_debug) {
-		printf("%s, input:\n", __func__);
-		printStateMachine(sm, stdout, stateLabels);
-		printf("Phi regs: ");
-		for (auto it = phiRegs.begin(); it != phiRegs.end(); it++) {
-			if (it != phiRegs.begin())
-				printf(", ");
-			printf("%s", it->name());
-		}
-		printf("\n");
 	}
+	IRExpr *get(StateMachineState *sm) const {
+		auto it = dominatingExpressions.find(sm);
+		assert(it != dominatingExpressions.end());
+		return it->second;
+	}
+};
 
-	/* First figure out the expressions which are definitely true
-	   at each state due to control flow, because the state must
-	   be reachable from the root state.  States which aren't
-	   present in this map definitely aren't reachable (once we've
-	   finished building it) i.e. default is 0.  These expressions
-	   definitely hold at the *start* of the state. */
-	/* (There's a converse optimisation to this one which looks
-	 * backwards from terminal nodes, because we're only
-	 * interested in machines which might conceivably reach
-	 * <crash>, but that's a bit harder to think about, and we
-	 * don't implement it.) */
-
+void
+ControlDominationMap::init(StateMachine *sm,
+			   const AllowableOptimisations &opt,
+			   const stateLabelT &stateLabels)
+{
 	/* We try to process states so that we pick whatever is
 	 * ``closest'' to the root first, where we measure distance
 	 * according to the *longest* path from the root to the state.
@@ -101,7 +75,6 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 	std::map<StateMachineState *, int> stateDistances;
 	computeMaxDistanceMap(sm, stateDistances);
 
-	std::map<StateMachineState *, IRExpr *> dominatingExpressions;
 	/* States whose successors might need updating. The first
 	   argument is just a depth argument to make sure we handle
 	   states in the right order. */
@@ -148,9 +121,11 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 		needsUpdate.pop();
 		/* Build the exprAtExit starting from the expression
 		   at entry to the state. */
-		if (debug_state_domination)
+		if (debug_state_domination) {
+			auto it = stateLabels.find(s);
 			printf("Recompute domination condition for l%d\n",
-			       stateLabels[s]);
+			       it == stateLabels.end() ? -1 : it->second);
+		}
 		IRExpr *exprAtEntry = dominatingExpressions[s];
 		assert(exprAtEntry); /* should definitely have been
 					populated by now */
@@ -226,15 +201,67 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 		}
 		}
 	}
+}
+
+static StateMachine *
+phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
+	       bool *done_something)
+{
+	/* We're only really interested in registers which are input
+	   to Phi expressions. */
+	std::set<threadAndRegister, threadAndRegister::fullCompare> phiRegs;
+	struct _2 : public StateMachineTransformer {
+		std::set<threadAndRegister, threadAndRegister::fullCompare> &phiRegs;
+		StateMachineSideEffectPhi *transformOneSideEffect(
+			StateMachineSideEffectPhi *p, bool *done_something) {
+			for (auto it = p->generations.begin(); it != p->generations.end(); it++)
+				phiRegs.insert(p->reg.setGen(it->first));
+			return StateMachineTransformer::transformOneSideEffect(p, done_something);
+		}
+		IRExpr *transformIRExpr(IRExpr *e, bool *) {
+			return e;
+		}
+		bool rewriteNewStates() const { return false; }
+		_2(std::set<threadAndRegister, threadAndRegister::fullCompare> &_phiRegs)
+			: phiRegs(_phiRegs)
+		{}
+	} buildPhiRegs(phiRegs);
+	buildPhiRegs.transform(sm);
+	if (phiRegs.empty() || TIMEOUT)
+		return sm;
+
+	stateLabelT stateLabels;
+	if (any_debug) {
+		printf("%s, input:\n", __func__);
+		printStateMachine(sm, stdout, stateLabels);
+		printf("Phi regs: ");
+		for (auto it = phiRegs.begin(); it != phiRegs.end(); it++) {
+			if (it != phiRegs.begin())
+				printf(", ");
+			printf("%s", it->name());
+		}
+		printf("\n");
+	}
+
+	/* First figure out the expressions which are definitely true
+	   at each state due to control flow, because the state must
+	   be reachable from the root state.  States which aren't
+	   present in this map definitely aren't reachable (once we've
+	   finished building it) i.e. default is 0.  These expressions
+	   definitely hold at the *start* of the state. */
+	/* (There's a converse optimisation to this one which looks
+	 * backwards from terminal nodes, because we're only
+	 * interested in machines which might conceivably reach
+	 * <crash>, but that's a bit harder to think about, and we
+	 * don't implement it.) */
+	ControlDominationMap dominatingExpressions;
+	dominatingExpressions.init(sm, opt, stateLabels);
 	if (TIMEOUT)
 		return sm;
 
 	if (debug_state_domination) {
 		printf("State domination table:\n");
-		for (auto it = dominatingExpressions.begin();
-		     it != dominatingExpressions.end();
-		     it++)
-			printf("l%d: %s\n", stateLabels[it->first], nameIRExpr(it->second));
+		dominatingExpressions.prettyPrint(stdout, stateLabels);
 	}
 
 	std::set<StateMachineSideEffecting *> states;
@@ -253,9 +280,8 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 			continue;
 		if (!phiRegs.count(tr))
 			continue;
-		assert(dominatingExpressions.count(*it));
 		assert(!regDominators.count(tr));
-		regDominators[tr] = dominatingExpressions[*it];
+		regDominators[tr] = dominatingExpressions.get(*it);
 	}
 	if (debug_reg_domination) {
 		printf("Register domination table:\n");
@@ -294,7 +320,7 @@ phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
 			printf("Consider reducing phi state l%d\n", stateLabels[*it]);
 		IRExpr *stateDominator =
 			simplifyIRExpr(
-				simplify_via_anf(dominatingExpressions[*it]),
+				simplify_via_anf(dominatingExpressions.get(*it)),
 				opt);
 		assert(stateDominator != NULL);
 		std::vector<IRExpr *> pRegDominators;
