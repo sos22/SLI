@@ -1299,297 +1299,325 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 	return cursor;
 }
 
-typedef std::vector<FrameId *> callStackT;
+typedef std::vector<FrameId> callStackT;
 
-template <typename t> static bool
-vectContains(const std::vector<t> &a, const t &b)
-{
-	for (auto it = a.begin(); it != a.end(); it++)
-		if (b == *it)
-			return true;
-	return false;
-}
+class StackEqConstraint : public std::pair<callStackT *, callStackT *> {
+public:
+	StackEqConstraint(callStackT *a, callStackT *b)
+		: std::pair<callStackT *, callStackT *>(a, b)
+	{}
+};
 
-template <typename t> static void
-vectErase(std::vector<t> &a, const t &b)
-{
-	for (auto it = a.begin(); it != a.end(); ) {
-		if (*it == b) {
-			it = a.erase(it);
-		} else {
-			it++;
-		}
+class StackConstraint : public Named {
+	char *mkName() const {
+		return my_asprintf("%p = %p:%p",
+				   afterExtension,
+				   beforeExtension,
+				   frame);
 	}
-}
+public:
+	callStackT *beforeExtension;
+	FrameId *frame;
+	callStackT *afterExtension;
+	StackConstraint(callStackT *_beforeExtension,
+			FrameId *_frame,
+			callStackT *_afterExtension)
+		: beforeExtension(_beforeExtension),
+		  frame(_frame),
+		  afterExtension(_afterExtension)
+	{}
+	bool operator<(const StackConstraint &o) const {
+		if (beforeExtension < o.beforeExtension)
+			return true;
+		if (beforeExtension > o.beforeExtension)
+			return false;
+		if (frame < o.frame)
+			return true;
+		if (frame > o.frame)
+			return false;
+		if (afterExtension < o.afterExtension)
+			return true;
+		return false;
+	}
+};
 
-template <typename t> static void
-pushIfNotPresent(std::vector<t> &a, const t &b)
-{
-	if (!vectContains(a, b))
-		a.push_back(b);
-}
-
-static StateMachineState *
-assignFrameIds(StateMachineState *root,
+static void
+assignFrameIds(const std::set<StateMachineState *> &roots,
 	       unsigned tid,
-	       std::set<FrameId> &allocatedFrameIds,
-	       std::vector<FrameId> &entryStack)
+	       std::map<StateMachineState *, std::vector<FrameId> > &entryStacks)
 {
 	std::map<const StateMachineState *, int> stateLabels;
 	if (debug_assign_frame_ids) {
 		printf("Assigning frame IDs in:\n");
-		printStateMachine(root, stdout, stateLabels);
+		std::set<const StateMachineState *> roots2; /* grr, constness */
+		for (auto it = roots.begin(); it != roots.end(); it++)
+			roots2.insert(*it);
+		printStateMachine(roots2, stdout, stateLabels);
 	}
 
-	/* Step one: figure out how many things are on the stack at
-	 * the root state.  The idea here is to simulate every
-	 * possible path through the machine and check for stack
-	 * underflows.  If we get an underflow then we need more stuff
-	 * in the initial stack. */
-	int initialStackDepth;
-	{
-		int worst_underflow = 0;
-		std::map<StateMachineState *, int> stackDepths;
-		std::queue<std::pair<StateMachineState *, int> > pending;
-		pending.push(std::pair<StateMachineState *, int>(root, 0));
-		while (!pending.empty()) {
-			StateMachineState *s = pending.front().first;
-			/* pushedFrames == how many frames we've
-			   pushed minus how many frames we've popped.
-			   Negative if we've underflowed. */
-			int pushedFrames = pending.front().second;
-			auto it_did_insert = stackDepths.insert(pending.front());
-			pending.pop();
-			auto it = it_did_insert.first;
-			auto did_insert = it_did_insert.second;
-			if (!did_insert) {
-				if (it->second != pushedFrames) {
-					/* The layout at @s depends on
-					   the path you take to reach
-					   @s.  Consider every
-					   path. */
-				} else {
-					/* Already done this bit */
-					continue;
-				}
-			}
-			if (pushedFrames < worst_underflow)
-				worst_underflow = pushedFrames;
-			if (s->getSideEffect() && s->getSideEffect()->type == StateMachineSideEffect::StartFunction)
-				pushedFrames++;
-			if (s->getSideEffect() && s->getSideEffect()->type == StateMachineSideEffect::EndFunction)
-				pushedFrames--;
-			std::vector<StateMachineState *> succ;
-			s->targets(succ);
-			for (auto it2 = succ.begin(); it2 != succ.end(); it2++) {
-				pending.push(std::pair<StateMachineState *, int>(*it2, pushedFrames));
-			}
-		}
-		/* +1 because we want to have a frame ID for the
-		 * initial function. */
-		initialStackDepth = -worst_underflow + 1;
-	}
-
-	if (debug_assign_frame_ids)
-		printf("Initial stack depth %d\n", initialStackDepth);
-
-	std::vector<FrameId *> unlabelledFrames;
-	std::set<FrameId *> preLabelledFrames;
-
-	/* Step two: Set up an initial stack. */
-	std::vector<FrameId> entryFrames;
-	entryFrames.resize(initialStackDepth, FrameId::invalid());
-	callStackT initialStack;
-	initialStack.resize(initialStackDepth);
-	for (int x = 0; x < initialStackDepth; x++) {
-		initialStack[x] = &entryFrames[x];
-		unlabelledFrames.push_back(&entryFrames[x]);
-	}
+	std::map<StateMachineState *, callStackT> stacks;
+	std::set<StateMachineState *> allStates;
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		enumStates(*it, &allStates);
+	for (auto it = allStates.begin(); it != allStates.end(); it++)
+		stacks[*it].resize(0, FrameId::invalid());
 
 	if (debug_assign_frame_ids) {
-		printf("Initial stack: {");
-		for (int x = 0; x < initialStackDepth; x++) {
-			if (x != 0)
-				printf(", ");
-			printf("%p", initialStack[x]);
-		}
-		printf("}\n");
+		printf("Stacks:\n");
+		for (auto it = allStates.begin(); it != allStates.end(); it++)
+			printf("\tl%d -> %p\n",
+			       stateLabels[*it], &stacks[*it]);
+		printf("Constraints:\n");
 	}
 
-	/* Step three: Explore the machine again, emitting equality
-	 * constraints as we go.  These equality constraints tell you
-	 * that the program's function structure is well-nested. */
-	std::set<std::pair<FrameId *, FrameId *> > eqConstraints;
-	{
-		std::queue<std::pair<StateMachineState *, callStackT> > pending;
-		pending.push(std::pair<StateMachineState *, callStackT>(root, initialStack));
-		while (!pending.empty()) {
-			StateMachineState *s = pending.front().first;
-			callStackT stack = pending.front().second;
-			pending.pop();
-
-			if (debug_assign_frame_ids) {
-				printf("l%d: stack = {", stateLabels[s]);
-				for (auto it = stack.begin(); it != stack.end(); it++) {
-					if (it != stack.begin())
-						printf(", ");
-					printf("%p", *it);
-				}
-				printf("}\n");
-			}
-
-			StateMachineSideEffect *se = s->getSideEffect();
+	/* Step one: walk over the set of states and convert them into
+	   a set of constraints on the possible values of call
+	   stacks. */
+	std::set<StackEqConstraint> eq_constraints;
+	std::set<StackConstraint> constraints;
+	for (auto it = allStates.begin(); it != allStates.end(); it++) {
+		StateMachineState *s = *it;
+		callStackT *entryState = &stacks[s];
+		switch (s->type) {
+		case StateMachineState::Unreached:
+		case StateMachineState::Crash:
+		case StateMachineState::NoCrash:
+		case StateMachineState::Stub:
+			if (debug_assign_frame_ids)
+				printf("\tl%d: <terminal>\n",
+				       stateLabels[s]);
+			break;
+		case StateMachineState::Bifurcate: {
+			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
+			if (debug_assign_frame_ids)
+				printf("\tl%d: %p == %p and %p == %p\n",
+				       stateLabels[s],
+				       entryState,
+				       &stacks[smb->trueTarget],
+				       entryState,
+				       &stacks[smb->falseTarget]);
+			eq_constraints.insert(
+				StackEqConstraint
+				(entryState, &stacks[smb->trueTarget]));
+			eq_constraints.insert(
+				StackEqConstraint
+				(entryState, &stacks[smb->falseTarget]));
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			auto *smse = (StateMachineSideEffecting *)s;
+			StateMachineSideEffect *se = smse->sideEffect;
 			if (se && se->type == StateMachineSideEffect::StartFunction) {
-				auto *l = (StateMachineSideEffectStartFunction *)se;
-				if (l->frame == FrameId::invalid())
-					pushIfNotPresent(unlabelledFrames, &l->frame);
-				else
-					preLabelledFrames.insert(&l->frame);
 				if (debug_assign_frame_ids)
-					printf("Push %p\n", &l->frame);
-				stack.push_back(&l->frame);
-			}
-			if (se && se->type == StateMachineSideEffect::EndFunction) {
-				/* Should be enough stuff in initial
-				 * stack to avoid underflow. */
-				auto l = (StateMachineSideEffectEndFunction *)se;
-				assert(!stack.empty());
-				FrameId *o = stack.back();
-				if (l->frame == FrameId::invalid())
-					pushIfNotPresent(unlabelledFrames, &l->frame);
-				else
-					preLabelledFrames.insert(&l->frame);
+					printf("\tl%d: %p == %p:%p\n",
+					       stateLabels[s],
+					       &stacks[smse->target],
+					       entryState,
+					       &((StateMachineSideEffectStartFunction *)se)->frame);
+				constraints.insert(StackConstraint(
+							   entryState,
+							   &((StateMachineSideEffectStartFunction *)se)->frame,
+							   &stacks[smse->target]));
+			} else if (se && se->type == StateMachineSideEffect::EndFunction) {
 				if (debug_assign_frame_ids)
-					printf("EQ constraint: %p == %p\n", o, &l->frame);
-				eqConstraints.insert(
-					std::pair<FrameId *, FrameId *>
-					(o, &l->frame));
-				stack.pop_back();
+					printf("\tl%d: %p:%p == %p\n",
+					       stateLabels[s],
+					       entryState,
+					       &((StateMachineSideEffectStartFunction *)se)->frame,
+					       &stacks[smse->target]);
+				constraints.insert(StackConstraint(
+							   &stacks[smse->target],
+							   &((StateMachineSideEffectEndFunction *)se)->frame,
+							   entryState));
+			} else {
+				if (debug_assign_frame_ids)
+					printf("\tl%d: %p == %p\n",
+					       stateLabels[s],
+					       entryState,
+					       &stacks[smse->target]);
+				eq_constraints.insert(
+					StackEqConstraint
+					(entryState, &stacks[smse->target]));
 			}
-			std::vector<StateMachineState *> succ;
-			s->targets(succ);
-			for (auto it2 = succ.begin(); it2 != succ.end(); it2++)
-				pending.push(std::pair<StateMachineState *, callStackT>(*it2, stack));
+			break;
+		}
+		}
+	}
+
+	/* Step two: Use the eq relationship to build up equivalence
+	 * classes over stacks. */
+	std::map<callStackT *, callStackT *> canonicalisationMap(eq_constraints.begin(), eq_constraints.end());
+	for (auto it = stacks.begin(); it != stacks.end(); it++) {
+		if (!canonicalisationMap.count(&it->second))
+			canonicalisationMap[&it->second] = &it->second;
+	}
+	bool progress = true;
+	while (progress) {
+		progress = false;
+		for (auto it = canonicalisationMap.begin(); it != canonicalisationMap.end(); it++) {
+			if (canonicalisationMap[it->second] != it->second) {
+				it->second = canonicalisationMap[it->second];
+				progress = true;
+			}
 		}
 	}
 
 	if (debug_assign_frame_ids) {
-		printf("Frame ID constraints:\n");
-		for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++)
-			printf("\t%p == %p\n", it->first, it->second);
-		printf("Constrained frames:\n");
-		for (auto it = preLabelledFrames.begin(); it != preLabelledFrames.end(); it++)
-			printf("\t%p == %s\n", *it, (*it)->name());
+		printf("Stack canonicalisation map:\n");
+		for (auto it = canonicalisationMap.begin(); it != canonicalisationMap.end(); it++)
+			printf("\t%p -> %p\n", it->first, it->second);
 	}
 
-	/* Step 4: Propagate any labels which might already have been specified. */
-	while (!preLabelledFrames.empty()) {
-		auto it = preLabelledFrames.begin();
-		FrameId *f = *it;
-		const FrameId &label(*f);
-		preLabelledFrames.erase(it);
-		allocatedFrameIds.insert(label);
+	std::set<callStackT *> canonStacks;
+	for (auto it = canonicalisationMap.begin(); it != canonicalisationMap.end(); it++)
+		canonStacks.insert(it->second);
 
-		if (debug_assign_frame_ids)
-			printf("Propagate %s from %p\n", label.name(), f);
+	/* Step three: re-express the extend relationships in terms of
+	   those equivalence classes. */
+	std::set<StackConstraint> constraints2;
+	for (auto it = constraints.begin(); it != constraints.end(); it++)
+		constraints2.insert(
+			StackConstraint(
+				canonicalisationMap[it->beforeExtension],
+				it->frame,
+				canonicalisationMap[it->afterExtension]));
+	constraints = constraints2;
 
-		assert(label != FrameId::invalid());
-		std::queue<FrameId *> pending;
-		std::set<FrameId *> done;
-		pending.push(f);
-		while (!pending.empty()) {
-			f = pending.front();
-			pending.pop();
-			if (!done.insert(f).second)
-				continue;
-			if (debug_assign_frame_ids)
-				printf("\tPropagate %s to %p\n", label.name(), f);
-			if (*f == FrameId::invalid()) {
-				*f = label;
-				assert(vectContains(unlabelledFrames, f));
-				vectErase(unlabelledFrames, f);
+	if (debug_assign_frame_ids) {
+		printf("Canonicalised extension constraints:\n");
+		for (auto it = constraints.begin(); it != constraints.end(); it++)
+			printf("\t%s\n", it->name());
+	}
+
+	/* Step four: find the sizes of all of the call stacks.  Basic
+	 * procedure is to start by assuming they're all empty and
+	 * then extend until we no longer suffer underflows. */
+	std::map<callStackT *, int> stackSizes;
+	for (auto it = canonStacks.begin(); it != canonStacks.end(); it++)
+		stackSizes[*it] = 0;
+	progress = true;
+	while (progress) {
+		progress = false;
+		for (auto it = constraints.begin(); it != constraints.end(); it++) {
+			auto it_before = stackSizes.find(it->beforeExtension);
+			auto it_after = stackSizes.find(it->afterExtension);
+			if (it_before == stackSizes.end()) {
+				if (it_after == stackSizes.end()) {
+					continue;
+				} else {
+					int i = it_after->second - 1;
+					if (i < 0) {
+						i = 0;
+						it_after->second = 1;
+					}
+					stackSizes[it->beforeExtension] = i;
+					progress = true;
+				}
 			} else {
-				assert(*f == label);
-			}
-			for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++) {
-				if (it->first == f) {
-					if (debug_assign_frame_ids)
-						printf("\tEq rule: %p == %p\n", it->first, it->second);
-					pending.push(it->second);
-				}
-				if (it->second == f) {
-					if (debug_assign_frame_ids)
-						printf("\tEq rule: %p == %p\n", it->second, it->first);
-					pending.push(it->first);
+				if (it_after == stackSizes.end()) {
+					stackSizes[it->afterExtension] = it_before->second + 1;
+					progress = true;
+				} else {
+					if (it_after->second != it_before->second + 1)
+						progress = true;
+					it_after->second = it_before->second + 1;
 				}
 			}
 		}
 	}
 
-	/* Step 5: Label the remaining frames, using the maximum
-	   number of distinct labels which is compatible with the eq
-	   constraints. */
-	unsigned nextLabel = 0;
-	while (!unlabelledFrames.empty()) {
-		FrameId *f = unlabelledFrames.back();
-		FrameId label(nextLabel, tid);
-		nextLabel++;
+	/* Allocate the stacks. */
+	for (auto it = stackSizes.begin(); it != stackSizes.end(); it++)
+		it->first->resize(it->second, FrameId::invalid());
 
-		while (allocatedFrameIds.count(label)) {
-			label = FrameId(nextLabel, tid);
-			nextLabel++;
-		}
-		allocatedFrameIds.insert(label);
+	if (debug_assign_frame_ids) {
+		printf("Stack sizes:\n");
+		for (auto it = stackSizes.begin(); it != stackSizes.end(); it++)
+			printf("\t%p -> %d\n", it->first, it->second);
+	}
 
+	/* Step five: convert the constraints on stacks into
+	 * constraints on frame IDs. */
+	std::set<std::pair<FrameId *, FrameId *> > frame_eq_constraints;
+	for (auto it = constraints.begin(); it != constraints.end(); it++) {
 		if (debug_assign_frame_ids)
-			printf("Assign %s to %p\n", label.name(), f);
+			printf("Frame constraint: %p == %p for %p == %p:%p\n",
+			       &it->afterExtension->back(),
+			       it->frame,
+			       it->afterExtension,
+			       it->beforeExtension,
+			       it->frame);
+		frame_eq_constraints.insert(
+			std::pair<FrameId *, FrameId *>
+			(&it->afterExtension->back(), it->frame));
+	}
 
-		assert(*f == FrameId::invalid());
-		/* Go and label the SCC */
-		std::queue<FrameId *> pending;
-		pending.push(f);
-		while (!pending.empty()) {
-			FrameId *fst = pending.front();
-			pending.pop();
-			if (*fst == label) {
-				/* Already done this one */
-				assert(!vectContains(unlabelledFrames, fst));
+	int nextFrameId = 1;
+
+	/* Step six: solve those constraints to assign frame IDs to
+	 * everything. */
+	for (auto it = frame_eq_constraints.begin();
+	     it != frame_eq_constraints.end();
+	     it++) {
+		if (*it->first != FrameId::invalid()) {
+			assert(*it->second == *it->first);
+			continue;
+		}
+		FrameId fid(nextFrameId, tid);
+		if (debug_assign_frame_ids)
+			printf("Assign %s to %p\n", fid.name(), it->first);
+		*it->first = fid;
+		std::queue<FrameId *> toAssign;
+		toAssign.push(it->second);
+		while (!toAssign.empty()) {
+			FrameId *f = toAssign.front();
+			toAssign.pop();
+			if (*f == fid)
 				continue;
-			}
+			assert(*f == FrameId::invalid());
 			if (debug_assign_frame_ids)
-				printf("\tAssign %s to %p for eq rule\n",
-				       label.name(), fst);
-			assert(*fst == FrameId::invalid());
-			assert(vectContains(unlabelledFrames, fst));
-			*fst = label;
-			vectErase(unlabelledFrames, fst);
-			for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++) {
-				if (it->first == fst) {
-					if (debug_assign_frame_ids)
-						printf("\tEq rule: %p == %p\n", it->first, it->second);
-					pending.push(it->second);
-				}
-				if (it->second == fst) {
-					if (debug_assign_frame_ids)
-						printf("\tEq rule: %p == %p\n", it->second, it->first);
-					pending.push(it->first);
-				}
+				printf("\tPropagate to %p\n", f);
+			*f = fid;
+			for (auto it2 = frame_eq_constraints.begin(); it2 != frame_eq_constraints.end(); it2++) {
+				if (it2->first == f)
+					toAssign.push(it2->second);
+				if (it2->second == f)
+					toAssign.push(it2->first);
 			}
+		}
+		nextFrameId++;
+	}
+
+	/* All frame IDs now assigned.  Extract the root stacks and
+	 * return. */
+	for (auto it = roots.begin(); it != roots.end(); it++) {
+		callStackT *stack = &stacks[*it];
+		stack = canonicalisationMap[stack];
+		callStackT stack0 = *stack;
+
+		/* Frame 0 is always on the top of the stack. */
+		stack0.insert(stack0.begin(), FrameId(0, tid));
+
+		entryStacks[*it] = stack0;
+		
+		if (debug_assign_frame_ids) {
+			printf("Stack for l%d: {", stateLabels[*it]);
+			for (auto it2 = stack0.begin(); it2 != stack0.end(); it2++) {
+				if (it2 != stack0.begin())
+					printf(", ");
+				printf("%s", it2->name());
+			}
+			printf("}\n");
 		}
 	}
 
-	/* Check that the resulting labelling is valid */
-#ifndef NDEBUG
-	for (auto it = eqConstraints.begin(); it != eqConstraints.end(); it++)
-		assert(*it->first == *it->second);
-	for (auto it1 = entryFrames.begin(); it1 != entryFrames.end(); it1++)
-		for (auto it2 = it1 + 1; it2 != entryFrames.end(); it2++)
-			assert(*it1 != *it2);
-#endif
-
-	entryStack = entryFrames;
-
-	return root;
+	if (debug_assign_frame_ids) {
+		printf("Final assignment:\n");
+		std::set<const StateMachineState *> roots2; /* grr, constness */
+		for (auto it = roots.begin(); it != roots.end(); it++)
+			roots2.insert(*it);
+		printStateMachine(roots2, stdout, stateLabels);
+	}
 }
 
 static void
@@ -1631,24 +1659,26 @@ probeCFGsToMachine(Oracle *oracle,
 		return;
 
 	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots_this_sm;
-	std::vector<StateMachineState *> roots_this_sm;
-	std::set<FrameId> allocatedFrameIds;
-	for (auto it = roots.begin(); it != roots.end(); it++) {
-		StateMachineState *root = results[*it];
-		assert(root);
-		std::vector<FrameId> entryStack;
-		root = assignFrameIds(root, tid, allocatedFrameIds, entryStack);
-		root = addEntrySideEffects(oracle, tid, root, entryStack, root->origin);
-		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
-		roots_this_sm.push_back(root);
+	std::set<StateMachineState *> roots_this_sm1;
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		roots_this_sm1.insert(results[*it]);
+	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
+	assignFrameIds(roots_this_sm1, tid, entryStacks);
+	std::vector<StateMachineState *> roots_this_sm2;
+	for (auto it = roots_this_sm1.begin(); it != roots_this_sm1.end(); it++) {
+		StateMachineState *root = *it;
+		root = addEntrySideEffects(oracle, tid, root, entryStacks[root], root->origin);
+		roots_this_sm2.push_back(root);
 	}
+	for (auto it = roots.begin(); it != roots.end(); it++)
+		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
-	if (roots_this_sm.empty())
+	if (roots_this_sm2.empty())
 		return;
 	StateMachineState *cursor;
 	
-	cursor = roots_this_sm[0];
-	if (roots_this_sm.size() > 1) {
+	cursor = roots_this_sm2[0];
+	if (roots_this_sm2.size() > 1) {
 		IRExpr *fv = mai.freeVariable(Ity_I64, tid, (*roots.begin())->label, false);
 		int x = 0;
 		cursor =
@@ -1665,7 +1695,7 @@ probeCFGsToMachine(Oracle *oracle,
 					true),
 				cursor);
 		for (x++;
-		     x < (int)roots_this_sm.size();
+		     x < (int)roots_this_sm2.size();
 		     x++)
 			cursor = 
 				new StateMachineBifurcate(
@@ -1674,7 +1704,7 @@ probeCFGsToMachine(Oracle *oracle,
 						Iop_CmpEQ64,
 						fv,
 						IRExpr_Const(IRConst_U64(x))),
-					roots_this_sm[x],
+					roots_this_sm2[x],
 					cursor);
 	} else {
 		/* No roots -> no machines */
@@ -1709,14 +1739,15 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 			doOne);
 	if (TIMEOUT)
 		return NULL;
-	std::vector<FrameId> entryStack;
-	std::set<FrameId> allocatedFrameIds;
-	s = assignFrameIds(s, tid, allocatedFrameIds, entryStack);
+	std::set<StateMachineState *> sm_roots;
+	sm_roots.insert(s);
+	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
+	assignFrameIds(sm_roots, tid, entryStacks);
 	s = addEntrySideEffects(
 			oracle,
 			tid,
 			s,
-			entryStack,
+			entryStacks[s],
 			root->rip);
 	StateMachine *sm = new StateMachine(
 		s,

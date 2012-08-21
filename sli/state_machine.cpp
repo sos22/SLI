@@ -357,6 +357,22 @@ printStateMachine(const StateMachineState *sm, FILE *f, std::map<const StateMach
 }
 
 void
+printStateMachine(const std::set<const StateMachineState *> &sm, FILE *f, std::map<const StateMachineState *, int> &labels)
+{
+	std::set<const StateMachineState *> statesS;
+	for (auto it = sm.begin(); it != sm.end(); it++)
+		enumStates(*it, &statesS);
+	std::vector<const StateMachineState *> statesV(statesS.begin(), statesS.end());
+	for (unsigned x = 0; x < statesV.size(); x++)
+		labels[statesV[x]] = x + 1;
+	for (auto it = statesV.begin(); it != statesV.end(); it++) {
+		fprintf(f, "l%d: ", labels[*it]);
+		(*it)->prettyPrint(f, labels);
+		fprintf(f, "\n");
+	}
+}
+
+void
 printStateMachine(const StateMachineState *sm, FILE *f)
 {
 	std::map<const StateMachineState *, int> labels;

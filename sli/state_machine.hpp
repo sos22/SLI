@@ -1317,6 +1317,9 @@ void printStateMachine(const StateMachineState *sm, FILE *f);
 void printStateMachine(const StateMachineState *sm,
 		       FILE *f,
 		       std::map<const StateMachineState *, int> &labels);
+void printStateMachine(const std::set<const StateMachineState *> &sm,
+		       FILE *f,
+		       std::map<const StateMachineState *, int> &labels);
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
