@@ -272,6 +272,8 @@ public:
 		/* Check whether there's any possibility of @a being a
 		   pointer to a non-stack location. */
 		bool mightPointOutsideStack(IRExpr *a, const AllowableOptimisations &opt) const;
+
+		void prettyPrint(FILE *) const;
 	};
 
 	RegisterAliasingConfiguration getAliasingConfiguration(const std::vector<std::pair<unsigned, VexRip> > &rips);

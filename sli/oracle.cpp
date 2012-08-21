@@ -164,6 +164,15 @@ Oracle::ThreadRegisterAliasingConfiguration::prettyPrint(FILE *f) const
 }
 
 void
+Oracle::RegisterAliasingConfiguration::prettyPrint(FILE *f) const
+{
+	for (auto it = content.begin(); it != content.end(); it++) {
+		fprintf(f, "thread %d:\n", it->first);
+		it->second.prettyPrint(f);
+	}
+}
+
+void
 Oracle::findPreviousInstructions(std::vector<VexRip> &out)
 {
 	std::vector<VexRip> fheads;
@@ -959,6 +968,7 @@ irexprAliasingClass(IRExpr *expr,
 		case Iop_V128to64:
 		case Iop_V128HIto64:
 		case Iop_Not64:
+		case Iop_Neg64:
 			return PointerAliasingSet::notAPointer;
 		default:
 			break;
@@ -1008,8 +1018,6 @@ irexprAliasingClass(IRExpr *expr,
 		case Iop_32HLto64:
 		case Iop_DivModU64to32:
 		case Iop_DivModS64to32:
-		case Iop_Add32:
-		case Iop_And32:
 			return PointerAliasingSet::notAPointer;
 		default:
 			break;
@@ -1034,6 +1042,8 @@ irexprAliasingClass(IRExpr *expr,
 		switch (e->op) {
 		case Iop_Add64:
 		case Iop_And64:
+		case Iop_Or64:
+		case Iop_Xor64:
 		{
 			if (e->nr_arguments == 0)
 				return PointerAliasingSet::notAPointer;
@@ -1051,10 +1061,6 @@ irexprAliasingClass(IRExpr *expr,
 								buildingAliasTable);
 			return res;
 		}
-		case Iop_Add32:
-		case Iop_And32:
-		case Iop_And16:
-			return PointerAliasingSet::notAPointer;
 		default:
 			break;
 		}
