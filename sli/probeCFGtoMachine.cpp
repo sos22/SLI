@@ -1456,6 +1456,26 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 		}
 	}
 
+	/* The <survive> and <crash> states are special, because they
+	 * can have several different contexts.  Easy fix: just don't
+	 * try to assign a stack to them at all. */
+	callStackT *surviveStack = &stacks[StateMachineNoCrash::get()];
+	callStackT *crashStack = &stacks[StateMachineCrash::get()];
+	for (auto it = eq_constraints.begin(); it != eq_constraints.end(); ) {
+		if (it->first == surviveStack || it->first == crashStack ||
+		    it->second == surviveStack || it->second == crashStack)
+			eq_constraints.erase(it++);
+		else
+			it++;
+	}
+	for (auto it = constraints.begin(); it != constraints.end(); ) {
+		if (it->beforeExtension == surviveStack || it->beforeExtension == crashStack ||
+		    it->afterExtension  == surviveStack || it->afterExtension  == crashStack)
+			constraints.erase(it++);
+		else
+			it++;
+	}
+
 	/* Step two: Use the eq relationship to build up equivalence
 	 * classes over stacks. */
 	std::map<callStackT *, callStackT *> canonicalisationMap(eq_constraints.begin(), eq_constraints.end());
