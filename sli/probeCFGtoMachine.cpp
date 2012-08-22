@@ -1542,17 +1542,38 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 						i = 0;
 						it_after->second = 1;
 					}
+					if (debug_assign_frame_ids)
+						printf("Initialise %p stack size to %d from %p (after)\n",
+						       it->beforeExtension, i, it->afterExtension);
 					stackSizes[it->beforeExtension] = i;
 					progress = true;
 				}
 			} else {
 				if (it_after == stackSizes.end()) {
+					if (debug_assign_frame_ids)
+						printf("Initialise %p stack size to %d from %p (before)\n",
+						       it->afterExtension, it_before->second + 1, it->beforeExtension);
 					stackSizes[it->afterExtension] = it_before->second + 1;
 					progress = true;
 				} else {
-					if (it_after->second != it_before->second + 1)
+					if (it_after->second != it_before->second + 1) {
 						progress = true;
-					it_after->second = it_before->second + 1;
+						if (it_after->second < it_before->second + 1) {
+							if (debug_assign_frame_ids)
+								printf("Update %p stack size to %d from %p (before)\n",
+								       it->afterExtension,
+								       it_before->second + 1,
+								       it->beforeExtension);
+							it_after->second = it_before->second + 1;
+						} else {
+							if (debug_assign_frame_ids)
+								printf("Update %p stack size to %d from %p (after)\n",
+								       it->beforeExtension,
+								       it_after->second - 1,
+								       it->afterExtension);
+							it_before->second = it_after->second - 1;
+						}
+					}
 				}
 			}
 		}
