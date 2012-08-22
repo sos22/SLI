@@ -901,6 +901,18 @@ buildCFG(CfgLabelAllocator &allocLabel, const std::set<DynAnalysisRip> &dyn_root
 	}
 }
 
+class SortByRipComp {
+public:
+	bool operator()(CFGNode *a, CFGNode *b) {
+		return a->rip < b->rip;
+	}
+};
+static void
+sortByRip(CFGNode **roots, int nr_roots)
+{
+	std::sort(&roots[0], &roots[nr_roots], SortByRipComp());
+}
+
 /* Build all of the store machines */
 static void
 getStoreCFGs(CfgLabelAllocator &allocLabel,
@@ -920,6 +932,14 @@ getStoreCFGs(CfgLabelAllocator &allocLabel,
 		(*roots)[nrCfgRoots] = *it;
 		nrCfgRoots++;
 	}
+
+	/* For sanity reasons, we want to process the store CFG roots
+	   in a deterministic order (because otherwise performance
+	   tuning is just too hard).  They're currently in pointer
+	   order, which is non-deterministic.  Sort by RIP to make it
+	   deterministic. */
+	sortByRip((*roots), nrCfgRoots);
+
 	*nr_roots = nrCfgRoots;
 }
 
