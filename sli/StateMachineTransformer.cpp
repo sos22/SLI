@@ -179,7 +179,6 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 				case StateMachineState::Unreached:
 				case StateMachineState::Crash:
 				case StateMachineState::NoCrash:
-				case StateMachineState::Stub:
 					abort();
 				}
 			}

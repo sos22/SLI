@@ -276,14 +276,14 @@ public:
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 public:
 #define all_state_types(f)						\
-	f(Unreached) f(Crash) f(NoCrash) f(Stub) f(Bifurcate) f(SideEffecting)
+	f(Unreached) f(Crash) f(NoCrash) f(Bifurcate) f(SideEffecting)
 #define mk_state_type(name) name ,
 	enum stateType {
 		all_state_types(mk_state_type)
 	};
 #undef mk_state_type
 	static bool stateTypeIsTerminal(enum stateType t) {
-		return t == Unreached || t == Crash || t == NoCrash || t == Stub;
+		return t == Unreached || t == Crash || t == NoCrash;
 	}
 protected:
 	StateMachineState(const VexRip &_origin,
@@ -593,36 +593,6 @@ public:
 	}
 	StateMachineSideEffect *getSideEffect() { return NULL; }
 };
-
-/* A node in the state machine representing a bit of code which we
-   haven't explored yet. */
-class StateMachineStub : public StateMachineTerminal {
-public:
-	VexRip target;
-
-	StateMachineStub(const VexRip &origin, const VexRip &t) : StateMachineTerminal(origin, StateMachineState::Stub), target(t) {}
-
-	void prettyPrint(FILE *f) const
-	{
-		fprintf(f, "<%s: jmp %s>", origin.name(), target.name());
-	}
-	static bool parse(StateMachineStub **out, const char *str, const char **suffix)
-	{
-		VexRip origin;
-		VexRip target;
-		if (parseThisChar('<', str, &str) &&
-		    parseVexRip(&origin, str, &str) &&
-		    parseThisString(": jmp ", str, &str) &&
-		    parseVexRip(&target, str, &str) &&
-		    parseThisChar('>', str, suffix)) {
-			*out = new StateMachineStub(origin, target);
-			return true;
-		}
-		return false;
-	}
-	void visit(HeapVisitor &) { }
-};
-
 
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {
 	static VexPtr<StateMachineSideEffectUnreached, &ir_heap> _this;

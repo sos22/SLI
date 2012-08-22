@@ -313,7 +313,6 @@ canonicaliseRbp(StateMachineState *root, const VexRip &rip, Oracle *oracle)
 			case StateMachineState::Crash:
 			case StateMachineState::NoCrash:
 			case StateMachineState::Unreached:
-			case StateMachineState::Stub:
 				break;
 			case StateMachineState::SideEffecting: {
 				StateMachineSideEffect *smse = s->getSideEffect();
@@ -1394,7 +1393,6 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 		case StateMachineState::Unreached:
 		case StateMachineState::Crash:
 		case StateMachineState::NoCrash:
-		case StateMachineState::Stub:
 			if (debug_assign_frame_ids)
 				printf("\tl%d: <terminal>\n",
 				       stateLabels[s]);

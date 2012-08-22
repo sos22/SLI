@@ -169,12 +169,6 @@ localSimilarity(StateMachineBifurcate *sm1, StateMachineBifurcate *sm2)
 }
 
 static bool
-localSimilarity(StateMachineStub *sm1, StateMachineStub *sm2)
-{
-	return sm1->target == sm2->target;
-}
-
-static bool
 stateMachineStatesTheSame(std::set<std::pair<StateMachineState *, StateMachineState *> > &memo,
 			  StateMachineState *sm1,
 			  StateMachineState *sm2)

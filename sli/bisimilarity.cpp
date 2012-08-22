@@ -129,12 +129,6 @@ statesLocallyBisimilar(StateMachineState *sm1,
 	case StateMachineState::NoCrash:
 		return true;
 
-	case StateMachineState::Stub: {
-		StateMachineStub *sms1 = (StateMachineStub *)sm1;
-		StateMachineStub *sms2 = (StateMachineStub *)sm2;
-		return sms1->target == sms2->target;
-	}
-
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme1 = (StateMachineSideEffecting *)sm1;
 		StateMachineSideEffecting *sme2 = (StateMachineSideEffecting *)sm2;

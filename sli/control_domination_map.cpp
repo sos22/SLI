@@ -109,7 +109,6 @@ ControlDominationMap::init(StateMachine *sm,
 		case StateMachineState::Unreached:
 		case StateMachineState::Crash:
 		case StateMachineState::NoCrash:
-		case StateMachineState::Stub:
 			/* No exit states, so it doesn't matter what
 			 * the exprAtExit is. */
 			break;

@@ -409,20 +409,6 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		t.states_bifurcate.insert(smb);
 		return start;
 	}
-	case StateMachineState::Stub: {
-		StateMachineStub *sms = (StateMachineStub *)start;
-		for (auto it = t.states_stub.begin();
-		     it != t.states_stub.end();
-		     it++) {
-			if (sms->target == (*it)->target) {
-				t.states[start] = *it;
-				return *it;
-			}
-		}
-		t.states[start] = start;
-		t.states_stub.insert(sms);
-		return start;
-	}
 	}
 	abort();
 }

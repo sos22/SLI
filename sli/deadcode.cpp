@@ -93,7 +93,6 @@ class LivenessMap {
 			break;
 		}
 		case StateMachineState::Unreached:
-		case StateMachineState::Stub:
 		case StateMachineState::Crash:
 		case StateMachineState::NoCrash:
 			/* Nothing needed */
@@ -257,7 +256,6 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			case StateMachineState::Bifurcate:
 			case StateMachineState::Crash:
 			case StateMachineState::NoCrash:
-			case StateMachineState::Stub:
 			case StateMachineState::Unreached:
 				/* Nothing needed */
 				return;

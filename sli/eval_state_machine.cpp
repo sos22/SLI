@@ -918,8 +918,6 @@ EvalContext::smallStepEvalStateMachine(CfgDecode &decode,
 		return ssr_crash;
 	case StateMachineState::NoCrash:
 		return ssr_survive;
-	case StateMachineState::Stub:
-		return ssr_escape;
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		evalStateMachineSideEffectRes res =
@@ -1133,8 +1131,6 @@ EvalContext::advance(CfgDecode &decode,
 		return consumer.crash(assumption, accumulatedAssumption);
 	case StateMachineState::NoCrash:
 		return consumer.survive(assumption, accumulatedAssumption);
-	case StateMachineState::Stub:
-		return consumer.escape(assumption, accumulatedAssumption);
 	case StateMachineState::Unreached:
 		return consumer.badMachine();
 	case StateMachineState::SideEffecting: {
@@ -1452,7 +1448,6 @@ shallowCloneState(StateMachineState *s)
 		case StateMachineState:: name :				\
 			return new StateMachine ## name			\
 				(*(StateMachine ## name *)s)
-		do_case(Stub);
 		do_case(Bifurcate);
 		do_case(SideEffecting);
 #undef do_case

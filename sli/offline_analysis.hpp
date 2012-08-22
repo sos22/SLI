@@ -157,9 +157,6 @@ protected:
 	virtual StateMachineNoCrash *transformOneState(StateMachineNoCrash *,
 						       bool *)
 	{ return NULL; }
-	virtual StateMachineStub *transformOneState(StateMachineStub *,
-						    bool *)
-	{ return NULL; }
 	virtual StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
 							     bool *done_something)
 	{

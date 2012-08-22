@@ -325,10 +325,6 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 		return StateMachineCrash::get();
 	case StateMachineState::NoCrash:
 		return StateMachineNoCrash::get();
-	case StateMachineState::Stub: {
-		StateMachineStub *sms = (StateMachineStub *)inp;
-		return new StateMachineStub(sms->origin, sms->target);
-	}
 	}
 	abort();
 }
