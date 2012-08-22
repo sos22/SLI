@@ -414,6 +414,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 		StateMachineSideEffectStore *smses2 =
 			dynamic_cast<StateMachineSideEffectStore *>(smse2);
 		return smses1->data->type() == smses2->data->type() &&
+			smses1->rip == smses2->rip &&
 			definitelyEqual(smses1->addr, smses2->addr, opt) &&
 			definitelyEqual(smses1->data, smses2->data, opt);
 	}
@@ -424,6 +425,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse2);
 		return threadAndRegister::fullEq(smsel1->target, smsel2->target) &&
 			smsel1->type == smsel2->type &&
+			smsel1->rip == smsel2->rip &&
 			definitelyEqual(smsel1->addr, smsel2->addr, opt);
 	}
 	case StateMachineSideEffect::Copy: {
