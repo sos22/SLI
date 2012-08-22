@@ -715,7 +715,8 @@ disjunctive_normal_form(IRExpr *what)
 
 static bool
 evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
-	       std::map<IRExpr *, std::pair<bool, bool> > &memo)
+	       std::map<IRExpr *, std::pair<bool, bool> > &memo,
+	       std::set<IRExpr *> &fixedVariables)
 {
 	assert(e->type() == Ity_I1);
 	if (e->tag == Iex_Const)
@@ -728,22 +729,41 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 	if (did_insert) {
 		if (e->tag == Iex_Unop &&
 		    ((IRExprUnop *)e)->op == Iop_Not1) {
-			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, !preferred_result, memo);
+			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, !preferred_result, memo, fixedVariables);
 		} else if (e->tag == Iex_Associative &&
 			   ((IRExprAssociative *)e)->op == Iop_And1) {
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = true;
 			for (int i = 0; i < a->nr_arguments && acc; i++)
-				acc &= evalExpression(a->contents[i], chooser, preferred_result, memo);
+				acc &= evalExpression(a->contents[i], chooser, preferred_result, memo, fixedVariables);
 			it->second.first = acc;
 		} else if (e->tag == Iex_Associative &&
 			   ((IRExprAssociative *)e)->op == Iop_Or1) {
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = false;
 			for (int i = 0; i < a->nr_arguments && !acc; i++)
-				acc |= evalExpression(a->contents[i], chooser, preferred_result, memo);
+				acc |= evalExpression(a->contents[i], chooser, preferred_result, memo, fixedVariables);
 			it->second.first = acc;
 		} else {
+			if (e->tag == Iex_Binop &&
+			    ((IRExprBinop *)e)->op >= Iop_CmpEQ8 &&
+			    ((IRExprBinop *)e)->op <= Iop_CmpEQ64 &&
+			    ((IRExprBinop *)e)->arg1->tag == Iex_Const) {
+				/* We quite often get expressions of
+				   the form ``(k1 == var) && (k2 ==
+				   var)'', where k1 != k2.  It's
+				   useful to return that that's
+				   unsatisfiable.  The trick is that
+				   if we say k1 == var is true then we
+				   say that var is fixed, and then any
+				   other equality on var must be false
+				   (because we're interned) */
+				if (fixedVariables.count(((IRExprBinop *)e)->arg2)) {
+					it->second.first = false;
+					return it->second.first;
+				}
+				fixedVariables.insert(((IRExprBinop *)e)->arg2);
+			}
 			it->second.first = !!chooser.nd_choice(2);
 			if (preferred_result == true)
 				it->second.first = !it->second.first;
@@ -757,7 +777,8 @@ static bool
 evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result)
 {
 	std::map<IRExpr *, std::pair<bool, bool> > memo;
-	bool r = evalExpression(e, chooser, preferred_result, memo);
+	std::set<IRExpr *> fixedVariables;
+	bool r = evalExpression(e, chooser, preferred_result, memo, fixedVariables);
 	if (r) {
 		fprintf(_logfile, "Satisfying assignment:\n");
 		for (auto it = memo.begin(); it != memo.end(); it++) {
