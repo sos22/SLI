@@ -1160,6 +1160,11 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 					   token);
 		if (summary)
 			df(summary, token);
+
+		if (TIMEOUT) {
+			fprintf(_logfile, "Processed %d/%d store CFGs\n", i, nrStoreCfgs);
+			break;
+		}
 	}
 
 	return foundRace;
