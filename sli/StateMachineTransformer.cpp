@@ -270,6 +270,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectPhi *phi,
 	unsigned x = 0;
 	IRExpr *newE;
 
+	newE = (IRExpr *)0xf001deadul; /* Shut the compiler up */
 	for (x = 0; x < phi->generations.size(); x++) {
 		if (phi->generations[x].second)
 			newE = transformIRExpr(phi->generations[x].second, &t);

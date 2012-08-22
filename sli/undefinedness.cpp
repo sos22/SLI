@@ -228,7 +228,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 	case Iex_Associative: {
 		IRExprAssociative *i = (IRExprAssociative *)a;
 		int x = 0;
-		IRExpr *newE;
+		IRExpr *newE = (IRExpr *)0xf001dead; /* shut compiler up */
 		while (x < i->nr_arguments) {
 			newE = undefinednessExpression(sm, i->contents[x], vdm);
 			if (newE != i->contents[x]) {

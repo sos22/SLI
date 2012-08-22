@@ -8633,6 +8633,8 @@ DisResult disInstr_AMD64_WRK (
    /* pfx holds the summary of prefixes. */
    Prefix pfx = PFX_EMPTY;
 
+   opc = 0xcc; /* shut compiler up. */
+
    /* Set result defaults. */
    dres.whatNext   = DisResult::Dis_Continue;
    dres.len        = 0;
