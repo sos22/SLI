@@ -1325,7 +1325,11 @@ public:
 		: beforeExtension(_beforeExtension),
 		  frame(_frame),
 		  afterExtension(_afterExtension)
-	{}
+	{
+		assert(beforeExtension);
+		assert(afterExtension);
+		assert(frame);
+	}
 	bool operator<(const StackConstraint &o) const {
 		if (beforeExtension < o.beforeExtension)
 			return true;
@@ -1339,6 +1343,14 @@ public:
 			return true;
 		return false;
 	}
+#ifndef NDEBUG
+	void assertSatisfied() const {
+		assert(afterExtension->size() == beforeExtension->size() + 1);
+		for (unsigned x = 0; x < beforeExtension->size(); x++)
+			assert( (*afterExtension)[x] == (*beforeExtension)[x]);
+		assert(afterExtension->back() == *frame);
+	}
+#endif
 };
 
 static void
@@ -1597,6 +1609,12 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 		}
 		nextFrameId++;
 	}
+
+#ifndef NDEBUG
+	/* Check that all constraints have actually been satisfied. */
+	for (auto it = constraints.begin(); it != constraints.end(); it++)
+		it->assertSatisfied();
+#endif
 
 	/* All frame IDs now assigned.  Extract the root stacks and
 	 * return. */
