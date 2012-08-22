@@ -153,6 +153,9 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 			switch (ieu->op) {
 			case Iop_32Uto64:
 				return ieu;
+			case Iop_BadPtr:
+			case Iop_Not1:
+				return UNDEFINED_EXPR;
 			default:
 				abort();
 			}
@@ -253,11 +256,14 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 		}
 
 		undefined:
-		if (i->op == Iop_And1)
+		if (i->op == Iop_And1 ||
+		    (i->op >= Iop_And8 && i->op <= Iop_And64))
 			return IRExpr_Const(IRConst_U1(0));
-		else if (i->op == Iop_Or1)
+		else if (i->op == Iop_Or1 |\
+			 (i->op >= Iop_Or8 && i->op <= Iop_Or64))
 			return IRExpr_Const(IRConst_U1(1));
-		else if (i->op == Iop_Add64)
+		else if ((i->op >= Iop_Add8 && i->op <= Iop_Add64) ||
+			 (i->op >= Iop_Xor8 && i->op <= Iop_Xor64))
 			return UNDEFINED_EXPR;
 		else
 			abort();
