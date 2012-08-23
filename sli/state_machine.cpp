@@ -423,7 +423,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse1);
 		StateMachineSideEffectLoad *smsel2 =
 			dynamic_cast<StateMachineSideEffectLoad *>(smse2);
-		return threadAndRegister::fullEq(smsel1->target, smsel2->target) &&
+		return smsel1->target == smsel2->target &&
 			smsel1->type == smsel2->type &&
 			smsel1->rip == smsel2->rip &&
 			definitelyEqual(smsel1->addr, smsel2->addr, opt);
@@ -433,7 +433,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse1);
 		StateMachineSideEffectCopy *smsec2 =
 			dynamic_cast<StateMachineSideEffectCopy *>(smse2);
-		return threadAndRegister::fullEq(smsec1->target, smsec2->target) &&
+		return smsec1->target == smsec2->target &&
 			smsec1->value->type() == smsec2->value->type() &&
 			definitelyEqual(smsec1->value, smsec2->value, opt);
 	}
@@ -451,7 +451,7 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			(StateMachineSideEffectPhi *)smse1;
 		StateMachineSideEffectPhi *smsep2 =
 			(StateMachineSideEffectPhi *)smse2;
-		return threadAndRegister::fullEq(smsep1->reg, smsep2->reg) &&
+		return smsep1->reg == smsep2->reg &&
 			smsep1->generations == smsep2->generations;
 	}
 	case StateMachineSideEffect::StartFunction: {

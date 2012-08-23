@@ -17,7 +17,7 @@ class StateMachineSideEffect;
 #ifdef NDEBUG
 static inline
 #endif
-void sanityCheckIRExpr(IRExpr *, const std::set<threadAndRegister, threadAndRegister::fullCompare> *)
+void sanityCheckIRExpr(IRExpr *, const std::set<threadAndRegister> *)
 #ifdef NDEBUG
 {}
 #else
@@ -352,7 +352,7 @@ public:
 		return const_cast<StateMachineState *>(this)->getSideEffect();
 	}
 
-	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const = 0;
+	virtual void sanityCheck(const std::set<threadAndRegister> *live) const = 0;
 
 #ifndef NDEBUG
 	void assertAcyclic(std::vector<const StateMachineState *> &stack,
@@ -391,7 +391,7 @@ protected:
 public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
-	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live = NULL) const = 0;
+	virtual void sanityCheck(const std::set<threadAndRegister> *live = NULL) const = 0;
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
 	virtual void inputExpressions(std::vector<IRExpr *> &exprs) = 0;
 	virtual void prettyPrint(FILE *f) const = 0;
@@ -411,7 +411,7 @@ public:
 	void targets(std::vector<const StateMachineState *> &) const { }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
 	StateMachineSideEffect *getSideEffect() { return NULL; }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const { return; }
+	void sanityCheck(const std::set<threadAndRegister> *) const { return; }
 };
 
 class StateMachineUnreached : public StateMachineTerminal {
@@ -517,7 +517,7 @@ public:
 	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
 	StateMachineSideEffect *getSideEffect() { return sideEffect; }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const
+	void sanityCheck(const std::set<threadAndRegister> *live) const
 	{
 		if (sideEffect)
 			sideEffect->sanityCheck(live);
@@ -586,7 +586,7 @@ public:
 		out.push_back(falseTarget);
 		out.push_back(trueTarget);
 	}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const
+	void sanityCheck(const std::set<threadAndRegister> *live) const
 	{
 		sanityCheckIRExpr(condition, live);
 		assert(condition->type() == Ity_I1);
@@ -615,7 +615,7 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &) {}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {}
+	void sanityCheck(const std::set<threadAndRegister> *) const {}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
@@ -638,7 +638,7 @@ public:
 	virtual void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
-	virtual void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	virtual void sanityCheck(const std::set<threadAndRegister> *live) const {
 		sanityCheckIRExpr(addr, live);
 		assert(addr->type() == Ity_I64);
 		rip.sanity_check();
@@ -690,7 +690,7 @@ public:
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	void sanityCheck(const std::set<threadAndRegister> *live) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(live);
 		sanityCheckIRExpr(data, live);
 	}
@@ -803,7 +803,7 @@ public:
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	void sanityCheck(const std::set<threadAndRegister> *live) const {
 		sanityCheckIRExpr(value, live);
 	}
 	bool definesRegister(threadAndRegister &reg) const {
@@ -851,7 +851,7 @@ public:
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	void sanityCheck(const std::set<threadAndRegister> *live) const {
 		assert(reflectsActualProgram == true ||
 		       reflectsActualProgram == false);
 		sanityCheckIRExpr(value, live);
@@ -887,7 +887,7 @@ public:
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
+	void sanityCheck(const std::set<threadAndRegister> *) const {
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -919,7 +919,7 @@ public:
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
+	void sanityCheck(const std::set<threadAndRegister> *) const {
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -1005,7 +1005,7 @@ public:
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
+	void sanityCheck(const std::set<threadAndRegister> *) const {
 		assert(generations.size() != 0);
 	}
 	bool definesRegister(threadAndRegister &reg) const {
@@ -1055,7 +1055,7 @@ public:
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	void sanityCheck(const std::set<threadAndRegister> *live) const {
 		if (rsp) {
 			sanityCheckIRExpr(rsp, live);
 			assert(rsp->type() == Ity_I64);
@@ -1100,7 +1100,7 @@ public:
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *live) const {
+	void sanityCheck(const std::set<threadAndRegister> *live) const {
 		sanityCheckIRExpr(rsp, live);
 		assert(rsp->type() == Ity_I64);
 	}
@@ -1128,7 +1128,7 @@ public:
 			return this;
 	}
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare>*) const {}
+	void sanityCheck(const std::set<threadAndRegister>*) const {}
 	bool definesRegister(threadAndRegister &) const { return false; }
 	void inputExpressions(std::vector<IRExpr *> &) {}
 	void prettyPrint(FILE *f) const {
@@ -1179,7 +1179,7 @@ public:
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare>*) const {}
+	void sanityCheck(const std::set<threadAndRegister>*) const {}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
@@ -1203,7 +1203,7 @@ public:
 		return false;
 	}
 	bool operator==(const StateMachineSideEffectPointerAliasing &o) const {
-		return threadAndRegister::fullEq(reg, o.reg) && set == o.set;
+		return reg == o.reg && set == o.set;
 	}
 
 };
@@ -1222,7 +1222,7 @@ public:
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck(const std::set<threadAndRegister, threadAndRegister::fullCompare> *) const {
+	void sanityCheck(const std::set<threadAndRegister> *) const {
 		/* No dupes */
 		for (auto it1 = functions.begin();
 		     it1 != functions.end();

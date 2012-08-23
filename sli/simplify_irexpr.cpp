@@ -77,7 +77,7 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 			*b = (const IRExpr ## type *)_b;
 #define footer() }
 	hdr(Get)
-		return threadAndRegister::fullEq(a->reg, b->reg) && a->ty == b->ty;
+		return a->reg == b->reg && a->ty == b->ty;
 	footer()
 	hdr(FreeVariable)
 		return a->id == b->id && a->ty == b->ty;
@@ -507,9 +507,9 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 				*b = (IRExpr ## t *)_b;
 	hdr1(Get)
 #define hdr(t) } hdr1(t)
-		if (threadAndRegister::fullCompare()(a->reg, b->reg))
+		if (a->reg < b->reg)
 			return less_than;
-		else if (threadAndRegister::fullCompare()(b->reg, a->reg))
+		else if (b->reg < a->reg)
 			return greater_than;
 		else
 			return equal_to;

@@ -157,7 +157,7 @@ compare_expressions(IRExpr *a, IRExpr *b)
 	} as(a), bs(b);
 	if (!as.tr.isValid() ||
 	    !bs.tr.isValid() ||
-	    !threadAndRegister::fullEq(as.tr, bs.tr))
+	    as.tr != bs.tr)
 		return compare_expressions_unknown;
 	if (as.offset < bs.offset)
 		return compare_expressions_lt;
@@ -386,7 +386,7 @@ StackLayoutTable::build(StateMachine *inp)
 }
 
 class PointsToTable {
-	std::map<threadAndRegister, PointerAliasingSet, threadAndRegister::fullCompare> content;
+	std::map<threadAndRegister, PointerAliasingSet> content;
 public:
 	PointerAliasingSet pointsToSetForExpr(IRExpr *e,
 					      StateMachineState *sm,
@@ -638,8 +638,7 @@ public:
 		for (auto it = content.begin();
 		     it != content.end();
 		     it++)
-			if ( threadAndRegister::fullEq(((StateMachineSideEffectLoad *)it->first->getSideEffect())->target,
-						       tr) )
+			if ( ((StateMachineSideEffectLoad *)it->first->getSideEffect())->target == tr )
 				return it->first;
 		abort();
 	}
@@ -863,7 +862,7 @@ sideEffectDefiningRegister(StateMachine *sm, const threadAndRegister &tr)
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
 		if ((*it)->getSideEffect() &&
 		    (*it)->getSideEffect()->definesRegister(tr2) &&
-		    threadAndRegister::fullEq(tr, tr2))
+		    tr == tr2)
 			return *it;
 	}
 	abort();

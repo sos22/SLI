@@ -25,9 +25,9 @@ phiElimination(StateMachine *sm,
 {
 	/* We're only really interested in registers which are input
 	   to Phi expressions. */
-	std::set<threadAndRegister, threadAndRegister::fullCompare> phiRegs;
+	std::set<threadAndRegister> phiRegs;
 	struct _2 : public StateMachineTransformer {
-		std::set<threadAndRegister, threadAndRegister::fullCompare> &phiRegs;
+		std::set<threadAndRegister> &phiRegs;
 		StateMachineSideEffectPhi *transformOneSideEffect(
 			StateMachineSideEffectPhi *p, bool *done_something) {
 			for (auto it = p->generations.begin(); it != p->generations.end(); it++)
@@ -38,7 +38,7 @@ phiElimination(StateMachine *sm,
 			return e;
 		}
 		bool rewriteNewStates() const { return false; }
-		_2(std::set<threadAndRegister, threadAndRegister::fullCompare> &_phiRegs)
+		_2(std::set<threadAndRegister> &_phiRegs)
 			: phiRegs(_phiRegs)
 		{}
 	} buildPhiRegs(phiRegs);
@@ -65,7 +65,7 @@ phiElimination(StateMachine *sm,
 	/* Now build the register dominator map.  This is a map from
 	   registers in the Phi set to expressions which must be true
 	   if we ever assign to that register. */
-	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> regDominators;
+	std::map<threadAndRegister, IRExpr *> regDominators;
 	for (auto it = states.begin(); it != states.end(); it++) {
 		StateMachineSideEffect *s = (*it)->getSideEffect();
 		if (!s)

@@ -75,7 +75,7 @@ class threadState {
 	};
 
 	/* The values of all of the registers */
-	std::map<threadAndRegister, register_val, threadAndRegister::fullCompare> registers;
+	std::map<threadAndRegister, register_val> registers;
 	/* The order in which registers have been assigned to.  This
 	   makes implementing Phi nodes much easier.  Each register
 	   appears at most once in here. */
@@ -85,7 +85,7 @@ class threadState {
 		for (auto it = assignmentOrder.begin();
 		     it != assignmentOrder.end();
 		     it++) {
-			if (threadAndRegister::fullEq(*it, reg)) {
+			if (*it == reg) {
 				assignmentOrder.erase(it);
 				break;
 			}
@@ -385,7 +385,7 @@ threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const Allowab
 			: reg(_reg), _this(__this)
 		{}
 		IRExpr *transformIex(IRExprGet *ieg) {
-			if (threadAndRegister::fullEq(ieg->reg, reg))
+			if (ieg->reg == reg)
 				return _this->register_value(reg, ieg->ty);
 			else
 				return IRExprTransformer::transformIex(ieg);

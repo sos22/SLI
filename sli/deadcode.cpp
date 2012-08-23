@@ -16,7 +16,7 @@ namespace _deadCode {
 static int debug_dump_liveness_map = 0;
 #endif
 
-class LivenessEntry : public std::set<threadAndRegister, threadAndRegister::fullCompare> {
+class LivenessEntry : public std::set<threadAndRegister> {
 	void killRegister(threadAndRegister r)
 	{
 		erase(r);
@@ -204,7 +204,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 				StateMachineSideEffectCopy *smsec =
 					(StateMachineSideEffectCopy *)e;
 				if (smsec->value->tag == Iex_Get &&
-				    threadAndRegister::fullEq(((IRExprGet *)smsec->value)->reg, smsec->target)) {
+				    ((IRExprGet *)smsec->value)->reg == smsec->target) {
 					/* Copying a register
 					   or temporary back
 					   to itself is always

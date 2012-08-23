@@ -237,12 +237,27 @@ public:
 		return generation;
 	}
 
-	static bool fullEq(const threadAndRegister &a, const threadAndRegister &b) {
-		if (!a.valid && !b.valid)
+	bool operator==(const threadAndRegister &b) const {
+		if (!valid && !b.valid)
 			return true;
-		if (!a.valid || !b.valid)
+		if (!valid || !b.valid)
 			return false;
-		return a.content == b.content && a.generation == b.generation;
+		return content == b.content && generation == b.generation;
+	}
+
+	bool operator!=(const threadAndRegister &o) const {
+		return !(*this == o);
+	}
+	bool operator<(const threadAndRegister &b) const {
+		if (valid < b.valid)
+			return true;
+		if (valid > b.valid)
+			return false;
+		if (content < b.content)
+			return true;
+		if (content > b.content)
+			return false;
+		return generation < b.generation;
 	}
 
 	static bool partialEq(const threadAndRegister &a, const threadAndRegister &b) {
@@ -253,20 +268,6 @@ public:
 		return a.content == b.content;
 	}
 
-	class fullCompare {
-	public:
-		bool operator()(const threadAndRegister &a, const threadAndRegister &b) const {
-			if (a.valid < b.valid)
-				return true;
-			if (a.valid > b.valid)
-				return false;
-			if (a.content < b.content)
-				return true;
-			if (a.content > b.content)
-				return false;
-			return a.generation < b.generation;
-		}
-	};
 	/* Compare two threadAndRegister structures in a way which
 	   ignores the generation number.  This is useful if you're
 	   e.g. interpreting a machine which is in SSA form, since

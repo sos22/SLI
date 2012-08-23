@@ -556,8 +556,7 @@ StateMachineSideEffectPhi::optimise(const AllowableOptimisations &, bool *done_s
 		if (generations[x].second != v) {
 			if (generations[x].first == (unsigned)-1 &&
 			    v->tag == Iex_Get &&
-			    threadAndRegister::fullEq( ((IRExprGet *)v)->reg,
-						       reg.setGen(-1) ))
+			    ((IRExprGet *)v)->reg == reg.setGen(-1))
 				continue;
 			return this;
 		}

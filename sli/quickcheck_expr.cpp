@@ -51,7 +51,7 @@ class RandomEvalContext {
 		{}
 	};
 	std::map<IRExpr *, IRExpr *> lookupTable;
-	std::map<threadAndRegister, unsigned long, threadAndRegister::fullCompare> registers;
+	std::map<threadAndRegister, unsigned long> registers;
 	std::map<unsigned long, bool> badAddrs;
 	unsigned long randomVal();
 	IRExpr *invent_random_const_expression(IRType ty);

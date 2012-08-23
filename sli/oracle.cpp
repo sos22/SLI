@@ -922,7 +922,7 @@ irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
 static PointerAliasingSet
 irexprAliasingClass(IRExpr *expr,
 		    const Oracle::RegisterAliasingConfiguration &config,
-		    std::map<threadAndRegister, PointerAliasingSet, threadAndRegister::fullCompare> *temps,
+		    std::map<threadAndRegister, PointerAliasingSet> *temps,
 		    const AllowableOptimisations &opt,
 		    bool buildingAliasTable)
 {
@@ -2089,7 +2089,7 @@ class RewriteRegisterExpr : public IRExprTransformer {
 	IRExpr *to;
 protected:
 	IRExpr *transformIex(IRExprGet *what) {
-		if (threadAndRegister::fullEq(what->reg, idx))
+		if (what->reg == idx)
 			return to;
 		else
 			return NULL;
@@ -2345,7 +2345,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 	RegisterAliasingConfiguration config;
 	config.addConfig(STATIC_THREAD, aliasConfigOnEntryToInstruction(rip));
 	ThreadRegisterAliasingConfiguration &tconfig(config.content[0].second);
-	std::map<threadAndRegister, PointerAliasingSet, threadAndRegister::fullCompare> temporaryAliases;
+	std::map<threadAndRegister, PointerAliasingSet> temporaryAliases;
 	IRStmt *st;
 
 	int nr_statements;

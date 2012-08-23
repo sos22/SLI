@@ -70,7 +70,7 @@ public:
 			: e(NULL), phiFrom(tr)
 		{}
 	};
-	std::map<threadAndRegister, registerMapEntry, threadAndRegister::fullCompare> _registers;
+	std::map<threadAndRegister, registerMapEntry> _registers;
 
 	void clear() { sideEffects.clear(); assertFalse.clear(); _registers.clear(); }
 	void makeFalse(IRExpr *expr, const AllowableOptimisations &opt);
@@ -287,14 +287,14 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		threadAndRegister reg;
 		StateMachineSideEffect *preserve;
 		IRExpr *transformIex(IRExprGet *e) {
-			if (threadAndRegister::fullEq(e->reg, reg))
+			if (e->reg == reg)
 				res = true;
 			return NULL;
 		}
 		StateMachineSideEffectLoad *transformOneSideEffect(StateMachineSideEffectLoad *l,
 								   bool *done_something)
 		{
-			if (l != preserve && threadAndRegister::fullEq(l->target, reg)) {
+			if (l != preserve && l->target == reg) {
 				res = true;
 				return NULL;
 			}
@@ -303,7 +303,7 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		StateMachineSideEffectCopy *transformOneSideEffect(StateMachineSideEffectCopy *l,
 								   bool *done_something)
 		{
-			if (l != preserve && threadAndRegister::fullEq(l->target, reg)) {
+			if (l != preserve && l->target == reg) {
 				res = true;
 				return NULL;
 			}
@@ -312,7 +312,7 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *l,
 								  bool *done_something)
 		{
-			if (l != preserve && threadAndRegister::fullEq(l->reg, reg)) {
+			if (l != preserve && l->reg == reg) {
 				res = true;
 				return NULL;
 			}

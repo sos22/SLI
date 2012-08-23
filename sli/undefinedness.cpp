@@ -30,7 +30,7 @@ operator |=(std::set<t, s> &a, const std::set<t, s> &b)
 }
 
 class VariableDefinednessMap {
-	typedef std::set<threadAndRegister, threadAndRegister::fullCompare> entryT ;
+	typedef std::set<threadAndRegister> entryT ;
 	std::map<StateMachineState *, entryT> content;
 public:
 	void prettyPrint(FILE *f, const std::map<const StateMachineState *, int> &labels) const {
