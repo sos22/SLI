@@ -1281,18 +1281,6 @@ ThreadEvent *interpretStatement(IRStmt *stmt,
 
 void HandleMallocFree(Thread *thr, AddressSpace *as);
 
-/* Expand @out by adding the contents of @inp to it.  Returns true if
-   we added anything, or false otherwise.  (i.e return false if @out
-   was already a (possibly non-strict) superset of @inp.) */
-template <typename t, typename comp> bool
-expandSet(std::set<t, comp> &out, const std::set<t, comp> &inp)
-{
-	bool res = false;
-	for (auto it = inp.begin(); it != inp.end(); it++)
-		res |= out.insert(*it).second;
-	return res;
-}
-
 struct internIRExprTable {
 	static const int nr_entries = 17;
 	std::map<IRExpr *, IRExpr *> lookups[nr_entries];

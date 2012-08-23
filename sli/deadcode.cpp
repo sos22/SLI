@@ -55,11 +55,13 @@ public:
 		}
 	}
 
-	void merge(const LivenessEntry &other) {
+	bool merge(const LivenessEntry &other) {
+		bool res = false;
 		for (auto it = other.begin();
 		     it != other.end();
 		     it++)
-			insert(*it);
+			res |= insert(*it).second;
+		return res;
 	}
 
 	bool registerLive(threadAndRegister reg) const { return count(reg); }
@@ -98,7 +100,7 @@ class LivenessMap {
 			/* Nothing needed */
 			break;
 		}
-		if (expandSet(content[sm], res))
+		if (content[sm].merge(res))
 			*progress = true;
 	}
 
