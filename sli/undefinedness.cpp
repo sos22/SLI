@@ -259,7 +259,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 		if (i->op == Iop_And1 ||
 		    (i->op >= Iop_And8 && i->op <= Iop_And64))
 			return IRExpr_Const(IRConst_U1(0));
-		else if (i->op == Iop_Or1 |\
+		else if (i->op == Iop_Or1 ||
 			 (i->op >= Iop_Or8 && i->op <= Iop_Or64))
 			return IRExpr_Const(IRConst_U1(1));
 		else if ((i->op >= Iop_Add8 && i->op <= Iop_Add64) ||
