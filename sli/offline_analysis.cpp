@@ -311,34 +311,9 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
+		}
 
-			/* Note that we use the same CDM for
-			   functionAliasAnalysis and phi elimination,
-			   without trying to recompute it.  That's
-			   fine, because function alias analysis won't
-			   modify the control-flow structure of the
-			   machine. */
-			ControlDominationMap cdm;
-			cdm.init(sm, opt);
-			if (TIMEOUT)
-				break;
-
-			p = false;
-			sm = functionAliasAnalysis(sm, opt, oracle, cdm, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("functionAliasAnalysis:\n");
-				printStateMachine(sm, stdout);
-			}
-			done_something |= p;
-
-			p = false;
-			sm = phiElimination(sm, opt, cdm, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("phiElimination:\n");
-				printStateMachine(sm, stdout);
-			}
-			done_something |= p;
-
+		if (is_ssa) {
 			p = false;
 			sm = undefinednessSimplification(sm, &p);
 			if (debugOptimiseStateMachine && p) {
@@ -383,6 +358,37 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 			}
 			done_something |= p;
 		}
+
+		if (!done_something && is_ssa) {
+			/* Note that we use the same CDM for
+			   functionAliasAnalysis and phi elimination,
+			   without trying to recompute it.  That's
+			   fine, because function alias analysis won't
+			   modify the control-flow structure of the
+			   machine. */
+
+			ControlDominationMap cdm;
+			cdm.init(sm, opt);
+			if (TIMEOUT)
+				break;
+
+			p = false;
+			sm = functionAliasAnalysis(sm, opt, oracle, cdm, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("functionAliasAnalysis:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+
+			p = false;
+			sm = phiElimination(sm, opt, cdm, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("phiElimination:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+		}
+
 		if (progress)
 			*progress |= done_something;
 	} while (done_something);
