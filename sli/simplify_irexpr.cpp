@@ -2578,6 +2578,8 @@ optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_someth
 						*done_something = true;
 						return rewriteTo;
 					}
+					if (!rewriteFrom && e->type() != Ity_I1)
+						return e;
 					return IRExprTransformer::transformIRExpr(e, done_something);
 				}
 			} doit;
