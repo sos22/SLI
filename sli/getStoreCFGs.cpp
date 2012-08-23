@@ -19,7 +19,8 @@ namespace _getStoreCFGs {
 	f(debug_find_roots)			\
 	f(debug_remove_redundant_roots)		\
 	f(debug_unroll_and_cycle_break)		\
-	f(debug_top_level)
+	f(debug_top_level)			\
+	f(debug_backtrack_roots)
 #ifdef NDEBUG
 #define mk_debug_flag(name)			\
 	static const bool name = false;
@@ -746,17 +747,97 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 		      std::set<CFGNode *> &roots,
 		      Oracle *oracle)
 {
+	if (debug_backtrack_roots)
+		printf("%s:\n", __func__);
 	std::set<CFGNode *> targetInstrs;
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++) {
 		auto it_fl = flavours.find(it->second);
 		assert(it_fl != flavours.end());
-		if (it_fl->second == cfgs_flavour_true)
+		if (it_fl->second == cfgs_flavour_true) {
+			if (debug_backtrack_roots) {
+				printf("Initial root %p: ", it->second);
+				it->second->prettyPrint(stdout);
+			}
 			targetInstrs.insert(it->second);
+		}
 	}
 	std::set<CFGNode *> newNodes;
 	for (auto it = targetInstrs.begin(); it != targetInstrs.end(); it++) {
-		CFGNode *n = *it;
+		CFGNode *start = *it;
+		CFGNode *n = start;
+		if (debug_backtrack_roots) {
+			printf("Consider backtracking %p: ", n);
+			n->prettyPrint(stdout);
+		}
 		for (unsigned cntr = 0; cntr < CONFIG_MAX_STORE_BACKTRACK; cntr++) {
+			std::vector<VexRip> predecessors;
+			bool isLibraryCall = false;
+			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+				if (it->calledFunction != LibraryFunctionTemplate::none)
+					isLibraryCall = true;
+			oracle->findPredecessors(n->rip,
+						 n->rip.stack.size() != 1,
+						 isLibraryCall,
+						 predecessors);
+			if (predecessors.size() != 1) {
+				if(debug_backtrack_roots)
+					printf("\tFailed; %zd predecessors\n", predecessors.size());
+				break;
+			}
+			VexRip &predecessor(predecessors[0]);
+			if (debug_backtrack_roots)
+				printf("\tPredecessor %s\n", predecessor.name());
+			/* The starts and ends of functions are often
+			   nice places to analyse, so stop
+			   backtracking if it looks like we've reached
+			   one. */
+			if (predecessor.stack.size() != n->rip.stack.size()) {
+				if (debug_backtrack_roots)
+					printf("\tFailed: stack size %zd != %zd\n",
+					       predecessor.stack.size(),
+					       n->rip.stack.size());
+				break;
+			}
+			if (ripsToCFGNodes.count(predecessor)) {
+				n = ripsToCFGNodes[predecessor];
+				if (debug_backtrack_roots) {
+					printf("\tFinished backtracking at %p: ", n);
+					n->prettyPrint(stdout);
+				}
+				break;
+			} else {
+				CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, predecessor);
+				if (!work) {
+					if (debug_backtrack_roots)
+						printf("\tFailed: no decode\n");
+					break;
+				}
+				flavours[work] = cfgs_flavour_ordinary;
+				ripsToCFGNodes[predecessor] = work;
+				newNodes.insert(work);
+				n = work;
+				if (debug_backtrack_roots) {
+					printf("\tBacktracked to new %p: ", n);
+					n->prettyPrint(stdout);
+				}
+			}
+		}
+		roots.insert(n);
+	}
+	for (auto it = newNodes.begin(); it != newNodes.end(); it++)
+		resolveReferences(ripsToCFGNodes, *it);
+
+	for (auto it = roots.begin(); it != roots.end(); ) {
+		CFGNode *n = *it;
+		/* Walk back up the unique predecessor chain for @n.
+		   If we encounter any other roots then this root is
+		   redundant. */
+		bool redundant = false;
+		if (debug_backtrack_roots) {
+			printf("Check redundancy of root %p: ", n);
+			n->prettyPrint(stdout);
+		}
+		while (1) {
 			std::vector<VexRip> predecessors;
 			bool isLibraryCall = false;
 			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
@@ -769,28 +850,31 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 			if (predecessors.size() != 1)
 				break;
 			VexRip &predecessor(predecessors[0]);
-			/* The starts and ends of functions are often
-			   nice places to analyse, so stop
-			   backtracking if it looks like we've reached
-			   one. */
-			if (predecessor.stack.size() != n->rip.stack.size())
+			auto it2 = ripsToCFGNodes.find(predecessor);
+			if (it2 == ripsToCFGNodes.end())
 				break;
-			if (ripsToCFGNodes.count(predecessor)) {
-				n = ripsToCFGNodes[predecessor];
-			} else {
-				CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, predecessor);
-				if (!work)
-					break;
-				flavours[work] = cfgs_flavour_ordinary;
-				ripsToCFGNodes[predecessor] = work;
-				newNodes.insert(work);
-				n = work;
+			CFGNode *pred = it2->second;
+			if (pred == n)
+				break;
+			if (roots.count(pred)) {
+				redundant = true;
+				if (debug_backtrack_roots) {
+					printf("\tRedundant with %p: ", pred);
+					pred->prettyPrint(stdout);
+				}
+				break;
 			}
+			n = pred;
 		}
-		roots.insert(n);
+
+		if (redundant) {
+			roots.erase(it++);
+		} else {
+			if (debug_backtrack_roots)
+				printf("\tNot redundant\n");
+			it++;
+		}
 	}
-	for (auto it = newNodes.begin(); it != newNodes.end(); it++)
-		resolveReferences(ripsToCFGNodes, *it);
 }
 
 template <typename t> static void
@@ -823,6 +907,15 @@ trimUninterestingCFGNodes(std::set<Instruction<t> *> &roots,
 			}
 		}
 	}
+	if (debug_trim_uninteresting) {
+		for (auto it = allCFGNodes.begin(); it != allCFGNodes.end(); it++) {
+			if (!interesting.count(*it)) {
+				printf("Trim uninteresting: %p ", *it);
+				(*it)->prettyPrint(stdout);
+			}
+		}
+	}
+
 	for (auto it = allCFGNodes.begin(); !TIMEOUT && it != allCFGNodes.end(); it++) {
 		Instruction<t> *n = *it;
 		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
