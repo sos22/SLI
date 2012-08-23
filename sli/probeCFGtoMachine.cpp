@@ -1213,7 +1213,8 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 	 * configuration for RAX at func3's return address and add
 	 * frame2 to everything if it includes the stack. */
 	PointerAliasingSet framesInRegisters(PointerAliasingSet::nothing);
-	for (int x = 0; x < (int)vr.stack.size() - 1; x++) {
+	assert(vr.stack.size() >= entryStack.size());
+	for (int x = 0; x < (int)entryStack.size() - 1; x++) {
 		StaticRip rtrnRip(vr.stack[x]);
 		Oracle::ThreadRegisterAliasingConfiguration rtrnConfig =
 			oracle->getAliasingConfigurationForRip(rtrnRip);
