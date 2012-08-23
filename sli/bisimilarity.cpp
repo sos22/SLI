@@ -68,7 +68,28 @@ rewriteStateMachine(StateMachine *sm, HashedMap<HashedPtr<StateMachineState>, St
 static bool
 statesLocallyBisimilar(StateMachineState *sm1,
 		       StateMachineState *sm2,
-		       const HashedSet<st_pair_t> &edges,
+		       const HashedSet<st_pair_t> &edges)
+{
+	if (sm1 == sm2)
+		return true;
+	assert(sm1->type == sm2->type);
+
+	std::vector<StateMachineState *> smTarg1;
+	std::vector<StateMachineState *> smTarg2;
+	sm1->targets(smTarg1);
+	sm2->targets(smTarg2);
+	assert(smTarg1.size() == smTarg2.size());
+	for (unsigned x = 0; x < smTarg1.size(); x++) {
+		if (smTarg1[x] != smTarg2[x] &&
+		    !edges.contains(st_pair_t(smTarg1[x], smTarg2[x])))
+			return false;
+	}
+	return true;
+}
+
+static bool
+statesMightBeBisimilar(StateMachineState *sm1,
+		       StateMachineState *sm2,
 		       const AllowableOptimisations &opt)
 {
 	if (sm1 == sm2)
@@ -83,10 +104,6 @@ statesLocallyBisimilar(StateMachineState *sm1,
 	sm2->targets(smTarg2);
 	if (smTarg1.size() != smTarg2.size())
 		return false;
-	for (unsigned x = 0; x < smTarg1.size(); x++) {
-		if (!edges.contains(st_pair_t(smTarg1[x], smTarg2[x])))
-			return false;
-	}
 	switch (sm1->type) {
 		/* These have no data, so if they're the same type it's fine */
 	case StateMachineState::Unreached:
@@ -109,6 +126,7 @@ statesLocallyBisimilar(StateMachineState *sm1,
 	abort();
 }
 
+
 static void
 buildStateMachineBisimilarityMap(HashedSet<st_pair_t> &bisimilarStates,
 				 const std::set<StateMachineState *> &allStates,
@@ -129,7 +147,8 @@ buildStateMachineBisimilarityMap(HashedSet<st_pair_t> &bisimilarStates,
 		for (auto it2 = allStates.begin();
 		     !TIMEOUT && it2 != allStates.end();
 		     it2++)
-			bisimilarStates.insert(st_pair_t(*it, *it2));
+			if (statesMightBeBisimilar(*it, *it2, opt))
+				bisimilarStates.insert(st_pair_t(*it, *it2));
 
 	bool progress;
 	do {
@@ -143,7 +162,7 @@ buildStateMachineBisimilarityMap(HashedSet<st_pair_t> &bisimilarStates,
 		   relationship, we will also be consistent with
 		   global bismilarity. */
 		for (auto it = bisimilarStates.begin(); !it.finished(); ) {
-			if (statesLocallyBisimilar(it->first, it->second, bisimilarStates, opt)) {
+			if (statesLocallyBisimilar(it->first, it->second, bisimilarStates)) {
 				it.advance();
 			} else {
 				it.erase();
