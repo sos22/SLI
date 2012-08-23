@@ -2,7 +2,13 @@
 #define HASH_TABLE_HPP__
 
 template <typename member, int _nr_heads = 2053, int _nr_per_elem = 4> class HashTable {
+	/* Duplicating an entire hash table is expensive.  Discourage
+	   people from doing so by making this private and
+	   not-implemented. */
+	HashTable(const HashTable &o);
 public:
+	HashTable() {}
+
 	static const int nr_heads = _nr_heads;
 	static const int nr_per_elem = _nr_per_elem;
 
