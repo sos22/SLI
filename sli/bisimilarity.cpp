@@ -70,8 +70,7 @@ statesLocallyBisimilar(StateMachineState *sm1,
 		       StateMachineState *sm2,
 		       const HashedSet<st_pair_t> &edges)
 {
-	if (sm1 == sm2)
-		return true;
+	assert(sm1 != sm2);
 	assert(sm1->type == sm2->type);
 
 	std::vector<StateMachineState *> smTarg1;
@@ -92,9 +91,7 @@ statesMightBeBisimilar(StateMachineState *sm1,
 		       StateMachineState *sm2,
 		       const AllowableOptimisations &opt)
 {
-	if (sm1 == sm2)
-		return true;
-
+	assert(sm1 != sm2);
 	if (sm1->type != sm2->type)
 		return false;
 
@@ -147,7 +144,7 @@ buildStateMachineBisimilarityMap(HashedSet<st_pair_t> &bisimilarStates,
 		for (auto it2 = allStates.begin();
 		     !TIMEOUT && it2 != allStates.end();
 		     it2++)
-			if (statesMightBeBisimilar(*it, *it2, opt))
+			if (*it != *it2 && statesMightBeBisimilar(*it, *it2, opt))
 				bisimilarStates.insert(st_pair_t(*it, *it2));
 
 	bool progress;
