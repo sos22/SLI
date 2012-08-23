@@ -16,7 +16,142 @@ namespace _deadCode {
 static int debug_dump_liveness_map = 0;
 #endif
 
-class LivenessEntry : public std::set<threadAndRegister> {
+template <typename content, int nr_inline> class small_set {
+	unsigned long inline_mask;
+	content inlined[nr_inline];
+	std::set<content> *out_of_line;
+public:
+	small_set(const small_set &o)
+		: inline_mask(o.inline_mask),
+		  inlined(o.inlined),
+		  out_of_line(o.out_of_line ? new std::set<content>(*o.out_of_line) : NULL)
+	{
+	}
+	small_set()
+		: inline_mask(0), out_of_line(NULL)
+	{}
+	void operator=(const small_set &o) {
+		if (out_of_line) {
+			if (o.out_of_line) {
+				*out_of_line = *o.out_of_line;
+			} else {
+				delete out_of_line;
+				out_of_line = NULL;
+			}
+		} else {
+			if (o.out_of_line)
+				out_of_line = new std::set<content>(*o.out_of_line);
+		}
+		inline_mask = o.inline_mask;
+		std::copy(o.inlined, o.inlined + nr_inline, inlined);
+	}
+	~small_set()
+	{
+		if (out_of_line)
+			delete out_of_line;
+	}
+	class const_iterator {
+		const small_set *owner;
+		int inline_idx;
+		typename std::set<content>::iterator it;
+		bool _started;
+	public:
+		const_iterator(const small_set *_owner)
+			: owner(_owner),
+			  inline_idx(-1)
+		{
+			advance();
+			_started = false;
+		}
+		void advance() {
+			_started = true;
+			if (inline_idx == nr_inline) {
+				it++;
+				if (it == owner->out_of_line->end())
+					inline_idx = nr_inline + 1;
+				return;
+			}
+			do {
+				inline_idx++;
+			} while (inline_idx < nr_inline && !(owner->inline_mask & (1ul << inline_idx)));
+			if (inline_idx == nr_inline) {
+				if (owner->out_of_line) {
+					it = owner->out_of_line->begin();
+					if (it == owner->out_of_line->end())
+						inline_idx = nr_inline + 1;
+				} else {
+					inline_idx = nr_inline + 1;
+				}
+			}
+		}
+		bool finished() const {
+			return inline_idx == nr_inline + 1;
+		}
+		bool started() const {
+			return _started;
+		}
+		const content &operator*() const {
+			assert(inline_idx <= nr_inline);
+			if (inline_idx == nr_inline)
+				return *it;
+			else
+				return owner->inlined[inline_idx];
+		}
+		const content *operator->() const {
+			assert(inline_idx <= nr_inline);
+			if (inline_idx == nr_inline)
+				return &*it;
+			else
+				return &owner->inlined[inline_idx];
+		}
+	};
+	const_iterator begin() const { return const_iterator(this); }
+	bool insert(const content &k) {
+		for (int i = 0; i < nr_inline; i++) {
+			if (inline_mask & (1ul << i)) {
+				if (inlined[i] == k)
+					return false;
+			}
+		}
+		if (out_of_line && out_of_line->count(k))
+			return false;
+		for (int i = 0; i < nr_inline; i++) {
+			if (!(inline_mask & (1ul << i))) {
+				inlined[i] = k;
+				inline_mask |= 1ul << i;
+				return true;
+			}
+		}
+		if (!out_of_line)
+			out_of_line = new std::set<content>();
+		out_of_line->insert(k);
+		return true;
+	}
+	void erase(const content &k) {
+		for (int i = 0; i < nr_inline; i++) {
+			if ( (inline_mask & (1ul << i)) &&
+			     inlined[i] == k ) {
+				inline_mask &= ~(1ul << i);
+				return;
+			}
+		}
+		if (out_of_line)
+			out_of_line->erase(k);
+	}
+	bool contains(const content &k) const {
+		for (int i = 0; i < nr_inline; i++) {
+			if (inline_mask & (1ul << i)) {
+				if (inlined[i] == k)
+					return true;
+			}
+		}
+		if (out_of_line)
+			return out_of_line->count(k) != 0;
+		return false;
+	}
+};
+
+class LivenessEntry : public small_set<threadAndRegister, 8> {
 	void killRegister(threadAndRegister r)
 	{
 		erase(r);
@@ -57,18 +192,16 @@ public:
 
 	bool merge(const LivenessEntry &other) {
 		bool res = false;
-		for (auto it = other.begin();
-		     it != other.end();
-		     it++)
-			res |= insert(*it).second;
+		for (auto it = other.begin(); !it.finished(); it.advance())
+			res |= insert(*it);
 		return res;
 	}
 
-	bool registerLive(threadAndRegister reg) const { return count(reg); }
+	bool registerLive(threadAndRegister reg) const { return contains(reg); }
 
 	void print() const {
-		for (auto it = begin(); it != end(); it++) {
-			if (it != begin())
+		for (auto it = begin(); !it.finished(); it.advance()) {
+			if (it.started())
 				printf(", ");
 			printf("%s", it->name());
 		}

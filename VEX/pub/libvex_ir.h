@@ -165,9 +165,6 @@ class threadAndRegister : public Named {
 	threadAndRegister(unsigned tid, int reg, unsigned _generation)
 		: content(tid, reg), valid(true), generation(_generation)
 	{}
-	threadAndRegister()
-		: content(-10000, -10000), valid(false), generation(-1)
-	{}
 	char *mkName(void) const {
 		if (!valid)
 			return strdup("<invalid>");
@@ -181,6 +178,9 @@ class threadAndRegister : public Named {
 		return res;
 	}
 public:
+	threadAndRegister()
+		: content(-10000, -10000), valid(false), generation(-1)
+	{}
 	static threadAndRegister reg(unsigned tid, int reg, unsigned generation)
 	{
 		return threadAndRegister(tid, reg, generation);
