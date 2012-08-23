@@ -860,7 +860,7 @@ StateMachine::assertSSA() const
 {
 	std::set<const StateMachineSideEffecting *> states;
 	enumStates(this, &states);
-	std::set<threadAndRegister, threadAndRegister::fullCompare> discoveredAssignments;
+	std::set<threadAndRegister> discoveredAssignments;
 	for (auto it = states.begin(); it != states.end(); it++) {
 		StateMachineSideEffect *smse = (*it)->sideEffect;
 		if (!smse)
@@ -1017,8 +1017,8 @@ StateMachine::sanityCheck() const
 	if (!debug_state_machine_sanity_checks)
 		return;
 
-	std::map<const StateMachineState *, std::set<threadAndRegister, threadAndRegister::fullCompare> > definedAtTopOfState;
-	std::set<threadAndRegister, threadAndRegister::fullCompare> allDefinedRegisters;
+	std::map<const StateMachineState *, std::set<threadAndRegister> > definedAtTopOfState;
+	std::set<threadAndRegister> allDefinedRegisters;
 	std::set<const StateMachineState *> allStates;
 
 	enumStates(this, &allStates);
@@ -1038,8 +1038,8 @@ StateMachine::sanityCheck() const
 		for (auto it = definedAtTopOfState.begin();
 		     it != definedAtTopOfState.end();
 		     it++) {
-			std::set<threadAndRegister, threadAndRegister::fullCompare> *definedAtEndOfState = &it->second;
-			std::set<threadAndRegister, threadAndRegister::fullCompare> ts;
+			std::set<threadAndRegister> *definedAtEndOfState = &it->second;
+			std::set<threadAndRegister> ts;
 			const StateMachineSideEffect *se = it->first->getSideEffect();
 			threadAndRegister definedHere(threadAndRegister::invalid());
 			if (se && se->definesRegister(definedHere)) {
@@ -1051,7 +1051,7 @@ StateMachine::sanityCheck() const
 			std::vector<const StateMachineState *> exits;
 			it->first->targets(exits);
 			for (auto it = exits.begin(); it != exits.end(); it++) {
-				std::set<threadAndRegister, threadAndRegister::fullCompare> &other(definedAtTopOfState[*it]);
+				std::set<threadAndRegister> &other(definedAtTopOfState[*it]);
 				if (intersectSets(other, *definedAtEndOfState))
 					progress = true;
 			}
