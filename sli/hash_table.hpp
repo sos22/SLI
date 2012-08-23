@@ -1,6 +1,8 @@
 #ifndef HASH_TABLE_HPP__
 #define HASH_TABLE_HPP__
 
+#include "maybe.hpp"
+
 template <typename member, int _nr_heads = 2053, int _nr_per_elem = 4> class HashTable {
 	/* Duplicating an entire hash table is expensive.  Discourage
 	   people from doing so by making this private and
@@ -55,6 +57,9 @@ public:
 			idx2 = -1;
 			advance();
 		}
+		bool started() const {
+			return idx2 != -1;
+		}
 		bool finished() const {
 			return idx2 == nr_heads;
 		}
@@ -87,9 +92,69 @@ public:
 			assert(elm);
 			return &elm->content[idx1];
 		}
+		const member &operator*() const {
+			assert(!finished());
+			assert(elm);
+			return elm->content[idx1];
+		}
 		void erase() {
 			elm->use_map &= ~(1ul << idx1);
 			advance();
+		}
+	};
+	class const_iterator {
+		const HashTable *owner;
+		const elem *elm;
+		int idx1;
+		int idx2;
+	public:
+		const_iterator(const HashTable *_owner)
+			: owner(_owner)
+		{
+			elm = NULL;
+			idx1 = nr_per_elem;
+			idx2 = -1;
+			advance();
+		}
+		bool finished() const {
+			return idx2 == nr_heads;
+		}
+		bool started() const {
+			return idx2 != -1;
+		}
+		void advance() {
+			idx1 = (idx1 + 1) % nr_per_elem;
+			if (idx1 == 0) {
+				if (elm) {
+					elm = elm->next;
+				} else {
+					assert(idx2 < nr_heads);
+					idx2++;
+					elm = &owner->heads[idx2];
+				}
+			}
+			while (idx2 < nr_heads) {
+				while (elm != NULL) {
+					for (; idx1 < nr_per_elem; idx1++) {
+						if (elm->use_map & (1ul << idx1))
+							return;
+					}
+					idx1 = 0;
+					elm = elm->next;
+				}
+				idx2++;
+				elm = &owner->heads[idx2];
+			}
+		}
+		const member *operator->() const {
+			assert(!finished());
+			assert(elm);
+			return &elm->content[idx1];
+		}
+		const member &operator*() const {
+			assert(!finished());
+			assert(elm);
+			return elm->content[idx1];
 		}
 	};
 };
@@ -110,12 +175,14 @@ public:
 		}
 		return false;
 	}
+	/* Returns true if the thing was already present or false
+	 * otherwise. */
 	bool insert(const member &v) {
 		typename contentT::elem *c = content.getHead(v.hash());
-		typename contentT::elem **last;
+		typename contentT::elem **last = (typename contentT::elem **)0xf001;
 		member *slot = NULL;
-		unsigned long *slot_use;
-		unsigned long slot_use_mask;
+		unsigned long *slot_use = (unsigned long *)0xf001; /* shut compiler up */
+		unsigned long slot_use_mask = 0xdeadbeefcafebabeul;
 		while (c) {
 			for (int i = 0; i < contentT::nr_per_elem; i++) {
 				if ( (c->use_map & (1ul << i)) ) {
@@ -141,8 +208,34 @@ public:
 		*last = c;
 		return false;
 	}
+	bool erase(const member &v) {
+		typename contentT::elem *c = content.getHead(v.hash());
+		while (c) {
+			for (int i = 0; i < contentT::nr_per_elem; i++) {
+				if ( (c->use_map & (1ul << i)) &&
+				     c->content[i] == v ) {
+					c->use_map &= ~(1ul << i);
+					return true;
+				}
+			}
+			c = c->next;
+		}
+		return false;
+	}
+
+	/* Extend @this by adding in the contents of @o.  Returns true
+	 * if we do anything or false if it's a no-op. */
+	template <int _nr_heads, int _elem_per_head> bool extend(const HashedSet<member, _nr_heads, _elem_per_head> &o) {
+		bool res = false;
+		for (auto it = o.begin(); !it.finished(); it.advance())
+			res |= !insert(*it);
+		return res;
+	}
+
 	typedef typename contentT::iterator iterator;
 	iterator begin() { return iterator(&content); }
+	typedef typename contentT::const_iterator const_iterator;
+	const_iterator begin() const { return const_iterator(&content); }
 };
 
 template <typename key, typename value, int nr_heads = 2053, int nr_per_elem = 4> class HashedMap {
