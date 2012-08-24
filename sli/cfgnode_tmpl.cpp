@@ -41,7 +41,7 @@ enumerateCFG(Instruction<t> *start, HashedSet<HashedPtr<Instruction<t> > > &out)
 	while (!pending.empty()) {
 		Instruction<t> *n = pending.back();
 		pending.pop_back();
-		if (!out.insert(n))
+		if (!out._insert(n))
 			continue;
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
 			if (it->instr)

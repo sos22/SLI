@@ -416,7 +416,7 @@ trimExcessNodes(Oracle *oracle,
 		HashedSet<HashedPtr<CFGNode> > newPending;
 		for (auto it = pending.begin(); !it.finished(); it.advance()) {
 			CFGNode *n = *it;
-			if (reachableFromFunctionHead.insert(n)) {
+			if (reachableFromFunctionHead._insert(n)) {
 				for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
 					if (it2->instr)
 						newPending.insert(it2->instr);
@@ -490,7 +490,7 @@ distanceToTrueInstr(const CFGNode *n, const HashedSet<HashedPtr<const CFGNode> >
 			pendingAtCurrentDepth.pop();
 			if (targetInstr.contains(n))
 				return depth;
-			if (!successors.insert(n))
+			if (!successors._insert(n))
 				continue;
 			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
 				if (it->instr)

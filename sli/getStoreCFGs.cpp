@@ -315,7 +315,7 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const HashedSet<Hashed
 		CFGNode *n = pending.back();
 		pending.pop_back();
 		assert(n);
-		if (!reachable.insert(n))
+		if (!reachable._insert(n))
 			continue;
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
 			if (it->instr)
@@ -376,7 +376,7 @@ predecessorMap<t>::predecessorMap(const HashedSet<HashedPtr<Instruction<t> > > &
 		Instruction<t> *n = pending.front();
 		pending.pop();
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
-			if (it->instr && content[it->instr].insert(n))
+			if (it->instr && content[it->instr]._insert(n))
 				pending.push(it->instr);
 		}
 	}
@@ -527,7 +527,7 @@ nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<Instruction<t> > > &ro
 		while (!p2.empty()) {
 			Instruction<t> *n = p2.front();
 			p2.pop();
-			if (!visited.insert(n))
+			if (!visited._insert(n))
 				continue;
 			auto it_fl = cfgFlavours.find(n);
 			assert(it_fl != cfgFlavours.end());

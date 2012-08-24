@@ -279,9 +279,8 @@ public:
 		}
 		return false;
 	}
-	/* Returns true if the thing was already present or false
-	 * otherwise. */
-	bool insert(const member &v) {
+	/* returns true if we did anything or false present */
+	bool _insert(const member &v) {
 		typename contentT::elem *c = content.getHead(v.hash());
 		typename contentT::elem **last = (typename contentT::elem **)0xf001;
 		member *slot = NULL;
@@ -291,7 +290,7 @@ public:
 			for (int i = 0; i < contentT::nr_per_elem; i++) {
 				if ( (c->use_map & (1ul << i)) ) {
 					if (c->content[i] == v )
-						return true;
+						return false;
 				} else if (!slot) {
 					slot = &c->content[i];
 					slot_use = &c->use_map;
@@ -305,13 +304,17 @@ public:
 		if (slot) {
 			*slot = v;
 			*slot_use |= slot_use_mask;
-			return false;
+			return true;
 		}
 		c = new typename contentT::elem();
 		c->use_map = 1;
 		c->content[0] = v;
 		*last = c;
-		return false;
+		assert(contains(v));
+		return true;
+	}
+	void insert(const member &v) {
+		_insert(v);
 	}
 	bool erase(const member &v) {
 		typename contentT::elem *c = content.getHead(v.hash());
@@ -319,13 +322,16 @@ public:
 			for (int i = 0; i < contentT::nr_per_elem; i++) {
 				if ( (c->use_map & (1ul << i)) &&
 				     c->content[i] == v ) {
+					assert(contains(v));
 					c->use_map &= ~(1ul << i);
 					content.sz--;
+					assert(!contains(v));
 					return true;
 				}
 			}
 			c = c->next;
 		}
+		assert(!contains(v));
 		return false;
 	}
 	void clear() {
@@ -336,7 +342,7 @@ public:
 	template <int _nr_heads, int _elem_per_head> bool extend(const HashedSet<member, _nr_heads, _elem_per_head> &o) {
 		bool res = false;
 		for (auto it = o.begin(); !it.finished(); it.advance())
-			res |= !insert(*it);
+			res |= _insert(*it);
 		return res;
 	}
 
