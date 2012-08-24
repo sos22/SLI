@@ -77,7 +77,6 @@ NdChooser::nd_choice(int nr_options, bool *isNew)
 #if ND_CHOOSER_STATS
 			cur_stack_cont_recovery_end = now();
 #endif
-			stop_profiling();
 		}
 	}
 	current_stack_index++;
@@ -100,7 +99,6 @@ NdChooser::advance(void)
 		cp.current_value++;
 		if (cp.current_value < cp.nr_options) {
 			nr_branches++;
-			start_profiling();
 			return true;
 		}
 		/* This choicepoint is exhausted, try another one. */
@@ -112,7 +110,6 @@ NdChooser::advance(void)
 
 NdChooser::~NdChooser()
 {
-	stop_profiling();
 #if ND_CHOOSER_STATS
 	nr_choosers++;
 	tot_nr_stacks += nr_stacks;
