@@ -34,14 +34,14 @@ resolveReferences(std::map<t, Instruction<t> *> &m)
 }
 
 template <typename t> static void
-enumerateCFG(Instruction<t> *start, std::set<Instruction<t> *> &out)
+enumerateCFG(Instruction<t> *start, HashedSet<HashedPtr<Instruction<t> > > &out)
 {
 	std::vector<Instruction<t> *> pending;
 	pending.push_back(start);
 	while (!pending.empty()) {
 		Instruction<t> *n = pending.back();
 		pending.pop_back();
-		if (!out.insert(n).second)
+		if (!out.insert(n))
 			continue;
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
 			if (it->instr)

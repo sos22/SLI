@@ -59,9 +59,9 @@ debug_dump(const std::map<k, v> &what, const char *prefix)
 }
 
 template <typename t> static void
-debug_dump(const std::set<t> &what, const char *prefix)
+debug_dump(const HashedSet<t> &what, const char *prefix)
 {
-	for (auto it = what.begin(); it != what.end(); it++) {
+	for (auto it = what.begin(); !it.finished(); it.advance()) {
 		printf("%s", prefix);
 		debug_dump(*it);
 		printf("\n");
@@ -275,10 +275,10 @@ top_exploration_iter:
    now-redundant parts of @m. */
 static bool
 removeRedundantRoots(const std::map<VexRip, CFGNode *> &m,
-		     std::set<CFGNode *> &roots)
+		     HashedSet<HashedPtr<CFGNode> > &roots)
 {
 	bool res = false;
-	for (auto it = roots.begin(); !TIMEOUT && it != roots.end(); ) {
+	for (auto it = roots.begin(); !TIMEOUT && !it.finished(); ) {
 		const VexRip &rootRip((*it)->rip);
 		bool redundant = false;
 		for (auto it2 = m.begin(); !redundant && it2 != m.end(); it2++) {
@@ -286,10 +286,10 @@ removeRedundantRoots(const std::map<VexRip, CFGNode *> &m,
 				redundant = true;
 		}
 		if (redundant) {
-			roots.erase(it++);
+			it.erase();
 			res = true;
 		} else {
-			it++;
+			it.advance();
 		}
 	}
 	return res;
@@ -298,12 +298,12 @@ removeRedundantRoots(const std::map<VexRip, CFGNode *> &m,
 /* Remove any nodes in @m which aren't reachable from a root in
  * @roots */
 static void
-removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode *> &roots)
+removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const HashedSet<HashedPtr<CFGNode> > &roots)
 {
-	std::set<CFGNode *> reachable(roots);
+	HashedSet<HashedPtr<CFGNode> > reachable(roots);
 	std::vector<CFGNode *> pending;
 	pending.reserve(roots.size() * 2);
-	for (auto it = roots.begin(); it != roots.end(); it++) {
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		CFGNode *n = *it;
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
 			if (it->instr)
@@ -315,14 +315,14 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode
 		CFGNode *n = pending.back();
 		pending.pop_back();
 		assert(n);
-		if (!reachable.insert(n).second)
+		if (!reachable.insert(n))
 			continue;
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
 			if (it->instr)
 				pending.push_back(it->instr);
 	}
 	for (auto it = m.begin(); it != m.end(); ) {
-		if (reachable.count(it->second))
+		if (reachable.contains(it->second))
 			it++;
 		else
 			m.erase(it++);
@@ -332,18 +332,18 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const std::set<CFGNode
 template <typename t>
 class predecessorMap {
 public:
-	std::map<Instruction<t> *, std::set<Instruction<t> *> > content;
-	predecessorMap(const std::set<Instruction<t> *> &roots);
+	std::map<Instruction<t> *, HashedSet<HashedPtr<Instruction<t> > > > content;
+	predecessorMap(const HashedSet<HashedPtr<Instruction<t> > > &roots);
 	void erase_edge(Instruction<t> *src, Instruction<t> *dest) {
 		assert(content.count(dest));
 		assert(content.count(src));
-		assert(content[dest].count(src));
+		assert(content[dest].contains(src));
 		content[dest].erase(src);
 	}
 	void insert_edge(Instruction<t> *src, Instruction<t> *dest) {
 		assert(content.count(dest));
 		assert(content.count(src));
-		assert(!content[dest].count(src));
+		assert(!content[dest].contains(src));
 		content[dest].insert(src);
 	}
 	void new_node(Instruction<t> *n) {
@@ -358,17 +358,17 @@ public:
 			}
 		}
 	}
-	void findPredecessors(Instruction<t> *n, std::set<Instruction<t> *> &out) {
+	void findPredecessors(Instruction<t> *n, HashedSet<HashedPtr<Instruction<t> > > &out) {
 		assert(content.count(n));
 		out = content[n];
 	}
 };
 
 template <typename t>
-predecessorMap<t>::predecessorMap(const std::set<Instruction<t> *> &roots)
+predecessorMap<t>::predecessorMap(const HashedSet<HashedPtr<Instruction<t> > > &roots)
 {
 	std::queue<Instruction<t> *> pending;
-	for (auto it = roots.begin(); it != roots.end(); it++) {
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		content[*it].clear();
 		pending.push(*it);
 	}
@@ -376,7 +376,7 @@ predecessorMap<t>::predecessorMap(const std::set<Instruction<t> *> &roots)
 		Instruction<t> *n = pending.front();
 		pending.pop();
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
-			if (it->instr &&content[it->instr].insert(n).second)
+			if (it->instr && content[it->instr].insert(n))
 				pending.push(it->instr);
 		}
 	}
@@ -440,7 +440,7 @@ class nodeLabellingMap : public std::map<Instruction<t> *, nodeLabelling<t> > {
 	const std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours;
 	int maxDepth;
 public:
-	nodeLabellingMap(std::set<Instruction<t> *> &roots,
+	nodeLabellingMap(HashedSet<HashedPtr<Instruction<t> > > &roots,
 			 predecessorMap<t> &predecessors,
 			 const std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours,
 			 int maxPathLength);
@@ -510,7 +510,7 @@ nodeLabelling<t>::dead(int maxDepth) const
 }
 
 template <typename t>
-nodeLabellingMap<t>::nodeLabellingMap(std::set<Instruction<t> *> &roots,
+nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<Instruction<t> > > &roots,
 				      predecessorMap<t> &_predecessors,
 				      const std::map<const Instruction<t> *, cfgflavour_store_t> &_cfgFlavours,
 				      int maxPathLength)
@@ -520,14 +520,14 @@ nodeLabellingMap<t>::nodeLabellingMap(std::set<Instruction<t> *> &roots,
 	/* Initial pending set is all of the true target instructions,
 	 * for both min_to and min_from calculations. */
 	std::queue<Instruction<t> *> initial_pending;
-	std::set<Instruction<t> *> visited;
-	for (auto it = roots.begin(); it != roots.end(); it++) {
+	HashedSet<HashedPtr<Instruction<t> > > visited;
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		std::queue<Instruction<t> *> p2;
 		p2.push(*it);
 		while (!p2.empty()) {
 			Instruction<t> *n = p2.front();
 			p2.pop();
-			if (!visited.insert(n).second)
+			if (!visited.insert(n))
 				continue;
 			auto it_fl = cfgFlavours.find(n);
 			assert(it_fl != cfgFlavours.end());
@@ -579,14 +579,14 @@ nodeLabellingMap<t>::nodeLabellingMap(std::set<Instruction<t> *> &roots,
 			(*this)[n].min_from[n] = 0;
 		assert(it_fl->second != cfgs_flavour_dupe);
 
-		std::set<Instruction<t> *> pred;
+		HashedSet<HashedPtr<Instruction<t> > > pred;
 		predecessors.findPredecessors(n, pred);
 		if (pred.empty())
 			continue;
 
 		nodeLabellingComponent<t> entryMap((*this)[n].min_from);
 		entryMap.successor(maxPathLength);
-		for (auto it2 = pred.begin(); it2 != pred.end(); it2++)
+		for (auto it2 = pred.begin(); !it2.finished(); it2.advance())
 			if ( (*this)[*it2].min_from.merge(entryMap) )
 				pending.push(*it2);
 	}
@@ -611,10 +611,10 @@ nodeLabellingMap<t>::recalculate_min_from(Instruction<t> *node)
 		   label on the node starting from just its
 		   predecessor nodes, without reference to the node's
 		   own label. */
-		std::set<Instruction<t> *> pred;
+		HashedSet<HashedPtr<Instruction<t> > > pred;
 		nodeLabellingComponent<t> newEntryMap;
 		predecessors.findPredecessors(p, pred);
-		for (auto it = pred.begin(); it != pred.end(); it++)
+		for (auto it = pred.begin(); !it.finished(); it.advance())
 			newEntryMap.merge((*this)[*it].min_from);
 		nodeLabellingComponent<t> newExitMap(newEntryMap);
 		newExitMap.successor(maxDepth);
@@ -640,18 +640,19 @@ template <typename t> static bool
 selectEdgeForCycleBreak(Instruction<t> *root,
 			Instruction<t> **edge_start,
 			Instruction<t> **edge_end,
-			std::set<Instruction<t> *> &clean, std::set<Instruction<t> *> &path)
+			HashedSet<HashedPtr<Instruction<t> > > &clean,
+			HashedSet<HashedPtr<Instruction<t> > > &path)
 {
 	if (root->successors.empty())
 		return false;
-	if (clean.count(root))
+	if (clean.contains(root))
 		return false;
-	assert(!path.count(root));
+	assert(!path.contains(root));
 	clean.insert(root);
 	path.insert(root);
 	for (auto it = root->successors.begin(); it != root->successors.end(); it++) {
 		if (it->instr) {
-			if (path.count(it->instr)) {
+			if (path.contains(it->instr)) {
 				*edge_start = root;
 				*edge_end = it->instr;
 				return true;
@@ -667,9 +668,9 @@ selectEdgeForCycleBreak(Instruction<t> *root,
 template <typename t> static bool
 selectEdgeForCycleBreak(Instruction<t> *root, Instruction<t> **edge_start, Instruction<t> **edge_end)
 {
-	std::set<Instruction<t> *> clean; /* Anything in here definitely
+	HashedSet<HashedPtr<Instruction<t> > > clean; /* Anything in here definitely
 				      cannot reach a cycle. */
-	std::set<Instruction<t> *> path; /* All the nodes between @root and
+	HashedSet<HashedPtr<Instruction<t> > > path; /* All the nodes between @root and
 				     the node we're currently looking
 				     at. */
 	return selectEdgeForCycleBreak(root, edge_start, edge_end, clean, path);
@@ -683,17 +684,17 @@ selectEdgeForCycleBreak(Instruction<t> *root, Instruction<t> **edge_start, Instr
    actually terminate. */
 template <typename t> static void
 performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
-			   std::set<Instruction<t> *> &roots,
+			   HashedSet<HashedPtr<Instruction<t> > > &roots,
 			   std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours,
 			   unsigned maxPathLength)
 {
 	predecessorMap<t> pred(roots);
 	nodeLabellingMap<t> nlm(roots, pred, cfgFlavours, maxPathLength);
 
-	for (auto it = roots.begin(); it != roots.end(); it++) {
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		while (!TIMEOUT) {
 			Instruction<t> *cycle_edge_start, *cycle_edge_end;
-			if (!selectEdgeForCycleBreak(*it, &cycle_edge_start, &cycle_edge_end)) {
+			if (!selectEdgeForCycleBreak(&**it, &cycle_edge_start, &cycle_edge_end)) {
 				/* No cycles left in the graph rooted
 				 * at *it.  Yay. */
 				break;
@@ -744,12 +745,12 @@ static void
 findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 		      std::map<VexRip, CFGNode *> &ripsToCFGNodes,
 		      std::map<const CFGNode *, cfgflavour_store_t> &flavours,
-		      std::set<CFGNode *> &roots,
+		      HashedSet<HashedPtr<CFGNode> > &roots,
 		      Oracle *oracle)
 {
 	if (debug_backtrack_roots)
 		printf("%s:\n", __func__);
-	std::set<CFGNode *> targetInstrs;
+	HashedSet<HashedPtr<CFGNode> > targetInstrs;
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++) {
 		auto it_fl = flavours.find(it->second);
 		assert(it_fl != flavours.end());
@@ -761,8 +762,8 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 			targetInstrs.insert(it->second);
 		}
 	}
-	std::set<CFGNode *> newNodes;
-	for (auto it = targetInstrs.begin(); it != targetInstrs.end(); it++) {
+	HashedSet<HashedPtr<CFGNode> > newNodes;
+	for (auto it = targetInstrs.begin(); !it.finished(); it.advance()) {
 		CFGNode *start = *it;
 		CFGNode *n = start;
 		if (debug_backtrack_roots) {
@@ -824,10 +825,10 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 		}
 		roots.insert(n);
 	}
-	for (auto it = newNodes.begin(); it != newNodes.end(); it++)
-		resolveReferences(ripsToCFGNodes, *it);
+	for (auto it = newNodes.begin(); !it.finished(); it.advance())
+		resolveReferences(ripsToCFGNodes, &**it);
 
-	for (auto it = roots.begin(); it != roots.end(); ) {
+	for (auto it = roots.begin(); !it.finished(); ) {
 		CFGNode *n = *it;
 		/* Walk back up the unique predecessor chain for @n.
 		   If we encounter any other roots then this root is
@@ -856,7 +857,7 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 			CFGNode *pred = it2->second;
 			if (pred == n)
 				break;
-			if (roots.count(pred)) {
+			if (roots.contains(pred)) {
 				redundant = true;
 				if (debug_backtrack_roots) {
 					printf("\tRedundant with %p: ", pred);
@@ -868,29 +869,29 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 		}
 
 		if (redundant) {
-			roots.erase(it++);
+			it.erase();
 		} else {
 			if (debug_backtrack_roots)
 				printf("\tNot redundant\n");
-			it++;
+			it.advance();
 		}
 	}
 }
 
 template <typename t> static void
-trimUninterestingCFGNodes(std::set<Instruction<t> *> &roots,
+trimUninterestingCFGNodes(HashedSet<HashedPtr<Instruction<t> > > &roots,
 			  const std::map<const Instruction<t> *, cfgflavour_store_t> &flavours)
 {
-	std::set<Instruction<t> *> interesting(roots);
-	std::set<Instruction<t> *> allCFGNodes;
-	for (auto it = roots.begin(); !TIMEOUT && it != roots.end(); it++)
-		cfgnode_tmpl::enumerateCFG(*it, allCFGNodes);
+	HashedSet<HashedPtr<Instruction<t> > > interesting(roots);
+	HashedSet<HashedPtr<Instruction<t> > > allCFGNodes;
+	for (auto it = roots.begin(); !TIMEOUT && !it.finished(); it.advance())
+		cfgnode_tmpl::enumerateCFG(&**it, allCFGNodes);
 	bool progress = true;
 	while (!TIMEOUT && progress) {
 		progress = false;
-		for (auto it = allCFGNodes.rbegin(); it != allCFGNodes.rend(); it++) {
+		for (auto it = allCFGNodes.begin(); !it.finished(); it.advance()) {
 			Instruction<t> *n = *it;
-			if (interesting.count(n))
+			if (interesting.contains(n))
 				continue;
 			bool isInteresting = false;
 			auto fl_it = flavours.find(n);
@@ -899,7 +900,7 @@ trimUninterestingCFGNodes(std::set<Instruction<t> *> &roots,
 			     fl_it->second == cfgs_flavour_dupe )
 				isInteresting = true;
 			for (auto it2 = n->successors.begin(); !isInteresting && it2 != n->successors.end(); it2++)
-				if (it2->instr && interesting.count(it2->instr))
+				if (it2->instr && interesting.contains(it2->instr))
 					isInteresting = true;
 			if (isInteresting) {
 				interesting.insert(n);
@@ -908,25 +909,25 @@ trimUninterestingCFGNodes(std::set<Instruction<t> *> &roots,
 		}
 	}
 	if (debug_trim_uninteresting) {
-		for (auto it = allCFGNodes.begin(); it != allCFGNodes.end(); it++) {
-			if (!interesting.count(*it)) {
-				printf("Trim uninteresting: %p ", *it);
+		for (auto it = allCFGNodes.begin(); !it.finished(); it.advance()) {
+			if (!interesting.contains(*it)) {
+				printf("Trim uninteresting: %p ", &**it);
 				(*it)->prettyPrint(stdout);
 			}
 		}
 	}
 
-	for (auto it = allCFGNodes.begin(); !TIMEOUT && it != allCFGNodes.end(); it++) {
+	for (auto it = allCFGNodes.begin(); !TIMEOUT && !it.finished(); it.advance()) {
 		Instruction<t> *n = *it;
 		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
-			if (it2->instr && !interesting.count(it2->instr))
+			if (it2->instr && !interesting.contains(it2->instr))
 				it2->instr = NULL;
 	}
 }
 
 static void
 buildCFG(CfgLabelAllocator &allocLabel, const std::set<DynAnalysisRip> &dyn_roots,
-	 unsigned maxPathLength, Oracle *oracle, std::set<CFGNode *> &roots)
+	 unsigned maxPathLength, Oracle *oracle, HashedSet<HashedPtr<CFGNode> > &roots)
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
 	std::map<const CFGNode *, cfgflavour_store_t> cfgFlavours;
@@ -1014,14 +1015,14 @@ getStoreCFGs(CfgLabelAllocator &allocLabel,
 	     CFGNode ***roots,
 	     int *nr_roots)
 {
-	std::set<CFGNode *> cfgRoots;
+	HashedSet<HashedPtr<CFGNode> > cfgRoots;
 	buildCFG(allocLabel, conflictingStores, STORE_CLUSTER_THRESHOLD, oracle, cfgRoots);
 
 	/* Need to copy that out to something in the IR heap, so that
 	   we can do garbage collection. */
 	*roots = (CFGNode **)__LibVEX_Alloc_Ptr_Array(&ir_heap, cfgRoots.size());
 	unsigned nrCfgRoots = 0;
-	for (auto it = cfgRoots.begin(); it != cfgRoots.end(); it++) {
+	for (auto it = cfgRoots.begin(); !it.finished(); it.advance()) {
 		(*roots)[nrCfgRoots] = *it;
 		nrCfgRoots++;
 	}

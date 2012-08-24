@@ -184,12 +184,17 @@ public:
 				elm = &owner->heads[idx2];
 			}
 		}
-		const member *operator->() const {
+		member *operator->() const {
 			assert(!finished());
 			assert(elm);
 			return &elm->content[idx1];
 		}
-		const member &operator*() const {
+		member &operator*() const {
+			assert(!finished());
+			assert(elm);
+			return elm->content[idx1];
+		}
+		member &operator*() {
 			assert(!finished());
 			assert(elm);
 			return elm->content[idx1];
@@ -244,7 +249,7 @@ public:
 				elm = &owner->heads[idx2];
 			}
 		}
-		const member *operator->() const {
+		member *operator->() const {
 			assert(!finished());
 			assert(elm);
 			return &elm->content[idx1];
@@ -403,7 +408,7 @@ public:
 	ptr &operator*() { return *content; }
 	ptr *operator->() { return content; }
 	const ptr &operator*() const { return *content; }
-	const ptr *operator->() const { return content; }
+	ptr *operator->() const { return content; }
 	HashedPtr(ptr *_content)
 		: content(_content)
 	{}
