@@ -28,7 +28,7 @@ ndChoiceState(StateMachineState **slot,
 	      std::vector<CFGNode *> &targets,
 	      MemoryAccessIdentifierAllocator &mai,
 	      bool storeLike,
-	      std::set<CFGNode *> *usedExits)
+	      HashedSet<HashedPtr<CFGNode> > *usedExits)
 {
 	if (targets.empty()) {
 		if (storeLike)
@@ -355,7 +355,7 @@ cfgNodeToState(Oracle *oracle,
 	} catch (BadMemoryException &e) {
 		return StateMachineUnreached::get();
 	}
-	std::set<CFGNode *> usedExits;
+	HashedSet<HashedPtr<CFGNode> > usedExits;
 	StateMachineState **cursor = &root;
 	int i;
 	for (i = 1; i < irsb->stmts_used && irsb->stmts[i]->tag != Ist_IMark; i++) {
@@ -653,7 +653,7 @@ cfgNodeToState(Oracle *oracle,
 			     it != target->successors.end();
 			     it++)
 				if (it->instr &&
-				    !usedExits.count(it->instr))
+				    !usedExits.contains(it->instr))
 					targets.push_back(it->instr);
 		}
 	} else {
@@ -1691,19 +1691,19 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 static void
 probeCFGsToMachine(Oracle *oracle,
 		   unsigned tid,
-		   std::set<CFGNode *> &roots,
-		   std::set<const CFGNode *> &proximalNodes,
+		   HashedSet<HashedPtr<CFGNode> > &roots,
+		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
 		   MemoryAccessIdentifierAllocator &mai,
 		   std::set<StateMachine *> &out)
 {
 	struct _ : public cfg_translator {
 		MemoryAccessIdentifierAllocator &mai;
-		std::set<const CFGNode *> &proximalNodes;
+		HashedSet<HashedPtr<const CFGNode> > &proximalNodes;
 		StateMachineState *operator()(CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations) {
-			if (proximalNodes.count(e)) {
+			if (proximalNodes.contains(e)) {
 				return getProximalCause(oracle->ms,
 							mai,
 							e->label,
@@ -1714,13 +1714,13 @@ probeCFGsToMachine(Oracle *oracle,
 			}
 		}
 		_(MemoryAccessIdentifierAllocator &_mai,
-		  std::set<const CFGNode *> &_proximalNodes)
+		  HashedSet<HashedPtr<const CFGNode> > &_proximalNodes)
 			: mai(_mai), proximalNodes(_proximalNodes)
 		{}
 	} doOne(mai, proximalNodes);
 
 	std::map<CFGNode *, StateMachineState *> results;
-	for (auto it = roots.begin(); it != roots.end(); it++)
+	for (auto it = roots.begin(); !it.finished(); it.advance())
 		performTranslation(results, *it, oracle, tid, doOne);
 
 	if (TIMEOUT)
@@ -1728,7 +1728,7 @@ probeCFGsToMachine(Oracle *oracle,
 
 	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots_this_sm;
 	std::set<StateMachineState *> roots_this_sm1;
-	for (auto it = roots.begin(); it != roots.end(); it++)
+	for (auto it = roots.begin(); !it.finished(); it.advance())
 		roots_this_sm1.insert(results[*it]);
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	assignFrameIds(roots_this_sm1, tid, entryStacks);
@@ -1738,7 +1738,7 @@ probeCFGsToMachine(Oracle *oracle,
 		root = addEntrySideEffects(oracle, tid, root, entryStacks[root], root->origin);
 		roots_this_sm2.push_back(root);
 	}
-	for (auto it = roots.begin(); it != roots.end(); it++)
+	for (auto it = roots.begin(); !it.finished(); it.advance())
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
 	if (roots_this_sm2.empty())
@@ -1829,8 +1829,8 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 void
 probeCFGsToMachine(Oracle *oracle,
 		   unsigned tid,
-		   std::set<CFGNode *> &roots,
-		   std::set<const CFGNode *> &proximalNodes,
+		   HashedSet<HashedPtr<CFGNode> > &roots,
+		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
 		   MemoryAccessIdentifierAllocator &mai,
 		   std::set<StateMachine *> &out)
 {

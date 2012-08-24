@@ -4,15 +4,10 @@
 #include "maybe.hpp"
 
 template <typename member, int _nr_heads = 2053, int _nr_per_elem = 4> class HashTable {
-	/* Duplicating an entire hash table is expensive.  Discourage
-	   people from doing so by making this private and
-	   not-implemented. */
-	HashTable(const HashTable &o);
 public:
-	HashTable() {}
-
 	static const int nr_heads = _nr_heads;
 	static const int nr_per_elem = _nr_per_elem;
+	size_t sz;
 
 	struct elem {
 		struct elem *next;
@@ -23,6 +18,93 @@ public:
 		{}
 	};
 	struct elem heads[nr_heads];
+
+	HashTable() : sz(0) {}
+	HashTable(const HashTable &o)
+		: sz(0)
+	{
+		for (int i = 0; i < nr_heads; i++) {
+			struct elem *dest_cursor = &heads[i];
+			const struct elem *src_cursor = &o.heads[i];
+			int dest_idx = 0;
+			while (src_cursor) {
+				for (int src_idx = 0; src_idx < nr_per_elem; src_idx++) {
+					if (!(src_cursor->use_map & (1ul << src_idx)))
+						continue;
+					dest_cursor->content[dest_idx] = src_cursor->content[src_idx];
+					dest_cursor->use_map |= 1ul << dest_idx;
+					dest_idx++;
+					sz++;
+					if (dest_idx == nr_per_elem) {
+						dest_idx = 0;
+						dest_cursor->next = new elem();
+						dest_cursor = dest_cursor->next;
+					}
+				}
+				src_cursor = src_cursor->next;
+			}
+		}
+		assert(sz == o.sz);
+	}
+	void operator=(const HashTable &o) {
+		/* First go and scavenge all of the dynamically
+		 * allocated elems. */
+		struct elem *malloced_elems = NULL;
+		for (int i = 0; i < nr_heads; i++) {
+			heads[i].use_map = 0;
+			if (!heads[i].next)
+				continue;
+			struct elem *end;
+			for (end = heads[i].next; end->next; end = end->next)
+				end->use_map = 0;
+			end->next = malloced_elems;
+			malloced_elems = heads[i].next;
+			heads[i].next = NULL;
+		}
+
+		sz = 0;
+
+		/* Now go and repack the other table's content into
+		   this one. */
+		for (int i = 0; i < nr_heads; i++) {
+			struct elem *dest_elem = &heads[i];
+			const struct elem *src_elem = &o.heads[i];
+			int dest_idx = 0;
+			while (src_elem) {
+				for (int j = 0; j < nr_per_elem; j++) {
+					if (src_elem->use_map & (1ul << j)) {
+						dest_elem->content[dest_idx] = src_elem->content[j];
+						dest_elem->use_map |= 1ul << dest_idx;
+						dest_idx++;
+						if (dest_idx == nr_per_elem) {
+							if (malloced_elems) {
+								dest_elem->next = malloced_elems;
+								malloced_elems = malloced_elems->next;
+								dest_elem = dest_elem->next;
+								dest_elem->next = NULL;
+								assert(dest_elem->use_map == 0);
+							} else {
+								dest_elem->next = new elem();
+								dest_elem = dest_elem->next;
+							}
+							dest_idx = 0;
+						}
+						sz++;
+					}
+				}
+				src_elem = src_elem->next;
+			}
+		}
+		assert(sz == o.sz);
+
+		/* Release any left-over scavenged heads */
+		while (malloced_elems) {
+			struct elem *n = malloced_elems->next;
+			delete malloced_elems;
+			malloced_elems = n;
+		}
+	}
+
 	~HashTable() {
 		for (int x = 0; x < nr_heads; x++) {
 			struct elem *n;
@@ -42,6 +124,21 @@ public:
 			h = (h % nr_heads) ^ (h / nr_heads);
 		return &heads[h];
 	}
+
+	void clear() {
+		for (int i = 0; i < nr_heads; i++) {
+			while (heads[i].next) {
+				struct elem *e = heads[i].next->next;
+				delete heads[i].next;
+				heads[i].next = e;
+			}
+			heads[i].use_map = 0;
+		}
+		sz = 0;
+	}
+
+	size_t size() const { return sz; }
+	bool empty() const { return size() == 0; }
 
 	class iterator {
 		HashTable *owner;
@@ -99,6 +196,7 @@ public:
 		}
 		void erase() {
 			elm->use_map &= ~(1ul << idx1);
+			owner->sz--;
 			advance();
 		}
 	};
@@ -163,6 +261,7 @@ template <typename member, int nr_heads = 2053, int nr_per_elem = 4> class Hashe
 	typedef HashTable<member, nr_heads, nr_per_elem> contentT;
 	contentT content;
 public:
+	HashedSet() {}
 	bool contains(const member &v) const {
 		const typename contentT::elem *c = content.getHead(v.hash());
 		while (c) {
@@ -197,6 +296,7 @@ public:
 			last = &c->next;
 			c = c->next;
 		}
+		content.sz++;
 		if (slot) {
 			*slot = v;
 			*slot_use |= slot_use_mask;
@@ -215,6 +315,7 @@ public:
 				if ( (c->use_map & (1ul << i)) &&
 				     c->content[i] == v ) {
 					c->use_map &= ~(1ul << i);
+					content.sz--;
 					return true;
 				}
 			}
@@ -222,7 +323,9 @@ public:
 		}
 		return false;
 	}
-
+	void clear() {
+		content.clear();
+	}
 	/* Extend @this by adding in the contents of @o.  Returns true
 	 * if we do anything or false if it's a no-op. */
 	template <int _nr_heads, int _elem_per_head> bool extend(const HashedSet<member, _nr_heads, _elem_per_head> &o) {
@@ -231,6 +334,9 @@ public:
 			res |= !insert(*it);
 		return res;
 	}
+
+	size_t size() const { return content.size(); }
+	bool empty() const { return content.empty(); }
 
 	typedef typename contentT::iterator iterator;
 	iterator begin() { return iterator(&content); }
@@ -276,6 +382,7 @@ public:
 			last = &c->next;
 			c = c->next;
 		}
+		content.sz++;
 		if (slot) {
 			*slot = std::pair<key, value>(k, v);
 			*slot_use |= slot_use_mask;
@@ -293,6 +400,10 @@ template <typename ptr> class HashedPtr {
 	ptr *content;
 public:
 	operator ptr*() const { return content; }
+	ptr &operator*() { return *content; }
+	ptr *operator->() { return content; }
+	const ptr &operator*() const { return *content; }
+	const ptr *operator->() const { return content; }
 	HashedPtr(ptr *_content)
 		: content(_content)
 	{}

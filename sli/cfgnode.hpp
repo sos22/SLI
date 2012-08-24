@@ -4,6 +4,7 @@
 #include "typesdb.hpp"
 #include "library.hpp"
 #include "genfix.hpp"
+#include "hash_table.hpp"
 
 class Oracle;
 
@@ -14,8 +15,8 @@ void getStoreCFGs(CfgLabelAllocator &allocLabel,
 		  CFGNode ***, int *);
 bool getProbeCFGs(CfgLabelAllocator &allocLabel,
 		  Oracle *oracle, const DynAnalysisRip &vr,
-		  std::set<CFGNode *> &out,
-		  std::set<const CFGNode *> &targetNodes);
+		  HashedSet<HashedPtr<CFGNode> > &out,
+		  HashedSet<HashedPtr<const CFGNode> > &targetNodes);
 
 void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			       const std::set<DynAnalysisRip> &roots);
@@ -31,8 +32,8 @@ StateMachine *storeCFGToMachine(Oracle *oracle,
 				MemoryAccessIdentifierAllocator &mai);
 void probeCFGsToMachine(Oracle *oracle,
 			unsigned tid,
-			std::set<CFGNode *> &roots,
-			std::set<const CFGNode *> &proximalNodes,
+			HashedSet<HashedPtr<CFGNode> > &roots,
+			HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
 			MemoryAccessIdentifierAllocator &mai,
 			std::set<StateMachine *> &out);
 void dumpCFGToDot(const std::set<CFGNode *> &allNodes, const char *fname);

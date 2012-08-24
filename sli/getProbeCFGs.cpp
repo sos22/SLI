@@ -3,6 +3,7 @@
 #include "sli.h"
 #include "oracle.hpp"
 #include "cfgnode.hpp"
+#include "hash_table.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -41,9 +42,9 @@ debug_dump(const std::map<k, v> &what, const char *prefix)
 }
 
 template <typename t> static void
-debug_dump(const std::set<t> &what, const char *prefix)
+debug_dump(const HashedSet<t> &what, const char *prefix)
 {
-	for (auto it = what.begin(); it != what.end(); it++) {
+	for (auto it = what.begin(); !it.finished(); it.advance()) {
 		printf("%s", prefix);
 		debug_dump(*it);
 		printf("\n");
@@ -58,7 +59,7 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 		      Oracle *oracle,
 		      const VexRip &startingVexRip,
 		      std::map<VexRip, CFGNode *> &out,
-		      std::set<const CFGNode *> &targetNodes,
+		      HashedSet<HashedPtr<const CFGNode> > &targetNodes,
 		      std::set<VexRip> &newStartingRips,
 		      unsigned maxPathLength1,
 		      unsigned maxPathLength2)
@@ -168,7 +169,7 @@ initialExploration(CfgLabelAllocator &allocLabel,
 		   Oracle *oracle,
 		   const DynAnalysisRip &targetRip,
 		   std::map<VexRip, CFGNode *> &out,
-		   std::set<const CFGNode *> &targetInstrs,
+		   HashedSet<HashedPtr<const CFGNode> > &targetInstrs,
 		   unsigned maxPathLength1,
 		   unsigned maxPathLength2)
 {
@@ -206,16 +207,16 @@ initialExploration(CfgLabelAllocator &allocLabel,
 static bool
 selectEdgeForCycleBreak(const CFGNode *start,
 			std::map<const CFGNode *, std::set<std::pair<CFGNode *, int> > > &predecessorMap,
-			std::set<const CFGNode *> &cycle_free,
+			HashedSet<HashedPtr<const CFGNode> > &cycle_free,
 			const CFGNode **edge_start,
 			int *edge_idx,
 			int *discoveryDepth,
-			std::set<const CFGNode *> &clean,
-			std::set<const CFGNode *> &path)
+			HashedSet<HashedPtr<const CFGNode> > &clean,
+			HashedSet<HashedPtr<const CFGNode> > &path)
 {
-	if (clean.count(start) || cycle_free.count(start))
+	if (clean.contains(start) || cycle_free.contains(start))
 		return false;
-	assert(!path.count(start));
+	assert(!path.contains(start));
 	clean.insert(start);
 	path.insert(start);
 	std::set<std::pair<CFGNode *, int> > &predecessors(predecessorMap[start]);
@@ -224,7 +225,7 @@ selectEdgeForCycleBreak(const CFGNode *start,
 		assert(it->second < (int)pred->successors.size());
 		CFGNode::successor_t *predEdge = &pred->successors[it->second];
 		assert(predEdge->instr == start);
-		if (path.count(pred)) {
+		if (path.contains(pred)) {
 			*edge_start = pred;
 			*edge_idx = it->second;
 			*discoveryDepth = path.size();
@@ -247,13 +248,13 @@ selectEdgeForCycleBreak(const CFGNode *start,
 static bool
 selectEdgeForCycleBreak(const CFGNode *start,
 			std::map<const CFGNode *, std::set<std::pair<CFGNode *, int> > > &predecessors,
-			std::set<const CFGNode *> &cycle_free,
+			HashedSet<HashedPtr<const CFGNode> > &cycle_free,
 			const CFGNode **cycle_edge_start,
 			int *cycle_edge_end,
 			int *discoveryDepth)
 {
-	std::set<const CFGNode *> clean;
-	std::set<const CFGNode *> path;
+	HashedSet<HashedPtr<const CFGNode> > clean;
+	HashedSet<HashedPtr<const CFGNode> > path;
 	return selectEdgeForCycleBreak(start, predecessors, cycle_free,
 				       cycle_edge_start, cycle_edge_end,
 				       discoveryDepth,
@@ -262,14 +263,14 @@ selectEdgeForCycleBreak(const CFGNode *start,
 
 static void
 unrollAndCycleBreak(CfgLabelAllocator &allocLabel,
-		    std::set<CFGNode *> &instrs,
-		    const std::set<const CFGNode *> &targetInstrs,
-		    std::set<CFGNode *> &roots,
+		    HashedSet<HashedPtr<CFGNode> > &instrs,
+		    const HashedSet<HashedPtr<const CFGNode> > &targetInstrs,
+		    HashedSet<HashedPtr<CFGNode> > &roots,
 		    int maxPathLength)
 {
 	std::map<const CFGNode *, std::set<std::pair<CFGNode *, int> > > predecessorMap;
 
-	for (auto it = instrs.begin(); it != instrs.end(); it++) {
+	for (auto it = instrs.begin(); !it.finished(); it.advance()) {
 		CFGNode *n = *it;
 		for (unsigned x = 0; x < n->successors.size(); x++)
 			if (n->successors[x].instr)
@@ -277,9 +278,9 @@ unrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 					std::pair<CFGNode *, int>(n, x));
 	}
 
-	for (auto it = targetInstrs.begin(); it != targetInstrs.end(); it++) {
+	for (auto it = targetInstrs.begin(); !it.finished(); it.advance()) {
 		const CFGNode *targetInstr = *it;
-		std::set<const CFGNode *> cycle_free;
+		HashedSet<HashedPtr<const CFGNode> > cycle_free;
 
 		while (1) {
 			CFGNode *cycle_edge_start;
@@ -371,17 +372,17 @@ unrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 */
 static void
 trimExcessNodes(Oracle *oracle,
-		std::set<CFGNode *> &nodes,
-		const std::set<const CFGNode *> &targetInstrs,
+		HashedSet<HashedPtr<CFGNode> > &nodes,
+		const HashedSet<HashedPtr<const CFGNode> > &targetInstrs,
 		int maxPathLength)
 {
 	/* This is not an efficient algorithm for doing this.
 	   Nevermind; this isn't exactly a hotspot. */
 	std::map<CFGNode *, int> distanceToTargetInstr;
-	for (auto it = nodes.begin(); it != nodes.end(); it++) {
+	for (auto it = nodes.begin(); !it.finished(); it.advance()) {
 		CFGNode *n = *it;
 		int v;
-		if (targetInstrs.count(n))
+		if (targetInstrs.contains(n))
 			v = 0;
 		else
 			v = nodes.size();
@@ -390,7 +391,7 @@ trimExcessNodes(Oracle *oracle,
 	bool progress = true;
 	while (progress) {
 		progress = false;
-		for (auto it = nodes.begin(); it != nodes.end(); it++) {
+		for (auto it = nodes.begin(); !it.finished(); it.advance()) {
 			CFGNode *n = *it;
 			int distance;
 			distance = distanceToTargetInstr[n];
@@ -404,18 +405,18 @@ trimExcessNodes(Oracle *oracle,
 		}
 	}
 
-	std::set<CFGNode *> reachableFromFunctionHead;
-	std::set<CFGNode *> pending;
-	for (auto it = nodes.begin(); it != nodes.end(); it++) {
+	HashedSet<HashedPtr<CFGNode> > reachableFromFunctionHead;
+	HashedSet<HashedPtr<CFGNode> > pending;
+	for (auto it = nodes.begin(); !it.finished(); it.advance()) {
 		CFGNode *n = *it;
 		if (oracle->isFunctionHead(n->rip))
 			pending.insert(n);
 	}
 	while (!pending.empty()) {
-		std::set<CFGNode *> newPending;
-		for (auto it = pending.begin(); it != pending.end(); it++) {
+		HashedSet<HashedPtr<CFGNode> > newPending;
+		for (auto it = pending.begin(); !it.finished(); it.advance()) {
 			CFGNode *n = *it;
-			if (reachableFromFunctionHead.insert(n).second) {
+			if (reachableFromFunctionHead.insert(n)) {
 				for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
 					if (it2->instr)
 						newPending.insert(it2->instr);
@@ -424,13 +425,13 @@ trimExcessNodes(Oracle *oracle,
 		pending = newPending;
 	}
 
-	std::set<CFGNode *> nodesToKill;
-	for (auto it = nodes.begin(); it != nodes.end(); it++) {
+	HashedSet<HashedPtr<CFGNode> > nodesToKill;
+	for (auto it = nodes.begin(); !it.finished(); it.advance()) {
 		/* We keep the node if either it's reachable from the
 		 * function head or a root... */
-		if (reachableFromFunctionHead.count(*it)) {
+		if (reachableFromFunctionHead.contains(*it)) {
 			if (debug_trim) {
-				printf("Preserve due to reachability from head %p ", *it);
+				printf("Preserve due to reachability from head %p ", &**it);
 				(*it)->prettyPrint(stdout);
 			}
 			continue;
@@ -442,14 +443,14 @@ trimExcessNodes(Oracle *oracle,
 		    it2->second < maxPathLength) {
 			if (debug_trim) {
 				printf("Preserve at distance %d(< %d) %p ",
-				       it2->second, maxPathLength, *it);
+				       it2->second, maxPathLength, &**it);
 				(*it)->prettyPrint(stdout);
 			}
 			continue;
 		}
 		/* Otherwise, we have to kill it. */
 		if (debug_trim) {
-			printf("Kill node %p ", *it);
+			printf("Kill node %p ", &**it);
 			(*it)->prettyPrint(stdout);
 		}
 		nodesToKill.insert(*it);
@@ -459,26 +460,26 @@ trimExcessNodes(Oracle *oracle,
 		return;
 
 	/* Now go back and remove all the nodes in nodesToKill. */
-	for (auto it = nodes.begin(); it != nodes.end(); ) {
+	for (auto it = nodes.begin(); !it.finished(); ) {
 		CFGNode *n = *it;
-		if (nodesToKill.count(n)) {
-			nodes.erase(it++);
+		if (nodesToKill.contains(n)) {
+			it.erase();
 		} else {
 			for (auto it2 = n->successors.begin();
 			     it2 != n->successors.end();
 			     it2++) {
-				if (it2->instr && nodesToKill.count(it2->instr))
+				if (it2->instr && nodesToKill.contains(it2->instr))
 					it2->instr = NULL;
 			}
-			it++;
+			it.advance();
 		}
 	}
 }
 
 static int
-distanceToTrueInstr(const CFGNode *n, const std::set<const CFGNode *> &targetInstr, int dflt)
+distanceToTrueInstr(const CFGNode *n, const HashedSet<HashedPtr<const CFGNode> > &targetInstr, int dflt)
 {
-	std::set<const CFGNode *> successors;
+	HashedSet<HashedPtr<const CFGNode> > successors;
 	std::queue<const CFGNode *> pendingAtCurrentDepth;
 	int depth = 0;
 	pendingAtCurrentDepth.push(n);
@@ -487,9 +488,9 @@ distanceToTrueInstr(const CFGNode *n, const std::set<const CFGNode *> &targetIns
 		while (!pendingAtCurrentDepth.empty()) {
 			const CFGNode *n = pendingAtCurrentDepth.front();
 			pendingAtCurrentDepth.pop();
-			if (targetInstr.count(n))
+			if (targetInstr.contains(n))
 				return depth;
-			if (!successors.insert(n).second)
+			if (!successors.insert(n))
 				continue;
 			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
 				if (it->instr)
@@ -503,7 +504,7 @@ distanceToTrueInstr(const CFGNode *n, const std::set<const CFGNode *> &targetIns
 }
 
 static void
-removeReachable(std::set<CFGNode *> &out, const CFGNode *n)
+removeReachable(HashedSet<HashedPtr<CFGNode> > &out, const CFGNode *n)
 {
 	std::vector<const CFGNode *> pending;
 	pending.push_back(n);
@@ -523,17 +524,10 @@ removeReachable(std::set<CFGNode *> &out, const CFGNode *n)
 }
 
 static void
-removeReachable(std::set<CFGNode *> &out, const std::set<CFGNode *> &roots)
+removeReachable(HashedSet<HashedPtr<CFGNode> > &out, const HashedSet<HashedPtr<CFGNode> > &roots)
 {
-	for (auto it = roots.begin(); it != roots.end(); it++)
+	for (auto it = roots.begin(); !it.finished(); it.advance())
 		removeReachable(out, *it);
-}
-
-template <typename t> static void
-operator|=(std::set<t> &a, const std::set<t> &b)
-{
-	for (auto it = b.begin(); it != b.end(); it++)
-		a.insert(*it);
 }
 
 /* Populate @roots with nodes such that, for every node in @m, there
@@ -541,17 +535,17 @@ operator|=(std::set<t> &a, const std::set<t> &b)
    make @roots as small as possible, but ony guarantee to produce a
    minimal result if @m is acyclic. */
 static void
-findRoots(const std::set<CFGNode *> &allNodes,
-	  const std::set<const CFGNode *> &targetInstrs,
-	  std::set<CFGNode *> &roots,
+findRoots(const HashedSet<HashedPtr<CFGNode> > &allNodes,
+	  const HashedSet<HashedPtr<const CFGNode> > &targetInstrs,
+	  HashedSet<HashedPtr<CFGNode> > &roots,
 	  bool allow_cycles)
 {
-	std::set<CFGNode *> currentlyUnrooted(allNodes);
+	HashedSet<HashedPtr<CFGNode> > currentlyUnrooted(allNodes);
 
 	if (debug_find_roots) {
 		printf("findRoots():\n");
-		for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
-			printf("\t%p -> ", *it);
+		for (auto it = allNodes.begin(); !it.finished(); it.advance()) {
+			printf("\t%p -> ", &**it);
 			for (auto it2 = (*it)->successors.begin();
 			     it2 != (*it)->successors.end();
 			     it2++)
@@ -563,10 +557,8 @@ findRoots(const std::set<CFGNode *> &allNodes,
 	/* First rule: if something in @currentlyUnrooted cannot be
 	   reached from any node in @currentlyUnrooted then that node
 	   should definitely be a root. */
-	std::set<CFGNode *> newRoots = currentlyUnrooted;
-	for (auto it = allNodes.begin();
-	     it != allNodes.end();
-	     it++) {
+	HashedSet<HashedPtr<CFGNode> > newRoots(currentlyUnrooted);
+	for (auto it = allNodes.begin(); !it.finished(); it.advance()) {
 		CFGNode *n = *it;
 		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
 			if (it2->instr) {
@@ -579,13 +571,13 @@ findRoots(const std::set<CFGNode *> &allNodes,
 
 	if (debug_find_roots) {
 		printf("Basic root set: ");
-		for (auto it = newRoots.begin(); it != newRoots.end(); it++)
-			printf("%p, ", *it);
+		for (auto it = newRoots.begin(); !it.finished(); it.advance())
+			printf("%p, ", &**it);
 		printf("\n");
 	}
 
 	removeReachable(currentlyUnrooted, newRoots);
-	roots |= newRoots;
+	roots.extend(newRoots);
 
 	if (!allow_cycles && !currentlyUnrooted.empty()) {
 		printf("Unexpected cycle in CFG!\n");
@@ -601,7 +593,7 @@ findRoots(const std::set<CFGNode *> &allNodes,
 		int best_distance;
 		best_node = NULL;
 		best_distance = -1;
-		for (auto it = currentlyUnrooted.begin(); it != currentlyUnrooted.end(); it++) {
+		for (auto it = currentlyUnrooted.begin(); !it.finished(); it.advance()) {
 			int n = distanceToTrueInstr(*it, targetInstrs, currentlyUnrooted.size());
 			if (n > best_distance) {
 				best_distance = n;
@@ -622,8 +614,8 @@ static bool
 getProbeCFG(CfgLabelAllocator &allocLabel,
 	    Oracle *oracle,
 	    const DynAnalysisRip &targetInstr,
-	    std::set<CFGNode *> &out,
-	    std::set<const CFGNode *> &targetNodes,
+	    HashedSet<HashedPtr<CFGNode> > &out,
+	    HashedSet<HashedPtr<const CFGNode> > &targetNodes,
 	    unsigned maxPathLength1,
 	    unsigned maxPathLength2)
 {
@@ -643,7 +635,7 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	resolveReferences(ripsToCFGNodes);
 	trimUninterestingCFGNodes(ripsToCFGNodes, targetInstr);
 
-	std::set<CFGNode *> nodes;
+	HashedSet<HashedPtr<CFGNode> > nodes;
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++)
 		nodes.insert(it->second);
 
@@ -675,8 +667,8 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 };
 
 bool
-getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const DynAnalysisRip &vr, std::set<CFGNode *> &out,
-	     std::set<const CFGNode *> &targetNodes)
+getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const DynAnalysisRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
+	     HashedSet<HashedPtr<const CFGNode> > &targetNodes)
 {
 	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, PROBE_CLUSTER_THRESHOLD1, PROBE_CLUSTER_THRESHOLD2);
 }

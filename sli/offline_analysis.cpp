@@ -1,6 +1,7 @@
 /* A load of random stuff which doesn't really belong anywhere. */
 #include <limits.h>
 #include <queue>
+#include <sys/time.h>
 
 #include "sli.h"
 #include "range_tree.h"
@@ -1026,8 +1027,8 @@ buildProbeMachine(CfgLabelAllocator &allocLabel,
 	VexPtr<StateMachine *, &ir_heap> sms;
 	unsigned nr_sms;
 	{
-		std::set<CFGNode *> roots;
-		std::set<const CFGNode *> proximalNodes;
+		HashedSet<HashedPtr<CFGNode> > roots;
+		HashedSet<HashedPtr<const CFGNode> > proximalNodes;
 		if (!getProbeCFGs(allocLabel, oracle, targetRip, roots, proximalNodes)) {
 			fprintf(_logfile, "Cannot get probe CFGs!\n");
 			return false;
@@ -1138,7 +1139,7 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 
 	bool foundRace;
 	foundRace = false;
-	for (int i = 0; i < nrStoreCfgs; i++) {
+	for (int i = 0; i < /*nrStoreCfgs*/10; i++) {
 		bool singleNodeCfg = isSingleNodeCfg(storeCFGs[i]);
 		if (roughLoadCount == StateMachineState::singleLoad && singleNodeCfg) {
 			fprintf(_logfile, "Single store versus single load -> no race possible\n");
@@ -1355,10 +1356,22 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	CfgLabelAllocator allocLabel;
 	{
 		StateMachine **_probeMachines;
+		struct timeval start;
+		gettimeofday(&start, NULL);
 		if (!buildProbeMachine(allocLabel, oracle, targetRip, tid, opt,
 				       &_probeMachines, &nrProbeMachines, mai,
 				       token))
 			return;
+		struct timeval end;
+		gettimeofday(&end, NULL);
+		end.tv_sec -= start.tv_sec;
+		end.tv_usec -= start.tv_usec;
+		if (end.tv_usec < 0) {
+			end.tv_usec += 1000000;
+			end.tv_sec--;
+		}
+		printf("buildProbeMachine takes %ld.%06ld\n", end.tv_sec, end.tv_usec);
+
 		probeMachines = _probeMachines;
 	}
 	for (unsigned x = 0; x < nrProbeMachines; x++) {
