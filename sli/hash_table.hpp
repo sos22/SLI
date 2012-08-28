@@ -53,7 +53,7 @@ public:
 			: owner(_owner)
 		{
 			elm = NULL;
-			idx1 = nr_per_elem;
+			idx1 = -1;
 			idx2 = -1;
 			advance();
 		}
@@ -98,6 +98,7 @@ public:
 			return elm->content[idx1];
 		}
 		void erase() {
+			assert(elm->use_map & (1ul << idx1));
 			elm->use_map &= ~(1ul << idx1);
 			advance();
 		}
@@ -112,7 +113,7 @@ public:
 			: owner(_owner)
 		{
 			elm = NULL;
-			idx1 = nr_per_elem;
+			idx1 = -1;
 			idx2 = -1;
 			advance();
 		}
