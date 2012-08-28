@@ -151,12 +151,18 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 		IRExpr *arg = undefinednessExpression(sm, ieu->arg, vdm);
 		if (arg == UNDEFINED_EXPR) {
 			switch (ieu->op) {
+			case Iop_8Uto16:
+			case Iop_8Uto32:
+			case Iop_8Uto64:
+			case Iop_16Uto32:
+			case Iop_16Uto64:
 			case Iop_32Uto64:
 				return ieu;
 			case Iop_BadPtr:
 			case Iop_Not1:
 				return UNDEFINED_EXPR;
 			default:
+				printIRExpr(a);
 				abort();
 			}
 		}

@@ -6,6 +6,13 @@
 #include "libvex_prof.hpp"
 #include "maybe.hpp"
 #include "hash_table.hpp"
+#include "allowable_optimisations.hpp"
+
+#ifndef NDEBUG
+static bool debug_bisimilarity = false;
+#else
+#define debug_bisimilarity false
+#endif
 
 namespace _bisimilarity {
 /* Unconfuse emacs */
@@ -127,7 +134,8 @@ statesMightBeBisimilar(StateMachineState *sm1,
 static void
 buildStateMachineBisimilarityMap(HashedSet<st_pair_t> &bisimilarStates,
 				 const std::set<StateMachineState *> &allStates,
-				 const AllowableOptimisations &opt)
+				 const AllowableOptimisations &opt,
+				 const std::map<const StateMachineState *, int> &labels)
 {
 	/* We start by assuming that all states are bisimilar to each
 	   other, and then use Tarski iteration to eliminate the
@@ -147,12 +155,27 @@ buildStateMachineBisimilarityMap(HashedSet<st_pair_t> &bisimilarStates,
 			if (*it != *it2 && statesMightBeBisimilar(*it, *it2, opt))
 				bisimilarStates.insert(st_pair_t(*it, *it2));
 
+	if (debug_bisimilarity) {
+		printf("Initial bisimilarity map:\n");
+		for (auto it = bisimilarStates.begin(); !it.finished(); it.advance()) {
+			auto it1 = labels.find(it->first);
+			auto it2 = labels.find(it->second);
+			assert(it1 != labels.end());
+			assert(it2 != labels.end());
+			printf("\tl%d <-> l%d\n", it1->second, it2->second);
+		}
+		for (auto it = labels.begin(); it != labels.end(); it++)
+			printf("\tl%d -> %p\n", it->second, it->first);
+	}
+
 	bool progress;
 	do {
 		progress = false;
 
 		if (TIMEOUT)
 			return;
+		if (debug_bisimilarity)
+			printf("Start Tarski iteration\n");
 		/* Iterate over every suspected bisimilarity pair and
 		   check for ``local bisimilarity''.  Once we're
 		   consistent with the local bisimilarity
@@ -160,24 +183,59 @@ buildStateMachineBisimilarityMap(HashedSet<st_pair_t> &bisimilarStates,
 		   global bismilarity. */
 		for (auto it = bisimilarStates.begin(); !it.finished(); ) {
 			if (statesLocallyBisimilar(it->first, it->second, bisimilarStates)) {
+				if (debug_bisimilarity) {
+					auto it1 = labels.find(it->first);
+					auto it2 = labels.find(it->second);
+					assert(it1 != labels.end());
+					assert(it2 != labels.end());
+					printf("\tPreserve l%d <-> l%d\n",
+					       it1->second, it2->second);
+				}
 				it.advance();
 			} else {
+				if (debug_bisimilarity) {
+					auto it1 = labels.find(it->first);
+					auto it2 = labels.find(it->second);
+					assert(it1 != labels.end());
+					assert(it2 != labels.end());
+					printf("\tErase l%d <-> l%d\n",
+					       it1->second, it2->second);
+				}
 				it.erase();
 				progress = true;
 			}
 		}
 	} while (progress);
+
+	if (debug_bisimilarity) {
+		printf("Final bisimilarity map:\n");
+		for (auto it = bisimilarStates.begin(); !it.finished(); it.advance()) {
+			auto it1 = labels.find(it->first);
+			auto it2 = labels.find(it->second);
+			assert(it1 != labels.end());
+			assert(it2 != labels.end());
+			printf("\tl%d <-> l%d\n", it1->second, it2->second);
+		}
+	}
 }
 
 static StateMachine *
 bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 {
+	std::map<const StateMachineState *, int> stateLabels;
+
 	__set_profiling(bisimilarityReduction);
 	HashedSet<st_pair_t> bisimilarStates;
 	std::set<StateMachineState *> allStates;
 
 	findAllStates(sm, allStates);
-	buildStateMachineBisimilarityMap(bisimilarStates, allStates, opt);
+
+	if (debug_bisimilarity) {
+		printf("%s(..., %s):\n", __func__, opt.name());
+		printf("SM = \n");
+		printStateMachine(sm, stdout, stateLabels);
+	}
+	buildStateMachineBisimilarityMap(bisimilarStates, allStates, opt, stateLabels);
 
 	if (TIMEOUT)
 		return sm;
@@ -227,9 +285,22 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 			canonMap.set(s2, s1);
 	}
 
+	if (debug_bisimilarity) {
+		printf("Canonicalisation map:\n");
+		for (auto it = canonMap.begin(); !it.finished(); it.advance())
+			printf("\tl%d -> l%d\n",
+			       stateLabels[it.key()],
+			       stateLabels[it.value()]);
+	}
+
 	/* Perform the rewrite.  We do this in-place, because it's not
 	   context-dependent. */
-	return rewriteStateMachine(sm, canonMap);
+	StateMachine *res = rewriteStateMachine(sm, canonMap);
+	if (debug_bisimilarity) {
+		printf("Rewritten machine:\n");
+		printStateMachine(res, stdout);
+	}
+	return res;
 }
 
 /* end of namespace */

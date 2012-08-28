@@ -150,7 +150,7 @@ public:
 			: owner(_owner)
 		{
 			elm = NULL;
-			idx1 = nr_per_elem;
+			idx1 = -1;
 			idx2 = -1;
 			advance();
 		}
@@ -200,6 +200,7 @@ public:
 			return elm->content[idx1];
 		}
 		void erase() {
+			assert(elm->use_map & (1ul << idx1));
 			elm->use_map &= ~(1ul << idx1);
 			owner->sz--;
 			advance();
@@ -215,7 +216,7 @@ public:
 			: owner(_owner)
 		{
 			elm = NULL;
-			idx1 = nr_per_elem;
+			idx1 = -1;
 			idx2 = -1;
 			advance();
 		}
@@ -355,26 +356,26 @@ public:
 	const_iterator begin() const { return const_iterator(&content); }
 };
 
-template <typename key, typename value, int nr_heads = 2053, int nr_per_elem = 4> class HashedMap {
-	typedef HashTable<std::pair<key, value>, nr_heads, nr_per_elem> contentT;
+template <typename _key, typename _value, int nr_heads = 2053, int nr_per_elem = 4> class HashedMap {
+	typedef HashTable<std::pair<_key, _value>, nr_heads, nr_per_elem> contentT;
 	contentT content;
 public:
-	Maybe<value> get(const key &k) const {
+	Maybe<_value> get(const _key &k) const {
 		const typename contentT::elem *c = content.getHead(k.hash());
 		while (c) {
 			for (int i = 0; i < contentT::nr_per_elem; i++) {
 				if ( (c->use_map & (1ul << i)) &&
 				     c->content[i].first == k )
-					return Maybe<value>::just(c->content[i].second);
+					return Maybe<_value>::just(c->content[i].second);
 			}
 			c = c->next;
 		}
-		return Maybe<value>::nothing();
+		return Maybe<_value>::nothing();
 	}
-	void set(const key &k, value &v) {
+	void set(const _key &k, _value &v) {
 		typename contentT::elem *c = content.getHead(k.hash());
 		typename contentT::elem **last;
-		std::pair<key, value> *slot = NULL;
+		std::pair<_key, _value> *slot = NULL;
 		unsigned long *slot_use;
 		unsigned long slot_use_mask;
 		while (c) {
@@ -395,7 +396,7 @@ public:
 		}
 		content.sz++;
 		if (slot) {
-			*slot = std::pair<key, value>(k, v);
+			*slot = std::pair<_key, _value>(k, v);
 			*slot_use |= slot_use_mask;
 			return;
 		}
@@ -405,6 +406,36 @@ public:
 		c->content[0].second = v;
 		*last = c;
 	}
+
+	class iterator {
+		typename contentT::iterator it;
+	public:
+		iterator(contentT *content)
+			: it(content)
+		{
+		}
+		bool finished() const { return it.finished(); }
+		bool started() const { return it.started(); }
+		void advance() { it.advance(); }
+		const _key &key() const { return it->first; }
+		const _value &value() const { return it->second; }
+	};
+	iterator begin() { return iterator(&content); }
+
+	class const_iterator {
+		typename contentT::const_iterator it;
+	public:
+		const_iterator(const contentT *content)
+			: it(content)
+		{
+		}
+		bool finished() const { return it.finished(); }
+		bool started() const { return it.started(); }
+		void advance() { it.advance(); }
+		const _key &key() const { return it->first; }
+		const _value &value() const { return it->second; }
+	};
+	const_iterator begin() const { return const_iterator(&content); }
 };
 
 template <typename ptr> class HashedPtr {
