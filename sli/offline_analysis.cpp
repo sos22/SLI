@@ -268,17 +268,6 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 			done_something |= p;
 		}
 
-		LibVEX_maybe_gc(token);
-
-		p = false;
-		sm = availExpressionAnalysis(sm, opt, is_ssa, oracle, &p);
-		if (debugOptimiseStateMachine && p) {
-			printf("availExpressionAnalysis:\n");
-			printStateMachine(sm, stdout);
-		}
-		done_something |= p;
-
-		LibVEX_maybe_gc(token);
 		{
 			bool d;
 			p = false;
@@ -300,6 +289,18 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 			printStateMachine(sm, stdout);
 		}
 		done_something |= p;
+
+		LibVEX_maybe_gc(token);
+
+		p = false;
+		sm = availExpressionAnalysis(sm, opt, is_ssa, oracle, &p);
+		if (debugOptimiseStateMachine && p) {
+			printf("availExpressionAnalysis:\n");
+			printStateMachine(sm, stdout);
+		}
+		done_something |= p;
+
+		LibVEX_maybe_gc(token);
 
 		sm = bisimilarityReduction(sm, opt);
 
