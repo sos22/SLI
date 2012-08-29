@@ -160,6 +160,14 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 				return ieu;
 			case Iop_BadPtr:
 			case Iop_Not1:
+			case Iop_Not8:
+			case Iop_Not16:
+			case Iop_Not32:
+			case Iop_Not64:
+			case Iop_Neg8:
+			case Iop_Neg16:
+			case Iop_Neg32:
+			case Iop_Neg64:
 				return UNDEFINED_EXPR;
 			default:
 				printIRExpr(a);
