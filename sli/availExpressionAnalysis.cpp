@@ -37,12 +37,6 @@ namespace _availExpressionAnalysis {
  */
 #define MAX_LIVE_ASSERTIONS 5
 
-static void
-findAllSideEffects(StateMachine *sm, std::set<StateMachineSideEffect *> &out)
-{
-	enumSideEffects(sm, out);
-}
-
 class avail_t {
 	std::set<StateMachineSideEffect *> sideEffects;
 public:
@@ -77,14 +71,13 @@ public:
 	void dereference(IRExpr *ptr, const AllowableOptimisations &opt);
 	/* Merge @other into the current availability set.  Returns
 	   true if we do anything, and false otherwise. */
-	bool merge(const avail_t &other, const AllowableOptimisations &opt,
-		   bool is_ssa);
+	bool mergeIntersection(const avail_t &other, const AllowableOptimisations &opt,
+			       bool is_ssa);
+	bool mergeUnion(const avail_t &other);
 
 	void calcRegisterMap(const AllowableOptimisations &opt);
 
 	void invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve);
-
-	void findAllPotentiallyAvailable(CfgDecode &decode, StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle);
 
 	int nr_asserts() const {
 		int cntr = 0;
@@ -181,9 +174,9 @@ intersectSets(std::set<a> &x, const std::set<a> &y)
 }
 
 bool
-avail_t::merge(const avail_t &other,
-	       const AllowableOptimisations &opt,
-	       bool is_ssa)
+avail_t::mergeIntersection(const avail_t &other,
+			   const AllowableOptimisations &opt,
+			   bool is_ssa)
 {
 	bool res;
 
@@ -271,6 +264,16 @@ avail_t::merge(const avail_t &other,
 			it++;
 		}
 	}
+	return res;
+}
+
+bool
+avail_t::mergeUnion(const avail_t &other)
+{
+	bool res;
+	res = false;
+	for (auto it = other.sideEffects.begin(); it != other.sideEffects.end(); it++)
+		res |= sideEffects.insert(*it).second;
 	return res;
 }
 
@@ -866,44 +869,6 @@ buildNewStateMachineWithLoadsEliminated(
 	}
 }
 
-void
-avail_t::findAllPotentiallyAvailable(CfgDecode &decode,
-				     StateMachine *sm,
-				     const AllowableOptimisations &opt,
-				     OracleInterface *oracle)
-{
-	findAllSideEffects(sm, sideEffects);
-	for (auto it = sideEffects.begin();
-	     !TIMEOUT && it != sideEffects.end();
-	     it++) {
-		StateMachineSideEffect *smse = *it;
-		if (StateMachineSideEffectMemoryAccess *smsema =
-		    dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse)) {
-			dereference(smsema->addr, opt);
-		} else if (StateMachineSideEffectAssertFalse *smseaf =
-			   dynamic_cast<StateMachineSideEffectAssertFalse *>(smse)) {
-			makeFalse(smseaf->value, opt);
-		}
-	}
-
-	/* If we're not executing atomically, stores to
-	   non-thread-local memory locations are never considered to
-	   be available. */
-	if (!opt.assumeNoInterferingStores()) {
-		for (auto it = sideEffects.begin();
-		     !TIMEOUT && it != sideEffects.end();
-			) {
-			StateMachineSideEffectMemoryAccess *smsema =
-				dynamic_cast<StateMachineSideEffectMemoryAccess *>(*it);
-			if ( smsema && oracle->hasConflictingRemoteStores(decode, opt, smsema) ) {
-				sideEffects.erase(it++);
-			} else {
-				it++;
-			}
-		}
-	}
-}
-
 static StateMachine *
 availExpressionAnalysis(StateMachine *sm,
 			const AllowableOptimisations &opt,
@@ -925,40 +890,49 @@ availExpressionAnalysis(StateMachine *sm,
 		alias.initialise(sm);
 
 	__set_profiling(availExpressionAnalysis);
-	/* Fairly standard available expression analysis.  Each edge
-	   in the state machine has two sets of
-	   StateMachineSideEffectStores representing the set of things
-	   which are available at the start and end of the edge.  We
-	   start off with everything available everywhere except at
-	   the start node (which has nothing) and then do a Tarski
-	   iteration to remove all of the contradictions.  Once we
-	   know what's available, it's easy enough to go through and
-	   forward all of the remaining stores. */
-	/* Minor tweak: the onEntry map is keyed on states rather than
-	   edges, since every edge starting at a given state will have
-	   the same entry map. */
 
-	/* build the set of potentially-available expressions. */
-	avail_t potentiallyAvailable;
-	potentiallyAvailable.findAllPotentiallyAvailable(decode, sm, opt, oracle);
-
-	/* build the initial availability map.  We start by assuming
-	 * that everything is available everywhere, except that at the
-	 * start of the very first state nothing is available, and
-	 * then use a Tarski iteration to make everything
-	 * consistent. */
 	std::set<StateMachineState *> allStates;
 	findAllStates(sm, allStates);
+
 	std::map<StateMachineState *, avail_t> availOnEntry;
-	for (auto it = allStates.begin();
-	     !TIMEOUT && it != allStates.end();
-	     it++)
-		availOnEntry[*it] = potentiallyAvailable;
-	availOnEntry[sm->root].clear();
 
+	static class _ {
+	public:
+		int nr_avail_calls;
+		int nr_phase1_iters;
+		int nr_phase2_iters;
+		int nr_useful_phase2;
+		_()
+			: nr_avail_calls(0),
+			  nr_phase1_iters(0),
+			  nr_phase2_iters(0),
+			  nr_useful_phase2(0)
+		{}
+		~_() {
+			printf("Avail analysis: invoked %d times, %d phase 1 iters (%f per), %d phase 2 (%f per), %d phase2 useful (%f%%)\n",
+			       nr_avail_calls,
+			       nr_phase1_iters,
+			       (double)nr_phase1_iters / nr_avail_calls,
+			       nr_phase2_iters,
+			       (double)nr_phase2_iters / nr_avail_calls,
+			       nr_useful_phase2,
+			       nr_useful_phase2 * 100.0 / nr_avail_calls);
+		}
+	} stats;
+
+	stats.nr_avail_calls++;
+
+	/* We use a two-phase building process here.  In the first
+	 * phase, we build an availability map using unions at
+	 * path-join, which is an overapproximation.  We then refine
+	 * it using intersections at path-join, which is an
+	 * underapproximation.  This ends up being equivalant to
+	 * starting with an initial state in which everything is
+	 * available everywhere and then going straight to the
+	 * intersection phase, except that it means you don't need to
+	 * build the full O(n^2) everything-everywhere availability
+	 * table. */
 	std::queue<StateMachineState *> statesNeedingRefresh;
-
-	/* Tarski iteration.  */
 	for (auto it = allStates.begin(); it != allStates.end(); it++)
 		statesNeedingRefresh.push(*it);
 	while (!statesNeedingRefresh.empty() && !TIMEOUT) {
@@ -976,19 +950,69 @@ availExpressionAnalysis(StateMachine *sm,
 		std::vector<StateMachineState *> edges;
 		state->targets(edges);
 		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
-			if (availOnEntry[*it2].merge(outputAvail, opt, is_ssa))
+			if (availOnEntry[*it2].mergeUnion(outputAvail))
 				statesNeedingRefresh.push(*it2);
 		}
+		stats.nr_phase1_iters++;
 	}
 
+	if (TIMEOUT)
+		return sm;
+
 	if (dump_avail_table) {
-		printf("Final entry availability map:\n");
+		printf("Availability map after phase one:\n");
 		for (auto it = availOnEntry.begin();
 		     it != availOnEntry.end();
 		     it++) {
 			printf("Edge %d:\n", edgeLabels[it->first]);
 			it->second.print(stdout);
 		}
+	}
+
+	bool phase2_useful = false;
+
+	/* Now do it using intersections. */
+	for (auto it = allStates.begin(); it != allStates.end(); it++)
+		statesNeedingRefresh.push(*it);
+	while (!statesNeedingRefresh.empty() && !TIMEOUT) {
+		StateMachineState *state = statesNeedingRefresh.front();
+		statesNeedingRefresh.pop();
+
+		avail_t outputAvail(availOnEntry[state]);
+		if ( state->type == StateMachineState::SideEffecting ) {
+			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
+			if (se)
+				updateAvailSetForSideEffect(decode, outputAvail, se, state, opt,
+							    alias, oracle);
+		}
+
+		std::vector<StateMachineState *> edges;
+		state->targets(edges);
+		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
+			if (availOnEntry[*it2].mergeIntersection(outputAvail, opt, is_ssa)) {
+				phase2_useful = true;
+				statesNeedingRefresh.push(*it2);
+			}
+		}
+		stats.nr_phase2_iters++;
+	}
+
+	if (phase2_useful)
+		stats.nr_useful_phase2++;
+
+	if (dump_avail_table) {
+		if (phase2_useful) {
+			printf("Final entry availability map:\n");
+			for (auto it = availOnEntry.begin();
+			     it != availOnEntry.end();
+			     it++) {
+				printf("Edge %d:\n", edgeLabels[it->first]);
+				it->second.print(stdout);
+			}
+		} else {
+			printf("Phase 2 had no effect.\n");
+		}
+
 	}
 
 	if (TIMEOUT)
