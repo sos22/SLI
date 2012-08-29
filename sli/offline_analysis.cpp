@@ -1140,7 +1140,7 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 
 	bool foundRace;
 	foundRace = false;
-	for (int i = 0; i < /*nrStoreCfgs*/10; i++) {
+	for (int i = 0; i < nrStoreCfgs; i++) {
 		bool singleNodeCfg = isSingleNodeCfg(storeCFGs[i]);
 		if (roughLoadCount == StateMachineState::singleLoad && singleNodeCfg) {
 			fprintf(_logfile, "Single store versus single load -> no race possible\n");
