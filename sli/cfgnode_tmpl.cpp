@@ -147,7 +147,7 @@ printCFG(const Instruction<t> *cfg, FILE *f)
 }
 
 template <typename t> void
-enumerateCFG(Instruction<t> *start, std::set<Instruction<t> *> &out)
+enumerateCFG(Instruction<t> *start, HashedSet<HashedPtr<Instruction<t> > > &out)
 {
 	return cfgnode_tmpl::enumerateCFG(start, out);
 }

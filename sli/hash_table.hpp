@@ -442,6 +442,7 @@ template <typename ptr> class HashedPtr {
 	ptr *content;
 public:
 	operator ptr*() const { return content; }
+	ptr *get() const { return content; }
 	ptr &operator*() { return *content; }
 	ptr *operator->() { return content; }
 	const ptr &operator*() const { return *content; }

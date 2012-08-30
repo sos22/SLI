@@ -93,7 +93,7 @@ parseEdgeDecl(std::map<named_string, cfg_node *> &nodes,
 }
 
 static bool
-parseCFG(std::set<cfg_node *> &roots,
+parseCFG(HashedSet<HashedPtr<cfg_node> > &roots,
 	 std::map<const cfg_node *, _getStoreCFGs::cfgflavour_store_t> &flavours,
 	 const char *buf, const char **suffix)
 {
@@ -121,7 +121,7 @@ parseCFG(std::set<cfg_node *> &roots,
 }
 
 static void
-read_cfg_and_depth(std::set<cfg_node *> &roots, std::map<const cfg_node *, _getStoreCFGs::cfgflavour_store_t> &flavours, int *maxDepth, int fd)
+read_cfg_and_depth(HashedSet<HashedPtr<cfg_node> > &roots, std::map<const cfg_node *, _getStoreCFGs::cfgflavour_store_t> &flavours, int *maxDepth, int fd)
 {
 	char *buf = readfile(fd);
 	const char *suffix;
@@ -137,13 +137,13 @@ read_cfg_and_depth(std::set<cfg_node *> &roots, std::map<const cfg_node *, _getS
 }
 
 static void
-uniqueify_labels(std::set<cfg_node *> &roots)
+uniqueify_labels(HashedSet<HashedPtr<cfg_node> > &roots)
 {
-	std::set<cfg_node *> allNodes;
-	for (auto it = roots.begin(); it != roots.end(); it++)
-		enumerateCFG(*it, allNodes);
+	HashedSet<HashedPtr<cfg_node> > allNodes;
+	for (auto it = roots.begin(); !it.finished(); it.advance())
+		enumerateCFG(it->get(), allNodes);
 	std::map<named_string, int> counters;
-	for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+	for (auto it = allNodes.begin(); !it.finished(); it.advance()) {
 		auto it2 = counters.insert(std::pair<named_string, int>( (*it)->rip, 0) ).first;
 		it2->second++;
 		if (it2->second != 1) {
@@ -160,13 +160,13 @@ uniqueify_labels(std::set<cfg_node *> &roots)
 }
 
 static void
-printCFG(std::set<cfg_node *> &roots, std::map<const cfg_node *, _getStoreCFGs::cfgflavour_store_t> &flavours, FILE *f)
+printCFG(HashedSet<HashedPtr<cfg_node> > &roots, std::map<const cfg_node *, _getStoreCFGs::cfgflavour_store_t> &flavours, FILE *f)
 {
-	std::set<cfg_node *> allNodes;
-	for (auto it = roots.begin(); it != roots.end(); it++)
-		enumerateCFG(*it, allNodes);
-	std::set<cfg_node *> defined;
-	for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+	HashedSet<HashedPtr<cfg_node> > allNodes;
+	for (auto it = roots.begin(); !it.finished(); it.advance())
+		enumerateCFG(it->get(), allNodes);
+	HashedSet<HashedPtr<cfg_node> > defined;
+	for (auto it = allNodes.begin(); !it.finished(); it.advance()) {
 		const char *fl = NULL;
 		auto it_fl = flavours.find(*it);
 		assert(it_fl != flavours.end());
@@ -184,7 +184,7 @@ printCFG(std::set<cfg_node *> &roots, std::map<const cfg_node *, _getStoreCFGs::
 		assert(fl != NULL);
 		fprintf(f, "%s %s\n", (*it)->rip.c_str(), fl);
 	}
-	for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+	for (auto it = allNodes.begin(); !it.finished(); it.advance()) {
 		cfg_node *n = *it;
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
 			if (it->instr)
@@ -192,7 +192,7 @@ printCFG(std::set<cfg_node *> &roots, std::map<const cfg_node *, _getStoreCFGs::
 		}
 	}
 	fprintf(f, "Roots:\n");
-	for (auto it = roots.begin(); it != roots.end(); it++)
+	for (auto it = roots.begin(); !it.finished(); it.advance())
 		fprintf(f, "%s\n", (*it)->rip.c_str());
 	fprintf(f, "End of roots\n");
 }
@@ -202,7 +202,7 @@ main()
 {
 	init_sli();
 
-	std::set<cfg_node *> roots;
+	HashedSet<HashedPtr<cfg_node> > roots;
 	std::map<const cfg_node *, _getStoreCFGs::cfgflavour_store_t> flavours;
 	int maxPathLength;
 	CfgLabelAllocator allocLabel;

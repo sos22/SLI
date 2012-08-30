@@ -25,16 +25,16 @@ main(int argc, char *argv[])
 	const char *suffix;
 	if (!parseDynAnalysisRip(&vr, argv[4], &suffix) || *suffix)
 		err(1, "cannot parse %s as VexRip", argv[4]);
-	std::set<CFGNode *> roots;
-	std::set<const CFGNode *> targets;
+	HashedSet<HashedPtr<CFGNode> > roots;
+	HashedSet<HashedPtr<const CFGNode> > targets;
 	CfgLabelAllocator allocLabel;
 	if (!getProbeCFGs(allocLabel, oracle, vr, roots, targets))
 		err(1, "cannot build root set");
 
 	int cntr = 0;
-	for (auto it = roots.begin(); it != roots.end(); it++) {
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		printf("Root %d/%zd:\n", cntr, roots.size());
-		printCFG(*it, stdout);
+		printCFG(it->get(), stdout);
 		cntr++;
 	}
 

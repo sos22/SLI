@@ -183,7 +183,7 @@ exprUsesRegister(IRExpr *e, const threadAndRegister &reg)
 		const threadAndRegister *reg;
 		bool res;
 		IRExpr *transformIex(IRExprGet *ieg) {
-			if (threadAndRegister::fullEq(*reg, ieg->reg))
+			if (*reg ==  ieg->reg)
 				res = true;
 			return ieg;
 		}
@@ -208,7 +208,7 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcem
 					for (auto it3 = hbe->content.begin();
 					     it3 != hbe->content.end();
 					     it3++) {
-						if (threadAndRegister::fullEq((*it3)->reg,expr->reg))
+						if ((*it3)->reg == expr->reg)
 							return true;
 					}
 				}

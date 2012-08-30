@@ -293,7 +293,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 	decode.addMachine(cs->loadMachine);
 	decode.addMachine(cs->storeMachine);
 
-	std::set<CFGNode *> allNodes;
+	HashedSet<HashedPtr<CFGNode> > allNodes;
 	for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
 				       saneIterator(cs->storeMachine->cfg_roots));
 	     !it.finished();
@@ -344,7 +344,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		bool progress = true;
 		while (progress) {
 			progress = false;
-			for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+			for (auto it = allNodes.begin(); !it.finished(); it.advance()) {
 				const CFGNode *n = *it;
 				if (reachesReferencedNode.count(n))
 					continue;
@@ -381,7 +381,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 
 	/* Now trim the CFG down a bit.  First step: any transition
 	 * from a needed node to a not-needed one can be killed. */
-	for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+	for (auto it = allNodes.begin(); !it.finished(); it.advance()) {
 		CFGNode *n = *it;
 		if (!needed.count(n))
 			continue;
@@ -441,19 +441,22 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		   from I' to a needed instruction must pass through
 		   I. */
 		CFGNode *root = const_cast<CFGNode *>(s->cfg_roots[0].second);
-		std::set<CFGNode *> nodes;
+		HashedSet<HashedPtr<CFGNode> > nodes;
 		enumerateCFG(root, nodes);
+		std::set<CFGNode *> nodesSet;
+		for (auto it = nodes.begin(); !it.finished(); it.advance())
+			nodesSet.insert(it->get());
 
 		/* First, calculate the dominators map for all
 		 * instructions. */
 		std::map<CFGNode *, std::set<CFGNode *> > dominators;
-		for (auto it = nodes.begin(); it != nodes.end(); it++)
+		for (auto it = nodes.begin(); !it.finished(); it.advance())
 			if (*it == root)
 				dominators[*it].insert(*it);
 			else
-				dominators[*it] = nodes;
+				dominators[*it] = nodesSet;
 		std::queue<CFGNode *> pending;
-		for (auto it = nodes.begin(); it != nodes.end(); it++)
+		for (auto it = nodes.begin(); !it.finished(); it.advance())
 			pending.push(*it);
 		while (!pending.empty()) {
 			CFGNode *p = pending.front();
@@ -482,7 +485,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		/* Initial candidates: everything which dominators
 		 * every needed instruction. */
 		auto it = needed.begin();
-		while (it != needed.end() && !nodes.count(const_cast<CFGNode *>(*it)))
+		while (it != needed.end() && !nodes.contains(const_cast<CFGNode *>(*it)))
 			it++;
 		if (it == needed.end()) {
 			/* Weird... the whole cfg is redundant.  Kill
@@ -493,7 +496,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		std::set<CFGNode *> candidates(dominators[const_cast<CFGNode *>(*it)]);
 		it++;
 		for (; it != needed.end(); it++) {
-			if (!nodes.count(const_cast<CFGNode *>(*it)))
+			if (!nodes.contains(const_cast<CFGNode *>(*it)))
 				continue;
 			std::set<CFGNode *> &dom(dominators[const_cast<CFGNode *>(*it)]);
 			for (auto it2 = candidates.begin(); it2 != candidates.end(); ) 

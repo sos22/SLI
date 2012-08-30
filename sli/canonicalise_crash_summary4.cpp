@@ -3,7 +3,7 @@
 #include "inferred_information.hpp"
 #include "intern.hpp"
 
-typedef std::set<threadAndRegister, threadAndRegister::fullCompare> reg_set_t;
+typedef std::set<threadAndRegister> reg_set_t;
 
 #ifndef NDEBUG
 static bool debug_find_constants = false;
@@ -212,8 +212,7 @@ Function::matches(IRExpr *what, IRExpr *tmpl, std::map<int, IRExpr *> &argVals)
 		return false;
 	switch (what->tag) {
 	case Iex_Get:
-		assert( !threadAndRegister::fullEq(((IRExprGet *)what)->reg,
-						   ((IRExprGet *)tmpl)->reg));
+		assert( ((IRExprGet *)what)->reg !=  ((IRExprGet *)tmpl)->reg );
 		return false;
 	case Iex_GetI: {
 		IRExprGetI *whatI = (IRExprGetI *)what;
@@ -310,14 +309,14 @@ introduceCandidateFunction(IRExpr *e, std::map<Function *, int> &functions, cons
 	input_regs &= ~constRegs;
 	if (input_regs.size() == 0)
 		return;
-	std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> placeholders;
+	std::map<threadAndRegister, IRExpr *> placeholders;
 	int cntr = 1;
 	for (auto it = input_regs.begin(); it != input_regs.end(); it++) {
 		std::pair<threadAndRegister, IRExpr *> t(*it, new IRExprPlaceholder(cntr++));
 		placeholders.insert(t);
 	}
 	struct : public IRExprTransformer {
-		std::map<threadAndRegister, IRExpr *, threadAndRegister::fullCompare> *placeholders;
+		std::map<threadAndRegister, IRExpr *> *placeholders;
 		IRExpr *transformIex(IRExprGet *ieg) {
 			auto it = placeholders->find(ieg->reg);
 			if (it != placeholders->end())
@@ -381,7 +380,7 @@ introduceCompoundFunctions(CrashSummary *summary,
 	{
 		struct _ : public StateMachineTransformer {
 			std::map<Function *, int> &possibleFunctions;
-			std::set<threadAndRegister, threadAndRegister::fullCompare> &constRegisters;
+			std::set<threadAndRegister> &constRegisters;
 			IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 				bool found_one = false;
 				for (auto it = possibleFunctions.begin(); it != possibleFunctions.end(); it++) {
@@ -397,7 +396,7 @@ introduceCompoundFunctions(CrashSummary *summary,
 			bool rewriteNewStates() const { return false; }
 		public:
 			_(std::map<Function *, int> &_possibleFunctions,
-			  std::set<threadAndRegister, threadAndRegister::fullCompare> &_constRegisters)
+			  std::set<threadAndRegister> &_constRegisters)
 				: possibleFunctions(_possibleFunctions),
 				  constRegisters(_constRegisters)
 			{}

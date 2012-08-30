@@ -48,7 +48,7 @@ public:
 		if (o.is_reg < is_reg)
 			return false;
 		if (is_reg)
-			return threadAndRegister::fullCompare()(reg, o.reg);
+			return reg < o.reg;
 		else
 			return fv < o.fv;
 	}
@@ -56,7 +56,7 @@ public:
 static bool
 operator==(const IRExpr *a, const reg_or_free_var &b)
 {
-	if (a->tag == Iex_Get && b.is_reg && threadAndRegister::fullEq( ((IRExprGet *)a)->reg, b.reg))
+	if (a->tag == Iex_Get && b.is_reg && ((IRExprGet *)a)->reg == b.reg)
 		return true;
 	if (a->tag == Iex_FreeVariable && !b.is_reg && ((IRExprFreeVariable *)a)->id == b.fv)
 		return true;

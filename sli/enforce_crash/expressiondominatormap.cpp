@@ -14,7 +14,7 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	     it != idom.end();
 	     it++) {
 		evalable[it->first].clear();
-		std::set<threadAndRegister, threadAndRegister::fullCompare> availRegs;
+		std::set<threadAndRegister> availRegs;
 		for (auto it2 = it->second.begin();
 		     it2 != it->second.end();
 		     it2++) {

@@ -289,7 +289,7 @@ public:
 			     it++) {
 				StateMachineSideEffectLoad *l = NULL;
 				for (auto it2 = loads.begin(); it2 != loads.end(); it2++) {
-					if ( threadAndRegister::fullEq((*it2)->target, (*it)->reg) ) {
+					if ( (*it2)->target == (*it)->reg ) {
 						assert(!l);
 						l = *it2;
 					}
@@ -355,7 +355,7 @@ public:
 
 class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > {
 	class trans1 : public IRExprTransformer {
-		std::set<threadAndRegister, threadAndRegister::fullCompare> &availRegs;
+		std::set<threadAndRegister> &availRegs;
 		IRExpr *transformIex(IRExprGet *e) {
 			if (!availRegs.count(e->reg))
 				isGood = false;
@@ -367,13 +367,13 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, s
 		}
 	public:
 		bool isGood;
-		trans1(std::set<threadAndRegister, threadAndRegister::fullCompare> &_availRegs)
+		trans1(std::set<threadAndRegister> &_availRegs)
 			: availRegs(_availRegs),
 			  isGood(true)
 		{}
 	};
 	static bool evaluatable(IRExpr *e,
-				std::set<threadAndRegister, threadAndRegister::fullCompare> &availRegs) {
+				std::set<threadAndRegister> &availRegs) {
 		trans1 t(availRegs);
 		t.doit(e);
 		return t.isGood;

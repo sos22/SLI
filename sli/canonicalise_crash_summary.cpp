@@ -135,9 +135,9 @@ expressionIsClosed(IRExpr *a)
 
 /* Caution: this is done partly in-place. */
 class SplitSsaGenerations : public StateMachineTransformer {
-	std::set<threadAndRegister, threadAndRegister::fullCompare> &phiRegs;
-	std::set<threadAndRegister, threadAndRegister::fullCompare> &generatedRegisters;
-	std::map<threadAndRegister, threadAndRegister, threadAndRegister::fullCompare> canonTable;
+	std::set<threadAndRegister> &phiRegs;
+	std::set<threadAndRegister> &generatedRegisters;
+	std::map<threadAndRegister, threadAndRegister> canonTable;
 	std::map<IRExprLoad *, threadAndRegister> canonLoadTable;
 	std::map<IRConst *, threadAndRegister> canonConstTable;
 	std::map<unsigned, unsigned> next_temp_id;
@@ -258,8 +258,8 @@ class SplitSsaGenerations : public StateMachineTransformer {
 	bool rewriteNewStates() const { return false; }
 public:
 	SplitSsaGenerations(
-		std::set<threadAndRegister, threadAndRegister::fullCompare> &_phiRegs,
-		std::set<threadAndRegister, threadAndRegister::fullCompare> &_generatedRegisters,
+		std::set<threadAndRegister> &_phiRegs,
+		std::set<threadAndRegister> &_generatedRegisters,
 		internIRExprTable &_internTable)
 		: phiRegs(_phiRegs),
 		  generatedRegisters(_generatedRegisters),
@@ -474,7 +474,7 @@ canonicalise_crash_summary(CrashSummary *input)
 	input = transformCrashSummary(input, thread_canon);
 
 	struct : public StateMachineTransformer {
-		std::set<threadAndRegister, threadAndRegister::fullCompare> res;
+		std::set<threadAndRegister> res;
 		StateMachineSideEffectPhi *transformOneSideEffect(
 			StateMachineSideEffectPhi *smsep, bool *done_something)
 		{
@@ -496,7 +496,7 @@ canonicalise_crash_summary(CrashSummary *input)
 	input->storeMachine = internStateMachine(input->storeMachine, t);
 	input->verificationCondition = internIRExpr(input->verificationCondition, t);
 
-	std::set<threadAndRegister, threadAndRegister::fullCompare> generatedRegisters;
+	std::set<threadAndRegister> generatedRegisters;
 	std::set<StateMachineSideEffect *> sideEffects;
 	enumSideEffects(input->loadMachine, sideEffects);
 	enumSideEffects(input->storeMachine, sideEffects);

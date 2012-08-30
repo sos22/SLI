@@ -71,10 +71,10 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 #include "cfgnode_tmpl.cpp"
 
 template <typename t> static void
-dumpCFGToDot(const std::set<Instruction<t> *> &roots, FILE *f)
+dumpCFGToDot(const HashedSet<HashedPtr<Instruction<t> > > &roots, FILE *f)
 {
 	std::set<Instruction<t> *> allNodes;
-	for (auto it = roots.begin(); it != roots.end(); it++)
+	for (auto it = roots.begin(); !it.finished(); it.advance())
 		enumerateCFG(*it, allNodes);
 
 	fprintf(f, "digraph {\n");
@@ -96,7 +96,7 @@ dumpCFGToDot(const std::set<Instruction<t> *> &roots, FILE *f)
 }
 
 template <typename t> static void
-dumpCFGToDot(const std::set<Instruction<t> *> &allNodes, const char *fname)
+dumpCFGToDot(const HashedSet<HashedPtr<Instruction<t> > > &allNodes, const char *fname)
 {
 	FILE *f = fopen(fname, "w");
 	if (!f) {
@@ -108,7 +108,7 @@ dumpCFGToDot(const std::set<Instruction<t> *> &allNodes, const char *fname)
 }
 
 void
-dumpCFGToDot(const std::set<CFGNode *> &allNodes, const char *fname)
+dumpCFGToDot(const HashedSet<HashedPtr<CFGNode> > &allNodes, const char *fname)
 {
 	dumpCFGToDot(allNodes, fname);
 }

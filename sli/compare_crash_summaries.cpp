@@ -21,7 +21,7 @@ static bool
 localSimilarity2(StateMachineSideEffectLoad *smsel1, StateMachineSideEffectLoad *smsel2)
 {
 	return localSimilarity(smsel1->addr, smsel2->addr) &&
-		threadAndRegister::fullEq(smsel1->target, smsel2->target) &&
+		smsel1->target == smsel2->target &&
 		smsel1->type == smsel2->type;
 }
 
@@ -36,7 +36,7 @@ static bool
 localSimilarity2(StateMachineSideEffectCopy *smsel1, StateMachineSideEffectCopy *smsel2)
 {
 	return localSimilarity(smsel1->value, smsel2->value) &&
-		threadAndRegister::fullEq(smsel1->target, smsel2->target);
+		smsel1->target == smsel2->target;
 }
 
 static bool
@@ -67,7 +67,7 @@ localSimilarity2(StateMachineSideEffectUnreached *, StateMachineSideEffectUnreac
 static bool
 localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2)
 {
-	if (!threadAndRegister::fullEq(e1->reg, e2->reg))
+	if (e1->reg != e2->reg)
 		return false;
 	if (e1->generations.size() != e2->generations.size())
 		return false;

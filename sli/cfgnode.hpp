@@ -36,6 +36,6 @@ void probeCFGsToMachine(Oracle *oracle,
 			HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
 			MemoryAccessIdentifierAllocator &mai,
 			std::set<StateMachine *> &out);
-void dumpCFGToDot(const std::set<CFGNode *> &allNodes, const char *fname);
+void dumpCFGToDot(const HashedSet<HashedPtr<CFGNode> > &allNodes, const char *fname);
 
 #endif /* !CFGNODE_HPP__ */
