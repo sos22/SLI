@@ -135,7 +135,7 @@ removeLocalSurvival(StateMachine *sm, const AllowableOptimisations &opt, bool *d
 		 * condition into an assertion. */
 		StateMachineState *targ;
 		if (nonLocalCond)
-			targ = new StateMachineBifurcate(smb->origin, nonLocalCond, smb->trueTarget, smb->falseTarget);
+			targ = new StateMachineBifurcate(smb, nonLocalCond);
 		else if (smb->trueTarget == assertFailedState)
 			targ = smb->falseTarget;
 		else
@@ -143,7 +143,7 @@ removeLocalSurvival(StateMachine *sm, const AllowableOptimisations &opt, bool *d
 
 		rewriteRules[smb] =
 			new StateMachineSideEffecting(
-				smb->origin,
+				smb->dbg_origin,
 				new StateMachineSideEffectAssertFalse(
 					smb->falseTarget == assertFailedState ?
 						IRExpr_Unop(Iop_Not1, localCond) :

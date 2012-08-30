@@ -305,7 +305,7 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 	switch (inp->type) {
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)inp;
-		StateMachineBifurcate *res = new StateMachineBifurcate(smb->origin, NULL, NULL, NULL);
+		StateMachineBifurcate *res = new StateMachineBifurcate(smb->dbg_origin, NULL, NULL, NULL);
 		ctxt(&res->condition, smb->condition, rawDupe);
 		ctxt(&res->trueTarget, smb->trueTarget, rawDupe);
 		ctxt(&res->falseTarget, smb->falseTarget, rawDupe);
@@ -313,7 +313,7 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)inp;
-		StateMachineSideEffecting *res = new StateMachineSideEffecting(sme->origin,
+		StateMachineSideEffecting *res = new StateMachineSideEffecting(sme->dbg_origin,
 									       sme->sideEffect ? rawDupe(ctxt, sme->sideEffect) : NULL,
 									       NULL);
 		ctxt(&res->target, sme->target, rawDupe);

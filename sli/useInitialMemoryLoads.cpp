@@ -177,11 +177,10 @@ UseReachingMap::transformOneState(CfgDecode &decode, StateMachineSideEffecting *
 	   expression for it. */
 	*done_something = true;
 	return new StateMachineSideEffecting(
-		smse->origin,
+		smse,
 		new StateMachineSideEffectCopy(
 			load->target,
-			IRExpr_Load(load->type, load->addr)),
-		smse->target);
+			IRExpr_Load(load->type, load->addr)));
 }
 
 static StateMachine *

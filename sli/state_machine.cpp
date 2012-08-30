@@ -47,7 +47,7 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		if (falseTarget == StateMachineUnreached::get())
 			return StateMachineUnreached::get();
 		return (new StateMachineSideEffecting(
-				origin,
+				dbg_origin,
 				new StateMachineSideEffectAssertFalse(
 					condition,
 					true),
@@ -56,7 +56,7 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 	if (falseTarget == StateMachineUnreached::get()) {
 		*done_something = true;
 		return (new StateMachineSideEffecting(
-				origin,
+				dbg_origin,
 				new StateMachineSideEffectAssertFalse(
 					IRExpr_Unop(
 						Iop_Not1,
@@ -936,7 +936,7 @@ void
 StateMachineSideEffecting::prependSideEffect(StateMachineSideEffect *se)
 {
 	if (sideEffect)
-		target = new StateMachineSideEffecting(origin, sideEffect, target);
+		target = new StateMachineSideEffecting(dbg_origin, sideEffect, target);
 	sideEffect = se;
 }
 
@@ -983,9 +983,8 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 				   pointless. */
 				*done_something = true;
 				return (new StateMachineSideEffecting(
-						t->origin,
-						t->sideEffect,
-						t2->target))->optimise(opt, done_something);
+						t2,
+						t->sideEffect))->optimise(opt, done_something);
 			}
 		}
 	}

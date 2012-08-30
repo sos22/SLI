@@ -1766,9 +1766,10 @@ probeCFGsToMachine(Oracle *oracle,
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	assignFrameIds(roots_this_sm1, tid, entryStacks);
 	std::vector<StateMachineState *> roots_this_sm2;
-	for (auto it = roots_this_sm1.begin(); it != roots_this_sm1.end(); it++) {
-		StateMachineState *root = *it;
-		root = addEntrySideEffects(oracle, tid, root, entryStacks[root], root->origin);
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
+		CFGNode *cfgnode = *it;
+		StateMachineState *root = results[*it];
+		root = addEntrySideEffects(oracle, tid, root, entryStacks[root], cfgnode->rip);
 		roots_this_sm2.push_back(root);
 	}
 	for (auto it = roots.begin(); !it.finished(); it.advance())

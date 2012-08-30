@@ -575,7 +575,7 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 		{
 			if (a->sideEffect && removeThisOne(a->sideEffect->type)) {
 				*done_something = true;
-				return new StateMachineSideEffecting(a->origin, NULL, a->target);
+				return new StateMachineSideEffecting(a->dbg_origin, NULL, a->target);
 			} else {
 				return NULL;
 			}

@@ -160,19 +160,12 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 				switch (s->type) {
 				case StateMachineState::SideEffecting: {
 					StateMachineSideEffecting *smp = (StateMachineSideEffecting *)s;
-					stateRewrites[s] =
-						new StateMachineSideEffecting(smp->origin,
-									      smp->sideEffect,
-									      smp->target);
+					stateRewrites[s] = new StateMachineSideEffecting(smp);
 					break;
 				}
 				case StateMachineState::Bifurcate: {
 					StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-					stateRewrites[s] =
-						new StateMachineBifurcate(smb->origin,
-									  smb->condition,
-									  smb->trueTarget,
-									  smb->falseTarget);
+					stateRewrites[s] = new StateMachineBifurcate(smb);
 					break;
 				}
 

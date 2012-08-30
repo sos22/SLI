@@ -1766,7 +1766,7 @@ buildCrossProductMachine(CfgDecode &decode,
 					   assert that they're equal,
 					   and that's what we do. */
 					nextStore = new StateMachineSideEffecting(
-						nextStore->origin,
+						nextStore->dbg_origin,
 						new StateMachineSideEffectAssertFalse(
 							IRExpr_Unop(
 								Iop_Not1, /* Remember, it's assertfalse,

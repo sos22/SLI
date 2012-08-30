@@ -165,9 +165,7 @@ protected:
 			smse->sideEffect ? transformSideEffect(smse->sideEffect, &b) : NULL;
 		if (b) {
 			*done_something = true;
-			return new StateMachineSideEffecting(smse->origin,
-							     e,
-							     smse->target);
+			return new StateMachineSideEffecting(smse, e);
 		} else {
 			return NULL;
 		}
@@ -179,10 +177,7 @@ protected:
 		IRExpr *c = doit(s->condition, &b);
 		if (b) {
 			*done_something = true;
-			return new StateMachineBifurcate(s->origin,
-							 c,
-							 s->trueTarget,
-							 s->falseTarget);
+			return new StateMachineBifurcate(s, c);
 		} else {
 			return NULL;
 		}

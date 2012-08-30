@@ -288,14 +288,14 @@ public:
 protected:
 	StateMachineState(const VexRip &_origin,
 			  enum stateType _type)
-		: type(_type), origin(_origin)
+		: type(_type), dbg_origin(_origin)
 	{}
 public:
 	stateType type;
-	VexRip origin; /* RIP we were looking at when we constructed
-			* the thing.  Not very meaningful, but
-			* occasionally provides useful hints for
-			* debugging.*/
+	VexRip dbg_origin; /* RIP we were looking at when we
+			    * constructed the thing.  Not very
+			    * meaningful, but occasionally provides
+			    * useful hints for debugging.*/
 
 	bool isTerminal() const {
 		return stateTypeIsTerminal(type);
@@ -482,9 +482,21 @@ public:
 		  sideEffect(smse)
 	{
 	}
+	StateMachineSideEffecting(StateMachineSideEffecting *base, StateMachineSideEffect *smse)
+		: StateMachineState(base->dbg_origin, StateMachineState::SideEffecting),
+		  target(base->target),
+		  sideEffect(smse)
+	{
+	}
+	StateMachineSideEffecting(StateMachineSideEffecting *base)
+		: StateMachineState(base->dbg_origin, StateMachineState::SideEffecting),
+		  target(base->target),
+		  sideEffect(base->sideEffect)
+	{
+	}
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
 	{
-		fprintf(f, "{%s:", origin.name());
+		fprintf(f, "{%s:", dbg_origin.name());
 		if (sideEffect)
 			sideEffect->prettyPrint(f);
 		fprintf(f, " then l%d}", labels[target]);
@@ -536,6 +548,21 @@ public:
 		  falseTarget(f)
 	{
 	}
+	StateMachineBifurcate(StateMachineBifurcate *base,
+			      IRExpr *_condition)
+		: StateMachineState(base->dbg_origin, StateMachineState::Bifurcate),
+		  condition(_condition),
+		  trueTarget(base->trueTarget),
+		  falseTarget(base->falseTarget)
+	{
+	}
+	StateMachineBifurcate(StateMachineBifurcate *base)
+		: StateMachineState(base->dbg_origin, StateMachineState::Bifurcate),
+		  condition(base->condition),
+		  trueTarget(base->trueTarget),
+		  falseTarget(base->falseTarget)
+	{
+	}
 
 	IRExpr *condition; /* Should be typed Ity_I1.  If zero, we go
 			      to the false target.  Otherwise, we go
@@ -545,7 +572,7 @@ public:
 
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
 	{
-		fprintf(f, "%s: if (", origin.name());
+		fprintf(f, "%s: if (", dbg_origin.name());
 		ppIRExpr(condition, f);
 		fprintf(f, ") then l%d else l%d",
 			labels[trueTarget], labels[falseTarget]);

@@ -367,7 +367,7 @@ findPredecessor(StateMachine *sm, StateMachineState *s)
 	/* This algorithm doesn't work for finding the predecessor of
 	 * the root state, so make sure we don't have to. */
 	if (sm->root == s)
-		sm->root = new StateMachineSideEffecting(s->origin, NULL, s);
+		sm->root = new StateMachineSideEffecting(s->dbg_origin, NULL, s);
 	std::set<StateMachineState *> allStates;
 	enumStates(sm, &allStates);
 	StateMachineState *found = NULL;
@@ -388,7 +388,7 @@ findPredecessor(StateMachine *sm, StateMachineState *s)
 		return (StateMachineSideEffecting *)found;
 
 insert_new_predecessor:
-	StateMachineSideEffecting *res = new StateMachineSideEffecting(s->origin, NULL, s);
+	StateMachineSideEffecting *res = new StateMachineSideEffecting(s->dbg_origin, NULL, s);
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		StateMachineState *st = *it;
 		std::vector<StateMachineState **> targets;
@@ -488,11 +488,10 @@ class optimiseSSATransformer : public StateMachineTransformer {
 				*done_something = true;
 				assert(newGenerations.size() != 0);
 				return new StateMachineSideEffecting(
-					smse->origin,
+					smse,
 					new StateMachineSideEffectPhi(
 						phi->reg,
-						newGenerations),
-					smse->target);
+						newGenerations));
 			}
 		}
 		return smse;

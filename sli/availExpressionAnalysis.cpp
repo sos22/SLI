@@ -805,9 +805,8 @@ buildNewStateMachineWithLoadsEliminated(
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
 		avail.calcRegisterMap(opt);
 		res = new StateMachineBifurcate(
-			sm->origin,
-			applyAvailSet(avail, smb->condition, true, done_something, opt),
-			smb->trueTarget, smb->falseTarget);
+			smb,
+			applyAvailSet(avail, smb->condition, true, done_something, opt));
 		break;
 	}
 	case StateMachineState::SideEffecting: {
@@ -825,7 +824,7 @@ buildNewStateMachineWithLoadsEliminated(
 									    opt);
 		else
 			newEffect = NULL;
-		res = new StateMachineSideEffecting(sm->origin, newEffect, smp->target);
+		res = new StateMachineSideEffecting(smp, newEffect);
 		break;
 	}
 	case StateMachineState::Unreached:
