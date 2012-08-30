@@ -1357,6 +1357,45 @@ public:
 #endif
 };
 
+template <typename t> class UnionFind {
+	mutable std::map<t, t> content;
+public:
+	class iterator {
+		typename std::map<t, t>::const_iterator it;
+		typename std::map<t, t>::const_iterator end_it;
+	public:
+		iterator(const typename std::map<t, t>::const_iterator &_it,
+			 const typename std::map<t, t>::const_iterator &_end_it)
+			: it(_it), end_it(_end_it)
+		{}
+		bool finished() const { return it == end_it; }
+		void advance() { it++; }
+		const t &element() const { return it->first; }
+		const t &representative() const { return it->second; }
+	};
+	iterator begin() const {
+		return iterator(content.begin(), content.end());
+	}
+	const t &get(const t &what) const {
+		auto it = content.find(what);
+		assert(it != content.end());
+		if (it->first == it->second)
+			return it->second;
+		const t &o(get(it->second));
+		content[what] = o;
+		return o;
+	}
+	void merge(const t &a, const t &b) {
+		t a2(get(a));
+		t b2(get(b));
+		content[a2] = b2;
+	}
+	void singleton(const t &what) {
+		assert(!content.count(what));
+		content[what] = what;
+	}
+};
+
 static void
 assignFrameIds(const std::set<StateMachineState *> &roots,
 	       unsigned tid,
@@ -1422,27 +1461,24 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 			auto *smse = (StateMachineSideEffecting *)s;
 			StateMachineSideEffect *se = smse->sideEffect;
 			if (se && se->type == StateMachineSideEffect::StartFunction) {
+				StackConstraint sc(
+					entryState,
+					&((StateMachineSideEffectStartFunction *)se)->frame,
+					&stacks[smse->target]);
 				if (debug_assign_frame_ids)
-					printf("\tl%d: l%d == l%d:%p\n",
+					printf("\tl%d: %s\n",
 					       stateLabels[s],
-					       stackLabels[&stacks[smse->target]],
-					       stackLabels[entryState],
-					       &((StateMachineSideEffectStartFunction *)se)->frame);
-				constraints.insert(StackConstraint(
-							   entryState,
-							   &((StateMachineSideEffectStartFunction *)se)->frame,
-							   &stacks[smse->target]));
+					       sc.name(stackLabels));
+				constraints.insert(sc);
 			} else if (se && se->type == StateMachineSideEffect::EndFunction) {
+				StackConstraint sc(&stacks[smse->target],
+						  &((StateMachineSideEffectEndFunction *)se)->frame,
+						  entryState);
 				if (debug_assign_frame_ids)
-					printf("\tl%d: l%d:%p == l%d\n",
+					printf("\tl%d: %s\n",
 					       stateLabels[s],
-					       stackLabels[entryState],
-					       &((StateMachineSideEffectStartFunction *)se)->frame,
-					       stackLabels[&stacks[smse->target]]);
-				constraints.insert(StackConstraint(
-							   &stacks[smse->target],
-							   &((StateMachineSideEffectEndFunction *)se)->frame,
-							   entryState));
+					       sc.name(stackLabels));
+				constraints.insert(sc);
 			} else {
 				if (debug_assign_frame_ids)
 					printf("\tl%d: l%d == l%d\n",
@@ -1480,31 +1516,21 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 
 	/* Step two: Use the eq relationship to build up equivalence
 	 * classes over stacks. */
-	std::map<callStackT *, callStackT *> canonicalisationMap(eq_constraints.begin(), eq_constraints.end());
-	for (auto it = stacks.begin(); it != stacks.end(); it++) {
-		if (!canonicalisationMap.count(&it->second))
-			canonicalisationMap[&it->second] = &it->second;
-	}
-	bool progress = true;
-	while (progress) {
-		progress = false;
-		for (auto it = canonicalisationMap.begin(); it != canonicalisationMap.end(); it++) {
-			if (canonicalisationMap[it->second] != it->second) {
-				it->second = canonicalisationMap[it->second];
-				progress = true;
-			}
-		}
-	}
+	UnionFind<callStackT *> canonicalisationMap;
+	for (auto it = stacks.begin(); it != stacks.end(); it++)
+		canonicalisationMap.singleton(&it->second);
+	for (auto it = eq_constraints.begin(); it != eq_constraints.end(); it++)
+		canonicalisationMap.merge(it->first, it->second);
 
 	if (debug_assign_frame_ids) {
 		printf("Stack canonicalisation map:\n");
-		for (auto it = canonicalisationMap.begin(); it != canonicalisationMap.end(); it++)
-			printf("\tl%d -> l%d\n", stackLabels[it->first], stackLabels[it->second]);
+		for (auto it = canonicalisationMap.begin(); !it.finished(); it.advance())
+			printf("\tl%d -> l%d\n", stackLabels[it.element()], stackLabels[it.representative()]);
 	}
 
 	std::set<callStackT *> canonStacks;
-	for (auto it = canonicalisationMap.begin(); it != canonicalisationMap.end(); it++)
-		canonStacks.insert(it->second);
+	for (auto it = canonicalisationMap.begin(); !it.finished(); it.advance())
+		canonStacks.insert(it.representative());
 
 	/* Step three: re-express the extend relationships in terms of
 	   those equivalence classes. */
@@ -1512,9 +1538,9 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	for (auto it = constraints.begin(); it != constraints.end(); it++)
 		constraints2.insert(
 			StackConstraint(
-				canonicalisationMap[it->beforeExtension],
+				canonicalisationMap.get(it->beforeExtension),
 				it->frame,
-				canonicalisationMap[it->afterExtension]));
+				canonicalisationMap.get(it->afterExtension)));
 	constraints = constraints2;
 
 	if (debug_assign_frame_ids) {
@@ -1529,7 +1555,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	std::map<callStackT *, int> stackSizes;
 	for (auto it = canonStacks.begin(); it != canonStacks.end(); it++)
 		stackSizes[*it] = 0;
-	progress = true;
+	bool progress = true;
 	while (progress) {
 		progress = false;
 		for (auto it = constraints.begin(); it != constraints.end(); it++) {
@@ -1667,7 +1693,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	 * return. */
 	for (auto it = roots.begin(); it != roots.end(); it++) {
 		callStackT *stack = &stacks[*it];
-		stack = canonicalisationMap[stack];
+		stack = canonicalisationMap.get(stack);
 		callStackT stack0 = *stack;
 
 		/* Frame 0 is always on the top of the stack. */
