@@ -24,6 +24,7 @@ public:
 
 	struct cache_entry {
 		unsigned nr_entries;
+		unsigned prod_idx;
 		struct p p[ASSOCIATIVITY];
 	};
 	unsigned nr_queries;
@@ -79,12 +80,13 @@ public:
 
 	void set(a_type *a, b_type *b, int idx, result_type res) {
 		struct cache_entry *e = &cache[idx];
-		if (e->nr_entries == ASSOCIATIVITY) {
-			e->nr_entries = 0;
+		if (e->nr_entries != ASSOCIATIVITY) {
+			e->nr_entries++;
+		} else {
 			nr_assoc_discards++;
 		}
-		e->p[e->nr_entries] = p(a, b, res);
-		e->nr_entries++;
+		e->p[e->prod_idx] = p(a, b, res);
+		e->prod_idx = (e->prod_idx + 1) % ASSOCIATIVITY;
 	}
 };
 
