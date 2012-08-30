@@ -1308,14 +1308,18 @@ public:
 	{}
 };
 
-class StackConstraint : public Named {
-	char *mkName() const {
-		return my_asprintf("%p = %p:%p",
-				   afterExtension,
-				   beforeExtension,
-				   frame);
-	}
+class StackConstraint {
 public:
+	const char *name(const std::map<callStackT *, int> &labels) const {
+		auto a = labels.find(afterExtension);
+		auto b = labels.find(beforeExtension);
+		assert(a != labels.end());
+		assert(b != labels.end());
+		return vex_asprintf("l%d = l%d:%p",
+				    a->second,
+				    b->second,
+				    frame);
+	}
 	callStackT *beforeExtension;
 	FrameId *frame;
 	callStackT *afterExtension;
@@ -1359,6 +1363,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	       std::map<StateMachineState *, std::vector<FrameId> > &entryStacks)
 {
 	std::map<const StateMachineState *, int> stateLabels;
+	std::map<callStackT *, int> stackLabels;
 	if (debug_assign_frame_ids) {
 		printf("Assigning frame IDs in:\n");
 		std::set<const StateMachineState *> roots2; /* grr, constness */
@@ -1375,10 +1380,8 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 		stacks[*it].resize(0, FrameId::invalid());
 
 	if (debug_assign_frame_ids) {
-		printf("Stacks:\n");
 		for (auto it = allStates.begin(); it != allStates.end(); it++)
-			printf("\tl%d -> %p\n",
-			       stateLabels[*it], &stacks[*it]);
+			stackLabels[&stacks[*it]] = stateLabels[*it];
 		printf("Constraints:\n");
 	}
 
@@ -1401,12 +1404,12 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 			if (debug_assign_frame_ids)
-				printf("\tl%d: %p == %p and %p == %p\n",
+				printf("\tl%d: l%d == l%d and l%d == l%d\n",
 				       stateLabels[s],
-				       entryState,
-				       &stacks[smb->trueTarget],
-				       entryState,
-				       &stacks[smb->falseTarget]);
+				       stackLabels[entryState],
+				       stackLabels[&stacks[smb->trueTarget]],
+				       stackLabels[entryState],
+				       stackLabels[&stacks[smb->falseTarget]]);
 			eq_constraints.insert(
 				StackEqConstraint
 				(entryState, &stacks[smb->trueTarget]));
@@ -1420,10 +1423,10 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 			StateMachineSideEffect *se = smse->sideEffect;
 			if (se && se->type == StateMachineSideEffect::StartFunction) {
 				if (debug_assign_frame_ids)
-					printf("\tl%d: %p == %p:%p\n",
+					printf("\tl%d: l%d == l%d:%p\n",
 					       stateLabels[s],
-					       &stacks[smse->target],
-					       entryState,
+					       stackLabels[&stacks[smse->target]],
+					       stackLabels[entryState],
 					       &((StateMachineSideEffectStartFunction *)se)->frame);
 				constraints.insert(StackConstraint(
 							   entryState,
@@ -1431,21 +1434,21 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 							   &stacks[smse->target]));
 			} else if (se && se->type == StateMachineSideEffect::EndFunction) {
 				if (debug_assign_frame_ids)
-					printf("\tl%d: %p:%p == %p\n",
+					printf("\tl%d: l%d:%p == l%d\n",
 					       stateLabels[s],
-					       entryState,
+					       stackLabels[entryState],
 					       &((StateMachineSideEffectStartFunction *)se)->frame,
-					       &stacks[smse->target]);
+					       stackLabels[&stacks[smse->target]]);
 				constraints.insert(StackConstraint(
 							   &stacks[smse->target],
 							   &((StateMachineSideEffectEndFunction *)se)->frame,
 							   entryState));
 			} else {
 				if (debug_assign_frame_ids)
-					printf("\tl%d: %p == %p\n",
+					printf("\tl%d: l%d == l%d\n",
 					       stateLabels[s],
-					       entryState,
-					       &stacks[smse->target]);
+					       stackLabels[entryState],
+					       stackLabels[&stacks[smse->target]]);
 				eq_constraints.insert(
 					StackEqConstraint
 					(entryState, &stacks[smse->target]));
@@ -1496,7 +1499,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	if (debug_assign_frame_ids) {
 		printf("Stack canonicalisation map:\n");
 		for (auto it = canonicalisationMap.begin(); it != canonicalisationMap.end(); it++)
-			printf("\t%p -> %p\n", it->first, it->second);
+			printf("\tl%d -> l%d\n", stackLabels[it->first], stackLabels[it->second]);
 	}
 
 	std::set<callStackT *> canonStacks;
@@ -1517,7 +1520,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	if (debug_assign_frame_ids) {
 		printf("Canonicalised extension constraints:\n");
 		for (auto it = constraints.begin(); it != constraints.end(); it++)
-			printf("\t%s\n", it->name());
+			printf("\t%s\n", it->name(stackLabels));
 	}
 
 	/* Step four: find the sizes of all of the call stacks.  Basic
@@ -1542,16 +1545,20 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 						it_after->second = 1;
 					}
 					if (debug_assign_frame_ids)
-						printf("Initialise %p stack size to %d from %p (after)\n",
-						       it->beforeExtension, i, it->afterExtension);
+						printf("Initialise l%d stack size to %d from l%d (after)\n",
+						       stackLabels[it->beforeExtension],
+						       i,
+						       stackLabels[it->afterExtension]);
 					stackSizes[it->beforeExtension] = i;
 					progress = true;
 				}
 			} else {
 				if (it_after == stackSizes.end()) {
 					if (debug_assign_frame_ids)
-						printf("Initialise %p stack size to %d from %p (before)\n",
-						       it->afterExtension, it_before->second + 1, it->beforeExtension);
+						printf("Initialise l%d stack size to %d from l%d (before)\n",
+						       stackLabels[it->afterExtension],
+						       it_before->second + 1,
+						       stackLabels[it->beforeExtension]);
 					stackSizes[it->afterExtension] = it_before->second + 1;
 					progress = true;
 				} else {
@@ -1559,17 +1566,17 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 						progress = true;
 						if (it_after->second < it_before->second + 1) {
 							if (debug_assign_frame_ids)
-								printf("Update %p stack size to %d from %p (before)\n",
-								       it->afterExtension,
+								printf("Update l%d stack size to %d from l%d (before)\n",
+								       stackLabels[it->afterExtension],
 								       it_before->second + 1,
-								       it->beforeExtension);
+								       stackLabels[it->beforeExtension]);
 							it_after->second = it_before->second + 1;
 						} else {
 							if (debug_assign_frame_ids)
-								printf("Update %p stack size to %d from %p (after)\n",
-								       it->beforeExtension,
+								printf("Update l%d stack size to %d from l%d (after)\n",
+								       stackLabels[it->beforeExtension],
 								       it_after->second - 1,
-								       it->afterExtension);
+								       stackLabels[it->afterExtension]);
 							it_before->second = it_after->second - 1;
 						}
 					}
@@ -1585,7 +1592,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	if (debug_assign_frame_ids) {
 		printf("Stack sizes:\n");
 		for (auto it = stackSizes.begin(); it != stackSizes.end(); it++)
-			printf("\t%p -> %d\n", it->first, it->second);
+			printf("\tl%d -> %d\n", stackLabels[it->first], it->second);
 	}
 
 	/* Step five: convert the constraints on stacks into
@@ -1596,7 +1603,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 			printf("Frame constraint: %p == %p for %s\n",
 			       &it->afterExtension->back(),
 			       it->frame,
-			       it->name());
+			       it->name(stackLabels));
 		frame_eq_constraints.insert(
 			std::pair<FrameId *, FrameId *>
 			(&it->afterExtension->back(), it->frame));
@@ -1607,7 +1614,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 				printf("Frame constraint2: %p == %p for %s\n",
 				       &(*it->afterExtension)[x],
 				       &(*it->beforeExtension)[x],
-				       it->name());
+				       it->name(stackLabels));
 			frame_eq_constraints.insert(
 				std::pair<FrameId *, FrameId *>
 				(&(*it->afterExtension)[x],
