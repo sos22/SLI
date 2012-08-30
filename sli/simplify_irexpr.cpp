@@ -2857,6 +2857,32 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	if (a == b)
 		return true;
 	assert(a->type() == b->type());
+	/* If one expression is a constant and the other one isn't
+	   then we're basically stuffed here and there's no point in
+	   going through the rest of the machinery. */
+	if ((a->tag == Iex_Const) != (b->tag == Iex_Const))
+		return false;
+	if (a->tag == Iex_Const) {
+		/* Special fast path for comparing two constants. */
+		IRExprConst *ac = (IRExprConst *)a;
+		IRExprConst *bc = (IRExprConst *)b;
+		assert(ac->con->tag == bc->con->tag);
+		switch (ac->con->tag) {
+#define do_type(n)							\
+			case Ico_ ## n :				\
+				return ac->con->Ico. n == bc->con->Ico. n
+			do_type(U1);
+			do_type(U8);
+			do_type(U16);
+			do_type(U32);
+			do_type(U64);
+			do_type(F64);
+			do_type(F64i);
+			do_type(V128);
+#undef do_type
+		}
+		abort();
+	}
 	int idx = definitelyEqualCache.hash(a, b);
 	bool res;
 	if (definitelyEqualCache.query(a, b, idx, &res))
