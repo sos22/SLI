@@ -157,6 +157,12 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 			case Iop_16Uto32:
 			case Iop_16Uto64:
 			case Iop_32Uto64:
+			case Iop_8Sto16:
+			case Iop_8Sto32:
+			case Iop_8Sto64:
+			case Iop_16Sto32:
+			case Iop_16Sto64:
+			case Iop_32Sto64:
 				return ieu;
 			case Iop_BadPtr:
 			case Iop_Not1:
@@ -168,6 +174,12 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 			case Iop_Neg16:
 			case Iop_Neg32:
 			case Iop_Neg64:
+			case Iop_64to8:
+			case Iop_64to16:
+			case Iop_64to32:
+			case Iop_32to8:
+			case Iop_32to16:
+			case Iop_16to8:
 				return UNDEFINED_EXPR;
 			default:
 				printIRExpr(a);
