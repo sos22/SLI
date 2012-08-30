@@ -54,11 +54,11 @@ public:
 	}
 
 	static int hash(a_type *a, b_type *b) {
-		unsigned long acc = (unsigned long)a;
-		while (acc > NR_ENTRIES)
+		unsigned long acc = (unsigned long)a / 32;
+		while (acc >= NR_ENTRIES)
 			acc = (acc / NR_ENTRIES) + (acc % NR_ENTRIES);
-		acc += (unsigned long)b;
-		while (acc > NR_ENTRIES)
+		acc += (unsigned long)b / 32;
+		while (acc >= NR_ENTRIES)
 			acc = (acc / NR_ENTRIES) + (acc % NR_ENTRIES);
 		return acc;
 	}
