@@ -732,6 +732,8 @@ truncateStateMachine(StateMachine *sm, StateMachineSideEffectMemoryAccess *trunc
 		if ((*it)->getSideEffect() == truncateAt)
 			rewriteRules[*it] = smb;
 	}
+	rewriteRules[StateMachineCrash::get()] = StateMachineCrash::get();
+	rewriteRules[StateMachineNoCrash::get()] = StateMachineNoCrash::get();
 	StateMachineTransformer::rewriteMachine(sm, rewriteRules, false);
 	assert(rewriteRules.count(sm->root));
 	assert(rewriteRules[sm->root] != sm->root);
