@@ -224,7 +224,7 @@ compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, con
 	}
 	for (auto it = ctxts.begin(); it != ctxts.end(); it++) {
 		ThreadCfgLabel l(it->first);
-		CFGNode *n = ced.crashCfg.findInstr(l);
+		auto n = ced.crashCfg.findInstr(l);
 		const VexRip &v(n->rip);
 		fprintf(f, "static const struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
@@ -238,7 +238,7 @@ compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, con
 	std::map<unsigned long, std::set<ThreadCfgLabel> > entryPoints;
 	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++) {
 		ThreadCfgLabel l(*it);
-		CFGNode *n = ced.crashCfg.findInstr(l);
+		auto n = ced.crashCfg.findInstr(l);
 		VexRip v(n->rip);
 		entryPoints[v.unwrap_vexrip()].insert(l);
 	}
@@ -445,7 +445,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			pending.pop();
 			if (!relabeller.label(l))
 				continue;
-			CFGNode *n = ced.crashCfg.findInstr(l);
+			auto n = ced.crashCfg.findInstr(l);
 			for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
 				if (it->instr)
 					pending.push(ThreadCfgLabel(l.thread, it->instr->label));
@@ -462,7 +462,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		ThreadCfgLabel oldLabel(it->first);
 		int newLabel(it->second);
 
-		CFGNode *instr = ced.crashCfg.findInstr(oldLabel);
+		auto instr = ced.crashCfg.findInstr(oldLabel);
 		fprintf(f, "static const unsigned char instr_%d_content[] = {", newLabel);
 		for (unsigned x = 0; x < instr->len; x++) {
 			if (x != 0)

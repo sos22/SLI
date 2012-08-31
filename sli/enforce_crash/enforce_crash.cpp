@@ -274,6 +274,7 @@ buildCED(DNF_Conjunction &c,
 	 crashEnforcementData *out,
 	 ThreadAbstracter &abs,
 	 int &next_hb_id,
+	 AddressSpace *as,
 	 simulationSlotT &next_slot)
 {
 	ThreadCfgDecode cfg;
@@ -285,7 +286,8 @@ buildCED(DNF_Conjunction &c,
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	*out = crashEnforcementData(neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, true);
+	InstructionDecoder decode(true, as);
+	*out = crashEnforcementData(neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, decode, true);
 	optimiseHBContent(*out, cfg);
 	return true;
 }
@@ -512,7 +514,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	crashEnforcementData accumulator(true);
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp(true);
-		if (buildCED(d[x], rootsCfg, summary, &tmp, abs, next_hb_id, next_slot)) {
+		if (buildCED(d[x], rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace, next_slot)) {
 			printf("Intermediate CED:\n");
 			tmp.prettyPrint(stdout, true);
 			accumulator |= tmp;
@@ -538,7 +540,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	     it != ced.exprStashPoints.end();
 	     it++) {
 		ThreadCfgLabel label = it->first;
-		CFGNode *node = ced.crashCfg.findInstr(label);
+		auto node = ced.crashCfg.findInstr(label);
 
 		while (1) {
 			/* Must have an unambiguous successor */
@@ -607,7 +609,7 @@ optimiseCfg(crashEnforcementData &ced)
 	for (auto it = ced.roots.begin();
 	     it != ced.roots.end();
 	     it++) {
-		CFGNode *n = ced.crashCfg.findInstr(*it);
+		auto n = ced.crashCfg.findInstr(*it);
 		while (1) {
 			/* We can advance a root if it has a single
 			   successor, and it has no stash points, and
@@ -629,6 +631,12 @@ optimiseCfg(crashEnforcementData &ced)
 		newRoots.insert(ThreadCfgLabel(it->thread, n->label));
 	}
 	ced.roots = newRoots;
+}
+
+Instruction<VexRip> *
+InstructionDecoder::operator()(const CFGNode *src)
+{
+	return Instruction<VexRip>::decode(src->label, this->as, src->rip, NULL, this->expandJcc);
 }
 
 int

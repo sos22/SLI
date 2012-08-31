@@ -14,7 +14,7 @@ class named_string : public std::string, public Named {
 	}
 };
 
-typedef Instruction<named_string> cfg_node;
+typedef _CFGNode<named_string> cfg_node;
 
 static bool
 parseCfgFlavour(_getStoreCFGs::cfgflavour_store_t *out, const char *buf, const char **suffix)
@@ -62,8 +62,7 @@ parseNodeDecl(std::map<named_string, cfg_node *> &nodes,
 		return false;
 	if (nodes.count(label))
 		return false;
-	cfg_node *n = new cfg_node(-1, CfgLabel::uninitialised());
-	n->rip = label;
+	cfg_node *n = new cfg_node(label, CfgLabel::uninitialised());
 	nodes[label] = n;
 	cfgFlavours[n] = flavour;
 	return true;

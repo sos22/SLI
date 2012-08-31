@@ -674,9 +674,8 @@ parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 		}
 		if (!parseThisChar('\n', str, &str))
 			return false;
-		CFGNode *work = new CFGNode(-1, label);
-		work->rip = rip;
-		work->successors.resize(successors.size());
+		CFGNode *work = new CFGNode(rip, label);
+		work->successors.resize(successors.size(), CFGNode::successor_t::call(NULL));
 		for (unsigned x = 0; x < successors.size(); x++) {
 			work->successors[x].type = successors[x].type;
 			work->successors[x].calledFunction = successors[x].l;

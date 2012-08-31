@@ -327,7 +327,7 @@ unrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 				   broken by maxPathLength. */
 				CFGNode *new_node;
 				/* Create new node */
-				new_node = cycle_edge_start->dupe(allocLabel());
+				new_node = new CFGNode(cycle_edge_start, allocLabel());
 			
 				/* Maintain only edge to cycle_edge_end */
 				new_node->successors.clear();

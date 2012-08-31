@@ -3,13 +3,13 @@
 namespace cfgnode_tmpl {
 
 template <typename t> static void
-resolveReferences(const std::map<t, Instruction<t> *> &m, Instruction<t> *what)
+resolveReferences(const std::map<t, _CFGNode<t> *> &m, _CFGNode<t> *what)
 {
 	assert(what);
 
 	struct {
 		const std::map<t, CFGNode *> *m;
-		Instruction<t> *operator()(const t &vr) {
+		_CFGNode<t> *operator()(const t &vr) {
 			if (!vr.isValid())
 				return NULL;
 			auto it = m->find(vr);
@@ -25,7 +25,7 @@ resolveReferences(const std::map<t, Instruction<t> *> &m, Instruction<t> *what)
 }
 
 template <typename t> static void
-resolveReferences(std::map<t, Instruction<t> *> &m)
+resolveReferences(std::map<t, _CFGNode<t> *> &m)
 {
 	if (TIMEOUT)
 		return;
@@ -34,12 +34,12 @@ resolveReferences(std::map<t, Instruction<t> *> &m)
 }
 
 template <typename t> static void
-enumerateCFG(Instruction<t> *start, HashedSet<HashedPtr<Instruction<t> > > &out)
+enumerateCFG(_CFGNode<t> *start, HashedSet<HashedPtr<_CFGNode<t> > > &out)
 {
-	std::vector<Instruction<t> *> pending;
+	std::vector<_CFGNode<t> *> pending;
 	pending.push_back(start);
 	while (!pending.empty()) {
-		Instruction<t> *n = pending.back();
+		_CFGNode<t> *n = pending.back();
 		pending.pop_back();
 		if (!out._insert(n))
 			continue;
@@ -50,10 +50,10 @@ enumerateCFG(Instruction<t> *start, HashedSet<HashedPtr<Instruction<t> > > &out)
 }
 
 template <typename t> static void
-printCFG(const Instruction<t> *cfg, FILE *f)
+printCFG(const _CFGNode<t> *cfg, FILE *f)
 {
-	std::vector<const Instruction<t> *> pending;
-	std::set<const Instruction<t> *> done;
+	std::vector<const _CFGNode<t> *> pending;
+	std::set<const _CFGNode<t> *> done;
 
 	pending.push_back(cfg);
 	while (!pending.empty()) {
@@ -75,14 +75,13 @@ printCFG(const Instruction<t> *cfg, FILE *f)
 /* End of namespace cfgnode_tmpl */
 }
 
-template <typename t> Instruction<t> *
+template <typename t> _CFGNode<t> *
 CfgNodeForRip(const CfgLabel &label, Oracle *oracle, const VexRip &vr)
 {
 	IRSB *irsb = oracle->getIRSBForRip(vr);
 	if (!irsb)
 		return NULL;
-	Instruction<t> *work = new Instruction<t>(-1, label);
-	work->rip = vr;
+	_CFGNode<t> *work = new _CFGNode<t>(vr, label);
 	int x;
 	for (x = 1; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 		if (irsb->stmts[x]->tag == Ist_Exit)
@@ -129,25 +128,25 @@ CfgNodeForRip(const CfgLabel &label, Oracle *oracle, const VexRip &vr)
 }
 
 template <typename t> void
-resolveReferences(const std::map<t, Instruction<t> *> &m, Instruction<t> *what)
+resolveReferences(const std::map<t, _CFGNode<t> *> &m, _CFGNode<t> *what)
 {
 	cfgnode_tmpl::resolveReferences(m, what);
 }
 
 template <typename t> void
-resolveReferences(std::map<t, Instruction<t> *> &m)
+resolveReferences(std::map<t, _CFGNode<t> *> &m)
 {
 	cfgnode_tmpl::resolveReferences(m);
 }
 
 template <typename t> void
-printCFG(const Instruction<t> *cfg, FILE *f)
+printCFG(const _CFGNode<t> *cfg, FILE *f)
 {
 	cfgnode_tmpl::printCFG(cfg, f);
 }
 
 template <typename t> void
-enumerateCFG(Instruction<t> *start, HashedSet<HashedPtr<Instruction<t> > > &out)
+enumerateCFG(_CFGNode<t> *start, HashedSet<HashedPtr<_CFGNode<t> > > &out)
 {
 	return cfgnode_tmpl::enumerateCFG(start, out);
 }

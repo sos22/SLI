@@ -49,7 +49,7 @@ CrashCfg::prettyPrint(FILE *f, bool verbose)
 {
 	fprintf(f, "\tCFG:\n");
 	for (auto it = content.begin(); it != content.end(); it++) {
-		Instruction<VexRip> *instr = it->second;
+		auto *instr = it->second;
 		fprintf(f, "\t\t%s: %s {", it->first.name(), instr->rip.name());
 		bool done_one = false;
 		for (auto it2 = instr->successors.begin();

@@ -332,21 +332,21 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const HashedSet<Hashed
 template <typename t>
 class predecessorMap {
 public:
-	std::map<Instruction<t> *, HashedSet<HashedPtr<Instruction<t> > > > content;
-	predecessorMap(const HashedSet<HashedPtr<Instruction<t> > > &roots);
-	void erase_edge(Instruction<t> *src, Instruction<t> *dest) {
+	std::map<_CFGNode<t> *, HashedSet<HashedPtr<_CFGNode<t> > > > content;
+	predecessorMap(const HashedSet<HashedPtr<_CFGNode<t> > > &roots);
+	void erase_edge(_CFGNode<t> *src, _CFGNode<t> *dest) {
 		assert(content.count(dest));
 		assert(content.count(src));
 		assert(content[dest].contains(src));
 		content[dest].erase(src);
 	}
-	void insert_edge(Instruction<t> *src, Instruction<t> *dest) {
+	void insert_edge(_CFGNode<t> *src, _CFGNode<t> *dest) {
 		assert(content.count(dest));
 		assert(content.count(src));
 		assert(!content[dest].contains(src));
 		content[dest].insert(src);
 	}
-	void new_node(Instruction<t> *n) {
+	void new_node(_CFGNode<t> *n) {
 		assert(!content.count(n));
 		content[n].clear(); /* kind of a no-op, but makes sure
 				       that the slot in content is
@@ -358,22 +358,22 @@ public:
 			}
 		}
 	}
-	void findPredecessors(Instruction<t> *n, HashedSet<HashedPtr<Instruction<t> > > &out) {
+	void findPredecessors(_CFGNode<t> *n, HashedSet<HashedPtr<_CFGNode<t> > > &out) {
 		assert(content.count(n));
 		out = content[n];
 	}
 };
 
 template <typename t>
-predecessorMap<t>::predecessorMap(const HashedSet<HashedPtr<Instruction<t> > > &roots)
+predecessorMap<t>::predecessorMap(const HashedSet<HashedPtr<_CFGNode<t> > > &roots)
 {
-	std::queue<Instruction<t> *> pending;
+	std::queue<_CFGNode<t> *> pending;
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		content[*it].clear();
 		pending.push(*it);
 	}
 	while (!pending.empty()) {
-		Instruction<t> *n = pending.front();
+		_CFGNode<t> *n = pending.front();
 		pending.pop();
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
 			if (it->instr && content[it->instr]._insert(n))
@@ -400,7 +400,7 @@ predecessorMap<t>::predecessorMap(const HashedSet<HashedPtr<Instruction<t> > > &
    right type.
 */
 template <typename t>
-class nodeLabellingComponent : public std::map<Instruction<t> *, int>, public Named {
+class nodeLabellingComponent : public std::map<_CFGNode<t> *, int>, public Named {
 	char *mkName() const {
 		std::vector<char *> v;
 		for (auto it = this->begin(); it != this->end(); it++) {
@@ -435,16 +435,16 @@ public:
 	bool dead(int maxDepth) const;
 };
 template <typename t>
-class nodeLabellingMap : public std::map<Instruction<t> *, nodeLabelling<t> > {
+class nodeLabellingMap : public std::map<_CFGNode<t> *, nodeLabelling<t> > {
 	predecessorMap<t> &predecessors;
-	const std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours;
+	const std::map<const _CFGNode<t> *, cfgflavour_store_t> &cfgFlavours;
 	int maxDepth;
 public:
-	nodeLabellingMap(HashedSet<HashedPtr<Instruction<t> > > &roots,
+	nodeLabellingMap(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
 			 predecessorMap<t> &predecessors,
-			 const std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours,
+			 const std::map<const _CFGNode<t> *, cfgflavour_store_t> &cfgFlavours,
 			 int maxPathLength);
-	void recalculate_min_from(Instruction<t> *n);
+	void recalculate_min_from(_CFGNode<t> *n);
 	void prettyPrint(FILE *f) const;
 };
 template <typename t> void
@@ -459,7 +459,7 @@ nodeLabellingComponent<t>::merge(nodeLabellingComponent<t> &other)
 {
 	bool did_something = false;
 	for (auto it = other.begin(); it != other.end(); it++) {
-		auto it_did_insert = insert(std::pair<Instruction<t> *, unsigned>(it->first, it->second));
+		auto it_did_insert = insert(std::pair<_CFGNode<t> *, unsigned>(it->first, it->second));
 		auto it2 = it_did_insert.first;
 		bool did_insert = it_did_insert.second;
 
@@ -510,22 +510,22 @@ nodeLabelling<t>::dead(int maxDepth) const
 }
 
 template <typename t>
-nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<Instruction<t> > > &roots,
+nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
 				      predecessorMap<t> &_predecessors,
-				      const std::map<const Instruction<t> *, cfgflavour_store_t> &_cfgFlavours,
+				      const std::map<const _CFGNode<t> *, cfgflavour_store_t> &_cfgFlavours,
 				      int maxPathLength)
 	: predecessors(_predecessors), cfgFlavours(_cfgFlavours),
 	  maxDepth(maxPathLength)
 {
 	/* Initial pending set is all of the true target instructions,
 	 * for both min_to and min_from calculations. */
-	std::queue<Instruction<t> *> initial_pending;
-	HashedSet<HashedPtr<Instruction<t> > > visited;
+	std::queue<_CFGNode<t> *> initial_pending;
+	HashedSet<HashedPtr<_CFGNode<t> > > visited;
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
-		std::queue<Instruction<t> *> p2;
+		std::queue<_CFGNode<t> *> p2;
 		p2.push(*it);
 		while (!p2.empty()) {
-			Instruction<t> *n = p2.front();
+			_CFGNode<t> *n = p2.front();
 			p2.pop();
 			if (!visited._insert(n))
 				continue;
@@ -542,11 +542,11 @@ nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<Instruction<t> > > &ro
 		}
 	}
 
-	std::queue<Instruction<t> *> pending(initial_pending);
+	std::queue<_CFGNode<t> *> pending(initial_pending);
 
 	/* First we calculate min_to */
 	while (!pending.empty()) {
-		Instruction<t> *n = pending.front();
+		_CFGNode<t> *n = pending.front();
 		pending.pop();
 
 		auto it_fl = cfgFlavours.find(n);
@@ -570,7 +570,7 @@ nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<Instruction<t> > > &ro
 	 * successors. */
 	pending = initial_pending;
 	while (!pending.empty()) {
-		Instruction<t> *n = pending.front();
+		_CFGNode<t> *n = pending.front();
 		pending.pop();
 
 		auto it_fl = cfgFlavours.find(n);
@@ -579,7 +579,7 @@ nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<Instruction<t> > > &ro
 			(*this)[n].min_from[n] = 0;
 		assert(it_fl->second != cfgs_flavour_dupe);
 
-		HashedSet<HashedPtr<Instruction<t> > > pred;
+		HashedSet<HashedPtr<_CFGNode<t> > > pred;
 		predecessors.findPredecessors(n, pred);
 		if (pred.empty())
 			continue;
@@ -596,12 +596,12 @@ nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<Instruction<t> > > &ro
    That might change the minimum distance from a root to @n.
    Recalculate min_from as appropriate. */
 template <typename t> void
-nodeLabellingMap<t>::recalculate_min_from(Instruction<t> *node)
+nodeLabellingMap<t>::recalculate_min_from(_CFGNode<t> *node)
 {
-	std::queue<Instruction<t> *> pending;
+	std::queue<_CFGNode<t> *> pending;
 	pending.push(node);
 	while (!pending.empty()) {
-		Instruction<t> *p = pending.front();
+		_CFGNode<t> *p = pending.front();
 		pending.pop();
 
 		/* This is a bit fiddly.  Because the label on the
@@ -611,7 +611,7 @@ nodeLabellingMap<t>::recalculate_min_from(Instruction<t> *node)
 		   label on the node starting from just its
 		   predecessor nodes, without reference to the node's
 		   own label. */
-		HashedSet<HashedPtr<Instruction<t> > > pred;
+		HashedSet<HashedPtr<_CFGNode<t> > > pred;
 		nodeLabellingComponent<t> newEntryMap;
 		predecessors.findPredecessors(p, pred);
 		for (auto it = pred.begin(); !it.finished(); it.advance())
@@ -637,11 +637,11 @@ nodeLabellingMap<t>::recalculate_min_from(Instruction<t> *node)
 /* Look through @root until we find a cycle.  Report the edge which
    completes the cycle in *@edge_start and *@edge_end. */
 template <typename t> static bool
-selectEdgeForCycleBreak(Instruction<t> *root,
-			Instruction<t> **edge_start,
-			Instruction<t> **edge_end,
-			HashedSet<HashedPtr<Instruction<t> > > &clean,
-			HashedSet<HashedPtr<Instruction<t> > > &path)
+selectEdgeForCycleBreak(_CFGNode<t> *root,
+			_CFGNode<t> **edge_start,
+			_CFGNode<t> **edge_end,
+			HashedSet<HashedPtr<_CFGNode<t> > > &clean,
+			HashedSet<HashedPtr<_CFGNode<t> > > &path)
 {
 	if (root->successors.empty())
 		return false;
@@ -666,11 +666,11 @@ selectEdgeForCycleBreak(Instruction<t> *root,
 	return false;
 }
 template <typename t> static bool
-selectEdgeForCycleBreak(Instruction<t> *root, Instruction<t> **edge_start, Instruction<t> **edge_end)
+selectEdgeForCycleBreak(_CFGNode<t> *root, _CFGNode<t> **edge_start, _CFGNode<t> **edge_end)
 {
-	HashedSet<HashedPtr<Instruction<t> > > clean; /* Anything in here definitely
+	HashedSet<HashedPtr<_CFGNode<t> > > clean; /* Anything in here definitely
 				      cannot reach a cycle. */
-	HashedSet<HashedPtr<Instruction<t> > > path; /* All the nodes between @root and
+	HashedSet<HashedPtr<_CFGNode<t> > > path; /* All the nodes between @root and
 				     the node we're currently looking
 				     at. */
 	return selectEdgeForCycleBreak(root, edge_start, edge_end, clean, path);
@@ -684,8 +684,8 @@ selectEdgeForCycleBreak(Instruction<t> *root, Instruction<t> **edge_start, Instr
    actually terminate. */
 template <typename t> static void
 performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
-			   HashedSet<HashedPtr<Instruction<t> > > &roots,
-			   std::map<const Instruction<t> *, cfgflavour_store_t> &cfgFlavours,
+			   HashedSet<HashedPtr<_CFGNode<t> > > &roots,
+			   std::map<const _CFGNode<t> *, cfgflavour_store_t> &cfgFlavours,
 			   unsigned maxPathLength)
 {
 	predecessorMap<t> pred(roots);
@@ -693,20 +693,20 @@ performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		while (!TIMEOUT) {
-			Instruction<t> *cycle_edge_start, *cycle_edge_end;
+			_CFGNode<t> *cycle_edge_start, *cycle_edge_end;
 			if (!selectEdgeForCycleBreak(&**it, &cycle_edge_start, &cycle_edge_end)) {
 				/* No cycles left in the graph rooted
 				 * at *it.  Yay. */
 				break;
 			}
 			nodeLabelling<t> label(nlm[cycle_edge_start]);
-			Instruction<t> *new_node;
+			_CFGNode<t> *new_node;
 			label.min_from.successor(maxPathLength);
 			label.min_to = nlm[cycle_edge_end].min_to;
 			if (label.dead(maxPathLength)) {
 				new_node = NULL;
 			} else {
-				new_node = cycle_edge_end->dupe(allocLabel());
+				new_node = new _CFGNode<t>(cycle_edge_end, allocLabel());
 				auto it_fl = cfgFlavours.find(cycle_edge_end);
 				assert(it_fl != cfgFlavours.end());
 				if (it_fl->second == cfgs_flavour_true || it_fl->second == cfgs_flavour_dupe)
@@ -879,18 +879,18 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 }
 
 template <typename t> static void
-trimUninterestingCFGNodes(HashedSet<HashedPtr<Instruction<t> > > &roots,
-			  const std::map<const Instruction<t> *, cfgflavour_store_t> &flavours)
+trimUninterestingCFGNodes(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
+			  const std::map<const _CFGNode<t> *, cfgflavour_store_t> &flavours)
 {
-	HashedSet<HashedPtr<Instruction<t> > > interesting(roots);
-	HashedSet<HashedPtr<Instruction<t> > > allCFGNodes;
+	HashedSet<HashedPtr<_CFGNode<t> > > interesting(roots);
+	HashedSet<HashedPtr<_CFGNode<t> > > allCFGNodes;
 	for (auto it = roots.begin(); !TIMEOUT && !it.finished(); it.advance())
 		cfgnode_tmpl::enumerateCFG(&**it, allCFGNodes);
 	bool progress = true;
 	while (!TIMEOUT && progress) {
 		progress = false;
 		for (auto it = allCFGNodes.begin(); !it.finished(); it.advance()) {
-			Instruction<t> *n = *it;
+			_CFGNode<t> *n = *it;
 			if (interesting.contains(n))
 				continue;
 			bool isInteresting = false;
@@ -918,7 +918,7 @@ trimUninterestingCFGNodes(HashedSet<HashedPtr<Instruction<t> > > &roots,
 	}
 
 	for (auto it = allCFGNodes.begin(); !TIMEOUT && !it.finished(); it.advance()) {
-		Instruction<t> *n = *it;
+		_CFGNode<t> *n = *it;
 		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
 			if (it2->instr && !interesting.contains(it2->instr))
 				it2->instr = NULL;

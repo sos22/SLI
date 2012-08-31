@@ -443,9 +443,7 @@ internCFG(const CFGNode *inp, internStateMachineTable &t)
 			(const_cast<CFGNode::successor_t *>(&*it))->instr = const_cast<CFGNode *>(internCFG(it->instr, t));
 	for (auto it2 = t.cfgNodesS.begin(); it2 != t.cfgNodesS.end(); it2++) {
 		const CFGNode *other = *it2;
-		if (other->label == inp->label &&
-		    other->rip == inp->rip &&
-		    other->successors == inp->successors) {
+		if (*other == *inp) {
 			it->second = other;
 			return other;
 		}

@@ -958,18 +958,28 @@ public:
 	}
 };
 
+class InstructionDecoder {
+	bool expandJcc;
+	AddressSpace *as;
+public:
+	InstructionDecoder(bool _expandJcc, AddressSpace *_as)
+		: expandJcc(_expandJcc), as(_as)
+	{}
+	Instruction<VexRip> *operator()(const CFGNode *);
+};
+
 class CrashCfg {
-	std::map<ThreadCfgLabel, CFGNode *> content;
+	std::map<ThreadCfgLabel, Instruction<VexRip> *> content;
 	bool expandJcc;
 public:
-	CFGNode *findInstr(const ThreadCfgLabel &label) {
+	Instruction<VexRip> *findInstr(const ThreadCfgLabel &label) {
 		auto it = content.find(label);
 		if (it == content.end())
 			return NULL;
 		else
 			return it->second;
 	}
-	void addInstr(const AbstractThread &thread, CFGNode *node) {
+	void addInstr(const AbstractThread &thread, Instruction<VexRip> *node) {
 		assert(!content.count(ThreadCfgLabel(thread, node->label)));
 		content[ThreadCfgLabel(thread, node->label)] = node;
 	}
@@ -978,24 +988,25 @@ public:
 			alloc.reserve(it->first.label);
 	}
 	CrashCfg(bool _expandJcc) : expandJcc(_expandJcc) {};
-	CrashCfg(CrashSummary *summary, ThreadAbstracter &abs, bool _expandJcc)
+	CrashCfg(CrashSummary *summary, ThreadAbstracter &abs,
+		 InstructionDecoder &decode, bool _expandJcc)
 		: expandJcc(_expandJcc)
 	{
-		typedef std::pair<AbstractThread, CFGNode *> q_entry_t;
+		typedef std::pair<AbstractThread, Instruction<VexRip> *> q_entry_t;
 		std::queue<q_entry_t> pending;
 		for (auto it = summary->loadMachine->cfg_roots.begin();
 		     it != summary->loadMachine->cfg_roots.end();
 		     it++)
-			pending.push(q_entry_t(abs(it->first), const_cast<CFGNode *>(it->second)));
+			pending.push(q_entry_t(abs(it->first), decode(it->second)));
 		for (auto it = summary->storeMachine->cfg_roots.begin();
 		     it != summary->storeMachine->cfg_roots.end();
 		     it++)
-			pending.push(q_entry_t(abs(it->first), const_cast<CFGNode *>(it->second)));
+			pending.push(q_entry_t(abs(it->first), decode(it->second)));
 		while (!pending.empty()) {
 			q_entry_t p = pending.front();
 			pending.pop();
 			auto it_did_insert = content.insert(
-				std::pair<ThreadCfgLabel, CFGNode *>(
+				std::pair<ThreadCfgLabel, Instruction<VexRip> *>(
 					ThreadCfgLabel(p.first, p.second->label),
 					p.second));
 			auto did_insert = it_did_insert.second;
@@ -1051,6 +1062,7 @@ public:
 			     simulationSlotT &next_slot,
 			     ThreadAbstracter &abs,
 			     CrashSummary *summary,
+			     InstructionDecoder &decode,
 			     bool expandJcc)
 		: roots(_roots, abs),
 		  happensBefore(conj, abs, cfg),
@@ -1062,7 +1074,7 @@ public:
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
 		  threadExitPoints(cfg, happensBeforePoints),
-		  crashCfg(summary, abs, expandJcc)
+		  crashCfg(summary, abs, decode, expandJcc)
 	{}
 
 	bool parse(AddressSpace *as, const char *str, const char **suffix) {

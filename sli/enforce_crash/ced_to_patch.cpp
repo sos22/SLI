@@ -772,7 +772,7 @@ instrJcc(CfgLabelAllocator &allocLabel, const C2PRip &target, jcc_code branchTyp
 
 /* This must return a single instruction! */
 static Instruction<C2PRip> *
-convertSimpleInstr(CfgLabelAllocator &allocLabel, CFGNode *simple)
+convertSimpleInstr(CfgLabelAllocator &allocLabel, Instruction<VexRip> *simple)
 {
 	assert(simple->lateRelocs.size() == 0);
 	Instruction<C2PRip> *work = new Instruction<C2PRip>(simple->modrm_start, allocLabel());
@@ -814,7 +814,7 @@ isPrefix(unsigned char opcode)
 }
 
 static unsigned
-instrOpcode(CFGNode *i)
+instrOpcode(Instruction<VexRip> *i)
 {
 	unsigned j;
 	j = 0;
@@ -832,7 +832,7 @@ instrOpcode(CFGNode *i)
 }
 
 static RegisterIdx
-instrModrmReg(CFGNode *i)
+instrModrmReg(Instruction<VexRip> *i)
 {
 	unsigned j;
 	bool extend;
@@ -864,7 +864,7 @@ instrModrmReg(CFGNode *i)
 }
 
 static jcc_code
-getJccCode(CFGNode *instr)
+getJccCode(Instruction<VexRip> *instr)
 {
 	switch (instrOpcode(instr)) {
 	case 0xf84:
@@ -920,8 +920,8 @@ public:
 		else
 			return it->second;
 	}
-	CFGNode *decodeUnderlyingInstr(const VexRip &vr) {
-		return CFGNode::decode(CfgLabel::uninitialised(),
+	Instruction<VexRip> *decodeUnderlyingInstr(const VexRip &vr) {
+		return Instruction<VexRip>::decode(CfgLabel::uninitialised(),
 				       as,
 				       vr,
 				       NULL,
@@ -976,7 +976,7 @@ startThread(const C2PRip &c2p_rip,
 		newCrossMachineState.insert(CrossLabel(newThread)).second;
 	assert(did_insert);
 
-	CFGNode *cfgNode = ced.crashCfg.findInstr(newThread);
+	Instruction<VexRip> *cfgNode = ced.crashCfg.findInstr(newThread);
 	assert(cfgNode);
 
 	/* At the moment, we don't support starting in the middle of a
@@ -1123,7 +1123,7 @@ origInstrAndStash(const C2PRip &c2p_rip,
 	 * examine the actual instruction to figure out how to get it.
 	 * All of the underlying instructions should be the same, so
 	 * just arbitrarily pick the first one. */
-	CFGNode *underlyingInstr = ced.crashCfg.findInstr(c2p_rip.crossMachineState.begin()->label);
+	Instruction<VexRip> *underlyingInstr = ced.crashCfg.findInstr(c2p_rip.crossMachineState.begin()->label);
 	assert(underlyingInstr);
 	switch (instrOpcode(underlyingInstr)) {
 	case 0x8b: { /* mov modrm, reg */
@@ -1568,7 +1568,7 @@ findSuccessors(const C2PRip &c2p_rip,
 	 * to simulate up against the instruction which we're actually
 	 * going to run, basically using a whole serious of fiddly
 	 * special cases. */
-	CFGNode *underlying = ad.decodeUnderlyingInstr(c2p_rip.vexrip(ced));
+	Instruction<VexRip> *underlying = ad.decodeUnderlyingInstr(c2p_rip.vexrip(ced));
 	assert(underlying);
 
 	if (debug_find_successors) {
@@ -1621,7 +1621,7 @@ findSuccessors(const C2PRip &c2p_rip,
 		     it != c2p_rip.crossMachineState.end();
 		     it++) {
 			const ThreadCfgLabel &thisLabel(it->label);
-			CFGNode *thisNode = ced.crashCfg.findInstr(thisLabel);
+			Instruction<VexRip> *thisNode = ced.crashCfg.findInstr(thisLabel);
 			assert(thisNode);
 			for (auto it = thisNode->successors.begin();
 			     it != thisNode->successors.end();
@@ -1643,7 +1643,7 @@ findSuccessors(const C2PRip &c2p_rip,
 		     it != c2p_rip.crossMachineState.end();
 		     it++) {
 			const ThreadCfgLabel &thisLabel(it->label);
-			CFGNode *thisNode = ced.crashCfg.findInstr(thisLabel);
+			Instruction<VexRip> *thisNode = ced.crashCfg.findInstr(thisLabel);
 			assert(thisNode);
 			bool hasSuccessors = false;
 			for (auto it2 = thisNode->successors.begin();
@@ -1675,7 +1675,7 @@ findSuccessors(const C2PRip &c2p_rip,
 		for (auto it = c2p_rip.crossMachineState.begin();
 		     it != c2p_rip.crossMachineState.end();
 		     it++) {
-			CFGNode *thisNode = ced.crashCfg.findInstr(it->label);
+			Instruction<VexRip> *thisNode = ced.crashCfg.findInstr(it->label);
 			assert(thisNode);
 			for (auto it2 = thisNode->successors.begin();
 			     it2 != thisNode->successors.end();
@@ -1706,9 +1706,9 @@ findSuccessors(const C2PRip &c2p_rip,
 		for (auto it = underlying->successors.begin();
 		     it != underlying->successors.end();
 		     it++) {
-			if (it->type == CFGNode::successor_t::succ_default)
+			if (it->type == Instruction<VexRip>::successor_t::succ_default)
 				defaultRip = it->rip;
-			else if (it->type == CFGNode::successor_t::succ_branch)
+			else if (it->type == Instruction<VexRip>::successor_t::succ_branch)
 				branchRip = it->rip;
 			else
 				abort();
@@ -1738,7 +1738,7 @@ findSuccessors(const C2PRip &c2p_rip,
 			/* Assume that we're at @currentLabel in the
 			   CFG.  What might happen next? */
 			const ThreadCfgLabel &currentLabel(it->label);
-			CFGNode *thisNode = ced.crashCfg.findInstr(currentLabel);
+			Instruction<VexRip> *thisNode = ced.crashCfg.findInstr(currentLabel);
 
 			/* Where might we go if the branch is taken? */
 			std::set<ThreadCfgLabel> currentBranchTargets;
@@ -2019,7 +2019,7 @@ sideConditionFailed(const C2PRip &c2p_rip,
 {
 	Instruction<C2PRip> *start;
 	Instruction<C2PRip> *cursor;
-	CFGNode *cn = ad.decodeUnderlyingInstr(c2p_rip.vexrip(ced));
+	Instruction<VexRip> *cn = ad.decodeUnderlyingInstr(c2p_rip.vexrip(ced));
 	/* This gets ridiculously confusing if you have multiple
 	   successors.  Ignore that case. */
 	assert(cn->successors.size() == 1);
