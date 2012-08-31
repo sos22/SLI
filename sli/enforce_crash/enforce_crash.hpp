@@ -1014,7 +1014,6 @@ public:
 	void insertBefore(const CfgLabel &existingInstr, CFGNode *newInstr);
 	void insertAfter(const CfgLabel &exitsingInstr, CFGNode *newInstr);
 	void insertAfter(const CfgLabel &exitsingInstr, CFGNode *newInstr, CFGNode *newInstrEnd);
-	void rewriteBranches(CFGNode *existingInstr, CFGNode *newInstr);
 	void operator|=(const CrashCfg &o) {
 		assert(expandJcc == o.expandJcc);
 		for (auto it = o.content.begin(); it != o.content.end(); it++) {

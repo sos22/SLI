@@ -217,15 +217,3 @@ CrashCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 	*suffix = cursor;
 	return true;
 }
-
-void
-CrashCfg::rewriteBranches(CFGNode *existingInstr, CFGNode *newInstr)
-{
-	for (auto it = content.begin(); it != content.end(); it++) {
-		for (auto it2 = it->second->successors.begin();
-		     it2 != it->second->successors.end();
-		     it2++)
-			if (it2->instr == existingInstr)
-				it2->instr = newInstr;
-	}
-}
