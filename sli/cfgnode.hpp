@@ -122,21 +122,9 @@ public:
 	void addCall(const ripType &r) {
 		successors.push_back(successor_t::call(r));
 	}
-	void addCall(_CFGNode *r) {
-		successors.push_back(successor_t::call(r));
-	}
 	void addDefault(const ripType &r, LibraryFunctionType t = LibraryFunctionTemplate::none) {
 		assert(!getDefault());
 		successors.push_back(successor_t::dflt(r, t));
-	}
-	_CFGNode *addDefault(_CFGNode *r) {
-		assert(!getDefault());
-		successors.push_back(successor_t::dflt(r));
-		return r;
-	}
-	_CFGNode *addBranch(_CFGNode *r) {
-		successors.push_back(successor_t::branch(r));
-		return r;
 	}
 
 	void prettyPrint(FILE *f) const {
