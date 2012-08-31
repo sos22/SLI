@@ -365,10 +365,6 @@ public:
 
 	void getFunctions(std::vector<StaticRip> &out);
 
-	VexRip dominator(const std::set<VexRip> &instrs,
-			    AddressSpace *as,
-			    unsigned minimum_size);
-
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const StaticRip &rip);
 	LivenessSet liveOnEntryToFunction(const StaticRip &rip);
 
