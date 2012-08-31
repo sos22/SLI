@@ -12,7 +12,6 @@ class SourceSinkCFG : public CFG<ThreadRip> {
 	gc_map<unsigned long, bool, __trivial_hash_function> *sinkInstructions;
 public:
 	void add_sink(unsigned long rip) { (*sinkInstructions)[rip] = true; }
-	void destruct() { this->~SourceSinkCFG(); }
 
 	bool exploreInstruction(Instruction<ThreadRip> *i) { return !(*sinkInstructions)[i->rip.rip.unwrap_vexrip()]; }
 	bool instructionUseful(Instruction<ThreadRip> *i) { return (*sinkInstructions)[i->rip.rip.unwrap_vexrip()]; }

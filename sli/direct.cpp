@@ -257,7 +257,6 @@ public:
 	virtual CrashExpression *map(CPMapper &m) = 0;
 
 	void visit(HeapVisitor &hv) { hv(simplified); _visit(hv); }
-	void destruct() { this->~CrashExpression(); }
 	virtual unsigned complexity() const = 0;
 
 	virtual void build_relevant_address_list(Thread *thr,
@@ -2216,7 +2215,6 @@ public:
 				    GarbageCollectionToken tok);
 
 	void visit(HeapVisitor &hv) { hv(content); }
-	void destruct() { this->~CrashMachine(); }
 	NAMED_CLASS
 };
 

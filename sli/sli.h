@@ -421,7 +421,7 @@ public:
 	bool readonly;
 	static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk *mc, bool readonly);
 	void visit(HeapVisitor &hv) { hv(mc); }
-	void destruct() {
+	~PMapEntry() {
 		*pprev = next;
 		if (next)
 			next->pprev = pprev;

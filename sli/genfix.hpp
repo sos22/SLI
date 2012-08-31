@@ -278,7 +278,6 @@ public:
 		for (auto it = successors.begin(); it != successors.end(); it++)
 			hv(it->instr);
 	}
-	void destruct() { this->~Instruction(); }
 	NAMED_CLASS
 };
 
@@ -365,7 +364,6 @@ public:
 
 	void print(FILE *logfile);
 
-	virtual void destruct() { this->~CFG(); }
 	NAMED_CLASS
 
 	/* These can be overriden by derived classes to change the
@@ -467,7 +465,6 @@ public:
 		visit_container(relocs, hv);
 		visit_container(lateRelocs, hv);
 	}
-	void destruct() { this->~PatchFragment(); }
 	NAMED_CLASS
 
 	/* Can be overridden by derived classes which need to do
@@ -507,7 +504,6 @@ public:
 		: offset(_offset), size(_size) {}
 	virtual void doit(CfgLabelAllocator &, PatchFragment<ripType> *pf) = 0;
 	void visit(HeapVisitor &) {}
-	void destruct() {}
 	NAMED_CLASS
 };
 

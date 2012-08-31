@@ -21,7 +21,6 @@ public:
 	{
 	}
 	void append(LogRecord *lr);
-	void destruct() { this->~LogChunker(); }
 	void visit(HeapVisitor &hv);
 	NAMED_CLASS
 };

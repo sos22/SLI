@@ -51,9 +51,6 @@ class gc_map : public GarbageCollected<gc_map<keyt, valuet, hashfn, equalfn, vis
 			visitvalue(key, value, hv);
 			hv(next); /* Hope it tail calls correctly... */
 		}
-		void destruct() {
-			this->~hash_entry();
-		}
 		NAMED_CLASS
 	};
 
@@ -200,7 +197,6 @@ public:
 		for (unsigned x = 0; x < nr_heads; x++)
 			hv(heads[x]);
 	}
-	void destruct() {}
 	NAMED_CLASS
 };
 
