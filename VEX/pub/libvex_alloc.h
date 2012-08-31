@@ -216,8 +216,10 @@ public:
 		abort();
 	}
 	virtual void visit(HeapVisitor &hv) = 0;
-	virtual void destruct() { this->~GarbageCollected(); }
 	virtual void relocate(t *, size_t) { }
+
+	/* Because you can't call someone else's virtual destructor... */
+	void destruct() { this->~GarbageCollected(); }
 };
 template <typename t, Heap *heap> VexAllocType GarbageCollected<t,heap>::type = {-1, relocate_object<t>, visit_object<t>, destruct_object<t>, NULL, get_name<t> };
 template <typename t, Heap *_heap> Heap *const GarbageCollected<t,_heap>::heap = _heap;
