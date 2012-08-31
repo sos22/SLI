@@ -61,6 +61,7 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 		      std::map<VexRip, CFGNode *> &out,
 		      HashedSet<HashedPtr<const CFGNode> > &targetNodes,
 		      std::set<VexRip> &newStartingRips,
+		      CfgSuccMap<VexRip, VexRip> &succMap,
 		      unsigned maxPathLength1,
 		      unsigned maxPathLength2)
 {
@@ -82,7 +83,7 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 			pendingAtCurrentDepth.pop_back();
 			if (out.count(vr))
 				continue;
-			CFGNode *node = CfgNodeForRip<VexRip>(allocLabel(), oracle, vr);
+			CFGNode *node = CfgNodeForRip<VexRip>(allocLabel(), oracle, vr, succMap);
 			if (firstInstr)
 				targetNodes.insert(node);
 			firstInstr = false;
@@ -175,10 +176,12 @@ initialExploration(CfgLabelAllocator &allocLabel,
 {
 	std::set<VexRip> startingRips;
 	startingRips.insert(targetRip.toVexRip());
+	CfgSuccMap<VexRip, VexRip> succMap;
 	while (1) {
 		out.clear();
 		targetInstrs.clear();
 		allocLabel.reset();
+		succMap.clear();
 		std::set<VexRip> newStartingRips;
 		bool failed = false;
 		if (debug_exploration)
@@ -191,6 +194,7 @@ initialExploration(CfgLabelAllocator &allocLabel,
 						  out,
 						  targetInstrs,
 						  newStartingRips,
+						  succMap,
 						  maxPathLength1,
 						  maxPathLength2)) {
 				failed = true;
@@ -198,8 +202,10 @@ initialExploration(CfgLabelAllocator &allocLabel,
 				newStartingRips.insert(*it);
 			}
 		}
-		if (!failed)
+		if (!failed) {
+			resolveReferences(succMap, out);
 			return;
+		}
 		startingRips = newStartingRips;
 	}
 }
@@ -632,7 +638,6 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 		debug_dump(ripsToCFGNodes, "\t");
 	}
 
-	resolveReferences(ripsToCFGNodes);
 	trimUninterestingCFGNodes(ripsToCFGNodes, targetInstr);
 
 	HashedSet<HashedPtr<CFGNode> > nodes;

@@ -7,90 +7,74 @@
 
 class Oracle;
 
+enum CfgSuccessorType {succ_default, succ_branch, succ_call, succ_unroll};
+template <typename succ_t>
+class CfgSuccessorT {
+	CfgSuccessorT(CfgSuccessorType _type,
+		      const succ_t &_instr,
+		      LibraryFunctionType _calledFunction)
+		: type(_type), instr(_instr), calledFunction(_calledFunction)
+	{}
+public:
+	CfgSuccessorT(const succ_t &s)
+		: type((CfgSuccessorType)-1),
+		  instr(s),
+		  calledFunction(LibraryFunctionTemplate::none)
+	{}
+	template <typename ot> CfgSuccessorT(const CfgSuccessorT<ot> &o,
+					     const succ_t targ)
+		: type(o.type), instr(targ), calledFunction(o.calledFunction)
+	{}
+	CfgSuccessorType type;
+	succ_t instr;
+	LibraryFunctionType calledFunction;
+
+	bool operator==(const CfgSuccessorT<succ_t> &o) const {
+		return instr == o.instr && type == o.type &&
+			calledFunction == o.calledFunction;
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "%s:", instr ? instr->label.name() : "<null>");
+		switch (type) {
+		case succ_default:
+			fprintf(f, "default");
+		case succ_branch:
+			fprintf(f, "branch");
+		case succ_call:
+			fprintf(f, "call");
+		case succ_unroll:
+			fprintf(f, "unroll");
+		}
+		if (calledFunction != LibraryFunctionTemplate::none)
+			LibraryFunctionTemplate::pp(calledFunction, f);
+	}
+
+	static CfgSuccessorT<succ_t> call(const succ_t & _rip)
+	{
+		return CfgSuccessorT<succ_t>(succ_call, _rip, LibraryFunctionTemplate::none);
+	}
+	static CfgSuccessorT<succ_t> branch(const succ_t & _rip)
+	{
+		return CfgSuccessorT<succ_t>(succ_branch, _rip, LibraryFunctionTemplate::none);
+	}
+	static CfgSuccessorT<succ_t> dflt(const succ_t & _rip, LibraryFunctionType _calledFunction = LibraryFunctionTemplate::none)
+	{
+		return CfgSuccessorT<succ_t>(succ_default, _rip, _calledFunction);
+	}
+	static CfgSuccessorT<succ_t> unroll(const succ_t &_rip)
+	{
+		return CfgSuccessorT<succ_t>(succ_unroll, _rip, LibraryFunctionTemplate::none);
+	}
+
+	void visit(HeapVisitor &hv) {
+		hv(instr);
+	}
+};
+
 template <typename ripType>
 class _CFGNode : public GarbageCollected<_CFGNode<ripType>, &ir_heap> {
 public:
-	class successor_t {
-	public:
-		enum succ_type {succ_default, succ_branch, succ_call, succ_unroll};
-	private:
-		successor_t(succ_type _type,
-			    const ripType &_rip,
-			    _CFGNode *_instr,
-			    LibraryFunctionType _calledFunction)
-			: type(_type), rip(_rip), instr(_instr),
-			  calledFunction(_calledFunction)
-		{}
-	public:
-		succ_type type;
-		ripType rip;
-		_CFGNode<ripType> *instr;
-		LibraryFunctionType calledFunction;
-
-		bool operator==(const successor_t &o) const {
-			return instr == o.instr && type == o.type &&
-				calledFunction == o.calledFunction;
-		}
-		void prettyPrint(FILE *f) const {
-			fprintf(f, "%s:", instr ? instr->label.name() : "<null>");
-			switch (type) {
-			case succ_default:
-				fprintf(f, "default");
-			case succ_branch:
-				fprintf(f, "branch");
-			case succ_call:
-				fprintf(f, "call");
-			case succ_unroll:
-				fprintf(f, "unroll");
-			}
-			if (calledFunction != LibraryFunctionTemplate::none)
-				LibraryFunctionTemplate::pp(calledFunction, f);
-		}
-
-		static successor_t call(const ripType _rip)
-		{
-			return successor_t(succ_call, _rip,
-					   NULL, LibraryFunctionTemplate::none);
-		}
-		static successor_t call(_CFGNode *i)
-		{
-			return successor_t(succ_call, ripType(), i, LibraryFunctionTemplate::none);
-		}
-		static successor_t branch(const ripType _rip)
-		{
-			return successor_t(succ_branch, _rip, NULL,
-					   LibraryFunctionTemplate::none);
-		}
-		static successor_t branch(_CFGNode *i)
-		{
-			return successor_t(succ_branch, ripType(), i,
-					   LibraryFunctionTemplate::none);
-		}
-		static successor_t dflt(const ripType _rip, LibraryFunctionType _calledFunction = LibraryFunctionTemplate::none)
-		{
-			return successor_t(succ_default, _rip, NULL,
-					   _calledFunction);
-		}
-		static successor_t dflt(_CFGNode *i)
-		{
-			return successor_t(succ_default, ripType(), i,
-					   LibraryFunctionTemplate::none);
-		}
-		static successor_t unroll(_CFGNode *i)
-		{
-			return successor_t(succ_unroll, ripType(), i,
-					   LibraryFunctionTemplate::none);
-		}
-		static successor_t unroll(const ripType &_rip)
-		{
-			return successor_t(succ_unroll, _rip, NULL,
-					   LibraryFunctionTemplate::none);
-		}
-
-		void visit(HeapVisitor &hv) {
-			hv(instr);
-		}
-	};
+	typedef CfgSuccessorT<_CFGNode<ripType> *> successor_t;
 
 	ripType rip;
 	CfgLabel label;
@@ -109,7 +93,7 @@ public:
 	successor_t *getDefault() {
 		successor_t *res = NULL;
 		for (auto it = successors.begin(); it != successors.end(); it++) {
-			if (it->type == successor_t::succ_default) {
+			if (it->type == succ_default) {
 				assert(!res);
 				res = &*it;
 			}

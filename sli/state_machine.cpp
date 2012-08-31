@@ -318,25 +318,7 @@ printCFGRootedAt(const CFGNode *root, FILE *f,
 		else
 			fprintf(f, " -> ");
 		done_one = true;
-		fprintf(f, "%s:", it->instr->label.name());
-		switch (it->type) {
-		case CFGNode::successor_t::succ_default:
-			fprintf(f, "default");
-			break;
-		case CFGNode::successor_t::succ_branch:
-			fprintf(f, "branch");
-			break;
-		case CFGNode::successor_t::succ_call:
-			fprintf(f, "call");
-			break;
-		case CFGNode::successor_t::succ_unroll:
-			fprintf(f, "unroll");
-			break;
-		}
-		if (it->calledFunction != LibraryFunctionTemplate::none) {
-			fprintf(f, ":");
-			LibraryFunctionTemplate::pp(it->calledFunction, f);
-		}
+		it->prettyPrint(f);
 		successors.push_back(it->instr);
 	}
 	fprintf(f, "\n");
@@ -593,44 +575,41 @@ parseStateMachine(StateMachineState **out,
 	return true;
 }
 
-struct succ {
-	succ() : label(CfgLabel::uninitialised()) {}
-	CfgLabel label;
-	CFGNode::successor_t::succ_type type;
-	LibraryFunctionType l;
-	static bool parse(succ *out, const char *str, const char **suffix)
-	{
-		if (!out->label.parse(str, &str) ||
-		    !parseThisChar(':', str, &str))
-			return false;
-		if (parseThisString("default", str, &str)) {
-			out->type = CFGNode::successor_t::succ_default;
-		} else if (parseThisString("branch", str, &str)) {
-			out->type = CFGNode::successor_t::succ_branch;
-		} else if (parseThisString("call", str, &str)) {
-			out->type = CFGNode::successor_t::succ_call;
-		} else if (parseThisString("unroll", str, &str)) {
-			out->type = CFGNode::successor_t::succ_unroll;
-		} else {
-			return false;
-		}
-		if (parseThisChar(':', str, &str)) {
-			if (!LibraryFunctionTemplate::parse(&out->l, str, &str))
-				return false;
-		} else {
-			out->l = LibraryFunctionTemplate::none;
-		}
-		*suffix = str;
-		return true;
+typedef CfgSuccessorT<CfgLabel> succ;
+
+static bool
+parseSucc(succ *out, const char *str, const char **suffix)
+{
+	if (!out->instr.parse(str, &str) ||
+	    !parseThisChar(':', str, &str))
+		return false;
+	if (parseThisString("default", str, &str)) {
+		out->type = succ_default;
+	} else if (parseThisString("branch", str, &str)) {
+		out->type = succ_branch;
+	} else if (parseThisString("call", str, &str)) {
+		out->type = succ_call;
+	} else if (parseThisString("unroll", str, &str)) {
+		out->type = succ_unroll;
+	} else {
+		return false;
 	}
-};
+	if (parseThisChar(':', str, &str)) {
+		if (!LibraryFunctionTemplate::parse(&out->calledFunction, str, &str))
+			return false;
+	} else {
+		out->calledFunction = LibraryFunctionTemplate::none;
+	}
+	*suffix = str;
+	return true;
+}
 
 static bool
 parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 	 const char *str, const char **suffix)
 {
 	std::map<CfgLabel, CFGNode *> cfg_labels;
-	std::vector<std::pair<CFGNode **, CfgLabel> > relocations;
+	std::map<CFGNode *, std::vector<succ> > relocations;
 	while (1) {
 		std::set<unsigned> rootOf;
 		if (parseThisChar('-', str, &str)) {
@@ -655,43 +634,39 @@ parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 		VexRip rip;
 		CfgLabel label(CfgLabel::uninitialised());
 		if (!label.parse(str, &str) ||
+		    cfg_labels.count(label) ||
 		    !parseThisString(": ", str, &str) ||
 		    !parseVexRip(&rip, str, &str))
 			return false;
-		std::vector<succ> successors;
+		CFGNode *work = new CFGNode(rip, label);
+		std::vector<succ> &successors(relocations[work]);
 		if (parseThisString(" -> ", str, &str)) {
-			succ l;
-			if (!succ::parse(&l, str, &str))
+			succ l(CfgLabel::uninitialised());
+			if (!parseSucc(&l, str, &str))
 				return false;
 			successors.push_back(l);
 			while (1) {
 				if (!parseThisString(", ", str, &str))
 					break;
-				if (!succ::parse(&l, str, &str))
+				if (!parseSucc(&l, str, &str))
 					return false;
 				successors.push_back(l);
 			}
 		}
 		if (!parseThisChar('\n', str, &str))
 			return false;
-		CFGNode *work = new CFGNode(rip, label);
-		work->successors.resize(successors.size(), CFGNode::successor_t::call(NULL));
-		for (unsigned x = 0; x < successors.size(); x++) {
-			work->successors[x].type = successors[x].type;
-			work->successors[x].calledFunction = successors[x].l;
-			relocations.push_back(std::pair<CFGNode **, CfgLabel>(&work->successors[x].instr, successors[x].label));
-		}
-		if (cfg_labels.count(label))
-			return false;
 		cfg_labels[label] = work;
 		for (auto it = rootOf.begin(); it != rootOf.end(); it++)
 			roots.push_back(std::pair<unsigned, const CFGNode *>(*it, work));
 	}
 	for (auto it = relocations.begin(); it != relocations.end(); it++) {
-		auto it2 = cfg_labels.find(it->second);
-		if (it2 == cfg_labels.end())
-			return false;
-		*it->first = it2->second;
+		CFGNode *n = it->first;
+		n->successors.resize(it->second.size(), CFGNode::successor_t(NULL));
+		for (unsigned x = 0; x < it->second.size(); x++) {
+			assert(cfg_labels.count(it->second[x].instr));
+			n->successors[x] = CFGNode::successor_t(it->second[x],
+								cfg_labels[it->second[x].instr]);
+		}
 	}
 	*suffix = str;
 	return true;

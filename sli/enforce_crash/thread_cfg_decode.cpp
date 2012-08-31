@@ -17,16 +17,16 @@ ThreadCfgDecode::addCfg(const AbstractThread &tid, const CFGNode *node)
 		if (!it->instr)
 			continue;
 		switch (it->type) {
-		case CFGNode::successor_t::succ_default:
+		case succ_default:
 			work->addDefault(addCfg(tid, it->instr));
 			break;
-		case CFGNode::successor_t::succ_branch:
+		case succ_branch:
 			work->addBranch(addCfg(tid, it->instr));
 			break;
-		case CFGNode::successor_t::succ_call:
+		case succ_call:
 			work->addCall(addCfg(tid, it->instr));
 			break;
-		case CFGNode::successor_t::succ_unroll:
+		case succ_unroll:
 			work->successors.push_back(
 				Instruction<ThreadCfgLabel>::successor_t::unroll(
 					addCfg(tid, it->instr)));

@@ -96,6 +96,9 @@ initialExploration(const std::set<DynAnalysisRip> &roots,
 		assert(it->isValid());
 		pending.push(std::pair<unsigned, VexRip>(maxPathLength, *it));
 	}
+
+	CfgSuccMap<VexRip, VexRip> succMap;
+
 top_exploration_iter:
 	while (!pending.empty()) {
 		if (TIMEOUT)
@@ -113,14 +116,11 @@ top_exploration_iter:
 				   but at a worse depth.  Fix it
 				   up. */
 				CFGNode *n = it->second.second;
-				for (auto it2 = n->successors.begin();
-				     it2 != n->successors.end();
-				     it2++) {
-					if (it2->rip.isValid())
-						pending.push(std::pair<unsigned, VexRip>(
-								     item.first - 1,
-								     it2->rip));
-				}
+				const std::vector<CfgSuccessorT<VexRip> > &succ(succMap[n]);
+				for (auto it2 = succ.begin(); it2 != succ.end(); it2++)
+					pending.push(std::pair<unsigned, VexRip>(
+							     item.first - 1,
+							     it2->instr));
 				it->second.first = item.first;
 
 				if (item.first == maxPathLength)
@@ -135,7 +135,7 @@ top_exploration_iter:
 
 		assert(item.second.isValid());
 
-		CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, item.second);
+		CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, item.second, succMap);
 		if (!work) {
 			if (debug_initial_exploration)
 				printf("Cannot get IRSB for %s\n", item.second.name());
@@ -146,13 +146,11 @@ top_exploration_iter:
 		else
 			flavours[work] = cfgs_flavour_ordinary;
 		if (item.first != 1) {
-			for (auto it = work->successors.begin();
-			     it != work->successors.end();
-			     it++)
-				if (it->rip.isValid())
-					pending.push(std::pair<unsigned, VexRip>(
-							     item.first - 1,
-							     it->rip));
+			const std::vector<CfgSuccessorT<VexRip> > &succ(succMap[work]);
+			for (auto it2 = succ.begin(); it2 != succ.end(); it2++)
+				pending.push(std::pair<unsigned, VexRip>(
+						     item.first - 1,
+						     it2->instr));
 		}
 
 		doneSoFar[item.second] = std::pair<unsigned, CFGNode *>(item.first, work);
@@ -244,6 +242,8 @@ top_exploration_iter:
 		assert(it->second.second);
 		results.insert(std::pair<VexRip, CFGNode *>(it->first, it->second.second));
 	}
+
+	resolveReferences(succMap, results);
 }
 
 /* Sometimes we end up generating redundant roots i.e. roots for
@@ -748,6 +748,7 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 		      HashedSet<HashedPtr<CFGNode> > &roots,
 		      Oracle *oracle)
 {
+	CfgSuccMap<VexRip, VexRip> succMap;
 	if (debug_backtrack_roots)
 		printf("%s:\n", __func__);
 	HashedSet<HashedPtr<CFGNode> > targetInstrs;
@@ -762,7 +763,6 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 			targetInstrs.insert(it->second);
 		}
 	}
-	HashedSet<HashedPtr<CFGNode> > newNodes;
 	for (auto it = targetInstrs.begin(); !it.finished(); it.advance()) {
 		CFGNode *start = *it;
 		CFGNode *n = start;
@@ -807,7 +807,7 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 				}
 				break;
 			} else {
-				CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, predecessor);
+				CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, predecessor, succMap);
 				if (!work) {
 					if (debug_backtrack_roots)
 						printf("\tFailed: no decode\n");
@@ -815,7 +815,6 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 				}
 				flavours[work] = cfgs_flavour_ordinary;
 				ripsToCFGNodes[predecessor] = work;
-				newNodes.insert(work);
 				n = work;
 				if (debug_backtrack_roots) {
 					printf("\tBacktracked to new %p: ", n);
@@ -825,8 +824,8 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 		}
 		roots.insert(n);
 	}
-	for (auto it = newNodes.begin(); !it.finished(); it.advance())
-		resolveReferences(ripsToCFGNodes, &**it);
+
+	resolveReferences(succMap, ripsToCFGNodes);
 
 	for (auto it = roots.begin(); !it.finished(); ) {
 		CFGNode *n = *it;
@@ -934,7 +933,6 @@ buildCFG(CfgLabelAllocator &allocLabel, const std::set<DynAnalysisRip> &dyn_root
 	initialExploration(dyn_roots, cfgFlavours, allocLabel, maxPathLength, oracle, ripsToCFGNodes);
 	if (TIMEOUT)
 		return;
-	resolveReferences(ripsToCFGNodes);
 
 	if (debug_initial_exploration) {
 		printf("Results of initial exploration:\n");

@@ -103,7 +103,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	CFGNode *fallThrough = NULL;
 	LibraryFunctionType lib = LibraryFunctionTemplate::none;
 	for (auto it = cfgnode->successors.begin(); it != cfgnode->successors.end(); it++) {
-		if (it->type == CFGNode::successor_t::succ_default) {
+		if (it->type == succ_default) {
 			assert(!fallThrough);
 			fallThrough = it->instr;
 			lib = it->calledFunction;
