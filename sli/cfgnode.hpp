@@ -100,16 +100,6 @@ public:
 		}
 		return res;
 	}
-	void addBranch(const ripType &r) {
-		successors.push_back(successor_t::branch(r));
-	}
-	void addCall(const ripType &r) {
-		successors.push_back(successor_t::call(r));
-	}
-	void addDefault(const ripType &r, LibraryFunctionType t = LibraryFunctionTemplate::none) {
-		assert(!getDefault());
-		successors.push_back(successor_t::dflt(r, t));
-	}
 
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "instr(%s, %s, succ = {", label.name(), rip.name());
