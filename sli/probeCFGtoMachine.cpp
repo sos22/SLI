@@ -256,7 +256,8 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		printf(")\n");
 		abort();
 	}
-	return acc.content->compile(pendingRelocs, mai, cfgnode, tid);
+	SMBCompilerState state(cfgnode->rip, cfgnode->label, tid, mai);
+	return acc.content->compile(pendingRelocs, state);
 }
 
 static void

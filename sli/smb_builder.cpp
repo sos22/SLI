@@ -217,23 +217,19 @@ StateMachineState *
 SMBState::compile(std::map<const SMBState *, StateMachineState *> &m,
 		  std::vector<reloc_t> &relocs,
 		  std::vector<reloc2> &relocs2,
-		  MemoryAccessIdentifierAllocator &mai,
-		  CFGNode *where,
-		  int tid) const
+		  SMBCompilerState &state) const
 {
 	auto it_did_insert = m.insert(std::pair<const SMBState *, StateMachineState *>(this, (StateMachineState *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
-		it->second = _compile(relocs, relocs2, mai, where, tid);
+		it->second = _compile(relocs, relocs2, state);
 	return it->second;
 }
 
 StateMachineState *
 SMBState::compile(std::vector<reloc_t> &relocs,
-		  MemoryAccessIdentifierAllocator &mai,
-		  CFGNode *where,
-		  int tid) const
+		  SMBCompilerState &state) const
 {
 	std::map<const SMBState *, StateMachineState *> m;
 	std::vector<reloc2> relocs2;
@@ -244,7 +240,7 @@ SMBState::compile(std::vector<reloc_t> &relocs,
 		reloc2 r2(relocs2.back());
 		relocs2.pop_back();
 		assert(!*r2.t);
-		*r2.t = r2.target->compile(m, relocs, relocs2, mai, where, tid);
+		*r2.t = r2.target->compile(m, relocs, relocs2, state);
 		assert(*r2.t);
 	}
 	assert(res);

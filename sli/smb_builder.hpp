@@ -125,15 +125,31 @@ operator!(const threadAndRegister &tr)
 	return SMBPtr<SMBRegisterReference>(new SMBRegisterReference(tr));
 }
 
+struct SMBCompilerState {
+	const VexRip &vr;
+	const CfgLabel &label;
+	int tid;
+	MemoryAccessIdentifierAllocator &mai;
+	SMBCompilerState(const VexRip &_vr,
+			 const CfgLabel &_label,
+			 int _tid,
+			 MemoryAccessIdentifierAllocator &_mai)
+		: vr(_vr), label(_label), tid(_tid), mai(_mai)
+	{}
+	MemoryAccessIdentifier getMai()
+	{
+		return mai(label, tid);
+	}
+};
 /* ------------------------------ Statements ------------------------------------- */
 /* These correspond to side effects in the state machines we generate */
 class SMBStatement : public GarbageCollected<SMBStatement, &ir_heap> {
 public:
-	virtual StateMachineSideEffect *compile(MemoryAccessIdentifierAllocator &mai, CFGNode *where, int tid) const = 0;
+	virtual StateMachineSideEffect *compile(SMBCompilerState &state) const = 0;
 	NAMED_CLASS
 };
 class SMBStatementCopy : public SMBStatement {
-	StateMachineSideEffect *compile(MemoryAccessIdentifierAllocator &, CFGNode *, int) const {
+	StateMachineSideEffect *compile(SMBCompilerState &) const {
 		return new StateMachineSideEffectCopy(
 			lvalue.content->compile(),
 			rvalue.content->compile());
@@ -150,13 +166,11 @@ public:
 	{}
 };
 class SMBStatementStore : public SMBStatement {
-	StateMachineSideEffect *compile(MemoryAccessIdentifierAllocator &mai,
-					CFGNode *node,
-					int tid) const {
+	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectStore(
 			addr.content->compile(),
 			value.content->compile(),
-			mai(node->label, tid));
+			state.getMai());
 	}
 public:
 	SMBPtr<SMBMemoryReference> addr;
@@ -172,11 +186,11 @@ public:
 	}
 };
 class SMBStatementLoad : public SMBStatement {
-	StateMachineSideEffect *compile(MemoryAccessIdentifierAllocator &mai, CFGNode *where, int tid) const {
+	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectLoad(
 			target.content->compile(),
 			addr.content->compile(),
-			mai(where->label, tid),
+			state.getMai(),
 			type);
 	}
 public:
@@ -196,7 +210,7 @@ public:
 	}
 };
 class SMBStatementAssertFalse : public SMBStatement {
-	StateMachineSideEffect *compile(MemoryAccessIdentifierAllocator &, CFGNode *, int) const {
+	StateMachineSideEffect *compile(SMBCompilerState &) const {
 		return new StateMachineSideEffectAssertFalse(
 			expr.content->compile(),
 			realAssertion);
@@ -215,7 +229,7 @@ public:
 	}
 };
 class SMBStatementStartAtomic : public SMBStatement {
-	StateMachineSideEffect *compile(MemoryAccessIdentifierAllocator &, CFGNode *, int) const {
+	StateMachineSideEffect *compile(SMBCompilerState &) const {
 		return StateMachineSideEffectStartAtomic::get();
 	}
 public:
@@ -226,7 +240,7 @@ public:
 	}
 };
 class SMBStatementEndAtomic : public SMBStatement {
-	StateMachineSideEffect *compile(MemoryAccessIdentifierAllocator &, CFGNode *, int) const {
+	StateMachineSideEffect *compile(SMBCompilerState &) const {
 		return StateMachineSideEffectEndAtomic::get();
 	}
 public:
@@ -288,31 +302,25 @@ protected:
 	};
 	virtual StateMachineState *_compile(std::vector<reloc_t> &relocs,
 					    std::vector<reloc2> &relocs2,
-					    MemoryAccessIdentifierAllocator &,
-					    CFGNode *where,
-					    int tid) const = 0;
+					    SMBCompilerState &state) const = 0;
 private:
 	StateMachineState *compile(std::map<const SMBState *, StateMachineState *> &m,
 				   std::vector<reloc_t> &relocs,
 				   std::vector<reloc2> &relocs2,
-				   MemoryAccessIdentifierAllocator &,
-				   CFGNode *, int) const;
+				   SMBCompilerState &) const;
 public:
 	StateMachineState *compile(std::vector<reloc_t> &relocs,
-				   MemoryAccessIdentifierAllocator &,
-				   CFGNode *, int) const;
+				   SMBCompilerState &) const;
 	NAMED_CLASS
 };
 class SMBStateStatement : public SMBState {
 	StateMachineState *_compile(std::vector<reloc_t> &,
 				    std::vector<reloc2> &relocs2,
-				    MemoryAccessIdentifierAllocator &mai,
-				    CFGNode *where,
-				    int tid) const {
+				    SMBCompilerState &state) const {
 		StateMachineSideEffecting *smse =
 			new StateMachineSideEffecting(
-				where->rip,
-				first.content->compile(mai, where, tid),
+				state.vr,
+				first.content->compile(state),
 				NULL);
 		relocs2.push_back(reloc2(second.content, &smse->target));
 		return smse;
@@ -332,11 +340,9 @@ public:
 class SMBStateIf : public SMBState {
 	StateMachineState *_compile(std::vector<reloc_t> &,
 				    std::vector<reloc2> &relocs2,
-				    MemoryAccessIdentifierAllocator &,
-				    CFGNode *where,
-				    int) const {
+				    SMBCompilerState &state) const {
 		StateMachineBifurcate *smb =
-			new StateMachineBifurcate(where->rip,
+			new StateMachineBifurcate(state.vr,
 						  cond.content->compile(),
 						  NULL,
 						  NULL);
@@ -362,11 +368,9 @@ public:
 class SMBStateProxy : public SMBState {
 	StateMachineState *_compile(std::vector<reloc_t> &relocs,
 				    std::vector<reloc2> &,
-				    MemoryAccessIdentifierAllocator &,
-				    CFGNode *where,
-				    int) const {
+				    SMBCompilerState &state) const {
 		StateMachineSideEffecting *smse =
-			new StateMachineSideEffecting(where->rip, NULL, NULL);
+			new StateMachineSideEffecting(state.vr, NULL, NULL);
 		relocs.push_back(reloc_t(&smse->target, target));
 		return smse;
 	}
