@@ -108,17 +108,6 @@ StateMachineTransformer::transformState(StateMachineState *s, bool *done_somethi
 	abort();
 }
 
-static void
-enumStates(const StateMachineState *start, std::set<const StateMachineState *> *out)
-{
-	if (!out->insert(start).second)
-		return;
-	std::vector<const StateMachineState *> targets;
-	start->targets(targets);
-	for (auto it = targets.begin(); it != targets.end(); it++)
-		enumStates(*it, out);
-}
-
 void
 StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 					std::map<const StateMachineState *, StateMachineState *> &stateRewrites,
