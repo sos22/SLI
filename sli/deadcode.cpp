@@ -291,7 +291,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 	}
 
 	std::set<StateMachineState *> allStates;
-	findAllStates(sm, allStates);
+	enumStates(sm, &allStates);
 
 	LivenessMap livenessMap(allStates);
 

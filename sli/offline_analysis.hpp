@@ -195,8 +195,6 @@ public:
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL);
 };
 
-void findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out);
-void findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out);
 class MemoryAccessIdentifierAllocator;
 StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
@@ -239,8 +237,6 @@ StateMachine *removeAnnotations(VexPtr<StateMachine, &ir_heap> sm,
 				const VexPtr<OracleInterface> &oracle,
 				bool is_ssa,
 				GarbageCollectionToken token);
-
-void findAllStates(StateMachine *sm, std::set<StateMachineState *> &out);
 
 class FixConsumer;
 void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,

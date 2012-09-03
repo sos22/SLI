@@ -25,43 +25,6 @@ static bool debugOptimiseStateMachine = false;
 #define debugOptimiseStateMachine false
 #endif
 
-template <typename t> static void
-findAllTypedSideEffects(StateMachine *sm, std::set<t *> &out)
-{
-	class _ : public StateMachineTransformer {
-		std::set<t *> &out;
-		t *transformOneSideEffect(t *smse, bool *) {
-			out.insert(smse);
-			return NULL;
-		}
-		IRExpr *transformIRExpr(IRExpr *a, bool *) {
-			return a;
-		}
-		bool rewriteNewStates() const { return false; }
-	public:
-		_(std::set<t *> &_out)
-			: out(_out)
-		{}
-	} doit(out);
-	doit.transform(sm);
-}
-void
-findAllLoads(StateMachine *sm, std::set<StateMachineSideEffectLoad *> &out)
-{
-	findAllTypedSideEffects(sm, out);
-}
-void
-findAllStores(StateMachine *sm, std::set<StateMachineSideEffectStore *> &out)
-{
-	findAllTypedSideEffects(sm, out);
-}
-
-void
-findAllStates(StateMachine *sm, std::set<StateMachineState *> &out)
-{
-	enumStates(sm, &out);
-}
-
 /* Find all of the states which definitely reach <survive> rather than
    <crash> and reduce them to just <survive> */
 static void
@@ -70,7 +33,7 @@ removeSurvivingStates(StateMachine *sm, const AllowableOptimisations &opt, bool 
 	std::set<StateMachineState *> survivingStates;
 	std::set<StateMachineState *> allStates;
 	bool progress;
-	findAllStates(sm, survivingStates);
+	enumStates(sm, &survivingStates);
 	allStates = survivingStates;
 	do {
 		progress = false;
@@ -426,7 +389,7 @@ static void
 getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores)
 {
 	std::set<StateMachineSideEffectLoad *> allLoads;
-	findAllLoads(sm, allLoads);
+	enumSideEffects(sm, allLoads);
 	if (allLoads.size() == 0) {
 		fprintf(_logfile, "\t\tNo loads left in store machine?\n");
 		return;

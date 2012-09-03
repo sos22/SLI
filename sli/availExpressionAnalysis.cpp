@@ -891,7 +891,7 @@ availExpressionAnalysis(StateMachine *sm,
 	__set_profiling(availExpressionAnalysis);
 
 	std::set<StateMachineState *> allStates;
-	findAllStates(sm, allStates);
+	enumStates(sm, &allStates);
 
 	std::map<StateMachineState *, avail_t> availOnEntry;
 

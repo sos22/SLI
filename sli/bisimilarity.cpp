@@ -228,7 +228,7 @@ bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt)
 	HashedSet<st_pair_t> bisimilarStates;
 	std::set<StateMachineState *> allStates;
 
-	findAllStates(sm, allStates);
+	enumStates(sm, &allStates);
 
 	if (debug_bisimilarity) {
 		printf("%s(..., %s):\n", __func__, opt.name());
