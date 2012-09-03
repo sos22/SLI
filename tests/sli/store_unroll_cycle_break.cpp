@@ -85,7 +85,7 @@ parseEdgeDecl(std::map<named_string, cfg_node *> &nodes,
 		cfg_node *e = nodes[end];
 		if (!s || !e)
 			return false;
-		s->addBranch(e);
+		s->successors.push_back(cfg_node::successor_t::branch(e));
 	}
 	*suffix = buf;
 	return true;
