@@ -198,9 +198,6 @@ const char *get_name(const void *_ctxt)
 template <typename t, Heap *_heap = &main_heap>
 class GarbageCollected {
 protected:
-	static void release(const t *x) {
-		_LibVEX_free(&_heap, x);
-	}
 	virtual ~GarbageCollected() {}
 public:
 	static VexAllocType type;
