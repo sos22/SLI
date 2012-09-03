@@ -355,6 +355,49 @@ printStateMachine(const std::set<const StateMachineState *> &sm, FILE *f, std::m
 }
 
 void
+printStateMachinePair(const char *label1, const StateMachine *sm1, const char *label2, const StateMachine *sm2, FILE *f)
+{
+	std::map<const StateMachineState *, int> labels;
+	{
+		std::vector<const StateMachineState *> states;
+		enumStates(sm1, &states);
+		enumStates(sm2, &states);
+		for (unsigned x = 0; x < states.size(); x++)
+			labels[states[x]] = x + 1;
+	}
+
+	fprintf(f, "%s", label1);
+	{
+		fprintf(f, "CFG:\n");
+		std::set<const CFGNode *> done_cfg;
+		for (auto it = sm1->cfg_roots.begin(); it != sm1->cfg_roots.end(); it++)
+			printCFGRootedAt(it->second, f, done_cfg, sm1->cfg_roots);
+		std::set<const StateMachineState *> states;
+		enumStates(sm1, &states);
+		for (auto it = states.begin(); it != states.end(); it++) {
+			fprintf(f, "l%d: ", labels[*it]);
+			(*it)->prettyPrint(f, labels);
+			fprintf(f, "\n");
+		}
+	}
+
+	fprintf(f, "%s", label2);
+	{
+		fprintf(f, "CFG:\n");
+		std::set<const CFGNode *> done_cfg;
+		for (auto it = sm2->cfg_roots.begin(); it != sm2->cfg_roots.end(); it++)
+			printCFGRootedAt(it->second, f, done_cfg, sm2->cfg_roots);
+		std::set<const StateMachineState *> states;
+		enumStates(sm2, &states);
+		for (auto it = states.begin(); it != states.end(); it++) {
+			fprintf(f, "l%d: ", labels[*it]);
+			(*it)->prettyPrint(f, labels);
+			fprintf(f, "\n");
+		}
+	}
+}
+
+void
 printStateMachine(const StateMachineState *sm, FILE *f)
 {
 	std::map<const StateMachineState *, int> labels;
@@ -541,9 +584,9 @@ parseOneState(std::map<int, StateMachineState *> &out,
 static bool
 parseStateMachine(StateMachineState **out,
 		  const char *str,
-		  const char **suffix)
+		  const char **suffix,
+		  std::map<int, StateMachineState *> &labelToState)
 {
-	std::map<int, StateMachineState *> labelToState;
 	while (*str) {
 		if (!parseOneState(labelToState, str, &str))
 			break;
@@ -673,9 +716,9 @@ parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 }
 
 bool
-StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
+parseStateMachine(StateMachine **out, const char *str, const char **suffix,
+		  std::map<int, StateMachineState *> &labelToState)
 {
-	std::vector<std::pair<unsigned, VexRip> > origin;
 	StateMachineState *root;
 
 	/* Shut the compiler up: it can't tell that
@@ -686,15 +729,10 @@ StateMachine::parse(StateMachine **out, const char *str, const char **suffix)
 	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots;
 	if (!parseThisString("CFG:\n", str, &str) ||
 	    !parseCFG(cfg_roots, str, &str) ||
-	    !parseStateMachine(&root, str, suffix))
+	    !parseStateMachine(&root, str, suffix, labelToState))
 		return false;
 	*out = new StateMachine(root, cfg_roots);
 	return true;
-}
-bool
-parseStateMachine(StateMachine **out, const char *str, const char **suffix)
-{
-	return StateMachine::parse(out, str, suffix);
 }
 
 StateMachine *

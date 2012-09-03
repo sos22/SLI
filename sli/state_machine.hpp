@@ -240,8 +240,6 @@ public:
 	StateMachineState *root;
 	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots;
 
-	static bool parse(StateMachine **out, const char *str, const char **suffix);
-
 	StateMachine(StateMachineState *_root,
 		     const std::vector<std::pair<unsigned, const CFGNode *> > &_cfg_roots)
 		: root(_root), cfg_roots(_cfg_roots)
@@ -1310,6 +1308,11 @@ public:
 void printStateMachine(const StateMachine *sm, FILE *f);
 void printStateMachine(const StateMachine *sm, FILE *f,
 		       std::map<const StateMachineState *, int> &labels);
+void printStateMachinePair(const char *label1,
+			   const StateMachine *sm1,
+			   const char *label2,
+			   const StateMachine *sm2,
+			   FILE *f);
 void printStateMachine(const StateMachineState *sm, FILE *f);
 void printStateMachine(const StateMachineState *sm,
 		       FILE *f,
@@ -1321,7 +1324,16 @@ bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
 bool parseStateMachine(StateMachine **out,
-		       const char *str, const char **suffix);
+		       const char *str,
+		       const char **suffix,
+		       std::map<int, StateMachineState *> &labels);
+static inline bool parseStateMachine(StateMachine **out,
+				     const char *str,
+				     const char **suffix)
+{
+	std::map<int, StateMachineState *> labels;
+	return parseStateMachine(out, str, suffix, labels);
+}	
 StateMachine *readStateMachine(int fd);
 
 class MemoryAccessIdentifierAllocator;

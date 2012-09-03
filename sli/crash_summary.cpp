@@ -12,11 +12,11 @@
 void
 printCrashSummary(CrashSummary *summary, FILE *f)
 {
-	fprintf(f, "Load machine:\n");
-	printStateMachine(summary->loadMachine, f);
-
-	fprintf(f, "Store machine:\n");
-	printStateMachine(summary->storeMachine, f);
+	printStateMachinePair("Load Machine:\n",
+			      summary->loadMachine,
+			      "Store Machine:\n",
+			      summary->storeMachine,
+			      f);
 
 	fprintf(f, "Verification condition: ");
 	ppIRExpr(summary->verificationCondition, f);
@@ -98,10 +98,11 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
 	IRExpr *verificationCondition;
+	std::map<int, StateMachineState *> labels;
 	if (!parseThisString("Load machine:\n", buf, &buf) ||
-	    !parseStateMachine(&loadMachine, buf, &buf) ||
+	    !parseStateMachine(&loadMachine, buf, &buf, labels) ||
 	    !parseThisString("Store machine:\n", buf, &buf) ||
-	    !parseStateMachine(&storeMachine, buf, &buf) ||
+	    !parseStateMachine(&storeMachine, buf, &buf, labels) ||
 	    !parseThisString("Verification condition: ", buf, &buf) ||
 	    !parseIRExpr(&verificationCondition, buf, &buf) ||
 	    !parseThisChar('\n', buf, &buf))
