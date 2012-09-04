@@ -76,9 +76,9 @@ class PointerAliasingSet : public Named {
 	bool nonStckPointer;
 public:
 	bool otherStackPointer;
-private:
 	bool valid;
 	std::vector<FrameId> stackPointers;
+private:
 	char *mkName() const {
 		if (!valid) {
 			return strdup("(<invalid>)");

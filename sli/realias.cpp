@@ -1104,6 +1104,51 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 		at.prettyPrint(stdout, stateLabels);
 	}
 
+	/* Figure out which frames might actually be accessed by the
+	   machine.  There's not much point in keeping any of the
+	   other ones hanging around. */
+	std::set<FrameId> liveFrames;
+	bool allFramesLive = false;
+	for (auto it = at.content.begin(); !allFramesLive && it != at.content.end(); it++) {
+		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
+		PointerAliasingSet pas(ptt.pointsToSetForExpr(
+					       l->addr,
+					       it->first,
+					       *stackLayout.forState(it->first),
+					       mat,
+					       stackLayout));
+		if (pas.otherStackPointer || !pas.valid) {
+			allFramesLive = true;
+		} else {
+			Maybe<StackLayout> *sl = stackLayout.forState(it->first);
+			if (sl && sl->valid) {
+				for (auto it = pas.stackPointers.begin();
+				     it != pas.stackPointers.end();
+				     it++) {
+					bool live = false;
+					for (auto it2 = sl->content.functions.begin();
+					     !live && it2 != sl->content.functions.end();
+					     it2++)
+						if (*it2 == *it)
+							live = true;
+					if (live)
+						liveFrames.insert(*it);
+				}
+			} else {
+				liveFrames.insert(pas.stackPointers.begin(), pas.stackPointers.end());
+			}
+		}
+	}
+	if (any_debug) {
+		printf("Live frames: {");
+		for (auto it = liveFrames.begin(); it != liveFrames.end(); it++) {
+			if (it != liveFrames.begin())
+				printf(", ");
+			printf("%s", it->name());
+		}
+		printf("}\n");
+	}
+
 	bool progress = false;
 
 	/* Use the aliasing table to resolve loads wherever possible. */
@@ -1235,39 +1280,112 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 		}
 	}
 
-	/* Let's also have a go at ripping out redundant stores. */
+	/* Let's also have a go at ripping out redundant stores and
+	   stack annotations. */
 	std::set<StateMachineSideEffecting *> sideEffects;
 	enumStates(sm, &sideEffects);
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
-		if (!(*it)->getSideEffect() ||
-		    (*it)->getSideEffect()->type != StateMachineSideEffect::Store)
+		StateMachineSideEffect *sideEffect = (*it)->getSideEffect();
+		if (!sideEffect)
 			continue;
-		StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)(*it)->getSideEffect();
-		bool ignore = true;
-		for (auto it2 = decode.begin(s->rip); ignore && !it2.finished(); it2.advance())
-			ignore &= opt.ignoreStore(it2.node()->rip);
-		if (ignore)
-			continue;
-		bool noConflictingLoads = true;
-		for (auto it2 = at.content.begin(); noConflictingLoads && it2 != at.content.end(); it2++) {
-			if (it2->second.stores.count(*it)) {
-				if (debug_use_alias_table)
-					printf("Can't remove store l%d because of load l%d\n",
-					       stateLabels[*it], stateLabels[it2->first]);
-				noConflictingLoads = false;
+		switch (sideEffect->type) {
+		case StateMachineSideEffect::Store: {
+			StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)sideEffect;
+			bool ignore = true;
+			for (auto it2 = decode.begin(s->rip); ignore && !it2.finished(); it2.advance())
+				ignore &= opt.ignoreStore(it2.node()->rip);
+			if (ignore)
+				break;
+			bool noConflictingLoads = true;
+			for (auto it2 = at.content.begin(); noConflictingLoads && it2 != at.content.end(); it2++) {
+				if (it2->second.stores.count(*it)) {
+					if (debug_use_alias_table)
+						printf("Can't remove store l%d because of load l%d\n",
+						       stateLabels[*it], stateLabels[it2->first]);
+					noConflictingLoads = false;
+				}
 			}
+			if (noConflictingLoads) {
+				if (debug_use_alias_table)
+					printf("Remove store l%d\n",
+					       stateLabels[*it]);
+				(*it)->sideEffect = 
+					new StateMachineSideEffectAssertFalse(
+						IRExpr_Unop(
+							Iop_BadPtr,
+							s->addr),
+						true);
+				progress = true;
+			}
+			break;
 		}
-		if (noConflictingLoads) {
-			if (debug_use_alias_table)
-				printf("Remove store l%d\n",
-				       stateLabels[*it]);
-			(*it)->sideEffect = 
-				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(
-						Iop_BadPtr,
-						s->addr),
-					true);
-			progress = true;
+		case StateMachineSideEffect::StartFunction: {
+			StateMachineSideEffectStartFunction *s = (StateMachineSideEffectStartFunction *)sideEffect;
+			if (!allFramesLive && !liveFrames.count(s->frame)) {
+				if (debug_use_alias_table)
+					printf("Remove start function l%d\n",
+					       stateLabels[*it]);
+				(*it)->sideEffect = NULL;
+				progress = true;
+			}
+			break;
+		}
+		case StateMachineSideEffect::EndFunction: {
+			StateMachineSideEffectEndFunction *s = (StateMachineSideEffectEndFunction *)sideEffect;
+			if (!allFramesLive && !liveFrames.count(s->frame)) {
+				if (debug_use_alias_table)
+					printf("Remove end function l%d\n",
+					       stateLabels[*it]);
+				(*it)->sideEffect = NULL;
+				progress = true;
+			}
+			break;
+		}
+		case StateMachineSideEffect::StackLayout: {
+			StateMachineSideEffectStackLayout *s = (StateMachineSideEffectStackLayout *)sideEffect;
+			if (allFramesLive)
+				break;
+			bool repl = false;
+			for (auto it2 = s->functions.begin(); !repl && it2 != s->functions.end(); it2++)
+				if (!liveFrames.count(it2->first))
+					repl = true;
+			if (repl) {
+				std::vector<std::pair<FrameId, bool> > newFunctions;
+				for (auto it2 = s->functions.begin(); it2 != s->functions.end(); it2++) {
+					if (liveFrames.count(it2->first))
+						newFunctions.push_back(*it2);
+				}
+				if (newFunctions.empty()) {
+					if (debug_use_alias_table)
+						printf("Stack layout l%d is dead\n",
+						       stateLabels[*it]);
+					(*it)->sideEffect = NULL;
+				} else {
+					(*it)->sideEffect =
+						new StateMachineSideEffectStackLayout(
+							s->tid,
+							newFunctions);
+					if (debug_use_alias_table) {
+						printf("Shrink stack layout l%d to ");
+						(*it)->sideEffect->prettyPrint(stdout);
+						printf("\n");
+					}
+				}
+
+				progress = true;
+			}
+			break;
+		}
+			/* Don't do anything with these. */
+		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::Load:
+		case StateMachineSideEffect::Copy:
+		case StateMachineSideEffect::Unreached:
+		case StateMachineSideEffect::Phi:
+		case StateMachineSideEffect::AssertFalse:
+		case StateMachineSideEffect::StartAtomic:
+		case StateMachineSideEffect::EndAtomic:
+			break;
 		}
 	}
 	*done_something |= progress;
