@@ -29,7 +29,7 @@ getProximalCause(MachineState *ms,
 	/* Successfully decoded the block -> build a state machine
 	   which does what we want of it.  This is a lot like a simple
 	   compiler from VEX intercode to our state machine model. */
-	StateMachineState *work = StateMachineNoCrash::get();
+	StateMachineState *work;
 
 	class _ {
 	public:
@@ -62,6 +62,15 @@ getProximalCause(MachineState *ms,
 	int idx;
 	for (idx = 1; idx < irsb->stmts_used && irsb->stmts[idx]->tag != Ist_IMark; idx++)
 		;
+	if (idx <= irsb->stmts_used || irsb->next_is_const)
+		work = StateMachineNoCrash::get();
+	else
+		work = new StateMachineBifurcate(
+			rip,
+			IRExpr_Unop(Iop_BadPtr, irsb->next_nonconst),
+			StateMachineCrash::get(),
+			StateMachineNoCrash::get());
+
 	idx--;
 	while (idx >= 0) {
 		IRStmt *stmt = irsb->stmts[idx];
