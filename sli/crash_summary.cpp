@@ -48,6 +48,8 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 		     it++)
 			fprintf(f, "\t%s <-> %s\n", it->first.name(), it->second.name());
 	}
+
+	summary->mai->print(f);
 }
 
 CrashSummary *
@@ -98,7 +100,7 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
 	IRExpr *verificationCondition;
-	std::map<int, StateMachineState *> labels;
+	std::map<CfgLabel, const CFGNode *> labels;
 	if (!parseThisString("Load machine:\n", buf, &buf) ||
 	    !parseStateMachine(&loadMachine, buf, &buf, labels) ||
 	    !parseThisString("Store machine:\n", buf, &buf) ||
@@ -142,9 +144,9 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 		while (1) {
 			MemoryAccessIdentifier w1(MemoryAccessIdentifier::uninitialised());
 			MemoryAccessIdentifier w2(MemoryAccessIdentifier::uninitialised());
-			if (!parseMemoryAccessIdentifier(&w1, buf, &buf) ||
+			if (!w1.parse(buf, &buf) ||
 			    !parseThisString(" <-> ", buf, &buf) ||
-			    !parseMemoryAccessIdentifier(&w2, buf, &buf) ||
+			    !w2.parse(buf, &buf) ||
 			    !parseThisChar('\n', buf, &buf))
 				break;
 			aliasing.push_back(CrashSummary::aliasingEntryT(w1, w2));
@@ -152,17 +154,17 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 	} else {
 		return false;
 	}
+	MaiMap *mai = MaiMap::parse(labels, buf, &buf);
+	if (!mai)
+		return false;
 	*succ = buf;
-	*out = new CrashSummary(loadMachine, storeMachine, verificationCondition, macros, aliasing);
+	*out = new CrashSummary(loadMachine, storeMachine, verificationCondition, macros, aliasing, mai);
 	return true;
 }
 
 void
 CrashSummary::buildAliasingTable(Oracle *oracle)
 {
-	CfgDecode decode;
-	decode.addMachine(loadMachine);
-	decode.addMachine(storeMachine);
 	std::set<StateMachineSideEffectLoad *> loadLoads;
 	std::set<StateMachineSideEffectLoad *> storeLoads;
 	std::set<StateMachineSideEffectStore *> loadStores;
@@ -185,7 +187,7 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 #define do_set(s)							\
 	for (auto it2 = s.begin(); it2 != s.end(); it2++) {		\
 		if (oracle->memoryAccessesMightAlias(			\
-			    decode,					\
+			    *mai,					\
 			    AllowableOptimisations::defaultOptimisations, \
 			    *it2, *it)) {				\
 			if ((*it)->rip < (*it2)->rip)			\

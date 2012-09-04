@@ -114,21 +114,11 @@ bool parseVexRip(VexRip *out, const char *str, const char **suffix)
 }
 
 bool
-parseMemoryAccessIdentifier(MemoryAccessIdentifier *out,
-			    const char *str,
-			    const char **suffix)
+MemoryAccessIdentifier::parse(const char *str,
+			      const char **suffix)
 {
-	CfgLabel l(CfgLabel::uninitialised());
-	int tid;
-	int generation;
-	if (!l.parse(str, &str) ||
-	    !parseThisChar(':', str, &str) ||
-	    !parseDecimalInt(&tid, str, &str) ||
-	    !parseThisChar(':', str, &str) ||
-	    !parseDecimalInt(&generation, str, suffix))
-		return false;
-	*out = MemoryAccessIdentifier(l, tid, generation);
-	return true;
+	return parseThisString("mai", str, &str) &&
+		parseDecimalInt(&id, str, suffix);
 }
 
 bool

@@ -6,7 +6,7 @@ class OracleInterface;
 class StateMachine;
 class StateMachineSideEffectStore;
 class CrashSummary;
-class MemoryAccessIdentifierAllocator;
+class MaiMap;
 
 class remoteMacroSectionsT : public GarbageCollected<remoteMacroSectionsT, &ir_heap> {
 	typedef std::vector<std::pair<StateMachineSideEffectStore *,
@@ -45,13 +45,15 @@ public:
 	friend class iterator;
 };
 
-IRExpr *survivalConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
+IRExpr *survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
+					       const VexPtr<StateMachine, &ir_heap> &sm,
 					       const VexPtr<IRExpr, &ir_heap> &assumption,
 					       const VexPtr<OracleInterface> &oracle,
 					       bool escapingStateSurvive,
 					       const AllowableOptimisations &opt,
 					       GarbageCollectionToken token);
-IRExpr *crashingConstraintIfExecutedAtomically(const VexPtr<StateMachine, &ir_heap> &sm,
+IRExpr *crashingConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
+					       const VexPtr<StateMachine, &ir_heap> &sm,
 					       const VexPtr<IRExpr, &ir_heap> &assumption,
 					       const VexPtr<OracleInterface> &oracle,
 					       bool escapingStateSurvive,
@@ -68,23 +70,26 @@ IRExpr *crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &pro
 				       const VexPtr<OracleInterface> &oracle,
 				       const VexPtr<IRExpr, &ir_heap> &initialStateCondition,
 				       const AllowableOptimisations &opt,
-				       MemoryAccessIdentifierAllocator mai,
+				       const VexPtr<MaiMap, &ir_heap> &mai,
 				       GarbageCollectionToken token);
-bool findRemoteMacroSections(const VexPtr<StateMachine, &ir_heap> &readMachine,
+bool findRemoteMacroSections(const VexPtr<MaiMap, &ir_heap> &mai,
+			     const VexPtr<StateMachine, &ir_heap> &readMachine,
 			     const VexPtr<StateMachine, &ir_heap> &writeMachine,
 			     const VexPtr<IRExpr, &ir_heap> &assumption,
 			     const VexPtr<OracleInterface> &oracle,
 			     const AllowableOptimisations &opt,
 			     VexPtr<remoteMacroSectionsT, &ir_heap> &output,
 			     GarbageCollectionToken token);
-bool fixSufficient(const VexPtr<StateMachine, &ir_heap> &writeMachine,
+bool fixSufficient(const VexPtr<MaiMap, &ir_heap> &mai,
+		   const VexPtr<StateMachine, &ir_heap> &writeMachine,
 		   const VexPtr<StateMachine, &ir_heap> &probeMachine,
 		   const VexPtr<IRExpr, &ir_heap> &assumption,
 		   const VexPtr<OracleInterface> &oracle,
 		   const AllowableOptimisations &opt,
 		   const VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
 		   GarbageCollectionToken token);
-IRExpr *writeMachineSuitabilityConstraint(const VexPtr<StateMachine, &ir_heap> &writeMachine,
+IRExpr *writeMachineSuitabilityConstraint(const VexPtr<MaiMap, &ir_heap> &mai,
+					  const VexPtr<StateMachine, &ir_heap> &writeMachine,
 					  const VexPtr<StateMachine, &ir_heap> &readMachine,
 					  const VexPtr<OracleInterface> &oracle,
 					  const VexPtr<IRExpr, &ir_heap> &assumption,
@@ -96,7 +101,7 @@ IRExpr *getCrossMachineCrashRequirement(
 	const VexPtr<OracleInterface> &oracle,
 	const VexPtr<IRExpr, &ir_heap> &assumption,
 	const AllowableOptimisations &opt,
-	MemoryAccessIdentifierAllocator mai,
+	const VexPtr<MaiMap, &ir_heap> &mai,
 	GarbageCollectionToken token);
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */

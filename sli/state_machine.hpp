@@ -13,6 +13,7 @@
 
 class StateMachine;
 class StateMachineSideEffect;
+class MaiMap;
 
 #ifdef NDEBUG
 static inline
@@ -259,11 +260,11 @@ public:
 			hv(it->second);
 	}
 #ifdef NDEBUG
-	void sanityCheck() const {}
+	void sanityCheck(const MaiMap &) const {}
 	void assertAcyclic() const {}
 	void assertSSA() const {}
 #else
-	void sanityCheck() const;
+	void sanityCheck(const MaiMap &) const;
 	void assertAcyclic() const;
 	void assertSSA() const;
 #endif
@@ -703,7 +704,7 @@ public:
 		    parseThisString(") <- ", str, &str) &&
 		    parseIRExpr(&data, str, &str) &&
 		    parseThisString(" @ ", str, &str) &&
-		    parseMemoryAccessIdentifier(&rip, str, suffix)) {
+		    rip.parse(str, suffix)) {
 			*out = new StateMachineSideEffectStore(addr, data, rip);
 			return true;
 		}
@@ -778,7 +779,7 @@ public:
 		    parseThisString(" <- *(", str, &str) &&
 		    parseIRExpr(&addr, str, &str) &&
 		    parseThisString(")@", str, &str) &&
-		    parseMemoryAccessIdentifier(&rip, str, suffix)) {
+		    rip.parse(str, suffix)) {
 			*out = new StateMachineSideEffectLoad(key, addr, rip, type);
 			return true;
 		}
@@ -1326,17 +1327,15 @@ bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 bool parseStateMachine(StateMachine **out,
 		       const char *str,
 		       const char **suffix,
-		       std::map<int, StateMachineState *> &labels);
+		       std::map<CfgLabel, const CFGNode *> &labels);
 static inline bool parseStateMachine(StateMachine **out,
 				     const char *str,
 				     const char **suffix)
 {
-	std::map<int, StateMachineState *> labels;
+	std::map<CfgLabel, const CFGNode *> labels;
 	return parseStateMachine(out, str, suffix, labels);
 }	
 StateMachine *readStateMachine(int fd);
-
-class MemoryAccessIdentifierAllocator;
 
 StateMachine *duplicateStateMachine(const StateMachine *inp);
 

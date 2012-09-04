@@ -1234,9 +1234,9 @@ static bool parseIRExprHappensBefore(IRExpr **res, const char *str, const char *
   MemoryAccessIdentifier before(MemoryAccessIdentifier::uninitialised());
   MemoryAccessIdentifier after(MemoryAccessIdentifier::uninitialised());
   if (!parseThisChar('(', str, &str) ||
-      !parseMemoryAccessIdentifier(&before, str, &str) ||
+      !before.parse(str, &str) ||
       !parseThisString(" <-< ", str, &str) ||
-      !parseMemoryAccessIdentifier(&after, str, &str) ||
+      !after.parse(str, &str) ||
       !parseThisChar(')', str, suffix))
     return false;
   *res = IRExpr_HappensBefore(before, after);
@@ -1249,7 +1249,7 @@ static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **
     IRType ty;
     bool isUnique;
     if (!parseThisString("Free", str, &str) ||
-	!parseMemoryAccessIdentifier(&ma, str, &str) ||
+	!ma.parse(str, &str) ||
 	!parseThisChar(':', str, &str) ||
 	!parseIRType(&ty, str, &str) ||
 	!parseThisChar(':', str, &str))

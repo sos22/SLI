@@ -404,7 +404,6 @@ insert_new_predecessor:
 static StateMachine *
 convertToSSA(StateMachine *inp)
 {
-	inp->sanityCheck();
 	assertNonSsa(inp);
 
 	inp = duplicateStateMachine(inp);
@@ -452,7 +451,6 @@ convertToSSA(StateMachine *inp)
 	}
 
 	inp->assertSSA();
-	inp->sanityCheck();
 
 	return inp;
 }

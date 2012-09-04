@@ -8,6 +8,7 @@
 #include "eval_state_machine.hpp"
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
+#include "alloc_mai.hpp"
 
 int
 main(int argc, char *argv[])
@@ -23,11 +24,12 @@ main(int argc, char *argv[])
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
+	VexPtr<MaiMap, &ir_heap> mai(MaiMap::fromFile(sm, argv[4]));
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack();
-	sm = optimiseStateMachine(sm, opt, oracle, true, ALLOW_GC);
+	sm = optimiseStateMachine(mai, sm, opt, oracle, true, ALLOW_GC);
 	printStateMachine(sm, stdout);
 
 	return 0;

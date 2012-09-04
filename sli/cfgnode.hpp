@@ -133,17 +133,17 @@ void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			       const DynAnalysisRip &target);
 
 class StateMachine;
-class MemoryAccessIdentifierAllocator;
+class MaiMap;
 class StateMachineState;
 StateMachine *storeCFGToMachine(Oracle *oracle,
 				unsigned tid,
 				CFGNode *root,
-				MemoryAccessIdentifierAllocator &mai);
+				MaiMap &mai);
 void probeCFGsToMachine(Oracle *oracle,
 			unsigned tid,
 			HashedSet<HashedPtr<CFGNode> > &roots,
 			HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
-			MemoryAccessIdentifierAllocator &mai,
+			MaiMap &mai,
 			std::set<StateMachine *> &out);
 void dumpCFGToDot(const HashedSet<HashedPtr<CFGNode> > &allNodes, const char *fname);
 

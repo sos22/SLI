@@ -116,10 +116,12 @@ public:
 		}
 		return res;
 	}
-	ThreadCfgLabel operator()(const MemoryAccessIdentifier &mai) const
+	ThreadCfgLabel operator()(const MemoryAccessIdentifier &mai) const;
+#if 0
 	{
 		return ThreadCfgLabel((*this)(mai.tid), mai.where);
 	}
+#endif
 };
 
 class ThreadCfgDecode {
@@ -256,7 +258,8 @@ public:
 			    ThreadAbstracter &abs,
 			    StateMachine *probeMachine,
 			    StateMachine *storeMachine,
-			    std::map<unsigned, CfgLabel> &roots)
+			    std::map<unsigned, CfgLabel> &roots);
+#if 0
 	{
 		/* XXX keep this in sync with buildCED */
 		std::set<IRExprGet *> neededTemporaries;
@@ -299,6 +302,8 @@ public:
 			}
 		}
 	}
+#endif
+
 	void operator|=(const expressionStashMapT &esm) {
 		for (auto it = esm.begin(); it != esm.end(); it++) {
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)

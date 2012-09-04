@@ -342,24 +342,26 @@ public:
 extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 
 class MemoryAccessIdentifier : public Named {
+	friend class MaiMap;
 	char *mkName() const {
-		return my_asprintf("%s:%d:%d", where.name(), tid, generation);
+		return my_asprintf("mai%d", id);
 	}
+	int id;
+	MemoryAccessIdentifier(int _id, int _tid)
+		: id(_id), tid(_tid)
+	{}
 public:
-	CfgLabel where;
 	int tid;
-	int generation;
-	unsigned long hash() const { return (unsigned long)where.hash() * 200010011 + tid * 200021863 + generation * 200030681; }
+
+	unsigned long hash() const { return (unsigned long)id * 200010011 + tid * 428143; }
 	void sanity_check() const {
-		assert(generation >= 0);
+		assert(id > 0);
 	}
 	bool operator==(const MemoryAccessIdentifier &other) const {
-		return where == other.where && tid == other.tid && generation == other.generation;
+		return id == other.id && tid == other.tid;
 	}
 	bool operator<(const MemoryAccessIdentifier &other) const {
-		return tid < other.tid ||
-			(tid == other.tid && generation < other.generation) ||
-			(tid == other.tid && generation == other.generation && where < other.where);
+		return tid < other.tid || (tid == other.tid && id < other.id);
 	}
 	bool operator<=(const MemoryAccessIdentifier &other) const {
 		return !(other < *this);
@@ -370,14 +372,11 @@ public:
 	bool operator!=(const MemoryAccessIdentifier &other) const {
 		return !(*this == other);
 	}
-	MemoryAccessIdentifier(const CfgLabel &_where, int _tid, int _generation)
-		: where(_where), tid(_tid), generation(_generation)
-	{}
 	static MemoryAccessIdentifier uninitialised(void) {
-		return MemoryAccessIdentifier(CfgLabel::uninitialised(), -1, -1);
+		return MemoryAccessIdentifier(-1, -1);
 	}
+	bool parse(const char *str, const char **suffix);
 };
-bool parseMemoryAccessIdentifier(MemoryAccessIdentifier *, const char *, const char **);
 
 extern Heap ir_heap;
 

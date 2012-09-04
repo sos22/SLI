@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "state_machine.hpp"
+#include "alloc_mai.hpp"
 
 class Oracle;
 class OracleInterface;
@@ -19,11 +20,14 @@ public:
 	std::vector<macroSectionT> macroSections;
 	typedef std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> aliasingEntryT;
 	std::vector<aliasingEntryT> aliasing;
+	MaiMap *mai;
 	CrashSummary(StateMachine *_loadMachine, StateMachine *_storeMachine,
-		     IRExpr *_verificationCondition, Oracle *oracle)
+		     IRExpr *_verificationCondition, Oracle *oracle,
+		     MaiMap *_mai)
 		: loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
-		  verificationCondition(_verificationCondition)
+		  verificationCondition(_verificationCondition),
+		  mai(_mai)
 	{
 		buildAliasingTable(oracle);
 	}
@@ -32,12 +36,14 @@ public:
 		     StateMachine *_storeMachine,
 		     IRExpr *_verificationCondition,
 		     const std::vector<macroSectionT> &_macroSections,
-		     const std::vector<aliasingEntryT> &_aliasing)
+		     const std::vector<aliasingEntryT> &_aliasing,
+		     MaiMap *_mai)
 		: loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
 		  verificationCondition(_verificationCondition),
 		  macroSections(_macroSections),
-		  aliasing(_aliasing)
+		  aliasing(_aliasing),
+		  mai(_mai)
 	{}
 
 	void visit(HeapVisitor &hv) {
@@ -50,6 +56,7 @@ public:
 			hv(it->first);
 			hv(it->second);
 		}
+		hv(mai);
 	}
 	NAMED_CLASS
 };
@@ -73,7 +80,6 @@ public:
 };
 
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
-class MemoryAccessIdentifierAllocator;
 bool buildProbeMachine(CfgLabelAllocator &allocLabel,
 		       const VexPtr<Oracle> &oracle,
 		       const DynAnalysisRip &interestingRip,
@@ -82,7 +88,7 @@ bool buildProbeMachine(CfgLabelAllocator &allocLabel,
 		       const AllowableOptimisations &opt,
 		       StateMachine ***out,
 		       unsigned *nr_out_machines,
-		       MemoryAccessIdentifierAllocator &mai,
+		       MaiMap &mai,
 		       int *nextFrameId,
 		       GarbageCollectionToken token);
 bool diagnoseCrash(CfgLabelAllocator &allocLabel,
@@ -91,7 +97,7 @@ bool diagnoseCrash(CfgLabelAllocator &allocLabel,
 		   const VexPtr<Oracle> &oracle,
 		   bool needRemoteMacroSections,
 		   const AllowableOptimisations &opt,
-		   const MemoryAccessIdentifierAllocator &mai,
+		   const MaiMap &mai,
 		   int nextFrameId,
 		   GarbageCollectionToken token);
 void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
@@ -103,7 +109,7 @@ void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 IRExpr *findHappensBeforeRelations(const VexPtr<CrashSummary, &ir_heap> &summary,
 				   const VexPtr<OracleInterface> &oracle,
 				   const AllowableOptimisations &opt,
-				   const MemoryAccessIdentifierAllocator &mai,
+				   const MaiMap &mai,
 				   GarbageCollectionToken token);
 
 #endif /* !INFERRED_INFORMATION_HPP__ */

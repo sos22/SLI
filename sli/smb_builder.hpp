@@ -127,18 +127,18 @@ operator!(const threadAndRegister &tr)
 
 struct SMBCompilerState {
 	const VexRip &vr;
-	const CfgLabel &label;
+	const CFGNode *where;
 	int tid;
-	MemoryAccessIdentifierAllocator &mai;
+	MaiMap &mai;
 	SMBCompilerState(const VexRip &_vr,
-			 const CfgLabel &_label,
+			 const CFGNode *_where,
 			 int _tid,
-			 MemoryAccessIdentifierAllocator &_mai)
-		: vr(_vr), label(_label), tid(_tid), mai(_mai)
+			 MaiMap &_mai)
+		: vr(_vr), where(_where), tid(_tid), mai(_mai)
 	{}
 	MemoryAccessIdentifier getMai()
 	{
-		return mai(label, tid);
+		return mai(tid, where);
 	}
 };
 /* ------------------------------ Statements ------------------------------------- */

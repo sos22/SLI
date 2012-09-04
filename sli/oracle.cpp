@@ -14,6 +14,7 @@
 #include "typesdb.hpp"
 #include "query_cache.hpp"
 #include "allowable_optimisations.hpp"
+#include "alloc_mai.hpp"
 
 #include "libvex_prof.hpp"
 #include "libvex_parse.h"
@@ -251,44 +252,38 @@ Oracle::fetchTagEntry(tag_entry *te, const Mapping &mapping, unsigned long offse
    the union of the store sets for all the locations whose load set
    includes the observed address. */
 void
-Oracle::findConflictingStores(CfgDecode &labelDecode,
+Oracle::findConflictingStores(const MaiMap &mai,
 			      StateMachineSideEffectLoad *smsel,
 			      std::set<DynAnalysisRip> &out)
 {
-	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr(labelDecode.dr(smsel->rip.where));
-	type_index->findOffsets(dr, offsets);
-	for (auto it = offsets.begin();
-	     it != offsets.end();
-	     it++) {
-		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it);
-		if (te.shared_loads.count(dr))
-			out |= te.shared_stores;
+	for (auto it = mai.begin(smsel->rip); !it.finished(); it.advance()) {
+		std::vector<unsigned long> offsets;
+		type_index->findOffsets(it.dr(), offsets);
+		for (auto it2 = offsets.begin();
+		     it2 != offsets.end();
+		     it2++) {
+			tag_entry te;
+			fetchTagEntry(&te, raw_types_database, *it2);
+			if (te.shared_loads.count(it.dr()))
+				out |= te.shared_stores;
+		}
 	}
 }
 
 bool
-Oracle::notInTagTable(CfgDecode &labelDecode, StateMachineSideEffectMemoryAccess *access)
+Oracle::notInTagTable(const DynAnalysisRip &dr)
 {
 	__set_profiling(notInTagTable);
 	std::vector<unsigned long> offsets;
-	type_index->findOffsets(labelDecode.dr(access->rip.where), offsets);
-	return offsets.size() == 0;
+	type_index->findOffsets(dr, offsets);
+	return offsets.empty();
 }
 
 bool
-Oracle::hasConflictingRemoteStores(CfgDecode &decode, const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access)
+Oracle::hasConflictingRemoteStores(const DynAnalysisRip &dr)
 {
 	__set_profiling(hasConflictingRemoteStores);
-	if (opt.assumeNoInterferingStores())
-		return false;
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr(decode.dr(access->rip.where));
-	if (access->type == StateMachineSideEffect::Load &&
-	    opt.nonLocalLoads() &&
-	    !opt.nonLocalLoads()->count(dr))
-		return false;
 	type_index->findOffsets(dr, offsets);
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		unsigned long offset = *it;
@@ -336,38 +331,33 @@ Oracle::hasConflictingRemoteStores(CfgDecode &decode, const AllowableOptimisatio
 }
 
 bool
-Oracle::memoryAccessesMightAlias(CfgDecode &decode,
-				 const AllowableOptimisations &opt,
-				 StateMachineSideEffectLoad *smsel,
-				 StateMachineSideEffectStore *smses)
+Oracle::hasConflictingRemoteStores(const MaiMap &mai, const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access)
+{
+	if (opt.assumeNoInterferingStores())
+		return false;
+	for (auto it = mai.begin(access->rip); !it.finished(); it.advance()) {
+		if (access->type == StateMachineSideEffect::Load &&
+		    opt.nonLocalLoads() &&
+		    !opt.nonLocalLoads()->count(it.dr()))
+			continue;
+		if (hasConflictingRemoteStores(it.dr()))
+			return true;
+	}
+	return false;
+}
+
+Oracle::mam_result
+Oracle::memoryAccessesMightAliasLS(const DynAnalysisRip &smsel_dr, const DynAnalysisRip &smses_dr)
 {
 	__set_profiling(might_alias_load_store);
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip smses_dr(decode.dr(smses->rip.where));
-	DynAnalysisRip smsel_dr(decode.dr(smsel->rip.where));
 	type_index->findOffsets(smses_dr, offsets);
 	if (offsets.size() == 0) {
-		if (!notInTagTable(decode, smsel))
-			return false;
-		if (smsel->rip.tid != smses->rip.tid)
-			return false;
-		if (!definitelyNotEqual(smsel->addr, smses->addr, opt))
-                        return true;
-		else
-			return false;
-	} else if (notInTagTable(decode, smsel))
-		return false;
-
-	static QueryCache<StateMachineSideEffectLoad, StateMachineSideEffectStore, bool> cache(__func__);
-	int idx = cache.hash(smsel, smses);
-	bool res;
-	if (cache.query(smsel, smses, idx, &res))
-		return res;
-
-	if (definitelyNotEqual(smsel->addr, smses->addr, opt)) {
-		cache.set(smsel, smses, idx, false);
-		return false;
-	}
+		if (!notInTagTable(smsel_dr))
+			return mam_no_alias;
+		return mam_private;
+	} else if (notInTagTable(smsel_dr))
+		return mam_no_alias;
 
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		unsigned long offset = *it;
@@ -396,9 +386,40 @@ Oracle::memoryAccessesMightAlias(CfgDecode &decode,
 		} doit;
 
 		if (doit(hdr->nr_loads, smsel_dr, raw_types_database, offset, &sz) &&
-		    doit(hdr->nr_stores, smses_dr, raw_types_database, offset, &sz)) {
-			cache.set(smsel, smses, idx, true);
-			return true;
+		    doit(hdr->nr_stores, smses_dr, raw_types_database, offset, &sz))
+			return mam_might_alias;
+	}
+	return mam_no_alias;
+}
+bool
+Oracle::memoryAccessesMightAlias(const MaiMap &mai,
+				 const AllowableOptimisations &opt,
+				 StateMachineSideEffectLoad *smsel,
+				 StateMachineSideEffectStore *smses)
+{
+	if (definitelyNotEqual(smsel->addr, smses->addr, opt))
+		return false;
+
+	static QueryCache<StateMachineSideEffectLoad, StateMachineSideEffectStore, bool> cache(__func__);
+	int idx = cache.hash(smsel, smses);
+	bool res;
+	if (cache.query(smsel, smses, idx, &res))
+		return res;
+
+	for (auto it = mai.begin(smsel->rip); !it.finished(); it.advance()) {
+		for (auto it2 = mai.begin(smses->rip); !it2.finished(); it2.advance()) {
+			switch (memoryAccessesMightAliasLS(it.dr(), it2.dr())) {
+			case mam_might_alias:
+				cache.set(smsel, smses, idx, true);
+				return true;
+			case mam_no_alias:
+				continue;
+			case mam_private:
+				if (smsel->rip.tid != smses->rip.tid)
+					continue;
+				cache.set(smsel, smses, idx, true);
+				return true;
+			}
 		}
 	}
 	cache.set(smsel, smses, idx, false);
@@ -482,99 +503,124 @@ Oracle::memoryAccessesMightAliasCrossThread(const DynAnalysisRip &smsel_dr, cons
 	return false;
 }
 
-bool
-Oracle::memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store)
-{
-	return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load),
-						   DynAnalysisRip(store));
-}
-
-bool
-Oracle::memoryAccessesMightAlias(CfgDecode &decode,
-				 const AllowableOptimisations &opt,
-				 StateMachineSideEffectLoad *smsel1,
-				 StateMachineSideEffectLoad *smsel2)
+Oracle::mam_result
+Oracle::memoryAccessesMightAliasLL(const DynAnalysisRip &dr1, const DynAnalysisRip &dr2)
 {
 	__set_profiling(memory_accesses_might_alias_load_load);
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr1(decode.dr(smsel1->rip.where));
-	DynAnalysisRip dr2(decode.dr(smsel2->rip.where));
 	type_index->findOffsets(dr1, offsets);
 	if (offsets.size() == 0) {
-		if (!notInTagTable(decode, smsel2))
-			return false;
-		if (smsel1->rip.tid != smsel2->rip.tid)
-			return false;
-		if (!definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
-			return true;
-		else
-			return false;
-	} else if (notInTagTable(decode, smsel2))
-		return false;
+		if (!notInTagTable(dr2))
+			return mam_no_alias;
+		return mam_private;
+	} else if (notInTagTable(dr1))
+		return mam_no_alias;
 
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		tag_entry te;
 		fetchTagEntry(&te, raw_types_database, *it);
 		if ((te.shared_loads.count(dr2) || te.private_loads.count(dr2)) &&
 		    (te.shared_loads.count(dr1) || te.private_loads.count(dr1)))
-			return true;
+			return mam_might_alias;
+	}
+	return mam_no_alias;
+}
+
+bool
+Oracle::memoryAccessesMightAlias(const MaiMap &mai,
+				 const AllowableOptimisations &opt,
+				 StateMachineSideEffectLoad *smsel1,
+				 StateMachineSideEffectLoad *smsel2)
+{
+	if (definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
+		return false;
+
+	for (auto it = mai.begin(smsel1->rip); !it.finished(); it.advance()) {
+		for (auto it2 = mai.begin(smsel2->rip); !it2.finished(); it2.advance()) {
+			switch (memoryAccessesMightAliasLS(it.dr(), it2.dr())) {
+			case mam_might_alias:
+				return true;
+			case mam_no_alias:
+				continue;
+			case mam_private:
+				if (smsel1->rip.tid != smsel2->rip.tid)
+					continue;
+				return true;
+			}
+		}
 	}
 	return false;
 }
 
-bool
-Oracle::memoryAccessesMightAlias(CfgDecode &decode,
-				 const AllowableOptimisations &opt,
-				 StateMachineSideEffectStore *smses1,
-				 StateMachineSideEffectStore *smses2)
+Oracle::mam_result
+Oracle::memoryAccessesMightAliasSS(const DynAnalysisRip &dr1, const DynAnalysisRip &dr2)
 {
 	__set_profiling(memory_accesses_might_alias_store_store);
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr1(decode.dr(smses1->rip.where));
-	DynAnalysisRip dr2(decode.dr(smses2->rip.where));
 	type_index->findOffsets(dr1, offsets);
 	if (offsets.size() == 0) {
-		if (!notInTagTable(decode, smses2))
-			return false;
-		if (smses1->rip.tid != smses2->rip.tid)
-			return false;
-		if (!definitelyNotEqual(smses2->addr, smses1->addr, opt))
-			return true;
-		else
-			return false;
-	} else if (notInTagTable(decode, smses2))
-		return false;
+		if (!notInTagTable(dr2))
+			return mam_no_alias;
+		return mam_private;
+	} else if (notInTagTable(dr2))
+		return mam_no_alias;
 
 	for (auto it = offsets.begin(); it != offsets.end(); it++) {
 		tag_entry te;
 		fetchTagEntry(&te, raw_types_database, *it);
 		if ((te.shared_stores.count(dr2) || te.private_stores.count(dr2)) &&
 		    (te.shared_stores.count(dr1) || te.private_stores.count(dr1)))
-			return true;
+			return mam_might_alias;
+	}
+	return mam_no_alias;
+}
+
+bool
+Oracle::memoryAccessesMightAlias(const MaiMap &mai,
+				 const AllowableOptimisations &opt,
+				 StateMachineSideEffectStore *smses1,
+				 StateMachineSideEffectStore *smses2)
+{
+	if (definitelyNotEqual(smses1->addr, smses2->addr, opt))
+		return false;
+
+	for (auto it = mai.begin(smses1->rip); !it.finished(); it.advance()) {
+		for (auto it2 = mai.begin(smses2->rip); !it2.finished(); it2.advance()) {
+			switch (memoryAccessesMightAliasSS(it.dr(), it2.dr())) {
+			case mam_might_alias:
+				return true;
+			case mam_no_alias:
+				continue;
+			case mam_private:
+				if (smses1->rip.tid != smses2->rip.tid)
+					continue;
+				return true;
+			}
+		}
 	}
 	return false;
 }
 
 void
-Oracle::findRacingRips(CfgDecode &decode, StateMachineSideEffectLoad *smsel, std::set<DynAnalysisRip> &out)
+Oracle::findRacingRips(const MaiMap &mai, StateMachineSideEffectLoad *smsel, std::set<DynAnalysisRip> &out)
 {
-	findConflictingStores(decode, smsel, out);
+	findConflictingStores(mai, smsel, out);
 }
 
 void
-Oracle::findRacingRips(CfgDecode &decode, StateMachineSideEffectStore *smses, std::set<DynAnalysisRip> &out)
+Oracle::findRacingRips(const MaiMap &mai, StateMachineSideEffectStore *smses, std::set<DynAnalysisRip> &out)
 {
 	__set_profiling(findRacingRips__store);
 	std::vector<unsigned long> offsets;
-	DynAnalysisRip dr(decode.dr(smses->rip.where));
-	type_index->findOffsets(dr, offsets);
-	for (auto it = offsets.begin(); it != offsets.end(); it++) {
-		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it);
-		if (te.shared_stores.count(dr))
-			out |= te.shared_loads;
+	for (auto it = mai.begin(smses->rip); !it.finished(); it.advance()) {
+		type_index->findOffsets(it.dr(), offsets);
+		for (auto it2 = offsets.begin(); it2 != offsets.end(); it2++) {
+			tag_entry te;
+			fetchTagEntry(&te, raw_types_database, *it2);
+			if (te.shared_stores.count(it.dr()))
+				out |= te.shared_loads;
+		}
 	}
-	return;
 }
 
 template <typename t>
@@ -3451,48 +3497,6 @@ Oracle::getAliasingConfiguration(const std::vector<std::pair<unsigned, VexRip> >
 		rac.addConfig(it->first,
 			      getAliasingConfigurationForRip(it->second));
 	return rac;
-}
-
-const CFGNode *
-CfgDecode::operator()(const CfgLabel &cl)
-{
-	std::queue<const CFGNode *> pending;
-	for (auto it = sm.begin(); it != sm.end(); it++) {
-		for (auto it2 = (*it)->cfg_roots.begin(); it2 != (*it)->cfg_roots.end(); it2++)
-			pending.push(it2->second);
-	}
-	std::set<const CFGNode *> visited;
-	while (!pending.empty()) {
-		const CFGNode *c = pending.front();
-		pending.pop();
-		if (!visited.insert(c).second)
-			continue;
-		if (c->label == cl)
-			return c;
-		for (auto it = c->successors.begin(); it != c->successors.end(); it++)
-			if (it->instr)
-				pending.push(it->instr);
-	}
-	abort();
-}
-
-DynAnalysisRip
-CfgDecode::dr(const CfgLabel &cl)
-{
-	return DynAnalysisRip((*this)(cl)->rip);
-}
-
-void
-CfgDecode::addMachine(StateMachine *sms)
-{
-	sm.push_back(sms);
-}
-
-void
-CfgDecode::runGc(HeapVisitor &hv)
-{
-	for (auto it = sm.begin(); it != sm.end(); it++)
-		hv(*it);
 }
 
 PointerAliasingSet

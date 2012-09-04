@@ -7,6 +7,7 @@
 #include "state_machine.hpp"
 #include "eval_state_machine.hpp"
 #include "allowable_optimisations.hpp"
+#include "alloc_mai.hpp"
 
 int
 main(int argc, char *argv[])
@@ -21,10 +22,11 @@ main(int argc, char *argv[])
 	VexPtr<StateMachine, &ir_heap> readMachine(readStateMachine(open(argv[2], O_RDONLY)));
 	VexPtr<StateMachine, &ir_heap> writeMachine(readStateMachine(open(argv[3], O_RDONLY)));
 	VexPtr<IRExpr, &ir_heap> assumption(readIRExpr(open(argv[4], O_RDONLY)));
-	
+	VexPtr<MaiMap, &ir_heap> mai(MaiMap::fromFile(readMachine, writeMachine, argv[5]));
+
 	VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT());
 
-	if (!findRemoteMacroSections(readMachine, writeMachine, assumption, oracle,
+	if (!findRemoteMacroSections(mai, readMachine, writeMachine, assumption, oracle,
 				     AllowableOptimisations::defaultOptimisations,
 				     remoteMacroSections, ALLOW_GC)) {
 		printf("Cannot find remote macro sections...\n");
@@ -39,7 +41,7 @@ main(int argc, char *argv[])
 		it->end->prettyPrint(stdout);
 		printf("\n");
 	}
-	if (!fixSufficient(readMachine, writeMachine, assumption, oracle,
+	if (!fixSufficient(mai, readMachine, writeMachine, assumption, oracle,
 			   AllowableOptimisations::defaultOptimisations,
 			   remoteMacroSections, ALLOW_GC)) {
 		printf("Fix insufficient\n");

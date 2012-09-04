@@ -449,7 +449,8 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       GarbageCollectionToken token,
 		       ThreadAbstracter &abs,
 		       int &next_hb_id,
-		       simulationSlotT &next_slot)
+		       simulationSlotT &next_slot);
+#if 0
 {
 	summary = internCrashSummary(summary);
 
@@ -522,6 +523,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	}
 	return accumulator;
 }
+#endif
 
 /* Try to delay stashing registers until we actually need to do so.
    We start off trying to stash them at the roots of the CFG and we

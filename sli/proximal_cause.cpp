@@ -11,8 +11,9 @@ namespace ProximalCause {
 static StateMachineState *
 getProximalCause(MachineState *ms,
 		 const VexRip &rip,
-		 MemoryAccessIdentifierAllocator &mai,
-		 const CfgLabel &where, int tid)
+		 MaiMap &mai,
+		 const CFGNode *where,
+		 int tid)
 {
 	IRSB *irsb;
 	try {
@@ -91,7 +92,7 @@ getProximalCause(MachineState *ms,
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					mai(where, tid)));
+					mai(tid, where)));
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, ist->addr),
 					  StateMachineCrash::get());
 			break;
@@ -147,7 +148,7 @@ getProximalCause(MachineState *ms,
 					new StateMachineSideEffectLoad(
 						tr,
 						cas->addr,
-						mai(where, tid),
+						mai(tid, where),
 						ty),
 					l4);
 			StateMachineSideEffecting *l2 =
@@ -182,7 +183,7 @@ getProximalCause(MachineState *ms,
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],
-					mai(where, tid),
+					mai(tid, where),
 					ity));
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, dirty->args[0]),
 					  StateMachineCrash::get());
@@ -212,8 +213,8 @@ getProximalCause(MachineState *ms,
 
 StateMachineState *
 getProximalCause(MachineState *ms,
-		 MemoryAccessIdentifierAllocator &mai,
-		 const CfgLabel &where,
+		 MaiMap &mai,
+		 const CFGNode *where,
 		 const VexRip &rip,
 		 int tid)
 {

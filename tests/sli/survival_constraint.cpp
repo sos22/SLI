@@ -7,12 +7,13 @@
 #include "state_machine.hpp"
 #include "eval_state_machine.hpp"
 #include "allowable_optimisations.hpp"
+#include "alloc_mai.hpp"
 
 int
 main(int argc, char *argv[])
 {
-	if (argc < 1)
-		errx(1, "need to know where to read the state machine from");
+	if (argc < 2)
+		errx(1, "need to know where to read the state machine and MAI map from");
 
 	init_sli();
 
@@ -27,7 +28,9 @@ main(int argc, char *argv[])
 		.enableassumePrivateStack()
 		.enableignoreSideEffects();
 
-	survive = survivalConstraintIfExecutedAtomically(sm, nullExpr, oracle, false, opt, ALLOW_GC);
+	VexPtr<MaiMap, &ir_heap> mai(MaiMap::fromFile(sm, argv[2]));
+
+	survive = survivalConstraintIfExecutedAtomically(mai, sm, nullExpr, oracle, false, opt, ALLOW_GC);
 
 	survive = simplifyIRExpr(survive, opt);
 

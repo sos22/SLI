@@ -649,9 +649,9 @@ parseSucc(succ *out, const char *str, const char **suffix)
 
 static bool
 parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
-	 const char *str, const char **suffix)
+	 const char *str, const char **suffix,
+	 std::map<CfgLabel, const CFGNode *> &cfg_labels)
 {
-	std::map<CfgLabel, CFGNode *> cfg_labels;
 	std::map<CFGNode *, std::vector<succ> > relocations;
 	while (1) {
 		std::set<unsigned> rootOf;
@@ -707,8 +707,9 @@ parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 		n->successors.resize(it->second.size(), CFGNode::successor_t(NULL));
 		for (unsigned x = 0; x < it->second.size(); x++) {
 			assert(cfg_labels.count(it->second[x].instr));
-			n->successors[x] = CFGNode::successor_t(it->second[x],
-								cfg_labels[it->second[x].instr]);
+			n->successors[x] = CFGNode::successor_t(
+				it->second[x],
+				const_cast<CFGNode *>(cfg_labels[it->second[x].instr]));
 		}
 	}
 	*suffix = str;
@@ -717,8 +718,9 @@ parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 
 bool
 parseStateMachine(StateMachine **out, const char *str, const char **suffix,
-		  std::map<int, StateMachineState *> &labelToState)
+		  std::map<CfgLabel, const CFGNode *> &labelToNode)
 {
+	std::map<int, StateMachineState *> labelToState;
 	StateMachineState *root;
 
 	/* Shut the compiler up: it can't tell that
@@ -728,7 +730,7 @@ parseStateMachine(StateMachine **out, const char *str, const char **suffix,
 
 	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots;
 	if (!parseThisString("CFG:\n", str, &str) ||
-	    !parseCFG(cfg_roots, str, &str) ||
+	    !parseCFG(cfg_roots, str, &str, labelToNode) ||
 	    !parseStateMachine(&root, str, suffix, labelToState))
 		return false;
 	*out = new StateMachine(root, cfg_roots);
@@ -1021,7 +1023,7 @@ intersectSets(std::set<t, s> &out, const std::set<t, s> &inp)
 
 #ifndef NDEBUG
 void
-StateMachine::sanityCheck() const
+StateMachine::sanityCheck(const MaiMap &mai) const
 {
 	/* These are expensive enough that we don't want them on
 	   unconditionally even in !NDEBUG builds. */
@@ -1075,53 +1077,160 @@ StateMachine::sanityCheck() const
 		it->first->sanityCheck(&definedAtTopOfState[it->first]);
 
 	struct : public StateMachineTransformer {
-		std::set<CfgLabel> neededLabels;
+		std::set<MemoryAccessIdentifier> neededMais;
 		IRExpr *transformIex(IRExprHappensBefore *hb) {
-			neededLabels.insert(hb->before.where);
-			neededLabels.insert(hb->after.where);
+			neededMais.insert(hb->before);
+			neededMais.insert(hb->after);
 			return hb;
 		}
 		StateMachineSideEffectLoad *transformOneSideEffect(
 			StateMachineSideEffectLoad *smse, bool *done_something)
 		{
-			neededLabels.insert(smse->rip.where);
+			neededMais.insert(smse->rip);
 			return StateMachineTransformer::transformOneSideEffect(smse, done_something);
 		}
 		StateMachineSideEffectStore *transformOneSideEffect(
 			StateMachineSideEffectStore *smse, bool *done_something)
 		{
-			neededLabels.insert(smse->rip.where);
+			neededMais.insert(smse->rip);
 			return StateMachineTransformer::transformOneSideEffect(smse, done_something);
 		}
 		bool rewriteNewStates() const { return false; }
-	} findNeededLabels;
-	findNeededLabels.transform(const_cast<StateMachine *>(this));
+	} findNeededMais;
+	findNeededMais.transform(const_cast<StateMachine *>(this));
+
+	std::set<const CFGNode *> neededLabels;
+	for (auto it = findNeededMais.neededMais.begin(); it != findNeededMais.neededMais.end(); it++) {
+		for (auto it2 = mai.begin(*it); !it2.finished(); it2.advance())
+			neededLabels.insert(it2.node());
+	}
+
 	std::queue<const CFGNode *> pending;
 	for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++)
 		pending.push(it->second);
 	while (!pending.empty()) {
 		const CFGNode *n = pending.front();
 		pending.pop();
-		findNeededLabels.neededLabels.erase(n->label);
+		neededLabels.erase(n);
 		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
 			if (it->instr)
 				pending.push(it->instr);
 	}
-	assert(findNeededLabels.neededLabels.empty());
+	assert(neededLabels.empty());
 }
 #endif
 
 MemoryAccessIdentifier
-MemoryAccessIdentifierAllocator::operator()(const CfgLabel &node, int tid)
+MaiMap::operator()(unsigned tid, const CFGNode *node)
 {
-	auto it_did_insert = ids.insert(std::pair<std::pair<int, CfgLabel>, unsigned>(std::pair<int, CfgLabel>(tid, node), -1));
-	auto it = it_did_insert.first;
-	it->second++;
-	return MemoryAccessIdentifier(node, tid, it->second);
+	MemoryAccessIdentifier res(nextId, tid);
+	nextId++;
+	assert(!maiCorrespondence->count(res));
+	(*maiCorrespondence)[res].push_back(node);
+	return res;
 }
 
 IRExpr *
-MemoryAccessIdentifierAllocator::freeVariable(IRType ty, int tid, const CfgLabel &node, bool isUnique)
+MaiMap::freeVariable(IRType ty, unsigned tid, const CFGNode *node, bool isUnique)
 {
-	return IRExpr_FreeVariable((*this)(node, tid), ty, isUnique);
+	return IRExpr_FreeVariable((*this)(tid, node), ty, isUnique);
+}
+
+void
+MaiMap::print(FILE *f) const
+{
+	fprintf(f, "Memory access identifiers:\n");
+	for (auto it = maiCorrespondence->begin(); it != maiCorrespondence->end(); it++) {
+		fprintf(f, "\t%s -> {", it->first.name());
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			if (it2 != it->second.begin())
+				fprintf(f, ", ");
+			fprintf(f, "%s", (*it2)->label.name());
+		}
+	}
+	fprintf(f, "Next id %d\n", nextId);
+}
+
+MaiMap *
+MaiMap::parse(const std::map<CfgLabel, const CFGNode *> &labels, const char *buf, const char **suffix)
+{
+	if (!parseThisString("Memory access identifiers:\n", buf, &buf))
+		return false;
+	std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> > *res =
+		new std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> >();
+	while (1) {
+		int nextId;
+		if (parseThisString("Next id ", buf, &buf) &&
+		    parseDecimalInt(&nextId, buf, suffix))
+			return new MaiMap(nextId, res);
+		MemoryAccessIdentifier mai(MemoryAccessIdentifier::uninitialised());
+		if (!mai.parse(buf, &buf) ||
+		    !parseThisString(" -> {", buf, &buf))
+			break;
+		std::vector<const CFGNode *> entry;
+		if (!parseThisChar('}', buf, &buf)) {
+			CfgLabel l(CfgLabel::uninitialised());
+			if (!l.parse(buf, &buf))
+				break;
+			auto it = labels.find(l);
+			if (it == labels.end())
+				break;
+			entry.push_back(it->second);
+			while (!parseThisChar('}', buf, &buf)) {
+				if (!parseThisString(", ", buf, &buf) ||
+				    !l.parse(buf, &buf))
+					goto failed;
+				auto it = labels.find(l);
+				if (it == labels.end())
+					goto failed;
+				entry.push_back(it->second);
+			}
+		}
+		if (!parseThisChar('\n', buf, &buf))
+			break;
+		auto it_did_insert = res->insert(std::pair<MemoryAccessIdentifier, std::vector<const CFGNode *> >(mai, entry));
+		if (!it_did_insert.second)
+			break;
+	}
+failed:
+	delete res;
+	return NULL;
+}
+
+MaiMap *
+MaiMap::fromFile(const StateMachine *sm1, const StateMachine *sm2, const char *fname)
+{
+	std::map<CfgLabel, const CFGNode *> lookup;
+	std::queue<const CFGNode *> pending;
+	for (auto it = sm1->cfg_roots.begin(); it != sm1->cfg_roots.end(); it++)
+		pending.push(it->second);
+	if (sm2) {
+		for (auto it = sm2->cfg_roots.begin(); it != sm2->cfg_roots.end(); it++)
+			pending.push(it->second);
+	}
+	while (!pending.empty()) {
+		const CFGNode *n = pending.front();
+		pending.pop();
+		auto it_did_insert = lookup.insert(std::pair<CfgLabel, const CFGNode *>(n->label, n));
+		auto did_insert = it_did_insert.second;
+		if (did_insert) {
+			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+				pending.push(it->instr);
+		}
+	}
+
+	int fd = open(fname, O_RDONLY);
+	if (fd < 0)
+		err(1, "opening %s", fname);
+	char *buf = readfile(fd);
+	const char *suffix;
+	MaiMap *res = parse(lookup, buf, &suffix);
+	free(buf);
+	return res;
+}
+
+MaiMap *
+MaiMap::fromFile(const StateMachine *sm1, const char *fname)
+{
+	return fromFile(sm1, NULL, fname);
 }

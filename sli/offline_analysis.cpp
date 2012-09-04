@@ -130,14 +130,12 @@ enforceMustStoreBeforeCrash(StateMachine *sm, bool *progress)
  * remove them.  This is kind of redundant with realias, except that
  * here we don't rely on havign access to stack layout information. */
 static StateMachine *
-removeTerminalStores(StateMachine *sm,
+removeTerminalStores(const MaiMap &mai,
+		     StateMachine *sm,
 		     const AllowableOptimisations &opt,
 		     OracleInterface *oracle,
 		     bool *done_something)
 {
-	CfgDecode decode;
-	decode.addMachine(sm);
-
 	std::set<StateMachineSideEffecting *> states;
 	enumStates(sm, &states);
 	for (auto it = states.begin(); it != states.end(); it++) {
@@ -154,7 +152,7 @@ removeTerminalStores(StateMachine *sm,
 			if (s->getSideEffect() &&
 			    s->getSideEffect()->type == StateMachineSideEffect::Load &&
 			    oracle->memoryAccessesMightAlias(
-				    decode,
+				    mai,
 				    opt,
 				    (StateMachineSideEffectLoad *)s->getSideEffect(),
 				    store) &&
@@ -166,7 +164,7 @@ removeTerminalStores(StateMachine *sm,
 			} else if (s->getSideEffect() &&
 				   s->getSideEffect()->type == StateMachineSideEffect::Store &&
 				   oracle->memoryAccessesMightAlias(
-					   decode,
+					   mai,
 					   opt,
 					   (StateMachineSideEffectStore *)s->getSideEffect(),
 					   store) &&
@@ -190,15 +188,16 @@ removeTerminalStores(StateMachine *sm,
 }
 
 static StateMachine *
-_optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
-		     const AllowableOptimisations &opt,
-		     const VexPtr<OracleInterface> &oracle,
-		     bool is_ssa,
-		     GarbageCollectionToken token,
-		     bool *progress)
+_optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+		      VexPtr<StateMachine, &ir_heap> sm,
+		      const AllowableOptimisations &opt,
+		      const VexPtr<OracleInterface> &oracle,
+		      bool is_ssa,
+		      GarbageCollectionToken token,
+		      bool *progress)
 {
 	__set_profiling(optimiseStateMachine);
-	sm->sanityCheck();
+	sm->sanityCheck(*mai);
 	sm->assertAcyclic();
 
 	if (debugOptimiseStateMachine) {
@@ -257,7 +256,7 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		LibVEX_maybe_gc(token);
 
 		p = false;
-		sm = availExpressionAnalysis(sm, opt, is_ssa, oracle, &p);
+		sm = availExpressionAnalysis(*mai, sm, opt, is_ssa, oracle, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("availExpressionAnalysis:\n");
 			printStateMachine(sm, stdout);
@@ -288,7 +287,7 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		}
 		if (opt.noExtend()) {
 			p = false;
-			sm = useInitialMemoryLoads(sm, opt, oracle, &p);
+			sm = useInitialMemoryLoads(*mai, sm, opt, oracle, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("useInitialMemoryLoads:\n");
 				printStateMachine(sm, stdout);
@@ -316,7 +315,7 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 
 		if (opt.ignoreSideEffects() && !done_something) {
 			p = false;
-			sm = removeTerminalStores(sm, opt, oracle, &p);
+			sm = removeTerminalStores(*mai, sm, opt, oracle, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("removeTerminalStores:\n");
 				printStateMachine(sm, stdout);
@@ -338,7 +337,7 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				break;
 
 			p = false;
-			sm = functionAliasAnalysis(sm, opt, oracle, cdm, &p);
+			sm = functionAliasAnalysis(*mai, sm, opt, oracle, cdm, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("functionAliasAnalysis:\n");
 				printStateMachine(sm, stdout);
@@ -358,23 +357,25 @@ _optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 			*progress |= done_something;
 	} while (done_something);
 	sm->assertAcyclic();
-	sm->sanityCheck();
+	sm->sanityCheck(*mai);
 	if (is_ssa)
 		sm->assertSSA();
 	return sm;
 }
 StateMachine *
-optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
+optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+		     VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
 		     const VexPtr<OracleInterface> &oracle,
 		     bool is_ssa,
 		     GarbageCollectionToken token,
 		     bool *progress)
 {
-	return _optimiseStateMachine(sm, opt, oracle, is_ssa, token, progress);
+	return _optimiseStateMachine(mai, sm, opt, oracle, is_ssa, token, progress);
 }
 StateMachine *
-optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
+optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+		     VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
 		     const VexPtr<Oracle> &oracle,
 		     bool is_ssa,
@@ -382,11 +383,11 @@ optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 		     bool *progress)
 {
 	VexPtr<OracleInterface> oracleI(oracle);
-	return _optimiseStateMachine(sm, opt, oracleI, is_ssa, token, progress);
+	return _optimiseStateMachine(mai, sm, opt, oracleI, is_ssa, token, progress);
 }
 
 static void
-getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores)
+getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores)
 {
 	std::set<StateMachineSideEffectLoad *> allLoads;
 	enumSideEffects(sm, allLoads);
@@ -394,30 +395,23 @@ getConflictingStores(StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> 
 		fprintf(_logfile, "\t\tNo loads left in store machine?\n");
 		return;
 	}
-	CfgDecode decode;
-	decode.addMachine(sm);
 	for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 	     it != allLoads.end();
-	     it++) {
-		oracle->findConflictingStores(decode, *it, potentiallyConflictingStores);
-	}
+	     it++)
+		oracle->findConflictingStores(mai, *it, potentiallyConflictingStores);
 }
 
 /* If there's precisely one interesting store in the store machine and
  * one interesting load in the probe machine then the whole thing
  * becomes very easy. */
 static bool
-singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachine,
+singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, StateMachine *probeMachine,
 			    const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineSideEffectStore *> storeMachineStores;
 	std::set<StateMachineSideEffectLoad *> probeMachineLoads;
 	enumSideEffects(storeMachine, storeMachineStores);
 	enumSideEffects(probeMachine, probeMachineLoads);
-
-	CfgDecode decode;
-	decode.addMachine(storeMachine);
-	decode.addMachine(probeMachine);
 
 	StateMachineSideEffectStore *racingStore = NULL;
 	StateMachineSideEffectLoad *racingLoad = NULL;
@@ -428,7 +422,7 @@ singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachi
 		     !races && it2 != probeMachineLoads.end();
 		     it2++) {
 			StateMachineSideEffectLoad *load = *it2;
-			if (oracle->memoryAccessesMightAlias(decode, opt, load, store)) {
+			if (oracle->memoryAccessesMightAlias(mai, opt, load, store)) {
 				if (racingLoad) {
 					/* Multiple racing loads */
 					return false;
@@ -465,16 +459,16 @@ singleLoadVersusSingleStore(StateMachine *storeMachine, StateMachine *probeMachi
 		StateMachineSideEffectLoad *load = *it;
 		if (racingLoad == load)
 			continue;
-		if (oracle->memoryAccessesMightAlias(decode, opt, load, racingStore))
+		if (oracle->memoryAccessesMightAlias(mai, opt, load, racingStore))
 			return false;
 	}
 
 	return true;
 }
 
-
 static IRExpr *
-atomicSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &machine,
+atomicSurvivalConstraint(const VexPtr<MaiMap, &ir_heap> &mai,
+			 VexPtr<StateMachine, &ir_heap> &machine,
 			 StateMachine **_atomicMachine,
 			 VexPtr<OracleInterface> &oracle,
 			 const AllowableOptimisations &opt,
@@ -482,7 +476,7 @@ atomicSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &machine,
 {
 	VexPtr<StateMachine, &ir_heap> atomicMachine;
 	atomicMachine = duplicateStateMachine(machine);
-	atomicMachine = optimiseStateMachine(atomicMachine, opt, oracle, true, token);
+	atomicMachine = optimiseStateMachine(mai, atomicMachine, opt, oracle, true, token);
 	VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;
@@ -491,7 +485,7 @@ atomicSurvivalConstraint(VexPtr<StateMachine, &ir_heap> &machine,
 		 * atomically! */
 		return IRExpr_Const(IRConst_U1(0));
 	}
-	IRExpr *survive = survivalConstraintIfExecutedAtomically(atomicMachine, nullexpr, oracle, false, opt, token);
+	IRExpr *survive = survivalConstraintIfExecutedAtomically(mai, atomicMachine, nullexpr, oracle, false, opt, token);
 	if (!survive) {
 		fprintf(_logfile, "\tTimed out computing survival constraint\n");
 		return NULL;
@@ -552,11 +546,12 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 }
 
 StateMachine *
-removeAnnotations(VexPtr<StateMachine, &ir_heap> sm,
-		 const AllowableOptimisations &opt,
-		 const VexPtr<OracleInterface> &oracle,
-		 bool is_ssa,
-		 GarbageCollectionToken token)
+removeAnnotations(const VexPtr<MaiMap, &ir_heap> &mai,
+		  VexPtr<StateMachine, &ir_heap> sm,
+		  const AllowableOptimisations &opt,
+		  const VexPtr<OracleInterface> &oracle,
+		  bool is_ssa,
+		  GarbageCollectionToken token)
 {
 	/* Iterate to make sure we get rid of any assertions
 	   introduced by the optimiser itself. */
@@ -568,7 +563,7 @@ removeAnnotations(VexPtr<StateMachine, &ir_heap> sm,
 		if (!done_something)
 			break;
 		done_something = false;
-		sm = optimiseStateMachine(sm, opt, oracle, is_ssa,
+		sm = optimiseStateMachine(mai, sm, opt, oracle, is_ssa,
 					  token, &done_something);
 		if (!done_something)
 			break;
@@ -580,7 +575,7 @@ static IRExpr *
 verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachine,
 				     VexPtr<StateMachine, &ir_heap> probeMachine,
 				     VexPtr<OracleInterface> &oracle,
-				     const MemoryAccessIdentifierAllocator &mai,
+				     const VexPtr<MaiMap, &ir_heap> &mai,
 				     const AllowableOptimisations &optIn,
 				     GarbageCollectionToken token)
 {
@@ -595,7 +590,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 
 	VexPtr<StateMachine, &ir_heap> sm;
 	sm = duplicateStateMachine(storeMachine);
-	sm = optimiseStateMachine(sm, storeOptimisations, oracle, true, token);
+	sm = optimiseStateMachine(mai, sm, storeOptimisations, oracle, true, token);
 
 	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
 		/* This store machine is unusable, probably because we
@@ -608,7 +603,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
 
-	probeMachine = optimiseStateMachine(probeMachine, probeOptimisations, oracle, true, token);
+	probeMachine = optimiseStateMachine(mai, probeMachine, probeOptimisations, oracle, true, token);
 
 	fprintf(_logfile, "\t\tAssertion-free probe machine:\n");
 	printStateMachine(probeMachine, _logfile);
@@ -617,19 +612,20 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	   probe machine and the store machine is a single load in the
 	   probe machine and a single store in the store machine then
 	   we don't need to do anything. */
-	if (singleLoadVersusSingleStore(storeMachine, probeMachine, optIn, oracle)) {
+	if (singleLoadVersusSingleStore(*mai, storeMachine, probeMachine, optIn, oracle)) {
 		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
 		return NULL;
 	}
 
 	VexPtr<IRExpr, &ir_heap> assumption;
-	assumption = atomicSurvivalConstraint(probeMachine, NULL, oracle,
+	assumption = atomicSurvivalConstraint(mai, probeMachine, NULL, oracle,
 					      atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
 					      token);
 	if (!assumption)
 		return NULL;
 
 	assumption = writeMachineSuitabilityConstraint(
+		mai,
 		sm,
 		probeMachine,
 		oracle,
@@ -676,13 +672,11 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 }
 
 static StateMachine *
-truncateStateMachine(StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
+truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
 {
-	CfgDecode decode;
-	decode.addMachine(sm);
 	StateMachineBifurcate *smb =
 		new StateMachineBifurcate(
-			decode(truncateAt->rip.where)->rip,
+			mai.begin(truncateAt->rip).node()->rip,
 			IRExpr_Unop(
 				Iop_BadPtr,
 				truncateAt->addr),
@@ -717,7 +711,8 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 }
 
 static StateMachine *
-localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
+localiseLoads(const VexPtr<MaiMap, &ir_heap> &mai,
+	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      const VexPtr<StateMachine, &ir_heap> &storeMachine,
 	      const AllowableOptimisations &opt,
 	      const VexPtr<OracleInterface> &oracle,
@@ -726,26 +721,28 @@ localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 {
 	std::set<DynAnalysisRip> nonLocalLoads;
 	{
-		CfgDecode decode;
-		decode.addMachine(probeMachine);
-		decode.addMachine(storeMachine);
 		std::set<StateMachineSideEffectStore *> stores;
 		enumSideEffects(storeMachine, stores);
 		std::set<StateMachineSideEffectLoad *> loads;
 		enumSideEffects(probeMachine, loads);
 		for (auto it = loads.begin(); it != loads.end(); it++) {
 			StateMachineSideEffectLoad *load = *it;
-			bool found_one = false;
-			for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
-				StateMachineSideEffectStore *store = *it2;
-				if (oracle->memoryAccessesMightAlias(decode, opt, load, store))
-					found_one = true;
+			for (auto it2 = mai->begin(load->rip); !it2.finished(); it2.advance()) {
+				DynAnalysisRip dr(it2.dr());
+				bool found_one = false;
+				for (auto it3 = stores.begin(); !found_one && it3 != stores.end(); it3++) {
+					StateMachineSideEffectStore *store = *it3;
+					for (auto it4 = mai->begin(store->rip); !found_one && !it4.finished(); it4.advance())
+						if (oracle->memoryAccessesMightAliasCrossThread(dr, it4.dr()))
+							found_one = true;
+				}
+				if (found_one)
+					nonLocalLoads.insert(dr);
 			}
-			if (found_one)
-				nonLocalLoads.insert(decode.dr(load->rip.where));
 		}
 	}
 	return optimiseStateMachine(
+		mai,
 		probeMachine,
 		opt.setnonLocalLoads(&nonLocalLoads),
 		oracle,
@@ -755,7 +752,8 @@ localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 }
 
 static StateMachine *
-localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
+localiseLoads(const VexPtr<MaiMap, &ir_heap> &mai,
+	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      const std::set<DynAnalysisRip> &stores,
 	      const AllowableOptimisations &opt,
 	      const VexPtr<OracleInterface> &oracle,
@@ -764,23 +762,24 @@ localiseLoads(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 {
 	std::set<DynAnalysisRip> nonLocalLoads;
 	{
-		CfgDecode decode;
-		decode.addMachine(probeMachine);
 		std::set<StateMachineSideEffectLoad *> loads;
 		enumSideEffects(probeMachine, loads);
 		for (auto it = loads.begin(); it != loads.end(); it++) {
 			StateMachineSideEffectLoad *load = *it;
-			bool found_one = false;
-			for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
-				DynAnalysisRip store = *it2;
-				if (oracle->memoryAccessesMightAliasCrossThread(decode.dr(load->rip.where), store))
-					found_one = true;
+			for (auto it3 = mai->begin(load->rip); !it3.finished(); it3.advance()) {
+				bool found_one = false;
+				for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
+					DynAnalysisRip store = *it2;
+					if (oracle->memoryAccessesMightAliasCrossThread(it3.dr(), store))
+						found_one = true;
+				}
+				if (found_one)
+					nonLocalLoads.insert(it3.dr());
 			}
-			if (found_one)
-				nonLocalLoads.insert(decode.dr(load->rip.where));
 		}
 	}
 	return optimiseStateMachine(
+		mai,
 		probeMachine,
 		opt.setnonLocalLoads(&nonLocalLoads),
 		oracle,
@@ -797,11 +796,12 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		 bool needRemoteMacroSections,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
-		 MemoryAccessIdentifierAllocator &mai,
+		 const VexPtr<MaiMap, &ir_heap> &maiIn,
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
-	VexPtr<StateMachine, &ir_heap> sm(storeCFGToMachine(oracle, tid, cfg, mai));
+	VexPtr<MaiMap, &ir_heap> mai(maiIn->dupe());
+	VexPtr<StateMachine, &ir_heap> sm(storeCFGToMachine(oracle, tid, cfg, *mai));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return NULL;
@@ -816,6 +816,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 			enableignoreSideEffects();
 	VexPtr<OracleInterface> oracleI(oracle);
 	sm = optimiseStateMachine(
+		mai,
 		sm,
 		storeOptimisations,
 		oracle,
@@ -827,13 +828,15 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		return NULL;
 
 	sm_ssa = optimiseStateMachine(
+		mai,
 		sm_ssa,
 		storeOptimisations,
 		oracle,
 		true,
 		token);
 	probeMachine = duplicateStateMachine(probeMachine);
-	probeMachine = localiseLoads(probeMachine,
+	probeMachine = localiseLoads(mai,
+				     probeMachine,
 				     sm_ssa,
 				     probeOptimisations,
 				     oracleI,
@@ -859,10 +862,6 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		return NULL;
 	}
 
-	CfgDecode decode;
-	decode.addMachine(probeMachine);
-	decode.addMachine(sm_ssa);
-
 	/* Now have a look at whether we have anything we can use the
 	 * induction rule on.  That means look at the probe machine
 	 * and pulling out all of the loads which are present in the
@@ -876,9 +875,12 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		enumSideEffects(probeMachine, probeAccesses);
 		std::set<StateMachineSideEffectMemoryAccess *> typeDbProbeAccesses;
 		for (auto it = probeAccesses.begin(); it != probeAccesses.end(); it++) {
-			DynAnalysisRip dr(decode.dr((*it)->rip.where));
-			if (oracle->type_index->ripPresent(dr))
-				typeDbProbeAccesses.insert(*it);
+			for (auto it2 = mai->begin((*it)->rip); !it2.finished(); it2.advance()) {
+				if (oracle->type_index->ripPresent(it2.dr())) {
+					typeDbProbeAccesses.insert(*it);
+					break;
+				}
+			}
 		}
 		inductionAccesses = (StateMachineSideEffectMemoryAccess **)__LibVEX_Alloc_Ptr_Array(&ir_heap, typeDbProbeAccesses.size());
 		auto it = typeDbProbeAccesses.begin();
@@ -897,9 +899,10 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 			return NULL;
 		VexPtr<StateMachine, &ir_heap> truncatedMachine(
 			truncateStateMachine(
+				*mai,
 				probeMachine,
 				inductionAccesses[x]));
-		truncatedMachine = optimiseStateMachine(truncatedMachine, optIn, oracle, true, token);
+		truncatedMachine = optimiseStateMachine(mai, truncatedMachine, optIn, oracle, true, token);
 		IRExpr *t = verificationConditionForStoreMachine(
 			sm_ssa,
 			truncatedMachine,
@@ -931,9 +934,8 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		fprintf(_logfile, "After simplification: ");
 		ppIRExpr(residual_verification_condition,  _logfile);
 		fprintf(_logfile, "\n");
-		logUseOfInduction(
-			target_rip,
-			decode.dr(inductionAccesses[x]->rip.where));
+		for (auto it = mai->begin(inductionAccesses[x]->rip); !it.finished(); it.advance())
+			logUseOfInduction(target_rip, it.dr());
 		if (residual_verification_condition->tag == Iex_Const &&
 		    ((IRExprConst *)residual_verification_condition.get())->con->Ico.U1 == 0) {
 			fprintf(_logfile, "\t\tCrash impossible.\n");
@@ -949,15 +951,15 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
-	VexPtr<CrashSummary, &ir_heap> res(new CrashSummary(probeMachine, sm_ssa, residual_verification_condition, oracle));
+	VexPtr<CrashSummary, &ir_heap> res(new CrashSummary(probeMachine, sm_ssa, residual_verification_condition, oracle, mai));
 	if (needRemoteMacroSections) {
 		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
-		if (!findRemoteMacroSections(probeMachine, sm_ssa, residual_verification_condition,
+		if (!findRemoteMacroSections(mai, probeMachine, sm_ssa, residual_verification_condition,
 					     oracleI, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tChose a bad write machine...\n");
 			return NULL;
 		}
-		if (!fixSufficient(sm, probeMachine, residual_verification_condition,
+		if (!fixSufficient(mai, sm, probeMachine, residual_verification_condition,
 				   oracleI, optIn, remoteMacroSections, token)) {
 			fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
 			return NULL;
@@ -979,7 +981,7 @@ buildProbeMachine(CfgLabelAllocator &allocLabel,
 		  const AllowableOptimisations &optIn,
 		  StateMachine ***out,
 		  unsigned *nr_out_machines,
-		  MemoryAccessIdentifierAllocator &mai,
+		  VexPtr<MaiMap, &ir_heap> &mai,
 		  GarbageCollectionToken token)
 {
 	__set_profiling(buildProbeMachine);
@@ -1003,7 +1005,7 @@ buildProbeMachine(CfgLabelAllocator &allocLabel,
 		probeCFGsToMachine(oracle, tid._tid(),
 				   roots,
 				   proximalNodes,
-				   mai,
+				   *mai,
 				   machines);
 		sms = (StateMachine **)__LibVEX_Alloc_Ptr_Array(&ir_heap, machines.size());
 		nr_sms = 0;
@@ -1019,9 +1021,10 @@ buildProbeMachine(CfgLabelAllocator &allocLabel,
 
 	for (unsigned x = 0; x < nr_sms; x++) {
 		VexPtr<StateMachine, &ir_heap> sm(sms[x]);
-		sm->sanityCheck();
+		sm->sanityCheck(*mai);
 
-		sm = optimiseStateMachine(sm,
+		sm = optimiseStateMachine(mai,
+					  sm,
 					  opt,
 					  oracle,
 					  false,
@@ -1030,8 +1033,9 @@ buildProbeMachine(CfgLabelAllocator &allocLabel,
 		sm = convertToSSA(sm);
 		if (TIMEOUT)
 			return false;
-		sm->sanityCheck();
-		sm = optimiseStateMachine(sm,
+		sm->sanityCheck(*mai);
+		sm = optimiseStateMachine(mai,
+					  sm,
 					  opt,
 					  oracle,
 					  true,
@@ -1054,16 +1058,19 @@ isSingleNodeCfg(CFGNode *root)
 }
 
 static bool
-machineHasOneRacingLoad(StateMachine *sm, const VexRip &vr, OracleInterface *oracle)
+machineHasOneRacingLoad(const MaiMap &mai, StateMachine *sm, const VexRip &vr, OracleInterface *oracle)
 {
-	CfgDecode decode;
-	decode.addMachine(sm);
 	std::set<StateMachineSideEffectLoad *> loads;
 	enumSideEffects(sm, loads);
 	bool got_one = false;
 	for (auto it = loads.begin(); it != loads.end(); it++) {
 		StateMachineSideEffectLoad *load = *it;
-		if (oracle->memoryAccessesMightAliasCrossThread(decode(load->rip.where)->rip, vr)) {
+		bool races = false;
+		for (auto it2 = mai.begin(load->rip); !races && !it2.finished(); it2.advance()) {
+			if (oracle->memoryAccessesMightAliasCrossThread(it2.node()->rip, vr))
+				races = true;
+		}
+		if (races) {
 			if (got_one)
 				return false;
 			got_one = true;
@@ -1085,7 +1092,7 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 		      bool needRemoteMacroSections,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
 		      const AllowableOptimisations &optIn,
-		      const MemoryAccessIdentifierAllocator &mai,
+		      const VexPtr<MaiMap, &ir_heap> &maiIn,
 		      GarbageCollectionToken token)
 {
 	assert(potentiallyConflictingStores.size() > 0);
@@ -1113,13 +1120,12 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 		}
 
 		if (singleNodeCfg &&
-		    machineHasOneRacingLoad(assertionFreeProbeMachine, storeCFGs[i]->rip, oracle)) {
+		    machineHasOneRacingLoad(*maiIn, assertionFreeProbeMachine, storeCFGs[i]->rip, oracle)) {
 			fprintf(_logfile, "Single store versus single shared load -> no race possible\n");
 			continue;
 		}
 
 		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
-		MemoryAccessIdentifierAllocator storeMai(mai);
 		VexPtr<CrashSummary, &ir_heap> summary;
 
 		summary = considerStoreCFG(targetRip,
@@ -1129,7 +1135,7 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 					   needRemoteMacroSections,
 					   STORING_THREAD + i,
 					   optIn.setinterestingStores(&potentiallyConflictingStores),
-					   storeMai,
+					   maiIn,
 					   token);
 		if (summary)
 			df(summary, token);
@@ -1151,7 +1157,7 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 	      FixConsumer &df,
 	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
-	      const MemoryAccessIdentifierAllocator &mai,
+	      const VexPtr<MaiMap, &ir_heap> &mai,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(diagnoseCrash);
@@ -1184,16 +1190,17 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
 
 	VexPtr<OracleInterface> oracleI(oracle);
-	reducedProbeMachine = removeAnnotations(probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
+	reducedProbeMachine = removeAnnotations(mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 	if (!reducedProbeMachine)
 		return NULL;
-	getConflictingStores(reducedProbeMachine, oracle, potentiallyConflictingStores);
+	getConflictingStores(*mai, reducedProbeMachine, oracle, potentiallyConflictingStores);
 	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 		return NULL;
 	}
 	bool localised_loads = false;
-	probeMachine = localiseLoads(probeMachine,
+	probeMachine = localiseLoads(mai,
+				     probeMachine,
 				     potentiallyConflictingStores,
 				     optIn.enableignoreSideEffects(),
 				     oracleI,
@@ -1202,10 +1209,10 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 	if (localised_loads) {
 		std::set<DynAnalysisRip> newPotentiallyConflictingStores;
 		while (1) {
-			reducedProbeMachine = removeAnnotations(probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
+			reducedProbeMachine = removeAnnotations(mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 			if (!reducedProbeMachine)
 				return NULL;
-			getConflictingStores(reducedProbeMachine, oracle, newPotentiallyConflictingStores);
+			getConflictingStores(*mai, reducedProbeMachine, oracle, newPotentiallyConflictingStores);
 			if (potentiallyConflictingStores.size() == 0) {
 				fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 				return NULL;
@@ -1214,7 +1221,7 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 				break;
 			potentiallyConflictingStores = newPotentiallyConflictingStores;
 			localised_loads = false;
-			probeMachine = localiseLoads(probeMachine,
+			probeMachine = localiseLoads(mai, probeMachine,
 						     potentiallyConflictingStores,
 						     optIn.enableignoreSideEffects(),
 						     oracleI, token, &localised_loads);
@@ -1310,7 +1317,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				FixConsumer &df,
 				GarbageCollectionToken token)
 {
-	MemoryAccessIdentifierAllocator mai;
+	VexPtr<MaiMap, &ir_heap> mai(MaiMap::empty());
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations

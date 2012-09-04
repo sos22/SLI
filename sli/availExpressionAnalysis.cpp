@@ -386,7 +386,7 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 }
 
 static void
-updateAvailSetForSideEffect(CfgDecode &decode,
+updateAvailSetForSideEffect(const MaiMap &decode,
 			    avail_t &outputAvail,
 			    StateMachineSideEffect *smse,
 			    StateMachineState *where,
@@ -531,7 +531,7 @@ applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_assumptions, bool *do
    doesn't so much eliminate loads are replace them with copies of
    already-loaded values. */
 static StateMachineSideEffect *
-buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
+buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 					StateMachineState *where,
 					StateMachineSideEffect *smse,
 					avail_t &currentlyAvailable,
@@ -778,7 +778,7 @@ buildNewStateMachineWithLoadsEliminated(CfgDecode &decode,
 
 static StateMachineState *
 buildNewStateMachineWithLoadsEliminated(
-	CfgDecode &decode,
+	const MaiMap &decode,
 	StateMachineState *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
 	std::map<StateMachineState *, StateMachineState *> &memo,
@@ -846,7 +846,7 @@ buildNewStateMachineWithLoadsEliminated(
 
 static StateMachine *
 buildNewStateMachineWithLoadsEliminated(
-	CfgDecode &decode,
+	const MaiMap &decode,
 	StateMachine *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
 	const AllowableOptimisations &opt,
@@ -869,7 +869,8 @@ buildNewStateMachineWithLoadsEliminated(
 }
 
 static StateMachine *
-availExpressionAnalysis(StateMachine *sm,
+availExpressionAnalysis(const MaiMap &decode,
+			StateMachine *sm,
 			const AllowableOptimisations &opt,
 			bool is_ssa,
 			OracleInterface *oracle,
@@ -880,9 +881,6 @@ availExpressionAnalysis(StateMachine *sm,
 		printf("Avail analysis on state machine:\n");
 		printStateMachine(sm, stdout, edgeLabels);
 	}
-
-	CfgDecode decode;
-	decode.addMachine(sm);
 
 	MachineAliasingTable alias;
 	if (is_ssa)
@@ -1036,17 +1034,18 @@ availExpressionAnalysis(StateMachine *sm,
 }
 
 StateMachine *
-availExpressionAnalysis(StateMachine *sm,
+availExpressionAnalysis(const MaiMap &decode,
+			StateMachine *sm,
 			const AllowableOptimisations &opt,
 			bool is_ssa,
 			OracleInterface *oracle,
 			bool *done_something)
 {
-	sm->sanityCheck();
+	sm->sanityCheck(decode);
 	if (is_ssa)
 		sm->assertSSA();
-	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(sm, opt, is_ssa, oracle, done_something);
-	res->sanityCheck();
+	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(decode, sm, opt, is_ssa, oracle, done_something);
+	res->sanityCheck(decode);
 	if (is_ssa)
 		res->assertSSA();
 	return res;

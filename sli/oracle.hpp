@@ -18,16 +18,6 @@ public:
 	std::set<VexRip> rips;
 };
 
-class CfgDecode : public GcCallback<&ir_heap> {
-	std::vector<StateMachine *> sm;
-public:
-	const CFGNode *operator()(const CfgLabel &cl);
-	DynAnalysisRip dr(const CfgLabel &cl);
-
-	void addMachine(StateMachine *sm);
-	void runGc(HeapVisitor &hv);
-};
-
 class AllowableOptimisations;
 
 /* Use these rather than VexRips for static analysis, because that
@@ -63,10 +53,10 @@ public:
 
 class OracleInterface : public GarbageCollected<OracleInterface> {
 public:
-	virtual bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *) = 0;
-	virtual bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *) = 0;
-	virtual bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *) = 0;
-	bool memoryAccessesMightAlias(CfgDecode &decode, const AllowableOptimisations &opt,
+	virtual bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *) = 0;
+	virtual bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *) = 0;
+	virtual bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *) = 0;
+	bool memoryAccessesMightAlias(const MaiMap &decode, const AllowableOptimisations &opt,
 				      StateMachineSideEffectMemoryAccess *a,
 				      StateMachineSideEffectMemoryAccess *b) {
 		if (a->type == StateMachineSideEffect::Load) {
@@ -82,13 +72,16 @@ public:
 		}
 	}
 	virtual bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) = 0;
-        virtual bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store) = 0;
+	bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store){
+		return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load), DynAnalysisRip(store));
+	}
+		
 	/* True if any table entry which includes @access as a
 	 * non-private entry also includes a non-private store
 	 * entry. */
 	/* i.e. this is true if there's some possibility that @access
 	 * might alias with a store in a remote thread. */
-	virtual bool hasConflictingRemoteStores(CfgDecode &, const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access) = 0;
+	virtual bool hasConflictingRemoteStores(const MaiMap &, const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access) = 0;
 
 	virtual ~OracleInterface() {}
 	NAMED_CLASS
@@ -338,7 +331,7 @@ public:
 
 	void findPreviousInstructions(std::vector<VexRip> &output);
 	void findPreviousInstructions(std::vector<VexRip> &output, const VexRip &rip);
-	void findConflictingStores(CfgDecode &labelDecode,
+	void findConflictingStores(const MaiMap &mai,
 				   StateMachineSideEffectLoad *smsel,
 				   std::set<DynAnalysisRip> &out);
 	void clusterRips(const std::set<VexRip> &inputRips,
@@ -347,16 +340,24 @@ public:
 	/* True if the access doesn't appear anywhere in the tag
 	   table.  This usually indicates that the relevant
 	   instruction is accessing the stack. */
-	bool notInTagTable(CfgDecode &labelDecode, StateMachineSideEffectMemoryAccess *access);
-	bool hasConflictingRemoteStores(CfgDecode &, const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access);
+private:
+	bool notInTagTable(const DynAnalysisRip &);
+	bool hasConflictingRemoteStores(const DynAnalysisRip &dr);
+public:
+	bool hasConflictingRemoteStores(const MaiMap &, const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access);
 
-	bool memoryAccessesMightAlias(CfgDecode &decode,const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
-	bool memoryAccessesMightAlias(CfgDecode &decode,const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
-	bool memoryAccessesMightAlias(CfgDecode &decode,const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
+private:
+	enum mam_result { mam_no_alias, mam_might_alias, mam_private };
+	mam_result memoryAccessesMightAliasLL(const DynAnalysisRip &, const DynAnalysisRip &);
+	mam_result memoryAccessesMightAliasLS(const DynAnalysisRip &, const DynAnalysisRip &);
+	mam_result memoryAccessesMightAliasSS(const DynAnalysisRip &, const DynAnalysisRip &);
+public:
+	bool memoryAccessesMightAlias(const MaiMap &,const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
+	bool memoryAccessesMightAlias(const MaiMap &,const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
+	bool memoryAccessesMightAlias(const MaiMap &,const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store);
-        bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store);
-        void findRacingRips(CfgDecode &decode, StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
-	void findRacingRips(CfgDecode &decode, StateMachineSideEffectStore *, std::set<DynAnalysisRip> &);
+        void findRacingRips(const MaiMap &, StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
+	void findRacingRips(const MaiMap &, StateMachineSideEffectStore *, std::set<DynAnalysisRip> &);
 	bool functionCanReturn(const VexRip &rip);
 
 	static void discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads,

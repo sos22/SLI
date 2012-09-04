@@ -26,7 +26,7 @@ ndChoiceState(StateMachineState **slot,
 	      CFGNode *node,
 	      std::vector<reloc_t> &pendingRelocs,
 	      std::vector<CFGNode *> &targets,
-	      MemoryAccessIdentifierAllocator &mai,
+	      MaiMap &mai,
 	      bool storeLike,
 	      HashedSet<HashedPtr<CFGNode> > *usedExits)
 {
@@ -42,7 +42,7 @@ ndChoiceState(StateMachineState **slot,
 		pendingRelocs.push_back(
 			reloc_t(slot, targets[0]));
 	} else {
-		IRExpr *fv = mai.freeVariable(Ity_I64, vr.thread, node->label, false);
+		IRExpr *fv = mai.freeVariable(Ity_I64, vr.thread, node, false);
 		StateMachineSideEffecting *r =
 			new StateMachineSideEffecting(
 				vr.rip,
@@ -94,7 +94,7 @@ getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 static StateMachineState *
 getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		       std::vector<reloc_t> &pendingRelocs,
-		       MemoryAccessIdentifierAllocator &mai)
+		       MaiMap &mai)
 {
 	threadAndRegister rax(threadAndRegister::reg(tid, OFFSET_amd64_RAX, 0));
 	threadAndRegister arg1(threadAndRegister::reg(tid, OFFSET_amd64_RDI, 0));
@@ -195,14 +195,14 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		break;
 	}
 	case LibraryFunctionTemplate::malloc: {
-		acc = (!rax <<= smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode->label, true))) >>
+		acc = (!rax <<= smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, true))) >>
 			(AssertFalse(smb_expr(IRExpr_Unop(Iop_BadPtr, IRExpr_Get(rax, Ity_I64)))) >> end);
 		break;
 	}
 	case LibraryFunctionTemplate::free: {
 		acc = end;
 		for (int i = 0; i < 8; i++) {
-			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode->label, false)));
+			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
 			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
 				acc;
 		}
@@ -240,7 +240,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	case LibraryFunctionTemplate::__stack_chk_fail:
 		return StateMachineUnreached::get();
 	case LibraryFunctionTemplate::time: {
-		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode->label, false)));
+		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
 		acc = (!rax <<= fv) >> end;
 		If(smb_reg(arg1, Ity_I64) == smb_const64(0),
 		   acc,
@@ -256,7 +256,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		printf(")\n");
 		abort();
 	}
-	SMBCompilerState state(cfgnode->rip, cfgnode->label, tid, mai);
+	SMBCompilerState state(cfgnode->rip, cfgnode, tid, mai);
 	return acc.content->compile(pendingRelocs, state);
 }
 
@@ -337,7 +337,7 @@ cfgNodeToState(Oracle *oracle,
 	       unsigned tid,
 	       CFGNode *target,
 	       bool storeLike,
-	       MemoryAccessIdentifierAllocator &mai,
+	       MaiMap &mai,
 	       std::vector<reloc_t> &pendingRelocs)
 {
 	if (TIMEOUT)
@@ -395,7 +395,7 @@ cfgNodeToState(Oracle *oracle,
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					mai(target->label, tid));
+					mai(tid, target));
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -442,7 +442,7 @@ cfgNodeToState(Oracle *oracle,
 					new StateMachineSideEffectStore(
 						cas->addr,
 						cas->dataLo,
-						mai(target->label, tid)),
+						mai(tid, target)),
 					l4);
 			StateMachineState *l2 =
 				new StateMachineBifurcate(
@@ -456,7 +456,7 @@ cfgNodeToState(Oracle *oracle,
 					new StateMachineSideEffectLoad(
 						tempreg,
 						cas->addr,
-						mai(target->label, tid),
+						mai(tid, target),
 						ty),
 					l2);
 			StateMachineState *l0 =
@@ -487,12 +487,12 @@ cfgNodeToState(Oracle *oracle,
 				se = new StateMachineSideEffectLoad(
 					dirty->tmp,
 					dirty->args[0],
-					mai(target->label, tid),
+					mai(tid, target),
 					ity);
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 				se = new StateMachineSideEffectCopy(
 					dirty->tmp,
-					mai.freeVariable(Ity_I64, tid, target->label, false));
+					mai.freeVariable(Ity_I64, tid, target, false));
 			} else {
 				abort();
 			}
@@ -1727,11 +1727,11 @@ probeCFGsToMachine(Oracle *oracle,
 		   unsigned tid,
 		   HashedSet<HashedPtr<CFGNode> > &roots,
 		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
-		   MemoryAccessIdentifierAllocator &mai,
+		   MaiMap &mai,
 		   std::set<StateMachine *> &out)
 {
 	struct _ : public cfg_translator {
-		MemoryAccessIdentifierAllocator &mai;
+		MaiMap &mai;
 		HashedSet<HashedPtr<const CFGNode> > &proximalNodes;
 		StateMachineState *operator()(CFGNode *e,
 					      Oracle *oracle,
@@ -1740,14 +1740,14 @@ probeCFGsToMachine(Oracle *oracle,
 			if (proximalNodes.contains(e)) {
 				return getProximalCause(oracle->ms,
 							mai,
-							e->label,
+							e,
 							e->rip,
 							tid);
 			} else {
 				return cfgNodeToState(oracle, tid, e, false, mai, pendingRelocations);
 			}
 		}
-		_(MemoryAccessIdentifierAllocator &_mai,
+		_(MaiMap &_mai,
 		  HashedSet<HashedPtr<const CFGNode> > &_proximalNodes)
 			: mai(_mai), proximalNodes(_proximalNodes)
 		{}
@@ -1782,7 +1782,7 @@ probeCFGsToMachine(Oracle *oracle,
 	
 	cursor = roots_this_sm2[0];
 	if (roots_this_sm2.size() > 1) {
-		IRExpr *fv = mai.freeVariable(Ity_I64, tid, (*roots.begin())->label, false);
+		IRExpr *fv = mai.freeVariable(Ity_I64, tid, *roots.begin(), false);
 		int x = 0;
 		cursor =
 			new StateMachineSideEffecting(
@@ -1817,10 +1817,10 @@ probeCFGsToMachine(Oracle *oracle,
 
 static StateMachine *
 storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
-		   MemoryAccessIdentifierAllocator &mai)
+		   MaiMap &mai)
 {
 	struct _ : public cfg_translator {
-		MemoryAccessIdentifierAllocator *mai;
+		MaiMap *mai;
 		StateMachineState *operator()(CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
@@ -1866,7 +1866,7 @@ probeCFGsToMachine(Oracle *oracle,
 		   unsigned tid,
 		   HashedSet<HashedPtr<CFGNode> > &roots,
 		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
-		   MemoryAccessIdentifierAllocator &mai,
+		   MaiMap &mai,
 		   std::set<StateMachine *> &out)
 {
 	_probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai, out);
@@ -1876,7 +1876,7 @@ StateMachine *
 storeCFGToMachine(Oracle *oracle,
 		  unsigned tid,
 		  CFGNode *root,
-		  MemoryAccessIdentifierAllocator &mai)
+		  MaiMap &mai)
 {
 	return _probeCFGsToMachine::storeCFGsToMachine(oracle, tid, root, mai);
 }

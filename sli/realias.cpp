@@ -6,6 +6,7 @@
 #include "MachineAliasingTable.hpp"
 #include "control_domination_map.hpp"
 #include "sat_checker.hpp"
+#include "alloc_mai.hpp"
 
 namespace _realias {
 
@@ -619,7 +620,7 @@ public:
 class AliasTable {
 public:
 	std::map<StateMachineSideEffecting *, AliasTableEntry> content;
-	bool build(CfgDecode &decode,
+	bool build(const MaiMap &decode,
 		   StateMachine *sm,
 		   stateLabelT &labels,
 		   const AllowableOptimisations &opt,
@@ -661,7 +662,7 @@ static bool
 mightLoadInitialValue(StateMachineSideEffecting *smse,
 		      StateMachine *sm,
 		      OracleInterface *oracle,
-		      CfgDecode &decode,
+		      const MaiMap &decode,
 		      const AllowableOptimisations &opt)
 {
 	assert(smse->getSideEffect());
@@ -701,7 +702,7 @@ mightLoadInitialValue(StateMachineSideEffecting *smse,
 }
 
 bool
-AliasTable::build(CfgDecode &decode,
+AliasTable::build(const MaiMap &decode,
 		  StateMachine *sm,
 		  stateLabelT &labels,
 		  const AllowableOptimisations &opt,
@@ -1025,7 +1026,7 @@ dataOfSideEffect(StateMachineSideEffect *s_effect)
 }
 
 static StateMachine *
-functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle,
+functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle,
 		      const ControlDominationMap &cdm, bool *done_something)
 {
 	StackLayoutTable stackLayout;
@@ -1058,8 +1059,6 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 	MachineAliasingTable mat;
 	mat.initialise(sm);
 
-	CfgDecode decode;
-	decode.addMachine(sm);
 	AliasTable at;
 	if (!at.build(decode, sm, stateLabels, opt, oracle)) {
 		if (any_debug)
@@ -1245,7 +1244,10 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 		    (*it)->getSideEffect()->type != StateMachineSideEffect::Store)
 			continue;
 		StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)(*it)->getSideEffect();
-		if (!opt.ignoreStore(decode(s->rip.where)->rip))
+		bool ignore = true;
+		for (auto it2 = decode.begin(s->rip); ignore && !it2.finished(); it2.advance())
+			ignore &= opt.ignoreStore(it2.node()->rip);
+		if (ignore)
 			continue;
 		bool noConflictingLoads = true;
 		for (auto it2 = at.content.begin(); noConflictingLoads && it2 != at.content.end(); it2++) {
@@ -1286,8 +1288,9 @@ functionAliasAnalysis(StateMachine *sm, const AllowableOptimisations &opt, Oracl
 }
 
 StateMachine *
-functionAliasAnalysis(StateMachine *machine, const AllowableOptimisations &opt, OracleInterface *oracle,
+functionAliasAnalysis(const MaiMap &decode, StateMachine *machine,
+		      const AllowableOptimisations &opt, OracleInterface *oracle,
 		      const ControlDominationMap &cdm, bool *done_something)
 {
-  return _realias::functionAliasAnalysis(machine, opt, oracle, cdm, done_something);
+	return _realias::functionAliasAnalysis(decode, machine, opt, oracle, cdm, done_something);
 }

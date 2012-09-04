@@ -195,14 +195,15 @@ public:
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL);
 };
 
-class MemoryAccessIdentifierAllocator;
-StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
+StateMachine *optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+				   VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
 				   const VexPtr<OracleInterface> &oracle,
 				   bool is_ssa,
 				   GarbageCollectionToken token,
 				   bool *progress = NULL);
-StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
+StateMachine *optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+				   VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
 				   const VexPtr<Oracle> &oracle,
 				   bool is_ssa,
@@ -210,20 +211,22 @@ StateMachine *optimiseStateMachine(VexPtr<StateMachine, &ir_heap> sm,
 				   bool *progress = NULL);
 
 /* Individual optimisation passes. */
-StateMachine *availExpressionAnalysis(StateMachine *sm,
+StateMachine *availExpressionAnalysis(const MaiMap &mai,
+				      StateMachine *sm,
 				      const AllowableOptimisations &opt,
 				      bool is_ssa,
 				      OracleInterface *oracle,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt);
 StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
-StateMachine *useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
+StateMachine *useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 				    OracleInterface *oracle, bool *done_something);
 StateMachine *removeLocalSurvival(StateMachine *sm,
 				  const AllowableOptimisations &opt,
 				  bool *done_something);
 class ControlDominationMap;
-StateMachine *functionAliasAnalysis(StateMachine *machine,
+StateMachine *functionAliasAnalysis(const MaiMap &mai,
+				    StateMachine *machine,
 				    const AllowableOptimisations &opt,
 				    OracleInterface *oracle,
 				    const ControlDominationMap &cdm,
@@ -232,7 +235,8 @@ StateMachine *phiElimination(StateMachine *sm, const AllowableOptimisations &opt
 			     const ControlDominationMap &cdm, bool *done_something);
 StateMachine *undefinednessSimplification(StateMachine *sm, bool *done_something);
 
-StateMachine *removeAnnotations(VexPtr<StateMachine, &ir_heap> sm,
+StateMachine *removeAnnotations(const MaiMap &mai,
+				VexPtr<StateMachine, &ir_heap> sm,
 				const AllowableOptimisations &opt,
 				const VexPtr<OracleInterface> &oracle,
 				bool is_ssa,
@@ -245,6 +249,6 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     FixConsumer &df,
 				     GarbageCollectionToken token);
 
-StateMachineState *getProximalCause(MachineState *ms, MemoryAccessIdentifierAllocator &mai, const CfgLabel &where, const VexRip &rip, int tid);
+StateMachineState *getProximalCause(MachineState *ms, MaiMap &mai, const CFGNode *where, const VexRip &rip, int tid);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

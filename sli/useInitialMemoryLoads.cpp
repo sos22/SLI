@@ -41,7 +41,7 @@ class ReachingMap {
 	std::map<const StateMachineState *, std::set<const StateMachineSideEffectStore *> > content;
 	std::set<const StateMachineSideEffectStore *> nothingReaching;
 public:
-	bool initialise(CfgDecode &decode,
+	bool initialise(const MaiMap &decode,
 			StateMachine *sm,
 			const AllowableOptimisations &opt,
 			OracleInterface *oracle);
@@ -49,7 +49,7 @@ public:
 };
 
 bool
-ReachingMap::initialise(CfgDecode &decode,
+ReachingMap::initialise(const MaiMap &decode,
 			StateMachine *sm,
 			const AllowableOptimisations &opt,
 			OracleInterface *oracle)
@@ -57,7 +57,7 @@ ReachingMap::initialise(CfgDecode &decode,
 	struct {
 		const AllowableOptimisations *opt;
 		OracleInterface *oracle;
-		CfgDecode *decode;
+		const MaiMap *decode;
 		bool operator()(StateMachineSideEffectStore *store) {
 			if (!oracle->hasConflictingRemoteStores(*decode, *opt, store))
 				return true;
@@ -147,7 +147,7 @@ class UseReachingMap : public StateMachineTransformer {
 	const AllowableOptimisations &opt;
 	OracleInterface *oracle;
 	StateMachineSideEffecting *transformOneState(
-		CfgDecode &, StateMachineSideEffecting *, bool *);
+		const MaiMap &, StateMachineSideEffecting *, bool *);
 	bool rewriteNewStates() const { return false; }
 public:
 	UseReachingMap(ReachingMap &_rm,
@@ -158,7 +158,7 @@ public:
 };
 
 StateMachineSideEffecting *
-UseReachingMap::transformOneState(CfgDecode &decode, StateMachineSideEffecting *smse, bool *done_something)
+UseReachingMap::transformOneState(const MaiMap &decode, StateMachineSideEffecting *smse, bool *done_something)
 {
 	if (!smse->sideEffect || smse->sideEffect->type != StateMachineSideEffect::Load)
 		return NULL;
@@ -184,13 +184,11 @@ UseReachingMap::transformOneState(CfgDecode &decode, StateMachineSideEffecting *
 }
 
 static StateMachine *
-useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
+useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 		      OracleInterface *oracle, bool *done_something)
 {
-	CfgDecode decode;
-	decode.addMachine(sm);
 	ReachingMap rm;
-	if (!rm.initialise(decode, sm, opt, oracle))
+	if (!rm.initialise(mai, sm, opt, oracle))
 		return sm;
 	UseReachingMap urm(rm, opt, oracle);
 	return urm.transform(sm, done_something);
@@ -200,8 +198,8 @@ useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
 };
 
 StateMachine *
-useInitialMemoryLoads(StateMachine *sm, const AllowableOptimisations &opt,
+useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 		      OracleInterface *oracle, bool *done_something)
 {
-	return _useInitialMemoryLoads::useInitialMemoryLoads(sm, opt, oracle, done_something);
+	return _useInitialMemoryLoads::useInitialMemoryLoads(mai, sm, opt, oracle, done_something);
 }
