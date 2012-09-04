@@ -1112,6 +1112,14 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		}
 	}
 
+	if (sideEffect->type == StateMachineSideEffect::StartFunction &&
+	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndFunction) {
+		/* No point in keeping an empty
+		 * StartFunction/EndFunction block. */
+		*done_something = true;
+		return ((StateMachineSideEffecting *)target)->target;
+	}
 	return this;
 }
 
