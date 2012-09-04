@@ -512,7 +512,6 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 			case StateMachineSideEffect::AssertFalse:
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
-			case StateMachineSideEffect::StackUnescaped:
 			case StateMachineSideEffect::PointerAliasing:
 			case StateMachineSideEffect::StackLayout:
 				return true;

@@ -139,9 +139,6 @@ protected:
 		StateMachineSideEffectStartFunction *, bool *);
 	virtual StateMachineSideEffectEndFunction *transformOneSideEffect(
 		StateMachineSideEffectEndFunction *, bool *);
-	virtual StateMachineSideEffectStackUnescaped *transformOneSideEffect(
-		StateMachineSideEffectStackUnescaped *, bool *)
-	{ return NULL; }
 	virtual StateMachineSideEffectPointerAliasing *transformOneSideEffect(
 		StateMachineSideEffectPointerAliasing *, bool *)
 	{ return NULL; }

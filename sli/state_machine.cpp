@@ -503,7 +503,6 @@ sideEffectsBisimilar(StateMachineSideEffect *smse1,
 				(StateMachineSideEffect ## t *)smse2;	\
 			return *smsep1 == *smsep2;			\
 		}
-	simple(StackUnescaped)
 	simple(PointerAliasing)
 	simple(StackLayout)
 #undef simple

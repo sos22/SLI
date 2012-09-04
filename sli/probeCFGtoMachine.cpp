@@ -1092,7 +1092,6 @@ getRspCanonicalisationDelta(StateMachineState *root, long *delta)
 			case StateMachineSideEffect::Unreached:
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
-			case StateMachineSideEffect::StackUnescaped:
 			case StateMachineSideEffect::StackLayout:
 			case StateMachineSideEffect::PointerAliasing:
 			case StateMachineSideEffect::AssertFalse:
@@ -1268,17 +1267,6 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 
 	Oracle::ThreadRegisterAliasingConfiguration alias =
 		oracle->getAliasingConfigurationForRip(vr);
-	{
-		std::vector<FrameId> privateFramesVector;
-		privateFramesVector.insert(privateFramesVector.begin(),
-					   privateFrames.begin(),
-					   privateFrames.end());
-		cursor = new StateMachineSideEffecting(
-			vr,
-			new StateMachineSideEffectStackUnescaped(
-				privateFramesVector),
-			cursor);
-	}
 	for (int i = 0; i < Oracle::NR_REGS; i++) {
 		PointerAliasingSet v(alias.v[i]);
 		if (i == 4) {

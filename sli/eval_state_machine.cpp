@@ -886,7 +886,6 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 	case StateMachineSideEffect::EndFunction:
 
 		 /* Todo: could maybe use these to improve aliasing here */
-	case StateMachineSideEffect::StackUnescaped:
 	case StateMachineSideEffect::PointerAliasing:
 	case StateMachineSideEffect::StackLayout:
 		break;
@@ -1554,7 +1553,6 @@ definitelyDoesntRace(const MaiMap &decode,
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
-		case StateMachineSideEffect::StackUnescaped:
 		case StateMachineSideEffect::PointerAliasing:
 		case StateMachineSideEffect::StackLayout:
 			return true;

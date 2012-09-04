@@ -176,7 +176,6 @@ ControlDominationMap::init(StateMachine *sm,
 				case StateMachineSideEffect::EndAtomic:
 				case StateMachineSideEffect::StartFunction:
 				case StateMachineSideEffect::EndFunction:
-				case StateMachineSideEffect::StackUnescaped:
 				case StateMachineSideEffect::PointerAliasing:
 				case StateMachineSideEffect::StackLayout:
 					break;

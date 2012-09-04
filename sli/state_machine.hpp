@@ -375,7 +375,6 @@ public:
 	f(EndAtomic)				\
 	f(StartFunction)			\
 	f(EndFunction)				\
-	f(StackUnescaped)			\
 	f(PointerAliasing)			\
 	f(StackLayout)
 	enum sideEffectType {
@@ -1135,61 +1134,6 @@ public:
 	}
 	bool operator==(const StateMachineSideEffectEndFunction &o) const {
 		return rsp == o.rsp && frame == o.frame;
-	}
-};
-/* Note that for a particular frame X there are no pointers from
- * outside X to inside X. */
-class StateMachineSideEffectStackUnescaped : public StateMachineSideEffect {
-public:
-	std::vector<FrameId> localFrames;
-	StateMachineSideEffectStackUnescaped(std::vector<FrameId> &_localFrames)
-		: StateMachineSideEffect(StateMachineSideEffect::StackUnescaped),
-		  localFrames(_localFrames)
-	{}
-	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) {
-		if (localFrames.empty())
-			return NULL;
-		else
-			return this;
-	}
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck(const std::set<threadAndRegister>*) const {}
-	bool definesRegister(threadAndRegister &) const { return false; }
-	void inputExpressions(std::vector<IRExpr *> &) {}
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "STACKUNESCAPED(");
-		for (auto it = localFrames.begin(); it != localFrames.end(); it++) {
-			if (it != localFrames.begin())
-				fprintf(f, ", ");
-			fprintf(f, "%s", it->name());
-		}
-		fprintf(f, ")");
-	}
-	static bool parse(StateMachineSideEffectStackUnescaped **out,
-			  const char *str,
-			  const char **suffix)
-	{
-		std::vector<FrameId> frames;
-		if (!parseThisString("STACKUNESCAPED(", str, &str))
-			return false;
-		if (!parseThisChar(')', str, suffix)) {
-			while (1) {
-				FrameId f(FrameId::invalid());
-				if (!FrameId::parse(&f, str, &str))
-					return false;
-				frames.push_back(f);
-				if (parseThisChar(')', str, suffix))
-					break;
-				if (!parseThisString(", ", str, &str))
-					return false;
-			}
-		}
-		*out = new StateMachineSideEffectStackUnescaped(frames);
-		return true;
-	}
-	bool operator==(const StateMachineSideEffectStackUnescaped &o) const {
-		return localFrames == o.localFrames;
 	}
 };
 class StateMachineSideEffectPointerAliasing : public StateMachineSideEffect {

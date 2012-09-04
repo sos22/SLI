@@ -400,7 +400,6 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 				}
 				case StateMachineSideEffect::StartAtomic:
 				case StateMachineSideEffect::EndAtomic:
-				case StateMachineSideEffect::StackUnescaped:
 				case StateMachineSideEffect::PointerAliasing:
 				case StateMachineSideEffect::StackLayout:
 				case StateMachineSideEffect::Unreached:

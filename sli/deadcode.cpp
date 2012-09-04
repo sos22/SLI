@@ -332,7 +332,6 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
 			case StateMachineSideEffect::AssertFalse:
-			case StateMachineSideEffect::StackUnescaped:
 			case StateMachineSideEffect::StackLayout:
 				break;
 			case StateMachineSideEffect::Copy: {

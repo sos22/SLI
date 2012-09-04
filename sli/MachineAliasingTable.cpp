@@ -101,13 +101,6 @@ MachineAliasingTable::initialise(StateMachine *sm)
 		StateMachineSideEffect *se = s->getSideEffect();
 		if (se) {
 			switch (se->type) {
-			case StateMachineSideEffect::StackUnescaped:
-				/* We conservatively assume that all
-				   stack frames are always leaked.
-				   realias does a better job of fixing
-				   these up. */
-				break;
-
 			case StateMachineSideEffect::PointerAliasing: {
 				auto sl = (StateMachineSideEffectPointerAliasing *)se;
 				setRegister(exitConfig, sl->reg, sl->set);

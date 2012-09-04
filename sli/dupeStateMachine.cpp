@@ -265,12 +265,6 @@ rawDupeS(duplication_context &ctxt, const StateMachineSideEffectEndFunction *l)
 	return res;
 }
 
-static StateMachineSideEffectStackUnescaped *
-rawDupeS(duplication_context &, const StateMachineSideEffectStackUnescaped *l)
-{
-	return (StateMachineSideEffectStackUnescaped *)l;
-}
-
 static StateMachineSideEffectPointerAliasing *
 rawDupeS(duplication_context &, const StateMachineSideEffectPointerAliasing *l)
 {

@@ -16,7 +16,6 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<StateMachineSideEffectEndFunction *> EndFunction;
 	std::set<StateMachineSideEffectStackLayout *> StackLayout;
 	std::set<StateMachineSideEffectPointerAliasing *> PointerAliasing;
-	std::set<StateMachineSideEffectStackUnescaped *> StackUnescaped;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineSideEffecting *> states_side_effect;
 	std::set<const CFGNode *> cfgNodesS;
