@@ -39,6 +39,26 @@ StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 	}
 }
 
+static bool
+irexprUsesRegister(IRExpr *what, const threadAndRegister &tr)
+{
+	struct : public IRExprTransformer {
+		const threadAndRegister *tr;
+		bool res;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			if (ieg->reg == *tr) {
+				res = true;
+				abortTransform();
+			}
+			return ieg;
+		}
+	} doit;
+	doit.tr = &tr;
+	doit.res = false;
+	doit.doit(what);
+	return doit.res;
+}
+
 StateMachineState *
 StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
@@ -141,6 +161,54 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		}
 	}
 
+	StateMachineSideEffect *trueEffect = NULL;
+	StateMachineSideEffect *falseEffect = NULL;
+	if (trueTarget->type == StateMachineState::SideEffecting)
+		trueEffect = ((StateMachineSideEffecting *)trueTarget)->sideEffect;
+	if (falseTarget->type == StateMachineState::SideEffecting)
+		falseEffect = ((StateMachineSideEffecting *)falseTarget)->sideEffect;
+
+	if (trueEffect && trueEffect == falseEffect) {
+		/* Turn
+
+		   if (x) {
+		       a;
+		       b;
+		   } else {
+		       a;
+		       c;
+		   }
+
+		   into
+
+		   a;
+		   if (x) {
+		      b;
+		   } else {
+		      c;
+		   }
+
+		   Provided that a doesn't define any registers which
+		   x depends on. */
+		bool doit = true;
+		threadAndRegister modifiedReg(threadAndRegister::invalid());
+		if (trueEffect->definesRegister(modifiedReg) &&
+		    irexprUsesRegister(condition, modifiedReg))
+			doit = false;
+		if (doit) {
+			*done_something = true;
+			return (new StateMachineSideEffecting(
+					trueTarget->dbg_origin,
+					trueEffect,
+					new StateMachineBifurcate(
+						dbg_origin,
+						condition,
+						((StateMachineSideEffecting *)trueTarget)->target,
+						((StateMachineSideEffecting *)falseTarget)->target)))
+				->optimise(opt, done_something);
+		}
+	}
+
 	/* Try to pull assertions up above conditionals, so that
 	   they're available earlier.  Do it like this:
 
@@ -155,16 +223,10 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 	*/
 	IRExpr *trueAssert = NULL;
 	IRExpr *falseAssert = NULL;
-	if (trueTarget->type == StateMachineState::SideEffecting &&
-	    ((StateMachineSideEffecting *)trueTarget)->sideEffect &&
-	    ((StateMachineSideEffecting *)trueTarget)->sideEffect->type == StateMachineSideEffect::AssertFalse)
-		trueAssert =
-			((StateMachineSideEffectAssertFalse *)(((StateMachineSideEffecting *)trueTarget)->sideEffect))->value;
-	if (falseTarget->type == StateMachineState::SideEffecting &&
-	    ((StateMachineSideEffecting *)falseTarget)->sideEffect &&
-	    ((StateMachineSideEffecting *)falseTarget)->sideEffect->type == StateMachineSideEffect::AssertFalse)
-		falseAssert =
-			((StateMachineSideEffectAssertFalse *)(((StateMachineSideEffecting *)falseTarget)->sideEffect))->value;
+	if (trueEffect && trueEffect->type == StateMachineSideEffect::AssertFalse)
+		trueAssert = ((StateMachineSideEffectAssertFalse *)trueEffect)->value;
+	if (falseEffect && falseEffect->type == StateMachineSideEffect::AssertFalse)
+		falseAssert = ((StateMachineSideEffectAssertFalse *)falseEffect)->value;
 
 	if (trueAssert || falseAssert) {
 		*done_something = true;
