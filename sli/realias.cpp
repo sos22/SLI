@@ -1325,7 +1325,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 			bool ignore = true;
 			for (auto it2 = decode.begin(s->rip); ignore && !it2.finished(); it2.advance())
 				ignore &= opt.ignoreStore(it2.node()->rip);
-			if (ignore)
+			if (!ignore)
 				break;
 			bool noConflictingLoads = true;
 			for (auto it2 = at.content.begin(); noConflictingLoads && it2 != at.content.end(); it2++) {
