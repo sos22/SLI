@@ -68,6 +68,117 @@ debug_dump(const HashedSet<t> &what, const char *prefix)
 	}
 }
 
+static bool
+initialExplorationRoot(
+	const VexRip &root,
+	Oracle *oracle,
+	CfgLabelAllocator &allocLabel,
+	unsigned maxPathLength,
+	std::map<const CFGNode *, cfgflavour_store_t> &flavours,
+	std::map<VexRip, std::pair<unsigned, CFGNode *> > &doneSoFar,
+	CfgSuccMap<VexRip, VexRip> &succMap,
+	std::set<VexRip> &newRoots)
+{
+	std::queue<std::pair<unsigned, VexRip> > pending;
+	pending.push(std::pair<unsigned, VexRip>(maxPathLength, root));
+	while (!pending.empty()) {
+		if (TIMEOUT)
+			return false;
+		std::pair<unsigned, VexRip> item(pending.front());
+		pending.pop();
+
+		assert(item.second.isValid());
+		assert(item.first > 0);
+		const VexRip &vr(item.second);
+
+		auto it = doneSoFar.find(vr);
+		if (it != doneSoFar.end()) {
+			if (item.first > it->second.first) {
+				/* We've already explored this once,
+				   but at a worse depth.  Fix it
+				   up. */
+				CFGNode *n = it->second.second;
+				const std::vector<CfgSuccessorT<VexRip> > &succ(succMap[n]);
+				for (auto it2 = succ.begin(); it2 != succ.end(); it2++) {
+					assert(it2->instr.isValid());
+					pending.push(std::pair<unsigned, VexRip>(
+							     item.first - 1,
+							     it2->instr));
+				}
+				it->second.first = item.first;
+					
+				if (item.first == maxPathLength)
+					flavours[n] = cfgs_flavour_true;
+			} else {
+				/* We've already explored this at
+				   a better depth, so don't need to
+				   do anything. */
+			}
+			continue;
+		}
+
+		CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, vr, succMap);
+		if (!work) {
+			if (debug_initial_exploration)
+				printf("Cannot get IRSB for %s\n", vr.name());
+			continue;
+		}
+		if (item.first == maxPathLength)
+			flavours[work] = cfgs_flavour_true;
+		else
+			flavours[work] = cfgs_flavour_ordinary;
+		if (item.first != 1) {
+			const std::vector<CfgSuccessorT<VexRip> > &succ(succMap[work]);
+			for (auto it2 = succ.begin(); it2 != succ.end(); it2++) {
+				if (!it2->instr.isValid()) {
+					/* Whoops: we just returned
+					   out of a function without
+					   knowing where to return to.
+					   That means we need to
+					   convert this root into a
+					   set of roots with more
+					   context and try it
+					   again. */
+					if (debug_initial_exploration)
+						printf("Need to backtrack further up the stack to get predecessors of %s\n",
+						       vr.name());
+					std::vector<unsigned long> callers;
+					oracle->getPossibleStackTruncations(vr, callers);
+					if (callers.size() != 0) {
+						for (auto it = callers.begin();
+						     it != callers.end();
+						     it++) {
+							VexRip newStart(root);
+							newStart.prepend(*it);
+							newRoots.insert(newStart);
+							if (debug_initial_exploration)
+								printf("\tCaller %lx -> new starting RIP %s\n",
+								       *it, newStart.name());
+						}
+						newRoots.erase(root);
+						return false;
+					} else {
+						/* Can't find any more
+						   predecessors, just have to
+						   make do with what we've
+						   got. */
+						if (debug_initial_exploration)
+							printf("atCouldn't find any callers for %s?\n",
+							       vr.name());
+					}
+				} else {
+					pending.push(std::pair<unsigned, VexRip>(
+							     item.first - 1,
+							     it2->instr));
+				}
+			}
+		}
+
+		doneSoFar[vr] = std::pair<unsigned, CFGNode *>(item.first, work);
+	}
+	return true;
+}
+
 static void
 initialExploration(const std::set<DynAnalysisRip> &roots,
 		   std::map<const CFGNode *, cfgflavour_store_t> &flavours,
@@ -80,170 +191,113 @@ initialExploration(const std::set<DynAnalysisRip> &roots,
 	   themselves or part of paths between roots which have a
 	   length of @maxPathLength or less. */
 
-	/* Start by enumerating all static paths of length
-	   @maxPathLength or less starting from a root. */
-	/* First argument is number of instructions left for paths
-	   from this instruction. */
-	std::queue<std::pair<unsigned, VexRip> > pending;
-
-	std::map<VexRip, std::pair<unsigned, CFGNode *> > doneSoFar;
-
 	std::set<VexRip> vr_roots;
 	for (auto it = roots.begin(); it != roots.end(); it++)
 		vr_roots.insert(it->toVexRip());
 
-	for (auto it = vr_roots.begin(); it != vr_roots.end(); it++) {
-		assert(it->isValid());
-		pending.push(std::pair<unsigned, VexRip>(maxPathLength, *it));
-	}
+	while (!TIMEOUT) {
+		std::map<VexRip, std::pair<unsigned, CFGNode *> > doneSoFar;
+		CfgSuccMap<VexRip, VexRip> succMap;
 
-	CfgSuccMap<VexRip, VexRip> succMap;
+		std::set<VexRip> new_roots(vr_roots);
+		bool succ = true;
+		for (auto it = vr_roots.begin(); succ && it != vr_roots.end(); it++) {
+			const VexRip &root(*it);
+			assert(root.isValid());
+			succ &= initialExplorationRoot(
+				root, oracle, allocLabel, maxPathLength,
+				flavours, doneSoFar, succMap, new_roots);
+		}
 
-top_exploration_iter:
-	while (!pending.empty()) {
-		if (TIMEOUT)
-			return;
-		std::pair<unsigned, VexRip> item(pending.front());
-		pending.pop();
-
-		assert(item.second.isValid());
-		assert(item.first > 0);
-
-		auto it = doneSoFar.find(item.second);
-		if (it != doneSoFar.end()) {
-			if (item.first > it->second.first) {
-				/* We've already explored this once,
-				   but at a worse depth.  Fix it
-				   up. */
-				CFGNode *n = it->second.second;
-				const std::vector<CfgSuccessorT<VexRip> > &succ(succMap[n]);
-				for (auto it2 = succ.begin(); it2 != succ.end(); it2++)
-					pending.push(std::pair<unsigned, VexRip>(
-							     item.first - 1,
-							     it2->instr));
-				it->second.first = item.first;
-
-				if (item.first == maxPathLength)
-					flavours[n] = cfgs_flavour_true;
-			} else {
-				/* We've already explored this at
-				   a better depth, so don't need to
-				   do anything. */
-			}
+		if (!succ) {
+			vr_roots = new_roots;
 			continue;
 		}
 
-		assert(item.second.isValid());
+		/* Now we need to try to stitch together CFGs wherever
+		   we can.  The problem is that DynamicAnalysisRips
+		   truncate the call stack, whereas VexRips don't, so
+		   if you want to cluster across function calls things
+		   are a bit tricky.
 
-		CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, item.second, succMap);
-		if (!work) {
-			if (debug_initial_exploration)
-				printf("Cannot get IRSB for %s\n", item.second.name());
-			continue;
-		}
-		if (item.first == maxPathLength)
-			flavours[work] = cfgs_flavour_true;
-		else
-			flavours[work] = cfgs_flavour_ordinary;
-		if (item.first != 1) {
-			const std::vector<CfgSuccessorT<VexRip> > &succ(succMap[work]);
-			for (auto it2 = succ.begin(); it2 != succ.end(); it2++)
-				pending.push(std::pair<unsigned, VexRip>(
-						     item.first - 1,
-						     it2->instr));
-		}
+		   e.g. suppose we have something like this:
 
-		doneSoFar[item.second] = std::pair<unsigned, CFGNode *>(item.first, work);
-	}
+		   a() {
+		       l1: x = 5;
+		       b();
+		   }
+		   b() {
+		       l2: y = 7;
+		   }
 
-	/* Now we need to try to stitch together CFGs wherever we can.
-	   The problem is that DynamicAnalysisRips truncate the call
-	   stack, whereas VexRips don't, so if you want to cluster
-	   across function calls things are a bit tricky.
+		   And we want to cluster the two assignments.  The
+		   dynamic analysis RIPs will look something like
+		   this:
 
-	   e.g. suppose we have something like this:
+		   1: X Y Z l1
+		   2: Y Z a l2
 
-	   a() {
-	   l1: x = 5;
-	       b();
-           }
-	   b() {
-	   l2: y = 7;
-           }
+		   When we explore from 1, we'll find l2 as ``X Y Z a
+		   l2'', which doesn't match up, so we won't merge the
+		   two nodes.  The fix is just to add X Y Z a l2 as a
+		   new root when we're done with the initial
+		   exploration.
 
-	   And we want to cluster the two assignments.  The dynamic
-	   analysis RIPs will look something like this:
+		   The obvious alternative way of doing this is just
+		   to explore everything using DynamicAnalysisRip
+		   rather than VexRip.  That doesn't work, for two
+		   reasons.  First, DynamicAnalysisRips don't contain
+		   enough information to correctly handle ret
+		   instructions.  More subtly, b() might also be
+		   called from some other function, c() say, with a
+		   completely different call context.  We don't really
+		   want to merge a() and c() (and even if we did want
+		   to, it's not obvious how we'd do so consistently),
+		   which means we really want to duplicate c().  Using
+		   full VexRips makes that trivial, but using
+		   DynamicAnalysisRips makes it really hard. */
 
-	   1: X Y Z l1
-	   2: Y Z a l2
-
-	   When we explore from 1, we'll find l2 as ``X Y Z a l2'',
-	   which doesn't match up, so we won't merge the two nodes.
-	   The fix is just to add X Y Z a l2 as a new root when we're
-	   done with the initial exploration.
-
-	   The obvious alternative way of doing this is just to
-	   explore everything using DynamicAnalysisRip rather than
-	   VexRip.  That doesn't work, for two reasons.  First,
-	   DynamicAnalysisRips don't contain enough information to
-	   correctly handle ret instructions.  More subtly, b() might
-	   also be called from some other function, c() say, with a
-	   completely different call context.  We don't really want to
-	   merge a() and c() (and even if we did want to, it's not
-	   obvious how we'd do so consistently), which means we really
-	   want to duplicate c().  Using full VexRips makes that
-	   trivial, but using DynamicAnalysisRips makes it really
-	   hard. */
-	std::set<VexRip> new_roots;
-	for (auto it = doneSoFar.begin(); !TIMEOUT && it != doneSoFar.end(); it++) {
-		const VexRip &discoveredRip(it->first);
-		if (TIMEOUT)
-			return;
-		if (vr_roots.count(discoveredRip))
-			continue;
-		for (auto it2 = vr_roots.begin(); !TIMEOUT && it2 != vr_roots.end(); it2++) {
-			const VexRip &rootRip(*it2);
-
-			/* We create a new root for @discoveredRip if
-			   there is any @rootRip which is a truncation
-			   of it. */
-			if (rootRip.isTruncationOf(discoveredRip)) {
-				if (debug_initial_exploration) {
-					printf("Need a new root, %s, because %s doesn't quite match up\n",
-					       discoveredRip.name(),
-					       rootRip.name());
+		for (auto it = doneSoFar.begin(); !TIMEOUT && it != doneSoFar.end(); it++) {
+			const VexRip &discoveredRip(it->first);
+			if (vr_roots.count(discoveredRip))
+				continue;
+			for (auto it2 = vr_roots.begin(); !TIMEOUT && it2 != vr_roots.end(); it2++) {
+				const VexRip &rootRip(*it2);
+				
+				/* We create a new root for @discoveredRip if
+				   there is any @rootRip which is a truncation
+				   of it. */
+				if (rootRip.isTruncationOf(discoveredRip)) {
+					if (debug_initial_exploration) {
+						printf("Need a new root, %s, because %s doesn't quite match up\n",
+						       discoveredRip.name(),
+						       rootRip.name());
+					}
+					new_roots.insert(discoveredRip);
+					/* You might think that we should
+					   erase @rootRip from new_roots at
+					   this point, because @discoveredRip
+					   will subsume it.  Not so.  We might
+					   have to iterate multiple times, in
+					   which case a future iteration might
+					   pick up @rootRip and perform
+					   further merging later on. */
+					succ = false;
 				}
-				new_roots.insert(discoveredRip);
-				/* You might think that we should
-				   erase @rootRip from new_roots at
-				   this point, because @discoveredRip
-				   will subsume it.  Not so.  We might
-				   have to iterate multiple times, in
-				   which case a future iteration might
-				   pick up @rootRip and perform
-				   further merging later on. */
 			}
 		}
-	}
+		
+		if (!succ)
+			continue;
 
-	if (!new_roots.empty()) {
-		for (auto it = new_roots.begin(); it != new_roots.end(); it++) {
-			assert(it->isValid());
-			vr_roots.insert(*it);
-			pending.push(std::pair<unsigned, VexRip>(maxPathLength, *it));
+		for (auto it = doneSoFar.begin(); it != doneSoFar.end(); it++) {
+			assert(it->second.second);
+			results.insert(std::pair<VexRip, CFGNode *>(it->first, it->second.second));
 		}
-		if (debug_initial_exploration)
-			printf("Explore %zd additional roots\n",
-			       pending.size());
-		goto top_exploration_iter;
-	}
 
-	for (auto it = doneSoFar.begin(); it != doneSoFar.end(); it++) {
-		assert(it->second.second);
-		results.insert(std::pair<VexRip, CFGNode *>(it->first, it->second.second));
+		resolveReferences(succMap, results);
+		break;
 	}
-
-	resolveReferences(succMap, results);
 }
 
 /* Sometimes we end up generating redundant roots i.e. roots for
