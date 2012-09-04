@@ -445,7 +445,8 @@ updateAvailSetForSideEffect(const MaiMap &decode,
 	case StateMachineSideEffect::Load: {
 		StateMachineSideEffectLoad *smsel =
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
-		outputAvail.insertSideEffect(smsel);
+		if (!oracle->hasConflictingRemoteStores(decode, opt, smsel))
+			outputAvail.insertSideEffect(smsel);
 		outputAvail.dereference(smsel->addr, opt);
 		break;
 	}
