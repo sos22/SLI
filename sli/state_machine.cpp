@@ -140,6 +140,54 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 			return this;
 		}
 	}
+
+	/* Try to pull assertions up above conditionals, so that
+	   they're available earlier.  Do it like this:
+
+	   if (x) { assert(foo); y; } else { assert(bar); z; }
+	   =>
+	   assert(x ? foo : bar);
+	   if (x) y; else z;
+
+	   If foo or bar don't exist then just substitute in the
+	   constant 1 and rely on the IRExpr simplifier to do
+	   something sensible with the ?: .
+	*/
+	IRExpr *trueAssert = NULL;
+	IRExpr *falseAssert = NULL;
+	if (trueTarget->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)trueTarget)->sideEffect &&
+	    ((StateMachineSideEffecting *)trueTarget)->sideEffect->type == StateMachineSideEffect::AssertFalse)
+		trueAssert =
+			((StateMachineSideEffectAssertFalse *)(((StateMachineSideEffecting *)trueTarget)->sideEffect))->value;
+	if (falseTarget->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)falseTarget)->sideEffect &&
+	    ((StateMachineSideEffecting *)falseTarget)->sideEffect->type == StateMachineSideEffect::AssertFalse)
+		falseAssert =
+			((StateMachineSideEffectAssertFalse *)(((StateMachineSideEffecting *)falseTarget)->sideEffect))->value;
+
+	if (trueAssert || falseAssert) {
+		*done_something = true;
+		/* Constant is 0 rather than 1 because these are
+		   AssertFalse expressions rather than Assert. */
+		IRExpr *compositeAssertion =
+			IRExpr_Mux0X(
+				condition,
+				falseAssert ? falseAssert : IRExpr_Const(IRConst_U1(0)),
+				trueAssert ? trueAssert : IRExpr_Const(IRConst_U1(0)));
+		compositeAssertion = optimiseIRExprFP(compositeAssertion, opt, done_something);
+		return (new StateMachineSideEffecting(
+				dbg_origin,
+				new StateMachineSideEffectAssertFalse(
+					compositeAssertion,
+					true),
+				new StateMachineBifurcate(
+					dbg_origin,
+					condition,
+					trueAssert ? ((StateMachineSideEffecting *)trueTarget)->target : trueTarget,
+					falseAssert ? ((StateMachineSideEffecting *)falseTarget)->target : falseTarget)))
+			->optimise(opt, done_something);
+	}
 	return this;
 }
 
