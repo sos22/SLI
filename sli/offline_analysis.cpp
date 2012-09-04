@@ -247,9 +247,13 @@ _optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
 		}
 		p = false;
 		sm = sm->optimise(opt, &p);
-		if (debugOptimiseStateMachine && p) {
-			printf("Local optimise 2:\n");
-			printStateMachine(sm, stdout);
+		if (p) {
+			if (is_ssa)
+				sm = internStateMachine(sm); /* Local optimisation only maintains SSA form if interned */
+			if (debugOptimiseStateMachine) {
+				printf("Local optimise 2:\n");
+				printStateMachine(sm, stdout);
+			}
 		}
 		done_something |= p;
 
