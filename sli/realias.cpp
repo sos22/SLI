@@ -884,6 +884,13 @@ PointsToTable::refine(AliasTable &at,
 		StateMachineSideEffecting *smse = sideEffectDefiningRegister(sm, it->first);
 		StateMachineSideEffect *effect = smse->getSideEffect();
 		assert(effect);
+#ifndef NDEBUG
+		{
+			threadAndRegister tr(threadAndRegister::invalid());
+			assert(effect->definesRegister(tr));
+			assert(tr == it->first);
+		}
+#endif
 		PointerAliasingSet newPts(PointerAliasingSet::nothing);
 		Maybe<StackLayout> *sl = slt.forState(smse);
 		if (!sl) {
@@ -906,14 +913,38 @@ PointsToTable::refine(AliasTable &at,
 					assert(content.count(l->target));
 					newPts |= content[l->target];
 				} else if (satisfier->type == StateMachineSideEffect::Store) {
-					newPts |= pointsToSetForExpr(
-						((StateMachineSideEffectStore *)satisfier)->data,
-						smse,
-						*sl,
-						mat,
-						slt);
+					newPts |=
+						pointsToSetForExpr(
+							((StateMachineSideEffectStore *)satisfier)->data,
+							smse,
+							*sl,
+							mat,
+							slt);
 				} else {
 					abort();
+				}
+			}
+
+			/* A load can only load from a frame if the
+			   frame is actually live at the time of the
+			   load. */
+			if (newPts.valid && !newPts.otherStackPointer &&
+			    sl->valid) {
+				for (auto it = newPts.stackPointers.begin();
+				     it != newPts.stackPointers.end();
+					) {
+					bool present = false;
+					for (auto it2 = sl->content.functions.begin();
+					     !present && it2 != sl->content.functions.end();
+					     it2++) {
+						if (*it2 == *it)
+							present = true;
+					}
+					if (present) {
+						it++;
+					} else {
+						it = newPts.stackPointers.erase(it);
+					}
 				}
 			}
 			break;
