@@ -1095,7 +1095,20 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 			*done_something = true;
 			return t->target;
 		}
-		
+
+		if (t->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+			/* Pull assertions out of atomic blocks
+			 * whenever possible. */
+			*done_something = true;
+			return (new StateMachineSideEffecting(
+					t->dbg_origin,
+					t->sideEffect,
+					new StateMachineSideEffecting(
+						dbg_origin,
+						sideEffect,
+						t->target)))->optimise(opt, done_something);
+		}
+
 		if (t->target->type == StateMachineState::SideEffecting) {
 			StateMachineSideEffecting *t2 = (StateMachineSideEffecting *)t->target;
 			assert(t2->sideEffect);
