@@ -117,8 +117,16 @@ bool
 MemoryAccessIdentifier::parse(const char *str,
 			      const char **suffix)
 {
-	return parseThisString("mai", str, &str) &&
-		parseDecimalInt(&id, str, suffix);
+	int tid, id;
+	if (!parseThisString("mai", str, &str) ||
+	    !parseDecimalInt(&tid, str, &str) ||
+	    !parseThisChar(':', str, &str) ||
+	    !parseDecimalInt(&id, str, suffix))
+		return false;
+	tid = tid;
+	id = id;
+	clearName();
+	return true;
 }
 
 bool

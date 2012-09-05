@@ -1182,6 +1182,7 @@ MaiMap::print(FILE *f) const
 				fprintf(f, ", ");
 			fprintf(f, "%s", (*it2)->label.name());
 		}
+		fprintf(f, "}\n");
 	}
 	fprintf(f, "Next id %d\n", nextId);
 }

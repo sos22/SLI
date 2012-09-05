@@ -344,7 +344,7 @@ extern bool parseThreadRip(ThreadRip *out, const char *str, const char **succ);
 class MemoryAccessIdentifier : public Named {
 	friend class MaiMap;
 	char *mkName() const {
-		return my_asprintf("mai%d", id);
+		return my_asprintf("mai%d:%d", tid, id);
 	}
 	int id;
 	MemoryAccessIdentifier(int _id, int _tid)
