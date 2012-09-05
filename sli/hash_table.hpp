@@ -1,3 +1,65 @@
+/* Hash-based, rather than red-black tree-based, implementations of
+   map and set ADTs.  The interface is a bit different from std::map
+   and std::set.
+
+   HashedSet
+   ---------
+
+   bool contains(const member &v) const;
+   -> check whether the set contains @v, returns true if it does or
+      false otherwise.  Essentially the same as std::set::count.
+   
+   bool _insert(const member &v);
+   -> insert @v in the set, or no-op if it's already present.  Returns
+      true if it actually inserted it or false otherwise.  Any
+      outstanding iterators remain valid, but it's undefined whether
+      they will ever return the item just inserted.
+
+   void insert(const member &v);
+   -> like _insert, but returns void.  Exists mostly because I'm
+      forever getting the sense of the return value of _insert wrong,
+      and having a function which doesn't return anything makes it
+      obvious which ones need auditing.
+      
+   bool erase(const member &v);
+   -> erase @v from the set, or no-op if it isn't present.  Returns
+      true if anything erase or false otherwise.  Invalidates any
+      current iterators.
+
+   void clear();
+   -> remove everything from the set.  Invalidates all iterators.
+
+   size_t size();
+   -> count of number of elements in set.
+
+   bool empty();
+   -> equivalent to size() == 0.
+
+   iterator begin();
+   const_iterator begin() const;
+   -> create a new iterator.  These are not standard iterators.  They
+      have these methods:
+
+      bool started() const;
+      -> returns true if advance() has ever been called.
+      
+      bool finished() const;
+      -> returns true if the iterator has reached the end of the set,
+         so that dereferencing it is no longer safe.
+
+      void advance();
+      -> move on to the next element of the set.  Unsafe if the
+         iterator is finished.
+
+      member *operator->() const;
+      member &operator* const;
+      -> Get various flavours of reference to the current item.
+
+      void erase();
+      -> erase the current item from the set.  Implicitly advances to
+         the next item.  Invalidates any other outstanding iterators
+         on this set.  Not in const iterators.
+*/
 #ifndef HASH_TABLE_HPP__
 #define HASH_TABLE_HPP__
 
@@ -190,11 +252,6 @@ public:
 			return &elm->content[idx1];
 		}
 		member &operator*() const {
-			assert(!finished());
-			assert(elm);
-			return elm->content[idx1];
-		}
-		member &operator*() {
 			assert(!finished());
 			assert(elm);
 			return elm->content[idx1];
