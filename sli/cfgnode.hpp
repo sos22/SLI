@@ -38,12 +38,16 @@ public:
 		switch (type) {
 		case succ_default:
 			fprintf(f, "default");
+			break;
 		case succ_branch:
 			fprintf(f, "branch");
+			break;
 		case succ_call:
 			fprintf(f, "call");
+			break;
 		case succ_unroll:
 			fprintf(f, "unroll");
+			break;
 		}
 		if (calledFunction != LibraryFunctionTemplate::none)
 			LibraryFunctionTemplate::pp(calledFunction, f);
