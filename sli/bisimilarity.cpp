@@ -140,7 +140,15 @@ equalModuloVariables(const StateMachineSideEffect *smse1,
 		return smsec1->value->type() == smsec2->value->type() &&
 			equalModuloVariables(smsec1->value, smsec2->value);
 	}
-	case StateMachineSideEffect::AssertFalse:
+	case StateMachineSideEffect::AssertFalse: {
+		const StateMachineSideEffectAssertFalse *smsea1 =
+			dynamic_cast<const StateMachineSideEffectAssertFalse *>(smse1);
+		const StateMachineSideEffectAssertFalse *smsea2 =
+			dynamic_cast<const StateMachineSideEffectAssertFalse *>(smse2);
+		return smsea1->reflectsActualProgram == smsea2->reflectsActualProgram &&
+			equalModuloVariables(smsea1->value, smsea2->value);
+	}
+
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
 	case StateMachineSideEffect::PointerAliasing:
@@ -738,6 +746,33 @@ bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_som
 							c->target,
 							unifiedValue),
 						unifyOutputs(c->target, unifiedValue->type(), outputRegs, rep->target));
+					replacement = replacementHead;
+				} else {
+					replacement = NULL;
+				}
+				break;
+			}
+			case StateMachineSideEffect::AssertFalse: {
+				std::set<std::pair<StateMachineState *, IRExpr *> > value;
+				for (auto it2 = set.begin();
+				     it2 != set.end();
+				     it2++) {
+					StateMachineSideEffecting *o = (StateMachineSideEffecting *)*it2;
+					StateMachineSideEffectAssertFalse *c = (StateMachineSideEffectAssertFalse *)o->sideEffect;
+					value.insert(std::pair<StateMachineState *, IRExpr *>(o, c->value));
+				}
+				StateMachineState **suffix;
+				IRExpr *unifiedValue;
+				StateMachineState *replacementHead;
+				if (unifyExpressions(sm, stateLabels, value, is_ssa, representative->dbg_origin, &suffix, &unifiedValue, &replacementHead)) {
+					StateMachineSideEffectAssertFalse *a =
+						(StateMachineSideEffectAssertFalse *)rep->sideEffect;
+					*suffix = new StateMachineSideEffecting(
+						representative->dbg_origin,
+						new StateMachineSideEffectAssertFalse(
+							unifiedValue,
+							a->reflectsActualProgram),
+						rep->target);
 					replacement = replacementHead;
 				} else {
 					replacement = NULL;
