@@ -53,7 +53,7 @@ public:
 	}
 
 	MemoryAccessIdentifier merge(int tid, const std::set<MemoryAccessIdentifier> &mais) {
-		MemoryAccessIdentifier res(tid, nextId);
+		MemoryAccessIdentifier res(nextId, tid);
 		nextId++;
 		std::vector<const CFGNode *> &entry1( (*maiCorrespondence)[res] );
 		for (auto it = mais.begin(); it != mais.end(); it++) {
