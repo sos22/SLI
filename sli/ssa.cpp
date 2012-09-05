@@ -470,9 +470,8 @@ StateMachineSideEffectPhi::optimise(const AllowableOptimisations &, bool *done_s
 	IRExpr *v = generations[0].second;
 	for (unsigned x = 1; x < generations.size(); x++) {
 		if (generations[x].second != v) {
-			if (generations[x].first == (unsigned)-1 &&
-			    v->tag == Iex_Get &&
-			    ((IRExprGet *)v)->reg == reg.setGen(-1))
+			if (v->tag == Iex_Get &&
+			    ((IRExprGet *)v)->reg == generations[x].first)
 				continue;
 			return this;
 		}

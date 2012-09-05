@@ -379,7 +379,7 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 			if (smsep->generations.size() == 0) {
 				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(-1));
 			} else if (smsep->generations.size() == 1) {
-				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(smsep->generations[0].first));
+				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->generations[0].first);
 			}
 		}
 	}
@@ -658,26 +658,24 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 		for (auto it = currentlyAvailable._registers.begin();
 		     it != currentlyAvailable._registers.end();
 		     it++) {
-			if (threadAndRegister::partialEq(phi->reg, it->first)) {
-				for (unsigned x = 0; x < phi->generations.size(); x++) {
-					if (phi->generations[x].first == it->first.gen()) {
-						if (it->second.e) {
-							if (phi->generations[x].second &&
-							    physicallyEqual(phi->generations[x].second,
-									    it->second.e))
-								break;
-							if (!newPhi)
-								newPhi = new StateMachineSideEffectPhi(*phi);
-							newPhi->generations[x].second = it->second.e;
-						} else {
-							if (!newPhi)
-								newPhi = new StateMachineSideEffectPhi(*phi);
-							assert(threadAndRegister::partialEq(phi->reg,
-											    it->second.phiFrom));
-							newPhi->generations[x].first = it->second.phiFrom.gen();
-							newPhi->generations[x].second = NULL;
-							needSort = true;
-						}
+			for (unsigned x = 0; x < phi->generations.size(); x++) {
+				if (phi->generations[x].first == it->first) {
+					if (it->second.e) {
+						if (phi->generations[x].second &&
+						    physicallyEqual(phi->generations[x].second,
+								    it->second.e))
+							break;
+						if (!newPhi)
+							newPhi = new StateMachineSideEffectPhi(*phi);
+						newPhi->generations[x].second = it->second.e;
+					} else {
+						if (!newPhi)
+							newPhi = new StateMachineSideEffectPhi(*phi);
+						assert(threadAndRegister::partialEq(phi->reg,
+										    it->second.phiFrom));
+						newPhi->generations[x].first = it->second.phiFrom;
+						newPhi->generations[x].second = NULL;
+						needSort = true;
 					}
 				}
 			}

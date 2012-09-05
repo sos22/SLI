@@ -959,7 +959,7 @@ PointsToTable::refine(AliasTable &at,
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
 			     it++) {
-				auto i = content.find(p->reg.setGen(it->first));
+				auto i = content.find(it->first);
 				assert(i != content.end());
 				newPts |= i->second;
 			}

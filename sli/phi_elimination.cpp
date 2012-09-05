@@ -31,7 +31,7 @@ phiElimination(StateMachine *sm,
 		StateMachineSideEffectPhi *transformOneSideEffect(
 			StateMachineSideEffectPhi *p, bool *done_something) {
 			for (auto it = p->generations.begin(); it != p->generations.end(); it++)
-				phiRegs.insert(p->reg.setGen(it->first));
+				phiRegs.insert(it->first);
 			return StateMachineTransformer::transformOneSideEffect(p, done_something);
 		}
 		IRExpr *transformIRExpr(IRExpr *e, bool *) {
@@ -116,11 +116,11 @@ phiElimination(StateMachine *sm,
 
 		/* Remove any possible inputs whose assignment has been lost. */
 		for (auto it2 = s->generations.begin(); it2 != s->generations.end(); ) {
-			if (regDominators.count(s->reg.setGen(it2->first))) {
+			if (regDominators.count(it2->first)) {
 				it2++;
 			} else {
 				if (debug_use_domination)
-					printf("Lost input generation %d\n", it2->first);
+					printf("Lost input generation %s\n", it2->first.name());
 				it2 = s->generations.erase(it2);
 				progress = true;
 			}
@@ -133,7 +133,7 @@ phiElimination(StateMachine *sm,
 			((StateMachineSideEffecting *)*it)->sideEffect =
 				new StateMachineSideEffectCopy(
 					s->reg,
-					IRExpr_Get(s->reg.setGen(s->generations[0].first), ty));
+					IRExpr_Get(s->generations[0].first, ty));
 			progress = true;
 			continue;
 		}
@@ -145,17 +145,17 @@ phiElimination(StateMachine *sm,
 		assert(stateDominator != NULL);
 		std::vector<IRExpr *> pRegDominators;
 		pRegDominators.resize(s->generations.size());
-		bool haveGenM1 = false;
+		threadAndRegister genM1(threadAndRegister::invalid());
 		for (unsigned x = 0; x < s->generations.size(); x++) {
-			if (s->generations[x].first == (unsigned)-1) {
-				assert(!haveGenM1);
-				haveGenM1 = true;
+			if (s->generations[x].first.gen() == (unsigned)-1) {
+				assert(!genM1.isValid());
+				genM1 = s->generations[x].first;
 			} else {
 				pRegDominators[x] =
 					simplifyIRExpr(
 						simplify_via_anf(
 							optimiseAssuming(
-								regDominators[s->reg.setGen(s->generations[x].first)],
+								regDominators[s->generations[x].first],
 								stateDominator)),
 						opt);
 			}
@@ -164,9 +164,9 @@ phiElimination(StateMachine *sm,
 			printf("State domination: %s\n", nameIRExpr(stateDominator));
 			printf("Register dominators:\n");
 			for (unsigned x = 0; x < s->generations.size(); x++)
-				printf("%d -> %s\n", s->generations[x].first, nameIRExpr(pRegDominators[x]));
-			if (haveGenM1)
-				printf("Have gen m1\n");
+				printf("%s -> %s\n", s->generations[x].first.name(), nameIRExpr(pRegDominators[x]));
+			if (genM1.isValid())
+				printf("Gen M1: %s\n", genM1.name());
 		}
 
 		/* In order for this to be valid, we need to be able
@@ -180,12 +180,12 @@ phiElimination(StateMachine *sm,
 		for (unsigned i = 0;
 		     !ambiguous_resolution && i < s->generations.size();
 		     i++) {
-			if (s->generations[i].first == (unsigned)-1)
+			if (s->generations[i].first.gen() == (unsigned)-1)
 				continue;
 			for (unsigned j = i + 1;
 			     !ambiguous_resolution && j < s->generations.size();
 			     j++) {
-				if (s->generations[j].first == (unsigned)-1)
+				if (s->generations[j].first.gen() == (unsigned)-1)
 					continue;
 				if (satisfiable(
 					    IRExpr_Binop(
@@ -204,7 +204,7 @@ phiElimination(StateMachine *sm,
 		if (ambiguous_resolution)
 			continue;
 		/* Next: at least one must always be true, unless we have gen -1 */
-		if (!haveGenM1) {
+		if (genM1.isInvalid()) {
 			IRExprAssociative *checker =
 				IRExpr_Associative(
 					s->generations.size(),
@@ -228,16 +228,16 @@ phiElimination(StateMachine *sm,
 		   expressions will always be true, so we can replace
 		   this Phi with a simple Mux and copy.  Do so. */
 		IRExpr *acc = NULL;
-		if (haveGenM1)
-			acc = IRExpr_Get(s->reg.setGen(-1), ty);
+		if (genM1.isValid())
+			acc = IRExpr_Get(genM1, ty);
 		for (unsigned x = 0; x < s->generations.size(); x++) {
 			IRExpr *component;
-			if (s->generations[x].first == (unsigned)-1)
+			if (s->generations[x].first.gen() == (unsigned)-1)
 				continue;
 			if (s->generations[x].second)
 				component = s->generations[x].second;
 			else
-				component = IRExpr_Get(s->reg.setGen(s->generations[x].first), ty);
+				component = IRExpr_Get(s->generations[x].first, ty);
 			if (acc)
 				acc = IRExpr_Mux0X(pRegDominators[x], acc, component);
 			else

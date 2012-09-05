@@ -324,43 +324,42 @@ public:
 		for (auto it = assignmentOrder.rbegin();
 		     it != assignmentOrder.rend();
 		     it++) {
-			if (threadAndRegister::partialEq(*it, phi->reg)) {
-				for (auto it2 = phi->generations.begin();
-				     it2 != phi->generations.end();
-				     it2++) {
-					if (it2->first == it->gen()) {
-						registers[phi->reg] = registers[*it];
-						if (phi->reg.isTemp())
-							*assumption = setTemporary(phi->reg, *assumption, opt);
-						bump_register_in_assignment_order(phi->reg);
-						return;
-					}
+			for (auto it2 = phi->generations.begin();
+			     it2 != phi->generations.end();
+			     it2++) {
+				if (it2->first == *it) {
+					registers[phi->reg] = registers[*it];
+					if (phi->reg.isTemp())
+						*assumption = setTemporary(phi->reg, *assumption, opt);
+					bump_register_in_assignment_order(phi->reg);
+					return;
 				}
 			}
 		}
 		/* We haven't yet assigned to any registers in the
 		   input set of the Phi, so we're going to pick up the
 		   initial value of the super-register. */
-		/* The initial value must be an allowable one. */
-#ifndef NDEBUG
-		bool found_it;
-		found_it = false;
+		threadAndRegister genM1(threadAndRegister::invalid());
 		for (auto it = phi->generations.begin();
-		     !found_it && it != phi->generations.end();
+		     genM1.isInvalid() && it != phi->generations.end();
 		     it++)
-			if (it->first == (unsigned)-1)
-				found_it = true;
-		assert(found_it);
-#endif
+			if (it->first.gen() == (unsigned)-1)
+				genM1 = it->first;
+		assert(genM1.isValid());
+
 		/* Pick up initial value */
-		register_val &rv(registers[phi->reg]);
-		rv.val8 = NULL;
-		rv.val16 = NULL;
-		rv.val32 = NULL;
-		rv.val64 = NULL;
-		if (phi->reg.isTemp())
-			*assumption = setTemporary(phi->reg, *assumption, opt);
-		bump_register_in_assignment_order(phi->reg);
+		if (threadAndRegister::partialEq(phi->reg, genM1)) {
+			register_val &rv(registers[phi->reg]);
+			rv.val8 = NULL;
+			rv.val16 = NULL;
+			rv.val32 = NULL;
+			rv.val64 = NULL;
+			if (phi->reg.isTemp())
+				*assumption = setTemporary(phi->reg, *assumption, opt);
+			bump_register_in_assignment_order(phi->reg);
+		} else {
+			set_register(phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
+		}
 	}
 
 	IRExpr *specialiseIRExpr(IRExpr *iex);

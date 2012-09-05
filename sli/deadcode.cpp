@@ -186,7 +186,7 @@ public:
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
 			     it++)
-				this->insert(smsep->reg.setGen(it->first));
+				this->insert(it->first);
 		}
 	}
 

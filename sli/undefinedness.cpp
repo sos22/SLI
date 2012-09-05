@@ -419,7 +419,7 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 					}
 					if (x == p->generations.size())
 						break;
-					std::vector<std::pair<unsigned, IRExpr *> > newGen(p->generations);
+					std::vector<std::pair<threadAndRegister, IRExpr *> > newGen(p->generations);
 					newGen[x].second = v;
 					for (x++; x < newGen.size(); x++) {
 						if (!newGen[x].second)

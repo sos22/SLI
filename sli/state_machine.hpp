@@ -958,7 +958,7 @@ class StateMachineSideEffectPhi : public StateMachineSideEffect {
 	}
 public:
 	threadAndRegister reg;
-	std::vector<std::pair<unsigned, IRExpr *> > generations;
+	std::vector<std::pair<threadAndRegister, IRExpr *> > generations;
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  const std::set<unsigned> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
@@ -966,14 +966,14 @@ public:
 	{
 		generations.reserve(_generations.size());
 		for (auto it = _generations.begin(); it != _generations.end(); it++) {
-			std::pair<unsigned, IRExpr *> item;
-			item.first = *it;
+			std::pair<threadAndRegister, IRExpr *> item;
+			item.first = reg.setGen(*it);
 			item.second = NULL;
 			generations.push_back(item);
 		}
 	}
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
-				  const std::vector<std::pair<unsigned, IRExpr *> > &_generations)
+				  const std::vector<std::pair<threadAndRegister, IRExpr *> > &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
 		  reg(_reg), generations(_generations)
 	{
@@ -985,7 +985,7 @@ public:
 		for (auto it = generations.begin(); it != generations.end(); it++) {
 			if (it != generations.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%d", it->first);
+			fprintf(f, "%s", it->first.name());
 			if (it->second) {
 				fprintf(f, "=");
 				ppIRExpr(it->second, f);
@@ -999,12 +999,12 @@ public:
 		if (parseThisString("Phi", str, &str) &&
 		    parseThreadAndRegister(&key, str, &str) &&
 		    parseThisString("(", str, &str)) {
-			std::vector<std::pair<unsigned, IRExpr *> > generations;
+			std::vector<std::pair<threadAndRegister, IRExpr *> > generations;
 			if (!parseThisChar(')', str, suffix)) {
 				while (1) {
-					int x;
+					threadAndRegister x(threadAndRegister::invalid());
 					IRExpr *val;
-					if (!parseDecimalInt(&x, str, &str))
+					if (!parseThreadAndRegister(&x, str, &str))
 						return false;
 					if (parseThisChar('=', str, &str)) {
 						if (!parseIRExpr(&val, str, &str))
@@ -1012,7 +1012,7 @@ public:
 					} else {
 						val = NULL;
 					}
-					generations.push_back(std::pair<unsigned, IRExpr *>(x, val));
+					generations.push_back(std::pair<threadAndRegister, IRExpr *>(x, val));
 					if (parseThisChar(')', str, suffix))
 						break;
 					if (!parseThisString(", ", str, &str))
