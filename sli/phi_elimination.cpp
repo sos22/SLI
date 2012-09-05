@@ -113,6 +113,31 @@ phiElimination(StateMachine *sm,
 		}
 		if (debug_use_domination)
 			printf("Consider reducing phi state l%d\n", stateLabels[*it]);
+
+		/* Remove any possible inputs whose assignment has been lost. */
+		for (auto it2 = s->generations.begin(); it2 != s->generations.end(); ) {
+			if (regDominators.count(s->reg.setGen(it2->first))) {
+				it2++;
+			} else {
+				if (debug_use_domination)
+					printf("Lost input generation %d\n", it2->first);
+				it2 = s->generations.erase(it2);
+				progress = true;
+			}
+		}
+
+		assert(s->generations.size() > 0);
+		if (s->generations.size() == 1) {
+			if (debug_use_domination)
+				printf("Reduced to a simple copy\n");
+			((StateMachineSideEffecting *)*it)->sideEffect =
+				new StateMachineSideEffectCopy(
+					s->reg,
+					IRExpr_Get(s->reg.setGen(s->generations[0].first), ty));
+			progress = true;
+			continue;
+		}
+
 		IRExpr *stateDominator =
 			simplifyIRExpr(
 				simplify_via_anf(dominatingExpressions.get(*it)),

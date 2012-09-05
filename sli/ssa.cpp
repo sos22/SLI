@@ -13,10 +13,8 @@ namespace SSA {
 
 #ifdef NDEBUG
 #define debug_dump_reaching_table 0
-#define debug_optimise_ssa 0
 #else
 static int debug_dump_reaching_table = 0;
-static int debug_optimise_ssa = 0;
 #endif
 
 /* Assert that the machine does not currently reference and tAR
@@ -454,78 +452,6 @@ convertToSSA(StateMachine *inp)
 	return inp;
 }
 
-class optimiseSSATransformer : public StateMachineTransformer {
-	ReachingTable reaching;
-	std::map<const StateMachineState *, int> stateLabels;
-
-	StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
-						     bool *done_something)
-	{
-		StateMachineSideEffect *se = smse->getSideEffect();
-		if (se && se->type == StateMachineSideEffect::Phi) {
-			StateMachineSideEffectPhi *phi =
-				(StateMachineSideEffectPhi *)se;
-			const ReachingEntry &reachingEntry(reaching.getEntryReaching(smse));
-			if (debug_optimise_ssa) {
-				printf("optimiseSSA consider state l%d, reaching entry ",
-				       stateLabels[smse]);
-				reachingEntry.print(stdout);
-				printf(" (target reg %s)\n", phi->reg.name());
-			}
-			const std::set<unsigned> &generations(reachingEntry.get(phi->reg));
-			std::vector<std::pair<unsigned, IRExpr *> > newGenerations;
-			newGenerations.reserve(phi->generations.size());
-			for (auto it = phi->generations.begin();
-			     it != phi->generations.end();
-			     it++) {
-				if (generations.count(it->first))
-					newGenerations.push_back(*it);
-			}
-			if (newGenerations.size() < phi->generations.size()) {
-				*done_something = true;
-				assert(newGenerations.size() != 0);
-				return new StateMachineSideEffecting(
-					smse,
-					new StateMachineSideEffectPhi(
-						phi->reg,
-						newGenerations));
-			}
-		}
-		return smse;
-	}
-	IRExpr *transformIRExpr(IRExpr *, bool *) { return NULL; }
-	bool rewriteNewStates() const { return false; }
-public:
-	optimiseSSATransformer(StateMachine *inp)
-		: reaching(inp, false)
-	{
-		if (debug_optimise_ssa && !TIMEOUT) {
-			printf("Input to optimiseSSA:\n");
-			printStateMachine(inp, stdout, stateLabels);
-			printf("Reaching table:\n");
-			reaching.print(stdout, stateLabels);
-		}
-	}
-};
-
-/* Other optimisations can sometimes lead to the set of assignments
-   which might reach a Phi node shrinking.  This pass goes through and
-   fixes things up so that the reaching set in the Phi node
-   accurately reflects this. */
-static StateMachine *
-optimiseSSA(StateMachine *inp, bool *done_something)
-{
-	optimiseSSATransformer t(inp);
-	if (TIMEOUT)
-		return inp;
-	StateMachine *res = t.transform(inp, done_something);
-	if (debug_optimise_ssa) {
-		printf("optimiseSSA result:\n");
-		printStateMachine(res, stdout);
-	}
-	return res;
-}
-
 /* End of namespace SSA */
 }
 
@@ -533,12 +459,6 @@ StateMachine *
 convertToSSA(StateMachine *inp)
 {
 	return SSA::convertToSSA(inp);
-}
-
-StateMachine *
-optimiseSSA(StateMachine *inp, bool *done_something)
-{
-	return SSA::optimiseSSA(inp, done_something);
 }
 
 StateMachineSideEffect *
