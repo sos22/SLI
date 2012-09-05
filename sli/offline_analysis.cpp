@@ -188,7 +188,7 @@ removeTerminalStores(const MaiMap &mai,
 }
 
 static StateMachine *
-_optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+_optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		      VexPtr<StateMachine, &ir_heap> sm,
 		      const AllowableOptimisations &opt,
 		      const VexPtr<OracleInterface> &oracle,
@@ -269,7 +269,13 @@ _optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
 
 		LibVEX_maybe_gc(token);
 
-		sm = bisimilarityReduction(sm, opt);
+		p = false;
+		sm = bisimilarityReduction(sm, *mai, &p);
+		if (debugOptimiseStateMachine && p) {
+			printf("bisimilarityReduction:\n");
+			printStateMachine(sm, stdout);
+		}
+		done_something |= p;
 
 		if (is_ssa) {
 			p = false;
@@ -367,7 +373,7 @@ _optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
 	return sm;
 }
 StateMachine *
-optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		     VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
 		     const VexPtr<OracleInterface> &oracle,
@@ -378,7 +384,7 @@ optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
 	return _optimiseStateMachine(mai, sm, opt, oracle, is_ssa, token, progress);
 }
 StateMachine *
-optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		     VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
 		     const VexPtr<Oracle> &oracle,
@@ -471,7 +477,7 @@ singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, State
 }
 
 static IRExpr *
-atomicSurvivalConstraint(const VexPtr<MaiMap, &ir_heap> &mai,
+atomicSurvivalConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 			 VexPtr<StateMachine, &ir_heap> &machine,
 			 StateMachine **_atomicMachine,
 			 VexPtr<OracleInterface> &oracle,
@@ -549,7 +555,7 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 }
 
 StateMachine *
-removeAnnotations(const VexPtr<MaiMap, &ir_heap> &mai,
+removeAnnotations(VexPtr<MaiMap, &ir_heap> &mai,
 		  VexPtr<StateMachine, &ir_heap> sm,
 		  const AllowableOptimisations &opt,
 		  const VexPtr<OracleInterface> &oracle,
@@ -578,7 +584,7 @@ static IRExpr *
 verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachine,
 				     VexPtr<StateMachine, &ir_heap> probeMachine,
 				     VexPtr<OracleInterface> &oracle,
-				     const VexPtr<MaiMap, &ir_heap> &mai,
+				     VexPtr<MaiMap, &ir_heap> &mai,
 				     const AllowableOptimisations &optIn,
 				     GarbageCollectionToken token)
 {
@@ -714,7 +720,7 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 }
 
 static StateMachine *
-localiseLoads(const VexPtr<MaiMap, &ir_heap> &mai,
+localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      const VexPtr<StateMachine, &ir_heap> &storeMachine,
 	      const AllowableOptimisations &opt,
@@ -755,7 +761,7 @@ localiseLoads(const VexPtr<MaiMap, &ir_heap> &mai,
 }
 
 static StateMachine *
-localiseLoads(const VexPtr<MaiMap, &ir_heap> &mai,
+localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      const std::set<DynAnalysisRip> &stores,
 	      const AllowableOptimisations &opt,
@@ -1160,7 +1166,7 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 	      FixConsumer &df,
 	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
-	      const VexPtr<MaiMap, &ir_heap> &mai,
+	      VexPtr<MaiMap, &ir_heap> &mai,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(diagnoseCrash);

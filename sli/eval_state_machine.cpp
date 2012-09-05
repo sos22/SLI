@@ -2239,7 +2239,7 @@ concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine
 }
 
 IRExpr *
-writeMachineSuitabilityConstraint(const VexPtr<MaiMap, &ir_heap> &mai,
+writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 				  const VexPtr<StateMachine, &ir_heap> &writeMachine,
 				  const VexPtr<StateMachine, &ir_heap> &readMachine,
 				  const VexPtr<OracleInterface> &oracle,

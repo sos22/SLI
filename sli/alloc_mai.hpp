@@ -52,6 +52,27 @@ public:
 		return iterator(it->second);
 	}
 
+	MemoryAccessIdentifier merge(int tid, const std::set<MemoryAccessIdentifier> &mais) {
+		MemoryAccessIdentifier res(tid, nextId);
+		nextId++;
+		std::vector<const CFGNode *> &entry1( (*maiCorrespondence)[res] );
+		for (auto it = mais.begin(); it != mais.end(); it++) {
+			assert(*it != res);
+			assert(maiCorrespondence->count(*it));
+			const std::vector<const CFGNode *> &entry2( (*maiCorrespondence)[*it] );
+			for (auto it2 = entry2.begin(); it2 != entry2.end(); it2++) {
+				bool alreadyPresent = false;
+				for (auto it3 = entry1.begin(); !alreadyPresent && it3 != entry1.end(); it3++) {
+					if (*it2 == *it3)
+						alreadyPresent = true;
+				}
+				if (!alreadyPresent)
+					entry1.push_back(*it2);
+			}
+		}
+		return res;
+	}
+
 	void visit(HeapVisitor &hv) {
 		for (auto it = maiCorrespondence->begin();
 		     it != maiCorrespondence->end();

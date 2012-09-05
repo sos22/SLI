@@ -88,7 +88,7 @@ bool fixSufficient(const VexPtr<MaiMap, &ir_heap> &mai,
 		   const AllowableOptimisations &opt,
 		   const VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
 		   GarbageCollectionToken token);
-IRExpr *writeMachineSuitabilityConstraint(const VexPtr<MaiMap, &ir_heap> &mai,
+IRExpr *writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 					  const VexPtr<StateMachine, &ir_heap> &writeMachine,
 					  const VexPtr<StateMachine, &ir_heap> &readMachine,
 					  const VexPtr<OracleInterface> &oracle,

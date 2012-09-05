@@ -192,14 +192,14 @@ public:
 	StateMachine *transform(StateMachine *s, bool *done_something = NULL);
 };
 
-StateMachine *optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+StateMachine *optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 				   VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
 				   const VexPtr<OracleInterface> &oracle,
 				   bool is_ssa,
 				   GarbageCollectionToken token,
 				   bool *progress = NULL);
-StateMachine *optimiseStateMachine(const VexPtr<MaiMap, &ir_heap> &mai,
+StateMachine *optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 				   VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
 				   const VexPtr<Oracle> &oracle,
@@ -215,7 +215,7 @@ StateMachine *availExpressionAnalysis(const MaiMap &mai,
 				      OracleInterface *oracle,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt);
-StateMachine *bisimilarityReduction(StateMachine *sm, const AllowableOptimisations &opt);
+StateMachine *bisimilarityReduction(StateMachine *sm, MaiMap &mai, bool *done_something);
 StateMachine *useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 				    OracleInterface *oracle, bool *done_something);
 StateMachine *removeLocalSurvival(StateMachine *sm,
@@ -232,7 +232,7 @@ StateMachine *phiElimination(StateMachine *sm, const AllowableOptimisations &opt
 			     const ControlDominationMap &cdm, bool *done_something);
 StateMachine *undefinednessSimplification(StateMachine *sm, bool *done_something);
 
-StateMachine *removeAnnotations(const MaiMap &mai,
+StateMachine *removeAnnotations(VexPtr<MaiMap, &ir_heap> &mai,
 				VexPtr<StateMachine, &ir_heap> sm,
 				const AllowableOptimisations &opt,
 				const VexPtr<OracleInterface> &oracle,
