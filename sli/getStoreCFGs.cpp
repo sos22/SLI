@@ -20,7 +20,8 @@ namespace _getStoreCFGs {
 	f(debug_remove_redundant_roots)		\
 	f(debug_unroll_and_cycle_break)		\
 	f(debug_top_level)			\
-	f(debug_backtrack_roots)
+	f(debug_backtrack_roots)		\
+	f(debug_remove_context)
 #ifdef NDEBUG
 #define mk_debug_flag(name)			\
 	static const bool name = false;
@@ -336,8 +337,12 @@ removeRedundantRoots(const std::map<VexRip, CFGNode *> &m,
 		const VexRip &rootRip((*it)->rip);
 		bool redundant = false;
 		for (auto it2 = m.begin(); !redundant && it2 != m.end(); it2++) {
-			if (rootRip.isTruncationOf(it2->first))
+			if (rootRip.isTruncationOf(it2->first)) {
+				if (debug_remove_redundant_roots)
+					printf("Root %s is redundant because of %s\n",
+					       rootRip.name(), it2->first.name());
 				redundant = true;
+			}
 		}
 		if (redundant) {
 			it.erase();
@@ -979,11 +984,171 @@ trimUninterestingCFGNodes(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
 }
 
 static void
+removeRedundantContext(CfgLabelAllocator &allocLabel,
+		       const HashedSet<HashedPtr<CFGNode> > &rootsIn,
+		       HashedSet<HashedPtr<CFGNode> > &rootsOut,
+		       std::map<const CFGNode *, cfgflavour_store_t> &flavours,
+		       std::map<VexRip, CFGNode *> &ripsToNodes)
+{
+	for (auto it = rootsIn.begin(); !it.finished(); it.advance()) {
+		if (debug_remove_context) {
+			printf("Remove redundant context in:\n");
+			debug_dump(it->get());
+		}
+		std::vector<unsigned long> uselessCtxt((*it)->rip.stack);
+		std::queue<CFGNode *> toCheck;
+
+		/* This is done before cycle breaking, so we need to
+		   check for cycles as we go around. */
+		std::set<CFGNode *> checked;
+
+		int nr_instrs;
+		toCheck.push(*it);
+		while (!toCheck.empty() && !uselessCtxt.empty()) {
+			CFGNode *n = toCheck.front();
+			toCheck.pop();
+			if (!checked.insert(n).second)
+				continue;
+			unsigned x;
+			for (x = 0; x < uselessCtxt.size() && x < n->rip.stack.size(); x++) {
+				if (uselessCtxt[x] != n->rip.stack[x])
+					break;
+			}
+			if (x < uselessCtxt.size())
+				uselessCtxt.resize(x);
+			for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
+				if (it2->instr)
+					toCheck.push(it2->instr);
+			nr_instrs++;
+		}
+		if (uselessCtxt.empty() || checked.size() == 1) {
+			if (debug_remove_context)
+				printf("No redundant context\n");
+			rootsOut.insert(*it);
+			continue;
+		}
+
+		if (debug_remove_context) {
+			printf("Redundant context: [");
+			for (auto it = uselessCtxt.begin(); it != uselessCtxt.end(); it++) {
+				if (it != uselessCtxt.begin())
+					printf(", ");
+				printf("%lx", *it);
+			}
+			printf("]\n");
+		}
+
+		/* Dupe the root with the context removed.  We can't
+		 * just do it in-place because nodes can be shared
+		 * between roots, and the root we're sharing with
+		 * might want to remove less context. */
+		CFGNode *newRoot = *it;
+		struct _ {
+			std::queue<std::pair<CFGNode **, VexRip> > relocations;
+			const std::vector<unsigned long> &uselessCtxt;
+			std::map<VexRip, CFGNode *> &ripsToNodes;
+			CfgLabelAllocator &allocLabel;
+			std::map<const CFGNode *, cfgflavour_store_t> &flavours;
+			void addReloc(CFGNode **what, const VexRip &vr) {
+				VexRip newVr(vr);
+#ifndef NDEBUG
+				for (unsigned x = 0; x < uselessCtxt.size(); x++)
+					assert( uselessCtxt[x] == vr.stack[x] );
+#endif
+				newVr.stack.erase(newVr.stack.begin(),
+						  newVr.stack.begin() + uselessCtxt.size());
+				newVr.clearName();
+				relocations.push(std::pair<CFGNode **, VexRip>(what, newVr));
+			}
+			void processReloc(CFGNode **what, const VexRip &vr) {
+				CFGNode *oldNode = *what;
+#ifndef NDEBUG
+				assert(oldNode);
+				assert(oldNode->rip.stack.size() == vr.stack.size() + uselessCtxt.size());
+				for (unsigned x = uselessCtxt.size(); x < oldNode->rip.stack.size(); x++)
+					assert(vr.stack[x - uselessCtxt.size()] == oldNode->rip.stack[x]);
+#endif
+				auto it_did_insert = ripsToNodes.insert(std::pair<VexRip, CFGNode *>(vr, (CFGNode *)NULL));
+				auto it = it_did_insert.first;
+				auto did_insert = it_did_insert.second;
+				if (!did_insert) {
+					assert(it->second->rip == vr);
+					*what = it->second;
+					return;
+				}
+
+				CFGNode *res = new CFGNode(oldNode, allocLabel());
+				res->rip = vr;
+				for (auto it = res->successors.begin();
+				     it != res->successors.end();
+				     it++)
+					if (it->instr)
+						addReloc(&it->instr, it->instr->rip);
+				it->second = res;
+				assert(flavours.count(oldNode));
+				flavours[res] = flavours[oldNode];
+				*what = res;
+			}
+			_(const std::vector<unsigned long> &_uselessCtxt,
+			  std::map<VexRip, CFGNode *> &_ripsToNodes,
+			  CfgLabelAllocator &_allocLabel,
+			  std::map<const CFGNode *, cfgflavour_store_t> &_flavours)
+				: uselessCtxt(_uselessCtxt),
+				  ripsToNodes(_ripsToNodes),
+				  allocLabel(_allocLabel),
+				  flavours(_flavours)
+			{}
+		} relocManager(uselessCtxt, ripsToNodes, allocLabel, flavours);
+		relocManager.addReloc(&newRoot, (*it)->rip);
+		while (!relocManager.relocations.empty()) {
+			std::pair<CFGNode **, VexRip> t(relocManager.relocations.front());
+			relocManager.relocations.pop();
+			relocManager.processReloc(t.first, t.second);
+		}
+
+		assert(newRoot != *it);
+		rootsOut.insert(newRoot);
+
+		if (debug_remove_context) {
+			printf("After removing context:\n");
+			debug_dump(newRoot);
+		}
+	}
+
+	/* Need to rebuild ripsToNodes now, because we might need to
+	   remove some nodes and it's hard to figure out which without
+	   doing this. */
+	ripsToNodes.clear();
+	std::queue<CFGNode *> pending;
+	std::set<const CFGNode *> found;
+	for (auto it = rootsOut.begin(); !it.finished(); it.advance())
+		pending.push(*it);
+	while (!pending.empty()) {
+		CFGNode *n = pending.front();
+		pending.pop();
+		if (!found.insert(n).second)
+			continue;
+		assert(!ripsToNodes.count(n->rip));
+		ripsToNodes[n->rip] = n;
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+			if (it->instr)
+				pending.push(it->instr);
+	}
+	for (auto it = flavours.begin(); it != flavours.end(); ) {
+		if (!found.count(it->first))
+			flavours.erase(it++);
+		else
+			it++;
+	}
+}
+
+static void
 buildCFG(CfgLabelAllocator &allocLabel, const std::set<DynAnalysisRip> &dyn_roots,
 	 unsigned maxPathLength, Oracle *oracle, HashedSet<HashedPtr<CFGNode> > &roots)
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
 	std::map<const CFGNode *, cfgflavour_store_t> cfgFlavours;
+	HashedSet<HashedPtr<CFGNode> > roots1;
 	initialExploration(dyn_roots, cfgFlavours, allocLabel, maxPathLength, oracle, ripsToCFGNodes);
 	if (TIMEOUT)
 		return;
@@ -999,11 +1164,21 @@ buildCFG(CfgLabelAllocator &allocLabel, const std::set<DynAnalysisRip> &dyn_root
 		debug_dump(ripsToCFGNodes, "\t");
 	}
 
-	findRootsAndBacktrack(allocLabel, ripsToCFGNodes, cfgFlavours, roots, oracle);
+	findRootsAndBacktrack(allocLabel, ripsToCFGNodes, cfgFlavours, roots1, oracle);
 	if (debug_find_roots) {
 		printf("After backtracking:\n");
+		debug_dump(roots1, "\t");
+	}
+
+	/* If all of the nodes reachable from a root have the same
+	 * context, that context probably doesn't matter.  Remove
+	 * it. */
+	removeRedundantContext(allocLabel, roots1, roots, cfgFlavours, ripsToCFGNodes);
+	if (debug_remove_context) {
+		printf("after removing redundant context:\n");
 		debug_dump(roots, "\t");
 	}
+
 	if (removeRedundantRoots(ripsToCFGNodes, roots)) {
 		if (debug_remove_redundant_roots) {
 			printf("after removing redundant roots:\n");

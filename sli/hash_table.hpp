@@ -307,7 +307,7 @@ public:
 				elm = &owner->heads[idx2];
 			}
 		}
-		member *operator->() const {
+		const member *operator->() const {
 			assert(!finished());
 			assert(elm);
 			return &elm->content[idx1];
