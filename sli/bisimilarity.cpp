@@ -4,6 +4,7 @@
 #include "offline_analysis.hpp"
 #include "state_machine.hpp"
 #include "alloc_mai.hpp"
+#include "maybe.hpp"
 
 #ifndef NDEBUG
 static bool debug_build_similarity_map = false;
@@ -241,8 +242,55 @@ extendUnifier(std::map<threadAndRegister, threadAndRegister> &unifier,
 	abort();
 }
 
+static IRExpr *
+rewriteVariables(IRExpr *a, const std::map<threadAndRegister, threadAndRegister> &rules)
+{
+	struct : public IRExprTransformer {
+		const std::map<threadAndRegister, threadAndRegister> *rules;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			auto it = rules->find(ieg->reg);
+			if (it != rules->end())
+				return IRExpr_Get(it->second, ieg->ty);
+			return ieg;
+		}
+	} doit;
+	doit.rules = &rules;
+	return doit.doit(a);
+}
+
+static threadAndRegister
+allocateNewTemporary(const StateMachine *sm, unsigned tid)
+{
+	unsigned idx = 0;
+	std::set<const StateMachineState *> f;
+	std::queue<const StateMachineState *> q;
+	q.push(sm->root);
+	while (!q.empty()) {
+		const StateMachineState *s = q.front();
+		q.pop();
+		if (!f.insert(s).second)
+			continue;
+		threadAndRegister definedReg(threadAndRegister::invalid());
+		if (s->getSideEffect() &&
+		    s->getSideEffect()->definesRegister(definedReg) &&
+		    definedReg.tid() == tid &&
+		    definedReg.isTemp() &&
+		    definedReg.asTemp() >= idx)
+			idx = definedReg.asTemp() + 1;
+		std::vector<const StateMachineState *> successors;
+		s->targets(successors);
+		for (auto it = successors.begin(); it != successors.end(); it++)
+			q.push(*it);
+	}
+
+	return threadAndRegister::temp(tid, idx, 1);
+}
+
 static bool
-unifyExpressions(const std::set<std::pair<StateMachineState *, IRExpr *> > inputExpressions,
+unifyExpressions(const StateMachine *sm,
+		 std::map<const StateMachineState *, int> &stateLabels,
+		 const std::set<std::pair<StateMachineState *, IRExpr *> > inputExpressions,
+		 bool is_ssa,
 		 const VexRip &vr,
 		 StateMachineState ***suffix,
 		 IRExpr **result,
@@ -288,10 +336,196 @@ unifyExpressions(const std::set<std::pair<StateMachineState *, IRExpr *> > input
 		*fragmentHead = smse;
 		return true;
 	}
-			
-#warning write me
 
-	return false;
+	if (!is_ssa)
+		return false;
+
+	/* Add the self edges into the unifier, since that makes
+	   things a bit easier to think about. */
+	{
+		std::set<threadAndRegister> unifyTo;
+		for (auto it = unifier.begin(); it != unifier.end(); it++)
+			unifyTo.insert(it->second);
+		for (auto it = unifyTo.begin(); it != unifyTo.end(); it++) {
+			assert(!unifier.count(*it));
+			unifier.insert(std::pair<threadAndRegister, threadAndRegister>
+				       (*it, *it));
+		}
+	}
+
+	/* Now we need to try to come up with a Phi node which will
+	   always select the right input in each state. */
+	std::map<threadAndRegister, std::set<threadAndRegister> > invertedUnifier;
+	for (auto it = unifier.begin(); it != unifier.end(); it++)
+		invertedUnifier[it->second].insert(it->first);
+
+	/* Suppose that we inserted a phi over invertedUnifier[reg]
+	 * just before state s.  Then statePhiResults[s][reg] tells
+	 * you which register the phi would select (or Nothing if it
+	 * would be invalid to insert it there). */
+	typedef std::map<threadAndRegister, Maybe<threadAndRegister> > statePhiT;
+	std::map<const StateMachineState *, statePhiT> statePhiResult;
+	statePhiT initialState;
+	for (auto it = invertedUnifier.begin(); it != invertedUnifier.end(); it++)
+		initialState.insert(
+			std::pair<threadAndRegister, Maybe<threadAndRegister> >(
+				it->first, Maybe<threadAndRegister>::nothing()));
+	std::queue<const StateMachineState *> pending;
+	pending.push(sm->root);
+	statePhiResult[sm->root] = initialState;
+	while (!pending.empty()) {
+		auto s = pending.front();
+		pending.pop();
+		assert(statePhiResult.count(s));
+		const statePhiT &entry(statePhiResult[s]);
+		statePhiT _exit;
+		auto exit = &entry;
+
+		auto se = s->getSideEffect();
+		threadAndRegister definedReg(threadAndRegister::invalid());
+		if (se && se->definesRegister(definedReg)) {
+			auto it = unifier.find(definedReg);
+			if (it != unifier.end()) {
+				if (debug_build_unifiers)
+					printf("l%d defines %s\n", stateLabels[s],
+					       definedReg.name());
+				/* @definedReg is in the set
+				   invertedUnifier[it->second], so we
+				   need to update our state. */
+				_exit = entry;
+				auto it2_did_insert = _exit.insert(std::pair<threadAndRegister, Maybe<threadAndRegister> >
+								   (it->second, Maybe<threadAndRegister>::just(it->first)));
+				assert(!it2_did_insert.second);
+				it2_did_insert.first->second = Maybe<threadAndRegister>::just(it->first);
+				exit = &_exit;
+			}
+		}
+
+		std::vector<const StateMachineState *> successors;
+		s->targets(successors);
+		for (auto it = successors.begin(); it != successors.end(); it++) {
+			auto it2_did_insert = statePhiResult.insert(
+				std::pair<const StateMachineState *, statePhiT>
+				(*it, *exit));
+			auto it2 = it2_did_insert.first;
+			auto did_insert = it2_did_insert.second;
+			bool need_successors;
+			if (!did_insert) {
+				/* Already had an assignment for this
+				   state.  Merge them. */
+				need_successors = false;
+				auto it3 = exit->begin();
+				auto it4 = it2->second.begin();
+				while (1) {
+					if (it3 == exit->end()) {
+						assert(it4 == it2->second.end());
+						break;
+					}
+					assert(it4 != it2->second.end());
+					assert(it3->first == it4->first);
+					if (it4->second.valid &&
+					    (!it3->second.valid ||
+					     it3->second.content != it4->second.content)) {
+						need_successors = true;
+						it4->second.valid = false;
+					}
+					it3++;
+					it4++;
+				}
+			} else {
+				need_successors = true;
+			}
+			if (need_successors)
+				pending.push(*it);
+		}
+	}
+
+	if (debug_build_unifiers) {
+		printf("Phi lookup table:\n");
+		for (auto it = statePhiResult.begin();
+		     it != statePhiResult.end();
+		     it++) {
+			printf("l%d -> {", stateLabels[it->first]);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin())
+					printf(", ");
+				printf("%s:", it2->first.name());
+				if (it2->second.valid)
+					printf("%s", it2->second.content.name());
+				else
+					printf("_|_");
+			}
+			printf("}\n");
+		}
+	}
+
+	/* In order to generate the necessary phis we need every state
+	   in the input set to have a complete entry in
+	   statePhiResult. */
+	for (auto it = inputExpressions.begin(); it != inputExpressions.end(); it++) {
+		assert(statePhiResult.count(it->first));
+		const statePhiT &v(statePhiResult[it->first]);
+		for (auto it2 = v.begin(); it2 != v.end(); it2++) {
+			if (!it2->second.valid) {
+				if (debug_build_unifiers)
+					printf("Failed to build unifier at l%d, reg %s\n",
+					       stateLabels[it->first], it2->first.name());
+				return false;
+			}
+		}
+	}
+
+	/* Okay, that's all of the necessary checking and setup done.
+	   From here on we're guaranteed to succeed. */
+
+	/* Create new temporaries */
+	std::map<threadAndRegister, threadAndRegister> newVariables;
+	for (auto it = invertedUnifier.begin(); it != invertedUnifier.end(); it++)
+		newVariables.insert(
+			std::pair<threadAndRegister, threadAndRegister>
+			(it->first, allocateNewTemporary(sm, it->first.tid())));
+
+	if (debug_build_unifiers) {
+		printf("Unification map:\n");
+		for (auto it = invertedUnifier.begin(); it != invertedUnifier.end(); it++) {
+			printf("\t{");
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin())
+					printf(", ");
+				printf("%s", it2->name());
+			}
+			printf("} -> %s -> %s\n", it->first.name(), newVariables[it->first].name());
+		}
+	}
+
+	/* Build the unified expression */
+	IRExpr *unifiedExpression = rewriteVariables(ref, newVariables);
+
+	/* Build the phis */
+	StateMachineState *head = NULL;
+	StateMachineState **tailp = &head;
+	for (auto it = invertedUnifier.begin(); it != invertedUnifier.end(); it++) {
+		auto targ = newVariables.find(it->first);
+		assert(targ != newVariables.end());
+		std::vector<std::pair<threadAndRegister, IRExpr *> > generations;
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+			generations.push_back(std::pair<threadAndRegister, IRExpr *>(*it2, (IRExpr *)NULL));
+		StateMachineSideEffecting *s =
+			new StateMachineSideEffecting(
+				vr,
+				new StateMachineSideEffectPhi(
+					targ->second,
+					generations),
+				NULL);
+		*tailp = s;
+		tailp = &s->target;
+	}
+
+	/* And we're done */
+	*suffix = tailp;
+	*fragmentHead = head;
+	*result = unifiedExpression;
+	return true;
 }
 
 static StateMachineState *
@@ -308,7 +542,7 @@ unifyOutputs(const threadAndRegister &reg1, IRType ty, const std::set<threadAndR
 }
 		 
 static StateMachine *
-bisimilarityReduction(StateMachine *sm, MaiMap &mai, bool *done_something)
+bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
 {
 	std::map<const StateMachineState *, int> stateLabels;
 
@@ -429,7 +663,7 @@ bisimilarityReduction(StateMachine *sm, MaiMap &mai, bool *done_something)
 			StateMachineState **suffix;
 			IRExpr *unifiedCondition;
 			StateMachineState *replacementHead;
-			if (unifyExpressions(conditions, representative->dbg_origin, &suffix, &unifiedCondition, &replacementHead)) {
+			if (unifyExpressions(sm, stateLabels, conditions, is_ssa, representative->dbg_origin, &suffix, &unifiedCondition, &replacementHead)) {
 				*suffix = new StateMachineBifurcate(
 					representative->dbg_origin,
 					unifiedCondition,
@@ -462,7 +696,7 @@ bisimilarityReduction(StateMachine *sm, MaiMap &mai, bool *done_something)
 				StateMachineState **suffix;
 				IRExpr *unifiedAddr;
 				StateMachineState *replacementHead;
-				if (unifyExpressions(addr, representative->dbg_origin, &suffix, &unifiedAddr, &replacementHead)) {
+				if (unifyExpressions(sm, stateLabels, addr, is_ssa, representative->dbg_origin, &suffix, &unifiedAddr, &replacementHead)) {
 					StateMachineSideEffectLoad *l =
 						(StateMachineSideEffectLoad *)rep->sideEffect;
 					MemoryAccessIdentifier newMai(mai.merge(l->rip.tid, mais));
@@ -495,7 +729,7 @@ bisimilarityReduction(StateMachine *sm, MaiMap &mai, bool *done_something)
 				StateMachineState **suffix;
 				IRExpr *unifiedValue;
 				StateMachineState *replacementHead;
-				if (unifyExpressions(value, representative->dbg_origin, &suffix, &unifiedValue, &replacementHead)) {
+				if (unifyExpressions(sm, stateLabels, value, is_ssa, representative->dbg_origin, &suffix, &unifiedValue, &replacementHead)) {
 					StateMachineSideEffectCopy *c =
 						(StateMachineSideEffectCopy *)rep->sideEffect;
 					*suffix = new StateMachineSideEffecting(
@@ -578,8 +812,8 @@ bisimilarityReduction(StateMachine *sm, MaiMap &mai, bool *done_something)
 }
 
 StateMachine *
-bisimilarityReduction(StateMachine *sm, MaiMap &mai, bool *done_something)
+bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
 {
-	return _bisimilarity::bisimilarityReduction(sm, mai, done_something);
+	return _bisimilarity::bisimilarityReduction(sm, is_ssa, mai, done_something);
 }
 

@@ -215,7 +215,7 @@ StateMachine *availExpressionAnalysis(const MaiMap &mai,
 				      OracleInterface *oracle,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt);
-StateMachine *bisimilarityReduction(StateMachine *sm, MaiMap &mai, bool *done_something);
+StateMachine *bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something);
 StateMachine *useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 				    OracleInterface *oracle, bool *done_something);
 StateMachine *removeLocalSurvival(StateMachine *sm,

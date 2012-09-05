@@ -270,7 +270,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		LibVEX_maybe_gc(token);
 
 		p = false;
-		sm = bisimilarityReduction(sm, *mai, &p);
+		sm = bisimilarityReduction(sm, is_ssa, *mai, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("bisimilarityReduction:\n");
 			printStateMachine(sm, stdout);
