@@ -397,6 +397,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 				 StateMachineSideEffectLoad *smsel,
 				 StateMachineSideEffectStore *smses)
 {
+	if (smsel->tag != smses->tag)
+		return false;
+
 	if (definitelyNotEqual(smsel->addr, smses->addr, opt))
 		return false;
 
@@ -532,6 +535,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 				 StateMachineSideEffectLoad *smsel1,
 				 StateMachineSideEffectLoad *smsel2)
 {
+	if (smsel1->tag != smsel2->tag)
+		return false;
+
 	if (definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
 		return false;
 
@@ -581,6 +587,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 				 StateMachineSideEffectStore *smses1,
 				 StateMachineSideEffectStore *smses2)
 {
+	if (smses1->tag != smses2->tag)
+		return false;
+
 	if (definitelyNotEqual(smses1->addr, smses2->addr, opt))
 		return false;
 
@@ -863,18 +872,6 @@ Oracle::loadTagTable(const char *path)
 	char *idx_path = my_asprintf("%s.idx", path);
 	type_index = new TypesDb(idx_path);
 	free(idx_path);
-}
-
-template <typename t>
-bool
-vector_contains(const std::vector<t> &v, const t &val)
-{
-	for (typename std::vector<t>::const_iterator it = v.begin();
-	     it != v.end();
-	     it++)
-		if (*it == val)
-			return true;
-	return false;
 }
 
 void

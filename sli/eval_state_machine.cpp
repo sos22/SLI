@@ -780,11 +780,9 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 			std::pair<StateMachine *, StateMachineSideEffectStore *>
 			(thisMachine,
 			 new StateMachineSideEffectStore(
+				 smses,
 				 state.specialiseIRExpr(addr),
-				 state.specialiseIRExpr(smses->data),
-				 smses->rip
-				 )
-				));
+				 state.specialiseIRExpr(smses->data))));
 		break;
 	}
 	case StateMachineSideEffect::Load: {

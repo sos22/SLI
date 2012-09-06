@@ -67,6 +67,43 @@ public:
 	}
 };
 
+class MemoryTag {
+	int id;
+	MemoryTag(int _id)
+		: id(_id)
+	{}
+public:
+	MemoryTag() : id(-1) {}
+	static MemoryTag normal() { return MemoryTag(1); }
+	static MemoryTag mutex() { return MemoryTag(2); }
+	const char *name() const {
+		switch (id) {
+		case -1: return "BadTag";
+		case 1: return "normal";
+		case 2: return "mutex";
+		default: abort();
+		}
+	}
+	void sanity_check() const {
+		assert(id == 1 || id == 2);
+	}
+	bool parse(const char *str, const char **suffix) {
+		if (parseThisString("BadTag", str, suffix)) {
+			id = -1;
+		} else if (parseThisString("normal", str, suffix)) {
+			id = 1;
+		} else if (parseThisString("mutex", str, suffix)) {
+			id = 2;
+		} else {
+			return false;
+		}
+		return true;
+	}
+
+	bool operator==(const MemoryTag &o) const { return id == o.id; }
+	bool operator!=(const MemoryTag &o) const { return !(*this == o); }
+};
+
 /* Pointer aliasing stuff.  Note that ``stack'' in this
    context means the *current* stack frame: a pointer without
    the stack bit set could still point into a *calling*
@@ -653,9 +690,11 @@ protected:
 public:
 	IRExpr *addr;
 	MemoryAccessIdentifier rip;
+	MemoryTag tag;
 	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const MemoryAccessIdentifier &_rip,
+					   const MemoryTag &_tag,
 					   StateMachineSideEffect::sideEffectType _type)
-		: StateMachineSideEffect(_type), addr(_addr), rip(_rip)
+		: StateMachineSideEffect(_type), addr(_addr), rip(_rip), tag(_tag)
 	{
 		if (addr)
 			sanityCheck(NULL);
@@ -673,13 +712,13 @@ public:
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 	void _inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(data); }
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const MemoryAccessIdentifier &_rip)
-		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Store),
+	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const MemoryAccessIdentifier &_rip, const MemoryTag &_tag)
+		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
 	StateMachineSideEffectStore(const StateMachineSideEffectStore *base, IRExpr *_addr, IRExpr *_data)
-		: StateMachineSideEffectMemoryAccess(_addr, base->rip, StateMachineSideEffect::Store),
+		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
@@ -687,7 +726,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "*(");
 		ppIRExpr(addr, f);
-		fprintf(f, ") <- ");
+		fprintf(f, "):%s <- ", tag.name());
 		ppIRExpr(data, f);
 		fprintf(f, " @ %s", rip.name());
 	}
@@ -698,13 +737,16 @@ public:
 		IRExpr *addr;
 		IRExpr *data;
 		MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
+		MemoryTag tag;
 		if (parseThisString("*(", str, &str) &&
 		    parseIRExpr(&addr, str, &str) &&
-		    parseThisString(") <- ", str, &str) &&
+		    parseThisString("):", str, &str) &&
+		    tag.parse(str, &str) &&
+		    parseThisString(" <- ", str, &str) &&
 		    parseIRExpr(&data, str, &str) &&
 		    parseThisString(" @ ", str, &str) &&
 		    rip.parse(str, suffix)) {
-			*out = new StateMachineSideEffectStore(addr, data, rip);
+			*out = new StateMachineSideEffectStore(addr, data, rip, tag);
 			return true;
 		}
 		return false;
@@ -734,22 +776,22 @@ typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 	void _inputExpressions(std::vector<IRExpr *> &) {}
 public:
-	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type)
-		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
+	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
+		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Load),
 		  target(alloc()), type(_type)
 	{
 	}
-	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type)
-		: StateMachineSideEffectMemoryAccess(_addr, _rip, StateMachineSideEffect::Load),
+	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
+		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Load),
 		  target(reg), type(_type)
 	{
 	}
 	StateMachineSideEffectLoad(StateMachineSideEffectLoad *base, const threadAndRegister &_reg)
-		: StateMachineSideEffectMemoryAccess(base->addr, base->rip, StateMachineSideEffect::Load),
+		: StateMachineSideEffectMemoryAccess(base->addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(_reg), type(base->type)
 	{}
 	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, IRExpr *_addr)
-		: StateMachineSideEffectMemoryAccess(_addr, base->rip, StateMachineSideEffect::Load),
+		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(base->target), type(base->type)
 	{}
 	threadAndRegister target;
@@ -761,7 +803,7 @@ public:
 		ppIRType(type, f);
 		fprintf(f, " <- *(");
 		ppIRExpr(addr, f);
-		fprintf(f, ")@%s", rip.name());
+		fprintf(f, "):%s@%s", tag.name(), rip.name());
 	}
 	static bool parse(StateMachineSideEffectLoad **out,
 			  const char *str,
@@ -771,15 +813,18 @@ public:
 		threadAndRegister key(threadAndRegister::invalid());
 		IRType type;
 		MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
+		MemoryTag tag;
 		if (parseThisString("LOAD ", str, &str) &&
 		    parseThreadAndRegister(&key, str, &str) &&
 		    parseThisString(":", str, &str) &&
 		    parseIRType(&type, str, &str) &&
 		    parseThisString(" <- *(", str, &str) &&
 		    parseIRExpr(&addr, str, &str) &&
-		    parseThisString(")@", str, &str) &&
+		    parseThisString("):", str, &str) &&
+		    tag.parse(str, &str) &&
+		    parseThisString("@", str, &str) &&
 		    rip.parse(str, suffix)) {
-			*out = new StateMachineSideEffectLoad(key, addr, rip, type);
+			*out = new StateMachineSideEffectLoad(key, addr, rip, type, tag);
 			return true;
 		}
 		return false;

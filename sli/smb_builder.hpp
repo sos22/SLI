@@ -170,18 +170,21 @@ class SMBStatementStore : public SMBStatement {
 		return new StateMachineSideEffectStore(
 			addr.content->compile(),
 			value.content->compile(),
-			state.getMai());
+			state.getMai(),
+			tag);
 	}
 public:
 	SMBPtr<SMBMemoryReference> addr;
 	SMBPtr<SMBExpression> value;
+	MemoryTag tag;
 
 	void visit(HeapVisitor &hv) {
 		hv(addr.content);
 		hv(value.content);
 	}
-	explicit SMBStatementStore(SMBPtr<SMBMemoryReference> _addr, SMBPtr<SMBExpression> _value)
-		: addr(_addr), value(_value)
+	explicit SMBStatementStore(SMBPtr<SMBMemoryReference> _addr, SMBPtr<SMBExpression> _value,
+				   const MemoryTag &_tag)
+		: addr(_addr), value(_value), tag(_tag)
 	{
 	}
 };
@@ -191,12 +194,14 @@ class SMBStatementLoad : public SMBStatement {
 			target.content->compile(),
 			addr.content->compile(),
 			state.getMai(),
-			type);
+			type,
+			tag);
 	}
 public:
 	SMBPtr<SMBRegisterReference> target;
 	SMBPtr<SMBMemoryReference> addr;
 	IRType type;
+	MemoryTag tag;
 
 	void visit(HeapVisitor &hv) {
 		hv(target.content);
@@ -204,8 +209,9 @@ public:
 	}
 	explicit SMBStatementLoad(SMBPtr<SMBRegisterReference> _target,
 				  SMBPtr<SMBMemoryReference> _addr,
-				  IRType _type)
-		: target(_target), addr(_addr), type(_type)
+				  IRType _type,
+				  const MemoryTag &_tag)
+		: target(_target), addr(_addr), type(_type), tag(_tag)
 	{
 	}
 };
@@ -262,16 +268,26 @@ operator <<=(SMBPtr<SMBRegisterReference> target, SMBPtr<SMBExpression> value)
 }
 /* Store a value in a memory location */
 static inline SMBPtr<SMBStatement>
+Store(SMBPtr<SMBMemoryReference> target, SMBPtr<SMBExpression> value, const MemoryTag &tag)
+{
+	return SMBPtr<SMBStatement>(new SMBStatementStore(target, value, tag));
+}
+static inline SMBPtr<SMBStatement>
 operator <<=(SMBPtr<SMBMemoryReference> target, SMBPtr<SMBExpression> value)
 {
-	return SMBPtr<SMBStatement>(new SMBStatementStore(target, value));
+	return Store(target, value, MemoryTag::normal());
 }
 /* Load a value from memory into a register.  No operator because you
-   need the addition ty argument */
+   need the addition ty and tag arguments */
+static inline SMBPtr<SMBStatement>
+Load(SMBPtr<SMBRegisterReference> target, SMBPtr<SMBMemoryReference> addr, IRType ty, const MemoryTag &tag)
+{
+	return SMBPtr<SMBStatement>(new SMBStatementLoad(target, addr, ty, tag));
+}
 static inline SMBPtr<SMBStatement>
 Load(SMBPtr<SMBRegisterReference> target, SMBPtr<SMBMemoryReference> addr, IRType ty)
 {
-	return SMBPtr<SMBStatement>(new SMBStatementLoad(target, addr, ty));
+	return Load(target, addr, ty, MemoryTag::normal());
 }
 /* Assert that x is false */
 static inline SMBPtr<SMBStatement>

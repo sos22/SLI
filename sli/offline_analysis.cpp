@@ -731,6 +731,8 @@ localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 				bool found_one = false;
 				for (auto it3 = stores.begin(); !found_one && it3 != stores.end(); it3++) {
 					StateMachineSideEffectStore *store = *it3;
+					if (store->tag != load->tag)
+						continue;
 					for (auto it4 = mai->begin(store->rip); !found_one && !it4.finished(); it4.advance())
 						if (oracle->memoryAccessesMightAliasCrossThread(dr, it4.dr()))
 							found_one = true;

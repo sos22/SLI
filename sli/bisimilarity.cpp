@@ -714,7 +714,8 @@ bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_som
 							l->target,
 							unifiedAddr,
 							newMai,
-							l->type),
+							l->type,
+							l->tag),
 						unifyOutputs(l->target, l->type, outputRegs, rep->target));
 					replacement = replacementHead;
 				} else {

@@ -9,7 +9,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, b
 	IRExpr *a = doit(l->addr, &b);
 	if (b) {
 		*c = true;
-		return new StateMachineSideEffectLoad(l->target, a, l->rip, l->type);
+		return new StateMachineSideEffectLoad(l, a);
 	} else {
 		return NULL;
 	}
@@ -22,7 +22,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStore *s, 
 	IRExpr *a = doit(s->addr, &b), *d = doit(s->data, &b);
 	if (b) {
 		*c = true;
-		return new StateMachineSideEffectStore(a, d, s->rip);
+		return new StateMachineSideEffectStore(s, a, d);
 	} else {
 		return NULL;
 	}

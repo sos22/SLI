@@ -101,7 +101,8 @@ getProximalCause(MachineState *ms,
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					mai(tid, where)));
+					mai(tid, where),
+					MemoryTag::normal()));
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, ist->addr),
 					  StateMachineCrash::get());
 			break;
@@ -158,7 +159,8 @@ getProximalCause(MachineState *ms,
 						tr,
 						cas->addr,
 						mai(tid, where),
-						ty),
+						ty,
+						MemoryTag::normal()),
 					l4);
 			StateMachineSideEffecting *l2 =
 				new StateMachineSideEffecting(
@@ -193,7 +195,8 @@ getProximalCause(MachineState *ms,
 					dirty->tmp,
 					dirty->args[0],
 					mai(tid, where),
-					ity));
+					ity,
+					MemoryTag::normal()));
 			conditionalBranch(IRExpr_Unop(Iop_BadPtr, dirty->args[0]),
 					  StateMachineCrash::get());
 			break;

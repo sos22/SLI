@@ -559,7 +559,7 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 		newData = applyAvailSet(currentlyAvailable, smses->data, false, &doit, opt);
 		if (doit) {
 			newEffect = new StateMachineSideEffectStore(
-				newAddr, newData, smses->rip);
+				smses, newAddr, newData);
 			*done_something = true;
 		} else {
 			newEffect = smses;
@@ -581,6 +581,7 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 				dynamic_cast<StateMachineSideEffectLoad *>(*it2);
 			if ( smses2 &&
 			     smsel->type <= smses2->data->type() &&
+			     smsel->tag == smses2->tag &&
 			     aliasing.ptrsMightAlias(where, smses2->addr, newAddr, opt) &&
 			     definitelyEqual(smses2->addr, newAddr, opt) ) {
 				newEffect =
@@ -589,6 +590,7 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 						coerceTypes(smsel->type, smses2->data));
 			} else if ( smsel2 &&
 				    smsel->type <= smsel2->type &&
+				    smsel->tag == smsel2->tag &&
 				    aliasing.ptrsMightAlias(where, smsel2->addr, newAddr, opt) &&
 				    definitelyEqual(smsel2->addr, newAddr, opt) ) {
 				newEffect =

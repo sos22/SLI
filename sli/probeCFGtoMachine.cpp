@@ -214,27 +214,29 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	case LibraryFunctionTemplate::pthread_mutex_lock: {
 		threadAndRegister tmp1(threadAndRegister::temp(tid, 0, 0));
 		acc = StartAtomic() >>
-			(Load(!tmp1,
-			      *smb_reg(arg1, Ity_I64),
-			      Ity_I8) >>
-			 (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(0)) >>
-			  ((*smb_reg(arg1, Ity_I64) <<= smb_const8(1)) >>
-			   (EndAtomic() >>
-			    ((!rax <<= smb_const64(0)) >>
-			     end)))));
+		      (Load(!tmp1,
+			    *smb_reg(arg1, Ity_I64),
+			    Ity_I8,
+			    MemoryTag::mutex()) >>
+		      (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(0)) >>
+		      (Store(*smb_reg(arg1, Ity_I64), smb_const8(1), MemoryTag::mutex()) >>
+		      (EndAtomic() >>
+		      ((!rax <<= smb_const64(0)) >>
+		      end)))));
 		break;
 	}
 	case LibraryFunctionTemplate::pthread_mutex_unlock: {
 		threadAndRegister tmp1(threadAndRegister::temp(tid, 0, 0));
 		acc = StartAtomic() >>
-			(Load(!tmp1,
-			      *smb_reg(arg1, Ity_I64),
-			      Ity_I8) >>
-			 (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(1)) >>
-			  ((*smb_reg(arg1, Ity_I64) <<= smb_const8(0)) >>
-			   (EndAtomic() >>
-			    ((!rax <<= smb_const64(0)) >>
-			     end)))));
+		      (Load(!tmp1,
+			    *smb_reg(arg1, Ity_I64),
+			    Ity_I8,
+			    MemoryTag::mutex()) >>
+		      (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(1)) >>
+		      (Store(*smb_reg(arg1, Ity_I64), smb_const8(0), MemoryTag::mutex()) >>
+		      (EndAtomic() >>
+		      ((!rax <<= smb_const64(0)) >>
+		      end)))));
 		break;
 	}
 	case LibraryFunctionTemplate::__stack_chk_fail:
@@ -395,7 +397,8 @@ cfgNodeToState(Oracle *oracle,
 				new StateMachineSideEffectStore(
 					ist->addr,
 					ist->data,
-					mai(tid, target));
+					mai(tid, target),
+					MemoryTag::normal());
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -442,7 +445,8 @@ cfgNodeToState(Oracle *oracle,
 					new StateMachineSideEffectStore(
 						cas->addr,
 						cas->dataLo,
-						mai(tid, target)),
+						mai(tid, target),
+						MemoryTag::normal()),
 					l4);
 			StateMachineState *l2 =
 				new StateMachineBifurcate(
@@ -457,7 +461,8 @@ cfgNodeToState(Oracle *oracle,
 						tempreg,
 						cas->addr,
 						mai(tid, target),
-						ty),
+						ty,
+						MemoryTag::normal()),
 					l2);
 			StateMachineState *l0 =
 				new StateMachineSideEffecting (
@@ -488,7 +493,8 @@ cfgNodeToState(Oracle *oracle,
 					dirty->tmp,
 					dirty->args[0],
 					mai(tid, target),
-					ity);
+					ity,
+					MemoryTag::normal());
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 				se = new StateMachineSideEffectCopy(
 					dirty->tmp,
