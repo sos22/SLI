@@ -1038,6 +1038,32 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		*done_something = true;
 		return ((StateMachineSideEffecting *)target)->target;
 	}
+
+	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
+	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::AssertFalse &&
+	    ((StateMachineSideEffectAssertFalse *)((StateMachineSideEffecting *)target)->sideEffect)->reflectsActualProgram ==
+	    ((StateMachineSideEffectAssertFalse *)sideEffect)->reflectsActualProgram) {
+		/* Take:
+
+		   assert(!x);
+		   assert(!y);
+
+		   and turn it into
+
+		   assert(!x && !y) -> assert(!(x || y));
+		*/
+		*done_something = true;
+		sideEffect = new StateMachineSideEffectAssertFalse(
+			IRExpr_Binop(
+				Iop_Or1,
+				((StateMachineSideEffectAssertFalse *)sideEffect)->value,
+				((StateMachineSideEffectAssertFalse *)((StateMachineSideEffecting *)target)->sideEffect)->value),
+			((StateMachineSideEffectAssertFalse *)sideEffect)->reflectsActualProgram);
+		sideEffect = sideEffect->optimise(opt, done_something);
+		target = ((StateMachineSideEffecting *)target)->target;
+		return this;
+	}
 	return this;
 }
 
