@@ -50,6 +50,70 @@ public:
 		if (out_of_line)
 			delete out_of_line;
 	}
+	class iterator {
+		small_set *owner;
+		int inline_idx;
+		typename std::set<content>::iterator it;
+		bool _started;
+	public:
+		iterator(small_set *_owner)
+			: owner(_owner),
+			  inline_idx(-1)
+		{
+			advance();
+			_started = false;
+		}
+		void advance() {
+			_started = true;
+			if (inline_idx == nr_inline) {
+				it++;
+				if (it == owner->out_of_line->end())
+					inline_idx = nr_inline + 1;
+				return;
+			}
+			do {
+				inline_idx++;
+			} while (inline_idx < nr_inline && !(owner->inline_mask & (1ul << inline_idx)));
+			if (inline_idx == nr_inline) {
+				if (owner->out_of_line) {
+					it = owner->out_of_line->begin();
+					if (it == owner->out_of_line->end())
+						inline_idx = nr_inline + 1;
+				} else {
+					inline_idx = nr_inline + 1;
+				}
+			}
+		}
+		bool finished() const {
+			return inline_idx == nr_inline + 1;
+		}
+		bool started() const {
+			return _started;
+		}
+		const content &operator*() const {
+			assert(inline_idx <= nr_inline);
+			if (inline_idx == nr_inline)
+				return *it;
+			else
+				return owner->inlined[inline_idx];
+		}
+		const content *operator->() const {
+			assert(inline_idx <= nr_inline);
+			if (inline_idx == nr_inline)
+				return &*it;
+			else
+				return &owner->inlined[inline_idx];
+		}
+		void erase() {
+			if (inline_idx == nr_inline) {
+				owner->out_of_line->erase(it++);
+			} else {
+				owner->inline_mask &= (1ul << inline_idx);
+				advance();
+			}
+		}
+	};
+	iterator begin() { return iterator(this); }
 	class const_iterator {
 		const small_set *owner;
 		int inline_idx;
@@ -154,17 +218,42 @@ public:
 class LivenessEntry {
 	void killRegister(threadAndRegister r)
 	{
-		live.erase(r);
+		liveDataOnly.erase(r);
+		livePointer.erase(r);
 	}
+	/* We track two different kinds of liveness: live for data and
+	 * live as a pointer.  The idea is that if something is never
+	 * used as a pointer then we can kill off its aliasing
+	 * information, even if it's still live as a data value. */
+	/* A register is added to livePointer if it's used to compute
+	 * a pointer.  It's added to liveDataOnly if it's used to
+	 * compute something which isn't a pointer.  Anything where
+	 * the value computed might be used as a pointer, but we're
+	 * not sure, goes in livePointer. */
+	small_set<threadAndRegister, 8> liveDataOnly;
+	small_set<threadAndRegister, 8> livePointer;
 public:
-	small_set<threadAndRegister, 8> live;
-
-	void useExpression(IRExpr *e)
+	void useExpressionData(IRExpr *e)
 	{
 		class _ : public IRExprTransformer {
 			LivenessEntry &out;
 			IRExpr *transformIex(IRExprGet *g) {
-				out.live.insert(g->reg);
+				if (!out.livePointer.contains(g->reg))
+					out.liveDataOnly.insert(g->reg);
+				return IRExprTransformer::transformIex(g);
+			}
+		public:
+			_(LivenessEntry &_out) : out(_out) {}
+		} t(*this);
+		t.doit(e);
+	}
+	void useExpressionPointer(IRExpr *e)
+	{
+		class _ : public IRExprTransformer {
+			LivenessEntry &out;
+			IRExpr *transformIex(IRExprGet *g) {
+				out.livePointer.insert(g->reg);
+				out.liveDataOnly.erase(g->reg);
 				return IRExprTransformer::transformIex(g);
 			}
 		public:
@@ -180,33 +269,71 @@ public:
 			killRegister(def);
 		std::vector<IRExpr *> inp;
 		smse->inputExpressions(inp);
-		for (auto it = inp.begin(); it != inp.end(); it++)
-			useExpression(*it);
-		if (smse->type == StateMachineSideEffect::Phi) {
+		switch (smse->type) {
+		case StateMachineSideEffect::Load:
+		case StateMachineSideEffect::Store:
+		case StateMachineSideEffect::Copy:
+			for (auto it = inp.begin(); it != inp.end(); it++)
+				useExpressionPointer(*it);
+			break;
+		case StateMachineSideEffect::Unreached:
+		case StateMachineSideEffect::AssertFalse:
+		case StateMachineSideEffect::StartAtomic:
+		case StateMachineSideEffect::EndAtomic:
+		case StateMachineSideEffect::StartFunction:
+		case StateMachineSideEffect::EndFunction:
+		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::StackLayout:
+			for (auto it = inp.begin(); it != inp.end(); it++)
+				useExpressionData(*it);
+			break;
+
+		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *smsep =
 				(StateMachineSideEffectPhi *)smse;
+			for (auto it = inp.begin(); it != inp.end(); it++)
+				useExpressionData(*it);
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
 			     it++)
-				this->live.insert(it->first);
+				this->livePointer.insert(it->first);
+			break;
+		}
 		}
 	}
 
 	bool merge(const LivenessEntry &other) {
 		bool res = false;
-		for (auto it = other.live.begin(); !it.finished(); it.advance())
-			res |= live.insert(*it);
+		for (auto it = other.livePointer.begin(); !it.finished(); it.advance()) {
+			if (livePointer.insert(*it)) {
+				liveDataOnly.erase(*it);
+				res = true;
+			}
+		}
+		for (auto it = other.liveDataOnly.begin(); !it.finished(); it.advance()) {
+			if (!livePointer.contains(*it))
+				res |= liveDataOnly.insert(*it);
+		}
 		return res;
 	}
 
-	bool registerLive(threadAndRegister reg) const { return live.contains(reg); }
+	bool registerLiveData(threadAndRegister reg) const { return liveDataOnly.contains(reg) || livePointer.contains(reg); }
+	bool registerLivePointer(threadAndRegister reg) const { return livePointer.contains(reg); }
 
 	void print() const {
-		for (auto it = live.begin(); !it.finished(); it.advance()) {
+		printf("dataOnly = {");
+		for (auto it = liveDataOnly.begin(); !it.finished(); it.advance()) {
 			if (it.started())
 				printf(", ");
 			printf("%s", it->name());
 		}
+		printf("}, pointer = {");
+		for (auto it = livePointer.begin(); !it.finished(); it.advance()) {
+			if (it.started())
+				printf(", ");
+			printf("%s", it->name());
+		}
+		printf("}");
 	}
 };
 
@@ -226,7 +353,7 @@ class LivenessMap {
 		}
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-			res.useExpression(smb->condition);
+			res.useExpressionData(smb->condition);
 			break;
 		}
 		case StateMachineState::Unreached:
@@ -321,7 +448,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			case StateMachineSideEffect::Load: {
 				StateMachineSideEffectLoad *smsel =
 					(StateMachineSideEffectLoad *)e;
-				if (!alive.registerLive(smsel->target))
+				if (!alive.registerLiveData(smsel->target))
 					newEffect = new StateMachineSideEffectAssertFalse(
 						IRExpr_Unop(Iop_BadPtr, smsel->addr),
 						true);
@@ -350,20 +477,20 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 					   might say. */
 					dead = true;
 				} else {
-					dead = !alive.registerLive(smsec->target);
+					dead = !alive.registerLiveData(smsec->target);
 				}
 				break;
 			}
 			case StateMachineSideEffect::Phi: {
 				StateMachineSideEffectPhi *p =
 					(StateMachineSideEffectPhi *)e;
-				if (!alive.registerLive(p->reg))
+				if (!alive.registerLiveData(p->reg))
 					dead = true;
 				break;
 			}
 			case StateMachineSideEffect::PointerAliasing: {
 				auto *p = (StateMachineSideEffectPointerAliasing *)e;
-				if (!alive.registerLive(p->reg))
+				if (!alive.registerLivePointer(p->reg))
 					dead = true;
 				break;
 			}
