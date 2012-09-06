@@ -1,4 +1,6 @@
 /* This file is somewhat misnamed, because it also handles store CFGs. */
+#include <sys/resource.h>
+
 #include "sli.h"
 #include "state_machine.hpp"
 #include "cfgnode.hpp"
@@ -247,6 +249,15 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		If(smb_reg(arg1, Ity_I64) == smb_const64(0),
 		   acc,
 		   (*smb_reg(arg1, Ity_I64) <<= fv) >> acc);
+		break;
+	}
+	case LibraryFunctionTemplate::getrusage: {
+		acc = (!rax <<= smb_const64(0)) >> end;
+		for (unsigned i = 0; i < sizeof(struct rusage) / 8; i++) {
+			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
+			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
+				acc;
+		}
 		break;
 	}
 	case LibraryFunctionTemplate::none:
