@@ -151,18 +151,20 @@ public:
 	}
 };
 
-class LivenessEntry : public small_set<threadAndRegister, 8> {
+class LivenessEntry {
 	void killRegister(threadAndRegister r)
 	{
-		erase(r);
+		live.erase(r);
 	}
 public:
+	small_set<threadAndRegister, 8> live;
+
 	void useExpression(IRExpr *e)
 	{
 		class _ : public IRExprTransformer {
 			LivenessEntry &out;
 			IRExpr *transformIex(IRExprGet *g) {
-				out.insert(g->reg);
+				out.live.insert(g->reg);
 				return IRExprTransformer::transformIex(g);
 			}
 		public:
@@ -186,21 +188,21 @@ public:
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
 			     it++)
-				this->insert(it->first);
+				this->live.insert(it->first);
 		}
 	}
 
 	bool merge(const LivenessEntry &other) {
 		bool res = false;
-		for (auto it = other.begin(); !it.finished(); it.advance())
-			res |= insert(*it);
+		for (auto it = other.live.begin(); !it.finished(); it.advance())
+			res |= live.insert(*it);
 		return res;
 	}
 
-	bool registerLive(threadAndRegister reg) const { return contains(reg); }
+	bool registerLive(threadAndRegister reg) const { return live.contains(reg); }
 
 	void print() const {
-		for (auto it = begin(); !it.finished(); it.advance()) {
+		for (auto it = live.begin(); !it.finished(); it.advance()) {
 			if (it.started())
 				printf(", ");
 			printf("%s", it->name());
