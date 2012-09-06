@@ -176,11 +176,6 @@ UseReachingMap::transformOneState(const MaiMap &decode, StateMachineSideEffectin
 	   could satisfy this load, so just use an initial-memory
 	   expression for it. */
 	*done_something = true;
-	return new StateMachineSideEffecting(
-		smse,
-		new StateMachineSideEffectCopy(
-			load->target,
-			IRExpr_Load(load->type, load->addr)));
 }
 
 static StateMachine *
@@ -190,8 +185,93 @@ useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimi
 	ReachingMap rm;
 	if (!rm.initialise(mai, sm, opt, oracle))
 		return sm;
-	UseReachingMap urm(rm, opt, oracle);
-	return urm.transform(sm, done_something);
+	/* Figure out whether we're actually going to do any rewrites
+	 * before we start */
+	std::map<StateMachineState *, StateMachineState *> rewrites;
+	{
+		std::set<StateMachineSideEffecting *> states;
+		enumStates(sm, &states);
+		for (auto it = states.begin(); it != states.end(); it++) {
+			StateMachineSideEffecting *s = *it;
+			StateMachineSideEffect *se = s->sideEffect;
+			if (!se || se->type != StateMachineSideEffect::Load)
+				continue;
+			StateMachineSideEffectLoad *load = (StateMachineSideEffectLoad *)se;
+			if (oracle->hasConflictingRemoteStores(mai, opt, load))
+				continue;
+			const std::set<const StateMachineSideEffectStore *> &potentiallyRelevantStores(rm.get(s));
+			bool hasConflictingStores = false;
+			for (auto it = potentiallyRelevantStores.begin();
+			     !hasConflictingStores && it != potentiallyRelevantStores.end();
+			     it++) {
+			if (oracle->memoryAccessesMightAlias(mai, opt, load, (StateMachineSideEffectStore *)*it))
+				hasConflictingStores = true;
+			}
+			if (hasConflictingStores)
+				continue;
+			rewrites[s] = new StateMachineSideEffecting(
+				s->dbg_origin,
+				new StateMachineSideEffectAssertFalse(
+					IRExpr_Unop(Iop_BadPtr, load->addr),
+					true),
+				new StateMachineSideEffecting(
+					s->dbg_origin,
+					new StateMachineSideEffectCopy(
+						load->target,
+						IRExpr_Load(load->type, load->addr)),
+					s->target));
+		}
+	}
+
+	if (rewrites.empty())
+		return sm;
+
+	/* Okay, have something to do.  Rewrite the machine. */
+	std::map<StateMachineState *, StateMachineState *> rewritten;
+	std::queue<StateMachineState **> pending;
+	StateMachineState *newRoot = sm->root;
+	pending.push(&newRoot);
+	while (!pending.empty()) {
+		StateMachineState **slot = pending.front();
+		pending.pop();
+		StateMachineState *s = *slot;
+		auto it_did_insert = rewritten.insert(std::pair<StateMachineState *, StateMachineState *>(s, (StateMachineState *)NULL));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (!did_insert) {
+			*slot = it->second;
+			continue;
+		}
+		StateMachineState *newS = (StateMachineState *)0xf001ul;
+		auto it2 = rewrites.find(s);
+		if (it2 != rewrites.end()) {
+			newS = it2->second;
+		} else {
+			switch (s->type) {
+			case StateMachineState::Unreached:
+			case StateMachineState::Crash:
+			case StateMachineState::NoCrash:
+				newS = s;
+				break;
+			case StateMachineState::Bifurcate:
+				newS = new StateMachineBifurcate(*(StateMachineBifurcate *)s);
+				break;
+			case StateMachineState::SideEffecting:
+				newS = new StateMachineSideEffecting(*(StateMachineSideEffecting *)s);
+				break;
+			}
+		}
+
+		it->second = newS;
+		*slot = newS;
+		std::vector<StateMachineState **> succ;
+		newS->targets(succ);
+		for (auto it = succ.begin(); it != succ.end(); it++)
+			pending.push(*it);
+	}
+	assert(newRoot != sm->root);
+	*done_something = true;
+	return new StateMachine(sm, newRoot);
 }
 
 /* End of namespace */

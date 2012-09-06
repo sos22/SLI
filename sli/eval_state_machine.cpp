@@ -721,30 +721,6 @@ EvalContext::evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConst
 				opt);
 }
 
-/* Build an expression which evaluates to true precisely when
-   dereferencing @e requires us to dereference a bad pointer in an LD
-   expression. */
-static IRExpr *
-dereferencesBadPointerIf(IRExpr *e)
-{
-	struct : public IRExprTransformer {
-		std::set<IRExpr *> addrs;
-		IRExpr *transformIex(IRExprLoad *iel) {
-			addrs.insert(iel->addr);
-			return IRExprTransformer::transformIex(iel);
-		}
-	} collectAddresses;
-	collectAddresses.doit(e);
-	IRExprAssociative *derefsBadPointer = IRExpr_Associative(collectAddresses.addrs.size(), Iop_Or1);
-	for (auto it = collectAddresses.addrs.begin(); it != collectAddresses.addrs.end(); it++) {
-		derefsBadPointer->contents[derefsBadPointer->nr_arguments++] =
-			IRExpr_Unop(
-				Iop_BadPtr,
-				*it);
-	}
-	return derefsBadPointer;
-}
-
 EvalContext::evalStateMachineSideEffectRes
 EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 					StateMachine *thisMachine,
@@ -762,11 +738,7 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
 		addr = state.specialiseIRExpr(smsema->addr);
-		IRExpr *v = IRExpr_Binop(
-			Iop_Or1,
-			IRExpr_Unop(Iop_BadPtr, addr),
-			dereferencesBadPointerIf(addr));
-		if (expressionIsTrue(v, !noImplicitBadPtrs, chooser, opt))
+		if (expressionIsTrue(IRExpr_Unop(Iop_BadPtr, addr), !noImplicitBadPtrs, chooser, opt))
 			return esme_escape;
 	}
 
@@ -852,10 +824,7 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 		StateMachineSideEffectAssertFalse *smseaf =
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
 		if (expressionIsTrue(
-			    IRExpr_Binop(
-				    Iop_Or1,
-				    smseaf->value,
-				    dereferencesBadPointerIf(smseaf->value)),
+			    smseaf->value,
 			    true,
 			    chooser, opt)) {
 			if (smseaf->reflectsActualProgram)
@@ -1146,42 +1115,7 @@ EvalContext::advance(const MaiMap &decode,
 				internIRExpr(
 					state.specialiseIRExpr(smb->condition)),
 				opt);
-		IRExpr *derefBad = dereferencesBadPointerIf(cond);
-		trool res = evalBooleanExpression(derefBad, opt);
-		switch (res) {
-		case tr_true:
-			return consumer.escape(assumption, accumulatedAssumption);
-		case tr_unknown: {
-			IRExpr *a = simplifyIRExpr(internIRExpr(IRExpr_Binop(Iop_And1, assumption, derefBad)), opt);
-			IRExpr *a2;
-			assert(a->tag != Iex_Const);
-			if (accumulatedAssumption)
-				a2 = simplifyIRExpr(
-					internIRExpr(
-						IRExpr_Binop(
-							Iop_And1,
-							accumulatedAssumption,
-							derefBad)),
-					opt);
-			else
-				a2 = NULL;
-			if (!consumer.escape(a, a2))
-				return false;
-			assumption = IRExpr_Binop(Iop_And1, assumption,
-						  IRExpr_Unop(Iop_Not1, derefBad));
-			if (accumulatedAssumption)
-				accumulatedAssumption =
-					IRExpr_Binop(Iop_And1, accumulatedAssumption,
-						     IRExpr_Unop(Iop_Not1, derefBad));
-			assumption = simplifyIRExpr(internIRExpr(assumption), opt);
-			if (accumulatedAssumption)
-				accumulatedAssumption = simplifyIRExpr(internIRExpr(accumulatedAssumption), opt);
-			break;
-		}
-		case tr_false:
-			break;
-		}
-		res = evalBooleanExpression(cond, opt);
+		trool res = evalBooleanExpression(cond, opt);
 		switch (res) {
 		case tr_true:
 			pendingStates.push_back(EvalContext(

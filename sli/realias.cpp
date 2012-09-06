@@ -1198,11 +1198,18 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 				       stateLabels[it->first]);
 			progress = true;
 			it->first->sideEffect =
-				new StateMachineSideEffectCopy(
-					l->target,
-					IRExpr_Load(
-						l->type,
-						l->addr));
+				new StateMachineSideEffectAssertFalse(
+					IRExpr_Unop(Iop_BadPtr, l->addr),
+					true);
+			it->first->target =
+				new StateMachineSideEffecting(
+					it->first->dbg_origin,
+					new StateMachineSideEffectCopy(
+						l->target,
+						IRExpr_Load(
+							l->type,
+							l->addr)),
+					it->first->target);
 		} else if (it->second.stores.size() == 1 &&
 			   !it->second.mightLoadInitial) {
 			StateMachineSideEffecting *s_state = *it->second.stores.begin();
