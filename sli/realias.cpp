@@ -353,11 +353,15 @@ StackLayoutTable::build(StateMachine *inp)
 						assert(exitLayout.content.rsps.back() ==
 						       frameBoundaries[exitLayout.content.functions.back()]);
 					} else if (se && se->type == StateMachineSideEffect::EndFunction) {
-						auto sf = (StateMachineSideEffectStartFunction *)se;
-						assert(exitLayout.content.functions.back() == sf->frame);
-						assert(exitLayout.content.rsps.back() == sf->rsp);
-						exitLayout.content.functions.pop_back();
-						exitLayout.content.rsps.pop_back();
+						if (exitLayout.content.rsps.empty()) {
+							exitLayout.valid = false;
+						} else {
+							auto sf = (StateMachineSideEffectStartFunction *)se;
+							assert(exitLayout.content.functions.back() == sf->frame);
+							assert(exitLayout.content.rsps.back() == sf->rsp);
+							exitLayout.content.functions.pop_back();
+							exitLayout.content.rsps.pop_back();
+						}
 					}
 				}
 			}
