@@ -260,6 +260,12 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		}
 		break;
 	}
+	case LibraryFunctionTemplate::sigwait: {
+		acc = (*smb_reg(arg2, Ity_I64) <<= smb_const32(1)) >>
+		      ((!rax <<= smb_const64(0)) >>
+		      end);
+		break;
+	}
 	case LibraryFunctionTemplate::none:
 		abort();
 	}
