@@ -42,6 +42,43 @@ operator+(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 					       (IRExpr *)b.content->what)));
 				     
 }
+SMBPtr<SMBExpression>
+operator*(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
+{
+	assert(a.content->what->type() == b.content->what->type());
+	IROp op = Iop_INVALID;
+	switch (a.content->what->type()) {
+	case Ity_I1:
+		abort();
+	case Ity_I8:
+		op = Iop_Mul8;
+		break;
+	case Ity_I16:
+		op = Iop_Mul16;
+		break;
+	case Ity_I32:
+		op = Iop_Mul32;
+		break;
+	case Ity_I64:
+		op = Iop_Mul64;
+		break;
+	case Ity_I128:
+		abort();
+	case Ity_F32:
+		abort();
+	case Ity_F64:
+		op = Iop_MulF64;
+		break;
+	case Ity_V128:
+		abort();
+	case Ity_INVALID:
+		abort();
+	}
+	assert(op != Iop_INVALID);
+	return SMBPtr<SMBExpression>(
+		new SMBExpression(IRExpr_Binop(op, (IRExpr *)a.content->what,
+					       (IRExpr *)b.content->what)));
+}
 
 SMBPtr<SMBExpression>
 operator&(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)

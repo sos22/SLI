@@ -74,6 +74,7 @@ smb_expr(const IRExpr *a)
 
 /* Builders */
 SMBPtr<SMBExpression> operator+(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
+SMBPtr<SMBExpression> operator*(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 SMBPtr<SMBExpression> operator&(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 SMBPtr<SMBExpression> operator|(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);
 SMBPtr<SMBExpression> operator<<(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b);

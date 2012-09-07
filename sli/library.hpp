@@ -18,7 +18,10 @@ namespace LibraryFunctionTemplate {
 	f(time)					\
 	f(getrusage)				\
 	f(sigwait)				\
-	f(_ZdlPv)
+	f(_ZdlPv)				\
+	f(__errno_location)			\
+	f(pthread_getspecific)			\
+	f(pthread_setspecific)
 
 	enum __type {
 		none = 0,

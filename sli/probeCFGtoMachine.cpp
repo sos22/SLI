@@ -267,6 +267,22 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		      end);
 		break;
 	}
+	case LibraryFunctionTemplate::__errno_location:
+		acc = (!rax <<= smb_reg(threadAndRegister::reg(tid, offsetof(VexGuestAMD64State, errno_address), 0), Ity_I64)) >>
+			end;
+		break;
+	case LibraryFunctionTemplate::pthread_getspecific:
+		acc = Load(!rax,
+			   *(smb_reg(arg1, Ity_I64) * smb_const64(8) +
+			     smb_reg(threadAndRegister::reg(tid, offsetof(VexGuestAMD64State, pthread_specific_base), 0), Ity_I64)),
+			   Ity_I64) >>
+			end;
+		break;
+	case LibraryFunctionTemplate::pthread_setspecific:
+		acc = (*(smb_reg(arg1, Ity_I64) * smb_const64(8) +
+			 smb_reg(threadAndRegister::reg(tid, offsetof(VexGuestAMD64State, pthread_specific_base), 0), Ity_I64)) <<= smb_reg(arg2, Ity_I64)) >>
+			end;
+		break;
 	case LibraryFunctionTemplate::none:
 		abort();
 	}

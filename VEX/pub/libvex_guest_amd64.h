@@ -167,6 +167,9 @@ typedef
          been interrupted by a signal. */
       ULong guest_IP_AT_SYSCALL;
 
+      ULong errno_address;
+      ULong pthread_specific_base;
+
       /* Padding to make it have an 16-aligned size */
       /* ULong padding; */
    }
