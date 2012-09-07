@@ -94,28 +94,32 @@ initialExplorationRoot(
 
 		auto it = doneSoFar.find(vr);
 		if (it != doneSoFar.end()) {
+			bool need_regen = false;
 			if (item.first > it->second.first) {
 				/* We've already explored this once,
 				   but at a worse depth.  Fix it
 				   up. */
 				CFGNode *n = it->second.second;
 				const std::vector<CfgSuccessorT<VexRip> > &succ(succMap[n]);
-				for (auto it2 = succ.begin(); it2 != succ.end(); it2++) {
-					assert(it2->instr.isValid());
+				for (auto it2 = succ.begin(); !need_regen && it2 != succ.end(); it2++) {
+					if (!it2->instr.isValid())
+						need_regen = true;
 					pending.push(std::pair<unsigned, VexRip>(
 							     item.first - 1,
 							     it2->instr));
 				}
-				it->second.first = item.first;
-					
-				if (item.first == maxPathLength)
-					flavours[n] = cfgs_flavour_true;
+				if (!need_regen) {
+					it->second.first = item.first;
+					if (item.first == maxPathLength)
+						flavours[n] = cfgs_flavour_true;
+				}
 			} else {
 				/* We've already explored this at
 				   a better depth, so don't need to
 				   do anything. */
 			}
-			continue;
+			if (!need_regen)
+				continue;
 		}
 
 		CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, vr, succMap);
@@ -164,7 +168,7 @@ initialExplorationRoot(
 						   make do with what we've
 						   got. */
 						if (debug_initial_exploration)
-							printf("atCouldn't find any callers for %s?\n",
+							printf("\tCouldn't find any callers for %s?\n",
 							       vr.name());
 					}
 				} else {
