@@ -116,7 +116,7 @@ phiElimination(StateMachine *sm,
 
 		/* Remove any possible inputs whose assignment has been lost. */
 		for (auto it2 = s->generations.begin(); it2 != s->generations.end(); ) {
-			if (regDominators.count(it2->first)) {
+			if (regDominators.count(it2->first) || it2->first.gen() == (unsigned)-1) {
 				it2++;
 			} else {
 				if (debug_use_domination)
@@ -164,7 +164,8 @@ phiElimination(StateMachine *sm,
 			printf("State domination: %s\n", nameIRExpr(stateDominator));
 			printf("Register dominators:\n");
 			for (unsigned x = 0; x < s->generations.size(); x++)
-				printf("%s -> %s\n", s->generations[x].first.name(), nameIRExpr(pRegDominators[x]));
+				printf("%s -> %s\n", s->generations[x].first.name(),
+				       pRegDominators[x] ? nameIRExpr(pRegDominators[x]) : "genM1");
 			if (genM1.isValid())
 				printf("Gen M1: %s\n", genM1.name());
 		}
