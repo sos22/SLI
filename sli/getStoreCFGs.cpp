@@ -82,6 +82,7 @@ initialExplorationRoot(
 {
 	std::queue<std::pair<unsigned, VexRip> > pending;
 	pending.push(std::pair<unsigned, VexRip>(maxPathLength, root));
+	assert(root.isValid());
 	while (!pending.empty()) {
 		if (TIMEOUT)
 			return false;
@@ -104,9 +105,10 @@ initialExplorationRoot(
 				for (auto it2 = succ.begin(); !need_regen && it2 != succ.end(); it2++) {
 					if (!it2->instr.isValid())
 						need_regen = true;
-					pending.push(std::pair<unsigned, VexRip>(
-							     item.first - 1,
-							     it2->instr));
+					else
+						pending.push(std::pair<unsigned, VexRip>(
+								     item.first - 1,
+								     it2->instr));
 				}
 				if (!need_regen) {
 					it->second.first = item.first;
