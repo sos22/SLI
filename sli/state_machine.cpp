@@ -903,13 +903,43 @@ StateMachine::assertSSA() const
 	}
 
 	struct : public StateMachineTransformer {
+		std::set<threadAndRegister> usedRegisters;
 		IRExpr *transformIex(IRExprGet *ieg) {
 			assert(ieg->reg.gen() != 0);
+			if (ieg->reg.gen() != (unsigned)-1)
+				usedRegisters.insert(ieg->reg);
+			return NULL;
+		}
+		StateMachineSideEffectPhi *transformOneSideEffect(
+			StateMachineSideEffectPhi *phi, bool *)
+		{
+			for (auto it = phi->generations.begin();
+			     it != phi->generations.end();
+			     it++)
+				if (it->first.gen() != (unsigned)-1)
+					usedRegisters.insert(it->first);
 			return NULL;
 		}
 		bool rewriteNewStates() const { return false; }
 	} checkForNonSSAVars;
 	checkForNonSSAVars.transform(const_cast<StateMachine *>(this));
+
+	for (auto it = states.begin(); it != states.end(); it++) {
+		const StateMachineSideEffect *s = (*it)->sideEffect;
+		if (!s)
+			continue;
+		threadAndRegister tr(threadAndRegister::invalid());
+		if (s->definesRegister(tr))
+			checkForNonSSAVars.usedRegisters.erase(tr);
+	}
+	if (!checkForNonSSAVars.usedRegisters.empty()) {
+		printf("Registers used without being defined:\n");
+		for (auto it = checkForNonSSAVars.usedRegisters.begin();
+		     it != checkForNonSSAVars.usedRegisters.end();
+		     it++)
+			printf("\t%s\n", it->name());
+		abort();
+	}
 }
 #endif
 
