@@ -201,6 +201,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 			(AssertFalse(smb_expr(IRExpr_Unop(Iop_BadPtr, IRExpr_Get(rax, Ity_I64)))) >> end);
 		break;
 	}
+	case LibraryFunctionTemplate::_ZdlPv:
 	case LibraryFunctionTemplate::free: {
 		acc = end;
 		for (int i = 0; i < 8; i++) {

@@ -17,7 +17,8 @@ namespace LibraryFunctionTemplate {
 	f(__stack_chk_fail)			\
 	f(time)					\
 	f(getrusage)				\
-	f(sigwait)
+	f(sigwait)				\
+	f(_ZdlPv)
 
 	enum __type {
 		none = 0,
