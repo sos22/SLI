@@ -344,13 +344,14 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 			}
 			done_something |= p;
 
-			p = false;
-			sm = phiElimination(sm, opt, cdm, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("phiElimination:\n");
-				printStateMachine(sm, stdout);
+			if (!p) {
+				sm = phiElimination(sm, opt, cdm, &p);
+				if (debugOptimiseStateMachine && p) {
+					printf("phiElimination:\n");
+					printStateMachine(sm, stdout);
+				}
+				done_something |= p;
 			}
-			done_something |= p;
 		}
 
 		if (progress)
