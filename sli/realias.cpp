@@ -403,7 +403,7 @@ public:
 	void sanity_check() const {
 		for (auto it = content.begin(); it != content.end(); it++) {
 			assert(it->first.isValid());
-			assert(it->first.isTemp());
+			assert(it->first.isTemp() || it->first.gen() != (unsigned)-1);
 		}
 	}
 	PointsToTable refine(AliasTable &at,
@@ -433,23 +433,21 @@ aliasConfigForState(StateMachineState *sm,
 	return false;
 }
 
-static bool
+static PointerAliasingSet
 aliasConfigForReg(StateMachineState *sm,
 		  const threadAndRegister &reg,
-		  MachineAliasingTable &mat,
-		  PointerAliasingSet *alias)
+		  MachineAliasingTable &mat)
 {
 	assert(reg.isReg());
 	assert(reg.gen() == (unsigned)-1);
 	if (reg.asReg() >= Oracle::NR_REGS * 8)
-		return false;
+		return PointerAliasingSet::anything;
 	assert(reg.asReg() % 8 == 0);
 
 	Oracle::ThreadRegisterAliasingConfiguration config;
 	if (!aliasConfigForState(sm, reg.tid(), mat, &config))
-		return false;
-	*alias = config.v[reg.asReg() / 8];
-	return true;
+		return PointerAliasingSet::anything;
+	return config.v[reg.asReg() / 8];
 }
 
 PointerAliasingSet
@@ -464,7 +462,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 	switch (e->tag) {
 	case Iex_Get: {
 		IRExprGet *iex = (IRExprGet *)e;
-		if (iex->reg.isTemp()) {
+		if (iex->reg.isTemp() || iex->reg.gen() != (unsigned)-1) {
 			if (!content.count(iex->reg)) {
 				/* This can actually happen sometimes
 				   during optimisation if, for
@@ -501,18 +499,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 			}
 		}
 
-		if (iex->reg.gen() != (unsigned)-1) {
-			/* Non-initial registers might point anywhere,
-			   including into any stack frame, and we
-			   can't say anything interesting about
-			   them. */
-			break;
-		}
-
-		PointerAliasingSet alias;
-		if (!aliasConfigForReg(sm, iex->reg, mat, &alias))
-			alias = PointerAliasingSet::anything;
-		return alias;
+		return aliasConfigForReg(sm, iex->reg, mat);
 	}
 
 	case Iex_Load:
@@ -557,8 +544,7 @@ PointsToTable::build(StateMachine *sm)
 		return false;
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
 		threadAndRegister tr(threadAndRegister::invalid());
-		if ( (*it)->definesRegister(tr) &&
-		     tr.isTemp() )
+		if ( (*it)->definesRegister(tr) )
 			content.insert(std::pair<threadAndRegister, PointerAliasingSet>(tr, defaultTmpPointsTo));
 	}
 	sanity_check();
@@ -964,8 +950,10 @@ PointsToTable::refine(AliasTable &at,
 			     it != p->generations.end();
 			     it++) {
 				auto i = content.find(it->first);
-				assert(i != content.end());
-				newPts |= i->second;
+				if (i == content.end())
+					newPts |= aliasConfigForReg(smse, it->first, mat);
+				else
+					newPts |= i->second;
 			}
 			break;
 		}
@@ -1408,7 +1396,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 							s->tid,
 							newFunctions);
 					if (debug_use_alias_table) {
-						printf("Shrink stack layout l%d to ");
+						printf("Shrink stack layout l%d to ", stateLabels[*it]);
 						(*it)->sideEffect->prettyPrint(stdout);
 						printf("\n");
 					}
