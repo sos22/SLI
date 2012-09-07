@@ -142,42 +142,6 @@ ReachingMap::get(const StateMachineState *s) const
 	return it->second;
 }
 
-class UseReachingMap : public StateMachineTransformer {
-	ReachingMap &rm;
-	const AllowableOptimisations &opt;
-	OracleInterface *oracle;
-	StateMachineSideEffecting *transformOneState(
-		const MaiMap &, StateMachineSideEffecting *, bool *);
-	bool rewriteNewStates() const { return false; }
-public:
-	UseReachingMap(ReachingMap &_rm,
-		       const AllowableOptimisations &_opt,
-		       OracleInterface *_oracle)
-		: rm(_rm), opt(_opt), oracle(_oracle)
-	{}
-};
-
-StateMachineSideEffecting *
-UseReachingMap::transformOneState(const MaiMap &decode, StateMachineSideEffecting *smse, bool *done_something)
-{
-	if (!smse->sideEffect || smse->sideEffect->type != StateMachineSideEffect::Load)
-		return NULL;
-	StateMachineSideEffectLoad *load = (StateMachineSideEffectLoad *)smse->sideEffect;
-	if (oracle->hasConflictingRemoteStores(decode, opt, load))
-		return NULL;
-	const std::set<const StateMachineSideEffectStore *> &potentiallyRelevantStores(rm.get(smse));
-	for (auto it = potentiallyRelevantStores.begin();
-	     it != potentiallyRelevantStores.end();
-	     it++) {
-		if (oracle->memoryAccessesMightAlias(decode, opt, load, (StateMachineSideEffectStore *)*it))
-			return NULL;
-	}
-	/* If we get here then there are definitely no stores which
-	   could satisfy this load, so just use an initial-memory
-	   expression for it. */
-	*done_something = true;
-}
-
 static StateMachine *
 useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 		      OracleInterface *oracle, bool *done_something)
