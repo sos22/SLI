@@ -1000,6 +1000,11 @@ removeRedundantContext(CfgLabelAllocator &allocLabel,
 			debug_dump(it->get());
 		}
 		std::vector<unsigned long> uselessCtxt((*it)->rip.stack);
+
+		/* The final entry in a stack is the address of the
+		   instruction, which is never useless. */
+		uselessCtxt.pop_back();
+
 		std::queue<CFGNode *> toCheck;
 
 		/* This is done before cycle breaking, so we need to
@@ -1025,7 +1030,7 @@ removeRedundantContext(CfgLabelAllocator &allocLabel,
 					toCheck.push(it2->instr);
 			nr_instrs++;
 		}
-		if (uselessCtxt.empty() || checked.size() == 1) {
+		if (uselessCtxt.empty()) {
 			if (debug_remove_context)
 				printf("No redundant context\n");
 			rootsOut.insert(*it);
