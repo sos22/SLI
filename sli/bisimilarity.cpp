@@ -357,7 +357,11 @@ unifyExpressions(const StateMachine *sm,
 		for (auto it = unifier.begin(); it != unifier.end(); it++)
 			unifyTo.insert(it->second);
 		for (auto it = unifyTo.begin(); it != unifyTo.end(); it++) {
-			assert(!unifier.count(*it));
+			if (unifier.count(*it)) {
+				if (debug_build_unifiers)
+					printf("Inconsistent unifier for %s\n", it->name());
+				return false;
+			}
 			unifier.insert(std::pair<threadAndRegister, threadAndRegister>
 				       (*it, *it));
 		}
