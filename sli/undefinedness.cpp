@@ -282,17 +282,33 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 		}
 
 		undefined:
-		if (i->op == Iop_And1 ||
-		    (i->op >= Iop_And8 && i->op <= Iop_And64))
+		switch (i->op) {
+		case Iop_And1:
 			return IRExpr_Const(IRConst_U1(0));
-		else if (i->op == Iop_Or1 ||
-			 (i->op >= Iop_Or8 && i->op <= Iop_Or64))
+		case Iop_And8:
+			return IRExpr_Const(IRConst_U8(0));
+		case Iop_And16:
+			return IRExpr_Const(IRConst_U16(0));
+		case Iop_And32:
+			return IRExpr_Const(IRConst_U32(0));
+		case Iop_And64:
+			return IRExpr_Const(IRConst_U64(0));
+		case Iop_Or1:
 			return IRExpr_Const(IRConst_U1(1));
-		else if ((i->op >= Iop_Add8 && i->op <= Iop_Add64) ||
-			 (i->op >= Iop_Xor8 && i->op <= Iop_Xor64))
+		case Iop_Or8:
+			return IRExpr_Const(IRConst_U8(0xff));
+		case Iop_Or16:
+			return IRExpr_Const(IRConst_U16(0xffff));
+		case Iop_Or32:
+			return IRExpr_Const(IRConst_U32(~0u));
+		case Iop_Or64:
+			return IRExpr_Const(IRConst_U64(~0ul));
+		case Iop_Add8: case Iop_Add16: case Iop_Add32: case Iop_Add64:
+		case Iop_Xor8: case Iop_Xor16: case Iop_Xor32: case Iop_Xor64:
 			return UNDEFINED_EXPR;
-		else
+		default:
 			abort();
+		}
 	}
 	}
 	abort();
