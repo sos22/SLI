@@ -439,8 +439,7 @@ aliasConfigForReg(StateMachineState *sm,
 		  MachineAliasingTable &mat)
 {
 	assert(reg.isReg());
-	assert(reg.gen() == (unsigned)-1);
-	if (reg.asReg() >= Oracle::NR_REGS * 8)
+	if (reg.gen() != (unsigned)-1 || reg.asReg() >= Oracle::NR_REGS * 8)
 		return PointerAliasingSet::anything;
 	assert(reg.asReg() % 8 == 0);
 
