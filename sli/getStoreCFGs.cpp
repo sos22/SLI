@@ -112,8 +112,10 @@ initialExplorationRoot(
 				}
 				if (!need_regen) {
 					it->second.first = item.first;
-					if (item.first == maxPathLength)
+					if (item.first == maxPathLength) {
+						assert(n->rip.isValid());
 						flavours[n] = cfgs_flavour_true;
+					}
 				}
 			} else {
 				/* We've already explored this at
@@ -130,6 +132,7 @@ initialExplorationRoot(
 				printf("Cannot get IRSB for %s\n", vr.name());
 			continue;
 		}
+		assert(work->rip.isValid());
 		if (item.first == maxPathLength)
 			flavours[work] = cfgs_flavour_true;
 		else
@@ -961,8 +964,13 @@ trimUninterestingCFGNodes(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
 			auto fl_it = flavours.find(n);
 			assert(fl_it != flavours.end());
 			if ( fl_it->second == cfgs_flavour_true ||
-			     fl_it->second == cfgs_flavour_dupe )
+			     fl_it->second == cfgs_flavour_dupe ) {
+				if (debug_trim_uninteresting) {
+					printf("Trim uninteresting: is interesting (%d): %p ", fl_it->second, &**it);
+					(*it)->prettyPrint(stdout);
+				}
 				isInteresting = true;
+			}
 			for (auto it2 = n->successors.begin(); !isInteresting && it2 != n->successors.end(); it2++)
 				if (it2->instr && interesting.contains(it2->instr))
 					isInteresting = true;
@@ -1021,7 +1029,7 @@ removeRedundantContext(CfgLabelAllocator &allocLabel,
 			if (!checked.insert(n).second)
 				continue;
 			unsigned x;
-			for (x = 0; x < uselessCtxt.size() && x < n->rip.stack.size(); x++) {
+			for (x = 0; x < uselessCtxt.size() && x < n->rip.stack.size() - 1; x++) {
 				if (uselessCtxt[x] != n->rip.stack[x])
 					break;
 			}
