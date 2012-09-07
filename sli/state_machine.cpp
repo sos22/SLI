@@ -1091,51 +1091,10 @@ StateMachine::sanityCheck(const MaiMap &mai) const
 	if (!debug_state_machine_sanity_checks)
 		return;
 
-	std::map<const StateMachineState *, std::set<threadAndRegister> > definedAtTopOfState;
-	std::set<threadAndRegister> allDefinedRegisters;
 	std::set<const StateMachineState *> allStates;
-
 	enumStates(this, &allStates);
-	for (auto it = allStates.begin(); it != allStates.end(); it++) {
-		const StateMachineSideEffect *se = (*it)->getSideEffect();
-		threadAndRegister r(threadAndRegister::invalid());
-		if (se && se->definesRegister(r))
-			allDefinedRegisters.insert(r);
-	}
 	for (auto it = allStates.begin(); it != allStates.end(); it++)
-		definedAtTopOfState[*it] = allDefinedRegisters;
-	definedAtTopOfState[root].clear();
-
-	bool progress = true;
-	while (progress && !TIMEOUT) {
-		progress = false;
-		for (auto it = definedAtTopOfState.begin();
-		     it != definedAtTopOfState.end();
-		     it++) {
-			std::set<threadAndRegister> *definedAtEndOfState = &it->second;
-			std::set<threadAndRegister> ts;
-			const StateMachineSideEffect *se = it->first->getSideEffect();
-			threadAndRegister definedHere(threadAndRegister::invalid());
-			if (se && se->definesRegister(definedHere)) {
-				ts = *definedAtEndOfState;
-				ts.insert(definedHere);
-				definedAtEndOfState = &ts;
-			}
-
-			std::vector<const StateMachineState *> exits;
-			it->first->targets(exits);
-			for (auto it = exits.begin(); it != exits.end(); it++) {
-				std::set<threadAndRegister> &other(definedAtTopOfState[*it]);
-				if (intersectSets(other, *definedAtEndOfState))
-					progress = true;
-			}
-		}
-	}
-
-	for (auto it = definedAtTopOfState.begin();
-	     it != definedAtTopOfState.end();
-	     it++)
-		it->first->sanityCheck(&definedAtTopOfState[it->first]);
+		(*it)->sanityCheck();
 
 	struct : public StateMachineTransformer {
 		std::set<MemoryAccessIdentifier> neededMais;

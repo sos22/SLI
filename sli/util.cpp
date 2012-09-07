@@ -137,31 +137,6 @@ __fail(const char *file, unsigned line, const char *fmt, ...)
 	abort();
 }
 
-#ifndef NDEBUG
-void
-sanityCheckIRExpr(IRExpr *e, const std::set<threadAndRegister> *live)
-{
-	e->sanity_check();
-	if (live) {
-		class _ : public IRExprTransformer {
-			const std::set<threadAndRegister> *live;
-			IRExpr *transformIex(IRExprGet *g) {
-				if (g->reg.isTemp() ||
-				    (g->reg.gen() != (unsigned)-1 &&
-				     g->reg.gen() != 0))
-					assert(live->count(g->reg));
-				return NULL;
-			}
-		public:
-			_(const std::set<threadAndRegister> *_live)
-				: live(_live)
-			{}
-		} t(live);
-		t.doit(e);
-	}
-}
-#endif
-
 /* This is mostly for the benefit of the debugger. */
 void
 printIRExpr(IRExpr *e)
