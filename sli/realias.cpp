@@ -787,7 +787,11 @@ AliasTable::build(const MaiMap &decode,
 			   without harming correctness, and we ideally
 			   want the set to be as small as possible,
 			   but losing a store is a disaster. */
+			/* The condition on types is unsound, but it's
+			   what eval_state_machine does. */
+#warning unsound
 			if (oracle->memoryAccessesMightAlias(decode, opt, smsel, smses) &&
+			    smsel->type <= smses->_type() &&
 			    (smses->type == StateMachineSideEffect::Store ||
 			     definitelyEqual(smses->addr, smsel->addr, opt))) {
 				it2++;
