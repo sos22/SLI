@@ -1016,8 +1016,8 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 
 		if (t->target->type == StateMachineState::SideEffecting) {
 			StateMachineSideEffecting *t2 = (StateMachineSideEffecting *)t->target;
-			assert(t2->sideEffect);
-			if (t2->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+			if (t2->sideEffect &&
+			    t2->sideEffect->type == StateMachineSideEffect::EndAtomic) {
 				/* Individual side effects are always
 				   atomic, so an atomic block with a
 				   single side effect in is a bit
@@ -1032,6 +1032,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 
 	if (sideEffect->type == StateMachineSideEffect::StartFunction &&
 	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect &&
 	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndFunction) {
 		/* No point in keeping an empty
 		 * StartFunction/EndFunction block. */
@@ -1041,6 +1042,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 
 	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect &&
 	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    ((StateMachineSideEffectAssertFalse *)((StateMachineSideEffecting *)target)->sideEffect)->reflectsActualProgram ==
 	    ((StateMachineSideEffectAssertFalse *)sideEffect)->reflectsActualProgram) {
