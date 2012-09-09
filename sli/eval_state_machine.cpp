@@ -1609,12 +1609,10 @@ buildCrossProductMachine(const MaiMap &maiIn,
 			/* We have to issue probe effects until we get
 			 * to an EndAtomic side effect. */
 			assert(!crossState.store_is_atomic);
-			assert(!crossState.p->isTerminal());
 			newState = advanceProbeMachine(crossState, pendingRelocs);
 		} else if (crossState.store_is_atomic) {
 			/* Likewise, if the store machine is currently
 			   atomic then we need to advance it. */
-			assert(!crossState.s->isTerminal());
 			newState = advanceStoreMachine(crossState, pendingRelocs);
 		} else {
 			/* Neither machine is in an atomic block, need
