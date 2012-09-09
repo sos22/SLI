@@ -958,9 +958,19 @@ PointsToTable::refine(AliasTable &at,
 			     it != p->generations.end();
 			     it++) {
 				auto i = content.find(it->first);
-				if (i == content.end())
-					newPts |= aliasConfigForReg(smse, it->first, mat);
-				else
+				if (i == content.end()) {
+					if (it->first.isReg()) {
+						newPts |= aliasConfigForReg(smse, it->first, mat);
+					} else {
+						/* We've not got any
+						 * assignments to this
+						 * temporary.  That
+						 * means that the Phi
+						 * can't pull it's
+						 * value, so we just
+						 * ignore it here. */
+					}
+				} else
 					newPts |= i->second;
 			}
 			break;
