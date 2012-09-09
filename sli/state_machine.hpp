@@ -1067,15 +1067,6 @@ public:
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck() const {
 		assert(generations.size() != 0);
-		IRType ty = Ity_INVALID;
-		for (auto it = generations.begin(); it != generations.end(); it++) {
-			if (it->second) {
-				if (ty == Ity_INVALID)
-					ty = it->second->type();
-				else
-					assert(ty == it->second->type());
-			}
-		}
 	}
 	bool definesRegister(threadAndRegister &reg) const {
 		reg = this->reg;
