@@ -287,7 +287,7 @@ buildCED(DNF_Conjunction &c,
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
 	InstructionDecoder decode(true, as);
-	*out = crashEnforcementData(neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, decode, true);
+	*out = crashEnforcementData(*summary->mai, neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, decode, true);
 	optimiseHBContent(*out, cfg);
 	return true;
 }
@@ -449,8 +449,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       GarbageCollectionToken token,
 		       ThreadAbstracter &abs,
 		       int &next_hb_id,
-		       simulationSlotT &next_slot);
-#if 0
+		       simulationSlotT &next_slot)
 {
 	summary = internCrashSummary(summary);
 
@@ -463,7 +462,6 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		findHappensBeforeRelations(summary, oracleI,
 					   AllowableOptimisations::defaultOptimisations
 						.setAddressSpace(oracle->ms->addressSpace),
-					   MemoryAccessIdentifierAllocator(),
 					   token);
 	requirement = IRExpr_Binop(Iop_And1, requirement, summary->verificationCondition);
 	requirement = internIRExpr(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
@@ -523,7 +521,6 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	}
 	return accumulator;
 }
-#endif
 
 /* Try to delay stashing registers until we actually need to do so.
    We start off trying to stash them at the roots of the CFG and we

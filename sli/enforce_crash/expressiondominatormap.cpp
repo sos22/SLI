@@ -82,22 +82,26 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	}
 }
 
-happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, ThreadCfgDecode &cfg)
+happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, ThreadCfgDecode &cfg, const MaiMap &mai)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
 			IRExprHappensBefore *e = (IRExprHappensBefore *)c[x].second;
-			ThreadCfgLabel beforeRip(abs(e->before));
-			ThreadCfgLabel afterRip(abs(e->after));
-			auto before = cfg(beforeRip);
-			auto after = cfg(afterRip);
-			if (c[x].first) {
-				auto *t = before;
-				before = after;
-				after = t;
+			for (auto before_it = mai.begin(e->before); !before_it.finished(); before_it.advance()) {
+				for (auto after_it = mai.begin(e->after); !after_it.finished(); after_it.advance()) {
+					ThreadCfgLabel beforeRip(abs(e->before.tid, before_it.label()));
+					ThreadCfgLabel afterRip(abs(e->after.tid, after_it.label()));
+					auto before = cfg(beforeRip);
+					auto after = cfg(afterRip);
+					if (c[x].first) {
+						auto *t = before;
+						before = after;
+						after = t;
+					}
+					happensAfter[before].insert(after);
+					happensBefore[after].insert(before);
+				}
 			}
-			happensAfter[before].insert(after);
-			happensBefore[after].insert(before);
 		}
 	}
 }

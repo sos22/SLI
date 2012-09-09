@@ -2112,8 +2112,7 @@ findHappensBeforeRelations(
 }
 
 IRExpr *
-findHappensBeforeRelations(const VexPtr<MaiMap, &ir_heap> &mai,
-			   const VexPtr<CrashSummary, &ir_heap> &summary,
+findHappensBeforeRelations(const VexPtr<CrashSummary, &ir_heap> &summary,
 			   const VexPtr<OracleInterface> &oracle,
 			   const AllowableOptimisations &opt,
 			   GarbageCollectionToken token)
@@ -2123,6 +2122,7 @@ findHappensBeforeRelations(const VexPtr<MaiMap, &ir_heap> &mai,
 	VexPtr<StateMachine, &ir_heap> probeMachine(summary->loadMachine);
 	VexPtr<StateMachine, &ir_heap> storeMachine(summary->storeMachine);
 	VexPtr<IRExpr, &ir_heap> assumption(summary->verificationCondition);
+	VexPtr<MaiMap, &ir_heap> mai(summary->mai);
 	findHappensBeforeRelations(mai, probeMachine, storeMachine, res, oracle, assumption, opt, token);
 
 	return res;

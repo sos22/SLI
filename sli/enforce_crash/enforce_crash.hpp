@@ -116,12 +116,16 @@ public:
 		}
 		return res;
 	}
-	ThreadCfgLabel operator()(const MemoryAccessIdentifier &mai) const;
 #if 0
+	ThreadCfgLabel operator()(const MemoryAccessIdentifier &mai) const
 	{
 		return ThreadCfgLabel((*this)(mai.tid), mai.where);
 	}
 #endif
+	ThreadCfgLabel operator()(int tid, const CfgLabel &where) const
+	{
+		return ThreadCfgLabel((*this)(tid), where);
+	}
 };
 
 class ThreadCfgDecode {
@@ -220,7 +224,7 @@ public:
 	instrToInstrSetMap happensBefore;
 	/* happensBefore[i] -> the set of all instructions ordered after i */
 	instrToInstrSetMap happensAfter;
-	happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, ThreadCfgDecode &cfg);
+	happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, ThreadCfgDecode &cfg, const MaiMap &mai);
 	happensAfterMapT() {}
 	void print(FILE *f) {
 		fprintf(f, "before:\n");
@@ -258,8 +262,8 @@ public:
 			    ThreadAbstracter &abs,
 			    StateMachine *probeMachine,
 			    StateMachine *storeMachine,
-			    std::map<unsigned, CfgLabel> &roots);
-#if 0
+			    std::map<unsigned, CfgLabel> &roots,
+			    const MaiMap &mai)
 	{
 		/* XXX keep this in sync with buildCED */
 		std::set<IRExprGet *> neededTemporaries;
@@ -298,11 +302,11 @@ public:
 					}
 				}
 				assert(l);
-				(*this)[ThreadCfgLabel(abs(l->rip.tid), l->rip.where)].insert(*it);
+				for (auto it2 = mai.begin(l->rip); !it2.finished(); it2.advance())
+					(*this)[abs(l->rip.tid, it2.label())].insert(*it);
 			}
 		}
 	}
-#endif
 
 	void operator|=(const expressionStashMapT &esm) {
 		for (auto it = esm.begin(); it != esm.end(); it++) {
@@ -471,15 +475,14 @@ public:
 		state.hbes.insert(this);
 		return this;
 	}
-	happensBeforeEdge(bool invert,
-			  IRExprHappensBefore *hb,
+	happensBeforeEdge(const ThreadCfgLabel &_before,
+			  const ThreadCfgLabel &_after,
 			  instructionDominatorMapT &idom,
 			  ThreadCfgDecode &cfg,
-			  ThreadAbstracter &abs,
 			  expressionStashMapT &stashMap,
 			  unsigned _msg_id)
-		: before(abs(invert ? hb->after : hb->before)),
-		  after(abs(invert ? hb->before : hb->after)),
+		: before(_before),
+		  after(_after),
 		  msg_id(_msg_id)
 	{
 		std::set<Instruction<ThreadCfgLabel> *> &liveInstructions(
@@ -848,7 +851,8 @@ class happensBeforeMapT : public std::map<ThreadCfgLabel, std::set<happensBefore
 	}
 public:
 	happensBeforeMapT() {}
-	happensBeforeMapT(DNF_Conjunction &c,
+	happensBeforeMapT(const MaiMap &mai,
+			  DNF_Conjunction &c,
 			  instructionDominatorMapT &idom,
 			  ThreadCfgDecode &cfg,
 			  expressionStashMapT &exprStashPoints,
@@ -860,11 +864,22 @@ public:
 			bool invert = c[x].first;
 			if (e->tag == Iex_HappensBefore) {
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
-				happensBeforeEdge *hbe = new happensBeforeEdge(invert, hb, idom,
-									       cfg, abs,
-									       exprStashPoints, next_hb_id++);
-				(*this)[hbe->before].insert(hbe);
-				(*this)[hbe->after].insert(hbe);
+				const MemoryAccessIdentifier &beforeMai(invert ? hb->after : hb->before);
+				const MemoryAccessIdentifier &afterMai(invert ? hb->before : hb->after);
+				for (auto before_it = mai.begin(beforeMai); !before_it.finished(); before_it.advance()) {
+					for (auto after_it = mai.begin(afterMai); !after_it.finished(); after_it.advance()) {
+						happensBeforeEdge *hbe =
+							new happensBeforeEdge(
+								abs(beforeMai.tid, before_it.label()),
+								abs(afterMai.tid, after_it.label()),
+								idom,
+								cfg,
+								exprStashPoints,
+								next_hb_id++);
+						(*this)[hbe->before].insert(hbe);
+						(*this)[hbe->after].insert(hbe);
+					}
+				}
 			}
 		}
 	}
@@ -1056,7 +1071,8 @@ public:
 	abstractThreadExitPointsT threadExitPoints;
 	CrashCfg crashCfg;
 
-	crashEnforcementData(std::set<IRExpr *> &neededExpressions,
+	crashEnforcementData(const MaiMap &mai,
+			     std::set<IRExpr *> &neededExpressions,
 			     std::map<unsigned, CfgLabel> &_roots,
 			     DNF_Conjunction &conj,
 			     ThreadCfgDecode &cfg,
@@ -1067,12 +1083,12 @@ public:
 			     InstructionDecoder &decode,
 			     bool expandJcc)
 		: roots(_roots, abs),
-		  happensBefore(conj, abs, cfg),
+		  happensBefore(conj, abs, cfg, mai),
 		  predecessorMap(cfg),
 		  idom(cfg, predecessorMap, happensBefore),
-		  exprStashPoints(neededExpressions, abs, summary->loadMachine, summary->storeMachine, _roots),
+		  exprStashPoints(neededExpressions, abs, summary->loadMachine, summary->storeMachine, _roots, mai),
 		  exprDominatorMap(conj, exprStashPoints, idom, predecessorMap, happensBefore),
-		  happensBeforePoints(conj, idom, cfg, exprStashPoints, abs, next_hb_id),
+		  happensBeforePoints(mai, conj, idom, cfg, exprStashPoints, abs, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
 		  threadExitPoints(cfg, happensBeforePoints),

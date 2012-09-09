@@ -43,6 +43,7 @@ public:
 		bool finished() const { return it == endIt; }
 		void advance() { it++; }
 		const CFGNode *node() const { return *it; }
+		const CfgLabel &label() const  { return (*it)->label; }
 		DynAnalysisRip dr() const { return DynAnalysisRip(node()->rip); }
 	};
 
