@@ -1050,19 +1050,21 @@ AliasTable::refine(PointsToTable &ptt,
 }
 
 static IRExpr *
-dataOfSideEffect(StateMachineSideEffect *s_effect)
+dataOfSideEffect(StateMachineSideEffect *s_effect, IRType ty)
 {
+	IRExpr *res;
 	if (s_effect->type == StateMachineSideEffect::Store) {
-		return ((StateMachineSideEffectStore *)s_effect)->data;
+		res = ((StateMachineSideEffectStore *)s_effect)->data;
 	} else if (s_effect->type == StateMachineSideEffect::Load) {
-		return IRExpr_Get(
+		res = IRExpr_Get(
 			((StateMachineSideEffectLoad *)s_effect)->target,
 			((StateMachineSideEffectLoad *)s_effect)->type);
 	} else if (s_effect->type == StateMachineSideEffect::Copy) {
-		return ((StateMachineSideEffectCopy *)s_effect)->value;
+		res = ((StateMachineSideEffectCopy *)s_effect)->value;
 	} else {
 		abort();
 	}
+	return coerceTypes(ty, res);
 }
 
 static StateMachine *
@@ -1227,7 +1229,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 				       stateLabels[it->first], stateLabels[s_state]);
 			assert(s_effect);
 			progress = true;
-			IRExpr *d = dataOfSideEffect(s_effect);
+			IRExpr *d = dataOfSideEffect(s_effect, l->type);
 			it->first->sideEffect =
 				new StateMachineSideEffectCopy(
 					l->target, d);
@@ -1305,14 +1307,14 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 						printf("Potentially null resolution: %s is satisfiable\n",
 						       nameIRExpr(c));
 				} else {
-					IRExpr *acc = dataOfSideEffect(possibleInputs[0].first->getSideEffect());
+					IRExpr *acc = dataOfSideEffect(possibleInputs[0].first->getSideEffect(), l->type);
 					for (unsigned x = 1;
 					     x < possibleInputs.size();
 					     x++)
 						acc = IRExpr_Mux0X(
 							possibleInputs[x].second,
 							acc,
-							dataOfSideEffect(possibleInputs[x].first->getSideEffect()));
+							dataOfSideEffect(possibleInputs[x].first->getSideEffect(), l->type));
 					if (debug_use_alias_table)
 						printf("Replace l%d with mux %s\n",
 						       stateLabels[it->first],
