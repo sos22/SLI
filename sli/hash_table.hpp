@@ -108,7 +108,14 @@ public:
 		}
 		assert(sz == o.sz);
 	}
-	void operator=(const HashTable &o) {
+	/* For some reason, gdb can't see the debug symbols for
+	   operator=, which makes debugging a pain.  I don't know
+	   whether the problem is gcc or gdb, but just making
+	   operator= a proxy for assign() avoids the issue, so do
+	   that. */
+	void operator=(const HashTable &o) { assign(o); }
+private:
+	void assign(const HashTable &o) {
 		/* First go and scavenge all of the dynamically
 		 * allocated elems. */
 		struct elem *malloced_elems = NULL;
@@ -119,6 +126,7 @@ public:
 			struct elem *end;
 			for (end = heads[i].next; end->next; end = end->next)
 				end->use_map = 0;
+			end->use_map = 0;
 			end->next = malloced_elems;
 			malloced_elems = heads[i].next;
 			heads[i].next = NULL;
@@ -166,6 +174,7 @@ public:
 			malloced_elems = n;
 		}
 	}
+public:
 
 	~HashTable() {
 		for (int x = 0; x < nr_heads; x++) {
