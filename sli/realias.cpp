@@ -1179,6 +1179,8 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 
 	/* Use the aliasing table to resolve loads wherever possible. */
 	for (auto it = at.content.begin(); it != at.content.end(); it++) {
+		assert(it->first->getSideEffect());
+		assert(it->first->getSideEffect()->type == StateMachineSideEffect::Load);
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
 		if (it->second.mightHaveExternalStores)
 			continue;
@@ -1189,17 +1191,17 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 				       stateLabels[it->first]);
 			progress = true;
 			it->first->sideEffect =
-				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(Iop_BadPtr, l->addr),
-					true);
-			it->first->target =
-				new StateMachineSideEffecting(
-					it->first->dbg_origin,
 					new StateMachineSideEffectCopy(
 						l->target,
 						IRExpr_Load(
 							l->type,
-							l->addr)),
+							l->addr));
+			it->first->target =
+				new StateMachineSideEffecting(
+					it->first->dbg_origin,
+					new StateMachineSideEffectAssertFalse(
+						IRExpr_Unop(Iop_BadPtr, l->addr),
+						true),
 					it->first->target);
 		} else if (it->second.stores.size() == 1 &&
 			   !it->second.mightLoadInitial) {
