@@ -507,42 +507,82 @@ atomicSurvivalOptimisations(const AllowableOptimisations &opt)
 static StateMachine *
 duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 {
-	struct : public StateMachineTransformer {
-		static bool removeThisOne(StateMachineSideEffect::sideEffectType t) {
+	struct {
+		bool operator()(StateMachineSideEffect::sideEffectType t) {
 			switch (t) {
+			case StateMachineSideEffect::Load:
+			case StateMachineSideEffect::Store:
+			case StateMachineSideEffect::Unreached:
+			case StateMachineSideEffect::Copy:
+			case StateMachineSideEffect::Phi:
+			case StateMachineSideEffect::StartAtomic:
+			case StateMachineSideEffect::EndAtomic:
+				return false;
 			case StateMachineSideEffect::AssertFalse:
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
 			case StateMachineSideEffect::PointerAliasing:
 			case StateMachineSideEffect::StackLayout:
 				return true;
-			case StateMachineSideEffect::Unreached:
-			case StateMachineSideEffect::Load:
-			case StateMachineSideEffect::Store:
-			case StateMachineSideEffect::Copy:
-			case StateMachineSideEffect::Phi:
-			case StateMachineSideEffect::StartAtomic:
-			case StateMachineSideEffect::EndAtomic:
-				return false;
 			}
 			abort();
 		}
-		StateMachineSideEffecting *transformOneState(
-			StateMachineSideEffecting *a, bool *done_something)
-		{
-			if (a->sideEffect && removeThisOne(a->sideEffect->type)) {
-				*done_something = true;
-				return new StateMachineSideEffecting(a->dbg_origin, NULL, a->target);
-			} else {
-				return NULL;
+	} isAnnotationType;
+	std::map<const StateMachineState *, StateMachineState *> map;
+	std::queue<StateMachineState **> relocs;
+	StateMachineState *newRoot = inp->root;
+	relocs.push(&newRoot);
+	bool progress = false;
+	while (!relocs.empty()) {
+		StateMachineState **slot = relocs.front();
+		relocs.pop();
+		const StateMachineState *oldState = *slot;
+		auto it_did_insert = map.insert(std::pair<const StateMachineState *, StateMachineState *>(oldState, (StateMachineState *)NULL));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (!did_insert) {
+			assert(it->second != NULL);
+			*slot = it->second;
+			continue;
+		}
+
+		/* Figure out where @oldState is going to be mapped
+		 * to. */
+		StateMachineState *newState = (StateMachineState *)0xf001deadul;
+		switch (oldState->type) {
+		case StateMachineState::Unreached:
+		case StateMachineState::Crash:
+		case StateMachineState::NoCrash:
+			/* Singletons are easy. */
+			newState = (StateMachineState *)oldState;
+			break;
+		case StateMachineState::Bifurcate: {
+			auto smb = (const StateMachineBifurcate *)oldState;
+			auto newSmb = new StateMachineBifurcate(*smb);
+			relocs.push(&newSmb->trueTarget);
+			relocs.push(&newSmb->falseTarget);
+			newState = newSmb;
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			auto sme = (const StateMachineSideEffecting *)oldState;
+			auto newSme = new StateMachineSideEffecting(*sme);
+			relocs.push(&newSme->target);
+			if (newSme->sideEffect && isAnnotationType(newSme->sideEffect->type)) {
+				newSme->sideEffect = NULL;
+				progress = true;
 			}
+			newState = newSme;
+			break;
 		}
-		IRExpr *transformIRExpr(IRExpr *, bool *) {
-			return NULL;
 		}
-		bool rewriteNewStates() const { return false; }
-	} doit;
-	return doit.transform(inp, done_something);
+		it->second = newState;
+		*slot = newState;
+	}
+	if (!progress)
+		return inp;
+	*done_something = true;
+	return new StateMachine(inp, newRoot);
 }
 
 StateMachine *
