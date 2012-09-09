@@ -410,6 +410,7 @@ public:
 			     StateMachine *sm,
 			     MachineAliasingTable &mat,
 			     StackLayoutTable &slt,
+			     std::map<const StateMachineState *, int> &stateLabels,
 			     bool *failed,
 			     bool *done_something);
 };
@@ -867,6 +868,7 @@ PointsToTable::refine(AliasTable &at,
 		      StateMachine *sm,
 		      MachineAliasingTable &mat,
 		      StackLayoutTable &slt,
+		      std::map<const StateMachineState *, int> &stateLabels,
 		      bool *failed,
 		      bool *done_something)
 {
@@ -887,6 +889,9 @@ PointsToTable::refine(AliasTable &at,
 		PointerAliasingSet newPts(PointerAliasingSet::nothing);
 		Maybe<StackLayout> *sl = slt.forState(smse);
 		if (!sl) {
+			if (debug_refine_points_to_table)
+				printf("Refining points-to table failed because we have no stack layout for l%d\n",
+				       stateLabels[smse]);
 			*failed = true;
 			return res;
 		}
@@ -1098,7 +1103,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 	while (1) {
 		bool p = false;
 		bool failed = false;
-		PointsToTable ptt2 = ptt.refine(at, sm, mat, stackLayout, &failed, &p);
+		PointsToTable ptt2 = ptt.refine(at, sm, mat, stackLayout, stateLabels, &failed, &p);
 		if (failed) {
 			if (any_debug)
 				printf("Failed to refine points-to table\n");
