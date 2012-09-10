@@ -579,7 +579,7 @@ findRoots(const HashedSet<HashedPtr<CFGNode> > &allNodes,
 	removeReachable(currentlyUnrooted, newRoots);
 	roots.extend(newRoots);
 
-	if (!allow_cycles && !currentlyUnrooted.empty()) {
+	if (!allow_cycles && !currentlyUnrooted.empty() && !TIMEOUT) {
 		printf("Unexpected cycle in CFG!\n");
 		abort();
 	}
