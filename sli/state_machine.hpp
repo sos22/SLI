@@ -1017,6 +1017,11 @@ public:
 		  reg(_reg), generations(_generations)
 	{
 	}
+	StateMachineSideEffectPhi(const StateMachineSideEffectPhi *base,
+				  const std::vector<std::pair<threadAndRegister, IRExpr *> > &_generations)
+		: StateMachineSideEffect(StateMachineSideEffect::Phi),
+		  reg(base->reg), generations(_generations)
+	{}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Phi");
 		reg.prettyPrint(f);

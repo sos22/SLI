@@ -115,25 +115,26 @@ phiElimination(StateMachine *sm,
 			printf("Consider reducing phi state l%d\n", stateLabels[*it]);
 
 		/* Remove any possible inputs whose assignment has been lost. */
-		for (auto it2 = s->generations.begin(); it2 != s->generations.end(); ) {
+		std::vector<std::pair<threadAndRegister, IRExpr *> > newGens;
+		newGens.reserve(s->generations.size());
+		for (auto it2 = s->generations.begin(); it2 != s->generations.end(); it2++) {
 			if (regDominators.count(it2->first) || it2->first.gen() == (unsigned)-1) {
-				it2++;
+				newGens.push_back(*it2);
 			} else {
 				if (debug_use_domination)
 					printf("Lost input generation %s\n", it2->first.name());
-				it2 = s->generations.erase(it2);
 				progress = true;
 			}
 		}
 
-		assert(s->generations.size() > 0);
-		if (s->generations.size() == 1) {
+		assert(newGens.size() > 0);
+		if (newGens.size() == 1) {
 			if (debug_use_domination)
 				printf("Reduced to a simple copy\n");
-			((StateMachineSideEffecting *)*it)->sideEffect =
+			(*it)->sideEffect =
 				new StateMachineSideEffectCopy(
 					s->reg,
-					IRExpr_Get(s->generations[0].first, ty));
+					IRExpr_Get(newGens[0].first, ty));
 			progress = true;
 			continue;
 		}
@@ -144,18 +145,18 @@ phiElimination(StateMachine *sm,
 				opt);
 		assert(stateDominator != NULL);
 		std::vector<IRExpr *> pRegDominators;
-		pRegDominators.resize(s->generations.size());
+		pRegDominators.resize(newGens.size());
 		threadAndRegister genM1(threadAndRegister::invalid());
-		for (unsigned x = 0; x < s->generations.size(); x++) {
-			if (s->generations[x].first.gen() == (unsigned)-1) {
+		for (unsigned x = 0; x < newGens.size(); x++) {
+			if (newGens[x].first.gen() == (unsigned)-1) {
 				assert(!genM1.isValid());
-				genM1 = s->generations[x].first;
+				genM1 = newGens[x].first;
 			} else {
 				pRegDominators[x] =
 					simplifyIRExpr(
 						simplify_via_anf(
 							optimiseAssuming(
-								regDominators[s->generations[x].first],
+								regDominators[newGens[x].first],
 								stateDominator)),
 						opt);
 			}
@@ -163,8 +164,8 @@ phiElimination(StateMachine *sm,
 		if (debug_use_domination) {
 			printf("State domination: %s\n", nameIRExpr(stateDominator));
 			printf("Register dominators:\n");
-			for (unsigned x = 0; x < s->generations.size(); x++)
-				printf("%s -> %s\n", s->generations[x].first.name(),
+			for (unsigned x = 0; x < newGens.size(); x++)
+				printf("%s -> %s\n", newGens[x].first.name(),
 				       pRegDominators[x] ? nameIRExpr(pRegDominators[x]) : "genM1");
 			if (genM1.isValid())
 				printf("Gen M1: %s\n", genM1.name());
@@ -179,14 +180,14 @@ phiElimination(StateMachine *sm,
 		/* First: at most one can be true at any time. */
 		bool ambiguous_resolution = false;
 		for (unsigned i = 0;
-		     !ambiguous_resolution && i < s->generations.size();
+		     !ambiguous_resolution && i < newGens.size();
 		     i++) {
-			if (s->generations[i].first.gen() == (unsigned)-1)
+			if (newGens[i].first.gen() == (unsigned)-1)
 				continue;
 			for (unsigned j = i + 1;
-			     !ambiguous_resolution && j < s->generations.size();
+			     !ambiguous_resolution && j < newGens.size();
 			     j++) {
-				if (s->generations[j].first.gen() == (unsigned)-1)
+				if (newGens[j].first.gen() == (unsigned)-1)
 					continue;
 				if (satisfiable(
 					    IRExpr_Binop(
@@ -202,25 +203,38 @@ phiElimination(StateMachine *sm,
 				}
 			}
 		}
-		if (ambiguous_resolution)
+		if (ambiguous_resolution) {
+			if (newGens.size() < s->generations.size()) {
+				if (debug_use_domination)
+					printf("Replace with simpler Phi\n");
+				(*it)->sideEffect = new StateMachineSideEffectPhi(
+					s, newGens);
+			}
 			continue;
+		}
 		/* Next: at least one must always be true, unless we have gen -1 */
 		if (genM1.isInvalid()) {
 			IRExprAssociative *checker =
 				IRExpr_Associative(
-					s->generations.size(),
+					newGens.size(),
 					Iop_Or1);
-			for (unsigned x = 0; x < s->generations.size(); x++)
+			for (unsigned x = 0; x < newGens.size(); x++)
 				checker->contents[x] = pRegDominators[x];
-			checker->nr_arguments = s->generations.size();
+			checker->nr_arguments = newGens.size();
 			IRExpr *c = IRExpr_Binop(
 				Iop_And1,
 				stateDominator,
 				IRExpr_Unop(Iop_Not1, checker));
 			if (satisfiable(c, opt)) {
 				if (debug_use_domination)
-					printf("Potentially null resolution: %s is not satisfiable\n",
+					printf("Potentially null resolution: %s is satisfiable\n",
 					       nameIRExpr(c));
+				if (newGens.size() < s->generations.size()) {
+					if (debug_use_domination)
+						printf("Replace with simpler Phi\n");
+					(*it)->sideEffect = new StateMachineSideEffectPhi(
+						s, newGens);
+				}
 				continue;
 			}
 		}
@@ -231,14 +245,14 @@ phiElimination(StateMachine *sm,
 		IRExpr *acc = NULL;
 		if (genM1.isValid())
 			acc = IRExpr_Get(genM1, ty);
-		for (unsigned x = 0; x < s->generations.size(); x++) {
+		for (unsigned x = 0; x < newGens.size(); x++) {
 			IRExpr *component;
-			if (s->generations[x].first.gen() == (unsigned)-1)
+			if (newGens[x].first.gen() == (unsigned)-1)
 				continue;
-			if (s->generations[x].second)
-				component = s->generations[x].second;
+			if (newGens[x].second)
+				component = newGens[x].second;
 			else
-				component = IRExpr_Get(s->generations[x].first, ty);
+				component = IRExpr_Get(newGens[x].first, ty);
 			if (acc)
 				acc = IRExpr_Mux0X(pRegDominators[x], acc, component);
 			else
