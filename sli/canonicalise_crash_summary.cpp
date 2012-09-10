@@ -54,11 +54,7 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 				addr = IRExpr_Get(r, Ity_I64);
 			}
 		}
-		return new StateMachineSideEffectLoad(
-			canon_reg(smsel->target),
-			addr,
-			smsel->rip,
-			smsel->type);
+		return new StateMachineSideEffectLoad(smsel, canon_reg(smsel->target), addr);
 	}
 	StateMachineSideEffectCopy *transformOneSideEffect(
 		StateMachineSideEffectCopy *smsec, bool *done_something)
@@ -101,10 +97,7 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 				freshVariables.insert(std::pair<IRExpr *, threadAndRegister>(store2->addr, r));
 				addr = IRExpr_Get(r, Ity_I64);
 			}
-			return new StateMachineSideEffectStore(
-				addr,
-				store2->data,
-				store2->rip);
+			return new StateMachineSideEffectStore(store2, addr, store2->data);
 		}
 		return store2;
 	}
@@ -222,11 +215,7 @@ class SplitSsaGenerations : public StateMachineTransformer {
 		if (smsel2)
 			smsel = smsel2;
 		*done_something = true;
-		return new StateMachineSideEffectLoad(
-			canon_reg(smsel->target),
-			smsel->addr,
-			smsel->rip,
-			smsel->type);
+		return new StateMachineSideEffectLoad(smsel, canon_reg(smsel->target));
 	}
 	StateMachineSideEffectCopy *transformOneSideEffect(
 		StateMachineSideEffectCopy *smsec, bool *done_something)
@@ -246,7 +235,7 @@ class SplitSsaGenerations : public StateMachineTransformer {
 		if (smsep2)
 			smsep = smsep2;
 		for (auto it = smsep->generations.begin(); it != smsep->generations.end(); ) {
-			if (!generatedRegisters.count( smsep->reg.setGen(it->first) ) ) {
+			if (!generatedRegisters.count(it->first) ) {
 				*done_something = true;
 				it = smsep->generations.erase(it);
 			} else {
@@ -287,7 +276,7 @@ private:
 	}
 	MemoryAccessIdentifier canon_memoryaccessidentifier(const MemoryAccessIdentifier &mai)
 	{
-		return MemoryAccessIdentifier(mai.where, canonTid(mai.tid), mai.generation);
+		return MemoryAccessIdentifier(mai.rip, canonTid(mai.tid), mai.generation);
 	}
 	threadAndRegister canon_reg(const threadAndRegister &input)
 	{
@@ -339,7 +328,8 @@ private:
 			canon_reg(l->target),
 			addr,
 			canon_memoryaccessidentifier(l->rip),
-			l->type);
+			l->type,
+			l->tag);
 	}
 	StateMachineSideEffectStore *transformOneSideEffect(
 		StateMachineSideEffectStore *l, bool *done_something)
@@ -355,7 +345,8 @@ private:
 		return new StateMachineSideEffectStore(
 			addr,
 			data,
-			canon_memoryaccessidentifier(l->rip));
+			canon_memoryaccessidentifier(l->rip),
+			l->tag);
 	}
 	StateMachineSideEffectCopy *transformOneSideEffect(
 		StateMachineSideEffectCopy *l, bool *done_something)
@@ -481,7 +472,7 @@ canonicalise_crash_summary(CrashSummary *input)
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
 			     it++)
-				res.insert(smsep->reg.setGen(it->first));
+				res.insert(*it);
 			res.insert(smsep->reg);
 			return StateMachineTransformer::transformOneSideEffect(smsep, done_something);
 		}
