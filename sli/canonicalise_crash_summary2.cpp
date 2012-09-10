@@ -10,24 +10,6 @@
 #include "dummy_oracle.hpp"
 
 static StateMachine *
-removeMarkers(VexPtr<StateMachine, &ir_heap> sm,
-	      const AllowableOptimisations &opt,
-	      VexPtr<OracleInterface> &oracle,
-	      GarbageCollectionToken token)
-{
-	std::vector<StateMachineSideEffecting *> states;
-	enumStates(sm, &states);
-	for (auto it = states.begin(); it != states.end(); it++) {
-		auto s = *it;
-		if (s->sideEffect &&
-		    (s->sideEffect->type == StateMachineSideEffect::StartFunction ||
-		     s->sideEffect->type == StateMachineSideEffect::EndFunction))
-			s->sideEffect = NULL;
-	}
-	return optimiseStateMachine(sm, opt, oracle, false, token);
-}
-
-static StateMachine *
 optimiseStateMachineAssuming(StateMachine *sm,
 			     IRExpr *assumption,
 			     bool assumptionIsTrue)
@@ -94,12 +76,11 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 	}
 
 	sm = input->loadMachine;
-	input->loadMachine = removeMarkers(sm, optIn, oracle, token);
-	input->loadMachine = removeAnnotations(input->loadMachine, optIn, oracle, false, token);
+	VexPtr<MaiMap, &ir_heap> mai(input->mai);
+	input->loadMachine = removeAnnotations(mai, input->loadMachine, optIn, oracle, false, token);
 
 	sm = input->storeMachine;
-	input->storeMachine = removeMarkers(sm, optIn, oracle, token);
-	input->storeMachine = removeAnnotations(input->storeMachine, optIn, oracle, false, token);
+	input->storeMachine = removeAnnotations(mai, input->storeMachine, optIn, oracle, false, token);
 
 	return input;
 }
@@ -113,10 +94,7 @@ main(int argc, char *argv[])
 	char *first_line;
 
 	summary = readBugReport(argv[1], &first_line);
-	CfgDecode decode;
-	decode.addMachine(summary->loadMachine);
-	decode.addMachine(summary->storeMachine);
-	VexPtr<OracleInterface> oracle(new DummyOracle(summary, &decode));
+	VexPtr<OracleInterface> oracle(new DummyOracle(summary));
 
 	summary = canonicalise_crash_summary(
 		summary,

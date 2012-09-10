@@ -276,7 +276,7 @@ private:
 	}
 	MemoryAccessIdentifier canon_memoryaccessidentifier(const MemoryAccessIdentifier &mai)
 	{
-		return MemoryAccessIdentifier(mai.rip, canonTid(mai.tid), mai.generation);
+		return mai.setTid(canonTid(mai.tid));
 	}
 	threadAndRegister canon_reg(const threadAndRegister &input)
 	{
@@ -472,7 +472,7 @@ canonicalise_crash_summary(CrashSummary *input)
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
 			     it++)
-				res.insert(*it);
+				res.insert(it->first);
 			res.insert(smsep->reg);
 			return StateMachineTransformer::transformOneSideEffect(smsep, done_something);
 		}

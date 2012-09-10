@@ -3,7 +3,6 @@
 
 class DummyOracle : public OracleInterface {
 	CrashSummary *summary;
-	CfgDecode *decode;
 	void visit(HeapVisitor &hv) {
 		hv(summary);
 	}
@@ -21,16 +20,16 @@ class DummyOracle : public OracleInterface {
 	}
 
 public:
-	DummyOracle(CrashSummary *_summary, CfgDecode *_decode)
-		: summary(_summary), decode(_decode)
+	DummyOracle(CrashSummary *_summary)
+		: summary(_summary)
 	{}
-	bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectLoad *l2) {
+	bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectLoad *l2) {
 		return memoryAccessesMightAlias(l1->rip, l2->rip);
 	}
-	bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectStore *l2) {
+	bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectStore *l2) {
 		return memoryAccessesMightAlias(l1->rip, l2->rip);
 	}
-	bool memoryAccessesMightAlias(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectStore *l1, StateMachineSideEffectStore *l2) {
+	bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectStore *l1, StateMachineSideEffectStore *l2) {
 		return memoryAccessesMightAlias(l1->rip, l2->rip);
 	}
 	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) {
@@ -39,9 +38,15 @@ public:
 		for (auto it = summary->aliasing.begin();
 		     it != summary->aliasing.end();
 		     it++) {
-			if ((load == decode->dr(it->first.where) && store == decode->dr(it->second.where)) ||
-			    (store == decode->dr(it->first.where) && load == decode->dr(it->second.where)))
-				return true;
+			for (auto it1 = summary->mai->begin(it->first); !it1.finished(); it1.advance()) {
+				if (load != it1.dr() && store != it1.dr())
+					continue;
+				for (auto it2 = summary->mai->begin(it->second); !it2.finished(); it2.advance()) {
+					if ((load == it1.dr() && store == it2.dr()) ||
+					    (load == it2.dr() && store == it1.dr()))
+						return true;
+				}
+			}
 		}
 		return false;
 	}
@@ -49,7 +54,7 @@ public:
 		return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load),
 							   DynAnalysisRip(store));
 	}
-	bool hasConflictingRemoteStores(CfgDecode &, const AllowableOptimisations &, StateMachineSideEffectMemoryAccess *) {
+	bool hasConflictingRemoteStores(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectMemoryAccess *) {
 		return true;
 	}
 };

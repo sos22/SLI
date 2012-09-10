@@ -353,6 +353,10 @@ class MemoryAccessIdentifier : public Named {
 public:
 	int tid;
 
+	MemoryAccessIdentifier setTid(int tid) const {
+		return MemoryAccessIdentifier(id, tid);
+	}
+
 	unsigned long hash() const { return (unsigned long)id * 200010011 + tid * 428143; }
 	void sanity_check() const {
 		assert(id > 0);

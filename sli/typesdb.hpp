@@ -38,6 +38,9 @@ public:
 				return false;
 		return true;
 	}
+	bool operator!=(const DynAnalysisRip &o) const {
+		return !(*this == o);
+	}
 	bool operator<(const DynAnalysisRip &o) const {
 		for (int x = 0; x < nr_rips && x < o.nr_rips; x++)
 			if (rips[x] < o.rips[x])
