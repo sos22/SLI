@@ -21,4 +21,5 @@ glibc-2.X.supp
 ms_print
 stamp-h1
 valgrind.pc
-
+autom4te.cache/
+Makefile.in
