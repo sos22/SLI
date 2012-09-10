@@ -17,6 +17,7 @@
 #include "inferred_information.hpp"
 #include "offline_analysis.hpp"
 #include "genfix.hpp"
+#include "allowable_optimisations.hpp"
 
 class DumpFix : public FixConsumer {
 public:
@@ -28,11 +29,10 @@ public:
 };
 
 void
-DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary, GarbageCollectionToken token)
+DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary, GarbageCollectionToken )
 {
 	printCrashSummary(summary, stdout);
-	char *s = buildPatchForCrashSummary(oracle, summary,
-					    "patch");
+	char *s = buildPatchForCrashSummary(oracle, summary, "patch");
 	if (s)
 		printf("Generates patch:\n#include \"patch_head.h\"\n\n%s\n\n#include \"patch_skeleton.c\"\n", s);
 	else
@@ -50,8 +50,9 @@ main(int argc, char *argv[])
 	VexPtr<MachineState> ms(MachineState::readCoredump(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
+	VexPtr<MaiMap, &ir_heap> mai(MaiMap::empty());
 
-	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(ms, ThreadRip::mk(CRASHED_THREAD, VexRip::invent_vex_rip(thr->regs.rip())), thr));
+	VexPtr<StateMachineState, &ir_heap> proximal(getProximalCause(ms, *mai, ..., CRASHED_THREAD));
 	if (!proximal)
 		errx(1, "cannot get proximal cause of crash");
 

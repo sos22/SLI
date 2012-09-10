@@ -70,8 +70,7 @@ CrashSummary *transformCrashSummary(CrashSummary *input, StateMachineTransformer
 				    bool *done_something = NULL);
 CrashSummary *internCrashSummary(CrashSummary *cs);
 
-char *buildPatchForCrashSummary(const std::map<const CFGNode *, int> &,
-				Oracle *oracle, CrashSummary *summary, const char *ident);
+char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident);
 
 class FixConsumer {
 public:
