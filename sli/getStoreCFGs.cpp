@@ -840,13 +840,8 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 		}
 		for (unsigned cntr = 0; cntr < CONFIG_MAX_STORE_BACKTRACK; cntr++) {
 			std::vector<VexRip> predecessors;
-			bool isLibraryCall = false;
-			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
-				if (it->calledFunction != LibraryFunctionTemplate::none)
-					isLibraryCall = true;
 			oracle->findPredecessors(n->rip,
 						 n->rip.stack.size() != 1,
-						 isLibraryCall,
 						 predecessors);
 			if (predecessors.size() != 1) {
 				if(debug_backtrack_roots)
@@ -907,13 +902,8 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 		}
 		while (1) {
 			std::vector<VexRip> predecessors;
-			bool isLibraryCall = false;
-			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
-				if (it->calledFunction != LibraryFunctionTemplate::none)
-					isLibraryCall = true;
 			oracle->findPredecessors(n->rip,
 						 n->rip.stack.size() != 1,
-						 isLibraryCall,
 						 predecessors);
 			if (predecessors.size() != 1)
 				break;

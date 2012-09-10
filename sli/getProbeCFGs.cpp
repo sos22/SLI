@@ -133,18 +133,12 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 						       vr.name());
 				}
 			}
-			bool isLibraryCall = false;
-			for (auto it = node->successors.begin(); it != node->successors.end(); it++)
-				isLibraryCall |= (it->calledFunction != LibraryFunctionTemplate::none);
 			if (depth < maxPathLength1) {
 				oracle->findPredecessors(vr, true,
-							 isLibraryCall,
 							 neededAtNextDepth);
 			} else {
 				std::vector<VexRip> pred;
-				oracle->findPredecessors(vr, true,
-							 isLibraryCall,
-							 pred);
+				oracle->findPredecessors(vr, true, pred);
 				/* If we're past the intended max
 				   depth then we only consider
 				   unambiguous non-call

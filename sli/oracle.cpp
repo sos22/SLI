@@ -3350,7 +3350,7 @@ Oracle::getPossibleStackTruncations(const VexRip &vr,
  * before @vr. */
 void
 Oracle::findPredecessors(const VexRip &vr, bool includeCallPredecessors,
-			 bool expectedLibraryCall, std::vector<VexRip> &out)
+			 std::vector<VexRip> &out)
 {
 	StaticRip sr(vr);
 	Function f(sr);
@@ -3391,13 +3391,8 @@ Oracle::findPredecessors(const VexRip &vr, bool includeCallPredecessors,
 		bind_oraclerip(stmt, 1, sr);
 		extract_oraclerip_column(stmt, 0, callSucc);
 
-		if (!callSucc.empty()) {
-			if (!expectedLibraryCall)
-				printf("Warning: ignoring library call at %s\n", sr.name());
-			for (auto it = callSucc.begin(); it != callSucc.end(); it++) {
-				out.push_back(it->makeVexRip(vr));
-			}
-		}
+		for (auto it = callSucc.begin(); it != callSucc.end(); it++)
+		  out.push_back(it->makeVexRip(vr));
 	}
 }
 

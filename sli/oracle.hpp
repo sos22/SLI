@@ -385,7 +385,7 @@ public:
 	void getPossibleStackTruncations(const VexRip &vr,
 					 std::vector<unsigned long> &callers);
 	void findPredecessors(const VexRip &vr, bool includeCallPredecessors,
-			      bool expectedLibraryCall, std::vector<VexRip> &out);
+			      std::vector<VexRip> &out);
 
 	bool isPltCall(const VexRip &vr);
 	LibraryFunctionType identifyLibraryCall(const VexRip &vr);
