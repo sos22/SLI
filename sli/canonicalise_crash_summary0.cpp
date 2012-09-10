@@ -248,7 +248,9 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		       const VexPtr<OracleInterface> &oracle,
 		       GarbageCollectionToken token)
 {
+	VexPtr<MaiMap, &ir_heap> mai(cs->mai);
 	cs->loadMachine = optimiseStateMachine(
+		mai,
 		cs->loadMachine,
 		AllowableOptimisations::defaultOptimisations.
 			enableassumePrivateStack().
@@ -258,6 +260,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		true,
 		token);
 	cs->storeMachine = optimiseStateMachine(
+		mai,
 		cs->storeMachine,
 		AllowableOptimisations::defaultOptimisations.
 			enableassumePrivateStack().
@@ -273,6 +276,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 	cs->verificationCondition = simplifyIRExpr(
 		cs->verificationCondition,
 		AllowableOptimisations::defaultOptimisations);
+	cs->mai = mai;
 
 	/* The only reason we maintain the CFG is so that we can
 	   resolve references into it from the machines and
@@ -289,9 +293,6 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 	      be referenced.
 	*/
 	std::set<const CFGNode *> needed;
-	CfgDecode decode;
-	decode.addMachine(cs->loadMachine);
-	decode.addMachine(cs->storeMachine);
 
 	HashedSet<HashedPtr<CFGNode> > allNodes;
 	for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
@@ -306,7 +307,8 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		cs->loadMachine->root->enumerateMentionedMemoryAccesses(mais);
 		cs->storeMachine->root->enumerateMentionedMemoryAccesses(mais);
 		for (auto it = mais.begin(); it != mais.end(); it++)
-			needed.insert(decode(it->where));
+			for (auto it2 = cs->mai->begin(*it); !it2.finished(); it2.advance())
+				needed.insert(it2.node());
 	}
 
 	/* Find references of the second sense */
@@ -535,10 +537,7 @@ main(int argc, char *argv[])
 
 	summary = readBugReport(argv[1], &first_line);
 
-	CfgDecode decode;
-	decode.addMachine(summary->loadMachine);
-	decode.addMachine(summary->storeMachine);
-	summary = optimise_crash_summary(summary, new DummyOracle(summary, &decode), ALLOW_GC);
+	summary = optimise_crash_summary(summary, new DummyOracle(summary), ALLOW_GC);
 
 	FILE *f = fopen(argv[2], "w");
 	fprintf(f, "%s\n", first_line);

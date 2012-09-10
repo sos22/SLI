@@ -494,7 +494,7 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 			oracle,
 			IRExpr_Const(IRConst_U1(1)),
 			AllowableOptimisations::defaultOptimisations,
-			MemoryAccessIdentifierAllocator(),
+			summary->mai,
 			token);
 	if (!reducedSurvivalConstraint) {
 		fprintf(stderr, "can't build cross product survival constraint\n");
@@ -870,7 +870,8 @@ simplifyAssuming(IRExpr *expr,
 }
 
 static IRExpr *
-simplifyAssumingMachineSurvives(const VexPtr<StateMachine, &ir_heap> &machine,
+simplifyAssumingMachineSurvives(const VexPtr<MaiMap, &ir_heap> &mai,
+				const VexPtr<StateMachine, &ir_heap> &machine,
 				bool doesSurvive,
 				const VexPtr<IRExpr, &ir_heap> &expr,
 				const VexPtr<OracleInterface> &oracle,
@@ -889,6 +890,7 @@ simplifyAssumingMachineSurvives(const VexPtr<StateMachine, &ir_heap> &machine,
 	IRExpr *survival_constraint;
 	if (doesSurvive) {
 		survival_constraint = survivalConstraintIfExecutedAtomically(
+			mai,
 			machine,
 			IRExpr_Const(IRConst_U1(1)),
 			oracle,
@@ -897,6 +899,7 @@ simplifyAssumingMachineSurvives(const VexPtr<StateMachine, &ir_heap> &machine,
 			token);
 	} else {
 		survival_constraint = crashingConstraintIfExecutedAtomically(
+			mai,
 			machine,
 			IRExpr_Const(IRConst_U1(1)),
 			oracle,
@@ -1195,6 +1198,7 @@ nonFunctionalSimplifications(
 			p = false;
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
+					summary->mai,
 					summary->loadMachine,
 					true,
 					summary->verificationCondition,
@@ -1203,6 +1207,7 @@ nonFunctionalSimplifications(
 					token);
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
+					summary->mai,
 					summary->storeMachine,
 					false,
 					summary->verificationCondition,
@@ -1331,8 +1336,6 @@ struct LCPrivateTransformer : public StateMachineTransformer {
 
 LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 {
-	int cntr = 0;
-
 	LCPrivateTransformer findAllLoads;
 	findAllLoads.currentState = NULL;
 	transformCrashSummary(cs, findAllLoads);
@@ -1377,9 +1380,7 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 		if (!allowSubst)
 			continue;
 		IRExprFreeVariable *fv = new IRExprFreeVariable(
-			MemoryAccessIdentifier(CfgLabel::uninitialised(),
-					       -1,
-					       cntr++), k.second->ty, false);
+			(*cs->mai)(-1, NULL), k.second->ty, false);
 		for (auto it = definitelyAliasLds.begin();
 		     it != definitelyAliasLds.end();
 		     it++) {
@@ -1420,11 +1421,15 @@ LoadCanonicaliser::decanonicalise(IRExpr *iex)
 CrashSummary *
 LoadCanonicaliser::canonicalise(CrashSummary *cs)
 {
-	return new CrashSummary(canonicalise(cs->loadMachine),
-				canonicalise(cs->storeMachine),
-				canonicalise(cs->verificationCondition),
+	StateMachine *loadM = canonicalise(cs->loadMachine);
+	StateMachine *storeM = canonicalise(cs->storeMachine);
+	IRExpr *cond = canonicalise(cs->verificationCondition);
+	return new CrashSummary(loadM,
+				storeM,
+				cond,
 				cs->macroSections,
-				cs->aliasing);
+				cs->aliasing,
+				cs->mai);
 }
 
 CrashSummary *
@@ -1434,7 +1439,8 @@ LoadCanonicaliser::decanonicalise(CrashSummary *cs)
 				decanonicalise(cs->storeMachine),
 				decanonicalise(cs->verificationCondition),
 				cs->macroSections,
-				cs->aliasing);
+				cs->aliasing,
+				cs->mai);
 }
 
 int
@@ -1449,11 +1455,8 @@ main(int argc, char *argv[])
 	timeoutTimer.schedule();
 
 	summary = readBugReport(argv[1], &first_line);
-	CfgDecode decode;
 	MachineState *ms = MachineState::readELFExec(argv[2]);
 	Thread *thr = ms->findThread(ThreadId(1));
-	decode.addMachine(summary->loadMachine);
-	decode.addMachine(summary->storeMachine);
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[3]));
 
 	summary = internCrashSummary(summary);
