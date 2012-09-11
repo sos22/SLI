@@ -2022,7 +2022,7 @@ top:
 									IRConst_U64(
 										cnst->con->Ico.U64 & ~((1ul << 22) - 1))),
 								assoc->contents[1]);
-					res = e;
+					progress = true;
 					break;
 				}
 			}
