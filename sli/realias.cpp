@@ -395,7 +395,7 @@ class PointsToTable {
 public:
 	PointerAliasingSet pointsToSetForExpr(IRExpr *e,
 					      StateMachineState *sm,
-					      Maybe<StackLayout> &sl,
+					      Maybe<StackLayout> *sl,
 					      MachineAliasingTable &mat,
 					      StackLayoutTable &slt);
 	bool build(StateMachine *sm);
@@ -410,8 +410,6 @@ public:
 			     StateMachine *sm,
 			     MachineAliasingTable &mat,
 			     StackLayoutTable &slt,
-			     std::map<const StateMachineState *, int> &stateLabels,
-			     bool *failed,
 			     bool *done_something);
 };
 
@@ -453,7 +451,7 @@ aliasConfigForReg(StateMachineState *sm,
 PointerAliasingSet
 PointsToTable::pointsToSetForExpr(IRExpr *e,
 				  StateMachineState *sm,
-				  Maybe<StackLayout> &sl,
+				  Maybe<StackLayout> *sl,
 				  MachineAliasingTable &mat,
 				  StackLayoutTable &slt)
 {
@@ -487,9 +485,9 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		}
 		if (iex->reg.isReg() &&
 		    iex->reg.asReg() == OFFSET_amd64_RSP) {
-			if (sl.valid) {
+			if (sl && sl->valid) {
 				FrameId f(FrameId::invalid());
-				if (sl.content.identifyFrameFromPtr(iex, &f)) {
+				if (sl->content.identifyFrameFromPtr(iex, &f)) {
 					return PointerAliasingSet::frame(f);
 				} else {
 					break;
@@ -508,7 +506,8 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
 	case Iex_Associative: {
 		IRExprAssociative *iex = (IRExprAssociative *)e;
-		if (sl.valid &&
+		if (sl &&
+		    sl->valid &&
 		    iex->op == Iop_Add64 &&
 		    iex->nr_arguments == 2 &&
 		    iex->contents[0]->tag == Iex_Const &&
@@ -516,7 +515,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		    ((IRExprGet *)iex->contents[1])->reg.isReg() &&
 		    ((IRExprGet *)iex->contents[1])->reg.asReg() == OFFSET_amd64_RSP) {
 			FrameId f(FrameId::invalid());
-			if (sl.content.identifyFrameFromPtr(iex, &f))
+			if (sl->content.identifyFrameFromPtr(iex, &f))
 				return PointerAliasingSet::frame(f);
 		}
 		if (iex->op == Iop_Add64) {
@@ -641,11 +640,11 @@ public:
 		assert(it != content.end());
 		return it->second;
 	}
-	bool refine(PointsToTable &ptt,
+	void refine(PointsToTable &ptt,
 		    MachineAliasingTable &mat,
 		    StackLayoutTable &slt,
 		    bool *done_something,
-		    stateLabelT &labels) __attribute__ ((warn_unused_result));
+		    stateLabelT &labels);
 };
 
 static bool
@@ -868,8 +867,6 @@ PointsToTable::refine(AliasTable &at,
 		      StateMachine *sm,
 		      MachineAliasingTable &mat,
 		      StackLayoutTable &slt,
-		      std::map<const StateMachineState *, int> &stateLabels,
-		      bool *failed,
 		      bool *done_something)
 {
 	PointsToTable res;
@@ -888,13 +885,6 @@ PointsToTable::refine(AliasTable &at,
 #endif
 		PointerAliasingSet newPts(PointerAliasingSet::nothing);
 		Maybe<StackLayout> *sl = slt.forState(smse);
-		if (!sl) {
-			if (debug_refine_points_to_table)
-				printf("Refining points-to table failed because we have no stack layout for l%d\n",
-				       stateLabels[smse]);
-			*failed = true;
-			return res;
-		}
 		switch (effect->type) {
 		case StateMachineSideEffect::Load: {
 			const AliasTableEntry &e(at.storesForLoad(smse));
@@ -915,7 +905,7 @@ PointsToTable::refine(AliasTable &at,
 						pointsToSetForExpr(
 							((StateMachineSideEffectStore *)satisfier)->data,
 							smse,
-							*sl,
+							sl,
 							mat,
 							slt);
 				} else {
@@ -926,7 +916,9 @@ PointsToTable::refine(AliasTable &at,
 			/* A load can only load from a frame if the
 			   frame is actually live at the time of the
 			   load. */
-			if (newPts.valid && !newPts.otherStackPointer &&
+			if (newPts.valid &&
+			    !newPts.otherStackPointer &&
+			    sl &&
 			    sl->valid) {
 				for (auto it = newPts.stackPointers.begin();
 				     it != newPts.stackPointers.end();
@@ -949,7 +941,7 @@ PointsToTable::refine(AliasTable &at,
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(c->value, smse, *sl, mat, slt);
+			newPts = pointsToSetForExpr(c->value, smse, sl, mat, slt);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
@@ -994,7 +986,7 @@ PointsToTable::refine(AliasTable &at,
 	return res;
 }
 
-bool
+void
 AliasTable::refine(PointsToTable &ptt,
 		   MachineAliasingTable &mat,
 		   StackLayoutTable &slt,
@@ -1006,13 +998,11 @@ AliasTable::refine(PointsToTable &ptt,
 	     it++) {
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
 		Maybe<StackLayout> *sl = slt.forState(it->first);
-		if (!sl)
-			return false;
 		PointerAliasingSet loadPts(
 			ptt.pointsToSetForExpr(
 				l->addr,
 				it->first,
-				*sl,
+				sl,
 				mat,
 				slt));
 		if (debug_refine_alias_table)
@@ -1022,12 +1012,10 @@ AliasTable::refine(PointsToTable &ptt,
 		     it2 != it->second.stores.end();
 			) {
 			Maybe<StackLayout> *sl2 = slt.forState(*it2);
-			if (!sl2)
-				return false;
 			PointerAliasingSet storePts(
 				ptt.pointsToSetForExpr( ((StateMachineSideEffectMemoryAccess *)(*it2)->getSideEffect())->addr,
 							it->first,
-							*sl2,
+							sl2,
 							mat,
 							slt));
 			if (storePts.overlaps(loadPts)) {
@@ -1046,7 +1034,6 @@ AliasTable::refine(PointsToTable &ptt,
 			}
 		}
 	}
-	return true;
 }
 
 static IRExpr *
@@ -1114,13 +1101,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 
 	while (1) {
 		bool p = false;
-		bool failed = false;
-		PointsToTable ptt2 = ptt.refine(at, sm, mat, stackLayout, stateLabels, &failed, &p);
-		if (failed) {
-			if (any_debug)
-				printf("Failed to refine points-to table\n");
-			return sm;
-		}
+		PointsToTable ptt2 = ptt.refine(at, sm, mat, stackLayout, &p);
 
 		if (p && debug_refine_points_to_table) {
 			printf("Refined points-to table:\n");
@@ -1128,11 +1109,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 		}
 		ptt = ptt2;
 
-		if (!at.refine(ptt, mat, stackLayout, &p, stateLabels)) {
-			if (any_debug)
-				printf("Failed to refine alias table\n");
-			return sm;
-		}
+		at.refine(ptt, mat, stackLayout, &p, stateLabels);
 		if (!p)
 			break;
 		if (debug_refine_alias_table) {
@@ -1157,7 +1134,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 		PointerAliasingSet pas(ptt.pointsToSetForExpr(
 					       l->addr,
 					       it->first,
-					       *stackLayout.forState(it->first),
+					       stackLayout.forState(it->first),
 					       mat,
 					       stackLayout));
 		if (pas.otherStackPointer || !pas.valid) {
