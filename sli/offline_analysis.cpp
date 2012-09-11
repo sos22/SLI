@@ -714,7 +714,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 static StateMachine *
 truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
 {
-	StateMachineBifurcate *smb =
+	StateMachineBifurcate *newTerminal =
 		new StateMachineBifurcate(
 			mai.begin(truncateAt->rip).node()->rip,
 			IRExpr_Unop(
@@ -722,23 +722,59 @@ truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffect
 				truncateAt->addr),
 			StateMachineCrash::get(),
 			StateMachineNoCrash::get());
-	std::map<const StateMachineState *, StateMachineState *> rewriteRules;
-	std::set<StateMachineSideEffecting *> s;
-	enumStates(sm, &s);
+	std::map<const StateMachineState *, StateMachineState *> map;
+	std::queue<StateMachineState **> relocs;
+	StateMachineState *newRoot = sm->root;
+	relocs.push(&newRoot);
 	bool found = false;
-	for (auto it = s.begin(); it != s.end(); it++) {
-		if ((*it)->getSideEffect() == truncateAt) {
-			rewriteRules[*it] = smb;
-			found = true;
+	while (!relocs.empty()) {
+		StateMachineState **r = relocs.front();
+		relocs.pop();
+		const StateMachineState *oldState = *r;
+		auto it_did_insert = map.insert(std::pair<const StateMachineState *, StateMachineState *>(oldState, (StateMachineState *)NULL));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (did_insert) {
+			StateMachineState *newState;
+			switch (oldState->type) {
+			case StateMachineState::Bifurcate: {
+				auto smb = (const StateMachineBifurcate *)oldState;
+				newState = new StateMachineBifurcate(*smb);
+				break;
+			}
+			case StateMachineState::SideEffecting: {
+				auto sme = (const StateMachineSideEffecting *)oldState;
+				if (sme->sideEffect == truncateAt) {
+					found = true;
+					newState = newTerminal;
+				} else {
+					newState = new StateMachineSideEffecting(*sme);
+				}
+				break;
+			}
+			case StateMachineState::Crash:
+				/* Get rid of the old way of crashing. */
+				newState = StateMachineNoCrash::get();
+				break;
+			case StateMachineState::NoCrash:
+				newState = StateMachineNoCrash::get();
+				break;
+			case StateMachineState::Unreached:
+				abort();
+			}
+			it->second = newState;
+			if (newState != newTerminal) {
+				std::vector<StateMachineState **> succ;
+				newState->targets(succ);
+				for (auto it = succ.begin(); it != succ.end(); it++)
+					relocs.push(*it);
+			}
 		}
+		*r = it->second;
 	}
 	assert(found);
-	rewriteRules[StateMachineCrash::get()] = StateMachineCrash::get();
-	rewriteRules[StateMachineNoCrash::get()] = StateMachineNoCrash::get();
-	StateMachineTransformer::rewriteMachine(sm, rewriteRules, false);
-	assert(rewriteRules.count(sm->root));
-	assert(rewriteRules[sm->root] != sm->root);
-	return new StateMachine(sm, rewriteRules[sm->root]);
+	assert(newRoot != sm->root);
+	return new StateMachine(sm, newRoot);
 }
 
 static void
