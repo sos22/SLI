@@ -1315,13 +1315,18 @@ protected:
    IRExpr(IRExprTag _tag)
        : tag(_tag), optimisationsApplied(0)
    {}
+   virtual void _sanity_check(unsigned m) const = 0;
 public:
    const IRExprTag tag;
    unsigned optimisationsApplied;
 
    virtual unsigned long hashval() const = 0;
    virtual IRType type() const = 0;
-   virtual void sanity_check() const = 0;
+   void sanity_check(unsigned minOptimisations) const {
+	   assert(!(minOptimisations & ~optimisationsApplied));
+	   _sanity_check(minOptimisations);
+   }
+   void sanity_check() const { sanity_check(optimisationsApplied); }
    NAMED_CLASS
 };
 
@@ -1372,7 +1377,7 @@ struct IRExprGet : public IRExpr {
    IRType type() const {
       return ty;
    }
-   void sanity_check() const {
+   void _sanity_check(unsigned) const {
       reg.sanity_check();
       sanity_check_irtype(ty);
    }
@@ -1435,9 +1440,9 @@ struct IRExprGetI : public IRExpr {
       fprintf(f, ",%d](%d)", bias, tid);
    }
    IRType type() const { return descr->elemTy; }
-   void sanity_check() const {
+   void _sanity_check(unsigned m) const {
       descr->sanity_check();
-      ix->sanity_check();
+      ix->sanity_check(m);
    }
 };
 
@@ -1480,12 +1485,12 @@ struct IRExprQop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
-   void sanity_check() const {
+   void _sanity_check(unsigned m) const {
       sanity_check_irop(op);
-      arg1->sanity_check();
-      arg2->sanity_check();
-      arg3->sanity_check();
-      arg4->sanity_check();
+      arg1->sanity_check(m);
+      arg2->sanity_check(m);
+      arg3->sanity_check(m);
+      arg4->sanity_check(m);
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       assert(b == arg1->type());
@@ -1529,11 +1534,11 @@ struct IRExprTriop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
-   void sanity_check() const {
+   void _sanity_check(unsigned m) const {
       sanity_check_irop(op);
-      arg1->sanity_check();
-      arg2->sanity_check();
-      arg3->sanity_check();
+      arg1->sanity_check(m);
+      arg2->sanity_check(m);
+      arg3->sanity_check(m);
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       assert(b == arg1->type());
@@ -1564,10 +1569,10 @@ struct IRExprBinop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
-   void sanity_check() const {
+   void _sanity_check(unsigned m) const {
       sanity_check_irop(op);
-      arg1->sanity_check();
-      arg2->sanity_check();
+      arg1->sanity_check(m);
+      arg2->sanity_check(m);
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       assert(b == arg1->type());
@@ -1595,9 +1600,9 @@ struct IRExprUnop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
-   void sanity_check() const {
+   void _sanity_check(unsigned m) const {
       sanity_check_irop(op);
-      arg->sanity_check();
+      arg->sanity_check(m);
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       assert(b == arg->type());
@@ -1629,9 +1634,9 @@ struct IRExprLoad : public IRExpr {
    }
    void prettyPrint(FILE *f) const;
    IRType type() const { return ty; }
-   void sanity_check() const {
+   void _sanity_check(unsigned m) const {
       sanity_check_irtype(ty);
-      addr->sanity_check();
+      addr->sanity_check(m);
    }
 };
 
@@ -1652,7 +1657,7 @@ struct IRExprConst : public IRExpr {
    unsigned long hashval() const { return con->hashval(); }
    void prettyPrint(FILE *f) const;
    IRType type() const { return typeOfIRConst(con); }
-   void sanity_check() const {
+   void _sanity_check(unsigned) const {
       con->sanity_check();
    }
 };
@@ -1711,11 +1716,11 @@ struct IRExprCCall : public IRExpr {
    }
    void prettyPrint(FILE *f) const;
    IRType type() const { return retty; }
-   void sanity_check() const {
+   void _sanity_check(unsigned m) const {
       cee->sanity_check();
       sanity_check_irtype(retty);
       for (unsigned x = 0; args[x]; x++)
-	args[x]->sanity_check();
+	args[x]->sanity_check(m);
    }
 };
 
@@ -1742,10 +1747,10 @@ struct IRExprMux0X : public IRExpr {
    }
    void prettyPrint(FILE *f) const;
    IRType type() const { return expr0->type(); }
-   void sanity_check() const {
-      cond->sanity_check();
-      expr0->sanity_check();
-      exprX->sanity_check();
+   void _sanity_check(unsigned m) const {
+      cond->sanity_check(m);
+      expr0->sanity_check(m);
+      exprX->sanity_check(m);
       assert(expr0->type() == exprX->type());
       assert(cond->type() == Ity_I1);
    }
@@ -1777,7 +1782,7 @@ struct IRExprAssociative : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
-   void sanity_check() const {
+   void _sanity_check(unsigned m) const {
       if (TIMEOUT)
 	 return;
       sanity_check_irop(op);
@@ -1788,7 +1793,7 @@ struct IRExprAssociative : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       assert(b == c);
       for (int i = 0; i < nr_arguments; i++)
-	 contents[i]->sanity_check();
+	 contents[i]->sanity_check(m);
       for (int i = 0; i < nr_arguments; i++)
 	 assert(contents[i]->type() == b);
    }
@@ -1807,7 +1812,7 @@ struct IRExprHappensBefore : public IRExpr {
     unsigned long hashval() const { return 19; }
     void prettyPrint(FILE *f) const;
     IRType type() const { return Ity_I1; }
-    void sanity_check() const {
+    void _sanity_check(unsigned) const {
 	    before.sanity_check();
 	    after.sanity_check();
     }
@@ -1828,7 +1833,7 @@ struct IRExprFreeVariable : public IRExpr {
 	fprintf(f, ":%s", isUnique ? "UNIQUE" : "NONUNIQUE");
     }
     IRType type() const { return ty; }
-    void sanity_check() const {
+    void _sanity_check(unsigned) const {
 	id.sanity_check();
 	sanity_check_irtype(ty);
 	assert(isUnique == true || isUnique == false);

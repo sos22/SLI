@@ -725,10 +725,14 @@ truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffect
 	std::map<const StateMachineState *, StateMachineState *> rewriteRules;
 	std::set<StateMachineSideEffecting *> s;
 	enumStates(sm, &s);
+	bool found = false;
 	for (auto it = s.begin(); it != s.end(); it++) {
-		if ((*it)->getSideEffect() == truncateAt)
+		if ((*it)->getSideEffect() == truncateAt) {
 			rewriteRules[*it] = smb;
+			found = true;
+		}
 	}
+	assert(found);
 	rewriteRules[StateMachineCrash::get()] = StateMachineCrash::get();
 	rewriteRules[StateMachineNoCrash::get()] = StateMachineNoCrash::get();
 	StateMachineTransformer::rewriteMachine(sm, rewriteRules, false);
