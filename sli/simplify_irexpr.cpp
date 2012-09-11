@@ -660,6 +660,7 @@ purgeAssocArgument(IRExprAssociative *e, int idx)
 		e->contents + idx + 1,
 		sizeof(IRExpr *) * (e->nr_arguments - idx - 1));
 	e->nr_arguments--;
+	e->optimisationsApplied = 0;
 }
 
 static IRExpr *optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something);
@@ -2292,9 +2293,10 @@ top:
 		   and right by trying to move all of the constants to
 		   the left and all of the non-constants to the
 		   right. */
-		if (e->op == Iop_CmpEQ64) {
+		if (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64) {
 			if (r->tag == Iex_Associative &&
-			    ((IRExprAssociative *)r)->op == Iop_Add64 &&
+			    ((IRExprAssociative *)r)->op >= Iop_Add8 &&
+			    ((IRExprAssociative *)r)->op <= Iop_Add64 &&
 			    ((IRExprAssociative *)r)->contents[0]->tag == Iex_Const) {
 				assert(((IRExprAssociative *)r)->nr_arguments > 1);
 				/* a == C + b -> -C + a == b */
@@ -2302,9 +2304,9 @@ top:
 				IRExprAssociative *newRight = (IRExprAssociative *)IRExpr_Associative((IRExprAssociative *)r);
 				purgeAssocArgument(newRight, 0);
 				IRExpr *newLeft = IRExpr_Associative(
-					Iop_Add64,
+					((IRExprAssociative *)r)->op,
 					IRExpr_Unop(
-						Iop_Neg64,
+						(IROp)(Iop_Neg8 + (((IRExprAssociative *)r)->op - Iop_Add8)),
 						cnst),
 					l,
 					NULL);
@@ -2339,7 +2341,7 @@ top:
 			}
 
 			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
-			if (l->tag != Iex_Const) {
+			if (l->tag != Iex_Const && e->op == Iop_CmpEQ64) {
 				e->arg1 = IRExpr_Const(IRConst_U64(0));
 				e->arg2 =
 					IRExpr_Binop(
@@ -2360,7 +2362,8 @@ top:
 			   to be true, which simplifies things
 			   a bit further. */
 			if (l->tag == Iex_Const &&
-			    r->tag == Iex_Unop) {
+			    r->tag == Iex_Unop &&
+			    e->op == Iop_CmpEQ64) {
 				IRExprConst *lc = (IRExprConst *)l;
 				IRExprUnop *ru = (IRExprUnop *)r;
 				assert(lc->con->tag == Ico_U64);
@@ -2407,6 +2410,7 @@ top:
 			   t1 != t2 and we have
 			   assumePrivateStacks set. */
 			if (opt.assumePrivateStack() &&
+			    e->op == Iop_CmpEQ64 &&
 			    l->tag == Iex_Const &&
 			    r->tag == Iex_Associative) {
 				IRExprAssociative *ra = (IRExprAssociative *)r;
