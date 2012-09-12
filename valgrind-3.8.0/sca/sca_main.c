@@ -129,14 +129,14 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 		const NSegment *seg = VG_(am_find_nsegment)(vex_state->guest_RIP);
 		HChar *n;
 		n = VG_(am_get_filename)(seg);
-		if (n && VG_(strncmp)(n, "/lib/", 5)) {
+		if (n && VG_(strncmp)(n, "/lib/", 5) && VG_(strncmp)(n, "/usr/lib/", 9)) {
 			VG_(printf)("WARNING: No database entry for RIP %llx (%s)\n", vex_state->guest_RIP, n);
 		}
 		return EmWarn_NONE;
 	}
 
 	pt = NULL;
-	he = (const struct hash_entry *)(database + hh->offset + hh->nr_slots * 8);
+	he = (const struct hash_entry *)(database + hh->offset + hh->nr_slots * 8 + i * (sizeof(struct hash_entry)));
 	for (i = 0; i < 16; i++) {
 		if (!(he->aliases[i] & 4)) {
 			unsigned long reg;
