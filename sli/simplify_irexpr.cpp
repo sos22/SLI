@@ -236,27 +236,10 @@ optimise_condition_calculation(
 			Iop_CmpLT ## type ## S,				\
 			coerce(dep1),					\
 			coerce(dep2));					\
-		of = IRExpr_Unop(					\
-			Iop_ ## type ## to1,				\
-			IRExpr_Binop(					\
-				Iop_Shr ## type,			\
-				IRExpr_Binop(				\
-					Iop_And ## type ,		\
-					IRExpr_Binop(			\
-						Iop_Xor ## type ,	\
-						coerce(dep1),		\
-						coerce(dep2)),		\
-					IRExpr_Binop(			\
-						Iop_Xor ## type,	\
-						coerce(dep1),		\
-						IRExpr_Binop(		\
-							Iop_Add ## type, \
-							coerce(dep1),	\
-							IRExpr_Unop(	\
-								Iop_Neg ## type , \
-								coerce(dep2))))), \
-				IRExpr_Const(				\
-					IRConst_U8(type - 1))))
+		of = IRExpr_Binop(					\
+			Iop_Xor1,					\
+			cf,						\
+			sf);
 #define do_sub(type) _do_sub(type, coerce ## type)
 	case AMD64G_CC_OP_SUBB:
 		do_sub(8);
