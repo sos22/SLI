@@ -168,12 +168,21 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 				VG_(tool_panic)("Badness");
 			}
 			if (reg >= vex_state->guest_RSP - 128 && reg < pt->frame_limit)
-				VG_(printf)("Register %d isn't supposed to point at the stack at %llx, but does (%lx vs (%llx,%lx))\n",
+				VG_(printf)("Failed: Register %d isn't supposed to point at the stack at %llx, but does (%lx vs (%llx,%lx))\n",
 					    i, vex_state->guest_RIP,
 					    reg,
 					    vex_state->guest_RSP - 128,
 					    pt->frame_limit);
 		}
+	}
+	if (!he->stackHasLeaked) {
+		if (!pt)
+			pt = get_per_thread();
+		if (pt->nr_stack_frames <= 32 * 6 &&
+		    pt->nr_stack_frames > 0 &&
+		    pt->stack_escape_flags[(pt->nr_stack_frames - 1)/32] & (1u << ((pt->nr_stack_frames - 1) % 32)))
+			VG_(printf)("Failed: stack was supposed to be private at %llx, but was found to be public\n",
+				    vex_state->guest_RIP);
 	}
 	//	VG_(printf)("Found database entry for RIP %llx (%d, %d)\n", vex_state->guest_RIP, i, h);
 	return EmWarn_NONE;
@@ -200,6 +209,19 @@ sca_ret_cb(unsigned long rsp)
 			    VG_(get_running_tid)());
 	else
 		pt->nr_stack_frames--;
+	return EmWarn_NONE;
+}
+
+static VexEmWarn
+sca_store_cb(unsigned long rsp, unsigned long ptr, unsigned long data)
+{
+	struct per_thread *pt = get_per_thread();
+	int f = pt->nr_stack_frames - 1;
+	if (f < 32 * 6 &&
+	    (ptr < rsp - 128 || ptr >= pt->frame_limit) &&
+	    data > rsp - 128 &&
+	    data < pt->frame_limit)
+		pt->stack_escape_flags[f / 32] |= (1u << (f % 32));
 	return EmWarn_NONE;
 }
 
@@ -241,8 +263,43 @@ sca_instrument ( VgCallbackClosure* closure,
 	}
 	for (; i < sbIn->stmts_used; i++) {
 		addStmtToIRSB(sbOut, sbIn->stmts[i]);
-		if (sbIn->stmts[i]->tag == Ist_IMark)
+		if (sbIn->stmts[i]->tag == Ist_IMark) {
 			addStmtToIRSB(sbOut, stmt);
+		} else if (sbIn->stmts[i]->tag == Ist_Store &&
+			 typeOfIRExpr(sbIn->tyenv, sbIn->stmts[i]->Ist.Store.data) == Ity_I64) {
+			IRTemp rsp;
+			IRTemp ptr;
+			IRTemp data;
+			rsp = newIRTemp(sbOut->tyenv, Ity_I64);
+			ptr = newIRTemp(sbOut->tyenv, Ity_I64);
+			data = newIRTemp(sbOut->tyenv, Ity_I64);
+			addStmtToIRSB(
+				sbOut,
+				IRStmt_WrTmp(
+					ptr,
+					sbIn->stmts[i]->Ist.Store.addr));
+			addStmtToIRSB(
+				sbOut,
+				IRStmt_WrTmp(
+					data,
+					sbIn->stmts[i]->Ist.Store.data));
+			addStmtToIRSB(
+				sbOut,
+				IRStmt_WrTmp(
+					rsp,
+					IRExpr_Get(OFFSET_amd64_RSP, Ity_I64)));
+			addStmtToIRSB(
+				sbOut,
+				IRStmt_Dirty(
+					unsafeIRDirty_0_N(
+						0,
+						"sca_store",
+						sca_store_cb,
+						mkIRExprVec_3(
+							IRExpr_RdTmp(rsp),
+							IRExpr_RdTmp(ptr),
+							IRExpr_RdTmp(data)))));
+		}
 	}
 	if (sbIn->jumpkind == Ijk_Call ||
 	    sbIn->jumpkind == Ijk_Ret) {
