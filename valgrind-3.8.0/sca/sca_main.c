@@ -37,9 +37,12 @@
 #include "pub_tool_libcassert.h"
 #include "pub_tool_options.h"
 #include "pub_tool_aspacemgr.h"
+#include "pub_tool_threadstate.h"
+#include "pub_tool_mallocfree.h"
 #include "vki/vki-scnums-amd64-linux.h"
 #include "libvex_emwarn.h"
 #include "libvex_guest_amd64.h"
+#include "libvex_guest_offsets.h"
 
 static Long sca_db_size;
 static unsigned long database;
@@ -55,6 +58,41 @@ struct hash_entry {
 	unsigned char aliases[16];
 	unsigned char stackHasLeaked;
 };
+
+struct per_thread {
+	struct per_thread *next;
+	ThreadId tid;
+	unsigned nr_stack_frames;
+	unsigned stack_escape_flags[6];
+	unsigned long frame_limit;
+};
+
+#define THREAD_HASH_HEADS 31
+static struct per_thread *
+thread_heads[THREAD_HASH_HEADS];
+
+static struct per_thread *
+get_per_thread(void)
+{
+	ThreadId t = VG_(get_running_tid)();
+	unsigned h = t;
+	struct per_thread *cursor;
+	while (h >= THREAD_HASH_HEADS)
+		h = (h / THREAD_HASH_HEADS) ^ (h % THREAD_HASH_HEADS);
+	cursor = thread_heads[h];
+	while (cursor && cursor->tid != t)
+		cursor = cursor->next;
+	if (!cursor) {
+		VG_(printf)("Allocate per-thread struct for %d\n", t);
+		cursor = VG_(malloc)("per_thread", sizeof(*cursor));
+		cursor->tid = t;
+		cursor->frame_limit = 0;
+		cursor->nr_stack_frames = 0;
+		cursor->next = thread_heads[h];
+		thread_heads[h] = cursor;
+	}
+	return cursor;
+}
 
 static void sca_post_clo_init(void)
 {
@@ -78,6 +116,9 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 	int nr_slots = hh->nr_slots;
 	const unsigned long *rip_area = (const unsigned long *)(database + hh->offset);
 	int i;
+	const struct hash_entry *he;
+	struct per_thread *pt;
+
 	for (i = 0; i < nr_slots; i++) {
 		if (rip_area[i] == 0)
 			VG_(tool_panic)("Corrupt database\n");
@@ -93,7 +134,72 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 		}
 		return EmWarn_NONE;
 	}
-//	VG_(printf)("Found database entry for RIP %llx (%d, %d)\n", vex_state->guest_RIP, i, h);
+
+	pt = NULL;
+	he = (const struct hash_entry *)(database + hh->offset + hh->nr_slots * 8);
+	for (i = 0; i < 16; i++) {
+		if (!(he->aliases[i] & 4)) {
+			unsigned long reg;
+			if (!pt)
+				pt = get_per_thread();
+			switch (i) {
+#define do_idx(idx, name)						\
+				case idx:				\
+					reg = vex_state->guest_ ## name; \
+					break;
+				do_idx(0, RAX)
+				do_idx(1, RCX)
+				do_idx(2, RDX)
+				do_idx(3, RBX)
+				do_idx(4, RSP)
+				do_idx(5, RBP)
+				do_idx(6, RSI)
+				do_idx(7, RDI)
+				do_idx(8, R8)
+				do_idx(9, R9)
+				do_idx(10, R10)
+				do_idx(11, R11)
+				do_idx(12, R12)
+				do_idx(13, R13)
+				do_idx(14, R14)
+				do_idx(15, R15)
+#undef do_idx
+			default:
+				VG_(tool_panic)("Badness");
+			}
+			if (reg >= vex_state->guest_RSP - 128 && reg < pt->frame_limit)
+				VG_(printf)("Register %d isn't supposed to point at the stack at %llx, but does (%lx vs (%llx,%lx))\n",
+					    i, vex_state->guest_RIP,
+					    reg,
+					    vex_state->guest_RSP - 128,
+					    pt->frame_limit);
+		}
+	}
+	//	VG_(printf)("Found database entry for RIP %llx (%d, %d)\n", vex_state->guest_RIP, i, h);
+	return EmWarn_NONE;
+}
+
+static VexEmWarn
+sca_call_cb(unsigned long rsp)
+{
+	struct per_thread *pt = get_per_thread();
+	pt->frame_limit = rsp;
+	if (pt->nr_stack_frames < 32 * 6)
+		pt->stack_escape_flags[pt->nr_stack_frames / 32] &= ~(1u << (pt->nr_stack_frames % 32));
+	pt->nr_stack_frames++;
+	return EmWarn_NONE;
+}
+
+static VexEmWarn
+sca_ret_cb(unsigned long rsp)
+{
+	struct per_thread *pt = get_per_thread();
+	pt->frame_limit = rsp;
+	if (pt->nr_stack_frames == 0)
+		VG_(printf)("Warning: thread %d returned from more functions than it called?\n",
+			    VG_(get_running_tid)());
+	else
+		pt->nr_stack_frames--;
 	return EmWarn_NONE;
 }
 
@@ -109,6 +215,7 @@ sca_instrument ( VgCallbackClosure* closure,
 	IRCallee *cee;
 	IRDirty *d;
 	IRStmt *stmt;
+
 	cee = mkIRCallee(0, "sca_instr", sca_instr_cb);
 	d = emptyIRDirty();
 	d->cee = cee;
@@ -126,10 +233,45 @@ sca_instrument ( VgCallbackClosure* closure,
 	d->fxState[0].nRepeats = 0;
 	d->fxState[0].repeatLen = 0;
 	stmt = IRStmt_Dirty(d);
-	for (i = 0; i < sbIn->stmts_used; i++) {
+	for (i = 0; i < sbIn->stmts_used && sbIn->stmts[i]->tag == Ist_NoOp; i++)
+		;
+	if (i >= sbIn->stmts_used) {
+		VG_(printf)("Huh? Block starts without an IMark?\n");
+		ppIRSB(sbIn);
+	}
+	for (; i < sbIn->stmts_used; i++) {
 		addStmtToIRSB(sbOut, sbIn->stmts[i]);
 		if (sbIn->stmts[i]->tag == Ist_IMark)
 			addStmtToIRSB(sbOut, stmt);
+	}
+	if (sbIn->jumpkind == Ijk_Call ||
+	    sbIn->jumpkind == Ijk_Ret) {
+		void *cb;
+		HChar *label;
+		IRTemp t;
+
+		if (sbIn->jumpkind == Ijk_Call) {
+			cb = sca_call_cb;
+			label = "sca_call_cb";
+		} else {
+			cb = sca_ret_cb;
+			label = "sca_ret_cb";
+		}
+		t = newIRTemp(sbOut->tyenv, Ity_I64);
+		addStmtToIRSB(
+			sbOut,
+			IRStmt_WrTmp(
+				t,
+				IRExpr_Get(OFFSET_amd64_RSP, Ity_I64)));
+		addStmtToIRSB(
+			sbOut,
+			IRStmt_Dirty(
+				unsafeIRDirty_0_N(
+					0,
+					label,
+					cb,
+					mkIRExprVec_1(
+						IRExpr_RdTmp(t)))));
 	}
 	return sbOut;
 }
