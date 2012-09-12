@@ -1544,6 +1544,27 @@ top:
 				}
 			}
 		}
+		/* And for Xor1. */
+		if (e->op == Iop_Xor1) {
+			__set_profiling(optimise_assoc_or1);
+			if (e->nr_arguments > 1 &&
+			    e->contents[0]->tag == Iex_Const) {
+				IRConst *c = ((IRExprConst *)e->contents[0])->con;
+				if (c->Ico.U1) {
+					if (e->nr_arguments == 2) {
+						res = IRExpr_Unop(Iop_Not1, e->contents[1]);
+					} else {
+						IRExprAssociative *a = (IRExprAssociative *)IRExpr_Associative(e);
+						purgeAssocArgument(a, 0);
+						res = IRExpr_Unop(Iop_Not1, a);
+					}
+					break;
+				} else {
+					progress = true;
+					purgeAssocArgument(e, 0);
+				}
+			}
+		}
 		/* And for Add */
 		if (e->op == Iop_Add64) {
 			if (e->nr_arguments > 1 &&
@@ -1685,7 +1706,8 @@ top:
 			plus_like = e->op >= Iop_Add8 && e->op <= Iop_Add64;
 			and_like = (e->op >= Iop_And8 && e->op <= Iop_And64) ||
 				e->op == Iop_And1;
-			xor_like = e->op >= Iop_Xor8 && e->op <= Iop_Xor64;
+			xor_like = (e->op >= Iop_Xor8 && e->op <= Iop_Xor64) ||
+				e->op == Iop_Xor1;
 			if (plus_like || and_like || xor_like) {
 				for (int it1 = 0;
 				     !p && it1 < e->nr_arguments;
@@ -1749,6 +1771,7 @@ top:
 								result = IRConst_U64(0);
 								break;
 							case Iop_And1:
+							case Iop_Xor1:
 								result = IRConst_U1(0);
 								break;
 							default:
@@ -1811,6 +1834,7 @@ top:
 				case Iop_And64:
 					res = IRExpr_Const(IRConst_U64(0xfffffffffffffffful));
 					break;
+				case Iop_Xor1:
 				case Iop_Or1:
 					res = IRExpr_Const(IRConst_U1(0));
 					break;
