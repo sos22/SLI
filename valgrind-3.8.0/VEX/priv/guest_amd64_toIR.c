@@ -19423,14 +19423,8 @@ Long dis_ESC_NONE (
       t2 = newTemp(Ity_I64);
       assign(t2, mkU64((Addr64)d64));
       make_redzone_AbiHint(vbi, t1, t2/*nia*/, "call-d32");
-      if (resteerOkFn( callback_opaque, (Addr64)d64) ) {
-         /* follow into the call target. */
-         dres->whatNext   = Dis_ResteerU;
-         dres->continueAt = d64;
-      } else {
-         jmp_lit(dres, Ijk_Call, d64);
-         vassert(dres->whatNext == Dis_StopHere);
-      }
+      jmp_lit(dres, Ijk_Call, d64);
+      vassert(dres->whatNext == Dis_StopHere);
       DIP("call 0x%llx\n",d64);
       return delta;
 
