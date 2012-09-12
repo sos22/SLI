@@ -794,13 +794,14 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result)
 }
 
 static bool
-exhaustive_satisfiable(IRExpr *e)
+exhaustive_satisfiable(IRExpr *e, bool print_all)
 {
 	NdChooser chooser;
 	do {
 		if (evalExpression(e, chooser, true)) {
 			sat_checker_counters.failed++;
-			return true;
+			if (!print_all)
+				return true;
 		}
 	} while (chooser.advance());
 	if (TIMEOUT)
@@ -855,7 +856,7 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 
 	/* Okay, that's about as far as we can push that.  Fall back
 	   to an exhaustive search. */
-	return exhaustive_satisfiable(norm3);
+	return exhaustive_satisfiable(norm3, false);
 }
 
 /* End of namespace */
