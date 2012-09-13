@@ -104,7 +104,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 		unexplored_instructions.pop_back();
 		if (visited.count(s.regs.rip()))
 			continue;
-		printf("Visiting %lx\n", s.regs.rip());
+		warning("Visiting %lx\n", s.regs.rip());
 		IRSB *irsb;
 		try {
 			irsb = as->getIRSBForAddress(ThreadRip::mk(1, VexRip::invent_vex_rip(s.regs.rip())), false);

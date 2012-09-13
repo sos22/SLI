@@ -915,7 +915,7 @@ EvalContext::smallStepEvalStateMachine(const MaiMap &decode,
 	}
 	case StateMachineState::Unreached:
 		/* Whoops... */
-		fprintf(_logfile, "Evaluating an unreachable state machine?\n");
+		warning("Evaluating an unreachable state machine?\n");
 		return ssr_failed;
 	}
 
@@ -983,7 +983,7 @@ EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &o
 		if (iec->con->Ico.U1) {
 			/* We just proved that the assumption is
 			 * definitely true. */
-			printf("Path assumption reduces to true?\n");
+			warning("Path assumption reduces to true?\n");
 			dbg_break("Path assumption reduces to true?\n");
 			assumption = e;
 			return tr_true;
@@ -1009,7 +1009,7 @@ EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &o
 			   assumption is definitely true, and
 			   therefore useless, and that @what is
 			   definitely false. */
-			printf("Path assumption is definitely true in way 2?\n");
+			warning("Path assumption is definitely true in way 2?\n");
 			dbg_break("Path assumption is definitely true in way 2?\n");
 			assumption = e;
 			return tr_false;
@@ -1958,7 +1958,7 @@ findRemoteMacroSections(const VexPtr<MaiMap, &ir_heap> &decode,
 		/* This is enforced by the suitability check at the
 		 * top of this function. */
 		if (!state.writer_failed && sectionStart) {
-			fprintf(_logfile, "Whoops... running store machine and then running load machine doesn't lead to goodness.\n");
+			warning("Whoops... running store machine and then running load machine doesn't lead to goodness.\n");
 			/* Give up, shouldn't ever happen. */
 			return false;
 		}

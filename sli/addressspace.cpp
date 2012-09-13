@@ -231,7 +231,7 @@ void AddressSpace::readMemory(unsigned long _start, unsigned size,
 			   hit this the program will definitely have
 			   accessed uninitialised stack memory, so
 			   it's definitely not a good thing. */
-			printf("Huh? Extended stack for a read?\n");
+			warning("Huh? Extended stack for a read?\n");
 			continue;
 		} else {
 			throw BadMemoryException(false, _start, size);

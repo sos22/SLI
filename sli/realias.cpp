@@ -477,7 +477,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 				   state due to phase ordering
 				   problems.  Just do something
 				   vaguely sensible. */
-				fprintf(_logfile, "%s:%s:%d: Use of initialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
+				warning("%s:%s:%d: Use of initialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
 				return PointerAliasingSet::nothing;
 			} else {
 				return content[iex->reg];

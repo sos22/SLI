@@ -294,7 +294,7 @@ optimise_condition_calculation(
 			IRExpr_Const(IRConst_U16(0)));
 		break;
 	default:
-		printf("Unknown CC op %lx\n", op);
+		warning("Unknown CC op %lx\n", op);
 		break;
 	}
 
@@ -322,7 +322,7 @@ optimise_condition_calculation(
 				sf,
 				of);
 		else
-			printf("CondL needs both sf and of; op %lx\n", op);
+			warning("CondL needs both sf and of; op %lx\n", op);
 		break;
 	case AMD64CondLE:
 		if (sf && of && zf)
@@ -334,13 +334,13 @@ optimise_condition_calculation(
 					of),
 				zf);
 		else
-			printf("CondLE needs sf, of, and zf; op %lx\n", op);
+			warning("CondLE needs sf, of, and zf; op %lx\n", op);
 		break;
 	default:
 		break;
 	}
 	if (!res)
-		printf("Cannot handle CC condition %ld, op %lx\n",
+		warning("Cannot handle CC condition %ld, op %lx\n",
 		       cond, op);
 	if (res && invert)
 		res = IRExpr_Unop(Iop_Not1, res);
@@ -2203,6 +2203,7 @@ top:
 				}
 				break;
 			default:
+				warning("cannot constant fold unop %d\n", e->op);
 				printf("Cannot constant fold unop %d (", e->op);
 				ppIROp(e->op, stdout);
 				printf(")\n");
@@ -2782,6 +2783,7 @@ top:
 						((IRExprConst *)r)->con->Ico.U32));
 				break;
 			default:
+				warning("cannot constant fold binop %d\n", e->op);
 				printf("Cannot constant fold binop %d (", e->op);
 				ppIROp(e->op, stdout);
 				printf(")\n");

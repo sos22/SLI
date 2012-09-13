@@ -1297,6 +1297,8 @@ char *flattenStringFragmentsMalloc(std::vector<const char *> fragments, const ch
 #define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
 #define DBG_PRINT(fmt, ...) do { printf(fmt, ## __VA_ARGS__ ); } while (0)
 
+void warning(const char *fmt, ...) __attribute__((__format__(__printf__, 1, 2)));
+
 void __fail(const char *file, unsigned line, const char *fmt, ...)
 	__attribute__((noreturn, __format__(__printf__, 3, 4)));
 #define fail(...) __fail(__FILE__, __LINE__, __VA_ARGS__)

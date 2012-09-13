@@ -16,6 +16,8 @@
 #include "timers.hpp"
 #include "profile.hpp"
 
+extern const char *__warning_tag;
+
 class DumpFix : public FixConsumer {
 public:
 	VexPtr<Oracle> &oracle;
@@ -90,6 +92,8 @@ consider_rip(const DynAnalysisRip &my_rip,
 {
 	__set_profiling(consider_rip);
 
+	__warning_tag = my_rip.name();
+
 	df.dr = my_rip;
 
 	LibVEX_maybe_gc(token);
@@ -124,7 +128,8 @@ consider_rip(const DynAnalysisRip &my_rip,
 	__timer_message_filter::reset();
 
 	fflush(NULL);
-		
+
+	__warning_tag = "<lost_tag>";
 }
 
 void startProfiling();

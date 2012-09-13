@@ -267,3 +267,42 @@ my_system(const char *arg1, ...)
 		errx(1, "%s died with signal %d", arg1, WTERMSIG(status));
 	errx(1, "unknown wait status %x from %s", status, arg1);
 }
+
+const char *__warning_tag = "<no_tag>";
+
+void
+warning(const char *fmt, ...)
+{
+	static int warnings = -1;
+	va_list args;
+	char *f1, *f2;
+
+	if (warnings < 0) {
+		warnings = open("warnings.txt", O_WRONLY | O_APPEND | O_CREAT, 0600);
+		if (warnings < 0)
+			err(1, "opening warnings.txt");
+	}
+	va_start(args, fmt);
+	if (vasprintf(&f1, fmt, args) < 0) {
+#define s "<failed to format warning message>\n"
+		write(warnings, s, sizeof(s) - 1);
+#undef s
+		va_end(args);
+		return;
+	}
+	va_end(args);
+	if (asprintf(&f2, "%s: %s", __warning_tag, f1) < 0) {
+#define s "<failed to get warning tag>\n"
+		write(warnings, s, sizeof(s) - 1);
+#undef s
+		write(warnings, f1, strlen(f1));
+		free(f1);
+		return;
+	}
+	write(warnings, f2, strlen(f2));
+	if (_logfile != stdout)
+		fprintf(stdout, "%s\n", f2);
+	fprintf(_logfile, "%s\n", f2);
+	free(f1);
+	free(f2);
+}

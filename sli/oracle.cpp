@@ -1144,9 +1144,7 @@ irexprAliasingClass(IRExpr *expr,
 	default:
 		break;
 	}
-	fprintf(_logfile, "Don't know how to compute aliasing sets for ");
-	ppIRExpr(expr, _logfile);
-	fprintf(_logfile, "\n");
+	warning("Don't know how to compute aliasing sets for %s\n", nameIRExpr(expr));
 	return PointerAliasingSet::anything;
 }
 
@@ -1270,7 +1268,7 @@ Oracle::findPreviousInstructions(std::vector<VexRip> &output,
 {
 	StaticRip sr(functionHeadForInstruction(StaticRip(rip)));
 	if (!sr.rip) {
-		fprintf(_logfile, "No function for %s\n", rip.name());
+		warning("No function for %s\n", rip.name());
 		return;
 	}
 	Function f(sr);
@@ -1310,7 +1308,7 @@ Oracle::findPreviousInstructions(std::vector<VexRip> &output,
 	if (!predecessors.count(StaticRip(rip))) {
 		/* This can happen if the information from the oracle
 		   is inconsistent. */
-		fprintf(_logfile, "Dijkstra failed in %s\n", __func__);
+		warning("Dijkstra failed in %s\n", __func__);
 		return;
 	}
 
@@ -2372,6 +2370,8 @@ impossible:
 	printf("Cannot do stack offset calculations in first instruction of: ");
 	ppIRSB(irsb, stdout);
 
+	warning("Whoops, screwed up stack offset calculation in %s\n", rip.name());
+
 	dbg_break("badness");
 
 impossible_clean:
@@ -2566,7 +2566,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				setAliasConfigOnEntryToInstruction(*it, new_config);
 			}
 		} else {
-			printf("No instruction %s?\n", it->name());
+			warning("No instruction %s?\n", it->name());
 		}
 	}
 }
@@ -3420,14 +3420,14 @@ Oracle::identifyLibraryCall(const VexRip &vr)
 
 	name = ms->elfData->lookupPltSymbol(idx);
 	if (!name) {
-		printf("Warning: don't know what library function to call at %s\n",
-		       vr.name());
+		warning("Warning: don't know what library function to call at %s\n",
+			vr.name());
 		return LibraryFunctionTemplate::none;
 	}
 	LibraryFunctionType res = LibraryFunctionTemplate::parse(name);
 	if (res == LibraryFunctionTemplate::none)
-		printf("Warning: Ignoring call to %s at %s\n",
-		       name, vr.name());
+		warning("Warning: Ignoring call to %s at %s\n",
+			name, vr.name());
 	return res;
 }
 

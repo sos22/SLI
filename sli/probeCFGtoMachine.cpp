@@ -1219,7 +1219,7 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 					NULL)),
 			cursor);
 	} else {
-		fprintf(_logfile, "Failed to get RSP canonicalisation delta\n");
+		warning("Failed to get RSP canonicalisation delta\n");
 	}
 
 	/* A frame is private if there's no possibility that a LD
