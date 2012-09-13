@@ -65,6 +65,8 @@ struct per_thread {
 	unsigned nr_stack_frames;
 	unsigned stack_escape_flags[6];
 	unsigned long frame_limit;
+	unsigned long rip;
+	const struct hash_entry *hash_entry;
 };
 
 #define THREAD_HASH_HEADS 31
@@ -117,8 +119,10 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 	const unsigned long *rip_area = (const unsigned long *)(database + hh->offset);
 	int i;
 	const struct hash_entry *he;
-	struct per_thread *pt;
+	struct per_thread *const pt = get_per_thread();
 
+	pt->hash_entry = NULL;
+	pt->rip = vex_state->guest_RIP;
 	for (i = 0; i < nr_slots; i++) {
 		if (rip_area[i] == 0)
 			VG_(tool_panic)("Corrupt database\n");
@@ -135,13 +139,10 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 		return EmWarn_NONE;
 	}
 
-	pt = NULL;
 	he = (const struct hash_entry *)(database + hh->offset + hh->nr_slots * 8 + i * (sizeof(struct hash_entry)));
 	for (i = 0; i < 16; i++) {
 		if (!(he->aliases[i] & 4)) {
 			unsigned long reg;
-			if (!pt)
-				pt = get_per_thread();
 			switch (i) {
 #define do_idx(idx, name)						\
 				case idx:				\
@@ -176,15 +177,31 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 		}
 	}
 	if (!he->stackHasLeaked) {
-		if (!pt)
-			pt = get_per_thread();
 		if (pt->nr_stack_frames <= 32 * 6 &&
 		    pt->nr_stack_frames > 0 &&
 		    pt->stack_escape_flags[(pt->nr_stack_frames - 1)/32] & (1u << ((pt->nr_stack_frames - 1) % 32)))
 			VG_(printf)("Failed: stack was supposed to be private at %llx, but was found to be public\n",
 				    vex_state->guest_RIP);
 	}
-	//	VG_(printf)("Found database entry for RIP %llx (%d, %d)\n", vex_state->guest_RIP, i, h);
+	pt->hash_entry = he;
+	return EmWarn_NONE;
+}
+
+static VexEmWarn
+sca_deref_cb(unsigned long rsp, unsigned long value, unsigned long reg)
+{
+	struct per_thread *pt = get_per_thread();
+	if (pt->hash_entry == NULL)
+		return EmWarn_NONE;
+	if (value >= rsp - 128 && value < pt->frame_limit)
+		return EmWarn_NONE;
+	if (reg > OFFSET_amd64_R15 || reg < OFFSET_amd64_RAX) {
+		VG_(printf)("sca_deref_cb called on bad reg %lx\n", reg);
+		VG_(tool_panic)("Dead");
+	}
+	if (!(pt->hash_entry->aliases[ (reg - OFFSET_amd64_RAX) / 8] & 2))
+		VG_(printf)("Failed: deref register %lx (-> %lx) which isn't supposed to be a pointer (stack %lx, %lx) at %lx\n",
+			    reg, value, rsp - 128, pt->frame_limit, pt->rip);
 	return EmWarn_NONE;
 }
 
@@ -225,6 +242,183 @@ sca_store_cb(unsigned long rsp, unsigned long ptr, unsigned long data)
 	return EmWarn_NONE;
 }
 
+struct deref_collection {
+	int nr_tmps;
+	IRTemp tmp[8];
+	int nr_regs;
+	unsigned regs[2];
+};
+
+static void
+dc_add_tmp(struct deref_collection *dc, IRTemp tmp)
+{
+	int i;
+	for (i = 0; i < dc->nr_tmps; i++)
+		if (dc->tmp[i] == tmp)
+			return;
+	if (dc->nr_tmps == 8)
+		VG_(tool_panic)("Out of tmp slots in deref collection\n");
+	dc->tmp[dc->nr_tmps] = tmp;
+	dc->nr_tmps++;
+}
+
+static void
+dc_add_reg(struct deref_collection *dc, unsigned offset)
+{
+	int i;
+	if (offset < OFFSET_amd64_RAX || offset > OFFSET_amd64_R15)
+		return;
+	for (i = 0; i < dc->nr_regs; i++)
+		if (dc->regs[i] == offset)
+			return;
+	if (dc->nr_regs == 8)
+		VG_(tool_panic)("Out of reg slots in deref collection\n");
+	dc->regs[dc->nr_regs] = offset;
+	dc->nr_regs++;
+}
+
+static void
+processDerefPtr(struct deref_collection *dc, IRExpr *derefPtr)
+{
+	if (derefPtr->tag == Iex_Const)
+		return;
+	if (derefPtr->tag != Iex_RdTmp) {
+		ppIRExpr(derefPtr);
+		VG_(tool_panic)("Bad derefPtr\n");
+	}
+	dc_add_tmp(dc, derefPtr->Iex.RdTmp.tmp);
+}
+
+static void
+processLoadExpr(struct deref_collection *dc, IRExpr *e)
+{
+	int j;
+	switch (e->tag) {
+	case Iex_Binder:
+		return;
+	case Iex_Get:
+		return;
+	case Iex_GetI:
+		processLoadExpr(dc, e->Iex.GetI.ix);
+		return;
+	case Iex_RdTmp:
+		return;
+	case Iex_Qop:
+		processLoadExpr(dc, e->Iex.Qop.details->arg4);
+	case Iex_Triop:
+		processLoadExpr(dc, e->Iex.Qop.details->arg1);
+		processLoadExpr(dc, e->Iex.Qop.details->arg2);
+		processLoadExpr(dc, e->Iex.Qop.details->arg3);
+		return;
+	case Iex_Binop:
+		processLoadExpr(dc, e->Iex.Binop.arg2);
+	case Iex_Unop:
+		processLoadExpr(dc, e->Iex.Binop.arg1);
+		return;
+	case Iex_Load:
+		processDerefPtr(dc, e->Iex.Load.addr);
+		processLoadExpr(dc, e->Iex.Load.addr);
+		return;
+	case Iex_Const:
+		return;
+	case Iex_CCall:
+		for (j = 0; e->Iex.CCall.args[j]; j++)
+			processLoadExpr(dc, e->Iex.CCall.args[j]);
+		return;
+	case Iex_Mux0X:
+		processLoadExpr(dc, e->Iex.Mux0X.cond);
+		processLoadExpr(dc, e->Iex.Mux0X.expr0);
+		processLoadExpr(dc, e->Iex.Mux0X.exprX);
+		return;
+	}
+	VG_(tool_panic)("badness");
+}
+
+static void
+addDependency(struct deref_collection *dc, IRExpr *iex, IRSB *sb)
+{
+	switch (iex->tag) {
+	case Iex_Get:
+		dc_add_reg(dc, iex->Iex.Get.offset);
+		return;
+	case Iex_RdTmp:
+		dc_add_tmp(dc, iex->Iex.RdTmp.tmp);
+		return;
+	case Iex_Const:
+		return;
+	case Iex_Binop:
+		switch (iex->Iex.Binop.op) {
+		case Iop_Add64:
+			addDependency(dc, iex->Iex.Binop.arg1, sb);
+			addDependency(dc, iex->Iex.Binop.arg2, sb);
+			return;
+		case Iop_Sub64:
+			addDependency(dc, iex->Iex.Binop.arg1, sb);
+			return;
+		case Iop_Shl64:
+		case Iop_Sar64:
+			return;
+		default:
+			break;
+		}
+		break;
+	}
+	ppIRExpr(iex);
+	ppIRSB(sb);
+	VG_(tool_panic)("Missing case in addDependency!");
+}
+
+static void
+rewriteDcForStatement(struct deref_collection *dc, IRStmt *stmt, IRSB *sb)
+{
+	int i;
+
+	switch (stmt->tag) {
+	case Ist_NoOp:
+		break;
+	case Ist_IMark:
+		break;
+	case Ist_AbiHint:
+		break;
+	case Ist_Put:
+		for (i = 0; i < dc->nr_regs; i++)
+			if (dc->regs[i] == stmt->Ist.Put.offset)
+				VG_(tool_panic)("Overly complex data flow in rewriteDcForStatement\n");
+		break;
+	case Ist_PutI:
+		break;
+	case Ist_WrTmp:
+		for (i = 0; i < dc->nr_tmps; ) {
+			if (dc->tmp[i] == stmt->Ist.WrTmp.tmp) {
+				VG_(memmove)(dc->tmp + i, dc->tmp + i + 1, sizeof(IRTemp) * (dc->nr_tmps - i - 1));
+				dc->nr_tmps--;
+				addDependency(dc, stmt->Ist.WrTmp.data, sb);
+			} else {
+				i++;
+			}
+		}
+		break;
+	case Ist_Store:
+		break;
+	case Ist_CAS:
+		break;
+	case Ist_LLSC:
+		break;
+	case Ist_Dirty:
+		for (i = 0; i < dc->nr_tmps; i++) {
+			if (dc->tmp[i] == stmt->Ist.WrTmp.tmp) {
+				ppIRStmt(stmt);
+				VG_(tool_panic)("DC depends on dirty call!\n");
+			}
+		}
+		break;
+	case Ist_MBE:
+		break;
+	case Ist_Exit:
+		break;
+	}
+}
+
 static IRSB *
 sca_instrument ( VgCallbackClosure* closure,
 		 IRSB* sbIn,
@@ -257,48 +451,141 @@ sca_instrument ( VgCallbackClosure* closure,
 	stmt = IRStmt_Dirty(d);
 	for (i = 0; i < sbIn->stmts_used && sbIn->stmts[i]->tag == Ist_NoOp; i++)
 		;
+	for (i = 0; i < sbIn->stmts_used && sbIn->stmts[i]->tag != Ist_IMark; i++)
+		addStmtToIRSB(sbOut, sbIn->stmts[i]);
 	if (i >= sbIn->stmts_used) {
 		VG_(printf)("Huh? Block starts without an IMark?\n");
 		ppIRSB(sbIn);
 	}
-	for (; i < sbIn->stmts_used; i++) {
+	while (i < sbIn->stmts_used) {
+		if (sbIn->stmts[i]->tag != Ist_IMark) {
+			ppIRSB(sbIn);
+			VG_(printf)("i = %d\n", i);
+			VG_(tool_panic)("Dead99");
+		}
 		addStmtToIRSB(sbOut, sbIn->stmts[i]);
-		if (sbIn->stmts[i]->tag == Ist_IMark) {
-			addStmtToIRSB(sbOut, stmt);
-		} else if (sbIn->stmts[i]->tag == Ist_Store &&
-			 typeOfIRExpr(sbIn->tyenv, sbIn->stmts[i]->Ist.Store.data) == Ity_I64) {
-			IRTemp rsp;
-			IRTemp ptr;
-			IRTemp data;
-			rsp = newIRTemp(sbOut->tyenv, Ity_I64);
-			ptr = newIRTemp(sbOut->tyenv, Ity_I64);
-			data = newIRTemp(sbOut->tyenv, Ity_I64);
-			addStmtToIRSB(
-				sbOut,
-				IRStmt_WrTmp(
-					ptr,
-					sbIn->stmts[i]->Ist.Store.addr));
-			addStmtToIRSB(
-				sbOut,
-				IRStmt_WrTmp(
-					data,
-					sbIn->stmts[i]->Ist.Store.data));
-			addStmtToIRSB(
-				sbOut,
-				IRStmt_WrTmp(
-					rsp,
-					IRExpr_Get(OFFSET_amd64_RSP, Ity_I64)));
-			addStmtToIRSB(
-				sbOut,
-				IRStmt_Dirty(
-					unsafeIRDirty_0_N(
-						0,
-						"sca_store",
-						sca_store_cb,
-						mkIRExprVec_3(
-							IRExpr_RdTmp(rsp),
-							IRExpr_RdTmp(ptr),
-							IRExpr_RdTmp(data)))));
+		addStmtToIRSB(sbOut, stmt);
+		i++;
+		while (i < sbIn->stmts_used && sbIn->stmts[i]->tag != Ist_IMark) {
+			IRTemp rsp = Ity_INVALID;
+			int j;
+			struct deref_collection dc;
+
+			VG_(memset)(&dc, 0, sizeof(dc));
+
+			addStmtToIRSB(sbOut, sbIn->stmts[i]);
+
+			/* Collect up all the derefed temporaries. */
+			switch (sbIn->stmts[i]->tag) {
+			case Ist_NoOp:
+				break;
+			case Ist_IMark:
+				break;
+			case Ist_AbiHint:
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.AbiHint.base);
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.AbiHint.nia);
+				break;
+			case Ist_Put:
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Put.data);
+				break;
+			case Ist_PutI:
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.PutI.details->ix);
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.PutI.details->data);
+				break;
+			case Ist_WrTmp:
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.WrTmp.data);
+				break;
+			case Ist_Store:
+				processDerefPtr(&dc, sbIn->stmts[i]->Ist.Store.addr);
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Store.addr);
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Store.data);
+				break;
+			case Ist_CAS:
+				processDerefPtr(&dc, sbIn->stmts[i]->Ist.CAS.details->addr);
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.CAS.details->expdLo);
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.CAS.details->dataLo);
+				break;
+			case Ist_LLSC:
+				VG_(tool_panic)("LLSC on amd64?");
+			case Ist_Dirty:
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Dirty.details->guard);
+				for (j = 0; sbIn->stmts[i]->Ist.Dirty.details->args[j]; j++)
+					processLoadExpr(&dc, sbIn->stmts[i]->Ist.Dirty.details->args[j]);
+				break;
+			case Ist_MBE:
+				break;
+			case Ist_Exit:
+				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Exit.guard);
+				break;
+			}
+
+			/* Now walk backwards from here to translate
+			 * the derefed temporaries into derefed
+			 * registers. */
+			for (j = i - 1; sbIn->stmts[j]->tag != Ist_IMark && dc.nr_tmps != 0; j--)
+				rewriteDcForStatement(&dc, sbIn->stmts[j], sbIn);
+			if (dc.nr_tmps != 0) {
+				ppIRSB(sbIn);
+				VG_(printf)("DC:\n");
+				for (j = 0; j < dc.nr_tmps; j++) {
+					VG_(printf)("\t");
+					ppIRTemp(dc.tmp[j]);
+					VG_(printf)("\n");
+				}
+				VG_(printf)("i = %d\n", i);
+				VG_(tool_panic)("Failed to reduce all temporaries!\n");
+			}
+			for (j = 0; j < dc.nr_regs; j++) {
+				IRTemp t;
+				if (rsp == Ity_INVALID) {
+					rsp = newIRTemp(sbOut->tyenv, Ity_I64);
+					addStmtToIRSB(
+						sbOut,
+						IRStmt_WrTmp(
+							rsp,
+							IRExpr_Get(OFFSET_amd64_RSP, Ity_I64)));
+				}
+				t = newIRTemp(sbOut->tyenv, Ity_I64);
+				addStmtToIRSB(
+					sbOut,
+					IRStmt_WrTmp(t, IRExpr_Get(dc.regs[j], Ity_I64)));
+				addStmtToIRSB(
+					sbOut,
+					IRStmt_Dirty(
+						unsafeIRDirty_0_N(
+							0,
+							"sca_deref",
+							sca_deref_cb,
+							mkIRExprVec_3(
+								IRExpr_RdTmp(rsp),
+								IRExpr_RdTmp(t),
+								IRExpr_Const(
+									IRConst_U64(dc.regs[j]))))));
+			}
+			if (sbIn->stmts[i]->tag == Ist_Store &&
+			    typeOfIRExpr(sbIn->tyenv, sbIn->stmts[i]->Ist.Store.data) == Ity_I64) {
+				if (rsp == Ity_INVALID) {
+					rsp = newIRTemp(sbOut->tyenv, Ity_I64);
+					addStmtToIRSB(
+						sbOut,
+						IRStmt_WrTmp(
+							rsp,
+							IRExpr_Get(OFFSET_amd64_RSP, Ity_I64)));
+				}
+				addStmtToIRSB(
+					sbOut,
+					IRStmt_Dirty(
+						unsafeIRDirty_0_N(
+							0,
+							"sca_store",
+							sca_store_cb,
+							mkIRExprVec_3(
+								IRExpr_RdTmp(rsp),
+								sbIn->stmts[i]->Ist.Store.addr,
+								sbIn->stmts[i]->Ist.Store.data))));
+			}
+
+			i++;
 		}
 	}
 	if (sbIn->jumpkind == Ijk_Call ||
