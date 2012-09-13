@@ -266,7 +266,7 @@ static void
 dc_add_reg(struct deref_collection *dc, unsigned offset)
 {
 	int i;
-	if (offset < OFFSET_amd64_RAX || offset > OFFSET_amd64_R15)
+	if (offset < OFFSET_amd64_RAX || offset > OFFSET_amd64_R15 || offset == OFFSET_amd64_RSP)
 		return;
 	for (i = 0; i < dc->nr_regs; i++)
 		if (dc->regs[i] == offset)
@@ -345,10 +345,12 @@ addDependency(struct deref_collection *dc, IRExpr *iex, IRSB *sb)
 		dc_add_tmp(dc, iex->Iex.RdTmp.tmp);
 		return;
 	case Iex_Const:
+	case Iex_Load:
 		return;
 	case Iex_Binop:
 		switch (iex->Iex.Binop.op) {
 		case Iop_Add64:
+		case Iop_And64:
 			addDependency(dc, iex->Iex.Binop.arg1, sb);
 			addDependency(dc, iex->Iex.Binop.arg2, sb);
 			return;
@@ -357,11 +359,24 @@ addDependency(struct deref_collection *dc, IRExpr *iex, IRSB *sb)
 			return;
 		case Iop_Shl64:
 		case Iop_Sar64:
+		case Iop_Mul64:
 			return;
 		default:
 			break;
 		}
 		break;
+	case Iex_Unop:
+		switch (iex->Iex.Unop.op) {
+		case Iop_32Uto64:
+			return;
+		default:
+			break;
+		}
+		break;
+	case Iex_Mux0X:
+		addDependency(dc, iex->Iex.Mux0X.expr0, sb);
+		addDependency(dc, iex->Iex.Mux0X.exprX, sb);
+		return;
 	}
 	ppIRExpr(iex);
 	ppIRSB(sb);
@@ -522,7 +537,7 @@ sca_instrument ( VgCallbackClosure* closure,
 			/* Now walk backwards from here to translate
 			 * the derefed temporaries into derefed
 			 * registers. */
-			for (j = i - 1; sbIn->stmts[j]->tag != Ist_IMark && dc.nr_tmps != 0; j--)
+			for (j = i - 1; j >= 0 && dc.nr_tmps != 0; j--)
 				rewriteDcForStatement(&dc, sbIn->stmts[j], sbIn);
 			if (dc.nr_tmps != 0) {
 				ppIRSB(sbIn);
