@@ -2410,7 +2410,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 						      std::vector<StaticRip> *changed,
 						      bool *done_something)
 {
-	const AllowableOptimisations &opt(AllowableOptimisations::defaultOptimisations);
+	const AllowableOptimisations opt(AllowableOptimisations::defaultOptimisations.setAddressSpace(as));
 	RegisterAliasingConfiguration config;
 	config.addConfig(STATIC_THREAD, aliasConfigOnEntryToInstruction(rip));
 	ThreadRegisterAliasingConfiguration &tconfig(config.content[0].second);
