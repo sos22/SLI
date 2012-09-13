@@ -2,6 +2,8 @@
 #include <asm/unistd.h>
 #include <sys/time.h>
 
+#include "sli.h"
+
 #include "libvex.h"
 #include "libvex_ir.h"
 #include "libvex_emwarn.h"
@@ -10,6 +12,8 @@
 #include "guest_generic_x87.h"
 #include "guest_amd64_defs.h"
 #include "main_util.h"
+#include "offline_analysis.hpp"
+#include "allowable_optimisations.hpp"
 
 #define FOOTSTEP_REGS_ONLY
 #include "ppres.h"
@@ -1485,6 +1489,198 @@ DecodeCache::search(const ThreadRip &tr)
 
 static VexPtr<WeakRef<DecodeCache, &ir_heap>, &ir_heap> decode_cache;
 
+/* Do some very basic optimisations directly on the IRSB, to keep
+   everything else a bit simpler.  This relies on the fact that IRSBs
+   are single-entry. */
+static void
+optimiseIRSB(IRSB *irsb)
+{
+	/* First, basic copy propagation. */
+	std::map<threadAndRegister, IRExpr *> tmps;
+	struct : public IRExprTransformer {
+		std::map<threadAndRegister, IRExpr *> *tmps;
+		IRExpr *transformIex(IRExprGet *what) {
+			auto it = tmps->find(((IRExprGet *)what)->reg);
+			if (it == tmps->end() || what->type() > it->second->type())
+				return what;
+			else
+				return coerceTypes(what->type(), it->second);
+		}
+		void operator()(IRExpr **k) {
+			if (*k)
+				*k = doit(*k);
+		}
+	} useTmps;
+	useTmps.tmps = &tmps;
+	struct {
+		struct mentionsRegister : public IRExprTransformer {
+			const threadAndRegister &tr;
+			mentionsRegister(const threadAndRegister &_tr)
+				: tr(_tr)
+			{}
+			IRExpr *transformIex(IRExprGet *ieg) {
+				if (ieg->reg == tr)
+					abortTransform();
+				return ieg;
+			}
+			bool operator()(IRExpr *a) {
+				aborted = false;
+				doit(a);
+				return aborted;
+			}
+		};
+		std::map<threadAndRegister, IRExpr *> *tmps;
+		void operator()(const threadAndRegister &tr) {
+			mentionsRegister mr(tr);
+			for (auto it = tmps->begin(); it != tmps->end(); ) {
+				if (mr(it->second))
+					tmps->erase(it++);
+				else
+					it++;
+			}
+		}
+	} invalidateTmp = {&tmps};
+	for (int i = 0; i < irsb->stmts_used; i++) {
+		IRStmt *stmt = irsb->stmts[i];
+		switch (stmt->tag) {
+		case Ist_NoOp:
+			break;
+		case Ist_IMark:
+			break;
+		case Ist_AbiHint:
+			useTmps(&((IRStmtAbiHint *)stmt)->base);
+			useTmps(&((IRStmtAbiHint *)stmt)->nia);
+			break;
+		case Ist_Put: {
+			IRStmtPut *p = (IRStmtPut *)stmt;
+			useTmps(&p->data);
+			tmps[p->target] = p->data;
+			invalidateTmp(p->target);
+			break;
+		}
+		case Ist_PutI:
+			useTmps(&((IRStmtPutI *)stmt)->ix);
+			useTmps(&((IRStmtPutI *)stmt)->data);
+			break;
+		case Ist_Store:
+			useTmps(&((IRStmtStore *)stmt)->addr);
+			useTmps(&((IRStmtStore *)stmt)->data);
+			break;
+		case Ist_CAS:
+			useTmps(&((IRStmtCAS *)stmt)->details->addr);
+			useTmps(&((IRStmtCAS *)stmt)->details->expdLo);
+			useTmps(&((IRStmtCAS *)stmt)->details->dataLo);
+			invalidateTmp( ((IRStmtCAS *)stmt)->details->oldLo);
+			break;
+		case Ist_Dirty: {
+			IRStmtDirty *d = (IRStmtDirty *)stmt;
+			useTmps(&d->details->guard);
+			useTmps(&d->details->mAddr);
+			for (int i = 0; d->details->args[i]; i++)
+				useTmps(&d->details->args[i]);
+			invalidateTmp(d->details->tmp);
+			break;
+		}
+		case Ist_MBE:
+			break;
+		case Ist_Exit:
+			useTmps(&((IRStmtExit *)stmt)->guard);
+			break;
+		case Ist_StartAtomic:
+			break;
+		case Ist_EndAtomic:
+			break;
+		}
+	}
+
+	/* Now do deadcode and local IRExpr optimisation. */
+	IRStmt *noop = NULL;
+	std::set<threadAndRegister> neededRegs;
+	struct : public IRExprTransformer {
+		std::set<threadAndRegister> *neededRegs;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			neededRegs->insert(ieg->reg);
+			return ieg;
+		}
+		void operator()(IRExpr **i) {
+			if (*i) {
+				*i = simplifyIRExpr(*i, AllowableOptimisations::defaultOptimisations);
+				doit(*i);
+			}
+		}
+	} useExpr;
+	useExpr.neededRegs = &neededRegs;
+	for (int i = irsb->stmts_used - 1; i >= 0; i--) {
+		IRStmt *stmt = irsb->stmts[i];
+		switch (stmt->tag) {
+		case Ist_NoOp:
+			break;
+		case Ist_IMark:
+			break;
+		case Ist_AbiHint:
+			useExpr(&((IRStmtAbiHint *)stmt)->base);
+			useExpr(&((IRStmtAbiHint *)stmt)->nia);
+			break;
+		case Ist_Put: {
+			IRStmtPut *p = (IRStmtPut *)stmt;
+			if (p->target.isTemp() && !neededRegs.count(p->target)) {
+				if (noop == NULL)
+					noop = IRStmt_NoOp();
+				irsb->stmts[i] = noop;
+			} else {
+				neededRegs.erase(p->target);
+				useExpr(&p->data);
+			}
+			break;
+		}
+		case Ist_PutI:
+			useExpr(&((IRStmtPutI *)stmt)->ix);
+			useExpr(&((IRStmtPutI *)stmt)->data);
+			break;
+		case Ist_Store:
+			useExpr(&((IRStmtStore *)stmt)->addr);
+			useExpr(&((IRStmtStore *)stmt)->data);
+			break;
+		case Ist_CAS:
+			neededRegs.erase(((IRStmtCAS *)stmt)->details->oldLo);
+			useExpr(&((IRStmtCAS *)stmt)->details->addr);
+			useExpr(&((IRStmtCAS *)stmt)->details->expdLo);
+			useExpr(&((IRStmtCAS *)stmt)->details->dataLo);
+			break;
+		case Ist_Dirty: {
+			IRStmtDirty *d = (IRStmtDirty *)stmt;
+			neededRegs.erase(d->details->tmp);
+			useExpr(&d->details->guard);
+			useExpr(&d->details->mAddr);
+			for (int i = 0; d->details->args[i]; i++)
+				useExpr(&d->details->args[i]);
+			break;
+		}
+		case Ist_MBE:
+			break;
+		case Ist_Exit:
+			useExpr(&((IRStmtExit *)stmt)->guard);
+			break;
+		case Ist_StartAtomic:
+			break;
+		case Ist_EndAtomic:
+			break;
+		}
+	}
+
+	/* And now kill off any noop statements. */
+	int in = 0;
+	int out = 0;
+	while (in < irsb->stmts_used) {
+		if (irsb->stmts[in]->tag != Ist_NoOp) {
+			irsb->stmts[out] = irsb->stmts[in];
+			out++;
+		}
+		in++;
+	}
+	irsb->stmts_used = out;
+}
+
 IRSB *
 AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 {
@@ -1529,6 +1725,8 @@ AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 			throw InstructionDecodeFailedException();
 
 		irsb = instrument_func(tid, NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
+
+		optimiseIRSB(irsb);
 
 		*cacheSlot = irsb;
 	}
