@@ -171,6 +171,10 @@ Oracle::ThreadRegisterAliasingConfiguration::prettyPrint(FILE *f) const
 {
        for (int i = 0; i < NR_REGS; i++)
                fprintf(f, "\t%8d: %s\n", i, v[i].name());
+       if (stackHasLeaked)
+	       fprintf(f, "\tStack escaped\n");
+       else
+	       fprintf(f, "\tStack not escaped\n");
 }
 
 void
