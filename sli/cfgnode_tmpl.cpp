@@ -55,7 +55,7 @@ CfgNodeForRip(const CfgLabel &label,
 	      const VexRip &vr,
 	      CfgSuccMap<t, VexRip> &succMap)
 {
-	IRSB *irsb = oracle->getIRSBForRip(vr);
+	IRSB *irsb = oracle->getIRSBForRip(vr, true);
 	if (!irsb)
 		return NULL;
 	_CFGNode<t> *work = new _CFGNode<t>(vr, label);

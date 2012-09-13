@@ -107,7 +107,7 @@ return_address(RegisterSet &regs, AddressSpace *as, unsigned long &return_rsp)
 		printf("Visiting %lx\n", s.regs.rip());
 		IRSB *irsb;
 		try {
-			irsb = as->getIRSBForAddress(ThreadRip::mk(1, VexRip::invent_vex_rip(s.regs.rip())));
+			irsb = as->getIRSBForAddress(ThreadRip::mk(1, VexRip::invent_vex_rip(s.regs.rip())), false);
 		} catch (BadMemoryException &x) {
 			/* Okay, that didn't work.  Guess we don't
 			   want to go down here... */
@@ -286,7 +286,7 @@ findDominators(const ripType &functionHead,
 		remainingToExplore.pop_back();
 		if (instrs.count(rip))
 			continue;
-		IRSB *irsb = Oracle::getIRSBForRip(as, rip);
+		IRSB *irsb = Oracle::getIRSBForRip(as, rip, false);
 		assert(irsb);
 		assert(irsb->stmts[0]->tag == Ist_IMark);
 		for (int idx = 1; idx < irsb->stmts_used; idx++) {

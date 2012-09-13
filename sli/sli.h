@@ -1144,7 +1144,7 @@ public:
 private:
 	bool extendStack(unsigned long ptr, unsigned long rsp);
 public:
-	IRSB *getIRSBForAddress(const ThreadRip &rip);
+	IRSB *getIRSBForAddress(const ThreadRip &rip, bool singleInstr);
 
 	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);

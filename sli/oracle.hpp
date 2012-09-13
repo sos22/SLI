@@ -289,9 +289,9 @@ public:
 					   const Mapping &mapping,
 					   unsigned long offset);
 
-	static IRSB *getIRSBForRip(AddressSpace *as, const StaticRip &sr);
-	static IRSB *getIRSBForRip(AddressSpace *as, const VexRip &sr);
-	IRSB *getIRSBForRip(const VexRip &vr);
+	static IRSB *getIRSBForRip(AddressSpace *as, const StaticRip &sr, bool singleInstr);
+	static IRSB *getIRSBForRip(AddressSpace *as, const VexRip &sr, bool singleInstr);
+	IRSB *getIRSBForRip(const VexRip &vr, bool singleInstr);
 
 private:
 

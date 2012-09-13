@@ -1682,7 +1682,7 @@ optimiseIRSB(IRSB *irsb)
 }
 
 IRSB *
-AddressSpace::getIRSBForAddress(const ThreadRip &tr)
+AddressSpace::getIRSBForAddress(const ThreadRip &tr, bool singleInstr)
 {
 	unsigned tid = tr.thread;
 
@@ -1720,7 +1720,8 @@ AddressSpace::getIRSBForAddress(const ThreadRip &tr)
 				&archinfo_guest,
 				&abiinfo_both,
 				False, /* do_self_check */
-				NULL);
+				NULL,
+				singleInstr);
 		if (!irsb)
 			throw InstructionDecodeFailedException();
 
@@ -1763,7 +1764,7 @@ Thread::translateNextBlock(VexPtr<Thread > &ths,
 	unsigned long _rip = rip;
 	LibVEX_maybe_gc(t);
 
-	IRSB *irsb = addrSpace->getIRSBForAddress(ThreadRip(ths->tid._tid(), VexRip::invent_vex_rip(_rip)));
+	IRSB *irsb = addrSpace->getIRSBForAddress(ThreadRip(ths->tid._tid(), VexRip::invent_vex_rip(_rip)), false);
 
 	ths->temporaries.setSize(irsb->tyenv->types_used);
 

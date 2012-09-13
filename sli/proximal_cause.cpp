@@ -17,7 +17,7 @@ getProximalCause(MachineState *ms,
 {
 	IRSB *irsb;
 	try {
-		irsb = ms->addressSpace->getIRSBForAddress(ThreadRip(tid, rip));
+		irsb = ms->addressSpace->getIRSBForAddress(ThreadRip(tid, rip), true);
 	} catch (BadMemoryException &e) {
 		/* If we can't decode the block then we assume the
 		   problem was an instruction fetch fault, and produce

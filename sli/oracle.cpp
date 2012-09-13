@@ -81,25 +81,25 @@ Oracle::LivenessSet Oracle::LivenessSet::argRegisters(
 	);
 
 IRSB *
-Oracle::getIRSBForRip(AddressSpace *as, const StaticRip &sr)
+Oracle::getIRSBForRip(AddressSpace *as, const StaticRip &sr, bool singleInstr)
 {
-	return getIRSBForRip(as, VexRip::invent_vex_rip(sr.rip));
+	return getIRSBForRip(as, VexRip::invent_vex_rip(sr.rip), singleInstr);
 }
 
 IRSB *
-Oracle::getIRSBForRip(AddressSpace *as, const VexRip &sr)
+Oracle::getIRSBForRip(AddressSpace *as, const VexRip &sr, bool singleInstr)
 {
 	try {
-		return as->getIRSBForAddress(ThreadRip::mk(STATIC_THREAD, sr));
+		return as->getIRSBForAddress(ThreadRip::mk(STATIC_THREAD, sr), singleInstr);
 	} catch (BadMemoryException e) {
 		return NULL;
 	}
 }
 
 IRSB *
-Oracle::getIRSBForRip(const VexRip &vr)
+Oracle::getIRSBForRip(const VexRip &vr, bool singleInstr)
 {
-	return getIRSBForRip(ms->addressSpace, vr);
+	return getIRSBForRip(ms->addressSpace, vr, singleInstr);
 }
 
 Oracle::LivenessSet
@@ -183,7 +183,7 @@ Oracle::findPreviousInstructions(std::vector<VexRip> &out)
 static unsigned
 getInstructionSize(AddressSpace *as, const StaticRip &rip)
 {
-	IRSB *irsb = Oracle::getIRSBForRip(as, rip);
+	IRSB *irsb = Oracle::getIRSBForRip(as, rip, true);
 	if (!irsb)
 		return 0;
 	assert(irsb->stmts[0]->tag == Ist_IMark);
@@ -697,7 +697,7 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 			      gc_pair_VexRip_set_t *callees)
 {
 	__set_profiling(findInstrSuccessorsAndCallees);
-	IRSB *irsb = Oracle::getIRSBForRip(as, rip);
+	IRSB *irsb = Oracle::getIRSBForRip(as, rip, true);
 	if (!irsb)
 		return;
 	int i;
@@ -931,6 +931,8 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 	     it++) {
 		LibVEX_maybe_gc(token);
 		Function f(*it);
+		if (f.rip.rip == 0xa335c0)
+			dbg_break("Here\n");
 		if (!f.aliasingConfigCorrect()) {
 			do {
 				done_something = false;
@@ -1775,7 +1777,7 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads,
 		if (rip != x && visited.count(rip))
 			continue;
 
-		IRSB *irsb = getIRSBForRip(ms->addressSpace, rip);
+		IRSB *irsb = getIRSBForRip(ms->addressSpace, rip, false);
 		if (!irsb)
 			continue;
 
@@ -2016,7 +2018,7 @@ Oracle::Function::updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool
 {
 	LivenessSet res;
 
-	IRSB *irsb = getIRSBForRip(as, rip);
+	IRSB *irsb = getIRSBForRip(as, rip, true);
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
@@ -2167,7 +2169,7 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 	}
 
 	/* Try to figure out what this instruction actually does. */
-	IRSB *irsb = getIRSBForRip(as, rip);
+	IRSB *irsb = getIRSBForRip(as, rip, true);
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
@@ -2392,7 +2394,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 	IRStmt *st;
 
 	int nr_statements;
-	IRSB *irsb = getIRSBForRip(as, rip);
+	IRSB *irsb = getIRSBForRip(as, rip, true);
 	if (!irsb)
 		return;
 	IRStmt **statements = irsb->stmts;
@@ -3099,7 +3101,7 @@ Oracle::getRbpToRspDelta(const VexRip &rip, long *out)
 	   (i.e. right on the ret instruction) then we can also grab
 	   the caller's delta. */
 	if (rip.stack.size() > 1) {
-		IRSB *irsb = getIRSBForRip(rip);
+		IRSB *irsb = getIRSBForRip(rip, false);
 		assert(irsb);
 		int nr_marks = 0;
 		for (int i = 0; i < irsb->stmts_used && nr_marks < 2; i++)

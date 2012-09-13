@@ -99,7 +99,8 @@ IRSB* bb_to_IR ( unsigned tid,
                  /*IN*/ VexArchInfo*     archinfo_guest,
                  /*IN*/ VexAbiInfo*      abiinfo_both,
                  /*IN*/ Bool             do_self_check,
-                 /*IN*/ Bool             (*preamble_function)(void*,IRSB*))
+                 /*IN*/ Bool             (*preamble_function)(void*,IRSB*),
+		 bool singleInstr)
 {
    Long       delta;
    Int        n_instrs, first_stmt_idx;
@@ -232,6 +233,9 @@ IRSB* bb_to_IR ( unsigned tid,
 
       /* Advance delta (inconspicuous but very important :-) */
       delta += (Long)dres.len;
+
+      if (singleInstr)
+	goto done;
 
       switch (dres.whatNext) {
          case DisResult::Dis_Continue:

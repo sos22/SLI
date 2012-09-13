@@ -388,7 +388,7 @@ cfgNodeToState(Oracle *oracle,
 
 	IRSB *irsb;
 	try {
-		irsb = oracle->ms->addressSpace->getIRSBForAddress(tr);
+		irsb = oracle->ms->addressSpace->getIRSBForAddress(tr, true);
 	} catch (BadMemoryException &e) {
 		return StateMachineUnreached::get();
 	}

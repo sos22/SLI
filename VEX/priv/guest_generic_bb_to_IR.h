@@ -178,7 +178,8 @@ IRSB* bb_to_IR ( unsigned                tid,
                  /*IN*/ VexArchInfo*     archinfo_guest,
                  /*IN*/ VexAbiInfo*      abiinfo_both,
                  /*IN*/ Bool             do_self_check,
-                 /*IN*/ Bool             (*preamble_function)(void*,IRSB*));
+                 /*IN*/ Bool             (*preamble_function)(void*,IRSB*),
+		 bool singleInstr);
 
 
 #endif /* ndef __VEX_GUEST_GENERIC_BB_TO_IR_H */
