@@ -2469,7 +2469,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			break;
 		case Ist_Store:
 			if (!tconfig.stackHasLeaked) {
-				PointerAliasingSet addr = irexprAliasingClass(((IRStmtStore *)st)->data,
+				PointerAliasingSet addr = irexprAliasingClass(((IRStmtStore *)st)->addr,
 									      config,
 									      &temporaryAliases,
 									      opt,
