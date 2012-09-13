@@ -2322,25 +2322,53 @@ top:
 				progress = true;
 			}
 			if (l->tag == Iex_Associative &&
-			    ((IRExprAssociative *)l)->op == Iop_Add64) {
+			    ((IRExprAssociative *)l)->op >= Iop_Add8 &&
+			    ((IRExprAssociative *)l)->op <= Iop_Add64) {
 				/* C + a == b -> C == b - a */
 				assert(((IRExprAssociative *)l)->nr_arguments > 1);
 				IRExprAssociative *newR =
-					(IRExprAssociative *)IRExpr_Associative(Iop_Add64, r, NULL);
+					(IRExprAssociative *)IRExpr_Associative(((IRExprAssociative *)l)->op, r, NULL);
 				for (int it = 1;
 				     it < ((IRExprAssociative *)l)->nr_arguments;
 				     it++)
 					addArgumentToAssoc(newR,
 							   IRExpr_Unop(
-								   Iop_Neg64,
+								   (IROp)(Iop_Neg8 + (((IRExprAssociative *)l)->op - Iop_Add8)),
 								   ((IRExprAssociative *)l)->contents[it]));
 				IRExpr *cnst = ((IRExprAssociative *)l)->contents[0];
 				if (cnst->tag != Iex_Const) {
-					addArgumentToAssoc(newR,
-							   IRExpr_Unop(
-								   Iop_Neg64,
-								   cnst));
-					cnst = IRExpr_Const(IRConst_U64(0));
+					switch (((IRExprAssociative *)l)->op) {
+					case Iop_Add8:
+						addArgumentToAssoc(newR,
+								   IRExpr_Unop(
+									   Iop_Neg8,
+									   cnst));
+						cnst = IRExpr_Const(IRConst_U8(0));
+						break;
+					case Iop_Add16:
+						addArgumentToAssoc(newR,
+								   IRExpr_Unop(
+									   Iop_Neg16,
+									   cnst));
+						cnst = IRExpr_Const(IRConst_U16(0));
+						break;
+					case Iop_Add32:
+						addArgumentToAssoc(newR,
+								   IRExpr_Unop(
+									   Iop_Neg32,
+									   cnst));
+						cnst = IRExpr_Const(IRConst_U32(0));
+						break;
+					case Iop_Add64:
+						addArgumentToAssoc(newR,
+								   IRExpr_Unop(
+									   Iop_Neg64,
+									   cnst));
+						cnst = IRExpr_Const(IRConst_U64(0));
+						break;
+					default:
+						abort();
+					}
 				}
 				l = e->arg1 = cnst;
 				r = e->arg2 = optimiseIRExprFP(newR, opt, &progress);
