@@ -1685,9 +1685,9 @@ int_from_PointerAliasingSet(const PointerAliasingSet &r)
 	acc = 0;
 	if (r.mightBeNonPointer())
 		acc |= 1;
-	if (r.mightPointAtNonStack())
-		acc |= 2;
 	if (r.mightPointAtStack())
+		acc |= 2;
+	if (r.mightPointAtNonStack())
 		acc |= 4;
 	return acc;
 }
