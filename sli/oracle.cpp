@@ -19,6 +19,15 @@
 #include "libvex_prof.hpp"
 #include "libvex_parse.h"
 
+#ifndef NDEBUG
+static bool debug_static_alias = false;
+#else
+#define debug_static_alias false
+#endif
+
+void dbg_database_query(const char *query);
+void dbg_database_queryf(const char *query, ...) __attribute__((__format__(__printf__, 1, 2)));
+
 static bool
 operator<(const InstructionSet &a, const InstructionSet &b)
 {
@@ -1997,6 +2006,15 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 		setAliasConfigOnEntryToInstruction(rip, ThreadRegisterAliasingConfiguration::functionEntryConfiguration);
 	}
 
+	if (debug_static_alias) {
+		printf("Calculate aliasing for function head %s\n", rip.name());
+		printf("Entry configuration:\n");
+		a.prettyPrint(stdout);
+		printf("Entry configuration:\n");
+		dbg_database_queryf("SELECT rip, alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackHasLeaked FROM instructionAttributes WHERE functionHead = %ld ORDER BY rip",
+				   rip.rip);
+	}
+
 	std::vector<StaticRip> needsUpdating;
 	std::vector<StaticRip> allInstrs;
 	getInstructionsInFunction(allInstrs);
@@ -2008,6 +2026,13 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 		StaticRip rip(needsUpdating.back());
 		needsUpdating.pop_back();
 		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, done_something);
+	}
+
+	if (debug_static_alias) {
+		printf("Finished recomputing aliasing for function head %s\n", rip.name());
+		printf("Exit configuration:\n");
+		dbg_database_queryf("SELECT rip, alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackHasLeaked FROM instructionAttributes WHERE functionHead = %ld ORDER BY rip",
+				    rip.rip);
 	}
 }
 
@@ -2393,6 +2418,12 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 	std::map<threadAndRegister, PointerAliasingSet> temporaryAliases;
 	IRStmt *st;
 
+	if (debug_static_alias) {
+		printf("Update successor aliasing for %s\n", rip.name());
+		printf("Config at start of instr:\n");
+		config.prettyPrint(stdout);
+	}
+
 	int nr_statements;
 	IRSB *irsb = getIRSBForRip(as, rip, true);
 	if (!irsb)
@@ -2402,6 +2433,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 	     nr_statements < irsb->stmts_used && statements[nr_statements]->tag != Ist_IMark;
 	     nr_statements++)
 		;
+	if (debug_static_alias)
+		ppIRSB(irsb, stdout);
+
 	for (int i = 1; i < nr_statements; i++) {
 		st = statements[i];
 		switch (st->tag) {
@@ -2501,6 +2535,10 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		}
 	}
 
+	if (debug_static_alias) {
+		printf("Config at end of instr:\n");
+		config.prettyPrint(stdout);
+	}
 	std::vector<StaticRip> callees;
 	getInstructionCallees(rip, callees);
 	if (!callees.empty())
@@ -2561,6 +2599,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			ThreadRegisterAliasingConfiguration new_config = succ_config;
 			new_config |= tconfig;
 			if (new_config != succ_config) {
+				if (debug_static_alias)
+					printf("Change successor config %s\n",
+					       it->name());
 				*done_something = true;
 				changed->push_back(*it);
 				setAliasConfigOnEntryToInstruction(*it, new_config);
@@ -3293,6 +3334,19 @@ dbg_database_query(const char *query)
 		}
 	}
 	sqlite3_finalize(stmt);
+}
+
+void
+dbg_database_queryf(const char *query, ...)
+{
+	va_list args;
+	char *q;
+	va_start(args, query);
+	if (vasprintf(&q, query, args) < 0)
+		errx(1, "vasprintf(%s)", query);
+	va_end(args);
+	dbg_database_query(q);
+	free(q);
 }
 
 bool
