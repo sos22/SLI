@@ -2203,7 +2203,9 @@ top:
 				}
 				break;
 			default:
-				printf("Cannot constant fold unop %d\n", e->op);
+				printf("Cannot constant fold unop %d (", e->op);
+				ppIROp(e->op, stdout);
+				printf(")\n");
 				break;
 			}
 		}
@@ -2780,7 +2782,9 @@ top:
 						((IRExprConst *)r)->con->Ico.U32));
 				break;
 			default:
-				printf("Cannot constant fold binop %d\n", e->op);
+				printf("Cannot constant fold binop %d (", e->op);
+				ppIROp(e->op, stdout);
+				printf(")\n");
 				break;
 			}
 		}
