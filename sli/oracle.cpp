@@ -2016,12 +2016,7 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 	}
 
 	std::vector<StaticRip> needsUpdating;
-	std::vector<StaticRip> allInstrs;
-	getInstructionsInFunction(allInstrs);
-	for (auto it = allInstrs.begin();
-	     it != allInstrs.end();
-	     it++)
-		updateSuccessorInstructionsAliasing(*it, as, &needsUpdating, done_something);
+	needsUpdating.push_back(rip);
 	while (!needsUpdating.empty()) {
 		StaticRip rip(needsUpdating.back());
 		needsUpdating.pop_back();
