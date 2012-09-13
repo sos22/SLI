@@ -1992,24 +1992,24 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 void
 Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 {
-	bool aValid;
-	ThreadRegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip, &aValid));
-	if (aValid) {
-		ThreadRegisterAliasingConfiguration b(a);
-		b |= ThreadRegisterAliasingConfiguration::functionEntryConfiguration;
-		if (a != b) {
+	{
+		bool aValid;
+		ThreadRegisterAliasingConfiguration a(aliasConfigOnEntryToInstruction(rip, &aValid));
+		if (aValid) {
+			ThreadRegisterAliasingConfiguration b(a);
+			b |= ThreadRegisterAliasingConfiguration::functionEntryConfiguration;
+			if (a != b) {
+				*done_something = true;
+				setAliasConfigOnEntryToInstruction(rip, b);
+			}
+		} else {
 			*done_something = true;
-			setAliasConfigOnEntryToInstruction(rip, b);
+			setAliasConfigOnEntryToInstruction(rip, ThreadRegisterAliasingConfiguration::functionEntryConfiguration);
 		}
-	} else {
-		*done_something = true;
-		setAliasConfigOnEntryToInstruction(rip, ThreadRegisterAliasingConfiguration::functionEntryConfiguration);
 	}
 
 	if (debug_static_alias) {
 		printf("Calculate aliasing for function head %s\n", rip.name());
-		printf("Entry configuration:\n");
-		a.prettyPrint(stdout);
 		printf("Entry configuration:\n");
 		dbg_database_queryf("SELECT rip, alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackHasLeaked FROM instructionAttributes WHERE functionHead = %ld ORDER BY rip",
 				   rip.rip);
