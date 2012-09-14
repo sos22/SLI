@@ -199,7 +199,8 @@ sca_deref_cb(unsigned long rsp, unsigned long value, unsigned long reg)
 		VG_(printf)("sca_deref_cb called on bad reg %lx\n", reg);
 		VG_(tool_panic)("Dead");
 	}
-	if (!(pt->hash_entry->aliases[ (reg - OFFSET_amd64_RAX) / 8] & 2))
+	reg = (reg - OFFSET_amd64_RAX) / 8;
+	if (!(pt->hash_entry->aliases[reg] & 6))
 		VG_(printf)("Failed: deref register %lx (-> %lx) which isn't supposed to be a pointer (stack %lx, %lx) at %lx\n",
 			    reg, value, rsp - 128, pt->frame_limit, pt->rip);
 	return EmWarn_NONE;
