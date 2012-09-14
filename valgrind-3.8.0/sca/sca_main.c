@@ -141,7 +141,7 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 
 	he = (const struct hash_entry *)(database + hh->offset + hh->nr_slots * 8 + i * (sizeof(struct hash_entry)));
 	for (i = 0; i < 16; i++) {
-		if (!(he->aliases[i] & 4)) {
+		if (!(he->aliases[i] & 2)) {
 			unsigned long reg;
 			switch (i) {
 #define do_idx(idx, name)						\
