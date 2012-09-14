@@ -398,7 +398,7 @@ processLoadExpr(const struct hash_entry *he, IRSB *sbOut, IRTemp *rsp, unsigned 
 		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Binop.arg1);
 		return;
 	case Iex_Load: {
-		if (e->Iex.Load.ty == Ity_I64 && he->stackEscape) {
+		if (e->Iex.Load.ty == Ity_I64 && he->stackEscape != 3) {
 			IRExpr *addr;
 			if (*rsp == IRTemp_INVALID) {
 				*rsp = newIRTemp(sbOut->tyenv, Ity_I64);
