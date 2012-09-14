@@ -57,14 +57,15 @@ struct hash_head {
 };
 struct hash_entry {
 	unsigned char aliases[16];
-	unsigned char stackHasLeaked;
+	unsigned char stackEscape;
 };
 
 struct per_thread {
 	struct per_thread *next;
 	ThreadId tid;
 	unsigned nr_stack_frames;
-	unsigned stack_escape_flags[6];
+	unsigned stack_in_stack_flags[6];
+	unsigned stack_in_memory_flags[6];
 
 	unsigned long last_called_function;
 
@@ -148,7 +149,7 @@ sca_instr_cb(VexGuestAMD64State *vex_state, const struct hash_entry *he)
 	for (i = 0; i < 16; i++) {
 		if (!(he->aliases[i] & 2)) {
 			unsigned long reg;
-			unsigned long *r;
+			ULong *r;
 			if (i == 5 && pt->last_called_function == vex_state->guest_RIP) {
 				/* Filter out some
 				   frame-pointer-related false
@@ -202,11 +203,15 @@ sca_instr_cb(VexGuestAMD64State *vex_state, const struct hash_entry *he)
 			}
 		}
 	}
-	if (!he->stackHasLeaked) {
-		if (pt->nr_stack_frames <= 32 * 6 &&
-		    pt->nr_stack_frames > 0 &&
-		    pt->stack_escape_flags[(pt->nr_stack_frames - 1)/32] & (1u << ((pt->nr_stack_frames - 1) % 32)))
-			VG_(printf)("Failed: stack was supposed to be private at %llx, but was found to be public\n",
+	if (pt->nr_stack_frames <= 32 * 6 &&
+	    pt->nr_stack_frames > 0) {
+		if (!(he->stackEscape & 1) &&
+		    pt->stack_in_memory_flags[(pt->nr_stack_frames - 1)/32] & (1u << ((pt->nr_stack_frames - 1) % 32)))
+			VG_(printf)("Failed: stack was supposed to not be in memory at %llx, but was\n",
+				    vex_state->guest_RIP);
+		if (!(he->stackEscape & 2) &&
+		    pt->stack_in_stack_flags[(pt->nr_stack_frames - 1)/32] & (1u << ((pt->nr_stack_frames - 1) % 32)))
+			VG_(printf)("Failed: stack was supposed to not be in itself at %llx, but was\n",
 				    vex_state->guest_RIP);
 	}
 	return EmWarn_NONE;
@@ -249,8 +254,10 @@ sca_call_cb(unsigned long rsp, unsigned long target)
 {
 	struct per_thread *pt = get_per_thread();
 	pt->frame_limit = rsp;
-	if (pt->nr_stack_frames < 32 * 6)
-		pt->stack_escape_flags[pt->nr_stack_frames / 32] &= ~(1u << (pt->nr_stack_frames % 32));
+	if (pt->nr_stack_frames < 32 * 6) {
+		pt->stack_in_memory_flags[pt->nr_stack_frames / 32] &= ~(1u << (pt->nr_stack_frames % 32));
+		pt->stack_in_stack_flags[pt->nr_stack_frames / 32] &= ~(1u << (pt->nr_stack_frames % 32));
+	}
 	pt->nr_stack_frames++;
 	pt->last_called_function = target;
 	return EmWarn_NONE;
@@ -286,27 +293,33 @@ sca_store_cb(unsigned long rsp, unsigned long ptr, unsigned long data)
 	struct per_thread *pt = get_per_thread();
 	int f = pt->nr_stack_frames - 1;
 	if (f < 32 * 6 &&
-	    (ptr < rsp - 128 || ptr >= pt->frame_limit) &&
 	    data > rsp - 128 &&
-	    data < pt->frame_limit)
-		pt->stack_escape_flags[f / 32] |= (1u << (f % 32));
+	    data < pt->frame_limit) {
+		if (ptr < rsp - 128 || ptr >= pt->frame_limit)
+			pt->stack_in_memory_flags[f / 32] |= (1u << (f % 32));
+		else
+			pt->stack_in_stack_flags[f / 32] |= (1u << (f % 32));
+	}
 	return EmWarn_NONE;
 }
 
 static VexEmWarn
-sca_load_cb(unsigned long rsp, unsigned long addr, unsigned long rip)
+sca_load_cb(unsigned long rsp, unsigned long addr, unsigned long rip, const struct hash_entry *he)
 {
 	struct per_thread *pt;
 	unsigned long val;
+	int is_stack_access;
 	val = *(unsigned long *)addr;
 	if (val < rsp - 128)
 		return EmWarn_NONE;
 	pt = get_per_thread();
-	if (addr >= rsp - 128 && addr < pt->frame_limit)
-		return EmWarn_NONE;
 	if (val >= pt->frame_limit)
 		return EmWarn_NONE;
-	VG_(printf)("Failed: load at %lx (addr %lx, val %lx, stack %lx,%lx) produced a pointer to the current frame, but that shouldn't be in memory\n",
+	is_stack_access = (addr >= rsp - 128 && addr < pt->frame_limit);
+	if ( (is_stack_access && (he->stackEscape & 2)) ||
+	     (!is_stack_access && (he->stackEscape & 1)) )
+		return EmWarn_NONE;
+	VG_(printf)("Failed: load at %lx (addr %lx, val %lx, stack %lx,%lx) produced a pointer to the current frame, but that shouldn't have done\n",
 		    rip, addr, val, rsp - 128, pt->frame_limit);
 	return EmWarn_NONE;
 }
@@ -359,7 +372,7 @@ processDerefPtr(struct deref_collection *dc, IRExpr *derefPtr)
 }
 
 static void
-processLoadExpr(Bool stackLeaked, IRSB *sbOut, IRTemp *rsp, unsigned long rip, struct deref_collection *dc, IRExpr *e)
+processLoadExpr(const struct hash_entry *he, IRSB *sbOut, IRTemp *rsp, unsigned long rip, struct deref_collection *dc, IRExpr *e)
 {
 	int j;
 	switch (e->tag) {
@@ -368,24 +381,24 @@ processLoadExpr(Bool stackLeaked, IRSB *sbOut, IRTemp *rsp, unsigned long rip, s
 	case Iex_Get:
 		return;
 	case Iex_GetI:
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.GetI.ix);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.GetI.ix);
 		return;
 	case Iex_RdTmp:
 		return;
 	case Iex_Qop:
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Qop.details->arg4);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Qop.details->arg4);
 	case Iex_Triop:
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Qop.details->arg1);
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Qop.details->arg2);
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Qop.details->arg3);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Qop.details->arg1);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Qop.details->arg2);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Qop.details->arg3);
 		return;
 	case Iex_Binop:
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Binop.arg2);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Binop.arg2);
 	case Iex_Unop:
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Binop.arg1);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Binop.arg1);
 		return;
 	case Iex_Load: {
-		if (e->Iex.Load.ty == Ity_I64 && !stackLeaked) {
+		if (e->Iex.Load.ty == Ity_I64 && he->stackEscape) {
 			IRExpr *addr;
 			if (*rsp == IRTemp_INVALID) {
 				*rsp = newIRTemp(sbOut->tyenv, Ity_I64);
@@ -408,26 +421,29 @@ processLoadExpr(Bool stackLeaked, IRSB *sbOut, IRTemp *rsp, unsigned long rip, s
 						0,
 						"sca_load",
 						sca_load_cb,
-						mkIRExprVec_3(
+						mkIRExprVec_4(
 							IRExpr_RdTmp(*rsp),
 							addr,
 							IRExpr_Const(
-								IRConst_U64(rip))))));
+								IRConst_U64(rip)),
+							IRExpr_Const(
+								IRConst_U64(
+									(unsigned long)he))))));
 		}
 		processDerefPtr(dc, e->Iex.Load.addr);
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Load.addr);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Load.addr);
 		return;
 	}
 	case Iex_Const:
 		return;
 	case Iex_CCall:
 		for (j = 0; e->Iex.CCall.args[j]; j++)
-			processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.CCall.args[j]);
+			processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.CCall.args[j]);
 		return;
 	case Iex_Mux0X:
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Mux0X.cond);
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Mux0X.expr0);
-		processLoadExpr(stackLeaked, sbOut, rsp, rip, dc, e->Iex.Mux0X.exprX);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Mux0X.cond);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Mux0X.expr0);
+		processLoadExpr(he, sbOut, rsp, rip, dc, e->Iex.Mux0X.exprX);
 		return;
 	}
 	VG_(tool_panic)("badness");
@@ -476,6 +492,12 @@ addDependency(struct deref_collection *dc, IRExpr *iex, IRSB *sb)
 		addDependency(dc, iex->Iex.Mux0X.expr0, sb);
 		addDependency(dc, iex->Iex.Mux0X.exprX, sb);
 		return;
+	case Iex_Binder:
+	case Iex_GetI:
+	case Iex_Qop:
+	case Iex_Triop:
+	case Iex_CCall:
+		break;
 	}
 	ppIRExpr(iex);
 	ppIRSB(sb);
@@ -665,40 +687,40 @@ sca_instrument_full(IRSB *sbIn)
 			case Ist_IMark:
 				break;
 			case Ist_AbiHint:
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.AbiHint.base);
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.AbiHint.nia);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.AbiHint.base);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.AbiHint.nia);
 				break;
 			case Ist_Put:
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Put.data);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Put.data);
 				break;
 			case Ist_PutI:
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.PutI.details->ix);
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.PutI.details->data);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.PutI.details->ix);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.PutI.details->data);
 				break;
 			case Ist_WrTmp:
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.WrTmp.data);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.WrTmp.data);
 				break;
 			case Ist_Store:
 				processDerefPtr(&dc, sbIn->stmts[i]->Ist.Store.addr);
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Store.addr);
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Store.data);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Store.addr);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Store.data);
 				break;
 			case Ist_CAS:
 				processDerefPtr(&dc, sbIn->stmts[i]->Ist.CAS.details->addr);
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.CAS.details->expdLo);
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.CAS.details->dataLo);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.CAS.details->expdLo);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.CAS.details->dataLo);
 				break;
 			case Ist_LLSC:
 				VG_(tool_panic)("LLSC on amd64?");
 			case Ist_Dirty:
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Dirty.details->guard);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Dirty.details->guard);
 				for (j = 0; sbIn->stmts[i]->Ist.Dirty.details->args[j]; j++)
-					processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Dirty.details->args[j]);
+					processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Dirty.details->args[j]);
 				break;
 			case Ist_MBE:
 				break;
 			case Ist_Exit:
-				processLoadExpr(he->stackHasLeaked, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Exit.guard);
+				processLoadExpr(he, sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Exit.guard);
 				break;
 			}
 

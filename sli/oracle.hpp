@@ -218,17 +218,25 @@ public:
 		ThreadRegisterAliasingConfiguration(float x); /* initialise as function entry configuration */
 		ThreadRegisterAliasingConfiguration(float x, int y); /* initialise as unknown configuration */
 	public:
-		ThreadRegisterAliasingConfiguration() : stackHasLeaked(false) {}
-		bool stackHasLeaked;
+		ThreadRegisterAliasingConfiguration()
+			: stackInStack(false), stackInMemory(false)
+		{}
+		/* True if the current stack frame contains any pointers to itself. */
+		bool stackInStack;
+		/* True if memory outside of the current stack frame might contain
+		   any pointers to memory in the current stack frame. */
+		bool stackInMemory;
 		PointerAliasingSet v[NR_REGS];
 		
 		void operator|=(const ThreadRegisterAliasingConfiguration &src) {
-			stackHasLeaked |= src.stackHasLeaked;
+			stackInStack |= src.stackInStack;
+			stackInMemory |= src.stackInMemory;
 			for (int i = 0; i < NR_REGS; i++)
 				v[i] = v[i] | src.v[i];
 		}
 		bool operator != (const ThreadRegisterAliasingConfiguration &x) const {
-			if (stackHasLeaked != x.stackHasLeaked)
+			if (stackInStack != x.stackInStack ||
+			    stackInMemory != x.stackInMemory)
 				return true;
 			for (int i = 0; i < NR_REGS; i++)
 				if (v[i] != x.v[i])

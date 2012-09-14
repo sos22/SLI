@@ -152,7 +152,8 @@ Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration
 	/* On function entry, the only pointer to the current stack
 	   frame should be in RSP.  Anythign else indicates that the
 	   guest program is doing something non-C-like. */
-	stackHasLeaked = false;
+	stackInStack = false;
+	stackInMemory = false;
 	for (int i = 0; i < NR_REGS; i++)
 		v[i] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
 	v[4] = PointerAliasingSet::stackPointer; /* rsp */
@@ -161,7 +162,8 @@ Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration
 Oracle::ThreadRegisterAliasingConfiguration Oracle::ThreadRegisterAliasingConfiguration::unknown(5.3f, 12);
 Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration(float, int)
 {
-	stackHasLeaked = true;
+	stackInStack = true;
+	stackInMemory = true;
 	for (int i = 0; i < NR_REGS; i++)
 		v[i] = PointerAliasingSet::anything;
 }
@@ -171,8 +173,12 @@ Oracle::ThreadRegisterAliasingConfiguration::prettyPrint(FILE *f) const
 {
        for (int i = 0; i < NR_REGS; i++)
                fprintf(f, "\t%8d: %s\n", i, v[i].name());
-       if (stackHasLeaked)
-	       fprintf(f, "\tStack escaped\n");
+       if (stackInMemory && stackInStack)
+	       fprintf(f, "\tStack in memory and stack\n");
+       else if (stackInMemory)
+	       fprintf(f, "\tStack in memory\n");
+       else if (stackInStack)
+	       fprintf(f, "\tStack in stack\n");
        else
 	       fprintf(f, "\tStack not escaped\n");
 }
@@ -1135,20 +1141,20 @@ irexprAliasingClass(IRExpr *expr,
 
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)expr;
-		bool anyStackHasLeaked = false;
+		bool anyStackInStack = false;
+		bool anyStackInMemory = false;
 		for (auto it = config.content.begin();
-		     !anyStackHasLeaked && it != config.content.end();
-		     it++)
-			if (it->second.stackHasLeaked)
-				anyStackHasLeaked = true;
-		if (anyStackHasLeaked)
+		     (!anyStackInStack || !anyStackInMemory) && it != config.content.end();
+		     it++) {
+			anyStackInStack |= it->second.stackInStack;
+			anyStackInMemory |= it->second.stackInMemory;
+		}
+		if (anyStackInStack && anyStackInMemory)
 			return PointerAliasingSet::anything;
-		/* No stacks have leaked, and therefore if the
-		   argument isn't a stack pointer then neither is our
-		   result. */
 		PointerAliasingSet addrType =
 			irexprAliasingClass(iel->addr, config, temps, opt, buildingAliasTable);
-		if (addrType.mightPointAtStack())
+		if ( (anyStackInStack && addrType.mightPointAtStack()) ||
+		     (anyStackInMemory && addrType.mightPointAtNonStack()) )
 			return PointerAliasingSet::anything;
 		else
 			return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
@@ -1375,7 +1381,7 @@ database(void)
 			  "alias13 INTEGER,"
 			  "alias14 INTEGER,"
 			  "alias15 INTEGER,"
-			  "stackHasLeaked INTEGER," /* 0 or NULL -> false, 1 -> true */
+			  "stackEscape INTEGER," /* 0 or NULL -> false, 1 -> true */
 			  "rbpToRspDeltaState INTEGER NOT NULL DEFAULT 0,"  /* 0 -> unknown, 1 -> known, 2 -> incalculable */
 			  "rbpToRspDelta INTEGER NOT NULL DEFAULT 0,"
 			  "functionHead INTEGER NOT NULL)",
@@ -1713,7 +1719,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b)
 
 	if (!stmt)
 		stmt = prepare_statement(
-			"SELECT alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackHasLeaked FROM instructionAttributes WHERE rip = ?");
+			"SELECT alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackEscape FROM instructionAttributes WHERE rip = ?");
 	bind_oraclerip(stmt, 1, rip);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE || rc == SQLITE_ROW);
@@ -1735,15 +1741,14 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b)
 		res.v[i] = PointerAliasingSet_from_int(r);
 	}
 	if (sqlite3_column_type(stmt, i) == SQLITE_NULL) {
-		res.stackHasLeaked = false;
+		res.stackInMemory = false;
+		res.stackInStack = false;
 	} else {
 		assert(sqlite3_column_type(stmt, i) == SQLITE_INTEGER);
 		unsigned long r = sqlite3_column_int64(stmt, i);
-		assert(r == 0 || r == 1);
-		if (r)
-			res.stackHasLeaked = true;
-		else
-			res.stackHasLeaked = false;
+		assert(!(r & ~3));
+		res.stackInMemory = !!(r & 1);
+		res.stackInStack  = !!(r & 2);
 	}
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);
@@ -2015,7 +2020,7 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 	if (debug_static_alias) {
 		printf("Calculate aliasing for function head %s\n", rip.name());
 		printf("Entry configuration:\n");
-		dbg_database_queryf("SELECT rip, alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackHasLeaked FROM instructionAttributes WHERE functionHead = %ld ORDER BY rip",
+		dbg_database_queryf("SELECT rip, alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackEscape FROM instructionAttributes WHERE functionHead = %ld ORDER BY rip",
 				   rip.rip);
 	}
 
@@ -2030,7 +2035,7 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 	if (debug_static_alias) {
 		printf("Finished recomputing aliasing for function head %s\n", rip.name());
 		printf("Exit configuration:\n");
-		dbg_database_queryf("SELECT rip, alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackHasLeaked FROM instructionAttributes WHERE functionHead = %ld ORDER BY rip",
+		dbg_database_queryf("SELECT rip, alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackEscape FROM instructionAttributes WHERE functionHead = %ld ORDER BY rip",
 				    rip.rip);
 	}
 }
@@ -2468,24 +2473,21 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			/* Assume that PutIs never target the NR_REGS registers */
 			break;
 		case Ist_Store:
-			if (!tconfig.stackHasLeaked) {
-				PointerAliasingSet addr = irexprAliasingClass(((IRStmtStore *)st)->addr,
-									      config,
-									      &temporaryAliases,
-									      opt,
-									      true);
+			if (!tconfig.stackInMemory || !tconfig.stackInStack) {
 				PointerAliasingSet data = irexprAliasingClass(((IRStmtStore *)st)->data,
 									      config,
 									      &temporaryAliases,
 									      opt,
 									      true);
-				if (addr.mightPointAtNonStack() &&
-				    data.mightPointAtStack()) {
-					/* Bit of a hack: rely on the
-					   fact that we only have one
-					   relevant thread here. */
-					tconfig.stackHasLeaked = true;
-				}
+				if (!data.mightPointAtStack())
+					break;
+				PointerAliasingSet addr = irexprAliasingClass(((IRStmtStore *)st)->addr,
+									      config,
+									      &temporaryAliases,
+									      opt,
+									      true);
+				tconfig.stackInMemory |= addr.mightPointAtNonStack();
+				tconfig.stackInStack  |= addr.mightPointAtStack();
 			}
 			break;
 		case Ist_CAS: {
@@ -2503,16 +2505,21 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		case Ist_Dirty:
 			if (((IRStmtDirty *)st)->details->tmp.isValid()) {
 				PointerAliasingSet res;
-				if (strcmp(((IRStmtDirty *)st)->details->cee->name, "helper_load_64") ||
-				    tconfig.stackHasLeaked ||
-				    (irexprAliasingClass(((IRStmtDirty *)st)->details->args[0],
-							 config,
-							 &temporaryAliases,
-							 opt,
-							 true).mightPointAtStack())) {
+				if ((tconfig.stackInStack && tconfig.stackInMemory) ||
+				    strcmp(((IRStmtDirty *)st)->details->cee->name, "helper_load_64")) {
 					res = PointerAliasingSet::anything;
 				} else {
-					res = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
+					PointerAliasingSet addr(
+						irexprAliasingClass(((IRStmtDirty *)st)->details->args[0],
+								    config,
+								    &temporaryAliases,
+								    opt,
+								    true));
+					if ( (addr.mightPointAtStack() && tconfig.stackInStack) ||
+					     (addr.mightPointAtNonStack() && tconfig.stackInMemory) )
+						res = PointerAliasingSet::anything;
+					else
+						res = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
 				}
 				temporaryAliases.insert(
 					std::pair<threadAndRegister, PointerAliasingSet>(
@@ -2725,14 +2732,20 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(const StaticRip &r,
 	static sqlite3_stmt *stmt;
 	int i;
 	int rc;
+	unsigned long stackEscape;
 
 	if (!stmt)
 		stmt = prepare_statement(
-			"UPDATE instructionAttributes SET alias0 = ?, alias1 = ?, alias2 = ?, alias3 = ?, alias4 = ?, alias5 = ?, alias6 = ?, alias7 = ?, alias8 = ?, alias9 = ?, alias10 = ?, alias11 = ?, alias12 = ?, alias13 = ?, alias14 = ?, alias15 = ?, stackHasLeaked = ? WHERE rip = ?"
+			"UPDATE instructionAttributes SET alias0 = ?, alias1 = ?, alias2 = ?, alias3 = ?, alias4 = ?, alias5 = ?, alias6 = ?, alias7 = ?, alias8 = ?, alias9 = ?, alias10 = ?, alias11 = ?, alias12 = ?, alias13 = ?, alias14 = ?, alias15 = ?, stackEscape = ? WHERE rip = ?"
 			);
 	for (i = 0; i < NR_REGS; i++)
 		bind_int64(stmt, i + 1, int_from_PointerAliasingSet(config.v[i]));
-	bind_int64(stmt, NR_REGS + 1, config.stackHasLeaked);
+	stackEscape = 0;
+	if (config.stackInMemory)
+		stackEscape |= 1;
+	if (config.stackInStack)
+		stackEscape |= 2;
+	bind_int64(stmt, NR_REGS + 1, stackEscape);
 	bind_oraclerip(stmt, NR_REGS + 2, r);
 	rc = sqlite3_step(stmt);
 	assert(rc == SQLITE_DONE);

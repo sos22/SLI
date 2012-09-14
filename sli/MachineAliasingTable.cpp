@@ -15,7 +15,8 @@ Oracle::ThreadRegisterAliasingConfiguration
 MachineAliasingTable::maximalThreadConfig()
 {
 	Oracle::ThreadRegisterAliasingConfiguration c;
-	c.stackHasLeaked = true;
+	c.stackInStack = true;
+	c.stackInMemory = true;
 	for (int i = 0; i < Oracle::NR_REGS; i++)
 		c.v[i] = PointerAliasingSet::nothing;
 	c.v[OFFSET_amd64_RSP / 8] = PointerAliasingSet::stackPointer;
@@ -66,9 +67,14 @@ MachineAliasingTable::updateStateConfig(StateMachineState *s,
 		     !done && it != oldConfig.content.end();
 		     it++) {
 			if (it->first == tid) {
-				if (newConfigElem.stackHasLeaked &&
-				    !it->second.stackHasLeaked) {
-					it->second.stackHasLeaked = true;
+				if (newConfigElem.stackInStack &&
+				    !it->second.stackInStack) {
+					it->second.stackInStack = true;
+					res = true;
+				}
+				if (newConfigElem.stackInMemory &&
+				    !it->second.stackInMemory) {
+					it->second.stackInMemory = true;
 					res = true;
 				}
 				for (int i = 0; i < Oracle::NR_REGS; i++) {

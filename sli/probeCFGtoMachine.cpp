@@ -1267,7 +1267,7 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 		StaticRip currentRip(vr.stack.back());
 		Oracle::ThreadRegisterAliasingConfiguration currentConfig =
 			oracle->getAliasingConfigurationForRip(currentRip);
-		if (currentConfig.stackHasLeaked)
+		if (currentConfig.stackInMemory || currentConfig.stackInStack)
 			privateFrames.erase(entryStack.back());
 	}
 
