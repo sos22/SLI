@@ -258,7 +258,6 @@ sca_ret_cb(VexGuestAMD64State *vex_state)
 	}
 	/* Note use of deliberately non-canonical address. */
 	vex_state->guest_RCX = 0xaaaadead0000f001ul;
-	vex_state->guest_RDX = 0xaaaadead0001f001ul;
 	vex_state->guest_RSI = 0xaaaadead0002f001ul;
 	vex_state->guest_RDI = 0xaaaadead0003f001ul;
 	vex_state->guest_R8  = 0xaaaadead0004f001ul;
