@@ -200,7 +200,21 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 static VexEmWarn
 sca_deref_cb(unsigned long rsp, unsigned long value, unsigned long reg)
 {
-	struct per_thread *pt = get_per_thread();
+	struct per_thread *pt;
+	/* Anything which is less than a MB can't be a pointer, so
+	 * must be a false positive.  Filter them out. */
+	/* This tends to show up when indexing arrays in .bss or .data,
+	   which usually involves an instruction like this:
+
+	   69199f:       0f b6 80 40 13 b4 00    movzbl 0xb41340(%rax),%eax
+
+	   The pointer is reg+constant, so the instrument phase thinks
+	   that we're dereferencing the register, when actually we're
+	   dereferencing the constant.  It's easier to filter out here
+	   than there, so do it here. */
+	if (value < (1ul << 20))
+		return EmWarn_NONE;
+	pt = get_per_thread();
 	if (pt->hash_entry == NULL)
 		return EmWarn_NONE;
 	if (value >= rsp - 128 && value < pt->frame_limit)
