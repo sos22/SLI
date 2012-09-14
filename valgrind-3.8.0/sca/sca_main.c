@@ -243,6 +243,24 @@ sca_store_cb(unsigned long rsp, unsigned long ptr, unsigned long data)
 	return EmWarn_NONE;
 }
 
+static VexEmWarn
+sca_load_cb(unsigned long rsp, unsigned long addr, unsigned long rip)
+{
+	struct per_thread *pt;
+	unsigned long val;
+	val = *(unsigned long *)addr;
+	if (val < rsp - 128)
+		return EmWarn_NONE;
+	pt = get_per_thread();
+	if (addr >= rsp - 128 && addr < pt->frame_limit)
+		return EmWarn_NONE;
+	if (val >= pt->frame_limit || !pt->hash_entry || pt->hash_entry->stackHasLeaked)
+		return EmWarn_NONE;
+	VG_(printf)("Failed: load at %lx (addr %lx, val %lx, stack %lx,%lx) produced a pointer to the current frame, but that shouldn't be in memory\n",
+		    rip, addr, val, rsp - 128, pt->frame_limit);
+	return EmWarn_NONE;
+}
+
 struct deref_collection {
 	int nr_tmps;
 	IRTemp tmp[8];
@@ -291,7 +309,7 @@ processDerefPtr(struct deref_collection *dc, IRExpr *derefPtr)
 }
 
 static void
-processLoadExpr(struct deref_collection *dc, IRExpr *e)
+processLoadExpr(IRSB *sbOut, IRTemp *rsp, unsigned long rip, struct deref_collection *dc, IRExpr *e)
 {
 	int j;
 	switch (e->tag) {
@@ -300,36 +318,66 @@ processLoadExpr(struct deref_collection *dc, IRExpr *e)
 	case Iex_Get:
 		return;
 	case Iex_GetI:
-		processLoadExpr(dc, e->Iex.GetI.ix);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.GetI.ix);
 		return;
 	case Iex_RdTmp:
 		return;
 	case Iex_Qop:
-		processLoadExpr(dc, e->Iex.Qop.details->arg4);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Qop.details->arg4);
 	case Iex_Triop:
-		processLoadExpr(dc, e->Iex.Qop.details->arg1);
-		processLoadExpr(dc, e->Iex.Qop.details->arg2);
-		processLoadExpr(dc, e->Iex.Qop.details->arg3);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Qop.details->arg1);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Qop.details->arg2);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Qop.details->arg3);
 		return;
 	case Iex_Binop:
-		processLoadExpr(dc, e->Iex.Binop.arg2);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Binop.arg2);
 	case Iex_Unop:
-		processLoadExpr(dc, e->Iex.Binop.arg1);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Binop.arg1);
 		return;
-	case Iex_Load:
+	case Iex_Load: {
+		if (e->Iex.Load.ty == Ity_I64) {
+			IRExpr *addr;
+			if (*rsp == IRTemp_INVALID) {
+				*rsp = newIRTemp(sbOut->tyenv, Ity_I64);
+				addStmtToIRSB(
+					sbOut,
+					IRStmt_WrTmp(
+						*rsp,
+						IRExpr_Get(OFFSET_amd64_RSP, Ity_I64)));
+			}
+			if (e->Iex.Load.addr->tag == Iex_RdTmp ||
+			    e->Iex.Load.addr->tag == Iex_Const) {
+				addr = e->Iex.Load.addr;
+			} else {
+				VG_(tool_panic)("Blah");
+			}
+			addStmtToIRSB(
+				sbOut,
+				IRStmt_Dirty(
+					unsafeIRDirty_0_N(
+						0,
+						"sca_load",
+						sca_load_cb,
+						mkIRExprVec_3(
+							IRExpr_RdTmp(*rsp),
+							addr,
+							IRExpr_Const(
+								IRConst_U64(rip))))));
+		}
 		processDerefPtr(dc, e->Iex.Load.addr);
-		processLoadExpr(dc, e->Iex.Load.addr);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Load.addr);
 		return;
+	}
 	case Iex_Const:
 		return;
 	case Iex_CCall:
 		for (j = 0; e->Iex.CCall.args[j]; j++)
-			processLoadExpr(dc, e->Iex.CCall.args[j]);
+			processLoadExpr(sbOut, rsp, rip, dc, e->Iex.CCall.args[j]);
 		return;
 	case Iex_Mux0X:
-		processLoadExpr(dc, e->Iex.Mux0X.cond);
-		processLoadExpr(dc, e->Iex.Mux0X.expr0);
-		processLoadExpr(dc, e->Iex.Mux0X.exprX);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Mux0X.cond);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Mux0X.expr0);
+		processLoadExpr(sbOut, rsp, rip, dc, e->Iex.Mux0X.exprX);
 		return;
 	}
 	VG_(tool_panic)("badness");
@@ -474,6 +522,7 @@ sca_instrument ( VgCallbackClosure* closure,
 		ppIRSB(sbIn);
 	}
 	while (i < sbIn->stmts_used) {
+		unsigned long rip;
 		if (sbIn->stmts[i]->tag != Ist_IMark) {
 			ppIRSB(sbIn);
 			VG_(printf)("i = %d\n", i);
@@ -481,9 +530,10 @@ sca_instrument ( VgCallbackClosure* closure,
 		}
 		addStmtToIRSB(sbOut, sbIn->stmts[i]);
 		addStmtToIRSB(sbOut, stmt);
+		rip = sbIn->stmts[i]->Ist.IMark.addr;
 		i++;
 		while (i < sbIn->stmts_used && sbIn->stmts[i]->tag != Ist_IMark) {
-			IRTemp rsp = Ity_INVALID;
+			IRTemp rsp = IRTemp_INVALID;
 			int j;
 			struct deref_collection dc;
 
@@ -498,40 +548,40 @@ sca_instrument ( VgCallbackClosure* closure,
 			case Ist_IMark:
 				break;
 			case Ist_AbiHint:
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.AbiHint.base);
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.AbiHint.nia);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.AbiHint.base);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.AbiHint.nia);
 				break;
 			case Ist_Put:
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Put.data);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Put.data);
 				break;
 			case Ist_PutI:
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.PutI.details->ix);
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.PutI.details->data);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.PutI.details->ix);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.PutI.details->data);
 				break;
 			case Ist_WrTmp:
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.WrTmp.data);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.WrTmp.data);
 				break;
 			case Ist_Store:
 				processDerefPtr(&dc, sbIn->stmts[i]->Ist.Store.addr);
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Store.addr);
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Store.data);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Store.addr);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Store.data);
 				break;
 			case Ist_CAS:
 				processDerefPtr(&dc, sbIn->stmts[i]->Ist.CAS.details->addr);
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.CAS.details->expdLo);
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.CAS.details->dataLo);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.CAS.details->expdLo);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.CAS.details->dataLo);
 				break;
 			case Ist_LLSC:
 				VG_(tool_panic)("LLSC on amd64?");
 			case Ist_Dirty:
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Dirty.details->guard);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Dirty.details->guard);
 				for (j = 0; sbIn->stmts[i]->Ist.Dirty.details->args[j]; j++)
-					processLoadExpr(&dc, sbIn->stmts[i]->Ist.Dirty.details->args[j]);
+					processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Dirty.details->args[j]);
 				break;
 			case Ist_MBE:
 				break;
 			case Ist_Exit:
-				processLoadExpr(&dc, sbIn->stmts[i]->Ist.Exit.guard);
+				processLoadExpr(sbOut, &rsp, rip, &dc, sbIn->stmts[i]->Ist.Exit.guard);
 				break;
 			}
 
@@ -553,7 +603,7 @@ sca_instrument ( VgCallbackClosure* closure,
 			}
 			for (j = 0; j < dc.nr_regs; j++) {
 				IRTemp t;
-				if (rsp == Ity_INVALID) {
+				if (rsp == IRTemp_INVALID) {
 					rsp = newIRTemp(sbOut->tyenv, Ity_I64);
 					addStmtToIRSB(
 						sbOut,
@@ -580,7 +630,7 @@ sca_instrument ( VgCallbackClosure* closure,
 			}
 			if (sbIn->stmts[i]->tag == Ist_Store &&
 			    typeOfIRExpr(sbIn->tyenv, sbIn->stmts[i]->Ist.Store.data) == Ity_I64) {
-				if (rsp == Ity_INVALID) {
+				if (rsp == IRTemp_INVALID) {
 					rsp = newIRTemp(sbOut->tyenv, Ity_I64);
 					addStmtToIRSB(
 						sbOut,
