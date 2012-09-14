@@ -179,6 +179,10 @@ sca_instr_cb(VexGuestAMD64State *vex_state, const struct hash_entry *he)
 			default:
 				VG_(tool_panic)("Badness");
 			}
+			if (i == 0 && reg == (((vex_state->guest_RSP + 0xf) >> 4) << 4)) {
+				/* Don't flag warnings for alloca() */
+				continue;
+			}
 			if (reg >= vex_state->guest_RSP - 128 && reg < pt->frame_limit)
 				VG_(printf)("Failed: Register %d isn't supposed to point at the stack at %llx, but does (%lx vs (%llx,%lx)) (just_called %lx)\n",
 					    i, vex_state->guest_RIP,
