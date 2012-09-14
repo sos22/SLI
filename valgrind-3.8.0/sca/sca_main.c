@@ -102,7 +102,7 @@ get_per_thread(void)
 
 static void sca_post_clo_init(void)
 {
-	if (database == 0 && !only_clobber)
+	if (database == 0)
 		VG_(tool_panic)("No database specified\n");
 }
 
@@ -525,8 +525,23 @@ sca_instrument_clobber(IRSB *sbIn)
 {
 	IRCallee *cee;
 	IRDirty *d;
+	unsigned long rip;
+	int i;
+	const struct hash_entry *he;
 
 	if (sbIn->jumpkind != Ijk_Ret)
+		return sbIn;
+	for (i = sbIn->stmts_used - 1; i >= 0; i--) {
+		if (sbIn->stmts[i]->tag == Ist_IMark) {
+			rip = sbIn->stmts[i]->Ist.IMark.addr;
+			break;
+		}
+	}
+	if (i < 0)
+		return sbIn;
+
+	he = find_hash_entry(rip);
+	if (!he)
 		return sbIn;
 
 	cee = mkIRCallee(0, "sca_ret", sca_ret_cb);
@@ -534,6 +549,7 @@ sca_instrument_clobber(IRSB *sbIn)
 	d->cee = cee;
 	d->guard = IRExpr_Const(IRConst_U1(1));
 	d->args = mkIRExprVec_0();
+
 	d->tmp = IRTemp_INVALID;
 	d->mFx = Ifx_None;
 	d->mAddr = NULL;
