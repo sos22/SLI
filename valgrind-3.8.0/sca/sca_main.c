@@ -64,6 +64,9 @@ struct per_thread {
 	ThreadId tid;
 	unsigned nr_stack_frames;
 	unsigned stack_escape_flags[6];
+
+	unsigned long last_called_function;
+
 	unsigned long frame_limit;
 	unsigned long rip;
 	const struct hash_entry *hash_entry;
@@ -143,6 +146,12 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 	for (i = 0; i < 16; i++) {
 		if (!(he->aliases[i] & 2)) {
 			unsigned long reg;
+			if (i == 5 && pt->last_called_function == vex_state->guest_RIP) {
+				/* Filter out some
+				   frame-pointer-related false
+				   positives.  Bit of a hack. */
+				continue;
+			}
 			switch (i) {
 #define do_idx(idx, name)						\
 				case idx:				\
@@ -169,11 +178,12 @@ sca_instr_cb(VexGuestAMD64State* vex_state)
 				VG_(tool_panic)("Badness");
 			}
 			if (reg >= vex_state->guest_RSP - 128 && reg < pt->frame_limit)
-				VG_(printf)("Failed: Register %d isn't supposed to point at the stack at %llx, but does (%lx vs (%llx,%lx))\n",
+				VG_(printf)("Failed: Register %d isn't supposed to point at the stack at %llx, but does (%lx vs (%llx,%lx)) (just_called %lx)\n",
 					    i, vex_state->guest_RIP,
 					    reg,
 					    vex_state->guest_RSP - 128,
-					    pt->frame_limit);
+					    pt->frame_limit,
+					    pt->last_called_function);
 		}
 	}
 	if (!he->stackHasLeaked) {
@@ -207,13 +217,14 @@ sca_deref_cb(unsigned long rsp, unsigned long value, unsigned long reg)
 }
 
 static VexEmWarn
-sca_call_cb(unsigned long rsp)
+sca_call_cb(unsigned long rsp, unsigned long target)
 {
 	struct per_thread *pt = get_per_thread();
 	pt->frame_limit = rsp;
 	if (pt->nr_stack_frames < 32 * 6)
 		pt->stack_escape_flags[pt->nr_stack_frames / 32] &= ~(1u << (pt->nr_stack_frames % 32));
 	pt->nr_stack_frames++;
+	pt->last_called_function = target;
 	return EmWarn_NONE;
 }
 
@@ -659,29 +670,43 @@ sca_instrument ( VgCallbackClosure* closure,
 		void *cb;
 		HChar *label;
 		IRTemp t;
+		IRDirty *d;
 
-		if (sbIn->jumpkind == Ijk_Call) {
-			cb = sca_call_cb;
-			label = "sca_call_cb";
-		} else {
-			cb = sca_ret_cb;
-			label = "sca_ret_cb";
-		}
 		t = newIRTemp(sbOut->tyenv, Ity_I64);
 		addStmtToIRSB(
 			sbOut,
 			IRStmt_WrTmp(
 				t,
 				IRExpr_Get(OFFSET_amd64_RSP, Ity_I64)));
-		addStmtToIRSB(
-			sbOut,
-			IRStmt_Dirty(
-				unsafeIRDirty_0_N(
-					0,
-					label,
-					cb,
-					mkIRExprVec_1(
-						IRExpr_RdTmp(t)))));
+		if (sbIn->jumpkind == Ijk_Call) {
+			IRExpr *n;
+			if (sbIn->next->tag == Iex_Const || sbIn->next->tag == Iex_RdTmp) {
+				n = sbIn->next;
+			} else {
+				IRTemp t2 = newIRTemp(sbOut->tyenv, Ity_I64);
+				addStmtToIRSB(
+					sbOut,
+					IRStmt_WrTmp(
+						t2,
+						sbIn->next));
+				n = IRExpr_RdTmp(t2);
+			}
+			d = unsafeIRDirty_0_N(
+				0,
+				"sca_call",
+				sca_call_cb,
+				mkIRExprVec_2(
+					IRExpr_RdTmp(t),
+					n));
+		} else {
+			d = unsafeIRDirty_0_N(
+				0,
+				"sca_ret",
+				sca_ret_cb,
+				mkIRExprVec_1(
+					IRExpr_RdTmp(t)));
+		}
+		addStmtToIRSB(sbOut, IRStmt_Dirty(d));
 	}
 	return sbOut;
 }
