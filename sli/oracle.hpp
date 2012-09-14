@@ -187,12 +187,12 @@ public:
 		void setRbpToRspOffsetsCorrect(bool v);
 		bool aliasingConfigCorrect() const;
 		void setAliasingConfigCorrect(bool v);
+		LivenessSet liveOnEntry(const StaticRip &, bool);
 	public:
 		Function(const StaticRip &_rip)
 			: rip(_rip)
 		{}
 
-		LivenessSet liveOnEntry(const StaticRip &, bool);
 		bool aliasConfigOnEntryToInstruction(const StaticRip &rip, ThreadRegisterAliasingConfiguration *out);
 		ThreadRegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip);
 		ThreadRegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b);
@@ -375,7 +375,6 @@ public:
 	void getFunctions(std::vector<StaticRip> &out);
 
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const StaticRip &rip);
-	LivenessSet liveOnEntryToFunction(const StaticRip &rip);
 
 private:
 	bool getRbpToRspDelta(const StaticRip &rip, long *out);
@@ -383,7 +382,6 @@ public:
 
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const VexRip &rip);
 	bool getRbpToRspDelta(const VexRip &rip, long *out);
-	LivenessSet liveOnEntryToFunction(const VexRip &rip);
 
 	void getInstrCallees(const VexRip &vr, std::vector<VexRip> &out);
 	void getInstrFallThroughs(const VexRip &vr, std::vector<VexRip> &out);

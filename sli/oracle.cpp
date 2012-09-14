@@ -3198,18 +3198,6 @@ Oracle::getRbpToRspDelta(const VexRip &rip, long *out)
 	return false;
 }
 
-Oracle::LivenessSet
-Oracle::liveOnEntryToFunction(const StaticRip &rip)
-{
-	Function f(rip);
-	return f.liveOnEntry(rip, true);
-}
-Oracle::LivenessSet
-Oracle::liveOnEntryToFunction(const VexRip &rip)
-{
-	return liveOnEntryToFunction(StaticRip(rip));
-}
-
 void
 Oracle::getInstrCallees(const VexRip &vr, std::vector<VexRip> &out)
 {
