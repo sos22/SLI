@@ -148,6 +148,7 @@ sca_instr_cb(VexGuestAMD64State *vex_state, const struct hash_entry *he)
 	for (i = 0; i < 16; i++) {
 		if (!(he->aliases[i] & 2)) {
 			unsigned long reg;
+			unsigned long *r;
 			if (i == 5 && pt->last_called_function == vex_state->guest_RIP) {
 				/* Filter out some
 				   frame-pointer-related false
@@ -157,7 +158,7 @@ sca_instr_cb(VexGuestAMD64State *vex_state, const struct hash_entry *he)
 			switch (i) {
 #define do_idx(idx, name)						\
 				case idx:				\
-					reg = vex_state->guest_ ## name; \
+					r = &vex_state->guest_ ## name; \
 					break;
 				do_idx(0, RAX)
 				do_idx(1, RCX)
@@ -179,17 +180,26 @@ sca_instr_cb(VexGuestAMD64State *vex_state, const struct hash_entry *he)
 			default:
 				VG_(tool_panic)("Badness");
 			}
+			reg = *r;
 			if (i == 0 && reg == (((vex_state->guest_RSP + 0xf) >> 4) << 4)) {
 				/* Don't flag warnings for alloca() */
 				continue;
 			}
-			if (reg >= vex_state->guest_RSP - 128 && reg < pt->frame_limit)
-				VG_(printf)("Failed: Register %d isn't supposed to point at the stack at %llx, but does (%lx vs (%llx,%lx)) (just_called %lx)\n",
-					    i, vex_state->guest_RIP,
+			if (reg >= vex_state->guest_RSP - 128 && reg < pt->frame_limit) {
+				VG_(printf)("Register %d isn't supposed to point at the stack at %llx, but does (%lx vs (%llx,%lx)) (just_called %lx)\n",
+					    i,
+					    vex_state->guest_RIP,
 					    reg,
 					    vex_state->guest_RSP - 128,
 					    pt->frame_limit,
 					    pt->last_called_function);
+				/* We should only get this kind of
+				   error if the register is dead, so
+				   clobber it with an
+				   easily-recognisable non-canonical
+				   pointer. */
+				*r = 0xbbbbdead0000f001ul + (i << 16);
+			}
 		}
 	}
 	if (!he->stackHasLeaked) {
@@ -587,7 +597,7 @@ build_imark_stmt(IRCallee *cee, const struct hash_entry *he)
 	d->mSize = 0;
 	d->needsBBP = True;
 	d->nFxState = 1;
-	d->fxState[0].fx = Ifx_Read;
+	d->fxState[0].fx = Ifx_Modify;
 	d->fxState[0].offset = 0;
 	d->fxState[0].size = sizeof(VexGuestAMD64State);
 	d->fxState[0].nRepeats = 0;
