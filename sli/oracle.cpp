@@ -2502,11 +2502,18 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		}
 		case Ist_Dirty:
 			if (((IRStmtDirty *)st)->details->tmp.isValid()) {
-				PointerAliasingSet res =
-					(strcmp(((IRStmtDirty *)st)->details->cee->name, "helper_load_64") ||
-					 tconfig.stackHasLeaked) ?
-					 PointerAliasingSet::anything :
-					PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
+				PointerAliasingSet res;
+				if (strcmp(((IRStmtDirty *)st)->details->cee->name, "helper_load_64") ||
+				    tconfig.stackHasLeaked ||
+				    (irexprAliasingClass(((IRStmtDirty *)st)->details->args[0],
+							 config,
+							 &temporaryAliases,
+							 opt,
+							 true).mightPointAtStack())) {
+					res = PointerAliasingSet::anything;
+				} else {
+					res = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
+				}
 				temporaryAliases.insert(
 					std::pair<threadAndRegister, PointerAliasingSet>(
 						((IRStmtDirty *)st)->details->tmp,
