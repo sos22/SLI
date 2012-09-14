@@ -46,6 +46,7 @@
 
 static Long sca_db_size;
 static unsigned long database;
+static Bool only_clobber;
 
 #define DATABASE_MAGIC 0xbb8d4fde1557ab1ful
 #define NR_HEADS 524243
@@ -101,7 +102,7 @@ get_per_thread(void)
 
 static void sca_post_clo_init(void)
 {
-	if (database == 0)
+	if (database == 0 && !only_clobber)
 		VG_(tool_panic)("No database specified\n");
 }
 
@@ -114,7 +115,7 @@ hash_rip(unsigned long h)
 }
 
 static VexEmWarn
-sca_instr_cb(VexGuestAMD64State* vex_state)
+sca_instr_cb(VexGuestAMD64State *vex_state)
 {
 	int h = hash_rip(vex_state->guest_RIP);
 	const struct hash_head *hh = (const struct hash_head *)(database + 8 + 16 * h);
@@ -243,15 +244,27 @@ sca_call_cb(unsigned long rsp, unsigned long target)
 }
 
 static VexEmWarn
-sca_ret_cb(unsigned long rsp)
+sca_ret_cb(VexGuestAMD64State *vex_state)
 {
-	struct per_thread *pt = get_per_thread();
-	pt->frame_limit = rsp;
-	if (pt->nr_stack_frames == 0)
-		VG_(printf)("Warning: thread %d returned from more functions than it called?\n",
-			    VG_(get_running_tid)());
-	else
-		pt->nr_stack_frames--;
+	unsigned long rsp = vex_state->guest_RSP;
+	if (!only_clobber) {
+		struct per_thread *pt = get_per_thread();
+		pt->frame_limit = rsp;
+		if (pt->nr_stack_frames == 0)
+			VG_(printf)("Warning: thread %d returned from more functions than it called?\n",
+				    VG_(get_running_tid)());
+		else
+			pt->nr_stack_frames--;
+	}
+	/* Note use of deliberately non-canonical address. */
+	vex_state->guest_RCX = 0xaaaadead0000f001ul;
+	vex_state->guest_RDX = 0xaaaadead0001f001ul;
+	vex_state->guest_RSI = 0xaaaadead0002f001ul;
+	vex_state->guest_RDI = 0xaaaadead0003f001ul;
+	vex_state->guest_R8  = 0xaaaadead0004f001ul;
+	vex_state->guest_R9  = 0xaaaadead0005f001ul;
+	vex_state->guest_R10 = 0xaaaadead0006f001ul;
+	vex_state->guest_R11 = 0xaaaadead0007f001ul;
 	return EmWarn_NONE;
 }
 
@@ -509,11 +522,41 @@ rewriteDcForStatement(struct deref_collection *dc, IRStmt *stmt, IRSB *sb)
 }
 
 static IRSB *
-sca_instrument ( VgCallbackClosure* closure,
-		 IRSB* sbIn,
-		 VexGuestLayout* layout, 
-		 VexGuestExtents* vge,
-		 IRType gWordTy, IRType hWordTy )
+sca_instrument_clobber(IRSB *sbIn)
+{
+	IRCallee *cee;
+	IRDirty *d;
+
+	if (sbIn->jumpkind != Ijk_Ret)
+		return sbIn;
+
+	cee = mkIRCallee(0, "sca_ret", sca_ret_cb);
+	d = emptyIRDirty();
+	d->cee = cee;
+	d->guard = IRExpr_Const(IRConst_U1(1));
+	d->args = mkIRExprVec_0();
+	d->tmp = IRTemp_INVALID;
+	d->mFx = Ifx_None;
+	d->mAddr = NULL;
+	d->mSize = 0;
+	d->needsBBP = True;
+	d->nFxState = 2;
+	d->fxState[0].fx = Ifx_Write;
+	d->fxState[0].offset = 0;
+	d->fxState[0].size = sizeof(VexGuestAMD64State);
+	d->fxState[0].nRepeats = 0;
+	d->fxState[0].repeatLen = 0;
+	d->fxState[1].fx = Ifx_Read;
+	d->fxState[1].offset = OFFSET_amd64_RSP;
+	d->fxState[1].size = 8;
+	d->fxState[1].nRepeats = 0;
+	d->fxState[1].repeatLen = 0;
+	addStmtToIRSB(sbIn, IRStmt_Dirty(d));
+	return sbIn;
+}
+
+static IRSB *
+sca_instrument_full(IRSB *sbIn)
 {
 	IRSB *sbOut = deepCopyIRSBExceptStmts(sbIn);
 	int i;
@@ -679,12 +722,12 @@ sca_instrument ( VgCallbackClosure* closure,
 			i++;
 		}
 	}
-	if (sbIn->jumpkind == Ijk_Call ||
-	    sbIn->jumpkind == Ijk_Ret) {
+	if (sbIn->jumpkind == Ijk_Call) {
 		void *cb;
 		HChar *label;
 		IRTemp t;
 		IRDirty *d;
+		IRExpr *n;
 
 		t = newIRTemp(sbOut->tyenv, Ity_I64);
 		addStmtToIRSB(
@@ -692,37 +735,41 @@ sca_instrument ( VgCallbackClosure* closure,
 			IRStmt_WrTmp(
 				t,
 				IRExpr_Get(OFFSET_amd64_RSP, Ity_I64)));
-		if (sbIn->jumpkind == Ijk_Call) {
-			IRExpr *n;
-			if (sbIn->next->tag == Iex_Const || sbIn->next->tag == Iex_RdTmp) {
-				n = sbIn->next;
-			} else {
-				IRTemp t2 = newIRTemp(sbOut->tyenv, Ity_I64);
-				addStmtToIRSB(
-					sbOut,
-					IRStmt_WrTmp(
-						t2,
-						sbIn->next));
-				n = IRExpr_RdTmp(t2);
-			}
-			d = unsafeIRDirty_0_N(
-				0,
-				"sca_call",
-				sca_call_cb,
-				mkIRExprVec_2(
-					IRExpr_RdTmp(t),
-					n));
+		if (sbIn->next->tag == Iex_Const || sbIn->next->tag == Iex_RdTmp) {
+			n = sbIn->next;
 		} else {
-			d = unsafeIRDirty_0_N(
-				0,
-				"sca_ret",
-				sca_ret_cb,
-				mkIRExprVec_1(
-					IRExpr_RdTmp(t)));
+			IRTemp t2 = newIRTemp(sbOut->tyenv, Ity_I64);
+			addStmtToIRSB(
+				sbOut,
+				IRStmt_WrTmp(
+					t2,
+					sbIn->next));
+			n = IRExpr_RdTmp(t2);
 		}
+		d = unsafeIRDirty_0_N(
+			0,
+			"sca_call",
+			sca_call_cb,
+			mkIRExprVec_2(
+				IRExpr_RdTmp(t),
+				n));
 		addStmtToIRSB(sbOut, IRStmt_Dirty(d));
 	}
-	return sbOut;
+
+	return sca_instrument_clobber(sbOut);
+}
+
+static IRSB *
+sca_instrument ( VgCallbackClosure* closure,
+		 IRSB* sbIn,
+		 VexGuestLayout* layout, 
+		 VexGuestExtents* vge,
+		 IRType gWordTy, IRType hWordTy )
+{
+	if (only_clobber)
+		return sca_instrument_clobber(sbIn);
+	else
+		return sca_instrument_full(sbIn);
 }
 
 static void sca_fini(Int exitcode)
@@ -768,6 +815,8 @@ sca_process_command_line_option(Char *opt)
 		database = mmap_addr;
 		VG_(close)(fd);
 		return True;
+	} else if (VG_BOOL_CLO(opt, "--only-clobber", only_clobber)) {
+		return True;
 	} else {
 		return False;
 	}
@@ -776,7 +825,7 @@ sca_process_command_line_option(Char *opt)
 static void
 sca_print_usage(void)
 {
-	VG_(printf)("Only tool argument is --database=..., the path to the database\n");
+	VG_(printf)("Only tool arguments are --database=..., the path to the database, and --only-clobber\n");
 }
 
 static void
