@@ -701,7 +701,8 @@ public:
 };
 
 void
-findInstrSuccessorsAndCallees(AddressSpace *as,
+findInstrSuccessorsAndCallees(Oracle *oracle,
+			      AddressSpace *as,
 			      const VexRip &rip,
 			      std::vector<VexRip> &directExits,
 			      gc_pair_VexRip_set_t *callees)
@@ -726,7 +727,7 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 	   so we need to look at the fall through addresses. */
 	if (irsb->jumpkind == Ijk_Call) {
 		if (!irsb->next_is_const ||
-		    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
+		    !oracle->functionNeverReturns(StaticRip(irsb->next_const.rip)))
 			directExits.push_back(extract_call_follower(irsb));
 		/* Emit the target as well, if possible. */
 		if (irsb->next_is_const)
@@ -745,10 +746,10 @@ findInstrSuccessorsAndCallees(AddressSpace *as,
 }
 
 static void
-findSuccessors(AddressSpace *as, VexRip rip, std::vector<VexRip> &out)
+findSuccessors(Oracle *oracle, AddressSpace *as, VexRip rip, std::vector<VexRip> &out)
 {
 	gc_pair_VexRip_set_t *callees = new gc_pair_VexRip_set_t();
-	findInstrSuccessorsAndCallees(as, rip, out, callees);
+	findInstrSuccessorsAndCallees(oracle, as, rip, out, callees);
 	for (auto it = callees->begin();
 	     it != callees->end();
 	     it++)
@@ -842,7 +843,7 @@ Oracle::clusterRips(const std::set<VexRip> &inputRips,
 			 * another root -> have to do it the hard
 			 * way. */
 			std::vector<VexRip> s;
-			findSuccessors(ms->addressSpace, next.first, s);
+			findSuccessors(this, ms->addressSpace, next.first, s);
 			for (auto it2 = s.begin();
 			     it2 != s.end();
 			     it2++)
@@ -904,7 +905,7 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 			LibVEX_maybe_gc(token);
 			bool this_did_something = false;
 			Function f(*it);
-			f.calculateRegisterLiveness(ths->ms->addressSpace, &this_did_something);
+			f.calculateRegisterLiveness(ths, ths->ms->addressSpace, &this_did_something);
 			if (this_did_something)
 				changed++;
 			else
@@ -1763,6 +1764,45 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip)
 	return aliasConfigOnEntryToInstruction(rip, &ign);
 }
 
+bool
+Oracle::functionNeverReturns(const StaticRip &sr)
+{
+	for (auto it = terminalFunctions.begin(); it != terminalFunctions.end(); it++)
+		if (sr == *it)
+			return true;
+	return false;
+}
+
+void
+Oracle::findNoReturnFunctions()
+{
+	/* Some library functions which never return */
+	static const char *const terminals[] =
+		{ "pthread_exit", "abort", "exit", "__stack_chk_fail",
+		  "__assert_fail", "__assert_perror_fail", "__assert",
+		  "err", "errx", "verr", "verrx", "__pthread_unwind_next",
+		  "longjmp", "_longjmp", "siglongjmp",
+		  "quick_exit", "_exit", "_Exit", "__error_noreturn",
+		  "__error_at_line_noreturn",
+
+		  "SLang_exit_error",
+
+		  "png_error", "png_chunk_error", "png_err",
+
+		  "g_assertion_message", "g_assertion_message_expr",
+		  "g_assertion_message_cmpstr", "g_assertion_message_cmpnum",
+		  "g_assertion_message_error", "g_assert_warning",
+
+		  "_ZSt9terminatev", "_ZSt10unexpectedv",
+		  NULL };
+	for (int i = 0; terminals[i]; i++) {
+		unsigned long r;
+		r = ms->elfData->getPltAddress(ms->addressSpace, terminals[i]);
+		if (r)
+			terminalFunctions.push_back(StaticRip(r));
+	}
+}
+
 void
 Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads,
 			     std::set<StaticRip> &visited,
@@ -1815,7 +1855,7 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads,
 			if (end_of_instruction == irsb->stmts_used) {
 				if (irsb->jumpkind == Ijk_Call) {
 					if (!irsb->next_is_const ||
-					    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
+					    !functionNeverReturns(StaticRip(irsb->next_const.rip)))
 						callSucc.push_back(StaticRip(extract_call_follower(irsb)));
 					if (irsb->next_is_const)
 						callees.push_back(StaticRip(irsb->next_const.rip));
@@ -1935,7 +1975,7 @@ Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
 }
 
 void
-Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_something)
+Oracle::Function::calculateRegisterLiveness(Oracle *oracle, AddressSpace *as, bool *done_something)
 {
 	bool changed;
 
@@ -1956,7 +1996,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 		     it != instrsToRecalculate1.end();
 		     it++) {
 			bool t = false;
-			updateLiveOnEntry(*it, as, &t);
+			updateLiveOnEntry(oracle, *it, as, &t);
 			if (t)
 				addPredecessorsNonCall(*it, instrsToRecalculate2);
 		}
@@ -1969,7 +2009,7 @@ Oracle::Function::calculateRegisterLiveness(AddressSpace *as, bool *done_somethi
 		     it != instrsToRecalculate2.end();
 		     it++) {
 			bool t = false;
-			updateLiveOnEntry(*it, as, &t);
+			updateLiveOnEntry(oracle, *it, as, &t);
 			if (t)
 				addPredecessorsNonCall(*it, instrsToRecalculate1);
 		}
@@ -2035,7 +2075,7 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 }
 
 void
-Oracle::Function::updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool *changed)
+Oracle::Function::updateLiveOnEntry(Oracle *oracle, const StaticRip &rip, AddressSpace *as, bool *changed)
 {
 	LivenessSet res;
 
@@ -2053,7 +2093,7 @@ Oracle::Function::updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool
 	if (nr_statements == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Call) {
 			if (!irsb->next_is_const ||
-			    irsb->next_const.rip.unwrap_vexrip() != __STACK_CHK_FAILED)
+			    !oracle->functionNeverReturns(StaticRip(irsb->next_const.rip)))
 				fallThroughRips.push_back(StaticRip(extract_call_follower(irsb)));
 			if (irsb->next_is_const)
 				callees.push_back(StaticRip(irsb->next_const.rip));

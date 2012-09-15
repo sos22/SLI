@@ -105,6 +105,24 @@ ElfData::lookupPltSymbol(unsigned idx) const
 	return NULL;
 }
 
+unsigned long
+ElfData::getPltAddress(AddressSpace *as, const char *name) const
+{
+	int idx = -1;
+	for (auto it = plt_symbol_names.begin(); it != plt_symbol_names.end(); it++) {
+		if (!strcmp(name, it->second)) {
+			idx = it->first;
+			break;
+		}
+	}
+	if (idx == -1)
+		return 0;
+	for (unsigned long res = plt_start; res < plt_end; res += 16)
+		if (as->fetch<int>(res + 7, NULL) == idx)
+			return res;
+	return -1;
+}
+
 MachineState *
 MachineState::readELFExec(const char *path)
 {

@@ -28,10 +28,6 @@
 #define FREE_ADDRESS 0
 #endif
 
-#ifndef __STACK_CHK_FAILED
-#define __STACK_CHK_FAILED 0x4ffe80ul
-#endif
-
 /* We do an initial clustering using @STORE_CLUSTER_THRESHOLD, and
    then backtrack by up to @CONFIG_MAX_STORE_BACKTRACK instructions to
    find a nice place to start the analysis from (where that's

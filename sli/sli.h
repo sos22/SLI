@@ -532,6 +532,7 @@ public:
 	unsigned long plt_start, plt_end;
 	std::vector<std::pair<unsigned, char *> > plt_symbol_names;
 	const char *lookupPltSymbol(unsigned idx) const;
+	unsigned long getPltAddress(AddressSpace *as, const char *name) const;
 	void visit(HeapVisitor &) {}
 	NAMED_CLASS
 };

@@ -169,7 +169,7 @@ public:
 		void *operator new(size_t s); /* DNI */
 		char *mkName() const { return my_asprintf("function_%s", rip.name()); }
 		void getInstructionsInFunction(std::vector<StaticRip> &out) const;
-		void updateLiveOnEntry(const StaticRip &rip, AddressSpace *as, bool *changed);
+		void updateLiveOnEntry(Oracle *oracle, const StaticRip &rip, AddressSpace *as, bool *changed);
 		void updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
 		void addPredecessorsDirect(const StaticRip &rip, std::vector<StaticRip> &out);
 		void addPredecessorsNonCall(const StaticRip &rip, std::vector<StaticRip> &out);
@@ -204,7 +204,7 @@ public:
 				    const std::vector<StaticRip> &fallThrough,
 				    const std::vector<StaticRip> &callSucc,
 				    const std::vector<StaticRip> &branch);
-		void calculateRegisterLiveness(AddressSpace *as, bool *done_something);
+		void calculateRegisterLiveness(Oracle *oracle, AddressSpace *as, bool *done_something);
 		void calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle);
 		void calculateAliasing(AddressSpace *as, bool *done_something);
 
@@ -324,7 +324,10 @@ private:
 	void getRbpToRspOffset(const StaticRip &rip, RbpToRspOffsetState *state, unsigned long *offset);
 	void setRbpToRspOffset(const StaticRip &rip, RbpToRspOffsetState state, unsigned long offset);
 
+	std::vector<StaticRip> terminalFunctions;
+	void findNoReturnFunctions();
 public:
+	bool functionNeverReturns(const StaticRip &rip);
 	static void loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token);
 	void visit(HeapVisitor &hv) {
 		hv(ms);
@@ -402,6 +405,8 @@ public:
 	{
 		if (tags)
 			loadTagTable(tags);
+		if (ms->elfData)
+			findNoReturnFunctions();
 	}
 };
 
@@ -419,7 +424,8 @@ typedef gc_map<std::pair<VexRip, VexRip>,
 	       &ir_heap> gc_pair_VexRip_set_t;
 //void mergeUlongSets(gc_pair_ulong_set_t *dest, const gc_pair_ulong_set_t *src);
 
-void findInstrSuccessorsAndCallees(AddressSpace *as,
+void findInstrSuccessorsAndCallees(Oracle *oracle,
+				   AddressSpace *as,
 				   const VexRip &rip,
 				   std::vector<VexRip> &directExits,
 				   gc_pair_VexRip_set_t *callees);
