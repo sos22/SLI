@@ -11,7 +11,8 @@ TOOLS =		memcheck \
 		none \
 		helgrind \
 		drd \
-		sca
+		sca \
+		scc
 
 EXP_TOOLS = 	exp-sgcheck \
 		exp-bbv \
