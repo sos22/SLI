@@ -942,8 +942,6 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 	     it++) {
 		LibVEX_maybe_gc(token);
 		Function f(*it);
-		if (f.rip.rip == 0xa335c0)
-			dbg_break("Here\n");
 		if (!f.aliasingConfigCorrect()) {
 			do {
 				done_something = false;
