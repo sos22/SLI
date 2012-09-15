@@ -58,6 +58,8 @@ struct hash_head {
 struct hash_entry {
 	unsigned char aliases[16];
 	unsigned char stackEscape;
+	unsigned char rbpToRspValid;
+	long rbpToRspDelta;
 };
 
 struct per_thread {
@@ -138,6 +140,19 @@ find_hash_entry(unsigned long rip)
 	}
 
 	return (const struct hash_entry *)(database + hh->offset + hh->nr_slots * 8 + i * (sizeof(struct hash_entry)));
+}
+
+static VexEmWarn
+sca_check_rbp_cb(unsigned long rip, unsigned long rsp, unsigned long rbp, long desiredDelta)
+{
+	if (desiredDelta != rsp - rbp)
+		VG_(printf)("RIP %lx, RBP %lx, RSP %lx, delta %lx, should be %lx\n",
+			    rip,
+			    rbp,
+			    rsp,
+			    rsp - rbp,
+			    desiredDelta);
+	return EmWarn_NONE;
 }
 
 static VexEmWarn
@@ -627,6 +642,29 @@ build_imark_stmt(IRCallee *cee, const struct hash_entry *he)
 	return IRStmt_Dirty(d);
 }
 
+static void
+checkRbp(IRSB *sb, unsigned long rip, long delta)
+{
+	IRTemp rsp;
+	IRTemp rbp;
+	rsp = newIRTemp(sb->tyenv, Ity_I64);
+	rbp = newIRTemp(sb->tyenv, Ity_I64);
+	addStmtToIRSB(sb, IRStmt_WrTmp(rsp, IRExpr_Get(OFFSET_amd64_RSP,Ity_I64)));
+	addStmtToIRSB(sb, IRStmt_WrTmp(rbp, IRExpr_Get(OFFSET_amd64_RBP,Ity_I64)));
+	addStmtToIRSB(
+		sb,
+		IRStmt_Dirty(
+			unsafeIRDirty_0_N(
+				0,
+				"sca_check_rbp",
+				sca_check_rbp_cb,
+				mkIRExprVec_4(
+					IRExpr_Const(IRConst_U64(rip)),
+					IRExpr_RdTmp(rsp),
+					IRExpr_RdTmp(rbp),
+					IRExpr_Const(IRConst_U64(delta))))));
+}
+
 static IRSB *
 sca_instrument_full(IRSB *sbIn)
 {
@@ -648,6 +686,8 @@ sca_instrument_full(IRSB *sbIn)
 	rip = 0;
 	he = NULL;
 	while (i < sbIn->stmts_used) {
+		if (he && he->rbpToRspValid)
+			checkRbp(sbOut, rip, he->rbpToRspDelta);
 		if (sbIn->stmts[i]->tag != Ist_IMark) {
 			ppIRSB(sbIn);
 			VG_(printf)("i = %d\n", i);
@@ -828,8 +868,9 @@ sca_instrument_full(IRSB *sbIn)
 					mkIRExprVec_2(
 						IRExpr_RdTmp(t),
 						n))));
+	} else if (he && he->rbpToRspValid) {
+		checkRbp(sbOut, rip, he->rbpToRspDelta);
 	}
-
 	return sca_instrument_clobber(sbOut);
 }
 

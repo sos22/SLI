@@ -22,6 +22,8 @@ typedef unsigned char uint8_t;
 struct hash_entry {
 	uint8_t aliases[16];
 	uint8_t stackEscape;
+	uint8_t rbpToRspValid;
+	long rbpToRspDelta;
 };
 
 struct header {
@@ -110,7 +112,8 @@ allocate_hash_chain(struct output_file *f, int idx, int len)
 }
 
 static void
-add_entry(struct output_file *f, int idx, int max_this_slot, unsigned long rip, int stackEscape, const uint8_t *alias)
+add_entry(struct output_file *f, int idx, int max_this_slot, unsigned long rip, int stackEscape, const uint8_t *alias,
+	  uint8_t rbpToRspValid, long rbpToRspDelta)
 {
 	assert(max_this_slot > 0);
 	if (f->allocated > f->mapping_size) {
@@ -136,6 +139,8 @@ add_entry(struct output_file *f, int idx, int max_this_slot, unsigned long rip, 
 	rip_area[h->heads[idx].nr_slots] = rip;
 	memcpy(he->aliases, alias, 16);
 	he->stackEscape = stackEscape;
+	he->rbpToRspValid = rbpToRspValid;
+	he->rbpToRspDelta = rbpToRspDelta;
 	h->heads[idx].nr_slots++;
 }
 
@@ -215,7 +220,7 @@ main(int argc, char *argv[])
 	/* Now we can actually populate the file. */
 	if (sqlite3_prepare_v2(
 		    database,
-		    "SELECT rip, alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackEscape FROM instructionAttributes",
+		    "SELECT rip, alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackEscape,rbpToRspDeltaState,rbpToRspDelta FROM instructionAttributes",
 		    -1,
 		    &stmt,
 		    NULL) != SQLITE_OK)
@@ -228,7 +233,10 @@ main(int argc, char *argv[])
 			alias[i] = sqlite3_column_int(stmt, i + 1);
 		int stackEscape = sqlite3_column_int(stmt, 17);
 		int idx = hash_rip(rip);
-		add_entry(&output, idx, hash_chain_lengths[idx], rip, stackEscape, alias);
+		int rbpToRspState = sqlite3_column_int(stmt, 18);
+		long rbpToRspDelta = sqlite3_column_int64(stmt, 19);
+		add_entry(&output, idx, hash_chain_lengths[idx], rip, stackEscape, alias,
+			  rbpToRspState == 1, rbpToRspDelta);
 	}
 	if (rc != SQLITE_DONE)
 		errx(1, "advancing SQL query: %s", sqlite3_errmsg(database));
