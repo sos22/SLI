@@ -21,8 +21,10 @@
 
 #ifndef NDEBUG
 static bool debug_static_alias = false;
+static bool debug_static_rbp_offsets = false;
 #else
 #define debug_static_alias false
+#define debug_static_rbp_offsets false
 #endif
 
 void dbg_database_query(const char *query);
@@ -48,17 +50,6 @@ hash_ulong_pair(const std::pair<unsigned long, unsigned long> &p)
 {
 	return p.first + p.second * 59;
 }
-
-#if 0
-void
-mergeUlongSets(gc_pair_ulong_set_t *dest, const gc_pair_ulong_set_t *src)
-{
-	for (gc_pair_ulong_set_t::iterator it = src->begin();
-	     it != src->end();
-	     it++)
-		dest->set(it.key(), it.value());
-}
-#endif
 
 template<typename t> void
 operator |=(std::set<t> &x, const std::set<t> &y)
@@ -1905,6 +1896,9 @@ Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
 	if (rbpToRspOffsetsCorrect())
 		return;
 
+	if (debug_static_rbp_offsets)
+		printf("Calculate RBP->RSP offsets for %s\n", rip.name());
+
 	std::vector<StaticRip> instrsToRecalculate1;
 	std::vector<StaticRip> instrsToRecalculate2;
 
@@ -2188,6 +2182,12 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 	unsigned long offset = -99999999; /* Shut the compiler up. */
 
 	oracle->getRbpToRspOffset(rip, &current_state, &current_offset);
+	if (debug_static_rbp_offsets)
+		printf("updateRbpToRspOffset(%s); current state %d, %ld\n",
+		       rip.name(),
+		       current_state,
+		       current_offset);
+
 	if (current_state == RbpToRspOffsetStateImpossible) {
 		/* By monotonicity, the result will be
 		   RbpToRspOffsetStateImpossible, so bypass and get
@@ -2204,6 +2204,9 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 	     nr_statements++)
 		;
 
+	if (debug_static_rbp_offsets)
+		ppIRSB(irsb, stdout);
+
 	long delta_offset = 0;
 	IRExpr *rbp = NULL;
 	IRExpr *rsp = NULL;
@@ -2212,8 +2215,11 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 	/* We assume called functions never change rsp or rbp, so
 	 * treat calls as nops. */
 	if (nr_statements == irsb->stmts_used &&
-	    irsb->jumpkind == Ijk_Call)
+	    irsb->jumpkind == Ijk_Call) {
+		if (debug_static_rbp_offsets)
+			printf("Call; treat as nop\n");
 		goto join_predecessors;
+	}
 	/* Scan backwards through the instruction for any writes to
 	   either of the registers of interest. */
 	for (j = nr_statements - 1; j >= 0; j--) {
@@ -2258,9 +2264,11 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 					 "helper_load_8"))
 				t = Ity_I8;
 			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-					 "amd64g_dirtyhelper_RDTSC"))
+					 "amd64g_dirtyhelper_RDTSC")) {
+				if (debug_static_rbp_offsets)
+					printf("Can't handle RDTSC\n");
 				goto impossible_clean;
-			else
+			} else
 				goto impossible;
 			IRExpr *v = IRExpr_Load(t,
 						((IRStmtDirty *)stmt)->details->args[0]);
@@ -2279,11 +2287,21 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 		rsp = NULL;
 	if (rbp && rbp->tag == Iex_Get && ((IRExprGet *)rbp)->reg.asReg() == OFFSET_amd64_RBP)
 		rbp = NULL;
-	if (!rsp && !rbp)
+	if (debug_static_rbp_offsets)
+		printf("RBP = %s, RSP = %s\n",
+		       rbp ? nameIRExpr(rbp) : "<null>",
+		       rsp ? nameIRExpr(rsp) : "<null>");
+	if (!rsp && !rbp) {
+		if (debug_static_rbp_offsets)
+			printf("No modifications to RBP or RSP -> join predecessors\n");
 		goto join_predecessors;
-	if (rsp && rbp)
+	}
+	if (rsp && rbp) {
+		if (debug_static_rbp_offsets)
+			printf("Disallowed odifications to both RBP and RSP -> impossible\n");
 		goto impossible_clean;
-
+	}
+	
 	if (rsp) {
 		if (rsp->tag == Iex_Get) {
 			IRExprGet *g = (IRExprGet *)rsp;
@@ -2292,6 +2310,8 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 			} else if (g->reg.asReg() == OFFSET_amd64_RBP) {
 				offset = 0;
 				state = RbpToRspOffsetStateValid;
+				if (debug_static_rbp_offsets)
+					printf("Set RSP = RBP\n");
 				goto done;
 			}
 		} else if (rsp->tag == Iex_Associative) {
@@ -2303,15 +2323,21 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 				IRExprGet *base = (IRExprGet *)a->contents[1];
 				if (base->reg.asReg() == OFFSET_amd64_RSP) {
 					delta_offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
+					if (debug_static_rbp_offsets)
+						printf("Set RSP = RSP+%ld\n", delta_offset);
 					goto join_predecessors;
 				} else if (base->reg.asReg() == OFFSET_amd64_RBP) {
 					offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
 					state = RbpToRspOffsetStateValid;
+					if (debug_static_rbp_offsets)
+						printf("Set RSP = RBP+%ld\n", offset);
 					goto done;
 				}
 			}
 		}
 
+		if (debug_static_rbp_offsets)
+			printf("Unhandleable update to rsp\n");
 		goto impossible_clean;
 	} else {
 		assert(rbp);
@@ -2323,6 +2349,8 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 			} else if (g->reg.asReg() == OFFSET_amd64_RSP) {
 				offset = 0;
 				state = RbpToRspOffsetStateValid;
+				if (debug_static_rbp_offsets)
+					printf("Set RBP = RSP\n");
 				goto done;
 			}
 		} else if (rbp->tag == Iex_Associative) {
@@ -2335,14 +2363,21 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 				IRConst *o = ((IRExprConst *)a->contents[0])->con;
 				if (base->reg.asReg() == OFFSET_amd64_RBP) {
 					delta_offset = -o->Ico.U64;
+					if (debug_static_rbp_offsets)
+						printf("Set RBP + RBP+%ld\n", -delta_offset);
 					goto join_predecessors;
 				} else if (base->reg.asReg() == OFFSET_amd64_RSP) {
 					offset = -o->Ico.U64;
 					state = RbpToRspOffsetStateValid;
+					if (debug_static_rbp_offsets)
+						printf("Set RBP = RSP+%ld\n", -offset);
 					goto done;
 				}
 			}
 		}
+
+		if (debug_static_rbp_offsets)
+			printf("Unhandleable update to rbp\n");
 
 		/* If the compiler's done base pointer elimination
 		   then RBP can contain almost anything and it's not
@@ -2362,24 +2397,42 @@ join_predecessors:
 			enum RbpToRspOffsetState pred_state;
 			unsigned long pred_offset;
 			oracle->getRbpToRspOffset(*it, &pred_state, &pred_offset);
-			if (pred_state == RbpToRspOffsetStateImpossible)
+			if (pred_state == RbpToRspOffsetStateImpossible) {
+				if (debug_static_rbp_offsets)
+					printf("Predecessor %s -> impossible, give up\n", it->name());
 				goto impossible_clean;
-			if (pred_state == RbpToRspOffsetStateUnknown)
+			}
+			if (pred_state == RbpToRspOffsetStateUnknown) {
+				if (debug_static_rbp_offsets)
+					printf("Predecessor %s -> unknown, continue\n", it->name());
 				continue;
+			}
 			assert(pred_state == RbpToRspOffsetStateValid);
 			if (state == RbpToRspOffsetStateUnknown) {
 				state = RbpToRspOffsetStateValid;
 				offset = pred_offset;
+				if (debug_static_rbp_offsets)
+					printf("Predecesor %s valid at %ld, current unknown, take predecessor\n",
+					       it->name(), offset);
 				continue;
 			}
 			assert(state == RbpToRspOffsetStateValid);
-			if (offset != pred_offset)
+			if (offset != pred_offset) {
+				if (debug_static_rbp_offsets)
+					printf("Predecessor %s has incompatible offset %ld\n",
+					       it->name(), pred_offset);
 				goto impossible_clean;
+			}
+			if (debug_static_rbp_offsets)
+				printf("Predecessor %s has compatible offset %ld\n",
+				       it->name(), pred_offset);
 		}
 	}
 	if (state == RbpToRspOffsetStateUnknown) {
 		/* Predecessor state is still unknown, nothing
 		 * we can do. */
+		if (debug_static_rbp_offsets)
+			printf("Ultimate state is unknown\n");
 		return;
 	}
 
@@ -2388,9 +2441,14 @@ join_predecessors:
 done:
 	if (current_state == state && current_offset == offset) {
 		/* Already correct, nothing to do */
+		if (debug_static_rbp_offsets)
+			printf("Achieved nothing; state %d, offset %ld\n",
+			       state, offset);
 		return;
 	}
 
+	if (debug_static_rbp_offsets)
+		printf("Update state\n");
 	*changed = true;
 	oracle->setRbpToRspOffset(rip, state, offset);
 	return;
@@ -2404,6 +2462,8 @@ impossible:
 	dbg_break("badness");
 
 impossible_clean:
+	if (debug_static_rbp_offsets)
+		printf("Ended in an impossible state\n");
 	state = RbpToRspOffsetStateImpossible;
 	offset = 0;
 	goto done;
