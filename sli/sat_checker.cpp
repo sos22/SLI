@@ -72,9 +72,17 @@ anf_depth(const IRExpr *a)
 	return acc + 1;
 }
 
-static bool
-anf_sort_func(IRExpr *a, IRExpr *b)
+enum ordering {
+	ord_lt,
+	ord_eq,
+	ord_gt
+};
+
+static ordering
+_anf_sort_func(IRExpr *a, IRExpr *b)
 {
+	if (a == b)
+		return ord_eq;
 	bool inv_a = false;
 	bool inv_b = false;
 	while (a->tag == Iex_Unop &&
@@ -87,12 +95,20 @@ anf_sort_func(IRExpr *a, IRExpr *b)
 		inv_b = !inv_b;
 		b = ((IRExprUnop *)b)->arg;
 	}
+	if (a == b) {
+		if (inv_a < inv_b)
+			return ord_lt;
+		else if (inv_a > inv_b)
+			return ord_gt;
+		else
+			return ord_eq;
+	}
 	int a_depth = anf_depth(a);
 	int b_depth = anf_depth(b);
 	if (a_depth < b_depth)
-		return true;
+		return ord_lt;
 	if (a_depth > b_depth)
-		return false;
+		return ord_gt;
 	assert(a_depth == b_depth);
 	if (a_depth != 0) {
 		assert(a->tag == Iex_Associative);
@@ -102,27 +118,31 @@ anf_sort_func(IRExpr *a, IRExpr *b)
 		assert(iex_a->op == Iop_And1);
 		assert(iex_b->op == Iop_And1);
 		for (int i = 0; i < iex_a->nr_arguments && i < iex_b->nr_arguments; i++) {
-			if ( anf_sort_func(iex_a->contents[i], iex_b->contents[i]) )
-				return true;
-			if ( anf_sort_func(iex_b->contents[i], iex_a->contents[i]) )
-				return false;
+			ordering a = _anf_sort_func(iex_a->contents[i], iex_b->contents[i]);
+			if (a != ord_eq)
+				return a;
 		}
 		if (iex_a->nr_arguments < iex_b->nr_arguments)
-			return true;
+			return ord_lt;
 		if (iex_a->nr_arguments > iex_b->nr_arguments)
-			return false;
+			return ord_gt;
 	}
 	if (a < b)
-		return true;
+		return ord_lt;
 	if (a > b)
-		return false;
-	return inv_a < inv_b;		
+		return ord_gt;
+	if (inv_a < inv_b)
+		return ord_lt;
+	else if (inv_a > inv_b)
+		return ord_gt;
+	else
+		return ord_eq;
 }
 
 class compare_args {
 public:
 	bool operator()(IRExpr *a, IRExpr *b) {
-		return anf_sort_func(a, b);
+		return _anf_sort_func(a, b) == ord_lt;
 	}
 };
 
@@ -156,8 +176,7 @@ check_and_normal_form(const IRExpr *e)
 		for (int i = 0; i < iex->nr_arguments; i++)
 			check_and_normal_form(iex->contents[i]);
 		for (int i = 1; i < iex->nr_arguments; i++)
-			assert(iex->contents[i-1] == iex->contents[i] ||
-			       anf_sort_func(iex->contents[i-1], iex->contents[i]));
+			assert(_anf_sort_func(iex->contents[i-1], iex->contents[i]) != ord_gt);
 	}
 }
 
