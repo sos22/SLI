@@ -130,6 +130,12 @@ bool getProbeCFGs(CfgLabelAllocator &allocLabel,
 		  Oracle *oracle, const DynAnalysisRip &vr,
 		  HashedSet<HashedPtr<CFGNode> > &out,
 		  HashedSet<HashedPtr<const CFGNode> > &targetNodes);
+bool getProbeCFGs(CfgLabelAllocator &allocLabel,
+		  Oracle *oracle, const DynAnalysisRip &vr,
+		  HashedSet<HashedPtr<CFGNode> > &out,
+		  HashedSet<HashedPtr<const CFGNode> > &targetNodes,
+		  int thresh1,
+		  int thresh2);
 
 void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			       const std::set<DynAnalysisRip> &roots);
