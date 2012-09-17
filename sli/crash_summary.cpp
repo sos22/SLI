@@ -181,6 +181,7 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 	   -- loadLoad vs loadStore
 	   -- loadLoad vs storeStore
 	   -- loadStore vs storeStore
+	   -- loadStore vs loadStore
 	   -- storeLoad vs storeStore
 	   -- storeStore vs storeStore
 	*/
@@ -201,6 +202,7 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 
 	for (auto it = loadStores.begin(); it != loadStores.end(); it++) {
 		do_set(loadLoads);
+		do_set(loadStores);
 	}
 	for (auto it = storeStores.begin(); it != storeStores.end(); it++) {
 		do_set(loadLoads);
