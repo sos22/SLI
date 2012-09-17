@@ -33,11 +33,11 @@ public:
 	static MaiMap *fromFile(const StateMachine *sm1, const StateMachine *sm2, const char *fname);
 	void print(FILE *f) const;
 
-	class iterator {
+	class const_iterator {
 		std::vector<const CFGNode *>::const_iterator it;
 		std::vector<const CFGNode *>::const_iterator endIt;
 	public:
-		iterator(const std::vector<const CFGNode *> &m)
+		const_iterator(const std::vector<const CFGNode *> &m)
 			: it(m.begin()), endIt(m.end())
 		{}
 		bool finished() const { return it == endIt; }
@@ -46,11 +46,47 @@ public:
 		const CfgLabel &label() const  { return (*it)->label; }
 		DynAnalysisRip dr() const { return DynAnalysisRip(node()->rip); }
 	};
-
-	iterator begin(const MemoryAccessIdentifier &mai) const {
+	const_iterator begin(const MemoryAccessIdentifier &mai) const {
+		auto it = maiCorrespondence->find(mai);
+		assert(it != maiCorrespondence->end());
+		return const_iterator(it->second);
+	}
+	class iterator {
+		std::vector<const CFGNode *>::iterator it;
+		std::vector<const CFGNode *> &vect;
+	public:
+		iterator(std::vector<const CFGNode *> &m)
+			: it(m.begin()), vect(m)
+		{}
+		bool finished() const { return it == vect.end(); }
+		void advance() { it++; }
+		void erase() { it = vect.erase(it); }
+		const CFGNode *node() const { return *it; }
+		const CfgLabel &label() const  { return (*it)->label; }
+		DynAnalysisRip dr() const { return DynAnalysisRip(node()->rip); }
+	};
+	iterator begin(const MemoryAccessIdentifier &mai) {
 		auto it = maiCorrespondence->find(mai);
 		assert(it != maiCorrespondence->end());
 		return iterator(it->second);
+	}
+
+	class key_iterator {
+		std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> >::iterator it;
+		std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> > &map;
+	public:
+		key_iterator(std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> > &c)
+			: it(c.begin()), map(c)
+		{}
+		bool finished() const { return it == map.end(); }
+		void advance() { it++; }
+		void erase() { map.erase(it++); }
+		const MemoryAccessIdentifier &mai() const { return it->first; }
+		bool empty() const { return it->second.empty(); }
+		iterator begin() { return iterator(it->second); }
+	};
+	key_iterator begin() {
+		return key_iterator(*maiCorrespondence);
 	}
 
 	MemoryAccessIdentifier merge(int tid, const std::set<MemoryAccessIdentifier> &mais) {
