@@ -443,6 +443,159 @@ heuristicSimplify(IRExpr *e)
 	return e;
 }
 
+/* We can't get at the values of free variables from the run-time
+   enforcer, so we might as well remove them now. */
+static IRExpr *
+removeFreeVariables(IRExpr *what)
+{
+	switch (what->tag) {
+	case Iex_Get:
+		return what;
+	case Iex_GetI: {
+		auto *i = (IRExprGetI *)what;
+		IRExpr *ix = removeFreeVariables(i->ix);
+		if (!ix)
+			return NULL;
+		if (ix == i->ix)
+			return i;
+		return IRExpr_GetI(i->descr, ix,  i->bias, i->tid);
+	}
+	case Iex_Qop: {
+		abort();
+		auto *i = (IRExprQop *)what;
+		auto arg1 = removeFreeVariables(i->arg1);
+		if (!arg1)
+			return NULL;
+		auto arg2 = removeFreeVariables(i->arg2);
+		if (!arg2)
+			return NULL;
+		auto arg3 = removeFreeVariables(i->arg3);
+		if (!arg3)
+			return NULL;
+		auto arg4 = removeFreeVariables(i->arg4);
+		if (!arg4)
+			return NULL;
+		if (arg1 == i->arg1 && arg2 == i->arg2 && arg3 == i->arg3 && arg4 == i->arg4)
+			return i;
+		return IRExpr_Qop(
+			i->op, arg1, arg2, arg3, arg4);
+	}
+	case Iex_Triop: {
+		abort();
+		auto *i = (IRExprTriop *)what;
+		auto arg1 = removeFreeVariables(i->arg1);
+		if (!arg1)
+			return NULL;
+		auto arg2 = removeFreeVariables(i->arg2);
+		if (!arg2)
+			return NULL;
+		auto arg3 = removeFreeVariables(i->arg3);
+		if (!arg3)
+			return NULL;
+		if (arg1 == i->arg1 && arg2 == i->arg2 && arg3 == i->arg3)
+			return i;
+		return IRExpr_Triop(
+			i->op, arg1, arg2, arg3);
+	}
+	case Iex_Binop: {
+		auto i = (IRExprBinop *)what;
+		auto arg1 = removeFreeVariables(i->arg1);
+		auto arg2 = removeFreeVariables(i->arg2);
+		if (arg1 == i->arg1 && arg2 == i->arg2)
+			return what;
+		if (arg1 && arg2)
+			return IRExpr_Binop(i->op, arg1, arg2);
+		switch (i->op) {
+		case Iop_CmpEQ8:
+		case Iop_CmpEQ16:
+		case Iop_CmpEQ32:
+		case Iop_CmpEQ64:
+			return NULL;
+		default:
+			abort();
+		}
+		break;
+	}
+	case Iex_Unop: {
+		auto i = (IRExprUnop *)what;
+		auto arg = removeFreeVariables(i->arg);
+		if (!arg)
+			return NULL;
+		if (arg == i->arg)
+			return i;
+		return IRExpr_Unop(i->op, arg);
+	}
+	case Iex_Load:
+		/* Should arguably recurse into addr here, but the
+		   rest of the pipeline will never look at it, so
+		   don't bother. */
+		return what;
+	case Iex_Const:
+		return what;
+	case Iex_CCall:
+		/* As for Load, should recur into arguments, but it
+		   doesn't actually make any difference, so don't
+		   bother. */
+		return what;
+	case Iex_Mux0X: {
+		/* mux0x is unevaluatable if any of the arguments are
+		   unevaluatable.  That's not ideal; it'd be better to
+		   try to preserve whichever arguments are eval-able.
+		   The problem is that we don't have any ``preferred''
+		   value at this stage, so we can't put in a sensible
+		   default for the other one. */
+		auto i = (IRExprMux0X *)what;
+		auto cond = removeFreeVariables(i->cond);
+		if (!cond)
+			return NULL;
+		auto expr0 = removeFreeVariables(i->expr0);
+		if (!expr0)
+			return NULL;
+		auto exprX = removeFreeVariables(i->exprX);
+		if (!exprX)
+			return NULL;
+		if (cond == i->cond && expr0 == i->expr0 && exprX == i->exprX)
+			return i;
+		return IRExpr_Mux0X(cond, expr0, exprX);
+	}
+	case Iex_Associative: {
+		auto i = (IRExprAssociative *)what;
+		int idx;
+		IRExpr *a;
+		for (idx = 0; idx < i->nr_arguments; idx++) {
+			a = removeFreeVariables(i->contents[idx]);
+			if (a != i->contents[idx])
+				break;
+		}
+		if (idx == i->nr_arguments)
+			return i;
+		IRExprAssociative *newI = (IRExprAssociative *)IRExpr_Associative(i->nr_arguments, i->op);
+		int idx2 = idx;
+		memcpy(newI->contents, i->contents, idx * sizeof(IRExpr *));
+		if (a) {
+			newI->contents[idx2] = a;
+			idx2++;
+		}
+		idx++;
+		while (idx < i->nr_arguments) {
+			a = removeFreeVariables(i->contents[idx]);
+			if (a) {
+				newI->contents[idx2] = a;
+				idx2++;
+			}
+			idx++;
+		}
+		newI->nr_arguments = idx2;
+		return newI;
+	}
+	case Iex_HappensBefore:
+		return what;
+	case Iex_FreeVariable:
+		return NULL;
+	}
+	abort();
+}
+
 static crashEnforcementData
 enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
@@ -464,6 +617,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 						.setAddressSpace(oracle->ms->addressSpace),
 					   token);
 	requirement = IRExpr_Binop(Iop_And1, requirement, summary->verificationCondition);
+	requirement = removeFreeVariables(requirement);
 	requirement = internIRExpr(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
