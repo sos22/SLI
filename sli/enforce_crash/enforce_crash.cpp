@@ -167,7 +167,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 		instrT *i = *it;
 
 		for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
-			if (it2->type == instrT::successor_t::succ_call)
+			if (it2->type == succ_call)
 				continue;
 			if (it2->instr && !instructionPresence.count(it2->instr))
 				insert(it2->instr->rip);

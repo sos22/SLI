@@ -6,6 +6,7 @@
 #include "libvex_ir.h"
 #include "libvex_guest_offsets.h"
 #include "library.hpp"
+#include "cfgnode.hpp"
 
 #include <set>
 #include <map>
@@ -165,10 +166,8 @@ public:
 	CfgLabel label;
 
 	class successor_t {
-	public:
-		enum succ_type { succ_default, succ_branch, succ_call, succ_unroll };
 	private:
-		successor_t(succ_type _type,
+		successor_t(CfgSuccessorType _type,
 			    const ripType &_rip,
 			    Instruction *_instr,
 			    LibraryFunctionType _calledFunction)
@@ -176,7 +175,7 @@ public:
 			  calledFunction(_calledFunction)
 		{}
 	public:
-		succ_type type;
+		CfgSuccessorType type;
 		ripType rip;
 		Instruction *instr;
 		LibraryFunctionType calledFunction;
@@ -184,7 +183,7 @@ public:
 			return type == o.type && rip == o.rip &&
 				instr == o.instr && calledFunction == o.calledFunction;
 		}
-		successor_t() : type((succ_type)-1) {}
+		successor_t() : type((CfgSuccessorType)-1) {}
 		static successor_t call(const ripType _rip)
 		{
 			return successor_t(succ_call, _rip,
@@ -230,7 +229,7 @@ public:
 	successor_t *getDefault() {
 		successor_t *res = NULL;
 		for (auto it = successors.begin(); it != successors.end(); it++) {
-			if (it->type == successor_t::succ_default) {
+			if (it->type == succ_default) {
 				assert(!res);
 				res = &*it;
 			}
@@ -1171,7 +1170,7 @@ PatchFragment<r>::nextInstr(CFG<r> *cfg)
 	     it != pendingInstructions.end();
 	     it++) {
 		for (auto it2 = it->first->successors.begin(); it2 != it->first->successors.end(); it2++) {
-			if (it2->type == Instruction<r>::successor_t::succ_default &&
+			if (it2->type == succ_default &&
 			    it2->instr) {
 				pendingInstructions[it2->instr] = false;
 				break;
@@ -1541,7 +1540,7 @@ PatchFragment<r>::emitStraightLine(Instruction<r> *i)
 		
 		typename Instruction<r>::successor_t *next = NULL;
 		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
-			if (it->type == Instruction<r>::successor_t::succ_default) {
+			if (it->type == succ_default) {
 				assert(!next);
 				next = &*it;
 			}
@@ -1658,16 +1657,16 @@ CFG<r>::print(FILE *f)
 		     it2++) {
 			const char *t = NULL;
 			switch (it2->type) {
-			case Instruction<r>::successor_t::succ_default:
+			case succ_default:
 				t = "default";
 				break;
-			case Instruction<r>::successor_t::succ_branch:
+			case succ_branch:
 				t = "branch";
 				break;
-			case Instruction<r>::successor_t::succ_call:
+			case succ_call:
 				t = "call";
 				break;
-			case Instruction<r>::successor_t::succ_unroll:
+			case succ_unroll:
 				t = "unroll";
 				break;
 			}
@@ -1697,16 +1696,16 @@ Instruction<r>::prettyPrint(FILE *f) const
 			fprintf(f, ", ");
 		const char *t = NULL;
 		switch (it->type) {
-		case successor_t::succ_default:
+		case succ_default:
 			t = "default";
 			break;
-		case successor_t::succ_branch:
+		case succ_branch:
 			t = "branch";
 			break;
-		case successor_t::succ_call:
+		case succ_call:
 			t = "call";
 			break;
-		case successor_t::succ_unroll:
+		case succ_unroll:
 			t = "unroll";
 			break;
 		}

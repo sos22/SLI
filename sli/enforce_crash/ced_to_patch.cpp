@@ -1706,9 +1706,9 @@ findSuccessors(const C2PRip &c2p_rip,
 		for (auto it = underlying->successors.begin();
 		     it != underlying->successors.end();
 		     it++) {
-			if (it->type == Instruction<VexRip>::successor_t::succ_default)
+			if (it->type == succ_default)
 				defaultRip = it->rip;
-			else if (it->type == Instruction<VexRip>::successor_t::succ_branch)
+			else if (it->type == succ_branch)
 				branchRip = it->rip;
 			else
 				abort();
@@ -2123,11 +2123,11 @@ printDetailedCfg(Instruction<C2PRip> *root, std::set<Instruction<C2PRip> *> &pri
 	     it != root->successors.end();
 	     it++) {
 		if (it->instr) {
-			if (it->type == Instruction<C2PRip>::successor_t::succ_default)
+			if (it->type == succ_default)
 				fprintf(f,
 					" defaultSucc = %-6s",
 					it->instr->label.name());
-			else if (it->type == Instruction<C2PRip>::successor_t::succ_branch)
+			else if (it->type == succ_branch)
 				fprintf(f,
 					" branchSucc  = %-6s",
 					it->instr->label.name());
@@ -2346,13 +2346,13 @@ top:
 	Instruction<C2PRip> *nextInstr = NULL;
 	for (auto it = root->successors.begin(); it != root->successors.end(); it++) {
 		if (it->instr) {
-			if (it->type == Instruction<C2PRip>::successor_t::succ_default) {
+			if (it->type == succ_default) {
 				/* Should only have one default exit */
 				assert(nextInstr == NULL);
 				nextInstr = it->instr;
 			} else {
 				/* Branches should be handled as early relocs */
-				assert(it->type == Instruction<C2PRip>::successor_t::succ_branch);
+				assert(it->type == succ_branch);
 				assert(!root->relocs.empty());
 			}
 		}
