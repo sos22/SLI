@@ -8,8 +8,8 @@
 
 class Mapping {
 	const void *content;
-	off_t size;
 public:
+	off_t size;
 	Mapping() : content(NULL) {}
 	int init(const char *path);
 	~Mapping() { if (content) munmap((void *)content, size); }

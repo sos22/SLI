@@ -2,23 +2,42 @@
 #include "mapping.hpp"
 #include "oracle.hpp"
 
+static FILE *
+success_log;
+static FILE *
+fail_log;
+static FILE *
+invalid_log;
+
+static long
+nr_success;
+static long
+nr_fail;
+static long
+nr_invalid;
+
 static void
-validate_trace(Oracle *oracle, std::vector<unsigned long> rips)
+dump_trace(FILE *f, const std::vector<unsigned long> &trace)
+{
+	fprintf(f, "{");
+	for (auto it2 = trace.begin(); it2 != trace.end(); it2++) {
+		if (it2 != trace.begin())
+			fprintf(f, ", ");
+		fprintf(f, "0x%lx", *it2);
+	}
+	fprintf(f, "}\n");
+}
+
+static void
+validate_trace(Oracle *oracle, const std::vector<unsigned long> &rips)
 {
 	CfgLabelAllocator allocLabel;
 
 	assert(!rips.empty());
 
-	printf("Check trace {");
-	for (auto it2 = rips.begin(); it2 != rips.end(); it2++) {
-		if (it2 != rips.begin())
-			printf(", ");
-		printf("0x%lx", *it2);
-	}
-	printf("} -> ");
-
 	if (!oracle->type_index->ripPresent(DynAnalysisRip(VexRip::invent_vex_rip(rips.back())))) {
-		printf("Invalid; no type information for %lx\n", rips.back());
+		dump_trace(invalid_log, rips);
+		nr_invalid++;
 		return;
 	}
 
@@ -32,7 +51,8 @@ validate_trace(Oracle *oracle, std::vector<unsigned long> rips)
 		live.insert(*it);
 	for (auto it = rips.begin(); it != rips.end(); it++) {
 		if (live.empty()) {
-			printf("Fail\n");
+			dump_trace(fail_log, rips);
+			nr_fail++;
 			return;
 		}
 		std::set<CFGNode *> newLive;
@@ -47,7 +67,8 @@ validate_trace(Oracle *oracle, std::vector<unsigned long> rips)
 		}
 	}
 
-	printf("Pass\n");
+	dump_trace(success_log, rips);
+	nr_success++;
 }
 
 int
@@ -74,7 +95,14 @@ main(int argc, char *argv[])
 	}
 	oracle->loadCallGraph(oracle, callgraph, ALLOW_GC);
 
+	success_log = fopen("success.txt", "w");
+	fail_log = fopen("fail.txt", "w");
+	invalid_log = fopen("invalid.txt", "w");
+	if (!success_log || !fail_log || !invalid_log)
+		err(1, "opening one of the log files");
+
 	unsigned long offset;
+	long cntr = 0;
 	offset = 0;
 	while (1) {
 		const unsigned long *magic = traces.get<unsigned long>(offset);
@@ -94,6 +122,14 @@ main(int argc, char *argv[])
 			offset += 8;
 		}
 		validate_trace(oracle, trace);
+		cntr++;
+		assert(cntr == nr_success + nr_fail + nr_invalid);
+		printf("Done %ld (%f%%).  %f%% success, %f%% invalid, %f%% failed\n",
+		       cntr,
+		       (offset * 100.0) / traces.size,
+		       (double)nr_success / cntr * 100,
+		       (double)nr_invalid / cntr * 100,
+		       (double)nr_fail / cntr * 100);
 	}
 
 	return 0;
