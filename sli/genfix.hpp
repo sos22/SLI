@@ -166,7 +166,7 @@ public:
 	CfgLabel label;
 
 	class successor_t {
-	private:
+	public:
 		successor_t(CfgSuccessorType _type,
 			    const ripType &_rip,
 			    Instruction *_instr,
@@ -174,7 +174,6 @@ public:
 			: type(_type), rip(_rip), instr(_instr),
 			  calledFunction(_calledFunction)
 		{}
-	public:
 		CfgSuccessorType type;
 		ripType rip;
 		Instruction *instr;

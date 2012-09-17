@@ -1012,31 +1012,57 @@ public:
 		 InstructionDecoder &decode, bool _expandJcc)
 		: expandJcc(_expandJcc)
 	{
-		typedef std::pair<AbstractThread, Instruction<VexRip> *> q_entry_t;
+		typedef std::pair<AbstractThread, const CFGNode *> q_entry_t;
 		std::queue<q_entry_t> pending;
 		for (auto it = summary->loadMachine->cfg_roots.begin();
 		     it != summary->loadMachine->cfg_roots.end();
 		     it++)
-			pending.push(q_entry_t(abs(it->first), decode(it->second)));
+			pending.push(q_entry_t(abs(it->first), it->second));
 		for (auto it = summary->storeMachine->cfg_roots.begin();
 		     it != summary->storeMachine->cfg_roots.end();
 		     it++)
-			pending.push(q_entry_t(abs(it->first), decode(it->second)));
+			pending.push(q_entry_t(abs(it->first), it->second));
+		std::map<ThreadCfgLabel, const CFGNode *> cfgNodes;
 		while (!pending.empty()) {
 			q_entry_t p = pending.front();
 			pending.pop();
+			ThreadCfgLabel label(p.first, p.second->label);
+			Instruction<VexRip> *newInstr = decode(p.second);
 			auto it_did_insert = content.insert(
 				std::pair<ThreadCfgLabel, Instruction<VexRip> *>(
-					ThreadCfgLabel(p.first, p.second->label),
-					p.second));
+					label, newInstr));
 			auto did_insert = it_did_insert.second;
 			if (did_insert) {
+				assert(!cfgNodes.count(label));
+				cfgNodes[label] = p.second;
 				for (auto it = p.second->successors.begin();
 				     it != p.second->successors.end();
 				     it++) {
 					if (it->instr)
 						pending.push(q_entry_t(p.first, it->instr));
 				}
+			}
+		}
+		for (auto it = cfgNodes.begin(); it != cfgNodes.end(); it++) {
+			const ThreadCfgLabel &label(it->first);
+			const CFGNode *n = it->second;
+			assert(content.count(label));
+			Instruction<VexRip> *i = content[label];
+			i->successors.clear();
+			for (auto it = n->successors.begin();
+			     it != n->successors.end();
+			     it++) {
+				const CFGNode::successor_t &srcSucc(*it);
+				if (!srcSucc.instr)
+					continue;
+				ThreadCfgLabel succLabel(label.thread, srcSucc.instr->label);
+				assert(content.count(succLabel));
+				Instruction<VexRip>::successor_t destSucc(
+					srcSucc.type,
+					srcSucc.instr->rip,
+					content[succLabel],
+					srcSucc.calledFunction);
+				i->successors.push_back(destSucc);
 			}
 		}
 	}
