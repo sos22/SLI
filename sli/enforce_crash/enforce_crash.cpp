@@ -754,30 +754,66 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 static void
 optimiseCfg(crashEnforcementData &ced)
 {
+	struct {
+		crashEnforcementData *ced;
+		bool operator()(const ThreadCfgLabel &label) {
+			return ced->exprStashPoints.count(label) != 0 ||
+				ced->happensBeforePoints.count(label) != 0 ||
+				ced->expressionEvalPoints.count(label) != 0 ||
+				ced->threadExitPoints.count(label) != 0;
+		}
+	} hasSideEffect = {&ced};
 	crashEnforcementRoots newRoots;
 	for (auto it = ced.roots.begin();
 	     it != ced.roots.end();
 	     it++) {
-		auto n = ced.crashCfg.findInstr(*it);
+		auto root = ced.crashCfg.findInstr(*it);
 		while (1) {
 			/* We can advance a root if it has a single
 			   successor, and it has no stash points, and
 			   it has no HB points, and it has no eval
 			   points, and it isn't an exit point. */
-			if (n->successors.size() != 1)
+			if (root->successors.size() != 1)
+                               break;
+			ThreadCfgLabel l(it->thread, root->label);
+			if (hasSideEffect(l))
 				break;
-			ThreadCfgLabel l(it->thread, n->label);
-			if (ced.exprStashPoints.count(l) != 0)
-				break;
-			if (ced.happensBeforePoints.count(l) != 0)
-				break;
-			if (ced.expressionEvalPoints.count(l) != 0)
-				break;
-			if (ced.threadExitPoints.count(l) != 0)
-				break;
-			n = n->successors[0].instr;
+			root = root->successors[0].instr;
 		}
-		newRoots.insert(ThreadCfgLabel(it->thread, n->label));
+
+		/* If all of the paths forwards from root N issue
+		   their first side-effect at node N' then N can be
+		   replaced by N'. */
+		bool haveFirstSideEffect = false;
+		bool failed = false;
+		ThreadCfgLabel firstSideEffect;
+		std::set<const Instruction<VexRip> *> visited;
+		std::queue<const Instruction<VexRip> *> pending;
+		pending.push(root);
+		while (!failed && !pending.empty()) {
+			auto n = pending.front();
+			pending.pop();
+			ThreadCfgLabel l(it->thread, n->label);
+
+			if (hasSideEffect(l)) {
+				if (haveFirstSideEffect) {
+					if (firstSideEffect != l)
+						failed = true;
+				} else {
+					firstSideEffect = l;
+					haveFirstSideEffect = true;
+				}
+			} else {
+				for (auto it = n->successors.begin();
+				     it != n->successors.end();
+				     it++)
+					pending.push(it->instr);
+			}
+		}
+		if (failed || !haveFirstSideEffect)
+			newRoots.insert(ThreadCfgLabel(it->thread, root->label));
+		else
+			newRoots.insert(firstSideEffect);
 	}
 	ced.roots = newRoots;
 }
