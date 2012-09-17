@@ -262,7 +262,7 @@ public:
 			    ThreadAbstracter &abs,
 			    StateMachine *probeMachine,
 			    StateMachine *storeMachine,
-			    std::map<unsigned, CfgLabel> &roots,
+			    std::map<unsigned, std::set<CfgLabel> > &roots,
 			    const MaiMap &mai)
 	{
 		/* XXX keep this in sync with buildCED */
@@ -277,7 +277,10 @@ public:
 					AbstractThread t(abs(ieg->reg.tid()));
 					auto it_r = roots.find(ieg->reg.tid());
 					assert(it_r != roots.end());
-					(*this)[ThreadCfgLabel(t, it_r->second)].insert(ieg);
+					for (auto it_r2 = it_r->second.begin();
+					     it_r2 != it_r->second.end();
+					     it_r2++)
+						(*this)[ThreadCfgLabel(t, *it_r2)].insert(ieg);
 				} else {
 					neededTemporaries.insert(ieg);
 				}
@@ -781,14 +784,17 @@ class crashEnforcementRoots : public std::set<ThreadCfgLabel> {
 public:
 	crashEnforcementRoots() {}
 
-	crashEnforcementRoots(std::map<unsigned, CfgLabel> &roots, ThreadAbstracter &abs) {
+	crashEnforcementRoots(std::map<unsigned, std::set<CfgLabel> > &roots, ThreadAbstracter &abs) {
 		std::map<CfgLabel, std::set<AbstractThread> > threadsRelevantAtEachEntryPoint;
 		for (auto it = roots.begin(); it != roots.end(); it++)
-			threadsRelevantAtEachEntryPoint[it->second].insert(abs(it->first));
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				threadsRelevantAtEachEntryPoint[*it2].insert(abs(it->first));
 		for (auto it = roots.begin(); it != roots.end(); it++) {
-			std::set<AbstractThread> &threads(threadsRelevantAtEachEntryPoint[it->second]);
-			for (auto it2 = threads.begin(); it2 != threads.end(); it2++)
-				insert(ThreadCfgLabel(*it2, it->second));
+			for (auto it_r = it->second.begin(); it_r != it->second.end(); it_r++) {
+				std::set<AbstractThread> &threads(threadsRelevantAtEachEntryPoint[*it_r]);
+				for (auto it2 = threads.begin(); it2 != threads.end(); it2++)
+					insert(ThreadCfgLabel(*it2, *it_r));
+			}
 		}
 	}
 
@@ -1099,7 +1105,7 @@ public:
 
 	crashEnforcementData(const MaiMap &mai,
 			     std::set<IRExpr *> &neededExpressions,
-			     std::map<unsigned, CfgLabel> &_roots,
+			     std::map<unsigned, std::set<CfgLabel> > &_roots,
 			     DNF_Conjunction &conj,
 			     ThreadCfgDecode &cfg,
 			     int &next_hb_id,
