@@ -1176,10 +1176,18 @@ MaiMap::print(FILE *f) const
 	fprintf(f, "Memory access identifiers:\n");
 	for (auto it = maiCorrespondence->begin(); it != maiCorrespondence->end(); it++) {
 		fprintf(f, "\t%s -> {", it->first.name());
+		bool n = false;
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			if (n && !*it2)
+				continue;
 			if (it2 != it->second.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%s", (*it2)->label.name());
+			if (*it2) {
+				fprintf(f, "%s", (*it2)->label.name());
+			} else {
+				fprintf(f, "<null>");
+				n = true;
+			}
 		}
 		fprintf(f, "}\n");
 	}
@@ -1205,20 +1213,29 @@ MaiMap::parse(const std::map<CfgLabel, const CFGNode *> &labels, const char *buf
 		std::vector<const CFGNode *> entry;
 		if (!parseThisChar('}', buf, &buf)) {
 			CfgLabel l(CfgLabel::uninitialised());
-			if (!l.parse(buf, &buf))
-				break;
-			auto it = labels.find(l);
-			if (it == labels.end())
-				break;
-			entry.push_back(it->second);
-			while (!parseThisChar('}', buf, &buf)) {
-				if (!parseThisString(", ", buf, &buf) ||
-				    !l.parse(buf, &buf))
-					goto failed;
+			if (parseThisString("<null>", buf, &buf)) {
+				entry.push_back(NULL);
+			} else {
+				if (!l.parse(buf, &buf))
+					break;
 				auto it = labels.find(l);
 				if (it == labels.end())
-					goto failed;
+					break;
 				entry.push_back(it->second);
+			}
+			while (!parseThisChar('}', buf, &buf)) {
+				if (!parseThisString(", ", buf, &buf))
+					goto failed;
+				if (parseThisString("<null>", buf, &buf)) {
+					entry.push_back(NULL);
+				} else {
+					if (!l.parse(buf, &buf))
+						goto failed;
+					auto it = labels.find(l);
+					if (it == labels.end())
+						goto failed;
+					entry.push_back(it->second);
+				}
 			}
 		}
 		if (!parseThisChar('\n', buf, &buf))
