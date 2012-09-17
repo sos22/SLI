@@ -11,8 +11,7 @@ Mapping::init(const char *path)
 		close(fd);
 		return -1;
 	}
-	size = (size + 4095) & ~4095ul;
-	content = mmap(NULL, size, PROT_READ, MAP_SHARED,
+	content = mmap(NULL, (size + 4095) & ~4095ul, PROT_READ, MAP_SHARED,
 		       fd, 0);
 	close(fd);
 	if (content == MAP_FAILED) {
