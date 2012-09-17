@@ -568,7 +568,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 
 			/* Can't stash a register which this
 			 * instruction might modify */
-			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, node->rip));
+			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, node->rip), true);
 			std::set<threadAndRegister, threadAndRegister::partialCompare> modified_regs;
 			for (int x = 0; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 				if (irsb->stmts[x]->tag == Ist_Put)

@@ -100,7 +100,7 @@ stack_offset(Oracle *oracle, unsigned long rip)
 			assert(it->second == q.second);
 			continue;
 		}
-		IRSB *irsb = Oracle::getIRSBForRip(oracle->ms->addressSpace, q.first);
+		IRSB *irsb = Oracle::getIRSBForRip(oracle->ms->addressSpace, q.first, false);
 		std::map<unsigned, unsigned> tempToOffset;
 		bool overlap = false;
 		bool failed = false;

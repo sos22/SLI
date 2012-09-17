@@ -31,7 +31,7 @@ public:
 	}
 	unsigned long hashval() const { return idx * 785234789; }
 	IRType type() const { return Ity_INVALID; }
-	void sanity_check() const { assert(idx >= 1); }
+	void _sanity_check(unsigned) const { assert(idx >= 1); }
 };
 
 template <typename exprTransformer>
