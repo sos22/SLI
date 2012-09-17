@@ -462,6 +462,13 @@ printStateMachine(const std::set<const StateMachineState *> &sm, FILE *f, std::m
 		(*it)->prettyPrint(f, labels);
 		fprintf(f, "\n");
 	}
+	fprintf(f, "Roots: [");
+	for (auto it = sm.begin(); it != sm.end(); it++){
+		if (it != sm.begin())
+			fprintf(f, ", ");
+		fprintf(f, "l%d", labels[*it]);
+	}
+	fprintf(f, "]\n");
 }
 
 void
@@ -482,13 +489,14 @@ printStateMachinePair(const char *label1, const StateMachine *sm1, const char *l
 		std::set<const CFGNode *> done_cfg;
 		for (auto it = sm1->cfg_roots.begin(); it != sm1->cfg_roots.end(); it++)
 			printCFGRootedAt(it->second, f, done_cfg, sm1->cfg_roots);
-		std::set<const StateMachineState *> states;
+		std::vector<const StateMachineState *> states;
 		enumStates(sm1, &states);
 		for (auto it = states.begin(); it != states.end(); it++) {
 			fprintf(f, "l%d: ", labels[*it]);
 			(*it)->prettyPrint(f, labels);
 			fprintf(f, "\n");
 		}
+		fprintf(f, "Root: l%d\n", labels[sm1->root]);
 	}
 
 	fprintf(f, "%s", label2);
@@ -497,13 +505,14 @@ printStateMachinePair(const char *label1, const StateMachine *sm1, const char *l
 		std::set<const CFGNode *> done_cfg;
 		for (auto it = sm2->cfg_roots.begin(); it != sm2->cfg_roots.end(); it++)
 			printCFGRootedAt(it->second, f, done_cfg, sm2->cfg_roots);
-		std::set<const StateMachineState *> states;
+		std::vector<const StateMachineState *> states;
 		enumStates(sm2, &states);
 		for (auto it = states.begin(); it != states.end(); it++) {
 			fprintf(f, "l%d: ", labels[*it]);
 			(*it)->prettyPrint(f, labels);
 			fprintf(f, "\n");
 		}
+		fprintf(f, "Root: l%d\n", labels[sm2->root]);
 	}
 }
 
@@ -522,6 +531,7 @@ printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineSt
 	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
 		printCFGRootedAt(it->second, f, done_cfg, sm->cfg_roots);
 	printStateMachine(sm->root, f, labels);
+	fprintf(f, "Root: l%d\n", labels[sm->root]);
 }
 
 void
@@ -622,13 +632,18 @@ parseStateMachine(StateMachineState **out,
 			return true;
 		}
 	} doOneState(labelToState);
+	int root;
+	if (!parseThisString("Root: l", str, &str) ||
+	    !parseDecimalInt(&root, str, &str) ||
+	    !parseThisChar('\n', str, &str))
+		return false;
 	for (auto it = labelToState.begin(); it != labelToState.end(); it++)
 		if (!doOneState(it->second))
 			return false;
-	if (!labelToState.count(1))
+	if (!labelToState.count(root))
 		return false;
 	*suffix = str;
-	*out = labelToState[1];
+	*out = labelToState[root];
 	return true;
 }
 
@@ -651,12 +666,9 @@ parseSucc(succ *out, const char *str, const char **suffix)
 	} else {
 		return false;
 	}
-	if (parseThisChar(':', str, &str)) {
-		if (!LibraryFunctionTemplate::parse(&out->calledFunction, str, &str))
-			return false;
-	} else {
+	parseThisChar(':', str, &str);
+	if (!LibraryFunctionTemplate::parse(&out->calledFunction, str, &str))
 		out->calledFunction = LibraryFunctionTemplate::none;
-	}
 	*suffix = str;
 	return true;
 }

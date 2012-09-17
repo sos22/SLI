@@ -101,9 +101,9 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 	StateMachine *storeMachine;
 	IRExpr *verificationCondition;
 	std::map<CfgLabel, const CFGNode *> labels;
-	if (!parseThisString("Load machine:\n", buf, &buf) ||
+	if (!parseThisString("Load Machine:\n", buf, &buf) ||
 	    !parseStateMachine(&loadMachine, buf, &buf, labels) ||
-	    !parseThisString("Store machine:\n", buf, &buf) ||
+	    !parseThisString("Store Machine:\n", buf, &buf) ||
 	    !parseStateMachine(&storeMachine, buf, &buf, labels) ||
 	    !parseThisString("Verification condition: ", buf, &buf) ||
 	    !parseIRExpr(&verificationCondition, buf, &buf) ||

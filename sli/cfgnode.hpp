@@ -49,8 +49,10 @@ public:
 			fprintf(f, "unroll");
 			break;
 		}
-		if (calledFunction != LibraryFunctionTemplate::none)
+		if (calledFunction != LibraryFunctionTemplate::none) {
+			fprintf(f, ":");
 			LibraryFunctionTemplate::pp(calledFunction, f);
+		}
 	}
 
 	static CfgSuccessorT<succ_t> call(const succ_t & _rip)
