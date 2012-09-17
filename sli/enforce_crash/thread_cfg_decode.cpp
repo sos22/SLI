@@ -217,3 +217,15 @@ CrashCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 	*suffix = cursor;
 	return true;
 }
+
+void
+CrashCfg::removeAllBut(const std::set<Instruction<VexRip> *> &retain)
+{
+	for (auto it = content.begin(); it != content.end(); ) {
+		if (!retain.count(it->second))
+			content.erase(it++);
+		else
+			it++;
+	}
+}
+

@@ -816,6 +816,22 @@ optimiseCfg(crashEnforcementData &ced)
 			newRoots.insert(firstSideEffect);
 	}
 	ced.roots = newRoots;
+
+	/* Anything which isn't reachable from a root can be removed
+	 * from the CFG. */
+	std::set<Instruction<VexRip> *> retain;
+	std::queue<Instruction<VexRip> *> pending;
+	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++)
+		pending.push(ced.crashCfg.findInstr(*it));
+	while (!pending.empty()) {
+		auto n = pending.front();
+		pending.pop();
+		if (!retain.insert(n).second)
+			continue;
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+			pending.push(it->instr);
+	}
+	ced.crashCfg.removeAllBut(retain);
 }
 
 Instruction<VexRip> *

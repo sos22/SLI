@@ -1081,6 +1081,7 @@ public:
 			assert(it2_did_insert.second);
 		}
 	}
+	void removeAllBut(const std::set<Instruction<VexRip> *> &retain);
 };
 
 class crashEnforcementData {
