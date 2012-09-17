@@ -77,10 +77,10 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 
 	sm = input->loadMachine;
 	VexPtr<MaiMap, &ir_heap> mai(input->mai);
-	input->loadMachine = removeAnnotations(mai, input->loadMachine, optIn, oracle, false, token);
+	input->loadMachine = removeAnnotations(mai, input->loadMachine, optIn, oracle, true, token);
 
 	sm = input->storeMachine;
-	input->storeMachine = removeAnnotations(mai, input->storeMachine, optIn, oracle, false, token);
+	input->storeMachine = removeAnnotations(mai, input->storeMachine, optIn, oracle, true, token);
 
 	return input;
 }
