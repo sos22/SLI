@@ -951,7 +951,6 @@ static struct low_level_state *
 clone_lls(struct low_level_state *lls)
 {
 	struct low_level_state *new_lls = new_low_level_state(lls->hls, lls->nr_simslots);
-	sanity_check_low_level_state(lls, 1);
 	new_lls->cfg_node = lls->cfg_node;
 	memcpy(new_lls->simslots, lls->simslots, sizeof(new_lls->simslots[0]) * new_lls->nr_simslots);
 	new_lls->bound_lls = lls->bound_lls;
@@ -1408,6 +1407,7 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 		struct low_level_state *lls = hls->ll_states.content[i];
 		cfg_label_t cur_label = lls->cfg_node;
 		const struct cfg_instr *current_cfg_node = &plan.cfg_nodes[cur_label];
+		sanity_check_low_level_state(lls, 1);
 		int preserve = 0;
 		debug("Consider successors of %d\n", i);
 		for (j = 0; j < current_cfg_node->nr_successors; j++) {
