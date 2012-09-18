@@ -29,6 +29,9 @@
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define MAX_DELAY_US (100000)
 
+#define KEEP_LLS_HISTORY 0
+#define LLS_HISTORY 8
+
 extern void clone(void);
 static void (*__GI__exit)(int res);
 void arch_prctl(int, unsigned long);
@@ -73,6 +76,9 @@ struct low_level_state {
 	struct msg_template *bound_receiving_message;
 	struct msg_template *unbound_receiving_message;
 
+#ifdef KEEP_LLS_HISTORY
+	cfg_label_t history[LLS_HISTORY];
+#endif
 	unsigned long simslots[];
 };
 mk_flex_array(low_level_state);
@@ -282,6 +288,9 @@ start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label,
 	lls->cfg_node = starting_label;
 	low_level_state_push(&hls->ll_states, lls);
 	sanity_check_low_level_state(lls, 1);
+#ifdef KEEP_LLS_HISTORY
+	lls->history[LLS_HISTORY-1] = starting_label;
+#endif
 }
 
 static void
@@ -951,6 +960,9 @@ clone_lls(struct low_level_state *lls)
 	assert(!lls->unbound_sending_message);
 	assert(!lls->unbound_receiving_message);
 
+#ifdef KEEP_LLS_HISTORY
+	memcpy(new_lls->history, lls->history, sizeof(lls->history));
+#endif
 	if (lls->bound_lls && lls->bound_lls != BOUND_LLS_EXITED) {
 		struct low_level_state *new_bound_lls = new_low_level_state(lls->hls, lls->bound_lls->nr_simslots);
 		new_bound_lls->cfg_node = lls->bound_lls->cfg_node;
@@ -963,6 +975,10 @@ clone_lls(struct low_level_state *lls)
 		/* We don't clone unbound_*_messages, or register with
 		 * the global sender and receiver arrays, because the
 		 * new LLS is bound. */
+
+#ifdef KEEP_LLS_HISTORY
+		memcpy(new_bound_lls->history, lls->bound_lls->history, sizeof(lls->bound_lls->history));
+#endif
 
 		low_level_state_push(&new_bound_lls->hls->ll_states, new_bound_lls);
 	}
@@ -1035,6 +1051,9 @@ rendezvous_threads(struct low_level_state_array *llsa,
 
 		dupe_tx_lls = new_low_level_state(tx_lls->hls, tx_lls->nr_simslots);
 		dupe_tx_lls->cfg_node = tx_lls->cfg_node;
+#ifdef KEEP_LLS_HISTORY
+		memcpy(dupe_tx_lls->history, tx_lls->history, sizeof(tx_lls->history));
+#endif
 		memcpy(dupe_tx_lls->simslots, tx_lls->simslots, sizeof(dupe_tx_lls->simslots[0]) * tx_lls->nr_simslots);
 
 		tx_lls = dupe_tx_lls;
@@ -1053,6 +1072,9 @@ rendezvous_threads(struct low_level_state_array *llsa,
 		dupe_rx_lls = new_low_level_state(rx_lls->hls, rx_lls->nr_simslots);
 		dupe_rx_lls->cfg_node = rx_lls->cfg_node;
 		memcpy(dupe_rx_lls->simslots, rx_lls->simslots, sizeof(dupe_rx_lls->simslots[0]) * rx_lls->nr_simslots);
+#ifdef KEEP_LLS_HISTORY
+		memcpy(dupe_rx_lls->history, rx_lls->history, sizeof(rx_lls->history));
+#endif
 
 		rx_lls = dupe_rx_lls;
 		if (tx_is_local)
@@ -1406,6 +1428,10 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 					newLls = clone_lls(lls);
 				}
 				newLls->cfg_node = current_cfg_node->successors[j];
+#ifdef KEEP_LLS_HISTORY
+				memmove(newLls->history, newLls->history + 1, sizeof(newLls->history[0]) * (LLS_HISTORY-1));
+				newLls->history[LLS_HISTORY-1] = current_cfg_node->successors[j];
+#endif
 				debug("Accept %d:%lx\n", current_cfg_node->successors[j], rip);
 			} else {
 				debug("Reject %d:%lx != %lx\n",
