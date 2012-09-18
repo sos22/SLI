@@ -530,8 +530,10 @@ anf_context::addAssumption(IRExpr *a)
 		return;
 	if (a->tag == Iex_Binop) {
 		IRExprBinop *ieb = (IRExprBinop *)a;
-		if (ieb->op == Iop_CmpEQ64) {
-			if (ieb->arg1->tag == Iex_Const &&
+		if (ieb->op >= Iop_CmpEQ8 &&
+		    ieb->op <= Iop_CmpEQ64) {
+			if (ieb->op == Iop_CmpEQ64 &&
+			    ieb->arg1->tag == Iex_Const &&
 			    ((IRExprConst *)ieb->arg1)->con->Ico.U64 == 0 &&
 			    ieb->arg2->tag == Iex_Associative &&
 			    ((IRExprAssociative *)ieb->arg2)->op == Iop_Add64 &&
