@@ -871,10 +871,11 @@ restart_interpreter(int entry_idx)
 	debug("Restart interpreter with idx %d\n", entry_idx);
 	release_big_lock();
 	asm volatile (
-		"    mov %%gs:0, %%rsp\n"              /* Reset the stack */
+		"    mov %%gs:0, %%rsp\n"      /* Reset the stack */
+		"    subq %1, %%rsp\n"         /* Make sure we don't tread on stashed registers */
 		"    jmp start_interpreting\n" /* Restart the interpreter */
 		:
-		: "D" (entry_idx)
+		: "D" (entry_idx), "i" (sizeof(struct reg_struct) - 8)
 		);
 	debug("Huh?  Restart interpreter didn't work\n");
 	abort();
