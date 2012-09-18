@@ -149,7 +149,9 @@ CrashCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 			as,
 			it->second.first,
 			NULL,
-			expandJcc);
+			expandJcc,
+			threadJumps);
+		assert(this->content[it->first]->len != 0);
 	}
 	for (auto it = content.begin(); it != content.end(); it++) {
 		auto it2 = this->content.find(it->first);

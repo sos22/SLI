@@ -260,7 +260,8 @@ public:
 					    AddressSpace *as,
 					    ripType rip,
 					    CFG<ripType> *cfg,
-					    bool expandJcc);
+					    bool expandJcc,
+					    bool threadJumps);
 	static Instruction<ripType> *pseudo(const CfgLabel &label, ripType rip);
 
 	void emit(unsigned char);
@@ -346,14 +347,14 @@ public:
 private:
 	std::vector<std::pair<ripType, unsigned> > pendingRips;
 	std::vector<ripType> neededRips;
-	void decodeInstruction(const CfgLabel &l, ripType rip, unsigned max_depth, bool expandJcc);
+	void decodeInstruction(const CfgLabel &l, ripType rip, unsigned max_depth);
 public:
 	CFG(AddressSpace *_as) : as(_as), ripToInstr(new ripToInstrT()) {}
 	void add_root(ripType root, unsigned max_depth)
 	{
 		pendingRips.push_back(std::pair<ripType, unsigned>(root, max_depth));
 	}
-	void doit(CfgLabelAllocator &, bool expandJcc);
+	void doit(CfgLabelAllocator &);
 	void visit(HeapVisitor &hv) {
 		hv(ripToInstr);
 		hv(as);
@@ -752,7 +753,8 @@ Instruction<r>::decode(const CfgLabel &label,
 		       AddressSpace *as,
 		       r start,
 		       CFG<r> *cfg,
-		       bool expandJcc)
+		       bool expandJcc,
+		       bool threadJumps)
 {
 	Instruction<r> *i = new Instruction<r>(label);
 	i->rip = start;
@@ -974,7 +976,8 @@ top:
 	case 0xe9: /* jmp rel32 */
 		delta32 = i->int32(as);
 		i->addDefault(i->rip + i->len + delta32);
-		i->len = 0;
+		if (threadJumps)
+			i->len = 0;
 		fallsThrough = false;
 		break;
 
@@ -986,7 +989,8 @@ top:
 		 * we'll synthesise an appropriate jump later on.
 		 * Otherwise, we'll eliminate it with jump
 		 * threading. */
-		i->len = 0;
+		if (threadJumps)
+			i->len = 0;
 
 		/* Don't let the tail update defaultNext */
 		fallsThrough = false;
@@ -1025,89 +1029,6 @@ top:
 		i->addDefault(i->rip + i->len);
 
 	return i;
-}
-
-template <typename r> void
-CFG<r>::decodeInstruction(const CfgLabel &l, r rip, unsigned max_depth, bool expandJcc)
-{
-	if (!max_depth)
-		return;
-	Instruction<r> *i = Instruction<r>::decode(l, as, rip, this, expandJcc);
-	if (!i)
-		return;
-	assert(i->rip == rip);
-	registerInstruction(i);
-	if (exploreInstruction(i)) {
-		for (auto it = i->successors.begin(); it != i->successors.end(); it++)
-			pendingRips.push_back(std::pair<r, unsigned>(
-						      it->rip, max_depth - 1));
-	}
-}
-
-template <typename r> void
-CFG<r>::doit(CfgLabelAllocator &allocLabel, bool expandJcc)
-{
-	while (!pendingRips.empty()) {
-		std::pair<r, unsigned> p = pendingRips.back();
-		pendingRips.pop_back();
-		if (!ripToInstr->hasKey(p.first))
-			decodeInstruction(allocLabel(), p.first, p.second, expandJcc);
-	}
-
-	for (typename ripToInstrT::iterator it = ripToInstr->begin();
-	     it != ripToInstr->end();
-	     it++) {
-		Instruction<r> *ins = it.value();
-		ins->useful = instructionUseful(ins);
-		for (auto it2 = ins->successors.begin(); it2 != ins->successors.end(); it2++) {
-			if (ripToInstr->hasKey(it2->rip)) {
-				Instruction<r> *dn = ripToInstr->get(it2->rip);
-				it2->rip = r();
-				it2->instr = dn;
-				if (dn->useful)
-					ins->useful = true;
-			}
-		}
-	}
-
-	bool progress;
-	do {
-		progress = false;
-		for (typename ripToInstrT::iterator it = ripToInstr->begin();
-		     it != ripToInstr->end();
-		     it++) {
-			Instruction<r> *i = it.value();
-			if (i->useful)
-				continue;
-			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
-				if (it2->instr && it2->instr->useful) {
-					i->useful = true;
-					progress = true;
-				}
-			}
-		}
-	} while (progress);
-
-	/* Rewrite every instruction so that non-useful next
-	   instructions get turned back into RIPs, and remove the
-	   non-useful instructions. */
-	for (typename ripToInstrT::iterator it = ripToInstr->begin();
-	     it != ripToInstr->end();
-		) {
-		Instruction<r> *i = it.value();
-
-		if (i->useful) {
-			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
-				if (it2->instr && !it2->instr->useful) {
-					it2->rip = it2->instr->rip;
-					it2->instr = NULL;
-				}
-			}
-			it++;
-		} else {
-			it = ripToInstr->erase(it);
-		}
-	}
 }
 
 template <typename r> void

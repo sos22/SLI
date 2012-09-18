@@ -921,11 +921,13 @@ public:
 			return it->second;
 	}
 	Instruction<VexRip> *decodeUnderlyingInstr(const VexRip &vr) {
-		return Instruction<VexRip>::decode(CfgLabel::uninitialised(),
-				       as,
-				       vr,
-				       NULL,
-				       true);
+		return Instruction<VexRip>::decode(
+			CfgLabel::uninitialised(),
+			as,
+			vr,
+			NULL,
+			true,
+			true);
 	}
 };
 
@@ -2435,7 +2437,7 @@ main(int argc, char *argv[])
 	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
 		err(1, "open(%s)", ced_path);
-	crashEnforcementData ced(true);
+	crashEnforcementData ced(true, true);
 	loadCrashEnforcementData(ced, ms->addressSpace, fd);
 	close(fd);
 

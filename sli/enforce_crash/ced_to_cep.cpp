@@ -498,6 +498,8 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		int newLabel(it->second);
 
 		auto instr = ced.crashCfg.findInstr(oldLabel);
+		assert(instr);
+		assert(instr->len != 0);
 		fprintf(f, "static const unsigned char instr_%d_content[] = {", newLabel);
 		for (unsigned x = 0; x < instr->len; x++) {
 			if (x != 0)
@@ -744,7 +746,7 @@ main(int argc, char *argv[])
 	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
 		err(1, "open(%s)", ced_path);
-	crashEnforcementData ced(false);
+	crashEnforcementData ced(false, false);
 	loadCrashEnforcementData(ced, ms->addressSpace, fd);
 	close(fd);
 

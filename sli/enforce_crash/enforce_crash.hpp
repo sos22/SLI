@@ -986,10 +986,11 @@ public:
 
 class InstructionDecoder {
 	bool expandJcc;
+	bool threadJumps;
 	AddressSpace *as;
 public:
-	InstructionDecoder(bool _expandJcc, AddressSpace *_as)
-		: expandJcc(_expandJcc), as(_as)
+	InstructionDecoder(bool _expandJcc, bool _threadJumps, AddressSpace *_as)
+		: expandJcc(_expandJcc), threadJumps(_threadJumps), as(_as)
 	{}
 	Instruction<VexRip> *operator()(const CFGNode *);
 };
@@ -997,6 +998,7 @@ public:
 class CrashCfg {
 	std::map<ThreadCfgLabel, Instruction<VexRip> *> content;
 	bool expandJcc;
+	bool threadJumps;
 public:
 	Instruction<VexRip> *findInstr(const ThreadCfgLabel &label) {
 		auto it = content.find(label);
@@ -1007,16 +1009,17 @@ public:
 	}
 	void addInstr(const AbstractThread &thread, Instruction<VexRip> *node) {
 		assert(!content.count(ThreadCfgLabel(thread, node->label)));
+		assert(node->len != 0);
 		content[ThreadCfgLabel(thread, node->label)] = node;
 	}
 	void prepLabelAllocator(CfgLabelAllocator &alloc) {
 		for (auto it = content.begin(); it != content.end(); it++)
 			alloc.reserve(it->first.label);
 	}
-	CrashCfg(bool _expandJcc) : expandJcc(_expandJcc) {};
+	CrashCfg(bool _expandJcc, bool _threadJumps) : expandJcc(_expandJcc), threadJumps(_threadJumps) {};
 	CrashCfg(CrashSummary *summary, ThreadAbstracter &abs,
-		 InstructionDecoder &decode, bool _expandJcc)
-		: expandJcc(_expandJcc)
+		 InstructionDecoder &decode, bool _expandJcc, bool _threadJumps)
+		: expandJcc(_expandJcc), threadJumps(_threadJumps)
 	{
 		typedef std::pair<AbstractThread, const CFGNode *> q_entry_t;
 		std::queue<q_entry_t> pending;
@@ -1114,7 +1117,8 @@ public:
 			     ThreadAbstracter &abs,
 			     CrashSummary *summary,
 			     InstructionDecoder &decode,
-			     bool expandJcc)
+			     bool expandJcc,
+			     bool threadJumps)
 		: roots(_roots, abs),
 		  happensBefore(conj, abs, cfg, mai),
 		  predecessorMap(cfg),
@@ -1125,7 +1129,7 @@ public:
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
 		  threadExitPoints(cfg, happensBeforePoints),
-		  crashCfg(summary, abs, decode, expandJcc)
+		  crashCfg(summary, abs, decode, expandJcc, threadJumps)
 	{}
 
 	bool parse(AddressSpace *as, const char *str, const char **suffix) {
@@ -1143,8 +1147,8 @@ public:
 		*suffix = str;
 		return true;
 	}
-	crashEnforcementData(bool expandJcc)
-		: crashCfg(expandJcc)
+	crashEnforcementData(bool expandJcc, bool threadJumps)
+		: crashCfg(expandJcc, threadJumps)
 	{}
 
 	void prettyPrint(FILE *f, bool verbose = false) {

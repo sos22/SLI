@@ -286,8 +286,8 @@ buildCED(DNF_Conjunction &c,
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	InstructionDecoder decode(true, as);
-	*out = crashEnforcementData(*summary->mai, neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, decode, true);
+	InstructionDecoder decode(true, true, as);
+	*out = crashEnforcementData(*summary->mai, neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, decode, true, true);
 	optimiseHBContent(*out, cfg);
 	return true;
 }
@@ -648,7 +648,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printDnf(d, _logfile);
 
 	if (d.size() == 0)
-		return crashEnforcementData(true);
+		return crashEnforcementData(true, true);
 
 	std::map<unsigned, std::set<CfgLabel> > rootsCfg;
 	for (auto it = summary->loadMachine->cfg_roots.begin();
@@ -660,9 +660,9 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	     it++)
 		rootsCfg[it->first].insert(it->second->label);
 
-	crashEnforcementData accumulator(true);
+	crashEnforcementData accumulator(true, true);
 	for (unsigned x = 0; x < d.size(); x++) {
-		crashEnforcementData tmp(true);
+		crashEnforcementData tmp(true, true);
 		if (buildCED(d[x], rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace, next_slot)) {
 			printf("Intermediate CED:\n");
 			tmp.prettyPrint(stdout, true);
@@ -837,7 +837,7 @@ optimiseCfg(crashEnforcementData &ced)
 Instruction<VexRip> *
 InstructionDecoder::operator()(const CFGNode *src)
 {
-	return Instruction<VexRip>::decode(src->label, this->as, src->rip, NULL, this->expandJcc);
+	return Instruction<VexRip>::decode(src->label, this->as, src->rip, NULL, this->expandJcc, this->threadJumps);
 }
 
 int
