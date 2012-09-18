@@ -24,12 +24,19 @@ enum byte_code_op {
 	bcop_push_const,
 	bcop_push_slot,
 
+	/* Binary ops */
 	bcop_cmp_eq,
+	bcop_cmp_ltu,
 	bcop_add,
+	bcop_shl,
 
+	/* Unary ops */
 	bcop_not,
+	bcop_sign_extend64,
 
+	/* Specials */
 	bcop_load,
+	bcop_badptr,
 
 	bcop_fail_if,
 	bcop_succeed,

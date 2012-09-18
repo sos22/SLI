@@ -335,6 +335,18 @@ bytecode_const32(FILE *f, unsigned val)
 	fprintf(f, "    %d,\n", (unsigned short)val);
 	fprintf(f, "    %d,\n", (unsigned short)(val >> 16));
 }
+static void
+bytecode_const16(FILE *f, unsigned short val)
+{
+	fprintf(f, "    %d,\n", (unsigned short)val);
+}
+static void
+bytecode_const8(FILE *f, unsigned char val)
+{
+	/* ``Bytecode'' format actually works in terms of shorts, so
+	   just zero-extend the byte to 16 bits. */
+	fprintf(f, "    %d,\n", (unsigned short)val);
+}
 
 static void
 bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnforcementData &ced)
@@ -342,13 +354,15 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 	switch (expr->tag) {
 	case Iex_Const: {
 		IRExprConst *iec = (IRExprConst *)expr;
+		bytecode_op(f, "push_const", iec->type());
 		switch (iec->con->tag) {
+		case Ico_U8:
+			bytecode_const8(f, iec->con->Ico.U8);
+			break;
 		case Ico_U32:
-			bytecode_op(f, "push_const", Ity_I32);
 			bytecode_const32(f, iec->con->Ico.U32);
 			break;
 		case Ico_U64:
-			bytecode_op(f, "push_const", Ity_I64);
 			bytecode_const64(f, iec->con->Ico.U64);
 			break;
 		default:
@@ -364,16 +378,36 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 		break;
 	}
 
+	case Iex_Unop: {
+		IRExprUnop *ieu = (IRExprUnop *)expr;
+		bytecode_eval_expr(f, ieu->arg, thread, ced);
+		switch (ieu->op) {
+		case Iop_32Sto64:
+			bytecode_op(f, "sign_extend64", ieu->arg->type());
+			break;
+		case Iop_BadPtr:
+			bytecode_op(f, "badptr", Ity_I64);
+			break;
+		default:
+			abort();
+		}
+		break;
+	}
+
 	case Iex_Binop: {
 		IRExprBinop *ieb = (IRExprBinop *)expr;
 		bytecode_eval_expr(f, ieb->arg1, thread, ced);
 		bytecode_eval_expr(f, ieb->arg2, thread, ced);
 		switch (ieb->op) {
 		case Iop_CmpEQ32:
-			bytecode_op(f, "cmp_eq", Ity_I32);
-			break;
 		case Iop_CmpEQ64:
-			bytecode_op(f, "cmp_eq", Ity_I64);
+			bytecode_op(f, "cmp_eq", ieb->arg1->type());
+			break;
+		case Iop_CmpLT32U:
+			bytecode_op(f, "cmp_ltu", ieb->arg1->type());
+			break;
+		case Iop_Shl64:
+			bytecode_op(f, "shl", ieb->arg1->type());
 			break;
 		default:
 			abort();
@@ -388,6 +422,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 		for (int i = 1; i < iea->nr_arguments; iea++) {
 			bytecode_eval_expr(f, iea->contents[i], thread, ced);
 			switch (iea->op) {
+			case Iop_Add32:
 			case Iop_Add64:
 				bytecode_op(f, "add", iea->type());
 				break;
