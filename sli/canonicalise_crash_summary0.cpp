@@ -273,6 +273,8 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		AllowableOptimisations::defaultOptimisations);
 	cs->verificationCondition = simplify_via_anf(
 		cs->verificationCondition);
+	cs->verificationCondition = interval_simplify(
+		cs->verificationCondition);
 	cs->verificationCondition = simplifyIRExpr(
 		cs->verificationCondition,
 		AllowableOptimisations::defaultOptimisations);

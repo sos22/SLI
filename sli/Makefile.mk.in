@@ -8,7 +8,7 @@ defvars() {
 	echo SLIR_SOURCES= ${input_base}/{ssa,transform_expr,logwriter,thread,machinestate}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{util,memorychunk,logreader,syscalls,nd_chooser}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{debug,addressspace,replay,crash_summary,phi_elimination}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap,interpreter,coredump,dominators}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap,interpreter,coredump,dominators,interval_simplify}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{state_machine,oracle,simplify_irexpr,eval_state_machine}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{mapping,elf_exec,offline_analysis,genfix,intern}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{StateMachineTransformer,IRExprTransformer,proximal_cause}.cpp
