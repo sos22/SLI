@@ -776,13 +776,56 @@ eval_bytecode(const unsigned short *bytecode,
 		case bcop_cmp_eq:
 			bytecode_push(&stack, bytecode_pop(&stack, type) == bytecode_pop(&stack, type), bct_bit);
 			break;
-		case bcop_add:
-			bytecode_push(&stack, bytecode_pop(&stack, type) + bytecode_pop(&stack, type), type);
+		case bcop_cmp_ltu: {
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			unsigned long arg2 = bytecode_pop(&stack, type);
+			bytecode_push(&stack, arg2 < arg1, bct_bit);
+			debug("bcop_cmpltu: %lx < %lx -> %d\n", arg1, arg2, arg2 < arg1);
 			break;
+		}
+		case bcop_add: {
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			unsigned long arg2 = bytecode_pop(&stack, type);
+			bytecode_push(&stack, arg1 + arg2, type);
+			debug("bcop_add: %lx + %lx -> %lx\n", arg1, arg2, arg1 + arg2);
+			break;
+		}
+		case bcop_shl: {
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			unsigned long arg2 = bytecode_pop(&stack, bct_byte);
+			debug("bcop_shl: %lx << %lx -> %lx\n", arg1, arg2, arg2 << arg1);
+			bytecode_push(&stack, arg2 << arg1, type);
+			break;
+		}
 
 		case bcop_not:
 			bytecode_push(&stack, ~bytecode_pop(&stack, type), type);
 			break;
+		case bcop_sign_extend64: {
+			unsigned long inp = bytecode_pop(&stack, type);
+			unsigned long res;
+			switch (type) {
+			case bct_bit:
+				res = ((long)inp << 63) >> 63;
+				break;
+			case bct_byte:
+				res = ((long)inp << 56) >> 56;
+				break;
+			case bct_short:
+				res = ((long)inp << 48) >> 48;
+				break;
+			case bct_int:
+				res = ((long)inp << 32) >> 32;
+				break;
+			case bct_long:
+				res = inp;
+				break;
+			default:
+				abort();
+			}
+			bytecode_push(&stack, res, bct_long);
+			break;
+		}
 
 		case bcop_load: {
 			unsigned long addr = bytecode_pop(&stack, bct_long);
@@ -799,6 +842,15 @@ eval_bytecode(const unsigned short *bytecode,
 				debug("%p(%s): load(%lx) -> %lx\n", lls, plan.cfg_nodes[lls->cfg_node].id, addr, data);
 				bytecode_push(&stack, data, type);
 			}
+			break;
+		}
+
+		case bcop_badptr: {
+			unsigned long addr = bytecode_pop(&stack, bct_long);
+			unsigned char buf;
+			int res;
+			res = !__fetch_guest(1, &buf, addr);
+			bytecode_push(&stack, res, bct_bit);
 			break;
 		}
 
