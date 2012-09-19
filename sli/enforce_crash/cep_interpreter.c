@@ -1919,10 +1919,16 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 static void
 start_interpreting(int entrypoint_idx)
 {
-	const struct cep_entry_point *entry_point = plan.entry_points[entrypoint_idx];
+	const struct cep_entry_point *entry_point;
 	struct per_thread_state *pts = find_pts();
 	struct high_level_state hls;
 
+	if (entrypoint_idx == -1) {
+		debug("Start with a dummy entry point\n");
+		exit_interpreter();
+	}
+
+	entry_point = plan.entry_points[entrypoint_idx];
 	debug("Start interpreting idx %d, pts at %p, regs at %p\n",
 	      entrypoint_idx,
 	      pts,
@@ -2025,6 +2031,12 @@ alloc_trampoline(int idx)
 		  2) = (unsigned long)start_interpreting;
 	debug("Trampoline at %p\n", buffer);
 	return (unsigned long)buffer;
+}
+
+static unsigned long
+alloc_dummy_trampoline(void)
+{
+	return alloc_trampoline(-1);
 }
 
 struct exit_trampoline {
@@ -2143,13 +2155,39 @@ call into our bits before doing basically the same thing. */
 	);
 
 static void
+patch_entry_point(unsigned long rip, unsigned long trampoline)
+{
+	static int nr_entry_patches_alloced = 0;
+	long delta;
+	if (nr_entry_patches_alloced == nr_entry_patches) {
+		nr_entry_patches_alloced += 8;
+		entry_patches = realloc(entry_patches, sizeof(entry_patches[0]) * nr_entry_patches_alloced);
+	}
+	entry_patches[nr_entry_patches].start = rip;
+	entry_patches[nr_entry_patches].size = 5;
+	memcpy(entry_patches[nr_entry_patches].content,
+	       (const void *)rip,
+	       5);
+	nr_entry_patches++;
+
+	mprotect((void *)(rip & PAGE_MASK),
+		 PAGE_SIZE * 2,
+		 PROT_READ|PROT_WRITE|PROT_EXEC);
+	*(unsigned char *)rip = 0xe9; /* jmp rel32 opcode */
+	delta = trampoline - (rip + 5);
+	assert(delta == (int)delta);
+	*(int *)(rip + 1) = delta;
+	mprotect((void *)(rip & PAGE_MASK),
+		 PAGE_SIZE * 2,
+		 PROT_READ|PROT_EXEC);
+}
+
+static void
 activate(void)
 {
 	unsigned x;
-	long delta;
 	char buf[4096];
 	ssize_t s;
-	int nr_entry_patches_alloced;
 
 	s = readlink("/proc/self/exe", buf, sizeof(buf)-1);
 	if (s == -1) {
@@ -2165,31 +2203,16 @@ activate(void)
 
 	alloc_thread_state_area();
 
-	nr_entry_patches_alloced = 0;
 	/* We need to patch each entry point so that it turns into a
 	   jump instruction which targets the patch.  Do so. */
-	for (x = 0; x < plan.nr_entry_points; x++) {
-		if (nr_entry_patches_alloced == nr_entry_patches) {
-			nr_entry_patches_alloced += 8;
-			entry_patches = realloc(entry_patches, sizeof(entry_patches[0]) * nr_entry_patches_alloced);
-		}
-		entry_patches[nr_entry_patches].start = plan.entry_points[x]->orig_rip;
-		entry_patches[nr_entry_patches].size = 5;
-		memcpy(entry_patches[nr_entry_patches].content,
-		       (const void *)plan.entry_points[x]->orig_rip,
-		       5);
-		nr_entry_patches++;
+	for (x = 0; x < plan.nr_entry_points; x++)
+		patch_entry_point(plan.entry_points[x]->orig_rip, alloc_trampoline(x));
 
-		mprotect((void *)(plan.entry_points[x]->orig_rip & PAGE_MASK),
-			 PAGE_SIZE * 2,
-			 PROT_READ|PROT_WRITE|PROT_EXEC);
-		*(unsigned char *)plan.entry_points[x]->orig_rip = 0xe9; /* jmp rel32 opcode */
-		delta = alloc_trampoline(x) - (plan.entry_points[x]->orig_rip + 5);
-		assert(delta == (int)delta);
-		*(int *)(plan.entry_points[x]->orig_rip + 1) = delta;
-		mprotect((void *)(plan.entry_points[x]->orig_rip & PAGE_MASK),
-			 PAGE_SIZE * 2,
-			 PROT_READ|PROT_EXEC);
+	/* And the dummy entry points as well. */
+	if (plan.nr_dummy_entry_points != 0) {
+		unsigned long tramp = alloc_dummy_trampoline();
+		for (x = 0; x < plan.nr_dummy_entry_points; x++)
+			patch_entry_point(plan.dummy_entry_points[x], tramp);
 	}
 
 	hook_clone();

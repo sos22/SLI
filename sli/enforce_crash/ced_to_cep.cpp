@@ -761,6 +761,13 @@ main(int argc, char *argv[])
 	fprintf(f, "\n");
 	dump_annotated_cfg(ced, f, relabeller, "__cfg_nodes");
 	compute_entry_point_list(oracle, ced, f, relabeller, "__entry_points");
+	fprintf(f, "const unsigned long __dummy_entry_points[] = {");
+	for (auto it = ced.dummyEntryPoints.begin(); it != ced.dummyEntryPoints.end(); it++) {
+		if (it != ced.dummyEntryPoints.begin())
+			fprintf(f, ", ");
+		fprintf(f, "0x%lxul", *it);
+	}
+	fprintf(f, "};\n");
 	fprintf(f, "const struct crash_enforcement_plan plan = {\n");
 	fprintf(f, "    .entry_points = __entry_points,\n");
 	fprintf(f, "    .nr_entry_points = sizeof(__entry_points)/sizeof(__entry_points[0]),\n");
@@ -768,6 +775,8 @@ main(int argc, char *argv[])
 	fprintf(f, "    .nr_cfg_nodes = sizeof(__cfg_nodes)/sizeof(__cfg_nodes[0]),\n");
 	fprintf(f, "    .base_msg_id = 0x%x,\n", lowest_msg_id(ced));
 	fprintf(f, "    .msg_id_limit = 0x%x,\n", highest_msg_id(ced) + 1);
+	fprintf(f, "    .nr_dummy_entry_points = %zd,\n", ced.dummyEntryPoints.size());
+	fprintf(f, "    .dummy_entry_points = __dummy_entry_points,\n");
 	fprintf(f, "};\n");
 
 	fprintf(f, "\n");

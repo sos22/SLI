@@ -108,6 +108,8 @@ struct crash_enforcement_plan {
 	const struct cfg_instr *cfg_nodes;
 	int base_msg_id;
 	int msg_id_limit;
+	int nr_dummy_entry_points;
+	const unsigned long *dummy_entry_points;
 };
 
 #define mk_flex_array(name)						\

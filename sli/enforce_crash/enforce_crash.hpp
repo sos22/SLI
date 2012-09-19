@@ -1106,6 +1106,7 @@ public:
 	expressionEvalMapT expressionEvalPoints;
 	abstractThreadExitPointsT threadExitPoints;
 	CrashCfg crashCfg;
+	std::set<unsigned long> dummyEntryPoints;
 
 	crashEnforcementData(const MaiMap &mai,
 			     std::set<IRExpr *> &neededExpressions,
@@ -1140,8 +1141,17 @@ public:
 		    !exprsToSlots.parse(str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||
 		    !threadExitPoints.parse(str, &str) ||
-		    !crashCfg.parse(as, str, &str))
+		    !crashCfg.parse(as, str, &str) ||
+		    !parseThisString("Dummy entry points: [", str, &str))
 			return false;
+		while (!parseThisString("]\n", str, &str)) {
+			unsigned long v;
+			if (!parseThisString("0x", str, &str) ||
+			    !parseHexUlong(&v, str, &str))
+				return false;
+			dummyEntryPoints.insert(v);
+			parseThisString(", ", str, &str);
+		}
 		internmentState state;
 		internSelf(state);
 		*suffix = str;
@@ -1160,6 +1170,14 @@ public:
 		expressionEvalPoints.prettyPrint(f);
 		threadExitPoints.prettyPrint(f);
 		crashCfg.prettyPrint(f, verbose);
+		fprintf(f, "Dummy entry points: [");
+		for (auto it = dummyEntryPoints.begin(); it != dummyEntryPoints.end(); it++) {
+			if (it != dummyEntryPoints.begin())
+				fprintf(f, ", ");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "]\n");
+			
 	}
 
 	void operator|=(const crashEnforcementData &ced) {
@@ -1170,6 +1188,8 @@ public:
 		expressionEvalPoints |= ced.expressionEvalPoints;
 		threadExitPoints |= ced.threadExitPoints;
 		crashCfg |= ced.crashCfg;
+		for (auto it = ced.dummyEntryPoints.begin(); it != ced.dummyEntryPoints.end(); it++)
+			dummyEntryPoints.insert(*it);
 	}
 };
 

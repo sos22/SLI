@@ -15,6 +15,12 @@
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
 
+#ifndef NDEBUG
+static bool debug_declobber_instructions = true;
+#else
+#define debug_declobber_instructuions false
+#endif
+
 unsigned long
 __trivial_hash_function(const VexRip &vr)
 {
@@ -840,6 +846,73 @@ InstructionDecoder::operator()(const CFGNode *src)
 	return Instruction<VexRip>::decode(src->label, this->as, src->rip, NULL, this->expandJcc, this->threadJumps);
 }
 
+/* We need to patch the program to jump to our instrumentation at
+ * every entry point.  Those jump instructions are five bytes, so
+ * could clobber a following instruction.  We need to make sure that
+ * all of the branches to those clobbered instructions are themselves
+ * handled by the CEP interpreter, and we do that by introducing new
+ * dummy entry points to cover them as necessary. */
+static void
+avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
+{
+	std::set<unsigned long> protectedInstructions;
+	std::set<unsigned long> clobberedInstructions;
+
+	if (debug_declobber_instructions)
+		printf("Computing clobbered instructions set\n");
+	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++) {
+		Instruction<VexRip> *vr = ced.crashCfg.findInstr(*it);
+		assert(vr);
+		unsigned long r = vr->rip.unwrap_vexrip();
+		if (debug_declobber_instructions)
+			printf("%lx is a root\n", r);
+		protectedInstructions.insert(r);
+		for (unsigned x = 1; x < 5; x++) {
+			if (debug_declobber_instructions)
+				printf("%lx is clobbered\n", r + x);
+			clobberedInstructions.insert(r + x);
+		}
+	}
+
+	std::set<unsigned long> newEntryPoints;
+	while (!clobberedInstructions.empty()) {
+		unsigned long c = *clobberedInstructions.begin();
+		clobberedInstructions.erase(c);
+		if (protectedInstructions.count(c))
+			continue;
+		if (debug_declobber_instructions)
+			printf("Protecting %lx\n", c);
+		std::set<unsigned long> predecessors;
+		oracle->findPredecessors(c, predecessors);
+		for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+			if (protectedInstructions.count(*it))
+				continue;
+			if (debug_declobber_instructions)
+				printf("Predecessor %lx.  Mark as needing protection.\n", *it);
+			newEntryPoints.insert(*it);
+			protectedInstructions.insert(*it);
+			for (unsigned x = 1; x < 5; x++) {
+				if (debug_declobber_instructions)
+					printf("Clobbers %lx\n", *it + x);
+				clobberedInstructions.insert(*it + x);
+			}
+		}
+		protectedInstructions.insert(c);
+	}
+
+	if (debug_declobber_instructions) {
+		printf("Need protection = [");
+		for (auto it = newEntryPoints.begin(); it != newEntryPoints.end(); it++) {
+			if (it != newEntryPoints.begin())
+				printf(", ");
+			printf("0x%lx", *it);
+		}
+		printf("]\n");
+	}
+
+	ced.dummyEntryPoints = newEntryPoints;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -859,6 +932,8 @@ main(int argc, char *argv[])
 
 	optimiseStashPoints(accumulator, oracle);
 	optimiseCfg(accumulator);
+
+	avoidBranchToPatch(accumulator, oracle);
 
 	FILE *f = fopen(argv[4], "w");
 	accumulator.prettyPrint(f);
