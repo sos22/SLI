@@ -291,6 +291,9 @@ start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label,
 #ifdef KEEP_LLS_HISTORY
 	lls->history[LLS_HISTORY-1] = starting_label;
 #endif
+	debug("%p(%s): Start new LLS\n",
+	      lls,
+	      plan.cfg_nodes[starting_label].id);
 }
 
 static void
@@ -792,8 +795,9 @@ eval_bytecode(const unsigned short *bytecode,
 			if (type == bct_longlong || type == bct_v128) {
 				bytecode_push_longlong(&stack, buf);
 			} else {
-				debug("%p: load(%lx) -> %lx\n", lls, addr, *(unsigned long *)buf);
-				bytecode_push(&stack, *(unsigned long *)buf, type);
+				unsigned long data = bytecode_mask(*(unsigned long *)buf, type);
+				debug("%p(%s): load(%lx) -> %lx\n", lls, plan.cfg_nodes[lls->cfg_node].id, addr, data);
+				bytecode_push(&stack, data, type);
 			}
 			break;
 		}
@@ -898,6 +902,10 @@ exit_interpreter(void)
 			.force_writeback = 0,
 		}
 	};
+	debug("Exit to %lx, rax %lx, rbp %lx\n",
+	      pts->client_regs.rip,
+	      pts->client_regs.rax,
+	      pts->client_regs.rbp);
 	hit_patch = 1;
 	while (hit_patch) {
 		hit_patch = 0;
@@ -909,6 +917,10 @@ exit_interpreter(void)
 				   patched.  That's basically never a
 				   good idea, so interpret for another
 				   couple of instructions. */
+				debug("Destination RIP %lx is in the middle of entry point patch [%lx,%lx); interpret.\n",
+				      pts->client_regs.rip,
+				      entry_patches[i].start,
+				      entry_patches[i].start + entry_patches[i].size);
 				hit_patch = 1;
 				ctxt.patch = &entry_patches[i];
 				r = x86_emulate(&ctxt.ctxt, &exit_emulator_ops);
@@ -922,10 +934,6 @@ exit_interpreter(void)
 		}
 	}
 	exit_routine = find_exit_stub(pts->client_regs.rip);
-	debug("Exit to %lx, rax %lx, rbp %lx\n",
-	      pts->client_regs.rip,
-	      pts->client_regs.rax,
-	      pts->client_regs.rbp);
 	release_big_lock();
 	exit_routine(&pts->client_regs);
 	/* shouldn't get here */
@@ -935,7 +943,7 @@ exit_interpreter(void)
 static void
 exit_thread(struct low_level_state *ll)
 {
-	debug("Exit thread %d\n", ll->cfg_node);
+	debug("Exit thread %p(%s)\n", ll, plan.cfg_nodes[ll->cfg_node].id);
 	sanity_check_low_level_state(ll, 0);
 	if (ll->bound_lls && ll->bound_lls != BOUND_LLS_EXITED) {
 		assert(ll->bound_lls->bound_lls == ll);
@@ -1216,6 +1224,7 @@ receive_messages(struct high_level_state *hls)
 	if (!have_rx)
 		return;
 
+	debug("start rx\n");
 	memset(&new_llsa, 0, sizeof(new_llsa));
 	need_delay = 0;
 	have_rx = 0;
@@ -1232,24 +1241,26 @@ receive_messages(struct high_level_state *hls)
 			 * don't need to do anything. */
 			low_level_state_push(&new_llsa, lls);
 			hls->ll_states.content[i] = NULL;
+			debug("%p(%s): nothing to receive\n", lls, instr->id);
 			continue;
 		}
 
 		msg = instr->rx_msg;
 
 		if (msg->event_count < msg->pair->event_count) {
-			debug("%p: RX %x, delay is on RX side (%d < %d)\n",
-			      lls, msg->msg_id, msg->event_count, msg->pair->event_count);
+			debug("%p(%s): RX %x, delay is on RX side (%d < %d)\n",
+			      lls, instr->id, msg->msg_id, msg->event_count, msg->pair->event_count);
 			delay_this_side = 1;
 		} else {
-			debug("%p: RX %x, delay is on TX side (%d >= %d)\n",
-			      lls, msg->msg_id, msg->event_count, msg->pair->event_count);
+			debug("%p(%s): RX %x, delay is on TX side (%d >= %d)\n",
+			      lls, instr->id, msg->msg_id, msg->event_count, msg->pair->event_count);
 			delay_this_side = 0;
 		}
 		msg->event_count++;
 
 		if (lls->bound_lls == BOUND_LLS_EXITED) {
-			debug("Receiving from an exited thread -> fail\n");
+			debug("%p(%s): Receiving from an exited thread -> fail\n",
+			      lls, instr->id);
 			hls->ll_states.content[i] = NULL;
 			exit_thread(lls);
 		} else if (lls->bound_lls != NULL) {
@@ -1257,20 +1268,20 @@ receive_messages(struct high_level_state *hls)
 			if (lls->bound_lls->bound_sending_message) {
 				if (lls->bound_lls->bound_sending_message == msg->pair &&
 				    rx_message_filter(lls, msg, lls->bound_lls, msg->pair)) {
-					debug("%p: Receive from bound thread %p\n", lls, lls->bound_lls);
+					debug("%p(%s): Receive from bound thread %p\n", lls, instr->id, lls->bound_lls);
 					discharge_message(lls->bound_lls, lls->bound_lls->bound_sending_message,
 							  lls, msg);
 					lls->bound_lls->bound_sending_message = NULL;
 					hls->ll_states.content[i] = NULL;
 					low_level_state_push(&new_llsa, lls);
 				} else {
-					debug("%p: Bound thread sent wrong message\n", lls);
+					debug("%p(%s): Bound thread sent wrong message\n", lls, instr->id);
 					hls->ll_states.content[i] = NULL;
 					exit_thread(lls);
 				}
 			} else {
-				debug("%p: Bound thread %p with nothing outstanding; go to RX state\n",
-				      lls, lls->bound_lls);
+				debug("%p(%s): Bound thread %p with nothing outstanding; go to RX state\n",
+				      lls, instr->id, lls->bound_lls);
 				lls->bound_receiving_message = msg;
 				lls->mbox = &mbox;
 				need_futex = 1;
@@ -1285,8 +1296,11 @@ receive_messages(struct high_level_state *hls)
 				struct low_level_state *tx_lls = message_senders.content[j];
 				assert(tx_lls->unbound_sending_message);
 				if (tx_lls->unbound_sending_message == msg->pair &&
-				    rx_message_filter(lls, msg, tx_lls, msg->pair))
+				    rx_message_filter(lls, msg, tx_lls, msg->pair)) {
+					debug("%p(%s): late rx from remote LLS %p\n", lls,
+					      instr->id, tx_lls);
 					rendezvous_threads_rx(&new_llsa, lls, tx_lls);
+				}
 			}
 			/* And tell any future senders that we're
 			 * available. */
@@ -1351,14 +1365,18 @@ receive_messages(struct high_level_state *hls)
 						continue;
 					}
 					if (lls->bound_lls == BOUND_LLS_EXITED) {
-						debug("%p: Unbound receive: peer exited\n", lls);
+						debug("%p(%s): Unbound receive: peer exited\n",
+						      lls,
+						      plan.cfg_nodes[lls->cfg_node].id);
 						lls->mbox = NULL;
 						hls->ll_states.content[i] = NULL;
 						exit_thread(lls);
 					} else if (lls->bound_receiving_message) {
 						have_more_bound_rx = 1;
 					} else {
-						debug("%p: Unbound receive succeeded\n", lls);
+						debug("%p(%s): Unbound receive succeeded\n",
+						      lls,
+						      plan.cfg_nodes[lls->cfg_node].id);
 						hls->ll_states.content[i] = NULL;
 						lls->mbox = NULL;
 						low_level_state_push(&new_llsa, lls);
@@ -1384,13 +1402,13 @@ receive_messages(struct high_level_state *hls)
 			low_level_state_erase_first(&message_receivers, lls);
 		}
 		if (lls->bound_receiving_message) {
-			debug("Bound receive failed\n");
+			debug("%p(%s): Bound receive failed\n", lls, plan.cfg_nodes[lls->cfg_node].id);
 			exit_thread(lls);
 		} else if (!lls->bound_lls) {
-			debug("Unbound receive failed\n");
+			debug("%p(%s): Unbound receive failed\n", lls, plan.cfg_nodes[lls->cfg_node].id);
 			exit_thread(lls);
 		} else {
-			debug("Receive succeeded.\n");
+			debug("%p(%s): Receive succeeded.\n", lls, plan.cfg_nodes[lls->cfg_node].id);
 			low_level_state_push(&new_llsa, lls);
 		}
 	}
@@ -1410,7 +1428,7 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 		const struct cfg_instr *current_cfg_node = &plan.cfg_nodes[cur_label];
 		sanity_check_low_level_state(lls, 1);
 		int preserve = 0;
-		debug("Consider successors of %d\n", i);
+		debug("%p(%s): advance\n", lls, current_cfg_node->id);
 		for (j = 0; j < current_cfg_node->nr_successors; j++) {
 			if (rip == plan.cfg_nodes[current_cfg_node->successors[j]].rip) {
 				struct low_level_state *newLls;
@@ -1433,16 +1451,23 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 				memmove(newLls->history, newLls->history + 1, sizeof(newLls->history[0]) * (LLS_HISTORY-1));
 				newLls->history[LLS_HISTORY-1] = current_cfg_node->successors[j];
 #endif
-				debug("Accept %d:%lx\n", current_cfg_node->successors[j], rip);
+				debug("%p(%s): Accept %p(%s)\n",
+				      lls,
+				      current_cfg_node->id,
+				      newLls,
+				      plan.cfg_nodes[newLls->cfg_node].id);
 			} else {
-				debug("Reject %d:%lx != %lx\n",
-				       current_cfg_node->successors[j],
-				       plan.cfg_nodes[current_cfg_node->successors[j]].rip,
-				       rip);
+				debug("%p(%s): Reject %s(%d): %lx != %lx\n",
+				      lls,
+				      current_cfg_node->id,
+				      plan.cfg_nodes[current_cfg_node->successors[j]].id,
+				      current_cfg_node->successors[j],
+				      plan.cfg_nodes[current_cfg_node->successors[j]].rip,
+				      rip);
 			}
 		}
 		if (!preserve) {
-			debug("%d has no viable successors\n", i);
+			debug("%p(%s): no viable successors\n", lls, current_cfg_node->id);
 			hls->ll_states.content[i] = NULL;
 			if (current_cfg_node->nr_successors == 0) {
 				if (lls->last_operation_is_send) {
@@ -1462,12 +1487,14 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 					   way of implementing that is
 					   simply to stall until the
 					   bound LLS exits. */
-					debug("successfully finished this CFG with a send\n");
+					debug("%p(%s): successfully finished this CFG with a send\n",
+					      lls, current_cfg_node->id);
 					assert(lls->bound_lls);
 					lls->await_bound_lls_exit = 1;
 					low_level_state_push(&hls->ll_states, lls);
 				} else {
-					debug("successfully finished this CFG; didn't end with a send\n");
+					debug("%p(%s): successfully finished this CFG; didn't end with a send\n",
+					      lls, current_cfg_node->id);
 					exit_thread(lls);
 				}
 			} else {
@@ -1554,31 +1581,35 @@ send_messages(struct high_level_state *hls)
 		if (!instr->tx_msg) {
 			low_level_state_push(&new_llsa, lls);
 			hls->ll_states.content[i] = NULL;
+			debug("%p(%s): nothing to send\n", lls, instr->id);
 			continue;
 		}
 
 		msg = instr->tx_msg;
 
 		if (msg->event_count <= msg->pair->event_count) {
-			debug("%p: Send %x, delay is on TX side (%d <= %d)\n",
-			      lls, msg->msg_id, msg->event_count, msg->pair->event_count);
+			debug("%p(%s): Send %x, delay is on TX side (%d <= %d)\n",
+			      lls, instr->id, msg->msg_id, msg->event_count, msg->pair->event_count);
 			delay_this_side = 1;
 		} else {
-			debug("%p: Send %x, delay is on RX side (%d > %d)\n",
-			      lls, msg->msg_id, msg->event_count, msg->pair->event_count);
+			debug("%p(%s): Send %x, delay is on RX side (%d > %d)\n",
+			      lls, instr->id, msg->msg_id, msg->event_count, msg->pair->event_count);
 			delay_this_side = 0;
 		}
 		msg->event_count++;
 
 		if (lls->bound_lls == BOUND_LLS_EXITED) {
-			debug("Send when bound to a dead thread; doomed\n");
+			debug("%p(%s): Send when bound to a dead thread; doomed\n",
+			      lls, instr->id);
 			hls->ll_states.content[i] = NULL;
 			exit_thread(lls);
 		} else if (lls->bound_lls) {
 			if (lls->bound_lls->bound_receiving_message) {
 				if (lls->bound_lls->bound_receiving_message == msg->pair &&
 				    rx_message_filter(lls, msg->pair, lls->bound_lls, msg)) {
-					debug("Transmit to bound thread %p which is already waiting\n",
+					debug("%p(%s): Transmit to bound thread %p which is already waiting\n",
+					      lls,
+					      instr->id,
 					      lls->bound_lls);
 					discharge_message(lls, msg,
 							  lls->bound_lls, lls->bound_lls->bound_receiving_message);
@@ -1586,12 +1617,14 @@ send_messages(struct high_level_state *hls)
 					low_level_state_push(&new_llsa, lls);
 					hls->ll_states.content[i] = NULL;
 				} else {
-					debug("%p: bound thread received wrong message\n", lls);
+					debug("%p(%s): bound thread received wrong message\n", lls, instr->id);
 					hls->ll_states.content[i] = NULL;
 					exit_thread(lls);
 				}
 			} else {
-				debug("Transmit to bound thread %p which isn't yet ready\n",
+				debug("%p(%s): Transmit to bound thread %p which isn't yet ready\n",
+				      lls,
+				      instr->id,
 				      lls->bound_lls);
 				lls->bound_sending_message = msg;
 				have_sends = 1;
@@ -1606,7 +1639,7 @@ send_messages(struct high_level_state *hls)
 				assert(rx_lls->unbound_receiving_message);
 				if (rx_lls->unbound_receiving_message == msg->pair &&
 				    rx_message_filter(rx_lls, msg->pair, lls, msg)) {
-					debug("inject message into remote LLS %p\n", rx_lls);
+					debug("%p(%s): inject message into remote LLS %p\n", lls, instr->id, rx_lls);
 					rendezvous_threads_tx(&new_llsa, lls, rx_lls);
 				}
 			}
@@ -1658,14 +1691,18 @@ send_messages(struct high_level_state *hls)
 					if (lls->unbound_sending_message)
 						continue;
 					if (lls->bound_lls == BOUND_LLS_EXITED) {
-						debug("%p: Unbound transmit, peer exited\n", lls);
+						debug("%p(%s): Unbound transmit, peer exited\n",
+						      lls,
+						      plan.cfg_nodes[lls->cfg_node].id);
 						hls->ll_states.content[i] = NULL;
 						lls->mbox = NULL;
 						exit_thread(lls);
 					} else if (lls->bound_sending_message) {
 						have_more_bound_tx = 1;
 					} else {
-						debug("Unbound transmit succeeded early\n");
+						debug("%p(%s): Unbound transmit succeeded early\n",
+						      lls,
+						      plan.cfg_nodes[lls->cfg_node].id);
 						hls->ll_states.content[i] = NULL;
 						lls->mbox = NULL;
 						low_level_state_push(&new_llsa, lls);
@@ -1687,14 +1724,14 @@ send_messages(struct high_level_state *hls)
 			low_level_state_erase_first(&message_senders, lls);
 		}
 		if (lls->bound_sending_message) {
-			debug("Bound send failed\n");
+			debug("%p(%s): Bound send failed\n", lls, plan.cfg_nodes[lls->cfg_node].id);
 			exit_thread(lls);
 		} else if (!lls->bound_lls) {
-			debug("Unbound send failed\n");
+			debug("%p(%s): Unbound send failed\n", lls, plan.cfg_nodes[lls->cfg_node].id);
 			hls->ll_states.content[i] = NULL;
 			exit_thread(lls);
 		} else {
-			debug("Send succeeded\n");
+			debug("%p(%s): Send succeeded\n", lls, plan.cfg_nodes[lls->cfg_node].id);
 			low_level_state_push(&new_llsa, lls);
 		}
 	}
@@ -1716,6 +1753,8 @@ wait_for_bound_exits(struct high_level_state *hls)
 			struct low_level_state *lls = hls->ll_states.content[i];
 			if (lls->await_bound_lls_exit) {
 				if (lls->bound_lls == BOUND_LLS_EXITED) {
+					debug("%p's was waiting for bound exit, but that has now happened\n",
+					      lls);
 					low_level_state_erase_idx(&hls->ll_states, i);
 					exit_thread(lls);
 					i--;
@@ -1773,6 +1812,9 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 				default:
 					abort();
 				}
+				debug("%p(%s) stashed r%d = %lx in slot %d\n",
+				      lls, instr->id, instr->stash[j].reg,
+				      *slot, instr->stash[j].slot);
 			}
 		}
 	}
@@ -1791,7 +1833,7 @@ check_conditions(struct high_level_state *hls, const char *message, unsigned off
 		const struct cfg_instr *cfg = &plan.cfg_nodes[lls->cfg_node];
 		const unsigned short *condition = *(const unsigned short **)((unsigned long)cfg + offset);
 		if (!eval_bytecode(condition, lls, NULL, NULL, NULL)) {
-			debug("%p failed a %s side-condition\n", lls, message);
+			debug("%p(%s) failed a %s side-condition\n", lls, cfg->id, message);
 			hls->ll_states.content[i] = NULL;
 			exit_thread(lls);
 			killed = 1;

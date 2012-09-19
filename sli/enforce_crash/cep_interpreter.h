@@ -83,6 +83,8 @@ struct cfg_instr {
 	const unsigned short *pre_validate;
 	const unsigned short *rx_validate;
 	const unsigned short *eval_validate;
+
+	const char *id; /* Just for debug */
 };
 
 struct cep_entry_ctxt {

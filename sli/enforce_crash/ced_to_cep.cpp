@@ -466,6 +466,7 @@ struct cfg_annotation_summary {
 	bool has_pre_validate;
 	bool has_rx_validate;
 	bool has_eval_validate;
+	const char *id;
 };
 
 static void
@@ -613,6 +614,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		}
 
 		summary.rip = instr->rip.unwrap_vexrip();
+		summary.id = instr->label.name();
 		summaries[newLabel] = summary;
 		fprintf(f, "\n");
 	}
@@ -687,6 +689,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "        .eval_validate = instr_%d_eval_validate,\n", it->first);
 		else
 			fprintf(f, "        .eval_validate = NULL,\n");
+		fprintf(f, "        .id = \"%s\",\n", it->second.id);
 	}
 	fprintf(f, "    }\n};\n");
 }
