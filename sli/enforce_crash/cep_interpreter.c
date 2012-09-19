@@ -850,12 +850,16 @@ exit_emulator_insn_fetch(enum x86_segment seg,
 	struct exit_emulation_ctxt *ctxt = (struct exit_emulation_ctxt *)_ctxt;
 	struct entry_patch *patch = ctxt->patch;
 	int from_patch;
-	from_patch = patch->size - (offset - patch->start);
-	if (from_patch > bytes)
-		from_patch = bytes;
-	memcpy(p_data, patch->content + offset - patch->start, from_patch);
-	if (from_patch < bytes)
-		memcpy(p_data + from_patch, (const void *)(offset + from_patch), bytes - from_patch);
+	if (offset >= patch->start + patch->size) {
+		memcpy(p_data, (const void *)offset, bytes);
+	} else {
+		from_patch = patch->size - (offset - patch->start);
+		if (from_patch > bytes)
+			from_patch = bytes;
+		memcpy(p_data, patch->content + offset - patch->start, from_patch);
+		if (from_patch < bytes)
+			memcpy(p_data + from_patch, (const void *)(offset + from_patch), bytes - from_patch);
+	}
 	return X86EMUL_OKAY;
 }
 
