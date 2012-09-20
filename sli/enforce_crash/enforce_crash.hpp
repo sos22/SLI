@@ -1107,6 +1107,7 @@ public:
 	abstractThreadExitPointsT threadExitPoints;
 	CrashCfg crashCfg;
 	std::set<unsigned long> dummyEntryPoints;
+	std::set<unsigned long> keepInterpretingInstrs;
 
 	crashEnforcementData(const MaiMap &mai,
 			     std::set<IRExpr *> &neededExpressions,
@@ -1142,14 +1143,22 @@ public:
 		    !expressionEvalPoints.parse(str, &str) ||
 		    !threadExitPoints.parse(str, &str) ||
 		    !crashCfg.parse(as, str, &str) ||
-		    !parseThisString("Dummy entry points: [", str, &str))
+		    !parseThisString("Dummy entry points = [", str, &str))
 			return false;
-		while (!parseThisString("]\n", str, &str)) {
+		while (!parseThisString("], keepInterpreting = [", str, &str)) {
 			unsigned long v;
 			if (!parseThisString("0x", str, &str) ||
 			    !parseHexUlong(&v, str, &str))
 				return false;
 			dummyEntryPoints.insert(v);
+			parseThisString(", ", str, &str);
+		}
+		while (!parseThisString("]\n", str, &str)) {
+			unsigned long v;
+			if (!parseThisString("0x", str, &str) ||
+			    !parseHexUlong(&v, str, &str))
+				return false;
+			keepInterpretingInstrs.insert(v);
 			parseThisString(", ", str, &str);
 		}
 		internmentState state;
@@ -1170,14 +1179,19 @@ public:
 		expressionEvalPoints.prettyPrint(f);
 		threadExitPoints.prettyPrint(f);
 		crashCfg.prettyPrint(f, verbose);
-		fprintf(f, "Dummy entry points: [");
+		fprintf(f, "Dummy entry points = [");
 		for (auto it = dummyEntryPoints.begin(); it != dummyEntryPoints.end(); it++) {
 			if (it != dummyEntryPoints.begin())
 				fprintf(f, ", ");
 			fprintf(f, "0x%lx", *it);
 		}
-		fprintf(f, "]\n");
-			
+		fprintf(f, "], keepInterpreting = [");
+		for (auto it = keepInterpretingInstrs.begin(); it != keepInterpretingInstrs.end(); it++) {
+			if (it != keepInterpretingInstrs.begin())
+				fprintf(f, ", ");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "]\n");			
 	}
 
 	void operator|=(const crashEnforcementData &ced) {

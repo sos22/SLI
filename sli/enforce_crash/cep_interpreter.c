@@ -902,7 +902,7 @@ exit_emulator_insn_fetch(enum x86_segment seg,
 	struct exit_emulation_ctxt *ctxt = (struct exit_emulation_ctxt *)_ctxt;
 	struct entry_patch *patch = ctxt->patch;
 	int from_patch;
-	if (offset >= patch->start + patch->size) {
+	if (!patch || offset >= patch->start + patch->size) {
 		memcpy(p_data, (const void *)offset, bytes);
 	} else {
 		from_patch = patch->size - (offset - patch->start);
@@ -986,6 +986,28 @@ exit_interpreter(void)
 				for (j = 0; j < plan.nr_entry_points; j++)
 					if (plan.entry_points[j]->orig_rip == pts->client_regs.rip)
 						restart_interpreter(j);
+			}
+		}
+		if (hit_patch)
+			continue;
+		for (i = 0; i < plan.nr_keep_interpreting; i++) {
+			if (plan.keep_interpreting[i] == pts->client_regs.rip) {
+				/* This instruction hasn't been
+				   patched, but for some reason the
+				   plan requires us to interpret it
+				   anyway.  Do so. */
+				debug("Destination RIP %lx matches keep_interpreting slot %d\n",
+				      pts->client_regs.rip, i);
+				hit_patch = 1;
+				ctxt.patch = NULL;
+				r = x86_emulate(&ctxt.ctxt, &exit_emulator_ops);
+				assert(r == X86EMUL_OKAY);
+				/* Check whether we've hit another
+				 * entry point. */
+				for (j = 0; j < plan.nr_entry_points; j++)
+					if (plan.entry_points[j]->orig_rip == pts->client_regs.rip)
+						restart_interpreter(j);
+				break;
 			}
 		}
 	}

@@ -3567,10 +3567,6 @@ Oracle::findPredecessors(unsigned long rip, std::set<unsigned long> &out)
 	f.addPredecessorsDirect(sr, nonCall);
 	for (auto it = nonCall.begin(); it != nonCall.end(); it++)
 		out.insert(it->rip);
-	std::vector<StaticRip> call;
-	f.addPredecessorsCall(sr, call);
-	for (auto it = call.begin(); it != call.end(); it++)
-		out.insert(it->rip);
 }
 
 bool

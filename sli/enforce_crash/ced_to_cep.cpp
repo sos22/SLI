@@ -768,6 +768,13 @@ main(int argc, char *argv[])
 		fprintf(f, "0x%lxul", *it);
 	}
 	fprintf(f, "};\n");
+	fprintf(f, "const unsigned long __keep_interpreting[] = {");
+	for (auto it = ced.keepInterpretingInstrs.begin(); it != ced.keepInterpretingInstrs.end(); it++) {
+		if (it != ced.keepInterpretingInstrs.begin())
+			fprintf(f, ", ");
+		fprintf(f, "0x%lxul", *it);
+	}
+	fprintf(f, "};\n");
 	fprintf(f, "const struct crash_enforcement_plan plan = {\n");
 	fprintf(f, "    .entry_points = __entry_points,\n");
 	fprintf(f, "    .nr_entry_points = sizeof(__entry_points)/sizeof(__entry_points[0]),\n");
@@ -777,6 +784,8 @@ main(int argc, char *argv[])
 	fprintf(f, "    .msg_id_limit = 0x%x,\n", highest_msg_id(ced) + 1);
 	fprintf(f, "    .nr_dummy_entry_points = %zd,\n", ced.dummyEntryPoints.size());
 	fprintf(f, "    .dummy_entry_points = __dummy_entry_points,\n");
+	fprintf(f, "    .nr_keep_interpreting = %zd,\n", ced.keepInterpretingInstrs.size());
+	fprintf(f, "    .keep_interpreting = __keep_interpreting,\n");
 	fprintf(f, "};\n");
 
 	fprintf(f, "\n");
