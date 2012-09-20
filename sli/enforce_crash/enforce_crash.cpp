@@ -516,6 +516,10 @@ removeFreeVariables(IRExpr *what)
 		case Iop_CmpEQ16:
 		case Iop_CmpEQ32:
 		case Iop_CmpEQ64:
+		case Iop_CmpLT8U:
+		case Iop_CmpLT16U:
+		case Iop_CmpLT32U:
+		case Iop_CmpLT64U:
 			return NULL;
 		default:
 			abort();
@@ -539,10 +543,9 @@ removeFreeVariables(IRExpr *what)
 	case Iex_Const:
 		return what;
 	case Iex_CCall:
-		/* As for Load, should recur into arguments, but it
-		   doesn't actually make any difference, so don't
-		   bother. */
-		return what;
+		/* The interpreter can't evaluate these, so might as
+		   well get rid of them as well. */
+		return NULL;
 	case Iex_Mux0X: {
 		/* mux0x is unevaluatable if any of the arguments are
 		   unevaluatable.  That's not ideal; it'd be better to
@@ -591,6 +594,8 @@ removeFreeVariables(IRExpr *what)
 			}
 			idx++;
 		}
+		if (idx2 == 0)
+			return NULL;
 		newI->nr_arguments = idx2;
 		return newI;
 	}
