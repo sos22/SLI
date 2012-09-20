@@ -101,10 +101,9 @@ stack_offset(Oracle *oracle, unsigned long rip)
 			continue;
 		}
 		IRSB *irsb = Oracle::getIRSBForRip(oracle->ms->addressSpace, q.first, false);
-		std::map<unsigned, unsigned> tempToOffset;
 		bool overlap = false;
 		bool failed = false;
-		for (int i = 1; !failed && !overlap && i < irsb->stmts_used; i++) {
+		for (int i = 1; !overlap && i < irsb->stmts_used; i++) {
 			IRStmt *stmt = irsb->stmts[i];
 			switch (stmt->tag) {
 			case Ist_IMark: {
@@ -122,52 +121,25 @@ stack_offset(Oracle *oracle, unsigned long rip)
 			case Ist_Put: {
 				IRStmtPut *p = (IRStmtPut *)stmt;
 				/* 32 == RSP */
-				if (p->target.isReg() && p->target.asReg() != 32)
+				if (!p->target.isReg() || p->target.asReg() != 32)
 					break;
-				if (!p->target.isReg()) {
-					tempToOffset.erase(p->target.asTemp());
-					switch (p->data->tag) {
-					case Iex_Binop: {
-						IRExprBinop *ieb = (IRExprBinop *)p->data;
-						switch (ieb->op) {
-						case Iop_Sub64:
-							if (ieb->arg2->tag == Iex_Const &&
-							    ieb->arg1->tag == Iex_Get &&
-							    ((IRExprGet *)ieb->arg1)->reg.isReg() &&
-							    ((IRExprGet *)ieb->arg1)->reg.asReg() == 32) {
-								tempToOffset[p->target.asTemp()] =
-									((IRExprConst *)ieb->arg2)->con->Ico.U64;
-							}
-							break;
-						default:
-							break;
-						}
+				switch (p->data->tag) {
+				case Iex_Associative: {
+					IRExprAssociative *iea = (IRExprAssociative *)p->data;
+					if (iea->op != Iop_Add64 ||
+					    iea->nr_arguments != 2 ||
+					    iea->contents[0]->tag != Iex_Const ||
+					    iea->contents[1]->tag != Iex_Get ||
+					    ((IRExprGet *)iea->contents[1])->reg != p->target) {
+						failed = true;
+					} else {
+						q.second += ((IRExprConst *)iea->contents[0])->con->Ico.U64;
 					}
-					default:
-						break;
-					}
-				} else {
-					switch (p->data->tag) {
-					case Iex_Get: {
-						IRExprGet *ieg = (IRExprGet *)p->data;
-						if (ieg->reg.isReg()) {
-							if (ieg->reg.asReg() == 32) {
-								/* no-op */
-							} else {
-								failed = true;
-							}
-						} else {
-							if (tempToOffset.count(ieg->reg.asTemp()))
-								q.second = tempToOffset[ieg->reg.asTemp()];
-							else
-								failed = true;
-						}
-						break;
-					}
-					default:
-							    failed = true;
-						break;
-					}
+					break;
+				}
+				default:
+					failed = true;
+					break;
 				}
 				break;
 			}
