@@ -128,9 +128,10 @@ class ThreadCfgDecode {
 	Instruction<ThreadCfgLabel> *addCfg(const AbstractThread &tid, const CFGNode *root);
 public:
 	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
-	Instruction<ThreadCfgLabel> *operator()(const ThreadCfgLabel &l) {
+	Instruction<ThreadCfgLabel> *decode(const ThreadCfgLabel &l) {
 		auto it = content.find(l);
-		assert(it != content.end());
+		if (it == content.end())
+			return NULL;
 		return it->second;
 	}
 
@@ -528,7 +529,7 @@ public:
 		if (!parseThisChar('}', str, &str))
 			return NULL;
 		*suffix = str;
-		return new happensBeforeEdge(cfg(before), cfg(after), content, msg_id);
+		return new happensBeforeEdge(cfg.decode(before), cfg.decode(after), content, msg_id);
 	}
 	void visit(HeapVisitor &hv) {
 		visit_container(content, hv);
@@ -870,11 +871,17 @@ public:
 				const MemoryAccessIdentifier &beforeMai(invert ? hb->after : hb->before);
 				const MemoryAccessIdentifier &afterMai(invert ? hb->before : hb->after);
 				for (auto before_it = mai.begin(beforeMai); !before_it.finished(); before_it.advance()) {
+					auto before = cfg.decode(abs(beforeMai.tid, before_it.label()));
+					if (!before)
+						continue;
 					for (auto after_it = mai.begin(afterMai); !after_it.finished(); after_it.advance()) {
+						auto after = cfg.decode(abs(afterMai.tid, after_it.label()));
+						if (!after)
+							continue;
 						happensBeforeEdge *hbe =
 							new happensBeforeEdge(
-								cfg(abs(beforeMai.tid, before_it.label())),
-								cfg(abs(afterMai.tid, after_it.label())),
+								before,
+								after,
 								idom,
 								exprStashPoints,
 								next_hb_id++);
