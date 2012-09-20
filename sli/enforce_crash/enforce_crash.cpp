@@ -119,15 +119,13 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 			     it4 != it3->second.end();
 			     it4++) {
 				happensBeforeEdge *hbe = *it4;
-				if (hbe->before.thread == thread) {
+				if (hbe->before->rip.thread == thread) {
 					/* Can we send this message? */
-					instrT *sender = cfg(hbe->before);
-					if (forwardReachable[i].count(sender))
+					if (forwardReachable[i].count(hbe->before))
 						should_be_present = true;
-				} else if (hbe->after.thread == thread) {
+				} else if (hbe->after->rip.thread == thread) {
 					/* Can we receive this message? */
-					instrT *receiver = cfg(hbe->after);
-					if (forwardReachable[i].count(receiver))
+					if (forwardReachable[i].count(hbe->after))
 						should_be_present = true;
 				}
 			}
@@ -143,8 +141,8 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 			     it4 != it3->second.end();
 			     it4++) {
 				happensBeforeEdge *hbe = *it4;
-				if (hbe->after.thread == thread) {
-					instrT *receiver = cfg(hbe->after);
+				if (hbe->after->rip.thread == thread) {
+					instrT *receiver = hbe->after;
 					if (!forwardReachable[i].count(receiver) &&
 					    !backwardReachable[i].count(receiver)) {
 						/* No path between this instruction and this
@@ -210,7 +208,7 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcem
 			     it2 != it->second.end();
 			     it2++) {
 				happensBeforeEdge *hbe = *it2;
-				if (hbe->before == instr->rip) {
+				if (hbe->before->rip == instr->rip) {
 					for (auto it3 = hbe->content.begin();
 					     it3 != hbe->content.end();
 					     it3++) {
@@ -237,8 +235,7 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcem
 }
 
 static void
-optimiseHBContent(crashEnforcementData &ced,
-		  ThreadCfgDecode &decode)
+optimiseHBContent(crashEnforcementData &ced)
 {
 	std::set<happensBeforeEdge *> hbEdges;
 	for (auto it = ced.happensBeforePoints.begin();
@@ -253,7 +250,7 @@ optimiseHBContent(crashEnforcementData &ced,
 			for (unsigned x = 0; x < hbe->content.size(); ) {
 				bool must_keep = false;
 				std::queue<Instruction<ThreadCfgLabel> *> pending;
-				pending.push(decode(hbe->after));
+				pending.push(hbe->after);
 				while (!must_keep && !pending.empty()) {
 					Instruction<ThreadCfgLabel> *l = pending.front();
 					pending.pop();
@@ -294,7 +291,7 @@ buildCED(DNF_Conjunction &c,
 
 	InstructionDecoder decode(true, true, as);
 	*out = crashEnforcementData(*summary->mai, neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, decode, true, true);
-	optimiseHBContent(*out, cfg);
+	optimiseHBContent(*out);
 	return true;
 }
 
@@ -719,7 +716,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 					for (auto it3 = it2->second.begin();
 					     !b && it3 != it2->second.end();
 					     it3++)
-						if ((*it3)->before == label)
+						if ((*it3)->before->rip == label)
 							b = true;
 					if (b)
 						break;

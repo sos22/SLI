@@ -116,17 +116,13 @@ public:
 		}
 		return res;
 	}
-#if 0
-	ThreadCfgLabel operator()(const MemoryAccessIdentifier &mai) const
-	{
-		return ThreadCfgLabel((*this)(mai.tid), mai.where);
-	}
-#endif
 	ThreadCfgLabel operator()(int tid, const CfgLabel &where) const
 	{
 		return ThreadCfgLabel((*this)(tid), where);
 	}
 };
+
+class CrashCfg;
 
 class ThreadCfgDecode {
 	Instruction<ThreadCfgLabel> *addCfg(const AbstractThread &tid, const CFGNode *root);
@@ -154,6 +150,8 @@ public:
 	iterator end() { return iterator(content.end()); }
 
 	void addMachine(StateMachine *sm, ThreadAbstracter &abs);
+
+	void fromCrashCfg(CrashCfg &cfg);
 };
 
 void enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out);
@@ -433,8 +431,8 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 }
 
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
-	happensBeforeEdge(const ThreadCfgLabel &_before,
-			  const ThreadCfgLabel &_after,
+	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
+			  Instruction<ThreadCfgLabel> *_after,
 			  const std::vector<IRExprGet *> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
@@ -444,8 +442,8 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 		fragments.push_back(my_asprintf(
 					    "%d: %s <-< %s {",
 					    msg_id,
-					    before.name(),
-					    after.name()));
+					    before->rip.name(),
+					    after->rip.name()));
 		for (auto it = content.begin(); it != content.end(); it++) {
 			fragments.push_back(nameIRExpr(*it));
 			fragments.push_back(", ");
@@ -461,8 +459,8 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 		return res_malloc;
 	}
 public:
-	ThreadCfgLabel before;
-	ThreadCfgLabel after;
+	Instruction<ThreadCfgLabel> *before;
+	Instruction<ThreadCfgLabel> *after;
 	std::vector<IRExprGet *> content;
 	unsigned msg_id;
 
@@ -478,10 +476,9 @@ public:
 		state.hbes.insert(this);
 		return this;
 	}
-	happensBeforeEdge(const ThreadCfgLabel &_before,
-			  const ThreadCfgLabel &_after,
+	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
+			  Instruction<ThreadCfgLabel> *_after,
 			  instructionDominatorMapT &idom,
-			  ThreadCfgDecode &cfg,
 			  expressionStashMapT &stashMap,
 			  unsigned _msg_id)
 		: before(_before),
@@ -489,7 +486,7 @@ public:
 		  msg_id(_msg_id)
 	{
 		std::set<Instruction<ThreadCfgLabel> *> &liveInstructions(
-			idom[cfg(before)]);
+			idom[before]);
 		for (auto it = liveInstructions.begin();
 		     it != liveInstructions.end();
 		     it++) {
@@ -505,7 +502,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "%s", name());
 	}
-	static happensBeforeEdge *parse(const char *str, const char **suffix)
+	static happensBeforeEdge *parse(ThreadCfgDecode &cfg, const char *str, const char **suffix)
 	{
 		ThreadCfgLabel before;
 		ThreadCfgLabel after;
@@ -531,7 +528,7 @@ public:
 		if (!parseThisChar('}', str, &str))
 			return NULL;
 		*suffix = str;
-		return new happensBeforeEdge(before, after, content, msg_id);
+		return new happensBeforeEdge(cfg(before), cfg(after), content, msg_id);
 	}
 	void visit(HeapVisitor &hv) {
 		visit_container(content, hv);
@@ -610,7 +607,7 @@ public:
 			     it2++) {
 				happensBeforeEdge *hb = *it2;
 				for (unsigned x = 0; x < hb->content.size(); x++)
-					mk_slot(hb->after.thread, hb->content[x], next_slot);
+					mk_slot(hb->after->rip.thread, hb->content[x], next_slot);
 			}
 		}
 	}
@@ -876,14 +873,13 @@ public:
 					for (auto after_it = mai.begin(afterMai); !after_it.finished(); after_it.advance()) {
 						happensBeforeEdge *hbe =
 							new happensBeforeEdge(
-								abs(beforeMai.tid, before_it.label()),
-								abs(afterMai.tid, after_it.label()),
+								cfg(abs(beforeMai.tid, before_it.label())),
+								cfg(abs(afterMai.tid, after_it.label())),
 								idom,
-								cfg,
 								exprStashPoints,
 								next_hb_id++);
-						(*this)[hbe->before].insert(hbe);
-						(*this)[hbe->after].insert(hbe);
+						(*this)[hbe->before->rip].insert(hbe);
+						(*this)[hbe->after->rip].insert(hbe);
 					}
 				}
 			}
@@ -906,7 +902,7 @@ public:
 			fprintf(f, "}\n");
 		}
 	}
-	bool parse(const char *str, const char **suffix) {
+	bool parse(ThreadCfgDecode &cfg, const char *str, const char **suffix) {
 		if (!parseThisString("Happens before map:\n", str, &str))
 			return false;
 		clear();
@@ -917,7 +913,7 @@ public:
 			    !parseThisString(" -> {", str, &str))
 				break;
 			while (1) {
-				happensBeforeEdge *edge = happensBeforeEdge::parse(str, &str);
+				happensBeforeEdge *edge = happensBeforeEdge::parse(cfg, str, &str);
 				if (!edge)
 					break;
 				edges.insert(edge);
@@ -996,6 +992,7 @@ public:
 };
 
 class CrashCfg {
+	friend void ThreadCfgDecode::fromCrashCfg(CrashCfg &);
 	std::map<ThreadCfgLabel, Instruction<VexRip> *> content;
 	bool expandJcc;
 	bool threadJumps;
@@ -1137,12 +1134,15 @@ public:
 	bool parse(AddressSpace *as, const char *str, const char **suffix) {
 		if (!parseThisString("Crash enforcement data:\n", str, &str) ||
 		    !roots.parse(str, &str) ||
-		    !exprStashPoints.parse(str, &str) ||
-		    !happensBeforePoints.parse(str, &str) ||
+		    !crashCfg.parse(as, str, &str) ||
+		    !exprStashPoints.parse(str, &str))
+			return false;
+		ThreadCfgDecode cfg;
+		cfg.fromCrashCfg(crashCfg);
+		if (!happensBeforePoints.parse(cfg, str, &str) ||
 		    !exprsToSlots.parse(str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||
 		    !threadExitPoints.parse(str, &str) ||
-		    !crashCfg.parse(as, str, &str) ||
 		    !parseThisString("Dummy entry points = [", str, &str))
 			return false;
 		while (!parseThisString("], keepInterpreting = [", str, &str)) {
@@ -1173,12 +1173,12 @@ public:
 	void prettyPrint(FILE *f, bool verbose = false) {
 		fprintf(f, "Crash enforcement data:\n");
 		roots.prettyPrint(f);
+		crashCfg.prettyPrint(f, verbose);
 		exprStashPoints.prettyPrint(f);
 		happensBeforePoints.prettyPrint(f);
 		exprsToSlots.prettyPrint(f);
 		expressionEvalPoints.prettyPrint(f);
 		threadExitPoints.prettyPrint(f);
-		crashCfg.prettyPrint(f, verbose);
 		fprintf(f, "Dummy entry points = [");
 		for (auto it = dummyEntryPoints.begin(); it != dummyEntryPoints.end(); it++) {
 			if (it != dummyEntryPoints.begin())

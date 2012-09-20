@@ -146,11 +146,9 @@ public:
 		successors.push_back(successor_t::call(r));
 	}
 	void addDefault(const ripType &r, LibraryFunctionType t = LibraryFunctionTemplate::none) {
-		assert(!getDefault());
 		successors.push_back(successor_t::dflt(r, t));
 	}
 	Instruction *addDefault(Instruction *r) {
-		assert(!getDefault());
 		successors.push_back(successor_t::dflt(r));
 		return r;
 	}

@@ -45,6 +45,48 @@ ThreadCfgDecode::addMachine(StateMachine *sm, ThreadAbstracter &abs)
 }
 
 void
+ThreadCfgDecode::fromCrashCfg(CrashCfg &cfg)
+{
+	assert(content.empty());
+	/* Generate the instructions we need */
+	for (auto it = cfg.content.begin(); it != cfg.content.end(); it++) {
+		const ThreadCfgLabel &label(it->first);
+		Instruction<VexRip> *inp = it->second;
+		Instruction<ThreadCfgLabel> *out = new Instruction<ThreadCfgLabel>(-1, inp->label);
+		out->rip = label;
+		out->successors.reserve(inp->successors.size());
+		for (auto it = inp->successors.begin(); it != inp->successors.end(); it++) {
+			if (!it->instr)
+				continue;
+			switch (it->type) {
+			case succ_default:
+				out->addDefault(ThreadCfgLabel(label.thread, it->instr->label));
+				break;
+			case succ_branch:
+				out->addBranch(ThreadCfgLabel(label.thread, it->instr->label));
+				break;
+			case succ_call:
+				out->addCall(ThreadCfgLabel(label.thread, it->instr->label));
+				break;
+			case succ_unroll:
+				out->successors.push_back(
+					Instruction<ThreadCfgLabel>::successor_t::unroll(
+						ThreadCfgLabel(label.thread, it->instr->label)));
+				break;
+			}
+		}
+		content[label] = out;
+	}
+	/* Resolve pointers. */
+	for (auto it = content.begin(); it != content.end(); it++) {
+		for (auto it2 = it->second->successors.begin(); it2 != it->second->successors.end(); it2++) {
+			assert(content.count(it2->rip));
+			it2->instr = content[it2->rip];
+		}
+	}
+}
+
+void
 CrashCfg::prettyPrint(FILE *f, bool verbose)
 {
 	fprintf(f, "\tCFG:\n");

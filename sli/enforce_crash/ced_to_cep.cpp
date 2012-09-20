@@ -544,10 +544,10 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			std::set<happensBeforeEdge *> txMsg;
 			for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
 				happensBeforeEdge *hb = *it2;
-				if (hb->after == oldLabel) {
+				if (hb->after->rip == oldLabel) {
 					rxMsg.insert(hb);
 				} else {
-					assert(hb->before == oldLabel);
+					assert(hb->before->rip == oldLabel);
 					txMsg.insert(hb);
 				}
 			}
@@ -569,7 +569,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				const std::set<happensBeforeEdge *> &hbEdges(ced.happensBeforePoints[oldLabel]);
 				for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
 					happensBeforeEdge *hb = *it2;
-					if (hb->after == oldLabel) {
+					if (hb->after->rip == oldLabel) {
 						for (unsigned x = 0; x < hb->content.size(); x++)
 							rxed.insert(hb->content[x]);
 					}
@@ -626,8 +626,8 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			allHbEdges.insert(*it2);
 	for (auto it = allHbEdges.begin(); it != allHbEdges.end(); it++) {
 		happensBeforeEdge *hb = *it;
-		AbstractThread beforeTid = hb->before.thread;
-		AbstractThread afterTid = hb->after.thread;
+		AbstractThread beforeTid = hb->before->rip.thread;
+		AbstractThread afterTid = hb->after->rip.thread;
 		fprintf(f, "static struct msg_template msg_template_%x_tx;\n", hb->msg_id);
 		fprintf(f, "static struct msg_template msg_template_%x_rx = {\n", hb->msg_id);
 		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);
