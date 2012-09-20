@@ -288,7 +288,7 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 				it->second = internIRExpr(it->second, t);
 		for (auto it = t.phis.begin(); it != t.phis.end(); it++) {
 			StateMachineSideEffectPhi *o = *it;
-			if (o->reg == phi->reg) {
+			if (o->reg == phi->reg && o->generations == phi->generations) {
 				t.sideEffects[s] = o;
 				return o;
 			}
