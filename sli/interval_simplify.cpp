@@ -41,8 +41,12 @@ public:
 		for (unsigned x = 0; x < intervals.size(); x++) {
 			assert(intervals[x].first <= intervals[x].second);
 			assert(intervals[x].second <= type_max);
-			if (x != 0)
+			if (x != 0) {
+				assert(intervals[x].first > 0);
 				assert(intervals[x].first > intervals[x-1].second + 1);
+			}
+			if (x != intervals.size() - 1)
+				assert(intervals[x].second < type_max);
 		}
 	}
 	space(const std::vector<interval> &_intervals, unsigned long _type_max)
@@ -244,6 +248,14 @@ space::operator||(const space &o) const
 		it2++;
 	}
 	while (it1 != intervals.end() || it2 != o.intervals.end()) {
+		if (newIntervals.back().second == type_max) {
+			/* We've already covered all the way to the
+			   end of the range.  Get out early.  This is
+			   marginally faster, but more importantly
+			   avoids overflow bugs later on if type_max
+			   == ulong_max */
+			break;
+		}
 		interval int_to_add;
 		if (it1 != intervals.end() &&
 		    (it2 == o.intervals.end() || it1->first < it2->first)) {
