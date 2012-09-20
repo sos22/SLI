@@ -949,7 +949,7 @@ top:
 		i->immediate(1, as);
 		break;
 
-	case 0xc3:
+	case 0xc3: /* ret */
 		fallsThrough = false;
 		break;
 
