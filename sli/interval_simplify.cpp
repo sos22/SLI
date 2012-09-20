@@ -301,7 +301,9 @@ class spaces : public Named {
 public:
 	IRExpr *asIRExpr();
 	bool empty() const { return content.empty(); }
+	bool singleElement() const { return content.size() == 1; }
 	spaces operator!() {
+		assert(singleElement());
 		spaces n;
 		for (auto it = content.begin(); it != content.end(); it++)
 			n.content.insert(std::pair<IRExpr *, space>(it->first, !it->second));
@@ -349,7 +351,7 @@ public:
 	IRExpr *asIRExpr();
 
 	intervalified operator!() {
-		if (!rest)
+		if (!rest && sp.singleElement())
 			return intervalified(!sp);
 		else
 			return intervalified(IRExpr_Unop(Iop_Not1, asIRExpr()));
