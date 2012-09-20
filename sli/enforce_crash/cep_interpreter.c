@@ -27,7 +27,7 @@
 #define PAGE_SIZE 4096ul
 #define STACK_SIZE (PAGE_SIZE * 4)
 #define PAGE_MASK (~(PAGE_SIZE - 1))
-#define MAX_DELAY_US (100000)
+#define MAX_DELAY_US (1000000)
 
 #define KEEP_LLS_HISTORY 0
 #define LLS_HISTORY 8
@@ -160,7 +160,8 @@ nr_queued_wakes;
 static int *
 queued_wakes[8];
 
-#define debug(fmt, ...) printf("%d:%f: " fmt, gettid(), now(), ##__VA_ARGS__)
+//#define debug(fmt, ...) printf("%d:%f: " fmt, gettid(), now(), ##__VA_ARGS__)
+#define debug(...) do {} while (0)
 
 static void
 futex(int *ptr, int op, int val, struct timespec *timeout)
