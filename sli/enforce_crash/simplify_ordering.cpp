@@ -260,7 +260,7 @@ extractImplicitOrder(StateMachineSideEffect *se,
 		return;
 	StateMachineSideEffectMemoryAccess *smsema =
 		dynamic_cast<StateMachineSideEffectMemoryAccess *>(se);
-	if (!se)
+	if (!smsema)
 		return;
 
 	for (unsigned y = 0; y < eventsSoFar.size(); y++) {

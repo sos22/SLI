@@ -671,3 +671,10 @@ getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const DynAnalysisRip
 {
 	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, PROBE_CLUSTER_THRESHOLD1, PROBE_CLUSTER_THRESHOLD2);
 }
+
+bool
+getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const DynAnalysisRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
+	     HashedSet<HashedPtr<const CFGNode> > &targetNodes, int threshold1, int threshold2)
+{
+	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, threshold1, threshold2);
+}

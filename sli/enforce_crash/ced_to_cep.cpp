@@ -100,11 +100,10 @@ stack_offset(Oracle *oracle, unsigned long rip)
 			assert(it->second == q.second);
 			continue;
 		}
-		IRSB *irsb = Oracle::getIRSBForRip(oracle->ms->addressSpace, q.first);
-		std::map<unsigned, unsigned> tempToOffset;
+		IRSB *irsb = Oracle::getIRSBForRip(oracle->ms->addressSpace, q.first, false);
 		bool overlap = false;
 		bool failed = false;
-		for (int i = 1; !failed && !overlap && i < irsb->stmts_used; i++) {
+		for (int i = 1; !overlap && i < irsb->stmts_used; i++) {
 			IRStmt *stmt = irsb->stmts[i];
 			switch (stmt->tag) {
 			case Ist_IMark: {
@@ -122,52 +121,25 @@ stack_offset(Oracle *oracle, unsigned long rip)
 			case Ist_Put: {
 				IRStmtPut *p = (IRStmtPut *)stmt;
 				/* 32 == RSP */
-				if (p->target.isReg() && p->target.asReg() != 32)
+				if (!p->target.isReg() || p->target.asReg() != 32)
 					break;
-				if (!p->target.isReg()) {
-					tempToOffset.erase(p->target.asTemp());
-					switch (p->data->tag) {
-					case Iex_Binop: {
-						IRExprBinop *ieb = (IRExprBinop *)p->data;
-						switch (ieb->op) {
-						case Iop_Sub64:
-							if (ieb->arg2->tag == Iex_Const &&
-							    ieb->arg1->tag == Iex_Get &&
-							    ((IRExprGet *)ieb->arg1)->reg.isReg() &&
-							    ((IRExprGet *)ieb->arg1)->reg.asReg() == 32) {
-								tempToOffset[p->target.asTemp()] =
-									((IRExprConst *)ieb->arg2)->con->Ico.U64;
-							}
-							break;
-						default:
-							break;
-						}
+				switch (p->data->tag) {
+				case Iex_Associative: {
+					IRExprAssociative *iea = (IRExprAssociative *)p->data;
+					if (iea->op != Iop_Add64 ||
+					    iea->nr_arguments != 2 ||
+					    iea->contents[0]->tag != Iex_Const ||
+					    iea->contents[1]->tag != Iex_Get ||
+					    ((IRExprGet *)iea->contents[1])->reg != p->target) {
+						failed = true;
+					} else {
+						q.second += ((IRExprConst *)iea->contents[0])->con->Ico.U64;
 					}
-					default:
-						break;
-					}
-				} else {
-					switch (p->data->tag) {
-					case Iex_Get: {
-						IRExprGet *ieg = (IRExprGet *)p->data;
-						if (ieg->reg.isReg()) {
-							if (ieg->reg.asReg() == 32) {
-								/* no-op */
-							} else {
-								failed = true;
-							}
-						} else {
-							if (tempToOffset.count(ieg->reg.asTemp()))
-								q.second = tempToOffset[ieg->reg.asTemp()];
-							else
-								failed = true;
-						}
-						break;
-					}
-					default:
-							    failed = true;
-						break;
-					}
+					break;
+				}
+				default:
+					failed = true;
+					break;
 				}
 				break;
 			}
@@ -335,6 +307,18 @@ bytecode_const32(FILE *f, unsigned val)
 	fprintf(f, "    %d,\n", (unsigned short)val);
 	fprintf(f, "    %d,\n", (unsigned short)(val >> 16));
 }
+static void
+bytecode_const16(FILE *f, unsigned short val)
+{
+	fprintf(f, "    %d,\n", (unsigned short)val);
+}
+static void
+bytecode_const8(FILE *f, unsigned char val)
+{
+	/* ``Bytecode'' format actually works in terms of shorts, so
+	   just zero-extend the byte to 16 bits. */
+	fprintf(f, "    %d,\n", (unsigned short)val);
+}
 
 static void
 bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnforcementData &ced)
@@ -342,13 +326,15 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 	switch (expr->tag) {
 	case Iex_Const: {
 		IRExprConst *iec = (IRExprConst *)expr;
+		bytecode_op(f, "push_const", iec->type());
 		switch (iec->con->tag) {
+		case Ico_U8:
+			bytecode_const8(f, iec->con->Ico.U8);
+			break;
 		case Ico_U32:
-			bytecode_op(f, "push_const", Ity_I32);
 			bytecode_const32(f, iec->con->Ico.U32);
 			break;
 		case Ico_U64:
-			bytecode_op(f, "push_const", Ity_I64);
 			bytecode_const64(f, iec->con->Ico.U64);
 			break;
 		default:
@@ -364,16 +350,36 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 		break;
 	}
 
+	case Iex_Unop: {
+		IRExprUnop *ieu = (IRExprUnop *)expr;
+		bytecode_eval_expr(f, ieu->arg, thread, ced);
+		switch (ieu->op) {
+		case Iop_32Sto64:
+			bytecode_op(f, "sign_extend64", ieu->arg->type());
+			break;
+		case Iop_BadPtr:
+			bytecode_op(f, "badptr", Ity_I64);
+			break;
+		default:
+			abort();
+		}
+		break;
+	}
+
 	case Iex_Binop: {
 		IRExprBinop *ieb = (IRExprBinop *)expr;
 		bytecode_eval_expr(f, ieb->arg1, thread, ced);
 		bytecode_eval_expr(f, ieb->arg2, thread, ced);
 		switch (ieb->op) {
 		case Iop_CmpEQ32:
-			bytecode_op(f, "cmp_eq", Ity_I32);
-			break;
 		case Iop_CmpEQ64:
-			bytecode_op(f, "cmp_eq", Ity_I64);
+			bytecode_op(f, "cmp_eq", ieb->arg1->type());
+			break;
+		case Iop_CmpLT32U:
+			bytecode_op(f, "cmp_ltu", ieb->arg1->type());
+			break;
+		case Iop_Shl64:
+			bytecode_op(f, "shl", ieb->arg1->type());
 			break;
 		default:
 			abort();
@@ -388,6 +394,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 		for (int i = 1; i < iea->nr_arguments; iea++) {
 			bytecode_eval_expr(f, iea->contents[i], thread, ced);
 			switch (iea->op) {
+			case Iop_Add32:
 			case Iop_Add64:
 				bytecode_op(f, "add", iea->type());
 				break;
@@ -431,6 +438,7 @@ struct cfg_annotation_summary {
 	bool has_pre_validate;
 	bool has_rx_validate;
 	bool has_eval_validate;
+	const char *id;
 };
 
 static void
@@ -463,6 +471,8 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		int newLabel(it->second);
 
 		auto instr = ced.crashCfg.findInstr(oldLabel);
+		assert(instr);
+		assert(instr->len != 0);
 		fprintf(f, "static const unsigned char instr_%d_content[] = {", newLabel);
 		for (unsigned x = 0; x < instr->len; x++) {
 			if (x != 0)
@@ -506,10 +516,10 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			std::set<happensBeforeEdge *> txMsg;
 			for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
 				happensBeforeEdge *hb = *it2;
-				if (hb->after == oldLabel) {
+				if (hb->after->rip == oldLabel) {
 					rxMsg.insert(hb);
 				} else {
-					assert(hb->before == oldLabel);
+					assert(hb->before->rip == oldLabel);
 					txMsg.insert(hb);
 				}
 			}
@@ -531,7 +541,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				const std::set<happensBeforeEdge *> &hbEdges(ced.happensBeforePoints[oldLabel]);
 				for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
 					happensBeforeEdge *hb = *it2;
-					if (hb->after == oldLabel) {
+					if (hb->after->rip == oldLabel) {
 						for (unsigned x = 0; x < hb->content.size(); x++)
 							rxed.insert(hb->content[x]);
 					}
@@ -576,6 +586,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		}
 
 		summary.rip = instr->rip.unwrap_vexrip();
+		summary.id = instr->label.name();
 		summaries[newLabel] = summary;
 		fprintf(f, "\n");
 	}
@@ -587,8 +598,8 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			allHbEdges.insert(*it2);
 	for (auto it = allHbEdges.begin(); it != allHbEdges.end(); it++) {
 		happensBeforeEdge *hb = *it;
-		AbstractThread beforeTid = hb->before.thread;
-		AbstractThread afterTid = hb->after.thread;
+		AbstractThread beforeTid = hb->before->rip.thread;
+		AbstractThread afterTid = hb->after->rip.thread;
 		fprintf(f, "static struct msg_template msg_template_%x_tx;\n", hb->msg_id);
 		fprintf(f, "static struct msg_template msg_template_%x_rx = {\n", hb->msg_id);
 		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);
@@ -650,6 +661,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "        .eval_validate = instr_%d_eval_validate,\n", it->first);
 		else
 			fprintf(f, "        .eval_validate = NULL,\n");
+		fprintf(f, "        .id = \"%s\",\n", it->second.id);
 	}
 	fprintf(f, "    }\n};\n");
 }
@@ -709,7 +721,7 @@ main(int argc, char *argv[])
 	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
 		err(1, "open(%s)", ced_path);
-	crashEnforcementData ced(false);
+	crashEnforcementData ced(false, false);
 	loadCrashEnforcementData(ced, ms->addressSpace, fd);
 	close(fd);
 
@@ -721,6 +733,20 @@ main(int argc, char *argv[])
 	fprintf(f, "\n");
 	dump_annotated_cfg(ced, f, relabeller, "__cfg_nodes");
 	compute_entry_point_list(oracle, ced, f, relabeller, "__entry_points");
+	fprintf(f, "const unsigned long __dummy_entry_points[] = {");
+	for (auto it = ced.dummyEntryPoints.begin(); it != ced.dummyEntryPoints.end(); it++) {
+		if (it != ced.dummyEntryPoints.begin())
+			fprintf(f, ", ");
+		fprintf(f, "0x%lxul", *it);
+	}
+	fprintf(f, "};\n");
+	fprintf(f, "const unsigned long __keep_interpreting[] = {");
+	for (auto it = ced.keepInterpretingInstrs.begin(); it != ced.keepInterpretingInstrs.end(); it++) {
+		if (it != ced.keepInterpretingInstrs.begin())
+			fprintf(f, ", ");
+		fprintf(f, "0x%lxul", *it);
+	}
+	fprintf(f, "};\n");
 	fprintf(f, "const struct crash_enforcement_plan plan = {\n");
 	fprintf(f, "    .entry_points = __entry_points,\n");
 	fprintf(f, "    .nr_entry_points = sizeof(__entry_points)/sizeof(__entry_points[0]),\n");
@@ -728,6 +754,10 @@ main(int argc, char *argv[])
 	fprintf(f, "    .nr_cfg_nodes = sizeof(__cfg_nodes)/sizeof(__cfg_nodes[0]),\n");
 	fprintf(f, "    .base_msg_id = 0x%x,\n", lowest_msg_id(ced));
 	fprintf(f, "    .msg_id_limit = 0x%x,\n", highest_msg_id(ced) + 1);
+	fprintf(f, "    .nr_dummy_entry_points = %zd,\n", ced.dummyEntryPoints.size());
+	fprintf(f, "    .dummy_entry_points = __dummy_entry_points,\n");
+	fprintf(f, "    .nr_keep_interpreting = %zd,\n", ced.keepInterpretingInstrs.size());
+	fprintf(f, "    .keep_interpreting = __keep_interpreting,\n");
 	fprintf(f, "};\n");
 
 	fprintf(f, "\n");

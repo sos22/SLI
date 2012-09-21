@@ -123,8 +123,8 @@ MemoryAccessIdentifier::parse(const char *str,
 	    !parseThisChar(':', str, &str) ||
 	    !parseDecimalInt(&id, str, suffix))
 		return false;
-	tid = tid;
-	id = id;
+	this->tid = tid;
+	this->id = id;
 	clearName();
 	return true;
 }

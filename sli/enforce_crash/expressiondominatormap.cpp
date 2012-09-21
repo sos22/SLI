@@ -88,18 +88,22 @@ happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, Th
 		if (c[x].second->tag == Iex_HappensBefore) {
 			IRExprHappensBefore *e = (IRExprHappensBefore *)c[x].second;
 			for (auto before_it = mai.begin(e->before); !before_it.finished(); before_it.advance()) {
+				ThreadCfgLabel beforeRip(abs(e->before.tid, before_it.label()));
+				auto before = cfg.decode(beforeRip);
+				if (!before)
+					continue;
 				for (auto after_it = mai.begin(e->after); !after_it.finished(); after_it.advance()) {
-					ThreadCfgLabel beforeRip(abs(e->before.tid, before_it.label()));
 					ThreadCfgLabel afterRip(abs(e->after.tid, after_it.label()));
-					auto before = cfg(beforeRip);
-					auto after = cfg(afterRip);
+					auto after = cfg.decode(afterRip);
+					if (!after)
+						continue;
 					if (c[x].first) {
-						auto *t = before;
-						before = after;
-						after = t;
+						happensAfter[after].insert(before);
+						happensBefore[before].insert(after);
+					} else {
+						happensAfter[before].insert(after);
+						happensBefore[after].insert(before);
 					}
-					happensAfter[before].insert(after);
-					happensBefore[after].insert(before);
 				}
 			}
 		}

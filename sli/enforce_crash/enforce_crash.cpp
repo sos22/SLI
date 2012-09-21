@@ -15,6 +15,12 @@
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
 
+#ifndef NDEBUG
+static bool debug_declobber_instructions = false;
+#else
+#define debug_declobber_instructuions false
+#endif
+
 unsigned long
 __trivial_hash_function(const VexRip &vr)
 {
@@ -113,15 +119,13 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 			     it4 != it3->second.end();
 			     it4++) {
 				happensBeforeEdge *hbe = *it4;
-				if (hbe->before.thread == thread) {
+				if (hbe->before->rip.thread == thread) {
 					/* Can we send this message? */
-					instrT *sender = cfg(hbe->before);
-					if (forwardReachable[i].count(sender))
+					if (forwardReachable[i].count(hbe->before))
 						should_be_present = true;
-				} else if (hbe->after.thread == thread) {
+				} else if (hbe->after->rip.thread == thread) {
 					/* Can we receive this message? */
-					instrT *receiver = cfg(hbe->after);
-					if (forwardReachable[i].count(receiver))
+					if (forwardReachable[i].count(hbe->after))
 						should_be_present = true;
 				}
 			}
@@ -137,8 +141,8 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 			     it4 != it3->second.end();
 			     it4++) {
 				happensBeforeEdge *hbe = *it4;
-				if (hbe->after.thread == thread) {
-					instrT *receiver = cfg(hbe->after);
+				if (hbe->after->rip.thread == thread) {
+					instrT *receiver = hbe->after;
 					if (!forwardReachable[i].count(receiver) &&
 					    !backwardReachable[i].count(receiver)) {
 						/* No path between this instruction and this
@@ -167,7 +171,7 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 		instrT *i = *it;
 
 		for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
-			if (it2->type == instrT::successor_t::succ_call)
+			if (it2->type == succ_call)
 				continue;
 			if (it2->instr && !instructionPresence.count(it2->instr))
 				insert(it2->instr->rip);
@@ -204,7 +208,7 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcem
 			     it2 != it->second.end();
 			     it2++) {
 				happensBeforeEdge *hbe = *it2;
-				if (hbe->before == instr->rip) {
+				if (hbe->before->rip == instr->rip) {
 					for (auto it3 = hbe->content.begin();
 					     it3 != hbe->content.end();
 					     it3++) {
@@ -231,8 +235,7 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcem
 }
 
 static void
-optimiseHBContent(crashEnforcementData &ced,
-		  ThreadCfgDecode &decode)
+optimiseHBContent(crashEnforcementData &ced)
 {
 	std::set<happensBeforeEdge *> hbEdges;
 	for (auto it = ced.happensBeforePoints.begin();
@@ -247,7 +250,7 @@ optimiseHBContent(crashEnforcementData &ced,
 			for (unsigned x = 0; x < hbe->content.size(); ) {
 				bool must_keep = false;
 				std::queue<Instruction<ThreadCfgLabel> *> pending;
-				pending.push(decode(hbe->after));
+				pending.push(hbe->after);
 				while (!must_keep && !pending.empty()) {
 					Instruction<ThreadCfgLabel> *l = pending.front();
 					pending.pop();
@@ -269,7 +272,7 @@ optimiseHBContent(crashEnforcementData &ced,
 
 static bool
 buildCED(DNF_Conjunction &c,
-	 std::map<unsigned, CfgLabel> &rootsCfg,
+	 std::map<unsigned, std::set<CfgLabel> > &rootsCfg,
 	 CrashSummary *summary,
 	 crashEnforcementData *out,
 	 ThreadAbstracter &abs,
@@ -286,9 +289,9 @@ buildCED(DNF_Conjunction &c,
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	InstructionDecoder decode(true, as);
-	*out = crashEnforcementData(*summary->mai, neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, decode, true);
-	optimiseHBContent(*out, cfg);
+	InstructionDecoder decode(true, true, as);
+	*out = crashEnforcementData(*summary->mai, neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, decode, true, true);
+	optimiseHBContent(*out);
 	return true;
 }
 
@@ -443,6 +446,164 @@ heuristicSimplify(IRExpr *e)
 	return e;
 }
 
+/* We can't get at the values of free variables from the run-time
+   enforcer, so we might as well remove them now. */
+static IRExpr *
+removeFreeVariables(IRExpr *what)
+{
+	switch (what->tag) {
+	case Iex_Get:
+		return what;
+	case Iex_GetI: {
+		auto *i = (IRExprGetI *)what;
+		IRExpr *ix = removeFreeVariables(i->ix);
+		if (!ix)
+			return NULL;
+		if (ix == i->ix)
+			return i;
+		return IRExpr_GetI(i->descr, ix,  i->bias, i->tid);
+	}
+	case Iex_Qop: {
+		abort();
+		auto *i = (IRExprQop *)what;
+		auto arg1 = removeFreeVariables(i->arg1);
+		if (!arg1)
+			return NULL;
+		auto arg2 = removeFreeVariables(i->arg2);
+		if (!arg2)
+			return NULL;
+		auto arg3 = removeFreeVariables(i->arg3);
+		if (!arg3)
+			return NULL;
+		auto arg4 = removeFreeVariables(i->arg4);
+		if (!arg4)
+			return NULL;
+		if (arg1 == i->arg1 && arg2 == i->arg2 && arg3 == i->arg3 && arg4 == i->arg4)
+			return i;
+		return IRExpr_Qop(
+			i->op, arg1, arg2, arg3, arg4);
+	}
+	case Iex_Triop: {
+		abort();
+		auto *i = (IRExprTriop *)what;
+		auto arg1 = removeFreeVariables(i->arg1);
+		if (!arg1)
+			return NULL;
+		auto arg2 = removeFreeVariables(i->arg2);
+		if (!arg2)
+			return NULL;
+		auto arg3 = removeFreeVariables(i->arg3);
+		if (!arg3)
+			return NULL;
+		if (arg1 == i->arg1 && arg2 == i->arg2 && arg3 == i->arg3)
+			return i;
+		return IRExpr_Triop(
+			i->op, arg1, arg2, arg3);
+	}
+	case Iex_Binop: {
+		auto i = (IRExprBinop *)what;
+		auto arg1 = removeFreeVariables(i->arg1);
+		auto arg2 = removeFreeVariables(i->arg2);
+		if (arg1 == i->arg1 && arg2 == i->arg2)
+			return what;
+		if (arg1 && arg2)
+			return IRExpr_Binop(i->op, arg1, arg2);
+		switch (i->op) {
+		case Iop_CmpEQ8:
+		case Iop_CmpEQ16:
+		case Iop_CmpEQ32:
+		case Iop_CmpEQ64:
+		case Iop_CmpLT8U:
+		case Iop_CmpLT16U:
+		case Iop_CmpLT32U:
+		case Iop_CmpLT64U:
+			return NULL;
+		default:
+			abort();
+		}
+		break;
+	}
+	case Iex_Unop: {
+		auto i = (IRExprUnop *)what;
+		auto arg = removeFreeVariables(i->arg);
+		if (!arg)
+			return NULL;
+		if (arg == i->arg)
+			return i;
+		return IRExpr_Unop(i->op, arg);
+	}
+	case Iex_Load:
+		/* Should arguably recurse into addr here, but the
+		   rest of the pipeline will never look at it, so
+		   don't bother. */
+		return what;
+	case Iex_Const:
+		return what;
+	case Iex_CCall:
+		/* The interpreter can't evaluate these, so might as
+		   well get rid of them as well. */
+		return NULL;
+	case Iex_Mux0X: {
+		/* mux0x is unevaluatable if any of the arguments are
+		   unevaluatable.  That's not ideal; it'd be better to
+		   try to preserve whichever arguments are eval-able.
+		   The problem is that we don't have any ``preferred''
+		   value at this stage, so we can't put in a sensible
+		   default for the other one. */
+		auto i = (IRExprMux0X *)what;
+		auto cond = removeFreeVariables(i->cond);
+		if (!cond)
+			return NULL;
+		auto expr0 = removeFreeVariables(i->expr0);
+		if (!expr0)
+			return NULL;
+		auto exprX = removeFreeVariables(i->exprX);
+		if (!exprX)
+			return NULL;
+		if (cond == i->cond && expr0 == i->expr0 && exprX == i->exprX)
+			return i;
+		return IRExpr_Mux0X(cond, expr0, exprX);
+	}
+	case Iex_Associative: {
+		auto i = (IRExprAssociative *)what;
+		int idx;
+		IRExpr *a;
+		for (idx = 0; idx < i->nr_arguments; idx++) {
+			a = removeFreeVariables(i->contents[idx]);
+			if (a != i->contents[idx])
+				break;
+		}
+		if (idx == i->nr_arguments)
+			return i;
+		IRExprAssociative *newI = (IRExprAssociative *)IRExpr_Associative(i->nr_arguments, i->op);
+		int idx2 = idx;
+		memcpy(newI->contents, i->contents, idx * sizeof(IRExpr *));
+		if (a) {
+			newI->contents[idx2] = a;
+			idx2++;
+		}
+		idx++;
+		while (idx < i->nr_arguments) {
+			a = removeFreeVariables(i->contents[idx]);
+			if (a) {
+				newI->contents[idx2] = a;
+				idx2++;
+			}
+			idx++;
+		}
+		if (idx2 == 0)
+			return NULL;
+		newI->nr_arguments = idx2;
+		return newI;
+	}
+	case Iex_HappensBefore:
+		return what;
+	case Iex_FreeVariable:
+		return NULL;
+	}
+	abort();
+}
+
 static crashEnforcementData
 enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
@@ -464,6 +625,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 						.setAddressSpace(oracle->ms->addressSpace),
 					   token);
 	requirement = IRExpr_Binop(Iop_And1, requirement, summary->verificationCondition);
+	requirement = removeFreeVariables(requirement);
 	requirement = internIRExpr(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
@@ -494,25 +656,21 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printDnf(d, _logfile);
 
 	if (d.size() == 0)
-		return crashEnforcementData(true);
+		return crashEnforcementData(true, true);
 
-	std::map<unsigned, CfgLabel> rootsCfg;
+	std::map<unsigned, std::set<CfgLabel> > rootsCfg;
 	for (auto it = summary->loadMachine->cfg_roots.begin();
 	     it != summary->loadMachine->cfg_roots.end();
 	     it++)
-		rootsCfg.insert(std::pair<unsigned, CfgLabel>(
-					it->first,
-					it->second->label));
+		rootsCfg[it->first].insert(it->second->label);
 	for (auto it = summary->storeMachine->cfg_roots.begin();
 	     it != summary->storeMachine->cfg_roots.end();
 	     it++)
-		rootsCfg.insert(std::pair<unsigned, CfgLabel>(
-					it->first,
-					it->second->label));
+		rootsCfg[it->first].insert(it->second->label);
 
-	crashEnforcementData accumulator(true);
+	crashEnforcementData accumulator(true, true);
 	for (unsigned x = 0; x < d.size(); x++) {
-		crashEnforcementData tmp(true);
+		crashEnforcementData tmp(true, true);
 		if (buildCED(d[x], rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace, next_slot)) {
 			printf("Intermediate CED:\n");
 			tmp.prettyPrint(stdout, true);
@@ -558,7 +716,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 					for (auto it3 = it2->second.begin();
 					     !b && it3 != it2->second.end();
 					     it3++)
-						if ((*it3)->before == label)
+						if ((*it3)->before->rip == label)
 							b = true;
 					if (b)
 						break;
@@ -568,7 +726,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 
 			/* Can't stash a register which this
 			 * instruction might modify */
-			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, node->rip));
+			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, node->rip), true);
 			std::set<threadAndRegister, threadAndRegister::partialCompare> modified_regs;
 			for (int x = 0; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 				if (irsb->stmts[x]->tag == Ist_Put)
@@ -604,38 +762,214 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 static void
 optimiseCfg(crashEnforcementData &ced)
 {
+	struct {
+		crashEnforcementData *ced;
+		bool operator()(const ThreadCfgLabel &label) {
+			return ced->exprStashPoints.count(label) != 0 ||
+				ced->happensBeforePoints.count(label) != 0 ||
+				ced->expressionEvalPoints.count(label) != 0 ||
+				ced->threadExitPoints.count(label) != 0;
+		}
+	} hasSideEffect = {&ced};
 	crashEnforcementRoots newRoots;
 	for (auto it = ced.roots.begin();
 	     it != ced.roots.end();
 	     it++) {
-		auto n = ced.crashCfg.findInstr(*it);
+		auto root = ced.crashCfg.findInstr(*it);
 		while (1) {
 			/* We can advance a root if it has a single
 			   successor, and it has no stash points, and
 			   it has no HB points, and it has no eval
 			   points, and it isn't an exit point. */
-			if (n->successors.size() != 1)
+			if (root->successors.size() != 1)
+                               break;
+			ThreadCfgLabel l(it->thread, root->label);
+			if (hasSideEffect(l))
 				break;
-			ThreadCfgLabel l(it->thread, n->label);
-			if (ced.exprStashPoints.count(l) != 0)
-				break;
-			if (ced.happensBeforePoints.count(l) != 0)
-				break;
-			if (ced.expressionEvalPoints.count(l) != 0)
-				break;
-			if (ced.threadExitPoints.count(l) != 0)
-				break;
-			n = n->successors[0].instr;
+			root = root->successors[0].instr;
 		}
-		newRoots.insert(ThreadCfgLabel(it->thread, n->label));
+
+		/* If all of the paths forwards from root N issue
+		   their first side-effect at node N' then N can be
+		   replaced by N'. */
+		bool haveFirstSideEffect = false;
+		bool failed = false;
+		ThreadCfgLabel firstSideEffect;
+		std::set<const Instruction<VexRip> *> visited;
+		std::queue<const Instruction<VexRip> *> pending;
+		pending.push(root);
+		while (!failed && !pending.empty()) {
+			auto n = pending.front();
+			pending.pop();
+			ThreadCfgLabel l(it->thread, n->label);
+
+			if (hasSideEffect(l)) {
+				if (haveFirstSideEffect) {
+					if (firstSideEffect != l)
+						failed = true;
+				} else {
+					firstSideEffect = l;
+					haveFirstSideEffect = true;
+				}
+			} else {
+				for (auto it = n->successors.begin();
+				     it != n->successors.end();
+				     it++)
+					pending.push(it->instr);
+			}
+		}
+		if (failed || !haveFirstSideEffect)
+			newRoots.insert(ThreadCfgLabel(it->thread, root->label));
+		else
+			newRoots.insert(firstSideEffect);
 	}
 	ced.roots = newRoots;
+
+	/* Anything which isn't reachable from a root can be removed
+	 * from the CFG. */
+	std::set<Instruction<VexRip> *> retain;
+	std::queue<Instruction<VexRip> *> pending;
+	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++)
+		pending.push(ced.crashCfg.findInstr(*it));
+	while (!pending.empty()) {
+		auto n = pending.front();
+		pending.pop();
+		if (!retain.insert(n).second)
+			continue;
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+			pending.push(it->instr);
+	}
+	ced.crashCfg.removeAllBut(retain);
 }
 
 Instruction<VexRip> *
 InstructionDecoder::operator()(const CFGNode *src)
 {
-	return Instruction<VexRip>::decode(src->label, this->as, src->rip, NULL, this->expandJcc);
+	return Instruction<VexRip>::decode(src->label, this->as, src->rip, NULL, this->expandJcc, this->threadJumps);
+}
+
+/* We need to patch the program to jump to our instrumentation at
+ * every entry point.  Those jump instructions are five bytes, so
+ * could clobber a following instruction.  We need to make sure that
+ * the program doesn't jump to one of those clobbered instructions.
+ * The way we do so is by making sure that anything which might jump
+ * to one of them is itself handled by the interpreter.  Sometimes, we
+ * can do that by marking the branch instruction as being a root
+ * itself, but sometimes we can't find it (e.g. an indirect call from
+ * a library back to a function in the main program), and in that case
+ * we find all of the places in the program which might branch to
+ * *that* instruction and recurse to protect them.
+ */
+static void
+avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
+{
+	/* Instructions which we've decided need to be patched as
+	   interpreter entry points but which we haven't gotten around
+	   to doing yet. */
+	std::set<unsigned long> neededEntryPoints;
+	/* Instructions which we now set up as entry points */
+	std::set<unsigned long> entryPoints;
+	/* Not entry points, and not part of the main CFG, but the
+	   interpreter should keep interpreting if it hits one
+	   anyway. */
+	std::set<unsigned long> keepInterpretingInstrs;
+	/* Instructions which are entry points because of the explicit
+	   CFG. */
+	std::set<unsigned long> basicEntryPoints;
+
+	if (debug_declobber_instructions)
+		printf("Computing clobbered instructions set\n");
+	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++) {
+		Instruction<VexRip> *vr = ced.crashCfg.findInstr(*it);
+		assert(vr);
+		unsigned long r = vr->rip.unwrap_vexrip();
+		if (debug_declobber_instructions)
+			printf("%lx is a root\n", r);
+		neededEntryPoints.insert(r);
+		basicEntryPoints.insert(r);
+	}
+
+	while (!neededEntryPoints.empty()) {
+		unsigned long e = *neededEntryPoints.begin();
+		neededEntryPoints.erase(e);
+
+		if (debug_declobber_instructions)
+			printf("Considering entry point %lx\n", e);
+
+		/* Are there any branches which we don't know about to
+		   this instruction's clobbered set?  We approximate
+		   that by saying that external branches will only
+		   ever target function heads. */
+		bool hasExternalBranches = false;
+		for (unsigned x = 1; !hasExternalBranches && x < 5; x++) {
+			if (oracle->isFunctionHead(StaticRip(e + x)))
+				hasExternalBranches = true;
+		}
+		if (hasExternalBranches) {
+			/* We can't make e an entry point, because
+			   there's not space before the end of the
+			   function, so try to cover its predecessors
+			   instead. */
+			keepInterpretingInstrs.insert(e);
+			std::set<unsigned long> predecessors;
+			oracle->findPredecessors(e, predecessors);
+			if (debug_declobber_instructions) {
+				printf("%lx cannot be patched due to potential external branches to the clobber zone; predecessors = [",
+				       e);
+				for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+					if (it != predecessors.begin())
+						printf(", ");
+					printf("%lx", *it);
+				}
+				printf("]\n");
+			}
+			neededEntryPoints.insert(predecessors.begin(), predecessors.end());
+		} else {
+			entryPoints.insert(e);
+			for (unsigned x = 1; x < 5; x++) {
+				std::set<unsigned long> predecessors;
+				oracle->findPredecessors(e + x, predecessors);
+				for (unsigned y = 0; y < x; y++)
+					predecessors.erase(e + y);
+				if (predecessors.empty())
+					continue;
+				if (debug_declobber_instructions) {
+					printf("Entry point %lx clobbers %lx; predecessors = [",
+					       e, e + x);
+					for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+						if (it != predecessors.begin())
+							printf(", ");
+						printf("%lx", *it);
+					}
+					printf("]\n");
+				}
+				neededEntryPoints.insert(predecessors.begin(), predecessors.end());
+			}
+		}
+	}
+
+	std::set<unsigned long> dummyEntryPoints;
+	for (auto it = entryPoints.begin(); it != entryPoints.end(); it++)
+		if (!basicEntryPoints.count(*it))
+			dummyEntryPoints.insert(*it);
+	if (debug_declobber_instructions) {
+		printf("Dummy entry points = [");
+		for (auto it = dummyEntryPoints.begin(); it != dummyEntryPoints.end(); it++) {
+			if (it != dummyEntryPoints.begin())
+				printf(", ");
+			printf("0x%lx", *it);
+		}
+		printf("], keepInterpreting = [");
+		for (auto it = keepInterpretingInstrs.begin(); it != keepInterpretingInstrs.end(); it++) {
+			if (it != keepInterpretingInstrs.begin())
+				printf(", ");
+			printf("0x%lx", *it);
+		}
+		printf("]\n");
+	}
+
+	ced.dummyEntryPoints = dummyEntryPoints;
+	ced.keepInterpretingInstrs = keepInterpretingInstrs;
 }
 
 int
@@ -657,6 +991,8 @@ main(int argc, char *argv[])
 
 	optimiseStashPoints(accumulator, oracle);
 	optimiseCfg(accumulator);
+
+	avoidBranchToPatch(accumulator, oracle);
 
 	FILE *f = fopen(argv[4], "w");
 	accumulator.prettyPrint(f);

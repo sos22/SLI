@@ -3543,7 +3543,7 @@ CrashCFG::build_cfg(MachineState *ms,
 
 			DBG_BUILD_CFG("Not dynamically available\n");
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(tid._tid(), VexRip::invent_vex_rip(work.time.rip)));
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(tid._tid(), VexRip::invent_vex_rip(work.time.rip)), true);
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used &&
@@ -3976,7 +3976,7 @@ CrashCFG::calculate_cmns(ThreadId tid,
 				continue;
 			}
 
-			IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(tid._tid(), VexRip::invent_vex_rip(node->when.rip)));
+			IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(tid._tid(), VexRip::invent_vex_rip(node->when.rip)), true);
 			int instr_end;
 			for (instr_end = 1;
 			     instr_end < irsb->stmts_used && irsb->stmts[instr_end]->tag != Ist_IMark;
@@ -4840,7 +4840,8 @@ main(int argc, char *argv[])
 			ms->addressSpace->getIRSBForAddress(
 				ThreadRip::mk(
 					oracle.crashingTid._tid(),
-					VexRip::invent_vex_rip(crashedThread->controlLog.rbegin()->translated_rip)));
+					VexRip::invent_vex_rip(crashedThread->controlLog.rbegin()->translated_rip)),
+				false);
 		/* We should be at the end of that... */
 		assert(crashedThread->currentIRSBOffset ==
 		       crashedThread->currentIRSB->stmts_used + 1);
@@ -4856,7 +4857,8 @@ main(int argc, char *argv[])
 			ms->addressSpace->getIRSBForAddress(
 				ThreadRip::mk(
 					oracle.crashingTid._tid(),
-					VexRip::invent_vex_rip(crashedThread->currentIRSBRip)));
+					VexRip::invent_vex_rip(crashedThread->currentIRSBRip)),
+				false);
 	}
 
 	/* Build the footstep log.  This has a record for every
@@ -4893,7 +4895,8 @@ main(int argc, char *argv[])
 	     it != crashedThread->controlLog.rend();
 	     it++) {
 	        IRSB *irsb = ms->addressSpace->getIRSBForAddress(ThreadRip::mk(oracle.crashingTid._tid(),
-									       VexRip::invent_vex_rip(it->translated_rip)));
+									       VexRip::invent_vex_rip(it->translated_rip)),
+								 false);
 		bool exited_by_branch;
 		int exit_idx;
 		if (it->exit_idx == irsb->stmts_used + 1) {

@@ -24,12 +24,19 @@ enum byte_code_op {
 	bcop_push_const,
 	bcop_push_slot,
 
+	/* Binary ops */
 	bcop_cmp_eq,
+	bcop_cmp_ltu,
 	bcop_add,
+	bcop_shl,
 
+	/* Unary ops */
 	bcop_not,
+	bcop_sign_extend64,
 
+	/* Specials */
 	bcop_load,
+	bcop_badptr,
 
 	bcop_fail_if,
 	bcop_succeed,
@@ -76,6 +83,8 @@ struct cfg_instr {
 	const unsigned short *pre_validate;
 	const unsigned short *rx_validate;
 	const unsigned short *eval_validate;
+
+	const char *id; /* Just for debug */
 };
 
 struct cep_entry_ctxt {
@@ -99,6 +108,10 @@ struct crash_enforcement_plan {
 	const struct cfg_instr *cfg_nodes;
 	int base_msg_id;
 	int msg_id_limit;
+	int nr_dummy_entry_points;
+	const unsigned long *dummy_entry_points;
+	int nr_keep_interpreting;
+	const unsigned long *keep_interpreting;
 };
 
 #define mk_flex_array(name)						\

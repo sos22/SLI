@@ -49,8 +49,10 @@ public:
 			fprintf(f, "unroll");
 			break;
 		}
-		if (calledFunction != LibraryFunctionTemplate::none)
+		if (calledFunction != LibraryFunctionTemplate::none) {
+			fprintf(f, ":");
 			LibraryFunctionTemplate::pp(calledFunction, f);
+		}
 	}
 
 	static CfgSuccessorT<succ_t> call(const succ_t & _rip)
@@ -130,6 +132,12 @@ bool getProbeCFGs(CfgLabelAllocator &allocLabel,
 		  Oracle *oracle, const DynAnalysisRip &vr,
 		  HashedSet<HashedPtr<CFGNode> > &out,
 		  HashedSet<HashedPtr<const CFGNode> > &targetNodes);
+bool getProbeCFGs(CfgLabelAllocator &allocLabel,
+		  Oracle *oracle, const DynAnalysisRip &vr,
+		  HashedSet<HashedPtr<CFGNode> > &out,
+		  HashedSet<HashedPtr<const CFGNode> > &targetNodes,
+		  int thresh1,
+		  int thresh2);
 
 void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			       const std::set<DynAnalysisRip> &roots);

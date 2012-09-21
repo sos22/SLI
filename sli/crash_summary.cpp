@@ -101,9 +101,9 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 	StateMachine *storeMachine;
 	IRExpr *verificationCondition;
 	std::map<CfgLabel, const CFGNode *> labels;
-	if (!parseThisString("Load machine:\n", buf, &buf) ||
+	if (!parseThisString("Load Machine:\n", buf, &buf) ||
 	    !parseStateMachine(&loadMachine, buf, &buf, labels) ||
-	    !parseThisString("Store machine:\n", buf, &buf) ||
+	    !parseThisString("Store Machine:\n", buf, &buf) ||
 	    !parseStateMachine(&storeMachine, buf, &buf, labels) ||
 	    !parseThisString("Verification condition: ", buf, &buf) ||
 	    !parseIRExpr(&verificationCondition, buf, &buf) ||
@@ -181,6 +181,7 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 	   -- loadLoad vs loadStore
 	   -- loadLoad vs storeStore
 	   -- loadStore vs storeStore
+	   -- loadStore vs loadStore
 	   -- storeLoad vs storeStore
 	   -- storeStore vs storeStore
 	*/
@@ -201,6 +202,7 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 
 	for (auto it = loadStores.begin(); it != loadStores.end(); it++) {
 		do_set(loadLoads);
+		do_set(loadStores);
 	}
 	for (auto it = storeStores.begin(); it != storeStores.end(); it++) {
 		do_set(loadLoads);

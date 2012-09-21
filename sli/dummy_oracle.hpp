@@ -54,8 +54,17 @@ public:
 		return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load),
 							   DynAnalysisRip(store));
 	}
-	bool hasConflictingRemoteStores(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectMemoryAccess *) {
-		return true;
+	bool hasConflictingRemoteStores(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectMemoryAccess *access) {
+		if (summary->aliasing.empty())
+			return true;
+		for (auto it = summary->aliasing.begin(); it != summary->aliasing.end(); it++) {
+			if (it->first != access->rip && it->second != access->rip)
+				continue;
+			if (it->first.tid == it->second.tid )
+				continue;
+			return true;
+		}
+		return false;
 	}
 };
 

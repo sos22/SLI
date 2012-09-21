@@ -273,6 +273,8 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		AllowableOptimisations::defaultOptimisations);
 	cs->verificationCondition = simplify_via_anf(
 		cs->verificationCondition);
+	cs->verificationCondition = interval_simplify(
+		cs->verificationCondition);
 	cs->verificationCondition = simplifyIRExpr(
 		cs->verificationCondition,
 		AllowableOptimisations::defaultOptimisations);
@@ -524,6 +526,26 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		s->cfg_roots[0].second = result;
 	}
 
+	/* Now walk the MAI map and remove anything which has become
+	 * redundant. */
+	HashedSet<HashedPtr<CFGNode> > remainingNodes;
+	for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
+				       saneIterator(cs->storeMachine->cfg_roots));
+	     !it.finished();
+	     it++)
+		enumerateCFG(const_cast<CFGNode *>(it->second), remainingNodes);
+	for (auto it = mai->begin(); !it.finished(); ) {
+		for (auto it2 = it.begin(); !it2.finished(); ) {
+			if (remainingNodes.contains(const_cast<CFGNode *>(it2.node())))
+				it2.advance();
+			else
+				it2.erase();
+		}
+		if (it.empty())
+			it.erase();
+		else
+			it.advance();
+	}
 	return cs;
 }
 

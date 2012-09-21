@@ -6,6 +6,7 @@
 #include "libvex_ir.h"
 #include "libvex_guest_offsets.h"
 #include "library.hpp"
+#include "cfgnode.hpp"
 
 #include <set>
 #include <map>
@@ -145,11 +146,9 @@ public:
 		successors.push_back(successor_t::call(r));
 	}
 	void addDefault(const ripType &r, LibraryFunctionType t = LibraryFunctionTemplate::none) {
-		assert(!getDefault());
 		successors.push_back(successor_t::dflt(r, t));
 	}
 	Instruction *addDefault(Instruction *r) {
-		assert(!getDefault());
 		successors.push_back(successor_t::dflt(r));
 		return r;
 	}
@@ -166,17 +165,14 @@ public:
 
 	class successor_t {
 	public:
-		enum succ_type { succ_default, succ_branch, succ_call, succ_unroll };
-	private:
-		successor_t(succ_type _type,
+		successor_t(CfgSuccessorType _type,
 			    const ripType &_rip,
 			    Instruction *_instr,
 			    LibraryFunctionType _calledFunction)
 			: type(_type), rip(_rip), instr(_instr),
 			  calledFunction(_calledFunction)
 		{}
-	public:
-		succ_type type;
+		CfgSuccessorType type;
 		ripType rip;
 		Instruction *instr;
 		LibraryFunctionType calledFunction;
@@ -184,7 +180,7 @@ public:
 			return type == o.type && rip == o.rip &&
 				instr == o.instr && calledFunction == o.calledFunction;
 		}
-		successor_t() : type((succ_type)-1) {}
+		successor_t() : type((CfgSuccessorType)-1) {}
 		static successor_t call(const ripType _rip)
 		{
 			return successor_t(succ_call, _rip,
@@ -230,7 +226,7 @@ public:
 	successor_t *getDefault() {
 		successor_t *res = NULL;
 		for (auto it = successors.begin(); it != successors.end(); it++) {
-			if (it->type == successor_t::succ_default) {
+			if (it->type == succ_default) {
 				assert(!res);
 				res = &*it;
 			}
@@ -262,7 +258,8 @@ public:
 					    AddressSpace *as,
 					    ripType rip,
 					    CFG<ripType> *cfg,
-					    bool expandJcc);
+					    bool expandJcc,
+					    bool threadJumps);
 	static Instruction<ripType> *pseudo(const CfgLabel &label, ripType rip);
 
 	void emit(unsigned char);
@@ -348,14 +345,14 @@ public:
 private:
 	std::vector<std::pair<ripType, unsigned> > pendingRips;
 	std::vector<ripType> neededRips;
-	void decodeInstruction(const CfgLabel &l, ripType rip, unsigned max_depth, bool expandJcc);
+	void decodeInstruction(const CfgLabel &l, ripType rip, unsigned max_depth);
 public:
 	CFG(AddressSpace *_as) : as(_as), ripToInstr(new ripToInstrT()) {}
 	void add_root(ripType root, unsigned max_depth)
 	{
 		pendingRips.push_back(std::pair<ripType, unsigned>(root, max_depth));
 	}
-	void doit(CfgLabelAllocator &, bool expandJcc);
+	void doit(CfgLabelAllocator &);
 	void visit(HeapVisitor &hv) {
 		hv(ripToInstr);
 		hv(as);
@@ -754,7 +751,8 @@ Instruction<r>::decode(const CfgLabel &label,
 		       AddressSpace *as,
 		       r start,
 		       CFG<r> *cfg,
-		       bool expandJcc)
+		       bool expandJcc,
+		       bool threadJumps)
 {
 	Instruction<r> *i = new Instruction<r>(label);
 	i->rip = start;
@@ -951,7 +949,7 @@ top:
 		i->immediate(1, as);
 		break;
 
-	case 0xc3:
+	case 0xc3: /* ret */
 		fallsThrough = false;
 		break;
 
@@ -976,7 +974,8 @@ top:
 	case 0xe9: /* jmp rel32 */
 		delta32 = i->int32(as);
 		i->addDefault(i->rip + i->len + delta32);
-		i->len = 0;
+		if (threadJumps)
+			i->len = 0;
 		fallsThrough = false;
 		break;
 
@@ -988,7 +987,8 @@ top:
 		 * we'll synthesise an appropriate jump later on.
 		 * Otherwise, we'll eliminate it with jump
 		 * threading. */
-		i->len = 0;
+		if (threadJumps)
+			i->len = 0;
 
 		/* Don't let the tail update defaultNext */
 		fallsThrough = false;
@@ -1027,89 +1027,6 @@ top:
 		i->addDefault(i->rip + i->len);
 
 	return i;
-}
-
-template <typename r> void
-CFG<r>::decodeInstruction(const CfgLabel &l, r rip, unsigned max_depth, bool expandJcc)
-{
-	if (!max_depth)
-		return;
-	Instruction<r> *i = Instruction<r>::decode(l, as, rip, this, expandJcc);
-	if (!i)
-		return;
-	assert(i->rip == rip);
-	registerInstruction(i);
-	if (exploreInstruction(i)) {
-		for (auto it = i->successors.begin(); it != i->successors.end(); it++)
-			pendingRips.push_back(std::pair<r, unsigned>(
-						      it->rip, max_depth - 1));
-	}
-}
-
-template <typename r> void
-CFG<r>::doit(CfgLabelAllocator &allocLabel, bool expandJcc)
-{
-	while (!pendingRips.empty()) {
-		std::pair<r, unsigned> p = pendingRips.back();
-		pendingRips.pop_back();
-		if (!ripToInstr->hasKey(p.first))
-			decodeInstruction(allocLabel(), p.first, p.second, expandJcc);
-	}
-
-	for (typename ripToInstrT::iterator it = ripToInstr->begin();
-	     it != ripToInstr->end();
-	     it++) {
-		Instruction<r> *ins = it.value();
-		ins->useful = instructionUseful(ins);
-		for (auto it2 = ins->successors.begin(); it2 != ins->successors.end(); it2++) {
-			if (ripToInstr->hasKey(it2->rip)) {
-				Instruction<r> *dn = ripToInstr->get(it2->rip);
-				it2->rip = r();
-				it2->instr = dn;
-				if (dn->useful)
-					ins->useful = true;
-			}
-		}
-	}
-
-	bool progress;
-	do {
-		progress = false;
-		for (typename ripToInstrT::iterator it = ripToInstr->begin();
-		     it != ripToInstr->end();
-		     it++) {
-			Instruction<r> *i = it.value();
-			if (i->useful)
-				continue;
-			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
-				if (it2->instr && it2->instr->useful) {
-					i->useful = true;
-					progress = true;
-				}
-			}
-		}
-	} while (progress);
-
-	/* Rewrite every instruction so that non-useful next
-	   instructions get turned back into RIPs, and remove the
-	   non-useful instructions. */
-	for (typename ripToInstrT::iterator it = ripToInstr->begin();
-	     it != ripToInstr->end();
-		) {
-		Instruction<r> *i = it.value();
-
-		if (i->useful) {
-			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
-				if (it2->instr && !it2->instr->useful) {
-					it2->rip = it2->instr->rip;
-					it2->instr = NULL;
-				}
-			}
-			it++;
-		} else {
-			it = ripToInstr->erase(it);
-		}
-	}
 }
 
 template <typename r> void
@@ -1171,7 +1088,7 @@ PatchFragment<r>::nextInstr(CFG<r> *cfg)
 	     it != pendingInstructions.end();
 	     it++) {
 		for (auto it2 = it->first->successors.begin(); it2 != it->first->successors.end(); it2++) {
-			if (it2->type == Instruction<r>::successor_t::succ_default &&
+			if (it2->type == succ_default &&
 			    it2->instr) {
 				pendingInstructions[it2->instr] = false;
 				break;
@@ -1541,7 +1458,7 @@ PatchFragment<r>::emitStraightLine(Instruction<r> *i)
 		
 		typename Instruction<r>::successor_t *next = NULL;
 		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
-			if (it->type == Instruction<r>::successor_t::succ_default) {
+			if (it->type == succ_default) {
 				assert(!next);
 				next = &*it;
 			}
@@ -1658,16 +1575,16 @@ CFG<r>::print(FILE *f)
 		     it2++) {
 			const char *t = NULL;
 			switch (it2->type) {
-			case Instruction<r>::successor_t::succ_default:
+			case succ_default:
 				t = "default";
 				break;
-			case Instruction<r>::successor_t::succ_branch:
+			case succ_branch:
 				t = "branch";
 				break;
-			case Instruction<r>::successor_t::succ_call:
+			case succ_call:
 				t = "call";
 				break;
-			case Instruction<r>::successor_t::succ_unroll:
+			case succ_unroll:
 				t = "unroll";
 				break;
 			}
@@ -1697,16 +1614,16 @@ Instruction<r>::prettyPrint(FILE *f) const
 			fprintf(f, ", ");
 		const char *t = NULL;
 		switch (it->type) {
-		case successor_t::succ_default:
+		case succ_default:
 			t = "default";
 			break;
-		case successor_t::succ_branch:
+		case succ_branch:
 			t = "branch";
 			break;
-		case successor_t::succ_call:
+		case succ_call:
 			t = "call";
 			break;
-		case successor_t::succ_unroll:
+		case succ_unroll:
 			t = "unroll";
 			break;
 		}

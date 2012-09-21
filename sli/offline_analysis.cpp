@@ -707,7 +707,8 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 				Iop_Not1,
 				crash_constraint));
 	verification_condition = simplifyIRExpr(verification_condition, optIn);
-	
+	verification_condition = simplify_via_anf(verification_condition);
+	verification_condition = interval_simplify(verification_condition);
 	return verification_condition;
 }
 

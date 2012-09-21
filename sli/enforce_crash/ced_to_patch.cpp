@@ -921,11 +921,13 @@ public:
 			return it->second;
 	}
 	Instruction<VexRip> *decodeUnderlyingInstr(const VexRip &vr) {
-		return Instruction<VexRip>::decode(CfgLabel::uninitialised(),
-				       as,
-				       vr,
-				       NULL,
-				       true);
+		return Instruction<VexRip>::decode(
+			CfgLabel::uninitialised(),
+			as,
+			vr,
+			NULL,
+			true,
+			true);
 	}
 };
 
@@ -1008,7 +1010,7 @@ receiveMessages(const C2PRip &c2p_rip,
 		const std::set<happensBeforeEdge *> &edges(ced.happensBeforePoints[thread]);
 		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
 			const happensBeforeEdge *edge = *it2;
-			if (edge->after == thread) {
+			if (edge->after->rip == thread) {
 				if (debug_receive_messages)
 					printf("\tReceive %d for %s\n", edge->msg_id, it->name());
 				messagesToReceive.insert(edge);
@@ -1066,7 +1068,7 @@ receiveMessages(const C2PRip &c2p_rip,
 		const ThreadCfgLabel &tl(it->label);
 		for (auto it2 = messagesToReceive.begin(); it2 != messagesToReceive.end(); it2++) {
 			const happensBeforeEdge *hb = *it2;
-			if (hb->after == tl) {
+			if (hb->after->rip == tl) {
 				failedThreads.insert(*it);
 				break;
 			}
@@ -1482,7 +1484,7 @@ sendMessages(const C2PRip &c2p_rip,
 		const std::set<happensBeforeEdge *> &edges(ced.happensBeforePoints[thread]);
 		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
 			const happensBeforeEdge *edge = *it2;
-			if (edge->before == thread) {
+			if (edge->before->rip == thread) {
 				messagesToSend.insert(edge);
 				messagesSentInEachThread[thread].insert(edge->msg_id);
 				if (debug_send_messages)
@@ -1515,7 +1517,7 @@ sendMessages(const C2PRip &c2p_rip,
 	for (auto it = messagesToSend.begin(); it != messagesToSend.end(); it++) {
 		const happensBeforeEdge *hb = *it;
 		for (unsigned x = 0; x < hb->content.size(); x++) {
-			simulationSlotT slot = ced.exprsToSlots(hb->before.thread,
+			simulationSlotT slot = ced.exprsToSlots(hb->before->rip.thread,
 								hb->content[x]);
 			cursor = cursor->addDefault(
 				instrMovLabelToRegister(
@@ -1706,9 +1708,9 @@ findSuccessors(const C2PRip &c2p_rip,
 		for (auto it = underlying->successors.begin();
 		     it != underlying->successors.end();
 		     it++) {
-			if (it->type == Instruction<VexRip>::successor_t::succ_default)
+			if (it->type == succ_default)
 				defaultRip = it->rip;
-			else if (it->type == Instruction<VexRip>::successor_t::succ_branch)
+			else if (it->type == succ_branch)
 				branchRip = it->rip;
 			else
 				abort();
@@ -1960,7 +1962,7 @@ receivedMessage(const C2PRip &c2p_rip,
 			instrMovRegToSlot(
 				allocLabel,
 				RegisterIdx::RAX,
-				ced.exprsToSlots(edge->after.thread, edge->content[x])));
+				ced.exprsToSlots(edge->after->rip.thread, edge->content[x])));
 	}
 
 	/* Undo the spill operations we did in receiveMessages() */
@@ -1991,7 +1993,7 @@ receivedMessage(const C2PRip &c2p_rip,
 #endif
 				continue;
 			}
-			if (hb->after == thread) {
+			if (hb->after->rip == thread) {
 				failedThreads.insert(*it);
 				break;
 			}
@@ -2123,11 +2125,11 @@ printDetailedCfg(Instruction<C2PRip> *root, std::set<Instruction<C2PRip> *> &pri
 	     it != root->successors.end();
 	     it++) {
 		if (it->instr) {
-			if (it->type == Instruction<C2PRip>::successor_t::succ_default)
+			if (it->type == succ_default)
 				fprintf(f,
 					" defaultSucc = %-6s",
 					it->instr->label.name());
-			else if (it->type == Instruction<C2PRip>::successor_t::succ_branch)
+			else if (it->type == succ_branch)
 				fprintf(f,
 					" branchSucc  = %-6s",
 					it->instr->label.name());
@@ -2346,13 +2348,13 @@ top:
 	Instruction<C2PRip> *nextInstr = NULL;
 	for (auto it = root->successors.begin(); it != root->successors.end(); it++) {
 		if (it->instr) {
-			if (it->type == Instruction<C2PRip>::successor_t::succ_default) {
+			if (it->type == succ_default) {
 				/* Should only have one default exit */
 				assert(nextInstr == NULL);
 				nextInstr = it->instr;
 			} else {
 				/* Branches should be handled as early relocs */
-				assert(it->type == Instruction<C2PRip>::successor_t::succ_branch);
+				assert(it->type == succ_branch);
 				assert(!root->relocs.empty());
 			}
 		}
@@ -2435,7 +2437,7 @@ main(int argc, char *argv[])
 	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
 		err(1, "open(%s)", ced_path);
-	crashEnforcementData ced(true);
+	crashEnforcementData ced(true, true);
 	loadCrashEnforcementData(ced, ms->addressSpace, fd);
 	close(fd);
 

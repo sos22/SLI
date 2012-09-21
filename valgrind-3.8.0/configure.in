@@ -2436,6 +2436,8 @@ AC_CONFIG_FILES([
    none/tests/x86-linux/Makefile
    sca/Makefile
    sca/tests/Makefile
+   scc/Makefile
+   scc/tests/Makefile
    exp-sgcheck/Makefile
    exp-sgcheck/tests/Makefile
    drd/Makefile

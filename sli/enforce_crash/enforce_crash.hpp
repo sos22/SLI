@@ -116,25 +116,22 @@ public:
 		}
 		return res;
 	}
-#if 0
-	ThreadCfgLabel operator()(const MemoryAccessIdentifier &mai) const
-	{
-		return ThreadCfgLabel((*this)(mai.tid), mai.where);
-	}
-#endif
 	ThreadCfgLabel operator()(int tid, const CfgLabel &where) const
 	{
 		return ThreadCfgLabel((*this)(tid), where);
 	}
 };
 
+class CrashCfg;
+
 class ThreadCfgDecode {
 	Instruction<ThreadCfgLabel> *addCfg(const AbstractThread &tid, const CFGNode *root);
 public:
 	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
-	Instruction<ThreadCfgLabel> *operator()(const ThreadCfgLabel &l) {
+	Instruction<ThreadCfgLabel> *decode(const ThreadCfgLabel &l) {
 		auto it = content.find(l);
-		assert(it != content.end());
+		if (it == content.end())
+			return NULL;
 		return it->second;
 	}
 
@@ -154,6 +151,8 @@ public:
 	iterator end() { return iterator(content.end()); }
 
 	void addMachine(StateMachine *sm, ThreadAbstracter &abs);
+
+	void fromCrashCfg(CrashCfg &cfg);
 };
 
 void enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out);
@@ -262,7 +261,7 @@ public:
 			    ThreadAbstracter &abs,
 			    StateMachine *probeMachine,
 			    StateMachine *storeMachine,
-			    std::map<unsigned, CfgLabel> &roots,
+			    std::map<unsigned, std::set<CfgLabel> > &roots,
 			    const MaiMap &mai)
 	{
 		/* XXX keep this in sync with buildCED */
@@ -277,7 +276,10 @@ public:
 					AbstractThread t(abs(ieg->reg.tid()));
 					auto it_r = roots.find(ieg->reg.tid());
 					assert(it_r != roots.end());
-					(*this)[ThreadCfgLabel(t, it_r->second)].insert(ieg);
+					for (auto it_r2 = it_r->second.begin();
+					     it_r2 != it_r->second.end();
+					     it_r2++)
+						(*this)[ThreadCfgLabel(t, *it_r2)].insert(ieg);
 				} else {
 					neededTemporaries.insert(ieg);
 				}
@@ -430,8 +432,8 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 }
 
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
-	happensBeforeEdge(const ThreadCfgLabel &_before,
-			  const ThreadCfgLabel &_after,
+	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
+			  Instruction<ThreadCfgLabel> *_after,
 			  const std::vector<IRExprGet *> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
@@ -441,8 +443,8 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 		fragments.push_back(my_asprintf(
 					    "%d: %s <-< %s {",
 					    msg_id,
-					    before.name(),
-					    after.name()));
+					    before->rip.name(),
+					    after->rip.name()));
 		for (auto it = content.begin(); it != content.end(); it++) {
 			fragments.push_back(nameIRExpr(*it));
 			fragments.push_back(", ");
@@ -458,8 +460,8 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 		return res_malloc;
 	}
 public:
-	ThreadCfgLabel before;
-	ThreadCfgLabel after;
+	Instruction<ThreadCfgLabel> *before;
+	Instruction<ThreadCfgLabel> *after;
 	std::vector<IRExprGet *> content;
 	unsigned msg_id;
 
@@ -475,10 +477,9 @@ public:
 		state.hbes.insert(this);
 		return this;
 	}
-	happensBeforeEdge(const ThreadCfgLabel &_before,
-			  const ThreadCfgLabel &_after,
+	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
+			  Instruction<ThreadCfgLabel> *_after,
 			  instructionDominatorMapT &idom,
-			  ThreadCfgDecode &cfg,
 			  expressionStashMapT &stashMap,
 			  unsigned _msg_id)
 		: before(_before),
@@ -486,7 +487,7 @@ public:
 		  msg_id(_msg_id)
 	{
 		std::set<Instruction<ThreadCfgLabel> *> &liveInstructions(
-			idom[cfg(before)]);
+			idom[before]);
 		for (auto it = liveInstructions.begin();
 		     it != liveInstructions.end();
 		     it++) {
@@ -502,7 +503,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "%s", name());
 	}
-	static happensBeforeEdge *parse(const char *str, const char **suffix)
+	static happensBeforeEdge *parse(ThreadCfgDecode &cfg, const char *str, const char **suffix)
 	{
 		ThreadCfgLabel before;
 		ThreadCfgLabel after;
@@ -528,7 +529,7 @@ public:
 		if (!parseThisChar('}', str, &str))
 			return NULL;
 		*suffix = str;
-		return new happensBeforeEdge(before, after, content, msg_id);
+		return new happensBeforeEdge(cfg.decode(before), cfg.decode(after), content, msg_id);
 	}
 	void visit(HeapVisitor &hv) {
 		visit_container(content, hv);
@@ -607,7 +608,7 @@ public:
 			     it2++) {
 				happensBeforeEdge *hb = *it2;
 				for (unsigned x = 0; x < hb->content.size(); x++)
-					mk_slot(hb->after.thread, hb->content[x], next_slot);
+					mk_slot(hb->after->rip.thread, hb->content[x], next_slot);
 			}
 		}
 	}
@@ -781,14 +782,17 @@ class crashEnforcementRoots : public std::set<ThreadCfgLabel> {
 public:
 	crashEnforcementRoots() {}
 
-	crashEnforcementRoots(std::map<unsigned, CfgLabel> &roots, ThreadAbstracter &abs) {
+	crashEnforcementRoots(std::map<unsigned, std::set<CfgLabel> > &roots, ThreadAbstracter &abs) {
 		std::map<CfgLabel, std::set<AbstractThread> > threadsRelevantAtEachEntryPoint;
 		for (auto it = roots.begin(); it != roots.end(); it++)
-			threadsRelevantAtEachEntryPoint[it->second].insert(abs(it->first));
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				threadsRelevantAtEachEntryPoint[*it2].insert(abs(it->first));
 		for (auto it = roots.begin(); it != roots.end(); it++) {
-			std::set<AbstractThread> &threads(threadsRelevantAtEachEntryPoint[it->second]);
-			for (auto it2 = threads.begin(); it2 != threads.end(); it2++)
-				insert(ThreadCfgLabel(*it2, it->second));
+			for (auto it_r = it->second.begin(); it_r != it->second.end(); it_r++) {
+				std::set<AbstractThread> &threads(threadsRelevantAtEachEntryPoint[*it_r]);
+				for (auto it2 = threads.begin(); it2 != threads.end(); it2++)
+					insert(ThreadCfgLabel(*it2, *it_r));
+			}
 		}
 	}
 
@@ -867,17 +871,22 @@ public:
 				const MemoryAccessIdentifier &beforeMai(invert ? hb->after : hb->before);
 				const MemoryAccessIdentifier &afterMai(invert ? hb->before : hb->after);
 				for (auto before_it = mai.begin(beforeMai); !before_it.finished(); before_it.advance()) {
+					auto before = cfg.decode(abs(beforeMai.tid, before_it.label()));
+					if (!before)
+						continue;
 					for (auto after_it = mai.begin(afterMai); !after_it.finished(); after_it.advance()) {
+						auto after = cfg.decode(abs(afterMai.tid, after_it.label()));
+						if (!after)
+							continue;
 						happensBeforeEdge *hbe =
 							new happensBeforeEdge(
-								abs(beforeMai.tid, before_it.label()),
-								abs(afterMai.tid, after_it.label()),
+								before,
+								after,
 								idom,
-								cfg,
 								exprStashPoints,
 								next_hb_id++);
-						(*this)[hbe->before].insert(hbe);
-						(*this)[hbe->after].insert(hbe);
+						(*this)[hbe->before->rip].insert(hbe);
+						(*this)[hbe->after->rip].insert(hbe);
 					}
 				}
 			}
@@ -900,7 +909,7 @@ public:
 			fprintf(f, "}\n");
 		}
 	}
-	bool parse(const char *str, const char **suffix) {
+	bool parse(ThreadCfgDecode &cfg, const char *str, const char **suffix) {
 		if (!parseThisString("Happens before map:\n", str, &str))
 			return false;
 		clear();
@@ -911,7 +920,7 @@ public:
 			    !parseThisString(" -> {", str, &str))
 				break;
 			while (1) {
-				happensBeforeEdge *edge = happensBeforeEdge::parse(str, &str);
+				happensBeforeEdge *edge = happensBeforeEdge::parse(cfg, str, &str);
 				if (!edge)
 					break;
 				edges.insert(edge);
@@ -980,17 +989,20 @@ public:
 
 class InstructionDecoder {
 	bool expandJcc;
+	bool threadJumps;
 	AddressSpace *as;
 public:
-	InstructionDecoder(bool _expandJcc, AddressSpace *_as)
-		: expandJcc(_expandJcc), as(_as)
+	InstructionDecoder(bool _expandJcc, bool _threadJumps, AddressSpace *_as)
+		: expandJcc(_expandJcc), threadJumps(_threadJumps), as(_as)
 	{}
 	Instruction<VexRip> *operator()(const CFGNode *);
 };
 
 class CrashCfg {
+	friend void ThreadCfgDecode::fromCrashCfg(CrashCfg &);
 	std::map<ThreadCfgLabel, Instruction<VexRip> *> content;
 	bool expandJcc;
+	bool threadJumps;
 public:
 	Instruction<VexRip> *findInstr(const ThreadCfgLabel &label) {
 		auto it = content.find(label);
@@ -1001,42 +1013,69 @@ public:
 	}
 	void addInstr(const AbstractThread &thread, Instruction<VexRip> *node) {
 		assert(!content.count(ThreadCfgLabel(thread, node->label)));
+		assert(node->len != 0);
 		content[ThreadCfgLabel(thread, node->label)] = node;
 	}
 	void prepLabelAllocator(CfgLabelAllocator &alloc) {
 		for (auto it = content.begin(); it != content.end(); it++)
 			alloc.reserve(it->first.label);
 	}
-	CrashCfg(bool _expandJcc) : expandJcc(_expandJcc) {};
+	CrashCfg(bool _expandJcc, bool _threadJumps) : expandJcc(_expandJcc), threadJumps(_threadJumps) {};
 	CrashCfg(CrashSummary *summary, ThreadAbstracter &abs,
-		 InstructionDecoder &decode, bool _expandJcc)
-		: expandJcc(_expandJcc)
+		 InstructionDecoder &decode, bool _expandJcc, bool _threadJumps)
+		: expandJcc(_expandJcc), threadJumps(_threadJumps)
 	{
-		typedef std::pair<AbstractThread, Instruction<VexRip> *> q_entry_t;
+		typedef std::pair<AbstractThread, const CFGNode *> q_entry_t;
 		std::queue<q_entry_t> pending;
 		for (auto it = summary->loadMachine->cfg_roots.begin();
 		     it != summary->loadMachine->cfg_roots.end();
 		     it++)
-			pending.push(q_entry_t(abs(it->first), decode(it->second)));
+			pending.push(q_entry_t(abs(it->first), it->second));
 		for (auto it = summary->storeMachine->cfg_roots.begin();
 		     it != summary->storeMachine->cfg_roots.end();
 		     it++)
-			pending.push(q_entry_t(abs(it->first), decode(it->second)));
+			pending.push(q_entry_t(abs(it->first), it->second));
+		std::map<ThreadCfgLabel, const CFGNode *> cfgNodes;
 		while (!pending.empty()) {
 			q_entry_t p = pending.front();
 			pending.pop();
+			ThreadCfgLabel label(p.first, p.second->label);
+			Instruction<VexRip> *newInstr = decode(p.second);
 			auto it_did_insert = content.insert(
 				std::pair<ThreadCfgLabel, Instruction<VexRip> *>(
-					ThreadCfgLabel(p.first, p.second->label),
-					p.second));
+					label, newInstr));
 			auto did_insert = it_did_insert.second;
 			if (did_insert) {
+				assert(!cfgNodes.count(label));
+				cfgNodes[label] = p.second;
 				for (auto it = p.second->successors.begin();
 				     it != p.second->successors.end();
 				     it++) {
 					if (it->instr)
 						pending.push(q_entry_t(p.first, it->instr));
 				}
+			}
+		}
+		for (auto it = cfgNodes.begin(); it != cfgNodes.end(); it++) {
+			const ThreadCfgLabel &label(it->first);
+			const CFGNode *n = it->second;
+			assert(content.count(label));
+			Instruction<VexRip> *i = content[label];
+			i->successors.clear();
+			for (auto it = n->successors.begin();
+			     it != n->successors.end();
+			     it++) {
+				const CFGNode::successor_t &srcSucc(*it);
+				if (!srcSucc.instr)
+					continue;
+				ThreadCfgLabel succLabel(label.thread, srcSucc.instr->label);
+				assert(content.count(succLabel));
+				Instruction<VexRip>::successor_t destSucc(
+					srcSucc.type,
+					srcSucc.instr->rip,
+					content[succLabel],
+					srcSucc.calledFunction);
+				i->successors.push_back(destSucc);
 			}
 		}
 	}
@@ -1049,6 +1088,7 @@ public:
 			assert(it2_did_insert.second);
 		}
 	}
+	void removeAllBut(const std::set<Instruction<VexRip> *> &retain);
 };
 
 class crashEnforcementData {
@@ -1070,10 +1110,12 @@ public:
 	expressionEvalMapT expressionEvalPoints;
 	abstractThreadExitPointsT threadExitPoints;
 	CrashCfg crashCfg;
+	std::set<unsigned long> dummyEntryPoints;
+	std::set<unsigned long> keepInterpretingInstrs;
 
 	crashEnforcementData(const MaiMap &mai,
 			     std::set<IRExpr *> &neededExpressions,
-			     std::map<unsigned, CfgLabel> &_roots,
+			     std::map<unsigned, std::set<CfgLabel> > &_roots,
 			     DNF_Conjunction &conj,
 			     ThreadCfgDecode &cfg,
 			     int &next_hb_id,
@@ -1081,7 +1123,8 @@ public:
 			     ThreadAbstracter &abs,
 			     CrashSummary *summary,
 			     InstructionDecoder &decode,
-			     bool expandJcc)
+			     bool expandJcc,
+			     bool threadJumps)
 		: roots(_roots, abs),
 		  happensBefore(conj, abs, cfg, mai),
 		  predecessorMap(cfg),
@@ -1092,37 +1135,70 @@ public:
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
 		  threadExitPoints(cfg, happensBeforePoints),
-		  crashCfg(summary, abs, decode, expandJcc)
+		  crashCfg(summary, abs, decode, expandJcc, threadJumps)
 	{}
 
 	bool parse(AddressSpace *as, const char *str, const char **suffix) {
 		if (!parseThisString("Crash enforcement data:\n", str, &str) ||
 		    !roots.parse(str, &str) ||
-		    !exprStashPoints.parse(str, &str) ||
-		    !happensBeforePoints.parse(str, &str) ||
+		    !crashCfg.parse(as, str, &str) ||
+		    !exprStashPoints.parse(str, &str))
+			return false;
+		ThreadCfgDecode cfg;
+		cfg.fromCrashCfg(crashCfg);
+		if (!happensBeforePoints.parse(cfg, str, &str) ||
 		    !exprsToSlots.parse(str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||
 		    !threadExitPoints.parse(str, &str) ||
-		    !crashCfg.parse(as, str, &str))
+		    !parseThisString("Dummy entry points = [", str, &str))
 			return false;
+		while (!parseThisString("], keepInterpreting = [", str, &str)) {
+			unsigned long v;
+			if (!parseThisString("0x", str, &str) ||
+			    !parseHexUlong(&v, str, &str))
+				return false;
+			dummyEntryPoints.insert(v);
+			parseThisString(", ", str, &str);
+		}
+		while (!parseThisString("]\n", str, &str)) {
+			unsigned long v;
+			if (!parseThisString("0x", str, &str) ||
+			    !parseHexUlong(&v, str, &str))
+				return false;
+			keepInterpretingInstrs.insert(v);
+			parseThisString(", ", str, &str);
+		}
 		internmentState state;
 		internSelf(state);
 		*suffix = str;
 		return true;
 	}
-	crashEnforcementData(bool expandJcc)
-		: crashCfg(expandJcc)
+	crashEnforcementData(bool expandJcc, bool threadJumps)
+		: crashCfg(expandJcc, threadJumps)
 	{}
 
 	void prettyPrint(FILE *f, bool verbose = false) {
 		fprintf(f, "Crash enforcement data:\n");
 		roots.prettyPrint(f);
+		crashCfg.prettyPrint(f, verbose);
 		exprStashPoints.prettyPrint(f);
 		happensBeforePoints.prettyPrint(f);
 		exprsToSlots.prettyPrint(f);
 		expressionEvalPoints.prettyPrint(f);
 		threadExitPoints.prettyPrint(f);
-		crashCfg.prettyPrint(f, verbose);
+		fprintf(f, "Dummy entry points = [");
+		for (auto it = dummyEntryPoints.begin(); it != dummyEntryPoints.end(); it++) {
+			if (it != dummyEntryPoints.begin())
+				fprintf(f, ", ");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "], keepInterpreting = [");
+		for (auto it = keepInterpretingInstrs.begin(); it != keepInterpretingInstrs.end(); it++) {
+			if (it != keepInterpretingInstrs.begin())
+				fprintf(f, ", ");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "]\n");			
 	}
 
 	void operator|=(const crashEnforcementData &ced) {
@@ -1133,6 +1209,8 @@ public:
 		expressionEvalPoints |= ced.expressionEvalPoints;
 		threadExitPoints |= ced.threadExitPoints;
 		crashCfg |= ced.crashCfg;
+		for (auto it = ced.dummyEntryPoints.begin(); it != ced.dummyEntryPoints.end(); it++)
+			dummyEntryPoints.insert(*it);
 	}
 };
 
