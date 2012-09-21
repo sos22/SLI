@@ -806,9 +806,9 @@ localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 		enumSideEffects(storeMachine, stores);
 		std::set<StateMachineSideEffectLoad *> loads;
 		enumSideEffects(probeMachine, loads);
-		for (auto it = loads.begin(); it != loads.end(); it++) {
+		for (auto it = loads.begin(); !TIMEOUT && it != loads.end(); it++) {
 			StateMachineSideEffectLoad *load = *it;
-			for (auto it2 = mai->begin(load->rip); !it2.finished(); it2.advance()) {
+			for (auto it2 = mai->begin(load->rip); !TIMEOUT && !it2.finished(); it2.advance()) {
 				DynAnalysisRip dr(it2.dr());
 				bool found_one = false;
 				for (auto it3 = stores.begin(); !found_one && it3 != stores.end(); it3++) {
@@ -847,9 +847,9 @@ localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 	{
 		std::set<StateMachineSideEffectLoad *> loads;
 		enumSideEffects(probeMachine, loads);
-		for (auto it = loads.begin(); it != loads.end(); it++) {
+		for (auto it = loads.begin(); !TIMEOUT && it != loads.end(); it++) {
 			StateMachineSideEffectLoad *load = *it;
-			for (auto it3 = mai->begin(load->rip); !it3.finished(); it3.advance()) {
+			for (auto it3 = mai->begin(load->rip); !TIMEOUT && !it3.finished(); it3.advance()) {
 				bool found_one = false;
 				for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
 					DynAnalysisRip store = *it2;
@@ -924,6 +924,8 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 				     probeOptimisations,
 				     oracleI,
 				     token);
+	if (TIMEOUT)
+		return NULL;
 
 	VexPtr<IRExpr, &ir_heap> base_verification_condition(
 		verificationConditionForStoreMachine(
