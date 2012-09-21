@@ -31,7 +31,7 @@ class space : public Named {
 						    "}");
 	}
 public:
-	IRExpr *asIRExpr(IRExpr *key);
+	IRExpr *asIRExpr(IRExpr *key) const;
 	space operator!() const;
 	space operator&&(const space &o) const;
 	space operator||(const space &o) const;
@@ -71,7 +71,7 @@ public:
 };
 
 IRExpr *
-space::asIRExpr(IRExpr *key)
+space::asIRExpr(IRExpr *key) const
 {
 	IRType ty;
 	switch (type_max) {
@@ -286,7 +286,6 @@ space::operator||(const space &o) const
 /* A spaces records the space which we've derived for each
    variable. */
 class spaces : public Named {
-	std::map<IRExpr *, space> content;
 	char *mkName() const {
 		std::vector<const char *> fragments;
 		for (auto it = content.begin(); it != content.end(); it++)
@@ -299,7 +298,8 @@ class spaces : public Named {
 						    "]");
 	}
 public:
-	IRExpr *asIRExpr();
+	std::map<IRExpr *, space> content;
+	IRExpr *asIRExpr() const;
 	bool empty() const { return content.empty(); }
 	bool singleElement() const { return content.size() == 1; }
 	spaces operator!() {
@@ -319,6 +319,7 @@ public:
 		}
 	}
 
+	void clear() { content.clear(); clearName(); }
 	spaces(IRExpr *key, const space &sp)
 	{
 		content.insert(std::pair<IRExpr *, space>(key, sp));
@@ -328,7 +329,7 @@ public:
 };
 
 IRExpr *
-spaces::asIRExpr()
+spaces::asIRExpr() const
 {
 	assert(!content.empty());
 	if (content.size() == 1)
@@ -348,7 +349,7 @@ public:
 	spaces sp;
 	IRExpr *rest;
 	
-	IRExpr *asIRExpr();
+	IRExpr *asIRExpr() const;
 
 	intervalified operator!() {
 		if (!rest && sp.singleElement())
@@ -367,6 +368,54 @@ public:
 			else
 				rest = o.rest;
 		}
+		clearName();
+	}
+	void operator |=(const intervalified &o) {
+		/* *this = (sp && rest) || (o.sp && o.rest).  Only a
+		   few special cases encodable. */
+		if (sp.empty() && o.sp.empty()) {
+			if (rest) {
+				if (o.rest)
+					rest = IRExpr_Binop(
+						Iop_Or1,
+						rest,
+						o.rest);
+				else
+					; /* Nothing to do */
+			} else {
+				rest = o.rest;
+			}
+			clearName();
+			return;
+		}
+
+		if (rest || o.rest) {
+			rest = IRExpr_Binop(Iop_Or1, asIRExpr(), o.asIRExpr());
+			sp.clear();
+			clearName();
+			return;
+		}
+
+		if (o.sp.empty())
+			return;
+		if (sp.empty()) {
+			sp = o.sp;
+			clearName();
+			return;
+		}
+
+		if (!sp.singleElement() || !o.sp.singleElement() ||
+		    sp.content.begin()->first != o.sp.content.begin()->first) {
+			rest = IRExpr_Binop(Iop_Or1, asIRExpr(), o.asIRExpr());
+			sp.clear();
+			clearName();
+			return;
+		}
+
+		sp.content.begin()->second = sp.content.begin()->second || o.sp.content.begin()->second;
+		sp.clearName();
+		clearName();
+		return;
 	}
 	explicit intervalified(IRExpr *a)
 		: rest(a)
@@ -529,8 +578,142 @@ intervalify(IRExpr *what)
 		case Iop_CmpLT8S:
 		case Iop_CmpLT16S:
 		case Iop_CmpLT32S:
-		case Iop_CmpLT64S:
-			abort();
+		case Iop_CmpLT64S: {
+			IRConst *threshC;
+			switch (ieb->op) {
+			case Iop_CmpLT8S:
+				threshC = IRConst_U8(0x80);
+				break;
+			case Iop_CmpLT16S:
+				threshC = IRConst_U16(0x8000);
+				break;
+			case Iop_CmpLT32S:
+				threshC = IRConst_U32(0x80000000);
+				break;
+			case Iop_CmpLT64S:
+				threshC = IRConst_U64(0x8000000000000000ul);
+				break;
+			default:
+				abort();
+			}
+			IRExpr *thresh = IRExpr_Const(threshC);
+			IRExpr *l_signed =
+				IRExpr_Binop(
+					IROp(Iop_CmpLT8U + ieb->op - Iop_CmpLT8S),
+					thresh,
+					ieb->arg1);
+			IRExpr *r_signed =
+				IRExpr_Binop(
+					IROp(Iop_CmpLT8U + ieb->op - Iop_CmpLT8S),
+					thresh,
+					ieb->arg2);
+			IRExpr *unsigned_cmp =
+				IRExpr_Binop(
+					IROp(Iop_CmpLT8U + ieb->op - Iop_CmpLT8S),
+					ieb->arg1,
+					ieb->arg2);
+
+			if (ieb->arg1->tag == Iex_Const) {
+				IRConst *arg1C = ((IRExprConst *)ieb->arg1)->con;
+				long arg1_cnst;
+				switch (ieb->op) {
+				case Iop_CmpLT8S:
+					arg1_cnst = (char)arg1C->Ico.U8;
+					break;
+				case Iop_CmpLT16S:
+					arg1_cnst = (short)arg1C->Ico.U16;
+					break;
+				case Iop_CmpLT32S:
+					arg1_cnst = (int)arg1C->Ico.U32;
+					break;
+				case Iop_CmpLT64S:
+					arg1_cnst = (long)arg1C->Ico.U64;
+					break;
+				default:
+					abort();
+				}
+				if (arg1_cnst < 0) {
+					return intervalify(
+						IRExpr_Associative(
+							Iop_Or1,
+							IRExpr_Associative(
+								Iop_And1,
+								r_signed,
+								unsigned_cmp,
+								NULL),
+							IRExpr_Unop(Iop_Not1, r_signed),
+							NULL));
+				} else {
+					return intervalify(
+						IRExpr_Associative(
+							Iop_And1,
+							IRExpr_Unop(Iop_Not1, r_signed),
+							unsigned_cmp,
+							NULL));
+				}
+			}
+			if (ieb->arg2->tag == Iex_Const) {
+				IRConst *arg2C = ((IRExprConst *)ieb->arg2)->con;
+				long arg2_cnst;
+				switch (ieb->op) {
+				case Iop_CmpLT8S:
+					arg2_cnst = (char)arg2C->Ico.U8;
+					break;
+				case Iop_CmpLT16S:
+					arg2_cnst = (short)arg2C->Ico.U16;
+					break;
+				case Iop_CmpLT32S:
+					arg2_cnst = (int)arg2C->Ico.U32;
+					break;
+				case Iop_CmpLT64S:
+					arg2_cnst = (long)arg2C->Ico.U64;
+					break;
+				default:
+					abort();
+				}
+				if (arg2_cnst < 0) {
+					return intervalify(
+						IRExpr_Associative(
+							Iop_And1,
+							l_signed,
+							unsigned_cmp,
+							NULL));
+				} else {
+					return intervalify(
+						IRExpr_Associative(
+							Iop_Or1,
+							l_signed,
+							IRExpr_Associative(
+								Iop_And1,
+								IRExpr_Unop(Iop_Not1, l_signed),
+								unsigned_cmp,
+								NULL),
+							NULL));
+				}
+			}
+
+			return intervalify(
+				IRExpr_Associative(
+					Iop_Or1,
+					IRExpr_Associative(
+						Iop_And1,
+						l_signed,
+						r_signed,
+						unsigned_cmp,
+						NULL),
+					IRExpr_Associative(
+						Iop_And1,
+						l_signed,
+						IRExpr_Unop(Iop_Not1, r_signed),
+						NULL),
+					IRExpr_Associative(
+						Iop_And1,
+						IRExpr_Unop(Iop_Not1, l_signed),
+						IRExpr_Unop(Iop_Not1, r_signed),
+						unsigned_cmp,
+						NULL),
+					NULL));
+		}
 		default:
 			return intervalified(what);
 		}
@@ -553,8 +736,12 @@ intervalify(IRExpr *what)
 				acc &= intervalify(iea->contents[i]);
 			return acc;
 		}
-		case Iop_Or1:
-			abort();
+		case Iop_Or1: {
+			intervalified acc(intervalify(iea->contents[0]));
+			for (int i = 1; i < iea->nr_arguments; i++)
+				acc |= intervalify(iea->contents[i]);
+			return acc;
+		}
 		default:
 			return intervalified(what);
 		}
@@ -564,7 +751,7 @@ intervalify(IRExpr *what)
 }
 
 IRExpr *
-intervalified::asIRExpr()
+intervalified::asIRExpr() const
 {
 	if (sp.empty()) {
 		if (rest)
