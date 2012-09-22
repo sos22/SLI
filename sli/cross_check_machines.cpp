@@ -229,7 +229,8 @@ EvalCtxt::eval(StateMachineSideEffect *effect)
 #endif
 		for (auto it = p->generations.begin(); it != p->generations.end(); it++) {
 			if (it->first.gen() == (unsigned)-1) {
-				assert(currentState.regs.count(it->first));
+				if (!currentState.regs.count(it->first))
+					currentState.regs[it->first] = genRandomUlong();
 				currentState.regs[p->reg] = currentState.regs[it->first];
 				regOrder.push_back(p->reg);
 				return true;
@@ -279,36 +280,6 @@ top:
 	}
 	abort();
 }
-
-#if 0
-static void
-crossEvalMachines(VexPtr<StateMachine, &ir_heap> &machine1,
-		  VexPtr<StateMachine, &ir_heap> &machine2,
-		  VexPtr<Oracle> &oracle,
-		  GarbageCollectionToken token)
-{
-	EvalState initialState;
-	EvalCtxt ctxt1(initialState);
-	evalRes res1 = ctxt1.eval(machine1->root, token);
-	if (res1 == evalRes::unreached() || !ctxt1.consistent(oracle)) {
-		printf("Machine 1 is unreached\n");
-		return;
-	}
-	EvalCtxt ctxt2(initialState);
-	evalRes res2 = ctxt2.eval(machine2->root, token);
-	if (res2 == evalRes::unreached() || !ctxt2.consistent(oracle)) {
-		printf("Machine 2 is unreached\n");
-		return;
-	}
-	if (res1 != res2) {
-		printf("Failed: %s != %s\n", res1.name(), res2.name());
-		printf("initial state:\n");
-		initialState.prettyPrint(stdout);
-	} else {
-		printf("Pass: %s == %s\n", res1.name(), res2.name());
-	}
-}
-#endif
 
 template <typename t, Heap *h>
 class gc_vector : public std::vector<t *>, public GcCallback<h> {
