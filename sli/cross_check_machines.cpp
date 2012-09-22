@@ -524,6 +524,26 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		}
 		abort();
 	}
+	case Iex_Associative: {
+		auto *iea = (IRExprAssociative *)what;
+		switch (iea->op) {
+		case Iop_Add64: {
+			if (iea->nr_arguments != 2)
+				abort();
+			evalExprRes res1(evalExpr(res, iea->contents[0], NULL));
+			evalExprRes res2(evalExpr(res, iea->contents[1], NULL));
+			unsigned long res1c, res2c;
+			if (res1.unpack(&res1c))
+				return makeEqConst(res, cnst - res1c, iea->contents[1], wantTrue, usedRandom);
+			if (res2.unpack(&res2c))
+				return makeEqConst(res, cnst - res2c, iea->contents[0], wantTrue, usedRandom);
+			res1 = evalExpr(res, iea->contents[0], usedRandom);
+			return makeEqConst(res, cnst - res1c, iea->contents[1], wantTrue, usedRandom);
+		}
+		default:
+			abort();
+		}
+	}
 	default:
 		abort();
 	}
