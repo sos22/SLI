@@ -390,6 +390,28 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			}
 			return IRExpr_Unop(Iop_BadPtr, arg);
 		}
+		IRExpr *transformIex(IRExprCCall *e) {
+			IRExpr *e2 = IRExprTransformer::transformIex(e);
+			if (e2) {
+				if (e2->tag == Iex_Const)
+					return e2;
+				if (e2->tag != Iex_CCall)
+					abort();
+				e = (IRExprCCall *)e2;
+			}
+			if (!strcmp(e->cee->name, "amd64g_calculate_condition")) {
+				/* Special case: we can sometimes end
+				   up generating a random value for
+				   cc_op here, in which case we're
+				   highly unlikely to hit one of the
+				   special cases in which
+				   amd64g_calculate_condition can be
+				   constant folded, so just make
+				   something up. */
+				return mk_const(random() % 2, Ity_I64);
+			}
+			return e;
+		}
 	} trans;
 	trans.ctxt = &ctxt;
 	trans.usedRandom = usedRandom;
