@@ -544,6 +544,15 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			abort();
 		}
 	}
+	case Iex_Unop: {
+		auto *ieu = (IRExprUnop *)what;
+		switch (ieu->op) {
+		case Iop_Neg64:
+			return makeEqConst(res, -cnst, ieu->arg, wantTrue, usedRandom);
+		default:
+			abort();
+		}
+	}
 	default:
 		abort();
 	}
