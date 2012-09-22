@@ -348,18 +348,7 @@ public:
 		assert(genM1.isValid());
 
 		/* Pick up initial value */
-		if (threadAndRegister::partialEq(phi->reg, genM1)) {
-			register_val &rv(registers[phi->reg]);
-			rv.val8 = NULL;
-			rv.val16 = NULL;
-			rv.val32 = NULL;
-			rv.val64 = NULL;
-			if (phi->reg.isTemp())
-				*assumption = setTemporary(phi->reg, *assumption, opt);
-			bump_register_in_assignment_order(phi->reg);
-		} else {
-			set_register(phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
-		}
+		set_register(phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
 	}
 
 	IRExpr *specialiseIRExpr(IRExpr *iex);
