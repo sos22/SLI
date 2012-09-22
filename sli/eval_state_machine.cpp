@@ -1101,11 +1101,14 @@ EvalContext::advance(const MaiMap &decode,
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
-		if (sme->sideEffect &&
-		    !evalSideEffect(decode, sm, oracle, consumer, pendingStates,
-				    sme->sideEffect, opt))
-			return false;
 		advance_state_trace();
+		if (sme->sideEffect) {
+			if (!evalSideEffect(decode, sm, oracle, consumer, pendingStates,
+					    sme->sideEffect, opt))
+				return false;
+		} else {
+			pendingStates.push_back(*this);
+		}
 		return true;
 	}
 	case StateMachineState::Bifurcate: {
