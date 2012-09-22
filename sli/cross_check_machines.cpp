@@ -755,6 +755,10 @@ main(int argc, char *argv[])
 		it->prettyPrint(stdout);
 	}
 
+	int nr_crash = 0;
+	int nr_nocrash = 0;
+	int nr_escape = 0;
+
 	int nr_failed = 0;
 	int cntr = 0;
 	for (auto it = initialCtxts.begin(); it != initialCtxts.end(); it++) {
@@ -767,6 +771,15 @@ main(int argc, char *argv[])
 			it->prettyPrint(stdout);
 			dbg_break("Failed");
 			nr_failed++;
+		} else {
+			if (machine1res == evalRes::unreached())
+				nr_escape++;
+			else if (machine1res == evalRes::crash())
+				nr_crash++;
+			else if (machine2res == evalRes::survive())
+				nr_nocrash++;
+			else
+				abort();
 		}
 		cntr++;
 	}
@@ -774,7 +787,8 @@ main(int argc, char *argv[])
 		printf("Result: failed %d/%d\n", nr_failed, cntr);
 		return 1;
 	} else {
-		printf("Result: passed %d\n", cntr);
+		printf("Result: passed %d (%d escape, %d survive, %d crash)\n",
+		       cntr, nr_escape, nr_nocrash, nr_crash);
 		return 0;
 	}
 }
