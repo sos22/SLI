@@ -736,34 +736,33 @@ disjunctive_normal_form(IRExpr *what)
 
 static bool
 evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
-	       std::map<IRExpr *, std::pair<bool, bool> > &memo,
-	       std::set<IRExpr *> &fixedVariables)
+	       satisfier &sat)
 {
 	assert(e->type() == Ity_I1);
 	if (e->tag == Iex_Const)
 		return ((IRExprConst *)e)->con->Ico.U1 != 0;
 
 	std::pair<bool, bool> falsefalse = std::pair<bool, bool>(false, false);
-	auto it_did_insert = memo.insert(std::pair<IRExpr *, std::pair<bool, bool> >(e, falsefalse));
+	auto it_did_insert = sat.memo.insert(std::pair<IRExpr *, std::pair<bool, bool> >(e, falsefalse));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
 		if (e->tag == Iex_Unop &&
 		    ((IRExprUnop *)e)->op == Iop_Not1) {
-			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, !preferred_result, memo, fixedVariables);
+			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, !preferred_result, sat);
 		} else if (e->tag == Iex_Associative &&
 			   ((IRExprAssociative *)e)->op == Iop_And1) {
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = true;
 			for (int i = 0; i < a->nr_arguments && acc; i++)
-				acc &= evalExpression(a->contents[i], chooser, preferred_result, memo, fixedVariables);
+				acc &= evalExpression(a->contents[i], chooser, preferred_result, sat);
 			it->second.first = acc;
 		} else if (e->tag == Iex_Associative &&
 			   ((IRExprAssociative *)e)->op == Iop_Or1) {
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = false;
 			for (int i = 0; i < a->nr_arguments && !acc; i++)
-				acc |= evalExpression(a->contents[i], chooser, preferred_result, memo, fixedVariables);
+				acc |= evalExpression(a->contents[i], chooser, preferred_result, sat);
 			it->second.first = acc;
 		} else {
 			if (e->tag == Iex_Binop &&
@@ -779,11 +778,11 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 				   say that var is fixed, and then any
 				   other equality on var must be false
 				   (because we're interned) */
-				if (fixedVariables.count(((IRExprBinop *)e)->arg2)) {
+				if (sat.fixedVariables.count(((IRExprBinop *)e)->arg2)) {
 					it->second.first = false;
 					return it->second.first;
 				}
-				fixedVariables.insert(((IRExprBinop *)e)->arg2);
+				sat.fixedVariables.insert(((IRExprBinop *)e)->arg2);
 			}
 			it->second.first = !!chooser.nd_choice(2);
 			if (preferred_result == true)
@@ -795,69 +794,53 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 }
 
 static bool
-evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result)
-{
-	std::map<IRExpr *, std::pair<bool, bool> > memo;
-	std::set<IRExpr *> fixedVariables;
-	bool r = evalExpression(e, chooser, preferred_result, memo, fixedVariables);
-	if (r) {
-		fprintf(_logfile, "Satisfying assignment:\n");
-		for (auto it = memo.begin(); it != memo.end(); it++) {
-			if (it->second.second) {
-				fprintf(_logfile, "\t");
-				ppIRExpr(it->first, _logfile);
-				fprintf(_logfile, "\t-> %s\n",
-					it->second.first ? "true" : "false");
-			}
-		}
-	}
-	return r;
-}
-
-static bool
 exhaustive_satisfiable(IRExpr *e, bool print_all)
 {
-	NdChooser chooser;
-	do {
-		if (evalExpression(e, chooser, true)) {
+	bool res = false;
+	for (auto it = sat_enumerator(e); !it.finished(); it.advance()) {
+		fprintf(_logfile, "Satisfying assignment:\n");
+		it.get().prettyPrint(_logfile);
+		if (!print_all) {
 			sat_checker_counters.failed++;
-			if (!print_all)
-				return true;
+			return true;
 		}
-	} while (chooser.advance());
-	if (TIMEOUT)
+		res = true;
+	}
+	if (res)
+		sat_checker_counters.failed++;
+	else if (TIMEOUT)
 		sat_checker_counters.timeout++;
 	else
 		sat_checker_counters.exhaustive_resolved++;
-	return false;
+	return res;
 }
 
-static bool
-satisfiable(IRExpr *e, const AllowableOptimisations &opt)
+static IRExpr *
+sat_simplify(IRExpr *a, const AllowableOptimisations &opt)
 {
 	sat_checker_counters.nr_invoked++;
 
-	assert(e->type() == Ity_I1);
-	Maybe<bool> res(isTrue(e));
+	assert(a->type() == Ity_I1);
+	Maybe<bool> res(isTrue(a));
 
 	if (res.valid) {
 		sat_checker_counters.initial_constant++;
-		return res.content;
+		return a;
 	}
 
 	internIRExprTable intern;
-	e = internIRExpr(e, intern);
+	a = internIRExpr(a, intern);
 
-	IRExpr *norm1 = and_normal_form(e, intern);
+	IRExpr *norm1 = and_normal_form(a, intern);
 	if (!norm1)
-		return true;
+		return a;
 	check_and_normal_form(norm1);
 	norm1 = anf_simplify(norm1, NULL, intern);
 	norm1 = simplifyIRExpr(norm1, opt);
 	res = isTrue(norm1);
 	if (res.valid) {
 		sat_checker_counters.anf_resolved++;
-		return res.content;
+		return norm1;
 	}
 
 	IRExpr *norm2 = conjunctive_normal_form(norm1);
@@ -865,19 +848,29 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 	res = isTrue(norm2);
 	if (res.valid) {
 		sat_checker_counters.cnf_resolved++;
-		return res.content;
+		return norm2;
 	}
 	IRExpr *norm3 = disjunctive_normal_form(norm2);
 	norm3 = simplifyIRExpr(norm3, opt);
 	res = isTrue(norm3);
-	if (res.valid) {
+	if (res.valid)
 		sat_checker_counters.dnf_resolved++;
-		return res.content;
-	}
 
-	/* Okay, that's about as far as we can push that.  Fall back
-	   to an exhaustive search. */
-	return exhaustive_satisfiable(norm3, false);
+	return norm3;
+}
+
+static bool
+satisfiable(IRExpr *e, const AllowableOptimisations &opt)
+{
+	assert(e->type() == Ity_I1);
+
+	e = _sat_checker::sat_simplify(e, opt);
+
+	Maybe<bool> res(isTrue(e));
+	if (res.valid)
+		return res.content;
+
+	return exhaustive_satisfiable(e, false);
 }
 
 /* End of namespace */
@@ -895,3 +888,46 @@ simplify_via_anf(IRExpr *a, IRExpr *assumption)
 	return _sat_checker::simplify_via_anf(a, assumption);
 }
 
+IRExpr *
+sat_simplify(IRExpr *a, const AllowableOptimisations &opt)
+{
+	return _sat_checker::sat_simplify(a, opt);
+}
+
+bool
+sat_enumerator::finished() const
+{
+	return _finished;
+}
+
+void
+sat_enumerator::skipToSatisfying()
+{
+	do {
+		content.clear();
+		if (_sat_checker::evalExpression(expr, chooser, true, content))
+			return;
+	} while (chooser.advance());
+	_finished = true;
+}
+
+void
+sat_enumerator::advance()
+{
+	if (!chooser.advance())
+		_finished = true;
+	skipToSatisfying();
+}
+
+void
+satisfier::prettyPrint(FILE *f) const
+{
+	for (auto it = memo.begin(); it != memo.end(); it++) {
+		if (it->second.second) {
+			fprintf(f, "\t");
+			ppIRExpr(it->first, f);
+			fprintf(f, "\t-> %s\n",
+				it->second.first ? "true" : "false");
+		}
+	}
+}

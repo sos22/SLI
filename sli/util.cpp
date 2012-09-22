@@ -306,3 +306,11 @@ warning(const char *fmt, ...)
 	free(f1);
 	free(f2);
 }
+
+/* fopen with C++ calling convention, so that gdb can tell that it has
+   a 64 bit return, because that just makes everything easier. */
+FILE *
+dbg_fopen(const char *fname, const char *name)
+{
+	return fopen(fname, name);
+}

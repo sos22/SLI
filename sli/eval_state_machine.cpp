@@ -2297,3 +2297,39 @@ getCrossMachineCrashRequirement(
 
 	return consumer.accumulator;
 }
+
+/* Just collect all of the constraints which the symbolic execution
+ * engine spits out.  The idea is that if you generate a set of input
+ * states X such that, for every condition Y which this emits some
+ * member of X makes Y false and some member makes it true then that
+ * should get you reasonably close to exploring all of the interesting
+ * behaviour in the machine. */
+void
+collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
+		   const VexPtr<StateMachine, &ir_heap> &sm,
+		   VexPtr<OracleInterface> &oracle,
+		   std::vector<IRExpr *> &out,
+		   GarbageCollectionToken token)
+{
+	struct : public EvalPathConsumer, public GcCallback<&ir_heap> {
+		std::vector<IRExpr *> *out;
+		void runGc(HeapVisitor &hv) {
+			for (auto it = out->begin(); it != out->end(); it++)
+				hv(*it);
+		}
+		bool crash(IRExpr *assumption, IRExpr *) {
+			out->push_back(assumption);
+			return true;
+		}
+		bool survive(IRExpr *assumption, IRExpr *) {
+			out->push_back(assumption);
+			return true;
+		}
+		bool escape(IRExpr *assumption, IRExpr *) {
+			out->push_back(assumption);
+			return true;
+		}
+	} consumer;
+	consumer.out = &out;
+	enumEvalPaths(mai, sm, IRExpr_Const(IRConst_U1(1)), oracle, AllowableOptimisations::defaultOptimisations, consumer, token);
+}
