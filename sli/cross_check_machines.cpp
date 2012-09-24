@@ -169,6 +169,8 @@ EvalCtxt::eval(StateMachineSideEffect *effect)
 		unsigned long res;
 		if (currentState.memory.count(addr)) {
 			res = currentState.memory[addr];
+		} else if (currentState.badPtrs.count(addr)) {
+			return false;
 		} else {
 			res = genRandomUlong();
 			currentState.memory[addr] = res;
@@ -391,26 +393,17 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			return IRExpr_Unop(Iop_BadPtr, arg);
 		}
 		IRExpr *transformIex(IRExprCCall *e) {
-			IRExpr *e2 = IRExprTransformer::transformIex(e);
-			if (e2) {
-				if (e2->tag == Iex_Const)
-					return e2;
-				if (e2->tag != Iex_CCall)
-					abort();
-				e = (IRExprCCall *)e2;
+			if (!strcmp(e->cee->name, "amd64g_calculate_condition") &&
+			    e->args[1]->tag == Iex_Get) {
+				/* Special case: make sure we produce
+				   something which is nice and easy to
+				   constant-fold here. */
+				IRExprGet *ieg = (IRExprGet *)e->args[1];
+				if (!ctxt->regs.count(ieg->reg))
+					ctxt->regs[ieg->reg] = AMD64G_CC_OP_SUBQ;
 			}
-			if (!strcmp(e->cee->name, "amd64g_calculate_condition")) {
-				/* Special case: we can sometimes end
-				   up generating a random value for
-				   cc_op here, in which case we're
-				   highly unlikely to hit one of the
-				   special cases in which
-				   amd64g_calculate_condition can be
-				   constant folded, so just make
-				   something up. */
-				return mk_const(random() % 2, Ity_I64);
-			}
-			return e;
+
+			return IRExprTransformer::transformIex(e);
 		}
 	} trans;
 	trans.ctxt = &ctxt;
@@ -786,8 +779,18 @@ main(int argc, char *argv[])
 	for (auto it = initialCtxts.begin(); it != initialCtxts.end(); it++) {
 		EvalCtxt ctxt1(*it);
 		evalRes machine1res = ctxt1.eval(machine1->root, ALLOW_GC);
+		int i;
+		for (i = 0; i < 100 && machine1res == evalRes::unreached(); i++) {
+			ctxt1.currentState = *it;
+			machine1res = ctxt1.eval(machine1->root, ALLOW_GC);
+		}
 		EvalCtxt ctxt2(*it);
 		evalRes machine2res = ctxt2.eval(machine2->root, ALLOW_GC);
+		for (i = 0; i < 100 && machine2res == evalRes::unreached(); i++) {
+			ctxt2.currentState = *it;
+			machine2res = ctxt1.eval(machine2->root, ALLOW_GC);
+		}
+		
 		if (machine1res != machine2res) {
 			printf("Failed: machine1res(%s) != machine2res(%s)\n", machine1res.name(), machine2res.name());
 			it->prettyPrint(stdout);
