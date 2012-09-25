@@ -538,12 +538,14 @@ public:
 	static jcc_code zero;
 	static jcc_code less_or_equal;
 	static jcc_code greater;
+	static jcc_code below;
 	jcc_code invert() const {
 		return jcc_code(code ^ 1);
 	}
 	jcc_code() : code(0xff) {}
 };
 
+jcc_code jcc_code::below(0x82);
 jcc_code jcc_code::zero(0x84);
 jcc_code jcc_code::nonzero(0x85);
 jcc_code jcc_code::less_or_equal(0x8e);
@@ -807,7 +809,7 @@ isPrefix(unsigned char opcode)
 		(opcode == 0x2E) ||
 		(opcode == 0x36) ||
 		(opcode == 0x3D) ||
-		(opcode >= 64 && opcode <= 0x67) ||
+		(opcode >= 0x64 && opcode <= 0x67) ||
 		(opcode == 0xF0) ||
 		(opcode == 0xF2) ||
 		(opcode == 0xF3));
@@ -1146,10 +1148,12 @@ origInstrAndStash(const C2PRip &c2p_rip,
 		if (!stashSlots.empty())
 			abort();
 
+	case 0x55: /* push %rbp */
 	case 0x89: /* mov reg, modrm */
 	case 0x90: /* nop */
 	case 0x98: /* cltq */
 	case 0xc7: /* mov imm, modrm */
+	case 0xeb: /* jmp imm8 */
 		/* These shouldn't generate any stashes */
 		assert(stashSlots.empty());
 		n = convertSimpleInstr(allocLabel, underlyingInstr);
@@ -1159,6 +1163,7 @@ origInstrAndStash(const C2PRip &c2p_rip,
 			cursor = start = n;
 		break;
 
+	case 0x74:
 	case 0xf84: /* Conditional branches.  These get special
 		       handling in findSuccessors() */
 	case 0xf8e:
@@ -1349,6 +1354,22 @@ evalBooleanCondition(CfgLabelAllocator &allocLabel,
 							scratch1,
 							scratch2);
 			j_code = jcc_code::zero;
+			break;
+		case Iop_CmpLT32U:
+			cursor = evalExpressionToReg(allocLabel,
+						     thread,
+						     cursor,
+						     ced,
+						     e->arg1,
+						     scratch1);
+			cursor = compareExpressionToReg(allocLabel,
+							thread,
+							cursor,
+							ced,
+							e->arg2,
+							scratch1,
+							scratch2);
+			j_code = jcc_code::below;
 			break;
 		default:
 			abort();
@@ -2437,7 +2458,7 @@ main(int argc, char *argv[])
 	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
 		err(1, "open(%s)", ced_path);
-	crashEnforcementData ced(true, true);
+	crashEnforcementData ced(false, false);
 	loadCrashEnforcementData(ced, ms->addressSpace, fd);
 	close(fd);
 
