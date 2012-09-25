@@ -176,6 +176,22 @@ findRegisterMultiplicity(const CrashSummary *sm, const reg_or_free_var &r)
 	return doit.multiplicity;
 }
 
+static bool
+mentionsHBEdge(IRExpr *a)
+{
+	struct : public IRExprTransformer {
+		bool res;
+		IRExpr *transformIex(IRExprHappensBefore *hb) {
+			res = true;
+			abortTransform();
+			return hb;
+		}
+	} doit;
+	doit.res = false;
+	doit.doit(a);
+	return doit.res;
+}
+
 static IRExpr *
 removeRedundantClauses(IRExpr *verificationCondition,
 		       const reg_set_t &targetRegisters,
@@ -202,7 +218,8 @@ removeRedundantClauses(IRExpr *verificationCondition,
 		verificationCondition = IRExpr_Associative(Iop_And1, verificationCondition, NULL);
 
 	/* First rule: we only want to keep clauses which interfere
-	   with the the target variables in some sense. */
+	   with the the target variables in some sense or which
+	   contain HB edges. */
 	int nr_verification_clauses = ((IRExprAssociative *)verificationCondition)->nr_arguments;
 	IRExpr **verification_clauses = ((IRExprAssociative *)verificationCondition)->contents;
 	bool precious[nr_verification_clauses];
@@ -220,7 +237,8 @@ removeRedundantClauses(IRExpr *verificationCondition,
 				continue;
 			reg_set_t vars;
 			enumRegisters(verification_clauses[i], &vars);
-			if (!(vars & preciousVariables).empty()) {
+			if (mentionsHBEdge(verification_clauses[i]) ||
+			    !(vars & preciousVariables).empty()) {
 				precious[i] = true;
 				preciousVariables |= vars;
 				progress = true;
