@@ -1259,6 +1259,15 @@ static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **s
   IROp op2;
   std::vector<IRExpr *> args;
   IRExpr *arg;
+  const char *str2;
+
+  if (parseThisChar('[', str, &str2) &&
+      parseIROp(&op, str2, &str2) &&
+      operationAssociates(op) &&
+      parseThisChar(']', str2, suffix)) {
+    *res = IRExpr_Associative(op, NULL);
+    return true;
+  }
 
   if (parseThisChar('(', str, &str)) {
     while (1) {
@@ -1453,6 +1462,13 @@ IRExprAssociative::prettyPrint(FILE *f) const
 	 the single assoc argument instead. */
       if (nr_arguments == 1) {
 	ppIRExpr(contents[0], f);
+	return;
+      }
+
+      if (nr_arguments == 0) {
+	fprintf(f, "[");
+	ppIROp(op, f);
+	fprintf(f, "]");
 	return;
       }
 
