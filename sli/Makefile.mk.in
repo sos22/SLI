@@ -52,7 +52,7 @@ EOF
 	do
 	    cat <<EOF
 $t: ${input_base}/${t}.o
-	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ \$^ -o \$@
+	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm \$^ -o \$@
 EOF
 	done
 }
