@@ -1083,31 +1083,30 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 	return true;
       }
     }
-    return false;
   } else if (str[0] == 'L') {
     IRType ty;
     IRExpr *addr;
     MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
-    if (!parseThisString("LD:", str, &str) ||
-	!parseIRType(&ty, str, &str) ||
-	!parseThisChar('(', str, &str) ||
-	!parseIRExpr(&addr, str, &str) ||
-	!parseThisString(")", str, suffix))
-      return false;
-    *out = IRExpr_Load(ty, addr);
-    return true;
+    if (parseThisString("LD:", str, &str) &&
+	parseIRType(&ty, str, &str) &&
+	parseThisChar('(', str, &str) &&
+	parseIRExpr(&addr, str, &str) &&
+	parseThisString(")", str, suffix)) {
+      *out = IRExpr_Load(ty, addr);
+      return true;
+    }
   } else if (str[0] == 'M') {
     IRExpr *cond, *expr0, *exprX;
-    if (!parseThisString("Mux0X(", str, &str) ||
-	!parseIRExpr(&cond, str, &str) ||
-	!parseThisChar(',', str, &str) ||
-	!parseIRExpr(&expr0, str, &str) ||
-	!parseThisChar(',', str, &str) ||
-	!parseIRExpr(&exprX, str, &str) ||
-	!parseThisChar(')', str, suffix))
-      return false;
-    *out = IRExpr_Mux0X(cond, expr0, exprX);
-    return true;
+    if (parseThisString("Mux0X(", str, &str) &&
+	parseIRExpr(&cond, str, &str) &&
+	parseThisChar(',', str, &str) &&
+	parseIRExpr(&expr0, str, &str) &&
+	parseThisChar(',', str, &str) &&
+	parseIRExpr(&exprX, str, &str) &&
+	parseThisChar(')', str, suffix)) {
+      *out = IRExpr_Mux0X(cond, expr0, exprX);
+      return true;
+    }
   } else if (str[0] == 'F') {
     /* This might also be a float constant, so try that here. */
     IRConst *c;
