@@ -775,6 +775,23 @@ readStateMachine(int fd)
 	return res;
 }
 
+StateMachine *
+readStateMachine(const char *fname)
+{
+	int fd = open(fname, O_RDONLY);
+	if (fd < 0)
+		err(1, "opening %s", fname);
+	char *content = readfile(fd);
+	close(fd);
+
+	const char *end;
+	StateMachine *res;
+	if (!parseStateMachine(&res, content, &end) || *end)
+		errx(1, "error parsing state machine:\n%s", content);
+	free(content);
+	return res;
+}
+
 #ifndef NDEBUG
 void
 StateMachineState::assertAcyclic(std::vector<const StateMachineState *> &stack,
@@ -1285,4 +1302,12 @@ MaiMap *
 MaiMap::fromFile(const StateMachine *sm1, const char *fname)
 {
 	return fromFile(sm1, NULL, fname);
+}
+
+void
+dumpStateMachine(const StateMachine *sm, const char *fname)
+{
+	FILE *f = fopen(fname, "w");
+	printStateMachine(sm, f);
+	fclose(f);
 }

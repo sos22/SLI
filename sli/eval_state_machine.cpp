@@ -348,18 +348,7 @@ public:
 		assert(genM1.isValid());
 
 		/* Pick up initial value */
-		if (threadAndRegister::partialEq(phi->reg, genM1)) {
-			register_val &rv(registers[phi->reg]);
-			rv.val8 = NULL;
-			rv.val16 = NULL;
-			rv.val32 = NULL;
-			rv.val64 = NULL;
-			if (phi->reg.isTemp())
-				*assumption = setTemporary(phi->reg, *assumption, opt);
-			bump_register_in_assignment_order(phi->reg);
-		} else {
-			set_register(phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
-		}
+		set_register(phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
 	}
 
 	IRExpr *specialiseIRExpr(IRExpr *iex);
@@ -1101,11 +1090,14 @@ EvalContext::advance(const MaiMap &decode,
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
-		if (sme->sideEffect &&
-		    !evalSideEffect(decode, sm, oracle, consumer, pendingStates,
-				    sme->sideEffect, opt))
-			return false;
 		advance_state_trace();
+		if (sme->sideEffect) {
+			if (!evalSideEffect(decode, sm, oracle, consumer, pendingStates,
+					    sme->sideEffect, opt))
+				return false;
+		} else {
+			pendingStates.push_back(*this);
+		}
 		return true;
 	}
 	case StateMachineState::Bifurcate: {
@@ -2293,4 +2285,40 @@ getCrossMachineCrashRequirement(
 		return NULL;
 
 	return consumer.accumulator;
+}
+
+/* Just collect all of the constraints which the symbolic execution
+ * engine spits out.  The idea is that if you generate a set of input
+ * states X such that, for every condition Y which this emits some
+ * member of X makes Y false and some member makes it true then that
+ * should get you reasonably close to exploring all of the interesting
+ * behaviour in the machine. */
+void
+collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
+		   const VexPtr<StateMachine, &ir_heap> &sm,
+		   VexPtr<OracleInterface> &oracle,
+		   std::vector<IRExpr *> &out,
+		   GarbageCollectionToken token)
+{
+	struct : public EvalPathConsumer, public GcCallback<&ir_heap> {
+		std::vector<IRExpr *> *out;
+		void runGc(HeapVisitor &hv) {
+			for (auto it = out->begin(); it != out->end(); it++)
+				hv(*it);
+		}
+		bool crash(IRExpr *assumption, IRExpr *) {
+			out->push_back(assumption);
+			return true;
+		}
+		bool survive(IRExpr *assumption, IRExpr *) {
+			out->push_back(assumption);
+			return true;
+		}
+		bool escape(IRExpr *assumption, IRExpr *) {
+			out->push_back(assumption);
+			return true;
+		}
+	} consumer;
+	consumer.out = &out;
+	enumEvalPaths(mai, sm, IRExpr_Const(IRConst_U1(1)), oracle, AllowableOptimisations::defaultOptimisations, consumer, token);
 }

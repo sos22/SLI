@@ -531,11 +531,13 @@ public:
 		VexRip origin;
 		int target;
 		StateMachineSideEffect *sme;
-		if (parseThisString("{", str, &str) &&
-		    parseVexRip(&origin, str, &str) &&
-		    parseThisChar(':', str, &str) &&
-		    StateMachineSideEffect::parse(&sme, str, &str) &&
-		    parseThisString(" then l", str, &str) &&
+		if (!parseThisString("{", str, &str) ||
+		    !parseVexRip(&origin, str, &str) ||
+		    !parseThisChar(':', str, &str))
+			return false;
+		if (!StateMachineSideEffect::parse(&sme, str, &str))
+			sme = NULL;
+		if (parseThisString(" then l", str, &str) &&
 		    parseDecimalInt(&target, str, &str) &&
 		    parseThisChar('}', str, suffix)) {
 			*out = new StateMachineSideEffecting(origin, sme, (StateMachineState *)target);
@@ -1324,6 +1326,7 @@ static inline bool parseStateMachine(StateMachine **out,
 	return parseStateMachine(out, str, suffix, labels);
 }	
 StateMachine *readStateMachine(int fd);
+StateMachine *readStateMachine(const char *fname);
 
 StateMachine *duplicateStateMachine(const StateMachine *inp);
 
