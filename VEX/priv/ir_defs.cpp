@@ -1108,32 +1108,34 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
       return true;
     }
   } else if (str[0] == 'F') {
-    /* This might also be a float constant, so try that here. */
+    /* Could be a float const */
     IRConst *c;
     if (parseIRConst(&c, str, suffix)) {
       *out = IRExpr_Const(c);
       return true;
     }
 
-    /* Not a float constant and starts with an F, must be a free
-       variable. */
-    MemoryAccessIdentifier ma(MemoryAccessIdentifier::uninitialised());
-    IRType ty;
-    bool isUnique;
-    if (!parseThisString("Free", str, &str) ||
-	!ma.parse(str, &str) ||
-	!parseThisChar(':', str, &str) ||
-	!parseIRType(&ty, str, &str) ||
-	!parseThisChar(':', str, &str))
-      return false;
-    if (parseThisString("UNIQUE", str, suffix))
-      isUnique = true;
-    else if (parseThisString("NONUNIQUE", str, suffix))
-      isUnique = false;
-    else
-      return false;
-    *out = IRExpr_FreeVariable(ma, ty, isUnique);
-    return true;
+    /* Might be a free variable. */
+    if (parseThisString("Free", str, &str)) {
+      MemoryAccessIdentifier ma(MemoryAccessIdentifier::uninitialised());
+      IRType ty;
+      bool isUnique;
+      if (!ma.parse(str, &str) ||
+	  !parseThisChar(':', str, &str) ||
+	  !parseIRType(&ty, str, &str) ||
+	  !parseThisChar(':', str, &str))
+	return false;
+      if (parseThisString("UNIQUE", str, suffix))
+	isUnique = true;
+      else if (parseThisString("NONUNIQUE", str, suffix))
+	isUnique = false;
+      else
+	return false;
+      *out = IRExpr_FreeVariable(ma, ty, isUnique);
+      return true;
+    }
+
+    /* Fall through and try to parse as a prefix irop. */
   } else if ((str[0] >= '0' && str[0] <= '9') || str[0] == 'V' || str[0] == '-') {
     /* Constant of some sort. */
     IRConst *c;
