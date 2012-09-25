@@ -120,6 +120,7 @@ public:
 		for (auto it = successors.begin(); it != successors.end(); it++)
 			it->visit(hv);
 	};
+	unsigned long hash() const { return 2 * label.hash() + 3 * rip.hash(); }
 	NAMED_CLASS
 };
 
