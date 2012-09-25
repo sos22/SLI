@@ -103,17 +103,38 @@ public:
 	}
 };
 
-class EvalCtxt {
+class EvalCtxt : public GcCallback<&ir_heap> {
+	EvalCtxt(const EvalCtxt &o);
+	void operator =(const EvalCtxt &o);
+	void runGc(HeapVisitor &hv) {
+		for (auto it = logmsgs.begin(); it != logmsgs.end(); it++)
+			hv(it->first);
+	}
 public:
 	EvalState currentState;
 	std::vector<threadAndRegister> regOrder;
+	std::vector<std::pair<const StateMachineState *, char *> > logmsgs;
+
+	void reset(const EvalState &s) {
+		currentState = s;
+		regOrder.clear();
+		for (auto it = logmsgs.begin(); it != logmsgs.end(); it++)
+			free(it->second);
+		logmsgs.clear();
+	}
 	EvalCtxt(EvalState &_initialState)
 		: currentState(_initialState)
 	{}
+	~EvalCtxt() {
+		for (auto it = logmsgs.begin(); it != logmsgs.end(); it++)
+			free(it->second);
+	}
 	unsigned long eval(IRExpr *e);
-	bool eval(StateMachineSideEffect *effect);
+	bool eval(const StateMachineState *, StateMachineSideEffect *effect);
 	evalRes eval(VexPtr<StateMachineState, &ir_heap> state,
 		     GarbageCollectionToken token);
+	void log(const StateMachineState *, const char *fmt, ...) __attribute__((__format__( __printf__, 3, 4)));
+	void printLog(FILE *f, const std::map<const StateMachineState *, int> &labels) const;
 };
 
 static unsigned long
@@ -159,8 +180,31 @@ EvalCtxt::eval(IRExpr *e)
 	return l;
 }
 
+void
+EvalCtxt::log(const StateMachineState *state, const char *fmt, ...)
+{
+	va_list args;
+	char *buf;
+	va_start(args, fmt);
+	if (vasprintf(&buf, fmt, args) < 0)
+		errx(1, "formating log msg; fmt %s\n", fmt);
+	va_end(args);
+	logmsgs.push_back(std::pair<const StateMachineState *, char *>(state, buf));
+}
+
+void
+EvalCtxt::printLog(FILE *f, const std::map<const StateMachineState *, int> &labels) const
+{
+	for (auto it = logmsgs.begin(); it != logmsgs.end(); it++) {
+		auto it2 = labels.find(it->first);
+		printf("%p\n", it->first);
+		assert(it2 != labels.end());
+		fprintf(f, "l%d: %s\n", it2->second, it->second);
+	}
+}
+
 bool
-EvalCtxt::eval(StateMachineSideEffect *effect)
+EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 {
 	switch (effect->type) {
 	case StateMachineSideEffect::Load: {
@@ -169,11 +213,14 @@ EvalCtxt::eval(StateMachineSideEffect *effect)
 		unsigned long res;
 		if (currentState.memory.count(addr)) {
 			res = currentState.memory[addr];
+			log(state, "load(%lx) -> %lx, already in memory", addr, res);
 		} else if (currentState.badPtrs.count(addr)) {
+			log(state, "load(%lx) -> bad pointer", addr);
 			return false;
 		} else {
 			res = genRandomUlong();
 			currentState.memory[addr] = res;
+			log(state, "load(%lx) -> %lx, freshly generated", addr, res);
 		}
 		currentState.regs[l->target] = res;
 		regOrder.push_back(l->target);
@@ -184,6 +231,7 @@ EvalCtxt::eval(StateMachineSideEffect *effect)
 		unsigned long addr = eval(s->addr);
 		unsigned long data = eval(s->data);
 		currentState.memory[addr] = data;
+		log(state, "store %lx -> %lx", data, addr);
 		return true;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -191,13 +239,16 @@ EvalCtxt::eval(StateMachineSideEffect *effect)
 		unsigned long val = eval(c->value);
 		currentState.regs[c->target] = val;
 		regOrder.push_back(c->target);
+		log(state, "copy %lx", val);
 		return true;
 	}
 	case StateMachineSideEffect::Unreached:
+		log(state, "unreached side-effect");
 		return false;
 	case StateMachineSideEffect::AssertFalse: {
 		auto *a = (StateMachineSideEffectAssertFalse *)effect;
 		unsigned long v = eval(a->value);
+		log(state, "AssertFalse(%lx)", v);
 		if (v == 0)
 			return true;
 		else
@@ -214,6 +265,9 @@ EvalCtxt::eval(StateMachineSideEffect *effect)
 					}
 					currentState.regs[p->reg] = currentState.regs[it2->first];
 					regOrder.push_back(p->reg);
+					log(state, "phi satisfied by %s (%lx)",
+					    it2->first.name(),
+					    currentState.regs[p->reg]);
 					return true;
 				}
 			}
@@ -231,8 +285,18 @@ EvalCtxt::eval(StateMachineSideEffect *effect)
 #endif
 		for (auto it = p->generations.begin(); it != p->generations.end(); it++) {
 			if (it->first.gen() == (unsigned)-1) {
-				if (!currentState.regs.count(it->first))
+				if (!currentState.regs.count(it->first)) {
 					currentState.regs[it->first] = genRandomUlong();
+					log(state,
+					    "phi satisfied by initial load of %s, randomly generated %lx",
+					    it->first.name(),
+					    currentState.regs[it->first]);
+				} else {
+					log(state,
+					    "phi satisfied by initial load of %s, already set to %lx",
+					    it->first.name(),
+					    currentState.regs[it->first]);
+				}
 				currentState.regs[p->reg] = currentState.regs[it->first];
 				regOrder.push_back(p->reg);
 				return true;
@@ -246,6 +310,7 @@ EvalCtxt::eval(StateMachineSideEffect *effect)
 	case StateMachineSideEffect::EndFunction:
 	case StateMachineSideEffect::PointerAliasing:
 	case StateMachineSideEffect::StackLayout:
+		log(state, "ignored side effect");
 		return true;
 	}
 	abort();
@@ -260,24 +325,36 @@ top:
 	switch (state->type) {
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)state.get();
-		if (eval(smb->condition))
+		if (eval(smb->condition)) {
+			log(state, "condition is true");
 			state = smb->trueTarget;
-		else
+		} else {
+			log(state, "condition is false");
 			state = smb->falseTarget;
+		}
 		goto top;
 	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)state.get();
-		if (sme->sideEffect && !eval(sme->sideEffect))
-			return evalRes::unreached();
+		if (sme->sideEffect) {
+			if (!eval(state, sme->sideEffect)) {
+				log(state, "eval side effect failed");
+				return evalRes::unreached();
+			}
+		} else {
+			log(state, "no-op");
+		}
 		state = sme->target;
 		goto top;
 	}
 	case StateMachineState::Unreached:
+		log(state, "unreached");
 		return evalRes::unreached();
 	case StateMachineState::Crash:
+		log(state, "crash");
 		return evalRes::crash();
 	case StateMachineState::NoCrash:
+		log(state, "no-crash");
 		return evalRes::survive();
 	}
 	abort();
@@ -776,24 +853,39 @@ main(int argc, char *argv[])
 
 	int nr_failed = 0;
 	int cntr = 0;
+	bool printedMachines = false;
+	std::map<const StateMachineState *, int> labels1;
+	std::map<const StateMachineState *, int> labels2;
 	for (auto it = initialCtxts.begin(); it != initialCtxts.end(); it++) {
 		EvalCtxt ctxt1(*it);
 		evalRes machine1res = ctxt1.eval(machine1->root, ALLOW_GC);
 		int i;
 		for (i = 0; i < 100 && machine1res == evalRes::unreached(); i++) {
-			ctxt1.currentState = *it;
+			ctxt1.reset(*it);
 			machine1res = ctxt1.eval(machine1->root, ALLOW_GC);
 		}
 		EvalCtxt ctxt2(*it);
 		evalRes machine2res = ctxt2.eval(machine2->root, ALLOW_GC);
 		for (i = 0; i < 100 && machine2res == evalRes::unreached(); i++) {
-			ctxt2.currentState = *it;
-			machine2res = ctxt1.eval(machine2->root, ALLOW_GC);
+			ctxt2.reset(*it);
+			machine2res = ctxt2.eval(machine2->root, ALLOW_GC);
 		}
 		
 		if (machine1res != machine2res) {
+			if (!printedMachines) {
+				printf("Machine1:\n");
+				printStateMachine(machine1, stdout, labels1);
+				printf("Machine2:\n");
+				printStateMachine(machine2, stdout, labels2);
+				printedMachines = true;
+			}
 			printf("Failed: machine1res(%s) != machine2res(%s)\n", machine1res.name(), machine2res.name());
 			it->prettyPrint(stdout);
+			printf("Machine 1 log:\n");
+			ctxt1.printLog(stdout, labels1);
+			printf("Machine 2 log:\n");
+			ctxt2.printLog(stdout, labels2);
+
 			dbg_break("Failed");
 			nr_failed++;
 		} else {
