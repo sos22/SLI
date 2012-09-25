@@ -664,6 +664,8 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	if (!assumption)
 		return NULL;
 
+	assumption = simplifyIRExpr(interval_simplify(simplify_via_anf(assumption)), optIn);
+
 	assumption = writeMachineSuitabilityConstraint(
 		mai,
 		sm,
@@ -677,6 +679,8 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
 		return NULL;
 	}
+
+	assumption = simplifyIRExpr(interval_simplify(simplify_via_anf(assumption)), optIn);
 
 	/* Figure out when the cross product machine will be at risk
 	 * of crashing. */
