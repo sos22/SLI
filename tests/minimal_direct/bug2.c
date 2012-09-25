@@ -5,6 +5,9 @@
 #include <time.h>
 #include <unistd.h>
 
+static int nr_read_events;
+static int nr_write_events;
+
 #define NR_PTRS 100
 static int *volatile global_ptrs[NR_PTRS];
 
@@ -30,6 +33,7 @@ thr_main(void *ign)
 			*p = 5;
 		}
 		STOP_ANALYSIS();
+		nr_read_events++;
 	}
 	return NULL;
 }
@@ -52,9 +56,13 @@ main()
 		STOP_ANALYSIS();
 		global_ptrs[idx] = &t;
 		STOP_ANALYSIS();
+		nr_write_events++;
 	}
 
 	force_quit = true;
 	pthread_join(thr, NULL);
+
+	printf("Survived, %d read events and %d write events\n",
+	       nr_read_events, nr_write_events);
 	return 0;
 }
