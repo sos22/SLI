@@ -1028,85 +1028,11 @@ parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suf
 	return false;
 }
 
-static bool parseIRExprGet(IRExpr **res, const char *str, const char **suffix)
-{
-  threadAndRegister reg(threadAndRegister::invalid());
-  int offset;
-  int tid;
-  IRType ty;
-
-#define do_reg(name)					\
-  if (parseThisString( #name ":", str, &str)) {	\
-    offset = OFFSET_amd64_ ## name;			\
-    goto canned_register;				\
-  }
-  foreach_reg(do_reg);
-#undef do_reg
-  if (!parseThisString("GET:", str, &str) ||
-      !parseIRType(&ty, str, &str) ||
-      !parseThisChar('(', str, &str) ||
-      !parseThreadAndRegister(&reg, str, &str) ||
-      !parseThisChar(')', str, suffix))
-    return false;
-  *res = IRExpr_Get(reg, ty);
-  return true;
-
- canned_register:
-  int generation;
-  if (!parseDecimalInt(&tid, str, &str) ||
-      !parseThisChar(':', str, &str) ||
-      !parseDecimalInt(&generation, str, suffix))
-    return false;
-  *res = IRExpr_Get(offset, Ity_I64, tid, generation);
-  return true;
-}
-
-static bool parseIRExprGetI(IRExpr **res, const char *str, const char **suffix)
-{
-  IRRegArray *arr;
-  IRExpr *ix;
-  int bias;
-  int tid;
-
-  if (!parseThisString("GETI", str, &str) ||
-      !parseIRRegArray(&arr, str, &str) ||
-      !parseThisChar('[', str, &str) ||
-      !parseIRExpr(&ix, str, &str) ||
-      !parseThisChar(',', str, &str) ||
-      !parseDecimalInt(&bias, str, &str) ||
-      !parseThisString("](", str, &str) ||
-      !parseDecimalInt(&tid, str, &str) ||
-      !parseThisChar(')', str, suffix))
-    return false;
-  *res = IRExpr_GetI(arr, ix, bias, tid);
-  return true;
-}
-
 static bool opHasFourArguments(IROp op)
 {
   IRType dst, arg1, arg2, arg3, arg4;
   typeOfPrimop(op, &dst, &arg1, &arg2, &arg3, &arg4);
   return arg4 != Ity_INVALID;
-}
-
-static bool parseIRExprQop(IRExpr **res, const char *str, const char **suffix)
-{
-  IROp op;
-  IRExpr *arg1, *arg2, *arg3, *arg4;
-  if (!parseIROp(&op, str, &str) ||
-      !opHasFourArguments(op) ||
-      !parseThisChar('(', str, &str) ||
-      !parseIRExpr(&arg1, str, &str) ||
-      !parseThisChar(',', str, &str) ||
-      !parseIRExpr(&arg2, str, &str) ||
-      !parseThisChar(',', str, &str) ||
-      !parseIRExpr(&arg3, str, &str) ||
-      !parseThisChar(',', str, &str) ||
-      !parseIRExpr(&arg4, str, &str) ||
-      !parseThisChar(')', str, suffix))
-    return false;
-  *res = IRExpr_Qop(op, arg1, arg2, arg3, arg4);
-  return true;
 }
 
 static bool opHasThreeArguments(IROp op)
@@ -1116,24 +1042,6 @@ static bool opHasThreeArguments(IROp op)
   return arg3 != Ity_INVALID && arg4 == Ity_INVALID;
 }
 
-static bool parseIRExprTriop(IRExpr **res, const char *str, const char **suffix)
-{
-  IROp op;
-  IRExpr *arg1, *arg2, *arg3;
-  if (!parseIROp(&op, str, &str) ||
-      !opHasThreeArguments(op) ||
-      !parseThisChar('(', str, &str) ||
-      !parseIRExpr(&arg1, str, &str) ||
-      !parseThisChar(',', str, &str) ||
-      !parseIRExpr(&arg2, str, &str) ||
-      !parseThisChar(',', str, &str) ||
-      !parseIRExpr(&arg3, str, &str) ||
-      !parseThisChar(')', str, suffix))
-    return false;
-  *res = IRExpr_Triop(op, arg1, arg2, arg3);
-  return true;
-}
-
 static bool opHasTwoArguments(IROp op)
 {
   IRType dst, arg1, arg2, arg3, arg4;
@@ -1141,75 +1049,279 @@ static bool opHasTwoArguments(IROp op)
   return arg2 != Ity_INVALID && arg3 == Ity_INVALID && arg4 == Ity_INVALID;
 }
 
-static bool parseIRExprBinop(IRExpr **res, const char *str, const char **suffix)
+/* Parse an IRExpr.  This ends up being a surprisingly important hot
+   spot in some tests. */
+bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 {
-  IRExpr *arg1, *arg2;
-  IROp op;
+  /* Forms which start with a fixed letter: GET, GETI, LD, Mux0X, free variables. */
+  if (str[0] == 'G') {
+    if (parseThisString("GET:", str, &str)) {
+      threadAndRegister reg(threadAndRegister::invalid());
+      IRType ty;
+      if (parseIRType(&ty, str, &str) &&
+	  parseThisChar('(', str, &str) &&
+	  parseThreadAndRegister(&reg, str, &str) &&
+	  parseThisChar(')', str, suffix)) {
+	*out = IRExpr_Get(reg, ty);
+	return true;
+      }
+    } else if (parseThisString("GETI", str, &str)) {
+      IRRegArray *arr;
+      IRExpr *ix;
+      int bias;
+      int tid;
 
-  if (parseThisChar('(', str, &str)) {
-    if (!parseIRExpr(&arg1, str, &str) ||
+      if (parseIRRegArray(&arr, str, &str) &&
+	  parseThisChar('[', str, &str) &&
+	  parseIRExpr(&ix, str, &str) &&
+	  parseThisChar(',', str, &str) &&
+	  parseDecimalInt(&bias, str, &str) &&
+	  parseThisString("](", str, &str) &&
+	  parseDecimalInt(&tid, str, &str) &&
+	  parseThisChar(')', str, suffix)) {
+	*out = IRExpr_GetI(arr, ix, bias, tid);
+	return true;
+      }
+    }
+    return false;
+  } else if (str[0] == 'L') {
+    IRType ty;
+    IRExpr *addr;
+    MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
+    if (!parseThisString("LD:", str, &str) ||
+	!parseIRType(&ty, str, &str) ||
+	!parseThisChar('(', str, &str) ||
+	!parseIRExpr(&addr, str, &str) ||
+	!parseThisString(")", str, suffix))
+      return false;
+    *out = IRExpr_Load(ty, addr);
+    return true;
+  } else if (str[0] == 'M') {
+    IRExpr *cond, *expr0, *exprX;
+    if (!parseThisString("Mux0X(", str, &str) ||
+	!parseIRExpr(&cond, str, &str) ||
+	!parseThisChar(',', str, &str) ||
+	!parseIRExpr(&expr0, str, &str) ||
+	!parseThisChar(',', str, &str) ||
+	!parseIRExpr(&exprX, str, &str) ||
+	!parseThisChar(')', str, suffix))
+      return false;
+    *out = IRExpr_Mux0X(cond, expr0, exprX);
+    return true;
+  } else if (str[0] == 'F') {
+    /* This might also be a float constant, so try that here. */
+    IRConst *c;
+    if (parseIRConst(&c, str, suffix)) {
+      *out = IRExpr_Const(c);
+      return true;
+    }
+
+    /* Not a float constant and starts with an F, must be a free
+       variable. */
+    MemoryAccessIdentifier ma(MemoryAccessIdentifier::uninitialised());
+    IRType ty;
+    bool isUnique;
+    if (!parseThisString("Free", str, &str) ||
+	!ma.parse(str, &str) ||
+	!parseThisChar(':', str, &str) ||
+	!parseIRType(&ty, str, &str) ||
+	!parseThisChar(':', str, &str))
+      return false;
+    if (parseThisString("UNIQUE", str, suffix))
+      isUnique = true;
+    else if (parseThisString("NONUNIQUE", str, suffix))
+      isUnique = false;
+    else
+      return false;
+    *out = IRExpr_FreeVariable(ma, ty, isUnique);
+    return true;
+  } else if ((str[0] >= '0' && str[0] <= '9') || str[0] == 'V' || str[0] == '-') {
+    /* Constant of some sort. */
+    IRConst *c;
+    if (parseIRConst(&c, str, suffix)) {
+      *out = IRExpr_Const(c);
+      return true;
+    }
+
+    /* Let it fall through, because it might be an unop which starts
+       with a number e.g. 64to1. */
+  } else if (str[0] == '(') {
+    /* This is either assoc or binop with a simple irop, or it's
+       happens-before */
+    {
+      MemoryAccessIdentifier before(MemoryAccessIdentifier::uninitialised());
+      if (before.parse(str + 1, &str)) {
+	MemoryAccessIdentifier after(MemoryAccessIdentifier::uninitialised());
+	/* It must be happens-before */
+	if (!parseThisString(" <-< ", str, &str) ||
+	    !after.parse(str, &str) ||
+	    !parseThisChar(')', str, suffix))
+	  return false;
+	*out = IRExpr_HappensBefore(before, after);
+	return true;
+      }
+    }
+
+    IRExpr *arg1, *arg2;
+    IROp op;
+    if (!parseIRExpr(&arg1, str + 1, &str) ||
 	!parseThisChar(' ', str, &str) ||
 	!parseIROpSimple(&op, arg1->type(), str, &str) ||
 	!parseThisChar(' ', str, &str) ||
-	!parseIRExpr(&arg2, str, &str) ||
-	!parseThisChar(')', str, suffix))
+	!parseIRExpr(&arg2, str, &str))
       return false;
-  } else {
-    if (!parseIROp(&op, str, &str) ||
-	!opHasTwoArguments(op) ||
-	!parseThisChar('(', str, &str) ||
-	!parseIRExpr(&arg1, str, &str) ||
-	!parseThisChar(',', str, &str) ||
-	!parseIRExpr(&arg2, str, &str) ||
-	!parseThisChar(')', str, suffix))
+    if (parseThisChar(')', str, suffix)) {
+      *out = IRExpr_Binop(op, arg1, arg2);
+      return true;
+    }
+
+    /* Must be a simple associative. */
+    if (!operationAssociates(op))
       return false;
+    IROp op2;
+    std::vector<IRExpr *> args;
+    args.push_back(arg1);
+    args.push_back(arg2);
+    IRExpr *arg;
+    while (!parseThisChar(')', str, suffix)) {
+      if (!parseThisChar(' ', str, &str) ||
+	  !parseIROpSimple(&op2, arg1->type(), str, &str) ||
+	  op != op2 ||
+	  !parseThisChar(' ', str, &str) ||
+	  !parseIRExpr(&arg, str, &str))
+	return false;
+      args.push_back(arg);
+    }
+    IRExprAssociative *r = IRExpr_Associative(args.size(), op);
+    r->nr_arguments = args.size();
+    for (unsigned i = 0; i < args.size(); i++)
+      r->contents[i] = args[i];
+    *out = r;
+    return true;
   }
-  *res = IRExpr_Binop(op, arg1, arg2);
-  return true;
-}
 
-static bool parseIRExprUnop(IRExpr **res, const char *str, const char **suffix)
-{
-  IROp op;
-  IRExpr *arg;
+  /* Short names for registers */
+  {
+    int offset = -1;
+#define do_reg(name)						\
+    if (offset == -1 && parseThisString( #name ":", str, &str))	\
+      offset = OFFSET_amd64_ ## name;
+    foreach_reg(do_reg);
+#undef do_reg
 
-  if (!parseIROpSimple(&op, Ity_I1, str, &str) &&
-      !parseIROp(&op, str, &str))
+    if (offset != -1) {
+      int tid;
+      int generation;
+      if (!parseDecimalInt(&tid, str, &str) ||
+	  !parseThisChar(':', str, &str) ||
+	  !parseDecimalInt(&generation, str, suffix))
+	return false;
+      *out = IRExpr_Get(offset, Ity_I64, tid, generation);
+      return true;
+    }
+  }
+
+  /* Now do the forms which start <IROp> ( <IRExpr> */
+  {
+    IROp op;
+    if (parseIROp(&op, str, &str)) {
+      IRExpr *arg1;
+      if (!parseThisChar('(', str, &str) ||
+	  !parseIRExpr(&arg1, str, &str))
+	return false;
+      if (opHasFourArguments(op)) {
+	IRExpr *arg2, *arg3, *arg4;
+	if (!parseThisChar(',', str, &str) ||
+	    !parseIRExpr(&arg2, str, &str) ||
+	    !parseThisChar(',', str, &str) ||
+	    !parseIRExpr(&arg3, str, &str) ||
+	    !parseThisChar(',', str, &str) ||
+	    !parseIRExpr(&arg4, str, &str) ||
+	    !parseThisChar(')', str, suffix))
+	  return false;
+	*out = IRExpr_Qop(op, arg1, arg2, arg3, arg4);
+	return true;
+      } else if (opHasThreeArguments(op)) {
+	IRExpr *arg2, *arg3;
+	if (!parseThisChar(',', str, &str) ||
+	    !parseIRExpr(&arg2, str, &str) ||
+	    !parseThisChar(',', str, &str) ||
+	    !parseIRExpr(&arg3, str, &str) ||
+	    !parseThisChar(')', str, suffix))
+	  return false;
+	*out = IRExpr_Triop(op, arg1, arg2, arg3);
+	return true;
+      } else if (opHasTwoArguments(op)) {
+	IRExpr *arg2;
+	if (!parseThisChar(',', str, &str) ||
+	    !parseIRExpr(&arg2, str, &str) ||
+	    !parseThisChar(')', str, suffix))
+	  return false;
+	*out = IRExpr_Binop(op, arg1, arg2);
+	return true;
+      } else {
+	if (!parseThisChar(')', str, suffix))
+	  return false;
+	*out = IRExpr_Unop(op, arg1);
+	return true;
+      }
+    }
+  }
+
+  /* A bit of a special case for unops with start with a simple
+     irop. */
+  {
+    IROp op;
+
+    if (parseIROpSimple(&op, Ity_I1, str, &str)) {
+      IRExpr *arg;
+      if (!parseThisChar('(', str, &str) ||
+	  !parseIRExpr(&arg, str, &str) ||
+	  !parseThisChar(')', str, suffix))
+	return false;
+      *out = IRExpr_Unop(op, arg);
+      return true;
+    }
+  }
+
+  /* And now various other cases which are too rare to be worth trying
+     to optimise. */
+  if (parseThisChar('[', str, &str)) {
+    IROp op;
+    if (parseIROp(&op, str, &str) &&
+	operationAssociates(op) &&
+	parseThisChar(']', str, suffix)) {
+      *out = IRExpr_Associative(op, NULL);
+      return true;
+    }
     return false;
-  if (!parseThisChar('(', str, &str) ||
-      !parseIRExpr(&arg, str, &str) ||
-      !parseThisChar(')', str, suffix))
-    return false;
-  *res = IRExpr_Unop(op, arg);
-  return true;
-}
+  }
 
-static bool parseIRExprLoad(IRExpr **res, const char *str, const char **suffix)
-{
-  IRType ty;
-  IRExpr *addr;
-  MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
-  if (!parseThisString("LD:", str, &str) ||
-      !parseIRType(&ty, str, &str) ||
-      !parseThisChar('(', str, &str) ||
-      !parseIRExpr(&addr, str, &str) ||
-      !parseThisString(")", str, suffix))
-    return false;
-  *res = IRExpr_Load(ty, addr);
-  return true;
-}
+  if (parseThisString("Assoc(", str, &str)) {
+    IROp op = Iop_INVALID;
+    IRExpr *arg;
+    std::vector<IRExpr *> args;
 
-static bool parseIRExprConst(IRExpr **res, const char *str, const char **suffix)
-{
-  IRConst *c;
-  if (!parseIRConst(&c, str, suffix))
-    return false;
-  *res = IRExpr_Const(c);
-  return true;
-}
+    if (!parseIROp(&op, str, &str) ||
+	!operationAssociates(op) ||
+	!parseThisChar(':', str, &str) ||
+	!parseIRExpr(&arg, str, &str))
+      return false;
+    args.push_back(arg);
+    while (!parseThisChar(')', str, suffix)) {
+      if (!parseThisString(", ", str, &str) ||
+	  !parseIRExpr(&arg, str, &str))
+	return false;
+      args.push_back(arg);
+    }
+    IRExprAssociative *e = IRExpr_Associative(args.size(), op);
+    e->nr_arguments = args.size();
+    for (unsigned i = 0; i < args.size(); i++)
+      e->contents[i] = args[i];
+    *out = e;
+    return true;
+  }
 
-static bool parseIRExprCCall(IRExpr **res, const char *str, const char **suffix)
-{
   IRCallee *cee;
   std::vector<IRExpr *> args;
   IRExpr *arg;
@@ -1220,13 +1332,13 @@ static bool parseIRExprCCall(IRExpr **res, const char *str, const char **suffix)
       !parseThisChar('(', str, &str))
     return false;
   while (1) {
+    if (parseThisString("):", str, &str))
+      break;
+    if (args.size() != 0 && !parseThisChar(',', str, &str))
+      return false;
     if (!parseIRExpr(&arg, str, &str))
       return false;
     args.push_back(arg);
-    if (parseThisString("):", str, &str))
-      break;
-    if (!parseThisChar(',', str, &str))
-      return false;
   }
   if (!parseIRType(&ty, str, suffix))
     return false;
@@ -1234,147 +1346,8 @@ static bool parseIRExprCCall(IRExpr **res, const char *str, const char **suffix)
   for (unsigned i = 0; i < args.size(); i++)
     argsA[i] = args[i];
   argsA[args.size()] = NULL;
-  *res = IRExpr_CCall(cee, ty, argsA);
+  *out = IRExpr_CCall(cee, ty, argsA);
   return true;
-}
-
-static bool parseIRExprMux0X(IRExpr **res, const char *str, const char **suffix)
-{
-  IRExpr *cond, *expr0, *exprX;
-  if (!parseThisString("Mux0X(", str, &str) ||
-      !parseIRExpr(&cond, str, &str) ||
-      !parseThisChar(',', str, &str) ||
-      !parseIRExpr(&expr0, str, &str) ||
-      !parseThisChar(',', str, &str) ||
-      !parseIRExpr(&exprX, str, &str) ||
-      !parseThisChar(')', str, suffix))
-    return false;
-  *res = IRExpr_Mux0X(cond, expr0, exprX);
-  return true;
-}
-
-static bool parseIRExprAssociative(IRExpr **res, const char *str, const char **suffix)
-{
-  IROp op = (IROp)-1;
-  IROp op2;
-  std::vector<IRExpr *> args;
-  IRExpr *arg;
-  const char *str2;
-
-  if (parseThisChar('[', str, &str2) &&
-      parseIROp(&op, str2, &str2) &&
-      operationAssociates(op) &&
-      parseThisChar(']', str2, suffix)) {
-    *res = IRExpr_Associative(op, NULL);
-    return true;
-  }
-
-  if (parseThisChar('(', str, &str)) {
-    while (1) {
-      if (!parseIRExpr(&arg, str, &str))
-	return false;
-      args.push_back(arg);
-      if (parseThisChar(')', str, &str))
-	break;
-      if (!parseThisChar(' ', str, &str))
-	return false;
-      if (!parseIROpSimple(&op2, arg->type(), str, &str) ||
-	  !operationAssociates(op2))
-	return false;
-      if (op != (IROp)-1 && op != op2)
-	return false;
-      op = op2;
-      if (!parseThisChar(' ', str, &str))
-	return false;
-    }
-  } else {
-    if (!parseThisString("Assoc(", str, &str) ||
-	!parseIROp(&op, str, &str) ||
-	!parseThisChar(':', str, &str))
-      return false;
-    while (1) {
-      if (!parseIRExpr(&arg, str, &str))
-	return false;
-      args.push_back(arg);
-      if (parseThisChar(')', str, &str))
-	break;
-      if (!parseThisString(", ", str, &str))
-	return false;
-    }
-  }
-  if (op == (IROp)-1) {
-    assert(args.size() == 1);
-    return false;
-  }
-  IRExprAssociative *e          = new IRExprAssociative();
-  e->op = op;
-  e->nr_arguments_allocated = args.size();
-  e->nr_arguments = args.size();
-  static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-  e->contents =
-    (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->contents[0]) * args.size(), &__las);
-  for (unsigned i = 0; i < args.size(); i++)
-    e->contents[i] = args[i];
-  *suffix = str;
-  *res = e;
-  return true;
-}
-
-static bool parseIRExprHappensBefore(IRExpr **res, const char *str, const char **suffix)
-{
-  MemoryAccessIdentifier before(MemoryAccessIdentifier::uninitialised());
-  MemoryAccessIdentifier after(MemoryAccessIdentifier::uninitialised());
-  if (!parseThisChar('(', str, &str) ||
-      !before.parse(str, &str) ||
-      !parseThisString(" <-< ", str, &str) ||
-      !after.parse(str, &str) ||
-      !parseThisChar(')', str, suffix))
-    return false;
-  *res = IRExpr_HappensBefore(before, after);
-  return true;
-}
-
-static bool parseIRExprFreeVariable(IRExpr **res, const char *str, const char **suffix)
-{
-    MemoryAccessIdentifier ma(MemoryAccessIdentifier::uninitialised());
-    IRType ty;
-    bool isUnique;
-    if (!parseThisString("Free", str, &str) ||
-	!ma.parse(str, &str) ||
-	!parseThisChar(':', str, &str) ||
-	!parseIRType(&ty, str, &str) ||
-	!parseThisChar(':', str, &str))
-	return false;
-    if (parseThisString("UNIQUE", str, suffix))
-	isUnique = true;
-    else if (parseThisString("NONUNIQUE", str, suffix))
-	isUnique = false;
-    else
-	return false;
-    *res = IRExpr_FreeVariable(ma, ty, isUnique);
-    return true;
-}
-
-bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
-{
-#define do_form(name)							\
-  if (parseIRExpr ## name (out, str, suffix))		\
-    return true;
-  do_form(Get);
-  do_form(GetI);
-  do_form(Qop);
-  do_form(Triop);
-  do_form(Binop);
-  do_form(Unop);
-  do_form(Load);
-  do_form(Const);
-  do_form(CCall);
-  do_form(Mux0X);
-  do_form(Associative);
-  do_form(HappensBefore);
-  do_form(FreeVariable);
-#undef do_form
-  return false;
 }
 
 void
