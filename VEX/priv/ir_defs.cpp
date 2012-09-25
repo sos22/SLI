@@ -775,48 +775,130 @@ void ppIROp ( IROp op, FILE* f )
    }
 }
 
-struct irop_table_entry {
-  const char *asString;
-  IROp op;
-  irop_table_entry(const char *_asString, IROp _op)
-    : asString(_asString), op(_op)
-  {}
-  bool operator<(const irop_table_entry &o) const {
-    return strlen(asString) > strlen(o.asString);
+struct irop_parser_successor;
+typedef std::vector<irop_parser_successor> irop_parser_state;
+struct irop_parser_successor {
+  char c;
+  IROp res;
+  irop_parser_state *next_state;
+  bool operator<(const irop_parser_successor &o) const {
+    return c < o.c;
   }
 };
 
-static bool parseIROp(IROp *out, const char *str, const char **suffix)
+static void add_entry_to_irop_table(irop_parser_state **acc,
+				    const char *str,
+				    IROp res)
 {
-  static std::vector<irop_table_entry> irop_table;
-  if (irop_table.empty()) {
-#define __do_op2(name, sz)                                             \
-    irop_table.push_back(irop_table_entry( #name #sz, Iop_ ## name ## sz))
-#define do_op(name) do {                       \
-      __do_op2(name, 8);                       \
-      __do_op2(name, 16);                      \
-      __do_op2(name, 32);                      \
-      __do_op2(name, 64);                      \
-    } while (0);
-    foreach_op_sized(do_op)
-#undef do_op
-#undef __do_op2
-
-#define do_op(name)                                                    \
-    irop_table.push_back(irop_table_entry( #name , Iop_ ## name));
-    foreach_op_unsized(do_op)
-#undef do_op
-
-    std::sort(irop_table.begin(), irop_table.end());
+  assert(str[0] != '\0');
+  if (!*acc)
+    *acc = new irop_parser_state();
+  struct irop_parser_successor *succ = NULL;
+  for (auto it = (*acc)->begin(); !succ && it != (*acc)->end(); it++) {
+    if (it->c == str[0])
+      succ = &*it;
   }
+  if (!succ) {
+    irop_parser_successor _succ;
+    _succ.c = str[0];
+    _succ.res = Iop_INVALID;
+    _succ.next_state = NULL;
+    (*acc)->push_back(_succ);
+    succ = &(*acc)->back();
+  }
+  if (str[1] == '\0') {
+    assert(succ->res == Iop_INVALID);
+    succ->res = res;
+  } else {
+    add_entry_to_irop_table(&succ->next_state, str + 1, res);
+  }
+}
 
-  for (auto it = irop_table.begin(); it != irop_table.end(); it++) {
-    if (parseThisString(it->asString, str, suffix)) {
-      *out = it->op;
-      return true;
+static void sort_irop_table(irop_parser_state *table)
+{
+  if (!table)
+    return;
+  std::sort(table->begin(), table->end());
+  for (auto it = table->begin(); it != table->end(); it++)
+    sort_irop_table(it->next_state);
+}
+
+static irop_parser_state *build_irop_parser(void)
+{
+  irop_parser_state *acc = NULL;
+#define do_op(name)						       \
+  add_entry_to_irop_table(&acc, #name, Iop_ ## name);
+  foreach_op_unsized(do_op)
+
+#define do_op2(name, sz)			\
+    do_op(name ## sz)
+#define do_op3(name) do {                       \
+      do_op2(name, 8);				\
+      do_op2(name, 16);				\
+      do_op2(name, 32);				\
+      do_op2(name, 64);				\
+    } while (0);
+    foreach_op_sized(do_op3)
+#undef do_op
+#undef do_op2
+#undef do_op3
+
+  sort_irop_table(acc);
+  return acc;
+}
+
+static bool parseIropTable(const irop_parser_state *current_state,
+			   IROp *res,
+			   const char *str,
+			   const char **successor)
+{
+  unsigned idx1, idx2;
+  if (!current_state)
+    return false;
+
+  /* Loop invariant: the slot we're looking for is definitely in the
+     range [idx1, idx2) */
+  idx1 = 0;
+  idx2 = current_state->size();
+  const struct irop_parser_successor *succ;
+  while (1) {
+    assert(idx1 < idx2);
+    /* Ignore overflow: these tables are small. */
+    unsigned probe = (idx1 + idx2) / 2;
+    assert(probe != idx2);
+    if (probe == idx1)
+      break;
+    succ = &(*current_state)[probe];
+    if ( succ->c < str[0] ) {
+      idx1 = probe;
+    } else if ( succ->c == str[0] ) {
+      goto found_succ;
+    } else {
+      idx2 = probe;
     }
   }
+
+  succ = &(*current_state)[idx1];
+  if (succ->c == str[0])
+    goto found_succ;
   return false;
+
+ found_succ:
+  if ( succ->res != Iop_INVALID &&
+       (str[1] == '\0' || str[1] == ':' || str[1] == '(' || isspace(str[1])) ) {
+    *successor = str + 1;
+    *res = succ->res;
+    return true;
+  }
+  return parseIropTable(succ->next_state, res, str + 1, successor);
+}
+
+static bool parseIROp(IROp *out, const char *str, const char **suffix)
+{
+  static irop_parser_state *parser;
+  if (!parser)
+    parser = build_irop_parser();
+  return parseIropTable(parser, out, str, suffix);
 }
 
 static const char *irOpSimpleChar(IROp op)
