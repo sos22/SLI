@@ -815,10 +815,12 @@ optimiseCfg(crashEnforcementData &ced)
 					pending.push(it->instr);
 			}
 		}
-		if (failed || !haveFirstSideEffect)
-			newRoots.insert(ThreadCfgLabel(it->thread, root->label));
-		else
-			newRoots.insert(firstSideEffect);
+		if (haveFirstSideEffect) {
+			if (failed)
+				newRoots.insert(ThreadCfgLabel(it->thread, root->label));
+			else
+				newRoots.insert(firstSideEffect);
+		}
 	}
 	ced.roots = newRoots;
 
