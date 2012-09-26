@@ -397,7 +397,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 
 	/* Now try to rationalise the roots a little bit.  Ideally,
 	   we'd like to trim the roots back a bit so as to remove
-	   anything which isn't necesarry.  Complication is that the
+	   anything which isn't necessary.  Complication is that the
 	   roots of the new graph have to correspond with the roots of
 	   the old one, in a way which isn't entirely well defined.
 	   Be conservative for now: if a root isn't needed and it has
@@ -424,6 +424,55 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		}
 		it->second = n;
 	}
+
+	/* Remove any roots which can't reach needed instructions. */
+	for (auto it = cs->loadMachine->cfg_roots.begin();
+	     it != cs->loadMachine->cfg_roots.end();
+		) {
+		bool reachesNeededInstr = false;
+		std::queue<const CFGNode *> pending;
+		std::set<const CFGNode *> visited;
+		pending.push(it->second);
+		while (!reachesNeededInstr && !pending.empty()) {
+			const CFGNode *n = pending.front();
+			pending.pop();
+			if (!visited.insert(n).second)
+				continue;
+			if (needed.count(n))
+				reachesNeededInstr = true;
+			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+				if (it->instr)
+					pending.push(it->instr);
+		}
+		if (reachesNeededInstr)
+			it++;
+		else
+			it = cs->loadMachine->cfg_roots.erase(it);
+	}
+	for (auto it = cs->storeMachine->cfg_roots.begin();
+	     it != cs->storeMachine->cfg_roots.end();
+		) {
+		bool reachesNeededInstr = false;
+		std::queue<const CFGNode *> pending;
+		std::set<const CFGNode *> visited;
+		pending.push(it->second);
+		while (!reachesNeededInstr && !pending.empty()) {
+			const CFGNode *n = pending.front();
+			pending.pop();
+			if (!visited.insert(n).second)
+				continue;
+			if (needed.count(n))
+				reachesNeededInstr = true;
+			for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+				if (it->instr)
+					pending.push(it->instr);
+		}
+		if (reachesNeededInstr)
+			it++;
+		else
+			it = cs->storeMachine->cfg_roots.erase(it);
+	}
+
 
 	/* Try a bit harder to rationalise the roots.  This version
 	 * only works for single-rooted CFGs.  The idea is to replace
