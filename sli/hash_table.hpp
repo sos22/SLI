@@ -517,7 +517,10 @@ public:
 		: content(_content)
 	{}
 	unsigned long hash() const {
-		return content->hash();
+		if (content)
+			return content->hash();
+		else
+			return 0;
 	}
 	HashedPtr() {}
 };
