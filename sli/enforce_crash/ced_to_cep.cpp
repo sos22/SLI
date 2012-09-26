@@ -198,7 +198,7 @@ compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, con
 		ThreadCfgLabel l(it->first);
 		auto n = ced.crashCfg.findInstr(l);
 		const VexRip &v(n->rip);
-		fprintf(f, "static const struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
+		fprintf(f, "static struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
 		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(l.thread, ced.exprsToSlots) + 1);
 		fprintf(f, "    .nr_stack_slots = %zd,\n", v.stack.size() - 1);
@@ -216,7 +216,7 @@ compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, con
 	}
 	int next_idx = 0;
 	for (auto it = entryPoints.begin(); it != entryPoints.end(); it++) {
-		fprintf(f, "static const struct cep_entry_point __entry_point%d = {\n", next_idx++);
+		fprintf(f, "static struct cep_entry_point __entry_point%d = {\n", next_idx++);
 		fprintf(f, "    .orig_rip = 0x%lx,\n", it->first);
 		fprintf(f, "    .nr_entry_ctxts = %zd,\n", it->second.size());
 		fprintf(f, "    .ctxts = {\n");
@@ -227,7 +227,7 @@ compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, con
 	}
 
 	next_idx = 0;
-	fprintf(f, "static const struct cep_entry_point *%s[] = {\n", ident);
+	fprintf(f, "static struct cep_entry_point *%s[] = {\n", ident);
 	for (auto it = entryPoints.begin(); it != entryPoints.end(); it++) {
 		fprintf(f, "    &__entry_point%d,\n", next_idx++);
 	}
@@ -628,7 +628,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 	}
 
 	/* Now dump out the actual CFG table. */
-	fprintf(f, "static const struct cfg_instr %s[] = {\n", ident);
+	fprintf(f, "static struct cfg_instr %s[] = {\n", ident);
 	for (auto it = summaries.begin(); it != summaries.end(); it++) {
 		if (it == summaries.begin())
 			fprintf(f, "    [%d] = {\n", it->first);

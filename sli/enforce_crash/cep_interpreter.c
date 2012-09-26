@@ -1591,7 +1591,8 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 	for (i = 0; i < r; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		cfg_label_t cur_label = lls->cfg_node;
-		const struct cfg_instr *current_cfg_node = &plan.cfg_nodes[cur_label];
+		struct cfg_instr *current_cfg_node = &plan.cfg_nodes[cur_label];
+		current_cfg_node->cntr++;
 		sanity_check_low_level_state(lls, 1);
 		int preserve = 0;
 		debug("%p(%s): advance\n", lls, current_cfg_node->id);
@@ -1688,11 +1689,13 @@ check_for_ll_thread_start(struct high_level_state *hls, struct reg_struct *regs)
 		assert(plan.entry_points[i]->nr_entry_ctxts > 0);
 		entry_node = &plan.cfg_nodes[plan.entry_points[i]->ctxts[0]->cfg_label];
 		for (j = 0; j < plan.entry_points[i]->nr_entry_ctxts; j++) {
-			if (ctxt_matches(plan.entry_points[i]->ctxts[j], regs))
+			if (ctxt_matches(plan.entry_points[i]->ctxts[j], regs)) {
+				plan.entry_points[i]->ctxts[j]->cntr++;
 				start_low_level_thread(
 					hls,
 					plan.entry_points[i]->ctxts[j]->cfg_label,
 					plan.entry_points[i]->ctxts[j]->nr_simslots);
+			}
 		}
 	}
 }
@@ -2373,11 +2376,35 @@ patch_entry_point(unsigned long rip, unsigned long trampoline)
 static void
 dump_stats(void)
 {
+	int i;
+	int j;
+
 	printf("CEP interpreter statistics:\n");
 #define do_stat(name)					\
 	printf("%-20s: %ld\n", #name, stats.name);
 	enum_stats(do_stat)
 #undef do_stat
+
+	for (i = 0; i < plan.nr_entry_points; i++) {
+		printf("Entry point %d tripped: ", i);
+		for (j = 0; j < plan.entry_points[i]->nr_entry_ctxts; j++) {
+			if (j != 0)
+				printf(", ");
+			printf("ctxt%d = %d", j, plan.entry_points[i]->ctxts[j]->cntr);
+		}
+		printf("\n");
+	}
+	for (i = 0; i < plan.nr_cfg_nodes; i++) {
+		printf("CFG node %s visited %d times\n",
+		       plan.cfg_nodes[i].id,
+		       plan.cfg_nodes[i].cntr);
+		if (plan.cfg_nodes[i].rx_msg)
+			printf("\tRX %d times\n",
+			       plan.cfg_nodes[i].rx_msg->event_count);
+		if (plan.cfg_nodes[i].tx_msg)
+			printf("\tTX %d times\n",
+			       plan.cfg_nodes[i].tx_msg->event_count);
+	}
 }
 #endif
 

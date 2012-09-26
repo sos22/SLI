@@ -85,12 +85,14 @@ struct cfg_instr {
 	const unsigned short *eval_validate;
 
 	const char *id; /* Just for debug */
+	int cntr;
 };
 
 struct cep_entry_ctxt {
 	cfg_label_t cfg_label;
 	unsigned nr_simslots;
 	unsigned nr_stack_slots;
+	int cntr;
 	struct {
 		unsigned offset;
 		unsigned long expected_value;
@@ -99,13 +101,13 @@ struct cep_entry_ctxt {
 struct cep_entry_point {
 	unsigned long orig_rip;
 	unsigned nr_entry_ctxts;
-	const struct cep_entry_ctxt *ctxts[];
+	struct cep_entry_ctxt *ctxts[];
 };
 struct crash_enforcement_plan {
 	int nr_entry_points;
-	const struct cep_entry_point **entry_points;
+	struct cep_entry_point **entry_points;
 	int nr_cfg_nodes;
-	const struct cfg_instr *cfg_nodes;
+	struct cfg_instr *cfg_nodes;
 	int base_msg_id;
 	int msg_id_limit;
 	int nr_dummy_entry_points;
