@@ -89,40 +89,8 @@ public:
 	}
 };
 
-class ThreadAbstracter {
-	std::map<int, AbstractThread> content;
-	AbstractThread nxtThread;
-public:
-	ThreadAbstracter()
-		: nxtThread(1)
-	{}
-	AbstractThread operator()(int tid) const {
-		auto it = content.find(tid);
-		assert(it != content.end());
-		return it->second;
-	}
-	AbstractThread newThread(int oldTid)
-	{
-		AbstractThread res = nxtThread;
-		nxtThread.id++;
-		auto it_did_insert = content.insert(std::pair<int, AbstractThread>(oldTid, res));
-		auto it = it_did_insert.first;
-		auto did_insert = it_did_insert.second;
-		if (!did_insert) {
-			/* Clober the existing assignment.  This is
-			 * how we rename apart machines which would
-			 * otherwise have overlapping thread IDs. */
-			it->second = res;
-		}
-		return res;
-	}
-	ThreadCfgLabel operator()(int tid, const CfgLabel &where) const
-	{
-		return ThreadCfgLabel((*this)(tid), where);
-	}
-};
-
 class CrashCfg;
+class ThreadAbstracter;
 
 class ThreadCfgDecode {
 	Instruction<ThreadCfgLabel> *addCfg(const AbstractThread &tid, const CFGNode *root);
@@ -153,6 +121,135 @@ public:
 	void addMachine(StateMachine *sm, ThreadAbstracter &abs);
 
 	void fromCrashCfg(CrashCfg &cfg);
+};
+
+class ThreadAbstracter {
+	std::map<int, std::set<AbstractThread> > content;
+	AbstractThread nxtThread;
+public:
+	ThreadAbstracter()
+		: nxtThread(1)
+	{}
+	class iterator {
+		std::set<AbstractThread>::const_iterator it;
+		std::set<AbstractThread>::const_iterator endIt;
+	public:
+		iterator(const std::set<AbstractThread> &a)
+			: it(a.begin()), endIt(a.end())
+		{}
+		bool finished() const { return it == endIt; }
+		void advance() { it++; }
+		AbstractThread get() const { return *it; }
+
+		iterator(double, double, double) {}
+	};
+	iterator begin(int tid) const {
+		auto it = content.find(tid);
+		assert(it != content.end());
+		return iterator(it->second);
+	}
+	AbstractThread newThread(int oldTid)
+	{
+		AbstractThread res = nxtThread;
+		nxtThread.id++;
+		content[oldTid].insert(res);
+		return res;
+	}
+	class thread_cfg_iterator {
+		iterator content;
+		CfgLabel where;
+	public:
+		thread_cfg_iterator(const iterator &_content, const CfgLabel &_where)
+			: content(_content), where(_where)
+		{}
+		bool finished() const { return content.finished(); }
+		void advance() { content.advance(); }
+		ThreadCfgLabel get() const { return ThreadCfgLabel(content.get(), where); }
+
+		/* Should only be used by mai_iterator */
+		thread_cfg_iterator(double, double, double)
+			: content(1.0, 1.0, 1.0),
+			  where(CfgLabel::uninitialised())
+		{}
+	};
+	thread_cfg_iterator begin(int tid, const CfgLabel &where) const
+	{
+		return thread_cfg_iterator( begin(tid), where);
+	}
+
+	class mai_iterator {
+		MaiMap::const_iterator hl_iter;
+		thread_cfg_iterator ll_iter;
+		bool _finished;
+		ThreadCfgLabel current_item;
+		unsigned tid;
+		ThreadAbstracter *_this;
+	public:
+		bool finished() const { return _finished; }
+		void advance() {
+			if (hl_iter.finished()) {
+				_finished = true;
+				return;
+			}
+			assert(!ll_iter.finished());
+			current_item = ll_iter.get();
+			ll_iter.advance();
+			if (!ll_iter.finished())
+				return;
+			while (1) {
+				hl_iter.advance();
+				if (hl_iter.finished())
+					return;
+				ll_iter = _this->begin(tid, hl_iter.label());
+				if (!ll_iter.finished())
+					return;
+				ll_iter.advance();
+			}
+		}
+		mai_iterator(const MaiMap &mai, const MemoryAccessIdentifier &rip, ThreadAbstracter *__this)
+			: hl_iter(mai.begin(rip)),
+			  ll_iter(1.0, 1.0, 1.0),
+			  _finished(false),
+			  tid(rip.tid),
+			  _this(__this)
+		{
+			if (hl_iter.finished()) {
+				_finished = true;
+				return;
+			}
+			ll_iter = _this->begin(tid, hl_iter.label());
+			while (ll_iter.finished()) {
+				hl_iter.advance();
+				if (hl_iter.finished()) {
+					_finished = true;
+					return;
+				}
+				ll_iter = _this->begin(tid, hl_iter.label());
+			}
+			advance();
+		}
+		ThreadCfgLabel get() const { return current_item; }
+	};
+	mai_iterator begin(const MaiMap &mai, const MemoryAccessIdentifier &rip)
+	{
+		return mai_iterator(mai, rip, this);
+	}
+
+	class instr_iterator {
+		mai_iterator underlying;
+		ThreadCfgDecode &cfg;
+	public:
+		bool finished() const { return underlying.finished(); }
+		void advance() { underlying.advance(); }
+		Instruction<ThreadCfgLabel> *get() const { return cfg.decode(underlying.get()); }
+		instr_iterator(const mai_iterator &_underlying, ThreadCfgDecode &_cfg)
+			: underlying(_underlying), cfg(_cfg)
+		{}
+	};
+	instr_iterator begin(const MaiMap &mai, const MemoryAccessIdentifier &rip, ThreadCfgDecode &cfg)
+	{
+		return instr_iterator(begin(mai, rip), cfg);
+	}
 };
 
 void enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out);
@@ -273,13 +370,13 @@ public:
 			if (e->tag == Iex_Get) {
 				IRExprGet *ieg = (IRExprGet *)e;
 				if (ieg->reg.isReg()) {
-					AbstractThread t(abs(ieg->reg.tid()));
 					auto it_r = roots.find(ieg->reg.tid());
 					assert(it_r != roots.end());
 					for (auto it_r2 = it_r->second.begin();
 					     it_r2 != it_r->second.end();
 					     it_r2++)
-						(*this)[ThreadCfgLabel(t, *it_r2)].insert(ieg);
+						for (auto it2 = abs.begin(ieg->reg.tid(), *it_r2); !it2.finished(); it2.advance())
+							(*this)[it2.get()].insert(ieg);
 				} else {
 					neededTemporaries.insert(ieg);
 				}
@@ -304,8 +401,8 @@ public:
 					}
 				}
 				assert(l);
-				for (auto it2 = mai.begin(l->rip); !it2.finished(); it2.advance())
-					(*this)[abs(l->rip.tid, it2.label())].insert(*it);
+				for (auto it2 = abs.begin(mai, l->rip); !it2.finished(); it2.advance())
+					(*this)[it2.get()].insert(*it);
 			}
 		}
 	}
@@ -783,16 +880,10 @@ public:
 	crashEnforcementRoots() {}
 
 	crashEnforcementRoots(std::map<unsigned, std::set<CfgLabel> > &roots, ThreadAbstracter &abs) {
-		std::map<CfgLabel, std::set<AbstractThread> > threadsRelevantAtEachEntryPoint;
-		for (auto it = roots.begin(); it != roots.end(); it++)
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-				threadsRelevantAtEachEntryPoint[*it2].insert(abs(it->first));
 		for (auto it = roots.begin(); it != roots.end(); it++) {
-			for (auto it_r = it->second.begin(); it_r != it->second.end(); it_r++) {
-				std::set<AbstractThread> &threads(threadsRelevantAtEachEntryPoint[*it_r]);
-				for (auto it2 = threads.begin(); it2 != threads.end(); it2++)
-					insert(ThreadCfgLabel(*it2, *it_r));
-			}
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
+				for (auto it3 = abs.begin(it->first, *it2); !it3.finished(); it3.advance())
+					insert(it3.get());
 		}
 	}
 
@@ -870,18 +961,18 @@ public:
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
 				const MemoryAccessIdentifier &beforeMai(invert ? hb->after : hb->before);
 				const MemoryAccessIdentifier &afterMai(invert ? hb->before : hb->after);
-				for (auto before_it = mai.begin(beforeMai); !before_it.finished(); before_it.advance()) {
-					auto before = cfg.decode(abs(beforeMai.tid, before_it.label()));
-					if (!before)
+				for (auto before_it = abs.begin(mai, beforeMai, cfg); !before_it.finished(); before_it.advance()) {
+					Instruction<ThreadCfgLabel> *beforeInstr = before_it.get();
+					if (!beforeInstr)
 						continue;
-					for (auto after_it = mai.begin(afterMai); !after_it.finished(); after_it.advance()) {
-						auto after = cfg.decode(abs(afterMai.tid, after_it.label()));
-						if (!after)
+					for (auto after_it = abs.begin(mai, afterMai, cfg); !after_it.finished(); after_it.advance()) {
+						Instruction<ThreadCfgLabel> *afterInstr = after_it.get();
+						if (!afterInstr)
 							continue;
 						happensBeforeEdge *hbe =
 							new happensBeforeEdge(
-								before,
-								after,
+								beforeInstr,
+								afterInstr,
 								idom,
 								exprStashPoints,
 								next_hb_id++);
@@ -1030,11 +1121,13 @@ public:
 		for (auto it = summary->loadMachine->cfg_roots.begin();
 		     it != summary->loadMachine->cfg_roots.end();
 		     it++)
-			pending.push(q_entry_t(abs(it->first), it->second));
+			for (auto it2 = abs.begin(it->first); !it2.finished(); it2.advance())
+				pending.push(q_entry_t(it2.get(), it->second));
 		for (auto it = summary->storeMachine->cfg_roots.begin();
 		     it != summary->storeMachine->cfg_roots.end();
 		     it++)
-			pending.push(q_entry_t(abs(it->first), it->second));
+			for (auto it2 = abs.begin(it->first); !it2.finished(); it2.advance())
+				pending.push(q_entry_t(it2.get(), it->second));
 		std::map<ThreadCfgLabel, const CFGNode *> cfgNodes;
 		while (!pending.empty()) {
 			q_entry_t p = pending.front();
