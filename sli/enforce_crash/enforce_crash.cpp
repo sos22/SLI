@@ -742,6 +742,8 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 			label.label = node->label;
 		}
 
+		label.clearName();
+
 		std::set<IRExprGet *> newStash(newMap[label]);
 		for (auto it2 = it->second.begin();
 		     it2 != it->second.end();
