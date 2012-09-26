@@ -88,7 +88,7 @@ stack_offset(Oracle *oracle, unsigned long rip)
 	typedef std::pair<StaticRip, unsigned> q_entry_t;
 	std::map<StaticRip, unsigned> offsets;
 	std::queue<q_entry_t> queue;
-	queue.push(q_entry_t(head, 8));
+	queue.push(q_entry_t(head, 0));
 
 	while (!queue.empty() && !offsets.count(sr)) {
 		q_entry_t q(queue.front());
@@ -133,7 +133,7 @@ stack_offset(Oracle *oracle, unsigned long rip)
 					    ((IRExprGet *)iea->contents[1])->reg != p->target) {
 						failed = true;
 					} else {
-						q.second += ((IRExprConst *)iea->contents[0])->con->Ico.U64;
+						q.second -= ((IRExprConst *)iea->contents[0])->con->Ico.U64;
 					}
 					break;
 				}
