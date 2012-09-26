@@ -969,6 +969,40 @@ avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 	ced.keepInterpretingInstrs = keepInterpretingInstrs;
 }
 
+static void
+optimiseHBEdges(crashEnforcementData &ced)
+{
+	/* If an instruction receives a message from thread X then it
+	   then binds to thread X and from that point on can only ever
+	   send or receive with X.  That allows us to eliminate some
+	   message operations. */
+	for (auto it = ced.happensBeforePoints.begin();
+	     it != ced.happensBeforePoints.end();
+	     it++) {
+		std::set<AbstractThread> mightReceiveFrom;
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			const happensBeforeEdge *hbe = *it2;
+			if (hbe->after->rip == it->first)
+				mightReceiveFrom.insert(hbe->before->rip.thread);
+		}
+		if (mightReceiveFrom.empty())
+			continue;
+		/* Now we know that we've definitely received from one
+		   of the threads in @mightReceiveFrom, so we can only
+		   send to them.  Kill off any other edges. */
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); ) {
+			const happensBeforeEdge *hbe = *it2;
+			if (hbe->before->rip == it->first &&
+			    !mightReceiveFrom.count(hbe->after->rip.thread))
+				it->second.erase(it2++);
+			else
+				it2++;
+		}
+	}
+	
+
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -986,6 +1020,7 @@ main(int argc, char *argv[])
 	ThreadAbstracter abs;
 	crashEnforcementData accumulator = enforceCrashForMachine(summary, oracle, ALLOW_GC, abs, next_hb_id, next_slot);
 
+	optimiseHBEdges(accumulator);
 	optimiseStashPoints(accumulator, oracle);
 	optimiseCfg(accumulator);
 
