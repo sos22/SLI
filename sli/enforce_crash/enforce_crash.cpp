@@ -999,8 +999,36 @@ optimiseHBEdges(crashEnforcementData &ced)
 				it2++;
 		}
 	}
-	
 
+	/* And now get rid of any messages which are sent but never
+	   received or received but never sent. */
+	std::set<unsigned> sent;
+	std::set<unsigned> received;
+	for (auto it = ced.happensBeforePoints.begin();
+	     it != ced.happensBeforePoints.end();
+	     it++) {
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			if ((*it2)->before->rip == it->first)
+				sent.insert( (*it2)->msg_id);
+			else
+				received.insert( (*it2)->msg_id);
+		}
+	}
+	for (auto it = ced.happensBeforePoints.begin();
+	     it != ced.happensBeforePoints.end();
+		) {
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); ) {
+			unsigned id = (*it2)->msg_id;
+			if (!sent.count(id) || !received.count(id))
+				it->second.erase(it2++);
+			else
+				it2++;
+		}
+		if (it->second.empty())
+			ced.happensBeforePoints.erase(it++);
+		else
+			it++;
+	}
 }
 
 int
