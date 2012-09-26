@@ -1486,7 +1486,7 @@ receive_messages(struct high_level_state *hls)
 		debug("Delay for RX\n");
 		EVENT(rx_delay);
 		release_big_lock();
-		usleep(MAX_DELAY_US);
+		usleep(random() % MAX_DELAY_US);
 		acquire_big_lock();
 		debug("Back from RX delay\n");
 	} else if (need_futex) {
@@ -1846,7 +1846,7 @@ send_messages(struct high_level_state *hls)
 		EVENT(tx_delay);
 		debug("Delay for TX.\n");
 		release_big_lock();
-		usleep(MAX_DELAY_US);
+		usleep(random() % MAX_DELAY_US);
 		acquire_big_lock();
 		debug("Back from TX delay.\n");
 	} else if (need_futex) {
