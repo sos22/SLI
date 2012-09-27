@@ -679,7 +679,6 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
    We start off trying to stash them at the roots of the CFG and we
    can delay if:
 
-   -- The node has an unambiguous successor
    -- The node doesn't modify the register
    -- We don't try to eval anything at the node.
    -- The node isn't the before end of a happens-before edge
@@ -691,17 +690,20 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	for (auto it = ced.exprStashPoints.begin();
 	     it != ced.exprStashPoints.end();
 	     it++) {
-		ThreadCfgLabel label = it->first;
-		auto node = ced.crashCfg.findInstr(label);
+		std::set<Instruction<VexRip> *> frozenStashPoints;
+		std::set<Instruction<VexRip> *> unfrozenStashPoints;
 
-		while (1) {
-			/* Must have an unambiguous successor */
-			if (node->successors.size() != 1)
-				break;
+		unfrozenStashPoints.insert(ced.crashCfg.findInstr(it->first));
+		while (!unfrozenStashPoints.empty()) {			
+			auto *node = *unfrozenStashPoints.begin();
+			unfrozenStashPoints.erase(node);
+			ThreadCfgLabel label(it->first.thread, node->label);
 
 			/* Can't be an eval point */
-			if (ced.expressionEvalPoints.count(label))
+			if (ced.expressionEvalPoints.count(label)) {
+				frozenStashPoints.insert(node);
 				break;
+			}
 
 			/* Can't be a happens-before before point */
 			{
@@ -713,8 +715,10 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 					     it3++)
 						if ((*it3)->before->rip == label)
 							b = true;
-					if (b)
+					if (b) {
+						frozenStashPoints.insert(node);
 						break;
+					}
 				}
 			}
 
@@ -734,21 +738,25 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 				if (modified_regs.count((*it2)->reg))
 					b = true;
 			}
-			if (b)
+			if (b) {
+				frozenStashPoints.insert(node);
 				break;
+			}
 
 			/* Advance this stash point */
-			node = node->successors[0].instr;
-			label.label = node->label;
+			for (auto it2 = node->successors.begin(); it2 != node->successors.end(); it2++)
+				unfrozenStashPoints.insert(it2->instr);
 		}
 
-		label.clearName();
-
-		std::set<IRExprGet *> newStash(newMap[label]);
-		for (auto it2 = it->second.begin();
-		     it2 != it->second.end();
-		     it2++)
-			newMap[label].insert(*it2);
+		for (auto it2 = frozenStashPoints.begin(); it2 != frozenStashPoints.end(); it2++) {
+			auto *node = *it2;
+			ThreadCfgLabel label(it->first.thread, node->label);
+			std::set<IRExprGet *> &newStash(newMap[label]);
+			for (auto it3 = it->second.begin();
+			     it3 != it->second.end();
+			     it3++)
+				newStash.insert(*it3);
+		}
 	}
 
 	ced.exprStashPoints = newMap;
