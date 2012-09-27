@@ -73,6 +73,7 @@ struct {
 	iter(rx_slow)				\
 	iter(rx_delay)				\
 	iter(rx_futex)				\
+	iter(rx_futex_timeout)			\
 	iter(rx_bound_failed_late)		\
 	iter(rx_unbound_failed)			\
 	iter(rx_success)			\
@@ -90,6 +91,7 @@ struct {
 	iter(tx_slow)				\
 	iter(tx_delay)				\
 	iter(tx_futex)				\
+	iter(tx_futex_timeout)			\
 	iter(tx_bound_failed_late)		\
 	iter(tx_unbound_failed)			\
 	iter(tx_success)			\
@@ -528,8 +530,10 @@ queue_wake(int *ptr)
 		/* Too much stuff queued -> do it immediately, even if
 		   that does mean forcing some other poor thread to
 		   spin waiting for the big lock. */
+		debug("Immediate wake on %p\n", ptr);
 		futex(ptr, FUTEX_WAKE, 1, NULL);
 	} else {
+		debug("Queue wake on %p\n", ptr);
 		queued_wakes[nr_queued_wakes] = ptr;
 		nr_queued_wakes++;
 	}
@@ -555,8 +559,10 @@ release_big_lock(void)
 		wake = queued_wakes[nr_queued_wakes];
 	}
 	store_release(&big_lock, 0);
-	if (wake)
+	if (wake) {
+		debug("Run queued wake on %p\n", wake);
 		futex(wake, FUTEX_WAKE, 1, NULL);
+	}
 }
 
 static void
@@ -1258,11 +1264,13 @@ rendezvous_threads(struct low_level_state_array *llsa,
 
 	if (rx_lls->mbox) {
 		int x = na_xchg(rx_lls->mbox, 1);
+		debug("rx_lls has an mbox %p; value %d\n", rx_lls->mbox, x);
 		if (!x)
 			queue_wake(rx_lls->mbox);
 	}
 	if (tx_lls->mbox) {
 		int x = na_xchg(tx_lls->mbox, 1);
+		debug("tx_lls has an mbox %p; value %d\n", tx_lls->mbox, x);
 		if (!x)
 			queue_wake(tx_lls->mbox);
 	}
@@ -1326,7 +1334,7 @@ get_timeout(const struct timeval *end_wait, struct timespec *timeout)
 		timeout->tv_sec--;
 		timeout->tv_nsec += 1000000000;
 	}
-	/* Delays of less than 10us get treated as an instance wakeup,
+	/* Delays of less than 10us get treated as an instant wakeup,
 	   just because you'd probably spend that long going to sleep
 	   and waking up again. */
 	if (timeout->tv_sec < 0 ||
@@ -1498,9 +1506,11 @@ receive_messages(struct high_level_state *hls)
 		EVENT(rx_futex);
 		get_max_wait_time(&end_wait);
 		while (1) {
-			if (get_timeout(&end_wait, &timeout) < 0)
+			if (get_timeout(&end_wait, &timeout) < 0) {
+				EVENT(rx_futex_timeout);
 				break;
-			debug("RX delay via futex\n");
+			}
+			debug("RX delay via futex %p\n", &mbox);
 			release_big_lock();
 			futex(&mbox, FUTEX_WAIT, 0, &timeout);
 			acquire_big_lock();
@@ -1858,9 +1868,11 @@ send_messages(struct high_level_state *hls)
 		EVENT(tx_futex);
 		get_max_wait_time(&end_wait);
 		while (1) {
-			if (get_timeout(&end_wait, &timeout) < 0)
+			if (get_timeout(&end_wait, &timeout) < 0) {
+				EVENT(tx_futex_timeout);
 				break;
-			debug("TX delay via futex\n");
+			}
+			debug("TX delay via futex %p\n", &mbox);
 			release_big_lock();
 			futex(&mbox, FUTEX_WAIT, 0, &timeout);
 			acquire_big_lock();
@@ -1956,7 +1968,7 @@ wait_for_bound_exits(struct high_level_state *hls)
 		if (!waiting_for_bound_exit)
 			break;
 		EVENT(wait_bound_exit);
-		debug("Waiting for %d bound exits\n", waiting_for_bound_exit);
+		debug("Waiting for %d bound exits on %p\n", waiting_for_bound_exit, &mbox);
 		release_big_lock();
 		futex(&mbox, FUTEX_WAIT, 0, NULL);
 		acquire_big_lock();
