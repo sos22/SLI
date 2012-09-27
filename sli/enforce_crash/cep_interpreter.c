@@ -1169,6 +1169,19 @@ discharge_message(struct low_level_state *tx_lls,
 		rx_lls->simslots[rx_template->payload[x]] = tx_lls->simslots[tx_template->payload[x]];
 	}
 	EVENT(discharge_message);
+
+	if (rx_lls->mbox) {
+		int x = na_xchg(rx_lls->mbox, 1);
+		debug("rx_lls has an mbox %p; value %d\n", rx_lls->mbox, x);
+		if (!x)
+			queue_wake(rx_lls->mbox);
+	}
+	if (tx_lls->mbox) {
+		int x = na_xchg(tx_lls->mbox, 1);
+		debug("tx_lls has an mbox %p; value %d\n", tx_lls->mbox, x);
+		if (!x)
+			queue_wake(tx_lls->mbox);
+	}
 }
 
 static void
@@ -1261,19 +1274,6 @@ rendezvous_threads(struct low_level_state_array *llsa,
 	}
 
 	discharge_message(tx_lls, tx_template, rx_lls, rx_template);
-
-	if (rx_lls->mbox) {
-		int x = na_xchg(rx_lls->mbox, 1);
-		debug("rx_lls has an mbox %p; value %d\n", rx_lls->mbox, x);
-		if (!x)
-			queue_wake(rx_lls->mbox);
-	}
-	if (tx_lls->mbox) {
-		int x = na_xchg(tx_lls->mbox, 1);
-		debug("tx_lls has an mbox %p; value %d\n", tx_lls->mbox, x);
-		if (!x)
-			queue_wake(tx_lls->mbox);
-	}
 }
 
 static void
