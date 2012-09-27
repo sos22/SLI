@@ -82,7 +82,7 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	}
 }
 
-happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, ThreadCfgDecode &cfg, const MaiMap &mai)
+happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, CrashCfg &cfg, const MaiMap &mai)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {

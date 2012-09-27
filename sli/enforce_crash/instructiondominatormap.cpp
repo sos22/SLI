@@ -3,16 +3,14 @@
 
 class cfgRootSetT : public std::set<Instruction<ThreadCfgLabel> *> {
 public:
-	cfgRootSetT(ThreadCfgDecode &cfg, predecessorMapT &pred);
+	cfgRootSetT(CrashCfg &cfg, predecessorMapT &pred);
 };
-cfgRootSetT::cfgRootSetT(ThreadCfgDecode &cfg, predecessorMapT &pred)
+cfgRootSetT::cfgRootSetT(CrashCfg &cfg, predecessorMapT &pred)
 {
 	std::set<Instruction<ThreadCfgLabel> *> toEmit;
-	for (auto it = cfg.begin();
-	     it != cfg.end();
-	     it++)
-		if (it.value())
-			toEmit.insert(it.value());
+	for (auto it = cfg.begin(); !it.finished(); it.advance())
+		if (it.instr())
+			toEmit.insert(it.instr());
 	while (!toEmit.empty()) {
 		/* Find one with no predecessors and emit that */
 		auto it = toEmit.begin();
@@ -70,31 +68,27 @@ cfgRootSetT::cfgRootSetT(ThreadCfgDecode &cfg, predecessorMapT &pred)
 	}
 }
 
-instructionDominatorMapT::instructionDominatorMapT(ThreadCfgDecode &cfg,
+instructionDominatorMapT::instructionDominatorMapT(CrashCfg &cfg,
 						   predecessorMapT &predecessors,
 						   happensAfterMapT &happensAfter)
 {
 	std::set<Instruction<ThreadCfgLabel> *> neededInstructions;
-	for (auto it = cfg.begin();
-	     it != cfg.end();
-	     it++) {
-		assert(it.value());
-		neededInstructions.insert(it.value());
+	for (auto it = cfg.begin(); !it.finished(); it.advance()) {
+		assert(it.instr());
+		neededInstructions.insert(it.instr());
 	}
 
 	/* Start by assuming that everything dominates everything */
 	cfgRootSetT entryPoints(cfg, predecessors);
 	std::set<Instruction<ThreadCfgLabel> *> needingRecompute;
 	std::set<Instruction<ThreadCfgLabel> *> empty;
-	for (auto it = cfg.begin();
-	     it != cfg.end();
-	     it++) {
-		if (!it.value())
+	for (auto it = cfg.begin(); !it.finished(); it.advance()) {
+		if (!it.instr())
 			continue;
 		insert(std::pair<Instruction<ThreadCfgLabel> *, std::set<Instruction<ThreadCfgLabel> *> >(
-			       it.value(),
+			       it.instr(),
 			       empty));
-		needingRecompute.insert(it.value());
+		needingRecompute.insert(it.instr());
 	}
 
 	/* Now iterate to a fixed point. */

@@ -11,6 +11,9 @@
 #include "intern.hpp"
 #include "inferred_information.hpp"
 
+class CrashCfg;
+class crashEnforcementRoots;
+
 class AbstractThread : public Named {
 	friend class ThreadAbstracter;
 	char *mkName() const {
@@ -87,40 +90,6 @@ public:
 		}
 		return false;
 	}
-};
-
-class CrashCfg;
-class ThreadAbstracter;
-
-class ThreadCfgDecode {
-	Instruction<ThreadCfgLabel> *addCfg(const AbstractThread &tid, const CFGNode *root);
-public:
-	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
-	Instruction<ThreadCfgLabel> *decode(const ThreadCfgLabel &l) {
-		auto it = content.find(l);
-		if (it == content.end())
-			return NULL;
-		return it->second;
-	}
-
-	class iterator {
-		std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>::iterator val;
-	public:
-		void operator++(int) { val++; }
-		Instruction<ThreadCfgLabel> *value() { return val->second; }
-		AbstractThread thread() const { return val->first.thread; }
-		bool operator!=(const iterator &o) const { return val != o.val; }
-		iterator(const std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>::iterator &_val)
-			: val(_val)
-		{}
-	};
-
-	iterator begin() { return iterator(content.begin()); }
-	iterator end() { return iterator(content.end()); }
-
-	void addMachine(StateMachine *sm, ThreadAbstracter &abs);
-
-	void fromCrashCfg(CrashCfg &cfg);
 };
 
 class ThreadAbstracter {
@@ -237,16 +206,16 @@ public:
 
 	class instr_iterator {
 		mai_iterator underlying;
-		ThreadCfgDecode &cfg;
+		CrashCfg &cfg;
 	public:
 		bool finished() const { return underlying.finished(); }
 		void advance() { underlying.advance(); }
-		Instruction<ThreadCfgLabel> *get() const { return cfg.decode(underlying.get()); }
-		instr_iterator(const mai_iterator &_underlying, ThreadCfgDecode &_cfg)
+		Instruction<ThreadCfgLabel> *get() const;
+		instr_iterator(const mai_iterator &_underlying, CrashCfg &_cfg)
 			: underlying(_underlying), cfg(_cfg)
 		{}
 	};
-	instr_iterator begin(const MaiMap &mai, const MemoryAccessIdentifier &rip, ThreadCfgDecode &cfg)
+	instr_iterator begin(const MaiMap &mai, const MemoryAccessIdentifier &rip, CrashCfg &cfg)
 	{
 		return instr_iterator(begin(mai, rip), cfg);
 	}
@@ -298,18 +267,7 @@ public:
 class predecessorMapT : public instrToInstrSetMap {
 public:
 	predecessorMapT() {}
-	predecessorMapT(ThreadCfgDecode &cfg) {
-		for (auto it = cfg.begin();
-		     it != cfg.end();
-		     it++) {
-			auto *v = it.value();
-			if (!count(v))
-				(*this)[v];
-			for (auto it2 = v->successors.begin(); it2 != v->successors.end(); it2++)
-				if (it2->instr)
-					(*this)[it2->instr].insert(v);
-		}
-	}
+	predecessorMapT(CrashCfg &cfg);
 };
 
 /* An encoding of the happens-before edges in a DNF clause into a map
@@ -320,7 +278,7 @@ public:
 	instrToInstrSetMap happensBefore;
 	/* happensBefore[i] -> the set of all instructions ordered after i */
 	instrToInstrSetMap happensAfter;
-	happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, ThreadCfgDecode &cfg, const MaiMap &mai);
+	happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, CrashCfg &cfg, const MaiMap &mai);
 	happensAfterMapT() {}
 	void print(FILE *f) {
 		fprintf(f, "before:\n");
@@ -335,7 +293,7 @@ public:
  * graph. */
 class instructionDominatorMapT : public instrToInstrSetMap {
 public:
-	instructionDominatorMapT(ThreadCfgDecode &cfg,
+	instructionDominatorMapT(CrashCfg &cfg,
 				 predecessorMapT &predecessors,
 				 happensAfterMapT &happensAfter);
 	instructionDominatorMapT() {}
@@ -358,54 +316,8 @@ public:
 			    ThreadAbstracter &abs,
 			    StateMachine *probeMachine,
 			    StateMachine *storeMachine,
-			    std::map<unsigned, std::set<CfgLabel> > &roots,
-			    const MaiMap &mai)
-	{
-		/* XXX keep this in sync with buildCED */
-		std::set<IRExprGet *> neededTemporaries;
-		for (auto it = neededExpressions.begin();
-		     it != neededExpressions.end();
-		     it++) {
-			IRExpr *e = *it;
-			if (e->tag == Iex_Get) {
-				IRExprGet *ieg = (IRExprGet *)e;
-				if (ieg->reg.isReg()) {
-					auto it_r = roots.find(ieg->reg.tid());
-					assert(it_r != roots.end());
-					for (auto it_r2 = it_r->second.begin();
-					     it_r2 != it_r->second.end();
-					     it_r2++)
-						for (auto it2 = abs.begin(ieg->reg.tid(), *it_r2); !it2.finished(); it2.advance())
-							(*this)[it2.get()].insert(ieg);
-				} else {
-					neededTemporaries.insert(ieg);
-				}
-			} else if (e->tag == Iex_HappensBefore) {
-				/* These don't really get stashed in any useful sense */
-			} else {
-				abort();
-			}
-		}
-		if (!neededTemporaries.empty()) {
-			std::set<StateMachineSideEffectLoad *> loads;
-			enumSideEffects(probeMachine, loads);
-			enumSideEffects(storeMachine, loads);
-			for (auto it = neededTemporaries.begin();
-			     it != neededTemporaries.end();
-			     it++) {
-				StateMachineSideEffectLoad *l = NULL;
-				for (auto it2 = loads.begin(); it2 != loads.end(); it2++) {
-					if ( (*it2)->target == (*it)->reg ) {
-						assert(!l);
-						l = *it2;
-					}
-				}
-				assert(l);
-				for (auto it2 = abs.begin(mai, l->rip); !it2.finished(); it2.advance())
-					(*this)[it2.get()].insert(*it);
-			}
-		}
-	}
+			    crashEnforcementRoots &roots,
+			    const MaiMap &mai);
 
 	void operator|=(const expressionStashMapT &esm) {
 		for (auto it = esm.begin(); it != esm.end(); it++) {
@@ -600,34 +512,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "%s", name());
 	}
-	static happensBeforeEdge *parse(ThreadCfgDecode &cfg, const char *str, const char **suffix)
-	{
-		ThreadCfgLabel before;
-		ThreadCfgLabel after;
-		unsigned msg_id;
-		if (!parseDecimalUInt(&msg_id, str, &str) ||
-		    !parseThisString(": ", str, &str) ||
-		    !before.parse(str, &str) ||
-		    !parseThisString(" <-< ", str, &str) ||
-		    !after.parse(str, &str) ||
-		    !parseThisString(" {", str, &str))
-			return NULL;
-		std::vector<IRExprGet *> content;
-		while (1) {
-			IRExpr *a;
-			if (!parseIRExpr(&a, str, &str))
-				break;
-			if (!parseThisString(", ", str, &str))
-				return NULL;
-			if (a->tag != Iex_Get)
-				return NULL;
-			content.push_back((IRExprGet *)a);
-		}
-		if (!parseThisChar('}', str, &str))
-			return NULL;
-		*suffix = str;
-		return new happensBeforeEdge(cfg.decode(before), cfg.decode(after), content, msg_id);
-	}
+	static happensBeforeEdge *parse(CrashCfg &cfg, const char *str, const char **suffix);
 	void visit(HeapVisitor &hv) {
 		visit_container(content, hv);
 	}
@@ -875,48 +760,133 @@ public:
 	}
 };
 
-class crashEnforcementRoots : public std::set<ThreadCfgLabel> {
+class crashEnforcementRoots {
+	std::map<unsigned, std::set<ThreadCfgLabel> > content;
 public:
 	crashEnforcementRoots() {}
 
 	crashEnforcementRoots(std::map<unsigned, std::set<CfgLabel> > &roots, ThreadAbstracter &abs) {
 		for (auto it = roots.begin(); it != roots.end(); it++) {
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-				for (auto it3 = abs.begin(it->first, *it2); !it3.finished(); it3.advance())
-					insert(it3.get());
+				content[it->first].insert(ThreadCfgLabel(abs.newThread(it->first), *it2));
 		}
 	}
 
+	void insert(unsigned concrete_tid, const ThreadCfgLabel &root)
+	{
+		content[concrete_tid].insert(root);
+	}
 	void operator|=(const crashEnforcementRoots &cer) {
-		for (auto it = cer.begin(); it != cer.end(); it++)
-			insert(*it);
+		for (auto it = cer.content.begin(); it != cer.content.end(); it++)
+			content.insert(*it);
 	}
 
 	bool parse(const char *str, const char **suffix) {
-		clear();
+		content.clear();
 		if (!parseThisString("Roots: ", str, &str))
 			return false;
-		while (1) {
+		while (!parseThisChar('\n', str, suffix)) {
+			unsigned concrete_tid;
+			if (!parseDecimalUInt(&concrete_tid, str, &str) ||
+			    !parseThisString(" = {", str, &str))
+				return false;
 			ThreadCfgLabel tcl;
-			if (!tcl.parse(str, &str))
-				break;
-			insert(tcl);
-			if (!parseThisString(", ", str, &str))
-				break;
+			std::set<ThreadCfgLabel> entry;
+			while (!parseThisChar('}', str, &str)) {
+				if (!tcl.parse(str, &str))
+					return false;
+				entry.insert(tcl);
+				parseThisChar(',', str, &str);
+			}
+			content[concrete_tid] = entry;
+			parseThisString("; ", str, &str);
 		}
-		if (!parseThisChar('\n', str, &str))
-			return false;
-		*suffix = str;
 		return true;
 	}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tRoots: ");
-		for (auto it = begin(); it != end(); it++) {
-			if (it != begin())
-				fprintf(f, ", ");
-			fprintf(f, "%s", it->name());
+		for (auto it = content.begin(); it != content.end(); it++) {
+			if (it != content.begin())
+				fprintf(f, "; ");
+			fprintf(f, "%d = {", it->first);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin())
+					fprintf(f, ",");
+				fprintf(f, "%s", it2->name());
+			}
+			fprintf(f, "}");
 		}
 		fprintf(f, "\n");
+	}
+
+	class iterator {
+		const std::map<unsigned, std::set<ThreadCfgLabel> > &content;
+		std::map<unsigned, std::set<ThreadCfgLabel> >::const_iterator it1;
+		std::set<ThreadCfgLabel>::const_iterator it2;
+		ThreadCfgLabel currentItem;
+		unsigned currentConcrete;
+		bool _finished;
+	public:
+		bool finished() const { return _finished; }
+		void advance() {
+			assert(!_finished);
+			if (it1 == content.end()) {
+				_finished = true;
+				return;
+			}
+			while (it2 == it1->second.end()) {
+				it1++;
+				if (it1 == content.end()) {
+					_finished = true;
+					return;
+				}
+				it2 = it1->second.begin();
+			}
+			currentItem = *it2;
+			currentConcrete = it1->first;
+			it2++;
+		}
+		const ThreadCfgLabel &get() const { return currentItem; }
+		unsigned concrete_tid() const { return currentConcrete; }
+		iterator(const std::map<unsigned, std::set<ThreadCfgLabel> > &_content)
+			: content(_content),
+			  it1(_content.begin()),
+			  _finished(false)
+		{
+			if (it1 == _content.end()) {
+				_finished = true;
+				return;
+			}
+			it2 = it1->second.begin();
+			while (it2 == it1->second.end()) {
+				it1++;
+				if (it1 == _content.end()) {
+					_finished = true;
+					return;
+				}
+				it2 = it1->second.begin();
+			}
+			currentItem = *it2;
+			currentConcrete = it1->first;
+			it2++;
+		}
+	};
+	iterator begin() const { return iterator(content); }
+
+	class conc_iterator {
+		std::set<ThreadCfgLabel>::const_iterator it1;
+		std::set<ThreadCfgLabel>::const_iterator it2;
+	public:
+		conc_iterator(const std::set<ThreadCfgLabel> &c)
+			: it1(c.begin()), it2(c.end())
+		{}
+		bool finished() const { return it1 == it2; }
+		void advance() { it1++; }
+		ThreadCfgLabel get() const { return *it1; }
+	};
+	conc_iterator begin(unsigned concrete_tid) {
+		assert(content.count(concrete_tid));
+		return conc_iterator(content[concrete_tid]);
 	}
 };
 
@@ -949,7 +919,7 @@ public:
 	happensBeforeMapT(const MaiMap &mai,
 			  DNF_Conjunction &c,
 			  instructionDominatorMapT &idom,
-			  ThreadCfgDecode &cfg,
+			  CrashCfg &cfg,
 			  expressionStashMapT &exprStashPoints,
 			  ThreadAbstracter &abs,
 			  int &next_hb_id)
@@ -1000,7 +970,7 @@ public:
 			fprintf(f, "}\n");
 		}
 	}
-	bool parse(ThreadCfgDecode &cfg, const char *str, const char **suffix) {
+	bool parse(CrashCfg &cfg, const char *str, const char **suffix) {
 		if (!parseThisString("Happens before map:\n", str, &str))
 			return false;
 		clear();
@@ -1039,7 +1009,7 @@ public:
 class abstractThreadExitPointsT : public std::set<ThreadCfgLabel> {
 public:
 	abstractThreadExitPointsT() {}
-	abstractThreadExitPointsT(ThreadCfgDecode &cfg, happensBeforeMapT &);
+	abstractThreadExitPointsT(CrashCfg &cfg, happensBeforeMapT &);
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tAbstract thread exit points: {");
 		for (auto it = begin(); it != end(); it++) {
@@ -1078,110 +1048,46 @@ public:
 	}
 };
 
-class InstructionDecoder {
-	bool expandJcc;
-	bool threadJumps;
-	AddressSpace *as;
-public:
-	InstructionDecoder(bool _expandJcc, bool _threadJumps, AddressSpace *_as)
-		: expandJcc(_expandJcc), threadJumps(_threadJumps), as(_as)
-	{}
-	Instruction<VexRip> *operator()(const CFGNode *);
-};
-
 class CrashCfg {
-	friend void ThreadCfgDecode::fromCrashCfg(CrashCfg &);
-	std::map<ThreadCfgLabel, Instruction<VexRip> *> content;
-	bool expandJcc;
-	bool threadJumps;
+	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
+	std::map<CfgLabel, VexRip> rips;
 public:
-	Instruction<VexRip> *findInstr(const ThreadCfgLabel &label) {
+	Instruction<ThreadCfgLabel> *findInstr(const ThreadCfgLabel &label) {
 		auto it = content.find(label);
 		if (it == content.end())
 			return NULL;
 		else
 			return it->second;
 	}
-	void addInstr(const AbstractThread &thread, Instruction<VexRip> *node) {
-		assert(!content.count(ThreadCfgLabel(thread, node->label)));
-		assert(node->len != 0);
-		content[ThreadCfgLabel(thread, node->label)] = node;
-	}
-	void prepLabelAllocator(CfgLabelAllocator &alloc) {
-		for (auto it = content.begin(); it != content.end(); it++)
-			alloc.reserve(it->first.label);
-	}
-	CrashCfg(bool _expandJcc, bool _threadJumps) : expandJcc(_expandJcc), threadJumps(_threadJumps) {};
-	CrashCfg(CrashSummary *summary, ThreadAbstracter &abs,
-		 InstructionDecoder &decode, bool _expandJcc, bool _threadJumps)
-		: expandJcc(_expandJcc), threadJumps(_threadJumps)
-	{
-		typedef std::pair<AbstractThread, const CFGNode *> q_entry_t;
-		std::queue<q_entry_t> pending;
-		for (auto it = summary->loadMachine->cfg_roots.begin();
-		     it != summary->loadMachine->cfg_roots.end();
-		     it++)
-			for (auto it2 = abs.begin(it->first); !it2.finished(); it2.advance())
-				pending.push(q_entry_t(it2.get(), it->second));
-		for (auto it = summary->storeMachine->cfg_roots.begin();
-		     it != summary->storeMachine->cfg_roots.end();
-		     it++)
-			for (auto it2 = abs.begin(it->first); !it2.finished(); it2.advance())
-				pending.push(q_entry_t(it2.get(), it->second));
-		std::map<ThreadCfgLabel, const CFGNode *> cfgNodes;
-		while (!pending.empty()) {
-			q_entry_t p = pending.front();
-			pending.pop();
-			ThreadCfgLabel label(p.first, p.second->label);
-			Instruction<VexRip> *newInstr = decode(p.second);
-			auto it_did_insert = content.insert(
-				std::pair<ThreadCfgLabel, Instruction<VexRip> *>(
-					label, newInstr));
-			auto did_insert = it_did_insert.second;
-			if (did_insert) {
-				assert(!cfgNodes.count(label));
-				cfgNodes[label] = p.second;
-				for (auto it = p.second->successors.begin();
-				     it != p.second->successors.end();
-				     it++) {
-					if (it->instr)
-						pending.push(q_entry_t(p.first, it->instr));
-				}
-			}
-		}
-		for (auto it = cfgNodes.begin(); it != cfgNodes.end(); it++) {
-			const ThreadCfgLabel &label(it->first);
-			const CFGNode *n = it->second;
-			assert(content.count(label));
-			Instruction<VexRip> *i = content[label];
-			i->successors.clear();
-			for (auto it = n->successors.begin();
-			     it != n->successors.end();
-			     it++) {
-				const CFGNode::successor_t &srcSucc(*it);
-				if (!srcSucc.instr)
-					continue;
-				ThreadCfgLabel succLabel(label.thread, srcSucc.instr->label);
-				assert(content.count(succLabel));
-				Instruction<VexRip>::successor_t destSucc(
-					srcSucc.type,
-					srcSucc.instr->rip,
-					content[succLabel],
-					srcSucc.calledFunction);
-				i->successors.push_back(destSucc);
-			}
-		}
-	}
+	CrashCfg() {};
+	CrashCfg(crashEnforcementRoots &roots, CrashSummary *summary, AddressSpace *as);
 	bool parse(AddressSpace *as, const char *str, const char **suffix);
 	void prettyPrint(FILE *f, bool verbose = false);
 	void operator|=(const CrashCfg &o) {
-		assert(expandJcc == o.expandJcc);
 		for (auto it = o.content.begin(); it != o.content.end(); it++) {
 			auto it2_did_insert = content.insert(*it);
 			assert(it2_did_insert.second);
 		}
+		for (auto it = o.rips.begin(); it != o.rips.end(); it++)
+			rips.insert(*it);
 	}
-	void removeAllBut(const std::set<Instruction<VexRip> *> &retain);
+	void removeAllBut(const std::set<Instruction<ThreadCfgLabel> *> &retain);
+
+	class iterator {
+		std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>::const_iterator it;
+		std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>::const_iterator endIt;
+	public:
+		bool finished() const { return it == endIt; }
+		void advance() { it++; }
+		Instruction<ThreadCfgLabel> *instr() const { return it->second; }
+		iterator(const std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>::const_iterator &_it,
+			 const std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>::const_iterator &_endIt)
+			: it(_it), endIt(_endIt)
+		{}
+
+	};
+	iterator begin() const { return iterator(content.begin(), content.end()); }
+	const VexRip &labelToRip(const CfgLabel &l) const;
 };
 
 class crashEnforcementData {
@@ -1193,6 +1099,7 @@ class crashEnforcementData {
 	}
 public:
 	crashEnforcementRoots roots;
+	CrashCfg crashCfg;
 	happensAfterMapT happensBefore;
 	predecessorMapT predecessorMap;
 	instructionDominatorMapT idom;
@@ -1202,44 +1109,38 @@ public:
 	slotMapT exprsToSlots;
 	expressionEvalMapT expressionEvalPoints;
 	abstractThreadExitPointsT threadExitPoints;
-	CrashCfg crashCfg;
 	std::set<unsigned long> dummyEntryPoints;
 	std::set<unsigned long> keepInterpretingInstrs;
 
+	crashEnforcementData() {}
 	crashEnforcementData(const MaiMap &mai,
 			     std::set<IRExpr *> &neededExpressions,
+			     ThreadAbstracter &abs,
 			     std::map<unsigned, std::set<CfgLabel> > &_roots,
 			     DNF_Conjunction &conj,
-			     ThreadCfgDecode &cfg,
 			     int &next_hb_id,
 			     simulationSlotT &next_slot,
-			     ThreadAbstracter &abs,
 			     CrashSummary *summary,
-			     InstructionDecoder &decode,
-			     bool expandJcc,
-			     bool threadJumps)
+			     AddressSpace *as)
 		: roots(_roots, abs),
-		  happensBefore(conj, abs, cfg, mai),
-		  predecessorMap(cfg),
-		  idom(cfg, predecessorMap, happensBefore),
-		  exprStashPoints(neededExpressions, abs, summary->loadMachine, summary->storeMachine, _roots, mai),
+		  crashCfg(roots, summary, as),
+		  happensBefore(conj, abs, crashCfg, mai),
+		  predecessorMap(crashCfg),
+		  idom(crashCfg, predecessorMap, happensBefore),
+		  exprStashPoints(neededExpressions, abs, summary->loadMachine, summary->storeMachine, roots, mai),
 		  exprDominatorMap(conj, exprStashPoints, idom, predecessorMap, happensBefore),
-		  happensBeforePoints(mai, conj, idom, cfg, exprStashPoints, abs, next_hb_id),
+		  happensBeforePoints(mai, conj, idom, crashCfg, exprStashPoints, abs, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap),
-		  threadExitPoints(cfg, happensBeforePoints),
-		  crashCfg(summary, abs, decode, expandJcc, threadJumps)
+		  threadExitPoints(crashCfg, happensBeforePoints)
 	{}
 
 	bool parse(AddressSpace *as, const char *str, const char **suffix) {
 		if (!parseThisString("Crash enforcement data:\n", str, &str) ||
 		    !roots.parse(str, &str) ||
 		    !crashCfg.parse(as, str, &str) ||
-		    !exprStashPoints.parse(str, &str))
-			return false;
-		ThreadCfgDecode cfg;
-		cfg.fromCrashCfg(crashCfg);
-		if (!happensBeforePoints.parse(cfg, str, &str) ||
+		    !exprStashPoints.parse(str, &str) ||
+		    !happensBeforePoints.parse(crashCfg, str, &str) ||
 		    !exprsToSlots.parse(str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||
 		    !threadExitPoints.parse(str, &str) ||
@@ -1266,9 +1167,6 @@ public:
 		*suffix = str;
 		return true;
 	}
-	crashEnforcementData(bool expandJcc, bool threadJumps)
-		: crashCfg(expandJcc, threadJumps)
-	{}
 
 	void prettyPrint(FILE *f, bool verbose = false) {
 		fprintf(f, "Crash enforcement data:\n");

@@ -44,7 +44,7 @@ instrToInstrSetMap::print(FILE *f) const
 }
 
 abstractThreadExitPointsT::abstractThreadExitPointsT(
-	ThreadCfgDecode &cfg,
+	CrashCfg &cfg,
 	happensBeforeMapT &happensBeforePoints)
 {
 	/* We need to exit thread X if we reach instruction Y and
@@ -64,15 +64,15 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 	   there's some control flow path from y to x */
 	instrToInstrSetMap backwardReachable;
 
-	for (auto it = cfg.begin(); it != cfg.end(); it++)
-		if (it.value())
-			forwardReachable[it.value()].insert(it.value());
+	for (auto it = cfg.begin(); !it.finished(); it.advance())
+		if (it.instr())
+			forwardReachable[it.instr()].insert(it.instr());
 
 	bool progress;
 	do {
 		progress = false;
-		for (auto it = cfg.begin(); it != cfg.end(); it++) {
-			instrT *i = it.value();
+		for (auto it = cfg.begin(); !it.finished(); it.advance()) {
+			instrT *i = it.instr();
 			if (!i)
 				continue;
 
@@ -102,12 +102,12 @@ abstractThreadExitPointsT::abstractThreadExitPointsT(
 
 	/* Figure out which instructions should be present. */
 	std::set<instrT *> instructionPresence;
-	for (auto it = cfg.begin(); it != cfg.end(); it++) {
-		instrT *i = it.value();
+	for (auto it = cfg.begin(); !it.finished(); it.advance()) {
+		instrT *i = it.instr();
 		if (!i)
 			continue;
 
-		AbstractThread thread = it.thread();
+		AbstractThread thread(it.instr()->rip.thread);
 
 		/* Should @i be present in thread @thread? */
 		bool should_be_present = false;
@@ -280,17 +280,12 @@ buildCED(DNF_Conjunction &c,
 	 AddressSpace *as,
 	 simulationSlotT &next_slot)
 {
-	ThreadCfgDecode cfg;
-	cfg.addMachine(summary->loadMachine, abs);
-	cfg.addMachine(summary->storeMachine, abs);
-
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	InstructionDecoder decode(true, true, as);
-	*out = crashEnforcementData(*summary->mai, neededExpressions, rootsCfg, c, cfg, next_hb_id, next_slot, abs, summary, decode, true, true);
+	*out = crashEnforcementData(*summary->mai, neededExpressions, abs, rootsCfg, c, next_hb_id, next_slot, summary, as);
 	optimiseHBContent(*out);
 	return true;
 }
@@ -651,7 +646,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	printDnf(d, _logfile);
 
 	if (d.size() == 0)
-		return crashEnforcementData(true, true);
+		return crashEnforcementData();
 
 	std::map<unsigned, std::set<CfgLabel> > rootsCfg;
 	for (auto it = summary->loadMachine->cfg_roots.begin();
@@ -663,9 +658,9 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	     it++)
 		rootsCfg[it->first].insert(it->second->label);
 
-	crashEnforcementData accumulator(true, true);
+	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
-		crashEnforcementData tmp(true, true);
+		crashEnforcementData tmp;
 		if (buildCED(d[x], rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace, next_slot)) {
 			printf("Intermediate CED:\n");
 			tmp.prettyPrint(stdout, true);
@@ -690,14 +685,18 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	for (auto it = ced.exprStashPoints.begin();
 	     it != ced.exprStashPoints.end();
 	     it++) {
-		std::set<Instruction<VexRip> *> frozenStashPoints;
-		std::set<Instruction<VexRip> *> unfrozenStashPoints;
+		const ThreadCfgLabel &label(it->first);
+		const std::set<IRExprGet *> &exprsToStash(it->second);
+		std::set<Instruction<ThreadCfgLabel> *> frozenStashPoints;
+		std::set<Instruction<ThreadCfgLabel> *> unfrozenStashPoints;
 
-		unfrozenStashPoints.insert(ced.crashCfg.findInstr(it->first));
+		assert(ced.crashCfg.findInstr(label));
+		unfrozenStashPoints.insert(ced.crashCfg.findInstr(label));
 		while (!unfrozenStashPoints.empty()) {			
 			auto *node = *unfrozenStashPoints.begin();
+			assert(node);
 			unfrozenStashPoints.erase(node);
-			ThreadCfgLabel label(it->first.thread, node->label);
+			const ThreadCfgLabel &label(node->rip);
 
 			/* Can't be an eval point */
 			if (ced.expressionEvalPoints.count(label)) {
@@ -725,7 +724,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 
 			/* Can't stash a register which this
 			 * instruction might modify */
-			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, node->rip), true);
+			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, ced.crashCfg.labelToRip(node->label)), true);
 			std::set<threadAndRegister, threadAndRegister::partialCompare> modified_regs;
 			for (int x = 0; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 				if (irsb->stmts[x]->tag == Ist_Put)
@@ -752,8 +751,8 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 			auto *node = *it2;
 			ThreadCfgLabel label(it->first.thread, node->label);
 			std::set<IRExprGet *> &newStash(newMap[label]);
-			for (auto it3 = it->second.begin();
-			     it3 != it->second.end();
+			for (auto it3 = exprsToStash.begin();
+			     it3 != exprsToStash.end();
 			     it3++)
 				newStash.insert(*it3);
 		}
@@ -777,10 +776,9 @@ optimiseCfg(crashEnforcementData &ced)
 		}
 	} hasSideEffect = {&ced};
 	crashEnforcementRoots newRoots;
-	for (auto it = ced.roots.begin();
-	     it != ced.roots.end();
-	     it++) {
-		auto root = ced.crashCfg.findInstr(*it);
+	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
+		const AbstractThread thread(it.get().thread);
+		auto root = ced.crashCfg.findInstr(it.get());
 		while (1) {
 			/* We can advance a root if it has a single
 			   successor, and it has no stash points, and
@@ -788,7 +786,7 @@ optimiseCfg(crashEnforcementData &ced)
 			   points, and it isn't an exit point. */
 			if (root->successors.size() != 1)
                                break;
-			ThreadCfgLabel l(it->thread, root->label);
+			ThreadCfgLabel l(thread, root->label);
 			if (hasSideEffect(l))
 				break;
 			root = root->successors[0].instr;
@@ -800,13 +798,13 @@ optimiseCfg(crashEnforcementData &ced)
 		bool haveFirstSideEffect = false;
 		bool failed = false;
 		ThreadCfgLabel firstSideEffect;
-		std::set<const Instruction<VexRip> *> visited;
-		std::queue<const Instruction<VexRip> *> pending;
+		std::set<const Instruction<ThreadCfgLabel> *> visited;
+		std::queue<const Instruction<ThreadCfgLabel> *> pending;
 		pending.push(root);
 		while (!failed && !pending.empty()) {
 			auto n = pending.front();
 			pending.pop();
-			ThreadCfgLabel l(it->thread, n->label);
+			ThreadCfgLabel l(thread, n->label);
 
 			if (hasSideEffect(l)) {
 				if (haveFirstSideEffect) {
@@ -825,19 +823,19 @@ optimiseCfg(crashEnforcementData &ced)
 		}
 		if (haveFirstSideEffect) {
 			if (failed)
-				newRoots.insert(ThreadCfgLabel(it->thread, root->label));
+				newRoots.insert(it.concrete_tid(), it.get());
 			else
-				newRoots.insert(firstSideEffect);
+				newRoots.insert(it.concrete_tid(), firstSideEffect);
 		}
 	}
 	ced.roots = newRoots;
 
 	/* Anything which isn't reachable from a root can be removed
 	 * from the CFG. */
-	std::set<Instruction<VexRip> *> retain;
-	std::queue<Instruction<VexRip> *> pending;
-	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++)
-		pending.push(ced.crashCfg.findInstr(*it));
+	std::set<Instruction<ThreadCfgLabel> *> retain;
+	std::queue<Instruction<ThreadCfgLabel> *> pending;
+	for (auto it = ced.roots.begin(); !it.finished(); it.advance())
+		pending.push(ced.crashCfg.findInstr(it.get()));
 	while (!pending.empty()) {
 		auto n = pending.front();
 		pending.pop();
@@ -847,12 +845,6 @@ optimiseCfg(crashEnforcementData &ced)
 			pending.push(it->instr);
 	}
 	ced.crashCfg.removeAllBut(retain);
-}
-
-Instruction<VexRip> *
-InstructionDecoder::operator()(const CFGNode *src)
-{
-	return Instruction<VexRip>::decode(src->label, this->as, src->rip, NULL, this->expandJcc, this->threadJumps);
 }
 
 /* We need to patch the program to jump to our instrumentation at
@@ -886,10 +878,11 @@ avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 
 	if (debug_declobber_instructions)
 		printf("Computing clobbered instructions set\n");
-	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++) {
-		Instruction<VexRip> *vr = ced.crashCfg.findInstr(*it);
-		assert(vr);
-		unsigned long r = vr->rip.unwrap_vexrip();
+	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
+		Instruction<ThreadCfgLabel> *instr = ced.crashCfg.findInstr(it.get());
+		assert(instr);
+		const VexRip &vr(ced.crashCfg.labelToRip(instr->label));
+		unsigned long r = vr.unwrap_vexrip();
 		if (debug_declobber_instructions)
 			printf("%lx is a root\n", r);
 		neededEntryPoints.insert(r);

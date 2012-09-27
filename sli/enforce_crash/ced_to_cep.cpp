@@ -186,10 +186,8 @@ compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, con
 	{
 		int next_idx;
 		next_idx = 1;
-		for (auto it = ced.roots.begin();
-		     it != ced.roots.end();
-		     it++) {
-			ThreadCfgLabel l(*it);
+		for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
+			ThreadCfgLabel l(it.get());
 			if (!ctxts.count(l))
 				ctxts[l] = next_idx++;
 		}
@@ -197,7 +195,7 @@ compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, con
 	for (auto it = ctxts.begin(); it != ctxts.end(); it++) {
 		ThreadCfgLabel l(it->first);
 		auto n = ced.crashCfg.findInstr(l);
-		const VexRip &v(n->rip);
+		const VexRip &v(ced.crashCfg.labelToRip(n->label));
 		fprintf(f, "static struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
 		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(l.thread, ced.exprsToSlots) + 1);
@@ -208,10 +206,10 @@ compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, con
 		fprintf(f, "};\n");
 	}
 	std::map<unsigned long, std::set<ThreadCfgLabel> > entryPoints;
-	for (auto it = ced.roots.begin(); it != ced.roots.end(); it++) {
-		ThreadCfgLabel l(*it);
+	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
+		ThreadCfgLabel l(it.get());
 		auto n = ced.crashCfg.findInstr(l);
-		VexRip v(n->rip);
+		const VexRip &v(ced.crashCfg.labelToRip(n->label));
 		entryPoints[v.unwrap_vexrip()].insert(l);
 	}
 	int next_idx = 0;
@@ -446,8 +444,8 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 {
 	{
 		std::queue<ThreadCfgLabel> pending;
-		for (auto it = ced.roots.begin(); it != ced.roots.end(); it++)
-			pending.push(*it);
+		for (auto it = ced.roots.begin(); !it.finished(); it.advance())
+			pending.push(it.get());
 		while (!pending.empty()) {
 			ThreadCfgLabel l(pending.front());
 			pending.pop();
@@ -585,7 +583,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 		}
 
-		summary.rip = instr->rip.unwrap_vexrip();
+		summary.rip = ced.crashCfg.labelToRip(instr->label).unwrap_vexrip();
 		summary.id = instr->label.name();
 		summaries[newLabel] = summary;
 		fprintf(f, "\n");
@@ -721,7 +719,7 @@ main(int argc, char *argv[])
 	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
 		err(1, "open(%s)", ced_path);
-	crashEnforcementData ced(false, false);
+	crashEnforcementData ced;
 	loadCrashEnforcementData(ced, ms->addressSpace, fd);
 	close(fd);
 
