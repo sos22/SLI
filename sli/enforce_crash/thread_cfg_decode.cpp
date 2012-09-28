@@ -267,7 +267,7 @@ done_prefixes:
 	work->rip = label;
 	work->len = ptr - init_ptr;
 	for (unsigned x = 0; x < work->len; x++)
-		work->content[x] = as->fetch<unsigned char>(ptr + x, NULL);
+		work->content[x] = as->fetch<unsigned char>(init_ptr + x, NULL);
 	return work;
 }
 
