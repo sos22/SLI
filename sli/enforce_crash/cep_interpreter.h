@@ -72,8 +72,10 @@ struct cfg_instr {
 	int nr_successors;
 	const struct cfg_instr_stash *stash;
 	int nr_stash;
-	struct msg_template *rx_msg;
-	struct msg_template *tx_msg;
+	int nr_rx_msg;
+	struct msg_template **rx_msgs;
+	int nr_tx_msg;
+	struct msg_template **tx_msgs;
 	/* Side conditions can be evaluated at one of three points:
 
 	   -- At the very beginning of the instruction.

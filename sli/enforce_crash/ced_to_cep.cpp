@@ -430,8 +430,8 @@ emit_validation(FILE *f, int ident, const char *name, const std::set<exprEvalPoi
 
 struct cfg_annotation_summary {
 	bool have_stash;
-	unsigned tx_msg;
 	unsigned rx_msg;
+	unsigned tx_msg;
 	unsigned long rip;
 	bool has_pre_validate;
 	bool has_rx_validate;
@@ -460,6 +460,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 	}
 
 	std::map<int, cfg_annotation_summary> summaries;
+	unsigned next_msg_list_id = 1;
 
 	/* Now go through and generate plan-level representations for those. */
 	/* Ancillary data first: the content of the instruction, plus
@@ -523,12 +524,28 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 			assert(!(rxMsg.empty() && txMsg.empty()));
 			if (!rxMsg.empty()) {
-				assert(rxMsg.size() == 1);
-				summary.rx_msg = (*rxMsg.begin())->msg_id;
+				for (auto it = rxMsg.begin(); it != rxMsg.end(); it++)
+					fprintf(f, "static struct msg_template msg_template_%x_rx;\n",
+						(*it)->msg_id);
+				fprintf(f, "static struct msg_template *msg_list_%d[] = {\n",
+					next_msg_list_id);
+				for (auto it = rxMsg.begin(); it != rxMsg.end(); it++)
+					fprintf(f, "\t&msg_template_%x_rx,\n", (*it)->msg_id);
+				fprintf(f, "};\n");
+				summary.rx_msg = next_msg_list_id;
+				next_msg_list_id++;
 			}
 			if (!txMsg.empty()) {
-				assert(txMsg.size() == 1);
-				summary.tx_msg = (*txMsg.begin())->msg_id;
+				for (auto it = txMsg.begin(); it != txMsg.end(); it++)
+					fprintf(f, "static struct msg_template msg_template_%x_tx;\n",
+						(*it)->msg_id);
+				fprintf(f, "static struct msg_template *msg_list_%d[] = {\n",
+					next_msg_list_id);
+				for (auto it = txMsg.begin(); it != txMsg.end(); it++)
+					fprintf(f, "\t&msg_template_%x_tx,\n", (*it)->msg_id);
+				fprintf(f, "};\n");
+				summary.tx_msg = next_msg_list_id;
+				next_msg_list_id++;
 			}
 		}
 		if (ced.expressionEvalPoints.count(oldLabel)) {
@@ -639,14 +656,22 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			add_simple_array(f, "        ", "stash", "stash", "nr_stash", it->first);
 		else
 			add_empty_array(f, "        ", "stash", "nr_stash");
-		if (it->second.rx_msg)
-			fprintf(f, "        .rx_msg = &msg_template_%x_rx,\n", it->second.rx_msg);
-		else
-			fprintf(f, "        .rx_msg = NULL,\n");
-		if (it->second.tx_msg)
-			fprintf(f, "        .tx_msg = &msg_template_%x_tx,\n", it->second.tx_msg);
-		else
-			fprintf(f, "        .tx_msg = NULL,\n");
+		if (it->second.rx_msg) {
+			fprintf(f, "        .nr_rx_msg = sizeof(msg_list_%d)/sizeof(msg_list_%d[0]),\n",
+				it->second.rx_msg, it->second.rx_msg);
+			fprintf(f, "        .rx_msgs = msg_list_%d,\n", it->second.rx_msg);
+		} else {
+			fprintf(f, "        .nr_rx_msg = 0,\n");
+			fprintf(f, "        .rx_msgs = NULL,\n");
+		}
+		if (it->second.tx_msg) {
+			fprintf(f, "        .nr_tx_msg = sizeof(msg_list_%d)/sizeof(msg_list_%d[0]),\n",
+				it->second.tx_msg, it->second.tx_msg);
+			fprintf(f, "        .tx_msgs = msg_list_%d,\n", it->second.tx_msg);
+		} else {
+			fprintf(f, "        .nr_tx_msg = 0,\n");
+			fprintf(f, "        .tx_msgs = NULL,\n");
+		}
 		if (it->second.has_pre_validate)
 			fprintf(f, "        .pre_validate = instr_%d_pre_validate,\n", it->first);
 		else

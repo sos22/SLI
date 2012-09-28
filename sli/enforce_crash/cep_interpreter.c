@@ -65,6 +65,7 @@ struct {
 	iter(message_filter_failed)		\
 	iter(rx_from_exited)			\
 	iter(rx_bound)				\
+	iter(rx_bound_fast)			\
 	iter(rx_bound_failed)			\
 	iter(rx_bound_wait)			\
 	iter(rx_unbound_early)			\
@@ -84,9 +85,11 @@ struct {
 	iter(emul_underlying)			\
 	iter(tx_bound_exited)			\
 	iter(tx_bound_fast)			\
+	iter(tx_bound_failed)			\
 	iter(tx_bound_wrong_message)		\
 	iter(tx_bound_slow)			\
 	iter(tx_unbound)			\
+	iter(tx_unbound_early)			\
 	iter(tx_fast)				\
 	iter(tx_slow)				\
 	iter(tx_delay)				\
@@ -134,10 +137,14 @@ struct low_level_state {
 	 * will fail. */
 	struct low_level_state *bound_lls;
 
-	struct msg_template *bound_sending_message;
-	struct msg_template *unbound_sending_message;
-	struct msg_template *bound_receiving_message;
-	struct msg_template *unbound_receiving_message;
+	int nr_bound_sending_messages;
+	struct msg_template **bound_sending_messages;
+	int nr_unbound_sending_messages;
+	struct msg_template **unbound_sending_messages;
+	int nr_bound_receiving_messages;
+	struct msg_template **bound_receiving_messages;
+	int nr_unbound_receiving_messages;
+	struct msg_template **unbound_receiving_messages;
 
 #ifdef KEEP_LLS_HISTORY
 	cfg_label_t history[LLS_HISTORY];
@@ -1116,10 +1123,10 @@ clone_lls(struct low_level_state *lls)
 	new_lls->cfg_node = lls->cfg_node;
 	memcpy(new_lls->simslots, lls->simslots, sizeof(new_lls->simslots[0]) * new_lls->nr_simslots);
 	new_lls->bound_lls = lls->bound_lls;
-	assert(!lls->bound_sending_message);
-	assert(!lls->bound_receiving_message);
-	assert(!lls->unbound_sending_message);
-	assert(!lls->unbound_receiving_message);
+	assert(!lls->bound_sending_messages);
+	assert(!lls->bound_receiving_messages);
+	assert(!lls->unbound_sending_messages);
+	assert(!lls->unbound_receiving_messages);
 
 #ifdef KEEP_LLS_HISTORY
 	memcpy(new_lls->history, lls->history, sizeof(lls->history));
@@ -1130,8 +1137,10 @@ clone_lls(struct low_level_state *lls)
 		new_bound_lls->bound_lls = new_lls;
 		new_lls->bound_lls = new_bound_lls;
 		memcpy(new_bound_lls->simslots, lls->bound_lls->simslots, sizeof(new_bound_lls->simslots[0]) * new_bound_lls->nr_simslots);
-		new_bound_lls->bound_receiving_message = lls->bound_lls->bound_receiving_message;
-		new_bound_lls->bound_sending_message = lls->bound_lls->bound_sending_message;
+		new_bound_lls->nr_bound_receiving_messages = lls->bound_lls->nr_bound_receiving_messages;
+		new_bound_lls->nr_bound_sending_messages = lls->bound_lls->nr_bound_sending_messages;
+		new_bound_lls->bound_receiving_messages = lls->bound_lls->bound_receiving_messages;
+		new_bound_lls->bound_sending_messages = lls->bound_lls->bound_sending_messages;
 
 		/* We don't clone unbound_*_messages, or register with
 		 * the global sender and receiver arrays, because the
@@ -1184,30 +1193,80 @@ discharge_message(struct low_level_state *tx_lls,
 	}
 }
 
+static struct low_level_state *
+dupe_lls(struct low_level_state *input)
+{
+	struct low_level_state *old_bound;
+	struct low_level_state *new_bound;
+	struct low_level_state *output;
+
+	assert(input);
+	assert(input->bound_lls);
+	assert(input->bound_lls->bound_lls);
+	assert(input->bound_lls->bound_lls == input);
+
+	old_bound = input->bound_lls;
+
+	assert(!input->unbound_sending_messages);
+	assert(!old_bound->unbound_receiving_messages);
+	assert(!input->await_bound_lls_exit);
+	assert(!old_bound->await_bound_lls_exit);
+
+	assert(!input->mbox);
+
+	new_bound = new_low_level_state(old_bound->hls, old_bound->nr_simslots);
+	new_bound->cfg_node = old_bound->cfg_node;
+#ifdef KEEP_LLS_HISTORY
+	memcpy(new_bound->history, old_bound->history, sizeof(new_bound->history));
+#endif
+	memcpy(new_bound->simslots, old_bound->simslots, sizeof(new_bound->simslots[0]) * new_bound->nr_simslots);
+	new_bound->last_operation_is_send = old_bound->last_operation_is_send;
+	new_bound->mbox = old_bound->mbox;
+	new_bound->nr_bound_sending_messages = old_bound->nr_bound_sending_messages;
+	new_bound->bound_sending_messages = old_bound->bound_sending_messages;
+	new_bound->nr_bound_receiving_messages = old_bound->nr_bound_receiving_messages;
+	new_bound->bound_receiving_messages = old_bound->bound_receiving_messages;
+
+	output = new_low_level_state(input->hls, input->nr_simslots);
+	output->cfg_node = input->cfg_node;
+#ifdef KEEP_LLS_HISTORY
+	memcpy(output->history, input->history, sizeof(output->history));
+#endif
+	memcpy(output->simslots, input->simslots, sizeof(output->simslots[0]) * output->nr_simslots);
+	output->last_operation_is_send = input->last_operation_is_send;
+	output->nr_bound_sending_messages   = input->nr_bound_sending_messages;
+	output->bound_sending_messages      = input->bound_sending_messages;
+	output->nr_bound_receiving_messages = input->nr_bound_receiving_messages;
+	output->bound_receiving_messages    = input->bound_receiving_messages;
+
+	new_bound->bound_lls = output;
+	output->bound_lls = new_bound;
+
+	low_level_state_push(&new_bound->hls->ll_states, new_bound);
+
+	return output;
+}
+
 static void
 rendezvous_threads(struct low_level_state_array *llsa,
 		   int tx_is_local,
+		   struct msg_template *tx_template,
 		   struct low_level_state *tx_lls,
+		   struct msg_template *rx_template,
 		   struct low_level_state *rx_lls)
 {
-	struct msg_template *rx_template;
-	struct msg_template *tx_template;
 	int x;
 
-	assert(rx_lls->unbound_receiving_message);
-	assert(!rx_lls->unbound_sending_message);
-	assert(tx_lls->unbound_sending_message);
-	assert(!tx_lls->unbound_receiving_message);
-
-	assert(!rx_lls->bound_receiving_message);
-	assert(!rx_lls->bound_sending_message);
-	assert(!tx_lls->bound_sending_message);
-	assert(!tx_lls->bound_receiving_message);
-
-	rx_template = rx_lls->unbound_receiving_message;
-	tx_template = tx_lls->unbound_sending_message;
 	assert(rx_template == tx_template->pair);
 	assert(tx_template == rx_template->pair);
+
+	assert(!rx_lls->unbound_sending_messages);
+	assert(!tx_lls->unbound_receiving_messages);
+
+	assert(!rx_lls->bound_receiving_messages);
+	assert(!rx_lls->bound_sending_messages);
+	assert(!tx_lls->bound_sending_messages);
+	assert(!tx_lls->bound_receiving_messages);
 
 	/* Note that we don't dupe the message send and receive state
 	   here.  That's because we're about to discharge the message
@@ -1278,21 +1337,25 @@ rendezvous_threads(struct low_level_state_array *llsa,
 
 static void
 rendezvous_threads_tx(struct low_level_state_array *llsa,
+		      struct msg_template *tx_msg,
 		      struct low_level_state *tx_lls,
+		      struct msg_template *rx_msg,
 		      struct low_level_state *rx_lls)
 {
 	sanity_check_low_level_state(rx_lls, 1);
 	sanity_check_low_level_state(tx_lls, 1);
-	rendezvous_threads(llsa, 1, tx_lls, rx_lls);
+	rendezvous_threads(llsa, 1, tx_msg, tx_lls, rx_msg, rx_lls);
 }
 static void
 rendezvous_threads_rx(struct low_level_state_array *llsa,
+		      struct msg_template *rx_msg,
 		      struct low_level_state *rx_lls,
+		      struct msg_template *tx_msg,
 		      struct low_level_state *tx_lls)
 {
 	sanity_check_low_level_state(rx_lls, 1);
 	sanity_check_low_level_state(tx_lls, 1);
-	rendezvous_threads(llsa, 0, tx_lls, rx_lls);
+	rendezvous_threads(llsa, 0, tx_msg, tx_lls, rx_msg, rx_lls);
 }
 
 static int
@@ -1343,6 +1406,22 @@ get_timeout(const struct timeval *end_wait, struct timespec *timeout)
 	return 0;
 }
 
+static long
+delay_bias(const struct cfg_instr *instr, int is_tx)
+{
+	struct msg_template **msgs = is_tx ? instr->tx_msgs : instr->rx_msgs;
+	int nr = is_tx ? instr->nr_tx_msg : instr->nr_rx_msg;
+	long res;
+	int j;
+	res = 0;
+	for (j = 0; j < nr; j++) {
+		res += msgs[j]->event_count;
+		res -= msgs[j]->pair->event_count;
+		msgs[j]->event_count++;
+	}
+	return res;
+}
+
 /* This is quite fiddly.  We have a bunch of low-level threads, some
  * of which want to perform message receive operations.  The threads
  * which don't want to receive anything are unchanged, so ignore them
@@ -1379,7 +1458,7 @@ receive_messages(struct high_level_state *hls)
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
 		sanity_check_low_level_state(lls, 1);
-		if (!lls->await_bound_lls_exit && instr->rx_msg)
+		if (!lls->await_bound_lls_exit && instr->nr_rx_msg != 0)
 			have_rx = 1;
 	}
 	if (!have_rx)
@@ -1394,10 +1473,10 @@ receive_messages(struct high_level_state *hls)
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-		struct msg_template *msg;
+		long db;
 		int delay_this_side;
 
-		if (lls->await_bound_lls_exit || !instr->rx_msg) {
+		if (lls->await_bound_lls_exit || instr->nr_rx_msg == 0) {
 			/* Threads which don't receive any messages
 			 * don't need to do anything. */
 			low_level_state_push(&new_llsa, lls);
@@ -1406,18 +1485,16 @@ receive_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		msg = instr->rx_msg;
-
-		if (msg->event_count < msg->pair->event_count) {
-			debug("%p(%s): RX %x, delay is on RX side (%d < %d)\n",
-			      lls, instr->id, msg->msg_id, msg->event_count, msg->pair->event_count);
+		db = delay_bias(instr, 0);
+		if (db < 0) {
+			debug("%p(%s): RX, delay is on RX side (bias %ld)\n",
+			      lls, instr->id, db);
 			delay_this_side = 1;
 		} else {
-			debug("%p(%s): RX %x, delay is on TX side (%d >= %d)\n",
-			      lls, instr->id, msg->msg_id, msg->event_count, msg->pair->event_count);
+			debug("%p(%s): RX, delay is on TX side (bias %ld)\n",
+			      lls, instr->id, db);
 			delay_this_side = 0;
 		}
-		msg->event_count++;
 
 		if (lls->bound_lls == BOUND_LLS_EXITED) {
 			debug("%p(%s): Receiving from an exited thread -> fail\n",
@@ -1427,26 +1504,43 @@ receive_messages(struct high_level_state *hls)
 			exit_thread(lls);
 		} else if (lls->bound_lls != NULL) {
 			assert(lls->bound_lls->bound_lls == lls);
-			if (lls->bound_lls->bound_sending_message) {
-				if (lls->bound_lls->bound_sending_message == msg->pair &&
-				    rx_message_filter(lls, msg, lls->bound_lls, msg->pair)) {
-					debug("%p(%s): Receive from bound thread %p\n", lls, instr->id, lls->bound_lls);
-					discharge_message(lls->bound_lls, lls->bound_lls->bound_sending_message,
-							  lls, msg);
-					lls->bound_lls->bound_sending_message = NULL;
-					hls->ll_states.content[i] = NULL;
-					low_level_state_push(&new_llsa, lls);
-					EVENT(rx_bound);
-				} else {
+			if (lls->bound_lls->nr_bound_sending_messages != 0) {
+				int tx_idx;
+				int rx_idx;
+				struct msg_template *rx_msg;
+				struct msg_template *tx_msg;
+				int keep = 0;
+				hls->ll_states.content[i] = NULL;
+				for (tx_idx = 0; tx_idx < lls->bound_lls->nr_bound_sending_messages; tx_idx++) {
+					tx_msg = lls->bound_lls->bound_sending_messages[tx_idx];
+					for (rx_idx = 0; rx_idx < instr->nr_rx_msg; rx_idx++) {
+						rx_msg = instr->rx_msgs[rx_idx];
+						if (rx_msg->pair == tx_msg &&
+						    rx_message_filter(lls, rx_msg, lls->bound_lls, tx_msg)) {
+							debug("%p(%s): Receive from bound thread %p\n", lls, instr->id, lls->bound_lls);
+							if (keep)
+								lls = dupe_lls(lls);
+							discharge_message(lls->bound_lls, tx_msg,
+									  lls, rx_msg);
+							lls->bound_lls->bound_sending_messages = NULL;
+							lls->bound_lls->nr_bound_sending_messages = 0;
+							low_level_state_push(&new_llsa, lls);
+							keep = 1;
+							EVENT(rx_bound_fast);
+						}
+					}
+				}
+
+				if (!keep) {
 					debug("%p(%s): Bound thread sent wrong message\n", lls, instr->id);
-					hls->ll_states.content[i] = NULL;
 					exit_thread(lls);
 					EVENT(rx_bound_failed);
 				}
 			} else {
 				debug("%p(%s): Bound thread %p with nothing outstanding; go to RX state\n",
 				      lls, instr->id, lls->bound_lls);
-				lls->bound_receiving_message = msg;
+				lls->nr_bound_receiving_messages = instr->nr_rx_msg;
+				lls->bound_receiving_messages = instr->rx_msgs;
 				lls->mbox = &mbox;
 				need_futex = 1;
 				have_rx = 1;
@@ -1456,16 +1550,25 @@ receive_messages(struct high_level_state *hls)
 			/* Gather up all of the messages which have
 			   already been sent which might be
 			   relevant. */
-			lls->unbound_receiving_message = msg;
+			lls->nr_unbound_receiving_messages = instr->nr_rx_msg;
+			lls->unbound_receiving_messages = instr->rx_msgs;
 			for (j = 0; j < message_senders.sz; j++) {
 				struct low_level_state *tx_lls = message_senders.content[j];
-				assert(tx_lls->unbound_sending_message);
-				if (tx_lls->unbound_sending_message == msg->pair &&
-				    rx_message_filter(lls, msg, tx_lls, msg->pair)) {
-					debug("%p(%s): late rx from remote LLS %p\n", lls,
-					      instr->id, tx_lls);
-					rendezvous_threads_rx(&new_llsa, lls, tx_lls);
-					EVENT(rx_unbound_early);
+				int tx_idx;
+				assert(tx_lls->nr_unbound_sending_messages != 0);
+				for (tx_idx = 0; tx_idx < tx_lls->nr_unbound_sending_messages; tx_idx++) {
+					struct msg_template *tx_msg = tx_lls->unbound_sending_messages[tx_idx];
+					int rx_idx;
+					for (rx_idx = 0; rx_idx < instr->nr_rx_msg; rx_idx++) {
+						struct msg_template *rx_msg = instr->rx_msgs[rx_idx];
+						if (tx_msg == rx_msg->pair &&
+						    rx_message_filter(lls, rx_msg, tx_lls, tx_msg)) {
+							debug("%p(%s): late rx from remote LLS %p\n", lls,
+							      instr->id, tx_lls);
+							rendezvous_threads_rx(&new_llsa, rx_msg, lls, tx_msg, tx_lls);
+							EVENT(rx_unbound_early);
+						}
+					}
 				}
 			}
 			/* And tell any future senders that we're
@@ -1525,7 +1628,7 @@ receive_messages(struct high_level_state *hls)
 					struct low_level_state *lls = hls->ll_states.content[i];
 					if (!lls)
 						continue;
-					if (lls->unbound_receiving_message) {
+					if (lls->nr_unbound_receiving_messages != 0) {
 						/* We allow unbound
 						   receives to keep
 						   trying while we're
@@ -1544,7 +1647,7 @@ receive_messages(struct high_level_state *hls)
 						lls->mbox = NULL;
 						hls->ll_states.content[i] = NULL;
 						exit_thread(lls);
-					} else if (lls->bound_receiving_message) {
+					} else if (lls->nr_bound_receiving_messages != 0) {
 						have_more_bound_rx = 1;
 					} else {
 						debug("%p(%s): Unbound receive succeeded\n",
@@ -1570,11 +1673,12 @@ receive_messages(struct high_level_state *hls)
 		sanity_check_low_level_state(lls, 1);
 		hls->ll_states.content[i] = NULL;
 		lls->mbox = NULL;
-		if (lls->unbound_receiving_message) {
-			lls->unbound_receiving_message = NULL;
+		if (lls->nr_unbound_receiving_messages != 0) {
+			lls->unbound_receiving_messages = NULL;
+			lls->nr_unbound_receiving_messages = 0;
 			low_level_state_erase_first(&message_receivers, lls);
 		}
-		if (lls->bound_receiving_message) {
+		if (lls->nr_bound_receiving_messages != 0) {
 			debug("%p(%s): Bound receive failed\n", lls, plan.cfg_nodes[lls->cfg_node].id);
 			exit_thread(lls);
 			EVENT(rx_bound_failed_late);
@@ -1744,7 +1848,7 @@ send_messages(struct high_level_state *hls)
 	have_sends = 0;
 	for (i = 0; !have_sends && i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
-		if (plan.cfg_nodes[lls->cfg_node].tx_msg)
+		if (plan.cfg_nodes[lls->cfg_node].nr_tx_msg != 0)
 			have_sends = 1;
 	}
 	if (!have_sends)
@@ -1759,28 +1863,26 @@ send_messages(struct high_level_state *hls)
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
-		struct msg_template *msg;
 		int delay_this_side;
+		long bias;
 
-		if (!instr->tx_msg) {
+		if (instr->nr_tx_msg == 0) {
 			low_level_state_push(&new_llsa, lls);
 			hls->ll_states.content[i] = NULL;
 			debug("%p(%s): nothing to send\n", lls, instr->id);
 			continue;
 		}
 
-		msg = instr->tx_msg;
-
-		if (msg->event_count <= msg->pair->event_count) {
-			debug("%p(%s): Send %x, delay is on TX side (%d <= %d)\n",
-			      lls, instr->id, msg->msg_id, msg->event_count, msg->pair->event_count);
+		bias = delay_bias(instr, 1);
+		if (bias < 0) {
+			debug("%p(%s): TX, delay is on TX side (bias %ld)\n",
+			      lls, instr->id, bias);
 			delay_this_side = 1;
 		} else {
-			debug("%p(%s): Send %x, delay is on RX side (%d > %d)\n",
-			      lls, instr->id, msg->msg_id, msg->event_count, msg->pair->event_count);
+			debug("%p(%s): TX, delay is on RX side (bias %ld)\n",
+			      lls, instr->id, bias);
 			delay_this_side = 0;
 		}
-		msg->event_count++;
 
 		if (lls->bound_lls == BOUND_LLS_EXITED) {
 			debug("%p(%s): Send when bound to a dead thread; doomed\n",
@@ -1789,31 +1891,47 @@ send_messages(struct high_level_state *hls)
 			exit_thread(lls);
 			EVENT(tx_bound_exited);
 		} else if (lls->bound_lls) {
-			if (lls->bound_lls->bound_receiving_message) {
-				if (lls->bound_lls->bound_receiving_message == msg->pair &&
-				    rx_message_filter(lls, msg->pair, lls->bound_lls, msg)) {
-					debug("%p(%s): Transmit to bound thread %p which is already waiting\n",
-					      lls,
-					      instr->id,
-					      lls->bound_lls);
-					discharge_message(lls, msg,
-							  lls->bound_lls, lls->bound_lls->bound_receiving_message);
-					lls->bound_lls->bound_receiving_message = NULL;
-					low_level_state_push(&new_llsa, lls);
-					hls->ll_states.content[i] = NULL;
-					EVENT(tx_bound_fast);
-				} else {
-					debug("%p(%s): bound thread received wrong message\n", lls, instr->id);
-					hls->ll_states.content[i] = NULL;
+			if (lls->bound_lls->nr_bound_receiving_messages != 0) {
+				int tx_idx;
+				int rx_idx;
+				struct msg_template *rx_msg;
+				struct msg_template *tx_msg;
+				int keep = 0;
+				hls->ll_states.content[i] = NULL;
+				for (rx_idx = 0; rx_idx < lls->bound_lls->nr_bound_receiving_messages; rx_idx++) {
+					rx_msg = lls->bound_lls->bound_receiving_messages[rx_idx];
+					for (tx_idx = 0; tx_idx < instr->nr_tx_msg; tx_idx++) {
+						tx_msg = instr->tx_msgs[tx_idx];
+						if (tx_msg->pair == rx_msg &&
+						    rx_message_filter(lls->bound_lls, rx_msg, lls, tx_msg)) {
+							debug("%p(%s): Transmit to bound thread %p which is already waiting\n",
+							      lls,
+							      instr->id,
+							      lls->bound_lls);
+							if (keep)
+								lls = dupe_lls(lls);
+							discharge_message(lls, tx_msg, lls->bound_lls, rx_msg);
+							lls->bound_lls->bound_receiving_messages = NULL;
+							lls->bound_lls->nr_bound_receiving_messages = 0;
+							low_level_state_push(&new_llsa, lls);
+							keep = 1;
+							EVENT(tx_bound_fast);
+						}
+					}
+				}
+
+				if (!keep) {
+					debug("%p(%s): Bound thread received wrong message\n", lls, instr->id);
 					exit_thread(lls);
-					EVENT(tx_bound_wrong_message);
+					EVENT(tx_bound_failed);
 				}
 			} else {
 				debug("%p(%s): Transmit to bound thread %p which isn't yet ready\n",
 				      lls,
 				      instr->id,
 				      lls->bound_lls);
-				lls->bound_sending_message = msg;
+				lls->nr_bound_sending_messages = instr->nr_tx_msg;
+				lls->bound_sending_messages = instr->tx_msgs;
 				have_sends = 1;
 				need_futex = 1;
 				lls->mbox = &mbox;
@@ -1821,14 +1939,26 @@ send_messages(struct high_level_state *hls)
 			}
 		} else {
 			/* Perform a general send. */
-			lls->unbound_sending_message = msg;
+			lls->nr_unbound_sending_messages = instr->nr_tx_msg;
+			lls->unbound_sending_messages = instr->tx_msgs;
 			for (j = 0; j < message_receivers.sz; j++) {
 				struct low_level_state *rx_lls = message_receivers.content[j];
-				assert(rx_lls->unbound_receiving_message);
-				if (rx_lls->unbound_receiving_message == msg->pair &&
-				    rx_message_filter(rx_lls, msg->pair, lls, msg)) {
-					debug("%p(%s): inject message into remote LLS %p\n", lls, instr->id, rx_lls);
-					rendezvous_threads_tx(&new_llsa, lls, rx_lls);
+
+				int rx_idx;
+				assert(rx_lls->nr_unbound_receiving_messages != 0);
+				for (rx_idx = 0; rx_idx < rx_lls->nr_unbound_receiving_messages; rx_idx++) {
+					struct msg_template *rx_msg = rx_lls->unbound_receiving_messages[rx_idx];
+					int tx_idx;
+					for (tx_idx = 0; tx_idx < instr->nr_tx_msg; tx_idx++) {
+						struct msg_template *tx_msg = instr->tx_msgs[tx_idx];
+						if (rx_msg == tx_msg->pair &&
+						    rx_message_filter(rx_lls, rx_msg, lls, tx_msg)) {
+							debug("%p(%s): inject message into remote LLS %p\n",
+							      lls, instr->id, rx_lls);
+							rendezvous_threads_tx(&new_llsa, tx_msg, lls, rx_msg, rx_lls);
+							EVENT(tx_unbound_early);
+						}
+					}
 				}
 			}
 			/* And tell any future receivers that we're
@@ -1884,7 +2014,7 @@ send_messages(struct high_level_state *hls)
 					struct low_level_state *lls = hls->ll_states.content[i];
 					if (!lls)
 						continue;
-					if (lls->unbound_sending_message)
+					if (lls->nr_unbound_sending_messages != 0)
 						continue;
 					if (lls->bound_lls == BOUND_LLS_EXITED) {
 						debug("%p(%s): Unbound transmit, peer exited\n",
@@ -1893,7 +2023,7 @@ send_messages(struct high_level_state *hls)
 						hls->ll_states.content[i] = NULL;
 						lls->mbox = NULL;
 						exit_thread(lls);
-					} else if (lls->bound_sending_message) {
+					} else if (lls->nr_bound_sending_messages != 0) {
 						have_more_bound_tx = 1;
 					} else {
 						debug("%p(%s): Unbound transmit succeeded early\n",
@@ -1915,11 +2045,12 @@ send_messages(struct high_level_state *hls)
 		if (!lls)
 			continue;
 		hls->ll_states.content[i] = NULL;
-		if (lls->unbound_sending_message) {
-			lls->unbound_sending_message = NULL;
+		if (lls->nr_unbound_sending_messages != 0) {
+			lls->unbound_sending_messages = NULL;
+			lls->nr_unbound_sending_messages = 0;
 			low_level_state_erase_first(&message_senders, lls);
 		}
-		if (lls->bound_sending_message) {
+		if (lls->nr_bound_sending_messages != 0) {
 			debug("%p(%s): Bound send failed\n", lls, plan.cfg_nodes[lls->cfg_node].id);
 			exit_thread(lls);
 			EVENT(tx_bound_failed_late);
@@ -2409,12 +2540,14 @@ dump_stats(void)
 		printf("CFG node %s visited %d times\n",
 		       plan.cfg_nodes[i].id,
 		       plan.cfg_nodes[i].cntr);
-		if (plan.cfg_nodes[i].rx_msg)
-			printf("\tRX %d times\n",
-			       plan.cfg_nodes[i].rx_msg->event_count);
-		if (plan.cfg_nodes[i].tx_msg)
-			printf("\tTX %d times\n",
-			       plan.cfg_nodes[i].tx_msg->event_count);
+		for (j = 0; j < plan.cfg_nodes[i].nr_rx_msg; j++)
+			printf("\tRX %x %d times\n",
+			       plan.cfg_nodes[i].rx_msgs[j]->msg_id,
+			       plan.cfg_nodes[i].rx_msgs[j]->event_count);
+		for (j = 0; j < plan.cfg_nodes[i].nr_tx_msg; j++)
+			printf("\tTX %x %d times\n",
+			       plan.cfg_nodes[i].tx_msgs[j]->msg_id,
+			       plan.cfg_nodes[i].tx_msgs[j]->event_count);
 	}
 }
 #endif
