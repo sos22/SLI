@@ -767,8 +767,9 @@ public:
 
 	crashEnforcementRoots(std::map<unsigned, std::set<CfgLabel> > &roots, ThreadAbstracter &abs) {
 		for (auto it = roots.begin(); it != roots.end(); it++) {
+			AbstractThread tid(abs.newThread(it->first));
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-				content[it->first].insert(ThreadCfgLabel(abs.newThread(it->first), *it2));
+				content[it->first].insert(ThreadCfgLabel(tid, *it2));
 		}
 	}
 
