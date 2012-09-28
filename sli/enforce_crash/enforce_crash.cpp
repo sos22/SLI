@@ -862,19 +862,15 @@ optimiseCfg(crashEnforcementData &ced)
 static void
 avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 {
-	/* Instructions which we've decided need to be patched as
-	   interpreter entry points but which we haven't gotten around
-	   to doing yet. */
-	std::set<unsigned long> neededEntryPoints;
-	/* Instructions which we now set up as entry points */
+	/* Instructions which need to be interpreted but which aren't
+	   currently covered by an entry point. */
+	std::set<unsigned long> needInterpret;
+	/* Instructions which are going to patched as entry points. */
 	std::set<unsigned long> entryPoints;
-	/* Not entry points, and not part of the main CFG, but the
-	   interpreter should keep interpreting if it hits one
-	   anyway. */
-	std::set<unsigned long> keepInterpretingInstrs;
-	/* Instructions which are entry points because of the explicit
-	   CFG. */
-	std::set<unsigned long> basicEntryPoints;
+	/* Instructions which aren't going to be patched as entry
+	   points but which are special in some way such that the
+	   interpreter needs to keep going if it hits one. */
+	std::set<unsigned long> contInterpret;
 
 	if (debug_declobber_instructions)
 		printf("Computing clobbered instructions set\n");
@@ -885,16 +881,26 @@ avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 		unsigned long r = vr.unwrap_vexrip();
 		if (debug_declobber_instructions)
 			printf("%lx is a root\n", r);
-		neededEntryPoints.insert(r);
-		basicEntryPoints.insert(r);
+		needInterpret.insert(r);
 	}
 
-	while (!neededEntryPoints.empty()) {
-		unsigned long e = *neededEntryPoints.begin();
-		neededEntryPoints.erase(e);
+	while (!needInterpret.empty()) {
+		unsigned long e = *needInterpret.begin();
+		needInterpret.erase(e);
 
 		if (debug_declobber_instructions)
 			printf("Considering entry point %lx\n", e);
+
+		if (contInterpret.count(e)) {
+			if (debug_declobber_instructions)
+				printf("Already in interpret set.\n");
+			continue;
+		}
+		if (entryPoints.count(e)) {
+			if (debug_declobber_instructions)
+				printf("Already an entry point.\n");
+			continue;
+		}
 
 		/* Are there any branches which we don't know about to
 		   this instruction's clobbered set?  We approximate
@@ -910,7 +916,7 @@ avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 			   there's not space before the end of the
 			   function, so try to cover its predecessors
 			   instead. */
-			keepInterpretingInstrs.insert(e);
+			contInterpret.insert(e);
 			std::set<unsigned long> predecessors;
 			oracle->findPredecessors(e, predecessors);
 			if (debug_declobber_instructions) {
@@ -923,7 +929,7 @@ avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 				}
 				printf("]\n");
 			}
-			neededEntryPoints.insert(predecessors.begin(), predecessors.end());
+			needInterpret.insert(predecessors.begin(), predecessors.end());
 		} else {
 			entryPoints.insert(e);
 			for (unsigned x = 1; x < 5; x++) {
@@ -931,9 +937,7 @@ avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 				oracle->findPredecessors(e + x, predecessors);
 				for (unsigned y = 0; y < x; y++)
 					predecessors.erase(e + y);
-				if (predecessors.empty())
-					continue;
-				if (debug_declobber_instructions) {
+				if (debug_declobber_instructions && !predecessors.empty()) {
 					printf("Entry point %lx clobbers %lx; predecessors = [",
 					       e, e + x);
 					for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
@@ -943,33 +947,29 @@ avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 					}
 					printf("]\n");
 				}
-				neededEntryPoints.insert(predecessors.begin(), predecessors.end());
+				needInterpret.insert(predecessors.begin(), predecessors.end());
 			}
 		}
 	}
 
-	std::set<unsigned long> dummyEntryPoints;
-	for (auto it = entryPoints.begin(); it != entryPoints.end(); it++)
-		if (!basicEntryPoints.count(*it))
-			dummyEntryPoints.insert(*it);
 	if (debug_declobber_instructions) {
-		printf("Dummy entry points = [");
-		for (auto it = dummyEntryPoints.begin(); it != dummyEntryPoints.end(); it++) {
-			if (it != dummyEntryPoints.begin())
+		printf("Entry points = [");
+		for (auto it = entryPoints.begin(); it != entryPoints.end(); it++) {
+			if (it != entryPoints.begin())
 				printf(", ");
 			printf("0x%lx", *it);
 		}
-		printf("], keepInterpreting = [");
-		for (auto it = keepInterpretingInstrs.begin(); it != keepInterpretingInstrs.end(); it++) {
-			if (it != keepInterpretingInstrs.begin())
+		printf("], contInterpret = [");
+		for (auto it = contInterpret.begin(); it != contInterpret.end(); it++) {
+			if (it != contInterpret.begin())
 				printf(", ");
 			printf("0x%lx", *it);
 		}
 		printf("]\n");
 	}
 
-	ced.dummyEntryPoints = dummyEntryPoints;
-	ced.keepInterpretingInstrs = keepInterpretingInstrs;
+	ced.patchPoints = entryPoints;
+	ced.interpretInstrs = contInterpret;
 }
 
 static void

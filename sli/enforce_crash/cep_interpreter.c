@@ -996,19 +996,19 @@ exit_emulator_ops = {
 };
 
 static void
-restart_interpreter(int entry_idx)
+restart_interpreter(void)
 {
 	/* We tried to exit the interpreter and then trod on another
 	 * entry point.  Try that again. */
-	debug("Restart interpreter with idx %d\n", entry_idx);
+	debug("Restart interpreter at %lx.\n", find_pts()->client_regs.rip);
 	EVENT(restart_interpreter);
 	release_big_lock();
 	asm volatile (
 		"    mov %%gs:0, %%rsp\n"      /* Reset the stack */
-		"    subq %1, %%rsp\n"         /* Make sure we don't tread on stashed registers */
+		"    subq %0, %%rsp\n"         /* Make sure we don't tread on stashed registers */
 		"    jmp start_interpreting\n" /* Restart the interpreter */
 		:
-		: "D" (entry_idx), "i" (sizeof(struct reg_struct) - 8)
+		: "i" (sizeof(struct reg_struct) - 8)
 		);
 	debug("Huh?  Restart interpreter didn't work\n");
 	abort();
@@ -1059,18 +1059,18 @@ exit_interpreter(void)
 				 * entry point. */
 				for (j = 0; j < plan.nr_entry_points; j++)
 					if (plan.entry_points[j]->orig_rip == pts->client_regs.rip)
-						restart_interpreter(j);
+						restart_interpreter();
 			}
 		}
 		if (hit_patch)
 			continue;
-		for (i = 0; i < plan.nr_keep_interpreting; i++) {
-			if (plan.keep_interpreting[i] == pts->client_regs.rip) {
+		for (i = 0; i < plan.nr_force_interpret; i++) {
+			if (plan.force_interpret[i] == pts->client_regs.rip) {
 				/* This instruction hasn't been
 				   patched, but for some reason the
 				   plan requires us to interpret it
 				   anyway.  Do so. */
-				debug("Destination RIP %lx matches keep_interpreting slot %d\n",
+				debug("Destination RIP %lx matches force_interpret slot %d\n",
 				      pts->client_regs.rip, i);
 				hit_patch = 1;
 				ctxt.patch = NULL;
@@ -1080,7 +1080,7 @@ exit_interpreter(void)
 				 * entry point. */
 				for (j = 0; j < plan.nr_entry_points; j++)
 					if (plan.entry_points[j]->orig_rip == pts->client_regs.rip)
-						restart_interpreter(j);
+						restart_interpreter();
 				break;
 			}
 		}
@@ -2116,13 +2116,18 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 }
 
 static void
-start_interpreting(int entrypoint_idx)
+start_interpreting(void)
 {
-	const struct cep_entry_point *entry_point;
 	struct per_thread_state *pts = find_pts();
+	const struct cep_entry_point *entry_point;
 	struct high_level_state hls;
+	int entrypoint_idx;
 
-	if (entrypoint_idx == -1) {
+	for (entrypoint_idx = 0; entrypoint_idx < plan.nr_entry_points; entrypoint_idx++)
+		if (plan.entry_points[entrypoint_idx]->orig_rip == pts->client_regs.rip)
+			break;
+
+	if (entrypoint_idx == plan.nr_entry_points) {
 		debug("Start with a dummy entry point\n");
 		EVENT(dummy_entry_point);
 		exit_interpreter();
@@ -2171,9 +2176,9 @@ asm(
 "    push %rcx\n"
 "    push %rdx\n"
 "    push %rax\n"
-"    push %rax\n"          /* Leave space for rip */
-"__trampoline_client_to_interp_load_edi:\n"
-"    mov $0x11223344, %edi\n"
+"__trampoline_client_to_interp_load_rip:\n"
+"    movq $0x1122334455667788, %rax\n"
+"    push %rax\n"
 "__trampoline_client_to_interp_load_rdx:\n"
 "    movq $0x1122334455667788, %rdx\n"
 "    jmp *%rdx\n"
@@ -2208,14 +2213,14 @@ asm(
 "__trampoline_interp_to_client_end:\n"
 "\n");
 void __trampoline_client_to_interp_start(void) __attribute__((visibility ("hidden")));
-void __trampoline_client_to_interp_load_edi(void) __attribute__((visibility ("hidden")));
 void __trampoline_client_to_interp_load_rdx(void) __attribute__((visibility ("hidden")));
+void __trampoline_client_to_interp_load_rip(void) __attribute__((visibility ("hidden")));
 void __trampoline_client_to_interp_end(void) __attribute__((visibility ("hidden")));
 void __trampoline_interp_to_client_start(void) __attribute__((visibility ("hidden")));
 void __trampoline_interp_to_client_jmp_client(void) __attribute__((visibility ("hidden")));
 void __trampoline_interp_to_client_end(void) __attribute__((visibility ("hidden")));
 static unsigned long
-alloc_trampoline(int idx)
+alloc_trampoline(unsigned long rip)
 {
 	size_t tramp_size = (unsigned long)&__trampoline_client_to_interp_end - (unsigned long)&__trampoline_client_to_interp_start;
 	unsigned char *buffer;
@@ -2223,22 +2228,16 @@ alloc_trampoline(int idx)
 	debug("tramp start %p, end %p, size %zx\n", &__trampoline_client_to_interp_end, &__trampoline_client_to_interp_start, tramp_size);
 	buffer = alloc_executable(tramp_size);
 	memcpy(buffer, &__trampoline_client_to_interp_start, tramp_size);
-	*(int *)(buffer +
-		 (unsigned long)&__trampoline_client_to_interp_load_edi -
-		 (unsigned long)&__trampoline_client_to_interp_start +
-		 1) = idx;
+	*(long *)(buffer +
+		  (unsigned long)&__trampoline_client_to_interp_load_rip -
+		  (unsigned long)&__trampoline_client_to_interp_start +
+		  2) = rip;
 	*(long *)(buffer +
 		  (unsigned long)&__trampoline_client_to_interp_load_rdx -
 		  (unsigned long)&__trampoline_client_to_interp_start +
 		  2) = (unsigned long)start_interpreting;
 	debug("Trampoline at %p\n", buffer);
 	return (unsigned long)buffer;
-}
-
-static unsigned long
-alloc_dummy_trampoline(void)
-{
-	return alloc_trampoline(-1);
 }
 
 struct exit_trampoline {
@@ -2445,17 +2444,8 @@ activate(void)
 
 	alloc_thread_state_area();
 
-	/* We need to patch each entry point so that it turns into a
-	   jump instruction which targets the patch.  Do so. */
-	for (x = 0; x < plan.nr_entry_points; x++)
-		patch_entry_point(plan.entry_points[x]->orig_rip, alloc_trampoline(x));
-
-	/* And the dummy entry points as well. */
-	if (plan.nr_dummy_entry_points != 0) {
-		unsigned long tramp = alloc_dummy_trampoline();
-		for (x = 0; x < plan.nr_dummy_entry_points; x++)
-			patch_entry_point(plan.dummy_entry_points[x], tramp);
-	}
+	for (x = 0; x < plan.nr_patch_points; x++)
+		patch_entry_point(plan.patch_points[x], alloc_trampoline(plan.patch_points[x]));
 
 	hook_clone();
 }

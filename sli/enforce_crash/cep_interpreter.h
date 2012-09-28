@@ -110,10 +110,10 @@ struct crash_enforcement_plan {
 	struct cfg_instr *cfg_nodes;
 	int base_msg_id;
 	int msg_id_limit;
-	int nr_dummy_entry_points;
-	const unsigned long *dummy_entry_points;
-	int nr_keep_interpreting;
-	const unsigned long *keep_interpreting;
+	int nr_patch_points;
+	const unsigned long *patch_points;
+	int nr_force_interpret;
+	const unsigned long *force_interpret;
 };
 
 #define mk_flex_array(name)						\

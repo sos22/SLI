@@ -1136,8 +1136,8 @@ public:
 	slotMapT exprsToSlots;
 	expressionEvalMapT expressionEvalPoints;
 	abstractThreadExitPointsT threadExitPoints;
-	std::set<unsigned long> dummyEntryPoints;
-	std::set<unsigned long> keepInterpretingInstrs;
+	std::set<unsigned long> patchPoints;
+	std::set<unsigned long> interpretInstrs;
 
 	crashEnforcementData() {}
 	crashEnforcementData(const MaiMap &mai,
@@ -1171,14 +1171,14 @@ public:
 		    !exprsToSlots.parse(str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||
 		    !threadExitPoints.parse(str, &str) ||
-		    !parseThisString("Dummy entry points = [", str, &str))
+		    !parseThisString("Patch points = [", str, &str))
 			return false;
-		while (!parseThisString("], keepInterpreting = [", str, &str)) {
+		while (!parseThisString("], contInterpret = [", str, &str)) {
 			unsigned long v;
 			if (!parseThisString("0x", str, &str) ||
 			    !parseHexUlong(&v, str, &str))
 				return false;
-			dummyEntryPoints.insert(v);
+			patchPoints.insert(v);
 			parseThisString(", ", str, &str);
 		}
 		while (!parseThisString("]\n", str, &str)) {
@@ -1186,7 +1186,7 @@ public:
 			if (!parseThisString("0x", str, &str) ||
 			    !parseHexUlong(&v, str, &str))
 				return false;
-			keepInterpretingInstrs.insert(v);
+			interpretInstrs.insert(v);
 			parseThisString(", ", str, &str);
 		}
 		internmentState state;
@@ -1204,15 +1204,15 @@ public:
 		exprsToSlots.prettyPrint(f);
 		expressionEvalPoints.prettyPrint(f);
 		threadExitPoints.prettyPrint(f);
-		fprintf(f, "Dummy entry points = [");
-		for (auto it = dummyEntryPoints.begin(); it != dummyEntryPoints.end(); it++) {
-			if (it != dummyEntryPoints.begin())
+		fprintf(f, "Patch points = [");
+		for (auto it = patchPoints.begin(); it != patchPoints.end(); it++) {
+			if (it != patchPoints.begin())
 				fprintf(f, ", ");
 			fprintf(f, "0x%lx", *it);
 		}
-		fprintf(f, "], keepInterpreting = [");
-		for (auto it = keepInterpretingInstrs.begin(); it != keepInterpretingInstrs.end(); it++) {
-			if (it != keepInterpretingInstrs.begin())
+		fprintf(f, "], contInterpret = [");
+		for (auto it = interpretInstrs.begin(); it != interpretInstrs.end(); it++) {
+			if (it != interpretInstrs.begin())
 				fprintf(f, ", ");
 			fprintf(f, "0x%lx", *it);
 		}
@@ -1227,8 +1227,8 @@ public:
 		expressionEvalPoints |= ced.expressionEvalPoints;
 		threadExitPoints |= ced.threadExitPoints;
 		crashCfg |= ced.crashCfg;
-		for (auto it = ced.dummyEntryPoints.begin(); it != ced.dummyEntryPoints.end(); it++)
-			dummyEntryPoints.insert(*it);
+		patchPoints.insert(ced.patchPoints.begin(), ced.patchPoints.end());
+		interpretInstrs.insert(ced.interpretInstrs.begin(), ced.interpretInstrs.end());
 	}
 };
 

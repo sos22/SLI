@@ -731,16 +731,16 @@ main(int argc, char *argv[])
 	fprintf(f, "\n");
 	dump_annotated_cfg(ced, f, relabeller, "__cfg_nodes");
 	compute_entry_point_list(oracle, ced, f, relabeller, "__entry_points");
-	fprintf(f, "const unsigned long __dummy_entry_points[] = {");
-	for (auto it = ced.dummyEntryPoints.begin(); it != ced.dummyEntryPoints.end(); it++) {
-		if (it != ced.dummyEntryPoints.begin())
+	fprintf(f, "const unsigned long __patch_points[] = {");
+	for (auto it = ced.patchPoints.begin(); it != ced.patchPoints.end(); it++) {
+		if (it != ced.patchPoints.begin())
 			fprintf(f, ", ");
 		fprintf(f, "0x%lxul", *it);
 	}
 	fprintf(f, "};\n");
-	fprintf(f, "const unsigned long __keep_interpreting[] = {");
-	for (auto it = ced.keepInterpretingInstrs.begin(); it != ced.keepInterpretingInstrs.end(); it++) {
-		if (it != ced.keepInterpretingInstrs.begin())
+	fprintf(f, "const unsigned long __force_interpret[] = {");
+	for (auto it = ced.interpretInstrs.begin(); it != ced.interpretInstrs.end(); it++) {
+		if (it != ced.interpretInstrs.begin())
 			fprintf(f, ", ");
 		fprintf(f, "0x%lxul", *it);
 	}
@@ -752,16 +752,14 @@ main(int argc, char *argv[])
 	fprintf(f, "    .nr_cfg_nodes = sizeof(__cfg_nodes)/sizeof(__cfg_nodes[0]),\n");
 	fprintf(f, "    .base_msg_id = 0x%x,\n", lowest_msg_id(ced));
 	fprintf(f, "    .msg_id_limit = 0x%x,\n", highest_msg_id(ced) + 1);
-	fprintf(f, "    .nr_dummy_entry_points = %zd,\n", ced.dummyEntryPoints.size());
-	fprintf(f, "    .dummy_entry_points = __dummy_entry_points,\n");
-	fprintf(f, "    .nr_keep_interpreting = %zd,\n", ced.keepInterpretingInstrs.size());
-	fprintf(f, "    .keep_interpreting = __keep_interpreting,\n");
+	fprintf(f, "    .nr_patch_points = sizeof(__patch_points)/sizeof(__patch_points[0]),\n");
+	fprintf(f, "    .patch_points = __patch_points,\n");
+	fprintf(f, "    .nr_force_interpret = sizeof(__force_interpret)/sizeof(__force_interpret[0]),\n");
+	fprintf(f, "    .force_interpret = __force_interpret,\n");
 	fprintf(f, "};\n");
 
 	fprintf(f, "\n");
-	fprintf(f,
-		"const char program_to_patch[] = \"%s\";\n",
-		realpath(binary,NULL));
+	fprintf(f, "const char program_to_patch[] = \"%s\";\n",	realpath(binary,NULL));
 	fclose(f);
 
 	return 0;
