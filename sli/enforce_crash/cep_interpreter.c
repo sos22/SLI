@@ -103,7 +103,9 @@ struct {
 	iter(condition_failed)			\
 	iter(condition_passed)			\
 	iter(dummy_entry_point)			\
-	iter(enter_interpreter)
+	iter(enter_interpreter)			\
+	iter(finish_send)			\
+	iter(finish_non_send)
 
 #define mk_stat(name)				\
 	long name;
@@ -1777,10 +1779,12 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 					assert(lls->bound_lls);
 					lls->await_bound_lls_exit = 1;
 					low_level_state_push(&hls->ll_states, lls);
+					EVENT(finish_send);
 				} else {
 					debug("%p(%s): successfully finished this CFG; didn't end with a send\n",
 					      lls, current_cfg_node->id);
 					exit_thread(lls);
+					EVENT(finish_non_send);
 				}
 			} else {
 				exit_thread(lls);
