@@ -441,17 +441,34 @@ heuristicSimplify(IRExpr *e)
 	return e;
 }
 
+/* We're allowed to make errors where the approximation returns 1 and
+   the true value is 0 */
+#define ERROR_POSITIVE 1
+/* Allow errors where the approximation returns 0 and the true value
+   is 1. */
+#define ERROR_NEGATIVE 2
+
 /* We can't get at the values of free variables from the run-time
    enforcer, so we might as well remove them now. */
+/* Return value is either NULL, if we can't compute any approximation
+   to @what with the desired error types, or an expression which
+   approximates @what.  In the latter case, *@errors_produced will be
+   set to a mask of the types of errors introduced. */
 static IRExpr *
-removeFreeVariables(IRExpr *what)
+removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 {
+	if (errors_allowed == (ERROR_POSITIVE | ERROR_NEGATIVE))
+		return NULL;
+	if (errors_allowed != 0) {
+		assert(errors_produced != NULL);
+		*errors_produced = 0;
+	}
 	switch (what->tag) {
 	case Iex_Get:
 		return what;
 	case Iex_GetI: {
 		auto *i = (IRExprGetI *)what;
-		IRExpr *ix = removeFreeVariables(i->ix);
+		IRExpr *ix = removeFreeVariables(i->ix, 0, NULL);
 		if (!ix)
 			return NULL;
 		if (ix == i->ix)
@@ -461,16 +478,16 @@ removeFreeVariables(IRExpr *what)
 	case Iex_Qop: {
 		abort();
 		auto *i = (IRExprQop *)what;
-		auto arg1 = removeFreeVariables(i->arg1);
+		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
 		if (!arg1)
 			return NULL;
-		auto arg2 = removeFreeVariables(i->arg2);
+		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
 		if (!arg2)
 			return NULL;
-		auto arg3 = removeFreeVariables(i->arg3);
+		auto arg3 = removeFreeVariables(i->arg3, 0, NULL);
 		if (!arg3)
 			return NULL;
-		auto arg4 = removeFreeVariables(i->arg4);
+		auto arg4 = removeFreeVariables(i->arg4, 0, NULL);
 		if (!arg4)
 			return NULL;
 		if (arg1 == i->arg1 && arg2 == i->arg2 && arg3 == i->arg3 && arg4 == i->arg4)
@@ -481,13 +498,13 @@ removeFreeVariables(IRExpr *what)
 	case Iex_Triop: {
 		abort();
 		auto *i = (IRExprTriop *)what;
-		auto arg1 = removeFreeVariables(i->arg1);
+		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
 		if (!arg1)
 			return NULL;
-		auto arg2 = removeFreeVariables(i->arg2);
+		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
 		if (!arg2)
 			return NULL;
-		auto arg3 = removeFreeVariables(i->arg3);
+		auto arg3 = removeFreeVariables(i->arg3, 0, NULL);
 		if (!arg3)
 			return NULL;
 		if (arg1 == i->arg1 && arg2 == i->arg2 && arg3 == i->arg3)
@@ -497,8 +514,8 @@ removeFreeVariables(IRExpr *what)
 	}
 	case Iex_Binop: {
 		auto i = (IRExprBinop *)what;
-		auto arg1 = removeFreeVariables(i->arg1);
-		auto arg2 = removeFreeVariables(i->arg2);
+		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
+		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
 		if (arg1 == i->arg1 && arg2 == i->arg2)
 			return what;
 		if (arg1 && arg2)
@@ -520,11 +537,33 @@ removeFreeVariables(IRExpr *what)
 	}
 	case Iex_Unop: {
 		auto i = (IRExprUnop *)what;
-		auto arg = removeFreeVariables(i->arg);
+		int errors2;
+		int errors3;
+		switch (errors_allowed) {
+		case 0:
+			errors2 = 0;
+			break;
+		case ERROR_POSITIVE:
+			errors2 = ERROR_NEGATIVE;
+			break;
+		case ERROR_NEGATIVE:
+			errors2 = ERROR_POSITIVE;
+			break;
+		default:
+			abort();
+		}
+		auto arg = removeFreeVariables(i->arg, errors2, &errors3);
 		if (!arg)
 			return NULL;
 		if (arg == i->arg)
 			return i;
+		if (errors_produced) {
+			*errors_produced = 0;
+			if (errors3 & ERROR_NEGATIVE)
+				*errors_produced |= ERROR_POSITIVE;
+			if (errors3 & ERROR_POSITIVE)
+				*errors_produced |= ERROR_NEGATIVE;
+		}
 		return IRExpr_Unop(i->op, arg);
 	}
 	case Iex_Load:
@@ -546,25 +585,66 @@ removeFreeVariables(IRExpr *what)
 		   value at this stage, so we can't put in a sensible
 		   default for the other one. */
 		auto i = (IRExprMux0X *)what;
-		auto cond = removeFreeVariables(i->cond);
-		if (!cond)
-			return NULL;
-		auto expr0 = removeFreeVariables(i->expr0);
-		if (!expr0)
-			return NULL;
-		auto exprX = removeFreeVariables(i->exprX);
-		if (!exprX)
-			return NULL;
+		auto cond = removeFreeVariables(i->cond, 0, NULL);
+		int err0, errX;
+		auto expr0 = removeFreeVariables(i->expr0, errors_allowed, &err0);
+		auto exprX = removeFreeVariables(i->exprX, errors_allowed, &errX);
 		if (cond == i->cond && expr0 == i->expr0 && exprX == i->exprX)
 			return i;
+		if (errors_allowed == 0 && (expr0 == NULL || exprX == NULL || cond == NULL))
+			return NULL;
+		if (!expr0 && !exprX)
+			return NULL;
+		*errors_produced = err0 | errX;
+		if (errors_allowed && (!expr0 || !exprX) && expr0->type() == Ity_I1) {
+			IRExpr *def;
+			if (errors_allowed & ERROR_POSITIVE) {
+				def = IRExpr_Const(IRConst_U1(1));
+				*errors_produced |= ERROR_POSITIVE;
+			} else {
+				def = IRExpr_Const(IRConst_U1(0));
+				*errors_produced |= ERROR_NEGATIVE;
+			}
+			if (!expr0)
+				expr0 = def;
+			if (!exprX)
+				exprX = def;
+			
+		}
+		if (!cond && expr0->type() == Ity_I1) {
+			/* mux0x(cond, expr0, exprx) = (cond && exprX) || (!cond && expr0).
+			   If cond is unknown then that can be approximated to
+			   either exprX && expr0 or exprX || expr0, depending on
+			   the type of error allowed. */
+			if (errors_allowed & ERROR_NEGATIVE) {
+				*errors_produced |= ERROR_NEGATIVE;
+				return IRExpr_Binop(
+					Iop_And1,
+					expr0,
+					exprX);
+			} else {
+				*errors_produced |= ERROR_POSITIVE;
+				return IRExpr_Binop(
+					Iop_Or1,
+					expr0,
+					exprX);
+			}
+		}
+		
+		if (!cond || !expr0 || !exprX) {
+			/* Out of ideas */
+			return NULL;
+		}
+
 		return IRExpr_Mux0X(cond, expr0, exprX);
 	}
 	case Iex_Associative: {
 		auto i = (IRExprAssociative *)what;
 		int idx;
 		IRExpr *a;
+		int err_a;
 		for (idx = 0; idx < i->nr_arguments; idx++) {
-			a = removeFreeVariables(i->contents[idx]);
+			a = removeFreeVariables(i->contents[idx], errors_allowed, &err_a);
 			if (a != i->contents[idx])
 				break;
 		}
@@ -573,14 +653,69 @@ removeFreeVariables(IRExpr *what)
 		IRExprAssociative *newI = (IRExprAssociative *)IRExpr_Associative(i->nr_arguments, i->op);
 		int idx2 = idx;
 		memcpy(newI->contents, i->contents, idx * sizeof(IRExpr *));
-		if (a) {
-			newI->contents[idx2] = a;
-			idx2++;
-		}
-		idx++;
+		goto l1;
+
 		while (idx < i->nr_arguments) {
-			a = removeFreeVariables(i->contents[idx]);
-			if (a) {
+			a = removeFreeVariables(i->contents[idx], errors_allowed, &err_a);
+		l1:
+			if (!a || err_a) {
+				switch (i->op) {
+				case Iop_Add8:
+				case Iop_Add16:
+				case Iop_Add32:
+				case Iop_Add64:
+					/* k + x, where x is
+					 * completely unknown, is
+					 * itself unknown. */
+					return NULL;
+				case Iop_And1:
+				case Iop_And8:
+				case Iop_And16:
+				case Iop_And32:
+				case Iop_And64:
+					if (!a) {
+						/* k & x, where x is
+						 * completely unknown.
+						 * Approximate it by
+						 * just k with a
+						 * positive error. */
+						if (errors_allowed & ERROR_POSITIVE)
+							*errors_produced |= ERROR_POSITIVE;
+						else
+							return NULL;
+					} else {
+						assert(err_a == errors_allowed);
+						*errors_produced |= err_a;
+						newI->contents[idx2] = a;
+						idx2++;
+					}
+					break;
+				case Iop_Or1:
+				case Iop_Or8:
+				case Iop_Or16:
+				case Iop_Or32:
+				case Iop_Or64:
+					if (!a) {
+						/* k | x, where x is
+						 * completely unknown.
+						 * Approximate it by
+						 * just k with a
+						 * negative error. */
+						if (errors_allowed & ERROR_NEGATIVE)
+							*errors_produced |= ERROR_NEGATIVE;
+						else
+							return NULL;
+					} else {
+						assert(err_a == errors_allowed);
+						*errors_produced |= err_a;
+						newI->contents[idx2] = a;
+						idx2++;
+					}
+					break;
+				default:
+					abort();
+				}
+			} else {
 				newI->contents[idx2] = a;
 				idx2++;
 			}
@@ -617,7 +752,8 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	VexPtr<OracleInterface> oracleI(oracle);
 
 	IRExpr *requirement = summary->verificationCondition;
-	requirement = removeFreeVariables(requirement);
+	int ignore;
+	requirement = removeFreeVariables(requirement, ERROR_POSITIVE, &ignore);
 	requirement = internIRExpr(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
