@@ -85,6 +85,41 @@ ndChoiceState(StateMachineState **slot,
 	}
 }
 
+static StateMachineState *
+entryState(const std::vector<std::pair<CFGNode *, StateMachineState *> > &targets,
+	   bool storeLike)
+{
+	if (targets.empty()) {
+		if (storeLike)
+			return StateMachineCrash::get();
+		else
+			return StateMachineNoCrash::get();
+	} else if (targets.size() == 1) {
+		return targets[0].second;
+	} else {
+		StateMachineSideEffecting *r =
+			new StateMachineSideEffecting(
+				targets[0].first->rip,
+				new StateMachineSideEffectAssertFalse(
+					IRExpr_Unop(
+						Iop_Not1,
+						new IRExprEntryPoint(targets[0].first->label)),
+					true),
+				targets[0].second);
+		StateMachineState *acc = r;
+		for (unsigned x = 1; x < targets.size(); x++) {
+			StateMachineBifurcate *b = 
+				new StateMachineBifurcate(
+					targets[0].first->rip,
+					new IRExprEntryPoint(targets[x].first->label),
+					targets[x].second,
+					acc);
+			acc = b;
+		}
+		return acc;
+	}
+}
+
 static void
 getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 {
@@ -1781,6 +1816,8 @@ probeCFGsToMachine(Oracle *oracle,
 		{}
 	} doOne(mai, proximalNodes);
 
+	assert(!roots.empty());
+
 	std::map<CFGNode *, StateMachineState *> results;
 	for (auto it = roots.begin(); !it.finished(); it.advance())
 		performTranslation(results, *it, oracle, tid, doOne);
@@ -1788,59 +1825,26 @@ probeCFGsToMachine(Oracle *oracle,
 	if (TIMEOUT)
 		return;
 
-	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots_this_sm;
-	std::set<StateMachineState *> roots_this_sm1;
-	for (auto it = roots.begin(); !it.finished(); it.advance())
-		roots_this_sm1.insert(results[*it]);
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
-	assignFrameIds(roots_this_sm1, tid, entryStacks);
-	std::vector<StateMachineState *> roots_this_sm2;
+	{
+		std::set<StateMachineState *> roots_this_sm1;
+		for (auto it = roots.begin(); !it.finished(); it.advance())
+			roots_this_sm1.insert(results[*it]);
+		assignFrameIds(roots_this_sm1, tid, entryStacks);
+	}
+	std::vector<std::pair<CFGNode *, StateMachineState *> > roots_this_sm2;
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		CFGNode *cfgnode = *it;
 		StateMachineState *root = results[*it];
 		root = addEntrySideEffects(oracle, tid, root, entryStacks[root], cfgnode->rip);
-		roots_this_sm2.push_back(root);
+		roots_this_sm2.push_back(std::pair<CFGNode *, StateMachineState *>(cfgnode, root));
 	}
+
+	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots_this_sm;
 	for (auto it = roots.begin(); !it.finished(); it.advance())
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
-	if (roots_this_sm2.empty())
-		return;
-	StateMachineState *cursor;
-	
-	cursor = roots_this_sm2[0];
-	if (roots_this_sm2.size() > 1) {
-		IRExpr *fv = mai.freeVariable(Ity_I64, tid, *roots.begin(), false);
-		int x = 0;
-		cursor =
-			new StateMachineSideEffecting(
-				cfg_roots_this_sm[x].second->rip,
-				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(
-						Iop_Not1,
-						IRExpr_Binop(
-							Iop_CmpEQ64,
-							fv,
-							IRExpr_Const(
-								IRConst_U64(0)))),
-					true),
-				cursor);
-		for (x++;
-		     x < (int)roots_this_sm2.size();
-		     x++)
-			cursor = 
-				new StateMachineBifurcate(
-					cfg_roots_this_sm[x].second->rip,
-					IRExpr_Binop(
-						Iop_CmpEQ64,
-						fv,
-						IRExpr_Const(IRConst_U64(x))),
-					roots_this_sm2[x],
-					cursor);
-	} else {
-		/* No roots -> no machines */
-	}
-	out.insert(new StateMachine(cursor, cfg_roots_this_sm));
+	out.insert(new StateMachine(entryState(roots_this_sm2, false), cfg_roots_this_sm));
 }
 
 static StateMachine *
