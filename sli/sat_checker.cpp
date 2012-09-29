@@ -402,6 +402,7 @@ anf_context::matches(const IRExpr *a, const IRExpr *b) const
 	case Iex_HappensBefore:
 	case Iex_Const:
 	case Iex_Get:
+	case Iex_EntryPoint:
 		return false; /* by internment property */
         }
         abort();

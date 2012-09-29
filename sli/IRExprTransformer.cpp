@@ -30,6 +30,7 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 		do_case(Associative);
 		do_case(HappensBefore);
 		do_case(FreeVariable);
+		do_case(EntryPoint);
 #undef do_case
 	}
 	/* res == e shouldn't really happen, but it's just about

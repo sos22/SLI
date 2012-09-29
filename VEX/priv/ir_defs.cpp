@@ -1107,6 +1107,15 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
       *out = IRExpr_Mux0X(cond, expr0, exprX);
       return true;
     }
+  } else if (str[0] == 'E') {
+    if (parseThisString("Entry(", str, &str)) {
+      CfgLabel label(CfgLabel::uninitialised());
+      if (!label.parse(str, &str) ||
+	  !parseThisChar(')', str, suffix))
+	return false;
+      *out = new IRExprEntryPoint(label);
+      return true;
+    }
   } else if (str[0] == 'F') {
     /* Could be a float const */
     IRConst *c;

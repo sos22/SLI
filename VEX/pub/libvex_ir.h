@@ -49,6 +49,8 @@
 
 #include <stdio.h>
 
+#include <algorithm>
+
 #include "libvex_basictypes.h"
 #include "libvex_alloc.h"
 #include "libvex_print.hpp"
@@ -103,10 +105,14 @@ public:
 	bool operator<(const CfgLabel &o) const {
 		return label < o.label;
 	}
+	bool operator!=(const CfgLabel &o) const {
+		return o < *this || *this < o;
+	}
 	bool operator==(const CfgLabel &o) const {
-		return !(o < *this || *this < o);
+		return !(o != *this);
 	}
 	bool parse(const char *str, const char **suffix);
+	void sanity_check() const {}
 };
 
 class CfgLabelAllocator {
@@ -1298,6 +1304,7 @@ typedef
       Iex_Load,
       Iex_HappensBefore,
       Iex_FreeVariable,
+      Iex_EntryPoint,
    }
    IRExprTag;
 
@@ -1837,6 +1844,38 @@ struct IRExprFreeVariable : public IRExpr {
 	id.sanity_check();
 	sanity_check_irtype(ty);
 	assert(isUnique == true || isUnique == false);
+    }
+};
+
+struct IRExprEntryPoint : public IRExpr {
+    CfgLabel label;
+    IRExprEntryPoint(const CfgLabel &_label)
+	: IRExpr(Iex_EntryPoint), label(_label)
+    {
+    }
+    IRExprEntryPoint(const IRExprEntryPoint &o)
+	: IRExpr(Iex_EntryPoint), label(o.label)
+    {
+    }
+    void visit(HeapVisitor &) {}
+    unsigned long hashval() const {
+	return label.hash();
+    }
+    void prettyPrint(FILE *f) const {
+	fprintf(f, "Entry(%s)", label.name());
+    }
+    IRType type() const { return Ity_I1; }
+    void _sanity_check(unsigned) const {
+	label.sanity_check();
+    }
+    bool operator==(const IRExprEntryPoint &o) const {
+	return label == o.label;
+    }
+    bool operator!=(const IRExprEntryPoint &o) const {
+	return label != o.label;
+    }
+    bool operator<(const IRExprEntryPoint &o) const {
+	return label < o.label;
     }
 };
 

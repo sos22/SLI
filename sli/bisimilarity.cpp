@@ -101,6 +101,8 @@ equalModuloVariables(const IRExpr *a, const IRExpr *b)
 		/* Variables here means assignable registers, so
 		   these, like HappensBefore, have no variables. */
 		return false;
+	case Iex_EntryPoint:
+		return false;
 #undef hdr
 #undef footer
 	}
@@ -243,6 +245,8 @@ extendUnifier(std::map<threadAndRegister, threadAndRegister> &unifier,
 	case Iex_FreeVariable:
 		/* Variables here means assignable registers, so
 		   these, like HappensBefore, have no variables. */
+		abort();
+	case Iex_EntryPoint:
 		abort();
 #undef hdr
 #undef footer

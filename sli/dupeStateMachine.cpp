@@ -180,6 +180,10 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 		const IRExprFreeVariable *i = (const IRExprFreeVariable *)inp;
 		return new IRExprFreeVariable(i->id, i->ty, i->isUnique);
 	}
+	case Iex_EntryPoint: {
+		const IRExprEntryPoint *i = (const IRExprEntryPoint *)inp;
+		return new IRExprEntryPoint(*i);
+	}
 	}
 	abort();
 }

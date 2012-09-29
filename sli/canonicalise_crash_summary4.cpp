@@ -170,6 +170,8 @@ Function::complexity(const IRExpr *e)
 		return 1;
 	case Iex_FreeVariable:
 		return 1;
+	case Iex_EntryPoint:
+		return 1;
 	}
 	abort();
 }
@@ -296,6 +298,8 @@ Function::matches(IRExpr *what, IRExpr *tmpl, std::map<int, IRExpr *> &argVals)
 	case Iex_HappensBefore:
 		return false;
 	case Iex_FreeVariable:
+		return false;
+	case Iex_EntryPoint:
 		return false;
 	}
 	abort();

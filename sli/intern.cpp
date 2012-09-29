@@ -36,6 +36,8 @@ shallow_hash(const IRExpr *e)
 		return 100234427;
 	case Iex_FreeVariable:
 		return 100039411 + ((IRExprFreeVariable *)e)->id.hash() * 100044913;
+	case Iex_EntryPoint:
+		return 100044947 + e->hashval() * 100044979;
 	}
 	abort();
 }
@@ -53,6 +55,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	case Iex_Const:
 	case Iex_HappensBefore:
 	case Iex_FreeVariable:
+	case Iex_EntryPoint:
 		break;
 	case Iex_GetI:
 		((IRExprGetI *)e)->ix = internIRExpr(((IRExprGetI *)e)->ix, lookupTable);
@@ -187,6 +190,11 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 				continue;
 			break;
 		}
+
+		case Iex_EntryPoint:
+			if (*(IRExprEntryPoint *)e != *(IRExprEntryPoint *)other)
+				continue;
+			break;
 		}
 
 		/* If we get here, they match and we're done. */

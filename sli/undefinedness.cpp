@@ -203,6 +203,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 	case Iex_Const:
 	case Iex_HappensBefore:
 	case Iex_FreeVariable:
+	case Iex_EntryPoint:
 		return a;
 
 	case Iex_CCall: {

@@ -595,6 +595,8 @@ removeFreeVariables(IRExpr *what)
 		return what;
 	case Iex_FreeVariable:
 		return NULL;
+	case Iex_EntryPoint:
+		return what;
 	}
 	abort();
 }

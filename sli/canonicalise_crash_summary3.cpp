@@ -439,6 +439,8 @@ clauseUnderspecified(IRExpr *clause,
 		return false;
 	case Iex_HappensBefore:
 		return false;
+	case Iex_EntryPoint:
+		return false;
 	}
 	fprintf(stderr, "%s: ", __func__);
 	ppIRExpr(clause, stderr);
