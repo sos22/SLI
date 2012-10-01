@@ -685,22 +685,32 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	     it != ced.exprStashPoints.end();
 	     it++) {
 		const ThreadCfgLabel &label(it->first);
-		const std::set<IRExprGet *> &exprsToStash(it->second);
-		std::set<Instruction<ThreadCfgLabel> *> frozenStashPoints;
-		std::set<Instruction<ThreadCfgLabel> *> unfrozenStashPoints;
+		typedef std::pair<Instruction<ThreadCfgLabel> *, IRExprGet *> entryT;
+		std::set<entryT> frozenStashPoints;
+		std::set<entryT> unfrozenStashPoints;
 
-		assert(ced.crashCfg.findInstr(label));
-		unfrozenStashPoints.insert(ced.crashCfg.findInstr(label));
-		while (!unfrozenStashPoints.empty()) {			
-			auto *node = *unfrozenStashPoints.begin();
-			assert(node);
-			unfrozenStashPoints.erase(node);
+		{
+			Instruction<ThreadCfgLabel> *n = ced.crashCfg.findInstr(label);
+			const std::set<IRExprGet *> &exprsToStash(it->second);
+			assert(n);
+			for (auto it = exprsToStash.begin(); it != exprsToStash.end(); it++)
+				unfrozenStashPoints.insert(entryT(n, *it));
+		}
+		while (!unfrozenStashPoints.empty()) {
+			Instruction<ThreadCfgLabel> *node;
+			IRExprGet *expr;
+			{
+				auto it = unfrozenStashPoints.begin();
+				node = it->first;
+				expr = it->second;
+				unfrozenStashPoints.erase(it);
+			}
 			const ThreadCfgLabel &label(node->rip);
 
 			/* Can't be an eval point */
 			if (ced.expressionEvalPoints.count(label)) {
-				frozenStashPoints.insert(node);
-				break;
+				frozenStashPoints.insert(entryT(node, expr));
+				continue;
 			}
 
 			/* Can't be a happens-before before point */
@@ -714,8 +724,8 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 						if ((*it3)->before->rip == label)
 							b = true;
 					if (b) {
-						frozenStashPoints.insert(node);
-						break;
+						frozenStashPoints.insert(entryT(node, expr));
+						continue;
 					}
 				}
 			}
@@ -724,36 +734,27 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 			/* Can't stash a register which this
 			 * instruction might modify */
 			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, ced.crashCfg.labelToRip(node->label)), true);
-			std::set<threadAndRegister, threadAndRegister::partialCompare> modified_regs;
-			for (int x = 0; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
-				if (irsb->stmts[x]->tag == Ist_Put)
-					modified_regs.insert( ((IRStmtPut *)irsb->stmts[x])->target );
+			bool modifies = false;
+			for (int x = 0; !modifies && x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
+				if (irsb->stmts[x]->tag == Ist_Put &&
+				    ((IRStmtPut *)irsb->stmts[x])->target == expr->reg)
+					modifies = true;
 			}
-			bool b = false;
-			for (auto it2 = it->second.begin();
-			     !b && it2 != it->second.end();
-			     it2++) {
-				if (modified_regs.count((*it2)->reg))
-					b = true;
-			}
-			if (b) {
-				frozenStashPoints.insert(node);
-				break;
+			if (modifies) {
+				frozenStashPoints.insert(entryT(node, expr));
+				continue;
 			}
 
 			/* Advance this stash point */
 			for (auto it2 = node->successors.begin(); it2 != node->successors.end(); it2++)
-				unfrozenStashPoints.insert(it2->instr);
+				unfrozenStashPoints.insert(entryT(it2->instr, expr));
 		}
 
 		for (auto it2 = frozenStashPoints.begin(); it2 != frozenStashPoints.end(); it2++) {
-			auto *node = *it2;
+			auto node = it2->first;
+			auto expr = it2->second;
 			ThreadCfgLabel label(it->first.thread, node->label);
-			std::set<IRExprGet *> &newStash(newMap[label]);
-			for (auto it3 = exprsToStash.begin();
-			     it3 != exprsToStash.end();
-			     it3++)
-				newStash.insert(*it3);
+			newMap[label].insert(expr);
 		}
 	}
 
