@@ -38,6 +38,8 @@ shallow_hash(const IRExpr *e)
 		return 100039411 + ((IRExprFreeVariable *)e)->id.hash() * 100044913;
 	case Iex_EntryPoint:
 		return 100044947 + e->hashval() * 100044979;
+	case Iex_ControlFlow:
+		return 100045349 + e->hashval() * 100045513;
 	}
 	abort();
 }
@@ -56,6 +58,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	case Iex_HappensBefore:
 	case Iex_FreeVariable:
 	case Iex_EntryPoint:
+	case Iex_ControlFlow:
 		break;
 	case Iex_GetI:
 		((IRExprGetI *)e)->ix = internIRExpr(((IRExprGetI *)e)->ix, lookupTable);
@@ -193,6 +196,11 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 
 		case Iex_EntryPoint:
 			if (*(IRExprEntryPoint *)e != *(IRExprEntryPoint *)other)
+				continue;
+			break;
+
+		case Iex_ControlFlow:
+			if (*(IRExprControlFlow *)e != *(IRExprControlFlow *)other)
 				continue;
 			break;
 		}

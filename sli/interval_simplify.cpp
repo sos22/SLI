@@ -557,6 +557,7 @@ intervalify(IRExpr *what)
 	case Iex_HappensBefore:
 	case Iex_FreeVariable:
 	case Iex_EntryPoint:
+	case Iex_ControlFlow:
 		return intervalified(what);
 	case Iex_Binop: {
 		IRExprBinop *ieb = (IRExprBinop *)what;

@@ -1211,6 +1211,21 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
       r->contents[i] = args[i];
     *out = r;
     return true;
+  } else if (str[0] == 'C') {
+    if (parseThisString("Control(", str, &str)) {
+      unsigned thread;
+      CfgLabel cfg1(CfgLabel::uninitialised());
+      CfgLabel cfg2(CfgLabel::uninitialised());
+      if (!parseDecimalUInt(&thread, str, &str) ||
+	  !parseThisChar(':', str, &str) ||
+	  !cfg1.parse(str, &str) ||
+	  !parseThisString("->", str, &str) ||
+	  !cfg2.parse(str, &str) ||
+	  !parseThisChar(')', str, suffix))
+	return false;
+      *out = new IRExprControlFlow(thread, cfg1, cfg2);
+      return true;
+    }
   }
 
   /* Short names for registers */

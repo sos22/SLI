@@ -184,6 +184,10 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 		const IRExprEntryPoint *i = (const IRExprEntryPoint *)inp;
 		return new IRExprEntryPoint(*i);
 	}
+	case Iex_ControlFlow: {
+		const IRExprControlFlow *i = (const IRExprControlFlow *)inp;
+		return new IRExprControlFlow(*i);
+	}
 	}
 	abort();
 }

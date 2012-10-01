@@ -103,6 +103,8 @@ equalModuloVariables(const IRExpr *a, const IRExpr *b)
 		return false;
 	case Iex_EntryPoint:
 		return false;
+	case Iex_ControlFlow:
+		return false;
 #undef hdr
 #undef footer
 	}
@@ -247,6 +249,8 @@ extendUnifier(std::map<threadAndRegister, threadAndRegister> &unifier,
 		   these, like HappensBefore, have no variables. */
 		abort();
 	case Iex_EntryPoint:
+		abort();
+	case Iex_ControlFlow:
 		abort();
 #undef hdr
 #undef footer

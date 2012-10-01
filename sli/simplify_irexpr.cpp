@@ -91,6 +91,9 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 	hdr(EntryPoint)
 		return *a == *b;
 	footer()
+	hdr(ControlFlow)
+		return *a == *b;
+	footer()
 	hdr(GetI)
 		return a->bias == b->bias &&
 			physicallyEqual(a->descr,
@@ -513,6 +516,13 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 		else
 			return _sortIntegers(a->ty, b->ty);
 	hdr(EntryPoint)
+		if (*a < *b)
+			return less_than;
+		else if (*a == *b)
+			return equal_to;
+		else
+			return greater_than;
+	hdr(ControlFlow)
 		if (*a < *b)
 			return less_than;
 		else if (*a == *b)
@@ -2903,6 +2913,7 @@ top:
 	}
 
 	case Iex_EntryPoint:
+	case Iex_ControlFlow:
 	case Iex_Get:
 	case Iex_Const:
 	case Iex_HappensBefore:

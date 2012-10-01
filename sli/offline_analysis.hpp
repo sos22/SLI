@@ -104,6 +104,7 @@ protected:
 	virtual IRExpr *transformIex(IRExprHappensBefore *) { return NULL; }
 	virtual IRExpr *transformIex(IRExprFreeVariable *) { return NULL; }
 	virtual IRExpr *transformIex(IRExprEntryPoint *) { return NULL; }
+	virtual IRExpr *transformIex(IRExprControlFlow *) { return NULL; }
 	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
 public:
 	IRExpr *doit(IRExpr *e, bool *done_something) { aborted = false; return transformIRExpr(e, done_something); }

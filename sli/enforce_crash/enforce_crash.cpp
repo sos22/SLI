@@ -603,6 +603,8 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 		return NULL;
 	case Iex_EntryPoint:
 		return what;
+	case Iex_ControlFlow:
+		return what;
 	}
 	abort();
 }

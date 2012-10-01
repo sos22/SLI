@@ -1305,6 +1305,7 @@ typedef
       Iex_HappensBefore,
       Iex_FreeVariable,
       Iex_EntryPoint,
+      Iex_ControlFlow,
    }
    IRExprTag;
 
@@ -1878,6 +1879,43 @@ struct IRExprEntryPoint : public IRExpr {
     bool operator<(const IRExprEntryPoint &o) const {
 	return thread < o.thread ||
 	    (thread == o.thread && label < o.label);
+    }
+};
+
+struct IRExprControlFlow : public IRExpr {
+    unsigned thread;
+    CfgLabel cfg1;
+    CfgLabel cfg2;
+    IRExprControlFlow(unsigned _thread, const CfgLabel &_cfg1, const CfgLabel &_cfg2)
+	: IRExpr(Iex_ControlFlow), thread(_thread), cfg1(_cfg1), cfg2(_cfg2)
+    {
+    }
+    IRExprControlFlow(const IRExprControlFlow &o)
+	: IRExpr(Iex_ControlFlow), thread(o.thread), cfg1(o.cfg1), cfg2(o.cfg2)
+    {
+    }
+    void visit(HeapVisitor &) {}
+    unsigned long hashval() const {
+	return cfg1.hash() ^ thread ^ (cfg2.hash() * 7);
+    }
+    void prettyPrint(FILE *f) const {
+	fprintf(f, "Control(%d:%s->%s)", thread, cfg1.name(), cfg2.name());
+    }
+    IRType type() const { return Ity_I1; }
+    void _sanity_check(unsigned) const {
+	cfg1.sanity_check();
+	cfg2.sanity_check();
+    }
+    bool operator<(const IRExprControlFlow &o) const {
+	return thread < o.thread ||
+	    (thread == o.thread && cfg1 < o.cfg1) ||
+	    (thread == o.thread && cfg1 == o.cfg1 && cfg2 < o.cfg2);
+    }
+    bool operator!=(const IRExprControlFlow &o) const {
+	return (*this < o) || (o < *this);
+    }
+    bool operator==(const IRExprControlFlow &o) const {
+	return !(*this != o);
     }
 };
 

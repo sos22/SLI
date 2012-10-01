@@ -45,6 +45,7 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 	case Iex_Get:
 	case Iex_FreeVariable:
 	case Iex_EntryPoint:
+	case Iex_ControlFlow:
 		return exp;
 	case Iex_GetI: {
 		IRExprGetI *e = (IRExprGetI *)exp;

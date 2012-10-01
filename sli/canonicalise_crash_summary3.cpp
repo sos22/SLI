@@ -441,6 +441,8 @@ clauseUnderspecified(IRExpr *clause,
 		return false;
 	case Iex_EntryPoint:
 		return false;
+	case Iex_ControlFlow:
+		return false;
 	}
 	fprintf(stderr, "%s: ", __func__);
 	ppIRExpr(clause, stderr);

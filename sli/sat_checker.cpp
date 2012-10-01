@@ -403,6 +403,7 @@ anf_context::matches(const IRExpr *a, const IRExpr *b) const
 	case Iex_Const:
 	case Iex_Get:
 	case Iex_EntryPoint:
+	case Iex_ControlFlow:
 		return false; /* by internment property */
         }
         abort();
