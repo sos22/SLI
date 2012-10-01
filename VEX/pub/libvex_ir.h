@@ -1848,34 +1848,36 @@ struct IRExprFreeVariable : public IRExpr {
 };
 
 struct IRExprEntryPoint : public IRExpr {
+    unsigned thread;
     CfgLabel label;
-    IRExprEntryPoint(const CfgLabel &_label)
-	: IRExpr(Iex_EntryPoint), label(_label)
+    IRExprEntryPoint(unsigned _thread, const CfgLabel &_label)
+	: IRExpr(Iex_EntryPoint), thread(_thread), label(_label)
     {
     }
     IRExprEntryPoint(const IRExprEntryPoint &o)
-	: IRExpr(Iex_EntryPoint), label(o.label)
+	: IRExpr(Iex_EntryPoint), thread(o.thread), label(o.label)
     {
     }
     void visit(HeapVisitor &) {}
     unsigned long hashval() const {
-	return label.hash();
+	return label.hash() ^ thread;
     }
     void prettyPrint(FILE *f) const {
-	fprintf(f, "Entry(%s)", label.name());
+	fprintf(f, "Entry(%d:%s)", thread, label.name());
     }
     IRType type() const { return Ity_I1; }
     void _sanity_check(unsigned) const {
 	label.sanity_check();
     }
     bool operator==(const IRExprEntryPoint &o) const {
-	return label == o.label;
+	return label == o.label && thread == o.thread;
     }
     bool operator!=(const IRExprEntryPoint &o) const {
-	return label != o.label;
+	return label != o.label || thread != o.thread;
     }
     bool operator<(const IRExprEntryPoint &o) const {
-	return label < o.label;
+	return thread < o.thread ||
+	    (thread == o.thread && label < o.label);
     }
 };
 

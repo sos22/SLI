@@ -87,6 +87,7 @@ ndChoiceState(StateMachineState **slot,
 
 static StateMachineState *
 entryState(const std::vector<std::pair<CFGNode *, StateMachineState *> > &targets,
+	   unsigned thread,
 	   bool storeLike)
 {
 	if (targets.empty()) {
@@ -103,7 +104,7 @@ entryState(const std::vector<std::pair<CFGNode *, StateMachineState *> > &target
 				new StateMachineSideEffectAssertFalse(
 					IRExpr_Unop(
 						Iop_Not1,
-						new IRExprEntryPoint(targets[0].first->label)),
+						new IRExprEntryPoint(thread, targets[0].first->label)),
 					true),
 				targets[0].second);
 		StateMachineState *acc = r;
@@ -111,7 +112,7 @@ entryState(const std::vector<std::pair<CFGNode *, StateMachineState *> > &target
 			StateMachineBifurcate *b = 
 				new StateMachineBifurcate(
 					targets[0].first->rip,
-					new IRExprEntryPoint(targets[x].first->label),
+					new IRExprEntryPoint(thread, targets[x].first->label),
 					targets[x].second,
 					acc);
 			acc = b;
@@ -1844,7 +1845,7 @@ probeCFGsToMachine(Oracle *oracle,
 	for (auto it = roots.begin(); !it.finished(); it.advance())
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
-	out.insert(new StateMachine(entryState(roots_this_sm2, false), cfg_roots_this_sm));
+	out.insert(new StateMachine(entryState(roots_this_sm2, tid, false), cfg_roots_this_sm));
 }
 
 static StateMachine *

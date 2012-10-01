@@ -1109,11 +1109,14 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
     }
   } else if (str[0] == 'E') {
     if (parseThisString("Entry(", str, &str)) {
+      unsigned thread;
       CfgLabel label(CfgLabel::uninitialised());
-      if (!label.parse(str, &str) ||
+      if (!parseDecimalUInt(&thread, str, &str) ||
+	  !parseThisChar(':', str, &str) ||
+	  !label.parse(str, &str) ||
 	  !parseThisChar(')', str, suffix))
 	return false;
-      *out = new IRExprEntryPoint(label);
+      *out = new IRExprEntryPoint(thread, label);
       return true;
     }
   } else if (str[0] == 'F') {
