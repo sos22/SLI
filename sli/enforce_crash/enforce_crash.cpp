@@ -716,7 +716,8 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 				IRExpr *e = it->second;
 				unfrozenStashPoints.erase(it);
 
-				if (e->tag == Iex_EntryPoint) {
+				if (e->tag == Iex_EntryPoint ||
+				    e->tag == Iex_ControlFlow) {
 					/* Can never advance stash of
 					 * entry point expressions. */
 					frozenStashPoints.insert(entryT(node, e));

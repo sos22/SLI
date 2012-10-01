@@ -29,6 +29,12 @@ expressionStashMapT::expressionStashMapT(std::set<IRExpr *> &neededExpressions,
 			IRExprEntryPoint *ep = (IRExprEntryPoint *)e;
 			for (auto it = abs.begin(ep->thread, ep->label); !it.finished(); it.advance())
 				(*this)[it.get()].insert(ep);
+		} else if (e->tag == Iex_ControlFlow) {
+			/* These are always stashed at the first
+			 * nominated node. */
+			IRExprControlFlow *ep = (IRExprControlFlow *)e;
+			for (auto it = abs.begin(ep->thread, ep->cfg1); !it.finished(); it.advance())
+				(*this)[it.get()].insert(ep);
 		} else {
 			abort();
 		}

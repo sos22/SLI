@@ -20,6 +20,10 @@ public:
 		out.insert(e);
 		return NULL;
 	}
+	IRExpr *transformIex(IRExprControlFlow *e) {
+		out.insert(e);
+		return NULL;
+	}
 };
 void
 enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out)
