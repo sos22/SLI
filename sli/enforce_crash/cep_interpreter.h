@@ -68,6 +68,11 @@ struct cfg_instr_set_entry {
 	simslot_t slot;
 };
 
+struct cfg_instr_set_control {
+	int next_node;
+	simslot_t slot;
+};
+
 struct cfg_instr {
 	unsigned long rip;
 	const unsigned char *content;
@@ -78,19 +83,23 @@ struct cfg_instr {
 	int nr_stash;
 	const struct cfg_instr_set_entry *set_entry;
 	int nr_set_entry;
+	const struct cfg_instr_set_control *set_control;
+	int nr_set_control;
 	int nr_rx_msg;
 	struct msg_template **rx_msgs;
 	int nr_tx_msg;
 	struct msg_template **tx_msgs;
-	/* Side conditions can be evaluated at one of three points:
+	/* Side conditions can be evaluated at one of four points:
 
 	   -- At the very beginning of the instruction.
 	   -- Just after receiving a message.
 	   -- Just after evaluating the original instruction.
+	   -- Just after doing control-flow stashes.
 	*/
 	const unsigned short *pre_validate;
 	const unsigned short *rx_validate;
 	const unsigned short *eval_validate;
+	const unsigned short *control_flow_validate;
 
 	const char *id; /* Just for debug */
 	int cntr;

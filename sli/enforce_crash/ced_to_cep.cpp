@@ -69,6 +69,13 @@ expressionDependsOn(IRExpr *what, const std::set<IRExpr *> &d, bool includeRegis
 			}
 			return e;
 		}
+		IRExpr *transformIex(IRExprControlFlow *e) {
+			if (d->count(e)) {
+				res = true;
+				abortTransform();
+			}
+			return e;
+		}
 	} doit;
 	doit.res = false;
 	doit.d = &d;
@@ -353,17 +360,11 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		}
 		break;
 	}
-	case Iex_Get: {
-		IRExprGet *ieg = (IRExprGet *)expr;
-		simulationSlotT slot = slots(ieg);
-		bytecode_op(f, "push_slot", ieg->ty);
-		bytecode_const32(f, slot.idx);
-		break;
-	}
+	case Iex_Get:
+	case Iex_ControlFlow:
 	case Iex_EntryPoint: {
-		IRExprEntryPoint *iee = (IRExprEntryPoint *)expr;
-		simulationSlotT slot = slots(iee);
-		bytecode_op(f, "push_slot", Ity_I1);
+		simulationSlotT slot = slots(expr);
+		bytecode_op(f, "push_slot", expr->type());
 		bytecode_const32(f, slot.idx);
 		break;
 	}
@@ -457,6 +458,7 @@ struct cfg_annotation_summary {
 	bool has_pre_validate;
 	bool has_rx_validate;
 	bool has_eval_validate;
+	bool has_control_validate;
 	const char *id;
 };
 
@@ -539,6 +541,16 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				}
 			}
 			fprintf(f, "};\n");
+			fprintf(f, "static const struct cfg_instr_set_control instr_%d_set_control[] = {\n", newLabel);
+			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
+				if ( (*it2)->tag == Iex_ControlFlow ) {
+					IRExprControlFlow *e = (IRExprControlFlow *)*it2;
+					simulationSlotT simSlot(slots(e));
+					int goingTo = relabeller(ThreadCfgLabel(oldLabel.thread, e->cfg2));
+					fprintf(f, "    { .next_node = %d, .slot = %d },\n", goingTo, simSlot.idx);
+				}
+			}
+			fprintf(f, "};\n");
 			summary.have_stash = true;
 		}
 		if (ced.happensBeforePoints.count(oldLabel)) {
@@ -582,8 +594,8 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		}
 		if (ced.expressionEvalPoints.count(oldLabel)) {
 			const std::set<exprEvalPoint> &sideConditions(ced.expressionEvalPoints[oldLabel]);
-			std::set<exprEvalPoint> pre_validate, rx_validate, eval_validate;
-			std::set<IRExpr *> rxed, stashed;
+			std::set<exprEvalPoint> pre_validate, rx_validate, eval_validate, control_validate;
+			std::set<IRExpr *> rxed, stashedData, stashedControl;
 			if (ced.happensBeforePoints.count(oldLabel)) {
 				const std::set<happensBeforeEdge *> &hbEdges(ced.happensBeforePoints[oldLabel]);
 				for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
@@ -596,28 +608,46 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 			if (ced.exprStashPoints.count(oldLabel)) {
 				const std::set<IRExpr *> &toStash(ced.exprStashPoints[oldLabel]);
-				for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++)
-					stashed.insert(*it2);
+				for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
+					IRExpr *e = *it2;
+					if ( e->tag == Iex_Get ) {
+						stashedData.insert(e);
+					} else if ( e->tag == Iex_ControlFlow ) {
+						stashedControl.insert(e);
+					} else if ( e->tag == Iex_EntryPoint ) {
+						/* This is arguably a control-flow stash,
+						   but it happens right at the start of the
+						   instruction rather than right at the end,
+						   so it's available throughout the instruction
+						   and doesn't affect where we can do the eval,
+						   so we can just ignore it. */
+					} else {
+						abort();
+					}
+				}
 			}
 			/* We need to decide where in the instruction
 			   cycle to evaluate this side-condition.  The
 			   options are at the very start, during
-			   message RX, or after performing the stash,
-			   and we pick the earliest point at which we
-			   have all necessary information. */
+			   message RX, after performing the data
+			   stash, or after performing the control flow
+			   stash.  We pick the earliest point at which
+			   we have all necessary information. */
 			/* (The instruction cycle always does RX
 			   before stash.) */
 			for (auto it = sideConditions.begin();
 			     it != sideConditions.end();
 			     it++) {
-				if (expressionDependsOn(it->e, stashed, false))
+				if (expressionDependsOn(it->e, stashedControl, false))
+					control_validate.insert(*it);
+				else if (expressionDependsOn(it->e, stashedData, false))
 					eval_validate.insert(*it);
 				else if (expressionDependsOn(it->e, rxed, true))
 					rx_validate.insert(*it);
 				else
 					pre_validate.insert(*it);
 			}
-			assert(!(pre_validate.empty() && rx_validate.empty() && eval_validate.empty()));
+			assert(!(pre_validate.empty() && rx_validate.empty() && eval_validate.empty() && control_validate.empty()));
 			if (!pre_validate.empty()) {
 				summary.has_pre_validate = true;
 				emit_validation(f, newLabel, "pre_validate", pre_validate, ced, slots);
@@ -629,6 +659,10 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			if (!eval_validate.empty()) {
 				summary.has_eval_validate = true;
 				emit_validation(f, newLabel, "eval_validate", eval_validate, ced, slots);
+			}
+			if (!control_validate.empty()) {
+				summary.has_control_validate = true;
+				emit_validation(f, newLabel, "control_validate", control_validate, ced, slots);
 			}
 		}
 
@@ -685,9 +719,11 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		if (it->second.have_stash) {
 			add_simple_array(f, "        ", "stash", "stash", "nr_stash", it->first);
 			add_simple_array(f, "        ", "set_entry", "set_entry", "nr_set_entry", it->first);
+			add_simple_array(f, "        ", "set_control", "set_control", "nr_set_control", it->first);
 		} else {
 			add_empty_array(f, "        ", "stash", "nr_stash");
 			add_empty_array(f, "        ", "set_entry", "nr_set_entry");
+			add_empty_array(f, "        ", "set_control", "nr_set_control");
 		}
 		if (it->second.rx_msg) {
 			fprintf(f, "        .nr_rx_msg = sizeof(msg_list_%d)/sizeof(msg_list_%d[0]),\n",
@@ -717,6 +753,10 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "        .eval_validate = instr_%d_eval_validate,\n", it->first);
 		else
 			fprintf(f, "        .eval_validate = NULL,\n");
+		if (it->second.has_control_validate)
+			fprintf(f, "        .control_flow_validate = instr_%d_control_validate,\n", it->first);
+		else
+			fprintf(f, "        .control_flow_validate = NULL,\n");
 		fprintf(f, "        .id = \"%s\",\n", it->second.id);
 	}
 	fprintf(f, "    }\n};\n");

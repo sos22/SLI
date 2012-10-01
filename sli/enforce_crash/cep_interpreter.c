@@ -82,6 +82,7 @@ struct {
 	iter(adv_malloc)			\
 	iter(adv_reject)			\
 	iter(adv_dead)				\
+	iter(adv_fail_side_condition)		\
 	iter(emul_underlying)			\
 	iter(tx_bound_exited)			\
 	iter(tx_bound_fast)			\
@@ -1705,7 +1706,7 @@ receive_messages(struct high_level_state *hls)
 static void
 advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 {
-	int i, j, r;
+	int i, j, k, r;
 	debug("Next instr %lx\n", rip);
 	r = hls->ll_states.sz;
 	for (i = 0; i < r; i++) {
@@ -1719,6 +1720,20 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 		for (j = 0; j < current_cfg_node->nr_successors; j++) {
 			if (rip == plan.cfg_nodes[current_cfg_node->successors[j]].rip) {
 				struct low_level_state *newLls;
+				for (k = 0; k < current_cfg_node->nr_set_control; k++) {
+					if (current_cfg_node->set_control[k].next_node ==
+					    current_cfg_node->successors[j])
+						lls->simslots[current_cfg_node->set_control[k].slot] = 1;
+				}
+				if (current_cfg_node->control_flow_validate &&
+				    !eval_bytecode(current_cfg_node->control_flow_validate,
+						   lls, NULL, NULL, NULL)) {
+					debug("%p(%s): Reject %s due to control-flow side condition\n",
+					      lls, current_cfg_node->id,
+					      plan.cfg_nodes[current_cfg_node->successors[j]].id);
+					EVENT(adv_fail_side_condition);
+					continue;
+				}
 				if (!preserve) {
 					/* The common case is that we
 					 * have precisely one
