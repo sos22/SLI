@@ -28,7 +28,6 @@ ndChoiceState(StateMachineState **slot,
 	      CFGNode *node,
 	      std::vector<reloc_t> &pendingRelocs,
 	      std::vector<CFGNode *> &targets,
-	      MaiMap &mai,
 	      bool storeLike,
 	      HashedSet<HashedPtr<CFGNode> > *usedExits)
 {
@@ -44,18 +43,16 @@ ndChoiceState(StateMachineState **slot,
 		pendingRelocs.push_back(
 			reloc_t(slot, targets[0]));
 	} else {
-		IRExpr *fv = mai.freeVariable(Ity_I64, vr.thread, node, false);
 		StateMachineSideEffecting *r =
 			new StateMachineSideEffecting(
 				vr.rip,
 				new StateMachineSideEffectAssertFalse(
 					IRExpr_Unop(
 						Iop_Not1,
-						IRExpr_Binop(
-							Iop_CmpEQ64,
-							fv,
-							IRExpr_Const(
-								IRConst_U64(0)))),
+						new IRExprControlFlow(
+							vr.thread,
+							node->label,
+							targets[0]->label)),
 					true),
 				NULL);
 		assert(targets[0] != NULL);
@@ -68,10 +65,10 @@ ndChoiceState(StateMachineState **slot,
 			StateMachineBifurcate *b = 
 				new StateMachineBifurcate(
 					vr.rip,
-					IRExpr_Binop(
-						Iop_CmpEQ64,
-						fv,
-						IRExpr_Const(IRConst_U64(x))),
+					new IRExprControlFlow(
+						vr.thread,
+						node->label,
+						targets[x]->label),
 					NULL,
 					acc);
 			pendingRelocs.push_back(
@@ -594,7 +591,7 @@ cfgNodeToState(Oracle *oracle,
 				NULL,
 				NULL);
 			ndChoiceState(&smb->trueTarget, tr, target, pendingRelocs,
-				      targets, mai, storeLike, &usedExits);
+				      targets, storeLike, &usedExits);
 			*cursor = smb;
 			cursor = &smb->falseTarget;
 			break;
@@ -737,7 +734,7 @@ cfgNodeToState(Oracle *oracle,
 		IRStmtIMark *mark = (IRStmtIMark *)irsb->stmts[i];
 		getTargets(target, mark->addr.rip, targets);
 	}
-	ndChoiceState(cursor, tr, target, pendingRelocs, targets, mai, storeLike, NULL);
+	ndChoiceState(cursor, tr, target, pendingRelocs, targets, storeLike, NULL);
 
 	return root;
 }
