@@ -140,15 +140,14 @@ buildCED(DNF_Conjunction &c,
 	 crashEnforcementData *out,
 	 ThreadAbstracter &abs,
 	 int &next_hb_id,
-	 AddressSpace *as,
-	 simulationSlotT &next_slot)
+	 AddressSpace *as)
 {
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	*out = crashEnforcementData(*summary->mai, neededExpressions, abs, rootsCfg, c, next_hb_id, next_slot, summary, as);
+	*out = crashEnforcementData(*summary->mai, neededExpressions, abs, rootsCfg, c, next_hb_id, summary, as);
 	optimiseHBContent(*out);
 	return true;
 }
@@ -604,8 +603,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
 		       GarbageCollectionToken token,
 		       ThreadAbstracter &abs,
-		       int &next_hb_id,
-		       simulationSlotT &next_slot)
+		       int &next_hb_id)
 {
 	summary = internCrashSummary(summary);
 
@@ -662,7 +660,7 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
-		if (buildCED(d[x], rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace, next_slot)) {
+		if (buildCED(d[x], rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
 			printf("Intermediate CED:\n");
 			tmp.prettyPrint(stdout, true);
 			accumulator |= tmp;
@@ -1045,11 +1043,10 @@ main(int argc, char *argv[])
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
 	int next_hb_id = 0xaabb;
-	simulationSlotT next_slot(1);
 
 	VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[5], NULL));
 	ThreadAbstracter abs;
-	crashEnforcementData accumulator = enforceCrashForMachine(summary, oracle, ALLOW_GC, abs, next_hb_id, next_slot);
+	crashEnforcementData accumulator = enforceCrashForMachine(summary, oracle, ALLOW_GC, abs, next_hb_id);
 
 	optimiseHBEdges(accumulator);
 	optimiseStashPoints(accumulator, oracle);

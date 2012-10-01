@@ -548,8 +548,8 @@ public:
 		return r;
 	}
 
-	simulationSlotT operator()(const AbstractThread &thr, IRExprGet *e) {
-		iterator it = find(key_t(thr, e));
+	simulationSlotT operator()(const AbstractThread &thr, IRExprGet *e) const {
+		auto it = find(key_t(thr, e));
 		assert(it != end());
 		return it->second;
 	}
@@ -567,9 +567,9 @@ public:
 	slotMapT() { }
 
 	slotMapT(std::map<ThreadCfgLabel, std::set<IRExprGet *> > &neededExpressions,
-		 std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore,
-		 simulationSlotT &next_slot)
+		 std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore)
 	{
+		simulationSlotT next_slot(1);
 		/* Allocate slots for expressions which we know we're
 		 * going to have to stash at some point. */
 		for (auto it = neededExpressions.begin();
@@ -1078,7 +1078,6 @@ class crashEnforcementData {
 	void internSelf(internmentState &state) {
 		exprStashPoints.internSelf(state);
 		happensBeforePoints.internSelf(state);
-		exprsToSlots.internSelf(state);
 		expressionEvalPoints.internSelf(state);
 	}
 public:
@@ -1090,7 +1089,6 @@ public:
 	expressionStashMapT exprStashPoints;
 	expressionDominatorMapT exprDominatorMap;
 	happensBeforeMapT happensBeforePoints;
-	slotMapT exprsToSlots;
 	expressionEvalMapT expressionEvalPoints;
 	std::set<unsigned long> patchPoints;
 	std::set<unsigned long> interpretInstrs;
@@ -1102,7 +1100,6 @@ public:
 			     std::map<unsigned, std::set<CfgLabel> > &_roots,
 			     DNF_Conjunction &conj,
 			     int &next_hb_id,
-			     simulationSlotT &next_slot,
 			     CrashSummary *summary,
 			     AddressSpace *as)
 		: roots(_roots, abs),
@@ -1113,7 +1110,6 @@ public:
 		  exprStashPoints(neededExpressions, abs, summary->loadMachine, summary->storeMachine, roots, mai),
 		  exprDominatorMap(conj, exprStashPoints, idom, predecessorMap, happensBefore),
 		  happensBeforePoints(mai, conj, idom, crashCfg, exprStashPoints, abs, next_hb_id),
-		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
 		  expressionEvalPoints(exprDominatorMap)
 	{}
 
@@ -1123,7 +1119,6 @@ public:
 		    !crashCfg.parse(as, str, &str) ||
 		    !exprStashPoints.parse(str, &str) ||
 		    !happensBeforePoints.parse(crashCfg, str, &str) ||
-		    !exprsToSlots.parse(str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||
 		    !parseThisString("Patch points = [", str, &str))
 			return false;
@@ -1155,7 +1150,6 @@ public:
 		crashCfg.prettyPrint(f, verbose);
 		exprStashPoints.prettyPrint(f);
 		happensBeforePoints.prettyPrint(f);
-		exprsToSlots.prettyPrint(f);
 		expressionEvalPoints.prettyPrint(f);
 		fprintf(f, "Patch points = [");
 		for (auto it = patchPoints.begin(); it != patchPoints.end(); it++) {
@@ -1176,7 +1170,6 @@ public:
 		roots |= ced.roots;
 		exprStashPoints |= ced.exprStashPoints;
 		happensBeforePoints |= ced.happensBeforePoints;
-		exprsToSlots |= ced.exprsToSlots;
 		expressionEvalPoints |= ced.expressionEvalPoints;
 		crashCfg |= ced.crashCfg;
 		patchPoints.insert(ced.patchPoints.begin(), ced.patchPoints.end());

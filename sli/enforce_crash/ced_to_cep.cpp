@@ -180,7 +180,12 @@ stack_validation_table(Oracle *oracle, FILE *f, const VexRip &vr)
 }
 
 static void
-compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, const CfgRelabeller &cfgLabels, const char *ident)
+compute_entry_point_list(Oracle *oracle,
+			 crashEnforcementData &ced,
+			 FILE *f,
+			 const CfgRelabeller &cfgLabels,
+			 const slotMapT &slotMap,
+			 const char *ident)
 {
 	std::map<ThreadCfgLabel, int> ctxts;
 	{
@@ -198,7 +203,7 @@ compute_entry_point_list(Oracle *oracle, crashEnforcementData &ced, FILE *f, con
 		const VexRip &v(ced.crashCfg.labelToRip(n->label));
 		fprintf(f, "static struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
-		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(l.thread, ced.exprsToSlots) + 1);
+		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(l.thread, slotMap) + 1);
 		fprintf(f, "    .nr_stack_slots = %zd,\n", v.stack.size() - 1);
 		fprintf(f, "    .stack = {\n");
 		stack_validation_table(oracle, f, v);
@@ -319,7 +324,8 @@ bytecode_const8(FILE *f, unsigned char val)
 }
 
 static void
-bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnforcementData &ced)
+bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnforcementData &ced,
+		   const slotMapT &slots)
 {
 	switch (expr->tag) {
 	case Iex_Const: {
@@ -342,7 +348,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 	}
 	case Iex_Get: {
 		IRExprGet *ieg = (IRExprGet *)expr;
-		simulationSlotT slot = ced.exprsToSlots(thread, ieg);
+		simulationSlotT slot = slots(thread, ieg);
 		bytecode_op(f, "push_slot", ieg->ty);
 		bytecode_const32(f, slot.idx);
 		break;
@@ -350,7 +356,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 
 	case Iex_Unop: {
 		IRExprUnop *ieu = (IRExprUnop *)expr;
-		bytecode_eval_expr(f, ieu->arg, thread, ced);
+		bytecode_eval_expr(f, ieu->arg, thread, ced, slots);
 		switch (ieu->op) {
 		case Iop_32Sto64:
 			bytecode_op(f, "sign_extend64", ieu->arg->type());
@@ -366,8 +372,8 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 
 	case Iex_Binop: {
 		IRExprBinop *ieb = (IRExprBinop *)expr;
-		bytecode_eval_expr(f, ieb->arg1, thread, ced);
-		bytecode_eval_expr(f, ieb->arg2, thread, ced);
+		bytecode_eval_expr(f, ieb->arg1, thread, ced, slots);
+		bytecode_eval_expr(f, ieb->arg2, thread, ced, slots);
 		switch (ieb->op) {
 		case Iop_CmpEQ32:
 		case Iop_CmpEQ64:
@@ -388,9 +394,9 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 	case Iex_Associative: {
 		IRExprAssociative *iea = (IRExprAssociative *)expr;
 		assert(iea->nr_arguments != 0);
-		bytecode_eval_expr(f, iea->contents[0], thread, ced);
+		bytecode_eval_expr(f, iea->contents[0], thread, ced, slots);
 		for (int i = 1; i < iea->nr_arguments; iea++) {
-			bytecode_eval_expr(f, iea->contents[i], thread, ced);
+			bytecode_eval_expr(f, iea->contents[i], thread, ced, slots);
 			switch (iea->op) {
 			case Iop_Add32:
 			case Iop_Add64:
@@ -404,7 +410,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 	}
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)expr;
-		bytecode_eval_expr(f, iel->addr, thread, ced);
+		bytecode_eval_expr(f, iel->addr, thread, ced, slots);
 		bytecode_op(f, "load", iel->ty);
 		break;
 	}
@@ -414,13 +420,15 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 }
 
 static void
-emit_validation(FILE *f, int ident, const char *name, const std::set<exprEvalPoint> &condition, const AbstractThread &thread, crashEnforcementData &ced)
+emit_validation(FILE *f, int ident, const char *name, const std::set<exprEvalPoint> &condition,
+		const AbstractThread &thread, crashEnforcementData &ced,
+		const slotMapT &slots)
 {
 	fprintf(f, "static const unsigned short instr_%d_%s[] = {\n", ident, name);
 	for (auto it = condition.begin();
 	     it != condition.end();
 	     it++) {
-		bytecode_eval_expr(f, it->e, thread, ced);
+		bytecode_eval_expr(f, it->e, thread, ced, slots);
 		if (!it->invert)
 			bytecode_op(f, "not", Ity_I1);
 		fprintf(f, "    (unsigned short)bcop_fail_if,\n");
@@ -440,7 +448,8 @@ struct cfg_annotation_summary {
 };
 
 static void
-dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller, const char *ident)
+dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller,
+		   const slotMapT &slots, const char *ident)
 {
 	{
 		std::queue<ThreadCfgLabel> pending;
@@ -501,7 +510,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "static const struct cfg_instr_stash instr_%d_stash[] = {\n", newLabel);
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
 				IRExprGet *e = *it2;
-				simulationSlotT simSlot(ced.exprsToSlots(oldLabel.thread, e));
+				simulationSlotT simSlot(slots(oldLabel.thread, e));
 				fprintf(f, "    { .reg = %d, .slot = %d },\n",
 					e->reg.isReg() ? RegisterIdx::fromVexOffset(e->reg.asReg()).idx : -1,
 					simSlot.idx);
@@ -588,15 +597,15 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			assert(!(pre_validate.empty() && rx_validate.empty() && eval_validate.empty()));
 			if (!pre_validate.empty()) {
 				summary.has_pre_validate = true;
-				emit_validation(f, newLabel, "pre_validate", pre_validate, oldLabel.thread, ced);
+				emit_validation(f, newLabel, "pre_validate", pre_validate, oldLabel.thread, ced, slots);
 			}
 			if (!rx_validate.empty()) {
 				summary.has_rx_validate = true;
-				emit_validation(f, newLabel, "rx_validate", rx_validate, oldLabel.thread, ced);
+				emit_validation(f, newLabel, "rx_validate", rx_validate, oldLabel.thread, ced, slots);
 			}
 			if (!eval_validate.empty()) {
 				summary.has_eval_validate = true;
-				emit_validation(f, newLabel, "eval_validate", eval_validate, oldLabel.thread, ced);
+				emit_validation(f, newLabel, "eval_validate", eval_validate, oldLabel.thread, ced, slots);
 			}
 		}
 
@@ -625,7 +634,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		for (unsigned x = 0; x < hb->content.size(); x++) {
 			if (x != 0)
 				fprintf(f, ", ");
-			fprintf(f, "%d", ced.exprsToSlots(afterTid, hb->content[x]).idx);
+			fprintf(f, "%d", slots(afterTid, hb->content[x]).idx);
 		}
 		fprintf(f, "}\n};\n");
 		fprintf(f, "static struct msg_template msg_template_%x_tx = {\n", hb->msg_id);
@@ -637,7 +646,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		for (unsigned x = 0; x < hb->content.size(); x++) {
 			if (x != 0)
 				fprintf(f, ", ");
-			fprintf(f, "%d", ced.exprsToSlots(beforeTid, hb->content[x]).idx);
+			fprintf(f, "%d", slots(beforeTid, hb->content[x]).idx);
 		}
 		fprintf(f, "}\n};\n");
 	}
@@ -754,8 +763,11 @@ main(int argc, char *argv[])
 	fprintf(f, "#include \"cep_interpreter.h\"\n");
 	fprintf(f, "#include <stddef.h>\n"); /* For NULL */
 	fprintf(f, "\n");
-	dump_annotated_cfg(ced, f, relabeller, "__cfg_nodes");
-	compute_entry_point_list(oracle, ced, f, relabeller, "__entry_points");
+
+	slotMapT slots(ced.exprStashPoints, ced.happensBeforePoints);
+
+	dump_annotated_cfg(ced, f, relabeller, slots, "__cfg_nodes");
+	compute_entry_point_list(oracle, ced, f, relabeller, slots, "__entry_points");
 	fprintf(f, "const unsigned long __patch_points[] = {");
 	for (auto it = ced.patchPoints.begin(); it != ced.patchPoints.end(); it++) {
 		if (it != ced.patchPoints.begin())
