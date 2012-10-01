@@ -133,22 +133,19 @@ space::asIRExpr(IRExpr *key) const
 				abort();
 			}
 		}
+		IRExpr *eq(IRExpr *a, unsigned long b) {
+			return IRExpr_Binop(eqOp(), a, cnst(b));
+		}
 		IRExpr *operator()(IRExpr *a, unsigned long v) {
 			if (v == 0)
 				return IRExpr_Const(
 					IRConst_U1(0));
 			else if (v == 1)
-				return IRExpr_Binop(
-					eqOp(),
-					a,
-					cnst(0));
+				return eq(a, 0);
 			else if (v == type_max)
 				return IRExpr_Unop(
 					Iop_Not1,
-					IRExpr_Binop(
-						eqOp(),
-						a,
-						cnst(type_max)));
+					eq(a, type_max));
 			else
 				return IRExpr_Binop(op(), a, cnst(v));
 		}
@@ -157,30 +154,46 @@ space::asIRExpr(IRExpr *key) const
 				return IRExpr_Const(
 					IRConst_U1(0));
 			else if (v == type_max - 1)
-				return IRExpr_Binop(
-					eqOp(),
-					a,
-					cnst(type_max));
+				return eq(a, type_max);
 			else if (v == 0)
 				return IRExpr_Unop(
 					Iop_Not1,
-					IRExpr_Binop(
-						eqOp(),
-						a,
-						cnst(0)));
+					eq(a, 0));
 			else
 				return IRExpr_Binop(op(), cnst(v), a);
 		}
 	} lt = {ty, type_max};
 
+	/* Some special cases:
+
+	   x = [1,max]         <-> x != 0
+	   x = [0,max-1]       <-> x != max
+	   x = [0,k]+[k+2,max] <-> x != k + 1
+	*/
+	if (intervals.size() == 1 &&
+	    intervals[0].first == 1 &&
+	    intervals[0].second == type_max) {
+		return IRExpr_Unop(Iop_Not1, lt.eq(key, 0));
+	} else if (intervals.size() == 1 &&
+		   intervals[0].first == 0 &&
+		   intervals[0].second == type_max - 1) {
+		return IRExpr_Unop(
+			Iop_Not1,
+			lt.eq(key, type_max - 1));
+	} else if (intervals.size() == 2 &&
+		   intervals[0].first == 0 &&
+		   intervals[1].first == intervals[0].second + 2 &&
+		   intervals[1].second == type_max) {
+		return IRExpr_Unop(
+			Iop_Not1,
+			lt.eq(key, intervals[0].second + 1));
+	}
+
 	IRExprAssociative *res = IRExpr_Associative(intervals.size(), Iop_Or1);
 	for (unsigned x = 0; x < intervals.size(); x++) {
 		IRExpr *arg;
 		if (intervals[x].first == intervals[x].second)
-			arg = IRExpr_Binop(
-				lt.eqOp(),
-				lt.cnst(intervals[x].first),
-				key);
+			arg = lt.eq(key, intervals[x].first);
 		else if (intervals[x].first == 0 && intervals[x].second == type_max)
 			arg = IRExpr_Const(IRConst_U1(1));
 		else if (intervals[x].first == 0)
