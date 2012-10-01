@@ -763,75 +763,57 @@ public:
 };
 
 class crashEnforcementRoots {
-	std::map<unsigned, std::pair<AbstractThread, std::set<CfgLabel> > > content;
+	std::map<unsigned, std::set<AbstractThread> > threadAbs;
+	std::map<AbstractThread, std::set<CfgLabel> > content;
 public:
 	crashEnforcementRoots() {}
 
 	crashEnforcementRoots(std::map<unsigned, std::set<CfgLabel> > &roots, ThreadAbstracter &abs) {
 		for (auto it = roots.begin(); it != roots.end(); it++) {
+			assert(!threadAbs.count(it->first));
 			AbstractThread tid(abs.newThread(it->first));
-			content.insert(
-				std::pair<unsigned, std::pair<AbstractThread, std::set<CfgLabel> > >
-				(it->first,
-				std::pair<AbstractThread, std::set<CfgLabel> >(tid, it->second)));
+			threadAbs[it->first].insert(tid);
+			content[tid] = it->second;
 		}
 	}
 
 	void insert(unsigned concrete_tid, const ThreadCfgLabel &root)
 	{
-		auto it_did_insert =
-			content.insert(
-				std::pair<unsigned, std::pair<AbstractThread, std::set<CfgLabel> > >
-				(concrete_tid,
-				std::pair<AbstractThread, std::set<CfgLabel> >(root.thread, std::set<CfgLabel>())));
-		auto it = it_did_insert.first;
-		auto did_insert = it_did_insert.second;
-		if (!did_insert)
-			assert(it->second.first == root.thread);
-		it->second.second.insert(root.label);
-	}
-	void operator|=(const crashEnforcementRoots &cer) {
-		for (auto it = cer.content.begin(); it != cer.content.end(); it++)
-			content.insert(*it);
+		threadAbs[concrete_tid].insert(root.thread);
+		content[root.thread].insert(root.label);
 	}
 
-	bool parse(const char *str, const char **suffix) {
-		content.clear();
-		if (!parseThisString("Roots: ", str, &str))
-			return false;
-		while (!parseThisChar('\n', str, suffix)) {
-			unsigned concrete_tid;
-			AbstractThread abstract_tid(AbstractThread::uninitialised());
-			if (!parseDecimalUInt(&concrete_tid, str, &str) ||
-			    !parseThisString(" = ", str, &str) ||
-			    !abstract_tid.parse(str, &str) ||
-			    !parseThisString(":{", str, &str))
-				return false;
-			CfgLabel tcl(CfgLabel::uninitialised());
-			std::set<CfgLabel> entry;
-			while (!parseThisChar('}', str, &str)) {
-				if (!tcl.parse(str, &str))
-					return false;
-				entry.insert(tcl);
-				parseThisChar(',', str, &str);
-			}
-			assert(!content.count(concrete_tid));
-			content.insert(
-				std::pair<unsigned, std::pair<AbstractThread, std::set<CfgLabel> > >
-				(concrete_tid,
-				 std::pair<AbstractThread, std::set<CfgLabel> >(abstract_tid, entry)));
-			parseThisString("; ", str, &str);
+	void operator|=(const crashEnforcementRoots &cer) {
+		for (auto it = cer.threadAbs.begin(); it != cer.threadAbs.end(); it++)
+			threadAbs[it->first].insert(it->second.begin(), it->second.end());
+		for (auto it = cer.content.begin(); it != cer.content.end(); it++) {
+			assert(!content.count(it->first));
+			content[it->first] = it->second;
 		}
-		return true;
 	}
+
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "\tRoots: ");
+		fprintf(f, "\tThreads: ");
+		for (auto it = threadAbs.begin(); it != threadAbs.end(); it++) {
+			if (it != threadAbs.begin())
+				fprintf(f, "; ");
+			fprintf(f, "%d = {", it->first);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin())
+					fprintf(f, ",");
+				fprintf(f, "%s", it2->name());
+			}
+			fprintf(f, "}");
+		}
+		fprintf(f, "\n\tRoots: ");
 		for (auto it = content.begin(); it != content.end(); it++) {
 			if (it != content.begin())
 				fprintf(f, "; ");
-			fprintf(f, "%d = %s:{", it->first, it->second.first.name());
-			for (auto it2 = it->second.second.begin(); it2 != it->second.second.end(); it2++) {
-				if (it2 != it->second.second.begin())
+			fprintf(f, "%s = {", it->first.name());
+			for (auto it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++) {
+				if (it2 != it->second.begin())
 					fprintf(f, ",");
 				fprintf(f, "%s", it2->name());
 			}
@@ -839,84 +821,159 @@ public:
 		}
 		fprintf(f, "\n");
 	}
-
-	class iterator {
-		const std::map<unsigned, std::pair<AbstractThread, std::set<CfgLabel> > > &content;
-		std::map<unsigned, std::pair<AbstractThread, std::set<CfgLabel> > >::const_iterator it1;
-		std::set<CfgLabel>::const_iterator it2;
-		CfgLabel currentLabel;
-		AbstractThread currentAbstract;
-		unsigned currentConcrete;
-		bool _finished;
-	public:
-		bool finished() const { return _finished; }
-		void advance() {
-			assert(!_finished);
-			if (it1 == content.end()) {
-				_finished = true;
-				return;
+	bool parse(const char *str, const char **suffix) {
+		content.clear();
+		threadAbs.clear();
+		if (!parseThisString("Threads: ", str, &str))
+			return false;
+		while (1) {
+			unsigned concrete_tid;
+			if (!parseDecimalUInt(&concrete_tid, str, &str) ||
+			    threadAbs.count(concrete_tid) ||
+			    !parseThisString(" = {", str, &str))
+				return false;
+			std::set<AbstractThread> &abs(threadAbs[concrete_tid]);
+			while (1) {
+				AbstractThread a(AbstractThread::uninitialised());
+				if (!a.parse(str, &str))
+					return false;
+				abs.insert(a);
+				if (parseThisString("}", str, &str))
+					break;
+				if (!parseThisChar(',', str, &str))
+					return false;
 			}
-			while (it2 == it1->second.second.end()) {
-				it1++;
-				if (it1 == content.end()) {
-					_finished = true;
-					return;
-				}
-				it2 = it1->second.second.begin();
-			}
-			currentLabel = *it2;
-			currentConcrete = it1->first;
-			currentAbstract = it1->second.first;
-			it2++;
+			if (parseThisChar('\n', str, &str))
+				break;
+			if (!parseThisString("; ", str, &str))
+				return false;
 		}
-		ThreadCfgLabel get() const { return ThreadCfgLabel(currentAbstract, currentLabel); }
-		unsigned concrete_tid() const { return currentConcrete; }
-		const AbstractThread &abstract_tid() const { return currentAbstract; }
-		iterator(const std::map<unsigned, std::pair<AbstractThread, std::set<CfgLabel> > > &_content)
-			: content(_content),
-			  it1(_content.begin()),
-			  currentLabel(CfgLabel::uninitialised()),
-			  currentAbstract(AbstractThread::uninitialised()),
-			  _finished(false)
-		{
-			if (it1 == _content.end()) {
-				_finished = true;
-				return;
+		if (!parseThisString("Roots: ", str, &str))
+			return false;
+		while (1) {
+			AbstractThread abs(AbstractThread::uninitialised());
+			if (!abs.parse(str, &str) ||
+			    content.count(abs) ||
+			    !parseThisString(" = {", str, &str))
+				return false;
+			std::set<CfgLabel> &roots(content[abs]);
+			while (1) {
+				CfgLabel a(CfgLabel::uninitialised());
+				if (!a.parse(str, &str))
+					return false;
+				roots.insert(a);
+				if (parseThisString("}", str, &str))
+					break;
+				if (!parseThisChar(',', str, &str))
+					return false;
 			}
-			it2 = it1->second.second.begin();
-			while (it2 == it1->second.second.end()) {
-				it1++;
-				if (it1 == _content.end()) {
-					_finished = true;
-					return;
-				}
-				it2 = it1->second.second.begin();
-			}
-			currentLabel = *it2;
-			currentConcrete = it1->first;
-			currentAbstract = it1->second.first;
-			it2++;
+			if (parseThisChar('\n', str, suffix))
+				break;
+			if (!parseThisString("; ", str, &str))
+				return false;
 		}
-	};
-	iterator begin() const { return iterator(content); }
+		return true;
+	}
 
+	/* Iterate over all of the ThreadCfgLabels with a given
+	 * concrete tid. */
 	class conc_iterator {
-		std::set<CfgLabel>::const_iterator it1;
-		std::set<CfgLabel>::const_iterator it2;
-		AbstractThread abs;
+		const std::set<AbstractThread> *i2set;
+		const std::map<AbstractThread, std::set<CfgLabel> > *content;
+		const std::set<CfgLabel> *i3set;
+		std::set<AbstractThread>::const_iterator it2;
+		std::set<CfgLabel>::const_iterator it3;
+
 	public:
-		conc_iterator(const AbstractThread &_abs, const std::set<CfgLabel> &c)
-			: it1(c.begin()), it2(c.end()), abs(_abs)
-		{}
-		bool finished() const { return it1 == it2; }
-		void advance() { it1++; }
-		ThreadCfgLabel get() const { return ThreadCfgLabel(abs, *it1); }
+		bool finished() const { return it2 == i2set->end(); }
+		void advance() {
+			assert(it2 != i2set->end());
+			it3++;
+			while (it3 == i3set->end()) {
+				it2++;
+				if (it2 == i2set->end())
+					return;
+				auto foo = content->find(*it2);
+				assert(foo != content->end());
+				i3set = &foo->second;
+				it3 = i3set->begin();
+			}
+		}
+		ThreadCfgLabel get() const { return ThreadCfgLabel(*it2, *it3); }
+		const AbstractThread &abstract_tid() const { return *it2; }
+		conc_iterator(const std::set<AbstractThread> *_i2set,
+			      const std::map<AbstractThread, std::set<CfgLabel> > &_content)
+			: i2set(_i2set), content(&_content)
+		{
+			it2 = i2set->begin();
+			if (it2 == i2set->end())
+				return;
+
+			auto foo = content->find(*it2);
+			assert(foo != content->end());
+			i3set = &foo->second;
+
+			it3 = i3set->begin();
+			while (it3 == i3set->end()) {
+				it2++;
+				if (it2 == i2set->end())
+					return;
+
+				auto foo = content->find(*it2);
+				assert(foo != content->end());
+				i3set = &foo->second;
+
+				it3 = i3set->begin();
+			}
+		}
+		conc_iterator() {}
 	};
 	conc_iterator begin(unsigned concrete_tid) {
-		auto it = content.find(concrete_tid);
-		assert(it != content.end());
-		return conc_iterator(it->second.first, it->second.second);
+		auto it = threadAbs.find(concrete_tid);
+		assert(it != threadAbs.end());
+		return conc_iterator(&it->second, content);
 	}
+
+	/* Iterate over all of the ThreadCfgLabels. */
+	class iterator {
+		const std::map<unsigned, std::set<AbstractThread> > &threadAbs;
+		std::map<unsigned, std::set<AbstractThread> >::const_iterator it1;
+		conc_iterator it2;
+
+		const std::map<AbstractThread, std::set<CfgLabel> > &content;
+	public:
+		bool finished() const { return it1 == threadAbs.end(); }
+		void advance() {
+			assert(it1 != threadAbs.end());
+			it2.advance();
+			while (it2.finished()) {
+				it1++;
+				if (it1 == threadAbs.end())
+					return;
+				it2 = conc_iterator(&it1->second, content);
+			}
+		}
+		ThreadCfgLabel get() const { return it2.get(); }
+		unsigned concrete_tid() const { return it1->first; }
+		const AbstractThread &abstract_tid() const { return it2.abstract_tid(); }
+		iterator(const std::map<unsigned, std::set<AbstractThread> > &_threadAbs,
+			 const std::map<AbstractThread, std::set<CfgLabel> > &_content)
+			: threadAbs(_threadAbs),
+			  content(_content)
+		{
+			it1 = threadAbs.begin();
+			if (it1 == threadAbs.end())
+				return;
+			it2 = conc_iterator(&it1->second, content);
+			while (it2.finished()) {
+				it1++;
+				if (it1 == threadAbs.end())
+					return;
+				it2 = conc_iterator(&it1->second, content);
+			}
+		}
+	};
+	iterator begin() const { return iterator(threadAbs, content); }
 };
 
 class EnforceCrashCFG : public CFG<ThreadCfgLabel> {
