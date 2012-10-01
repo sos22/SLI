@@ -317,6 +317,7 @@ public:
 			else
 				it2->second = it->second && it2->second;
 		}
+		clearName();
 	}
 
 	void clear() { content.clear(); clearName(); }
@@ -343,7 +344,10 @@ spaces::asIRExpr() const
 
 class intervalified : public Named {
 	char *mkName() const {
-		return my_asprintf("%s &&& %s", sp.name(), nameIRExpr(rest));
+		if (rest)
+			return my_asprintf("%s &&& %s", sp.name(), nameIRExpr(rest));
+		else
+			return my_asprintf("%s", sp.name());
 	}
 public:
 	spaces sp;
