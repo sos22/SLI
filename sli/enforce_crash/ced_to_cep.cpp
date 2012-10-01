@@ -69,12 +69,11 @@ expressionDependsOn(IRExpr *what, const std::set<IRExprGet *> &d, bool includeRe
 }
 
 static int
-max_simslot(const AbstractThread &tid, const slotMapT &sm)
+max_simslot(const slotMapT &sm)
 {
 	int res = 0;
 	for (auto it = sm.begin(); it != sm.end(); it++)
-		if (it->first.first == tid &&
-		    it->second.idx > res)
+		if (it->second.idx > res)
 			res = it->second.idx;
 	return res;
 }
@@ -203,7 +202,7 @@ compute_entry_point_list(Oracle *oracle,
 		const VexRip &v(ced.crashCfg.labelToRip(n->label));
 		fprintf(f, "static struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
-		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(l.thread, slotMap) + 1);
+		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(slotMap) + 1);
 		fprintf(f, "    .nr_stack_slots = %zd,\n", v.stack.size() - 1);
 		fprintf(f, "    .stack = {\n");
 		stack_validation_table(oracle, f, v);
@@ -324,8 +323,7 @@ bytecode_const8(FILE *f, unsigned char val)
 }
 
 static void
-bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnforcementData &ced,
-		   const slotMapT &slots)
+bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotMapT &slots)
 {
 	switch (expr->tag) {
 	case Iex_Const: {
@@ -348,7 +346,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 	}
 	case Iex_Get: {
 		IRExprGet *ieg = (IRExprGet *)expr;
-		simulationSlotT slot = slots(thread, ieg);
+		simulationSlotT slot = slots(ieg);
 		bytecode_op(f, "push_slot", ieg->ty);
 		bytecode_const32(f, slot.idx);
 		break;
@@ -356,7 +354,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 
 	case Iex_Unop: {
 		IRExprUnop *ieu = (IRExprUnop *)expr;
-		bytecode_eval_expr(f, ieu->arg, thread, ced, slots);
+		bytecode_eval_expr(f, ieu->arg, ced, slots);
 		switch (ieu->op) {
 		case Iop_32Sto64:
 			bytecode_op(f, "sign_extend64", ieu->arg->type());
@@ -372,8 +370,8 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 
 	case Iex_Binop: {
 		IRExprBinop *ieb = (IRExprBinop *)expr;
-		bytecode_eval_expr(f, ieb->arg1, thread, ced, slots);
-		bytecode_eval_expr(f, ieb->arg2, thread, ced, slots);
+		bytecode_eval_expr(f, ieb->arg1, ced, slots);
+		bytecode_eval_expr(f, ieb->arg2, ced, slots);
 		switch (ieb->op) {
 		case Iop_CmpEQ32:
 		case Iop_CmpEQ64:
@@ -394,9 +392,9 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 	case Iex_Associative: {
 		IRExprAssociative *iea = (IRExprAssociative *)expr;
 		assert(iea->nr_arguments != 0);
-		bytecode_eval_expr(f, iea->contents[0], thread, ced, slots);
+		bytecode_eval_expr(f, iea->contents[0], ced, slots);
 		for (int i = 1; i < iea->nr_arguments; iea++) {
-			bytecode_eval_expr(f, iea->contents[i], thread, ced, slots);
+			bytecode_eval_expr(f, iea->contents[i], ced, slots);
 			switch (iea->op) {
 			case Iop_Add32:
 			case Iop_Add64:
@@ -410,7 +408,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 	}
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)expr;
-		bytecode_eval_expr(f, iel->addr, thread, ced, slots);
+		bytecode_eval_expr(f, iel->addr, ced, slots);
 		bytecode_op(f, "load", iel->ty);
 		break;
 	}
@@ -421,14 +419,13 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, const AbstractThread &thread, crashEnf
 
 static void
 emit_validation(FILE *f, int ident, const char *name, const std::set<exprEvalPoint> &condition,
-		const AbstractThread &thread, crashEnforcementData &ced,
-		const slotMapT &slots)
+		crashEnforcementData &ced, const slotMapT &slots)
 {
 	fprintf(f, "static const unsigned short instr_%d_%s[] = {\n", ident, name);
 	for (auto it = condition.begin();
 	     it != condition.end();
 	     it++) {
-		bytecode_eval_expr(f, it->e, thread, ced, slots);
+		bytecode_eval_expr(f, it->e, ced, slots);
 		if (!it->invert)
 			bytecode_op(f, "not", Ity_I1);
 		fprintf(f, "    (unsigned short)bcop_fail_if,\n");
@@ -510,7 +507,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "static const struct cfg_instr_stash instr_%d_stash[] = {\n", newLabel);
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
 				IRExprGet *e = *it2;
-				simulationSlotT simSlot(slots(oldLabel.thread, e));
+				simulationSlotT simSlot(slots(e));
 				fprintf(f, "    { .reg = %d, .slot = %d },\n",
 					e->reg.isReg() ? RegisterIdx::fromVexOffset(e->reg.asReg()).idx : -1,
 					simSlot.idx);
@@ -597,15 +594,15 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			assert(!(pre_validate.empty() && rx_validate.empty() && eval_validate.empty()));
 			if (!pre_validate.empty()) {
 				summary.has_pre_validate = true;
-				emit_validation(f, newLabel, "pre_validate", pre_validate, oldLabel.thread, ced, slots);
+				emit_validation(f, newLabel, "pre_validate", pre_validate, ced, slots);
 			}
 			if (!rx_validate.empty()) {
 				summary.has_rx_validate = true;
-				emit_validation(f, newLabel, "rx_validate", rx_validate, oldLabel.thread, ced, slots);
+				emit_validation(f, newLabel, "rx_validate", rx_validate, ced, slots);
 			}
 			if (!eval_validate.empty()) {
 				summary.has_eval_validate = true;
-				emit_validation(f, newLabel, "eval_validate", eval_validate, oldLabel.thread, ced, slots);
+				emit_validation(f, newLabel, "eval_validate", eval_validate, ced, slots);
 			}
 		}
 
@@ -622,8 +619,6 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			allHbEdges.insert(*it2);
 	for (auto it = allHbEdges.begin(); it != allHbEdges.end(); it++) {
 		happensBeforeEdge *hb = *it;
-		AbstractThread beforeTid = hb->before->rip.thread;
-		AbstractThread afterTid = hb->after->rip.thread;
 		fprintf(f, "static struct msg_template msg_template_%x_tx;\n", hb->msg_id);
 		fprintf(f, "static struct msg_template msg_template_%x_rx = {\n", hb->msg_id);
 		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);
@@ -634,7 +629,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		for (unsigned x = 0; x < hb->content.size(); x++) {
 			if (x != 0)
 				fprintf(f, ", ");
-			fprintf(f, "%d", slots(afterTid, hb->content[x]).idx);
+			fprintf(f, "%d", slots(hb->content[x]).idx);
 		}
 		fprintf(f, "}\n};\n");
 		fprintf(f, "static struct msg_template msg_template_%x_tx = {\n", hb->msg_id);
@@ -646,7 +641,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		for (unsigned x = 0; x < hb->content.size(); x++) {
 			if (x != 0)
 				fprintf(f, ", ");
-			fprintf(f, "%d", slots(beforeTid, hb->content[x]).idx);
+			fprintf(f, "%d", slots(hb->content[x]).idx);
 		}
 		fprintf(f, "}\n};\n");
 	}

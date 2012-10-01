@@ -519,23 +519,19 @@ public:
 	NAMED_CLASS
 };
 
-class slotMapT : public std::map<std::pair<AbstractThread, IRExprGet *>, simulationSlotT>,
+class slotMapT : public std::map<IRExprGet *, simulationSlotT>,
 		 private GcCallback<&ir_heap> {
-	typedef std::pair<AbstractThread, IRExprGet *> key_t;
-	void mk_slot(const AbstractThread &thr, IRExprGet *e, simulationSlotT &next_slot) {
-		key_t key(thr, e);
-		if (!count(key)) {
-			simulationSlotT s = allocateSlot(next_slot);
-			insert(std::pair<key_t, simulationSlotT>(key, s));
-		}
+	void mk_slot(IRExprGet *e, simulationSlotT &next_slot) {
+		if (!count(e))
+			insert(std::pair<IRExprGet *, simulationSlotT>(e, allocateSlot(next_slot)));
 	}
 	void runGc(HeapVisitor &hv) {
 		slotMapT n(*this);
 		clear();
 		for (auto it = n.begin(); it != n.end(); it++) {
-			std::pair<key_t, simulationSlotT> a = *it;
-			hv(a.first.second);
-			insert(a);
+			IRExprGet *e = it->first;
+			hv(e);
+			insert(std::pair<IRExprGet *, simulationSlotT>(e, it->second));
 		}
 	}
 public:
@@ -548,20 +544,18 @@ public:
 		return r;
 	}
 
-	simulationSlotT operator()(const AbstractThread &thr, IRExprGet *e) const {
-		auto it = find(key_t(thr, e));
+	simulationSlotT operator()(IRExprGet *e) const {
+		auto it = find(e);
 		assert(it != end());
 		return it->second;
 	}
 
 	void internSelf(internmentState &state) {
-		std::map<key_t, simulationSlotT> work;
-		for (auto it = begin(); it != end(); it++) {
+		std::map<IRExprGet *, simulationSlotT> work;
+		for (auto it = begin(); it != end(); it++)
 			work[state.intern(it->first)] = it->second;
-		}
 		clear();
-		for (auto it = work.begin(); it != work.end(); it++)
-			insert(std::pair<key_t, simulationSlotT>(it->first, it->second));
+		insert(work.begin(), work.end());
 	}
 
 	slotMapT() { }
@@ -577,10 +571,12 @@ public:
 		     it++) {
 			std::set<IRExprGet *> &s((*it).second);
 			for (auto it2 = s.begin(); it2 != s.end(); it2++)
-				mk_slot(it->first.thread, *it2, next_slot);
+				mk_slot(*it2, next_slot);
 		}
-		/* And the ones which we're going to receive in
-		 * messages */
+		/* That should also cover all of the stuff we're going
+		   to receive over HB edges: if we receive it then
+		   someone must have stashed it, and we'll have
+		   allocated a slot at the stash point. */
 		for (auto it = happensBefore.begin();
 		     it != happensBefore.end();
 		     it++) {
@@ -590,7 +586,7 @@ public:
 			     it2++) {
 				happensBeforeEdge *hb = *it2;
 				for (unsigned x = 0; x < hb->content.size(); x++)
-					mk_slot(hb->after->rip.thread, hb->content[x], next_slot);
+					assert(count(hb->content[x]));
 			}
 		}
 	}
@@ -604,8 +600,8 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tSlot map:\n");
 		for (auto it = begin(); it != end(); it++) {
-			fprintf(f, "\t\t%s:", it->first.first.name());
-			it->first.second->prettyPrint(f);
+			fprintf(f, "\t\t");
+			it->first->prettyPrint(f);
 			fprintf(f, " -> %d\n", it->second.idx);
 		}
 	}
@@ -614,20 +610,16 @@ public:
 			return false;
 		clear();
 		while (1) {
-			key_t key(AbstractThread::uninitialised(), (IRExprGet *)NULL);
 			simulationSlotT value;
 			IRExpr *k;
-			if (!key.first.parse(str, &str) ||
-			    !parseThisChar(':', str, &str) ||
-			    !parseIRExpr(&k, str, &str) ||
+			if (!parseIRExpr(&k, str, &str) ||
 			    !parseThisString(" -> ", str, &str) ||
 			    !parseDecimalInt(&value.idx, str, &str) ||
 			    !parseThisChar('\n', str, &str))
 				break;
 			if (k->tag != Iex_Get)
 				return false;
-			key.second = (IRExprGet *)k;
-			(*this)[key] = value;
+			(*this)[(IRExprGet *)k] = value;
 		}
 		*suffix = str;
 		return true;
