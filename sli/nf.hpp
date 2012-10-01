@@ -81,6 +81,15 @@ public:
 		for (auto it = begin(); it != end(); it++)
 			bloom.set(*it);
 	}
+	void remove(const NF_Atom &a) {
+		for (auto it = begin(); it != end(); it++) {
+			if (*it == a) {
+				erase(it);
+				return;
+			}
+		}
+		abort();
+	}
 };
 class NF_Expression : public std::vector<NF_Term>, GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {

@@ -609,6 +609,51 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 	abort();
 }
 
+static bool
+simplifyControlExpressions(DNF_Conjunction &d)
+{
+	std::set<std::pair<bool, IRExprControlFlow *> > exprs;
+	for (auto it = d.begin(); it != d.end(); it++)
+		if ( it->second->tag == Iex_ControlFlow )
+			exprs.insert( std::pair<bool, IRExprControlFlow *>(it->first, (IRExprControlFlow *)it->second) );
+
+	std::set<std::pair<unsigned, CfgLabel> > setExit;
+
+	/* First rule: if we have both A->B and A->C edges, where B !=
+	   C, we have a contradiction. */
+	for (auto it1 = exprs.begin(); it1 != exprs.end(); it1++) {
+		if (it1->first)
+			continue;
+		IRExprControlFlow *e1 = it1->second;
+		setExit.insert(std::pair<unsigned, CfgLabel>(e1->thread, e1->cfg1));
+		auto it2 = it1;
+		it2++;
+		for (; it2 != exprs.end(); it2++) {
+			if (it2->first)
+				continue;
+			IRExprControlFlow *e2 = it2->second;
+			if (e1->thread == e2->thread &&
+			    e1->cfg1 == e2->cfg1) {
+				/* By the internment property */
+				assert(e1->cfg2 != e2->cfg2);
+				return false;
+			}
+		}
+	}
+
+	/* Second rule: if we have Control(t1:cfg1->cfg2) &&
+	 * !Control(t1:cfg1->cfg3) then we can turn it into just
+	 * Control(t1:cfg1->cfg2) */
+	for (auto it = exprs.begin(); it != exprs.end(); it++) {
+		if (it->first) {
+			IRExprControlFlow *e = it->second;
+			if (setExit.count(std::pair<unsigned, CfgLabel>(e->thread, e->cfg1)))
+				d.remove(NF_Atom(it->first, it->second));
+		}
+	}
+	return true;
+}
+
 static crashEnforcementData
 enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
@@ -651,6 +696,13 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 		} else {
 			d.erase(d.begin() + x);
 		}
+	}
+
+	for (unsigned x = 0; x < d.size(); ) {
+		if (simplifyControlExpressions(d[x]))
+			x++;
+		else
+			d.erase(d.begin() + x);
 	}
 
 	printDnf(d, _logfile);
