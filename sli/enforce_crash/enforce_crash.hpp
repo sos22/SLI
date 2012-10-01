@@ -1032,49 +1032,6 @@ public:
 	}
 };
 
-/* Map that tells us where the various threads have to exit. */
-class abstractThreadExitPointsT : public std::set<ThreadCfgLabel> {
-public:
-	abstractThreadExitPointsT() {}
-	abstractThreadExitPointsT(CrashCfg &cfg, happensBeforeMapT &);
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "\tAbstract thread exit points: {");
-		for (auto it = begin(); it != end(); it++) {
-			if (it != begin())
-				fprintf(f, ", ");
-			fprintf(f, "%s", it->name());
-		}
-		fprintf(f, "}\n");
-	}
-	bool parse(const char *str, const char **suffix) {
-		if (!parseThisString("Abstract thread exit points: {", str, &str))
-			return false;
-		std::set<ThreadCfgLabel> res;
-		if (!parseThisString("}", str, &str)) {
-			while (1) {
-				ThreadCfgLabel l;
-				if (!l.parse(str, &str))
-					return false;
-				if (parseThisString("}", str, &str))
-					break;
-				if (!parseThisString(", ", str, &str))
-					return false;
-			}
-		}
-		if (!parseThisChar('\n', str, &str))
-			return false;
-		*suffix = str;
-		clear();
-		for (auto it = res.begin(); it != res.end(); it++)
-			insert(*it);
-		return true;
-	}
-	void operator|=(const abstractThreadExitPointsT &atet) {
-		for (auto it = atet.begin(); it != atet.end(); it++)
-			this->insert(*it);
-	}
-};
-
 class CrashCfg {
 	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
 	std::map<CfgLabel, VexRip> rips;
@@ -1135,7 +1092,6 @@ public:
 	happensBeforeMapT happensBeforePoints;
 	slotMapT exprsToSlots;
 	expressionEvalMapT expressionEvalPoints;
-	abstractThreadExitPointsT threadExitPoints;
 	std::set<unsigned long> patchPoints;
 	std::set<unsigned long> interpretInstrs;
 
@@ -1158,8 +1114,7 @@ public:
 		  exprDominatorMap(conj, exprStashPoints, idom, predecessorMap, happensBefore),
 		  happensBeforePoints(mai, conj, idom, crashCfg, exprStashPoints, abs, next_hb_id),
 		  exprsToSlots(exprStashPoints, happensBeforePoints, next_slot),
-		  expressionEvalPoints(exprDominatorMap),
-		  threadExitPoints(crashCfg, happensBeforePoints)
+		  expressionEvalPoints(exprDominatorMap)
 	{}
 
 	bool parse(AddressSpace *as, const char *str, const char **suffix) {
@@ -1170,7 +1125,6 @@ public:
 		    !happensBeforePoints.parse(crashCfg, str, &str) ||
 		    !exprsToSlots.parse(str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||
-		    !threadExitPoints.parse(str, &str) ||
 		    !parseThisString("Patch points = [", str, &str))
 			return false;
 		while (!parseThisString("], contInterpret = [", str, &str)) {
@@ -1203,7 +1157,6 @@ public:
 		happensBeforePoints.prettyPrint(f);
 		exprsToSlots.prettyPrint(f);
 		expressionEvalPoints.prettyPrint(f);
-		threadExitPoints.prettyPrint(f);
 		fprintf(f, "Patch points = [");
 		for (auto it = patchPoints.begin(); it != patchPoints.end(); it++) {
 			if (it != patchPoints.begin())
@@ -1225,7 +1178,6 @@ public:
 		happensBeforePoints |= ced.happensBeforePoints;
 		exprsToSlots |= ced.exprsToSlots;
 		expressionEvalPoints |= ced.expressionEvalPoints;
-		threadExitPoints |= ced.threadExitPoints;
 		crashCfg |= ced.crashCfg;
 		patchPoints.insert(ced.patchPoints.begin(), ced.patchPoints.end());
 		interpretInstrs.insert(ced.interpretInstrs.begin(), ced.interpretInstrs.end());
