@@ -44,25 +44,34 @@ instrToInstrSetMap::print(FILE *f) const
 }
 
 static bool
-exprUsesRegister(IRExpr *e, const threadAndRegister &reg)
+exprUsesRegister(IRExpr *e, const IRExpr *e2)
 {
 	struct : public IRExprTransformer {
-		const threadAndRegister *reg;
+		const IRExpr *needle;
 		bool res;
 		IRExpr *transformIex(IRExprGet *ieg) {
-			if (*reg ==  ieg->reg)
+			if (ieg == needle) {
 				res = true;
+				abortTransform();
+			}
+			return ieg;
+		}
+		IRExpr *transformIex(IRExprEntryPoint *ieg) {
+			if (ieg == needle) {
+				res = true;
+				abortTransform();
+			}
 			return ieg;
 		}
 	} doit;
-	doit.reg = &reg;
+	doit.needle = e2;
 	doit.res = false;
 	doit.doit(e);
 	return doit.res;
 }
 
 static bool
-instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcementData &ced)
+instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExpr *expr, crashEnforcementData &ced)
 {
 	{
 		auto it = ced.happensBeforePoints.find(instr->rip);
@@ -75,7 +84,7 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcem
 					for (auto it3 = hbe->content.begin();
 					     it3 != hbe->content.end();
 					     it3++) {
-						if ((*it3)->reg == expr->reg)
+						if (*it3 == expr)
 							return true;
 					}
 				}
@@ -89,7 +98,7 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExprGet *expr, crashEnforcem
 			for (auto it2 = it->second.begin();
 			     it2 != it->second.end();
 			     it2++) {
-				if (exprUsesRegister(it2->e, expr->reg))
+				if (exprUsesRegister(it2->e, expr))
 					return true;
 			}
 		}
@@ -685,13 +694,13 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	     it != ced.exprStashPoints.end();
 	     it++) {
 		const ThreadCfgLabel &label(it->first);
-		typedef std::pair<Instruction<ThreadCfgLabel> *, IRExprGet *> entryT;
+		typedef std::pair<Instruction<ThreadCfgLabel> *, IRExpr *> entryT;
 		std::set<entryT> frozenStashPoints;
 		std::set<entryT> unfrozenStashPoints;
 
 		{
 			Instruction<ThreadCfgLabel> *n = ced.crashCfg.findInstr(label);
-			const std::set<IRExprGet *> &exprsToStash(it->second);
+			const std::set<IRExpr *> &exprsToStash(it->second);
 			assert(n);
 			for (auto it = exprsToStash.begin(); it != exprsToStash.end(); it++)
 				unfrozenStashPoints.insert(entryT(n, *it));
@@ -702,8 +711,17 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 			{
 				auto it = unfrozenStashPoints.begin();
 				node = it->first;
-				expr = it->second;
+				IRExpr *e = it->second;
 				unfrozenStashPoints.erase(it);
+
+				if (e->tag == Iex_EntryPoint) {
+					/* Can never advance stash of
+					 * entry point expressions. */
+					frozenStashPoints.insert(entryT(node, e));
+					continue;
+				}
+				assert(e->tag == Iex_Get);
+				expr = (IRExprGet *)e;
 			}
 			const ThreadCfgLabel &label(node->rip);
 

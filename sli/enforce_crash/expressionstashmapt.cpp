@@ -24,6 +24,11 @@ expressionStashMapT::expressionStashMapT(std::set<IRExpr *> &neededExpressions,
 			}
 		} else if (e->tag == Iex_HappensBefore) {
 			/* These don't really get stashed in any useful sense */
+		} else if (e->tag == Iex_EntryPoint) {
+			/* These are always stashed at the nominated node. */
+			IRExprEntryPoint *ep = (IRExprEntryPoint *)e;
+			for (auto it = abs.begin(ep->thread, ep->label); !it.finished(); it.advance())
+				(*this)[it.get()].insert(ep);
 		} else {
 			abort();
 		}

@@ -475,16 +475,14 @@ happensBeforeEdge::parse(CrashCfg &cfg, const char *str, const char **suffix)
 	    !after.parse(str, &str) ||
 	    !parseThisString(" {", str, &str))
 		return NULL;
-	std::vector<IRExprGet *> content;
+	std::vector<IRExpr *> content;
 	while (1) {
 		IRExpr *a;
 		if (!parseIRExpr(&a, str, &str))
 			break;
 		if (!parseThisString(", ", str, &str))
 			return NULL;
-		if (a->tag != Iex_Get)
-			return NULL;
-		content.push_back((IRExprGet *)a);
+		content.push_back(a);
 	}
 	if (!parseThisChar('}', str, &str))
 		return NULL;

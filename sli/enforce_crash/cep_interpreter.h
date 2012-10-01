@@ -64,6 +64,10 @@ struct cfg_instr_stash {
 	simslot_t slot;
 };
 
+struct cfg_instr_set_entry {
+	simslot_t slot;
+};
+
 struct cfg_instr {
 	unsigned long rip;
 	const unsigned char *content;
@@ -72,6 +76,8 @@ struct cfg_instr {
 	int nr_successors;
 	const struct cfg_instr_stash *stash;
 	int nr_stash;
+	const struct cfg_instr_set_entry *set_entry;
+	int nr_set_entry;
 	int nr_rx_msg;
 	struct msg_template **rx_msgs;
 	int nr_tx_msg;

@@ -47,17 +47,26 @@ public:
 };
 
 static bool
-expressionDependsOn(IRExpr *what, const std::set<IRExprGet *> &d, bool includeRegisters)
+expressionDependsOn(IRExpr *what, const std::set<IRExpr *> &d, bool includeRegisters)
 {
 	struct : public IRExprTransformer {
 		bool res;
-		const std::set<IRExprGet *> *d;
+		const std::set<IRExpr *> *d;
 		bool includeRegisters;
 		IRExpr *transformIex(IRExprGet *e) {
 			if (e->reg.isReg() && !includeRegisters)
 				return e;
-			if (d->count(e))
+			if (d->count(e)) {
 				res = true;
+				abortTransform();
+			}
+			return e;
+		}
+		IRExpr *transformIex(IRExprEntryPoint *e) {
+			if (d->count(e)) {
+				res = true;
+				abortTransform();
+			}
 			return e;
 		}
 	} doit;
@@ -351,6 +360,13 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		bytecode_const32(f, slot.idx);
 		break;
 	}
+	case Iex_EntryPoint: {
+		IRExprEntryPoint *iee = (IRExprEntryPoint *)expr;
+		simulationSlotT slot = slots(iee);
+		bytecode_op(f, "push_slot", Ity_I1);
+		bytecode_const32(f, slot.idx);
+		break;
+	}
 
 	case Iex_Unop: {
 		IRExprUnop *ieu = (IRExprUnop *)expr;
@@ -503,14 +519,24 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		struct cfg_annotation_summary summary;
 		memset(&summary, 0, sizeof(summary));
 		if (ced.exprStashPoints.count(oldLabel)) {
-			const std::set<IRExprGet *> &toStash(ced.exprStashPoints[oldLabel]);
+			const std::set<IRExpr *> &toStash(ced.exprStashPoints[oldLabel]);
 			fprintf(f, "static const struct cfg_instr_stash instr_%d_stash[] = {\n", newLabel);
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
-				IRExprGet *e = *it2;
-				simulationSlotT simSlot(slots(e));
-				fprintf(f, "    { .reg = %d, .slot = %d },\n",
-					e->reg.isReg() ? RegisterIdx::fromVexOffset(e->reg.asReg()).idx : -1,
-					simSlot.idx);
+				if ( (*it2)->tag == Iex_Get ) {
+					IRExprGet *e = (IRExprGet *)*it2;
+					simulationSlotT simSlot(slots(e));
+					fprintf(f, "    { .reg = %d, .slot = %d },\n",
+						e->reg.isReg() ? RegisterIdx::fromVexOffset(e->reg.asReg()).idx : -1,
+						simSlot.idx);
+				}
+			}
+			fprintf(f, "};\n");
+			fprintf(f, "static const struct cfg_instr_set_entry instr_%d_set_entry[] = {\n", newLabel);
+			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
+				if ( (*it2)->tag == Iex_EntryPoint ) {
+					simulationSlotT simSlot(slots(*it2));
+					fprintf(f, "    { .slot = %d },\n", simSlot.idx);
+				}
 			}
 			fprintf(f, "};\n");
 			summary.have_stash = true;
@@ -557,7 +583,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		if (ced.expressionEvalPoints.count(oldLabel)) {
 			const std::set<exprEvalPoint> &sideConditions(ced.expressionEvalPoints[oldLabel]);
 			std::set<exprEvalPoint> pre_validate, rx_validate, eval_validate;
-			std::set<IRExprGet *> rxed, stashed;
+			std::set<IRExpr *> rxed, stashed;
 			if (ced.happensBeforePoints.count(oldLabel)) {
 				const std::set<happensBeforeEdge *> &hbEdges(ced.happensBeforePoints[oldLabel]);
 				for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
@@ -569,7 +595,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				}
 			}
 			if (ced.exprStashPoints.count(oldLabel)) {
-				const std::set<IRExprGet *> &toStash(ced.exprStashPoints[oldLabel]);
+				const std::set<IRExpr *> &toStash(ced.exprStashPoints[oldLabel]);
 				for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++)
 					stashed.insert(*it2);
 			}
@@ -656,10 +682,13 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		fprintf(f, "        .rip = 0x%lx,\n", it->second.rip);
 		add_simple_array(f, "        ", "content", "content", "content_sz", it->first);
 		add_simple_array(f, "        ", "successors", "successors", "nr_successors", it->first);
-		if (it->second.have_stash)
+		if (it->second.have_stash) {
 			add_simple_array(f, "        ", "stash", "stash", "nr_stash", it->first);
-		else
+			add_simple_array(f, "        ", "set_entry", "set_entry", "nr_set_entry", it->first);
+		} else {
 			add_empty_array(f, "        ", "stash", "nr_stash");
+			add_empty_array(f, "        ", "set_entry", "nr_set_entry");
+		}
 		if (it->second.rx_msg) {
 			fprintf(f, "        .nr_rx_msg = sizeof(msg_list_%d)/sizeof(msg_list_%d[0]),\n",
 				it->second.rx_msg, it->second.rx_msg);
@@ -760,6 +789,10 @@ main(int argc, char *argv[])
 	fprintf(f, "\n");
 
 	slotMapT slots(ced.exprStashPoints, ced.happensBeforePoints);
+
+	fprintf(f, "/*\n");
+	slots.prettyPrint(f);
+	fprintf(f, "*/\n");
 
 	dump_annotated_cfg(ced, f, relabeller, slots, "__cfg_nodes");
 	compute_entry_point_list(oracle, ced, f, relabeller, slots, "__entry_points");

@@ -359,6 +359,8 @@ static void
 start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label, int nr_simslots)
 {
 	struct low_level_state *lls = new_low_level_state(hls, nr_simslots);
+	int i;
+
 	lls->cfg_node = starting_label;
 	low_level_state_push(&hls->ll_states, lls);
 	sanity_check_low_level_state(lls, 1);
@@ -368,6 +370,8 @@ start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label,
 	debug("%p(%s): Start new LLS\n",
 	      lls,
 	      plan.cfg_nodes[starting_label].id);
+	for (i = 0; i < plan.cfg_nodes[starting_label].nr_set_entry; i++)
+		lls->simslots[plan.cfg_nodes[starting_label].set_entry[i].slot] = 1;
 }
 
 static void

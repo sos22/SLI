@@ -8,12 +8,16 @@ public:
 	EnumNeededExpressionsTransformer(std::set<IRExpr *> &_out)
 		: out(_out)
 	{}
-	IRExpr *transformIex(IRExprGet *) {
-		out.insert(currentIRExpr());
+	IRExpr *transformIex(IRExprGet *e) {
+		out.insert(e);
 		return NULL;
 	}
-	IRExpr *transformIex(IRExprHappensBefore *) {
-		out.insert(currentIRExpr());
+	IRExpr *transformIex(IRExprHappensBefore *e) {
+		out.insert(e);
+		return NULL;
+	}
+	IRExpr *transformIex(IRExprEntryPoint *e) {
+		out.insert(e);
 		return NULL;
 	}
 };

@@ -299,11 +299,11 @@ public:
 	instructionDominatorMapT() {}
 };
 
-class expressionStashMapT : public std::map<ThreadCfgLabel, std::set<IRExprGet *> >,
+class expressionStashMapT : public std::map<ThreadCfgLabel, std::set<IRExpr *> >,
 			    private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
-			std::vector<IRExprGet *> f(it->second.begin(), it->second.end());
+			std::vector<IRExpr *> f(it->second.begin(), it->second.end());
 			for (auto it2 = f.begin(); it2 != f.end(); it2++)
 				hv(*it2);
 			it->second.clear();
@@ -334,15 +334,13 @@ public:
 			if (!where.parse(str, &str) ||
 			    !parseThisString(" -> {", str, &str))
 				break;
-			std::set<IRExprGet *> b;
+			std::set<IRExpr *> b;
 			while (1) {
 				IRExpr * s;
 				if (!parseIRExpr(&s, str, &str) ||
 				    !parseThisString(", ", str, &str))
 					break;
-				if (s->tag != Iex_Get)
-					return false;
-				b.insert((IRExprGet *)s);
+				b.insert(s);
 			}
 			if (!parseThisString("}\n", str, &str))
 				return false;
@@ -365,7 +363,7 @@ public:
 	}
 	void internSelf(internmentState &state) {
 		for (auto it = begin(); it != end(); it++) {
-			std::set<IRExprGet *> out;
+			std::set<IRExpr *> out;
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
 				out.insert(state.intern(*it2));
 			it->second = out;
@@ -375,26 +373,35 @@ public:
 
 class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > {
 	class trans1 : public IRExprTransformer {
-		std::set<threadAndRegister> &availRegs;
+		std::set<IRExpr *> &availExprs;
+		void failed() {
+			isGood = false;
+			abortTransform();
+		}
 		IRExpr *transformIex(IRExprGet *e) {
-			if (!availRegs.count(e->reg))
-				isGood = false;
+			if (!availExprs.count(e))
+				failed();
 			return NULL;
 		}
 		IRExpr *transformIex(IRExprHappensBefore *) {
-			isGood = false;
+			failed();
+			return NULL;
+		}
+		IRExpr *transformIex(IRExprEntryPoint *e) {
+			if (!availExprs.count(e))
+				failed();
 			return NULL;
 		}
 	public:
 		bool isGood;
-		trans1(std::set<threadAndRegister> &_availRegs)
-			: availRegs(_availRegs),
+		trans1(std::set<IRExpr *> &_availExprs)
+			: availExprs(_availExprs),
 			  isGood(true)
 		{}
 	};
 	static bool evaluatable(IRExpr *e,
-				std::set<threadAndRegister> &availRegs) {
-		trans1 t(availRegs);
+				std::set<IRExpr *> &availExprs) {
+		trans1 t(availExprs);
 		t.doit(e);
 		return t.isGood;
 	}
@@ -443,7 +450,7 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
 	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
 			  Instruction<ThreadCfgLabel> *_after,
-			  const std::vector<IRExprGet *> &_content,
+			  const std::vector<IRExpr *> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
 	{}
@@ -471,7 +478,7 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 public:
 	Instruction<ThreadCfgLabel> *before;
 	Instruction<ThreadCfgLabel> *after;
-	std::vector<IRExprGet *> content;
+	std::vector<IRExpr *> content;
 	unsigned msg_id;
 
 	happensBeforeEdge *intern(internmentState &state) {
@@ -501,7 +508,7 @@ public:
 		     it != liveInstructions.end();
 		     it++) {
 			auto *i = *it;
-			std::set<IRExprGet *> &exprs(stashMap[i->rip]);
+			std::set<IRExpr *> &exprs(stashMap[i->rip]);
 			for (auto it2 = exprs.begin();
 			     it2 != exprs.end();
 			     it2++)
@@ -519,19 +526,19 @@ public:
 	NAMED_CLASS
 };
 
-class slotMapT : public std::map<IRExprGet *, simulationSlotT>,
+class slotMapT : public std::map<IRExpr *, simulationSlotT>,
 		 private GcCallback<&ir_heap> {
-	void mk_slot(IRExprGet *e, simulationSlotT &next_slot) {
+	void mk_slot(IRExpr *e, simulationSlotT &next_slot) {
 		if (!count(e))
-			insert(std::pair<IRExprGet *, simulationSlotT>(e, allocateSlot(next_slot)));
+			insert(std::pair<IRExpr *, simulationSlotT>(e, allocateSlot(next_slot)));
 	}
 	void runGc(HeapVisitor &hv) {
 		slotMapT n(*this);
 		clear();
 		for (auto it = n.begin(); it != n.end(); it++) {
-			IRExprGet *e = it->first;
+			IRExpr *e = it->first;
 			hv(e);
-			insert(std::pair<IRExprGet *, simulationSlotT>(e, it->second));
+			insert(std::pair<IRExpr *, simulationSlotT>(e, it->second));
 		}
 	}
 public:
@@ -544,14 +551,14 @@ public:
 		return r;
 	}
 
-	simulationSlotT operator()(IRExprGet *e) const {
+	simulationSlotT operator()(IRExpr *e) const {
 		auto it = find(e);
 		assert(it != end());
 		return it->second;
 	}
 
 	void internSelf(internmentState &state) {
-		std::map<IRExprGet *, simulationSlotT> work;
+		std::map<IRExpr *, simulationSlotT> work;
 		for (auto it = begin(); it != end(); it++)
 			work[state.intern(it->first)] = it->second;
 		clear();
@@ -560,7 +567,7 @@ public:
 
 	slotMapT() { }
 
-	slotMapT(std::map<ThreadCfgLabel, std::set<IRExprGet *> > &neededExpressions,
+	slotMapT(std::map<ThreadCfgLabel, std::set<IRExpr *> > &neededExpressions,
 		 std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore)
 	{
 		simulationSlotT next_slot(1);
@@ -569,7 +576,7 @@ public:
 		for (auto it = neededExpressions.begin();
 		     it != neededExpressions.end();
 		     it++) {
-			std::set<IRExprGet *> &s((*it).second);
+			std::set<IRExpr *> &s((*it).second);
 			for (auto it2 = s.begin(); it2 != s.end(); it2++)
 				mk_slot(*it2, next_slot);
 		}
@@ -617,9 +624,7 @@ public:
 			    !parseDecimalInt(&value.idx, str, &str) ||
 			    !parseThisChar('\n', str, &str))
 				break;
-			if (k->tag != Iex_Get)
-				return false;
-			(*this)[(IRExprGet *)k] = value;
+			(*this)[k] = value;
 		}
 		*suffix = str;
 		return true;
