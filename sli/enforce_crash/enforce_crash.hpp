@@ -86,6 +86,7 @@ public:
 	{
 		return id * 10113569ul + summary_id.hash() * 10118387ul;
 	}
+	const SummaryId &summary() const { return summary_id; }
 };
 
 class AbstractThread : public Named {
@@ -123,6 +124,47 @@ public:
 	unsigned long hash() const
 	{
 		return id * 10113109ul;
+	}
+};
+
+class ConcreteCfgLabel : public Named {
+	char *mkName() const {
+		return my_asprintf("%s:%s", summary.name(), label.name());
+	}
+public:
+	SummaryId summary;
+	CfgLabel label;
+	ConcreteCfgLabel(const SummaryId &_summary, const CfgLabel &_label)
+		: summary(_summary), label(_label)
+	{}
+	ConcreteCfgLabel()
+		: summary(SummaryId::uninitialised()), label(CfgLabel::uninitialised())
+	{}
+	bool operator <(const ConcreteCfgLabel &o) const {
+		return summary < o.summary ||
+			(summary == o.summary && label < o.label);
+	}
+	bool operator!=(const ConcreteCfgLabel &o) const {
+		return (*this < o) || (o < *this);
+	}
+	bool operator==(const ConcreteCfgLabel &o) const {
+		return !(*this != o);
+	}
+	unsigned long hash() const {
+		return summary.hash() * 10120421 + label.hash() * 10123909;
+	}
+	bool parse(const char *str, const char **suffix) {
+		CfgLabel l(CfgLabel::uninitialised());
+		SummaryId t(SummaryId::uninitialised());
+		if (l.parse(str, &str) &&
+		    parseThisChar(':', str, &str) &&
+		    t.parse(str, suffix)) {
+			label = l;
+			summary = t;
+			clearName();
+			return true;
+		}
+		return false;
 	}
 };
 
@@ -1050,6 +1092,29 @@ public:
 		}
 	};
 	iterator begin() const { return iterator(threadAbs, content); }
+
+	ConcreteThread lookupAbsThread(const AbstractThread &abs)
+	{
+#ifndef NDEBUG
+		bool found_it = false;
+		ConcreteThread res(ConcreteThread::uninitialised());
+		for (auto it = threadAbs.begin(); it != threadAbs.end(); it++) {
+			if (it->second.count(abs)) {
+				assert(!found_it);
+				res = it->first;
+				found_it = true;
+			}
+		}
+		assert(found_it);
+		return res;
+#else
+		for (auto it = threadAbs.begin(); it != threadAbs.end(); it++) {
+			if (it->second.count(abs))
+				return it->first;
+		}
+		abort();
+#endif
+	}
 };
 
 class EnforceCrashCFG : public CFG<ThreadCfgLabel> {
@@ -1170,7 +1235,7 @@ public:
 
 class CrashCfg {
 	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
-	std::map<CfgLabel, VexRip> rips;
+	std::map<ConcreteCfgLabel, VexRip> rips;
 public:
 	Instruction<ThreadCfgLabel> *findInstr(const ThreadCfgLabel &label) {
 		auto it = content.find(label);
@@ -1180,8 +1245,8 @@ public:
 			return it->second;
 	}
 	CrashCfg() {};
-	CrashCfg(crashEnforcementRoots &roots, CrashSummary *summary, AddressSpace *as);
-	bool parse(AddressSpace *as, const char *str, const char **suffix);
+	CrashCfg(crashEnforcementRoots &roots, const SummaryId &summaryId, CrashSummary *summary, AddressSpace *as);
+	bool parse(crashEnforcementRoots &roots, AddressSpace *as, const char *str, const char **suffix);
 	void prettyPrint(FILE *f, bool verbose = false);
 	void operator|=(const CrashCfg &o) {
 		for (auto it = o.content.begin(); it != o.content.end(); it++) {
@@ -1207,7 +1272,7 @@ public:
 
 	};
 	iterator begin() const { return iterator(content.begin(), content.end()); }
-	const VexRip &labelToRip(const CfgLabel &l) const;
+	const VexRip &labelToRip(const ConcreteCfgLabel &l) const;
 };
 
 class crashEnforcementData {
@@ -1240,7 +1305,7 @@ public:
 			     CrashSummary *summary,
 			     AddressSpace *as)
 		: roots(_roots, abs),
-		  crashCfg(roots, summary, as),
+		  crashCfg(roots, summaryId, summary, as),
 		  happensBefore(summaryId, conj, abs, crashCfg, mai),
 		  predecessorMap(crashCfg),
 		  idom(crashCfg, predecessorMap, happensBefore),
@@ -1253,7 +1318,7 @@ public:
 	bool parse(AddressSpace *as, const char *str, const char **suffix) {
 		if (!parseThisString("Crash enforcement data:\n", str, &str) ||
 		    !roots.parse(str, &str) ||
-		    !crashCfg.parse(as, str, &str) ||
+		    !crashCfg.parse(roots, as, str, &str) ||
 		    !exprStashPoints.parse(str, &str) ||
 		    !happensBeforePoints.parse(crashCfg, str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||

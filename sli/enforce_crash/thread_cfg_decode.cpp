@@ -272,7 +272,7 @@ done_prefixes:
 }
 
 bool
-CrashCfg::parse(AddressSpace *as, const char *str, const char **suffix)
+CrashCfg::parse(crashEnforcementRoots &roots, AddressSpace *as, const char *str, const char **suffix)
 {
 	if (!parseThisString("CFG:\n", str, &str))
 		return false;
@@ -300,7 +300,7 @@ CrashCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 	if (!parseThisString("Label to RIP table:\n", cursor, &cursor))
 		return false;
 	while (1) {
-		CfgLabel cfg(CfgLabel::uninitialised());
+		ConcreteCfgLabel cfg;
 		VexRip vr;
 		if (!cfg.parse(cursor, &cursor))
 			break;
@@ -315,9 +315,11 @@ CrashCfg::parse(AddressSpace *as, const char *str, const char **suffix)
 	
 	/* Decode instructions */
 	for (auto it = content.begin(); it != content.end(); it++) {
-		assert(rips.count(it->second.first.label));
+		const AbstractThread &absThread(it->second.first.thread);
+		ConcreteThread concThread(roots.lookupAbsThread(absThread));
+		ConcreteCfgLabel clabel(concThread.summary(), it->second.first.label);
 		Instruction<ThreadCfgLabel> *instr =
-			decode_instr(as, rips[it->second.first.label].unwrap_vexrip(), it->first);
+			decode_instr(as, rips[clabel].unwrap_vexrip(), it->first);
 		assert(instr->len != 0);
 		this->content[it->first] = instr;
 	}
@@ -366,14 +368,14 @@ ThreadAbstracter::instr_iterator::get() const
 }
 
 const VexRip &
-CrashCfg::labelToRip(const CfgLabel &l) const
+CrashCfg::labelToRip(const ConcreteCfgLabel &l) const
 {
 	auto it = rips.find(l);
 	assert(it != rips.end());
 	return it->second;
 }
 
-CrashCfg::CrashCfg(crashEnforcementRoots &roots, CrashSummary *summary, AddressSpace *as)
+CrashCfg::CrashCfg(crashEnforcementRoots &roots, const SummaryId &summaryId, CrashSummary *summary, AddressSpace *as)
 {
 	std::map<CfgLabel, const CFGNode *> labelToNode;
 
@@ -392,10 +394,9 @@ CrashCfg::CrashCfg(crashEnforcementRoots &roots, CrashSummary *summary, AddressS
 			nodesToExplore.pop_back();
 			if (labelToNode.count(n->label)) {
 				assert(labelToNode[n->label] == n);
-				assert(rips.count(n->label));
 				continue;
 			}
-			rips[n->label] = n->rip;
+			rips[ConcreteCfgLabel(summaryId, n->label)] = n->rip;
 			labelToNode[n->label] = n;
 			for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
 				if (it->instr)

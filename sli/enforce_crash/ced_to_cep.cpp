@@ -215,7 +215,10 @@ compute_entry_point_list(Oracle *oracle,
 	for (auto it = ctxts.begin(); it != ctxts.end(); it++) {
 		ThreadCfgLabel l(it->first);
 		auto n = ced.crashCfg.findInstr(l);
-		const VexRip &v(ced.crashCfg.labelToRip(n->label));
+		const AbstractThread &absThread(n->rip.thread);
+		ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));
+		ConcreteCfgLabel concCfgLabel(concThread.summary(), n->rip.label);
+		const VexRip &v(ced.crashCfg.labelToRip(concCfgLabel));
 		fprintf(f, "static struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
 		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(slotMap) + 1);
@@ -229,7 +232,10 @@ compute_entry_point_list(Oracle *oracle,
 	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
 		ThreadCfgLabel l(it.get());
 		auto n = ced.crashCfg.findInstr(l);
-		const VexRip &v(ced.crashCfg.labelToRip(n->label));
+		const AbstractThread &absThread(n->rip.thread);
+		ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));
+		ConcreteCfgLabel concCfgLabel(concThread.summary(), n->rip.label);
+		const VexRip &v(ced.crashCfg.labelToRip(concCfgLabel));
 		entryPoints[v.unwrap_vexrip()].insert(l);
 	}
 	int next_idx = 0;
@@ -666,7 +672,10 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 		}
 
-		summary.rip = ced.crashCfg.labelToRip(instr->label).unwrap_vexrip();
+		const AbstractThread &absThread(instr->rip.thread);
+		ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));
+		ConcreteCfgLabel concCfgLabel(concThread.summary(), instr->rip.label);
+		summary.rip = ced.crashCfg.labelToRip(concCfgLabel).unwrap_vexrip();
 		summary.id = instr->label.name();
 		summaries[newLabel] = summary;
 		fprintf(f, "\n");

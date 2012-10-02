@@ -808,7 +808,11 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 
 			/* Can't stash a register which this
 			 * instruction might modify */
-			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, ced.crashCfg.labelToRip(node->label)), true);
+			const AbstractThread &absThread(node->rip.thread);
+			ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));
+			ConcreteCfgLabel concCfgLabel(concThread.summary(), node->rip.label);
+			const VexRip &vr(ced.crashCfg.labelToRip(concCfgLabel));
+			IRSB *irsb = oracle->ms->addressSpace->getIRSBForAddress(ThreadRip(Oracle::STATIC_THREAD, vr), true);
 			bool modifies = false;
 			for (int x = 0; !modifies && x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 				if (irsb->stmts[x]->tag == Ist_Put &&
@@ -951,7 +955,11 @@ avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
 		Instruction<ThreadCfgLabel> *instr = ced.crashCfg.findInstr(it.get());
 		assert(instr);
-		const VexRip &vr(ced.crashCfg.labelToRip(instr->label));
+		const AbstractThread &absThread(instr->rip.thread);
+		ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));
+		ConcreteCfgLabel concCfgLabel(concThread.summary(), instr->rip.label);
+		const VexRip &vr(ced.crashCfg.labelToRip(concCfgLabel));
+
 		unsigned long r = vr.unwrap_vexrip();
 		if (debug_declobber_instructions)
 			printf("%lx is a root\n", r);
