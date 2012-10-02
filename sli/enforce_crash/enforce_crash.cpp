@@ -1128,13 +1128,16 @@ main(int argc, char *argv[])
 
 	int next_hb_id = 0xaabb;
 
-	VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[5], NULL));
 	ThreadAbstracter abs;
-	crashEnforcementData accumulator = enforceCrashForMachine(SummaryId(1), summary, oracle, ALLOW_GC, abs, next_hb_id);
-
-	optimiseHBEdges(accumulator);
-	optimiseStashPoints(accumulator, oracle);
-	optimiseCfg(accumulator);
+	crashEnforcementData accumulator;
+	for (int i = 5; i < argc; i++) {
+		VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[i], NULL));
+		crashEnforcementData acc = enforceCrashForMachine(SummaryId(i - 4), summary, oracle, ALLOW_GC, abs, next_hb_id);
+		optimiseHBEdges(acc);
+		optimiseStashPoints(acc, oracle);
+		optimiseCfg(acc);
+		accumulator |= acc;
+	}
 
 	avoidBranchToPatch(accumulator, oracle);
 
