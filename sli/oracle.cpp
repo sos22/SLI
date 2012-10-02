@@ -1093,14 +1093,30 @@ irexprAliasingClass(IRExpr *expr,
 	}
 	case Iex_Associative: {
 		IRExprAssociative *e = (IRExprAssociative *)expr;
+		if (e->nr_arguments == 0)
+			return PointerAliasingSet::notAPointer;
 		switch (e->op) {
 		case Iop_Add64:
+			if (e->nr_arguments == 2 &&
+			    e->contents[0]->tag == Iex_Const) {
+				/* Special case: if X points at space
+				   Y then X + k points at Y as well,
+				   if k is a small constant. */
+				long k = ((IRExprConst *)e->contents[0])->con->Ico.U64;
+				if (k >= -4096 && k < 4096) {
+					return irexprAliasingClass(e->contents[1],
+								   config,
+								   temps,
+								   opt,
+								   buildingAliasTable);
+				}
+			}
+			/* Otherwise, fall through to normal assoc
+			 * handling. */
 		case Iop_And64:
 		case Iop_Or64:
 		case Iop_Xor64:
 		{
-			if (e->nr_arguments == 0)
-				return PointerAliasingSet::notAPointer;
 			PointerAliasingSet res = 
 				irexprAliasingClass(e->contents[0],
 						    config,
