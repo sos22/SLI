@@ -840,8 +840,28 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
 
-		 /* Todo: could maybe use these to improve aliasing here */
-	case StateMachineSideEffect::PointerAliasing:
+	case StateMachineSideEffect::PointerAliasing: {
+		StateMachineSideEffectPointerAliasing *p =
+			(StateMachineSideEffectPointerAliasing *)smse;
+		/* The only use we make of a PointerAliasing side
+		   effect is to say that things which aliasing says
+		   are definitely valid pointers really are definitely
+		   valid pointers.  Todo: could do much better
+		   here. */
+		if (!p->set.mightBeNonPointer() &&
+		    expressionIsTrue(
+			    IRExpr_Unop(
+				    Iop_BadPtr,
+				    IRExpr_Get(p->reg, Ity_I64)),
+			    true,
+			    chooser,
+			    opt)) {
+			return esme_escape;
+		}
+		break;
+	}
+
+		/* Todo: could maybe use this to improve aliasing. */
 	case StateMachineSideEffect::StackLayout:
 		break;
 	}
