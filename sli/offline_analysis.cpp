@@ -403,26 +403,26 @@ getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::s
 }
 
 /* If there's precisely one interesting store in the store machine and
- * one interesting load in the probe machine then the whole thing
- * becomes very easy. */
+ * one interesting memory access in the probe machine then the whole
+ * thing becomes very easy. */
 static bool
 singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, StateMachine *probeMachine,
 			    const AllowableOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineSideEffectStore *> storeMachineStores;
-	std::set<StateMachineSideEffectLoad *> probeMachineLoads;
+	std::set<StateMachineSideEffectMemoryAccess *> probeMachineAccesses;
 	enumSideEffects(storeMachine, storeMachineStores);
-	enumSideEffects(probeMachine, probeMachineLoads);
+	enumSideEffects(probeMachine, probeMachineAccesses);
 
 	StateMachineSideEffectStore *racingStore = NULL;
-	StateMachineSideEffectLoad *racingLoad = NULL;
+	StateMachineSideEffectMemoryAccess *racingLoad = NULL;
 	for (auto it = storeMachineStores.begin(); it != storeMachineStores.end(); it++) {
 		StateMachineSideEffectStore *store = *it;
 		bool races = false;
-		for (auto it2 = probeMachineLoads.begin();
-		     !races && it2 != probeMachineLoads.end();
+		for (auto it2 = probeMachineAccesses.begin();
+		     !races && it2 != probeMachineAccesses.end();
 		     it2++) {
-			StateMachineSideEffectLoad *load = *it2;
+			StateMachineSideEffectMemoryAccess *load = *it2;
 			if (oracle->memoryAccessesMightAlias(mai, opt, load, store)) {
 				if (racingLoad) {
 					/* Multiple racing loads */
@@ -456,8 +456,8 @@ singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, State
 	}
 	assert(racingLoad);
 
-	for (auto it = probeMachineLoads.begin(); it != probeMachineLoads.end(); it++) {
-		StateMachineSideEffectLoad *load = *it;
+	for (auto it = probeMachineAccesses.begin(); it != probeMachineAccesses.end(); it++) {
+		StateMachineSideEffectMemoryAccess *load = *it;
 		if (racingLoad == load)
 			continue;
 		if (oracle->memoryAccessesMightAlias(mai, opt, load, racingStore))
