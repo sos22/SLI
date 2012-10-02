@@ -116,6 +116,7 @@ stack_offset(Oracle *oracle, unsigned long rip)
 			continue;
 		}
 		IRSB *irsb = Oracle::getIRSBForRip(oracle->ms->addressSpace, q.first, false);
+		assert(irsb);
 		bool overlap = false;
 		bool failed = false;
 		for (int i = 1; !overlap && i < irsb->stmts_used; i++) {

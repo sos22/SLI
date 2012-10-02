@@ -156,9 +156,9 @@ public:
 	bool parse(const char *str, const char **suffix) {
 		CfgLabel l(CfgLabel::uninitialised());
 		SummaryId t(SummaryId::uninitialised());
-		if (l.parse(str, &str) &&
+		if (t.parse(str, &str) &&
 		    parseThisChar(':', str, &str) &&
-		    t.parse(str, suffix)) {
+		    l.parse(str, suffix)) {
 			label = l;
 			summary = t;
 			clearName();
