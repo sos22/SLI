@@ -513,8 +513,9 @@ static int
 cmpxchg(int *what, int oldval, int newval)
 {
 	int seen;
-	if (*what != oldval)
-		return *what;
+	seen = *what;
+	if (seen != oldval)
+		return seen;
 	asm ("lock cmpxchg %3, %1\n"
 	     : "=a" (seen), "+m" (*what)
 	     : "0" (oldval),
