@@ -16,7 +16,7 @@ static volatile bool force_quit;
 static void *
 thr_main(void *ign)
 {
-	int q;
+	static int q;
 	while (!force_quit) {
 		STOP_ANALYSIS();
 		global_ptr = &q;
