@@ -6,7 +6,7 @@ all: bug1.so bug2.so bug3.so
 %.cep.o: %.cep.c ../../sli/enforce_crash/cep_interpreter.h
 	gcc -g -I ../../sli/enforce_crash -c -fPIC -Wall -Werror $< -o $@
 
-%.cep.c: %.ced ../../ced_to_cep
+%.cep.c: %.ced ../../ced_to_cep %.bcg %.types.canon %.exe
 	../../ced_to_cep $*.exe $< $*.types.canon $*.bcg $@
 %.interp.so: %.cep.o ../../cep_interpreter.o
 	gcc -shared $^ -o $@
@@ -32,6 +32,23 @@ all: bug1.so bug2.so bug3.so
 %.summary: %.summaries
 	! [ -e $</1 ] && [ -e $</0 ] && cp $</0 $@
 
+bug9a.summary: bug9.summaries
+	cp $</0 $@
+bug9b.summary: bug9.summaries
+	cp $</1 $@
+bug9a.summary.canon3: ../../canonicalise_crash_summary3 bug9a.summary.canon2 bug9.exe bug9.types.canon bug9.types.canon.idx
+	$< bug9a.summary.canon2 bug9.exe bug9.types.canon $@
+bug9b.summary.canon3: ../../canonicalise_crash_summary3 bug9b.summary.canon2 bug9.exe bug9.types.canon bug9.types.canon.idx
+	$< bug9b.summary.canon2 bug9.exe bug9.types.canon $@
+bug9a.ced: bug9a.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.types.canon.idx bug9.bcg
+	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg $@ $<
+bug9b.ced: bug9b.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.types.canon.idx bug9.bcg
+	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg $@ $<
+bug9a.cep.c: bug9a.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
+	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg $@
+bug9b.cep.c: bug9b.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
+	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg $@
+
 %.summaries: ../../minimal_direct %.exe %.types.canon %.types.canon.idx %.bcg
 	rm -rf $@ crash_summaries induction.log logs generated_patch.c static.db && \
 	mkdir logs && \
@@ -48,7 +65,7 @@ all: bug1.so bug2.so bug3.so
 %.types.canon: %.exe %.types ../../canonicalise_types_table
 	../../canonicalise_types_table ./$< $*.types $@
 
-.PRECIOUS: bug1.types bug1.bcg bug2.types bug2.bcg bug1.ced bug2.ced bug3.types bug3.bcg bug3.ced bug4.types bug4.bcg bug4.ced bug5.types bug5.bcg bug5.ced bug6.types bug6.bcg bug6.ced bug8.types bug8.bcg
+.PRECIOUS: bug1.types bug1.bcg bug2.types bug2.bcg bug1.ced bug2.ced bug3.types bug3.bcg bug3.ced bug4.types bug4.bcg bug4.ced bug5.types bug5.bcg bug5.ced bug6.types bug6.bcg bug6.ced bug8.types bug8.bcg bug9.types bug9.bcg
 %.types.canon.idx: %.exe %.types.canon ../../build_types_db
 	rm -f $@ ; \
 	../../build_types_db ./$< $*.types.canon $@
