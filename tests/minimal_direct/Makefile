@@ -48,6 +48,10 @@ bug9a.cep.c: bug9a.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
 	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg $@
 bug9b.cep.c: bug9b.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
 	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg $@
+bug9ab.ced: bug9a.summary.canon4 bug9b.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.types.canon.idx bug9.bcg
+	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg $@ bug9a.summary.canon4 bug9b.summary.canon4
+bug9ab.cep.c: bug9ab.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
+	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg $@
 
 %.summaries: ../../minimal_direct %.exe %.types.canon %.types.canon.idx %.bcg
 	rm -rf $@ crash_summaries induction.log logs generated_patch.c static.db && \
