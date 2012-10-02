@@ -81,16 +81,16 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	}
 }
 
-happensAfterMapT::happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, CrashCfg &cfg, const MaiMap &mai)
+happensAfterMapT::happensAfterMapT(const SummaryId &summary, DNF_Conjunction &c, ThreadAbstracter &abs, CrashCfg &cfg, const MaiMap &mai)
 {
 	for (unsigned x = 0; x < c.size(); x++) {
 		if (c[x].second->tag == Iex_HappensBefore) {
 			IRExprHappensBefore *e = (IRExprHappensBefore *)c[x].second;
-			for (auto before_it = abs.begin(mai, e->before, cfg); !before_it.finished(); before_it.advance()) {
+			for (auto before_it = abs.begin(summary, mai, e->before, cfg); !before_it.finished(); before_it.advance()) {
 				Instruction<ThreadCfgLabel> *const before = before_it.get();
 				if (!before)
 					continue;
-				for (auto after_it = abs.begin(mai, e->after, cfg); !after_it.finished(); after_it.advance()) {
+				for (auto after_it = abs.begin(summary, mai, e->after, cfg); !after_it.finished(); after_it.advance()) {
 					auto after = after_it.get();
 					if (!after)
 						continue;

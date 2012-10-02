@@ -143,7 +143,8 @@ optimiseHBContent(crashEnforcementData &ced)
 }
 
 static bool
-buildCED(DNF_Conjunction &c,
+buildCED(const SummaryId &summaryId,
+	 DNF_Conjunction &c,
 	 std::map<ConcreteThread, std::set<CfgLabel> > &rootsCfg,
 	 CrashSummary *summary,
 	 crashEnforcementData *out,
@@ -156,7 +157,7 @@ buildCED(DNF_Conjunction &c,
 	for (unsigned x = 0; x < c.size(); x++)
 		enumerateNeededExpressions(c[x].second, neededExpressions);
 
-	*out = crashEnforcementData(*summary->mai, neededExpressions, abs, rootsCfg, c, next_hb_id, summary, as);
+	*out = crashEnforcementData(summaryId, *summary->mai, neededExpressions, abs, rootsCfg, c, next_hb_id, summary, as);
 	optimiseHBContent(*out);
 	return true;
 }
@@ -655,7 +656,8 @@ simplifyControlExpressions(DNF_Conjunction &d)
 }
 
 static crashEnforcementData
-enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
+enforceCrashForMachine(const SummaryId &summaryId,
+		       VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
 		       GarbageCollectionToken token,
 		       ThreadAbstracter &abs,
@@ -714,16 +716,16 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	for (auto it = summary->loadMachine->cfg_roots.begin();
 	     it != summary->loadMachine->cfg_roots.end();
 	     it++)
-		rootsCfg[ConcreteThread(it->first)].insert(it->second->label);
+		rootsCfg[ConcreteThread(summaryId, it->first)].insert(it->second->label);
 	for (auto it = summary->storeMachine->cfg_roots.begin();
 	     it != summary->storeMachine->cfg_roots.end();
 	     it++)
-		rootsCfg[ConcreteThread(it->first)].insert(it->second->label);
+		rootsCfg[ConcreteThread(summaryId, it->first)].insert(it->second->label);
 
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {
 		crashEnforcementData tmp;
-		if (buildCED(d[x], rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
+		if (buildCED(summaryId, d[x], rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
 			printf("Intermediate CED:\n");
 			tmp.prettyPrint(stdout, true);
 			accumulator |= tmp;
@@ -1120,7 +1122,7 @@ main(int argc, char *argv[])
 
 	VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[5], NULL));
 	ThreadAbstracter abs;
-	crashEnforcementData accumulator = enforceCrashForMachine(summary, oracle, ALLOW_GC, abs, next_hb_id);
+	crashEnforcementData accumulator = enforceCrashForMachine(SummaryId(1), summary, oracle, ALLOW_GC, abs, next_hb_id);
 
 	optimiseHBEdges(accumulator);
 	optimiseStashPoints(accumulator, oracle);

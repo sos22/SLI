@@ -1,7 +1,8 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 
-expressionStashMapT::expressionStashMapT(std::set<IRExpr *> &neededExpressions,
+expressionStashMapT::expressionStashMapT(const SummaryId &summary,
+					 std::set<IRExpr *> &neededExpressions,
 					 ThreadAbstracter &abs,
 					 StateMachine *probeMachine,
 					 StateMachine *storeMachine,
@@ -17,7 +18,7 @@ expressionStashMapT::expressionStashMapT(std::set<IRExpr *> &neededExpressions,
 		if (e->tag == Iex_Get) {
 			IRExprGet *ieg = (IRExprGet *)e;
 			if (ieg->reg.isReg()) {
-				for (auto it2 = roots.begin(ConcreteThread(ieg->reg.tid())); !it2.finished(); it2.advance())
+				for (auto it2 = roots.begin(ConcreteThread(summary, ieg->reg.tid())); !it2.finished(); it2.advance())
 					(*this)[it2.get()].insert(ieg);
 			} else {
 				neededTemporaries.insert(ieg);
@@ -27,13 +28,13 @@ expressionStashMapT::expressionStashMapT(std::set<IRExpr *> &neededExpressions,
 		} else if (e->tag == Iex_EntryPoint) {
 			/* These are always stashed at the nominated node. */
 			IRExprEntryPoint *ep = (IRExprEntryPoint *)e;
-			for (auto it = abs.begin(ConcreteThread(ep->thread), ep->label); !it.finished(); it.advance())
+			for (auto it = abs.begin(ConcreteThread(summary, ep->thread), ep->label); !it.finished(); it.advance())
 				(*this)[it.get()].insert(ep);
 		} else if (e->tag == Iex_ControlFlow) {
 			/* These are always stashed at the first
 			 * nominated node. */
 			IRExprControlFlow *ep = (IRExprControlFlow *)e;
-			for (auto it = abs.begin(ConcreteThread(ep->thread), ep->cfg1); !it.finished(); it.advance())
+			for (auto it = abs.begin(ConcreteThread(summary, ep->thread), ep->cfg1); !it.finished(); it.advance())
 				(*this)[it.get()].insert(ep);
 		} else {
 			abort();
@@ -54,7 +55,7 @@ expressionStashMapT::expressionStashMapT(std::set<IRExpr *> &neededExpressions,
 				}
 			}
 			assert(l);
-			for (auto it2 = abs.begin(mai, l->rip); !it2.finished(); it2.advance())
+			for (auto it2 = abs.begin(summary, mai, l->rip); !it2.finished(); it2.advance())
 				(*this)[it2.get()].insert(*it);
 		}
 	}

@@ -14,44 +14,77 @@
 class CrashCfg;
 class crashEnforcementRoots;
 
+class SummaryId : public Named {
+	static unsigned next_id;
+	unsigned id;
+	char *mkName() const {
+		return my_asprintf("%d", id);
+	}
+public:
+	static SummaryId uninitialised()
+	{
+		return SummaryId(-1);
+	}
+	explicit SummaryId(unsigned _id)
+		: id(_id)
+	{}
+	bool parse(const char *str, const char **suffix)
+	{
+		if (!parseDecimalUInt(&id, str, suffix))
+			return false;
+		clearName();
+		return true;
+	}
+	bool operator==(const SummaryId &o) const
+	{
+		return id == o.id;
+	}
+	bool operator<(const SummaryId &o) const
+	{
+		return id < o.id;
+	}
+	unsigned long hash() const
+	{
+		return id * 10114771ul;
+	}
+};
+
 class ConcreteThread : public Named {
+	SummaryId summary_id;
 	unsigned id;
 
 	char *mkName() const {
-		return my_asprintf("T%d", id);
+		return my_asprintf("T%s:%d", summary_id.name(), id);
 	}
 public:
-	explicit ConcreteThread(unsigned _id)
-		: id(_id)
-	{}
-	ConcreteThread(const ConcreteThread &o)
-		: id(o.id)
+	ConcreteThread(const SummaryId &_summary_id, unsigned _id)
+		: summary_id(_summary_id), id(_id)
 	{}
 	static ConcreteThread uninitialised() {
-		return ConcreteThread(-1);
+		return ConcreteThread(SummaryId::uninitialised(), -1);
 	}
 	bool parse(const char *str, const char **suffix)
 	{
+		clearName();
 		if (!parseThisChar('T', str, &str) ||
+		    !summary_id.parse(str, &str) ||
+		    !parseThisChar(':', str, &str) ||
 		    !parseDecimalUInt(&id, str, suffix))
 			return false;
 		return true;
 	}
 	bool operator==(const ConcreteThread &o) const
 	{
-		return id == o.id;
+		return summary_id == o.summary_id && id == o.id;
 	}
 	bool operator<(const ConcreteThread &o) const
 	{
-		return id < o.id;
+		return summary_id < o.summary_id ||
+			(summary_id == o.summary_id && id < o.id);
 	}
 	unsigned long hash() const
 	{
-		return id * 10113569ul;
-	}
-	unsigned unwrap() const
-	{
-		return id;
+		return id * 10113569ul + summary_id.hash() * 10118387ul;
 	}
 };
 
@@ -76,6 +109,7 @@ public:
 		if (!parseThisChar('t', str, &str) ||
 		    !parseDecimalUInt(&id, str, suffix))
 			return false;
+		clearName();
 		return true;
 	}
 	bool operator==(const AbstractThread &o) const
@@ -216,11 +250,11 @@ public:
 				ll_iter.advance();
 			}
 		}
-		mai_iterator(const MaiMap &mai, const MemoryAccessIdentifier &rip, ThreadAbstracter *__this)
+		mai_iterator(const SummaryId &summary, const MaiMap &mai, const MemoryAccessIdentifier &rip, ThreadAbstracter *__this)
 			: hl_iter(mai.begin(rip)),
 			  ll_iter(1.0, 1.0, 1.0),
 			  _finished(false),
-			  tid(ConcreteThread(rip.tid)),
+			  tid(ConcreteThread(summary, rip.tid)),
 			  _this(__this)
 		{
 			if (hl_iter.finished()) {
@@ -240,9 +274,9 @@ public:
 		}
 		ThreadCfgLabel get() const { return current_item; }
 	};
-	mai_iterator begin(const MaiMap &mai, const MemoryAccessIdentifier &rip)
+	mai_iterator begin(const SummaryId &summary, const MaiMap &mai, const MemoryAccessIdentifier &rip)
 	{
-		return mai_iterator(mai, rip, this);
+		return mai_iterator(summary, mai, rip, this);
 	}
 
 	class instr_iterator {
@@ -256,9 +290,9 @@ public:
 			: underlying(_underlying), cfg(_cfg)
 		{}
 	};
-	instr_iterator begin(const MaiMap &mai, const MemoryAccessIdentifier &rip, CrashCfg &cfg)
+	instr_iterator begin(const SummaryId &summary, const MaiMap &mai, const MemoryAccessIdentifier &rip, CrashCfg &cfg)
 	{
-		return instr_iterator(begin(mai, rip), cfg);
+		return instr_iterator(begin(summary, mai, rip), cfg);
 	}
 };
 
@@ -319,7 +353,7 @@ public:
 	instrToInstrSetMap happensBefore;
 	/* happensBefore[i] -> the set of all instructions ordered after i */
 	instrToInstrSetMap happensAfter;
-	happensAfterMapT(DNF_Conjunction &c, ThreadAbstracter &abs, CrashCfg &cfg, const MaiMap &mai);
+	happensAfterMapT(const SummaryId &summary, DNF_Conjunction &c, ThreadAbstracter &abs, CrashCfg &cfg, const MaiMap &mai);
 	happensAfterMapT() {}
 	void print(FILE *f) {
 		fprintf(f, "before:\n");
@@ -353,7 +387,8 @@ class expressionStashMapT : public std::map<ThreadCfgLabel, std::set<IRExpr *> >
 	}
 public:
 	expressionStashMapT() {}
-	expressionStashMapT(std::set<IRExpr *> &neededExpressions,
+	expressionStashMapT(const SummaryId &summary,
+			    std::set<IRExpr *> &neededExpressions,
 			    ThreadAbstracter &abs,
 			    StateMachine *probeMachine,
 			    StateMachine *storeMachine,
@@ -1043,7 +1078,8 @@ class happensBeforeMapT : public std::map<ThreadCfgLabel, std::set<happensBefore
 	}
 public:
 	happensBeforeMapT() {}
-	happensBeforeMapT(const MaiMap &mai,
+	happensBeforeMapT(const SummaryId &summary,
+			  const MaiMap &mai,
 			  DNF_Conjunction &c,
 			  instructionDominatorMapT &idom,
 			  CrashCfg &cfg,
@@ -1058,11 +1094,11 @@ public:
 				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
 				const MemoryAccessIdentifier &beforeMai(invert ? hb->after : hb->before);
 				const MemoryAccessIdentifier &afterMai(invert ? hb->before : hb->after);
-				for (auto before_it = abs.begin(mai, beforeMai, cfg); !before_it.finished(); before_it.advance()) {
+				for (auto before_it = abs.begin(summary, mai, beforeMai, cfg); !before_it.finished(); before_it.advance()) {
 					Instruction<ThreadCfgLabel> *beforeInstr = before_it.get();
 					if (!beforeInstr)
 						continue;
-					for (auto after_it = abs.begin(mai, afterMai, cfg); !after_it.finished(); after_it.advance()) {
+					for (auto after_it = abs.begin(summary, mai, afterMai, cfg); !after_it.finished(); after_it.advance()) {
 						Instruction<ThreadCfgLabel> *afterInstr = after_it.get();
 						if (!afterInstr)
 							continue;
@@ -1194,7 +1230,8 @@ public:
 	std::set<unsigned long> interpretInstrs;
 
 	crashEnforcementData() {}
-	crashEnforcementData(const MaiMap &mai,
+	crashEnforcementData(const SummaryId &summaryId,
+			     const MaiMap &mai,
 			     std::set<IRExpr *> &neededExpressions,
 			     ThreadAbstracter &abs,
 			     std::map<ConcreteThread, std::set<CfgLabel> > &_roots,
@@ -1204,12 +1241,12 @@ public:
 			     AddressSpace *as)
 		: roots(_roots, abs),
 		  crashCfg(roots, summary, as),
-		  happensBefore(conj, abs, crashCfg, mai),
+		  happensBefore(summaryId, conj, abs, crashCfg, mai),
 		  predecessorMap(crashCfg),
 		  idom(crashCfg, predecessorMap, happensBefore),
-		  exprStashPoints(neededExpressions, abs, summary->loadMachine, summary->storeMachine, roots, mai),
+		  exprStashPoints(summaryId, neededExpressions, abs, summary->loadMachine, summary->storeMachine, roots, mai),
 		  exprDominatorMap(conj, exprStashPoints, idom, predecessorMap, happensBefore),
-		  happensBeforePoints(mai, conj, idom, crashCfg, exprStashPoints, abs, next_hb_id),
+		  happensBeforePoints(summaryId, mai, conj, idom, crashCfg, exprStashPoints, abs, next_hb_id),
 		  expressionEvalPoints(exprDominatorMap)
 	{}
 
