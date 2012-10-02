@@ -227,6 +227,10 @@ have_cloned;
 
 static int
 big_lock;
+#ifndef NDEBUG
+static int
+big_lock_owned_by;
+#endif
 static int
 nr_queued_wakes;
 #define MAX_QUEUED_WAKES 8
@@ -558,6 +562,10 @@ acquire_big_lock(void)
 {
 	while (cmpxchg(&big_lock, 0, 1) != 0)
 		;
+#ifndef NDEBUG
+	assert(big_lock_owned_by == 0);
+	big_lock_owned_by = gettid();
+#endif
 }
 static void
 release_big_lock(void)
@@ -572,6 +580,10 @@ release_big_lock(void)
 		nr_queued_wakes--;
 		wake = queued_wakes[nr_queued_wakes];
 	}
+#ifndef NDEBUG
+	assert(big_lock_owned_by == gettid());
+	big_lock_owned_by = 0;
+#endif
 	store_release(&big_lock, 0);
 	if (wake) {
 		debug("Run queued wake on %p\n", wake);
@@ -1877,7 +1889,7 @@ send_messages(struct high_level_state *hls)
 	if (!have_sends)
 		return;
 
-	debug("start tx\n");
+	debug("start tx %d\n", hls->ll_states.sz);
 	memset(&new_llsa, 0, sizeof(new_llsa));
 	have_sends = 0;
 	need_delay = 0;
