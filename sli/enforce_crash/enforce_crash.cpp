@@ -144,7 +144,7 @@ optimiseHBContent(crashEnforcementData &ced)
 
 static bool
 buildCED(DNF_Conjunction &c,
-	 std::map<unsigned, std::set<CfgLabel> > &rootsCfg,
+	 std::map<ConcreteThread, std::set<CfgLabel> > &rootsCfg,
 	 CrashSummary *summary,
 	 crashEnforcementData *out,
 	 ThreadAbstracter &abs,
@@ -710,15 +710,15 @@ enforceCrashForMachine(VexPtr<CrashSummary, &ir_heap> summary,
 	if (d.size() == 0)
 		return crashEnforcementData();
 
-	std::map<unsigned, std::set<CfgLabel> > rootsCfg;
+	std::map<ConcreteThread, std::set<CfgLabel> > rootsCfg;
 	for (auto it = summary->loadMachine->cfg_roots.begin();
 	     it != summary->loadMachine->cfg_roots.end();
 	     it++)
-		rootsCfg[it->first].insert(it->second->label);
+		rootsCfg[ConcreteThread(it->first)].insert(it->second->label);
 	for (auto it = summary->storeMachine->cfg_roots.begin();
 	     it != summary->storeMachine->cfg_roots.end();
 	     it++)
-		rootsCfg[it->first].insert(it->second->label);
+		rootsCfg[ConcreteThread(it->first)].insert(it->second->label);
 
 	crashEnforcementData accumulator;
 	for (unsigned x = 0; x < d.size(); x++) {

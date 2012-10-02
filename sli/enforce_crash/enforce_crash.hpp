@@ -14,6 +14,47 @@
 class CrashCfg;
 class crashEnforcementRoots;
 
+class ConcreteThread : public Named {
+	unsigned id;
+
+	char *mkName() const {
+		return my_asprintf("T%d", id);
+	}
+public:
+	explicit ConcreteThread(unsigned _id)
+		: id(_id)
+	{}
+	ConcreteThread(const ConcreteThread &o)
+		: id(o.id)
+	{}
+	static ConcreteThread uninitialised() {
+		return ConcreteThread(-1);
+	}
+	bool parse(const char *str, const char **suffix)
+	{
+		if (!parseThisChar('T', str, &str) ||
+		    !parseDecimalUInt(&id, str, suffix))
+			return false;
+		return true;
+	}
+	bool operator==(const ConcreteThread &o) const
+	{
+		return id == o.id;
+	}
+	bool operator<(const ConcreteThread &o) const
+	{
+		return id < o.id;
+	}
+	unsigned long hash() const
+	{
+		return id * 10113569ul;
+	}
+	unsigned unwrap() const
+	{
+		return id;
+	}
+};
+
 class AbstractThread : public Named {
 	friend class ThreadAbstracter;
 	char *mkName() const {
@@ -93,7 +134,7 @@ public:
 };
 
 class ThreadAbstracter {
-	std::map<int, std::set<AbstractThread> > content;
+	std::map<ConcreteThread, std::set<AbstractThread> > content;
 	AbstractThread nxtThread;
 public:
 	ThreadAbstracter()
@@ -112,12 +153,12 @@ public:
 
 		iterator(double, double, double) {}
 	};
-	iterator begin(int tid) const {
+	iterator begin(const ConcreteThread &tid) const {
 		auto it = content.find(tid);
 		assert(it != content.end());
 		return iterator(it->second);
 	}
-	AbstractThread newThread(int oldTid)
+	AbstractThread newThread(const ConcreteThread &oldTid)
 	{
 		AbstractThread res = nxtThread;
 		nxtThread.id++;
@@ -141,7 +182,7 @@ public:
 			  where(CfgLabel::uninitialised())
 		{}
 	};
-	thread_cfg_iterator begin(int tid, const CfgLabel &where) const
+	thread_cfg_iterator begin(const ConcreteThread &tid, const CfgLabel &where) const
 	{
 		return thread_cfg_iterator( begin(tid), where);
 	}
@@ -151,7 +192,7 @@ public:
 		thread_cfg_iterator ll_iter;
 		bool _finished;
 		ThreadCfgLabel current_item;
-		unsigned tid;
+		ConcreteThread tid;
 		ThreadAbstracter *_this;
 	public:
 		bool finished() const { return _finished; }
@@ -179,7 +220,7 @@ public:
 			: hl_iter(mai.begin(rip)),
 			  ll_iter(1.0, 1.0, 1.0),
 			  _finished(false),
-			  tid(rip.tid),
+			  tid(ConcreteThread(rip.tid)),
 			  _this(__this)
 		{
 			if (hl_iter.finished()) {
@@ -763,12 +804,12 @@ public:
 };
 
 class crashEnforcementRoots {
-	std::map<unsigned, std::set<AbstractThread> > threadAbs;
+	std::map<ConcreteThread, std::set<AbstractThread> > threadAbs;
 	std::map<AbstractThread, std::set<CfgLabel> > content;
 public:
 	crashEnforcementRoots() {}
 
-	crashEnforcementRoots(std::map<unsigned, std::set<CfgLabel> > &roots, ThreadAbstracter &abs) {
+	crashEnforcementRoots(std::map<ConcreteThread, std::set<CfgLabel> > &roots, ThreadAbstracter &abs) {
 		for (auto it = roots.begin(); it != roots.end(); it++) {
 			assert(!threadAbs.count(it->first));
 			AbstractThread tid(abs.newThread(it->first));
@@ -777,7 +818,7 @@ public:
 		}
 	}
 
-	void insert(unsigned concrete_tid, const ThreadCfgLabel &root)
+	void insert(ConcreteThread concrete_tid, const ThreadCfgLabel &root)
 	{
 		threadAbs[concrete_tid].insert(root.thread);
 		content[root.thread].insert(root.label);
@@ -797,7 +838,7 @@ public:
 		for (auto it = threadAbs.begin(); it != threadAbs.end(); it++) {
 			if (it != threadAbs.begin())
 				fprintf(f, "; ");
-			fprintf(f, "%d = {", it->first);
+			fprintf(f, "%s = {", it->first.name());
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
 				if (it2 != it->second.begin())
 					fprintf(f, ",");
@@ -827,8 +868,8 @@ public:
 		if (!parseThisString("Threads: ", str, &str))
 			return false;
 		while (1) {
-			unsigned concrete_tid;
-			if (!parseDecimalUInt(&concrete_tid, str, &str) ||
+			ConcreteThread concrete_tid(ConcreteThread::uninitialised());
+			if (!concrete_tid.parse(str, &str) ||
 			    threadAbs.count(concrete_tid) ||
 			    !parseThisString(" = {", str, &str))
 				return false;
@@ -928,7 +969,7 @@ public:
 		}
 		conc_iterator() {}
 	};
-	conc_iterator begin(unsigned concrete_tid) {
+	conc_iterator begin(ConcreteThread concrete_tid) {
 		auto it = threadAbs.find(concrete_tid);
 		assert(it != threadAbs.end());
 		return conc_iterator(&it->second, content);
@@ -936,8 +977,8 @@ public:
 
 	/* Iterate over all of the ThreadCfgLabels. */
 	class iterator {
-		const std::map<unsigned, std::set<AbstractThread> > &threadAbs;
-		std::map<unsigned, std::set<AbstractThread> >::const_iterator it1;
+		const std::map<ConcreteThread, std::set<AbstractThread> > &threadAbs;
+		std::map<ConcreteThread, std::set<AbstractThread> >::const_iterator it1;
 		conc_iterator it2;
 
 		const std::map<AbstractThread, std::set<CfgLabel> > &content;
@@ -954,9 +995,9 @@ public:
 			}
 		}
 		ThreadCfgLabel get() const { return it2.get(); }
-		unsigned concrete_tid() const { return it1->first; }
+		ConcreteThread concrete_tid() const { return it1->first; }
 		const AbstractThread &abstract_tid() const { return it2.abstract_tid(); }
-		iterator(const std::map<unsigned, std::set<AbstractThread> > &_threadAbs,
+		iterator(const std::map<ConcreteThread, std::set<AbstractThread> > &_threadAbs,
 			 const std::map<AbstractThread, std::set<CfgLabel> > &_content)
 			: threadAbs(_threadAbs),
 			  content(_content)
@@ -1156,7 +1197,7 @@ public:
 	crashEnforcementData(const MaiMap &mai,
 			     std::set<IRExpr *> &neededExpressions,
 			     ThreadAbstracter &abs,
-			     std::map<unsigned, std::set<CfgLabel> > &_roots,
+			     std::map<ConcreteThread, std::set<CfgLabel> > &_roots,
 			     DNF_Conjunction &conj,
 			     int &next_hb_id,
 			     CrashSummary *summary,
