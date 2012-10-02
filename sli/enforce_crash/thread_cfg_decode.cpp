@@ -72,9 +72,9 @@ CrashCfg::prettyPrint(FILE *f, bool verbose)
 		}
 		fprintf(f, "\n");
 	}
-	fprintf(f, "Label to RIP table:\n");
+	fprintf(f, "\tLabel to RIP table:\n");
 	for (auto it = rips.begin(); it != rips.end(); it++)
-		fprintf(f, "\t%s -> %s\n", it->first.name(), it->second.name());
+		fprintf(f, "\t\t%s -> %s\n", it->first.name(), it->second.name());
 }
 
 #include "x86_opcodes.c"
