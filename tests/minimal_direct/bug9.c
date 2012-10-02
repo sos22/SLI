@@ -10,6 +10,7 @@ static int *volatile global_ptr2;
 static int read_events[2];
 static int write_events;
 static volatile bool force_quit;
+static int mode;
 
 #define BAD_PTR ((void *)0x57ul)
 #define STOP_ANALYSIS()					\
@@ -38,7 +39,12 @@ thr_main(void *ign)
 {
 	int r;
 	while (!force_quit) {
-		r = random() % 2;
+		if (mode == 0)
+			r = random() % 2;
+		else if (mode == 1)
+			r = 0;
+		else
+			r = 1;
 		STOP_ANALYSIS();
 		if (r) {
 			bug1();
@@ -52,11 +58,21 @@ thr_main(void *ign)
 }
 
 int
-main()
+main(int argc, char *argv[])
 {
 	pthread_t thr;
 	static int t;
 	int cntr;
+
+	if (argc == 1) {
+		mode = 0;
+	} else if (argc == 2 && !strcmp(argv[1], "1")) {
+		mode = 1;
+	} else if (argc == 2 && !strcmp(argv[1], "2")) {
+		mode = 2;
+	} else {
+		errx(1, "need at most one argument which should be 1 or 2 to select a mode");
+	}
 
 	global_ptr1 = &t;
 
