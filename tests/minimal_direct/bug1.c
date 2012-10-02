@@ -3,6 +3,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#define STOP_ANALYSIS()					\
+	asm (".fill 100,1,0x90\n")
+
 static int *volatile global_ptr;
 
 static void *
@@ -14,9 +17,7 @@ thr_main(void *ign)
 			p = global_ptr;
 			*p = 5;
 		}
-		int cntr;
-		for (cntr = 0; cntr < 100; cntr++)
-			asm ("nop");
+		STOP_ANALYSIS();
 	}
 	return NULL;
 }
@@ -30,15 +31,16 @@ main()
 	time_t start_time = time(NULL);
 
 	int t;
-	while (time(NULL) < start_time + 10) {
+	while (time(NULL) < start_time + 120) {
+		STOP_ANALYSIS();
 		global_ptr = &t;
-		int cntr;
-		for (cntr = 0; cntr < 100; cntr++)
-			asm ("nop");
+		STOP_ANALYSIS();
+
 		usleep(1000000);
+
+		STOP_ANALYSIS();
 		global_ptr = NULL;
-		for (cntr = 0; cntr < 100; cntr++)
-			asm ("nop");
+		STOP_ANALYSIS();
 	}
 
 	return 0;
