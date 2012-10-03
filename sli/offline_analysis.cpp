@@ -1064,82 +1064,58 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 	return res;
 }
 
-bool
+StateMachine *
 buildProbeMachine(CfgLabelAllocator &allocLabel,
 		  const VexPtr<Oracle> &oracle,
 		  const DynAnalysisRip &targetRip,
 		  ThreadId tid,
 		  const AllowableOptimisations &optIn,
-		  StateMachine ***out,
-		  unsigned *nr_out_machines,
 		  VexPtr<MaiMap, &ir_heap> &mai,
 		  GarbageCollectionToken token)
 {
 	__set_profiling(buildProbeMachine);
 
-	*nr_out_machines = 0;
-
 	AllowableOptimisations opt =
 		optIn
 		.enableignoreSideEffects();
 
-	VexPtr<StateMachine *, &ir_heap> sms;
-	unsigned nr_sms;
+	VexPtr<StateMachine, &ir_heap> sm;
 	{
 		HashedSet<HashedPtr<CFGNode> > roots;
 		HashedSet<HashedPtr<const CFGNode> > proximalNodes;
 		if (!getProbeCFGs(allocLabel, oracle, targetRip, roots, proximalNodes)) {
 			fprintf(_logfile, "Cannot get probe CFGs!\n");
-			return false;
+			return NULL;
 		}
-		std::set<StateMachine *> machines;
-		probeCFGsToMachine(oracle, tid._tid(),
-				   roots,
-				   proximalNodes,
-				   *mai,
-				   machines);
-		sms = (StateMachine **)__LibVEX_Alloc_Ptr_Array(&ir_heap, machines.size());
-		nr_sms = 0;
-		for (auto it = machines.begin(); it != machines.end(); it++) {
-			sms[nr_sms] = *it;
-			nr_sms++;
-		}
+		sm = probeCFGsToMachine(oracle, tid._tid(),
+					roots,
+					proximalNodes,
+					*mai);
 	}
 	if (TIMEOUT)
-		return false;
+		return NULL;
 
 	LibVEX_maybe_gc(token);
 
-	for (unsigned x = 0; x < nr_sms; x++) {
-		VexPtr<StateMachine, &ir_heap> sm(sms[x]);
-		sm->sanityCheck(*mai);
-
-		sm = optimiseStateMachine(mai,
-					  sm,
-					  opt,
-					  oracle,
-					  false,
-					  token);
-
-		sm = convertToSSA(sm);
-		if (TIMEOUT)
-			return false;
-		sm->sanityCheck(*mai);
-		sm = optimiseStateMachine(mai,
-					  sm,
-					  opt,
-					  oracle,
-					  true,
-					  token);
-
-		sms[x] = sm;
-	}
-
-	*out = (StateMachine **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_sms);
-	for (unsigned x = 0; x < nr_sms; x++)
-		(*out)[x] = sms[x];
-	*nr_out_machines = nr_sms;
-	return true;
+	sm->sanityCheck(*mai);
+	sm = optimiseStateMachine(mai,
+				  sm,
+				  opt,
+				  oracle,
+				  false,
+				  token);
+	
+	sm = convertToSSA(sm);
+	if (TIMEOUT)
+		return NULL;
+	sm->sanityCheck(*mai);
+	sm = optimiseStateMachine(mai,
+				  sm,
+				  opt,
+				  oracle,
+				  true,
+				  token);
+	return sm;
 }
 
 static bool
@@ -1415,16 +1391,14 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		.enableassumePrivateStack()
 		.setAddressSpace(oracle->ms->addressSpace)
 		.enablenoExtend();
-	VexPtr<StateMachine *, &ir_heap> probeMachines;
-	unsigned nrProbeMachines;
+	VexPtr<StateMachine, &ir_heap> probeMachine;
 	CfgLabelAllocator allocLabel;
 	{
-		StateMachine **_probeMachines;
 		struct timeval start;
 		gettimeofday(&start, NULL);
-		if (!buildProbeMachine(allocLabel, oracle, targetRip, tid, opt,
-				       &_probeMachines, &nrProbeMachines, mai,
-				       token))
+		probeMachine = buildProbeMachine(allocLabel, oracle, targetRip,
+						 tid, opt, mai, token);
+		if (!probeMachine)
 			return;
 		struct timeval end;
 		gettimeofday(&end, NULL);
@@ -1435,14 +1409,9 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 			end.tv_sec--;
 		}
 		printf("buildProbeMachine takes %ld.%06ld\n", end.tv_sec, end.tv_usec);
-
-		probeMachines = _probeMachines;
 	}
-	for (unsigned x = 0; x < nrProbeMachines; x++) {
-		VexPtr<StateMachine, &ir_heap> probeMachine(probeMachines[x]);
-		diagnoseCrash(allocLabel, targetRip, probeMachine, oracle,
-			      df, false, opt.enablenoLocalSurvival(),
-			      mai, token);
-	}
+	diagnoseCrash(allocLabel, targetRip, probeMachine, oracle,
+		      df, false, opt.enablenoLocalSurvival(),
+		      mai, token);
 }
 

@@ -1783,13 +1783,12 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	}
 }
 
-static void
+static StateMachine *
 probeCFGsToMachine(Oracle *oracle,
 		   unsigned tid,
 		   HashedSet<HashedPtr<CFGNode> > &roots,
 		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
-		   MaiMap &mai,
-		   std::set<StateMachine *> &out)
+		   MaiMap &mai)
 {
 	struct _ : public cfg_translator {
 		MaiMap &mai;
@@ -1821,7 +1820,7 @@ probeCFGsToMachine(Oracle *oracle,
 		performTranslation(results, *it, oracle, tid, doOne);
 
 	if (TIMEOUT)
-		return;
+		return NULL;
 
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	{
@@ -1842,7 +1841,7 @@ probeCFGsToMachine(Oracle *oracle,
 	for (auto it = roots.begin(); !it.finished(); it.advance())
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
-	out.insert(new StateMachine(entryState(roots_this_sm2, tid, false), cfg_roots_this_sm));
+	return new StateMachine(entryState(roots_this_sm2, tid, false), cfg_roots_this_sm);
 }
 
 static StateMachine *
@@ -1891,15 +1890,14 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 /* End of namespace */
 };
 
-void
+StateMachine *
 probeCFGsToMachine(Oracle *oracle,
 		   unsigned tid,
 		   HashedSet<HashedPtr<CFGNode> > &roots,
 		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
-		   MaiMap &mai,
-		   std::set<StateMachine *> &out)
+		   MaiMap &mai)
 {
-	_probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai, out);
+	return _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai);
 }
 
 StateMachine *

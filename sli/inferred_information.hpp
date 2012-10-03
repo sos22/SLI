@@ -79,17 +79,15 @@ public:
 };
 
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
-bool buildProbeMachine(CfgLabelAllocator &allocLabel,
-		       const VexPtr<Oracle> &oracle,
-		       const DynAnalysisRip &interestingRip,
-		       const VexPtr<StateMachineState, &ir_heap> &proximal,
-		       ThreadId tid,
-		       const AllowableOptimisations &opt,
-		       StateMachine ***out,
-		       unsigned *nr_out_machines,
-		       MaiMap &mai,
-		       int *nextFrameId,
-		       GarbageCollectionToken token);
+StateMachine *buildProbeMachine(CfgLabelAllocator &allocLabel,
+				const VexPtr<Oracle> &oracle,
+				const DynAnalysisRip &interestingRip,
+				const VexPtr<StateMachineState, &ir_heap> &proximal,
+				ThreadId tid,
+				const AllowableOptimisations &opt,
+				MaiMap &mai,
+				int *nextFrameId,
+				GarbageCollectionToken token);
 bool diagnoseCrash(CfgLabelAllocator &allocLabel,
 		   const DynAnalysisRip &,
 		   VexPtr<StateMachine, &ir_heap> probeMachine,

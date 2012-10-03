@@ -152,12 +152,11 @@ StateMachine *storeCFGToMachine(Oracle *oracle,
 				unsigned tid,
 				CFGNode *root,
 				MaiMap &mai);
-void probeCFGsToMachine(Oracle *oracle,
-			unsigned tid,
-			HashedSet<HashedPtr<CFGNode> > &roots,
-			HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
-			MaiMap &mai,
-			std::set<StateMachine *> &out);
+StateMachine *probeCFGsToMachine(Oracle *oracle,
+				 unsigned tid,
+				 HashedSet<HashedPtr<CFGNode> > &roots,
+				 HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
+				 MaiMap &mai);
 void dumpCFGToDot(const HashedSet<HashedPtr<CFGNode> > &allNodes, const char *fname);
 
 #endif /* !CFGNODE_HPP__ */
