@@ -1953,6 +1953,10 @@ Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
 	if (debug_static_rbp_offsets)
 		printf("Calculate RBP->RSP offsets for %s\n", rip.name());
 
+	/* The correct answer for the function head instruction is
+	   always ``impossible'' */
+	oracle->setRbpToRspOffset(rip, RbpToRspOffsetStateImpossible, 0);
+
 	std::vector<StaticRip> instrsToRecalculate1;
 	std::vector<StaticRip> instrsToRecalculate2;
 
@@ -2251,6 +2255,8 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 
 	/* Try to figure out what this instruction actually does. */
 	IRSB *irsb = getIRSBForRip(as, rip, true);
+	if (!irsb)
+		return;
 	IRStmt **statements = irsb->stmts;
 	int nr_statements;
 	for (nr_statements = 1;
