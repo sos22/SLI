@@ -162,14 +162,14 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 static void
 initialExploration(CfgLabelAllocator &allocLabel,
 		   Oracle *oracle,
-		   const DynAnalysisRip &targetRip,
+		   const VexRip &targetRip,
 		   std::map<VexRip, CFGNode *> &out,
 		   HashedSet<HashedPtr<const CFGNode> > &targetInstrs,
 		   unsigned maxPathLength1,
 		   unsigned maxPathLength2)
 {
 	std::set<VexRip> startingRips;
-	startingRips.insert(targetRip.toVexRip());
+	startingRips.insert(targetRip);
 	CfgSuccMap<VexRip, VexRip> succMap;
 	while (1) {
 		out.clear();
@@ -610,6 +610,51 @@ findRoots(const HashedSet<HashedPtr<CFGNode> > &allNodes,
 	}
 }
 
+static void
+trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
+			  const HashedSet<HashedPtr<const CFGNode> > &roots)
+{
+	/* First, figure out which nodes are interesting. */
+	HashedSet<HashedPtr<const CFGNode> > interesting(roots);
+
+	/* Anything which can reach an interesting node is itself
+	 * interesting. */
+	bool progress = true;
+	while (progress) {
+		if (TIMEOUT)
+			return;
+		progress = false;
+		for (auto it = m.begin(); it != m.end(); it++) {
+			const CFGNode *n = it->second;
+			assert(n);
+			if (interesting.contains(n))
+				continue;
+			bool isInteresting = false;
+			for (auto it = n->successors.begin(); !isInteresting && it != n->successors.end(); it++)
+				if (it->instr && interesting.contains(it->instr))
+					isInteresting = true;
+			if (isInteresting) {
+				interesting.insert(n);
+				progress = true;
+			}
+		}
+	}
+
+	/* So now we know which nodes we want to keep.  Go through and
+	   remove all the ones which we don't want. */
+	for (auto it = m.begin(); it != m.end(); ) {
+		CFGNode *n = it->second;
+		if (!interesting.contains(n)) {
+			m.erase(it++);
+			continue;
+		}
+		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
+			if (it2->instr && !interesting.contains(it2->instr))
+				it2->instr = NULL;
+		it++;
+	}
+}
+
 static bool
 getProbeCFG(CfgLabelAllocator &allocLabel,
 	    Oracle *oracle,
@@ -625,14 +670,14 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	VexRip dominator;
 
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
-	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength2, maxPathLength2);
+	initialExploration(allocLabel, oracle, targetInstr.toVexRip(), ripsToCFGNodes, targetNodes, maxPathLength2, maxPathLength2);
 
 	if (debug_exploration) {
 		printf("Initial ripsToCFGNodes table:\n");
 		debug_dump(ripsToCFGNodes, "\t");
 	}
 
-	trimUninterestingCFGNodes(ripsToCFGNodes, targetInstr);
+	trimUninterestingCFGNodes(ripsToCFGNodes, targetNodes);
 
 	HashedSet<HashedPtr<CFGNode> > nodes;
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++)

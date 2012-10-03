@@ -59,15 +59,6 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 	}
 }
 
-void
-trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
-			  const DynAnalysisRip &root)
-{
-	std::set<DynAnalysisRip> roots;
-	roots.insert(root);
-	trimUninterestingCFGNodes(m, roots);
-}
-
 #include "cfgnode_tmpl.cpp"
 
 template <typename t> static void

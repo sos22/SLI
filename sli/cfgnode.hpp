@@ -142,8 +142,6 @@ bool getProbeCFGs(CfgLabelAllocator &allocLabel,
 
 void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			       const std::set<DynAnalysisRip> &roots);
-void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
-			       const DynAnalysisRip &target);
 
 class StateMachine;
 class MaiMap;
