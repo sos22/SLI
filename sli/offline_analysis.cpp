@@ -1067,7 +1067,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 StateMachine *
 buildProbeMachine(CfgLabelAllocator &allocLabel,
 		  const VexPtr<Oracle> &oracle,
-		  const DynAnalysisRip &targetRip,
+		  const VexRip &targetRip,
 		  ThreadId tid,
 		  const AllowableOptimisations &optIn,
 		  VexPtr<MaiMap, &ir_heap> &mai,
@@ -1396,7 +1396,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	{
 		struct timeval start;
 		gettimeofday(&start, NULL);
-		probeMachine = buildProbeMachine(allocLabel, oracle, targetRip,
+		probeMachine = buildProbeMachine(allocLabel, oracle, targetRip.toVexRip(),
 						 tid, opt, mai, token);
 		if (!probeMachine)
 			return;

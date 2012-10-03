@@ -81,7 +81,7 @@ public:
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
 StateMachine *buildProbeMachine(CfgLabelAllocator &allocLabel,
 				const VexPtr<Oracle> &oracle,
-				const DynAnalysisRip &interestingRip,
+				const VexRip &interestingRip,
 				const VexPtr<StateMachineState, &ir_heap> &proximal,
 				ThreadId tid,
 				const AllowableOptimisations &opt,

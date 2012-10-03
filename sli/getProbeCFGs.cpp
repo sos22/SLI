@@ -658,7 +658,7 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 static bool
 getProbeCFG(CfgLabelAllocator &allocLabel,
 	    Oracle *oracle,
-	    const DynAnalysisRip &targetInstr,
+	    const VexRip &targetInstr,
 	    HashedSet<HashedPtr<CFGNode> > &out,
 	    HashedSet<HashedPtr<const CFGNode> > &targetNodes,
 	    unsigned maxPathLength1,
@@ -670,7 +670,7 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	VexRip dominator;
 
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
-	initialExploration(allocLabel, oracle, targetInstr.toVexRip(), ripsToCFGNodes, targetNodes, maxPathLength2, maxPathLength2);
+	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength2, maxPathLength2);
 
 	if (debug_exploration) {
 		printf("Initial ripsToCFGNodes table:\n");
@@ -711,14 +711,14 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 };
 
 bool
-getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const DynAnalysisRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
+getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const VexRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
 	     HashedSet<HashedPtr<const CFGNode> > &targetNodes)
 {
 	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, PROBE_CLUSTER_THRESHOLD1, PROBE_CLUSTER_THRESHOLD2);
 }
 
 bool
-getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const DynAnalysisRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
+getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const VexRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
 	     HashedSet<HashedPtr<const CFGNode> > &targetNodes, int threshold1, int threshold2)
 {
 	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, threshold1, threshold2);

@@ -130,11 +130,11 @@ void getStoreCFGs(CfgLabelAllocator &allocLabel,
 		  const std::set<DynAnalysisRip> &, Oracle *,
 		  CFGNode ***, int *);
 bool getProbeCFGs(CfgLabelAllocator &allocLabel,
-		  Oracle *oracle, const DynAnalysisRip &vr,
+		  Oracle *oracle, const VexRip &vr,
 		  HashedSet<HashedPtr<CFGNode> > &out,
 		  HashedSet<HashedPtr<const CFGNode> > &targetNodes);
 bool getProbeCFGs(CfgLabelAllocator &allocLabel,
-		  Oracle *oracle, const DynAnalysisRip &vr,
+		  Oracle *oracle, const VexRip &vr,
 		  HashedSet<HashedPtr<CFGNode> > &out,
 		  HashedSet<HashedPtr<const CFGNode> > &targetNodes,
 		  int thresh1,
