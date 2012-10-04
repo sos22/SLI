@@ -49,6 +49,9 @@ public:
 				return false;
 		return nr_rips < o.nr_rips;
 	}
+	bool operator>(const DynAnalysisRip &o) const {
+		return o < *this;
+	}
 
 	bool isValid() const { return nr_rips != 0; }
 
@@ -116,13 +119,12 @@ public:
 
 class __types_db_instr_iterator : public GarbageCollected<__types_db_instr_iterator> {
 	friend class TypesDb;
+	unsigned long start;
+	unsigned long end;
 	const TypesDb *owner;
-	unsigned bucket_index;
-	unsigned long offset;
-	bool have_finished;
-	__types_db_instr_iterator(const TypesDb *_owner);
+	__types_db_instr_iterator(const TypesDb *_owner, unsigned long _start, unsigned long _end);
 public:
-	bool finished() const { return have_finished; }
+	bool finished() const { return start == end; }
 	void advance();
 	void fetch(DynAnalysisRip *out) const;
 	void visit(HeapVisitor &hv) { hv(owner); }
@@ -130,38 +132,29 @@ public:
 };
 
 class TypesDb : public GarbageCollected<TypesDb> {
+	void read_index_shape();
+	std::vector<std::pair<unsigned long, unsigned long> > indexes;
+	unsigned long index_lookup(const DynAnalysisRip &dr) const;
 public:
 	typedef __types_db_instr_iterator all_instrs_iterator;
 	Mapping mapping;
 	TypesDb(const char *path) {
 		if (mapping.init(path) < 0)
 			err(1, "loading %s", path);
+		read_index_shape();
 	}
-	void findOffsets(const DynAnalysisRip &vr, std::vector<unsigned long> &out) const;
+
 	all_instrs_iterator *enumerateAllInstructions() const;
 	unsigned long nrDistinctInstructions() const;
 	void visit(HeapVisitor &) {}
 
 	bool ripPresent(const DynAnalysisRip &vr) const;
-	/* Parse a vexrip which has already been canonicalised. */
-	static void parse_vexrip_canon(DynAnalysisRip *out, const Mapping &mapping,
-				       unsigned long offset, bool *is_private,
-				       unsigned long *sz);
-	/* Read a vexrip which has already been canonicalised */
-	static void read_vexrip_canon(FILE *f, DynAnalysisRip *out, bool *is_private);
 
-	enum read_vexrip_res {
-		read_vexrip_take,
-		read_vexrip_skip,
-		read_vexrip_error
+	struct types_entry {
+		bool is_private;
+		DynAnalysisRip rip;
 	};
-	/* Read a vexrip which has not been canonicalised,
-	 * canonicalising as we go. */
-	static read_vexrip_res read_vexrip_noncanon(FILE *f,
-						    DynAnalysisRip *out,
-						    AddressSpace *as,
-						    bool *is_private);
-
+	bool lookupEntry(const DynAnalysisRip &dr, std::vector<types_entry> &loads, std::vector<types_entry> &stores);
 
 	NAMED_CLASS
 };

@@ -31,7 +31,7 @@ main()
 	time_t start_time = time(NULL);
 
 	int t;
-	while (time(NULL) < start_time + 120) {
+	while (time(NULL) < start_time + 10) {
 		STOP_ANALYSIS();
 		global_ptr = &t;
 		STOP_ANALYSIS();

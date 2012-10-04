@@ -173,8 +173,8 @@ main(int argc, char *argv[])
 	}
 
 	FILE *timings = fopen("timings.txt", "w");
-	VexPtr<TypesDb::all_instrs_iterator> instrIterator(oracle->type_index->enumerateAllInstructions());
-	unsigned long total_instructions = oracle->type_index->nrDistinctInstructions();
+	VexPtr<TypesDb::all_instrs_iterator> instrIterator(oracle->type_db->enumerateAllInstructions());
+	unsigned long total_instructions = oracle->type_db->nrDistinctInstructions();
 	unsigned long instructions_processed = 0;
 	printf("%ld instructions to protect\n", total_instructions);
 

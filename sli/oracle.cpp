@@ -216,43 +216,6 @@ Oracle::functionCanReturn(const VexRip &rip)
 		return true;
 }
 
-struct tag_hdr {
-	int nr_loads;
-	int nr_stores;
-};
-
-unsigned long
-Oracle::fetchTagEntry(tag_entry *te, const Mapping &mapping, unsigned long offset)
-{
-	const struct tag_hdr *hdr = mapping.get<tag_hdr>(offset);
-	if (!hdr)
-		return 0;
-	unsigned long sz = sizeof(*hdr);
-	struct {
-		void operator()(int nr_items, const Mapping &mapping,
-				unsigned long offset, unsigned long *sz,
-				std::set<DynAnalysisRip> &private_set,
-				std::set<DynAnalysisRip> &shared_set) {
-			for (int x = 0; x < nr_items; x++) {
-				DynAnalysisRip buf;
-				bool is_private;
-				unsigned long s;
-				TypesDb::parse_vexrip_canon(&buf, mapping, offset + *sz, &is_private, &s);
-				*sz += s;
-				if (is_private)
-					private_set.insert(buf);
-				else
-					shared_set.insert(buf);
-			}
-		}
-	} doit;
-
-	doit(hdr->nr_loads, mapping, offset, &sz, te->private_loads, te->shared_loads);
-	doit(hdr->nr_stores, mapping, offset, &sz, te->private_stores, te->shared_stores);
-
-	return sz;
-}
-
 /* Try to find the RIPs of some stores which might conceivably have
    interfered with the observed load.  Stack accesses are not tracked
    by this mechanism. */
@@ -267,16 +230,20 @@ Oracle::findConflictingStores(const MaiMap &mai,
 			      std::set<DynAnalysisRip> &out)
 {
 	for (auto it = mai.begin(smsel->rip); !it.finished(); it.advance()) {
-		std::vector<unsigned long> offsets;
-		type_index->findOffsets(it.dr(), offsets);
-		for (auto it2 = offsets.begin();
-		     it2 != offsets.end();
-		     it2++) {
-			tag_entry te;
-			fetchTagEntry(&te, raw_types_database, *it2);
-			if (te.shared_loads.count(it.dr()))
-				out |= te.shared_stores;
-		}
+
+		std::vector<TypesDb::types_entry> loads;
+		std::vector<TypesDb::types_entry> stores;
+		if (!type_db->lookupEntry(it.dr(), loads, stores))
+			continue;
+		bool shared_loads = false;
+		for (auto it2 = loads.begin(); !shared_loads && it2 != loads.end(); it2++)
+			if (!it2->is_private && it2->rip == it.dr())
+				shared_loads = true;
+		if (!shared_loads)
+			continue;
+		for (auto it = stores.begin(); it != stores.end(); it++)
+			if (!it->is_private)
+				out.insert(it->rip);
 	}
 }
 
@@ -284,59 +251,26 @@ bool
 Oracle::notInTagTable(const DynAnalysisRip &dr)
 {
 	__set_profiling(notInTagTable);
-	std::vector<unsigned long> offsets;
-	type_index->findOffsets(dr, offsets);
-	return offsets.empty();
+	return !type_db->ripPresent(dr);
 }
 
 bool
 Oracle::hasConflictingRemoteStores(const DynAnalysisRip &dr)
 {
 	__set_profiling(hasConflictingRemoteStores);
-	std::vector<unsigned long> offsets;
-	type_index->findOffsets(dr, offsets);
-	for (auto it = offsets.begin(); it != offsets.end(); it++) {
-		unsigned long offset = *it;
-		const struct tag_hdr *hdr = raw_types_database.get<tag_hdr>(offset);
-		if (!hdr)
-			abort();
-		if (hdr->nr_stores == 0)
-			continue;
-
-		/* We want to return true if the entry contains *any*
-		   shared stores at all and the access matches with
-		   either the shared store set or the shared load set.
-		   Ideally, you'd check whether you have shared stores
-		   first and then go and check the load set
-		   afterwards, but the file format means that you have
-		   to parse the load set first.  Meh. */
-		bool relevant_load = false;
-		offset += sizeof(*hdr);
-		for (int x = 0; x < hdr->nr_loads; x++) {
-			DynAnalysisRip buf;
-			bool is_private;
-			unsigned long s;
-			TypesDb::parse_vexrip_canon(&buf, raw_types_database, offset, &is_private, &s);
-			offset += s;
-			if (!is_private && buf == dr) {
-				/* You might think that we should
-				   break out of the loop here.  Not
-				   so: we need to parse all of the
-				   loads to find the start of the
-				   store set. */
-				relevant_load = true;
-			}
-		}
-		for (int x = 0; x < hdr->nr_stores; x++) {
-			DynAnalysisRip buf;
-			bool is_private;
-			unsigned long s;
-			TypesDb::parse_vexrip_canon(&buf, raw_types_database, offset, &is_private, &s);
-			offset += s;
-			if (!is_private && (relevant_load || buf == dr))
-				return true;
-		}
-	}
+	std::vector<TypesDb::types_entry> loads;
+	std::vector<TypesDb::types_entry> stores;
+	if (!type_db->lookupEntry(dr, loads, stores))
+		return false;
+	bool shared_load = false;
+	for (auto it = loads.begin(); !shared_load && it != loads.end(); it++)
+		if (!it->is_private && it->rip == dr)
+			shared_load = true;
+	if (!shared_load)
+		return false;
+	for (auto it = stores.begin(); it != stores.end(); it++)
+		if (!it->is_private)
+			return true;
 	return false;
 }
 
@@ -357,48 +291,123 @@ Oracle::hasConflictingRemoteStores(const MaiMap &mai, const AllowableOptimisatio
 }
 
 Oracle::mam_result
+Oracle::alias_query(const DynAnalysisRip &dr1,
+		    const std::vector<TypesDb::types_entry> &alias1,
+		    const DynAnalysisRip &dr2,
+		    const std::vector<TypesDb::types_entry> &alias2)
+{
+	bool shared_1 = false;
+	bool private_1 = false;
+	for (auto it = alias1.begin();
+	     (!shared_1 || !private_1) && it != alias1.end();
+	     it++) {
+		if (it->rip == dr1) {
+			if (it->is_private)
+				private_1 = true;
+			else
+				shared_1 = true;
+		}
+	}
+	bool shared_2 = false;
+	bool private_2 = false;
+	for (auto it = alias2.begin();
+	     (!shared_2 || !private_2) && it != alias2.end();
+	     it++) {
+		if (it->rip == dr2) {
+			if (it->is_private)
+				private_2 = true;
+			else
+				shared_2 = true;
+		}
+	}
+	assert(private_1 || shared_1);
+	assert(private_2 || shared_2);
+
+	if (!private_1 && !shared_2)
+		return mam_no_alias;
+	if (!shared_1 && !private_2)
+		return mam_no_alias;
+
+	bool have_private_alias = false;
+	for (auto it = alias1.begin(); it != alias1.end(); it++)
+		if (it->rip == dr2) {
+			if (it->is_private)
+				have_private_alias = true;
+			else
+				return mam_might_alias;
+		}
+	if (have_private_alias)
+		return mam_private;
+	return mam_no_alias;
+}
+
+Oracle::mam_result
 Oracle::memoryAccessesMightAliasLS(const DynAnalysisRip &smsel_dr, const DynAnalysisRip &smses_dr)
 {
 	__set_profiling(might_alias_load_store);
-	std::vector<unsigned long> offsets;
-	type_index->findOffsets(smses_dr, offsets);
-	if (offsets.size() == 0) {
-		if (!notInTagTable(smsel_dr))
-			return mam_no_alias;
-		return mam_private;
-	} else if (notInTagTable(smsel_dr))
+	std::vector<TypesDb::types_entry> load_loads;
+	std::vector<TypesDb::types_entry> load_stores;
+	std::vector<TypesDb::types_entry> store_loads;
+	std::vector<TypesDb::types_entry> store_stores;
+	if (!type_db->lookupEntry(smsel_dr, load_loads, load_stores)) {
+		/* Load is private.  What about store? */
+		if (!type_db->ripPresent(smses_dr)) {
+			/* Both private  */
+			return mam_private;
+		}
+		/* Load private, store shared -> no alias */
+		return mam_no_alias;
+	}
+	if (!type_db->lookupEntry(smses_dr, store_loads, store_stores)) {
+		/* Store is private, load is shared -> no alias */
+		return mam_no_alias;
+	}
+
+	bool shared_load = false;
+	bool private_load = false;
+	for (auto it = load_loads.begin();
+	     (!shared_load || !private_load) && it != load_loads.end();
+	     it++) {
+		if (it->rip == smsel_dr) {
+			if (it->is_private)
+				private_load = true;
+			else
+				shared_load = true;
+		}
+	}
+	bool shared_store = false;
+	bool private_store = false;
+	for (auto it = store_stores.begin();
+	     (!shared_store || !private_store) && it != store_stores.end();
+	     it++) {
+		if (it->rip == smses_dr) {
+			if (it->is_private)
+				private_store = true;
+			else
+				shared_store = true;
+		}
+	}
+	assert(private_load || shared_load);
+	assert(private_store || shared_store);
+
+	/* If the load is definitely shared and the store is
+	   definitely private then they can't alias, and
+	   vice-versa. */
+	if (!private_load && !shared_store)
+		return mam_no_alias;
+	if (!shared_load && !private_store)
 		return mam_no_alias;
 
-	for (auto it = offsets.begin(); it != offsets.end(); it++) {
-		unsigned long offset = *it;
-		const struct tag_hdr *hdr = raw_types_database.get<tag_hdr>(offset);
-		assert(hdr);
-		unsigned long sz = sizeof(*hdr);
-		struct {
-			bool operator()(int nr_items,
-					const DynAnalysisRip &desiredRip,
-					const Mapping &mapping,
-					unsigned long offset,
-					unsigned long *sz)
-			{
-				bool res = false;
-				for (int x = 0; x < nr_items; x++) {
-					DynAnalysisRip buf;
-					bool is_private;
-					unsigned long s;
-					TypesDb::parse_vexrip_canon(&buf, mapping, offset + *sz, &is_private, &s);
-					*sz += s;
-					if (buf == desiredRip)
-						res = true;
-				}
-				return res;
-			}
-		} doit;
-
-		if (doit(hdr->nr_loads, smsel_dr, raw_types_database, offset, &sz) &&
-		    doit(hdr->nr_stores, smses_dr, raw_types_database, offset, &sz))
-			return mam_might_alias;
-	}
+	bool have_private_alias = false;
+	for (auto it = load_stores.begin(); it != load_stores.end(); it++)
+		if (it->rip == smses_dr) {
+			if (it->is_private)
+				have_private_alias = true;
+			else
+				return mam_might_alias;
+		}
+	if (have_private_alias)
+		return mam_private;
 	return mam_no_alias;
 }
 bool
@@ -439,104 +448,30 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 	return false;
 }
 
-static void
-intersect_sorted_vectors(std::vector<unsigned long> &out, const std::vector<unsigned long> &a,
-			 const std::vector<unsigned long> &b)
-{
-	out.clear();
-	out.reserve(std::min(a.size(), b.size()));
-
-	auto it1 = a.begin();
-	auto it2 = b.begin();
-
-	while (1) {
-		if (it1 == a.end() || it2 == b.end())
-			break;
-		unsigned long A = *it1;
-		unsigned long B = *it2;
-		if (A == B) {
-			out.push_back(A);
-			it1++;
-			it2++;
-		} else if (A < B) {
-			it1++;
-		} else {
-			it2++;
-		}
-	}
-}
-
 bool
 Oracle::memoryAccessesMightAliasCrossThread(const DynAnalysisRip &smsel_dr, const DynAnalysisRip &smses_dr)
 {
 	__set_profiling(might_alias_cross_thread);
-	std::vector<unsigned long> offsets_store;
-	type_index->findOffsets(smses_dr, offsets_store);
-	if (offsets_store.size() == 0)
-		return false;
-	std::vector<unsigned long> offsets_load;
-	type_index->findOffsets(smsel_dr, offsets_load);
-	if (offsets_load.size() == 0)
-		return false;
-	std::sort(offsets_store.begin(), offsets_store.end());
-	std::sort(offsets_load.begin(), offsets_load.end());
-	std::vector<unsigned long> combinedOffsets;
-	intersect_sorted_vectors(combinedOffsets, offsets_store, offsets_load);
-
-	for (auto it = combinedOffsets.begin(); it != combinedOffsets.end(); it++) {
-		unsigned long offset = *it;
-		const struct tag_hdr *hdr = raw_types_database.get<tag_hdr>(offset);
-		assert(hdr);
-		unsigned long sz = sizeof(*hdr);
-		struct {
-			bool operator()(int nr_items,
-					const DynAnalysisRip &desiredRip,
-					const Mapping &mapping,
-					unsigned long offset,
-					unsigned long *sz)
-			{
-				bool res = false;
-				for (int x = 0; x < nr_items; x++) {
-					DynAnalysisRip buf;
-					bool is_private;
-					unsigned long s;
-					TypesDb::parse_vexrip_canon(&buf, mapping, offset + *sz, &is_private, &s);
-					*sz += s;
-					if (buf == desiredRip)
-						res = true;
-				}
-				return res;
-			}
-		} doit;
-
-		if (doit(hdr->nr_loads, smsel_dr, raw_types_database, offset, &sz) &&
-		    doit(hdr->nr_stores, smses_dr, raw_types_database, offset, &sz))
-			return true;
-	}
-	return false;
+	return memoryAccessesMightAliasLS(smsel_dr, smses_dr) == mam_might_alias;
 }
 
 Oracle::mam_result
 Oracle::memoryAccessesMightAliasLL(const DynAnalysisRip &dr1, const DynAnalysisRip &dr2)
 {
-	__set_profiling(memory_accesses_might_alias_load_load);
-	std::vector<unsigned long> offsets;
-	type_index->findOffsets(dr1, offsets);
-	if (offsets.size() == 0) {
-		if (!notInTagTable(dr2))
-			return mam_no_alias;
-		return mam_private;
-	} else if (notInTagTable(dr1))
+	__set_profiling(might_alias_load_load);
+	std::vector<TypesDb::types_entry> l1_loads;
+	std::vector<TypesDb::types_entry> l1_stores;
+	std::vector<TypesDb::types_entry> l2_loads;
+	std::vector<TypesDb::types_entry> l2_stores;
+	if (!type_db->lookupEntry(dr1, l1_loads, l1_stores)) {
+		if (!type_db->ripPresent(dr2))
+			return mam_private;
+		return mam_no_alias;
+	}
+	if (!type_db->lookupEntry(dr2, l2_loads, l2_stores))
 		return mam_no_alias;
 
-	for (auto it = offsets.begin(); it != offsets.end(); it++) {
-		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it);
-		if ((te.shared_loads.count(dr2) || te.private_loads.count(dr2)) &&
-		    (te.shared_loads.count(dr1) || te.private_loads.count(dr1)))
-			return mam_might_alias;
-	}
-	return mam_no_alias;
+	return alias_query(dr1, l1_loads, dr2, l2_loads);
 }
 
 bool
@@ -553,7 +488,7 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 
 	for (auto it = mai.begin(smsel1->rip); !it.finished(); it.advance()) {
 		for (auto it2 = mai.begin(smsel2->rip); !it2.finished(); it2.advance()) {
-			switch (memoryAccessesMightAliasLS(it.dr(), it2.dr())) {
+			switch (memoryAccessesMightAliasLL(it.dr(), it2.dr())) {
 			case mam_might_alias:
 				return true;
 			case mam_no_alias:
@@ -571,24 +506,20 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 Oracle::mam_result
 Oracle::memoryAccessesMightAliasSS(const DynAnalysisRip &dr1, const DynAnalysisRip &dr2)
 {
-	__set_profiling(memory_accesses_might_alias_store_store);
-	std::vector<unsigned long> offsets;
-	type_index->findOffsets(dr1, offsets);
-	if (offsets.size() == 0) {
-		if (!notInTagTable(dr2))
-			return mam_no_alias;
-		return mam_private;
-	} else if (notInTagTable(dr2))
+	__set_profiling(might_alias_load_load);
+	std::vector<TypesDb::types_entry> s1_loads;
+	std::vector<TypesDb::types_entry> s1_stores;
+	std::vector<TypesDb::types_entry> s2_loads;
+	std::vector<TypesDb::types_entry> s2_stores;
+	if (!type_db->lookupEntry(dr1, s1_loads, s1_stores)) {
+		if (!type_db->ripPresent(dr2))
+			return mam_private;
+		return mam_no_alias;
+	}
+	if (!type_db->lookupEntry(dr2, s2_loads, s2_stores))
 		return mam_no_alias;
 
-	for (auto it = offsets.begin(); it != offsets.end(); it++) {
-		tag_entry te;
-		fetchTagEntry(&te, raw_types_database, *it);
-		if ((te.shared_stores.count(dr2) || te.private_stores.count(dr2)) &&
-		    (te.shared_stores.count(dr1) || te.private_stores.count(dr1)))
-			return mam_might_alias;
-	}
-	return mam_no_alias;
+	return alias_query(dr1, s1_stores, dr2, s2_stores);
 }
 
 bool
@@ -630,15 +561,13 @@ void
 Oracle::findRacingRips(const MaiMap &mai, StateMachineSideEffectStore *smses, std::set<DynAnalysisRip> &out)
 {
 	__set_profiling(findRacingRips__store);
-	std::vector<unsigned long> offsets;
+	std::vector<TypesDb::types_entry> loads, stores;
 	for (auto it = mai.begin(smses->rip); !it.finished(); it.advance()) {
-		type_index->findOffsets(it.dr(), offsets);
-		for (auto it2 = offsets.begin(); it2 != offsets.end(); it2++) {
-			tag_entry te;
-			fetchTagEntry(&te, raw_types_database, *it2);
-			if (te.shared_stores.count(it.dr()))
-				out |= te.shared_loads;
-		}
+		if (!type_db->lookupEntry(it.dr(), loads, stores))
+			continue;
+		for (auto it = loads.begin(); it != loads.end(); it++)
+			if (!it->is_private)
+				out.insert(it->rip);
 	}
 }
 
@@ -878,11 +807,7 @@ Oracle::loadTagTable(const char *path)
 {
 	__set_profiling(loadTagTable);
 
-	if (raw_types_database.init(path) < 0)
-		err(1, "opening %s as raw types database", path);
-	char *idx_path = my_asprintf("%s.idx", path);
-	type_index = new TypesDb(idx_path);
-	free(idx_path);
+	type_db = new TypesDb(path);
 }
 
 void
@@ -1214,6 +1139,52 @@ struct cg_header {
 	unsigned long nr;
 };
 
+enum read_cg_vexrip_res {
+	read_cg_vexrip_error,
+	read_cg_vexrip_take,
+	read_cg_vexrip_skip
+};
+
+static read_cg_vexrip_res
+read_cg_vexrip(FILE *f, DynAnalysisRip *out, AddressSpace *as, bool *is_private)
+{
+	unsigned long rip;
+	unsigned nr_entries;
+	std::vector<unsigned long> stack;
+
+	if (fread(&rip, sizeof(rip), 1, f) != 1 ||
+	    fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
+		return read_cg_vexrip_error;
+	stack.reserve(nr_entries);
+	for (unsigned x = 0; x < nr_entries; x++) {
+		unsigned long a;
+		if (fread(&a, sizeof(a), 1, f) != 1)
+			return read_cg_vexrip_error;
+		if (as->isReadable(a, 1))
+			stack.push_back(a);
+	}
+	if (rip & (1ul << 63)) {
+		*is_private = true;
+		rip &= ~(1ul << 63);
+	} else {
+		*is_private = false;
+	}
+	read_cg_vexrip_res res;
+	if (as->isReadable(rip, 1)) {
+		stack.push_back(rip);
+		res = read_cg_vexrip_take;
+	} else {
+		res = read_cg_vexrip_skip;
+	}
+	
+	out->nr_rips = stack.size();
+	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH)
+		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
+	for (int x = 0; x < out->nr_rips; x++)
+		out->rips[out->nr_rips - x - 1] = stack[stack.size() - x - 1];
+	return res;
+}
+
 void
 Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionToken token)
 {
@@ -1226,8 +1197,8 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionT
 		callgraph_entry ce;
 		bool is_call;
 		DynAnalysisRip branch_rip;
-		auto res = TypesDb::read_vexrip_noncanon(f, &branch_rip, ths->ms->addressSpace, &is_call);
-		if (res == TypesDb::read_vexrip_error) {
+		auto res = read_cg_vexrip(f, &branch_rip, ths->ms->addressSpace, &is_call);
+		if (res == read_cg_vexrip_error) {
 			if (feof(f))
 				break;
 			err(1, "reading rip from %s", fname);

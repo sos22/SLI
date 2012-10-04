@@ -5,92 +5,54 @@
 #include "typesdb.hpp"
 #include "types_db.hpp"
 
-void
-TypesDb::findOffsets(const DynAnalysisRip &vr, std::vector<unsigned long> &out) const
-{
-	unsigned long hash = vr.hash();
-	const struct hash_head *heads = mapping.get<hash_head>(0, NR_HASH_HEADS);
-	const struct hash_head *head = &heads[hash % NR_HASH_HEADS];
-
-	unsigned long he_offset;
-	const hash_entry *he;
-	he = NULL;
-	for (he_offset = head->offset; he_offset != 0; ) {
-		he = mapping.get<hash_entry>(he_offset);
-		if (he->for_rip(vr))
-			break;
-		he_offset = he->chain;
-	}
-	if (he_offset == 0) {
-		/* Nothing found */
-		return;
-	}
-
-	unsigned long ol_offset;
-	const offsets_list *ol;
-	for (ol_offset = he->offsets_start;
-	     ol_offset != 0;
-		) {
-		ol = mapping.get<offsets_list>(ol_offset);
-		assert(ol->nr_entries != 0);
-		for (unsigned x = 0; x < ol->nr_entries; x++)
-			out.push_back(ol->offsets[x]);
-		ol_offset = ol->chain;
-	}
-}
+#define PRIVATE_RIP_FLAG 0x80000000
 
 TypesDb::all_instrs_iterator *
 TypesDb::enumerateAllInstructions() const
 {
-	return new all_instrs_iterator(this);
+	return new all_instrs_iterator(this, indexes.back().first, indexes.back().second);
 }
 
-__types_db_instr_iterator::__types_db_instr_iterator(const TypesDb *_owner)
-	: owner(_owner), have_finished(false)
+__types_db_instr_iterator::__types_db_instr_iterator(const TypesDb *_owner,
+						     unsigned long _start,
+						     unsigned long _end)
+	: start(_start), end(_end), owner(_owner)
 {
-	const struct hash_head *heads = owner->mapping.get<hash_head>(0, NR_HASH_HEADS);
-		for (bucket_index = 0; bucket_index < NR_HASH_HEADS; bucket_index++) {
-		const struct hash_head *head = &heads[bucket_index];
-		offset = head->offset;
-		if (offset != 0)
-			return;
-	}
-	/* Index is empty? */
-	have_finished = true;
 }
 
 void
 __types_db_instr_iterator::advance(void)
 {
-	const hash_entry *he;
-	he = owner->mapping.get<hash_entry>(offset);
-	offset = he->chain;
-	if (offset != 0)
-		return;
+	unsigned nr_entries = *owner->mapping.get<unsigned>(start);
+	nr_entries &= ~PRIVATE_RIP_FLAG;
+	start += 12;
+	start += nr_entries * 8;
+}
 
-	/* finished the bucket, move on to next one. */
-	bucket_index++;
-	const struct hash_head *heads = owner->mapping.get<hash_head>(0, NR_HASH_HEADS);
-	for (; bucket_index < NR_HASH_HEADS; bucket_index++) {
-		const struct hash_head *head = &heads[bucket_index];
-		offset = head->offset;
-		if (offset != 0)
-			return;
+static unsigned long
+parse_db_rip(const void *start, DynAnalysisRip *out, bool *is_private)
+{
+	int nr_entries = *(unsigned*)start;
+	if (is_private) {
+		if (nr_entries & PRIVATE_RIP_FLAG)
+			*is_private = true;
+		else
+			*is_private = false;
 	}
-	/* Index is empty? */
-	have_finished = true;
+	nr_entries &= ~PRIVATE_RIP_FLAG;
+	out->nr_rips = nr_entries;
+	if (nr_entries > DynAnalysisRip::DATABASE_RIP_DEPTH)
+		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
+	for (int x = 0; x < out->nr_rips; x++)
+		out->rips[x] = *(unsigned long *)((unsigned long)start + 4 + x * 8);
+	out->changed();
+	return 4 + 8 * nr_entries;
 }
 
 void
 __types_db_instr_iterator::fetch(DynAnalysisRip *out) const
 {
-	const struct hash_entry *he = owner->mapping.get<hash_entry>(offset);
-	out->nr_rips = he->nr_rips;
-	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH)
-		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
-	for (int x = 0; x < out->nr_rips; x++)
-		out->rips[out->nr_rips - x - 1] = he->rips[he->nr_rips - x - 1];
-	out->changed();
+	parse_db_rip(owner->mapping.get<char>(start), out, NULL);
 }
 
 unsigned long
@@ -105,129 +67,101 @@ TypesDb::nrDistinctInstructions() const
 	return res;
 }
 
-struct vexrip_hdr {
-	unsigned long rip;
-	unsigned nr_entries;
-};
-
-void
-TypesDb::parse_vexrip_canon(DynAnalysisRip *out, const Mapping &mapping, unsigned long offset, bool *is_private, unsigned long *sz)
-{
-	const struct vexrip_hdr *hdr = mapping.get<vexrip_hdr>(offset);
-	if (!hdr)
-		err(1, "reading vexrip header");
-
-	/* sizeof(vexrip_hdr) would be 12 if we'd properly packed
-	 * vexrip_hdr. :( */
-	*sz = 12 + sizeof(unsigned long) * hdr->nr_entries;
-
-	unsigned long rip = hdr->rip;
-	if (rip & (1ul << 63)) {
-		*is_private = true;
-		rip &= ~(1ul << 63);
-	} else {
-		*is_private = false;
-	}
-
-	const unsigned long *body = mapping.get<unsigned long>(offset + 12, hdr->nr_entries);
-	out->nr_rips = hdr->nr_entries + 1;
-	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH - 1)
-		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
-	for (int x = 0; x < out->nr_rips - 1; x++)
-		out->rips[x] = body[x + hdr->nr_entries - out->nr_rips + 1];
-	out->rips[out->nr_rips - 1] = rip;
-}
-
-void
-TypesDb::read_vexrip_canon(FILE *f, DynAnalysisRip *out, bool *is_private)
-{
-	unsigned long rip;
-	unsigned nr_entries;
-	std::vector<unsigned long> stack;
-
-	if (fread(&rip, sizeof(rip), 1, f) != 1 ||
-	    fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
-		err(1, "reading input");
-	stack.reserve(nr_entries);
-	for (unsigned x = 0; x < nr_entries; x++) {
-		unsigned long a;
-		if (fread(&a, sizeof(a), 1, f) != 1)
-			err(1, "reading input");
-		stack.push_back(a);
-	}
-	if (rip & (1ul << 63)) {
-		*is_private = true;
-		rip &= ~(1ul << 63);
-	} else {
-		*is_private = false;
-	}
-	stack.push_back(rip);
-
-	out->nr_rips = stack.size();
-	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH)
-		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
-	for (int x = 0; x < out->nr_rips; x++)
-		out->rips[out->nr_rips - x - 1] = stack[stack.size() - x - 1];
-}
-
-TypesDb::read_vexrip_res
-TypesDb::read_vexrip_noncanon(FILE *f, DynAnalysisRip *out, AddressSpace *as, bool *is_private)
-{
-	unsigned long rip;
-	unsigned nr_entries;
-	std::vector<unsigned long> stack;
-
-	if (fread(&rip, sizeof(rip), 1, f) != 1 ||
-	    fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
-		return read_vexrip_error;
-	stack.reserve(nr_entries);
-	for (unsigned x = 0; x < nr_entries; x++) {
-		unsigned long a;
-		if (fread(&a, sizeof(a), 1, f) != 1)
-			return read_vexrip_error;
-		if (as->isReadable(a, 1))
-			stack.push_back(a);
-	}
-	if (rip & (1ul << 63)) {
-		*is_private = true;
-		rip &= ~(1ul << 63);
-	} else {
-		*is_private = false;
-	}
-	read_vexrip_res res;
-	if (as->isReadable(rip, 1)) {
-		stack.push_back(rip);
-		res = read_vexrip_take;
-	} else {
-		res = read_vexrip_skip;
-	}
-	
-	out->nr_rips = stack.size();
-	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH)
-		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
-	for (int x = 0; x < out->nr_rips; x++)
-		out->rips[out->nr_rips - x - 1] = stack[stack.size() - x - 1];
-	return res;
-}
-
 bool
 TypesDb::ripPresent(const DynAnalysisRip &vr) const
 {
-	unsigned long hash = vr.hash();
-	const struct hash_head *heads = mapping.get<hash_head>(0, NR_HASH_HEADS);
-	const struct hash_head *head = &heads[hash % NR_HASH_HEADS];
+	unsigned long o = index_lookup(vr);
+	if (o == 0)
+		return false;
+	else
+		return true;
+}
 
-	unsigned long he_offset;
-	const hash_entry *he;
-	he = NULL;
-	for (he_offset = head->offset; he_offset != 0; ) {
-		he = mapping.get<hash_entry>(he_offset);
-		if (he->for_rip(vr))
-			return true;
-		he_offset = he->chain;
+
+bool
+TypesDb::lookupEntry(const DynAnalysisRip &dr,
+		     std::vector<types_entry> &loads,
+		     std::vector<types_entry> &stores)
+{
+	unsigned long o = index_lookup(dr);
+	if (o == 0)
+		return false;
+	unsigned nr_loads = *mapping.get<unsigned>(o);
+	unsigned nr_stores = *mapping.get<unsigned>(o + 4);
+	o += 8;
+	for (unsigned x = 0; x < nr_loads; x++) {
+		types_entry te;
+		o += parse_db_rip(mapping.get<char>(o), &te.rip, &te.is_private);
+		loads.push_back(te);
 	}
-	/* Nothing found */
-	return false;
+	for (unsigned x = 0; x < nr_stores; x++) {
+		types_entry te;
+		o += parse_db_rip(mapping.get<char>(o), &te.rip, &te.is_private);
+		stores.push_back(te);
+	}
+	return true;
+}
+
+unsigned long
+TypesDb::index_lookup(const DynAnalysisRip &dr) const
+{
+	unsigned long idx_start = indexes[0].first;
+	unsigned long idx_end = indexes[0].second;
+	for (unsigned idx = 0; idx < indexes.size() - 1; idx++) {
+		unsigned long o = idx_start;
+		DynAnalysisRip idx_dr;
+		unsigned long sz;
+		sz = parse_db_rip(mapping.get<char>(idx_start), &idx_dr, NULL);
+		if (idx_dr > dr) {
+			idx_start = indexes[idx + 1].first;
+			idx_end = *mapping.get<unsigned long>(idx_start + sz);
+			continue;
+		}
+		bool s = false;
+		while (o < idx_end) {
+			sz = parse_db_rip(mapping.get<char>(o), &idx_dr, NULL);
+			if (idx_dr > dr) {
+				idx_end = *mapping.get<unsigned long>(o + sz);
+				s = true;
+				break;
+			}
+			idx_start = *mapping.get<unsigned long>(o + sz);
+			o += sz + 8;
+		}
+		if (!s) {
+			assert(o == idx_end);
+			idx_end = indexes[idx+1].second;
+		}
+	}
+	unsigned long o = idx_start;
+	while (1) {
+		if (o >= idx_end) {
+			assert(o == idx_end);
+			return 0;
+		}
+		DynAnalysisRip idx_dr;
+		unsigned long sz;
+		sz = parse_db_rip(mapping.get<char>(o), &idx_dr, NULL);
+		if (idx_dr == dr)
+			return *mapping.get<unsigned long>(o + sz);
+		if (idx_dr > dr)
+			return 0;
+		o += sz + 8;
+	}
+}
+
+void
+TypesDb::read_index_shape()
+{
+	unsigned nr_levels = *mapping.get<unsigned>(0);
+	printf("Type index has %d levels.\n", nr_levels);
+	for (unsigned x = 0; x < nr_levels; x++) {
+		std::pair<unsigned long, unsigned long> entry;
+		entry.first = *mapping.get<unsigned long>(4 + x * 16);
+		entry.second = *mapping.get<unsigned long>(12 + x * 16);
+		printf("\tLevel %d: %lx -> %lx\n", x, entry.first, entry.second);
+		indexes.push_back(entry);
+	}
 }
 
 bool

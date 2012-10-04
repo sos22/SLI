@@ -967,7 +967,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		std::set<StateMachineSideEffectMemoryAccess *> typeDbProbeAccesses;
 		for (auto it = probeAccesses.begin(); it != probeAccesses.end(); it++) {
 			for (auto it2 = mai->begin((*it)->rip); !it2.finished(); it2.advance()) {
-				if (oracle->type_index->ripPresent(it2.dr())) {
+				if (oracle->type_db->ripPresent(it2.dr())) {
 					typeDbProbeAccesses.insert(*it);
 					break;
 				}

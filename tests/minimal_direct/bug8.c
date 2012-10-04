@@ -5,8 +5,8 @@
 
 static int *volatile global_ptr;
 
-static int read_events;
-static int write_events;
+static long read_events;
+static long write_events;
 static volatile bool force_quit;
 
 #define BAD_PTR ((void *)0x57ul)
@@ -44,6 +44,6 @@ main()
 		write_events++;
 	}
 
-	printf("%d read events, %d write\n", read_events, write_events);
+	printf("%ld read events, %ld write\n", read_events, write_events);
 	return 0;
 }

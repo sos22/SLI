@@ -285,17 +285,7 @@ public:
 	};
 	typedef std::map<StaticRip, callgraph_entry> callgraph_t;
 
-	struct tag_entry {
-		std::set<DynAnalysisRip> shared_loads;
-		std::set<DynAnalysisRip> shared_stores;
-		std::set<DynAnalysisRip> private_loads;
-		std::set<DynAnalysisRip> private_stores;
-	};
-	TypesDb *type_index;
-	Mapping raw_types_database;
-	static unsigned long fetchTagEntry(tag_entry *te,
-					   const Mapping &mapping,
-					   unsigned long offset);
+	TypesDb *type_db;
 
 	static IRSB *getIRSBForRip(AddressSpace *as, const StaticRip &sr, bool singleInstr);
 	static IRSB *getIRSBForRip(AddressSpace *as, const VexRip &sr, bool singleInstr);
@@ -332,7 +322,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(ms);
 		hv(crashedThread);
-		hv(type_index);
+		hv(type_db);
 	}
 
 	MachineState *ms;
@@ -362,6 +352,10 @@ private:
 	mam_result memoryAccessesMightAliasLL(const DynAnalysisRip &, const DynAnalysisRip &);
 	mam_result memoryAccessesMightAliasLS(const DynAnalysisRip &, const DynAnalysisRip &);
 	mam_result memoryAccessesMightAliasSS(const DynAnalysisRip &, const DynAnalysisRip &);
+	mam_result alias_query(const DynAnalysisRip &dr1,
+			       const std::vector<TypesDb::types_entry> &alias1,
+			       const DynAnalysisRip &dr2,
+			       const std::vector<TypesDb::types_entry> &alias2);
 public:
 	bool memoryAccessesMightAlias(const MaiMap &,const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
 	bool memoryAccessesMightAlias(const MaiMap &,const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
