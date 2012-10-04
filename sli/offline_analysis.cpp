@@ -187,6 +187,63 @@ removeTerminalStores(const MaiMap &mai,
 	return sm;
 }
 
+class OptimisationRecorder {
+public:
+#if CONFIG_RECORD_MACHINE_OPTIMISATIONS
+	char *prefix;
+	OptimisationRecorder()
+		: prefix(NULL)
+	{}
+	~OptimisationRecorder() { free(prefix); }
+	void start(MaiMap *mai, StateMachine *sm, bool is_ssa,
+		   const AllowableOptimisations &opt)
+	{
+		static int idx;
+		while (1) {
+			prefix = my_asprintf("machines/%d", idx);
+			if (mkdir(prefix, 0700) == -1) {
+				if (errno == EEXIST) {
+					idx++;
+					free(prefix);
+					continue;
+				}
+				err(1, "creating %s", prefix);
+			} else {
+				break;
+			}
+		}
+		FILE *f = fopenf("w", "%s/opt", prefix);
+		fprintf(f, "%s", opt.name());
+		fclose(f);
+		f = fopenf("w", "%s/pre_mai", prefix);
+		mai->print(f);
+		fclose(f);
+		f = fopenf("w", "%s/pre_machine", prefix);
+		printStateMachine(sm, f);
+		fclose(f);
+		f = fopenf("w", "%s/is_ssa", prefix);
+		if (is_ssa)
+			fprintf(f, "true\n");
+		else
+			fprintf(f, "false\n");
+		fclose(f);
+	}
+	void finish(MaiMap *mai, StateMachine *sm)
+	{
+		FILE *f = fopenf("w", "%s/post_mai", prefix);
+		mai->print(f);
+		fclose(f);
+		f = fopenf("w", "%s/post_machine", prefix);
+		printStateMachine(sm, f);
+		fclose(f);
+	}
+#else
+	void start(MaiMap *, StateMachine *, bool , const AllowableOptimisations &)
+	{}
+	void finish(MaiMap *, StateMachine *);
+#endif
+};
+
 static StateMachine *
 _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		      VexPtr<StateMachine, &ir_heap> sm,
@@ -205,6 +262,9 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		       __func__, opt.name(), is_ssa ? "true" : "false");
 		printStateMachine(sm, stdout);
 	}
+
+	OptimisationRecorder optrec;
+	optrec.start(mai, sm, is_ssa, opt);
 
 	bool done_something;
 	do {
@@ -361,6 +421,8 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 	sm->sanityCheck(*mai);
 	if (is_ssa)
 		sm->assertSSA();
+	if (!TIMEOUT)
+		optrec.finish(mai, sm);
 	return sm;
 }
 StateMachine *
