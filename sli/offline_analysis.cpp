@@ -240,7 +240,8 @@ public:
 #else
 	void start(MaiMap *, StateMachine *, bool , const AllowableOptimisations &)
 	{}
-	void finish(MaiMap *, StateMachine *);
+	void finish(MaiMap *, StateMachine *)
+	{}
 #endif
 };
 
