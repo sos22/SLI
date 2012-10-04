@@ -35,7 +35,7 @@ validate_trace(Oracle *oracle, const std::vector<unsigned long> &rips)
 
 	assert(!rips.empty());
 
-	if (!oracle->type_index->ripPresent(DynAnalysisRip(VexRip::invent_vex_rip(rips.back())))) {
+	if (!oracle->type_db->ripPresent(DynAnalysisRip(VexRip::invent_vex_rip(rips.back())))) {
 		dump_trace(invalid_log, rips);
 		nr_invalid++;
 		return;
@@ -43,7 +43,7 @@ validate_trace(Oracle *oracle, const std::vector<unsigned long> &rips)
 
 	HashedSet<HashedPtr<CFGNode> > roots;
 	HashedSet<HashedPtr<const CFGNode> > targetNodes;
-	getProbeCFGs(allocLabel, oracle, DynAnalysisRip(VexRip::invent_vex_rip(rips.back())),
+	getProbeCFGs(allocLabel, oracle, VexRip::invent_vex_rip(rips.back()),
 		     roots, targetNodes, rips.size(), rips.size());
 
 	std::set<CFGNode *> live;
