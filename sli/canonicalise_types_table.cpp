@@ -11,6 +11,27 @@
 #define PRIVATE_RIP_FLAG 0x80000000
 #define SECOND_LEVEL_IDX_INTERVAL 4096
 
+/* A wrapper around FILE which doesn't force a flush every time you
+ * call ftell() */
+struct sane_write_file {
+	FILE *f;
+	unsigned long offset;
+	sane_write_file(FILE *_f)
+		: f(_f), offset(::ftell(f))
+	{}
+	unsigned long ftell() const { return offset; }
+	template <typename t> void write(const t &value)
+	{
+		fwrite(&value, sizeof(value), 1, f);
+		offset += sizeof(value);
+	}
+	template <typename t> void write(const t *value, size_t nr_elems)
+	{
+		fwrite(value, sizeof(*value), nr_elems, f);
+		offset += sizeof(value) * nr_elems;
+	}
+};
+
 struct rip_t {
 	int is_private;
 	std::vector<unsigned long> stack;
@@ -115,24 +136,24 @@ input_database::read(FILE *f, AddressSpace *as)
 }
 
 static void
-write_output_rip(const rip_t &r, FILE *output)
+write_output_rip(const rip_t &r, sane_write_file &output)
 {
 	unsigned nr_entries = r.stack.size();
 	if (r.is_private)
 		nr_entries |= PRIVATE_RIP_FLAG;
-	fwrite(&nr_entries, sizeof(nr_entries), 1, output);
+	output.write(nr_entries);
 	for (auto it = r.stack.begin(); it != r.stack.end(); it++)
-		fwrite(&*it, sizeof(*it), 1, output);
+		output.write(*it);
 }
 
 static void
-transform_record(const input_record &ir, FILE *output)
+transform_record(const input_record &ir, sane_write_file &output)
 {
 	int nr_loads, nr_stores;
 	nr_loads = ir.loads.size();
 	nr_stores = ir.stores.size();
-	fwrite(&nr_loads, sizeof(nr_loads), 1, output);
-	fwrite(&nr_stores, sizeof(nr_loads), 1, output);
+	output.write(nr_loads);
+	output.write(nr_stores);
 	for (auto it = ir.loads.begin(); it != ir.loads.end(); it++)
 		write_output_rip(*it, output);
 	for (auto it = ir.stores.begin(); it != ir.stores.end(); it++)
@@ -140,25 +161,25 @@ transform_record(const input_record &ir, FILE *output)
 }
 
 static void
-copy_rip(FILE *input, FILE *output)
+copy_rip(FILE *input, sane_write_file &output)
 {
 	unsigned nr_entries;
 	fread(&nr_entries, sizeof(nr_entries), 1, input);
-	fwrite(&nr_entries, sizeof(nr_entries), 1, output);
+	output.write(nr_entries);
 	nr_entries &= ~PRIVATE_RIP_FLAG;
 	unsigned long stack[nr_entries];
 	fread(stack, sizeof(unsigned long), nr_entries, input);
-	fwrite(stack, sizeof(unsigned long), nr_entries, output);
+	output.write(stack, nr_entries);
 }
 
 static void
-copy_record(FILE *input, FILE *output)
+copy_record(FILE *input, sane_write_file &output)
 {
 	int nr_loads, nr_stores;
 	fread(&nr_loads, sizeof(nr_loads), 1, input);
-	fwrite(&nr_loads, sizeof(nr_loads), 1, output);
+	output.write(nr_loads);
 	fread(&nr_stores, sizeof(nr_stores), 1, input);
-	fwrite(&nr_stores, sizeof(nr_stores), 1, output);
+	output.write(nr_stores);
 	for (int i = 0; i < nr_loads; i++)
 		copy_rip(input, output);
 	for (int i = 0; i < nr_stores; i++)
@@ -166,37 +187,37 @@ copy_record(FILE *input, FILE *output)
 }
 
 static void
-add_index_entry(const rip_t &rip, unsigned long offset, FILE *f)
+add_index_entry(const rip_t &rip, unsigned long offset, sane_write_file &f)
 {
 	write_output_rip(rip, f);
-	fwrite(&offset, sizeof(offset), 1, f);
+	f.write(offset);
 }
 
 static void
-rewrite_index_entry(FILE *input, FILE *output, unsigned long delta)
+rewrite_index_entry(FILE *input, sane_write_file &output, unsigned long delta)
 {
 	copy_rip(input, output);
 	unsigned long offset;
 	fread(&offset, sizeof(offset), 1, input);
 	offset += delta;
-	fwrite(&offset, sizeof(offset), 1, output);
+	output.write(offset);
 }
 
 static void
-write_index(FILE *output,
+write_index(sane_write_file &output,
 	    const std::vector<std::pair<rip_t, unsigned long> > idx,
 	    std::vector<std::pair<rip_t, unsigned long> > &idx_next_level,
 	    std::vector<std::pair<unsigned long, unsigned long> > &regions)
 {
-	unsigned long idx_start = ftell(output);
+	unsigned long idx_start = output.ftell();
 	unsigned long last_idx2 = idx_start;
 	
 	for (auto it = idx.begin(); it != idx.end(); it++) {
-		if (ftell(output) >= (long)last_idx2 + SECOND_LEVEL_IDX_INTERVAL)
-			idx_next_level.push_back(std::pair<rip_t, unsigned long>(it->first, ftell(output) - idx_start));
+		if (output.ftell() >= last_idx2 + SECOND_LEVEL_IDX_INTERVAL)
+			idx_next_level.push_back(std::pair<rip_t, unsigned long>(it->first, output.ftell() - idx_start));
 		add_index_entry(it->first, it->second, output);
 	}
-	regions.push_back(std::pair<unsigned long, unsigned long>(idx_start, ftell(output)));
+	regions.push_back(std::pair<unsigned long, unsigned long>(idx_start, output.ftell()));
 }
 
 int
@@ -216,9 +237,7 @@ main(int argc, char *argv[])
 	FILE *inp = fopen(input_fname, "r");
 	if (!inp)
 		err(1, "opening %s", input_fname);
-	FILE *tmp = tmpfile();
-	if (!tmp)
-		err(1, "opening temporary file");
+	sane_write_file tmp(tmpfile());
 
 	input_database input;
 	input.read(inp, ms->addressSpace);
@@ -227,7 +246,7 @@ main(int argc, char *argv[])
 
 	std::vector<std::pair<rip_t, unsigned long> > idx;
 	for (auto it = input.content.begin(); it != input.content.end(); it++) {
-		idx.push_back(std::pair<rip_t, unsigned long>(it->rip, ftell(tmp)));
+		idx.push_back(std::pair<rip_t, unsigned long>(it->rip, tmp.ftell()));
 		transform_record(*it, tmp);
 	}
 
@@ -240,8 +259,8 @@ main(int argc, char *argv[])
 		write_index(tmp, idx, idx2, indexes);
 	}
 
-	FILE *output = fopen(output_fname, "w");
-	if (!output)
+	sane_write_file output(fopen(output_fname, "w"));
+	if (!output.f)
 		err(1, "opening output");
 
 	/* Now write the final thing by reversing the order of the
@@ -252,15 +271,15 @@ main(int argc, char *argv[])
 	unsigned long o = 4 + 16 * indexes.size();
 	{
 		unsigned nr_indexes = indexes.size();
-		fwrite(&nr_indexes, sizeof(nr_indexes), 1, output);
+		output.write(nr_indexes);
 		for (auto it = indexes.rbegin(); it != indexes.rend(); it++) {
 			unsigned long old_begin = it->first;
 			unsigned long old_end = it->second;
 			unsigned long new_begin = o;
 			unsigned long new_end = new_begin + old_end - old_begin;
 			o = new_end;
-			fwrite(&new_begin, sizeof(new_begin), 1, output);
-			fwrite(&new_end, sizeof(new_end), 1, output);
+			output.write(new_begin);
+			output.write(new_end);
 		}
 	}
 	o = 4 + 16 * indexes.size();
@@ -269,16 +288,16 @@ main(int argc, char *argv[])
 		unsigned long end = it->second;
 		o += end - begin;
 		printf("Index %lx -> %lx, o %lx\n", begin, end, o);
-		fseek(tmp, begin, SEEK_SET);
-		while (ftell(tmp) < (long)end)
-			rewrite_index_entry(tmp, output, o);
+		fseek(tmp.f, begin, SEEK_SET);
+		while (ftell(tmp.f) < (long)end)
+			rewrite_index_entry(tmp.f, output, o);
 	}
 	/* Now write out the actual content of the file */
-	fseek(tmp, 0, SEEK_SET);
-	while (ftell(tmp) < (long)indexes[0].first)
-		copy_record(tmp, output);
+	fseek(tmp.f, 0, SEEK_SET);
+	while (ftell(tmp.f) < (long)indexes[0].first)
+		copy_record(tmp.f, output);
 
-	if (fclose(output) == EOF)
+	if (fclose(output.f) == EOF)
 		err(1, "closing output file");
 
 	return 0;  
