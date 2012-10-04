@@ -12,6 +12,14 @@ class named_string : public std::string, public Named {
 	char *mkName() const {
 		return strdup(c_str());
 	}
+public:
+	unsigned long hash() const {
+		unsigned long acc;
+		acc = 0;
+		for (auto it = begin(); it != end(); it++)
+			acc = acc * 17 + *it;
+		return acc;
+	}
 };
 
 typedef _CFGNode<named_string> cfg_node;
