@@ -258,6 +258,7 @@ main(int argc, char *argv[])
 	write_index(tmp, idx, idx2, indexes);
 	while (idx2.size() > 10) {
 		idx = idx2;
+		idx2.clear();
 		write_index(tmp, idx, idx2, indexes);
 	}
 
