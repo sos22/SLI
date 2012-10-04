@@ -2319,6 +2319,16 @@ top:
 			break;
 		}
 
+		if (e->op == Iop_CmpEQ1 &&
+		    e->arg1->tag == Iex_Unop &&
+		    e->arg2->tag == Iex_Unop &&
+		    ((IRExprUnop *)e->arg1)->op == Iop_Not1 &&
+		    ((IRExprUnop *)e->arg2)->op == Iop_Not1) {
+			l = e->arg1 = ((IRExprUnop *)e->arg1)->arg;
+			r = e->arg2 = ((IRExprUnop *)e->arg2)->arg;
+			progress = true;
+		}
+
 		/* We simplify == expressions with sums on the left
 		   and right by trying to move all of the constants to
 		   the left and all of the non-constants to the
