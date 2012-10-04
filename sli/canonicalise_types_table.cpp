@@ -213,8 +213,10 @@ write_index(sane_write_file &output,
 	unsigned long last_idx2 = idx_start;
 	
 	for (auto it = idx.begin(); it != idx.end(); it++) {
-		if (output.ftell() >= last_idx2 + SECOND_LEVEL_IDX_INTERVAL)
+		if (output.ftell() >= last_idx2 + SECOND_LEVEL_IDX_INTERVAL) {
 			idx_next_level.push_back(std::pair<rip_t, unsigned long>(it->first, output.ftell() - idx_start));
+			last_idx2 = output.ftell();
+		}
 		add_index_entry(it->first, it->second, output);
 	}
 	regions.push_back(std::pair<unsigned long, unsigned long>(idx_start, output.ftell()));
