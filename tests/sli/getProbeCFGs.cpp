@@ -21,9 +21,9 @@ main(int argc, char *argv[])
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
 	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
-	DynAnalysisRip vr;
+	VexRip vr;
 	const char *suffix;
-	if (!parseDynAnalysisRip(&vr, argv[4], &suffix) || *suffix)
+	if (!parseVexRip(&vr, argv[4], &suffix) || *suffix)
 		err(1, "cannot parse %s as VexRip", argv[4]);
 	HashedSet<HashedPtr<CFGNode> > roots;
 	HashedSet<HashedPtr<const CFGNode> > targets;
