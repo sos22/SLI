@@ -8,45 +8,10 @@
 */
 #include "sli.h"
 
+#include "raw_types.hpp"
+
 #define PRIVATE_RIP_FLAG 0x80000000
 #define SECOND_LEVEL_IDX_INTERVAL 4096
-
-/* A wrapper around FILE which doesn't force a flush every time you
- * call ftell() */
-struct sane_write_file {
-	FILE *f;
-	unsigned long offset;
-	sane_write_file(FILE *_f)
-		: f(_f), offset(::ftell(f))
-	{}
-	unsigned long ftell() const { return offset; }
-	template <typename t> void write(const t &value)
-	{
-		fwrite(&value, sizeof(value), 1, f);
-		offset += sizeof(value);
-	}
-	template <typename t> void write(const t *value, size_t nr_elems)
-	{
-		fwrite(value, sizeof(*value), nr_elems, f);
-		offset += sizeof(value) * nr_elems;
-	}
-};
-
-struct rip_t {
-	int is_private;
-	std::vector<unsigned long> stack;
-	bool read(FILE *f, AddressSpace *as);
-	bool operator<(const rip_t &o) const {
-		if (stack < o.stack)
-			return true;
-		if (stack > o.stack)
-			return false;
-		return is_private < o.is_private;
-	}
-	bool operator>(const rip_t &o) const {
-		return o < *this;
-	}
-};
 
 bool
 rip_t::read(FILE *f, AddressSpace *as)
@@ -64,32 +29,13 @@ rip_t::read(FILE *f, AddressSpace *as)
 		content[nr_items - 1] &= ~(1ul << 63);
 	}
 	for (unsigned x = 0; x < nr_items; x++)
-		if (as->isReadable(content[x], 1))
+		if (!as || as->isReadable(content[x], 1))
 			stack.push_back(content[x]);
-	if (!as->isReadable(content[nr_items - 1], 1))
+	if (as && !as->isReadable(content[nr_items - 1], 1))
 		return false;
 	return true;
 }
 
-struct input_record {
-	rip_t rip;
-	std::vector<rip_t> loads;
-	std::vector<rip_t> stores;
-	bool read(FILE *f, AddressSpace *as);
-	bool operator<(const input_record &o) const {
-		if (rip < o.rip)
-			return true;
-		if (rip > o.rip)
-			return false;
-		if (loads < o.loads)
-			return true;
-		if (loads > o.loads)
-			return false;
-		if (stores < o.stores)
-			return true;
-		return false;
-	}
-};
 
 bool
 input_record::read(FILE *f, AddressSpace *as)
@@ -115,11 +61,6 @@ input_record::read(FILE *f, AddressSpace *as)
 	return res;
 }
 
-struct input_database {
-	std::vector<input_record> content;
-	void read(FILE *f, AddressSpace *as);
-};
-
 void
 input_database::read(FILE *f, AddressSpace *as)
 {
@@ -135,61 +76,51 @@ input_database::read(FILE *f, AddressSpace *as)
 	}
 }
 
-static void
-write_output_rip(const rip_t &r, sane_write_file &output)
+void
+rip_t::write(sane_write_file &output) const
 {
-	unsigned nr_entries = r.stack.size();
-	if (r.is_private)
+	unsigned nr_entries = stack.size();
+	if (is_private)
 		nr_entries |= PRIVATE_RIP_FLAG;
 	output.write(nr_entries);
-	for (auto it = r.stack.begin(); it != r.stack.end(); it++)
+	for (auto it = stack.begin(); it != stack.end(); it++)
 		output.write(*it);
 }
 
-static void
-transform_record(const input_record &ir, sane_write_file &output)
+void
+input_record::write(sane_write_file &output) const
 {
 	int nr_loads, nr_stores;
-	nr_loads = ir.loads.size();
-	nr_stores = ir.stores.size();
+	nr_loads = loads.size();
+	nr_stores = stores.size();
 	output.write(nr_loads);
 	output.write(nr_stores);
-	for (auto it = ir.loads.begin(); it != ir.loads.end(); it++)
-		write_output_rip(*it, output);
-	for (auto it = ir.stores.begin(); it != ir.stores.end(); it++)
-		write_output_rip(*it, output);
+	for (auto it = loads.begin(); it != loads.end(); it++)
+		it->write(output);
+	for (auto it = stores.begin(); it != stores.end(); it++)
+		it->write(output);
 }
 
 static void
 copy_rip(FILE *input, sane_write_file &output)
 {
-	unsigned nr_entries;
-	fread(&nr_entries, sizeof(nr_entries), 1, input);
-	output.write(nr_entries);
-	nr_entries &= ~PRIVATE_RIP_FLAG;
-	unsigned long stack[nr_entries];
-	fread(stack, sizeof(unsigned long), nr_entries, input);
-	output.write(stack, nr_entries);
+	rip_t r;
+	r.read(input, NULL);
+	r.write(output);
 }
 
 static void
 copy_record(FILE *input, sane_write_file &output)
 {
-	int nr_loads, nr_stores;
-	fread(&nr_loads, sizeof(nr_loads), 1, input);
-	output.write(nr_loads);
-	fread(&nr_stores, sizeof(nr_stores), 1, input);
-	output.write(nr_stores);
-	for (int i = 0; i < nr_loads; i++)
-		copy_rip(input, output);
-	for (int i = 0; i < nr_stores; i++)
-		copy_rip(input, output);
+	input_record ir;
+	ir.read(input);
+	ir.write(output);
 }
 
 static void
 add_index_entry(const rip_t &rip, unsigned long offset, sane_write_file &f)
 {
-	write_output_rip(rip, f);
+	rip.write(f);
 	f.write(offset);
 }
 
@@ -249,7 +180,7 @@ main(int argc, char *argv[])
 	std::vector<std::pair<rip_t, unsigned long> > idx;
 	for (auto it = input.content.begin(); it != input.content.end(); it++) {
 		idx.push_back(std::pair<rip_t, unsigned long>(it->rip, tmp.ftell()));
-		transform_record(*it, tmp);
+		it->write(tmp);
 	}
 
 	std::vector<std::pair<unsigned long, unsigned long> > indexes;
