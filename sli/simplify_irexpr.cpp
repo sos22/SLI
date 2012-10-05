@@ -2799,6 +2799,11 @@ top:
 						((IRExprConst *)l)->con->Ico.U64 <<
 						((IRExprConst *)r)->con->Ico.U8));
 				break;
+			case Iop_CmpLT8U:
+				res = IRExpr_Const(
+					IRConst_U1(((IRExprConst *)l)->con->Ico.U8 <
+						   ((IRExprConst *)r)->con->Ico.U8));
+				break;
 			case Iop_CmpLT8S: {
 				char a = ((IRExprConst *)l)->con->Ico.U8;
 				char b = ((IRExprConst *)r)->con->Ico.U8;
