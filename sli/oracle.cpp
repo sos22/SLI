@@ -320,8 +320,13 @@ Oracle::alias_query(const DynAnalysisRip &dr1,
 				shared_2 = true;
 		}
 	}
-	assert(private_1 || shared_1);
-	assert(private_2 || shared_2);
+	if (!private_1 && !shared_1) {
+		if (!private_2 && !shared_2)
+			return mam_private;
+		return mam_no_alias;
+	}
+	if (!private_2 && !shared_2)
+		return mam_no_alias;
 
 	if (!private_1 && !shared_2)
 		return mam_no_alias;
@@ -387,8 +392,17 @@ Oracle::memoryAccessesMightAliasLS(const DynAnalysisRip &smsel_dr, const DynAnal
 				shared_store = true;
 		}
 	}
-	assert(private_load || shared_load);
-	assert(private_store || shared_store);
+
+	if (!private_load && !shared_load) {
+		/* Load is from the stack */
+		if (!private_store && !shared_store) {
+			/* So is store */
+			return mam_private;
+		}
+		return mam_no_alias;
+	}
+	if (!private_store && !shared_store)
+		return mam_no_alias;
 
 	/* If the load is definitely shared and the store is
 	   definitely private then they can't alias, and
@@ -3546,7 +3560,7 @@ Oracle::findPredecessors(const VexRip &vr, bool includeCallPredecessors,
 		extract_oraclerip_column(stmt, 0, callSucc);
 
 		for (auto it = callSucc.begin(); it != callSucc.end(); it++)
-		  out.push_back(it->makeVexRip(vr));
+			out.push_back(it->makeVexRip(vr));
 	}
 }
 
