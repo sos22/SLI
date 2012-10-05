@@ -75,14 +75,96 @@
          constant address.
 
 */
-class AllowableOptimisations : public Named {
+class IRExprOptimisations : public Named {
+	bool _assumePrivateStack;
+	bool _noSanityChecking;
+
+	IRExprOptimisations(bool __assumePrivateStack,
+			    bool __noSanityChecking,
+			    AddressSpace *__as)
+		: _assumePrivateStack(__assumePrivateStack),
+		  _noSanityChecking(__noSanityChecking),
+		  _as(__as)
+	{}
+protected:
+	IRExprOptimisations(double)
+		: _assumePrivateStack(false),
+		  _noSanityChecking(false),
+		  _as(NULL)
+	{}
+	char *mkName() const {
+		std::vector<const char *> fragments;
+		if (_assumePrivateStack)
+			fragments.push_back("assumePrivateStack");
+		if (_noSanityChecking)
+			fragments.push_back("noSanityChecking");
+		if (_as)
+			fragments.push_back("as");
+		return flattenStringFragmentsMalloc(fragments, ", ",
+						    "expropts(",
+						    ")");
+	}
+public:
+	/* If non-NULL, use this to resolve BadPtr expressions where
+	   the address is a constant. */
+	VexPtr<AddressSpace> _as;
+
+	/* If @addr is definitely accessible, set *@res to true and
+	   return true.  If it's definitely not accessible, set *@res
+	   to false and return true.  If we can't be sure, return
+	   false. */
+	bool addressAccessible(unsigned long addr, bool *res) const {
+		if (!_as)
+			return false;
+		*res = _as->isReadable(addr, 1);
+		return true;
+	}
+
+	IRExprOptimisations setAddressSpace(AddressSpace *as) const
+	{
+		IRExprOptimisations res(*this);
+		res._as = as;
+		return res;
+	}
+
+	AddressSpace *getAddressSpace()
+	{
+		return _as;
+	}
+
+	bool noSanityChecking() const { return _noSanityChecking; }
+	IRExprOptimisations enablenoSanityChecking() const { return IRExprOptimisations(_assumePrivateStack, true, _as); }
+	bool assumePrivateStack() const { return _assumePrivateStack; }
+	IRExprOptimisations enableassumePrivateStack() const { return IRExprOptimisations(true, _noSanityChecking, _as); }
+
+	unsigned asUnsigned() const {
+		unsigned x = 1; /* turning off all of the optional
+				   optimisations doesn't turn off the
+				   ones which are always available, so
+				   have an implicit bit for them.
+				   i.e. 0 means no optimisations at
+				   all, and 1 means only the most
+				   basic ones which are always
+				   safe. */
+		if (_assumePrivateStack)
+			x |= 2;
+#if 0
+		/* _noSanityChecking doesn't really affect the final
+		   result, so there's no point including it here. */
+		if (_noSanityChecking)
+			x |= 4;
+#endif
+		if (_as)
+			x |= 8;
+		return x;
+	}	
+};
+class AllowableOptimisations : public IRExprOptimisations {
 #define _optimisation_flags(f)						\
-	f(assumePrivateStack, bool)					\
 	f(assumeExecutesAtomically, bool)				\
 	f(ignoreSideEffects, bool)					\
 	f(assumeNoInterferingStores, bool)				\
 	f(noExtend,bool)						\
-	f(noSanityChecking,bool)					\
 	f(preferCrash,bool)						\
 	f(noLocalSurvival,bool)						\
 	f(mustStoreBeforeCrash,bool)
@@ -95,22 +177,18 @@ class AllowableOptimisations : public Named {
 	   so that we can select this constructor. */
 	AllowableOptimisations(double)
 		:
+		IRExprOptimisations(1.0),
 #define default_flag(name, type)		\
 		_ ## name(false),
 		_optimisation_flags(default_flag)
 #undef default_flag
 		_interestingStores(NULL),
-		_nonLocalLoads(NULL),
-		_as(NULL)
+		_nonLocalLoads(NULL)
 	{}
 
 #define mk_field(name, type) type _ ## name;
 	optimisation_flags(mk_field)
 #undef mk_field
-
-	/* If non-NULL, use this to resolve BadPtr expressions where
-	   the address is a constant. */
-	VexPtr<AddressSpace> _as;
 
 	char *mkName() const {
 		std::vector<const char *> fragments;
@@ -149,11 +227,9 @@ class AllowableOptimisations : public Named {
 			}
 			fragments.push_back("}");
 		}
-		if (_as) {
-			if (fragments.size() != 1)
-				fragments.push_back(", ");
-			fragments.push_back("as");
-		}
+		if (fragments.size() != 1)
+			fragments.push_back(", ");
+		fragments.push_back(IRExprOptimisations::mkName());
 		fragments.push_back("}");
 		size_t sz = 1; /* nul terminator */
 		for (auto it = fragments.begin(); it != fragments.end(); it++)
@@ -162,10 +238,12 @@ class AllowableOptimisations : public Named {
 		res[0] = 0;
 		for (auto it = fragments.begin(); it != fragments.end(); it++)
 			strcat(res, *it);
+		free((void *)fragments[fragments.size() - 2]);
 		return res;
 	}
 public:
 	static AllowableOptimisations defaultOptimisations;
+#if 0
 	AllowableOptimisations(
 #define mk_arg(name, type) type __ ## name,
 		optimisation_flags(mk_arg)
@@ -178,13 +256,19 @@ public:
 		_as(__as)
 	{
 	}
-	AllowableOptimisations(const AllowableOptimisations &o)
-		:
-#define mk_init(name, type) _ ## name(o._ ## name),
-		optimisation_flags(mk_init)
-#undef mk_init
-		_as(o._as)
-	{}
+#endif
+
+	AllowableOptimisations(
+		const AllowableOptimisations *base,
+		const IRExprOptimisations &ob)
+		: IRExprOptimisations(ob),
+#define mk_arg(name, type) _ ## name (base-> _ ## name),
+		  _optimisation_flags(mk_arg)
+#undef mk_arg
+		  _interestingStores(base->_interestingStores),
+		  _nonLocalLoads(base->_nonLocalLoads)
+	{
+	}
 
 #define mk_set_value(name, type)				\
 	AllowableOptimisations set ## name (type value) const	\
@@ -217,37 +301,13 @@ public:
 
 	AllowableOptimisations setAddressSpace(AddressSpace *as) const
 	{
-		AllowableOptimisations res(*this);
-		res._as = as;
-		return res;
+		return AllowableOptimisations(this,
+					      IRExprOptimisations::setAddressSpace(as));
 	}
-
-	AddressSpace *getAddressSpace()
+	AllowableOptimisations enableassumePrivateStack() const
 	{
-		return _as;
-	}
-
-	unsigned asUnsigned() const {
-		unsigned x = 1; /* turning off all of the optional
-				   optimisations doesn't turn off the
-				   ones which are always available, so
-				   have an implicit bit for them.
-				   i.e. 0 means no optimisations at
-				   all, and 1 means only the most
-				   basic ones which are always
-				   safe. */
-
-		unsigned acc = 2;
-
-#define do_flag(name, type)			\
-		if ( _ ## name )			\
-			x |= acc;		\
-		acc *= 2;
-		_optimisation_flags(do_flag)
-#undef do_flag
-		if (_as != NULL)
-			x |= acc;
-		return x;
+		return AllowableOptimisations(this,
+					      IRExprOptimisations::enableassumePrivateStack());
 	}
 
 	bool ignoreStore(const VexRip &rip) const {
@@ -257,17 +317,6 @@ public:
 		    !_interestingStores->count(DynAnalysisRip(rip)))
 			return true;
 		return false;
-	}
-
-	/* If @addr is definitely accessible, set *@res to true and
-	   return true.  If it's definitely not accessible, set *@res
-	   to false and return true.  If we can't be sure, return
-	   false. */
-	bool addressAccessible(unsigned long addr, bool *res) const {
-		if (!_as)
-			return false;
-		*res = _as->isReadable(addr, 1);
-		return true;
 	}
 
 #undef _optimisation_flags

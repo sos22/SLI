@@ -666,10 +666,10 @@ purgeAssocArgument(IRExprAssociative *e, int idx)
 	e->optimisationsApplied = 0;
 }
 
-static IRExpr *optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something);
+static IRExpr *optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt, bool *done_something);
 
 IRExpr *
-optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_something)
+optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something)
 {
 #if MANUAL_PROFILING
 	static ProfilingSite __site("optimiseIRExprFP");
@@ -1383,7 +1383,7 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
 }
 
 static IRExpr *
-optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
+optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt, bool *done_something)
 {
 	if (TIMEOUT)
 		return src;
@@ -2950,7 +2950,7 @@ top:
 }
 
 IRExpr *
-simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
+simplifyIRExpr(IRExpr *a, const IRExprOptimisations &opt)
 {
 	bool progress;
 	return optimiseIRExprFP(a, opt, &progress);
@@ -2987,7 +2987,7 @@ expr_eq(IRExpr *a, IRExpr *b)
 QueryCache<IRExpr, IRExpr, bool> definitelyEqualCache("Definitely equal");
 QueryCache<IRExpr, IRExpr, bool> definitelyNotEqualCache("Definitely not equal");
 bool
-definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
+definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 {
 	if (a == b)
 		return true;
@@ -3029,7 +3029,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	return res;
 }
 bool
-definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
+definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 {
 	if (a == b)
 		return false;

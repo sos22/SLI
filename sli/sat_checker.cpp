@@ -11,6 +11,7 @@
 #include "nf.hpp"
 #include "nd_chooser.h"
 #include "offline_analysis.hpp"
+#include "allowable_optimisations.hpp"
 
 namespace _sat_checker {
 

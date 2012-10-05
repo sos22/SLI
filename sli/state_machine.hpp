@@ -14,6 +14,7 @@
 class StateMachine;
 class StateMachineSideEffect;
 class MaiMap;
+class AllowableOptimisations;
 
 class FrameId : public Named {
 	unsigned id;
