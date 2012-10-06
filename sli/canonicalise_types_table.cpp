@@ -19,11 +19,15 @@ rip_t::read(FILE *f, AddressSpace *as)
 	unsigned nr_items;
 	if (fread(&nr_items, sizeof(nr_items), 1, f) != 1)
 		errx(1, "input truncated");
+	is_private = 0;
+	if (nr_items & PRIVATE_RIP_FLAG) {
+		is_private = 1;
+		nr_items &= ~PRIVATE_RIP_FLAG;
+	}
 	assert(nr_items < 1000000);
 	unsigned long content[nr_items];
 	if (fread(content, sizeof(content[0]), nr_items, f) != nr_items)
 		errx(1, "input truncated");
-	is_private = 0;
 	if (content[nr_items - 1] & (1ul << 63)) {
 		is_private = 1;
 		content[nr_items - 1] &= ~(1ul << 63);
@@ -112,9 +116,15 @@ copy_rip(FILE *input, sane_write_file &output)
 static void
 copy_record(FILE *input, sane_write_file &output)
 {
-	input_record ir;
-	ir.read(input);
-	ir.write(output);
+	int nr_loads, nr_stores;
+	fread(&nr_loads, sizeof(nr_loads), 1, input);
+	output.write(nr_loads);
+	fread(&nr_stores, sizeof(nr_stores), 1, input);
+	output.write(nr_stores);
+	for (int i = 0; i < nr_loads; i++)
+		copy_rip(input, output);
+	for (int i = 0; i < nr_stores; i++)
+		copy_rip(input, output);
 }
 
 static void
