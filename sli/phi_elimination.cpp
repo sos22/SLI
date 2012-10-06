@@ -3,6 +3,7 @@
 #include "offline_analysis.hpp"
 #include "sat_checker.hpp"
 #include "control_domination_map.hpp"
+#include "allowable_optimisations.hpp"
 
 namespace _phi_elimination {
 

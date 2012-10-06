@@ -666,10 +666,10 @@ purgeAssocArgument(IRExprAssociative *e, int idx)
 	e->optimisationsApplied = 0;
 }
 
-static IRExpr *optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something);
+static IRExpr *optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt, bool *done_something);
 
 IRExpr *
-optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_something)
+optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something)
 {
 #if MANUAL_PROFILING
 	static ProfilingSite __site("optimiseIRExprFP");
@@ -1324,6 +1324,56 @@ isZero(const IRConst *iec)
 	abort();
 }
 
+/* Should we rewrite a to b or be to a, or neither?  Return lt for
+   b->a, gt for a->b, or eq for neither. */
+static sort_ordering
+rewriteOrdering(IRExpr *a, IRExpr *b)
+{
+	/* Prefer constants to anything else. */
+#define tag_test(n)				\
+	if (a->tag == Iex_ ## n)		\
+		return less_than;		\
+	if (b->tag == Iex_ ## n)		\
+		return greater_than
+	tag_test(Const);
+	/* Prefer simple variables to anything apart from constants. */
+	tag_test(EntryPoint);
+	tag_test(ControlFlow);
+	tag_test(HappensBefore);
+	tag_test(Get);
+	tag_test(FreeVariable);
+	/* Now do loads */
+	if (a->tag == Iex_Load) {
+		if (b->tag != Iex_Load)
+			return less_than;
+		return rewriteOrdering( ((IRExprLoad *)a)->addr,
+					((IRExprLoad *)b)->addr);
+	}
+	if (b->tag == Iex_Load)
+		return greater_than;
+	/* Binops are usually pretty useful, so preserve them. */
+	tag_test(Binop);
+	/* For assocs, pick the one with fewest arguments */
+	if (a->tag == Iex_Associative) {
+		if (b->tag != Iex_Associative)
+			return less_than;
+		if ( ((IRExprAssociative *)a)->nr_arguments < ((IRExprAssociative *)b)->nr_arguments )
+			return less_than;
+		else if ( ((IRExprAssociative *)a)->nr_arguments > ((IRExprAssociative *)b)->nr_arguments )
+			return greater_than;
+		else
+			return equal_to;
+	}
+
+	tag_test(Unop);
+	tag_test(Triop);
+	tag_test(Qop);
+	tag_test(CCall);
+	tag_test(GetI);
+#undef tag_test
+	/* That should have covered everything. */
+	abort();
+}
 
 static IRExpr *
 rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
@@ -1366,26 +1416,29 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
 		IRExprBinop *ieb = (IRExprBinop *)expr;
 		if (ieb->op >= Iop_CmpEQ8 &&
 		    ieb->op <= Iop_CmpEQ64) {
-			/* CmpEQ is always sorted so
-			   that the thing on the left
-			   is before the thing on the
-			   right in the expression
-			   sort order.  That tends to
-			   mean that the thing on the
-			   left is simpler than the
-			   thing on the right, so
-			   rewriting from right to
-			   left is generally
-			   worthwhile. */
-			doit.rewriteFrom = ieb->arg2;
-			doit.rewriteTo = ieb->arg1;
+			switch (rewriteOrdering(ieb->arg1, ieb->arg2).val) {
+			case sort_ordering::lt:
+				doit.rewriteFrom = ieb->arg2;
+				doit.rewriteTo = ieb->arg1;
+				break;
+			case sort_ordering::eq:
+				doit.rewriteFrom = NULL;
+				doit.rewriteTo = NULL;
+				break;
+			case sort_ordering::gt:
+				doit.rewriteFrom = ieb->arg1;
+				doit.rewriteTo = ieb->arg2;
+				break;
+			case sort_ordering::bad:
+				abort();
+			}
 		}
 	}
 	return doit.doit(inp, done_something);
 }
 
 static IRExpr *
-optimiseIRExpr(IRExpr *src, const AllowableOptimisations &opt, bool *done_something)
+optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt, bool *done_something)
 {
 	if (TIMEOUT)
 		return src;
@@ -2801,6 +2854,11 @@ top:
 						((IRExprConst *)l)->con->Ico.U64 <<
 						((IRExprConst *)r)->con->Ico.U8));
 				break;
+			case Iop_CmpLT8U:
+				res = IRExpr_Const(
+					IRConst_U1(((IRExprConst *)l)->con->Ico.U8 <
+						   ((IRExprConst *)r)->con->Ico.U8));
+				break;
 			case Iop_CmpLT8S: {
 				char a = ((IRExprConst *)l)->con->Ico.U8;
 				char b = ((IRExprConst *)r)->con->Ico.U8;
@@ -2947,7 +3005,7 @@ top:
 }
 
 IRExpr *
-simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt)
+simplifyIRExpr(IRExpr *a, const IRExprOptimisations &opt)
 {
 	bool progress;
 	return optimiseIRExprFP(a, opt, &progress);
@@ -2984,7 +3042,7 @@ expr_eq(IRExpr *a, IRExpr *b)
 QueryCache<IRExpr, IRExpr, bool> definitelyEqualCache("Definitely equal");
 QueryCache<IRExpr, IRExpr, bool> definitelyNotEqualCache("Definitely not equal");
 bool
-definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
+definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 {
 	if (a == b)
 		return true;
@@ -3026,7 +3084,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
 	return res;
 }
 bool
-definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt)
+definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 {
 	if (a == b)
 		return false;

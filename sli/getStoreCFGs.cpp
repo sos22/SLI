@@ -876,6 +876,14 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 						printf("\tFailed: no decode\n");
 					break;
 				}
+
+				std::vector<CfgSuccessorT<VexRip> > &succ(succMap[work]);
+				bool have_succ = false;
+				for (auto it = succ.begin(); !have_succ && it != succ.end(); it++)
+					have_succ |= (it->instr == n->rip);
+				if (!have_succ)
+					succ.push_back(CfgSuccessorT<VexRip>(n->rip));
+
 				flavours[work] = cfgs_flavour_ordinary;
 				ripsToCFGNodes[predecessor] = work;
 				n = work;

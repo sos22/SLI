@@ -1,16 +1,16 @@
 #ifndef SIMPLIFY_IREXPR_HPP__
 #define SIMPLIFY_IREXPR_HPP__
 
-class AllowableOptimisations;
+class IRExprOptimisations;
 class Oracle;
 class Oracle;
 
-IRExpr *optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_something);
+IRExpr *optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something);
 bool isBadAddress(IRExpr *e);
 bool definitelyUnevaluatable(IRExpr *e);
-bool definitelyEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
-bool definitelyNotEqual(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt);
-IRExpr *simplifyIRExpr(IRExpr *a, const AllowableOptimisations &opt);
+bool definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt);
+bool definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt);
+IRExpr *simplifyIRExpr(IRExpr *a, const IRExprOptimisations &opt);
 IRExpr *optimiseAssuming(IRExpr *iex, const IRExpr *assumption);
 void addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg);
 bool physicallyEqual(const IRConst *a, const IRConst *b);

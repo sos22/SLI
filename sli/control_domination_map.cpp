@@ -2,6 +2,7 @@
 #include "control_domination_map.hpp"
 #include "state_machine.hpp"
 #include "sat_checker.hpp"
+#include "allowable_optimisations.hpp"
 
 #include <queue>
 

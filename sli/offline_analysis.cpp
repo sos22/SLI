@@ -976,7 +976,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		token);
 
 	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(sm));
-	if (!sm_ssa)
+	if (!sm_ssa || TIMEOUT)
 		return NULL;
 
 	sm_ssa = optimiseStateMachine(
