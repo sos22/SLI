@@ -365,6 +365,29 @@ findDominator(Oracle *oracle, const std::set<VexRip> &neededInstrs, unsigned min
 	return VexRip(stack);
 }
 
+class AddExitCallPatch : public PatchFragment<ThreadRip> {
+protected:
+	void generateEpilogue(const CfgLabel &l, ThreadRip exitRip);
+	/* XXX should really override emitInstruction here to catch
+	   indirect jmp and ret instructions; oh well. */
+public:
+	AddExitCallPatch(const std::set<ThreadRip> &roots)
+		: PatchFragment<ThreadRip>(roots)
+	{}
+};
+
+void
+AddExitCallPatch::generateEpilogue(const CfgLabel &l, ThreadRip exitRip)
+{
+	Instruction<ThreadRip> *i = Instruction<ThreadRip>::pseudo(l, exitRip);
+
+	cfg->registerInstruction(i);
+	registerInstruction(i, content.size());
+
+	emitCallSequence("(unsigned long)release_lock");
+	emitJmpToRipHost(exitRip.rip.unwrap_vexrip());
+}
+
 class DcdCFG : public CFG<ThreadRip> {
 	std::set<VexRip> &neededInstructions;
 public:
@@ -440,7 +463,7 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 			e.what());
 		return NULL;
 	}
-	PatchFragment<ThreadRip> *pf = new PatchFragment<ThreadRip>(roots);
+	PatchFragment<ThreadRip> *pf = new AddExitCallPatch(roots);
 	pf->fromCFG(allocLabel, cfg);
 
 	return pf->asC(ident);
