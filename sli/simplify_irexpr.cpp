@@ -720,6 +720,8 @@ optimiseIRExprFP(IRExpr *e, const AllowableOptimisations &opt, bool *done_someth
 			e = e2;
 		}
 	}
+	if (TIMEOUT)
+		return e;
 	e->optimisationsApplied |= opt.asUnsigned();
 #if MANUAL_PROFILING
 	if (do_profiling) {
