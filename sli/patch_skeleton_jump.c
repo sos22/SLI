@@ -67,8 +67,11 @@ activate(void)
 		;
 	while (x > 0 && pathbuf[x] != '/')
 		x--;
-	if (strcmp(pathbuf + x, "/mysqld"))
+	if (strcmp(pathbuf + x, "/" BINARY_PATCH_FOR)) {
+		printf("This is a patch for %s, but this is %s; disabled\n",
+		       BINARY_PATCH_FOR, pathbuf + x + 1);
 		return;
+	}
 
 	pthread_mutex_init(&mux, NULL);
 
@@ -107,7 +110,7 @@ activate(void)
 
 		/* Patch in jump address */
 		for (y = 0; y < patch.nr_translations; y++) {
-			if (patch.trans_table[y].rip == patch.entry_points[x]) {
+			if (patch.trans_table[y].rip == patch.entry_points[x].rip) {
 				delta = (unsigned long)body + patch.trans_table[y].offset -
 					((unsigned long)trampolines + 32);
 				assert(delta == (int)delta);
@@ -120,14 +123,14 @@ activate(void)
 
 		/* Trampoline is now correctly established.  Patch in
 		 * a jump to it. */
-		mprotect((void *)(patch.entry_points[x] & PAGE_MASK),
+		mprotect((void *)(patch.entry_points[x].rip & PAGE_MASK),
 			 PAGE_SIZE * 2,
 			 PROT_READ|PROT_WRITE|PROT_EXEC);
-		*(unsigned char *)patch.entry_points[x] = 0xe9;
-		delta = (unsigned long)trampolines - (patch.entry_points[x] + 5);
+		*(unsigned char *)patch.entry_points[x].rip = 0xe9;
+		delta = (unsigned long)trampolines - (patch.entry_points[x].rip + 5);
 		assert(delta == (int)delta);
-		*(int *)(patch.entry_points[x] + 1) = delta;
-		mprotect((void *)(patch.entry_points[x] & PAGE_MASK),
+		*(int *)(patch.entry_points[x].rip + 1) = delta;
+		mprotect((void *)(patch.entry_points[x].rip & PAGE_MASK),
 			 PAGE_SIZE * 2,
 			 PROT_READ|PROT_EXEC);
 

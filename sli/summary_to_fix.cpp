@@ -1,3 +1,15 @@
+/* Somewhat annoyingly, we actually need _GNU_SOURCE for correctness,
+   because of the call to basename().  If it's not there then
+   compilation will succeed but the resulting program will be
+   buggy. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+/* Make sure this gets #include'd before libgen.h, including
+   #include's from other headers, or you get the buggy version of
+   basename() */
+#include <string.h>
+
 #include "sli.h"
 
 #include "genfix.hpp"
@@ -472,13 +484,14 @@ buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ide
 int
 main(int argc, char *argv[])
 {
-	if (argc != 5)
-		errx(1, "need four arguments: binary, types table, callgraph, and summary");
+	if (argc != 6)
+		errx(1, "need four arguments: binary, types table, callgraph, summary, and output filename");
 
 	const char *binary = argv[1];
 	const char *types_table = argv[2];
 	const char *callgraph = argv[3];
 	const char *summary_fname = argv[4];
+	const char *output_fname = argv[5];
 
 	init_sli();
 
@@ -491,7 +504,23 @@ main(int argc, char *argv[])
 	oracle->loadCallGraph(oracle, callgraph, ALLOW_GC);
 
 	VexPtr<CrashSummary, &ir_heap> summary(readBugReport(summary_fname, NULL));
-	char *patch = buildPatchForCrashSummary(oracle, summary, "ident");
+	char *patch = buildPatchForCrashSummary(oracle, summary, "patch");
 	printf("Patch is:\n%s\n", patch);
+
+	FILE *output = fopen(output_fname, "w");
+	fprintf(output, "/* SLI fix generated for %s */\n", binary);
+	fprintf(output,
+		"/* Compile as gcc -Wall -g -shared -fPIC -Isli <this_file> -o %s.so */\n",
+		binary);
+	fprintf(output, "/* Crash summary:\n");
+	printCrashSummary(summary, output);
+	fprintf(output, "*/\n");
+	fprintf(output, "#define BINARY_PATCH_FOR \"%s\"\n",
+		basename(binary));
+	fprintf(output, "#include \"patch_head.h\"\n\n");
+	fprintf(output, "%s\n\n", patch);
+	fprintf(output, "#include \"patch_skeleton_jump.c\"\n");
+	if (fclose(output) == EOF)
+		err(1, "writing output");
 	return 0;
 }
