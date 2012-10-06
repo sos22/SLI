@@ -23,9 +23,15 @@ copy_rip(FILE *input, sane_write_file &output)
 static void
 copy_record(FILE *input, sane_write_file &output)
 {
-	input_record ir;
-	ir.read(input, NULL);
-	ir.write(output);
+	int nr_loads, nr_stores;
+	fread(&nr_loads, sizeof(nr_loads), 1, input);
+	output.write(nr_loads);
+	fread(&nr_stores, sizeof(nr_stores), 1, input);
+	output.write(nr_stores);
+	for (int i = 0; i < nr_loads; i++)
+		copy_rip(input, output);
+	for (int i = 0; i < nr_stores; i++)
+		copy_rip(input, output);
 }
 
 static void
