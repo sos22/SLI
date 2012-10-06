@@ -11,6 +11,11 @@ all: bug1.so bug2.so bug3.so
 %.interp.so: %.cep.o ../../cep_interpreter.o
 	gcc -shared $^ -o $@
 
+%.fix.c: ../../summary_to_fix %.exe %.types.canon %.bcg %.summary.canon4
+	$^ $@
+%.fix.so: %.fix.c ../../sli/patch_head.h ../../sli/patch_skeleton_jump.c
+	gcc -Wall -g -shared -fPIC -I../../sli $< -o $@
+
 %.ced: %.summary.canon4  ../../enforce_crash %.exe %.types.canon %.bcg
 	../../enforce_crash $*.exe $*.types.canon $*.bcg $@ $<
 
