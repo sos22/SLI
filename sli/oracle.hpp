@@ -390,6 +390,7 @@ public:
 	void findPredecessors(const VexRip &vr, bool includeCallPredecessors,
 			      std::vector<VexRip> &out);
 	void findPredecessors(unsigned long rip, std::set<unsigned long> &out);
+	unsigned long findCallPredecessor(unsigned long rip);
 
 	bool isPltCall(const VexRip &vr);
 	LibraryFunctionType identifyLibraryCall(const VexRip &vr);

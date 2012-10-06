@@ -83,7 +83,7 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 			pendingAtCurrentDepth.pop_back();
 			if (out.count(vr))
 				continue;
-			CFGNode *node = CfgNodeForRip<VexRip>(allocLabel(), oracle, vr, succMap);
+			CFGNode *node = CfgNodeForRip<VexRip>(allocLabel(), oracle, vr, vr, succMap);
 			if (firstInstr)
 				targetNodes.insert(node);
 			firstInstr = false;
