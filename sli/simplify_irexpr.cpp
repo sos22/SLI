@@ -1362,8 +1362,10 @@ rewriteOrdering(IRExpr *a, IRExpr *b)
 		else
 			return equal_to;
 	}
-
+	if (b->tag == Iex_Associative)
+		return greater_than;
 	tag_test(Unop);
+	tag_test(Mux0X);
 	tag_test(Triop);
 	tag_test(Qop);
 	tag_test(CCall);
