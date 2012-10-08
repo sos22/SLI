@@ -256,26 +256,15 @@ findDominator(Oracle *oracle, const std::set<VexRip> &neededInstrs, unsigned min
 			}
 		}
 		desiredDom.insert(n);
-		if (debug_find_dominator) {
-			printf("%s -> {", n->label.name());
-			for (auto it = dominatorMap[n].begin();
-			     it != dominatorMap[n].end();
-			     it++) {
-				if (it != dominatorMap[n].begin())
-					printf(", ");
-					printf("%s", (*it)->label.name());
-			}
-			printf("}\n");
-		}
 		if (dominatorMap[n] &= desiredDom) {
 			if (debug_find_dominator) {
-				printf("Updated %s to {", n->label.name());
+				printf("Updated %s to {", n->rip.name());
 				for (auto it = dominatorMap[n].begin();
 				     it != dominatorMap[n].end();
 				     it++) {
 					if (it != dominatorMap[n].begin())
 						printf(", ");
-					printf("%s", (*it)->label.name());
+					printf("%s", (*it)->rip.name());
 				}
 				printf("}\n");
 			}
@@ -290,13 +279,13 @@ findDominator(Oracle *oracle, const std::set<VexRip> &neededInstrs, unsigned min
 	if (debug_find_dominator) {
 		printf("Dominator map:\n");
 		for (auto it = dominatorMap.begin(); it != dominatorMap.end(); it++) {
-			printf("%s -> {", it->first->label.name());
+			printf("%s -> {", it->first->rip.name());
 			for (auto it2 = it->second.begin();
 			     it2 != it->second.end();
 			     it2++) {
 				if (it2 != it->second.begin())
 					printf(", ");
-				printf("%s", (*it2)->label.name());
+				printf("%s", (*it2)->rip.name());
 			}
 			printf("}\n");
 		}
@@ -330,7 +319,7 @@ findDominator(Oracle *oracle, const std::set<VexRip> &neededInstrs, unsigned min
 		     it++) {
 			if (it != candidates.begin())
 				printf(", ");
-			printf("%s", (*it)->label.name());
+			printf("%s", (*it)->rip.name());
 		}
 		printf("}\n");
 	}
@@ -363,7 +352,7 @@ findDominator(Oracle *oracle, const std::set<VexRip> &neededInstrs, unsigned min
 		     it++) {
 			if (it != candidates.begin())
 				printf(", ");
-			printf("%s", (*it)->label.name());
+			printf("%s", (*it)->rip.name());
 		}
 		printf("}\n");
 	}
