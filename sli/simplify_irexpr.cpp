@@ -1325,7 +1325,7 @@ isZero(const IRConst *iec)
 /* Should we rewrite a to b or be to a, or neither?  Return lt for
    b->a, gt for a->b, or eq for neither. */
 static sort_ordering
-rewriteOrdering(IRExpr *a, IRExpr *b)
+_rewriteOrdering(IRExpr *a, IRExpr *b)
 {
 	/* Prefer constants to anything else. */
 #define tag_test(n)				\
@@ -1344,7 +1344,7 @@ rewriteOrdering(IRExpr *a, IRExpr *b)
 	if (a->tag == Iex_Load) {
 		if (b->tag != Iex_Load)
 			return less_than;
-		return rewriteOrdering( ((IRExprLoad *)a)->addr,
+		return _rewriteOrdering( ((IRExprLoad *)a)->addr,
 					((IRExprLoad *)b)->addr);
 	}
 	if (b->tag == Iex_Load)
@@ -1372,6 +1372,86 @@ rewriteOrdering(IRExpr *a, IRExpr *b)
 	tag_test(GetI);
 #undef tag_test
 	/* That should have covered everything. */
+	abort();
+}
+
+static bool
+occursCheck(const IRExpr *needle, const IRExpr *haystack)
+{
+	if (haystack == needle)
+		return true;
+	switch (haystack->tag) {
+	case Iex_Get:
+		return false;
+	case Iex_GetI:
+		return occursCheck( needle, ((const IRExprGetI *)haystack)->ix);
+	case Iex_Qop:
+		if (occursCheck(needle, ((const IRExprQop *)haystack)->arg4))
+			return true;
+		/* Fall through */
+	case Iex_Triop:
+		if (occursCheck(needle, ((const IRExprTriop *)haystack)->arg3))
+			return true;
+		/* Fall through */
+	case Iex_Binop:
+		if (occursCheck(needle, ((const IRExprBinop *)haystack)->arg2))
+			return true;
+		/* Fall through */
+	case Iex_Unop:
+		return occursCheck(needle, ((const IRExprUnop *)haystack)->arg);
+	case Iex_Const:
+		return false;
+	case Iex_Mux0X:
+		return occursCheck(needle, ((const IRExprMux0X *)haystack)->cond) ||
+			occursCheck(needle, ((const IRExprMux0X *)haystack)->expr0) ||
+			occursCheck(needle, ((const IRExprMux0X *)haystack)->exprX);
+	case Iex_CCall: {
+		const IRExprCCall *cc = (const IRExprCCall *)haystack;
+		for (int i = 0; cc->args[i]; i++)
+			if (occursCheck(needle, cc->args[i]))
+				return true;
+		return false;
+	}
+	case Iex_Associative: {
+		const IRExprAssociative *a = (const IRExprAssociative *)haystack;
+		for (int i = 0; i < a->nr_arguments; i++)
+			if (occursCheck(needle, a->contents[i]))
+				return true;
+		return false;
+	}
+	case Iex_Load:
+		return occursCheck(needle, ((const IRExprLoad *)haystack)->addr);
+	case Iex_HappensBefore:
+		return false;
+	case Iex_FreeVariable:
+		return false;
+	case Iex_EntryPoint:
+		return false;
+	case Iex_ControlFlow:
+		return false;
+	}
+	abort();
+}
+
+static sort_ordering
+rewriteOrdering(IRExpr *a, IRExpr *b)
+{
+	switch (_rewriteOrdering(a, b).val) {
+	case sort_ordering::lt:
+		if (occursCheck(b, a))
+			return equal_to;
+		else
+			return less_than;
+	case sort_ordering::eq:
+		return equal_to;
+	case sort_ordering::gt:
+		if (occursCheck(a, b))
+			return equal_to;
+		else
+			return greater_than;
+	case sort_ordering::bad:
+		abort();
+	}
 	abort();
 }
 
