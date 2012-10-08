@@ -53,39 +53,44 @@ template <typename t> _CFGNode<t> *
 CfgNodeForRip(const CfgLabel &label,
 	      Oracle *oracle,
 	      const VexRip &vr,
-	      CfgSuccMap<t, VexRip> &succMap)
+	      const t &rip,
+	      CfgSuccMap<t, t> &succMap,
+	      std::map<_CFGNode<t> *, unsigned> *sizeMap = NULL)
 {
 	IRSB *irsb = oracle->getIRSBForRip(vr, true);
 	if (!irsb)
 		return NULL;
-	_CFGNode<t> *work = new _CFGNode<t>(vr, label);
-	std::vector<CfgSuccessorT<VexRip> > &relocs(succMap[work]);
+	_CFGNode<t> *work = new _CFGNode<t>(rip, label);
+	std::vector<CfgSuccessorT<t> > &relocs(succMap[work]);
 	int x;
+	assert(irsb->stmts[0]->tag == Ist_IMark);
+	if (sizeMap)
+		(*sizeMap)[work] = ((IRStmtIMark *)irsb->stmts[0])->len;
 	for (x = 1; x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 		if (irsb->stmts[x]->tag == Ist_Exit)
-			relocs.push_back(CfgSuccessorT<VexRip>::branch(((IRStmtExit *)irsb->stmts[x])->dst.rip));
+			relocs.push_back(CfgSuccessorT<t>::branch(t(((IRStmtExit *)irsb->stmts[x])->dst.rip)));
 	}
 	if (x == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Ret) {
 			VexRip r(vr);
 			r.rtrn();
-			relocs.push_back(CfgSuccessorT<VexRip>::dflt(r));
+			relocs.push_back(CfgSuccessorT<t>::dflt(t(r)));
 		} else if (irsb->jumpkind == Ijk_Call) {
 			if (irsb->next_is_const) {
 				if (oracle->isPltCall(irsb->next_const.rip)) {
 					LibraryFunctionType tmpl = oracle->identifyLibraryCall(irsb->next_const.rip);
-					relocs.push_back(CfgSuccessorT<VexRip>::dflt(extract_call_follower(irsb), tmpl));
+					relocs.push_back(CfgSuccessorT<t>::dflt(t(extract_call_follower(irsb)), tmpl));
 				} else {
-					relocs.push_back(CfgSuccessorT<VexRip>::call(irsb->next_const.rip));
+					relocs.push_back(CfgSuccessorT<t>::call(t(irsb->next_const.rip)));
 				}
 			} else {
 				std::vector<VexRip> b;
 				oracle->getInstrCallees(vr, b);
 				for (auto it = b.begin(); it != b.end(); it++)
-					relocs.push_back(CfgSuccessorT<VexRip>::call(*it));
+					relocs.push_back(CfgSuccessorT<t>::call(t(*it)));
 			}
 		} else if (irsb->next_is_const) {
-			relocs.push_back(CfgSuccessorT<VexRip>::dflt(irsb->next_const.rip));
+			relocs.push_back(CfgSuccessorT<t>::dflt(t(irsb->next_const.rip)));
 		} else {
 			/* Note that the oracle has a slightly
 			   different idea of fall-throughs to
@@ -96,11 +101,11 @@ CfgNodeForRip(const CfgLabel &label,
 			std::vector<VexRip> b;
 			oracle->getInstrFallThroughs(vr, b);
 			for (auto it = b.begin(); it != b.end(); it++)
-				relocs.push_back(CfgSuccessorT<VexRip>::branch(*it));
+				relocs.push_back(CfgSuccessorT<t>::branch(t(*it)));
 		}
 	} else {
 		assert(irsb->stmts[x]->tag == Ist_IMark);
-		relocs.push_back(CfgSuccessorT<VexRip>::dflt(((IRStmtIMark *)irsb->stmts[x])->addr.rip));
+		relocs.push_back(CfgSuccessorT<t>::dflt(t(((IRStmtIMark *)irsb->stmts[x])->addr.rip)));
 	}
 	return work;
 }
@@ -109,7 +114,7 @@ template <typename from, typename to> void
 resolveReferences(CfgSuccMap<to, from> &succMap, const std::map<to, _CFGNode<from> *> &lookup)
 {
 	for (auto it = succMap.begin(); it != succMap.end(); it++) {
-		CFGNode *a = it->first;
+		_CFGNode<from> *a = it->first;
 		const std::vector<CfgSuccessorT<from> > &desired(it->second);
 		assert(a->successors.size() == 0);
 		a->successors.reserve(desired.size());

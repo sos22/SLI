@@ -1634,4 +1634,87 @@ Instruction<r>::prettyPrint(FILE *f) const
 	fprintf(f, "}\n");
 }
 
+template <typename r> void
+CFG<r>::decodeInstruction(const CfgLabel &l, r rip, unsigned max_depth)
+{
+	if (!max_depth)
+		return;
+	Instruction<r> *i = Instruction<r>::decode(l, as, rip, this, true, true);
+	if (!i)
+		return;
+	assert(i->rip == rip);
+	registerInstruction(i);
+	if (exploreInstruction(i)) {
+		for (auto it = i->successors.begin(); it != i->successors.end(); it++)
+			pendingRips.push_back(std::pair<r, unsigned>(
+						      it->rip, max_depth - 1));
+	}
+}
+
+template <typename r> void
+CFG<r>::doit(CfgLabelAllocator &allocLabel)
+{
+	while (!pendingRips.empty()) {
+		std::pair<r, unsigned> p = pendingRips.back();
+		pendingRips.pop_back();
+		if (!ripToInstr->hasKey(p.first))
+			decodeInstruction(allocLabel(), p.first, p.second);
+	}
+
+	for (typename ripToInstrT::iterator it = ripToInstr->begin();
+	     it != ripToInstr->end();
+	     it++) {
+		Instruction<r> *ins = it.value();
+		ins->useful = instructionUseful(ins);
+		for (auto it2 = ins->successors.begin(); it2 != ins->successors.end(); it2++) {
+			if (ripToInstr->hasKey(it2->rip)) {
+				Instruction<r> *dn = ripToInstr->get(it2->rip);
+				it2->rip = r();
+				it2->instr = dn;
+				if (dn->useful)
+					ins->useful = true;
+			}
+		}
+	}
+
+	bool progress;
+	do {
+		progress = false;
+		for (typename ripToInstrT::iterator it = ripToInstr->begin();
+		     it != ripToInstr->end();
+		     it++) {
+			Instruction<r> *i = it.value();
+			if (i->useful)
+				continue;
+			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
+				if (it2->instr && it2->instr->useful) {
+					i->useful = true;
+					progress = true;
+				}
+			}
+		}
+	} while (progress);
+
+	/* Rewrite every instruction so that non-useful next
+	   instructions get turned back into RIPs, and remove the
+	   non-useful instructions. */
+	for (typename ripToInstrT::iterator it = ripToInstr->begin();
+	     it != ripToInstr->end();
+		) {
+		Instruction<r> *i = it.value();
+
+		if (i->useful) {
+			for (auto it2 = i->successors.begin(); it2 != i->successors.end(); it2++) {
+				if (it2->instr && !it2->instr->useful) {
+					it2->rip = it2->instr->rip;
+					it2->instr = NULL;
+				}
+			}
+			it++;
+		} else {
+			it = ripToInstr->erase(it);
+		}
+	}
+}
+
 #endif /* !GENFIX_H__ */

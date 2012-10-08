@@ -3907,3 +3907,16 @@ stack_offset(Oracle *oracle, unsigned long rip)
 	return offsets[sr];
 }
 
+unsigned long
+Oracle::findCallPredecessor(unsigned long rip)
+{
+	StaticRip sr(rip);
+	std::vector<StaticRip> pred;
+	Function(sr).addPredecessorsCall(sr, pred);
+	if (pred.empty())
+		return 0;
+	assert(pred.size() == 1);
+	return pred[0].rip;
+}
+
+

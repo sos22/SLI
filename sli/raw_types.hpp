@@ -65,4 +65,3 @@ struct input_database {
 	void read(FILE *f, AddressSpace *as);
 };
 
-

@@ -13,12 +13,17 @@ struct trans_table_entry {
 	unsigned offset;
 };
 
+struct patch_entry_point {
+	unsigned long rip;
+	unsigned offset;
+};
+
 struct patch {
 	const struct relocation *relocations;
 	int nr_relocations;
 	const struct trans_table_entry *trans_table;
 	int nr_translations;
-	unsigned long *entry_points;
+	const struct patch_entry_point *entry_points;
 	int nr_entry_points;
 	const unsigned char *content;
 	unsigned content_size;

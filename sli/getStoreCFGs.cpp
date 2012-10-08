@@ -126,7 +126,7 @@ initialExplorationRoot(
 				continue;
 		}
 
-		CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, vr, succMap);
+		CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, vr, vr, succMap);
 		if (!work) {
 			if (debug_initial_exploration)
 				printf("Cannot get IRSB for %s\n", vr.name());
@@ -870,7 +870,7 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 				}
 				break;
 			} else {
-				CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, predecessor, succMap);
+				CFGNode *work = CfgNodeForRip<VexRip>(allocLabel(), oracle, predecessor, predecessor, succMap);
 				if (!work) {
 					if (debug_backtrack_roots)
 						printf("\tFailed: no decode\n");

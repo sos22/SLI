@@ -13,11 +13,15 @@ rip_t::read(FILE *f, AddressSpace *as)
 	unsigned nr_items;
 	if (fread(&nr_items, sizeof(nr_items), 1, f) != 1)
 		errx(1, "input truncated");
+	is_private = 0;
+	if (nr_items & PRIVATE_RIP_FLAG) {
+		is_private = 1;
+		nr_items &= ~PRIVATE_RIP_FLAG;
+	}
 	assert(nr_items < 1000000);
 	unsigned long content[nr_items];
 	if (fread(content, sizeof(content[0]), nr_items, f) != nr_items)
 		errx(1, "input truncated");
-	is_private = 0;
 	if (content[nr_items - 1] & (1ul << 63)) {
 		is_private = 1;
 		content[nr_items - 1] &= ~(1ul << 63);
