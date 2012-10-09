@@ -710,7 +710,7 @@ parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 		CFGNode *work = new CFGNode(rip, label);
 		std::vector<succ> &successors(relocations[work]);
 		if (parseThisString(" -> ", str, &str)) {
-			succ l(CfgLabel::uninitialised());
+			succ l(succ::unroll(CfgLabel::uninitialised()));
 			if (!parseSucc(&l, str, &str))
 				return false;
 			successors.push_back(l);
@@ -730,7 +730,7 @@ parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 	}
 	for (auto it = relocations.begin(); it != relocations.end(); it++) {
 		CFGNode *n = it->first;
-		n->successors.resize(it->second.size(), CFGNode::successor_t(NULL));
+		n->successors.resize(it->second.size(), CFGNode::successor_t(CFGNode::successor_t::unroll(NULL)));
 		for (unsigned x = 0; x < it->second.size(); x++) {
 			assert(cfg_labels.count(it->second[x].instr));
 			n->successors[x] = CFGNode::successor_t(
