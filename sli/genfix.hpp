@@ -702,22 +702,27 @@ public:
 template <typename r>
 class RipRelativeBlindRelocation : public EarlyRelocation<r> {
 	char *mkName() const {
-		return my_asprintf("rrbr(offset = %d, size = %d, target = %lx)",
+		return my_asprintf("rrbr(offset = %d, size = %d, target = %lx, is_branch = %s)",
 				   this->offset,
 				   this->size,
-				   target);
+				   target,
+				   is_branch ? "true" : "false");
 	}
 public:
 	unsigned long target;
+	bool is_branch;
 
 	void doit(CfgLabelAllocator &, PatchFragment<r> *) { abort(); }
 
 	RipRelativeBlindRelocation(unsigned _offset,
 				   unsigned _size,
-				   unsigned long _target)
+				   unsigned long _target,
+				   bool _is_branch)
 		: EarlyRelocation<r>(_offset, _size),
-		  target(_target)
+		  target(_target),
+		  is_branch(_is_branch)
 	{
+		assert((int)this->offset >= 0);
 	}
 };
 

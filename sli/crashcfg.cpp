@@ -20,11 +20,13 @@ decode_instr(AddressSpace *as, unsigned long ptr, const ThreadCfgLabel &label,
 		std::vector<EarlyRelocation<ThreadCfgLabel> *> r;
 		void operator()(unsigned long offset,
 				unsigned long value,
-				unsigned sz) {
+				unsigned sz,
+				bool is_branch) {
 			r.push_back(new RipRelativeBlindRelocation<ThreadCfgLabel>(
 					    offset,
 					    sz,
-					    value));
+					    value,
+					    is_branch));
 		}
 	} emit_reloc;
 
@@ -126,7 +128,7 @@ done_prefixes:
 					else if ( (b & 0xfff7) == 0xfa4 )
 						/* SHLD/SHRD with immediate byte third operand. */
 						delta = 1;
-					emit_reloc(ptr - 4 - init_ptr - delta, target, 4);
+					emit_reloc(ptr - 4 - init_ptr, target, 4, false);
 				} else {
 					ptr += 4;
 				}
@@ -217,7 +219,7 @@ done_prefixes:
 		assert(op_bytes == 4);
 		int delta = op_bytes == 4 ? insn_fetch_type(int) : insn_fetch_type(short);
 		unsigned long target = ptr + delta;
-		emit_reloc(ptr - 4 - init_ptr, target, 4);
+		emit_reloc(ptr - 4 - init_ptr, target, 4, true);
 		break;
 	}
 	case 0xeb: /* jmp rel 8 bit. */
@@ -232,7 +234,7 @@ done_prefixes:
 			work->content[0] = 0xe9;
 			work->relocs.push_back(
 				new RipRelativeBlindRelocation<ThreadCfgLabel>(
-					1, 4, target));
+					1, 4, target, true));
 			return work;
 		} else {
 			ptr++;
@@ -249,7 +251,7 @@ done_prefixes:
 			work->content[1] = b + 0x80 - 0x70;
 			work->relocs.push_back(
 				new RipRelativeBlindRelocation<ThreadCfgLabel>(
-					2, 4, target));
+					2, 4, target, true));
 			return work;
 		} else {
 			ptr++;

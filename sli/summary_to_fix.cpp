@@ -640,7 +640,7 @@ public:
 			}
 		} else if (auto rrBr = dynamic_cast<RipRelativeBlindRelocation<ThreadCfgLabel> *>(_base)) {
 			addend = 0;
-			generateEpilogue = true;
+			generateEpilogue = rrBr->is_branch;
 			relative = true;
 			target = NULL;
 			raw_target = rrBr->target;
@@ -858,29 +858,32 @@ buildPatchForCrashSummary(Oracle *oracle,
 
 		for (auto it = relocs.begin(); it != relocs.end(); it++) {
 			Relocation *reloc = *it;
-			unsigned offset;
-			if (reloc->target) {
-				assert(instrOffsets.count(reloc->target));
-				offset = instrOffsets[reloc->target];
-				long delta = reloc->offset - offset + reloc->addend;
+			if (reloc->target || reloc->generateEpilogue) {
+				unsigned offset;
+				if (reloc->target) {
+					assert(instrOffsets.count(reloc->target));
+					offset = instrOffsets[reloc->target];
+				} else {
+					offset = patch_content.size();
+					emitCallSequence(patch_content, "(unsigned long)release_lock", lateRelocs);
+					patch_content.push_back(0xe9);
+					patch_content.push_back(0);
+					patch_content.push_back(0);
+					patch_content.push_back(0);
+					patch_content.push_back(0);
+					lateRelocs.push_back(
+						new LateRelocation(
+							patch_content.size() - 4,
+							4,
+							vex_asprintf("0x%lx", reloc->raw_target),
+							0,
+							true));
+				}
+				long delta = offset - reloc->offset + reloc->addend - 4;
 				patch_content[reloc->offset  ] = delta;
 				patch_content[reloc->offset+1] = delta >> 8;
 				patch_content[reloc->offset+2] = delta >> 16;
 				patch_content[reloc->offset+3] = delta >> 24;
-			} else if (reloc->generateEpilogue) {
-				emitCallSequence(patch_content, "(unsigned long)release_lock", lateRelocs);
-				patch_content.push_back(0xe9);
-				patch_content.push_back(0);
-				patch_content.push_back(0);
-				patch_content.push_back(0);
-				patch_content.push_back(0);
-				lateRelocs.push_back(
-					new LateRelocation(
-						patch_content.size() - 4,
-						4,
-						vex_asprintf("0x%lx", reloc->raw_target),
-						0,
-						true));
 			} else {
 				lateRelocs.push_back(
 					new LateRelocation(
