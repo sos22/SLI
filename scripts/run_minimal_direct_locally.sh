@@ -17,4 +17,4 @@ cd ${jobid}
 ln -s ../static.db
 mkdir logs
 mkdir crash_summaries
-../../minimal_direct ../mysqld ../types-new-format-no-head-canon.dat ../callgraph-newformat.dat ${start}...${end}
+../../minimal_direct ../mysqld ../types.dat.canon ../callgraph-newformat.dat ${start}...${end}
