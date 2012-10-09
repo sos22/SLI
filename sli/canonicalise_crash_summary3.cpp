@@ -315,6 +315,8 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_128to64:
 			return clauseUnderspecified(ieu->arg, mult);
 		case Iop_1Uto8:
+		case Iop_1Uto32:
+		case Iop_1Uto64:
 		case Iop_8Uto16:
 		case Iop_8Uto32:
 		case Iop_8Uto64:
