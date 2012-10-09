@@ -714,64 +714,31 @@ struct trans_table_entry {
 	{}
 };
 
-static char *
-buildPatchForCrashSummary(Oracle *oracle,
-			  const SummaryId &summaryId,
-			  CrashSummary *summary,
-			  const char *ident)
+static void
+segregateRoots(const std::map<VexRip, Instruction<ThreadCfgLabel> *> &inp,
+	       std::map<unsigned long, std::map<VexRip, Instruction<ThreadCfgLabel> *> > &out)
 {
-	ThreadAbstracter absThread;
-	std::map<ConcreteThread, std::set<CfgLabel> > cfgRoots;
-	for (auto it = summary->loadMachine->cfg_roots.begin();
-	     it != summary->loadMachine->cfg_roots.end();
-	     it++)
-		cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
-	for (auto it = summary->storeMachine->cfg_roots.begin();
-	     it != summary->storeMachine->cfg_roots.end();
-	     it++)
-		cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
-	crashEnforcementRoots cer(cfgRoots, absThread);
-	CrashCfg cfg(cer, summaryId, summary, oracle->ms->addressSpace, true);
+	for (auto it = inp.begin(); it != inp.end(); it++)
+		out[it->first.unwrap_vexrip()].insert(*it);
+}
 
-	cfg.prettyPrint(stdout, true);
-	cer.prettyPrint(stdout);
-
-	std::map<VexRip, Instruction<ThreadCfgLabel> *> cfgRoots2;
-	CfgLabelAllocator allocLabel;
-	avoidBranchToPatch(cer, cfg, cfgRoots2, allocLabel, oracle);
-	
-	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
-		printf("Root %s:\n", it->first.name());
-		std::vector<Instruction<ThreadCfgLabel> *> q;
-		std::set<Instruction<ThreadCfgLabel> *> v;
-		q.push_back(it->second);
-		while (!q.empty()) {
-			Instruction<ThreadCfgLabel> *a = q.back();
-			q.pop_back();
-			if (!v.insert(a).second)
-				continue;
-			a->prettyPrint(stdout);
-			for (auto it2 = a->successors.begin(); it2 != a->successors.end(); it2++)
-				q.push_back(it2->instr);
-		}
-	}
-
-	/* Now go and flatten the CFG fragments into patches. */
-	std::vector<unsigned char> patch_content;
-	std::vector<LateRelocation *> lateRelocs;
-	std::vector<std::pair<VexRip, unsigned> > entryOffsets;
-	std::vector<trans_table_entry> transTable;
+static unsigned
+genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
+		     std::vector<LateRelocation *> &lateRelocs,
+		     std::vector<trans_table_entry> &transTable,
+		     const CrashCfg &cfg,
+		     const SummaryId &summaryId,
+		     const std::map<VexRip, Instruction<ThreadCfgLabel> *> &cfgRoots2)
+{
+	unsigned result = patch_content.size();
 	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
 		const VexRip &entryVr(it->first);
 		std::vector<Instruction<ThreadCfgLabel> *> toEmit;
 		std::map<Instruction<ThreadCfgLabel> *, unsigned> instrOffsets;
 		std::vector<Relocation *> relocs;
 
-		entryOffsets.push_back(std::pair<VexRip, unsigned>(entryVr, patch_content.size()));
-
 		emitCallSequence(patch_content, "(unsigned long)acquire_lock", lateRelocs);
 
-		/* XXX need to do stack validation here */
 		toEmit.push_back(it->second);
 		while (!toEmit.empty()) {
 			Instruction<ThreadCfgLabel> *node = toEmit.back();
@@ -897,6 +864,69 @@ buildPatchForCrashSummary(Oracle *oracle,
 			}
 		}
 	}
+	return result;
+}
+
+static char *
+buildPatchForCrashSummary(Oracle *oracle,
+			  const SummaryId &summaryId,
+			  CrashSummary *summary,
+			  const char *ident)
+{
+	ThreadAbstracter absThread;
+	std::map<ConcreteThread, std::set<CfgLabel> > cfgRoots;
+	for (auto it = summary->loadMachine->cfg_roots.begin();
+	     it != summary->loadMachine->cfg_roots.end();
+	     it++)
+		cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
+	for (auto it = summary->storeMachine->cfg_roots.begin();
+	     it != summary->storeMachine->cfg_roots.end();
+	     it++)
+		cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
+	crashEnforcementRoots cer(cfgRoots, absThread);
+	CrashCfg cfg(cer, summaryId, summary, oracle->ms->addressSpace, true);
+
+	cfg.prettyPrint(stdout, true);
+	cer.prettyPrint(stdout);
+
+	std::map<VexRip, Instruction<ThreadCfgLabel> *> cfgRoots2;
+	CfgLabelAllocator allocLabel;
+	avoidBranchToPatch(cer, cfg, cfgRoots2, allocLabel, oracle);
+	
+	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
+		printf("Root %s:\n", it->first.name());
+		std::vector<Instruction<ThreadCfgLabel> *> q;
+		std::set<Instruction<ThreadCfgLabel> *> v;
+		q.push_back(it->second);
+		while (!q.empty()) {
+			Instruction<ThreadCfgLabel> *a = q.back();
+			q.pop_back();
+			if (!v.insert(a).second)
+				continue;
+			a->prettyPrint(stdout);
+			for (auto it2 = a->successors.begin(); it2 != a->successors.end(); it2++)
+				q.push_back(it2->instr);
+		}
+	}
+
+	/* Classify the entry points according to their actual RIP, so
+	   that we can do stack validation a bit more sensibly. */
+	std::map<unsigned long, std::map<VexRip, Instruction<ThreadCfgLabel> * > > segregatedRoots;
+	segregateRoots(cfgRoots2, segregatedRoots);
+
+	/* Now go and flatten the CFG fragments into patches. */
+	std::vector<unsigned char> patch_content;
+	std::vector<LateRelocation *> lateRelocs;
+	std::map<unsigned long, unsigned> entryPoints;
+	std::vector<trans_table_entry> transTable;
+	for (auto it = segregatedRoots.begin(); it != segregatedRoots.end(); it++)
+		entryPoints[it->first] = genCodeForEntryPoint(
+			patch_content,
+			lateRelocs,
+			transTable,
+			cfg,
+			summaryId,
+			it->second);
 
 	std::vector<const char *> fragments;
 	fragments.push_back("static const unsigned char patch_content[] = \"");
@@ -917,12 +947,12 @@ buildPatchForCrashSummary(Oracle *oracle,
 	/* XXX this will need to change slightly once we have the
 	 * stack validation stuff in. */
 	fragments.push_back("static const struct entry_context entry_points[] = {\n");
-	for (auto it = entryOffsets.begin(); it != entryOffsets.end(); it++)
+	for (auto it = entryPoints.begin(); it != entryPoints.end(); it++)
 		fragments.push_back(
 			vex_asprintf(
 				"\t{ .offset = %d, .rip = 0x%lx},\n",
 				it->second,
-				it->first.unwrap_vexrip()));
+				it->first));
 	fragments.push_back("};\n\n");
 
 	fragments.push_back("static const struct patch patch = {\n");
