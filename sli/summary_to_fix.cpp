@@ -894,8 +894,17 @@ validateStackContext(Oracle *oracle,
 	/* If that generated any further early relocs then we're
 	   screwed, because we won't be able to resolve them.  Late
 	   relocs are okay, though. */
-	if (relocs.size() != 0)
-		abort();
+	for (auto it = relocs.begin(); it != relocs.end(); it++) {
+		Relocation *reloc = *it;
+		assert(!reloc->target && !reloc->generateEpilogue);
+		lateRelocs.push_back(
+			new LateRelocation(
+				reloc->offset,
+				4,
+				vex_asprintf("0x%lx", reloc->raw_target),
+				reloc->addend,
+				reloc->relative));
+	}
 
 	/* jmp rel32 */
 	content.push_back(0xe9);
