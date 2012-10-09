@@ -263,11 +263,22 @@ Oracle::hasConflictingRemoteStores(const DynAnalysisRip &dr)
 	if (!type_db->lookupEntry(dr, loads, stores))
 		return false;
 	bool shared_load = false;
-	for (auto it = loads.begin(); !shared_load && it != loads.end(); it++)
-		if (!it->is_private && it->rip == dr)
+	bool shared_store = false;
+	for (auto it = loads.begin(); !shared_load && it != loads.end(); it++) {
+		if (it->rip == dr && !it->is_private)
 			shared_load = true;
+	}
+	for (auto it = stores.begin(); !shared_store && it != stores.end(); it++) {
+		if (it->rip == dr && !it->is_private)
+			shared_store = true;
+	}
+
+	if (shared_store)
+		return true;
+
 	if (!shared_load)
 		return false;
+
 	for (auto it = stores.begin(); it != stores.end(); it++)
 		if (!it->is_private)
 			return true;
