@@ -882,7 +882,7 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 				for (auto it = succ.begin(); !have_succ && it != succ.end(); it++)
 					have_succ |= (it->instr == n->rip);
 				if (!have_succ)
-					succ.push_back(CfgSuccessorT<VexRip>(n->rip));
+					succ.push_back(CfgSuccessorT<VexRip>(CfgSuccessorT<VexRip>::dflt(n->rip)));
 
 				flavours[work] = cfgs_flavour_ordinary;
 				ripsToCFGNodes[predecessor] = work;

@@ -70,8 +70,6 @@ CrashSummary *transformCrashSummary(CrashSummary *input, StateMachineTransformer
 				    bool *done_something = NULL);
 CrashSummary *internCrashSummary(CrashSummary *cs);
 
-char *buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident);
-
 class FixConsumer {
 public:
 	virtual void operator()(VexPtr<CrashSummary, &ir_heap> &loadMachine,

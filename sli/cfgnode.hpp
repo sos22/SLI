@@ -16,11 +16,6 @@ class CfgSuccessorT {
 		: type(_type), instr(_instr), calledFunction(_calledFunction)
 	{}
 public:
-	CfgSuccessorT(const succ_t &s)
-		: type((CfgSuccessorType)-1),
-		  instr(s),
-		  calledFunction(LibraryFunctionTemplate::none)
-	{}
 	template <typename ot> CfgSuccessorT(const CfgSuccessorT<ot> &o,
 					     const succ_t targ)
 		: type(o.type), instr(targ), calledFunction(o.calledFunction)

@@ -657,10 +657,11 @@ cfgNodeToState(Oracle *oracle,
 					NULL);
 			*cursor = smp;
 			cursor = &smp->target;
-			if (irsb->next_is_const &&
-			    target->getDefault() &&
+
+			if (target->getDefault() &&
 			    target->getDefault()->instr &&
-			    target->getDefault()->instr->rip != irsb->next_const.rip) {
+			    target->getDefault()->instr->rip == extract_call_follower(irsb)) {
+				/* Skip this call */
 				targets.push_back(target->getDefault()->instr);
 				smp = new StateMachineSideEffecting(
 					target->rip,

@@ -433,6 +433,7 @@ StateMachine *introduceFreeVariables(StateMachine *sm,
 				     bool *done_something);
 
 unsigned getInstructionSize(AddressSpace *as, const VexRip &rip);
+unsigned getInstructionSize(AddressSpace *as, const StaticRip &rip);
 unsigned stack_offset(Oracle *oracle, unsigned long rip);
 
 #endif /* !ORACLE_H__ */
