@@ -640,7 +640,7 @@ public:
 			}
 		} else if (auto rrBr = dynamic_cast<RipRelativeBlindRelocation<ThreadCfgLabel> *>(_base)) {
 			addend = 0;
-			generateEpilogue = false;
+			generateEpilogue = true;
 			relative = true;
 			target = NULL;
 			raw_target = rrBr->target;
