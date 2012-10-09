@@ -658,6 +658,7 @@ public:
 asm (
 	"__call_sequence_template_start:\n"
 	"lea -128(%rsp), %rsp\n"
+	"__call_sequence_template_done_redzone:\n"
 	"pushq %rsi\n"
 	"__call_sequence_template_load_rsi:\n"
 	"movq $0x1122334455667788, %rsi\n"
@@ -670,22 +671,28 @@ asm (
 static void
 emitCallSequence(std::vector<unsigned char> &content,
 		 const char *target,
-		 std::vector<LateRelocation *> &lateRelocs)
+		 std::vector<LateRelocation *> &lateRelocs,
+		 bool already_done_redzone)
 {
 	extern const unsigned char
 		__call_sequence_template_start[],
+		__call_sequence_template_done_redzone[],
 		__call_sequence_template_load_rsi[],
 		__call_sequence_template_end[];
-
 	unsigned start_sz = content.size();
-	for (const unsigned char *cursor = __call_sequence_template_start;
+	const unsigned char *start;
+	if (already_done_redzone)
+		start = __call_sequence_template_done_redzone;
+	else
+		start = __call_sequence_template_start;
+	for (const unsigned char *cursor = start;
 	     cursor != __call_sequence_template_end;
 	     cursor++)
 		content.push_back(*cursor);
 
 	lateRelocs.push_back(
 		new LateRelocation(
-			start_sz + __call_sequence_template_load_rsi - __call_sequence_template_start + 2,
+			start_sz + __call_sequence_template_load_rsi - start + 2,
 			8,
 			vex_asprintf("%s", target),
 			0,
@@ -722,22 +729,244 @@ segregateRoots(const std::map<VexRip, Instruction<ThreadCfgLabel> *> &inp,
 		out[it->first.unwrap_vexrip()].insert(*it);
 }
 
+static void
+emitOneInstruction(const VexRip &vr,
+		   const VexRip &entryVr,
+		   Instruction<ThreadCfgLabel> *node,
+		   const SummaryId &summaryId,
+		   const CrashCfg &cfg,
+		   std::vector<unsigned char> &patch_content,
+		   std::vector<Relocation *> &relocs,
+		   std::vector<LateRelocation *> &lateRelocs,
+		   std::vector<trans_table_entry> &transTable)
+{
+
+	transTable.push_back(
+		trans_table_entry(
+			patch_content.size(),
+			vr.unwrap_vexrip(),
+			vex_asprintf("CFG node %s, vexrip %s, for entry point %s",
+				     node->rip.name(),
+				     vr.name(),
+				     entryVr.name())));
+	for (auto it = node->relocs.begin();
+	     it != node->relocs.end();
+	     it++)
+		relocs.push_back(new Relocation(*it, summaryId, cfg, node->successors, patch_content.size()));
+	for (auto it = node->lateRelocs.begin();
+	     it != node->lateRelocs.end();
+	     it++) {
+		LateRelocation *lr = *it;
+		assert(lr->nrImmediateBytes != 4);
+		lateRelocs.push_back(
+			new LateRelocation(
+				lr->offset + patch_content.size(),
+				lr->size,
+				lr->target,
+				lr->nrImmediateBytes,
+				lr->relative));
+	}
+	for (unsigned x = 0; x < node->len; x++)
+		patch_content.push_back(node->content[x]);
+}
+
+static void
+validateStackContext(Oracle *oracle,
+		     const SummaryId &summaryId,
+		     const CrashCfg &cfg,
+		     const std::map<VexRip, Instruction<ThreadCfgLabel> *> &cfgRoots2,
+		     std::vector<std::pair<VexRip, unsigned> > &branchesToEntryPoints,
+		     std::vector<unsigned char> &content,
+		     std::vector<LateRelocation *> &lateRelocs,
+		     std::vector<trans_table_entry> &transTable)
+{
+	unsigned offset = 136;
+
+	std::vector<VexRip> rips;
+	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++)
+		rips.push_back(it->first);
+
+	std::vector<unsigned> branchesToEscape;
+
+	for (unsigned idx = 0; idx < rips.size(); idx++) {
+		const VexRip vr(rips[idx]);
+		assert(vr.stack.size() > 1);
+		std::vector<unsigned> branchesToNextValidate;
+		/* This generates a series of stack validators, each
+		   of which is structured like this:
+
+		   cmp stack_value_1, off1(%rsp)
+		   jne next_validator
+		   cmp stack_value_2, off2(%rsp)
+		   jne next_validator
+		   ...
+		   cmp stack_value_N, offN(%rsp)
+		   je start_of_actual_machine
+		   next_validator:
+		   ...
+
+		   If this is the last validator then next_validator
+		   instead branches back to the original program. */
+		for (unsigned x = 1; x < vr.stack.size(); x++) {
+			offset += stack_offset(oracle, vr.stack[vr.stack.size() - x]);
+			unsigned long expected = vr.stack[vr.stack.size() - x - 1];
+			if (expected < 0x100000000ul) {
+				/* cmpq imm32, offset(%rsp) */
+				content.push_back(0x48);
+				content.push_back(0x81);
+				content.push_back(0xbc);
+				content.push_back(0x24);
+				content.push_back(offset);
+				content.push_back(offset >> 8);
+				content.push_back(offset >> 16);
+				content.push_back(offset >> 24);
+				content.push_back(expected);
+				content.push_back(expected >> 8);
+				content.push_back(expected >> 16);
+				content.push_back(expected >> 24);
+				/* jne rel32 or je rel32. */
+				content.push_back(0x0f);
+				if (idx == rips.size() - 1)
+					content.push_back(0x84);
+				else
+					content.push_back(0x85);
+				content.push_back(0);
+				content.push_back(0);
+				content.push_back(0);
+				content.push_back(0);
+				if (idx == rips.size() - 1)
+					branchesToEntryPoints.push_back(std::pair<VexRip, unsigned>(vr, content.size() - 4));
+				else
+					branchesToNextValidate.push_back(content.size() - 4);
+			} else {
+				/* Can't check these ones yet. */
+				abort();
+			}
+		}
+
+		if (idx < rips.size() - 1) {
+			for (auto it = branchesToNextValidate.begin();
+			     it != branchesToNextValidate.end();
+			     it++) {
+				/* Fix up the branch */
+				long delta = content.size() - *it - 4;
+				content[*it] = delta;
+				content[*it + 1] = delta >> 8;
+				content[*it + 2] = delta >> 16;
+				content[*it + 3] = delta >> 24;
+			}
+		} else {
+			branchesToEscape = branchesToNextValidate;
+		}
+	}
+
+	/* None of the stacks match, so go back to the original
+	 * program. */
+
+	/* Where are we actually going? */
+	unsigned long targ = rips[0].unwrap_vexrip();
+	for (unsigned x = 1; x < rips.size(); x++)
+		assert(targ == rips[x].unwrap_vexrip());
+
+	/* popf */
+	content.push_back(0x9d);
+	/* Restore red zone with lea 0x80(%rsp), %rsp */
+	content.push_back(0x48);
+	content.push_back(0x8d);
+	content.push_back(0xa4);
+	content.push_back(0x24);
+	content.push_back(0x80);
+	content.push_back(0x00);
+	content.push_back(0x00);
+	content.push_back(0x00);
+	/* Emit the instruction which we clobbered to set up the
+	 * patch. */
+	std::vector<Relocation *> relocs;
+	emitOneInstruction(rips[0],
+			   VexRip(),
+			   cfgRoots2.begin()->second,
+			   summaryId,
+			   cfg,
+			   content,
+			   relocs,
+			   lateRelocs,
+			   transTable);
+	/* If that generated any further early relocs then we're
+	   screwed, because we won't be able to resolve them.  Late
+	   relocs are okay, though. */
+	if (relocs.size() != 0)
+		abort();
+
+	/* jmp rel32 */
+	content.push_back(0xe9);
+	content.push_back(0);
+	content.push_back(0);
+	content.push_back(0);
+	content.push_back(0);
+
+	targ += getInstructionSize(oracle->ms->addressSpace, StaticRip(targ));
+	lateRelocs.push_back(
+		new LateRelocation(
+			content.size() - 4,
+			4,
+			vex_asprintf("0x%lxul", targ),
+			0,
+			true));
+}
+
 static unsigned
 genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
 		     std::vector<LateRelocation *> &lateRelocs,
 		     std::vector<trans_table_entry> &transTable,
 		     const CrashCfg &cfg,
 		     const SummaryId &summaryId,
+		     Oracle *oracle,
 		     const std::map<VexRip, Instruction<ThreadCfgLabel> *> &cfgRoots2)
 {
 	unsigned result = patch_content.size();
+	bool have_entry_validate;
+	assert(cfgRoots2.size() > 0);
+
+	/* First thing we do is get out of the red zone. */
+	patch_content.push_back(0x48);
+	patch_content.push_back(0x8d);
+	patch_content.push_back(0x64);
+	patch_content.push_back(0x24);
+	patch_content.push_back(0x80);
+
+	/* Start by doing something to check all of the stack
+	 * contexts. */
+	std::vector<std::pair<VexRip, unsigned> > branchesToEntryPoints;
+	if (cfgRoots2.size() > 1 || cfgRoots2.begin()->first.stack.size() > 1) {
+		/* pushf */
+		patch_content.push_back(0x9c);
+
+		validateStackContext(oracle, summaryId, cfg, cfgRoots2,
+				     branchesToEntryPoints,
+				     patch_content, lateRelocs,
+				     transTable);
+		have_entry_validate = true;
+	} else {
+		have_entry_validate = false;
+	}
+
+	std::map<VexRip, unsigned> entryMap;
 	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
 		const VexRip &entryVr(it->first);
 		std::vector<Instruction<ThreadCfgLabel> *> toEmit;
 		std::map<Instruction<ThreadCfgLabel> *, unsigned> instrOffsets;
 		std::vector<Relocation *> relocs;
 
-		emitCallSequence(patch_content, "(unsigned long)acquire_lock", lateRelocs);
+		assert(!entryMap.count(entryVr));
+		entryMap[entryVr] = patch_content.size();
+
+		if (have_entry_validate) {
+			/* popf, to match the pushf in entry point
+			 * validation. */
+			patch_content.push_back(0x9d);
+		}
+
+		emitCallSequence(patch_content, "(unsigned long)acquire_lock", lateRelocs, true);
 
 		toEmit.push_back(it->second);
 		while (!toEmit.empty()) {
@@ -769,33 +998,12 @@ genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
 						ConcreteCfgLabel(
 							summaryId,
 							node->label)));
-				transTable.push_back(
-					trans_table_entry(
-						patch_content.size(),
-						vr.unwrap_vexrip(),
-						vex_asprintf("CFG node %s, vexrip %s, for entry point %s",
-							     node->rip.name(),
-							     vr.name(),
-							     entryVr.name())));
-				for (auto it = node->relocs.begin();
-				     it != node->relocs.end();
-				     it++)
-					relocs.push_back(new Relocation(*it, summaryId, cfg, node->successors, patch_content.size()));
-				for (auto it = node->lateRelocs.begin();
-				     it != node->lateRelocs.end();
-				     it++) {
-					LateRelocation *lr = *it;
-					assert(lr->nrImmediateBytes != 4);
-					lateRelocs.push_back(
-						new LateRelocation(
-							lr->offset + patch_content.size(),
-							lr->size,
-							lr->target,
-							lr->nrImmediateBytes,
-							lr->relative));
-				}
-				for (unsigned x = 0; x < node->len; x++)
-					patch_content.push_back(node->content[x]);
+				emitOneInstruction(vr, entryVr, node,
+						   summaryId, cfg,
+						   patch_content,
+						   relocs,
+						   lateRelocs,
+						   transTable);
 				if (node->successors.empty()) {
 					patch_content.push_back(0xe9);
 					patch_content.push_back(0);
@@ -834,7 +1042,7 @@ genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
 					offset = instrOffsets[reloc->target];
 				} else {
 					offset = patch_content.size();
-					emitCallSequence(patch_content, "(unsigned long)release_lock", lateRelocs);
+					emitCallSequence(patch_content, "(unsigned long)release_lock", lateRelocs, false);
 					patch_content.push_back(0xe9);
 					patch_content.push_back(0);
 					patch_content.push_back(0);
@@ -864,6 +1072,21 @@ genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
 			}
 		}
 	}
+
+	for (auto it = branchesToEntryPoints.begin();
+	     it != branchesToEntryPoints.end();
+	     it++) {
+		assert(entryMap.count(it->first));
+		unsigned targ = entryMap[it->first];
+		unsigned o = it->second;
+		long delta = targ - o - 4;
+		assert(delta == (int)delta);
+		patch_content[o] = delta;
+		patch_content[o + 1] = delta >> 8;
+		patch_content[o + 2] = delta >> 16;
+		patch_content[o + 3] = delta >> 24;
+	}
+
 	return result;
 }
 
@@ -926,6 +1149,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 			transTable,
 			cfg,
 			summaryId,
+			oracle,
 			it->second);
 
 	std::vector<const char *> fragments;
