@@ -698,6 +698,28 @@ public:
 	}
 };
 
+template <typename r>
+class RipRelativeBlindRelocation : public EarlyRelocation<r> {
+	char *mkName() const {
+		return my_asprintf("rrbr(offset = %d, size = %d, target = %lx)",
+				   this->offset,
+				   this->size,
+				   target);
+	}
+public:
+	unsigned long target;
+
+	void doit(CfgLabelAllocator &, PatchFragment<r> *) { abort(); }
+
+	RipRelativeBlindRelocation(unsigned _offset,
+				   unsigned _size,
+				   unsigned long _target)
+		: EarlyRelocation<r>(_offset, _size),
+		  target(_target)
+	{
+	}
+};
+
 template <typename r> void
 Instruction<r>::_modrm(unsigned nrImmediates, AddressSpace *as)
 {
@@ -1056,6 +1078,8 @@ RipRelativeDataRelocation<r>::doit(CfgLabelAllocator &, PatchFragment<r> *pf)
 template <typename r> void
 RipRelativeBranchRelocation<r>::doit(CfgLabelAllocator &allocLabel, PatchFragment<r> *pf)
 {
+	abort();
+#if 0
 	unsigned targetOffset;
 	if (!pf->ripToOffset(target, &targetOffset))
 		pf->generateEpilogue(allocLabel(), target);
@@ -1063,6 +1087,7 @@ RipRelativeBranchRelocation<r>::doit(CfgLabelAllocator &allocLabel, PatchFragmen
 		fail("Failed to generate epilogue for %s\n", target.name());
 	int delta = targetOffset - this->offset - this->size;
 	pf->writeBytes(&delta, this->size, this->offset);
+#endif
 }
 
 template <typename r> Instruction<r> *

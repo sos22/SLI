@@ -190,7 +190,7 @@ Oracle::findPreviousInstructions(std::vector<VexRip> &out)
 	getDominators(crashedThread, ms, out, fheads);
 }
 
-static unsigned
+unsigned
 getInstructionSize(AddressSpace *as, const StaticRip &rip)
 {
 	IRSB *irsb = Oracle::getIRSBForRip(as, rip, true);

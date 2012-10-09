@@ -1,6 +1,8 @@
 #ifndef ALLOC_MAI_HPP__
 #define ALLOC_MAI_HPP__
 
+#include "cfgnode.hpp"
+
 class MaiMap : public GarbageCollected<MaiMap, &ir_heap> {
 	int nextId;
 	std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> > *maiCorrespondence;

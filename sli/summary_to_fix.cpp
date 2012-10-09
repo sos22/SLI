@@ -15,6 +15,8 @@
 #include "genfix.hpp"
 #include "inferred_information.hpp"
 #include "oracle.hpp"
+#include "crashcfg.hpp"
+#include "offline_analysis.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -377,97 +379,526 @@ public:
 	{}
 };
 
-void
-AddExitCallPatch::generateEpilogue(const CfgLabel &l, ThreadRip exitRip)
+
+static void
+trimCfg(StateMachine *machine, const std::set<std::pair<unsigned, CfgLabel> > &neededCfg)
 {
-	Instruction<ThreadRip> *i = Instruction<ThreadRip>::pseudo(l, exitRip);
+	typedef std::pair<unsigned, const CFGNode *> elem;
+	std::set<elem> neededNodes;
+	std::set<elem> allNodes;
 
-	cfg->registerInstruction(i);
-	registerInstruction(i, content.size());
+	std::vector<elem> q(machine->cfg_roots);
+	while (!q.empty()) {
+		if (!allNodes.insert(q.back()).second) {
+			q.pop_back();
+			continue;
+		}
+		unsigned tid = q.back().first;
+		const CFGNode *n = q.back().second;
+		if (neededCfg.count(std::pair<unsigned, CfgLabel>(tid, n->label)))
+			neededNodes.insert(q.back());
+		q.pop_back();
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
+			if (it->instr)
+				q.push_back(elem(tid, it->instr));
+		}
+	}
 
-	emitCallSequence("(unsigned long)release_lock");
-	emitJmpToRipHost(exitRip.rip.unwrap_vexrip());
+	/* We need to preserve anything which can reach and be reached
+	 * by some interesting node. */
+	std::set<elem> reachInterestingNode(neededNodes);
+	std::set<elem> reachedByInterestingNode(neededNodes);
+	bool progress = true;
+	while (progress) {
+		progress = false;
+		for (auto it = allNodes.begin(); it != allNodes.end(); it++) {
+			if (!reachInterestingNode.count(*it)) {
+				for (auto it2 = it->second->successors.begin();
+				     it2 != it->second->successors.end();
+				     it2++) {
+					if (it2->instr &&
+					    reachInterestingNode.count(elem(it->first, it2->instr))) {
+						reachInterestingNode.insert(*it);
+						progress = true;
+						break;
+					}
+				}
+			}
+			if (reachedByInterestingNode.count(*it)) {
+				for (auto it2 = it->second->successors.begin();
+				     it2 != it->second->successors.end();
+				     it2++) {
+					if (it2->instr &&
+					    reachedByInterestingNode.insert(elem(it->first, it2->instr)).second)
+						progress = true;
+				}
+			}
+		}
+	}
+	std::set<elem> desired;
+	for (auto it = reachInterestingNode.begin();
+	     it != reachInterestingNode.end();
+	     it++) {
+		if (reachedByInterestingNode.count(*it))
+			desired.insert(*it);
+	}
+
+	/* Now we need to find a new root set for the machine, by
+	   advancing the existing roots until they reach something in
+	   desired. */
+	std::set<elem> possibleRoots(machine->cfg_roots.begin(), machine->cfg_roots.end());
+	std::set<elem> newRoots;
+	while (!possibleRoots.empty()) {
+		elem e = *possibleRoots.begin();
+		possibleRoots.erase(e);
+		if (desired.count(e)) {
+			newRoots.insert(e);
+		} else {
+			for (auto it = e.second->successors.begin();
+			     it != e.second->successors.end();
+			     it++)
+				if (it->instr)
+					possibleRoots.insert(elem(e.first, it->instr));
+		}
+	}
+
+	/* @newRoots is now the new root set.  Remove anything
+	 * reachable which shouldn't be reachable. */
+	std::vector<elem> pending;
+	pending.insert(pending.begin(), newRoots.begin(), newRoots.end());
+	while (!pending.empty()) {
+		elem e = pending.back();
+		pending.pop_back();
+		for (auto it = ((CFGNode *)e.second)->successors.begin();
+		     it != ((CFGNode *)e.second)->successors.end();
+		     it++) {
+			if (!it->instr)
+				continue;
+			if (desired.count(elem(e.first, it->instr)))
+				pending.push_back(elem(e.first, it->instr));
+			else
+				it->instr = NULL;
+		}
+	}
+
+	/* Done */
+	machine->cfg_roots.clear();
+	machine->cfg_roots.insert(machine->cfg_roots.begin(),
+				  newRoots.begin(),
+				  newRoots.end());
 }
 
-class DcdCFG : public CFG<ThreadRip> {
-	std::set<VexRip> &neededInstructions;
-public:
-	bool instructionUseful(Instruction<ThreadRip> *i) { return neededInstructions.count(i->rip.rip) != 0; }
-	DcdCFG(AddressSpace *as, std::set<VexRip> &ni)
-		: CFG<ThreadRip>(as), neededInstructions(ni)
-	{}
-};
-char *
-buildPatchForCrashSummary(Oracle *oracle, CrashSummary *summary, const char *ident)
+static void
+avoidBranchToPatch(crashEnforcementRoots &cer,
+		   CrashCfg &cfg,
+		   std::map<VexRip, Instruction<ThreadCfgLabel> *> &cfgRoots,
+		   CfgLabelAllocator &allocLabel,
+		   Oracle *oracle)
 {
-	AddressSpace *as = oracle->ms->addressSpace;
-
-	/* What instructions do we need to cover? */
-	std::set<MemoryAccessIdentifier> neededMais;
-	summary->loadMachine->root->enumerateMentionedMemoryAccesses(neededMais);
-	assert(summary->loadMachine->cfg_roots.size() >= 1);
-	unsigned tid = summary->loadMachine->cfg_roots[0].first;
-	for (unsigned x = 1; x < summary->loadMachine->cfg_roots.size(); x++)
-		assert(tid == summary->loadMachine->cfg_roots[x].first);
-	std::set<VexRip> neededInstructions;
-	for (auto it = neededMais.begin(); it != neededMais.end(); it++) {
-		for (auto it2 = summary->mai->begin(*it); !it2.finished(); it2.advance())
-			neededInstructions.insert(it2.node()->rip);
-	}
-	/* 5 bytes is the size of a 32-bit relative jump. */
-	ThreadVexRip root(tid, findDominator(oracle, neededInstructions, 5));
-	if (!root.rip.isValid()) {
-		fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominating instruction for load machine.\n");
-		return NULL;
+	std::map<VexRip, std::set<Instruction<ThreadCfgLabel> *> > multiRoots;
+	for (auto it = cer.content.begin(); it != cer.content.end(); it++) {
+		AbstractThread tid(it->first);
+		const std::set<CfgLabel> &pendingRoots(it->second);
+		for (auto it2 = pendingRoots.begin(); it2 != pendingRoots.end(); it2++) {
+			multiRoots[cfg.labelToRip(ConcreteCfgLabel(cer.lookupAbsThread(tid).summary_id, *it2))].
+				insert(cfg.findInstr(ThreadCfgLabel(tid, *it2)));
+		}
 	}
 
-	summary->storeMachine->root->enumerateMentionedMemoryAccesses(neededMais);
-	for (auto it = neededMais.begin(); it != neededMais.end(); it++) {
-		for (auto it2 = summary->mai->begin(*it); !it2.finished(); it2.advance())
-			neededInstructions.insert(it2.node()->rip);
+	std::map<VexRip, std::set<Instruction<ThreadCfgLabel> *> > acceptedRoots;
+	for (auto it = multiRoots.begin(); it != multiRoots.end(); it++) {
+		const VexRip &inpRip(it->first);
+		const std::set<Instruction<ThreadCfgLabel> *> &inpRoots(it->second);
+		for (auto it = inpRoots.begin(); it != inpRoots.end(); it++) {
+			std::set<std::pair<VexRip, Instruction<ThreadCfgLabel> *> > pendingRoots;
+			pendingRoots.insert(std::pair<VexRip, Instruction<ThreadCfgLabel> *>(inpRip, *it));
+			std::set<VexRip> alreadyCovered;
+			while (!pendingRoots.empty()) {
+				VexRip vr(pendingRoots.begin()->first);
+				Instruction<ThreadCfgLabel> *node = pendingRoots.begin()->second;
+				pendingRoots.erase(pendingRoots.begin());
+				if (!alreadyCovered.insert(vr).second)
+					continue;
+
+				unsigned long e = vr.unwrap_vexrip();
+				bool acceptAsRoot = true;
+				for (unsigned x = 1; acceptAsRoot && x < 5; x++) {
+					if (oracle->isFunctionHead(StaticRip(e + x))) {
+						acceptAsRoot = false;
+					} else {
+						std::set<unsigned long> predecessors;
+						oracle->findPredecessors(e + x, predecessors);
+						for (unsigned y = 0; y < x; y++)
+							predecessors.erase(e + y);
+						if (!predecessors.empty())
+							acceptAsRoot = false;
+					}
+				}
+				if (acceptAsRoot) {
+					acceptedRoots[vr].insert(node);
+					continue;
+				}
+
+				/* Can't take this one as a root, so
+				 * look at its predecessors. */
+				std::set<unsigned long> predecessors;
+				oracle->findPredecessors(e, predecessors);
+				assert(!predecessors.empty());
+				for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+					auto pred = decode_instr(oracle->ms->addressSpace,
+								 *it,
+								 ThreadCfgLabel(node->rip.thread, allocLabel()),
+								 true);
+					pred->addDefault(node);
+					VexRip pred_vr(vr);
+					pred_vr.jump(*it);
+					pendingRoots.insert(std::pair<VexRip, Instruction<ThreadCfgLabel> *>(pred_vr, pred));
+				}
+			}
+		}
 	}
 
-	DcdCFG *cfg = new DcdCFG(as, neededInstructions);
-
-	std::set<ThreadRip> roots;
-	/* What are the entry points of the patch? */
-	cfg->add_root(root, 100);
-	roots.insert(root);
-
-	std::set<MemoryAccessIdentifier> mais;
-	summary->storeMachine->root->enumerateMentionedMemoryAccesses(mais);
-	std::set<VexRip> instrs;
-	for (auto it = mais.begin(); it != mais.end(); it++) {
-		for (auto it2 = summary->mai->begin(*it); !it2.finished(); it2.advance())
-			instrs.insert(it2.node()->rip);
+	/* For now we assume that that only produces one CFG for each
+	   potential entry point.  We will eventually need to support
+	   a kind of cross-product operation to merge the CFGs. */
+	for (auto it = multiRoots.begin(); it != multiRoots.end(); it++) {
+		assert(it->second.size() == 1);
+		cfgRoots[it->first] = *it->second.begin();
 	}
-	assert( summary->storeMachine->cfg_roots.size() >= 1);
-	unsigned store_tid = summary->storeMachine->cfg_roots[0].first;
-	for (unsigned x = 1; x < summary->storeMachine->cfg_roots.size(); x++)
-		assert(store_tid == summary->storeMachine->cfg_roots[x].first);
-	ThreadVexRip r(store_tid, findDominator(oracle, instrs, 5));
-	if (!r.rip.isValid()) {
-	  fprintf(_logfile, "Patch generation fails because we can't find an appropriate dominator instruction for one of the store machines.\n");
-	  return NULL;
-	}
-	cfg->add_root(r, 100);
-	roots.insert(r);
+}
 
+class Relocation : public GarbageCollected<Relocation, &ir_heap> {
+public:
+	unsigned offset;
+	unsigned size;
+	unsigned addend;
+	Instruction<ThreadCfgLabel> *target;
+	unsigned long raw_target;
+	bool generateEpilogue;
+	bool relative;
+	Relocation(unsigned _offset,
+		   unsigned _size,
+		   Instruction<ThreadCfgLabel> *_target,
+		   bool _generateEpilogue,
+		   bool _relative)
+		: offset(_offset), size(_size), addend(0), target(_target),
+		  raw_target(0), generateEpilogue(_generateEpilogue),
+		  relative(_relative)
+	{}
+	Relocation(unsigned _offset,
+		   unsigned _size,
+		   unsigned long _raw_target,
+		   bool _generateEpilogue,
+		   bool _relative)
+		: offset(_offset), size(_size), addend(0), target(NULL),
+		  raw_target(_raw_target), generateEpilogue(_generateEpilogue),
+		  relative(_relative)
+	{}
+	Relocation(EarlyRelocation<ThreadCfgLabel> *_base,
+		   const SummaryId &summaryId,
+		   const CrashCfg &cfg,
+		   std::vector<Instruction<ThreadCfgLabel>::successor_t> &successors,
+		   unsigned _offset)
+		: offset(_offset + _base->offset),
+		  size(_base->size)
+	{
+		if (auto rrr = dynamic_cast<RipRelativeRelocation<ThreadCfgLabel> *> (_base)) {
+			addend = rrr->nrImmediateBytes;
+			generateEpilogue = false;
+			relative = true;
+			target = NULL;
+			for (auto it = successors.begin(); it != successors.end(); it++) {
+				if (it->instr && it->instr->rip == rrr->target) {
+					target = it->instr;
+					break;
+				}
+			}
+			if (!target) {
+				generateEpilogue = true;
+				raw_target = cfg.labelToRip(ConcreteCfgLabel(summaryId, rrr->target.label)).unwrap_vexrip();
+			}
+		} else if (auto rrdr = dynamic_cast<RipRelativeDataRelocation<ThreadCfgLabel> *>(_base)) {
+			addend = rrdr->nrImmediateBytes;
+			generateEpilogue = false;
+			target = NULL;
+			raw_target = rrdr->target;
+			relative = true;
+		} else if (auto rrbr = dynamic_cast<RipRelativeBranchRelocation<ThreadCfgLabel> *>(_base)) {
+			addend = 0;
+			generateEpilogue = false;
+			relative = true;
+			target = NULL;
+			for (auto it = successors.begin(); it != successors.end(); it++) {
+				if (it->instr && it->instr->rip == rrbr->target) {
+					target = it->instr;
+					break;
+				}
+			}
+			if (!target) {
+				generateEpilogue = true;
+				raw_target = cfg.labelToRip(ConcreteCfgLabel(summaryId, rrbr->target.label)).unwrap_vexrip();
+			}
+		} else if (auto rrBr = dynamic_cast<RipRelativeBlindRelocation<ThreadCfgLabel> *>(_base)) {
+			addend = 0;
+			generateEpilogue = false;
+			relative = true;
+			target = NULL;
+			raw_target = rrBr->target;
+		} else {
+			abort();
+		}
+	}
+
+	void visit(HeapVisitor &hv) {
+		hv(target);
+	}
+	NAMED_CLASS
+};
+
+asm (
+	"__call_sequence_template_start:\n"
+	"lea -128(%rsp), %rsp\n"
+	"pushq %rsi\n"
+	"__call_sequence_template_load_rsi:\n"
+	"movq $0x1122334455667788, %rsi\n"
+	"call *%rsi\n"
+	"popq %rsi\n"
+	"lea 128(%rsp), %rsp\n"
+	"__call_sequence_template_end:\n"
+	);
+
+static void
+emitCallSequence(std::vector<unsigned char> &content,
+		 const char *target,
+		 std::vector<LateRelocation *> &lateRelocs)
+{
+	extern const unsigned char
+		__call_sequence_template_start[],
+		__call_sequence_template_load_rsi[],
+		__call_sequence_template_end[];
+
+	unsigned start_sz = content.size();
+	for (const unsigned char *cursor = __call_sequence_template_start;
+	     cursor != __call_sequence_template_end;
+	     cursor++)
+		content.push_back(*cursor);
+
+	lateRelocs.push_back(
+		new LateRelocation(
+			start_sz + __call_sequence_template_load_rsi - __call_sequence_template_start + 2,
+			8,
+			vex_asprintf("%s", target),
+			0,
+			false));
+}
+
+static char *
+buildPatchForCrashSummary(Oracle *oracle,
+			  const SummaryId &summaryId,
+			  CrashSummary *summary,
+			  const char *ident)
+{
+	ThreadAbstracter absThread;
+	std::map<ConcreteThread, std::set<CfgLabel> > cfgRoots;
+	for (auto it = summary->loadMachine->cfg_roots.begin();
+	     it != summary->loadMachine->cfg_roots.end();
+	     it++)
+		cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
+	for (auto it = summary->storeMachine->cfg_roots.begin();
+	     it != summary->storeMachine->cfg_roots.end();
+	     it++)
+		cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
+	crashEnforcementRoots cer(cfgRoots, absThread);
+	CrashCfg cfg(cer, summaryId, summary, oracle->ms->addressSpace, true);
+
+	cfg.prettyPrint(stdout, true);
+	cer.prettyPrint(stdout);
+
+	std::map<VexRip, Instruction<ThreadCfgLabel> *> cfgRoots2;
 	CfgLabelAllocator allocLabel;
-	try {
-		cfg->doit(allocLabel);
-	} catch (NotImplementedException &e) {
-		/* This means that there's some instruction we can't
-		   decode.  Dump a diagnostic and just continue on. */
-		fprintf(_logfile,
-			"Cannot build patch for crash summary.  Instruction decoder said %s\n",
-			e.what());
-		return NULL;
+	avoidBranchToPatch(cer, cfg, cfgRoots2, allocLabel, oracle);
+	
+	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
+		printf("Root %s:\n", it->first.name());
+		std::vector<Instruction<ThreadCfgLabel> *> q;
+		std::set<Instruction<ThreadCfgLabel> *> v;
+		q.push_back(it->second);
+		while (!q.empty()) {
+			Instruction<ThreadCfgLabel> *a = q.back();
+			q.pop_back();
+			if (!v.insert(a).second)
+				continue;
+			a->prettyPrint(stdout);
+			for (auto it2 = a->successors.begin(); it2 != a->successors.end(); it2++)
+				q.push_back(it2->instr);
+		}
 	}
+
+	/* Now go and flatten the CFG fragments into patches. */
+	std::vector<unsigned char> patch_content;
+	std::vector<LateRelocation *> lateRelocs;
+	std::vector<std::pair<VexRip, unsigned> > entryOffsets;
+	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
+		const VexRip &entryVr(it->first);
+		std::vector<Instruction<ThreadCfgLabel> *> toEmit;
+		std::map<Instruction<ThreadCfgLabel> *, unsigned> instrOffsets;
+		std::vector<Relocation *> relocs;
+
+		entryOffsets.push_back(std::pair<VexRip, unsigned>(entryVr, patch_content.size()));
+
+		toEmit.push_back(it->second);
+		while (!toEmit.empty()) {
+			Instruction<ThreadCfgLabel> *node = toEmit.back();
+			toEmit.pop_back();
+			while (1) {
+				auto it_did_insert = instrOffsets.insert(std::pair<Instruction<ThreadCfgLabel> *, unsigned>(node, patch_content.size()));
+				auto did_insert = it_did_insert.second;
+				if (!did_insert) {
+					/* We already have something
+					 * for this instruction, so
+					 * just insert a branch. */
+					patch_content.push_back(0xe9);
+					patch_content.push_back(0);
+					patch_content.push_back(0);
+					patch_content.push_back(0);
+					patch_content.push_back(0);
+					relocs.push_back(
+						new Relocation(
+							patch_content.size() - 4,
+							4,
+							node,
+							false,
+							true));
+					break;
+				}
+				for (auto it = node->relocs.begin();
+				     it != node->relocs.end();
+				     it++)
+					relocs.push_back(new Relocation(*it, summaryId, cfg, node->successors, patch_content.size()));
+				for (auto it = node->lateRelocs.begin();
+				     it != node->lateRelocs.end();
+				     it++) {
+					LateRelocation *lr = *it;
+					lateRelocs.push_back(
+						new LateRelocation(
+							lr->offset + patch_content.size(),
+							lr->size,
+							lr->target,
+							lr->nrImmediateBytes,
+							lr->relative));
+				}
+				for (unsigned x = 0; x < node->len; x++)
+					patch_content.push_back(node->content[x]);
+				if (node->successors.empty()) {
+					patch_content.push_back(0xe9);
+					patch_content.push_back(0);
+					patch_content.push_back(0);
+					patch_content.push_back(0);
+					patch_content.push_back(0);
+					relocs.push_back(
+						new Relocation(
+							patch_content.size() - 4,
+							4,
+							cfg.labelToRip(
+								ConcreteCfgLabel(
+									summaryId,
+									node->label)).unwrap_vexrip() +
+								node->len,
+							true,
+							true));
+				}
+				Instruction<ThreadCfgLabel> *next = NULL;
+				for (auto it = node->successors.begin(); it != node->successors.end(); it++) {
+					if (!it->instr)
+						continue;
+					if (next)
+						toEmit.push_back(it->instr);
+					else
+						next = it->instr;
+				}
+				if (!next)
+					break;
+				node = next;
+			}
+		}
+
+		for (auto it = relocs.begin(); it != relocs.end(); it++) {
+			Relocation *reloc = *it;
+			unsigned offset;
+			if (reloc->target) {
+				assert(instrOffsets.count(reloc->target));
+				offset = instrOffsets[reloc->target];
+				long delta = reloc->offset - offset + reloc->addend;
+				patch_content[reloc->offset  ] = delta;
+				patch_content[reloc->offset+1] = delta >> 8;
+				patch_content[reloc->offset+2] = delta >> 16;
+				patch_content[reloc->offset+3] = delta >> 24;
+			} else if (reloc->generateEpilogue) {
+				emitCallSequence(patch_content, "(unsigned long)release_lock", lateRelocs);
+				patch_content.push_back(0xe9);
+				patch_content.push_back(0);
+				patch_content.push_back(0);
+				patch_content.push_back(0);
+				patch_content.push_back(0);
+				lateRelocs.push_back(
+					new LateRelocation(
+						patch_content.size() - 4,
+						4,
+						vex_asprintf("0x%lx", reloc->raw_target),
+						4,
+						true));
+			} else {
+				lateRelocs.push_back(
+					new LateRelocation(
+						reloc->offset,
+						4,
+						vex_asprintf("0x%lx", reloc->raw_target),
+						reloc->addend,
+						reloc->relative));
+			}
+		}
+	}
+
+	printf("const char *patch_content = \"");
+	for (auto it = patch_content.begin(); it != patch_content.end(); it++)
+		printf("\\x%02x", *it);
+	printf("\";\n");
+	printf("relocs:\n");
+	for (auto it = lateRelocs.begin(); it != lateRelocs.end(); it++)
+		printf("%s\n", (*it)->name());
+	exit(0);
+#if 0
 	PatchFragment<ThreadRip> *pf = new AddExitCallPatch(roots);
 	pf->fromCFG(allocLabel, cfg);
 
 	return pf->asC(ident);
+#endif
+}
+
+static void
+findRelevantMais(IRExpr *iex, std::set<MemoryAccessIdentifier> &out)
+{
+	struct : public IRExprTransformer {
+		std::set<MemoryAccessIdentifier> *out;
+		IRExpr *transformIex(IRExprHappensBefore *hb) {
+			out->insert(hb->before);
+			out->insert(hb->after);
+			return hb;
+		}
+	} doit;
+	doit.out = &out;
+	doit.doit(iex);
+}
+
+static void
+findRelevantCfgs(MaiMap *mai,
+		 const std::set<MemoryAccessIdentifier> &neededMais,
+		 std::set<std::pair<unsigned, CfgLabel> > &out)
+{
+	for (auto it = neededMais.begin(); it != neededMais.end(); it++) {
+		for (auto it2 = mai->begin(*it); !it2.finished(); it2.advance())
+			out.insert(std::pair<unsigned, CfgLabel>(it->tid, it2.label()));
+	}
 }
 
 int
@@ -493,14 +924,23 @@ main(int argc, char *argv[])
 	oracle->loadCallGraph(oracle, callgraph, ALLOW_GC);
 
 	VexPtr<CrashSummary, &ir_heap> summary(readBugReport(summary_fname, NULL));
-	char *patch = buildPatchForCrashSummary(oracle, summary, "patch");
+	SummaryId summaryId(1); /* Only have one summary here */
+	std::set<MemoryAccessIdentifier> relevant_mais;
+	findRelevantMais(summary->verificationCondition, relevant_mais);
+	std::set<std::pair<unsigned, CfgLabel> > relevant_cfgs;
+	findRelevantCfgs(summary->mai, relevant_mais, relevant_cfgs);
+
+	trimCfg(summary->loadMachine, relevant_cfgs);
+	trimCfg(summary->storeMachine, relevant_cfgs);
+
+	char *patch = buildPatchForCrashSummary(oracle, summaryId, summary, "patch");
 	printf("Patch is:\n%s\n", patch);
 
 	FILE *output = fopen(output_fname, "w");
 	fprintf(output, "/* SLI fix generated for %s */\n", binary);
 	fprintf(output,
-		"/* Compile as gcc -Wall -g -shared -fPIC -Isli <this_file> -o %s.so */\n",
-		binary);
+		"/* Compile as gcc -Wall -g -shared -fPIC -Isli %s -o %s.so */\n",
+		output_fname, binary);
 	fprintf(output, "/* Crash summary:\n");
 	printCrashSummary(summary, output);
 	fprintf(output, "*/\n");
