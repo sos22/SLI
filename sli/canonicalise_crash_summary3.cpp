@@ -1386,7 +1386,8 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 		     it++) {
 			if (*it == k)
 				continue;
-			if (definitelyEqual(k.second->addr, it->second->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
+			if (it->second->ty == k.second->ty &&
+			    definitelyEqual(k.second->addr, it->second->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
 				assert(!definitelyAliasLds.count(*it));
 				definitelyAliasLds.insert(*it);
 				assert(it->second->ty == k.second->ty);
