@@ -21,15 +21,12 @@ acquire_lock_c(void)
 	pthread_mutex_lock(&mux);
 }
 
-extern void acquire_lock_ll();
 asm ("\
 	/* We're called from the patch without saving any registers except rsi.\
 	We are outside the stack redzone, though.  Go and save all the\
 	call-clobbered registers and get into C. */\
 	\
-acquire_lock_ll:\n\
-        .quad 1f\n\
-1:\n\
+acquire_lock:\n\
 	pushf\n\
 	push %rax\n\
 	push %rcx\n\
@@ -56,7 +53,6 @@ static void
 activate(void)
 {
 	char *body;
-	char *trampolines;
 	unsigned x;
 	long delta;
 	unsigned y;
@@ -77,55 +73,18 @@ activate(void)
 
 	patch_body = body = build_patch(&patch);
 
-	trampolines = malloc_executable(PAGE_SIZE);
-	/* We need to patch each entry point so that it turns into a
-	   jump instruction which targets a trampoline which does
-	   this:
-
-	   lea -128(%rsp), %rsp
-	   pushq %rsi
-	   movq $acquire_lock_ll, %rsi
-	   call *%rsi
-	   popq %rsi
-	   lea 128(%rsp), %rsp
-	   jmp relevant_offset_in_patch
-
-	   Do so. */
 	for (x = 0; x < patch.nr_entry_points; x++) {
-		memcpy(trampolines,
-		       "\x48\x8d\x64\x24\x80" /* lea -128(%rsp), %rsp */
-		       "\x56" /* pushq %rsi */
-		       "\x48\xbe\x00\x00\x00\x00\x00\x00\x00\x00" /* movq $imm64, %rsi */
-		       "\xff\xd6" /* call *%rsi */
-		       "\x5e" /* pop %rsi */
-		       "\x48\x8d\xa4\x24\x80\x00\x00\x00" /* lea 128(%rsp), %rsp */
-		       "\xe9\x00\x00\x00\x00" /* jmp rel32 */
-		       ,
-		       32);
-
-		/* Patch in call address */
-		assert(*(unsigned long *)(trampolines+8) == 0);
-		*(unsigned long *)(trampolines+8) = (unsigned long)&acquire_lock_ll;
-
-		/* Patch in jump address */
-		*(int *)(trampolines + 28) =
-			(unsigned long)body + patch.entry_points[x].offset -
-			(unsigned long)trampolines - 32;
-
-		/* Trampoline is now correctly established.  Patch in
-		 * a jump to it. */
 		mprotect((void *)(patch.entry_points[x].rip & PAGE_MASK),
 			 PAGE_SIZE * 2,
 			 PROT_READ|PROT_WRITE|PROT_EXEC);
 		*(unsigned char *)patch.entry_points[x].rip = 0xe9;
-		delta = (unsigned long)trampolines - (patch.entry_points[x].rip + 5);
+		delta = (unsigned long)body + patch.entry_points[x].offset -
+			patch.entry_points[x].rip - 5;
 		assert(delta == (int)delta);
 		*(int *)(patch.entry_points[x].rip + 1) = delta;
 		mprotect((void *)(patch.entry_points[x].rip & PAGE_MASK),
 			 PAGE_SIZE * 2,
 			 PROT_READ|PROT_EXEC);
-
-		trampolines += 32;
 	}
 }
 

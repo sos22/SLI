@@ -769,6 +769,8 @@ buildPatchForCrashSummary(Oracle *oracle,
 
 		entryOffsets.push_back(std::pair<VexRip, unsigned>(entryVr, patch_content.size()));
 
+		emitCallSequence(patch_content, "(unsigned long)acquire_lock", lateRelocs);
+
 		/* XXX need to do stack validation here */
 		toEmit.push_back(it->second);
 		while (!toEmit.empty()) {

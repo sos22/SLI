@@ -1,4 +1,5 @@
 extern unsigned char release_lock[];
+extern unsigned char acquire_lock[];
 
 struct relocation {
 	unsigned offset;
