@@ -527,7 +527,8 @@ public:
 		: offset(_offset), size(_size), target(_target),
 		  nrImmediateBytes(_nrImmediateBytes),
 		  relative(_relative)
-	{}
+	{
+	}
 
 	char *asC() const {
 		return vex_asprintf("{0x%x, 0x%x, %d, %d, %s}",

@@ -692,6 +692,28 @@ emitCallSequence(std::vector<unsigned char> &content,
 			false));
 }
 
+static void
+stack_validation_table(std::vector<const char *> &fragments, Oracle *oracle, const VexRip &vr)
+{
+	unsigned offset = 0;
+	for (unsigned x = 1; x < vr.stack.size(); x++) {
+		offset += stack_offset(oracle, vr.stack[vr.stack.size() - x]);
+		fragments.push_back(vex_asprintf("\t\t{ .offset = %d, .expected_value = 0x%lx },\n",
+						 offset, vr.stack[vr.stack.size() - x - 1]));
+	}
+}
+
+struct trans_table_entry {
+	unsigned offset_in_patch;
+	unsigned long rip;
+	const char *debug_msg;
+	trans_table_entry(unsigned _offset, unsigned long _rip,
+			  const char *_msg)
+		: offset_in_patch(_offset), rip(_rip),
+		  debug_msg(_msg)
+	{}
+};
+
 static char *
 buildPatchForCrashSummary(Oracle *oracle,
 			  const SummaryId &summaryId,
@@ -738,6 +760,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 	std::vector<unsigned char> patch_content;
 	std::vector<LateRelocation *> lateRelocs;
 	std::vector<std::pair<VexRip, unsigned> > entryOffsets;
+	std::vector<trans_table_entry> transTable;
 	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
 		const VexRip &entryVr(it->first);
 		std::vector<Instruction<ThreadCfgLabel> *> toEmit;
@@ -746,6 +769,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 
 		entryOffsets.push_back(std::pair<VexRip, unsigned>(entryVr, patch_content.size()));
 
+		/* XXX need to do stack validation here */
 		toEmit.push_back(it->second);
 		while (!toEmit.empty()) {
 			Instruction<ThreadCfgLabel> *node = toEmit.back();
@@ -771,6 +795,19 @@ buildPatchForCrashSummary(Oracle *oracle,
 							true));
 					break;
 				}
+				VexRip vr(
+					cfg.labelToRip(
+						ConcreteCfgLabel(
+							summaryId,
+							node->label)));
+				transTable.push_back(
+					trans_table_entry(
+						patch_content.size(),
+						vr.unwrap_vexrip(),
+						vex_asprintf("CFG node %s, vexrip %s, for entry point %s",
+							     node->rip.name(),
+							     vr.name(),
+							     entryVr.name())));
 				for (auto it = node->relocs.begin();
 				     it != node->relocs.end();
 				     it++)
@@ -779,6 +816,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 				     it != node->lateRelocs.end();
 				     it++) {
 					LateRelocation *lr = *it;
+					assert(lr->nrImmediateBytes != 4);
 					lateRelocs.push_back(
 						new LateRelocation(
 							lr->offset + patch_content.size(),
@@ -799,11 +837,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 						new Relocation(
 							patch_content.size() - 4,
 							4,
-							cfg.labelToRip(
-								ConcreteCfgLabel(
-									summaryId,
-									node->label)).unwrap_vexrip() +
-								node->len,
+							vr.unwrap_vexrip() + node->len,
 							true,
 							true));
 				}
@@ -845,7 +879,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 						patch_content.size() - 4,
 						4,
 						vex_asprintf("0x%lx", reloc->raw_target),
-						4,
+						0,
 						true));
 			} else {
 				lateRelocs.push_back(
@@ -859,20 +893,44 @@ buildPatchForCrashSummary(Oracle *oracle,
 		}
 	}
 
-	printf("const char *patch_content = \"");
+	std::vector<const char *> fragments;
+	fragments.push_back("static const unsigned char patch_content[] = \"");
 	for (auto it = patch_content.begin(); it != patch_content.end(); it++)
-		printf("\\x%02x", *it);
-	printf("\";\n");
-	printf("relocs:\n");
+		fragments.push_back(vex_asprintf("\\x%02x", *it));
+	fragments.push_back("\";\n\n");
+	fragments.push_back("static const struct relocation relocations[] = {\n");
 	for (auto it = lateRelocs.begin(); it != lateRelocs.end(); it++)
-		printf("%s\n", (*it)->name());
-	exit(0);
-#if 0
-	PatchFragment<ThreadRip> *pf = new AddExitCallPatch(roots);
-	pf->fromCFG(allocLabel, cfg);
+		fragments.push_back(vex_asprintf("\t%s,\n", (*it)->asC()));
+	fragments.push_back("};\n\n");
+	fragments.push_back("static const struct trans_table_entry trans_table[] = {\n");
+	for (auto it = transTable.begin(); it != transTable.end(); it++)
+		fragments.push_back(vex_asprintf("\t{.rip = 0x%lx, .offset = %d} /* %s */,\n",
+						 it->rip,
+						 it->offset_in_patch,
+						 it->debug_msg));
+	fragments.push_back("};\n\n");
+	/* XXX this will need to change slightly once we have the
+	 * stack validation stuff in. */
+	fragments.push_back("static const struct entry_context entry_points[] = {\n");
+	for (auto it = entryOffsets.begin(); it != entryOffsets.end(); it++)
+		fragments.push_back(
+			vex_asprintf(
+				"\t{ .offset = %d, .rip = 0x%lx},\n",
+				it->second,
+				it->first.unwrap_vexrip()));
+	fragments.push_back("};\n\n");
 
-	return pf->asC(ident);
-#endif
+	fragments.push_back("static const struct patch patch = {\n");
+	fragments.push_back("\t.content = patch_content,\n");
+	fragments.push_back("\t.content_sz = sizeof(patch_content),\n");
+	fragments.push_back("\t.relocations = relocations,\n");
+	fragments.push_back("\t.nr_relocations = sizeof(relocations)/sizeof(relocations[0]),\n");
+	fragments.push_back("\t.trans_table = trans_table,\n");
+	fragments.push_back("\t.nr_trans_table_entries = sizeof(trans_table)/sizeof(trans_table[0]),\n");
+	fragments.push_back("\t.entry_points = entry_points,\n");
+	fragments.push_back("\t.nr_entry_points = sizeof(entry_points)/sizeof(entry_points[0]),\n");
+	fragments.push_back("};\n");
+	return flattenStringFragmentsMalloc(fragments, "", "", "");
 }
 
 static void

@@ -9,6 +9,8 @@
 #define PAGE_SIZE 4096ul
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 
+static const void *patch_body;
+
 #include "patch_skeleton_common.c"
 
 void acquire_lock_c(void) __attribute__((visibility ("hidden")));
@@ -21,7 +23,7 @@ acquire_lock_c(void)
 
 extern void acquire_lock_ll();
 asm ("\
-	/* We're called from the patch without saving any registers.\
+	/* We're called from the patch without saving any registers except rsi.\
 	We are outside the stack redzone, though.  Go and save all the\
 	call-clobbered registers and get into C. */\
 	\
@@ -33,7 +35,6 @@ acquire_lock_ll:\n\
 	push %rcx\n\
 	push %rdx\n\
 	push %rdi\n\
-        push %rsi\n\
 	push %r8\n\
 	push %r9\n\
 	push %r10\n\
@@ -43,7 +44,6 @@ acquire_lock_ll:\n\
 	pop %r10\n\
 	pop %r9\n\
 	pop %r8\n\
-        pop %rsi\n\
 	pop %rdi\n\
 	pop %rdx\n\
 	pop %rcx\n\
@@ -75,7 +75,7 @@ activate(void)
 
 	pthread_mutex_init(&mux, NULL);
 
-	body = build_patch(&patch);
+	patch_body = body = build_patch(&patch);
 
 	trampolines = malloc_executable(PAGE_SIZE);
 	/* We need to patch each entry point so that it turns into a
@@ -89,7 +89,6 @@ activate(void)
 	   popq %rsi
 	   lea 128(%rsp), %rsp
 	   jmp relevant_offset_in_patch
-	   1: acquire_lock_ll
 
 	   Do so. */
 	for (x = 0; x < patch.nr_entry_points; x++) {
@@ -109,17 +108,9 @@ activate(void)
 		*(unsigned long *)(trampolines+8) = (unsigned long)&acquire_lock_ll;
 
 		/* Patch in jump address */
-		for (y = 0; y < patch.nr_translations; y++) {
-			if (patch.trans_table[y].rip == patch.entry_points[x].rip) {
-				delta = (unsigned long)body + patch.trans_table[y].offset -
-					((unsigned long)trampolines + 32);
-				assert(delta == (int)delta);
-				assert(*(int *)(trampolines+28) == 0);
-				*(int *)(trampolines + 28) = delta;
-				break;
-			}
-		}
-		assert(y != patch.nr_translations);
+		*(int *)(trampolines + 28) =
+			(unsigned long)body + patch.entry_points[x].offset -
+			(unsigned long)trampolines - 32;
 
 		/* Trampoline is now correctly established.  Patch in
 		 * a jump to it. */
