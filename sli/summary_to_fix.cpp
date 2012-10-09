@@ -766,8 +766,21 @@ emitOneInstruction(const VexRip &vr,
 				lr->nrImmediateBytes,
 				lr->relative));
 	}
-	for (unsigned x = 0; x < node->len; x++)
-		patch_content.push_back(node->content[x]);
+
+	if (node->len == 1 && node->content[0] == 0xc3) {
+		/* Special case for ret instructions.  These are in
+		   theory redundant because of the stack context
+		   validation logic, so all we need to do is adjust
+		   the stack pointer.  Use an lea to do so. */
+		patch_content.push_back(0x48);
+		patch_content.push_back(0x8d);
+		patch_content.push_back(0x64);
+		patch_content.push_back(0x24);
+		patch_content.push_back(0x08);
+	} else {
+		for (unsigned x = 0; x < node->len; x++)
+			patch_content.push_back(node->content[x]);
+	}
 }
 
 static void
