@@ -244,6 +244,24 @@ operator |=(std::set<t> &dest, const s &other)
 }
 
 static CrashSummary *
+rewriteEntryPointExpressions(CrashSummary *cs, const std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > &rules)
+{
+	struct : public StateMachineTransformer {
+		const std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > *rules;
+		IRExpr *transformIex(IRExprEntryPoint *iep) {
+			std::pair<unsigned, CfgLabel> key(iep->thread, iep->label);
+			auto it = rules->find(key);
+			if (it != rules->end())
+				return new IRExprEntryPoint(it->second.first, it->second.second);
+			return iep;
+		}
+		bool rewriteNewStates() const { return false; }
+	} doit;
+	doit.rules = &rules;
+	return transformCrashSummary(cs, doit);
+}
+
+static CrashSummary *
 optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		       const VexPtr<OracleInterface> &oracle,
 		       GarbageCollectionToken token)
@@ -402,6 +420,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 	   the old one, in a way which isn't entirely well defined.
 	   Be conservative for now: if a root isn't needed and it has
 	   a single successor, replace it with that successor. */
+	std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > rootRewrites;
 	for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
 				       saneIterator(cs->storeMachine->cfg_roots));
 	     !it.finished();
@@ -422,8 +441,15 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 				}
 			}
 		}
+		rootRewrites.insert(
+			std::pair<std::pair<unsigned, CfgLabel>,
+			          std::pair<unsigned, CfgLabel> >(
+					  std::pair<unsigned, CfgLabel>(it->first, it->second->label),
+					  std::pair<unsigned, CfgLabel>(it->first, n->label)));
 		it->second = n;
 	}
+
+	cs = rewriteEntryPointExpressions(cs, rootRewrites);
 
 	/* Remove any roots which can't reach needed instructions. */
 	for (auto it = cs->loadMachine->cfg_roots.begin();
@@ -473,6 +499,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 			it = cs->storeMachine->cfg_roots.erase(it);
 	}
 
+	rootRewrites.clear();
 
 	/* Try a bit harder to rationalise the roots.  This version
 	 * only works for single-rooted CFGs.  The idea is to replace
@@ -572,8 +599,15 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 			if (dominators[*it2].count(result))
 				result = *it2;
 		}
+		rootRewrites.insert(
+			std::pair<std::pair<unsigned, CfgLabel>,
+			          std::pair<unsigned, CfgLabel> >(
+					  std::pair<unsigned, CfgLabel>(s->cfg_roots[0].first, s->cfg_roots[0].second->label),
+					  std::pair<unsigned, CfgLabel>(s->cfg_roots[0].first, result->label)));
 		s->cfg_roots[0].second = result;
 	}
+
+	cs = rewriteEntryPointExpressions(cs, rootRewrites);
 
 	/* Now walk the MAI map and remove anything which has become
 	 * redundant. */
