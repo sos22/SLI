@@ -66,6 +66,8 @@ IRStmtNoOp IRStmtNoOp::singleton;
 IRStmtStartAtomic IRStmtStartAtomic::singleton;
 IRStmtEndAtomic IRStmtEndAtomic::singleton;
 
+const IRExpr *IRExpr::no_tag_expr;
+
 /* Returns true if the operation definitely associates in the sense
  * that (a op b) op c == a op (b op c), or false if we're not sure. */
 bool
@@ -1379,63 +1381,63 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 }
 
 void
-IRExprBinop::prettyPrint(FILE *f) const
+IRExprBinop::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
 {
   if (irOpSimpleChar(op)) {
     fprintf(f, "(");
-    arg1->prettyPrint(f);
+    arg1->prettyPrint(f, tags);
     fprintf(f,  " %s ", irOpSimpleChar(op) );
-    arg2->prettyPrint(f);
+    arg2->prettyPrint(f, tags);
     fprintf(f,  ")" );
   } else {
     ppIROp(op, f);
     fprintf(f,  "(" );
-    arg1->prettyPrint(f);
+    arg1->prettyPrint(f, tags);
     fprintf(f,  "," );
-    arg2->prettyPrint(f);
+    arg2->prettyPrint(f, tags);
     fprintf(f,  ")" );
   }
 }
 
 void
-IRExprUnop::prettyPrint(FILE *f) const
+IRExprUnop::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
 {
   if (irOpSimpleChar(op))
     {
       fprintf(f, "%s(", irOpSimpleChar(op));
-      ppIRExpr(arg, f);
+      arg->prettyPrint(f, tags);
       fprintf(f, ")");
     }
   else
     {
       ppIROp(op, f);
       fprintf(f,  "(" );
-      ppIRExpr(arg, f);
+      arg->prettyPrint(f, tags);
       fprintf(f,  ")" );
     }
 }
 
 void
-IRExprLoad::prettyPrint(FILE *f) const
+IRExprLoad::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
 {
       fprintf(f,  "LD:");
       ppIRType(ty, f);
       fprintf(f,  "(" );
-      ppIRExpr(addr, f);
+      addr->prettyPrint(f, tags);
       fprintf(f,  ")" );
 }
 void
-IRExprConst::prettyPrint(FILE *f) const
+IRExprConst::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const
 {
       ppIRConst(con, f);
 }
 void
-IRExprCCall::prettyPrint(FILE *f) const
+IRExprCCall::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
 {
       ppIRCallee(cee, f);
       fprintf(f, "(");
       for (int i = 0; args[i] != NULL; i++) {
-        ppIRExpr(args[i], f);
+	args[i]->prettyPrint(f, tags);
         if (args[i+1] != NULL)
           fprintf(f, ",");
       }
@@ -1443,18 +1445,18 @@ IRExprCCall::prettyPrint(FILE *f) const
       ppIRType(retty, f);
 }
 void
-IRExprMux0X::prettyPrint(FILE *f) const
+IRExprMux0X::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
 {
       fprintf(f, "Mux0X(");
-      ppIRExpr(cond, f);
+      cond->prettyPrint(f, tags);
       fprintf(f, ",");
-      ppIRExpr(expr0, f);
+      expr0->prettyPrint(f, tags);
       fprintf(f, ",");
-      ppIRExpr(exprX, f);
+      exprX->prettyPrint(f, tags);
       fprintf(f, ")");
 }
 void
-IRExprAssociative::prettyPrint(FILE *f) const
+IRExprAssociative::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
 {
       /* Bit of a hack: our parser can't handle expressions with
 	 redundant brackets, which is what you get if print an assoc
@@ -1462,7 +1464,7 @@ IRExprAssociative::prettyPrint(FILE *f) const
 	 word) is to just avoid printing such things, by just printing
 	 the single assoc argument instead. */
       if (nr_arguments == 1) {
-	ppIRExpr(contents[0], f);
+	contents[0]->prettyPrint(f, tags);
 	return;
       }
 
@@ -1479,7 +1481,7 @@ IRExprAssociative::prettyPrint(FILE *f) const
 	for (int x = 0; x < nr_arguments; x++) {
 	  if (x != 0)
 	    fprintf(f, " %s ", irOpSimpleChar(op));
-	  ppIRExpr(contents[x], f);
+	  contents[x]->prettyPrint(f, tags);
 	}
 	fprintf(f, ")");
       }
@@ -1491,13 +1493,13 @@ IRExprAssociative::prettyPrint(FILE *f) const
 	for (int x = 0; x < nr_arguments; x++) {
 	  if (x != 0)
 	    fprintf(f, ", ");
-	  ppIRExpr(contents[x], f);
+	  contents[x]->prettyPrint(f, tags);
 	}
 	fprintf(f, ")");
       }
 }
 void
-IRExprHappensBefore::prettyPrint(FILE *f) const
+IRExprHappensBefore::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const
 {
       fprintf(f, "(%s <-< %s)", before.name(), after.name());
 }

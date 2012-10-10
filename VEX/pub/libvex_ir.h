@@ -50,6 +50,7 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <map>
 
 #include "libvex_basictypes.h"
 #include "libvex_alloc.h"
@@ -1318,13 +1319,15 @@ typedef
    For each kind of expression, we show what it looks like when
    pretty-printed with ppIRExpr().
 */
-class IRExpr : public GarbageCollected<IRExpr, &ir_heap>, public PrettyPrintable {
+class IRExpr : public GarbageCollected<IRExpr, &ir_heap> {
 protected:
    IRExpr(IRExprTag _tag)
        : tag(_tag), optimisationsApplied(0)
    {}
    virtual void _sanity_check(unsigned m) const = 0;
+   virtual void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const = 0;
 public:
+   static const IRExpr *no_tag_expr;
    const IRExprTag tag;
    unsigned optimisationsApplied;
 
@@ -1333,6 +1336,14 @@ public:
    void sanity_check(unsigned minOptimisations) const {
 	   assert(!(minOptimisations & ~optimisationsApplied));
 	   _sanity_check(minOptimisations);
+   }
+   void prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const {
+     if (this != no_tag_expr && tags.count(const_cast<IRExpr *>(this))) {
+       fprintf(f, "<v%d>", tags[const_cast<IRExpr *>(this)]);
+       return;
+     } else {
+       _prettyPrint(f, tags);
+     }
    }
    void sanity_check() const { sanity_check(optimisationsApplied); }
    NAMED_CLASS
@@ -1368,7 +1379,7 @@ struct IRExprGet : public IRExpr {
    {}
    void visit(HeapVisitor &) {}
    unsigned long hashval() const { return reg.hash() + ty * 3; }
-   void prettyPrint(FILE *f) const {
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const {
       if (ty == Ity_I64 && !reg.isTemp()) {
 	 switch (reg.asReg()) {
 #define do_reg(n) case OFFSET_amd64_ ## n : fprintf(f, #n ":%d:%d", reg.tid(), reg.gen()); return;
@@ -1440,11 +1451,11 @@ struct IRExprGetI : public IRExpr {
        return descr->hashval() + ix->hashval() * 3 + bias * 5 + tid * 7;
    }
 
-   void prettyPrint(FILE *f) const {
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const {
       fprintf(f,  "GETI" );
       ppIRRegArray(descr, f);
       fprintf(f, "[");
-      ix->prettyPrint(f);
+      ix->prettyPrint(f, tags);
       fprintf(f, ",%d](%d)", bias, tid);
    }
    IRType type() const { return descr->elemTy; }
@@ -1476,16 +1487,16 @@ struct IRExprQop : public IRExpr {
        return op + arg1->hashval() * 3 + arg2->hashval() * 5 +
 	   arg3->hashval() * 7 + arg4->hashval() * 11;
    }
-   void prettyPrint(FILE *f) const {
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const {
       ppIROp(op, f);
       fprintf(f,  "(" );
-      arg1->prettyPrint(f);
+      arg1->prettyPrint(f, tags);
       fprintf(f,  "," );
-      arg2->prettyPrint(f);
+      arg2->prettyPrint(f, tags);
       fprintf(f,  "," );
-      arg3->prettyPrint(f);
+      arg3->prettyPrint(f, tags);
       fprintf(f,  "," );
-      arg4->prettyPrint(f);
+      arg4->prettyPrint(f, tags);
       fprintf(f,  ")" );
    }
    IRType type() const {
@@ -1527,14 +1538,14 @@ struct IRExprTriop : public IRExpr {
        return op + arg1->hashval() * 3 + arg2->hashval() * 5 +
 	   arg3->hashval() * 7;
    }
-   void prettyPrint(FILE *f) const {
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const {
       ppIROp(op, f);
       fprintf(f,  "(" );
-      arg1->prettyPrint(f);
+      arg1->prettyPrint(f, tags);
       fprintf(f,  "," );
-      arg2->prettyPrint(f);
+      arg2->prettyPrint(f, tags);
       fprintf(f,  "," );
-      arg3->prettyPrint(f);
+      arg3->prettyPrint(f, tags);
       fprintf(f,  ")" );
    }
    IRType type() const {
@@ -1571,7 +1582,7 @@ struct IRExprBinop : public IRExpr {
    unsigned long hashval() const {
        return op + arg1->hashval() * 3 + arg2->hashval() * 5;
    }
-   void prettyPrint(FILE *f) const;
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const {
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
@@ -1602,7 +1613,7 @@ struct IRExprUnop : public IRExpr {
    unsigned long hashval() const {
        return op + arg->hashval() * 3;
    }
-   void prettyPrint(FILE *f) const;
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const {
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
@@ -1640,7 +1651,7 @@ struct IRExprLoad : public IRExpr {
    unsigned long hashval() const {
        return ty + addr->hashval() * 97;
    }
-   void prettyPrint(FILE *f) const;
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const { return ty; }
    void _sanity_check(unsigned m) const {
       sanity_check_irtype(ty);
@@ -1663,7 +1674,7 @@ struct IRExprConst : public IRExpr {
    }
    void visit(HeapVisitor &hv) { hv(con); }
    unsigned long hashval() const { return con->hashval(); }
-   void prettyPrint(FILE *f) const;
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const { return typeOfIRConst(con); }
    void _sanity_check(unsigned) const {
       con->sanity_check();
@@ -1722,7 +1733,7 @@ struct IRExprCCall : public IRExpr {
 	   h = h * 7 + args[x]->hashval();
        return h;
    }
-   void prettyPrint(FILE *f) const;
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const { return retty; }
    void _sanity_check(unsigned m) const {
       cee->sanity_check();
@@ -1753,7 +1764,7 @@ struct IRExprMux0X : public IRExpr {
        return cond->hashval() + expr0->hashval() * 3 +
 	   exprX->hashval() * 7;
    }
-   void prettyPrint(FILE *f) const;
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const { return expr0->type(); }
    void _sanity_check(unsigned m) const {
       cond->sanity_check(m);
@@ -1784,7 +1795,7 @@ struct IRExprAssociative : public IRExpr {
 	   h = h * 11 + contents[x]->hashval();
        return h;
    }
-   void prettyPrint(FILE *f) const;
+   void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const {
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
@@ -1818,7 +1829,7 @@ struct IRExprHappensBefore : public IRExpr {
     {}
     void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 19; }
-    void prettyPrint(FILE *f) const;
+    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
     IRType type() const { return Ity_I1; }
     void _sanity_check(unsigned) const {
 	    before.sanity_check();
@@ -1835,7 +1846,7 @@ struct IRExprFreeVariable : public IRExpr {
     {}
     void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 1045239 * id.hash(); }
-    void prettyPrint(FILE *f) const {
+    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const {
 	fprintf(f, "Free%s:", id.name());
 	ppIRType(ty, f);
 	fprintf(f, ":%s", isUnique ? "UNIQUE" : "NONUNIQUE");
@@ -1863,7 +1874,7 @@ struct IRExprEntryPoint : public IRExpr {
     unsigned long hashval() const {
 	return label.hash() ^ thread;
     }
-    void prettyPrint(FILE *f) const {
+    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const {
 	fprintf(f, "Entry(%d:%s)", thread, label.name());
     }
     IRType type() const { return Ity_I1; }
@@ -1898,7 +1909,7 @@ struct IRExprControlFlow : public IRExpr {
     unsigned long hashval() const {
 	return cfg1.hash() ^ thread ^ (cfg2.hash() * 7);
     }
-    void prettyPrint(FILE *f) const {
+    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const {
 	fprintf(f, "Control(%d:%s->%s)", thread, cfg1.name(), cfg2.name());
     }
     IRType type() const { return Ity_I1; }
@@ -1947,7 +1958,16 @@ static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRTy
 }
 
 /* Pretty-print an IRExpr. */
-static inline void ppIRExpr ( const IRExpr*e, FILE *f ) { e->prettyPrint(f); }
+static inline void ppIRExpr ( const IRExpr*e, FILE *f, std::map<IRExpr *, unsigned> &tags ) {
+  assert(!IRExpr::no_tag_expr);
+  IRExpr::no_tag_expr = e;
+  e->prettyPrint(f, tags);
+  IRExpr::no_tag_expr = NULL;
+}
+static inline void ppIRExpr ( const IRExpr*e, FILE *f ) {
+  std::map<IRExpr *, unsigned> tags;
+  ppIRExpr(e, f, tags);
+}
 extern bool parseIRExpr(IRExpr **out, const char *str, const char **suffix);
 
 /* NULL-terminated IRExpr vector constructors, suitable for

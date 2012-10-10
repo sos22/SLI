@@ -141,7 +141,39 @@ __fail(const char *file, unsigned line, const char *fmt, ...)
 void
 printIRExpr(IRExpr *e)
 {
-	ppIRExpr(e, stdout);
+	struct : public IRExprTransformer {
+		std::map<IRExpr *, unsigned> multiplicity;
+		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+			bool counts = false;
+			if (e->tag != Iex_Const && e->tag != Iex_Get &&
+			    e->tag != Iex_HappensBefore && e->tag != Iex_FreeVariable &&
+			    e->tag != Iex_EntryPoint && e->tag != Iex_ControlFlow &&
+			    e->tag != Iex_Load)
+				counts = true;
+			if (counts && e->tag == Iex_Unop &&
+			    ((IRExprUnop *)e)->op == Iop_Not1)
+				counts = false;
+			if (counts) {
+				multiplicity[e]++;
+				if (multiplicity[e] > 1)
+					return e;
+			}
+			return IRExprTransformer::transformIRExpr(e, done_something);
+		}
+	} buildMult;
+	buildMult.doit(e);
+	std::map<IRExpr *, unsigned> tags;
+	unsigned next_tag = 1;
+	for (auto it = buildMult.multiplicity.begin(); it != buildMult.multiplicity.end(); it++) {
+		if (it->second > 1)
+			tags[it->first] = next_tag++;
+	}
+	for (auto it = tags.begin(); it != tags.end(); it++) {
+		printf("\t<v%d> = ", it->second);
+		ppIRExpr(it->first, stdout, tags);
+		printf("\n");
+	}
+	ppIRExpr(e, stdout, tags);
 	printf("\n");
 }
 
