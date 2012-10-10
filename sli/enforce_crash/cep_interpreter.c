@@ -388,7 +388,7 @@ init_high_level_state(struct high_level_state *hls)
 
 #define cpu_user_regs reg_struct
 #include "x86_emulate.h"
-#include "x86_emulate.c"
+#include "../x86_emulate.c"
 #undef cpu_user_regs
 
 struct cep_emulate_ctxt {
