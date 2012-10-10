@@ -2295,6 +2295,7 @@ start_interpreting(void)
 			break;
 
 	if (entrypoint_idx == plan.nr_entry_points) {
+		acquire_big_lock();
 		debug("Start with a dummy entry point\n");
 		EVENT(dummy_entry_point);
 		exit_interpreter();
