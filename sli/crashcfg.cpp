@@ -281,7 +281,8 @@ done_prefixes:
 }
 
 bool
-CrashCfg::parse(crashEnforcementRoots &roots, AddressSpace *as, const char *str, const char **suffix)
+CrashCfg::parse(crashEnforcementRoots &roots, AddressSpace *as,
+		bool generateRelocs, const char *str, const char **suffix)
 {
 	if (!parseThisString("CFG:\n", str, &str))
 		return false;
@@ -328,7 +329,7 @@ CrashCfg::parse(crashEnforcementRoots &roots, AddressSpace *as, const char *str,
 		ConcreteThread concThread(roots.lookupAbsThread(absThread));
 		ConcreteCfgLabel clabel(concThread.summary(), it->second.first.label);
 		Instruction<ThreadCfgLabel> *instr =
-			decode_instr(as, rips[clabel].unwrap_vexrip(), it->first, true);
+			decode_instr(as, rips[clabel].unwrap_vexrip(), it->first, generateRelocs);
 		assert(instr->len != 0);
 		this->content[it->first] = instr;
 	}
