@@ -32,6 +32,24 @@ optimiseStateMachineAssuming(StateMachine *sm,
 							    !assumptionIsTrue);
 	}
 
+	if (assumption->tag == Iex_EntryPoint) {
+		/* Simplify the CFGs a bit based on knowledge of the
+		 * entry point. */
+		IRExprEntryPoint *a = (IRExprEntryPoint *)assumption;
+		for (auto it = sm->cfg_roots.begin();
+		     it != sm->cfg_roots.end();
+			) {
+			unsigned tid = it->first;
+			const CFGNode *root = it->second;
+			if ( tid == a->thread &&
+			     assumptionIsTrue != (root->label == a->label) ) {
+				it = sm->cfg_roots.erase(it);
+			} else {
+				it++;
+			}
+		}
+	}
+
 	struct : public StateMachineTransformer {
 		IRExpr *assumption;
 		bool assumptionIsTrue;
@@ -40,6 +58,16 @@ optimiseStateMachineAssuming(StateMachine *sm,
 			if (e == assumption) {
 				*done_something = true;
 				return IRExpr_Const(IRConst_U1(assumptionIsTrue));
+			}
+			if (assumptionIsTrue &&
+			    e->tag == Iex_EntryPoint &&
+			    assumption->tag == Iex_EntryPoint &&
+			    ((IRExprEntryPoint *)e)->thread == ((IRExprEntryPoint *)assumption)->thread) {
+				/* We're supposed to be interned here. */
+				assert( ((IRExprEntryPoint *)e)->label != ((IRExprEntryPoint *)assumption)->label);
+				/* If we entered at t1:labelA we can't
+				 * also have entered at t1:labelB */
+				return IRExpr_Const(IRConst_U1(0));
 			}
 			return StateMachineTransformer::transformIRExpr(e, done_something);
 		}
