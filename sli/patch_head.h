@@ -1,4 +1,5 @@
 extern unsigned char release_lock[];
+extern unsigned char acquire_lock[];
 
 struct relocation {
 	unsigned offset;
@@ -13,18 +14,18 @@ struct trans_table_entry {
 	unsigned offset;
 };
 
-struct patch_entry_point {
-	unsigned long rip;
+struct entry_context {
 	unsigned offset;
+	unsigned long rip;
 };
 
 struct patch {
+	const unsigned char *content;
+	unsigned content_sz;
 	const struct relocation *relocations;
 	int nr_relocations;
 	const struct trans_table_entry *trans_table;
-	int nr_translations;
-	const struct patch_entry_point *entry_points;
+	int nr_trans_table_entries;
+	const struct entry_context *entry_points;
 	int nr_entry_points;
-	const unsigned char *content;
-	unsigned content_size;
 };

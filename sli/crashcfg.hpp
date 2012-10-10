@@ -587,7 +587,7 @@ public:
 	CrashCfg(crashEnforcementRoots &roots, const SummaryId &summaryId, CrashSummary *summary,
 		 AddressSpace *as, bool need_relocs);
 
-	bool parse(crashEnforcementRoots &roots, AddressSpace *as, const char *str, const char **suffix);
+	bool parse(crashEnforcementRoots &roots, AddressSpace *as, bool generateRelocs, const char *str, const char **suffix);
 	void prettyPrint(FILE *f, bool verbose = false);
 	void operator|=(const CrashCfg &o) {
 		for (auto it = o.content.begin(); it != o.content.end(); it++) {

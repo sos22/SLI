@@ -8,6 +8,9 @@
 #define NR_PTRS 100
 static int *volatile global_ptrs[NR_PTRS];
 
+static int read_events;
+static int write_events;
+
 static volatile bool force_quit;
 
 #define STOP_ANALYSIS()					\
@@ -30,6 +33,7 @@ thr_main(void *ign)
 			*p = 5;
 		}
 		STOP_ANALYSIS();
+		read_events++;
 	}
 	return NULL;
 }
@@ -53,9 +57,12 @@ main()
 		global_ptrs[idx] = &t;
 		STOP_ANALYSIS();
 		sleep(1);
+		write_events++;
 	}
 
 	force_quit = true;
 	pthread_join(thr, NULL);
+
+	printf("%d read, %d write events\n", read_events, write_events);
 	return 0;
 }

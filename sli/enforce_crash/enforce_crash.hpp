@@ -713,7 +713,7 @@ public:
 	bool parse(AddressSpace *as, const char *str, const char **suffix) {
 		if (!parseThisString("Crash enforcement data:\n", str, &str) ||
 		    !roots.parse(str, &str) ||
-		    !crashCfg.parse(roots, as, str, &str) ||
+		    !crashCfg.parse(roots, as, false, str, &str) ||
 		    !exprStashPoints.parse(str, &str) ||
 		    !happensBeforePoints.parse(crashCfg, str, &str) ||
 		    !expressionEvalPoints.parse(str, &str) ||

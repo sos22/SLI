@@ -388,7 +388,7 @@ init_high_level_state(struct high_level_state *hls)
 
 #define cpu_user_regs reg_struct
 #include "x86_emulate.h"
-#include "x86_emulate.c"
+#include "../x86_emulate.c"
 #undef cpu_user_regs
 
 struct cep_emulate_ctxt {
@@ -2295,6 +2295,7 @@ start_interpreting(void)
 			break;
 
 	if (entrypoint_idx == plan.nr_entry_points) {
+		acquire_big_lock();
 		debug("Start with a dummy entry point\n");
 		EVENT(dummy_entry_point);
 		exit_interpreter();
