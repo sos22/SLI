@@ -26,7 +26,7 @@ public:
 		  idx(_idx)
 	{}
 	void visit(HeapVisitor &) {}
-	void prettyPrint(FILE *f) const {
+	void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const {
 		fprintf(f, "<arg%d>", idx);
 	}
 	unsigned long hashval() const { return idx * 785234789; }

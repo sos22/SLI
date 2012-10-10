@@ -147,7 +147,7 @@ public:
 		for (auto it = begin(); it != end(); it++) {
 			fprintf(f, "\t\t%s -> {", it->first.name());
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
-				(*it2)->prettyPrint(f);
+				ppIRExpr(*it2, f);
 				fprintf(f, ", ");
 			}
 			fprintf(f, "}\n");
@@ -405,7 +405,7 @@ public:
 		fprintf(f, "\tSlot map:\n");
 		for (auto it = begin(); it != end(); it++) {
 			fprintf(f, "\t\t");
-			it->first->prettyPrint(f);
+			ppIRExpr(it->first, f);
 			fprintf(f, " -> %d\n", it->second.idx);
 		}
 	}
@@ -452,7 +452,7 @@ struct exprEvalPoint {
 
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "%s", invert ? "!" : "");
-		e->prettyPrint(f);
+		ppIRExpr(e, f);
 	}
 	bool parse(const char *str, const char **suffix) {
 		bool inv = false;
