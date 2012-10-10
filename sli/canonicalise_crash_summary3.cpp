@@ -986,7 +986,8 @@ static void
 findBooleanMultiplicity(IRExpr *input, std::map<IRExpr *, int> &r)
 {
 	assert(input->type() == Ity_I1);
-	assert(input->tag != Iex_Const);
+	if (input->tag == Iex_Const)
+		return;
 	if (input->tag == Iex_Associative) {
 		IRExprAssociative *iex = (IRExprAssociative *)input;
 		assert(iex->op == Iop_And1 || iex->op == Iop_Or1);
