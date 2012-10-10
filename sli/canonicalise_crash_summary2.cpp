@@ -51,6 +51,7 @@ optimiseStateMachineAssuming(StateMachine *sm,
 	}
 
 	struct : public StateMachineTransformer {
+		std::set<std::pair<unsigned, CfgLabel> > *entryPoints;
 		IRExpr *assumption;
 		bool assumptionIsTrue;
 
@@ -126,6 +127,21 @@ enumCfgNodes(CrashSummary *input, std::set<const CFGNode *> &out)
 	}
 }
 
+static IRExpr *
+removeImpossibleRoots(IRExpr *a, const std::set<std::pair<unsigned, CfgLabel> > &roots)
+{
+	struct : public IRExprTransformer {
+		const std::set<std::pair<unsigned, CfgLabel> > *roots;
+		IRExpr *transformIex(IRExprEntryPoint *iep) {
+			if (!roots->count(std::pair<unsigned, CfgLabel>(iep->thread, iep->label)))
+				return IRExpr_Const(IRConst_U1(0));
+			return iep;
+		}
+	} doit;
+	doit.roots = &roots;
+	return doit.doit(a);
+}
+
 static CrashSummary *
 canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 			   VexPtr<OracleInterface> oracle,
@@ -161,6 +177,18 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 	if (input->loadMachine->root->type == StateMachineState::Unreached ||
 	    input->storeMachine->root->type == StateMachineState::Unreached)
 		input->verificationCondition = IRExpr_Const(IRConst_U1(0));
+
+	std::set<std::pair<unsigned, CfgLabel> > machineRoots;
+	for (auto it = input->loadMachine->cfg_roots.begin();
+	     it != input->loadMachine->cfg_roots.end();
+	     it++)
+		machineRoots.insert(std::pair<unsigned, CfgLabel>(it->first, it->second->label));
+	for (auto it = input->storeMachine->cfg_roots.begin();
+	     it != input->storeMachine->cfg_roots.end();
+	     it++)
+		machineRoots.insert(std::pair<unsigned, CfgLabel>(it->first, it->second->label));
+
+	input->verificationCondition = removeImpossibleRoots(input->verificationCondition, machineRoots);
 
 	std::set<MemoryAccessIdentifier> neededMais;
 	findAllMais(input, neededMais);
