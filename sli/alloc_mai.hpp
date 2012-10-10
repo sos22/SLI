@@ -112,6 +112,9 @@ public:
 		return res;
 	}
 
+	void restrict(const std::set<const CFGNode *> &cfgNodes,
+		      const std::set<MemoryAccessIdentifier> &mais);
+
 	void visit(HeapVisitor &hv) {
 		for (auto it = maiCorrespondence->begin();
 		     it != maiCorrespondence->end();

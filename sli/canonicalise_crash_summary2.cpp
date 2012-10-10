@@ -78,6 +78,54 @@ optimiseStateMachineAssuming(StateMachine *sm,
 	return doit.transform(sm);
 }
 
+static void
+findAllMais(CrashSummary *summary, std::set<MemoryAccessIdentifier> &out)
+{
+	std::set<StateMachineSideEffectMemoryAccess *> acc;
+	enumSideEffects(summary->loadMachine, acc);
+	enumSideEffects(summary->storeMachine, acc);
+	for (auto it = acc.begin(); it != acc.end(); it++)
+		out.insert( (*it)->rip );
+	struct : public StateMachineTransformer {
+		std::set<MemoryAccessIdentifier> *out;
+		IRExpr *transformIex(IRExprHappensBefore *hb) {
+			out->insert(hb->before);
+			out->insert(hb->after);
+			return hb;
+		}
+		IRExpr *transformIex(IRExprFreeVariable *f) {
+			out->insert(f->id);
+			return f;
+		}
+		bool rewriteNewStates() const { return false; }
+	} d;
+	d.out = &out;
+	transformCrashSummary(summary, d);
+}
+
+static void
+enumCfgNodes(CrashSummary *input, std::set<const CFGNode *> &out)
+{
+	std::vector<const CFGNode *> q;
+	for (auto it = input->loadMachine->cfg_roots.begin();
+	     it != input->loadMachine->cfg_roots.end();
+	     it++)
+		q.push_back(it->second);
+	for (auto it = input->storeMachine->cfg_roots.begin();
+	     it != input->storeMachine->cfg_roots.end();
+	     it++)
+		q.push_back(it->second);
+	while (!q.empty()) {
+		const CFGNode *n = q.back();
+		q.pop_back();
+		if (!out.insert(n).second)
+			continue;
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++)
+			if (it->instr)
+				q.push_back(it->instr);
+	}
+}
+
 static CrashSummary *
 canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 			   VexPtr<OracleInterface> oracle,
@@ -113,6 +161,13 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 	if (input->loadMachine->root->type == StateMachineState::Unreached ||
 	    input->storeMachine->root->type == StateMachineState::Unreached)
 		input->verificationCondition = IRExpr_Const(IRConst_U1(0));
+
+	std::set<MemoryAccessIdentifier> neededMais;
+	findAllMais(input, neededMais);
+	std::set<const CFGNode *> allowedCfgNodes;
+	enumCfgNodes(input, allowedCfgNodes);
+	mai->restrict(allowedCfgNodes, neededMais);
+	input->mai = mai;
 
 	return input;
 }

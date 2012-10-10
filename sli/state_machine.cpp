@@ -1311,3 +1311,25 @@ dumpStateMachine(const StateMachine *sm, const char *fname)
 	printStateMachine(sm, f);
 	fclose(f);
 }
+
+void
+MaiMap::restrict(const std::set<const CFGNode *> &cfgNodes,
+		 const std::set<MemoryAccessIdentifier> &mais)
+{
+	for (auto it = maiCorrespondence->begin();
+	     it != maiCorrespondence->end();
+		) {
+		if (!mais.count(it->first)) {
+			maiCorrespondence->erase(it++);
+			continue;
+		}
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); ) {
+			if (cfgNodes.count(*it2)) {
+				it2++;
+			} else {
+				it2 = it->second.erase(it2);
+			}
+		}
+		it++;
+	}
+}
