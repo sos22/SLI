@@ -307,6 +307,8 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		bytecode_eval_expr(f, ieb->arg1, ced, slots);
 		bytecode_eval_expr(f, ieb->arg2, ced, slots);
 		switch (ieb->op) {
+		case Iop_CmpEQ8:
+		case Iop_CmpEQ16:
 		case Iop_CmpEQ32:
 		case Iop_CmpEQ64:
 			bytecode_op(f, "cmp_eq", ieb->arg1->type());
