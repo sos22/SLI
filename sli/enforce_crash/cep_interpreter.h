@@ -37,7 +37,13 @@ enum byte_code_op {
 	bcop_not,
 	bcop_neg,
 	bcop_sign_extend64,
+	/* Zero extend ops are somewhat misnamed: they convert the
+	   argument the appropriate number of bits.  If that's an
+	   upcast then they zero extend, but they also work for
+	   downcasts, which aren't really extends at all. */
 	bcop_zero_extend8,
+	bcop_zero_extend16,
+	bcop_zero_extend32,
 	bcop_zero_extend64,
 
 	/* Specials */

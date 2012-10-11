@@ -266,6 +266,9 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		case Ico_U8:
 			bytecode_const8(f, iec->con->Ico.U8);
 			break;
+		case Ico_U16:
+			bytecode_const16(f, iec->con->Ico.U16);
+			break;
 		case Ico_U32:
 			bytecode_const32(f, iec->con->Ico.U32);
 			break;
@@ -303,14 +306,33 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		case Iop_Neg64:
 			bytecode_op(f, "neg", ieu->arg->type());
 			break;
+		case Iop_8Sto64:
+		case Iop_16Sto64:
 		case Iop_32Sto64:
 			bytecode_op(f, "sign_extend64", ieu->arg->type());
 			break;
+		case Iop_1Uto8:
+		case Iop_16to8:
+		case Iop_32to8:
+		case Iop_64to8:
+			bytecode_op(f, "zero_extend8", ieu->arg->type());
+			break;
+		case Iop_8Uto16:
+		case Iop_32to16:
+		case Iop_64to16:
+			bytecode_op(f, "zero_extend16", ieu->arg->type());
+			break;
+		case Iop_1Uto32:
+		case Iop_8Uto32:
+		case Iop_16Uto32:
+		case Iop_64to32:
+			bytecode_op(f, "zero_extend32", ieu->arg->type());
+			break;
+		case Iop_1Uto64:
+		case Iop_8Uto64:
+		case Iop_16Uto64:
 		case Iop_32Uto64:
 			bytecode_op(f, "zero_extend64", ieu->arg->type());
-			break;
-		case Iop_1Uto8:
-			bytecode_op(f, "zero_extend8", ieu->arg->type());
 			break;
 		case Iop_BadPtr:
 			bytecode_op(f, "badptr", Ity_I64);

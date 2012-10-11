@@ -980,6 +980,16 @@ eval_bytecode(const unsigned short *bytecode,
 			bytecode_push(&stack, inp, bct_long);
 			break;
 		}
+		case bcop_zero_extend32: {
+			unsigned long inp = bytecode_pop(&stack, type);
+			bytecode_push(&stack, inp, bct_int);
+			break;
+		}
+		case bcop_zero_extend16: {
+			unsigned long inp = bytecode_pop(&stack, type);
+			bytecode_push(&stack, inp, bct_short);
+			break;
+		}
 		case bcop_zero_extend8: {
 			unsigned long inp = bytecode_pop(&stack, type);
 			bytecode_push(&stack, inp, bct_byte);
