@@ -336,8 +336,16 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 		*errors_produced = 0;
 	}
 	switch (what->tag) {
-	case Iex_Get:
+	case Iex_Get: {
+		auto *i = (IRExprGet *)what;
+		/* Interpreters can only get at the ``normal'' integer
+		   registers, plus FS_ZERO, so we need to treat the
+		   other ones as being free. */
+		if (i->reg.isReg() &&
+		    (unsigned)i->reg.asReg() > offsetof(VexGuestAMD64State, guest_FS_ZERO))
+			return NULL;
 		return what;
+	}
 	case Iex_GetI: {
 		auto *i = (IRExprGetI *)what;
 		IRExpr *ix = removeFreeVariables(i->ix, 0, NULL);
