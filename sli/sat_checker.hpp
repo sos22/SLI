@@ -22,9 +22,10 @@ public:
 	   x && (x || y) then x and y are the primaries and
 	   (x || y) will be a secondary. */
 	std::map<IRExpr *, std::pair<bool, bool> > memo;
+	std::map<unsigned, CfgLabel> entry;
 	std::set<IRExpr *> fixedVariables;
 	void prettyPrint(FILE *f) const;
-	void clear() { memo.clear(); fixedVariables.clear(); }
+	void clear() { memo.clear(); fixedVariables.clear(); entry.clear(); }
 };
 class sat_enumerator {
 	satisfier content;

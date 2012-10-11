@@ -767,6 +767,24 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 			for (int i = 0; i < a->nr_arguments && !acc; i++)
 				acc |= evalExpression(a->contents[i], chooser, preferred_result, sat);
 			it->second.first = acc;
+		} else if (e->tag == Iex_EntryPoint) {
+			it->second.second = true;
+			IRExprEntryPoint *a = (IRExprEntryPoint *)e;
+			auto it2 = sat.entry.find(a->thread);
+			if (it2 == sat.entry.end()) {
+				if (preferred_result == !chooser.nd_choice(2)) {
+					sat.entry.insert(std::pair<unsigned, CfgLabel>(a->thread, a->label));
+					it->second.first = true;
+				} else {
+					it->second.first = false;
+				}
+			} else {
+				/* Because otherwise we'd have found
+				   it in the memo table, by the
+				   internment property. */
+				assert(it2->second != a->label);
+				it->second.first = false;
+			}
 		} else {
 			if (e->tag == Iex_Binop &&
 			    ((IRExprBinop *)e)->op >= Iop_CmpEQ8 &&
@@ -933,4 +951,13 @@ satisfier::prettyPrint(FILE *f) const
 				it->second.first ? "true" : "false");
 		}
 	}
+	fprintf(f, "Fixed: {");
+	for (auto it = fixedVariables.begin(); it != fixedVariables.end(); it++) {
+		if (it != fixedVariables.begin())
+			fprintf(f, ", ");
+		ppIRExpr(*it, f);
+	}
+	fprintf(f, "}\nEntry map:\n");
+	for (auto it = entry.begin(); it != entry.end(); it++)
+		fprintf(f, "\t%d -> %s\n", it->first, it->second.name());
 }
