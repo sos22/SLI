@@ -447,11 +447,15 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 		}
 		return IRExpr_Unop(i->op, arg);
 	}
-	case Iex_Load:
-		/* Should arguably recurse into addr here, but the
-		   rest of the pipeline will never look at it, so
-		   don't bother. */
-		return what;
+	case Iex_Load: {
+		auto i = (IRExprLoad *)what;
+		auto addr = removeFreeVariables(i->addr, 0, NULL);
+		if (!addr)
+			return NULL;
+		if (addr == i->addr)
+			return what;
+		return IRExpr_Load(i->ty, addr);
+	}
 	case Iex_Const:
 		return what;
 	case Iex_CCall:
