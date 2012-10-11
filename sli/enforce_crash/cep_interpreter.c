@@ -925,6 +925,11 @@ eval_bytecode(const unsigned short *bytecode,
 			bytecode_push(&stack, res, bct_long);
 			break;
 		}
+		case bcop_zero_extend64: {
+			unsigned long inp = bytecode_pop(&stack, type);
+			bytecode_push(&stack, inp, bct_long);
+			break;
+		}
 
 		case bcop_load: {
 			unsigned long addr = bytecode_pop(&stack, bct_long);

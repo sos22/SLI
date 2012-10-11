@@ -293,6 +293,9 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		case Iop_32Sto64:
 			bytecode_op(f, "sign_extend64", ieu->arg->type());
 			break;
+		case Iop_32Uto64:
+			bytecode_op(f, "zero_extend64", ieu->arg->type());
+			break;
 		case Iop_BadPtr:
 			bytecode_op(f, "badptr", Ity_I64);
 			break;

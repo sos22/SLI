@@ -33,6 +33,7 @@ enum byte_code_op {
 	/* Unary ops */
 	bcop_not,
 	bcop_sign_extend64,
+	bcop_zero_extend64,
 
 	/* Specials */
 	bcop_load,
