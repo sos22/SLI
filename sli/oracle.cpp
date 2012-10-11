@@ -3920,7 +3920,15 @@ stack_offset(Oracle *oracle, unsigned long rip)
 					/* XXX write me: should query
 					 * the oracle for branch
 					 * targets. */
-					abort();
+					Oracle::Function f(q.first);
+					std::vector<StaticRip> fthru;
+					f.getInstructionFallThroughs(q.first, fthru);
+					for (auto it = fthru.begin();
+					     it != fthru.end();
+					     it++) {
+						q.first = *it;
+						queue.push(q);
+					}
 				}
 			}
 		}

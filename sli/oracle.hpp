@@ -177,7 +177,9 @@ public:
 		void addPredecessorsReturn(const StaticRip &rip, std::vector<StaticRip> &out);
 		void updateSuccessorInstructionsAliasing(const StaticRip &rip, AddressSpace *as, std::vector<StaticRip> *changed,
 							 bool *done_something);
+	public:
 		void getInstructionFallThroughs(const StaticRip &rip, std::vector<StaticRip> &out);
+	private:
 		void getInstructionCallees(const StaticRip &rip, std::vector<StaticRip> &out);
 		void getSuccessors(const StaticRip &rip, std::vector<StaticRip> &succ);
 		void getFunctionCallers(std::vector<StaticRip> &out);
