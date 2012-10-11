@@ -342,7 +342,8 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 		   registers, plus FS_ZERO, so we need to treat the
 		   other ones as being free. */
 		if (i->reg.isReg() &&
-		    (unsigned)i->reg.asReg() > offsetof(VexGuestAMD64State, guest_FS_ZERO))
+		    (unsigned)i->reg.asReg() > offsetof(VexGuestAMD64State, guest_R15) &&
+		    (unsigned)i->reg.asReg() != offsetof(VexGuestAMD64State, guest_FS_ZERO))
 			return NULL;
 		return what;
 	}
