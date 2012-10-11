@@ -29,6 +29,7 @@ enum byte_code_op {
 	bcop_cmp_ltu,
 	bcop_add,
 	bcop_and,
+	bcop_xor,
 	bcop_mul,
 	bcop_shl,
 
@@ -36,6 +37,7 @@ enum byte_code_op {
 	bcop_not,
 	bcop_neg,
 	bcop_sign_extend64,
+	bcop_zero_extend8,
 	bcop_zero_extend64,
 
 	/* Specials */

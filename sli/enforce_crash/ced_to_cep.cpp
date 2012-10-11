@@ -309,6 +309,9 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		case Iop_32Uto64:
 			bytecode_op(f, "zero_extend64", ieu->arg->type());
 			break;
+		case Iop_1Uto8:
+			bytecode_op(f, "zero_extend8", ieu->arg->type());
+			break;
 		case Iop_BadPtr:
 			bytecode_op(f, "badptr", Ity_I64);
 			break;
@@ -369,6 +372,13 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 			case Iop_And32:
 			case Iop_And64:
 				bytecode_op(f, "and", iea->type());
+				break;
+			case Iop_Xor1:
+			case Iop_Xor8:
+			case Iop_Xor16:
+			case Iop_Xor32:
+			case Iop_Xor64:
+				bytecode_op(f, "xor", iea->type());
 				break;
 			default:
 				abort();
