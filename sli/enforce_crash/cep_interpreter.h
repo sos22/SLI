@@ -29,13 +29,16 @@ enum byte_code_op {
 	bcop_cmp_ltu,
 	bcop_add,
 	bcop_and,
+	bcop_or,
 	bcop_xor,
 	bcop_mul,
 	bcop_shl,
+	bcop_shr,
 
 	/* Unary ops */
 	bcop_not,
 	bcop_neg,
+	bcop_sign_extend32,
 	bcop_sign_extend64,
 	/* Zero extend ops are somewhat misnamed: they convert the
 	   argument the appropriate number of bits.  If that's an

@@ -896,6 +896,13 @@ eval_bytecode(const unsigned short *bytecode,
 			debug("bcop_and: %lx & %lx -> %lx\n", arg1, arg2, arg1 & arg2);
 			break;
 		}
+		case bcop_or: {
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			unsigned long arg2 = bytecode_pop(&stack, type);
+			bytecode_push(&stack, arg1 | arg2, type);
+			debug("bcop_and: %lx | %lx -> %lx\n", arg1, arg2, arg1 | arg2);
+			break;
+		}
 		case bcop_xor: {
 			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, type);
@@ -915,6 +922,13 @@ eval_bytecode(const unsigned short *bytecode,
 			unsigned long arg2 = bytecode_pop(&stack, bct_byte);
 			debug("bcop_shl: %lx << %lx -> %lx\n", arg1, arg2, arg2 << arg1);
 			bytecode_push(&stack, arg2 << arg1, type);
+			break;
+		}
+		case bcop_shr: {
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			unsigned long arg2 = bytecode_pop(&stack, bct_byte);
+			debug("bcop_shr: %lx >> %lx -> %lx\n", arg1, arg2, arg2 << arg1);
+			bytecode_push(&stack, arg2 >> arg1, type);
 			break;
 		}
 
@@ -973,6 +987,25 @@ eval_bytecode(const unsigned short *bytecode,
 				abort();
 			}
 			bytecode_push(&stack, res, bct_long);
+			break;
+		}
+		case bcop_sign_extend32: {
+			unsigned long inp = bytecode_pop(&stack, type);
+			unsigned long res;
+			switch (type) {
+			case bct_bit:
+				res = ((int)inp << 31) >> 31;
+				break;
+			case bct_byte:
+				res = ((int)inp << 24) >> 24;
+				break;
+			case bct_short:
+				res = ((int)inp << 16) >> 16;
+				break;
+			default:
+				abort();
+			}
+			bytecode_push(&stack, res, bct_int);
 			break;
 		}
 		case bcop_zero_extend64: {
