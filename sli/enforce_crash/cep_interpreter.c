@@ -2224,6 +2224,14 @@ wait_for_bound_exits(struct high_level_state *hls)
 	return;
 }
 
+static unsigned long
+fetch_fs_base(void)
+{
+	unsigned long res;
+	arch_prctl(ARCH_GET_FS, (unsigned long)&res);
+	return res;
+}
+
 static void
 stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 {
@@ -2258,6 +2266,9 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 					do_case(14, r14);
 					do_case(15, r15);
 #undef do_case
+				case 16:
+					*slot = fetch_fs_base();
+					break;
 				default:
 					abort();
 				}

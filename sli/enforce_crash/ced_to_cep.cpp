@@ -455,6 +455,16 @@ struct cfg_annotation_summary {
 	const char *id;
 };
 
+static unsigned
+getRegisterIdx(unsigned vex_offset)
+{
+	if (vex_offset <= OFFSET_amd64_R15)
+		return (vex_offset - OFFSET_amd64_RAX) / 8;
+	if (vex_offset == offsetof(VexGuestAMD64State, guest_FS_ZERO))
+		return 16;
+	abort();
+}
+
 static void
 dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller,
 		   const slotMapT &slots, const char *ident)
@@ -521,7 +531,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 					IRExprGet *e = (IRExprGet *)*it2;
 					simulationSlotT simSlot(slots(e));
 					fprintf(f, "    { .reg = %d, .slot = %d },\n",
-						e->reg.isReg() ? RegisterIdx::fromVexOffset(e->reg.asReg()).idx : -1,
+						e->reg.isReg() ? getRegisterIdx(e->reg.asReg()) : -1,
 						simSlot.idx);
 				}
 			}
