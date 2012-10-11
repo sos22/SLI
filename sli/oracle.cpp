@@ -3902,13 +3902,26 @@ stack_offset(Oracle *oracle, unsigned long rip)
 			}
 		}
 		if (!failed && !overlap) {
-			if (irsb->next_is_const) {
-				q.first = StaticRip(irsb->next_const.rip.unwrap_vexrip());
+			if (irsb->jumpkind == Ijk_Call) {
+				/* Assume that calling another
+				 * function doesn't adjust the stack
+				 * pointer. */
+				VexRip follower(extract_call_follower(irsb));
+				q.first = StaticRip(follower.unwrap_vexrip());
+				/* Pop the return address off the
+				 * stack. */
+				q.second -= 8;
 				queue.push(q);
-			} else if (irsb->jumpkind != Ijk_Ret) {
-				/* XXX write me: should query the
-				 * oracle for branch targets. */
-				abort();
+			} else {
+				if (irsb->next_is_const) {
+					q.first = StaticRip(irsb->next_const.rip.unwrap_vexrip());
+					queue.push(q);
+				} else if (irsb->jumpkind != Ijk_Ret) {
+					/* XXX write me: should query
+					 * the oracle for branch
+					 * targets. */
+					abort();
+				}
 			}
 		}
 	}
