@@ -418,6 +418,8 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 	}
 	case Iex_Unop: {
 		auto i = (IRExprUnop *)what;
+		if (i->op == Iop_64HLto128)
+			return NULL;
 		int errors2;
 		int errors3;
 		switch (errors_allowed) {
