@@ -28,16 +28,20 @@ enum byte_code_op {
 	bcop_cmp_eq,
 	bcop_cmp_ltu,
 	bcop_add,
+	bcop_and,
+	bcop_mul,
 	bcop_shl,
 
 	/* Unary ops */
 	bcop_not,
+	bcop_neg,
 	bcop_sign_extend64,
 	bcop_zero_extend64,
 
 	/* Specials */
 	bcop_load,
 	bcop_badptr,
+	bcop_mux0x,
 
 	bcop_fail_if,
 	bcop_succeed,

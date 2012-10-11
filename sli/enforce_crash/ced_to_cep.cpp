@@ -290,6 +290,19 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		IRExprUnop *ieu = (IRExprUnop *)expr;
 		bytecode_eval_expr(f, ieu->arg, ced, slots);
 		switch (ieu->op) {
+		case Iop_Not1:
+		case Iop_Not8:
+		case Iop_Not16:
+		case Iop_Not32:
+		case Iop_Not64:
+			bytecode_op(f, "not", ieu->arg->type());
+			break;
+		case Iop_Neg8:
+		case Iop_Neg16:
+		case Iop_Neg32:
+		case Iop_Neg64:
+			bytecode_op(f, "neg", ieu->arg->type());
+			break;
 		case Iop_32Sto64:
 			bytecode_op(f, "sign_extend64", ieu->arg->type());
 			break;
@@ -316,6 +329,12 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		case Iop_CmpEQ64:
 			bytecode_op(f, "cmp_eq", ieb->arg1->type());
 			break;
+		case Iop_Mul8:
+		case Iop_Mul16:
+		case Iop_Mul32:
+		case Iop_Mul64:
+			bytecode_op(f, "mul", ieb->arg1->type());
+			break;
 		case Iop_CmpLT32U:
 			bytecode_op(f, "cmp_ltu", ieb->arg1->type());
 			break;
@@ -335,9 +354,17 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		for (int i = 1; i < iea->nr_arguments; i++) {
 			bytecode_eval_expr(f, iea->contents[i], ced, slots);
 			switch (iea->op) {
+			case Iop_Add8:
+			case Iop_Add16:
 			case Iop_Add32:
 			case Iop_Add64:
 				bytecode_op(f, "add", iea->type());
+				break;
+			case Iop_And8:
+			case Iop_And16:
+			case Iop_And32:
+			case Iop_And64:
+				bytecode_op(f, "and", iea->type());
 				break;
 			default:
 				abort();
@@ -349,6 +376,14 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		IRExprLoad *iel = (IRExprLoad *)expr;
 		bytecode_eval_expr(f, iel->addr, ced, slots);
 		bytecode_op(f, "load", iel->ty);
+		break;
+	}
+	case Iex_Mux0X: {
+		IRExprMux0X *m = (IRExprMux0X *)expr;
+		bytecode_eval_expr(f, m->exprX, ced, slots);
+		bytecode_eval_expr(f, m->expr0, ced, slots);
+		bytecode_eval_expr(f, m->cond, ced, slots);
+		bytecode_op(f, "mux0x", m->expr0->type());
 		break;
 	}
 	default:

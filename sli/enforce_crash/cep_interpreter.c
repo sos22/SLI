@@ -889,6 +889,20 @@ eval_bytecode(const unsigned short *bytecode,
 			debug("bcop_add: %lx + %lx -> %lx\n", arg1, arg2, arg1 + arg2);
 			break;
 		}
+		case bcop_and: {
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			unsigned long arg2 = bytecode_pop(&stack, type);
+			bytecode_push(&stack, arg1 & arg2, type);
+			debug("bcop_and: %lx & %lx -> %lx\n", arg1, arg2, arg1 & arg2);
+			break;
+		}
+		case bcop_mul: {
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			unsigned long arg2 = bytecode_pop(&stack, type);
+			bytecode_push(&stack, arg1 * arg2, type);
+			debug("bcop_mul: %lx * %lx -> %lx\n", arg1, arg2, arg1 * arg2);
+			break;
+		}
 		case bcop_shl: {
 			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, bct_byte);
@@ -900,6 +914,35 @@ eval_bytecode(const unsigned short *bytecode,
 		case bcop_not:
 			bytecode_push(&stack, ~bytecode_pop(&stack, type), type);
 			break;
+		case bcop_neg: {
+			unsigned long inp = bytecode_pop(&stack, type);
+			unsigned long res;
+			switch (type) {
+			case bct_bit:
+				if (inp)
+					res = 0;
+				else
+					res = ~0ul;
+				break;
+			case bct_byte:
+				res = -(char)inp;
+				break;
+			case bct_short:
+				res = -(short)inp;
+				break;
+			case bct_int:
+				res = -(int)inp;
+				break;
+			case bct_long:
+				res = -(long)inp;
+				break;
+			default:
+				abort();
+			}
+			bytecode_push(&stack, res, type);
+			debug("bcop_neg: -%lx -> %lx\n", inp, res);
+			break;
+		}
 		case bcop_sign_extend64: {
 			unsigned long inp = bytecode_pop(&stack, type);
 			unsigned long res;
@@ -955,6 +998,17 @@ eval_bytecode(const unsigned short *bytecode,
 			int res;
 			res = !__fetch_guest(1, &buf, addr);
 			bytecode_push(&stack, res, bct_bit);
+			break;
+		}
+
+		case bcop_mux0x: {
+			unsigned cond = bytecode_pop(&stack, bct_bit);
+			unsigned long zero = bytecode_pop(&stack, type);
+			unsigned long nzero = bytecode_pop(&stack, type);
+			unsigned long res = cond ? nzero : zero;
+			bytecode_push(&stack, res, type);
+			debug("bcop_mux0x: %d ? %lx : %lx -> %lx\n", cond,
+			      nzero, zero, res);
 			break;
 		}
 
