@@ -324,10 +324,10 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 	}
 
 	case Iex_Associative: {
-		IRExprAssociative *iea = (IRExprAssociative *)expr;
+		IRExprAssociative *const iea = (IRExprAssociative *)expr;
 		assert(iea->nr_arguments != 0);
 		bytecode_eval_expr(f, iea->contents[0], ced, slots);
-		for (int i = 1; i < iea->nr_arguments; iea++) {
+		for (int i = 1; i < iea->nr_arguments; i++) {
 			bytecode_eval_expr(f, iea->contents[i], ced, slots);
 			switch (iea->op) {
 			case Iop_Add32:
