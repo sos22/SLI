@@ -880,11 +880,22 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 						if (it2->first->tag != Iex_Binop)
 							continue;
 						IRExprBinop *ieb2 = (IRExprBinop *)it2->first;
+						if (it2->second.first &&
+						    ieb2->op >= Iop_CmpEQ8 &&
+						    ieb2->op <= Iop_CmpEQ64) {
+							if ( (arg1 == ieb2->arg1 &&
+							      arg2 == ieb2->arg2) ||
+							     (arg1 == ieb2->arg2 &&
+							      arg2 == ieb2->arg1) ) {
+								it->second.first = false;
+								return false;
+							}
+						}
+						IRExpr *lt = ieb2->arg1;
+						IRExpr *gt = ieb2->arg1;
 						if (ieb2->op < Iop_CmpLT8U ||
 						    ieb2->op > Iop_CmpLT64U)
 							continue;
-						IRExpr *lt = ieb2->arg1;
-						IRExpr *gt = ieb2->arg1;
 						if (lt != arg1 && lt != arg2 &&
 						    gt != arg1 && gt != arg2)
 							continue;
