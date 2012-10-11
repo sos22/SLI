@@ -376,6 +376,9 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		case Iop_Shr64:
 			bytecode_op(f, "shr", ieb->arg1->type());
 			break;
+		case Iop_Sar64:
+			bytecode_op(f, "sar", ieb->arg1->type());
+			break;
 		default:
 			abort();
 		}

@@ -927,8 +927,32 @@ eval_bytecode(const unsigned short *bytecode,
 		case bcop_shr: {
 			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, bct_byte);
-			debug("bcop_shr: %lx >> %lx -> %lx\n", arg1, arg2, arg2 << arg1);
+			debug("bcop_shr: %lx >> %lx -> %lx\n", arg1, arg2, arg2 >> arg1);
 			bytecode_push(&stack, arg2 >> arg1, type);
+			break;
+		}
+		case bcop_sar: {
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			long arg2 = bytecode_pop(&stack, bct_byte);
+			unsigned long res;
+			switch (type) {
+			case bct_byte:
+				res = (char)arg2 >> arg1;
+				break;
+			case bct_short:
+				res = (short)arg2 >> arg1;
+				break;
+			case bct_int:
+				res = (int)arg2 >> arg1;
+				break;
+			case bct_long:
+				res = (long)arg2 >> arg1;
+				break;
+			default:
+				abort();
+			}
+			debug("bcop_sar: %lx >> %lx -> %lx\n", arg1, arg2, res);
+			bytecode_push(&stack, res, type);
 			break;
 		}
 

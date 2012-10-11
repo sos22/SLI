@@ -34,6 +34,7 @@ enum byte_code_op {
 	bcop_mul,
 	bcop_shl,
 	bcop_shr,
+	bcop_sar,
 
 	/* Unary ops */
 	bcop_not,
