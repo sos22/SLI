@@ -786,24 +786,173 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 				it->second.first = false;
 			}
 		} else {
-			if (e->tag == Iex_Binop &&
-			    ((IRExprBinop *)e)->op >= Iop_CmpEQ8 &&
-			    ((IRExprBinop *)e)->op <= Iop_CmpEQ64 &&
-			    ((IRExprBinop *)e)->arg1->tag == Iex_Const) {
-				/* We quite often get expressions of
-				   the form ``(k1 == var) && (k2 ==
-				   var)'', where k1 != k2.  It's
-				   useful to return that that's
-				   unsatisfiable.  The trick is that
-				   if we say k1 == var is true then we
-				   say that var is fixed, and then any
-				   other equality on var must be false
-				   (because we're interned) */
-				if (sat.fixedVariables.count(((IRExprBinop *)e)->arg2)) {
-					it->second.first = false;
-					return it->second.first;
+			if (e->tag == Iex_Binop) {
+				IRExprBinop *ieb = (IRExprBinop *)e;
+				if (ieb->op >= Iop_CmpEQ8 &&
+				    ieb->op <= Iop_CmpEQ64 &&
+				    ieb->arg1->tag == Iex_Const) {
+					/* We quite often get
+					   expressions of the form
+					   ``(k1 == var) && (k2 ==
+					   var)'', where k1 != k2.
+					   It's useful to return that
+					   that's unsatisfiable.  The
+					   trick is that if we say k1
+					   == var is true then we say
+					   that var is fixed, and then
+					   any other equality on var
+					   must be false (because
+					   we're interned) */
+					if (sat.fixedVariables.count(ieb->arg2)) {
+						it->second.first = false;
+						return it->second.first;
+					}
+					sat.fixedVariables.insert(ieb->arg2);
 				}
-				sat.fixedVariables.insert(((IRExprBinop *)e)->arg2);
+
+				if (ieb->op >= Iop_CmpEQ8 &&
+				    ieb->op <= Iop_CmpEQ64) {
+					/* Compare that to all of the
+					   CmpLTxU expressions which
+					   we've already assigned
+					   values to. */
+					IRExpr *arg1 = ieb->arg1;
+					IRExpr *arg2 = ieb->arg2;
+					for (auto it2 = sat.memo.begin();
+					     it2 != sat.memo.end();
+					     it2++) {
+						if (it2->first == ieb ||
+						    it2->first->tag != Iex_Binop)
+							continue;
+						IRExprBinop *ieb2 = (IRExprBinop *)it2->first;
+						if (ieb2->op < Iop_CmpLT8U ||
+						    ieb2->op > Iop_CmpLT64U)
+							continue;
+						IRExpr *lt = ieb2->arg1;
+						IRExpr *gt = ieb2->arg1;
+						if (lt != arg1 && lt != arg2 &&
+						    gt != arg1 && gt != arg2)
+							continue;
+						if ( (lt == arg1 && gt == arg2) ||
+						     (lt == arg2 && gt == arg1) ) {
+							/* Have either
+							   A < B or B < A
+							   and we're
+							   evaluating
+							   A == B */
+							if (it2->second.first) {
+								it->second.first = false;
+								return false;
+							}
+						}
+						if (arg1->tag == Iex_Const &&
+						    ((lt->tag == Iex_Const && gt == arg2) ||
+						     (gt->tag == Iex_Const && lt == arg2)) ) {
+							unsigned long arg1_cnst =
+								((IRExprConst *)arg1)->con->Ico.U64;
+							if (lt->tag == Iex_Const) {
+								unsigned long lt_cnst =
+									((IRExprConst *)lt)->con->Ico.U64;
+								if ((arg1_cnst <= lt_cnst) == it2->second.first) {
+									it->second.first = false;
+									return false;
+								}
+							}
+							if (gt->tag == Iex_Const) {
+								unsigned long gt_cnst =
+									((IRExprConst *)gt)->con->Ico.U64;
+								if ((arg1_cnst >= gt_cnst) == it2->second.first) {
+									it->second.first = false;
+									return false;
+								}
+							}
+						}
+					}
+				}
+
+				if (ieb->op >= Iop_CmpLT8U &&
+				    ieb->op <= Iop_CmpLT64U) {
+					IRExpr *arg1 = ieb->arg1;
+					IRExpr *arg2 = ieb->arg2;
+					for (auto it2 = sat.memo.begin();
+					     it2 != sat.memo.end();
+					     it2++) {
+						if (it2->first->tag != Iex_Binop)
+							continue;
+						IRExprBinop *ieb2 = (IRExprBinop *)it2->first;
+						if (ieb2->op < Iop_CmpLT8U ||
+						    ieb2->op > Iop_CmpLT64U)
+							continue;
+						IRExpr *lt = ieb2->arg1;
+						IRExpr *gt = ieb2->arg1;
+						if (lt != arg1 && lt != arg2 &&
+						    gt != arg1 && gt != arg2)
+							continue;
+						if (lt == arg1 && gt == arg2) {
+							/* By internment property */
+							abort();
+						}
+						if (lt == arg2 && gt == arg1) {
+							it->second.first = !it2->second.first;
+							return it->second.first;
+						}
+						if (lt == arg1) {
+							if (gt->tag != Iex_Const ||
+							    arg2->tag != Iex_Const)
+								continue;
+							unsigned long k1 =
+								((IRExprConst *)gt)->con->Ico.U64;
+							unsigned long k2 =
+								((IRExprConst *)arg2)->con->Ico.U64;
+							if (k1 < k2) {
+								it->second.first = it2->second.first;
+								return it->second.first;
+							}
+						}
+						if (lt == arg2) {
+							if (gt->tag != Iex_Const ||
+							    arg1->tag != Iex_Const)
+								continue;
+							unsigned long k1 =
+								((IRExprConst *)gt)->con->Ico.U64;
+							unsigned long k2 =
+								((IRExprConst *)arg1)->con->Ico.U64;
+							if (k1 <= k2 ||
+							    k1 == k2 + 1) {
+								it->second.first = !it2->second.first;
+								return it->second.first;
+							}
+						}
+						if (gt == arg2) {
+							if (lt->tag != Iex_Const ||
+							    arg1->tag != Iex_Const)
+								continue;
+							unsigned long k1 =
+								((IRExprConst *)lt)->con->Ico.U64;
+							unsigned long k2 =
+								((IRExprConst *)arg1)->con->Ico.U64;
+							if (k1 < k2) {
+								it->second.first = !it2->second.first;
+								return it2->second.first;
+							}
+						}
+						if (gt == arg1) {
+							if (lt->tag != Iex_Const ||
+							    arg2->tag != Iex_Const)
+								continue;
+							unsigned long k1 =
+								((IRExprConst *)lt)->con->Ico.U64;
+							unsigned long k2 =
+								((IRExprConst *)arg2)->con->Ico.U64;
+							if (k1 >= k2 ||
+							    k2 == k1 + 1) {
+								it->second.first = !it2->second.first;
+								return it->second.first;
+							}
+						}
+					}
+				}
+
 			}
 			it->second.first = !!chooser.nd_choice(2);
 			if (preferred_result == true)
