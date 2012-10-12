@@ -2741,13 +2741,9 @@ dump_stats(void)
 static void
 activate(void)
 {
-	unsigned x;
+	unsigned x, y;
 	char buf[4096];
 	ssize_t s;
-
-#if USE_STATS
-	atexit(dump_stats);
-#endif
 
 	s = readlink("/proc/self/exe", buf, sizeof(buf)-1);
 	if (s == -1) {
@@ -2755,11 +2751,24 @@ activate(void)
 		return;
 	}
 	buf[s] = 0;
-	if (strcmp(buf, program_to_patch)) {
+
+	buf[s] = 0;
+	for (x = s; x > 0 && buf[x] != '/'; x--)
+		;
+	for (y = strlen(program_to_patch); y > 0 && program_to_patch[y] != '/'; y--)
+		;
+
+	if (strcmp(buf + x, program_to_patch + y)) {
 		printf("This is a patch for %s, but we were invoked on %s; disabling.\n",
-		       program_to_patch, buf);
+		       program_to_patch + y, buf + x);
 		return;
 	}
+
+	printf("Patching %s\n", buf);
+
+#if USE_STATS
+	atexit(dump_stats);
+#endif
 
 	alloc_thread_state_area();
 
