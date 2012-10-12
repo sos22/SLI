@@ -37,7 +37,7 @@ namespace __nf {
 
 #define NF_MAX_EXPRESSION 100
 
-static bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp);
+static bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp) __attribute__((warn_unused_result));
 static void insert_term_destruct(NF_Term &src, NF_Expression &out);
 
 /* The ordering we use for NF disjunctions works like this:
@@ -728,8 +728,8 @@ top:
 	extra_sanity(out);
 	{
 		NF_Expression this_one;
-		__nf::convert_to_nf(fragments[0], this_one, expressionOp, termOp);
-		if (!nf_countermerge(this_one, out))
+		if (!__nf::convert_to_nf(fragments[0], this_one, expressionOp, termOp) ||
+		    !nf_countermerge(this_one, out))
 			return false;
 	}
 
