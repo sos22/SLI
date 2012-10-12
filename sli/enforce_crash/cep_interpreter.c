@@ -2745,10 +2745,6 @@ activate(void)
 	char buf[4096];
 	ssize_t s;
 
-#if USE_STATS
-	atexit(dump_stats);
-#endif
-
 	s = readlink("/proc/self/exe", buf, sizeof(buf)-1);
 	if (s == -1) {
 		printf("Can't access /proc/self/exe; patch disabled\n");
@@ -2760,6 +2756,10 @@ activate(void)
 		       program_to_patch, buf);
 		return;
 	}
+
+#if USE_STATS
+	atexit(dump_stats);
+#endif
 
 	alloc_thread_state_area();
 
