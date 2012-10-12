@@ -1477,6 +1477,14 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
 				*done_something = true;
 				return rewriteTo;
 			}
+			if (to &&
+			    from->tag == Iex_EntryPoint &&
+			    e->tag == Iex_EntryPoint &&
+			    ((IRExprEntryPoint *)e)->thread == ((IRExprEntryPoint *)from)->thread &&
+			    ((IRExprEntryPoint *)e)->label != ((IRExprEntryPoint *)from)->label) {
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(0));
+			}
 			if (!rewriteFrom && e->type() != Ity_I1)
 				return e;
 			return IRExprTransformer::transformIRExpr(e, done_something);
