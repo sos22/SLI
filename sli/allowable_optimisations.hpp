@@ -217,7 +217,7 @@ class AllowableOptimisations : public IRExprOptimisations {
 		if (_nonLocalLoads) {
 			if (fragments.size() != 1)
 				fragments.push_back(", ");
-			fragments.push_back(", nonLocalLoads = {");
+			fragments.push_back("nonLocalLoads = {");
 			for (auto it = _nonLocalLoads->begin();
 			     it != _nonLocalLoads->end();
 			     it++) {
