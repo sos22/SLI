@@ -430,7 +430,9 @@ isEqualityTest(const IRExpr *a)
 static bool
 isVariableLike(const IRExpr *a)
 {
-	return a->tag == Iex_Get || a->tag == Iex_Load;
+	return a->tag == Iex_Get || a->tag == Iex_Load ||
+		a->tag == Iex_FreeVariable || a->tag == Iex_EntryPoint ||
+		a->tag == Iex_ControlFlow;
 }
 
 /* Simple sort function.  Ordering looks like this:

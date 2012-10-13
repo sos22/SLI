@@ -1167,11 +1167,13 @@ enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<OracleInterface> &oracle,
 	      const AllowableOptimisations &opt,
 	      struct EvalPathConsumer &consumer,
-	      GarbageCollectionToken &token)
+	      GarbageCollectionToken &token,
+	      bool loud = false)
 {
 	std::vector<EvalContext> pendingStates;
 	std::map<const StateMachineState *, int> stateLabels;
-	
+	int cntr = 0;
+
 	if (debug_dump_state_traces) {
 		printf("Eval machine:\n");
 		printStateMachine(sm, stdout, stateLabels);
@@ -1192,6 +1194,8 @@ enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 		pendingStates.pop_back();
 		if (!ctxt.advance(*decode, oracle, opt, pendingStates, sm, consumer))
 			return false;
+		if (loud && cntr++ % 100 == 0)
+			printf("Processed %d states; %d in queue\n", cntr, pendingStates.size());
 	}
 	return true;
 }
@@ -2340,5 +2344,5 @@ collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		}
 	} consumer;
 	consumer.out = &out;
-	enumEvalPaths(mai, sm, IRExpr_Const(IRConst_U1(1)), oracle, AllowableOptimisations::defaultOptimisations, consumer, token);
+	enumEvalPaths(mai, sm, IRExpr_Const(IRConst_U1(1)), oracle, AllowableOptimisations::defaultOptimisations, consumer, token, true);
 }
