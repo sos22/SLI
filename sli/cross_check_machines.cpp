@@ -958,8 +958,15 @@ main(int argc, char *argv[])
 		enableassumePrivateStack());
 	collectConstraints(mai1, machine1, oracleI, opt2, constraints, ALLOW_GC);
 
-	for (auto it = constraints.begin(); it != constraints.end(); it++)
+	for (auto it = constraints.begin(); it != constraints.end(); ) {
 		*it = sat_simplify(*it, AllowableOptimisations::defaultOptimisations);
+		if ((*it)->tag == Iex_Const) {
+			/* These are generally pretty useless, so remove them now. */
+			it = constraints.erase(it);
+		} else {
+			it++;
+		}
+	}
 
 	printf("Constraints:\n");
 	for (auto it = constraints.begin(); it != constraints.end(); it++)
