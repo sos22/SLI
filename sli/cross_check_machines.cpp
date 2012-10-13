@@ -228,6 +228,19 @@ public:
 		nonEntryPoints.clear();
 		hbEdges.clear();
 	}
+	bool consistent() const {
+		/* Not interested in anything where RSP is a bad
+		 * pointer. */
+		for (auto it = regs.begin(); it != regs.end(); it++) {
+			if (it->first.isReg() && it->first.asReg() == OFFSET_amd64_RSP) {
+				evalExprRes err(badPtr(it->second));
+				unsigned long v;
+				if (err.unpack(&v) && v)
+					return false;
+			}
+		}
+		return true;
+	}
 };
 
 class EvalCtxt : public GcCallback<&ir_heap> {
@@ -491,9 +504,13 @@ top:
 		return evalRes::unreached();
 	case StateMachineState::Crash:
 		log(state, "crash");
+		if (!currentState.consistent())
+			return evalRes::unreached();
 		return evalRes::crash();
 	case StateMachineState::NoCrash:
 		log(state, "no-crash");
+		if (!currentState.consistent())
+			return evalRes::unreached();
 		return evalRes::survive();
 	}
 	abort();
