@@ -948,6 +948,7 @@ main(int argc, char *argv[])
 	int nr_crash = 0;
 	int nr_nocrash = 0;
 	int nr_escape = 0;
+	int nr_demote_survival = 0;
 
 	int nr_failed = 0;
 	int cntr = 0;
@@ -978,6 +979,7 @@ main(int argc, char *argv[])
 			   allowed to convert <survive> into
 			   <unreached> */
 			failed = false;
+			nr_demote_survival++;
 		}
 
 		if (failed) {
@@ -1017,6 +1019,7 @@ main(int argc, char *argv[])
 	       failed_generate_satisfier + failed_generate_nonsat,
 	       failed_generate_satisfier,
 	       failed_generate_nonsat);
+	printf("%d survival states demoted to unreached.\n", nr_demote_survival);
 	if (nr_failed != 0) {
 		printf("Result: failed %d/%d\n", nr_failed, cntr);
 		return 1;
