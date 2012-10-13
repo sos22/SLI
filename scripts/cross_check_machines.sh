@@ -34,7 +34,8 @@ fi
 for x in ${scratch}/*
 do
     id=$(basename $x)
-    script -f -c "../scripts/cross_check_machine.sh $binary $types $callgraph $x" logfile
+    cx=$(canon $x)
+    script -f -c "../scripts/cross_check_machine.sh $binary $types $callgraph $cx" logfile
     if grep -q "Trivial machine" logfile
     then
 	touch res/trivial/$id
