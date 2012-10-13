@@ -2321,6 +2321,7 @@ void
 collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		   const VexPtr<StateMachine, &ir_heap> &sm,
 		   VexPtr<OracleInterface> &oracle,
+		   const AllowableOptimisations &opt,
 		   std::vector<IRExpr *> &out,
 		   GarbageCollectionToken token)
 {
@@ -2344,5 +2345,5 @@ collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		}
 	} consumer;
 	consumer.out = &out;
-	enumEvalPaths(mai, sm, IRExpr_Const(IRConst_U1(1)), oracle, AllowableOptimisations::defaultOptimisations, consumer, token, true);
+	enumEvalPaths(mai, sm, IRExpr_Const(IRConst_U1(1)), oracle, opt, consumer, token, true);
 }

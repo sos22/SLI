@@ -813,7 +813,11 @@ main(int argc, char *argv[])
 	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(argv[6]));
 	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, argv[7]));
 	gc_vector<IRExpr, &ir_heap> constraints;
-	collectConstraints(mai1, machine1, oracleI, constraints, ALLOW_GC);
+	AllowableOptimisations opt(
+		AllowableOptimisations::defaultOptimisations.
+		setAddressSpace(oracle->ms->addressSpace).
+		enableassumePrivateStack());
+	collectConstraints(mai1, machine1, oracleI, opt, constraints, ALLOW_GC);
 
 	printf("Constraints:\n");
 	for (auto it = constraints.begin(); it != constraints.end(); it++)

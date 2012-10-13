@@ -98,6 +98,7 @@ IRExpr *writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 void collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 			const VexPtr<StateMachine, &ir_heap> &sm,
 			VexPtr<OracleInterface> &oracle,
+			const AllowableOptimisations &opt,
 			std::vector<IRExpr *> &out,
 			GarbageCollectionToken token);
 IRExpr *getCrossMachineCrashRequirement(
