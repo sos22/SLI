@@ -79,6 +79,7 @@ public:
 
 class EvalState {
 public:
+	EvalState() { clear(); }
 	std::map<threadAndRegister, unsigned long> regs;
 	std::map<MemoryAccessIdentifier, unsigned long> freeVars;
 	std::map<unsigned long, unsigned long> memory;
@@ -87,6 +88,7 @@ public:
 	std::map<unsigned, std::set<CfgLabel> > nonEntryPoints;
 	/* (a, b) in hbEdges -> a must happen before b */
 	std::vector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > hbEdges;
+	bool hasIssuedStore;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Regs:\n");
 		for (auto it = regs.begin(); it != regs.end(); it++)
@@ -116,6 +118,7 @@ public:
 		fprintf(f, "hbEdges:\n");
 		for (auto it = hbEdges.begin(); it != hbEdges.end(); it++)
 			fprintf(f, "\t%s <-< %s\n", it->first.name(), it->second.name());
+		fprintf(f, "hasIssuedStore: %s\n", hasIssuedStore ? "true" : "false");
 	}
 
 	/* Possible return values:
@@ -227,6 +230,7 @@ public:
 		entryPoints.clear();
 		nonEntryPoints.clear();
 		hbEdges.clear();
+		hasIssuedStore = false;
 	}
 	bool consistent() const {
 		/* Not interested in anything where RSP is a bad
@@ -272,6 +276,7 @@ public:
 	unsigned long eval(IRExpr *e);
 	bool eval(const StateMachineState *, StateMachineSideEffect *effect);
 	evalRes eval(VexPtr<StateMachineState, &ir_heap> state,
+		     const AllowableOptimisations &opt,
 		     GarbageCollectionToken token);
 	void log(const StateMachineState *, const char *fmt, ...) __attribute__((__format__( __printf__, 3, 4)));
 	void printLog(FILE *f, const std::map<const StateMachineState *, int> &labels) const;
@@ -383,6 +388,7 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		}
 		unsigned long data = eval(s->data);
 		currentState.memory[addr] = data;
+		currentState.hasIssuedStore = true;
 		log(state, "store %lx -> %lx", data, addr);
 		return true;
 	}
@@ -470,6 +476,7 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 
 evalRes
 EvalCtxt::eval(VexPtr<StateMachineState, &ir_heap> state,
+	       const AllowableOptimisations &opt,
 	       GarbageCollectionToken token)
 {
 top:
@@ -506,6 +513,8 @@ top:
 		log(state, "crash");
 		if (!currentState.consistent())
 			return evalRes::unreached();
+		if (opt.mustStoreBeforeCrash())
+			return evalRes::survive();
 		return evalRes::crash();
 	case StateMachineState::NoCrash:
 		log(state, "no-crash");
@@ -1185,17 +1194,17 @@ main(int argc, char *argv[])
 	std::map<const StateMachineState *, int> labels2;
 	for (auto it = initialCtxts.begin(); it != initialCtxts.end(); it++) {
 		EvalCtxt ctxt1(*it);
-		evalRes machine1res = ctxt1.eval(machine1->root, ALLOW_GC);
+		evalRes machine1res = ctxt1.eval(machine1->root, opt, ALLOW_GC);
 		int i;
 		for (i = 0; i < 100 && machine1res == evalRes::unreached(); i++) {
 			ctxt1.reset(*it);
-			machine1res = ctxt1.eval(machine1->root, ALLOW_GC);
+			machine1res = ctxt1.eval(machine1->root, opt, ALLOW_GC);
 		}
 		EvalCtxt ctxt2(*it);
-		evalRes machine2res = ctxt2.eval(machine2->root, ALLOW_GC);
+		evalRes machine2res = ctxt2.eval(machine2->root, opt, ALLOW_GC);
 		for (i = 0; i < 100 && machine2res == evalRes::unreached(); i++) {
 			ctxt2.reset(*it);
-			machine2res = ctxt2.eval(machine2->root, ALLOW_GC);
+			machine2res = ctxt2.eval(machine2->root, opt, ALLOW_GC);
 		}
 
 		bool failed = machine1res != machine2res;
