@@ -972,11 +972,6 @@ main(int argc, char *argv[])
 	for (auto it = constraints.begin(); it != constraints.end(); it++)
 		printf("\t%s\n", nameIRExpr(*it));
 
-	if (constraints.size() == 1 && (*constraints.begin())->tag == Iex_Const) {
-		printf("Trivial machine\n");
-		return 0;
-	}
-
 	int failed_generate_satisfier = 0;
 	int failed_generate_nonsat = 0;
 	int satisfier_contexts = 0;
@@ -1009,7 +1004,12 @@ main(int argc, char *argv[])
 			failed_generate_satisfier++;
 		} else {
 			satisfier_contexts++;
+			if (satisfier_contexts % 100 == 0)
+				printf("Generated %d/%zd concrete satisfiers\n",
+				       satisfier_contexts + failed_generate_satisfier,
+				       constraints.size());
 		}
+		LibVEX_maybe_gc(ALLOW_GC);
 	}
 
 	/* Should also try to make all of the conditions be
@@ -1037,6 +1037,7 @@ main(int argc, char *argv[])
 		} else {
 			non_satisfier_contexts++;
 		}
+		LibVEX_maybe_gc(ALLOW_GC);
 	}
 
 	printf("Concrete conditions to consider:\n");
