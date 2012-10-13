@@ -2317,6 +2317,10 @@ getCrossMachineCrashRequirement(
  * member of X makes Y false and some member makes it true then that
  * should get you reasonably close to exploring all of the interesting
  * behaviour in the machine. */
+/* The number of constraints you get from a single machine is
+   arbitrarily limited to 1000, just because the only consumer of this
+   data can't handle any more than that without exploding due to
+   super-linear scaling behaviour. */
 void
 collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		   const VexPtr<StateMachine, &ir_heap> &sm,
@@ -2331,17 +2335,21 @@ collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 			for (auto it = out->begin(); it != out->end(); it++)
 				hv(*it);
 		}
+		bool addConstraint(IRExpr *a) {
+			out->push_back(a);
+			if (out->size() > 1000)
+				return false;
+			else
+				return true;
+		}
 		bool crash(IRExpr *assumption, IRExpr *) {
-			out->push_back(assumption);
-			return true;
+			return addConstraint(assumption);
 		}
 		bool survive(IRExpr *assumption, IRExpr *) {
-			out->push_back(assumption);
-			return true;
+			return addConstraint(assumption);
 		}
 		bool escape(IRExpr *assumption, IRExpr *) {
-			out->push_back(assumption);
-			return true;
+			return addConstraint(assumption);
 		}
 	} consumer;
 	consumer.out = &out;
