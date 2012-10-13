@@ -1236,9 +1236,8 @@ MaiMap::parse(const std::map<CfgLabel, const CFGNode *> &labels, const char *buf
 				if (!l.parse(buf, &buf))
 					break;
 				auto it = labels.find(l);
-				if (it == labels.end())
-					break;
-				entry.push_back(it->second);
+				if (it != labels.end())
+					entry.push_back(it->second);
 			}
 			while (!parseThisChar('}', buf, &buf)) {
 				if (!parseThisString(", ", buf, &buf))
@@ -1249,9 +1248,8 @@ MaiMap::parse(const std::map<CfgLabel, const CFGNode *> &labels, const char *buf
 					if (!l.parse(buf, &buf))
 						goto failed;
 					auto it = labels.find(l);
-					if (it == labels.end())
-						goto failed;
-					entry.push_back(it->second);
+					if (it != labels.end())
+						entry.push_back(it->second);
 				}
 			}
 		}
