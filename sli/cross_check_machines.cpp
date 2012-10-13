@@ -584,7 +584,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 	case Iex_CCall: {
 		auto iec = (IRExprCCall *)what;
 		if (strcmp(iec->cee->name, "amd64g_calculate_condition"))
-			abort();
+			break;
 		IRExpr *cond, *cc_op, *dep1, *dep2;
 		cond = iec->args[0];
 		cc_op = iec->args[1];
@@ -595,7 +595,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		unsigned long cond_c;
 		if (!cond_eval.unpack(&cond_c) ||
 		    cc_op_eval.valid())
-			abort();
+			break;
 		if (!cnst)
 			cond_c ^= 1;
 		switch (cond_c) {
@@ -626,7 +626,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		switch (iea->op) {
 		case Iop_Add64: {
 			if (iea->nr_arguments != 2)
-				abort();
+				break;
 			evalExprRes res1(evalExpr(res, iea->contents[0], NULL));
 			evalExprRes res2(evalExpr(res, iea->contents[1], NULL));
 			unsigned long res1c, res2c;
@@ -637,9 +637,26 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			res1 = evalExpr(res, iea->contents[0], usedRandom);
 			return makeEqConst(res, cnst - res1c, iea->contents[1], wantTrue, usedRandom);
 		}
-		default:
-			abort();
+		case Iop_Xor8:
+		case Iop_Xor16:
+		case Iop_Xor32:
+		case Iop_Xor64: {
+			if (iea->nr_arguments != 2)
+				break;
+			evalExprRes res1(evalExpr(res, iea->contents[0], NULL));
+			evalExprRes res2(evalExpr(res, iea->contents[1], NULL));
+			unsigned long res1c, res2c;
+			if (res1.unpack(&res1c))
+				return makeEqConst(res, cnst ^ res1c, iea->contents[1], wantTrue, usedRandom);
+			if (res2.unpack(&res2c))
+				return makeEqConst(res, cnst ^ res2c, iea->contents[0], wantTrue, usedRandom);
+			res1 = evalExpr(res, iea->contents[0], usedRandom);
+			return makeEqConst(res, cnst ^ res1c, iea->contents[1], wantTrue, usedRandom);
 		}
+		default:
+			break;
+		}
+		break;
 	}
 	case Iex_Unop: {
 		auto *ieu = (IRExprUnop *)what;
@@ -647,12 +664,15 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		case Iop_Neg64:
 			return makeEqConst(res, -cnst, ieu->arg, wantTrue, usedRandom);
 		default:
-			abort();
+			break;
 		}
+		break;
 	}
 	default:
-		abort();
+		break;
 	}
+	printf("Can't make %s equal constant %lx\n", nameIRExpr(what), cnst);
+	abort();
 }
 
 static bool
