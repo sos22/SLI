@@ -842,6 +842,15 @@ main(int argc, char *argv[])
 	for (auto it = constraints.begin(); it != constraints.end(); it++)
 		printf("\t%s\n", nameIRExpr(*it));
 
+	if (constraints.size() == 1 && (*constraints.begin())->tag == Iex_Const) {
+		printf("Trivial machine\n");
+		return 0;
+	}
+
+	int failed_generate_satisfier = 0;
+	int failed_generate_nonsat = 0;
+	int satisfier_contexts = 0;
+	int non_satisfier_contexts = 0;
 	std::vector<EvalState> initialCtxts;
 	for (auto it = constraints.begin(); it != constraints.end(); it++) {
 		/* Find some concrete configuration which satisfies
@@ -865,8 +874,12 @@ main(int argc, char *argv[])
 		}
 
 		IRExpr *a = sat_simplify(*it, AllowableOptimisations::defaultOptimisations);
-		if (!addSatisfier(initialCtxts, a))
+		if (!addSatisfier(initialCtxts, a)) {
 			fprintf(stderr, "WARNING: Cannot generate concrete satisfier for %s\n", nameIRExpr(a));
+			failed_generate_satisfier++;
+		} else {
+			satisfier_contexts++;
+		}
 	}
 
 	/* Should also try to make all of the conditions be
@@ -887,11 +900,13 @@ main(int argc, char *argv[])
 		if (found_one)
 			continue;
 
-		dbg_break("Need explicit non-satisfier\n");
-
 		printf("Need explicit non-satisfier for %s...\n", nameIRExpr(a));
-		if (!addSatisfier(initialCtxts, a))
+		if (!addSatisfier(initialCtxts, a)) {
 			fprintf(stderr, "WARNING: Cannot generate concrete non-satisfier for %s\n", nameIRExpr(a));
+			failed_generate_nonsat++;
+		} else {
+			non_satisfier_contexts++;
+		}
 	}
 
 	printf("Concrete conditions to consider:\n");
@@ -954,6 +969,14 @@ main(int argc, char *argv[])
 		}
 		cntr++;
 	}
+	printf("%zd constraints generated, %d contexts total (%d sat, %d non-sat), %d failures to generate contexts (%d sat, %d non-sat)\n",
+	       constraints.size(),
+	       satisfier_contexts + non_satisfier_contexts,
+	       satisfier_contexts,
+	       non_satisfier_contexts,
+	       failed_generate_satisfier + failed_generate_nonsat,
+	       failed_generate_satisfier,
+	       failed_generate_nonsat);
 	if (nr_failed != 0) {
 		printf("Result: failed %d/%d\n", nr_failed, cntr);
 		return 1;
