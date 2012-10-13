@@ -8,4 +8,6 @@ callgraph="$3"
 # CONFIG_RECORD_MACHINE_OPTIMISATIONS is set.
 dir="$4"
 
+set -x
+
 ../cross_check_machines "$binary" "$types" "$callgraph" "${dir}/pre_machine" "${dir}/pre_mai" "${dir}/post_machine" "${dir}/post_mai"
