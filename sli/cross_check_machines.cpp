@@ -81,6 +81,8 @@ public:
 	std::map<MemoryAccessIdentifier, unsigned long> freeVars;
 	std::map<unsigned long, unsigned long> memory;
 	std::set<unsigned long> badPtrs;
+	std::map<unsigned, CfgLabel> entryPoints;
+	std::map<unsigned, std::set<CfgLabel> > nonEntryPoints;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Regs:\n");
 		for (auto it = regs.begin(); it != regs.end(); it++)
@@ -94,6 +96,19 @@ public:
 		fprintf(f, "badPtrs:\n");
 		for (auto it = badPtrs.begin(); it != badPtrs.end(); it++)
 			fprintf(f, "\t0x%lx\n", *it);
+		fprintf(f, "entryPoints:\n");
+		for (auto it = entryPoints.begin(); it != entryPoints.end(); it++)
+			fprintf(f, "\t%d -> %s\n", it->first, it->second.name());
+		fprintf(f, "nonEntryPoints:\n");
+		for (auto it = nonEntryPoints.begin(); it != nonEntryPoints.end(); it++) {
+			fprintf(f, "\t%d -> {", it->first);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin())
+					fprintf(f, ", ");
+				fprintf(f, "%s", it2->name());
+			}
+			fprintf(f, "}\n");
+		}
 	}
 	void clear() {
 		regs.clear();
@@ -701,6 +716,22 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 		}
 		break;
 	}
+	case Iex_EntryPoint: {
+		auto iee = (IRExprEntryPoint *)expr;
+		auto it = res.entryPoints.find(iee->thread);
+		if (it != res.entryPoints.end())
+			return wantTrue == (it->second == iee->label);
+		if (res.nonEntryPoints.count(iee->thread)) {
+			if (res.nonEntryPoints[iee->thread].count(iee->label))
+				return !wantTrue;
+		}
+		if (wantTrue)
+			res.entryPoints.insert(std::pair<unsigned, CfgLabel>(iee->thread, iee->label));
+		else
+			res.nonEntryPoints[iee->thread].insert(iee->label);
+		return true;
+	}
+
 	default:
 		abort();
 	}
