@@ -1172,6 +1172,14 @@ out:
 	return res;
 }
 
+static unsigned long
+fetch_fs_base(void)
+{
+	unsigned long res;
+	arch_prctl(ARCH_GET_FS, (unsigned long)&res);
+	return res;
+}
+
 struct exit_emulation_ctxt {
 	struct x86_emulate_ctxt ctxt;
 	struct entry_patch *patch;
@@ -1179,14 +1187,25 @@ struct exit_emulation_ctxt {
 
 static int
 exit_emulator_read(enum x86_segment seg,
-	      unsigned long offset,
-	      void *p_data,
-	      unsigned int bytes,
-	      struct x86_emulate_ctxt *_ctxt)
+		   unsigned long offset,
+		   void *p_data,
+		   unsigned int bytes,
+		   struct x86_emulate_ctxt *_ctxt)
 {
+	unsigned long base;
 	/* XXX should trap any faults here, so that we can set up a
 	   correct signal frame. XXX */
-	assert(seg == x86_seg_ds || seg == x86_seg_ss);
+	switch (seg) {
+	case x86_seg_ds:
+	case x86_seg_ss:
+		base = 0;
+		break;
+	case x86_seg_fs:
+		base = fetch_fs_base();
+		break;
+	default:
+		abort();
+	}
 	memcpy(p_data, (const void *)offset, bytes);
 	return X86EMUL_OKAY;
 }
@@ -2341,14 +2360,6 @@ wait_for_bound_exits(struct high_level_state *hls)
 		acquire_big_lock();
 	}
 	return;
-}
-
-static unsigned long
-fetch_fs_base(void)
-{
-	unsigned long res;
-	arch_prctl(ARCH_GET_FS, (unsigned long)&res);
-	return res;
 }
 
 static void
