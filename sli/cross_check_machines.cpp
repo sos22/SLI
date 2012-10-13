@@ -738,8 +738,12 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		evalExprRes cc_op_eval(evalExpr(res, cc_op, NULL));
 		unsigned long cond_c;
 		if (!cond_eval.unpack(&cond_c) ||
-		    cc_op_eval.valid())
+		    cc_op_eval.valid()) {
+			unsigned long cc_op_c;
+			cc_op_eval.unpack(&cc_op_c);
+			printf("CC op %ld\n", cc_op_c);
 			break;
+		}
 		if (!cnst)
 			cond_c ^= 1;
 		switch (cond_c) {
@@ -761,9 +765,9 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 					makeEqConst(res, 0, dep1, true, usedRandom);
 			}
 		default:
-			abort();
+			break;
 		}
-		abort();
+		break;
 	}
 	case Iex_Associative: {
 		auto *iea = (IRExprAssociative *)what;
@@ -812,11 +816,45 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		}
 		break;
 	}
+	case Iex_Binop: {
+		auto *ieb = (IRExprBinop *)what;
+		switch (ieb->op) {
+		case Iop_Shl64: {
+			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL));
+			evalExprRes arg2(evalExpr(res, ieb->arg2, NULL));
+			unsigned long arg1c, arg2c;
+			if (arg1.unpack(&arg1c)) {
+				if (arg2.unpack(&arg2c)) {
+					unsigned long res = arg1c << arg2c;
+					return (res == cnst) == wantTrue;
+				} else {
+					for (arg2c = 0; arg2c < 63; arg2c++) {
+						if ( ((arg1c << arg2c) == cnst) == wantTrue )
+							return makeEqConst(res, arg2c, ieb->arg2, true, usedRandom);
+					}
+					return false;
+				}
+			} else if (arg2.unpack(&arg2c)) {
+				arg1c = cnst >> arg2c;
+				if ( (arg1c << arg2c) != cnst)
+					return !wantTrue;
+				return makeEqConst(res, arg1c, ieb->arg1, wantTrue, usedRandom);
+			} else {
+				return makeEqConst(res, cnst, ieb->arg1, wantTrue, usedRandom) &&
+					makeEqConst(res, 0, ieb->arg2, true, usedRandom);
+			}
+			abort();
+		}
+		default:
+			break;
+		}
+		break;
+	}
 	default:
 		break;
 	}
 	printf("Can't make %s equal constant %lx\n", nameIRExpr(what), cnst);
-	abort();
+	return false;
 }
 
 static bool

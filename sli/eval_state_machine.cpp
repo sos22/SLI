@@ -2351,6 +2351,9 @@ collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		bool escape(IRExpr *assumption, IRExpr *) {
 			return addConstraint(assumption);
 		}
+		bool badMachine(void) {
+			return true;
+		}
 	} consumer;
 	consumer.out = &out;
 	enumEvalPaths(mai, sm, IRExpr_Const(IRConst_U1(1)), oracle, opt, consumer, token, true);
