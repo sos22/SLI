@@ -191,6 +191,7 @@ class OptimisationRecorder {
 public:
 #if CONFIG_RECORD_MACHINE_OPTIMISATIONS
 	char *prefix;
+	bool skip;
 	OptimisationRecorder()
 		: prefix(NULL)
 	{}
@@ -198,6 +199,12 @@ public:
 	void start(MaiMap *mai, StateMachine *sm, bool is_ssa,
 		   const AllowableOptimisations &opt)
 	{
+		if (random() % CONFIG_RECORD_MACHINE_OPTIMISATIONS) {
+			skip = true;
+			return;
+		}
+		skip = false;
+
 		static int idx;
 		while (1) {
 			prefix = my_asprintf("machines/%d", idx);
@@ -230,6 +237,8 @@ public:
 	}
 	void finish(MaiMap *mai, StateMachine *sm)
 	{
+		if (skip)
+			return;
 		FILE *f = fopenf("w", "%s/post_mai", prefix);
 		mai->print(f);
 		fclose(f);
