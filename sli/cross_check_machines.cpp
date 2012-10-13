@@ -905,7 +905,7 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 				wantTrue,
 				usedRandom);
 		default:
-			abort();
+			break;
 		}
 		break;
 	}
@@ -938,7 +938,7 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 			abort();
 		}
 		default:
-			abort();
+			break;
 		}
 		break;
 	}
@@ -971,8 +971,9 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 		return true;
 	}
 	default:
-		abort();
+		break;
 	}
+	return false;
 }
 
 static bool
