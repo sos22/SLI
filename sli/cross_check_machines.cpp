@@ -13,6 +13,8 @@
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
 #include "../VEX/priv/guest_amd64_defs.h"
 
+#define BAD_PTR_FUZZ 10000000
+
 class evalRes : public Named {
 	int val;
 	char *mkName() const {
@@ -114,6 +116,51 @@ public:
 		fprintf(f, "hbEdges:\n");
 		for (auto it = hbEdges.begin(); it != hbEdges.end(); it++)
 			fprintf(f, "\t%s <-< %s\n", it->first.name(), it->second.name());
+	}
+
+	/* Possible return values:
+
+	   -- Definitely a bad pointer.
+	   -- Definitely contains a given value.
+	   -- Definitely a valid memory location, but unknown value.
+	   -- Nothing known */
+	enum loadMemoryRes {
+		lmr_bad_ptr,
+		lmr_known_value,
+		lmr_unknown_value,
+		lmr_unknown_state
+	};
+	loadMemoryRes loadMemory(unsigned long addr, unsigned long *value) const {
+		for (auto it = badPtrs.begin(); it != badPtrs.end(); it++) {
+			if (addr + BAD_PTR_FUZZ >= *it &&
+			    *it + BAD_PTR_FUZZ >= addr)
+				return lmr_bad_ptr;
+		}
+		auto it_l = memory.find(addr);
+		if (it_l != memory.end()) {
+			*value = it_l->second;
+			return lmr_known_value;
+		}
+		for (auto it = memory.begin(); it != memory.end(); it++) {
+			if (addr + BAD_PTR_FUZZ >= it->first &&
+			    it->first + BAD_PTR_FUZZ >= addr)
+				return lmr_unknown_value;
+		}
+		return lmr_unknown_state;
+	}
+	evalExprRes badPtr(unsigned long addr) const
+	{
+		unsigned long val;
+		switch (loadMemory(addr, &val)) {
+		case lmr_bad_ptr:
+			return evalExprRes::success(1);
+		case lmr_known_value:
+		case lmr_unknown_value:
+			return evalExprRes::success(0);
+		case lmr_unknown_state:
+			return evalExprRes::failed();
+		}
+		abort();
 	}
 
 	evalExprRes happensBefore(const MemoryAccessIdentifier &acc1,
@@ -290,16 +337,19 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		auto *l = (StateMachineSideEffectLoad *)effect;
 		unsigned long addr = eval(l->addr);
 		unsigned long res;
-		if (currentState.memory.count(addr)) {
-			res = currentState.memory[addr];
-			log(state, "load(%lx) -> %lx, already in memory", addr, res);
-		} else if (currentState.badPtrs.count(addr)) {
+		switch (currentState.loadMemory(addr, &res)) {
+		case EvalState::lmr_bad_ptr:
 			log(state, "load(%lx) -> bad pointer", addr);
 			return false;
-		} else {
+		case EvalState::lmr_known_value:
+			log(state, "load(%lx) -> %lx, already in memory", addr, res);
+			break;
+		case EvalState::lmr_unknown_value:
+		case EvalState::lmr_unknown_state:
 			res = genRandomUlong();
 			currentState.memory[addr] = res;
 			log(state, "load(%lx) -> %lx, freshly generated", addr, res);
+			break;
 		}
 		currentState.regs[l->target] = res;
 		regOrder.push_back(l->target);
@@ -308,6 +358,12 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 	case StateMachineSideEffect::Store: {
 		auto *s = (StateMachineSideEffectStore *)effect;
 		unsigned long addr = eval(s->addr);
+		evalExprRes err(currentState.badPtr(addr));
+		unsigned long isBadPtr;
+		if (err.unpack(&isBadPtr)) {
+			log(state, "store to %lx: is a bad pointer", addr);
+			return false;
+		}
 		unsigned long data = eval(s->data);
 		currentState.memory[addr] = data;
 		log(state, "store %lx -> %lx", data, addr);
@@ -500,9 +556,16 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			assert(addr->tag == Iex_Const);
 			assert(addr->type() == Ity_I64);
 			unsigned long address = ((IRExprConst *)addr)->con->Ico.U64;
-			if (ctxt->memory.count(address))
-				return mk_const(ctxt->memory[address], e->type());
-			if (usedRandom) {
+			unsigned long val;
+			switch (ctxt->loadMemory(address, &val)) {
+			case EvalState::lmr_bad_ptr:
+				break;
+			case EvalState::lmr_known_value:
+				return mk_const(val, e->type());
+			case EvalState::lmr_unknown_value:
+			case EvalState::lmr_unknown_state:
+				if (!usedRandom)
+					break;
 				*usedRandom = true;
 				ctxt->memory[address] = genRandomUlong();
 				return mk_const(ctxt->memory[address], e->type());
@@ -571,11 +634,11 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			assert(arg->tag == Iex_Const);
 			assert(arg->type() == Ity_I64);
 			unsigned long address = ((IRExprConst *)arg)->con->Ico.U64;
-			if (ctxt->badPtrs.count(address)) {
-				return mk_const(1, Ity_I1);
-			} else if (ctxt->memory.count(address)) {
-				return mk_const(0, Ity_I1);
-			} else if (usedRandom) {
+			evalExprRes err(ctxt->badPtr(address));
+			unsigned long res;
+			if (err.unpack(&res))
+				return mk_const(!!res, Ity_I1);
+			if (usedRandom) {
 				*usedRandom = true;
 				ctxt->memory[address] = genRandomUlong();
 				return mk_const(0, Ity_I1);
@@ -646,19 +709,21 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		unsigned long addr_c;
 		if (!addr.unpack(&addr_c))
 			return false;
-		if (res.badPtrs.count(addr_c))
+		unsigned long val;
+		switch (res.loadMemory(addr_c, &val)) {
+		case EvalState::lmr_bad_ptr:
 			return false;
-		if (res.memory.count(addr_c)) {
-			if (res.memory[addr_c] == cnst)
-				return wantTrue;
+		case EvalState::lmr_known_value:
+			return (val == cnst) == wantTrue;
+		case EvalState::lmr_unknown_value:
+		case EvalState::lmr_unknown_state:
+			if (wantTrue)
+				res.memory[addr_c] = cnst;
 			else
-				return !wantTrue;
+				res.memory[addr_c] = cnst + 128;
+			return true;
 		}
-		if (wantTrue)
-			res.memory[addr_c] = cnst;
-		else
-			res.memory[addr_c] = cnst + 128;
-		return true;
+		abort();
 	}
 	case Iex_CCall: {
 		auto iec = (IRExprCCall *)what;
@@ -812,13 +877,14 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 			unsigned long addr_c;
 			if (!addr.unpack(&addr_c))
 				return false;
-			if (res.memory.count(addr_c))
-				return !wantTrue;
+			evalExprRes err(res.badPtr(addr_c));
+			unsigned long already_res;
+			if (err.unpack(&already_res))
+				return !!already_res == wantTrue;
 			if (wantTrue) {
 				res.badPtrs.insert(addr_c);
+				return true;
 			} else {
-				if (res.badPtrs.count(addr_c))
-					return false;
 				if (usedRandom) {
 					res.memory[addr_c] = genRandomUlong();
 					*usedRandom = true;
@@ -827,7 +893,7 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 					return false;
 				}
 			}
-			return true;
+			abort();
 		}
 		default:
 			abort();
