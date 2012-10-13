@@ -243,20 +243,6 @@ class AllowableOptimisations : public IRExprOptimisations {
 	}
 public:
 	static AllowableOptimisations defaultOptimisations;
-#if 0
-	AllowableOptimisations(
-#define mk_arg(name, type) type __ ## name,
-		optimisation_flags(mk_arg)
-#undef mk_arg
-		AddressSpace *__as)
-		:
-#define mk_init(name, type) _ ## name(__ ## name),
-		optimisation_flags(mk_init)
-#undef mk_init
-		_as(__as)
-	{
-	}
-#endif
 
 	AllowableOptimisations(
 		const AllowableOptimisations *base,
