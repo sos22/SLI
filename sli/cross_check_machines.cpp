@@ -458,6 +458,25 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			}
 			return e;
 		}
+		IRExpr *transformIex(IRExprEntryPoint *e) {
+			auto it = ctxt->entryPoints.find(e->thread);
+			if (it != ctxt->entryPoints.end())
+				return mk_const(it->second == e->label, Ity_I1);
+			if (ctxt->nonEntryPoints[e->thread].count(e->label))
+				return mk_const(0, Ity_I1);
+			if (usedRandom) {
+				*usedRandom = true;
+				bool res = random() % 2 == 0;
+				if (res) {
+					assert(!ctxt->entryPoints.count(e->thread));
+					ctxt->entryPoints.insert(std::pair<unsigned, CfgLabel>(e->thread, e->label));
+				} else {
+					ctxt->nonEntryPoints[e->thread].insert(e->label);
+				}
+				return mk_const(res, Ity_I1);
+			}
+			return e;
+		}
 		IRExpr *transformIex(IRExprUnop *e) {
 			bool b;
 			IRExpr *arg = transformIRExpr(e->arg, &b);
