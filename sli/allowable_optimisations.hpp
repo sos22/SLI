@@ -347,6 +347,7 @@ public:
 		_optimisation_flags(parse_flag)
 #undef parse_flag
 
+		parseThisString(", ", buf, &buf);
 		if (parseThisString("interestingStores = {", buf, &buf)) {
 			while (!parseThisString("}", buf, &buf)) {
 				parseThisString(";", buf, &buf);
