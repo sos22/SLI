@@ -157,7 +157,27 @@ public:
 		if (_as)
 			x |= 8;
 		return x;
-	}	
+	}
+
+	bool parse(AddressSpace *addrSpace, const char *buf, const char **suffix) {
+		if (!parseThisString("expropts(", buf, &buf))
+			return false;
+		_assumePrivateStack = false;
+		_noSanityChecking = false;
+		_as = NULL;
+		clearName();
+		if (parseThisString("assumePrivateStack", buf, &buf))
+			_assumePrivateStack = true;
+		parseThisString(", ", buf, &buf);
+		if (parseThisString("noSanityChecking", buf, &buf))
+			_noSanityChecking = true;
+		parseThisString(", ", buf, &buf);
+		if (parseThisString("as", buf, &buf))
+			_as = addrSpace;
+		if (!parseThisString(")", buf, suffix))
+			return false;
+		return true;
+	}
 };
 class AllowableOptimisations : public IRExprOptimisations {
 #define _optimisation_flags(f)						\
@@ -305,8 +325,67 @@ public:
 		return false;
 	}
 
+	bool parse(std::set<DynAnalysisRip> *is, std::set<DynAnalysisRip> *nll,
+		   AddressSpace *as, const char *buf, const char **suffix)
+	{
+		if (!parseThisString("opt{", buf, &buf))
+			return false;
+#define clear_flg(name, ign) _ ## name = false;
+		_optimisation_flags(clear_flg)
+#undef clear_flg
+
+		_interestingStores = NULL;
+		_nonLocalLoads = NULL;
+		is->clear();
+		nll->clear();
+		clearName();
+
+#define parse_flag(name, ign)					\
+		parseThisString(", ", buf, &buf);		\
+		if (parseThisString( #name , buf, &buf))	\
+			_ ## name = true;
+		_optimisation_flags(parse_flag)
+#undef parse_flag
+
+		if (parseThisString("interestingStores = {", buf, &buf)) {
+			while (!parseThisString("}", buf, &buf)) {
+				parseThisString(";", buf, &buf);
+				DynAnalysisRip dr;
+				if (!parseDynAnalysisRip(&dr, buf, &buf))
+					return false;
+				is->insert(dr);
+			}
+			_interestingStores = is;
+		}
+		parseThisString(", ", buf, &buf);
+		/* We used to have a bug which sometimes doubled up
+		   this comma.  Rather than throw away all of the
+		   results of those tests, just strip out an extra
+		   comma here and ignore it. */
+		parseThisString(", ", buf, &buf);
+		if (parseThisString("nonLocalLoads = {", buf, &buf)) {
+			while (!parseThisString("}", buf, &buf)) {
+				parseThisString(";", buf, &buf);
+				DynAnalysisRip dr;
+				if (!parseDynAnalysisRip(&dr, buf, &buf))
+					return false;
+				nll->insert(dr);
+			}
+			_nonLocalLoads = nll;
+		}
+		parseThisString(", ", buf, &buf);
+		if (!IRExprOptimisations::parse(as, buf, &buf))
+			return false;
+		if (!parseThisString("}", buf, suffix))
+			return false;
+		return true;
+	}
+
 #undef _optimisation_flags
 #undef optimisation_flags
+
+	static AllowableOptimisations fromFile(std::set<DynAnalysisRip> *is, std::set<DynAnalysisRip> *nll,
+					       AddressSpace *as, const char *path);
 };
 
 #endif /* !ALLOWABLE_OPTIMISATIONS_HPP__ */

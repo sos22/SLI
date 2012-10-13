@@ -851,12 +851,21 @@ main(int argc, char *argv[])
 	VexPtr<MaiMap, &ir_heap> mai1(MaiMap::fromFile(machine1, argv[5]));
 	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(argv[6]));
 	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, argv[7]));
-	gc_vector<IRExpr, &ir_heap> constraints;
+	std::set<DynAnalysisRip> nonLocalLoads;
+	std::set<DynAnalysisRip> interestingStores;
 	AllowableOptimisations opt(
+		AllowableOptimisations::fromFile(
+			&interestingStores,
+			&nonLocalLoads,
+			oracle->ms->addressSpace,
+			argv[8]));
+
+	gc_vector<IRExpr, &ir_heap> constraints;
+	AllowableOptimisations opt2(
 		AllowableOptimisations::defaultOptimisations.
 		setAddressSpace(oracle->ms->addressSpace).
 		enableassumePrivateStack());
-	collectConstraints(mai1, machine1, oracleI, opt, constraints, ALLOW_GC);
+	collectConstraints(mai1, machine1, oracleI, opt2, constraints, ALLOW_GC);
 
 	printf("Constraints:\n");
 	for (auto it = constraints.begin(); it != constraints.end(); it++)
@@ -959,8 +968,19 @@ main(int argc, char *argv[])
 			ctxt2.reset(*it);
 			machine2res = ctxt2.eval(machine2->root, ALLOW_GC);
 		}
-		
-		if (machine1res != machine2res) {
+
+		bool failed = machine1res != machine2res;
+		if (failed &&
+		    machine1res == evalRes::survive() &&
+		    machine2res == evalRes::unreached() &&
+		    opt.noLocalSurvival()) {
+			/* If noLocalSurvival is set then you're
+			   allowed to convert <survive> into
+			   <unreached> */
+			failed = false;
+		}
+
+		if (failed) {
 			if (!printedMachines) {
 				printf("Machine1:\n");
 				printStateMachine(machine1, stdout, labels1);

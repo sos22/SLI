@@ -1333,3 +1333,23 @@ MaiMap::restrict(const std::set<const CFGNode *> &cfgNodes,
 		it++;
 	}
 }
+
+AllowableOptimisations
+AllowableOptimisations::fromFile(std::set<DynAnalysisRip> *is, std::set<DynAnalysisRip> *nll,
+				 AddressSpace *as, const char *path)
+{
+	int fd = open(path, O_RDONLY);
+	if (fd < 0)
+		err(1, "opening %s\n", path);
+	char *content = readfile(fd);
+	if (!content)
+		err(1, "reading %s\n", path);
+	close(fd);
+
+	AllowableOptimisations res(1.0);
+	const char *p;
+	if (!res.parse(is, nll, as, content, &p))
+		err(1, "parsing %s as AllowableOptimisations set", content);
+	free(content);
+	return res;
+}

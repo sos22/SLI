@@ -10,4 +10,4 @@ dir="$4"
 
 set -x
 
-../cross_check_machines "$binary" "$types" "$callgraph" "${dir}/pre_machine" "${dir}/pre_mai" "${dir}/post_machine" "${dir}/post_mai"
+../cross_check_machines "$binary" "$types" "$callgraph" "${dir}/pre_machine" "${dir}/pre_mai" "${dir}/post_machine" "${dir}/post_mai" "${dir}/opt"
