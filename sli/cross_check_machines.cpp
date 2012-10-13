@@ -362,7 +362,11 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		unsigned long isBadPtr;
 		if (err.unpack(&isBadPtr)) {
 			log(state, "store to %lx: is a bad pointer", addr);
-			return false;
+			/* This should arguably return false, and so
+			   flag this execution as reaching an escaping
+			   state, but that produces so many false
+			   positives that it's not worth it. */
+			return true;
 		}
 		unsigned long data = eval(s->data);
 		currentState.memory[addr] = data;
