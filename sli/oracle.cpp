@@ -437,7 +437,7 @@ Oracle::memoryAccessesMightAliasLS(const DynAnalysisRip &smsel_dr, const DynAnal
 }
 bool
 Oracle::memoryAccessesMightAlias(const MaiMap &mai,
-				 const AllowableOptimisations &opt,
+				 const IRExprOptimisations &opt,
 				 StateMachineSideEffectLoad *smsel,
 				 StateMachineSideEffectStore *smses)
 {
@@ -501,7 +501,7 @@ Oracle::memoryAccessesMightAliasLL(const DynAnalysisRip &dr1, const DynAnalysisR
 
 bool
 Oracle::memoryAccessesMightAlias(const MaiMap &mai,
-				 const AllowableOptimisations &opt,
+				 const IRExprOptimisations &opt,
 				 StateMachineSideEffectLoad *smsel1,
 				 StateMachineSideEffectLoad *smsel2)
 {
@@ -549,7 +549,7 @@ Oracle::memoryAccessesMightAliasSS(const DynAnalysisRip &dr1, const DynAnalysisR
 
 bool
 Oracle::memoryAccessesMightAlias(const MaiMap &mai,
-				 const AllowableOptimisations &opt,
+				 const IRExprOptimisations &opt,
 				 StateMachineSideEffectStore *smses1,
 				 StateMachineSideEffectStore *smses2)
 {
@@ -927,7 +927,7 @@ static PointerAliasingSet
 irexprAliasingClass(IRExpr *expr,
 		    const Oracle::RegisterAliasingConfiguration &config,
 		    std::map<threadAndRegister, PointerAliasingSet> *temps,
-		    const AllowableOptimisations &opt,
+		    const IRExprOptimisations &opt,
 		    bool buildingAliasTable)
 {
 	if (expr->type() != Ity_I64)
@@ -1124,7 +1124,7 @@ irexprAliasingClass(IRExpr *expr,
 }
 
 bool
-Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a, const AllowableOptimisations &opt) const
+Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a, const IRExprOptimisations &opt) const
 {
 	PointerAliasingSet as = irexprAliasingClass(a, *this, NULL, opt, false);
 	if (as.mightPointAtNonStack())
@@ -1134,7 +1134,7 @@ Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a, const A
 }
 
 bool
-Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt) const
+Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt) const
 {
 	return (irexprAliasingClass(a, *this, NULL, opt, false) &
 		irexprAliasingClass(b, *this, NULL, opt, false)).mightPoint();
@@ -2531,7 +2531,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 						      std::vector<StaticRip> *changed,
 						      bool *done_something)
 {
-	const AllowableOptimisations opt(AllowableOptimisations::defaultOptimisations.setAddressSpace(as));
+	const IRExprOptimisations opt(AllowableOptimisations::defaultOptimisations.setAddressSpace(as));
 	RegisterAliasingConfiguration config;
 	config.addConfig(STATIC_THREAD, aliasConfigOnEntryToInstruction(rip));
 	ThreadRegisterAliasingConfiguration &tconfig(config.content[0].second);

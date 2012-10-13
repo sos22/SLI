@@ -93,7 +93,7 @@ class threadState {
 		assignmentOrder.push_back(reg);
 	}
 
-	IRExpr *setTemporary(const threadAndRegister &reg, IRExpr *inp, const AllowableOptimisations &opt);
+	IRExpr *setTemporary(const threadAndRegister &reg, IRExpr *inp, const IRExprOptimisations &opt);
 public:
 	IRExpr *register_value(const threadAndRegister &reg,
 			       IRType type) {
@@ -277,7 +277,7 @@ public:
 	}
 	void set_register(const threadAndRegister &reg, IRExpr *e,
 			  IRExpr **assumption,
-			  const AllowableOptimisations &opt) {
+			  const IRExprOptimisations &opt) {
 		register_val &rv(registers[reg]);
 		switch (e->type()) {
 		case Ity_I8:
@@ -320,7 +320,7 @@ public:
 		bump_register_in_assignment_order(reg);
 	}
 	void eval_phi(StateMachineSideEffectPhi *phi, IRExpr **assumption,
-		      const AllowableOptimisations &opt) {
+		      const IRExprOptimisations &opt) {
 		for (auto it = assignmentOrder.rbegin();
 		     it != assignmentOrder.rend();
 		     it++) {
@@ -364,7 +364,7 @@ public:
 
 /* Rewrite @e now that we know the value of @reg */
 IRExpr *
-threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const AllowableOptimisations &opt)
+threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const IRExprOptimisations &opt)
 {
 	struct _ : public IRExprTransformer {
 		const threadAndRegister &reg;
@@ -464,10 +464,10 @@ private:
 #endif
 	}
 
-	trool evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt);
+	trool evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt);
 	bool evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
-			    StateMachineSideEffect *smse, const AllowableOptimisations &opt)
+			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
 		__attribute__((warn_unused_result));
 
 
@@ -498,7 +498,7 @@ private:
 	/* Create a new context which is like this one, but with an
 	   extra assumption. */
 	EvalContext(const EvalContext &o, StateMachineState *sms, IRExpr *assume,
-		    const AllowableOptimisations &opt)
+		    const IRExprOptimisations &opt)
 		: assumption(o.assumption ? IRExpr_Binop(Iop_And1, o.assumption, assume) : assume),
 		  accumulatedAssumption(o.accumulatedAssumption
 					? IRExpr_Binop(Iop_And1, o.accumulatedAssumption, assume)
@@ -532,14 +532,14 @@ private:
 		bool noImplicitBadPtrs,
 		NdChooser &chooser,
 		OracleInterface *oracle,
-		const AllowableOptimisations &opt);
-	bool expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const AllowableOptimisations &opt);
-	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const AllowableOptimisations &opt);
+		const IRExprOptimisations &opt);
+	bool expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
 
 public:
 	bool advance(const MaiMap &decode,
 		     OracleInterface *oracle,
-		     const AllowableOptimisations &opt,
+		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer) __attribute__((warn_unused_result));
@@ -551,7 +551,7 @@ public:
 						  bool useInitialMemoryValues,
 						  bool noImplicitBadPtrs,
 						  OracleInterface *oracle,
-						  const AllowableOptimisations &opt);
+						  const IRExprOptimisations &opt);
 	enum bigStepResult { bsr_crash, bsr_survive, bsr_failed };
 	bigStepResult bigStepEvalStateMachine(const MaiMap &decode,
 					      StateMachine *rootMachine,
@@ -560,7 +560,7 @@ public:
 					      bool noImplicitBadPtrs,
 					      NdChooser &chooser,
 					      OracleInterface *oracle,
-					      const AllowableOptimisations &opt);
+					      const IRExprOptimisations &opt);
 	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
 		    std::map<const StateMachineState*, int> &
 #ifndef NDEBUG
@@ -593,7 +593,7 @@ public:
 };
 
 bool
-EvalContext::expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const AllowableOptimisations &opt)
+EvalContext::expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt)
 {
 	if (TIMEOUT)
 		return true;
@@ -699,7 +699,7 @@ EvalContext::expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &c
 }
 
 bool
-EvalContext::evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const AllowableOptimisations &opt)
+EvalContext::evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt)
 {
 	return expressionIsTrue(IRExpr_Binop(
 					Iop_CmpEQ64,
@@ -718,7 +718,7 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 					bool noImplicitBadPtrs,
 					NdChooser &chooser,
 					OracleInterface *oracle,
-					const AllowableOptimisations &opt)
+					const IRExprOptimisations &opt)
 {
 	IRExpr *addr = NULL;
 	if (smse->type == StateMachineSideEffect::Load ||
@@ -882,7 +882,7 @@ EvalContext::smallStepEvalStateMachine(const MaiMap &decode,
 				       bool useInitialMemoryValues,
 				       bool noImplicitBadPtrs,
 				       OracleInterface *oracle,
-				       const AllowableOptimisations &opt)
+				       const IRExprOptimisations &opt)
 {
 	if (TIMEOUT)
 		return ssr_failed;
@@ -939,7 +939,7 @@ EvalContext::bigStepEvalStateMachine(const MaiMap &decode,
 				     bool noImplicitBadPtrs,
 				     NdChooser &chooser,
 				     OracleInterface *oracle,
-				     const AllowableOptimisations &opt)
+				     const IRExprOptimisations &opt)
 {
 	while (1) {
 		smallStepResult res =
@@ -969,7 +969,7 @@ EvalContext::bigStepEvalStateMachine(const MaiMap &decode,
 }
 
 EvalContext::trool
-EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &opt)
+EvalContext::evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt)
 {
 	assert(what->type() == Ity_I1);
 	IRExpr *e;
@@ -1034,7 +1034,7 @@ EvalContext::evalBooleanExpression(IRExpr *what, const AllowableOptimisations &o
 bool
 EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
-			    StateMachineSideEffect *smse, const AllowableOptimisations &opt)
+			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
 {
 	NdChooser chooser;
 
@@ -1072,7 +1072,7 @@ EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterf
 bool
 EvalContext::advance(const MaiMap &decode,
 		     OracleInterface *oracle,
-		     const AllowableOptimisations &opt,
+		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer)
@@ -1165,7 +1165,7 @@ enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<StateMachine, &ir_heap> &sm,
 	      const VexPtr<IRExpr, &ir_heap> &assumption,
 	      const VexPtr<OracleInterface> &oracle,
-	      const AllowableOptimisations &opt,
+	      const IRExprOptimisations &opt,
 	      struct EvalPathConsumer &consumer,
 	      GarbageCollectionToken &token,
 	      bool loud = false)
@@ -1195,7 +1195,7 @@ enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 		if (!ctxt.advance(*decode, oracle, opt, pendingStates, sm, consumer))
 			return false;
 		if (loud && cntr++ % 100 == 0)
-			printf("Processed %d states; %d in queue\n", cntr, pendingStates.size());
+			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
 	}
 	return true;
 }
@@ -1207,7 +1207,7 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 					const VexPtr<OracleInterface> &oracle,
 					bool escapingStatesSurvive,
 					bool wantCrash,
-					const AllowableOptimisations &opt,
+					const IRExprOptimisations &opt,
 					GarbageCollectionToken token)
 {
 	__set_profiling(survivalConstraintIfExecutedAtomically);
@@ -1224,7 +1224,7 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 
 	struct _ : public EvalPathConsumer {
 		VexPtr<IRExpr, &ir_heap> res;
-		const AllowableOptimisations &opt;
+		const IRExprOptimisations &opt;
 		bool escapingStatesSurvive;
 		bool wantCrash;
 		void addComponent(const char *label, IRExpr *pathConstraint, IRExpr *justPathConstraint) {
@@ -1266,7 +1266,7 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 			return true;
 		}
 		_(const VexPtr<IRExpr, &ir_heap> &_assumption,
-		  const AllowableOptimisations &_opt,
+		  const IRExprOptimisations &_opt,
 		  bool _escapingStatesSurvive,
 		  bool _wantCrash)
 			: res(_assumption), opt(_opt), escapingStatesSurvive(_escapingStatesSurvive),
@@ -1303,7 +1303,7 @@ survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 				       const VexPtr<IRExpr, &ir_heap> &assumption,
 				       const VexPtr<OracleInterface> &oracle,
 				       bool escapingStatesSurvive,
-				       const AllowableOptimisations &opt,
+				       const IRExprOptimisations &opt,
 				       GarbageCollectionToken token)
 {
 	return _survivalConstraintIfExecutedAtomically(
@@ -1325,7 +1325,7 @@ crashingConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 				       const VexPtr<IRExpr, &ir_heap> &assumption,
 				       const VexPtr<OracleInterface> &oracle,
 				       bool escapingStatesSurvive,
-				       const AllowableOptimisations &opt,
+				       const IRExprOptimisations &opt,
 				       GarbageCollectionToken token)
 {
 	return _survivalConstraintIfExecutedAtomically(
@@ -1344,7 +1344,7 @@ evalMachineUnderAssumption(const VexPtr<MaiMap, &ir_heap> &mai,
 			   const VexPtr<StateMachine, &ir_heap> &sm,
 			   const VexPtr<OracleInterface> &oracle,
 			   const VexPtr<IRExpr, &ir_heap> &assumption,
-			   const AllowableOptimisations &opt,
+			   const IRExprOptimisations &opt,
 			   bool *mightSurvive, bool *mightCrash,
 			   GarbageCollectionToken token)
 {
@@ -1448,7 +1448,7 @@ static bool
 definitelyDoesntRace(const MaiMap &decode,
 		     StateMachineSideEffect *probeEffect,
 		     StateMachineState *storeMachine,
-		     const AllowableOptimisations &opt,
+		     const IRExprOptimisations &opt,
 		     bool allowStoreLoadRaces,
 		     OracleInterface *oracle,
 		     std::set<StateMachineState *> &memo)
@@ -1518,7 +1518,7 @@ definitelyDoesntRace(const MaiMap &decode,
 static bool
 probeDefinitelyDoesntRace(const MaiMap &decode, StateMachineSideEffect *probeEffect,
 			  StateMachineState *storeMachine,
-			  const AllowableOptimisations &opt, OracleInterface *oracle)
+			  const IRExprOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineState *> memo;
 	return definitelyDoesntRace(decode, probeEffect, storeMachine, opt, false, oracle, memo);
@@ -1526,7 +1526,7 @@ probeDefinitelyDoesntRace(const MaiMap &decode, StateMachineSideEffect *probeEff
 static bool
 storeDefinitelyDoesntRace(const MaiMap &decode, StateMachineSideEffect *storeEffect,
 			  StateMachineState *probeMachine,
-			  const AllowableOptimisations &opt, OracleInterface *oracle)
+			  const IRExprOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineState *> memo;
 	return definitelyDoesntRace(decode, storeEffect, probeMachine, opt, true, oracle, memo);
@@ -1539,7 +1539,7 @@ buildCrossProductMachine(const MaiMap &maiIn,
 			 OracleInterface *oracle,
 			 MaiMap *&maiOut,
 			 int *next_fake_free_variable,
-			 const AllowableOptimisations &opt)
+			 const IRExprOptimisations &opt)
 {
 	maiOut = maiIn.dupe();
 
@@ -1837,7 +1837,7 @@ struct findRemoteMacroSectionsState {
 							 StateMachine *writeMachine,
 							 NdChooser &chooser,
 							 OracleInterface *oracle,
-							 const AllowableOptimisations &opt);
+							 const IRExprOptimisations &opt);
 	findRemoteMacroSectionsState(StateMachine *sm,
 				     IRExpr *initialAssumption,
 				     bool accumulateAssumptions,
@@ -1852,7 +1852,7 @@ findRemoteMacroSectionsState::advanceWriteMachine(const MaiMap &decode,
 						  StateMachine *writeMachine,
 						  NdChooser &chooser,
 						  OracleInterface *oracle,
-						  const AllowableOptimisations &opt)
+						  const IRExprOptimisations &opt)
 {
 	StateMachineSideEffectStore *smses = NULL;
 
@@ -1900,7 +1900,7 @@ findRemoteMacroSections(const VexPtr<MaiMap, &ir_heap> &decode,
 			const VexPtr<StateMachine, &ir_heap> &writeMachine,
 			const VexPtr<IRExpr, &ir_heap> &assumption,
 			const VexPtr<OracleInterface> &oracle,
-			const AllowableOptimisations &opt,
+			const IRExprOptimisations &opt,
 			VexPtr<remoteMacroSectionsT, &ir_heap> &output,
 			GarbageCollectionToken token)
 {
@@ -1988,7 +1988,7 @@ fixSufficient(const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      const VexPtr<IRExpr, &ir_heap> &assumption,
 	      const VexPtr<OracleInterface> &oracle,
-	      const AllowableOptimisations &opt,
+	      const IRExprOptimisations &opt,
 	      const VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
 	      GarbageCollectionToken token)
 {
@@ -2080,7 +2080,7 @@ findHappensBeforeRelations(
 	int cntr = 0;
 	struct : public EvalPathConsumer {
 		VexPtr<IRExpr, &ir_heap> newCondition;
-		const AllowableOptimisations *opt;
+		const IRExprOptimisations *opt;
 		bool crash(IRExpr *, IRExpr *justPathConstraint) {
 			newCondition =
 				IRExpr_Binop(
@@ -2276,7 +2276,7 @@ getCrossMachineCrashRequirement(
 
 	struct : public EvalPathConsumer {
 		VexPtr<IRExpr, &ir_heap> accumulator;
-		const AllowableOptimisations *opt;
+		const IRExprOptimisations *opt;
 
 		bool crash(IRExpr *, IRExpr *accAssumption) {
 			if (accumulator) {
@@ -2321,7 +2321,7 @@ void
 collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		   const VexPtr<StateMachine, &ir_heap> &sm,
 		   VexPtr<OracleInterface> &oracle,
-		   const AllowableOptimisations &opt,
+		   const IRExprOptimisations &opt,
 		   std::vector<IRExpr *> &out,
 		   GarbageCollectionToken token)
 {

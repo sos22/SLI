@@ -22,12 +22,12 @@ public:
 	bool ptrsMightAlias(StateMachineState *where,
 			    IRExpr *ptr1,
 			    IRExpr *ptr2,
-			    const AllowableOptimisations &opt) const;
+			    const IRExprOptimisations &opt) const;
 	bool ptrsMightAlias(StateMachineState *where1,
 			    IRExpr *ptr1,
 			    StateMachineState *where2,
 			    IRExpr *ptr2,
-			    const AllowableOptimisations &opt) const;
+			    const IRExprOptimisations &opt) const;
 	bool findConfig(StateMachineState *, Oracle::RegisterAliasingConfiguration *) const;
 };
 

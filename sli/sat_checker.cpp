@@ -997,7 +997,7 @@ exhaustive_satisfiable(IRExpr *e, bool print_all)
 }
 
 static IRExpr *
-sat_simplify(IRExpr *a, const AllowableOptimisations &opt)
+sat_simplify(IRExpr *a, const IRExprOptimisations &opt)
 {
 	sat_checker_counters.nr_invoked++;
 
@@ -1041,7 +1041,7 @@ sat_simplify(IRExpr *a, const AllowableOptimisations &opt)
 }
 
 static bool
-satisfiable(IRExpr *e, const AllowableOptimisations &opt)
+satisfiable(IRExpr *e, const IRExprOptimisations &opt)
 {
 	assert(e->type() == Ity_I1);
 
@@ -1058,7 +1058,7 @@ satisfiable(IRExpr *e, const AllowableOptimisations &opt)
 };
 
 bool
-satisfiable(IRExpr *e, const AllowableOptimisations &opt)
+satisfiable(IRExpr *e, const IRExprOptimisations &opt)
 {
 	return _sat_checker::satisfiable(e, opt);
 }
@@ -1070,7 +1070,7 @@ simplify_via_anf(IRExpr *a, IRExpr *assumption)
 }
 
 IRExpr *
-sat_simplify(IRExpr *a, const AllowableOptimisations &opt)
+sat_simplify(IRExpr *a, const IRExprOptimisations &opt)
 {
 	return _sat_checker::sat_simplify(a, opt);
 }

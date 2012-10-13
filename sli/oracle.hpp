@@ -53,10 +53,10 @@ public:
 
 class OracleInterface : public GarbageCollected<OracleInterface> {
 public:
-	virtual bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *) = 0;
-	virtual bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *) = 0;
-	virtual bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *) = 0;
-	bool memoryAccessesMightAlias(const MaiMap &decode, const AllowableOptimisations &opt,
+	virtual bool memoryAccessesMightAlias(const MaiMap &, const IRExprOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *) = 0;
+	virtual bool memoryAccessesMightAlias(const MaiMap &, const IRExprOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *) = 0;
+	virtual bool memoryAccessesMightAlias(const MaiMap &, const IRExprOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *) = 0;
+	bool memoryAccessesMightAlias(const MaiMap &decode, const IRExprOptimisations &opt,
 				      StateMachineSideEffectMemoryAccess *a,
 				      StateMachineSideEffectMemoryAccess *b) {
 		if (a->type == StateMachineSideEffect::Load) {
@@ -270,11 +270,11 @@ public:
 		   configuration.  Note that this assumes that both @a
 		   and @b are pointers i.e. it's not just asking
 		   whether @a and @b might be equal. */
-		bool ptrsMightAlias(IRExpr *a, IRExpr *b, const AllowableOptimisations &opt) const;
+		bool ptrsMightAlias(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt) const;
 
 		/* Check whether there's any possibility of @a being a
 		   pointer to a non-stack location. */
-		bool mightPointOutsideStack(IRExpr *a, const AllowableOptimisations &opt) const;
+		bool mightPointOutsideStack(IRExpr *a, const IRExprOptimisations &opt) const;
 
 		void prettyPrint(FILE *) const;
 	};
@@ -359,9 +359,9 @@ private:
 			       const DynAnalysisRip &dr2,
 			       const std::vector<TypesDb::types_entry> &alias2);
 public:
-	bool memoryAccessesMightAlias(const MaiMap &,const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
-	bool memoryAccessesMightAlias(const MaiMap &,const AllowableOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
-	bool memoryAccessesMightAlias(const MaiMap &,const AllowableOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
+	bool memoryAccessesMightAlias(const MaiMap &,const IRExprOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectLoad *);
+	bool memoryAccessesMightAlias(const MaiMap &,const IRExprOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
+	bool memoryAccessesMightAlias(const MaiMap &,const IRExprOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store);
         void findRacingRips(const MaiMap &, StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
 	void findRacingRips(const MaiMap &, StateMachineSideEffectStore *, std::set<DynAnalysisRip> &);

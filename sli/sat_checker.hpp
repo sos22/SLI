@@ -3,14 +3,14 @@
 
 #include "nd_chooser.h"
 
-class AllowableOptimisations;
+class IRExprOptimisations;
 class IRExpr;
 
 bool satisfiable(IRExpr *e,
-		 const AllowableOptimisations &opt);
+		 const IRExprOptimisations &opt);
 IRExpr *simplify_via_anf(IRExpr *a, IRExpr *assumption = NULL);
 IRExpr *interval_simplify(IRExpr *what);
-IRExpr *sat_simplify(IRExpr *a, const AllowableOptimisations &);
+IRExpr *sat_simplify(IRExpr *a, const IRExprOptimisations &);
 
 class satisfier {
 public:
