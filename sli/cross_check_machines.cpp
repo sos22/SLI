@@ -1002,7 +1002,7 @@ main(int argc, char *argv[])
 				nr_escape++;
 			else if (machine1res == evalRes::crash())
 				nr_crash++;
-			else if (machine2res == evalRes::survive())
+			else if (machine1res == evalRes::survive())
 				nr_nocrash++;
 			else
 				abort();
