@@ -83,6 +83,8 @@ public:
 	std::set<unsigned long> badPtrs;
 	std::map<unsigned, CfgLabel> entryPoints;
 	std::map<unsigned, std::set<CfgLabel> > nonEntryPoints;
+	/* (a, b) in hbEdges -> a must happen before b */
+	std::vector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > hbEdges;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Regs:\n");
 		for (auto it = regs.begin(); it != regs.end(); it++)
@@ -109,12 +111,75 @@ public:
 			}
 			fprintf(f, "}\n");
 		}
+		fprintf(f, "hbEdges:\n");
+		for (auto it = hbEdges.begin(); it != hbEdges.end(); it++)
+			fprintf(f, "\t%s <-< %s\n", it->first.name(), it->second.name());
+	}
+
+	evalExprRes happensBefore(const MemoryAccessIdentifier &acc1,
+				  const MemoryAccessIdentifier &acc2) const
+	{
+		/* All accesses which might happen before or after the
+		   two accesses, include the accesses themselves. */
+		std::set<MemoryAccessIdentifier> beforeAcc1, afterAcc1, beforeAcc2, afterAcc2;
+		beforeAcc2.insert(acc2);
+		afterAcc2.insert(acc2);
+
+		bool progress;
+		progress = true;
+		beforeAcc1.insert(acc1);
+		while (progress) {
+			progress = false;
+			for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
+				if (beforeAcc1.count(it->second))
+					progress |= beforeAcc1.insert(it->first).second;
+			}
+			if (beforeAcc1.count(acc2))
+				return evalExprRes::success(0);
+		}
+		progress = true;
+		afterAcc1.insert(acc1);
+		while (progress) {
+			progress = false;
+			for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
+				if (afterAcc1.count(it->first))
+					progress |= afterAcc1.insert(it->first).second;
+			}
+			if (afterAcc1.count(acc2))
+				return evalExprRes::success(1);
+		}
+		progress = true;
+		beforeAcc2.insert(acc2);
+		while (progress) {
+			progress = false;
+			for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
+				if (beforeAcc2.count(it->second))
+					progress |= beforeAcc2.insert(it->first).second;
+			}
+			if (beforeAcc2.count(acc1))
+				return evalExprRes::success(1);
+		}
+		progress = true;
+		afterAcc2.insert(acc2);
+		while (progress) {
+			progress = false;
+			for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
+				if (afterAcc2.count(it->first))
+					progress |= afterAcc2.insert(it->second).second;
+			}
+			if (afterAcc2.count(acc1))
+				return evalExprRes::success(0);
+		}
+		return evalExprRes::failed();
 	}
 	void clear() {
 		regs.clear();
 		freeVars.clear();
 		memory.clear();
 		badPtrs.clear();
+		entryPoints.clear();
+		nonEntryPoints.clear();
+		hbEdges.clear();
 	}
 };
 
@@ -212,7 +277,6 @@ EvalCtxt::printLog(FILE *f, const std::map<const StateMachineState *, int> &labe
 {
 	for (auto it = logmsgs.begin(); it != logmsgs.end(); it++) {
 		auto it2 = labels.find(it->first);
-		printf("%p\n", it->first);
 		assert(it2 != labels.end());
 		fprintf(f, "l%d: %s\n", it2->second, it->second);
 	}
@@ -445,8 +509,23 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			}
 			return IRExpr_Load(e->ty, addr);
 		}
-		IRExpr *transformIex(IRExprHappensBefore *) {
-			abort();
+		IRExpr *transformIex(IRExprHappensBefore *e) {
+			auto er(ctxt->happensBefore(e->before, e->after));
+			unsigned long res;
+			if (er.unpack(&res)) {
+				assert(res == 0 || res == 1);
+				return mk_const(res, Ity_I1);
+			}
+			if (usedRandom) {
+				*usedRandom = true;
+				bool res = random() % 2 == 0;
+				if (res)
+					ctxt->hbEdges.push_back(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>(e->before, e->after));
+				else
+					ctxt->hbEdges.push_back(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>(e->after, e->before));
+				return mk_const(res, Ity_I1);
+			}
+			return e;
 		}
 		IRExpr *transformIex(IRExprFreeVariable *e) {
 			if (ctxt->freeVars.count(e->id))
@@ -771,6 +850,18 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 		return true;
 	}
 
+	case Iex_HappensBefore: {
+		auto ieh = (IRExprHappensBefore *)expr;
+		auto er(res.happensBefore(ieh->before, ieh->after));
+		unsigned long erl;
+		if (er.unpack(&erl))
+			return !!erl == wantTrue;
+		if (wantTrue)
+			res.hbEdges.push_back(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>(ieh->before, ieh->after));
+		else
+			res.hbEdges.push_back(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>(ieh->after, ieh->before));
+		return true;
+	}
 	default:
 		abort();
 	}
@@ -997,7 +1088,11 @@ main(int argc, char *argv[])
 			printf("Machine 2 log:\n");
 			ctxt2.printLog(stdout, labels2);
 
+			printf("Context %zd/%zd\n", it - initialCtxts.begin(),
+			       initialCtxts.size());
+
 			dbg_break("Failed");
+
 			nr_failed++;
 		} else {
 			if (machine1res == evalRes::unreached())
