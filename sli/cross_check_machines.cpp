@@ -958,6 +958,9 @@ main(int argc, char *argv[])
 		enableassumePrivateStack());
 	collectConstraints(mai1, machine1, oracleI, opt2, constraints, ALLOW_GC);
 
+	for (auto it = constraints.begin(); it != constraints.end(); it++)
+		*it = sat_simplify(*it, AllowableOptimisations::defaultOptimisations);
+
 	printf("Constraints:\n");
 	for (auto it = constraints.begin(); it != constraints.end(); it++)
 		printf("\t%s\n", nameIRExpr(*it));
@@ -993,7 +996,7 @@ main(int argc, char *argv[])
 			continue;
 		}
 
-		IRExpr *a = sat_simplify(*it, AllowableOptimisations::defaultOptimisations);
+		IRExpr *a = *it;
 		if (!addSatisfier(initialCtxts, a)) {
 			fprintf(stderr, "WARNING: Cannot generate concrete satisfier for %s\n", nameIRExpr(a));
 			failed_generate_satisfier++;
