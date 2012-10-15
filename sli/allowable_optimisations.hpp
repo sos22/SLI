@@ -124,6 +124,7 @@ public:
 	{
 		IRExprOptimisations res(*this);
 		res._as = as;
+		res.clearName();
 		return res;
 	}
 
@@ -281,6 +282,7 @@ public:
 	{							\
 		AllowableOptimisations res(*this);		\
 		res._ ## name = value;				\
+		res.clearName();					\
 		return res;					\
 	}
 	optimisation_flags(mk_set_value);
