@@ -701,6 +701,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 
 static bool makeEq(EvalState &res, IRExpr *arg1, IRExpr *arg2, bool wantTrue, bool *usedRandom);
 
+/* Returns true on success and false otherwise. */
 static bool
 makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, bool *usedRandom)
 {
@@ -831,6 +832,98 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			res1 = evalExpr(res, iea->contents[0], usedRandom);
 			return makeEqConst(res, cnst ^ res1c, iea->contents[1], wantTrue, usedRandom);
 		}
+		case Iop_And1: {
+			std::vector<IRExpr *> nonConstArgs;
+			for (int i = 0; i < iea->nr_arguments; i++) {
+				evalExprRes eer(evalExpr(res, iea->contents[i], NULL));
+				unsigned long a;
+				if (eer.unpack(&a)) {
+					if (!a) {
+						/* Result is definitely false. */
+						return !wantTrue;
+					} else {
+						/* Ignore it */
+					}
+				} else {
+					nonConstArgs.push_back(iea->contents[i]);
+				}
+			}
+			if (nonConstArgs.empty()) {
+				/* Every clause is the constant true
+				   -> result is the constant true as
+				   well. */
+				return wantTrue;
+			}
+			if (wantTrue == !!cnst) {
+				/* We're trying to make this
+				   expression evaluate to 1.  That
+				   means that every clause has to
+				   evaluate to 1. */
+				for (auto it = nonConstArgs.begin();
+				     it != nonConstArgs.end();
+				     it++) {
+					if (!makeEqConst(res, 1, *it, true, usedRandom))
+						return false;
+				}
+				return true;
+			} else {
+				/* We're trying to make it eval to 0.
+				   It's sufficient for any of the clauses
+				   to be zero. */
+				for (unsigned x = 0; x < nonConstArgs.size() - 1; x++) {
+					EvalState r2(res);
+					bool ur = false;
+					if (makeEqConst(r2, 0, nonConstArgs[x], true, usedRandom ? &ur : NULL)) {
+						res = r2;
+						if (ur) {
+							assert(usedRandom);
+							*usedRandom = true;
+						}
+						return true;
+					}
+				}
+				return false;
+			}
+			abort();
+		}
+		case Iop_And8:
+		case Iop_And16:
+		case Iop_And32:
+		case Iop_And64: {
+			std::vector<IRExpr *> nonConstArgs;
+			unsigned long consts = ~0ul;
+			for (int i = 0; i < iea->nr_arguments; i++) {
+				evalExprRes eer(evalExpr(res, iea->contents[i], NULL));
+				unsigned long a;
+				if (eer.unpack(&a)) {
+					consts &= a;
+					if (cnst & ~consts)
+						return !wantTrue;
+				} else {
+					nonConstArgs.push_back(iea->contents[i]);
+				}
+			}
+			cnst &= ~consts;
+			if (nonConstArgs.empty())
+				return wantTrue == (cnst == consts);
+			if (cnst != 0) {
+				/* XXX could be more clever here. */
+				break;
+			}
+			for (unsigned x = 0; x < nonConstArgs.size() - 1; x++) {
+				EvalState r2(res);
+				bool ur = false;
+				if (makeEqConst(r2, cnst, nonConstArgs[x], wantTrue, usedRandom ? &ur : NULL)) {
+					res = r2;
+					if (ur) {
+						assert(usedRandom);
+						*usedRandom = true;
+					}
+					return true;
+				}
+			}
+			return makeEqConst(res, cnst, nonConstArgs.back(), wantTrue, usedRandom);
+		}
 		default:
 			break;
 		}
@@ -841,6 +934,35 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		switch (ieu->op) {
 		case Iop_Neg64:
 			return makeEqConst(res, -cnst, ieu->arg, wantTrue, usedRandom);
+		case Iop_16to8:
+		case Iop_32to8:
+		case Iop_64to8: {
+			if (cnst & ~0xfful)
+				return !wantTrue;
+			return makeEqConst(res, cnst & 0xff, ieu->arg, wantTrue, usedRandom);
+		}
+		case Iop_32to16:
+		case Iop_64to16: {
+			if (cnst & ~0xfffful)
+				return !wantTrue;
+			return makeEqConst(res, cnst & 0xffff, ieu->arg, wantTrue, usedRandom);
+		}
+		case Iop_64to32: {
+			if (cnst & ~0xfffffffful)
+				return !wantTrue;
+			return makeEqConst(res, cnst & 0xffffffff, ieu->arg, wantTrue, usedRandom);
+		}
+		case Iop_1Uto64: {
+			if (cnst & ~1ul)
+				return !wantTrue;
+			return makeEqConst(res, cnst & 1, ieu->arg, wantTrue, usedRandom);
+		}
+		case Iop_8Sto32: {
+			if ( (cnst & 0xffffff80) != 0xffffff80 &&
+			     (cnst & 0xffffff80) != 0)
+				return !wantTrue;
+			return makeEqConst(res, cnst & 0xff, ieu->arg, wantTrue, usedRandom);
+		}
 		default:
 			break;
 		}
@@ -875,6 +997,30 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			}
 			abort();
 		}
+		case Iop_CmpLT64U: {
+			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL));
+			evalExprRes arg2(evalExpr(res, ieb->arg1, NULL));
+			unsigned long arg1c, arg2c;
+			if (arg1.unpack(&arg1c)) {
+				if (arg2.unpack(&arg2c))
+					return ((arg1c < arg2c) == cnst) == wantTrue;
+				if (arg1c == ~0ul)
+					return (0 == cnst) == wantTrue;
+			} else {
+				if (arg2.unpack(&arg2c)) {
+					if (arg2c == 0)
+						return (0 == cnst) == wantTrue;
+					return makeEqConst(res, arg2c - 1, ieb->arg1, wantTrue, usedRandom);
+				}
+				do {
+					arg1c = genRandomUlong();
+				} while (arg1c == ~0ul);
+				if (!makeEqConst(res, arg1c, ieb->arg1, true, usedRandom))
+					return false;
+			}
+			return makeEqConst(res, arg1c + 1, ieb->arg2, wantTrue, usedRandom);
+			abort();
+		}
 		default:
 			break;
 		}
@@ -883,7 +1029,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 	default:
 		break;
 	}
-	printf("Can't make %s equal constant %lx\n", nameIRExpr(what), cnst);
+	printf("Can't make %s%s equal constant %lx\n", nameIRExpr(what), wantTrue ? "" : " not", cnst);
 	return false;
 }
 
@@ -1002,18 +1148,51 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 	return false;
 }
 
+template <typename t> static void
+shuffle(std::vector<t> &what)
+{
+	for (unsigned idx1 = 0; idx1 < what.size(); idx1++) {
+		unsigned idx2 = random() % (what.size() - idx1) + idx1;
+		t tmp(what[idx1]);
+		what[idx1] = what[idx2];
+		what[idx2] = tmp;
+	}
+}
+	
 static bool
 generateConcreteSatisfier(EvalState &res, const satisfier &abstract_sat, bool *usedRandom)
 {
-	std::set<IRExpr *> truePrimaries;
-	std::set<IRExpr *> falsePrimaries;
+	std::vector<IRExpr *> truePrimaries;
+	std::vector<IRExpr *> falsePrimaries;
+	std::vector<IRExpr *> trueBadPtrs;
+	std::vector<IRExpr *> falseBadPtrs;
 	for (auto it = abstract_sat.memo.begin(); it != abstract_sat.memo.end(); it++) {
 		if (!it->second.second)
 			continue;
-		if (it->second.first)
-			truePrimaries.insert(it->first);
-		else
-			falsePrimaries.insert(it->first);
+		if (it->second.first) {
+			if (it->first->tag == Iex_Unop &&
+			    ((IRExprUnop *)it->first)->op == Iop_BadPtr)
+				trueBadPtrs.push_back(it->first);
+			else
+				truePrimaries.push_back(it->first);
+		} else {
+			if (it->first->tag == Iex_Unop &&
+			    ((IRExprUnop *)it->first)->op == Iop_BadPtr)
+				falseBadPtrs.push_back(it->first);
+			else
+				falsePrimaries.push_back(it->first);
+		}
+	}
+
+	/* If we're allowed to randomise, take the expressions in
+	 * random order. */
+	if (usedRandom && (truePrimaries.size() > 1 || falsePrimaries.size() > 1 ||
+			   trueBadPtrs.size() > 1 || falseBadPtrs.size() > 1)) {
+		*usedRandom = true;
+		shuffle(truePrimaries);
+		shuffle(falsePrimaries);
+		shuffle(trueBadPtrs);
+		shuffle(falseBadPtrs);
 	}
 
 	/* True primaries tend to be easier to deal with, so do them
@@ -1023,6 +1202,16 @@ generateConcreteSatisfier(EvalState &res, const satisfier &abstract_sat, bool *u
 			return false;
 	}
 	for (auto it = falsePrimaries.begin(); it != falsePrimaries.end(); it++) {
+		if (!makeTrue(res, *it, false, usedRandom))
+			return false;
+	}
+	/* BadPtr expressions are particularly tricky, so do them
+	 * last. */
+	for (auto it = trueBadPtrs.begin(); it != trueBadPtrs.end(); it++) {
+		if (!makeTrue(res, *it, true, usedRandom))
+			return false;
+	}
+	for (auto it = falseBadPtrs.begin(); it != falseBadPtrs.end(); it++) {
 		if (!makeTrue(res, *it, false, usedRandom))
 			return false;
 	}
@@ -1140,9 +1329,10 @@ main(int argc, char *argv[])
 		} else {
 			satisfier_contexts++;
 			if (satisfier_contexts % 100 == 0)
-				printf("Generated %d/%zd concrete satisfiers\n",
+				printf("Generated %d/%zd concrete satisfiers (%d failed)\n",
 				       satisfier_contexts + failed_generate_satisfier,
-				       constraints.size());
+				       constraints.size(),
+				       failed_generate_satisfier);
 		}
 		LibVEX_maybe_gc(ALLOW_GC);
 	}
