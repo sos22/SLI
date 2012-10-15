@@ -234,6 +234,7 @@ public:
 		else
 			fprintf(f, "false\n");
 		fclose(f);
+		fprintf(_logfile, "Optimisation log: %s\n", prefix);
 	}
 	void finish(MaiMap *mai, StateMachine *sm)
 	{
