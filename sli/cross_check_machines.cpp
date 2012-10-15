@@ -934,6 +934,8 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		switch (ieu->op) {
 		case Iop_Neg64:
 			return makeEqConst(res, -cnst, ieu->arg, wantTrue, usedRandom);
+		case Iop_Not1:
+			return makeEqConst(res, !cnst, ieu->arg, wantTrue, usedRandom);
 		case Iop_16to8:
 		case Iop_32to8:
 		case Iop_64to8: {
@@ -997,6 +999,29 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			}
 			abort();
 		}
+		case Iop_CmpEQ64: {
+			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL));
+			evalExprRes arg2(evalExpr(res, ieb->arg2, NULL));
+			unsigned long arg1c, arg2c;
+			if (!cnst)
+				wantTrue = !wantTrue;
+			if (arg1.unpack(&arg1c)) {
+				if (arg2.unpack(&arg2c))
+					return (arg1c == arg2c) == wantTrue;
+				return makeEqConst(res, arg1c, ieb->arg2, wantTrue, usedRandom);
+			} else if (arg2.unpack(&arg2c)) {
+				return makeEqConst(res, arg2c, ieb->arg1, wantTrue, usedRandom);
+			}
+			if (usedRandom) {
+				arg1c = genRandomUlong();
+				*usedRandom = true;
+			} else {
+				arg1c = 0;
+			}
+			if (!makeEqConst(res, arg1c, ieb->arg1, true, usedRandom))
+				return false;
+			return makeEqConst(res, arg1c, ieb->arg2, wantTrue, usedRandom);
+		}
 		case Iop_CmpLT64U: {
 			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL));
 			evalExprRes arg2(evalExpr(res, ieb->arg1, NULL));
@@ -1012,14 +1037,18 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 						return (0 == cnst) == wantTrue;
 					return makeEqConst(res, arg2c - 1, ieb->arg1, wantTrue, usedRandom);
 				}
-				do {
-					arg1c = genRandomUlong();
-				} while (arg1c == ~0ul);
+				if (usedRandom) {
+					do {
+						arg1c = genRandomUlong();
+					} while (arg1c == ~0ul);
+					*usedRandom = true;
+				} else {
+					arg1c = 0;
+				}
 				if (!makeEqConst(res, arg1c, ieb->arg1, true, usedRandom))
 					return false;
 			}
 			return makeEqConst(res, arg1c + 1, ieb->arg2, wantTrue, usedRandom);
-			abort();
 		}
 		default:
 			break;
