@@ -2328,6 +2328,7 @@ protected:
 	{}
 public:
       IRStmtTag tag;
+      virtual void sanity_check() const = 0;
       NAMED_CLASS
 };
 class IRStmtNoOp : public IRStmt {
@@ -2336,6 +2337,7 @@ public:
       static IRStmtNoOp singleton;
       void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const { fprintf(f, "IR-NoOp"); }
+      void sanity_check() const {}
 };
 struct IRStmtIMark : public IRStmt {
       ThreadRip addr;
@@ -2347,6 +2349,10 @@ struct IRStmtIMark : public IRStmt {
       void prettyPrint(FILE *f) const {
          fprintf(f,  "------ IMark(%s, %d) ------", 
 		 addr.name(), len);
+      }
+      void sanity_check() const {
+	 assert(len >= 0);
+	 assert(len < 20);
       }
 };
 struct IRStmtAbiHint : public IRStmt {
@@ -2368,6 +2374,10 @@ struct IRStmtAbiHint : public IRStmt {
          ppIRExpr(nia, f);
          fprintf(f, ") ======");
       }
+      void sanity_check() const {
+	 base->sanity_check();
+	 nia->sanity_check();
+      }
 };
 struct IRStmtPut : public IRStmt {
       threadAndRegister target;
@@ -2381,6 +2391,9 @@ struct IRStmtPut : public IRStmt {
 	 target.prettyPrint(f);
 	 fprintf(f, ") = ");
          ppIRExpr(data, f);
+      }
+      void sanity_check() const {
+	 data->sanity_check();
       }
 };
 /* Write a guest register, at a non-fixed offset in the guest state.
@@ -2409,6 +2422,10 @@ struct IRStmtPutI : public IRStmt {
          ppIRExpr(ix, f);
          fprintf(f, ",%d] = ", bias);
          ppIRExpr(data, f);
+      }
+      void sanity_check() const {
+	 ix->sanity_check();
+	 data->sanity_check();
       }
 };
 
@@ -2445,6 +2462,10 @@ struct IRStmtStore : public IRStmt {
          fprintf(f,  ") = ");
          ppIRExpr(data, f);
       }
+      void sanity_check() const {
+	 data->sanity_check();
+	 addr->sanity_check();
+      }
 };
 
 /* Do an atomic compare-and-swap operation.  Semantics are described
@@ -2469,6 +2490,8 @@ struct IRStmtCAS : public IRStmt{
       void prettyPrint(FILE *f) const {
 	 ppIRCAS(details, f);
       }
+      void sanity_check() const {
+      }
 };
 
 /* Call (possibly conditionally) a C function that has side effects
@@ -2491,6 +2514,8 @@ struct IRStmtDirty : public IRStmt {
       void prettyPrint(FILE *f) const {
 	  ppIRDirty(details, f);
       }
+      void sanity_check() const {
+      }
 };
 
 /* A memory bus event - a fence, or acquisition/release of the
@@ -2509,6 +2534,8 @@ struct IRStmtMBE : public IRStmt {
       void prettyPrint(FILE *f) const {
          fprintf(f, "IR-");
          ppIRMBusEvent(event, f);
+      }
+      void sanity_check() const {
       }
 };
 
@@ -2531,6 +2558,8 @@ struct IRStmtExit : public IRStmt {
          ppIRJumpKind(jk, f);
          fprintf(f, "} %s", dst.name());
       }
+      void sanity_check() const {
+      }
 };
 
 class IRStmtStartAtomic : public IRStmt {
@@ -2539,6 +2568,8 @@ public:
       static IRStmtStartAtomic singleton;
       void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const { fprintf(f, "IR-StartAtomic"); }
+      void sanity_check() const {
+      }
 };
 
 class IRStmtEndAtomic : public IRStmt {
@@ -2547,6 +2578,8 @@ public:
       static IRStmtEndAtomic singleton;
       void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const { fprintf(f, "IR-EndAtomic"); }
+      void sanity_check() const {
+      }
 };
 
 /* Statement constructors. */
@@ -2605,6 +2638,18 @@ struct _IRSB : public GarbageCollected<_IRSB, &ir_heap> {
 	 hv(tyenv);
 	 hv(stmts);
 	 hv(next_nonconst);
+      }
+      void sanity_check() const {
+	 assert(stmts_used <= stmts_size);
+	 assert(next_is_const == true || next_is_const == false);
+	 for (int i = 0; i < stmts_used; i++)
+	     stmts[i]->sanity_check();
+	 if (next_is_const) {
+	     assert(!next_nonconst);
+	 } else {
+	     assert(next_nonconst);
+	     next_nonconst->sanity_check();
+	 }
       }
       NAMED_CLASS
    }

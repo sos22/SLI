@@ -1495,6 +1495,7 @@ static VexPtr<WeakRef<DecodeCache, &ir_heap>, &ir_heap> decode_cache;
 static void
 optimiseIRSB(IRSB *irsb)
 {
+	irsb->sanity_check();
 	/* First, basic copy propagation. */
 	std::map<threadAndRegister, IRExpr *> tmps;
 	struct : public IRExprTransformer {
@@ -1542,6 +1543,7 @@ optimiseIRSB(IRSB *irsb)
 	} invalidateTmp = {&tmps};
 	for (int i = 0; i < irsb->stmts_used; i++) {
 		IRStmt *stmt = irsb->stmts[i];
+		stmt->sanity_check();
 		switch (stmt->tag) {
 		case Ist_NoOp:
 			break;
@@ -1591,6 +1593,7 @@ optimiseIRSB(IRSB *irsb)
 		case Ist_EndAtomic:
 			break;
 		}
+		stmt->sanity_check();
 	}
 
 	/* Now do deadcode and local IRExpr optimisation. */
@@ -1666,6 +1669,7 @@ optimiseIRSB(IRSB *irsb)
 		case Ist_EndAtomic:
 			break;
 		}
+		stmt->sanity_check();
 	}
 
 	/* And now kill off any noop statements. */
@@ -1724,6 +1728,8 @@ AddressSpace::getIRSBForAddress(const ThreadRip &tr, bool singleInstr)
 				singleInstr);
 		if (!irsb)
 			throw InstructionDecodeFailedException();
+
+		irsb->sanity_check();
 
 		irsb = instrument_func(tid, NULL, irsb, NULL, NULL, Ity_I64, Ity_I64);
 
