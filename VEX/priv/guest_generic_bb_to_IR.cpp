@@ -234,16 +234,13 @@ IRSB* bb_to_IR ( unsigned tid,
       /* Advance delta (inconspicuous but very important :-) */
       delta += (Long)dres.len;
 
-      if (singleInstr)
-	goto done;
-
       switch (dres.whatNext) {
          case DisResult::Dis_Continue:
 	    /* This is the IP of the instruction we're just about to deal
 	       with. */
 	   guest_IP_curr_instr = guest_IP_curr_instr + (long)dres.len;
 
-            if (n_instrs < vex_control.guest_max_insns) {
+            if (!singleInstr && n_instrs < vex_control.guest_max_insns) {
                /* keep going */
             } else {
                /* We have to stop. */
