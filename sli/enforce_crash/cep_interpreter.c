@@ -2050,13 +2050,10 @@ static void
 check_for_ll_thread_start(struct high_level_state *hls, struct reg_struct *regs)
 {
 	int i, j;
-	const struct cfg_instr *entry_node;
-	entry_node = NULL;
 	for (i = 0; i < plan.nr_entry_points; i++) {
 		if (plan.entry_points[i]->orig_rip != regs->rip)
 			continue;
 		assert(plan.entry_points[i]->nr_entry_ctxts > 0);
-		entry_node = &plan.cfg_nodes[plan.entry_points[i]->ctxts[0]->cfg_label];
 		for (j = 0; j < plan.entry_points[i]->nr_entry_ctxts; j++) {
 			if (ctxt_matches(plan.entry_points[i]->ctxts[j], regs)) {
 				plan.entry_points[i]->ctxts[j]->cntr++;
