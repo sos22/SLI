@@ -1923,6 +1923,8 @@ Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads,
 				 * discovered r. */
 				purgeFunction(x);
 				StaticRip old_head(functionHeadForInstruction(r));
+				warning("Misanalysed tail call: %s should be a function head, but we put in %s; correcting.\n",
+					r.name(), old_head.name());
 				purgeFunction(old_head);
 				/* Processed in stack order, so push
 				 * in the inverse of the order we want
