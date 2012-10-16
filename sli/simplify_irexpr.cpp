@@ -2990,6 +2990,13 @@ top:
 						((unsigned long)((IRExprConst *)l)->con->Ico.U32 << 32) |
 						((IRExprConst *)r)->con->Ico.U32));
 				break;
+
+			case Iop_64HLto128:
+				/* We can't constant fold this because
+				   we have no way of representing 128
+				   bit constants. */
+				break;
+
 			default:
 				warning("cannot constant fold binop %d\n", e->op);
 				printf("Cannot constant fold binop %d (", e->op);
