@@ -11728,9 +11728,9 @@ DisResult disInstr_AMD64_WRK (
       breakup128to32s(tid,  sV, &s3, &s2, &s1, &s0 );
 
       assign( t0, binop( Iop_MullU32, mkexpr(d0, tid, Ity_I32), mkexpr(s0, tid, Ity_I32)) );
-      putXMMRegLane64( gregOfRexRM(pfx,modrm), 0, mkexpr(t0, tid, Ity_I32) );
+      putXMMRegLane64( gregOfRexRM(pfx,modrm), 0, mkexpr(t0, tid, Ity_I64) );
       assign( t1, binop( Iop_MullU32, mkexpr(d2, tid, Ity_I32), mkexpr(s2, tid, Ity_I32)) );
-      putXMMRegLane64( gregOfRexRM(pfx,modrm), 1, mkexpr(t1, tid, Ity_I32) );
+      putXMMRegLane64( gregOfRexRM(pfx,modrm), 1, mkexpr(t1, tid, Ity_I64) );
       goto decode_success;
    }
 
