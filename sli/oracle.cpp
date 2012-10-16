@@ -1266,76 +1266,114 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionT
 	fclose(f);
 
 	make_unique(roots);
-	Oracle::discoverFunctionHeads(ths, roots, callgraph, token);
+	Oracle::findInstructions(ths, roots, callgraph, token);
 }
 
-void
-Oracle::findPossibleJumpTargets(const StaticRip &rip,
-				const callgraph_t &callgraph_table,
-				std::vector<StaticRip> &output)
-{
-	auto it = callgraph_table.find(rip);
-	if (it == callgraph_table.end())
-		return;
+template <typename underlying>
+class range_set {
+	std::vector<std::pair<underlying, underlying> > content;
+	underlying amt_set;
 
-	output.reserve(it->second.targets.size());
-	for (auto it2 = it->second.targets.begin(); it2 != it->second.targets.end(); it2++)
-		output.push_back(StaticRip(*it2));
-}
-
-void
-Oracle::findPreviousInstructions(std::vector<VexRip> &output,
-				 const VexRip &rip)
-{
-	StaticRip sr(functionHeadForInstruction(StaticRip(rip)));
-	if (!sr.rip) {
-		warning("No function for %s\n", rip.name());
-		return;
+public:
+	range_set() : amt_set(0) {}
+	unsigned nr_ranges() const { return content.size(); }
+	underlying min() const { assert(!content.empty()); return content.front().first; }
+	underlying max() const { assert(!content.empty()); return content.back().first; }
+	void sanity_check() const {
+		/* These are expensive, so turn them off by default
+		 * even in debug builds. */
+#if 0
+		for (unsigned x = 0; x + 1 < content.size(); x++) {
+			assert(content[x].second < content[x+1].first);
+			assert(content[x].first < content[x].second);
+		}
+		if (!content.empty())
+			assert(content.back().first < content.back().second);
+#endif
 	}
-	Function f(sr);
-
-	/* Build the shortest path from the start of the function to
-	   the desired rip using Dijkstra's algorithm.  */
-	/* Distance from start of function to key.  Non-present keys
-	 * should be assumed to have an infinite length. */
-	std::map<StaticRip, unsigned> pathLengths;
-	/* Predecessor on best path from start to key. */
-	std::map<StaticRip, StaticRip> predecessors; 
-	/* We push stuff in here when we discover a new shortest path
-	   to that node. */
-	std::priority_queue<std::pair<unsigned, StaticRip> > grey;
-
-	pathLengths[f.rip] = 0;
-	grey.push(std::pair<unsigned, StaticRip>(0, f.rip));
-	while (!grey.empty()) {
-		std::pair<unsigned, StaticRip> e(grey.top());
-		grey.pop();
-
-		assert(pathLengths.count(e.second));
-		unsigned p = pathLengths[e.second] + 1;
-		std::vector<StaticRip> successors;
-		f.getSuccessors(e.second, successors);
-		for (auto it = successors.begin();
-		     it != successors.end();
-		     it++) {
-			if (!pathLengths.count(*it) || pathLengths[*it] >= p) {
-				pathLengths[*it] = p;
-				predecessors[*it] = e.second;
-				grey.push(std::pair<unsigned, StaticRip>(p, *it));
+	bool contains(unsigned long x) const {
+		sanity_check();
+		int low, high;
+		low = 0;
+		high = content.size();
+		/* Avoid nasty edge cases by just finishing up with a
+		 * linear scan once we get anywhere near to them. */
+		while (low < high - 10) {
+			int probe = (low + high) / 2;
+			if (content[probe].first <= x &&
+			    content[probe].second > x) {
+				return true;
+			}
+			if (x == content[probe].second) {
+				return false;
+			}
+			if (content[probe].first > x) {
+				high = probe;
+			} else {
+				low = probe;
 			}
 		}
+		for (int i = std::max(0, low - 10); i < std::min(high + 10, (int)content.size()); i++) {
+			if (content[i].first <= x && content[i].second > x) {
+				return true;
+			}
+		}
+		return false;
 	}
-	
-	if (!predecessors.count(StaticRip(rip))) {
-		/* This can happen if the information from the oracle
-		   is inconsistent. */
-		warning("Dijkstra failed in %s\n", __func__);
-		return;
+	double coverage() const {
+		if (content.empty())
+			return 0;
+		return amt_set / (double)(content.back().second - content.front().first);
 	}
+	void insert(underlying start, underlying end) {
+		sanity_check();
+		for (unsigned idx = 0; idx != content.size(); ) {
+			if (start > content[idx].second) {
+				idx++;
+				continue;
+			}
+			if (end < content[idx].first) {
+				content.insert(content.begin() + idx, std::pair<underlying, underlying>(start, end));
+				amt_set += end - start;
+				assert(contains(start));
+				sanity_check();
+				return;
+			}
+			if (content[idx].first > start) {
+				amt_set += content[idx].first - start;
+				content[idx].first = start;
+			}
 
-	for (auto i = predecessors[StaticRip(rip)]; i.rip != 0; i = predecessors[i])
-		output.push_back(i.makeVexRip(rip));
-}
+			if (content[idx].second >= end) {
+				assert(contains(start));
+				sanity_check();
+				return;
+			}
+
+			amt_set += end - content[idx].second;
+			content[idx].second = end;
+			while (idx + 1 != content.size() &&
+			       content[idx+1].second <= content[idx].second) {
+				amt_set -= content[idx + 1].second - content[idx].first;
+				content.erase(content.begin() + idx + 1);
+			}
+			if (idx + 1 != content.size() &&
+			    content[idx+1].first <= content[idx].second) {
+				amt_set += content[idx + 1].second - content[idx].second;
+				content[idx].second = content[idx+1].second;
+				amt_set -= content[idx + 1].second - content[idx + 1].first;
+				content.erase(content.begin() + idx + 1);
+			}
+			sanity_check();
+			assert(contains(start));
+			return;
+		}
+		content.push_back(std::pair<underlying, underlying>(start, end));
+		amt_set += end - start;
+		sanity_check();
+		assert(contains(start));
+	}
+};
 
 static sqlite3 *_database;
 
@@ -1386,7 +1424,7 @@ database(void)
 			  "stackEscape INTEGER," /* 0 or NULL -> false, 1 -> true */
 			  "rbpToRspDeltaState INTEGER NOT NULL DEFAULT 0,"  /* 0 -> unknown, 1 -> known, 2 -> incalculable */
 			  "rbpToRspDelta INTEGER NOT NULL DEFAULT 0,"
-			  "functionHead INTEGER NOT NULL)",
+			  "functionHead INTEGER)",
 			  NULL,
 			  NULL,
 			  NULL);
@@ -1402,12 +1440,6 @@ database(void)
 	rc = sqlite3_exec(_database, "CREATE TABLE returnRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, rbpOffsetCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
-			  NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-
-	/* Bit of a hack: use this to stash a flag saying whether we
-	   believe we've found all function heads already. */
-	rc = sqlite3_exec(_database, "CREATE TABLE doneFindFunctionHeads (doneit INTEGER)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 
@@ -1477,106 +1509,280 @@ bind_oraclerip(sqlite3_stmt *stmt, int idx, const StaticRip &rip)
 	bind_int64(stmt, idx, rip.rip);
 }
 
-static void
-drop_index(const char *name)
-{
-	char *s = my_asprintf("DROP INDEX %s", name);
-	sqlite3_exec(database(), s, NULL, NULL, NULL);
-	free(s);
-}
-
-static int
-_functionHeadsCorrect(void *_ctxt, int, char **, char **)
-{
-	bool *flag = (bool *)_ctxt;
-	*flag = true;
-	return 0;
-}
-static bool
-functionHeadsCorrect(void)
-{
-	bool flag = false;
-	int rc;
-
-	rc = sqlite3_exec(database(), "SELECT * FROM doneFindFunctionHeads",
-			  _functionHeadsCorrect, &flag, NULL);
-	assert(rc == SQLITE_OK);
-	return flag;
-}
-
-static void
-setFunctionHeadsCorrect(void)
-{
-	int rc;
-	rc = sqlite3_exec(database(), "INSERT INTO doneFindFunctionHeads VALUES (1)",
-			  NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-}
+class prepared_stmt {
+public:
+	sqlite3_stmt *stmt;
+	prepared_stmt(const char *content) {
+		stmt = prepare_statement(content);
+	}
+	~prepared_stmt() {
+		sqlite3_finalize(stmt);
+	}
+	void bindOracleRip(int idx, const StaticRip &sr) {
+		bind_oraclerip(stmt, idx, sr);
+	}
+	void bindInt64(int idx, unsigned long val) {
+		bind_int64(stmt, idx, val);
+	}
+	void run() {
+		int r;
+		do {
+			r = sqlite3_step(stmt);
+		} while (r == SQLITE_ROW);
+		assert(r == SQLITE_DONE);
+		sqlite3_reset(stmt);
+	}
+};
 
 void
-Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads, const callgraph_t &callgraph, GarbageCollectionToken token)
+Oracle::findInstructions(VexPtr<Oracle> &ths,
+			 std::vector<StaticRip> &heads,
+			 const callgraph_t &callgraph,
+			 GarbageCollectionToken token)
 {
-	if (!functionHeadsCorrect()) {
-		drop_index("branchDest");
-		drop_index("callDest");
-		drop_index("fallThroughDest");
-		drop_index("callSuccDest");
-		drop_index("returnDest");
-		drop_index("branchRip");
-		drop_index("callRip");
-		drop_index("fallThroughRip");
-		drop_index("callSuccRip");
-		drop_index("instructionAttributesFunctionHead");
-		drop_index("instructionAttributesRip");
-
-		struct timeval start;
-		gettimeofday(&start, NULL);
-		std::set<StaticRip> visited;
-		int cntr = 0;
-		printf("Discovering function heads...\n");
-		sqlite3_exec(database(), "BEGIN TRANSACTION", NULL, NULL, NULL);
-		while (!heads.empty()) {
-			StaticRip head(heads.back());
-			heads.pop_back();
-			if (visited.count(head))
-				continue;
-			visited.insert(head);
-			ths->discoverFunctionHead(head, heads, visited, callgraph);
-			if (cntr++ % 100 == 0) {
-				struct timeval now;
-				gettimeofday(&now, NULL);
-				now.tv_sec -= start.tv_sec;
-				now.tv_usec -= start.tv_usec;
-				if (now.tv_usec < 0) {
-					now.tv_usec += 1e6;
-					now.tv_sec--;
-				}
-				printf("%zd heads left; %d discovered in %ld.%06ld.\r", heads.size(), cntr,
-				       now.tv_sec, now.tv_usec);
-				fflush(stdout);
-				sqlite3_exec(database(), "END TRANSACTION", NULL, NULL, NULL);
-				sqlite3_exec(database(), "BEGIN TRANSACTION", NULL, NULL, NULL);
-			}
-			LibVEX_maybe_gc(token);
-		}
-		sqlite3_exec(database(), "END TRANSACTION", NULL, NULL, NULL);
-		printf("Done discovering function heads\n");
-		setFunctionHeadsCorrect();
-
-		create_index("branchDest", "branchRips", "dest");
-		create_index("callDest", "callRips", "dest");
-		create_index("fallThroughDest", "fallThroughRips", "dest");
-		create_index("callSuccDest", "callSuccRips", "dest");
-		create_index("branchRip", "branchRips", "rip");
-		create_index("callRip", "callRips", "rip");
-		create_index("fallThroughRip", "fallThroughRips", "rip");
-		create_index("callSuccRip", "callSuccRips", "rip");
-		create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
-		create_index("instructionAttributesRip", "instructionAttributes", "rip");
-
-		ths->buildReturnAddressTable();
-		create_index("returnDest", "returnRips", "dest");
+	std::vector<unsigned long> pendingInstrs;
+	std::set<unsigned long> known_heads;
+	for (auto it = heads.begin(); it != heads.end(); it++) {
+		pendingInstrs.push_back(it->rip);
+		known_heads.insert(it->rip);
 	}
+	range_set<unsigned long> covered;
+	static prepared_stmt add_attributes("INSERT INTO instructionAttributes (rip) VALUES (?)");
+	static prepared_stmt add_branch("INSERT INTO branchRips (rip, dest) VALUES (?, ?)");
+	static prepared_stmt add_fallthrough("INSERT INTO fallThroughRips (rip, dest) VALUES (?, ?)");
+	static prepared_stmt add_return("INSERT INTO returnRips (rip, dest) VALUES (?, 0)");
+	static prepared_stmt add_call("INSERT INTO callRips (rip, dest) VALUES (?, ?)");
+	static prepared_stmt add_callsucc("INSERT INTO callSuccRips (rip, dest) VALUES (?, ?)");
+
+	sqlite3_exec(database(), "BEGIN TRANSACTION", NULL, NULL, NULL);
+	unsigned cntr = 0;
+	while (!pendingInstrs.empty()) {
+		unsigned long rip(pendingInstrs.back());
+		pendingInstrs.pop_back();
+
+		if (++cntr % 1000 == 0) {
+			printf("Current coverage %f%% [%lx, %lx); %zd in queue, %d ranges, %zd known heads\n",
+			       covered.coverage() * 100,
+			       covered.min(),
+			       covered.max(),
+			       pendingInstrs.size(),
+			       covered.nr_ranges(),
+			       known_heads.size());
+			LibVEX_maybe_gc(token);
+			sqlite3_exec(database(), "END TRANSACTION", NULL, NULL, NULL);
+			sqlite3_exec(database(), "BEGIN TRANSACTION", NULL, NULL, NULL);
+		}
+		if (covered.contains(rip))
+			continue;
+		IRSB *irsb = ths->getIRSBForRip(ths->ms->addressSpace, StaticRip(rip), false);
+		if (!irsb) {
+			known_heads.erase(rip);
+			continue;
+		}
+		int i;
+		i = 0;
+		bool done = false;
+		while (1) {
+			assert(irsb->stmts[i]->tag == Ist_IMark);
+			IRStmtIMark *mark = (IRStmtIMark *)irsb->stmts[i];
+			rip = mark->addr.rip.unwrap_vexrip();
+			if (covered.contains(rip)) {
+				done = true;
+				break;
+			}
+			covered.insert(rip, rip + mark->len);
+			i++;
+
+			add_attributes.bindInt64(1, rip);
+			add_attributes.run();
+
+			std::set<unsigned long> exits;
+			while (i < irsb->stmts_used && irsb->stmts[i]->tag != Ist_IMark) {
+				if (irsb->stmts[i]->tag == Ist_Exit) {
+					IRStmtExit *ex = (IRStmtExit *)irsb->stmts[i];
+					exits.insert(ex->dst.rip.unwrap_vexrip());
+				}
+				i++;
+			}
+
+			for (auto it = exits.begin(); it != exits.end(); it++) {
+				add_branch.bindInt64(1, rip);
+				add_branch.bindInt64(2, *it);
+				add_branch.run();
+
+				pendingInstrs.push_back(*it);
+			}
+
+			if (i == irsb->stmts_used)
+				break;
+
+			add_fallthrough.bindInt64(1, rip);
+			add_fallthrough.bindInt64(2, ((IRStmtIMark *)irsb->stmts[i])->addr.rip.unwrap_vexrip());
+			add_fallthrough.run();
+		}
+		if (done)
+			continue;
+
+		if (irsb->jumpkind == Ijk_Call) {
+			if (!irsb->next_is_const ||
+			    !ths->functionNeverReturns(StaticRip(irsb->next_const.rip))) {
+				unsigned long succ = extract_call_follower(irsb).unwrap_vexrip();
+				add_callsucc.bindInt64(1, rip);
+				add_callsucc.bindInt64(2, succ);
+				add_callsucc.run();
+
+				pendingInstrs.push_back(succ);
+			}
+
+			std::vector<StaticRip> targets;
+			if (irsb->next_is_const)
+				targets.push_back(StaticRip(irsb->next_const.rip));
+			else
+				ths->findPossibleJumpTargets(StaticRip(rip), callgraph, targets);
+			for (auto it = targets.begin(); it != targets.end(); it++) {
+				add_call.bindInt64(1, rip);
+				add_call.bindInt64(2, it->rip);
+				add_call.run();
+
+				known_heads.insert(it->rip);
+				pendingInstrs.push_back(it->rip);
+			}
+		} else {
+			if (irsb->jumpkind == Ijk_Ret) {
+				add_return.bindInt64(1, rip);
+				add_return.run();
+			}
+
+			std::vector<StaticRip> targets;
+			if (irsb->next_is_const) {
+				targets.push_back(StaticRip(irsb->next_const.rip));
+			} else {
+				ths->findPossibleJumpTargets(StaticRip(rip), callgraph, targets);
+			}
+			for (auto it = targets.begin();
+			     it != targets.end();
+			     it++) {
+				add_fallthrough.bindInt64(1, rip);
+				add_fallthrough.bindInt64(2, it->rip);
+				add_fallthrough.run();
+
+				pendingInstrs.push_back(it->rip);
+			}
+		}
+	}
+
+	sqlite3_exec(database(), "END TRANSACTION", NULL, NULL, NULL);
+
+	printf("Building indices...\n");
+	create_index("branchDest", "branchRips", "dest");
+	create_index("callDest", "callRips", "dest");
+	create_index("fallThroughDest", "fallThroughRips", "dest");
+	create_index("callSuccDest", "callSuccRips", "dest");
+	create_index("branchRip", "branchRips", "rip");
+	create_index("callRip", "callRips", "rip");
+	create_index("fallThroughRip", "fallThroughRips", "rip");
+	create_index("callSuccRip", "callSuccRips", "rip");
+	create_index("instructionAttributesRip", "instructionAttributes", "rip");
+
+	dbg_break("Check 1\n");
+	/* Now we need to go and discover all of the functions in the
+	 * program.  This may be a bit more than just those in
+	 * known_heads because of tail-call effects. */
+	std::vector<unsigned long> pending_heads(known_heads.begin(),
+						 known_heads.end());
+#ifndef NDEBUG
+	std::set<unsigned long> processed_heads;
+#endif
+	while (!pending_heads.empty()) {
+		unsigned long this_head(pending_heads.back());
+		pending_heads.pop_back();
+#ifndef NDEBUG
+		assert(!processed_heads.count(this_head));
+		processed_heads.insert(this_head);
+#endif
+		if (cntr++ % 100 == 0)
+			printf("%zd heads left...\n", pending_heads.size());
+		std::set<unsigned long> alreadyProcessedThisHead;
+		std::vector<unsigned long> instrsThisHead;
+		instrsThisHead.push_back(this_head);
+		while (!instrsThisHead.empty()) {
+			unsigned long instr(instrsThisHead.back());
+			instrsThisHead.pop_back();
+
+			if (alreadyProcessedThisHead.count(instr))
+				continue;
+			alreadyProcessedThisHead.insert(instr);
+
+			static sqlite3_stmt *getOldHead;
+			if (!getOldHead)
+				getOldHead = prepare_statement("SELECT functionHead FROM instructionAttributes WHERE rip = ?");
+			bind_int64(getOldHead, 1, instr);
+			int rc = sqlite3_step(getOldHead);
+			if (rc == SQLITE_DONE) {
+				/* Woohoo, tail call into a library
+				 * function.  Just ignore it. */
+				sqlite3_reset(getOldHead);
+				continue;
+			}
+			assert(rc == SQLITE_ROW);
+			unsigned long old_head;
+			if (sqlite3_column_type(getOldHead, 0) == SQLITE_NULL)
+				old_head = 0;
+			else if (sqlite3_column_type(getOldHead, 0) == SQLITE_INTEGER)
+				old_head = sqlite3_column_int64(getOldHead, 0);
+			else
+				abort();
+			rc = sqlite3_step(getOldHead);
+			assert(rc == SQLITE_DONE);
+			sqlite3_reset(getOldHead);
+
+			if (old_head != 0) {
+				assert(old_head != this_head);
+				/* Whoops: tail call.  That means we
+				   have to insert a new head here and
+				   re-do @old_head. */
+
+				printf("Correct for tail call: %lx was assigned to function %lx, but also to %lx\n",
+				       instr, old_head, this_head);
+				/* Remove @old_head, since it's now
+				 * incorrect */
+				static prepared_stmt purgeFunction("UPDATE instructionAttributes SET functionHead = 0 WHERE functionHead = ?");
+				purgeFunction.bindInt64(1, old_head);
+				purgeFunction.run();
+
+				/* We've discovered a new head */
+				known_heads.insert(instr);
+				/* Need to process both of them again. */
+				pending_heads.push_back(instr);
+				pending_heads.push_back(old_head);
+				
+#ifndef NDEBUG
+				processed_heads.erase(old_head);
+#endif
+				continue;
+			}
+
+			/* Add this instruction to the current function */
+			static prepared_stmt addInstrToFunction("UPDATE instructionAttributes SET functionHead = ? WHERE rip = ?");
+			addInstrToFunction.bindInt64(1, this_head);
+			addInstrToFunction.bindInt64(2, instr);
+			addInstrToFunction.run();
+
+			/* And now figure out where we're going
+			 * next */
+			std::vector<StaticRip> succ;
+			Function(StaticRip(this_head)).getSuccessors(StaticRip(instr), succ);
+			for (auto it = succ.rbegin(); it != succ.rend(); it++) {
+				if (!known_heads.count(it->rip))
+					instrsThisHead.push_back(it->rip);
+			}
+		}
+	}
+	
+	dbg_break("Check 2\n");
+	printf("Building return address table.\n");
+	ths->buildReturnAddressTable();
+	create_index("returnDest", "returnRips", "dest");
 
 	printf("Calculate register liveness...\n");
 	calculateRegisterLiveness(ths, token);
@@ -1585,6 +1791,74 @@ Oracle::discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads
 	printf("Calculate RBP map...\n");
 	calculateRbpToRspOffsets(ths, token);
 	printf("Done static analysis phase\n");
+}
+
+void
+Oracle::findPossibleJumpTargets(const StaticRip &rip,
+				const callgraph_t &callgraph_table,
+				std::vector<StaticRip> &output)
+{
+	auto it = callgraph_table.find(rip);
+	if (it == callgraph_table.end())
+		return;
+
+	output.reserve(it->second.targets.size());
+	for (auto it2 = it->second.targets.begin(); it2 != it->second.targets.end(); it2++)
+		output.push_back(StaticRip(*it2));
+}
+
+void
+Oracle::findPreviousInstructions(std::vector<VexRip> &output,
+				 const VexRip &rip)
+{
+	StaticRip sr(functionHeadForInstruction(StaticRip(rip)));
+	if (!sr.rip) {
+		warning("No function for %s\n", rip.name());
+		return;
+	}
+	Function f(sr);
+
+	/* Build the shortest path from the start of the function to
+	   the desired rip using Dijkstra's algorithm.  */
+	/* Distance from start of function to key.  Non-present keys
+	 * should be assumed to have an infinite length. */
+	std::map<StaticRip, unsigned> pathLengths;
+	/* Predecessor on best path from start to key. */
+	std::map<StaticRip, StaticRip> predecessors; 
+	/* We push stuff in here when we discover a new shortest path
+	   to that node. */
+	std::priority_queue<std::pair<unsigned, StaticRip> > grey;
+
+	pathLengths[f.rip] = 0;
+	grey.push(std::pair<unsigned, StaticRip>(0, f.rip));
+	while (!grey.empty()) {
+		std::pair<unsigned, StaticRip> e(grey.top());
+		grey.pop();
+
+		assert(pathLengths.count(e.second));
+		unsigned p = pathLengths[e.second] + 1;
+		std::vector<StaticRip> successors;
+		f.getSuccessors(e.second, successors);
+		for (auto it = successors.begin();
+		     it != successors.end();
+		     it++) {
+			if (!pathLengths.count(*it) || pathLengths[*it] >= p) {
+				pathLengths[*it] = p;
+				predecessors[*it] = e.second;
+				grey.push(std::pair<unsigned, StaticRip>(p, *it));
+			}
+		}
+	}
+	
+	if (!predecessors.count(StaticRip(rip))) {
+		/* This can happen if the information from the oracle
+		   is inconsistent. */
+		warning("Dijkstra failed in %s\n", __func__);
+		return;
+	}
+
+	for (auto i = predecessors[StaticRip(rip)]; i.rip != 0; i = predecessors[i])
+		output.push_back(i.makeVexRip(rip));
 }
 
 void
@@ -1810,135 +2084,6 @@ Oracle::findNoReturnFunctions()
 		r = ms->elfData->getPltAddress(ms->addressSpace, terminals[i]);
 		if (r)
 			terminalFunctions.push_back(StaticRip(r));
-	}
-}
-
-void
-Oracle::discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads,
-			     std::set<StaticRip> &visited,
-			     const callgraph_t &callgraph_table)
-{
-	Function work(x);
-
-	/* Start by building a CFG of the function's instructions. */
-	std::vector<StaticRip> unexplored;
-	std::set<StaticRip> explored;
-	unexplored.push_back(x);
-	while (!unexplored.empty()) {
-		StaticRip rip = unexplored.back();
-		unexplored.pop_back();
-
-		if (explored.count(rip))
-			continue;
-
-		if (rip != x && visited.count(rip))
-			continue;
-
-		IRSB *irsb = getIRSBForRip(ms->addressSpace, rip, false);
-		if (!irsb)
-			continue;
-
-		int end_of_instruction;
-		int start_of_instruction = 0;
-		while (start_of_instruction < irsb->stmts_used) {
-			IRStmt *stmt = irsb->stmts[start_of_instruction];
-			assert(stmt->tag == Ist_IMark);
-			StaticRip r(((IRStmtIMark *)stmt)->addr.rip);
-			if (explored.count(r))
-				break;
-			if (r != x && visited.count(r))
-				break;
-
-			std::vector<StaticRip> branch;
-			std::vector<StaticRip> fallThrough;
-			std::vector<StaticRip> callSucc;
-			std::vector<StaticRip> callees;
-			for (end_of_instruction = start_of_instruction + 1;
-			     end_of_instruction < irsb->stmts_used && irsb->stmts[end_of_instruction]->tag != Ist_IMark;
-			     end_of_instruction++) {
-				stmt = irsb->stmts[end_of_instruction];
-				if (stmt->tag == Ist_Exit)
-					branch.push_back(StaticRip(((IRStmtExit *)stmt)->dst.rip));
-			}
-
-			rip = StaticRip( ((IRStmtIMark *)irsb->stmts[start_of_instruction])->addr.rip );
-			if (end_of_instruction == irsb->stmts_used) {
-				if (irsb->jumpkind == Ijk_Call) {
-					if (!irsb->next_is_const ||
-					    !functionNeverReturns(StaticRip(irsb->next_const.rip)))
-						callSucc.push_back(StaticRip(extract_call_follower(irsb)));
-					if (irsb->next_is_const)
-						callees.push_back(StaticRip(irsb->next_const.rip));
-					else
-						findPossibleJumpTargets(rip, callgraph_table, callees);
-				} else {
-					if (irsb->next_is_const)
-						fallThrough.push_back(StaticRip(irsb->next_const.rip));
-					else if (irsb->jumpkind != Ijk_Ret)
-						findPossibleJumpTargets(rip, callgraph_table, fallThrough);
-				}
-			} else {
-				stmt = irsb->stmts[end_of_instruction];
-				assert(dynamic_cast<IRStmtIMark *>(stmt));
-				fallThrough.push_back(StaticRip( ((IRStmtIMark *)stmt)->addr.rip ));
-			}
-
-			heads.insert(heads.end(), callees.begin(), callees.end());
-			unexplored.insert(unexplored.end(), fallThrough.begin(), fallThrough.end());
-			unexplored.insert(unexplored.end(), callSucc.begin(), callSucc.end());
-			unexplored.insert(unexplored.end(), branch.begin(), branch.end());
-
-			/* This can sometimes contain duplicates if
-			   you're looking at e.g. a rep cmps
-			   instruction, which looks like this:
-
-			   l1:
-			   if (ecx == 0) goto next;
-			   t1 = *rdi
-			   t2 = *rsi;
-			   ecx--;
-			   if (t1 != t2) goto next;
-			   goto l1;
-			   next:
-
-			   i.e. two branches to next. */
-			make_unique(branch);
-
-			explored.insert(r);
-			bool isReturn = end_of_instruction == irsb->stmts_used &&
-				irsb->jumpkind == Ijk_Ret;
-			if (!work.addInstruction(r, isReturn, callees, fallThrough, callSucc, branch)) {
-				/* Already explored this instruction
-				 * as part of some other function.
-				 * That means we have some kind of
-				 * tail call going on. */
-
-				/* This is a bit messy.  We need to
-				 * purge everything we've done so far,
-				 * plus whatever instruction
-				 * previously discovered r, introduce
-				 * a new head for r, and then make
-				 * sure that we re-process this
-				 * function and whatever previously
-				 * discovered r. */
-				purgeFunction(x);
-				StaticRip old_head(functionHeadForInstruction(r));
-				warning("Misanalysed tail call: %s should be a function head, but we put in %s; correcting.\n",
-					r.name(), old_head.name());
-				purgeFunction(old_head);
-				/* Processed in stack order, so push
-				 * in the inverse of the order we want
-				 * the dealt with. */
-				heads.push_back(x);
-				heads.push_back(old_head);
-				heads.push_back(r);
-				visited.erase(x);
-				visited.erase(old_head);
-				return;
-			}
-
-			start_of_instruction = end_of_instruction;
-		}
 	}
 }
 
@@ -2962,28 +3107,6 @@ Oracle::Function::addInstruction(const StaticRip &rip,
 
 	return true;
 }
-
-class prepared_stmt {
-public:
-	sqlite3_stmt *stmt;
-	prepared_stmt(const char *content) {
-		stmt = prepare_statement(content);
-	}
-	~prepared_stmt() {
-		sqlite3_finalize(stmt);
-	}
-	void bindOracleRip(int idx, const StaticRip &sr) {
-		bind_oraclerip(stmt, idx, sr);
-	}
-	void run() {
-		int r;
-		do {
-			r = sqlite3_step(stmt);
-		} while (r == SQLITE_ROW);
-		assert(r == SQLITE_DONE);
-		sqlite3_reset(stmt);
-	}
-};
 
 void
 Oracle::purgeFunction(const StaticRip &functionHead)

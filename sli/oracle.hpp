@@ -295,8 +295,6 @@ public:
 
 private:
 
-	void discoverFunctionHead(const StaticRip &x, std::vector<StaticRip> &heads,
-				  std::set<StaticRip> &visited, const callgraph_t &callgraph_table);
 	void buildReturnAddressTable();
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token);
@@ -367,10 +365,9 @@ public:
 	void findRacingRips(const MaiMap &, StateMachineSideEffectStore *, std::set<DynAnalysisRip> &);
 	bool functionCanReturn(const VexRip &rip);
 
-	static void discoverFunctionHeads(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads,
-					  const callgraph_t &callgraph,
-					  GarbageCollectionToken token);
-
+	static void findInstructions(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads,
+				     const callgraph_t &callgraph,
+				     GarbageCollectionToken token);
 	void getFunctions(std::vector<StaticRip> &out);
 
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const StaticRip &rip);
