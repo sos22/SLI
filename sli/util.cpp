@@ -333,8 +333,8 @@ warning(const char *fmt, ...)
 	}
 	write(warnings, f2, strlen(f2));
 	if (_logfile != stdout)
-		fprintf(stdout, "%s\n", f2);
-	fprintf(_logfile, "%s\n", f2);
+		fprintf(stdout, "%s", f2);
+	fprintf(_logfile, "%s", f2);
 	free(f1);
 	free(f2);
 }
