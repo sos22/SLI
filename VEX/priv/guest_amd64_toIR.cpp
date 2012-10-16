@@ -1762,7 +1762,7 @@ static void helper_ADC ( unsigned tid,
 
    assign( tres, binop(plus,
                        binop(plus,mkexpr(ta1, tid, ty),mkexpr(ta2, tid, ty)),
-                       mkexpr(oldcn, tid, Ity_I64)) );
+                       mkexpr(oldcn, tid, ty)) );
 
    /* Possibly generate a store of 'tres' to 'taddr'.  See comment at
       start of this function. */
@@ -1772,7 +1772,7 @@ static void helper_ADC ( unsigned tid,
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid, ty))  ));
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(binop(xoro, mkexpr(ta2, tid, ty), 
-							    mkexpr(oldcn, tid, Ity_I64)) )) );
+							    mkexpr(oldcn, tid, ty)) )) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkexpr(oldc, tid, Ity_I64) ) );
 }
 
@@ -1812,7 +1812,7 @@ static void helper_SBB ( unsigned tid,
 
    assign( tres, binop(minus,
                        binop(minus,mkexpr(ta1, tid, ty),mkexpr(ta2, tid, ty)),
-                       mkexpr(oldcn, tid, Ity_I64)) );
+                       mkexpr(oldcn, tid, ty)) );
 
    /* Possibly generate a store of 'tres' to 'taddr'.  See comment at
       start of this function. */
@@ -1822,7 +1822,7 @@ static void helper_SBB ( unsigned tid,
    stmt( IRStmt_Put( mk_reg(OFFB_CC_OP),   mkU64(thunkOp) ) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP1), widenUto64(mkexpr(ta1, tid, ty) )) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), widenUto64(binop(xoro, mkexpr(ta2, tid, ty), 
-							    mkexpr(oldcn, tid, Ity_I64)) )) );
+							    mkexpr(oldcn, tid, ty)) )) );
    stmt( IRStmt_Put( mk_reg(OFFB_CC_NDEP), mkexpr(oldc, tid, Ity_I64) ) );
 }
 
