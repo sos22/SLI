@@ -843,6 +843,7 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 	unsigned long changed;
 	unsigned long unchanged;
 	std::vector<StaticRip> functions;
+	int cntr = 0;
 
 	do {
 		changed = 0;
@@ -861,6 +862,9 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 			else
 				unchanged++;
 			done_something |= this_did_something;
+			if (cntr++ % 100 == 0)
+				printf("Register liveness: %zd/%zd on current pass\n",
+				       it - functions.begin(), functions.size());
 		}
 		printf("Register liveness progress: %ld/%ld\n", changed, changed+unchanged);
 	} while (done_something);
@@ -1210,6 +1214,87 @@ read_cg_vexrip(FILE *f, DynAnalysisRip *out, AddressSpace *as, bool *is_private)
 	return res;
 }
 
+static sqlite3 *_database;
+
+static void
+create_index(const char *name, const char *table, const char *field)
+{
+	char *s = my_asprintf("CREATE INDEX %s ON %s (%s)", name, table, field);
+	sqlite3_exec(_database, s, NULL, NULL, NULL);
+	free(s);
+}
+
+static bool
+open_database(void)
+{
+	bool res;
+	int rc;
+
+	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READONLY, NULL);
+	if (rc == SQLITE_OK) {
+		/* Return existing database */
+		res = false;
+		goto disable_journalling;
+	}
+
+	res = true;
+	/* Create new database */
+	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
+	assert(rc == SQLITE_OK);
+
+	rc = sqlite3_exec(_database,
+			  "CREATE TABLE instructionAttributes (rip INTEGER UNIQUE NOT NULL, liveOnEntry INTEGER,"
+			  "alias0 INTEGER,"
+			  "alias1 INTEGER,"
+			  "alias2 INTEGER,"
+			  "alias3 INTEGER,"
+			  "alias4 INTEGER,"
+			  "alias5 INTEGER,"
+			  "alias6 INTEGER,"
+			  "alias7 INTEGER,"
+			  "alias8 INTEGER,"
+			  "alias9 INTEGER,"
+			  "alias10 INTEGER,"
+			  "alias11 INTEGER,"
+			  "alias12 INTEGER,"
+			  "alias13 INTEGER,"
+			  "alias14 INTEGER,"
+			  "alias15 INTEGER,"
+			  "stackEscape INTEGER," /* 0 or NULL -> false, 1 -> true */
+			  "rbpToRspDeltaState INTEGER NOT NULL DEFAULT 0,"  /* 0 -> unknown, 1 -> known, 2 -> incalculable */
+			  "rbpToRspDelta INTEGER NOT NULL DEFAULT 0,"
+			  "functionHead INTEGER)",
+			  NULL,
+			  NULL,
+			  NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE fallThroughRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE callSuccRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE branchRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE returnRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, rbpOffsetCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
+			  NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+
+disable_journalling:
+	/* All of the information in the database can be regenerated
+	   by just blowing it away and starting over, so there's not
+	   much point in doing lots of journaling and fsync()
+	   operations. */
+	rc = sqlite3_exec(_database, "PRAGMA journal_mode = OFF", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "PRAGMA synchronous = OFF", NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+
+	return res;
+}
+
 void
 Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionToken token)
 {
@@ -1265,8 +1350,11 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionT
 
 	fclose(f);
 
-	make_unique(roots);
-	Oracle::findInstructions(ths, roots, callgraph, token);
+	bool need_rebuild_database = open_database();
+	if (need_rebuild_database) {
+		make_unique(roots);
+		Oracle::findInstructions(ths, roots, callgraph, token);
+	}
 }
 
 template <typename underlying>
@@ -1375,84 +1463,10 @@ public:
 	}
 };
 
-static sqlite3 *_database;
-
-static void
-create_index(const char *name, const char *table, const char *field)
-{
-	char *s = my_asprintf("CREATE INDEX %s ON %s (%s)", name, table, field);
-	sqlite3_exec(_database, s, NULL, NULL, NULL);
-	free(s);
-}
-
 static sqlite3 *
 database(void)
 {
-	int rc;
-
-	if (_database)
-		return _database;
-	
-	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READONLY, NULL);
-	if (rc == SQLITE_OK) {
-		/* Return existing database */
-		goto disable_journalling;
-	}
-
-	/* Create new database */
-	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
-	assert(rc == SQLITE_OK);
-
-	rc = sqlite3_exec(_database,
-			  "CREATE TABLE instructionAttributes (rip INTEGER UNIQUE NOT NULL, liveOnEntry INTEGER,"
-			  "alias0 INTEGER,"
-			  "alias1 INTEGER,"
-			  "alias2 INTEGER,"
-			  "alias3 INTEGER,"
-			  "alias4 INTEGER,"
-			  "alias5 INTEGER,"
-			  "alias6 INTEGER,"
-			  "alias7 INTEGER,"
-			  "alias8 INTEGER,"
-			  "alias9 INTEGER,"
-			  "alias10 INTEGER,"
-			  "alias11 INTEGER,"
-			  "alias12 INTEGER,"
-			  "alias13 INTEGER,"
-			  "alias14 INTEGER,"
-			  "alias15 INTEGER,"
-			  "stackEscape INTEGER," /* 0 or NULL -> false, 1 -> true */
-			  "rbpToRspDeltaState INTEGER NOT NULL DEFAULT 0,"  /* 0 -> unknown, 1 -> known, 2 -> incalculable */
-			  "rbpToRspDelta INTEGER NOT NULL DEFAULT 0,"
-			  "functionHead INTEGER)",
-			  NULL,
-			  NULL,
-			  NULL);
-	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE fallThroughRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE callSuccRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE branchRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE callRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE returnRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, rbpOffsetCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
-			  NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-
-disable_journalling:
-	/* All of the information in the database can be regenerated
-	   by just blowing it away and starting over, so there's not
-	   much point in doing lots of journaling and fsync()
-	   operations. */
-	rc = sqlite3_exec(_database, "PRAGMA journal_mode = OFF", NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "PRAGMA synchronous = OFF", NULL, NULL, NULL);
-	assert(rc == SQLITE_OK);
-
+	assert(_database);
 	return _database;
 }
 
