@@ -286,19 +286,45 @@ optimise_condition_calculation(
 		break;
 #undef do_logic
 #undef _do_logic
+
+#define _do_add(type, coerce)						\
+		do {							\
+			IRExpr *res = IRExpr_Binop(			\
+				Iop_Add ## type ,			\
+				coerce(dep1),				\
+				coerce(dep2));				\
+			IRExpr *zero =					\
+				IRExpr_Const(IRConst_U ## type (0));	\
+			cf = IRExpr_Binop(Iop_CmpLT ## type ## U,	\
+					  res,				\
+					  coerce(dep1));		\
+			zf = IRExpr_Binop(Iop_CmpEQ ## type ,		\
+					  res,				\
+					  zero);			\
+			sf = IRExpr_Binop(Iop_CmpLT ## type ## S,	\
+					  res,				\
+					  zero);			\
+		} while (0)
+#define do_add(type) _do_add(type, coerce ## type)
+	case AMD64G_CC_OP_ADDB:
+		do_add(8);
+		break;
+	case AMD64G_CC_OP_ADDW:
+		do_add(16);
+		break;
+	case AMD64G_CC_OP_ADDL:
+		do_add(32);
+		break;
+	case AMD64G_CC_OP_ADDQ:
+		do_add(64);
+		break;
+#undef do_add
+#undef _do_add
 #undef coerce64
 #undef coerce32
 #undef coerce16
 #undef coerce8
-	case AMD64G_CC_OP_ADDW:
-		sf = IRExpr_Binop(
-			Iop_CmpLT32S,
-			IRExpr_Binop(
-				Iop_Add16,
-				dep1,
-				dep2),
-			IRExpr_Const(IRConst_U16(0)));
-		break;
+
 	default:
 		warning("Unknown CC op %lx\n", op);
 		break;
