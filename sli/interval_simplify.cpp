@@ -565,6 +565,8 @@ interval_ltu(IRExpr *arg1, IRExpr *arg2)
 static intervalified
 intervalify(IRExpr *what)
 {
+	if (TIMEOUT)
+		return intervalified(what);
 	switch (what->tag) {
 	case Iex_Const:
 	case Iex_Get:
@@ -792,6 +794,8 @@ static IRExpr *
 interval_simplify(IRExpr *what)
 {
 	intervalified i(intervalify(what));
+	if (TIMEOUT)
+		return what;
 	if (debug_interval_conv)
 		printf("intervalify(%s) -> %s\n", nameIRExpr(what), i.name());
 	IRExpr *res = i.asIRExpr();
