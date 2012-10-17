@@ -1022,6 +1022,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 
 	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect &&
 	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic) {
 		StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
 		assert(!sideEffect || sideEffect->type != StateMachineSideEffect::EndAtomic);
