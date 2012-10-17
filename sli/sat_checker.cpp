@@ -829,7 +829,7 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 						    ieb2->op > Iop_CmpLT64U)
 							continue;
 						IRExpr *lt = ieb2->arg1;
-						IRExpr *gt = ieb2->arg1;
+						IRExpr *gt = ieb2->arg2;
 						if (lt != arg1 && lt != arg2 &&
 						    gt != arg1 && gt != arg2)
 							continue;
@@ -877,7 +877,7 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 					for (auto it2 = sat.memo.begin();
 					     it2 != sat.memo.end();
 					     it2++) {
-						if (it2->first->tag != Iex_Binop)
+						if (it2->first == e || it2->first->tag != Iex_Binop)
 							continue;
 						IRExprBinop *ieb2 = (IRExprBinop *)it2->first;
 						if (it2->second.first &&
@@ -892,7 +892,7 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 							}
 						}
 						IRExpr *lt = ieb2->arg1;
-						IRExpr *gt = ieb2->arg1;
+						IRExpr *gt = ieb2->arg2;
 						if (ieb2->op < Iop_CmpLT8U ||
 						    ieb2->op > Iop_CmpLT64U)
 							continue;
