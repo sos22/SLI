@@ -176,7 +176,7 @@ public:
 		void addPredecessorsCall(const StaticRip &rip, std::vector<StaticRip> &out);
 		void addPredecessorsReturn(const StaticRip &rip, std::vector<StaticRip> &out);
 		void updateSuccessorInstructionsAliasing(const StaticRip &rip, AddressSpace *as, std::vector<StaticRip> *changed,
-							 bool *done_something);
+							 Oracle *oracle, bool *done_something);
 	public:
 		void getInstructionFallThroughs(const StaticRip &rip, std::vector<StaticRip> &out);
 	private:
@@ -208,7 +208,7 @@ public:
 				    const std::vector<StaticRip> &branch);
 		void calculateRegisterLiveness(Oracle *oracle, AddressSpace *as, bool *done_something);
 		void calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle);
-		void calculateAliasing(AddressSpace *as, bool *done_something);
+		void calculateAliasing(AddressSpace *as, Oracle *oracle, bool *done_something);
 
 		void visit(HeapVisitor &) { }
 		NAMED_CLASS

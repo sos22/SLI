@@ -889,7 +889,7 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 {
 	bool done_something;
 	std::vector<StaticRip> functions;
-
+	int cntr = 0;
 	ths->getFunctions(functions);
 	for (auto it = functions.begin();
 	     it != functions.end();
@@ -899,10 +899,13 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 		if (!f.aliasingConfigCorrect()) {
 			do {
 				done_something = false;
-				f.calculateAliasing(ths->ms->addressSpace, &done_something);
+				f.calculateAliasing(ths->ms->addressSpace, ths, &done_something);
 			} while (done_something);
 			f.setAliasingConfigCorrect(true);
 		}
+		if (cntr++ % 100 == 0)
+			printf("Aliasing progress: %zd/%zd\n",
+			       it - functions.begin(), functions.size());
 	}
 }
 
@@ -2209,7 +2212,7 @@ Oracle::Function::calculateRegisterLiveness(Oracle *oracle, AddressSpace *as, bo
 }
 
 void
-Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
+Oracle::Function::calculateAliasing(AddressSpace *as, Oracle *oracle, bool *done_something)
 {
 	{
 		bool aValid;
@@ -2239,7 +2242,7 @@ Oracle::Function::calculateAliasing(AddressSpace *as, bool *done_something)
 	while (!needsUpdating.empty()) {
 		StaticRip rip(needsUpdating.back());
 		needsUpdating.pop_back();
-		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, done_something);
+		updateSuccessorInstructionsAliasing(rip, as, &needsUpdating, oracle, done_something);
 	}
 
 	if (debug_static_alias) {
@@ -2691,6 +2694,7 @@ void
 Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 						      AddressSpace *as,
 						      std::vector<StaticRip> *changed,
+						      Oracle *oracle,
 						      bool *done_something)
 {
 	const IRExprOptimisations opt(AllowableOptimisations::defaultOptimisations.setAddressSpace(as));
@@ -2872,7 +2876,9 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			else
 				getInstructionFallThroughs(rip, _fallThroughRips);
 		} else {
-			_fallThroughRips.push_back(StaticRip(extract_call_follower(irsb)));
+			if (!irsb->next_is_const ||
+			    !oracle->functionNeverReturns(StaticRip(irsb->next_const.rip)))
+				_fallThroughRips.push_back(StaticRip(extract_call_follower(irsb)));
 		}
 	} else {
 		assert(statements[nr_statements]->tag == Ist_IMark);
