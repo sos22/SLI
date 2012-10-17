@@ -1020,15 +1020,11 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		return target;
 	}
 
-	if (sideEffect->type != StateMachineSideEffect::Load &&
-	    sideEffect->type != StateMachineSideEffect::Store &&
-	    sideEffect->type != StateMachineSideEffect::StartAtomic &&
+	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    target->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic) {
 		StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
 		assert(!sideEffect || sideEffect->type != StateMachineSideEffect::EndAtomic);
-		/* Pull non-memory-accessing side effects out of
-		   atomic block whenever possible. */
 		*done_something = true;
 		return (new StateMachineSideEffecting(
 				t->dbg_origin,
@@ -1049,8 +1045,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 				return t->target;
 			}
 
-			if (t->sideEffect->type != StateMachineSideEffect::Load &&
-			    t->sideEffect->type != StateMachineSideEffect::Store) {
+			if (t->sideEffect->type == StateMachineSideEffect::AssertFalse) {
 				/* Pull non-memory-accesses out of
 				 * atomic blocks whenever possible. */
 				*done_something = true;
@@ -1061,21 +1056,6 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 							dbg_origin,
 							sideEffect,
 							t->target)))->optimise(opt, done_something);
-			}
-
-			if (t->target->type == StateMachineState::SideEffecting) {
-				StateMachineSideEffecting *t2 = (StateMachineSideEffecting *)t->target;
-				if (t2->sideEffect &&
-				    t2->sideEffect->type == StateMachineSideEffect::EndAtomic) {
-					/* Individual side effects are always
-					   atomic, so an atomic block with a
-					   single side effect in is a bit
-					   pointless. */
-					*done_something = true;
-					return (new StateMachineSideEffecting(
-							t2,
-							t->sideEffect))->optimise(opt, done_something);
-				}
 			}
 		} else if (target->isTerminal()) {
 			/* START_ATOMIC followed by a terminal is a

@@ -561,6 +561,11 @@ public:
 	{
 		if (sideEffect)
 			sideEffect->sanityCheck();
+		if (sideEffect && sideEffect->type == StateMachineSideEffect::EndAtomic &&
+		    target && target->type == StateMachineState::SideEffecting &&
+		    ((StateMachineSideEffecting *)target)->sideEffect &&
+		    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic)
+			abort();
 	}
 };
 
