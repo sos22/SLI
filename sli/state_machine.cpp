@@ -1020,42 +1020,91 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		return target;
 	}
 
-	if (sideEffect->type == StateMachineSideEffect::StartAtomic &&
-	    target->type == StateMachineState::SideEffecting) {
+	if (sideEffect->type != StateMachineSideEffect::Load &&
+	    sideEffect->type != StateMachineSideEffect::Store &&
+	    sideEffect->type != StateMachineSideEffect::StartAtomic &&
+	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic) {
 		StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
-		assert(t->sideEffect);
-		if (t->sideEffect->type == StateMachineSideEffect::EndAtomic) {
-			/* Remove empty atomic section */
-			*done_something = true;
-			return t->target;
-		}
+		assert(!sideEffect || sideEffect->type != StateMachineSideEffect::EndAtomic);
+		/* Pull non-memory-accessing side effects out of
+		   atomic block whenever possible. */
+		*done_something = true;
+		return (new StateMachineSideEffecting(
+				t->dbg_origin,
+				t->sideEffect,
+				new StateMachineSideEffecting(
+					dbg_origin,
+					sideEffect,
+					t->target)))->optimise(opt, done_something);
+	}
 
-		if (t->sideEffect->type == StateMachineSideEffect::AssertFalse) {
-			/* Pull assertions out of atomic blocks
-			 * whenever possible. */
-			*done_something = true;
-			return (new StateMachineSideEffecting(
-					t->dbg_origin,
-					t->sideEffect,
-					new StateMachineSideEffecting(
-						dbg_origin,
-						sideEffect,
-						t->target)))->optimise(opt, done_something);
-		}
+	if (sideEffect->type == StateMachineSideEffect::StartAtomic) {
+		if (target->type == StateMachineState::SideEffecting) {
+			StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
+			assert(t->sideEffect);
+			if (t->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+				/* Remove empty atomic section */
+				*done_something = true;
+				return t->target;
+			}
 
-		if (t->target->type == StateMachineState::SideEffecting) {
-			StateMachineSideEffecting *t2 = (StateMachineSideEffecting *)t->target;
-			if (t2->sideEffect &&
-			    t2->sideEffect->type == StateMachineSideEffect::EndAtomic) {
-				/* Individual side effects are always
-				   atomic, so an atomic block with a
-				   single side effect in is a bit
-				   pointless. */
+			if (t->sideEffect->type != StateMachineSideEffect::Load &&
+			    t->sideEffect->type != StateMachineSideEffect::Store) {
+				/* Pull non-memory-accesses out of
+				 * atomic blocks whenever possible. */
 				*done_something = true;
 				return (new StateMachineSideEffecting(
-						t2,
-						t->sideEffect))->optimise(opt, done_something);
+						t->dbg_origin,
+						t->sideEffect,
+						new StateMachineSideEffecting(
+							dbg_origin,
+							sideEffect,
+							t->target)))->optimise(opt, done_something);
 			}
+
+			if (t->target->type == StateMachineState::SideEffecting) {
+				StateMachineSideEffecting *t2 = (StateMachineSideEffecting *)t->target;
+				if (t2->sideEffect &&
+				    t2->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+					/* Individual side effects are always
+					   atomic, so an atomic block with a
+					   single side effect in is a bit
+					   pointless. */
+					*done_something = true;
+					return (new StateMachineSideEffecting(
+							t2,
+							t->sideEffect))->optimise(opt, done_something);
+				}
+			}
+		} else if (target->isTerminal()) {
+			/* START_ATOMIC followed by a terminal is a
+			 * bit pointless. */
+			*done_something = true;
+			return target;
+		} else {
+			/* It's a bifurcate i.e. we have
+			   START_ATOMIC; if (x) a else b.
+			   You might think we'd want to transform
+			   that to
+
+			   if (x) {
+			      START_ATOMIC
+			      a
+			   } else { 
+			      START_ATOMIC
+			      b
+			   }
+
+			   which would shrink the size of the atomic
+			   block, but we then get into an infinite
+			   loop where the other analyses then go and
+			   undo it.  That could be fixed, but it
+			   wouldn't actually do any good: it'd only
+			   matter if the first things in a and b were
+			   END_ATOMICs, but in that case we'll already
+			   merge across the condition and it's all
+			   fine. */
 		}
 	}
 
