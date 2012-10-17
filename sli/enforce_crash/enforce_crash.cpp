@@ -940,33 +940,181 @@ optimiseCfg(crashEnforcementData &ced)
 	ced.crashCfg.removeAllBut(retain);
 }
 
-/* We need to patch the program to jump to our instrumentation at
- * every entry point.  Those jump instructions are five bytes, so
- * could clobber a following instruction.  We need to make sure that
- * the program doesn't jump to one of those clobbered instructions.
- * The way we do so is by making sure that anything which might jump
- * to one of them is itself handled by the interpreter.  Sometimes, we
- * can do that by marking the branch instruction as being a root
- * itself, but sometimes we can't find it (e.g. an indirect call from
- * a library back to a function in the main program), and in that case
- * we find all of the places in the program which might branch to
- * *that* instruction and recurse to protect them.
- */
-static void
-avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
-{
-	/* Instructions which need to be interpreted but which aren't
-	   currently covered by an entry point. */
-	std::set<unsigned long> needInterpret;
-	/* Instructions which are going to patched as entry points. */
-	std::set<unsigned long> entryPoints;
-	/* Instructions which aren't going to be patched as entry
-	   points but which are special in some way such that the
-	   interpreter needs to keep going if it hits one. */
-	std::set<unsigned long> contInterpret;
+/* This function is responsible for setting up the patch point list
+   and the force interpret list.  The preceding phases of the analysis
+   have given us a set of instructions I and we must arrange that
+   we're in the interpreter whenever the program executes an
+   instruction from I.  The challenge is that the only way of gaining
+   control is through a jump instruction, which is five bytes, and
+   some of the instructions in I might themselves be smaller than five
+   bytes, and so directly patching one of them might clobber something
+   important.  That is itself fine *provided* that the program is
+   definitely in the interpreter when it executes the instruction
+   which you clobbered, which might then require us to add new entry
+   points.
 
-	if (debug_declobber_instructions)
-		printf("Computing clobbered instructions set\n");
+   Define some notation first:
+
+   -- MustInterpret(X) means that we must be in the interpreter when we
+   run instruction X.
+   -- DoesInterpret(X) means that the patched program definitely will
+   be in the interpreter when in runs X.
+   -- Clobber(X, Y) means that trying to patch X into an entry point
+   will clobber Y.
+   -- Patch(X) means that we're going to replace X with an entry point.
+   -- Cont(X) means that if the interpreter hits X it should continue
+   interpreting.
+   -- Predecessor(X, Y) is true precisely when there's some control-flow
+   edge from Y to X i.e. when Y is a predecessor of X.
+   -- External(X) is true if there might be some control-flow edge which
+   we don't know about which ends at X.
+
+   We control Patch and Cont; everything else is set for us in advance
+   by the oracle and the CED.
+
+   Assumptions:
+
+   Patch(X) => DoesInterpret(X)
+   !External(X) && Cont(X) && forall Y.(Predecessor(X, Y) => DoesInterpret(Y)) => DoesInterpret(X)
+
+   In the final configuration, we need:
+
+   Patch(X) => Cont(X)
+   MustInterpret(X) => DoesInterpret(X)
+   Patch(X) && Clobber(X, Y) => DoesInterpret(Y)
+   Patch(X) && Clobber(X, Y) => !External(Y)
+
+   For performance reasons, we'd also like to minimise the size of the
+   Cont set.
+
+   We treat this as an exhaustive search problem, using two possible
+   maneuvers:
+
+   -- Create a new patch point at X.  That's only valid if doing so
+      wouldn't clobber an external function.  Doing this then moves
+      you to a new state in which MustInterpret() contains all of the
+      instructions which are clobbered by X.
+   -- Use a continue point instead: set Cont(X) and then set
+      MustInterpret for all of X's predecessors.
+*/
+
+struct patchStrategy {
+	std::set<unsigned long> MustInterpret;
+	std::set<unsigned long> Patch;
+	std::set<unsigned long> Cont;
+	unsigned size() const {
+		return MustInterpret.size() + Cont.size();
+	}
+	bool operator<(const patchStrategy &o) const {
+		return size() > o.size();
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "MI: {");
+		for (auto it = MustInterpret.begin(); it != MustInterpret.end(); it++) {
+			if (it != MustInterpret.begin())
+				fprintf(f, ",");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "}; P {");
+		for (auto it = Patch.begin(); it != Patch.end(); it++) {
+			if (it != Patch.begin())
+				fprintf(f, ",");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "}; C {");
+		for (auto it = Cont.begin(); it != Cont.end(); it++) {
+			if (it != Cont.begin())
+				fprintf(f, ",");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "}\n");
+	}
+};
+
+static bool
+patchSearch(Oracle *oracle,
+	    const patchStrategy &input,
+	    std::priority_queue<patchStrategy> &thingsToTry)
+{
+	if (input.MustInterpret.empty())
+		return true;
+
+	input.prettyPrint(stdout);
+	unsigned long needed = *input.MustInterpret.begin();
+
+	printf("\tLook at %lx\n", needed);
+	patchStrategy c(input);
+	/* @needed is definitely going to be interpreted after
+	 * this. */
+	c.Cont.insert(needed);
+	c.MustInterpret.erase(needed);
+
+	/* Decide which maneuver to use here.  We need to either patch
+	   @needed itself or bring all of its predecessors into the
+	   patch. */
+
+	/* Figure out which instructions might get clobbered by the
+	 * patch */
+	std::set<unsigned long> clobbered_by_patch;
+	unsigned offset = 0;
+	offset += getInstructionSize(oracle->ms->addressSpace, StaticRip(needed));
+	while (offset < 5) {
+		clobbered_by_patch.insert(needed + offset);
+		offset += getInstructionSize(oracle->ms->addressSpace, StaticRip(needed + offset));
+	}
+
+	/* Can't use patch if that would clobber an external. */
+	bool can_use_patch = true;
+	for (auto it = clobbered_by_patch.begin(); can_use_patch && it != clobbered_by_patch.end(); it++) {
+		if (oracle->isFunctionHead(StaticRip(*it)))
+			can_use_patch = false;
+	}
+
+	if (can_use_patch) {
+		/* Try using a patch. */
+		patchStrategy patched(c);
+		patched.Patch.insert(needed);
+		for (auto it = clobbered_by_patch.begin();
+		     it != clobbered_by_patch.end();
+		     it++) {
+			std::set<unsigned long> predecessors;
+			oracle->findPredecessors(*it, predecessors);
+			for (unsigned long y = needed; y < *it; y++)
+				predecessors.erase(y);
+			if (!predecessors.empty()) {
+				patched.Cont.insert(*it);
+				printf("Need predecessors for %lx: {", *it);
+				for (auto it = predecessors.begin();
+				     it != predecessors.end();
+				     it++) {
+					if (it != predecessors.begin())
+						printf(", ");
+					printf("0x%lx", *it);
+				}
+				printf("}\n");
+			}
+			patched.MustInterpret.insert(predecessors.begin(), predecessors.end());
+		}
+		thingsToTry.push(patched);
+		printf("Patch to: ");
+		patched.prettyPrint(stdout);
+	}
+
+	/* Try expanding to predecessors. */
+	std::set<unsigned long> predecessors;
+	oracle->findPredecessors(needed, predecessors);
+	c.MustInterpret.insert(predecessors.begin(), predecessors.end());
+	thingsToTry.push(c);
+	printf("Unpatched: ");
+	c.prettyPrint(stdout);
+	return false;
+}
+
+static void
+buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
+{
+	patchStrategy initPs;
+
 	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
 		Instruction<ThreadCfgLabel> *instr = ced.crashCfg.findInstr(it.get());
 		assert(instr);
@@ -978,95 +1126,28 @@ avoidBranchToPatch(crashEnforcementData &ced, Oracle *oracle)
 		unsigned long r = vr.unwrap_vexrip();
 		if (debug_declobber_instructions)
 			printf("%lx is a root\n", r);
-		needInterpret.insert(r);
+		initPs.MustInterpret.insert(r);
 	}
 
-	while (!needInterpret.empty()) {
-		unsigned long e = *needInterpret.begin();
-		needInterpret.erase(e);
+	std::priority_queue<patchStrategy> pses;
+	pses.push(initPs);
+	while (!pses.empty()) {
+		patchStrategy next(pses.top());
+		pses.pop();
+		if (patchSearch(oracle, next, pses)) {
+			/* We have a solution. */
+			ced.patchPoints = next.Patch;
+			ced.interpretInstrs = next.Cont;
 
-		if (debug_declobber_instructions)
-			printf("Considering entry point %lx\n", e);
-
-		if (contInterpret.count(e)) {
-			if (debug_declobber_instructions)
-				printf("Already in interpret set.\n");
-			continue;
-		}
-		if (entryPoints.count(e)) {
-			if (debug_declobber_instructions)
-				printf("Already an entry point.\n");
-			continue;
-		}
-
-		/* Are there any branches which we don't know about to
-		   this instruction's clobbered set?  We approximate
-		   that by saying that external branches will only
-		   ever target function heads. */
-		bool hasExternalBranches = false;
-		for (unsigned x = 1; !hasExternalBranches && x < 5; x++) {
-			if (oracle->isFunctionHead(StaticRip(e + x)))
-				hasExternalBranches = true;
-		}
-		if (hasExternalBranches) {
-			/* We can't make e an entry point, because
-			   there's not space before the end of the
-			   function, so try to cover its predecessors
-			   instead. */
-			contInterpret.insert(e);
-			std::set<unsigned long> predecessors;
-			oracle->findPredecessors(e, predecessors);
-			if (debug_declobber_instructions) {
-				printf("%lx cannot be patched due to potential external branches to the clobber zone; predecessors = [",
-				       e);
-				for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
-					if (it != predecessors.begin())
-						printf(", ");
-					printf("%lx", *it);
-				}
-				printf("]\n");
-			}
-			needInterpret.insert(predecessors.begin(), predecessors.end());
-		} else {
-			entryPoints.insert(e);
-			for (unsigned x = 1; x < 5; x++) {
-				std::set<unsigned long> predecessors;
-				oracle->findPredecessors(e + x, predecessors);
-				for (unsigned y = 0; y < x; y++)
-					predecessors.erase(e + y);
-				if (debug_declobber_instructions && !predecessors.empty()) {
-					printf("Entry point %lx clobbers %lx; predecessors = [",
-					       e, e + x);
-					for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
-						if (it != predecessors.begin())
-							printf(", ");
-						printf("%lx", *it);
-					}
-					printf("]\n");
-				}
-				needInterpret.insert(predecessors.begin(), predecessors.end());
-			}
+			/* Minor optimisation: anything within five bytes of a patch
+			   point is implicitly cont, so remove them. */
+			for (auto it = ced.patchPoints.begin(); it != ced.patchPoints.end(); it++)
+				for (unsigned x = 0; x < 5; x++)
+					ced.interpretInstrs.erase(*it + x);
+			return;
 		}
 	}
-
-	if (debug_declobber_instructions) {
-		printf("Entry points = [");
-		for (auto it = entryPoints.begin(); it != entryPoints.end(); it++) {
-			if (it != entryPoints.begin())
-				printf(", ");
-			printf("0x%lx", *it);
-		}
-		printf("], contInterpret = [");
-		for (auto it = contInterpret.begin(); it != contInterpret.end(); it++) {
-			if (it != contInterpret.begin())
-				printf(", ");
-			printf("0x%lx", *it);
-		}
-		printf("]\n");
-	}
-
-	ced.patchPoints = entryPoints;
-	ced.interpretInstrs = contInterpret;
+	errx(1, "Cannot solve patch problem");
 }
 
 static void
@@ -1154,7 +1235,7 @@ main(int argc, char *argv[])
 		accumulator |= acc;
 	}
 
-	avoidBranchToPatch(accumulator, oracle);
+	buildPatchStrategy(accumulator, oracle);
 
 	FILE *f = fopen(argv[4], "w");
 	accumulator.prettyPrint(f);

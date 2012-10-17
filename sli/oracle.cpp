@@ -1811,6 +1811,7 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 	printf("Calculate aliasing map...\n");
 	calculateAliasing(ths, token);
 	printf("Calculate RBP map...\n");
+	dbg_break("Here we are\n");
 	calculateRbpToRspOffsets(ths, token);
 	printf("Done static analysis phase\n");
 }
@@ -3640,12 +3641,17 @@ Oracle::isFunctionHead(const StaticRip &sr)
 	static sqlite3_stmt *stmt;
 
 	if (!stmt)
-		stmt = prepare_statement("SELECT COUNT(*) FROM instructionAttributes WHERE functionHead = ?");
+		stmt = prepare_statement("SELECT functionHead FROM instructionAttributes WHERE rip = ?");
 	bind_oraclerip(stmt, 1, sr);
 	std::vector<unsigned long> a;
 	extract_int64_column(stmt, 0, a);
+	if (a.size() == 0) {
+		/* We don't know about this instruction, so
+		   conservatively assume that it's a head. */
+		return true;
+	}
 	assert(a.size() == 1);
-	return a[0];
+	return a[0] == sr.rip;
 }
 bool
 Oracle::isFunctionHead(const VexRip &vr)
@@ -3731,9 +3737,11 @@ Oracle::findPredecessors(unsigned long rip, std::set<unsigned long> &out)
 	StaticRip sr(rip);
 	Function f(sr);
 
-	std::vector<StaticRip> nonCall;
-	f.addPredecessorsDirect(sr, nonCall);
-	for (auto it = nonCall.begin(); it != nonCall.end(); it++)
+	std::vector<StaticRip> pred;
+	f.addPredecessorsNonCall(sr, pred);
+	f.addPredecessorsCall(sr, pred);
+	f.addPredecessorsReturn(sr, pred);
+	for (auto it = pred.begin(); it != pred.end(); it++)
 		out.insert(it->rip);
 }
 
