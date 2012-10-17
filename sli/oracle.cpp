@@ -874,6 +874,7 @@ void
 Oracle::calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 {
 	std::vector<StaticRip> functions;
+	int cntr = 0;
 	ths->getFunctions(functions);
 	for (auto it = functions.begin();
 	     it != functions.end();
@@ -881,6 +882,9 @@ Oracle::calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken tok
 		LibVEX_maybe_gc(token);
 		Function f(*it);
 		f.calculateRbpToRspOffsets(ths->ms->addressSpace, ths);
+		if (cntr++ % 100 == 0)
+			printf("RBP map progress: %zd/%zd\n",
+			       it - functions.begin(), functions.size());
 	}
 }
 
