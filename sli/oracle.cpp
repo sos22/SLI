@@ -1698,7 +1698,6 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 	create_index("callSuccRip", "callSuccRips", "rip");
 	create_index("instructionAttributesRip", "instructionAttributes", "rip");
 
-	dbg_break("Check 1\n");
 	/* Now we need to go and discover all of the functions in the
 	 * program.  This may be a bit more than just those in
 	 * known_heads because of tail-call effects. */
@@ -1793,7 +1792,8 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 		}
 	}
 	
-	dbg_break("Check 2\n");
+	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
+
 	printf("Building return address table.\n");
 	ths->buildReturnAddressTable();
 	create_index("returnDest", "returnRips", "dest");
