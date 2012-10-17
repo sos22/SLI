@@ -1081,18 +1081,8 @@ patchSearch(Oracle *oracle,
 			oracle->findPredecessors(*it, predecessors);
 			for (unsigned long y = needed; y < *it; y++)
 				predecessors.erase(y);
-			if (!predecessors.empty()) {
-				patched.Cont.insert(*it);
-				printf("Need predecessors for %lx: {", *it);
-				for (auto it = predecessors.begin();
-				     it != predecessors.end();
-				     it++) {
-					if (it != predecessors.begin())
-						printf(", ");
-					printf("0x%lx", *it);
-				}
-				printf("}\n");
-			}
+			patched.Cont.insert(*it);
+			patched.MustInterpret.erase(*it);
 			patched.MustInterpret.insert(predecessors.begin(), predecessors.end());
 		}
 		thingsToTry.push(patched);
