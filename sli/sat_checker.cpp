@@ -1023,6 +1023,7 @@ sat_simplify(IRExpr *a, const IRExprOptimisations &opt)
 		sat_checker_counters.anf_resolved++;
 		return norm1;
 	}
+	norm1 = internIRExpr(norm1, intern);
 
 	IRExpr *norm2 = conjunctive_normal_form(norm1);
 	norm2 = simplifyIRExpr(norm2, opt);
@@ -1031,12 +1032,17 @@ sat_simplify(IRExpr *a, const IRExprOptimisations &opt)
 		sat_checker_counters.cnf_resolved++;
 		return norm2;
 	}
+	norm2 = internIRExpr(norm2, intern);
+
 	IRExpr *norm3 = disjunctive_normal_form(norm2);
 	norm3 = simplifyIRExpr(norm3, opt);
 	res = isTrue(norm3);
-	if (res.valid)
+	if (res.valid) {
 		sat_checker_counters.dnf_resolved++;
+		return norm3;
+	}
 
+	norm3 = internIRExpr(norm3, intern);
 	return norm3;
 }
 
