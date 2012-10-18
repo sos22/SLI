@@ -1457,6 +1457,19 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				FixConsumer &df,
 				GarbageCollectionToken token)
 {
+	/* Quick pre-check: see whether this instruction might crash
+	 * in isolation.  A lot can't (e.g. accesses to BSS) */
+	{
+		if (getProximalCause(oracle->ms,
+				     *MaiMap::empty(),
+				     NULL,
+				     targetRip.toVexRip(),
+				     tid)->type == StateMachineState::NoCrash) {
+			fprintf(_logfile, "Instruction is definitely non-crashing\n");
+			return;
+		}
+	}
+
 	VexPtr<MaiMap, &ir_heap> mai(MaiMap::empty());
 
 	AllowableOptimisations opt =
