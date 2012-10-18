@@ -5,6 +5,7 @@
 #include "libvex_prof.hpp"
 #include "alloc_mai.hpp"
 #include "simplify_irexpr.hpp"
+#include "allowable_optimisations.hpp"
 
 namespace ProximalCause {
 
@@ -31,16 +32,16 @@ getProximalCause(MachineState *ms,
 	   compiler from VEX intercode to our state machine model. */
 	StateMachineState *work;
 
-	class _ {
-	public:
+	struct _ {
 		const VexRip &rip;
 		StateMachineState *&work;
 		void operator()(IRExpr *condition, StateMachineState *target) {
-			work = new StateMachineBifurcate(
-				rip,
-				condition,
-				target,
-				work);
+			if (work != target)
+				work = new StateMachineBifurcate(
+					rip,
+					condition,
+					target,
+					work);
 		}
 		_(const VexRip &_rip, StateMachineState *&_work)
 			: rip(_rip), work(_work)
@@ -50,26 +51,46 @@ getProximalCause(MachineState *ms,
 		const VexRip &rip;
 		StateMachineState *&work;
 		void operator()(StateMachineSideEffect *se) {
-			work = new StateMachineSideEffecting(
-				rip,
-				se,
-				work);
+			if (work->type != StateMachineState::NoCrash)
+				work = new StateMachineSideEffecting(
+					rip,
+					se,
+					work);
 		}
 		_2(const VexRip &_rip, StateMachineState *&_work)
 			: rip(_rip), work(_work)
 		{}
 	} prependSideEffect(rip, work);
+	struct _3 {
+		_ &conditionalBranch;
+		AllowableOptimisations opt;
+		StateMachineState *&work;
+		void operator()(IRExpr *e) {
+			e = IRExpr_Unop(Iop_BadPtr, e);
+			e = simplifyIRExpr(e, opt);
+			assert(e->type() == Ity_I1);
+			if (e->tag == Iex_Const) {
+				if ( ((IRExprConst *)e)->con->Ico.U1 )
+					work = StateMachineCrash::get();
+				return;
+			}
+			conditionalBranch(e, StateMachineCrash::get());
+		}
+		_3(_ &_conditionalBranch, const AllowableOptimisations &_opt,
+		   StateMachineState *&_work)
+			: conditionalBranch(_conditionalBranch),
+			  opt(_opt), work(_work)
+		{}
+	} crashIfBadPtr(conditionalBranch,
+			AllowableOptimisations::defaultOptimisations.setAddressSpace(ms->addressSpace),
+			work);
+
 	int idx;
 	for (idx = 1; idx < irsb->stmts_used && irsb->stmts[idx]->tag != Ist_IMark; idx++)
 		;
-	if (idx <= irsb->stmts_used || irsb->next_is_const)
-		work = StateMachineNoCrash::get();
-	else
-		work = new StateMachineBifurcate(
-			rip,
-			IRExpr_Unop(Iop_BadPtr, irsb->next_nonconst),
-			StateMachineCrash::get(),
-			StateMachineNoCrash::get());
+	work = StateMachineNoCrash::get();
+	if (idx == irsb->stmts_used && !irsb->next_is_const)
+		crashIfBadPtr(irsb->next_nonconst);
 
 	idx--;
 	while (idx >= 0) {
@@ -103,8 +124,7 @@ getProximalCause(MachineState *ms,
 					ist->data,
 					mai(tid, where),
 					MemoryTag::normal()));
-			conditionalBranch(IRExpr_Unop(Iop_BadPtr, ist->addr),
-					  StateMachineCrash::get());
+			crashIfBadPtr(ist->addr);
 			break;
 		}
 		case Ist_CAS: {
@@ -167,13 +187,8 @@ getProximalCause(MachineState *ms,
 					rip,
 					StateMachineSideEffectStartAtomic::get(),
 					l3);
-			StateMachineBifurcate *l1 =
-				new StateMachineBifurcate(
-					rip,
-					IRExpr_Unop(Iop_BadPtr, cas->addr),
-					StateMachineCrash::get(),
-					l2);
-			work = l1;
+			work = l2;
+			crashIfBadPtr(cas->addr);
 			break;
 		}
 		case Ist_Dirty: {
@@ -187,6 +202,8 @@ getProximalCause(MachineState *ms,
 				ity = Ity_I32;
 			else if (!strcmp(dirty->cee->name, "helper_load_64"))
 				ity = Ity_I64;
+			else if (!strcmp(dirty->cee->name, "helper_load_128"))
+				ity = Ity_I128;
 			else
 				abort();
 			assert(ity != Ity_INVALID);
@@ -197,8 +214,7 @@ getProximalCause(MachineState *ms,
 					mai(tid, where),
 					ity,
 					MemoryTag::normal()));
-			conditionalBranch(IRExpr_Unop(Iop_BadPtr, dirty->args[0]),
-					  StateMachineCrash::get());
+			crashIfBadPtr(dirty->args[0]);
 			break;
 		}
 		case Ist_MBE:
