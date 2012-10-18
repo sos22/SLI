@@ -1596,6 +1596,9 @@ optimiseIRSB(IRSB *irsb)
 		stmt->sanity_check();
 	}
 
+	if (!irsb->next_is_const)
+		useTmps(&irsb->next_nonconst);
+
 	/* Now do deadcode and local IRExpr optimisation. */
 	IRStmt *noop = NULL;
 	std::set<threadAndRegister> neededRegs;
@@ -1613,6 +1616,9 @@ optimiseIRSB(IRSB *irsb)
 		}
 	} useExpr;
 	useExpr.neededRegs = &neededRegs;
+	if (!irsb->next_is_const)
+		useExpr(&irsb->next_nonconst);
+
 	for (int i = irsb->stmts_used - 1; i >= 0; i--) {
 		IRStmt *stmt = irsb->stmts[i];
 		switch (stmt->tag) {
