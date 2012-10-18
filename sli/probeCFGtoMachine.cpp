@@ -553,6 +553,8 @@ cfgNodeToState(Oracle *oracle,
 					ity = Ity_I32;
 				else if (!strcmp(dirty->cee->name, "helper_load_64"))
 					ity = Ity_I64;
+				else if (!strcmp(dirty->cee->name, "helper_load_128"))
+					ity = Ity_I128;
 				else
 					abort();
 				assert(ity != Ity_INVALID);
