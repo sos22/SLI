@@ -664,11 +664,6 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	    unsigned maxPathLength1,
 	    unsigned maxPathLength2)
 {
-	/* Step one: build a CFG backwards from @targetInstr until the
-	   shortest path from any root to @vr is at least
-	   @maxPathLength */
-	VexRip dominator;
-
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
 	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength2, maxPathLength2);
 
