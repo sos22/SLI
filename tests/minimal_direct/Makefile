@@ -77,7 +77,7 @@ bug9ab.cep.c: bug9ab.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
 .PRECIOUS: bug1.types bug1.bcg bug2.types bug2.bcg bug1.ced bug2.ced bug3.types bug3.bcg bug3.ced bug4.types bug4.bcg bug4.ced bug5.types bug5.bcg bug5.ced bug6.types bug6.bcg bug6.ced bug8.types bug8.bcg bug9.types bug9.bcg
 
 %.exe: %.c
-	gcc -pthread -Wall -g $< -o $@
+	gcc -O -pthread -Wall -g $< -o $@
 
 clean:
 	rm -f *.exe *.idx *.canon *.types *.bcg *~ static.db timings.txt generated_patch.c \
