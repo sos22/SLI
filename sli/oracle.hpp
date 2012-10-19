@@ -319,6 +319,7 @@ private:
 	void findNoReturnFunctions();
 public:
 	bool functionNeverReturns(const StaticRip &rip);
+	void findAssertions(std::vector<DynAnalysisRip> &out);
 	static void loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token);
 	void visit(HeapVisitor &hv) {
 		hv(ms);

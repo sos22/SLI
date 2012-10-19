@@ -4134,3 +4134,17 @@ Oracle::isCrashingAddr(const VexRip &vr) const
 	return false;
 }
 
+void
+Oracle::findAssertions(std::vector<DynAnalysisRip> &drs)
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
+	for (auto it = crashingFunctions.begin(); it != crashingFunctions.end(); it++) {
+		bind_oraclerip(stmt, 1, *it);
+		std::vector<StaticRip> res;
+		extract_oraclerip_column(stmt, 0, res);
+		for (auto it = res.begin(); it != res.end(); it++)
+			drs.push_back(DynAnalysisRip(VexRip::invent_vex_rip(it->rip)));
+	}
+}

@@ -237,11 +237,18 @@ main(int argc, char *argv[])
 
 	LibVEX_gc(ALLOW_GC);
 
+	bool assert_mode = false;
+
 	int start_percentage;
 	int end_percentage;
 
 	start_percentage = 0;
 	end_percentage = 100;
+
+	if (!strcmp(argv[argc - 1], "assertions")) {
+		assert_mode = true;
+		argc--;
+	}
 
 	if (argc == 5) {
 		DynAnalysisRip vr;
@@ -256,15 +263,24 @@ main(int argc, char *argv[])
 	}
 
 	FILE *timings = fopen("timings.txt", "w");
-	VexPtr<TypesDb::all_instrs_iterator> instrIterator(oracle->type_db->enumerateAllInstructions());
-	unsigned long total_instructions = oracle->type_db->nrDistinctInstructions();
+
+	std::vector<DynAnalysisRip> assertions;
+	VexPtr<TypesDb::all_instrs_iterator> instrIterator;
+	unsigned long total_instructions;
+	if (assert_mode) {
+		oracle->findAssertions(assertions);
+		total_instructions = assertions.size();
+	} else {
+		instrIterator = oracle->type_db->enumerateAllInstructions();
+		total_instructions = oracle->type_db->nrDistinctInstructions();
+	}
 	printf("%ld instructions to protect\n", total_instructions);
 
 	/* There are a couple of important properties here:
-
+	   
 	   -- 0...100 must precisely cover the entire range
 	   -- a...b and b...c must, between them, cover precisely the
-              same range as a...c i.e. no duplicates or gaps.
+	      same range as a...c i.e. no duplicates or gaps.
 	*/
 	unsigned long start_instr = total_instructions / 100 * start_percentage;
 	unsigned long end_instr = end_percentage == 100 ? total_instructions : total_instructions / 100 * end_percentage - 1;
@@ -272,19 +288,26 @@ main(int argc, char *argv[])
 
 	printf("Processing instructions %ld to %ld\n", start_instr, end_instr);
 
-	/* Skip the ones we've been told to skip. */
-	for (unsigned long a = 0; a < start_instr; a++)
-		instrIterator->advance();
-
 	unsigned long cntr = 0;
 	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, timings);
-	while (cntr < instructions_to_process) {
-		assert(!instrIterator->finished());
-		DynAnalysisRip dar;
-		instrIterator->fetch(&dar);
-		instrIterator->advance();
-		ic(oracle, df, dar, cntr);
-		cntr++;
+	if (assert_mode) {
+		for (unsigned long idx = start_instr; idx < end_instr; idx++) {
+			ic(oracle, df, assertions[idx], cntr);
+			cntr++;
+		}
+	} else {
+		/* Skip the ones we've been told to skip. */
+		for (unsigned long a = 0; a < start_instr; a++)
+			instrIterator->advance();
+
+		while (cntr < instructions_to_process) {
+			assert(!instrIterator->finished());
+			DynAnalysisRip dar;
+			instrIterator->fetch(&dar);
+			instrIterator->advance();
+			ic(oracle, df, dar, cntr);
+			cntr++;
+		}
 	}
 
 	df.finish();
