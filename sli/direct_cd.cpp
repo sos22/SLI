@@ -90,6 +90,7 @@ main(int argc, char *argv[])
 	VexPtr<MachineState> ms(MachineState::readCoredump(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(CRASHED_THREAD)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
+	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
@@ -111,7 +112,7 @@ main(int argc, char *argv[])
 					 mai,
 					 ALLOW_GC);
 
-	DumpFix df(argv[3], DynAnalysisRip(vr));
+	DumpFix df(argv[4], DynAnalysisRip(vr));
 	diagnoseCrash(allocLabel, DynAnalysisRip(vr),
 		      probeMachine, oracle, df, false,
 		      opt, mai, ALLOW_GC);

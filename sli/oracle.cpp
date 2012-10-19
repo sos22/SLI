@@ -3660,11 +3660,8 @@ Oracle::isFunctionHead(const StaticRip &sr)
 	bind_oraclerip(stmt, 1, sr);
 	std::vector<unsigned long> a;
 	extract_int64_column(stmt, 0, a);
-	if (a.size() == 0) {
-		/* We don't know about this instruction, so
-		   conservatively assume that it's a head. */
-		return true;
-	}
+	if (a.size() == 0)
+		return false;
 	assert(a.size() == 1);
 	return a[0] == sr.rip;
 }
