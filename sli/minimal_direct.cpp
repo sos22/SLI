@@ -134,6 +134,89 @@ consider_rip(const DynAnalysisRip &my_rip,
 
 void startProfiling();
 
+class InstructionConsumer {
+	unsigned long start_instr;
+	unsigned long instructions_to_process;
+	unsigned long instructions_processed;
+	unsigned long total_instructions;
+	FILE *timings;
+	double start;
+	double low_end_time;
+	double high_end_time;
+	bool first;
+public:
+	InstructionConsumer(unsigned long _start_instr, unsigned long _instructions_to_process,
+			    unsigned long _total_instructions, FILE *_timings)
+		: start_instr(_start_instr), instructions_to_process(_instructions_to_process),
+		  instructions_processed(0), total_instructions(_total_instructions),
+		  timings(_timings), start(now()), first(true)
+	{}
+	void operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAnalysisRip &dar, unsigned long cntr);
+};
+
+void
+InstructionConsumer::operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAnalysisRip &dar, unsigned long cntr)
+{
+	_logfile = fopenf("w", "logs/%ld", cntr + start_instr);
+	if (!_logfile) err(1, "opening logs/%ld", cntr + start_instr);
+	printf("Considering %s, log logs/%ld\n", dar.name(), cntr + start_instr);
+	fprintf(_logfile, "Log for %s:\n", dar.name());
+	fflush(0);
+
+	consider_rip(dar, 1, oracle, df, timings, ALLOW_GC);
+	fclose(_logfile);
+	_logfile = stdout;
+
+	instructions_processed++;
+
+	double completion = instructions_processed / double(instructions_to_process);
+	double elapsed = now() - start;
+	double total_estimated = elapsed / completion;
+	double endd = total_estimated + start;
+	if (isinf(endd))
+		return;
+
+	dump_profiling_data();
+
+	time_t end = endd;
+	char *times;
+	if (first) {
+		low_end_time = endd;
+		high_end_time = endd;
+		first = false;
+		times = my_asprintf("finish at %s", ctime(&end));
+	} else {
+		low_end_time = low_end_time * .99 + endd * 0.01;
+		high_end_time = high_end_time * .99 + endd * 0.01;
+		if (low_end_time > endd)
+			low_end_time = endd;
+		if (high_end_time < endd)
+			high_end_time = endd;
+		char *t = strdup(ctime(&end));
+		t[strlen(t)-1] = 0;
+		end = low_end_time;
+		char *t2 = strdup(ctime(&end));
+		t2[strlen(t2)-1] = 0;
+		end = high_end_time;
+		char *t3 = strdup(ctime(&end));
+		t3[strlen(t3)-1] = 0;
+		times = my_asprintf("finish at %s [%s,%s]\n",
+				    t, t2, t3);
+		free(t);
+		free(t2);
+		free(t3);
+	}
+	printf("Done %ld/%ld(%f%%) in %f seconds (%f each); %f left; %s",
+	       instructions_processed,
+	       total_instructions,
+	       completion * 100,
+	       elapsed,
+	       elapsed / instructions_processed,
+	       total_estimated - elapsed,
+	       times);
+	free(times);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -175,7 +258,6 @@ main(int argc, char *argv[])
 	FILE *timings = fopen("timings.txt", "w");
 	VexPtr<TypesDb::all_instrs_iterator> instrIterator(oracle->type_db->enumerateAllInstructions());
 	unsigned long total_instructions = oracle->type_db->nrDistinctInstructions();
-	unsigned long instructions_processed = 0;
 	printf("%ld instructions to protect\n", total_instructions);
 
 	/* There are a couple of important properties here:
@@ -194,76 +276,15 @@ main(int argc, char *argv[])
 	for (unsigned long a = 0; a < start_instr; a++)
 		instrIterator->advance();
 
-	double start = now();
-	double low_end_time;
-	double high_end_time;
-	/* Shut compiler up */
-	high_end_time = low_end_time = -99999;
-	bool first = true;
 	unsigned long cntr = 0;
+	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, timings);
 	while (cntr < instructions_to_process) {
 		assert(!instrIterator->finished());
 		DynAnalysisRip dar;
 		instrIterator->fetch(&dar);
-		_logfile = fopenf("w", "logs/%ld", cntr + start_instr);
-		if (!_logfile) err(1, "opening logs/%ld", cntr + start_instr);
-		printf("Considering %s, log logs/%ld\n", dar.name(), cntr + start_instr);
-		fprintf(_logfile, "Log for %s:\n", dar.name());
-		fflush(0);
-		cntr++;
-		consider_rip(dar, 1, oracle, df, timings, ALLOW_GC);
-		fclose(_logfile);
-		_logfile = stdout;
-
 		instrIterator->advance();
-		instructions_processed++;
-
-		double completion = instructions_processed / double(instructions_to_process);
-		double elapsed = now() - start;
-		double total_estimated = elapsed / completion;
-		double endd = total_estimated + start;
-		if (isinf(endd))
-			continue;
-
-		dump_profiling_data();
-
-		time_t end = endd;
-		char *times;
-		if (first) {
-			low_end_time = endd;
-			high_end_time = endd;
-			first = false;
-			times = my_asprintf("finish at %s", ctime(&end));
-		} else {
-			low_end_time = low_end_time * .99 + endd * 0.01;
-			high_end_time = high_end_time * .99 + endd * 0.01;
-			if (low_end_time > endd)
-				low_end_time = endd;
-			if (high_end_time < endd)
-				high_end_time = endd;
-			char *t = strdup(ctime(&end));
-			t[strlen(t)-1] = 0;
-			end = low_end_time;
-			char *t2 = strdup(ctime(&end));
-			t2[strlen(t2)-1] = 0;
-			end = high_end_time;
-			char *t3 = strdup(ctime(&end));
-			t3[strlen(t3)-1] = 0;
-			times = my_asprintf("finish at %s [%s,%s]\n",
-					    t, t2, t3);
-			free(t);
-			free(t2);
-			free(t3);
-		}
-		printf("Done %ld/%ld(%f%%) in %f seconds (%f each); %f left; %s",
-		       instructions_processed,
-		       total_instructions,
-		       completion * 100,
-		       elapsed,
-		       elapsed / instructions_processed,
-		       total_estimated - elapsed,
-		       times);
-		free(times);
+		ic(oracle, df, dar, cntr);
+		cntr++;
 	}
 
 	df.finish();
