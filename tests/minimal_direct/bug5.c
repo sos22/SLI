@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,8 +23,7 @@ thr_main(void *ign)
 		STOP_ANALYSIS();
 		v1 = global1;
 		v2 = global2;
-		if (v1 != v2)
-			*(unsigned long *)0xf001 = 5;
+		assert(v1 == v2);
 		STOP_ANALYSIS();
 		usleep(10000);
 	}

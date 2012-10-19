@@ -1802,6 +1802,7 @@ probeCFGsToMachine(Oracle *oracle,
 					      std::vector<reloc_t> &pendingRelocations) {
 			if (proximalNodes.contains(e)) {
 				return getProximalCause(oracle->ms,
+							oracle,
 							mai,
 							e,
 							e->rip,

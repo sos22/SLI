@@ -315,6 +315,7 @@ private:
 	void setRbpToRspOffset(const StaticRip &rip, RbpToRspOffsetState state, unsigned long offset);
 
 	std::vector<StaticRip> terminalFunctions;
+	std::vector<StaticRip> crashingFunctions;
 	void findNoReturnFunctions();
 public:
 	bool functionNeverReturns(const StaticRip &rip);
@@ -393,6 +394,8 @@ public:
 
 	bool isPltCall(const VexRip &vr);
 	LibraryFunctionType identifyLibraryCall(const VexRip &vr);
+
+	bool isCrashingAddr(const VexRip &vr) const;
 
 	~Oracle() { }
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)

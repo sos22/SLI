@@ -248,6 +248,6 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     FixConsumer &df,
 				     GarbageCollectionToken token);
 
-StateMachineState *getProximalCause(MachineState *ms, MaiMap &mai, const CFGNode *where, const VexRip &rip, int tid);
+StateMachineState *getProximalCause(MachineState *ms, Oracle *oracle, MaiMap &mai, const CFGNode *where, const VexRip &rip, int tid);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

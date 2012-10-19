@@ -2085,9 +2085,7 @@ Oracle::findNoReturnFunctions()
 {
 	/* Some library functions which never return */
 	static const char *const terminals[] =
-		{ "pthread_exit", "abort", "exit", "__stack_chk_fail",
-		  "__assert_fail", "__assert_perror_fail", "__assert",
-		  "err", "errx", "verr", "verrx", "__pthread_unwind_next",
+		{ "pthread_exit", "exit", "err", "errx", "verr", "verrx", "__pthread_unwind_next",
 		  "longjmp", "_longjmp", "siglongjmp",
 		  "quick_exit", "_exit", "_Exit", "__error_noreturn",
 		  "__error_at_line_noreturn",
@@ -2096,12 +2094,29 @@ Oracle::findNoReturnFunctions()
 
 		  "png_error", "png_chunk_error", "png_err",
 
+		  "_ZSt9terminatev", "_ZSt10unexpectedv",
+		  NULL };
+	/* Some functions which always just crash.  The distinction
+	   between ``crash'' and ``fail to return'' is kind of
+	   arbitrary (e.g. err() might be considered a crash or a
+	   normal termination, depending on what you're doing), so be
+	   just a little bit conservative. */
+	static const char *const crashers[] =
+		{ "abort", "__stack_chk_fail", "__assert_fail",
+		  "__assert_perror_fail", "__assert",
+
 		  "g_assertion_message", "g_assertion_message_expr",
 		  "g_assertion_message_cmpstr", "g_assertion_message_cmpnum",
 		  "g_assertion_message_error", "g_assert_warning",
 
 		  "_ZSt9terminatev", "_ZSt10unexpectedv",
 		  NULL };
+	for (int i = 0; crashers[i]; i++) {
+		unsigned long r;
+		r = ms->elfData->getPltAddress(ms->addressSpace, crashers[i]);
+		if (r)
+			crashingFunctions.push_back(StaticRip(r));
+	}
 	for (int i = 0; terminals[i]; i++) {
 		unsigned long r;
 		r = ms->elfData->getPltAddress(ms->addressSpace, terminals[i]);
@@ -4109,4 +4124,13 @@ Oracle::findCallPredecessor(unsigned long rip)
 	return pred[0].rip;
 }
 
+
+bool
+Oracle::isCrashingAddr(const VexRip &vr) const
+{
+	for (auto it = crashingFunctions.begin(); it != crashingFunctions.end(); it++)
+		if (*it == StaticRip(vr))
+			return true;
+	return false;
+}
 

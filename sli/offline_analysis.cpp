@@ -1461,6 +1461,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	 * in isolation.  A lot can't (e.g. accesses to BSS) */
 	{
 		if (getProximalCause(oracle->ms,
+				     oracle,
 				     *MaiMap::empty(),
 				     NULL,
 				     targetRip.toVexRip(),
