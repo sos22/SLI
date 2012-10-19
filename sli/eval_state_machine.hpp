@@ -2,6 +2,7 @@
 #define EVAL_STATE_MACHINE_HPP__
 
 class AllowableOptimisations;
+class IRExprOptimisations;
 class OracleInterface;
 class StateMachine;
 class StateMachineSideEffectStore;
