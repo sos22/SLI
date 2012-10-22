@@ -2114,8 +2114,10 @@ Oracle::findNoReturnFunctions()
 	for (int i = 0; crashers[i]; i++) {
 		unsigned long r;
 		r = ms->elfData->getPltAddress(ms->addressSpace, crashers[i]);
-		if (r)
+		if (r) {
 			crashingFunctions.push_back(StaticRip(r));
+			terminalFunctions.push_back(StaticRip(r));
+		}
 	}
 	for (int i = 0; terminals[i]; i++) {
 		unsigned long r;
