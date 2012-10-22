@@ -5,16 +5,10 @@
 #include <time.h>
 #include <unistd.h>
 
-volatile int read_cntr;
-volatile int write_cntr;
-
-#define STOP_ANALYSIS()					\
-	asm (".fill 100,1,0x90\n")
+#include "test.h"
 
 #define NR_PTRS 100
 static int *volatile global_ptrs[NR_PTRS];
-
-static volatile bool force_quit;
 
 static void *
 thr_main(void *ign)
