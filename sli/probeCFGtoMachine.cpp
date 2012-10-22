@@ -1194,6 +1194,11 @@ getRspCanonicalisationDelta(StateMachineState *root, long *delta)
 		}
 	}
 
+	if (debug_rsp_canonicalisation) {
+		printf("Final table:\n");
+		for (auto it = res.begin(); it != res.end(); it++)
+			printf("l%d: %s\n", stateLabels[it->first], it->second.name());
+	}
 	/* So that's as much as we're going to get from that.
 	   Hopefully, it'll be enough to assign a label to <crash>
 	   state, in which case we have our answer. */
