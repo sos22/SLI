@@ -1026,6 +1026,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		return NULL;
 	}
 
+#if CONFIG_USE_INDUCTION
 	/* Now have a look at whether we have anything we can use the
 	 * induction rule on.  That means look at the probe machine
 	 * and pulling out all of the loads which are present in the
@@ -1112,6 +1113,9 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		fprintf(_logfile, "\t\tVerification condition is unsatisfiable -> no bug\n");
 		return NULL;
 	}
+#else
+	VexPtr<IRExpr, &ir_heap> residual_verification_condition(base_verification_condition);
+#endif
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
