@@ -94,6 +94,11 @@ consider_rip(const DynAnalysisRip &my_rip,
 
 	__warning_tag = my_rip.name();
 
+	if (oracle->isPltCall(my_rip.toVexRip())) {
+		fprintf(_logfile, "Is in PLT, so ignore\n");
+		return;
+	}
+
 	df.dr = my_rip;
 
 	LibVEX_maybe_gc(token);
