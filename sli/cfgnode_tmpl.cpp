@@ -78,8 +78,10 @@ CfgNodeForRip(const CfgLabel &label,
 		} else if (irsb->jumpkind == Ijk_Call) {
 			if (irsb->next_is_const) {
 				if (oracle->isPltCall(irsb->next_const.rip)) {
-					LibraryFunctionType tmpl = oracle->identifyLibraryCall(irsb->next_const.rip);
-					relocs.push_back(CfgSuccessorT<t>::dflt(t(extract_call_follower(irsb)), tmpl));
+					if (!oracle->functionNeverReturns(StaticRip(irsb->next_const.rip))) {
+						LibraryFunctionType tmpl = oracle->identifyLibraryCall(irsb->next_const.rip);
+						relocs.push_back(CfgSuccessorT<t>::dflt(t(extract_call_follower(irsb)), tmpl));
+					}
 				} else {
 					relocs.push_back(CfgSuccessorT<t>::call(t(irsb->next_const.rip)));
 				}

@@ -460,19 +460,34 @@ cfgNodeToState(Oracle *oracle,
 			break;
 		case Ist_Store: {
 			IRStmtStore *ist = (IRStmtStore *)stmt;
-			StateMachineSideEffect *se =
-				new StateMachineSideEffectStore(
-					ist->addr,
-					ist->data,
-					mai(tid, target),
-					MemoryTag::normal());
-			StateMachineSideEffecting *smse =
-				new StateMachineSideEffecting(
-					target->rip,
-					se,
-					NULL);
-			*cursor = smse;
-			cursor = &smse->target;
+			bool isCall;
+			isCall = false;
+			int j;
+			for (j = i + 1; j < irsb->stmts_used && irsb->stmts[j]->tag != Ist_IMark; j++)
+				;
+			if (j == irsb->stmts_used && irsb->jumpkind == Ijk_Call)
+				isCall = true;
+			if (!isCall) {
+				/* Don't bother storing the return
+				   address for function calls.  It'll
+				   never get loaded (because we handle
+				   all functions by inlining), and it's
+				   sometimes a pain to optimise
+				   out later. */
+				StateMachineSideEffect *se =
+					new StateMachineSideEffectStore(
+						ist->addr,
+						ist->data,
+						mai(tid, target),
+						MemoryTag::normal());
+				StateMachineSideEffecting *smse =
+					new StateMachineSideEffecting(
+						target->rip,
+						se,
+						NULL);
+				*cursor = smse;
+				cursor = &smse->target;
+			}
 			break;
 		}
 		case Ist_CAS: {
@@ -1194,6 +1209,11 @@ getRspCanonicalisationDelta(StateMachineState *root, long *delta)
 		}
 	}
 
+	if (debug_rsp_canonicalisation) {
+		printf("Final table:\n");
+		for (auto it = res.begin(); it != res.end(); it++)
+			printf("l%d: %s\n", stateLabels[it->first], it->second.name());
+	}
 	/* So that's as much as we're going to get from that.
 	   Hopefully, it'll be enough to assign a label to <crash>
 	   state, in which case we have our answer. */
@@ -1802,6 +1822,7 @@ probeCFGsToMachine(Oracle *oracle,
 					      std::vector<reloc_t> &pendingRelocations) {
 			if (proximalNodes.contains(e)) {
 				return getProximalCause(oracle->ms,
+							oracle,
 							mai,
 							e,
 							e->rip,

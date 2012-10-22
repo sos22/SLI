@@ -3,11 +3,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static int read_cntr;
-static int write_cntr;
-
-#define STOP_ANALYSIS()					\
-	asm (".fill 100,1,0x90\n")
+#include "test.h"
 
 static int *volatile global_ptr;
 

@@ -23,13 +23,13 @@ public:
 	DummyOracle(CrashSummary *_summary)
 		: summary(_summary)
 	{}
-	bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectLoad *l2) {
+	bool memoryAccessesMightAlias(const MaiMap &, const IRExprOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectLoad *l2) {
 		return memoryAccessesMightAlias(l1->rip, l2->rip);
 	}
-	bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectStore *l2) {
+	bool memoryAccessesMightAlias(const MaiMap &, const IRExprOptimisations &, StateMachineSideEffectLoad *l1, StateMachineSideEffectStore *l2) {
 		return memoryAccessesMightAlias(l1->rip, l2->rip);
 	}
-	bool memoryAccessesMightAlias(const MaiMap &, const AllowableOptimisations &, StateMachineSideEffectStore *l1, StateMachineSideEffectStore *l2) {
+	bool memoryAccessesMightAlias(const MaiMap &, const IRExprOptimisations &, StateMachineSideEffectStore *l1, StateMachineSideEffectStore *l2) {
 		return memoryAccessesMightAlias(l1->rip, l2->rip);
 	}
 	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) {

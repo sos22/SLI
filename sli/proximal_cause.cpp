@@ -11,6 +11,7 @@ namespace ProximalCause {
 
 static StateMachineState *
 getProximalCause(MachineState *ms,
+		 Oracle *oracle,
 		 const VexRip &rip,
 		 MaiMap &mai,
 		 const CFGNode *where,
@@ -89,8 +90,12 @@ getProximalCause(MachineState *ms,
 	for (idx = 1; idx < irsb->stmts_used && irsb->stmts[idx]->tag != Ist_IMark; idx++)
 		;
 	work = StateMachineNoCrash::get();
-	if (idx == irsb->stmts_used && !irsb->next_is_const)
-		crashIfBadPtr(irsb->next_nonconst);
+	if (idx == irsb->stmts_used) {
+		if (!irsb->next_is_const) {
+			crashIfBadPtr(irsb->next_nonconst);
+		} else if (oracle->isCrashingAddr(irsb->next_const.rip))
+			work = StateMachineCrash::get();
+	}
 
 	idx--;
 	while (idx >= 0) {
@@ -241,10 +246,11 @@ getProximalCause(MachineState *ms,
 
 StateMachineState *
 getProximalCause(MachineState *ms,
+		 Oracle *oracle,
 		 MaiMap &mai,
 		 const CFGNode *where,
 		 const VexRip &rip,
 		 int tid)
 {
-	return ProximalCause::getProximalCause(ms, rip, mai, where, tid);
+	return ProximalCause::getProximalCause(ms, oracle, rip, mai, where, tid);
 }
