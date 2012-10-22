@@ -32,10 +32,11 @@ class sat_enumerator {
 	NdChooser chooser;
 	IRExpr *expr;
 	bool _finished;
+	const IRExprOptimisations &opt;
 	void skipToSatisfying(void);
 public:
-	sat_enumerator(IRExpr *what)
-		: expr(what), _finished(false)
+	sat_enumerator(IRExpr *what, const IRExprOptimisations &_opt)
+		: expr(what), _finished(false), opt(_opt)
 	{ skipToSatisfying(); }
 	bool finished() const;
 	void advance();
