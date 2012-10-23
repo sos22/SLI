@@ -758,14 +758,14 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = true;
 			for (int i = 0; i < a->nr_arguments && acc; i++)
-				acc &= evalExpression(a->contents[i], chooser, preferred_result, opt, sat);
+				acc &= evalExpression(a->contents[i], chooser, false, opt, sat);
 			it->second.first = acc;
 		} else if (e->tag == Iex_Associative &&
 			   ((IRExprAssociative *)e)->op == Iop_Or1) {
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = false;
 			for (int i = 0; i < a->nr_arguments && !acc; i++)
-				acc |= evalExpression(a->contents[i], chooser, preferred_result, opt, sat);
+				acc |= evalExpression(a->contents[i], chooser, true, opt, sat);
 			it->second.first = acc;
 		} else if (e->tag == Iex_EntryPoint) {
 			it->second.second = true;
