@@ -310,6 +310,10 @@ public:
 			   value we just truncate it down. */
 			set_register(reg, IRExpr_Unop(Iop_V128to64, e), assumption, opt);
 			return;
+		case Ity_I128:
+			/* Likewise */
+			set_register(reg, IRExpr_Unop(Iop_128to64, e), assumption, opt);
+			return;
 		default:
 			abort();
 		}
