@@ -20,15 +20,6 @@ static bool debug_undefinedness = false;
 
 namespace _undefinedness {
 
-template <typename t, typename s> static bool
-operator |=(std::set<t, s> &a, const std::set<t, s> &b)
-{
-	bool res = false;
-	for (auto it = b.begin(); it != b.end(); it++)
-		res |= a.insert(*it).second;
-	return res;
-}
-
 class VariableDefinednessMap {
 	typedef std::set<threadAndRegister> entryT ;
 	std::map<StateMachineState *, entryT> content;

@@ -234,15 +234,6 @@ operator &(const std::set<t> &_a, const std::set<t> &_b)
 	return intersectSets<t>(_a, _b);
 }
 
-template <typename t, typename s> void
-operator |=(std::set<t> &dest, const s &other)
-{
-	for (auto it = other.begin();
-	     !it.finished();
-	     it++)
-		dest.insert(*it);
-}
-
 static CrashSummary *
 rewriteEntryPointExpressions(CrashSummary *cs, const std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > &rules)
 {

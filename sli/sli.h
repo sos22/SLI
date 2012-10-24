@@ -1305,4 +1305,13 @@ void __fail(const char *file, unsigned line, const char *fmt, ...)
 #define fail(...) __fail(__FILE__, __LINE__, __VA_ARGS__)
 #define abort() fail("aborted")
 
+template <typename t> bool
+operator |=(std::set<t> &a, const std::set<t> &b)
+{
+	bool res = false;
+	for (auto it = b.begin(); it != b.end(); it++)
+		res |= a.insert(*it).second;
+	return res;
+}
+
 #endif /* !SLI_H__ */
