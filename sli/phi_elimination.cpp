@@ -60,7 +60,108 @@ struct path {
 		}
 		fprintf(f, "Result: %d\n", result);
 	}
+
+	/* Return true on success or false if we find a
+	 * contradiction. */
+	bool addTrue(IRExpr *e, internIRExprTable &table);
+	bool addFalse(IRExpr *e, internIRExprTable &table);
 };
+
+bool
+path::addTrue(IRExpr *e, internIRExprTable &intern)
+{
+	e = internIRExpr(e, intern);
+	if (trueExprs.count(e))
+		return true;
+	if (falseExprs.count(e))
+		return false;
+	if (e->tag == Iex_Unop && ((IRExprUnop *)e)->op == Iop_Not1)
+		return addFalse(((IRExprUnop *)e)->arg, intern);
+	if (e->tag == Iex_Associative &&
+	    ((IRExprAssociative *)e)->op == Iop_And1) {
+		IRExprAssociative *a = (IRExprAssociative *)e;
+		for (int i = 0; i < a->nr_arguments; i++)
+			if (!addTrue(a->contents[i], intern))
+				return false;
+		return true;
+	}
+	if (e->tag == Iex_EntryPoint) {
+		IRExprEntryPoint *iee = (IRExprEntryPoint *)e;
+		for (auto it = trueExprs.begin(); it != trueExprs.end(); it++) {
+			if ( (*it)->tag != Iex_EntryPoint )
+				continue;
+			IRExprEntryPoint *other = (IRExprEntryPoint *)*it;
+			if (other->thread == iee->thread) {
+				assert(other->label != iee->label);
+				return false;
+			}
+		}
+	}
+	if (e->tag == Iex_ControlFlow) {
+		IRExprControlFlow *iec = (IRExprControlFlow *)e;
+		for (auto it = trueExprs.begin(); it != trueExprs.end(); it++) {
+			if ( (*it)->tag != Iex_ControlFlow )
+				continue;
+			IRExprControlFlow *other = (IRExprControlFlow *)*it;
+			if (other->thread == iec->thread &&
+			    other->cfg1 == iec->cfg1) {
+				assert(other->cfg2 != iec->cfg2);
+				return false;
+			}
+		}
+	}
+
+	trueExprs.insert(e);
+	return true;
+}
+
+bool
+path::addFalse(IRExpr *e, internIRExprTable &intern)
+{
+	e = internIRExpr(e, intern);
+	if (falseExprs.count(e))
+		return true;
+	if (trueExprs.count(e))
+		return false;
+	if (e->tag == Iex_Unop && ((IRExprUnop *)e)->op == Iop_Not1)
+		return addTrue(((IRExprUnop *)e)->arg, intern);
+	if (e->tag == Iex_Associative &&
+	    ((IRExprAssociative *)e)->op == Iop_Or1) {
+		IRExprAssociative *a = (IRExprAssociative *)e;
+		for (int i = 0; i < a->nr_arguments; i++)
+			if (!addFalse(a->contents[i], intern))
+				return false;
+		return true;
+	}
+	if (e->tag == Iex_EntryPoint) {
+		IRExprEntryPoint *iee = (IRExprEntryPoint *)e;
+		for (auto it = trueExprs.begin(); it != trueExprs.end(); it++) {
+			if ( (*it)->tag != Iex_EntryPoint )
+				continue;
+			IRExprEntryPoint *other = (IRExprEntryPoint *)*it;
+			if (other->thread == iee->thread) {
+				assert(other->label != iee->label);
+				return true;
+			}
+		}
+	}
+	if (e->tag == Iex_ControlFlow) {
+		IRExprControlFlow *iec = (IRExprControlFlow *)e;
+		for (auto it = trueExprs.begin(); it != trueExprs.end(); it++) {
+			if ( (*it)->tag != Iex_ControlFlow )
+				continue;
+			IRExprControlFlow *other = (IRExprControlFlow *)*it;
+			if (other->thread == iec->thread &&
+			    other->cfg1 == iec->cfg1) {
+				assert(other->cfg2 != iec->cfg2);
+				return true;
+			}
+		}
+	}
+
+	falseExprs.insert(e);
+	return true;
+}
 
 struct path_set {
 	path_set()
@@ -160,10 +261,17 @@ path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 			queue.push_back(entry);
 			/* Continued use of @entry is valid because of
 			   queue.reserve() at top of loop. */
-			entry.second.trueExprs.insert(cond);
-			entry.first = smb->trueTarget;
-			queue.back().second.falseExprs.insert(cond);
-			queue.back().first = smb->falseTarget;
+			if (entry.second.addTrue(cond, intern)) {
+				entry.first = smb->trueTarget;
+			} else {
+				entry = queue.back();
+				queue.pop_back();
+			}
+			if (queue.back().second.addFalse(cond, intern)) {
+				queue.back().first = smb->falseTarget;
+			} else {
+				queue.pop_back();
+			}
 		} else if (s->type == StateMachineState::SideEffecting) {
 			auto sme = (StateMachineSideEffecting *)s;
 			entry.first = sme->target;
@@ -181,22 +289,22 @@ path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 			switch (sme->sideEffect->type) {
 			case StateMachineSideEffect::Load:
 			case StateMachineSideEffect::Store:
-				entry.second.falseExprs.insert(
-					internIRExpr(
-						IRExpr_Unop(
-							Iop_BadPtr,
-							((StateMachineSideEffectMemoryAccess *)sme->sideEffect)->addr),
-						intern));
+				if (!entry.second.addFalse(
+					    IRExpr_Unop(
+						    Iop_BadPtr,
+						    ((StateMachineSideEffectMemoryAccess *)sme->sideEffect)->addr),
+					    intern)) {
+					queue.pop_back();
+/**/					continue;
+				}
 				break;
 			case StateMachineSideEffect::AssertFalse: {
 				StateMachineSideEffectAssertFalse *a =
 					(StateMachineSideEffectAssertFalse *)sme->sideEffect;
-				IRExpr *f = a->value;
-				if (f->tag != Iex_Unop ||
-				    ((IRExprUnop *)f)->op != Iop_Not1)
-					entry.second.falseExprs.insert(internIRExpr(f, intern));
-				else
-					entry.second.trueExprs.insert(internIRExpr(((IRExprUnop *)f)->arg, intern));
+				if (!entry.second.addFalse(a->value, intern)) {
+					queue.pop_back();
+/**/					continue;
+				}
 				break;
 			}
 			case StateMachineSideEffect::Unreached:
