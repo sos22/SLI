@@ -136,6 +136,10 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 	}
 	case Iex_Binop: {
 		IRExprBinop *i = (IRExprBinop *)a;
+		if (CONFIG_DISCARD_FLOATING_POINT) {
+			if (i->op >= Iop_AddF64 && i->op <= Iop_RoundF64toInt)
+				return UNDEFINED_EXPR;
+		}
 		IRExpr *a = undefinednessExpression(sm, i->arg1, vdm);
 		IRExpr *b = undefinednessExpression(sm, i->arg2, vdm);
 		if (a == UNDEFINED_EXPR)
@@ -148,6 +152,14 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 	}
 	case Iex_Unop: {
 		IRExprUnop *ieu = (IRExprUnop *)a;
+		if (CONFIG_DISCARD_FLOATING_POINT) {
+			switch (ieu->op) {
+			case Iop_F32toF64:
+				return UNDEFINED_EXPR;
+			default:
+				break;
+			}
+		}
 		IRExpr *arg = undefinednessExpression(sm, ieu->arg, vdm);
 		if (arg == UNDEFINED_EXPR) {
 			switch (ieu->op) {
