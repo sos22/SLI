@@ -997,6 +997,32 @@ StateMachineSideEffecting::prependSideEffect(StateMachineSideEffect *se)
 	sideEffect = se;
 }
 
+static IRExpr *
+replaceRegister(const threadAndRegister &reg, IRExpr *replaceWith, IRExpr *replaceIn)
+{
+	struct : IRExprTransformer {
+		bool failed;
+		const threadAndRegister *reg;
+		IRExpr *replaceWith;
+		IRExpr *transformIex(IRExprGet *e) {
+			if (e->reg == *reg) {
+				if (e->type() > replaceWith->type())
+					failed = true;
+				else
+					return coerceTypes(e->type(), replaceWith);
+			}
+			return NULL;
+		}
+	} doit;
+	doit.failed = false;
+	doit.reg = &reg;
+	doit.replaceWith = replaceWith;
+	IRExpr *res = doit.doit(replaceIn);
+	if (doit.failed)
+		return NULL;
+	return res;
+}
+
 StateMachineState *
 StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
@@ -1124,6 +1150,29 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		sideEffect = sideEffect->optimise(opt, done_something);
 		target = ((StateMachineSideEffecting *)target)->target;
 		return this;
+	}
+
+	if (sideEffect->type == StateMachineSideEffect::Copy &&
+	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect &&
+	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::Copy &&
+	    ((StateMachineSideEffectCopy *)sideEffect)->target ==
+	    ((StateMachineSideEffectCopy *)((StateMachineSideEffecting *)target)->sideEffect)->target) {
+		/* Try to do something with fragments which just
+		   go ``rsp = rsp + 8; rsp = rsp - 8'', which happens
+		   quite a lot. */
+		StateMachineSideEffectCopy *thisCopy = (StateMachineSideEffectCopy *)sideEffect;
+		StateMachineSideEffectCopy *nextCopy = (StateMachineSideEffectCopy *)
+			((StateMachineSideEffecting *)target)->sideEffect;
+		IRExpr *repl = replaceRegister(thisCopy->target, thisCopy->value, nextCopy->value);
+		if (repl) {
+			sideEffect = new StateMachineSideEffectCopy(
+				thisCopy->target,
+				repl);
+			target = ((StateMachineSideEffecting *)target)->target;
+			*done_something = true;
+			return this;
+		}
 	}
 	return this;
 }
