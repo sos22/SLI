@@ -230,8 +230,7 @@ StateMachine *functionAliasAnalysis(const MaiMap &mai,
 				    OracleInterface *oracle,
 				    const ControlDominationMap &cdm,
 				    bool *done_something);
-StateMachine *phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
-			     const ControlDominationMap &cdm, bool *done_something);
+StateMachine *phiElimination(StateMachine *sm, bool *done_something);
 StateMachine *undefinednessSimplification(StateMachine *sm, bool *done_something);
 
 StateMachine *removeAnnotations(VexPtr<MaiMap, &ir_heap> &mai,
