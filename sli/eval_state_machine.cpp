@@ -22,6 +22,22 @@ static bool debug_dump_crash_reasons = false;
 static bool debug_survival_constraint = false;
 #endif
 
+/* Various bits which can sometimes allow some useful optimisations to
+ * the evaluator. */
+class EvalMetaData {
+public:
+	bool initialised;
+	/* Map from states to the set of registers which are live at
+	 * the start of that state. */
+	std::map<StateMachineState *, std::set<threadAndRegister> > live;
+	/* All registers used as input to a phi expression */
+	std::set<threadAndRegister> phiRegs;
+	EvalMetaData()
+		: initialised(false)
+	{}
+	void build(StateMachine *);
+};
+
 /* All of the state needed to evaluate a single pure IRExpr. */
 /* Note that this is not GCed, but contains bare pointers to GCed
    objects, so needs to be manually visited if live across GC
@@ -81,7 +97,10 @@ class threadState {
 	   appears at most once in here. */
 	std::vector<threadAndRegister> assignmentOrder;
 
-	void bump_register_in_assignment_order(const threadAndRegister &reg) {
+	void bump_register_in_assignment_order(const threadAndRegister &reg,
+					       const EvalMetaData &emd) {
+		if (emd.initialised && !emd.phiRegs.count(reg))
+			return;
 		for (auto it = assignmentOrder.begin();
 		     it != assignmentOrder.end();
 		     it++) {
@@ -277,7 +296,8 @@ public:
 	}
 	void set_register(const threadAndRegister &reg, IRExpr *e,
 			  IRExpr **assumption,
-			  const IRExprOptimisations &opt) {
+			  const IRExprOptimisations &opt,
+			  const EvalMetaData &emd) {
 		register_val &rv(registers[reg]);
 		switch (e->type()) {
 		case Ity_I8:
@@ -299,20 +319,20 @@ public:
 			rv.val64 = e;
 			break;
 		case Ity_F32:
-			set_register(reg, IRExpr_Unop(Iop_ReinterpF32asI32, e), assumption, opt);
+			set_register(reg, IRExpr_Unop(Iop_ReinterpF32asI32, e), assumption, opt, emd);
 			return;
 		case Ity_F64:
-			set_register(reg, IRExpr_Unop(Iop_ReinterpF64asI64, e), assumption, opt);
+			set_register(reg, IRExpr_Unop(Iop_ReinterpF64asI64, e), assumption, opt, emd);
 			return;
 		case Ity_V128:
 			/* Bit of a hack.  We only have 64 bit
 			   registers, so if we have to store a 128 bit
 			   value we just truncate it down. */
-			set_register(reg, IRExpr_Unop(Iop_V128to64, e), assumption, opt);
+			set_register(reg, IRExpr_Unop(Iop_V128to64, e), assumption, opt, emd);
 			return;
 		case Ity_I128:
 			/* Likewise */
-			set_register(reg, IRExpr_Unop(Iop_128to64, e), assumption, opt);
+			set_register(reg, IRExpr_Unop(Iop_128to64, e), assumption, opt, emd);
 			return;
 		default:
 			abort();
@@ -321,10 +341,10 @@ public:
 		if (reg.isTemp())
 			*assumption = setTemporary(reg, *assumption, opt);
 
-		bump_register_in_assignment_order(reg);
+		bump_register_in_assignment_order(reg, emd);
 	}
 	void eval_phi(StateMachineSideEffectPhi *phi, IRExpr **assumption,
-		      const IRExprOptimisations &opt) {
+		      const IRExprOptimisations &opt, const EvalMetaData &emd) {
 		for (auto it = assignmentOrder.rbegin();
 		     it != assignmentOrder.rend();
 		     it++) {
@@ -335,7 +355,7 @@ public:
 					registers[phi->reg] = registers[*it];
 					if (phi->reg.isTemp())
 						*assumption = setTemporary(phi->reg, *assumption, opt);
-					bump_register_in_assignment_order(phi->reg);
+					bump_register_in_assignment_order(phi->reg, emd);
 					return;
 				}
 			}
@@ -352,10 +372,21 @@ public:
 		assert(genM1.isValid());
 
 		/* Pick up initial value */
-		set_register(phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
+		set_register(phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt, emd);
 	}
 
 	IRExpr *specialiseIRExpr(IRExpr *iex);
+
+	void purgeDeadRegisters(const std::set<threadAndRegister> &keep) {
+		for (auto it = registers.begin();
+		     it != registers.end();
+			) {
+			if (keep.count(it->first))
+				it++;
+			else
+				registers.erase(it++);
+		}
+	}
 
 	void visit(HeapVisitor &hv) {
 		for (auto it = registers.begin();
@@ -417,6 +448,60 @@ public:
 	}
 };
 
+static void
+enumRegisters(IRExpr *e, std::set<threadAndRegister> &out)
+{
+	struct : public IRExprTransformer {
+		std::set<threadAndRegister> *out;
+		IRExpr *transformIex(IRExprGet *e) {
+			out->insert(e->reg);
+			return e;
+		}
+	} doit;
+	doit.out = &out;
+	doit.doit(e);
+}
+
+void
+EvalMetaData::build(StateMachine *sm)
+{
+	std::map<StateMachineState *, std::set<StateMachineState *> > predecessors;
+	std::vector<StateMachineState *> allStates;
+	enumStates(sm, &allStates);
+	if (allStates.size() < 5)
+		return; /* Not much point in doing this for very
+			 * simple machines. */
+	for (auto it = allStates.begin(); it != allStates.end(); it++) {
+		std::vector<StateMachineState *> targets;
+		(*it)->targets(targets);
+		for (auto it2 = targets.begin(); it2 != targets.end(); it2++)
+			predecessors[*it2].insert(*it);
+	}
+	/* Build a map showing which registers are live where abouts
+	 * in the machine. */
+	std::vector<StateMachineState *> pending(allStates);
+	while (!pending.empty()) {
+		StateMachineState *s = pending.back();
+		pending.pop_back();
+		std::vector<StateMachineState *> targets;
+		s->targets(targets);
+		std::set<threadAndRegister> newVal;
+		for (auto it = targets.begin(); it != targets.end(); it++)
+			newVal |= live[*it];
+		threadAndRegister tr(threadAndRegister::invalid());
+		if (s->getSideEffect() && s->getSideEffect()->definesRegister(tr))
+			newVal.erase(tr);
+		std::vector<IRExpr *> inputExpressions;
+		s->inputExpressions(inputExpressions);
+		for (auto it = inputExpressions.begin(); it != inputExpressions.end(); it++)
+			enumRegisters(*it, newVal);
+		if (live[s] |= newVal) {
+			const std::set<StateMachineState *> &pred(predecessors[s]);
+			pending.insert(pending.end(), pred.begin(), pred.end());
+		}
+	}
+}
+
 struct EvalPathConsumer {
 	virtual bool crash(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
 	virtual bool survive(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
@@ -471,7 +556,8 @@ private:
 	trool evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt);
 	bool evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
-			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
+			    StateMachineSideEffect *smse, const IRExprOptimisations &opt,
+			    const EvalMetaData &emp)
 		__attribute__((warn_unused_result));
 
 
@@ -485,7 +571,7 @@ private:
 		statePath.push_back(stateLabels[currentState]);
 #endif
 	}
-	EvalContext(const EvalContext &o, StateMachineState *sms)
+	EvalContext(const EvalContext &o, StateMachineState *sms, const EvalMetaData &emd)
 		: assumption(o.assumption),
 		  accumulatedAssumption(o.accumulatedAssumption),
 		  state(o.state),
@@ -497,12 +583,13 @@ private:
 		, stateLabels(o.stateLabels)
 #endif
 	{
+		purgeDeadRegisters(emd);
 		advance_state_trace();
 	}
 	/* Create a new context which is like this one, but with an
 	   extra assumption. */
 	EvalContext(const EvalContext &o, StateMachineState *sms, IRExpr *assume,
-		    const IRExprOptimisations &opt)
+		    const IRExprOptimisations &opt, const EvalMetaData &emd)
 		: assumption(o.assumption ? IRExpr_Binop(Iop_And1, o.assumption, assume) : assume),
 		  accumulatedAssumption(o.accumulatedAssumption
 					? IRExpr_Binop(Iop_And1, o.accumulatedAssumption, assume)
@@ -520,6 +607,7 @@ private:
 			assumption = simplifyIRExpr(assumption, opt);
 		if (accumulatedAssumption)
 			accumulatedAssumption = simplifyIRExpr(accumulatedAssumption, opt);
+		purgeDeadRegisters(emd);
 		advance_state_trace();
 	}
 
@@ -536,17 +624,29 @@ private:
 		bool noImplicitBadPtrs,
 		NdChooser &chooser,
 		OracleInterface *oracle,
-		const IRExprOptimisations &opt);
+		const IRExprOptimisations &opt,
+		const EvalMetaData &emp);
 	bool expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
 	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
 
 public:
+	void purgeDeadRegisters(const EvalMetaData &emd)
+	{
+		if (!emd.initialised)
+			return;
+		auto it = emd.live.find(currentState);
+		assert(it != emd.live.end());
+		state.purgeDeadRegisters(it->second);
+	}
+
 	bool advance(const MaiMap &decode,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
-		     EvalPathConsumer &consumer) __attribute__((warn_unused_result));
+		     EvalPathConsumer &consumer,
+		     const EvalMetaData &emp)
+		__attribute__((warn_unused_result));
 	enum smallStepResult { ssr_crash, ssr_survive, ssr_escape,
 			       ssr_ignore_path, ssr_failed, ssr_continue };
 	smallStepResult smallStepEvalStateMachine(const MaiMap &decode,
@@ -722,7 +822,8 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 					bool noImplicitBadPtrs,
 					NdChooser &chooser,
 					OracleInterface *oracle,
-					const IRExprOptimisations &opt)
+					const IRExprOptimisations &opt,
+					const EvalMetaData &emp)
 {
 	IRExpr *addr = NULL;
 	if (smse->type == StateMachineSideEffect::Load ||
@@ -798,7 +899,7 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 			   enough. */
 			val = IRExpr_Get(smsel->target, smsel->type);
 		}
-		state.set_register(smsel->target, val, &assumption, opt);
+		state.set_register(smsel->target, val, &assumption, opt, emp);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -808,7 +909,8 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 		state.set_register(smsec->target,
 				   state.specialiseIRExpr(smsec->value),
 				   &assumption,
-				   opt);
+				   opt,
+				   emp);
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
@@ -830,7 +932,7 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *smsep =
 			(StateMachineSideEffectPhi *)(smse);
-		state.eval_phi(smsep, &assumption, opt);
+		state.eval_phi(smsep, &assumption, opt, emp);
 		break;
 	}
 	case StateMachineSideEffect::StartAtomic:
@@ -906,7 +1008,8 @@ EvalContext::smallStepEvalStateMachine(const MaiMap &decode,
 						   noImplicitBadPtrs,
 						   chooser,
 						   oracle,
-						   opt);
+						   opt,
+						   EvalMetaData());
 		switch (res) {
 		case esme_escape:
 			return ssr_escape;
@@ -1038,7 +1141,8 @@ EvalContext::evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt)
 bool
 EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
-			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
+			    StateMachineSideEffect *smse, const IRExprOptimisations &opt,
+			    const EvalMetaData &emp)
 {
 	NdChooser chooser;
 
@@ -1052,7 +1156,8 @@ EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterf
 							      consumer.noImplicitBadPtrs,
 							      chooser,
 							      oracle,
-							      opt);
+							      opt,
+							      emp);
 		switch (res) {
 		case esme_normal:
 			pendingStates.push_back(newContext);
@@ -1079,7 +1184,8 @@ EvalContext::advance(const MaiMap &decode,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
-		     EvalPathConsumer &consumer)
+		     EvalPathConsumer &consumer,
+		     const EvalMetaData &emp)
 {
 	if (debug_dump_state_traces && currentState->isTerminal()) {
 #ifndef NDEBUG
@@ -1115,9 +1221,10 @@ EvalContext::advance(const MaiMap &decode,
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
 		advance_state_trace();
+		purgeDeadRegisters(emp);
 		if (sme->sideEffect) {
 			if (!evalSideEffect(decode, sm, oracle, consumer, pendingStates,
-					    sme->sideEffect, opt))
+					    sme->sideEffect, opt, emp))
 				return false;
 		} else {
 			pendingStates.push_back(*this);
@@ -1136,12 +1243,14 @@ EvalContext::advance(const MaiMap &decode,
 		case tr_true:
 			pendingStates.push_back(EvalContext(
 							*this,
-							smb->trueTarget));
+							smb->trueTarget,
+							emp));
 			break;
 		case tr_false:
 			pendingStates.push_back(EvalContext(
 							*this,
-							smb->falseTarget));
+							smb->falseTarget,
+							emp));
 			break;
 		case tr_unknown:
 			pendingStates.push_back(EvalContext(
@@ -1150,12 +1259,14 @@ EvalContext::advance(const MaiMap &decode,
 							IRExpr_Unop(
 								Iop_Not1,
 								cond),
-							opt));
+							opt,
+							emp));
 			pendingStates.push_back(EvalContext(
 							*this,
 							smb->trueTarget,
 							cond,
-							opt));
+							opt,
+							emp));
 			break;
 		}
 		return true;
@@ -1174,6 +1285,9 @@ enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 	      GarbageCollectionToken &token,
 	      bool loud = false)
 {
+	EvalMetaData metaData;
+	metaData.build(sm);
+
 	std::vector<EvalContext> pendingStates;
 	std::map<const StateMachineState *, int> stateLabels;
 	int cntr = 0;
@@ -1196,7 +1310,7 @@ enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 
 		EvalContext ctxt(pendingStates.back());
 		pendingStates.pop_back();
-		if (!ctxt.advance(*decode, oracle, opt, pendingStates, sm, consumer))
+		if (!ctxt.advance(*decode, oracle, opt, pendingStates, sm, consumer, metaData))
 			return false;
 		if (loud && cntr++ % 100 == 0)
 			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
