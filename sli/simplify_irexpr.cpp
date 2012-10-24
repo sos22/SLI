@@ -1513,7 +1513,7 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
 				*done_something = true;
 				return IRExpr_Const(IRConst_U1(0));
 			}
-			if (!rewriteFrom && e->type() != Ity_I1)
+			if (!rewriteFrom && e->type() != Ity_I1 && e->tag != Iex_Mux0X)
 				return e;
 			return IRExprTransformer::transformIRExpr(e, done_something);
 		}
@@ -3011,7 +3011,9 @@ top:
 	case Iex_Mux0X: {
 		IRExprMux0X *e = (IRExprMux0X *)src;
 		e->cond = optimiseIRExpr(e->cond, opt, done_something);
+		e->expr0 = rewriteBoolean(e->cond, false, e->expr0, done_something);
 		e->expr0 = optimiseIRExpr(e->expr0, opt, done_something);
+		e->exprX = rewriteBoolean(e->cond, true, e->exprX, done_something);
 		e->exprX = optimiseIRExpr(e->exprX, opt, done_something);
 		if (e->cond->tag == Iex_Const) {
 			if (((IRExprConst *)e->cond)->con->Ico.U1)
