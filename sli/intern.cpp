@@ -423,26 +423,12 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 	abort();
 }
 
-StateMachine *
-internStateMachine(StateMachine *sm, internStateMachineTable &t)
-{
-	__set_profiling(internStateMachine);
-	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
-		it->second = internCFG(it->second, t);
-	sm->root = internStateMachineState(sm->root, t);
-	return sm;
-}
-
-StateMachine *
-internStateMachine(StateMachine *sm)
-{
-	internStateMachineTable t;
-	return internStateMachine(sm, t);
-}
-
-const CFGNode *
+static const CFGNode *
 internCFG(const CFGNode *inp, internStateMachineTable &t)
 {
+	if (TIMEOUT)
+		return inp;
+
 	auto it_did_insert = t.cfgNodes.insert(std::pair<const CFGNode *, const CFGNode *>(inp, inp));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
@@ -462,4 +448,21 @@ internCFG(const CFGNode *inp, internStateMachineTable &t)
 	}
 	t.cfgNodesS.insert(inp);
 	return inp;
+}
+
+StateMachine *
+internStateMachine(StateMachine *sm, internStateMachineTable &t)
+{
+	__set_profiling(internStateMachine);
+	for (auto it = sm->cfg_roots.begin(); !TIMEOUT && it != sm->cfg_roots.end(); it++)
+		it->second = internCFG(it->second, t);
+	sm->root = internStateMachineState(sm->root, t);
+	return sm;
+}
+
+StateMachine *
+internStateMachine(StateMachine *sm)
+{
+	internStateMachineTable t;
+	return internStateMachine(sm, t);
 }

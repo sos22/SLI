@@ -487,6 +487,9 @@ canonicalise_crash_summary(CrashSummary *input)
 	input->storeMachine = internStateMachine(input->storeMachine, t);
 	input->verificationCondition = internIRExpr(input->verificationCondition, t);
 
+	if (TIMEOUT)
+		return input;
+
 	std::set<threadAndRegister> generatedRegisters;
 	std::set<StateMachineSideEffect *> sideEffects;
 	enumSideEffects(input->loadMachine, sideEffects);
