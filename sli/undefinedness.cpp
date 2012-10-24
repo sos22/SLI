@@ -193,6 +193,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 			case Iop_32to8:
 			case Iop_32to16:
 			case Iop_16to8:
+			case Iop_ReinterpF64asI64:
 				return UNDEFINED_EXPR;
 			default:
 				printIRExpr(a);
