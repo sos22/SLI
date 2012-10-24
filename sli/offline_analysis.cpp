@@ -292,6 +292,8 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		done_something |= p;
 
 		sm = internStateMachine(sm);
+		if (TIMEOUT)
+			return sm;
 		if (opt.ignoreSideEffects()) {
 			p = false;
 			removeSurvivingStates(sm, opt, &p);
@@ -319,8 +321,11 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		p = false;
 		sm = sm->optimise(opt, &p);
 		if (p) {
-			if (is_ssa)
+			if (is_ssa) {
 				sm = internStateMachine(sm); /* Local optimisation only maintains SSA form if interned */
+				if (TIMEOUT)
+					return sm;
+			}
 			if (debugOptimiseStateMachine) {
 				printf("Local optimise 2:\n");
 				printStateMachine(sm, stdout);

@@ -739,7 +739,7 @@ disjunctive_normal_form(IRExpr *what)
 
 static bool
 evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
-	       satisfier &sat)
+	       const IRExprOptimisations &opt, satisfier &sat)
 {
 	assert(e->type() == Ity_I1);
 	if (e->tag == Iex_Const)
@@ -752,20 +752,20 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 	if (did_insert) {
 		if (e->tag == Iex_Unop &&
 		    ((IRExprUnop *)e)->op == Iop_Not1) {
-			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, !preferred_result, sat);
+			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, !preferred_result, opt, sat);
 		} else if (e->tag == Iex_Associative &&
 			   ((IRExprAssociative *)e)->op == Iop_And1) {
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = true;
 			for (int i = 0; i < a->nr_arguments && acc; i++)
-				acc &= evalExpression(a->contents[i], chooser, preferred_result, sat);
+				acc &= evalExpression(a->contents[i], chooser, false, opt, sat);
 			it->second.first = acc;
 		} else if (e->tag == Iex_Associative &&
 			   ((IRExprAssociative *)e)->op == Iop_Or1) {
 			IRExprAssociative *a = (IRExprAssociative *)e;
 			bool acc = false;
 			for (int i = 0; i < a->nr_arguments && !acc; i++)
-				acc |= evalExpression(a->contents[i], chooser, preferred_result, sat);
+				acc |= evalExpression(a->contents[i], chooser, true, opt, sat);
 			it->second.first = acc;
 		} else if (e->tag == Iex_EntryPoint) {
 			it->second.second = true;
@@ -808,6 +808,41 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 						return it->second.first;
 					}
 					sat.fixedVariables.insert(ieb->arg2);
+
+					/* Do we have any idea about
+					   whether this expression is
+					   a bad pointer? */
+					if (ieb->op == Iop_CmpEQ64) {
+						for (auto it2 = sat.memo.begin();
+						     it2 != sat.memo.end();
+						     it2++) {
+							if (it2->first->tag != Iex_Unop ||
+							    ((IRExprUnop *)it2->first)->op != Iop_BadPtr ||
+							    ((IRExprUnop *)it2->first)->arg != ieb->arg2)
+								continue;
+							/* We have an
+							   expression of the
+							   form BadPtr(x) or
+							   !BadPtr(x) and
+							   we're trying to
+							   eval k == x.  Make
+							   sure we produce
+							   something
+							   consistent. */
+							bool isAcc;
+							unsigned long v = ((IRExprConst *)ieb->arg1)->con->Ico.U64;
+							if (opt.addressAccessible(v, &isAcc)) {
+								/* isAcc == !BadPtr(k) */
+								if (isAcc == it2->second.first) {
+									/* BadPtr(k) != BadPtr(x),
+									   therefore k != x */
+									it->second.first = false;
+									return it->second.first;
+								}
+							}
+							break;
+						}
+					}
 				}
 
 				if (ieb->op >= Iop_CmpEQ8 &&
@@ -963,7 +998,31 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 						}
 					}
 				}
-
+			}
+			if (e->tag == Iex_Unop &&
+			    ((IRExprUnop *)e)->op == Iop_BadPtr) {
+				IRExprUnop *ieu = (IRExprUnop *)e;
+				if (sat.fixedVariables.count(ieu->arg)) {
+					for (auto it2 = sat.memo.begin();
+					     it2 != sat.memo.end();
+					     it2++) {
+						if (it2->first->tag != Iex_Binop ||
+						    !it2->second.first)
+							continue;
+						IRExprBinop *ieb = (IRExprBinop *)it2->first;
+						if (ieb->op != Iop_CmpEQ64 ||
+						    ieb->arg1->tag != Iex_Const ||
+						    ieb->arg2 != ieu->arg)
+							continue;
+						IRExprConst *val = (IRExprConst *)ieb->arg1;
+						unsigned long valc = val->con->Ico.U64;
+						bool isAcc;
+						if (opt.addressAccessible(valc, &isAcc)) {
+							it->second.first = !isAcc;
+							return !isAcc;
+						}
+					}
+				}
 			}
 			it->second.first = !!chooser.nd_choice(2);
 			if (preferred_result == true)
@@ -975,10 +1034,10 @@ evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
 }
 
 static bool
-exhaustive_satisfiable(IRExpr *e, bool print_all)
+exhaustive_satisfiable(IRExpr *e, const IRExprOptimisations &opt, bool print_all)
 {
 	bool res = false;
-	for (auto it = sat_enumerator(e); !it.finished(); it.advance()) {
+	for (auto it = sat_enumerator(e, opt); !it.finished(); it.advance()) {
 		fprintf(_logfile, "Satisfying assignment:\n");
 		it.get().prettyPrint(_logfile);
 		if (!print_all) {
@@ -1057,7 +1116,7 @@ satisfiable(IRExpr *e, const IRExprOptimisations &opt)
 	if (res.valid)
 		return res.content;
 
-	return exhaustive_satisfiable(e, false);
+	return exhaustive_satisfiable(e, opt, false);
 }
 
 /* End of namespace */
@@ -1092,7 +1151,7 @@ sat_enumerator::skipToSatisfying()
 {
 	do {
 		content.clear();
-		if (_sat_checker::evalExpression(expr, chooser, true, content))
+		if (_sat_checker::evalExpression(expr, chooser, true, opt, content))
 			return;
 	} while (chooser.advance());
 	_finished = true;

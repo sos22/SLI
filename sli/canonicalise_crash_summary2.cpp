@@ -160,6 +160,9 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 		input->storeMachine = internStateMachine(input->storeMachine, intern);
 		input->verificationCondition = internIRExpr(input->verificationCondition, intern);
 
+		if (TIMEOUT)
+			return input;
+
 		cnf_condition = internIRExpr(cnf_condition, intern);
 		input->loadMachine = optimiseStateMachineAssuming(input->loadMachine, cnf_condition,
 								  true);

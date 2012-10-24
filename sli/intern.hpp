@@ -21,7 +21,6 @@ struct internStateMachineTable : public internIRExprTable {
 	std::set<const CFGNode *> cfgNodesS;
 };
 
-const CFGNode *internCFG(const CFGNode *n, internStateMachineTable &t);
 IRExpr *internIRExpr(IRExpr *x);
 StateMachine *internStateMachine(StateMachine *sm);
 StateMachine *internStateMachine(

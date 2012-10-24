@@ -679,6 +679,10 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		       int &next_hb_id)
 {
 	summary = internCrashSummary(summary);
+	if (TIMEOUT) {
+		fprintf(_logfile, "Timeout while interning summary\n");
+		exit(1);
+	}
 
 	printf("Machines to enforce:\n");
 	printCrashSummary(summary, stdout);

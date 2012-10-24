@@ -310,6 +310,10 @@ public:
 			   value we just truncate it down. */
 			set_register(reg, IRExpr_Unop(Iop_V128to64, e), assumption, opt);
 			return;
+		case Ity_I128:
+			/* Likewise */
+			set_register(reg, IRExpr_Unop(Iop_128to64, e), assumption, opt);
+			return;
 		default:
 			abort();
 		}
@@ -1415,16 +1419,19 @@ struct crossStateT {
 	StateMachineState *p;
 	StateMachineState *s;
 	bool store_issued_store;
+	bool probe_issued_access;
 	bool probe_is_atomic;
 	bool store_is_atomic;
 	crossStateT(StateMachineState *_p,
 		    StateMachineState *_s,
 		    bool _sis,
+		    bool _pi_acc,
 		    bool _pia,
 		    bool _sia)
 		: p(_p),
 		  s(_s),
 		  store_issued_store(_sis),
+		  probe_issued_access(_pi_acc),
 		  probe_is_atomic(_pia),
 		  store_is_atomic(_sia)
 	{}
@@ -1437,6 +1444,7 @@ struct crossStateT {
 		do_field(p);
 		do_field(s);
 		do_field(store_issued_store);
+		do_field(probe_issued_access);
 		do_field(probe_is_atomic);
 		do_field(store_is_atomic);
 #undef do_field
@@ -1550,7 +1558,7 @@ buildCrossProductMachine(const MaiMap &maiIn,
 	StateMachineState *crossMachineRoot;
 	crossMachineRoot = NULL;
 	pendingRelocs.push_back(
-		relocT(&crossMachineRoot, crossStateT(probeMachine->root, storeMachine->root, false, false, false)));
+		relocT(&crossMachineRoot, crossStateT(probeMachine->root, storeMachine->root, false, false, false, false)));
 	while (!pendingRelocs.empty()) {
 		relocT r(pendingRelocs.back());
 		pendingRelocs.pop_back();
@@ -1583,6 +1591,7 @@ buildCrossProductMachine(const MaiMap &maiIn,
 							       **it,
 							       crossState.s,
 							       crossState.store_issued_store,
+							       true,
 							       lockState,
 							       crossState.store_is_atomic
 							       )));
@@ -1613,6 +1622,7 @@ buildCrossProductMachine(const MaiMap &maiIn,
 							       crossState.p,
 							       **it,
 							       true,
+							       crossState.probe_issued_access,
 							       crossState.probe_is_atomic,
 							       lockState)));
 					**it = NULL;
@@ -1663,7 +1673,8 @@ buildCrossProductMachine(const MaiMap &maiIn,
 				   machine has issued any loads, so
 				   turn that into <unreached> as
 				   well. */
-				if (crossState.s->type == StateMachineState::Crash)
+				if (crossState.probe_issued_access &&
+				    crossState.s->type == StateMachineState::Crash)
 					newState = advanceProbeMachine(crossState, pendingRelocs);
 				else
 					newState = StateMachineUnreached::get();

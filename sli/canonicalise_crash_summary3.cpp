@@ -1487,18 +1487,20 @@ main(int argc, char *argv[])
 
 	summary = internCrashSummary(summary);
 
-	VexPtr<LoadCanonicaliser, &ir_heap> lc(new LoadCanonicaliser(summary));
-	summary = lc->canonicalise(summary);
-	VexPtr<OracleInterface> oracleI(oracle);
-	summary = nonFunctionalSimplifications(summary, oracleI, ALLOW_GC);
-	if (!TIMEOUT)
-		summary = functionalSimplifications(summary, oracleI, ALLOW_GC);
-	if (!TIMEOUT)
-		summary = nonFunctionalSimplifications(
-			summary,
-			oracleI,
-			ALLOW_GC);
-	summary = lc->decanonicalise(summary);
+	if (!TIMEOUT) {
+		VexPtr<LoadCanonicaliser, &ir_heap> lc(new LoadCanonicaliser(summary));
+		summary = lc->canonicalise(summary);
+		VexPtr<OracleInterface> oracleI(oracle);
+		summary = nonFunctionalSimplifications(summary, oracleI, ALLOW_GC);
+		if (!TIMEOUT)
+			summary = functionalSimplifications(summary, oracleI, ALLOW_GC);
+		if (!TIMEOUT)
+			summary = nonFunctionalSimplifications(
+				summary,
+				oracleI,
+				ALLOW_GC);
+		summary = lc->decanonicalise(summary);
+	}
 
 	if (TIMEOUT)
 		fprintf(stderr, "timeout processing %s\n", argv[1]);
