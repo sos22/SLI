@@ -944,6 +944,28 @@ eval_bytecode(const unsigned short *bytecode,
 			debug("bcop_cmpltu: %lx < %lx -> %d\n", arg1, arg2, arg2 < arg1);
 			break;
 		}
+		case bcop_cmp_lts: {
+			unsigned res;
+			switch (type) {
+#define do_type(bct_type, c_type)					\
+				case bct_type: {			\
+					c_type arg1 = bytecode_pop(&stack, bct_type); \
+					c_type arg2 = bytecode_pop(&stack, bct_type); \
+					res = arg2 < arg1;		\
+					debug("bcop_cmplts: %lx < %lx -> %d\n", arg1, arg2, res); \
+					break;				\
+				}
+				do_type(bct_byte, char);
+				do_type(bct_short, short);
+				do_type(bct_int, int);
+				do_type(bct_long, long);
+#undef do_type
+			default:
+				abort();
+			}
+			bytecode_push(&stack, res, bct_bit);
+			break;
+		}
 		case bcop_add: {
 			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, type);
