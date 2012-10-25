@@ -231,7 +231,7 @@ StateMachine *functionAliasAnalysis(const MaiMap &mai,
 				    const ControlDominationMap &cdm,
 				    bool *done_something);
 StateMachine *phiElimination(StateMachine *sm, bool *done_something);
-StateMachine *undefinednessSimplification(StateMachine *sm, bool *done_something);
+StateMachine *undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt, bool *done_something);
 
 StateMachine *removeAnnotations(VexPtr<MaiMap, &ir_heap> &mai,
 				VexPtr<StateMachine, &ir_heap> sm,

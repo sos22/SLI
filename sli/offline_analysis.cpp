@@ -355,7 +355,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 
 		if (is_ssa) {
 			p = false;
-			sm = undefinednessSimplification(sm, &p);
+			sm = undefinednessSimplification(sm, opt, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("Undefinedness:\n");
 				printStateMachine(sm, stdout);

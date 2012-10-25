@@ -103,10 +103,6 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		trueTarget = falseTarget;
 		falseTarget = t;
 	}
-	if (definitelyUnevaluatable(condition)) {
-		*done_something = true;
-		return StateMachineUnreached::get();
-	}
 	trueTarget = trueTarget->optimise(opt, done_something);
 	falseTarget = falseTarget->optimise(opt, done_something);
 
@@ -258,7 +254,7 @@ StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, bool *d
 {
 	addr = optimiseIRExprFP(addr, opt, done_something);
 	data = optimiseIRExprFP(data, opt, done_something);
-	if (isBadAddress(addr) || definitelyUnevaluatable(data)) {
+	if (isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
@@ -292,10 +288,6 @@ StateMachineSideEffect *
 StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
-	if (definitelyUnevaluatable(value)) {
-		*done_something = true;
-		return StateMachineSideEffectUnreached::get();
-	}
 	return this;
 }
 
@@ -303,8 +295,7 @@ StateMachineSideEffect *
 StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
-	if ((value->tag == Iex_Const && ((IRExprConst *)value)->con->Ico.U1) ||
-	    definitelyUnevaluatable(value)) {
+	if (value->tag == Iex_Const && ((IRExprConst *)value)->con->Ico.U1) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}

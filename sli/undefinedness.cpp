@@ -9,6 +9,7 @@
    zero. */
 #include "sli.h"
 #include "offline_analysis.hpp"
+#include "allowable_optimisations.hpp"
 
 #define UNDEFINED_EXPR ((IRExpr *)3)
 
@@ -74,7 +75,8 @@ VariableDefinednessMap::init(StateMachine *sm)
 }
 
 static IRExpr *
-undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinednessMap &vdm)
+undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinednessMap &vdm,
+			const IRExprOptimisations &opt)
 {
 	switch (a->tag) {
 	case Iex_Get: {
@@ -85,7 +87,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 	}
 	case Iex_GetI: {
 		IRExprGetI *iegi = (IRExprGetI *)a;
-		IRExpr *ix = undefinednessExpression(sm, iegi->ix, vdm);
+		IRExpr *ix = undefinednessExpression(sm, iegi->ix, vdm, opt);
 		if (ix == UNDEFINED_EXPR)
 			return a;
 		if (ix != iegi->ix)
@@ -94,10 +96,10 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 	}
 	case Iex_Qop: {
 		IRExprQop *i = (IRExprQop *)a;
-		IRExpr *a = undefinednessExpression(sm, i->arg1, vdm);
-		IRExpr *b = undefinednessExpression(sm, i->arg2, vdm);
-		IRExpr *c = undefinednessExpression(sm, i->arg3, vdm);
-		IRExpr *d = undefinednessExpression(sm, i->arg4, vdm);
+		IRExpr *a = undefinednessExpression(sm, i->arg1, vdm, opt);
+		IRExpr *b = undefinednessExpression(sm, i->arg2, vdm, opt);
+		IRExpr *c = undefinednessExpression(sm, i->arg3, vdm, opt);
+		IRExpr *d = undefinednessExpression(sm, i->arg4, vdm, opt);
 		if (a == UNDEFINED_EXPR)
 			a = i->arg1;
 		if (b == UNDEFINED_EXPR)
@@ -112,9 +114,9 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 	}
 	case Iex_Triop: {
 		IRExprTriop *i = (IRExprTriop *)a;
-		IRExpr *a = undefinednessExpression(sm, i->arg1, vdm);
-		IRExpr *b = undefinednessExpression(sm, i->arg2, vdm);
-		IRExpr *c = undefinednessExpression(sm, i->arg3, vdm);
+		IRExpr *a = undefinednessExpression(sm, i->arg1, vdm, opt);
+		IRExpr *b = undefinednessExpression(sm, i->arg2, vdm, opt);
+		IRExpr *c = undefinednessExpression(sm, i->arg3, vdm, opt);
 		if (a == UNDEFINED_EXPR)
 			a = i->arg1;
 		if (b == UNDEFINED_EXPR)
@@ -131,8 +133,12 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 			if (i->op >= Iop_AddF64 && i->op <= Iop_RoundF64toInt)
 				return UNDEFINED_EXPR;
 		}
-		IRExpr *a = undefinednessExpression(sm, i->arg1, vdm);
-		IRExpr *b = undefinednessExpression(sm, i->arg2, vdm);
+		IRExpr *a = undefinednessExpression(sm, i->arg1, vdm, opt);
+		IRExpr *b = undefinednessExpression(sm, i->arg2, vdm, opt);
+		if (a == UNDEFINED_EXPR || b == UNDEFINED_EXPR) {
+			if (i->op >= Iop_CmpEQ8 && i->op <= Iop_CmpEQ64)
+				return UNDEFINED_EXPR;
+		}
 		if (a == UNDEFINED_EXPR)
 			a = i->arg1;
 		if (b == UNDEFINED_EXPR)
@@ -151,7 +157,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 				break;
 			}
 		}
-		IRExpr *arg = undefinednessExpression(sm, ieu->arg, vdm);
+		IRExpr *arg = undefinednessExpression(sm, ieu->arg, vdm, opt);
 		if (arg == UNDEFINED_EXPR) {
 			switch (ieu->op) {
 			case Iop_8Uto16:
@@ -197,9 +203,15 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 	}
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)a;
-		IRExpr *addr = undefinednessExpression(sm, iel->addr, vdm);
+		IRExpr *addr = undefinednessExpression(sm, iel->addr, vdm, opt);
 		if (addr == UNDEFINED_EXPR)
 			return UNDEFINED_EXPR;
+		if (addr->tag == Iex_Const) {
+			unsigned long addrc = ((IRExprConst *)addr)->con->Ico.U64;
+			bool isAcc;
+			if (opt.addressAccessible(addrc, &isAcc) && !isAcc)
+				return UNDEFINED_EXPR;
+		}
 		if (addr == iel->addr)
 			return a;
 		return IRExpr_Load(iel->ty, addr);
@@ -217,7 +229,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 		IRExpr *v;
 		int j;
 		for (j = 0; i->args[j]; j++) {
-			v = undefinednessExpression(sm, i->args[j], vdm);
+			v = undefinednessExpression(sm, i->args[j], vdm, opt);
 			if (v != i->args[j] && v != UNDEFINED_EXPR)
 				break;
 		}
@@ -231,7 +243,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 		memcpy(newArgs, i->args, sizeof(newArgs[0]) * j);
 		newArgs[j] = v;
 		for (j++; i->args[j]; j++) {
-			v = undefinednessExpression(sm, i->args[j], vdm);
+			v = undefinednessExpression(sm, i->args[j], vdm, opt);
 			if (v == UNDEFINED_EXPR)
 				newArgs[j] = i->args[j];
 			else
@@ -243,9 +255,9 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 
 	case Iex_Mux0X: {
 		IRExprMux0X *i = (IRExprMux0X *)a;
-		IRExpr *c = undefinednessExpression(sm, i->cond, vdm);
-		IRExpr *z = undefinednessExpression(sm, i->expr0, vdm);
-		IRExpr *x = undefinednessExpression(sm, i->exprX, vdm);
+		IRExpr *c = undefinednessExpression(sm, i->cond, vdm, opt);
+		IRExpr *z = undefinednessExpression(sm, i->expr0, vdm, opt);
+		IRExpr *x = undefinednessExpression(sm, i->exprX, vdm, opt);
 
 		if (c == UNDEFINED_EXPR) {
 			if (z == UNDEFINED_EXPR || x == UNDEFINED_EXPR)
@@ -266,7 +278,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 		int x = 0;
 		IRExpr *newE = (IRExpr *)0xf001dead; /* shut compiler up */
 		while (x < i->nr_arguments) {
-			newE = undefinednessExpression(sm, i->contents[x], vdm);
+			newE = undefinednessExpression(sm, i->contents[x], vdm, opt);
 			if (newE != i->contents[x]) {
 				if (newE == UNDEFINED_EXPR)
 					goto undefined;
@@ -280,7 +292,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 			IRExprAssociative *r = (IRExprAssociative *)IRExpr_Associative(i);
 			r->contents[x] = newE;
 			for (x++; x < i->nr_arguments; x++) {
-				r->contents[x] = undefinednessExpression(sm, i->contents[x], vdm);
+				r->contents[x] = undefinednessExpression(sm, i->contents[x], vdm, opt);
 				if (r->contents[x] == UNDEFINED_EXPR)
 					goto undefined;
 				
@@ -322,7 +334,8 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 }
 
 static StateMachine *
-undefinednessSimplification(StateMachine *sm, bool *done_something)
+undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt,
+			    bool *done_something)
 {
 	std::map<const StateMachineState *, int> stateLabels;
 	if (debug_undefinedness) {
@@ -346,7 +359,7 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 			break;
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-			IRExpr *e = undefinednessExpression(sm, smb->condition, vdm);
+			IRExpr *e = undefinednessExpression(sm, smb->condition, vdm, opt);
 			if (e != smb->condition) {
 				*done_something = true;
 				if (e == UNDEFINED_EXPR) {
@@ -373,10 +386,10 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 				switch (smse->sideEffect->type) {
 				case StateMachineSideEffect::Load: {
 					StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)newSe;
-					IRExpr *addr = undefinednessExpression(sm, l->addr, vdm);
+					IRExpr *addr = undefinednessExpression(sm, l->addr, vdm, opt);
 					if (addr != l->addr) {
 						if (addr == UNDEFINED_EXPR) {
-							newSe = NULL;
+							newSe = StateMachineSideEffectUnreached::get();
 						} else {
 							newSe = new StateMachineSideEffectLoad(
 								l, addr);
@@ -386,11 +399,11 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 				}
 				case StateMachineSideEffect::Store: {
 					auto *s = (StateMachineSideEffectStore *)newSe;
-					IRExpr *addr = undefinednessExpression(sm, s->addr, vdm);
-					IRExpr *data = undefinednessExpression(sm, s->data, vdm);
+					IRExpr *addr = undefinednessExpression(sm, s->addr, vdm, opt);
+					IRExpr *data = undefinednessExpression(sm, s->data, vdm, opt);
 					if (addr != s->addr || data != s->data) {
 						if (addr == UNDEFINED_EXPR || data == UNDEFINED_EXPR)
-							newSe = NULL;
+							newSe = StateMachineSideEffectUnreached::get();
 						else
 							newSe = new StateMachineSideEffectStore(
 								s, addr, data);
@@ -399,7 +412,7 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 				}
 				case StateMachineSideEffect::Copy: {
 					auto *c = (StateMachineSideEffectCopy *)newSe;
-					IRExpr *v = undefinednessExpression(sm, c->value, vdm);
+					IRExpr *v = undefinednessExpression(sm, c->value, vdm, opt);
 					if (v != c->value) {
 						if (v == UNDEFINED_EXPR)
 							newSe = NULL;
@@ -411,7 +424,7 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 				}
 				case StateMachineSideEffect::AssertFalse: {
 					auto *a = (StateMachineSideEffectAssertFalse *)newSe;
-					IRExpr *v = undefinednessExpression(sm, a->value, vdm);
+					IRExpr *v = undefinednessExpression(sm, a->value, vdm, opt);
 					if (v != a->value) {
 						if (v == UNDEFINED_EXPR)
 							newSe = StateMachineSideEffectUnreached::get();
@@ -434,7 +447,7 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 					for (x = 0; x < p->generations.size(); x++) {
 						if (!p->generations[x].second)
 							continue;
-						v = undefinednessExpression(sm, p->generations[x].second, vdm);
+						v = undefinednessExpression(sm, p->generations[x].second, vdm, opt);
 						if (v == p->generations[x].second)
 							continue;
 						if (v != UNDEFINED_EXPR)
@@ -447,7 +460,7 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 					for (x++; x < newGen.size(); x++) {
 						if (!newGen[x].second)
 							continue;
-						v = undefinednessExpression(sm, newGen[x].second, vdm);
+						v = undefinednessExpression(sm, newGen[x].second, vdm, opt);
 						if (v == newGen[x].second)
 							continue;
 						if (v != UNDEFINED_EXPR)
@@ -459,14 +472,14 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 				}
 				case StateMachineSideEffect::StartFunction: {
 					auto *s = (StateMachineSideEffectStartFunction *)newSe;
-					IRExpr *v = undefinednessExpression(sm, s->rsp, vdm);
+					IRExpr *v = undefinednessExpression(sm, s->rsp, vdm, opt);
 					if (v != s->rsp && v != UNDEFINED_EXPR)
 						newSe = new StateMachineSideEffectStartFunction(v, s->frame);
 					break;
 				}
 				case StateMachineSideEffect::EndFunction: {
 					auto *e = (StateMachineSideEffectEndFunction *)newSe;
-					IRExpr *v = undefinednessExpression(sm, e->rsp, vdm);
+					IRExpr *v = undefinednessExpression(sm, e->rsp, vdm, opt);
 					if (v != e->rsp && v != UNDEFINED_EXPR)
 						newSe = new StateMachineSideEffectEndFunction(v, e->frame);
 					break;
@@ -498,8 +511,8 @@ undefinednessSimplification(StateMachine *sm, bool *done_something)
 };
 
 StateMachine *
-undefinednessSimplification(StateMachine *sm, bool *done_something)
+undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt, bool *done_something)
 {
-	return _undefinedness::undefinednessSimplification(sm, done_something);
+	return _undefinedness::undefinednessSimplification(sm, opt, done_something);
 }
 
