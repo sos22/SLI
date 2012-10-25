@@ -769,11 +769,16 @@ phiElimination(StateMachine *sm, bool *done_something)
 			printf("\n");
 		}
 		IRType ity = Ity_INVALID;
-		for (auto it = phi->generations.begin(); ity == Ity_INVALID && it != phi->generations.end(); it++) {
-			if (it->second)
-				ity = it->second->type();
+		bool failed = false;
+		for (auto it = phi->generations.begin(); it != phi->generations.end(); it++) {
+			if (it->second) {
+				if (ity == Ity_INVALID)
+					ity = it->second->type();
+				else if (ity != it->second->type())
+					failed = true;
+			}
 		}
-		if (ity == Ity_INVALID) {
+		if (ity == Ity_INVALID || failed) {
 			if (debug_toplevel)
 				printf("Failed: unknown type\n");
 			continue;
