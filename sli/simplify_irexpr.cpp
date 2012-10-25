@@ -2080,12 +2080,24 @@ top:
 				res = IRExpr_Get(argg->reg, Ity_I8);
 				break;
 			}
+			if (e->op == Iop_V128to32) {
+				res = IRExpr_Get(argg->reg, Ity_I32);
+				break;
+			}
+			if (e->op == Iop_ReinterpI32asF32) {
+				res = IRExpr_Get(argg->reg, Ity_F32);
+				break;
+			}
 		}
 
 		if (e->arg->tag == Iex_Load) {
 			IRExprLoad *argl = (IRExprLoad *)e->arg;
 			if (e->op == Iop_64to32) {
 				res = IRExpr_Load(Ity_I32, argl->addr);
+				break;
+			}
+			if (e->op == Iop_ReinterpI32asF32) {
+				res = IRExpr_Load(Ity_F32, argl->addr);
 				break;
 			}
 		}
@@ -2514,6 +2526,21 @@ top:
 			break;
 		}
 		     
+		if (e->op == Iop_CmpF64 &&
+		    e->arg1->tag == Iex_Unop &&
+		    e->arg2->tag == Iex_Unop &&
+		    ((IRExprUnop *)e->arg1)->op == Iop_F32toF64 &&
+		    ((IRExprUnop *)e->arg2)->op == Iop_F32toF64) {
+			res = IRExpr_Binop(Iop_CmpF32, ((IRExprUnop *)e->arg1)->arg, ((IRExprUnop *)e->arg2)->arg);
+			break;
+		}
+
+		if ( (e->op == Iop_CmpF32 || e->op == Iop_CmpF64) &&
+		     physicallyEqual(e->arg1, e->arg2) ) {
+			res = IRExpr_Const(IRConst_U32(0x40));
+			break;
+		}
+
 		/* We simplify == expressions with sums on the left
 		   and right by trying to move all of the constants to
 		   the left and all of the non-constants to the

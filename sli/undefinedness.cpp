@@ -187,6 +187,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 			case Iop_64to8:
 			case Iop_64to16:
 			case Iop_64to32:
+			case Iop_32to1:
 			case Iop_32to8:
 			case Iop_32to16:
 			case Iop_16to8:
