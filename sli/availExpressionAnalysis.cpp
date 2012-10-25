@@ -274,6 +274,8 @@ avail_t::mergeUnion(const avail_t &other)
 	res = false;
 	for (auto it = other.sideEffects.begin(); it != other.sideEffects.end(); it++)
 		res |= sideEffects.insert(*it).second;
+	for (auto it = other.assertFalse.begin(); it != other.assertFalse.end(); it++)
+		res |= assertFalse.insert(*it).second;
 	return res;
 }
 
@@ -508,6 +510,21 @@ class applyAvailTransformer : public IRExprTransformer {
 				if (definitelyEqual(*it, e,  opt)) {
 					*done_something = true;
 					return IRExpr_Const(IRConst_U1(0));
+				}
+				/* If @e is definitely false, and *it
+				   != @e, then clear *it is definitely
+				   true.  As a minor optimisation,
+				   only do this if one of the
+				   expressions is of the form !(x),
+				   since those are the only ones for
+				   which this is likely to help. */
+				if ( ((e->tag == Iex_Unop &&
+				       ((IRExprUnop *)e)->op == Iop_Not1) !=
+				      ((*it)->tag == Iex_Unop &&
+				       ((IRExprUnop *)*it)->op == Iop_Not1)) &&
+				    definitelyNotEqual(*it, e, opt)) {
+					*done_something = true;
+					return IRExpr_Const(IRConst_U1(1));
 				}
 			}
 		}
