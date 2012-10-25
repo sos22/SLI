@@ -5,7 +5,8 @@
 #endif
 
 #ifndef ASSERT_FAILED_ADDRESS
-#define ASSERT_FAILED_ADDRESS 0x40a770
+//#define ASSERT_FAILED_ADDRESS 0x40a770
+#define ASSERT_FAILED_ADDRESS 0
 #endif
 
 #ifndef CRASHED_THREAD
@@ -43,10 +44,10 @@
    that looks like it'll reach a convenient place in the program to do
    analysis from. */
 #ifndef PROBE_CLUSTER_THRESHOLD1
-#define PROBE_CLUSTER_THRESHOLD1 20
+#define PROBE_CLUSTER_THRESHOLD1 49
 #endif
 #ifndef PROBE_CLUSTER_THRESHOLD2
-#define PROBE_CLUSTER_THRESHOLD2 30
+#define PROBE_CLUSTER_THRESHOLD2 49
 #endif
 
 #ifndef CONFIG_DATABASE_RIP_DEPTH

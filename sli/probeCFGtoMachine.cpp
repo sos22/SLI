@@ -1921,7 +1921,16 @@ probeCFGsToMachine(Oracle *oracle,
 		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
 		   MaiMap &mai)
 {
-	return _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai);
+	StateMachine *sm = _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai);
+	sm->root = new StateMachineSideEffecting(
+		sm->root->dbg_origin,
+		new StateMachineSideEffectAssertFalse(
+			IRExpr_Unop(
+				Iop_Not1,
+				new IRExprEntryPoint(tid, CfgLabel(88))),
+			true),
+		sm->root);
+	return sm;
 }
 
 StateMachine *

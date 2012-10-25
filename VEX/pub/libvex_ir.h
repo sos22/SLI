@@ -92,10 +92,10 @@ class CfgLabel : public Named {
 	friend class CfgLabelAllocator;
 	char *mkName() const { return my_asprintf("cfg%d", label); }
 	int label;
+public:
 	CfgLabel(int _label)
 		: label(_label)
 	{}
-public:
 	unsigned long hash() const { return (unsigned long)label * 300051181ul; }
 	static CfgLabel uninitialised() {
 		return CfgLabel(-1);

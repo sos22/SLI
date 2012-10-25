@@ -172,7 +172,7 @@ struct path_set {
 	path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 		 internIRExprTable &intern,
 		 std::map<const StateMachineState *, int> &labels);
-	void simplify();
+	void simplify(bool is_canonical);
 	IRExpr *build_mux(StateMachineSideEffectPhi *, IRType);
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Path set:\n");
@@ -183,6 +183,7 @@ struct path_set {
 		}
 	}
 	void case_split(IRExpr *on, path_set *true_out, path_set *false_out);
+	void canonicalise(internIRExprTable &intern);
 	double entropy() const;
 };
 
@@ -334,7 +335,7 @@ path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 }
 
 void
-path_set::simplify()
+path_set::simplify(bool is_canonical)
 {
 	if (content.empty())
 		return;
@@ -344,54 +345,105 @@ top:
 	progress = false;
 
 	/* We're only interested in expressions which are sometimes
-	   true and sometimes false. */
-	std::set<IRExpr *> allExprs;
-	for (auto it = content.begin(); it != content.end(); it++) {
-		for (auto it2 = it->trueExprs.begin(); it2 != it->trueExprs.end(); it2++)
-			allExprs.insert(*it2);
-		for (auto it2 = it->falseExprs.begin(); it2 != it->falseExprs.end(); it2++)
-			allExprs.insert(*it2);
-	}
-	std::set<IRExpr *> alwaysTrue(allExprs);
-	std::set<IRExpr *> alwaysFalse(allExprs);
-	for (unsigned x = 0; x < content.size(); x++) {
-		path &p(content[x]);
-		for (auto it = p.trueExprs.begin(); it != p.trueExprs.end(); it++)
-			alwaysFalse.erase(*it);
-		for (auto it = p.falseExprs.begin(); it != p.falseExprs.end(); it++)
-			alwaysTrue.erase(*it);
-	}
-	if (debug_simplify) {
-		printf("Always true: {");
-		for (auto it = alwaysTrue.begin();
-		     it != alwaysTrue.end();
-		     it++) {
-			if (it != alwaysTrue.begin())
-				printf(", ");
-			ppIRExpr(*it, stdout);
+	   true and sometimes false.  If the expressions are in
+	   canonical form then we can treat not-present as either true
+	   or false, but if it's non-canonical we have to treat it as
+	   neither. */
+	std::set<IRExpr *> alwaysTrue;
+	std::set<IRExpr *> alwaysFalse;
+	if (!is_canonical) {
+		alwaysTrue = content.begin()->trueExprs;
+		alwaysFalse = content.begin()->falseExprs;
+		for (unsigned x = 1; x < content.size(); x++) {
+			path &p(content[x]);
+			alwaysTrue &= p.trueExprs;
+			alwaysFalse &= p.falseExprs;
 		}
-		printf("}\nAlways false: {");
-		for (auto it = alwaysFalse.begin();
-		     it != alwaysFalse.end();
-		     it++) {
-			if (it != alwaysFalse.begin())
-				printf(", ");
-			ppIRExpr(*it, stdout);
+	} else {
+		std::set<IRExpr *> allExprs;
+		for (auto it = content.begin(); it != content.end(); it++) {
+			for (auto it2 = it->trueExprs.begin(); it2 != it->trueExprs.end(); it2++)
+				allExprs.insert(*it2);
+			for (auto it2 = it->falseExprs.begin(); it2 != it->falseExprs.end(); it2++)
+				allExprs.insert(*it2);
 		}
-		printf("}\n");
+		alwaysTrue = allExprs;
+		alwaysFalse = allExprs;
+		for (unsigned x = 0; x < content.size(); x++) {
+			path &p(content[x]);
+			for (auto it = p.trueExprs.begin(); it != p.trueExprs.end(); it++)
+				alwaysFalse.erase(*it);
+			for (auto it = p.falseExprs.begin(); it != p.falseExprs.end(); it++)
+				alwaysTrue.erase(*it);
+		}
 	}
 	if (!alwaysTrue.empty() || !alwaysFalse.empty()) {
+		if (debug_simplify) {
+			printf("Always true: {");
+			for (auto it = alwaysTrue.begin();
+			     it != alwaysTrue.end();
+			     it++) {
+				if (it != alwaysTrue.begin())
+					printf(", ");
+				ppIRExpr(*it, stdout);
+			}
+			printf("}\nAlways false: {");
+			for (auto it = alwaysFalse.begin();
+			     it != alwaysFalse.end();
+			     it++) {
+				if (it != alwaysFalse.begin())
+					printf(", ");
+				ppIRExpr(*it, stdout);
+			}
+			printf("}\n");
+		}
 		for (auto it = content.begin(); it != content.end(); it++) {
 			for (auto it2 = alwaysTrue.begin(); it2 != alwaysTrue.end(); it2++)
 				progress |= it->trueExprs.erase(*it2);
 			for (auto it2 = alwaysFalse.begin(); it2 != alwaysFalse.end(); it2++)
 				progress |= it->falseExprs.erase(*it2);
 		}
+		if (debug_simplify) {
+			printf("After elimination of always terms:\n");
+			prettyPrint(stdout);
+		}
 	}
 
-	if (debug_simplify) {
-		printf("After elimination of always terms:\n");
-		prettyPrint(stdout);
+	/* If a term T only appears in paths whose result is N then it
+	   doesn't help us very much. */
+	std::map<IRExpr *, std::set<int> > appearsWithResult;
+	for (auto it = content.begin(); it != content.end(); it++) {
+		for (auto it2 = it->trueExprs.begin(); it2 != it->trueExprs.end(); it2++)
+			appearsWithResult[*it2].insert(it->result);
+		for (auto it2 = it->falseExprs.begin(); it2 != it->falseExprs.end(); it2++)
+			appearsWithResult[*it2].insert(it->result);
+	}
+	std::set<IRExpr *> constantResult;
+	for (auto it = appearsWithResult.begin(); it != appearsWithResult.end(); it++)
+		if (it->second.size() == 1)
+			constantResult.insert(it->first);
+	if (!constantResult.empty()) {
+		if (debug_simplify) {
+			printf("Constant result: {");
+			for (auto it = constantResult.begin();
+			     it != constantResult.end();
+			     it++) {
+				if (it != constantResult.begin())
+					printf(", ");
+				ppIRExpr(*it, stdout);
+			}
+			printf("}\n");
+		}
+		for (auto it = content.begin(); it != content.end(); it++) {
+			for (auto it2 = alwaysTrue.begin(); it2 != alwaysTrue.end(); it2++)
+				progress |= it->trueExprs.erase(*it2);
+			for (auto it2 = alwaysFalse.begin(); it2 != alwaysFalse.end(); it2++)
+				progress |= it->falseExprs.erase(*it2);
+		}
+		if (debug_simplify) {
+			printf("After elimination of constant-result terms:\n");
+			prettyPrint(stdout);
+		}
 	}
 
 	/* Don't care about any terms T such that for every path P
@@ -498,6 +550,48 @@ top:
 		
 }
 
+/* Some of the simplifications get confused if the things in the
+   expression set aren't units i.e. if there are (x || y) expressions
+   in a trueExpr set or (x && y) expressions in a falseExpr set.
+   Remove them now. */
+void
+path_set::canonicalise(internIRExprTable &intern)
+{
+	for (unsigned idx = 0; idx < content.size(); idx++) {
+	retry:
+		for (auto it = content[idx].trueExprs.begin(); it != content[idx].trueExprs.end(); it++) {
+			if ( (*it)->tag != Iex_Associative )
+				continue;
+			IRExprAssociative *e = (IRExprAssociative *)*it;
+			assert(e->op == Iop_Or1);
+			path newP(content[idx]);
+			newP.trueExprs.erase(e);
+			content.resize(content.size() + e->nr_arguments - 1,
+				       newP);
+			content[idx] = newP;
+			content[idx].addTrue(e->contents[0], intern);
+			for (int y = 1; y < e->nr_arguments; y++)
+				content[content.size() - e->nr_arguments + y].addTrue(e->contents[y], intern);
+			goto retry;
+		}
+		for (auto it = content[idx].falseExprs.begin(); it != content[idx].falseExprs.end(); it++) {
+			if ( (*it)->tag != Iex_Associative )
+				continue;
+			IRExprAssociative *e = (IRExprAssociative *)*it;
+			assert(e->op == Iop_And1);
+			path newP(content[idx]);
+			newP.falseExprs.erase(e);
+			content.resize(content.size() + e->nr_arguments - 1,
+				       newP);
+			content[idx] = newP;
+			content[idx].addFalse(e->contents[0], intern);
+			for (int y = 1; y < e->nr_arguments; y++)
+				content[content.size() - e->nr_arguments + y].addFalse(e->contents[y], intern);
+			goto retry;
+		}
+	}
+}
+
 void
 path_set::case_split(IRExpr *on, path_set *true_out, path_set *false_out)
 {
@@ -509,8 +603,8 @@ path_set::case_split(IRExpr *on, path_set *true_out, path_set *false_out)
 		if (!it->trueExprs.count(on))
 			false_out->content.push_back(*it);
 	}
-	true_out->simplify();
-	false_out->simplify();
+	true_out->simplify(true);
+	false_out->simplify(true);
 }
 
 /* Assume each input variable is independently distributed with a 50%
@@ -687,7 +781,9 @@ phiElimination(StateMachine *sm, bool *done_something)
 		path_set paths(sm, phi, intern, labels);
 		if (TIMEOUT)
 			break;
-		paths.simplify();
+		paths.simplify(false);
+		paths.canonicalise(intern);
+		paths.simplify(true);
 		IRExpr *e = paths.build_mux(phi, ity);
 		if (e) {
 			if (debug_toplevel)
@@ -717,7 +813,6 @@ phiElimination(StateMachine *sm, bool *done_something)
 	*done_something = true;
 	return replaceSideEffects(sm, replacements);
 }
-
 
 /* End of namespace */
 };

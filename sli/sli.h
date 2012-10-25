@@ -1314,4 +1314,19 @@ operator |=(std::set<t> &a, const std::set<t> &b)
 	return res;
 }
 
+template <typename t> bool
+operator &=(std::set<t> &a, const std::set<t> &b)
+{
+	bool res = false;
+	for (auto it = a.begin(); it != a.end(); ) {
+		if (b.count(*it)) {
+			it++;
+		} else {
+			a.erase(it++);
+			res = true;
+		}
+	}
+	return res;
+}
+
 #endif /* !SLI_H__ */
