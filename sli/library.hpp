@@ -21,7 +21,8 @@ namespace LibraryFunctionTemplate {
 	f(_ZdlPv)				\
 	f(__errno_location)			\
 	f(pthread_getspecific)			\
-	f(pthread_setspecific)
+	f(pthread_setspecific)			\
+	f(__assert_fail)
 
 	enum __type {
 		none = 0,

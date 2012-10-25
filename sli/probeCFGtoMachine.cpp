@@ -276,6 +276,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		break;
 	}
 	case LibraryFunctionTemplate::__stack_chk_fail:
+	case LibraryFunctionTemplate::__assert_fail:
 		return StateMachineUnreached::get();
 	case LibraryFunctionTemplate::time: {
 		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
