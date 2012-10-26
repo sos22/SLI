@@ -577,8 +577,123 @@ validateStackContext(Oracle *oracle,
 			true));
 }
 
+static void
+emitInternalJump(unsigned to_offset,
+		 std::vector<unsigned char> &patch_content)
+{
+	long delta = to_offset - patch_content.size();
+	/* Try with an 8-bit jump */
+	if (delta >= -126 && delta < 130) {
+		patch_content.push_back(0xeb);
+		patch_content.push_back(delta - 2);
+	} else {
+		/* Use a 32 bit one */
+		patch_content.push_back(0xe9);
+		delta -= 5;
+		patch_content.push_back(delta & 0xff);
+		patch_content.push_back((delta >> 8) & 0xff);
+		patch_content.push_back((delta >> 16) & 0xff);
+		patch_content.push_back((delta >> 24) & 0xff);
+	}
+}
+
+static void
+emitExitSequence(unsigned long exit_to,
+		 std::vector<unsigned char> &patch_content,
+		 std::vector<Relocation *> &relocs,
+		 std::vector<LateRelocation *> &lateRelocs,
+		 std::vector<trans_table_entry> &transTable,
+		 const std::set<unsigned long> &clobberedInstructions,
+		 std::map<unsigned long, unsigned> &exitSequences,
+		 const SummaryId &summaryId,
+		 const CrashCfg &cfg,
+		 AddressSpace *as)
+{
+top:
+	if (!clobberedInstructions.count(exit_to)) {
+		/* Easy case: just branch to the original program
+		 * instruction. */
+		patch_content.push_back(0xe9);
+		patch_content.push_back(0);
+		patch_content.push_back(0);
+		patch_content.push_back(0);
+		patch_content.push_back(0);
+		lateRelocs.push_back(
+			new LateRelocation(
+				patch_content.size() - 4,
+				4,
+				vex_asprintf("0x%lx", exit_to),
+				0,
+				true));
+		return;
+	}
+	/* We're trying to exit to an instruction which was clobbered
+	   by one of our patch points.  That's a little more
+	   tricky. */
+	if (exitSequences.count(exit_to)) {
+		/* Reuse existing sequence */
+		emitInternalJump(exitSequences[exit_to], patch_content);
+		return;
+	}
+
+	/* Generate a new exit sequence */
+	exitSequences[exit_to] = patch_content.size();
+
+	Instruction<ThreadCfgLabel> *newInstr =
+		decode_instr(as, exit_to, ThreadCfgLabel(AbstractThread::uninitialised(), CfgLabel(-1)), true);
+	if (!newInstr)
+		errx(1, "need to decode instruction at %lx, but decoder failed!", exit_to);
+	emitOneInstruction(VexRip::invent_vex_rip(exit_to),
+			   VexRip::invent_vex_rip(exit_to),
+			   newInstr,
+			   summaryId,
+			   cfg,
+			   patch_content,
+			   relocs,
+			   lateRelocs,
+			   transTable);
+	exit_to += newInstr->len;
+	goto top;
+}
+
+static void
+emitReleaseSequence(unsigned long exit_to,
+		    std::map<unsigned long, unsigned> &releaseSequences,
+		    std::vector<unsigned char> &patch_content,
+		    std::vector<Relocation *> &relocs,
+		    std::vector<LateRelocation *> &lateRelocs,
+		    std::vector<trans_table_entry> &transTable,
+		    const std::set<unsigned long> &clobberedInstructions,
+		    std::map<unsigned long, unsigned> &exitSequences,
+		    const SummaryId &summaryId,
+		    const CrashCfg &cfg,
+		    AddressSpace *as)
+{
+	if (releaseSequences.count(exit_to)) {
+		/* Already have a release sequence here, branch to
+		   it. */
+		emitInternalJump(releaseSequences[exit_to], patch_content);
+	} else {
+		/* Generate a new release sequence here */
+		unsigned offset = patch_content.size();
+		releaseSequences[exit_to] = offset;
+		emitCallSequence(patch_content, "(unsigned long)release_lock", lateRelocs, false);
+		emitExitSequence(exit_to,
+				 patch_content,
+				 relocs,
+				 lateRelocs,
+				 transTable,
+				 clobberedInstructions,
+				 exitSequences,
+				 summaryId,
+				 cfg,
+				 as);
+	}
+}
+
 static unsigned
-genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
+genCodeForEntryPoint(const std::set<unsigned long> &clobberedInstructions,
+		     std::vector<unsigned char> &patch_content,
 		     std::vector<LateRelocation *> &lateRelocs,
 		     std::vector<trans_table_entry> &transTable,
 		     const CrashCfg &cfg,
@@ -614,6 +729,8 @@ genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
 	}
 
 	std::map<VexRip, unsigned> entryMap;
+	std::map<unsigned long, unsigned> releaseSequences;
+	std::map<unsigned long, unsigned> exitSequences;
 	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
 		const VexRip &entryVr(it->first);
 		std::vector<Instruction<ThreadCfgLabel> *> toEmit;
@@ -667,20 +784,18 @@ genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
 						   relocs,
 						   lateRelocs,
 						   transTable);
-				if (node->successors.empty()) {
-					patch_content.push_back(0xe9);
-					patch_content.push_back(0);
-					patch_content.push_back(0);
-					patch_content.push_back(0);
-					patch_content.push_back(0);
-					relocs.push_back(
-						new Relocation(
-							patch_content.size() - 4,
-							4,
-							vr.unwrap_vexrip() + node->len,
-							true,
-							true));
-				}
+				if (node->successors.empty())
+					emitReleaseSequence(vr.unwrap_vexrip() + node->len,
+							    releaseSequences,
+							    patch_content,
+							    relocs,
+							    lateRelocs,
+							    transTable,
+							    clobberedInstructions,
+							    exitSequences,
+							    summaryId,
+							    cfg,
+							    oracle->ms->addressSpace);
 				Instruction<ThreadCfgLabel> *next = NULL;
 				for (auto it = node->successors.begin(); it != node->successors.end(); it++) {
 					if (!it->instr)
@@ -705,19 +820,17 @@ genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
 					offset = instrOffsets[reloc->target];
 				} else {
 					offset = patch_content.size();
-					emitCallSequence(patch_content, "(unsigned long)release_lock", lateRelocs, false);
-					patch_content.push_back(0xe9);
-					patch_content.push_back(0);
-					patch_content.push_back(0);
-					patch_content.push_back(0);
-					patch_content.push_back(0);
-					lateRelocs.push_back(
-						new LateRelocation(
-							patch_content.size() - 4,
-							4,
-							vex_asprintf("0x%lx", reloc->raw_target),
-							0,
-							true));
+					emitReleaseSequence(reloc->raw_target,
+							    releaseSequences,
+							    patch_content,
+							    relocs,
+							    lateRelocs,
+							    transTable,
+							    clobberedInstructions,
+							    exitSequences,
+							    summaryId,
+							    cfg,
+							    oracle->ms->addressSpace);
 				}
 				long delta = offset - reloc->offset + reloc->addend - 4;
 				patch_content[reloc->offset  ] = delta;
@@ -725,13 +838,32 @@ genCodeForEntryPoint(std::vector<unsigned char> &patch_content,
 				patch_content[reloc->offset+2] = delta >> 16;
 				patch_content[reloc->offset+3] = delta >> 24;
 			} else {
-				lateRelocs.push_back(
-					new LateRelocation(
-						reloc->offset,
-						4,
-						vex_asprintf("0x%lx", reloc->raw_target),
-						reloc->addend,
-						reloc->relative));
+				if (clobberedInstructions.count(reloc->raw_target)) {
+					unsigned offset = patch_content.size();
+					emitExitSequence(reloc->raw_target,
+							 patch_content,
+							 relocs,
+							 lateRelocs,
+							 transTable,
+							 clobberedInstructions,
+							 exitSequences,
+							 summaryId,
+							 cfg,
+							 oracle->ms->addressSpace);
+					long delta = offset - reloc->offset + reloc->addend - 4;
+					patch_content[reloc->offset  ] = delta;
+					patch_content[reloc->offset+1] = delta >> 8;
+					patch_content[reloc->offset+2] = delta >> 16;
+					patch_content[reloc->offset+3] = delta >> 24;
+				} else {
+					lateRelocs.push_back(
+						new LateRelocation(
+							reloc->offset,
+							4,
+							vex_asprintf("0x%lx", reloc->raw_target),
+							reloc->addend,
+							reloc->relative));
+				}
 			}
 		}
 	}
@@ -778,7 +910,12 @@ buildPatchForCrashSummary(Oracle *oracle,
 	std::map<VexRip, Instruction<ThreadCfgLabel> *> cfgRoots2;
 	CfgLabelAllocator allocLabel;
 	avoidBranchToPatch(cer, cfg, cfgRoots2, allocLabel, oracle);
-	
+	std::set<unsigned long> clobberedInstructions;
+	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
+		for (unsigned x = 1; x < 5; x++)
+			clobberedInstructions.insert(it->first.unwrap_vexrip() + x);
+	}
+
 	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
 		printf("Root %s:\n", it->first.name());
 		std::vector<Instruction<ThreadCfgLabel> *> q;
@@ -807,6 +944,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 	std::vector<trans_table_entry> transTable;
 	for (auto it = segregatedRoots.begin(); it != segregatedRoots.end(); it++)
 		entryPoints[it->first] = genCodeForEntryPoint(
+			clobberedInstructions,
 			patch_content,
 			lateRelocs,
 			transTable,
