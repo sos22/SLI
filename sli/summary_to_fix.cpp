@@ -26,21 +26,6 @@ static bool debug_find_dominator = false;
 #define debug_find_dominator false
 #endif
 
-template <typename t> static bool
-operator &=(std::set<t> &a, const std::set<t> &b)
-{
-	bool res = false;
-	for (auto it = a.begin(); it != a.end(); ) {
-		if (!b.count(*it)) {
-			a.erase(it++);
-			res = true;
-		} else {
-			it++;
-		}
-	}
-	return res;
-}
-
 static void
 enumerateCFG(_CFGNode<StaticRip> *root, std::set<_CFGNode<StaticRip> *> &instrs)
 {
