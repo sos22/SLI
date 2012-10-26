@@ -14,6 +14,7 @@
 #include "enforce_crash.hpp"
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
+#include "sat_checker.hpp"
 
 #ifndef NDEBUG
 static bool debug_declobber_instructions = false;
@@ -397,6 +398,8 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 		auto i = (IRExprBinop *)what;
 		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
 		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
+		if (i->op == Iop_CmpF32 || i->op == Iop_CmpF64)
+			return NULL;
 		if (arg1 == i->arg1 && arg2 == i->arg2)
 			return what;
 		if (arg1 && arg2)
@@ -410,6 +413,7 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 		case Iop_CmpLT16U:
 		case Iop_CmpLT32U:
 		case Iop_CmpLT64U:
+		case Iop_Shr64:
 			return NULL;
 		default:
 			abort();
@@ -692,7 +696,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	IRExpr *requirement = summary->verificationCondition;
 	int ignore;
 	requirement = removeFreeVariables(requirement, ERROR_POSITIVE, &ignore);
-	requirement = internIRExpr(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
+	requirement = internIRExpr(simplify_via_anf(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations)));
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");
