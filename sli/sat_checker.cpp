@@ -13,6 +13,8 @@
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
 
+#define UNEVALUATABLE ((IRExpr *)1)
+
 namespace _sat_checker {
 
 static struct stats {
@@ -73,6 +75,63 @@ anf_depth(const IRExpr *a)
 	return acc + 1;
 }
 
+static int
+expr_depth(const IRExpr *a)
+{
+	switch (a->tag) {
+	case Iex_Get:
+	case Iex_Const:
+	case Iex_HappensBefore:
+	case Iex_FreeVariable:
+	case Iex_EntryPoint:
+	case Iex_ControlFlow:
+		return 1;
+	case Iex_GetI:
+		return expr_depth( ((IRExprGetI *)a)->ix) + 1;
+	case Iex_Qop:
+		return std::max( std::max(expr_depth( ((IRExprQop *)a)->arg1),
+					  expr_depth( ((IRExprQop *)a)->arg2)),
+				 std::max(expr_depth( ((IRExprQop *)a)->arg3),
+					  expr_depth( ((IRExprQop *)a)->arg4)) ) + 1;
+	case Iex_Triop:
+		return std::max( std::max(expr_depth( ((IRExprTriop *)a)->arg1),
+					  expr_depth( ((IRExprTriop *)a)->arg2)),
+				 expr_depth( ((IRExprTriop *)a)->arg3) ) + 1;
+	case Iex_Binop:
+		return std::max(expr_depth( ((IRExprBinop *)a)->arg1),
+				expr_depth( ((IRExprBinop *)a)->arg2) ) + 1;
+	case Iex_Unop:
+		return expr_depth( ((IRExprUnop *)a)->arg ) + (((IRExprUnop *)a)->op != Iop_Not1);
+	case Iex_Mux0X:
+		return std::max( std::max(expr_depth( ((IRExprMux0X *)a)->cond),
+					  expr_depth( ((IRExprMux0X *)a)->expr0)),
+				 expr_depth( ((IRExprMux0X *)a)->exprX) ) + 1;
+	case Iex_Load:
+		return expr_depth( ((IRExprLoad *)a)->addr) + 1;
+	case Iex_Associative: {
+		IRExprAssociative *e = (IRExprAssociative *)a;
+		int m = 0;
+		for (int i = 0; i < e->nr_arguments; i++) {
+			int j = expr_depth(e->contents[i]);
+			if (j > m)
+				m = j;
+		}
+		return m + (e->op != Iop_And1 && e->op != Iop_Or1);
+	}
+	case Iex_CCall: {
+		IRExprCCall *e = (IRExprCCall *)a;
+		int m = 0;
+		for (int i = 0; e->args[i]; i++) {
+			int j = expr_depth(e->args[i]);
+			if (j > m)
+				m = j;
+		}
+		return m + 1;
+	}
+	}
+	abort();
+}
+
 enum ordering {
 	ord_lt,
 	ord_eq,
@@ -131,6 +190,12 @@ _anf_sort_func(IRExpr *a, IRExpr *b)
 	if (a < b)
 		return ord_lt;
 	if (a > b)
+		return ord_gt;
+	int a_depth_e = expr_depth(a);
+	int b_depth_e = expr_depth(b);
+	if (a_depth_e < b_depth_e)
+		return ord_lt;
+	if (a_depth_e > b_depth_e)
 		return ord_gt;
 	if (inv_a < inv_b)
 		return ord_lt;
@@ -305,9 +370,11 @@ class anf_context {
 	std::set<std::pair<IRExpr *, IRExpr *> > eqRules;
 	std::set<IRExpr *> definitelyTrue;
 	std::set<IRExpr *> definitelyFalse;
+	std::set<IRExpr *> badPointers;
 	bool matches(const IRExpr *a, const IRExpr *b) const;
 	void addAssumption(IRExpr *a);
 	void introduceEqRule(IRExpr *a, IRExpr *b);
+	bool loadsBadPointer(IRExpr *a) const;
 public:
 	anf_context(internIRExprTable &_intern, IRExpr *assumption)
 		: intern(_intern)
@@ -318,6 +385,60 @@ public:
 	IRExpr *simplify(IRExpr *input);
 	void prettyPrint(FILE *);
 };
+
+bool
+anf_context::loadsBadPointer(IRExpr *a) const
+{
+	switch (a->tag) {
+	case Iex_Get:
+		return false;
+	case Iex_GetI:
+		return loadsBadPointer(((IRExprGetI *)a)->ix);
+	case Iex_Qop:
+		if (loadsBadPointer( ((IRExprQop *)a)->arg4))
+			return true;
+	case Iex_Triop:
+		if (loadsBadPointer( ((IRExprTriop *)a)->arg3))
+			return true;
+	case Iex_Binop:
+		if (loadsBadPointer( ((IRExprBinop *)a)->arg2))
+			return true;
+	case Iex_Unop:
+		return loadsBadPointer( ((IRExprUnop *)a)->arg);
+	case Iex_Const:
+		return false;
+	case Iex_Mux0X:
+		return loadsBadPointer( ((IRExprMux0X *)a)->cond ) ||
+			(loadsBadPointer( ((IRExprMux0X *)a)->expr0 ) &&
+			 loadsBadPointer( ((IRExprMux0X *)a)->exprX ) );
+	case Iex_CCall: {
+		IRExprCCall *cee = (IRExprCCall *)a;
+		for (int i = 0; cee->args[i]; i++)
+			if (loadsBadPointer(cee->args[i]))
+				return true;
+		return false;
+	}
+	case Iex_Associative: {
+		IRExprAssociative *cee = (IRExprAssociative *)a;
+		for (int i = 0; i < cee->nr_arguments; i++)
+			if (loadsBadPointer(cee->contents[i]))
+				return true;
+		return false;
+	}
+	case Iex_Load:
+		return badPointers.count( ((IRExprLoad *)a)->addr ) ||
+			loadsBadPointer( ((IRExprLoad *)a)->addr );
+	case Iex_HappensBefore:
+		return false;
+	case Iex_FreeVariable:
+		return false;
+	case Iex_EntryPoint:
+		return false;
+	case Iex_ControlFlow:
+		return false;
+	}
+	abort();
+}
 
 void
 anf_context::prettyPrint(FILE *f)
@@ -341,6 +462,12 @@ anf_context::prettyPrint(FILE *f)
 		ppIRExpr(it->first, f);
 		fprintf(f, "\t==\t");
 		ppIRExpr(it->second, f);
+		fprintf(f, "\n");
+	}
+	fprintf(f, "\tBad pointers:\n");
+	for (auto it = badPointers.begin(); it != badPointers.end(); it++) {
+		fprintf(f, "\t\t");
+		ppIRExpr(*it, f);
 		fprintf(f, "\n");
 	}
 }
@@ -613,11 +740,16 @@ anf_context::simplify(IRExpr *a)
 		if (matches(a, *it))
 			return internIRExpr(IRExpr_Const(IRConst_U1(0)), intern);
 
+	if (!badPointers.empty() && loadsBadPointer(a))
+		return UNEVALUATABLE;
+
 	if (a->tag == Iex_Unop) {
 		IRExprUnop *ieu = (IRExprUnop *)a;
 		if (ieu->op != Iop_Not1)
 			return a;
 		IRExpr *arg = simplify(ieu->arg);
+		if (arg == UNEVALUATABLE)
+			return UNEVALUATABLE;
 		if (arg->tag == Iex_Const) {
 			IRExprConst *iec = (IRExprConst *)arg;
 			return internIRExpr(IRExpr_Const(IRConst_U1(!iec->con->Ico.U1)), intern);
@@ -649,20 +781,22 @@ anf_context::simplify(IRExpr *a)
 		IRExprAssociative *res = IRExpr_Associative(iea->nr_arguments, Iop_And1);
 		for (int i = 0; i < iea->nr_arguments; i++) {
 			IRExpr *arg = sub_context.simplify(iea->contents[i]);
-			if (arg->tag == Iex_Const) {
-				IRExprConst *iec = (IRExprConst *)arg;
-				if (!iec->con->Ico.U1)
-					return arg;
-			} else if (arg->tag == Iex_Associative &&
-			    ((IRExprAssociative *)arg)->op == Iop_And1) {
-				IRExprAssociative *argA = (IRExprAssociative *)arg;
-				for (int i = 0; i < argA->nr_arguments; i++) {
-					sub_context.addAssumption(argA->contents[i]);
-					addArgumentToAssoc(res, argA->contents[i]);
+			if (arg != UNEVALUATABLE) {
+				if (arg->tag == Iex_Const) {
+					IRExprConst *iec = (IRExprConst *)arg;
+					if (!iec->con->Ico.U1)
+						return arg;
+				} else if (arg->tag == Iex_Associative &&
+					   ((IRExprAssociative *)arg)->op == Iop_And1) {
+					IRExprAssociative *argA = (IRExprAssociative *)arg;
+					for (int i = 0; i < argA->nr_arguments; i++) {
+						sub_context.addAssumption(argA->contents[i]);
+						addArgumentToAssoc(res, argA->contents[i]);
+					}
+				} else {
+					sub_context.addAssumption(arg);
+					addArgumentToAssoc(res, arg);
 				}
-			} else {
-				sub_context.addAssumption(arg);
-				addArgumentToAssoc(res, arg);
 			}
 		}
 		if (res->nr_arguments == 1)
@@ -696,7 +830,7 @@ anf_simplify(IRExpr *a, IRExpr *assumption, internIRExprTable &intern)
 	while (!TIMEOUT) {
 		anf_context ctxt(intern, assumption);
 		IRExpr *a2 = ctxt.simplify(a);
-		if (a == a2)
+		if (a2 == UNEVALUATABLE || a == a2)
 			break;
 		a = a2;
 	}
