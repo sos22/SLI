@@ -2514,6 +2514,13 @@ top:
 			progress = true;
 		}
 
+		if ( e->op >= Iop_CmpLT8S &&
+		     e->op <= Iop_CmpLT64S &&
+		     physicallyEqual(e->arg1,e->arg2) ) {
+			res = IRExpr_Const(IRConst_U1(0));
+			break;
+		}
+
 		/* !x != x, for any x */
 		if (e->op == Iop_CmpEQ1 &&
 		    ((e->arg1->tag == Iex_Unop &&

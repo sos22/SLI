@@ -364,6 +364,8 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_CmpLT64S:
 		case Iop_CmpLE32U:
 		case Iop_CmpLE64U:
+		case Iop_CmpF32:
+		case Iop_CmpF64:
 			return clauseUnderspecified(ieb->arg1, mult) &&
 				clauseUnderspecified(ieb->arg2, mult);
 		default:

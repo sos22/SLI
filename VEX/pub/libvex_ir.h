@@ -792,6 +792,7 @@ typedef
          are recorded in the type IRCmpF64Result.
       */
       Iop_CmpF64,
+      Iop_CmpF32,
 
       /* --- Int to/from FP conversions. --- */
 

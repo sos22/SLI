@@ -27,6 +27,7 @@ enum byte_code_op {
 	/* Binary ops */
 	bcop_cmp_eq,
 	bcop_cmp_ltu,
+	bcop_cmp_lts,
 	bcop_add,
 	bcop_and,
 	bcop_or,
