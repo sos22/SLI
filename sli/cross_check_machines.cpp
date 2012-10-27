@@ -1251,7 +1251,7 @@ static bool
 addSatisfier(std::vector<EvalState> &initialCtxts, IRExpr *a)
 {
 	bool done = false;
-	for (auto sat = sat_enumerator(a);
+	for (auto sat = sat_enumerator(a, AllowableOptimisations::defaultOptimisations);
 	     !done && !sat.finished();
 	     sat.advance()) {
 		EvalState ctxt;
