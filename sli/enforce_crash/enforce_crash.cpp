@@ -1077,6 +1077,12 @@ patchSearch(Oracle *oracle,
 		if (oracle->isFunctionHead(StaticRip(*it)))
 			can_use_patch = false;
 	}
+	/* Can't use patch if that would clobber/be clobbered by an
+	   existing patch point. */
+	for (auto it = input.Patch.begin(); can_use_patch && it != input.Patch.end(); it++) {
+		if (needed > *it - 5 && needed < *it + 5)
+			can_use_patch = false;
+	}
 
 	if (can_use_patch) {
 		/* Try using a patch. */
