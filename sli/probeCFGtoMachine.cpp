@@ -1928,7 +1928,7 @@ probeCFGsToMachine(Oracle *oracle,
 		new StateMachineSideEffectAssertFalse(
 			IRExpr_Unop(
 				Iop_Not1,
-				new IRExprEntryPoint(tid, CfgLabel(88))),
+				new IRExprEntryPoint(tid, CfgLabel(51))),
 			true),
 		sm->root);
 	return sm;

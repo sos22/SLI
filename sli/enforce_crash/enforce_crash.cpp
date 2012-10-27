@@ -396,10 +396,11 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 	}
 	case Iex_Binop: {
 		auto i = (IRExprBinop *)what;
+		if (i->op == Iop_CmpF32 || i->op == Iop_CmpF64 ||
+		    i->op == Iop_64HLtoV128)
+			return NULL;
 		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
 		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
-		if (i->op == Iop_CmpF32 || i->op == Iop_CmpF64)
-			return NULL;
 		if (arg1 == i->arg1 && arg2 == i->arg2)
 			return what;
 		if (arg1 && arg2)
@@ -422,7 +423,7 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 	}
 	case Iex_Unop: {
 		auto i = (IRExprUnop *)what;
-		if (i->op == Iop_64HLto128)
+		if (i->op == Iop_V128to64 || i->op == Iop_ReinterpI32asF32)
 			return NULL;
 		int errors2;
 		int errors3;

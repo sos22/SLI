@@ -44,10 +44,10 @@
    that looks like it'll reach a convenient place in the program to do
    analysis from. */
 #ifndef PROBE_CLUSTER_THRESHOLD1
-#define PROBE_CLUSTER_THRESHOLD1 49
+#define PROBE_CLUSTER_THRESHOLD1 40
 #endif
 #ifndef PROBE_CLUSTER_THRESHOLD2
-#define PROBE_CLUSTER_THRESHOLD2 49
+#define PROBE_CLUSTER_THRESHOLD2 40
 #endif
 
 #ifndef CONFIG_DATABASE_RIP_DEPTH
