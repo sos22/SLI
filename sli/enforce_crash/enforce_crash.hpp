@@ -700,7 +700,7 @@ public:
 			     CrashSummary *summary,
 			     AddressSpace *as)
 		: roots(_roots, abs),
-		  crashCfg(roots, summaryId, summary, as, false),
+		  crashCfg(roots, summaryId, summary, as, false, abs),
 		  happensBefore(summaryId, conj, abs, crashCfg, mai),
 		  predecessorMap(crashCfg),
 		  idom(crashCfg, predecessorMap, happensBefore),

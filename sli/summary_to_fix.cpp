@@ -20,6 +20,14 @@
 
 #include "cfgnode_tmpl.cpp"
 
+#ifndef NDEBUG
+static bool debug_gen_patch = false;
+static bool debug_stack_validation = false;
+#else
+#define debug_gen_patch false
+#define debug_stack_validation false
+#endif
+
 class AddExitCallPatch : public PatchFragment<ThreadRip> {
 protected:
 	void generateEpilogue(const CfgLabel &l, ThreadRip exitRip);
@@ -200,6 +208,7 @@ avoidBranchToPatch(crashEnforcementRoots &cer,
 					auto pred = decode_instr(oracle->ms->addressSpace,
 								 *it,
 								 ThreadCfgLabel(node->rip.thread, allocLabel()),
+								 NULL,
 								 true);
 					pred->addDefault(node);
 					VexRip pred_vr(vr);
@@ -219,137 +228,229 @@ avoidBranchToPatch(crashEnforcementRoots &cer,
 	}
 }
 
-class Relocation : public GarbageCollected<Relocation, &ir_heap> {
+class InstructionLabel : public Named {
 public:
-	unsigned offset;
-	unsigned size;
-	unsigned addend;
-	Instruction<ThreadCfgLabel> *target;
-	unsigned long raw_target;
-	bool generateEpilogue;
-	bool relative;
-	Relocation(unsigned _offset,
-		   unsigned _size,
-		   Instruction<ThreadCfgLabel> *_target,
-		   bool _generateEpilogue,
-		   bool _relative)
-		: offset(_offset), size(_size), addend(0), target(_target),
-		  raw_target(0), generateEpilogue(_generateEpilogue),
-		  relative(_relative)
-	{}
-	Relocation(unsigned _offset,
-		   unsigned _size,
-		   unsigned long _raw_target,
-		   bool _generateEpilogue,
-		   bool _relative)
-		: offset(_offset), size(_size), addend(0), target(NULL),
-		  raw_target(_raw_target), generateEpilogue(_generateEpilogue),
-		  relative(_relative)
-	{}
-	Relocation(EarlyRelocation<ThreadCfgLabel> *_base,
-		   const SummaryId &summaryId,
-		   const CrashCfg &cfg,
-		   std::vector<Instruction<ThreadCfgLabel>::successor_t> &successors,
-		   unsigned _offset)
-		: offset(_offset + _base->offset),
-		  size(_base->size)
+	class entry : public Named {
+		char *mkName() const {
+			return my_asprintf("%s:%d:%s", summary.name(), tid, node->label.name());
+		}
+	public:
+		SummaryId summary;
+		unsigned tid;
+		const CFGNode *node;
+		entry(const SummaryId &_summary,
+		      unsigned _tid,
+		      const CFGNode *_node)
+			: summary(_summary), tid(_tid), node(_node)
+		{}
+		bool operator<(const entry &o) const {
+			if (summary < o.summary)
+				return true;
+			else if (o.summary < summary)
+				return false;
+			else if (tid < o.tid)
+				return true;
+			else if (tid > o.tid)
+				return false;
+			else
+				return node->label < o.node->label;
+		}
+		bool operator==(const entry &o) const {
+			return summary == o.summary &&
+				tid == o.tid &&
+				node->label == o.node->label;
+		}
+	};
+
+	enum {
+		fl_locked,
+		fl_unlocked,
+		fl_bad,
+	} flavour;
+	/* For locked instructions */
+	std::set<entry> content;
+	bool restoreRedzone;
+	/* For unlocked instructions */
+	unsigned long rip;
+	/* For both */
+	bool checkForEntry;
+	bool locked;
+private:
+	char *mkName() const {
+		switch (flavour) {
+		case fl_locked: {
+			std::vector<const char *> fragments;
+			for (auto it = content.begin(); it != content.end(); it++)
+				fragments.push_back(it->name());
+			const char *suffix;
+			if (!restoreRedzone &&
+			    checkForEntry &&
+			    locked)
+				suffix = ")";
+			else
+				suffix = vex_asprintf(
+					"){%s%s%s%s%s}",
+					(restoreRedzone ? "redzone" : ""),
+					(restoreRedzone && (!checkForEntry || !locked) ? "," : ""),
+					(checkForEntry ? "" : "non-entry"),
+					(!checkForEntry && !locked ? "," : ""),
+					(locked ? "" : "unlocked"));
+			return flattenStringFragmentsMalloc(fragments, ";",
+							    "L(",
+							    suffix);
+		}
+		case fl_unlocked:
+			return my_asprintf("raw:0x%lx%s", rip,
+					   checkForEntry ?
+					   (locked ? "{locked}" : "") :
+					   (locked ? "{non-entry,locked}" : "{non-entry}"));
+		case fl_bad:
+			return strdup("<bad>");
+		}
+		abort();
+	}
+public:
+	InstructionLabel() : flavour(fl_bad) {}
+	static InstructionLabel raw(unsigned long _rip, bool locked)
 	{
-		if (auto rrr = dynamic_cast<RipRelativeRelocation<ThreadCfgLabel> *> (_base)) {
-			addend = rrr->nrImmediateBytes;
-			generateEpilogue = false;
-			relative = true;
-			target = NULL;
-			for (auto it = successors.begin(); it != successors.end(); it++) {
-				if (it->instr && it->instr->rip == rrr->target) {
-					target = it->instr;
-					break;
-				}
+		InstructionLabel res;
+		res.flavour = fl_unlocked;
+		res.rip = _rip;
+		res.checkForEntry = true;
+		res.locked = locked;
+		return res;
+	}
+	static InstructionLabel rawDoneEntryCheck(unsigned long _rip, bool locked)
+	{
+		InstructionLabel res;
+		res.flavour = fl_unlocked;
+		res.rip = _rip;
+		res.checkForEntry = false;
+		res.locked = locked;
+		return res;
+	}
+	static InstructionLabel compound(const std::set<entry> &_content, bool locked)
+	{
+		InstructionLabel res;
+		res.flavour = fl_locked;
+		res.content = _content;
+		res.restoreRedzone = false;
+		res.checkForEntry = true;
+		res.locked = locked;
+		return res;
+	}
+	static InstructionLabel compoundRestoreRedZone(const std::set<entry> &_content, bool locked)
+	{
+		InstructionLabel res;
+		res.flavour = fl_locked;
+		res.content = _content;
+		res.restoreRedzone = true;
+		res.checkForEntry = true;
+		res.locked = locked;
+		return res;
+	}
+	static InstructionLabel compoundRestoreRedZoneSkipEntry(const std::set<entry> &_content, bool locked)
+	{
+		InstructionLabel res;
+		res.flavour = fl_locked;
+		res.content = _content;
+		res.restoreRedzone = true;
+		res.checkForEntry = false;
+		res.locked = locked;
+		return res;
+	}
+	static InstructionLabel compoundSkipEntry(const std::set<entry> &_content, bool locked)
+	{
+		InstructionLabel res;
+		res.flavour = fl_locked;
+		res.content = _content;
+		res.restoreRedzone = false;
+		res.checkForEntry = false;
+		res.locked = locked;
+		return res;
+	}
+	static InstructionLabel simple(const entry &_content, bool locked)
+	{
+		std::set<entry> content;
+		content.insert(_content);
+		return compound(content, locked);
+	}
+
+	InstructionLabel clearRestoreRedZone() const {
+		if (checkForEntry)
+			return compound(content, locked);
+		else
+			return compoundSkipEntry(content, locked);
+	}
+
+	InstructionLabel acquiredLock() const {
+		InstructionLabel res = *this;
+		res.locked = true;
+		res.clearName();
+		return res;
+	}
+	InstructionLabel releasedLock() const {
+		InstructionLabel res = *this;
+		res.locked = false;
+		res.clearName();
+		return res;
+	}
+
+	unsigned long getRip() const {
+		switch (flavour) {
+		case fl_locked: {
+			if (content.empty())
+				abort();
+			unsigned long res;
+			for (auto it = content.begin(); it != content.end(); it++) {
+				if (it == content.begin())
+					res = it->node->rip.unwrap_vexrip();
+				else
+					assert(res == it->node->rip.unwrap_vexrip());
 			}
-			if (!target) {
-				generateEpilogue = true;
-				raw_target = cfg.labelToRip(ConcreteCfgLabel(summaryId, rrr->target.label)).unwrap_vexrip();
-			}
-		} else if (auto rrdr = dynamic_cast<RipRelativeDataRelocation<ThreadCfgLabel> *>(_base)) {
-			addend = rrdr->nrImmediateBytes;
-			generateEpilogue = false;
-			target = NULL;
-			raw_target = rrdr->target;
-			relative = true;
-		} else if (auto rrbr = dynamic_cast<RipRelativeBranchRelocation<ThreadCfgLabel> *>(_base)) {
-			addend = 0;
-			generateEpilogue = false;
-			relative = true;
-			target = NULL;
-			for (auto it = successors.begin(); it != successors.end(); it++) {
-				if (it->instr && it->instr->rip == rrbr->target) {
-					target = it->instr;
-					break;
-				}
-			}
-			if (!target) {
-				generateEpilogue = true;
-				raw_target = cfg.labelToRip(ConcreteCfgLabel(summaryId, rrbr->target.label)).unwrap_vexrip();
-			}
-		} else if (auto rrBr = dynamic_cast<RipRelativeBlindRelocation<ThreadCfgLabel> *>(_base)) {
-			addend = 0;
-			generateEpilogue = rrBr->is_branch;
-			relative = true;
-			target = NULL;
-			raw_target = rrBr->target;
-		} else {
+			return res;
+		}
+		case fl_unlocked:
+			return rip;
+		case fl_bad:
 			abort();
 		}
+		abort();
 	}
 
-	void visit(HeapVisitor &hv) {
-		hv(target);
+	bool operator != (const InstructionLabel &o) const {
+		return *this < o || o < *this;
 	}
-	NAMED_CLASS
+	bool operator<(const InstructionLabel &o) const {
+		if (flavour < o.flavour)
+			return true;
+		if (flavour > o.flavour)
+			return false;
+		if (flavour == fl_bad)
+			return false;
+		if (checkForEntry < o.checkForEntry)
+			return true;
+		if (checkForEntry > o.checkForEntry)
+			return false;
+		if (locked < o.locked)
+			return true;
+		if (locked > o.locked)
+			return false;
+		switch (flavour) {
+		case fl_locked:
+			if (content < o.content)
+				return true;
+			if (content > o.content)
+				return false;
+			return restoreRedzone < o.restoreRedzone;
+		case fl_unlocked:
+			return rip < o.rip;
+		case fl_bad:
+			abort();
+		}
+		abort();
+	}
 };
-
-asm (
-	"__call_sequence_template_start:\n"
-	"lea -128(%rsp), %rsp\n"
-	"__call_sequence_template_done_redzone:\n"
-	"pushq %rsi\n"
-	"__call_sequence_template_load_rsi:\n"
-	"movq $0x1122334455667788, %rsi\n"
-	"call *%rsi\n"
-	"popq %rsi\n"
-	"lea 128(%rsp), %rsp\n"
-	"__call_sequence_template_end:\n"
-	);
-
-static void
-emitCallSequence(std::vector<unsigned char> &content,
-		 const char *target,
-		 std::vector<LateRelocation *> &lateRelocs,
-		 bool already_done_redzone)
-{
-	extern const unsigned char
-		__call_sequence_template_start[],
-		__call_sequence_template_done_redzone[],
-		__call_sequence_template_load_rsi[],
-		__call_sequence_template_end[];
-	unsigned start_sz = content.size();
-	const unsigned char *start;
-	if (already_done_redzone)
-		start = __call_sequence_template_done_redzone;
-	else
-		start = __call_sequence_template_start;
-	for (const unsigned char *cursor = start;
-	     cursor != __call_sequence_template_end;
-	     cursor++)
-		content.push_back(*cursor);
-
-	lateRelocs.push_back(
-		new LateRelocation(
-			start_sz + __call_sequence_template_load_rsi - start + 2,
-			8,
-			vex_asprintf("%s", target),
-			0,
-			false));
-}
 
 struct trans_table_entry {
 	unsigned offset_in_patch;
@@ -362,547 +463,939 @@ struct trans_table_entry {
 	{}
 };
 
-static void
-segregateRoots(const std::map<VexRip, Instruction<ThreadCfgLabel> *> &inp,
-	       std::map<unsigned long, std::map<VexRip, Instruction<ThreadCfgLabel> *> > &out)
-{
-	for (auto it = inp.begin(); it != inp.end(); it++)
-		out[it->first.unwrap_vexrip()].insert(*it);
-}
+class Relocation : public GarbageCollected<Relocation, &ir_heap> {
+public:
+	unsigned offset;
+	InstructionLabel target;
 
-static void
-emitOneInstruction(const VexRip &vr,
-		   const VexRip &entryVr,
-		   Instruction<ThreadCfgLabel> *node,
-		   const SummaryId &summaryId,
-		   const CrashCfg &cfg,
-		   std::vector<unsigned char> &patch_content,
-		   std::vector<Relocation *> &relocs,
-		   std::vector<LateRelocation *> &lateRelocs,
-		   std::vector<trans_table_entry> &transTable)
-{
-
-	transTable.push_back(
-		trans_table_entry(
-			patch_content.size(),
-			vr.unwrap_vexrip(),
-			vex_asprintf("CFG node %s, vexrip %s, for entry point %s",
-				     node->rip.name(),
-				     vr.name(),
-				     entryVr.name())));
-	for (auto it = node->relocs.begin();
-	     it != node->relocs.end();
-	     it++)
-		relocs.push_back(new Relocation(*it, summaryId, cfg, node->successors, patch_content.size()));
-	for (auto it = node->lateRelocs.begin();
-	     it != node->lateRelocs.end();
-	     it++) {
-		LateRelocation *lr = *it;
-		assert(lr->nrImmediateBytes != 4);
-		lateRelocs.push_back(
-			new LateRelocation(
-				lr->offset + patch_content.size(),
-				lr->size,
-				lr->target,
-				lr->nrImmediateBytes,
-				lr->relative));
+	Relocation(unsigned _offset, const InstructionLabel &_target)
+		: offset(_offset), target(_target)
+	{}
+	void visit(HeapVisitor &) {
 	}
+	NAMED_CLASS
+};
 
-	if (node->len == 1 && node->content[0] == 0xc3) {
-		/* Special case for ret instructions.  These are in
-		   theory redundant because of the stack context
-		   validation logic, so all we need to do is adjust
-		   the stack pointer.  Use an lea to do so. */
-		patch_content.push_back(0x48);
-		patch_content.push_back(0x8d);
-		patch_content.push_back(0x64);
-		patch_content.push_back(0x24);
-		patch_content.push_back(0x08);
-	} else {
-		for (unsigned x = 0; x < node->len; x++)
-			patch_content.push_back(node->content[x]);
-	}
-}
-
-static void
-validateStackContext(Oracle *oracle,
-		     const SummaryId &summaryId,
-		     const CrashCfg &cfg,
-		     const std::map<VexRip, Instruction<ThreadCfgLabel> *> &cfgRoots2,
-		     std::vector<std::pair<VexRip, unsigned> > &branchesToEntryPoints,
-		     std::vector<unsigned char> &content,
-		     std::vector<LateRelocation *> &lateRelocs,
-		     std::vector<trans_table_entry> &transTable)
-{
-	unsigned offset = 136;
-
-	std::vector<VexRip> rips;
-	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++)
-		rips.push_back(it->first);
-
-	std::vector<unsigned> branchesToEscape;
-
-	for (unsigned idx = 0; idx < rips.size(); idx++) {
-		const VexRip vr(rips[idx]);
-		assert(vr.stack.size() > 1);
-		std::vector<unsigned> branchesToNextValidate;
-		/* This generates a series of stack validators, each
-		   of which is structured like this:
-
-		   cmp stack_value_1, off1(%rsp)
-		   jne next_validator
-		   cmp stack_value_2, off2(%rsp)
-		   jne next_validator
-		   ...
-		   cmp stack_value_N, offN(%rsp)
-		   je start_of_actual_machine
-		   next_validator:
-		   ...
-
-		   If this is the last validator then next_validator
-		   instead branches back to the original program. */
-		for (unsigned x = 1; x < vr.stack.size(); x++) {
-			offset += stack_offset(oracle, vr.stack[vr.stack.size() - x]);
-			unsigned long expected = vr.stack[vr.stack.size() - x - 1];
-			if (expected < 0x100000000ul) {
-				/* cmpq imm32, offset(%rsp) */
-				content.push_back(0x48);
-				content.push_back(0x81);
-				content.push_back(0xbc);
-				content.push_back(0x24);
-				content.push_back(offset);
-				content.push_back(offset >> 8);
-				content.push_back(offset >> 16);
-				content.push_back(offset >> 24);
-				content.push_back(expected);
-				content.push_back(expected >> 8);
-				content.push_back(expected >> 16);
-				content.push_back(expected >> 24);
-				/* jne rel32 or je rel32. */
-				content.push_back(0x0f);
-				if (idx == rips.size() - 1)
-					content.push_back(0x84);
-				else
-					content.push_back(0x85);
-				content.push_back(0);
-				content.push_back(0);
-				content.push_back(0);
-				content.push_back(0);
-				if (idx == rips.size() - 1)
-					branchesToEntryPoints.push_back(std::pair<VexRip, unsigned>(vr, content.size() - 4));
-				else
-					branchesToNextValidate.push_back(content.size() - 4);
-			} else {
-				/* Can't check these ones yet. */
-				abort();
-			}
-		}
-
-		if (idx < rips.size() - 1) {
-			for (auto it = branchesToNextValidate.begin();
-			     it != branchesToNextValidate.end();
-			     it++) {
-				/* Fix up the branch */
-				long delta = content.size() - *it - 4;
-				content[*it] = delta;
-				content[*it + 1] = delta >> 8;
-				content[*it + 2] = delta >> 16;
-				content[*it + 3] = delta >> 24;
-			}
-		} else {
-			branchesToEscape = branchesToNextValidate;
-		}
-	}
-
-	/* None of the stacks match, so go back to the original
-	 * program. */
-
-	/* Where are we actually going? */
-	unsigned long targ = rips[0].unwrap_vexrip();
-	for (unsigned x = 1; x < rips.size(); x++)
-		assert(targ == rips[x].unwrap_vexrip());
-
-	/* popf */
-	content.push_back(0x9d);
-	/* Restore red zone with lea 0x80(%rsp), %rsp */
-	content.push_back(0x48);
-	content.push_back(0x8d);
-	content.push_back(0xa4);
-	content.push_back(0x24);
-	content.push_back(0x80);
-	content.push_back(0x00);
-	content.push_back(0x00);
-	content.push_back(0x00);
-	/* Emit the instruction which we clobbered to set up the
-	 * patch. */
+class patch {
+public:
+	std::vector<unsigned char> content;
+	std::map<InstructionLabel, unsigned> offsets;
+	std::vector<trans_table_entry> transTable;
 	std::vector<Relocation *> relocs;
-	emitOneInstruction(rips[0],
-			   VexRip(),
-			   cfgRoots2.begin()->second,
-			   summaryId,
-			   cfg,
-			   content,
-			   relocs,
-			   lateRelocs,
-			   transTable);
-	/* If that generated any further early relocs then we're
-	   screwed, because we won't be able to resolve them.  Late
-	   relocs are okay, though. */
-	for (auto it = relocs.begin(); it != relocs.end(); it++) {
-		Relocation *reloc = *it;
-		assert(!reloc->target && !reloc->generateEpilogue);
-		lateRelocs.push_back(
-			new LateRelocation(
-				reloc->offset,
-				4,
-				vex_asprintf("0x%lx", reloc->raw_target),
-				reloc->addend,
-				reloc->relative));
-	}
+	std::vector<LateRelocation *> lateRelocs;
+};
 
-	/* jmp rel32 */
-	content.push_back(0xe9);
-	content.push_back(0);
-	content.push_back(0);
-	content.push_back(0);
-	content.push_back(0);
-
-	targ += getInstructionSize(oracle->ms->addressSpace, StaticRip(targ));
-	lateRelocs.push_back(
+static void
+emitBranchToHost(patch &p, unsigned long rip)
+{
+	p.content.push_back(0xe9);
+	p.content.push_back(0);
+	p.content.push_back(0);
+	p.content.push_back(0);
+	p.content.push_back(0);
+	p.lateRelocs.push_back(
 		new LateRelocation(
-			content.size() - 4,
+			p.content.size() - 4,
 			4,
-			vex_asprintf("0x%lxul", targ),
+			vex_asprintf("0x%lx", rip),
 			0,
 			true));
 }
 
+
+class stack_context : public Named {
+	char *mkName() const {
+		std::vector<const char *> fragments;
+		for (auto it = context.begin();
+		     it != context.end();
+		     it++)
+			fragments.push_back(my_asprintf("%d -> %lx", it->first, it->second));
+		char *res = flattenStringFragmentsMalloc(fragments, ", ", "StackContext(", ")");
+		for (auto it = fragments.begin();
+		     it != fragments.end();
+		     it++)
+			free((void *)*it);
+		return res;
+	}
+public:
+	std::vector<std::pair<int, unsigned long> > context;
+	stack_context stripOne() const {
+		assert(!context.empty());
+		stack_context res(*this);
+		res.context.pop_back();
+		res.clearName();
+		return res;
+	}
+	bool operator<(const stack_context &o) const {
+		return context < o.context;
+	}
+};
+
+struct validation_machine {
+	std::set<std::pair<stack_context, InstructionLabel::entry> > toValidate;
+	std::set<InstructionLabel::entry> accepted;
+	bool operator<(const validation_machine &o) const {
+		if (toValidate < o.toValidate)
+			return true;
+		if (toValidate > o.toValidate)
+			return false;
+		return accepted < o.accepted;
+	}
+	void prettyPrint(FILE *f, const char *prefix) const {
+		fprintf(f, "%stoValidate:\n", prefix);
+		for (auto it = toValidate.begin();
+		     it != toValidate.end();
+		     it++)
+			fprintf(f, "%s\t%s -> %s\n", prefix, it->first.name(), it->second.name());
+		fprintf(f, "%sAccepted:\n", prefix);
+		for (auto it = accepted.begin();
+		     it != accepted.end();
+		     it++)
+			fprintf(f, "%s\t%s\n", prefix, it->name());
+	}
+};
+
 static void
-emitInternalJump(unsigned to_offset,
-		 std::vector<unsigned char> &patch_content)
+emitInternalJump(patch &p, unsigned to)
 {
-	long delta = to_offset - patch_content.size();
+	long delta = to - p.content.size();
 	/* Try with an 8-bit jump */
 	if (delta >= -126 && delta < 130) {
-		patch_content.push_back(0xeb);
-		patch_content.push_back(delta - 2);
+		p.content.push_back(0xeb);
+		p.content.push_back(delta - 2);
 	} else {
 		/* Use a 32 bit one */
-		patch_content.push_back(0xe9);
+		p.content.push_back(0xe9);
 		delta -= 5;
-		patch_content.push_back(delta & 0xff);
-		patch_content.push_back((delta >> 8) & 0xff);
-		patch_content.push_back((delta >> 16) & 0xff);
-		patch_content.push_back((delta >> 24) & 0xff);
+		p.content.push_back(delta & 0xff);
+		p.content.push_back((delta >> 8) & 0xff);
+		p.content.push_back((delta >> 16) & 0xff);
+		p.content.push_back((delta >> 24) & 0xff);
 	}
 }
 
 static void
-emitExitSequence(unsigned long exit_to,
-		 std::vector<unsigned char> &patch_content,
-		 std::vector<Relocation *> &relocs,
-		 std::vector<LateRelocation *> &lateRelocs,
-		 std::vector<trans_table_entry> &transTable,
-		 const std::set<unsigned long> &clobberedInstructions,
-		 std::map<unsigned long, unsigned> &exitSequences,
-		 const SummaryId &summaryId,
-		 const CrashCfg &cfg,
-		 AddressSpace *as)
+emitInternalJump(patch &p, const InstructionLabel &to)
 {
-top:
-	if (!clobberedInstructions.count(exit_to)) {
-		/* Easy case: just branch to the original program
-		 * instruction. */
-		patch_content.push_back(0xe9);
-		patch_content.push_back(0);
-		patch_content.push_back(0);
-		patch_content.push_back(0);
-		patch_content.push_back(0);
-		lateRelocs.push_back(
-			new LateRelocation(
-				patch_content.size() - 4,
-				4,
-				vex_asprintf("0x%lx", exit_to),
-				0,
-				true));
-		return;
-	}
-	/* We're trying to exit to an instruction which was clobbered
-	   by one of our patch points.  That's a little more
-	   tricky. */
-	if (exitSequences.count(exit_to)) {
-		/* Reuse existing sequence */
-		emitInternalJump(exitSequences[exit_to], patch_content);
-		return;
-	}
-
-	/* Generate a new exit sequence */
-	exitSequences[exit_to] = patch_content.size();
-
-	Instruction<ThreadCfgLabel> *newInstr =
-		decode_instr(as, exit_to, ThreadCfgLabel(AbstractThread::uninitialised(), CfgLabel(-1)), true);
-	if (!newInstr)
-		errx(1, "need to decode instruction at %lx, but decoder failed!", exit_to);
-	emitOneInstruction(VexRip::invent_vex_rip(exit_to),
-			   VexRip::invent_vex_rip(exit_to),
-			   newInstr,
-			   summaryId,
-			   cfg,
-			   patch_content,
-			   relocs,
-			   lateRelocs,
-			   transTable);
-	exit_to += newInstr->len;
-	goto top;
-}
-
-static void
-emitReleaseSequence(unsigned long exit_to,
-		    std::map<unsigned long, unsigned> &releaseSequences,
-		    std::vector<unsigned char> &patch_content,
-		    std::vector<Relocation *> &relocs,
-		    std::vector<LateRelocation *> &lateRelocs,
-		    std::vector<trans_table_entry> &transTable,
-		    const std::set<unsigned long> &clobberedInstructions,
-		    std::map<unsigned long, unsigned> &exitSequences,
-		    const SummaryId &summaryId,
-		    const CrashCfg &cfg,
-		    AddressSpace *as)
-{
-	if (releaseSequences.count(exit_to)) {
-		/* Already have a release sequence here, branch to
-		   it. */
-		emitInternalJump(releaseSequences[exit_to], patch_content);
+	if (p.offsets.count(to)) {
+		emitInternalJump(p, p.offsets[to]);
 	} else {
-		/* Generate a new release sequence here */
-		unsigned offset = patch_content.size();
-		releaseSequences[exit_to] = offset;
-		emitCallSequence(patch_content, "(unsigned long)release_lock", lateRelocs, false);
-		emitExitSequence(exit_to,
-				 patch_content,
-				 relocs,
-				 lateRelocs,
-				 transTable,
-				 clobberedInstructions,
-				 exitSequences,
-				 summaryId,
-				 cfg,
-				 as);
+		p.content.push_back(0xe9);
+		p.content.push_back(0);
+		p.content.push_back(0);
+		p.content.push_back(0);
+		p.content.push_back(0);
+		p.relocs.push_back(new Relocation(
+					   p.content.size() - 4,
+					   to));
 	}
 }
 
-static unsigned
-genCodeForEntryPoint(const std::set<unsigned long> &clobberedInstructions,
-		     std::vector<unsigned char> &patch_content,
-		     std::vector<LateRelocation *> &lateRelocs,
-		     std::vector<trans_table_entry> &transTable,
-		     const CrashCfg &cfg,
-		     const SummaryId &summaryId,
-		     Oracle *oracle,
-		     const std::map<VexRip, Instruction<ThreadCfgLabel> *> &cfgRoots2)
-{
-	unsigned result = patch_content.size();
-	bool have_entry_validate;
-	assert(cfgRoots2.size() > 0);
-
-	/* First thing we do is get out of the red zone. */
-	patch_content.push_back(0x48);
-	patch_content.push_back(0x8d);
-	patch_content.push_back(0x64);
-	patch_content.push_back(0x24);
-	patch_content.push_back(0x80);
-
-	/* Start by doing something to check all of the stack
-	 * contexts. */
-	std::vector<std::pair<VexRip, unsigned> > branchesToEntryPoints;
-	if (cfgRoots2.size() > 1 || cfgRoots2.begin()->first.stack.size() > 1) {
-		/* pushf */
-		patch_content.push_back(0x9c);
-
-		validateStackContext(oracle, summaryId, cfg, cfgRoots2,
-				     branchesToEntryPoints,
-				     patch_content, lateRelocs,
-				     transTable);
-		have_entry_validate = true;
-	} else {
-		have_entry_validate = false;
-	}
-
-	std::map<VexRip, unsigned> entryMap;
-	std::map<unsigned long, unsigned> releaseSequences;
-	std::map<unsigned long, unsigned> exitSequences;
-	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
-		const VexRip &entryVr(it->first);
-		std::vector<Instruction<ThreadCfgLabel> *> toEmit;
-		std::map<Instruction<ThreadCfgLabel> *, unsigned> instrOffsets;
-		std::vector<Relocation *> relocs;
-
-		assert(!entryMap.count(entryVr));
-		entryMap[entryVr] = patch_content.size();
-
-		if (have_entry_validate) {
-			/* popf, to match the pushf in entry point
-			 * validation. */
-			patch_content.push_back(0x9d);
-		}
-
-		emitCallSequence(patch_content, "(unsigned long)acquire_lock", lateRelocs, true);
-
-		toEmit.push_back(it->second);
-		while (!toEmit.empty()) {
-			Instruction<ThreadCfgLabel> *node = toEmit.back();
-			toEmit.pop_back();
-			while (1) {
-				auto it_did_insert = instrOffsets.insert(std::pair<Instruction<ThreadCfgLabel> *, unsigned>(node, patch_content.size()));
-				auto did_insert = it_did_insert.second;
-				if (!did_insert) {
-					/* We already have something
-					 * for this instruction, so
-					 * just insert a branch. */
-					patch_content.push_back(0xe9);
-					patch_content.push_back(0);
-					patch_content.push_back(0);
-					patch_content.push_back(0);
-					patch_content.push_back(0);
-					relocs.push_back(
-						new Relocation(
-							patch_content.size() - 4,
-							4,
-							node,
-							false,
-							true));
-					break;
-				}
-				VexRip vr(
-					cfg.labelToRip(
-						ConcreteCfgLabel(
-							summaryId,
-							node->label)));
-				emitOneInstruction(vr, entryVr, node,
-						   summaryId, cfg,
-						   patch_content,
-						   relocs,
-						   lateRelocs,
-						   transTable);
-				if (node->successors.empty())
-					emitReleaseSequence(vr.unwrap_vexrip() + node->len,
-							    releaseSequences,
-							    patch_content,
-							    relocs,
-							    lateRelocs,
-							    transTable,
-							    clobberedInstructions,
-							    exitSequences,
-							    summaryId,
-							    cfg,
-							    oracle->ms->addressSpace);
-				Instruction<ThreadCfgLabel> *next = NULL;
-				for (auto it = node->successors.begin(); it != node->successors.end(); it++) {
-					if (!it->instr)
-						continue;
-					if (next)
-						toEmit.push_back(it->instr);
-					else
-						next = it->instr;
-				}
-				if (!next)
-					break;
-				node = next;
+struct validater_context {
+	std::vector<std::pair<unsigned, validation_machine> > relocs;
+	std::map<validation_machine, unsigned> offsets;
+	std::vector<validation_machine> pending;
+	void flush(patch &p) {
+		for (auto it = relocs.begin(); it != relocs.end(); ) {
+			if (debug_stack_validation) {
+				printf("Process validation reloc, offset %d ->\n",
+				       it->first);
+				it->second.prettyPrint(stdout, "");
 			}
-		}
-
-		for (auto it = relocs.begin(); it != relocs.end(); it++) {
-			Relocation *reloc = *it;
-			if (reloc->target || reloc->generateEpilogue) {
-				unsigned offset;
-				if (reloc->target) {
-					assert(instrOffsets.count(reloc->target));
-					offset = instrOffsets[reloc->target];
-				} else {
-					offset = patch_content.size();
-					emitReleaseSequence(reloc->raw_target,
-							    releaseSequences,
-							    patch_content,
-							    relocs,
-							    lateRelocs,
-							    transTable,
-							    clobberedInstructions,
-							    exitSequences,
-							    summaryId,
-							    cfg,
-							    oracle->ms->addressSpace);
-				}
-				long delta = offset - reloc->offset + reloc->addend - 4;
-				patch_content[reloc->offset  ] = delta;
-				patch_content[reloc->offset+1] = delta >> 8;
-				patch_content[reloc->offset+2] = delta >> 16;
-				patch_content[reloc->offset+3] = delta >> 24;
+			if (offsets.count(it->second)) {
+				printf("Ready to process\n");
+				unsigned reloc_offset = it->first;
+				unsigned res_offset = offsets[it->second];
+				int delta = res_offset - reloc_offset;
+				p.content[reloc_offset - 4] = delta;
+				p.content[reloc_offset - 3] = delta >> 8;
+				p.content[reloc_offset - 2] = delta >> 16;
+				p.content[reloc_offset - 1] = delta >> 24;
+				it = relocs.erase(it);
 			} else {
-				if (clobberedInstructions.count(reloc->raw_target)) {
-					unsigned offset = patch_content.size();
-					emitExitSequence(reloc->raw_target,
-							 patch_content,
-							 relocs,
-							 lateRelocs,
-							 transTable,
-							 clobberedInstructions,
-							 exitSequences,
-							 summaryId,
-							 cfg,
-							 oracle->ms->addressSpace);
-					long delta = offset - reloc->offset + reloc->addend - 4;
-					patch_content[reloc->offset  ] = delta;
-					patch_content[reloc->offset+1] = delta >> 8;
-					patch_content[reloc->offset+2] = delta >> 16;
-					patch_content[reloc->offset+3] = delta >> 24;
+				printf("Still pending\n");
+				pending.push_back(it->second);
+				it++;
+			}
+		}
+		for (auto it = pending.begin(); it != pending.end(); ) {
+			if (offsets.count(*it)) {
+				it = pending.erase(it);
+			} else {
+				it++;
+			}
+		}
+ 	}
+};
+
+static void
+emitValidater(patch &p,
+	      unsigned long rip,
+	      struct validater_context &ctxt,
+	      bool locked,
+	      validation_machine machine)
+{
+	if (debug_stack_validation) {
+		printf("emitValidater: rip = %lx, machine =\n", rip);
+		machine.prettyPrint(stdout, "\t");
+	}
+	/* Anything with a now-empty context is accepted */
+	for (auto it = machine.toValidate.begin();
+	     it != machine.toValidate.end();
+		) {
+		if (it->first.context.empty()) {
+			machine.accepted.insert(it->second);
+			machine.toValidate.erase(it++);
+		} else {
+			it++;
+		}
+	}
+	if (machine.toValidate.empty()) {
+		/* We're done */
+		if (debug_stack_validation)
+			printf("\t-> all done\n");
+		emitInternalJump(p, InstructionLabel::compoundRestoreRedZoneSkipEntry(machine.accepted, locked));
+		return;
+	}
+	/* Otherwise, need to do some more validation.  Always pick
+	 * the nearest (i.e. lowest offset) entry in the stack
+	 * context. */
+	int nearest_offset = -1;
+	for (auto it = machine.toValidate.begin();
+	     it != machine.toValidate.end();
+	     it++) {
+		if (it->first.context[0].first > nearest_offset)
+			nearest_offset = it->first.context[0].first;
+	}
+	assert(nearest_offset != -1);
+	if (debug_stack_validation)
+		printf("\tSplit on offset %d\n", nearest_offset);
+	/* Now split based on that offset */
+	std::map<unsigned long, validation_machine> split;
+	std::set<std::pair<stack_context, InstructionLabel::entry> > unsplit;
+	for (auto it = machine.toValidate.begin(); it != machine.toValidate.end(); it++) {
+		if (it->first.context[0].first == nearest_offset) {
+			split[it->first.context[0].second].toValidate.insert(
+				std::pair<stack_context, InstructionLabel::entry>(
+					it->first.stripOne(),
+					it->second));
+		} else {
+			unsplit.insert(*it);
+		}
+	}
+	for (auto it = split.begin();
+	     it != split.end();
+	     it++) {
+		it->second.accepted = machine.accepted;
+		it->second.toValidate |= unsplit;
+	}
+	/* Now emit the validater */
+
+	if (debug_stack_validation) {
+		printf("\tSplit validaters:\n");
+		for (auto it = split.begin();
+		     it != split.end();
+		     it++) {
+			printf("\t\t%lx ->\n", it->first);
+			it->second.prettyPrint(stdout, "\t\t\t");
+		}
+	}
+	/* 136 to get past red zone and save rflags */
+	int offset = 136 + nearest_offset;
+	for (auto it = split.begin(); it != split.end(); it++) {
+		unsigned long expected = it->first;
+		if (expected >= 0x100000000ul) {
+			/* Can't handle this case yet */
+			abort();
+		}
+		/* cmpq imm32, offset(%rsp) */
+		p.content.push_back(0x48);
+		p.content.push_back(0x81);
+		p.content.push_back(0xbc);
+		p.content.push_back(0x24);
+		p.content.push_back(offset);
+		p.content.push_back(offset >> 8);
+		p.content.push_back(offset >> 16);
+		p.content.push_back(offset >> 24);
+		p.content.push_back(expected);
+		p.content.push_back(expected >> 8);
+		p.content.push_back(expected >> 16);
+		p.content.push_back(expected >> 24);
+		/* je rel32 */
+		p.content.push_back(0x0f);
+		p.content.push_back(0x84);
+		p.content.push_back(1);
+		p.content.push_back(2);
+		p.content.push_back(3);
+		p.content.push_back(4);
+		ctxt.relocs.push_back(
+			std::pair<unsigned, validation_machine>(p.content.size(), it->second));
+	}
+
+	/* None of the validaters fired.  Take what we have. */
+	if (!machine.accepted.empty()) {
+		emitInternalJump(p, InstructionLabel::compoundRestoreRedZoneSkipEntry(machine.accepted, locked));
+		ctxt.flush(p);
+		if (debug_stack_validation) {
+			printf("\tFall back to {");
+			for (auto it = machine.accepted.begin(); it != machine.accepted.end(); it++) {
+				if (it != machine.accepted.begin())
+					printf(", ");
+				printf("%s", it->name());
+			}
+			printf("}\n");
+		}
+		return;
+	}
+
+	/* Don't have anything -> get out */
+
+	/* popf */
+	p.content.push_back(0x9d);
+	/* Restore red zone */
+	p.content.push_back(0x48);
+	p.content.push_back(0x8d);
+	p.content.push_back(0xa4);
+	p.content.push_back(0x24);
+	p.content.push_back(0x80);
+	p.content.push_back(0x00);
+	p.content.push_back(0x00);
+	p.content.push_back(0x00);
+
+	ctxt.flush(p);
+	if (!ctxt.pending.empty()) {
+		if (debug_stack_validation)
+			printf("\tFall back to raw %lx\n", rip);
+		emitInternalJump(p, InstructionLabel::rawDoneEntryCheck(rip, locked));
+	} else {
+		if (debug_stack_validation)
+			printf("No epilogue\n");
+		assert(ctxt.relocs.empty());
+	}
+}
+
+static stack_context
+ripToStackContext(Oracle *oracle, const VexRip &vr)
+{
+	unsigned offset = 0;
+	stack_context res;
+	for (unsigned x = 1; x < vr.stack.size(); x++) {
+		offset += stack_offset(oracle, vr.stack[vr.stack.size() - x ]);
+		res.context.push_back(
+			std::pair<int, unsigned long>(
+				offset, vr.stack[vr.stack.size() - x - 1]));
+	}
+	return res;
+}
+
+static void
+stackValidatedEntryPoints(Oracle *oracle,
+			  patch &p,
+			  const InstructionLabel &start,
+			  const std::set<InstructionLabel::entry> &entries,
+			  bool locked)
+{
+	if (debug_stack_validation) {
+		printf("Stack validated entry point at %s\n", start.name());
+		printf("Options:\n");
+		for (auto it = entries.begin(); it != entries.end(); it++)
+			printf("\t%s\n", it->name());
+	}
+
+	/* Get out of the red zone. */
+	p.content.push_back(0x48);
+	p.content.push_back(0x8d);
+	p.content.push_back(0x64);
+	p.content.push_back(0x24);
+	p.content.push_back(0x80);
+	/* pushf */
+	p.content.push_back(0x9c);
+
+	validation_machine validater;
+	validater.accepted.insert(start.content.begin(), start.content.end());
+	for (auto it = entries.begin(); it != entries.end(); it++)
+		validater.toValidate.insert(
+			std::pair<stack_context, InstructionLabel::entry>
+			(ripToStackContext(oracle, it->node->rip), *it));
+	if (debug_stack_validation) {
+		printf("Initial validater:\n");
+		validater.prettyPrint(stdout, "");
+	}
+	struct validater_context ctxt;
+	ctxt.pending.push_back(validater);
+	while (!ctxt.pending.empty()) {
+		validation_machine m(ctxt.pending.back());
+		ctxt.pending.pop_back();
+		if (ctxt.offsets.count(m))
+			continue;
+		ctxt.offsets[m] = p.content.size();
+		emitValidater(p, start.getRip(), ctxt, locked, m);
+		ctxt.flush(p);
+	}
+	assert(ctxt.relocs.empty());
+}
+
+typedef std::map<SummaryId, std::vector<std::pair<unsigned, const CFGNode *> > > summaryRootsT;
+static void
+findEntryLabels(unsigned long rip,
+		std::set<InstructionLabel::entry> &entryPoints,
+		const summaryRootsT &summaryRoots)
+{
+	for (auto it = summaryRoots.begin(); it != summaryRoots.end(); it++) {
+		SummaryId summary(it->first);
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			unsigned thread = it2->first;
+			const CFGNode *n = it2->second;
+			if (n->rip.unwrap_vexrip() == rip)
+				entryPoints.insert(
+					InstructionLabel::entry(summary,
+								thread,
+								n));
+		}
+	}
+}
+
+asm (
+	"__call_sequence_template_start:\n"
+	"lea -128(%rsp), %rsp\n"
+	"pushq %rsi\n"
+	"__call_sequence_template_load_rsi:\n"
+	"movq $0x1122334455667788, %rsi\n"
+	"call *%rsi\n"
+	"popq %rsi\n"
+	"lea 128(%rsp), %rsp\n"
+	"__call_sequence_template_end:\n"
+	);
+
+static void
+emitCallSequence(patch &p, const char *target)
+{
+	extern const unsigned char
+		__call_sequence_template_start[],
+		__call_sequence_template_load_rsi[],
+		__call_sequence_template_end[];
+	unsigned start_sz = p.content.size();
+	for (const unsigned char *cursor = __call_sequence_template_start;
+	     cursor != __call_sequence_template_end;
+	     cursor++)
+		p.content.push_back(*cursor);
+
+	p.lateRelocs.push_back(
+		new LateRelocation(
+			start_sz + __call_sequence_template_load_rsi - __call_sequence_template_start + 2,
+			8,
+			vex_asprintf("%s", target),
+			0,
+			false));
+}
+
+static Maybe<InstructionLabel>
+emitUnlockedInstruction(const InstructionLabel &rip,
+			const std::set<unsigned long> &clobbered,
+			const summaryRootsT &summaryRoots,
+			Oracle *oracle,
+			patch &p)
+{
+	if (rip.locked) {
+		emitCallSequence(p, "(unsigned long)release_lock");
+		return Maybe<InstructionLabel>::just(rip.releasedLock());
+	}
+	if (rip.checkForEntry) {
+		/* Do we need to move to locked mode? */
+		std::set<InstructionLabel::entry> entries;
+		findEntryLabels(rip.getRip(), entries, summaryRoots);
+		if (!entries.empty()) {
+			if (entries.size() == 1 &&
+			    entries.begin()->node->rip.stack.size() == 1) {
+				/* Easy case: there is only one entrypoint
+				   here, and it has no stack context, so just
+				   switch unconditionally. */
+				return Maybe<InstructionLabel>::just(InstructionLabel::simple(*entries.begin(), false));
+			}
+			bool allContextFree = true;
+			for (auto it = entries.begin();
+			     allContextFree && it != entries.end();
+			     it++)
+				allContextFree &= it->node->rip.stack.size() == 1;
+			if (allContextFree) {
+				/* Multiple entry points, but none require
+				   stack validation -> still pretty easy. */
+				return Maybe<InstructionLabel>::just(InstructionLabel::compound(entries, false));
+			}
+
+			/* Okay, we need to do stack validation.  That
+			 * complicates things a bit. */
+			stackValidatedEntryPoints(oracle, p, rip, entries, false);
+			/* Fall through if stack validation fails. */
+		}
+	}
+
+	if (!clobbered.count(rip.getRip())) {
+		emitBranchToHost(p, rip.getRip());
+		return Maybe<InstructionLabel>::nothing();
+	}
+
+	unsigned len = 99;
+	Instruction<ThreadCfgLabel> *newInstr =
+		decode_instr(oracle->ms->addressSpace,
+			     rip.getRip(),
+			     ThreadCfgLabel(
+				     AbstractThread::uninitialised(),
+				     CfgLabel(-1)),
+			     &len,
+			     true);
+	assert(len != 99);
+	if (!newInstr)
+		errx(1, "need to decode instruction at %lx, but decoder failed!", rip.getRip());
+	for (auto it = newInstr->relocs.begin();
+	     it != newInstr->relocs.end();
+	     it++) {
+		RipRelativeBlindRelocation<ThreadCfgLabel> *r = 
+			dynamic_cast<RipRelativeBlindRelocation<ThreadCfgLabel> *>(*it);
+		assert(r);
+		if (r->is_branch) {
+			p.relocs.push_back(
+				new Relocation(
+					r->offset + p.content.size(),
+					InstructionLabel::raw(r->target, false)));
+		} else {
+			p.lateRelocs.push_back(
+				new LateRelocation(
+					r->offset + p.content.size(),
+					4,
+					vex_asprintf("0x%lx", r->target),
+					0,
+					true));
+		}
+	}
+	assert(newInstr->lateRelocs.empty());
+	for (unsigned x = 0; x < newInstr->len; x++)
+		p.content.push_back(newInstr->content[x]);
+
+	/* Figure out whether we have a fall-through successor.
+	   Assuming we have a fallthrough when we don't is safe but
+	   inefficient; assuming we don't have one when we do is
+	   dangerous. */
+	bool hasFallThrough = true;
+	if (newInstr->content[0] == 0xc3 /* ret */ ||
+	    newInstr->content[0] == 0xeb /* jmp 8 bit */ ||
+	    newInstr->content[0] == 0xe9 /* jmp 32 bit */)
+		hasFallThrough = false;
+	if (hasFallThrough)
+		return Maybe<InstructionLabel>::just(InstructionLabel::raw(rip.getRip() + len, false));
+	else
+		return Maybe<InstructionLabel>::nothing();
+}
+
+static InstructionLabel
+succRipToLabel(unsigned long nextRip, const InstructionLabel &start)
+{
+	InstructionLabel nextLabel(InstructionLabel::compound(std::set<InstructionLabel::entry>(), start.locked));
+	for (auto it = start.content.begin();
+	     it != start.content.end();
+	     it++) {
+		const CFGNode *currentNode = it->node;
+		for (auto it2 = currentNode->successors.begin();
+		     it2 != currentNode->successors.end();
+		     it2++) {
+			const CFGNode *potentialSuccessor = it2->instr;
+			if (!potentialSuccessor)
+				continue;
+			if (potentialSuccessor->rip.unwrap_vexrip() != nextRip)
+				continue;
+			/* Take this successor */
+			nextLabel.content.insert(
+				InstructionLabel::entry(
+					it->summary,
+					it->tid,
+					potentialSuccessor));
+		}
+	}
+	if (nextLabel.content.empty())
+		return InstructionLabel::raw(nextRip, start.locked);
+	nextLabel.clearName();
+	return nextLabel;
+}
+
+static Maybe<InstructionLabel>
+emitLockedInstruction(const InstructionLabel &start,
+		      const summaryRootsT &summaryRoots,
+		      Oracle *oracle,
+		      patch &p)
+{
+	unsigned long rip = start.getRip();
+
+	if (start.restoreRedzone) {
+		p.content.push_back(0x9d);
+		p.content.push_back(0x48);
+		p.content.push_back(0x8d);
+		p.content.push_back(0xa4);
+		p.content.push_back(0x24);
+		p.content.push_back(0x80);
+		p.content.push_back(0x00);
+		p.content.push_back(0x00);
+		p.content.push_back(0x00);
+		return Maybe<InstructionLabel>::just(start.clearRestoreRedZone());
+	}
+
+	if (!start.locked) {
+		emitCallSequence(p, "(unsigned long)acquire_lock");
+		return Maybe<InstructionLabel>::just(start.acquiredLock());
+	}
+	if (start.checkForEntry) {
+		/* Do we need to start any more CFG fragments? */
+		std::set<InstructionLabel::entry> entries;
+		findEntryLabels(rip, entries, summaryRoots);
+		if (!entries.empty()) {
+			InstructionLabel newStart(start);
+			if (entries.size() == 1 &&
+			    entries.begin()->node->rip.stack.size() == 1) {
+				newStart.content.insert(*entries.begin());
+				if (newStart != start) {
+					newStart.clearName();
+					return Maybe<InstructionLabel>::just(newStart);
+				}
+			} else {
+				bool allContextFree = true;
+				for (auto it = entries.begin();
+				     allContextFree && it != entries.end();
+				     it++)
+					allContextFree &= it->node->rip.stack.size() == 1;
+				if (allContextFree) {
+					/* Multiple entry points, but
+					   none require stack
+					   validation -> still pretty
+					   easy. */
+					newStart.content.insert(entries.begin(), entries.end());
+					if (newStart != start) {
+						newStart.clearName();
+						return Maybe<InstructionLabel>::just(newStart);
+					}
 				} else {
-					lateRelocs.push_back(
-						new LateRelocation(
-							reloc->offset,
-							4,
-							vex_asprintf("0x%lx", reloc->raw_target),
-							reloc->addend,
-							reloc->relative));
+					/* Okay, we need to do stack
+					 * validation.  That
+					 * complicates things a
+					 * bit. */
+					stackValidatedEntryPoints(oracle, p, start, entries, true);
 				}
 			}
 		}
 	}
 
-	for (auto it = branchesToEntryPoints.begin();
-	     it != branchesToEntryPoints.end();
+	if (start.content.empty()) {
+		/* Fell off the locked CFG -> move to unlocked mode */
+		return Maybe<InstructionLabel>::just(InstructionLabel::raw(rip, true));
+	}
+	unsigned len = 99;
+	Instruction<ThreadCfgLabel> *newInstr =
+		decode_instr(oracle->ms->addressSpace,
+			     rip,
+			     ThreadCfgLabel(AbstractThread::uninitialised(), CfgLabel(-1)),
+			     &len,
+			     true);
+	assert(len != 99);
+	if (!newInstr)
+		errx(1, "need to decode instruction at %lx, but decoder failed!", rip);
+	std::vector<unsigned long> succInstructions;
+	for (auto it = newInstr->relocs.begin();
+	     it != newInstr->relocs.end();
 	     it++) {
-		assert(entryMap.count(it->first));
-		unsigned targ = entryMap[it->first];
-		unsigned o = it->second;
-		long delta = targ - o - 4;
-		assert(delta == (int)delta);
-		patch_content[o] = delta;
-		patch_content[o + 1] = delta >> 8;
-		patch_content[o + 2] = delta >> 16;
-		patch_content[o + 3] = delta >> 24;
+		RipRelativeBlindRelocation<ThreadCfgLabel> *r = 
+			dynamic_cast<RipRelativeBlindRelocation<ThreadCfgLabel> *>(*it);
+		assert(r);
+		if (!r->is_branch) {
+			p.lateRelocs.push_back(
+				new LateRelocation(
+					r->offset + p.content.size(),
+					4,
+					vex_asprintf("0x%lx", r->target),
+					0,
+					true));
+			continue;
+		}
+
+		/* The decoder has told us what RIP this instruction
+		   might branch to.  Figure out what label that
+		   corresponds to. */
+		InstructionLabel nextLabel = succRipToLabel(r->target, start);
+		/* Emit an appropriate reloc */
+		p.relocs.push_back(
+			new Relocation(
+				r->offset + p.content.size(),
+				nextLabel));
+	}
+	assert(newInstr->lateRelocs.empty());
+	for (unsigned x = 0; x < newInstr->len; x++)
+		p.content.push_back(newInstr->content[x]);
+
+	/* Figure out whether we have a fall-through successor.
+	   Assuming we have a fallthrough when we don't is safe but
+	   inefficient; assuming we don't have one when we do is
+	   dangerous. */
+	bool hasFallThrough = true;
+	if (newInstr->content[0] == 0xc3 /* ret */ ||
+	    newInstr->content[0] == 0xeb /* jmp 8 bit */ ||
+	    newInstr->content[0] == 0xe9 /* jmp 32 bit */)
+		hasFallThrough = false;
+	if (hasFallThrough)
+		return Maybe<InstructionLabel>::just(succRipToLabel(rip + len, start));
+	else
+		return Maybe<InstructionLabel>::nothing();
+	
+}
+
+static void
+flushRelocations(patch &p, std::vector<InstructionLabel> &needed)
+{
+	for (auto it = p.relocs.begin();
+	     it != p.relocs.end();
+		) {
+		Relocation *r = *it;
+		if (p.offsets.count(r->target)) {
+			long delta = p.offsets[r->target] - r->offset - 4;
+			assert(delta == (int)delta);
+			p.content[r->offset] = delta;
+			p.content[r->offset+1] = delta >> 8;
+			p.content[r->offset+2] = delta >> 16;
+			p.content[r->offset+3] = delta >> 24;
+			it = p.relocs.erase(it);
+		} else {
+			needed.push_back(r->target);
+			it++;
+		}
+	}
+}
+
+static void
+buildPatch(patch &p,
+	   const std::set<unsigned long> &patchPoints,
+	   const std::set<unsigned long> &clobbered,
+	   const summaryRootsT &summaryRoots,
+	   Oracle *oracle)
+{
+	std::vector<InstructionLabel> needed;
+	for (auto it = patchPoints.begin();
+	     it != patchPoints.end();
+	     it++)
+		needed.push_back(InstructionLabel::raw(*it, false));
+
+	while (!needed.empty()) {
+		InstructionLabel n(needed.back());
+		needed.pop_back();
+
+		if (p.offsets.count(n))
+			continue;
+		while (1) {
+			if (debug_gen_patch)
+				printf("Extend patch with %s at offset 0x%zx\n",
+				       n.name(), p.content.size());
+			assert(!p.offsets.count(n));
+			p.offsets[n] = p.content.size();
+			p.transTable.push_back(
+				trans_table_entry(
+					p.content.size(),
+					n.getRip(),
+					strdup(n.name())));
+			Maybe<InstructionLabel> next(Maybe<InstructionLabel>::nothing());
+			switch (n.flavour) {
+			case InstructionLabel::fl_locked:
+				next = emitLockedInstruction(n, summaryRoots, oracle, p);
+				break;
+			case InstructionLabel::fl_unlocked:
+				next = emitUnlockedInstruction(n, clobbered, summaryRoots, oracle, p);
+				break;
+			case InstructionLabel::fl_bad:
+				abort();
+			}
+			if (!next.valid)
+				break;
+			if (p.offsets.count(next.content)) {
+				emitInternalJump(p, p.offsets[next.content]);
+				break;
+			}
+			n = next.content;
+		}
+		flushRelocations(p, needed);
+	}
+}
+
+static void
+findRelevantMais(IRExpr *iex, std::set<MemoryAccessIdentifier> &out)
+{
+	struct : public IRExprTransformer {
+		std::set<MemoryAccessIdentifier> *out;
+		IRExpr *transformIex(IRExprHappensBefore *hb) {
+			out->insert(hb->before);
+			out->insert(hb->after);
+			return hb;
+		}
+	} doit;
+	doit.out = &out;
+	doit.doit(iex);
+}
+
+static void
+findRelevantCfgs(MaiMap *mai,
+		 const std::set<MemoryAccessIdentifier> &neededMais,
+		 std::set<std::pair<unsigned, CfgLabel> > &out)
+{
+	for (auto it = neededMais.begin(); it != neededMais.end(); it++) {
+		for (auto it2 = mai->begin(*it); !it2.finished(); it2.advance())
+			out.insert(std::pair<unsigned, CfgLabel>(it->tid, it2.label()));
+	}
+}
+
+struct patchStrategy {
+	std::set<unsigned long> MustInterpret;
+	std::set<unsigned long> Patch;
+	std::set<unsigned long> Cont;
+	unsigned size() const {
+		return MustInterpret.size() + Cont.size();
+	}
+	bool operator<(const patchStrategy &o) const {
+		return size() > o.size();
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "MI: {");
+		for (auto it = MustInterpret.begin(); it != MustInterpret.end(); it++) {
+			if (it != MustInterpret.begin())
+				fprintf(f, ",");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "}; P {");
+		for (auto it = Patch.begin(); it != Patch.end(); it++) {
+			if (it != Patch.begin())
+				fprintf(f, ",");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "}; C {");
+		for (auto it = Cont.begin(); it != Cont.end(); it++) {
+			if (it != Cont.begin())
+				fprintf(f, ",");
+			fprintf(f, "0x%lx", *it);
+		}
+		fprintf(f, "}\n");
+	}
+};
+
+static bool
+patchSearch(Oracle *oracle,
+	    const patchStrategy &input,
+	    std::priority_queue<patchStrategy> &thingsToTry)
+{
+	if (input.MustInterpret.empty())
+		return true;
+
+	input.prettyPrint(stdout);
+	unsigned long needed = *input.MustInterpret.begin();
+
+	printf("\tLook at %lx\n", needed);
+	patchStrategy c(input);
+	/* @needed is definitely going to be interpreted after
+	 * this. */
+	c.Cont.insert(needed);
+	c.MustInterpret.erase(needed);
+
+	/* Decide which maneuver to use here.  We need to either patch
+	   @needed itself or bring all of its predecessors into the
+	   patch. */
+
+	/* Figure out which instructions might get clobbered by the
+	 * patch */
+	std::set<unsigned long> clobbered_by_patch;
+	unsigned offset = 0;
+	offset += getInstructionSize(oracle->ms->addressSpace, StaticRip(needed));
+	while (offset < 5) {
+		clobbered_by_patch.insert(needed + offset);
+		offset += getInstructionSize(oracle->ms->addressSpace, StaticRip(needed + offset));
 	}
 
-	return result;
+	/* Can't use patch if that would clobber an external. */
+	bool can_use_patch = true;
+	for (auto it = clobbered_by_patch.begin(); can_use_patch && it != clobbered_by_patch.end(); it++) {
+		if (oracle->isFunctionHead(StaticRip(*it)))
+			can_use_patch = false;
+	}
+	/* Can't use patch if that would clobber/be clobbered by an
+	   existing patch point. */
+	for (auto it = input.Patch.begin(); can_use_patch && it != input.Patch.end(); it++) {
+		if (needed > *it - 5 && needed < *it + 5)
+			can_use_patch = false;
+	}
+
+	if (can_use_patch) {
+		/* Try using a patch. */
+		patchStrategy patched(c);
+		patched.Patch.insert(needed);
+		for (auto it = clobbered_by_patch.begin();
+		     it != clobbered_by_patch.end();
+		     it++) {
+			std::set<unsigned long> predecessors;
+			oracle->findPredecessors(*it, predecessors);
+			for (unsigned long y = needed; y < *it; y++)
+				predecessors.erase(y);
+			patched.Cont.insert(*it);
+			patched.MustInterpret.erase(*it);
+			patched.MustInterpret.insert(predecessors.begin(), predecessors.end());
+		}
+		thingsToTry.push(patched);
+		printf("Patch to: ");
+		patched.prettyPrint(stdout);
+	}
+
+	/* Try expanding to predecessors. */
+	std::set<unsigned long> predecessors;
+	oracle->findPredecessors(needed, predecessors);
+	c.MustInterpret.insert(predecessors.begin(), predecessors.end());
+	thingsToTry.push(c);
+	printf("Unpatched: ");
+	c.prettyPrint(stdout);
+	return false;
+}
+
+static void
+buildPatchStrategy(Oracle *oracle,
+		   crashEnforcementRoots &roots,
+		   CrashCfg &cfg,
+		   std::set<unsigned long> &patchPoints,
+		   std::set<unsigned long> &clobbered)
+{
+	patchStrategy initPs;
+
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
+		Instruction<ThreadCfgLabel> *instr = cfg.findInstr(it.get());
+		assert(instr);
+		const AbstractThread &absThread(instr->rip.thread);
+		ConcreteThread concThread(roots.lookupAbsThread(absThread));
+		ConcreteCfgLabel concCfgLabel(concThread.summary(), instr->rip.label);
+		const VexRip &vr(cfg.labelToRip(concCfgLabel));
+
+		unsigned long r = vr.unwrap_vexrip();
+		initPs.MustInterpret.insert(r);
+	}
+
+	std::priority_queue<patchStrategy> pses;
+	pses.push(initPs);
+	while (!pses.empty()) {
+		patchStrategy next(pses.top());
+		pses.pop();
+		if (patchSearch(oracle, next, pses)) {
+			/* We have a solution. */
+			printf("Patch solution:\n");
+			next.prettyPrint(stdout);
+			patchPoints = next.Patch;
+			clobbered = next.Cont;
+			return;
+		}
+	}
+	errx(1, "Cannot solve patch problem");
 }
 
 static char *
 buildPatchForCrashSummary(Oracle *oracle,
-			  const SummaryId &summaryId,
-			  CrashSummary *summary,
-			  const char *ident)
+			  const std::map<SummaryId, CrashSummary *> &summaries)
 {
-	ThreadAbstracter absThread;
-	std::map<ConcreteThread, std::set<CfgLabel> > cfgRoots;
-	for (auto it = summary->loadMachine->cfg_roots.begin();
-	     it != summary->loadMachine->cfg_roots.end();
-	     it++)
-		cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
-	for (auto it = summary->storeMachine->cfg_roots.begin();
-	     it != summary->storeMachine->cfg_roots.end();
-	     it++)
-		cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
-	crashEnforcementRoots cer(cfgRoots, absThread);
-	CrashCfg cfg(cer, summaryId, summary, oracle->ms->addressSpace, true);
+#if 0
 
 	cfg.prettyPrint(stdout, true);
 	cer.prettyPrint(stdout);
@@ -936,48 +1429,77 @@ buildPatchForCrashSummary(Oracle *oracle,
 	   that we can do stack validation a bit more sensibly. */
 	std::map<unsigned long, std::map<VexRip, Instruction<ThreadCfgLabel> * > > segregatedRoots;
 	segregateRoots(cfgRoots2, segregatedRoots);
+#endif
+	std::set<unsigned long> patchPoints;
+	std::set<unsigned long> clobbered;
+	summaryRootsT summaryRoots;
+	{
+		ThreadAbstracter absThread;
+		std::map<ConcreteThread, std::set<CfgLabel> > cfgRoots;
+		for (auto it = summaries.begin();
+		     it != summaries.end();
+		     it++) {
+			CrashSummary *summary = it->second;
+			const SummaryId &summaryId(it->first);
+
+			std::set<MemoryAccessIdentifier> relevant_mais;
+			findRelevantMais(summary->verificationCondition, relevant_mais);
+			std::set<std::pair<unsigned, CfgLabel> > relevant_cfgs;
+			findRelevantCfgs(summary->mai, relevant_mais, relevant_cfgs);
+
+			trimCfg(summary->loadMachine, relevant_cfgs);
+			trimCfg(summary->storeMachine, relevant_cfgs);
+
+			for (auto it = summary->loadMachine->cfg_roots.begin();
+			     it != summary->loadMachine->cfg_roots.end();
+			     it++)
+				cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
+			for (auto it = summary->storeMachine->cfg_roots.begin();
+			     it != summary->storeMachine->cfg_roots.end();
+			     it++)
+				cfgRoots[ConcreteThread(summaryId, it->first)].insert(it->second->label);
+
+			summaryRoots[summaryId] = summary->loadMachine->cfg_roots;
+			summaryRoots[summaryId].insert(
+				summaryRoots[summaryId].end(),
+				summary->storeMachine->cfg_roots.begin(),
+				summary->storeMachine->cfg_roots.end());
+		}
+		crashEnforcementRoots cer(cfgRoots, absThread);
+		CrashCfg cfg(cer, summaries, oracle->ms->addressSpace, true, absThread);
+		buildPatchStrategy(oracle, cer, cfg, patchPoints, clobbered);
+	}
 
 	/* Now go and flatten the CFG fragments into patches. */
-	std::vector<unsigned char> patch_content;
-	std::vector<LateRelocation *> lateRelocs;
-	std::map<unsigned long, unsigned> entryPoints;
-	std::vector<trans_table_entry> transTable;
-	for (auto it = segregatedRoots.begin(); it != segregatedRoots.end(); it++)
-		entryPoints[it->first] = genCodeForEntryPoint(
-			clobberedInstructions,
-			patch_content,
-			lateRelocs,
-			transTable,
-			cfg,
-			summaryId,
-			oracle,
-			it->second);
+	patch p;
+	buildPatch(p, patchPoints, clobbered, summaryRoots,oracle);
 
 	std::vector<const char *> fragments;
 	fragments.push_back("static const unsigned char patch_content[] = \"");
-	for (auto it = patch_content.begin(); it != patch_content.end(); it++)
+	for (auto it = p.content.begin(); it != p.content.end(); it++)
 		fragments.push_back(vex_asprintf("\\x%02x", *it));
 	fragments.push_back("\";\n\n");
 	fragments.push_back("static const struct relocation relocations[] = {\n");
-	for (auto it = lateRelocs.begin(); it != lateRelocs.end(); it++)
+	for (auto it = p.lateRelocs.begin(); it != p.lateRelocs.end(); it++)
 		fragments.push_back(vex_asprintf("\t%s,\n", (*it)->asC()));
 	fragments.push_back("};\n\n");
 	fragments.push_back("static const struct trans_table_entry trans_table[] = {\n");
-	for (auto it = transTable.begin(); it != transTable.end(); it++)
+	for (auto it = p.transTable.begin(); it != p.transTable.end(); it++)
 		fragments.push_back(vex_asprintf("\t{.rip = 0x%lx, .offset = %d} /* %s */,\n",
 						 it->rip,
 						 it->offset_in_patch,
 						 it->debug_msg));
 	fragments.push_back("};\n\n");
-	/* XXX this will need to change slightly once we have the
-	 * stack validation stuff in. */
+
 	fragments.push_back("static const struct entry_context entry_points[] = {\n");
-	for (auto it = entryPoints.begin(); it != entryPoints.end(); it++)
+	for (auto it = patchPoints.begin(); it != patchPoints.end(); it++) {
+		assert(p.offsets.count(InstructionLabel::raw(*it, false)));
 		fragments.push_back(
 			vex_asprintf(
 				"\t{ .offset = %d, .rip = 0x%lx},\n",
-				it->second,
-				it->first));
+				p.offsets[InstructionLabel::raw(*it, false)],
+				*it));
+	}
 	fragments.push_back("};\n\n");
 
 	fragments.push_back("static const struct patch patch = {\n");
@@ -993,43 +1515,18 @@ buildPatchForCrashSummary(Oracle *oracle,
 	return flattenStringFragmentsMalloc(fragments, "", "", "");
 }
 
-static void
-findRelevantMais(IRExpr *iex, std::set<MemoryAccessIdentifier> &out)
-{
-	struct : public IRExprTransformer {
-		std::set<MemoryAccessIdentifier> *out;
-		IRExpr *transformIex(IRExprHappensBefore *hb) {
-			out->insert(hb->before);
-			out->insert(hb->after);
-			return hb;
-		}
-	} doit;
-	doit.out = &out;
-	doit.doit(iex);
-}
-
-static void
-findRelevantCfgs(MaiMap *mai,
-		 const std::set<MemoryAccessIdentifier> &neededMais,
-		 std::set<std::pair<unsigned, CfgLabel> > &out)
-{
-	for (auto it = neededMais.begin(); it != neededMais.end(); it++) {
-		for (auto it2 = mai->begin(*it); !it2.finished(); it2.advance())
-			out.insert(std::pair<unsigned, CfgLabel>(it->tid, it2.label()));
-	}
-}
-
 int
-main(int argc, char *argv[])
+main(int argc, char *const argv[])
 {
-	if (argc != 6)
-		errx(1, "need four arguments: binary, types table, callgraph, summary, and output filename");
+	if (argc < 6)
+		errx(1, "need at least five arguments: binary, types table, callgraph, output filename, and at least one summary");
 
 	const char *binary = argv[1];
 	const char *types_table = argv[2];
 	const char *callgraph = argv[3];
-	const char *summary_fname = argv[4];
-	const char *output_fname = argv[5];
+	const char *output_fname = argv[4];
+	const char *const *summary_fnames = argv + 5;
+	int nr_summaries = argc - 5;
 
 	init_sli();
 
@@ -1041,17 +1538,11 @@ main(int argc, char *argv[])
 	}
 	oracle->loadCallGraph(oracle, callgraph, ALLOW_GC);
 
-	VexPtr<CrashSummary, &ir_heap> summary(readBugReport(summary_fname, NULL));
-	SummaryId summaryId(1); /* Only have one summary here */
-	std::set<MemoryAccessIdentifier> relevant_mais;
-	findRelevantMais(summary->verificationCondition, relevant_mais);
-	std::set<std::pair<unsigned, CfgLabel> > relevant_cfgs;
-	findRelevantCfgs(summary->mai, relevant_mais, relevant_cfgs);
+	std::map<SummaryId, CrashSummary *> summaries;
+	for (int i = 0; i < nr_summaries; i++)
+		summaries[SummaryId(i + 1)] = readBugReport(summary_fnames[i], NULL);
 
-	trimCfg(summary->loadMachine, relevant_cfgs);
-	trimCfg(summary->storeMachine, relevant_cfgs);
-
-	char *patch = buildPatchForCrashSummary(oracle, summaryId, summary, "patch");
+	char *patch = buildPatchForCrashSummary(oracle, summaries);
 	printf("Patch is:\n%s\n", patch);
 
 	FILE *output = fopen(output_fname, "w");
@@ -1059,8 +1550,12 @@ main(int argc, char *argv[])
 	fprintf(output,
 		"/* Compile as gcc -Wall -g -shared -fPIC -Isli %s -o %s.so */\n",
 		output_fname, binary);
-	fprintf(output, "/* Crash summary:\n");
-	printCrashSummary(summary, output);
+	fprintf(output, "/* Crash summaries:\n");
+	for (auto it = summaries.begin(); it != summaries.end(); it++) {
+		fprintf(output, "  Summary %s:\n", it->first.name());
+		printCrashSummary(it->second, output);
+		fprintf(output, "\n\n\n");
+	}
 	fprintf(output, "*/\n");
 	fprintf(output, "#define BINARY_PATCH_FOR \"%s\"\n",
 		basename(binary));

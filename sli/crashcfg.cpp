@@ -8,7 +8,7 @@
  * size of the instruction. */
 Instruction<ThreadCfgLabel> *
 decode_instr(AddressSpace *as, unsigned long ptr, const ThreadCfgLabel &label,
-	     bool generate_relocs)
+	     unsigned *true_size, bool generate_relocs)
 {
 	const unsigned long init_ptr = ptr;
 	uint16_t b;
@@ -235,6 +235,8 @@ done_prefixes:
 			work->relocs.push_back(
 				new RipRelativeBlindRelocation<ThreadCfgLabel>(
 					1, 4, target, true));
+			if (true_size)
+				*true_size = 2;
 			return work;
 		} else {
 			ptr++;
@@ -252,6 +254,8 @@ done_prefixes:
 			work->relocs.push_back(
 				new RipRelativeBlindRelocation<ThreadCfgLabel>(
 					2, 4, target, true));
+			if (true_size)
+				*true_size = 2;
 			return work;
 		} else {
 			ptr++;
@@ -277,6 +281,8 @@ done_prefixes:
 	for (unsigned x = 0; x < work->len; x++)
 		work->content[x] = as->fetch<unsigned char>(init_ptr + x, NULL);
 	work->relocs = emit_reloc.r;
+	if (true_size)
+		*true_size = work->len;
 	return work;
 }
 
@@ -329,7 +335,7 @@ CrashCfg::parse(crashEnforcementRoots &roots, AddressSpace *as,
 		ConcreteThread concThread(roots.lookupAbsThread(absThread));
 		ConcreteCfgLabel clabel(concThread.summary(), it->second.first.label);
 		Instruction<ThreadCfgLabel> *instr =
-			decode_instr(as, rips[clabel].unwrap_vexrip(), it->first, generateRelocs);
+			decode_instr(as, rips[clabel].unwrap_vexrip(), it->first, NULL, generateRelocs);
 		assert(instr->len != 0);
 		this->content[it->first] = instr;
 	}
@@ -455,12 +461,38 @@ CrashCfg::prettyPrint(FILE *f, bool verbose)
 		fprintf(f, "\t\t%s -> %s\n", it->first.name(), it->second.name());
 }
 
-CrashCfg::CrashCfg(crashEnforcementRoots &roots, const SummaryId &summaryId, CrashSummary *summary,
-		   AddressSpace *as, bool need_relocs)
+CrashCfg::CrashCfg(crashEnforcementRoots &roots,
+		   const SummaryId &summaryId,
+		   CrashSummary *summary,
+		   AddressSpace *as,
+		   bool need_relocs,
+		   const ThreadAbstracter &abs)
 {
-	std::map<CfgLabel, const CFGNode *> labelToNode;
+	std::map<SummaryId, CrashSummary *> c;
+	c[summaryId] = summary;
+	init(roots, c, as, need_relocs, abs);
+}
 
-	{
+CrashCfg::CrashCfg(crashEnforcementRoots &roots,
+		   const std::map<SummaryId, CrashSummary *> &summaries,
+		   AddressSpace *as, bool need_relocs,
+		   const ThreadAbstracter &abs)
+{
+	init(roots, summaries, as, need_relocs, abs);
+}
+void
+CrashCfg::init(crashEnforcementRoots &roots,
+	       const std::map<SummaryId, CrashSummary *> &summaries,
+	       AddressSpace *as,
+	       bool need_relocs,
+	       const ThreadAbstracter &abs)
+{
+	typedef std::pair<SummaryId, CfgLabel> slabel;
+	std::map<slabel, const CFGNode *> labelToNode;
+
+	for (auto it = summaries.begin(); it != summaries.end(); it++) {
+		const SummaryId &summaryId(it->first);
+		CrashSummary *summary = it->second;
 		std::vector<const CFGNode *> nodesToExplore;
 		for (auto it = summary->loadMachine->cfg_roots.begin();
 		     it != summary->loadMachine->cfg_roots.end();
@@ -473,12 +505,12 @@ CrashCfg::CrashCfg(crashEnforcementRoots &roots, const SummaryId &summaryId, Cra
 		while (!nodesToExplore.empty()) {
 			const CFGNode *n = nodesToExplore.back();
 			nodesToExplore.pop_back();
-			if (labelToNode.count(n->label)) {
-				assert(labelToNode[n->label] == n);
+			if (labelToNode.count(slabel(summaryId, n->label))) {
+				assert(labelToNode[slabel(summaryId, n->label)] == n);
 				continue;
 			}
 			rips[ConcreteCfgLabel(summaryId, n->label)] = n->rip;
-			labelToNode[n->label] = n;
+			labelToNode[slabel(summaryId, n->label)] = n;
 			for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
 				if (it->instr)
 					nodesToExplore.push_back(it->instr);
@@ -493,10 +525,11 @@ CrashCfg::CrashCfg(crashEnforcementRoots &roots, const SummaryId &summaryId, Cra
 	while (!pending.empty()) {
 		ThreadCfgLabel label(pending.back());
 		pending.pop_back();
-		const CFGNode *node = labelToNode[label.label];
+		SummaryId summary(abs.lookup(label.thread).summary_id);
+		const CFGNode *node = labelToNode[slabel(summary, label.label)];
 		assert(node != NULL);
 		Instruction<ThreadCfgLabel> *newInstr =
-			decode_instr(as, node->rip.unwrap_vexrip(), label, need_relocs);
+			decode_instr(as, node->rip.unwrap_vexrip(), label, NULL, need_relocs);
 		auto it_did_insert = content.insert(
 				std::pair<ThreadCfgLabel, Instruction<ThreadCfgLabel> *>(
 					label, newInstr));
@@ -513,7 +546,8 @@ CrashCfg::CrashCfg(crashEnforcementRoots &roots, const SummaryId &summaryId, Cra
 
 	for (auto it = content.begin(); it != content.end(); it++) {
 		Instruction<ThreadCfgLabel> *instr = it->second;
-		const CFGNode *old = labelToNode[instr->rip.label];
+		SummaryId summary(abs.lookup(instr->rip.thread).summary_id);
+		const CFGNode *old = labelToNode[slabel(summary, instr->rip.label)];
 		for (auto it = old->successors.begin();
 		     it != old->successors.end();
 		     it++) {
