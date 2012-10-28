@@ -947,18 +947,18 @@ eval_bytecode(const unsigned short *bytecode,
 		case bcop_cmp_lts: {
 			unsigned res;
 			switch (type) {
-#define do_type(bct_type, c_type)					\
+#define do_type(bct_type, c_type, fmt)					\
 				case bct_type: {			\
 					c_type arg1 = bytecode_pop(&stack, bct_type); \
 					c_type arg2 = bytecode_pop(&stack, bct_type); \
 					res = arg2 < arg1;		\
-					debug("bcop_cmplts: %lx < %lx -> %d\n", arg1, arg2, res); \
+					debug("bcop_cmplts: %"fmt" < %"fmt" -> %d\n", arg1, arg2, res); \
 					break;				\
 				}
-				do_type(bct_byte, char);
-				do_type(bct_short, short);
-				do_type(bct_int, int);
-				do_type(bct_long, long);
+				do_type(bct_byte, char, "x");
+				do_type(bct_short, short, "x");
+				do_type(bct_int, int, "x");
+				do_type(bct_long, long, "lx");
 #undef do_type
 			default:
 				abort();
@@ -1268,7 +1268,9 @@ restart_interpreter(void)
 {
 	/* We tried to exit the interpreter and then trod on another
 	 * entry point.  Try that again. */
-	debug("Restart interpreter at %lx.\n", find_pts()->client_regs.rip);
+	debug("Restart interpreter at %lx (stack %lx).\n",
+	      find_pts()->client_regs.rip,
+	      find_pts()->initial_interpreter_rsp);
 	EVENT(restart_interpreter);
 	release_big_lock();
 	asm volatile (
