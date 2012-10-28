@@ -204,7 +204,7 @@ struct per_thread_state {
 	   address if the access fails. */
 	unsigned long fault_recovery_addr;
 	void *sigstack;
-	unsigned char interpreter_stack[STACK_SIZE - 24 - sizeof(struct reg_struct)];
+	unsigned char interpreter_stack[STACK_SIZE - 32 - sizeof(struct reg_struct)];
 	struct reg_struct client_regs;
 };
 
@@ -1276,7 +1276,7 @@ restart_interpreter(void)
 		"    subq %0, %%rsp\n"         /* Make sure we don't tread on stashed registers */
 		"    jmp start_interpreting\n" /* Restart the interpreter */
 		:
-		: "i" (sizeof(struct reg_struct))
+		: "i" (sizeof(struct reg_struct) + 8)
 		);
 	debug("Huh?  Restart interpreter didn't work\n");
 	abort();
@@ -2567,7 +2567,7 @@ start_interpreting(void)
    client code. */
 asm(
 "__trampoline_client_to_interp_start:\n"
-"    mov %rsp, %gs:(" str(_STACK_SIZE) " - 8)\n" /* Stash client RSP */
+"    mov %rsp, %gs:(" str(_STACK_SIZE) " - 16)\n" /* Stash client RSP */
 "    mov %gs:0, %rsp\n"    /* Switch to interpreter stack */
 "    pushf\n"              /* Save other client registers */
 "    push %r15\n"
