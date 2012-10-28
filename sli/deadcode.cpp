@@ -409,9 +409,98 @@ public:
 	}
 };
 
-static StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something)
+static void
+enumRegisters(IRExpr *e, std::set<threadAndRegister> &regs)
 {
+	struct : public IRExprTransformer {
+		std::set<threadAndRegister> *out;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			out->insert(ieg->reg);
+			return ieg;
+		}
+	} doit;
+	doit.out = &regs;
+	doit.doit(e);
+}
+
+static StateMachine *
+ssaDeadCode(StateMachine *sm, bool *done_something)
+{
+	std::set<threadAndRegister> refed_regs;
+	std::set<StateMachineState *> states;
+	enumStates(sm, &states);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		StateMachineState *s = *it;
+		std::vector<IRExpr *> exprs;
+		s->inputExpressions(exprs);
+		for (auto it = exprs.begin(); it != exprs.end(); it++)
+			enumRegisters(*it, refed_regs);
+		if (s->getSideEffect() && s->getSideEffect()->type == StateMachineSideEffect::Phi) {
+			StateMachineSideEffectPhi *p = (StateMachineSideEffectPhi *)s->getSideEffect();
+			for (auto it = p->generations.begin();
+			     it != p->generations.end();
+			     it++)
+				refed_regs.insert(it->first);
+		}
+	}
+	std::set<StateMachineSideEffecting *> ses;
+	enumStates(sm, &ses);
+	for (auto it = ses.begin(); it != ses.end(); it++) {
+		StateMachineSideEffect *effect = (*it)->sideEffect;
+		if (!effect)
+			continue;
+		switch (effect->type) {
+		case StateMachineSideEffect::Copy: {
+			StateMachineSideEffectCopy *smsec =
+				(StateMachineSideEffectCopy *)effect;
+			if (!refed_regs.count(smsec->target)) {
+				*done_something = true;
+				(*it)->sideEffect = NULL;
+			}
+			break;
+		}
+		case StateMachineSideEffect::Load: {
+			StateMachineSideEffectLoad *smsel =
+				(StateMachineSideEffectLoad *)effect;
+			if (!refed_regs.count(smsel->target)) {
+				*done_something = true;
+				(*it)->sideEffect =
+					new StateMachineSideEffectAssertFalse(
+						IRExpr_Unop(Iop_BadPtr, smsel->addr),
+						true);
+			}
+			break;
+		}
+		case StateMachineSideEffect::Phi: {
+			StateMachineSideEffectPhi *p =
+				(StateMachineSideEffectPhi *)effect;
+			if (!refed_regs.count(p->reg)) {
+				*done_something = true;
+				(*it)->sideEffect = NULL;
+			}
+			break;
+		}
+		case StateMachineSideEffect::PointerAliasing: {
+			auto *p = (StateMachineSideEffectPointerAliasing *)effect;
+			if (!refed_regs.count(p->reg)) {
+				*done_something = true;
+				(*it)->sideEffect = NULL;
+			}
+			break;
+		}
+		default:
+			break;
+		}
+	}
+	return sm;
+}
+
+static StateMachine *
+deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
+{
+	if (is_ssa)
+		return ssaDeadCode(sm, done_something);
+
 	std::map<const StateMachineState *, int> stateLabels;
 
 	if (debug_dump_liveness_map) {
@@ -549,8 +638,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something)
 }
 
 StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something)
+deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 {
-	return _deadCode::deadCodeElimination(sm, done_something);
+	return _deadCode::deadCodeElimination(sm, done_something, is_ssa);
 }
 

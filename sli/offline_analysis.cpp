@@ -309,7 +309,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 			p = false;
 			do {
 				d = false;
-				sm = deadCodeElimination(sm, &d);
+				sm = deadCodeElimination(sm, &d, is_ssa);
 				p |= d;
 			} while (d);
 			if (debugOptimiseStateMachine && p) {
