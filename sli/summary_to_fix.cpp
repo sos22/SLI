@@ -1183,6 +1183,44 @@ handleIndirectCall(patch &p,
 }
 
 static Maybe<InstructionLabel>
+handleReturnInstr(patch &p, const InstructionLabel &start)
+{
+	/* If we're in a locked fragment then returns are pointless,
+	   because the return structure is already incorporated into
+	   the control structure of the patch via implicit inlining.
+	   All we need to do is calculate the successor and adjust the
+	   stack. */
+	InstructionLabel nextLabel(InstructionLabel::compound(std::set<InstructionLabel::entry>(), start.locked));
+	for (auto it = start.content.begin();
+	     it != start.content.end();
+	     it++) {
+		const CFGNode *currentNode = it->node;
+		for (auto it2 = currentNode->successors.begin();
+		     it2 != currentNode->successors.end();
+		     it2++) {
+			const CFGNode *potentialSuccessor = it2->instr;
+			if (!potentialSuccessor)
+				continue;
+			nextLabel.content.insert(
+				InstructionLabel::entry(
+					it->summary,
+					it->tid,
+					potentialSuccessor));
+		}
+	}
+	nextLabel.clearName();
+	assert(!nextLabel.content.empty());
+	/* Restore stack pointer with an lea. */
+	p.content.push_back(0x48);
+	p.content.push_back(0x8d);
+	p.content.push_back(0x64);
+	p.content.push_back(0x24);
+	p.content.push_back(0x08);
+	/* Go wherever we need to go next */
+	return Maybe<InstructionLabel>::just(nextLabel);
+}
+
+static Maybe<InstructionLabel>
 emitLockedInstruction(const InstructionLabel &start,
 		      const summaryRootsT &summaryRoots,
 		      Oracle *oracle,
@@ -1277,6 +1315,11 @@ emitLockedInstruction(const InstructionLabel &start,
 		/* Indirect call instructions need special handling. */
 		return handleIndirectCall(p, start, len, newInstr);
 	}
+	if (newInstr->content[0] == 0xc3) {
+		/* Also need special handling for ret instructions. */
+		return handleReturnInstr(p, start);
+	}
+
 	std::vector<unsigned long> succInstructions;
 	for (auto it = newInstr->relocs.begin();
 	     it != newInstr->relocs.end();
@@ -1314,8 +1357,7 @@ emitLockedInstruction(const InstructionLabel &start,
 	   inefficient; assuming we don't have one when we do is
 	   dangerous. */
 	bool hasFallThrough = true;
-	if (newInstr->content[0] == 0xc3 /* ret */ ||
-	    newInstr->content[0] == 0xeb /* jmp 8 bit */ ||
+	if (newInstr->content[0] == 0xeb /* jmp 8 bit */ ||
 	    newInstr->content[0] == 0xe9 /* jmp 32 bit */)
 		hasFallThrough = false;
 	if (hasFallThrough)
