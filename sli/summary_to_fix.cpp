@@ -1152,7 +1152,7 @@ flushRelocations(patch &p, std::vector<InstructionLabel> &needed)
 		) {
 		Relocation *r = *it;
 		if (p.offsets.count(r->target)) {
-			long delta = p.offsets[r->target] - r->offset - 4;
+			long delta = (long)p.offsets[r->target] - (long)r->offset - 4;
 			assert(delta == (int)delta);
 			p.content[r->offset] = delta;
 			p.content[r->offset+1] = delta >> 8;
