@@ -451,12 +451,12 @@ struct exprEvalPoint {
 	}
 
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "%s", invert ? "!" : "");
+		fprintf(f, "%s", invert ? "¬" : "");
 		ppIRExpr(e, f);
 	}
 	bool parse(const char *str, const char **suffix) {
 		bool inv = false;
-		if (parseThisChar('!', str, &str))
+		if (parseThisChar('¬', str, &str))
 			inv = true;
 		if (!parseIRExpr(&e, str, &str))
 			return false;

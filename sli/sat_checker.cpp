@@ -1491,3 +1491,10 @@ satisfier::makeFalse(IRExpr *e)
 
 	falseBooleans.insert(e);
 }
+
+IRExpr *
+setVariable(IRExpr *expression, IRExpr *variable, bool value)
+{
+	return _sat_checker::setVariable(expression, variable, value);
+}
+
