@@ -410,7 +410,7 @@ public:
 };
 
 static StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt)
+deadCodeElimination(StateMachine *sm, bool *done_something)
 {
 	std::map<const StateMachineState *, int> stateLabels;
 
@@ -438,7 +438,6 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 	class _ {
 		LivenessMap &livenessMap;
 		bool *done_something;
-		const AllowableOptimisations &opt;
 
 		StateMachineSideEffect *doit(StateMachineSideEffect *e,
 					     const LivenessEntry &alive) {
@@ -526,10 +525,10 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 			abort();
 		}
 
-		_(LivenessMap &_livenessMap, bool *_done_something, const AllowableOptimisations &_opt)
-			: livenessMap(_livenessMap), done_something(_done_something), opt(_opt)
+		_(LivenessMap &_livenessMap, bool *_done_something)
+			: livenessMap(_livenessMap), done_something(_done_something)
 		{}
-	} eliminateDeadCode(livenessMap, done_something, opt);
+	} eliminateDeadCode(livenessMap, done_something);
 
 	for (auto it = allStates.begin();
 	     it != allStates.end();
@@ -550,8 +549,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptim
 }
 
 StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt)
+deadCodeElimination(StateMachine *sm, bool *done_something)
 {
-	return _deadCode::deadCodeElimination(sm, done_something, opt);
+	return _deadCode::deadCodeElimination(sm, done_something);
 }
 
