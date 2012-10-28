@@ -181,8 +181,8 @@ struct crash_enforcement_plan {
 				arr->sz--;				\
 				return;					\
 			}						\
-			abort();					\
 		}							\
+		abort();						\
 	}								\
 	void name ## _erase_idx(struct name ## _array *arr,		\
 				int idx)				\
