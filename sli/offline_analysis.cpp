@@ -1453,6 +1453,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				unsigned tid,
 				const VexPtr<Oracle> &oracle,
 				FixConsumer &df,
+				const AllowableOptimisations &opt,
 				GarbageCollectionToken token)
 {
 	/* Quick pre-check: see whether this instruction might crash
@@ -1471,11 +1472,6 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 
 	VexPtr<MaiMap, &ir_heap> mai(MaiMap::empty());
 
-	AllowableOptimisations opt =
-		AllowableOptimisations::defaultOptimisations
-		.enableassumePrivateStack()
-		.setAddressSpace(oracle->ms->addressSpace)
-		.enablenoExtend();
 	VexPtr<StateMachine, &ir_heap> probeMachine;
 	CfgLabelAllocator allocLabel;
 	{

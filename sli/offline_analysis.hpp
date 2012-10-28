@@ -245,6 +245,7 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     unsigned tid,
 				     const VexPtr<Oracle> &oracle,
 				     FixConsumer &df,
+				     const AllowableOptimisations &opt,
 				     GarbageCollectionToken token);
 
 StateMachineState *getProximalCause(MachineState *ms, Oracle *oracle, MaiMap &mai, const CFGNode *where, const VexRip &rip, int tid);

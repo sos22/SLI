@@ -2194,6 +2194,10 @@ top:
 		}
 
 		if (e->op == Iop_BadPtr) {
+			if (opt.allPointersGood()) {
+				res = IRExpr_Const(IRConst_U1(0));
+				break;
+			}
 			if (e->arg->tag == Iex_Associative &&
 			    ((IRExprAssociative *)e->arg)->op == Iop_Add64 &&
 			    ((IRExprAssociative *)e->arg)->nr_arguments == 2 &&
