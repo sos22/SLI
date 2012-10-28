@@ -346,9 +346,20 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_CmpEQ64:
 			return clauseUnderspecified(ieb->arg1, mult) ||
 				clauseUnderspecified(ieb->arg2, mult);
+		case Iop_Shr64:
+			/* Special case: remove
+			   shr64(32Uto64(CmpF32()), 6), because it's
+			   almost always useless and it shows up a
+			   lot. */
+			if (ieb->arg1->tag == Iex_Unop &&
+			    ((IRExprUnop *)ieb->arg1)->op == Iop_32Uto64 &&
+			    ((IRExprUnop *)ieb->arg1)->arg->tag == Iex_Binop &&
+			    ((IRExprBinop *)((IRExprUnop *)ieb->arg1)->arg)->op == Iop_CmpF32 &&
+			    ieb->arg2->tag == Iex_Const &&
+			    ((IRExprConst *)ieb->arg2)->con->Ico.U8 == 6)
+				return true;
 		case Iop_Shr32:
 		case Iop_Shl64:
-		case Iop_Shr64:
 		case Iop_Sar64:
 		case Iop_MullU64:
 		case Iop_Mul64:
@@ -367,10 +378,11 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_CmpLT64S:
 		case Iop_CmpLE32U:
 		case Iop_CmpLE64U:
-		case Iop_CmpF32:
-		case Iop_CmpF64:
 			return clauseUnderspecified(ieb->arg1, mult) &&
 				clauseUnderspecified(ieb->arg2, mult);
+		case Iop_CmpF32:
+		case Iop_CmpF64:
+			return true;
 		default:
 			break;
 		}
@@ -391,7 +403,7 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_Xor32:
 		case Iop_Xor64:
 			acc = false;
-			for (int i = 0; i < iea->nr_arguments; i++)
+			for (int i = 0; !acc && i < iea->nr_arguments; i++)
 				acc |= clauseUnderspecified(iea->contents[i], mult);
 			return acc;
 		case Iop_And1:
@@ -405,7 +417,7 @@ clauseUnderspecified(IRExpr *clause,
 		case Iop_Or32:
 		case Iop_Or64:
 			acc = true;
-			for (int i = 0; i < iea->nr_arguments; i++)
+			for (int i = 0; acc && i < iea->nr_arguments; i++)
 				acc &= clauseUnderspecified(iea->contents[i], mult);
 			return acc;
 		default:
@@ -436,9 +448,13 @@ clauseUnderspecified(IRExpr *clause,
 		break;
 	case Iex_Mux0X: {
 		IRExprMux0X *m = (IRExprMux0X *)clause;
-#warning could do better here if either argument is underspec and the condition is as well.
-		return clauseUnderspecified(m->expr0, mult) &&
-			clauseUnderspecified(m->exprX, mult);
+		bool z_underspec = clauseUnderspecified(m->expr0, mult);
+		bool x_underspec = clauseUnderspecified(m->exprX, mult);
+		if (z_underspec && x_underspec)
+			return true;
+		if (!z_underspec && !x_underspec)
+			return false;
+		return clauseUnderspecified(m->cond, mult);
 	}
 	case Iex_CCall:
 		return false;
@@ -1203,6 +1219,139 @@ functionalUnderspecification(IRExpr *input,
 	return res;
 }
 
+#define FP_EXPRESSION ((IRExpr *)1)
+
+static IRExpr *
+stripFloatingPoint(IRExpr *expr, bool *p)
+{
+	IRType ty = expr->type();
+	if (ty >= Ity_I128) {
+		*p = true;
+		return FP_EXPRESSION;
+	}
+	switch (expr->tag) {
+	case Iex_Get:
+		return expr;
+	case Iex_GetI: {
+		IRExprGetI *i = (IRExprGetI *)expr;
+		i->ix = stripFloatingPoint(i->ix, p);
+		if (i->ix == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		return i;
+	}
+	case Iex_Qop: {
+		IRExprQop *i = (IRExprQop *)expr;
+		IRExpr *arg = stripFloatingPoint(i->arg4, p);
+		if (arg == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		i->arg4 = arg;
+	}
+		/* fall through */
+	case Iex_Triop: {
+		IRExprTriop *i = (IRExprTriop *)expr;
+		IRExpr *arg = stripFloatingPoint(i->arg3, p);
+		if (arg == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		i->arg3 = arg;
+	}
+		/* fall through */
+	case Iex_Binop: {
+		IRExprBinop *i = (IRExprBinop *)expr;
+		IRExpr *arg = stripFloatingPoint(i->arg2, p);
+		if (arg == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		i->arg2 = arg;
+	}
+		/* fall through */
+	case Iex_Unop: {
+		IRExprUnop *i = (IRExprUnop *)expr;
+		IRExpr *arg = stripFloatingPoint(i->arg, p);
+		if (arg == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		i->arg = arg;
+		return i;
+	}
+	case Iex_Const:
+		return expr;
+	case Iex_Mux0X: {
+		IRExprMux0X *i= (IRExprMux0X *)expr;
+		IRExpr *cond = stripFloatingPoint(i->cond, p);
+		if (cond == FP_EXPRESSION) {
+			IRExpr *a = stripFloatingPoint(i->expr0, p);
+			if (a != FP_EXPRESSION)
+				return a;
+			return stripFloatingPoint(i->exprX, p);
+		}
+		i->cond = cond;
+		IRExpr *expr0 = stripFloatingPoint(i->expr0, p);
+		if (expr0 == FP_EXPRESSION)
+			return stripFloatingPoint(i->exprX, p);
+		i->expr0 = expr0;
+		IRExpr *exprX = stripFloatingPoint(i->exprX, p);
+		if (exprX == FP_EXPRESSION)
+			return i->expr0;
+		i->exprX = exprX;
+		return i;
+	}
+	case Iex_CCall: {
+		IRExprCCall *cee = (IRExprCCall *)expr;
+		int nr_args = 0;
+		for (nr_args = 0; cee->args[nr_args]; nr_args++)
+			;
+		IRExpr *args[nr_args];
+		for (int i = 0; i < nr_args; i++) {
+			IRExpr *arg = stripFloatingPoint(cee->args[i], p);
+			if (arg == FP_EXPRESSION)
+				return FP_EXPRESSION;
+			args[i] = arg;
+		}
+		memcpy(cee->args, args, nr_args * sizeof(IRExpr *));
+		return cee;
+	}
+	case Iex_Associative: {
+		IRExprAssociative *a = (IRExprAssociative *)expr;
+		if (a->op == Iop_And1 || a->op == Iop_Or1) {
+			for (int i = 0; i < a->nr_arguments; i++) {
+				a->contents[i] = stripFloatingPoint(a->contents[i], p);
+				if (a->contents[i] == FP_EXPRESSION) {
+					memmove(a->contents + i,
+						a->contents + i + 1,
+						sizeof(IRExpr *) * (a->nr_arguments - i - 1));
+					i--;
+					a->nr_arguments--;
+				}
+			}
+			if (a->nr_arguments == 0)
+				return FP_EXPRESSION;
+		} else {
+			IRExpr *args[a->nr_arguments];
+			for (int i = 0; i < a->nr_arguments; i++) {
+				IRExpr *arg = stripFloatingPoint(a->contents[i], p);
+				if (arg == FP_EXPRESSION)
+					return FP_EXPRESSION;
+				args[i] = arg;
+			}
+			memcpy(a->contents, args, a->nr_arguments * sizeof(IRExpr *));
+		}
+		return a;
+	}
+	case Iex_Load: {
+		IRExprLoad *l = (IRExprLoad *)expr;
+		IRExpr *a = stripFloatingPoint(l->addr, p);
+		if (a == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		l->addr = a;
+		return l;
+	}
+	case Iex_HappensBefore:
+	case Iex_FreeVariable:
+	case Iex_EntryPoint:
+	case Iex_ControlFlow:
+		return expr;
+	}
+	abort();
+}
+
 static CrashSummary *
 nonFunctionalSimplifications(
 	VexPtr<CrashSummary, &ir_heap> summary,
@@ -1226,6 +1375,8 @@ nonFunctionalSimplifications(
 		p = true;
 		while (!TIMEOUT && p) {
 			p = false;
+			summary->verificationCondition =
+				stripFloatingPoint(summary->verificationCondition, &p);
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
 					summary->mai,
