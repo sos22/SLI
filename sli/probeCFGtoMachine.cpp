@@ -1923,6 +1923,7 @@ probeCFGsToMachine(Oracle *oracle,
 		   MaiMap &mai)
 {
 	StateMachine *sm = _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai);
+#if 0
 	sm->root = new StateMachineSideEffecting(
 		sm->root->dbg_origin,
 		new StateMachineSideEffectAssertFalse(
@@ -1931,6 +1932,7 @@ probeCFGsToMachine(Oracle *oracle,
 				new IRExprEntryPoint(tid, CfgLabel(51))),
 			true),
 		sm->root);
+#endif
 	return sm;
 }
 
