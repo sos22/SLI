@@ -270,6 +270,7 @@ public:
 	/* For locked instructions */
 	std::set<entry> content;
 	bool restoreRedzone;
+	unsigned long finishCallSequence;
 	/* For unlocked instructions */
 	unsigned long rip;
 	/* For both */
@@ -285,16 +286,19 @@ private:
 			const char *suffix;
 			if (!restoreRedzone &&
 			    checkForEntry &&
-			    locked)
+			    locked &&
+			    !finishCallSequence)
 				suffix = ")";
 			else
 				suffix = vex_asprintf(
-					"){%s%s%s%s%s}",
+					"){%s%s%s%s%s%s%s}",
 					(restoreRedzone ? "redzone" : ""),
-					(restoreRedzone && (!checkForEntry || !locked) ? "," : ""),
+					(restoreRedzone && (!checkForEntry || !locked || finishCallSequence) ? "," : ""),
 					(checkForEntry ? "" : "non-entry"),
-					(!checkForEntry && !locked ? "," : ""),
-					(locked ? "" : "unlocked"));
+					(!checkForEntry && (!locked || finishCallSequence) ? "," : ""),
+					(locked ? "" : "unlocked"),
+					((locked && finishCallSequence) ? "," : ""),
+					(finishCallSequence ? vex_asprintf("call{%lx}", finishCallSequence) : ""));
 			return flattenStringFragmentsMalloc(fragments, ";",
 							    "L(",
 							    suffix);
@@ -337,6 +341,7 @@ public:
 		res.restoreRedzone = false;
 		res.checkForEntry = true;
 		res.locked = locked;
+		res.finishCallSequence = 0;
 		return res;
 	}
 	static InstructionLabel compoundRestoreRedZone(const std::set<entry> &_content, bool locked)
@@ -357,6 +362,7 @@ public:
 		res.restoreRedzone = true;
 		res.checkForEntry = false;
 		res.locked = locked;
+		res.finishCallSequence = 0;
 		return res;
 	}
 	static InstructionLabel compoundSkipEntry(const std::set<entry> &_content, bool locked)
@@ -367,6 +373,7 @@ public:
 		res.restoreRedzone = false;
 		res.checkForEntry = false;
 		res.locked = locked;
+		res.finishCallSequence = 0;
 		return res;
 	}
 	static InstructionLabel simple(const entry &_content, bool locked)
@@ -377,10 +384,17 @@ public:
 	}
 
 	InstructionLabel clearRestoreRedZone() const {
-		if (checkForEntry)
-			return compound(content, locked);
-		else
-			return compoundSkipEntry(content, locked);
+		InstructionLabel res = *this;
+		res.restoreRedzone = false;
+		res.clearName();
+		return res;
+	}
+	InstructionLabel clearFinishCallSequence() const {
+		InstructionLabel res = *this;
+		res.finishCallSequence = false;
+		assert(!res.restoreRedzone);
+		res.clearName();
+		return res;
 	}
 
 	InstructionLabel acquiredLock() const {
@@ -442,7 +456,11 @@ public:
 				return true;
 			if (content > o.content)
 				return false;
-			return restoreRedzone < o.restoreRedzone;
+			if (restoreRedzone < o.restoreRedzone)
+				return true;
+			if (restoreRedzone > o.restoreRedzone)
+				return true;
+			return finishCallSequence < o.finishCallSequence;
 		case fl_unlocked:
 			return rip < o.rip;
 		case fl_bad:
@@ -484,6 +502,28 @@ public:
 	std::vector<Relocation *> relocs;
 	std::vector<LateRelocation *> lateRelocs;
 };
+
+static void
+exitRedZone(patch &p)
+{
+	p.content.push_back(0x48);
+	p.content.push_back(0x8d);
+	p.content.push_back(0x64);
+	p.content.push_back(0x24);
+	p.content.push_back(0x80);	
+}
+static void
+restoreRedZone(patch &p)
+{
+	p.content.push_back(0x48);
+	p.content.push_back(0x8d);
+	p.content.push_back(0xa4);
+	p.content.push_back(0x24);
+	p.content.push_back(0x80);
+	p.content.push_back(0x00);
+	p.content.push_back(0x00);
+	p.content.push_back(0x00);
+}
 
 static void
 emitBranchToHost(patch &p, unsigned long rip)
@@ -598,12 +638,14 @@ struct validater_context {
 	void flush(patch &p) {
 		for (auto it = relocs.begin(); it != relocs.end(); ) {
 			if (debug_stack_validation) {
-				printf("Process validation reloc, offset %d ->\n",
-				       it->first);
+				if (debug_stack_validation)
+					printf("Process validation reloc, offset %d ->\n",
+					       it->first);
 				it->second.prettyPrint(stdout, "");
 			}
 			if (offsets.count(it->second)) {
-				printf("Ready to process\n");
+				if (debug_stack_validation)
+					printf("Ready to process\n");
 				unsigned reloc_offset = it->first;
 				unsigned res_offset = offsets[it->second];
 				int delta = res_offset - reloc_offset;
@@ -613,7 +655,8 @@ struct validater_context {
 				p.content[reloc_offset - 1] = delta >> 24;
 				it = relocs.erase(it);
 			} else {
-				printf("Still pending\n");
+				if (debug_stack_validation)
+					printf("Still pending\n");
 				pending.push_back(it->second);
 				it++;
 			}
@@ -803,11 +846,7 @@ stackValidatedEntryPoints(Oracle *oracle,
 	}
 
 	/* Get out of the red zone. */
-	p.content.push_back(0x48);
-	p.content.push_back(0x8d);
-	p.content.push_back(0x64);
-	p.content.push_back(0x24);
-	p.content.push_back(0x80);
+	exitRedZone(p);
 	/* pushf */
 	p.content.push_back(0x9c);
 
@@ -1018,6 +1057,132 @@ succRipToLabel(unsigned long nextRip, const InstructionLabel &start)
 }
 
 static Maybe<InstructionLabel>
+handleIndirectCall(patch &p,
+		   const InstructionLabel &start,
+		   unsigned len,
+		   Instruction<ThreadCfgLabel> *instr)
+{
+	unsigned long rip = start.getRip();
+	unsigned long next_rip = rip + len;
+	InstructionLabel emptyLabel(InstructionLabel::compound(std::set<InstructionLabel::entry>(), start.locked));
+	emptyLabel.finishCallSequence = next_rip;
+	emptyLabel.clearName();
+
+	/* Where might we be going next? */
+	std::map<unsigned long, InstructionLabel> whereToNext;
+	for (auto it = start.content.begin();
+	     it != start.content.end();
+	     it++) {
+		const CFGNode *currentNode = it->node;
+		for (auto it2 = currentNode->successors.begin();
+		     it2 != currentNode->successors.end();
+		     it2++) {
+			const CFGNode *potentialSuccessor = it2->instr;
+			if (!potentialSuccessor)
+				continue;
+			unsigned long rip = potentialSuccessor->rip.unwrap_vexrip();
+			auto it3_did_insert = whereToNext.insert(
+				std::pair<unsigned long, InstructionLabel>(
+					rip,
+					emptyLabel));
+			InstructionLabel &nextLabel(it3_did_insert.first->second);
+			nextLabel.content.insert(
+				InstructionLabel::entry(
+					it->summary,
+					it->tid,
+					potentialSuccessor));
+		}
+	}
+
+	exitRedZone(p);
+	p.content.push_back(0x57); /* push rdi */
+	p.content.push_back(0x9c); /* pushf */
+
+	/* The instruction is call modrm.  We want to turn it into mov
+	   modrm, rdi so that we can do the validation. */
+	int skip = 0;
+	if (instr->content[0] >= 0x40 && instr->content[0] <= 0x4f) {
+		/* Preserve REX prefix, except for the R bit, and set
+		   W bit. */
+		p.content.push_back((instr->content[0] & ~4) | 8);
+		skip = 1;
+	} else {
+		/* Need a REX prefix with the W bit set */
+		p.content.push_back(0x48);
+	}
+	/* opcode */
+	p.content.push_back(0x8b);
+	/* modrm.  Take the original one, but replace the reg field with
+	   7 (== rdi) */
+	p.content.push_back(instr->content[1 + skip] | (7 << 3));
+	/* Transfer the rest of the modrm */
+	for (unsigned i = skip + 2; i < instr->len; i++)
+		p.content.push_back(instr->content[i]);
+
+	/* Now emit the validation stuff */
+	for (auto it = whereToNext.begin(); it != whereToNext.end(); it++) {
+		assert(it->first < 0x100000000ul);
+		/* cmpq $imm32, %rdi */
+		p.content.push_back(0x48);
+		p.content.push_back(0x81);
+		p.content.push_back(0xff);
+		p.content.push_back(it->first);
+		p.content.push_back(it->first >> 8);
+		p.content.push_back(it->first >> 16);
+		p.content.push_back(it->first >> 32);
+		/* je rel32 */
+		p.content.push_back(0x0f);
+		p.content.push_back(0x84);
+		p.content.push_back(1);
+		p.content.push_back(2);
+		p.content.push_back(3);
+		p.content.push_back(4);
+		p.relocs.push_back(
+			new Relocation(
+				p.content.size() - 4,
+				it->second));
+	}
+
+	/* If we get here then none of the successors matched, so we
+	   need to get out of the patch. */
+	/* Tricky part: can't re-evaluate the successor, because that
+	   would introduce a race, so have to emulate the call
+	   manually. */
+	if (start.locked)
+		emitCallSequence(p, "(unsigned long)release_lock");
+	/* movq imm32, 0x88(%rsp) -- save the return address */
+	assert(next_rip <= 0x100000000ul);
+	p.content.push_back(0x48);
+	p.content.push_back(0xc7);
+	p.content.push_back(0x84);
+	p.content.push_back(0x24);
+	p.content.push_back(0x88);
+	p.content.push_back(0x00);
+	p.content.push_back(0x00);
+	p.content.push_back(0x00);
+	p.content.push_back(next_rip);
+	p.content.push_back(next_rip >> 8);
+	p.content.push_back(next_rip >> 16);
+	p.content.push_back(next_rip >> 24);
+	/* popf */
+	p.content.push_back(0x9d);
+	/* xchg %rdi, (%rsp) -- restores rdi and pushes the address we want to go to next. */
+	p.content.push_back(0x48);
+	p.content.push_back(0x87);
+	p.content.push_back(0x3c);
+	p.content.push_back(0x24);
+	/* ret $0x78 -- restore redzone.  Note that we don't restore
+	   the whole thing, because the return address of the function
+	   we're calling is effectively the first 8 bytes of the
+	   redzone. */
+	p.content.push_back(0xc2);
+	p.content.push_back(0x78);
+	p.content.push_back(0x00);
+	/* Well, that was fun. */
+	return Maybe<InstructionLabel>::nothing();
+}
+
+static Maybe<InstructionLabel>
 emitLockedInstruction(const InstructionLabel &start,
 		      const summaryRootsT &summaryRoots,
 		      Oracle *oracle,
@@ -1025,16 +1190,26 @@ emitLockedInstruction(const InstructionLabel &start,
 {
 	unsigned long rip = start.getRip();
 
-	if (start.restoreRedzone) {
+	if (start.finishCallSequence) {
+		/* popf */
 		p.content.push_back(0x9d);
-		p.content.push_back(0x48);
-		p.content.push_back(0x8d);
-		p.content.push_back(0xa4);
-		p.content.push_back(0x24);
-		p.content.push_back(0x80);
-		p.content.push_back(0x00);
-		p.content.push_back(0x00);
-		p.content.push_back(0x00);
+		/* pop rdi */
+		p.content.push_back(0x5f);
+		/* restore red zone */
+		restoreRedZone(p);
+		/* pushq $imm64 */
+		assert(start.finishCallSequence < 0x100000000ul);
+		p.content.push_back(0x68);
+		p.content.push_back(start.finishCallSequence);
+		p.content.push_back(start.finishCallSequence >> 8);
+		p.content.push_back(start.finishCallSequence >> 16);
+		p.content.push_back(start.finishCallSequence >> 24);
+		return Maybe<InstructionLabel>::just(start.clearFinishCallSequence());
+	}
+	if (start.restoreRedzone) {
+		/* popf */
+		p.content.push_back(0x9d);
+		restoreRedZone(p);
 		return Maybe<InstructionLabel>::just(start.clearRestoreRedZone());
 	}
 
@@ -1096,6 +1271,12 @@ emitLockedInstruction(const InstructionLabel &start,
 	assert(len != 99);
 	if (!newInstr)
 		errx(1, "need to decode instruction at %lx, but decoder failed!", rip);
+
+	if (newInstr->content[0] == 0xff &&
+	    ((newInstr->content[1] >> 3) & 7) == 2) {
+		/* Indirect call instructions need special handling. */
+		return handleIndirectCall(p, start, len, newInstr);
+	}
 	std::vector<unsigned long> succInstructions;
 	for (auto it = newInstr->relocs.begin();
 	     it != newInstr->relocs.end();
@@ -1113,7 +1294,7 @@ emitLockedInstruction(const InstructionLabel &start,
 					true));
 			continue;
 		}
-
+		
 		/* The decoder has told us what RIP this instruction
 		   might branch to.  Figure out what label that
 		   corresponds to. */
