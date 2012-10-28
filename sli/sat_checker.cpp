@@ -1097,7 +1097,7 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 								return IRExpr_Const(IRConst_U1(0));
 						}
 					} else if (b->tag == Iex_Const) {
-						unsigned long k = ((IRExprConst *)a)->con->Ico.U64;
+						unsigned long k = ((IRExprConst *)b)->con->Ico.U64;
 						/* Our assumption is that b < k */
 						if (e->arg1->tag == Iex_Const &&
 						    e->arg2 == b) {
@@ -1131,7 +1131,7 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 								return IRExpr_Const(IRConst_U1(1));
 						}
 					} else if (b->tag == Iex_Const) {
-						unsigned long k = ((IRExprConst *)a)->con->Ico.U64;
+						unsigned long k = ((IRExprConst *)b)->con->Ico.U64;
 						/* Our assumption is that b >= k */
 						if (e->arg1->tag == Iex_Const &&
 						    e->arg2 == b) {
