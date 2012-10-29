@@ -297,8 +297,10 @@ initialExploration(const std::set<DynAnalysisRip> &roots,
 			}
 		}
 		
-		if (!succ)
+		if (!succ) {
+			vr_roots = new_roots;
 			continue;
+		}
 
 		for (auto it = doneSoFar.begin(); it != doneSoFar.end(); it++) {
 			assert(it->second.second);
