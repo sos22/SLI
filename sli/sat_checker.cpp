@@ -987,7 +987,8 @@ expressionImpliesRewrite(IRExpr *what, IRExpr **from, IRExpr **to)
 	/* Special case: if we have 0 == k - x, we're sometimes
 	   better off rewriting x to k or vice-versa rather than
 	   rewriting k - x to 0. */
-	if ( ((IRExprConst *)whatb->arg1)->con->Ico.U64 == 0 &&
+	if ( whatb->arg1->tag == Iex_Const &&
+	     ((IRExprConst *)whatb->arg1)->con->Ico.U64 == 0 &&
 	     whatb->arg2->tag == Iex_Associative &&
 	     ((IRExprAssociative *)whatb->arg2)->op >= Iop_Add8 &&
 	     ((IRExprAssociative *)whatb->arg2)->op <= Iop_Add64 &&
