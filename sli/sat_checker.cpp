@@ -1331,6 +1331,11 @@ sat_enumerator::skipToSatisfying()
 		 */
 		std::set<IRExpr *> allBooleans;
 		_sat_checker::findBooleans(frame.remainder, allBooleans);
+		if (TIMEOUT) {
+			/* Give up */
+			stack.clear();
+			return;
+		}
 		assert(!allBooleans.empty());
 		IRExpr *chosenVar = NULL;
 		int chosenVarMult;
