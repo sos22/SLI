@@ -184,7 +184,7 @@ struct path_set {
 		}
 	}
 	void case_split(IRExpr *on, path_set *true_out, path_set *false_out);
-	void canonicalise(internIRExprTable &intern);
+	bool canonicalise(internIRExprTable &intern);
 	double entropy() const;
 };
 
@@ -556,11 +556,13 @@ top:
    expression set aren't units i.e. if there are (x || y) expressions
    in a trueExpr set or (x && y) expressions in a falseExpr set.
    Remove them now. */
-void
+bool
 path_set::canonicalise(internIRExprTable &intern)
 {
 	for (unsigned idx = 0; idx < content.size(); idx++) {
 	retry:
+		if (TIMEOUT || content.size() > 100000)
+			return false;
 		for (auto it = content[idx].trueExprs.begin(); it != content[idx].trueExprs.end(); it++) {
 			if ( (*it)->tag != Iex_Associative )
 				continue;
@@ -811,7 +813,8 @@ phiElimination(StateMachine *sm, bool *done_something)
 		if (TIMEOUT)
 			break;
 		paths.simplify(false);
-		paths.canonicalise(intern);
+		if (!paths.canonicalise(intern))
+			continue;
 		paths.simplify(true);
 		IRExpr *e = paths.build_mux(phi, ity);
 		if (e) {
