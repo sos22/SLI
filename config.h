@@ -29,12 +29,16 @@
 #define FREE_ADDRESS 0
 #endif
 
+#ifndef CONFIG_CLUSTER_THRESHOLD
+#define CONFIG_CLUSTER_THRESHOLD 50
+#endif
+
 /* We do an initial clustering using @STORE_CLUSTER_THRESHOLD, and
    then backtrack by up to @CONFIG_MAX_STORE_BACKTRACK instructions to
    find a nice place to start the analysis from (where that's
    unambiguous). */
 #ifndef STORE_CLUSTER_THRESHOLD
-#define STORE_CLUSTER_THRESHOLD 20
+#define STORE_CLUSTER_THRESHOLD CONFIG_CLUSTER_THRESHOLD
 #endif
 #ifndef CONFIG_MAX_STORE_BACKTRACK
 #define CONFIG_MAX_STORE_BACKTRACK 10
@@ -44,10 +48,10 @@
    that looks like it'll reach a convenient place in the program to do
    analysis from. */
 #ifndef PROBE_CLUSTER_THRESHOLD1
-#define PROBE_CLUSTER_THRESHOLD1 20
+#define PROBE_CLUSTER_THRESHOLD1 CONFIG_CLUSTER_THRESHOLD
 #endif
 #ifndef PROBE_CLUSTER_THRESHOLD2
-#define PROBE_CLUSTER_THRESHOLD2 20
+#define PROBE_CLUSTER_THRESHOLD2 CONFIG_CLUSTER_THRESHOLD
 #endif
 
 #ifndef CONFIG_DATABASE_RIP_DEPTH
