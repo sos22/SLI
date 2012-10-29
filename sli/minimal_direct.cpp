@@ -19,6 +19,11 @@
 
 extern const char *__warning_tag;
 
+struct size_limited_file {
+	FILE *f;
+	size_t remaining_quota;
+};
+
 class DumpFix : public FixConsumer {
 public:
 	VexPtr<Oracle> &oracle;
@@ -72,6 +77,61 @@ DumpFix::finish(void)
 	for (int x = 0; x < cntr; x++)
 		fprintf(output, "\t&patch%d,\n", x);
 	fprintf(output, "};\n\n#include \"patch_skeleton_jump.c\"\n");
+}
+
+static ssize_t
+size_limited_write(void *_slf, const char *buf, size_t sz)
+{
+	struct size_limited_file *slf = (struct size_limited_file *)_slf;
+	if (slf->remaining_quota < sz)
+		sz = slf->remaining_quota;
+	if (sz == slf->remaining_quota && slf->remaining_quota != 0) {
+		fprintf(slf->f, "<log truncated>\n");
+		fflush(slf->f);
+	}
+	size_t s = fwrite(buf, 1, sz, slf->f);
+	slf->remaining_quota -= s;
+	return s;
+}
+
+static int
+size_limited_close(void *_slf)
+{
+	struct size_limited_file *slf = (struct size_limited_file *)_slf;
+	int res = fclose(slf->f);
+	free(slf);
+	return res;
+}
+
+static FILE *
+open_logfile(size_t sz, const char *fmt, ...)
+{
+	static cookie_io_functions_t funcs = {
+		NULL,
+		size_limited_write,
+		NULL,
+		size_limited_close
+	};
+	va_list args;
+	va_start(args, fmt);
+	char *path;
+	int r = vasprintf(&path, fmt, args);
+	(void)r;
+	va_end(args);
+	FILE *f = fopen(path, "w");
+	free(path);
+	if (!f)
+		return NULL;
+	struct size_limited_file *slf = (struct size_limited_file *)malloc(sizeof(struct size_limited_file));
+	slf->remaining_quota = sz;
+	slf->f = f;
+	FILE *res = fopencookie(slf, "w", funcs);
+	if (!res) {
+		fclose(f);
+		free(slf);
+		return NULL;
+	}
+	return res;
 }
 
 class TimeoutTimer : public Timer {
@@ -166,7 +226,7 @@ public:
 void
 InstructionConsumer::operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAnalysisRip &dar, unsigned long cntr)
 {
-	_logfile = fopenf("w", "logs/%ld", cntr + start_instr);
+	_logfile = open_logfile(1000000, "logs/%ld", cntr + start_instr);
 	if (!_logfile) err(1, "opening logs/%ld", cntr + start_instr);
 	printf("Considering %s, log logs/%ld\n", dar.name(), cntr + start_instr);
 	fprintf(_logfile, "Log for %s:\n", dar.name());

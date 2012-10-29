@@ -1491,6 +1491,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		}
 		printf("buildProbeMachine takes %ld.%06ld\n", end.tv_sec, end.tv_usec);
 	}
+	if (TIMEOUT)
+		return;
 	diagnoseCrash(allocLabel, targetRip, probeMachine, oracle,
 		      df, false, opt.enablenoLocalSurvival(),
 		      mai, token);
