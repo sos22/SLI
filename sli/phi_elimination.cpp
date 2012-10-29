@@ -171,7 +171,8 @@ struct path_set {
 	int nr_possible_results;
 	path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 		 internIRExprTable &intern,
-		 std::map<const StateMachineState *, int> &labels);
+		 std::map<const StateMachineState *, int> &labels,
+		 std::map<unsigned, unsigned> &canonResult);
 	void simplify(bool is_canonical);
 	IRExpr *build_mux(StateMachineSideEffectPhi *, IRType);
 	void prettyPrint(FILE *f) const {
@@ -189,7 +190,8 @@ struct path_set {
 
 path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 		   internIRExprTable &intern,
-		   std::map<const StateMachineState *, int> &labels)
+		   std::map<const StateMachineState *, int> &labels,
+		   std::map<unsigned, unsigned> &canonResult)
 	: nr_possible_results(phi->generations.size())
 {
 	std::set<StateMachineState *> mightReachPhi;
@@ -243,7 +245,7 @@ path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 			/* Yes; that'll be the result at the root and
 			   any other path which doesn't assign to one
 			   of the input registers. */
-			queue.back().second.result = x;
+			queue.back().second.result = canonResult[x];
 			break;
 		}
 	}
@@ -318,7 +320,7 @@ path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 			if (sme->sideEffect->definesRegister(tr)) {
 				for (unsigned x = 0; x < phi->generations.size(); x++) {
 					if (phi->generations[x].first == tr) {
-						entry.second.result = x;
+						entry.second.result = canonResult[x];
 						break;
 					}
 				}
@@ -770,12 +772,34 @@ phiElimination(StateMachine *sm, bool *done_something)
 		}
 		IRType ity = Ity_INVALID;
 		bool failed = false;
-		for (auto it = phi->generations.begin(); it != phi->generations.end(); it++) {
-			if (it->second) {
+		std::map<unsigned, unsigned> resultCanoniser;
+		for (unsigned x = 0; x < phi->generations.size(); x++) {
+			IRExpr *expr = phi->generations[x].second;
+			if (expr) {
 				if (ity == Ity_INVALID)
-					ity = it->second->type();
-				else if (ity != it->second->type())
+					ity = expr->type();
+				else if (ity != expr->type())
 					failed = true;
+				bool found_one = false;
+				for (unsigned y = 0; !found_one && y < x; y++) {
+					if (phi->generations[y].second == expr) {
+						resultCanoniser[x] = y;
+						found_one = true;
+					}
+				}
+				if (!found_one)
+					resultCanoniser[x] = x;
+			} else {
+				bool found_one = false;
+				for (unsigned y = 0; !found_one && y < x; y++) {
+					if (phi->generations[y].first == 
+					    phi->generations[x].first) {
+						resultCanoniser[x] = y;
+						found_one = true;
+					}
+				}
+				if (!found_one)
+					resultCanoniser[x] = x;
 			}
 		}
 		if (ity == Ity_INVALID || failed) {
@@ -783,7 +807,7 @@ phiElimination(StateMachine *sm, bool *done_something)
 				printf("Failed: unknown type\n");
 			continue;
 		}
-		path_set paths(sm, phi, intern, labels);
+		path_set paths(sm, phi, intern, labels, resultCanoniser);
 		if (TIMEOUT)
 			break;
 		paths.simplify(false);
