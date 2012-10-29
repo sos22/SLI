@@ -57,6 +57,8 @@
 			   one of the targets of the branch is <crash>,
 			   turn it into an assertion that we don't go
 			   to <crash>.
+
+   allPointersGood -- If true, BadPtr(x) is always assumed to be false.
 		  
    Other fields:
 
@@ -78,18 +80,22 @@
 class IRExprOptimisations : public Named {
 	bool _assumePrivateStack;
 	bool _noSanityChecking;
+	bool _allPointersGood;
 
 	IRExprOptimisations(bool __assumePrivateStack,
 			    bool __noSanityChecking,
+			    bool __allPointersGood,
 			    AddressSpace *__as)
 		: _assumePrivateStack(__assumePrivateStack),
 		  _noSanityChecking(__noSanityChecking),
+		  _allPointersGood(__allPointersGood),
 		  _as(__as)
 	{}
 protected:
 	IRExprOptimisations(double)
 		: _assumePrivateStack(false),
 		  _noSanityChecking(false),
+		  _allPointersGood(false),
 		  _as(NULL)
 	{}
 	char *mkName() const {
@@ -98,6 +104,8 @@ protected:
 			fragments.push_back("assumePrivateStack");
 		if (_noSanityChecking)
 			fragments.push_back("noSanityChecking");
+		if (_allPointersGood)
+			fragments.push_back("allPointersGood");
 		if (_as)
 			fragments.push_back("as");
 		return flattenStringFragmentsMalloc(fragments, ", ",
@@ -114,6 +122,10 @@ public:
 	   to false and return true.  If we can't be sure, return
 	   false. */
 	bool addressAccessible(unsigned long addr, bool *res) const {
+		if (_allPointersGood) {
+			*res = true;
+			return true;
+		}
 		if (!_as)
 			return false;
 		*res = _as->isReadable(addr, 1);
@@ -134,9 +146,11 @@ public:
 	}
 
 	bool noSanityChecking() const { return _noSanityChecking; }
-	IRExprOptimisations enablenoSanityChecking() const { return IRExprOptimisations(_assumePrivateStack, true, _as); }
+	IRExprOptimisations enablenoSanityChecking() const { return IRExprOptimisations(_assumePrivateStack, true, _allPointersGood, _as); }
+	bool allPointersGood() const { return _allPointersGood; }
+	IRExprOptimisations enableallPointersGood() const { return IRExprOptimisations(_assumePrivateStack, _noSanityChecking, true, _as); }
 	bool assumePrivateStack() const { return _assumePrivateStack; }
-	IRExprOptimisations enableassumePrivateStack() const { return IRExprOptimisations(true, _noSanityChecking, _as); }
+	IRExprOptimisations enableassumePrivateStack() const { return IRExprOptimisations(true, _noSanityChecking, _allPointersGood, _as); }
 
 	unsigned asUnsigned() const {
 		unsigned x = 1; /* turning off all of the optional
@@ -157,6 +171,8 @@ public:
 #endif
 		if (_as)
 			x |= 8;
+		if (_allPointersGood)
+			x |= 16;
 		return x;
 	}
 
@@ -172,6 +188,9 @@ public:
 		parseThisString(", ", buf, &buf);
 		if (parseThisString("noSanityChecking", buf, &buf))
 			_noSanityChecking = true;
+		parseThisString(", ", buf, &buf);
+		if (parseThisString("allPointersGood", buf, &buf))
+			_allPointersGood = true;
 		parseThisString(", ", buf, &buf);
 		if (parseThisString("as", buf, &buf))
 			_as = addrSpace;
@@ -316,6 +335,11 @@ public:
 	{
 		return AllowableOptimisations(this,
 					      IRExprOptimisations::enableassumePrivateStack());
+	}
+	AllowableOptimisations enableallPointersGood() const
+	{
+		return AllowableOptimisations(this,
+					      IRExprOptimisations::enableallPointersGood());
 	}
 
 	bool ignoreStore(const VexRip &rip) const {

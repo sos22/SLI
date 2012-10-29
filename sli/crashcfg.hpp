@@ -333,6 +333,15 @@ public:
 	{
 		return instr_iterator(begin(summary, mai, rip), cfg);
 	}
+
+	const ConcreteThread &lookup(const AbstractThread &abs) const
+	{
+		for (auto it = content.begin(); it != content.end(); it++)
+			if (it->second.count(abs))
+				return it->first;
+		abort();
+	}
+
 };
 
 class crashEnforcementRoots {
@@ -585,8 +594,12 @@ public:
 	}
 	CrashCfg() {};
 	CrashCfg(crashEnforcementRoots &roots, const SummaryId &summaryId, CrashSummary *summary,
-		 AddressSpace *as, bool need_relocs);
-
+		 AddressSpace *as, bool need_relocs, const ThreadAbstracter &abs);
+	CrashCfg(crashEnforcementRoots &roots, const std::map<SummaryId, CrashSummary *> &summaries,
+		 AddressSpace *as, bool need_relocs, const ThreadAbstracter &abs);
+	void init(crashEnforcementRoots &roots, const std::map<SummaryId, CrashSummary *> &summaries,
+		  AddressSpace *as, bool need_relocs, const ThreadAbstracter &abs);
+	
 	bool parse(crashEnforcementRoots &roots, AddressSpace *as, bool generateRelocs, const char *str, const char **suffix);
 	void prettyPrint(FILE *f, bool verbose = false);
 	void operator|=(const CrashCfg &o) {
@@ -617,6 +630,6 @@ public:
 };
 
 Instruction<ThreadCfgLabel> *decode_instr(AddressSpace *as, unsigned long ptr, const ThreadCfgLabel &label,
-					  bool include_reloacs);
+					  unsigned *true_size, bool include_reloacs);
 
 #endif /* !crashCfg_HPP__ */

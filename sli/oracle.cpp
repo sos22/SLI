@@ -51,15 +51,6 @@ hash_ulong_pair(const std::pair<unsigned long, unsigned long> &p)
 	return p.first + p.second * 59;
 }
 
-template<typename t> void
-operator |=(std::set<t> &x, const std::set<t> &y)
-{
-	for (typename std::set<t>::iterator it = y.begin();
-	     it != y.end();
-	     it++)
-		x.insert(*it);
-}
-
 Oracle::LivenessSet Oracle::LivenessSet::everything(~0ul);
 Oracle::LivenessSet Oracle::LivenessSet::argRegisters(
 	0x01 | /* rax -- not strictly an arg register, but treated

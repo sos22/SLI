@@ -15,6 +15,7 @@
 #include "typesdb.hpp"
 #include "timers.hpp"
 #include "profile.hpp"
+#include "allowable_optimisations.hpp"
 
 extern const char *__warning_tag;
 
@@ -88,6 +89,7 @@ consider_rip(const DynAnalysisRip &my_rip,
 	     VexPtr<Oracle> &oracle,
 	     DumpFix &df,
 	     FILE *timings,
+	     const AllowableOptimisations &opt,
 	     GarbageCollectionToken token)
 {
 	__set_profiling(consider_rip);
@@ -111,7 +113,7 @@ consider_rip(const DynAnalysisRip &my_rip,
 	struct timeval start;
 	gettimeofday(&start, NULL);
 
-	checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, token);
+	checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, opt, token);
 
 	struct timeval end;
 	gettimeofday(&end, NULL);
@@ -149,12 +151,14 @@ class InstructionConsumer {
 	double low_end_time;
 	double high_end_time;
 	bool first;
+	const AllowableOptimisations &opt;
 public:
 	InstructionConsumer(unsigned long _start_instr, unsigned long _instructions_to_process,
-			    unsigned long _total_instructions, FILE *_timings)
+			    unsigned long _total_instructions, FILE *_timings,
+			    const AllowableOptimisations &_opt)
 		: start_instr(_start_instr), instructions_to_process(_instructions_to_process),
 		  instructions_processed(0), total_instructions(_total_instructions),
-		  timings(_timings), start(now()), first(true)
+		  timings(_timings), start(now()), first(true), opt(_opt)
 	{}
 	void operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAnalysisRip &dar, unsigned long cntr);
 };
@@ -168,7 +172,7 @@ InstructionConsumer::operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAn
 	fprintf(_logfile, "Log for %s:\n", dar.name());
 	fflush(0);
 
-	consider_rip(dar, 1, oracle, df, timings, ALLOW_GC);
+	consider_rip(dar, 1, oracle, df, timings, opt, ALLOW_GC);
 	fclose(_logfile);
 	_logfile = stdout;
 
@@ -255,11 +259,19 @@ main(int argc, char *argv[])
 		argc--;
 	}
 
+	AllowableOptimisations opt =
+		AllowableOptimisations::defaultOptimisations
+		.enableassumePrivateStack()
+		.setAddressSpace(oracle->ms->addressSpace)
+		.enablenoExtend();
+	if (assert_mode)
+		opt = opt.enableallPointersGood();
+
 	if (argc == 5) {
 		DynAnalysisRip vr;
 		const char *succ;
 		if (parseDynAnalysisRip(&vr, argv[4], &succ)) {
-			consider_rip(vr, 1, oracle, df, NULL, ALLOW_GC);
+			consider_rip(vr, 1, oracle, df, NULL, opt, ALLOW_GC);
 			df.finish();
 			return 0;
 		}
@@ -294,7 +306,8 @@ main(int argc, char *argv[])
 	printf("Processing instructions %ld to %ld\n", start_instr, end_instr);
 
 	unsigned long cntr = 0;
-	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, timings);
+
+	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, timings, opt);
 	if (assert_mode) {
 		for (unsigned long idx = start_instr; idx < end_instr; idx++) {
 			ic(oracle, df, assertions[idx], cntr);

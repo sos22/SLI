@@ -276,6 +276,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		break;
 	}
 	case LibraryFunctionTemplate::__stack_chk_fail:
+	case LibraryFunctionTemplate::__assert_fail:
 		return StateMachineUnreached::get();
 	case LibraryFunctionTemplate::time: {
 		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
@@ -1921,7 +1922,18 @@ probeCFGsToMachine(Oracle *oracle,
 		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
 		   MaiMap &mai)
 {
-	return _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai);
+	StateMachine *sm = _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai);
+#if 0
+	sm->root = new StateMachineSideEffecting(
+		sm->root->dbg_origin,
+		new StateMachineSideEffectAssertFalse(
+			IRExpr_Unop(
+				Iop_Not1,
+				new IRExprEntryPoint(tid, CfgLabel(51))),
+			true),
+		sm->root);
+#endif
+	return sm;
 }
 
 StateMachine *

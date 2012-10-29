@@ -1513,7 +1513,7 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
 				*done_something = true;
 				return IRExpr_Const(IRConst_U1(0));
 			}
-			if (!rewriteFrom && e->type() != Ity_I1)
+			if (!rewriteFrom && e->type() != Ity_I1 && e->tag != Iex_Mux0X)
 				return e;
 			return IRExprTransformer::transformIRExpr(e, done_something);
 		}
@@ -2080,12 +2080,24 @@ top:
 				res = IRExpr_Get(argg->reg, Ity_I8);
 				break;
 			}
+			if (e->op == Iop_V128to32) {
+				res = IRExpr_Get(argg->reg, Ity_I32);
+				break;
+			}
+			if (e->op == Iop_ReinterpI32asF32) {
+				res = IRExpr_Get(argg->reg, Ity_F32);
+				break;
+			}
 		}
 
 		if (e->arg->tag == Iex_Load) {
 			IRExprLoad *argl = (IRExprLoad *)e->arg;
 			if (e->op == Iop_64to32) {
 				res = IRExpr_Load(Ity_I32, argl->addr);
+				break;
+			}
+			if (e->op == Iop_ReinterpI32asF32) {
+				res = IRExpr_Load(Ity_F32, argl->addr);
 				break;
 			}
 		}
@@ -2182,6 +2194,10 @@ top:
 		}
 
 		if (e->op == Iop_BadPtr) {
+			if (opt.allPointersGood()) {
+				res = IRExpr_Const(IRConst_U1(0));
+				break;
+			}
 			if (e->arg->tag == Iex_Associative &&
 			    ((IRExprAssociative *)e->arg)->op == Iop_Add64 &&
 			    ((IRExprAssociative *)e->arg)->nr_arguments == 2 &&
@@ -2500,6 +2516,40 @@ top:
 			l = e->arg1 = ((IRExprUnop *)e->arg1)->arg;
 			r = e->arg2 = ((IRExprUnop *)e->arg2)->arg;
 			progress = true;
+		}
+
+		if ( e->op >= Iop_CmpLT8S &&
+		     e->op <= Iop_CmpLT64S &&
+		     physicallyEqual(e->arg1,e->arg2) ) {
+			res = IRExpr_Const(IRConst_U1(0));
+			break;
+		}
+
+		/* !x != x, for any x */
+		if (e->op == Iop_CmpEQ1 &&
+		    ((e->arg1->tag == Iex_Unop &&
+		      ((IRExprUnop *)e->arg1)->op == Iop_Not1 &&
+		      ((IRExprUnop *)e->arg1)->arg == e->arg2) ||
+		     (e->arg2->tag == Iex_Unop &&
+		      ((IRExprUnop *)e->arg2)->op == Iop_Not1 &&
+		      ((IRExprUnop *)e->arg2)->arg == e->arg1))) {
+			res = IRExpr_Const(IRConst_U1(0));
+			break;
+		}
+		     
+		if (e->op == Iop_CmpF64 &&
+		    e->arg1->tag == Iex_Unop &&
+		    e->arg2->tag == Iex_Unop &&
+		    ((IRExprUnop *)e->arg1)->op == Iop_F32toF64 &&
+		    ((IRExprUnop *)e->arg2)->op == Iop_F32toF64) {
+			res = IRExpr_Binop(Iop_CmpF32, ((IRExprUnop *)e->arg1)->arg, ((IRExprUnop *)e->arg2)->arg);
+			break;
+		}
+
+		if ( (e->op == Iop_CmpF32 || e->op == Iop_CmpF64) &&
+		     physicallyEqual(e->arg1, e->arg2) ) {
+			res = IRExpr_Const(IRConst_U32(0x40));
+			break;
 		}
 
 		/* We simplify == expressions with sums on the left
@@ -3011,7 +3061,9 @@ top:
 	case Iex_Mux0X: {
 		IRExprMux0X *e = (IRExprMux0X *)src;
 		e->cond = optimiseIRExpr(e->cond, opt, done_something);
+		e->expr0 = rewriteBoolean(e->cond, false, e->expr0, done_something);
 		e->expr0 = optimiseIRExpr(e->expr0, opt, done_something);
+		e->exprX = rewriteBoolean(e->cond, true, e->exprX, done_something);
 		e->exprX = optimiseIRExpr(e->exprX, opt, done_something);
 		if (e->cond->tag == Iex_Const) {
 			if (((IRExprConst *)e->cond)->con->Ico.U1)

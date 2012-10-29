@@ -27,6 +27,7 @@ enum byte_code_op {
 	/* Binary ops */
 	bcop_cmp_eq,
 	bcop_cmp_ltu,
+	bcop_cmp_lts,
 	bcop_add,
 	bcop_and,
 	bcop_or,
@@ -180,8 +181,8 @@ struct crash_enforcement_plan {
 				arr->sz--;				\
 				return;					\
 			}						\
-			abort();					\
 		}							\
+		abort();						\
 	}								\
 	void name ## _erase_idx(struct name ## _array *arr,		\
 				int idx)				\

@@ -370,6 +370,12 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		case Iop_CmpLT64U:
 			bytecode_op(f, "cmp_ltu", ieb->arg1->type());
 			break;
+		case Iop_CmpLT8S:
+		case Iop_CmpLT16S:
+		case Iop_CmpLT32S:
+		case Iop_CmpLT64S:
+			bytecode_op(f, "cmp_lts", ieb->arg1->type());
+			break;
 		case Iop_Shl64:
 			bytecode_op(f, "shl", ieb->arg1->type());
 			break;

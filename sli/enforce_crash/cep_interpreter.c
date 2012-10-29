@@ -204,7 +204,7 @@ struct per_thread_state {
 	   address if the access fails. */
 	unsigned long fault_recovery_addr;
 	void *sigstack;
-	unsigned char interpreter_stack[STACK_SIZE - 24 - sizeof(struct reg_struct)];
+	unsigned char interpreter_stack[STACK_SIZE - 32 - sizeof(struct reg_struct)];
 	struct reg_struct client_regs;
 };
 
@@ -944,6 +944,28 @@ eval_bytecode(const unsigned short *bytecode,
 			debug("bcop_cmpltu: %lx < %lx -> %d\n", arg1, arg2, arg2 < arg1);
 			break;
 		}
+		case bcop_cmp_lts: {
+			unsigned res;
+			switch (type) {
+#define do_type(bct_type, c_type, fmt)					\
+				case bct_type: {			\
+					c_type arg1 = bytecode_pop(&stack, bct_type); \
+					c_type arg2 = bytecode_pop(&stack, bct_type); \
+					res = arg2 < arg1;		\
+					debug("bcop_cmplts: %"fmt" < %"fmt" -> %d\n", arg1, arg2, res); \
+					break;				\
+				}
+				do_type(bct_byte, char, "x");
+				do_type(bct_short, short, "x");
+				do_type(bct_int, int, "x");
+				do_type(bct_long, long, "lx");
+#undef do_type
+			default:
+				abort();
+			}
+			bytecode_push(&stack, res, bct_bit);
+			break;
+		}
 		case bcop_add: {
 			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, type);
@@ -1246,7 +1268,9 @@ restart_interpreter(void)
 {
 	/* We tried to exit the interpreter and then trod on another
 	 * entry point.  Try that again. */
-	debug("Restart interpreter at %lx.\n", find_pts()->client_regs.rip);
+	debug("Restart interpreter at %lx (stack %lx).\n",
+	      find_pts()->client_regs.rip,
+	      find_pts()->initial_interpreter_rsp);
 	EVENT(restart_interpreter);
 	release_big_lock();
 	asm volatile (
@@ -1254,7 +1278,7 @@ restart_interpreter(void)
 		"    subq %0, %%rsp\n"         /* Make sure we don't tread on stashed registers */
 		"    jmp start_interpreting\n" /* Restart the interpreter */
 		:
-		: "i" (sizeof(struct reg_struct))
+		: "i" (sizeof(struct reg_struct) + 8)
 		);
 	debug("Huh?  Restart interpreter didn't work\n");
 	abort();
@@ -2545,7 +2569,7 @@ start_interpreting(void)
    client code. */
 asm(
 "__trampoline_client_to_interp_start:\n"
-"    mov %rsp, %gs:(" str(_STACK_SIZE) " - 8)\n" /* Stash client RSP */
+"    mov %rsp, %gs:(" str(_STACK_SIZE) " - 16)\n" /* Stash client RSP */
 "    mov %gs:0, %rsp\n"    /* Switch to interpreter stack */
 "    pushf\n"              /* Save other client registers */
 "    push %r15\n"

@@ -216,7 +216,7 @@ StateMachine *availExpressionAnalysis(const MaiMap &mai,
 				      bool is_ssa,
 				      OracleInterface *oracle,
 				      bool *done_something);
-StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, const AllowableOptimisations &opt);
+StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa);
 StateMachine *bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something);
 StateMachine *useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 				    OracleInterface *oracle, bool *done_something);
@@ -230,9 +230,8 @@ StateMachine *functionAliasAnalysis(const MaiMap &mai,
 				    OracleInterface *oracle,
 				    const ControlDominationMap &cdm,
 				    bool *done_something);
-StateMachine *phiElimination(StateMachine *sm, const AllowableOptimisations &opt,
-			     const ControlDominationMap &cdm, bool *done_something);
-StateMachine *undefinednessSimplification(StateMachine *sm, bool *done_something);
+StateMachine *phiElimination(StateMachine *sm, bool *done_something);
+StateMachine *undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt, bool *done_something);
 
 StateMachine *removeAnnotations(VexPtr<MaiMap, &ir_heap> &mai,
 				VexPtr<StateMachine, &ir_heap> sm,
@@ -246,6 +245,7 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     unsigned tid,
 				     const VexPtr<Oracle> &oracle,
 				     FixConsumer &df,
+				     const AllowableOptimisations &opt,
 				     GarbageCollectionToken token);
 
 StateMachineState *getProximalCause(MachineState *ms, Oracle *oracle, MaiMap &mai, const CFGNode *where, const VexRip &rip, int tid);

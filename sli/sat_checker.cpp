@@ -13,6 +13,14 @@
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
 
+#ifdef NDEBUG
+#define debug_satisfier false
+#else
+static bool debug_satisfier = false;
+#endif
+
+#define UNEVALUATABLE ((IRExpr *)1)
+
 namespace _sat_checker {
 
 static struct stats {
@@ -73,6 +81,63 @@ anf_depth(const IRExpr *a)
 	return acc + 1;
 }
 
+static int
+expr_depth(const IRExpr *a)
+{
+	switch (a->tag) {
+	case Iex_Get:
+	case Iex_Const:
+	case Iex_HappensBefore:
+	case Iex_FreeVariable:
+	case Iex_EntryPoint:
+	case Iex_ControlFlow:
+		return 1;
+	case Iex_GetI:
+		return expr_depth( ((IRExprGetI *)a)->ix) + 1;
+	case Iex_Qop:
+		return std::max( std::max(expr_depth( ((IRExprQop *)a)->arg1),
+					  expr_depth( ((IRExprQop *)a)->arg2)),
+				 std::max(expr_depth( ((IRExprQop *)a)->arg3),
+					  expr_depth( ((IRExprQop *)a)->arg4)) ) + 1;
+	case Iex_Triop:
+		return std::max( std::max(expr_depth( ((IRExprTriop *)a)->arg1),
+					  expr_depth( ((IRExprTriop *)a)->arg2)),
+				 expr_depth( ((IRExprTriop *)a)->arg3) ) + 1;
+	case Iex_Binop:
+		return std::max(expr_depth( ((IRExprBinop *)a)->arg1),
+				expr_depth( ((IRExprBinop *)a)->arg2) ) + 1;
+	case Iex_Unop:
+		return expr_depth( ((IRExprUnop *)a)->arg ) + (((IRExprUnop *)a)->op != Iop_Not1);
+	case Iex_Mux0X:
+		return std::max( std::max(expr_depth( ((IRExprMux0X *)a)->cond),
+					  expr_depth( ((IRExprMux0X *)a)->expr0)),
+				 expr_depth( ((IRExprMux0X *)a)->exprX) ) + 1;
+	case Iex_Load:
+		return expr_depth( ((IRExprLoad *)a)->addr) + 1;
+	case Iex_Associative: {
+		IRExprAssociative *e = (IRExprAssociative *)a;
+		int m = 0;
+		for (int i = 0; i < e->nr_arguments; i++) {
+			int j = expr_depth(e->contents[i]);
+			if (j > m)
+				m = j;
+		}
+		return m + (e->op != Iop_And1 && e->op != Iop_Or1);
+	}
+	case Iex_CCall: {
+		IRExprCCall *e = (IRExprCCall *)a;
+		int m = 0;
+		for (int i = 0; e->args[i]; i++) {
+			int j = expr_depth(e->args[i]);
+			if (j > m)
+				m = j;
+		}
+		return m + 1;
+	}
+	}
+	abort();
+}
+
 enum ordering {
 	ord_lt,
 	ord_eq,
@@ -131,6 +196,12 @@ _anf_sort_func(IRExpr *a, IRExpr *b)
 	if (a < b)
 		return ord_lt;
 	if (a > b)
+		return ord_gt;
+	int a_depth_e = expr_depth(a);
+	int b_depth_e = expr_depth(b);
+	if (a_depth_e < b_depth_e)
+		return ord_lt;
+	if (a_depth_e > b_depth_e)
 		return ord_gt;
 	if (inv_a < inv_b)
 		return ord_lt;
@@ -305,9 +376,11 @@ class anf_context {
 	std::set<std::pair<IRExpr *, IRExpr *> > eqRules;
 	std::set<IRExpr *> definitelyTrue;
 	std::set<IRExpr *> definitelyFalse;
+	std::set<IRExpr *> badPointers;
 	bool matches(const IRExpr *a, const IRExpr *b) const;
 	void addAssumption(IRExpr *a);
 	void introduceEqRule(IRExpr *a, IRExpr *b);
+	bool loadsBadPointer(IRExpr *a) const;
 public:
 	anf_context(internIRExprTable &_intern, IRExpr *assumption)
 		: intern(_intern)
@@ -318,6 +391,60 @@ public:
 	IRExpr *simplify(IRExpr *input);
 	void prettyPrint(FILE *);
 };
+
+bool
+anf_context::loadsBadPointer(IRExpr *a) const
+{
+	switch (a->tag) {
+	case Iex_Get:
+		return false;
+	case Iex_GetI:
+		return loadsBadPointer(((IRExprGetI *)a)->ix);
+	case Iex_Qop:
+		if (loadsBadPointer( ((IRExprQop *)a)->arg4))
+			return true;
+	case Iex_Triop:
+		if (loadsBadPointer( ((IRExprTriop *)a)->arg3))
+			return true;
+	case Iex_Binop:
+		if (loadsBadPointer( ((IRExprBinop *)a)->arg2))
+			return true;
+	case Iex_Unop:
+		return loadsBadPointer( ((IRExprUnop *)a)->arg);
+	case Iex_Const:
+		return false;
+	case Iex_Mux0X:
+		return loadsBadPointer( ((IRExprMux0X *)a)->cond ) ||
+			(loadsBadPointer( ((IRExprMux0X *)a)->expr0 ) &&
+			 loadsBadPointer( ((IRExprMux0X *)a)->exprX ) );
+	case Iex_CCall: {
+		IRExprCCall *cee = (IRExprCCall *)a;
+		for (int i = 0; cee->args[i]; i++)
+			if (loadsBadPointer(cee->args[i]))
+				return true;
+		return false;
+	}
+	case Iex_Associative: {
+		IRExprAssociative *cee = (IRExprAssociative *)a;
+		for (int i = 0; i < cee->nr_arguments; i++)
+			if (loadsBadPointer(cee->contents[i]))
+				return true;
+		return false;
+	}
+	case Iex_Load:
+		return badPointers.count( ((IRExprLoad *)a)->addr ) ||
+			loadsBadPointer( ((IRExprLoad *)a)->addr );
+	case Iex_HappensBefore:
+		return false;
+	case Iex_FreeVariable:
+		return false;
+	case Iex_EntryPoint:
+		return false;
+	case Iex_ControlFlow:
+		return false;
+	}
+	abort();
+}
 
 void
 anf_context::prettyPrint(FILE *f)
@@ -341,6 +468,12 @@ anf_context::prettyPrint(FILE *f)
 		ppIRExpr(it->first, f);
 		fprintf(f, "\t==\t");
 		ppIRExpr(it->second, f);
+		fprintf(f, "\n");
+	}
+	fprintf(f, "\tBad pointers:\n");
+	for (auto it = badPointers.begin(); it != badPointers.end(); it++) {
+		fprintf(f, "\t\t");
+		ppIRExpr(*it, f);
 		fprintf(f, "\n");
 	}
 }
@@ -613,11 +746,16 @@ anf_context::simplify(IRExpr *a)
 		if (matches(a, *it))
 			return internIRExpr(IRExpr_Const(IRConst_U1(0)), intern);
 
+	if (!badPointers.empty() && loadsBadPointer(a))
+		return UNEVALUATABLE;
+
 	if (a->tag == Iex_Unop) {
 		IRExprUnop *ieu = (IRExprUnop *)a;
 		if (ieu->op != Iop_Not1)
 			return a;
 		IRExpr *arg = simplify(ieu->arg);
+		if (arg == UNEVALUATABLE)
+			return UNEVALUATABLE;
 		if (arg->tag == Iex_Const) {
 			IRExprConst *iec = (IRExprConst *)arg;
 			return internIRExpr(IRExpr_Const(IRConst_U1(!iec->con->Ico.U1)), intern);
@@ -649,20 +787,22 @@ anf_context::simplify(IRExpr *a)
 		IRExprAssociative *res = IRExpr_Associative(iea->nr_arguments, Iop_And1);
 		for (int i = 0; i < iea->nr_arguments; i++) {
 			IRExpr *arg = sub_context.simplify(iea->contents[i]);
-			if (arg->tag == Iex_Const) {
-				IRExprConst *iec = (IRExprConst *)arg;
-				if (!iec->con->Ico.U1)
-					return arg;
-			} else if (arg->tag == Iex_Associative &&
-			    ((IRExprAssociative *)arg)->op == Iop_And1) {
-				IRExprAssociative *argA = (IRExprAssociative *)arg;
-				for (int i = 0; i < argA->nr_arguments; i++) {
-					sub_context.addAssumption(argA->contents[i]);
-					addArgumentToAssoc(res, argA->contents[i]);
+			if (arg != UNEVALUATABLE) {
+				if (arg->tag == Iex_Const) {
+					IRExprConst *iec = (IRExprConst *)arg;
+					if (!iec->con->Ico.U1)
+						return arg;
+				} else if (arg->tag == Iex_Associative &&
+					   ((IRExprAssociative *)arg)->op == Iop_And1) {
+					IRExprAssociative *argA = (IRExprAssociative *)arg;
+					for (int i = 0; i < argA->nr_arguments; i++) {
+						sub_context.addAssumption(argA->contents[i]);
+						addArgumentToAssoc(res, argA->contents[i]);
+					}
+				} else {
+					sub_context.addAssumption(arg);
+					addArgumentToAssoc(res, arg);
 				}
-			} else {
-				sub_context.addAssumption(arg);
-				addArgumentToAssoc(res, arg);
 			}
 		}
 		if (res->nr_arguments == 1)
@@ -696,7 +836,7 @@ anf_simplify(IRExpr *a, IRExpr *assumption, internIRExprTable &intern)
 	while (!TIMEOUT) {
 		anf_context ctxt(intern, assumption);
 		IRExpr *a2 = ctxt.simplify(a);
-		if (a == a2)
+		if (a2 == UNEVALUATABLE || a == a2)
 			break;
 		a = a2;
 	}
@@ -735,302 +875,6 @@ disjunctive_normal_form(IRExpr *what)
 		return res;
 	else
 		return what;
-}
-
-static bool
-evalExpression(IRExpr *e, NdChooser &chooser, bool preferred_result,
-	       const IRExprOptimisations &opt, satisfier &sat)
-{
-	assert(e->type() == Ity_I1);
-	if (e->tag == Iex_Const)
-		return ((IRExprConst *)e)->con->Ico.U1 != 0;
-
-	std::pair<bool, bool> falsefalse = std::pair<bool, bool>(false, false);
-	auto it_did_insert = sat.memo.insert(std::pair<IRExpr *, std::pair<bool, bool> >(e, falsefalse));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert) {
-		if (e->tag == Iex_Unop &&
-		    ((IRExprUnop *)e)->op == Iop_Not1) {
-			it->second.first = !evalExpression(((IRExprUnop *)e)->arg, chooser, !preferred_result, opt, sat);
-		} else if (e->tag == Iex_Associative &&
-			   ((IRExprAssociative *)e)->op == Iop_And1) {
-			IRExprAssociative *a = (IRExprAssociative *)e;
-			bool acc = true;
-			for (int i = 0; i < a->nr_arguments && acc; i++)
-				acc &= evalExpression(a->contents[i], chooser, false, opt, sat);
-			it->second.first = acc;
-		} else if (e->tag == Iex_Associative &&
-			   ((IRExprAssociative *)e)->op == Iop_Or1) {
-			IRExprAssociative *a = (IRExprAssociative *)e;
-			bool acc = false;
-			for (int i = 0; i < a->nr_arguments && !acc; i++)
-				acc |= evalExpression(a->contents[i], chooser, true, opt, sat);
-			it->second.first = acc;
-		} else if (e->tag == Iex_EntryPoint) {
-			it->second.second = true;
-			IRExprEntryPoint *a = (IRExprEntryPoint *)e;
-			auto it2 = sat.entry.find(a->thread);
-			if (it2 == sat.entry.end()) {
-				if (preferred_result == !chooser.nd_choice(2)) {
-					sat.entry.insert(std::pair<unsigned, CfgLabel>(a->thread, a->label));
-					it->second.first = true;
-				} else {
-					it->second.first = false;
-				}
-			} else {
-				/* Because otherwise we'd have found
-				   it in the memo table, by the
-				   internment property. */
-				assert(it2->second != a->label);
-				it->second.first = false;
-			}
-		} else {
-			if (e->tag == Iex_Binop) {
-				IRExprBinop *ieb = (IRExprBinop *)e;
-				if (ieb->op >= Iop_CmpEQ8 &&
-				    ieb->op <= Iop_CmpEQ64 &&
-				    ieb->arg1->tag == Iex_Const) {
-					/* We quite often get
-					   expressions of the form
-					   ``(k1 == var) && (k2 ==
-					   var)'', where k1 != k2.
-					   It's useful to return that
-					   that's unsatisfiable.  The
-					   trick is that if we say k1
-					   == var is true then we say
-					   that var is fixed, and then
-					   any other equality on var
-					   must be false (because
-					   we're interned) */
-					if (sat.fixedVariables.count(ieb->arg2)) {
-						it->second.first = false;
-						return it->second.first;
-					}
-					sat.fixedVariables.insert(ieb->arg2);
-
-					/* Do we have any idea about
-					   whether this expression is
-					   a bad pointer? */
-					if (ieb->op == Iop_CmpEQ64) {
-						for (auto it2 = sat.memo.begin();
-						     it2 != sat.memo.end();
-						     it2++) {
-							if (it2->first->tag != Iex_Unop ||
-							    ((IRExprUnop *)it2->first)->op != Iop_BadPtr ||
-							    ((IRExprUnop *)it2->first)->arg != ieb->arg2)
-								continue;
-							/* We have an
-							   expression of the
-							   form BadPtr(x) or
-							   !BadPtr(x) and
-							   we're trying to
-							   eval k == x.  Make
-							   sure we produce
-							   something
-							   consistent. */
-							bool isAcc;
-							unsigned long v = ((IRExprConst *)ieb->arg1)->con->Ico.U64;
-							if (opt.addressAccessible(v, &isAcc)) {
-								/* isAcc == !BadPtr(k) */
-								if (isAcc == it2->second.first) {
-									/* BadPtr(k) != BadPtr(x),
-									   therefore k != x */
-									it->second.first = false;
-									return it->second.first;
-								}
-							}
-							break;
-						}
-					}
-				}
-
-				if (ieb->op >= Iop_CmpEQ8 &&
-				    ieb->op <= Iop_CmpEQ64) {
-					/* Compare that to all of the
-					   CmpLTxU expressions which
-					   we've already assigned
-					   values to. */
-					IRExpr *arg1 = ieb->arg1;
-					IRExpr *arg2 = ieb->arg2;
-					for (auto it2 = sat.memo.begin();
-					     it2 != sat.memo.end();
-					     it2++) {
-						if (it2->first == ieb ||
-						    it2->first->tag != Iex_Binop)
-							continue;
-						IRExprBinop *ieb2 = (IRExprBinop *)it2->first;
-						if (ieb2->op < Iop_CmpLT8U ||
-						    ieb2->op > Iop_CmpLT64U)
-							continue;
-						IRExpr *lt = ieb2->arg1;
-						IRExpr *gt = ieb2->arg2;
-						if (lt != arg1 && lt != arg2 &&
-						    gt != arg1 && gt != arg2)
-							continue;
-						if ( (lt == arg1 && gt == arg2) ||
-						     (lt == arg2 && gt == arg1) ) {
-							/* Have either
-							   A < B or B < A
-							   and we're
-							   evaluating
-							   A == B */
-							if (it2->second.first) {
-								it->second.first = false;
-								return false;
-							}
-						}
-						if (arg1->tag == Iex_Const &&
-						    ((lt->tag == Iex_Const && gt == arg2) ||
-						     (gt->tag == Iex_Const && lt == arg2)) ) {
-							unsigned long arg1_cnst =
-								((IRExprConst *)arg1)->con->Ico.U64;
-							if (lt->tag == Iex_Const) {
-								unsigned long lt_cnst =
-									((IRExprConst *)lt)->con->Ico.U64;
-								if ((arg1_cnst <= lt_cnst) == it2->second.first) {
-									it->second.first = false;
-									return false;
-								}
-							}
-							if (gt->tag == Iex_Const) {
-								unsigned long gt_cnst =
-									((IRExprConst *)gt)->con->Ico.U64;
-								if ((arg1_cnst >= gt_cnst) == it2->second.first) {
-									it->second.first = false;
-									return false;
-								}
-							}
-						}
-					}
-				}
-
-				if (ieb->op >= Iop_CmpLT8U &&
-				    ieb->op <= Iop_CmpLT64U) {
-					IRExpr *arg1 = ieb->arg1;
-					IRExpr *arg2 = ieb->arg2;
-					for (auto it2 = sat.memo.begin();
-					     it2 != sat.memo.end();
-					     it2++) {
-						if (it2->first == e || it2->first->tag != Iex_Binop)
-							continue;
-						IRExprBinop *ieb2 = (IRExprBinop *)it2->first;
-						if (it2->second.first &&
-						    ieb2->op >= Iop_CmpEQ8 &&
-						    ieb2->op <= Iop_CmpEQ64) {
-							if ( (arg1 == ieb2->arg1 &&
-							      arg2 == ieb2->arg2) ||
-							     (arg1 == ieb2->arg2 &&
-							      arg2 == ieb2->arg1) ) {
-								it->second.first = false;
-								return false;
-							}
-						}
-						IRExpr *lt = ieb2->arg1;
-						IRExpr *gt = ieb2->arg2;
-						if (ieb2->op < Iop_CmpLT8U ||
-						    ieb2->op > Iop_CmpLT64U)
-							continue;
-						if (lt != arg1 && lt != arg2 &&
-						    gt != arg1 && gt != arg2)
-							continue;
-						if (lt == arg1 && gt == arg2) {
-							/* By internment property */
-							abort();
-						}
-						if (lt == arg2 && gt == arg1) {
-							it->second.first = !it2->second.first;
-							return it->second.first;
-						}
-						if (lt == arg1) {
-							if (gt->tag != Iex_Const ||
-							    arg2->tag != Iex_Const)
-								continue;
-							unsigned long k1 =
-								((IRExprConst *)gt)->con->Ico.U64;
-							unsigned long k2 =
-								((IRExprConst *)arg2)->con->Ico.U64;
-							if (k1 < k2) {
-								it->second.first = it2->second.first;
-								return it->second.first;
-							}
-						}
-						if (lt == arg2) {
-							if (gt->tag != Iex_Const ||
-							    arg1->tag != Iex_Const)
-								continue;
-							unsigned long k1 =
-								((IRExprConst *)gt)->con->Ico.U64;
-							unsigned long k2 =
-								((IRExprConst *)arg1)->con->Ico.U64;
-							if (k1 <= k2 ||
-							    k1 == k2 + 1) {
-								it->second.first = !it2->second.first;
-								return it->second.first;
-							}
-						}
-						if (gt == arg2) {
-							if (lt->tag != Iex_Const ||
-							    arg1->tag != Iex_Const)
-								continue;
-							unsigned long k1 =
-								((IRExprConst *)lt)->con->Ico.U64;
-							unsigned long k2 =
-								((IRExprConst *)arg1)->con->Ico.U64;
-							if (k1 < k2) {
-								it->second.first = !it2->second.first;
-								return it2->second.first;
-							}
-						}
-						if (gt == arg1) {
-							if (lt->tag != Iex_Const ||
-							    arg2->tag != Iex_Const)
-								continue;
-							unsigned long k1 =
-								((IRExprConst *)lt)->con->Ico.U64;
-							unsigned long k2 =
-								((IRExprConst *)arg2)->con->Ico.U64;
-							if (k1 >= k2 ||
-							    k2 == k1 + 1) {
-								it->second.first = !it2->second.first;
-								return it->second.first;
-							}
-						}
-					}
-				}
-			}
-			if (e->tag == Iex_Unop &&
-			    ((IRExprUnop *)e)->op == Iop_BadPtr) {
-				IRExprUnop *ieu = (IRExprUnop *)e;
-				if (sat.fixedVariables.count(ieu->arg)) {
-					for (auto it2 = sat.memo.begin();
-					     it2 != sat.memo.end();
-					     it2++) {
-						if (it2->first->tag != Iex_Binop ||
-						    !it2->second.first)
-							continue;
-						IRExprBinop *ieb = (IRExprBinop *)it2->first;
-						if (ieb->op != Iop_CmpEQ64 ||
-						    ieb->arg1->tag != Iex_Const ||
-						    ieb->arg2 != ieu->arg)
-							continue;
-						IRExprConst *val = (IRExprConst *)ieb->arg1;
-						unsigned long valc = val->con->Ico.U64;
-						bool isAcc;
-						if (opt.addressAccessible(valc, &isAcc)) {
-							it->second.first = !isAcc;
-							return !isAcc;
-						}
-					}
-				}
-			}
-			it->second.first = !!chooser.nd_choice(2);
-			if (preferred_result == true)
-				it->second.first = !it->second.first;
-			it->second.second = true;
-		}
-	}
-	return it->second.first;
 }
 
 static bool
@@ -1119,6 +963,262 @@ satisfiable(IRExpr *e, const IRExprOptimisations &opt)
 	return exhaustive_satisfiable(e, opt, false);
 }
 
+/* Is a rewrite from @from to @to preferred over one from @to to
+   @from? */
+static bool
+preferredRewriteDir(IRExpr *from, IRExpr *to)
+{
+	/* Prefer to *expand* expressions */
+	return expr_depth(to) > expr_depth(from);
+}
+
+static bool
+expressionImpliesRewrite(IRExpr *what, IRExpr **from, IRExpr **to)
+{
+	if (what->tag != Iex_Binop)
+		return false;
+	IRExprBinop *whatb = (IRExprBinop *)what;
+	if (whatb->op < Iop_CmpEQ8 || whatb->op > Iop_CmpEQ64)
+		return false;
+	assert(whatb->arg1->tag == Iex_Const);
+	*to = whatb->arg1;
+	*from = whatb->arg2;
+
+	/* Special case: if we have 0 == k - x, we're sometimes
+	   better off rewriting x to k or vice-versa rather than
+	   rewriting k - x to 0. */
+	if ( ((IRExprConst *)whatb->arg1)->con->Ico.U64 == 0 &&
+	     whatb->arg2->tag == Iex_Associative &&
+	     ((IRExprAssociative *)whatb->arg2)->op >= Iop_Add8 &&
+	     ((IRExprAssociative *)whatb->arg2)->op <= Iop_Add64 &&
+	     ((IRExprAssociative *)whatb->arg2)->nr_arguments == 2 &&
+	     ((IRExprAssociative *)whatb->arg2)->contents[1]->tag == Iex_Unop &&
+	     ((IRExprUnop *)((IRExprAssociative *)whatb->arg2)->contents[1])->op >= Iop_Neg8 &&
+	     ((IRExprUnop *)((IRExprAssociative *)whatb->arg2)->contents[1])->op <= Iop_Neg64) {
+		IRExpr *a = ((IRExprAssociative *)whatb->arg2)->contents[0];
+		IRExpr *b = ((IRExprUnop *)((IRExprAssociative *)whatb->arg2)->contents[1])->arg;
+		if (preferredRewriteDir(a, b)) {
+			*from = a;
+			*to = b;
+		} else {
+			*from = b;
+			*to = a;
+		}
+	}
+	return true;
+}
+
+static int
+variableMultiplicity(IRExpr *expression, IRExpr *variable)
+{
+	IRExpr *from, *to;
+	if (expressionImpliesRewrite(variable, &from, &to))
+		variable = from;
+	struct : public IRExprTransformer {
+		int cntr;
+		IRExpr *expr;
+		IRExpr *transformIRExpr(IRExpr *a, bool *done_something) {
+			if (a == expr) {
+				cntr++;
+				return a;
+			}
+			return IRExprTransformer::transformIRExpr(a, done_something);
+		}
+	} doit;
+	doit.cntr = 0;
+	doit.expr = variable;
+	doit.doit(expression);
+	return doit.cntr;
+}
+
+static IRExpr *
+setVariable(IRExpr *expression, IRExpr *variable, bool value)
+{
+	struct : public IRExprTransformer {
+		IRExpr *variable;
+		bool value;
+		IRExpr *transformIex(IRExprControlFlow *e) {
+			if (value &&
+			    variable->tag == Iex_ControlFlow &&
+			    ((IRExprControlFlow *)variable)->thread == e->thread &&
+			    ((IRExprControlFlow *)variable)->cfg1 == e->cfg1) {
+				/* We're supposed to be interned, so
+				   the transformIRExpr() case should
+				   catch this. */
+				assert(e->cfg2 != ((IRExprControlFlow *)variable)->cfg2);
+				return IRExpr_Const(IRConst_U1(0));
+			}
+			return e;
+		}
+		IRExpr *transformIex(IRExprEntryPoint *e) {
+			if (value &&
+			    variable->tag == Iex_EntryPoint &&
+			    ((IRExprEntryPoint *)variable)->thread == e->thread) {
+				assert(e->label != ((IRExprEntryPoint *)variable)->label);
+				return IRExpr_Const(IRConst_U1(0));
+			}
+			return e;
+		}
+		IRExpr *transformIex(IRExprBinop *e) {
+			if (e->op >= Iop_CmpLT8U &&
+			    e->op <= Iop_CmpLT64U &&
+			    variable->tag == Iex_Binop &&
+			    ((IRExprBinop *)variable)->op >= Iop_CmpLT8U &&
+			    ((IRExprBinop *)variable)->op <= Iop_CmpLT64U &&
+			    (((IRExprBinop *)variable)->arg1 == e->arg1 ||
+			     ((IRExprBinop *)variable)->arg2 == e->arg1 ||
+			     ((IRExprBinop *)variable)->arg1 == e->arg2 ||
+			     ((IRExprBinop *)variable)->arg2 == e->arg2)) {
+				IRExpr *a = ((IRExprBinop *)variable)->arg1;
+				IRExpr *b = ((IRExprBinop *)variable)->arg2;
+				assert(a != e->arg1 || b != e->arg2);
+				if (a == e->arg2 && b == e->arg1) {
+					/* We're trying to set (a < b)
+					   to @value and we just
+					   encounted b < a.  Set
+					   b < a to ~@value. */
+					return IRExpr_Const(IRConst_U1(!value));
+				}
+				if (value) {
+					if (a->tag == Iex_Const) {
+						unsigned long k = ((IRExprConst *)a)->con->Ico.U64;
+						/* Our assumption is that k < b */
+						if (e->arg1->tag == Iex_Const &&
+						    e->arg2 == b) {
+							unsigned long k2 = ((IRExprConst *)e->arg1)->con->Ico.U64;
+							/* Trying to eval k2 < b */
+							if (k2 >= k)
+								return IRExpr_Const(IRConst_U1(1));
+						} else if (e->arg2->tag == Iex_Const &&
+							   e->arg1 == b) {
+							unsigned long k2 = ((IRExprConst *)e->arg2)->con->Ico.U64;
+							/* Trying to eval b < k2 */
+							if (k2 <= k + 1)
+								return IRExpr_Const(IRConst_U1(0));
+						}
+					} else if (b->tag == Iex_Const) {
+						unsigned long k = ((IRExprConst *)b)->con->Ico.U64;
+						/* Our assumption is that b < k */
+						if (e->arg1->tag == Iex_Const &&
+						    e->arg2 == b) {
+							unsigned long k2 = ((IRExprConst *)e->arg1)->con->Ico.U64;
+							/* Trying to eval k2 < b */
+							if (k <= k2 + 1)
+								return IRExpr_Const(IRConst_U1(0));
+						} else if (e->arg2->tag == Iex_Const &&
+							   e->arg1 == b) {
+							unsigned long k2 = ((IRExprConst *)e->arg2)->con->Ico.U64;
+							/* Trying to eval b < k2 */
+							if (k >= k2)
+								return IRExpr_Const(IRConst_U1(1));
+						}
+					}
+				} else {
+					if (a->tag == Iex_Const) {
+						unsigned long k = ((IRExprConst *)a)->con->Ico.U64;
+						/* Our assumption is that k >= b */
+						if (e->arg1->tag == Iex_Const &&
+						    e->arg2 == b) {
+							unsigned long k2 = ((IRExprConst *)e->arg1)->con->Ico.U64;
+							/* Trying to eval k2 < b */
+							if (k <= k2)
+								return IRExpr_Const(IRConst_U1(0));
+						} else if (e->arg2->tag == Iex_Const &&
+							   e->arg1 == b) {
+							unsigned long k2 = ((IRExprConst *)e->arg2)->con->Ico.U64;
+							/* Trying to eval b < k2 */
+							if (k > k2)
+								return IRExpr_Const(IRConst_U1(1));
+						}
+					} else if (b->tag == Iex_Const) {
+						unsigned long k = ((IRExprConst *)b)->con->Ico.U64;
+						/* Our assumption is that b >= k */
+						if (e->arg1->tag == Iex_Const &&
+						    e->arg2 == b) {
+							unsigned long k2 = ((IRExprConst *)e->arg1)->con->Ico.U64;
+							/* Trying to eval k2 < b */
+							if (k + 1 < k2)
+								return IRExpr_Const(IRConst_U1(1));
+						} else if (e->arg2->tag == Iex_Const &&
+							   e->arg1 == b) {
+							unsigned long k2 = ((IRExprConst *)e->arg2)->con->Ico.U64;
+							/* Trying to eval b < k2 */
+							if (k2 <= k)
+								return IRExpr_Const(IRConst_U1(0));
+						}
+					}
+				}
+			}
+			return IRExprTransformer::transformIex(e);
+		}
+		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+			if (e == variable) {
+				*done_something = true;
+				return IRExpr_Const(IRConst_U1(value));
+			}
+			return IRExprTransformer::transformIRExpr(e, done_something);
+		}
+	} boolRewrite;
+	boolRewrite.variable = variable;
+	boolRewrite.value = value;
+	expression = boolRewrite.doit(expression);
+
+	struct : public IRExprTransformer {
+		IRExpr *from;
+		IRExpr *to;
+		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+			if (e == from) {
+				*done_something = true;
+				return to;
+			}
+			return IRExprTransformer::transformIRExpr(e, done_something);
+		}
+	} arithRewrite;
+	if (value && expressionImpliesRewrite(variable, &arithRewrite.from, &arithRewrite.to))
+		expression = arithRewrite.doit(expression);
+	return expression;
+}
+
+static bool
+isSimpleBoolean(const IRExpr *e)
+{
+	assert(e->type() == Ity_I1);
+	switch (e->tag) {
+	case Iex_Binop:
+		assert(((IRExprBinop *)e)->arg1->type() != Ity_I1);
+		assert(((IRExprBinop *)e)->arg2->type() != Ity_I1);
+		return true;
+	case Iex_Unop:
+		if ( ((IRExprUnop *)e)->op == Iop_Not1 )
+			return false;
+		assert(((IRExprUnop *)e)->arg->type() != Ity_I1);
+		return true;
+	case Iex_HappensBefore:
+	case Iex_EntryPoint:
+	case Iex_ControlFlow:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static void
+findBooleans(IRExpr *expr, std::set<IRExpr *> &booleans)
+{
+	struct _ : public IRExprTransformer {
+		std::set<IRExpr *> &booleans;
+		IRExpr *transformIRExpr(IRExpr *a, bool *done_something) {
+			if (a->type() == Ity_I1 && isSimpleBoolean(a))
+				booleans.insert(a);
+			return IRExprTransformer::transformIRExpr(a, done_something);
+		}
+		_(std::set<IRExpr *> &_booleans)
+			: booleans(_booleans)
+		{}
+	} doit(booleans);
+	doit.doit(expr);
+}
+
 /* End of namespace */
 };
 
@@ -1140,49 +1240,261 @@ sat_simplify(IRExpr *a, const IRExprOptimisations &opt)
 	return _sat_checker::sat_simplify(a, opt);
 }
 
-bool
-sat_enumerator::finished() const
-{
-	return _finished;
-}
-
 void
 sat_enumerator::skipToSatisfying()
 {
-	do {
-		content.clear();
-		if (_sat_checker::evalExpression(expr, chooser, true, opt, content))
+	while (1) {
+		if (stack.empty()) /* No more satisfiers available. */
 			return;
-	} while (chooser.advance());
-	_finished = true;
-}
+		/* Avoid reallocating the stack in an awkward
+		 * place. */
+		stack.reserve(stack.size() + 1);
+		stack_entry &frame(stack.back());
+		frame.remainder =
+			internIRExpr(
+				simplifyIRExpr(
+					frame.remainder,
+					opt),
+				intern);
+		if (debug_satisfier) {
+			printf("Try to advance satisfier from:\n");
+			frame.prettyPrint(stdout);
+		}
+		if (frame.remainder->tag == Iex_Const) {
+			IRExprConst *c = (IRExprConst *)frame.remainder;
+			if (c->con->Ico.U1) {
+				/* We're done */
+				if (debug_satisfier)
+					printf("Satisfier complete\n");
+				return;
+			} else {
+				/* Whoops, contradiction.  Give up on
+				   this case split and try something
+				   else. */
+				stack.pop_back();
+				if (debug_satisfier)
+					printf("Satisfier contradiction\n");
+				continue;
+			}
+		}
 
-void
-sat_enumerator::advance()
-{
-	if (!chooser.advance())
-		_finished = true;
-	skipToSatisfying();
+		if (frame.remainder->tag == Iex_Associative &&
+		    ((IRExprAssociative *)frame.remainder)->op == Iop_And1) {
+			IRExprAssociative *a = ((IRExprAssociative *)frame.remainder);
+			bool done_something = false;
+			for (int i = 0; i < a->nr_arguments; i++) {
+				if (_sat_checker::isSimpleBoolean(a->contents[i])) {
+					if (debug_satisfier)
+						printf("Have a simple boolean at top level (%s)\n",
+						       nameIRExpr(a->contents[i]));
+					frame.partial_sat.makeTrue(a->contents[i]);
+					frame.remainder = _sat_checker::setVariable(frame.remainder, a->contents[i], true);
+					done_something = true;
+				}
+				if (a->contents[i]->tag == Iex_Unop &&
+				    ((IRExprUnop *)a->contents[i])->op == Iop_Not1 &&
+				    _sat_checker::isSimpleBoolean(((IRExprUnop *)a->contents[i])->arg)) {
+					IRExpr *arg = ((IRExprUnop *)a->contents[i])->arg;
+					if (debug_satisfier)
+						printf("Have a simple false boolean at top level (%s)\n",
+						       nameIRExpr(arg));
+					frame.partial_sat.makeFalse(arg);
+					frame.remainder = _sat_checker::setVariable(frame.remainder, arg, false);
+					done_something = true;
+				}
+			}
+			if (done_something) {
+				if (debug_satisfier)
+					printf("Advance by setting top-level simples\n");
+				continue;
+			}
+		}
+
+		/* Can't solve it with the simplifier, so do a case
+		 * split.  We can do two kinds of case splits: boolean
+		 * and arithmetic.  Arithmetic is used if we have
+		 * something like (x == 5 && Z) || (x == 7 && Z'),
+		 * where being able to subst in the value of x in Z
+		 * and Z' is quite helpful.  The rules are like this:
+		 *
+		 * 1) We split on EntryPoints first.
+		 * 2) We split on ControlFlow expressions next.
+		 * 3) Then we split on == expressions.  
+		 * 4) Finally split on anything else.
+		 *
+		 * Within a class we pick the thing with the highest
+		 * multiplicity.  That's obvious for classes 1, 2, and
+		 * 4, but 3 is a bit less obvious.  There, we start by
+		 * figuring out what the rewrite rule is going to be,
+		 * and pick whichever rule will fire most often.
+		 */
+		std::set<IRExpr *> allBooleans;
+		_sat_checker::findBooleans(frame.remainder, allBooleans);
+		assert(!allBooleans.empty());
+		IRExpr *chosenVar = NULL;
+		int chosenVarMult;
+		for (auto it = allBooleans.begin();
+		     it != allBooleans.end();
+		     it++) {
+			IRExpr *possible = *it;
+			/* -1 -> don't take, 0 -> take on better mult,
+			   1 -> always take */
+			int take;
+			assert(!frame.partial_sat.trueBooleans.count(possible));
+			assert(!frame.partial_sat.falseBooleans.count(possible));
+			if (!chosenVar) {
+				take = 1;
+			} else {
+				if (chosenVar->tag == Iex_EntryPoint) {
+					if ( (*it)->tag == Iex_EntryPoint )
+						take = 0;
+					else
+						take = -1;
+				} else if (chosenVar->tag == Iex_ControlFlow) {
+					if ( (*it)->tag == Iex_EntryPoint) {
+						take = 1;
+					} else if ( (*it)->tag == Iex_ControlFlow ) {
+						take = 0;
+					} else {
+						take = -1;
+					}
+				} else if (chosenVar->tag == Iex_Binop &&
+					   ((IRExprBinop *)chosenVar)->op >= Iop_CmpEQ8 &&
+					   ((IRExprBinop *)chosenVar)->op <= Iop_CmpEQ64) {
+					if ( (*it)->tag == Iex_EntryPoint ||
+					     (*it)->tag == Iex_ControlFlow ) {
+						take = 1;
+					} else if ( (*it)->tag == Iex_Binop &&
+						    ((IRExprBinop *)*it)->op >= Iop_CmpEQ8 &&
+						    ((IRExprBinop *)*it)->op <= Iop_CmpEQ64 ) {
+						take = 0;
+					} else {
+						take = -1;
+					}
+				} else {
+					if ( (*it)->tag == Iex_EntryPoint ||
+					     (*it)->tag == Iex_ControlFlow ||
+					     ( (*it)->tag == Iex_Binop &&
+					       ((IRExprBinop *)*it)->op >= Iop_CmpEQ8 &&
+					       ((IRExprBinop *)*it)->op <= Iop_CmpEQ64 ) )
+						take = 1;
+					else
+						take = 0;
+				}
+			}
+			switch (take) {
+			case -1:
+				break;
+			case 0: {
+				int mult = _sat_checker::variableMultiplicity(frame.remainder, possible);
+				if (mult > chosenVarMult) {
+					chosenVar = possible;
+					chosenVarMult = mult;
+				}
+				break;
+			}
+			case 1:
+				chosenVar = possible;
+				chosenVarMult = _sat_checker::variableMultiplicity(frame.remainder, possible);
+				break;
+			default:
+				abort();
+			}
+			assert(chosenVarMult > 0);
+		}
+
+		/* Do a case split on this variable. */
+
+		if (debug_satisfier)
+			printf("Case split on %s\n", nameIRExpr(chosenVar));
+
+		/* Doesn't realloc stack because of reserve() call at
+		 * top of loop. */
+		stack.push_back(frame);
+		frame.partial_sat.makeFalse(chosenVar);
+		frame.remainder = _sat_checker::setVariable(frame.remainder, chosenVar, false);
+		stack.back().partial_sat.makeTrue(chosenVar);
+		stack.back().remainder = _sat_checker::setVariable(stack.back().remainder, chosenVar, true);
+		if (debug_satisfier) {
+			printf("False case:\n");
+			frame.prettyPrint(stdout);
+			printf("True case:\n");
+			stack.back().prettyPrint(stdout);
+		}
+	}
 }
 
 void
 satisfier::prettyPrint(FILE *f) const
 {
-	for (auto it = memo.begin(); it != memo.end(); it++) {
-		if (it->second.second) {
-			fprintf(f, "\t");
-			ppIRExpr(it->first, f);
-			fprintf(f, "\t-> %s\n",
-				it->second.first ? "true" : "false");
-		}
-	}
-	fprintf(f, "Fixed: {");
-	for (auto it = fixedVariables.begin(); it != fixedVariables.end(); it++) {
-		if (it != fixedVariables.begin())
-			fprintf(f, ", ");
+	fprintf(f, "True:\n");
+	for (auto it = trueBooleans.begin(); it != trueBooleans.end(); it++) {
+		fprintf(f, "\t");
 		ppIRExpr(*it, f);
+		fprintf(f, "\n");
 	}
-	fprintf(f, "}\nEntry map:\n");
-	for (auto it = entry.begin(); it != entry.end(); it++)
+	fprintf(f, "False:\n");
+	for (auto it = falseBooleans.begin(); it != falseBooleans.end(); it++) {
+		fprintf(f, "\t");
+		ppIRExpr(*it, f);
+		fprintf(f, "\n");
+	}
+	fprintf(f, "Entry points:\n");
+	for (auto it = entryPoints.begin(); it != entryPoints.end(); it++)
 		fprintf(f, "\t%d -> %s\n", it->first, it->second.name());
 }
+
+sat_enumerator::sat_enumerator(IRExpr *what, const IRExprOptimisations &_opt)
+	: opt(_opt)
+{
+	stack.push_back(stack_entry(satisfier(), internIRExpr(what, intern)));
+	skipToSatisfying();
+}
+
+void
+satisfier::makeTrue(IRExpr *e)
+{
+	/* Only boolean assocs are Or1 and And1, and they should be
+	   broken down before we get here. */
+	assert(e->tag != Iex_Associative);
+	/* Likewise Iop_Not1 */
+	assert(e->tag != Iex_Unop ||
+	       ((IRExprUnop *)e)->op != Iop_Not1);
+	/* Shouldn't set something to true twice, or to both true and
+	   false. */
+	assert(!trueBooleans.count(e));
+	assert(!falseBooleans.count(e));
+
+	/* Special rule for entry points */
+	if (e->tag == Iex_EntryPoint) {
+		IRExprEntryPoint *ee = (IRExprEntryPoint *)e;
+		assert(!entryPoints.count(ee->thread));
+		entryPoints.insert(std::pair<unsigned, CfgLabel>(ee->thread, ee->label));
+	}
+
+	trueBooleans.insert(e);
+}
+
+void
+satisfier::makeFalse(IRExpr *e)
+{
+	assert(e->tag != Iex_Associative);
+	assert(e->tag != Iex_Unop ||
+	       ((IRExprUnop *)e)->op != Iop_Not1);
+	assert(!trueBooleans.count(e));
+	assert(!falseBooleans.count(e));
+
+	if (e->tag == Iex_EntryPoint) {
+		IRExprEntryPoint *ee = (IRExprEntryPoint *)e;
+		assert(!entryPoints.count(ee->thread));
+	}
+
+	falseBooleans.insert(e);
+}
+
+IRExpr *
+setVariable(IRExpr *expression, IRExpr *variable, bool value)
+{
+	return _sat_checker::setVariable(expression, variable, value);
+}
+

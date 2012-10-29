@@ -35,7 +35,7 @@ namespace __nf {
 }
 #endif
 
-#define NF_MAX_EXPRESSION 100
+#define NF_MAX_EXPRESSION 1000
 
 static bool convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp) __attribute__((warn_unused_result));
 static void insert_term_destruct(NF_Term &src, NF_Expression &out);
@@ -306,6 +306,9 @@ extra_sanity(const NF_Expression &a
 /* Set @out to @src1 `termOp` @src2.  Return false if the result is
    unrepresentable as a term in this normal norm (i.e. is definitely
    true for CNF or definitely false for DNF) and true otherwise. */
+static bool merge_terms(const NF_Term &src1,
+			const NF_Term &src2,
+			NF_Term &out) __attribute__((warn_unused_result));
 static bool
 merge_terms(const NF_Term &src1,
 	    const NF_Term &src2,
@@ -667,6 +670,7 @@ merge_expressions_destruct(NF_Expression &src1,
 
 /* Convert @out to @out `termOp` @this_one, maintaining normal form.
  * Returns false on error or true otherwise. */
+static bool nf_countermerge(const NF_Expression &this_one, NF_Expression &out) __attribute__((warn_unused_result));
 static bool
 nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 {
@@ -706,6 +710,8 @@ out:
 /* i.e. convert @out to
    @out `termOp` fragments[0] `termOp` fragments[1] ... `termOp` fragments[nr_fragments-1]
 */
+static bool nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
+			   IROp expressionOp, IROp termOp) __attribute__((warn_unused_result));
 static bool
 nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
 	       IROp expressionOp, IROp termOp)
@@ -764,6 +770,7 @@ nf_invert(const NF_Term &conj, NF_Expression &out)
 
 /* Set @out to ~@in.  Returns true on success or false if we hit a
  * timeout. */
+static bool nf_invert(const NF_Expression &in, NF_Expression &out) __attribute__((warn_unused_result));
 static bool
 nf_invert(const NF_Expression &in, NF_Expression &out)
 {
@@ -817,7 +824,8 @@ convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 		NF_Expression r;
 		if (!__nf::convert_to_nf(((IRExprUnop *)e)->arg, r, expressionOp, termOp))
 			return false;
-		nf_invert(r, out);
+		if (!nf_invert(r, out))
+			return false;
 		return true;
 	}
 
@@ -872,6 +880,7 @@ convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
    then we would have detected the relationship and reduced the result
    to just ba.  The fix is just to do the full O(n^2) thing at the end
    to find *all* of the subset relationships and purge them. */
+static bool optimise_nf(NF_Expression &e) __attribute__((warn_unused_result));
 static bool
 optimise_nf(NF_Expression &e)
 {

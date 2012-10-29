@@ -153,7 +153,7 @@ static uint8_t twobyte_table[256] = {
     /* 0x08 - 0x0F */
     ImplicitOps, ImplicitOps, 0, 0, 0, ImplicitOps|ModRM, 0, 0,
     /* 0x10 - 0x17 */
-    0, 0, 0, 0, 0, 0, 0, 0,
+    ModRM, ModRM, ModRM, ModRM, ModRM, ModRM, ModRM, ModRM,
     /* 0x18 - 0x1F */
     ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM,
     ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM,
@@ -161,7 +161,7 @@ static uint8_t twobyte_table[256] = {
     ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM, ImplicitOps|ModRM,
     0, 0, 0, 0,
     /* 0x28 - 0x2F */
-    0, 0, 0, 0, 0, 0, 0, 0,
+    ModRM, ModRM, ModRM, ModRM, ModRM, ModRM, ModRM, ModRM,
     /* 0x30 - 0x37 */
     ImplicitOps, ImplicitOps, ImplicitOps, 0,
     ImplicitOps, ImplicitOps, 0, 0,

@@ -12,7 +12,7 @@ all: bug1.so bug2.so bug3.so
 	gcc -shared $^ -o $@
 
 %.fix.c: ../../summary_to_fix %.exe %.types.canon %.bcg %.summary.canon4
-	$^ $@
+	../../summary_to_fix $*.exe $*.types.canon $*.bcg $@ $*.summary.canon4
 %.fix.so: %.fix.c ../../sli/patch_head.h ../../sli/patch_skeleton_jump.c ../../sli/patch_skeleton_common.c
 	gcc -Wall -g -shared -fPIC -I../../sli $< -o $@
 

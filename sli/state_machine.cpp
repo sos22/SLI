@@ -103,10 +103,6 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		trueTarget = falseTarget;
 		falseTarget = t;
 	}
-	if (definitelyUnevaluatable(condition)) {
-		*done_something = true;
-		return StateMachineUnreached::get();
-	}
 	trueTarget = trueTarget->optimise(opt, done_something);
 	falseTarget = falseTarget->optimise(opt, done_something);
 
@@ -258,7 +254,7 @@ StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, bool *d
 {
 	addr = optimiseIRExprFP(addr, opt, done_something);
 	data = optimiseIRExprFP(data, opt, done_something);
-	if (isBadAddress(addr) || definitelyUnevaluatable(data)) {
+	if (isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
@@ -292,10 +288,6 @@ StateMachineSideEffect *
 StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
-	if (definitelyUnevaluatable(value)) {
-		*done_something = true;
-		return StateMachineSideEffectUnreached::get();
-	}
 	return this;
 }
 
@@ -303,8 +295,7 @@ StateMachineSideEffect *
 StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
-	if ((value->tag == Iex_Const && ((IRExprConst *)value)->con->Ico.U1) ||
-	    definitelyUnevaluatable(value)) {
+	if (value->tag == Iex_Const && ((IRExprConst *)value)->con->Ico.U1) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
@@ -997,6 +988,32 @@ StateMachineSideEffecting::prependSideEffect(StateMachineSideEffect *se)
 	sideEffect = se;
 }
 
+static IRExpr *
+replaceRegister(const threadAndRegister &reg, IRExpr *replaceWith, IRExpr *replaceIn)
+{
+	struct : IRExprTransformer {
+		bool failed;
+		const threadAndRegister *reg;
+		IRExpr *replaceWith;
+		IRExpr *transformIex(IRExprGet *e) {
+			if (e->reg == *reg) {
+				if (e->type() > replaceWith->type())
+					failed = true;
+				else
+					return coerceTypes(e->type(), replaceWith);
+			}
+			return NULL;
+		}
+	} doit;
+	doit.failed = false;
+	doit.reg = &reg;
+	doit.replaceWith = replaceWith;
+	IRExpr *res = doit.doit(replaceIn);
+	if (doit.failed)
+		return NULL;
+	return res;
+}
+
 StateMachineState *
 StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
@@ -1124,6 +1141,29 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		sideEffect = sideEffect->optimise(opt, done_something);
 		target = ((StateMachineSideEffecting *)target)->target;
 		return this;
+	}
+
+	if (sideEffect->type == StateMachineSideEffect::Copy &&
+	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect &&
+	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::Copy &&
+	    ((StateMachineSideEffectCopy *)sideEffect)->target ==
+	    ((StateMachineSideEffectCopy *)((StateMachineSideEffecting *)target)->sideEffect)->target) {
+		/* Try to do something with fragments which just
+		   go ``rsp = rsp + 8; rsp = rsp - 8'', which happens
+		   quite a lot. */
+		StateMachineSideEffectCopy *thisCopy = (StateMachineSideEffectCopy *)sideEffect;
+		StateMachineSideEffectCopy *nextCopy = (StateMachineSideEffectCopy *)
+			((StateMachineSideEffecting *)target)->sideEffect;
+		IRExpr *repl = replaceRegister(thisCopy->target, thisCopy->value, nextCopy->value);
+		if (repl) {
+			sideEffect = new StateMachineSideEffectCopy(
+				thisCopy->target,
+				repl);
+			target = ((StateMachineSideEffecting *)target)->target;
+			*done_something = true;
+			return this;
+		}
 	}
 	return this;
 }

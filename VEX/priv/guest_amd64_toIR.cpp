@@ -4461,11 +4461,9 @@ static void fp_do_ucomi_ST0_STi ( unsigned tid, UInt i, Bool pop_after )
    stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
    stmt( IRStmt_Put( 
             mk_reg(OFFB_CC_DEP1),
-            binop( Iop_And64,
-                   unop( Iop_32Uto64,
-                         binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, i))),
-                   mkU64(0x45)
-        )));
+	    unop( Iop_32Uto64,
+		  binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, i))))
+        );
    if (pop_after)
       fp_pop(tid);
 }
@@ -4594,12 +4592,10 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                /* This forces C1 to zero, which isn't right. */
                put_C3210( 
                    unop(Iop_32Uto64,
-                   binop( Iop_And32,
-                          binop(Iop_Shl32, 
-                                binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, r_dst)),
-                                mkU8(8)),
-                          mkU32(0x4500)
-                   )));
+			binop(Iop_Shl32, 
+			      binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, r_dst)),
+			      mkU8(8)))
+                   );
                break;
 
             /* Dunno if this is right */
@@ -4609,12 +4605,9 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                /* This forces C1 to zero, which isn't right. */
                put_C3210( 
                    unop(Iop_32Uto64,
-                   binop( Iop_And32,
-                          binop(Iop_Shl32, 
-                                binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, r_dst)),
-                                mkU8(8)),
-                          mkU32(0x4500)
-                   )));
+			binop(Iop_Shl32, 
+			      binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, r_dst)),
+			      mkU8(8))));
                fp_pop(tid);
                break;
 
@@ -5247,12 +5240,9 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                /* This forces C1 to zero, which isn't right. */
                put_C3210( 
                    unop(Iop_32Uto64,
-                   binop( Iop_And32,
-                          binop(Iop_Shl32, 
-                                binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, 1)),
-                                mkU8(8)),
-                          mkU32(0x4500)
-                   )));
+			binop(Iop_Shl32, 
+			      binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, 1)),
+			      mkU8(8))));
                fp_pop(tid);
                fp_pop(tid);
                break;
@@ -5515,14 +5505,11 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                /* This forces C1 to zero, which isn't right. */
                put_C3210( 
                    unop(Iop_32Uto64,
-                   binop( Iop_And32,
-                          binop(Iop_Shl32, 
-                                binop(Iop_CmpF64, 
-                                      get_ST(tid, 0),
-                                      loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64))),
-                                mkU8(8)),
-                          mkU32(0x4500)
-                   )));
+			binop(Iop_Shl32, 
+			      binop(Iop_CmpF64, 
+				    get_ST(tid, 0),
+				    loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64))),
+			      mkU8(8))));
                fp_pop(tid);
                break;  
 
@@ -5772,12 +5759,9 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                /* This forces C1 to zero, which isn't right. */
                put_C3210(
                    unop(Iop_32Uto64, 
-                   binop( Iop_And32,
-                          binop(Iop_Shl32, 
-                                binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, r_dst)),
-                                mkU8(8)),
-                          mkU32(0x4500)
-                   )));
+			binop(Iop_Shl32, 
+			      binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, r_dst)),
+			      mkU8(8))));
                break;
 
             case 0xE8 ... 0xEF: /* FUCOMP %st(0),%st(?) */
@@ -5786,12 +5770,9 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                /* This forces C1 to zero, which isn't right. */
                put_C3210( 
                    unop(Iop_32Uto64, 
-                   binop( Iop_And32,
-                          binop(Iop_Shl32, 
-                                binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, r_dst)),
-                                mkU8(8)),
-                          mkU32(0x4500)
-                   )));
+			binop(Iop_Shl32, 
+			      binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, r_dst)),
+			      mkU8(8))));
                fp_pop(tid);
                break;
 
@@ -5889,12 +5870,9 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                /* This forces C1 to zero, which isn't right. */
                put_C3210( 
                    unop(Iop_32Uto64,
-                   binop( Iop_And32,
-                          binop(Iop_Shl32, 
-                                binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, 1)),
-                                mkU8(8)),
-                          mkU32(0x4500)
-                   )));
+			binop(Iop_Shl32, 
+			      binop(Iop_CmpF64, get_ST(tid, 0), get_ST(tid, 1)),
+			      mkU8(8))));
                fp_pop(tid);
                fp_pop(tid);
                break;
@@ -8945,13 +8923,10 @@ DisResult disInstr_AMD64_WRK (
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
       stmt( IRStmt_Put( 
                mk_reg(OFFB_CC_DEP1),
-               binop( Iop_And64,
-                      unop( Iop_32Uto64,
-                            binop(Iop_CmpF64, 
-                                  unop(Iop_F32toF64,mkexpr(argL, tid, Ity_F32)),
-                                  unop(Iop_F32toF64,mkexpr(argR, tid, Ity_F32)))),
-                      mkU64(0x45)
-          )));
+	       unop( Iop_32Uto64,
+		     binop(Iop_CmpF64, 
+			   unop(Iop_F32toF64,mkexpr(argL, tid, Ity_F32)),
+			   unop(Iop_F32toF64,mkexpr(argR, tid, Ity_F32))))));
 
       goto decode_success;
    }
@@ -10085,11 +10060,8 @@ DisResult disInstr_AMD64_WRK (
       stmt( IRStmt_Put( mk_reg(OFFB_CC_DEP2), mkU64(0) ));
       stmt( IRStmt_Put( 
                mk_reg(OFFB_CC_DEP1),
-               binop( Iop_And64,
-                      unop( Iop_32Uto64, 
-                            binop(Iop_CmpF64, mkexpr(argL, tid, Ity_F64), mkexpr(argR, tid, Ity_F64)) ),
-                      mkU64(0x45)
-          )));
+	       unop( Iop_32Uto64, 
+		     binop(Iop_CmpF64, mkexpr(argL, tid, Ity_F64), mkexpr(argR, tid, Ity_F64)) )));
 
       goto decode_success;
    }

@@ -447,6 +447,7 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(TruncF64asF32)		\
 	     iter(CalcFPRF)			\
 						\
+	     iter(CmpF32)			\
 	     iter(CmpF64)			\
 						\
 	     iter(F64toI16)			\
@@ -1852,6 +1853,7 @@ bool shortCircuitableUnops(IROp a, IROp b, IROp *c)
 
   /* An upcast immediately followed by a stronger downcast can be
      eliminated. */
+  rule(Iop_64to1, Iop_32Uto64, Iop_32to1);
   rule(Iop_64to8, Iop_16Uto64, Iop_16to8);
   rule(Iop_64to8, Iop_32Uto64, Iop_32to8);
   rule(Iop_64to16, Iop_32Uto64, Iop_32to16);
@@ -2517,6 +2519,8 @@ void typeOfPrimop ( IROp op,
 
       case Iop_CmpF64:
          BINARY(Ity_F64,Ity_F64, Ity_I32);
+      case Iop_CmpF32:
+         BINARY(Ity_F32,Ity_F32, Ity_I32);
 
       case Iop_F64toI16: BINARY(ity_RMode,Ity_F64, Ity_I16);
       case Iop_F64toI32: BINARY(ity_RMode,Ity_F64, Ity_I32);

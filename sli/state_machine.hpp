@@ -379,6 +379,8 @@ public:
 		return const_cast<StateMachineState *>(this)->getSideEffect();
 	}
 
+	virtual void inputExpressions(std::vector<IRExpr *> &out) = 0;
+
 	virtual void sanityCheck() const = 0;
 
 #ifndef NDEBUG
@@ -437,6 +439,7 @@ public:
 	void targets(std::vector<const StateMachineState *> &) const { }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
 	StateMachineSideEffect *getSideEffect() { return NULL; }
+	void inputExpressions(std::vector<IRExpr *> &) {}
 	void sanityCheck() const { return; }
 };
 
@@ -557,6 +560,10 @@ public:
 	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
 	StateMachineSideEffect *getSideEffect() { return sideEffect; }
+	void inputExpressions(std::vector<IRExpr *> &out) {
+		if (sideEffect)
+			sideEffect->inputExpressions(out);
+	}
 	void sanityCheck() const
 	{
 		if (sideEffect)
@@ -652,6 +659,9 @@ public:
 		assert(condition->type() == Ity_I1);
 	}
 	StateMachineSideEffect *getSideEffect() { return NULL; }
+	void inputExpressions(std::vector<IRExpr *> &out) {
+		out.push_back(condition);
+	}
 };
 
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {

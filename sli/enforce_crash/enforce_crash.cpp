@@ -14,6 +14,7 @@
 #include "enforce_crash.hpp"
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
+#include "sat_checker.hpp"
 
 #ifndef NDEBUG
 static bool debug_declobber_instructions = false;
@@ -142,9 +143,46 @@ optimiseHBContent(crashEnforcementData &ced)
 	}
 }
 
+struct expr_slice {
+	std::set<IRExpr *> trueSlice;
+	std::set<IRExpr *> falseSlice;
+	mutable IRExpr *leftOver;
+	bool operator <(const expr_slice &o) const {
+		if (trueSlice < o.trueSlice)
+			return true;
+		if (trueSlice > o.trueSlice)
+			return false;
+		return falseSlice < o.falseSlice;
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "\t{");
+		bool comma = false;
+		for (auto it = trueSlice.begin();
+		     it != trueSlice.end();
+		     it++) {
+			if (comma)
+				fprintf(f, ", ");
+			comma = true;
+			ppIRExpr(*it, f);
+		}
+		for (auto it = falseSlice.begin();
+		     it != falseSlice.end();
+		     it++) {
+			if (comma)
+				fprintf(f, ", ");
+			comma = true;
+			fprintf(f, "¬");
+			ppIRExpr(*it, f);
+		}
+		fprintf(f, "} -> ");
+		ppIRExpr(leftOver, f);
+		fprintf(f, "\n");		
+	}
+};
+
 static bool
 buildCED(const SummaryId &summaryId,
-	 DNF_Conjunction &c,
+	 const expr_slice &c,
 	 std::map<ConcreteThread, std::set<CfgLabel> > &rootsCfg,
 	 CrashSummary *summary,
 	 crashEnforcementData *out,
@@ -154,52 +192,22 @@ buildCED(const SummaryId &summaryId,
 {
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
-	for (unsigned x = 0; x < c.size(); x++)
-		enumerateNeededExpressions(c[x].second, neededExpressions);
+	enumerateNeededExpressions(c.leftOver, neededExpressions);
 
-	*out = crashEnforcementData(summaryId, *summary->mai, neededExpressions, abs, rootsCfg, c, next_hb_id, summary, as);
+	DNF_Conjunction conj;
+	for (auto it = c.trueSlice.begin(); it != c.trueSlice.end(); it++)
+		conj.push_back(NF_Atom(false, *it));
+	for (auto it = c.falseSlice.begin(); it != c.falseSlice.end(); it++)
+		conj.push_back(NF_Atom(true, *it));
+	if (c.leftOver->tag == Iex_Associative) {
+		IRExprAssociative *assoc = (IRExprAssociative *)c.leftOver;
+		for (int i = 0; i < assoc->nr_arguments; i++)
+			conj.push_back(NF_Atom(false, assoc->contents[i]));
+	} else {
+		conj.push_back(NF_Atom(false, c.leftOver));
+	}
+	*out = crashEnforcementData(summaryId, *summary->mai, neededExpressions, abs, rootsCfg, conj, next_hb_id, summary, as);
 	optimiseHBContent(*out);
-	return true;
-}
-
-static bool
-analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
-{
-	std::set<IRExprHappensBefore *, HBOrdering> hb;
-	std::set<IRExprHappensBefore *, HBOrdering> assumption;
-
-	extractImplicitOrder(summary->loadMachine, assumption);
-	extractImplicitOrder(summary->storeMachine, assumption);
-	for (unsigned x = 0; x < c.size(); x++) {
-		if (c[x].second->tag == Iex_HappensBefore) {
-			IRExprHappensBefore *g = (IRExprHappensBefore *)c[x].second;
-			IRExprHappensBefore *h;
-			if (c[x].first) {
-				h = (IRExprHappensBefore *)IRExpr_HappensBefore(g->after, g->before);
-			} else {
-				h = g;
-			}
-			hb.insert(h);
-		}
-	}
-
-	if (!simplifyOrdering(hb, assumption)) {
-		/* Contradiction, get out */
-		return false;
-	}
-
-	/* Build the results */
-	DNF_Conjunction out;
-	for (unsigned x = 0; x < c.size(); x++)
-		if (c[x].second->tag != Iex_HappensBefore)
-			out.push_back(c[x]);
-	for (auto it = hb.begin();
-	     it != hb.end();
-	     it++)
-		out.push_back(NF_Atom(false, *it));
-
-	c = out;
-
 	return true;
 }
 
@@ -207,14 +215,14 @@ analyseHbGraph(DNF_Conjunction &c, CrashSummary *summary)
    ordering over threads.  Those don't actually enforce any
    concurrency, so aren't very interesting. */
 static bool
-consistentOrdering(DNF_Conjunction &c)
+consistentOrdering(const expr_slice &slice)
 {
 	int thread_a;
 	int thread_b;
 	bool found_a_thread;
-	for (auto it = c.begin(); it != c.end(); it++) {
-		if (it->second->tag == Iex_HappensBefore) {
-			IRExprHappensBefore *e = (IRExprHappensBefore *)it->second;
+	for (auto it = slice.trueSlice.begin(); it != slice.trueSlice.end(); it++) {
+		if ((*it)->tag == Iex_HappensBefore) {
+			IRExprHappensBefore *e = (IRExprHappensBefore *)*it;
 			if (!found_a_thread) {
 				thread_a = e->before.tid;
 				thread_b = e->after.tid;
@@ -222,6 +230,20 @@ consistentOrdering(DNF_Conjunction &c)
 			} else {
 				if (thread_a != e->before.tid ||
 				    thread_b != e->after.tid)
+					return false;
+			}
+		}
+	}
+	for (auto it = slice.falseSlice.begin(); it != slice.falseSlice.end(); it++) {
+		if ((*it)->tag == Iex_HappensBefore) {
+			IRExprHappensBefore *e = (IRExprHappensBefore *)*it;
+			if (!found_a_thread) {
+				thread_a = e->after.tid;
+				thread_b = e->before.tid;
+				found_a_thread = true;
+			} else {
+				if (thread_a != e->after.tid ||
+				    thread_b != e->before.tid)
 					return false;
 			}
 		}
@@ -395,6 +417,9 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 	}
 	case Iex_Binop: {
 		auto i = (IRExprBinop *)what;
+		if (i->op == Iop_CmpF32 || i->op == Iop_CmpF64 ||
+		    i->op == Iop_64HLtoV128)
+			return NULL;
 		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
 		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
 		if (arg1 == i->arg1 && arg2 == i->arg2)
@@ -410,6 +435,7 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 		case Iop_CmpLT16U:
 		case Iop_CmpLT32U:
 		case Iop_CmpLT64U:
+		case Iop_Shr64:
 			return NULL;
 		default:
 			abort();
@@ -418,7 +444,7 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 	}
 	case Iex_Unop: {
 		auto i = (IRExprUnop *)what;
-		if (i->op == Iop_64HLto128)
+		if (i->op == Iop_V128to64 || i->op == Iop_ReinterpI32asF32)
 			return NULL;
 		int errors2;
 		int errors3;
@@ -625,49 +651,81 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 	abort();
 }
 
-static bool
-simplifyControlExpressions(DNF_Conjunction &d)
+class sliced_expr : public std::set<expr_slice> {
+public:
+	sliced_expr operator |(const sliced_expr &a) const
+	{
+		sliced_expr res(*this);
+		res.insert(a.begin(), a.end());
+		return res;
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "Sliced expr:\n");
+		for (auto it = begin(); it != end(); it++)
+			it->prettyPrint(f);
+	}
+	sliced_expr setTrue(IRExpr *e) const
+	{
+		sliced_expr res;
+		for (auto it = begin();
+		     it != end();
+		     it++) {
+			expr_slice a(*it);
+			a.trueSlice.insert(e);
+			res.insert(a);
+		}
+		return res;
+	}
+	sliced_expr setFalse(IRExpr *e) const
+	{
+		sliced_expr res;
+		for (auto it = begin();
+		     it != end();
+		     it++) {
+			expr_slice a(*it);
+			a.falseSlice.insert(e);
+			res.insert(a);
+		}
+		return res;
+	}
+};
+
+static sliced_expr
+slice_by_exprs(IRExpr *expr, const std::set<IRExpr *> &sliceby)
 {
-	std::set<std::pair<bool, IRExprControlFlow *> > exprs;
-	for (auto it = d.begin(); it != d.end(); it++)
-		if ( it->second->tag == Iex_ControlFlow )
-			exprs.insert( std::pair<bool, IRExprControlFlow *>(it->first, (IRExprControlFlow *)it->second) );
-
-	std::set<std::pair<unsigned, CfgLabel> > setExit;
-
-	/* First rule: if we have both A->B and A->C edges, where B !=
-	   C, we have a contradiction. */
-	for (auto it1 = exprs.begin(); it1 != exprs.end(); it1++) {
-		if (it1->first)
-			continue;
-		IRExprControlFlow *e1 = it1->second;
-		setExit.insert(std::pair<unsigned, CfgLabel>(e1->thread, e1->cfg1));
-		auto it2 = it1;
-		it2++;
-		for (; it2 != exprs.end(); it2++) {
-			if (it2->first)
-				continue;
-			IRExprControlFlow *e2 = it2->second;
-			if (e1->thread == e2->thread &&
-			    e1->cfg1 == e2->cfg1) {
-				/* By the internment property */
-				assert(e1->cfg2 != e2->cfg2);
-				return false;
-			}
-		}
+	if (sliceby.empty()) {
+		expr_slice theSlice;
+		theSlice.leftOver =
+			simplify_via_anf(
+				simplifyIRExpr(
+					expr,
+					AllowableOptimisations::defaultOptimisations));
+		sliced_expr s;
+		s.insert(theSlice);
+		return s;
 	}
+	IRExpr *e = *sliceby.begin();
+	std::set<IRExpr *> others(sliceby);
+	others.erase(e);
+	sliced_expr trueSlice(
+		slice_by_exprs(setVariable(expr, e, true), others));
+	sliced_expr falseSlice(
+		slice_by_exprs(setVariable(expr, e, false), others));
+	return trueSlice.setTrue(e) | falseSlice.setFalse(e);
+}
 
-	/* Second rule: if we have Control(t1:cfg1->cfg2) &&
-	 * !Control(t1:cfg1->cfg3) then we can turn it into just
-	 * Control(t1:cfg1->cfg2) */
-	for (auto it = exprs.begin(); it != exprs.end(); it++) {
-		if (it->first) {
-			IRExprControlFlow *e = it->second;
-			if (setExit.count(std::pair<unsigned, CfgLabel>(e->thread, e->cfg1)))
-				d.remove(NF_Atom(it->first, it->second));
-		}
-	}
-	return true;
+static sliced_expr
+slice_by_hb(IRExpr *expr)
+{
+	struct : public IRExprTransformer {
+		std::set<IRExpr *> hbEdges;
+		IRExpr *transformIex(IRExprHappensBefore *e) {
+			hbEdges.insert(e);
+			return e;
+		};
+	} findAllEdges;
+	findAllEdges.doit(expr);
+	return slice_by_exprs(expr, findAllEdges.hbEdges);
 }
 
 static crashEnforcementData
@@ -692,7 +750,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	IRExpr *requirement = summary->verificationCondition;
 	int ignore;
 	requirement = removeFreeVariables(requirement, ERROR_POSITIVE, &ignore);
-	requirement = internIRExpr(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
+	requirement = internIRExpr(simplify_via_anf(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations)));
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");
@@ -700,36 +758,24 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		fprintf(_logfile, "Killed by a timeout during simplification\n");
 		exit(1);
 	}
-	DNF_Disjunction d;
-	if (!dnf(requirement, d)) {
-		fprintf(_logfile, "failed to convert to DNF\n");
-		exit(1);
-	}
 
-	for (unsigned x = 0; x < d.size(); x++)
-		for (unsigned y = 0; y < d[x].size(); y++)
-			d[x][y].second = heuristicSimplify(d[x][y].second);
+	sliced_expr sliced_by_hb(slice_by_hb(requirement));
+	printf("Sliced requirement:\n");
+	sliced_by_hb.prettyPrint(stdout);
 
-	for (unsigned x = 0; x < d.size(); ) {
-		if (analyseHbGraph(d[x], summary) &&
-		    !consistentOrdering(d[x])) {
-			x++;
+	for (auto it = sliced_by_hb.begin();
+	     it != sliced_by_hb.end();
+		) {
+		it->leftOver = heuristicSimplify(it->leftOver);
+		if (!consistentOrdering(*it)) {
+			it++;
 		} else {
-			d.erase(d.begin() + x);
+			sliced_by_hb.erase(it++);
 		}
 	}
 
-	for (unsigned x = 0; x < d.size(); ) {
-		if (simplifyControlExpressions(d[x]))
-			x++;
-		else
-			d.erase(d.begin() + x);
-	}
-
-	printDnf(d, _logfile);
-
-	if (d.size() == 0)
-		return crashEnforcementData();
+	printf("After simplifying down:\n");
+	sliced_by_hb.prettyPrint(stdout);
 
 	std::map<ConcreteThread, std::set<CfgLabel> > rootsCfg;
 	for (auto it = summary->loadMachine->cfg_roots.begin();
@@ -742,9 +788,9 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		rootsCfg[ConcreteThread(summaryId, it->first)].insert(it->second->label);
 
 	crashEnforcementData accumulator;
-	for (unsigned x = 0; x < d.size(); x++) {
+	for (auto it = sliced_by_hb.begin(); it != sliced_by_hb.end(); it++) {
 		crashEnforcementData tmp;
-		if (buildCED(summaryId, d[x], rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
+		if (buildCED(summaryId, *it, rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
 			printf("Intermediate CED:\n");
 			tmp.prettyPrint(stdout, true);
 			accumulator |= tmp;
@@ -1071,6 +1117,12 @@ patchSearch(Oracle *oracle,
 	bool can_use_patch = true;
 	for (auto it = clobbered_by_patch.begin(); can_use_patch && it != clobbered_by_patch.end(); it++) {
 		if (oracle->isFunctionHead(StaticRip(*it)))
+			can_use_patch = false;
+	}
+	/* Can't use patch if that would clobber/be clobbered by an
+	   existing patch point. */
+	for (auto it = input.Patch.begin(); can_use_patch && it != input.Patch.end(); it++) {
+		if (needed > *it - 5 && needed < *it + 5)
 			can_use_patch = false;
 	}
 

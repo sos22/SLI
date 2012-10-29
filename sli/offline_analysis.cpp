@@ -309,7 +309,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 			p = false;
 			do {
 				d = false;
-				sm = deadCodeElimination(sm, &d, opt);
+				sm = deadCodeElimination(sm, &d, is_ssa);
 				p |= d;
 			} while (d);
 			if (debugOptimiseStateMachine && p) {
@@ -355,7 +355,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 
 		if (is_ssa) {
 			p = false;
-			sm = undefinednessSimplification(sm, &p);
+			sm = undefinednessSimplification(sm, opt, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("Undefinedness:\n");
 				printStateMachine(sm, stdout);
@@ -400,13 +400,15 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		}
 
 		if (!done_something && is_ssa) {
-			/* Note that we use the same CDM for
-			   functionAliasAnalysis and phi elimination,
-			   without trying to recompute it.  That's
-			   fine, because function alias analysis won't
-			   modify the control-flow structure of the
-			   machine. */
+			sm = phiElimination(sm, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("phiElimination:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+		}
 
+		if (!done_something && is_ssa) {
 			ControlDominationMap cdm;
 			cdm.init(sm, opt);
 			if (TIMEOUT)
@@ -419,15 +421,6 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
-
-			if (!p) {
-				sm = phiElimination(sm, opt, cdm, &p);
-				if (debugOptimiseStateMachine && p) {
-					printf("phiElimination:\n");
-					printStateMachine(sm, stdout);
-				}
-				done_something |= p;
-			}
 		}
 
 		if (progress)
@@ -1464,6 +1457,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				unsigned tid,
 				const VexPtr<Oracle> &oracle,
 				FixConsumer &df,
+				const AllowableOptimisations &opt,
 				GarbageCollectionToken token)
 {
 	/* Quick pre-check: see whether this instruction might crash
@@ -1482,11 +1476,6 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 
 	VexPtr<MaiMap, &ir_heap> mai(MaiMap::empty());
 
-	AllowableOptimisations opt =
-		AllowableOptimisations::defaultOptimisations
-		.enableassumePrivateStack()
-		.setAddressSpace(oracle->ms->addressSpace)
-		.enablenoExtend();
 	VexPtr<StateMachine, &ir_heap> probeMachine;
 	CfgLabelAllocator allocLabel;
 	{
