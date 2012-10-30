@@ -344,6 +344,9 @@ path_set::simplify(bool is_canonical)
 
 	bool progress;
 top:
+	if (TIMEOUT)
+		return;
+
 	progress = false;
 
 	/* We're only interested in expressions which are sometimes
@@ -643,6 +646,9 @@ path_set::entropy() const
 IRExpr *
 path_set::build_mux(StateMachineSideEffectPhi *phi, IRType ty)
 {
+	if (TIMEOUT)
+		return NULL;
+
 	if (debug_build_mux) {
 		printf("Build mux for ");
 		prettyPrint(stdout);
