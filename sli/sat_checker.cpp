@@ -1406,7 +1406,6 @@ sat_enumerator::skipToSatisfying()
 			default:
 				abort();
 			}
-			assert(chosenVarMult > 0);
 		}
 
 		/* Do a case split on this variable. */
