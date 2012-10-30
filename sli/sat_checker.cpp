@@ -1393,7 +1393,7 @@ sat_enumerator::skipToSatisfying()
 				break;
 			case 0: {
 				int mult = _sat_checker::variableMultiplicity(frame.remainder, possible);
-				if (mult > chosenVarMult) {
+				if (chosenVar == NULL || mult > chosenVarMult) {
 					chosenVar = possible;
 					chosenVarMult = mult;
 				}
