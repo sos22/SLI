@@ -1304,7 +1304,7 @@ sat_enumerator::skipToSatisfying()
 					done_something = true;
 				}
 			}
-			if (done_something) {
+			if (done_something && !TIMEOUT) {
 				if (debug_satisfier)
 					printf("Advance by setting top-level simples\n");
 				continue;
