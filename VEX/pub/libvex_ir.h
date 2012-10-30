@@ -1336,7 +1336,9 @@ public:
    virtual IRType type() const = 0;
    void sanity_check(unsigned minOptimisations) const {
 	   assert(!(minOptimisations & ~optimisationsApplied));
+#ifndef NDEBUG
 	   _sanity_check(minOptimisations);
+#endif
    }
    void prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const {
      if (this != no_tag_expr && tags.count(const_cast<IRExpr *>(this))) {
@@ -1397,6 +1399,7 @@ struct IRExprGet : public IRExpr {
    IRType type() const {
       return ty;
    }
+ private:
    void _sanity_check(unsigned) const {
       reg.sanity_check();
       sanity_check_irtype(ty);
@@ -1460,6 +1463,7 @@ struct IRExprGetI : public IRExpr {
       fprintf(f, ",%d](%d)", bias, tid);
    }
    IRType type() const { return descr->elemTy; }
+ private:
    void _sanity_check(unsigned m) const {
       descr->sanity_check();
       ix->sanity_check(m);
@@ -1505,6 +1509,7 @@ struct IRExprQop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
+ private:
    void _sanity_check(unsigned m) const {
       sanity_check_irop(op);
       arg1->sanity_check(m);
@@ -1554,6 +1559,7 @@ struct IRExprTriop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
+ private:
    void _sanity_check(unsigned m) const {
       sanity_check_irop(op);
       arg1->sanity_check(m);
@@ -1589,6 +1595,7 @@ struct IRExprBinop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
+ private:
    void _sanity_check(unsigned m) const {
       sanity_check_irop(op);
       arg1->sanity_check(m);
@@ -1620,6 +1627,7 @@ struct IRExprUnop : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
+ private:
    void _sanity_check(unsigned m) const {
       sanity_check_irop(op);
       arg->sanity_check(m);
@@ -1654,6 +1662,7 @@ struct IRExprLoad : public IRExpr {
    }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const { return ty; }
+ private:
    void _sanity_check(unsigned m) const {
       sanity_check_irtype(ty);
       addr->sanity_check(m);
@@ -1677,6 +1686,7 @@ struct IRExprConst : public IRExpr {
    unsigned long hashval() const { return con->hashval(); }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const { return typeOfIRConst(con); }
+ private:
    void _sanity_check(unsigned) const {
       con->sanity_check();
    }
@@ -1736,6 +1746,7 @@ struct IRExprCCall : public IRExpr {
    }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const { return retty; }
+ private:
    void _sanity_check(unsigned m) const {
       cee->sanity_check();
       sanity_check_irtype(retty);
@@ -1767,6 +1778,7 @@ struct IRExprMux0X : public IRExpr {
    }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
    IRType type() const { return expr0->type(); }
+ private:
    void _sanity_check(unsigned m) const {
       cond->sanity_check(m);
       expr0->sanity_check(m);
@@ -1802,6 +1814,7 @@ struct IRExprAssociative : public IRExpr {
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       return a;
    }
+ private:
    void _sanity_check(unsigned m) const {
       if (TIMEOUT)
 	 return;
@@ -1832,6 +1845,7 @@ struct IRExprHappensBefore : public IRExpr {
     unsigned long hashval() const { return 19; }
     void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
     IRType type() const { return Ity_I1; }
+ private:
     void _sanity_check(unsigned) const {
 	    before.sanity_check();
 	    after.sanity_check();
@@ -1853,6 +1867,7 @@ struct IRExprFreeVariable : public IRExpr {
 	fprintf(f, ":%s", isUnique ? "UNIQUE" : "NONUNIQUE");
     }
     IRType type() const { return ty; }
+ private:
     void _sanity_check(unsigned) const {
 	id.sanity_check();
 	sanity_check_irtype(ty);
@@ -1879,9 +1894,6 @@ struct IRExprEntryPoint : public IRExpr {
 	fprintf(f, "Entry(%d:%s)", thread, label.name());
     }
     IRType type() const { return Ity_I1; }
-    void _sanity_check(unsigned) const {
-	label.sanity_check();
-    }
     bool operator==(const IRExprEntryPoint &o) const {
 	return label == o.label && thread == o.thread;
     }
@@ -1891,6 +1903,10 @@ struct IRExprEntryPoint : public IRExpr {
     bool operator<(const IRExprEntryPoint &o) const {
 	return thread < o.thread ||
 	    (thread == o.thread && label < o.label);
+    }
+ private:
+    void _sanity_check(unsigned) const {
+	label.sanity_check();
     }
 };
 
@@ -1914,10 +1930,6 @@ struct IRExprControlFlow : public IRExpr {
 	fprintf(f, "Control(%d:%s->%s)", thread, cfg1.name(), cfg2.name());
     }
     IRType type() const { return Ity_I1; }
-    void _sanity_check(unsigned) const {
-	cfg1.sanity_check();
-	cfg2.sanity_check();
-    }
     bool operator<(const IRExprControlFlow &o) const {
 	return thread < o.thread ||
 	    (thread == o.thread && cfg1 < o.cfg1) ||
@@ -1928,6 +1940,11 @@ struct IRExprControlFlow : public IRExpr {
     }
     bool operator==(const IRExprControlFlow &o) const {
 	return !(*this != o);
+    }
+ private:
+    void _sanity_check(unsigned) const {
+	cfg1.sanity_check();
+	cfg2.sanity_check();
     }
 };
 
@@ -2327,18 +2344,23 @@ protected:
       IRStmt(IRStmtTag _tag)
 	      : tag(_tag)
 	{}
+      virtual void _sanity_check() const = 0;
 public:
       IRStmtTag tag;
-      virtual void sanity_check() const = 0;
+      void sanity_check() const {
+#ifndef NDEBUG
+	  _sanity_check();
+#endif
+      }
       NAMED_CLASS
 };
 class IRStmtNoOp : public IRStmt {
       IRStmtNoOp() : IRStmt(Ist_NoOp) {}
+      void _sanity_check() const {}
 public:
       static IRStmtNoOp singleton;
       void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const { fprintf(f, "IR-NoOp"); }
-      void sanity_check() const {}
 };
 struct IRStmtIMark : public IRStmt {
       ThreadRip addr;
@@ -2351,7 +2373,8 @@ struct IRStmtIMark : public IRStmt {
          fprintf(f,  "------ IMark(%s, %d) ------", 
 		 addr.name(), len);
       }
-      void sanity_check() const {
+private:
+      void _sanity_check() const {
 	 assert(len >= 0);
 	 assert(len < 20);
       }
@@ -2375,7 +2398,8 @@ struct IRStmtAbiHint : public IRStmt {
          ppIRExpr(nia, f);
          fprintf(f, ") ======");
       }
-      void sanity_check() const {
+private:
+      void _sanity_check() const {
 	 base->sanity_check();
 	 nia->sanity_check();
       }
@@ -2393,7 +2417,8 @@ struct IRStmtPut : public IRStmt {
 	 fprintf(f, ") = ");
          ppIRExpr(data, f);
       }
-      void sanity_check() const {
+private:
+      void _sanity_check() const {
 	 data->sanity_check();
       }
 };
@@ -2424,7 +2449,8 @@ struct IRStmtPutI : public IRStmt {
          fprintf(f, ",%d] = ", bias);
          ppIRExpr(data, f);
       }
-      void sanity_check() const {
+private:
+      void _sanity_check() const {
 	 ix->sanity_check();
 	 data->sanity_check();
       }
@@ -2463,7 +2489,8 @@ struct IRStmtStore : public IRStmt {
          fprintf(f,  ") = ");
          ppIRExpr(data, f);
       }
-      void sanity_check() const {
+private:
+      void _sanity_check() const {
 	 data->sanity_check();
 	 addr->sanity_check();
       }
@@ -2491,7 +2518,8 @@ struct IRStmtCAS : public IRStmt{
       void prettyPrint(FILE *f) const {
 	 ppIRCAS(details, f);
       }
-      void sanity_check() const {
+private:
+      void _sanity_check() const {
       }
 };
 
@@ -2515,7 +2543,8 @@ struct IRStmtDirty : public IRStmt {
       void prettyPrint(FILE *f) const {
 	  ppIRDirty(details, f);
       }
-      void sanity_check() const {
+private:
+      void _sanity_check() const {
       }
 };
 
@@ -2536,7 +2565,8 @@ struct IRStmtMBE : public IRStmt {
          fprintf(f, "IR-");
          ppIRMBusEvent(event, f);
       }
-      void sanity_check() const {
+private:
+      void _sanity_check() const {
       }
 };
 
@@ -2559,28 +2589,29 @@ struct IRStmtExit : public IRStmt {
          ppIRJumpKind(jk, f);
          fprintf(f, "} %s", dst.name());
       }
-      void sanity_check() const {
+private:
+      void _sanity_check() const {
       }
 };
 
 class IRStmtStartAtomic : public IRStmt {
       IRStmtStartAtomic() : IRStmt(Ist_StartAtomic) {}
+      void _sanity_check() const {
+      }
 public:
       static IRStmtStartAtomic singleton;
       void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const { fprintf(f, "IR-StartAtomic"); }
-      void sanity_check() const {
-      }
 };
 
 class IRStmtEndAtomic : public IRStmt {
       IRStmtEndAtomic() : IRStmt(Ist_EndAtomic) {}
+      void _sanity_check() const {
+      }
 public:
       static IRStmtEndAtomic singleton;
       void visit(HeapVisitor &) {}
       void prettyPrint(FILE *f) const { fprintf(f, "IR-EndAtomic"); }
-      void sanity_check() const {
-      }
 };
 
 /* Statement constructors. */
@@ -2641,6 +2672,7 @@ struct _IRSB : public GarbageCollected<_IRSB, &ir_heap> {
 	 hv(next_nonconst);
       }
       void sanity_check() const {
+#ifndef NDEBUG
 	 assert(stmts_used <= stmts_size);
 	 assert(next_is_const == true || next_is_const == false);
 	 for (int i = 0; i < stmts_used; i++)
@@ -2651,6 +2683,7 @@ struct _IRSB : public GarbageCollected<_IRSB, &ir_heap> {
 	     assert(next_nonconst);
 	     next_nonconst->sanity_check();
 	 }
+#endif
       }
       NAMED_CLASS
    }

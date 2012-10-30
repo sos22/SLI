@@ -408,7 +408,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 			done_something |= p;
 		}
 
-		if (!done_something && is_ssa) {
+		if (!done_something && is_ssa && !TIMEOUT) {
 			ControlDominationMap cdm;
 			cdm.init(sm, opt);
 			if (TIMEOUT)

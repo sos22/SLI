@@ -36,6 +36,7 @@ public:
 	space operator&&(const space &o) const;
 	space operator||(const space &o) const;
 	void sanity_check() const {
+#ifndef NDEBUG
 		assert(type_max);
 		assert(!((type_max + 1) & (type_max)));
 		for (unsigned x = 0; x < intervals.size(); x++) {
@@ -48,6 +49,7 @@ public:
 			if (x != intervals.size() - 1)
 				assert(intervals[x].second < type_max);
 		}
+#endif
 	}
 	space(const std::vector<interval> &_intervals, unsigned long _type_max)
 		: intervals(_intervals), type_max(_type_max)

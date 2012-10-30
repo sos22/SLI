@@ -1329,9 +1329,9 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 	}
 
 
-	/* RSP be used to refer to any frame in this thread. */
-	/* (realias uses refined information than this, but this is
-	 * good enough for all of the other analyses, and realias
+	/* RSP can be used to refer to any frame in this thread. */
+	/* (realias uses more refined information than this, but this
+	 * is good enough for all of the other analyses, and realias
 	 * derives what it needs when it needs it) */
 	PointerAliasingSet rspFrames(PointerAliasingSet::nothing);
 	{

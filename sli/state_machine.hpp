@@ -381,7 +381,11 @@ public:
 
 	virtual void inputExpressions(std::vector<IRExpr *> &out) = 0;
 
+#ifdef NDEBUG
+	void sanityCheck() const {}
+#else
 	virtual void sanityCheck() const = 0;
+#endif
 
 #ifndef NDEBUG
 	void assertAcyclic(std::vector<const StateMachineState *> &stack,
@@ -419,7 +423,11 @@ protected:
 public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) = 0;
 	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
+#ifdef NDEBUG
+	void sanityCheck() const {}
+#else
 	virtual void sanityCheck() const = 0;
+#endif
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
 	virtual void inputExpressions(std::vector<IRExpr *> &exprs) = 0;
 	virtual void prettyPrint(FILE *f) const = 0;
@@ -566,6 +574,7 @@ public:
 	}
 	void sanityCheck() const
 	{
+#ifndef NDEBUG
 		if (sideEffect)
 			sideEffect->sanityCheck();
 		if (sideEffect && sideEffect->type == StateMachineSideEffect::EndAtomic &&
@@ -573,6 +582,7 @@ public:
 		    ((StateMachineSideEffecting *)target)->sideEffect &&
 		    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic)
 			abort();
+#endif
 	}
 };
 
@@ -710,11 +720,13 @@ public:
 	virtual void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
+#ifndef NDEBUG
 	virtual void sanityCheck() const {
 		addr->sanity_check();
 		assert(addr->type() == Ity_I64);
 		rip.sanity_check();
 	}
+#endif
 	virtual IRType _type() const = 0;
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
@@ -1255,6 +1267,7 @@ public:
 	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
 	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck() const {
+#ifndef NDEBUG
 		/* No dupes */
 		for (auto it1 = functions.begin();
 		     it1 != functions.end();
@@ -1264,6 +1277,7 @@ public:
 			     it2++)
 				assert(it1->first != it2->first);
 		}
+#endif
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;

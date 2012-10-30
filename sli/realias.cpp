@@ -93,6 +93,7 @@ public:
 	std::vector<FrameId> functions;
 	std::vector<IRExpr *> rsps;
 	void sanity_check() const {
+#ifndef NDEBUG
 		assert(functions.size() == rsps.size() + 1);
 		/* No dupes */
 		for (auto it1 = functions.begin();
@@ -105,6 +106,7 @@ public:
 		}
 		for (auto it = rsps.begin(); it != rsps.end(); it++)
 			assert(*it);
+#endif
 	}
 
 	StackLayout()
@@ -219,6 +221,7 @@ public:
 		}
 	}
 	void sanity_check() const {
+#ifndef NDEBUG
 		for (auto it = content.begin();
 		     it != content.end();
 		     it++) {
@@ -226,6 +229,7 @@ public:
 			if (it->second.valid)
 				it->second.content.sanity_check();
 		}
+#endif
 	}
 	Maybe<StackLayout> *forState(StateMachineState *s)
 	{
@@ -958,7 +962,7 @@ PointsToTable::refine(AliasTable &at,
 						 * assignments to this
 						 * temporary.  That
 						 * means that the Phi
-						 * can't pull it's
+						 * can't pull its
 						 * value, so we just
 						 * ignore it here. */
 					}
