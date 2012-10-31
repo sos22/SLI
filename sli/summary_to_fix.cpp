@@ -148,86 +148,6 @@ trimCfg(StateMachine *machine, const std::set<std::pair<unsigned, CfgLabel> > &n
 				  newRoots.end());
 }
 
-static void
-avoidBranchToPatch(crashEnforcementRoots &cer,
-		   CrashCfg &cfg,
-		   std::map<VexRip, Instruction<ThreadCfgLabel> *> &cfgRoots,
-		   CfgLabelAllocator &allocLabel,
-		   Oracle *oracle)
-{
-	std::map<VexRip, std::set<Instruction<ThreadCfgLabel> *> > multiRoots;
-	for (auto it = cer.content.begin(); it != cer.content.end(); it++) {
-		AbstractThread tid(it->first);
-		const std::set<CfgLabel> &pendingRoots(it->second);
-		for (auto it2 = pendingRoots.begin(); it2 != pendingRoots.end(); it2++) {
-			multiRoots[cfg.labelToRip(ConcreteCfgLabel(cer.lookupAbsThread(tid).summary_id, *it2))].
-				insert(cfg.findInstr(ThreadCfgLabel(tid, *it2)));
-		}
-	}
-
-	std::map<VexRip, std::set<Instruction<ThreadCfgLabel> *> > acceptedRoots;
-	for (auto it = multiRoots.begin(); it != multiRoots.end(); it++) {
-		const VexRip &inpRip(it->first);
-		const std::set<Instruction<ThreadCfgLabel> *> &inpRoots(it->second);
-		for (auto it = inpRoots.begin(); it != inpRoots.end(); it++) {
-			std::set<std::pair<VexRip, Instruction<ThreadCfgLabel> *> > pendingRoots;
-			pendingRoots.insert(std::pair<VexRip, Instruction<ThreadCfgLabel> *>(inpRip, *it));
-			std::set<VexRip> alreadyCovered;
-			while (!pendingRoots.empty()) {
-				VexRip vr(pendingRoots.begin()->first);
-				Instruction<ThreadCfgLabel> *node = pendingRoots.begin()->second;
-				pendingRoots.erase(pendingRoots.begin());
-				if (!alreadyCovered.insert(vr).second)
-					continue;
-
-				unsigned long e = vr.unwrap_vexrip();
-				bool acceptAsRoot = true;
-				for (unsigned x = 1; acceptAsRoot && x < 5; x++) {
-					if (oracle->isFunctionHead(StaticRip(e + x))) {
-						acceptAsRoot = false;
-					} else {
-						std::set<unsigned long> predecessors;
-						oracle->findPredecessors(e + x, predecessors);
-						for (unsigned y = 0; y < x; y++)
-							predecessors.erase(e + y);
-						if (!predecessors.empty())
-							acceptAsRoot = false;
-					}
-				}
-				if (acceptAsRoot) {
-					acceptedRoots[vr].insert(node);
-					continue;
-				}
-
-				/* Can't take this one as a root, so
-				 * look at its predecessors. */
-				std::set<unsigned long> predecessors;
-				oracle->findPredecessors(e, predecessors);
-				assert(!predecessors.empty());
-				for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
-					auto pred = decode_instr(oracle->ms->addressSpace,
-								 *it,
-								 ThreadCfgLabel(node->rip.thread, allocLabel()),
-								 NULL,
-								 true);
-					pred->addDefault(node);
-					VexRip pred_vr(vr);
-					pred_vr.jump(*it);
-					pendingRoots.insert(std::pair<VexRip, Instruction<ThreadCfgLabel> *>(pred_vr, pred));
-				}
-			}
-		}
-	}
-
-	/* For now we assume that that only produces one CFG for each
-	   potential entry point.  We will eventually need to support
-	   a kind of cross-product operation to merge the CFGs. */
-	for (auto it = multiRoots.begin(); it != multiRoots.end(); it++) {
-		assert(it->second.size() == 1);
-		cfgRoots[it->first] = *it->second.begin();
-	}
-}
-
 class InstructionLabel : public Named {
 public:
 	class entry : public Named {
@@ -1618,41 +1538,6 @@ static char *
 buildPatchForCrashSummary(Oracle *oracle,
 			  const std::map<SummaryId, CrashSummary *> &summaries)
 {
-#if 0
-
-	cfg.prettyPrint(stdout, true);
-	cer.prettyPrint(stdout);
-
-	std::map<VexRip, Instruction<ThreadCfgLabel> *> cfgRoots2;
-	CfgLabelAllocator allocLabel;
-	avoidBranchToPatch(cer, cfg, cfgRoots2, allocLabel, oracle);
-	std::set<unsigned long> clobberedInstructions;
-	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
-		for (unsigned x = 1; x < 5; x++)
-			clobberedInstructions.insert(it->first.unwrap_vexrip() + x);
-	}
-
-	for (auto it = cfgRoots2.begin(); it != cfgRoots2.end(); it++) {
-		printf("Root %s:\n", it->first.name());
-		std::vector<Instruction<ThreadCfgLabel> *> q;
-		std::set<Instruction<ThreadCfgLabel> *> v;
-		q.push_back(it->second);
-		while (!q.empty()) {
-			Instruction<ThreadCfgLabel> *a = q.back();
-			q.pop_back();
-			if (!v.insert(a).second)
-				continue;
-			a->prettyPrint(stdout);
-			for (auto it2 = a->successors.begin(); it2 != a->successors.end(); it2++)
-				q.push_back(it2->instr);
-		}
-	}
-
-	/* Classify the entry points according to their actual RIP, so
-	   that we can do stack validation a bit more sensibly. */
-	std::map<unsigned long, std::map<VexRip, Instruction<ThreadCfgLabel> * > > segregatedRoots;
-	segregateRoots(cfgRoots2, segregatedRoots);
-#endif
 	std::set<unsigned long> patchPoints;
 	std::set<unsigned long> clobbered;
 	summaryRootsT summaryRoots;

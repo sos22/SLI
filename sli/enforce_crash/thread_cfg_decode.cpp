@@ -1,8 +1,6 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 
-#include "x86_opcodes.c"
-
 Instruction<ThreadCfgLabel> *
 ThreadAbstracter::instr_iterator::get() const
 {
