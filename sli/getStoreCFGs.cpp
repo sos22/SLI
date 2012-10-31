@@ -1261,6 +1261,13 @@ getStoreCFGs(CfgLabelAllocator &allocLabel,
 	     CFGNode ***roots,
 	     int *nr_roots)
 {
+	if (_getStoreCFGs::debug_top_level) {
+		printf("getStoreCFGs, input ");
+		for (auto it = conflictingStores.begin(); it != conflictingStores.end(); it++)
+			printf("%s, ", it->name());
+		printf("\n");
+	}
+
 	HashedSet<HashedPtr<CFGNode> > cfgRoots;
 	buildCFG(allocLabel, conflictingStores, STORE_CLUSTER_THRESHOLD, oracle, cfgRoots);
 
@@ -1281,6 +1288,15 @@ getStoreCFGs(CfgLabelAllocator &allocLabel,
 	sortByRip((*roots), nrCfgRoots);
 
 	*nr_roots = nrCfgRoots;
+
+
+	if (!TIMEOUT && _getStoreCFGs::debug_top_level) {
+		printf("Results:\n");
+		for (int x = 0; x < *nr_roots; x++) {
+			printf("%d/%d:\n", x, *nr_roots);
+			printCFG( (*roots)[x], stdout);
+		}
+	}
 }
 
 /* End of namespace */
@@ -1293,20 +1309,5 @@ getStoreCFGs(CfgLabelAllocator &allocLabel,
 	     CFGNode ***roots,
 	     int *nr_roots)
 {
-	if (_getStoreCFGs::debug_top_level) {
-		printf("getStoreCFGs, input ");
-		for (auto it = conflictingStores.begin(); it != conflictingStores.end(); it++)
-			printf("%s, ", it->name());
-		printf("\n");
-	}
-
 	_getStoreCFGs::getStoreCFGs(allocLabel, conflictingStores, oracle, roots, nr_roots);
-
-	if (!TIMEOUT && _getStoreCFGs::debug_top_level) {
-		printf("Results:\n");
-		for (int x = 0; x < *nr_roots; x++) {
-			printf("%d/%d:\n", x, *nr_roots);
-			printCFG( (*roots)[x], stdout);
-		}
-	}
 }
