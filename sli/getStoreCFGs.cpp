@@ -33,7 +33,7 @@ debug_flags(mk_debug_flag)
 #undef debug_flags
 #undef mk_debug_flag
 
-enum cfgflavour_store_t { cfgs_flavour_true, cfgs_flavour_dupe, cfgs_flavour_ordinary };
+enum cfgflavour_store_t { cfgs_flavour_true = 72, cfgs_flavour_dupe, cfgs_flavour_ordinary };
 
 static void
 debug_dump(const VexRip &vr)
@@ -72,6 +72,7 @@ debug_dump(const HashedSet<t> &what, const char *prefix)
 static bool
 initialExplorationRoot(
 	const VexRip &root,
+	const std::set<DynAnalysisRip> &dr_roots,
 	Oracle *oracle,
 	CfgLabelAllocator &allocLabel,
 	unsigned maxPathLength,
@@ -112,7 +113,7 @@ initialExplorationRoot(
 				}
 				if (!need_regen) {
 					it->second.first = item.first;
-					if (item.first == maxPathLength) {
+					if (dr_roots.count(DynAnalysisRip(n->rip))) {
 						assert(n->rip.isValid());
 						flavours[n] = cfgs_flavour_true;
 					}
@@ -133,7 +134,7 @@ initialExplorationRoot(
 			continue;
 		}
 		assert(work->rip.isValid());
-		if (item.first == maxPathLength)
+		if (dr_roots.count(DynAnalysisRip(vr)))
 			flavours[work] = cfgs_flavour_true;
 		else
 			flavours[work] = cfgs_flavour_ordinary;
@@ -215,7 +216,7 @@ initialExploration(const std::set<DynAnalysisRip> &roots,
 			const VexRip &root(*it);
 			assert(root.isValid());
 			succ &= initialExplorationRoot(
-				root, oracle, allocLabel, maxPathLength,
+				root, roots, oracle, allocLabel, maxPathLength,
 				flavours, doneSoFar, succMap, new_roots);
 		}
 
@@ -954,6 +955,14 @@ trimUninterestingCFGNodes(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
 	for (auto it = roots.begin(); !TIMEOUT && !it.finished(); it.advance())
 		cfgnode_tmpl::enumerateCFG(&**it, allCFGNodes);
 	bool progress = true;
+	if (debug_trim_uninteresting) {
+		printf("Flavour map:\n");
+		for (auto it = allCFGNodes.begin(); !it.finished(); it.advance()) {
+			auto it_fl = flavours.find(*it);
+			assert(it_fl != flavours.end());
+			printf("\t%s -> %d\n", (*it)->label.name(), it_fl->second);
+		}
+	}
 	while (!TIMEOUT && progress) {
 		progress = false;
 		for (auto it = allCFGNodes.begin(); !it.finished(); it.advance()) {
