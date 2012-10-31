@@ -1334,12 +1334,15 @@ public:
 
    virtual unsigned long hashval() const = 0;
    virtual IRType type() const = 0;
+#ifndef NDEBUG
    void sanity_check(unsigned minOptimisations) const {
 	   assert(!(minOptimisations & ~optimisationsApplied));
-#ifndef NDEBUG
 	   _sanity_check(minOptimisations);
-#endif
    }
+#else
+   void sanity_check(unsigned) const {
+   }
+#endif
    void prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const {
      if (this != no_tag_expr && tags.count(const_cast<IRExpr *>(this))) {
        fprintf(f, "<v%d>", tags[const_cast<IRExpr *>(this)]);
