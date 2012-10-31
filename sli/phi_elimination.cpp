@@ -454,7 +454,7 @@ top:
 	/* Don't care about any terms T such that for every path P
 	   where T is true there is another path P' which is identical
 	   to P except for flipping the sense of T. */
-	for (unsigned it1 = 0; it1 < content.size(); it1++) {
+	for (unsigned it1 = 0; !TIMEOUT && it1 < content.size(); it1++) {
 		const path &path1(content[it1]);
 		for (unsigned it2 = it1 + 1; it2 < content.size(); it2++) {
 			const path &path2(content[it2]);
