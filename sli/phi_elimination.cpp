@@ -597,6 +597,7 @@ path_set::canonicalise(internIRExprTable &intern)
 			goto retry;
 		}
 	}
+	return true;
 }
 
 void

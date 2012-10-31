@@ -174,7 +174,7 @@ compare_expressions(IRExpr *a, IRExpr *b)
 bool
 StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
 {
-	*out = FrameId::invalid();
+	*out = FrameId();
 	bool definitelyStack = false;
 	assert(ptr->type() == Ity_I64);
 	auto it2 = functions.begin();
@@ -208,7 +208,7 @@ class StackLayoutTable {
 	std::map<StateMachineState *, Maybe<StackLayout> > content;
 	bool updateLayout(StateMachineState *s, const Maybe<StackLayout> &newLayout);
 public:
-	PointerAliasingSet initialLoadAliasing;
+	std::map<Maybe<FrameId>, PointerAliasingSet> initialLoadAliasing;
 	StackLayoutTable()
 	{}
 	bool build(StateMachine *inp);
@@ -326,20 +326,20 @@ StackLayoutTable::build(StateMachine *inp)
 			haveExitLayout = true;
 			exitLayout.valid = true;
 			exitLayout.content = StackLayout();
-			exitLayout.content.functions.resize(l->functions.size(), FrameId::invalid());
+			exitLayout.content.functions.resize(l->functions.size(), FrameId());
 			exitLayout.content.rsps.resize(l->functions.size() - 1);
 			for (unsigned x = 1; x < l->functions.size(); x++) {
-				if (frameBoundaries.count(l->functions[x].first) == 0) {
+				if (frameBoundaries.count(l->functions[x].frame) == 0) {
 					failed = true;
 					break;
 				}
-				exitLayout.content.functions[x] = l->functions[x].first;
-				exitLayout.content.rsps[x-1] = frameBoundaries[l->functions[x].first];
+				exitLayout.content.functions[x] = l->functions[x].frame;
+				exitLayout.content.rsps[x-1] = frameBoundaries[l->functions[x].frame];
 			}
 			if (failed) {
 				exitLayout.valid = false;
 			} else {
-				exitLayout.content.functions[0] = l->functions.front().first;
+				exitLayout.content.functions[0] = l->functions.front().frame;
 			}
 		} else {
 			auto it = content.find(s);
@@ -381,13 +381,27 @@ StackLayoutTable::build(StateMachine *inp)
 		}
 	}
 
-	initialLoadAliasing = PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
+	PointerAliasingSet baseInitialLoadAliasing = PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
 	std::set<StateMachineSideEffectStackLayout *> layouts;
 	enumSideEffects(inp, layouts);
 	for (auto it = layouts.begin(); it != layouts.end(); it++) {
 		for (auto it2 = (*it)->functions.begin(); it2 != (*it)->functions.end(); it2++)
-			if (it2->second)
-				initialLoadAliasing |= PointerAliasingSet::frame(it2->first);
+			if (it2->pointedAtByOthers)
+				baseInitialLoadAliasing |= PointerAliasingSet::frame(it2->frame);
+	}
+	initialLoadAliasing[Maybe<FrameId>::nothing()] = baseInitialLoadAliasing;
+
+	for (auto it = layouts.begin(); it != layouts.end(); it++) {
+		for (auto it2 = (*it)->functions.begin(); it2 != (*it)->functions.end(); it2++) {
+			auto it3_did_insert = initialLoadAliasing.insert(
+				std::pair<Maybe<FrameId>, PointerAliasingSet>(
+					Maybe<FrameId>::just(it2->frame),
+					baseInitialLoadAliasing));
+			auto it3 = it3_did_insert.first;
+			if (it2->pointsAtSelf)
+				initialLoadAliasing[Maybe<FrameId>::just(it2->frame)] |=
+					PointerAliasingSet::frame(it2->frame);
+		}
 	}
 
 	sanity_check();
@@ -396,6 +410,12 @@ StackLayoutTable::build(StateMachine *inp)
 
 class PointsToTable {
 	std::map<threadAndRegister, PointerAliasingSet> content;
+	PointerAliasingSet getInitialLoadAliasing(IRExpr *addr,
+						  StateMachineState *sm,
+						  Maybe<StackLayout> *sl,
+						  MachineAliasingTable &mat,
+						  StackLayoutTable &slt);
+
 public:
 	PointerAliasingSet pointsToSetForExpr(IRExpr *e,
 					      StateMachineState *sm,
@@ -453,6 +473,39 @@ aliasConfigForReg(StateMachineState *sm,
 }
 
 PointerAliasingSet
+PointsToTable::getInitialLoadAliasing(IRExpr *addr,
+				      StateMachineState *sm,
+				      Maybe<StackLayout> *sl,
+				      MachineAliasingTable &mat,
+				      StackLayoutTable &slt)
+{
+	PointerAliasingSet addrPts(pointsToSetForExpr(addr,
+						      sm,
+						      sl,
+						      mat,
+						      slt));
+	PointerAliasingSet res = PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
+	if (!addrPts.valid || addrPts.otherStackPointer) {
+		for (auto it = slt.initialLoadAliasing.begin();
+		     it != slt.initialLoadAliasing.end();
+		     it++) {
+			if (it->first.valid)
+				res |= it->second;
+		}
+	} else {
+		for (auto it = addrPts.stackPointers.begin();
+		     it != addrPts.stackPointers.end();
+		     it++) {
+			assert(slt.initialLoadAliasing.count(Maybe<FrameId>::just(*it)));
+			res |= slt.initialLoadAliasing[Maybe<FrameId>::just(*it)];
+		}
+	}
+	if (addrPts.mightPointAtNonStack())
+		res |= slt.initialLoadAliasing[Maybe<FrameId>::nothing()];
+	return res;
+}
+
+PointerAliasingSet
 PointsToTable::pointsToSetForExpr(IRExpr *e,
 				  StateMachineState *sm,
 				  Maybe<StackLayout> *sl,
@@ -490,7 +543,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		if (iex->reg.isReg() &&
 		    iex->reg.asReg() == OFFSET_amd64_RSP) {
 			if (sl && sl->valid) {
-				FrameId f(FrameId::invalid());
+				FrameId f;
 				if (sl->content.identifyFrameFromPtr(iex, &f)) {
 					return PointerAliasingSet::frame(f);
 				} else {
@@ -504,8 +557,10 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		return aliasConfigForReg(sm, iex->reg, mat);
 	}
 
-	case Iex_Load:
-		return slt.initialLoadAliasing;
+	case Iex_Load: {
+		IRExprLoad *iel = (IRExprLoad *)e;
+		return getInitialLoadAliasing(iel->addr, sm, sl, mat, slt);
+	}
 	case Iex_Const:
 		return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
 	case Iex_Associative: {
@@ -518,7 +573,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		    iex->contents[1]->tag == Iex_Get &&
 		    ((IRExprGet *)iex->contents[1])->reg.isReg() &&
 		    ((IRExprGet *)iex->contents[1])->reg.asReg() == OFFSET_amd64_RSP) {
-			FrameId f(FrameId::invalid());
+			FrameId f;
 			if (sl->content.identifyFrameFromPtr(iex, &f))
 				return PointerAliasingSet::frame(f);
 		}
@@ -895,7 +950,8 @@ PointsToTable::refine(AliasTable &at,
 			if (e.mightHaveExternalStores)
 				newPts |= PointerAliasingSet::nonStackPointer;
 			if (e.mightLoadInitial)
-				newPts |= slt.initialLoadAliasing;
+				newPts |= getInitialLoadAliasing( ((StateMachineSideEffectLoad *)effect)->addr,
+								  smse, sl, mat, slt);
 			for (auto it2 = e.stores.begin(); it2 != e.stores.end(); it2++) {
 				StateMachineSideEffecting *satisfierState = *it2;
 				StateMachineSideEffect *satisfier = satisfierState->sideEffect;
@@ -1380,12 +1436,12 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 				break;
 			bool repl = false;
 			for (auto it2 = s->functions.begin(); !repl && it2 != s->functions.end(); it2++)
-				if (!liveFrames.count(it2->first))
+				if (!liveFrames.count(it2->frame))
 					repl = true;
 			if (repl) {
-				std::vector<std::pair<FrameId, bool> > newFunctions;
+				std::vector<StateMachineSideEffectStackLayout::entry> newFunctions;
 				for (auto it2 = s->functions.begin(); it2 != s->functions.end(); it2++) {
-					if (liveFrames.count(it2->first))
+					if (liveFrames.count(it2->frame))
 						newFunctions.push_back(*it2);
 				}
 				if (newFunctions.empty()) {

@@ -671,7 +671,7 @@ cfgNodeToState(Oracle *oracle,
 								OFFSET_amd64_RSP,
 								0),
 							Ity_I64),
-						FrameId::invalid()),
+						FrameId()),
 					NULL);
 			*cursor = smp;
 			cursor = &smp->target;
@@ -694,7 +694,7 @@ cfgNodeToState(Oracle *oracle,
 								Ity_I64),
 							IRExpr_Const(
 								IRConst_U64(-8))),
-						FrameId::invalid()),
+						FrameId()),
 					NULL);
 				*cursor = smp;
 				cursor = &smp->target;
@@ -733,7 +733,7 @@ cfgNodeToState(Oracle *oracle,
 								Ity_I64),
 							IRExpr_Const(
 								IRConst_U64(-8))),
-						FrameId::invalid()),
+						FrameId()),
 					NULL);
 			*cursor = smp;
 			cursor = &smp->target;
@@ -1279,13 +1279,8 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 		warning("Failed to get RSP canonicalisation delta\n");
 	}
 
-	/* A frame is private if there's no possibility that a LD
-	   could return a pointer to it.  That's automatically true of
-	   any functions which start in the middle of this machine,
-	   and also true of functions which are live at the start of
-	   the machine and which don't escape. */
-	std::set<FrameId> privateFrames;
-	privateFrames.insert(entryStack.begin(), entryStack.end());
+	std::set<FrameId> pointAtSelf;
+	std::set<FrameId> pointedAtByOthers;
 
 	/* We now need to figure out which stack frames each register
 	 * might point to.  The oracle's static analysis can tell us
@@ -1298,7 +1293,7 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 	 * func3, frame3 <--- you are here.
 	 *
 	 * Static analysis tells us whether frame3 is in registers.
-	 * it can also tell us whether frame2 was in any registers or
+	 * It can also tell us whether frame2 was in any registers or
 	 * non-stack memory when func2 called func3.  If it was then
 	 * we have to assume that it could have reached any registers
 	 * by the time we get to the point of interest in func3.
@@ -1317,15 +1312,18 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 			oracle->getAliasingConfigurationForRip(rtrnRip);
 		if (rtrnConfig.v[0].mightPointAtStack()) {
 			framesInRegisters |= PointerAliasingSet::frame(entryStack[x]);
-			privateFrames.erase(entryStack[x]);
+			pointAtSelf.insert(entryStack[x]);
+			pointedAtByOthers.insert(entryStack[x]);
 		}
 	}
 	{
 		StaticRip currentRip(vr.stack.back());
 		Oracle::ThreadRegisterAliasingConfiguration currentConfig =
 			oracle->getAliasingConfigurationForRip(currentRip);
-		if (currentConfig.stackInMemory || currentConfig.stackInStack)
-			privateFrames.erase(entryStack.back());
+		if (currentConfig.stackInMemory)
+			pointedAtByOthers.insert(entryStack.back());
+		if (currentConfig.stackInStack)
+			pointAtSelf.insert(entryStack.back());
 	}
 
 
@@ -1339,10 +1337,8 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 		std::set<StateMachineSideEffectEndFunction *> ends;
 		enumSideEffects(cursor, starts);
 		enumSideEffects(cursor, ends);
-		for (auto it = starts.begin(); it != starts.end(); it++) {
+		for (auto it = starts.begin(); it != starts.end(); it++)
 			rspFrames |= PointerAliasingSet::frame((*it)->frame);
-			privateFrames.insert((*it)->frame);
-		}
 		for (auto it = ends.begin(); it != ends.end(); it++)
 			rspFrames |= PointerAliasingSet::frame((*it)->frame);
 		for (auto it = entryStack.begin(); it != entryStack.end(); it++)
@@ -1351,9 +1347,13 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 
 	/* Set up the initial stack layout */
 	{
-		std::vector<std::pair<FrameId, bool> > stackAndEscape;
+		std::vector<StateMachineSideEffectStackLayout::entry> stackAndEscape;
 		for (auto it = entryStack.begin(); it != entryStack.end(); it++)
-			stackAndEscape.push_back(std::pair<FrameId, bool>(*it, !privateFrames.count(*it)));
+			stackAndEscape.push_back(
+				StateMachineSideEffectStackLayout::entry(
+					*it,
+					pointAtSelf.count(*it),
+					pointedAtByOthers.count(*it)));
 		cursor = new StateMachineSideEffecting(
 			vr,
 			new StateMachineSideEffectStackLayout(
@@ -1501,7 +1501,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	for (auto it = roots.begin(); it != roots.end(); it++)
 		enumStates(*it, &allStates);
 	for (auto it = allStates.begin(); it != allStates.end(); it++)
-		stacks[*it].resize(0, FrameId::invalid());
+		stacks[*it].resize(0, FrameId());
 
 	if (debug_assign_frame_ids) {
 		for (auto it = allStates.begin(); it != allStates.end(); it++)
@@ -1698,7 +1698,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 
 	/* Allocate the stacks. */
 	for (auto it = stackSizes.begin(); it != stackSizes.end(); it++)
-		it->first->resize(it->second, FrameId::invalid());
+		it->first->resize(it->second, FrameId());
 
 	if (debug_assign_frame_ids) {
 		printf("Stack sizes:\n");
@@ -1740,7 +1740,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	for (auto it = frame_eq_constraints.begin();
 	     it != frame_eq_constraints.end();
 	     it++) {
-		if (*it->first != FrameId::invalid()) {
+		if (*it->first != FrameId()) {
 			assert(*it->second == *it->first);
 			continue;
 		}
@@ -1756,7 +1756,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 				continue;
 			if (debug_assign_frame_ids)
 				printf("\tPropagate to %p\n", f);
-			assert(*f == FrameId::invalid());
+			assert(*f == FrameId());
 			*f = fid;
 			for (auto it2 = frame_eq_constraints.begin(); it2 != frame_eq_constraints.end(); it2++) {
 				if (it2->first == f)

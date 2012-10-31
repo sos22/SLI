@@ -25,6 +25,12 @@ public:
 	bool operator!=(const Maybe<t> &o) const {
 		return !(*this == o);
 	}
+	bool operator<(const Maybe<t> &o) const {
+		if (valid && o.valid)
+			return content < o.content;
+		else
+			return valid < o.valid;
+	}
 
 	/* Note that we do *not* lift &&, ||, and ?:, because there's
 	   no way of getting the right short circuit and laziness

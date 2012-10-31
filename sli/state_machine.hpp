@@ -28,9 +28,9 @@ public:
 	FrameId(unsigned _id, unsigned _tid)
 		: id(_id), tid(_tid)
 	{}
-	static FrameId invalid()
+	FrameId()
+		: id(-1), tid(-1)
 	{
-		return FrameId(-1, -1);
 	}
 	static bool parse(FrameId *out, const char *str, const char **suffix)
 	{
@@ -227,7 +227,7 @@ public:
 							return false;
 						anyStack = true;
 					} else {
-						FrameId f(FrameId::invalid());
+						FrameId f;
 						if (FrameId::parse(&f, str, &str)) {
 							if (anyStack)
 								return false;
@@ -1135,7 +1135,7 @@ public:
 	static bool parse(StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *data;
-		FrameId frame(FrameId::invalid());
+		FrameId frame;
 		if (parseThisString("StartFunction(", str, &str) &&
 		    FrameId::parse(&frame, str, &str) &&
 		    parseThisString(") rsp = ", str, &str)) {
@@ -1184,7 +1184,7 @@ public:
 	static bool parse(StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *rsp;
-		FrameId frame(FrameId::invalid());
+		FrameId frame;
 		if (parseThisString("EndFunction(", str, &str) &&
 		    FrameId::parse(&frame, str, &str) &&
 		    parseThisString(") rsp = ", str, &str) &&
@@ -1253,11 +1253,56 @@ public:
 };
 class StateMachineSideEffectStackLayout : public StateMachineSideEffect {
 public:
-	/* Second element is whether there could be any pointers to
-	 * that frame in initial memory. */
-	std::vector<std::pair<FrameId, bool> > functions;
+	class entry : public Named {
+		char *mkName() const {
+			return my_asprintf("%s{%s%s%s}",
+					   frame.name(),
+					   pointsAtSelf ? "self" : "",
+					   pointsAtSelf && pointedAtByOthers ? "," : "",
+					   pointedAtByOthers ? "other" : "");
+		}
+	public:
+		FrameId frame;
+		bool pointsAtSelf;
+		bool pointedAtByOthers;
+		entry(const FrameId &_frame,
+		      bool _pointsAtSelf,
+		      bool _pointedAtByOthers)
+			: frame(_frame), pointsAtSelf(_pointsAtSelf),
+			  pointedAtByOthers(_pointedAtByOthers)
+		{}
+		entry() {}
+		bool operator==(const entry &o) const {
+			return frame == o.frame &&
+				pointsAtSelf == o.pointsAtSelf &&
+				pointedAtByOthers == o.pointedAtByOthers;
+		}
+		bool parse(const char *str, const char **end) {
+			FrameId f;
+			if (!FrameId::parse(&f, str, &str) ||
+			    !parseThisString("{", str, &str))
+				return false;
+			bool pas = false;
+			bool pao = false;
+			if (parseThisString("self", str, &str)) {
+				pas = true;
+				if (parseThisString(",other", str, &str))
+					pao = true;
+			} else if (parseThisString("other", str, &str)) {
+				pao = true;
+			}
+			if (!parseThisString("}", str, end))
+				return false;
+			frame = f;
+			pointsAtSelf = pas;
+			pointedAtByOthers = pao;
+			clearName();
+			return true;
+		}
+	};
+	std::vector<entry> functions;
 	StateMachineSideEffectStackLayout(
-		const std::vector<std::pair<FrameId, bool> > &_functions)
+		const std::vector<entry> &_functions)
 		: StateMachineSideEffect(StateMachineSideEffect::StackLayout),
 		  functions(_functions)
 	{}
@@ -1273,7 +1318,11 @@ public:
 			for (auto it2 = it1 + 1;
 			     it2 != functions.end();
 			     it2++)
-				assert(it1->first != it2->first);
+				assert(it1->frame != it2->frame);
+			assert(it1->pointsAtSelf == true ||
+			       it1->pointsAtSelf == false);
+			assert(it1->pointedAtByOthers == true ||
+			       it1->pointedAtByOthers == false);
 		}
 #endif
 	}
@@ -1287,26 +1336,21 @@ public:
 		for (auto it = functions.begin(); it != functions.end(); it++) {
 			if (it != functions.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%s%s", it->first.name(), it->second ? " <mem>" : "");
+			fprintf(f, "%s", it->name());
 		}
 		fprintf(f, "}");
 	}
 	static bool parse(StateMachineSideEffectStackLayout **out, const char *str, const char **suffix)
 	{
-		std::vector<std::pair<FrameId, bool> > functions;
+		std::vector<entry> functions;
 
 		if (!parseThisString("STACKLAYOUT = {", str, &str))
 			return false;
 		while (1) {
-			FrameId f(FrameId::invalid());
-			bool regs;
-			if (!FrameId::parse(&f, str, &str))
+			entry f;
+			if (!f.parse(str, &str))
 				return false;
-			if (parseThisString(" <mem>", str, &str))
-				regs = true;
-			else
-				regs = false;
-			functions.push_back(std::pair<FrameId, bool>(f, regs));
+			functions.push_back(f);
 			if (parseThisChar('}', str, suffix))
 				break;
 			if (!parseThisString(", ", str, &str))
