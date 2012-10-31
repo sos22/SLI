@@ -1396,7 +1396,6 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 				} else {
 					(*it)->sideEffect =
 						new StateMachineSideEffectStackLayout(
-							s->tid,
 							newFunctions);
 					if (debug_use_alias_table) {
 						printf("Shrink stack layout l%d to ", stateLabels[*it]);

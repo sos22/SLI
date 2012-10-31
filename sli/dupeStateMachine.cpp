@@ -282,7 +282,7 @@ rawDupeS(duplication_context &, const StateMachineSideEffectPointerAliasing *l)
 static StateMachineSideEffectStackLayout *
 rawDupeS(duplication_context &, const StateMachineSideEffectStackLayout *l)
 {
-	return new StateMachineSideEffectStackLayout(l->tid, l->functions);
+	return new StateMachineSideEffectStackLayout(l->functions);
 }
 
 static StateMachineSideEffect *

@@ -1357,7 +1357,6 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 		cursor = new StateMachineSideEffecting(
 			vr,
 			new StateMachineSideEffectStackLayout(
-				tid,
 				stackAndEscape),
 			cursor);
 	}

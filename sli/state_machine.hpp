@@ -1253,15 +1253,13 @@ public:
 };
 class StateMachineSideEffectStackLayout : public StateMachineSideEffect {
 public:
-	unsigned tid;
 	/* Second element is whether there could be any pointers to
 	 * that frame in initial memory. */
 	std::vector<std::pair<FrameId, bool> > functions;
 	StateMachineSideEffectStackLayout(
-		unsigned _tid,
 		const std::vector<std::pair<FrameId, bool> > &_functions)
 		: StateMachineSideEffect(StateMachineSideEffect::StackLayout),
-		  tid(_tid), functions(_functions)
+		  functions(_functions)
 	{}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
@@ -1285,7 +1283,7 @@ public:
 	void inputExpressions(std::vector<IRExpr *> &) {
 	}
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "STACKLAYOUT(%d) = {", tid);
+		fprintf(f, "STACKLAYOUT = {");
 		for (auto it = functions.begin(); it != functions.end(); it++) {
 			if (it != functions.begin())
 				fprintf(f, ", ");
@@ -1295,12 +1293,9 @@ public:
 	}
 	static bool parse(StateMachineSideEffectStackLayout **out, const char *str, const char **suffix)
 	{
-		unsigned tid;
 		std::vector<std::pair<FrameId, bool> > functions;
 
-		if (!parseThisString("STACKLAYOUT(", str, &str) ||
-		    !parseDecimalUInt(&tid, str, &str) ||
-		    !parseThisString(") = {", str, &str))
+		if (!parseThisString("STACKLAYOUT = {", str, &str))
 			return false;
 		while (1) {
 			FrameId f(FrameId::invalid());
@@ -1317,11 +1312,11 @@ public:
 			if (!parseThisString(", ", str, &str))
 				return false;
 		}
-		*out = new StateMachineSideEffectStackLayout(tid, functions);
+		*out = new StateMachineSideEffectStackLayout(functions);
 		return true;
 	}
 	bool operator==(const StateMachineSideEffectStackLayout &o) const {
-		return tid == o.tid && functions == o.functions;
+		return functions == o.functions;
 	}
 
 };
