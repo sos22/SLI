@@ -1082,7 +1082,7 @@ RipRelativeDataRelocation<r>::doit(CfgLabelAllocator &, PatchFragment<r> *pf)
 }
 
 template <typename r> void
-RipRelativeBranchRelocation<r>::doit(CfgLabelAllocator &allocLabel, PatchFragment<r> *pf)
+RipRelativeBranchRelocation<r>::doit(CfgLabelAllocator &, PatchFragment<r> *)
 {
 	abort();
 #if 0
