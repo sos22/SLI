@@ -400,7 +400,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		}
 
 		if (!done_something && is_ssa) {
-			sm = phiElimination(sm, &p);
+			sm = phiElimination(sm, opt, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("phiElimination:\n");
 				printStateMachine(sm, stdout);

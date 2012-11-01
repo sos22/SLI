@@ -172,7 +172,8 @@ struct path_set {
 	path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 		 internIRExprTable &intern,
 		 std::map<const StateMachineState *, int> &labels,
-		 std::map<unsigned, unsigned> &canonResult);
+		 std::map<unsigned, unsigned> &canonResult,
+		 const IRExprOptimisations &opt);
 	void simplify(bool is_canonical);
 	IRExpr *build_mux(StateMachineSideEffectPhi *, IRType);
 	void prettyPrint(FILE *f) const {
@@ -191,7 +192,8 @@ struct path_set {
 path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 		   internIRExprTable &intern,
 		   std::map<const StateMachineState *, int> &labels,
-		   std::map<unsigned, unsigned> &canonResult)
+		   std::map<unsigned, unsigned> &canonResult,
+		   const IRExprOptimisations &opt)
 	: nr_possible_results(phi->generations.size())
 {
 	std::set<StateMachineState *> mightReachPhi;
@@ -254,6 +256,10 @@ path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 		queue.reserve(queue.size() + 1);
 		q_entry &entry(queue.back());
 		StateMachineState *s = entry.first;
+		if (debug_build_paths) {
+			printf("Build path discovers a path to l%d\n", labels[s]);
+			entry.second.prettyPrint(stdout);
+		}
 		if (!mightReachPhi.count(s)) {
 			queue.pop_back();
 			continue;
@@ -292,7 +298,8 @@ path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 			switch (sme->sideEffect->type) {
 			case StateMachineSideEffect::Load:
 			case StateMachineSideEffect::Store:
-				if (!entry.second.addFalse(
+				if (!opt.allPointersGood() &&
+				    !entry.second.addFalse(
 					    IRExpr_Unop(
 						    Iop_BadPtr,
 						    ((StateMachineSideEffectMemoryAccess *)sme->sideEffect)->addr),
@@ -757,7 +764,7 @@ replaceSideEffects(StateMachine *sm, std::map<StateMachineSideEffect *, StateMac
 }
 
 static StateMachine *
-phiElimination(StateMachine *sm, bool *done_something)
+phiElimination(StateMachine *sm, const IRExprOptimisations &opt, bool *done_something)
 {
 	std::map<const StateMachineState *, int> labels;
 
@@ -816,9 +823,20 @@ phiElimination(StateMachine *sm, bool *done_something)
 				printf("Failed: unknown type\n");
 			continue;
 		}
-		path_set paths(sm, phi, intern, labels, resultCanoniser);
+		path_set paths(sm, phi, intern, labels, resultCanoniser, opt);
 		if (TIMEOUT)
 			break;
+		if (paths.content.empty()) {
+			/* There are no paths to this phi.  Kill it off. */
+			/* We can sometimes spot this when the other
+			   optimisations can't due to slightly
+			   different handling of control
+			   dependencies. */
+			if (debug_toplevel)
+				printf("Phi is unreachable?\n");
+			replacements[phi] = StateMachineSideEffectUnreached::get();
+			continue;
+		}
 		paths.simplify(false);
 		if (!paths.canonicalise(intern))
 			continue;
@@ -857,7 +875,7 @@ phiElimination(StateMachine *sm, bool *done_something)
 };
 
 StateMachine *
-phiElimination(StateMachine *sm, bool *done_something)
+phiElimination(StateMachine *sm, const IRExprOptimisations &opt, bool *done_something)
 {
-	return _phi_elimination::phiElimination(sm, done_something);
+	return _phi_elimination::phiElimination(sm, opt, done_something);
 }
