@@ -74,6 +74,7 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 	return res;
 }
 
+#warning Fuck, this is incorrect for multi-threaded machines.  Need to have one StackLayout for each thread.
 class StackLayout : public Named {
 	char *mkName() const {
 		std::vector<const char *> fragments;
@@ -238,6 +239,11 @@ public:
 			return NULL;
 		else
 			return &it->second;
+	}
+	Maybe<StackLayout> *initialStackLayout(StateMachineState *, StateMachine *sm)
+	{
+		/* XXX could do better than this */
+		return forState(sm->root);
 	}
 };
 
@@ -412,16 +418,17 @@ class PointsToTable {
 	std::map<threadAndRegister, PointerAliasingSet> content;
 	PointerAliasingSet getInitialLoadAliasing(IRExpr *addr,
 						  StateMachineState *sm,
-						  Maybe<StackLayout> *sl,
 						  MachineAliasingTable &mat,
-						  StackLayoutTable &slt);
+						  StackLayoutTable &slt,
+						  StateMachine *machine);
 
 public:
 	PointerAliasingSet pointsToSetForExpr(IRExpr *e,
 					      StateMachineState *sm,
 					      Maybe<StackLayout> *sl,
 					      MachineAliasingTable &mat,
-					      StackLayoutTable &slt);
+					      StackLayoutTable &slt,
+					      StateMachine *machine);
 	bool build(StateMachine *sm);
 	void prettyPrint(FILE *f);
 	void sanity_check() const {
@@ -475,15 +482,17 @@ aliasConfigForReg(StateMachineState *sm,
 PointerAliasingSet
 PointsToTable::getInitialLoadAliasing(IRExpr *addr,
 				      StateMachineState *sm,
-				      Maybe<StackLayout> *sl,
 				      MachineAliasingTable &mat,
-				      StackLayoutTable &slt)
+				      StackLayoutTable &slt,
+				      StateMachine *machine)
 {
+	Maybe<StackLayout> *sl = slt.initialStackLayout(sm, machine);
 	PointerAliasingSet addrPts(pointsToSetForExpr(addr,
 						      sm,
 						      sl,
 						      mat,
-						      slt));
+						      slt,
+						      machine));
 	PointerAliasingSet res = PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
 	if (!addrPts.valid || addrPts.otherStackPointer) {
 		for (auto it = slt.initialLoadAliasing.begin();
@@ -510,7 +519,8 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 				  StateMachineState *sm,
 				  Maybe<StackLayout> *sl,
 				  MachineAliasingTable &mat,
-				  StackLayoutTable &slt)
+				  StackLayoutTable &slt,
+				  StateMachine *machine)
 {
 	if (e->type() != Ity_I64)
 		return PointerAliasingSet();
@@ -534,7 +544,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 				   state due to phase ordering
 				   problems.  Just do something
 				   vaguely sensible. */
-				warning("%s:%s:%d: Use of initialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
+				warning("%s:%s:%d: Use of uninitialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
 				return PointerAliasingSet::nothing;
 			} else {
 				return content[iex->reg];
@@ -559,7 +569,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)e;
-		return getInitialLoadAliasing(iel->addr, sm, sl, mat, slt);
+		return getInitialLoadAliasing(iel->addr, sm, mat, slt, machine);
 	}
 	case Iex_Const:
 		return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
@@ -580,7 +590,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		if (iex->op == Iop_Add64) {
 			PointerAliasingSet res(PointerAliasingSet::nothing);
 			for (int i = 0; i < iex->nr_arguments; i++)
-				res |= pointsToSetForExpr(iex->contents[i], sm, sl, mat, slt);
+				res |= pointsToSetForExpr(iex->contents[i], sm, sl, mat, slt, machine);
 			return res;
 		}
 
@@ -702,6 +712,7 @@ public:
 	void refine(PointsToTable &ptt,
 		    MachineAliasingTable &mat,
 		    StackLayoutTable &slt,
+		    StateMachine *sm,
 		    bool *done_something,
 		    stateLabelT &labels);
 };
@@ -951,7 +962,7 @@ PointsToTable::refine(AliasTable &at,
 				newPts |= PointerAliasingSet::nonStackPointer;
 			if (e.mightLoadInitial)
 				newPts |= getInitialLoadAliasing( ((StateMachineSideEffectLoad *)effect)->addr,
-								  smse, sl, mat, slt);
+								  smse, mat, slt, sm);
 			for (auto it2 = e.stores.begin(); it2 != e.stores.end(); it2++) {
 				StateMachineSideEffecting *satisfierState = *it2;
 				StateMachineSideEffect *satisfier = satisfierState->sideEffect;
@@ -967,7 +978,8 @@ PointsToTable::refine(AliasTable &at,
 							smse,
 							sl,
 							mat,
-							slt);
+							slt,
+							sm);
 				} else {
 					abort();
 				}
@@ -1001,7 +1013,7 @@ PointsToTable::refine(AliasTable &at,
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(c->value, smse, sl, mat, slt);
+			newPts = pointsToSetForExpr(c->value, smse, sl, mat, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
@@ -1050,6 +1062,7 @@ void
 AliasTable::refine(PointsToTable &ptt,
 		   MachineAliasingTable &mat,
 		   StackLayoutTable &slt,
+		   StateMachine *sm,
 		   bool *done_something,
 		   stateLabelT &labels)
 {
@@ -1064,7 +1077,8 @@ AliasTable::refine(PointsToTable &ptt,
 				it->first,
 				sl,
 				mat,
-				slt));
+				slt,
+				sm));
 		if (debug_refine_alias_table)
 			printf("Examining alias table for state %d\n",
 			       labels[it->first]);
@@ -1077,7 +1091,8 @@ AliasTable::refine(PointsToTable &ptt,
 							it->first,
 							sl2,
 							mat,
-							slt));
+							slt,
+							sm));
 			if (storePts.overlaps(loadPts)) {
 				if (debug_refine_alias_table)
 					printf("\tPreserve l%d: %s vs %s\n",
@@ -1169,7 +1184,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 		}
 		ptt = ptt2;
 
-		at.refine(ptt, mat, stackLayout, &p, stateLabels);
+		at.refine(ptt, mat, stackLayout, sm, &p, stateLabels);
 		if (!p)
 			break;
 		if (debug_refine_alias_table) {
@@ -1196,7 +1211,8 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 					       it->first,
 					       stackLayout.forState(it->first),
 					       mat,
-					       stackLayout));
+					       stackLayout,
+					       sm));
 		if (pas.otherStackPointer || !pas.valid) {
 			allFramesLive = true;
 		} else {
