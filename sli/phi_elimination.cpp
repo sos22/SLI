@@ -172,8 +172,7 @@ struct path_set {
 	path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 		 internIRExprTable &intern,
 		 std::map<const StateMachineState *, int> &labels,
-		 std::map<unsigned, unsigned> &canonResult,
-		 const IRExprOptimisations &opt);
+		 std::map<unsigned, unsigned> &canonResult);
 	void simplify(bool is_canonical);
 	IRExpr *build_mux(StateMachineSideEffectPhi *, IRType);
 	void prettyPrint(FILE *f) const {
@@ -192,8 +191,7 @@ struct path_set {
 path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 		   internIRExprTable &intern,
 		   std::map<const StateMachineState *, int> &labels,
-		   std::map<unsigned, unsigned> &canonResult,
-		   const IRExprOptimisations &opt)
+		   std::map<unsigned, unsigned> &canonResult)
 	: nr_possible_results(phi->generations.size())
 {
 	std::set<StateMachineState *> mightReachPhi;
@@ -294,34 +292,6 @@ path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 					content.back().prettyPrint(stdout);
 				}
 				continue;
-			}
-			switch (sme->sideEffect->type) {
-			case StateMachineSideEffect::Load:
-			case StateMachineSideEffect::Store:
-				if (!opt.allPointersGood() &&
-				    !entry.second.addFalse(
-					    IRExpr_Unop(
-						    Iop_BadPtr,
-						    ((StateMachineSideEffectMemoryAccess *)sme->sideEffect)->addr),
-					    intern)) {
-					queue.pop_back();
-/**/					continue;
-				}
-				break;
-			case StateMachineSideEffect::AssertFalse: {
-				StateMachineSideEffectAssertFalse *a =
-					(StateMachineSideEffectAssertFalse *)sme->sideEffect;
-				if (!entry.second.addFalse(a->value, intern)) {
-					queue.pop_back();
-/**/					continue;
-				}
-				break;
-			}
-			case StateMachineSideEffect::Unreached:
-				queue.pop_back();
-/**/				continue;
-			default:
-				break;
 			}
 			threadAndRegister tr(threadAndRegister::invalid());
 			if (sme->sideEffect->definesRegister(tr)) {
@@ -764,7 +734,7 @@ replaceSideEffects(StateMachine *sm, std::map<StateMachineSideEffect *, StateMac
 }
 
 static StateMachine *
-phiElimination(StateMachine *sm, const IRExprOptimisations &opt, bool *done_something)
+phiElimination(StateMachine *sm, bool *done_something)
 {
 	std::map<const StateMachineState *, int> labels;
 
@@ -823,7 +793,7 @@ phiElimination(StateMachine *sm, const IRExprOptimisations &opt, bool *done_some
 				printf("Failed: unknown type\n");
 			continue;
 		}
-		path_set paths(sm, phi, intern, labels, resultCanoniser, opt);
+		path_set paths(sm, phi, intern, labels, resultCanoniser);
 		if (TIMEOUT)
 			break;
 		if (paths.content.empty()) {
@@ -875,7 +845,7 @@ phiElimination(StateMachine *sm, const IRExprOptimisations &opt, bool *done_some
 };
 
 StateMachine *
-phiElimination(StateMachine *sm, const IRExprOptimisations &opt, bool *done_something)
+phiElimination(StateMachine *sm, bool *done_something)
 {
-	return _phi_elimination::phiElimination(sm, opt, done_something);
+	return _phi_elimination::phiElimination(sm, done_something);
 }
