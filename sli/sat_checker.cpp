@@ -1336,6 +1336,39 @@ sat_enumerator::skipToSatisfying()
 			stack.clear();
 			return;
 		}
+		/* Other simplifications can sometimes mean that we
+		   end up with with things in the remainder which we
+		   know to be true or false.  e.g. if we have the
+		   initial condition !BadPtr(RBX) && !BadPtr(RDI) &&
+		   (RBX == RDI) then we might graph BadPtr(RBX) first,
+		   to get
+
+		   (true = !BadPtr(RBX), remainder = !BadPtr(RDI) && (RBX == RDI))
+
+		   Then grab RBX = RDI, to get
+
+		   (true = !BadPtr(RBX), RBX = RDI, remainder = !BadPtr(RBX))
+
+		   Make sure we handle that at least a little bit
+		   sensibly. */
+		{
+			bool redo = false;
+			for (auto it = allBooleans.begin();
+			     it != allBooleans.end();
+			     it++) {
+				if (frame.partial_sat.trueBooleans.count(*it)) {
+					redo = true;
+					frame.remainder = _sat_checker::setVariable(frame.remainder, *it, true);
+				}
+				if (frame.partial_sat.falseBooleans.count(*it)) {
+					redo = true;
+					frame.remainder = _sat_checker::setVariable(frame.remainder, *it, false);
+				}
+			}
+			if (redo)
+				continue;
+		}
+
 		assert(!allBooleans.empty());
 		IRExpr *chosenVar = NULL;
 		int chosenVarMult;
