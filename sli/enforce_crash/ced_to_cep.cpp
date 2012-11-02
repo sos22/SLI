@@ -254,6 +254,14 @@ bytecode_const8(FILE *f, unsigned char val)
 	   just zero-extend the byte to 16 bits. */
 	fprintf(f, "    %d,\n", (unsigned short)val);
 }
+static void
+bytecode_const1(FILE *f, bool val)
+{
+	if (val)
+		fprintf(f, "    1,\n");
+	else
+		fprintf(f, "    0,\n");
+}
 
 static void
 bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotMapT &slots)
@@ -263,6 +271,9 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 		IRExprConst *iec = (IRExprConst *)expr;
 		bytecode_op(f, "push_const", iec->type());
 		switch (iec->con->tag) {
+		case Ico_U1:
+			bytecode_const1(f, iec->con->Ico.U1);
+			break;
 		case Ico_U8:
 			bytecode_const8(f, iec->con->Ico.U8);
 			break;
