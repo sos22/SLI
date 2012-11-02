@@ -767,7 +767,9 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	     it != sliced_by_hb.end();
 		) {
 		it->leftOver = heuristicSimplify(it->leftOver);
-		if (!consistentOrdering(*it)) {
+		if ( (it->leftOver->tag != Iex_Const ||
+		      ((IRExprConst *)it->leftOver)->con->Ico.U1) &&
+		     !consistentOrdering(*it) ) {
 			it++;
 		} else {
 			sliced_by_hb.erase(it++);
