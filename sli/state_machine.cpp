@@ -1042,7 +1042,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 	    ((StateMachineSideEffecting *)target)->sideEffect &&
 	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic) {
 		StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
-		assert(!sideEffect || sideEffect->type != StateMachineSideEffect::EndAtomic);
+		assert(sideEffect->type != StateMachineSideEffect::EndAtomic);
 		*done_something = true;
 		return (new StateMachineSideEffecting(
 				t->dbg_origin,
@@ -1056,14 +1056,13 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 	if (sideEffect->type == StateMachineSideEffect::StartAtomic) {
 		if (target->type == StateMachineState::SideEffecting) {
 			StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
-			assert(t->sideEffect);
-			if (t->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+			if (t->sideEffect && t->sideEffect->type == StateMachineSideEffect::EndAtomic) {
 				/* Remove empty atomic section */
 				*done_something = true;
 				return t->target;
 			}
 
-			if (t->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+			if (t->sideEffect && t->sideEffect->type == StateMachineSideEffect::AssertFalse) {
 				/* Pull non-memory-accesses out of
 				 * atomic blocks whenever possible. */
 				*done_something = true;
