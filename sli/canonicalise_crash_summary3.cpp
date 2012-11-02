@@ -14,11 +14,9 @@
 #include "MachineAliasingTable.hpp"
 
 #ifndef NDEBUG
-static bool debug_subst_equalities = false;
 static bool debug_simplify_assuming_survive = false;
 static bool debug_functional_underspecification = false;
 #else
-#define debug_subst_equalities false
 #define debug_simplify_assuming_survive false
 #define debug_functional_underspecification false
 #endif
@@ -123,24 +121,7 @@ operator &(const std::set<t, comp> &a, const std::set<t, comp> &b)
 	return lazySetIntersection<t, comp>(a, b);
 }
 
-template <typename t, typename comp>
-static void
-operator |=(std::set<t, comp> &out, const std::set<t, comp> &a)
-{
-	auto it1 = out.begin();
-	for (auto it2 = a.begin(); it2 != a.end(); it2++)
-		it1 = out.insert(it1, *it2);
-}
-
-template <typename t, typename comp>
-static void
-operator -=(std::set<t, comp> &out, const std::set<t, comp> &a)
-{
-	for (auto it = a.begin(); it != a.end(); it++)
-		out.erase(*it);
-}
-
-struct _findRegisterMultiplicity : public StateMachineTransformer {
+struct _findRegisterMultiplicity : public IRExprTransformer {
 	const reg_or_free_var &r;
 	int multiplicity;
 	IRExpr *transformIex(IRExprGet *ieg) {
@@ -153,7 +134,6 @@ struct _findRegisterMultiplicity : public StateMachineTransformer {
 			multiplicity++;
 		return ieg;
 	}
-	bool rewriteNewStates() const { return false; }
 	_findRegisterMultiplicity(const reg_or_free_var &_r)
 		: r(_r), multiplicity(0)
 	{}
@@ -164,15 +144,6 @@ findRegisterMultiplicity(const IRExpr *iex, const reg_or_free_var &r)
 {
 	_findRegisterMultiplicity doit(r);
 	doit.doit(const_cast<IRExpr *>(iex));
-	return doit.multiplicity;
-}
-
-
-static int
-findRegisterMultiplicity(const CrashSummary *sm, const reg_or_free_var &r)
-{
-	_findRegisterMultiplicity doit(r);
-	transformCrashSummary(const_cast<CrashSummary *>(sm), doit);
 	return doit.multiplicity;
 }
 
@@ -555,275 +526,6 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 	enumRegisters(reducedSurvivalConstraint, targetRegisters);
 
 	return true;
-}
-
-static CrashSummary *
-substituteEqualities(CrashSummary *input,
-		     bool *progress)
-{
-	if (debug_subst_equalities) {
-		printf("Input to substituteEqualities:\n");
-		printCrashSummary(input, stdout);
-	}
-
-	IRExpr *verificationCondition = input->verificationCondition;
-	int nr_clauses;
-	IRExpr *const *clauses;
-	if (verificationCondition->tag == Iex_Associative &&
-	    ((IRExprAssociative *)verificationCondition)->op == Iop_And1) {
-		nr_clauses = ((IRExprAssociative *)verificationCondition)->nr_arguments;
-		clauses = ((IRExprAssociative *)verificationCondition)->contents;		
-	} else {
-		nr_clauses = 1;
-		clauses = &verificationCondition;
-	}
-
-	/* Now we see if there are any equalities we can use to remove
-	   some variables. */
-	reg_set_t things_we_can_remove;
-	for (int i = 0; i < nr_clauses; i++) {
-		if (clauses[i]->tag != Iex_Binop)
-			continue;
-		IRExprBinop *clause = (IRExprBinop *)clauses[i];
-		if (clause->op != Iop_CmpEQ64)
-			continue;
-		/* We assume that the expression is of the form
-		   const == x + y + z + ....  We can then eliminate
-		   R1 if one of the things on the right is R1 and
-		   R1 occurs precisely once on the RHS. */
-		reg_set_t topLevelRegisters;
-		struct {
-			bool f(IRExpr *a, reg_set_t &out) {
-				if (a->tag == Iex_Get) {
-					out.insert( ((IRExprGet *)a)->reg );
-					return true;
-				} else if (a->tag == Iex_Unop &&
-					   ((IRExprUnop *)a)->op == Iop_Neg64 &&
-					   ((IRExprUnop *)a)->arg->tag == Iex_Get) {
-					out.insert( ((IRExprGet *)((IRExprUnop *)a)->arg)->reg );
-					return true;
-				} else {
-					return false;
-				}
-			}
-			void operator()(IRExpr *a, reg_set_t &out) {
-				if (f(a, out))
-					return;
-				if (a->tag == Iex_Associative &&
-				    ((IRExprAssociative *)a)->op == Iop_Add64) {
-					IRExprAssociative *aa = (IRExprAssociative *)a;
-					for (int i = 0; i < aa->nr_arguments; i++)
-						f(aa->contents[i], out);
-				}
-			}
-		} findTopLevelRegisters;
-		findTopLevelRegisters(clause->arg1, topLevelRegisters);
-		findTopLevelRegisters(clause->arg2, topLevelRegisters);
-		for (auto it = topLevelRegisters.begin(); it != topLevelRegisters.end(); ) {
-			int multiplicity = findRegisterMultiplicity(clause, *it);
-			if (TIMEOUT)
-				return input;
-			assert(multiplicity != 0);
-			if (multiplicity != 1) {
-				topLevelRegisters.erase(it++);
-			} else {
-				it++;
-			}
-		}
-		things_we_can_remove |= topLevelRegisters;
-	}
-
-	if (debug_subst_equalities) {
-		printf("Things we can remove: {");
-		for (auto it = things_we_can_remove.begin();
-		     it != things_we_can_remove.end();
-		     it++) {
-			if (it != things_we_can_remove.begin())
-				printf(", ");
-			printf("%s", it->name());
-		}
-		printf("}\n");
-	}
-	if (things_we_can_remove.empty()) {
-		if (debug_subst_equalities)
-			printf("Cannot remove anything.\n");
-		return input;
-	}
-
-	if (debug_subst_equalities)
-		printf("Calc multiplicities:\n");
-	auto it = things_we_can_remove.begin();
-	reg_or_free_var bestReg(*it);
-	int bestMultiplicity = findRegisterMultiplicity(input, bestReg);
-	if (debug_subst_equalities)
-		printf("\t%s -> %d\n", bestReg.name(), bestMultiplicity);
-	it++;
-	while (it != things_we_can_remove.end()) {
-		int m = findRegisterMultiplicity(input, *it);
-		if (debug_subst_equalities)
-			printf("\t%s -> %d\n", it->name(), m);
-		if (m > bestMultiplicity) {
-			bestReg = *it;
-			bestMultiplicity = m;
-		}
-		it++;
-	}
-	if (debug_subst_equalities)
-		printf("Best register: %s, with mult %d\n",
-		       bestReg.name(), bestMultiplicity);
-
-	IRExpr *rewriteResult = NULL;
-	IRExpr *rewriteClause = NULL;
-	for (int i = 0; i < nr_clauses; i++) {
-		if (clauses[i]->tag != Iex_Binop ||
-		    ((IRExprBinop *)clauses[i])->op != Iop_CmpEQ64)
-			continue;
-		if (findRegisterMultiplicity(clauses[i], bestReg) != 1)
-			continue;
-		IRExprBinop *clause = (IRExprBinop *)clauses[i];
-		int nr_left_terms;
-		int nr_right_terms;
-		IRExpr **left_terms;
-		IRExpr **right_terms;
-		if (clause->arg1->tag == Iex_Associative &&
-		    ((IRExprAssociative *)clause->arg1)->op == Iop_Add64) {
-			nr_left_terms = ((IRExprAssociative *)clause->arg1)->nr_arguments;
-			left_terms = ((IRExprAssociative *)clause->arg1)->contents;
-		} else {
-			nr_left_terms = 1;
-			left_terms = &clause->arg1;
-		}
-		if (clause->arg2->tag == Iex_Associative &&
-		    ((IRExprAssociative *)clause->arg2)->op == Iop_Add64) {
-			nr_right_terms = ((IRExprAssociative *)clause->arg2)->nr_arguments;
-			right_terms = ((IRExprAssociative *)clause->arg2)->contents;
-		} else {
-			nr_right_terms = 1;
-			right_terms = &clause->arg2;
-		}
-
-		bool targetIsOnLeft = false;
-		bool targetIsOnRight = false;
-		for (int i = 0; i < nr_left_terms; i++) {
-			if (left_terms[i] == bestReg) {
-				assert(!targetIsOnLeft);
-				targetIsOnLeft = true;
-			}
-			if (left_terms[i]->tag == Iex_Unop &&
-			    ((IRExprUnop *)left_terms[i])->op == Iop_Neg64 &&
-			    ((IRExprUnop *)left_terms[i])->arg == bestReg) {
-				assert(!targetIsOnRight);
-				targetIsOnRight = true;
-			}
-		}
-		for (int i = 0; i < nr_right_terms; i++) {
-			if (right_terms[i] == bestReg) {
-				assert(!targetIsOnRight);
-				targetIsOnRight = true;
-			}
-			if (right_terms[i]->tag == Iex_Unop &&
-			    ((IRExprUnop *)right_terms[i])->op == Iop_Neg64 &&
-			    ((IRExprUnop *)right_terms[i])->arg == bestReg) {
-				assert(!targetIsOnLeft);
-				targetIsOnLeft = true;
-			}
-		}
-		if (!targetIsOnLeft && !targetIsOnRight)
-			continue;
-		assert(!targetIsOnLeft || !targetIsOnRight);
-
-		rewriteClause = clause;
-		IRExprAssociative *res = IRExpr_Associative(nr_left_terms + nr_right_terms, Iop_Add64);
-		for (int i = 0; i < nr_left_terms; i++) {
-			if (left_terms[i] == bestReg)
-				continue;
-			if (left_terms[i]->tag == Iex_Unop &&
-			    ((IRExprUnop *)left_terms[i])->op == Iop_Neg64 &&
-			    ((IRExprUnop *)left_terms[i])->arg == bestReg)
-				continue;
-			res->contents[res->nr_arguments++] =
-				targetIsOnLeft ?
-				IRExpr_Unop(Iop_Neg64, left_terms[i]) :
-				left_terms[i];
-		}
-		for (int i = 0; i < nr_right_terms; i++) {
-			if (right_terms[i] == bestReg)
-				continue;
-			if (right_terms[i]->tag == Iex_Unop &&
-			    ((IRExprUnop *)right_terms[i])->op == Iop_Neg64 &&
-			    ((IRExprUnop *)right_terms[i])->arg == bestReg)
-				continue;
-			res->contents[res->nr_arguments++] =
-				!targetIsOnLeft ?
-				IRExpr_Unop(Iop_Neg64, right_terms[i]) :
-				right_terms[i];
-		}
-
-		rewriteResult = res;
-		break;
-	}
-	if (TIMEOUT)
-		return input;
-
-	assert(rewriteResult != NULL);
-	assert(rewriteClause != NULL);
-	if (debug_subst_equalities) {
-		printf("Rewrite clause: ");
-		ppIRExpr(rewriteClause, stdout);
-		printf("\n");
-		printf("Rewrite result: ");
-		ppIRExpr(rewriteResult, stdout);
-		printf("\n");
-	}
-	rewriteResult = simplifyIRExpr(rewriteResult, AllowableOptimisations::defaultOptimisations);
-
-	if (debug_subst_equalities) {
-		printf("Rewrite result after optimisation: ");
-		ppIRExpr(rewriteResult, stdout);
-		printf("\n");
-	}
-	struct _ : public StateMachineTransformer {
-		IRExpr *rewriteClause;
-		IRExpr *rewriteResult;
-		const reg_or_free_var &rewriteReg;
-		IRExpr *transformIex(IRExprGet *ieg) {
-			if (ieg == rewriteReg)
-				return coerceTypes(ieg->ty, rewriteResult);
-			return ieg;
-		}
-		IRExpr *transformIex(IRExprFreeVariable *ieg) {
-			if (ieg == rewriteReg)
-				return coerceTypes(ieg->ty, rewriteResult);
-			return ieg;
-		}
-		IRExpr *transformIRExpr(IRExpr *e, bool *done_something)
-		{
-			if (e == rewriteClause) {
-				*done_something = true;
-				return IRExpr_Const(IRConst_U1(1));
-			}
-			return StateMachineTransformer::transformIRExpr(e, done_something);
-		}
-		bool rewriteNewStates() const { return false; }
-		_(IRExpr *_rewriteClause,
-		  IRExpr *_rewriteResult,
-		  const reg_or_free_var &_rewriteReg)
-			: rewriteClause(_rewriteClause),
-			  rewriteResult(_rewriteResult),
-			  rewriteReg(_rewriteReg)
-		{}
-	} doit(rewriteClause, rewriteResult, bestReg);
-
-	input = transformCrashSummary(input, doit, progress);
-	input->verificationCondition = simplifyIRExpr(
-		input->verificationCondition,
-		AllowableOptimisations::defaultOptimisations);
-	if (debug_subst_equalities) {
-		printf("Result of rewrite:\n");
-		printCrashSummary(input, stdout);
-		printf("\n");
-	}
-	return input;
 }
 
 static void
@@ -1363,15 +1065,6 @@ nonFunctionalSimplifications(
 	while (!TIMEOUT && progress) {
 		progress = false;
 		bool p;
-		p = true;
-		while (!TIMEOUT && p) {
-			p = false;
-			summary =
-				substituteEqualities(
-					summary,
-					&p);
-			progress |= p;
-		}
 		p = true;
 		while (!TIMEOUT && p) {
 			p = false;
