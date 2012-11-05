@@ -124,8 +124,6 @@ struct {
 #endif
 
 struct low_level_state {
-	int refcount; /* HLS holds a reference. */
-
 	cfg_label_t cfg_node;
 
 	int nr_simslots;
@@ -276,7 +274,6 @@ sanity_check_low_level_state(const struct low_level_state *lls, int expected_pre
 {
 	int i;
 	int present;
-	assert(lls->refcount > 0);
 	assert(lls->hls);
 	if (lls->bound_lls && lls->bound_lls != BOUND_LLS_EXITED) {
 		assert(lls->bound_lls->bound_lls == lls);
@@ -414,7 +411,6 @@ static struct low_level_state *
 new_low_level_state(struct high_level_state *hls, int nr_simslots)
 {
 	struct low_level_state *lls = calloc(sizeof(struct low_level_state) + nr_simslots * sizeof(lls->simslots[0]), 1);
-	lls->refcount = 1;
 	lls->nr_simslots = nr_simslots;
 	lls->hls = hls;
 	sanity_check_low_level_state(lls, 0);
@@ -657,9 +653,7 @@ release_big_lock(void)
 static void
 release_lls(struct low_level_state *lls)
 {
-	lls->refcount--;
-	if (!lls->refcount)
-		free(lls);
+	free(lls);
 }
 
 static struct per_thread_state *
