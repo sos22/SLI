@@ -1,4 +1,4 @@
-all: bug1.so bug2.so bug3.so
+all: bug1.interp.so harness
 
 %.so: ../../ced_to_patch %.exe %.ced ../../sli/enforce_crash/patch_core.c
 	../../ced_to_patch $*.exe $*.ced ../../ $@
@@ -78,6 +78,9 @@ bug9ab.cep.c: bug9ab.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
 
 %.exe: %.c
 	gcc -O -pthread -Wall -g $< -o $@
+
+harness: harness.c
+	gcc -g -Wall $< -o $@
 
 clean:
 	rm -f *.exe *.idx *.canon *.types *.bcg *~ static.db timings.txt generated_patch.c \
