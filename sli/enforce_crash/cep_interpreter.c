@@ -37,6 +37,8 @@
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define MAX_DELAY_US (1000000)
 
+static unsigned long prng_state = 0xe6b16c0386053e31;
+
 extern void clone(void);
 static void (*__GI__exit)(int res);
 void arch_prctl(int, unsigned long);
@@ -1718,6 +1720,22 @@ delay_bias(const struct cfg_instr *instr, int is_tx)
 	return res;
 }
 
+static unsigned
+gen_random(void)
+{
+	/* The MMIX PRNG */
+	unsigned long next_state = prng_state * 6364136223846793005ul + 1442695040888963407ul;
+	unsigned res = next_state >> 33;
+	prng_state = next_state;
+	return res;
+}
+
+static void
+random_delay(void)
+{
+	usleep(gen_random() % MAX_DELAY_US);
+}
+
 /* This is quite fiddly.  We have a bunch of low-level threads, some
  * of which want to perform message receive operations.  The threads
  * which don't want to receive anything are unchanged, so ignore them
@@ -1893,7 +1911,7 @@ receive_messages(struct high_level_state *hls)
 		debug("Delay for RX\n");
 		EVENT(rx_delay);
 		release_big_lock();
-		usleep(random() % MAX_DELAY_US);
+		random_delay();
 		acquire_big_lock();
 		debug("Back from RX delay\n");
 	} else if (need_futex) {
@@ -2298,7 +2316,7 @@ send_messages(struct high_level_state *hls)
 		EVENT(tx_delay);
 		debug("Delay for TX.\n");
 		release_big_lock();
-		usleep(random() % MAX_DELAY_US);
+		random_delay();
 		acquire_big_lock();
 		debug("Back from TX delay.\n");
 	} else if (need_futex) {
@@ -2937,6 +2955,19 @@ activate(void)
 		printf("This is a patch for %s, but we were invoked on %s; disabling.\n",
 		       program_to_patch + y, buf + x);
 		return;
+	}
+
+	if (getenv("SOS22_ENFORCER_RANDOMISE")) {
+		struct timeval t;
+		/* Stepping the PRNG while we're doing this gives
+		 * marginally better mixing. */
+		prng_state ^= getpid();
+		gen_random();
+		gettimeofday(&t, NULL);
+		prng_state ^= t.tv_sec;
+		gen_random();
+		prng_state ^= t.tv_usec;
+		gen_random();
 	}
 
 	printf("Patching %s\n", buf);
