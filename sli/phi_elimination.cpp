@@ -83,6 +83,7 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 			}
 		}
 	} addPath;
+#warning this would work better with a consistent advance structure rather than a fixed point iteration.
 	addPath.pending = &pending;
 	addPath.scope = scope;
 	while (!pending.empty()) {
@@ -297,6 +298,7 @@ build_selection_bdd(StateMachine *sm,
 			for (auto it = pred.begin(); !failed && it != pred.end(); it++) {
 				bbdd *condition = bbdd::assume(&scope, cdg.domOf(*it), assumption);
 				intbdd *res = intbdd::assume(iscope, m[*it], assumption);
+#warning Should be more cunning if the predecessor state is a bifurcate
 				if (enabling.count(condition) && enabling[condition] != res) {
 					failed = true;
 				} else {

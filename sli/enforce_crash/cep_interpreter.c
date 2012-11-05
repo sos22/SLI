@@ -251,6 +251,7 @@ futex(int *ptr, int op, int val, struct timespec *timeout)
 	syscall(__NR_futex, (unsigned long)ptr, (unsigned long)op, (unsigned long)val, (unsigned long)timeout);
 }
 
+#ifndef NDEBUG
 static int
 gettid(void)
 {
@@ -268,6 +269,7 @@ now(void)
 		start = res;
 	return res - start;
 }
+#endif
 
 static void
 sanity_check_low_level_state(const struct low_level_state *lls, int expected_present)
@@ -582,6 +584,17 @@ cmpxchg(int *what, int oldval, int newval)
 	return seen;
 }
 
+static int
+xchg(int *what, int newval)
+{
+	int seen;
+	asm ("xchg %0, %1\n"
+	     : "=r" (seen), "=m" (*what)
+	     : "0" (newval)
+	     : "memory");
+	return seen;
+}
+
 /* Note that this is non-atomic!  That's okay, because all of the
  * callers are under the big lock. */
 static int
@@ -619,8 +632,28 @@ queue_wake(int *ptr)
 static void
 acquire_big_lock(void)
 {
-	while (cmpxchg(&big_lock, 0, 1) != 0)
-		;
+	int val;
+	while (1) {
+		val = big_lock;
+		switch (val) {
+		case 0:
+			val = cmpxchg(&big_lock, 0, 1);
+			if (val == 0)
+				goto got_lock;
+			continue;
+		case 1:
+			val = cmpxchg(&big_lock, 1, 2);
+			if (val != 1)
+				continue;
+			/* fall through */
+		case 2:
+			futex(&big_lock, FUTEX_WAIT, 2, NULL);
+			break;
+		default:
+			abort();
+		}
+	}
+got_lock:
 #ifndef NDEBUG
 	assert(big_lock_owned_by == 0);
 	big_lock_owned_by = gettid();
@@ -635,6 +668,7 @@ release_big_lock(void)
 	 * lock, and so there's no point in having lots of people wake
 	 * up just to contend for the lock. */
 	int *wake = NULL;
+	int old_lock;
 	if (nr_queued_wakes != 0) {
 		nr_queued_wakes--;
 		wake = queued_wakes[nr_queued_wakes];
@@ -643,10 +677,15 @@ release_big_lock(void)
 	assert(big_lock_owned_by == gettid());
 	big_lock_owned_by = 0;
 #endif
-	store_release(&big_lock, 0);
 	if (wake) {
+		store_release(&big_lock, 0);
 		debug("Run queued wake on %p\n", wake);
 		futex(wake, FUTEX_WAKE, 1, NULL);
+	} else {
+		old_lock = xchg(&big_lock, 0);
+		assert(old_lock == 1 || old_lock == 2);
+		if (old_lock == 2)
+			futex(&big_lock, FUTEX_WAKE, 1, NULL);
 	}
 }
 
