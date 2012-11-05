@@ -1261,7 +1261,7 @@ exit_emulator_read(enum x86_segment seg,
 	default:
 		abort();
 	}
-	memcpy(p_data, (const void *)offset, bytes);
+	memcpy(p_data, (const void *)offset + base, bytes);
 	return X86EMUL_OKAY;
 }
 
