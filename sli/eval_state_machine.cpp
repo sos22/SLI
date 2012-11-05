@@ -1,3 +1,4 @@
+#warning It'd arguably make sense to strip out the effects we don't use before we start (e.g. PointerAliasing and StackLayout), because that might allow other simplifications.
 #include "sli.h"
 #include "state_machine.hpp"
 #include "oracle.hpp"

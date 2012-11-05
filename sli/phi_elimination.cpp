@@ -8,191 +8,156 @@
 #include "sli.h"
 #include "state_machine.hpp"
 #include "offline_analysis.hpp"
-#include "sat_checker.hpp"
-#include "control_domination_map.hpp"
-#include "allowable_optimisations.hpp"
+#include "bdd.hpp"
 
 #ifndef NDEBUG
 static bool debug_build_paths = false;
+static bool debug_control_dependence = false;
 static bool debug_toplevel = false;
-static bool debug_simplify = false;
-static bool debug_build_mux = false;
 #else
 #define debug_build_paths false
+#define debug_control_dependence false
 #define debug_toplevel false
-#define debug_simplify false
-#define debug_build_mux false
 #endif
-#define any_debug (debug_build_paths || debug_toplevel || debug_simplify || debug_build_mux)
 
 namespace _phi_elimination {
 
-struct path {
-	std::set<IRExpr *> trueExprs;
-	std::set<IRExpr *> falseExprs;
-	int result; /* an index into the phi's input vector, or -1 if
-		     * we don't have one yet. */
-	path()
-		: result(-1)
-	{}
-	void prettyPrint(FILE *f) const {
-		if (!trueExprs.empty()) {
-			fprintf(f, "True: {");
-			for (auto it = trueExprs.begin();
-			     it != trueExprs.end();
-			     it++) {
-				if (it != trueExprs.begin())
-					fprintf(f, ", ");
-				ppIRExpr(*it, f);
-			}
-			fprintf(f, "}\n");
-		}
-		if (!falseExprs.empty()) {
-			fprintf(f, "False: {");
-			for (auto it = falseExprs.begin();
-			     it != falseExprs.end();
-			     it++) {
-				if (it != falseExprs.begin())
-					fprintf(f, ", ");
-				ppIRExpr(*it, f);
-			}
-			fprintf(f, "}\n");
-		}
-		fprintf(f, "Result: %d\n", result);
+class predecessor_map {
+	std::map<StateMachineState *, std::set<StateMachineState *> > content;
+public:
+	predecessor_map(StateMachine *sm);
+	void getPredecessors(StateMachineState *s, std::vector<StateMachineState *> &out) const {
+		auto i = content.find(s);
+		assert(i != content.end());
+		out.insert(out.end(), i->second.begin(), i->second.end());
 	}
-
-	/* Return true on success or false if we find a
-	 * contradiction. */
-	bool addTrue(IRExpr *e, internIRExprTable &table);
-	bool addFalse(IRExpr *e, internIRExprTable &table);
 };
 
-bool
-path::addTrue(IRExpr *e, internIRExprTable &intern)
+predecessor_map::predecessor_map(StateMachine *sm)
 {
-	e = internIRExpr(e, intern);
-	if (trueExprs.count(e))
-		return true;
-	if (falseExprs.count(e))
-		return false;
-	if (e->tag == Iex_Unop && ((IRExprUnop *)e)->op == Iop_Not1)
-		return addFalse(((IRExprUnop *)e)->arg, intern);
-	if (e->tag == Iex_Associative &&
-	    ((IRExprAssociative *)e)->op == Iop_And1) {
-		IRExprAssociative *a = (IRExprAssociative *)e;
-		for (int i = 0; i < a->nr_arguments; i++)
-			if (!addTrue(a->contents[i], intern))
-				return false;
-		return true;
+	std::set<StateMachineState *> s;
+	enumStates(sm, &s);
+	for (auto it = s.begin(); it != s.end(); it++) {
+		std::vector<StateMachineState *> ss;
+		(*it)->targets(ss);
+		for (auto it2 = ss.begin(); it2 != ss.end(); it2++)
+			content[*it2].insert(*it);
 	}
-	if (e->tag == Iex_EntryPoint) {
-		IRExprEntryPoint *iee = (IRExprEntryPoint *)e;
-		for (auto it = trueExprs.begin(); it != trueExprs.end(); it++) {
-			if ( (*it)->tag != Iex_EntryPoint )
-				continue;
-			IRExprEntryPoint *other = (IRExprEntryPoint *)*it;
-			if (other->thread == iee->thread) {
-				assert(other->label != iee->label);
-				return false;
-			}
-		}
-	}
-	if (e->tag == Iex_ControlFlow) {
-		IRExprControlFlow *iec = (IRExprControlFlow *)e;
-		for (auto it = trueExprs.begin(); it != trueExprs.end(); it++) {
-			if ( (*it)->tag != Iex_ControlFlow )
-				continue;
-			IRExprControlFlow *other = (IRExprControlFlow *)*it;
-			if (other->thread == iec->thread &&
-			    other->cfg1 == iec->cfg1) {
-				assert(other->cfg2 != iec->cfg2);
-				return false;
-			}
-		}
-	}
-
-	trueExprs.insert(e);
-	return true;
 }
 
-bool
-path::addFalse(IRExpr *e, internIRExprTable &intern)
-{
-	e = internIRExpr(e, intern);
-	if (falseExprs.count(e))
-		return true;
-	if (trueExprs.count(e))
-		return false;
-	if (e->tag == Iex_Unop && ((IRExprUnop *)e)->op == Iop_Not1)
-		return addTrue(((IRExprUnop *)e)->arg, intern);
-	if (e->tag == Iex_Associative &&
-	    ((IRExprAssociative *)e)->op == Iop_Or1) {
-		IRExprAssociative *a = (IRExprAssociative *)e;
-		for (int i = 0; i < a->nr_arguments; i++)
-			if (!addFalse(a->contents[i], intern))
-				return false;
-		return true;
+class control_dependence_graph {
+	std::map<StateMachineState *, bbdd *> content;
+public:
+	control_dependence_graph(StateMachine *sm, bbdd_scope *scope,
+				 std::map<const StateMachineState *, int> &labels);
+	bbdd *domOf(StateMachineState *s) const {
+		auto i = content.find(s);
+		assert(i != content.end());
+		return i->second;
 	}
-	if (e->tag == Iex_EntryPoint) {
-		IRExprEntryPoint *iee = (IRExprEntryPoint *)e;
-		for (auto it = trueExprs.begin(); it != trueExprs.end(); it++) {
-			if ( (*it)->tag != Iex_EntryPoint )
-				continue;
-			IRExprEntryPoint *other = (IRExprEntryPoint *)*it;
-			if (other->thread == iee->thread) {
-				assert(other->label != iee->label);
-				return true;
-			}
-		}
-	}
-	if (e->tag == Iex_ControlFlow) {
-		IRExprControlFlow *iec = (IRExprControlFlow *)e;
-		for (auto it = trueExprs.begin(); it != trueExprs.end(); it++) {
-			if ( (*it)->tag != Iex_ControlFlow )
-				continue;
-			IRExprControlFlow *other = (IRExprControlFlow *)*it;
-			if (other->thread == iec->thread &&
-			    other->cfg1 == iec->cfg1) {
-				assert(other->cfg2 != iec->cfg2);
-				return true;
-			}
-		}
-	}
-
-	falseExprs.insert(e);
-	return true;
-}
-
-struct path_set {
-	path_set()
-		: nr_possible_results(-1)
-	{}
-	std::vector<path> content;
-	int nr_possible_results;
-	path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
-		 internIRExprTable &intern,
-		 std::map<const StateMachineState *, int> &labels,
-		 std::map<unsigned, unsigned> &canonResult);
-	void simplify(bool is_canonical);
-	IRExpr *build_mux(StateMachineSideEffectPhi *, IRType);
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "Path set:\n");
-		for (auto it = content.begin(); it != content.end(); it++) {
-			if (it != content.begin())
-				fprintf(f, "--------------------------\n");
-			it->prettyPrint(f);
-		}
-	}
-	void case_split(IRExpr *on, path_set *true_out, path_set *false_out);
-	bool canonicalise(internIRExprTable &intern);
-	double entropy() const;
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const;
 };
 
-path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
-		   internIRExprTable &intern,
-		   std::map<const StateMachineState *, int> &labels,
-		   std::map<unsigned, unsigned> &canonResult)
-	: nr_possible_results(phi->generations.size())
+control_dependence_graph::control_dependence_graph(StateMachine *sm,
+						   bbdd_scope *scope,
+						   std::map<const StateMachineState *, int> &labels)
+{
+	content[sm->root] = bbdd::cnst(true);
+	std::vector<StateMachineState *> pending;
+	pending.push_back(sm->root);
+
+	struct {
+		std::vector<StateMachineState *> *pending;
+		bbdd_scope *scope;
+		void operator()(bbdd *&slot,
+				bbdd *newPath,
+				StateMachineState *owner) {
+			if (slot) {
+				bbdd *n = bbdd::Or(scope, slot, newPath);
+				if (n != slot)
+					pending->push_back(owner);
+				slot = n;
+			} else {
+				slot = newPath;
+				pending->push_back(owner);
+			}
+		}
+	} addPath;
+	addPath.pending = &pending;
+	addPath.scope = scope;
+	while (!pending.empty()) {
+		StateMachineState *s = pending.back();
+		pending.pop_back();
+		bbdd *dom = content[s];
+		assert(dom);
+		if (debug_control_dependence) {
+			printf("Redo control dependence of state l%d; current = \n", labels[s]);
+			dom->prettyPrint(stdout);
+		}
+		switch (s->type) {
+		case StateMachineState::Bifurcate: {
+			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
+			bbdd *cond = bbdd::var(scope, smb->condition);
+			bbdd *trueCond = bbdd::And(scope, dom, cond);
+			bbdd *falseCond = bbdd::And(scope, dom, bbdd::invert(scope, cond));
+			addPath(content[smb->trueTarget],
+				trueCond,
+				smb->trueTarget);
+			addPath(content[smb->falseTarget],
+				falseCond,
+				smb->falseTarget);
+			if (debug_control_dependence) {
+				printf("Convert %s to BBDD ->\n", nameIRExpr(smb->condition));
+				cond->prettyPrint(stdout);
+				printf("Combine with dom constraint\n");
+				dom->prettyPrint(stdout);
+				printf("-> true\n");
+				trueCond->prettyPrint(stdout);
+				printf("-> false\n");
+				falseCond->prettyPrint(stdout);
+
+				printf("Update l%d to:\n", labels[smb->trueTarget]);
+				content[smb->trueTarget]->prettyPrint(stdout);
+				printf("Update l%d to:\n", labels[smb->falseTarget]);
+				content[smb->falseTarget]->prettyPrint(stdout);
+			}
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *sme = (StateMachineSideEffecting *)s;
+			addPath(content[sme->target],
+				dom,
+				sme->target);
+			if (debug_control_dependence) {
+				printf("Update l%d to:\n", labels[sme->target]);
+				content[sme->target]->prettyPrint(stdout);
+			}
+			break;
+		}
+		case StateMachineState::Crash:
+		case StateMachineState::NoCrash:
+		case StateMachineState::Unreached:
+			break;
+		}
+	}
+}
+
+void
+control_dependence_graph::prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
+{
+	fprintf(f, "CDG:\n");
+	for (auto it = content.begin(); it != content.end(); it++) {
+		fprintf(f, "l%d:\n", labels[it->first]);
+		it->second->prettyPrint(f);
+	}
+}
+
+static intbdd *
+build_selection_bdd(StateMachine *sm,
+		    StateMachineSideEffectPhi *phi,
+		    std::map<const StateMachineState *, int> &labels,
+		    std::map<unsigned, unsigned> &canonResult,
+		    intbdd_scope *iscope)
 {
 	std::set<StateMachineState *> mightReachPhi;
 	{
@@ -234,481 +199,179 @@ path_set::path_set(StateMachine *sm, StateMachineSideEffectPhi *phi,
 		printf("}\n");
 	}
 
-	typedef std::pair<StateMachineState *, path> q_entry;
-	std::vector<q_entry> queue;
-	queue.push_back(q_entry(sm->root, path()));
+	std::set<StateMachineSideEffecting *> sideEffecting;
+	enumStates(sm, &sideEffecting);
 
-	/* Do we have a gen -1 entry in the input set? */
-	for (unsigned x = 0; x != phi->generations.size(); x++) {
+	bbdd_scope scope;
+	predecessor_map pm(sm);
+	control_dependence_graph cdg(sm, &scope, labels);
+
+	if (debug_build_paths)
+		cdg.prettyPrint(stdout, labels);
+
+	/* Map from states to an intbdd which provides the result if
+	   we issue the phi immediately after that state. */
+	std::map<StateMachineState *, intbdd *> m;
+
+	/* States whose success entries in @m might need updating */
+	std::queue<StateMachineState *> toUpdate;
+
+	/* Set up initial map */
+	for (unsigned x = 0; x < phi->generations.size(); x++) {
 		const threadAndRegister &tr(phi->generations[x].first);
 		if (tr.isReg() && tr.gen() == (unsigned)-1 ) {
-			/* Yes; that'll be the result at the root and
-			   any other path which doesn't assign to one
-			   of the input registers. */
-			queue.back().second.result = canonResult[x];
+			/* gen -1; that'll be the result at the root
+			   and any other path which doesn't assign to
+			   one of the input registers. */
+			m[sm->root] = intbdd::cnst(iscope, canonResult[x]);
+			toUpdate.push(sm->root);
 			break;
-		}
-	}
-
-	while (!queue.empty()) {
-		queue.reserve(queue.size() + 1);
-		q_entry &entry(queue.back());
-		StateMachineState *s = entry.first;
-		if (debug_build_paths) {
-			printf("Build path discovers a path to l%d\n", labels[s]);
-			entry.second.prettyPrint(stdout);
-		}
-		if (!mightReachPhi.count(s)) {
-			queue.pop_back();
-			continue;
-		}
-		if (s->type == StateMachineState::Bifurcate) {
-			auto smb = (StateMachineBifurcate *)s;
-			IRExpr *cond = internIRExpr(smb->condition, intern);
-			queue.push_back(entry);
-			/* Continued use of @entry is valid because of
-			   queue.reserve() at top of loop. */
-			if (entry.second.addTrue(cond, intern)) {
-				entry.first = smb->trueTarget;
-			} else {
-				entry = queue.back();
-				queue.pop_back();
-			}
-			if (queue.back().second.addFalse(cond, intern)) {
-				queue.back().first = smb->falseTarget;
-			} else {
-				queue.pop_back();
-			}
-		} else if (s->type == StateMachineState::SideEffecting) {
-			auto sme = (StateMachineSideEffecting *)s;
-			entry.first = sme->target;
-			if (!sme->sideEffect)
-				continue;
-			if (sme->sideEffect == phi) {
-				content.push_back(entry.second);
-				queue.pop_back();
-				if (debug_build_paths) {
-					printf("Found a path to l%d:\n", labels[s]);
-					content.back().prettyPrint(stdout);
-				}
-				continue;
-			}
-			threadAndRegister tr(threadAndRegister::invalid());
-			if (sme->sideEffect->definesRegister(tr)) {
-				for (unsigned x = 0; x < phi->generations.size(); x++) {
-					if (phi->generations[x].first == tr) {
-						entry.second.result = canonResult[x];
-						break;
-					}
-				}
-			}
 		} else {
-			assert(s->isTerminal());
-			if (debug_build_paths) {
-				printf("Found a path which doesn't reach the phi:\n");
-				queue.back().second.prettyPrint(stdout);
-			}
-			queue.pop_back();
-		}
-	}
-}
-
-void
-path_set::simplify(bool is_canonical)
-{
-	if (content.empty())
-		return;
-
-	bool progress;
-top:
-	if (TIMEOUT)
-		return;
-
-	progress = false;
-
-	/* We're only interested in expressions which are sometimes
-	   true and sometimes false.  If the expressions are in
-	   canonical form then we can treat not-present as either true
-	   or false, but if it's non-canonical we have to treat it as
-	   neither. */
-	std::set<IRExpr *> alwaysTrue;
-	std::set<IRExpr *> alwaysFalse;
-	if (!is_canonical) {
-		alwaysTrue = content.begin()->trueExprs;
-		alwaysFalse = content.begin()->falseExprs;
-		for (unsigned x = 1; x < content.size(); x++) {
-			path &p(content[x]);
-			alwaysTrue &= p.trueExprs;
-			alwaysFalse &= p.falseExprs;
-		}
-	} else {
-		std::set<IRExpr *> allExprs;
-		for (auto it = content.begin(); it != content.end(); it++) {
-			for (auto it2 = it->trueExprs.begin(); it2 != it->trueExprs.end(); it2++)
-				allExprs.insert(*it2);
-			for (auto it2 = it->falseExprs.begin(); it2 != it->falseExprs.end(); it2++)
-				allExprs.insert(*it2);
-		}
-		alwaysTrue = allExprs;
-		alwaysFalse = allExprs;
-		for (unsigned x = 0; x < content.size(); x++) {
-			path &p(content[x]);
-			for (auto it = p.trueExprs.begin(); it != p.trueExprs.end(); it++)
-				alwaysFalse.erase(*it);
-			for (auto it = p.falseExprs.begin(); it != p.falseExprs.end(); it++)
-				alwaysTrue.erase(*it);
-		}
-	}
-	if (!alwaysTrue.empty() || !alwaysFalse.empty()) {
-		if (debug_simplify) {
-			printf("Always true: {");
-			for (auto it = alwaysTrue.begin();
-			     it != alwaysTrue.end();
-			     it++) {
-				if (it != alwaysTrue.begin())
-					printf(", ");
-				ppIRExpr(*it, stdout);
-			}
-			printf("}\nAlways false: {");
-			for (auto it = alwaysFalse.begin();
-			     it != alwaysFalse.end();
-			     it++) {
-				if (it != alwaysFalse.begin())
-					printf(", ");
-				ppIRExpr(*it, stdout);
-			}
-			printf("}\n");
-		}
-		for (auto it = content.begin(); it != content.end(); it++) {
-			for (auto it2 = alwaysTrue.begin(); it2 != alwaysTrue.end(); it2++)
-				progress |= it->trueExprs.erase(*it2);
-			for (auto it2 = alwaysFalse.begin(); it2 != alwaysFalse.end(); it2++)
-				progress |= it->falseExprs.erase(*it2);
-		}
-		if (debug_simplify) {
-			printf("After elimination of always terms:\n");
-			prettyPrint(stdout);
-		}
-	}
-
-	/* If a term T only appears in paths whose result is N then it
-	   doesn't help us very much. */
-	std::map<IRExpr *, std::set<int> > appearsWithResult;
-	for (auto it = content.begin(); it != content.end(); it++) {
-		for (auto it2 = it->trueExprs.begin(); it2 != it->trueExprs.end(); it2++)
-			appearsWithResult[*it2].insert(it->result);
-		for (auto it2 = it->falseExprs.begin(); it2 != it->falseExprs.end(); it2++)
-			appearsWithResult[*it2].insert(it->result);
-	}
-	std::set<IRExpr *> constantResult;
-	for (auto it = appearsWithResult.begin(); it != appearsWithResult.end(); it++)
-		if (it->second.size() == 1)
-			constantResult.insert(it->first);
-	if (!constantResult.empty()) {
-		if (debug_simplify) {
-			printf("Constant result: {");
-			for (auto it = constantResult.begin();
-			     it != constantResult.end();
-			     it++) {
-				if (it != constantResult.begin())
-					printf(", ");
-				ppIRExpr(*it, stdout);
-			}
-			printf("}\n");
-		}
-		for (auto it = content.begin(); it != content.end(); it++) {
-			for (auto it2 = alwaysTrue.begin(); it2 != alwaysTrue.end(); it2++)
-				progress |= it->trueExprs.erase(*it2);
-			for (auto it2 = alwaysFalse.begin(); it2 != alwaysFalse.end(); it2++)
-				progress |= it->falseExprs.erase(*it2);
-		}
-		if (debug_simplify) {
-			printf("After elimination of constant-result terms:\n");
-			prettyPrint(stdout);
-		}
-	}
-
-	/* Don't care about any terms T such that for every path P
-	   where T is true there is another path P' which is identical
-	   to P except for flipping the sense of T. */
-	for (unsigned it1 = 0; !TIMEOUT && it1 < content.size(); it1++) {
-		const path &path1(content[it1]);
-		for (unsigned it2 = it1 + 1; it2 < content.size(); it2++) {
-			const path &path2(content[it2]);
-			if (path2.result != path1.result)
-				continue;
-			/* Eliminate dupes while we're here */
-			if (path1.falseExprs.size() == path2.falseExprs.size() &&
-			    path1.trueExprs == path2.trueExprs &&
-			    path1.falseExprs == path2.falseExprs) {
-				if (debug_simplify) {
-					printf("Eliminate dupe:\n");
-					path1.prettyPrint(stdout);
+			/* Non-gen -1; need to plop this in at all of
+			   the places which define this register. */
+			bool found = false;
+			for (auto it2 = sideEffecting.begin();
+			     it2 != sideEffecting.end();
+			     it2++) {
+				StateMachineSideEffect *sr = (*it2)->sideEffect;
+				if (!sr)
+					continue;
+				threadAndRegister def(threadAndRegister::invalid());
+				if (sr->definesRegister(def) && def == tr) {
+					assert(!m.count(*it2));
+					m[*it2] = intbdd::cnst(iscope, canonResult[x]);
+					toUpdate.push(*it2);
+					found = true;
 				}
-				content.erase(content.begin() + it2);
-				it2--;
-				progress = true;
-				continue;
 			}
+			assert(found);
+		}
+	}
 
-			/* Do a quick check on size first, since that's fast. */
-			bool trueToFalse;
-			if (path2.trueExprs.size() == path1.trueExprs.size() + 1 &&
-			    path2.falseExprs.size() == path1.falseExprs.size() - 1)
-				trueToFalse = false;
-			else if (path2.trueExprs.size() == path1.trueExprs.size() - 1 &&
-				   path2.falseExprs.size() == path1.falseExprs.size() + 1)
-				trueToFalse = true;
-			else
+	if (debug_build_paths) {
+		printf("Initial map:\n");
+		for (auto it = m.begin(); it != m.end(); it++) {
+			printf("l%d: ", labels[it->first]);
+			it->second->prettyPrint(stdout);
+		}
+	}
+
+	/* Expand the map to get the final result. */
+	while (!toUpdate.empty()) {
+		StateMachineState *s = toUpdate.front();
+		toUpdate.pop();
+		assert(m.count(s));
+
+		if (debug_build_paths) {
+			printf("Extend from l%d\n", labels[s]);
+			m[s]->prettyPrint(stdout);
+		}
+
+		std::vector<StateMachineState *> ss;
+		s->targets(ss);
+		for (auto it = ss.begin();
+		     it != ss.end();
+		     it++) {
+			StateMachineState *state = *it;
+			if (!mightReachPhi.count(state) || m.count(state))
 				continue;
-			/* Sizes match, make sure that it really is a
-			   transfer of the desired type. */
-			IRExpr *movedExpr = NULL;
+			if (debug_build_paths)
+				printf("Consider extending to l%d\n", labels[state]);
+			std::vector<StateMachineState *> pred;
+			pm.getPredecessors(state, pred);
+			assert(!pred.empty());
+			bool missing = false;
+			for (auto it2 = pred.begin(); !missing && it2 != pred.end(); it2++) {
+				if (!m.count(*it2)) {
+					if (debug_build_paths)
+						printf("No extend; predecessor l%d missing\n",
+						       labels[*it2]);
+					missing = true;
+				}
+			}
+			if (missing)
+				continue;
+			std::map<bbdd *, intbdd *> enabling;
+			bbdd *assumption = cdg.domOf(state);
 			bool failed = false;
-			if (trueToFalse) {
-				for (auto it = path1.trueExprs.begin();
-				     !failed && it != path1.trueExprs.end();
-				     it++) {
-					if (!path2.trueExprs.count(*it)) {
-						if (movedExpr ||
-						    !path2.falseExprs.count(*it))
-							failed = true;
-						else
-							movedExpr = *it;
-					}
-				}
-				assert(failed || movedExpr);
-				for (auto it = path1.falseExprs.begin();
-				     !failed && it != path1.falseExprs.end();
-				     it++) {
-					if (!path2.falseExprs.count(*it))
-						failed = true;
-				}
-			} else {
-				for (auto it = path1.falseExprs.begin();
-				     !failed && it != path1.falseExprs.end();
-				     it++) {
-					if (!path2.falseExprs.count(*it)) {
-						if (movedExpr ||
-						    !path2.trueExprs.count(*it))
-							failed = true;
-						else
-							movedExpr = *it;
-					}
-				}
-				assert(failed || movedExpr);
-				for (auto it = path1.trueExprs.begin();
-				     !failed && it != path1.trueExprs.end();
-				     it++) {
-					if (!path2.trueExprs.count(*it))
-						failed = true;
+			for (auto it = pred.begin(); !failed && it != pred.end(); it++) {
+				bbdd *condition = bbdd::assume(&scope, cdg.domOf(*it), assumption);
+				intbdd *res = intbdd::assume(iscope, m[*it], assumption);
+				if (enabling.count(condition) && enabling[condition] != res) {
+					failed = true;
+				} else {
+					enabling[condition] = res;
 				}
 			}
-			if (!failed) {
-				assert(movedExpr != NULL);
-				if (debug_simplify) {
-					printf("Merge paths on %s:\n", nameIRExpr(movedExpr));
-					path1.prettyPrint(stdout);
-					printf("<---->\n");
-					path2.prettyPrint(stdout);
+			if (failed) {
+				if (debug_build_paths)
+					printf("Failed to build initial enabling table\n");
+				return NULL;
+			}
+			if (debug_build_paths) {
+				printf("Enabling table:\n");
+				for (auto it = enabling.begin();
+				     it != enabling.end();
+				     it++) {
+					if (it != enabling.begin())
+						printf("------------------\n");
+					printf("Cond:\n");
+					it->first->prettyPrint(stdout);
+					printf("Result:\n");
+					it->second->prettyPrint(stdout);
 				}
-				content.erase(content.begin() + it2);
-				it2--;
-				progress = true;
 			}
-		}
-	}
-
-	if (debug_simplify) {
-		printf("After elimination of similar terms:\n");
-		prettyPrint(stdout);
-	}
-
-	if (progress) {
-		if (debug_simplify)
-			printf("Made progress, going around again\n");
-		goto top;
-	}
-		
-}
-
-/* Some of the simplifications get confused if the things in the
-   expression set aren't units i.e. if there are (x || y) expressions
-   in a trueExpr set or (x && y) expressions in a falseExpr set.
-   Remove them now. */
-bool
-path_set::canonicalise(internIRExprTable &intern)
-{
-	for (unsigned idx = 0; idx < content.size(); idx++) {
-	retry:
-		if (TIMEOUT || content.size() > 100000)
-			return false;
-		for (auto it = content[idx].trueExprs.begin(); it != content[idx].trueExprs.end(); it++) {
-			if ( (*it)->tag != Iex_Associative )
-				continue;
-			IRExprAssociative *e = (IRExprAssociative *)*it;
-			assert(e->op == Iop_Or1);
-			path newP(content[idx]);
-			newP.trueExprs.erase(e);
-			content.resize(content.size() + e->nr_arguments - 1,
-				       newP);
-			content[idx] = newP;
-			content[idx].addTrue(e->contents[0], intern);
-			for (int y = 1; y < e->nr_arguments; y++)
-				content[content.size() - e->nr_arguments + y].addTrue(e->contents[y], intern);
-			goto retry;
-		}
-		for (auto it = content[idx].falseExprs.begin(); it != content[idx].falseExprs.end(); it++) {
-			if ( (*it)->tag != Iex_Associative )
-				continue;
-			IRExprAssociative *e = (IRExprAssociative *)*it;
-			assert(e->op == Iop_And1);
-			path newP(content[idx]);
-			newP.falseExprs.erase(e);
-			content.resize(content.size() + e->nr_arguments - 1,
-				       newP);
-			content[idx] = newP;
-			content[idx].addFalse(e->contents[0], intern);
-			for (int y = 1; y < e->nr_arguments; y++)
-				content[content.size() - e->nr_arguments + y].addFalse(e->contents[y], intern);
-			goto retry;
-		}
-	}
-	return true;
-}
-
-void
-path_set::case_split(IRExpr *on, path_set *true_out, path_set *false_out)
-{
-	true_out->nr_possible_results = nr_possible_results;
-	false_out->nr_possible_results = nr_possible_results;
-	for (auto it = content.begin(); it != content.end(); it++) {
-		if (!it->falseExprs.count(on))
-			true_out->content.push_back(*it);
-		if (!it->trueExprs.count(on))
-			false_out->content.push_back(*it);
-	}
-	true_out->simplify(true);
-	false_out->simplify(true);
-}
-
-/* Assume each input variable is independently distributed with a 50%
-   chance of being either true or false.  What is the entropy of the
-   result of this path set? */   
-double
-path_set::entropy() const
-{
-	std::vector<double> prob_of_result;
-	double norm = 0;
-	prob_of_result.resize(nr_possible_results, 0);
-	for (auto it = content.begin(); it != content.end(); it++) {
-		assert(it->result >= 0);
-		assert(it->result < nr_possible_results);
-		double p = pow(0.5, it->trueExprs.size() + it->falseExprs.size());
-		prob_of_result[it->result] += p;
-		norm += p;
-	}
-	double acc = 0;
-	for (auto it = prob_of_result.begin(); it != prob_of_result.end(); it++) {
-		/* zero times log(0) is zero for our purposes, but
-		   not in IEEE arithmetic. */
-		if (*it == 0)
-			continue;
-		*it /= norm;
-		acc += *it * log(*it);
-	}
-	return -acc;
-}
-
-
-IRExpr *
-path_set::build_mux(StateMachineSideEffectPhi *phi, IRType ty)
-{
-	if (TIMEOUT)
-		return NULL;
-
-	if (debug_build_mux) {
-		printf("Build mux for ");
-		prettyPrint(stdout);
-	}
-
-	/* Easy case: if all of the paths produce the same result,
-	   that's the answer. */
-	assert(!content.empty());
-	int result = -2;
-	for (auto it = content.begin(); it != content.end(); it++) {
-		if (result == -2) {
-			result = it->result;
-		} else if (result != it->result) {
-			result = -3;
-		}
-	}
-	assert(result != -2);
-	assert(result != -1);
-	if (result != -3) {
-		assert(result >= 0);
-		assert(result < (int)phi->generations.size());
-		/* Everything is the same -> we're done */
-		if (debug_build_mux)
-			printf("Trivial, result is %d\n", result);
-		if (phi->generations[result].second)
-			return phi->generations[result].second;
-		else
-			return IRExpr_Get(phi->generations[result].first, ty);
-	}
-	std::set<IRExpr *> allExprs;
-	for (auto it = content.begin(); it != content.end(); it++) {
-		for (auto it2 = it->trueExprs.begin(); it2 != it->trueExprs.end(); it2++)
-			allExprs.insert(*it2);
-		for (auto it2 = it->falseExprs.begin(); it2 != it->falseExprs.end(); it2++)
-			allExprs.insert(*it2);
-	}
-	/* Now we need to do a case split on one of the inputs.  We
-	 * try to pick the one which gives the biggest decrease in
-	 * entropy of the final result. */
-	while (!allExprs.empty()) {
-		IRExpr *best_split = NULL;
-		path_set best_t;
-		path_set best_f;
-		double best_entropy;
-		for (auto it = allExprs.begin(); it != allExprs.end(); it++) {
-			path_set t, f;
-			case_split(*it, &t, &f);
-			double entropy = t.entropy() + f.entropy();
-			if (best_split == NULL || entropy < best_entropy) {
-				best_entropy = entropy;
-				best_t = t;
-				best_f = f;
-				best_split = *it;
+			intbdd *flattened = intbdd::from_enabling(iscope, enabling);
+			if (!flattened) {
+				if (debug_build_paths)
+					printf("Failed to flatten enabling table\n");
+				return NULL;
 			}
-		}
-		assert(best_split != NULL);
-		if (debug_build_mux)
-			printf("Try split on %s, entropy %f\n", nameIRExpr(best_split), best_entropy);
-		IRExpr *trueExpr = best_t.build_mux(phi, ty);
-		IRExpr *falseExpr = trueExpr ? best_f.build_mux(phi, ty) : NULL;
-		if (!falseExpr) {
-			if (debug_build_mux)
-				printf("Failed to build %s sub-condition, go around again\n",
-				       trueExpr ? "false" : "true");
-			for (auto it = allExprs.begin(); it != allExprs.end(); ) {
-				IRExpr *e;
-				e = *it;
-				allExprs.erase(it++);
-				if (e == best_split)
-					break;
+
+			if (debug_build_paths) {
+				printf("Mux for l%d is:\n", labels[state]);
+				flattened->prettyPrint(stdout);
 			}
-			continue;
+			if (state->getSideEffect() == phi) {
+				if (debug_build_paths)
+					printf("...and that's the end of the analysis.\n");
+				return flattened;
+			}
+			m[state] = flattened;
+			toUpdate.push(state);
 		}
-		IRExpr *res = IRExpr_Mux0X(best_split, falseExpr, trueExpr);
-		if (debug_build_mux)
-			printf("Result %s\n", nameIRExpr(res));
-		return res;
 	}
-	/* Not enough information to disambiguate -> give up */
-	if (debug_build_mux)
-		printf("Impossible.\n");
+
+	if (debug_build_paths)
+		printf("Mux builder failed?\n");
+
 	return NULL;
+}
+
+static IRExpr *
+build_mux(StateMachineSideEffectPhi *phi,
+	  IRType ty,
+	  bdd<int> *from,
+	  std::map<bdd<int> *, IRExpr *> &memo)
+{
+	if (memo.count(from))
+		return memo[from];
+
+	IRExpr *res;
+	if (from->isLeaf) {
+		int idx = from->content.leaf;
+		if (phi->generations[idx].second)
+			res = phi->generations[idx].second;
+		else
+			res = IRExpr_Get(phi->generations[idx].first, ty);
+	} else {
+		res = IRExpr_Mux0X(
+			from->content.condition,
+			build_mux(phi, ty, from->content.falseBranch, memo),
+			build_mux(phi, ty, from->content.trueBranch, memo));
+	}
+	memo[from] = res;
+	return res;
 }
 
 static StateMachine *
@@ -738,7 +401,7 @@ phiElimination(StateMachine *sm, bool *done_something)
 {
 	std::map<const StateMachineState *, int> labels;
 
-	if (any_debug) {
+	if (debug_build_paths || debug_toplevel) {
 		printf("phiElimination:\n");
 		printStateMachine(sm, stdout, labels);
 	}
@@ -793,25 +456,15 @@ phiElimination(StateMachine *sm, bool *done_something)
 				printf("Failed: unknown type\n");
 			continue;
 		}
-		path_set paths(sm, phi, intern, labels, resultCanoniser);
-		if (TIMEOUT)
-			break;
-		if (paths.content.empty()) {
-			/* There are no paths to this phi.  Kill it off. */
-			/* We can sometimes spot this when the other
-			   optimisations can't due to slightly
-			   different handling of control
-			   dependencies. */
+		intbdd_scope iscope;
+		intbdd *sel_bdd = build_selection_bdd(sm, phi, labels, resultCanoniser, &iscope);
+		if (!sel_bdd) {
 			if (debug_toplevel)
-				printf("Phi is unreachable?\n");
-			replacements[phi] = StateMachineSideEffectUnreached::get();
+				printf("Failed to build bdd!\n");
 			continue;
 		}
-		paths.simplify(false);
-		if (!paths.canonicalise(intern))
-			continue;
-		paths.simplify(true);
-		IRExpr *e = paths.build_mux(phi, ity);
+		std::map<bdd<int> *, IRExpr *> memo;
+		IRExpr *e = build_mux(phi, ity, sel_bdd, memo);
 		if (e) {
 			if (debug_toplevel)
 				printf("Replace side effect with %s\n", nameIRExpr(e));
