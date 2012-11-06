@@ -245,7 +245,6 @@ build_selection_bdd(StateMachine *sm,
 					found = true;
 				}
 			}
-			assert(found);
 		}
 	}
 
