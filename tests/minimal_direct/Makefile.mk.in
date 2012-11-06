@@ -27,6 +27,16 @@ ${bugname}.summary.canon0: canonicalise_crash_summary0 ${bugname}.summary
 	./canonicalise_crash_summary0 ${bugname}.summary ${bugname}.summary.canon0
 ALL_MD_TESTS+=${bugname}.interp.so
 ALL_MD_TESTS+=${bugname}.fix.so
+
+${bugname}.crash_times_dist: ${MD_TEST_DIR}/harness ${exename}.exe ${bugname}.interp.so ./tests/minimal_direct/crash_times_dist.sh /home/sos22/bin/check_dist
+	./tests/minimal_direct/crash_times_dist.sh ${exename}.exe ${bugname}.interp.so "" ${bugname}.crash_times_data > ${bugname}.crash_times_dist
+clean_files += ${bugname}.crash_times_dist ${bugname}.crash_times_data
+${bugname}.S.crash_times_dist: ${MD_TEST_DIR}/harness ${exename}.exe ${bugname}.interp.so ./tests/minimal_direct/crash_times_dist.sh /home/sos22/bin/check_dist
+	./tests/minimal_direct/crash_times_dist.sh ${exename}.exe ${bugname}.interp.so "-s" ${bugname}.S.crash_times_data > ${bugname}.S.crash_times_dist
+clean_files += ${bugname}.S.crash_times_dist ${bugname}.S.crash_times_data
+
+${bugname}.build_interp_time: timing ced_to_cep enforce_crash cep_interpreter.o ${static_files} ${bugname}.summary.canon4 ./tests/minimal_direct/build_interp.sh
+	./timing 10 ${bugname}.build_interp_time ./tests/minimal_direct/build_interp.sh ${bugname}
 EOF
     for p in interp.so fix.c fix.so ced summary{,.canon0,.canon2,.canon3,.canon4} cep.c
     do
@@ -74,6 +84,9 @@ cat <<EOF
 ${exename}.build_summary_time: ./timing ${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db ./tests/minimal_direct/build_summary.sh canonicalise_crash_summary0 canonicalise_crash_summary2 canonicalise_crash_summary3 minimal_direct
 	./timing 10 ${exename}.build_summary_time ./tests/minimal_direct/build_summary.sh ${exename}
 clean_files += ${exename}.build_summary_time
+${exename}.crash_times_dist: ${MD_TEST_DIR}/harness ${exename}.exe ./tests/minimal_direct/crash_times_dist.sh /home/sos22/bin/check_dist
+	./tests/minimal_direct/crash_times_dist.sh ${exename}.exe '<none>' "" ${exename}.crash_times_data > ${exename}.crash_times_dist
+clean_files += ${exename}.crash_times_dist ${exename}.crash_times_data
 EOF
 
 }
