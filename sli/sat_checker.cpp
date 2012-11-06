@@ -980,30 +980,40 @@ expressionImpliesRewrite(IRExpr *what, IRExpr **from, IRExpr **to)
 	IRExprBinop *whatb = (IRExprBinop *)what;
 	if (whatb->op < Iop_CmpEQ8 || whatb->op > Iop_CmpEQ64)
 		return false;
-	assert(whatb->arg1->tag == Iex_Const);
-	*to = whatb->arg1;
-	*from = whatb->arg2;
+	if (whatb->op == Iop_CmpEQ64) {
+		assert(whatb->arg1->tag == Iex_Const);
+		*to = whatb->arg1;
+		*from = whatb->arg2;
 
-	/* Special case: if we have 0 == k - x, we're sometimes
-	   better off rewriting x to k or vice-versa rather than
-	   rewriting k - x to 0. */
-	if ( whatb->arg1->tag == Iex_Const &&
-	     ((IRExprConst *)whatb->arg1)->con->Ico.U64 == 0 &&
-	     whatb->arg2->tag == Iex_Associative &&
-	     ((IRExprAssociative *)whatb->arg2)->op >= Iop_Add8 &&
-	     ((IRExprAssociative *)whatb->arg2)->op <= Iop_Add64 &&
-	     ((IRExprAssociative *)whatb->arg2)->nr_arguments == 2 &&
-	     ((IRExprAssociative *)whatb->arg2)->contents[1]->tag == Iex_Unop &&
-	     ((IRExprUnop *)((IRExprAssociative *)whatb->arg2)->contents[1])->op >= Iop_Neg8 &&
-	     ((IRExprUnop *)((IRExprAssociative *)whatb->arg2)->contents[1])->op <= Iop_Neg64) {
-		IRExpr *a = ((IRExprAssociative *)whatb->arg2)->contents[0];
-		IRExpr *b = ((IRExprUnop *)((IRExprAssociative *)whatb->arg2)->contents[1])->arg;
-		if (preferredRewriteDir(a, b)) {
-			*from = a;
-			*to = b;
+		/* Special case: if we have 0 == k - x, we're
+		   sometimes better off rewriting x to k or vice-versa
+		   rather than rewriting k - x to 0. */
+		if ( whatb->arg1->tag == Iex_Const &&
+		     ((IRExprConst *)whatb->arg1)->con->Ico.U64 == 0 &&
+		     whatb->arg2->tag == Iex_Associative &&
+		     ((IRExprAssociative *)whatb->arg2)->op >= Iop_Add8 &&
+		     ((IRExprAssociative *)whatb->arg2)->op <= Iop_Add64 &&
+		     ((IRExprAssociative *)whatb->arg2)->nr_arguments == 2 &&
+		     ((IRExprAssociative *)whatb->arg2)->contents[1]->tag == Iex_Unop &&
+		     ((IRExprUnop *)((IRExprAssociative *)whatb->arg2)->contents[1])->op >= Iop_Neg8 &&
+		     ((IRExprUnop *)((IRExprAssociative *)whatb->arg2)->contents[1])->op <= Iop_Neg64) {
+			IRExpr *a = ((IRExprAssociative *)whatb->arg2)->contents[0];
+			IRExpr *b = ((IRExprUnop *)((IRExprAssociative *)whatb->arg2)->contents[1])->arg;
+			if (preferredRewriteDir(a, b)) {
+				*from = a;
+				*to = b;
+			} else {
+				*from = b;
+				*to = a;
+			}
+		}
+	} else {
+		if (preferredRewriteDir(whatb->arg1, whatb->arg2)) {
+			*from = whatb->arg1;
+			*to = whatb->arg2;
 		} else {
-			*from = b;
-			*to = a;
+			*from = whatb->arg2;
+			*to = whatb->arg1;
 		}
 	}
 	return true;
