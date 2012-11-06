@@ -6,13 +6,13 @@ all: bug1.interp.so harness
 %.interp.so: %.cep.o ../../cep_interpreter.o
 	gcc -shared $^ -o $@
 
-%.fix.c: ../../summary_to_fix %.exe %.types.canon %.bcg %.summary.canon4
-	../../summary_to_fix $*.exe $*.types.canon $*.bcg ./static.db $@ $*.summary.canon4
+%.fix.c: ../../summary_to_fix %.exe %.types.canon %.bcg %.db %.summary.canon4
+	../../summary_to_fix $*.exe $*.types.canon $*.bcg $*.db $@ $*.summary.canon4
 %.fix.so: %.fix.c ../../sli/patch_head.h ../../sli/patch_skeleton_jump.c ../../sli/patch_skeleton_common.c
 	gcc -Wall -g -shared -fPIC -I../../sli $< -o $@
 
-%.ced: %.summary.canon4  ../../enforce_crash %.exe %.types.canon %.bcg
-	../../enforce_crash $*.exe $*.types.canon $*.bcg ./static.db $@ $<
+%.ced: %.summary.canon4  ../../enforce_crash %.exe %.types.canon %.bcg %.db
+	../../enforce_crash $*.exe $*.types.canon $*.bcg $*.db $@ $<
 
 %.summary.canon4: ../../canonicalise_crash_summary0 %.summary.canon3
 	$^ $@
@@ -40,24 +40,24 @@ bug9a.summary.canon3: ../../canonicalise_crash_summary3 bug9a.summary.canon2 bug
 	$< bug9a.summary.canon2 bug9.exe bug9.types.canon $@
 bug9b.summary.canon3: ../../canonicalise_crash_summary3 bug9b.summary.canon2 bug9.exe bug9.types.canon
 	$< bug9b.summary.canon2 bug9.exe bug9.types.canon $@
-bug9a.ced: bug9a.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.bcg
-	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg ./static.db $@ $<
-bug9b.ced: bug9b.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.bcg
-	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg static.db $@ $<
-bug9a.cep.c: bug9a.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
-	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg static.db $@
-bug9b.cep.c: bug9b.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
-	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg static.db $@
-bug9ab.ced: bug9a.summary.canon4 bug9b.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.bcg
-	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg static.db $@ bug9a.summary.canon4 bug9b.summary.canon4
-bug9ab.cep.c: bug9ab.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
-	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg static.db $@
+bug9a.ced: bug9a.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.bcg bug9.db
+	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg bug9.db $@ $<
+bug9b.ced: bug9b.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.bcg bug9.db
+	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg bug9.db $@ $<
+bug9a.cep.c: bug9a.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe bug9.db
+	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg bug9.db $@
+bug9b.cep.c: bug9b.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe bug9.db
+	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg bug9.db $@
+bug9ab.ced: bug9a.summary.canon4 bug9b.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.bcg bug9.db
+	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg bug9.db $@ bug9a.summary.canon4 bug9b.summary.canon4
+bug9ab.cep.c: bug9ab.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe bug9.db
+	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg bug9.db $@
 
-%.summaries: ../../minimal_direct %.exe %.types.canon %.bcg
-	rm -rf $@ crash_summaries induction.log logs generated_patch.c static.db && \
+%.summaries: ../../minimal_direct %.exe %.types.canon %.bcg %.db
+	rm -rf $@ crash_summaries induction.log logs generated_patch.c && \
 	mkdir logs && \
 	mkdir crash_summaries && \
-	../../minimal_direct $*.exe $*.types.canon $*.bcg static.db && \
+	../../minimal_direct $*.exe $*.types.canon $*.bcg $*.db && \
 	mv crash_summaries $*.summaries
 
 %.types: %.exe ./build_types_table.sh
@@ -68,6 +68,9 @@ bug9ab.cep.c: bug9ab.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
 
 %.types.canon: %.exe %.types ../../canonicalise_types_table
 	../../canonicalise_types_table ./$< $*.types $@
+
+%.db: %.exe %.types.canon %.bcg ../../static
+	../../static $*.exe $*.types.canon $*.bcg $@
 
 .PRECIOUS: bug1.types bug1.bcg bug2.types bug2.bcg bug1.ced bug2.ced bug3.types bug3.bcg bug3.ced bug4.types bug4.bcg bug4.ced bug5.types bug5.bcg bug5.ced bug6.types bug6.bcg bug6.ced bug8.types bug8.bcg bug9.types bug9.bcg
 
