@@ -19,7 +19,7 @@
 #ifndef NDEBUG
 static bool debug_declobber_instructions = false;
 #else
-#define debug_declobber_instructuions false
+#define debug_declobber_instructions false
 #endif
 
 unsigned long
@@ -211,7 +211,7 @@ buildCED(const SummaryId &summaryId,
 	return true;
 }
 
-/* Check whether the ordering in @c is consistent with a total
+/* Check whether the ordering in @slice is consistent with a total
    ordering over threads.  Those don't actually enforce any
    concurrency, so aren't very interesting. */
 static bool
@@ -219,7 +219,12 @@ consistentOrdering(const expr_slice &slice)
 {
 	int thread_a;
 	int thread_b;
-	bool found_a_thread;
+	bool found_a_thread = false;
+
+	/* Shut compiler up */
+	thread_a = -98;
+	thread_b = -99;
+
 	for (auto it = slice.trueSlice.begin(); it != slice.trueSlice.end(); it++) {
 		if ((*it)->tag == Iex_HappensBefore) {
 			IRExprHappensBefore *e = (IRExprHappensBefore *)*it;
@@ -554,8 +559,9 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 	case Iex_Associative: {
 		auto i = (IRExprAssociative *)what;
 		int idx;
-		IRExpr *a;
+		IRExpr *a = (IRExpr *)0xf001; /* shut compiler up */
 		int err_a;
+		assert(i->nr_arguments != 0);
 		for (idx = 0; idx < i->nr_arguments; idx++) {
 			a = removeFreeVariables(i->contents[idx], errors_allowed, &err_a);
 			if (a != i->contents[idx])
@@ -732,7 +738,6 @@ static crashEnforcementData
 enforceCrashForMachine(const SummaryId &summaryId,
 		       VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
-		       GarbageCollectionToken token,
 		       ThreadAbstracter &abs,
 		       int &next_hb_id)
 {
@@ -1275,8 +1280,8 @@ main(int argc, char *argv[])
 	ThreadAbstracter abs;
 	crashEnforcementData accumulator;
 	for (int i = 5; i < argc; i++) {
-		VexPtr<CrashSummary, &ir_heap> summary(readBugReport(argv[i], NULL));
-		crashEnforcementData acc = enforceCrashForMachine(SummaryId(i - 4), summary, oracle, ALLOW_GC, abs, next_hb_id);
+		CrashSummary *summary = readBugReport(argv[i], NULL);
+		crashEnforcementData acc = enforceCrashForMachine(SummaryId(i - 4), summary, oracle, abs, next_hb_id);
 		optimiseHBEdges(acc);
 		optimiseStashPoints(acc, oracle);
 		optimiseCfg(acc);

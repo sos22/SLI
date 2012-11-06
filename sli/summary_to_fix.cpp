@@ -335,7 +335,7 @@ public:
 		case fl_locked: {
 			if (content.empty())
 				abort();
-			unsigned long res;
+			unsigned long res = 0xf001; /* shut compiler up */
 			for (auto it = content.begin(); it != content.end(); it++) {
 				if (it == content.begin())
 					res = it->node->rip.unwrap_vexrip();
