@@ -1,6 +1,6 @@
 #! /usr/bin/env bash
 
-valgrind="../../../valgrind-ft-stage3/bin/valgrind"
+valgrind="/local/scratch/sos22/valgrind-ft-stage3/bin/valgrind"
 program="$*"
 
 # The test program contains racing bugs, or there wouldn't be any

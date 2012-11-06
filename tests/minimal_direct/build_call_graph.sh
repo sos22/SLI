@@ -1,6 +1,6 @@
 #! /usr/bin/env bash
 
-valgrind="../../../valgrind-ft-stage3/bin/valgrind"
+valgrind="/local/scratch/sos22/valgrind-ft-stage3/bin/valgrind"
 program="$*"
 
 rm -f callgraph1.dat

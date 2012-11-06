@@ -35,6 +35,7 @@ Makefile.mk: Makefile.mk.in build_makefile.sh
 clean:
 	find . -name '*.mk' -o -name '*.[od]' | xargs rm ; \
 	rm -f $(clean_files)
+	rm -rf ${clean_dirs}
 
 real_all: $(TARGETS)
 
