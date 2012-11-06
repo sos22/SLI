@@ -1279,20 +1279,32 @@ public:
 		}
 		bool parse(const char *str, const char **end) {
 			FrameId f;
-			if (!FrameId::parse(&f, str, &str) ||
-			    !parseThisString("{", str, &str))
+			if (!FrameId::parse(&f, str, &str))
 				return false;
 			bool pas = false;
 			bool pao = false;
-			if (parseThisString("self", str, &str)) {
-				pas = true;
-				if (parseThisString(",other", str, &str))
+			if (parseThisString("{", str, &str)) {
+				if (parseThisString("self", str, &str)) {
+					pas = true;
+					if (parseThisString(",other", str, &str))
+						pao = true;
+				} else if (parseThisString("other", str, &str)) {
 					pao = true;
-			} else if (parseThisString("other", str, &str)) {
+				}
+				if (!parseThisString("}", str, end))
+					return false;
+			} else if (parseThisString(" <mem>", str, end)) {
+				/* Old format */
+				pas = true;
 				pao = true;
-			}
-			if (!parseThisString("}", str, end))
+			} else if (str[0] == '}' || str[0] == ',') {
+				/* Also old format */
+				*end = str;
+				pas = false;
+				pao = false;
+			} else {
 				return false;
+			}
 			frame = f;
 			pointsAtSelf = pas;
 			pointedAtByOthers = pao;
@@ -1344,7 +1356,17 @@ public:
 	{
 		std::vector<entry> functions;
 
-		if (!parseThisString("STACKLAYOUT = {", str, &str))
+		if (!parseThisString("STACKLAYOUT", str, &str))
+			return false;
+		if (parseThisChar('(', str, &str)) {
+			/* Old-style format includes some information
+			 * we no longer need. */
+			int d;
+			if (!parseDecimalInt(&d, str, &str) ||
+			    !parseThisChar(')', str, &str))
+				return false;
+		}
+		if (!parseThisString(" = {", str, &str))
 			return false;
 		while (1) {
 			entry f;
