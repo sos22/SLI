@@ -789,6 +789,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	return verification_condition;
 }
 
+#if CONFIG_USE_INDUCTION
 static StateMachine *
 truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
 {
@@ -867,6 +868,7 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 	}
 	fprintf(inductionLog, "%s -> %s\n", used.name(), used_in.name());
 }
+#endif
 
 static StateMachine *
 localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
@@ -949,7 +951,11 @@ localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 }
 
 static CrashSummary *
-considerStoreCFG(const DynAnalysisRip &target_rip,
+considerStoreCFG(const DynAnalysisRip &
+#if CONFIG_USE_INDUCTION
+		 target_rip
+#endif
+		 ,
 		 const VexPtr<CFGNode, &ir_heap> cfg,
 		 const VexPtr<Oracle> &oracle,
 		 VexPtr<StateMachine, &ir_heap> probeMachine,
