@@ -35,9 +35,10 @@
 #define PAGE_SIZE 4096ul
 #define STACK_SIZE (PAGE_SIZE * 4)
 #define PAGE_MASK (~(PAGE_SIZE - 1))
-#define MAX_DELAY_US (1000000)
+#define MAX_DELAY_US (100000)
 
 static unsigned long prng_state = 0xe6b16c0386053e31;
+static int disable_sideconditions;
 
 extern void clone(void);
 static void (*__GI__exit)(int res);
@@ -951,7 +952,7 @@ eval_bytecode(const unsigned short *bytecode,
 	enum byte_code_type type;
 	int res;
 
-	if (!bytecode)
+	if (disable_sideconditions || !bytecode)
 		return 1;
 
 	EVENT(bytecode_evaluated);
@@ -1733,7 +1734,7 @@ gen_random(void)
 static void
 random_delay(void)
 {
-	usleep(gen_random() % MAX_DELAY_US);
+	usleep((gen_random() % MAX_DELAY_US) + MAX_DELAY_US);
 }
 
 /* This is quite fiddly.  We have a bunch of low-level threads, some
@@ -2969,6 +2970,9 @@ activate(void)
 		prng_state ^= t.tv_usec;
 		gen_random();
 	}
+
+	if (getenv("SOS22_DISABLE_SIDECONDITIONS"))
+		disable_sideconditions = 1;
 
 	printf("Patching %s\n", buf);
 

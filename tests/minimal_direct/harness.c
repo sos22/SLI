@@ -33,6 +33,7 @@ main(int argc, char *argv[])
 {
 	const char *enforcer;
 	bool randomise = false;
+	bool no_sideconditions = false;
 	long nr_iters = 0;
 	int i;
 
@@ -41,6 +42,10 @@ main(int argc, char *argv[])
 	while (argv[0]) {
 		if (!strcmp(argv[0], "-r")) {
 			randomise = true;
+			argv++;
+			argc--;
+		} else if (!strcmp(argv[0], "-s")) {
+			no_sideconditions = true;
 			argv++;
 			argc--;
 		} else if (!strcmp(argv[0], "-n")) {
@@ -76,6 +81,10 @@ main(int argc, char *argv[])
 		setenv("SOS22_ENFORCER_RANDOMISE", "1", 1);
 	else
 		unsetenv("SOS22_ENFORCER_RANDOMISE");
+	if (no_sideconditions)
+		setenv("SOS22_DISABLE_SIDECONDITIONS", "1", 1);
+	else
+		unsetenv("SOS22_DISABLE_SIDECONDITIONS");
 
 	for (i = 0; i < nr_iters; i++) {
 		struct timeval start;
