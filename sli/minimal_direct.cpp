@@ -305,15 +305,14 @@ main(int argc, char *argv[])
 	argv += 4;
 	argc -= 4;
 
-	if (argc > 1)
-		errx(1, "Too many arguments");
-
 	bool assert_mode = false;
 	if (!strcmp(argv[argc - 1], "assertions")) {
 		assert_mode = true;
 		argc--;
 	}
 
+	if (argc > 1)
+		errx(1, "Too many arguments");
 
 	VexPtr<Oracle> oracle;
 	{
