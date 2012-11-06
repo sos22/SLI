@@ -1,6 +1,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 static int *volatile global_ptr;
@@ -31,13 +32,14 @@ int
 main()
 {
 	pthread_t thr;
+	int forever = !!getenv("SOS22_RUN_FOREVER");
 
 	pthread_create(&thr, NULL, thr_main, NULL);
 
 	usleep(100000);
 	time_t start_time = time(NULL);
 
-	while (time(NULL) < start_time + 100) {
+	while (forever || time(NULL) < start_time + 100) {
 		STOP_ANALYSIS();
 		global_ptr = BAD_PTR;
 		STOP_ANALYSIS();

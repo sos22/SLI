@@ -63,6 +63,7 @@ main(int argc, char *argv[])
 	pthread_t thr;
 	static int t;
 	int cntr;
+	int forever = !!getenv("SOS22_RUN_FOREVER");
 
 	if (argc == 1) {
 		mode = 0;
@@ -81,7 +82,7 @@ main(int argc, char *argv[])
 	usleep(100000);
 	time_t start_time = time(NULL);
 
-	while (time(NULL) < start_time + 10) {
+	while (forever || time(NULL) < start_time + 10) {
 		for (cntr = 0; cntr < 2000000; cntr++) {
 			STOP_ANALYSIS();
 			global_ptr2 = BAD_PTR;

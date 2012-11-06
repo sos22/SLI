@@ -35,13 +35,16 @@ main()
 {
 	pthread_t thr;
 	time_t start_time = time(NULL);
+	int forever = 0;
+	if (getenv("SOS22_RUN_FOREVER"))
+		forever = 1;
 
 	global1 = 99;
 	global2 = 99;
 
 	pthread_create(&thr, NULL, thr_main, NULL);
 
-	while (time(NULL) < start_time + 10) {
+	while (forever || time(NULL) < start_time + 10) {
 		usleep(100000);
 		STOP_ANALYSIS();
 		global1 = 5;

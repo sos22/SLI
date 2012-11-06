@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #include "test.h"
 
@@ -27,12 +28,16 @@ int
 main()
 {
 	pthread_t thr;
+	int forever = 0;
+
 	pthread_create(&thr, NULL, thr_main, NULL);
 
 	time_t start_time = time(NULL);
 
+	if (getenv("SOS22_RUN_FOREVER"))
+		forever = 1;
 	int t;
-	while (time(NULL) < start_time + 10) {
+	while (forever || time(NULL) < start_time + 10) {
 		STOP_ANALYSIS();
 		global_ptr = &t;
 		STOP_ANALYSIS();

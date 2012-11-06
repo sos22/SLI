@@ -43,13 +43,15 @@ main()
 {
 	pthread_t thr;
 	int t;
+	int forever = !!getenv("SOS22_RUN_FOREVER");
+
 	global_ptr1 = &t;
 	global_ptr2 = &t;
 	pthread_create(&thr, NULL, thr_main, NULL);
 
 	time_t start_time = time(NULL);
 
-	while (time(NULL) < start_time + 10) {
+	while (forever || time(NULL) < start_time + 10) {
 		STOP_ANALYSIS();
 		global_ptr1 = &t;
 		STOP_ANALYSIS();
