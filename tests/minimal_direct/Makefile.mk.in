@@ -25,6 +25,8 @@ ${bugname}.summary.canon2: canonicalise_crash_summary2 ${bugname}.summary.canon0
 	./canonicalise_crash_summary2 ${bugname}.summary.canon0 ${bugname}.summary.canon2
 ${bugname}.summary.canon0: canonicalise_crash_summary0 ${bugname}.summary
 	./canonicalise_crash_summary0 ${bugname}.summary ${bugname}.summary.canon0
+ALL_MD_TESTS+=${bugname}.interp.so
+ALL_MD_TESTS+=${bugname}.fix.so
 EOF
     for p in interp.so fix.c fix.so ced summary{,.canon0,.canon2,.canon3,.canon4} cep.c
     do
@@ -132,5 +134,9 @@ EOF
 ${MD_TEST_DIR}/harness: ./tests/minimal_direct/harness.c
 	gcc -g -Wall \$< -o \$@
 clean_files += ${MD_TEST_DIR}/harness
+EOF
+
+    cat <<EOF
+all_md_tests: \$(ALL_MD_TESTS)
 EOF
 }
