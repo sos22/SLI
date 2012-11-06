@@ -35,11 +35,16 @@ main()
 	time_t start_time = time(NULL);
 	int t;
 	int idx;
+	int forever = 0;
+
 	pthread_create(&thr, NULL, thr_main, NULL);
 	for (idx = 0; idx < NR_PTRS; idx++)
 		global_ptrs[idx] = &t;
 
-	while (time(NULL) < start_time + 10) {
+	if (getenv("SOS22_RUN_FOREVER"))
+		forever = 1;
+
+	while (forever || time(NULL) < start_time + 10) {
 		idx = random() % NR_PTRS;
 		STOP_ANALYSIS();
 		global_ptrs[idx] = NULL;
