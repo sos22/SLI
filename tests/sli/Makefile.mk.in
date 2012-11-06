@@ -11,6 +11,6 @@ rules() {
     do
 	echo "${input_base}/${t}.o: ${input_base}/${t}.cpp"
 	echo "${input_base}/$t: ${input_base}/${t}.o slir.a libVEX.a"
-	echo -e '\tgcc -lrt -lstdc++ $(CFLAGS) $(CPPFLAGS) -lsqlite3 $^ -o $@'
+	echo -e '\tgcc -lrt -lstdc++ $(CFLAGS) $(CPPFLAGS) -lsqlite3 -lm $^ -o $@'
     done
 }
