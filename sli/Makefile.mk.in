@@ -3,7 +3,7 @@ targets="crop binpatch dbg chunk direct dbg_core get_dominator dbg_exec minimal_
 targets="${targets} canonicalise_types_table canonicalise_crash_summary compare_crash_summaries canonicalise_crash_summary2"
 targets="${targets} remove_non_badptrs canonicalise_crash_summary3 canonicalise_crash_summary0 canonicalise_crash_summary4"
 targets="${targets} case_split_summaries memloc_split_summaries dump_alias_db check_cfg_generation cross_check_machines"
-targets="${targets} direct_cd merge_type_tables summary_to_fix static"
+targets="${targets} direct_cd merge_type_tables summary_to_fix static timing"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{ssa,transform_expr,logwriter,thread,machinestate}.cpp
