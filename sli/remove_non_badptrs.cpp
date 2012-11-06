@@ -21,6 +21,8 @@ irexprUsesBadPtr(const IRExpr *e)
 	} doit;
 	doit.res = false;
 	doit.doit(const_cast<IRExpr *>(e));
+	if (TIMEOUT)
+		abort();
 	return doit.res;
 }
 
@@ -78,6 +80,7 @@ main(int argc, char *argv[])
 		CrashSummary *summary = readBugReport(de->d_name, NULL);
 		if (!summaryUsesBadPtr(summary))
 			unlink(de->d_name);
+		LibVEX_maybe_gc(ALLOW_GC);
 	}
 	return 0;
 }
