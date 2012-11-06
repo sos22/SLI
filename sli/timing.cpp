@@ -61,7 +61,6 @@ main(int argc, char *argv[])
 		if (child == -1)
 			err(1, "fork()");
 		if (child == 0) {
-			close(1);
 			execv(argv[0], argv);
 			err(1, "execv(%s) failed", argv[0]);
 		}

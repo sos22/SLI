@@ -67,6 +67,13 @@ EOF
     do
 	echo "clean_files+=${exename}.${p}"
     done
+
+cat <<EOF
+${exename}.build_summary_time: ./timing ${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db ./tests/minimal_direct/build_summary.sh canonicalise_crash_summary0 canonicalise_crash_summary2 canonicalise_crash_summary3 minimal_direct
+	./timing 10 ${exename}.build_summary_time ./tests/minimal_direct/build_summary.sh ${exename}
+clean_files += ${exename}.build_summary_time
+EOF
+
 }
 
 emit_rules_for_exe_segv() {
