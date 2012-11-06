@@ -39,6 +39,7 @@
 
 static unsigned long prng_state = 0xe6b16c0386053e31;
 static int disable_sideconditions;
+static int force_delay; /* -1 -> on send, 0 -> use rebalancer, 1 -> on receive */
 
 extern void clone(void);
 static void (*__GI__exit)(int res);
@@ -1712,6 +1713,19 @@ delay_bias(const struct cfg_instr *instr, int is_tx)
 	int nr = is_tx ? instr->nr_tx_msg : instr->nr_rx_msg;
 	long res;
 	int j;
+	if (force_delay) {
+		if (force_delay == -1) {
+			if (is_tx)
+				return -1;
+			else
+				return 1;
+		} else {
+			if (is_tx)
+				return 1;
+			else
+				return -1;
+		}
+	}
 	res = 0;
 	for (j = 0; j < nr; j++) {
 		res += msgs[j]->event_count;
@@ -2973,6 +2987,10 @@ activate(void)
 
 	if (getenv("SOS22_DISABLE_SIDECONDITIONS"))
 		disable_sideconditions = 1;
+	if (getenv("SOS22_DELAY_TX"))
+		force_delay = -1;
+	else if (getenv("SOS22_DELAY_RX"))
+		force_delay = 1;
 
 	printf("Patching %s\n", buf);
 
