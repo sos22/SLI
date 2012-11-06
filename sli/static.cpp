@@ -11,6 +11,8 @@ main(int argc, char *argv[])
 	const char *callgraph = argv[3];
 	const char *staticdb = argv[4];
 
+	unlink(staticdb);
+
 	MachineState *ms = MachineState::readELFExec(binary);
 	Thread *thr = ms->findThread(ThreadId(1));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, types));
