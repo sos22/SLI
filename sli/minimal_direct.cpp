@@ -293,31 +293,46 @@ main(int argc, char *argv[])
 
 	__set_profiling(root);
 
+	if (argc < 5)
+		errx(1, "not enough arguments");
+	argv++;
+	argc--;
+	const char *binary = argv[0];
+	const char *typesdb = argv[1];
+	const char *callgraph = argv[2];
+	const char *staticdb = argv[3];
+
+	argv += 4;
+	argc -= 4;
+
+	if (argc > 1)
+		errx(1, "Too many arguments");
+
+	bool assert_mode = false;
+	if (!strcmp(argv[argc - 1], "assertions")) {
+		assert_mode = true;
+		argc--;
+	}
+
+
 	VexPtr<Oracle> oracle;
 	{
-		MachineState *ms = MachineState::readELFExec(argv[1]);
+		MachineState *ms = MachineState::readELFExec(binary);
 		Thread *thr = ms->findThread(ThreadId(1));
-		oracle = new Oracle(ms, thr, argv[2]);
+		oracle = new Oracle(ms, thr, typesdb);
 	}
-	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
+	oracle->loadCallGraph(oracle, callgraph, staticdb, ALLOW_GC);
 
 	FILE *output = fopen("generated_patch.c", "w");
 	DumpFix df(oracle, output);
 
 	LibVEX_gc(ALLOW_GC);
 
-	bool assert_mode = false;
-
 	int start_percentage;
 	int end_percentage;
 
 	start_percentage = 0;
 	end_percentage = 100;
-
-	if (!strcmp(argv[argc - 1], "assertions")) {
-		assert_mode = true;
-		argc--;
-	}
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
@@ -327,15 +342,15 @@ main(int argc, char *argv[])
 	if (assert_mode)
 		opt = opt.enableallPointersGood();
 
-	if (argc == 5) {
+	if (argc == 1) {
 		DynAnalysisRip vr;
 		const char *succ;
-		if (parseDynAnalysisRip(&vr, argv[4], &succ)) {
+		if (parseDynAnalysisRip(&vr, argv[0], &succ)) {
 			consider_rip(vr, 1, oracle, df, NULL, opt, ALLOW_GC);
 			df.finish();
 			return 0;
 		}
-		if (sscanf(argv[4], "%d...%d", &start_percentage, &end_percentage) != 2)
+		if (sscanf(argv[0], "%d...%d", &start_percentage, &end_percentage) != 2)
 			errx(1, "expect final argument to be either a VexRip or s...d where s and d are start and end percentages");
 	}
 

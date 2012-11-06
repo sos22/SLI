@@ -23,8 +23,8 @@ main(int argc, char *argv[])
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
-	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
-	VexPtr<MaiMap, &ir_heap> mai(MaiMap::fromFile(sm, argv[4]));
+	oracle->loadCallGraph(oracle, argv[3], argv[4], ALLOW_GC);
+	VexPtr<MaiMap, &ir_heap> mai(MaiMap::fromFile(sm, argv[5]));
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations

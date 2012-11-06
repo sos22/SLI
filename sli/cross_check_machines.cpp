@@ -1288,13 +1288,13 @@ main(int argc, char *argv[])
 		Thread *thr = ms->findThread(ThreadId(1));
 		oracle = new Oracle(ms, thr, argv[2]);
 	}
-	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
+	oracle->loadCallGraph(oracle, argv[3], argv[4], ALLOW_GC);
 
 	VexPtr<OracleInterface> oracleI(oracle);
-	VexPtr<StateMachine, &ir_heap> machine1(readStateMachine(argv[4]));
-	VexPtr<MaiMap, &ir_heap> mai1(MaiMap::fromFile(machine1, argv[5]));
-	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(argv[6]));
-	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, argv[7]));
+	VexPtr<StateMachine, &ir_heap> machine1(readStateMachine(argv[5]));
+	VexPtr<MaiMap, &ir_heap> mai1(MaiMap::fromFile(machine1, argv[6]));
+	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(argv[7]));
+	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, argv[8]));
 	std::set<DynAnalysisRip> nonLocalLoads;
 	std::set<DynAnalysisRip> interestingStores;
 	AllowableOptimisations opt(
@@ -1302,7 +1302,7 @@ main(int argc, char *argv[])
 			&interestingStores,
 			&nonLocalLoads,
 			oracle->ms->addressSpace,
-			argv[8]));
+			argv[9]));
 
 	gc_vector<IRExpr, &ir_heap> constraints;
 	AllowableOptimisations opt2(

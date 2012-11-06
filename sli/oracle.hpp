@@ -320,7 +320,8 @@ private:
 public:
 	bool functionNeverReturns(const StaticRip &rip);
 	void findAssertions(std::vector<DynAnalysisRip> &out);
-	static void loadCallGraph(VexPtr<Oracle> &ths, const char *path, GarbageCollectionToken token);
+	static void loadCallGraph(VexPtr<Oracle> &ths, const char *cg_path,
+				  const char *db_fname, GarbageCollectionToken token);
 	void visit(HeapVisitor &hv) {
 		hv(ms);
 		hv(crashedThread);

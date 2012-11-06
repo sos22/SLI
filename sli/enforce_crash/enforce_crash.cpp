@@ -1273,15 +1273,15 @@ main(int argc, char *argv[])
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
-	oracle->loadCallGraph(oracle, argv[3], ALLOW_GC);
+	oracle->loadCallGraph(oracle, argv[3], argv[4], ALLOW_GC);
 
 	int next_hb_id = 0xaabb;
 
 	ThreadAbstracter abs;
 	crashEnforcementData accumulator;
-	for (int i = 5; i < argc; i++) {
+	for (int i = 6; i < argc; i++) {
 		CrashSummary *summary = readBugReport(argv[i], NULL);
-		crashEnforcementData acc = enforceCrashForMachine(SummaryId(i - 4), summary, oracle, abs, next_hb_id);
+		crashEnforcementData acc = enforceCrashForMachine(SummaryId(i - 5), summary, oracle, abs, next_hb_id);
 		optimiseHBEdges(acc);
 		optimiseStashPoints(acc, oracle);
 		optimiseCfg(acc);
@@ -1290,7 +1290,7 @@ main(int argc, char *argv[])
 
 	buildPatchStrategy(accumulator, oracle);
 
-	FILE *f = fopen(argv[4], "w");
+	FILE *f = fopen(argv[5], "w");
 	accumulator.prettyPrint(f);
 	accumulator.prettyPrint(stdout);
 	fclose(f);

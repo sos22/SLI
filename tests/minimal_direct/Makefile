@@ -3,21 +3,16 @@ all: bug1.interp.so harness
 %.so: ../../ced_to_patch %.exe %.ced ../../sli/enforce_crash/patch_core.c
 	../../ced_to_patch $*.exe $*.ced ../../ $@
 
-%.cep.o: %.cep.c ../../sli/enforce_crash/cep_interpreter.h
-	gcc -g -I ../../sli/enforce_crash -c -fPIC -Wall -Werror $< -o $@
-
-%.cep.c: %.ced ../../ced_to_cep %.bcg %.types.canon %.exe
-	../../ced_to_cep $*.exe $< $*.types.canon $*.bcg $@
 %.interp.so: %.cep.o ../../cep_interpreter.o
 	gcc -shared $^ -o $@
 
 %.fix.c: ../../summary_to_fix %.exe %.types.canon %.bcg %.summary.canon4
-	../../summary_to_fix $*.exe $*.types.canon $*.bcg $@ $*.summary.canon4
+	../../summary_to_fix $*.exe $*.types.canon $*.bcg ./static.db $@ $*.summary.canon4
 %.fix.so: %.fix.c ../../sli/patch_head.h ../../sli/patch_skeleton_jump.c ../../sli/patch_skeleton_common.c
 	gcc -Wall -g -shared -fPIC -I../../sli $< -o $@
 
 %.ced: %.summary.canon4  ../../enforce_crash %.exe %.types.canon %.bcg
-	../../enforce_crash $*.exe $*.types.canon $*.bcg $@ $<
+	../../enforce_crash $*.exe $*.types.canon $*.bcg ./static.db $@ $<
 
 %.summary.canon4: ../../canonicalise_crash_summary0 %.summary.canon3
 	$^ $@
@@ -46,23 +41,23 @@ bug9a.summary.canon3: ../../canonicalise_crash_summary3 bug9a.summary.canon2 bug
 bug9b.summary.canon3: ../../canonicalise_crash_summary3 bug9b.summary.canon2 bug9.exe bug9.types.canon
 	$< bug9b.summary.canon2 bug9.exe bug9.types.canon $@
 bug9a.ced: bug9a.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.bcg
-	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg $@ $<
+	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg ./static.db $@ $<
 bug9b.ced: bug9b.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.bcg
-	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg $@ $<
+	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg static.db $@ $<
 bug9a.cep.c: bug9a.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
-	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg $@
+	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg static.db $@
 bug9b.cep.c: bug9b.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
-	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg $@
+	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg static.db $@
 bug9ab.ced: bug9a.summary.canon4 bug9b.summary.canon4  ../../enforce_crash bug9.exe bug9.types.canon bug9.bcg
-	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg $@ bug9a.summary.canon4 bug9b.summary.canon4
+	../../enforce_crash bug9.exe bug9.types.canon bug9.bcg static.db $@ bug9a.summary.canon4 bug9b.summary.canon4
 bug9ab.cep.c: bug9ab.ced ../../ced_to_cep bug9.bcg bug9.types.canon bug9.exe
-	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg $@
+	../../ced_to_cep bug9.exe $< bug9.types.canon bug9.bcg static.db $@
 
 %.summaries: ../../minimal_direct %.exe %.types.canon %.bcg
 	rm -rf $@ crash_summaries induction.log logs generated_patch.c static.db && \
 	mkdir logs && \
 	mkdir crash_summaries && \
-	../../minimal_direct $*.exe $*.types.canon $*.bcg && \
+	../../minimal_direct $*.exe $*.types.canon $*.bcg static.db && \
 	mv crash_summaries $*.summaries
 
 %.types: %.exe ./build_types_table.sh

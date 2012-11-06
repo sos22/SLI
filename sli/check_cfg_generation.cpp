@@ -75,13 +75,14 @@ int
 main(int argc, char *argv[])
 {
 	init_sli();
-	if (argc != 5)
+	if (argc != 6)
 		errx(1, "bad arguments");
 
 	const char *binary = argv[1];
 	const char *types = argv[2];
 	const char *callgraph = argv[3];
-	const char *trace_file = argv[4];
+	const char *staticdb = argv[4];
+	const char *trace_file = argv[5];
 	Mapping traces;
 
 	if (traces.init(trace_file) < 0)
@@ -93,7 +94,7 @@ main(int argc, char *argv[])
 		Thread *thr = ms->findThread(ThreadId(1));
 		oracle = new Oracle(ms, thr, types);
 	}
-	oracle->loadCallGraph(oracle, callgraph, ALLOW_GC);
+	oracle->loadCallGraph(oracle, callgraph, staticdb, ALLOW_GC);
 
 	success_log = fopen("success.txt", "w");
 	fail_log = fopen("fail.txt", "w");

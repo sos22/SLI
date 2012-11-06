@@ -1223,12 +1223,12 @@ create_index(const char *name, const char *table, const char *field)
 }
 
 static bool
-open_database(void)
+open_database(const char *path)
 {
 	bool res;
 	int rc;
 
-	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READONLY, NULL);
+	rc = sqlite3_open_v2(path, &_database, SQLITE_OPEN_READONLY, NULL);
 	if (rc == SQLITE_OK) {
 		/* Return existing database */
 		res = false;
@@ -1237,7 +1237,7 @@ open_database(void)
 
 	res = true;
 	/* Create new database */
-	rc = sqlite3_open_v2("static.db", &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
+	rc = sqlite3_open_v2(path, &_database, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE, NULL);
 	assert(rc == SQLITE_OK);
 
 	rc = sqlite3_exec(_database,
@@ -1294,13 +1294,16 @@ disable_journalling:
 }
 
 void
-Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionToken token)
+Oracle::loadCallGraph(VexPtr<Oracle> &ths,
+		      const char *cg_fname,
+		      const char *db_fname,
+		      GarbageCollectionToken token)
 {
 	__set_profiling(oracle_load_call_graph);
 
 	callgraph_t callgraph; 
 	std::vector<StaticRip> roots;
-	FILE *f = fopen(fname, "r");
+	FILE *f = fopen(cg_fname, "r");
 	while (!feof(f)) {
 		callgraph_entry ce;
 		bool is_call;
@@ -1309,18 +1312,18 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionT
 		if (res == read_cg_vexrip_error) {
 			if (feof(f))
 				break;
-			err(1, "reading rip from %s", fname);
+			err(1, "reading rip from %s", cg_fname);
 		}
 		unsigned nr_callees;
 		if (fread(&nr_callees, sizeof(nr_callees), 1, f) != 1)
-			err(1, "reading number of callees from %s\n", fname);
+			err(1, "reading number of callees from %s\n", cg_fname);
 		bool is_first = true;
 		is_call = false;
 		for (unsigned x = 0; x < nr_callees; x++) {
 			unsigned long callee;
 			bool ic;
 			if (fread(&callee, sizeof(callee), 1, f) != 1)
-				err(1, "reading callee rip from %s", fname);
+				err(1, "reading callee rip from %s", cg_fname);
 			if (callee & (1ul << 63)) {
 				ic = true;
 				callee &= ~(1ul << 63);
@@ -1348,7 +1351,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths, const char *fname, GarbageCollectionT
 
 	fclose(f);
 
-	bool need_rebuild_database = open_database();
+	bool need_rebuild_database = open_database(db_fname);
 	if (need_rebuild_database) {
 		make_unique(roots);
 		Oracle::findInstructions(ths, roots, callgraph, token);
