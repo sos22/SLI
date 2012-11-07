@@ -789,7 +789,6 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	return verification_condition;
 }
 
-#if CONFIG_USE_INDUCTION
 static StateMachine *
 truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
 {
@@ -868,7 +867,6 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 	}
 	fprintf(inductionLog, "%s -> %s\n", used.name(), used_in.name());
 }
-#endif
 
 static StateMachine *
 localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
@@ -1030,96 +1028,95 @@ considerStoreCFG(const DynAnalysisRip &
 		return NULL;
 	}
 
-#if CONFIG_USE_INDUCTION
-	/* Now have a look at whether we have anything we can use the
-	 * induction rule on.  That means look at the probe machine
-	 * and pulling out all of the loads which are present in the
-	 * type index and then just assuming that we won't generate
-	 * any crash summaries for them.  Once we've processed every
-	 * instruction we have to go back and look for any cycles. */
-	VexPtr<StateMachineSideEffectMemoryAccess *, &ir_heap> inductionAccesses;
-	unsigned nrInductionAccesses;
-	{
-		std::set<StateMachineSideEffectMemoryAccess *> probeAccesses;
-		enumSideEffects(probeMachine, probeAccesses);
-		std::set<StateMachineSideEffectMemoryAccess *> typeDbProbeAccesses;
-		for (auto it = probeAccesses.begin(); it != probeAccesses.end(); it++) {
-			for (auto it2 = mai->begin((*it)->rip); !it2.finished(); it2.advance()) {
-				if (oracle->type_db->ripPresent(it2.dr())) {
-					typeDbProbeAccesses.insert(*it);
-					break;
+	VexPtr<IRExpr, &ir_heap> residual_verification_condition(base_verification_condition);
+	if (CONFIG_USE_INDUCTION && !optIn.allPointersGood()) {
+		/* Now have a look at whether we have anything we can use the
+		 * induction rule on.  That means look at the probe machine
+		 * and pulling out all of the loads which are present in the
+		 * type index and then just assuming that we won't generate
+		 * any crash summaries for them.  Once we've processed every
+		 * instruction we have to go back and look for any cycles. */
+		VexPtr<StateMachineSideEffectMemoryAccess *, &ir_heap> inductionAccesses;
+		unsigned nrInductionAccesses;
+		{
+			std::set<StateMachineSideEffectMemoryAccess *> probeAccesses;
+			enumSideEffects(probeMachine, probeAccesses);
+			std::set<StateMachineSideEffectMemoryAccess *> typeDbProbeAccesses;
+			for (auto it = probeAccesses.begin(); it != probeAccesses.end(); it++) {
+				for (auto it2 = mai->begin((*it)->rip); !it2.finished(); it2.advance()) {
+					if (oracle->type_db->ripPresent(it2.dr())) {
+						typeDbProbeAccesses.insert(*it);
+						break;
+					}
 				}
 			}
+			inductionAccesses = (StateMachineSideEffectMemoryAccess **)__LibVEX_Alloc_Ptr_Array(&ir_heap, typeDbProbeAccesses.size());
+			auto it = typeDbProbeAccesses.begin();
+			nrInductionAccesses = 0;
+			while (it != typeDbProbeAccesses.end()) {
+				inductionAccesses[nrInductionAccesses] = *it;
+				nrInductionAccesses++;
+				it++;
+			}
+			assert(nrInductionAccesses == typeDbProbeAccesses.size());
 		}
-		inductionAccesses = (StateMachineSideEffectMemoryAccess **)__LibVEX_Alloc_Ptr_Array(&ir_heap, typeDbProbeAccesses.size());
-		auto it = typeDbProbeAccesses.begin();
-		nrInductionAccesses = 0;
-		while (it != typeDbProbeAccesses.end()) {
-			inductionAccesses[nrInductionAccesses] = *it;
-			nrInductionAccesses++;
-			it++;
+		VexPtr<IRExpr, &ir_heap> residual_verification_condition(base_verification_condition);
+		std::set<DynAnalysisRip> inductionRips;
+		for (unsigned x = 0; x < nrInductionAccesses; x++) {
+			if (TIMEOUT)
+				return NULL;
+			VexPtr<StateMachine, &ir_heap> truncatedMachine(
+				truncateStateMachine(
+					*mai,
+					probeMachine,
+					inductionAccesses[x]));
+			truncatedMachine = optimiseStateMachine(mai, truncatedMachine, optIn, oracle, true, token);
+			IRExpr *t = verificationConditionForStoreMachine(
+				sm_ssa,
+				truncatedMachine,
+				oracleI,
+				mai,
+				optIn,
+				token);
+			if (!t || t == residual_verification_condition ||
+			    (t->tag == Iex_Const &&
+			     ((IRExprConst *)t)->con->Ico.U1 == 0))
+				continue;
+			fprintf(_logfile, "Induction probe machine:\n");
+			printStateMachine(truncatedMachine, _logfile);
+			fprintf(_logfile, "Induction rule: ");
+			ppIRExpr(t, _logfile);
+			fprintf(_logfile, "\n");
+			fprintf(_logfile, "Residual:       ");
+			ppIRExpr(residual_verification_condition, _logfile);
+			fprintf(_logfile, "\n");
+			residual_verification_condition =
+				IRExpr_Binop(
+					Iop_And1,
+					residual_verification_condition,
+					IRExpr_Unop(
+						Iop_Not1,
+						t));
+			residual_verification_condition =
+				simplifyIRExpr(residual_verification_condition, optIn);
+			fprintf(_logfile, "After simplification: ");
+			ppIRExpr(residual_verification_condition,  _logfile);
+			fprintf(_logfile, "\n");
+			for (auto it = mai->begin(inductionAccesses[x]->rip); !it.finished(); it.advance())
+				logUseOfInduction(target_rip, it.dr());
+			if (residual_verification_condition->tag == Iex_Const &&
+			    ((IRExprConst *)residual_verification_condition.get())->con->Ico.U1 == 0) {
+				fprintf(_logfile, "\t\tCrash impossible.\n");
+				return NULL;
+			}
 		}
-		assert(nrInductionAccesses == typeDbProbeAccesses.size());
-	}
-	VexPtr<IRExpr, &ir_heap> residual_verification_condition(base_verification_condition);
-	std::set<DynAnalysisRip> inductionRips;
-	for (unsigned x = 0; x < nrInductionAccesses; x++) {
-		if (TIMEOUT)
-			return NULL;
-		VexPtr<StateMachine, &ir_heap> truncatedMachine(
-			truncateStateMachine(
-				*mai,
-				probeMachine,
-				inductionAccesses[x]));
-		truncatedMachine = optimiseStateMachine(mai, truncatedMachine, optIn, oracle, true, token);
-		IRExpr *t = verificationConditionForStoreMachine(
-			sm_ssa,
-			truncatedMachine,
-			oracleI,
-			mai,
-			optIn,
-			token);
-		if (!t || t == residual_verification_condition ||
-		    (t->tag == Iex_Const &&
-		     ((IRExprConst *)t)->con->Ico.U1 == 0))
-			continue;
-		fprintf(_logfile, "Induction probe machine:\n");
-		printStateMachine(truncatedMachine, _logfile);
-		fprintf(_logfile, "Induction rule: ");
-		ppIRExpr(t, _logfile);
-		fprintf(_logfile, "\n");
-		fprintf(_logfile, "Residual:       ");
-		ppIRExpr(residual_verification_condition, _logfile);
-		fprintf(_logfile, "\n");
-		residual_verification_condition =
-			IRExpr_Binop(
-				Iop_And1,
-				residual_verification_condition,
-				IRExpr_Unop(
-					Iop_Not1,
-					t));
-		residual_verification_condition =
-			simplifyIRExpr(residual_verification_condition, optIn);
-		fprintf(_logfile, "After simplification: ");
-		ppIRExpr(residual_verification_condition,  _logfile);
-		fprintf(_logfile, "\n");
-		for (auto it = mai->begin(inductionAccesses[x]->rip); !it.finished(); it.advance())
-			logUseOfInduction(target_rip, it.dr());
-		if (residual_verification_condition->tag == Iex_Const &&
-		    ((IRExprConst *)residual_verification_condition.get())->con->Ico.U1 == 0) {
-			fprintf(_logfile, "\t\tCrash impossible.\n");
-			return NULL;
-		}
-	}
 
-	/* Okay, final check: is the verification condition satisfiable? */
-	if (!satisfiable(residual_verification_condition, optIn)) {
-		fprintf(_logfile, "\t\tVerification condition is unsatisfiable -> no bug\n");
-		return NULL;
+		/* Okay, final check: is the verification condition satisfiable? */
+		if (!satisfiable(residual_verification_condition, optIn)) {
+			fprintf(_logfile, "\t\tVerification condition is unsatisfiable -> no bug\n");
+			return NULL;
+		}
 	}
-#else
-	VexPtr<IRExpr, &ir_heap> residual_verification_condition(base_verification_condition);
-#endif
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
