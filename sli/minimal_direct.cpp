@@ -167,7 +167,12 @@ consider_rip(const DynAnalysisRip &my_rip,
 
 	fprintf(_logfile, "Considering %s...\n", my_rip.name());
 
-	timeoutTimer.nextDue = now() + 45;
+	int timeout;
+	if (getenv("SOS22_MINIMAL_DIRECT_TIMEOUT"))
+		timeout = atoi(getenv("SOS22_MINIMAL_DIRECT_TIMEOUT"));
+	else
+		timeout = 45;
+	timeoutTimer.nextDue = now() + timeout;
 	timeoutTimer.schedule();
 
 	struct timeval start;
