@@ -90,6 +90,16 @@ main(int argc, char *argv[])
 		struct timeval start;
 		struct timeval end;
 		pid_t child;
+		pid_t timeout;
+		pid_t exited;
+
+		timeout = fork();
+		if (timeout == -1)
+			err(1, "fork() timeout");
+		if (timeout == 0) {
+			sleep(180);
+			_exit(0);
+		}
 
 		gettimeofday(&start, NULL);
 		child = fork();
@@ -100,8 +110,7 @@ main(int argc, char *argv[])
 			execv(argv[0], argv);
 			err(1, "execv(%s) failed", argv[0]);
 		}
-		if (waitpid(child, NULL, 0) != child)
-			err(1, "waiting for child");
+		exited = wait(NULL);
 		gettimeofday(&end, NULL);
 
 		end.tv_sec -= start.tv_sec;
@@ -110,8 +119,17 @@ main(int argc, char *argv[])
 			end.tv_sec--;
 			end.tv_usec += 1000000;
 		}
-		printf("%ld.%06ld\n", end.tv_sec, end.tv_usec);
+		if (exited == timeout)
+			printf("%ld.%06ld T\n", end.tv_sec, end.tv_usec);
+		else
+			printf("%ld.%06ld\n", end.tv_sec, end.tv_usec);
 		fflush(stdout);
+
+		if (exited == timeout)
+			kill(child, 9);
+		else
+			kill(timeout, 9);
+		wait(NULL);
 	}
 	return 0;
 }
