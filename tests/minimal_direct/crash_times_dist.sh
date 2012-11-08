@@ -14,7 +14,7 @@ t=$(mktemp)
 check_dist < $data > $t
 if grep -q "Cannot reject normality " "$t"
 then
-    mean=$(grep "pop stats" "$" | sed 's/.*mean = \([-0-9.]*\),.*/\1/')
+    mean=$(grep "pop stats" "$t" | sed 's/.*mean = \([-0-9.]*\),.*/\1/')
     sd=$(grep "pop stats" "$t" | sed 's/.*sd = \([-0-9.]*\),.*/\1/')
     rm "$t"
     echo "\$$mean \\pm $sd\$"
