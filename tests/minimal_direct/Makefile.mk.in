@@ -110,7 +110,7 @@ ${exename}.summaries: minimal_direct ${static_files} machines
 	rm -rf \$@ crash_summaries induction.log logs generated_patch.c && \\
 	mkdir logs && \\
 	mkdir crash_summaries && \\
-	./minimal_direct ${static_files} && \\
+	SOS22_MINIMAL_DIRECT_TIMEOUT=600 ./minimal_direct ${static_files} && \\
 	mv crash_summaries ${exename}.summaries
 clean_dirs += ${exename}.summaries
 EOF
@@ -125,7 +125,7 @@ ${exename}.summaries: minimal_direct ${static_files} machines
 	rm -rf \$@ crash_summaries induction.log logs generated_patch.c && \\
 	mkdir logs && \\
 	mkdir crash_summaries && \\
-	./minimal_direct ${static_files} assertions && \\
+	SOS22_MINIMAL_DIRECT_TIMEOUT=600 ./minimal_direct ${static_files} assertions && \\
 	mv crash_summaries ${exename}.summaries
 clean_dirs += ${exename}.summaries
 EOF
