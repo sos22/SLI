@@ -1063,7 +1063,19 @@ struct patchStrategy {
 		return MustInterpret.size() + Cont.size();
 	}
 	bool operator<(const patchStrategy &o) const {
-		return size() > o.size();
+		if (size() > o.size())
+			return true;
+		if (size() < o.size())
+			return false;
+		if (MustInterpret < o.MustInterpret)
+			return true;
+		if (MustInterpret > o.MustInterpret)
+			return false;
+		if (Patch < o.Patch)
+			return true;
+		if (Patch > o.Patch)
+			return true;
+		return Cont < o.Cont;
 	}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "MI: {");
