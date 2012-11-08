@@ -1182,11 +1182,14 @@ buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 		initPs.MustInterpret.insert(r);
 	}
 
+	std::set<patchStrategy> visited;
 	std::priority_queue<patchStrategy> pses;
 	pses.push(initPs);
 	while (!pses.empty()) {
 		patchStrategy next(pses.top());
 		pses.pop();
+		if (!visited.insert(next).second)
+			continue;
 		if (patchSearch(oracle, next, pses)) {
 			/* We have a solution. */
 			ced.patchPoints = next.Patch;
