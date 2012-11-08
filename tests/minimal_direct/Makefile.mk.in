@@ -5,6 +5,7 @@ emit_rules_for_bug() {
     echo "# emit_rules_for_bug $*"
     local bugname="${MD_TEST_DIR}/$1"
     local exename="${MD_TEST_DIR}/$2"
+    local include_perf="$3"
     local static_files="${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db"
     cat <<EOF
 ${bugname}.interp.so: ${bugname}.cep.c cep_interpreter.o
@@ -37,12 +38,17 @@ ${bugname}.build_interp_time: timing ced_to_cep enforce_crash cep_interpreter.o 
 	./timing 10 ${bugname}.build_interp_time ./tests/minimal_direct/build_interp.sh ${bugname}
 clean_files += ${bugname}.build_interp_time
 
+MD_PERF_FILES+=${bugname}.crash_times_dist ${bugname}.S.crash_times_dist ${bugname}.build_interp_time
+EOF
+    if ! [ -z "$include_perf" ]
+    then
+	cat <<EOF
 ${bugname}.perf_dists: ${MD_TEST_DIR}/harness ${exename}.exe ${bugname}.fix.so ./tests/minimal_direct/perf_dist.sh /home/sos22/bin/check_dist /home/sos22/bin/discard_outliers.py
 	./tests/minimal_direct/perf_dist.sh ${exename}.exe "${bugname}.fix.so" ${bugname}.perf_data > ${bugname}.perf_dists
 clean_files += ${bugname}.perf_dists ${bugname}.perf_data
-
-MD_PERF_FILES+=${bugname}.crash_times_dist ${bugname}.S.crash_times_dist ${bugname}.build_interp_time ${bugname}.perf_dists
+MD_PERF_FILES += ${bugname}.perf_dists
 EOF
+    fi
     for p in interp.so fix.c fix.so ced summary{,.canon0,.canon2,.canon3,.canon4} cep.c
     do
 	echo "clean_files+=${bugname}.${p}"
@@ -70,6 +76,14 @@ ${exename}.db.timing: ${exename}.exe ${exename}.types.canon ${exename}.bcg stati
 	./timing 10 ${exename}.db.timing ./static ${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db
 .PRECIOUS: ${exename}.exe ${exename}.types ${exename}.bcg
 EOF
+
+    if [ "$nr_summaries" -eq 1 ]
+    then
+	single_bug=y
+    else
+	single_bug=""
+    fi
+
     for i in $(seq 0 $((${nr_summaries} - 1)) )
     do
 	cat <<EOF
@@ -77,7 +91,7 @@ ${exename}~${i}.summary: ${exename}.summaries
 	! [ -e $</${nr_summaries} ] && [ -e $</${i} ] && cp \$</${i} \$@
 clean_files += ${exename}~${i}.summary
 EOF
-	emit_rules_for_bug "$1~$i" "$1"
+	emit_rules_for_bug "$1~$i" "$1" "$single_bug"
     done
 
     for p in types bcg types.canon db exe db.timing
@@ -163,5 +177,7 @@ EOF
     cat <<EOF
 all_md_tests: \$(ALL_MD_TESTS)
 all_md_perf: \$(MD_PERF_FILES)
+
+.PRECIOUS: \$(MD_PERF_FILES)
 EOF
 }
