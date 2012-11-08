@@ -1074,7 +1074,7 @@ struct patchStrategy {
 		if (Patch < o.Patch)
 			return true;
 		if (Patch > o.Patch)
-			return true;
+			return false;
 		return Cont < o.Cont;
 	}
 	void prettyPrint(FILE *f) const {
