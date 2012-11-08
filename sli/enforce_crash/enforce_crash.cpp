@@ -1099,7 +1099,8 @@ patchSearch(Oracle *oracle,
 	input.prettyPrint(stdout);
 	unsigned long needed = *input.MustInterpret.begin();
 
-	printf("\tLook at %lx\n", needed);
+	if (debug_declobber_instructions)
+		printf("\tLook at %lx\n", needed);
 	patchStrategy c(input);
 	/* @needed is definitely going to be interpreted after
 	 * this. */
@@ -1149,8 +1150,10 @@ patchSearch(Oracle *oracle,
 			patched.MustInterpret.insert(predecessors.begin(), predecessors.end());
 		}
 		thingsToTry.push(patched);
-		printf("Patch to: ");
-		patched.prettyPrint(stdout);
+		if (debug_declobber_instructions) {
+			printf("Patch to: ");
+			patched.prettyPrint(stdout);
+		}
 	}
 
 	/* Try expanding to predecessors. */
@@ -1158,8 +1161,10 @@ patchSearch(Oracle *oracle,
 	oracle->findPredecessors(needed, predecessors);
 	c.MustInterpret.insert(predecessors.begin(), predecessors.end());
 	thingsToTry.push(c);
-	printf("Unpatched: ");
-	c.prettyPrint(stdout);
+	if (debug_declobber_instructions) {
+		printf("Unpatched: ");
+		c.prettyPrint(stdout);
+	}
 	return false;
 }
 
