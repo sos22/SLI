@@ -150,7 +150,7 @@ EOF
     do
 	emit_rules_for_exe_segv bug${bug} 2
     done
-    for bug in 5
+    for bug in 5 11 12
     do
 	emit_rules_for_exe_assert bug${bug} 2
     done
