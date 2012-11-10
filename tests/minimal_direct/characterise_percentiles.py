@@ -14,7 +14,7 @@ def percentile(n):
     if idx == int(idx):
         return data[int(idx)]
     l_idx = int(idx)
-    h_idx = l + 1
+    h_idx = l_idx + 1
     l = data[l_idx]
     h = data[h_idx]
     return l + (h - l) * (idx - l_idx)

@@ -40,6 +40,7 @@
 static unsigned long prng_state = 0xe6b16c0386053e31;
 static int disable_sideconditions;
 static int force_delay; /* -1 -> on send, 0 -> use rebalancer, 1 -> on receive */
+static int skip_context_check;
 
 extern void clone(void);
 static void (*__GI__exit)(int res);
@@ -400,6 +401,8 @@ static int
 ctxt_matches(const struct cep_entry_ctxt *ctxt, const struct reg_struct *regs)
 {
 	unsigned x;
+	if (skip_context_check)
+		return 1;
 	for (x = 0; x < ctxt->nr_stack_slots; x++) {
 		unsigned long guest_val;
 		if (!fetch_guest(&guest_val, regs->rsp + ctxt->stack[x].offset))
@@ -2991,6 +2994,8 @@ activate(void)
 		force_delay = -1;
 	else if (getenv("SOS22_DELAY_RX"))
 		force_delay = 1;
+	if (getenv("SOS22_DISABLE_CTXT_CHECK"))
+		skip_context_check = 1;
 
 	printf("Patching %s\n", buf);
 
