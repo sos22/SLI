@@ -34,6 +34,7 @@ main(int argc, char *argv[])
 	const char *enforcer;
 	bool randomise = false;
 	bool no_sideconditions = false;
+	bool usedc = false;
 	long nr_iters = 0;
 	int i;
 
@@ -72,6 +73,8 @@ main(int argc, char *argv[])
 
 	if (!strcmp(enforcer, "<none>")) {
 		unsetenv("LD_PRELOAD");
+	} else if (!strcmp(enforcer, "<dc>")) {
+		usedc = true;
 	} else {
 		if (access(enforcer, R_OK))
 			errx(1, "%s must be readable", enforcer);
@@ -106,8 +109,17 @@ main(int argc, char *argv[])
 		if (child == -1)
 			err(1, "fork()");
 		if (child == 0) {
+			setpgid(0, 0);
 			close(1);
-			execv(argv[0], argv);
+			if (usedc) {
+				char **args;
+				args = calloc(sizeof(char *), argc + 2);
+				args[0] = "/local/scratch/sos22/notdc/ndc";
+				memcpy(args + 1, argv, sizeof(char *) * argc);
+				execv(args[0], args);
+			} else {
+				execv(argv[0], argv);
+			}
 			err(1, "execv(%s) failed", argv[0]);
 		}
 		exited = wait(NULL);
@@ -126,7 +138,7 @@ main(int argc, char *argv[])
 		fflush(stdout);
 
 		if (exited == timeout)
-			kill(child, 9);
+			kill(-child, 9);
 		else
 			kill(timeout, 9);
 		wait(NULL);

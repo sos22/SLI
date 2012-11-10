@@ -9,7 +9,7 @@ set -e
 
 # First attempt: Can we get away with just claiming it's normal or
 # uniform?
-SOS22_RUN_FOREVER=1 ./md_test_dir/harness -n 20 $harness_args $enforcer $exe > $data
+SOS22_RUN_FOREVER=1 ./md_test_dir/harness -n 20 -r $harness_args $enforcer $exe > $data
 if grep -q "T" "$data"
 then
     if grep -v -q "T" "$data"
@@ -65,7 +65,7 @@ do
     then
 	break
     fi
-    SOS22_RUN_FOREVER=1 ./md_test_dir/harness -n $((100 - $got)) $harness_args $enforcer $exe >> $data
+    SOS22_RUN_FOREVER=1 ./md_test_dir/harness -n $((100 - $got)) -r $harness_args $enforcer $exe >> $data
 done
 timeouts=$(mk_timeouts)
 t2=$(mktemp)
