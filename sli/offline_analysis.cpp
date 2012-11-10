@@ -949,11 +949,7 @@ localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 }
 
 static CrashSummary *
-considerStoreCFG(const DynAnalysisRip &
-#if CONFIG_USE_INDUCTION
-		 target_rip
-#endif
-		 ,
+considerStoreCFG(const DynAnalysisRip &target_rip,
 		 const VexPtr<CFGNode, &ir_heap> cfg,
 		 const VexPtr<Oracle> &oracle,
 		 VexPtr<StateMachine, &ir_heap> probeMachine,
