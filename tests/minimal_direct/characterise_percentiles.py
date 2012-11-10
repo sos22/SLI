@@ -19,4 +19,4 @@ def percentile(n):
     h = data[h_idx]
     return l + (h - l) * (idx - l_idx)
 
-print "[%f; %f; %f]_{%d}" % (percentile(10), percentile(50), percentile(90), len(data))
+print "$[%f; %f; %f]_{%d}$" % (percentile(10), percentile(50), percentile(90), len(data))

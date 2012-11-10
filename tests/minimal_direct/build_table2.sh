@@ -13,7 +13,7 @@ _make() {
 
 get_dist() {
     _make md_test_dir/"$1".crash_times_dist
-    sed 's/\\/\\\\/g' md_test_dir/$1.crash_times_dist
+    cat md_test_dir/$1.crash_times_dist
 }
 
 cat tests/minimal_direct/bug_table.txt | while read exe_name exe_desc nr_bugs

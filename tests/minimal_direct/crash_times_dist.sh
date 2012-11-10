@@ -18,7 +18,7 @@ then
 	exit 0
     fi
     n=$(grep "T" "$data" | wc -l)
-    echo "\$timeout = ${n}/20"
+    echo "\$timeout = ${n}/20\$"
     exit 0
 fi
 
