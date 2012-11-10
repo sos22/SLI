@@ -38,6 +38,10 @@ ${bugname}.build_interp_time: timing ced_to_cep enforce_crash cep_interpreter.o 
 	./timing 10 ${bugname}.build_interp_time ./tests/minimal_direct/build_interp.sh ${bugname}
 clean_files += ${bugname}.build_interp_time
 
+${bugname}.build_fix_time: timing sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c summary_to_fix ${static_files} ${bugname}.summary.canon4 ./tests/minimal_direct/build_fix.sh
+	./timing 10 ${bugname}.build_fix_time ./tests/minimal_direct/build_fix.sh ${bugname}
+clean_files += ${bugname}.build_fix_time
+
 MD_PERF_FILES+=${bugname}.crash_times_dist ${bugname}.S.crash_times_dist ${bugname}.build_interp_time
 EOF
     if ! [ -z "$include_perf" ]
@@ -111,7 +115,7 @@ ${exename}.perf_dists: ${MD_TEST_DIR}/harness ${exename}.exe ./tests/minimal_dir
 	./tests/minimal_direct/perf_dist.sh ${exename}.exe "" ${exename}.perf_data > ${exename}.perf_dists
 clean_files += ${exename}.perf_dists ${exename}.perf_data
 
-MD_PERF_FILES+=${exename}.build_summary_time ${exename}.crash_times_dist ${exename}.perf_dists
+MD_PERF_FILES+=${exename}.build_summary_time ${exename}.crash_times_dist ${exename}.perf_dists ${exename}.db.timing
 EOF
 
 }
@@ -158,11 +162,15 @@ EOF
     do
 	emit_rules_for_exe_segv bug${bug} 1
     done
+    for bug in 11 12
+    do
+	emit_rules_for_exe_assert bug${bug} 1
+    done
     for bug in 9
     do
 	emit_rules_for_exe_segv bug${bug} 2
     done
-    for bug in 5 11 12
+    for bug in 5
     do
 	emit_rules_for_exe_assert bug${bug} 2
     done

@@ -97,6 +97,7 @@ main(int argc, char *argv[])
 		usleep(1);
 	}
 
+	printf("Survived, %d read events and %d write events\n", read_events[0] + read_events[1], write_events);
 	printf("%d,%d read events, %d write\n", read_events[0], read_events[1], write_events);
 	return 0;
 }

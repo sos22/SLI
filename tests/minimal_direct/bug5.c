@@ -9,10 +9,7 @@
 static int volatile global1;
 static int volatile global2;
 
-static volatile bool force_quit;
-
-#define STOP_ANALYSIS()					\
-	asm (".fill 100,1,0x90\n")
+#include "test.h"
 
 static void *
 thr_main(void *ign)
@@ -26,6 +23,7 @@ thr_main(void *ign)
 		assert(v1 == v2);
 		STOP_ANALYSIS();
 		usleep(10000);
+		read_cntr++;
 	}
 	return NULL;
 }
@@ -55,9 +53,11 @@ main()
 		global1 = 7;
 		global2 = 7;
 		STOP_ANALYSIS();
+		write_cntr++;
 	}
 
 	force_quit = true;
 	pthread_join(thr, NULL);
+	printf("Survived, %d read events and %d write events\n", read_cntr, write_cntr);
 	return 0;
 }

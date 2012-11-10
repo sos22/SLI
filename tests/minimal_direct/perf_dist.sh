@@ -6,11 +6,14 @@ data="$3"
 
 sample() {
     t=$(mktemp)
-    while true
+    cntr=0
+    while [ $cntr -lt 100 ]
     do
 	LD_PRELOAD=$preload $exe > $t && break
+	cntr=$(($cntr + 1))
     done
     grep "Survived" $t | sed 's/Survived, \([0-9]*\) read events and \([0-9]*\) write events.*/\1 \2/'
+    rm -f "$t"
 }
 
 get_dist() {

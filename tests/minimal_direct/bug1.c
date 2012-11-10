@@ -50,6 +50,6 @@ main()
 		write_cntr++;
 	}
 
-	printf("%d read events, %d write\n", read_cntr, write_cntr);
+	printf("Survived, %d read events and %d write events\n", read_cntr, write_cntr);
 	return 0;
 }

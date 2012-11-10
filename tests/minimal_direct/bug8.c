@@ -46,6 +46,6 @@ main()
 		write_events++;
 	}
 
-	printf("%ld read events, %ld write\n", read_events, write_events);
+	printf("Survived, %ld read events and %ld write events\n", read_events, write_events);
 	return 0;
 }
