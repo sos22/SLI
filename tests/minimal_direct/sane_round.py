@@ -16,4 +16,4 @@ mu += 0.5 * 10 **shift
 sigma += 0.5 * 10 **shift
 mu -= mu % (10 ** shift)
 sigma -= sigma % (10 ** shift)
-print "%f %f" % (mu, sigma)
+print "%.*f %.*f" % (-shift, mu, -shift, sigma)
