@@ -2745,7 +2745,7 @@ CrashExpression::get(IRExpr *e)
 			return CrashExpressionTemp::get(g->reg.asTemp());
 	}
 	case Iex_Const:
-		return CrashExpressionConst::get(((IRExprConst *)e)->con->Ico.U64);
+		return CrashExpressionConst::get(((IRExprConst *)e)->Ico.U64);
 	case Iex_Binop:
 		switch (((IRExprBinop *)e)->op) {
 #define do_binop(x, _1, _2)						\

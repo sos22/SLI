@@ -874,8 +874,8 @@ static Bool isU64 ( IRExpr* e, ULong n )
 {
   IRExprConst *c = dynamic_cast<IRExprConst *>(e);
   return toBool( c
-		 && c->con->tag == Ico_U64
-		 && c->con->Ico.U64 == n );
+		 && c->ty == Ity_I64
+		 && c->Ico.U64 == n );
 }
 
 IRExpr* guest_amd64_spechelper ( const char* function_name,
@@ -883,8 +883,8 @@ IRExpr* guest_amd64_spechelper ( const char* function_name,
 {
 #  define unop(_op,_a1) IRExpr_Unop((_op),(_a1))
 #  define binop(_op,_a1,_a2) IRExpr_Binop((_op),(_a1),(_a2))
-#  define mkU64(_n) IRExpr_Const(IRConst_U64(_n))
-#  define mkU8(_n)  IRExpr_Const(IRConst_U8(_n))
+#  define mkU64(_n) IRExpr_Const_U64(_n)
+#  define mkU8(_n)  IRExpr_Const_U8(_n)
 
    Int i, arity = 0;
    for (i = 0; args[i]; i++)

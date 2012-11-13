@@ -54,14 +54,6 @@ static IRRegArray *rawDupe(duplication_context &, const IRRegArray *inp)
 	return res;
 }
 
-static IRConst *rawDupe(duplication_context &, const IRConst *inp)
-{
-	IRConst *res = new IRConst();
-	res->tag = inp->tag;
-	res->Ico = inp->Ico;
-	return res;
-}
-
 static IRCallee *rawDupe(duplication_context &, const IRCallee *inp)
 {
 	IRCallee *res = new IRCallee();
@@ -132,7 +124,8 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	case Iex_Const: {
 		const IRExprConst *i = (const IRExprConst *)inp;
 		IRExprConst *res = new IRExprConst();
-		ctxt(&res->con, i->con, rawDupe);
+		res->ty = i->ty;
+		res->Ico = i->Ico;
 		return res;
 	}
 	case Iex_CCall: {

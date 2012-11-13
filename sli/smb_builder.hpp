@@ -49,17 +49,17 @@ public:
 static inline SMBPtr<SMBExpression>
 smb_const64(uint64_t k)
 {
-	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const(IRConst_U64(k))));
+	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const_U64(k)));
 }
 static inline SMBPtr<SMBExpression>
 smb_const32(uint32_t k)
 {
-	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const(IRConst_U32(k))));
+	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const_U32(k)));
 }
 static inline SMBPtr<SMBExpression>
 smb_const8(uint8_t k)
 {
-	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const(IRConst_U8(k))));
+	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const_U8(k)));
 }
 static inline SMBPtr<SMBExpression>
 smb_reg(const threadAndRegister &tr, IRType ty)

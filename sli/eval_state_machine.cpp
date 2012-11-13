@@ -116,7 +116,7 @@ public:
 		case Ity_I16:
 			if (rv.val8) {
 				IRExpr *acc = IRExpr_Unop(Iop_8Uto16, rv.val8);
-				IRExpr *mask = IRExpr_Const(IRConst_U16(0xff00));
+				IRExpr *mask = IRExpr_Const_U16(0xff00);
 				IRExpr *hi;
 				if (rv.val16) {
 					hi = rv.val16;
@@ -160,7 +160,7 @@ public:
 						IRExpr_Binop(
 							Iop_And32,
 							a,
-							IRExpr_Const(IRConst_U32(mask))));
+							IRExpr_Const_U32(mask)));
 				else
 					res = a;
 				mask = ~0xffff;
@@ -183,7 +183,7 @@ public:
 					IRExpr_Binop(
 						Iop_And32,
 						parent,
-						IRExpr_Const(IRConst_U32(mask))));
+						IRExpr_Const_U32(mask)));
 			else
 				res = parent;
 			rv.val8 = NULL;
@@ -208,7 +208,7 @@ public:
 						IRExpr_Binop(
 							Iop_And64,
 							a,
-							IRExpr_Const(IRConst_U64(mask))));
+							IRExpr_Const_U64(mask)));
 				else
 					res = a;
 				mask = ~0xfffful;
@@ -222,7 +222,7 @@ public:
 						IRExpr_Binop(
 							Iop_And64,
 							a,
-							IRExpr_Const(IRConst_U64(mask))));
+							IRExpr_Const_U64(mask)));
 				else
 					res = a;
 				mask = ~0xfffffffful;
@@ -235,7 +235,7 @@ public:
 						IRExpr_Binop(
 							Iop_And64,
 							rv.val64,
-							IRExpr_Const(IRConst_U64(mask))));
+							IRExpr_Const_U64(mask)));
 				else
 					res = rv.val64;
 			} else {
@@ -246,7 +246,7 @@ public:
 						IRExpr_Binop(
 							Iop_And64,
 							IRExpr_Get(reg, Ity_I64),
-							IRExpr_Const(IRConst_U64(mask))));
+							IRExpr_Const_U64(mask)));
 				
 			}
 			/* res might still be NULL.  That's okay; it
@@ -524,7 +524,7 @@ public:
 #endif
 		)
 		: assumption(initialAssumption),
-		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const(IRConst_U1(1)) : NULL),
+		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const_U1(true) : NULL),
 		  atomic(false),
 		  currentState(sm->root)
 #ifndef NDEBUG
@@ -561,7 +561,7 @@ EvalContext::expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &c
 		   able to simplify the path constraint down to 1
 		   earlier.  Consider that a lucky break and simplify
 		   it now. */
-		if (((IRExprConst *)e)->con->Ico.U1) {
+		if (((IRExprConst *)e)->Ico.U1) {
 			assumption = e;
 			return true;
 		} else {
@@ -585,8 +585,8 @@ EvalContext::expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &c
 	if (e2->tag == Iex_Const) {
 		/* If X & ¬Y is definitely true, Y is definitely
 		 * false and X is definitely true. */
-		if (((IRExprConst *)e2)->con->Ico.U1) {
-			assumption = IRExpr_Const(IRConst_U1(1));
+		if (((IRExprConst *)e2)->Ico.U1) {
+			assumption = IRExpr_Const_U1(true);
 			return false;
 		}
 
@@ -807,7 +807,7 @@ EvalContext::evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt)
 	IRExpr *e;
 	if (what->tag == Iex_Const) {
 		IRExprConst *iec = (IRExprConst *)what;
-		if (iec->con->Ico.U1)
+		if (iec->Ico.U1)
 			return tr_true;
 		else
 			return tr_false;
@@ -821,7 +821,7 @@ EvalContext::evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt)
 		opt);
 	if (e->tag == Iex_Const) {
 		IRExprConst *iec = (IRExprConst *)e;
-		if (iec->con->Ico.U1) {
+		if (iec->Ico.U1) {
 			/* We just proved that the assumption is
 			 * definitely true. */
 			warning("Path assumption reduces to true?\n");
@@ -843,7 +843,7 @@ EvalContext::evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt)
 		opt);
 	if (e->tag == Iex_Const) {
 		IRExprConst *iec = (IRExprConst *)e;
-		if (iec->con->Ico.U1) {
+		if (iec->Ico.U1) {
 			/* So X & ~Y is definitely true, where X is
 			   our assumption and Y is the thing which
 			   we're after.  That tells us that the
@@ -1107,7 +1107,7 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 	if (assumption)
 		consumeEvalPath.needsAccAssumptions = true;
 	else
-		assumption = IRExpr_Const(IRConst_U1(1));
+		assumption = IRExpr_Const_U1(true);
 	enumEvalPaths(mai, sm, assumption, oracle, opt, consumeEvalPath, token);
 
 	if (debug_survival_constraint)
@@ -1123,7 +1123,7 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 			       __func__, nameIRExpr(res));
 		return res;
 	} else
-		return IRExpr_Const(IRConst_U1(1));
+		return IRExpr_Const_U1(true);
 }
 
 /* Assume that @sm executes atomically.  Figure out a constraint on
@@ -1669,7 +1669,7 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
 		   store machine unconditionally dereferences it.
 		   Easy to deal with: just return the constant 1, so
 		   that we don't report a bug. */
-		return IRExpr_Const(IRConst_U1(1));
+		return IRExpr_Const_U1(true);
 	}
 
 	return survivalConstraintIfExecutedAtomically(
@@ -1756,7 +1756,7 @@ writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 		   survive.  That tells us that the store machine is
 		   never suitable, so the suitability constraint is
 		   just 0. */
-		return IRExpr_Const(IRConst_U1(0));
+		return IRExpr_Const_U1(false);
 	}
 	return survivalConstraintIfExecutedAtomically(
 		mai,
@@ -1813,5 +1813,5 @@ collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		}
 	} consumer;
 	consumer.out = &out;
-	enumEvalPaths(mai, sm, IRExpr_Const(IRConst_U1(1)), oracle, opt, consumer, token, true);
+	enumEvalPaths(mai, sm, IRExpr_Const_U1(true), oracle, opt, consumer, token, true);
 }

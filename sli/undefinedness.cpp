@@ -211,7 +211,7 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 		if (addr == UNDEFINED_EXPR)
 			return UNDEFINED_EXPR;
 		if (addr->tag == Iex_Const) {
-			unsigned long addrc = ((IRExprConst *)addr)->con->Ico.U64;
+			unsigned long addrc = ((IRExprConst *)addr)->Ico.U64;
 			bool isAcc;
 			if (opt.addressAccessible(addrc, &isAcc) && !isAcc)
 				return UNDEFINED_EXPR;
@@ -307,25 +307,25 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 		undefined:
 		switch (i->op) {
 		case Iop_And1:
-			return IRExpr_Const(IRConst_U1(0));
+			return IRExpr_Const_U1(false);
 		case Iop_And8:
-			return IRExpr_Const(IRConst_U8(0));
+			return IRExpr_Const_U8(0);
 		case Iop_And16:
-			return IRExpr_Const(IRConst_U16(0));
+			return IRExpr_Const_U16(0);
 		case Iop_And32:
-			return IRExpr_Const(IRConst_U32(0));
+			return IRExpr_Const_U32(0);
 		case Iop_And64:
-			return IRExpr_Const(IRConst_U64(0));
+			return IRExpr_Const_U64(0);
 		case Iop_Or1:
-			return IRExpr_Const(IRConst_U1(1));
+			return IRExpr_Const_U1(true);
 		case Iop_Or8:
-			return IRExpr_Const(IRConst_U8(0xff));
+			return IRExpr_Const_U8(0xff);
 		case Iop_Or16:
-			return IRExpr_Const(IRConst_U16(0xffff));
+			return IRExpr_Const_U16(0xffff);
 		case Iop_Or32:
-			return IRExpr_Const(IRConst_U32(~0u));
+			return IRExpr_Const_U32(~0u);
 		case Iop_Or64:
-			return IRExpr_Const(IRConst_U64(~0ul));
+			return IRExpr_Const_U64(~0ul);
 		case Iop_Add8: case Iop_Add16: case Iop_Add32: case Iop_Add64:
 		case Iop_Xor8: case Iop_Xor16: case Iop_Xor32: case Iop_Xor64:
 			return UNDEFINED_EXPR;

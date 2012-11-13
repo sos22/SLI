@@ -154,7 +154,7 @@ compare_expressions(IRExpr *a, IRExpr *b)
 				    a->contents[0]->tag == Iex_Const &&
 				    a->contents[1]->tag == Iex_Get) {
 					tr = ((IRExprGet *)a->contents[1])->reg;
-					offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
+					offset = ((IRExprConst *)a->contents[0])->Ico.U64;
 				}
 			}
 		}

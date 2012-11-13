@@ -60,7 +60,7 @@ ControlDominationMap::init(StateMachine *sm,
 	   states in the right order. */
 	typedef std::pair<int, StateMachineState *> needsUpdateEntryT;
 	std::set<needsUpdateEntryT> needsUpdate;
-	dominatingExpressions[sm->root] = IRExpr_Const(IRConst_U1(1));
+	dominatingExpressions[sm->root] = IRExpr_Const_U1(true);
 	needsUpdate.insert(needsUpdateEntryT(0, sm->root));
 	struct _ {
 		const AllowableOptimisations &opt;
@@ -159,7 +159,7 @@ ControlDominationMap::init(StateMachine *sm,
 					break;
 				}
 				case StateMachineSideEffect::Unreached:
-					exprAtExit = IRExpr_Const(IRConst_U1(0));
+					exprAtExit = IRExpr_Const_U1(false);
 					break;
 				case StateMachineSideEffect::AssertFalse: {
 					StateMachineSideEffectAssertFalse *a = (StateMachineSideEffectAssertFalse *)effecting->sideEffect;

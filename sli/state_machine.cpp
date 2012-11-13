@@ -101,7 +101,7 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 	condition = optimiseIRExprFP(condition, opt, done_something);
 	if (condition->tag == Iex_Const) {
 		*done_something = true;
-		if (((IRExprConst *)condition)->con->Ico.U1)
+		if (((IRExprConst *)condition)->Ico.U1)
 			return trueTarget->optimise(opt, done_something);
 		else
 			return falseTarget->optimise(opt, done_something);
@@ -241,8 +241,8 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		IRExpr *compositeAssertion =
 			IRExpr_Mux0X(
 				condition,
-				falseAssert ? falseAssert : IRExpr_Const(IRConst_U1(0)),
-				trueAssert ? trueAssert : IRExpr_Const(IRConst_U1(0)));
+				falseAssert ? falseAssert : IRExpr_Const_U1(false),
+				trueAssert ? trueAssert : IRExpr_Const_U1(false));
 		compositeAssertion = optimiseIRExprFP(compositeAssertion, opt, done_something);
 		return (new StateMachineSideEffecting(
 				dbg_origin,
@@ -293,11 +293,11 @@ StateMachineSideEffect *
 StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
-	if (value->tag == Iex_Const && ((IRExprConst *)value)->con->Ico.U1) {
+	if (value->tag == Iex_Const && ((IRExprConst *)value)->Ico.U1) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
-	if (value->tag == Iex_Const && !((IRExprConst *)value)->con->Ico.U1) {
+	if (value->tag == Iex_Const && !((IRExprConst *)value)->Ico.U1) {
 		*done_something = true;
 		return NULL;
 	}

@@ -121,21 +121,23 @@ bool parseIRType(IRType *out, const char *str, const char **suffix)
   return false;
 }
 
-void ppIRConst ( IRConst* con, FILE* f )
+static void ppIRConst ( const IRExprConst *con, FILE* f )
 {
    vassert(sizeof(ULong) == sizeof(Double));
-   switch (con->tag) {
-      case Ico_U1:   fprintf(f,  "%d:I1",        con->Ico.U1 ? 1 : 0); return;
-      case Ico_U8:   fprintf(f,  "0x%x:I8",      (UInt)(con->Ico.U8)); return;
-      case Ico_U16:  fprintf(f,  "0x%x:I16",     (UInt)(con->Ico.U16)); return;
-      case Ico_U32:  fprintf(f,  "0x%x:I32",     (UInt)(con->Ico.U32)); return;
-      case Ico_U64:  fprintf(f,  "0x%llx:I64",   (ULong)(con->Ico.U64)); return;
-      case Ico_U128: fprintf(f,  "U128{0x%llx, 0x%llx}", con->Ico.U128.hi, con->Ico.U128.lo); return;
+   switch (con->ty) {
+      case Ity_I1:   fprintf(f,  "%d:I1",        con->Ico.U1 ? 1 : 0); return;
+      case Ity_I8:   fprintf(f,  "0x%x:I8",      (UInt)(con->Ico.U8)); return;
+      case Ity_I16:  fprintf(f,  "0x%x:I16",     (UInt)(con->Ico.U16)); return;
+      case Ity_I32:  fprintf(f,  "0x%x:I32",     (UInt)(con->Ico.U32)); return;
+      case Ity_I64:  fprintf(f,  "0x%llx:I64",   (ULong)(con->Ico.U64)); return;
+      case Ity_I128: fprintf(f,  "U128{0x%llx, 0x%llx}", con->Ico.U128.hi, con->Ico.U128.lo); return;
+      case Ity_INVALID:
+	break;
    }
    abort();
 }
 
-static bool parseIRConst(IRConst **out, const char *str, const char **suffix)
+static bool parseIRConst(IRExprConst **out, const char *str, const char **suffix)
 {
   int val1;
   unsigned long val2;
@@ -143,20 +145,20 @@ static bool parseIRConst(IRConst **out, const char *str, const char **suffix)
 
   if (parseDecimalInt(&val1, str, &str2) &&
       parseThisString(":I1", str2, suffix)) {
-    *out = IRConst_U1(val1);
+    *out = IRExpr_Const_U1(val1);
     return true;
   }
   if (parseThisString("0x", str, &str2) &&
       parseHexUlong(&val2, str2, &str)) {
     *out = NULL;
     if (parseThisString(":I8", str, suffix))
-      *out = IRConst_U8(val2);
+      *out = IRExpr_Const_U8(val2);
     else if (parseThisString(":I16", str, suffix))
-      *out = IRConst_U16(val2);
+      *out = IRExpr_Const_U16(val2);
     else if (parseThisString(":I32", str, suffix))
-      *out = IRConst_U32(val2);
+      *out = IRExpr_Const_U32(val2);
     else if (parseThisString(":I64", str, suffix))
-      *out = IRConst_U64(val2);
+      *out = IRExpr_Const_U64(val2);
     if (*out)
       return true;
   }
@@ -165,19 +167,28 @@ static bool parseIRConst(IRConst **out, const char *str, const char **suffix)
       parseThisChar('}', str, suffix)) {
     union { ULong x; Double y; } u;
     u.x = val2;
-    *out = IRConst_F64(u.y);
+    *out = IRExpr_Const_F64(u.y);
     return true;
   }
   if (parseThisString("F64i{0x", str, &str) &&
       parseHexUlong(&val2, str, &str) &&
       parseThisChar('}', str, suffix)) {
-    *out = IRConst_F64i(val2);
+    *out = IRExpr_Const_F64i(val2);
     return true;
   }
   if (parseThisString("V128{0x", str, &str) &&
       parseHexUlong(&val2, str, &str) &&
       parseThisChar('}', str, suffix)) {
-    *out = IRConst_V128(val2);
+    *out = IRExpr_Const_V128(val2);
+    return true;
+  }
+  unsigned long val3;
+  if (parseThisString("U128{0x", str, &str) &&
+      parseHexUlong(&val2, str, &str) &&
+      parseThisString(", 0x", str, &str) &&
+      parseHexUlong(&val3, str, &str) &&
+      parseThisString("}", str, suffix)) {
+    *out = IRExpr_Const_U128(val2, val3);
     return true;
   }
   return false;
@@ -1113,9 +1124,9 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
     }
   } else if (str[0] == 'F') {
     /* Could be a float const */
-    IRConst *c;
+    IRExprConst *c;
     if (parseIRConst(&c, str, suffix)) {
-      *out = IRExpr_Const(c);
+      *out = c;
       return true;
     }
 
@@ -1142,9 +1153,9 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
     /* Fall through and try to parse as a prefix irop. */
   } else if ((str[0] >= '0' && str[0] <= '9') || str[0] == 'V' || str[0] == '-') {
     /* Constant of some sort. */
-    IRConst *c;
+    IRExprConst *c;
     if (parseIRConst(&c, str, suffix)) {
-      *out = IRExpr_Const(c);
+      *out = c;
       return true;
     }
 
@@ -1419,7 +1430,7 @@ IRExprLoad::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
 void
 IRExprConst::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const
 {
-      ppIRConst(con, f);
+  ppIRConst(this, f);
 }
 void
 IRExprCCall::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
@@ -1646,77 +1657,84 @@ void ppIRSB ( IRSB* bb, FILE* f )
 
 /* Constructors -- IRConst */
 
-IRConst* IRConst_U1 ( Bool bit )
+IRExprConst* IRExpr_Const_U1 ( bool bit )
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U1;
+   IRExprConst* c = new IRExprConst();
+   c->ty     = Ity_I1;
    c->Ico.U1  = bit;
-   /* call me paranoid; I don't care :-) */
    vassert(bit == False || bit == True);
    return c;
 }
-IRConst* IRConst_U8 ( UChar u8 )
+IRExprConst* IRExpr_Const_U8 ( unsigned char u8)
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U8;
+   IRExprConst* c = new IRExprConst();
+   c->ty     = Ity_I8;
    c->Ico.U8  = u8;
    return c;
 }
-IRConst* IRConst_U16 ( UShort u16 )
+IRExprConst* IRExpr_Const_U16 ( unsigned short u16 )
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U16;
+   IRExprConst* c = new IRExprConst();
+   c->ty     = Ity_I16;
    c->Ico.U16 = u16;
    return c;
 }
-IRConst* IRConst_U32 ( UInt u32 )
+IRExprConst* IRExpr_Const_U32 ( unsigned u32 )
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U32;
+   IRExprConst* c = new IRExprConst();
+   c->ty      = Ity_I32;
    c->Ico.U32 = u32;
    return c;
 }
-static VexPtr<IRConst, &ir_heap> magicConstant0;
-IRConst* IRConst_U64 ( ULong u64 )
+static VexPtr<IRExprConst, &ir_heap> magicConstant0;
+IRExprConst* IRExpr_Const_U64 ( unsigned long u64 )
 {
    if (u64 == 0) {
      if (!magicConstant0) {
-       magicConstant0 = new IRConst();
-       magicConstant0->tag = Ico_U64;
+       magicConstant0 = new IRExprConst();
+       magicConstant0->ty = Ity_I64;
        magicConstant0->Ico.U64 = 0;
      }
      return magicConstant0;
    }
 
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U64;
+   IRExprConst* c = new IRExprConst();
+   c->ty      = Ity_I64;
    c->Ico.U64 = u64;
    return c;
 }
-IRConst* IRConst_F64 ( Double f64 )
+IRExprConst* IRExpr_Const_F64 ( Double f64 )
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U64;
+   IRExprConst* c = new IRExprConst();
+   c->ty     = Ity_I64;
    *(double *)&c->Ico.U64 = f64;
    return c;
 }
-IRConst* IRConst_F64i ( ULong f64i )
+IRExprConst* IRExpr_Const_F64i ( unsigned long f64i )
 {
-   IRConst* c = new IRConst();
-   c->tag      = Ico_U64;
+   IRExprConst* c = new IRExprConst();
+   c->ty      = Ity_I64;
    c->Ico.U64 = f64i;
    return c;
 }
-IRConst* IRConst_V128 ( UShort con )
+IRExprConst* IRExpr_Const_V128 ( unsigned short con )
 {
-   IRConst* c = new IRConst();
+   IRExprConst* c = new IRExprConst();
    unsigned long a = con;
    a <<= 16;
    a |= con;
    a = a | (a << 32);
-   c->tag      = Ico_U128;
+   c->ty      = Ity_I128;
    c->Ico.U128.lo = a;
    c->Ico.U128.hi = a;
+   return c;
+}
+IRExprConst* IRExpr_Const_U128 ( unsigned long hi, unsigned long lo )
+{
+   IRExprConst* c = new IRExprConst();
+   c->ty      = Ity_I128;
+   c->Ico.U128.lo = lo;
+   c->Ico.U128.hi = hi;
    return c;
 }
 
@@ -1923,19 +1941,6 @@ IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
    e->addr = addr;
    return e;
 }
-IRExpr* IRExpr_Const ( IRConst* con ) {
-   if (con == magicConstant0) {
-     static VexPtr<IRExprConst, &ir_heap> cached;
-     if (!cached) {
-       cached = new IRExprConst();
-       cached->con = con;
-     }
-     return cached;
-   }
-   IRExprConst* e        = new IRExprConst();
-   e->con = con;
-   return e;
-}
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
    IRExprCCall* e          = new IRExprCCall();
    e->cee   = cee;
@@ -1990,7 +1995,7 @@ IRExpr* IRExpr_Associative(IROp op, ...)
        if (argsL[src]->tag == Iex_Const) {
 	 IRExprConst *iec = (IRExprConst *)argsL[src];
 	 foundConstant = iec;
-	 acc += iec->con->Ico.U64;
+	 acc += iec->Ico.U64;
        } else {
 	 argsL[dest] = argsL[src];
 	 dest--;
@@ -2005,7 +2010,7 @@ IRExpr* IRExpr_Associative(IROp op, ...)
        argsL[0] = foundConstant;
      } else if (dest > 0) {
        /* Found multiple constants -> fold them together. */
-       argsL[0] = IRExpr_Const(IRConst_U64(acc));
+       argsL[0] = IRExpr_Const_U64(acc);
        if (nr_args == dest + 1) {
 	 /* Everything was a constant */
 	 return argsL[0];
@@ -2718,15 +2723,17 @@ IRTemp newIRTemp ( IRTypeEnv* env )
 /*--- Helper functions for the IR -- finding types of exprs   ---*/
 /*---------------------------------------------------------------*/
 
-IRType typeOfIRConst ( IRConst* con )
+IRType typeOfIRExprConst ( IRExprConst* con )
 {
-   switch (con->tag) {
-      case Ico_U1:    return Ity_I1;
-      case Ico_U8:    return Ity_I8;
-      case Ico_U16:   return Ity_I16;
-      case Ico_U32:   return Ity_I32;
-      case Ico_U64:   return Ity_I64;
-      case Ico_U128:  return Ity_I128;
+   switch (con->ty) {
+      case Ity_I1:    return Ity_I1;
+      case Ity_I8:    return Ity_I8;
+      case Ity_I16:   return Ity_I16;
+      case Ity_I32:   return Ity_I32;
+      case Ity_I64:   return Ity_I64;
+      case Ity_I128:  return Ity_I128;
+      case Ity_INVALID:
+	break;
    }
    abort();
 }
@@ -2787,22 +2794,23 @@ void sanityCheckFail ( IRSB* bb, IRStmt* stmt, const char* what )
 /*--- Misc helper functions                                   ---*/
 /*---------------------------------------------------------------*/
 
-Bool eqIRConst ( IRConst* c1, IRConst* c2 )
+Bool eqIRExprConst ( const IRExprConst* c1, const IRExprConst* c2 )
 {
-   if (c1->tag != c2->tag)
+   if (c1->ty != c2->ty)
       return False;
 
-   switch (c1->tag) {
-      case Ico_U1:  return toBool( (1 & c1->Ico.U1) == (1 & c2->Ico.U1) );
-      case Ico_U8:  return toBool( c1->Ico.U8  == c2->Ico.U8 );
-      case Ico_U16: return toBool( c1->Ico.U16 == c2->Ico.U16 );
-      case Ico_U32: return toBool( c1->Ico.U32 == c2->Ico.U32 );
-      case Ico_U64: return toBool( c1->Ico.U64 == c2->Ico.U64 );
-      case Ico_U128:
+   switch (c1->ty) {
+      case Ity_I1:  return toBool( (1 & c1->Ico.U1) == (1 & c2->Ico.U1) );
+      case Ity_I8:  return toBool( c1->Ico.U8  == c2->Ico.U8 );
+      case Ity_I16: return toBool( c1->Ico.U16 == c2->Ico.U16 );
+      case Ity_I32: return toBool( c1->Ico.U32 == c2->Ico.U32 );
+      case Ity_I64: return toBool( c1->Ico.U64 == c2->Ico.U64 );
+      case Ity_I128:
 	return toBool( c1->Ico.U128.hi == c2->Ico.U128.hi &&
 		       c1->Ico.U128.lo == c2->Ico.U128.lo );
+      case Ity_INVALID: break;
    }
-  vpanic("eqIRConst");
+  vpanic("eqIRExprConst");
 }
 
 Int sizeofIRType ( IRType ty )
@@ -2825,9 +2833,9 @@ IRExpr* mkIRExpr_HWord ( HWord hw )
 {
    vassert(sizeof(void*) == sizeof(HWord));
    if (sizeof(HWord) == 4)
-      return IRExpr_Const(IRConst_U32((UInt)hw));
+      return IRExpr_Const_U32((UInt)hw);
    if (sizeof(HWord) == 8)
-      return IRExpr_Const(IRConst_U64((ULong)hw));
+      return IRExpr_Const_U64((ULong)hw);
    vpanic("mkIRExpr_HWord");
 }
 
@@ -2836,7 +2844,7 @@ IRDirty* unsafeIRDirty_0_N ( Int regparms, const char* name, void* addr,
 {
    IRDirty* d = emptyIRDirty();
    d->cee   = mkIRCallee ( regparms, name, addr );
-   d->guard = IRExpr_Const(IRConst_U1(True));
+   d->guard = IRExpr_Const_U1(True);
    d->args  = args;
    return d;
 }
@@ -2847,7 +2855,7 @@ IRDirty* unsafeIRDirty_1_N ( threadAndRegister dst,
 {
    IRDirty* d = emptyIRDirty();
    d->cee   = mkIRCallee ( regparms, name, addr );
-   d->guard = IRExpr_Const(IRConst_U1(True));
+   d->guard = IRExpr_Const_U1(True);
    d->args  = args;
    d->tmp   = dst;
    return d;

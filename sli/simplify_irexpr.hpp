@@ -12,7 +12,6 @@ bool definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt);
 IRExpr *simplifyIRExpr(IRExpr *a, const IRExprOptimisations &opt);
 IRExpr *optimiseAssuming(IRExpr *iex, const IRExpr *assumption);
 void addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg);
-bool physicallyEqual(const IRConst *a, const IRConst *b);
 bool physicallyEqual(const IRExpr *a, const IRExpr *b);
 IRExpr *coerceTypes(IRType, IRExpr *);
 IRExpr *expr_eq(IRExpr *, IRExpr *);

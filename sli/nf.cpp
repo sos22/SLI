@@ -942,9 +942,7 @@ static IRExpr *
 convert_from_nf(NF_Term &inp, IROp op)
 {
 	if (inp.size() == 0)
-		return IRExpr_Const(
-			IRConst_U1(
-				op == Iop_And1 ? 1 : 0));
+		return IRExpr_Const_U1(op == Iop_And1);
 	if (inp.size() == 1)
 		return convert_from_nf(inp[0]);
 	IRExprAssociative *acc = new IRExprAssociative();
@@ -963,9 +961,7 @@ static IRExpr *
 convert_from_nf(NF_Expression &inp, IROp expressionOp, IROp termOp)
 {
 	if (inp.size() == 0)
-		return IRExpr_Const(
-			IRConst_U1(
-			        expressionOp == Iop_And1 ? 1 : 0));
+		return IRExpr_Const_U1(expressionOp == Iop_And1);
 	if (inp.size() == 1)
 		return convert_from_nf(inp[0], termOp);
 	IRExprAssociative *acc = new IRExprAssociative();

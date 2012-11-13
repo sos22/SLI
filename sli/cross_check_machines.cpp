@@ -292,24 +292,21 @@ genRandomUlong()
 
 static IRExpr *mk_const(unsigned long val, IRType ty)
 {
-	IRConst *c;
 	switch (ty) {
 	case Ity_I8:
-		c = IRConst_U8(val);
-		break;
+		return IRExpr_Const_U8(val);
 	case Ity_I16:
-		c = IRConst_U16(val);
-		break;
+		return IRExpr_Const_U16(val);
 	case Ity_I32:
-		c = IRConst_U32(val);
-		break;
+		return IRExpr_Const_U32(val);
 	case Ity_I64:
-		c = IRConst_U64(val);
+		return IRExpr_Const_U64(val);
+	case Ity_INVALID:
+	case Ity_I1:
+	case Ity_I128:
 		break;
-	default:
-		abort();
 	}
-	return IRExpr_Const(c);
+	abort();
 }
 
 static evalExprRes evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom);
@@ -539,29 +536,6 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 	struct : public IRExprTransformer {
 		EvalState *ctxt;
 		bool *usedRandom;
-		IRExpr *mk_const(unsigned long val, IRType ty) {
-			IRConst *c;
-			switch (ty) {
-			case Ity_I1:
-				c = IRConst_U1(val);
-				break;
-			case Ity_I8:
-				c = IRConst_U8(val);
-				break;
-			case Ity_I16:
-				c = IRConst_U16(val);
-				break;
-			case Ity_I32:
-				c = IRConst_U32(val);
-				break;
-			case Ity_I64:
-				c = IRConst_U64(val);
-				break;
-			default:
-				abort();
-			}
-			return IRExpr_Const(c);
-		}
 		IRExpr *transformIex(IRExprGet *ieg) {
 			if (!ctxt->regs.count(ieg->reg) &&
 			    usedRandom) {
@@ -585,7 +559,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 				return IRExpr_Load(e->ty, addr);
 			assert(addr->tag == Iex_Const);
 			assert(addr->type() == Ity_I64);
-			unsigned long address = ((IRExprConst *)addr)->con->Ico.U64;
+			unsigned long address = ((IRExprConst *)addr)->Ico.U64;
 			unsigned long val;
 			switch (ctxt->loadMemory(address, &val)) {
 			case EvalState::lmr_bad_ptr:
@@ -663,7 +637,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 				return IRExpr_Unop(e->op, arg);
 			assert(arg->tag == Iex_Const);
 			assert(arg->type() == Ity_I64);
-			unsigned long address = ((IRExprConst *)arg)->con->Ico.U64;
+			unsigned long address = ((IRExprConst *)arg)->Ico.U64;
 			evalExprRes err(ctxt->badPtr(address));
 			unsigned long res;
 			if (err.unpack(&res))
@@ -694,7 +668,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 	IRExpr *a = trans.doit(what);
 	a = simplifyIRExpr(a, AllowableOptimisations::defaultOptimisations);
 	if (a->tag == Iex_Const)
-		return evalExprRes::success(((IRExprConst *)a)->con->Ico.U64);
+		return evalExprRes::success(((IRExprConst *)a)->Ico.U64);
 	else
 		return evalExprRes::failed();
 }
@@ -1066,9 +1040,9 @@ static bool
 makeEq(EvalState &res, IRExpr *arg1, IRExpr *arg2, bool wantTrue, bool *usedRandom)
 {
 	if (arg1->tag == Iex_Const)
-		return makeEqConst(res, ((IRExprConst *)arg1)->con->Ico.U64, arg2, wantTrue, usedRandom);
+		return makeEqConst(res, ((IRExprConst *)arg1)->Ico.U64, arg2, wantTrue, usedRandom);
 	else if (arg2->tag == Iex_Const)
-		return makeEqConst(res, ((IRExprConst *)arg2)->con->Ico.U64, arg1, wantTrue, usedRandom);
+		return makeEqConst(res, ((IRExprConst *)arg2)->Ico.U64, arg1, wantTrue, usedRandom);
 	else
 		return makeEqConst(res, 0, arg1, true, usedRandom) &&
 			makeEqConst(res, 0, arg2, wantTrue, usedRandom);

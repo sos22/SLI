@@ -555,7 +555,7 @@ atomicSurvivalConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 	if (atomicMachine->root->type == StateMachineState::Unreached) {
 		/* This machine can definitely never survive if run
 		 * atomically! */
-		return IRExpr_Const(IRConst_U1(0));
+		return IRExpr_Const_U1(false);
 	}
 	IRExpr *survive = survivalConstraintIfExecutedAtomically(mai, atomicMachine, nullexpr, oracle, false, opt, token);
 	if (!survive) {
@@ -1075,7 +1075,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 				token);
 			if (!t || t == residual_verification_condition ||
 			    (t->tag == Iex_Const &&
-			     ((IRExprConst *)t)->con->Ico.U1 == 0))
+			     ((IRExprConst *)t)->Ico.U1 == 0))
 				continue;
 			fprintf(_logfile, "Induction probe machine:\n");
 			printStateMachine(truncatedMachine, _logfile);
@@ -1100,7 +1100,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 			for (auto it = mai->begin(inductionAccesses[x]->rip); !it.finished(); it.advance())
 				logUseOfInduction(target_rip, it.dr());
 			if (residual_verification_condition->tag == Iex_Const &&
-			    ((IRExprConst *)residual_verification_condition.get())->con->Ico.U1 == 0) {
+			    ((IRExprConst *)residual_verification_condition.get())->Ico.U1 == 0) {
 				fprintf(_logfile, "\t\tCrash impossible.\n");
 				return NULL;
 			}

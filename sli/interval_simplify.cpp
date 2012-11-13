@@ -96,24 +96,21 @@ space::asIRExpr(IRExpr *key) const
 		IRType ty;
 		unsigned long type_max;
 		IRExpr *cnst(unsigned long v) {
-			IRConst *c;
 			switch (ty) {
 			case Ity_I8:
-				c = IRConst_U8(v);
-				break;
+				return IRExpr_Const_U8(v);
 			case Ity_I16:
-				c = IRConst_U16(v);
-				break;
+				return IRExpr_Const_U16(v);
 			case Ity_I32:
-				c = IRConst_U32(v);
-				break;
+				return IRExpr_Const_U32(v);
 			case Ity_I64:
-				c = IRConst_U64(v);
+				return IRExpr_Const_U64(v);
+			case Ity_INVALID:
+			case Ity_I1:
+			case Ity_I128:
 				break;
-			default:
-				abort();
 			}
-			return IRExpr_Const(c);
+			abort();
 		}
 		IROp op() const {
 			switch (ty) {
@@ -140,8 +137,7 @@ space::asIRExpr(IRExpr *key) const
 		}
 		IRExpr *operator()(IRExpr *a, unsigned long v) {
 			if (v == 0)
-				return IRExpr_Const(
-					IRConst_U1(0));
+				return IRExpr_Const_U1(0);
 			else if (v == 1)
 				return eq(a, 0);
 			else if (v == type_max)
@@ -153,8 +149,7 @@ space::asIRExpr(IRExpr *key) const
 		}
 		IRExpr *operator()(unsigned long v, IRExpr *a) {
 			if (v == type_max)
-				return IRExpr_Const(
-					IRConst_U1(0));
+				return IRExpr_Const_U1(0);
 			else if (v == type_max - 1)
 				return eq(a, type_max);
 			else if (v == 0)
@@ -197,7 +192,7 @@ space::asIRExpr(IRExpr *key) const
 		if (intervals[x].first == intervals[x].second)
 			arg = lt.eq(key, intervals[x].first);
 		else if (intervals[x].first == 0 && intervals[x].second == type_max)
-			arg = IRExpr_Const(IRConst_U1(1));
+			arg = IRExpr_Const_U1(1);
 		else if (intervals[x].first == 0)
 			arg = lt(key, intervals[x].second + 1);
 		else if (intervals[x].second == type_max)
@@ -448,32 +443,35 @@ public:
 };
 
 static void
-unpack_const(IRConst *cnst, unsigned long *type_max, unsigned long *val)
+unpack_const(IRExprConst *cnst, unsigned long *type_max, unsigned long *val)
 {
-	switch (cnst->tag) {
-	case Ico_U8:
+	switch (cnst->ty) {
+	case Ity_I8:
 		*val = cnst->Ico.U8;
 		*type_max = 0xff;
-		break;
-	case Ico_U16:
+		return;
+	case Ity_I16:
 		*val = cnst->Ico.U16;
 		*type_max = 0xffff;
-		break;
-	case Ico_U32:
+		return;
+	case Ity_I32:
 		*val = cnst->Ico.U32;
 		*type_max = 0xffffffff;
-		break;
-	case Ico_U64:
+		return;
+	case Ity_I64:
 		*val = cnst->Ico.U64;
 		*type_max = 0xfffffffffffffffful;
+		return;
+	case Ity_INVALID:
+	case Ity_I1:
+	case Ity_I128:
 		break;
-	default:
-		abort();
 	}
+	abort();
 }
 
 static intervalified
-interval_eq(IRConst *cnst, IRExpr *what)
+interval_eq(IRExprConst *cnst, IRExpr *what)
 {
 	unsigned long cnsti;
 	unsigned long type_max;
@@ -494,7 +492,7 @@ interval_ltu(IRExpr *arg1, IRExpr *arg2)
 		unsigned long type_max;
 		unsigned long k1;
 		unsigned long k2;
-		unpack_const( ((IRExprConst *)arg1)->con, &type_max, &k2);
+		unpack_const((IRExprConst *)arg1, &type_max, &k2);
 		if (arg2->tag == Iex_Associative &&
 		    ((IRExprAssociative *)arg2)->op >= Iop_Add8 &&
 		    ((IRExprAssociative *)arg2)->op <= Iop_Add64 &&
@@ -502,7 +500,7 @@ interval_ltu(IRExpr *arg1, IRExpr *arg2)
 		    ((IRExprAssociative *)arg2)->contents[0]->tag == Iex_Const) {
 			IRExprAssociative *iea = (IRExprAssociative *)arg2;
 			unsigned long t;
-			unpack_const( ((IRExprConst *)iea->contents[0])->con, &t, &k1);
+			unpack_const( (IRExprConst *)iea->contents[0], &t, &k1);
 			assert(t == type_max);
 			key = iea->contents[1];
 		} else {
@@ -528,7 +526,7 @@ interval_ltu(IRExpr *arg1, IRExpr *arg2)
 		unsigned long type_max;
 		unsigned long k2;
 		unsigned long k1;
-		unpack_const( ((IRExprConst *)arg2)->con, &type_max, &k2);
+		unpack_const( (IRExprConst *)arg2, &type_max, &k2);
 		if (arg1->tag == Iex_Associative &&
 		    ((IRExprAssociative *)arg1)->op >= Iop_Add8 &&
 		    ((IRExprAssociative *)arg1)->op <= Iop_Add64 &&
@@ -536,7 +534,7 @@ interval_ltu(IRExpr *arg1, IRExpr *arg2)
 		    ((IRExprAssociative *)arg1)->contents[0]->tag == Iex_Const) {
 			IRExprAssociative *iea = (IRExprAssociative *)arg1;
 			unsigned long t;
-			unpack_const( ((IRExprConst *)iea->contents[0])->con, &t, &k1);
+			unpack_const( (IRExprConst *)iea->contents[0], &t, &k1);
 			assert(t == type_max);
 			key = iea->contents[1];
 		} else {
@@ -595,7 +593,7 @@ intervalify(IRExpr *what)
 			assert(ieb->arg1->tag == Iex_Const);
 			if (ieb->arg2->tag == Iex_Const)
 				return intervalified(what);
-			return interval_eq(((IRExprConst *)ieb->arg1)->con, ieb->arg2);
+			return interval_eq((IRExprConst *)ieb->arg1, ieb->arg2);
 		case Iop_CmpLT8U:
 		case Iop_CmpLT16U:
 		case Iop_CmpLT32U:
@@ -605,24 +603,23 @@ intervalify(IRExpr *what)
 		case Iop_CmpLT16S:
 		case Iop_CmpLT32S:
 		case Iop_CmpLT64S: {
-			IRConst *threshC;
+			IRExpr *thresh;
 			switch (ieb->op) {
 			case Iop_CmpLT8S:
-				threshC = IRConst_U8(0x80);
+				thresh = IRExpr_Const_U8(0x80);
 				break;
 			case Iop_CmpLT16S:
-				threshC = IRConst_U16(0x8000);
+				thresh = IRExpr_Const_U16(0x8000);
 				break;
 			case Iop_CmpLT32S:
-				threshC = IRConst_U32(0x80000000);
+				thresh = IRExpr_Const_U32(0x80000000);
 				break;
 			case Iop_CmpLT64S:
-				threshC = IRConst_U64(0x8000000000000000ul);
+				thresh = IRExpr_Const_U64(0x8000000000000000ul);
 				break;
 			default:
 				abort();
 			}
-			IRExpr *thresh = IRExpr_Const(threshC);
 			IRExpr *l_signed =
 				IRExpr_Binop(
 					IROp(Iop_CmpLT8U + ieb->op - Iop_CmpLT8S),
@@ -640,7 +637,7 @@ intervalify(IRExpr *what)
 					ieb->arg2);
 
 			if (ieb->arg1->tag == Iex_Const) {
-				IRConst *arg1C = ((IRExprConst *)ieb->arg1)->con;
+				IRExprConst *arg1C = (IRExprConst *)ieb->arg1;
 				long arg1_cnst;
 				switch (ieb->op) {
 				case Iop_CmpLT8S:
@@ -679,7 +676,7 @@ intervalify(IRExpr *what)
 				}
 			}
 			if (ieb->arg2->tag == Iex_Const) {
-				IRConst *arg2C = ((IRExprConst *)ieb->arg2)->con;
+				IRExprConst *arg2C = (IRExprConst *)ieb->arg2;
 				long arg2_cnst;
 				switch (ieb->op) {
 				case Iop_CmpLT8S:
@@ -783,7 +780,7 @@ intervalified::asIRExpr() const
 		if (rest)
 			return rest;
 		else
-			return IRExpr_Const(IRConst_U1(1));
+			return IRExpr_Const_U1(1);
 	} else {
 		if (rest)
 			return IRExpr_Binop(

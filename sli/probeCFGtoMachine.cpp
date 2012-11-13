@@ -348,8 +348,7 @@ canonicaliseRbp(StateMachineState *root, const VexRip &rip, Oracle *oracle)
 						canonedRbp =
 							IRExpr_Binop(
 								Iop_Add64,
-								IRExpr_Const(
-									IRConst_U64(-delta)),
+								IRExpr_Const_U64(-delta),
 								IRExpr_Get(
 									threadAndRegister::reg(
 										ieg->reg.tid(),
@@ -692,8 +691,7 @@ cfgNodeToState(Oracle *oracle,
 									OFFSET_amd64_RSP,
 									0),
 								Ity_I64),
-							IRExpr_Const(
-								IRConst_U64(-8))),
+							IRExpr_Const_U64(-8)),
 						FrameId()),
 					NULL);
 				*cursor = smp;
@@ -707,7 +705,7 @@ cfgNodeToState(Oracle *oracle,
 							0),
 						IRExpr_Binop(
 							Iop_Add64,
-							IRExpr_Const(IRConst_U64(8)),
+							IRExpr_Const_U64(8),
 							IRExpr_Get(
 								threadAndRegister::reg(
 									tid,
@@ -731,8 +729,7 @@ cfgNodeToState(Oracle *oracle,
 									OFFSET_amd64_RSP,
 									0),
 								Ity_I64),
-							IRExpr_Const(
-								IRConst_U64(-8))),
+							IRExpr_Const_U64(-8)),
 						FrameId()),
 					NULL);
 			*cursor = smp;
@@ -1044,8 +1041,8 @@ struct RspCanonicalisationState : public Named {
 		}
 		case Iex_Const: {
 			IRExprConst *iec = (IRExprConst *)a;
-			if (iec->con->tag == Ico_U64)
-				res = eval_res::cnst(iec->con->Ico.U64);
+			if (iec->ty == Ity_I64)
+				res = eval_res::cnst(iec->Ico.U64);
 			break;
 		}
 		case Iex_Get: {
@@ -1255,8 +1252,7 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 					IRExpr_Get(
 						threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
 						Ity_I64),
-					IRExpr_Const(
-						IRConst_U64(-delta)),
+					IRExpr_Const_U64(-delta),
 					NULL)),
 			cursor);
 	}
@@ -1271,8 +1267,7 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 					IRExpr_Get(
 						threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
 						Ity_I64),
-					IRExpr_Const(
-						IRConst_U64(-delta)),
+					IRExpr_Const_U64(-delta),
 					NULL)),
 			cursor);
 	} else {

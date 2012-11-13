@@ -483,7 +483,7 @@ class applyAvailTransformer : public IRExprTransformer {
 			     it++) {
 				if (definitelyEqual(*it, e,  opt)) {
 					*done_something = true;
-					return IRExpr_Const(IRConst_U1(0));
+					return IRExpr_Const_U1(false);
 				}
 				/* If @e is definitely false, and *it
 				   != @e, then clear *it is definitely
@@ -498,7 +498,7 @@ class applyAvailTransformer : public IRExprTransformer {
 				       ((IRExprUnop *)*it)->op == Iop_Not1)) &&
 				    definitelyNotEqual(*it, e, opt)) {
 					*done_something = true;
-					return IRExpr_Const(IRConst_U1(1));
+					return IRExpr_Const_U1(true);
 				}
 			}
 		}
@@ -633,7 +633,7 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 			   which isn't much use, so turn this
 			   one into a no-op.  It'll get
 			   optimised out again later. */
-			newVal = IRExpr_Const(IRConst_U1(0));
+			newVal = IRExpr_Const_U1(false);
 			doit = true;
 		}
 		if (doit) {

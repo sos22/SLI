@@ -671,25 +671,24 @@ eval_expression(const RegisterSet *rs,
 		throw SliException("transform_expr failed to remove all load expressions\n");
 
 	case Iex_Const: {
-		IRExprConst *e = (IRExprConst *)expr;
-		IRConst *cnst = e->con;
-		switch (cnst->tag) {
-		case Ico_U1:
+		IRExprConst *cnst = (IRExprConst *)expr;
+		switch (cnst->ty) {
+		case Ity_I1:
 			dest->lo = (cnst->Ico.U1);
 			break;
-		case Ico_U8:
+		case Ity_I8:
 			dest->lo = (cnst->Ico.U8);
 			break;
-		case Ico_U16:
+		case Ity_I16:
 			dest->lo = (cnst->Ico.U16);
 			break;
-		case Ico_U32:
+		case Ity_I32:
 			dest->lo = (cnst->Ico.U32);
 			break;
-		case Ico_U64:
+		case Ity_I64:
 			dest->lo = (cnst->Ico.U64);
 			break;
-		case Ico_U128:
+		case Ity_I128:
 			dest->lo = cnst->Ico.U128.lo;
 			dest->lo = cnst->Ico.U128.hi;
 			break;
@@ -1818,7 +1817,7 @@ extract_call_follower(IRSB *irsb)
 		idx--;
 	assert(idx >= 0);
 	VexRip r( ((IRStmtIMark *)irsb->stmts[idx])->addr.rip );
-	r.jump(((IRExprConst *)s->data)->con->Ico.U64);
+	r.jump(((IRExprConst *)s->data)->Ico.U64);
 	return r;
 }
 

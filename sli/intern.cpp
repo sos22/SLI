@@ -175,32 +175,11 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		}
 
 		case Iex_Const:
-			if (!physicallyEqual(((IRExprConst *)e)->con,
-					     ((IRExprConst *)other)->con))
-				continue;
-			break;
-
 		case Iex_HappensBefore:
-			if (((IRExprHappensBefore *)e)->before != ((IRExprHappensBefore *)other)->before ||
-			    ((IRExprHappensBefore *)e)->after != ((IRExprHappensBefore *)other)->after)
-				continue;
-			break;
-
-		case Iex_FreeVariable: {
-			IRExprFreeVariable *ef = (IRExprFreeVariable *)e;
-			IRExprFreeVariable *of = (IRExprFreeVariable *)other;
-			if (ef->id != of->id || ef->ty != of->ty)
-				continue;
-			break;
-		}
-
+		case Iex_FreeVariable:
 		case Iex_EntryPoint:
-			if (*(IRExprEntryPoint *)e != *(IRExprEntryPoint *)other)
-				continue;
-			break;
-
 		case Iex_ControlFlow:
-			if (*(IRExprControlFlow *)e != *(IRExprControlFlow *)other)
+			if (!physicallyEqual(e, other))
 				continue;
 			break;
 		}

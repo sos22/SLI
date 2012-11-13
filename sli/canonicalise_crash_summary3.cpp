@@ -232,7 +232,7 @@ removeRedundantClauses(IRExpr *verificationCondition,
 		*done_something = true;
 
 	if (nr_kept == 0) {
-		return IRExpr_Const(IRConst_U1(1));
+		return IRExpr_Const_U1(true);
 	} else if (nr_kept == 1) {
 		for (int i = 0; i < nr_verification_clauses; i++)
 			if (precious[i])
@@ -327,7 +327,7 @@ clauseUnderspecified(IRExpr *clause,
 			    ((IRExprUnop *)ieb->arg1)->arg->tag == Iex_Binop &&
 			    ((IRExprBinop *)((IRExprUnop *)ieb->arg1)->arg)->op == Iop_CmpF32 &&
 			    ieb->arg2->tag == Iex_Const &&
-			    ((IRExprConst *)ieb->arg2)->con->Ico.U8 == 6)
+			    ((IRExprConst *)ieb->arg2)->Ico.U8 == 6)
 				return true;
 		case Iop_Shr32:
 		case Iop_Shl64:
@@ -508,7 +508,7 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 			summary->loadMachine,
 			summary->storeMachine,
 			oracle,
-			IRExpr_Const(IRConst_U1(1)),
+			IRExpr_Const_U1(true),
 			AllowableOptimisations::defaultOptimisations,
 			summary->mai,
 			token);
@@ -554,7 +554,7 @@ extractDefinitelyTrueFalse(std::set<IRExpr *> *definitelyTrue,
 	}
 
 	if (expr->tag == Iex_Const) {
-		assert(((IRExprConst *)expr)->con->Ico.U1 == exprIsTrue);
+		assert(((IRExprConst *)expr)->Ico.U1 == exprIsTrue);
 		return;
 	}
 
@@ -598,11 +598,11 @@ simplifyAssuming(IRExpr *expr,
 		IRExpr *transformIRExpr(IRExpr *what, bool *done_something) {
 			if (definitelyTrue.count(what)) {
 				*done_something = true;
-				return IRExpr_Const(IRConst_U1(1));
+				return IRExpr_Const_U1(true);
 			}
 			if (definitelyFalse.count(what)) {
 				*done_something = true;
-				return IRExpr_Const(IRConst_U1(0));
+				return IRExpr_Const_U1(false);
 			}
 			return IRExprTransformer::transformIRExpr(what, done_something);
 		}
@@ -639,7 +639,7 @@ simplifyAssumingMachineSurvives(const VexPtr<MaiMap, &ir_heap> &mai,
 		survival_constraint = survivalConstraintIfExecutedAtomically(
 			mai,
 			machine,
-			IRExpr_Const(IRConst_U1(1)),
+			IRExpr_Const_U1(true),
 			oracle,
 			false,
 			AllowableOptimisations::defaultOptimisations,
@@ -648,7 +648,7 @@ simplifyAssumingMachineSurvives(const VexPtr<MaiMap, &ir_heap> &mai,
 		survival_constraint = crashingConstraintIfExecutedAtomically(
 			mai,
 			machine,
-			IRExpr_Const(IRConst_U1(1)),
+			IRExpr_Const_U1(true),
 			oracle,
 			true,
 			AllowableOptimisations::defaultOptimisations,
@@ -1096,7 +1096,7 @@ nonFunctionalSimplifications(
 				simplifyUsingUnderspecification(
 					summary->verificationCondition,
 					targetRegisters,
-					IRExpr_Const(IRConst_U1(1)),
+					IRExpr_Const_U1(true),
 					&progress);
 		}
 	}
@@ -1119,7 +1119,7 @@ functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
 				targetRegisters,
 				1);
 		if (e == underspecExpression)
-			summary->verificationCondition = IRExpr_Const(IRConst_U1(1));
+			summary->verificationCondition = IRExpr_Const_U1(true);
 		else
 			summary->verificationCondition = simplify_via_anf(e);
 	}

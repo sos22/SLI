@@ -71,7 +71,7 @@ getProximalCause(MachineState *ms,
 			e = simplifyIRExpr(e, opt);
 			assert(e->type() == Ity_I1);
 			if (e->tag == Iex_Const) {
-				if ( ((IRExprConst *)e)->con->Ico.U1 )
+				if ( ((IRExprConst *)e)->Ico.U1 )
 					work = StateMachineCrash::get();
 				return;
 			}

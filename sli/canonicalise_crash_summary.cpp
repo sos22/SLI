@@ -132,7 +132,7 @@ class SplitSsaGenerations : public StateMachineTransformer {
 	std::set<threadAndRegister> &generatedRegisters;
 	std::map<threadAndRegister, threadAndRegister> canonTable;
 	std::map<IRExprLoad *, threadAndRegister> canonLoadTable;
-	std::map<IRConst *, threadAndRegister> canonConstTable;
+	std::map<IRExprConst *, threadAndRegister> canonConstTable;
 	std::map<unsigned, unsigned> next_temp_id;
 	internIRExprTable &internTable;
 
@@ -162,9 +162,9 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			it->second = threadAndRegister::temp(-1, alloc_temp_id(-1), 0);
 		return it->second;
 	}
-	threadAndRegister canon_const(IRConst *iec)
+	threadAndRegister canon_const(IRExprConst *iec)
 	{
-		auto it_did_insert = canonConstTable.insert(std::pair<IRConst *, threadAndRegister>(iec, threadAndRegister::invalid()));
+		auto it_did_insert = canonConstTable.insert(std::pair<IRExprConst *, threadAndRegister>(iec, threadAndRegister::invalid()));
 		auto it = it_did_insert.first;
 		auto did_insert = it_did_insert.second;
 		if (did_insert)
@@ -182,12 +182,12 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			return IRExprTransformer::transformIex(iel);
 	}
 	IRExpr *transformIex(IRExprConst *iec) {
-		switch (iec->con->tag) {
-		case Ico_U1:
+		switch (iec->ty) {
+		case Ity_I1:
 			return iec;
 #define do_type(n)						\
-			case Ico_U ## n :			\
-				if (iec->con->Ico.U ## n  == 0)	\
+			case Ity_I ## n :			\
+				if (iec->Ico.U ## n  == 0)	\
 					return iec;		\
 				break
 			do_type(8);
@@ -195,13 +195,15 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			do_type(32);
 			do_type(64);
 #undef do_type
-		case Ico_U128:
-			if (iec->con->Ico.U128.hi == 0 &&
-			    iec->con->Ico.U128.lo == 0)
+		case Ity_I128:
+			if (iec->Ico.U128.hi == 0 &&
+			    iec->Ico.U128.lo == 0)
 				return iec;
 			break;
+		case Ity_INVALID:
+			abort();
 		}
-		return IRExpr_Get(canon_const(iec->con), iec->type());
+		return IRExpr_Get(canon_const(iec), iec->type());
 	}
 	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 		IRExpr *res = IRExprTransformer::transformIRExpr(e, done_something);

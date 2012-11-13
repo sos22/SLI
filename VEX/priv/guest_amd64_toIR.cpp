@@ -235,28 +235,10 @@ static IRExpr* mkexpr ( IRTemp tmp, unsigned tid, IRType ty )
    return IRExpr_RdTmp(tmp, ty, tid, 0);
 }
 
-static IRExpr* mkU8 ( ULong i )
-{
-   vassert(i < 256);
-   return IRExpr_Const(IRConst_U8( (UChar)i ));
-}
-
-static IRExpr* mkU16 ( ULong i )
-{
-   vassert(i < 0x10000ULL);
-   return IRExpr_Const(IRConst_U16( (UShort)i ));
-}
-
-static IRExpr* mkU32 ( ULong i )
-{
-   vassert(i < 0x100000000ULL);
-   return IRExpr_Const(IRConst_U32( (UInt)i ));
-}
-
-static IRExpr* mkU64 ( ULong i )
-{
-   return IRExpr_Const(IRConst_U64(i));
-}
+#define mkU8 IRExpr_Const_U8
+#define mkU16 IRExpr_Const_U16
+#define mkU32 IRExpr_Const_U32
+#define mkU64 IRExpr_Const_U64
 
 static IRExpr* mkU ( IRType ty, ULong i )
 {
@@ -1356,7 +1338,7 @@ static void putXMMRegLane16 ( UInt xmmreg, Int laneno, IRExpr* e )
 
 static IRExpr* mkV128 ( UShort mask )
 {
-   return IRExpr_Const(IRConst_V128(mask));
+   return IRExpr_Const_V128(mask);
 }
 
 static IRExpr* mkAnd1 ( IRExpr* x, IRExpr* y )
@@ -3077,7 +3059,7 @@ bangBangOperator8(IRExpr *inp)
     return IRExpr_Unop(Iop_Not1,
 		       IRExpr_Binop(Iop_CmpEQ8,
 				    inp,
-				    IRExpr_Const(IRConst_U8(0))));
+				    IRExpr_Const_U8(0)));
 }
 
 /* Group 2 extended opcodes.  shift_expr must be an 8-bit typed
@@ -4168,7 +4150,7 @@ static IRExpr* mkQNaN64 ( void )
      == 0b 11111111111b 1 0(51times)
      == 0x7FF8 0000 0000 0000
    */
-   return IRExpr_Const(IRConst_F64i(0x7FF8000000000000ULL));
+   return IRExpr_Const_F64i(0x7FF8000000000000ULL);
 }
 
 /* --------- Get/put the top-of-stack pointer :: Ity_I32 --------- */
@@ -4884,49 +4866,49 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("fld1\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(1.0))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x3ff0000000000000ULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x3ff0000000000000ULL));
                break;
 
             case 0xE9: /* FLDL2T */
                DIP("fldl2t\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(3.32192809488736234781))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x400a934f0979a371ULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x400a934f0979a371ULL));
                break;
 
             case 0xEA: /* FLDL2E */
                DIP("fldl2e\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(1.44269504088896340739))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x3ff71547652b82feULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x3ff71547652b82feULL));
                break;
 
             case 0xEB: /* FLDPI */
                DIP("fldpi\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(3.14159265358979323851))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x400921fb54442d18ULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x400921fb54442d18ULL));
                break;
 
             case 0xEC: /* FLDLG2 */
                DIP("fldlg2\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(0.301029995663981143))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x3fd34413509f79ffULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x3fd34413509f79ffULL));
                break;
 
             case 0xED: /* FLDLN2 */
                DIP("fldln2\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(0.69314718055994530942))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x3fe62e42fefa39efULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x3fe62e42fefa39efULL));
                break;
 
             case 0xEE: /* FLDZ */
                DIP("fldz\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(0.0))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x0000000000000000ULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x0000000000000000ULL));
                break;
 
             case 0xF0: /* F2XM1 */
@@ -4954,7 +4936,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
                         get_ST(tid, 0)));
                fp_push(tid);
-               put_ST(tid,0, IRExpr_Const(IRConst_F64(1.0)));
+               put_ST(tid,0, IRExpr_Const_F64i(1.0));
                clear_C2(tid); /* HACK */
                break;
 

@@ -559,66 +559,6 @@ extern Heap ir_heap;
      shallow copy constructor.
 */
 
-/* ------------------ Constants ------------------ */
-
-/* IRConsts are used within 'Const' and 'Exit' IRExprs. */
-
-/* The various kinds of constant. */
-typedef
-   enum { 
-      Ico_U1=0x13000,
-      Ico_U8, 
-      Ico_U16, 
-      Ico_U32, 
-      Ico_U64,
-      Ico_U128   /* 128-bit restricted vector constant, with 1 bit
-                    (repeated 8 times) for each of the 16 x 1-byte lanes */
-   }
-   IRConstTag;
-
-/* A constant.  Stored as a tagged union.  'tag' indicates what kind of
-   constant this is.  'Ico' is the union that holds the fields.  If an
-   IRConst 'c' has c.tag equal to Ico_U32, then it's a 32-bit constant,
-   and its value can be accessed with 'c.Ico.U32'. */
-typedef
-struct _IRConst : public GarbageCollected<_IRConst, &ir_heap>{
-      IRConstTag tag;
-      union {
-         Bool   U1;
-         UChar  U8;
-         UShort U16;
-         UInt   U32;
-         ULong  U64;
-	 struct {
-	    ULong lo;
-	    ULong hi;
-	 } U128;
-      } Ico;
-      unsigned long hashval() const { return tag * 103 + Ico.U64 * 607; }
-      void visit(HeapVisitor &) {}
-      void sanity_check() const {
-	 assert(tag >= Ico_U1 && tag <= Ico_U128);
-      }
-      NAMED_CLASS
-   }
-   IRConst;
-
-/* IRConst constructors */
-extern IRConst* IRConst_U1   ( Bool );
-extern IRConst* IRConst_U8   ( UChar );
-extern IRConst* IRConst_U16  ( UShort );
-extern IRConst* IRConst_U32  ( UInt );
-extern IRConst* IRConst_U64  ( ULong );
-extern IRConst* IRConst_F64  ( Double );
-extern IRConst* IRConst_F64i ( ULong );
-extern IRConst* IRConst_V128 ( UShort );
-
-/* Pretty-print an IRConst */
-extern void ppIRConst ( IRConst*, FILE* );
-
-/* Compare two IRConsts for equality */
-extern Bool eqIRConst ( IRConst*, IRConst* );
-
 /* --------------- Primops (arity 1,2,3 and 4) --------------- */
 
 /* Primitive operations that are used in Unop, Binop, Triop and Qop
@@ -1211,7 +1151,6 @@ struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
    }
    IRTypeEnv;
 
-extern IRType typeOfIRConst ( IRConst* );
 extern void typeOfPrimop ( IROp op,
 			   /*OUTs*/
 			   IRType* t_dst,
@@ -1671,7 +1610,19 @@ struct IRExprLoad : public IRExpr {
    ppIRExpr output: <con>, eg. 0x4:I32
 */
 struct IRExprConst : public IRExpr {
-   IRConst* con;     /* The constant itself */
+   IRType ty;
+   union {
+      Bool   U1;
+      UChar  U8;
+      UShort U16;
+      UInt   U32;
+      ULong  U64;
+      struct {
+	 ULong lo;
+	 ULong hi;
+      } U128;
+   } Ico;
+
    IRExprConst()
        : IRExpr(Iex_Const)
    {
@@ -1680,15 +1631,16 @@ struct IRExprConst : public IRExpr {
 	  optimised. */
        optimisationsApplied = ~0u;
    }
-   void visit(HeapVisitor &hv) { hv(con); }
-   unsigned long hashval() const { return con->hashval(); }
+   void visit(HeapVisitor &) { }
+   unsigned long hashval() const { return Ico.U64; }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
-   IRType type() const { return typeOfIRConst(con); }
+   IRType type() const { return ty; }
  private:
    void _sanity_check(unsigned) const {
-      con->sanity_check();
    }
 };
+
+Bool eqIRExprConst ( const IRExprConst* c1, const IRExprConst* c2 );
 
 /* A call to a pure (no side-effects) helper C function.
 
@@ -1961,7 +1913,15 @@ extern bool shortCircuitableUnops(IROp a, IROp b, IROp *c);
 extern bool inverseUnops(IROp a, IROp b);
 extern IRExpr* IRExpr_Unop   ( IROp op, IRExpr* arg );
 extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr );
-extern IRExpr* IRExpr_Const  ( IRConst* con );
+extern IRExprConst* IRExpr_Const_U1 ( bool b);
+extern IRExprConst* IRExpr_Const_U8 (unsigned char c);
+extern IRExprConst* IRExpr_Const_U16 (unsigned short c);
+extern IRExprConst* IRExpr_Const_U32 (unsigned c);
+extern IRExprConst* IRExpr_Const_U64 (unsigned long c);
+extern IRExprConst* IRExpr_Const_F64 (double c);
+extern IRExprConst* IRExpr_Const_F64i (unsigned long c);
+extern IRExprConst* IRExpr_Const_V128 (unsigned short c);
+extern IRExprConst* IRExpr_Const_U128 (unsigned long hi, unsigned long lo);
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));

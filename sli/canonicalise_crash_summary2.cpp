@@ -58,7 +58,7 @@ optimiseStateMachineAssuming(StateMachine *sm,
 		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 			if (e == assumption) {
 				*done_something = true;
-				return IRExpr_Const(IRConst_U1(assumptionIsTrue));
+				return IRExpr_Const_U1(assumptionIsTrue);
 			}
 			if (assumptionIsTrue &&
 			    e->tag == Iex_EntryPoint &&
@@ -68,7 +68,7 @@ optimiseStateMachineAssuming(StateMachine *sm,
 				assert( ((IRExprEntryPoint *)e)->label != ((IRExprEntryPoint *)assumption)->label);
 				/* If we entered at t1:labelA we can't
 				 * also have entered at t1:labelB */
-				return IRExpr_Const(IRConst_U1(0));
+				return IRExpr_Const_U1(false);
 			}
 			return StateMachineTransformer::transformIRExpr(e, done_something);
 		}
@@ -134,7 +134,7 @@ removeImpossibleRoots(IRExpr *a, const std::set<std::pair<unsigned, CfgLabel> > 
 		const std::set<std::pair<unsigned, CfgLabel> > *roots;
 		IRExpr *transformIex(IRExprEntryPoint *iep) {
 			if (!roots->count(std::pair<unsigned, CfgLabel>(iep->thread, iep->label)))
-				return IRExpr_Const(IRConst_U1(0));
+				return IRExpr_Const_U1(false);
 			return iep;
 		}
 	} doit;
@@ -179,7 +179,7 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 
 	if (input->loadMachine->root->type == StateMachineState::Unreached ||
 	    input->storeMachine->root->type == StateMachineState::Unreached)
-		input->verificationCondition = IRExpr_Const(IRConst_U1(0));
+		input->verificationCondition = IRExpr_Const_U1(false);
 
 	std::set<std::pair<unsigned, CfgLabel> > machineRoots;
 	for (auto it = input->loadMachine->cfg_roots.begin();
