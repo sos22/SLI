@@ -87,19 +87,16 @@ operationAssociates(IROp op)
 void ppIRType ( IRType ty, FILE *f )
 {
    switch (ty) {
-      case Ity_INVALID: fprintf(f, "Ity_INVALID"); break;
-      case Ity_I1:      fprintf(f,  "I1");   break;
-      case Ity_I8:      fprintf(f,  "I8");   break;
-      case Ity_I16:     fprintf(f,  "I16");  break;
-      case Ity_I32:     fprintf(f,  "I32");  break;
-      case Ity_I64:     fprintf(f,  "I64");  break;
-      case Ity_I128:    fprintf(f,  "I128"); break;
-      case Ity_F32:     fprintf(f,  "F32");  break;
-      case Ity_F64:     fprintf(f,  "F64");  break;
-      case Ity_V128:    fprintf(f,  "V128"); break;
-      default: fprintf(f, "ty = 0x%x\n", (Int)ty);
-               vpanic("ppIRType");
+      case Ity_INVALID: fprintf(f, "Ity_INVALID"); return;
+      case Ity_I1:      fprintf(f,  "I1");   return;
+      case Ity_I8:      fprintf(f,  "I8");   return;
+      case Ity_I16:     fprintf(f,  "I16");  return;
+      case Ity_I32:     fprintf(f,  "I32");  return;
+      case Ity_I64:     fprintf(f,  "I64");  return;
+      case Ity_I128:    fprintf(f,  "I128"); return;
    }
+   fprintf(f, "ty = 0x%x\n", (Int)ty);
+   vpanic("ppIRType");
 }
 
 bool parseIRType(IRType *out, const char *str, const char **suffix)
@@ -119,9 +116,6 @@ bool parseIRType(IRType *out, const char *str, const char **suffix)
   do_type(I32);
   do_type(I64);
   do_type(I128);
-  do_type(F32);
-  do_type(F64);
-  do_type(V128);
   do_type(I1);
 #undef do_type
   return false;
@@ -2508,61 +2502,61 @@ void typeOfPrimop ( IROp op,
       case Iop_MulF64:    case Iop_DivF64:
       case Iop_AddF64r32: case Iop_SubF64r32: 
       case Iop_MulF64r32: case Iop_DivF64r32:
-         TERNARY(ity_RMode,Ity_F64,Ity_F64, Ity_F64);
+         TERNARY(ity_RMode,Ity_I64,Ity_I64, Ity_I64);
 
       case Iop_NegF64: case Iop_AbsF64: 
-         UNARY(Ity_F64, Ity_F64);
+         UNARY(Ity_I64, Ity_I64);
 
       case Iop_SqrtF64:
       case Iop_SqrtF64r32:
-         BINARY(ity_RMode,Ity_F64, Ity_F64);
+         BINARY(ity_RMode,Ity_I64, Ity_I64);
 
       case Iop_CmpF64:
-         BINARY(Ity_F64,Ity_F64, Ity_I32);
+         BINARY(Ity_I64,Ity_I64, Ity_I32);
       case Iop_CmpF32:
-         BINARY(Ity_F32,Ity_F32, Ity_I32);
+         BINARY(Ity_I32,Ity_I32, Ity_I32);
 
-      case Iop_F64toI16: BINARY(ity_RMode,Ity_F64, Ity_I16);
-      case Iop_F64toI32: BINARY(ity_RMode,Ity_F64, Ity_I32);
-      case Iop_F64toI64: BINARY(ity_RMode,Ity_F64, Ity_I64);
+      case Iop_F64toI16: BINARY(ity_RMode,Ity_I64, Ity_I16);
+      case Iop_F64toI32: BINARY(ity_RMode,Ity_I64, Ity_I32);
+      case Iop_F64toI64: BINARY(ity_RMode,Ity_I64, Ity_I64);
 
-      case Iop_I16toF64: UNARY(Ity_I16, Ity_F64);
-      case Iop_I32toF64: UNARY(Ity_I32, Ity_F64);
-      case Iop_I64toF64: BINARY(ity_RMode,Ity_I64, Ity_F64);
+      case Iop_I16toF64: UNARY(Ity_I16, Ity_I64);
+      case Iop_I32toF64: UNARY(Ity_I32, Ity_I64);
+      case Iop_I64toF64: BINARY(ity_RMode,Ity_I64, Ity_I64);
 
-      case Iop_F32toF64: UNARY(Ity_F32, Ity_F64);
-      case Iop_F64toF32: BINARY(ity_RMode,Ity_F64, Ity_F32);
+      case Iop_F32toF64: UNARY(Ity_I32, Ity_I64);
+      case Iop_F64toF32: BINARY(ity_RMode,Ity_I64, Ity_I32);
 
-      case Iop_ReinterpI64asF64: UNARY(Ity_I64, Ity_F64);
-      case Iop_ReinterpF64asI64: UNARY(Ity_F64, Ity_I64);
-      case Iop_ReinterpI32asF32: UNARY(Ity_I32, Ity_F32);
-      case Iop_ReinterpF32asI32: UNARY(Ity_F32, Ity_I32);
+      case Iop_ReinterpI64asF64: UNARY(Ity_I64, Ity_I64);
+      case Iop_ReinterpF64asI64: UNARY(Ity_I64, Ity_I64);
+      case Iop_ReinterpI32asF32: UNARY(Ity_I32, Ity_I32);
+      case Iop_ReinterpF32asI32: UNARY(Ity_I32, Ity_I32);
 
       case Iop_AtanF64: case Iop_Yl2xF64:  case Iop_Yl2xp1F64: 
       case Iop_ScaleF64: case Iop_PRemF64: case Iop_PRem1F64:
-         TERNARY(ity_RMode,Ity_F64,Ity_F64, Ity_F64);
+         TERNARY(ity_RMode,Ity_I64,Ity_I64, Ity_I64);
 
       case Iop_PRemC3210F64: case Iop_PRem1C3210F64:
-         TERNARY(ity_RMode,Ity_F64,Ity_F64, Ity_I32);
+         TERNARY(ity_RMode,Ity_I64,Ity_I64, Ity_I32);
 
       case Iop_SinF64: case Iop_CosF64: case Iop_TanF64: 
       case Iop_2xm1F64:
-      case Iop_RoundF64toInt: BINARY(ity_RMode,Ity_F64, Ity_F64);
+      case Iop_RoundF64toInt: BINARY(ity_RMode,Ity_I64, Ity_I64);
 
       case Iop_MAddF64: case Iop_MSubF64:
       case Iop_MAddF64r32: case Iop_MSubF64r32:
-         QUATERNARY(ity_RMode,Ity_F64,Ity_F64,Ity_F64, Ity_F64);
+         QUATERNARY(ity_RMode,Ity_I64,Ity_I64,Ity_I64, Ity_I64);
 
       case Iop_Est5FRSqrt:
       case Iop_RoundF64toF64_NEAREST: case Iop_RoundF64toF64_NegINF:
       case Iop_RoundF64toF64_PosINF: case Iop_RoundF64toF64_ZERO:
-         UNARY(Ity_F64, Ity_F64);
+         UNARY(Ity_I64, Ity_I64);
       case Iop_RoundF64toF32:
-         BINARY(ity_RMode,Ity_F64, Ity_F64);
+         BINARY(ity_RMode,Ity_I64, Ity_I64);
       case Iop_CalcFPRF:
-         UNARY(Ity_F64, Ity_I32);
+         UNARY(Ity_I64, Ity_I32);
       case Iop_TruncF64asF32:
-         UNARY(Ity_F64, Ity_F32);
+         UNARY(Ity_I64, Ity_I32);
 
       case Iop_I32UtoFx4:
       case Iop_I32StoFx4:
@@ -2572,21 +2566,21 @@ void typeOfPrimop ( IROp op,
       case Iop_RoundF32x4_RP:
       case Iop_RoundF32x4_RN:
       case Iop_RoundF32x4_RZ:
-         UNARY(Ity_V128, Ity_V128);
+         UNARY(Ity_I128, Ity_I128);
 
-      case Iop_64HLtoV128: BINARY(Ity_I64,Ity_I64, Ity_V128);
+      case Iop_64HLtoV128: BINARY(Ity_I64,Ity_I64, Ity_I128);
       case Iop_V128to64: case Iop_V128HIto64: 
-         UNARY(Ity_V128, Ity_I64);
+         UNARY(Ity_I128, Ity_I64);
 
-      case Iop_V128to32:    UNARY(Ity_V128, Ity_I32);
-      case Iop_32UtoV128:   UNARY(Ity_I32, Ity_V128);
-      case Iop_64UtoV128:   UNARY(Ity_I64, Ity_V128);
-      case Iop_SetV128lo32: BINARY(Ity_V128,Ity_I32, Ity_V128);
-      case Iop_SetV128lo64: BINARY(Ity_V128,Ity_I64, Ity_V128);
+      case Iop_V128to32:    UNARY(Ity_I128, Ity_I32);
+      case Iop_32UtoV128:   UNARY(Ity_I32, Ity_I128);
+      case Iop_64UtoV128:   UNARY(Ity_I64, Ity_I128);
+      case Iop_SetV128lo32: BINARY(Ity_I128,Ity_I32, Ity_I128);
+      case Iop_SetV128lo64: BINARY(Ity_I128,Ity_I64, Ity_I128);
 
-      case Iop_Dup8x16: UNARY(Ity_I8, Ity_V128);
-      case Iop_Dup16x8: UNARY(Ity_I16, Ity_V128);
-      case Iop_Dup32x4: UNARY(Ity_I32, Ity_V128);
+      case Iop_Dup8x16: UNARY(Ity_I8, Ity_I128);
+      case Iop_Dup16x8: UNARY(Ity_I16, Ity_I128);
+      case Iop_Dup32x4: UNARY(Ity_I32, Ity_I128);
 
       case Iop_CmpEQ32Fx4: case Iop_CmpLT32Fx4:
       case Iop_CmpEQ64Fx2: case Iop_CmpLT64Fx2:
@@ -2644,7 +2638,7 @@ void typeOfPrimop ( IROp op,
       case Iop_InterleaveLO8x16: case Iop_InterleaveLO16x8: 
       case Iop_InterleaveLO32x4: case Iop_InterleaveLO64x2:
       case Iop_Perm8x16:
-         BINARY(Ity_V128,Ity_V128, Ity_V128);
+         BINARY(Ity_I128,Ity_I128, Ity_I128);
 
       case Iop_NotV128:
       case Iop_Recip32Fx4: case Iop_Recip32F0x4:
@@ -2655,7 +2649,7 @@ void typeOfPrimop ( IROp op,
       case Iop_Sqrt64Fx2:  case Iop_Sqrt64F0x2:
       case Iop_CmpNEZ8x16: case Iop_CmpNEZ16x8:
       case Iop_CmpNEZ32x4: case Iop_CmpNEZ64x2:
-         UNARY(Ity_V128, Ity_V128);
+         UNARY(Ity_I128, Ity_I128);
 
       case Iop_ShlV128: case Iop_ShrV128:
       case Iop_ShlN8x16: case Iop_ShlN16x8: 
@@ -2663,16 +2657,16 @@ void typeOfPrimop ( IROp op,
       case Iop_ShrN8x16: case Iop_ShrN16x8: 
       case Iop_ShrN32x4: case Iop_ShrN64x2:
       case Iop_SarN8x16: case Iop_SarN16x8: case Iop_SarN32x4:
-         BINARY(Ity_V128,Ity_I8, Ity_V128);
+         BINARY(Ity_I128,Ity_I8, Ity_I128);
 
       case Iop_CmpEQF32:
-	  BINARY(Ity_F32, Ity_F32, Ity_I1);
+	  BINARY(Ity_I32, Ity_I32, Ity_I1);
       case Iop_CmpEQF64:
-	  BINARY(Ity_F64, Ity_F64, Ity_I1);
+	  BINARY(Ity_I64, Ity_I64, Ity_I1);
       case Iop_CmpEQI128:
 	  BINARY(Ity_I128, Ity_I128, Ity_I1);
       case Iop_CmpEQV128:
-	  BINARY(Ity_V128, Ity_V128, Ity_I1);
+	  BINARY(Ity_I128, Ity_I128, Ity_I1);
 
       default:
 	 ppIROp(op, stderr);
@@ -2732,9 +2726,9 @@ IRType typeOfIRConst ( IRConst* con )
       case Ico_U16:   return Ity_I16;
       case Ico_U32:   return Ity_I32;
       case Ico_U64:   return Ity_I64;
-      case Ico_F64:   return Ity_F64;
-      case Ico_F64i:  return Ity_F64;
-      case Ico_V128:  return Ity_V128;
+      case Ico_F64:   return Ity_I64;
+      case Ico_F64i:  return Ity_I64;
+      case Ico_V128:  return Ity_I128;
       default: vpanic("typeOfIRConst");
    }
 }
@@ -2746,8 +2740,6 @@ Bool isPlausibleIRType ( IRType ty )
       case Ity_INVALID: case Ity_I1:
       case Ity_I8: case Ity_I16: case Ity_I32: 
       case Ity_I64: case Ity_I128:
-      case Ity_F32: case Ity_F64:
-      case Ity_V128:
          return True;
       default: 
          return False;
@@ -2822,12 +2814,13 @@ Int sizeofIRType ( IRType ty )
       case Ity_I16:  return 2;
       case Ity_I32:  return 4;
       case Ity_I64:  return 8;
-      case Ity_F32:  return 4;
-      case Ity_F64:  return 8;
-      case Ity_V128: return 16;
-      default: fprintf(stderr, "\n"); ppIRType(ty, stderr); fprintf(stderr, "\n");
-               vpanic("sizeofIRType");
+      case Ity_I128: return 16;
+      case Ity_I1:
+      case Ity_INVALID:
+	break;
    }
+   fprintf(stderr, "\n"); ppIRType(ty, stderr); fprintf(stderr, "\n");
+   vpanic("sizeofIRType");
 }
 
 IRExpr* mkIRExpr_HWord ( HWord hw )

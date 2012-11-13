@@ -1256,8 +1256,6 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 			return IRExpr_Unop(Iop_64to16, expr);
 		case Ity_I32:
 			return IRExpr_Unop(Iop_64to32, expr);
-		case Ity_F64:
-			return IRExpr_Unop(Iop_ReinterpI64asF64, expr);
 		default:
 			break;
 		}
@@ -1268,16 +1266,6 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 			return IRExpr_Unop(Iop_32to8, expr);
 		case Ity_I16:
 			return IRExpr_Unop(Iop_32to16, expr);
-		case Ity_F32:
-			return IRExpr_Unop(Iop_ReinterpI32asF32, expr);
-		default:
-			break;
-		}
-		break;
-	case Ity_F32:
-		switch (desiredType) {
-		case Ity_I32:
-			return IRExpr_Unop(Iop_ReinterpF32asI32, expr);
 		default:
 			break;
 		}
@@ -1298,20 +1286,8 @@ coerceTypes(IRType desiredType, IRExpr *expr)
 			break;
 		}
 		break;
-	case Ity_F64:
+	case Ity_I128:
 		switch (desiredType) {
-		case Ity_I64:
-			return IRExpr_Unop(Iop_ReinterpF64asI64, expr);
-		default:
-			break;
-		}
-		break;
-	case Ity_V128:
-		switch (desiredType) {
-		case Ity_F64:
-			return coerceTypes(desiredType, coerceTypes(Ity_I64, expr));
-		case Ity_F32:
-			return coerceTypes(desiredType, coerceTypes(Ity_I32, expr));
 		case Ity_I64:
 			return IRExpr_Unop(Iop_V128to64, expr);
 		case Ity_I32:
@@ -2079,7 +2055,7 @@ top:
 				break;
 			}
 			if (e->op == Iop_ReinterpI32asF32) {
-				res = IRExpr_Get(argg->reg, Ity_F32);
+				res = IRExpr_Get(argg->reg, Ity_I32);
 				break;
 			}
 		}
@@ -2091,7 +2067,7 @@ top:
 				break;
 			}
 			if (e->op == Iop_ReinterpI32asF32) {
-				res = IRExpr_Load(Ity_F32, argl->addr);
+				res = IRExpr_Load(Ity_I32, argl->addr);
 				break;
 			}
 		}
@@ -3199,15 +3175,10 @@ expr_eq(IRExpr *a, IRExpr *b)
 		return IRExpr_Binop(Iop_CmpEQ64, a, b);
 	case Ity_I128:
 		return IRExpr_Binop(Iop_CmpEQI128, a, b);
-	case Ity_F32:
-		return IRExpr_Binop(Iop_CmpEQF32, a, b);
-	case Ity_F64:
-		return IRExpr_Binop(Iop_CmpEQF64, a, b);
-	case Ity_V128:
-		return IRExpr_Binop(Iop_CmpEQV128, a, b);
-	default:
-		abort();
+	case Ity_INVALID:
+		break;
 	}
+	abort();
 }
 
 QueryCache<IRExpr, IRExpr, bool> definitelyEqualCache("Definitely equal");

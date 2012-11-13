@@ -630,17 +630,15 @@ eval_expression(const RegisterSet *rs,
 		v1 = read_reg(rs, getOffset - sub_word_offset);
 		switch (getType) {
 		case Ity_I64:
-		case Ity_F64:
 			assert(!sub_word_offset);
 			dest->lo = v1;
 			break;
-		case Ity_V128:
+		case Ity_I128:
 			assert(!sub_word_offset);
 			dest->lo = v1;
 			dest->hi = read_reg(rs, getOffset - sub_word_offset + 8);
 			break;
 		case Ity_I32:
-		case Ity_F32:
 			assert(!(sub_word_offset % 4));
 			dest->lo = (v1 >> (sub_word_offset * 8)) & 0xfffffffful;
 			break;
@@ -1127,12 +1125,7 @@ eval_expression(const RegisterSet *rs,
 		case Ity_I64:
 			break;
 
-		case Ity_F32:
-		case Ity_F64:
-			break;
-
 		case Ity_I128:
-		case Ity_V128:
 			break;
 
 		default:
@@ -1852,20 +1845,17 @@ put_stmt(RegisterSet *rs, unsigned put_offset, struct expression_result put_data
 		break;
 
 	case Ity_I32:
-	case Ity_F32:
 		assert(!(byte_offset % 4));
 		dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
 		dest |= put_data.lo << (byte_offset * 8);
 		break;
 
 	case Ity_I64:
-	case Ity_F64:
 		assert(byte_offset == 0);
 		dest = put_data.lo;
 		break;
 
 	case Ity_I128:
-	case Ity_V128:
 		assert(byte_offset == 0);
 		dest = put_data.lo;
 		write_reg(rs,

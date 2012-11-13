@@ -16,9 +16,6 @@ enum byte_code_type {
 	bct_int,
 	bct_long,
 	bct_longlong,
-	bct_float,
-	bct_double,
-	bct_v128
 };
 enum byte_code_op {
 	bcop_push_const,

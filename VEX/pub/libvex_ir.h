@@ -1178,10 +1178,7 @@ typedef
       Ity_I16, 
       Ity_I32, 
       Ity_I64,
-      Ity_I128,  /* 128-bit scalar */
-      Ity_F32,   /* IEEE 754 float */
-      Ity_F64,   /* IEEE 754 double */
-      Ity_V128   /* 128-bit SIMD */
+      Ity_I128,
    }
    IRType;
 
@@ -1191,7 +1188,7 @@ static inline void sanity_check_irtype(IRType i
 #endif
 	)
 {
-   assert(i > Ity_INVALID && i <= Ity_V128);
+   assert(i > Ity_INVALID && i <= Ity_I128);
 }
 
 /* Pretty-print an IRType */

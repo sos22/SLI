@@ -26,13 +26,6 @@ operator+(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 		break;
 	case Ity_I128:
 		abort();
-	case Ity_F32:
-		abort();
-	case Ity_F64:
-		op = Iop_AddF64;
-		break;
-	case Ity_V128:
-		abort();
 	case Ity_INVALID:
 		abort();
 	}
@@ -63,13 +56,6 @@ operator*(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 		op = Iop_Mul64;
 		break;
 	case Ity_I128:
-		abort();
-	case Ity_F32:
-		abort();
-	case Ity_F64:
-		op = Iop_MulF64;
-		break;
-	case Ity_V128:
 		abort();
 	case Ity_INVALID:
 		abort();
@@ -103,13 +89,6 @@ operator&(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 		break;
 	case Ity_I128:
 		abort();
-	case Ity_F32:
-		abort();
-	case Ity_F64:
-		abort();
-	case Ity_V128:
-		op = Iop_AndV128;
-		break;
 	case Ity_INVALID:
 		abort();
 	}
@@ -142,13 +121,6 @@ operator|(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 		break;
 	case Ity_I128:
 		abort();
-	case Ity_F32:
-		abort();
-	case Ity_F64:
-		abort();
-	case Ity_V128:
-		op = Iop_OrV128;
-		break;
 	case Ity_INVALID:
 		abort();
 	}
@@ -180,13 +152,6 @@ operator<<(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 		break;
 	case Ity_I128:
 		abort();
-	case Ity_F32:
-		abort();
-	case Ity_F64:
-		abort();
-	case Ity_V128:
-		op = Iop_ShlV128;
-		break;
 	case Ity_INVALID:
 		abort();
 	}
@@ -237,9 +202,6 @@ operator<=(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 		op = Iop_CmpLE64U;
 		break;
 	case Ity_I128:
-	case Ity_V128:
-	case Ity_F32:
-	case Ity_F64:
 		abort();
 	case Ity_INVALID:
 		abort();

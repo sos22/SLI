@@ -210,12 +210,6 @@ vex_type_to_bytecode_type(IRType ty)
 		return "bct_long";
 	case Ity_I128:
 		return "bct_longlong";
-	case Ity_F32:
-		return "bct_float";
-	case Ity_F64:
-		return "bct_double";
-	case Ity_V128:
-		return "bct_v128";
 	}
 	abort();
 }

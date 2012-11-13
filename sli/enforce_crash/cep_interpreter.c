@@ -735,12 +735,10 @@ bytecode_fetch_const(const unsigned short **bytecode,
 		(*bytecode)++;
 		break;
 	case bct_int:
-	case bct_float:
 		res = (*bytecode)[0] | ((unsigned)(*bytecode)[1] << 16);
 		(*bytecode) += 2;
 		break;
 	case bct_long:
-	case bct_double:
 		res = (*bytecode)[0] |
 			((unsigned long)(*bytecode)[1] << 16) |
 			((unsigned long)(*bytecode)[2] << 32) |
@@ -748,7 +746,6 @@ bytecode_fetch_const(const unsigned short **bytecode,
 		(*bytecode) += 4;
 		break;
 	case bct_longlong:
-	case bct_v128:
 		/* Can't just return these as longs */
 		abort();
 	}
@@ -766,13 +763,10 @@ bytecode_mask(unsigned long val, enum byte_code_type type)
 	case bct_short:
 		return val & 0xffff;
 	case bct_int:
-	case bct_float:
 		return val & 0xffffffff;
 	case bct_long:
-	case bct_double:
 		return val;
 	case bct_longlong:
-	case bct_v128:
 		/* Can't just return these as longs */
 		abort();
 	}
@@ -935,9 +929,6 @@ bct_size(enum byte_code_type type)
 	case bct_int: return 4;
 	case bct_long: return 8;
 	case bct_longlong: return 16;
-	case bct_float: return 4;
-	case bct_double: return 8;
-	case bct_v128: return 16;
 	}
 	abort();
 }
@@ -1185,7 +1176,7 @@ eval_bytecode(const unsigned short *bytecode,
 				res = 0;
 				goto out;
 			}
-			if (type == bct_longlong || type == bct_v128) {
+			if (type == bct_longlong) {
 				bytecode_push_longlong(&stack, buf);
 			} else {
 				unsigned long data = bytecode_mask(*(unsigned long *)buf, type);

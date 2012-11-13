@@ -115,17 +115,12 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 			HLP(16);
 			break;
 		case Ity_I32:
-		case Ity_F32:
 			HLP(32);
 			break;
 		case Ity_I64:
-		case Ity_F64:
 			HLP(64);
 			break;
 		case Ity_I128:
-			HLP(128);
-			break;
-		case Ity_V128:
 			HLP(128);
 			break;
 		}
