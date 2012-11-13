@@ -49,10 +49,10 @@ physicallyEqual(const IRConst *a, const IRConst *b)
 		do_case(U16);
 		do_case(U32);
 		do_case(U64);
-		do_case(F64);
-		do_case(F64i);
-		do_case(V128);
 #undef do_case
+	case Ico_U128:
+		return a->Ico.U128.hi == b->Ico.U128.hi &&
+			a->Ico.U128.lo == b->Ico.U128.lo;
 	}
 	abort();
 }
@@ -435,10 +435,16 @@ _sortIRConsts(const IRConst *a, const IRConst *b)
 		do_type(U16);
 		do_type(U32);
 		do_type(U64);
-		do_type(F64);
-		do_type(F64i);
-		do_type(V128);
 #undef do_type
+	case Ico_U128: {
+		sort_ordering h = _sortIntegers(a->Ico.U128.hi,
+						b->Ico.U128.hi);
+		if (h == equal_to)
+			return _sortIntegers(a->Ico.U128.lo,
+					     b->Ico.U128.lo);
+		else
+			return h;
+	}
 	}
 	abort();
 }
@@ -1315,9 +1321,10 @@ isZero(const IRConst *iec)
 		do_tag(U16);
 		do_tag(U32);
 		do_tag(U64);
-		do_tag(F64);
-		do_tag(F64i);
-		do_tag(V128);
+#undef do_tag
+	case Ico_U128:
+		return iec->Ico.U128.hi == 0 &&
+			iec->Ico.U128.lo == 0;
 	}
 	abort();
 }
@@ -3198,22 +3205,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 		/* Special fast path for comparing two constants. */
 		IRExprConst *ac = (IRExprConst *)a;
 		IRExprConst *bc = (IRExprConst *)b;
-		assert(ac->con->tag == bc->con->tag);
-		switch (ac->con->tag) {
-#define do_type(n)							\
-			case Ico_ ## n :				\
-				return ac->con->Ico. n == bc->con->Ico. n
-			do_type(U1);
-			do_type(U8);
-			do_type(U16);
-			do_type(U32);
-			do_type(U64);
-			do_type(F64);
-			do_type(F64i);
-			do_type(V128);
-#undef do_type
-		}
-		abort();
+		return physicallyEqual(ac->con, bc->con);
 	}
 	int idx = definitelyEqualCache.hash(a, b);
 	bool res;

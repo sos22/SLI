@@ -687,17 +687,12 @@ eval_expression(const RegisterSet *rs,
 			dest->lo = (cnst->Ico.U32);
 			break;
 		case Ico_U64:
-		case Ico_F64:
-		case Ico_F64i:
 			dest->lo = (cnst->Ico.U64);
 			break;
-		case Ico_V128: {
-			unsigned long r = cnst->Ico.V128;
-			r = r | (r << 16) | (r << 32) | (r << 48);
-			dest->lo = (r);
-			dest->hi = dest->lo;
+		case Ico_U128:
+			dest->lo = cnst->Ico.U128.lo;
+			dest->lo = cnst->Ico.U128.hi;
 			break;
-		}
 		default:
 			ppIRExpr(expr, stderr);
 			throw NotImplementedException();

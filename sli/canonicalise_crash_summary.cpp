@@ -195,9 +195,10 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			do_type(32);
 			do_type(64);
 #undef do_type
-		case Ico_F64:
-		case Ico_F64i:
-		case Ico_V128:
+		case Ico_U128:
+			if (iec->con->Ico.U128.hi == 0 &&
+			    iec->con->Ico.U128.lo == 0)
+				return iec;
 			break;
 		}
 		return IRExpr_Get(canon_const(iec->con), iec->type());

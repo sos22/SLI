@@ -571,10 +571,7 @@ typedef
       Ico_U16, 
       Ico_U32, 
       Ico_U64,
-      Ico_F64,   /* 64-bit IEEE754 floating */
-      Ico_F64i,  /* 64-bit unsigned int to be interpreted literally
-                    as a IEEE754 double value. */
-      Ico_V128   /* 128-bit restricted vector constant, with 1 bit
+      Ico_U128   /* 128-bit restricted vector constant, with 1 bit
                     (repeated 8 times) for each of the 16 x 1-byte lanes */
    }
    IRConstTag;
@@ -592,14 +589,15 @@ struct _IRConst : public GarbageCollected<_IRConst, &ir_heap>{
          UShort U16;
          UInt   U32;
          ULong  U64;
-         Double F64;
-         ULong  F64i;
-         UShort V128;   /* 16-bit value; see Ico_V128 comment above */
+	 struct {
+	    ULong lo;
+	    ULong hi;
+	 } U128;
       } Ico;
       unsigned long hashval() const { return tag * 103 + Ico.U64 * 607; }
       void visit(HeapVisitor &) {}
       void sanity_check() const {
-	 assert(tag >= Ico_U1 && tag <= Ico_V128);
+	 assert(tag >= Ico_U1 && tag <= Ico_U128);
       }
       NAMED_CLASS
    }

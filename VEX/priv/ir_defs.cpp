@@ -123,21 +123,16 @@ bool parseIRType(IRType *out, const char *str, const char **suffix)
 
 void ppIRConst ( IRConst* con, FILE* f )
 {
-   union { ULong i64; Double f64; } u;
    vassert(sizeof(ULong) == sizeof(Double));
    switch (con->tag) {
-      case Ico_U1:   fprintf(f,  "%d:I1",        con->Ico.U1 ? 1 : 0); break;
-      case Ico_U8:   fprintf(f,  "0x%x:I8",      (UInt)(con->Ico.U8)); break;
-      case Ico_U16:  fprintf(f,  "0x%x:I16",     (UInt)(con->Ico.U16)); break;
-      case Ico_U32:  fprintf(f,  "0x%x:I32",     (UInt)(con->Ico.U32)); break;
-      case Ico_U64:  fprintf(f,  "0x%llx:I64",   (ULong)(con->Ico.U64)); break;
-      case Ico_F64:  u.f64 = con->Ico.F64;
-                     fprintf(f,  "F64{0x%llx}",  u.i64);
-                     break;
-      case Ico_F64i: fprintf(f,  "F64i{0x%llx}", con->Ico.F64i); break;
-      case Ico_V128: fprintf(f,  "V128{0x%04x}", (UInt)(con->Ico.V128)); break;
-      default: vpanic("ppIRConst");
+      case Ico_U1:   fprintf(f,  "%d:I1",        con->Ico.U1 ? 1 : 0); return;
+      case Ico_U8:   fprintf(f,  "0x%x:I8",      (UInt)(con->Ico.U8)); return;
+      case Ico_U16:  fprintf(f,  "0x%x:I16",     (UInt)(con->Ico.U16)); return;
+      case Ico_U32:  fprintf(f,  "0x%x:I32",     (UInt)(con->Ico.U32)); return;
+      case Ico_U64:  fprintf(f,  "0x%llx:I64",   (ULong)(con->Ico.U64)); return;
+      case Ico_U128: fprintf(f,  "U128{0x%llx, 0x%llx}", con->Ico.U128.hi, con->Ico.U128.lo); return;
    }
+   abort();
 }
 
 static bool parseIRConst(IRConst **out, const char *str, const char **suffix)
@@ -1701,22 +1696,27 @@ IRConst* IRConst_U64 ( ULong u64 )
 IRConst* IRConst_F64 ( Double f64 )
 {
    IRConst* c = new IRConst();
-   c->tag     = Ico_F64;
-   c->Ico.F64 = f64;
+   c->tag     = Ico_U64;
+   *(double *)&c->Ico.U64 = f64;
    return c;
 }
 IRConst* IRConst_F64i ( ULong f64i )
 {
    IRConst* c = new IRConst();
-   c->tag      = Ico_F64i;
-   c->Ico.F64i = f64i;
+   c->tag      = Ico_U64;
+   c->Ico.U64 = f64i;
    return c;
 }
 IRConst* IRConst_V128 ( UShort con )
 {
    IRConst* c = new IRConst();
-   c->tag      = Ico_V128;
-   c->Ico.V128 = con;
+   unsigned long a = con;
+   a <<= 16;
+   a |= con;
+   a = a | (a << 32);
+   c->tag      = Ico_U128;
+   c->Ico.U128.lo = a;
+   c->Ico.U128.hi = a;
    return c;
 }
 
@@ -2726,11 +2726,9 @@ IRType typeOfIRConst ( IRConst* con )
       case Ico_U16:   return Ity_I16;
       case Ico_U32:   return Ity_I32;
       case Ico_U64:   return Ity_I64;
-      case Ico_F64:   return Ity_I64;
-      case Ico_F64i:  return Ity_I64;
-      case Ico_V128:  return Ity_I128;
-      default: vpanic("typeOfIRConst");
+      case Ico_U128:  return Ity_I128;
    }
+   abort();
 }
 
 /* Is this any value actually in the enumeration 'IRType' ? */
@@ -2800,11 +2798,11 @@ Bool eqIRConst ( IRConst* c1, IRConst* c2 )
       case Ico_U16: return toBool( c1->Ico.U16 == c2->Ico.U16 );
       case Ico_U32: return toBool( c1->Ico.U32 == c2->Ico.U32 );
       case Ico_U64: return toBool( c1->Ico.U64 == c2->Ico.U64 );
-      case Ico_F64: return toBool( c1->Ico.F64 == c2->Ico.F64 );
-      case Ico_F64i: return toBool( c1->Ico.F64i == c2->Ico.F64i );
-      case Ico_V128: return toBool( c1->Ico.V128 == c2->Ico.V128 );
-      default: vpanic("eqIRConst");
+      case Ico_U128:
+	return toBool( c1->Ico.U128.hi == c2->Ico.U128.hi &&
+		       c1->Ico.U128.lo == c2->Ico.U128.lo );
    }
+  vpanic("eqIRConst");
 }
 
 Int sizeofIRType ( IRType ty )
