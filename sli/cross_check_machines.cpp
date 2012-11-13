@@ -1195,22 +1195,21 @@ generateConcreteSatisfier(EvalState &res, const satisfier &abstract_sat, bool *u
 	std::vector<IRExpr *> falsePrimaries;
 	std::vector<IRExpr *> trueBadPtrs;
 	std::vector<IRExpr *> falseBadPtrs;
-	for (auto it = abstract_sat.memo.begin(); it != abstract_sat.memo.end(); it++) {
-		if (!it->second.second)
-			continue;
-		if (it->second.first) {
-			if (it->first->tag == Iex_Unop &&
-			    ((IRExprUnop *)it->first)->op == Iop_BadPtr)
-				trueBadPtrs.push_back(it->first);
-			else
-				truePrimaries.push_back(it->first);
-		} else {
-			if (it->first->tag == Iex_Unop &&
-			    ((IRExprUnop *)it->first)->op == Iop_BadPtr)
-				falseBadPtrs.push_back(it->first);
-			else
-				falsePrimaries.push_back(it->first);
-		}
+	for (auto it = abstract_sat.trueBooleans.begin(); it != abstract_sat.trueBooleans.end(); it++) {
+		IRExpr *e = *it;
+		if (e->tag == Iex_Unop &&
+		    ((IRExprUnop *)e)->op == Iop_BadPtr)
+			trueBadPtrs.push_back(e);
+		else
+			truePrimaries.push_back(e);
+	}
+	for (auto it = abstract_sat.falseBooleans.begin(); it != abstract_sat.falseBooleans.end(); it++) {
+		IRExpr *e = *it;
+		if (e->tag == Iex_Unop &&
+		    ((IRExprUnop *)e)->op == Iop_BadPtr)
+			falseBadPtrs.push_back(e);
+		else
+			falsePrimaries.push_back(e);
 	}
 
 	/* If we're allowed to randomise, take the expressions in
