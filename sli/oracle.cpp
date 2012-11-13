@@ -136,6 +136,7 @@ Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration
 	   guest program is doing something non-C-like. */
 	stackInStack = false;
 	stackInMemory = false;
+#warning non-argument registers should point at nothing.
 	for (int i = 0; i < NR_REGS; i++)
 		v[i] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
 	v[4] = PointerAliasingSet::stackPointer; /* rsp */

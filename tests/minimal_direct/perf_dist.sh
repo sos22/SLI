@@ -27,12 +27,6 @@ get_dist() {
 	sd=$(grep "pop stats" "$t" | sed 's/.*sd = \([-0-9.]*\),.*/\1/')
 	read mean sd < <(./tests/minimal_direct/sane_round.py "$mean" "$sd")
 	echo "\$$mean \\pm $sd\$"
-    elif grep -q "Might be uniform" "$t"
-    then
-	low=$(grep "Might be uniform" "$t" | sed 's/.*uniform(\([0-9.-]*\),.*/\1/')
-	high=$(grep "Might be uniform" "$t" | sed 's/.*uniform(\([0-9.-]*\), \([0-9.-]*\)).*/\2/')
-	read low high < <(./tests/minimal_direct/sane_round_range.py "$low" "$high")
-	echo "\$[$low, $high]\$"
     else
 	cat "$t2" | ./tests/minimal_direct/characterise_percentiles.py ""
     fi

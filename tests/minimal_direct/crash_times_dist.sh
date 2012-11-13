@@ -12,7 +12,7 @@ set -e
 SOS22_RUN_FOREVER=1 ./md_test_dir/harness -n 20 -r $harness_args $enforcer $exe > $data
 if grep -q "T" "$data"
 then
-    if grep -v -q "T" "$data"
+    if ! grep -v -q "T" "$data"
     then
 	echo "\textit{timeout}"
 	exit 0
@@ -39,7 +39,7 @@ then
     high=$(grep "Might be uniform" "$t" | sed 's/.*uniform(\([0-9.-]*\), \([0-9.-]*\)).*/\2/')
     rm "$t"
     read low high < <(./tests/minimal_direct/sane_round_range.py "$low" "$high")
-    echo "\$\[$low, $high\]\$"
+    echo "\$[$low, $high]\$"
     exit 0
 fi
 rm "$t"

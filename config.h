@@ -30,7 +30,7 @@
 #endif
 
 #ifndef CONFIG_CLUSTER_THRESHOLD
-#define CONFIG_CLUSTER_THRESHOLD 20
+#define CONFIG_CLUSTER_THRESHOLD 40
 #endif
 
 /* We do an initial clustering using @STORE_CLUSTER_THRESHOLD, and

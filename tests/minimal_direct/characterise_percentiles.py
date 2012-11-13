@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
 import sys
+import math
 
 extra = sys.argv[1]
 data = map(float, sys.stdin.xreadlines())
@@ -15,8 +16,23 @@ def percentile(n):
         return data[int(idx)]
     l_idx = int(idx)
     h_idx = l_idx + 1
+    if h_idx == len(data):
+        return data[l_idx]
     l = data[l_idx]
     h = data[h_idx]
     return l + (h - l) * (idx - l_idx)
 
-print "$[%f; %f; %f]_{%d}$" % (percentile(10), percentile(50), percentile(90), len(data))
+def round(n):
+    shift = int(math.log(n, 10))
+    n += 0.5 * 10 ** (shift - 1)
+    n -= n % (10 ** (shift - 1))
+    return n
+
+p10 = percentile(10)
+p50 = percentile(50)
+p90 = percentile(90)
+p10 = round(p10)
+p50 = round(p50)
+p90 = round(p90)
+
+print "$[%f; %f; %f]_{%d}$" % (p10, p50, p90, len(data))
