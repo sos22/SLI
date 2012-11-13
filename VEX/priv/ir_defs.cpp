@@ -83,20 +83,23 @@ operationAssociates(IROp op)
 /*---------------------------------------------------------------*/
 /*--- Printing the IR                                         ---*/
 /*---------------------------------------------------------------*/
+const char *nameIRType(IRType ty)
+{
+   switch (ty) {
+      case Ity_INVALID: return "Ity_INVALID";
+      case Ity_I1:      return "I1";
+      case Ity_I8:      return "I8";
+      case Ity_I16:     return "I16";
+      case Ity_I32:     return "I32";
+      case Ity_I64:     return "I64";
+      case Ity_I128:    return "I128";
+   }
+   return vex_asprintf("ty(0x%x)", ty);
+}
 
 void ppIRType ( IRType ty, FILE *f )
 {
-   switch (ty) {
-      case Ity_INVALID: fprintf(f, "Ity_INVALID"); return;
-      case Ity_I1:      fprintf(f,  "I1");   return;
-      case Ity_I8:      fprintf(f,  "I8");   return;
-      case Ity_I16:     fprintf(f,  "I16");  return;
-      case Ity_I32:     fprintf(f,  "I32");  return;
-      case Ity_I64:     fprintf(f,  "I64");  return;
-      case Ity_I128:    fprintf(f,  "I128"); return;
-   }
-   fprintf(f, "ty = 0x%x\n", (Int)ty);
-   vpanic("ppIRType");
+   fprintf(f, nameIRType(ty));
 }
 
 bool parseIRType(IRType *out, const char *str, const char **suffix)
