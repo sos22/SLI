@@ -1021,10 +1021,10 @@ PointsToTable::refine(AliasTable &at,
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
 			     it++) {
-				auto i = content.find(it->first);
+				auto i = content.find(it->reg);
 				if (i == content.end()) {
-					if (it->first.isReg()) {
-						newPts |= aliasConfigForReg(smse, it->first, mat);
+					if (it->reg.isReg()) {
+						newPts |= aliasConfigForReg(smse, it->reg, mat);
 					} else {
 						/* We've not got any
 						 * assignments to this

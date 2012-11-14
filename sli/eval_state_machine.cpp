@@ -308,7 +308,7 @@ public:
 			for (auto it2 = phi->generations.begin();
 			     it2 != phi->generations.end();
 			     it2++) {
-				if (it2->first == *it) {
+				if (it2->reg == *it) {
 					registers[phi->reg] = registers[*it];
 					if (phi->reg.isTemp())
 						*assumption = setTemporary(phi->reg, *assumption, opt);
@@ -324,8 +324,8 @@ public:
 		for (auto it = phi->generations.begin();
 		     genM1.isInvalid() && it != phi->generations.end();
 		     it++)
-			if (it->first.gen() == (unsigned)-1)
-				genM1 = it->first;
+			if (it->reg.gen() == (unsigned)-1)
+				genM1 = it->reg;
 		assert(genM1.isValid());
 
 		/* Pick up initial value */

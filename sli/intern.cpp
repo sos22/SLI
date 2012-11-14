@@ -279,11 +279,11 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		StateMachineSideEffectPhi *phi = dynamic_cast<StateMachineSideEffectPhi *>(s);
 		assert(phi);
 		for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
-			if (it->second)
-				it->second = internIRExpr(it->second, t);
+			if (it->val)
+				it->val = internIRExpr(it->val, t);
 		for (auto it = t.phis.begin(); it != t.phis.end(); it++) {
 			StateMachineSideEffectPhi *o = *it;
-			if (o->reg == phi->reg && o->generations == phi->generations) {
+			if (o->ty == phi->ty && o->reg == phi->reg && o->generations == phi->generations) {
 				t.sideEffects[s] = o;
 				return o;
 			}

@@ -76,6 +76,7 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 		*done_something = true;
 		return new StateMachineSideEffectPhi(
 			canon_reg(smsep->reg),
+			smsep->ty,
 			smsep->generations);
 	}
 	StateMachineSideEffectStore *transformOneSideEffect(
@@ -238,7 +239,7 @@ class SplitSsaGenerations : public StateMachineTransformer {
 		if (smsep2)
 			smsep = smsep2;
 		for (auto it = smsep->generations.begin(); it != smsep->generations.end(); ) {
-			if (!generatedRegisters.count(it->first) ) {
+			if (!generatedRegisters.count(it->reg) ) {
 				*done_something = true;
 				it = smsep->generations.erase(it);
 			} else {
@@ -372,6 +373,7 @@ private:
 		*done_something = true;
 		return new StateMachineSideEffectPhi(
 			canon_reg(p->reg),
+			p->ty,
 			p->generations);
 	}
 	bool rewriteNewStates() const { return false; };
@@ -475,7 +477,7 @@ canonicalise_crash_summary(CrashSummary *input)
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
 			     it++)
-				res.insert(it->first);
+				res.insert(it->reg);
 			res.insert(smsep->reg);
 			return StateMachineTransformer::transformOneSideEffect(smsep, done_something);
 		}

@@ -413,15 +413,14 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		auto *p = (StateMachineSideEffectPhi *)effect;
 		for (auto it = regOrder.rbegin(); it != regOrder.rend(); it++) {
 			for (auto it2 = p->generations.begin(); it2 != p->generations.end(); it2++) {
-				if (it2->first == *it) {
-					assert(currentState.regs.count(it2->first));
-					if (it2->second) {
-						assert(eval(it2->second) == currentState.regs[it2->first]);
-					}
-					currentState.regs[p->reg] = currentState.regs[it2->first];
+				if (it2->reg == *it) {
+					assert(currentState.regs.count(it2->reg));
+					if (it2->val)
+						assert(eval(it2->val) == currentState.regs[it2->reg]);
+					currentState.regs[p->reg] = currentState.regs[it2->reg];
 					regOrder.push_back(p->reg);
 					log(state, "phi satisfied by %s (%lx)",
-					    it2->first.name(),
+					    it2->reg.name(),
 					    currentState.regs[p->reg]);
 					return true;
 				}
@@ -433,26 +432,26 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		{
 			int nr_gen_m1 = 0;
 			for (auto it = p->generations.begin(); it != p->generations.end(); it++)
-				if (it->first.gen() == (unsigned)-1)
+				if (it->reg.gen() == (unsigned)-1)
 					nr_gen_m1++;
 			assert(nr_gen_m1 == 1);
 		}
 #endif
 		for (auto it = p->generations.begin(); it != p->generations.end(); it++) {
-			if (it->first.gen() == (unsigned)-1) {
-				if (!currentState.regs.count(it->first)) {
-					currentState.regs[it->first] = genRandomUlong();
+			if (it->reg.gen() == (unsigned)-1) {
+				if (!currentState.regs.count(it->reg)) {
+					currentState.regs[it->reg] = genRandomUlong();
 					log(state,
 					    "phi satisfied by initial load of %s, randomly generated %lx",
-					    it->first.name(),
-					    currentState.regs[it->first]);
+					    it->reg.name(),
+					    currentState.regs[it->reg]);
 				} else {
 					log(state,
 					    "phi satisfied by initial load of %s, already set to %lx",
-					    it->first.name(),
-					    currentState.regs[it->first]);
+					    it->reg.name(),
+					    currentState.regs[it->reg]);
 				}
-				currentState.regs[p->reg] = currentState.regs[it->first];
+				currentState.regs[p->reg] = currentState.regs[it->reg];
 				regOrder.push_back(p->reg);
 				return true;
 			}

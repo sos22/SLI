@@ -355,7 +355,7 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 			if (smsep->generations.size() == 0) {
 				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(-1));
 			} else if (smsep->generations.size() == 1) {
-				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->generations[0].first);
+				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->generations[0].reg);
 			}
 		}
 	}
@@ -652,22 +652,22 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 		     it != currentlyAvailable._registers.end();
 		     it++) {
 			for (unsigned x = 0; x < phi->generations.size(); x++) {
-				if (phi->generations[x].first == it->first) {
+				if (phi->generations[x].reg == it->first) {
 					if (it->second.e) {
-						if (phi->generations[x].second &&
-						    physicallyEqual(phi->generations[x].second,
+						if (phi->generations[x].val &&
+						    physicallyEqual(phi->generations[x].val,
 								    it->second.e))
 							break;
 						if (!newPhi)
 							newPhi = new StateMachineSideEffectPhi(*phi);
-						newPhi->generations[x].second = it->second.e;
+						newPhi->generations[x].val = it->second.e;
 					} else {
 						if (!newPhi)
 							newPhi = new StateMachineSideEffectPhi(*phi);
 						assert(threadAndRegister::partialEq(phi->reg,
 										    it->second.phiFrom));
-						newPhi->generations[x].first = it->second.phiFrom;
-						newPhi->generations[x].second = NULL;
+						newPhi->generations[x].reg = it->second.phiFrom;
+						newPhi->generations[x].val = NULL;
 						needSort = true;
 					}
 				}
@@ -675,7 +675,7 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 		}
 		for (unsigned x = 0; x < phi->generations.size(); x++) {
 			IRExpr *e;
-			e = (newPhi ? newPhi : phi)->generations[x].second;
+			e = (newPhi ? newPhi : phi)->generations[x].val;
 			if (e) {
 				bool t = false;
 				IRExpr *e2 = applyAvailSet(currentlyAvailable,
@@ -687,7 +687,7 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 					assert(e != e2);
 					if (!newPhi)
 						newPhi = new StateMachineSideEffectPhi(*phi);
-					newPhi->generations[x].second = e2;
+					newPhi->generations[x].val = e2;
 					*done_something = true;
 				}
 			}
@@ -696,16 +696,16 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 			assert(newPhi);
 			std::sort(newPhi->generations.begin(), newPhi->generations.end());
 			for (unsigned x = 0; x + 1 < newPhi->generations.size(); ) {
-				if (newPhi->generations[x].first ==
-				    newPhi->generations[x+1].first) {
-					IRExpr *v = newPhi->generations[x].second;
+				if (newPhi->generations[x].reg ==
+				    newPhi->generations[x+1].reg) {
+					IRExpr *v = newPhi->generations[x].val;
 					if (!v) {
-						v = newPhi->generations[x+1].second;
+						v = newPhi->generations[x+1].val;
 					} else {
-						assert(!newPhi->generations[x+1].second ||
-						       v == newPhi->generations[x+1].second);
+						assert(!newPhi->generations[x+1].val ||
+						       v == newPhi->generations[x+1].val);
 					}
-					newPhi->generations[x].second = v;
+					newPhi->generations[x].val = v;
 					newPhi->generations.erase(newPhi->generations.begin() + x + 1);
 				} else {
 					x++;

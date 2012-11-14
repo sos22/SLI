@@ -74,14 +74,14 @@ localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2)
 	for (auto it1 = e1->generations.begin(); it1 != e1->generations.end(); it1++) {
 		bool found_one = false;
 		for (auto it2 = e2->generations.begin(); !found_one && it2 != e2->generations.end(); it2++)
-			found_one = it1->first == it2->first;
+			found_one = it1->reg == it2->reg;
 		if (!found_one)
 			return false;
 	}
 	for (auto it1 = e2->generations.begin(); it1 != e2->generations.end(); it1++) {
 		bool found_one = false;
 		for (auto it2 = e1->generations.begin(); !found_one && it2 != e1->generations.end(); it2++)
-			found_one = it1->first == it2->first;
+			found_one = it1->reg == it2->reg;
 		if (!found_one)
 			return false;
 	}

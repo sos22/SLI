@@ -449,29 +449,29 @@ undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt,
 					unsigned x;
 					IRExpr *v = NULL;
 					for (x = 0; x < p->generations.size(); x++) {
-						if (!p->generations[x].second)
+						if (!p->generations[x].val)
 							continue;
-						v = undefinednessExpression(sm, p->generations[x].second, vdm, opt);
-						if (v == p->generations[x].second)
+						v = undefinednessExpression(sm, p->generations[x].val, vdm, opt);
+						if (v == p->generations[x].val)
 							continue;
 						if (v != UNDEFINED_EXPR)
 							break;
 					}
 					if (x == p->generations.size())
 						break;
-					std::vector<std::pair<threadAndRegister, IRExpr *> > newGen(p->generations);
-					newGen[x].second = v;
+					std::vector<StateMachineSideEffectPhi::input> newGen(p->generations);
+					newGen[x].val = v;
 					for (x++; x < newGen.size(); x++) {
-						if (!newGen[x].second)
+						if (!newGen[x].val)
 							continue;
-						v = undefinednessExpression(sm, newGen[x].second, vdm, opt);
-						if (v == newGen[x].second)
+						v = undefinednessExpression(sm, newGen[x].val, vdm, opt);
+						if (v == newGen[x].val)
 							continue;
 						if (v != UNDEFINED_EXPR)
-							newGen[x].second = v;
+							newGen[x].val = v;
 					}
 					newSe = new StateMachineSideEffectPhi(
-						p->reg, newGen);
+						p, newGen);
 					break;
 				}
 				case StateMachineSideEffect::StartFunction: {

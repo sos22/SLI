@@ -1000,47 +1000,73 @@ public:
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
 	void inputExpressions(std::vector<IRExpr *> &exprs) {
 		for (auto it = generations.begin(); it != generations.end(); it++)
-			if (it->second)
-				exprs.push_back(it->second);
+			if (it->val)
+				exprs.push_back(it->val);
 	}
 public:
 	threadAndRegister reg;
-	std::vector<std::pair<threadAndRegister, IRExpr *> > generations;
+	IRType ty;
+	class input {
+	public:
+		threadAndRegister reg;
+		IRExpr *val;
+		bool operator==(const input &i) const {
+			return reg == i.reg && val == i.val;
+		}
+		bool operator<(const input &o) const {
+			if (val < o.val)
+				return true;
+			if (val > o.val)
+				return false;
+			return reg < o.reg;
+		}
+		input(const threadAndRegister &_reg, IRExpr *_val)
+			: reg(_reg), val(_val)
+		{}
+		input()
+			: reg(threadAndRegister::invalid()),
+			  val(NULL)
+		{}
+	};
+	std::vector<input> generations;
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
+				  IRType _ty,
 				  const std::set<unsigned> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
-		  reg(_reg)
+		  reg(_reg),
+		  ty(_ty)
 	{
 		generations.reserve(_generations.size());
 		for (auto it = _generations.begin(); it != _generations.end(); it++) {
-			std::pair<threadAndRegister, IRExpr *> item;
-			item.first = reg.setGen(*it);
-			item.second = NULL;
+			input item;
+			item.reg = reg.setGen(*it);
+			item.val = NULL;
 			generations.push_back(item);
 		}
 	}
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
-				  const std::vector<std::pair<threadAndRegister, IRExpr *> > &_generations)
+				  IRType _ty,
+				  const std::vector<input> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
-		  reg(_reg), generations(_generations)
+		  reg(_reg), ty(_ty), generations(_generations)
 	{
 	}
 	StateMachineSideEffectPhi(const StateMachineSideEffectPhi *base,
-				  const std::vector<std::pair<threadAndRegister, IRExpr *> > &_generations)
+				  const std::vector<input> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
-		  reg(base->reg), generations(_generations)
+		  reg(base->reg), ty(base->ty), generations(_generations)
 	{}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Phi");
 		reg.prettyPrint(f);
-		fprintf(f, "(");
+		fprintf(f, ":%s(", nameIRType(ty));
 		for (auto it = generations.begin(); it != generations.end(); it++) {
 			if (it != generations.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%s", it->first.name());
-			if (it->second) {
+			fprintf(f, "%s", it->reg.name());
+			if (it->val) {
 				fprintf(f, "=");
-				ppIRExpr(it->second, f);
+				ppIRExpr(it->val, f);
 			}
 		}
 		fprintf(f, ")");
@@ -1048,37 +1074,37 @@ public:
 	static bool parse(StateMachineSideEffectPhi **out, const char *str, const char **suffix)
 	{
 		threadAndRegister key(threadAndRegister::invalid());
+		IRType ty;
 		if (parseThisString("Phi", str, &str) &&
 		    parseThreadAndRegister(&key, str, &str) &&
+		    parseThisChar(':', str, &str) &&
+		    parseIRType(&ty, str, &str) &&
 		    parseThisString("(", str, &str)) {
-			std::vector<std::pair<threadAndRegister, IRExpr *> > generations;
+			std::vector<input> generations;
 			if (!parseThisChar(')', str, suffix)) {
 				while (1) {
-					threadAndRegister x(threadAndRegister::invalid());
-					IRExpr *val;
-					if (!parseThreadAndRegister(&x, str, &str))
+					input item;
+					if (!parseThreadAndRegister(&item.reg, str, &str))
 						return false;
 					if (parseThisChar('=', str, &str)) {
-						if (!parseIRExpr(&val, str, &str))
+						if (!parseIRExpr(&item.val, str, &str))
 							return false;
-					} else {
-						val = NULL;
 					}
-					generations.push_back(std::pair<threadAndRegister, IRExpr *>(x, val));
+					generations.push_back(item);
 					if (parseThisChar(')', str, suffix))
 						break;
 					if (!parseThisString(", ", str, &str))
 						return false;
 				}
 			}
-			*out = new StateMachineSideEffectPhi(key, generations);
+			*out = new StateMachineSideEffectPhi(key, ty, generations);
 			return true;
 		}
 		return false;
 	}
 	void visit(HeapVisitor &hv) {
 		for (auto it = generations.begin(); it != generations.end(); it++)
-			hv(it->second);
+			hv(it->val);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
 	void sanityCheck() const {

@@ -242,10 +242,10 @@ rawDupeS(duplication_context &ctxt, const StateMachineSideEffectCopy *l)
 static StateMachineSideEffectPhi *
 rawDupeS(duplication_context &ctxt, const StateMachineSideEffectPhi *l)
 {
-	StateMachineSideEffectPhi *res = new StateMachineSideEffectPhi(l->reg, l->generations);
+	StateMachineSideEffectPhi *res = new StateMachineSideEffectPhi(l->reg, l->ty, l->generations);
 	for (unsigned x = 0; x < l->generations.size(); x++) {
-		if (l->generations[x].second)
-			ctxt(&res->generations[x].second, l->generations[x].second, rawDupe);
+		if (l->generations[x].val)
+			ctxt(&res->generations[x].val, l->generations[x].val, rawDupe);
 	}
 	return res;
 }

@@ -219,7 +219,7 @@ build_selection_bdd(StateMachine *sm,
 
 	/* Set up initial map */
 	for (unsigned x = 0; x < phi->generations.size(); x++) {
-		const threadAndRegister &tr(phi->generations[x].first);
+		const threadAndRegister &tr(phi->generations[x].reg);
 		if (tr.isReg() && tr.gen() == (unsigned)-1 ) {
 			/* gen -1; that'll be the result at the root
 			   and any other path which doesn't assign to
@@ -361,10 +361,10 @@ build_mux(StateMachineSideEffectPhi *phi,
 	IRExpr *res;
 	if (from->isLeaf) {
 		int idx = from->content.leaf;
-		if (phi->generations[idx].second)
-			res = phi->generations[idx].second;
+		if (phi->generations[idx].val)
+			res = coerceTypes(ty, phi->generations[idx].val);
 		else
-			res = IRExpr_Get(phi->generations[idx].first, ty);
+			res = IRExpr_Get(phi->generations[idx].reg, ty);
 	} else {
 		res = IRExpr_Mux0X(
 			from->content.condition,
@@ -420,19 +420,14 @@ phiElimination(StateMachine *sm, bool *done_something)
 			phi->prettyPrint(stdout);
 			printf("\n");
 		}
-		IRType ity = Ity_INVALID;
-		bool failed = false;
+		IRType ity = phi->ty;
 		std::map<unsigned, unsigned> resultCanoniser;
 		for (unsigned x = 0; x < phi->generations.size(); x++) {
-			IRExpr *expr = phi->generations[x].second;
+			IRExpr *expr = phi->generations[x].val;
 			if (expr) {
-				if (ity == Ity_INVALID)
-					ity = expr->type();
-				else if (ity != expr->type())
-					failed = true;
 				bool found_one = false;
 				for (unsigned y = 0; !found_one && y < x; y++) {
-					if (phi->generations[y].second == expr) {
+					if (phi->generations[y].val == expr) {
 						resultCanoniser[x] = y;
 						found_one = true;
 					}
@@ -442,8 +437,8 @@ phiElimination(StateMachine *sm, bool *done_something)
 			} else {
 				bool found_one = false;
 				for (unsigned y = 0; !found_one && y < x; y++) {
-					if (phi->generations[y].first == 
-					    phi->generations[x].first) {
+					if (phi->generations[y].reg == 
+					    phi->generations[x].reg) {
 						resultCanoniser[x] = y;
 						found_one = true;
 					}
@@ -451,11 +446,6 @@ phiElimination(StateMachine *sm, bool *done_something)
 				if (!found_one)
 					resultCanoniser[x] = x;
 			}
-		}
-		if (ity == Ity_INVALID || failed) {
-			if (debug_toplevel)
-				printf("Failed: unknown type\n");
-			continue;
 		}
 		intbdd_scope iscope;
 		intbdd *sel_bdd = build_selection_bdd(sm, phi, labels, resultCanoniser, &iscope);

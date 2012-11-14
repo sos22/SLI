@@ -296,7 +296,7 @@ public:
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
 			     it++)
-				this->livePointer.insert(it->first);
+				this->livePointer.insert(it->reg);
 			break;
 		}
 		}
@@ -440,7 +440,7 @@ ssaDeadCode(StateMachine *sm, bool *done_something)
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
 			     it++)
-				refed_regs.insert(it->first);
+				refed_regs.insert(it->reg);
 		}
 	}
 	std::set<StateMachineSideEffecting *> ses;

@@ -254,8 +254,8 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectPhi *phi,
 
 	newE = (IRExpr *)0xf001deadul; /* Shut the compiler up */
 	for (x = 0; x < phi->generations.size(); x++) {
-		if (phi->generations[x].second)
-			newE = transformIRExpr(phi->generations[x].second, &t);
+		if (phi->generations[x].val)
+			newE = transformIRExpr(phi->generations[x].val, &t);
 		if (t)
 			break;
 	}
@@ -263,13 +263,13 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectPhi *phi,
 		return NULL;
 	*done_something = true;
 	StateMachineSideEffectPhi *newPhi = new StateMachineSideEffectPhi(*phi);
-	newPhi->generations[x].second = newE;
+	newPhi->generations[x].val = newE;
 
 	x++;
 	while (x < newPhi->generations.size()) {
-		if (newPhi->generations[x].second)
-			newPhi->generations[x].second =
-				transformIRExpr(newPhi->generations[x].second, &t);
+		if (newPhi->generations[x].val)
+			newPhi->generations[x].val =
+				transformIRExpr(newPhi->generations[x].val, &t);
 		x++;
 	}
 	return newPhi;

@@ -336,18 +336,30 @@ resolveDependencies(StateMachine *sm,
 	return doit.transform(sm);
 }
 
+class unresolvedRefCmp {
+public:
+	bool operator()(const std::pair<threadAndRegister, IRType> &a,
+			const std::pair<threadAndRegister, IRType> &b) {
+		if (a.second < b.second)
+			return true;
+		if (a.second > b.second)
+			return false;
+		return threadAndRegister::partialCompare()(a.first, b.first);
+	}
+};
+
 static void
-findUnresolvedReferences(StateMachineState *s, std::set<threadAndRegister, threadAndRegister::partialCompare> &out)
+findUnresolvedReferences(StateMachineState *s, std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> &out)
 {
 	struct _ : public StateMachineTransformer {
-		std::set<threadAndRegister, threadAndRegister::partialCompare> &out;
+		std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> &out;
 		IRExpr *transformIex(IRExprGet *ieg) {
 			if (ieg->reg.gen() == 0)
-				out.insert(ieg->reg);
+				out.insert(std::pair<threadAndRegister, IRType>(ieg->reg, ieg->ty));
 			return NULL;
 		}
 		_(
-			std::set<threadAndRegister, threadAndRegister::partialCompare> &_out)
+			std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> &_out)
 			: out(_out)
 		{}
 		bool rewriteNewStates() const { return false; }
@@ -433,7 +445,7 @@ convertToSSA(StateMachine *inp)
 		   we invalidate the reaching map.  We simplify
 		   further by just only resolving one state each
 		   time around. */
-		std::set<threadAndRegister, threadAndRegister::partialCompare> needed;
+		std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> needed;
 		StateMachineSideEffecting *insertAt;
 
 		findUnresolvedReferences(needsPhi, needed);
@@ -443,8 +455,9 @@ convertToSSA(StateMachine *inp)
 		     it++)
 			insertAt->prependSideEffect(
 					new StateMachineSideEffectPhi(
-						it->setGen(++lastGeneration[*it]),
-						reaching.getEntryReaching(needsPhi).get(*it)));
+						it->first.setGen(++lastGeneration[it->first]),
+						it->second,
+						reaching.getEntryReaching(needsPhi).get(it->first)));
 	}
 
 	inp->assertSSA();
@@ -465,13 +478,13 @@ StateMachineSideEffect *
 StateMachineSideEffectPhi::optimise(const AllowableOptimisations &, bool *done_something)
 {
 	if (generations.size() == 0 ||
-	    generations[0].second == NULL)
+	    generations[0].val == NULL)
 		return this;
-	IRExpr *v = generations[0].second;
+	IRExpr *v = generations[0].val;
 	for (unsigned x = 1; x < generations.size(); x++) {
-		if (generations[x].second != v) {
+		if (generations[x].val != v) {
 			if (v->tag == Iex_Get &&
-			    ((IRExprGet *)v)->reg == generations[x].first)
+			    ((IRExprGet *)v)->reg == generations[x].reg)
 				continue;
 			return this;
 		}
