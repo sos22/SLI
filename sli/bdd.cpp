@@ -114,8 +114,8 @@ bbdd::zip(bbdd_scope *scope,
 		bestCond = b->content.condition;
 	} else if (b->isLeaf) {
 		bestCond = a->content.condition;
-	} else if (scope->ordering.before(a->content.condition,
-					  b->content.condition)) {
+	} else if (scope->ordering->before(a->content.condition,
+					   b->content.condition)) {
 		bestCond = a->content.condition;
 	} else {
 		bestCond = b->content.condition;
@@ -253,11 +253,11 @@ intbdd::from_enabling(intbdd_scope *scope,
 	for (auto it = inp.begin(); it != inp.end(); it++) {
 		if (!it->first->isLeaf &&
 		    (!bestCond ||
-		     scope->ordering.before(it->first->content.condition, bestCond)))
+		     scope->ordering->before(it->first->content.condition, bestCond)))
 			bestCond = it->first->content.condition;
 		if (!it->second->isLeaf &&
 		    (!bestCond ||
-		     scope->ordering.before(it->second->content.condition, bestCond)))
+		     scope->ordering->before(it->second->content.condition, bestCond)))
 			bestCond = it->second->content.condition;
 	}
 	assert(bestCond != NULL);
@@ -348,7 +348,7 @@ intbdd::assume(intbdd_scope *scope,
 	if (!did_insert)
 		return it->second;
 	IRExpr *cond;
-	if (scope->ordering.before(a->content.condition, b->content.condition))
+	if (scope->ordering->before(a->content.condition, b->content.condition))
 		cond = a->content.condition;
 	else
 		cond = b->content.condition;

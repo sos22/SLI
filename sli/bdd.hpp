@@ -105,7 +105,11 @@ class bdd_scope {
 	std::map<entry, t *> intern;
 public:
 	t *makeInternal(IRExpr *a, t *, t *);
-	bdd_ordering ordering;
+	bdd_ordering *ordering;
+
+	bdd_scope(bdd_ordering *_ordering)
+		: ordering(_ordering)
+	{}
 };
 
 
@@ -171,6 +175,9 @@ class intbdd_scope : public bdd_scope<intbdd> {
 	std::map<int, intbdd *> content;
 public:
 	intbdd *cnst(int k);
+	intbdd_scope(bdd_ordering *_ordering)
+		: bdd_scope<intbdd>(_ordering)
+	{}
 };
 
 class intbdd : public _bdd<int, intbdd> {

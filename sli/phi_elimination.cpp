@@ -201,7 +201,7 @@ build_selection_bdd(StateMachine *sm,
 	std::set<StateMachineSideEffecting *> sideEffecting;
 	enumStates(sm, &sideEffecting);
 
-	bbdd_scope scope;
+	bbdd_scope scope(iscope->ordering);
 	predecessor_map pm(sm);
 	control_dependence_graph cdg(sm, &scope, labels);
 
@@ -445,7 +445,8 @@ phiElimination(StateMachine *sm, bool *done_something)
 					resultCanoniser[x] = x;
 			}
 		}
-		intbdd_scope iscope;
+		bdd_ordering ordering;
+		intbdd_scope iscope(&ordering);
 		intbdd *sel_bdd = build_selection_bdd(sm, phi, labels, resultCanoniser, &iscope);
 		if (!sel_bdd) {
 			if (debug_toplevel)
