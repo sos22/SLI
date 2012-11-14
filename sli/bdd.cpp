@@ -1,7 +1,6 @@
-#include <queue>
-
 #include "sli.h"
 #include "bdd.hpp"
+#include "simplify_irexpr.hpp"
 
 VexPtr<bbdd, &ir_heap>
 bbdd::trueLeaf(new bbdd(true));
@@ -198,16 +197,41 @@ bbdd::invert(bbdd_scope *scope, bbdd *a)
 			bbdd::invert(scope, a->content.falseBranch));
 }
 
-bdd_ordering::ordT
-bdd_ordering::operator()(const IRExpr *a, const IRExpr *b)
+long
+bdd_ordering::rankVariable(const IRExpr *a)
 {
-	if (a < b)
-		return lt;
-	if (a == b)
-		return eq;
-	return gt;
+	auto it_did_insert = variableRankings.insert(std::pair<const IRExpr *, long>(a, nextRanking));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		bool dupe = false;
+		for (auto it2 = variableRankings.begin();
+		     !dupe && it2 != variableRankings.end();
+		     it2++) {
+			if (a != it2->first && physicallyEqual(a, it2->first)) {
+				it->second = it2->second;
+				dupe = true;
+			}
+		}
+		if (!dupe)
+			nextRanking++;
+	}
+	return it->second;
 }
 
+void
+bdd_ordering::runGc(HeapVisitor &hv)
+{
+	std::map<const IRExpr *, long> newRankings;
+	for (auto it = variableRankings.begin();
+	     it != variableRankings.end();
+	     it++) {
+		const IRExpr *a = hv.visited(it->first);
+		if (a)
+			newRankings[a] = it->second;
+	}
+	variableRankings = newRankings;
+}
 
 intbdd *
 intbdd_scope::cnst(int k)

@@ -6,13 +6,27 @@
 #include <libvex_parse.h>
 
 /* Thing for specifying variable ordering. */
-class bdd_ordering {
+class bdd_ordering : public GcCallback<&ir_heap> {
+	void runGc(HeapVisitor &hv);
+	std::map<const IRExpr *, long> variableRankings;
+	long nextRanking;
+	long rankVariable(const IRExpr *e);
 public:
 	typedef enum { lt, eq, gt} ordT;
-	ordT operator()(const IRExpr *a, const IRExpr *b) ;
+	ordT operator()(const IRExpr *a, const IRExpr *b) {
+		long ra = rankVariable(a);
+		long rb = rankVariable(b);
+		if (ra < rb)
+			return lt;
+		else if (ra == rb)
+			return eq;
+		else
+			return gt;
+	}
 	bool before(const IRExpr *a, const IRExpr *b) {
 		return (*this)(a, b) == lt;
 	}
+	bdd_ordering() : GcCallback<&ir_heap>(true), nextRanking(0) {}
 };
 
 template <typename _leafT, typename _subtreeT>
