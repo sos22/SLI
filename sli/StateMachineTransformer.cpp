@@ -143,9 +143,6 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 				/* Need to rewrite this one as well. */
 				progress = true;
 
-				/* Because terminals don't have targets. */
-				assert(!StateMachineState::stateTypeIsTerminal(s->type));
-
 				switch (s->type) {
 				case StateMachineState::SideEffecting: {
 					StateMachineSideEffecting *smp = (StateMachineSideEffecting *)s;
@@ -158,9 +155,7 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 					break;
 				}
 
-				case StateMachineState::Unreached:
-				case StateMachineState::Crash:
-				case StateMachineState::NoCrash:
+				case StateMachineState::Terminal:
 					abort();
 				}
 			}

@@ -135,9 +135,7 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 			}
 			break;
 		}
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
-		case StateMachineState::Unreached:
+		case StateMachineState::Terminal:
 			break;
 		}
 	}

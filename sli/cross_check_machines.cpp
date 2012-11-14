@@ -502,21 +502,25 @@ top:
 		state = sme->target;
 		goto top;
 	}
-	case StateMachineState::Unreached:
-		log(state, "unreached");
-		return evalRes::unreached();
-	case StateMachineState::Crash:
-		log(state, "crash");
-		if (!currentState.consistent())
+	case StateMachineState::Terminal:
+		switch ( ((StateMachineTerminal *)state.get())->res ) {
+		case smr_unreached:
+			log(state, "unreached");
 			return evalRes::unreached();
-		if (opt.mustStoreBeforeCrash())
+		case smr_crash:
+			log(state, "crash");
+			if (!currentState.consistent())
+				return evalRes::unreached();
+			if (opt.mustStoreBeforeCrash())
+				return evalRes::survive();
+			return evalRes::crash();
+		case smr_survive:
+			log(state, "no-crash");
+			if (!currentState.consistent())
+				return evalRes::unreached();
 			return evalRes::survive();
-		return evalRes::crash();
-	case StateMachineState::NoCrash:
-		log(state, "no-crash");
-		if (!currentState.consistent())
-			return evalRes::unreached();
-		return evalRes::survive();
+		}
+		abort();
 	}
 	abort();
 }

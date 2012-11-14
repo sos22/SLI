@@ -91,9 +91,9 @@ removeLocalSurvival(StateMachine *sm, const AllowableOptimisations &opt, bool *d
 	StateMachineState *assertFailedState;
 
 	if (opt.preferCrash())
-		assertFailedState = StateMachineCrash::get();
+		assertFailedState = StateMachineTerminal::crash();
 	else
-		assertFailedState = StateMachineNoCrash::get();
+		assertFailedState = StateMachineTerminal::survive();
 
 	std::set<StateMachineBifurcate *> bifurcations;
 	enumStates(sm, &bifurcations);

@@ -33,9 +33,9 @@ ndChoiceState(StateMachineState **slot,
 {
 	if (targets.empty()) {
 		if (storeLike)
-			*slot = StateMachineCrash::get();
+			*slot = StateMachineTerminal::crash();
 		else
-			*slot = StateMachineNoCrash::get();
+			*slot = StateMachineTerminal::survive();
 	} else if (targets.size() == 1) {
 		if (usedExits)
 			usedExits->insert(targets[0]);
@@ -89,9 +89,9 @@ entryState(const std::vector<std::pair<CFGNode *, StateMachineState *> > &target
 {
 	if (targets.empty()) {
 		if (storeLike)
-			return StateMachineCrash::get();
+			return StateMachineTerminal::crash();
 		else
-			return StateMachineNoCrash::get();
+			return StateMachineTerminal::survive();
 	} else if (targets.size() == 1) {
 		return targets[0].second;
 	} else {
@@ -277,7 +277,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	}
 	case LibraryFunctionTemplate::__stack_chk_fail:
 	case LibraryFunctionTemplate::__assert_fail:
-		return StateMachineUnreached::get();
+		return StateMachineTerminal::unreached();
 	case LibraryFunctionTemplate::time: {
 		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
 		acc = (!rax <<= fv) >> end;
@@ -380,9 +380,7 @@ canonicaliseRbp(StateMachineState *root, const VexRip &rip, Oracle *oracle)
 				smb->condition = doit.doit(smb->condition);
 				break;
 			}
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
-			case StateMachineState::Unreached:
+			case StateMachineState::Terminal:
 				break;
 			case StateMachineState::SideEffecting: {
 				StateMachineSideEffect *smse = s->getSideEffect();
@@ -423,7 +421,7 @@ cfgNodeToState(Oracle *oracle,
 	try {
 		irsb = oracle->ms->addressSpace->getIRSBForAddress(tr, true);
 	} catch (BadMemoryException &e) {
-		return StateMachineUnreached::get();
+		return StateMachineTerminal::unreached();
 	}
 	HashedSet<HashedPtr<CFGNode> > usedExits;
 	StateMachineState **cursor = &root;
@@ -1215,7 +1213,7 @@ getRspCanonicalisationDelta(StateMachineState *root, long *delta)
 	/* So that's as much as we're going to get from that.
 	   Hopefully, it'll be enough to assign a label to <crash>
 	   state, in which case we have our answer. */
-	auto it = res.find(StateMachineCrash::get());
+	auto it = res.find(StateMachineTerminal::crash());
 	if (it == res.end()) {
 		if (debug_rsp_canonicalisation)
 			printf("No RSP delta for crash state\n");
@@ -1513,9 +1511,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 		StateMachineState *s = *it;
 		callStackT *entryState = &stacks[s];
 		switch (s->type) {
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
+		case StateMachineState::Terminal:
 			if (debug_assign_frame_ids)
 				printf("\tl%d: <terminal>\n",
 				       stateLabels[s]);
@@ -1577,8 +1573,8 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	/* The <survive> and <crash> states are special, because they
 	 * can have several different contexts.  Easy fix: just don't
 	 * try to assign a stack to them at all. */
-	callStackT *surviveStack = &stacks[StateMachineNoCrash::get()];
-	callStackT *crashStack = &stacks[StateMachineCrash::get()];
+	callStackT *surviveStack = &stacks[StateMachineTerminal::survive()];
+	callStackT *crashStack = &stacks[StateMachineTerminal::crash()];
 	for (auto it = eq_constraints.begin(); it != eq_constraints.end(); ) {
 		if (it->first == surviveStack || it->first == crashStack ||
 		    it->second == surviveStack || it->second == crashStack)

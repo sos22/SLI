@@ -147,14 +147,8 @@ protected:
 	virtual StateMachineSideEffectStackLayout *transformOneSideEffect(
 		StateMachineSideEffectStackLayout *, bool *)
 	{ return NULL; }
-	virtual StateMachineUnreached *transformOneState(StateMachineUnreached *,
-							 bool *)
-	{ return NULL; }
-	virtual StateMachineCrash *transformOneState(StateMachineCrash *,
-						     bool *)
-	{ return NULL; }
-	virtual StateMachineNoCrash *transformOneState(StateMachineNoCrash *,
-						       bool *)
+	virtual StateMachineTerminal *transformOneState(StateMachineTerminal *,
+							bool *)
 	{ return NULL; }
 	virtual StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
 							     bool *done_something)

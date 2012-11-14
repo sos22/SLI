@@ -23,9 +23,9 @@ static unsigned current_optimisation_gen;
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
 VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> StateMachineSideEffectStartAtomic::singleton;
 VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> StateMachineSideEffectEndAtomic::singleton;
-VexPtr<StateMachineUnreached, &ir_heap> StateMachineUnreached::_this;
-VexPtr<StateMachineCrash, &ir_heap> StateMachineCrash::_this;
-VexPtr<StateMachineNoCrash, &ir_heap> StateMachineNoCrash::_this;
+VexPtr<StateMachineTerminal, &ir_heap> StateMachineTerminal::_crash;
+VexPtr<StateMachineTerminal, &ir_heap> StateMachineTerminal::_survive;
+VexPtr<StateMachineTerminal, &ir_heap> StateMachineTerminal::_unreached;
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(7.3);
 
 StateMachine *
@@ -72,10 +72,10 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		return this;
 	last_optimisation_gen = current_optimisation_gen;
 
-	if (trueTarget == StateMachineUnreached::get()) {
+	if (trueTarget == StateMachineTerminal::unreached()) {
 		*done_something = true;
-		if (falseTarget == StateMachineUnreached::get())
-			return StateMachineUnreached::get();
+		if (falseTarget == StateMachineTerminal::unreached())
+			return StateMachineTerminal::unreached();
 		return (new StateMachineSideEffecting(
 				dbg_origin,
 				new StateMachineSideEffectAssertFalse(
@@ -83,7 +83,7 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 					true),
 				falseTarget))->optimise(opt, done_something);
 	}
-	if (falseTarget == StateMachineUnreached::get()) {
+	if (falseTarget == StateMachineTerminal::unreached()) {
 		*done_something = true;
 		return (new StateMachineSideEffecting(
 				dbg_origin,
@@ -999,13 +999,13 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 		return target->optimise(opt, done_something);
 	}
 
-	if (target == StateMachineUnreached::get()) {
+	if (target == StateMachineTerminal::unreached()) {
 		*done_something = true;
 		return target;
 	}
 	if (sideEffect->type == StateMachineSideEffect::Unreached) {
 		*done_something = true;
-		return StateMachineUnreached::get();
+		return StateMachineTerminal::unreached();
 	}
 	sideEffect = sideEffect->optimise(opt, done_something);
 	target = target->optimise(opt, done_something);
@@ -1051,7 +1051,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 							sideEffect,
 							t->target)))->optimise(opt, done_something);
 			}
-		} else if (target->isTerminal()) {
+		} else if (target->type == StateMachineState::Terminal) {
 			/* START_ATOMIC followed by a terminal is a
 			 * bit pointless. */
 			*done_something = true;

@@ -314,12 +314,8 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 		ctxt(&res->target, sme->target, rawDupe);
 		return res;
 	}
-	case StateMachineState::Unreached:
-		return StateMachineUnreached::get();
-	case StateMachineState::Crash:
-		return StateMachineCrash::get();
-	case StateMachineState::NoCrash:
-		return StateMachineNoCrash::get();
+	case StateMachineState::Terminal:
+		return StateMachineTerminal::get( ((StateMachineTerminal *)inp)->res );
 	}
 	abort();
 }

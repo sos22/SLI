@@ -40,10 +40,22 @@ removeSurvivingStates(StateMachine *sm, const AllowableOptimisations &opt, bool 
 		for (auto it = survivingStates.begin(); it != survivingStates.end(); ) {
 			StateMachineState *s = *it;
 			bool definitely_survives = true;
-			if (dynamic_cast<StateMachineCrash *>(s) ||
-			    dynamic_cast<StateMachineUnreached *>(s))
-				definitely_survives = false;
-			if (s->getSideEffect() &&
+			if (s->type == StateMachineState::Terminal) {
+				auto smt = (StateMachineTerminal *)s;
+				switch (smt->res) {
+				case smr_survive:
+					break;
+				case smr_crash:
+					definitely_survives = false;
+					break;
+				case smr_unreached:
+					if (opt.preferCrash())
+						definitely_survives = false;
+					break;
+				}
+			}
+			if (definitely_survives &&
+			    s->getSideEffect() &&
 			    s->getSideEffect()->type == StateMachineSideEffect::AssertFalse &&
 			    opt.preferCrash())
 				definitely_survives = false;
@@ -68,14 +80,14 @@ removeSurvivingStates(StateMachine *sm, const AllowableOptimisations &opt, bool 
 		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s);
 		if (!smb)
 			continue;
-		if (smb->trueTarget != StateMachineNoCrash::get() &&
+		if (smb->trueTarget != StateMachineTerminal::survive() &&
 		    survivingStates.count(smb->trueTarget)) {
-			smb->trueTarget = StateMachineNoCrash::get();
+			smb->trueTarget = StateMachineTerminal::survive();
 			*done_something = true;
 		}
-		if (smb->falseTarget != StateMachineNoCrash::get() &&
+		if (smb->falseTarget != StateMachineTerminal::survive() &&
 		    survivingStates.count(smb->falseTarget)) {
-			smb->falseTarget = StateMachineNoCrash::get();
+			smb->falseTarget = StateMachineTerminal::survive();
 			*done_something = true;
 		}
 	}
@@ -117,9 +129,9 @@ enforceMustStoreBeforeCrash(StateMachine *sm, bool *progress)
 		std::vector<StateMachineState **> targets;
 		s->targets(targets);
 		for (auto it = targets.begin(); it != targets.end(); it++) {
-			if (**it == StateMachineCrash::get()) {
+			if (**it == StateMachineTerminal::crash()) {
 				*progress = true;
-				**it = StateMachineNoCrash::get();
+				**it = StateMachineTerminal::survive();
 			}
 		}
 	}
@@ -552,7 +564,7 @@ atomicSurvivalConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 	VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;
-	if (atomicMachine->root->type == StateMachineState::Unreached) {
+	if (atomicMachine->root == StateMachineTerminal::unreached()) {
 		/* This machine can definitely never survive if run
 		 * atomically! */
 		return IRExpr_Const_U1(false);
@@ -621,9 +633,7 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 		 * to. */
 		StateMachineState *newState = (StateMachineState *)0xf001deadul;
 		switch (oldState->type) {
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
+		case StateMachineState::Terminal:
 			/* Singletons are easy. */
 			newState = (StateMachineState *)oldState;
 			break;
@@ -703,7 +713,7 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	sm = duplicateStateMachine(storeMachine);
 	sm = optimiseStateMachine(mai, sm, storeOptimisations, oracle, true, token);
 
-	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
+	if (sm->root == StateMachineTerminal::unreached()) {
 		/* This store machine is unusable, probably because we
 		 * don't have the machine code for the relevant
 		 * library */
@@ -798,8 +808,8 @@ truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffect
 			IRExpr_Unop(
 				Iop_BadPtr,
 				truncateAt->addr),
-			StateMachineCrash::get(),
-			StateMachineNoCrash::get());
+			StateMachineTerminal::crash(),
+			StateMachineTerminal::survive());
 	std::map<const StateMachineState *, StateMachineState *> map;
 	std::queue<StateMachineState **> relocs;
 	StateMachineState *newRoot = sm->root;
@@ -830,15 +840,13 @@ truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffect
 				}
 				break;
 			}
-			case StateMachineState::Crash:
+			case StateMachineState::Terminal:
 				/* Get rid of the old way of crashing. */
-				newState = StateMachineNoCrash::get();
+				if (oldState == StateMachineTerminal::crash())
+					newState = StateMachineTerminal::survive();
+				else
+					newState = StateMachineTerminal::get( ((StateMachineTerminal *)oldState)->res );
 				break;
-			case StateMachineState::NoCrash:
-				newState = StateMachineNoCrash::get();
-				break;
-			case StateMachineState::Unreached:
-				abort();
 			}
 			it->second = newState;
 			if (newState != newTerminal) {
@@ -1443,7 +1451,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				     *MaiMap::empty(),
 				     NULL,
 				     targetRip.toVexRip(),
-				     tid)->type == StateMachineState::NoCrash) {
+				     tid) == StateMachineTerminal::survive()) {
 			fprintf(_logfile, "Instruction is definitely non-crashing\n");
 			return;
 		}

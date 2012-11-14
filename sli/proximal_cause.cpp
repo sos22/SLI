@@ -25,7 +25,7 @@ getProximalCause(MachineState *ms,
 		   problem was an instruction fetch fault, and produce
 		   a proximal cause which says ``we always crash if we
 		   get to this RIP''. */
-		return StateMachineCrash::get();
+		return StateMachineTerminal::crash();
 	}
 
 	/* Successfully decoded the block -> build a state machine
@@ -52,7 +52,8 @@ getProximalCause(MachineState *ms,
 		const VexRip &rip;
 		StateMachineState *&work;
 		void operator()(StateMachineSideEffect *se) {
-			if (work->type != StateMachineState::NoCrash)
+			if (work->type != StateMachineState::Terminal ||
+			    ((StateMachineTerminal *)work)->res != smr_survive)
 				work = new StateMachineSideEffecting(
 					rip,
 					se,
@@ -72,10 +73,10 @@ getProximalCause(MachineState *ms,
 			assert(e->type() == Ity_I1);
 			if (e->tag == Iex_Const) {
 				if ( ((IRExprConst *)e)->Ico.U1 )
-					work = StateMachineCrash::get();
+					work = StateMachineTerminal::crash();
 				return;
 			}
-			conditionalBranch(e, StateMachineCrash::get());
+			conditionalBranch(e, StateMachineTerminal::crash());
 		}
 		_3(_ &_conditionalBranch, const AllowableOptimisations &_opt,
 		   StateMachineState *&_work)
@@ -89,12 +90,12 @@ getProximalCause(MachineState *ms,
 	int idx;
 	for (idx = 1; idx < irsb->stmts_used && irsb->stmts[idx]->tag != Ist_IMark; idx++)
 		;
-	work = StateMachineNoCrash::get();
+	work = StateMachineTerminal::survive();
 	if (idx == irsb->stmts_used) {
 		if (!irsb->next_is_const) {
 			crashIfBadPtr(irsb->next_nonconst);
 		} else if (oracle->isCrashingAddr(irsb->next_const.rip))
-			work = StateMachineCrash::get();
+			work = StateMachineTerminal::crash();
 	}
 
 	idx--;
@@ -228,7 +229,7 @@ getProximalCause(MachineState *ms,
 			/* If we exit the instruction then that's
 			   considered to be a surviving run. */
 			IRStmtExit *ise = (IRStmtExit *)stmt;
-			conditionalBranch(ise->guard, StateMachineNoCrash::get());
+			conditionalBranch(ise->guard, StateMachineTerminal::survive());
 			break;
 		}
 		case Ist_StartAtomic:

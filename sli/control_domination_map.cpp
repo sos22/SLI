@@ -118,9 +118,7 @@ ControlDominationMap::init(StateMachine *sm,
 		assert(exprAtEntry); /* should definitely have been
 					populated by now */
 		switch (s->type) {
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
+		case StateMachineState::Terminal:
 			/* No exit states, so it doesn't matter what
 			 * the exprAtExit is. */
 			break;

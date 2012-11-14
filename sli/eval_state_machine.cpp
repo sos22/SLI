@@ -908,7 +908,7 @@ EvalContext::advance(const MaiMap &decode,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer)
 {
-	if (debug_dump_state_traces && currentState->isTerminal()) {
+	if (debug_dump_state_traces && currentState->type == StateMachineState::Terminal) {
 #ifndef NDEBUG
 		assert(stateLabels.count(currentState));
 		printf("Reached state %d, trace: ", stateLabels[currentState]);
@@ -923,21 +923,27 @@ EvalContext::advance(const MaiMap &decode,
 #endif
 	}
 	switch (currentState->type) {
-	case StateMachineState::Crash:
-		if (debug_dump_crash_reasons) {
-			printf("Found a crash, assumption ");
-			ppIRExpr(assumption, stdout);
-			if (accumulatedAssumption) {
-				printf(", accumulated assumption ");
-				ppIRExpr(accumulatedAssumption, stdout);
+	case StateMachineState::Terminal: {
+		auto smt = (StateMachineTerminal *)currentState;
+		switch (smt->res) {
+		case smr_crash:
+			if (debug_dump_crash_reasons) {
+				printf("Found a crash, assumption ");
+				ppIRExpr(assumption, stdout);
+				if (accumulatedAssumption) {
+					printf(", accumulated assumption ");
+					ppIRExpr(accumulatedAssumption, stdout);
+				}
+				printf("\n");
 			}
-			printf("\n");
+			return consumer.crash(assumption, accumulatedAssumption);
+		case smr_survive:
+			return consumer.survive(assumption, accumulatedAssumption);
+		case smr_unreached:
+			return consumer.badMachine();
 		}
-		return consumer.crash(assumption, accumulatedAssumption);
-	case StateMachineState::NoCrash:
-		return consumer.survive(assumption, accumulatedAssumption);
-	case StateMachineState::Unreached:
-		return consumer.badMachine();
+		abort();
+	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
@@ -1174,20 +1180,12 @@ static StateMachineState *
 shallowCloneState(StateMachineState *s)
 {
 	switch (s->type) {
-#define do_case(name)					\
-	case StateMachineState:: name :			\
-		return StateMachine ## name ::get()
-		do_case(Unreached);
-		do_case(Crash);
-		do_case(NoCrash);
-#undef do_case
-#define do_case(name)							\
-		case StateMachineState:: name :				\
-			return new StateMachine ## name			\
-				(*(StateMachine ## name *)s)
-		do_case(Bifurcate);
-		do_case(SideEffecting);
-#undef do_case
+	case StateMachineState::Terminal:
+		return s;
+	case StateMachineState::Bifurcate:
+		return new StateMachineBifurcate(*(StateMachineBifurcate *)s);
+	case StateMachineState::SideEffecting:
+		return new StateMachineSideEffecting(*(StateMachineSideEffecting *)s);
 	}
 	abort();
 }
@@ -1428,7 +1426,7 @@ buildCrossProductMachine(const MaiMap &maiIn,
 			StateMachineSideEffect *probe_effect = crossState.p->getSideEffect();
 			StateMachineSideEffect *store_effect = crossState.s->getSideEffect();
 
-			if (crossState.p->isTerminal()) {
+			if (crossState.p->type == StateMachineState::Terminal) {
 				/* The probe machine has reached its
 				   end.  The result is the result of
 				   the whole machine. */
@@ -1437,12 +1435,12 @@ buildCrossProductMachine(const MaiMap &maiIn,
 				   crashes before the store machine
 				   has issued any stores, so that just
 				   turns into Unreached. */
-				if (crossState.p->type == StateMachineState::NoCrash ||
+				if (crossState.p == StateMachineTerminal::survive() ||
 				    crossState.store_issued_store)
 					newState = crossState.p;
 				else
-					newState = StateMachineUnreached::get();
-			} else if (crossState.s->isTerminal()) {
+					newState = StateMachineTerminal::unreached();
+			} else if (crossState.s->type == StateMachineState::Terminal) {
 				/* If the store machine terminates at
 				   <survive> or <unreached> then we
 				   should ignore this path.  If it
@@ -1456,10 +1454,10 @@ buildCrossProductMachine(const MaiMap &maiIn,
 				   turn that into <unreached> as
 				   well. */
 				if (crossState.probe_issued_access &&
-				    crossState.s->type == StateMachineState::Crash)
+				    crossState.s == StateMachineTerminal::crash())
 					newState = advanceProbeMachine(crossState, pendingRelocs);
 				else
-					newState = StateMachineUnreached::get();
+					newState = StateMachineTerminal::unreached();
 			} else if (!probe_effect ||
 				   probeDefinitelyDoesntRace(*maiOut, probe_effect, crossState.s, opt, oracle)) {
 				/* If the probe effect definitely
@@ -1596,9 +1594,7 @@ stripUninterpretableAnnotations(StateMachine *inp)
 				it->second = nw;
 				break;
 			}
-			case StateMachineState::Unreached:
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
+			case StateMachineState::Terminal:
 				it->second = it->first;
 				break;
 			case StateMachineState::SideEffecting: {
@@ -1661,7 +1657,7 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
 			oracle,
 			false,
 			token);
-	if (crossProductMachine->root->type == StateMachineState::Unreached) {
+	if (crossProductMachine->root == StateMachineTerminal::unreached()) {
 		/* This indicates that the store machine and probe
 		   machine assert incompatible things.  e.g. suppose
 		   the probe machine amounts to saying we'll crash if
@@ -1702,9 +1698,9 @@ concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine
 	   terminal states, even no-op rules, forces rewriteMachine()
 	   to duplicate every state, because it duplicates any state
 	   which can ultimately reach a state which it has a rule for. */
-	rewriteRules[StateMachineCrash::get()] = to->root;
-	rewriteRules[StateMachineNoCrash::get()] = StateMachineCrash::get();
-	rewriteRules[StateMachineUnreached::get()] = StateMachineUnreached::get();
+	rewriteRules[StateMachineTerminal::crash()] = to->root;
+	rewriteRules[StateMachineTerminal::survive()] = StateMachineTerminal::crash();
+	rewriteRules[StateMachineTerminal::unreached()] = StateMachineTerminal::unreached();
 
 	StateMachineTransformer::rewriteMachine(machine, rewriteRules, false);
 	assert(rewriteRules.count(machine->root));
@@ -1750,7 +1746,7 @@ writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 					       oracle,
 					       true,
 					       token);
-	if (combinedMachine->root == StateMachineUnreached::get()) {
+	if (combinedMachine->root == StateMachineTerminal::unreached()) {
 		/* This means that running the store machine and then
 		   running the load machine is guaranteed to never
 		   survive.  That tells us that the store machine is

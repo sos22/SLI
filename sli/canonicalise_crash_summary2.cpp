@@ -177,8 +177,8 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 	sm = input->storeMachine;
 	input->storeMachine = removeAnnotations(mai, input->storeMachine, optIn, oracle, true, token);
 
-	if (input->loadMachine->root->type == StateMachineState::Unreached ||
-	    input->storeMachine->root->type == StateMachineState::Unreached)
+	if (input->loadMachine->root == StateMachineTerminal::unreached() ||
+	    input->storeMachine->root == StateMachineTerminal::unreached())
 		input->verificationCondition = IRExpr_Const_U1(false);
 
 	std::set<std::pair<unsigned, CfgLabel> > machineRoots;

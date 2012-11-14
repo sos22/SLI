@@ -300,18 +300,17 @@ public:
 	NAMED_CLASS
 };
 
+enum StateMachineRes { smr_crash, smr_survive, smr_unreached };
+
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 public:
 #define all_state_types(f)						\
-	f(Unreached) f(Crash) f(NoCrash) f(Bifurcate) f(SideEffecting)
+	f(Terminal) f(Bifurcate) f(SideEffecting)
 #define mk_state_type(name) name ,
 	enum stateType {
 		all_state_types(mk_state_type)
 	};
 #undef mk_state_type
-	static bool stateTypeIsTerminal(enum stateType t) {
-		return t == Unreached || t == Crash || t == NoCrash;
-	}
 protected:
 	StateMachineState(const VexRip &_origin,
 			  enum stateType _type)
@@ -324,10 +323,6 @@ public:
 			    * constructed the thing.  Not very
 			    * meaningful, but occasionally provides
 			    * useful hints for debugging.*/
-
-	bool isTerminal() const {
-		return stateTypeIsTerminal(type);
-	}
 
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
@@ -423,75 +418,78 @@ public:
 };
 
 class StateMachineTerminal : public StateMachineState {
-protected:
-	virtual void prettyPrint(FILE *f) const = 0;
-	StateMachineTerminal(const VexRip &rip, StateMachineState::stateType type) : StateMachineState(rip, type) {}
+	void prettyPrint(FILE *f) const {
+		switch (res) {
+		case smr_crash:
+			fprintf(f, "<crash>");
+			return;
+		case smr_survive:
+			fprintf(f, "<survive>");
+			return;
+		case smr_unreached:
+			fprintf(f, "<unreached>");
+			return;
+		}
+		abort();
+	}
+
+	StateMachineTerminal(StateMachineRes _res)
+		: StateMachineState(VexRip(), StateMachineState::Terminal),
+		  res(_res)
+	{}
+
+	static VexPtr<StateMachineTerminal, &ir_heap> _crash;
+	static VexPtr<StateMachineTerminal, &ir_heap> _survive;
+	static VexPtr<StateMachineTerminal, &ir_heap> _unreached;
 public:
+	StateMachineRes res;
 	StateMachineState *optimise(const AllowableOptimisations &, bool *)
 	{ return this; }
-	virtual void visit(HeapVisitor &) {}
+	void visit(HeapVisitor &) {}
 	void targets(std::vector<StateMachineState **> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
 	StateMachineSideEffect *getSideEffect() { return NULL; }
 	void inputExpressions(std::vector<IRExpr *> &) {}
 	void sanityCheck() const { return; }
-};
 
-class StateMachineUnreached : public StateMachineTerminal {
-	StateMachineUnreached() : StateMachineTerminal(VexRip(), StateMachineState::Unreached) {}
-	static VexPtr<StateMachineUnreached, &ir_heap> _this;
-	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-public:
-	static StateMachineUnreached *get() {
-		if (!_this) _this = new StateMachineUnreached();
-		return _this;
+	static StateMachineTerminal *crash() {
+		if (!_crash) _crash = new StateMachineTerminal(smr_crash);
+		return _crash;
 	}
-	static bool parse(StateMachineUnreached **out, const char *str, const char **suffix)
-	{
-		if (parseThisString("<unreached>", str, suffix)) {
-			*out = StateMachineUnreached::get();
-			return true;
+	static StateMachineTerminal *survive() {
+		if (!_survive) _survive = new StateMachineTerminal(smr_survive);
+		return _survive;
+	}
+	static StateMachineTerminal *unreached() {
+		if (!_unreached) _unreached = new StateMachineTerminal(smr_unreached);
+		return _unreached;
+	}
+	static StateMachineTerminal *get(StateMachineRes res) {
+		switch (res) {
+		case smr_crash:
+			return crash();
+		case smr_survive:
+			return survive();
+		case smr_unreached:
+			return unreached();
 		}
-		return false;
+		abort();
 	}
-};
-
-class StateMachineCrash : public StateMachineTerminal {
-	StateMachineCrash() : StateMachineTerminal(VexRip(), StateMachineState::Crash) {}
-	static VexPtr<StateMachineCrash, &ir_heap> _this;
-	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
-public:
-	static StateMachineCrash *get() {
-		if (!_this) _this = new StateMachineCrash();
-		return _this;
-	}
-	static bool parse(StateMachineCrash **out, const char *str, const char **suffix)
+	static bool parse(StateMachineTerminal **out, const char *str, const char **suffix)
 	{
 		if (parseThisString("<crash>", str, suffix)) {
-			*out = StateMachineCrash::get();
+			*out = crash();
 			return true;
-		}
-		return false;
-	}
-};
-
-class StateMachineNoCrash : public StateMachineTerminal {
-	StateMachineNoCrash() : StateMachineTerminal(VexRip(), StateMachineState::NoCrash) {}
-	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
-	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
-public:
-	static StateMachineNoCrash *get() {
-		if (!_this) _this = new StateMachineNoCrash();
-		return _this;
-	}
-	static bool parse(StateMachineNoCrash **out, const char *str, const char **suffix)
-	{
-		if (parseThisString("<survive>", str, suffix)) {
-			*out = StateMachineNoCrash::get();
+		} else if (parseThisString("<survive>", str, suffix)) {
+			*out = survive();
 			return true;
+		} else if (parseThisString("<unreached>", str, suffix)) {
+			*out = unreached();
+			return true;
+		} else {
+			return false;
 		}
-		return false;
 	}
 };
 

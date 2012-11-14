@@ -778,7 +778,7 @@ buildNewStateMachineWithLoadsEliminated(
 	bool *done_something,
 	std::map<const StateMachineState *, int> &edgeLabels)
 {
-	if (sm->isTerminal())
+	if (sm->type == StateMachineState::Terminal)
 		return sm;
 	if (memo.count(sm)) {
 		/* We rely on whoever it was that set memo[sm] having
@@ -817,9 +817,7 @@ buildNewStateMachineWithLoadsEliminated(
 		res = new StateMachineSideEffecting(smp, newEffect);
 		break;
 	}
-	case StateMachineState::Unreached:
-	case StateMachineState::Crash:
-	case StateMachineState::NoCrash:
+	case StateMachineState::Terminal:
 		abort();
 	}
 

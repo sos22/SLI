@@ -355,9 +355,7 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		return t.states[start];
 	t.states[start] = start; /* Cycle breaking */
 	switch (start->type) {
-	case StateMachineState::Crash:
-	case StateMachineState::NoCrash:
-	case StateMachineState::Unreached:
+	case StateMachineState::Terminal:
 		t.states[start] = start;
 		return start;
 	case StateMachineState::SideEffecting: {

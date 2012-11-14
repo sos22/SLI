@@ -357,9 +357,7 @@ undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt,
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		StateMachineState *sm = *it;
 		switch (sm->type) {
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
+		case StateMachineState::Terminal:
 			break;
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
@@ -370,8 +368,8 @@ undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt,
 					if (debug_undefinedness)
 						printf("l%d: bifurcation on undefined value\n",
 						       stateLabels[sm]);
-					smb->trueTarget = StateMachineUnreached::get();
-					smb->falseTarget = StateMachineUnreached::get();
+					smb->trueTarget = StateMachineTerminal::unreached();
+					smb->falseTarget = StateMachineTerminal::unreached();
 				} else {
 					if (debug_undefinedness)
 						printf("l%d: condition changed from %s to %s\n",

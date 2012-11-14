@@ -129,21 +129,9 @@ localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2)
 }
 
 static bool
-localSimilarity(StateMachineUnreached *, StateMachineUnreached *)
+localSimilarity(StateMachineTerminal *a, StateMachineTerminal *b)
 {
-	return true;
-}
-
-static bool
-localSimilarity(StateMachineCrash *, StateMachineCrash *)
-{
-	return true;
-}
-
-static bool
-localSimilarity(StateMachineNoCrash *, StateMachineNoCrash *)
-{
-	return true;
+	return a->res == b->res;
 }
 
 static bool

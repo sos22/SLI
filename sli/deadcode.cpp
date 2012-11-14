@@ -356,9 +356,7 @@ class LivenessMap {
 			res.useExpressionData(smb->condition);
 			break;
 		}
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
+		case StateMachineState::Terminal:
 			/* Nothing needed */
 			break;
 		}
@@ -605,9 +603,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 				return;
 			}
 			case StateMachineState::Bifurcate:
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
-			case StateMachineState::Unreached:
+			case StateMachineState::Terminal:
 				/* Nothing needed */
 				return;
 			}

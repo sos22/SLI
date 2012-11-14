@@ -212,9 +212,7 @@ useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimi
 			newS = it2->second;
 		} else {
 			switch (s->type) {
-			case StateMachineState::Unreached:
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
+			case StateMachineState::Terminal:
 				newS = s;
 				break;
 			case StateMachineState::Bifurcate:

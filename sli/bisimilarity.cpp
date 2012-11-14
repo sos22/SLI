@@ -630,13 +630,8 @@ bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_som
 			if (other->type != s->type)
 				continue;
 			switch (s->type) {
-			case StateMachineState::Unreached:
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
-				/* These are singletons, but we seem
-				   to have found multiple
-				   instances. */
-				abort();
+			case StateMachineState::Terminal:
+				break;
 			case StateMachineState::Bifurcate: {
 				StateMachineBifurcate *s2 = (StateMachineBifurcate *)s;
 				StateMachineBifurcate *o2 = (StateMachineBifurcate *)other;
@@ -707,9 +702,7 @@ bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_som
 		StateMachineState *representative = *set.begin();
 		StateMachineState *replacement;
 		switch (representative->type) {
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
+		case StateMachineState::Terminal:
 			abort();
 		case StateMachineState::Bifurcate: {
 			std::set<std::pair<StateMachineState *, IRExpr *> > conditions;
