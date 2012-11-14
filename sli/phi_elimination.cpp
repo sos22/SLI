@@ -350,8 +350,8 @@ build_selection_bdd(StateMachine *sm,
 static IRExpr *
 build_mux(StateMachineSideEffectPhi *phi,
 	  IRType ty,
-	  bdd<int> *from,
-	  std::map<bdd<int> *, IRExpr *> &memo)
+	  intbdd *from,
+	  std::map<intbdd *, IRExpr *> &memo)
 {
 	if (memo.count(from))
 		return memo[from];
@@ -452,7 +452,7 @@ phiElimination(StateMachine *sm, bool *done_something)
 				printf("Failed to build bdd!\n");
 			continue;
 		}
-		std::map<bdd<int> *, IRExpr *> memo;
+		std::map<intbdd *, IRExpr *> memo;
 		IRExpr *e = build_mux(phi, ity, sel_bdd, memo);
 		if (e) {
 			if (debug_toplevel)

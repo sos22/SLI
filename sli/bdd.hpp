@@ -15,21 +15,22 @@ public:
 	}
 };
 
-template <typename _leafT>
-class bdd : public GarbageCollected<bdd<_leafT>, &ir_heap> {
+template <typename _leafT, typename _subtreeT>
+class _bdd : public GarbageCollected<_bdd<_leafT, _subtreeT>, &ir_heap> {
 public:
+	typedef _bdd<_leafT, _subtreeT> thisT;
 	typedef _leafT leafT;
 protected:
 	virtual void _visit(HeapVisitor &hv, leafT &leaf) const = 0;
 	virtual void _sanity_check(leafT leaf) const = 0;
 	virtual void _prettyPrint(FILE *f, leafT what) const = 0;
 
-	bdd(leafT leaf)
+	_bdd(leafT leaf)
 		: isLeaf(true)
 	{
 		content.leaf = leaf;
 	}
-	bdd(IRExpr *cond, bdd<leafT> *trueB, bdd<leafT> *falseB)
+	_bdd(IRExpr *cond, _subtreeT *trueB, _subtreeT *falseB)
 		: isLeaf(false)
 	{
 		content.condition = cond;
@@ -43,8 +44,8 @@ public:
 		struct {
 			/* Must be Ity_I1 */
 			IRExpr *condition;
-			bdd<leafT> *trueBranch;
-			bdd<leafT> *falseBranch;
+			_subtreeT *trueBranch;
+			_subtreeT *falseBranch;
 		};
 	} content;
 	void sanity_check(bdd_ordering *ordering = NULL) const {
@@ -112,7 +113,7 @@ class bbdd;
 
 typedef bdd_scope<bbdd> bbdd_scope;
 
-class bbdd : public bdd<bool> {
+class bbdd : public _bdd<bool, bbdd> {
 	friend class bdd_scope<bbdd>;
 
 	static VexPtr<bbdd, &ir_heap> trueLeaf;
@@ -131,10 +132,10 @@ class bbdd : public bdd<bool> {
 	}
 
 	bbdd(IRExpr *cond, bbdd *trueB, bbdd *falseB)
-		: bdd<bool>(cond, trueB, falseB)
+		: _bdd<bool, bbdd>(cond, trueB, falseB)
 	{}
 	bbdd(bool b)
-		: bdd<bool>(b)
+		: _bdd<bool, bbdd>(b)
 	{}
 
 	static bbdd *zip(bbdd_scope *scope,
@@ -172,7 +173,7 @@ public:
 	intbdd *cnst(int k);
 };
 
-class intbdd : public bdd<int> {
+class intbdd : public _bdd<int, intbdd> {
 public:
 	typedef std::map<bbdd *, intbdd *> enablingTableT;
 private:
@@ -186,10 +187,10 @@ private:
 	}
 
 	intbdd(int _k)
-		: bdd<int>(_k)
+		: _bdd<int, intbdd>(_k)
 	{}
 	intbdd(IRExpr *cond, intbdd *a, intbdd *b)
-		: bdd<int>(cond, a, b)
+		: _bdd<int, intbdd>(cond, a, b)
 	{}
 	static intbdd *from_enabling(intbdd_scope *scope,
 				     const enablingTableT &inp,

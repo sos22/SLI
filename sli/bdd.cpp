@@ -126,23 +126,23 @@ bbdd::zip(bbdd_scope *scope,
 	if (bestCond == a->content.condition) {
 		if (bestCond == b->content.condition) {
 			trueB = bbdd::zip(scope,
-					  (bbdd *)a->content.trueBranch,
-					  (bbdd *)b->content.trueBranch,
+					  a->content.trueBranch,
+					  b->content.trueBranch,
 					  leafzip,
 					  memo);
 			falseB = bbdd::zip(scope,
-					   (bbdd *)a->content.falseBranch,
-					   (bbdd *)b->content.falseBranch,
+					   a->content.falseBranch,
+					   b->content.falseBranch,
 					   leafzip,
 					   memo);
 		} else {
 			trueB = bbdd::zip(scope,
-					  (bbdd *)a->content.trueBranch,
+					  a->content.trueBranch,
 					  b,
 					  leafzip,
 					  memo);
 			falseB = bbdd::zip(scope,
-					   (bbdd *)a->content.falseBranch,
+					   a->content.falseBranch,
 					   b,
 					   leafzip,
 					   memo);
@@ -150,12 +150,12 @@ bbdd::zip(bbdd_scope *scope,
 	} else {
 		trueB = bbdd::zip(scope,
 				  a,
-				  (bbdd *)b->content.trueBranch,
+				  b->content.trueBranch,
 				  leafzip,
 				  memo);
 		falseB = bbdd::zip(scope,
 				   a,
-				   (bbdd *)b->content.falseBranch,
+				   b->content.falseBranch,
 				   leafzip,
 				   memo);
 	}
@@ -194,8 +194,8 @@ bbdd::invert(bbdd_scope *scope, bbdd *a)
 	else
 		return scope->makeInternal(
 			a->content.condition,
-			bbdd::invert(scope, (bbdd *)a->content.trueBranch),
-			bbdd::invert(scope, (bbdd *)a->content.falseBranch));
+			bbdd::invert(scope, a->content.trueBranch),
+			bbdd::invert(scope, a->content.falseBranch));
 }
 
 bdd_ordering::ordT
@@ -268,10 +268,10 @@ intbdd::from_enabling(intbdd_scope *scope,
 		intbdd *newRes = it->second;
 		if (!newGuard->isLeaf &&
 		    newGuard->content.condition == bestCond)
-			newGuard = (bbdd *)newGuard->content.trueBranch;
+			newGuard = newGuard->content.trueBranch;
 		if (!newRes->isLeaf &&
 		    newRes->content.condition == bestCond)
-			newRes = (intbdd *)newRes->content.trueBranch;
+			newRes = newRes->content.trueBranch;
 		if (trueSucc.count(newGuard) && trueSucc[newGuard] != newRes) {
 			return NULL;
 		} else {
@@ -288,10 +288,10 @@ intbdd::from_enabling(intbdd_scope *scope,
 			intbdd *newRes = it2->second;
 			if (!newGuard->isLeaf &&
 			    newGuard->content.condition == bestCond)
-				newGuard = (bbdd *)newGuard->content.falseBranch;
+				newGuard = newGuard->content.falseBranch;
 			if (!newRes->isLeaf &&
 			    newRes->content.condition == bestCond)
-				newRes = (intbdd *)newRes->content.falseBranch;
+				newRes = newRes->content.falseBranch;
 			if (falseSucc.count(newGuard) && falseSucc[newGuard] != newRes) {
 				return NULL;
 			} else {
@@ -357,20 +357,20 @@ intbdd::assume(intbdd_scope *scope,
 	if (cond == a->content.condition) {
 		if (cond == b->content.condition) {
 			trueB = intbdd::assume(scope,
-					       (intbdd *)a->content.trueBranch,
-					       (bbdd *)b->content.trueBranch,
+					       a->content.trueBranch,
+					       b->content.trueBranch,
 					       memo);
 			falseB = intbdd::assume(scope,
-						(intbdd *)a->content.falseBranch,
-						(bbdd *)b->content.falseBranch,
+						a->content.falseBranch,
+						b->content.falseBranch,
 						memo);
 		} else {
 			trueB = intbdd::assume(scope,
-					       (intbdd *)a->content.trueBranch,
+					       a->content.trueBranch,
 					       b,
 					       memo);
 			falseB = intbdd::assume(scope,
-						(intbdd *)a->content.falseBranch,
+						a->content.falseBranch,
 						b,
 						memo);
 		}
@@ -378,11 +378,11 @@ intbdd::assume(intbdd_scope *scope,
 		assert(cond == b->content.condition);
 		trueB = intbdd::assume(scope,
 				       a,
-				       (bbdd *)b->content.trueBranch,
+				       b->content.trueBranch,
 				       memo);
 		falseB = intbdd::assume(scope,
 					a,
-					(bbdd *)b->content.falseBranch,
+					b->content.falseBranch,
 					memo);
 	}
 	if (!trueB || trueB == falseB)
@@ -408,20 +408,20 @@ intbdd::assume(intbdd_scope *scope,
 		return res;
 }
 
-template <typename leafT> void
-bdd<leafT>::prettyPrint(FILE *f)
+template <typename leafT, typename subtreeT> void
+_bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 {
 	int nextLabel = 0;
-	std::map<bdd<leafT> *, int> labels;
+	std::map<thisT *, int> labels;
 
 	/* First, assign labels to anything which occurs multiple
 	 * times. */
 	{
-		std::set<bdd<leafT> *> seen;
-		std::vector<bdd<leafT> *> pending;
+		std::set<thisT *> seen;
+		std::vector<thisT *> pending;
 		pending.push_back(this);
 		while (!pending.empty()) {
-			bdd<leafT> *l = pending.back();
+			thisT *l = pending.back();
 			assert(l);
 			pending.pop_back();
 			if (labels.count(l))
@@ -449,12 +449,12 @@ bdd<leafT>::prettyPrint(FILE *f)
 	}
 
 	/* Now print it */
-	std::set<bdd<leafT> *> printed;
-	std::vector<std::pair<int, bdd<leafT> *> > pending;
-	pending.push_back(std::pair<int, bdd<leafT> *>(0, this));
+	std::set<thisT *> printed;
+	std::vector<std::pair<int, thisT *> > pending;
+	pending.push_back(std::pair<int, thisT *>(0, this));
 	while (!pending.empty()) {
 		int depth = pending.back().first;
-		bdd<leafT> *what = pending.back().second;
+		thisT *what = pending.back().second;
 		pending.pop_back();
 
 		if (labels.count(what) && !printed.count(what))
@@ -473,8 +473,8 @@ bdd<leafT>::prettyPrint(FILE *f)
 			} else {
 				fprintf(f, "Mux: ");
 				ppIRExpr(what->content.condition, f);
-				pending.push_back(std::pair<int, bdd<leafT> *>(depth + 1, what->content.falseBranch));
-				pending.push_back(std::pair<int, bdd<leafT> *>(depth + 1, what->content.trueBranch));
+				pending.push_back(std::pair<int, thisT *>(depth + 1, what->content.falseBranch));
+				pending.push_back(std::pair<int, thisT *>(depth + 1, what->content.trueBranch));
 			}
 		}
 		fprintf(f, "\n");
@@ -499,5 +499,5 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	return it->second;
 }
 
-template void bdd<int>::prettyPrint(FILE *);
-template void bdd<bool>::prettyPrint(FILE *);
+template void _bdd<int, intbdd>::prettyPrint(FILE *);
+template void _bdd<bool, bbdd>::prettyPrint(FILE *);
