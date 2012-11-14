@@ -721,11 +721,8 @@ optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something
 	progress = false;
 	IRExpr *e2;
 	e2 = optimiseIRExpr(e, opt, &progress);
-	if (e2 != e) {
-		if (!opt.noSanityChecking())
-			quickcheck_exprs_eq(e, e2);
+	if (e2 != e)
 		progress = true;
-	}
 	e = e2;
 	if (progress) {
 		*done_something = true;
@@ -740,11 +737,8 @@ optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something
 			}
 			progress = false;
 			e2 = optimiseIRExpr(e, opt, &progress);
-			if (e2 != e) {
-				if (!opt.noSanityChecking())
-					quickcheck_exprs_eq(e, e2);
+			if (e2 != e)
 				progress = true;
-			}
 			e = e2;
 		}
 	}
