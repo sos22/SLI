@@ -3,7 +3,9 @@
 
 #include "state_machine.hpp"
 
-struct internStateMachineTable : public internIRExprTable {
+class internStateMachineTable : public internIRExprTable {
+	void _runGc(HeapVisitor &hv);
+public:
 	std::map<StateMachineSideEffect *, StateMachineSideEffect *> sideEffects;
 	std::map<StateMachineState *, StateMachineState *> states;
 	std::map<const CFGNode *, const CFGNode *> cfgNodes;

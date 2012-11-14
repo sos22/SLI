@@ -158,6 +158,7 @@ public:
 	std::vector<struct allocation_header *> deferredVisit;
 	unsigned depth;
 	void visit(void *&ptr);
+	void *_visited(void *);
 };
 
 void
@@ -212,6 +213,17 @@ GcVisitor::visit(void *&what)
 		DBG("Already visited; redirect to %p\n", what);
 		assert((unsigned long)what != 0x93939393939393ab);
 	}
+}
+
+void *
+GcVisitor::_visited(void *what)
+{
+	struct allocation_header *what_header;
+	if (!what)
+		return what;
+	assert_gc_allocated(what);
+	what_header = alloc_to_header(what);
+	return what_header->redirection(h);
 }
 
 void
@@ -281,7 +293,9 @@ LibVEX_gc(Heap *h, GarbageCollectionToken )
 
 	/* Run any GC callbacks */
 	for (auto it = h->callbacks.begin(); it != h->callbacks.end(); it++)
-		(**it)(gc);
+		(**it)(gc, false);
+	for (auto it = h->callbacks.begin(); it != h->callbacks.end(); it++)
+		(**it)(gc, true);
 
 	LibVEX_alloc_sanity_check(h);
 
@@ -496,6 +510,7 @@ public:
 	unsigned long heap_used;
 	unsigned nr_allocations;
 	void visit(void *&ptr);
+	void *_visited(void *) { return NULL; }
 	void account_one_allocation(allocation_header *hdr);
 };
 

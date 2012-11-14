@@ -40,6 +40,7 @@ extern Heap main_heap;
 template <typename t, Heap *heap> class GarbageCollected;
 
 class HeapVisitor {
+	virtual void *_visited(void *x) = 0;
 public:
 	virtual void visit(void *&ptr) = 0;
 	template <typename t> void operator()(t *&p) {
@@ -50,13 +51,19 @@ public:
 			assert(p);
 		}
 	}
+	template <typename t> t visited(t what) {
+		if (!what)
+			return NULL;
+		return (t)_visited((void *)what);
+	}
 };
 
 class __GcCallback {
 	Heap *h;
+	bool is_late;
 protected:
-	__GcCallback(Heap *_h)
-		: h(_h)
+	__GcCallback(Heap *_h, bool _is_late)
+		: h(_h), is_late(_is_late)
 	{
 		h->callbacks.insert(this);
 	}
@@ -66,13 +73,13 @@ protected:
 	}
 	virtual void runGc(HeapVisitor &hv) = 0;
 public:
-	void operator()(HeapVisitor &hv) { runGc(hv); }
+	void operator()(HeapVisitor &hv, bool late) { if (late == is_late) runGc(hv); }
 };
 
 template <Heap *heap = &main_heap>
 class GcCallback : public __GcCallback {
 protected:
-	GcCallback() : __GcCallback(heap) {}
+	GcCallback(bool is_late = false) : __GcCallback(heap, is_late) {}
 };
 
 /* Allocate in Vex's temporary allocation area.  Be careful with this.

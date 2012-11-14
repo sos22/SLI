@@ -443,3 +443,75 @@ internStateMachine(StateMachine *sm)
 	internStateMachineTable t;
 	return internStateMachine(sm, t);
 }
+
+void
+internIRExprTable::runGc(HeapVisitor &hv)
+{
+	for (int i = 0; i < nr_entries; i++) {
+		std::map<IRExpr *, IRExpr *> newTable;
+		for (auto it = lookups[i].begin();
+		     it != lookups[i].end();
+		     it++) {
+			if (it->first != it->second)
+				continue;
+			IRExpr *a = hv.visited(it->first);
+			if (!a)
+				continue;
+			newTable[a] = a;
+		}
+		lookups[i] = newTable;
+	}
+	_runGc(hv);
+}
+
+void
+internStateMachineTable::_runGc(HeapVisitor &hv)
+{
+#define do_map(typename, fieldname)					\
+	do {								\
+		std::map<typename, typename> newLookup;			\
+		for (auto it = fieldname.begin();			\
+		     it != fieldname.end();				\
+		     it++) {						\
+			if (it->first != it->second)			\
+				continue;				\
+			typename aa = hv.visited(it->first);		\
+			if (!aa)					\
+				continue;				\
+			newLookup[aa] = aa;				\
+		}							\
+		fieldname = newLookup;					\
+	} while (0)
+	do_map(StateMachineSideEffect *, sideEffects);
+	do_map(StateMachineState *, states);
+	do_map(const CFGNode *, cfgNodes);
+#undef do_map
+#define do_set(typename, fieldname)			\
+	do {						\
+		std::set<typename> newSet;		\
+		for (auto it = fieldname.begin();	\
+		     it != fieldname.end();		\
+		     it++) {				\
+			typename aa = hv.visited(*it);	\
+			if (aa)				\
+				newSet.insert(aa);	\
+		}					\
+		fieldname = newSet;			\
+	} while (0)
+	do_set(StateMachineSideEffectStore *, stores);
+	do_set(StateMachineSideEffectLoad *, loads);
+	do_set(StateMachineSideEffectCopy *, copies);
+	do_set(StateMachineSideEffectPhi *, phis);
+	do_set(StateMachineSideEffectAssertFalse *, asserts);
+#define ds(n)					\
+	do_set(StateMachineSideEffect ## n *, n)
+	ds(StartFunction);
+	ds(EndFunction);
+	ds(StackLayout);
+	ds(PointerAliasing);
+#undef ds
+	do_set(StateMachineBifurcate *, states_bifurcate);
+	do_set(StateMachineSideEffecting *, states_side_effect);
+	do_set(const CFGNode *, cfgNodesS);
+#undef do_set
+}

@@ -1282,9 +1282,14 @@ ThreadEvent *interpretStatement(IRStmt *stmt,
 
 void HandleMallocFree(Thread *thr, AddressSpace *as);
 
-struct internIRExprTable {
+class internIRExprTable : public GcCallback<&ir_heap> {
+	void runGc(HeapVisitor &hv);
+protected:
+	virtual void _runGc(HeapVisitor &) {}
+public:
 	static const int nr_entries = 17;
 	std::map<IRExpr *, IRExpr *> lookups[nr_entries];
+	internIRExprTable() : GcCallback<&ir_heap>(true) {};
 };
 IRExpr *internIRExpr(IRExpr *e, internIRExprTable &lookupTable);
 
