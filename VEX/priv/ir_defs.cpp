@@ -99,7 +99,7 @@ const char *nameIRType(IRType ty)
 
 void ppIRType ( IRType ty, FILE *f )
 {
-   fprintf(f, nameIRType(ty));
+  fprintf(f, "%s", nameIRType(ty));
 }
 
 bool parseIRType(IRType *out, const char *str, const char **suffix)
