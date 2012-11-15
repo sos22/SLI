@@ -264,13 +264,14 @@ bdd_ordering::runGc(HeapVisitor &hv)
 	variableRankings = newRankings;
 }
 
-#define INTBDD_DONT_CARE ((intbdd *)1)
+#define INTBDD_DONT_CARE ((subtreeT *)0x1)
+template <typename subtreeT, typename scopeT>
 class from_enabling_internal {
 public:
 	bool failed;
-	intbdd::enablingTableT table;
-	from_enabling_internal(const intbdd::enablingTableT &_table)
-		: table(_table)
+	typename subtreeT::enablingTableT table;
+	from_enabling_internal(const typename subtreeT::enablingTableT &_table)
+		: failed(false), table(_table)
 	{}
 	from_enabling_internal(bool _failed)
 		: failed(_failed)
@@ -278,7 +279,7 @@ public:
 	bool isLeaf() const {
 		return failed || table.size() <= 1;
 	}
-	intbdd *leafzip() const {
+	subtreeT *leafzip() const {
 		if (failed)
 			return NULL;
 		else if (table.size() == 0)
@@ -307,7 +308,7 @@ public:
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); it != table.end(); it++) {
 			bbdd *newGuard = it->first;
-			intbdd *newRes = it->second;
+			subtreeT *newRes = it->second;
 			if (!newGuard->isLeaf &&
 			    ordering->equal(newGuard->content.condition, cond))
 				newGuard = newGuard->content.trueBranch;
@@ -316,7 +317,7 @@ public:
 			if (!newRes->isLeaf &&
 			    ordering->equal(newRes->content.condition, cond))
 				newRes = newRes->content.trueBranch;
-			auto it2_did_insert = res.table.insert(std::pair<bbdd *, intbdd *>(newGuard, newRes));
+			auto it2_did_insert = res.table.insert(std::pair<bbdd *, subtreeT *>(newGuard, newRes));
 			if (it2_did_insert.first->second != newRes)
 				return from_enabling_internal(true);
 		}
@@ -328,7 +329,7 @@ public:
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); it != table.end(); it++) {
 			bbdd *newGuard = it->first;
-			intbdd *newRes = it->second;
+			subtreeT *newRes = it->second;
 			if (!newGuard->isLeaf &&
 			    ordering->equal(newGuard->content.condition, cond))
 				newGuard = newGuard->content.falseBranch;
@@ -337,13 +338,13 @@ public:
 			if (!newRes->isLeaf &&
 			    ordering->equal(newRes->content.condition, cond))
 				newRes = newRes->content.falseBranch;
-			auto it2_did_insert = res.table.insert(std::pair<bbdd *, intbdd *>(newGuard, newRes));
+			auto it2_did_insert = res.table.insert(std::pair<bbdd *, subtreeT *>(newGuard, newRes));
 			if (it2_did_insert.first->second != newRes)
 				return from_enabling_internal(true);
 		}
 		return res;
 	}
-	intbdd *mkNode(intbdd::scope *scope, IRExpr *a, intbdd *t, intbdd *f)
+	subtreeT *mkNode(scopeT *scope, IRExpr *a, subtreeT *t, subtreeT *f)
 	{
 		if (t == NULL || f == NULL)
 			return NULL;
@@ -358,10 +359,11 @@ public:
 	}
 };
 
-intbdd *
-intbdd::from_enabling(scope *scope, const enablingTableT &inp)
+template <typename constT, typename subtreeT> template <typename scopeT>
+subtreeT *
+const_bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp)
 {
-	intbdd *res = zip(scope, from_enabling_internal(inp));
+	subtreeT *res = zip(scope, from_enabling_internal<subtreeT, scopeT>(inp));
 	if (res == INTBDD_DONT_CARE)
 		return scope->cnst(0);
 	else
@@ -464,3 +466,4 @@ template void _bdd<int, intbdd>::prettyPrint(FILE *);
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template intbdd *const_bdd<int, intbdd>::assume(const_bdd_scope<intbdd> *, intbdd *, bbdd*);
 template bbdd *const_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
+template intbdd *const_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &);

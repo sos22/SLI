@@ -167,10 +167,10 @@ template <typename constT, typename subtreeT> class const_bdd : public _bdd<cons
 public:
 	typedef constT leafT;
 	typedef const_bdd_scope<subtreeT> scope;
+	typedef std::map<bbdd *, subtreeT *> enablingTableT;
 private:
 	void _visit(HeapVisitor &, constT &) const {
 	}
-
 protected:
 	template <typename scopeT, typename zipInternalT> static subtreeT *zip(
 		scopeT *,
@@ -183,6 +183,7 @@ protected:
 		return zip(scp, where, memo);
 	}
 
+
 	const_bdd(IRExpr *cond, subtreeT *trueB, subtreeT *falseB)
 		: _bdd<constT, subtreeT>(cond, trueB, falseB)
 	{}
@@ -193,6 +194,15 @@ public:
 	static subtreeT *assume(scope *,
 				subtreeT *thing,
 				bbdd *assumption);
+
+	/* An enabling table is a map from BBDDs to xBDDs.  The idea
+	   is that the caller arranges that at most one of the BBDDs
+	   is true (i.e. enabled) for any context and we then select
+	   the matching xBDD.  @from_enabling flattens an enabling
+	   table into a single xBDD */
+	template <typename scopeT> static subtreeT *from_enabling(
+		scopeT *scp,
+		const enablingTableT &inp);
 };
 
 class bbdd : public const_bdd<bool, bbdd> {
@@ -227,18 +237,12 @@ public:
 class intbdd : public const_bdd<int, intbdd> {
 	friend class const_bdd_scope<intbdd>;
 	friend class bdd_scope<intbdd>;
-public:
-	typedef std::map<bbdd *, intbdd *> enablingTableT;
-private:
 	void _sanity_check(int) const {
 	}
 	void _prettyPrint(FILE *f, int k) const {
 		fprintf(f, "<%d>", k);
 	}
 
-	static intbdd *from_enabling(scope *,
-				     const enablingTableT &inp,
-				     std::map<enablingTableT, intbdd *> &memo);
 	intbdd(IRExpr *cond, intbdd *trueB, intbdd *falseB)
 		: const_bdd<int, intbdd>(cond, trueB, falseB)
 	{}
@@ -246,14 +250,6 @@ private:
 		: const_bdd<int, intbdd>(b)
 	{}
 public:
-	/* An enabling table is a map from BBDDs to int BDDs.  The
-	   idea is that the caller arranges that at most one of the
-	   BBDDs is true (i.e. enabled) for any context and we then
-	   select the matching intbdd.  @from_enabling flattens an
-	   enabling table into a single int BDD */
-	static intbdd *from_enabling(scope *,
-				     const enablingTableT &inp);
-
 	/* Simplify @thing under the assumption that @assumption is
 	 * true. */
 	static intbdd *assume(scope *scp,
