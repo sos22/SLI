@@ -46,11 +46,87 @@ _leafzip_assume(bool, bool)
 	abort();
 }
 
+template <typename constT, typename subtreeT>
+IRExpr *
+const_bdd<constT, subtreeT>::binary_zip_internal::bestCond(bdd_ordering *ordering) const
+{
+	assert(!(first->isLeaf && second->isLeaf));
+	if (first->isLeaf) {
+		return second->content.condition;
+	} else if (second->isLeaf) {
+		return first->content.condition;
+	} else if (ordering->before(first->content.condition,
+					   second->content.condition)) {
+		return first->content.condition;
+	} else {
+		return second->content.condition;
+	}
+}
+
+template <typename constT, typename subtreeT>
+typename const_bdd<constT, subtreeT>::binary_zip_internal
+const_bdd<constT, subtreeT>::binary_zip_internal::trueSucc(bdd_ordering *ordering, IRExpr *bestCond) const
+{
+	return binary_zip_internal(
+		first->isLeaf  || !ordering->equal(first->content.condition, bestCond)  ? first  : first->content.trueBranch,
+		second->isLeaf || !ordering->equal(second->content.condition, bestCond) ? second : second->content.trueBranch);
+}
+
+template <typename constT, typename subtreeT>
+typename const_bdd<constT, subtreeT>::binary_zip_internal
+const_bdd<constT, subtreeT>::binary_zip_internal::falseSucc(bdd_ordering *ordering, IRExpr *bestCond) const
+{
+	return binary_zip_internal(
+		first->isLeaf  || !ordering->equal(first->content.condition, bestCond)  ? first  : first->content.falseBranch,
+		second->isLeaf || !ordering->equal(second->content.condition, bestCond) ? second : second->content.falseBranch);
+}
+
+template <typename constT, typename subtreeT>
+bool
+const_bdd<constT, subtreeT>::binary_zip_internal::isLeaf() const
+{
+	return first->isLeaf && second->isLeaf;
+}
+
+template <typename constT, typename subtreeT> template <typename scopeT, typename zipInternalT, typename zipLeafT>
+subtreeT *
+const_bdd<constT, subtreeT>::zip(scopeT *scope,
+				 zipInternalT where,
+				 zipLeafT leafzip,
+				 std::map<zipInternalT, subtreeT *> &memo)
+{
+#define zipcore								\
+	if (where.isLeaf())						\
+		return where.leafzip(leafzip);				\
+									\
+	auto it_did_insert = memo.insert(				\
+		std::pair<zipInternalT, bbdd *>(where, (bbdd *)NULL));	\
+	auto it = it_did_insert.first;					\
+	auto did_insert = it_did_insert.second;				\
+	if (!did_insert) {						\
+		assert(it->second);					\
+		return it->second;					\
+	}								\
+									\
+	IRExpr *bestCond = where.bestCond(scope->ordering);		\
+	zipInternalT trueSucc(where.trueSucc(scope->ordering, bestCond)); \
+	zipInternalT falseSucc(where.falseSucc(scope->ordering, bestCond)); \
+	it->second = scope->makeInternal(				\
+		bestCond,						\
+		zip(scope, trueSucc, leafzip, memo),			\
+		zip(scope, falseSucc, leafzip, memo));			\
+	return it->second;
+	zipcore
+}
+
+/* Specialise that for bools, to allow a couple of performance
+ * hacks. */
+template <> template <>
 bbdd *
-bbdd::zip(scope *scope,
-	  zipInternalT where,
-	  zipLeafT leafzip,
-	  std::map<zipInternalT, bbdd *> &memo)
+const_bdd<bool, bbdd>::zip(bbdd::scope *scope,
+			   binary_zip_internal where,
+			   bbdd *(*leafzip)(bool, bool),
+			   std::map<binary_zip_internal, bbdd *> &memo)
 {
 	if (where.first == where.second) {
 		if (leafzip == _leafzip_and || leafzip == _leafzip_or)
@@ -89,67 +165,25 @@ bbdd::zip(scope *scope,
 		}
 	}
 
-	if (where.first->isLeaf && where.second->isLeaf)
-		return leafzip(where.first->content.leaf, where.second->content.leaf);
-
-	auto it_did_insert = memo.insert(
-		std::pair<zipInternalT, bbdd *>(where, (bbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (!did_insert) {
-		assert(it->second);
-		return it->second;
-	}
-
-	IRExpr *bestCond;
-	if (where.first->isLeaf) {
-		bestCond = where.second->content.condition;
-	} else if (where.second->isLeaf) {
-		bestCond = where.first->content.condition;
-	} else if (scope->ordering->before(where.first->content.condition,
-					   where.second->content.condition)) {
-		bestCond = where.first->content.condition;
-	} else {
-		bestCond = where.second->content.condition;
-	}
-
-	zipInternalT trueSucc;
-	zipInternalT falseSucc;
-	if (!where.first->isLeaf && scope->ordering->equal(bestCond, where.first->content.condition)) {
-		trueSucc.first = where.first->content.trueBranch;
-		falseSucc.first = where.first->content.falseBranch;
-	} else {
-		trueSucc.first = where.first;
-		falseSucc.first = where.first;
-	}
-	if (!where.second->isLeaf && scope->ordering->equal(bestCond, where.second->content.condition)) {
-		trueSucc.second = where.second->content.trueBranch;
-		falseSucc.second = where.second->content.falseBranch;
-	} else {
-		trueSucc.second = where.second;
-		falseSucc.second = where.second;
-	}
-	it->second = scope->makeInternal(
-		bestCond,
-		zip(scope, trueSucc, leafzip, memo),
-		zip(scope, falseSucc, leafzip, memo));
-	return it->second;
+	typedef binary_zip_internal zipInternalT;
+	zipcore
+#undef zipcore
 }
 
 bbdd *
 bbdd::And(scope *scope, bbdd *a, bbdd *b)
 {
-	return zip(scope, zipInternalT(a, b), _leafzip_and);
+	return zip(scope, binary_zip_internal(a, b), _leafzip_and);
 }
 bbdd *
 bbdd::Or(scope *scope, bbdd *a, bbdd *b)
 {
-	return zip(scope, zipInternalT(a, b), _leafzip_or);
+	return zip(scope, binary_zip_internal(a, b), _leafzip_or);
 }
 bbdd *
 bbdd::assume(scope *scope, bbdd *thing, bbdd *assumption)
 {
-	return zip(scope, zipInternalT(thing, assumption), _leafzip_assume);
+	return zip(scope, binary_zip_internal(thing, assumption), _leafzip_assume);
 }
 
 bbdd *

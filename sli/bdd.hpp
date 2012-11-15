@@ -170,6 +170,42 @@ private:
 	}
 
 protected:
+	class binary_zip_internal {
+	public:
+		subtreeT *first;
+		subtreeT *second;
+		IRExpr *bestCond(bdd_ordering *ordering) const;
+		binary_zip_internal trueSucc(bdd_ordering *, IRExpr *cond) const;
+		binary_zip_internal falseSucc(bdd_ordering *, IRExpr *cond) const;
+		binary_zip_internal(subtreeT *_first, subtreeT *_second)
+			: first(_first), second(_second)
+		{}
+		bool isLeaf() const;
+		subtreeT *leafzip(subtreeT *(*f)(leafT, leafT)) const {
+			assert(isLeaf());
+			return f(first->content.leaf, second->content.leaf);
+		}
+		bool operator<(const binary_zip_internal &o) const {
+			if (first < o.first)
+				return true;
+			if (first > o.first)
+				return false;
+			return second < o.second;
+		}
+	};
+	template <typename scopeT, typename zipInternalT, typename zipLeafT> static subtreeT *zip(
+		scopeT *,
+		zipInternalT,
+		zipLeafT,
+		std::map<zipInternalT, subtreeT *> &memo);
+	template <typename scopeT, typename zipInternalT, typename zipLeafT> static subtreeT *zip(
+		scopeT *scp,
+		zipInternalT where,
+		zipLeafT leaf) {
+		std::map<zipInternalT, subtreeT *> memo;
+		return zip(scp, where, leaf, memo);
+	}
+
 	const_bdd(IRExpr *cond, subtreeT *trueB, subtreeT *falseB)
 		: _bdd<constT, subtreeT>(cond, trueB, falseB)
 	{}
@@ -183,18 +219,6 @@ class bbdd : public const_bdd<bool, bbdd> {
 	friend class const_bdd_scope<bbdd>;
 	friend class bdd_scope<bbdd>;
 
-	typedef std::pair<bbdd *, bbdd *> zipInternalT;
-	typedef bbdd *(*zipLeafT)(bool, bool);
-	static bbdd *zip(scope *,
-			 zipInternalT,
-			 zipLeafT,
-			 std::map<zipInternalT, bbdd *> &memo);
-	static bbdd *zip(scope *scp,
-			 zipInternalT where,
-			 zipLeafT leaf) {
-		std::map<zipInternalT, bbdd *> memo;
-		return zip(scp, where, leaf, memo);
-	}
 	void _sanity_check(bool b) const {
 		assert(b == true || b == false);
 	}
