@@ -2,13 +2,8 @@
 #include "bdd.hpp"
 #include "simplify_irexpr.hpp"
 
-VexPtr<bbdd, &ir_heap>
-bbdd::trueLeaf(new bbdd(true));
-VexPtr<bbdd, &ir_heap>
-bbdd::falseLeaf(new bbdd(false));
-
 bbdd *
-bbdd::var(bbdd_scope *scope, IRExpr *a)
+bbdd::var(scope *scope, IRExpr *a)
 {
 	assert(a->type() == Ity_I1);
 	if (a->tag == Iex_Associative) {
@@ -28,8 +23,8 @@ bbdd::var(bbdd_scope *scope, IRExpr *a)
 	    ((IRExprUnop *)a)->op == Iop_Not1)
 		return bbdd::invert(scope, bbdd::var(scope, ((IRExprUnop *)a)->arg));
 	return scope->makeInternal(a,
-				   cnst(true),
-				   cnst(false));
+				   scope->cnst(true),
+				   scope->cnst(false));
 }
 
 /* The zipper effectively inlines these so that they never actually
@@ -52,7 +47,7 @@ _leafzip_assume(bool, bool)
 }
 
 bbdd *
-bbdd::zip(bbdd_scope *scope,
+bbdd::zip(scope *scope,
 	  bbdd *a,
 	  bbdd *b,
 	  bbdd *(*leafzip)(bool a, bool b),
@@ -62,7 +57,7 @@ bbdd::zip(bbdd_scope *scope,
 		if (leafzip == _leafzip_and || leafzip == _leafzip_or)
 			return a;
 		if (leafzip == _leafzip_assume)
-			return cnst(true);
+			return scope->cnst(true);
 	}
 	if (leafzip == _leafzip_and || leafzip == _leafzip_or || leafzip == _leafzip_assume) {
 		if (b->isLeaf) {
@@ -70,12 +65,12 @@ bbdd::zip(bbdd_scope *scope,
 				if (leafzip == _leafzip_and || leafzip == _leafzip_assume)
 					return a;
 				else
-					return cnst(true);
+					return scope->cnst(true);
 			} else {
 				if (leafzip == _leafzip_assume)
 					return NULL;
 				else if (leafzip == _leafzip_and)
-					return cnst(false);
+					return scope->cnst(false);
 				else
 					return a;
 			}
@@ -85,10 +80,10 @@ bbdd::zip(bbdd_scope *scope,
 				if (leafzip == _leafzip_and)
 					return b;
 				else
-					return cnst(true);
+					return scope->cnst(true);
 			} else {
 				if (leafzip == _leafzip_and || leafzip == _leafzip_assume)
-					return cnst(false);
+					return scope->cnst(false);
 				else
 					return b;
 			}
@@ -170,26 +165,26 @@ bbdd::zip(bbdd_scope *scope,
 }
 
 bbdd *
-bbdd::And(bbdd_scope *scope, bbdd *a, bbdd *b)
+bbdd::And(scope *scope, bbdd *a, bbdd *b)
 {
 	return zip(scope, a, b, _leafzip_and);
 }
 bbdd *
-bbdd::Or(bbdd_scope *scope, bbdd *a, bbdd *b)
+bbdd::Or(scope *scope, bbdd *a, bbdd *b)
 {
 	return zip(scope, a, b, _leafzip_or);
 }
 bbdd *
-bbdd::assume(bbdd_scope *scope, bbdd *thing, bbdd *assumption)
+bbdd::assume(scope *scope, bbdd *thing, bbdd *assumption)
 {
 	return zip(scope, thing, assumption, _leafzip_assume);
 }
 
 bbdd *
-bbdd::invert(bbdd_scope *scope, bbdd *a)
+bbdd::invert(scope *scope, bbdd *a)
 {
 	if (a->isLeaf)
-		return bbdd::cnst(!a->content.leaf);
+		return scope->cnst(!a->content.leaf);
 	else
 		return scope->makeInternal(
 			a->content.condition,
@@ -233,21 +228,10 @@ bdd_ordering::runGc(HeapVisitor &hv)
 	variableRankings = newRankings;
 }
 
-intbdd *
-intbdd_scope::cnst(int k)
-{
-	auto it_did_insert = content.insert(std::pair<int, intbdd *>(k, (intbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert)
-		it->second = new intbdd(k);
-	return it->second;
-}
-
 #define INTBDD_DONT_CARE ((intbdd *)1)
 
 intbdd *
-intbdd::from_enabling(intbdd_scope *scope,
+intbdd::from_enabling(scope *scope,
 		      const enablingTableT &_inp,
 		      std::map<enablingTableT, intbdd *> &memo)
 {
@@ -337,19 +321,19 @@ intbdd::from_enabling(intbdd_scope *scope,
 	return it->second;
 }
 intbdd *
-intbdd::from_enabling(intbdd_scope *scope, const enablingTableT &inp)
+intbdd::from_enabling(scope *scope, const enablingTableT &inp)
 {
 	std::map<enablingTableT, intbdd *> memo;
 	intbdd *res = from_enabling(scope, inp, memo);
 	if (res == INTBDD_DONT_CARE)
-		return cnst(scope, 0);
+		return scope->cnst(0);
 	else
 		return res;
 }
 #undef INTBDD_DONT_CARE
 
 intbdd *
-intbdd::assume(intbdd_scope *scope,
+intbdd::assume(scope *scope,
 	       intbdd *a,
 	       bbdd *b,
 	       std::map<std::pair<intbdd *, bbdd *>, intbdd *> &memo)
@@ -420,14 +404,14 @@ intbdd::assume(intbdd_scope *scope,
 			
 
 intbdd *
-intbdd::assume(intbdd_scope *scope,
+intbdd::assume(scope *scope,
 	       intbdd *thing,
 	       bbdd *assumption)
 {
 	std::map<std::pair<intbdd *, bbdd *>, intbdd *> memo;
 	intbdd *res = assume(scope, thing, assumption, memo);
 	if (res == NULL)
-		return cnst(scope, 0);
+		return scope->cnst(0);
 	else
 		return res;
 }
@@ -436,16 +420,16 @@ template <typename leafT, typename subtreeT> void
 _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 {
 	int nextLabel = 0;
-	std::map<thisT *, int> labels;
+	std::map<_bdd *, int> labels;
 
 	/* First, assign labels to anything which occurs multiple
 	 * times. */
 	{
-		std::set<thisT *> seen;
-		std::vector<thisT *> pending;
+		std::set<_bdd *> seen;
+		std::vector<_bdd *> pending;
 		pending.push_back(this);
 		while (!pending.empty()) {
-			thisT *l = pending.back();
+			auto l = pending.back();
 			assert(l);
 			pending.pop_back();
 			if (labels.count(l))
@@ -473,12 +457,12 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 	}
 
 	/* Now print it */
-	std::set<thisT *> printed;
-	std::vector<std::pair<int, thisT *> > pending;
-	pending.push_back(std::pair<int, thisT *>(0, this));
+	std::set<_bdd *> printed;
+	std::vector<std::pair<int, _bdd *> > pending;
+	pending.push_back(std::pair<int, _bdd *>(0, this));
 	while (!pending.empty()) {
 		int depth = pending.back().first;
-		thisT *what = pending.back().second;
+		auto what = pending.back().second;
 		pending.pop_back();
 
 		if (labels.count(what) && !printed.count(what))
@@ -497,8 +481,8 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 			} else {
 				fprintf(f, "Mux: ");
 				ppIRExpr(what->content.condition, f);
-				pending.push_back(std::pair<int, thisT *>(depth + 1, what->content.falseBranch));
-				pending.push_back(std::pair<int, thisT *>(depth + 1, what->content.trueBranch));
+				pending.push_back(std::pair<int, _bdd *>(depth + 1, what->content.falseBranch));
+				pending.push_back(std::pair<int, _bdd *>(depth + 1, what->content.trueBranch));
 			}
 		}
 		fprintf(f, "\n");

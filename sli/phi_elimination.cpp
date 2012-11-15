@@ -48,7 +48,7 @@ predecessor_map::predecessor_map(StateMachine *sm)
 class control_dependence_graph {
 	std::map<StateMachineState *, bbdd *> content;
 public:
-	control_dependence_graph(StateMachine *sm, bbdd_scope *scope,
+	control_dependence_graph(StateMachine *sm, bbdd::scope *scope,
 				 std::map<const StateMachineState *, int> &labels);
 	bbdd *domOf(StateMachineState *s) const {
 		auto i = content.find(s);
@@ -59,16 +59,16 @@ public:
 };
 
 control_dependence_graph::control_dependence_graph(StateMachine *sm,
-						   bbdd_scope *scope,
+						   bbdd::scope *scope,
 						   std::map<const StateMachineState *, int> &labels)
 {
-	content[sm->root] = bbdd::cnst(true);
+	content[sm->root] = scope->cnst(true);
 	std::vector<StateMachineState *> pending;
 	pending.push_back(sm->root);
 
 	struct {
 		std::vector<StateMachineState *> *pending;
-		bbdd_scope *scope;
+		bbdd::scope *scope;
 		void operator()(bbdd *&slot,
 				bbdd *newPath,
 				StateMachineState *owner) {
@@ -156,7 +156,7 @@ build_selection_bdd(StateMachine *sm,
 		    StateMachineSideEffectPhi *phi,
 		    std::map<const StateMachineState *, int> &labels,
 		    std::map<unsigned, unsigned> &canonResult,
-		    intbdd_scope *iscope)
+		    intbdd::scope *iscope)
 {
 	std::set<StateMachineState *> mightReachPhi;
 	{
@@ -201,7 +201,7 @@ build_selection_bdd(StateMachine *sm,
 	std::set<StateMachineSideEffecting *> sideEffecting;
 	enumStates(sm, &sideEffecting);
 
-	bbdd_scope scope(iscope->ordering);
+	bbdd::scope scope(iscope->ordering);
 	predecessor_map pm(sm);
 	control_dependence_graph cdg(sm, &scope, labels);
 
@@ -222,7 +222,7 @@ build_selection_bdd(StateMachine *sm,
 			/* gen -1; that'll be the result at the root
 			   and any other path which doesn't assign to
 			   one of the input registers. */
-			m[sm->root] = intbdd::cnst(iscope, canonResult[x]);
+			m[sm->root] = iscope->cnst(canonResult[x]);
 			toUpdate.push(sm->root);
 			break;
 		} else {
@@ -238,7 +238,7 @@ build_selection_bdd(StateMachine *sm,
 				threadAndRegister def(threadAndRegister::invalid());
 				if (sr->definesRegister(def) && def == tr) {
 					assert(!m.count(*it2));
-					m[*it2] = intbdd::cnst(iscope, canonResult[x]);
+					m[*it2] = iscope->cnst(canonResult[x]);
 					toUpdate.push(*it2);
 					found = true;
 				}
@@ -446,7 +446,7 @@ phiElimination(StateMachine *sm, bool *done_something)
 			}
 		}
 		bdd_ordering ordering;
-		intbdd_scope iscope(&ordering);
+		intbdd::scope iscope(&ordering);
 		intbdd *sel_bdd = build_selection_bdd(sm, phi, labels, resultCanoniser, &iscope);
 		if (!sel_bdd) {
 			if (debug_toplevel)

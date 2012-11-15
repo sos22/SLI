@@ -32,7 +32,6 @@ public:
 template <typename _leafT, typename _subtreeT>
 class _bdd : public GarbageCollected<_bdd<_leafT, _subtreeT>, &ir_heap> {
 public:
-	typedef _bdd<_leafT, _subtreeT> thisT;
 	typedef _leafT leafT;
 protected:
 	virtual void _visit(HeapVisitor &hv, leafT &leaf) const = 0;
@@ -127,112 +126,130 @@ public:
 };
 
 
-class bbdd;
+template <typename t> class const_bdd_scope
+	: public bdd_scope<t>,
+	  private GcCallback<&ir_heap> {
+	std::map<typename t::leafT, t *> lookup;
+	void runGc(HeapVisitor &hv) {
+		for (auto it = lookup.begin();
+		     it != lookup.end();
+			) {
+			it->second = hv.visited(it->second);
+			if (it->second == NULL)
+				lookup.erase(it++);
+			else
+				it++;
+		}
+	}
+public:
+	t *cnst(const typename t::leafT &i) {
+		auto it_did_insert = lookup.insert(std::pair<typename t::leafT, t *>(i, (t *)NULL));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (did_insert)
+			it->second = new t(i);
+		return it->second;
+	}
+	const_bdd_scope(bdd_ordering *_ordering)
+		: bdd_scope<t>(_ordering),
+		  GcCallback<&ir_heap>(true)
+	{}
+};
 
-typedef bdd_scope<bbdd> bbdd_scope;
+template <typename constT, typename subtreeT> class const_bdd : public _bdd<constT, subtreeT> {
+public:
+	typedef constT leafT;
+	typedef const_bdd_scope<subtreeT> scope;
+private:
+	void _visit(HeapVisitor &, constT &) const {
+	}
 
-class bbdd : public _bdd<bool, bbdd> {
+protected:
+	const_bdd(IRExpr *cond, subtreeT *trueB, subtreeT *falseB)
+		: _bdd<constT, subtreeT>(cond, trueB, falseB)
+	{}
+	const_bdd(constT b)
+		: _bdd<constT, subtreeT>(b)
+	{}
+public:
+};
+
+class bbdd : public const_bdd<bool, bbdd> {
+	friend class const_bdd_scope<bbdd>;
 	friend class bdd_scope<bbdd>;
 
-	static VexPtr<bbdd, &ir_heap> trueLeaf;
-	static VexPtr<bbdd, &ir_heap> falseLeaf;
-
-	void _sanity_check(bool b) const {
-		assert(b == true || b == false);
-	}
-	void _visit(HeapVisitor &, bool &) const {
-	}
-	void _prettyPrint(FILE *f, bool b) const {
-		if (b)
-			fprintf(f, "true");
-		else
-			fprintf(f, "false");
-	}
-
-	bbdd(IRExpr *cond, bbdd *trueB, bbdd *falseB)
-		: _bdd<bool, bbdd>(cond, trueB, falseB)
-	{}
-	bbdd(bool b)
-		: _bdd<bool, bbdd>(b)
-	{}
-
-	static bbdd *zip(bbdd_scope *scope,
+	static bbdd *zip(scope *,
 			 bbdd *a,
 			 bbdd *b,
 			 bbdd *(*)(bool, bool),
 			 std::map<std::pair<bbdd *, bbdd *>, bbdd *> &memo);
-	static bbdd *zip(bbdd_scope *scope,
+	static bbdd *zip(scope *scp,
 			 bbdd *a,
 			 bbdd *b,
 			 bbdd *(*f)(bool, bool)) {
 		std::map<std::pair<bbdd *, bbdd *>, bbdd *> memo;
-		return zip(scope, a, b, f, memo);
+		return zip(scp, a, b, f, memo);
 	}
+	void _sanity_check(bool b) const {
+		assert(b == true || b == false);
+	}
+	void _prettyPrint(FILE *f, bool b) const {
+		fprintf(f, "%s", b ? "<true>" : "<false>");
+	}
+
+	bbdd(IRExpr *cond, bbdd *trueB, bbdd *falseB)
+		: const_bdd<bool, bbdd>(cond, trueB, falseB)
+	{}
+	bbdd(bool b)
+		: const_bdd<bool, bbdd>(b)
+	{}
 public:
-	static bbdd *cnst(bool b) {
-		if (b)
-			return trueLeaf;
-		else
-			return falseLeaf;
-	}
-	static bbdd *Or(bbdd_scope *scope, bbdd *a, bbdd *b);
-	static bbdd *And(bbdd_scope *scope, bbdd *a, bbdd *b);
-	static bbdd *var(bbdd_scope *scope, IRExpr *a);
-	static bbdd *invert(bbdd_scope *scope, bbdd *a);
-	static bbdd *assume(bbdd_scope *scope,
+	static bbdd *Or(scope *, bbdd *a, bbdd *b);
+	static bbdd *And(scope *, bbdd *a, bbdd *b);
+	static bbdd *var(scope *, IRExpr *a);
+	static bbdd *invert(scope *, bbdd *a);
+	static bbdd *assume(scope *,
 			    bbdd *thing,
 			    bbdd *assumption);
 };
 
-class intbdd;
-class intbdd_scope : public bdd_scope<intbdd> {
-	std::map<int, intbdd *> content;
-public:
-	intbdd *cnst(int k);
-	intbdd_scope(bdd_ordering *_ordering)
-		: bdd_scope<intbdd>(_ordering)
-	{}
-};
-
-class intbdd : public _bdd<int, intbdd> {
+class intbdd : public const_bdd<int, intbdd> {
+	friend class const_bdd_scope<intbdd>;
+	friend class bdd_scope<intbdd>;
 public:
 	typedef std::map<bbdd *, intbdd *> enablingTableT;
 private:
-	friend class bdd_scope<intbdd>;
-	friend class intbdd_scope;
-
-	void _visit(HeapVisitor &, int &) const {}
-	void _sanity_check(int) const {}
+	void _sanity_check(int) const {
+	}
 	void _prettyPrint(FILE *f, int k) const {
 		fprintf(f, "<%d>", k);
 	}
 
-	intbdd(int _k)
-		: _bdd<int, intbdd>(_k)
-	{}
-	intbdd(IRExpr *cond, intbdd *a, intbdd *b)
-		: _bdd<int, intbdd>(cond, a, b)
-	{}
-	static intbdd *from_enabling(intbdd_scope *scope,
+	static intbdd *from_enabling(scope *,
 				     const enablingTableT &inp,
 				     std::map<enablingTableT, intbdd *> &memo);
-	static intbdd *assume(intbdd_scope *scope,
+	static intbdd *assume(scope *,
 			      intbdd *thing,
 			      bbdd *assumption,
 			      std::map<std::pair<intbdd *, bbdd *>, intbdd *> &memo);
+	intbdd(IRExpr *cond, intbdd *trueB, intbdd *falseB)
+		: const_bdd<int, intbdd>(cond, trueB, falseB)
+	{}
+	intbdd(int b)
+		: const_bdd<int, intbdd>(b)
+	{}
 public:
-	static intbdd *cnst(intbdd_scope *scope, int k) { return scope->cnst(k); }
 	/* An enabling table is a map from BBDDs to int BDDs.  The
 	   idea is that the caller arranges that at most one of the
 	   BBDDs is true (i.e. enabled) for any context and we then
 	   select the matching intbdd.  @from_enabling flattens an
 	   enabling table into a single int BDD */
-	static intbdd *from_enabling(intbdd_scope *scope,
+	static intbdd *from_enabling(scope *,
 				     const enablingTableT &inp);
 
 	/* Simplify @thing under the assumption that @assumption is
 	 * true. */
-	static intbdd *assume(intbdd_scope *scope,
+	static intbdd *assume(scope *,
 			      intbdd *thing,
 			      bbdd *assumption);
 };
