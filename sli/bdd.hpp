@@ -14,6 +14,8 @@ class bdd_ordering : public GcCallback<&ir_heap> {
 public:
 	typedef enum { lt, eq, gt} ordT;
 	ordT operator()(const IRExpr *a, const IRExpr *b) {
+		if (a == b)
+			return eq;
 		long ra = rankVariable(a);
 		long rb = rankVariable(b);
 		if (ra < rb)
@@ -25,6 +27,9 @@ public:
 	}
 	bool before(const IRExpr *a, const IRExpr *b) {
 		return (*this)(a, b) == lt;
+	}
+	bool equal(const IRExpr *a, const IRExpr *b) {
+		return (*this)(a, b) == eq;
 	}
 	bdd_ordering() : GcCallback<&ir_heap>(true), nextRanking(0) {}
 };
@@ -178,17 +183,17 @@ class bbdd : public const_bdd<bool, bbdd> {
 	friend class const_bdd_scope<bbdd>;
 	friend class bdd_scope<bbdd>;
 
+	typedef std::pair<bbdd *, bbdd *> zipInternalT;
+	typedef bbdd *(*zipLeafT)(bool, bool);
 	static bbdd *zip(scope *,
-			 bbdd *a,
-			 bbdd *b,
-			 bbdd *(*)(bool, bool),
-			 std::map<std::pair<bbdd *, bbdd *>, bbdd *> &memo);
+			 zipInternalT,
+			 zipLeafT,
+			 std::map<zipInternalT, bbdd *> &memo);
 	static bbdd *zip(scope *scp,
-			 bbdd *a,
-			 bbdd *b,
-			 bbdd *(*f)(bool, bool)) {
-		std::map<std::pair<bbdd *, bbdd *>, bbdd *> memo;
-		return zip(scp, a, b, f, memo);
+			 zipInternalT where,
+			 zipLeafT leaf) {
+		std::map<zipInternalT, bbdd *> memo;
+		return zip(scp, where, leaf, memo);
 	}
 	void _sanity_check(bool b) const {
 		assert(b == true || b == false);

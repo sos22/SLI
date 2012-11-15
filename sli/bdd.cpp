@@ -48,22 +48,21 @@ _leafzip_assume(bool, bool)
 
 bbdd *
 bbdd::zip(scope *scope,
-	  bbdd *a,
-	  bbdd *b,
-	  bbdd *(*leafzip)(bool a, bool b),
-	  std::map<std::pair<bbdd *, bbdd *>, bbdd *> &memo)
+	  zipInternalT where,
+	  zipLeafT leafzip,
+	  std::map<zipInternalT, bbdd *> &memo)
 {
-	if (a == b) {
+	if (where.first == where.second) {
 		if (leafzip == _leafzip_and || leafzip == _leafzip_or)
-			return a;
+			return where.first;
 		if (leafzip == _leafzip_assume)
 			return scope->cnst(true);
 	}
 	if (leafzip == _leafzip_and || leafzip == _leafzip_or || leafzip == _leafzip_assume) {
-		if (b->isLeaf) {
-			if (b->content.leaf) {
+		if (where.second->isLeaf) {
+			if (where.second->content.leaf) {
 				if (leafzip == _leafzip_and || leafzip == _leafzip_assume)
-					return a;
+					return where.first;
 				else
 					return scope->cnst(true);
 			} else {
@@ -72,30 +71,29 @@ bbdd::zip(scope *scope,
 				else if (leafzip == _leafzip_and)
 					return scope->cnst(false);
 				else
-					return a;
+					return where.first;
 			}
 		}
-		if (a->isLeaf) {
-			if (a->content.leaf) {
+		if (where.first->isLeaf) {
+			if (where.first->content.leaf) {
 				if (leafzip == _leafzip_and)
-					return b;
+					return where.second;
 				else
 					return scope->cnst(true);
 			} else {
 				if (leafzip == _leafzip_and || leafzip == _leafzip_assume)
 					return scope->cnst(false);
 				else
-					return b;
+					return where.second;
 			}
 		}
 	}
 
-	if (a->isLeaf && b->isLeaf)
-		return leafzip(a->content.leaf, b->content.leaf);
+	if (where.first->isLeaf && where.second->isLeaf)
+		return leafzip(where.first->content.leaf, where.second->content.leaf);
 
 	auto it_did_insert = memo.insert(
-		std::pair<std::pair<bbdd *, bbdd *>, bbdd *>(
-			std::pair<bbdd *, bbdd *>(a, b), (bbdd *)NULL));
+		std::pair<zipInternalT, bbdd *>(where, (bbdd *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -104,80 +102,54 @@ bbdd::zip(scope *scope,
 	}
 
 	IRExpr *bestCond;
-	if (a->isLeaf) {
-		bestCond = b->content.condition;
-	} else if (b->isLeaf) {
-		bestCond = a->content.condition;
-	} else if (scope->ordering->before(a->content.condition,
-					   b->content.condition)) {
-		bestCond = a->content.condition;
+	if (where.first->isLeaf) {
+		bestCond = where.second->content.condition;
+	} else if (where.second->isLeaf) {
+		bestCond = where.first->content.condition;
+	} else if (scope->ordering->before(where.first->content.condition,
+					   where.second->content.condition)) {
+		bestCond = where.first->content.condition;
 	} else {
-		bestCond = b->content.condition;
+		bestCond = where.second->content.condition;
 	}
 
-	bbdd *trueB;
-	bbdd *falseB;
-	if (bestCond == a->content.condition) {
-		if (bestCond == b->content.condition) {
-			trueB = bbdd::zip(scope,
-					  a->content.trueBranch,
-					  b->content.trueBranch,
-					  leafzip,
-					  memo);
-			falseB = bbdd::zip(scope,
-					   a->content.falseBranch,
-					   b->content.falseBranch,
-					   leafzip,
-					   memo);
-		} else {
-			trueB = bbdd::zip(scope,
-					  a->content.trueBranch,
-					  b,
-					  leafzip,
-					  memo);
-			falseB = bbdd::zip(scope,
-					   a->content.falseBranch,
-					   b,
-					   leafzip,
-					   memo);
-		}
+	zipInternalT trueSucc;
+	zipInternalT falseSucc;
+	if (!where.first->isLeaf && scope->ordering->equal(bestCond, where.first->content.condition)) {
+		trueSucc.first = where.first->content.trueBranch;
+		falseSucc.first = where.first->content.falseBranch;
 	} else {
-		trueB = bbdd::zip(scope,
-				  a,
-				  b->content.trueBranch,
-				  leafzip,
-				  memo);
-		falseB = bbdd::zip(scope,
-				   a,
-				   b->content.falseBranch,
-				   leafzip,
-				   memo);
+		trueSucc.first = where.first;
+		falseSucc.first = where.first;
 	}
-
-	if (trueB == falseB || !trueB) {
-		it->second = falseB;
-	} else if (!falseB) {
-		it->second = trueB;
+	if (!where.second->isLeaf && scope->ordering->equal(bestCond, where.second->content.condition)) {
+		trueSucc.second = where.second->content.trueBranch;
+		falseSucc.second = where.second->content.falseBranch;
 	} else {
-		it->second = scope->makeInternal(bestCond, trueB, falseB);
+		trueSucc.second = where.second;
+		falseSucc.second = where.second;
 	}
+	it->second = scope->makeInternal(
+		bestCond,
+		zip(scope, trueSucc, leafzip, memo),
+		zip(scope, falseSucc, leafzip, memo));
 	return it->second;
 }
 
 bbdd *
 bbdd::And(scope *scope, bbdd *a, bbdd *b)
 {
-	return zip(scope, a, b, _leafzip_and);
+	return zip(scope, zipInternalT(a, b), _leafzip_and);
 }
 bbdd *
 bbdd::Or(scope *scope, bbdd *a, bbdd *b)
 {
-	return zip(scope, a, b, _leafzip_or);
+	return zip(scope, zipInternalT(a, b), _leafzip_or);
 }
 bbdd *
 bbdd::assume(scope *scope, bbdd *thing, bbdd *assumption)
 {
-	return zip(scope, thing, assumption, _leafzip_assume);
+	return zip(scope, zipInternalT(thing, assumption), _leafzip_assume);
 }
 
 bbdd *
