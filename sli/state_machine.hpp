@@ -332,18 +332,6 @@ public:
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
 	virtual StateMachineState *optimise(const AllowableOptimisations &, bool *) = 0;
-	bool canCrash(std::set<const StateMachineState *> &memo) const {
-		if (type == Crash)
-			return true;
-		if (!memo.insert(this).second)
-			return false;
-		std::vector<const StateMachineState *> s;
-		targets(s);
-		for (auto it = s.begin(); it != s.end(); it++)
-			if ((*it)->canCrash(memo))
-				return true;
-		return false;
-	}
 	virtual void targets(std::vector<StateMachineState **> &) = 0;
 	virtual void targets(std::vector<const StateMachineState *> &) const = 0;
 	void targets(std::vector<StateMachineState *> &out) {
