@@ -1356,51 +1356,6 @@ crashingConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 		token);
 }
 
-bool
-evalMachineUnderAssumption(const VexPtr<MaiMap, &ir_heap> &mai,
-			   const VexPtr<StateMachine, &ir_heap> &sm,
-			   const VexPtr<OracleInterface> &oracle,
-			   const VexPtr<IRExpr, &ir_heap> &assumption,
-			   const IRExprOptimisations &opt,
-			   bool *mightSurvive, bool *mightCrash,
-			   GarbageCollectionToken token)
-{
-	__set_profiling(evalMachineUnderAssumption);
-
-	*mightSurvive = false;
-	*mightCrash = false;
-
-	struct : public EvalPathConsumer {
-		bool *mightSurvive, *mightCrash;
-
-		bool crash(IRExpr *, IRExpr *) {
-			*mightCrash = true;
-			if (*mightSurvive)
-				return false;
-			return true;
-		}
-		bool survive(IRExpr *, IRExpr *) {
-			*mightSurvive = true;
-			if (*mightCrash)
-				return false;
-			return true;
-		}
-		bool escape(IRExpr *, IRExpr *) {
-			return survive(NULL, NULL);
-		}
-	} consumer;
-	consumer.mightSurvive = mightSurvive;
-	consumer.mightCrash = mightCrash;
-	consumer.needsAccAssumptions = true;
-
-	enumEvalPaths(mai, sm, assumption, oracle, opt, consumer, token);
-
-	if (TIMEOUT)
-		return false;
-
-	return true;
-}
-
 static StateMachineState *
 shallowCloneState(StateMachineState *s)
 {

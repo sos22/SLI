@@ -60,12 +60,6 @@ IRExpr *crashingConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &m
 					       bool escapingStateSurvive,
 					       const IRExprOptimisations &opt,
 					       GarbageCollectionToken token);
-bool evalMachineUnderAssumption(const VexPtr<StateMachine, &ir_heap> &sm,
-				const VexPtr<OracleInterface> &oracle,
-				const VexPtr<IRExpr, &ir_heap> &assumption,
-				const AllowableOptimisations &opt,
-				bool *mightSurvive, bool *mightCrash,
-				GarbageCollectionToken token);
 IRExpr *crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 				       const VexPtr<StateMachine, &ir_heap> &storeMachine,
 				       const VexPtr<OracleInterface> &oracle,
