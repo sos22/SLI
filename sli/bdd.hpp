@@ -161,6 +161,8 @@ public:
 	{}
 };
 
+class bbdd;
+
 template <typename constT, typename subtreeT> class const_bdd : public _bdd<constT, subtreeT> {
 public:
 	typedef constT leafT;
@@ -170,40 +172,15 @@ private:
 	}
 
 protected:
-	class binary_zip_internal {
-	public:
-		subtreeT *first;
-		subtreeT *second;
-		IRExpr *bestCond(bdd_ordering *ordering) const;
-		binary_zip_internal trueSucc(bdd_ordering *, IRExpr *cond) const;
-		binary_zip_internal falseSucc(bdd_ordering *, IRExpr *cond) const;
-		binary_zip_internal(subtreeT *_first, subtreeT *_second)
-			: first(_first), second(_second)
-		{}
-		bool isLeaf() const;
-		subtreeT *leafzip(subtreeT *(*f)(leafT, leafT)) const {
-			assert(isLeaf());
-			return f(first->content.leaf, second->content.leaf);
-		}
-		bool operator<(const binary_zip_internal &o) const {
-			if (first < o.first)
-				return true;
-			if (first > o.first)
-				return false;
-			return second < o.second;
-		}
-	};
-	template <typename scopeT, typename zipInternalT, typename zipLeafT> static subtreeT *zip(
+	template <typename scopeT, typename zipInternalT> static subtreeT *zip(
 		scopeT *,
 		zipInternalT,
-		zipLeafT,
 		std::map<zipInternalT, subtreeT *> &memo);
-	template <typename scopeT, typename zipInternalT, typename zipLeafT> static subtreeT *zip(
+	template <typename scopeT, typename zipInternalT> static subtreeT *zip(
 		scopeT *scp,
-		zipInternalT where,
-		zipLeafT leaf) {
+		zipInternalT where) {
 		std::map<zipInternalT, subtreeT *> memo;
-		return zip(scp, where, leaf, memo);
+		return zip(scp, where, memo);
 	}
 
 	const_bdd(IRExpr *cond, subtreeT *trueB, subtreeT *falseB)
@@ -213,6 +190,9 @@ protected:
 		: _bdd<constT, subtreeT>(b)
 	{}
 public:
+	static subtreeT *assume(scope *,
+				subtreeT *thing,
+				bbdd *assumption);
 };
 
 class bbdd : public const_bdd<bool, bbdd> {
@@ -237,9 +217,11 @@ public:
 	static bbdd *And(scope *, bbdd *a, bbdd *b);
 	static bbdd *var(scope *, IRExpr *a);
 	static bbdd *invert(scope *, bbdd *a);
-	static bbdd *assume(scope *,
+	static bbdd *assume(scope *scp,
 			    bbdd *thing,
-			    bbdd *assumption);
+			    bbdd *assumption) {
+		return const_bdd<bool, bbdd>::assume(scp, thing, assumption);
+	}
 };
 
 class intbdd : public const_bdd<int, intbdd> {
@@ -257,10 +239,6 @@ private:
 	static intbdd *from_enabling(scope *,
 				     const enablingTableT &inp,
 				     std::map<enablingTableT, intbdd *> &memo);
-	static intbdd *assume(scope *,
-			      intbdd *thing,
-			      bbdd *assumption,
-			      std::map<std::pair<intbdd *, bbdd *>, intbdd *> &memo);
 	intbdd(IRExpr *cond, intbdd *trueB, intbdd *falseB)
 		: const_bdd<int, intbdd>(cond, trueB, falseB)
 	{}
@@ -278,9 +256,11 @@ public:
 
 	/* Simplify @thing under the assumption that @assumption is
 	 * true. */
-	static intbdd *assume(scope *,
+	static intbdd *assume(scope *scp,
 			      intbdd *thing,
-			      bbdd *assumption);
+			      bbdd *assumption) {
+		return const_bdd<int, intbdd>::assume(scp, thing, assumption);
+	}
 };
 
 #endif /* !BDD_HPP__ */
