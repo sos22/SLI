@@ -437,11 +437,9 @@ struct EvalPathConsumer {
 		abort();
 	}
 	bool needsAccAssumptions;
-	bool useInitialMemoryValues;
 	bool noImplicitBadPtrs;
 	EvalPathConsumer()
 		: needsAccAssumptions(false),
-		  useInitialMemoryValues(true),
 		  noImplicitBadPtrs(false)
 	{}
 };
@@ -544,7 +542,6 @@ private:
 		const MaiMap &decode,
 		StateMachine *thisMachine,
 		StateMachineSideEffect *smse,
-		bool useInitialMemoryValues,
 		bool noImplicitBadPtrs,
 		NdChooser &chooser,
 		OracleInterface *oracle,
@@ -565,7 +562,6 @@ public:
 	smallStepResult smallStepEvalStateMachine(const MaiMap &decode,
 						  StateMachine *rootMachine,
 						  NdChooser &chooser,
-						  bool useInitialMemoryValues,
 						  bool noImplicitBadPtrs,
 						  OracleInterface *oracle,
 						  const IRExprOptimisations &opt);
@@ -573,7 +569,6 @@ public:
 	bigStepResult bigStepEvalStateMachine(const MaiMap &decode,
 					      StateMachine *rootMachine,
 					      bigStepResult preferred_result,
-					      bool useInitialMemoryValues,
 					      bool noImplicitBadPtrs,
 					      NdChooser &chooser,
 					      OracleInterface *oracle,
@@ -731,7 +726,6 @@ EvalContext::evalStateMachineSideEffectRes
 EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 					StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
-					bool useInitialMemoryValues,
 					bool noImplicitBadPtrs,
 					NdChooser &chooser,
 					OracleInterface *oracle,
@@ -798,18 +792,8 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 		IRExpr *val;
 		if (satisfier) {
 			val = coerceTypes(smsel->type, satisfier->data);
-		} else if (useInitialMemoryValues) {
-			val = IRExpr_Load(smsel->type, addr);
 		} else {
-			/* Using an IRExpr_Load() means that we lose
-			   track of where precisely the memory was
-			   loaded from.  That then makes building
-			   crash enforcement data much more difficult,
-			   so if we're ultimately going to build CED
-			   then we need to avoid Load expressions.
-			   Just retaining the Get expression is good
-			   enough. */
-			val = IRExpr_Get(smsel->target, smsel->type);
+			val = IRExpr_Load(smsel->type, addr);
 		}
 		state.set_register(smsel->target, val, &assumption, opt);
 		break;
@@ -896,7 +880,6 @@ EvalContext::smallStepResult
 EvalContext::smallStepEvalStateMachine(const MaiMap &decode,
 				       StateMachine *rootMachine,
 				       NdChooser &chooser,
-				       bool useInitialMemoryValues,
 				       bool noImplicitBadPtrs,
 				       OracleInterface *oracle,
 				       const IRExprOptimisations &opt)
@@ -915,7 +898,6 @@ EvalContext::smallStepEvalStateMachine(const MaiMap &decode,
 			evalStateMachineSideEffect(decode,
 						   rootMachine,
 						   sme->sideEffect,
-						   useInitialMemoryValues,
 						   noImplicitBadPtrs,
 						   chooser,
 						   oracle,
@@ -952,7 +934,6 @@ EvalContext::bigStepResult
 EvalContext::bigStepEvalStateMachine(const MaiMap &decode,
 				     StateMachine *rootMachine,
 				     bigStepResult preferred_result,
-				     bool useInitialMemoryValues,
 				     bool noImplicitBadPtrs,
 				     NdChooser &chooser,
 				     OracleInterface *oracle,
@@ -963,7 +944,6 @@ EvalContext::bigStepEvalStateMachine(const MaiMap &decode,
 			smallStepEvalStateMachine(decode,
 						  rootMachine,
 						  chooser,
-						  useInitialMemoryValues,
 						  noImplicitBadPtrs,
 						  oracle,
 						  opt);
@@ -1061,7 +1041,6 @@ EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterf
 			newContext.evalStateMachineSideEffect(decode,
 							      sm,
 							      smse,
-							      consumer.useInitialMemoryValues,
 							      consumer.noImplicitBadPtrs,
 							      chooser,
 							      oracle,
@@ -1843,7 +1822,6 @@ findRemoteMacroSectionsState::advanceWriteMachine(const MaiMap &decode,
 				decode,
 				writeMachine,
 				chooser,
-				true,
 				false,
 				oracle,
 				opt)) {
@@ -1918,7 +1896,6 @@ findRemoteMacroSections(const VexPtr<MaiMap, &ir_heap> &decode,
 					*decode,
 					readMachine,
 					sectionStart ? EvalContext::bsr_crash : EvalContext::bsr_survive,
-					true,
 					false,
 					chooser,
 					oracle,
@@ -2019,7 +1996,6 @@ fixSufficient(const VexPtr<MaiMap, &ir_heap> &decode,
 					*decode,
 					probeMachine,
 					EvalContext::bsr_survive,
-					true,
 					false,
 					chooser,
 					oracle,
