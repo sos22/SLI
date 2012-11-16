@@ -11,6 +11,7 @@
 #include "allowable_optimisations.hpp"
 #include "sat_checker.hpp"
 #include "alloc_mai.hpp"
+#include "bdd.hpp"
 
 #ifdef NDEBUG
 #define debug_dump_state_traces false
@@ -21,6 +22,14 @@ static bool debug_dump_state_traces = false;
 static bool debug_dump_crash_reasons = false;
 static bool debug_survival_constraint = false;
 #endif
+
+struct scopes {
+	bdd_ordering ordering;
+	bbdd::scope bools;
+	scopes()
+		: bools(&ordering)
+	{}
+};
 
 /* All of the state needed to evaluate a single pure IRExpr. */
 /* Note that this is not GCed, but contains bare pointers to GCed
@@ -94,6 +103,7 @@ class threadState {
 	}
 
 	IRExpr *setTemporary(const threadAndRegister &reg, IRExpr *inp, const IRExprOptimisations &opt);
+	bbdd *setTemporary(scopes *scopes, const threadAndRegister &reg, bbdd *inp, const IRExprOptimisations &opt);
 public:
 	IRExpr *register_value(const threadAndRegister &reg,
 			       IRType type) {
@@ -262,8 +272,10 @@ public:
 			abort();
 		}
 	}
-	void set_register(const threadAndRegister &reg, IRExpr *e,
-			  IRExpr **assumption,
+	void set_register(scopes *scopes,
+			  const threadAndRegister &reg,
+			  IRExpr *e,
+			  bbdd **assumption,
 			  const IRExprOptimisations &opt) {
 		register_val &rv(registers[reg]);
 		switch (e->type()) {
@@ -289,18 +301,20 @@ public:
 			/* Bit of a hack.  We only have 64 bit
 			   registers, so if we have to store a 128 bit
 			   value we just truncate it down. */
-			set_register(reg, IRExpr_Unop(Iop_128to64, e), assumption, opt);
+			set_register(scopes, reg, IRExpr_Unop(Iop_128to64, e), assumption, opt);
 			return;
 		default:
 			abort();
 		}
 
 		if (reg.isTemp())
-			*assumption = setTemporary(reg, *assumption, opt);
+			*assumption = setTemporary(scopes, reg, *assumption, opt);
 
 		bump_register_in_assignment_order(reg);
 	}
-	void eval_phi(StateMachineSideEffectPhi *phi, IRExpr **assumption,
+	void eval_phi(scopes *scopes,
+		      StateMachineSideEffectPhi *phi,
+		      bbdd **assumption,
 		      const IRExprOptimisations &opt) {
 		for (auto it = assignmentOrder.rbegin();
 		     it != assignmentOrder.rend();
@@ -311,7 +325,7 @@ public:
 				if (it2->reg == *it) {
 					registers[phi->reg] = registers[*it];
 					if (phi->reg.isTemp())
-						*assumption = setTemporary(phi->reg, *assumption, opt);
+						*assumption = setTemporary(scopes, phi->reg, *assumption, opt);
 					bump_register_in_assignment_order(phi->reg);
 					return;
 				}
@@ -329,7 +343,7 @@ public:
 		assert(genM1.isValid());
 
 		/* Pick up initial value */
-		set_register(phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
+		set_register(scopes, phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
 	}
 
 	IRExpr *specialiseIRExpr(IRExpr *iex);
@@ -343,6 +357,22 @@ public:
 };
 
 /* Rewrite @e now that we know the value of @reg */
+bbdd *
+threadState::setTemporary(scopes *scopes, const threadAndRegister &reg, bbdd *e, const IRExprOptimisations &opt)
+{
+	if (e->isLeaf)
+		return e;
+	IRExpr *cond = setTemporary(reg, e->content.condition, opt);
+	bbdd *trueB = setTemporary(scopes, reg, e->content.trueBranch, opt);
+	bbdd *falseB = setTemporary(scopes, reg, e->content.falseBranch, opt);
+	if (cond == e->content.condition && trueB == e->content.trueBranch && falseB == e->content.falseBranch)
+		return e;
+	return bbdd::ifelse(&scopes->bools,
+			    bbdd::var(&scopes->bools, cond),
+			    trueB,
+			    falseB);
+}
+
 IRExpr *
 threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const IRExprOptimisations &opt)
 {
@@ -393,27 +423,19 @@ public:
 };
 
 struct EvalPathConsumer {
-	virtual void crash(IRExpr *assumption, IRExpr *accAssumption) = 0;
-	virtual void survive(IRExpr *assumption, IRExpr *accAssumption) = 0;
-	virtual void escape(IRExpr *assumption, IRExpr *accAssumption) = 0;
-	virtual void badMachine() {
-		abort();
-	}
-	bool needsAccAssumptions;
-	bool noImplicitBadPtrs;
+	virtual void escape(bbdd *) = 0;
+	virtual void survive(bbdd *) = 0;
+	virtual void crash(bbdd *) = 0;
 	bool aborted;
 	EvalPathConsumer()
-		: needsAccAssumptions(false),
-		  noImplicitBadPtrs(false),
-		  aborted(false)
+		: aborted(false)
 	{}
 };
 
 class EvalContext : public GcCallback<&ir_heap> {
 	enum trool { tr_true, tr_false, tr_unknown };
-	IRExpr *assumption;
 public:
-	IRExpr *accumulatedAssumption;
+	bbdd *pathConstraint;
 private:
 	threadState state;
 	memLogT memlog;
@@ -421,79 +443,38 @@ public:
 	bool atomic;
 	StateMachineState *currentState;
 private:
-#ifndef NDEBUG
-	std::vector<int> statePath;
-	std::map<const StateMachineState *, int> stateLabels;
-#endif
-
 	void runGc(HeapVisitor &hv) {
-		hv(assumption);
-		hv(accumulatedAssumption);
 		state.visit(hv);
 		memlog.visit(hv);
 		hv(currentState);
-#ifndef NDEBUG
-		std::vector<std::pair<const StateMachineState *, int> > vectStateLabels(stateLabels.begin(), stateLabels.end());
-		for (auto it = vectStateLabels.begin();
-		     it != vectStateLabels.end();
-		     it++)
-			hv(it->first);
-		stateLabels.clear();
-		stateLabels.insert(vectStateLabels.begin(), vectStateLabels.end());
-#endif
+		hv(pathConstraint);
 	}
 
-	trool evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt);
-	void evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
+	trool evalBooleanExpression(scopes *scopes, IRExpr *what, const IRExprOptimisations &opt);
+	void evalSideEffect(scopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
 
-	void advance_state_trace()
-	{
-#ifndef NDEBUG
-		if (!debug_dump_state_traces)
-			return;
-		assert(stateLabels.count(currentState));
-		assert(stateLabels[currentState] != 0);
-		statePath.push_back(stateLabels[currentState]);
-#endif
-	}
 	EvalContext(const EvalContext &o, StateMachineState *sms)
-		: assumption(o.assumption),
-		  accumulatedAssumption(o.accumulatedAssumption),
+		: pathConstraint(o.pathConstraint),
 		  state(o.state),
 		  memlog(o.memlog),
 		  atomic(o.atomic),
 		  currentState(sms)
-#ifndef NDEBUG
-		, statePath(o.statePath)
-		, stateLabels(o.stateLabels)
-#endif
 	{
-		advance_state_trace();
 	}
 	/* Create a new context which is like this one, but with an
 	   extra assumption. */
-	EvalContext(const EvalContext &o, StateMachineState *sms, IRExpr *assume,
-		    const IRExprOptimisations &opt)
-		: assumption(o.assumption ? IRExpr_Binop(Iop_And1, o.assumption, assume) : assume),
-		  accumulatedAssumption(o.accumulatedAssumption
-					? IRExpr_Binop(Iop_And1, o.accumulatedAssumption, assume)
-					: NULL),
+	EvalContext(scopes *scopes,
+		    const EvalContext &o,
+		    StateMachineState *sms,
+		    bbdd *assume)
+		: pathConstraint(bbdd::And(&scopes->bools, o.pathConstraint, assume)),
 		  state(o.state),
 		  memlog(o.memlog),
 		  atomic(o.atomic),
 		  currentState(sms)
-#ifndef NDEBUG
-		, statePath(o.statePath)
-		, stateLabels(o.stateLabels)
-#endif
 	{
-		if (assumption)
-			assumption = simplifyIRExpr(assumption, opt);
-		if (accumulatedAssumption)
-			accumulatedAssumption = simplifyIRExpr(accumulatedAssumption, opt);
-		advance_state_trace();
 	}
 	enum evalStateMachineSideEffectRes {
 		esme_normal,
@@ -501,163 +482,96 @@ private:
 		esme_ignore_path
 	};
 	evalStateMachineSideEffectRes evalStateMachineSideEffect(
+		scopes *scopes,
 		const MaiMap &decode,
 		StateMachine *thisMachine,
 		StateMachineSideEffect *smse,
-		bool noImplicitBadPtrs,
 		NdChooser &chooser,
 		OracleInterface *oracle,
 		const IRExprOptimisations &opt);
-	bool expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
-	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool expressionIsTrue(scopes *scopes, IRExpr *exp, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool evalExpressionsEqual(scopes *scopes, IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
+
 public:
-	void advance(const MaiMap &decode,
+	void advance(scopes *scopes,
+		     const MaiMap &decode,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer);
-	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
-		    std::map<const StateMachineState*, int> &
-#ifndef NDEBUG
-		    _stateLabels
-#endif
-		)
-		: assumption(initialAssumption),
-		  accumulatedAssumption(useAccAssumptions ? IRExpr_Const_U1(true) : NULL),
+	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
+		: pathConstraint(_pathConstraint),
 		  atomic(false),
 		  currentState(sm->root)
-#ifndef NDEBUG
-		, stateLabels(_stateLabels)
-#endif
 	{
-		advance_state_trace();
+		assert(pathConstraint);
 	}
 };
 
 bool
-EvalContext::expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt)
+EvalContext::expressionIsTrue(scopes *scopes, IRExpr *exp, NdChooser &chooser, const IRExprOptimisations &opt)
 {
 	if (TIMEOUT)
 		return true;
 
 	exp = simplifyIRExpr(internIRExpr(state.specialiseIRExpr(exp)), opt);
 
-	/* Combine the path constraint with the new expression and see
-	   if that produces a contradiction.  If it does then we know
-	   for sure that the new expression is false. */
-	IRExpr *e =
-		simplifyIRExpr(
-			IRExpr_Binop(
-				Iop_And1,
-				assumption,
-				exp),
-			opt);
-	if (e->tag == Iex_Const) {
-		/* That shouldn't produce the constant 1 very often.
-		   If it does, it indicates that the path constraint
-		   is definitely true, and the new expression is
-		   definitely true, but for some reason we weren't
-		   able to simplify the path constraint down to 1
-		   earlier.  Consider that a lucky break and simplify
-		   it now. */
-		if (((IRExprConst *)e)->Ico.U1) {
-			assumption = e;
-			return true;
-		} else {
-			return false;
-		}
-	}
+	bbdd *simplifiedCondition =
+		bbdd::assume(
+			&scopes->bools,
+			bbdd::var(&scopes->bools, exp),
+			pathConstraint);
+	std::map<bool, bbdd *> selectors(bbdd::to_selectors(&scopes->bools, simplifiedCondition));
+	assert(!selectors.empty());
+	if (selectors.size() == 1)
+		return selectors.begin()->first;
 
-	/* Now try it the other way around, by combining the path
-	   constraint with ¬exp.  If we had a perfect theorem prover
-	   this would be redundant with the previous version, but we
-	   don't, so it isn't. */
-	IRExpr *e2 =
-		simplifyIRExpr(
-			IRExpr_Binop(
-				Iop_And1,
-				assumption,
-				IRExpr_Unop(
-					Iop_Not1,
-					exp)),
-			opt);
-	if (e2->tag == Iex_Const) {
-		/* If X & ¬Y is definitely true, Y is definitely
-		 * false and X is definitely true. */
-		if (((IRExprConst *)e2)->Ico.U1) {
-			assumption = IRExpr_Const_U1(true);
-			return false;
-		}
-
-		/* So now we know that X & ¬Y is definitely false, and
-		 * we assume that X is true.  Therefore ¬Y is false
-		 * and Y is true. */
-		return true;
-	}
+	assert(selectors.count(true));
+	assert(selectors.count(false));
+	IRExpr *trueCond = simplifyIRExpr(
+		bbdd::to_irexpr(selectors[true]),
+		opt);
+	if (trueCond->tag == Iex_Const)
+		return ((IRExprConst *)trueCond)->Ico.U1;
+	IRExpr *falseCond = simplifyIRExpr(
+		bbdd::to_irexpr(selectors[false]),
+		opt);
+	if (falseCond->tag == Iex_Const)
+		return !((IRExprConst *)falseCond)->Ico.U1;
 
 	/* Can't prove it one way or another.  Use the
 	   non-deterministic chooser to guess. */
-	int res;
-	bool isNewChoice;
-	res = chooser.nd_choice(2, &isNewChoice);
-
-#if 0
-	if (isNewChoice) {
-		printf("Having to use state split to check whether ");
-		ppIRExpr(exp, stdout);
-		printf(" is true under assumption ");
-		ppIRExpr(*assumption, stdout);
-		printf("\n");
-	} else {
-		printf("Retread old choice\n");
-	}
-#endif
-
-	if (res == 0) {
-		assumption = e;
-		if (addToAccConstraint && accumulatedAssumption)
-			accumulatedAssumption =
-				simplifyIRExpr(
-					IRExpr_Binop(
-						Iop_And1,
-						accumulatedAssumption,
-						exp),
-					opt);
-		return true;
-	} else {
-		assumption = e2;
-		if (addToAccConstraint && accumulatedAssumption)
-			accumulatedAssumption =
-				simplifyIRExpr(
-					IRExpr_Binop(
-						Iop_And1,
-						accumulatedAssumption,
-						IRExpr_Unop(
-							Iop_Not1,
-							exp)),
-					opt);
-		return false;
-	}
+	bool res;
+	if (chooser.nd_choice(2) == 0)
+		res = true;
+	else
+		res = false;
+	pathConstraint =
+		bbdd::And(
+			&scopes->bools,
+			selectors[res],
+			pathConstraint);
+	return res;
 }
 
 bool
-EvalContext::evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt)
+EvalContext::evalExpressionsEqual(scopes *scopes, IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const IRExprOptimisations &opt)
 {
-	return expressionIsTrue(IRExpr_Binop(
+	return expressionIsTrue(scopes,
+				IRExpr_Binop(
 					Iop_CmpEQ64,
 					exp1,
 					exp2),
-				addToAccConstraint,
 				chooser,
 				opt);
 }
 
 EvalContext::evalStateMachineSideEffectRes
-EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
+EvalContext::evalStateMachineSideEffect(scopes *scopes,
+					const MaiMap &decode,
 					StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
-					bool noImplicitBadPtrs,
 					NdChooser &chooser,
 					OracleInterface *oracle,
 					const IRExprOptimisations &opt)
@@ -669,7 +583,7 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
 		addr = state.specialiseIRExpr(smsema->addr);
-		if (expressionIsTrue(IRExpr_Unop(Iop_BadPtr, addr), !noImplicitBadPtrs, chooser, opt))
+		if (expressionIsTrue(scopes, IRExpr_Unop(Iop_BadPtr, addr), chooser, opt))
 			return esme_escape;
 	}
 
@@ -714,7 +628,7 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 
 			if (!oracle->memoryAccessesMightAlias(decode, opt, smsel, smses))
 				continue;
-			if (evalExpressionsEqual(smses->addr, addr, true, chooser, opt)) {
+			if (evalExpressionsEqual(scopes, smses->addr, addr, chooser, opt)) {
 				satisfier = smses;
 				satisfierMachine = it->first;
 				break;
@@ -726,16 +640,17 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 		} else {
 			val = IRExpr_Load(smsel->type, addr);
 		}
-		state.set_register(smsel->target, val, &assumption, opt);
+		state.set_register(scopes, smsel->target, val, &pathConstraint, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
 		StateMachineSideEffectCopy *smsec =
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
-		state.set_register(smsec->target,
+		state.set_register(scopes,
+				   smsec->target,
 				   state.specialiseIRExpr(smsec->value),
-				   &assumption,
+				   &pathConstraint,
 				   opt);
 		break;
 	}
@@ -745,9 +660,10 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 		StateMachineSideEffectAssertFalse *smseaf =
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
 		if (expressionIsTrue(
+			    scopes,
 			    smseaf->value,
-			    true,
-			    chooser, opt)) {
+			    chooser,
+			    opt)) {
 			if (smseaf->reflectsActualProgram)
 				return esme_escape;
 			else
@@ -758,7 +674,7 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *smsep =
 			(StateMachineSideEffectPhi *)(smse);
-		state.eval_phi(smsep, &assumption, opt);
+		state.eval_phi(scopes, smsep, &pathConstraint, opt);
 		break;
 	}
 	case StateMachineSideEffect::StartAtomic:
@@ -782,10 +698,10 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 		   here. */
 		if (!p->set.mightBeNonPointer() &&
 		    expressionIsTrue(
+			    scopes,
 			    IRExpr_Unop(
 				    Iop_BadPtr,
 				    IRExpr_Get(p->reg, Ity_I64)),
-			    true,
 			    chooser,
 			    opt)) {
 			return esme_escape;
@@ -801,62 +717,52 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 }
 
 EvalContext::trool
-EvalContext::evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt)
+EvalContext::evalBooleanExpression(scopes *scopes, IRExpr *what, const IRExprOptimisations &opt)
 {
 	assert(what->type() == Ity_I1);
-	IRExpr *e;
-	if (what->tag == Iex_Const) {
-		IRExprConst *iec = (IRExprConst *)what;
-		if (iec->Ico.U1)
+	what = simplifyIRExpr(internIRExpr(state.specialiseIRExpr(what)), opt);
+
+	bbdd *simplifiedCondition =
+		bbdd::assume(
+			&scopes->bools,
+			bbdd::var(
+				&scopes->bools,
+				what),
+			pathConstraint);
+	if (!simplifiedCondition) {
+		/* @what is a contradiction when combined with
+		 * @pathConstraint.  That means we can say whatever we
+		 * like and it won't actually matter. */
+		return tr_true;
+	}
+	std::map<bool, bbdd *> selectors(bbdd::to_selectors(&scopes->bools, simplifiedCondition));
+	assert(!selectors.empty());
+	if (selectors.size() == 1) {
+		if (selectors.begin()->first)
 			return tr_true;
 		else
 			return tr_false;
 	}
 
-	e = simplifyIRExpr(
-		IRExpr_Binop(
-			Iop_And1,
-			assumption,
-			what),
+	assert(selectors.count(true));
+	assert(selectors.count(false));
+	IRExpr *trueCond = simplifyIRExpr(
+		bbdd::to_irexpr(selectors[true]),
 		opt);
-	if (e->tag == Iex_Const) {
-		IRExprConst *iec = (IRExprConst *)e;
-		if (iec->Ico.U1) {
-			/* We just proved that the assumption is
-			 * definitely true. */
-			warning("Path assumption reduces to true?\n");
-			dbg_break("Path assumption reduces to true?\n");
-			assumption = e;
+	if (trueCond->tag == Iex_Const) {
+		if ( ((IRExprConst *)trueCond)->Ico.U1 )
 			return tr_true;
-		} else {
+		else
 			return tr_false;
-		}
 	}
-
-	e = simplifyIRExpr(
-		IRExpr_Binop(
-			Iop_And1,
-			assumption,
-			IRExpr_Unop(
-				Iop_Not1,
-				what)),
+	IRExpr *falseCond = simplifyIRExpr(
+		bbdd::to_irexpr(selectors[false]),
 		opt);
-	if (e->tag == Iex_Const) {
-		IRExprConst *iec = (IRExprConst *)e;
-		if (iec->Ico.U1) {
-			/* So X & ~Y is definitely true, where X is
-			   our assumption and Y is the thing which
-			   we're after.  That tells us that the
-			   assumption is definitely true, and
-			   therefore useless, and that @what is
-			   definitely false. */
-			warning("Path assumption is definitely true in way 2?\n");
-			dbg_break("Path assumption is definitely true in way 2?\n");
-			assumption = e;
+	if (falseCond->tag == Iex_Const) {
+		if ( ((IRExprConst *)falseCond)->Ico.U1 )
 			return tr_false;
-		} else {
+		else
 			return tr_true;
-		}
 	}
 
 	/* Give up on this one and just accept that we don't know. */
@@ -864,7 +770,7 @@ EvalContext::evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt)
 }
 
 void
-EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
+EvalContext::evalSideEffect(scopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
 {
@@ -873,10 +779,10 @@ EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterf
 	do {
 		EvalContext newContext(*this);
 		evalStateMachineSideEffectRes res =
-			newContext.evalStateMachineSideEffect(decode,
+			newContext.evalStateMachineSideEffect(scopes,
+							      decode,
 							      sm,
 							      smse,
-							      consumer.noImplicitBadPtrs,
 							      chooser,
 							      oracle,
 							      opt);
@@ -887,7 +793,7 @@ EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterf
 		case esme_ignore_path:
 			break;
 		case esme_escape:
-			consumer.escape(newContext.assumption, newContext.accumulatedAssumption);
+			consumer.escape(newContext.pathConstraint);
 			break;
 		}
 	} while (chooser.advance());
@@ -899,27 +805,14 @@ EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterf
    every item in the pending state queue, which would make that queue
    much bigger, which'd be kind of annoying. */
 void
-EvalContext::advance(const MaiMap &decode,
+EvalContext::advance(scopes *scopes,
+		     const MaiMap &decode,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer)
 {
-	if (debug_dump_state_traces && currentState->type == StateMachineState::Terminal) {
-#ifndef NDEBUG
-		assert(stateLabels.count(currentState));
-		printf("Reached state %d, trace: ", stateLabels[currentState]);
-		for (auto it = statePath.begin(); it != statePath.end(); it++) {
-			if (it != statePath.begin())
-				printf(", ");
-			printf("%d", *it);
-		}
-		printf("; assumption ");
-		ppIRExpr(assumption, stdout);
-		printf("\n");
-#endif
-	}
 	switch (currentState->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)currentState;
@@ -927,20 +820,16 @@ EvalContext::advance(const MaiMap &decode,
 		case smr_crash:
 			if (debug_dump_crash_reasons) {
 				printf("Found a crash, assumption ");
-				ppIRExpr(assumption, stdout);
-				if (accumulatedAssumption) {
-					printf(", accumulated assumption ");
-					ppIRExpr(accumulatedAssumption, stdout);
-				}
+				pathConstraint->prettyPrint(stdout);
 				printf("\n");
 			}
-			consumer.crash(assumption, accumulatedAssumption);
+			consumer.crash(pathConstraint);
 			return;
 		case smr_survive:
-			consumer.survive(assumption, accumulatedAssumption);
+			consumer.survive(pathConstraint);
 			return;
 		case smr_unreached:
-			consumer.badMachine();
+			consumer.escape(pathConstraint);
 			return;
 		}
 		abort();
@@ -948,9 +837,8 @@ EvalContext::advance(const MaiMap &decode,
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
-		advance_state_trace();
 		if (sme->sideEffect) {
-			evalSideEffect(decode, sm, oracle, consumer, pendingStates,
+			evalSideEffect(scopes, decode, sm, oracle, consumer, pendingStates,
 				       sme->sideEffect, opt);
 		} else {
 			pendingStates.push_back(*this);
@@ -964,7 +852,7 @@ EvalContext::advance(const MaiMap &decode,
 				internIRExpr(
 					state.specialiseIRExpr(smb->condition)),
 				opt);
-		trool res = evalBooleanExpression(cond, opt);
+		trool res = evalBooleanExpression(scopes, cond, opt);
 		switch (res) {
 		case tr_true:
 			pendingStates.push_back(EvalContext(
@@ -978,17 +866,19 @@ EvalContext::advance(const MaiMap &decode,
 			break;
 		case tr_unknown:
 			pendingStates.push_back(EvalContext(
+							scopes,
 							*this,
 							smb->falseTarget,
-							IRExpr_Unop(
-								Iop_Not1,
-								cond),
-							opt));
+							bbdd::var(
+								&scopes->bools,
+								IRExpr_Unop(
+									Iop_Not1,
+									cond))));
 			pendingStates.push_back(EvalContext(
+							scopes,
 							*this,
 							smb->trueTarget,
-							cond,
-							opt));
+							bbdd::var(&scopes->bools, cond)));
 			break;
 		}
 		return;
@@ -998,9 +888,10 @@ EvalContext::advance(const MaiMap &decode,
 }
 
 static void
-enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
+enumEvalPaths(scopes *scopes,
+	      const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<StateMachine, &ir_heap> &sm,
-	      const VexPtr<IRExpr, &ir_heap> &assumption,
+	      const VexPtr<bbdd, &ir_heap> &assumption,
 	      const VexPtr<OracleInterface> &oracle,
 	      const IRExprOptimisations &opt,
 	      struct EvalPathConsumer &consumer,
@@ -1015,18 +906,18 @@ enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 		printf("Eval machine:\n");
 		printStateMachine(sm, stdout, stateLabels);
 		printf("Under assumption ");
-		ppIRExpr(assumption, stdout);
+		assumption->prettyPrint(stdout);
 		printf("\n");
 	}
 
-	pendingStates.push_back(EvalContext(sm, assumption, consumer.needsAccAssumptions, stateLabels));
+	pendingStates.push_back(EvalContext(sm, assumption));
 
 	while (!TIMEOUT && !consumer.aborted && !pendingStates.empty()) {
 		LibVEX_maybe_gc(token);
 
 		EvalContext ctxt(pendingStates.back());
 		pendingStates.pop_back();
-		ctxt.advance(*decode, oracle, opt, pendingStates, sm, consumer);
+		ctxt.advance(scopes, *decode, oracle, opt, pendingStates, sm, consumer);
 		if (loud && cntr++ % 100 == 0)
 			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
 	}
@@ -1035,93 +926,93 @@ enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 static IRExpr *
 _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 					const VexPtr<StateMachine, &ir_heap> &sm,
-					VexPtr<IRExpr, &ir_heap> assumption,
+					VexPtr<IRExpr, &ir_heap> _assumption,
 					const VexPtr<OracleInterface> &oracle,
 					bool escapingStatesSurvive,
 					bool wantCrash,
 					const IRExprOptimisations &opt,
 					GarbageCollectionToken token)
 {
+	scopes scp;
+
 	__set_profiling(survivalConstraintIfExecutedAtomically);
 
 	if (debug_survival_constraint) {
 		printf("%s(sm = ..., assumption = %s, escapingStatesSurvive = %s, wantCrash = %s, opt = %s)\n",
 		       __func__,
-		       assumption ? nameIRExpr(assumption) : "<null>",
+		       _assumption ? nameIRExpr(_assumption) : "<null>",
 		       escapingStatesSurvive ? "true" : "false",
 		       wantCrash ? "true" : "false",
 		       opt.name());
 		printStateMachine(sm, stdout);
 	}
 
+	VexPtr<bbdd, &ir_heap> assumption;
+	if (_assumption)
+		assumption = bbdd::var(&scp.bools, _assumption);
+	else
+		assumption = scp.bools.cnst(true);
+
 	struct _ : public EvalPathConsumer {
-		VexPtr<IRExpr, &ir_heap> res;
+		VexPtr<bbdd, &ir_heap> res;
 		const IRExprOptimisations &opt;
 		bool escapingStatesSurvive;
 		bool wantCrash;
-		void addComponent(const char *label, IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		struct scopes *scopes;
+		void addComponent(const char *label, bbdd *pathConstraint) {
 #warning Think hard about what we're doing here.  Should we constraint it to never reach a crashing node, or merely to always reach a surviving one?'
-#warning Makes a difference due to incompleteness of simplifier and also presence of ND choice states.
-			IRExpr *component =
-				IRExpr_Unop(
-					Iop_Not1,
-					justPathConstraint ? justPathConstraint : pathConstraint);
+			bbdd *component =
+				bbdd::invert(&scopes->bools, pathConstraint);
 			if (res)
-				res = IRExpr_Binop(
-					Iop_And1,
-					res,
-					component);
+				res = bbdd::And(&scopes->bools,
+						component,
+						res);
 			else
 				res = component;
-			res = simplifyIRExpr(res, opt);
-			if (debug_survival_constraint)
-				printf("%s: add %s, got %s\n",
-				       label,
-				       nameIRExpr(component),
-				       nameIRExpr(res));
+			if (debug_survival_constraint) {
+				printf("%s: add:\n", label);
+				pathConstraint->prettyPrint(stdout);
+				printf("got:\n");
+				res->prettyPrint(stdout);
+			}
 		}
-		void crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		void crash(bbdd *pathConstraint) {
 			if (!wantCrash)
-				addComponent("crash", pathConstraint, justPathConstraint);
+				addComponent("crash", pathConstraint);
 		}
-		void survive(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		void survive(bbdd *pathConstraint) {
 			if (wantCrash)
-				addComponent("survive", pathConstraint, justPathConstraint);
+				addComponent("survive", pathConstraint);
 		}
-		void escape(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		void escape(bbdd *pathConstraint) {
 			if (escapingStatesSurvive && wantCrash)
-				addComponent("escape", pathConstraint, justPathConstraint);
+				addComponent("escape", pathConstraint);
 			else if (!escapingStatesSurvive && !wantCrash)
-				addComponent("escape", pathConstraint, justPathConstraint);
+				addComponent("escape", pathConstraint);
 		}
-		_(const VexPtr<IRExpr, &ir_heap> &_assumption,
+		_(bbdd *_assumption,
 		  const IRExprOptimisations &_opt,
 		  bool _escapingStatesSurvive,
-		  bool _wantCrash)
+		  bool _wantCrash,
+		  struct scopes *_scopes)
 			: res(_assumption), opt(_opt), escapingStatesSurvive(_escapingStatesSurvive),
-			  wantCrash(_wantCrash)
+			  wantCrash(_wantCrash), scopes(_scopes)
 		{}
-	} consumeEvalPath(assumption, opt, escapingStatesSurvive, wantCrash);
-	if (assumption)
-		consumeEvalPath.needsAccAssumptions = true;
-	else
-		assumption = IRExpr_Const_U1(true);
-	enumEvalPaths(mai, sm, assumption, oracle, opt, consumeEvalPath, token);
+	} consumeEvalPath(assumption, opt, escapingStatesSurvive, wantCrash, &scp);
+	enumEvalPaths(&scp, mai, sm, assumption, oracle, opt, consumeEvalPath, token);
 
-	if (debug_survival_constraint)
-		printf("%s: result %s\n", __func__,
-		       consumeEvalPath.res ? nameIRExpr(consumeEvalPath.res) : "const(1)");
+	if (debug_survival_constraint) {
+		printf("%s: result:", __func__);
+		consumeEvalPath.res->prettyPrint(stdout);
+	}
 	
 	if (TIMEOUT)
 		return NULL;
-	else if (consumeEvalPath.res) {
-		IRExpr *res = simplifyIRExpr(simplify_via_anf(consumeEvalPath.res), opt);
-		if (debug_survival_constraint)
-			printf("%s: after optimisation, result %s\n",
-			       __func__, nameIRExpr(res));
-		return res;
-	} else
-		return IRExpr_Const_U1(true);
+	IRExpr *res = simplifyIRExpr(simplify_via_anf(bbdd::to_irexpr(consumeEvalPath.res)), opt);
+	if (debug_survival_constraint)
+		printf("%s: after optimisation, result %s\n",
+		       __func__, nameIRExpr(res));
+	return res;
 }
 
 /* Assume that @sm executes atomically.  Figure out a constraint on
@@ -1775,28 +1666,39 @@ collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		   GarbageCollectionToken token)
 {
 	struct : public EvalPathConsumer, public GcCallback<&ir_heap> {
-		std::vector<IRExpr *> *out;
+		std::set<IRExpr *> res;
 		void runGc(HeapVisitor &hv) {
-			for (auto it = out->begin(); it != out->end(); it++)
-				hv(*it);
+			std::set<IRExpr *> newRes;
+			for (auto it = res.begin(); it != res.end(); it++) {
+				IRExpr *a = *it;
+				hv(a);
+				newRes.insert(a);
+			}
+			res = newRes;
 		}
-		void addConstraint(IRExpr *a) {
-			out->push_back(a);
-			if (out->size() > 1000)
+		void addConstraint(bbdd *a) {
+			if (a->isLeaf)
+				return;
+			if (res.size() > 1000) {
 				aborted = true;
+				return;
+			}
+			res.insert(a->content.condition);
+			addConstraint(a->content.trueBranch);
+			addConstraint(a->content.falseBranch);
 		}
-		void crash(IRExpr *assumption, IRExpr *) {
+		void crash(bbdd *assumption) {
 			addConstraint(assumption);
 		}
-		void survive(IRExpr *assumption, IRExpr *) {
+		void survive(bbdd *assumption) {
 			addConstraint(assumption);
 		}
-		void escape(IRExpr *assumption, IRExpr *) {
+		void escape(bbdd *assumption) {
 			addConstraint(assumption);
-		}
-		void badMachine(void) {
 		}
 	} consumer;
-	consumer.out = &out;
-	enumEvalPaths(mai, sm, IRExpr_Const_U1(true), oracle, opt, consumer, token, true);
+	scopes scp;
+
+	enumEvalPaths(&scp, mai, sm, scp.bools.cnst(true), oracle, opt, consumer, token, true);
+	out.insert(out.end(), consumer.res.begin(), consumer.res.end());
 }

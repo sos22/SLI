@@ -32,6 +32,18 @@ public:
 		return (*this)(a, b) == eq;
 	}
 	bdd_ordering() : GcCallback<&ir_heap>(true), nextRanking(0) {}
+	template <typename subtreeT> subtreeT *trueBranch(subtreeT *bdd, IRExpr *cond) {
+		if (!bdd->isLeaf && equal(cond, bdd->content.condition))
+			return bdd->content.trueBranch;
+		else
+			return bdd;
+	}
+	template <typename subtreeT> subtreeT *falseBranch(subtreeT *bdd, IRExpr *cond) {
+		if (!bdd->isLeaf && equal(cond, bdd->content.condition))
+			return bdd->content.falseBranch;
+		else
+			return bdd;
+	}
 };
 
 template <typename _leafT, typename _subtreeT>
@@ -171,11 +183,13 @@ public:
 private:
 	void _visit(HeapVisitor &, constT &) const {
 	}
-protected:
+	template <IRExpr *mkConst(constT)> static IRExpr *to_irexpr(subtreeT *, std::map<subtreeT *, IRExpr *> &memo);
 	template <typename scopeT, typename zipInternalT> static subtreeT *zip(
 		scopeT *,
 		zipInternalT,
 		std::map<zipInternalT, subtreeT *> &memo);
+	template <typename scopeT> static const typename std::map<constT, bbdd *> &to_selectors(scopeT *, subtreeT *, std::map<subtreeT *, std::map<constT, bbdd *> > &);
+protected:
 	template <typename scopeT, typename zipInternalT> static subtreeT *zip(
 		scopeT *scp,
 		zipInternalT where) {
@@ -183,6 +197,7 @@ protected:
 		return zip(scp, where, memo);
 	}
 
+	template <IRExpr *mkConst(constT)> static IRExpr *to_irexpr(subtreeT *);
 
 	const_bdd(IRExpr *cond, subtreeT *trueB, subtreeT *falseB)
 		: _bdd<constT, subtreeT>(cond, trueB, falseB)
@@ -203,6 +218,12 @@ public:
 	template <typename scopeT> static subtreeT *from_enabling(
 		scopeT *scp,
 		const enablingTableT &inp);
+	template <typename scopeT> static subtreeT *ifelse(
+		scopeT *scp,
+		bbdd *cond,
+		subtreeT *ifTrue,
+		subtreeT *ifFalse);
+	template <typename scopeT> static typename std::map<constT, bbdd *> to_selectors(scopeT *, subtreeT *);
 };
 
 class bbdd : public const_bdd<bool, bbdd> {
@@ -222,6 +243,9 @@ class bbdd : public const_bdd<bool, bbdd> {
 	bbdd(bool b)
 		: const_bdd<bool, bbdd>(b)
 	{}
+	static IRExpr *mkConst(bool b) {
+		return IRExpr_Const_U1(b);
+	}
 public:
 	static bbdd *Or(scope *, bbdd *a, bbdd *b);
 	static bbdd *And(scope *, bbdd *a, bbdd *b);
@@ -231,6 +255,9 @@ public:
 			    bbdd *thing,
 			    bbdd *assumption) {
 		return const_bdd<bool, bbdd>::assume(scp, thing, assumption);
+	}
+	static IRExpr *to_irexpr(bbdd *b) {
+		return const_bdd<bool, bbdd>::to_irexpr<mkConst>(b);
 	}
 };
 

@@ -462,8 +462,202 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	return it->second;
 }
 
+template <typename constT, typename subtreeT> template <IRExpr *mkConst(constT)> IRExpr *
+const_bdd<constT, subtreeT>::to_irexpr(subtreeT *what, std::map<subtreeT *, IRExpr *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<subtreeT *, IRExpr *>(what, (IRExpr *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		if (what->isLeaf) {
+			it->second = mkConst(what->content.leaf);
+		} else {
+			it->second = IRExpr_Mux0X(
+				what->content.condition,
+				to_irexpr<mkConst>(what->content.falseBranch, memo),
+				to_irexpr<mkConst>(what->content.trueBranch, memo));
+		}
+	} else {
+		assert(it->second != NULL);
+	}
+	return it->second;
+}
+
+template <typename constT, typename subtreeT> template <IRExpr *mkConst(constT)> IRExpr *
+const_bdd<constT, subtreeT>::to_irexpr(subtreeT *what)
+{
+	std::map<subtreeT *, IRExpr *> memo;
+	return to_irexpr<mkConst>(what, memo);
+}
+
+template <typename constT, typename subtreeT> template <typename scopeT> const std::map<constT, bbdd *> &
+const_bdd<constT, subtreeT>::to_selectors(scopeT *scope,
+					  subtreeT *what,
+					  std::map<subtreeT *, std::map<constT, bbdd *> > &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<subtreeT *, std::map<constT, bbdd *> >(what, std::map<constT, bbdd *>()));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		std::map<constT, bbdd *> &res(it->second);
+		assert(res.empty());
+		if (what->isLeaf) {
+			res[what->content.leaf] = scope->cnst(true);
+		} else {
+			const std::map<constT, bbdd *> &trueB(to_selectors(scope, what->content.trueBranch, memo));
+			const std::map<constT, bbdd *> &falseB(to_selectors(scope, what->content.falseBranch, memo));
+			auto true_it = trueB.begin();
+			auto false_it = falseB.begin();
+			bbdd *const_false = scope->cnst(false);
+			while (true_it != trueB.end() || false_it != falseB.end()) {
+				if (true_it != trueB.end() &&
+				    (false_it == falseB.end() || true_it->first < false_it->first)) {
+					res[true_it->first] =
+						scope->makeInternal(what->content.condition,
+								    true_it->second,
+								    const_false);
+					true_it++;
+				} else if (false_it != falseB.end() &&
+					   (true_it == trueB.end() || false_it->first < true_it->first)) {
+					res[false_it->first] =
+						scope->makeInternal(what->content.condition,
+								    const_false,
+								    false_it->second);
+					false_it++;
+				} else {
+					/* (true_it != trueB.end() || false_it != falseB.end()) &&
+					   !(true_it != trueB.end() &&
+					    (false_it == falseB.end() || true_it->first < false_it->first)) &&
+					   !(false_it != falseB.end() &&
+					    (true_it == trueB.end() || false_it->first < true_it->first))
+					   =>
+					   (true_it != trueB.end() || false_it != falseB.end()) &&
+					   (true_it == trueB.end() ||
+					    (false_it != falseB.end() && !(true_it->first < false_it->first))) &&
+					   (false_it == falseB.end() ||
+					    (true_it != trueB.end() && !(false_it->first < true_it->first)))
+					   =>
+					   (!finished(t) || !finished(f)) &&
+					   (finished(t) || (!finished(f) && t >= f)) &&
+					   (finished(f) || (!finished(t) && f >= t))
+					   =>
+					   (!finished(t) &&
+					     (finished(t) || (!finished(f) && t >= f)) &&
+					     (finished(f) || (!finished(t) && f >= t))) ||
+					   (!finished(f) &&
+					     (finished(t) || (!finished(f) && t >= f)) &&
+					     (finished(f) || (!finished(t) && f >= t)))
+					   =>
+					   (!finished(t) &&
+					     (!finished(f) && t >= f) &&
+					     (finished(f) || f >= t)) ||
+					   (!finished(f) &&
+					     (finished(t) || t >= f) &&
+					     (!finished(t) && f >= t))
+					   =>
+					   (!finished(t) &&
+					    !finished(f) &&
+					    t >= f &&
+					    f >= t) ||
+					   (!finished(f) &&
+					    t >= f &&
+					    !finished(t) &&
+					    f >= t)
+					   => !finished(t) && !finished(f) && t == f
+					*/
+					res[false_it->first] =
+						scope->makeInternal(what->content.condition,
+								    true_it->second,
+								    false_it->second);
+					true_it++;
+					false_it++;
+				}
+			}
+		}
+	}
+	return it->second;
+}
+
+template <typename constT, typename subtreeT> template <typename scopeT> std::map<constT, bbdd *>
+const_bdd<constT, subtreeT>::to_selectors(scopeT *scope, subtreeT *what)
+{
+	std::map<subtreeT *, std::map<constT, bbdd *> > memo;
+	return to_selectors(scope, what, memo);
+}
+
+template <typename subtreeT, typename scopeT> class ifelse_zip_internal {
+	bbdd *cond;
+	subtreeT *ifTrue;
+	subtreeT *ifFalse;
+public:
+	ifelse_zip_internal(bbdd *_cond, subtreeT *_ifTrue, subtreeT *_ifFalse)
+		: cond(_cond), ifTrue(_ifTrue), ifFalse(_ifFalse)
+	{}
+	bool isLeaf() const {
+		return cond->isLeaf || (ifTrue == ifFalse);
+	}
+	subtreeT *leafzip() const {
+		if (cond->isLeaf) {
+			if (cond->content.leaf)
+				return ifTrue;
+			else
+				return ifFalse;
+		}
+		if (ifTrue == ifFalse)
+			return ifTrue;
+		abort();
+	}
+	IRExpr *bestCond(bdd_ordering *ordering) const {
+		assert(!cond->isLeaf);
+		IRExpr *best = cond->content.condition;
+		if (!ifTrue->isLeaf && ordering->before(ifTrue->content.condition, best))
+			best = ifTrue->content.condition;
+		if (!ifFalse->isLeaf && ordering->before(ifFalse->content.condition, best))
+			best = ifFalse->content.condition;
+		return best;
+	}
+	ifelse_zip_internal trueSucc(bdd_ordering *ordering, IRExpr *on) const {
+		return ifelse_zip_internal(
+			ordering->trueBranch(cond, on),
+			ordering->trueBranch(ifTrue, on),
+			ordering->trueBranch(ifFalse, on));
+	}
+	ifelse_zip_internal falseSucc(bdd_ordering *ordering, IRExpr *on) const {
+		return ifelse_zip_internal(
+			ordering->falseBranch(cond, on),
+			ordering->falseBranch(ifTrue, on),
+			ordering->falseBranch(ifFalse, on));
+	}
+	subtreeT *mkNode(scopeT *scope, IRExpr *cond, subtreeT *trueB, subtreeT *falseB) const {
+		return scope->makeInternal(cond, trueB, falseB);
+	}
+	bool operator<(const ifelse_zip_internal &o) const {
+		if (cond < o.cond)
+			return true;
+		if (cond > o.cond)
+			return false;
+		if (ifTrue < o.ifTrue)
+			return true;
+		if (ifTrue > o.ifTrue)
+			return false;
+		return ifFalse < o.ifFalse;
+	}
+};
+
+template <typename constT, typename subtreeT> template <typename scopeT> subtreeT *
+const_bdd<constT, subtreeT>::ifelse(scopeT *scope,
+				    bbdd *cond,
+				    subtreeT *ifTrue,
+				    subtreeT *ifFalse)
+{
+	return zip(scope, ifelse_zip_internal<subtreeT, scopeT>(cond, ifTrue, ifFalse));
+}
+
 template void _bdd<int, intbdd>::prettyPrint(FILE *);
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template intbdd *const_bdd<int, intbdd>::assume(const_bdd_scope<intbdd> *, intbdd *, bbdd*);
 template bbdd *const_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template intbdd *const_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &);
+template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);
+template std::map<bool, bbdd *> const_bdd<bool, bbdd>::to_selectors(const_bdd_scope<bbdd> *, bbdd *);
+template bbdd *const_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *, bbdd *);
