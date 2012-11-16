@@ -655,9 +655,13 @@ const_bdd<constT, subtreeT>::ifelse(scopeT *scope,
 
 template void _bdd<int, intbdd>::prettyPrint(FILE *);
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
-template intbdd *const_bdd<int, intbdd>::assume(const_bdd_scope<intbdd> *, intbdd *, bbdd*);
 template bbdd *const_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
-template intbdd *const_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);
 template std::map<bool, bbdd *> const_bdd<bool, bbdd>::to_selectors(const_bdd_scope<bbdd> *, bbdd *);
 template bbdd *const_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *, bbdd *);
+
+template intbdd *const_bdd<int, intbdd>::assume(const_bdd_scope<intbdd> *, intbdd *, bbdd*);
+template intbdd *const_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &);
+
+template smrbdd *const_bdd<StateMachineRes, smrbdd>::ifelse(const_bdd_scope<smrbdd> *, bbdd *, smrbdd *, smrbdd *);
+template std::map<StateMachineRes, bbdd *> const_bdd<StateMachineRes, smrbdd>::to_selectors(const_bdd_scope<bbdd> *, smrbdd *);

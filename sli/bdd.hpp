@@ -5,6 +5,8 @@
 #include <libvex_alloc.h>
 #include <libvex_parse.h>
 
+#include "smr.hpp"
+
 /* Thing for specifying variable ordering. */
 class bdd_ordering : public GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv);
@@ -30,6 +32,11 @@ public:
 	}
 	bool equal(const IRExpr *a, const IRExpr *b) {
 		return (*this)(a, b) == eq;
+	}
+	void enumVariables(std::vector<IRExpr *> &out) {
+		out.reserve(out.size() + variableRankings.size());
+		for (auto it = variableRankings.begin(); it != variableRankings.end(); it++)
+			out.push_back(const_cast<IRExpr *>(it->first));
 	}
 	bdd_ordering() : GcCallback<&ir_heap>(true), nextRanking(0) {}
 	template <typename subtreeT> subtreeT *trueBranch(subtreeT *bdd, IRExpr *cond) {
@@ -284,6 +291,35 @@ public:
 			      bbdd *assumption) {
 		return const_bdd<int, intbdd>::assume(scp, thing, assumption);
 	}
+};
+
+class smrbdd : public const_bdd<StateMachineRes, smrbdd> {
+	friend class const_bdd_scope<smrbdd>;
+	friend class bdd_scope<smrbdd>;
+	void _sanity_check(StateMachineRes r) const {
+		assert(r == smr_crash || r == smr_survive || r == smr_unreached);
+	}
+	void _prettyPrint(FILE *f, StateMachineRes r) const {
+		switch (r) {
+		case smr_crash:
+			fprintf(f, "<crash>");
+			return;
+		case smr_survive:
+			fprintf(f, "<survive>");
+			return;
+		case smr_unreached:
+			fprintf(f, "<unreached>");
+			return;
+		}
+		abort();
+	}
+
+	smrbdd(IRExpr *cond, smrbdd *trueB, smrbdd *falseB)
+		: const_bdd<StateMachineRes, smrbdd>(cond, trueB, falseB)
+	{}
+	smrbdd(StateMachineRes b)
+		: const_bdd<StateMachineRes, smrbdd>(b)
+	{}
 };
 
 #endif /* !BDD_HPP__ */

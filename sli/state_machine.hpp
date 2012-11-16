@@ -10,6 +10,7 @@
 #include "typesdb.hpp"
 #include "libvex_parse.h"
 #include "cfgnode.hpp"
+#include "smr.hpp"
 
 class StateMachine;
 class StateMachineSideEffect;
@@ -299,8 +300,6 @@ public:
 
 	NAMED_CLASS
 };
-
-enum StateMachineRes { smr_crash, smr_survive, smr_unreached };
 
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 public:

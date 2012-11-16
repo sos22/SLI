@@ -14,20 +14,17 @@
 #include "bdd.hpp"
 
 #ifdef NDEBUG
-#define debug_dump_state_traces false
-#define debug_dump_crash_reasons false
 #define debug_survival_constraint false
 #else
-static bool debug_dump_state_traces = false;
-static bool debug_dump_crash_reasons = false;
 static bool debug_survival_constraint = false;
 #endif
 
 struct scopes {
 	bdd_ordering ordering;
 	bbdd::scope bools;
+	smrbdd::scope smrs;
 	scopes()
-		: bools(&ordering)
+		: bools(&ordering), smrs(&ordering)
 	{}
 };
 
@@ -422,16 +419,6 @@ public:
 	}
 };
 
-struct EvalPathConsumer {
-	virtual void escape(bbdd *) = 0;
-	virtual void survive(bbdd *) = 0;
-	virtual void crash(bbdd *) = 0;
-	bool aborted;
-	EvalPathConsumer()
-		: aborted(false)
-	{}
-};
-
 class EvalContext : public GcCallback<&ir_heap> {
 	enum trool { tr_true, tr_false, tr_unknown };
 public:
@@ -452,7 +439,7 @@ private:
 
 	trool evalBooleanExpression(scopes *scopes, IRExpr *what, const IRExprOptimisations &opt);
 	void evalSideEffect(scopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
-			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
+			    smrbdd *&result, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
 
 	EvalContext(const EvalContext &o, StateMachineState *sms)
@@ -499,7 +486,7 @@ public:
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
-		     EvalPathConsumer &consumer);
+		     smrbdd *&result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
 		: pathConstraint(_pathConstraint),
 		  atomic(false),
@@ -771,7 +758,7 @@ EvalContext::evalBooleanExpression(scopes *scopes, IRExpr *what, const IRExprOpt
 
 void
 EvalContext::evalSideEffect(scopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
-			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
+			    smrbdd *&result, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
 {
 	NdChooser chooser;
@@ -793,7 +780,10 @@ EvalContext::evalSideEffect(scopes *scopes, const MaiMap &decode, StateMachine *
 		case esme_ignore_path:
 			break;
 		case esme_escape:
-			consumer.escape(newContext.pathConstraint);
+			result = smrbdd::ifelse(&scopes->smrs,
+						newContext.pathConstraint,
+						scopes->smrs.cnst(smr_unreached),
+						result);
 			break;
 		}
 	} while (chooser.advance());
@@ -811,34 +801,23 @@ EvalContext::advance(scopes *scopes,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
-		     EvalPathConsumer &consumer)
+		     smrbdd *&result)
 {
 	switch (currentState->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)currentState;
-		switch (smt->res) {
-		case smr_crash:
-			if (debug_dump_crash_reasons) {
-				printf("Found a crash, assumption ");
-				pathConstraint->prettyPrint(stdout);
-				printf("\n");
-			}
-			consumer.crash(pathConstraint);
-			return;
-		case smr_survive:
-			consumer.survive(pathConstraint);
-			return;
-		case smr_unreached:
-			consumer.escape(pathConstraint);
-			return;
-		}
-		abort();
+		smrbdd *res = scopes->smrs.cnst(smt->res);
+		result = smrbdd::ifelse(&scopes->smrs,
+					pathConstraint,
+					res,
+					result);
+		return;
 	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
 		if (sme->sideEffect) {
-			evalSideEffect(scopes, decode, sm, oracle, consumer, pendingStates,
+			evalSideEffect(scopes, decode, sm, oracle, result, pendingStates,
 				       sme->sideEffect, opt);
 		} else {
 			pendingStates.push_back(*this);
@@ -887,40 +866,34 @@ EvalContext::advance(scopes *scopes,
 	abort();
 }
 
-static void
+static smrbdd *
 enumEvalPaths(scopes *scopes,
 	      const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<StateMachine, &ir_heap> &sm,
 	      const VexPtr<bbdd, &ir_heap> &assumption,
 	      const VexPtr<OracleInterface> &oracle,
 	      const IRExprOptimisations &opt,
-	      struct EvalPathConsumer &consumer,
 	      GarbageCollectionToken &token,
 	      bool loud = false)
 {
-	std::vector<EvalContext> pendingStates;
-	std::map<const StateMachineState *, int> stateLabels;
 	int cntr = 0;
+	std::vector<EvalContext> pendingStates;
+	VexPtr<smrbdd, &ir_heap> result;
 
-	if (debug_dump_state_traces) {
-		printf("Eval machine:\n");
-		printStateMachine(sm, stdout, stateLabels);
-		printf("Under assumption ");
-		assumption->prettyPrint(stdout);
-		printf("\n");
-	}
+	result = scopes->smrs.cnst( smr_unreached );
 
 	pendingStates.push_back(EvalContext(sm, assumption));
 
-	while (!TIMEOUT && !consumer.aborted && !pendingStates.empty()) {
+	while (!TIMEOUT && !pendingStates.empty()) {
 		LibVEX_maybe_gc(token);
 
 		EvalContext ctxt(pendingStates.back());
 		pendingStates.pop_back();
-		ctxt.advance(scopes, *decode, oracle, opt, pendingStates, sm, consumer);
+		ctxt.advance(scopes, *decode, oracle, opt, pendingStates, sm, result);
 		if (loud && cntr++ % 100 == 0)
 			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
 	}
+	return result;
 }
 
 static IRExpr *
@@ -953,62 +926,39 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 	else
 		assumption = scp.bools.cnst(true);
 
-	struct _ : public EvalPathConsumer {
-		VexPtr<bbdd, &ir_heap> res;
-		const IRExprOptimisations &opt;
-		bool escapingStatesSurvive;
-		bool wantCrash;
-		struct scopes *scopes;
-		void addComponent(const char *label, bbdd *pathConstraint) {
-#warning Think hard about what we're doing here.  Should we constraint it to never reach a crashing node, or merely to always reach a surviving one?'
-			bbdd *component =
-				bbdd::invert(&scopes->bools, pathConstraint);
-			if (res)
-				res = bbdd::And(&scopes->bools,
-						component,
-						res);
-			else
-				res = component;
-			if (debug_survival_constraint) {
-				printf("%s: add:\n", label);
-				pathConstraint->prettyPrint(stdout);
-				printf("got:\n");
-				res->prettyPrint(stdout);
-			}
-		}
-		void crash(bbdd *pathConstraint) {
-			if (!wantCrash)
-				addComponent("crash", pathConstraint);
-		}
-		void survive(bbdd *pathConstraint) {
-			if (wantCrash)
-				addComponent("survive", pathConstraint);
-		}
-		void escape(bbdd *pathConstraint) {
-			if (escapingStatesSurvive && wantCrash)
-				addComponent("escape", pathConstraint);
-			else if (!escapingStatesSurvive && !wantCrash)
-				addComponent("escape", pathConstraint);
-		}
-		_(bbdd *_assumption,
-		  const IRExprOptimisations &_opt,
-		  bool _escapingStatesSurvive,
-		  bool _wantCrash,
-		  struct scopes *_scopes)
-			: res(_assumption), opt(_opt), escapingStatesSurvive(_escapingStatesSurvive),
-			  wantCrash(_wantCrash), scopes(_scopes)
-		{}
-	} consumeEvalPath(assumption, opt, escapingStatesSurvive, wantCrash, &scp);
-	enumEvalPaths(&scp, mai, sm, assumption, oracle, opt, consumeEvalPath, token);
+	smrbdd *smr = enumEvalPaths(&scp, mai, sm, assumption, oracle, opt, token);
+	std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scp.bools, smr));
+	bbdd *crashIf, *surviveIf, *unreachedIf;
+	if (selectors.count(smr_crash))
+		crashIf = selectors[smr_crash];
+	else
+		crashIf = scp.bools.cnst(false);
+	if (selectors.count(smr_survive))
+		surviveIf = selectors[smr_survive];
+	else
+		surviveIf = scp.bools.cnst(false);
+	if (selectors.count(smr_unreached))
+		unreachedIf = selectors[smr_unreached];
+	else
+		unreachedIf = scp.bools.cnst(false);
+	if (escapingStatesSurvive)
+		surviveIf = bbdd::Or(&scp.bools, surviveIf, unreachedIf);
+	else
+		crashIf = bbdd::Or(&scp.bools, crashIf, unreachedIf);
+	bbdd *resBdd;
+	if (wantCrash)
+		resBdd = crashIf;
+	else
+		resBdd = surviveIf;
 
 	if (debug_survival_constraint) {
 		printf("%s: result:", __func__);
-		consumeEvalPath.res->prettyPrint(stdout);
+		resBdd->prettyPrint(stdout);
 	}
 	
 	if (TIMEOUT)
 		return NULL;
-	IRExpr *res = simplifyIRExpr(simplify_via_anf(bbdd::to_irexpr(consumeEvalPath.res)), opt);
+	IRExpr *res = simplifyIRExpr(simplify_via_anf(bbdd::to_irexpr(resBdd)), opt);
 	if (debug_survival_constraint)
 		printf("%s: after optimisation, result %s\n",
 		       __func__, nameIRExpr(res));
@@ -1653,10 +1603,6 @@ writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
  * member of X makes Y false and some member makes it true then that
  * should get you reasonably close to exploring all of the interesting
  * behaviour in the machine. */
-/* The number of constraints you get from a single machine is
-   arbitrarily limited to 1000, just because the only consumer of this
-   data can't handle any more than that without exploding due to
-   super-linear scaling behaviour. */
 void
 collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		   const VexPtr<StateMachine, &ir_heap> &sm,
@@ -1665,40 +1611,7 @@ collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 		   std::vector<IRExpr *> &out,
 		   GarbageCollectionToken token)
 {
-	struct : public EvalPathConsumer, public GcCallback<&ir_heap> {
-		std::set<IRExpr *> res;
-		void runGc(HeapVisitor &hv) {
-			std::set<IRExpr *> newRes;
-			for (auto it = res.begin(); it != res.end(); it++) {
-				IRExpr *a = *it;
-				hv(a);
-				newRes.insert(a);
-			}
-			res = newRes;
-		}
-		void addConstraint(bbdd *a) {
-			if (a->isLeaf)
-				return;
-			if (res.size() > 1000) {
-				aborted = true;
-				return;
-			}
-			res.insert(a->content.condition);
-			addConstraint(a->content.trueBranch);
-			addConstraint(a->content.falseBranch);
-		}
-		void crash(bbdd *assumption) {
-			addConstraint(assumption);
-		}
-		void survive(bbdd *assumption) {
-			addConstraint(assumption);
-		}
-		void escape(bbdd *assumption) {
-			addConstraint(assumption);
-		}
-	} consumer;
 	scopes scp;
-
-	enumEvalPaths(&scp, mai, sm, scp.bools.cnst(true), oracle, opt, consumer, token, true);
-	out.insert(out.end(), consumer.res.begin(), consumer.res.end());
+	enumEvalPaths(&scp, mai, sm, scp.bools.cnst(true), oracle, opt, token, true);
+	scp.ordering.enumVariables(out);
 }
