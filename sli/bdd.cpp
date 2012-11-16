@@ -486,7 +486,8 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 {
 	assert(a);
 	assert(b);
-	assert(a != b);
+	if (a == b)
+		return a;
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
 			entry(cond, a, b),
