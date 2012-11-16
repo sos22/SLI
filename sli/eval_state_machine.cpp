@@ -393,17 +393,19 @@ public:
 };
 
 struct EvalPathConsumer {
-	virtual bool crash(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
-	virtual bool survive(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
-	virtual bool escape(IRExpr *assumption, IRExpr *accAssumption) __attribute__((warn_unused_result)) = 0;
-	virtual bool badMachine() __attribute__((warn_unused_result)) {
+	virtual void crash(IRExpr *assumption, IRExpr *accAssumption) = 0;
+	virtual void survive(IRExpr *assumption, IRExpr *accAssumption) = 0;
+	virtual void escape(IRExpr *assumption, IRExpr *accAssumption) = 0;
+	virtual void badMachine() {
 		abort();
 	}
 	bool needsAccAssumptions;
 	bool noImplicitBadPtrs;
+	bool aborted;
 	EvalPathConsumer()
 		: needsAccAssumptions(false),
-		  noImplicitBadPtrs(false)
+		  noImplicitBadPtrs(false),
+		  aborted(false)
 	{}
 };
 
@@ -442,10 +444,9 @@ private:
 	}
 
 	trool evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt);
-	bool evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
+	void evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
-			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
-		__attribute__((warn_unused_result));
+			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
 
 	void advance_state_trace()
 	{
@@ -510,13 +511,12 @@ private:
 	bool expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
 	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
 public:
-	bool advance(const MaiMap &decode,
+	void advance(const MaiMap &decode,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachine *sm,
-		     EvalPathConsumer &consumer)
-		__attribute__((warn_unused_result));
+		     EvalPathConsumer &consumer);
 	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
 		    std::map<const StateMachineState*, int> &
 #ifndef NDEBUG
@@ -863,7 +863,7 @@ EvalContext::evalBooleanExpression(IRExpr *what, const IRExprOptimisations &opt)
 	return tr_unknown;
 }
 
-bool
+void
 EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    EvalPathConsumer &consumer, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
@@ -887,12 +887,10 @@ EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterf
 		case esme_ignore_path:
 			break;
 		case esme_escape:
-			if (!consumer.escape(newContext.assumption, newContext.accumulatedAssumption))
-				return false;
+			consumer.escape(newContext.assumption, newContext.accumulatedAssumption);
 			break;
 		}
 	} while (chooser.advance());
-	return true;
 }
 
 /* You might that we could stash things like @oracle, @opt, and @sm in
@@ -900,7 +898,7 @@ EvalContext::evalSideEffect(const MaiMap &decode, StateMachine *sm, OracleInterf
    time.  That'd work, but it'd mean duplicating those pointers in
    every item in the pending state queue, which would make that queue
    much bigger, which'd be kind of annoying. */
-bool
+void
 EvalContext::advance(const MaiMap &decode,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
@@ -936,11 +934,14 @@ EvalContext::advance(const MaiMap &decode,
 				}
 				printf("\n");
 			}
-			return consumer.crash(assumption, accumulatedAssumption);
+			consumer.crash(assumption, accumulatedAssumption);
+			return;
 		case smr_survive:
-			return consumer.survive(assumption, accumulatedAssumption);
+			consumer.survive(assumption, accumulatedAssumption);
+			return;
 		case smr_unreached:
-			return consumer.badMachine();
+			consumer.badMachine();
+			return;
 		}
 		abort();
 	}
@@ -949,13 +950,12 @@ EvalContext::advance(const MaiMap &decode,
 		currentState = sme->target;
 		advance_state_trace();
 		if (sme->sideEffect) {
-			if (!evalSideEffect(decode, sm, oracle, consumer, pendingStates,
-					    sme->sideEffect, opt))
-				return false;
+			evalSideEffect(decode, sm, oracle, consumer, pendingStates,
+				       sme->sideEffect, opt);
 		} else {
 			pendingStates.push_back(*this);
 		}
-		return true;
+		return;
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
@@ -991,13 +991,13 @@ EvalContext::advance(const MaiMap &decode,
 							opt));
 			break;
 		}
-		return true;
+		return;
 	}
 	}
 	abort();
 }
 
-static bool
+static void
 enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<StateMachine, &ir_heap> &sm,
 	      const VexPtr<IRExpr, &ir_heap> &assumption,
@@ -1021,20 +1021,15 @@ enumEvalPaths(const VexPtr<MaiMap, &ir_heap> &decode,
 
 	pendingStates.push_back(EvalContext(sm, assumption, consumer.needsAccAssumptions, stateLabels));
 
-	while (!pendingStates.empty()) {
-		if (TIMEOUT)
-			return true;
-
+	while (!TIMEOUT && !consumer.aborted && !pendingStates.empty()) {
 		LibVEX_maybe_gc(token);
 
 		EvalContext ctxt(pendingStates.back());
 		pendingStates.pop_back();
-		if (!ctxt.advance(*decode, oracle, opt, pendingStates, sm, consumer))
-			return false;
+		ctxt.advance(*decode, oracle, opt, pendingStates, sm, consumer);
 		if (loud && cntr++ % 100 == 0)
 			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
 	}
-	return true;
 }
 
 static IRExpr *
@@ -1085,22 +1080,19 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 				       nameIRExpr(component),
 				       nameIRExpr(res));
 		}
-		bool crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		void crash(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			if (!wantCrash)
 				addComponent("crash", pathConstraint, justPathConstraint);
-			return true;
 		}
-		bool survive(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		void survive(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			if (wantCrash)
 				addComponent("survive", pathConstraint, justPathConstraint);
-			return true;
 		}
-		bool escape(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
+		void escape(IRExpr *pathConstraint, IRExpr *justPathConstraint) {
 			if (escapingStatesSurvive && wantCrash)
 				addComponent("escape", pathConstraint, justPathConstraint);
 			else if (!escapingStatesSurvive && !wantCrash)
 				addComponent("escape", pathConstraint, justPathConstraint);
-			return true;
 		}
 		_(const VexPtr<IRExpr, &ir_heap> &_assumption,
 		  const IRExprOptimisations &_opt,
@@ -1788,24 +1780,21 @@ collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 			for (auto it = out->begin(); it != out->end(); it++)
 				hv(*it);
 		}
-		bool addConstraint(IRExpr *a) {
+		void addConstraint(IRExpr *a) {
 			out->push_back(a);
 			if (out->size() > 1000)
-				return false;
-			else
-				return true;
+				aborted = true;
 		}
-		bool crash(IRExpr *assumption, IRExpr *) {
-			return addConstraint(assumption);
+		void crash(IRExpr *assumption, IRExpr *) {
+			addConstraint(assumption);
 		}
-		bool survive(IRExpr *assumption, IRExpr *) {
-			return addConstraint(assumption);
+		void survive(IRExpr *assumption, IRExpr *) {
+			addConstraint(assumption);
 		}
-		bool escape(IRExpr *assumption, IRExpr *) {
-			return addConstraint(assumption);
+		void escape(IRExpr *assumption, IRExpr *) {
+			addConstraint(assumption);
 		}
-		bool badMachine(void) {
-			return true;
+		void badMachine(void) {
 		}
 	} consumer;
 	consumer.out = &out;
