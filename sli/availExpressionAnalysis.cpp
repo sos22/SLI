@@ -7,6 +7,7 @@
 #include "libvex_prof.hpp"
 #include "allowable_optimisations.hpp"
 #include "MachineAliasingTable.hpp"
+#include "visitor.hpp"
 
 /* Debug options: */
 #ifdef NDEBUG
@@ -258,75 +259,82 @@ avail_t::mergeUnion(const avail_t &other)
    define @reg.  The exception is the side-effect @preserve, which is
    only purged if it uses @reg (i.e. it'll be left in place if its
    only reference to @reg is to use it). */
+struct avail_inv_reg_ctxt {
+	threadAndRegister reg;
+	const StateMachineSideEffect *preserve;
+};
 void
 avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve)
 {
-	class _ : public StateMachineTransformer {
-		bool res;
-		threadAndRegister reg;
-		StateMachineSideEffect *preserve;
-		IRExpr *transformIex(IRExprGet *e) {
-			if (e->reg == reg)
-				res = true;
-			return NULL;
+	class {
+		typedef avail_inv_reg_ctxt ctxt;
+		static visit_result Get(ctxt *ctxt, const IRExprGet *e) {
+			if (e->reg == ctxt->reg)
+				return visit_abort;
+			else
+				return visit_continue;
 		}
-		StateMachineSideEffectLoad *transformOneSideEffect(StateMachineSideEffectLoad *l,
-								   bool *done_something)
+		static visit_result Load(ctxt *ctxt, const StateMachineSideEffectLoad *l)
 		{
-			if (l != preserve && l->target == reg) {
-				res = true;
-				return NULL;
-			}
-			return StateMachineTransformer::transformOneSideEffect(l, done_something);
+			if (l != ctxt->preserve && l->target == ctxt->reg)
+				return visit_abort;
+			else
+				return visit_continue;
 		}
-		StateMachineSideEffectCopy *transformOneSideEffect(StateMachineSideEffectCopy *l,
-								   bool *done_something)
+		static visit_result Copy(ctxt *ctxt, const StateMachineSideEffectCopy *c)
 		{
-			if (l != preserve && l->target == reg) {
-				res = true;
-				return NULL;
-			}
-			return StateMachineTransformer::transformOneSideEffect(l, done_something);
+			if (c != ctxt->preserve && c->target == ctxt->reg)
+				return visit_abort;
+			else
+				return visit_continue;
 		}
-		StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *l,
-								  bool *done_something)
+		static visit_result Phi(ctxt *ctxt, const StateMachineSideEffectPhi *phi)
 		{
-			if (l != preserve && l->reg == reg) {
-				res = true;
-				return NULL;
-			}
-			return StateMachineTransformer::transformOneSideEffect(l, done_something);
+			if (phi != ctxt->preserve && phi->reg == ctxt->reg)
+				return visit_abort;
+			else
+				return visit_continue;
 		}
-		bool rewriteNewStates() const { return false; }
 	public:
-		_(threadAndRegister _reg, StateMachineSideEffect *_preserve)
-			: reg(_reg), preserve(_preserve)
-		{}
-		bool operator()(StateMachineSideEffect *se)
+		bool operator()(const threadAndRegister &reg, const StateMachineSideEffect *preserve,
+				const StateMachineSideEffect *se)
 		{
-			bool ignore;
-			res = false;
-			transformSideEffect(se, &ignore);
-			return res;
+			static state_machine_visitor<ctxt> visitor;
+			visitor.irexpr.Get = Get;
+			visitor.Load = Load;
+			visitor.Copy = Copy;
+			visitor.Phi = Phi;
+			ctxt ctxt;
+			ctxt.reg = reg;
+			ctxt.preserve = preserve;
+			if (visit_side_effect(&ctxt, &visitor, se) == visit_abort)
+				return true;
+			else
+				return false;
 		}
-		bool operator()(IRExpr *e)
+		bool operator()(const threadAndRegister reg, const StateMachineSideEffect *preserve, const IRExpr *e)
 		{
-			bool ignore;
-			res = false;
-			doit(e, &ignore);
-			return res;
+			static irexpr_visitor<ctxt> visitor;
+			visitor.Get = Get;
+			ctxt ctxt;
+			ctxt.reg = reg;
+			ctxt.preserve = preserve;
+			if (visit_irexpr(&ctxt, &visitor, e) == visit_abort)
+				return true;
+			else
+				return false;
 		}
-	} isPresent(reg, preserve);
+	} isPresent;
 
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); ) {
-		if (isPresent(*it)) {
+		if (isPresent(reg, preserve, *it)) {
 			sideEffects.erase(it++);
 		} else {
 			it++;
 		}
 	}
 	for (auto it = assertFalse.begin(); it != assertFalse.end(); ) {
-		if (isPresent(*it))
+		if (isPresent(reg, preserve, *it))
 			assertFalse.erase(it++);
 		else
 			it++;

@@ -8,6 +8,7 @@
 #include "offline_analysis.hpp"
 #include "nf.hpp"
 #include "dummy_oracle.hpp"
+#include "visitor.hpp"
 
 static StateMachine *
 optimiseStateMachineAssuming(StateMachine *sm,
@@ -80,28 +81,30 @@ optimiseStateMachineAssuming(StateMachine *sm,
 }
 
 static void
-findAllMais(CrashSummary *summary, std::set<MemoryAccessIdentifier> &out)
+findAllMais(const CrashSummary *summary, std::set<MemoryAccessIdentifier> &out)
 {
 	std::set<StateMachineSideEffectMemoryAccess *> acc;
 	enumSideEffects(summary->loadMachine, acc);
 	enumSideEffects(summary->storeMachine, acc);
 	for (auto it = acc.begin(); it != acc.end(); it++)
 		out.insert( (*it)->rip );
-	struct : public StateMachineTransformer {
-		std::set<MemoryAccessIdentifier> *out;
-		IRExpr *transformIex(IRExprHappensBefore *hb) {
+	struct {
+		static visit_result HappensBefore(std::set<MemoryAccessIdentifier> *out,
+						  const IRExprHappensBefore *hb) {
 			out->insert(hb->before);
 			out->insert(hb->after);
-			return hb;
+			return visit_continue;
 		}
-		IRExpr *transformIex(IRExprFreeVariable *f) {
+		static visit_result FreeVariable(std::set<MemoryAccessIdentifier> *out,
+						 const IRExprFreeVariable *f) {
 			out->insert(f->id);
-			return f;
+			return visit_continue;
 		}
-		bool rewriteNewStates() const { return false; }
-	} d;
-	d.out = &out;
-	transformCrashSummary(summary, d);
+	} foo;
+	static irexpr_visitor<std::set<MemoryAccessIdentifier> > visitor;
+	visitor.HappensBefore = foo.HappensBefore;
+	visitor.FreeVariable = foo.FreeVariable;
+	visit_crash_summary(&out, &visitor, summary);
 }
 
 static void

@@ -3,6 +3,7 @@
 #include "state_machine.hpp"
 #include "ssa.hpp"
 #include "offline_analysis.hpp"
+#include "visitor.hpp"
 
 namespace SSA {
 
@@ -20,34 +21,36 @@ static int debug_dump_reaching_table = 0;
 /* Assert that the machine does not currently reference and tAR
    structures with non-zero generation number. */
 static void
-assertNonSsa(StateMachine *
+assertNonSsa(const StateMachine *
 #ifndef NDEBUG
 	     inp
 #endif
 	)
 {
 #ifndef NDEBUG
-	class : public StateMachineTransformer {
-		IRExpr *transformIex(IRExprGet *g) {
-			assert(g->reg.gen() == 0);
-			return NULL;
+	struct {
+		static visit_result Get(void *, const IRExprGet *ieg) {
+			assert(ieg->reg.gen() == 0);
+			return visit_continue;
 		}
-		StateMachineSideEffectLoad *transformOneSideEffect(StateMachineSideEffectLoad *l, bool *done_something) {
+		static visit_result Load(void *, const StateMachineSideEffectLoad *l) {
 			assert(l->target.gen() == 0);
-			return StateMachineTransformer::transformOneSideEffect(l, done_something);
+			return visit_continue;
 		}
-		StateMachineSideEffectCopy *transformOneSideEffect(StateMachineSideEffectCopy *l, bool *done_something) {
+		static visit_result Copy(void *, const StateMachineSideEffectCopy *l) {
 			assert(l->target.gen() == 0);
-			return StateMachineTransformer::transformOneSideEffect(l, done_something);
+			return visit_continue;
 		}
-		StateMachineSideEffectPhi *transformOneSideEffect(StateMachineSideEffectPhi *, bool *) {
+		static visit_result Phi(void *, const StateMachineSideEffectPhi *) {
 			abort();
 		}
-		bool rewriteNewStates() const {
-			return false;
-		}
-	} t;
-	t.StateMachineTransformer::transform(inp);
+	} foo;
+	static state_machine_visitor<void> visitor;
+	visitor.irexpr.Get = foo.Get;
+	visitor.Load = foo.Load;
+	visitor.Copy = foo.Copy;
+	visitor.Phi = foo.Phi;
+	visit_state_machine((void *)NULL, &visitor, inp);
 #endif
 }
 
@@ -241,17 +244,18 @@ ReachingTable::ReachingTable(const StateMachine *inp, bool considerErasure)
 ReachingEntry
 ReachingTable::initialReachingSet(const StateMachine *sm)
 {
-	struct : public StateMachineTransformer {
-		ReachingEntry res;
-		IRExpr *transformIex(IRExprGet *ieg) {
+	struct {
+		static visit_result Get(ReachingEntry *res, const IRExprGet *ieg) {
 			if (ieg->reg.isReg())
-				res[ieg->reg].insert((unsigned)-1);
-			return IRExprTransformer::transformIex(ieg);
+				(*res)[ieg->reg].insert((unsigned)-1);
+			return visit_continue;
 		}
-		bool rewriteNewStates() const { return false; }
-	} doit;
-	doit.transform(const_cast<StateMachine *>(sm));
-	return doit.res;
+	} foo;
+	static irexpr_visitor<ReachingEntry> visitor;
+	visitor.Get = foo.Get;
+	ReachingEntry res;
+	visit_state_machine(&res, &visitor, sm);
+	return res;
 }
 
 ReachingEntry
@@ -349,23 +353,22 @@ public:
 };
 
 static void
-findUnresolvedReferences(StateMachineState *s, std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> &out)
+findUnresolvedReferences(const StateMachineState *s, std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> &out)
 {
-	struct _ : public StateMachineTransformer {
-		std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> &out;
-		IRExpr *transformIex(IRExprGet *ieg) {
+	struct {
+		static visit_result Get(std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> *out,
+				const IRExprGet *ieg) {
 			if (ieg->reg.gen() == 0)
-				out.insert(std::pair<threadAndRegister, IRType>(ieg->reg, ieg->ty));
-			return NULL;
+				out->insert(std::pair<threadAndRegister, IRType>(ieg->reg, ieg->ty));
+			return visit_continue;
 		}
-		_(
-			std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> &_out)
-			: out(_out)
-		{}
-		bool rewriteNewStates() const { return false; }
-	} t(out);
-	bool d;
-	t.transformState(s, &d);
+	} foo;
+	std::vector<IRExpr *> exprs;
+	static irexpr_visitor<std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> > visitor;
+	visitor.Get = foo.Get;
+	((StateMachineState *)s)->inputExpressions(exprs);
+	for (auto it = exprs.begin(); it != exprs.end(); it++)
+		visit_irexpr(&out, &visitor, *it);
 }
 
 static StateMachineSideEffecting *

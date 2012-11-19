@@ -9,6 +9,7 @@
 #include "offline_analysis.hpp"
 #include "alloc_mai.hpp"
 #include "allowable_optimisations.hpp"
+#include "visitor.hpp"
 
 #include "libvex_parse.h"
 
@@ -46,23 +47,19 @@ StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 }
 
 static bool
-irexprUsesRegister(IRExpr *what, const threadAndRegister &tr)
+irexprUsesRegister(const IRExpr *what, const threadAndRegister &tr)
 {
-	struct : public IRExprTransformer {
-		const threadAndRegister *tr;
-		bool res;
-		IRExpr *transformIex(IRExprGet *ieg) {
-			if (ieg->reg == *tr) {
-				res = true;
-				abortTransform();
-			}
-			return ieg;
+	struct {
+		static visit_result Get(const threadAndRegister *tr, const IRExprGet *ieg) {
+			if (ieg->reg == *tr)
+				return visit_abort;
+			else
+				return visit_continue;
 		}
-	} doit;
-	doit.tr = &tr;
-	doit.res = false;
-	doit.doit(what);
-	return doit.res;
+	} foo;
+	static irexpr_visitor<const threadAndRegister> visitor;
+	visitor.Get = foo.Get;
+	return visit_irexpr(&tr, &visitor, what) == visit_abort;
 }
 
 StateMachineState *
@@ -896,61 +893,15 @@ StateMachine::assertSSA() const
 		}
 	}
 
-	struct : public StateMachineTransformer {
-		IRExpr *transformIex(IRExprGet *ieg) {
+	struct {
+		static visit_result Get(void *, const IRExprGet *ieg) {
 			assert(ieg->reg.gen() != 0);
-			return NULL;
+			return visit_continue;
 		}
-		bool rewriteNewStates() const { return false; }
-	} checkForNonSSAVars;
-	checkForNonSSAVars.transform(const_cast<StateMachine *>(this));
-}
-#endif
-
-#if 0
-StateMachineEdge::StateMachineEdge(const std::vector<StateMachineSideEffect *> &sideEffects,
-				   const VexRip &vr,
-				   StateMachineState *target)
-{
-	if (sideEffects.size() == 0) {
-		this->target = target;
-		return;
-	}
-	if (sideEffects.size() == 1) {
-		this->sideEffect = sideEffects[0];
-		this->target = target;
-		return;
-	}
-	StateMachineState **cursor;
-	StateMachineState *root;
-	cursor = &root;
-	for (unsigned x = 1; x < sideEffects.size(); x++) {
-		StateMachineEdge *t = new StateMachineEdge(sideEffects[x], NULL);
-		StateMachineProxy *p = new StateMachineProxy(vr, t);
-		*cursor = p;
-		cursor = &t->target;
-	}
-	*cursor = target;
-	this->target = root;
-}
-
-void
-StateMachineEdge::prependSideEffect(const VexRip &vr, StateMachineSideEffect *smse,
-				    StateMachineState ***endOfTheLine)
-{
-	assert(endOfTheLine || target);
-	if (!sideEffect) {
-		if (endOfTheLine)
-			assert(*endOfTheLine == &target);
-		sideEffect = smse;
-	} else {
-		StateMachineProxy *smp = new StateMachineProxy(vr, target);
-		smp->target->sideEffect = sideEffect;
-		target = smp;
-		sideEffect = smse;
-		if (endOfTheLine && *endOfTheLine == &target)
-			*endOfTheLine = &smp->target->target;
-	}
+	} foo;
+	static irexpr_visitor<void> visitor;
+	visitor.Get = foo.Get;
+	visit_state_machine((void *)NULL, &visitor, this);
 }
 #endif
 
@@ -1173,31 +1124,36 @@ StateMachine::sanityCheck(const MaiMap &mai) const
 	for (auto it = allStates.begin(); it != allStates.end(); it++)
 		(*it)->sanityCheck();
 
-	struct : public StateMachineTransformer {
-		std::set<MemoryAccessIdentifier> neededMais;
-		IRExpr *transformIex(IRExprHappensBefore *hb) {
-			neededMais.insert(hb->before);
-			neededMais.insert(hb->after);
-			return hb;
-		}
-		StateMachineSideEffectLoad *transformOneSideEffect(
-			StateMachineSideEffectLoad *smse, bool *done_something)
+	struct {
+		static visit_result HappensBefore(std::set<MemoryAccessIdentifier> *neededMais,
+						  const IRExprHappensBefore *hb)
 		{
-			neededMais.insert(smse->rip);
-			return StateMachineTransformer::transformOneSideEffect(smse, done_something);
+			neededMais->insert(hb->before);
+			neededMais->insert(hb->after);
+			return visit_continue;
 		}
-		StateMachineSideEffectStore *transformOneSideEffect(
-			StateMachineSideEffectStore *smse, bool *done_something)
+		static visit_result Load(std::set<MemoryAccessIdentifier> *neededMais,
+					 const StateMachineSideEffectLoad *smse)
 		{
-			neededMais.insert(smse->rip);
-			return StateMachineTransformer::transformOneSideEffect(smse, done_something);
+			neededMais->insert(smse->rip);
+			return visit_continue;
 		}
-		bool rewriteNewStates() const { return false; }
-	} findNeededMais;
-	findNeededMais.transform(const_cast<StateMachine *>(this));
+		static visit_result Store(std::set<MemoryAccessIdentifier> *neededMais,
+					  const StateMachineSideEffectStore *smse)
+		{
+			neededMais->insert(smse->rip);
+			return visit_continue;
+		}
+	} foo;
+	static state_machine_visitor<std::set<MemoryAccessIdentifier> > visitor;
+	visitor.irexpr.HappensBefore = foo.HappensBefore;
+	visitor.Load = foo.Load;
+	visitor.Store = foo.Store;
+	std::set<MemoryAccessIdentifier> neededMais;
+	visit_state_machine(&neededMais, &visitor, this);
 
 	std::set<const CFGNode *> neededLabels;
-	for (auto it = findNeededMais.neededMais.begin(); it != findNeededMais.neededMais.end(); it++) {
+	for (auto it = neededMais.begin(); it != neededMais.end(); it++) {
 		for (auto it2 = mai.begin(*it); !it2.finished(); it2.advance())
 			neededLabels.insert(it2.node());
 	}

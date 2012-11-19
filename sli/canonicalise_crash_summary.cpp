@@ -11,6 +11,7 @@
 #include "intern.hpp"
 #include "sat_checker.hpp"
 #include "nf.hpp"
+#include "visitor.hpp"
 
 class RegisterCanonicaliser : public StateMachineTransformer {
 	std::map<threadAndRegister, threadAndRegister, threadAndRegister::partialCompare> canonTable;
@@ -111,20 +112,18 @@ public:
 static bool
 expressionIsClosed(IRExpr *a)
 {
-	struct : public IRExprTransformer {
-		bool res;
-		IRExpr *transformIex(IRExprGet *ieg) {
+	struct {
+		static visit_result f(void *, const IRExprGet *ieg) {
 			if (!ieg->reg.isReg() &&
-			    ieg->reg.tid() != (unsigned)-1) {
-				res = false;
-				abortTransform();
-			}
-			return IRExprTransformer::transformIex(ieg);
+			    ieg->reg.tid() != (unsigned) -1)
+				return visit_abort;
+			else
+				return visit_continue;
 		}
-	} doit;
-	doit.res = true;
-	doit.doit(a);
-	return doit.res;
+	} foo;
+	static irexpr_visitor<void> visit;
+	visit.Get = foo.f;
+	return visit_irexpr((void *)NULL, &visit, a) == visit_continue;
 }
 
 /* Caution: this is done partly in-place. */
@@ -469,23 +468,22 @@ canonicalise_crash_summary(CrashSummary *input)
 	CanonicaliseThreadIds thread_canon;
 	input = transformCrashSummary(input, thread_canon);
 
-	struct : public StateMachineTransformer {
-		std::set<threadAndRegister> res;
-		StateMachineSideEffectPhi *transformOneSideEffect(
-			StateMachineSideEffectPhi *smsep, bool *done_something)
+	struct {
+		static visit_result Phi(std::set<threadAndRegister> *res,
+					const StateMachineSideEffectPhi *smsep)
 		{
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
 			     it++)
-				res.insert(it->reg);
-			res.insert(smsep->reg);
-			return StateMachineTransformer::transformOneSideEffect(smsep, done_something);
+				res->insert(it->reg);
+			res->insert(smsep->reg);
+			return visit_continue;
 		}
-		bool rewriteNewStates() const { return false; }
-	} phiRegs;
-	phiRegs.transform(input->loadMachine);
-	phiRegs.transform(input->storeMachine);
-	phiRegs.doit(input->verificationCondition);
+	} foo;
+	static state_machine_visitor<std::set<threadAndRegister> > visitor;
+	visitor.Phi = foo.Phi;
+	std::set<threadAndRegister> phiRegs;
+	visit_crash_summary(&phiRegs, &visitor, input);
 
 	internStateMachineTable t;
 	input->loadMachine = internStateMachine(input->loadMachine, t);
@@ -505,7 +503,7 @@ canonicalise_crash_summary(CrashSummary *input)
 			generatedRegisters.insert(r);
 	}
 
-	SplitSsaGenerations splitter(phiRegs.res, generatedRegisters, t);
+	SplitSsaGenerations splitter(phiRegs, generatedRegisters, t);
 	input = transformCrashSummary(input, splitter);
 
 	RegisterCanonicaliser reg_canon;

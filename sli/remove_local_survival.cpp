@@ -1,39 +1,36 @@
 #include "sli.h"
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
+#include "visitor.hpp"
 
 namespace _remove_local_survival {
 
 static bool
-exprIsLocal(IRExpr *input)
+exprIsLocal(const IRExpr *input)
 {
-	struct : public IRExprTransformer {
-		bool res;
-		void stop() {
-			res = false;
-			abortTransform();
-		}
-		IRExpr *transformIex(IRExprGet *ieg) {
+	struct {
+		static visit_result Get(void *, const IRExprGet *ieg) {
 			if (ieg->reg.gen() != (unsigned)-1)
-				stop();
-			return ieg;
+				return visit_abort;
+			else
+				return visit_continue;
 		}
-		IRExpr *transformIex(IRExprGetI *ieg) {
-			stop();
-			return ieg;
+		static visit_result GetI(void *, const IRExprGetI *) {
+			return visit_abort;
 		}
-		IRExpr *transformIex(IRExprHappensBefore *ieg) {
-			stop();
-			return ieg;
+		static visit_result HappensBefore(void *, const IRExprHappensBefore *) {
+			return visit_abort;
 		}
-		IRExpr *transformIex(IRExprFreeVariable *ieg) {
-			stop();
-			return ieg;
+		static visit_result FreeVariable(void *, const IRExprFreeVariable *) {
+			return visit_abort;
 		}
-	} doit;
-	doit.res = true;
-	doit.doit(input);
-	return doit.res;
+	} foo;
+	static irexpr_visitor<void> visitor;
+	visitor.Get = foo.Get;
+	visitor.GetI = foo.GetI;
+	visitor.HappensBefore = foo.HappensBefore;
+	visitor.FreeVariable = foo.FreeVariable;
+	return visit_irexpr((void *)NULL, &visitor, input) == visit_continue;
 }
 
 static void

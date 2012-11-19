@@ -1226,23 +1226,32 @@ extern Bool eqIRRegArray ( IRRegArray*, IRRegArray* );
 
 /* The different kinds of expressions.  Their meaning is explained below
    in the comments for IRExpr. */
+#define __IREXPR_TYPES(first, iter, last)	\
+  first(Get)				\
+  iter(GetI)				\
+  iter(Qop)				\
+  iter(Triop)				\
+  iter(Binop)				\
+  iter(Unop)				\
+  iter(Const)				\
+  iter(Mux0X)				\
+  iter(CCall)				\
+  iter(Associative)			\
+  iter(Load)				\
+  iter(HappensBefore)			\
+  iter(FreeVariable)			\
+  iter(EntryPoint)			\
+  last(ControlFlow)
+#define IREXPR_TYPES(f) __IREXPR_TYPES(f, f, f)
 typedef
    enum { 
-      Iex_Get = 0x15001,
-      Iex_GetI,
-      Iex_Qop,
-      Iex_Triop,
-      Iex_Binop,
-      Iex_Unop,
-      Iex_Const,
-      Iex_Mux0X,
-      Iex_CCall,
-      Iex_Associative, /* n-ary associative operator */
-      Iex_Load,
-      Iex_HappensBefore,
-      Iex_FreeVariable,
-      Iex_EntryPoint,
-      Iex_ControlFlow,
+#define first_type(name) Iex_ ## name = 0x15001,
+#define iter_type(name) Iex_ ## name,
+#define last_type(name) Iex_ ## name
+  __IREXPR_TYPES(first_type, iter_type, last_type)
+#undef last_type
+#undef iter_type
+#undef first_type
    }
    IRExprTag;
 

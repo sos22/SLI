@@ -15,6 +15,7 @@
 #include "query_cache.hpp"
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
+#include "visitor.hpp"
 
 #include "libvex_prof.hpp"
 #include "libvex_parse.h"
@@ -917,24 +918,22 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 }
 
 static Oracle::LivenessSet
-irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
+irexprUsedValues(Oracle::LivenessSet old, const IRExpr *w)
 {
 	if (!w)
 		return old;
-	class _ : public IRExprTransformer {
-	public:
-		Oracle::LivenessSet old;
-		IRExpr *transformIex(IRExprGet *e) {
+	struct {
+		static visit_result Get(Oracle::LivenessSet *old, const IRExprGet *e) {
 			if (!e->reg.isTemp())
-				old = old.use(e->reg.asReg());
-			return IRExprTransformer::transformIex(e);
+				*old = old->use(e->reg.asReg());
+			return visit_continue;
 		}
-		_(Oracle::LivenessSet &_old)
-			: old(_old)
-		{}
-	} t(old);
-	t.doit(w);
-	return t.old;
+	} foo;
+	static irexpr_visitor<Oracle::LivenessSet> visitor;
+	visitor.Get = foo.Get;
+	Oracle::LivenessSet res(old);
+	visit_irexpr(&res, &visitor, w);
+	return res;
 }
 
 static PointerAliasingSet

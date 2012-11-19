@@ -6,6 +6,7 @@
 
 #include "state_machine.hpp"
 #include "alloc_mai.hpp"
+#include "visitor.hpp"
 
 class Oracle;
 class OracleInterface;
@@ -88,5 +89,34 @@ void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 FixConsumer &haveAFix,
 				 bool considerEverything,
 				 GarbageCollectionToken token);
+
+template <typename ctxtT> static visit_result
+visit_crash_summary(ctxtT *ctxt,
+		    const state_machine_visitor<ctxtT> *visitor,
+		    const CrashSummary *sm)
+{
+	std::set<const StateMachineState *> memo;
+	visit_result res;
+	res = visit_irexpr(ctxt, &visitor->irexpr, sm->verificationCondition);
+	if (res == visit_continue)
+		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
+	if (res == visit_continue)
+		res = visit_state_machine(ctxt, visitor, sm->storeMachine, memo);
+	return res;
+}
+template <typename ctxtT> static visit_result
+visit_crash_summary(ctxtT *ctxt,
+		    const irexpr_visitor<ctxtT> *visitor,
+		    const CrashSummary *sm)
+{
+	std::set<const StateMachineState *> memo;
+	visit_result res;
+	res = visit_irexpr(ctxt, visitor, sm->verificationCondition);
+	if (res == visit_continue)
+		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
+	if (res == visit_continue)
+		res = visit_state_machine(ctxt, visitor, sm->storeMachine, memo);
+	return res;
+}
 
 #endif /* !INFERRED_INFORMATION_HPP__ */

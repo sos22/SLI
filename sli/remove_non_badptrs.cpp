@@ -7,23 +7,21 @@
 #include "offline_analysis.hpp"
 #include "state_machine.hpp"
 #include "inferred_information.hpp"
+#include "visitor.hpp"
 
 static bool
 irexprUsesBadPtr(const IRExpr *e)
 {
-	struct : public IRExprTransformer {
-		bool res;
-		IRExpr *transformIex(IRExprUnop *ieg) {
+	struct {
+		static visit_result Unop(void *, const IRExprUnop *ieg) {
 			if (ieg->op == Iop_BadPtr)
-				res = true;
-			return IRExprTransformer::transformIex(ieg);
+				return visit_abort;
+			return visit_continue;
 		}
-	} doit;
-	doit.res = false;
-	doit.doit(const_cast<IRExpr *>(e));
-	if (TIMEOUT)
-		abort();
-	return doit.res;
+	} foo;
+	static irexpr_visitor<void> visitor;
+	visitor.Unop = foo.Unop;
+	return visit_irexpr((void *)NULL, &visitor, e) == visit_abort;
 }
 
 static bool

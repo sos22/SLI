@@ -17,6 +17,7 @@
 #include "oracle.hpp"
 #include "crashcfg.hpp"
 #include "offline_analysis.hpp"
+#include "visitor.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -1363,18 +1364,20 @@ buildPatch(patch &p,
 }
 
 static void
-findRelevantMais(IRExpr *iex, std::set<MemoryAccessIdentifier> &out)
+findRelevantMais(const IRExpr *iex, std::set<MemoryAccessIdentifier> &out)
 {
-	struct : public IRExprTransformer {
-		std::set<MemoryAccessIdentifier> *out;
-		IRExpr *transformIex(IRExprHappensBefore *hb) {
+	struct {
+		static visit_result HappensBefore(
+			std::set<MemoryAccessIdentifier> *out,
+			const IRExprHappensBefore *hb) {
 			out->insert(hb->before);
 			out->insert(hb->after);
-			return hb;
+			return visit_continue;
 		}
-	} doit;
-	doit.out = &out;
-	doit.doit(iex);
+	} foo;
+	static irexpr_visitor<std::set<MemoryAccessIdentifier> > visitor;
+	visitor.HappensBefore = foo.HappensBefore;
+	visit_irexpr(&out, &visitor, iex);
 }
 
 static void

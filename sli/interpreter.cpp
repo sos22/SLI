@@ -14,6 +14,7 @@
 #include "main_util.h"
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
+#include "visitor.hpp"
 
 #define FOOTSTEP_REGS_ONLY
 #include "ppres.h"
@@ -1501,27 +1502,22 @@ optimiseIRSB(IRSB *irsb)
 	} useTmps;
 	useTmps.tmps = &tmps;
 	struct {
-		struct mentionsRegister : public IRExprTransformer {
-			const threadAndRegister &tr;
-			mentionsRegister(const threadAndRegister &_tr)
-				: tr(_tr)
-			{}
-			IRExpr *transformIex(IRExprGet *ieg) {
-				if (ieg->reg == tr)
-					abortTransform();
-				return ieg;
-			}
-			bool operator()(IRExpr *a) {
-				aborted = false;
-				doit(a);
-				return aborted;
-			}
-		};
+		static visit_result Get(const threadAndRegister *c, const IRExprGet *ieg) {
+			if (ieg->reg == *c)
+				return visit_abort;
+			else
+				return visit_continue;
+		}
+		bool mentionsRegister(const threadAndRegister &tr, const IRExpr *e)
+		{
+			static irexpr_visitor<const threadAndRegister> visitor;
+			visitor.Get = Get;
+			return visit_irexpr(&tr, &visitor, e) == visit_abort;
+		}
 		std::map<threadAndRegister, IRExpr *> *tmps;
 		void operator()(const threadAndRegister &tr) {
-			mentionsRegister mr(tr);
 			for (auto it = tmps->begin(); it != tmps->end(); ) {
-				if (mr(it->second))
+				if (mentionsRegister(tr, it->second))
 					tmps->erase(it++);
 				else
 					it++;
@@ -1591,14 +1587,16 @@ optimiseIRSB(IRSB *irsb)
 	std::set<threadAndRegister> neededRegs;
 	struct : public IRExprTransformer {
 		std::set<threadAndRegister> *neededRegs;
-		IRExpr *transformIex(IRExprGet *ieg) {
+		static visit_result Get(std::set<threadAndRegister> *neededRegs, const IRExprGet *ieg) {
 			neededRegs->insert(ieg->reg);
-			return ieg;
+			return visit_continue;
 		}
 		void operator()(IRExpr **i) {
+			static irexpr_visitor<std::set<threadAndRegister> > visitor;
+			visitor.Get = Get;
 			if (*i) {
 				*i = simplifyIRExpr(*i, AllowableOptimisations::defaultOptimisations);
-				doit(*i);
+				visit_irexpr(neededRegs, &visitor, *i);
 			}
 		}
 	} useExpr;

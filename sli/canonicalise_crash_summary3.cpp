@@ -12,6 +12,7 @@
 #include "alloc_mai.hpp"
 #include "dummy_oracle.hpp"
 #include "MachineAliasingTable.hpp"
+#include "visitor.hpp"
 
 #ifndef NDEBUG
 static bool debug_simplify_assuming_survive = false;
@@ -74,19 +75,20 @@ static TimeoutTimer timeoutTimer;
 static void
 enumRegisters(const IRExpr *input, reg_set_t *out)
 {
-	struct : public IRExprTransformer {
-		reg_set_t *out;
-		IRExpr *transformIex(IRExprGet *ieg) {
+	struct {
+		static visit_result f(reg_set_t *out, const IRExprGet *ieg) {
 			out->insert(reg_or_free_var(ieg->reg));
-			return ieg;
+			return visit_continue;
 		}
-		IRExpr *transformIex(IRExprFreeVariable *ieg) {
+		static visit_result g(reg_set_t *out, const IRExprFreeVariable *ieg) {
 			out->insert(reg_or_free_var(ieg->id));
-			return ieg;
+			return visit_continue;
 		}
-	} doit;
-	doit.out = out;
-	doit.doit(const_cast<IRExpr *>(input));
+	} foo;
+	static irexpr_visitor<reg_set_t> visitor;
+	visitor.Get = foo.f;
+	visitor.FreeVariable = foo.g;
+	visit_irexpr(out, &visitor, input);
 }
 
 template <typename t, typename compare>
@@ -139,28 +141,48 @@ struct _findRegisterMultiplicity : public IRExprTransformer {
 	{}
 };
 
+struct _findRegCtxt {
+	const reg_or_free_var &r;
+	int multiplicity;
+	_findRegCtxt(const reg_or_free_var &_r)
+		: r(_r), multiplicity(0)
+	{}
+};
+
 static int
 findRegisterMultiplicity(const IRExpr *iex, const reg_or_free_var &r)
 {
-	_findRegisterMultiplicity doit(r);
-	doit.doit(const_cast<IRExpr *>(iex));
-	return doit.multiplicity;
+	struct {
+		static visit_result Get(_findRegCtxt *ctxt, const IRExprGet *ieg) {
+			if (ieg == ctxt->r)
+				ctxt->multiplicity++;
+			return visit_continue;
+		}
+		static visit_result FreeVariable(_findRegCtxt *ctxt, const IRExprFreeVariable *ieg) {
+			if (ieg == ctxt->r)
+				ctxt->multiplicity++;
+			return visit_continue;
+		}
+	} foo;
+	static irexpr_visitor<_findRegCtxt> visitor;
+	visitor.Get = foo.Get;
+	visitor.FreeVariable = foo.FreeVariable;
+	_findRegCtxt ctxt(r);
+	visit_irexpr(&ctxt, &visitor, iex);
+	return ctxt.multiplicity;
 }
 
 static bool
-mentionsHBEdge(IRExpr *a)
+mentionsHBEdge(const IRExpr *a)
 {
-	struct : public IRExprTransformer {
-		bool res;
-		IRExpr *transformIex(IRExprHappensBefore *hb) {
-			res = true;
-			abortTransform();
-			return hb;
+	struct {
+		static visit_result HappensBefore(void *, const IRExprHappensBefore *) {
+			return visit_abort;
 		}
-	} doit;
-	doit.res = false;
-	doit.doit(a);
-	return doit.res;
+	} foo;
+	static irexpr_visitor<void> visitor;
+	visitor.HappensBefore = foo.HappensBefore;
+	return visit_irexpr((void *)NULL, &visitor, a) == visit_abort;
 }
 
 static IRExpr *

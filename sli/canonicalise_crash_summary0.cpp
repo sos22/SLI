@@ -5,6 +5,7 @@
 #include "allowable_optimisations.hpp"
 #include "state_machine.hpp"
 #include "sat_checker.hpp"
+#include "visitor.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -333,18 +334,17 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 
 	/* Find references of the second sense */
 	{
-		struct : public StateMachineTransformer {
-			bool res;
-			IRExpr *transformIex(IRExprGet *ieg) {
+		struct {
+			static visit_result Get(void *, const IRExprGet *ieg) {
 				if (ieg->reg.isReg())
-					res = true;
-				return ieg;
+					return visit_abort;
+				else
+					return visit_continue;
 			}
-			bool rewriteNewStates() const { return false; }
-		} checkForRegisterReferences;
-		checkForRegisterReferences.res = false;
-		transformCrashSummary(cs, checkForRegisterReferences);
-		if (checkForRegisterReferences.res) {
+		} foo;
+		static irexpr_visitor<void> visitor;
+		visitor.Get = foo.Get;
+		if (visit_crash_summary((void *)NULL, &visitor, cs) == visit_abort) {
 			for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
 						       saneIterator(cs->storeMachine->cfg_roots));
 			     !it.finished();

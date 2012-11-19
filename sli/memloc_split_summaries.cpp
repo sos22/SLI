@@ -5,27 +5,28 @@
 #include "sli.h"
 #include "inferred_information.hpp"
 #include "offline_analysis.hpp"
+#include "visitor.hpp"
 
 static int
 nr_distinct_memory_locations(CrashSummary *summary)
 {
 	summary = internCrashSummary(summary);
-	struct : public StateMachineTransformer {
-		std::set<IRExpr *> addrs;
-		StateMachineSideEffectLoad *transformOneSideEffect(
-			StateMachineSideEffectLoad *sel, bool *) {
-			addrs.insert(sel->addr);
-			return NULL;
+	struct {
+		static visit_result Load(std::set<IRExpr *> *addrs, const StateMachineSideEffectLoad *l) {
+			addrs->insert(l->addr);
+			return visit_continue;
 		}
-		StateMachineSideEffectStore *transformOneSideEffect(
-			StateMachineSideEffectStore *ses, bool *) {
-			addrs.insert(ses->addr);
-			return NULL;
+		static visit_result Store(std::set<IRExpr *> *addrs, const StateMachineSideEffectStore *l) {
+			addrs->insert(l->addr);
+			return visit_continue;
 		}
-		bool rewriteNewStates() const { return false; }
-	} doit;
-	transformCrashSummary(summary, doit);
-	return doit.addrs.size();
+	} foo;
+	static state_machine_visitor<std::set<IRExpr *> > visitor;
+	visitor.Load = foo.Load;
+	visitor.Store = foo.Store;
+	std::set<IRExpr *> addrs;
+	visit_crash_summary(&addrs, &visitor, summary);
+	return addrs.size();
 }
 
 int

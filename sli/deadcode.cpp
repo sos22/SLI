@@ -3,6 +3,7 @@
 #include "sli.h"
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
+#include "visitor.hpp"
 
 namespace _deadCode {
 /* unconfuse emacs */
@@ -233,33 +234,31 @@ class LivenessEntry {
 	small_set<threadAndRegister, 8> liveDataOnly;
 	small_set<threadAndRegister, 8> livePointer;
 public:
-	void useExpressionData(IRExpr *e)
+	void useExpressionData(const IRExpr *e)
 	{
-		class _ : public IRExprTransformer {
-			LivenessEntry &out;
-			IRExpr *transformIex(IRExprGet *g) {
-				if (!out.livePointer.contains(g->reg))
-					out.liveDataOnly.insert(g->reg);
-				return IRExprTransformer::transformIex(g);
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				if (!out->livePointer.contains(g->reg))
+					out->liveDataOnly.insert(g->reg);
+				return visit_continue;
 			}
-		public:
-			_(LivenessEntry &_out) : out(_out) {}
-		} t(*this);
-		t.doit(e);
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_irexpr(this, &visitor, e);
 	}
 	void useExpressionPointer(IRExpr *e)
 	{
-		class _ : public IRExprTransformer {
-			LivenessEntry &out;
-			IRExpr *transformIex(IRExprGet *g) {
-				out.livePointer.insert(g->reg);
-				out.liveDataOnly.erase(g->reg);
-				return IRExprTransformer::transformIex(g);
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				out->livePointer.insert(g->reg);
+				out->liveDataOnly.erase(g->reg);
+				return visit_continue;
 			}
-		public:
-			_(LivenessEntry &_out) : out(_out) {}
-		} t(*this);
-		t.doit(e);
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_irexpr(this, &visitor, e);
 	}
 
 	void useSideEffect(StateMachineSideEffect *smse)
@@ -408,17 +407,17 @@ public:
 };
 
 static void
-enumRegisters(IRExpr *e, std::set<threadAndRegister> &regs)
+enumRegisters(const IRExpr *e, std::set<threadAndRegister> &regs)
 {
-	struct : public IRExprTransformer {
-		std::set<threadAndRegister> *out;
-		IRExpr *transformIex(IRExprGet *ieg) {
+	struct {		
+		static visit_result f(std::set<threadAndRegister> *out, const IRExprGet *ieg) {
 			out->insert(ieg->reg);
-			return ieg;
+			return visit_continue;
 		}
-	} doit;
-	doit.out = &regs;
-	doit.doit(e);
+	} foo;
+	static irexpr_visitor<std::set<threadAndRegister> > visitor;
+	visitor.Get = foo.f;
+	visit_irexpr(&regs, &visitor, e);
 }
 
 static StateMachine *
