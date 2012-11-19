@@ -3277,25 +3277,3 @@ isBadAddress(IRExpr *e)
 	return e->tag == Iex_Const &&
 		(long)((IRExprConst *)e)->con->Ico.U64 < 4096;
 }
-
-bool
-definitelyUnevaluatable(IRExpr *e)
-{
-	if (TIMEOUT)
-		return false;
-	class _ : public IRExprTransformer {
-	public:
-		bool res;
-
-		IRExpr *transformIex(IRExprLoad *e) {
-			if (isBadAddress(e->addr))
-				res = true;
-			return IRExprTransformer::transformIex(e);
-		}
-		_() : res (false)
-		{}
-	} t;
-	t.doit(e);
-	return t.res;
-}
-

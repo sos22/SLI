@@ -7,7 +7,6 @@ class Oracle;
 
 IRExpr *optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something);
 bool isBadAddress(IRExpr *e);
-bool definitelyUnevaluatable(IRExpr *e);
 bool definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt);
 bool definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt);
 IRExpr *simplifyIRExpr(IRExpr *a, const IRExprOptimisations &opt);

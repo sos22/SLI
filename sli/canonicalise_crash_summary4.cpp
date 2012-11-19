@@ -65,7 +65,6 @@ class EnumRegistersTransformer : public IRExprTransformer {
 		return iex;
 	}
 	reg_set_t &res;
-	bool rewriteNewStates() const { return false; }
 public:
 	EnumRegistersTransformer(reg_set_t &_res)
 		: res(_res)
