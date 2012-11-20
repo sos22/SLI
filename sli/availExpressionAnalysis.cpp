@@ -532,6 +532,13 @@ applyAvailSet(bbdd::scope *scope, const avail_t &avail, bbdd *expr, bool use_ass
 	applyAvailTransformer aat(avail, use_assumptions, opt);
 	return aat.transform_bbdd(scope, expr, done_something);
 }
+static smrbdd *
+applyAvailSet(bbdd::scope *bscope, smrbdd::scope *scope, const avail_t &avail, smrbdd *expr, bool use_assumptions, bool *done_something,
+	      const AllowableOptimisations &opt)
+{
+	applyAvailTransformer aat(avail, use_assumptions, opt);
+	return aat.transform_smrbdd(bscope, scope, expr, done_something);
+}
 
 /* Slightly misnamed: this also propagates copy operations.  Also, it
    doesn't so much eliminate loads are replace them with copies of
@@ -794,8 +801,6 @@ buildNewStateMachineWithLoadsEliminated(
 	bool *done_something,
 	std::map<const StateMachineState *, int> &edgeLabels)
 {
-	if (sm->type == StateMachineState::Terminal)
-		return sm;
 	if (memo.count(sm)) {
 		/* We rely on whoever it was that set memo[sm] having
 		 * also set *done_something if appropriate. */
@@ -833,8 +838,14 @@ buildNewStateMachineWithLoadsEliminated(
 		res = new StateMachineSideEffecting(smp, newEffect);
 		break;
 	}
-	case StateMachineState::Terminal:
-		abort();
+	case StateMachineState::Terminal: {
+		StateMachineTerminal *smt = (StateMachineTerminal *)sm;
+		avail.calcRegisterMap(opt);
+		res = new StateMachineTerminal(
+			smt,
+			applyAvailSet(&scopes->bools, &scopes->smrs, avail, smt->res, true, done_something, opt));
+		break;
+	}
 	}
 
 	memo[sm] = res;
