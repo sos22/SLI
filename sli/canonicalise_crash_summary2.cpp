@@ -11,7 +11,8 @@
 #include "visitor.hpp"
 
 static StateMachine *
-optimiseStateMachineAssuming(StateMachine *sm,
+optimiseStateMachineAssuming(SMScopes *scopes,
+			     StateMachine *sm,
 			     IRExpr *assumption,
 			     bool assumptionIsTrue)
 {
@@ -21,7 +22,9 @@ optimiseStateMachineAssuming(StateMachine *sm,
 		if ( (assumptionIsTrue && a->op == Iop_And1) ||
 		     (!assumptionIsTrue && a->op == Iop_Or1) ) {
 			for (int i = 0; i < a->nr_arguments; i++)
-				sm = optimiseStateMachineAssuming(sm, a->contents[i],
+				sm = optimiseStateMachineAssuming(scopes,
+								  sm,
+								  a->contents[i],
 								  assumptionIsTrue);
 			return sm;
 		}
@@ -29,7 +32,7 @@ optimiseStateMachineAssuming(StateMachine *sm,
 	if (assumption->tag == Iex_Unop) {
 		IRExprUnop *a = (IRExprUnop *)assumption;
 		if (a->op == Iop_Not1)
-			return optimiseStateMachineAssuming(sm, a->arg,
+			return optimiseStateMachineAssuming(scopes, sm, a->arg,
 							    !assumptionIsTrue);
 	}
 
@@ -77,7 +80,7 @@ optimiseStateMachineAssuming(StateMachine *sm,
 	} doit;
 	doit.assumption = assumption;
 	doit.assumptionIsTrue = assumptionIsTrue;
-	return doit.transform(sm);
+	return doit.transform(scopes, sm);
 }
 
 static void
@@ -167,22 +170,22 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 			return input;
 
 		cnf_condition = internIRExpr(cnf_condition, intern);
-		input->loadMachine = optimiseStateMachineAssuming(input->loadMachine, cnf_condition,
+		input->loadMachine = optimiseStateMachineAssuming(input->scopes,
+								  input->loadMachine,
+								  cnf_condition,
 								  true);
-		input->storeMachine = optimiseStateMachineAssuming(input->storeMachine, cnf_condition,
+		input->storeMachine = optimiseStateMachineAssuming(input->scopes,
+								   input->storeMachine,
+								   cnf_condition,
 								   true);
 	}
 
 	sm = input->loadMachine;
 	VexPtr<MaiMap, &ir_heap> mai(input->mai);
-	input->loadMachine = removeAnnotations(mai, input->loadMachine, optIn.enableignoreSideEffects(), oracle, true, token);
+	input->loadMachine = removeAnnotations(input->scopes, mai, input->loadMachine, optIn.enableignoreSideEffects(), oracle, true, token);
 
 	sm = input->storeMachine;
-	input->storeMachine = removeAnnotations(mai, input->storeMachine, optIn, oracle, true, token);
-
-	if (input->loadMachine->root == StateMachineTerminal::unreached() ||
-	    input->storeMachine->root == StateMachineTerminal::unreached())
-		input->verificationCondition = IRExpr_Const_U1(false);
+	input->storeMachine = removeAnnotations(input->scopes, mai, input->storeMachine, optIn, oracle, true, token);
 
 	std::set<std::pair<unsigned, CfgLabel> > machineRoots;
 	for (auto it = input->loadMachine->cfg_roots.begin();
@@ -214,7 +217,8 @@ main(int argc, char *argv[])
 	VexPtr<CrashSummary, &ir_heap> summary;
 	char *first_line;
 
-	summary = readBugReport(argv[1], &first_line);
+	SMScopes scopes;
+	summary = readBugReport(&scopes, argv[1], &first_line);
 	VexPtr<OracleInterface> oracle(new DummyOracle(summary));
 
 	summary = canonicalise_crash_summary(

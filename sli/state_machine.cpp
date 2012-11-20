@@ -24,20 +24,17 @@ static unsigned current_optimisation_gen;
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
 VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> StateMachineSideEffectStartAtomic::singleton;
 VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> StateMachineSideEffectEndAtomic::singleton;
-VexPtr<StateMachineTerminal, &ir_heap> StateMachineTerminal::_crash;
-VexPtr<StateMachineTerminal, &ir_heap> StateMachineTerminal::_survive;
-VexPtr<StateMachineTerminal, &ir_heap> StateMachineTerminal::_unreached;
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(7.3);
 
 StateMachine *
-StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachine::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
 	current_optimisation_gen++;
 	if (current_optimisation_gen == 0)
 		current_optimisation_gen = 1;
 
 	bool b = false;
-	StateMachineState *new_root = root->optimise(opt, &b);
+	StateMachineState *new_root = root->optimise(scopes, opt, &b);
 	if (b) {
 		*done_something = true;
 		return new StateMachine(new_root, cfg_roots);
@@ -46,94 +43,55 @@ StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 	}
 }
 
-static bool
-irexprUsesRegister(const IRExpr *what, const threadAndRegister &tr)
-{
-	struct {
-		static visit_result Get(const threadAndRegister *tr, const IRExprGet *ieg) {
-			if (ieg->reg == *tr)
-				return visit_abort;
-			else
-				return visit_continue;
-		}
-	} foo;
-	static irexpr_visitor<const threadAndRegister> visitor;
-	visitor.Get = foo.Get;
-	return visit_irexpr(&tr, &visitor, what) == visit_abort;
-}
-
 StateMachineState *
-StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
 	if (current_optimisation_gen == last_optimisation_gen)
 		return this;
 	last_optimisation_gen = current_optimisation_gen;
 
-	if (trueTarget == StateMachineTerminal::unreached()) {
-		*done_something = true;
-		if (falseTarget == StateMachineTerminal::unreached())
-			return StateMachineTerminal::unreached();
-		return (new StateMachineSideEffecting(
-				dbg_origin,
-				new StateMachineSideEffectAssertFalse(
-					condition,
-					true),
-				falseTarget))->optimise(opt, done_something);
-	}
-	if (falseTarget == StateMachineTerminal::unreached()) {
-		*done_something = true;
-		return (new StateMachineSideEffecting(
-				dbg_origin,
-				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(
-						Iop_Not1,
-						condition),
-					true),
-				trueTarget))->optimise(opt, done_something);
-	}
 	if (trueTarget == falseTarget) {
 		*done_something = true;
 		return trueTarget;
 	}
-	condition = optimiseIRExprFP(condition, opt, done_something);
-	if (condition->tag == Iex_Const) {
+	if (trueTarget->type == StateMachineState::Terminal &&
+	    falseTarget->type == StateMachineState::Terminal) {
 		*done_something = true;
-		if (((IRExprConst *)condition)->Ico.U1)
-			return trueTarget->optimise(opt, done_something);
+		return new StateMachineTerminal(
+			dbg_origin,
+			smrbdd::ifelse(
+				&scopes->smrs,
+				condition,
+				((StateMachineTerminal *)trueTarget)->res,
+				((StateMachineTerminal *)falseTarget)->res));
+	}
+	if (condition->isLeaf) {
+		*done_something = true;
+		if (condition->content.leaf)
+			return trueTarget->optimise(scopes, opt, done_something);
 		else
-			return falseTarget->optimise(opt, done_something);
+			return falseTarget->optimise(scopes, opt, done_something);
 	}
-	if (condition->tag == Iex_Unop && ((IRExprUnop *)condition)->op == Iop_Not1) {
-		*done_something = true;
-		condition = ((IRExprUnop *)condition)->arg;
-		StateMachineState *t = trueTarget;
-		trueTarget = falseTarget;
-		falseTarget = t;
-	}
-	trueTarget = trueTarget->optimise(opt, done_something);
-	falseTarget = falseTarget->optimise(opt, done_something);
+	trueTarget = trueTarget->optimise(scopes, opt, done_something);
+	falseTarget = falseTarget->optimise(scopes, opt, done_something);
 
 	if (falseTarget->type == StateMachineState::Bifurcate) {
 		StateMachineBifurcate *falseBifur = (StateMachineBifurcate *)falseTarget;
 		if (falseTarget != falseBifur->falseTarget &&
 		    trueTarget == falseBifur->trueTarget) {
 			falseTarget = falseBifur->falseTarget;
-			condition = IRExpr_Binop(
-				Iop_Or1,
-				condition,
-				falseBifur->condition);
+			condition = bbdd::Or(&scopes->bools, condition, falseBifur->condition);
 			*done_something = true;
 			return this;
 		}
 		if (falseTarget != falseBifur->trueTarget &&
 		    trueTarget == falseBifur->falseTarget) {
 			falseTarget = falseBifur->trueTarget;
-			condition = IRExpr_Binop(
-				Iop_Or1,
-				condition,
-				IRExpr_Unop(
-					Iop_Not1,
-					falseBifur->condition));
+			condition =
+				bbdd::Or(&scopes->bools,
+					 condition,
+					 bbdd::invert(&scopes->bools,
+						      falseBifur->condition));
 			*done_something = true;
 			return this;
 		}
@@ -143,116 +101,29 @@ StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_so
 		if (trueTarget != trueBifur->trueTarget &&
 		    falseTarget == trueBifur->falseTarget) {
 			trueTarget = trueBifur->trueTarget;
-			condition = IRExpr_Binop(
-				Iop_And1,
-				condition,
-				trueBifur->condition);
+			condition =
+				bbdd::And(
+					&scopes->bools,
+					condition,
+					trueBifur->condition);
 			*done_something = true;
 			return this;
 		}
 		if (trueTarget != trueBifur->falseTarget &&
 		    falseTarget == trueBifur->trueTarget) {
 			trueTarget = trueBifur->falseTarget;
-			condition = IRExpr_Binop(
-				Iop_And1,
-				condition,
-				IRExpr_Unop(
-					Iop_Not1,
-					trueBifur->condition));
+			condition =
+				bbdd::And(
+					&scopes->bools,
+					condition,
+					bbdd::invert(
+						&scopes->bools,
+						trueBifur->condition));
 			*done_something = true;
 			return this;
 		}
 	}
 
-	StateMachineSideEffect *trueEffect = NULL;
-	StateMachineSideEffect *falseEffect = NULL;
-	if (trueTarget->type == StateMachineState::SideEffecting)
-		trueEffect = ((StateMachineSideEffecting *)trueTarget)->sideEffect;
-	if (falseTarget->type == StateMachineState::SideEffecting)
-		falseEffect = ((StateMachineSideEffecting *)falseTarget)->sideEffect;
-
-	if (trueEffect && trueEffect == falseEffect) {
-		/* Turn
-
-		   if (x) {
-		       a;
-		       b;
-		   } else {
-		       a;
-		       c;
-		   }
-
-		   into
-
-		   a;
-		   if (x) {
-		      b;
-		   } else {
-		      c;
-		   }
-
-		   Provided that a doesn't define any registers which
-		   x depends on. */
-		bool doit = true;
-		threadAndRegister modifiedReg(threadAndRegister::invalid());
-		if (trueEffect->definesRegister(modifiedReg) &&
-		    irexprUsesRegister(condition, modifiedReg))
-			doit = false;
-		if (doit) {
-			*done_something = true;
-			return (new StateMachineSideEffecting(
-					trueTarget->dbg_origin,
-					trueEffect,
-					new StateMachineBifurcate(
-						dbg_origin,
-						condition,
-						((StateMachineSideEffecting *)trueTarget)->target,
-						((StateMachineSideEffecting *)falseTarget)->target)))
-				->optimise(opt, done_something);
-		}
-	}
-
-	/* Try to pull assertions up above conditionals, so that
-	   they're available earlier.  Do it like this:
-
-	   if (x) { assert(foo); y; } else { assert(bar); z; }
-	   =>
-	   assert(x ? foo : bar);
-	   if (x) y; else z;
-
-	   If foo or bar don't exist then just substitute in the
-	   constant 1 and rely on the IRExpr simplifier to do
-	   something sensible with the ?: .
-	*/
-	IRExpr *trueAssert = NULL;
-	IRExpr *falseAssert = NULL;
-	if (trueEffect && trueEffect->type == StateMachineSideEffect::AssertFalse)
-		trueAssert = ((StateMachineSideEffectAssertFalse *)trueEffect)->value;
-	if (falseEffect && falseEffect->type == StateMachineSideEffect::AssertFalse)
-		falseAssert = ((StateMachineSideEffectAssertFalse *)falseEffect)->value;
-
-	if (trueAssert || falseAssert) {
-		*done_something = true;
-		/* Constant is 0 rather than 1 because these are
-		   AssertFalse expressions rather than Assert. */
-		IRExpr *compositeAssertion =
-			IRExpr_Mux0X(
-				condition,
-				falseAssert ? falseAssert : IRExpr_Const_U1(false),
-				trueAssert ? trueAssert : IRExpr_Const_U1(false));
-		compositeAssertion = optimiseIRExprFP(compositeAssertion, opt, done_something);
-		return (new StateMachineSideEffecting(
-				dbg_origin,
-				new StateMachineSideEffectAssertFalse(
-					compositeAssertion,
-					true),
-				new StateMachineBifurcate(
-					dbg_origin,
-					condition,
-					trueAssert ? ((StateMachineSideEffecting *)trueTarget)->target : trueTarget,
-					falseAssert ? ((StateMachineSideEffecting *)falseTarget)->target : falseTarget)))
-			->optimise(opt, done_something);
-	}
 	return this;
 }
 
@@ -551,14 +422,14 @@ StateMachineSideEffect::parse(StateMachineSideEffect **out,
  * labels in the target fields of state machine states until we have
  * find the state we're actually supposed to point at. */
 static bool
-parseStateMachineState(StateMachineState **out, const char *str, const char **suffix)
+parseStateMachineState(SMScopes *scopes, StateMachineState **out, const char *str, const char **suffix)
 {
 #define try_state_type(t)						\
 	{								\
 		StateMachine ## t *res;					\
 		/* shut compiler up */					\
 		res = (StateMachine ## t *)0xf001deadul;		\
-		if (StateMachine ## t :: parse(&res, str, suffix)) {	\
+		if (StateMachine ## t :: parse(scopes, &res, str, suffix)) { \
 			*out = res;					\
 			return true;					\
 		}							\
@@ -569,7 +440,8 @@ parseStateMachineState(StateMachineState **out, const char *str, const char **su
 }
 
 static bool
-parseOneState(std::map<int, StateMachineState *> &out,
+parseOneState(SMScopes *scopes,
+	      std::map<int, StateMachineState *> &out,
 	      const char *str,
 	      const char **suffix)
 {
@@ -581,8 +453,7 @@ parseOneState(std::map<int, StateMachineState *> &out,
 	if (!parseThisChar('l', str, &str) ||
 	    !parseDecimalInt(&label, str, &str) ||
 	    !parseThisString(": ", str, &str) ||
-	    !parseStateMachineState(&res, str, &str) ||
-	    !parseThisChar('\n', str, &str))
+	    !parseStateMachineState(scopes, &res, str, &str))
 		return false;
 	if (out.count(label))
 		return false;
@@ -592,13 +463,14 @@ parseOneState(std::map<int, StateMachineState *> &out,
 }
 
 static bool
-parseStateMachine(StateMachineState **out,
+parseStateMachine(SMScopes *scopes,
+		  StateMachineState **out,
 		  const char *str,
 		  const char **suffix,
 		  std::map<int, StateMachineState *> &labelToState)
 {
 	while (*str) {
-		if (!parseOneState(labelToState, str, &str))
+		if (!parseOneState(scopes, labelToState, str, &str))
 			break;
 	}
 	class _ {
@@ -729,7 +601,10 @@ parseCFG(std::vector<std::pair<unsigned, const CFGNode *> > &roots,
 }
 
 bool
-parseStateMachine(StateMachine **out, const char *str, const char **suffix,
+parseStateMachine(SMScopes *scopes,
+		  StateMachine **out,
+		  const char *str,
+		  const char **suffix,
 		  std::map<CfgLabel, const CFGNode *> &labelToNode)
 {
 	std::map<int, StateMachineState *> labelToState;
@@ -743,26 +618,26 @@ parseStateMachine(StateMachine **out, const char *str, const char **suffix,
 	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots;
 	if (!parseThisString("CFG:\n", str, &str) ||
 	    !parseCFG(cfg_roots, str, &str, labelToNode) ||
-	    !parseStateMachine(&root, str, suffix, labelToState))
+	    !parseStateMachine(scopes, &root, str, suffix, labelToState))
 		return false;
 	*out = new StateMachine(root, cfg_roots);
 	return true;
 }
 
 StateMachine *
-readStateMachine(int fd)
+readStateMachine(SMScopes *scopes, int fd)
 {
 	char *content = readfile(fd);
 	const char *end;
 	StateMachine *res;
-	if (!parseStateMachine(&res, content, &end) || *end)
+	if (!parseStateMachine(scopes, &res, content, &end) || *end)
 		errx(1, "error parsing state machine:\n%s", content);
 	free(content);
 	return res;
 }
 
 StateMachine *
-readStateMachine(const char *fname)
+readStateMachine(SMScopes *scopes, const char *fname)
 {
 	int fd = open(fname, O_RDONLY);
 	if (fd < 0)
@@ -772,7 +647,7 @@ readStateMachine(const char *fname)
 
 	const char *end;
 	StateMachine *res;
-	if (!parseStateMachine(&res, content, &end) || *end)
+	if (!parseStateMachine(scopes, &res, content, &end) || *end)
 		errx(1, "error parsing state machine:\n%s", content);
 	free(content);
 	return res;
@@ -940,26 +815,27 @@ replaceRegister(const threadAndRegister &reg, IRExpr *replaceWith, IRExpr *repla
 }
 
 StateMachineState *
-StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
 	if (current_optimisation_gen == last_optimisation_gen)
 		return this;
 	last_optimisation_gen = current_optimisation_gen;
 	if (!sideEffect) {
 		*done_something = true;
-		return target->optimise(opt, done_something);
+		return target->optimise(scopes, opt, done_something);
 	}
 
-	if (target == StateMachineTerminal::unreached()) {
+	if (target->type == StateMachineState::Terminal &&
+	    ((StateMachineTerminal *)target)->res == scopes->smrs.cnst(smr_unreached)) {
 		*done_something = true;
 		return target;
 	}
 	if (sideEffect->type == StateMachineSideEffect::Unreached) {
 		*done_something = true;
-		return StateMachineTerminal::unreached();
+		return new StateMachineTerminal(dbg_origin, scopes->smrs.cnst(smr_unreached));
 	}
 	sideEffect = sideEffect->optimise(opt, done_something);
-	target = target->optimise(opt, done_something);
+	target = target->optimise(scopes, opt, done_something);
 	if (!sideEffect) {
 		assert(*done_something);
 		return target;
@@ -978,7 +854,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 				new StateMachineSideEffecting(
 					dbg_origin,
 					sideEffect,
-					t->target)))->optimise(opt, done_something);
+					t->target)))->optimise(scopes, opt, done_something);
 	}
 
 	if (sideEffect->type == StateMachineSideEffect::StartAtomic) {
@@ -1000,7 +876,7 @@ StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *don
 						new StateMachineSideEffecting(
 							dbg_origin,
 							sideEffect,
-							t->target)))->optimise(opt, done_something);
+							t->target)))->optimise(scopes, opt, done_something);
 			}
 		} else if (target->type == StateMachineState::Terminal) {
 			/* START_ATOMIC followed by a terminal is a
@@ -1353,3 +1229,119 @@ AllowableOptimisations::fromFile(std::set<DynAnalysisRip> *is, std::set<DynAnaly
 	free(content);
 	return res;
 }
+
+void
+StateMachineBifurcate::prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
+{
+	fprintf(f, "%s: if ()\n", dbg_origin.name());
+	condition->prettyPrint(f);
+	fprintf(f, "then: l%d\n else: l%d\n",
+		labels[trueTarget], labels[falseTarget]);
+}
+bool
+StateMachineBifurcate::parse(SMScopes *scopes, StateMachineBifurcate **out, const char *str, const char **suffix)
+{
+	VexRip origin;
+	int targ1;
+	int targ2;
+	bbdd *condition;
+	if (!parseVexRip(&origin, str, &str) ||
+	    !parseThisString(": if ()", str, &str) ||
+	    !bbdd::parse(&scopes->bools, &condition, str, &str) ||
+	    !parseThisString("then: l", str, &str) ||
+	    !parseDecimalInt(&targ1, str, &str) ||
+	    !parseThisString(" else: l", str, &str) ||
+	    !parseDecimalInt(&targ2, str, &str) ||
+	    !parseThisChar('\n', str, suffix))
+		return false;
+	*out = new StateMachineBifurcate(origin,
+					 condition,
+					 (StateMachineState *)targ1,
+					 (StateMachineState *)targ2);
+	return true;
+}
+
+void
+StateMachineTerminal::prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const
+{
+	fprintf(f, "%s: terminal:\n", dbg_origin.name());
+	res->prettyPrint(f);
+}
+bool
+StateMachineTerminal::parse(SMScopes *scopes, StateMachineTerminal **out, const char *str, const char **suffix)
+{
+	VexRip origin;
+	smrbdd *res;
+	if (!parseVexRip(&origin, str, &str) ||
+	    !parseThisString(": terminal:", str, &str) ||
+	    !smrbdd::parse(&scopes->smrs, &res, str, suffix))
+		return false;
+	*out = new StateMachineTerminal(origin, res);
+	return true;
+}
+
+bool
+parseSmr(StateMachineRes *out, const char *str, const char **suffix)
+{
+	if (parseThisString("crash", str, suffix)) {
+		*out = smr_crash;
+		return true;
+	} else if (parseThisString("survive", str, suffix)) {
+		*out = smr_survive;
+		return true;
+	} else if (parseThisString("unreached", str, suffix)) {
+		*out = smr_unreached;
+		return true;
+	} else {
+		return false;
+	}
+}
+
+template <typename t> static void
+enumConditions(t *bdd, std::vector<IRExpr *> &out)
+{
+	if (bdd->isLeaf)
+		return;
+	out.push_back(bdd->content.condition);
+	enumConditions(bdd->content.trueBranch, out);
+	enumConditions(bdd->content.falseBranch, out);
+}
+
+void
+StateMachineTerminal::inputExpressions(std::vector<IRExpr *> &out)
+{
+	enumConditions(res, out);
+}
+
+void
+StateMachineBifurcate::inputExpressions(std::vector<IRExpr *> &out)
+{
+	enumConditions(condition, out);
+}
+
+bool
+SMScopes::read(const char *fname)
+{
+	int fd = open(fname, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	char *content = readfile(fd);
+	close(fd);
+	const char *end;
+	bool res = parse(content, &end);
+	free(content);
+	return res;
+}
+
+void
+SMScopes::prettyPrint(FILE *f) const
+{
+	ordering.prettyPrint(f);
+}
+
+bool
+SMScopes::parse(const char *buf, const char **end)
+{
+	return ordering.parse(buf, end);
+}
+

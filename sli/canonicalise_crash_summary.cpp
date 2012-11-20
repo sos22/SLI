@@ -536,11 +536,9 @@ main(int argc, char *argv[])
 
 	CrashSummary *summary;
 	char *first_line;
-
-	summary = readBugReport(argv[1], &first_line);
-
+	SMScopes scopes;
+	summary = readBugReport(&scopes, argv[1], &first_line);
 	summary = canonicalise_crash_summary(summary);
-
 	FILE *f = fopen(argv[2], "w");
 	fprintf(f, "%s\n", first_line);
 	printCrashSummary(summary, f);

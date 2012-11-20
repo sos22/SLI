@@ -12,6 +12,8 @@
 #include "allowable_optimisations.hpp"
 
 #define UNDEFINED_EXPR ((IRExpr *)3)
+#define UNDEFINED_BBDD ((bbdd *)5)
+#define UNDEFINED_SMRBDD ((smrbdd *)7)
 
 #ifndef NDEBUG
 static bool debug_undefinedness = false;
@@ -337,8 +339,52 @@ undefinednessExpression(StateMachineState *sm, IRExpr *a, const VariableDefinedn
 	abort();
 }
 
+static bbdd *
+undefinednessBBDD(bbdd::scope *scope,
+		  StateMachineState *sm,
+		  bbdd *what,
+		  const VariableDefinednessMap &vdm,
+		  const IRExprOptimisations &opt)
+{
+	if (what->isLeaf)
+		return what;
+	IRExpr *c = undefinednessExpression(sm, what->content.condition, vdm, opt);
+	if (c == UNDEFINED_EXPR)
+		return UNDEFINED_BBDD;
+	bbdd *trueB = undefinednessBBDD(scope, sm, what->content.trueBranch, vdm, opt);
+	bbdd *falseB = undefinednessBBDD(scope, sm, what->content.falseBranch, vdm, opt);
+	if (trueB == UNDEFINED_BBDD)
+		return falseB;
+	if (falseB == UNDEFINED_BBDD)
+		return trueB;
+	return scope->makeInternal(c, trueB, falseB);
+}
+
+static smrbdd *
+undefinednessSmrBDD(smrbdd::scope *scope,
+		  StateMachineState *sm,
+		  smrbdd *what,
+		  const VariableDefinednessMap &vdm,
+		  const IRExprOptimisations &opt)
+{
+	if (what->isLeaf)
+		return what;
+	IRExpr *c = undefinednessExpression(sm, what->content.condition, vdm, opt);
+	if (c == UNDEFINED_EXPR)
+		return UNDEFINED_SMRBDD;
+	smrbdd *trueB = undefinednessSmrBDD(scope, sm, what->content.trueBranch, vdm, opt);
+	smrbdd *falseB = undefinednessSmrBDD(scope, sm, what->content.falseBranch, vdm, opt);
+	if (trueB == UNDEFINED_SMRBDD)
+		return falseB;
+	if (falseB == UNDEFINED_SMRBDD)
+		return trueB;
+	return scope->makeInternal(c, trueB, falseB);
+}
+
 static StateMachine *
-undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt,
+undefinednessSimplification(SMScopes *scopes,
+			    StateMachine *sm,
+			    const IRExprOptimisations &opt,
 			    bool *done_something)
 {
 	std::map<const StateMachineState *, int> stateLabels;
@@ -357,25 +403,52 @@ undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt,
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		StateMachineState *sm = *it;
 		switch (sm->type) {
-		case StateMachineState::Terminal:
+		case StateMachineState::Terminal: {
+			StateMachineTerminal *smt = (StateMachineTerminal *)sm;
+			smrbdd *res = undefinednessSmrBDD(&scopes->smrs, sm, smt->res, vdm, opt);
+			if (res != smt->res) {
+				*done_something = true;
+				if (res == UNDEFINED_SMRBDD) {
+					if (debug_undefinedness)
+						printf("l%d: terminal on undefined expression\n",
+						       stateLabels[sm]);
+					smt->res = scopes->smrs.cnst(smr_unreached);
+				} else {
+					if (debug_undefinedness) {
+						printf("l%d: terminal changed from:",
+						       stateLabels[sm]);
+						smt->res->prettyPrint(stdout);
+						printf("l%d: terminal changed to:",
+						       stateLabels[sm]);
+						res->prettyPrint(stdout);
+					}
+					smt->res = res;
+				}
+			}
 			break;
+		}
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-			IRExpr *e = undefinednessExpression(sm, smb->condition, vdm, opt);
+			bbdd *e = undefinednessBBDD(&scopes->bools, sm, smb->condition, vdm, opt);
 			if (e != smb->condition) {
 				*done_something = true;
-				if (e == UNDEFINED_EXPR) {
+				if (e == UNDEFINED_BBDD) {
 					if (debug_undefinedness)
 						printf("l%d: bifurcation on undefined value\n",
 						       stateLabels[sm]);
-					smb->trueTarget = StateMachineTerminal::unreached();
-					smb->falseTarget = StateMachineTerminal::unreached();
+					smb->falseTarget = smb->trueTarget =
+						new StateMachineTerminal(
+							smb->dbg_origin,
+							scopes->smrs.cnst(smr_unreached));
 				} else {
-					if (debug_undefinedness)
-						printf("l%d: condition changed from %s to %s\n",
-						       stateLabels[sm],
-						       nameIRExpr(smb->condition),
-						       nameIRExpr(e));
+					if (debug_undefinedness) {
+						printf("l%d: condition changed from:\n",
+						       stateLabels[sm]);
+						smb->condition->prettyPrint(stdout);
+						printf("l%d: condition changed to:\n",
+						       stateLabels[sm]);
+						e->prettyPrint(stdout);
+					}
 					smb->condition = e;
 				}
 			}
@@ -513,8 +586,8 @@ undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt,
 };
 
 StateMachine *
-undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt, bool *done_something)
+undefinednessSimplification(SMScopes *scopes, StateMachine *sm, const IRExprOptimisations &opt, bool *done_something)
 {
-	return _undefinedness::undefinednessSimplification(sm, opt, done_something);
+	return _undefinedness::undefinednessSimplification(scopes, sm, opt, done_something);
 }
 

@@ -361,11 +361,11 @@ public:
 
 template <typename constT, typename subtreeT> template <typename scopeT>
 subtreeT *
-const_bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp)
+const_bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp, constT defaultValue)
 {
 	subtreeT *res = zip(scope, from_enabling_internal<subtreeT, scopeT>(inp));
 	if (res == INTBDD_DONT_CARE)
-		return scope->cnst(0);
+		return scope->cnst(defaultValue);
 	else
 		return res;
 }
@@ -441,6 +441,74 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 			}
 		}
 		fprintf(f, "\n");
+	}
+}
+
+template <typename leafT, typename subtreeT> template <typename scopeT,
+						       subtreeT *(*parseLeaf)(scopeT *, const char *, const char **)> subtreeT *
+_bdd<leafT, subtreeT>::_parse(scopeT *scope,
+			      const char *str,
+			      const char **suffix,
+			      std::map<int, subtreeT *> &labels)
+{
+	int label = -1;
+	/* Discard whitespace */
+	parseThisChar(' ', str, &str);
+
+	/* Deal with references to elsewhere in the tree. */
+	if (parseThisString("[->", str, &str)) {
+		if (!parseDecimalInt(&label, str, &str) ||
+		    !parseThisString("]\n", str, suffix) ||
+		    !labels.count(label))
+			return NULL;
+		return labels[label];
+	}
+
+	/* Does it have a label? */
+	if (parseThisChar('[', str, &str)) {
+		/* Yes */
+		parseThisChar(' ', str, &str);
+		if (!parseDecimalInt(&label, str, &str) ||
+		    !parseThisChar(']', str, &str) ||
+		    labels.count(label))
+			return NULL;
+		parseThisChar(' ', str, &str);
+	}
+	subtreeT *res;
+	if (parseThisString("Leaf: ", str, &str)) {
+		res = parseLeaf(scope, str, &str);
+		if (!res || !parseThisChar('\n', str, suffix))
+			return NULL;
+	} else if (parseThisString("Mux: ", str, &str)) {
+		IRExpr *a;
+		if (!parseIRExpr(&a, str, &str))
+			return NULL;
+		subtreeT *t = _parse<scopeT, parseLeaf>(scope, str, &str, labels);
+		if (!t)
+			return NULL;
+		subtreeT *f = _parse<scopeT, parseLeaf>(scope, str, suffix, labels);
+		if (!f)
+			return NULL;
+		res = scope->makeInternal(a, t, f);
+	} else {
+		return NULL;
+	}
+	if (label != -1)
+		labels[label] = res;
+	return res;
+}
+
+template <typename leafT, typename subtreeT> template <typename scopeT,
+						       subtreeT *(*parseLeaf)(scopeT *scope, const char *, const char **)> bool
+_bdd<leafT, subtreeT>::_parse(scopeT *scope, subtreeT **root, const char *str, const char **suffix)
+{
+	std::map<int, subtreeT *> labels;
+	subtreeT *res = _parse<scopeT, parseLeaf>(scope, str, suffix, labels);
+	if (res) {
+		*root = res;
+		return true;
+	} else {
+		return false;
 	}
 }
 
@@ -666,15 +734,40 @@ bdd_ordering::prettyPrint(FILE *f) const
 	}
 }
 
-template void _bdd<int, intbdd>::prettyPrint(FILE *);
+bool
+bdd_ordering::parse(const char *buf, const char **end)
+{
+	if (!parseThisString("Variable rankings:\n", buf, &buf))
+		return false;
+	variableRankings.clear();
+	while (1) {
+		IRExpr *key;
+		long rank;
+		if (!parseIRExpr(&key, buf, &buf) ||
+		    !parseThisString("\t->\t", buf, &buf) ||
+		    !parseDecimalLong(&rank, buf, &buf) ||
+		    !parseThisChar('\n', buf, &buf))
+			break;
+		variableRankings[key] = rank;
+	}
+	*end = buf;
+	return true;
+}
+
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *const_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);
 template std::map<bool, bbdd *> const_bdd<bool, bbdd>::to_selectors(const_bdd_scope<bbdd> *, bbdd *);
 template bbdd *const_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *, bbdd *);
 
+template void _bdd<int, intbdd>::prettyPrint(FILE *);
+template bool _bdd<bool, bbdd>::_parse<const_bdd_scope<bbdd>, bbdd::parseBool>(const_bdd_scope<bbdd>*, bbdd **, const char *, const char **);
 template intbdd *const_bdd<int, intbdd>::assume(const_bdd_scope<intbdd> *, intbdd *, bbdd*);
-template intbdd *const_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &);
+template intbdd *const_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &, int);
 
+template void _bdd<StateMachineRes, smrbdd>::prettyPrint(FILE *);
+template bool _bdd<StateMachineRes, smrbdd>::_parse<const_bdd_scope<smrbdd>, smrbdd::parseLeaf>(const_bdd_scope<smrbdd>*, smrbdd **, const char *, const char **);
+template smrbdd *const_bdd<StateMachineRes, smrbdd>::assume(const_bdd_scope<smrbdd> *, smrbdd *, bbdd*);
 template smrbdd *const_bdd<StateMachineRes, smrbdd>::ifelse(const_bdd_scope<smrbdd> *, bbdd *, smrbdd *, smrbdd *);
 template std::map<StateMachineRes, bbdd *> const_bdd<StateMachineRes, smrbdd>::to_selectors(const_bdd_scope<bbdd> *, smrbdd *);
+template smrbdd *const_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, StateMachineRes);

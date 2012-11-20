@@ -96,12 +96,12 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 }
 
 StateMachineState *
-StateMachineTransformer::transformState(StateMachineState *s, bool *done_something)
+StateMachineTransformer::transformState(SMScopes *scopes, StateMachineState *s, bool *done_something)
 {
 	switch (s->type) {
 #define do_type(name)							\
 		case StateMachineState:: name :				\
-			return transformOneState((StateMachine ## name *)s, done_something);
+			return transformOneState(scopes, (StateMachine ## name *)s, done_something);
 		all_state_types(do_type);
 #undef do_type
 	}
@@ -188,7 +188,7 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 }
 
 StateMachine *
-StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
+StateMachineTransformer::transform(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
 	aborted = false;
 	currentState = NULL;
@@ -207,7 +207,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 		StateMachineState *s = *it;
 		assert(currentState == NULL);
 		currentState = s;
-		StateMachineState *res = transformState(s, done_something);
+		StateMachineState *res = transformState(scopes, s, done_something);
 		assert(currentState == s);
 		currentState = NULL;
 

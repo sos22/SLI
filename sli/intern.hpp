@@ -20,6 +20,7 @@ public:
 	std::set<StateMachineSideEffectPointerAliasing *> PointerAliasing;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineSideEffecting *> states_side_effect;
+	std::set<StateMachineTerminal *> states_terminal;
 	std::set<const CFGNode *> cfgNodesS;
 };
 

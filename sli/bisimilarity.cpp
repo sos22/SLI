@@ -115,6 +115,11 @@ equalModuloVariables(const IRExpr *a, const IRExpr *b)
 	abort();
 }
 
+static bool equalModuloVariables(bbdd *a, bbdd *b)
+{
+	return equalModuloVariables(bbdd::to_irexpr(a), bbdd::to_irexpr(b));
+}
+
 static bool
 equalModuloVariables(const StateMachineSideEffect *smse1,
 		     const StateMachineSideEffect *smse2)
@@ -598,7 +603,7 @@ unifyOutputs(const threadAndRegister &reg1, IRType ty, const std::set<threadAndR
 }
 		 
 static StateMachine *
-bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
+bisimilarityReduction(bbdd::scope *scope, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
 {
 	unsigned nextTmp = 0;
 	std::map<const StateMachineState *, int> stateLabels;
@@ -709,14 +714,14 @@ bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_som
 			for (auto it2 = set.begin(); it2 != set.end(); it2++)
 				conditions.insert(
 					std::pair<StateMachineState *, IRExpr *>
-					(*it2, ((StateMachineBifurcate *)*it2)->condition ));
+					(*it2, bbdd::to_irexpr(((StateMachineBifurcate *)*it2)->condition )));
 			StateMachineState **suffix;
 			IRExpr *unifiedCondition;
 			StateMachineState *replacementHead;
 			if (unifyExpressions(sm, stateLabels, conditions, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedCondition, &replacementHead)) {
 				*suffix = new StateMachineBifurcate(
 					representative->dbg_origin,
-					unifiedCondition,
+					bbdd::var(scope, unifiedCondition),
 					((StateMachineBifurcate *)representative)->trueTarget,
 					((StateMachineBifurcate *)representative)->falseTarget);
 				replacement = replacementHead;
@@ -890,8 +895,8 @@ bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_som
 }
 
 StateMachine *
-bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
+bisimilarityReduction(bbdd::scope *scope, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
 {
-	return _bisimilarity::bisimilarityReduction(sm, is_ssa, mai, done_something);
+	return _bisimilarity::bisimilarityReduction(scope, sm, is_ssa, mai, done_something);
 }
 

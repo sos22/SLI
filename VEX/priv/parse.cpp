@@ -63,6 +63,17 @@ bool parseDecimalInt(int *out, const char *str, const char **suffix)
   return true;
 }
 
+bool parseDecimalLong(long *out, const char *str, const char **suffix)
+{
+  long res;
+  errno = 0;
+  res = strtol(str, (char **)suffix, 10);
+  *out = res;
+  if (errno != 0 || *suffix == str)
+    return false;
+  return true;
+}
+
 bool parseDecimalUInt(unsigned *out, const char *str, const char **suffix)
 {
   long res;

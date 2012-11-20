@@ -47,7 +47,8 @@ main(int argc, char *argv[])
 			continue;
 		char *path = my_asprintf("%s/%s", argv[1], de->d_name);
 		char *metadata;
-		CrashSummary *summary = readBugReport(path, &metadata);
+		SMScopes scopes;
+		CrashSummary *summary = readBugReport(&scopes, path, &metadata);
 		free(path);
 
 		int nr_locs = nr_distinct_memory_locations(summary);

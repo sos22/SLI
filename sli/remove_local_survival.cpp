@@ -85,12 +85,12 @@ getExprLocalPart(IRExpr *input, IRExpr **localPart, IRExpr **remotePart, IROp sp
 static StateMachine *
 removeLocalSurvival(StateMachine *sm, const AllowableOptimisations &opt, bool *done_something)
 {
-	StateMachineState *assertFailedState;
+	StateMachineRes assertFailedRes;
 
 	if (opt.preferCrash())
-		assertFailedState = StateMachineTerminal::crash();
+		assertFailedRes = smr_crash;
 	else
-		assertFailedState = StateMachineTerminal::survive();
+		assertFailedRes = smr_survive;
 
 	std::set<StateMachineBifurcate *> bifurcations;
 	enumStates(sm, &bifurcations);

@@ -1130,7 +1130,8 @@ dataOfSideEffect(StateMachineSideEffect *s_effect, IRType ty)
 }
 
 static StateMachine *
-functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle,
+functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *sm,
+		      const AllowableOptimisations &opt, OracleInterface *oracle,
 		      const ControlDominationMap &cdm, bool *done_something)
 {
 	StackLayoutTable stackLayout;
@@ -1287,31 +1288,28 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 				new StateMachineSideEffectCopy(
 					l->target, d);
 		} else if (!it->second.mightLoadInitial) {
-			std::vector<std::pair<StateMachineState *, IRExpr *> > possibleInputs;
-			IRExpr *stateDominator = simplifyIRExpr(simplify_via_anf(cdm.get(it->first)), opt);
+#warning convert to an enabling table.
+			std::vector<std::pair<StateMachineState *, bbdd *> > possibleInputs;
+			bbdd *stateDominator = cdm.get(it->first);
 			possibleInputs.reserve(it->second.stores.size());
 			for (auto it2 = it->second.stores.begin(); it2 != it->second.stores.end(); it2++)
 				possibleInputs.push_back(
-					std::pair<StateMachineState *, IRExpr *>(
+					std::pair<StateMachineState *, bbdd *>(
 						*it2,
-						simplifyIRExpr(
-							simplify_via_anf(
-								optimiseAssuming(
-									cdm.get(*it2),
-									stateDominator)),
-							opt)));
+						bbdd::assume(
+							scope,
+							cdm.get(*it2),
+							stateDominator)));
 			if (debug_use_alias_table) {
-				printf("Consider replacing l%d (%s) with control-flow-based mux: ",
-				       stateLabels[it->first],
-				       nameIRExpr(stateDominator));
+				printf("Consider replacing l%d with control-flow-based mux.\nState dominator:\n",
+				       stateLabels[it->first]);
+				stateDominator->prettyPrint(stdout);
 				for (auto it2 = possibleInputs.begin();
 				     it2 != possibleInputs.end();
 				     it2++) {
-					if (it2 != possibleInputs.begin())
-						printf(", ");
-					printf("l%d[%s]", stateLabels[it2->first], nameIRExpr(it2->second));
+					printf("l%d:\n", stateLabels[it2->first]);
+					it2->second->prettyPrint(stdout);
 				}
-				printf("\n");
 			}
 			/* This is valid if it's guaranteed that
 			   precisely one of the input memory accesses
@@ -1326,16 +1324,21 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 				for (unsigned j = i + 1;
 				     !ambiguous_resolution && j < possibleInputs.size();
 				     j++) {
-					IRExpr *check =
-						IRExpr_Binop(
-							Iop_And1,
-							possibleInputs[i].second,
-							possibleInputs[j].second);
-					if (satisfiable(check, opt)) {
-						if (debug_use_alias_table)
-							printf("Ambiguous resolution: %s vs %s\n",
-							       nameIRExpr(possibleInputs[i].second),
-							       nameIRExpr(possibleInputs[j].second));
+					bbdd *check =
+						bbdd::assume(
+							scope,
+							bbdd::And(
+								scope,
+								possibleInputs[i].second,
+								possibleInputs[j].second),
+							stateDominator);
+					if (satisfiable(bbdd::to_irexpr(check), opt)) {
+						if (debug_use_alias_table) {
+							printf("Ambiguous resolution:\n");
+							possibleInputs[i].second->prettyPrint(stdout);
+							printf("--------- vs -----------\n");
+							possibleInputs[j].second->prettyPrint(stdout);
+						}
 						ambiguous_resolution = true;
 					}
 				}
@@ -1343,18 +1346,21 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 
 			if (!ambiguous_resolution) {
 				/* Now at least one must be true */
-				IRExprAssociative *checker =
-					IRExpr_Associative(
-						possibleInputs.size(),
-						Iop_Or1);
+				bbdd *checker = scope->cnst(false);
+				/* checker is true if any input is true */
 				for (unsigned x = 0; x < possibleInputs.size(); x++)
-					checker->contents[x] = possibleInputs[x].second;
-				checker->nr_arguments = possibleInputs.size();
-				IRExpr *c =
-					IRExpr_Binop(
-						Iop_And1,
-						stateDominator,
-						IRExpr_Unop(Iop_Not1, checker));
+					checker = bbdd::Or(
+						scope,
+						checker,
+						possibleInputs[x].second);
+				/* We can assume that the dominator holds */
+				checker = bbdd::assume(
+					scope,
+					checker,
+					stateDominator);
+				/* Now we need that to be unsatisfiable. */
+				checker = bbdd::invert(scope, checker);
+				IRExpr *c = bbdd::to_irexpr(checker);
 				if (satisfiable(c, opt)) {
 					if (debug_use_alias_table)
 						printf("Potentially null resolution: %s is satisfiable\n",
@@ -1365,7 +1371,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 					     x < possibleInputs.size();
 					     x++)
 						acc = IRExpr_Mux0X(
-							possibleInputs[x].second,
+							bbdd::to_irexpr(possibleInputs[x].second),
 							acc,
 							dataOfSideEffect(possibleInputs[x].first->getSideEffect(), l->type));
 					if (debug_use_alias_table)
@@ -1509,9 +1515,9 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 }
 
 StateMachine *
-functionAliasAnalysis(const MaiMap &decode, StateMachine *machine,
+functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *machine,
 		      const AllowableOptimisations &opt, OracleInterface *oracle,
 		      const ControlDominationMap &cdm, bool *done_something)
 {
-	return _realias::functionAliasAnalysis(decode, machine, opt, oracle, cdm, done_something);
+	return _realias::functionAliasAnalysis(scope, decode, machine, opt, oracle, cdm, done_something);
 }

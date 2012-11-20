@@ -9,6 +9,7 @@ bool parseThisString(const char *pattern,
 		     const char *str,
 		     const char **suffix);
 bool parseDecimalInt(int *out, const char *str, const char **suffix);
+bool parseDecimalLong(long *out, const char *str, const char **suffix);
 bool parseDecimalUInt(unsigned int *out, const char *str, const char **suffix);
 bool parseHexUlong(unsigned long *out, const char *str, const char **suffix);
 

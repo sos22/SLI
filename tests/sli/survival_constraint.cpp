@@ -12,14 +12,18 @@
 int
 main(int argc, char *argv[])
 {
-	if (argc < 2)
+	if (argc < 3)
 		errx(1, "need to know where to read the state machine and MAI map from");
 
 	init_sli();
 
+	SMScopes scopes;
+	if (!scopes.read(argv[3]))
+		errx(1, "parsing %s as scopes file", argv[3]);
+
 	VexPtr<OracleInterface> oracle(new Oracle(NULL, NULL, NULL));
 
-	VexPtr<StateMachine, &ir_heap> sm(readStateMachine(open(argv[1], O_RDONLY)));
+	VexPtr<StateMachine, &ir_heap> sm(readStateMachine(&scopes, open(argv[1], O_RDONLY)));
 	VexPtr<IRExpr, &ir_heap> survive;
 	VexPtr<IRExpr, &ir_heap> nullExpr(NULL);
 
@@ -30,7 +34,7 @@ main(int argc, char *argv[])
 
 	VexPtr<MaiMap, &ir_heap> mai(MaiMap::fromFile(sm, argv[2]));
 
-	survive = survivalConstraintIfExecutedAtomically(mai, sm, nullExpr, oracle, false, opt, ALLOW_GC);
+	survive = survivalConstraintIfExecutedAtomically(&scopes, mai, sm, nullExpr, oracle, false, opt, ALLOW_GC);
 
 	survive = simplifyIRExpr(survive, opt);
 

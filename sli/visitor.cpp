@@ -193,6 +193,8 @@ _visit_state_machine(void *ctxt,
 		auto smt = (const StateMachineTerminal *)sm;
 		if (visitor->Terminal)
 			res = visitor->Terminal(ctxt, smt);
+		if (res == visit_continue)
+			res = visit_const_bdd(ctxt, &visitor->irexpr, smt->res);
 		return res;
 	}
 	case StateMachineState::Bifurcate: {
@@ -200,7 +202,7 @@ _visit_state_machine(void *ctxt,
 		if (visitor->Bifurcate)
 			res = visitor->Bifurcate(ctxt, smb);
 		if (res == visit_continue)
-			res = _visit_irexpr(ctxt, &visitor->irexpr, smb->condition);
+			res = visit_const_bdd(ctxt, &visitor->irexpr, smb->condition);
 		if (res == visit_continue)
 			res = _visit_state_machine(ctxt, visitor, smb->trueTarget, memo);
 		if (res == visit_continue)

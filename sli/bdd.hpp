@@ -52,12 +52,20 @@ public:
 			return bdd;
 	}
 	void prettyPrint(FILE *) const;
+	bool parse(const char *buf, const char **end);
 };
 
 template <typename _leafT, typename _subtreeT>
 class _bdd : public GarbageCollected<_bdd<_leafT, _subtreeT>, &ir_heap> {
 public:
 	typedef _leafT leafT;
+private:
+	template <typename scopeT,
+		  _subtreeT *parseLeaf(scopeT *, const char *, const char **)>
+	static _subtreeT *_parse(scopeT *scope,
+				 const char *,
+				 const char **,
+				 std::map<int, _subtreeT *> &labels);
 protected:
 	virtual void _visit(HeapVisitor &hv, leafT &leaf) const = 0;
 	virtual void _sanity_check(leafT leaf) const = 0;
@@ -75,6 +83,9 @@ protected:
 		content.trueBranch = trueB;
 		content.falseBranch = falseB;
 	}
+	template <typename scopeT,
+		  _subtreeT *(*parseLeaf)(scopeT *, const char *, const char **)>
+	static bool _parse(scopeT *, _subtreeT **, const char *, const char **);
 public:
 	bool isLeaf;
 	union {
@@ -204,7 +215,6 @@ protected:
 		std::map<zipInternalT, subtreeT *> memo;
 		return zip(scp, where, memo);
 	}
-
 	template <IRExpr *mkConst(constT)> static IRExpr *to_irexpr(subtreeT *);
 
 	const_bdd(IRExpr *cond, subtreeT *trueB, subtreeT *falseB)
@@ -214,6 +224,8 @@ protected:
 		: _bdd<constT, subtreeT>(b)
 	{}
 public:
+	/* Simplify @thing under the assumption that @assumption is
+	 * true. */
 	static subtreeT *assume(scope *,
 				subtreeT *thing,
 				bbdd *assumption);
@@ -232,6 +244,15 @@ public:
 		subtreeT *ifTrue,
 		subtreeT *ifFalse);
 	template <typename scopeT> static typename std::map<constT, bbdd *> to_selectors(scopeT *, subtreeT *);
+	/* An enabling table is a map from BBDDs to int BDDs.  The
+	   idea is that the caller arranges that at most one of the
+	   BBDDs is true (i.e. enabled) for any context and we then
+	   select the matching intbdd.  @from_enabling flattens an
+	   enabling table into a single int BDD */
+	template <typename scopeT> static subtreeT *from_enabling(
+		scopeT *scp,
+		const enablingTableT &inp,
+		constT defaultValue);
 };
 
 class bbdd : public const_bdd<bool, bbdd> {
@@ -244,7 +265,15 @@ class bbdd : public const_bdd<bool, bbdd> {
 	void _prettyPrint(FILE *f, bool b) const {
 		fprintf(f, "%s", b ? "<true>" : "<false>");
 	}
-
+	static bbdd *parseBool(bbdd::scope *scope, const char *str, const char **suffix) {
+		if (parseThisString("<true>", str, suffix)) {
+			return scope->cnst(true);
+		} else if (parseThisString("<false>", str, suffix)) {
+			return scope->cnst(false);
+		} else {
+			return NULL;
+		}
+	}
 	bbdd(IRExpr *cond, bbdd *trueB, bbdd *falseB)
 		: const_bdd<bool, bbdd>(cond, trueB, falseB)
 	{}
@@ -267,6 +296,9 @@ public:
 	static IRExpr *to_irexpr(bbdd *b) {
 		return const_bdd<bool, bbdd>::to_irexpr<mkConst>(b);
 	}
+	static bool parse(bbdd::scope *scope, bbdd **out, const char *str, const char **suffix) {
+		return _bdd<bool, bbdd>::_parse<bbdd::scope, parseBool>(scope, out, str, suffix);
+	}
 };
 
 class intbdd : public const_bdd<int, intbdd> {
@@ -277,7 +309,16 @@ class intbdd : public const_bdd<int, intbdd> {
 	void _prettyPrint(FILE *f, int k) const {
 		fprintf(f, "<%d>", k);
 	}
-
+	static bool parseInt(int *out, const char *str, const char **suffix) {
+		int r;
+		if (parseThisChar('<', str, &str) &&
+		    parseDecimalInt(&r, str, &str) &&
+		    parseThisChar('>', str, suffix)) {
+			*out = r;
+			return true;
+		}
+		return false;
+	}
 	intbdd(IRExpr *cond, intbdd *trueB, intbdd *falseB)
 		: const_bdd<int, intbdd>(cond, trueB, falseB)
 	{}
@@ -301,18 +342,16 @@ class smrbdd : public const_bdd<StateMachineRes, smrbdd> {
 		assert(r == smr_crash || r == smr_survive || r == smr_unreached);
 	}
 	void _prettyPrint(FILE *f, StateMachineRes r) const {
-		switch (r) {
-		case smr_crash:
-			fprintf(f, "<crash>");
-			return;
-		case smr_survive:
-			fprintf(f, "<survive>");
-			return;
-		case smr_unreached:
-			fprintf(f, "<unreached>");
-			return;
-		}
-		abort();
+		fprintf(f, "<%s>", nameSmr(r));
+	}
+	static smrbdd *parseLeaf(scope *scp, const char *str, const char **suffix)
+	{
+		StateMachineRes r;
+		if (!parseThisChar('<', str, &str) ||
+		    !parseSmr(&r, str, &str) ||
+		    !parseThisChar('>', str, suffix))
+			return NULL;
+		return scp->cnst(r);
 	}
 
 	smrbdd(IRExpr *cond, smrbdd *trueB, smrbdd *falseB)
@@ -321,6 +360,10 @@ class smrbdd : public const_bdd<StateMachineRes, smrbdd> {
 	smrbdd(StateMachineRes b)
 		: const_bdd<StateMachineRes, smrbdd>(b)
 	{}
+public:
+	static bool parse(scope *scp, smrbdd **out, const char *str, const char **suffix) {
+		return _bdd<StateMachineRes, smrbdd>::_parse<smrbdd::scope, parseLeaf>(scp, out, str, suffix);
+	}
 };
 
 #endif /* !BDD_HPP__ */

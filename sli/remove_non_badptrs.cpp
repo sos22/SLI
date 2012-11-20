@@ -10,7 +10,7 @@
 #include "visitor.hpp"
 
 static bool
-irexprUsesBadPtr(const IRExpr *e)
+irexprUsesBadPtr(const bbdd *e)
 {
 	struct {
 		static visit_result Unop(void *, const IRExprUnop *ieg) {
@@ -21,7 +21,7 @@ irexprUsesBadPtr(const IRExpr *e)
 	} foo;
 	static irexpr_visitor<void> visitor;
 	visitor.Unop = foo.Unop;
-	return visit_irexpr((void *)NULL, &visitor, e) == visit_abort;
+	return visit_const_bdd((void *)NULL, &visitor, e) == visit_abort;
 }
 
 static bool
@@ -48,9 +48,11 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
+	SMScopes scopes;
+
 	if (argc == 2) {
 		CrashSummary *summary;
-		summary = readBugReport(argv[1], NULL);
+		summary = readBugReport(&scopes, argv[1], NULL);
 
 		if (summaryUsesBadPtr(summary)){
 			printf("Uses badptr\n");
@@ -75,7 +77,7 @@ main(int argc, char *argv[])
 		}
 		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
 			continue;
-		CrashSummary *summary = readBugReport(de->d_name, NULL);
+		CrashSummary *summary = readBugReport(&scopes, de->d_name, NULL);
 		if (!summaryUsesBadPtr(summary))
 			unlink(de->d_name);
 		LibVEX_maybe_gc(ALLOW_GC);

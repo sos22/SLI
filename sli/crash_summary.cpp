@@ -12,6 +12,8 @@
 void
 printCrashSummary(CrashSummary *summary, FILE *f)
 {
+	fprintf(f, "Scopes:\n");
+	summary->scopes->prettyPrint(f);
 	printStateMachinePair("Load Machine:\n",
 			      summary->loadMachine,
 			      "Store Machine:\n",
@@ -36,12 +38,12 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 }
 
 CrashSummary *
-readCrashSummary(int fd)
+readCrashSummary(SMScopes *scopes, int fd)
 {
 	char *buf = readfile(fd);
 	const char *succ;
 	CrashSummary *r;
-	if (!parseCrashSummary(&r, buf, &succ))
+	if (!parseCrashSummary(scopes, &r, buf, &succ))
 		errx(1, "cannot parse %s as CrashSummary", buf);
 	parseThisChar(' ', succ, &succ);
 	if (*succ)
@@ -51,7 +53,7 @@ readCrashSummary(int fd)
 }
 
 CrashSummary *
-readBugReport(const char *name, char **metadata)
+readBugReport(SMScopes *scopes, const char *name, char **metadata)
 {
 	int fd = open(name, O_RDONLY);
 	if (fd < 0)
@@ -69,7 +71,7 @@ readBugReport(const char *name, char **metadata)
 	real_start++;
 	/* And use the rest */
 	CrashSummary *res;
-	if (!parseCrashSummary(&res, real_start, (const char **)&real_start))
+	if (!parseCrashSummary(scopes, &res, real_start, (const char **)&real_start))
 		errx(1, "cannot parse %s as crash summary", name);
 	free(content);
 	close(fd);
@@ -77,17 +79,21 @@ readBugReport(const char *name, char **metadata)
 }
 
 bool
-parseCrashSummary(CrashSummary **out, const char *buf,
+parseCrashSummary(SMScopes *scopes,
+		  CrashSummary **out,
+		  const char *buf,
 		  const char **succ)
 {
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
 	IRExpr *verificationCondition;
 	std::map<CfgLabel, const CFGNode *> labels;
-	if (!parseThisString("Load Machine:\n", buf, &buf) ||
-	    !parseStateMachine(&loadMachine, buf, &buf, labels) ||
+	if (!parseThisString("Scopes:\n", buf, &buf) ||
+	    !scopes->parse(buf, &buf) ||
+	    !parseThisString("Load Machine:\n", buf, &buf) ||
+	    !parseStateMachine(scopes, &loadMachine, buf, &buf, labels) ||
 	    !parseThisString("Store Machine:\n", buf, &buf) ||
-	    !parseStateMachine(&storeMachine, buf, &buf, labels) ||
+	    !parseStateMachine(scopes, &storeMachine, buf, &buf, labels) ||
 	    !parseThisString("Verification condition: ", buf, &buf) ||
 	    !parseIRExpr(&verificationCondition, buf, &buf) ||
 	    !parseThisChar('\n', buf, &buf))
@@ -121,7 +127,7 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 	if (!mai)
 		return false;
 	*succ = buf;
-	*out = new CrashSummary(loadMachine, storeMachine, verificationCondition, aliasing, mai);
+	*out = new CrashSummary(scopes, loadMachine, storeMachine, verificationCondition, aliasing, mai);
 	return true;
 }
 
@@ -183,8 +189,8 @@ transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans, bool 
 {
 	bool b;
 	if (!done_something) done_something = &b;
-	input->loadMachine = trans.transform(input->loadMachine, done_something);
-	input->storeMachine = trans.transform(input->storeMachine, done_something);
+	input->loadMachine = trans.transform(input->scopes, input->loadMachine, done_something);
+	input->storeMachine = trans.transform(input->scopes, input->storeMachine, done_something);
 	input->verificationCondition = trans.doit(input->verificationCondition, done_something);
 	return input;
 }

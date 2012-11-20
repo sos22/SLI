@@ -344,6 +344,22 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 	abort();
 }
 
+/* Only safe on const bdds */
+template <typename subtreeT> static void
+internBDD(subtreeT *what, internIRExprTable &tab)
+{
+	/* bdd_scopes implicitly intern all leaves already */
+	if (what->isLeaf)
+		return;
+	/* We rely on the fact that the ordering is invariant
+	   replacing one expression with a physically identical one,
+	   and that nodes are already interned up to replacement of
+	   conditions. */
+	what->content.condition = internIRExpr(what->content.condition, tab);
+	internBDD(what->content.trueBranch, tab);
+	internBDD(what->content.falseBranch, tab);
+}
+
 static StateMachineState *internStateMachineState(StateMachineState *start, internStateMachineTable &t);
 
 static StateMachineState *
@@ -355,9 +371,21 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		return t.states[start];
 	t.states[start] = start; /* Cycle breaking */
 	switch (start->type) {
-	case StateMachineState::Terminal:
+	case StateMachineState::Terminal: {
+		auto smt = (StateMachineTerminal *)start;
+		internBDD(smt->res, t);
+		for (auto it = t.states_terminal.begin();
+		     it != t.states_terminal.end();
+		     it++) {
+			if ( (*it)->res == smt->res) {
+				t.states[start] = *it;
+				return *it;
+			}
+		}
 		t.states[start] = start;
+		t.states_terminal.insert(smt);
 		return start;
+	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)start;
 		if (smse->sideEffect)
@@ -378,7 +406,7 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)start;
-		smb->condition = internIRExpr(smb->condition, t);
+		internBDD(smb->condition, t);
 		smb->trueTarget = internStateMachineState(smb->trueTarget, t);
 		smb->falseTarget = internStateMachineState(smb->falseTarget, t);
 		for (auto it = t.states_bifurcate.begin();

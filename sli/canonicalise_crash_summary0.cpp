@@ -269,6 +269,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 {
 	VexPtr<MaiMap, &ir_heap> mai(cs->mai);
 	cs->loadMachine = optimiseStateMachine(
+		cs->scopes,
 		mai,
 		cs->loadMachine,
 		AllowableOptimisations::defaultOptimisations.
@@ -279,6 +280,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		true,
 		token);
 	cs->storeMachine = optimiseStateMachine(
+		cs->scopes,
 		mai,
 		cs->storeMachine,
 		AllowableOptimisations::defaultOptimisations.
@@ -640,7 +642,8 @@ main(int argc, char *argv[])
 	CrashSummary *summary;
 	char *first_line;
 
-	summary = readBugReport(argv[1], &first_line);
+	SMScopes scopes;
+	summary = readBugReport(&scopes, argv[1], &first_line);
 
 	summary = optimise_crash_summary(summary, new DummyOracle(summary), ALLOW_GC);
 

@@ -55,7 +55,8 @@ assertNonSsa(const StateMachine *
 }
 
 static StateMachine *
-assignLabelsToDefinitions(StateMachine *sm,
+assignLabelsToDefinitions(SMScopes *scopes,
+			  StateMachine *sm,
 			  std::map<threadAndRegister, unsigned, threadAndRegister::partialCompare> &lastGeneration)
 {
 	struct _ : public StateMachineTransformer {
@@ -122,7 +123,7 @@ assignLabelsToDefinitions(StateMachine *sm,
 			return false;
 		}
 	} doit(lastGeneration);
-	return doit.transform(sm);
+	return doit.transform(scopes, sm);
 }
 
 /* A map from registers to sets of generations, telling us precisely
@@ -284,7 +285,8 @@ ReachingTable::print(FILE *f, std::map<const StateMachineState *, int> &labels) 
 }
 
 static StateMachine *
-resolveDependencies(StateMachine *sm,
+resolveDependencies(SMScopes *scopes,
+		    StateMachine *sm,
 		    ReachingTable &reachingTable,
 		    StateMachineState **needsPhi)
 {
@@ -313,17 +315,16 @@ resolveDependencies(StateMachine *sm,
 				return NULL;
 			}
 		}
-		StateMachineState *transformState(StateMachineState *sms,
+		StateMachineState *transformState(SMScopes *scopes,
+						  StateMachineState *sms,
 						  bool *done_something)
 		{
 			assert(!currentState);
 			assert(!currentStateReaching);
-			if (sms->type == StateMachineState::Bifurcate ||
-			    sms->type == StateMachineState::SideEffecting)
-				currentStateReaching = &reachingTable.getEntryReaching(sms);
+			currentStateReaching = &reachingTable.getEntryReaching(sms);
 			currentState = sms;
 			StateMachineState *res =
-				StateMachineTransformer::transformState(sms, done_something);
+				StateMachineTransformer::transformState(scopes, sms, done_something);
 			assert(currentState == sms);
 			currentState = NULL;
 			currentStateReaching = NULL;
@@ -337,7 +338,7 @@ resolveDependencies(StateMachine *sm,
 		{}
 		bool rewriteNewStates() const { return false; }
 	} doit(reachingTable, needsPhi);
-	return doit.transform(sm);
+	return doit.transform(scopes, sm);
 }
 
 class unresolvedRefCmp {
@@ -414,14 +415,14 @@ insert_new_predecessor:
 }
 
 static StateMachine *
-convertToSSA(StateMachine *inp)
+convertToSSA(SMScopes *scopes, StateMachine *inp)
 {
 	assertNonSsa(inp);
 
 	inp = duplicateStateMachine(inp);
 
 	std::map<threadAndRegister, unsigned, threadAndRegister::partialCompare> lastGeneration;
-	inp = assignLabelsToDefinitions(inp, lastGeneration);
+	inp = assignLabelsToDefinitions(scopes, inp, lastGeneration);
 
 	while (1) {
 		if (TIMEOUT)
@@ -437,7 +438,7 @@ convertToSSA(StateMachine *inp)
 		}
 
 		StateMachineState *needsPhi = NULL;
-		inp = resolveDependencies(inp, reaching, &needsPhi);
+		inp = resolveDependencies(scopes, inp, reaching, &needsPhi);
 		if (!needsPhi) {
 			/* We're done */
 			break;
@@ -472,9 +473,9 @@ convertToSSA(StateMachine *inp)
 }
 
 StateMachine *
-convertToSSA(StateMachine *inp)
+convertToSSA(SMScopes *scopes, StateMachine *inp)
 {
-	return SSA::convertToSSA(inp);
+	return SSA::convertToSSA(scopes, inp);
 }
 
 StateMachineSideEffect *

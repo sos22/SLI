@@ -7,6 +7,7 @@
 #include "oracle.hpp"
 
 #include "libvex_ir.h"
+#include "bdd.hpp"
 
 #define STORING_THREAD 97
 
@@ -109,6 +110,16 @@ protected:
 public:
 	IRExpr *doit(IRExpr *e, bool *done_something) { aborted = false; return transformIRExpr(e, done_something); }
 	IRExpr *doit(IRExpr *e) { bool t; return doit(e, &t); }
+	smrbdd *transform_smrbdd(bbdd::scope *, smrbdd::scope *, smrbdd *what, bool *done_something);
+	smrbdd *transform_smrbdd(bbdd::scope *scope, smrbdd::scope *scope2, smrbdd *what) {
+		bool b;
+		return transform_smrbdd(scope, scope2, what, &b);
+	}
+	bbdd *transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_something);
+	bbdd *transform_bbdd(bbdd::scope *scope, bbdd *what) {
+		bool b;
+		return transform_bbdd(scope, what, &b);
+	}
 };
 
 class StateMachineTransformer : public IRExprTransformer {
@@ -147,10 +158,21 @@ protected:
 	virtual StateMachineSideEffectStackLayout *transformOneSideEffect(
 		StateMachineSideEffectStackLayout *, bool *)
 	{ return NULL; }
-	virtual StateMachineTerminal *transformOneState(StateMachineTerminal *,
-							bool *)
-	{ return NULL; }
-	virtual StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
+	virtual StateMachineTerminal *transformOneState(SMScopes *scopes,
+							StateMachineTerminal *smt,
+							bool *done_something)
+	{
+		bool b = false;
+		smrbdd *smr = transform_smrbdd(&scopes->bools, &scopes->smrs, smt->res, &b);
+		if (b) {
+			*done_something = true;
+			return new StateMachineTerminal(smt, smr);
+		} else {
+			return NULL;
+		}
+	}
+	virtual StateMachineSideEffecting *transformOneState(SMScopes *,
+							     StateMachineSideEffecting *smse,
 							     bool *done_something)
 	{
 		bool b = false;
@@ -163,11 +185,12 @@ protected:
 			return NULL;
 		}
 	}
-	virtual StateMachineBifurcate *transformOneState(StateMachineBifurcate *s,
+	virtual StateMachineBifurcate *transformOneState(SMScopes *scopes,
+							 StateMachineBifurcate *s,
 							 bool *done_something)
 	{
 		bool b = false;
-		IRExpr *c = doit(s->condition, &b);
+		bbdd *c = transform_bbdd(&scopes->bools, s->condition, &b);
 		if (b) {
 			*done_something = true;
 			return new StateMachineBifurcate(s, c);
@@ -178,24 +201,26 @@ protected:
 
 	virtual bool rewriteNewStates() const = 0;
 public:
-	virtual StateMachineState *transformState(StateMachineState *, bool *);
+	virtual StateMachineState *transformState(SMScopes *, StateMachineState *, bool *);
 	virtual StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,
 							    bool *);
 	static void rewriteMachine(const StateMachine *sm,
 				   std::map<const StateMachineState *, StateMachineState *> &rewriteRules,
 				   bool rewriteNewStates);
 
-	StateMachine *transform(StateMachine *s, bool *done_something = NULL);
+	StateMachine *transform(SMScopes *scopes, StateMachine *s, bool *done_something = NULL);
 };
 
-StateMachine *optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
+StateMachine *optimiseStateMachine(SMScopes *scopes,
+				   VexPtr<MaiMap, &ir_heap> &mai,
 				   VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
 				   const VexPtr<OracleInterface> &oracle,
 				   bool is_ssa,
 				   GarbageCollectionToken token,
 				   bool *progress = NULL);
-StateMachine *optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
+StateMachine *optimiseStateMachine(SMScopes *scopes,
+				   VexPtr<MaiMap, &ir_heap> &mai,
 				   VexPtr<StateMachine, &ir_heap> sm,
 				   const AllowableOptimisations &opt,
 				   const VexPtr<Oracle> &oracle,
@@ -204,30 +229,33 @@ StateMachine *optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 				   bool *progress = NULL);
 
 /* Individual optimisation passes. */
-StateMachine *availExpressionAnalysis(const MaiMap &mai,
+StateMachine *availExpressionAnalysis(SMScopes *,
+				      const MaiMap &mai,
 				      StateMachine *sm,
 				      const AllowableOptimisations &opt,
 				      bool is_ssa,
 				      OracleInterface *oracle,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa);
-StateMachine *bisimilarityReduction(StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something);
+StateMachine *bisimilarityReduction(bbdd::scope *, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something);
 StateMachine *useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 				    OracleInterface *oracle, bool *done_something);
 StateMachine *removeLocalSurvival(StateMachine *sm,
 				  const AllowableOptimisations &opt,
 				  bool *done_something);
 class ControlDominationMap;
-StateMachine *functionAliasAnalysis(const MaiMap &mai,
+StateMachine *functionAliasAnalysis(bbdd::scope *scopes,
+				    const MaiMap &mai,
 				    StateMachine *machine,
 				    const AllowableOptimisations &opt,
 				    OracleInterface *oracle,
 				    const ControlDominationMap &cdm,
 				    bool *done_something);
-StateMachine *phiElimination(StateMachine *sm, bool *done_something);
-StateMachine *undefinednessSimplification(StateMachine *sm, const IRExprOptimisations &opt, bool *done_something);
+StateMachine *phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something);
+StateMachine *undefinednessSimplification(SMScopes *scopes, StateMachine *sm, const IRExprOptimisations &opt, bool *done_something);
 
-StateMachine *removeAnnotations(VexPtr<MaiMap, &ir_heap> &mai,
+StateMachine *removeAnnotations(SMScopes *scopes,
+				VexPtr<MaiMap, &ir_heap> &mai,
 				VexPtr<StateMachine, &ir_heap> sm,
 				const AllowableOptimisations &opt,
 				const VexPtr<OracleInterface> &oracle,
@@ -242,6 +270,6 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     const AllowableOptimisations &opt,
 				     GarbageCollectionToken token);
 
-StateMachineState *getProximalCause(MachineState *ms, Oracle *oracle, MaiMap &mai, const CFGNode *where, const VexRip &rip, int tid);
+StateMachineState *getProximalCause(SMScopes *scopes, MachineState *ms, Oracle *oracle, MaiMap &mai, const CFGNode *where, const VexRip &rip, int tid);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

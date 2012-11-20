@@ -1,9 +1,17 @@
 subdirs="enforce_crash"
 targets="crop binpatch dbg chunk direct dbg_core get_dominator dbg_exec minimal_direct dump_types_db check_types_index"
-targets="${targets} canonicalise_types_table canonicalise_crash_summary compare_crash_summaries canonicalise_crash_summary2"
+targets="${targets} canonicalise_types_table canonicalise_crash_summary canonicalise_crash_summary2"
 targets="${targets} remove_non_badptrs canonicalise_crash_summary3 canonicalise_crash_summary0 canonicalise_crash_summary4"
-targets="${targets} case_split_summaries memloc_split_summaries dump_alias_db check_cfg_generation cross_check_machines"
+targets="${targets} case_split_summaries memloc_split_summaries dump_alias_db check_cfg_generation"
 targets="${targets} direct_cd merge_type_tables summary_to_fix static timing"
+
+# Disabled targets:
+
+# Relies on comparing machines generated in different scopes, which
+# isn't allowed.
+#targets="${targets} compare_crash_summaries"
+# Likewise
+#targets="${targets} cross_check_machines"
 
 defvars() {
 	echo SLIR_SOURCES= ${input_base}/{ssa,transform_expr,logwriter,thread,machinestate}.cpp
@@ -17,7 +25,7 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{bisimilarity,nf,typesdb,timers,realias,undefinedness}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{getStoreCFGs,dupeStateMachine,MachineAliasingTable}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{cfgnode,getProbeCFGs,probeCFGtoMachine,useInitialMemoryLoads}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{sat_checker,smb_builder,remove_local_survival}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{sat_checker,smb_builder}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{raw_types,crashcfg,bdd}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF

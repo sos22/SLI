@@ -1651,8 +1651,10 @@ main(int argc, char *const argv[])
 	oracle->loadCallGraph(oracle, callgraph, staticdb, ALLOW_GC);
 
 	std::map<SummaryId, CrashSummary *> summaries;
-	for (int i = 0; i < nr_summaries; i++)
-		summaries[SummaryId(i + 1)] = readBugReport(summary_fnames[i], NULL);
+	for (int i = 0; i < nr_summaries; i++) {
+		SMScopes scopes;
+		summaries[SummaryId(i + 1)] = readBugReport(&scopes, summary_fnames[i], NULL);
+	}
 
 	char *patch = buildPatchForCrashSummary(oracle, summaries);
 	printf("Patch is:\n%s\n", patch);

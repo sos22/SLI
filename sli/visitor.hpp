@@ -36,14 +36,14 @@ visit_bdd(ctxtT *ctxt,
 			   (visit_result(*)(void *, const irexpr_visitor<void> *, constT))visitLeaf,
 			   bdd );
 }
-template <typename constT, typename subtreeT, typename ctxtT> static visit_result
+template <typename subtreeT, typename ctxtT> static visit_result
 visit_const_bdd(ctxtT *ctxt,
 		const irexpr_visitor<ctxtT> *visitor,
 		const subtreeT *bdd)
 {
 	return _visit_bdd( (void *)ctxt,
 			   (const irexpr_visitor<void> *)visitor,
-			   (visit_result (*)(void *, const irexpr_visitor<void> *, constT))NULL,
+			   (visit_result (*)(void *, const irexpr_visitor<void> *, typename subtreeT::leafT))NULL,
 			   bdd );
 }
 

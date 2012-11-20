@@ -2,7 +2,8 @@
 #define SSA_HPP__
 
 class StateMachine;
+struct SMScopes;
 
-StateMachine *convertToSSA(StateMachine *);
+StateMachine *convertToSSA(SMScopes *, StateMachine *);
 
 #endif /* !SSA_HPP__ */

@@ -136,11 +136,13 @@ struct SMBCompilerState {
 	const CFGNode *where;
 	int tid;
 	MaiMap &mai;
+	bbdd::scope *scope;
 	SMBCompilerState(const VexRip &_vr,
 			 const CFGNode *_where,
 			 int _tid,
-			 MaiMap &_mai)
-		: vr(_vr), where(_where), tid(_tid), mai(_mai)
+			 MaiMap &_mai,
+			 bbdd::scope *_scope)
+		: vr(_vr), where(_where), tid(_tid), mai(_mai), scope(_scope)
 	{}
 	MemoryAccessIdentifier getMai()
 	{
@@ -365,7 +367,7 @@ class SMBStateIf : public SMBState {
 				    SMBCompilerState &state) const {
 		StateMachineBifurcate *smb =
 			new StateMachineBifurcate(state.vr,
-						  cond.content->compile(),
+						  bbdd::var(state.scope, cond.content->compile()),
 						  NULL,
 						  NULL);
 		relocs2.push_back(reloc2(trueTarg.content, &smb->trueTarget));

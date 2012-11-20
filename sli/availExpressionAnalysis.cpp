@@ -525,6 +525,13 @@ applyAvailSet(const avail_t &avail, IRExpr *expr, bool use_assumptions, bool *do
 	applyAvailTransformer aat(avail, use_assumptions, opt);
 	return aat.doit(expr, done_something);
 }
+static bbdd *
+applyAvailSet(bbdd::scope *scope, const avail_t &avail, bbdd *expr, bool use_assumptions, bool *done_something,
+	      const AllowableOptimisations &opt)
+{
+	applyAvailTransformer aat(avail, use_assumptions, opt);
+	return aat.transform_bbdd(scope, expr, done_something);
+}
 
 /* Slightly misnamed: this also propagates copy operations.  Also, it
    doesn't so much eliminate loads are replace them with copies of
@@ -776,6 +783,7 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 
 static StateMachineState *
 buildNewStateMachineWithLoadsEliminated(
+	SMScopes *scopes,
 	const MaiMap &decode,
 	StateMachineState *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
@@ -804,7 +812,7 @@ buildNewStateMachineWithLoadsEliminated(
 		avail.calcRegisterMap(opt);
 		res = new StateMachineBifurcate(
 			smb,
-			applyAvailSet(avail, smb->condition, true, done_something, opt));
+			applyAvailSet(&scopes->bools, avail, smb->condition, true, done_something, opt));
 		break;
 	}
 	case StateMachineState::SideEffecting: {
@@ -834,7 +842,7 @@ buildNewStateMachineWithLoadsEliminated(
 	res->targets(targets);
 	for (auto it = targets.begin(); it != targets.end(); it++) {
 		**it = buildNewStateMachineWithLoadsEliminated(
-			decode, **it, availMap, memo, opt, alias, oracle,
+			scopes, decode, **it, availMap, memo, opt, alias, oracle,
 			done_something, edgeLabels);
 	}
 	return res;
@@ -842,6 +850,7 @@ buildNewStateMachineWithLoadsEliminated(
 
 static StateMachine *
 buildNewStateMachineWithLoadsEliminated(
+	SMScopes *scopes,
 	const MaiMap &decode,
 	StateMachine *sm,
 	std::map<StateMachineState *, avail_t> &availMap,
@@ -853,9 +862,16 @@ buildNewStateMachineWithLoadsEliminated(
 {
 	std::map<StateMachineState *, StateMachineState *> memo;
 	bool d = false;
-	StateMachineState *new_root = buildNewStateMachineWithLoadsEliminated(decode, sm->root, availMap, memo,
-									      opt, alias, oracle,
-									      &d, edgeLabels);
+	StateMachineState *new_root = buildNewStateMachineWithLoadsEliminated(scopes,
+									      decode,
+									      sm->root,
+									      availMap,
+									      memo,
+									      opt,
+									      alias,
+									      oracle,
+									      &d,
+									      edgeLabels);
 	if (d) {
 		*done_something = true;
 		return new StateMachine(sm, new_root);
@@ -865,7 +881,8 @@ buildNewStateMachineWithLoadsEliminated(
 }
 
 static StateMachine *
-availExpressionAnalysis(const MaiMap &decode,
+availExpressionAnalysis(SMScopes *scopes,
+			const MaiMap &decode,
 			StateMachine *sm,
 			const AllowableOptimisations &opt,
 			bool is_ssa,
@@ -1016,6 +1033,7 @@ availExpressionAnalysis(const MaiMap &decode,
 	   construct a new state machine with redundant loads replaced
 	   with copy side effects. */
 	return buildNewStateMachineWithLoadsEliminated(
+		scopes,
 		decode,
 		sm,
 		availOnEntry,
@@ -1030,7 +1048,8 @@ availExpressionAnalysis(const MaiMap &decode,
 }
 
 StateMachine *
-availExpressionAnalysis(const MaiMap &decode,
+availExpressionAnalysis(SMScopes *scopes,
+			const MaiMap &decode,
 			StateMachine *sm,
 			const AllowableOptimisations &opt,
 			bool is_ssa,
@@ -1040,7 +1059,7 @@ availExpressionAnalysis(const MaiMap &decode,
 	sm->sanityCheck(decode);
 	if (is_ssa)
 		sm->assertSSA();
-	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(decode, sm, opt, is_ssa, oracle, done_something);
+	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(scopes, decode, sm, opt, is_ssa, oracle, done_something);
 	res->sanityCheck(decode);
 	if (is_ssa)
 		res->assertSSA();

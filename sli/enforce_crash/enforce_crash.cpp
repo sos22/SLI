@@ -1301,7 +1301,8 @@ main(int argc, char *argv[])
 	ThreadAbstracter abs;
 	crashEnforcementData accumulator;
 	for (int i = 6; i < argc; i++) {
-		CrashSummary *summary = readBugReport(argv[i], NULL);
+		SMScopes scopes;
+		CrashSummary *summary = readBugReport(&scopes, argv[i], NULL);
 		crashEnforcementData acc = enforceCrashForMachine(SummaryId(i - 5), summary, oracle, abs, next_hb_id);
 		optimiseHBEdges(acc);
 		optimiseStashPoints(acc, oracle);

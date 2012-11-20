@@ -14,16 +14,19 @@ class OracleInterface;
 class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
 	void buildAliasingTable(Oracle *);
 public:
+	SMScopes *scopes;
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
 	IRExpr *verificationCondition;
 	typedef std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> aliasingEntryT;
 	std::vector<aliasingEntryT> aliasing;
 	MaiMap *mai;
-	CrashSummary(StateMachine *_loadMachine, StateMachine *_storeMachine,
+	CrashSummary(SMScopes *_scopes, StateMachine *_loadMachine,
+		     StateMachine *_storeMachine,
 		     IRExpr *_verificationCondition, Oracle *oracle,
 		     MaiMap *_mai)
-		: loadMachine(_loadMachine),
+		: scopes(_scopes),
+		  loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
 		  verificationCondition(_verificationCondition),
 		  mai(_mai)
@@ -31,12 +34,14 @@ public:
 		buildAliasingTable(oracle);
 	}
 
-	CrashSummary(StateMachine *_loadMachine,
+	CrashSummary(SMScopes *_scopes,
+		     StateMachine *_loadMachine,
 		     StateMachine *_storeMachine,
 		     IRExpr *_verificationCondition,
 		     const std::vector<aliasingEntryT> &_aliasing,
 		     MaiMap *_mai)
-		: loadMachine(_loadMachine),
+		: scopes(_scopes),
+		  loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
 		  verificationCondition(_verificationCondition),
 		  aliasing(_aliasing),
@@ -53,11 +58,12 @@ public:
 };
 
 void printCrashSummary(CrashSummary *cs, FILE *f);
-CrashSummary *readCrashSummary(int fd);
-bool parseCrashSummary(CrashSummary **out, const char *buf, const char **succ);
-CrashSummary *readBugReport(const char *name, char **metadata);
+CrashSummary *readCrashSummary(SMScopes *scopes, int fd);
+bool parseCrashSummary(SMScopes *scopes, CrashSummary **out, const char *buf, const char **succ);
+CrashSummary *readBugReport(SMScopes *scopes, const char *name, char **metadata);
 class StateMachineTransformer;
-CrashSummary *transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans,
+CrashSummary *transformCrashSummary(CrashSummary *input,
+				    StateMachineTransformer &trans,
 				    bool *done_something = NULL);
 CrashSummary *internCrashSummary(CrashSummary *cs);
 
@@ -68,14 +74,16 @@ public:
 };
 
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
-StateMachine *buildProbeMachine(CfgLabelAllocator &allocLabel,
+StateMachine *buildProbeMachine(SMScopes *scopes,
+				CfgLabelAllocator &allocLabel,
 				const VexPtr<Oracle> &oracle,
 				const VexRip &interestingRip,
 				ThreadId tid,
 				const AllowableOptimisations &opt,
 				VexPtr<MaiMap, &ir_heap> &mai,
 				GarbageCollectionToken token);
-bool diagnoseCrash(CfgLabelAllocator &allocLabel,
+bool diagnoseCrash(SMScopes *scopes,
+		   CfgLabelAllocator &allocLabel,
 		   const DynAnalysisRip &,
 		   VexPtr<StateMachine, &ir_heap> probeMachine,
 		   const VexPtr<Oracle> &oracle,

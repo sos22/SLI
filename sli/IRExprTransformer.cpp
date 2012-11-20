@@ -91,3 +91,41 @@ IRExprTransformer::transformIex(IRExprAssociative *e)
 	}
 	return r;
 }
+
+bbdd *
+IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_something)
+{
+	if (what->isLeaf)
+		return what;
+	bool b = false;
+	IRExpr *e = doit(what->content.condition, &b);
+	bbdd *t = transform_bbdd(scope, what->content.trueBranch, &b);
+	bbdd *f = transform_bbdd(scope, what->content.falseBranch, &b);
+	if (!b)
+		return what;
+	*done_something = true;
+	return bbdd::ifelse(
+		scope,
+		bbdd::var(scope, e),
+		t,
+		f);
+}
+
+smrbdd *
+IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, smrbdd *what, bool *done_something)
+{
+	if (what->isLeaf)
+		return what;
+	bool b = false;
+	IRExpr *e = doit(what->content.condition, &b);
+	smrbdd *t = transform_smrbdd(bscope, scope, what->content.trueBranch, &b);
+	smrbdd *f = transform_smrbdd(bscope, scope, what->content.falseBranch, &b);
+	if (!b)
+		return what;
+	*done_something = true;
+	return smrbdd::ifelse(
+		scope,
+		bbdd::var(bscope, e),
+		t,
+		f);
+}

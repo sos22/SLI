@@ -10,7 +10,8 @@
 namespace ProximalCause {
 
 static StateMachineState *
-getProximalCause(MachineState *ms,
+getProximalCause(SMScopes *scopes,
+		 MachineState *ms,
 		 Oracle *oracle,
 		 const VexRip &rip,
 		 MaiMap &mai,
@@ -25,7 +26,7 @@ getProximalCause(MachineState *ms,
 		   problem was an instruction fetch fault, and produce
 		   a proximal cause which says ``we always crash if we
 		   get to this RIP''. */
-		return StateMachineTerminal::crash();
+		return new StateMachineTerminal(rip, scopes->smrs.cnst(smr_crash));
 	}
 
 	/* Successfully decoded the block -> build a state machine
@@ -36,7 +37,7 @@ getProximalCause(MachineState *ms,
 	struct _ {
 		const VexRip &rip;
 		StateMachineState *&work;
-		void operator()(IRExpr *condition, StateMachineState *target) {
+		void operator()(bbdd *condition, StateMachineState *target) {
 			if (work != target)
 				work = new StateMachineBifurcate(
 					rip,
@@ -51,51 +52,64 @@ getProximalCause(MachineState *ms,
 	struct _2 {
 		const VexRip &rip;
 		StateMachineState *&work;
+		SMScopes *scopes;
 		void operator()(StateMachineSideEffect *se) {
 			if (work->type != StateMachineState::Terminal ||
-			    ((StateMachineTerminal *)work)->res != smr_survive)
+			    ((StateMachineTerminal *)work)->res != scopes->smrs.cnst(smr_survive))
 				work = new StateMachineSideEffecting(
 					rip,
 					se,
 					work);
 		}
-		_2(const VexRip &_rip, StateMachineState *&_work)
-			: rip(_rip), work(_work)
+		_2(const VexRip &_rip, StateMachineState *&_work, SMScopes *_scopes)
+			: rip(_rip), work(_work), scopes(_scopes)
 		{}
-	} prependSideEffect(rip, work);
+	} prependSideEffect(rip, work, scopes);
 	struct _3 {
 		_ &conditionalBranch;
 		AllowableOptimisations opt;
 		StateMachineState *&work;
+		const VexRip &vr;
+		SMScopes *scopes;
 		void operator()(IRExpr *e) {
 			e = IRExpr_Unop(Iop_BadPtr, e);
 			e = simplifyIRExpr(e, opt);
 			assert(e->type() == Ity_I1);
 			if (e->tag == Iex_Const) {
 				if ( ((IRExprConst *)e)->Ico.U1 )
-					work = StateMachineTerminal::crash();
+					work = new StateMachineTerminal(vr, scopes->smrs.cnst(smr_crash));
 				return;
 			}
-			conditionalBranch(e, StateMachineTerminal::crash());
+			conditionalBranch(
+				bbdd::var(&scopes->bools, e),
+				new StateMachineTerminal(vr, scopes->smrs.cnst(smr_crash)));
 		}
-		_3(_ &_conditionalBranch, const AllowableOptimisations &_opt,
-		   StateMachineState *&_work)
+		_3(_ &_conditionalBranch,
+		   const AllowableOptimisations &_opt,
+		   StateMachineState *&_work,
+		   const VexRip &_vr,
+		   SMScopes *_scopes)
 			: conditionalBranch(_conditionalBranch),
-			  opt(_opt), work(_work)
+			  opt(_opt),
+			  work(_work),
+			  vr(_vr),
+			  scopes(_scopes)
 		{}
 	} crashIfBadPtr(conditionalBranch,
 			AllowableOptimisations::defaultOptimisations.setAddressSpace(ms->addressSpace),
-			work);
+			work,
+			rip,
+			scopes);
 
 	int idx;
 	for (idx = 1; idx < irsb->stmts_used && irsb->stmts[idx]->tag != Ist_IMark; idx++)
 		;
-	work = StateMachineTerminal::survive();
+	work = new StateMachineTerminal(rip, scopes->smrs.cnst(smr_survive));
 	if (idx == irsb->stmts_used) {
 		if (!irsb->next_is_const) {
 			crashIfBadPtr(irsb->next_nonconst);
 		} else if (oracle->isCrashingAddr(irsb->next_const.rip))
-			work = StateMachineTerminal::crash();
+			work = new StateMachineTerminal(rip, scopes->smrs.cnst(smr_crash));
 	}
 
 	idx--;
@@ -175,7 +189,7 @@ getProximalCause(MachineState *ms,
 			StateMachineBifurcate *l4 =
 				new StateMachineBifurcate(
 					rip,
-					expr_eq(t_expr, cas->expdLo),
+					bbdd::var(&scopes->bools, expr_eq(t_expr, cas->expdLo)),
 					l5,
 					l6);
 			StateMachineSideEffecting *l3 =
@@ -229,7 +243,9 @@ getProximalCause(MachineState *ms,
 			/* If we exit the instruction then that's
 			   considered to be a surviving run. */
 			IRStmtExit *ise = (IRStmtExit *)stmt;
-			conditionalBranch(ise->guard, StateMachineTerminal::survive());
+			conditionalBranch(
+				bbdd::var(&scopes->bools, ise->guard),
+				new StateMachineTerminal(rip, scopes->smrs.cnst(smr_survive)));
 			break;
 		}
 		case Ist_StartAtomic:
@@ -246,12 +262,13 @@ getProximalCause(MachineState *ms,
 }
 
 StateMachineState *
-getProximalCause(MachineState *ms,
+getProximalCause(SMScopes *scopes,
+		 MachineState *ms,
 		 Oracle *oracle,
 		 MaiMap &mai,
 		 const CFGNode *where,
 		 const VexRip &rip,
 		 int tid)
 {
-	return ProximalCause::getProximalCause(ms, oracle, rip, mai, where, tid);
+	return ProximalCause::getProximalCause(scopes, ms, oracle, rip, mai, where, tid);
 }

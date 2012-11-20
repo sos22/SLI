@@ -11,11 +11,24 @@
 #include "libvex_parse.h"
 #include "cfgnode.hpp"
 #include "smr.hpp"
+#include "bdd.hpp"
 
 class StateMachine;
 class StateMachineSideEffect;
 class MaiMap;
 class AllowableOptimisations;
+
+struct SMScopes {
+	bdd_ordering ordering;
+	bbdd::scope bools;
+	smrbdd::scope smrs;
+	SMScopes()
+		: bools(&ordering), smrs(&ordering)
+	{}
+	bool read(const char *fname);
+	bool parse(const char *buf, const char **end);
+	void prettyPrint(FILE *f) const;
+};
 
 class FrameId : public Named {
 	unsigned id;
@@ -281,7 +294,8 @@ public:
 	StateMachine(StateMachine *parent, StateMachineState *_root)
 		: root(_root), cfg_roots(parent->cfg_roots)
 	{}
-	StateMachine *optimise(const AllowableOptimisations &opt,
+	StateMachine *optimise(SMScopes *scopes,
+			       const AllowableOptimisations &opt,
 			       bool *done_something);
 	void visit(HeapVisitor &hv) {
 		hv(root);
@@ -326,7 +340,7 @@ public:
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachineState *optimise(const AllowableOptimisations &, bool *) = 0;
+	virtual StateMachineState *optimise(SMScopes *, const AllowableOptimisations &, bool *) = 0;
 	virtual void targets(std::vector<StateMachineState **> &) = 0;
 	virtual void targets(std::vector<const StateMachineState *> &) const = 0;
 	void targets(std::vector<StateMachineState *> &out) {
@@ -417,79 +431,27 @@ public:
 };
 
 class StateMachineTerminal : public StateMachineState {
-	void prettyPrint(FILE *f) const {
-		switch (res) {
-		case smr_crash:
-			fprintf(f, "<crash>");
-			return;
-		case smr_survive:
-			fprintf(f, "<survive>");
-			return;
-		case smr_unreached:
-			fprintf(f, "<unreached>");
-			return;
-		}
-		abort();
-	}
-
-	StateMachineTerminal(StateMachineRes _res)
-		: StateMachineState(VexRip(), StateMachineState::Terminal),
+public:
+	StateMachineTerminal(const VexRip &vr, smrbdd * _res)
+		: StateMachineState(vr, StateMachineState::Terminal),
 		  res(_res)
 	{}
-
-	static VexPtr<StateMachineTerminal, &ir_heap> _crash;
-	static VexPtr<StateMachineTerminal, &ir_heap> _survive;
-	static VexPtr<StateMachineTerminal, &ir_heap> _unreached;
-public:
-	StateMachineRes res;
-	StateMachineState *optimise(const AllowableOptimisations &, bool *)
+	StateMachineTerminal(StateMachineTerminal *base, smrbdd *_res)
+		: StateMachineState(base->dbg_origin, StateMachineState::Terminal),
+		  res(_res)
+	{}
+	smrbdd *res;
+	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &, bool *)
 	{ return this; }
-	void visit(HeapVisitor &) {}
+	void visit(HeapVisitor &hv) { hv(res); }
 	void targets(std::vector<StateMachineState **> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
 	StateMachineSideEffect *getSideEffect() { return NULL; }
-	void inputExpressions(std::vector<IRExpr *> &) {}
-	void sanityCheck() const { return; }
+	void inputExpressions(std::vector<IRExpr *> &);
+	void sanityCheck() const { res->sanity_check(); }
 
-	static StateMachineTerminal *crash() {
-		if (!_crash) _crash = new StateMachineTerminal(smr_crash);
-		return _crash;
-	}
-	static StateMachineTerminal *survive() {
-		if (!_survive) _survive = new StateMachineTerminal(smr_survive);
-		return _survive;
-	}
-	static StateMachineTerminal *unreached() {
-		if (!_unreached) _unreached = new StateMachineTerminal(smr_unreached);
-		return _unreached;
-	}
-	static StateMachineTerminal *get(StateMachineRes res) {
-		switch (res) {
-		case smr_crash:
-			return crash();
-		case smr_survive:
-			return survive();
-		case smr_unreached:
-			return unreached();
-		}
-		abort();
-	}
-	static bool parse(StateMachineTerminal **out, const char *str, const char **suffix)
-	{
-		if (parseThisString("<crash>", str, suffix)) {
-			*out = crash();
-			return true;
-		} else if (parseThisString("<survive>", str, suffix)) {
-			*out = survive();
-			return true;
-		} else if (parseThisString("<unreached>", str, suffix)) {
-			*out = unreached();
-			return true;
-		} else {
-			return false;
-		}
-	}
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const;
+	static bool parse(SMScopes *scopes, StateMachineTerminal **out, const char *str, const char **suffix);
 };
 
 class StateMachineSideEffecting : public StateMachineState {
@@ -522,7 +484,7 @@ public:
 			sideEffect->prettyPrint(f);
 		fprintf(f, " then l%d}", labels[target]);
 	}
-	static bool parse(StateMachineSideEffecting **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffecting **out, const char *str, const char **suffix)
 	{
 		VexRip origin;
 		int target;
@@ -535,7 +497,7 @@ public:
 			sme = NULL;
 		if (parseThisString(" then l", str, &str) &&
 		    parseDecimalInt(&target, str, &str) &&
-		    parseThisChar('}', str, suffix)) {
+		    parseThisString("}\n", str, suffix)) {
 			*out = new StateMachineSideEffecting(origin, sme, (StateMachineState *)target);
 			return true;
 		}
@@ -548,7 +510,7 @@ public:
 	}
 	void prependSideEffect(StateMachineSideEffect *sideEffect);
 
-	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something);
+	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
 	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
 	StateMachineSideEffect *getSideEffect() { return sideEffect; }
@@ -573,7 +535,7 @@ public:
 class StateMachineBifurcate : public StateMachineState {
 public:
 	StateMachineBifurcate(const VexRip &origin,
-			      IRExpr *_condition,
+			      bbdd *_condition,
 			      StateMachineState *t,
 			      StateMachineState *f)
 		: StateMachineState(origin, StateMachineState::Bifurcate),
@@ -583,7 +545,7 @@ public:
 	{
 	}
 	StateMachineBifurcate(StateMachineBifurcate *base,
-			      IRExpr *_condition)
+			      bbdd *_condition)
 		: StateMachineState(base->dbg_origin, StateMachineState::Bifurcate),
 		  condition(_condition),
 		  trueTarget(base->trueTarget),
@@ -598,39 +560,12 @@ public:
 	{
 	}
 
-	IRExpr *condition; /* Should be typed Ity_I1.  If zero, we go
-			      to the false target.  Otherwise, we go
-			      to the true one. */
+	bbdd *condition;
 	StateMachineState *trueTarget;
 	StateMachineState *falseTarget;
 
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
-	{
-		fprintf(f, "%s: if (", dbg_origin.name());
-		ppIRExpr(condition, f);
-		fprintf(f, ") then l%d else l%d",
-			labels[trueTarget], labels[falseTarget]);
-	}
-	static bool parse(StateMachineBifurcate **out, const char *str, const char **suffix)
-	{
-		VexRip origin;
-		IRExpr *condition;
-		int target1;
-		int target2;
-		if (parseVexRip(&origin, str, &str) &&
-		    parseThisString(": if (", str, &str) &&
-		    parseIRExpr(&condition, str, &str) &&
-		    parseThisString(") then l", str, &str) &&
-		    parseDecimalInt(&target1, str, &str) &&
-		    parseThisString(" else l", str, &str) &&
-		    parseDecimalInt(&target2, str, suffix)) {
-			*out = new StateMachineBifurcate(origin, condition,
-							 (StateMachineState *)target1,
-							 (StateMachineState *)target2);
-			return true;
-		}
-		return false;
-	}
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const;
+	static bool parse(SMScopes *scopes, StateMachineBifurcate **out, const char *str, const char **suffix);
 
 	void visit(HeapVisitor &hv)
 	{
@@ -638,7 +573,7 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something);
+	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
 	void targets(std::vector<StateMachineState **> &out) {
 		out.push_back(&falseTarget);
 		out.push_back(&trueTarget);
@@ -650,12 +585,9 @@ public:
 	void sanityCheck() const
 	{
 		condition->sanity_check();
-		assert(condition->type() == Ity_I1);
 	}
 	StateMachineSideEffect *getSideEffect() { return NULL; }
-	void inputExpressions(std::vector<IRExpr *> &out) {
-		out.push_back(condition);
-	}
+	void inputExpressions(std::vector<IRExpr *> &out);
 };
 
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {
@@ -1401,19 +1333,21 @@ void printStateMachine(const std::set<const StateMachineState *> &sm,
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
-bool parseStateMachine(StateMachine **out,
+bool parseStateMachine(SMScopes *scopes,
+		       StateMachine **out,
 		       const char *str,
 		       const char **suffix,
 		       std::map<CfgLabel, const CFGNode *> &labels);
-static inline bool parseStateMachine(StateMachine **out,
+static inline bool parseStateMachine(SMScopes *scopes,
+				     StateMachine **out,
 				     const char *str,
 				     const char **suffix)
 {
 	std::map<CfgLabel, const CFGNode *> labels;
-	return parseStateMachine(out, str, suffix, labels);
+	return parseStateMachine(scopes, out, str, suffix, labels);
 }	
-StateMachine *readStateMachine(int fd);
-StateMachine *readStateMachine(const char *fname);
+StateMachine *readStateMachine(SMScopes *scopes, int fd);
+StateMachine *readStateMachine(SMScopes *scopes, const char *fname);
 
 StateMachine *duplicateStateMachine(const StateMachine *inp);
 

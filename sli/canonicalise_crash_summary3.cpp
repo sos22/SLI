@@ -527,6 +527,7 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 {
 	IRExpr *reducedSurvivalConstraint =
 		crossProductSurvivalConstraint(
+			summary->scopes,
 			summary->loadMachine,
 			summary->storeMachine,
 			oracle,
@@ -639,7 +640,8 @@ simplifyAssuming(IRExpr *expr,
 }
 
 static IRExpr *
-simplifyAssumingMachineSurvives(const VexPtr<MaiMap, &ir_heap> &mai,
+simplifyAssumingMachineSurvives(SMScopes *scopes,
+				const VexPtr<MaiMap, &ir_heap> &mai,
 				const VexPtr<StateMachine, &ir_heap> &machine,
 				bool doesSurvive,
 				const VexPtr<IRExpr, &ir_heap> &expr,
@@ -659,6 +661,7 @@ simplifyAssumingMachineSurvives(const VexPtr<MaiMap, &ir_heap> &mai,
 	IRExpr *survival_constraint;
 	if (doesSurvive) {
 		survival_constraint = survivalConstraintIfExecutedAtomically(
+			scopes,
 			mai,
 			machine,
 			IRExpr_Const_U1(true),
@@ -668,6 +671,7 @@ simplifyAssumingMachineSurvives(const VexPtr<MaiMap, &ir_heap> &mai,
 			token);
 	} else {
 		survival_constraint = crashingConstraintIfExecutedAtomically(
+			scopes,
 			mai,
 			machine,
 			IRExpr_Const_U1(true),
@@ -1094,6 +1098,7 @@ nonFunctionalSimplifications(
 				stripFloatingPoint(summary->verificationCondition, &p);
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
+					summary->scopes,
 					summary->mai,
 					summary->loadMachine,
 					true,
@@ -1103,6 +1108,7 @@ nonFunctionalSimplifications(
 					token);
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
+					summary->scopes,
 					summary->mai,
 					summary->storeMachine,
 					false,
@@ -1151,9 +1157,9 @@ functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
 class LoadCanonicaliser : public GarbageCollected<LoadCanonicaliser, &ir_heap> {
 	std::vector<std::pair<IRExprLoad *, IRExprFreeVariable *> > canonMap;
 
-	StateMachine *canonicalise(StateMachine *sm);
+	StateMachine *canonicalise(SMScopes *scopes, StateMachine *sm);
 	IRExpr *canonicalise(IRExpr *iex);
-	StateMachine *decanonicalise(StateMachine *sm);
+	StateMachine *decanonicalise(SMScopes *scopes, StateMachine *sm);
 	IRExpr *decanonicalise(IRExpr *iex);
 	class canon_transformer : public StateMachineTransformer {
 		LoadCanonicaliser *_this;
@@ -1213,11 +1219,11 @@ struct LCPrivateTransformer : public StateMachineTransformer {
 		res.insert(std::pair<StateMachineState *, IRExprLoad *>(currentState, iex));
 		return StateMachineTransformer::transformIex(iex);
 	}
-	StateMachineState *transformState(StateMachineState *s, bool *d) {
+	StateMachineState *transformState(SMScopes *scopes, StateMachineState *s, bool *d) {
 		assert(currentState == NULL);
 		assert(!*d);
 		currentState = s;
-		StateMachineState *s2 = StateMachineTransformer::transformState(s, d);
+		StateMachineState *s2 = StateMachineTransformer::transformState(scopes, s, d);
 		assert(s2 == NULL);
 		assert(!*d);
 		assert(currentState == s);
@@ -1288,10 +1294,10 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 }
 
 StateMachine *
-LoadCanonicaliser::canonicalise(StateMachine *sm)
+LoadCanonicaliser::canonicalise(SMScopes *scopes, StateMachine *sm)
 {
 	canon_transformer t(this);
-	return t.transform(sm);
+	return t.transform(scopes, sm);
 }
 
 IRExpr *
@@ -1302,10 +1308,10 @@ LoadCanonicaliser::canonicalise(IRExpr *iex)
 }
 
 StateMachine *
-LoadCanonicaliser::decanonicalise(StateMachine *sm)
+LoadCanonicaliser::decanonicalise(SMScopes *scopes, StateMachine *sm)
 {
 	decanon_transformer t(this);
-	return t.transform(sm);
+	return t.transform(scopes, sm);
 }
 
 IRExpr *
@@ -1318,10 +1324,11 @@ LoadCanonicaliser::decanonicalise(IRExpr *iex)
 CrashSummary *
 LoadCanonicaliser::canonicalise(CrashSummary *cs)
 {
-	StateMachine *loadM = canonicalise(cs->loadMachine);
-	StateMachine *storeM = canonicalise(cs->storeMachine);
+	StateMachine *loadM = canonicalise(cs->scopes, cs->loadMachine);
+	StateMachine *storeM = canonicalise(cs->scopes, cs->storeMachine);
 	IRExpr *cond = canonicalise(cs->verificationCondition);
-	return new CrashSummary(loadM,
+	return new CrashSummary(cs->scopes,
+				loadM,
 				storeM,
 				cond,
 				cs->aliasing,
@@ -1331,8 +1338,9 @@ LoadCanonicaliser::canonicalise(CrashSummary *cs)
 CrashSummary *
 LoadCanonicaliser::decanonicalise(CrashSummary *cs)
 {
-	return new CrashSummary(decanonicalise(cs->loadMachine),
-				decanonicalise(cs->storeMachine),
+	return new CrashSummary(cs->scopes,
+				decanonicalise(cs->scopes, cs->loadMachine),
+				decanonicalise(cs->scopes, cs->storeMachine),
 				decanonicalise(cs->verificationCondition),
 				cs->aliasing,
 				cs->mai);
@@ -1349,7 +1357,8 @@ main(int argc, char *argv[])
 	timeoutTimer.nextDue = now() + 30;
 	timeoutTimer.schedule();
 
-	summary = readBugReport(argv[1], &first_line);
+	SMScopes scopes;
+	summary = readBugReport(&scopes, argv[1], &first_line);
 	MachineState *ms = MachineState::readELFExec(argv[2]);
 	Thread *thr = ms->findThread(ThreadId(1));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[3]));

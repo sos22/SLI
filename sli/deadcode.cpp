@@ -234,6 +234,32 @@ class LivenessEntry {
 	small_set<threadAndRegister, 8> liveDataOnly;
 	small_set<threadAndRegister, 8> livePointer;
 public:
+	void useExpressionData(const bbdd *e)
+	{
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				if (!out->livePointer.contains(g->reg))
+					out->liveDataOnly.insert(g->reg);
+				return visit_continue;
+			}
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_const_bdd(this, &visitor, e);
+	}
+	void useExpressionData(const smrbdd *e)
+	{
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				if (!out->livePointer.contains(g->reg))
+					out->liveDataOnly.insert(g->reg);
+				return visit_continue;
+			}
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_const_bdd(this, &visitor, e);
+	}
 	void useExpressionData(const IRExpr *e)
 	{
 		struct {
@@ -355,9 +381,11 @@ class LivenessMap {
 			res.useExpressionData(smb->condition);
 			break;
 		}
-		case StateMachineState::Terminal:
-			/* Nothing needed */
+		case StateMachineState::Terminal: {
+			StateMachineTerminal *smt = (StateMachineTerminal *)sm;
+			res.useExpressionData(smt->res);
 			break;
+		}
 		}
 		if (content[sm].merge(res))
 			*progress = true;

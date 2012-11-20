@@ -19,15 +19,6 @@
 static bool debug_survival_constraint = false;
 #endif
 
-struct scopes {
-	bdd_ordering ordering;
-	bbdd::scope bools;
-	smrbdd::scope smrs;
-	scopes()
-		: bools(&ordering), smrs(&ordering)
-	{}
-};
-
 /* All of the state needed to evaluate a single pure IRExpr. */
 /* Note that this is not GCed, but contains bare pointers to GCed
    objects, so needs to be manually visited if live across GC
@@ -100,7 +91,7 @@ class threadState {
 	}
 
 	IRExpr *setTemporary(const threadAndRegister &reg, IRExpr *inp, const IRExprOptimisations &opt);
-	bbdd *setTemporary(scopes *scopes, const threadAndRegister &reg, bbdd *inp, const IRExprOptimisations &opt);
+	bbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *inp, const IRExprOptimisations &opt);
 public:
 	IRExpr *register_value(const threadAndRegister &reg,
 			       IRType type) {
@@ -269,7 +260,7 @@ public:
 			abort();
 		}
 	}
-	void set_register(scopes *scopes,
+	void set_register(SMScopes *scopes,
 			  const threadAndRegister &reg,
 			  IRExpr *e,
 			  bbdd **assumption,
@@ -309,7 +300,7 @@ public:
 
 		bump_register_in_assignment_order(reg);
 	}
-	void eval_phi(scopes *scopes,
+	void eval_phi(SMScopes *scopes,
 		      StateMachineSideEffectPhi *phi,
 		      bbdd **assumption,
 		      const IRExprOptimisations &opt) {
@@ -343,6 +334,8 @@ public:
 		set_register(scopes, phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
 	}
 
+	bbdd *specialiseIRExpr(bbdd::scope *scope, bbdd *iex);
+	smrbdd *specialiseIRExpr(smrbdd::scope *scope, bbdd::scope *, smrbdd *iex);
 	IRExpr *specialiseIRExpr(IRExpr *iex);
 	void visit(HeapVisitor &hv) {
 		for (auto it = registers.begin();
@@ -355,7 +348,7 @@ public:
 
 /* Rewrite @e now that we know the value of @reg */
 bbdd *
-threadState::setTemporary(scopes *scopes, const threadAndRegister &reg, bbdd *e, const IRExprOptimisations &opt)
+threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *e, const IRExprOptimisations &opt)
 {
 	if (e->isLeaf)
 		return e;
@@ -389,24 +382,36 @@ threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const IRExprO
 	return simplifyIRExpr(doit.doit(e), opt);
 }
 
+class SpecialiseIRExpr : public IRExprTransformer {
+	threadState &state;
+	IRExpr *transformIex(IRExprGet *e) {
+		IRExpr *e2 = state.register_value(e->reg, e->type());
+		if (e2)
+			return coerceTypes(e->type(), e2);
+		return IRExprTransformer::transformIex(e);
+	}
+public:
+	SpecialiseIRExpr(threadState &_state)
+		: state(_state)
+	{}
+};
 IRExpr *
 threadState::specialiseIRExpr(IRExpr *iex)
 {
-	class SpecialiseIRExpr : public IRExprTransformer {
-		threadState &state;
-		IRExpr *transformIex(IRExprGet *e) {
-			IRExpr *e2 = state.register_value(e->reg, e->type());
-			if (e2)
-				return coerceTypes(e->type(), e2);
-			return IRExprTransformer::transformIex(e);
-		}
-	public:
-		SpecialiseIRExpr(threadState &_state)
-			: state(_state)
-		{}
-	};
 	SpecialiseIRExpr s(*this);
 	return s.doit(iex);
+}
+bbdd *
+threadState::specialiseIRExpr(bbdd::scope *scope, bbdd *bbdd)
+{
+	SpecialiseIRExpr s(*this);
+	return s.transform_bbdd(scope, bbdd);
+}
+smrbdd *
+threadState::specialiseIRExpr(smrbdd::scope *scope, bbdd::scope *bscope, smrbdd *smrbdd)
+{
+	SpecialiseIRExpr s(*this);
+	return s.transform_smrbdd(bscope, scope, smrbdd);
 }
 
 class memLogT : public std::vector<std::pair<StateMachine *, StateMachineSideEffectStore *> > {
@@ -437,8 +442,8 @@ private:
 		hv(pathConstraint);
 	}
 
-	trool evalBooleanExpression(scopes *scopes, IRExpr *what, const IRExprOptimisations &opt);
-	void evalSideEffect(scopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
+	trool evalBooleanExpression(SMScopes *scopes, bbdd *what, const IRExprOptimisations &opt);
+	void evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    smrbdd *&result, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
 
@@ -452,7 +457,7 @@ private:
 	}
 	/* Create a new context which is like this one, but with an
 	   extra assumption. */
-	EvalContext(scopes *scopes,
+	EvalContext(SMScopes *scopes,
 		    const EvalContext &o,
 		    StateMachineState *sms,
 		    bbdd *assume)
@@ -469,18 +474,18 @@ private:
 		esme_ignore_path
 	};
 	evalStateMachineSideEffectRes evalStateMachineSideEffect(
-		scopes *scopes,
+		SMScopes *scopes,
 		const MaiMap &decode,
 		StateMachine *thisMachine,
 		StateMachineSideEffect *smse,
 		NdChooser &chooser,
 		OracleInterface *oracle,
 		const IRExprOptimisations &opt);
-	bool expressionIsTrue(scopes *scopes, IRExpr *exp, NdChooser &chooser, const IRExprOptimisations &opt);
-	bool evalExpressionsEqual(scopes *scopes, IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool evalExpressionsEqual(SMScopes *scopes, IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
 
 public:
-	void advance(scopes *scopes,
+	void advance(SMScopes *scopes,
 		     const MaiMap &decode,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
@@ -497,17 +502,15 @@ public:
 };
 
 bool
-EvalContext::expressionIsTrue(scopes *scopes, IRExpr *exp, NdChooser &chooser, const IRExprOptimisations &opt)
+EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
 {
 	if (TIMEOUT)
 		return true;
 
-	exp = simplifyIRExpr(internIRExpr(state.specialiseIRExpr(exp)), opt);
-
 	bbdd *simplifiedCondition =
 		bbdd::assume(
 			&scopes->bools,
-			bbdd::var(&scopes->bools, exp),
+			exp,
 			pathConstraint);
 	std::map<bool, bbdd *> selectors(bbdd::to_selectors(&scopes->bools, simplifiedCondition));
 	assert(!selectors.empty());
@@ -543,19 +546,20 @@ EvalContext::expressionIsTrue(scopes *scopes, IRExpr *exp, NdChooser &chooser, c
 }
 
 bool
-EvalContext::evalExpressionsEqual(scopes *scopes, IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const IRExprOptimisations &opt)
+EvalContext::evalExpressionsEqual(SMScopes *scopes, IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const IRExprOptimisations &opt)
 {
 	return expressionIsTrue(scopes,
-				IRExpr_Binop(
-					Iop_CmpEQ64,
-					exp1,
-					exp2),
+				bbdd::var(&scopes->bools,
+					  IRExpr_Binop(
+						  Iop_CmpEQ64,
+						  exp1,
+						  exp2)),
 				chooser,
 				opt);
 }
 
 EvalContext::evalStateMachineSideEffectRes
-EvalContext::evalStateMachineSideEffect(scopes *scopes,
+EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					const MaiMap &decode,
 					StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
@@ -570,7 +574,7 @@ EvalContext::evalStateMachineSideEffect(scopes *scopes,
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
 		addr = state.specialiseIRExpr(smsema->addr);
-		if (expressionIsTrue(scopes, IRExpr_Unop(Iop_BadPtr, addr), chooser, opt))
+		if (expressionIsTrue(scopes, bbdd::var(&scopes->bools, IRExpr_Unop(Iop_BadPtr, addr)), chooser, opt))
 			return esme_escape;
 	}
 
@@ -648,7 +652,7 @@ EvalContext::evalStateMachineSideEffect(scopes *scopes,
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
 		if (expressionIsTrue(
 			    scopes,
-			    smseaf->value,
+			    bbdd::var(&scopes->bools, smseaf->value),
 			    chooser,
 			    opt)) {
 			if (smseaf->reflectsActualProgram)
@@ -686,9 +690,9 @@ EvalContext::evalStateMachineSideEffect(scopes *scopes,
 		if (!p->set.mightBeNonPointer() &&
 		    expressionIsTrue(
 			    scopes,
-			    IRExpr_Unop(
-				    Iop_BadPtr,
-				    IRExpr_Get(p->reg, Ity_I64)),
+			    bbdd::var(&scopes->bools, IRExpr_Unop(
+					      Iop_BadPtr,
+					      IRExpr_Get(p->reg, Ity_I64))),
 			    chooser,
 			    opt)) {
 			return esme_escape;
@@ -704,17 +708,12 @@ EvalContext::evalStateMachineSideEffect(scopes *scopes,
 }
 
 EvalContext::trool
-EvalContext::evalBooleanExpression(scopes *scopes, IRExpr *what, const IRExprOptimisations &opt)
+EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, const IRExprOptimisations &opt)
 {
-	assert(what->type() == Ity_I1);
-	what = simplifyIRExpr(internIRExpr(state.specialiseIRExpr(what)), opt);
-
 	bbdd *simplifiedCondition =
 		bbdd::assume(
 			&scopes->bools,
-			bbdd::var(
-				&scopes->bools,
-				what),
+			what,
 			pathConstraint);
 	if (!simplifiedCondition) {
 		/* @what is a contradiction when combined with
@@ -757,7 +756,7 @@ EvalContext::evalBooleanExpression(scopes *scopes, IRExpr *what, const IRExprOpt
 }
 
 void
-EvalContext::evalSideEffect(scopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
+EvalContext::evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    smrbdd *&result, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
 {
@@ -795,7 +794,7 @@ EvalContext::evalSideEffect(scopes *scopes, const MaiMap &decode, StateMachine *
    every item in the pending state queue, which would make that queue
    much bigger, which'd be kind of annoying. */
 void
-EvalContext::advance(scopes *scopes,
+EvalContext::advance(SMScopes *scopes,
 		     const MaiMap &decode,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
@@ -806,10 +805,9 @@ EvalContext::advance(scopes *scopes,
 	switch (currentState->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)currentState;
-		smrbdd *res = scopes->smrs.cnst(smt->res);
 		result = smrbdd::ifelse(&scopes->smrs,
 					pathConstraint,
-					res,
+					state.specialiseIRExpr(&scopes->smrs, &scopes->bools, smt->res),
 					result);
 		return;
 	}
@@ -826,11 +824,7 @@ EvalContext::advance(scopes *scopes,
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
-		IRExpr *cond =
-			simplifyIRExpr(
-				internIRExpr(
-					state.specialiseIRExpr(smb->condition)),
-				opt);
+		bbdd *cond = state.specialiseIRExpr(&scopes->bools, smb->condition);
 		trool res = evalBooleanExpression(scopes, cond, opt);
 		switch (res) {
 		case tr_true:
@@ -848,16 +842,14 @@ EvalContext::advance(scopes *scopes,
 							scopes,
 							*this,
 							smb->falseTarget,
-							bbdd::var(
+							bbdd::invert(
 								&scopes->bools,
-								IRExpr_Unop(
-									Iop_Not1,
-									cond))));
+								cond)));
 			pendingStates.push_back(EvalContext(
 							scopes,
 							*this,
 							smb->trueTarget,
-							bbdd::var(&scopes->bools, cond)));
+							cond));
 			break;
 		}
 		return;
@@ -867,7 +859,7 @@ EvalContext::advance(scopes *scopes,
 }
 
 static smrbdd *
-enumEvalPaths(scopes *scopes,
+enumEvalPaths(SMScopes *scopes,
 	      const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<StateMachine, &ir_heap> &sm,
 	      const VexPtr<bbdd, &ir_heap> &assumption,
@@ -897,7 +889,8 @@ enumEvalPaths(scopes *scopes,
 }
 
 static IRExpr *
-_survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
+_survivalConstraintIfExecutedAtomically(SMScopes *scopes,
+					const VexPtr<MaiMap, &ir_heap> &mai,
 					const VexPtr<StateMachine, &ir_heap> &sm,
 					VexPtr<IRExpr, &ir_heap> _assumption,
 					const VexPtr<OracleInterface> &oracle,
@@ -906,8 +899,6 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 					const IRExprOptimisations &opt,
 					GarbageCollectionToken token)
 {
-	scopes scp;
-
 	__set_profiling(survivalConstraintIfExecutedAtomically);
 
 	if (debug_survival_constraint) {
@@ -922,29 +913,29 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 
 	VexPtr<bbdd, &ir_heap> assumption;
 	if (_assumption)
-		assumption = bbdd::var(&scp.bools, _assumption);
+		assumption = bbdd::var(&scopes->bools, _assumption);
 	else
-		assumption = scp.bools.cnst(true);
+		assumption = scopes->bools.cnst(true);
 
-	smrbdd *smr = enumEvalPaths(&scp, mai, sm, assumption, oracle, opt, token);
-	std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scp.bools, smr));
+	smrbdd *smr = enumEvalPaths(scopes, mai, sm, assumption, oracle, opt, token);
+	std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scopes->bools, smr));
 	bbdd *crashIf, *surviveIf, *unreachedIf;
 	if (selectors.count(smr_crash))
 		crashIf = selectors[smr_crash];
 	else
-		crashIf = scp.bools.cnst(false);
+		crashIf = scopes->bools.cnst(false);
 	if (selectors.count(smr_survive))
 		surviveIf = selectors[smr_survive];
 	else
-		surviveIf = scp.bools.cnst(false);
+		surviveIf = scopes->bools.cnst(false);
 	if (selectors.count(smr_unreached))
 		unreachedIf = selectors[smr_unreached];
 	else
-		unreachedIf = scp.bools.cnst(false);
+		unreachedIf = scopes->bools.cnst(false);
 	if (escapingStatesSurvive)
-		surviveIf = bbdd::Or(&scp.bools, surviveIf, unreachedIf);
+		surviveIf = bbdd::Or(&scopes->bools, surviveIf, unreachedIf);
 	else
-		crashIf = bbdd::Or(&scp.bools, crashIf, unreachedIf);
+		crashIf = bbdd::Or(&scopes->bools, crashIf, unreachedIf);
 	bbdd *resBdd;
 	if (wantCrash)
 		resBdd = crashIf;
@@ -968,7 +959,8 @@ _survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 /* Assume that @sm executes atomically.  Figure out a constraint on
    the initial state which will lead to it not crashing. */
 IRExpr *
-survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
+survivalConstraintIfExecutedAtomically(SMScopes *scopes,
+				       const VexPtr<MaiMap, &ir_heap> &mai,
 				       const VexPtr<StateMachine, &ir_heap> &sm,
 				       const VexPtr<IRExpr, &ir_heap> &assumption,
 				       const VexPtr<OracleInterface> &oracle,
@@ -977,6 +969,7 @@ survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 				       GarbageCollectionToken token)
 {
 	return _survivalConstraintIfExecutedAtomically(
+		scopes,
 		mai,
 		sm,
 		assumption,
@@ -990,7 +983,8 @@ survivalConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 /* Assume that @sm executes atomically.  Figure out a constraint on
    the initial state which will lead to it not surviving. */
 IRExpr *
-crashingConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
+crashingConstraintIfExecutedAtomically(SMScopes *scopes,
+				       const VexPtr<MaiMap, &ir_heap> &mai,
 				       const VexPtr<StateMachine, &ir_heap> &sm,
 				       const VexPtr<IRExpr, &ir_heap> &assumption,
 				       const VexPtr<OracleInterface> &oracle,
@@ -999,6 +993,7 @@ crashingConstraintIfExecutedAtomically(const VexPtr<MaiMap, &ir_heap> &mai,
 				       GarbageCollectionToken token)
 {
 	return _survivalConstraintIfExecutedAtomically(
+		scopes,
 		mai,
 		sm,
 		assumption,
@@ -1154,7 +1149,8 @@ storeDefinitelyDoesntRace(const MaiMap &decode, StateMachineSideEffect *storeEff
 }
 
 static StateMachine *
-buildCrossProductMachine(const MaiMap &maiIn,
+buildCrossProductMachine(SMScopes *scopes,
+			 const MaiMap &maiIn,
 			 StateMachine *probeMachine,
 			 StateMachine *storeMachine,
 			 OracleInterface *oracle,
@@ -1268,11 +1264,11 @@ buildCrossProductMachine(const MaiMap &maiIn,
 				   crashes before the store machine
 				   has issued any stores, so that just
 				   turns into Unreached. */
-				if (crossState.p == StateMachineTerminal::survive() ||
-				    crossState.store_issued_store)
-					newState = crossState.p;
-				else
-					newState = StateMachineTerminal::unreached();
+				newState = new StateMachineTerminal(
+					crossState.p->dbg_origin,
+					crossState.store_issued_store ?
+						((StateMachineTerminal *)crossState.p)->res :
+						scopes->smrs.cnst(smr_unreached));
 			} else if (crossState.s->type == StateMachineState::Terminal) {
 				/* If the store machine terminates at
 				   <survive> or <unreached> then we
@@ -1286,11 +1282,22 @@ buildCrossProductMachine(const MaiMap &maiIn,
 				   machine has issued any loads, so
 				   turn that into <unreached> as
 				   well. */
-				if (crossState.probe_issued_access &&
-				    crossState.s == StateMachineTerminal::crash())
-					newState = advanceProbeMachine(crossState, pendingRelocs);
-				else
-					newState = StateMachineTerminal::unreached();
+				newState = new StateMachineTerminal(
+					crossState.s->dbg_origin,
+					scopes->smrs.cnst(smr_unreached));
+				if (crossState.probe_issued_access) {
+					std::map<StateMachineRes, bbdd *> selectors(
+						smrbdd::to_selectors(
+							&scopes->bools,
+							((StateMachineTerminal *)crossState.s)->res));
+					if (selectors.count(smr_crash))
+						newState =
+							new StateMachineBifurcate(
+								crossState.s->dbg_origin,
+								selectors[smr_crash],
+								advanceProbeMachine(crossState, pendingRelocs),
+								newState);
+				}
 			} else if (!probe_effect ||
 				   probeDefinitelyDoesntRace(*maiOut, probe_effect, crossState.s, opt, oracle)) {
 				/* If the probe effect definitely
@@ -1374,7 +1381,7 @@ buildCrossProductMachine(const MaiMap &maiIn,
 				}
 				newState = new StateMachineBifurcate(
 					VexRip(),
-					fv,
+					bbdd::var(&scopes->bools, fv),
 					nextProbe,
 					nextStore);
 			}
@@ -1455,7 +1462,8 @@ stripUninterpretableAnnotations(StateMachine *inp)
 }
 
 IRExpr *
-crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachine,
+crossProductSurvivalConstraint(SMScopes *scopes,
+			       const VexPtr<StateMachine, &ir_heap> &probeMachine,
 			       const VexPtr<StateMachine, &ir_heap> &storeMachine,
 			       const VexPtr<OracleInterface> &oracle,
 			       const VexPtr<IRExpr, &ir_heap> &initialStateCondition,
@@ -1475,6 +1483,7 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
 	VexPtr<MaiMap, &ir_heap> decode;
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
+			scopes,
 			*mai,
 			stripUninterpretableAnnotations(probeMachine),
 			stripUninterpretableAnnotations(storeMachine),
@@ -1484,24 +1493,16 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
 			opt));
 	crossProductMachine =
 		optimiseStateMachine(
+			scopes,
 			decode,
 			crossProductMachine,
 			opt,
 			oracle,
 			false,
 			token);
-	if (crossProductMachine->root == StateMachineTerminal::unreached()) {
-		/* This indicates that the store machine and probe
-		   machine assert incompatible things.  e.g. suppose
-		   the probe machine amounts to saying we'll crash if
-		   some global variable is a bad pointer, but the
-		   store machine unconditionally dereferences it.
-		   Easy to deal with: just return the constant 1, so
-		   that we don't report a bug. */
-		return IRExpr_Const_U1(true);
-	}
 
 	return survivalConstraintIfExecutedAtomically(
+		scopes,
 		decode,
 		crossProductMachine,
 		initialStateCondition,
@@ -1516,27 +1517,118 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
    is a store state then this effectively concatenates the two
    machines together.  We duplicate both machines in the process. */
 /* Slightly non-obvious: we make the composite machine branch to
-   <crash> if the first machine branches to <survive>.  The idea is
-   that the composite machine runs the first machine to completion and
-   then, if that predicts a crash, runs the second machine to
+   <unreached> if the first machine branches to <survive>.  The idea
+   is that the composite machine runs the first machine to completion
+   and then, if that predicts a crash, runs the second machine to
    completion. */
+struct concat_machines_state {
+	bool in_first_machine;
+	StateMachineState *state;
+	bool operator<(const concat_machines_state &o) const {
+		if (in_first_machine < o.in_first_machine)
+			return true;
+		if (in_first_machine > o.in_first_machine)
+			return false;
+		return state < o.state;
+	}
+	concat_machines_state(bool ifm, StateMachineState *s)
+		: in_first_machine(ifm), state(s)
+	{}
+};
 static StateMachine *
-concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine *to)
+concatenateStateMachinesCrashing(SMScopes *scopes, const StateMachine *machine, const StateMachine *to)
 {
-	std::map<const StateMachineState *, StateMachineState *> rewriteRules;
+	typedef std::pair<StateMachineState **, concat_machines_state> relocT;
+	std::map<concat_machines_state, StateMachineState *> newStates;
+	std::vector<relocT> relocs;
+	StateMachineState *newRoot = NULL;
+	relocs.push_back(relocT(&newRoot, concat_machines_state(true, machine->root)));
+	while (!relocs.empty()) {
+		relocT reloc(relocs.back());
+		relocs.pop_back();
+		auto it_did_insert = newStates.insert(
+			std::pair<concat_machines_state, StateMachineState *>
+			(reloc.second, (StateMachineState *)NULL));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (did_insert) {
+			StateMachineState *inpState = reloc.second.state;
+			switch (inpState->type) {
+			case StateMachineState::Terminal: {
+				StateMachineTerminal *inp_smt =
+					(StateMachineTerminal *)inpState;
+				if (reloc.second.in_first_machine) {
+					std::map<StateMachineRes, bbdd *> sel(smrbdd::to_selectors(&scopes->bools, inp_smt->res));
+					StateMachineState *unreached =
+						new StateMachineTerminal(
+							inp_smt->dbg_origin,
+							scopes->smrs.cnst(smr_unreached));
+					if (sel.count(smr_crash)) {
+						StateMachineBifurcate *smb =
+							new StateMachineBifurcate(
+								inp_smt->dbg_origin,
+								sel[smr_crash],
+								NULL,
+								unreached);
+						relocs.push_back(
+							relocT(&smb->trueTarget,
+							       concat_machines_state(
+								       false,
+								       to->root)));
+						it->second = smb;
+					} else {
+						it->second = unreached;
+					}
+				} else {
+					it->second = new StateMachineTerminal(
+						inp_smt->dbg_origin,
+						inp_smt->res);
+				}
+				break;
+			}
+			case StateMachineState::Bifurcate: {
+				StateMachineBifurcate *inp_smb =
+					(StateMachineBifurcate *)inpState;
+				StateMachineBifurcate *out_smb =
+					new StateMachineBifurcate(
+						inp_smb->dbg_origin,
+						inp_smb->condition,
+						NULL,
+						NULL);
+				relocs.push_back(
+					relocT(&out_smb->trueTarget,
+					       concat_machines_state(
+						       reloc.second.in_first_machine,
+						       inp_smb->trueTarget)));
+				relocs.push_back(
+					relocT(&out_smb->falseTarget,
+					       concat_machines_state(
+						       reloc.second.in_first_machine,
+						       inp_smb->falseTarget)));
+				it->second = out_smb;
+				break;
+			}
+			case StateMachineState::SideEffecting: {
+				StateMachineSideEffecting *inp_sme =
+					(StateMachineSideEffecting *)inpState;
+				StateMachineSideEffecting *out_sme =
+					new StateMachineSideEffecting(
+						inp_sme->dbg_origin,
+						inp_sme->sideEffect,
+						NULL);
+				relocs.push_back(
+					relocT(&out_sme->target,
+					       concat_machines_state(
+						       reloc.second.in_first_machine,
+						       inp_sme->target)));
+				it->second = out_sme;
+				break;
+			}
+			}
+		}
+		*reloc.first = it->second;
+	}
 
-	to = duplicateStateMachine(to);
-
-	/* This is moderately tricky: setting rules for all of the
-	   terminal states, even no-op rules, forces rewriteMachine()
-	   to duplicate every state, because it duplicates any state
-	   which can ultimately reach a state which it has a rule for. */
-	rewriteRules[StateMachineTerminal::crash()] = to->root;
-	rewriteRules[StateMachineTerminal::survive()] = StateMachineTerminal::crash();
-	rewriteRules[StateMachineTerminal::unreached()] = StateMachineTerminal::unreached();
-
-	StateMachineTransformer::rewriteMachine(machine, rewriteRules, false);
-	assert(rewriteRules.count(machine->root));
 	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots(machine->cfg_roots);
 	for (auto it = to->cfg_roots.begin(); it != to->cfg_roots.end(); it++) {
 		bool already_present = false;
@@ -1546,12 +1638,12 @@ concatenateStateMachinesCrashing(const StateMachine *machine, const StateMachine
 		if (!already_present)
 			cfg_roots.push_back(*it);
 	}
-	return new StateMachine(rewriteRules[machine->root],
-				cfg_roots);
+	return new StateMachine(newRoot, cfg_roots);
 }
 
 IRExpr *
-writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
+writeMachineSuitabilityConstraint(SMScopes *scopes,
+				  VexPtr<MaiMap, &ir_heap> &mai,
 				  const VexPtr<StateMachine, &ir_heap> &writeMachine,
 				  const VexPtr<StateMachine, &ir_heap> &readMachine,
 				  const VexPtr<OracleInterface> &oracle,
@@ -1566,10 +1658,12 @@ writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 	writeMachine->assertAcyclic();
 	readMachine->assertAcyclic();
 	combinedMachine = concatenateStateMachinesCrashing(
+		scopes,
 		writeMachine,
 		readMachine);
 	combinedMachine->assertAcyclic();
-	combinedMachine = optimiseStateMachine(mai,
+	combinedMachine = optimiseStateMachine(scopes,
+					       mai,
 					       combinedMachine,
 					       opt
 					          .enableassumeExecutesAtomically()
@@ -1579,15 +1673,8 @@ writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 					       oracle,
 					       true,
 					       token);
-	if (combinedMachine->root == StateMachineTerminal::unreached()) {
-		/* This means that running the store machine and then
-		   running the load machine is guaranteed to never
-		   survive.  That tells us that the store machine is
-		   never suitable, so the suitability constraint is
-		   just 0. */
-		return IRExpr_Const_U1(false);
-	}
 	return survivalConstraintIfExecutedAtomically(
+		scopes,
 		mai,
 		combinedMachine,
 		assumption,
@@ -1604,14 +1691,14 @@ writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
  * should get you reasonably close to exploring all of the interesting
  * behaviour in the machine. */
 void
-collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
+collectConstraints(SMScopes *scopes,
+		   const VexPtr<MaiMap, &ir_heap> &mai,
 		   const VexPtr<StateMachine, &ir_heap> &sm,
 		   VexPtr<OracleInterface> &oracle,
 		   const IRExprOptimisations &opt,
 		   std::vector<IRExpr *> &out,
 		   GarbageCollectionToken token)
 {
-	scopes scp;
-	enumEvalPaths(&scp, mai, sm, scp.bools.cnst(true), oracle, opt, token, true);
-	scp.ordering.enumVariables(out);
+	enumEvalPaths(scopes, mai, sm, scopes->bools.cnst(true), oracle, opt, token, true);
+	scopes->ordering.enumVariables(out);
 }

@@ -98,7 +98,7 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 		switch (s->type) {
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-			bbdd *cond = bbdd::var(scope, smb->condition);
+			bbdd *cond = smb->condition;
 			bbdd *trueCond = bbdd::And(scope, dom, cond);
 			bbdd *falseCond = bbdd::And(scope, dom, bbdd::invert(scope, cond));
 			addPath(content[smb->trueTarget],
@@ -108,7 +108,7 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 				falseCond,
 				smb->falseTarget);
 			if (debug_control_dependence) {
-				printf("Convert %s to BBDD ->\n", nameIRExpr(smb->condition));
+				printf("Condition:\n");
 				cond->prettyPrint(stdout);
 				printf("Combine with dom constraint\n");
 				dom->prettyPrint(stdout);
@@ -320,7 +320,7 @@ build_selection_bdd(StateMachine *sm,
 					it->second->prettyPrint(stdout);
 				}
 			}
-			intbdd *flattened = intbdd::from_enabling(iscope, enabling);
+			intbdd *flattened = intbdd::from_enabling(iscope, enabling, 0);
 			if (!flattened) {
 				if (debug_build_paths)
 					printf("Failed to flatten enabling table\n");
@@ -374,11 +374,12 @@ build_mux(StateMachineSideEffectPhi *phi,
 }
 
 static StateMachine *
-replaceSideEffects(StateMachine *sm, std::map<StateMachineSideEffect *, StateMachineSideEffect *> &rewrites)
+replaceSideEffects(SMScopes *scopes, StateMachine *sm, std::map<StateMachineSideEffect *, StateMachineSideEffect *> &rewrites)
 {
 	struct : public StateMachineTransformer {
 		std::map<StateMachineSideEffect *, StateMachineSideEffect *> *rewrites;
-		StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
+		StateMachineSideEffecting *transformOneState(SMScopes *,
+							     StateMachineSideEffecting *smse,
 							     bool *done_something)
 		{
 			if (!smse->sideEffect)
@@ -392,11 +393,11 @@ replaceSideEffects(StateMachine *sm, std::map<StateMachineSideEffect *, StateMac
 		bool rewriteNewStates() const { return true; }
 	} doit;
 	doit.rewrites = &rewrites;
-	return doit.transform(sm);
+	return doit.transform(scopes, sm);
 }
 
 static StateMachine *
-phiElimination(StateMachine *sm, bool *done_something)
+phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
 	std::map<const StateMachineState *, int> labels;
 
@@ -481,14 +482,14 @@ phiElimination(StateMachine *sm, bool *done_something)
 		}
 	}
 	*done_something = true;
-	return replaceSideEffects(sm, replacements);
+	return replaceSideEffects(scopes, sm, replacements);
 }
 
 /* End of namespace */
 };
 
 StateMachine *
-phiElimination(StateMachine *sm, bool *done_something)
+phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
-	return _phi_elimination::phiElimination(sm, done_something);
+	return _phi_elimination::phiElimination(scopes, sm, done_something);
 }
