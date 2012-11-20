@@ -517,6 +517,8 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 {
 	assert(a);
 	assert(b);
+	assert(a->isLeaf || ordering->before(cond, a->content.condition));
+	assert(b->isLeaf || ordering->before(cond, b->content.condition));
 	if (a == b)
 		return a;
 	auto it_did_insert = intern.insert(

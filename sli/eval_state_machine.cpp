@@ -917,7 +917,9 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 	else
 		assumption = scopes->bools.cnst(true);
 
+	assumption->sanity_check(&scopes->ordering);
 	smrbdd *smr = enumEvalPaths(scopes, mai, sm, assumption, oracle, opt, token);
+	smr->sanity_check(&scopes->ordering);
 	std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scopes->bools, smr));
 	bbdd *crashIf, *surviveIf, *unreachedIf;
 	if (selectors.count(smr_crash))
@@ -932,10 +934,15 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 		unreachedIf = selectors[smr_unreached];
 	else
 		unreachedIf = scopes->bools.cnst(false);
+	crashIf->sanity_check(&scopes->ordering);
+	surviveIf->sanity_check(&scopes->ordering);
+	unreachedIf->sanity_check(&scopes->ordering);
 	if (escapingStatesSurvive)
 		surviveIf = bbdd::Or(&scopes->bools, surviveIf, unreachedIf);
 	else
 		crashIf = bbdd::Or(&scopes->bools, crashIf, unreachedIf);
+	crashIf->sanity_check(&scopes->ordering);
+	surviveIf->sanity_check(&scopes->ordering);
 	bbdd *resBdd;
 	if (wantCrash)
 		resBdd = crashIf;

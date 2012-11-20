@@ -303,11 +303,11 @@ public:
 			hv(it->second);
 	}
 #ifdef NDEBUG
-	void sanityCheck(const MaiMap &) const {}
+	void sanityCheck(const MaiMap &, SMScopes * = NULL) const {}
 	void assertAcyclic() const {}
 	void assertSSA() const {}
 #else
-	void sanityCheck(const MaiMap &) const;
+	void sanityCheck(const MaiMap &, SMScopes * = NULL) const;
 	void assertAcyclic() const;
 	void assertSSA() const;
 #endif
@@ -378,9 +378,9 @@ public:
 	virtual void inputExpressions(std::vector<IRExpr *> &out) = 0;
 
 #ifdef NDEBUG
-	void sanityCheck() const {}
+	void sanityCheck(SMScopes *) const {}
 #else
-	virtual void sanityCheck() const = 0;
+	virtual void sanityCheck(SMScopes *) const = 0;
 #endif
 
 #ifndef NDEBUG
@@ -448,7 +448,7 @@ public:
 	void targets(std::vector<const StateMachineState *> &) const { }
 	StateMachineSideEffect *getSideEffect() { return NULL; }
 	void inputExpressions(std::vector<IRExpr *> &);
-	void sanityCheck() const { res->sanity_check(); }
+	void sanityCheck(SMScopes *scopes) const { res->sanity_check(&scopes->ordering); }
 
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const;
 	static bool parse(SMScopes *scopes, StateMachineTerminal **out, const char *str, const char **suffix);
@@ -518,7 +518,7 @@ public:
 		if (sideEffect)
 			sideEffect->inputExpressions(out);
 	}
-	void sanityCheck() const
+	void sanityCheck(SMScopes *) const
 	{
 #ifndef NDEBUG
 		if (sideEffect)
@@ -582,9 +582,9 @@ public:
 		out.push_back(falseTarget);
 		out.push_back(trueTarget);
 	}
-	void sanityCheck() const
+	void sanityCheck(SMScopes *scopes) const
 	{
-		condition->sanity_check();
+		condition->sanity_check(&scopes->ordering);
 	}
 	StateMachineSideEffect *getSideEffect() { return NULL; }
 	void inputExpressions(std::vector<IRExpr *> &out);

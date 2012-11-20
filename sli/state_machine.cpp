@@ -988,7 +988,7 @@ intersectSets(std::set<t, s> &out, const std::set<t, s> &inp)
 
 #ifndef NDEBUG
 void
-StateMachine::sanityCheck(const MaiMap &mai) const
+StateMachine::sanityCheck(const MaiMap &mai, SMScopes *scopes) const
 {
 	/* These are expensive enough that we don't want them on
 	   unconditionally even in !NDEBUG builds. */
@@ -998,7 +998,7 @@ StateMachine::sanityCheck(const MaiMap &mai) const
 	std::set<const StateMachineState *> allStates;
 	enumStates(this, &allStates);
 	for (auto it = allStates.begin(); it != allStates.end(); it++)
-		(*it)->sanityCheck();
+		(*it)->sanityCheck(scopes);
 
 	struct {
 		static visit_result HappensBefore(std::set<MemoryAccessIdentifier> *neededMais,
