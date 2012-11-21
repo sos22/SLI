@@ -1013,7 +1013,7 @@ PointsToTable::refine(AliasTable &at,
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(c->value, smse, sl, mat, slt, sm);
+			newPts = pointsToSetForExpr(exprbdd::to_irexpr(c->value), smse, sl, mat, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
@@ -1122,7 +1122,7 @@ dataOfSideEffect(StateMachineSideEffect *s_effect, IRType ty)
 			((StateMachineSideEffectLoad *)s_effect)->target,
 			((StateMachineSideEffectLoad *)s_effect)->type);
 	} else if (s_effect->type == StateMachineSideEffect::Copy) {
-		res = ((StateMachineSideEffectCopy *)s_effect)->value;
+		res = exprbdd::to_irexpr(((StateMachineSideEffectCopy *)s_effect)->value);
 	} else {
 		abort();
 	}
@@ -1130,7 +1130,7 @@ dataOfSideEffect(StateMachineSideEffect *s_effect, IRType ty)
 }
 
 static StateMachine *
-functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *sm,
+functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		      const AllowableOptimisations &opt, OracleInterface *oracle,
 		      const ControlDominationMap &cdm, bool *done_something)
 {
@@ -1264,9 +1264,12 @@ functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *sm
 			it->first->sideEffect =
 					new StateMachineSideEffectCopy(
 						l->target,
-						IRExpr_Load(
-							l->type,
-							l->addr));
+						exprbdd::var(
+							&scopes->exprs,
+							&scopes->bools,
+							IRExpr_Load(
+								l->type,
+								l->addr)));
 			it->first->target =
 				new StateMachineSideEffecting(
 					it->first->dbg_origin,
@@ -1286,7 +1289,7 @@ functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *sm
 			IRExpr *d = dataOfSideEffect(s_effect, l->type);
 			it->first->sideEffect =
 				new StateMachineSideEffectCopy(
-					l->target, d);
+					l->target, exprbdd::var(&scopes->exprs, &scopes->bools, d));
 		} else if (!it->second.mightLoadInitial) {
 #warning convert to an enabling table.
 			std::vector<std::pair<StateMachineState *, bbdd *> > possibleInputs;
@@ -1297,7 +1300,7 @@ functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *sm
 					std::pair<StateMachineState *, bbdd *>(
 						*it2,
 						bbdd::assume(
-							scope,
+							&scopes->bools,
 							cdm.get(*it2),
 							stateDominator)));
 			if (debug_use_alias_table) {
@@ -1326,9 +1329,9 @@ functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *sm
 				     j++) {
 					bbdd *check =
 						bbdd::assume(
-							scope,
+							&scopes->bools,
 							bbdd::And(
-								scope,
+								&scopes->bools,
 								possibleInputs[i].second,
 								possibleInputs[j].second),
 							stateDominator);
@@ -1346,41 +1349,45 @@ functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *sm
 
 			if (!ambiguous_resolution) {
 				/* Now at least one must be true */
-				bbdd *checker = scope->cnst(false);
+				bbdd *checker = scopes->bools.cnst(false);
 				/* checker is true if any input is true */
 				for (unsigned x = 0; x < possibleInputs.size(); x++)
 					checker = bbdd::Or(
-						scope,
+						&scopes->bools,
 						checker,
 						possibleInputs[x].second);
 				/* We can assume that the dominator holds */
 				checker = bbdd::assume(
-					scope,
+					&scopes->bools,
 					checker,
 					stateDominator);
 				/* Now we need that to be unsatisfiable. */
-				checker = bbdd::invert(scope, checker);
+				checker = bbdd::invert(&scopes->bools, checker);
 				IRExpr *c = bbdd::to_irexpr(checker);
 				if (satisfiable(c, opt)) {
 					if (debug_use_alias_table)
 						printf("Potentially null resolution: %s is satisfiable\n",
 						       nameIRExpr(c));
 				} else {
-					IRExpr *acc = dataOfSideEffect(possibleInputs[0].first->getSideEffect(), l->type);
-					for (unsigned x = 1;
-					     x < possibleInputs.size();
-					     x++)
-						acc = IRExpr_Mux0X(
-							bbdd::to_irexpr(possibleInputs[x].second),
-							acc,
-							dataOfSideEffect(possibleInputs[x].first->getSideEffect(), l->type));
-					if (debug_use_alias_table)
-						printf("Replace l%d with mux %s\n",
-						       stateLabels[it->first],
-						       nameIRExpr(acc));
+					exprbdd::enablingTableT tab;
+					exprbdd *dflt = (exprbdd *)0xdead;
+					for (auto it2 = possibleInputs.begin();
+					     it2 != possibleInputs.end();
+					     it2++) {
+						IRExpr *valE = dataOfSideEffect(it2->first->getSideEffect(), l->type);
+						exprbdd *val = exprbdd::var(&scopes->exprs, &scopes->bools, valE);
+						tab[it2->second] = val;
+						dflt = val;
+					}
+					exprbdd *res = exprbdd::from_enabling(&scopes->exprs, tab, dflt);
+					if (debug_use_alias_table) {
+						printf("Replace l%d with mux:\n",
+						       stateLabels[it->first]);
+						res->prettyPrint(stdout);
+					}
 					it->first->sideEffect =
 						new StateMachineSideEffectCopy(
-							l->target, acc);
+							l->target, res);
 					progress = true;
 				}
 			}
@@ -1515,9 +1522,9 @@ functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *sm
 }
 
 StateMachine *
-functionAliasAnalysis(bbdd::scope *scope, const MaiMap &decode, StateMachine *machine,
+functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *machine,
 		      const AllowableOptimisations &opt, OracleInterface *oracle,
 		      const ControlDominationMap &cdm, bool *done_something)
 {
-	return _realias::functionAliasAnalysis(scope, decode, machine, opt, oracle, cdm, done_something);
+	return _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdm, done_something);
 }

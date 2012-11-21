@@ -128,7 +128,7 @@ getProximalCause(SMScopes *scopes,
 			prependSideEffect(
 				new StateMachineSideEffectCopy(
 					isp->target,
-					isp->data));
+					exprbdd::var(&scopes->exprs, &scopes->bools, isp->data)));
 			break;
 		}
 		case Ist_PutI:
@@ -172,7 +172,7 @@ getProximalCause(SMScopes *scopes,
 					rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
-						t_expr),
+						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr)),
 					work);
 			StateMachineSideEffecting *l6 =
 				new StateMachineSideEffecting(
@@ -184,7 +184,7 @@ getProximalCause(SMScopes *scopes,
 					rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
-						t_expr),
+						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr)),
 					l6);
 			StateMachineBifurcate *l4 =
 				new StateMachineBifurcate(

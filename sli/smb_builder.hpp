@@ -136,13 +136,13 @@ struct SMBCompilerState {
 	const CFGNode *where;
 	int tid;
 	MaiMap &mai;
-	bbdd::scope *scope;
+	SMScopes *scopes;
 	SMBCompilerState(const VexRip &_vr,
 			 const CFGNode *_where,
 			 int _tid,
 			 MaiMap &_mai,
-			 bbdd::scope *_scope)
-		: vr(_vr), where(_where), tid(_tid), mai(_mai), scope(_scope)
+			 SMScopes *_scopes)
+		: vr(_vr), where(_where), tid(_tid), mai(_mai), scopes(_scopes)
 	{}
 	MemoryAccessIdentifier getMai()
 	{
@@ -157,10 +157,10 @@ public:
 	NAMED_CLASS
 };
 class SMBStatementCopy : public SMBStatement {
-	StateMachineSideEffect *compile(SMBCompilerState &) const {
+	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectCopy(
 			lvalue.content->compile(),
-			rvalue.content->compile());
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, rvalue.content->compile()));
 	}
 public:
 	SMBPtr<SMBRegisterReference> lvalue;
@@ -366,10 +366,11 @@ class SMBStateIf : public SMBState {
 				    std::vector<reloc2> &relocs2,
 				    SMBCompilerState &state) const {
 		StateMachineBifurcate *smb =
-			new StateMachineBifurcate(state.vr,
-						  bbdd::var(state.scope, cond.content->compile()),
-						  NULL,
-						  NULL);
+			new StateMachineBifurcate(
+				state.vr,
+				bbdd::var(&state.scopes->bools, cond.content->compile()),
+				NULL,
+				NULL);
 		relocs2.push_back(reloc2(trueTarg.content, &smb->trueTarget));
 		relocs2.push_back(reloc2(falseTarg.content, &smb->falseTarget));
 		return smb;

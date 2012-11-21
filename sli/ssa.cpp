@@ -61,8 +61,9 @@ assignLabelsToDefinitions(SMScopes *scopes,
 {
 	struct _ : public StateMachineTransformer {
 		std::map<threadAndRegister, unsigned, threadAndRegister::partialCompare> &lastGeneration;
-		StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *se,
-							    bool *done_something) {
+	  StateMachineSideEffect *transformSideEffect(SMScopes *,
+						      StateMachineSideEffect *se,
+						      bool *done_something) {
 			threadAndRegister tr(threadAndRegister::invalid());
 			if (se->type == StateMachineSideEffect::PointerAliasing) {
 				StateMachineSideEffectPointerAliasing *smsespas =
@@ -479,7 +480,7 @@ convertToSSA(SMScopes *scopes, StateMachine *inp)
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectPhi::optimise(const AllowableOptimisations &, bool *done_something)
+StateMachineSideEffectPhi::optimise(SMScopes *scopes, const AllowableOptimisations &, bool *done_something)
 {
 	if (generations.size() == 0 ||
 	    generations[0].val == NULL)
@@ -494,6 +495,6 @@ StateMachineSideEffectPhi::optimise(const AllowableOptimisations &, bool *done_s
 		}
 	}
 	*done_something = true;
-	return new StateMachineSideEffectCopy(reg, v);
+	return new StateMachineSideEffectCopy(reg, exprbdd::var(&scopes->exprs, &scopes->bools, v));
 }
 

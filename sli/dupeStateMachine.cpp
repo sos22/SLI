@@ -231,12 +231,9 @@ rawDupeS(duplication_context &ctxt, const StateMachineSideEffectAssertFalse *l)
 }
 
 static StateMachineSideEffectCopy *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectCopy *l)
+rawDupeS(duplication_context &, const StateMachineSideEffectCopy *l)
 {
-	StateMachineSideEffectCopy *res = new StateMachineSideEffectCopy(l->target,
-									 NULL);
-	ctxt(&res->value, l->value, rawDupe);
-	return res;
+	return new StateMachineSideEffectCopy(l->target, l->value);
 }
 
 static StateMachineSideEffectPhi *

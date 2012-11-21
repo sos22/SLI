@@ -25,8 +25,9 @@ public:
 };
 
 IRExpr *internIRExpr(IRExpr *x);
-StateMachine *internStateMachine(StateMachine *sm);
+StateMachine *internStateMachine(SMScopes *scopes, StateMachine *sm);
 StateMachine *internStateMachine(
+	SMScopes *scopes,
 	StateMachine *sm,
 	internStateMachineTable &t);
 

@@ -129,7 +129,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectStore::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
 {
 	addr = optimiseIRExprFP(addr, opt, done_something);
 	data = optimiseIRExprFP(data, opt, done_something);
@@ -141,7 +141,7 @@ StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, bool *d
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectLoad::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
 {
 	addr = optimiseIRExprFP(addr, opt, done_something);
 	if (isBadAddress(addr)) {
@@ -152,14 +152,14 @@ StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, bool *do
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectCopy::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	value = optimiseIRExprFP(value, opt, done_something);
+	value = simplifyBDD(&scopes->exprs, &scopes->bools, value, opt, done_something);
 	return this;
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectAssertFalse::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
 {
 	value = optimiseIRExprFP(value, opt, done_something);
 	if (value->tag == Iex_Const && ((IRExprConst *)value)->Ico.U1) {
@@ -174,21 +174,21 @@ StateMachineSideEffectAssertFalse::optimise(const AllowableOptimisations &opt, b
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStartFunction::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectStartFunction::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
 {
 	rsp = optimiseIRExprFP(rsp, opt, done_something);
 	return this;
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectEndFunction::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectEndFunction::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
 {
 	rsp = optimiseIRExprFP(rsp, opt, done_something);
 	return this;
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStartAtomic::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectStartAtomic::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
 {
 	if (opt.assumeExecutesAtomically()) {
 		*done_something = true;
@@ -198,7 +198,7 @@ StateMachineSideEffectStartAtomic::optimise(const AllowableOptimisations &opt, b
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectEndAtomic::optimise(const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectEndAtomic::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
 {
 	if (opt.assumeExecutesAtomically()) {
 		*done_something = true;
@@ -400,7 +400,8 @@ printStateMachine(const StateMachine *sm, FILE *f)
 }
 
 bool
-StateMachineSideEffect::parse(StateMachineSideEffect **out,
+StateMachineSideEffect::parse(SMScopes *scopes,
+			      StateMachineSideEffect **out,
 			      const char *str,
 			      const char **suffix)
 {
@@ -409,7 +410,7 @@ StateMachineSideEffect::parse(StateMachineSideEffect **out,
 		StateMachineSideEffect ## n *res;			\
 		/* shut compiler up */					\
 		res = (StateMachineSideEffect ## n *)0xf001deadul;	\
-		if (StateMachineSideEffect ## n :: parse(&res, str, suffix) ) {	\
+		if (StateMachineSideEffect ## n :: parse(scopes, &res, str, suffix) ) { \
 			*out = res;					\
 			return true;					\
 		}							\
@@ -789,32 +790,6 @@ StateMachineSideEffecting::prependSideEffect(StateMachineSideEffect *se)
 	sideEffect = se;
 }
 
-static IRExpr *
-replaceRegister(const threadAndRegister &reg, IRExpr *replaceWith, IRExpr *replaceIn)
-{
-	struct : IRExprTransformer {
-		bool failed;
-		const threadAndRegister *reg;
-		IRExpr *replaceWith;
-		IRExpr *transformIex(IRExprGet *e) {
-			if (e->reg == *reg) {
-				if (e->type() > replaceWith->type())
-					failed = true;
-				else
-					return coerceTypes(e->type(), replaceWith);
-			}
-			return NULL;
-		}
-	} doit;
-	doit.failed = false;
-	doit.reg = &reg;
-	doit.replaceWith = replaceWith;
-	IRExpr *res = doit.doit(replaceIn);
-	if (doit.failed)
-		return NULL;
-	return res;
-}
-
 StateMachineState *
 StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
@@ -835,7 +810,7 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		*done_something = true;
 		return new StateMachineTerminal(dbg_origin, scopes->smrs.cnst(smr_unreached));
 	}
-	sideEffect = sideEffect->optimise(opt, done_something);
+	sideEffect = sideEffect->optimise(scopes, opt, done_something);
 	target = target->optimise(scopes, opt, done_something);
 	if (!sideEffect) {
 		assert(*done_something);
@@ -942,33 +917,11 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 				((StateMachineSideEffectAssertFalse *)sideEffect)->value,
 				((StateMachineSideEffectAssertFalse *)((StateMachineSideEffecting *)target)->sideEffect)->value),
 			((StateMachineSideEffectAssertFalse *)sideEffect)->reflectsActualProgram);
-		sideEffect = sideEffect->optimise(opt, done_something);
+		sideEffect = sideEffect->optimise(scopes, opt, done_something);
 		target = ((StateMachineSideEffecting *)target)->target;
 		return this;
 	}
 
-	if (sideEffect->type == StateMachineSideEffect::Copy &&
-	    target->type == StateMachineState::SideEffecting &&
-	    ((StateMachineSideEffecting *)target)->sideEffect &&
-	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::Copy &&
-	    ((StateMachineSideEffectCopy *)sideEffect)->target ==
-	    ((StateMachineSideEffectCopy *)((StateMachineSideEffecting *)target)->sideEffect)->target) {
-		/* Try to do something with fragments which just
-		   go ``rsp = rsp + 8; rsp = rsp - 8'', which happens
-		   quite a lot. */
-		StateMachineSideEffectCopy *thisCopy = (StateMachineSideEffectCopy *)sideEffect;
-		StateMachineSideEffectCopy *nextCopy = (StateMachineSideEffectCopy *)
-			((StateMachineSideEffecting *)target)->sideEffect;
-		IRExpr *repl = replaceRegister(thisCopy->target, thisCopy->value, nextCopy->value);
-		if (repl) {
-			sideEffect = new StateMachineSideEffectCopy(
-				thisCopy->target,
-				repl);
-			target = ((StateMachineSideEffecting *)target)->target;
-			*done_something = true;
-			return this;
-		}
-	}
 	return this;
 }
 
@@ -1308,6 +1261,18 @@ enumConditions(t *bdd, std::vector<IRExpr *> &out)
 	enumConditions(bdd->content.falseBranch, out);
 }
 
+static void
+enumBDDExprs(exprbdd *bdd, std::vector<IRExpr *> &out)
+{
+	if (bdd->isLeaf) {
+		out.push_back(bdd->content.leaf);
+		return;
+	}
+	out.push_back(bdd->content.condition);
+	enumConditions(bdd->content.trueBranch, out);
+	enumConditions(bdd->content.falseBranch, out);
+}
+
 void
 StateMachineTerminal::inputExpressions(std::vector<IRExpr *> &out)
 {
@@ -1344,6 +1309,12 @@ bool
 SMScopes::parse(const char *buf, const char **end)
 {
 	return ordering.parse(buf, end);
+}
+
+void
+StateMachineSideEffectCopy::inputExpressions(std::vector<IRExpr *> &out)
+{
+	enumBDDExprs(value, out);
 }
 
 StateMachineState *

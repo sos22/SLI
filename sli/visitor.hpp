@@ -20,6 +20,7 @@ visit_irexpr(ctxtT *ctxt,
 {
 	return _visit_irexpr( (void *)ctxt, (const irexpr_visitor<void> *)visitor, expr);
 }
+
 template <typename constT, typename subtreeT> visit_result _visit_bdd(
 	void *ctxt,
 	const irexpr_visitor<void> *visitor,

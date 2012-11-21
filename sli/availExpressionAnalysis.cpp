@@ -44,7 +44,6 @@ public:
 	std::set<StateMachineSideEffect *>::iterator beginSideEffects() { return sideEffects.begin(); }
 	std::set<StateMachineSideEffect *>::iterator endSideEffects() { return sideEffects.end(); }
 	void insertSideEffect(StateMachineSideEffect *smse) {
-		smse->sanityCheck();
 		sideEffects.insert(smse);
 	}
 	void eraseSideEffect(std::set<StateMachineSideEffect *>::iterator it) {
@@ -53,12 +52,12 @@ public:
 
 	std::set<IRExpr *> assertFalse;
 	struct registerMapEntry {
-		IRExpr *e;
+		exprbdd *e;
 		threadAndRegister phiFrom;
 		registerMapEntry()
 			: e(NULL), phiFrom(threadAndRegister::invalid())
 		{}
-		registerMapEntry(IRExpr *_e)
+		registerMapEntry(exprbdd *_e)
 			: e(_e), phiFrom(threadAndRegister::invalid())
 		{}
 		registerMapEntry(const threadAndRegister &tr)
@@ -115,11 +114,11 @@ avail_t::print(FILE *f)
 			fprintf(f, "\t\t");
 			it->first.prettyPrint(f);
 			fprintf(f, " -> ");
-			if (it->second.e)
-				ppIRExpr(it->second.e, f);
-			else
-				fprintf(f, "%s", it->second.phiFrom.name());
-			fprintf(f, "\n");
+			if (it->second.e) {
+				it->second.e->prettyPrint(f);
+			} else {
+				fprintf(f, "%s\n", it->second.phiFrom.name());
+			}
 		}
 	}
 }
@@ -380,7 +379,6 @@ updateAvailSetForSideEffect(const MaiMap &decode,
 {
 	if (TIMEOUT)
 		return;
-	smse->sanityCheck();
 	switch (smse->type) {
 	case StateMachineSideEffect::Store: {
 		StateMachineSideEffectStore *smses =
@@ -477,7 +475,7 @@ class applyAvailTransformer : public IRExprTransformer {
 		if (it != avail._registers.end()) {
 			if (it->second.e) {
 				if (it->second.e->type() >= e->type())
-					return coerceTypes(e->type(), it->second.e);
+					return coerceTypes(e->type(), exprbdd::to_irexpr(it->second.e));
 			} else {
 				return IRExpr_Get(it->second.phiFrom, e->type());
 			}
@@ -539,12 +537,20 @@ applyAvailSet(bbdd::scope *bscope, smrbdd::scope *scope, const avail_t &avail, s
 	applyAvailTransformer aat(avail, use_assumptions, opt);
 	return aat.transform_smrbdd(bscope, scope, expr, done_something);
 }
+static exprbdd *
+applyAvailSet(bbdd::scope *bscope, exprbdd::scope *scope, const avail_t &avail, exprbdd *expr, bool use_assumptions, bool *done_something,
+	      const AllowableOptimisations &opt)
+{
+	applyAvailTransformer aat(avail, use_assumptions, opt);
+	return aat.transform_exprbdd(bscope, scope, expr, done_something);
+}
 
 /* Slightly misnamed: this also propagates copy operations.  Also, it
    doesn't so much eliminate loads are replace them with copies of
    already-loaded values. */
 static StateMachineSideEffect *
-buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
+buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
+					const MaiMap &decode,
 					StateMachineState *where,
 					StateMachineSideEffect *smse,
 					avail_t &currentlyAvailable,
@@ -600,7 +606,7 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 				newEffect =
 					new StateMachineSideEffectCopy(
 						smsel->target,
-						coerceTypes(smsel->type, smses2->data));
+						exprbdd::var(&scopes->exprs, &scopes->bools, coerceTypes(smsel->type, smses2->data)));
 			} else if ( smsel2 &&
 				    smsel->type <= smsel2->type &&
 				    smsel->tag == smsel2->tag &&
@@ -609,7 +615,7 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 				newEffect =
 					new StateMachineSideEffectCopy(
 						smsel->target,
-						new IRExprGet(smsel2->target, smsel->type));
+						exprbdd::var(&scopes->exprs, &scopes->bools, new IRExprGet(smsel2->target, smsel->type)));
 			}
 		}
 		if (!newEffect && doit)
@@ -623,9 +629,9 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 	case StateMachineSideEffect::Copy: {
 		StateMachineSideEffectCopy *smsec =
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
-		IRExpr *newValue;
+		exprbdd *newValue;
 		bool doit = false;
-		newValue = applyAvailSet(currentlyAvailable, smsec->value, false, &doit, opt);
+		newValue = applyAvailSet(&scopes->bools, &scopes->exprs, currentlyAvailable, smsec->value, false, &doit, opt);
 		if (doit) {
 			*done_something = true;
 			newEffect = new StateMachineSideEffectCopy(
@@ -677,12 +683,11 @@ buildNewStateMachineWithLoadsEliminated(const MaiMap &decode,
 				if (phi->generations[x].reg == it->first) {
 					if (it->second.e) {
 						if (phi->generations[x].val &&
-						    physicallyEqual(phi->generations[x].val,
-								    it->second.e))
+						    it->second.e == exprbdd::var(&scopes->exprs, &scopes->bools, phi->generations[x].val))
 							break;
 						if (!newPhi)
 							newPhi = new StateMachineSideEffectPhi(*phi);
-						newPhi->generations[x].val = it->second.e;
+						newPhi->generations[x].val = exprbdd::to_irexpr(it->second.e);
 					} else {
 						if (!newPhi)
 							newPhi = new StateMachineSideEffectPhi(*phi);
@@ -825,7 +830,8 @@ buildNewStateMachineWithLoadsEliminated(
 		StateMachineSideEffect *newEffect;
 		avail.calcRegisterMap(opt);
 		if (smp->sideEffect)
-			newEffect = buildNewStateMachineWithLoadsEliminated(decode,
+			newEffect = buildNewStateMachineWithLoadsEliminated(scopes,
+									    decode,
 									    smp,
 									    smp->sideEffect,
 									    avail,

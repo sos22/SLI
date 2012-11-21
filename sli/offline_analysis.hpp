@@ -115,6 +115,11 @@ public:
 		bool b;
 		return transform_smrbdd(scope, scope2, what, &b);
 	}
+	exprbdd *transform_exprbdd(bbdd::scope *, exprbdd::scope *, exprbdd *what, bool *done_something);
+	exprbdd *transform_exprbdd(bbdd::scope *scope, exprbdd::scope *scope2, exprbdd *what) {
+		bool b;
+		return transform_exprbdd(scope, scope2, what, &b);
+	}
 	bbdd *transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_something);
 	bbdd *transform_bbdd(bbdd::scope *scope, bbdd *what) {
 		bool b;
@@ -127,36 +132,36 @@ protected:
 	StateMachineState *currentState;
 
 	virtual StateMachineSideEffectLoad *transformOneSideEffect(
-		StateMachineSideEffectLoad *, bool *);
+		SMScopes *, StateMachineSideEffectLoad *, bool *);
 	virtual StateMachineSideEffectStore *transformOneSideEffect(
-		StateMachineSideEffectStore *, bool *);
+		SMScopes *, StateMachineSideEffectStore *, bool *);
 	virtual StateMachineSideEffectAssertFalse *transformOneSideEffect(
-		StateMachineSideEffectAssertFalse *, bool *);
+		SMScopes *, StateMachineSideEffectAssertFalse *, bool *);
 	virtual StateMachineSideEffectCopy *transformOneSideEffect(
-		StateMachineSideEffectCopy *, bool *);
+		SMScopes *, StateMachineSideEffectCopy *, bool *);
 	virtual StateMachineSideEffectUnreached *transformOneSideEffect(
-		StateMachineSideEffectUnreached *, bool *) {
+		SMScopes *, StateMachineSideEffectUnreached *, bool *) {
 		return NULL;
 	}
 	virtual StateMachineSideEffectStartAtomic *transformOneSideEffect(
-		StateMachineSideEffectStartAtomic *, bool *) {
+		SMScopes *, StateMachineSideEffectStartAtomic *, bool *) {
 		return NULL;
 	}
 	virtual StateMachineSideEffectEndAtomic *transformOneSideEffect(
-		StateMachineSideEffectEndAtomic *, bool *) {
+		SMScopes *, StateMachineSideEffectEndAtomic *, bool *) {
 		return NULL;
 	}
 	virtual StateMachineSideEffectPhi *transformOneSideEffect(
-		StateMachineSideEffectPhi *, bool *);
+		SMScopes *, StateMachineSideEffectPhi *, bool *);
 	virtual StateMachineSideEffectStartFunction *transformOneSideEffect(
-		StateMachineSideEffectStartFunction *, bool *);
+		SMScopes *, StateMachineSideEffectStartFunction *, bool *);
 	virtual StateMachineSideEffectEndFunction *transformOneSideEffect(
-		StateMachineSideEffectEndFunction *, bool *);
+		SMScopes *, StateMachineSideEffectEndFunction *, bool *);
 	virtual StateMachineSideEffectPointerAliasing *transformOneSideEffect(
-		StateMachineSideEffectPointerAliasing *, bool *)
+		SMScopes *, StateMachineSideEffectPointerAliasing *, bool *)
 	{ return NULL; }
 	virtual StateMachineSideEffectStackLayout *transformOneSideEffect(
-		StateMachineSideEffectStackLayout *, bool *)
+		SMScopes *, StateMachineSideEffectStackLayout *, bool *)
 	{ return NULL; }
 	virtual StateMachineTerminal *transformOneState(SMScopes *scopes,
 							StateMachineTerminal *smt,
@@ -171,13 +176,13 @@ protected:
 			return NULL;
 		}
 	}
-	virtual StateMachineSideEffecting *transformOneState(SMScopes *,
+	virtual StateMachineSideEffecting *transformOneState(SMScopes *scopes,
 							     StateMachineSideEffecting *smse,
 							     bool *done_something)
 	{
 		bool b = false;
 		StateMachineSideEffect *e =
-			smse->sideEffect ? transformSideEffect(smse->sideEffect, &b) : NULL;
+			smse->sideEffect ? transformSideEffect(scopes, smse->sideEffect, &b) : NULL;
 		if (b) {
 			*done_something = true;
 			return new StateMachineSideEffecting(smse, e);
@@ -202,7 +207,8 @@ protected:
 	virtual bool rewriteNewStates() const = 0;
 public:
 	virtual StateMachineState *transformState(SMScopes *, StateMachineState *, bool *);
-	virtual StateMachineSideEffect *transformSideEffect(StateMachineSideEffect *,
+	virtual StateMachineSideEffect *transformSideEffect(SMScopes *,
+							    StateMachineSideEffect *,
 							    bool *);
 	static void rewriteMachine(const StateMachine *sm,
 				   std::map<const StateMachineState *, StateMachineState *> &rewriteRules,
@@ -237,14 +243,14 @@ StateMachine *availExpressionAnalysis(SMScopes *,
 				      OracleInterface *oracle,
 				      bool *done_something);
 StateMachine *deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa);
-StateMachine *bisimilarityReduction(bbdd::scope *, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something);
-StateMachine *useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
+StateMachine *bisimilarityReduction(SMScopes *, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something);
+StateMachine *useInitialMemoryLoads(SMScopes *, const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 				    OracleInterface *oracle, bool *done_something);
 StateMachine *removeLocalSurvival(StateMachine *sm,
 				  const AllowableOptimisations &opt,
 				  bool *done_something);
 class ControlDominationMap;
-StateMachine *functionAliasAnalysis(bbdd::scope *scopes,
+StateMachine *functionAliasAnalysis(SMScopes *scopes,
 				    const MaiMap &mai,
 				    StateMachine *machine,
 				    const AllowableOptimisations &opt,

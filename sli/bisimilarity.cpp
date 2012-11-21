@@ -115,9 +115,15 @@ equalModuloVariables(const IRExpr *a, const IRExpr *b)
 	abort();
 }
 
-static bool equalModuloVariables(bbdd *a, bbdd *b)
+static bool
+equalModuloVariables(bbdd *a, bbdd *b)
 {
 	return equalModuloVariables(bbdd::to_irexpr(a), bbdd::to_irexpr(b));
+}
+static bool
+equalModuloVariables(exprbdd *a, exprbdd *b)
+{
+	return equalModuloVariables(exprbdd::to_irexpr(a), exprbdd::to_irexpr(b));
 }
 
 static bool
@@ -590,20 +596,20 @@ unifyExpressions(const StateMachine *sm,
 }
 
 static StateMachineState *
-unifyOutputs(const threadAndRegister &reg1, IRType ty, const std::set<threadAndRegister> &otherRegs, StateMachineState *next)
+unifyOutputs(SMScopes *scopes, const threadAndRegister &reg1, IRType ty, const std::set<threadAndRegister> &otherRegs, StateMachineState *next)
 {
 	for (auto it = otherRegs.begin(); it != otherRegs.end(); it++)
 		next = new StateMachineSideEffecting(
 			next->dbg_origin,
 			new StateMachineSideEffectCopy(
 				*it,
-				IRExpr_Get(reg1, ty)),
+				exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg1, ty))),
 			next);
 	return next;
 }
 		 
 static StateMachine *
-bisimilarityReduction(bbdd::scope *scope, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
+bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
 {
 	unsigned nextTmp = 0;
 	std::map<const StateMachineState *, int> stateLabels;
@@ -721,7 +727,7 @@ bisimilarityReduction(bbdd::scope *scope, StateMachine *sm, bool is_ssa, MaiMap 
 			if (unifyExpressions(sm, stateLabels, conditions, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedCondition, &replacementHead)) {
 				*suffix = new StateMachineBifurcate(
 					representative->dbg_origin,
-					bbdd::var(scope, unifiedCondition),
+					bbdd::var(&scopes->bools, unifiedCondition),
 					((StateMachineBifurcate *)representative)->trueTarget,
 					((StateMachineBifurcate *)representative)->falseTarget);
 				replacement = replacementHead;
@@ -763,7 +769,7 @@ bisimilarityReduction(bbdd::scope *scope, StateMachine *sm, bool is_ssa, MaiMap 
 							newMai,
 							l->type,
 							l->tag),
-						unifyOutputs(l->target, l->type, outputRegs, rep->target));
+						unifyOutputs(scopes, l->target, l->type, outputRegs, rep->target));
 					replacement = replacementHead;
 				} else {
 					replacement = NULL;
@@ -778,7 +784,7 @@ bisimilarityReduction(bbdd::scope *scope, StateMachine *sm, bool is_ssa, MaiMap 
 				     it2++) {
 					StateMachineSideEffecting *o = (StateMachineSideEffecting *)*it2;
 					StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)o->sideEffect;
-					value.insert(std::pair<StateMachineState *, IRExpr *>(o, c->value));
+					value.insert(std::pair<StateMachineState *, IRExpr *>(o, exprbdd::to_irexpr(c->value)));
 					if (o != representative)
 						outputRegs.insert(c->target);
 				}
@@ -792,8 +798,8 @@ bisimilarityReduction(bbdd::scope *scope, StateMachine *sm, bool is_ssa, MaiMap 
 						representative->dbg_origin,
 						new StateMachineSideEffectCopy(
 							c->target,
-							unifiedValue),
-						unifyOutputs(c->target, unifiedValue->type(), outputRegs, rep->target));
+							exprbdd::var(&scopes->exprs, &scopes->bools, unifiedValue)),
+						unifyOutputs(scopes, c->target, unifiedValue->type(), outputRegs, rep->target));
 					replacement = replacementHead;
 				} else {
 					replacement = NULL;
@@ -895,7 +901,7 @@ bisimilarityReduction(bbdd::scope *scope, StateMachine *sm, bool is_ssa, MaiMap 
 }
 
 StateMachine *
-bisimilarityReduction(bbdd::scope *scope, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
+bisimilarityReduction(SMScopes *scope, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something)
 {
 	return _bisimilarity::bisimilarityReduction(scope, sm, is_ssa, mai, done_something);
 }

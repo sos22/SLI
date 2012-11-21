@@ -2,29 +2,323 @@
 #include "bdd.hpp"
 #include "simplify_irexpr.hpp"
 
+/* Convert @what so that it uses muxes wherever possible (i.e. no
+   And1, Or1, or Not1 operators) and so that all muxes are at top
+   level. */
+static IRExpr *
+muxify(IRExpr *what)
+{
+	switch (what->tag) {
+	case Iex_Get:
+		return what;
+	case Iex_GetI:
+		abort();
+	case Iex_Qop: {
+		IRExprQop *w = (IRExprQop *)what;
+		IRExpr *a = muxify(w->arg1);
+		if (a->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)a)->cond,
+				muxify(IRExpr_Qop(
+					       w->op,
+					       ((IRExprMux0X *)a)->expr0,
+					       w->arg2,
+					       w->arg3,
+					       w->arg4)),
+				muxify(IRExpr_Qop(
+					       w->op,
+					       ((IRExprMux0X *)a)->exprX,
+					       w->arg2,
+					       w->arg3,
+					       w->arg4)));
+		IRExpr *b = muxify(w->arg2);
+		if (b->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)b)->cond,
+				muxify(IRExpr_Qop(
+					       w->op,
+					       a,
+					       ((IRExprMux0X *)b)->expr0,
+					       w->arg3,
+					       w->arg4)),
+				muxify(IRExpr_Qop(
+					       w->op,
+					       a,
+					       ((IRExprMux0X *)b)->exprX,
+					       w->arg3,
+					       w->arg4)));
+		IRExpr *c = muxify(w->arg3);
+		if (c->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)c)->cond,
+				muxify(IRExpr_Qop(
+					       w->op,
+					       a,
+					       b,
+					       ((IRExprMux0X *)c)->expr0,
+					       w->arg4)),
+				muxify(IRExpr_Qop(
+					       w->op,
+					       a,
+					       b,
+					       ((IRExprMux0X *)c)->exprX,
+					       w->arg4)));
+		IRExpr *d = muxify(w->arg4);
+		if (d->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)c)->cond,
+				muxify(IRExpr_Qop(
+					       w->op,
+					       a,
+					       b,
+					       c,
+					       ((IRExprMux0X *)d)->expr0)),
+				muxify(IRExpr_Qop(
+					       w->op,
+					       a,
+					       b,
+					       c,
+					       ((IRExprMux0X *)d)->exprX)));
+		assert(a == w->arg1 && b == w->arg2 && c == w->arg3 && d == w->arg4);
+		return what;
+	}
+	case Iex_Triop: {
+		IRExprTriop *w = (IRExprTriop *)what;
+		IRExpr *a = muxify(w->arg1);
+		if (a->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)a)->cond,
+				muxify(IRExpr_Triop(
+					       w->op,
+					       ((IRExprMux0X *)a)->expr0,
+					       w->arg2,
+					       w->arg3)),
+				muxify(IRExpr_Triop(
+					       w->op,
+					       ((IRExprMux0X *)a)->exprX,
+					       w->arg2,
+					       w->arg3)));
+		IRExpr *b = muxify(w->arg2);
+		if (b->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)b)->cond,
+				muxify(IRExpr_Triop(
+					       w->op,
+					       a,
+					       ((IRExprMux0X *)b)->expr0,
+					       w->arg3)),
+				muxify(IRExpr_Triop(
+					       w->op,
+					       a,
+					       ((IRExprMux0X *)b)->exprX,
+					       w->arg3)));
+		IRExpr *c = muxify(w->arg3);
+		if (c->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)c)->cond,
+				muxify(IRExpr_Triop(
+					       w->op,
+					       a,
+					       b,
+					       ((IRExprMux0X *)c)->expr0)),
+				muxify(IRExpr_Triop(
+					       w->op,
+					       a,
+					       b,
+					       ((IRExprMux0X *)c)->exprX)));
+		if (a == w->arg1 && b == w->arg2 && c == w->arg3)
+			return what;
+		else
+			return IRExpr_Triop(w->op, a, b, c);
+	}
+	case Iex_Binop: {
+		IRExprBinop *w = (IRExprBinop *)what;
+		IRExpr *a = muxify(w->arg1);
+		if (a->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)a)->cond,
+				muxify(IRExpr_Binop(
+					       w->op,
+					       ((IRExprMux0X *)a)->expr0,
+					       w->arg2)),
+				muxify(IRExpr_Binop(
+					       w->op,
+					       ((IRExprMux0X *)a)->exprX,
+					       w->arg2)));
+		IRExpr *b = muxify(w->arg2);
+		if (b->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)b)->cond,
+				muxify(IRExpr_Binop(
+					       w->op,
+					       a,
+					       ((IRExprMux0X *)b)->expr0)),
+				muxify(IRExpr_Binop(
+					       w->op,
+					       a,
+					       ((IRExprMux0X *)b)->exprX)));
+		assert(a == w->arg1 && b == w->arg2);
+		return what;
+	}
+	case Iex_Unop: {
+		IRExprUnop *w = (IRExprUnop *)what;
+		IRExpr *a = muxify(w->arg);
+		if (a->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)a)->cond,
+				muxify(IRExpr_Unop(
+					       w->op,
+					       ((IRExprMux0X *)a)->expr0)),
+				muxify(IRExpr_Unop(
+					       w->op,
+					       ((IRExprMux0X *)a)->exprX)));
+		if (w->op == Iop_Not1)
+			return IRExpr_Mux0X(
+				a,
+				IRExpr_Const_U1(true),
+				IRExpr_Const_U1(false));
+		assert(a == w->arg);
+		return w;
+	}
+	case Iex_Const:
+		return what;
+	case Iex_Mux0X: {
+		IRExprMux0X *m = (IRExprMux0X *)what;
+		IRExpr *cond = muxify(m->cond);
+		IRExpr *expr0 = muxify(m->expr0);
+		IRExpr *exprX = muxify(m->exprX);
+		if (cond == m->cond && expr0 == m->expr0 && exprX == m->exprX)
+			return what;
+		else
+			return IRExpr_Mux0X(cond, expr0, exprX);
+	}
+	case Iex_CCall: {
+		IRExprCCall *cee = (IRExprCCall *)what;
+		IRExpr *a;
+		int i;
+		for (i = 0; cee->args[i]; i++) {
+			a = muxify(cee->args[i]);
+			if (a->tag == Iex_Mux0X)
+				break;
+			assert(a == cee->args[i]);
+		}
+		if (!cee->args[i])
+			return what;
+		int nr_args;
+		for (nr_args = i; cee->args[nr_args]; nr_args++)
+			;
+		IRExpr **newArgs0 = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_args + 1);
+		memcpy(newArgs0, cee->args, sizeof(cee->args[0]) * (nr_args + 1));
+		newArgs0[i] = ((IRExprMux0X *)a)->expr0;
+		IRExpr **newArgsX = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_args + 1);
+		memcpy(newArgsX, cee->args, sizeof(cee->args[0]) * (nr_args + 1));
+		newArgsX[i] = ((IRExprMux0X *)a)->exprX;
+		return muxify(
+			IRExpr_Mux0X(
+				((IRExprMux0X *)a)->cond,
+				IRExpr_CCall(cee->cee, cee->retty, newArgs0),
+				IRExpr_CCall(cee->cee, cee->retty, newArgsX)));
+	}
+	case Iex_Associative: {
+		IRExprAssociative *iea = (IRExprAssociative *)what;
+		if (iea->op == Iop_And1) {
+			IRExpr *acc = IRExpr_Const_U1(true);
+			IRExpr *fls = IRExpr_Const_U1(false);
+			for (int i = 0; i < iea->nr_arguments; i++)
+				acc = IRExpr_Mux0X(
+					muxify(iea->contents[i]),
+					fls,
+					acc);
+			return acc;
+		} else if (iea->op == Iop_Or1) {
+			IRExpr *acc = IRExpr_Const_U1(false);
+			IRExpr *tru = IRExpr_Const_U1(true);
+			for (int i = 0; i < iea->nr_arguments; i++)
+				acc = IRExpr_Mux0X(
+					muxify(iea->contents[i]),
+					acc,
+					tru);
+			return acc;
+		}
+
+		IRExpr *a;
+		int i;
+		for (i = 0; i < iea->nr_arguments; i++) {
+			a = muxify(iea->contents[i]);
+			if (a->tag == Iex_Mux0X)
+				break;
+			assert(a == iea->contents[i]);
+		}
+		if (i == iea->nr_arguments)
+			return what;
+		IRExpr **newArgs0 = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, iea->nr_arguments);
+		memcpy(newArgs0, iea->contents, sizeof(iea->contents[0]) * iea->nr_arguments);
+		newArgs0[i] = ((IRExprMux0X *)a)->expr0;
+		IRExpr **newArgsX = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, iea->nr_arguments);
+		memcpy(newArgsX, iea->contents, sizeof(iea->contents[0]) * iea->nr_arguments);
+		newArgsX[i] = ((IRExprMux0X *)a)->exprX;
+		IRExprAssociative *exp0 = new IRExprAssociative();
+		exp0->op = iea->op;
+		exp0->nr_arguments = iea->nr_arguments;
+		exp0->nr_arguments_allocated = iea->nr_arguments;
+		exp0->contents = newArgs0;
+		IRExprAssociative *expX = new IRExprAssociative();
+		expX->op = iea->op;
+		expX->nr_arguments = iea->nr_arguments;
+		expX->nr_arguments_allocated = iea->nr_arguments;
+		expX->contents = newArgsX;
+		return muxify(
+			IRExpr_Mux0X(
+				((IRExprMux0X *)a)->cond,
+				exp0,
+				expX));
+	}
+		
+	case Iex_Load: {
+		IRExprLoad *l = (IRExprLoad *)what;
+		IRExpr *a = muxify(l->addr);
+		if (a->tag == Iex_Mux0X)
+			return IRExpr_Mux0X(
+				((IRExprMux0X *)a)->cond,
+				muxify(IRExpr_Load(
+					       l->ty,
+					       ((IRExprMux0X *)a)->expr0)),
+				muxify(IRExpr_Load(
+					       l->ty,
+					       ((IRExprMux0X *)a)->exprX)));
+		assert(a == l->addr);
+		return what;
+	}
+	case Iex_HappensBefore:
+		return what;
+	case Iex_FreeVariable:
+		return what;
+	case Iex_EntryPoint:
+		return what;
+	case Iex_ControlFlow:
+		return what;
+	}
+	abort();
+}
+
+bbdd *
+bbdd::_var(scope *scope, IRExpr *a)
+{
+	if (a->tag == Iex_Mux0X)
+		return ifelse(
+			scope,
+			_var(scope, ((IRExprMux0X *)a)->cond),
+			_var(scope, ((IRExprMux0X *)a)->exprX),
+			_var(scope, ((IRExprMux0X *)a)->expr0));
+	else
+		return scope->makeInternal(a,
+					   scope->cnst(true),
+					   scope->cnst(false));
+}
 bbdd *
 bbdd::var(scope *scope, IRExpr *a)
 {
-	assert(a->type() == Ity_I1);
-	if (a->tag == Iex_Associative) {
-		IRExprAssociative *iex = (IRExprAssociative *)a;
-		assert(iex->op == Iop_And1 || iex->op == Iop_Or1);
-		bbdd *res = bbdd::var(scope, iex->contents[0]);
-		for (int i = 1; i < iex->nr_arguments; i++) {
-			bbdd *r = bbdd::var(scope, iex->contents[i]);
-			if (iex->op == Iop_And1)
-				res = bbdd::And(scope, res, r);
-			else
-				res = bbdd::Or(scope, res, r);
-		}
-		return res;
-	}
-	if (a->tag == Iex_Unop &&
-	    ((IRExprUnop *)a)->op == Iop_Not1)
-		return bbdd::invert(scope, bbdd::var(scope, ((IRExprUnop *)a)->arg));
-	return scope->makeInternal(a,
-				   scope->cnst(true),
-				   scope->cnst(false));
+	return _var(scope, muxify(a));
 }
 
 template <typename constT, typename subtreeT> template <typename scopeT, typename zipInternalT>
@@ -361,11 +655,11 @@ public:
 
 template <typename constT, typename subtreeT> template <typename scopeT>
 subtreeT *
-_bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp, constT defaultValue)
+_bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp, subtreeT *defaultValue)
 {
 	subtreeT *res = zip(scope, from_enabling_internal<subtreeT, scopeT>(inp));
 	if (res == INTBDD_DONT_CARE)
-		return scope->cnst(defaultValue);
+		return defaultValue;
 	else
 		return res;
 }
@@ -763,6 +1057,117 @@ bdd_ordering::parse(const char *buf, const char **end)
 	return true;
 }
 
+void
+exprbdd::sanity_check(bdd_ordering *ordering) const
+{
+	std::set<const IRExpr *> terminals;
+	std::set<const exprbdd *> visited;
+	std::vector<const exprbdd *> q;
+	q.push_back(this);
+	IRType ty = Ity_INVALID;
+	while (!q.empty()) {
+		const exprbdd *e = q.back();
+		q.pop_back();
+		if (!visited.insert(e).second)
+			continue;
+		if (e->isLeaf) {
+			assert(e->content.leaf->tag != Iex_Mux0X);
+			if (ty == Ity_INVALID)
+				ty = e->content.leaf->type();
+			else
+				assert(ty == e->content.leaf->type());
+			assert(ty != Ity_I1 || e->content.leaf->tag == Iex_Const);
+		} else {
+			assert(e->content.condition->tag != Iex_Mux0X);
+			q.push_back(e->content.trueBranch);
+			q.push_back(e->content.falseBranch);
+		}
+	}
+	parentT::sanity_check(ordering);
+}
+
+exprbdd *
+exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
+{
+	if (what->tag == Iex_Mux0X)
+		return ifelse(
+			scope,
+			bbdd::var(bscope, ((IRExprMux0X *)what)->cond),
+			_var(scope, bscope, ((IRExprMux0X *)what)->exprX),
+			_var(scope, bscope, ((IRExprMux0X *)what)->expr0));
+	else if (what->type() == Ity_I1)
+		return ifelse(
+			scope,
+			bbdd::var(bscope, what),
+			scope->cnst(IRExpr_Const_U1(true)),
+			scope->cnst(IRExpr_Const_U1(false)));
+	else
+		return scope->cnst(what);
+}
+
+exprbdd *
+exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
+{
+	return _var(scope, bscope, muxify(what));
+}
+
+IRExpr *
+exprbdd::to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo)
+{
+	if (what->isLeaf)
+		return what->content.leaf;
+	auto it_did_insert = memo.insert(std::pair<exprbdd *, IRExpr *>(what, (IRExpr *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert)
+		it->second = IRExpr_Mux0X(
+			what->content.condition,
+			to_irexpr(what->content.falseBranch, memo),
+			to_irexpr(what->content.trueBranch, memo));
+       return it->second;
+}
+
+IRExpr *
+exprbdd::to_irexpr(exprbdd *what)
+{
+	std::map<exprbdd *, IRExpr *> memo;
+	return to_irexpr(what, memo);
+}
+
+exprbdd *
+exprbdd::parseLeaf(scope *scope, const char *str, const char **suffix)
+{
+	IRExpr *a;
+	if (parseThisChar('<', str, &str) &&
+	    parseIRExpr(&a, str, &str) &&
+	    parseThisChar('>', str, suffix))
+		return scope->cnst(a);
+	else
+		return NULL;
+}
+
+exprbdd *
+exprbdd_scope::cnst(IRExpr *what)
+{
+	auto it_did_insert = leaves.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert)
+		it->second = new exprbdd(what);
+	return it->second;
+}
+
+void
+exprbdd_scope::runGc(HeapVisitor &hv)
+{
+	std::map<IRExpr *, exprbdd *> newLeaves;
+	for (auto it = leaves.begin(); it != leaves.end(); it++) {
+		exprbdd *b = hv.visited(it->second);
+		newLeaves[it->first] = b;
+	}
+	leaves = newLeaves;
+}
+
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);
@@ -772,11 +1177,17 @@ template bbdd *_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *,
 template void _bdd<int, intbdd>::prettyPrint(FILE *);
 template bool _bdd<bool, bbdd>::_parse<const_bdd_scope<bbdd>, bbdd::parseBool>(const_bdd_scope<bbdd>*, bbdd **, const char *, const char **);
 template intbdd *_bdd<int, intbdd>::assume(const_bdd_scope<intbdd> *, intbdd *, bbdd*);
-template intbdd *_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &, int);
+template intbdd *_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &, intbdd *);
 
 template void _bdd<StateMachineRes, smrbdd>::prettyPrint(FILE *);
 template bool _bdd<StateMachineRes, smrbdd>::_parse<const_bdd_scope<smrbdd>, smrbdd::parseLeaf>(const_bdd_scope<smrbdd>*, smrbdd **, const char *, const char **);
 template smrbdd *_bdd<StateMachineRes, smrbdd>::assume(const_bdd_scope<smrbdd> *, smrbdd *, bbdd*);
 template smrbdd *_bdd<StateMachineRes, smrbdd>::ifelse(const_bdd_scope<smrbdd> *, bbdd *, smrbdd *, smrbdd *);
 template std::map<StateMachineRes, bbdd *> _bdd<StateMachineRes, smrbdd>::to_selectors(const_bdd_scope<bbdd> *, smrbdd *);
-template smrbdd *_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, StateMachineRes);
+template smrbdd *_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, smrbdd *);
+
+template void _bdd<IRExpr *, exprbdd>::prettyPrint(FILE *);
+template bool _bdd<IRExpr *, exprbdd>::_parse<exprbdd_scope, exprbdd::parseLeaf>(exprbdd_scope *, exprbdd **, const char *, const char **);
+template exprbdd *_bdd<IRExpr *, exprbdd>::assume(exprbdd_scope *, exprbdd *, bbdd*);
+template std::map<IRExpr *, bbdd *> _bdd<IRExpr *, exprbdd>::to_selectors(const_bdd_scope<bbdd> *, exprbdd *);
+template exprbdd *_bdd<IRExpr *, exprbdd>::from_enabling(exprbdd_scope *, const enablingTableT &, exprbdd *);

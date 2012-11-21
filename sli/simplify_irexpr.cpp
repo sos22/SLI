@@ -3203,7 +3203,7 @@ isBadAddress(IRExpr *e)
 }
 
 template <typename treeT, typename scopeT> treeT *
-simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const AllowableOptimisations &opt, bool *done_something)
+simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt, bool *done_something)
 {
 	if (bdd->isLeaf)
 		return bdd;
@@ -3217,11 +3217,41 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const AllowableOptim
 	}
 	treeT *t = simplifyBDD(scope, bscope, bdd->content.trueBranch, opt, done_something);
 	treeT *f = simplifyBDD(scope, bscope, bdd->content.falseBranch, opt, done_something);
+	if (cond == bdd->content.condition && t == bdd->content.trueBranch && f == bdd->content.falseBranch)
+		return bdd;
 	return treeT::ifelse(
 		scope,
 		bbdd::var(bscope, cond),
 		t,
 		f);
 }
-template bbdd   *simplifyBDD(bbdd::scope *,   bbdd::scope *, bbdd *,   const AllowableOptimisations &, bool *);
-template smrbdd *simplifyBDD(smrbdd::scope *, bbdd::scope *, smrbdd *, const AllowableOptimisations &, bool *);
+
+template <> exprbdd *
+simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IRExprOptimisations &opt, bool *done_something)
+{
+	if (bdd->isLeaf) {
+		IRExpr *res = optimiseIRExprFP(bdd->content.leaf, opt, done_something);
+		if (res == bdd->content.leaf)
+			return bdd;
+		return exprbdd::var(scope, bscope, res);
+	}
+	IRExpr *cond = optimiseIRExprFP(bdd->content.condition, opt, done_something);
+	assert(cond->type() == Ity_I1);
+	if (cond->tag == Iex_Const) {
+		if (((IRExprConst *)cond)->Ico.U1)
+			return simplifyBDD(scope, bscope, bdd->content.trueBranch, opt, done_something);
+		else
+			return simplifyBDD(scope, bscope, bdd->content.falseBranch, opt, done_something);
+	}
+	exprbdd *t = simplifyBDD(scope, bscope, bdd->content.trueBranch, opt, done_something);
+	exprbdd *f = simplifyBDD(scope, bscope, bdd->content.falseBranch, opt, done_something);
+	if (cond == bdd->content.condition && t == bdd->content.trueBranch && f == bdd->content.falseBranch)
+		return bdd;
+	return exprbdd::ifelse(
+		scope,
+		bbdd::var(bscope, cond),
+		t,
+		f);
+}
+template bbdd   *simplifyBDD(bbdd::scope *,   bbdd::scope *, bbdd *,   const IRExprOptimisations &, bool *);
+template smrbdd *simplifyBDD(smrbdd::scope *, bbdd::scope *, smrbdd *, const IRExprOptimisations &, bool *);

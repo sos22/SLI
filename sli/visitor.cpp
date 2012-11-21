@@ -124,7 +124,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->Copy)
 			res = visitor->Copy(ctxt, c);
 		if (res == visit_continue)
-			res = visit_irexpr(ctxt, &visitor->irexpr, c->value);
+			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, c->value);
 		return res;
 	}
 	case StateMachineSideEffect::AssertFalse: {

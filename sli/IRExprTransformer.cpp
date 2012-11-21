@@ -129,3 +129,26 @@ IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, s
 		t,
 		f);
 }
+
+exprbdd *
+IRExprTransformer::transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope, exprbdd *what, bool *done_something)
+{
+	if (what->isLeaf) {
+		IRExpr *newLeaf = doit(what->content.leaf, done_something);
+		if (what->content.leaf == newLeaf)
+			return what;
+		return exprbdd::var(scope, bscope, newLeaf);
+	}
+	bool b = false;
+	IRExpr *e = doit(what->content.condition, &b);
+	exprbdd *t = transform_exprbdd(bscope, scope, what->content.trueBranch, &b);
+	exprbdd *f = transform_exprbdd(bscope, scope, what->content.falseBranch, &b);
+	if (!b)
+		return what;
+	*done_something = true;
+	return exprbdd::ifelse(
+		scope,
+		bbdd::var(bscope, e),
+		t,
+		f);
+}

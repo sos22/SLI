@@ -119,6 +119,7 @@ public:
 		} else {
 			content.condition->sanity_check();
 			assert(content.condition->type() == Ity_I1);
+			assert(content.condition->tag != Iex_Mux0X);
 			content.trueBranch->sanity_check(ordering);
 			content.falseBranch->sanity_check(ordering);
 			if (ordering) {
@@ -146,8 +147,8 @@ public:
 	   enabling table into a single int BDD */
 	template <typename scopeT> static _subtreeT *from_enabling(
 		scopeT *scp,
-		const std::map<bbdd *, _subtreeT *> &inp,
-		_leafT defaultValue);
+		const enablingTableT &inp,
+		_subtreeT *defaultValue);
 
 	/* Kind of the inverse of from_enabling: convert an MTBDD into
 	   a set of BBDDs, one for each possible terminal, such that
@@ -292,6 +293,7 @@ class bbdd : public const_bdd<bool, bbdd> {
 	static IRExpr *mkConst(bool b) {
 		return IRExpr_Const_U1(b);
 	}
+	static bbdd *_var(scope *, IRExpr *a);
 public:
 	static bbdd *Or(scope *, bbdd *a, bbdd *b);
 	static bbdd *And(scope *, bbdd *a, bbdd *b);
@@ -371,8 +373,70 @@ class smrbdd : public const_bdd<StateMachineRes, smrbdd> {
 	{}
 public:
 	static bool parse(scope *scp, smrbdd **out, const char *str, const char **suffix) {
-		return _bdd<StateMachineRes, smrbdd>::_parse<smrbdd::scope, parseLeaf>(scp, out, str, suffix);
+		return _bdd<StateMachineRes, smrbdd>::_parse<scope, parseLeaf>(scp, out, str, suffix);
 	}
+};
+
+class exprbdd;
+
+class exprbdd_scope : public bdd_scope<exprbdd>, private GcCallback<&ir_heap> {
+	friend class exprbdd;
+
+	std::map<IRExpr *, exprbdd *> leaves;
+
+	void runGc(HeapVisitor &hv);
+	exprbdd *cnst(IRExpr *what);
+
+public:
+	exprbdd_scope(bdd_ordering *_ordering)
+		: bdd_scope<exprbdd>(_ordering),
+		  GcCallback<&ir_heap>(true)
+	{}
+};
+
+class exprbdd : public _bdd<IRExpr *, exprbdd> {
+public:
+	typedef IRExpr *leafT;
+	typedef exprbdd_scope scope;
+private:
+	friend class bdd_scope<exprbdd>;
+	friend class exprbdd_scope;
+
+	typedef _bdd<IRExpr *, exprbdd> parentT;
+
+	static exprbdd *parseLeaf(scope *, const char *, const char **);
+	void _visit(HeapVisitor &hv, IRExpr *&leaf) const {
+		hv(leaf);
+	}
+	void _sanity_check(IRExpr *leaf) const {
+		leaf->sanity_check();
+	}
+	void _prettyPrint(FILE *f, leafT what) const {
+		fprintf(f, "<");
+		ppIRExpr(what, f);
+		fprintf(f, ">");
+	}
+	exprbdd(IRExpr *cond, exprbdd *trueB, exprbdd *falseB)
+		: parentT(cond, trueB, falseB)
+	{}
+	exprbdd(leafT b)
+		: parentT(b)
+	{}
+	static exprbdd *_var(scope *scope, bbdd::scope *, IRExpr *);
+	static IRExpr *to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo);
+public:
+	static bool parse(scope *scp, exprbdd **out, const char *str, const char **suffix) {
+		return parentT::_parse<scope, parseLeaf>(scp, out, str, suffix);
+	}
+	static IRExpr *to_irexpr(exprbdd *);
+	static exprbdd *var(scope *scope, bbdd::scope *, IRExpr *);
+	IRType type() const {
+		if (isLeaf)
+			return content.leaf->type();
+		else
+			return content.trueBranch->type();
+	}
+	void sanity_check(bdd_ordering *ordering = NULL) const;
 };
 
 #endif /* !BDD_HPP__ */

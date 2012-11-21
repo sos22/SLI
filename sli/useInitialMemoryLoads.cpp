@@ -143,7 +143,7 @@ ReachingMap::get(const StateMachineState *s) const
 }
 
 static StateMachine *
-useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
+useInitialMemoryLoads(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 		      OracleInterface *oracle, bool *done_something)
 {
 	ReachingMap rm;
@@ -182,7 +182,7 @@ useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimi
 					s->dbg_origin,
 					new StateMachineSideEffectCopy(
 						load->target,
-						IRExpr_Load(load->type, load->addr)),
+						exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Load(load->type, load->addr))),
 					s->target));
 		}
 	}
@@ -240,8 +240,8 @@ useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimi
 };
 
 StateMachine *
-useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
+useInitialMemoryLoads(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 		      OracleInterface *oracle, bool *done_something)
 {
-	return _useInitialMemoryLoads::useInitialMemoryLoads(mai, sm, opt, oracle, done_something);
+	return _useInitialMemoryLoads::useInitialMemoryLoads(scopes, mai, sm, opt, oracle, done_something);
 }

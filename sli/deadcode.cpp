@@ -579,8 +579,9 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec =
 					(StateMachineSideEffectCopy *)e;
-				if (smsec->value->tag == Iex_Get &&
-				    ((IRExprGet *)smsec->value)->reg == smsec->target) {
+				if (smsec->value->isLeaf &&
+				    smsec->value->content.leaf->tag == Iex_Get &&
+				    ((IRExprGet *)smsec->value->content.leaf)->reg == smsec->target) {
 					/* Copying a register
 					   or temporary back
 					   to itself is always

@@ -36,9 +36,9 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 		return IRExpr_Get(canon_reg(ieg->reg), ieg->ty);
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
-		StateMachineSideEffectLoad *smsel, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectLoad *smsel, bool *done_something)
 	{
-		StateMachineSideEffectLoad *smsel2 = StateMachineTransformer::transformOneSideEffect(smsel, done_something);
+		StateMachineSideEffectLoad *smsel2 = StateMachineTransformer::transformOneSideEffect(scopes, smsel, done_something);
 		if (smsel2)
 			smsel = smsel2;
 		*done_something = true;
@@ -58,9 +58,9 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 		return new StateMachineSideEffectLoad(smsel, canon_reg(smsel->target), addr);
 	}
 	StateMachineSideEffectCopy *transformOneSideEffect(
-		StateMachineSideEffectCopy *smsec, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectCopy *smsec, bool *done_something)
 	{
-		StateMachineSideEffectCopy *smsec2 = StateMachineTransformer::transformOneSideEffect(smsec, done_something);
+		StateMachineSideEffectCopy *smsec2 = StateMachineTransformer::transformOneSideEffect(scopes, smsec, done_something);
 		if (smsec2)
 			smsec = smsec2;
 		*done_something = true;
@@ -69,9 +69,9 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 			smsec->value);
 	}
 	StateMachineSideEffectPhi *transformOneSideEffect(
-		StateMachineSideEffectPhi *smsep, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectPhi *smsep, bool *done_something)
 	{
-		StateMachineSideEffectPhi *smsep2 = StateMachineTransformer::transformOneSideEffect(smsep, done_something);
+		StateMachineSideEffectPhi *smsep2 = StateMachineTransformer::transformOneSideEffect(scopes, smsep, done_something);
 		if (smsep2)
 			smsep2 = smsep;
 		*done_something = true;
@@ -81,9 +81,9 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 			smsep->generations);
 	}
 	StateMachineSideEffectStore *transformOneSideEffect(
-		StateMachineSideEffectStore *store, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectStore *store, bool *done_something)
 	{
-		StateMachineSideEffectStore *store2 = StateMachineTransformer::transformOneSideEffect(store, done_something);
+		StateMachineSideEffectStore *store2 = StateMachineTransformer::transformOneSideEffect(scopes, store, done_something);
 		if (!store2)
 			store2 = store;
 		if (store2->addr->tag != Iex_Get) {
@@ -212,18 +212,18 @@ class SplitSsaGenerations : public StateMachineTransformer {
 		return internIRExpr(res, internTable);
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
-		StateMachineSideEffectLoad *smsel, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectLoad *smsel, bool *done_something)
 	{
-		StateMachineSideEffectLoad *smsel2 = StateMachineTransformer::transformOneSideEffect(smsel, done_something);
+		StateMachineSideEffectLoad *smsel2 = StateMachineTransformer::transformOneSideEffect(scopes, smsel, done_something);
 		if (smsel2)
 			smsel = smsel2;
 		*done_something = true;
 		return new StateMachineSideEffectLoad(smsel, canon_reg(smsel->target));
 	}
 	StateMachineSideEffectCopy *transformOneSideEffect(
-		StateMachineSideEffectCopy *smsec, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectCopy *smsec, bool *done_something)
 	{
-		StateMachineSideEffectCopy *smsec2 = StateMachineTransformer::transformOneSideEffect(smsec, done_something);
+		StateMachineSideEffectCopy *smsec2 = StateMachineTransformer::transformOneSideEffect(scopes, smsec, done_something);
 		if (smsec2)
 			smsec = smsec2;
 		*done_something = true;
@@ -232,9 +232,9 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			smsec->value);
 	}
 	StateMachineSideEffectPhi *transformOneSideEffect(
-		StateMachineSideEffectPhi *smsep, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectPhi *smsep, bool *done_something)
 	{
-		StateMachineSideEffectPhi *smsep2 = StateMachineTransformer::transformOneSideEffect(smsep, done_something);
+		StateMachineSideEffectPhi *smsep2 = StateMachineTransformer::transformOneSideEffect(scopes, smsep, done_something);
 		if (smsep2)
 			smsep = smsep2;
 		for (auto it = smsep->generations.begin(); it != smsep->generations.end(); ) {
@@ -320,7 +320,7 @@ private:
 			ief->isUnique);
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
-		StateMachineSideEffectLoad *l, bool *done_something)
+		SMScopes *, StateMachineSideEffectLoad *l, bool *done_something)
 	{
 		bool ign;
 		IRExpr *addr = doit(l->addr, &ign);
@@ -335,7 +335,7 @@ private:
 			l->tag);
 	}
 	StateMachineSideEffectStore *transformOneSideEffect(
-		StateMachineSideEffectStore *l, bool *done_something)
+		SMScopes *, StateMachineSideEffectStore *l, bool *done_something)
 	{
 		bool ign;
 		IRExpr *addr = doit(l->addr, &ign);
@@ -352,10 +352,9 @@ private:
 			l->tag);
 	}
 	StateMachineSideEffectCopy *transformOneSideEffect(
-		StateMachineSideEffectCopy *l, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectCopy *l, bool *done_something)
 	{
-		bool ign;
-		IRExpr *value = doit(l->value, &ign);
+		exprbdd *value = transform_exprbdd(&scopes->bools, &scopes->exprs, l->value);
 		if (!value)
 			value = l->value;
 		*done_something = true;
@@ -364,9 +363,9 @@ private:
 			value);
 	}
 	StateMachineSideEffectPhi *transformOneSideEffect(
-		StateMachineSideEffectPhi *p, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectPhi *p, bool *done_something)
 	{
-		StateMachineSideEffectPhi *p2 = StateMachineTransformer::transformOneSideEffect(p, done_something);
+		StateMachineSideEffectPhi *p2 = StateMachineTransformer::transformOneSideEffect(scopes, p, done_something);
 		if (p2)
 			p = p2;
 		*done_something = true;
@@ -486,8 +485,8 @@ canonicalise_crash_summary(CrashSummary *input)
 	visit_crash_summary(&phiRegs, &visitor, input);
 
 	internStateMachineTable t;
-	input->loadMachine = internStateMachine(input->loadMachine, t);
-	input->storeMachine = internStateMachine(input->storeMachine, t);
+	input->loadMachine = internStateMachine(input->scopes, input->loadMachine, t);
+	input->storeMachine = internStateMachine(input->scopes, input->storeMachine, t);
 	input->verificationCondition = internIRExpr(input->verificationCondition, t);
 
 	if (TIMEOUT)

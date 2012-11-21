@@ -14,6 +14,7 @@
 #define UNDEFINED_EXPR ((IRExpr *)3)
 #define UNDEFINED_BBDD ((bbdd *)5)
 #define UNDEFINED_SMRBDD ((smrbdd *)7)
+#define UNDEFINED_EXPRBDD ((exprbdd *)9)
 
 #ifndef NDEBUG
 static bool debug_undefinedness = false;
@@ -362,10 +363,10 @@ undefinednessBBDD(bbdd::scope *scope,
 
 static smrbdd *
 undefinednessSmrBDD(smrbdd::scope *scope,
-		  StateMachineState *sm,
-		  smrbdd *what,
-		  const VariableDefinednessMap &vdm,
-		  const IRExprOptimisations &opt)
+		    StateMachineState *sm,
+		    smrbdd *what,
+		    const VariableDefinednessMap &vdm,
+		    const IRExprOptimisations &opt)
 {
 	if (what->isLeaf)
 		return what;
@@ -377,6 +378,27 @@ undefinednessSmrBDD(smrbdd::scope *scope,
 	if (trueB == UNDEFINED_SMRBDD)
 		return falseB;
 	if (falseB == UNDEFINED_SMRBDD)
+		return trueB;
+	return scope->makeInternal(c, trueB, falseB);
+}
+
+static exprbdd *
+undefinednessExprBDD(exprbdd::scope *scope,
+		     StateMachineState *sm,
+		     exprbdd *what,
+		     const VariableDefinednessMap &vdm,
+		     const IRExprOptimisations &opt)
+{
+	if (what->isLeaf)
+		return what;
+	IRExpr *c = undefinednessExpression(sm, what->content.condition, vdm, opt);
+	if (c == UNDEFINED_EXPR)
+		return UNDEFINED_EXPRBDD;
+	exprbdd *trueB = undefinednessExprBDD(scope, sm, what->content.trueBranch, vdm, opt);
+	exprbdd *falseB = undefinednessExprBDD(scope, sm, what->content.falseBranch, vdm, opt);
+	if (trueB == UNDEFINED_EXPRBDD)
+		return falseB;
+	if (falseB == UNDEFINED_EXPRBDD)
 		return trueB;
 	return scope->makeInternal(c, trueB, falseB);
 }
@@ -487,9 +509,9 @@ undefinednessSimplification(SMScopes *scopes,
 				}
 				case StateMachineSideEffect::Copy: {
 					auto *c = (StateMachineSideEffectCopy *)newSe;
-					IRExpr *v = undefinednessExpression(sm, c->value, vdm, opt);
+					exprbdd *v = undefinednessExprBDD(&scopes->exprs, sm, c->value, vdm, opt);
 					if (v != c->value) {
-						if (v == UNDEFINED_EXPR)
+						if (v == UNDEFINED_EXPRBDD)
 							newSe = NULL;
 						else
 							newSe = new StateMachineSideEffectCopy(

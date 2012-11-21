@@ -333,7 +333,7 @@ getLibraryStateMachine(SMScopes *scopes,
 		printf(")\n");
 		abort();
 	}
-	SMBCompilerState state(cfgnode->rip, cfgnode, tid, mai, &scopes->bools);
+	SMBCompilerState state(cfgnode->rip, cfgnode, tid, mai, scopes);
 	return acc.content->compile(pendingRelocs, state);
 }
 
@@ -394,7 +394,7 @@ canonicaliseRbp(SMScopes *scopes, StateMachineState *root, const VexRip &rip, Or
 				if (smse) {
 					bool b;
 					StateMachineSideEffect *new_smse =
-						doit.transformSideEffect(smse, &b);
+						doit.transformSideEffect(scopes, smse, &b);
 					if (new_smse)
 						((StateMachineSideEffecting *)s)->sideEffect =
 							new_smse;
@@ -449,7 +449,7 @@ cfgNodeToState(SMScopes *scopes,
 			StateMachineSideEffect *se =
 				new StateMachineSideEffectCopy(
 					isp->target,
-					isp->data);
+					exprbdd::var(&scopes->exprs, &scopes->bools, isp->data));
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -520,7 +520,7 @@ cfgNodeToState(SMScopes *scopes,
 					target->rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
-						t_expr),
+						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr)),
 					NULL);
 			StateMachineSideEffecting *l4 =
 				new StateMachineSideEffecting(
@@ -588,7 +588,7 @@ cfgNodeToState(SMScopes *scopes,
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 				se = new StateMachineSideEffectCopy(
 					dirty->tmp,
-					mai.freeVariable(Ity_I64, tid, target, false));
+					exprbdd::var(&scopes->exprs, &scopes->bools, mai.freeVariable(Ity_I64, tid, target, false)));
 			} else {
 				abort();
 			}
@@ -709,15 +709,18 @@ cfgNodeToState(SMScopes *scopes,
 							tid,
 							OFFSET_amd64_RSP,
 							0),
-						IRExpr_Binop(
-							Iop_Add64,
-							IRExpr_Const_U64(8),
-							IRExpr_Get(
-								threadAndRegister::reg(
-									tid,
-									OFFSET_amd64_RSP,
-									0),
-								Ity_I64))),
+						exprbdd::var(
+							&scopes->exprs,
+							&scopes->bools,
+							IRExpr_Binop(
+								Iop_Add64,
+								IRExpr_Const_U64(8),
+								IRExpr_Get(
+									threadAndRegister::reg(
+										tid,
+										OFFSET_amd64_RSP,
+										0),
+									Ity_I64)))),
 					NULL);
 				*cursor = smp;
 				cursor = &smp->target;
@@ -1090,6 +1093,21 @@ struct RspCanonicalisationState : public Named {
 		}
 		return res;
 	}
+	eval_res eval(exprbdd *expr) const {
+		if (expr->isLeaf)
+			return eval(expr->content.leaf);
+		eval_res r1(eval(expr->content.condition));
+		if (r1.tag == eval_res::eval_res_const) {
+			if (r1.val)
+				return eval(expr->content.trueBranch);
+			else
+				return eval(expr->content.falseBranch);
+		}
+		eval_res rt(eval(expr->content.trueBranch));
+		eval_res rf(eval(expr->content.falseBranch));
+		rt.merge(rf);
+		return rt;
+	}
 };
 
 /* Find the delta between the start RSP and the RSP at the final crash
@@ -1258,13 +1276,16 @@ addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachine
 			vr,
 			new StateMachineSideEffectCopy(
 				threadAndRegister::reg(tid, OFFSET_amd64_RBP, 0),
-				IRExpr_Associative(
-					Iop_Add64,
-					IRExpr_Get(
-						threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
-						Ity_I64),
-					IRExpr_Const_U64(-delta),
-					NULL)),
+				exprbdd::var(
+					&scopes->exprs,
+					&scopes->bools,
+					IRExpr_Associative(
+						Iop_Add64,
+						IRExpr_Get(
+							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
+							Ity_I64),
+						IRExpr_Const_U64(-delta),
+						NULL))),
 			cursor);
 	}
 
@@ -1273,13 +1294,16 @@ addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachine
 			vr,
 			new StateMachineSideEffectCopy(
 				threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
-				IRExpr_Associative(
-					Iop_Add64,
-					IRExpr_Get(
-						threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
-						Ity_I64),
-					IRExpr_Const_U64(-delta),
-					NULL)),
+				exprbdd::var(
+					&scopes->exprs,
+					&scopes->bools,
+					IRExpr_Associative(
+						Iop_Add64,
+						IRExpr_Get(
+							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
+							Ity_I64),
+						IRExpr_Const_U64(-delta),
+						NULL))),
 			cursor);
 	} else {
 		warning("Failed to get RSP canonicalisation delta\n");

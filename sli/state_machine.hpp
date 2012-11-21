@@ -22,8 +22,9 @@ struct SMScopes {
 	bdd_ordering ordering;
 	bbdd::scope bools;
 	smrbdd::scope smrs;
+	exprbdd::scope exprs;
 	SMScopes()
-		: bools(&ordering), smrs(&ordering)
+		: bools(&ordering), smrs(&ordering), exprs(&ordering)
 	{}
 	bool read(const char *fname);
 	bool parse(const char *buf, const char **end);
@@ -417,16 +418,16 @@ protected:
 		: type(_type)
 	{}
 public:
-	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) = 0;
+	virtual StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &, bool *) = 0;
 #ifdef NDEBUG
-	void sanityCheck() const {}
+	void sanityCheck(SMScopes *) const {}
 #else
-	virtual void sanityCheck() const = 0;
+	virtual void sanityCheck(SMScopes *) const = 0;
 #endif
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
 	virtual void inputExpressions(std::vector<IRExpr *> &exprs) = 0;
 	virtual void prettyPrint(FILE *f) const = 0;
-	static bool parse(StateMachineSideEffect **out, const char *str, const char **suffix);
+	static bool parse(SMScopes *scopes, StateMachineSideEffect **out, const char *str, const char **suffix);
 	NAMED_CLASS
 };
 
@@ -483,7 +484,7 @@ public:
 			sideEffect->prettyPrint(f);
 		fprintf(f, " then l%d}", labels[target]);
 	}
-	static bool parse(SMScopes *, StateMachineSideEffecting **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffecting **out, const char *str, const char **suffix)
 	{
 		VexRip origin;
 		int target;
@@ -492,7 +493,7 @@ public:
 		    !parseVexRip(&origin, str, &str) ||
 		    !parseThisChar(':', str, &str))
 			return false;
-		if (!StateMachineSideEffect::parse(&sme, str, &str))
+		if (!StateMachineSideEffect::parse(scopes, &sme, str, &str))
 			sme = NULL;
 		if (parseThisString(" then l", str, &str) &&
 		    parseDecimalInt(&target, str, &str) &&
@@ -517,11 +518,11 @@ public:
 		if (sideEffect)
 			sideEffect->inputExpressions(out);
 	}
-	void sanityCheck(SMScopes *) const
+	void sanityCheck(SMScopes *scopes) const
 	{
 #ifndef NDEBUG
 		if (sideEffect)
-			sideEffect->sanityCheck();
+			sideEffect->sanityCheck(scopes);
 		if (sideEffect && sideEffect->type == StateMachineSideEffect::EndAtomic &&
 		    target && target->type == StateMachineState::SideEffecting &&
 		    ((StateMachineSideEffecting *)target)->sideEffect &&
@@ -599,7 +600,7 @@ public:
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-	static bool parse(StateMachineSideEffectUnreached **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectUnreached **out, const char *str, const char **suffix)
 	{
 		if (parseThisString("<unreached>", str, suffix)) {
 			*out = StateMachineSideEffectUnreached::get();
@@ -607,9 +608,9 @@ public:
 		}
 		return false;
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &, bool *) { return this; }
 	void visit(HeapVisitor &) {}
-	void sanityCheck() const {}
+	void sanityCheck(SMScopes *) const {}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
@@ -628,14 +629,12 @@ public:
 					   StateMachineSideEffect::sideEffectType _type)
 		: StateMachineSideEffect(_type), addr(_addr), rip(_rip), tag(_tag)
 	{
-		if (addr)
-			sanityCheck();
 	}
 	virtual void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
 #ifndef NDEBUG
-	virtual void sanityCheck() const {
+	virtual void sanityCheck(SMScopes *) const {
 		addr->sanity_check();
 		assert(addr->type() == Ity_I64);
 		rip.sanity_check();
@@ -664,7 +663,8 @@ public:
 		ppIRExpr(data, f);
 		fprintf(f, " @ %s", rip.name());
 	}
-	static bool parse(StateMachineSideEffectStore **out,
+	static bool parse(SMScopes *,
+			  StateMachineSideEffectStore **out,
 			  const char *str,
 			  const char **suffix)
 	{
@@ -689,9 +689,9 @@ public:
 		StateMachineSideEffectMemoryAccess::visit(hv);
 		hv(data);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck() const {
-		StateMachineSideEffectMemoryAccess::sanityCheck();
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *scopes) const {
+		StateMachineSideEffectMemoryAccess::sanityCheck(scopes);
 		data->sanity_check();
 	}
 	bool definesRegister(threadAndRegister &) const {
@@ -742,7 +742,8 @@ public:
 		ppIRExpr(addr, f);
 		fprintf(f, "):%s@%s", tag.name(), rip.name());
 	}
-	static bool parse(StateMachineSideEffectLoad **out,
+	static bool parse(SMScopes *,
+			  StateMachineSideEffectLoad **out,
 			  const char *str,
 			  const char **suffix)
 	{
@@ -766,7 +767,7 @@ public:
 		}
 		return false;
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
 	bool definesRegister(threadAndRegister &reg) const {
 		reg = target;
 		return true;
@@ -774,29 +775,29 @@ public:
 	IRType _type() const { return type; }
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(value); }
+	void inputExpressions(std::vector<IRExpr *> &exprs);
 public:
-	StateMachineSideEffectCopy(threadAndRegister k, IRExpr *_value)
+	StateMachineSideEffectCopy(threadAndRegister k, exprbdd *_value)
 		: StateMachineSideEffect(StateMachineSideEffect::Copy),
 		  target(k), value(_value)
 	{
 	}
 	threadAndRegister target;
-	IRExpr *value;
+	exprbdd *value;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "COPY ");
 		target.prettyPrint(f);
-		fprintf(f, " = ");
-		ppIRExpr(value, f);
+		fprintf(f, " =\n");
+		value->prettyPrint(f);
 	}
-	static bool parse(StateMachineSideEffectCopy **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectCopy **out, const char *str, const char **suffix)
 	{
-		IRExpr *data;
+		exprbdd *data;
 		threadAndRegister key(threadAndRegister::invalid());
 		if (parseThisString("COPY ", str, &str) &&
 		    parseThreadAndRegister(&key, str, &str) &&
-		    parseThisString(" = ", str, &str) &&
-		    parseIRExpr(&data, str, suffix)) {
+		    parseThisString(" =\n", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &data, str, suffix)) {
 			*out = new StateMachineSideEffectCopy(key, data);
 			return true;
 		}
@@ -805,9 +806,9 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck() const {
-		value->sanity_check();
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *scopes) const {
+		value->sanity_check(&scopes->ordering);
 	}
 	bool definesRegister(threadAndRegister &reg) const {
 		reg = target;
@@ -830,7 +831,7 @@ public:
 		ppIRExpr(value, f);
 		fprintf(f, ") %s", reflectsActualProgram ? "REAL" : "FAKE");
 	}
-	static bool parse(StateMachineSideEffectAssertFalse **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectAssertFalse **out, const char *str, const char **suffix)
 	{
 		IRExpr *data;
 		if (parseThisString("Assert !(", str, &str) &&
@@ -852,8 +853,8 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *) const {
 		assert(reflectsActualProgram == true ||
 		       reflectsActualProgram == false);
 		value->sanity_check();
@@ -878,7 +879,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "START_ATOMIC");
 	}
-	static bool parse(StateMachineSideEffectStartAtomic **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectStartAtomic **out, const char *str, const char **suffix)
 	{
 		if (parseThisString("START_ATOMIC", str, suffix)) {
 			*out = StateMachineSideEffectStartAtomic::get();
@@ -887,8 +888,8 @@ public:
 		return false;
 	}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *) const {
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -909,7 +910,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "END_ATOMIC");
 	}
-	static bool parse(StateMachineSideEffectEndAtomic **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectEndAtomic **out, const char *str, const char **suffix)
 	{
 		if (parseThisString("END_ATOMIC", str, suffix)) {
 			*out = StateMachineSideEffectEndAtomic::get();
@@ -918,8 +919,8 @@ public:
 		return false;
 	}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *) const {
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -999,7 +1000,7 @@ public:
 		}
 		fprintf(f, ")");
 	}
-	static bool parse(StateMachineSideEffectPhi **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectPhi **out, const char *str, const char **suffix)
 	{
 		threadAndRegister key(threadAndRegister::invalid());
 		IRType ty;
@@ -1034,8 +1035,8 @@ public:
 		for (auto it = generations.begin(); it != generations.end(); it++)
 			hv(it->val);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *) const {
 		assert(generations.size() != 0);
 	}
 	bool definesRegister(threadAndRegister &reg) const {
@@ -1063,7 +1064,7 @@ public:
 		else
 			fprintf(f, "<inf>");
 	}
-	static bool parse(StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *data;
 		FrameId frame;
@@ -1083,8 +1084,8 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(rsp);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *) const {
 		if (rsp) {
 			rsp->sanity_check();
 			assert(rsp->type() == Ity_I64);
@@ -1111,7 +1112,7 @@ public:
 		fprintf(f, "EndFunction(%s) rsp = ", frame.name());
 		ppIRExpr(rsp, f);
 	}
-	static bool parse(StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
 	{
 		IRExpr *rsp;
 		FrameId frame;
@@ -1127,8 +1128,8 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(rsp);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *) const {
 		rsp->sanity_check();
 		assert(rsp->type() == Ity_I64);
 	}
@@ -1150,8 +1151,8 @@ public:
 		  reg(_reg), set(_set)
 	{}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
-	void sanityCheck() const {}
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations&, bool*) { return this; }
+	void sanityCheck(SMScopes *) const {}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
@@ -1160,7 +1161,7 @@ public:
 		fprintf(f, "ALIAS %s = %s",
 			reg.name(), set.name());
 	}
-	static bool parse(StateMachineSideEffectPointerAliasing **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectPointerAliasing **out, const char *str, const char **suffix)
 	{
 		threadAndRegister reg(threadAndRegister::invalid());
 		PointerAliasingSet set(PointerAliasingSet::nothing);
@@ -1247,8 +1248,8 @@ public:
 		  functions(_functions)
 	{}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &, bool *) { return this; }
+	void sanityCheck(SMScopes *) const {
 #ifndef NDEBUG
 		/* No dupes */
 		for (auto it1 = functions.begin();
@@ -1279,7 +1280,7 @@ public:
 		}
 		fprintf(f, "}");
 	}
-	static bool parse(StateMachineSideEffectStackLayout **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectStackLayout **out, const char *str, const char **suffix)
 	{
 		std::vector<entry> functions;
 

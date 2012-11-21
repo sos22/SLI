@@ -3,7 +3,7 @@
 #include "state_machine.hpp"
 
 StateMachineSideEffectLoad *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, bool *c)
+StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectLoad *l, bool *c)
 {
 	bool b = false;
 	IRExpr *a = doit(l->addr, &b);
@@ -16,7 +16,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, b
 }
 
 StateMachineSideEffectStore *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStore *s, bool *c)
+StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectStore *s, bool *c)
 {
 	bool b = false;
 	IRExpr *a = doit(s->addr, &b), *d = doit(s->data, &b);
@@ -29,7 +29,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStore *s, 
 }
 
 StateMachineSideEffectAssertFalse *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFalse *a, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectAssertFalse *a, bool *d)
 {
 	bool b = false;
 	IRExpr *v = doit(a->value, &b);
@@ -42,7 +42,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFals
 }
 
 StateMachineSideEffectStartFunction *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStartFunction *a, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectStartFunction *a, bool *d)
 {
 	bool b = false;
 	IRExpr *v = doit(a->rsp, &b);
@@ -55,7 +55,7 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStartFunct
 }
 
 StateMachineSideEffectEndFunction *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectEndFunction *a, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectEndFunction *a, bool *d)
 {
 	bool b = false;
 	IRExpr *v = doit(a->rsp, &b);
@@ -68,10 +68,10 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectEndFunctio
 }
 
 StateMachineSideEffectCopy *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectCopy *c, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectCopy *c, bool *d)
 {
 	bool b = false;
-	IRExpr *v = doit(c->value, &b);
+	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, c->value, &b);
 	if (b) {
 		*d = true;
 		return new StateMachineSideEffectCopy(c->target, v);
@@ -81,12 +81,12 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectCopy *c, b
 }
 
 StateMachineSideEffect *
-StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *done_something)
+StateMachineTransformer::transformSideEffect(SMScopes *scopes, StateMachineSideEffect *se, bool *done_something)
 {
 	switch (se->type) {
 #define do_type(t)							\
 		case StateMachineSideEffect:: t:			\
-			return transformOneSideEffect(			\
+			return transformOneSideEffect(scopes,		\
 				(StateMachineSideEffect ## t *)se,	\
 				done_something);
 		all_side_effect_types(do_type);
@@ -240,7 +240,8 @@ StateMachineTransformer::transform(SMScopes *scopes, StateMachine *sm, bool *don
 }
 
 StateMachineSideEffectPhi *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectPhi *phi,
+StateMachineTransformer::transformOneSideEffect(SMScopes *,
+						StateMachineSideEffectPhi *phi,
 						bool *done_something)
 {
 	bool t = false;

@@ -70,7 +70,7 @@ enforceMustStoreBeforeCrash(SMScopes *scopes, StateMachine *sm, bool *progress)
 			tab[selectors[smr_unreached]] = scopes->smrs.cnst(smr_unreached);
 		tab[selectors[smr_crash]] = scopes->smrs.cnst(smr_unreached);
 		*progress = true;
-		s->res = smrbdd::from_enabling(&scopes->smrs, tab, smr_unreached);
+		s->res = smrbdd::from_enabling(&scopes->smrs, tab, scopes->smrs.cnst(smr_unreached));
 	}
 	return sm;
 }
@@ -247,7 +247,7 @@ _optimiseStateMachine(SMScopes *scopes,
 		}
 		done_something |= p;
 
-		sm = internStateMachine(sm);
+		sm = internStateMachine(scopes, sm);
 		if (TIMEOUT)
 			return sm;
 
@@ -269,7 +269,8 @@ _optimiseStateMachine(SMScopes *scopes,
 		sm = sm->optimise(scopes, opt, &p);
 		if (p) {
 			if (is_ssa) {
-				sm = internStateMachine(sm); /* Local optimisation only maintains SSA form if interned */
+				/* Local optimisation only maintains SSA form if interned */
+				sm = internStateMachine(scopes, sm);
 				if (TIMEOUT)
 					return sm;
 			}
@@ -293,7 +294,7 @@ _optimiseStateMachine(SMScopes *scopes,
 		LibVEX_maybe_gc(token);
 
 		p = false;
-		sm = bisimilarityReduction(&scopes->bools, sm, is_ssa, *mai, &p);
+		sm = bisimilarityReduction(scopes, sm, is_ssa, *mai, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("bisimilarityReduction:\n");
 			printStateMachine(sm, stdout);
@@ -310,7 +311,7 @@ _optimiseStateMachine(SMScopes *scopes,
 		}
 		if (opt.noExtend()) {
 			p = false;
-			sm = useInitialMemoryLoads(*mai, sm, opt, oracle, &p);
+			sm = useInitialMemoryLoads(scopes, *mai, sm, opt, oracle, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("useInitialMemoryLoads:\n");
 				printStateMachine(sm, stdout);
@@ -364,7 +365,7 @@ _optimiseStateMachine(SMScopes *scopes,
 				break;
 
 			p = false;
-			sm = functionAliasAnalysis(&scopes->bools, *mai, sm, opt, oracle, cdm, &p);
+			sm = functionAliasAnalysis(scopes, *mai, sm, opt, oracle, cdm, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("functionAliasAnalysis:\n");
 				printStateMachine(sm, stdout);
@@ -785,7 +786,7 @@ truncateStateMachine(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, Stat
 					tab[selectors[smr_survive]] = scopes->smrs.cnst(smr_survive);
 				if (selectors.count(smr_unreached))
 					tab[selectors[smr_unreached]] = scopes->smrs.cnst(smr_unreached);
-				smrbdd *newRes = smrbdd::from_enabling(&scopes->smrs, tab, smr_unreached);
+				smrbdd *newRes = smrbdd::from_enabling(&scopes->smrs, tab, scopes->smrs.cnst(smr_unreached));
 				assert(newRes);
 				newRes->sanity_check(&scopes->ordering);
 				newState = new StateMachineTerminal(smt->dbg_origin, newRes);

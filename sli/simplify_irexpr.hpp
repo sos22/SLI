@@ -18,8 +18,8 @@ bool physicallyEqual(const IRExpr *a, const IRExpr *b);
 IRExpr *coerceTypes(IRType, IRExpr *);
 IRExpr *expr_eq(IRExpr *, IRExpr *);
 
-template <typename treeT, typename scopeT> treeT *simplifyBDD(scopeT *scope, bbdd::scope *, treeT *bdd, const AllowableOptimisations &opt, bool *done_something);
-static inline bbdd *simplifyBDD(bbdd::scope *scope, bbdd *bdd, const AllowableOptimisations &opt, bool *done_something)
+template <typename treeT, typename scopeT> treeT *simplifyBDD(scopeT *scope, bbdd::scope *, treeT *bdd, const IRExprOptimisations &opt, bool *done_something);
+static inline bbdd *simplifyBDD(bbdd::scope *scope, bbdd *bdd, const IRExprOptimisations &opt, bool *done_something)
 {
 	return simplifyBDD(scope, scope, bdd, opt, done_something);
 }
