@@ -728,14 +728,16 @@ static StateMachine *
 truncateStateMachine(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
 {
 	const VexRip &vr(mai.begin(truncateAt->rip).node()->rip);
-	StateMachineBifurcate *newTerminal =
-		new StateMachineBifurcate(
+	StateMachineTerminal *newTerminal =
+		new StateMachineTerminal(
 			vr,
-			bbdd::var(&scopes->bools, IRExpr_Unop(
-					  Iop_BadPtr,
-					  truncateAt->addr)),
-			new StateMachineTerminal(vr, scopes->smrs.cnst(smr_crash)),
-			new StateMachineTerminal(vr, scopes->smrs.cnst(smr_survive)));
+			smrbdd::ifelse(
+				&scopes->smrs,
+				bbdd::var(&scopes->bools, IRExpr_Unop(
+						  Iop_BadPtr,
+						  truncateAt->addr)),
+				scopes->smrs.cnst(smr_crash),
+				scopes->smrs.cnst(smr_survive)));
 	std::map<const StateMachineState *, StateMachineState *> map;
 	std::queue<StateMachineState **> relocs;
 	StateMachineState *newRoot = sm->root;
@@ -777,7 +779,10 @@ truncateStateMachine(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, Stat
 					tab[selectors[smr_survive]] = scopes->smrs.cnst(smr_survive);
 				if (selectors.count(smr_unreached))
 					tab[selectors[smr_unreached]] = scopes->smrs.cnst(smr_unreached);
-				newState = new StateMachineTerminal(smt->dbg_origin, smrbdd::from_enabling(&scopes->smrs, tab, smr_unreached));
+				smrbdd *newRes = smrbdd::from_enabling(&scopes->smrs, tab, smr_unreached);
+				assert(newRes);
+				newRes->sanity_check(&scopes->ordering);
+				newState = new StateMachineTerminal(smt->dbg_origin, newRes);
 				break;
 			}
 			}
