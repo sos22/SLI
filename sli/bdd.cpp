@@ -521,6 +521,13 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	assert(b->isLeaf || ordering->before(cond, b->content.condition));
 	if (a == b)
 		return a;
+	if (cond->tag == Iex_Const) {
+		if ( ((IRExprConst *)cond)->Ico.U1 )
+			return a;
+		else
+			return b;
+	}
+
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
 			entry(cond, a, b),
