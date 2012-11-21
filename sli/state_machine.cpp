@@ -65,6 +65,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 				((StateMachineTerminal *)trueTarget)->res,
 				((StateMachineTerminal *)falseTarget)->res));
 	}
+	condition = simplifyBDD(&scopes->bools, condition, opt, done_something);
 	if (condition->isLeaf) {
 		*done_something = true;
 		if (condition->content.leaf)
@@ -1345,3 +1346,13 @@ SMScopes::parse(const char *buf, const char **end)
 	return ordering.parse(buf, end);
 }
 
+StateMachineState *
+StateMachineTerminal::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+{
+	if (current_optimisation_gen == last_optimisation_gen)
+		return this;
+	last_optimisation_gen = current_optimisation_gen;
+
+	res = simplifyBDD(&scopes->smrs, &scopes->bools, res, opt, done_something);
+	return this;
+}

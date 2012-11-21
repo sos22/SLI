@@ -3201,3 +3201,27 @@ isBadAddress(IRExpr *e)
 	return e->tag == Iex_Const &&
 		(long)((IRExprConst *)e)->Ico.U64 < 4096;
 }
+
+template <typename treeT, typename scopeT> treeT *
+simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const AllowableOptimisations &opt, bool *done_something)
+{
+	if (bdd->isLeaf)
+		return bdd;
+	IRExpr *cond = optimiseIRExprFP(bdd->content.condition, opt, done_something);
+	assert(cond->type() == Ity_I1);
+	if (cond->tag == Iex_Const) {
+		if (((IRExprConst *)cond)->Ico.U1)
+			return simplifyBDD(scope, bscope, bdd->content.trueBranch, opt, done_something);
+		else
+			return simplifyBDD(scope, bscope, bdd->content.falseBranch, opt, done_something);
+	}
+	treeT *t = simplifyBDD(scope, bscope, bdd->content.trueBranch, opt, done_something);
+	treeT *f = simplifyBDD(scope, bscope, bdd->content.falseBranch, opt, done_something);
+	return treeT::ifelse(
+		scope,
+		bbdd::var(bscope, cond),
+		t,
+		f);
+}
+template bbdd   *simplifyBDD(bbdd::scope *,   bbdd::scope *, bbdd *,   const AllowableOptimisations &, bool *);
+template smrbdd *simplifyBDD(smrbdd::scope *, bbdd::scope *, smrbdd *, const AllowableOptimisations &, bool *);

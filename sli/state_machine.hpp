@@ -441,8 +441,7 @@ public:
 		  res(_res)
 	{}
 	smrbdd *res;
-	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &, bool *)
-	{ return this; }
+	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &, bool *);
 	void visit(HeapVisitor &hv) { hv(res); }
 	void targets(std::vector<StateMachineState **> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
