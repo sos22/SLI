@@ -29,9 +29,9 @@ bbdd::var(scope *scope, IRExpr *a)
 
 template <typename constT, typename subtreeT> template <typename scopeT, typename zipInternalT>
 subtreeT *
-const_bdd<constT, subtreeT>::zip(scopeT *scope,
-				 zipInternalT where,
-				 std::map<zipInternalT, subtreeT *> &memo)
+_bdd<constT, subtreeT>::zip(scopeT *scope,
+			    zipInternalT where,
+			    std::map<zipInternalT, subtreeT *> &memo)
 {
 	if (where.isLeaf())
 		return where.leafzip();
@@ -210,8 +210,8 @@ public:
 		return assumption < o.assumption;
 	}
 };
-template <typename constT, typename subtreeT> subtreeT *
-const_bdd<constT, subtreeT>::assume(scope *scope, subtreeT *thing, bbdd *assumption)
+template <typename constT, typename subtreeT> template <typename scopeT> subtreeT *
+_bdd<constT, subtreeT>::assume(scopeT *scope, subtreeT *thing, bbdd *assumption)
 {
 	return zip(scope, assume_zip_internal<subtreeT>(thing, assumption));
 }
@@ -361,7 +361,7 @@ public:
 
 template <typename constT, typename subtreeT> template <typename scopeT>
 subtreeT *
-const_bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp, constT defaultValue)
+_bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp, constT defaultValue)
 {
 	subtreeT *res = zip(scope, from_enabling_internal<subtreeT, scopeT>(inp));
 	if (res == INTBDD_DONT_CARE)
@@ -757,19 +757,19 @@ bdd_ordering::parse(const char *buf, const char **end)
 }
 
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
-template bbdd *const_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
+template bbdd *_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);
 template std::map<bool, bbdd *> const_bdd<bool, bbdd>::to_selectors(const_bdd_scope<bbdd> *, bbdd *);
 template bbdd *const_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *, bbdd *);
 
 template void _bdd<int, intbdd>::prettyPrint(FILE *);
 template bool _bdd<bool, bbdd>::_parse<const_bdd_scope<bbdd>, bbdd::parseBool>(const_bdd_scope<bbdd>*, bbdd **, const char *, const char **);
-template intbdd *const_bdd<int, intbdd>::assume(const_bdd_scope<intbdd> *, intbdd *, bbdd*);
-template intbdd *const_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &, int);
+template intbdd *_bdd<int, intbdd>::assume(const_bdd_scope<intbdd> *, intbdd *, bbdd*);
+template intbdd *_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, const enablingTableT &, int);
 
 template void _bdd<StateMachineRes, smrbdd>::prettyPrint(FILE *);
 template bool _bdd<StateMachineRes, smrbdd>::_parse<const_bdd_scope<smrbdd>, smrbdd::parseLeaf>(const_bdd_scope<smrbdd>*, smrbdd **, const char *, const char **);
-template smrbdd *const_bdd<StateMachineRes, smrbdd>::assume(const_bdd_scope<smrbdd> *, smrbdd *, bbdd*);
+template smrbdd *_bdd<StateMachineRes, smrbdd>::assume(const_bdd_scope<smrbdd> *, smrbdd *, bbdd*);
 template smrbdd *const_bdd<StateMachineRes, smrbdd>::ifelse(const_bdd_scope<smrbdd> *, bbdd *, smrbdd *, smrbdd *);
 template std::map<StateMachineRes, bbdd *> const_bdd<StateMachineRes, smrbdd>::to_selectors(const_bdd_scope<bbdd> *, smrbdd *);
-template smrbdd *const_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, StateMachineRes);
+template smrbdd *_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, StateMachineRes);

@@ -7,6 +7,8 @@
 
 #include "smr.hpp"
 
+class bbdd;
+
 /* Thing for specifying variable ordering. */
 class bdd_ordering : public GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv);
@@ -59,6 +61,7 @@ template <typename _leafT, typename _subtreeT>
 class _bdd : public GarbageCollected<_bdd<_leafT, _subtreeT>, &ir_heap> {
 public:
 	typedef _leafT leafT;
+	typedef std::map<bbdd *, _subtreeT *> enablingTableT;
 private:
 	template <typename scopeT,
 		  _subtreeT *parseLeaf(scopeT *, const char *, const char **)>
@@ -66,6 +69,10 @@ private:
 				 const char *,
 				 const char **,
 				 std::map<int, _subtreeT *> &labels);
+	template <typename scopeT, typename zipInternalT> static _subtreeT *zip(
+		scopeT *,
+		zipInternalT,
+		std::map<zipInternalT, _subtreeT *> &memo);
 protected:
 	virtual void _visit(HeapVisitor &hv, leafT &leaf) const = 0;
 	virtual void _sanity_check(leafT leaf) const = 0;
@@ -86,6 +93,13 @@ protected:
 	template <typename scopeT,
 		  _subtreeT *(*parseLeaf)(scopeT *, const char *, const char **)>
 	static bool _parse(scopeT *, _subtreeT **, const char *, const char **);
+
+	template <typename scopeT, typename zipInternalT> static _subtreeT *zip(
+		scopeT *scp,
+		zipInternalT where) {
+		std::map<zipInternalT, _subtreeT *> memo;
+		return zip(scp, where, memo);
+	}
 public:
 	bool isLeaf;
 	union {
@@ -117,6 +131,22 @@ public:
 
 	void inputExpressions(std::vector<IRExpr *> &out);
 	void prettyPrint(FILE *f);
+
+	/* Simplify @thing under the assumption that @assumption is
+	 * true. */
+	template <typename scopeT> static _subtreeT *assume(scopeT *,
+							    _subtreeT *thing,
+							    bbdd *assumption);
+
+	/* An enabling table is a map from BBDDs to int BDDs.  The
+	   idea is that the caller arranges that at most one of the
+	   BBDDs is true (i.e. enabled) for any context and we then
+	   select the matching intbdd.  @from_enabling flattens an
+	   enabling table into a single int BDD */
+	template <typename scopeT> static _subtreeT *from_enabling(
+		scopeT *scp,
+		const std::map<bbdd *, _subtreeT *> &inp,
+		_leafT defaultValue);
 
 	void visit(HeapVisitor &hv) {
 		if (isLeaf) {
@@ -198,23 +228,12 @@ template <typename constT, typename subtreeT> class const_bdd : public _bdd<cons
 public:
 	typedef constT leafT;
 	typedef const_bdd_scope<subtreeT> scope;
-	typedef std::map<bbdd *, subtreeT *> enablingTableT;
 private:
 	void _visit(HeapVisitor &, constT &) const {
 	}
 	template <IRExpr *mkConst(constT)> static IRExpr *to_irexpr(subtreeT *, std::map<subtreeT *, IRExpr *> &memo);
-	template <typename scopeT, typename zipInternalT> static subtreeT *zip(
-		scopeT *,
-		zipInternalT,
-		std::map<zipInternalT, subtreeT *> &memo);
 	template <typename scopeT> static const typename std::map<constT, bbdd *> &to_selectors(scopeT *, subtreeT *, std::map<subtreeT *, std::map<constT, bbdd *> > &);
 protected:
-	template <typename scopeT, typename zipInternalT> static subtreeT *zip(
-		scopeT *scp,
-		zipInternalT where) {
-		std::map<zipInternalT, subtreeT *> memo;
-		return zip(scp, where, memo);
-	}
 	template <IRExpr *mkConst(constT)> static IRExpr *to_irexpr(subtreeT *);
 
 	const_bdd(IRExpr *cond, subtreeT *trueB, subtreeT *falseB)
@@ -224,35 +243,12 @@ protected:
 		: _bdd<constT, subtreeT>(b)
 	{}
 public:
-	/* Simplify @thing under the assumption that @assumption is
-	 * true. */
-	static subtreeT *assume(scope *,
-				subtreeT *thing,
-				bbdd *assumption);
-
-	/* An enabling table is a map from BBDDs to xBDDs.  The idea
-	   is that the caller arranges that at most one of the BBDDs
-	   is true (i.e. enabled) for any context and we then select
-	   the matching xBDD.  @from_enabling flattens an enabling
-	   table into a single xBDD */
-	template <typename scopeT> static subtreeT *from_enabling(
-		scopeT *scp,
-		const enablingTableT &inp);
 	template <typename scopeT> static subtreeT *ifelse(
 		scopeT *scp,
 		bbdd *cond,
 		subtreeT *ifTrue,
 		subtreeT *ifFalse);
 	template <typename scopeT> static typename std::map<constT, bbdd *> to_selectors(scopeT *, subtreeT *);
-	/* An enabling table is a map from BBDDs to int BDDs.  The
-	   idea is that the caller arranges that at most one of the
-	   BBDDs is true (i.e. enabled) for any context and we then
-	   select the matching intbdd.  @from_enabling flattens an
-	   enabling table into a single int BDD */
-	template <typename scopeT> static subtreeT *from_enabling(
-		scopeT *scp,
-		const enablingTableT &inp,
-		constT defaultValue);
 };
 
 class bbdd : public const_bdd<bool, bbdd> {
