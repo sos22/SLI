@@ -561,9 +561,9 @@ const_bdd<constT, subtreeT>::to_irexpr(subtreeT *what)
 }
 
 template <typename constT, typename subtreeT> template <typename scopeT> const std::map<constT, bbdd *> &
-const_bdd<constT, subtreeT>::to_selectors(scopeT *scope,
-					  subtreeT *what,
-					  std::map<subtreeT *, std::map<constT, bbdd *> > &memo)
+_bdd<constT, subtreeT>::to_selectors(scopeT *scope,
+				     subtreeT *what,
+				     std::map<subtreeT *, std::map<constT, bbdd *> > &memo)
 {
 	auto it_did_insert = memo.insert(std::pair<subtreeT *, std::map<constT, bbdd *> >(what, std::map<constT, bbdd *>()));
 	auto it = it_did_insert.first;
@@ -649,7 +649,7 @@ const_bdd<constT, subtreeT>::to_selectors(scopeT *scope,
 }
 
 template <typename constT, typename subtreeT> template <typename scopeT> std::map<constT, bbdd *>
-const_bdd<constT, subtreeT>::to_selectors(scopeT *scope, subtreeT *what)
+_bdd<constT, subtreeT>::to_selectors(scopeT *scope, subtreeT *what)
 {
 	std::map<subtreeT *, std::map<constT, bbdd *> > memo;
 	return to_selectors(scope, what, memo);
@@ -759,7 +759,7 @@ bdd_ordering::parse(const char *buf, const char **end)
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);
-template std::map<bool, bbdd *> const_bdd<bool, bbdd>::to_selectors(const_bdd_scope<bbdd> *, bbdd *);
+template std::map<bool, bbdd *> _bdd<bool, bbdd>::to_selectors(const_bdd_scope<bbdd> *, bbdd *);
 template bbdd *const_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *, bbdd *);
 
 template void _bdd<int, intbdd>::prettyPrint(FILE *);
@@ -771,5 +771,5 @@ template void _bdd<StateMachineRes, smrbdd>::prettyPrint(FILE *);
 template bool _bdd<StateMachineRes, smrbdd>::_parse<const_bdd_scope<smrbdd>, smrbdd::parseLeaf>(const_bdd_scope<smrbdd>*, smrbdd **, const char *, const char **);
 template smrbdd *_bdd<StateMachineRes, smrbdd>::assume(const_bdd_scope<smrbdd> *, smrbdd *, bbdd*);
 template smrbdd *const_bdd<StateMachineRes, smrbdd>::ifelse(const_bdd_scope<smrbdd> *, bbdd *, smrbdd *, smrbdd *);
-template std::map<StateMachineRes, bbdd *> const_bdd<StateMachineRes, smrbdd>::to_selectors(const_bdd_scope<bbdd> *, smrbdd *);
+template std::map<StateMachineRes, bbdd *> _bdd<StateMachineRes, smrbdd>::to_selectors(const_bdd_scope<bbdd> *, smrbdd *);
 template smrbdd *_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, StateMachineRes);

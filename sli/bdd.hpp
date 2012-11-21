@@ -73,6 +73,7 @@ private:
 		scopeT *,
 		zipInternalT,
 		std::map<zipInternalT, _subtreeT *> &memo);
+	template <typename scopeT> static const typename std::map<leafT, bbdd *> &to_selectors(scopeT *, _subtreeT *, std::map<_subtreeT *, std::map<leafT, bbdd *> > &);
 protected:
 	virtual void _visit(HeapVisitor &hv, leafT &leaf) const = 0;
 	virtual void _sanity_check(leafT leaf) const = 0;
@@ -147,6 +148,16 @@ public:
 		scopeT *scp,
 		const std::map<bbdd *, _subtreeT *> &inp,
 		_leafT defaultValue);
+
+	/* Kind of the inverse of from_enabling: convert an MTBDD into
+	   a set of BBDDs, one for each possible terminal, such that
+	   there's always precisely one BBDD which evaluates to true,
+	   and the associated terminal is the result of the original
+	   MTBDD. */
+	/* Note that scopeT is always bbdd::scope, but it's a pain to
+	   do that without a circular dependency between _bdd and
+	   bbdd.  The template lets us break that dependency. */
+	template <typename scopeT> static typename std::map<leafT, bbdd *> to_selectors(scopeT *, _subtreeT *);
 
 	void visit(HeapVisitor &hv) {
 		if (isLeaf) {
@@ -232,7 +243,6 @@ private:
 	void _visit(HeapVisitor &, constT &) const {
 	}
 	template <IRExpr *mkConst(constT)> static IRExpr *to_irexpr(subtreeT *, std::map<subtreeT *, IRExpr *> &memo);
-	template <typename scopeT> static const typename std::map<constT, bbdd *> &to_selectors(scopeT *, subtreeT *, std::map<subtreeT *, std::map<constT, bbdd *> > &);
 protected:
 	template <IRExpr *mkConst(constT)> static IRExpr *to_irexpr(subtreeT *);
 
@@ -248,7 +258,6 @@ public:
 		bbdd *cond,
 		subtreeT *ifTrue,
 		subtreeT *ifFalse);
-	template <typename scopeT> static typename std::map<constT, bbdd *> to_selectors(scopeT *, subtreeT *);
 };
 
 class bbdd : public const_bdd<bool, bbdd> {
