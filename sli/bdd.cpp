@@ -539,7 +539,7 @@ bdd_ordering::rankVariable(const IRExpr *a)
 			}
 		}
 		if (!dupe)
-			nextRanking++;
+			nextRanking--;
 	}
 	return it->second;
 }
