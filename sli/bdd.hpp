@@ -159,6 +159,15 @@ public:
 	   bbdd.  The template lets us break that dependency. */
 	template <typename scopeT> static typename std::map<leafT, bbdd *> to_selectors(scopeT *, _subtreeT *);
 
+	/* Special case of an enabling table.  ifelse(a, b, c)
+	   evaluates to the same thing as b if a is true and to the
+	   same thing as c otherwise. */
+	template <typename scopeT> static _subtreeT *ifelse(
+		scopeT *scp,
+		bbdd *cond,
+		_subtreeT *ifTrue,
+		_subtreeT *ifFalse);
+
 	void visit(HeapVisitor &hv) {
 		if (isLeaf) {
 			_visit(hv, content.leaf);
@@ -253,11 +262,6 @@ protected:
 		: _bdd<constT, subtreeT>(b)
 	{}
 public:
-	template <typename scopeT> static subtreeT *ifelse(
-		scopeT *scp,
-		bbdd *cond,
-		subtreeT *ifTrue,
-		subtreeT *ifFalse);
 };
 
 class bbdd : public const_bdd<bool, bbdd> {

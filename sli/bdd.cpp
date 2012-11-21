@@ -715,7 +715,7 @@ public:
 };
 
 template <typename constT, typename subtreeT> template <typename scopeT> subtreeT *
-const_bdd<constT, subtreeT>::ifelse(scopeT *scope,
+_bdd<constT, subtreeT>::ifelse(scopeT *scope,
 				    bbdd *cond,
 				    subtreeT *ifTrue,
 				    subtreeT *ifFalse)
@@ -760,7 +760,7 @@ template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);
 template std::map<bool, bbdd *> _bdd<bool, bbdd>::to_selectors(const_bdd_scope<bbdd> *, bbdd *);
-template bbdd *const_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *, bbdd *);
+template bbdd *_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *, bbdd *);
 
 template void _bdd<int, intbdd>::prettyPrint(FILE *);
 template bool _bdd<bool, bbdd>::_parse<const_bdd_scope<bbdd>, bbdd::parseBool>(const_bdd_scope<bbdd>*, bbdd **, const char *, const char **);
@@ -770,6 +770,6 @@ template intbdd *_bdd<int, intbdd>::from_enabling(const_bdd_scope<intbdd> *, con
 template void _bdd<StateMachineRes, smrbdd>::prettyPrint(FILE *);
 template bool _bdd<StateMachineRes, smrbdd>::_parse<const_bdd_scope<smrbdd>, smrbdd::parseLeaf>(const_bdd_scope<smrbdd>*, smrbdd **, const char *, const char **);
 template smrbdd *_bdd<StateMachineRes, smrbdd>::assume(const_bdd_scope<smrbdd> *, smrbdd *, bbdd*);
-template smrbdd *const_bdd<StateMachineRes, smrbdd>::ifelse(const_bdd_scope<smrbdd> *, bbdd *, smrbdd *, smrbdd *);
+template smrbdd *_bdd<StateMachineRes, smrbdd>::ifelse(const_bdd_scope<smrbdd> *, bbdd *, smrbdd *, smrbdd *);
 template std::map<StateMachineRes, bbdd *> _bdd<StateMachineRes, smrbdd>::to_selectors(const_bdd_scope<bbdd> *, smrbdd *);
 template smrbdd *_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, StateMachineRes);
