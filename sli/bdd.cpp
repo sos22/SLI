@@ -1402,6 +1402,7 @@ exprbdd::parseLeaf(scope *scope, const char *str, const char **suffix)
 exprbdd *
 exprbdd_scope::cnst(IRExpr *what)
 {
+	what = internIRExpr(what, tab);
 	auto it_did_insert = leaves.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
