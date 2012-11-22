@@ -352,7 +352,6 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 			   available expressions which both define the
 			   same register. */
 			assert(!_registers.count(sep->target));
-			sep->value->sanity_check();
 			_registers[sep->target] = avail_t::registerMapEntry(sep->value);
 		} else if (se->type == StateMachineSideEffect::AssertFalse) {
 			StateMachineSideEffectAssertFalse *seaf = (StateMachineSideEffectAssertFalse *)se;
