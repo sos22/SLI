@@ -9,6 +9,7 @@ class StateMachineSideEffectStore;
 class CrashSummary;
 class MaiMap;
 class SMScopes;
+class bbdd;
 
 class remoteMacroSectionsT : public GarbageCollected<remoteMacroSectionsT, &ir_heap> {
 	typedef std::vector<std::pair<StateMachineSideEffectStore *,
@@ -47,38 +48,38 @@ public:
 	friend class iterator;
 };
 
-IRExpr *survivalConstraintIfExecutedAtomically(SMScopes *scopes,
-					       const VexPtr<MaiMap, &ir_heap> &mai,
-					       const VexPtr<StateMachine, &ir_heap> &sm,
-					       const VexPtr<IRExpr, &ir_heap> &assumption,
-					       const VexPtr<OracleInterface> &oracle,
-					       bool escapingStateSurvive,
-					       const IRExprOptimisations &opt,
-					       GarbageCollectionToken token);
-IRExpr *crashingConstraintIfExecutedAtomically(SMScopes *scopes,
-					       const VexPtr<MaiMap, &ir_heap> &mai,
-					       const VexPtr<StateMachine, &ir_heap> &sm,
-					       const VexPtr<IRExpr, &ir_heap> &assumption,
-					       const VexPtr<OracleInterface> &oracle,
-					       bool escapingStateSurvive,
-					       const IRExprOptimisations &opt,
-					       GarbageCollectionToken token);
-IRExpr *crossProductSurvivalConstraint(SMScopes *scopes,
-				       const VexPtr<StateMachine, &ir_heap> &probeMachine,
-				       const VexPtr<StateMachine, &ir_heap> &storeMachine,
-				       const VexPtr<OracleInterface> &oracle,
-				       const VexPtr<IRExpr, &ir_heap> &initialStateCondition,
-				       const AllowableOptimisations &opt,
-				       const VexPtr<MaiMap, &ir_heap> &mai,
-				       GarbageCollectionToken token);
-IRExpr *writeMachineSuitabilityConstraint(SMScopes *scopes,
-					  VexPtr<MaiMap, &ir_heap> &mai,
-					  const VexPtr<StateMachine, &ir_heap> &writeMachine,
-					  const VexPtr<StateMachine, &ir_heap> &readMachine,
-					  const VexPtr<OracleInterface> &oracle,
-					  const VexPtr<IRExpr, &ir_heap> &assumption,
-					  const AllowableOptimisations &opt,
-					  GarbageCollectionToken token);
+bbdd *survivalConstraintIfExecutedAtomically(SMScopes *scopes,
+					     const VexPtr<MaiMap, &ir_heap> &mai,
+					     const VexPtr<StateMachine, &ir_heap> &sm,
+					     const VexPtr<bbdd, &ir_heap> &assumption,
+					     const VexPtr<OracleInterface> &oracle,
+					     bool escapingStateSurvive,
+					     const IRExprOptimisations &opt,
+					     GarbageCollectionToken token);
+bbdd *crashingConstraintIfExecutedAtomically(SMScopes *scopes,
+					     const VexPtr<MaiMap, &ir_heap> &mai,
+					     const VexPtr<StateMachine, &ir_heap> &sm,
+					     const VexPtr<bbdd, &ir_heap> &assumption,
+					     const VexPtr<OracleInterface> &oracle,
+					     bool escapingStateSurvive,
+					     const IRExprOptimisations &opt,
+					     GarbageCollectionToken token);
+bbdd *crossProductSurvivalConstraint(SMScopes *scopes,
+				     const VexPtr<StateMachine, &ir_heap> &probeMachine,
+				     const VexPtr<StateMachine, &ir_heap> &storeMachine,
+				     const VexPtr<OracleInterface> &oracle,
+				     const VexPtr<bbdd, &ir_heap> &initialStateCondition,
+				     const AllowableOptimisations &opt,
+				     const VexPtr<MaiMap, &ir_heap> &mai,
+				     GarbageCollectionToken token);
+bbdd *writeMachineSuitabilityConstraint(SMScopes *scopes,
+					VexPtr<MaiMap, &ir_heap> &mai,
+					const VexPtr<StateMachine, &ir_heap> &writeMachine,
+					const VexPtr<StateMachine, &ir_heap> &readMachine,
+					const VexPtr<OracleInterface> &oracle,
+					const VexPtr<bbdd, &ir_heap> &assumption,
+					const AllowableOptimisations &opt,
+					GarbageCollectionToken token);
 void collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 			const VexPtr<StateMachine, &ir_heap> &sm,
 			VexPtr<OracleInterface> &oracle,

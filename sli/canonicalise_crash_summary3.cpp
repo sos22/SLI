@@ -525,13 +525,13 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 		    reg_set_t *targetRegisters,
 		    GarbageCollectionToken token)
 {
-	IRExpr *reducedSurvivalConstraint =
+	bbdd *reducedSurvivalConstraint =
 		crossProductSurvivalConstraint(
 			summary->scopes,
 			summary->loadMachine,
 			summary->storeMachine,
 			oracle,
-			IRExpr_Const_U1(true),
+			summary->scopes->bools.cnst(true),
 			AllowableOptimisations::defaultOptimisations,
 			summary->mai,
 			token);
@@ -540,13 +540,7 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 		return false;
 	}
 
-	reducedSurvivalConstraint = simplify_via_anf(reducedSurvivalConstraint);
-	if (!reducedSurvivalConstraint) {
-		fprintf(stderr, "can't convert reduced survival constraint to CNF\n");
-		return false;
-	}
-
-	enumRegisters(reducedSurvivalConstraint, targetRegisters);
+	enumRegisters(bbdd::to_irexpr(reducedSurvivalConstraint), targetRegisters);
 
 	return true;
 }
@@ -658,13 +652,13 @@ simplifyAssumingMachineSurvives(SMScopes *scopes,
 		printf("\n");
 	}
 
-	IRExpr *survival_constraint;
+	bbdd *survival_constraint;
 	if (doesSurvive) {
 		survival_constraint = survivalConstraintIfExecutedAtomically(
 			scopes,
 			mai,
 			machine,
-			IRExpr_Const_U1(true),
+			scopes->bools.cnst(true),
 			oracle,
 			false,
 			AllowableOptimisations::defaultOptimisations,
@@ -674,7 +668,7 @@ simplifyAssumingMachineSurvives(SMScopes *scopes,
 			scopes,
 			mai,
 			machine,
-			IRExpr_Const_U1(true),
+			scopes->bools.cnst(true),
 			oracle,
 			true,
 			AllowableOptimisations::defaultOptimisations,
@@ -687,15 +681,15 @@ simplifyAssumingMachineSurvives(SMScopes *scopes,
 
 	if (debug_simplify_assuming_survive) {
 		printf("survival_constraint: ");
-		ppIRExpr(survival_constraint, stdout);
+		survival_constraint->prettyPrint(stdout);
 		printf("\n");
 	}
 
 	internIRExprTable intern;
 	IRExpr *expri = internIRExpr(expr.get(), intern);
-	survival_constraint = internIRExpr(survival_constraint, intern);
+	IRExpr *survive = internIRExpr(bbdd::to_irexpr(survival_constraint), intern);
 
-	IRExpr *res = simplifyAssuming(expri, survival_constraint,
+	IRExpr *res = simplifyAssuming(expri, survive,
 				       debug_simplify_assuming_survive,
 				       true, progress);
 	if (debug_simplify_assuming_survive) {

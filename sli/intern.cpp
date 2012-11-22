@@ -393,6 +393,17 @@ internBDD(scopeT *scope, bbdd::scope *bscope, subtreeT *what, internIRExprTable 
 		f);
 }
 
+bbdd *
+intern_bbdd(SMScopes *scopes, bbdd *bbdd, internIRExprTable &t)
+{
+	return internBDD(&scopes->bools, &scopes->bools, bbdd, t);
+}
+smrbdd *
+intern_smrbdd(SMScopes *scopes, smrbdd *smrbdd, internIRExprTable &t)
+{
+	return internBDD(&scopes->smrs, &scopes->bools, smrbdd, t);
+}
+
 static StateMachineState *
 internStateMachineState(SMScopes *scopes, StateMachineState *start, internStateMachineTable &t)
 {
@@ -404,7 +415,7 @@ internStateMachineState(SMScopes *scopes, StateMachineState *start, internStateM
 	switch (start->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)start;
-		internBDD(&scopes->smrs, &scopes->bools, smt->res, t);
+		smt->res = intern_smrbdd(scopes, smt->res, t);
 		for (auto it = t.states_terminal.begin();
 		     it != t.states_terminal.end();
 		     it++) {
@@ -437,7 +448,7 @@ internStateMachineState(SMScopes *scopes, StateMachineState *start, internStateM
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)start;
-		internBDD(&scopes->bools, &scopes->bools, smb->condition, t);
+		smb->condition = intern_bbdd(scopes, smb->condition, t);
 		smb->trueTarget = internStateMachineState(scopes, smb->trueTarget, t);
 		smb->falseTarget = internStateMachineState(scopes, smb->falseTarget, t);
 		for (auto it = t.states_bifurcate.begin();

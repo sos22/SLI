@@ -948,7 +948,7 @@ enumEvalPaths(SMScopes *scopes,
 
 	result = scopes->smrs.cnst( smr_unreached );
 
-	pendingStates.push_back(EvalContext(sm, assumption));
+	pendingStates.push_back(EvalContext(sm, assumption ? assumption.get() : scopes->bools.cnst(true)));
 
 	while (!TIMEOUT && !pendingStates.empty()) {
 		LibVEX_maybe_gc(token);
@@ -962,11 +962,11 @@ enumEvalPaths(SMScopes *scopes,
 	return result;
 }
 
-static IRExpr *
+static bbdd *
 _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 					const VexPtr<MaiMap, &ir_heap> &mai,
 					const VexPtr<StateMachine, &ir_heap> &sm,
-					VexPtr<IRExpr, &ir_heap> _assumption,
+					VexPtr<bbdd, &ir_heap> assumption,
 					const VexPtr<OracleInterface> &oracle,
 					bool escapingStatesSurvive,
 					bool wantCrash,
@@ -978,20 +978,17 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 	if (debug_survival_constraint) {
 		printf("%s(sm = ..., assumption = %s, escapingStatesSurvive = %s, wantCrash = %s, opt = %s)\n",
 		       __func__,
-		       _assumption ? nameIRExpr(_assumption) : "<null>",
+		       assumption ? "..." : "<null>",
 		       escapingStatesSurvive ? "true" : "false",
 		       wantCrash ? "true" : "false",
 		       opt.name());
+		if (assumption)
+			assumption->prettyPrint(stdout);
 		printStateMachine(sm, stdout);
 	}
 
-	VexPtr<bbdd, &ir_heap> assumption;
-	if (_assumption)
-		assumption = bbdd::var(&scopes->bools, _assumption);
-	else
-		assumption = scopes->bools.cnst(true);
-
-	assumption->sanity_check(&scopes->ordering);
+	if (assumption)
+		assumption->sanity_check(&scopes->ordering);
 	smrbdd *smr = enumEvalPaths(scopes, mai, sm, assumption, oracle, opt, token);
 	smr->sanity_check(&scopes->ordering);
 	std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scopes->bools, smr));
@@ -1030,20 +1027,16 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 	
 	if (TIMEOUT)
 		return NULL;
-	IRExpr *res = simplifyIRExpr(simplify_via_anf(bbdd::to_irexpr(resBdd)), opt);
-	if (debug_survival_constraint)
-		printf("%s: after optimisation, result %s\n",
-		       __func__, nameIRExpr(res));
-	return res;
+	return resBdd;
 }
 
 /* Assume that @sm executes atomically.  Figure out a constraint on
    the initial state which will lead to it not crashing. */
-IRExpr *
+bbdd *
 survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 				       const VexPtr<MaiMap, &ir_heap> &mai,
 				       const VexPtr<StateMachine, &ir_heap> &sm,
-				       const VexPtr<IRExpr, &ir_heap> &assumption,
+				       const VexPtr<bbdd, &ir_heap> &assumption,
 				       const VexPtr<OracleInterface> &oracle,
 				       bool escapingStatesSurvive,
 				       const IRExprOptimisations &opt,
@@ -1063,11 +1056,11 @@ survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 
 /* Assume that @sm executes atomically.  Figure out a constraint on
    the initial state which will lead to it not surviving. */
-IRExpr *
+bbdd *
 crashingConstraintIfExecutedAtomically(SMScopes *scopes,
 				       const VexPtr<MaiMap, &ir_heap> &mai,
 				       const VexPtr<StateMachine, &ir_heap> &sm,
-				       const VexPtr<IRExpr, &ir_heap> &assumption,
+				       const VexPtr<bbdd, &ir_heap> &assumption,
 				       const VexPtr<OracleInterface> &oracle,
 				       bool escapingStatesSurvive,
 				       const IRExprOptimisations &opt,
@@ -1542,12 +1535,12 @@ stripUninterpretableAnnotations(StateMachine *inp)
 	return new StateMachine(inp, newRoot);
 }
 
-IRExpr *
+bbdd *
 crossProductSurvivalConstraint(SMScopes *scopes,
 			       const VexPtr<StateMachine, &ir_heap> &probeMachine,
 			       const VexPtr<StateMachine, &ir_heap> &storeMachine,
 			       const VexPtr<OracleInterface> &oracle,
-			       const VexPtr<IRExpr, &ir_heap> &initialStateCondition,
+			       const VexPtr<bbdd, &ir_heap> &initialStateCondition,
 			       const AllowableOptimisations &optIn,
 			       const VexPtr<MaiMap, &ir_heap> &mai,
 			       GarbageCollectionToken token)
@@ -1722,13 +1715,13 @@ concatenateStateMachinesCrashing(SMScopes *scopes, const StateMachine *machine, 
 	return new StateMachine(newRoot, cfg_roots);
 }
 
-IRExpr *
+bbdd *
 writeMachineSuitabilityConstraint(SMScopes *scopes,
 				  VexPtr<MaiMap, &ir_heap> &mai,
 				  const VexPtr<StateMachine, &ir_heap> &writeMachine,
 				  const VexPtr<StateMachine, &ir_heap> &readMachine,
 				  const VexPtr<OracleInterface> &oracle,
-				  const VexPtr<IRExpr, &ir_heap> &assumption,
+				  const VexPtr<bbdd, &ir_heap> &assumption,
 				  const AllowableOptimisations &opt,
 				  GarbageCollectionToken token)
 {

@@ -490,7 +490,7 @@ singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, State
 	return true;
 }
 
-static IRExpr *
+static bbdd *
 atomicSurvivalConstraint(SMScopes *scopes,
 			 VexPtr<MaiMap, &ir_heap> &mai,
 			 VexPtr<StateMachine, &ir_heap> &machine,
@@ -502,15 +502,13 @@ atomicSurvivalConstraint(SMScopes *scopes,
 	VexPtr<StateMachine, &ir_heap> atomicMachine;
 	atomicMachine = duplicateStateMachine(machine);
 	atomicMachine = optimiseStateMachine(scopes, mai, atomicMachine, opt, oracle, true, token);
-	VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;
-	IRExpr *survive = survivalConstraintIfExecutedAtomically(scopes, mai, atomicMachine, nullexpr, oracle, false, opt, token);
-	if (!survive) {
+	VexPtr<bbdd, &ir_heap> nullexpr(NULL);
+	bbdd *survive = survivalConstraintIfExecutedAtomically(scopes, mai, atomicMachine, nullexpr, oracle, false, opt, token);
+	if (!survive)
 		fprintf(_logfile, "\tTimed out computing survival constraint\n");
-		return NULL;
-	}
-	return simplifyIRExpr(survive, opt);
+	return survive;
 }
 
 static AllowableOptimisations
@@ -668,14 +666,12 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 		return NULL;
 	}
 
-	VexPtr<IRExpr, &ir_heap> assumption;
+	VexPtr<bbdd, &ir_heap> assumption;
 	assumption = atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracle,
 					      atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
 					      token);
 	if (!assumption)
 		return NULL;
-
-	assumption = simplifyIRExpr(interval_simplify(simplify_via_anf(assumption)), optIn);
 
 	assumption = writeMachineSuitabilityConstraint(
 		scopes,
@@ -692,11 +688,9 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 		return NULL;
 	}
 
-	assumption = simplifyIRExpr(interval_simplify(simplify_via_anf(assumption)), optIn);
-
 	/* Figure out when the cross product machine will be at risk
 	 * of crashing. */
-	IRExpr *crash_constraint =
+	bbdd *crash_constraint =
 		crossProductSurvivalConstraint(
 			scopes,
 			probeMachine,
@@ -717,12 +711,13 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 	   those states which might suffer a bug of the desired
 	   kind. */
 	IRExpr *verification_condition =
-		IRExpr_Binop(
-			Iop_And1,
-			assumption,
-			IRExpr_Unop(
-				Iop_Not1,
-				crash_constraint));
+		bbdd::to_irexpr(
+			bbdd::And(
+				&scopes->bools,
+				bbdd::invert(
+					&scopes->bools,
+					crash_constraint),
+				assumption));
 	verification_condition = simplifyIRExpr(verification_condition, optIn);
 	verification_condition = simplify_via_anf(verification_condition);
 	verification_condition = simplifyIRExpr(verification_condition, optIn);

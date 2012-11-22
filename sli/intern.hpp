@@ -30,6 +30,8 @@ StateMachine *internStateMachine(
 	SMScopes *scopes,
 	StateMachine *sm,
 	internStateMachineTable &t);
+bbdd *intern_bbdd(SMScopes *scopes, bbdd *bbdd, internIRExprTable &t);
+smrbdd *intern_smrbdd(SMScopes *scopes, smrbdd *smrbdd, internIRExprTable &t);
 
 #endif /* !INTERN_HPP__ */
 
