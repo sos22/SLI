@@ -332,7 +332,6 @@ public:
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
 	virtual StateMachineState *optimise(const AllowableOptimisations &, bool *) = 0;
-	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
 	bool canCrash(std::set<const StateMachineState *> &memo) const {
 		if (type == Crash)
 			return true;
