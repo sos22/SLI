@@ -260,6 +260,19 @@ public:
 		visitor.Get = foo.f;
 		visit_const_bdd(this, &visitor, e);
 	}
+	void useExpressionData(const exprbdd *e)
+	{
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				if (!out->livePointer.contains(g->reg))
+					out->liveDataOnly.insert(g->reg);
+				return visit_continue;
+			}
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
+	}
 	void useExpressionData(const IRExpr *e)
 	{
 		struct {
@@ -292,36 +305,40 @@ public:
 		threadAndRegister def(threadAndRegister::invalid());
 		if (smse->definesRegister(def))
 			killRegister(def);
-		std::vector<IRExpr *> inp;
-		smse->inputExpressions(inp);
 		switch (smse->type) {
 		case StateMachineSideEffect::Load:
+			useExpressionPointer( ((StateMachineSideEffectLoad *)smse)->addr);
+			break;
 		case StateMachineSideEffect::Store:
+			useExpressionPointer( ((StateMachineSideEffectStore *)smse)->addr);
+			useExpressionPointer( ((StateMachineSideEffectStore *)smse)->data);
+			break;
 		case StateMachineSideEffect::Copy:
-			for (auto it = inp.begin(); it != inp.end(); it++)
-				useExpressionPointer(*it);
+			useExpressionData( ((StateMachineSideEffectCopy *)smse)->value);
 			break;
 		case StateMachineSideEffect::Unreached:
-		case StateMachineSideEffect::AssertFalse:
 		case StateMachineSideEffect::StartAtomic:
 		case StateMachineSideEffect::EndAtomic:
-		case StateMachineSideEffect::StartFunction:
-		case StateMachineSideEffect::EndFunction:
-		case StateMachineSideEffect::PointerAliasing:
 		case StateMachineSideEffect::StackLayout:
-			for (auto it = inp.begin(); it != inp.end(); it++)
-				useExpressionData(*it);
+		case StateMachineSideEffect::PointerAliasing:
+			break;
+		case StateMachineSideEffect::AssertFalse:
+			useExpressionData( ((StateMachineSideEffectAssertFalse *)smse)->value );
+			break;
+		case StateMachineSideEffect::StartFunction:
+			useExpressionData( ((StateMachineSideEffectStartFunction *)smse)->rsp );
+			break;
+		case StateMachineSideEffect::EndFunction:
+			useExpressionData( ((StateMachineSideEffectEndFunction *)smse)->rsp );
 			break;
 
 		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *smsep =
 				(StateMachineSideEffectPhi *)smse;
-			for (auto it = inp.begin(); it != inp.end(); it++)
-				useExpressionData(*it);
-			for (auto it = smsep->generations.begin();
-			     it != smsep->generations.end();
-			     it++)
-				this->livePointer.insert(it->reg);
+			for (auto it = smsep->generations.begin(); it != smsep->generations.end(); it++) {
+				useExpressionData(it->val);
+				livePointer.insert(it->reg);
+			}
 			break;
 		}
 		}
@@ -434,40 +451,32 @@ public:
 	}
 };
 
-static void
-enumRegisters(const IRExpr *e, std::set<threadAndRegister> &regs)
-{
-	struct {		
-		static visit_result f(std::set<threadAndRegister> *out, const IRExprGet *ieg) {
-			out->insert(ieg->reg);
-			return visit_continue;
-		}
-	} foo;
-	static irexpr_visitor<std::set<threadAndRegister> > visitor;
-	visitor.Get = foo.f;
-	visit_irexpr(&regs, &visitor, e);
-}
-
 static StateMachine *
 ssaDeadCode(StateMachine *sm, bool *done_something)
 {
 	std::set<threadAndRegister> refed_regs;
 	std::set<StateMachineState *> states;
 	enumStates(sm, &states);
-	for (auto it = states.begin(); it != states.end(); it++) {
-		StateMachineState *s = *it;
-		std::vector<IRExpr *> exprs;
-		s->inputExpressions(exprs);
-		for (auto it = exprs.begin(); it != exprs.end(); it++)
-			enumRegisters(*it, refed_regs);
-		if (s->getSideEffect() && s->getSideEffect()->type == StateMachineSideEffect::Phi) {
-			StateMachineSideEffectPhi *p = (StateMachineSideEffectPhi *)s->getSideEffect();
-			for (auto it = p->generations.begin();
-			     it != p->generations.end();
-			     it++)
-				refed_regs.insert(it->reg);
+	struct {
+		static visit_result Get(std::set<threadAndRegister> *refed_regs,
+					const IRExprGet *ieg) {
+			refed_regs->insert(ieg->reg);
+			return visit_continue;
 		}
-	}
+		static visit_result Phi(std::set<threadAndRegister> *refed_regs,
+					const StateMachineSideEffectPhi *phi) {
+			for (auto it = phi->generations.begin();
+			     it != phi->generations.end();
+			     it++)
+				refed_regs->insert(it->reg);
+			return visit_continue;
+		}
+	} foo;
+	static state_machine_visitor<std::set<threadAndRegister> > visitor;
+	visitor.irexpr.Get = foo.Get;
+	visitor.Phi = foo.Phi;
+	for (auto it = states.begin(); it != states.end(); it++)
+		visit_one_state(&refed_regs, &visitor, *it);
 	std::set<StateMachineSideEffecting *> ses;
 	enumStates(sm, &ses);
 	for (auto it = ses.begin(); it != ses.end(); it++) {

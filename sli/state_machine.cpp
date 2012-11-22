@@ -1251,40 +1251,6 @@ parseSmr(StateMachineRes *out, const char *str, const char **suffix)
 	}
 }
 
-template <typename t> static void
-enumConditions(t *bdd, std::vector<IRExpr *> &out)
-{
-	if (bdd->isLeaf)
-		return;
-	out.push_back(bdd->content.condition);
-	enumConditions(bdd->content.trueBranch, out);
-	enumConditions(bdd->content.falseBranch, out);
-}
-
-static void
-enumBDDExprs(exprbdd *bdd, std::vector<IRExpr *> &out)
-{
-	if (bdd->isLeaf) {
-		out.push_back(bdd->content.leaf);
-		return;
-	}
-	out.push_back(bdd->content.condition);
-	enumConditions(bdd->content.trueBranch, out);
-	enumConditions(bdd->content.falseBranch, out);
-}
-
-void
-StateMachineTerminal::inputExpressions(std::vector<IRExpr *> &out)
-{
-	enumConditions(res, out);
-}
-
-void
-StateMachineBifurcate::inputExpressions(std::vector<IRExpr *> &out)
-{
-	enumConditions(condition, out);
-}
-
 bool
 SMScopes::read(const char *fname)
 {
@@ -1309,19 +1275,6 @@ bool
 SMScopes::parse(const char *buf, const char **end)
 {
 	return ordering.parse(buf, end);
-}
-
-void
-StateMachineSideEffectCopy::inputExpressions(std::vector<IRExpr *> &out)
-{
-	enumBDDExprs(value, out);
-}
-
-void
-StateMachineSideEffectPhi::inputExpressions(std::vector<IRExpr *> &out)
-{
-	for (auto it = generations.begin(); it != generations.end(); it++)
-		enumBDDExprs(it->val, out);
 }
 
 StateMachineState *

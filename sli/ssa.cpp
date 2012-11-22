@@ -357,20 +357,18 @@ public:
 static void
 findUnresolvedReferences(const StateMachineState *s, std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> &out)
 {
+	typedef std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> ctxtT;
 	struct {
-		static visit_result Get(std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> *out,
-				const IRExprGet *ieg) {
+		static visit_result Get(ctxtT *out, const IRExprGet *ieg) {
 			if (ieg->reg.gen() == 0)
 				out->insert(std::pair<threadAndRegister, IRType>(ieg->reg, ieg->ty));
 			return visit_continue;
 		}
 	} foo;
 	std::vector<IRExpr *> exprs;
-	static irexpr_visitor<std::set<std::pair<threadAndRegister, IRType>, unresolvedRefCmp> > visitor;
-	visitor.Get = foo.Get;
-	((StateMachineState *)s)->inputExpressions(exprs);
-	for (auto it = exprs.begin(); it != exprs.end(); it++)
-		visit_irexpr(&out, &visitor, *it);
+	static state_machine_visitor<ctxtT> visitor;
+	visitor.irexpr.Get = foo.Get;
+	visit_one_state(&out, &visitor, s);
 }
 
 static StateMachineSideEffecting *

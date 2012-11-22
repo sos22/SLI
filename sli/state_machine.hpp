@@ -376,8 +376,6 @@ public:
 		return const_cast<StateMachineState *>(this)->getSideEffect();
 	}
 
-	virtual void inputExpressions(std::vector<IRExpr *> &out) = 0;
-
 #ifdef NDEBUG
 	void sanityCheck(SMScopes *) const {}
 #else
@@ -425,7 +423,6 @@ public:
 	virtual void sanityCheck(SMScopes *) const = 0;
 #endif
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
-	virtual void inputExpressions(std::vector<IRExpr *> &exprs) = 0;
 	virtual void prettyPrint(FILE *f) const = 0;
 	static bool parse(SMScopes *scopes, StateMachineSideEffect **out, const char *str, const char **suffix);
 	NAMED_CLASS
@@ -447,7 +444,6 @@ public:
 	void targets(std::vector<StateMachineState **> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
 	StateMachineSideEffect *getSideEffect() { return NULL; }
-	void inputExpressions(std::vector<IRExpr *> &);
 	void sanityCheck(SMScopes *scopes) const { res->sanity_check(&scopes->ordering); }
 
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const;
@@ -514,10 +510,6 @@ public:
 	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
 	StateMachineSideEffect *getSideEffect() { return sideEffect; }
-	void inputExpressions(std::vector<IRExpr *> &out) {
-		if (sideEffect)
-			sideEffect->inputExpressions(out);
-	}
 	void sanityCheck(SMScopes *scopes) const
 	{
 #ifndef NDEBUG
@@ -587,13 +579,11 @@ public:
 		condition->sanity_check(&scopes->ordering);
 	}
 	StateMachineSideEffect *getSideEffect() { return NULL; }
-	void inputExpressions(std::vector<IRExpr *> &out);
 };
 
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {
 	static VexPtr<StateMachineSideEffectUnreached, &ir_heap> _this;
 	StateMachineSideEffectUnreached() : StateMachineSideEffect(StateMachineSideEffect::Unreached) {}
-	void inputExpressions(std::vector<IRExpr *> &) {}
 public:
 	static StateMachineSideEffectUnreached *get() {
 		if (!_this) _this = new StateMachineSideEffectUnreached();
@@ -617,9 +607,6 @@ public:
 };
 
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
-	virtual void _inputExpressions(std::vector<IRExpr *> &exprs) = 0;
-protected:
-	void inputExpressions(std::vector<IRExpr *> &exprs) { _inputExpressions(exprs); exprs.push_back(addr); }
 public:
 	IRExpr *addr;
 	MemoryAccessIdentifier rip;
@@ -643,7 +630,6 @@ public:
 	virtual IRType _type() const = 0;
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
-	void _inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(data); }
 public:
 	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const MemoryAccessIdentifier &_rip, const MemoryTag &_tag)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Store),
@@ -707,7 +693,6 @@ public:
 };
 typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
-	void _inputExpressions(std::vector<IRExpr *> &) {}
 public:
 	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Load),
@@ -775,7 +760,6 @@ public:
 	IRType _type() const { return type; }
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs);
 public:
 	StateMachineSideEffectCopy(threadAndRegister k, exprbdd *_value)
 		: StateMachineSideEffect(StateMachineSideEffect::Copy),
@@ -816,7 +800,6 @@ public:
 	}
 };
 class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(value); }
 public:
 	StateMachineSideEffectAssertFalse(IRExpr *_value, bool _reflectsActualProgram)
 		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
@@ -869,7 +852,6 @@ class StateMachineSideEffectStartAtomic : public StateMachineSideEffect {
 		: StateMachineSideEffect(StateMachineSideEffect::StartAtomic)
 	{}
 	static VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> singleton;
-	void inputExpressions(std::vector<IRExpr *> &) { }
 public:
 	static StateMachineSideEffectStartAtomic *get() {
 		if (!singleton)
@@ -900,7 +882,6 @@ class StateMachineSideEffectEndAtomic : public StateMachineSideEffect {
 		: StateMachineSideEffect(StateMachineSideEffect::EndAtomic)
 	{}
 	static VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> singleton;
-	void inputExpressions(std::vector<IRExpr *> &) { }
 public:
 	static StateMachineSideEffectEndAtomic *get() {
 		if (!singleton)
@@ -927,7 +908,6 @@ public:
 	}
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs);
 public:
 	threadAndRegister reg;
 	IRType ty;
@@ -1034,10 +1014,6 @@ public:
 	}
 };
 class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) {
-		if (rsp)
-			exprs.push_back(rsp);
-	}
 public:
 	StateMachineSideEffectStartFunction(IRExpr *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
@@ -1088,7 +1064,6 @@ public:
 	}
 };
 class StateMachineSideEffectEndFunction : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(rsp); }
 public:
 	StateMachineSideEffectEndFunction(IRExpr *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
@@ -1145,7 +1120,6 @@ public:
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
-	void inputExpressions(std::vector<IRExpr *> &) {}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "ALIAS %s = %s",
 			reg.name(), set.name());
@@ -1257,8 +1231,6 @@ public:
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
-	}
-	void inputExpressions(std::vector<IRExpr *> &) {
 	}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "STACKLAYOUT = {");

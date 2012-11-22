@@ -179,6 +179,41 @@ _visit_side_effect(void *ctxt,
 }
 
 visit_result
+_visit_one_state(void *ctxt,
+		 const state_machine_visitor<void> *visitor,
+		 const StateMachineState *s)
+{
+	visit_result res = visit_continue;
+	switch (s->type) {
+	case StateMachineState::Terminal: {
+		auto smt = (const StateMachineTerminal *)s;
+		if (visitor->Terminal)
+			res = visitor->Terminal(ctxt, smt);
+		if (res == visit_continue)
+			res = _visit_bdd(ctxt, &visitor->irexpr, (visit_result (*)(void *, const irexpr_visitor<void> *, StateMachineRes))NULL, smt->res);
+		return res;
+	}
+	case StateMachineState::Bifurcate: {
+		auto smb = (const StateMachineBifurcate *)s;
+		if (visitor->Bifurcate)
+			res = visitor->Bifurcate(ctxt, smb);
+		if (res == visit_continue)
+			res = _visit_bdd(ctxt, &visitor->irexpr, (visit_result (*)(void *, const irexpr_visitor<void> *, bool))NULL, smb->condition);
+		return res;
+	}
+	case StateMachineState::SideEffecting: {
+		auto sme = (const StateMachineSideEffecting *)s;
+		if (visitor->SideEffecting)
+			res = visitor->SideEffecting(ctxt, sme);
+		if (res == visit_continue && sme->sideEffect)
+			res = visit_side_effect(ctxt, visitor, sme->sideEffect);
+		return res;
+	}
+	}
+	abort();
+}
+
+visit_result
 _visit_state_machine(void *ctxt,
 		     const state_machine_visitor<void> *visitor,
 		     const StateMachineState *sm,

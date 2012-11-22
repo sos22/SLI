@@ -47,6 +47,14 @@ visit_const_bdd(ctxtT *ctxt,
 			   (visit_result (*)(void *, const irexpr_visitor<void> *, typename subtreeT::leafT))NULL,
 			   bdd );
 }
+template <typename subtreeT, typename ctxtT> void visit_bdd(ctxtT *ctxt,
+							    const irexpr_visitor<ctxtT> *visitor,
+							    const subtreeT *bdd) {
+	_visit_bdd( (void *)ctxt,
+		    (const irexpr_visitor<void> *)visitor,
+		    (void (*)(void *, const irexpr_visitor<void> *, typename subtreeT::leafT))NULL,
+		    bdd );
+}
 
 template <typename ctxtT> struct state_machine_visitor {
 	struct irexpr_visitor<ctxtT> irexpr;
@@ -146,6 +154,19 @@ visit_state_machine(ctxtT *ctxt,
 		    const StateMachine *sm)
 {
 	return visit_state_machine(ctxt, visitor, sm->root);
+}
+
+visit_result _visit_one_state(void *ctxt,
+			      const state_machine_visitor<void> *visitor,
+			      const StateMachineState *s);
+template <typename ctxtT> static visit_result
+visit_one_state(ctxtT *ctxt,
+		const state_machine_visitor<ctxtT> *visitor,
+		const StateMachineState *s)
+{
+	return _visit_one_state( (void *)ctxt,
+				 (const state_machine_visitor<void> *)visitor,
+				 s );
 }
 
 #endif /* !VISITOR_HPP__ */
