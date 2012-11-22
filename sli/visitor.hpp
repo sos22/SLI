@@ -71,7 +71,8 @@ visit_state_machine(ctxtT *ctxt,
 {
 	return _visit_state_machine( (void *)ctxt,
 				     (const state_machine_visitor<void> *)visitor,
-				     sm, memo );
+				     sm,
+				     memo );
 }
 
 visit_result _visit_side_effect(void *ctxt,
