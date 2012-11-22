@@ -260,18 +260,6 @@ StateMachineSideEffectStore::optimise(const AllowableOptimisations &opt, bool *d
 	}
 	return this;
 }
-void
-StateMachineSideEffectStore::updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt)
-{
-	for (std::set<IRExpr *>::iterator it = l.begin();
-	     it != l.end();
-		) {
-		if (definitelyEqual(*it, addr, opt))
-			l.erase(it++);
-		else
-			it++;
-	}
-}
 
 StateMachineSideEffect *
 StateMachineSideEffectLoad::optimise(const AllowableOptimisations &opt, bool *done_something)

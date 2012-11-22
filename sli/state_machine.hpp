@@ -421,7 +421,6 @@ protected:
 	{}
 public:
 	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) = 0;
-	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
 #ifdef NDEBUG
 	void sanityCheck() const {}
 #else
@@ -692,7 +691,6 @@ public:
 		return false;
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void visit(HeapVisitor &) {}
 	void sanityCheck() const {}
 	bool definesRegister(threadAndRegister &) const {
@@ -775,7 +773,6 @@ public:
 		hv(data);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
 	void sanityCheck() const {
 		StateMachineSideEffectMemoryAccess::sanityCheck();
 		data->sanity_check();
@@ -853,9 +850,6 @@ public:
 		return false;
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
-		l.insert(addr);
-	}
 	bool definesRegister(threadAndRegister &reg) const {
 		reg = target;
 		return true;
@@ -895,7 +889,6 @@ public:
 		hv(value);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck() const {
 		value->sanity_check();
 	}
@@ -943,7 +936,6 @@ public:
 		hv(value);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck() const {
 		assert(reflectsActualProgram == true ||
 		       reflectsActualProgram == false);
@@ -979,7 +971,6 @@ public:
 	}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck() const {
 	}
 	bool definesRegister(threadAndRegister &) const {
@@ -1011,7 +1002,6 @@ public:
 	}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck() const {
 	}
 	bool definesRegister(threadAndRegister &) const {
@@ -1102,7 +1092,6 @@ public:
 			hv(it->second);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck() const {
 		assert(generations.size() != 0);
 	}
@@ -1152,7 +1141,6 @@ public:
 		hv(rsp);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck() const {
 		if (rsp) {
 			rsp->sanity_check();
@@ -1197,7 +1185,6 @@ public:
 		hv(rsp);
 	}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
 	void sanityCheck() const {
 		rsp->sanity_check();
 		assert(rsp->type() == Ity_I64);
@@ -1221,7 +1208,6 @@ public:
 	{}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck() const {}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -1319,7 +1305,6 @@ public:
 	{}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
 	void sanityCheck() const {
 #ifndef NDEBUG
 		/* No dupes */
