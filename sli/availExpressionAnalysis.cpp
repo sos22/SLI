@@ -53,15 +53,11 @@ public:
 	std::set<IRExpr *> assertFalse;
 	struct registerMapEntry {
 		exprbdd *e;
-		threadAndRegister phiFrom;
 		registerMapEntry()
-			: e(NULL), phiFrom(threadAndRegister::invalid())
+			: e(NULL)
 		{}
 		registerMapEntry(exprbdd *_e)
-			: e(_e), phiFrom(threadAndRegister::invalid())
-		{}
-		registerMapEntry(const threadAndRegister &tr)
-			: e(NULL), phiFrom(tr)
+			: e(_e)
 		{}
 	};
 	std::map<threadAndRegister, registerMapEntry> _registers;
@@ -75,7 +71,7 @@ public:
 			       bool is_ssa);
 	bool mergeUnion(const avail_t &other);
 
-	void calcRegisterMap(const AllowableOptimisations &opt);
+	void calcRegisterMap(exprbdd::scope *, bbdd::scope *, const AllowableOptimisations &opt);
 
 	void invalidateRegister(threadAndRegister reg, StateMachineSideEffect *preserve);
 
@@ -114,11 +110,7 @@ avail_t::print(FILE *f)
 			fprintf(f, "\t\t");
 			it->first.prettyPrint(f);
 			fprintf(f, " -> ");
-			if (it->second.e) {
-				it->second.e->prettyPrint(f);
-			} else {
-				fprintf(f, "%s\n", it->second.phiFrom.name());
-			}
+			it->second.e->prettyPrint(f);
 		}
 	}
 }
@@ -289,10 +281,14 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 		}
 		static visit_result Phi(ctxt *ctxt, const StateMachineSideEffectPhi *phi)
 		{
-			if (phi != ctxt->preserve && phi->reg == ctxt->reg)
-				return visit_abort;
-			else
+			if (phi == ctxt->preserve)
 				return visit_continue;
+			if (phi->reg == ctxt->reg)
+				return visit_abort;
+			for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
+				if (it->reg == ctxt->reg)
+					return visit_abort;
+			return visit_continue;
 		}
 	public:
 		bool operator()(const threadAndRegister &reg, const StateMachineSideEffect *preserve,
@@ -341,7 +337,7 @@ avail_t::invalidateRegister(threadAndRegister reg, StateMachineSideEffect *prese
 }
 
 void
-avail_t::calcRegisterMap(const AllowableOptimisations &opt)
+avail_t::calcRegisterMap(exprbdd::scope *scope, bbdd::scope *bscope, const AllowableOptimisations &opt)
 {
 	_registers.clear();
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
@@ -358,11 +354,11 @@ avail_t::calcRegisterMap(const AllowableOptimisations &opt)
 			makeFalse(seaf->value, opt);
 		} else if (se->type == StateMachineSideEffect::Phi) {
 			StateMachineSideEffectPhi *smsep = (StateMachineSideEffectPhi *)se;
-			if (smsep->generations.size() == 0) {
-				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->reg.setGen(-1));
-			} else if (smsep->generations.size() == 1) {
-				_registers[smsep->reg] = avail_t::registerMapEntry(smsep->generations[0].reg);
-			}
+			assert(!smsep->generations.empty());
+			if (smsep->generations.size() == 1)
+				_registers[smsep->reg] =
+					registerMapEntry(
+						exprbdd::var(scope, bscope, smsep->generations[0].val));
 		}
 	}
 }
@@ -472,12 +468,8 @@ class applyAvailTransformer : public IRExprTransformer {
 	IRExpr *transformIex(IRExprGet *e) {
 		auto it = avail._registers.find(e->reg);
 		if (it != avail._registers.end()) {
-			if (it->second.e) {
-				if (it->second.e->type() >= e->type())
-					return coerceTypes(e->type(), exprbdd::to_irexpr(it->second.e));
-			} else {
-				return IRExpr_Get(it->second.phiFrom, e->type());
-			}
+			if (it->second.e->type() >= e->type())
+				return coerceTypes(e->type(), exprbdd::to_irexpr(it->second.e));
 		}
 		return IRExprTransformer::transformIex(e);
 	}
@@ -674,68 +666,17 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 		StateMachineSideEffectPhi *phi =
 			(StateMachineSideEffectPhi *)smse;
 		StateMachineSideEffectPhi *newPhi = NULL;
-		bool needSort = false;
-		for (auto it = currentlyAvailable._registers.begin();
-		     it != currentlyAvailable._registers.end();
-		     it++) {
-			for (unsigned x = 0; x < phi->generations.size(); x++) {
-				if (phi->generations[x].reg == it->first) {
-					if (it->second.e) {
-						if (phi->generations[x].val &&
-						    it->second.e == exprbdd::var(&scopes->exprs, &scopes->bools, phi->generations[x].val))
-							break;
-						if (!newPhi)
-							newPhi = new StateMachineSideEffectPhi(*phi);
-						newPhi->generations[x].val = exprbdd::to_irexpr(it->second.e);
-					} else {
-						if (!newPhi)
-							newPhi = new StateMachineSideEffectPhi(*phi);
-						assert(threadAndRegister::partialEq(phi->reg,
-										    it->second.phiFrom));
-						newPhi->generations[x].reg = it->second.phiFrom;
-						newPhi->generations[x].val = NULL;
-						needSort = true;
-					}
-				}
-			}
-		}
 		for (unsigned x = 0; x < phi->generations.size(); x++) {
-			IRExpr *e;
-			e = (newPhi ? newPhi : phi)->generations[x].val;
-			if (e) {
-				bool t = false;
-				IRExpr *e2 = applyAvailSet(currentlyAvailable,
-							   e,
-							   false,
-							   &t,
-							   opt);
-				if (t) {
-					assert(e != e2);
-					if (!newPhi)
-						newPhi = new StateMachineSideEffectPhi(*phi);
-					newPhi->generations[x].val = e2;
-					*done_something = true;
-				}
-			}
-		}
-		if (needSort) {
-			assert(newPhi);
-			std::sort(newPhi->generations.begin(), newPhi->generations.end());
-			for (unsigned x = 0; x + 1 < newPhi->generations.size(); ) {
-				if (newPhi->generations[x].reg ==
-				    newPhi->generations[x+1].reg) {
-					IRExpr *v = newPhi->generations[x].val;
-					if (!v) {
-						v = newPhi->generations[x+1].val;
-					} else {
-						assert(!newPhi->generations[x+1].val ||
-						       v == newPhi->generations[x+1].val);
-					}
-					newPhi->generations[x].val = v;
-					newPhi->generations.erase(newPhi->generations.begin() + x + 1);
-				} else {
-					x++;
-				}
+			bool t = false;
+			IRExpr *e = applyAvailSet(currentlyAvailable,
+						  phi->generations[x].val,
+						  false,
+						  &t,
+						  opt);
+			if (t) {
+				if (!newPhi)
+					newPhi = new StateMachineSideEffectPhi(*phi);
+				newPhi->generations[x].val = e;
 			}
 		}
 		if (newPhi) {
@@ -783,7 +724,7 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 	assert(newEffect);
 	if (!*done_something) assert(newEffect == smse);
 	updateAvailSetForSideEffect(decode, currentlyAvailable, newEffect, where, opt, aliasing, oracle);
-	currentlyAvailable.calcRegisterMap(opt);
+	currentlyAvailable.calcRegisterMap(&scopes->exprs, &scopes->bools, opt);
 	if (debug_substitutions) {
 		printf("New available set:\n");
 		currentlyAvailable.print(stdout);
@@ -818,7 +759,7 @@ buildNewStateMachineWithLoadsEliminated(
 	switch (sm->type) {
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-		avail.calcRegisterMap(opt);
+		avail.calcRegisterMap(&scopes->exprs, &scopes->bools, opt);
 		res = new StateMachineBifurcate(
 			smb,
 			applyAvailSet(&scopes->bools, avail, smb->condition, true, done_something, opt));
@@ -827,7 +768,7 @@ buildNewStateMachineWithLoadsEliminated(
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *smp = (StateMachineSideEffecting *)sm;
 		StateMachineSideEffect *newEffect;
-		avail.calcRegisterMap(opt);
+		avail.calcRegisterMap(&scopes->exprs, &scopes->bools, opt);
 		if (smp->sideEffect)
 			newEffect = buildNewStateMachineWithLoadsEliminated(scopes,
 									    decode,
@@ -845,7 +786,7 @@ buildNewStateMachineWithLoadsEliminated(
 	}
 	case StateMachineState::Terminal: {
 		StateMachineTerminal *smt = (StateMachineTerminal *)sm;
-		avail.calcRegisterMap(opt);
+		avail.calcRegisterMap(&scopes->exprs, &scopes->bools, opt);
 		res = new StateMachineTerminal(
 			smt,
 			applyAvailSet(&scopes->bools, &scopes->smrs, avail, smt->res, true, done_something, opt));

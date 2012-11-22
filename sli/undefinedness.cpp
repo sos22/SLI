@@ -539,29 +539,29 @@ undefinednessSimplification(SMScopes *scopes,
 					break;
 				case StateMachineSideEffect::Phi: {
 					auto *p = (StateMachineSideEffectPhi *)newSe;
-					unsigned x;
+					unsigned inIdx;
+					unsigned outIdx;
 					IRExpr *v = NULL;
-					for (x = 0; x < p->generations.size(); x++) {
-						if (!p->generations[x].val)
-							continue;
-						v = undefinednessExpression(sm, p->generations[x].val, vdm, opt);
-						if (v == p->generations[x].val)
-							continue;
-						if (v != UNDEFINED_EXPR)
+					for (inIdx = 0; inIdx < p->generations.size(); inIdx++) {
+						v = undefinednessExpression(sm, p->generations[inIdx].val, vdm, opt);
+						if (v != p->generations[inIdx].val)
 							break;
 					}
-					if (x == p->generations.size())
+					if (inIdx == p->generations.size())
 						break;
-					std::vector<StateMachineSideEffectPhi::input> newGen(p->generations);
-					newGen[x].val = v;
-					for (x++; x < newGen.size(); x++) {
-						if (!newGen[x].val)
-							continue;
-						v = undefinednessExpression(sm, newGen[x].val, vdm, opt);
-						if (v == newGen[x].val)
-							continue;
+					std::vector<StateMachineSideEffectPhi::input> newGen;
+					newGen.reserve(p->generations.size());
+					newGen.resize(inIdx);
+					for (outIdx = 0; outIdx < inIdx; outIdx++)
+						newGen[outIdx] = p->generations[outIdx];
+
+					goto middle_of_loop;
+					while (inIdx < newGen.size()) {
+						v = undefinednessExpression(sm, p->generations[inIdx].val, vdm, opt);
+					middle_of_loop:
 						if (v != UNDEFINED_EXPR)
-							newGen[x].val = v;
+							newGen[outIdx++].val = v;
+						inIdx++;
 					}
 					newSe = new StateMachineSideEffectPhi(
 						p, newGen);

@@ -415,8 +415,7 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 			for (auto it2 = p->generations.begin(); it2 != p->generations.end(); it2++) {
 				if (it2->reg == *it) {
 					assert(currentState.regs.count(it2->reg));
-					if (it2->val)
-						assert(eval(it2->val) == currentState.regs[it2->reg]);
+					assert(eval(it2->val) == currentState.regs[it2->reg]);
 					currentState.regs[p->reg] = currentState.regs[it2->reg];
 					regOrder.push_back(p->reg);
 					log(state, "phi satisfied by %s (%lx)",

@@ -482,17 +482,13 @@ convertToSSA(SMScopes *scopes, StateMachine *inp)
 StateMachineSideEffect *
 StateMachineSideEffectPhi::optimise(SMScopes *scopes, const AllowableOptimisations &, bool *done_something)
 {
-	if (generations.size() == 0 ||
-	    generations[0].val == NULL)
-		return this;
+	if (generations.size() == 0)
+		return StateMachineSideEffectUnreached::get();
+
 	IRExpr *v = generations[0].val;
 	for (unsigned x = 1; x < generations.size(); x++) {
-		if (generations[x].val != v) {
-			if (v->tag == Iex_Get &&
-			    ((IRExprGet *)v)->reg == generations[x].reg)
-				continue;
+		if (generations[x].val != v)
 			return this;
-		}
 	}
 	*done_something = true;
 	return new StateMachineSideEffectCopy(reg, exprbdd::var(&scopes->exprs, &scopes->bools, v));

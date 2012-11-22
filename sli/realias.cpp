@@ -1020,23 +1020,8 @@ PointsToTable::refine(AliasTable &at,
 			StateMachineSideEffectPhi *p = (StateMachineSideEffectPhi *)effect;
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
-			     it++) {
-				auto i = content.find(it->reg);
-				if (i == content.end()) {
-					if (it->reg.isReg()) {
-						newPts |= aliasConfigForReg(smse, it->reg, mat);
-					} else {
-						/* We've not got any
-						 * assignments to this
-						 * temporary.  That
-						 * means that the Phi
-						 * can't pull its
-						 * value, so we just
-						 * ignore it here. */
-					}
-				} else
-					newPts |= i->second;
-			}
+			     it++)
+				newPts |= pointsToSetForExpr(it->val, smse, sl, mat, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::PointerAliasing:

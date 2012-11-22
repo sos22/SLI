@@ -575,7 +575,7 @@ unifyExpressions(const StateMachine *sm,
 		assert(targ != newVariables.end());
 		std::vector<StateMachineSideEffectPhi::input> generations;
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-			generations.push_back(StateMachineSideEffectPhi::input(it2->first, (IRExpr *)NULL));
+			generations.push_back(StateMachineSideEffectPhi::input(it2->first, IRExpr_Get(it2->first, it2->second)));
 		StateMachineSideEffecting *s =
 			new StateMachineSideEffecting(
 				vr,

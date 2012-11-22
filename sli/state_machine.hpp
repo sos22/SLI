@@ -929,8 +929,7 @@ public:
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
 	void inputExpressions(std::vector<IRExpr *> &exprs) {
 		for (auto it = generations.begin(); it != generations.end(); it++)
-			if (it->val)
-				exprs.push_back(it->val);
+			exprs.push_back(it->val);
 	}
 public:
 	threadAndRegister reg;
@@ -969,7 +968,7 @@ public:
 		for (auto it = _generations.begin(); it != _generations.end(); it++) {
 			input item;
 			item.reg = reg.setGen(*it);
-			item.val = NULL;
+			item.val = IRExpr_Get(item.reg, ty);
 			generations.push_back(item);
 		}
 	}
@@ -979,12 +978,17 @@ public:
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
 		  reg(_reg), ty(_ty), generations(_generations)
 	{
+		for (auto it = generations.begin(); it != generations.end(); it++)
+			assert(it->val);
 	}
 	StateMachineSideEffectPhi(const StateMachineSideEffectPhi *base,
 				  const std::vector<input> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
 		  reg(base->reg), ty(base->ty), generations(_generations)
-	{}
+	{
+		for (auto it = generations.begin(); it != generations.end(); it++)
+			assert(it->val);
+	}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Phi");
 		reg.prettyPrint(f);
@@ -992,11 +996,8 @@ public:
 		for (auto it = generations.begin(); it != generations.end(); it++) {
 			if (it != generations.begin())
 				fprintf(f, ", ");
-			fprintf(f, "%s", it->reg.name());
-			if (it->val) {
-				fprintf(f, "=");
-				ppIRExpr(it->val, f);
-			}
+			fprintf(f, "%s=", it->reg.name());
+			ppIRExpr(it->val, f);
 		}
 		fprintf(f, ")");
 	}
@@ -1013,12 +1014,10 @@ public:
 			if (!parseThisChar(')', str, suffix)) {
 				while (1) {
 					input item;
-					if (!parseThreadAndRegister(&item.reg, str, &str))
+					if (!parseThreadAndRegister(&item.reg, str, &str) ||
+					    !parseThisChar('=', str, &str) ||
+					    !parseIRExpr(&item.val, str, &str))
 						return false;
-					if (parseThisChar('=', str, &str)) {
-						if (!parseIRExpr(&item.val, str, &str))
-							return false;
-					}
 					generations.push_back(item);
 					if (parseThisChar(')', str, suffix))
 						break;

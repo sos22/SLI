@@ -142,8 +142,7 @@ _visit_side_effect(void *ctxt,
 		for (auto it = p->generations.begin();
 		     res == visit_continue && it != p->generations.end();
 		     it++)
-			if (it->val)
-				res = visit_irexpr(ctxt, &visitor->irexpr, it->val);
+			res = visit_irexpr(ctxt, &visitor->irexpr, it->val);
 		return res;
 	}
 	case StateMachineSideEffect::StartFunction: {

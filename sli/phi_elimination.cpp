@@ -392,38 +392,27 @@ phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 			phi->prettyPrint(stdout);
 			printf("\n");
 		}
+		/* The result canoniser is a mapping from indexes in
+		   the generation array to the exprbdd which we select
+		   if we pick thaht generation.  This allows us to
+		   merge generations which ultimately produce the same
+		   value, which can sometimes result in simpler
+		   intbdds. */
 		std::map<unsigned, exprbdd *> resultCanoniser;
 		for (unsigned x = 0; x < phi->generations.size(); x++) {
 			IRExpr *expr = phi->generations[x].val;
-			if (expr) {
-				bool found_one = false;
-				for (unsigned y = 0; !found_one && y < x; y++) {
-					if (phi->generations[y].val == expr) {
-						resultCanoniser[x] = resultCanoniser[y];
-						found_one = true;
-					}
+			bool found_one = false;
+			for (unsigned y = 0; !found_one && y < x; y++) {
+				if (phi->generations[y].val == expr) {
+					resultCanoniser[x] = resultCanoniser[y];
+					found_one = true;
 				}
-				if (!found_one)
-					resultCanoniser[x] = exprbdd::var(
-						&scopes->exprs,
-						&scopes->bools,
-						expr);
-			} else {
-				bool found_one = false;
-				for (unsigned y = 0; !found_one && y < x; y++) {
-					if (phi->generations[y].reg == 
-					    phi->generations[x].reg) {
-						resultCanoniser[x] = resultCanoniser[y];
-						found_one = true;
-					}
-				}
-				if (!found_one)
-					resultCanoniser[x] = exprbdd::var(
-						&scopes->exprs,
-						&scopes->bools,
-						IRExpr_Get(phi->generations[x].reg, phi->ty));
 			}
-
+			if (!found_one)
+				resultCanoniser[x] = exprbdd::var(
+					&scopes->exprs,
+					&scopes->bools,
+					expr);
 		}
 		exprbdd *sel_bdd = build_selection_bdd(scopes, sm, phi, labels, resultCanoniser);
 		if (!sel_bdd) {
