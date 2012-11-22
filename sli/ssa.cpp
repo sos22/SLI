@@ -460,6 +460,7 @@ convertToSSA(SMScopes *scopes, StateMachine *inp)
 		     it++)
 			insertAt->prependSideEffect(
 					new StateMachineSideEffectPhi(
+						scopes,
 						it->first.setGen(++lastGeneration[it->first]),
 						it->second,
 						reaching.getEntryReaching(needsPhi).get(it->first)));
@@ -480,17 +481,17 @@ convertToSSA(SMScopes *scopes, StateMachine *inp)
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectPhi::optimise(SMScopes *scopes, const AllowableOptimisations &, bool *done_something)
+StateMachineSideEffectPhi::optimise(SMScopes *, const AllowableOptimisations &, bool *done_something)
 {
 	if (generations.size() == 0)
 		return StateMachineSideEffectUnreached::get();
 
-	IRExpr *v = generations[0].val;
+	exprbdd *v = generations[0].val;
 	for (unsigned x = 1; x < generations.size(); x++) {
 		if (generations[x].val != v)
 			return this;
 	}
 	*done_something = true;
-	return new StateMachineSideEffectCopy(reg, exprbdd::var(&scopes->exprs, &scopes->bools, v));
+	return new StateMachineSideEffectCopy(reg, v);
 }
 

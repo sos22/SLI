@@ -927,17 +927,14 @@ public:
 	}
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) {
-		for (auto it = generations.begin(); it != generations.end(); it++)
-			exprs.push_back(it->val);
-	}
+	void inputExpressions(std::vector<IRExpr *> &exprs);
 public:
 	threadAndRegister reg;
 	IRType ty;
 	class input {
 	public:
 		threadAndRegister reg;
-		IRExpr *val;
+		exprbdd *val;
 		bool operator==(const input &i) const {
 			return reg == i.reg && val == i.val;
 		}
@@ -948,7 +945,7 @@ public:
 				return false;
 			return reg < o.reg;
 		}
-		input(const threadAndRegister &_reg, IRExpr *_val)
+		input(const threadAndRegister &_reg, exprbdd *_val)
 			: reg(_reg), val(_val)
 		{}
 		input()
@@ -957,7 +954,8 @@ public:
 		{}
 	};
 	std::vector<input> generations;
-	StateMachineSideEffectPhi(const threadAndRegister &_reg,
+	StateMachineSideEffectPhi(SMScopes *scopes,
+				  const threadAndRegister &_reg,
 				  IRType _ty,
 				  const std::set<unsigned> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
@@ -968,7 +966,7 @@ public:
 		for (auto it = _generations.begin(); it != _generations.end(); it++) {
 			input item;
 			item.reg = reg.setGen(*it);
-			item.val = IRExpr_Get(item.reg, ty);
+			item.val = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(item.reg, ty));
 			generations.push_back(item);
 		}
 	}
@@ -992,16 +990,13 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Phi");
 		reg.prettyPrint(f);
-		fprintf(f, ":%s(", nameIRType(ty));
+		fprintf(f, ":%s:\n", nameIRType(ty));
 		for (auto it = generations.begin(); it != generations.end(); it++) {
-			if (it != generations.begin())
-				fprintf(f, ", ");
-			fprintf(f, "%s=", it->reg.name());
-			ppIRExpr(it->val, f);
+			fprintf(f, "%s --> ", it->reg.name());
+			it->val->prettyPrint(f);
 		}
-		fprintf(f, ")");
 	}
-	static bool parse(SMScopes *, StateMachineSideEffectPhi **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectPhi **out, const char *str, const char **suffix)
 	{
 		threadAndRegister key(threadAndRegister::invalid());
 		IRType ty;
@@ -1009,22 +1004,17 @@ public:
 		    parseThreadAndRegister(&key, str, &str) &&
 		    parseThisChar(':', str, &str) &&
 		    parseIRType(&ty, str, &str) &&
-		    parseThisString("(", str, &str)) {
+		    parseThisString(":\n", str, &str)) {
 			std::vector<input> generations;
-			if (!parseThisChar(')', str, suffix)) {
-				while (1) {
-					input item;
-					if (!parseThreadAndRegister(&item.reg, str, &str) ||
-					    !parseThisChar('=', str, &str) ||
-					    !parseIRExpr(&item.val, str, &str))
-						return false;
-					generations.push_back(item);
-					if (parseThisChar(')', str, suffix))
-						break;
-					if (!parseThisString(", ", str, &str))
-						return false;
-				}
+			while (1) {
+				input item;
+				if (!parseThreadAndRegister(&item.reg, str, &str) ||
+				    !parseThisString(" --> ", str, &str) ||
+				    !exprbdd::parse(&scopes->exprs, &item.val, str, &str))
+					break;
+				generations.push_back(item);
 			}
+			*suffix = str;
 			*out = new StateMachineSideEffectPhi(key, ty, generations);
 			return true;
 		}

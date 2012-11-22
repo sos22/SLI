@@ -308,8 +308,7 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 		StateMachineSideEffectPhi *phi = dynamic_cast<StateMachineSideEffectPhi *>(s);
 		assert(phi);
 		for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
-			if (it->val)
-				it->val = internIRExpr(it->val, t);
+			it->val = intern_exprbdd(scopes, it->val, t);
 		for (auto it = t.phis.begin(); it != t.phis.end(); it++) {
 			StateMachineSideEffectPhi *o = *it;
 			if (o->ty == phi->ty && o->reg == phi->reg && o->generations == phi->generations) {

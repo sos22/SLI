@@ -1021,7 +1021,7 @@ PointsToTable::refine(AliasTable &at,
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
 			     it++)
-				newPts |= pointsToSetForExpr(it->val, smse, sl, mat, slt, sm);
+				newPts |= pointsToSetForExpr(exprbdd::to_irexpr(it->val), smse, sl, mat, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::PointerAliasing:

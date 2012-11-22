@@ -240,18 +240,18 @@ StateMachineTransformer::transform(SMScopes *scopes, StateMachine *sm, bool *don
 }
 
 StateMachineSideEffectPhi *
-StateMachineTransformer::transformOneSideEffect(SMScopes *,
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes,
 						StateMachineSideEffectPhi *phi,
 						bool *done_something)
 {
 	bool t = false;
 	unsigned x = 0;
-	IRExpr *newE;
+	exprbdd *newE;
 
-	newE = (IRExpr *)0xf001deadul; /* Shut the compiler up */
+	newE = (exprbdd *)0xf001deadul; /* Shut the compiler up */
 	for (x = 0; x < phi->generations.size(); x++) {
 		if (phi->generations[x].val)
-			newE = transformIRExpr(phi->generations[x].val, &t);
+			newE = transform_exprbdd(&scopes->bools, &scopes->exprs, phi->generations[x].val, &t);
 		if (t)
 			break;
 	}
@@ -265,7 +265,7 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *,
 	while (x < newPhi->generations.size()) {
 		if (newPhi->generations[x].val)
 			newPhi->generations[x].val =
-				transformIRExpr(newPhi->generations[x].val, &t);
+				transform_exprbdd(&scopes->bools, &scopes->exprs, newPhi->generations[x].val, &t);
 		x++;
 	}
 	return newPhi;

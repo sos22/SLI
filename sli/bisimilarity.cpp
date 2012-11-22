@@ -323,7 +323,8 @@ allocateNewTemporary(const StateMachine *sm, unsigned tid, unsigned *pidx)
 }
 
 static bool
-unifyExpressions(const StateMachine *sm,
+unifyExpressions(SMScopes *scopes,
+		 const StateMachine *sm,
 		 std::map<const StateMachineState *, int> &stateLabels,
 		 const std::set<std::pair<StateMachineState *, IRExpr *> > inputExpressions,
 		 bool is_ssa,
@@ -575,7 +576,7 @@ unifyExpressions(const StateMachine *sm,
 		assert(targ != newVariables.end());
 		std::vector<StateMachineSideEffectPhi::input> generations;
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-			generations.push_back(StateMachineSideEffectPhi::input(it2->first, IRExpr_Get(it2->first, it2->second)));
+			generations.push_back(StateMachineSideEffectPhi::input(it2->first, exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(it2->first, it2->second))));
 		StateMachineSideEffecting *s =
 			new StateMachineSideEffecting(
 				vr,
@@ -724,7 +725,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 			StateMachineState **suffix;
 			IRExpr *unifiedCondition;
 			StateMachineState *replacementHead;
-			if (unifyExpressions(sm, stateLabels, conditions, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedCondition, &replacementHead)) {
+			if (unifyExpressions(scopes, sm, stateLabels, conditions, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedCondition, &replacementHead)) {
 				*suffix = new StateMachineBifurcate(
 					representative->dbg_origin,
 					bbdd::var(&scopes->bools, unifiedCondition),
@@ -757,7 +758,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 				StateMachineState **suffix;
 				IRExpr *unifiedAddr;
 				StateMachineState *replacementHead;
-				if (unifyExpressions(sm, stateLabels, addr, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedAddr, &replacementHead)) {
+				if (unifyExpressions(scopes, sm, stateLabels, addr, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedAddr, &replacementHead)) {
 					StateMachineSideEffectLoad *l =
 						(StateMachineSideEffectLoad *)rep->sideEffect;
 					MemoryAccessIdentifier newMai(mai.merge(l->rip.tid, mais));
@@ -791,7 +792,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 				StateMachineState **suffix;
 				IRExpr *unifiedValue;
 				StateMachineState *replacementHead;
-				if (unifyExpressions(sm, stateLabels, value, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedValue, &replacementHead)) {
+				if (unifyExpressions(scopes, sm, stateLabels, value, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedValue, &replacementHead)) {
 					StateMachineSideEffectCopy *c =
 						(StateMachineSideEffectCopy *)rep->sideEffect;
 					*suffix = new StateMachineSideEffecting(
@@ -818,7 +819,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 				StateMachineState **suffix;
 				IRExpr *unifiedValue;
 				StateMachineState *replacementHead;
-				if (unifyExpressions(sm, stateLabels, value, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedValue, &replacementHead)) {
+				if (unifyExpressions(scopes, sm, stateLabels, value, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedValue, &replacementHead)) {
 					StateMachineSideEffectAssertFalse *a =
 						(StateMachineSideEffectAssertFalse *)rep->sideEffect;
 					*suffix = new StateMachineSideEffecting(

@@ -400,7 +400,7 @@ phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 		   intbdds. */
 		std::map<unsigned, exprbdd *> resultCanoniser;
 		for (unsigned x = 0; x < phi->generations.size(); x++) {
-			IRExpr *expr = phi->generations[x].val;
+			exprbdd *expr = phi->generations[x].val;
 			bool found_one = false;
 			for (unsigned y = 0; !found_one && y < x; y++) {
 				if (phi->generations[y].val == expr) {
@@ -409,10 +409,7 @@ phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 				}
 			}
 			if (!found_one)
-				resultCanoniser[x] = exprbdd::var(
-					&scopes->exprs,
-					&scopes->bools,
-					expr);
+				resultCanoniser[x] = expr;
 		}
 		exprbdd *sel_bdd = build_selection_bdd(scopes, sm, phi, labels, resultCanoniser);
 		if (!sel_bdd) {

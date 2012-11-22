@@ -384,6 +384,7 @@ undefinednessSmrBDD(smrbdd::scope *scope,
 
 static exprbdd *
 undefinednessExprBDD(exprbdd::scope *scope,
+		     bbdd::scope *bscope,
 		     StateMachineState *sm,
 		     exprbdd *what,
 		     const VariableDefinednessMap &vdm,
@@ -394,13 +395,17 @@ undefinednessExprBDD(exprbdd::scope *scope,
 	IRExpr *c = undefinednessExpression(sm, what->content.condition, vdm, opt);
 	if (c == UNDEFINED_EXPR)
 		return UNDEFINED_EXPRBDD;
-	exprbdd *trueB = undefinednessExprBDD(scope, sm, what->content.trueBranch, vdm, opt);
-	exprbdd *falseB = undefinednessExprBDD(scope, sm, what->content.falseBranch, vdm, opt);
+	exprbdd *trueB = undefinednessExprBDD(scope, bscope, sm, what->content.trueBranch, vdm, opt);
+	exprbdd *falseB = undefinednessExprBDD(scope, bscope, sm, what->content.falseBranch, vdm, opt);
 	if (trueB == UNDEFINED_EXPRBDD)
 		return falseB;
 	if (falseB == UNDEFINED_EXPRBDD)
 		return trueB;
-	return scope->makeInternal(c, trueB, falseB);
+	return exprbdd::ifelse(
+		scope,
+		bbdd::var(bscope, c),
+		trueB,
+		falseB);
 }
 
 static StateMachine *
@@ -509,7 +514,7 @@ undefinednessSimplification(SMScopes *scopes,
 				}
 				case StateMachineSideEffect::Copy: {
 					auto *c = (StateMachineSideEffectCopy *)newSe;
-					exprbdd *v = undefinednessExprBDD(&scopes->exprs, sm, c->value, vdm, opt);
+					exprbdd *v = undefinednessExprBDD(&scopes->exprs, &scopes->bools, sm, c->value, vdm, opt);
 					if (v != c->value) {
 						if (v == UNDEFINED_EXPRBDD)
 							newSe = NULL;
@@ -541,9 +546,9 @@ undefinednessSimplification(SMScopes *scopes,
 					auto *p = (StateMachineSideEffectPhi *)newSe;
 					unsigned inIdx;
 					unsigned outIdx;
-					IRExpr *v = NULL;
+					exprbdd *v = NULL;
 					for (inIdx = 0; inIdx < p->generations.size(); inIdx++) {
-						v = undefinednessExpression(sm, p->generations[inIdx].val, vdm, opt);
+						v = undefinednessExprBDD(&scopes->exprs, &scopes->bools, sm, p->generations[inIdx].val, vdm, opt);
 						if (v != p->generations[inIdx].val)
 							break;
 					}
@@ -557,9 +562,9 @@ undefinednessSimplification(SMScopes *scopes,
 
 					goto middle_of_loop;
 					while (inIdx < newGen.size()) {
-						v = undefinednessExpression(sm, p->generations[inIdx].val, vdm, opt);
+						v = undefinednessExprBDD(&scopes->exprs, &scopes->bools, sm, p->generations[inIdx].val, vdm, opt);
 					middle_of_loop:
-						if (v != UNDEFINED_EXPR)
+						if (v != UNDEFINED_EXPRBDD)
 							newGen[outIdx++].val = v;
 						inIdx++;
 					}

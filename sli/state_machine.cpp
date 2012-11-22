@@ -1317,6 +1317,13 @@ StateMachineSideEffectCopy::inputExpressions(std::vector<IRExpr *> &out)
 	enumBDDExprs(value, out);
 }
 
+void
+StateMachineSideEffectPhi::inputExpressions(std::vector<IRExpr *> &out)
+{
+	for (auto it = generations.begin(); it != generations.end(); it++)
+		enumBDDExprs(it->val, out);
+}
+
 StateMachineState *
 StateMachineTerminal::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
