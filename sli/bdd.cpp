@@ -822,6 +822,15 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 			return b;
 	}
 
+	if (cond->tag == Iex_ControlFlow &&
+	    !a->isLeaf &&
+	    a->content.condition->tag == Iex_ControlFlow &&
+	    ((IRExprControlFlow *)a->content.condition)->thread == ((IRExprControlFlow *)cond)->thread &&
+	    ((IRExprControlFlow *)a->content.condition)->cfg1 == ((IRExprControlFlow *)cond)->cfg1)  {
+		assert(((IRExprControlFlow *)a->content.condition)->cfg2 != ((IRExprControlFlow *)cond)->cfg2);
+		a = a->content.falseBranch;
+	}
+
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
 			entry(cond, a, b),
