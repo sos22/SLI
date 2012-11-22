@@ -96,14 +96,14 @@ public:
 		   important), but it shuts Valgrind up. */
 		nextRanking.val = 0;
 	}
-	template <typename subtreeT> subtreeT *trueBranch(subtreeT *bdd, const IRExpr *cond) {
-		if (!bdd->isLeaf && equal(cond, bdd))
+	template <typename subtreeT> subtreeT *trueBranch(subtreeT *bdd, const bdd_rank &cond) {
+		if (!bdd->isLeaf && cond == bdd->content.rank)
 			return bdd->content.trueBranch;
 		else
 			return bdd;
 	}
-	template <typename subtreeT> subtreeT *falseBranch(subtreeT *bdd, const IRExpr *cond) {
-		if (!bdd->isLeaf && equal(cond, bdd))
+	template <typename subtreeT> subtreeT *falseBranch(subtreeT *bdd, const bdd_rank &cond) {
+		if (!bdd->isLeaf && cond == bdd->content.rank)
 			return bdd->content.falseBranch;
 		else
 			return bdd;

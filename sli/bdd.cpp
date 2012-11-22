@@ -597,9 +597,10 @@ _bdd<constT, subtreeT>::zip(scopeT *scope,
 		return it->second;
 	}
 
-	IRExpr *bestCond = where.bestCond(scope->ordering);
-	subtreeT *trueSucc = zip(scope, where.trueSucc(scope->ordering, bestCond), memo);
-	subtreeT *falseSucc = zip(scope, where.falseSucc(scope->ordering, bestCond), memo);
+	IRExpr *bestCond;
+	const bdd_rank &bestRank(where.bestCond(&bestCond));
+	subtreeT *trueSucc = zip(scope, where.trueSucc(scope->ordering, bestRank), memo);
+	subtreeT *falseSucc = zip(scope, where.falseSucc(scope->ordering, bestRank), memo);
 	it->second = where.mkNode(scope, bestCond, trueSucc, falseSucc);
 	return it->second;
 }
@@ -610,29 +611,33 @@ public:
 	bool isAnd;
 	bbdd *first;
 	bbdd *second;
-	IRExpr *bestCond(bdd_ordering *ordering) const {
+	const bdd_rank &bestCond(IRExpr **cond) const {
 		assert(!(first->isLeaf && second->isLeaf));
 		if (first->isLeaf) {
-			return second->content.condition;
+			*cond = second->content.condition;
+			return second->content.rank;
 		} else if (second->isLeaf) {
-			return first->content.condition;
-		} else if (ordering->before(first, second)) {
-			return first->content.condition;
+			*cond = first->content.condition;
+			return first->content.rank;
+		} else if (first->content.rank < second->content.rank) {
+			*cond = first->content.condition;
+			return first->content.rank;
 		} else {
-			return second->content.condition;
+			*cond = second->content.condition;
+			return second->content.rank;
 		}
 	}
-	binary_zip_internal trueSucc(bdd_ordering *ordering, IRExpr *cond) const {
+	binary_zip_internal trueSucc(bdd_ordering *ordering, const bdd_rank &cond) const {
 		return binary_zip_internal(
 			isAnd,
-			first->isLeaf  || !ordering->equal(first, cond)  ? first  : first->content.trueBranch,
-			second->isLeaf || !ordering->equal(second, cond) ? second : second->content.trueBranch);
+			ordering->trueBranch(first, cond),
+			ordering->trueBranch(second, cond));
 	}
-	binary_zip_internal falseSucc(bdd_ordering *ordering, IRExpr *cond) const {
+	binary_zip_internal falseSucc(bdd_ordering *ordering, const bdd_rank &cond) const {
 		return binary_zip_internal(
 			isAnd,
-			first->isLeaf  || !ordering->equal(first, cond)  ? first  : first->content.falseBranch,
-			second->isLeaf || !ordering->equal(second, cond) ? second : second->content.falseBranch);
+			ordering->falseBranch(first, cond),
+			ordering->falseBranch(second, cond));
 	}
 	binary_zip_internal(bool _isAnd, bbdd *_first, bbdd *_second)
 		: isAnd(_isAnd), first(_first), second(_second)
@@ -708,24 +713,28 @@ public:
 	assume_zip_internal(subtreeT *_thing, bbdd *_assumption)
 		: thing(_thing), assumption(_assumption)
 	{}
-	IRExpr *bestCond(bdd_ordering *ordering) const {
+	const bdd_rank &bestCond(IRExpr **cond) const {
 		assert(!(thing->isLeaf && assumption->isLeaf));
 		if (thing->isLeaf) {
-			return assumption->content.condition;
+			*cond = assumption->content.condition;
+			return assumption->content.rank;
 		} else if (assumption->isLeaf) {
-			return thing->content.condition;
-		} else if (ordering->before(thing, assumption)) {
-			return thing->content.condition;
+			*cond = thing->content.condition;
+			return thing->content.rank;
+		} else if (thing->content.rank < assumption->content.rank) {
+			*cond = thing->content.condition;
+			return thing->content.rank;
 		} else {
-			return assumption->content.condition;
+			*cond = assumption->content.condition;
+			return assumption->content.rank;
 		}
 	}
-	assume_zip_internal trueSucc(bdd_ordering *ordering, IRExpr *cond) const {
+	assume_zip_internal trueSucc(bdd_ordering *ordering, const bdd_rank &cond) const {
 		return assume_zip_internal(
 			ordering->trueBranch(thing, cond),
 			ordering->trueBranch(assumption, cond));
 	}
-	assume_zip_internal falseSucc(bdd_ordering *ordering, IRExpr *cond) const {
+	assume_zip_internal falseSucc(bdd_ordering *ordering, const bdd_rank &cond) const {
 		return assume_zip_internal(
 			ordering->falseBranch(thing, cond),
 			ordering->falseBranch(assumption, cond));
@@ -837,23 +846,27 @@ public:
 		else
 			return table.begin()->second;
 	}
-	IRExpr *bestCond(bdd_ordering *ordering) const {
-		IRExpr *bestCond = NULL;
+	const bdd_rank &bestCond(IRExpr **cond) const {
+		IRExpr *c = NULL;
+		const bdd_rank *bestCond = NULL;
 		for (auto it = table.begin(); it != table.end(); it++) {
 			if (!it->first->isLeaf &&
-			    (!bestCond ||
-			     ordering->before(it->first, bestCond)))
-				bestCond = it->first->content.condition;
+			    (!bestCond || it->first->content.rank < *bestCond)) {
+				c = it->first->content.condition;
+				bestCond = &it->first->content.rank;
+			}
 			if (!it->second->isLeaf &&
-			    (!bestCond ||
-			     ordering->before(it->second, bestCond)))
-				bestCond = it->second->content.condition;
+			    (!bestCond || it->second->content.rank < *bestCond)) {
+				c = it->second->content.condition;
+				bestCond = &it->second->content.rank;
+			}
 		}
+		assert(c);
 		assert(bestCond != NULL);
-		return bestCond;
+		*cond = c;
+		return *bestCond;
 	}
-	from_enabling_internal trueSucc(bdd_ordering *ordering,
-					IRExpr *cond)
+	from_enabling_internal trueSucc(bdd_ordering *ordering, const bdd_rank &cond)
 	{
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); it != table.end(); it++) {
@@ -867,8 +880,7 @@ public:
 		}
 		return res;
 	}
-	from_enabling_internal falseSucc(bdd_ordering *ordering,
-					 IRExpr *cond)
+	from_enabling_internal falseSucc(bdd_ordering *ordering, const bdd_rank &cond)
 	{
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); it != table.end(); it++) {
@@ -1231,22 +1243,27 @@ public:
 			return ifTrue;
 		abort();
 	}
-	IRExpr *bestCond(bdd_ordering *ordering) const {
+	const bdd_rank &bestCond(IRExpr **c) const {
 		assert(!cond->isLeaf);
-		IRExpr *best = cond->content.condition;
-		if (!ifTrue->isLeaf && ordering->before(ifTrue, best))
-			best = ifTrue->content.condition;
-		if (!ifFalse->isLeaf && ordering->before(ifFalse, best))
-			best = ifFalse->content.condition;
-		return best;
+		const bdd_rank *best = &cond->content.rank;
+		*c = cond->content.condition;
+		if (!ifTrue->isLeaf && ifTrue->content.rank < *best) {
+			best = &ifTrue->content.rank;
+			*c = ifTrue->content.condition;
+		}
+		if (!ifFalse->isLeaf && ifFalse->content.rank < *best) {
+			best = &ifFalse->content.rank;
+			*c = ifFalse->content.condition;
+		}
+		return *best;
 	}
-	ifelse_zip_internal trueSucc(bdd_ordering *ordering, IRExpr *on) const {
+	ifelse_zip_internal trueSucc(bdd_ordering *ordering, const bdd_rank &on) const {
 		return ifelse_zip_internal(
 			ordering->trueBranch(cond, on),
 			ordering->trueBranch(ifTrue, on),
 			ordering->trueBranch(ifFalse, on));
 	}
-	ifelse_zip_internal falseSucc(bdd_ordering *ordering, IRExpr *on) const {
+	ifelse_zip_internal falseSucc(bdd_ordering *ordering, const bdd_rank &on) const {
 		return ifelse_zip_internal(
 			ordering->falseBranch(cond, on),
 			ordering->falseBranch(ifTrue, on),
