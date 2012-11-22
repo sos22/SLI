@@ -10,22 +10,51 @@
 class bbdd;
 template <typename _leafT, typename _subtreeT> class _bdd;
 
+/* Should only ever be created by bdd_orderings, but it needs to be
+   stashed in a union in _bdd, so it can't have any constructors, so
+   we can't enforce it with the type system.  Just have to be
+   careful. */
+class bdd_rank {
+	friend class bdd_ordering;
+	long val;
+public:
+	bool operator <(const bdd_rank &o) const
+	{
+		return val < o.val;
+	}
+	bool operator==(const bdd_rank &o) const
+	{
+		return val == o.val;
+	}
+	bool parse(const char *, const char **);
+
+	/* You might think that this should be a Named class, rather
+	 * than having a prettyPrint method, and you'd be almost
+	 * right, except that making it Named means introducing a
+	 * vtable pointer and the name pointer itself, so making the
+	 * structure 16 bytes bigger.  We have a *lot* of these, and
+	 * we also need to copy them around a *lot*, and without Named
+	 * they're only 8 bytes, so that's actually worth worrying
+	 * about. */
+	void prettyPrint(FILE *f) const;
+};
+
 /* Thing for specifying variable ordering. */
 class bdd_ordering : public GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv);
-	std::map<const IRExpr *, long> variableRankings;
-	long nextRanking;
+	std::map<const IRExpr *, bdd_rank> variableRankings;
+	bdd_rank nextRanking;
 public:
-	template <typename leafT, typename subtreeT> long rankVariable(const _bdd<leafT, subtreeT> *a) {
+	template <typename leafT, typename subtreeT> bdd_rank rankVariable(const _bdd<leafT, subtreeT> *a) {
 		assert(!a->isLeaf);
 		return a->content.rank;
 	}
-	long rankVariable(const IRExpr *e);
+	bdd_rank rankVariable(const IRExpr *e);
 	typedef enum { lt, eq, gt} ordT;
 	template <typename aT, typename bT>
 	ordT operator()(const aT *a, const bT *b) {
-		long ra = rankVariable(a);
-		long rb = rankVariable(b);
+		bdd_rank ra = rankVariable(a);
+		bdd_rank rb = rankVariable(b);
 		if (ra < rb)
 			return lt;
 		else if (ra == rb)
@@ -37,8 +66,8 @@ public:
 	ordT operator()(const aT *a, const aT *b) {
 		if (a == b)
 			return eq;
-		long ra = rankVariable(a);
-		long rb = rankVariable(b);
+		bdd_rank ra = rankVariable(a);
+		bdd_rank rb = rankVariable(b);
 		if (ra < rb)
 			return lt;
 		else if (ra == rb)
@@ -59,7 +88,14 @@ public:
 		for (auto it = variableRankings.begin(); it != variableRankings.end(); it++)
 			out.push_back(const_cast<IRExpr *>(it->first));
 	}
-	bdd_ordering() : GcCallback<&ir_heap>(true), nextRanking(0) {}
+	bdd_ordering()
+		: GcCallback<&ir_heap>(true)
+	{
+		/* Doesn't actually matter what you initialise this to
+		   (only the relative order of variables is
+		   important), but it shuts Valgrind up. */
+		nextRanking.val = 0;
+	}
 	template <typename subtreeT> subtreeT *trueBranch(subtreeT *bdd, const IRExpr *cond) {
 		if (!bdd->isLeaf && equal(cond, bdd))
 			return bdd->content.trueBranch;
@@ -104,7 +140,7 @@ protected:
 		contentT *_content = const_cast<contentT *>(&content);
 		_content->leaf = leaf;
 	}
-	_bdd(long rank, IRExpr *cond, _subtreeT *trueB, _subtreeT *falseB)
+	_bdd(const bdd_rank &rank, IRExpr *cond, _subtreeT *trueB, _subtreeT *falseB)
 		: isLeaf(false), content()
 	{
 		contentT *_content = const_cast<contentT *>(&content);
@@ -128,7 +164,7 @@ public:
 	union contentT {
 		leafT leaf;
 		struct {
-			long rank;
+			bdd_rank rank;
 			/* Must be Ity_I1 */
 			IRExpr *condition;
 			_subtreeT *trueBranch;
@@ -284,7 +320,7 @@ private:
 protected:
 	template <IRExpr *mkConst(constT)> static IRExpr *to_irexpr(subtreeT *);
 
-	const_bdd(long rank, IRExpr *cond, subtreeT *trueB, subtreeT *falseB)
+	const_bdd(bdd_rank rank, IRExpr *cond, subtreeT *trueB, subtreeT *falseB)
 		: _bdd<constT, subtreeT>(rank, cond, trueB, falseB)
 	{}
 	const_bdd(constT b)
@@ -312,7 +348,7 @@ class bbdd : public const_bdd<bool, bbdd> {
 			return NULL;
 		}
 	}
-	bbdd(long rank, IRExpr *cond, bbdd *trueB, bbdd *falseB)
+	bbdd(bdd_rank rank, IRExpr *cond, bbdd *trueB, bbdd *falseB)
 		: const_bdd<bool, bbdd>(rank, cond, trueB, falseB)
 	{}
 	bbdd(bool b)
@@ -358,7 +394,7 @@ class intbdd : public const_bdd<int, intbdd> {
 		}
 		return false;
 	}
-	intbdd(long rank, IRExpr *cond, intbdd *trueB, intbdd *falseB)
+	intbdd(bdd_rank rank, IRExpr *cond, intbdd *trueB, intbdd *falseB)
 		: const_bdd<int, intbdd>(rank, cond, trueB, falseB)
 	{}
 	intbdd(int b)
@@ -393,7 +429,7 @@ class smrbdd : public const_bdd<StateMachineRes, smrbdd> {
 		return scp->cnst(r);
 	}
 
-	smrbdd(long rank, IRExpr *cond, smrbdd *trueB, smrbdd *falseB)
+	smrbdd(bdd_rank rank, IRExpr *cond, smrbdd *trueB, smrbdd *falseB)
 		: const_bdd<StateMachineRes, smrbdd>(rank, cond, trueB, falseB)
 	{}
 	smrbdd(StateMachineRes b)
@@ -445,7 +481,7 @@ private:
 		ppIRExpr(what, f);
 		fprintf(f, ">");
 	}
-	exprbdd(int _rank, IRExpr *cond, exprbdd *trueB, exprbdd *falseB)
+	exprbdd(bdd_rank _rank, IRExpr *cond, exprbdd *trueB, exprbdd *falseB)
 		: parentT(_rank, cond, trueB, falseB)
 	{}
 	exprbdd(leafT b)

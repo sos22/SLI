@@ -778,10 +778,10 @@ bbdd::invert(scope *scope, bbdd *a)
 			bbdd::invert(scope, a->content.falseBranch));
 }
 
-long
+bdd_rank
 bdd_ordering::rankVariable(const IRExpr *a)
 {
-	auto it_did_insert = variableRankings.insert(std::pair<const IRExpr *, long>(a, nextRanking));
+	auto it_did_insert = variableRankings.insert(std::pair<const IRExpr *, bdd_rank>(a, nextRanking));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
@@ -795,7 +795,7 @@ bdd_ordering::rankVariable(const IRExpr *a)
 			}
 		}
 		if (!dupe)
-			nextRanking--;
+			nextRanking.val--;
 	}
 	return it->second;
 }
@@ -803,7 +803,7 @@ bdd_ordering::rankVariable(const IRExpr *a)
 void
 bdd_ordering::runGc(HeapVisitor &hv)
 {
-	std::map<const IRExpr *, long> newRankings;
+	std::map<const IRExpr *, bdd_rank> newRankings;
 	for (auto it = variableRankings.begin();
 	     it != variableRankings.end();
 	     it++) {
@@ -1278,6 +1278,19 @@ _bdd<constT, subtreeT>::ifelse(scopeT *scope,
 }
 
 void
+bdd_rank::prettyPrint(FILE *f) const
+{
+	fprintf(f, "r%ld", val);
+}
+
+bool
+bdd_rank::parse(const char *buf, const char **end)
+{
+	return parseThisChar('r', buf, &buf) &&
+		parseDecimalLong(&val, buf, end);
+}
+
+void
 bdd_ordering::prettyPrint(FILE *f) const
 {
 	fprintf(f, "Variable rankings:\n");
@@ -1286,7 +1299,9 @@ bdd_ordering::prettyPrint(FILE *f) const
 	     it++) {
 		fprintf(f, "\t");
 		ppIRExpr(it->first, f);
-		fprintf(f, "\t -> \t%ld\n", it->second);
+		fprintf(f, "\t -> \t");
+		it->second.prettyPrint(f);
+		fprintf(f, "\n");
 	}
 }
 
@@ -1298,10 +1313,10 @@ bdd_ordering::parse(const char *buf, const char **end)
 	variableRankings.clear();
 	while (1) {
 		IRExpr *key;
-		long rank;
+		bdd_rank rank;
 		if (!parseIRExpr(&key, buf, &buf) ||
 		    !parseThisString("\t->\t", buf, &buf) ||
-		    !parseDecimalLong(&rank, buf, &buf) ||
+		    !rank.parse(buf, &buf) ||
 		    !parseThisChar('\n', buf, &buf))
 			break;
 		variableRankings[key] = rank;
