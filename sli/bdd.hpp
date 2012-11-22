@@ -80,16 +80,18 @@ protected:
 	virtual void _prettyPrint(FILE *f, leafT what) const = 0;
 
 	_bdd(leafT leaf)
-		: isLeaf(true)
+		: isLeaf(true), content()
 	{
-		content.leaf = leaf;
+		contentT *_content = const_cast<contentT *>(&content);
+		_content->leaf = leaf;
 	}
 	_bdd(IRExpr *cond, _subtreeT *trueB, _subtreeT *falseB)
-		: isLeaf(false)
+		: isLeaf(false), content()
 	{
-		content.condition = cond;
-		content.trueBranch = trueB;
-		content.falseBranch = falseB;
+		contentT *_content = const_cast<contentT *>(&content);
+		_content->condition = cond;
+		_content->trueBranch = trueB;
+		_content->falseBranch = falseB;
 	}
 	template <typename scopeT,
 		  _subtreeT *(*parseLeaf)(scopeT *, const char *, const char **)>
@@ -102,8 +104,8 @@ protected:
 		return zip(scp, where, memo);
 	}
 public:
-	bool isLeaf;
-	union {
+	const bool isLeaf;
+	union contentT {
 		leafT leaf;
 		struct {
 			/* Must be Ity_I1 */
@@ -111,7 +113,8 @@ public:
 			_subtreeT *trueBranch;
 			_subtreeT *falseBranch;
 		};
-	} content;
+	};
+	const contentT content;
 	void sanity_check(bdd_ordering *ordering = NULL) const {
 		assert(isLeaf == true || isLeaf == false);
 		if (isLeaf) {
@@ -170,12 +173,15 @@ public:
 		_subtreeT *ifFalse);
 
 	void visit(HeapVisitor &hv) {
+		/* Bit of a hack: content is const except for things
+		   possibly being moved around by the GC. */
+		contentT *_content = const_cast<contentT *>(&content);
 		if (isLeaf) {
-			_visit(hv, content.leaf);
+			_visit(hv, _content->leaf);
 		} else {
-			hv(content.condition);
-			hv(content.trueBranch);
-			hv(content.falseBranch);
+			hv(_content->condition);
+			hv(_content->trueBranch);
+			hv(_content->falseBranch);
 		}
 	}
 	NAMED_CLASS

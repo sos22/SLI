@@ -373,20 +373,24 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 	abort();
 }
 
-/* Only safe on const bdds */
-template <typename subtreeT> static void
-internBDD(subtreeT *what, internIRExprTable &tab)
+/* Only sufficient on const bdds */
+template <typename scopeT, typename subtreeT> static subtreeT *
+internBDD(scopeT *scope, bbdd::scope *bscope, subtreeT *what, internIRExprTable &tab)
 {
-	/* bdd_scopes implicitly intern all leaves already */
 	if (what->isLeaf)
-		return;
-	/* We rely on the fact that the ordering is invariant
-	   replacing one expression with a physically identical one,
-	   and that nodes are already interned up to replacement of
-	   conditions. */
-	what->content.condition = internIRExpr(what->content.condition, tab);
-	internBDD(what->content.trueBranch, tab);
-	internBDD(what->content.falseBranch, tab);
+		return scope->cnst(what->content.leaf);
+	IRExpr *cond = internIRExpr(what->content.condition, tab);
+	subtreeT *t = internBDD(scope, bscope, what->content.trueBranch, tab);
+	subtreeT *f = internBDD(scope, bscope, what->content.falseBranch, tab);
+	if (cond == what->content.condition &&
+	    t == what->content.trueBranch &&
+	    f == what->content.falseBranch)
+		return what;
+	return subtreeT::ifelse(
+		scope,
+		bbdd::var(bscope, cond),
+		t,
+		f);
 }
 
 static StateMachineState *
@@ -400,7 +404,7 @@ internStateMachineState(SMScopes *scopes, StateMachineState *start, internStateM
 	switch (start->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)start;
-		internBDD(smt->res, t);
+		internBDD(&scopes->smrs, &scopes->bools, smt->res, t);
 		for (auto it = t.states_terminal.begin();
 		     it != t.states_terminal.end();
 		     it++) {
@@ -433,7 +437,7 @@ internStateMachineState(SMScopes *scopes, StateMachineState *start, internStateM
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)start;
-		internBDD(smb->condition, t);
+		internBDD(&scopes->bools, &scopes->bools, smb->condition, t);
 		smb->trueTarget = internStateMachineState(scopes, smb->trueTarget, t);
 		smb->falseTarget = internStateMachineState(scopes, smb->falseTarget, t);
 		for (auto it = t.states_bifurcate.begin();
