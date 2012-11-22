@@ -301,6 +301,264 @@ muxify(IRExpr *what)
 	abort();
 }
 
+/* Some very quick simplifications which are always applied to the
+ * condition of BDD internal nodes.  This isn't much more than just
+ * constant folding. */
+static IRExpr *
+quickSimplify(IRExpr *a)
+{
+	if (a->optimisationsApplied)
+		return a;
+	if (a->tag == Iex_Unop) {
+		IRExprUnop *au = (IRExprUnop *)a;
+		au->arg = quickSimplify(au->arg);
+		if (au->arg->tag != Iex_Const)
+			return au;
+		IRExprConst *arg = (IRExprConst *)au->arg;
+		switch (au->op) {
+		case Iop_64to32:
+			return IRExpr_Const_U32(arg->Ico.U64);
+		case Iop_32Sto64:
+			return IRExpr_Const_U64((long)(int)arg->Ico.U32);
+		case Iop_32Uto64:
+			return IRExpr_Const_U64(arg->Ico.U32);
+		case Iop_Not1:
+			return IRExpr_Const_U1(!arg->Ico.U1);
+		case Iop_BadPtr:
+			/* Can't constant fold these without an
+			 * IRExprOptimisations struct. */
+			if (arg->Ico.U64 < 4096)
+				return IRExpr_Const_U1(true);
+			break;
+		default:
+			abort();
+		}
+	} else if (a->tag == Iex_Binop) {
+		IRExprBinop *ieb = (IRExprBinop *)a;
+		ieb->arg1 = quickSimplify(ieb->arg1);
+		ieb->arg2 = quickSimplify(ieb->arg2);
+		if (ieb->arg1->tag == Iex_Const &&
+		    ieb->arg2->tag == Iex_Const) {
+			IRExprConst *arg1c = (IRExprConst *)ieb->arg1;
+			IRExprConst *arg2c = (IRExprConst *)ieb->arg2;
+			switch (ieb->op) {
+			case Iop_CmpEQ32:
+				return IRExpr_Const_U1(arg1c->Ico.U32 == arg2c->Ico.U32);
+			case Iop_CmpEQ64:
+				return IRExpr_Const_U1(arg1c->Ico.U64 == arg2c->Ico.U64);
+			case Iop_Shl64:
+				return IRExpr_Const_U64(arg1c->Ico.U64 << arg2c->Ico.U8);
+			default:
+				abort();
+			}
+		}
+		if (ieb->op == Iop_CmpEQ32 &&
+		    ieb->arg1->tag == Iex_Const &&
+		    ieb->arg2->tag == Iex_Associative &&
+		    ((IRExprAssociative *)ieb->arg2)->op == Iop_Add32 &&
+		    ((IRExprAssociative *)ieb->arg2)->nr_arguments >= 2 &&
+		    ((IRExprAssociative *)ieb->arg2)->contents[0]->tag == Iex_Const) {
+			IRExprConst *arg1 = (IRExprConst *)ieb->arg1;
+			IRExprAssociative *arg2 = (IRExprAssociative *)ieb->arg2;
+			IRExprConst *arg2a = (IRExprConst *)arg2->contents[0];
+			IRExprConst *newArg1 = IRExpr_Const_U32(arg1->Ico.U32 - arg2a->Ico.U32);
+			IRExpr *newArg2;
+			if (arg2->nr_arguments == 2) {
+				newArg2 = arg2->contents[1];
+			} else {
+				IRExprAssociative *newArg2a = IRExpr_Associative(arg2->nr_arguments - 1, Iop_Add32);
+				memcpy(newArg2a->contents, arg2->contents + 1, sizeof(IRExpr *) * (arg2->nr_arguments - 1));
+				newArg2 = newArg2a;
+			}
+			return IRExpr_Binop(ieb->op, newArg1, newArg2);
+		}
+	} else if (a->tag == Iex_Associative) {
+		IRExprAssociative *iea = (IRExprAssociative *)a;
+		bool haveConsts = false;
+		unsigned long mask;
+		unsigned long acc;
+		unsigned long defaultValue;
+		bool haveNested = false;
+
+		switch (iea->op) {
+		case Iop_And1:                 mask = 1;      defaultValue = mask; break;
+		case Iop_And8:                 mask = 0xff;   defaultValue = mask; break;
+		case Iop_And16:                mask = 0xffff; defaultValue = mask; break;
+		case Iop_And32:                mask = ~0u;    defaultValue = mask; break;
+		case Iop_And64:                mask = ~0ul;   defaultValue = mask; break;
+		case Iop_Or1:                  mask = 1;      defaultValue = 0; break;
+		case Iop_Or8:  case Iop_Add8:  mask = 0xff;   defaultValue = 0; break;
+		case Iop_Or16: case Iop_Add16: mask = 0xffff; defaultValue = 0; break;
+		case Iop_Or32: case Iop_Add32: mask = ~0u;    defaultValue = 0; break;
+		case Iop_Or64: case Iop_Add64: mask = ~0ul;   defaultValue = 0; break;
+			break;
+		default:
+			abort();
+		}
+		acc = defaultValue;
+		int new_nr_args = 0;
+		for (int i = 0; i < iea->nr_arguments; i++) {
+			iea->contents[i] = quickSimplify(iea->contents[i]);
+			if (iea->contents[i]->tag == Iex_Const) {
+				if (!haveConsts)
+					new_nr_args++;
+				haveConsts = true;
+				switch (iea->op) {
+				case Iop_And1: case Iop_And8: case Iop_And16:
+				case Iop_And32: case Iop_And64:
+					acc &= ((IRExprConst *)iea->contents[i])->Ico.U64;
+					break;
+				case Iop_Or1: case Iop_Or8: case Iop_Or16:
+				case Iop_Or32: case Iop_Or64:
+					acc |= ((IRExprConst *)iea->contents[i])->Ico.U64;
+					break;
+				case Iop_Add8: case Iop_Add16:
+				case Iop_Add32: case Iop_Add64:
+					acc += ((IRExprConst *)iea->contents[i])->Ico.U64;
+					break;
+				default:
+					abort();
+				}
+			} else if (iea->contents[i]->tag == Iex_Associative &&
+			    ((IRExprAssociative *)iea->contents[i])->op == iea->op) {
+				haveNested = true;
+				IRExprAssociative *arg = (IRExprAssociative *)iea->contents[i];
+				for (int j = 0; j < iea->nr_arguments; j++) {
+					if (arg->contents[j]->tag == Iex_Const) {
+						if (!haveConsts)
+							new_nr_args++;
+						haveConsts = true;
+						switch (iea->op) {
+						case Iop_And1: case Iop_And8: case Iop_And16:
+						case Iop_And32: case Iop_And64:
+							acc &= ((IRExprConst *)arg->contents[j])->Ico.U64;
+							break;
+						case Iop_Or1: case Iop_Or8: case Iop_Or16:
+						case Iop_Or32: case Iop_Or64:
+							acc |= ((IRExprConst *)arg->contents[j])->Ico.U64;
+							break;
+						case Iop_Add8: case Iop_Add16:
+						case Iop_Add32: case Iop_Add64:
+							acc += ((IRExprConst *)arg->contents[j])->Ico.U64;
+							break;
+						default:
+							abort();
+						}
+					} else {
+						new_nr_args++;
+					}
+				}
+			} else {
+				new_nr_args++;
+			}
+		}
+		acc &= mask;
+		if ((iea->op == Iop_And1 || iea->op == Iop_Or1) &&
+		    haveConsts) {
+			if (iea->op == Iop_And1) {
+				if (acc) {
+					haveConsts = false;
+					new_nr_args--;
+				} else {
+					return IRExpr_Const_U1(false);
+				}
+			} else {
+				if (!acc) {
+					haveConsts = false;
+					new_nr_args--;
+				} else {
+					return IRExpr_Const_U1(true);
+				}
+			}
+		}
+		if (haveConsts && acc == defaultValue) {
+			haveConsts = false;
+			new_nr_args--;
+		}
+		if (new_nr_args == 0) {
+			acc = defaultValue;
+			haveConsts = true;
+			new_nr_args = 1;
+		}
+		if (new_nr_args == 1 && haveConsts) {
+			switch (iea->type()) {
+#define do_ty(n)							\
+				case Ity_I ## n :			\
+					return IRExpr_Const_U ## n(acc);
+				do_ty(1);
+				do_ty(8);
+				do_ty(16);
+				do_ty(32);
+				do_ty(64);
+#undef do_ty
+			default:
+				abort();
+			}
+		}
+		if (new_nr_args == 1) {
+			for (int i = 0; i < iea->nr_arguments; i++)
+				if (iea->contents[i]->tag != Iex_Const)
+					return iea->contents[i];
+			abort();
+		}
+		if (!haveNested && new_nr_args == iea->nr_arguments)
+			return iea;
+		static libvex_allocation_site __las = {0, __FILE__, __LINE__};
+		IRExpr **newArgs = (IRExpr **)
+			__LibVEX_Alloc_Bytes(&ir_heap,
+					     sizeof(IRExpr *) * new_nr_args,
+					     &__las);
+		int outIdx = 0;
+		if (haveConsts) {
+			switch (iea->type()) {
+#define do_ty(n)							\
+				case Ity_I ## n :			\
+					newArgs[0] = IRExpr_Const_U ## n(acc); \
+					break;
+				do_ty(1);
+				do_ty(8);
+				do_ty(16);
+				do_ty(32);
+				do_ty(64);
+#undef do_ty
+			default:
+				abort();
+			}
+			outIdx++;
+		}
+
+		for (int i = 0; i < iea->nr_arguments; i++) {
+			if (iea->contents[i]->tag == Iex_Const) {
+				/* Already handled */
+			} else if (iea->contents[i]->tag == Iex_Associative &&
+				   ((IRExprAssociative *)iea->contents[i])->op == iea->op) {
+				IRExprAssociative *arg = (IRExprAssociative *)iea->contents[i];
+				for (int j = 0; j < arg->nr_arguments; j++) {
+					if (arg->contents[j]->tag == Iex_Const) {
+						/* Already handled */
+					} else {
+						newArgs[outIdx] = arg->contents[j];
+						outIdx++;
+					}
+				}
+			} else {
+				newArgs[outIdx] = iea->contents[i];
+				outIdx++;
+			}
+		}
+		assert(outIdx == new_nr_args);
+		iea->nr_arguments = new_nr_args;
+		iea->nr_arguments_allocated = new_nr_args;
+		iea->contents = newArgs;
+	} else if (a->tag == Iex_Mux0X) {
+		IRExprMux0X *m = (IRExprMux0X *)a;
+		m->cond = quickSimplify(m->cond);
+		m->expr0 = quickSimplify(m->expr0);
+		m->exprX = quickSimplify(m->exprX);
+	}
+	return a;
+}
+
 bbdd *
 bbdd::_var(scope *scope, IRExpr *a)
 {
@@ -318,7 +576,7 @@ bbdd::_var(scope *scope, IRExpr *a)
 bbdd *
 bbdd::var(scope *scope, IRExpr *a)
 {
-	return _var(scope, muxify(a));
+	return _var(scope, quickSimplify(muxify(quickSimplify(a))));
 }
 
 template <typename constT, typename subtreeT> template <typename scopeT, typename zipInternalT>
@@ -358,8 +616,7 @@ public:
 			return second->content.condition;
 		} else if (second->isLeaf) {
 			return first->content.condition;
-		} else if (ordering->before(first->content.condition,
-					    second->content.condition)) {
+		} else if (ordering->before(first, second)) {
 			return first->content.condition;
 		} else {
 			return second->content.condition;
@@ -368,14 +625,14 @@ public:
 	binary_zip_internal trueSucc(bdd_ordering *ordering, IRExpr *cond) const {
 		return binary_zip_internal(
 			isAnd,
-			first->isLeaf  || !ordering->equal(first->content.condition, cond)  ? first  : first->content.trueBranch,
-			second->isLeaf || !ordering->equal(second->content.condition, cond) ? second : second->content.trueBranch);
+			first->isLeaf  || !ordering->equal(first, cond)  ? first  : first->content.trueBranch,
+			second->isLeaf || !ordering->equal(second, cond) ? second : second->content.trueBranch);
 	}
 	binary_zip_internal falseSucc(bdd_ordering *ordering, IRExpr *cond) const {
 		return binary_zip_internal(
 			isAnd,
-			first->isLeaf  || !ordering->equal(first->content.condition, cond)  ? first  : first->content.falseBranch,
-			second->isLeaf || !ordering->equal(second->content.condition, cond) ? second : second->content.falseBranch);
+			first->isLeaf  || !ordering->equal(first, cond)  ? first  : first->content.falseBranch,
+			second->isLeaf || !ordering->equal(second, cond) ? second : second->content.falseBranch);
 	}
 	binary_zip_internal(bool _isAnd, bbdd *_first, bbdd *_second)
 		: isAnd(_isAnd), first(_first), second(_second)
@@ -457,8 +714,7 @@ public:
 			return assumption->content.condition;
 		} else if (assumption->isLeaf) {
 			return thing->content.condition;
-		} else if (ordering->before(thing->content.condition,
-					    assumption->content.condition)) {
+		} else if (ordering->before(thing, assumption)) {
 			return thing->content.condition;
 		} else {
 			return assumption->content.condition;
@@ -466,13 +722,13 @@ public:
 	}
 	assume_zip_internal trueSucc(bdd_ordering *ordering, IRExpr *cond) const {
 		return assume_zip_internal(
-			thing->isLeaf  || !ordering->equal(thing->content.condition, cond)  ? thing  : thing->content.trueBranch,
-			assumption->isLeaf || !ordering->equal(assumption->content.condition, cond) ? assumption : assumption->content.trueBranch);
+			ordering->trueBranch(thing, cond),
+			ordering->trueBranch(assumption, cond));
 	}
 	assume_zip_internal falseSucc(bdd_ordering *ordering, IRExpr *cond) const {
 		return assume_zip_internal(
-			thing->isLeaf  || !ordering->equal(thing->content.condition, cond)  ? thing  : thing->content.falseBranch,
-			assumption->isLeaf || !ordering->equal(assumption->content.condition, cond) ? assumption : assumption->content.falseBranch);
+			ordering->falseBranch(thing, cond),
+			ordering->falseBranch(assumption, cond));
 	}
 	bool isLeaf() const {
 		return assumption->isLeaf || thing->isLeaf;
@@ -586,11 +842,11 @@ public:
 		for (auto it = table.begin(); it != table.end(); it++) {
 			if (!it->first->isLeaf &&
 			    (!bestCond ||
-			     ordering->before(it->first->content.condition, bestCond)))
+			     ordering->before(it->first, bestCond)))
 				bestCond = it->first->content.condition;
 			if (!it->second->isLeaf &&
 			    (!bestCond ||
-			     ordering->before(it->second->content.condition, bestCond)))
+			     ordering->before(it->second, bestCond)))
 				bestCond = it->second->content.condition;
 		}
 		assert(bestCond != NULL);
@@ -601,16 +857,10 @@ public:
 	{
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); it != table.end(); it++) {
-			bbdd *newGuard = it->first;
-			subtreeT *newRes = it->second;
-			if (!newGuard->isLeaf &&
-			    ordering->equal(newGuard->content.condition, cond))
-				newGuard = newGuard->content.trueBranch;
+			bbdd *newGuard = ordering->trueBranch(it->first, cond);
 			if (newGuard->isLeaf && !newGuard->content.leaf)
 				continue;
-			if (!newRes->isLeaf &&
-			    ordering->equal(newRes->content.condition, cond))
-				newRes = newRes->content.trueBranch;
+			subtreeT *newRes = ordering->trueBranch(it->second, cond);
 			auto it2_did_insert = res.table.insert(std::pair<bbdd *, subtreeT *>(newGuard, newRes));
 			if (it2_did_insert.first->second != newRes)
 				return from_enabling_internal(true);
@@ -622,16 +872,10 @@ public:
 	{
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); it != table.end(); it++) {
-			bbdd *newGuard = it->first;
-			subtreeT *newRes = it->second;
-			if (!newGuard->isLeaf &&
-			    ordering->equal(newGuard->content.condition, cond))
-				newGuard = newGuard->content.falseBranch;
+			bbdd *newGuard = ordering->falseBranch(it->first, cond);
 			if (newGuard->isLeaf && !newGuard->content.leaf)
 				continue;
-			if (!newRes->isLeaf &&
-			    ordering->equal(newRes->content.condition, cond))
-				newRes = newRes->content.falseBranch;
+			subtreeT *newRes = ordering->falseBranch(it->second, cond);
 			auto it2_did_insert = res.table.insert(std::pair<bbdd *, subtreeT *>(newGuard, newRes));
 			if (it2_did_insert.first->second != newRes)
 				return from_enabling_internal(true);
@@ -811,8 +1055,8 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 {
 	assert(a);
 	assert(b);
-	assert(a->isLeaf || ordering->before(cond, a->content.condition));
-	assert(b->isLeaf || ordering->before(cond, b->content.condition));
+	assert(a->isLeaf || ordering->before(cond, a));
+	assert(b->isLeaf || ordering->before(cond, b));
 	if (a == b)
 		return a;
 	if (cond->tag == Iex_Const) {
@@ -838,7 +1082,7 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
-		it->second = new t(cond, a, b);
+		it->second = new t(ordering->rankVariable(cond), cond, a, b);
 	return it->second;
 }
 
@@ -990,9 +1234,9 @@ public:
 	IRExpr *bestCond(bdd_ordering *ordering) const {
 		assert(!cond->isLeaf);
 		IRExpr *best = cond->content.condition;
-		if (!ifTrue->isLeaf && ordering->before(ifTrue->content.condition, best))
+		if (!ifTrue->isLeaf && ordering->before(ifTrue, best))
 			best = ifTrue->content.condition;
-		if (!ifFalse->isLeaf && ordering->before(ifFalse->content.condition, best))
+		if (!ifFalse->isLeaf && ordering->before(ifFalse, best))
 			best = ifFalse->content.condition;
 		return best;
 	}
@@ -1117,7 +1361,7 @@ exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
 exprbdd *
 exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
 {
-	return _var(scope, bscope, muxify(what));
+	return _var(scope, bscope, quickSimplify(muxify(quickSimplify(what))));
 }
 
 IRExpr *
