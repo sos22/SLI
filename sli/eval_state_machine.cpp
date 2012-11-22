@@ -513,11 +513,9 @@ EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, c
 			&scopes->bools,
 			exp,
 			pathConstraint);
+	if (simplifiedCondition->isLeaf)
+		return simplifiedCondition->content.leaf;
 	std::map<bool, bbdd *> selectors(bbdd::to_selectors(&scopes->bools, simplifiedCondition));
-	assert(!selectors.empty());
-	if (selectors.size() == 1)
-		return selectors.begin()->first;
-
 	assert(selectors.count(true));
 	assert(selectors.count(false));
 	IRExpr *trueCond = simplifyIRExpr(
