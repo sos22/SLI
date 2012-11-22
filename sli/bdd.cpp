@@ -790,7 +790,16 @@ bbdd::invert(scope *scope, bbdd *a)
 bdd_rank
 bdd_ordering::rankVariable(const IRExpr *a)
 {
-	auto it_did_insert = variableRankings.insert(std::pair<const IRExpr *, bdd_rank>(a, nextRanking));
+	bdd_rank::clsT cls;
+	if (a->tag == Iex_EntryPoint || a->tag == Iex_ControlFlow)
+		cls = bdd_rank::cls_entry;
+	else
+		cls = bdd_rank::cls_norm;
+	long &rankNr(nextRanking[cls]);
+	bdd_rank rank;
+	rank.cls = cls;
+	rank.val = rankNr;
+	auto it_did_insert = variableRankings.insert(std::pair<const IRExpr *, bdd_rank>(a, rank));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
@@ -804,7 +813,7 @@ bdd_ordering::rankVariable(const IRExpr *a)
 			}
 		}
 		if (!dupe)
-			nextRanking.val--;
+			rankNr--;
 	}
 	return it->second;
 }

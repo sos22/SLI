@@ -17,14 +17,22 @@ template <typename _leafT, typename _subtreeT> class _bdd;
 class bdd_rank {
 	friend class bdd_ordering;
 	long val;
+	enum clsT {
+		cls_entry,
+		cls_norm
+	} cls;
 public:
 	bool operator <(const bdd_rank &o) const
 	{
+		if (cls < o.cls)
+			return true;
+		if (cls > o.cls)
+			return false;
 		return val < o.val;
 	}
 	bool operator==(const bdd_rank &o) const
 	{
-		return val == o.val;
+		return cls == o.cls && val == o.val;
 	}
 	bool parse(const char *, const char **);
 
@@ -43,7 +51,7 @@ public:
 class bdd_ordering : public GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv);
 	std::map<const IRExpr *, bdd_rank> variableRankings;
-	bdd_rank nextRanking;
+	std::map<bdd_rank::clsT, long> nextRanking;
 public:
 	template <typename leafT, typename subtreeT> bdd_rank rankVariable(const _bdd<leafT, subtreeT> *a) {
 		assert(!a->isLeaf);
@@ -91,10 +99,6 @@ public:
 	bdd_ordering()
 		: GcCallback<&ir_heap>(true)
 	{
-		/* Doesn't actually matter what you initialise this to
-		   (only the relative order of variables is
-		   important), but it shuts Valgrind up. */
-		nextRanking.val = 0;
 	}
 	template <typename subtreeT> subtreeT *trueBranch(subtreeT *bdd, const bdd_rank &cond) {
 		if (!bdd->isLeaf && cond == bdd->content.rank)
