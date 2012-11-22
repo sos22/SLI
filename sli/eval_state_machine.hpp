@@ -96,13 +96,5 @@ void collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
 			const IRExprOptimisations &opt,
 			std::vector<IRExpr *> &out,
 			GarbageCollectionToken token);
-IRExpr *getCrossMachineCrashRequirement(
-	const VexPtr<StateMachine, &ir_heap> &readMachine,
-	const VexPtr<StateMachine, &ir_heap> &writeMachine,
-	const VexPtr<OracleInterface> &oracle,
-	const VexPtr<IRExpr, &ir_heap> &assumption,
-	const AllowableOptimisations &opt,
-	const VexPtr<MaiMap, &ir_heap> &mai,
-	GarbageCollectionToken token);
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */
