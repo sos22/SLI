@@ -64,7 +64,7 @@ public:
 
 	void clear() { sideEffects.clear(); assumption = NULL; _registers.clear(); }
 	void makeFalse(bbdd::scope *, bbdd *expr);
-	void dereference(bbdd::scope *, exprbdd *ptr, const AllowableOptimisations &opt);
+	void dereference(SMScopes *scope, exprbdd *ptr, const AllowableOptimisations &opt);
 	/* Merge @other into the current availability set.  Returns
 	   true if we do anything, and false otherwise. */
 	bool mergeIntersection(bbdd::scope *scope, const avail_t &other, bool is_ssa);
@@ -125,13 +125,18 @@ avail_t::makeFalse(bbdd::scope *scope, bbdd *expr)
 }
 
 void
-avail_t::dereference(bbdd::scope *scope, exprbdd *addr, const AllowableOptimisations &opt)
+avail_t::dereference(SMScopes *scopes, exprbdd *addr, const AllowableOptimisations &opt)
 {
 	if (TIMEOUT)
 		return;
-	IRExpr *badPtr = IRExpr_Unop(Iop_BadPtr, exprbdd::to_irexpr(addr));
-	badPtr = simplifyIRExpr(badPtr, opt);
-	makeFalse(scope, bbdd::var(scope, badPtr));
+	exprbdd *badPtr = exprbdd::unop(
+		&scopes->exprs,
+		&scopes->bools,
+		Iop_BadPtr,
+		addr);
+	bool b;
+	badPtr = simplifyBDD(&scopes->exprs, &scopes->bools, badPtr, opt, &b);
+	makeFalse(&scopes->bools, exprbdd::to_bbdd(&scopes->bools, badPtr));
 }
 
 bool
@@ -368,7 +373,7 @@ avail_t::calcRegisterMap(bbdd::scope *scope)
 }
 
 static void
-updateAvailSetForSideEffect(bbdd::scope *scope,
+updateAvailSetForSideEffect(SMScopes *scopes,
 			    const MaiMap &decode,
 			    avail_t &outputAvail,
 			    StateMachineSideEffect *smse,
@@ -414,7 +419,7 @@ updateAvailSetForSideEffect(bbdd::scope *scope,
 		/* Introduce the store which was generated. */
 		if (!oracle->hasConflictingRemoteStores(decode, opt, smses))
 			outputAvail.insertSideEffect(smses);
-		outputAvail.dereference(scope, smses->addr, opt);
+		outputAvail.dereference(scopes, smses->addr, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -429,13 +434,13 @@ updateAvailSetForSideEffect(bbdd::scope *scope,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		if (!oracle->hasConflictingRemoteStores(decode, opt, smsel))
 			outputAvail.insertSideEffect(smsel);
-		outputAvail.dereference(scope, smsel->addr, opt);
+		outputAvail.dereference(scopes, smsel->addr, opt);
 		break;
 	}
 	case StateMachineSideEffect::AssertFalse: {
 		StateMachineSideEffectAssertFalse *smseaf =
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
-		outputAvail.makeFalse(scope, smseaf->value);
+		outputAvail.makeFalse(&scopes->bools, smseaf->value);
 		break;
 	}
 	case StateMachineSideEffect::Unreached:
@@ -463,7 +468,7 @@ updateAvailSetForSideEffect(bbdd::scope *scope,
 
 	threadAndRegister r(threadAndRegister::invalid());
 	if (smse->definesRegister(r))
-		outputAvail.invalidateRegister(scope, r, smse);
+		outputAvail.invalidateRegister(&scopes->bools, r, smse);
 }
 
 class applyAvailTransformer : public IRExprTransformer {
@@ -721,7 +726,7 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 	}
 	if (!*done_something) assert(newEffect == smse);
 	if (newEffect)
-		updateAvailSetForSideEffect(&scopes->bools, decode, currentlyAvailable, newEffect, where, opt, aliasing, oracle);
+		updateAvailSetForSideEffect(scopes, decode, currentlyAvailable, newEffect, where, opt, aliasing, oracle);
 	currentlyAvailable.calcRegisterMap(&scopes->bools);
 	if (debug_substitutions) {
 		printf("New available set:\n");
@@ -908,7 +913,7 @@ availExpressionAnalysis(SMScopes *scopes,
 		if ( state->type == StateMachineState::SideEffecting ) {
 			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
 			if (se)
-				updateAvailSetForSideEffect(&scopes->bools, decode, outputAvail,
+				updateAvailSetForSideEffect(scopes, decode, outputAvail,
 							    se, state, opt, alias, oracle);
 		}
 
@@ -947,7 +952,7 @@ availExpressionAnalysis(SMScopes *scopes,
 		if ( state->type == StateMachineState::SideEffecting ) {
 			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
 			if (se)
-				updateAvailSetForSideEffect(&scopes->bools, decode, outputAvail,
+				updateAvailSetForSideEffect(scopes, decode, outputAvail,
 							    se, state, opt, alias, oracle);
 		}
 
