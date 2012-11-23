@@ -788,7 +788,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
 		if (expressionIsTrue(
 			    scopes,
-			    bbdd::var(&scopes->bools, smseaf->value),
+			    smseaf->value,
 			    chooser,
 			    opt)) {
 			if (smseaf->reflectsActualProgram)
@@ -1485,13 +1485,15 @@ buildCrossProductMachine(SMScopes *scopes,
 					nextStore = new StateMachineSideEffecting(
 						nextStore->dbg_origin,
 						new StateMachineSideEffectAssertFalse(
-							IRExpr_Unop(
-								Iop_Not1, /* Remember, it's assertfalse,
-									     so need to invert the condition. */
-								IRExpr_Binop(
-									Iop_CmpEQ64,
-									probe_access->addr,
-									store_access->addr)),
+							bbdd::var(
+								&scopes->bools,
+								IRExpr_Unop(
+									Iop_Not1, /* Remember, it's assertfalse,
+										     so need to invert the condition. */
+									IRExpr_Binop(
+										Iop_CmpEQ64,
+										probe_access->addr,
+										store_access->addr))),
 							false),
 						nextStore);
 				} else {

@@ -165,11 +165,9 @@ ControlDominationMap::init(bbdd::scope *scope,
 					StateMachineSideEffectAssertFalse *a = (StateMachineSideEffectAssertFalse *)effecting->sideEffect;
 					exprAtExit = bbdd::And(
 						scope,
-						bbdd::var(
+						bbdd::invert(
 							scope,
-							IRExpr_Unop(
-								Iop_Not1,
-								a->value)),
+							a->value),
 						exprAtEntry);
 					break;
 				}

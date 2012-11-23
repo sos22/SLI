@@ -48,12 +48,14 @@ ndChoiceState(SMScopes *scopes,
 			new StateMachineSideEffecting(
 				vr.rip,
 				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(
-						Iop_Not1,
-						new IRExprControlFlow(
-							vr.thread,
-							node->label,
-							targets[0]->label)),
+					bbdd::var(
+						&scopes->bools,
+						IRExpr_Unop(
+							Iop_Not1,
+							new IRExprControlFlow(
+								vr.thread,
+								node->label,
+								targets[0]->label))),
 					true),
 				NULL);
 		assert(targets[0] != NULL);
@@ -104,9 +106,11 @@ entryState(SMScopes *scopes,
 			new StateMachineSideEffecting(
 				targets[0].first->rip,
 				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(
-						Iop_Not1,
-						new IRExprEntryPoint(thread, targets[0].first->label)),
+					bbdd::var(
+						&scopes->bools,
+						IRExpr_Unop(
+							Iop_Not1,
+							new IRExprEntryPoint(thread, targets[0].first->label))),
 					true),
 				targets[0].second);
 		StateMachineState *acc = r;

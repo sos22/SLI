@@ -465,7 +465,7 @@ public:
 };
 
 static StateMachine *
-ssaDeadCode(StateMachine *sm, bool *done_something)
+ssaDeadCode(bbdd::scope *scope, StateMachine *sm, bool *done_something)
 {
 	std::set<threadAndRegister> refed_regs;
 	std::set<StateMachineState *> states;
@@ -513,7 +513,9 @@ ssaDeadCode(StateMachine *sm, bool *done_something)
 				*done_something = true;
 				(*it)->sideEffect =
 					new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(Iop_BadPtr, smsel->addr),
+						bbdd::var(
+							scope,
+							IRExpr_Unop(Iop_BadPtr, smsel->addr)),
 						true);
 			}
 			break;
@@ -543,10 +545,10 @@ ssaDeadCode(StateMachine *sm, bool *done_something)
 }
 
 static StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
+deadCodeElimination(bbdd::scope *scope, StateMachine *sm, bool *done_something, bool is_ssa)
 {
 	if (is_ssa)
-		return ssaDeadCode(sm, done_something);
+		return ssaDeadCode(scope, sm, done_something);
 
 	std::map<const StateMachineState *, int> stateLabels;
 
@@ -574,6 +576,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 	class _ {
 		LivenessMap &livenessMap;
 		bool *done_something;
+		bbdd::scope *scope;
 
 		StateMachineSideEffect *doit(StateMachineSideEffect *e,
 					     const LivenessEntry &alive) {
@@ -585,7 +588,9 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 					(StateMachineSideEffectLoad *)e;
 				if (!alive.registerLiveData(smsel->target))
 					newEffect = new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(Iop_BadPtr, smsel->addr),
+						bbdd::var(
+							scope,
+							IRExpr_Unop(Iop_BadPtr, smsel->addr)),
 						true);
 				break;
 			}
@@ -660,10 +665,11 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 			abort();
 		}
 
-		_(LivenessMap &_livenessMap, bool *_done_something)
-			: livenessMap(_livenessMap), done_something(_done_something)
+		_(LivenessMap &_livenessMap, bool *_done_something, bbdd::scope *_scope)
+			: livenessMap(_livenessMap), done_something(_done_something),
+			  scope(_scope)
 		{}
-	} eliminateDeadCode(livenessMap, done_something);
+	} eliminateDeadCode(livenessMap, done_something, scope);
 
 	for (auto it = allStates.begin();
 	     it != allStates.end();
@@ -684,8 +690,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 }
 
 StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
+deadCodeElimination(bbdd::scope *scope, StateMachine *sm, bool *done_something, bool is_ssa)
 {
-	return _deadCode::deadCodeElimination(sm, done_something, is_ssa);
+	return _deadCode::deadCodeElimination(scope, sm, done_something, is_ssa);
 }
 

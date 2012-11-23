@@ -814,7 +814,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 				     it2++) {
 					StateMachineSideEffecting *o = (StateMachineSideEffecting *)*it2;
 					StateMachineSideEffectAssertFalse *c = (StateMachineSideEffectAssertFalse *)o->sideEffect;
-					value.insert(std::pair<StateMachineState *, IRExpr *>(o, c->value));
+					value.insert(std::pair<StateMachineState *, IRExpr *>(o, bbdd::to_irexpr(c->value)));
 				}
 				StateMachineState **suffix;
 				IRExpr *unifiedValue;
@@ -825,7 +825,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 					*suffix = new StateMachineSideEffecting(
 						representative->dbg_origin,
 						new StateMachineSideEffectAssertFalse(
-							unifiedValue,
+							bbdd::var(&scopes->bools, unifiedValue),
 							a->reflectsActualProgram),
 						rep->target);
 					replacement = replacementHead;

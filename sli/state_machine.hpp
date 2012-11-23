@@ -807,47 +807,45 @@ public:
 };
 class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
 public:
-	StateMachineSideEffectAssertFalse(IRExpr *_value, bool _reflectsActualProgram)
+	StateMachineSideEffectAssertFalse(bbdd *_value, bool _reflectsActualProgram)
 		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
 		  value(_value),
 		  reflectsActualProgram(_reflectsActualProgram)
 	{
 	}
-	IRExpr *value;
+	bbdd *value;
 	bool reflectsActualProgram;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "Assert !(");
-		ppIRExpr(value, f);
-		fprintf(f, ") %s", reflectsActualProgram ? "REAL" : "FAKE");
+		fprintf(f, "ASSERT %s !", reflectsActualProgram ? "REAL" : "FAKE");
+		value->prettyPrint(f);
 	}
-	static bool parse(SMScopes *, StateMachineSideEffectAssertFalse **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectAssertFalse **out, const char *str, const char **suffix)
 	{
-		IRExpr *data;
-		if (parseThisString("Assert !(", str, &str) &&
-		    parseIRExpr(&data, str, &str) &&
-		    parseThisChar(')', str, &str)) {
-			bool isReal;
-			if (parseThisString(" REAL", str, suffix)) {
-				isReal = true;
-			} else if (parseThisString(" FAKE", str, suffix)) {
-				isReal = false;
-			} else {
-				return false;
-			}
-			*out = new StateMachineSideEffectAssertFalse(data, isReal);
-			return true;
+		bbdd *data;
+		if (!parseThisString("ASSERT ", str, &str))
+			return false;
+		bool isReal;
+		if (parseThisString("REAL ", str, &str)) {
+			isReal = true;
+		} else if (parseThisString("FAKE ", str, &str)) {
+			isReal = false;
+		} else {
+			return false;
 		}
-		return false;
+		if (!parseThisChar('!', str, &str) ||
+		    !bbdd::parse(&scopes->bools, &data, str, suffix))
+			return false;
+		*out = new StateMachineSideEffectAssertFalse(data, isReal);
+		return true;
 	}
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
 	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck(SMScopes *) const {
+	void sanityCheck(SMScopes *scopes) const {
 		assert(reflectsActualProgram == true ||
 		       reflectsActualProgram == false);
-		value->sanity_check();
-		assert(value->type() == Ity_I1);
+		value->sanity_check(&scopes->ordering);
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;

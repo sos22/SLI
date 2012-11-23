@@ -526,9 +526,9 @@ undefinednessSimplification(SMScopes *scopes,
 				}
 				case StateMachineSideEffect::AssertFalse: {
 					auto *a = (StateMachineSideEffectAssertFalse *)newSe;
-					IRExpr *v = undefinednessExpression(sm, a->value, vdm, opt);
+					bbdd *v = undefinednessBBDD(&scopes->bools, sm, a->value, vdm, opt);
 					if (v != a->value) {
-						if (v == UNDEFINED_EXPR)
+						if (v == UNDEFINED_BBDD)
 							newSe = StateMachineSideEffectUnreached::get();
 						else
 							newSe = new StateMachineSideEffectAssertFalse(

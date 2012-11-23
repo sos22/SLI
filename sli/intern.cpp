@@ -323,7 +323,6 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 	case StateMachineSideEffect::AssertFalse: {
 		StateMachineSideEffectAssertFalse *af = dynamic_cast<StateMachineSideEffectAssertFalse *>(s);
 		assert(af);
-		af->value = internIRExpr(af->value, t);
 		for (auto it = t.asserts.begin(); it != t.asserts.end(); it++) {
 			StateMachineSideEffectAssertFalse *o = *it;
 			if (o->value == af->value) {

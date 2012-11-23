@@ -224,9 +224,9 @@ public:
 	}
 };
 class SMBStatementAssertFalse : public SMBStatement {
-	StateMachineSideEffect *compile(SMBCompilerState &) const {
+	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectAssertFalse(
-			expr.content->compile(),
+			bbdd::var(&state.scopes->bools, expr.content->compile()),
 			realAssertion);
 	}
 public:

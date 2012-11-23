@@ -256,7 +256,7 @@ _optimiseStateMachine(SMScopes *scopes,
 			p = false;
 			do {
 				d = false;
-				sm = deadCodeElimination(sm, &d, is_ssa);
+				sm = deadCodeElimination(&scopes->bools, sm, &d, is_ssa);
 				p |= d;
 			} while (d);
 			if (debugOptimiseStateMachine && p) {

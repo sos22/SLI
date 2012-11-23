@@ -176,7 +176,7 @@ useInitialMemoryLoads(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, con
 			rewrites[s] = new StateMachineSideEffecting(
 				s->dbg_origin,
 				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(Iop_BadPtr, load->addr),
+					bbdd::var(&scopes->bools, IRExpr_Unop(Iop_BadPtr, load->addr)),
 					true),
 				new StateMachineSideEffecting(
 					s->dbg_origin,

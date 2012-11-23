@@ -30,10 +30,10 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 }
 
 StateMachineSideEffectAssertFalse *
-StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectAssertFalse *a, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectAssertFalse *a, bool *d)
 {
 	bool b = false;
-	IRExpr *v = doit(a->value, &b);
+	bbdd *v = transform_bbdd(&scopes->bools, a->value, &b);
 	if (b) {
 		*d = true;
 		return new StateMachineSideEffectAssertFalse(v, a->reflectsActualProgram);

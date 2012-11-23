@@ -159,16 +159,15 @@ StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisati
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectAssertFalse::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	value = optimiseIRExprFP(value, opt, done_something);
-	if (value->tag == Iex_Const && ((IRExprConst *)value)->Ico.U1) {
+	value = simplifyBDD(&scopes->bools, value, opt, done_something);
+	if (value->isLeaf) {
 		*done_something = true;
-		return StateMachineSideEffectUnreached::get();
-	}
-	if (value->tag == Iex_Const && !((IRExprConst *)value)->Ico.U1) {
-		*done_something = true;
-		return NULL;
+		if (value->content.leaf)
+			return StateMachineSideEffectUnreached::get();
+		else
+			return NULL;
 	}
 	return this;
 }
@@ -912,8 +911,8 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		*/
 		*done_something = true;
 		sideEffect = new StateMachineSideEffectAssertFalse(
-			IRExpr_Binop(
-				Iop_Or1,
+			bbdd::Or(
+				&scopes->bools,
 				((StateMachineSideEffectAssertFalse *)sideEffect)->value,
 				((StateMachineSideEffectAssertFalse *)((StateMachineSideEffecting *)target)->sideEffect)->value),
 			((StateMachineSideEffectAssertFalse *)sideEffect)->reflectsActualProgram);

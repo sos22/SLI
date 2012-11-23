@@ -222,11 +222,9 @@ rawDupeS(duplication_context &, const StateMachineSideEffectEndAtomic *)
 }
 
 static StateMachineSideEffectAssertFalse *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectAssertFalse *l)
+rawDupeS(duplication_context &, const StateMachineSideEffectAssertFalse *l)
 {
-	StateMachineSideEffectAssertFalse *res = new StateMachineSideEffectAssertFalse(NULL, l->reflectsActualProgram);
-	ctxt(&res->value, l->value, rawDupe);
-	return res;
+	return new StateMachineSideEffectAssertFalse(l->value, l->reflectsActualProgram);
 }
 
 static StateMachineSideEffectCopy *

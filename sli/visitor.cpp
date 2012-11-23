@@ -132,7 +132,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->AssertFalse)
 			res = visitor->AssertFalse(ctxt, c);
 		if (res == visit_continue)
-			res = visit_irexpr(ctxt, &visitor->irexpr, c->value);
+			res = visit_bdd(ctxt, &visitor->irexpr, c->value);
 		return res;
 	}
 	case StateMachineSideEffect::Phi: {

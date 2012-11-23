@@ -1296,7 +1296,9 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 				new StateMachineSideEffecting(
 					it->first->dbg_origin,
 					new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(Iop_BadPtr, l->addr),
+						bbdd::var(
+							&scopes->bools,
+							IRExpr_Unop(Iop_BadPtr, l->addr)),
 						true),
 					it->first->target);
 		} else if (it->second.stores.size() == 1 &&
@@ -1450,9 +1452,11 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 					       stateLabels[*it]);
 				(*it)->sideEffect = 
 					new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(
-							Iop_BadPtr,
-							s->addr),
+						bbdd::var(
+							&scopes->bools,
+							IRExpr_Unop(
+								Iop_BadPtr,
+								s->addr)),
 						true);
 				progress = true;
 			}
