@@ -1041,7 +1041,6 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr)
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);
-template std::map<bool, bbdd *> _bdd<bool, bbdd>::to_selectors(const_bdd_scope<bbdd> *, bbdd *);
 template bbdd *_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *, bbdd *);
 
 template void _bdd<int, intbdd>::prettyPrint(FILE *);
