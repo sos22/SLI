@@ -1805,7 +1805,6 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 	printf("Calculate aliasing map...\n");
 	calculateAliasing(ths, token);
 	printf("Calculate RBP map...\n");
-	dbg_break("Here we are\n");
 	calculateRbpToRspOffsets(ths, token);
 	printf("Done static analysis phase\n");
 }
