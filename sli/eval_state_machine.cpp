@@ -572,21 +572,13 @@ EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, c
 			&scopes->bools,
 			exp,
 			pathConstraint);
+	bool b;
+	simplifiedCondition = simplifyBDD(&scopes->bools, simplifiedCondition, opt, &b);
 	if (simplifiedCondition->isLeaf)
 		return simplifiedCondition->leaf();
 	std::map<bool, bbdd *> selectors(bbdd::to_selectors(&scopes->bools, simplifiedCondition));
 	assert(selectors.count(true));
 	assert(selectors.count(false));
-	IRExpr *trueCond = simplifyIRExpr(
-		bbdd::to_irexpr(selectors[true]),
-		opt);
-	if (trueCond->tag == Iex_Const)
-		return ((IRExprConst *)trueCond)->Ico.U1;
-	IRExpr *falseCond = simplifyIRExpr(
-		bbdd::to_irexpr(selectors[false]),
-		opt);
-	if (falseCond->tag == Iex_Const)
-		return !((IRExprConst *)falseCond)->Ico.U1;
 
 	/* Can't prove it one way or another.  Use the
 	   non-deterministic chooser to guess. */
@@ -892,34 +884,13 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, const IRExprOpt
 		 * like and it won't actually matter. */
 		return tr_true;
 	}
-	std::map<bool, bbdd *> selectors(bbdd::to_selectors(&scopes->bools, simplifiedCondition));
-	assert(!selectors.empty());
-	if (selectors.size() == 1) {
-		if (selectors.begin()->first)
+	bool b;
+	simplifiedCondition = simplifyBDD(&scopes->bools, simplifiedCondition, opt, &b);
+	if (simplifiedCondition->isLeaf) {
+		if (simplifiedCondition->leaf())
 			return tr_true;
 		else
 			return tr_false;
-	}
-
-	assert(selectors.count(true));
-	assert(selectors.count(false));
-	IRExpr *trueCond = simplifyIRExpr(
-		bbdd::to_irexpr(selectors[true]),
-		opt);
-	if (trueCond->tag == Iex_Const) {
-		if ( ((IRExprConst *)trueCond)->Ico.U1 )
-			return tr_true;
-		else
-			return tr_false;
-	}
-	IRExpr *falseCond = simplifyIRExpr(
-		bbdd::to_irexpr(selectors[false]),
-		opt);
-	if (falseCond->tag == Iex_Const) {
-		if ( ((IRExprConst *)falseCond)->Ico.U1 )
-			return tr_false;
-		else
-			return tr_true;
 	}
 
 	/* Give up on this one and just accept that we don't know. */
