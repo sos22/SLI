@@ -500,7 +500,7 @@ private:
 		hv(pathConstraint);
 	}
 
-	trool evalBooleanExpression(SMScopes *scopes, bbdd *what, const IRExprOptimisations &opt);
+	trool evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt);
 	void evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    smrbdd *&result, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
@@ -854,7 +854,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 }
 
 EvalContext::trool
-EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, const IRExprOptimisations &opt)
+EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt)
 {
 	bbdd *simplifiedCondition =
 		bbdd::assume(
@@ -877,6 +877,7 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, const IRExprOpt
 	}
 
 	/* Give up on this one and just accept that we don't know. */
+	*simplified = simplifiedCondition;
 	return tr_unknown;
 }
 
@@ -950,7 +951,8 @@ EvalContext::advance(SMScopes *scopes,
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
 		bbdd *cond = state.specialiseIRExpr(scopes, smb->condition);
-		trool res = evalBooleanExpression(scopes, cond, opt);
+		bbdd *scond;
+		trool res = evalBooleanExpression(scopes, cond, &scond, opt);
 		switch (res) {
 		case tr_true:
 			pendingStates.push_back(EvalContext(
@@ -969,12 +971,12 @@ EvalContext::advance(SMScopes *scopes,
 							smb->falseTarget,
 							bbdd::invert(
 								&scopes->bools,
-								cond)));
+								scond)));
 			pendingStates.push_back(EvalContext(
 							scopes,
 							*this,
 							smb->trueTarget,
-							cond));
+							scond));
 			break;
 		}
 		return;
