@@ -198,9 +198,8 @@ rawDupeS(duplication_context &ctxt, const StateMachineSideEffectStore *l)
 {
 	StateMachineSideEffectStore *res = new StateMachineSideEffectStore(l,
 									   NULL,
-									   NULL);
+									   l->data);
 	ctxt(&res->addr, l->addr, rawDupe);
-	ctxt(&res->data, l->data, rawDupe);
 	return res;
 }
 
@@ -237,7 +236,7 @@ rawDupeS(duplication_context &, const StateMachineSideEffectCopy *l)
 }
 
 static StateMachineSideEffectPhi *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectPhi *l)
+rawDupeS(duplication_context &, const StateMachineSideEffectPhi *l)
 {
 	return new StateMachineSideEffectPhi(l->reg, l->ty, l->generations);
 }

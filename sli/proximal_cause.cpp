@@ -141,7 +141,7 @@ getProximalCause(SMScopes *scopes,
 			prependSideEffect(
 				new StateMachineSideEffectStore(
 					ist->addr,
-					ist->data,
+					exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
 					mai(tid, where),
 					MemoryTag::normal()));
 			crashIfBadPtr(ist->addr);

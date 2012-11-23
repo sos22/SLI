@@ -502,9 +502,9 @@ undefinednessSimplification(SMScopes *scopes,
 				case StateMachineSideEffect::Store: {
 					auto *s = (StateMachineSideEffectStore *)newSe;
 					IRExpr *addr = undefinednessExpression(sm, s->addr, vdm, opt);
-					IRExpr *data = undefinednessExpression(sm, s->data, vdm, opt);
+					exprbdd *data = undefinednessExprBDD(&scopes->exprs, &scopes->bools, sm, s->data, vdm, opt);
 					if (addr != s->addr || data != s->data) {
-						if (addr == UNDEFINED_EXPR || data == UNDEFINED_EXPR)
+						if (addr == UNDEFINED_EXPR || data == UNDEFINED_EXPRBDD)
 							newSe = StateMachineSideEffectUnreached::get();
 						else
 							newSe = new StateMachineSideEffectStore(

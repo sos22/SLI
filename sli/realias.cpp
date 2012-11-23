@@ -429,6 +429,12 @@ public:
 					      MachineAliasingTable &mat,
 					      StackLayoutTable &slt,
 					      StateMachine *machine);
+	PointerAliasingSet pointsToSetForExpr(exprbdd *e,
+					      StateMachineState *sm,
+					      Maybe<StackLayout> *sl,
+					      MachineAliasingTable &mat,
+					      StackLayoutTable &slt,
+					      StateMachine *machine);
 	bool build(StateMachine *sm);
 	void prettyPrint(FILE *f);
 	void sanity_check() const {
@@ -600,6 +606,34 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		break;
 	}
 	return PointerAliasingSet::anything;
+}
+
+PointerAliasingSet
+PointsToTable::pointsToSetForExpr(exprbdd *e,
+				  StateMachineState *sm,
+				  Maybe<StackLayout> *sl,
+				  MachineAliasingTable &mat,
+				  StackLayoutTable &slt,
+				  StateMachine *machine)
+{
+	PointerAliasingSet acc(PointerAliasingSet::nothing);
+	std::set<exprbdd *> visited;
+	std::vector<exprbdd *> q;
+	q.push_back(e);
+	while (!q.empty()) {
+		exprbdd *ee = q.back();
+		q.pop_back();
+		if (!visited.insert(ee).second)
+			continue;
+		if (e->isLeaf) {
+			acc |= pointsToSetForExpr(e->content.leaf, sm, sl,
+						  mat, slt, machine);
+		} else {
+			q.push_back(e->content.trueBranch);
+			q.push_back(e->content.falseBranch);
+		}
+	}
+	return acc;
 }
 
 bool
@@ -1013,7 +1047,7 @@ PointsToTable::refine(AliasTable &at,
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(exprbdd::to_irexpr(c->value), smse, sl, mat, slt, sm);
+			newPts = pointsToSetForExpr(c->value, smse, sl, mat, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
@@ -1021,7 +1055,7 @@ PointsToTable::refine(AliasTable &at,
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
 			     it++)
-				newPts |= pointsToSetForExpr(exprbdd::to_irexpr(it->val), smse, sl, mat, slt, sm);
+				newPts |= pointsToSetForExpr(it->val, smse, sl, mat, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::PointerAliasing:
@@ -1096,22 +1130,25 @@ AliasTable::refine(PointsToTable &ptt,
 	}
 }
 
-static IRExpr *
-dataOfSideEffect(StateMachineSideEffect *s_effect, IRType ty)
+static exprbdd *
+dataOfSideEffect(SMScopes *scopes, StateMachineSideEffect *s_effect, IRType ty)
 {
-	IRExpr *res;
+	exprbdd *res;
 	if (s_effect->type == StateMachineSideEffect::Store) {
 		res = ((StateMachineSideEffectStore *)s_effect)->data;
 	} else if (s_effect->type == StateMachineSideEffect::Load) {
-		res = IRExpr_Get(
-			((StateMachineSideEffectLoad *)s_effect)->target,
-			((StateMachineSideEffectLoad *)s_effect)->type);
+		res = exprbdd::var(
+			&scopes->exprs,
+			&scopes->bools,
+			IRExpr_Get(
+				((StateMachineSideEffectLoad *)s_effect)->target,
+				((StateMachineSideEffectLoad *)s_effect)->type));
 	} else if (s_effect->type == StateMachineSideEffect::Copy) {
-		res = exprbdd::to_irexpr(((StateMachineSideEffectCopy *)s_effect)->value);
+		res = ((StateMachineSideEffectCopy *)s_effect)->value;
 	} else {
 		abort();
 	}
-	return coerceTypes(ty, res);
+	return exprbdd::coerceTypes(&scopes->exprs, &scopes->bools, ty, res);
 }
 
 static StateMachine *
@@ -1271,10 +1308,10 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 				       stateLabels[it->first], stateLabels[s_state]);
 			assert(s_effect);
 			progress = true;
-			IRExpr *d = dataOfSideEffect(s_effect, l->type);
+			exprbdd *d = dataOfSideEffect(scopes, s_effect, l->type);
 			it->first->sideEffect =
 				new StateMachineSideEffectCopy(
-					l->target, exprbdd::var(&scopes->exprs, &scopes->bools, d));
+					l->target, d);
 		} else if (!it->second.mightLoadInitial) {
 #warning convert to an enabling table.
 			std::vector<std::pair<StateMachineState *, bbdd *> > possibleInputs;
@@ -1359,8 +1396,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 					for (auto it2 = possibleInputs.begin();
 					     it2 != possibleInputs.end();
 					     it2++) {
-						IRExpr *valE = dataOfSideEffect(it2->first->getSideEffect(), l->type);
-						exprbdd *val = exprbdd::var(&scopes->exprs, &scopes->bools, valE);
+						exprbdd *val = dataOfSideEffect(scopes, it2->first->getSideEffect(), l->type);
 						tab[it2->second] = val;
 						dflt = val;
 					}

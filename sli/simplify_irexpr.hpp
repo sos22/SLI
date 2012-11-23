@@ -16,6 +16,7 @@ IRExpr *optimiseAssuming(IRExpr *iex, const IRExpr *assumption);
 void addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg);
 bool physicallyEqual(const IRExpr *a, const IRExpr *b);
 IRExpr *coerceTypes(IRType, IRExpr *);
+IROp coerceTypesOp(IRType from, IRType to);
 IRExpr *expr_eq(IRExpr *, IRExpr *);
 
 template <typename treeT, typename scopeT> treeT *simplifyBDD(scopeT *scope, bbdd::scope *, treeT *bdd, const IRExprOptimisations &opt, bool *done_something);

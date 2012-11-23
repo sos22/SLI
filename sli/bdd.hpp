@@ -511,6 +511,7 @@ public:
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, IRExpr *);
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, IRExpr *, exprbdd *);
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, exprbdd *);
+	static exprbdd *coerceTypes(scope *, bbdd::scope *, IRType ty, exprbdd *);
 };
 
 #endif /* !BDD_HPP__ */

@@ -369,9 +369,10 @@ public:
 		set_register(scopes, phi->reg, exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(genM1, Ity_I64)), assumption, opt);
 	}
 
-	bbdd *specialiseIRExpr(SMScopes *scopes, bbdd *iex);
-	smrbdd *specialiseIRExpr(SMScopes *scopes, smrbdd *iex);
-	IRExpr *specialiseIRExpr(SMScopes *scopes, IRExpr *iex);
+	bbdd *specialiseIRExpr(SMScopes *, bbdd *iex);
+	smrbdd *specialiseIRExpr(SMScopes *, smrbdd *iex);
+	exprbdd *specialiseIRExpr(SMScopes *, exprbdd *iex);
+	IRExpr *specialiseIRExpr(SMScopes *, IRExpr *iex);
 	void visit(HeapVisitor &hv) {
 		for (auto it = registers.begin();
 		     it != registers.end();
@@ -463,6 +464,12 @@ threadState::specialiseIRExpr(SMScopes *scopes, smrbdd *smrbdd)
 {
 	SpecialiseIRExpr s(*this, scopes);
 	return s.transform_smrbdd(&scopes->bools, &scopes->smrs, smrbdd);
+}
+exprbdd *
+threadState::specialiseIRExpr(SMScopes *scopes, exprbdd *smrbdd)
+{
+	SpecialiseIRExpr s(*this, scopes);
+	return s.transform_exprbdd(&scopes->bools, &scopes->exprs, smrbdd);
 }
 
 class memLogT : public std::vector<std::pair<StateMachine *, StateMachineSideEffectStore *> > {
@@ -750,13 +757,17 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				break;
 			}
 		}
-		IRExpr *val;
+		exprbdd *val;
 		if (satisfier) {
-			val = coerceTypes(smsel->type, satisfier->data);
+			val = exprbdd::coerceTypes(
+				&scopes->exprs,
+				&scopes->bools,
+				smsel->type,
+				satisfier->data);
 		} else {
-			val = IRExpr_Load(smsel->type, addr);
+			val = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Load(smsel->type, addr));
 		}
-		state.set_register(scopes, smsel->target, exprbdd::var(&scopes->exprs, &scopes->bools, val), &pathConstraint, opt);
+		state.set_register(scopes, smsel->target, val, &pathConstraint, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {

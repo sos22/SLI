@@ -491,7 +491,10 @@ public:
 			return false;
 		if (!StateMachineSideEffect::parse(scopes, &sme, str, &str))
 			sme = NULL;
-		if (parseThisString(" then l", str, &str) &&
+		/* Some side-effect parsers consume trailing space and
+		   some don't.  Fix it up.  Bit of a hack. */
+		parseThisChar(' ', str, &str);
+		if (parseThisString("then l", str, &str) &&
 		    parseDecimalInt(&target, str, &str) &&
 		    parseThisString("}\n", str, suffix)) {
 			*out = new StateMachineSideEffecting(origin, sme, (StateMachineState *)target);
@@ -635,41 +638,40 @@ public:
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const MemoryAccessIdentifier &_rip, const MemoryTag &_tag)
+	StateMachineSideEffectStore(IRExpr *_addr, exprbdd *_data, const MemoryAccessIdentifier &_rip, const MemoryTag &_tag)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
-	StateMachineSideEffectStore(const StateMachineSideEffectStore *base, IRExpr *_addr, IRExpr *_data)
+	StateMachineSideEffectStore(const StateMachineSideEffectStore *base, IRExpr *_addr, exprbdd *_data)
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
-	IRExpr *data;
+	exprbdd *data;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "*(");
+		fprintf(f, "STORE (");
 		ppIRExpr(addr, f);
-		fprintf(f, "):%s <- ", tag.name());
-		ppIRExpr(data, f);
-		fprintf(f, " @ %s", rip.name());
+		fprintf(f, "):%s@%s <-\n", tag.name(), rip.name());
+		data->prettyPrint(f);
 	}
-	static bool parse(SMScopes *,
+	static bool parse(SMScopes *scopes,
 			  StateMachineSideEffectStore **out,
 			  const char *str,
 			  const char **suffix)
 	{
 		IRExpr *addr;
-		IRExpr *data;
+		exprbdd *data;
 		MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
 		MemoryTag tag;
-		if (parseThisString("*(", str, &str) &&
+		if (parseThisString("STORE (", str, &str) &&
 		    parseIRExpr(&addr, str, &str) &&
 		    parseThisString("):", str, &str) &&
 		    tag.parse(str, &str) &&
-		    parseThisString(" <- ", str, &str) &&
-		    parseIRExpr(&data, str, &str) &&
-		    parseThisString(" @ ", str, &str) &&
-		    rip.parse(str, suffix)) {
+		    parseThisString("@", str, &str) &&
+		    rip.parse(str, &str) &&
+		    parseThisString(" <-\n", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &data, str, suffix)) {
 			*out = new StateMachineSideEffectStore(addr, data, rip, tag);
 			return true;
 		}
@@ -682,7 +684,7 @@ public:
 	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
 	void sanityCheck(SMScopes *scopes) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(scopes);
-		data->sanity_check();
+		data->sanity_check(&scopes->ordering);
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;

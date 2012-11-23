@@ -116,7 +116,7 @@ _visit_side_effect(void *ctxt,
 		if (res == visit_continue)
 			res = visit_irexpr(ctxt, &visitor->irexpr, s->addr);
 		if (res == visit_continue)
-			res = visit_irexpr(ctxt, &visitor->irexpr, s->data);
+			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->data);
 		return res;
 	}
 	case StateMachineSideEffect::Copy: {

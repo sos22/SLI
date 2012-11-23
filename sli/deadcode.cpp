@@ -299,6 +299,19 @@ public:
 		visitor.Get = foo.f;
 		visit_irexpr(this, &visitor, e);
 	}
+	void useExpressionPointer(const exprbdd *e)
+	{
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				out->livePointer.insert(g->reg);
+				out->liveDataOnly.erase(g->reg);
+				return visit_continue;
+			}
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
+	}
 
 	void useSideEffect(StateMachineSideEffect *smse)
 	{

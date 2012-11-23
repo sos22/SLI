@@ -483,7 +483,7 @@ cfgNodeToState(SMScopes *scopes,
 				StateMachineSideEffect *se =
 					new StateMachineSideEffectStore(
 						ist->addr,
-						ist->data,
+						exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
 						mai(tid, target),
 						MemoryTag::normal());
 				StateMachineSideEffecting *smse =
@@ -532,7 +532,7 @@ cfgNodeToState(SMScopes *scopes,
 					target->rip,
 					new StateMachineSideEffectStore(
 						cas->addr,
-						cas->dataLo,
+						exprbdd::var(&scopes->exprs, &scopes->bools, cas->dataLo),
 						mai(tid, target),
 						MemoryTag::normal()),
 					l4);

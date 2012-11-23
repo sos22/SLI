@@ -561,10 +561,11 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 	case StateMachineSideEffect::Store: {
 		StateMachineSideEffectStore *smses =
 			dynamic_cast<StateMachineSideEffectStore *>(smse);
-		IRExpr *newAddr, *newData;
+		IRExpr *newAddr;
+		exprbdd *newData;
 		bool doit = false;
 		newAddr = applyAvailSet(currentlyAvailable, smses->addr, false, &doit, opt);
-		newData = applyAvailSet(currentlyAvailable, smses->data, false, &doit, opt);
+		newData = applyAvailSet(&scopes->bools, &scopes->exprs, currentlyAvailable, smses->data, false, &doit, opt);
 		if (doit) {
 			newEffect = new StateMachineSideEffectStore(
 				smses, newAddr, newData);
@@ -595,7 +596,11 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 				newEffect =
 					new StateMachineSideEffectCopy(
 						smsel->target,
-						exprbdd::var(&scopes->exprs, &scopes->bools, coerceTypes(smsel->type, smses2->data)));
+						exprbdd::coerceTypes(
+							&scopes->exprs,
+							&scopes->bools,
+							smsel->type,
+							smses2->data));
 			} else if ( smsel2 &&
 				    smsel->type <= smsel2->type &&
 				    smsel->tag == smsel2->tag &&

@@ -335,13 +335,13 @@ private:
 			l->tag);
 	}
 	StateMachineSideEffectStore *transformOneSideEffect(
-		SMScopes *, StateMachineSideEffectStore *l, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectStore *l, bool *done_something)
 	{
 		bool ign;
 		IRExpr *addr = doit(l->addr, &ign);
 		if (!addr)
 			addr = l->addr;
-		IRExpr *data = doit(l->data, &ign);
+		exprbdd *data = transform_exprbdd(&scopes->bools, &scopes->exprs, l->data, &ign);
 		if (!data)
 			data = l->data;
 		*done_something = true;

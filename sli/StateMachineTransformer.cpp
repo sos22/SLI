@@ -16,10 +16,11 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffe
 }
 
 StateMachineSideEffectStore *
-StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectStore *s, bool *c)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectStore *s, bool *c)
 {
 	bool b = false;
-	IRExpr *a = doit(s->addr, &b), *d = doit(s->data, &b);
+	IRExpr *a = doit(s->addr, &b);
+	exprbdd *d = transform_exprbdd(&scopes->bools, &scopes->exprs, s->data, &b);
 	if (b) {
 		*c = true;
 		return new StateMachineSideEffectStore(s, a, d);

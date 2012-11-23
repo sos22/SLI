@@ -1544,6 +1544,12 @@ exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *
 			binop(scope, bscope, op, a, b->content.falseBranch));
 }
 
+exprbdd *
+exprbdd::coerceTypes(scope *scope, bbdd::scope *bscope, IRType to, exprbdd *what)
+{
+	return unop(scope, bscope, coerceTypesOp(what->type(), to), what);
+}
+
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);

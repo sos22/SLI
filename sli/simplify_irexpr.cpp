@@ -1222,65 +1222,78 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption)
 	return iex;
 }
 
-/* Down-cast @expr so that it is of type @desiredType. */
-IRExpr *
-coerceTypes(IRType desiredType, IRExpr *expr)
+IROp
+coerceTypesOp(IRType from, IRType to)
 {
-	IRType origType = expr->type();
-	switch (origType) {
+	switch (from) {
 	case Ity_I64:
-		switch (desiredType) {
+		switch (to) {
 		case Ity_I8:
-			return IRExpr_Unop(Iop_64to8, expr);
+			return Iop_64to8;
 		case Ity_I16:
-			return IRExpr_Unop(Iop_64to16, expr);
+			return Iop_64to16;
 		case Ity_I32:
-			return IRExpr_Unop(Iop_64to32, expr);
+			return Iop_64to32;
+		case Ity_I64:
+			return Iop_Noop64;
 		default:
 			break;
 		}
 		break;
 	case Ity_I32:
-		switch (desiredType) {
+		switch (to) {
 		case Ity_I8:
-			return IRExpr_Unop(Iop_32to8, expr);
+			return Iop_32to8;
 		case Ity_I16:
-			return IRExpr_Unop(Iop_32to16, expr);
+			return Iop_32to16;
+		case Ity_I32:
+			return Iop_Noop32;
 		default:
 			break;
 		}
 		break;
 	case Ity_I16:
-		switch (desiredType) {
+		switch (to) {
 		case Ity_I8:
-			return IRExpr_Unop(Iop_16to8, expr);
+			return Iop_16to8;
+		case Ity_I16:
+			return Iop_Noop16;
 		default:
 			break;
 		}
 		break;
 	case Ity_I8:
-		switch (desiredType) {
+		switch (to) {
 		case Ity_I1:
-			return IRExpr_Unop(Iop_8to1, expr);
+			return Iop_8to1;
+		case Ity_I8:
+			return Iop_Noop8;
 		default:
 			break;
 		}
 		break;
 	case Ity_I128:
-		switch (desiredType) {
+		switch (to) {
 		case Ity_I64:
-			return IRExpr_Unop(Iop_V128to64, expr);
+			return Iop_128to64;
 		case Ity_I32:
-			return IRExpr_Unop(Iop_V128to32, expr);
+			return Iop_V128to32;
+		case Ity_I128:
+			return Iop_Noop128;
 		default:
 			break;
 		}
 	default:
 		break;
 	}
-	if (desiredType != origType)
-		abort();
-	return expr;
+	abort();
+}
+
+/* Down-cast @expr so that it is of type @desiredType. */
+IRExpr *
+coerceTypes(IRType desiredType, IRExpr *expr)
+{
+	return IRExpr_Unop(coerceTypesOp(expr->type(), desiredType), expr);
 }
 
 static bool

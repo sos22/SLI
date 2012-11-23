@@ -256,7 +256,7 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 		if (s->type == StateMachineSideEffect::Store) {
 			StateMachineSideEffectStore *store = dynamic_cast<StateMachineSideEffectStore *>(ma);
 			assert(store);
-			store->data = internIRExpr(store->data, t);
+			store->data = intern_exprbdd(scopes, store->data, t);
 			for (auto it = t.stores.begin();
 			     it != t.stores.end();
 			     it++) {
