@@ -147,32 +147,6 @@ avail_t::dereference(IRExpr *addr, const AllowableOptimisations &opt)
 	makeFalse(badPtr, opt);
 }
 
-template <typename a> bool
-intersectSets(std::set<a> &x, const std::set<a> &y)
-{
-	bool res = false;
-	auto it1 = x.begin();
-	auto it2 = y.begin();
-
-	while (it1 != x.end() && it2 != y.end()) {
-		if (*it1 == *it2) {
-			it1++;
-			it2++;
-		} else if (*it1 < *it2) {
-			x.erase(it1++);
-			res = true;
-		} else {
-			assert(*it2 < *it1);
-			it2++;
-		}
-	}
-	while (it1 != x.end()) {
-		res = true;
-		x.erase(it1++);
-	}
-	return res;
-}
-
 bool
 avail_t::mergeIntersection(const avail_t &other,
 			   const AllowableOptimisations &opt,
