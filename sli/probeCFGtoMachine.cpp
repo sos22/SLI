@@ -674,12 +674,15 @@ cfgNodeToState(SMScopes *scopes,
 				new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectStartFunction(
-						IRExpr_Get(
-							threadAndRegister::reg(
-								tid,
-								OFFSET_amd64_RSP,
-								0),
-							Ity_I64),
+						exprbdd::var(
+							&scopes->exprs,
+							&scopes->bools,
+							IRExpr_Get(
+								threadAndRegister::reg(
+									tid,
+									OFFSET_amd64_RSP,
+									0),
+								Ity_I64)),
 						FrameId()),
 					NULL);
 			*cursor = smp;
@@ -693,15 +696,18 @@ cfgNodeToState(SMScopes *scopes,
 				smp = new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectEndFunction(
-						IRExpr_Binop(
-							Iop_Add64,
-							IRExpr_Get(
-								threadAndRegister::reg(
-									tid,
-									OFFSET_amd64_RSP,
-									0),
-								Ity_I64),
-							IRExpr_Const_U64(-8)),
+						exprbdd::var(
+							&scopes->exprs,
+							&scopes->bools,
+							IRExpr_Binop(
+								Iop_Add64,
+								IRExpr_Get(
+									threadAndRegister::reg(
+										tid,
+										OFFSET_amd64_RSP,
+										0),
+									Ity_I64),
+								IRExpr_Const_U64(-8))),
 						FrameId()),
 					NULL);
 				*cursor = smp;
@@ -734,15 +740,18 @@ cfgNodeToState(SMScopes *scopes,
 				new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectEndFunction(
-						IRExpr_Binop(
-							Iop_Add64,
-							IRExpr_Get(
-								threadAndRegister::reg(
-									tid,
-									OFFSET_amd64_RSP,
-									0),
-								Ity_I64),
-							IRExpr_Const_U64(-8)),
+						exprbdd::var(
+							&scopes->exprs,
+							&scopes->bools,
+							IRExpr_Binop(
+								Iop_Add64,
+								IRExpr_Get(
+									threadAndRegister::reg(
+										tid,
+										OFFSET_amd64_RSP,
+										0),
+									Ity_I64),
+								IRExpr_Const_U64(-8))),
 						FrameId()),
 					NULL);
 			*cursor = smp;

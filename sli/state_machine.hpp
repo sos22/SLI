@@ -1016,33 +1016,26 @@ public:
 };
 class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
 public:
-	StateMachineSideEffectStartFunction(IRExpr *_rsp, FrameId _frame)
+	StateMachineSideEffectStartFunction(exprbdd *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
 		  rsp(_rsp), frame(_frame)
 	{
 	}
-	IRExpr *rsp;
+	exprbdd *rsp;
 	FrameId frame;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "StartFunction(%s) rsp = ", frame.name());
-		if (rsp)
-			ppIRExpr(rsp, f);
-		else
-			fprintf(f, "<inf>");
+		rsp->prettyPrint(f);
 	}
-	static bool parse(SMScopes *, StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
 	{
-		IRExpr *data;
+		exprbdd *data;
 		FrameId frame;
 		if (parseThisString("StartFunction(", str, &str) &&
 		    FrameId::parse(&frame, str, &str) &&
-		    parseThisString(") rsp = ", str, &str)) {
-			if (parseThisString("<inf>", str, suffix))
-				*out = new StateMachineSideEffectStartFunction(NULL, frame);
-			else if (parseIRExpr(&data, str, suffix))
-				*out = new StateMachineSideEffectStartFunction(data, frame);
-			else
-				return false;
+		    parseThisString(") rsp = ", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &data, str, suffix)) {
+			*out = new StateMachineSideEffectStartFunction(data, frame);
 			return true;
 		}
 		return false;
@@ -1051,11 +1044,9 @@ public:
 		hv(rsp);
 	}
 	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck(SMScopes *) const {
-		if (rsp) {
-			rsp->sanity_check();
-			assert(rsp->type() == Ity_I64);
-		}
+	void sanityCheck(SMScopes *scopes) const {
+		rsp->sanity_check(&scopes->ordering);
+		assert(rsp->type() == Ity_I64);
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -1066,25 +1057,25 @@ public:
 };
 class StateMachineSideEffectEndFunction : public StateMachineSideEffect {
 public:
-	StateMachineSideEffectEndFunction(IRExpr *_rsp, FrameId _frame)
+	StateMachineSideEffectEndFunction(exprbdd *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
 		  rsp(_rsp), frame(_frame)
 	{
 	}
-	IRExpr *rsp;
+	exprbdd *rsp;
 	FrameId frame;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "EndFunction(%s) rsp = ", frame.name());
-		ppIRExpr(rsp, f);
+		rsp->prettyPrint(f);
 	}
-	static bool parse(SMScopes *, StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
 	{
-		IRExpr *rsp;
+		exprbdd *rsp;
 		FrameId frame;
 		if (parseThisString("EndFunction(", str, &str) &&
 		    FrameId::parse(&frame, str, &str) &&
 		    parseThisString(") rsp = ", str, &str) &&
-		    parseIRExpr(&rsp, str, suffix)) {
+		    exprbdd::parse(&scopes->exprs, &rsp, str, suffix)) {
 			*out = new StateMachineSideEffectEndFunction(rsp, frame);
 			return true;
 		}
@@ -1094,8 +1085,8 @@ public:
 		hv(rsp);
 	}
 	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
-	void sanityCheck(SMScopes *) const {
-		rsp->sanity_check();
+	void sanityCheck(SMScopes *scopes) const {
+		rsp->sanity_check(&scopes->ordering);
 		assert(rsp->type() == Ity_I64);
 	}
 	bool definesRegister(threadAndRegister &) const {

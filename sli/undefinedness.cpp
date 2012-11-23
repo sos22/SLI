@@ -574,15 +574,15 @@ undefinednessSimplification(SMScopes *scopes,
 				}
 				case StateMachineSideEffect::StartFunction: {
 					auto *s = (StateMachineSideEffectStartFunction *)newSe;
-					IRExpr *v = undefinednessExpression(sm, s->rsp, vdm, opt);
-					if (v != s->rsp && v != UNDEFINED_EXPR)
+					auto v = undefinednessExprBDD(&scopes->exprs, &scopes->bools, sm, s->rsp, vdm, opt);
+					if (v != s->rsp && v != UNDEFINED_EXPRBDD)
 						newSe = new StateMachineSideEffectStartFunction(v, s->frame);
 					break;
 				}
 				case StateMachineSideEffect::EndFunction: {
 					auto *e = (StateMachineSideEffectEndFunction *)newSe;
-					IRExpr *v = undefinednessExpression(sm, e->rsp, vdm, opt);
-					if (v != e->rsp && v != UNDEFINED_EXPR)
+					auto v = undefinednessExprBDD(&scopes->exprs, &scopes->bools, sm, e->rsp, vdm, opt);
+					if (v != e->rsp && v != UNDEFINED_EXPRBDD)
 						newSe = new StateMachineSideEffectEndFunction(v, e->frame);
 					break;
 				}

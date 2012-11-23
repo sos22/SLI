@@ -150,7 +150,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->StartFunction)
 			res = visitor->StartFunction(ctxt, s);
 		if (res == visit_continue)
-			res = visit_irexpr(ctxt, &visitor->irexpr, s->rsp);
+			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->rsp);
 		return res;
 	}
 	case StateMachineSideEffect::EndFunction: {
@@ -158,7 +158,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->EndFunction)
 			res = visitor->EndFunction(ctxt, s);
 		if (res == visit_continue)
-			visit_irexpr(ctxt, &visitor->irexpr, s->rsp);
+			_visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->rsp);
 		return res;
 	}
 #define do_simple(name)							\

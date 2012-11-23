@@ -173,16 +173,16 @@ StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOpt
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStartFunction::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	rsp = optimiseIRExprFP(rsp, opt, done_something);
+	rsp = simplifyBDD(&scopes->exprs, &scopes->bools, rsp, opt, done_something);
 	return this;
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectEndFunction::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectEndFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	rsp = optimiseIRExprFP(rsp, opt, done_something);
+	rsp = simplifyBDD(&scopes->exprs, &scopes->bools, rsp, opt, done_something);
 	return this;
 }
 

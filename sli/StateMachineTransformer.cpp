@@ -43,10 +43,10 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 }
 
 StateMachineSideEffectStartFunction *
-StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectStartFunction *a, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectStartFunction *a, bool *d)
 {
 	bool b = false;
-	IRExpr *v = doit(a->rsp, &b);
+	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, a->rsp, &b);
 	if (b) {
 		*d = true;
 		return new StateMachineSideEffectStartFunction(v, a->frame);
@@ -56,10 +56,10 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffe
 }
 
 StateMachineSideEffectEndFunction *
-StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectEndFunction *a, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectEndFunction *a, bool *d)
 {
 	bool b = false;
-	IRExpr *v = doit(a->rsp, &b);
+	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, a->rsp, &b);
 	if (b) {
 		*d = true;
 		return new StateMachineSideEffectEndFunction(v, a->frame);

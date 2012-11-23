@@ -349,12 +349,10 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 		} while (0)
 	case StateMachineSideEffect::StartFunction: {
 		StateMachineSideEffectStartFunction *sf = (StateMachineSideEffectStartFunction *)s;
-		sf->rsp = internIRExpr(sf->rsp, t);
 		do_search(StartFunction);
 	}
 	case StateMachineSideEffect::EndFunction: {
 		StateMachineSideEffectEndFunction *sf = (StateMachineSideEffectEndFunction *)s;
-		sf->rsp = internIRExpr(sf->rsp, t);
 		do_search(EndFunction);
 	}
 	case StateMachineSideEffect::PointerAliasing: {

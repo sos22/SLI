@@ -481,12 +481,6 @@ public:
 		: avail(_avail)
 	{}
 };
-static IRExpr *
-applyAvailSet(const avail_t &avail, IRExpr *expr, bool *done_something)
-{
-	applyAvailTransformer aat(avail);
-	return aat.doit(expr, done_something);
-}
 static bbdd *
 applyAvailSet(bbdd::scope *scope, const avail_t &avail, bbdd *expr, bool *done_something)
 {
@@ -695,8 +689,8 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 		StateMachineSideEffectStartFunction *sf =
 			(StateMachineSideEffectStartFunction *)smse;
 		bool doit = false;
-		IRExpr *newRsp;
-		newRsp = applyAvailSet(currentlyAvailable, sf->rsp, &doit);
+		exprbdd *newRsp;
+		newRsp = applyAvailSet(scopes, currentlyAvailable, sf->rsp, &doit);
 		if (doit) {
 			newEffect = new StateMachineSideEffectStartFunction(newRsp, sf->frame);
 			*done_something = true;
@@ -709,8 +703,8 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 		StateMachineSideEffectEndFunction *sf =
 			(StateMachineSideEffectEndFunction *)smse;
 		bool doit = false;
-		IRExpr *newRsp;
-		newRsp = applyAvailSet(currentlyAvailable, sf->rsp, &doit);
+		exprbdd *newRsp;
+		newRsp = applyAvailSet(scopes, currentlyAvailable, sf->rsp, &doit);
 		if (doit) {
 			newEffect = new StateMachineSideEffectEndFunction(newRsp, sf->frame);
 			*done_something = true;

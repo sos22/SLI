@@ -186,89 +186,84 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 }
 
 static StateMachineSideEffectLoad *
-rawDupeS(duplication_context &, const StateMachineSideEffectLoad *l)
+rawDupeS(const StateMachineSideEffectLoad *l)
 {
 	return new StateMachineSideEffectLoad(l, l->addr);
 }
 
 static StateMachineSideEffectStore *
-rawDupeS(duplication_context &, const StateMachineSideEffectStore *l)
+rawDupeS(const StateMachineSideEffectStore *l)
 {
 	return new StateMachineSideEffectStore(l, l->addr, l->data);
 }
 
 static StateMachineSideEffectUnreached *
-rawDupeS(duplication_context &, const StateMachineSideEffectUnreached *)
+rawDupeS(const StateMachineSideEffectUnreached *)
 {
 	return StateMachineSideEffectUnreached::get();
 }
 
 static StateMachineSideEffectStartAtomic *
-rawDupeS(duplication_context &, const StateMachineSideEffectStartAtomic *)
+rawDupeS(const StateMachineSideEffectStartAtomic *)
 {
 	return StateMachineSideEffectStartAtomic::get();
 }
 
 static StateMachineSideEffectEndAtomic *
-rawDupeS(duplication_context &, const StateMachineSideEffectEndAtomic *)
+rawDupeS(const StateMachineSideEffectEndAtomic *)
 {
 	return StateMachineSideEffectEndAtomic::get();
 }
 
 static StateMachineSideEffectAssertFalse *
-rawDupeS(duplication_context &, const StateMachineSideEffectAssertFalse *l)
+rawDupeS(const StateMachineSideEffectAssertFalse *l)
 {
 	return new StateMachineSideEffectAssertFalse(l->value, l->reflectsActualProgram);
 }
 
 static StateMachineSideEffectCopy *
-rawDupeS(duplication_context &, const StateMachineSideEffectCopy *l)
+rawDupeS(const StateMachineSideEffectCopy *l)
 {
 	return new StateMachineSideEffectCopy(l->target, l->value);
 }
 
 static StateMachineSideEffectPhi *
-rawDupeS(duplication_context &, const StateMachineSideEffectPhi *l)
+rawDupeS(const StateMachineSideEffectPhi *l)
 {
 	return new StateMachineSideEffectPhi(l->reg, l->ty, l->generations);
 }
 
 static StateMachineSideEffectStartFunction *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectStartFunction *l)
+rawDupeS(const StateMachineSideEffectStartFunction *l)
 {
-	auto *res = new StateMachineSideEffectStartFunction(NULL, l->frame);
-	ctxt(&res->rsp, l->rsp, rawDupe);
-	return res;
+	return new StateMachineSideEffectStartFunction(l->rsp, l->frame);
 }
 
 static StateMachineSideEffectEndFunction *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectEndFunction *l)
+rawDupeS(const StateMachineSideEffectEndFunction *l)
 {
-	auto *res = new StateMachineSideEffectEndFunction(NULL, l->frame);
-	ctxt(&res->rsp, l->rsp, rawDupe);
-	return res;
+	return new StateMachineSideEffectEndFunction(l->rsp, l->frame);
 }
 
 static StateMachineSideEffectPointerAliasing *
-rawDupeS(duplication_context &, const StateMachineSideEffectPointerAliasing *l)
+rawDupeS(const StateMachineSideEffectPointerAliasing *l)
 {
 	return new StateMachineSideEffectPointerAliasing(l->reg, l->set);
 }
 
 static StateMachineSideEffectStackLayout *
-rawDupeS(duplication_context &, const StateMachineSideEffectStackLayout *l)
+rawDupeS(const StateMachineSideEffectStackLayout *l)
 {
 	return new StateMachineSideEffectStackLayout(l->functions);
 }
 
 static StateMachineSideEffect *
-rawDupe(duplication_context &ctxt, const StateMachineSideEffect *smse)
+rawDupe(const StateMachineSideEffect *smse)
 {
 	switch (smse->type) {
 #define do_case(n)							\
 		case StateMachineSideEffect::n:				\
-			return rawDupeS(ctxt,				\
-					(const StateMachineSideEffect ## n *)smse);
+			return rawDupeS((const StateMachineSideEffect ## n *)smse);
 		all_side_effect_types(do_case);
 #undef do_case
 	}
@@ -291,7 +286,7 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)inp;
 		StateMachineSideEffecting *res = new StateMachineSideEffecting(sme->dbg_origin,
-									       sme->sideEffect ? rawDupe(ctxt, sme->sideEffect) : NULL,
+									       sme->sideEffect ? rawDupe(sme->sideEffect) : NULL,
 									       NULL);
 		ctxt(&res->target, sme->target, rawDupe);
 		return res;
