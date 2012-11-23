@@ -241,7 +241,8 @@ muxify(IRExpr *what)
 			return acc;
 		}
 
-		IRExpr *a;
+		assert(iea->nr_arguments > 0);
+		IRExpr *a = (IRExpr *)0xdead;
 		int i;
 		for (i = 0; i < iea->nr_arguments; i++) {
 			a = muxify(iea->contents[i]);

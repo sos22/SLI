@@ -1451,6 +1451,8 @@ sat_enumerator::skipToSatisfying()
 			}
 		}
 
+		assert(chosenVar != NULL);
+
 		/* Do a case split on this variable. */
 
 		if (debug_satisfier)

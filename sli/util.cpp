@@ -302,6 +302,17 @@ my_system(const char *arg1, ...)
 
 const char *__warning_tag = "<no_tag>";
 
+static void
+swrite(int fd, const void *buf, size_t size)
+{
+	ssize_t s;
+	for (size_t off = 0; off < size; off += s) {
+		s = write(fd, (const void *)((unsigned long)buf + off), size - off);
+		if (s <= 0)
+			break;
+	}
+}
+
 void
 warning(const char *fmt, ...)
 {
@@ -317,7 +328,7 @@ warning(const char *fmt, ...)
 	va_start(args, fmt);
 	if (vasprintf(&f1, fmt, args) < 0) {
 #define s "<failed to format warning message>\n"
-		write(warnings, s, sizeof(s) - 1);
+		swrite(warnings, s, sizeof(s) - 1);
 #undef s
 		va_end(args);
 		return;
@@ -325,13 +336,13 @@ warning(const char *fmt, ...)
 	va_end(args);
 	if (asprintf(&f2, "%s: %s", __warning_tag, f1) < 0) {
 #define s "<failed to get warning tag>\n"
-		write(warnings, s, sizeof(s) - 1);
+		swrite(warnings, s, sizeof(s) - 1);
 #undef s
-		write(warnings, f1, strlen(f1));
+		swrite(warnings, f1, strlen(f1));
 		free(f1);
 		return;
 	}
-	write(warnings, f2, strlen(f2));
+	swrite(warnings, f2, strlen(f2));
 	if (_logfile != stdout)
 		fprintf(stdout, "%s", f2);
 	fprintf(_logfile, "%s", f2);

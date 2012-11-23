@@ -510,7 +510,11 @@ public:
 	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
 	StateMachineSideEffect *getSideEffect() { return sideEffect; }
-	void sanityCheck(SMScopes *scopes) const
+	void sanityCheck(SMScopes *
+#ifndef NDEBUG
+			 scopes
+#endif
+			 ) const
 	{
 #ifndef NDEBUG
 		if (sideEffect)

@@ -754,6 +754,8 @@ truncateStateMachine(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, Stat
 		auto did_insert = it_did_insert.second;
 		if (did_insert) {
 			StateMachineState *newState;
+			/* Shut compiler up */
+			newState = (StateMachineState *)0xdead;
 			switch (oldState->type) {
 			case StateMachineState::Bifurcate: {
 				auto smb = (const StateMachineBifurcate *)oldState;
