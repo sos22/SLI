@@ -506,6 +506,11 @@ public:
 			return content.trueBranch->type();
 	}
 	void sanity_check(bdd_ordering *ordering = NULL) const;
+
+	static exprbdd *unop(scope *scope, bbdd::scope *, IROp, exprbdd *);
+	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, IRExpr *);
+	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, IRExpr *, exprbdd *);
+	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, exprbdd *);
 };
 
 #endif /* !BDD_HPP__ */

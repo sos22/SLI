@@ -56,10 +56,10 @@ class threadState {
 	   you e.g. write to val32 you clear val16 and val8).
 	*/
 	struct register_val {
-		IRExpr *val8;
-		IRExpr *val16;
-		IRExpr *val32;
-		IRExpr *val64;
+		exprbdd *val8;
+		exprbdd *val16;
+		exprbdd *val32;
+		exprbdd *val64;
 		register_val()
 			: val8(NULL), val16(NULL), val32(NULL), val64(NULL)
 		{}
@@ -90,10 +90,12 @@ class threadState {
 		assignmentOrder.push_back(reg);
 	}
 
-	IRExpr *setTemporary(const threadAndRegister &reg, IRExpr *inp, const IRExprOptimisations &opt);
+	IRExpr *setTemporary(SMScopes *scopes, const threadAndRegister &reg, IRExpr *inp, const IRExprOptimisations &opt);
 	bbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *inp, const IRExprOptimisations &opt);
+	exprbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *inp, const IRExprOptimisations &opt);
 public:
-	IRExpr *register_value(const threadAndRegister &reg,
+	exprbdd *register_value(SMScopes *scopes,
+				const threadAndRegister &reg,
 			       IRType type) {
 		auto it = registers.find(reg);
 		if (it == registers.end())
@@ -104,84 +106,101 @@ public:
 			if (rv.val8)
 				return rv.val8;
 			else if (rv.val16)
-				return IRExpr_Unop(Iop_16to8, rv.val16);
+				return exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_16to8, rv.val16);
 			else if (rv.val32)
-				return IRExpr_Unop(Iop_32to8, rv.val32);
+				return exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_32to8, rv.val32);
 			else if (rv.val64)
-				return IRExpr_Unop(Iop_64to8, rv.val64);
+				return exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_64to8, rv.val64);
 			else
 				return NULL;
 		case Ity_I16:
 			if (rv.val8) {
-				IRExpr *acc = IRExpr_Unop(Iop_8Uto16, rv.val8);
-				IRExpr *mask = IRExpr_Const_U16(0xff00);
-				IRExpr *hi;
+				exprbdd *acc = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_8Uto16, rv.val8);
+				exprbdd *mask = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U16(0xff00));
+				exprbdd *hi;
 				if (rv.val16) {
 					hi = rv.val16;
 				} else if (rv.val32) {
-					hi = IRExpr_Unop(Iop_32to16, rv.val32);
+					hi = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_32to16, rv.val32);
 				} else if (rv.val64) {
-					hi = IRExpr_Unop(Iop_64to16, rv.val64);
+					hi = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_64to16, rv.val64);
 				} else {
-					hi = IRExpr_Get(reg, type);
+					hi = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg, type));
 				}
-				acc = IRExpr_Binop(Iop_Or16,
-						   acc,
-						   IRExpr_Binop(
-							   Iop_And16,
-							   hi,
-							   mask));
+				acc = exprbdd::binop(
+					&scopes->exprs,
+					&scopes->bools,
+					Iop_Or16,
+					acc,
+					exprbdd::binop(
+						&scopes->exprs,
+						&scopes->bools,
+						Iop_And16,
+						hi,
+						mask));
 				rv.val8 = NULL;
 				rv.val16 = acc;
 				return acc;
 			} else if (rv.val16) {
 				return rv.val16;
 			} else if (rv.val32) {
-				return IRExpr_Unop(Iop_32to16, rv.val32);
+				return exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_32to16, rv.val32);
 			} else if (rv.val64) {
-				return IRExpr_Unop(Iop_64to16, rv.val64);
-			} else
+				return exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_64to16, rv.val64);
+			} else {
 				return NULL;
+			}
 		case Ity_I32: {
-			IRExpr *res = NULL;
+			exprbdd *res = NULL;
 			unsigned mask = ~0;
 			if (rv.val8) {
-				res = IRExpr_Unop(Iop_8Uto32, rv.val8);
+				res = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_8Uto32, rv.val8);
 				mask = ~0xff;
 			}
 			if (rv.val16) {
-				IRExpr *a = IRExpr_Unop(Iop_16Uto32, rv.val16);
+				exprbdd *a = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_16Uto32, rv.val16);
 				if (res)
-					res = IRExpr_Binop(
+					res = exprbdd::binop(
+						&scopes->exprs,
+						&scopes->bools,
 						Iop_Or32,
 						res,
-						IRExpr_Binop(
+						exprbdd::binop(
+							&scopes->exprs,
+							&scopes->bools,
 							Iop_And32,
 							a,
-							IRExpr_Const_U32(mask)));
+							exprbdd::var(
+								&scopes->exprs,
+								&scopes->bools,
+								IRExpr_Const_U32(mask))));
 				else
 					res = a;
 				mask = ~0xffff;
 			}
-			IRExpr *parent;
+			exprbdd *parent;
 			if (rv.val32) {
 				parent = rv.val32;
 			} else if (rv.val64) {
-				parent = IRExpr_Unop(Iop_64to32, rv.val64);
+				parent = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_64to32, rv.val64);
 			} else if (res) {
-				parent = IRExpr_Get(reg, Ity_I32);
+				parent = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg, Ity_I32));
 			} else {
 				parent = NULL;
 			}
 
 			if (res)
-				res = IRExpr_Binop(
+				res = exprbdd::binop(
+					&scopes->exprs,
+					&scopes->bools,
 					Iop_Or32,
 					res,
-					IRExpr_Binop(
+					exprbdd::binop(
+						&scopes->exprs,
+						&scopes->bools,
 						Iop_And32,
 						parent,
-						IRExpr_Const_U32(mask)));
+						exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U32(mask))));
 			else
 				res = parent;
 			rv.val8 = NULL;
@@ -191,60 +210,76 @@ public:
 		}
 
 		case Ity_I64: {
-			IRExpr *res = NULL;
+			exprbdd *res = NULL;
 			unsigned long mask = ~0ul;
 			if (rv.val8) {
-				res = IRExpr_Unop(Iop_8Uto64, rv.val8);
+				res = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_8Uto64, rv.val8);
 				mask = ~0xfful;
 			}
 			if (rv.val16) {
-				IRExpr *a = IRExpr_Unop(Iop_16Uto64, rv.val16);
+				exprbdd *a = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_16Uto64, rv.val16);
 				if (res)
-					res = IRExpr_Binop(
+					res = exprbdd::binop(
+						&scopes->exprs,
+						&scopes->bools,
 						Iop_Or64,
 						res,
-						IRExpr_Binop(
+						exprbdd::binop(
+							&scopes->exprs,
+							&scopes->bools,
 							Iop_And64,
 							a,
-							IRExpr_Const_U64(mask)));
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask))));
 				else
 					res = a;
 				mask = ~0xfffful;
 			}
 			if (rv.val32) {
-				IRExpr *a = IRExpr_Unop(Iop_32Uto64, rv.val32);
+				exprbdd *a = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_32Uto64, rv.val32);
 				if (res)
-					res = IRExpr_Binop(
+					res = exprbdd::binop(
+						&scopes->exprs,
+						&scopes->bools,
 						Iop_Or64,
 						res,
-						IRExpr_Binop(
+						exprbdd::binop(
+							&scopes->exprs,
+							&scopes->bools,
 							Iop_And64,
 							a,
-							IRExpr_Const_U64(mask)));
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask))));
 				else
 					res = a;
 				mask = ~0xfffffffful;
 			}
 			if (rv.val64) {
 				if (res)
-					res = IRExpr_Binop(
+					res = exprbdd::binop(
+						&scopes->exprs,
+						&scopes->bools,
 						Iop_Or64,
 						res,
-						IRExpr_Binop(
+						exprbdd::binop(
+							&scopes->exprs,
+							&scopes->bools,
 							Iop_And64,
 							rv.val64,
-							IRExpr_Const_U64(mask)));
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask))));
 				else
 					res = rv.val64;
 			} else {
 				if (res)
-					res = IRExpr_Binop(
+					res = exprbdd::binop(
+						&scopes->exprs,
+						&scopes->bools,
 						Iop_Or64,
 						res,
-						IRExpr_Binop(
+						exprbdd::binop(
+							&scopes->exprs,
+							&scopes->bools,
 							Iop_And64,
-							IRExpr_Get(reg, Ity_I64),
-							IRExpr_Const_U64(mask)));
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg, Ity_I64)),
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask))));
 				
 			}
 			/* res might still be NULL.  That's okay; it
@@ -262,7 +297,7 @@ public:
 	}
 	void set_register(SMScopes *scopes,
 			  const threadAndRegister &reg,
-			  IRExpr *e,
+			  exprbdd *e,
 			  bbdd **assumption,
 			  const IRExprOptimisations &opt) {
 		register_val &rv(registers[reg]);
@@ -289,7 +324,7 @@ public:
 			/* Bit of a hack.  We only have 64 bit
 			   registers, so if we have to store a 128 bit
 			   value we just truncate it down. */
-			set_register(scopes, reg, IRExpr_Unop(Iop_128to64, e), assumption, opt);
+			set_register(scopes, reg, exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_128to64, e), assumption, opt);
 			return;
 		default:
 			abort();
@@ -331,12 +366,12 @@ public:
 		assert(genM1.isValid());
 
 		/* Pick up initial value */
-		set_register(scopes, phi->reg, IRExpr_Get(genM1, Ity_I64), assumption, opt);
+		set_register(scopes, phi->reg, exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(genM1, Ity_I64)), assumption, opt);
 	}
 
-	bbdd *specialiseIRExpr(bbdd::scope *scope, bbdd *iex);
-	smrbdd *specialiseIRExpr(smrbdd::scope *scope, bbdd::scope *, smrbdd *iex);
-	IRExpr *specialiseIRExpr(IRExpr *iex);
+	bbdd *specialiseIRExpr(SMScopes *scopes, bbdd *iex);
+	smrbdd *specialiseIRExpr(SMScopes *scopes, smrbdd *iex);
+	IRExpr *specialiseIRExpr(SMScopes *scopes, IRExpr *iex);
 	void visit(HeapVisitor &hv) {
 		for (auto it = registers.begin();
 		     it != registers.end();
@@ -352,7 +387,7 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *
 {
 	if (e->isLeaf)
 		return e;
-	IRExpr *cond = setTemporary(reg, e->content.condition, opt);
+	IRExpr *cond = setTemporary(scopes, reg, e->content.condition, opt);
 	bbdd *trueB = setTemporary(scopes, reg, e->content.trueBranch, opt);
 	bbdd *falseB = setTemporary(scopes, reg, e->content.falseBranch, opt);
 	if (cond == e->content.condition && trueB == e->content.trueBranch && falseB == e->content.falseBranch)
@@ -362,56 +397,72 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *
 			    trueB,
 			    falseB);
 }
-
+exprbdd *
+threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *e, const IRExprOptimisations &opt)
+{
+	if (e->isLeaf)
+		return exprbdd::var(&scopes->exprs, &scopes->bools, e->content.leaf);
+	IRExpr *cond = setTemporary(scopes, reg, e->content.condition, opt);
+	exprbdd *trueB = setTemporary(scopes, reg, e->content.trueBranch, opt);
+	exprbdd *falseB = setTemporary(scopes, reg, e->content.falseBranch, opt);
+	if (cond == e->content.condition && trueB == e->content.trueBranch && falseB == e->content.falseBranch)
+		return e;
+	return exprbdd::ifelse(&scopes->exprs,
+			       bbdd::var(&scopes->bools, cond),
+			       trueB,
+			       falseB);
+}
 IRExpr *
-threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const IRExprOptimisations &opt)
+threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, IRExpr *e, const IRExprOptimisations &opt)
 {
 	struct _ : public IRExprTransformer {
 		const threadAndRegister &reg;
 		threadState *_this;
-		_(const threadAndRegister &_reg, threadState *__this)
-			: reg(_reg), _this(__this)
+		SMScopes *_scopes;
+		_(const threadAndRegister &_reg, threadState *__this, SMScopes *__scopes)
+			: reg(_reg), _this(__this), _scopes(__scopes)
 		{}
 		IRExpr *transformIex(IRExprGet *ieg) {
 			if (ieg->reg == reg)
-				return _this->register_value(reg, ieg->ty);
+				return exprbdd::to_irexpr(_this->register_value(_scopes, reg, ieg->ty));
 			else
 				return IRExprTransformer::transformIex(ieg);
 		}
-	} doit(reg, this);
+	} doit(reg, this, scopes);
 	return simplifyIRExpr(doit.doit(e), opt);
 }
 
 class SpecialiseIRExpr : public IRExprTransformer {
 	threadState &state;
+	SMScopes *scopes;
 	IRExpr *transformIex(IRExprGet *e) {
-		IRExpr *e2 = state.register_value(e->reg, e->type());
+		exprbdd *e2 = state.register_value(scopes, e->reg, e->type());
 		if (e2)
-			return coerceTypes(e->type(), e2);
+			return coerceTypes(e->type(), exprbdd::to_irexpr(e2));
 		return IRExprTransformer::transformIex(e);
 	}
 public:
-	SpecialiseIRExpr(threadState &_state)
-		: state(_state)
+	SpecialiseIRExpr(threadState &_state, SMScopes *_scopes)
+		: state(_state), scopes(_scopes)
 	{}
 };
 IRExpr *
-threadState::specialiseIRExpr(IRExpr *iex)
+threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *iex)
 {
-	SpecialiseIRExpr s(*this);
+	SpecialiseIRExpr s(*this, scopes);
 	return s.doit(iex);
 }
 bbdd *
-threadState::specialiseIRExpr(bbdd::scope *scope, bbdd *bbdd)
+threadState::specialiseIRExpr(SMScopes *scopes, bbdd *bbdd)
 {
-	SpecialiseIRExpr s(*this);
-	return s.transform_bbdd(scope, bbdd);
+	SpecialiseIRExpr s(*this, scopes);
+	return s.transform_bbdd(&scopes->bools, bbdd);
 }
 smrbdd *
-threadState::specialiseIRExpr(smrbdd::scope *scope, bbdd::scope *bscope, smrbdd *smrbdd)
+threadState::specialiseIRExpr(SMScopes *scopes, smrbdd *smrbdd)
 {
-	SpecialiseIRExpr s(*this);
-	return s.transform_smrbdd(bscope, scope, smrbdd);
+	SpecialiseIRExpr s(*this, scopes);
+	return s.transform_smrbdd(&scopes->bools, &scopes->smrs, smrbdd);
 }
 
 class memLogT : public std::vector<std::pair<StateMachine *, StateMachineSideEffectStore *> > {
@@ -607,10 +658,10 @@ EvalContext::evalExprBDD(SMScopes *scopes, exprbdd *expr, NdChooser &chooser, co
 	for (auto it = selectors.begin(); it != selectors.end(); it++) {
 		assert(ordering.count(it->first));
 		bool b;
-		bbdd *spec_cond = simplifyBDD(&scopes->bools, state.specialiseIRExpr(&scopes->bools, it->second), opt, &b);
+		bbdd *spec_cond = simplifyBDD(&scopes->bools, state.specialiseIRExpr(scopes, it->second), opt, &b);
 		if (spec_cond->isLeaf) {
 			if (spec_cond->content.leaf)
-				return state.specialiseIRExpr(it->first);
+				return state.specialiseIRExpr(scopes, it->first);
 		} else {
 			sorted.push_back(expr_bbdd_ordered_tuple(ordering[it->first], it->first, spec_cond));
 		}
@@ -628,7 +679,7 @@ EvalContext::evalExprBDD(SMScopes *scopes, exprbdd *expr, NdChooser &chooser, co
 			&scopes->bools,
 			sorted[choice].cond,
 			pathConstraint);
-	return state.specialiseIRExpr(sorted[choice].expr);
+	return state.specialiseIRExpr(scopes, sorted[choice].expr);
 
 }
 
@@ -647,7 +698,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		StateMachineSideEffectMemoryAccess *smsema =
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
-		addr = state.specialiseIRExpr(smsema->addr);
+		addr = state.specialiseIRExpr(scopes, smsema->addr);
 		if (expressionIsTrue(scopes, bbdd::var(&scopes->bools, IRExpr_Unop(Iop_BadPtr, addr)), chooser, opt))
 			return esme_escape;
 	}
@@ -663,8 +714,8 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			(thisMachine,
 			 new StateMachineSideEffectStore(
 				 smses,
-				 state.specialiseIRExpr(addr),
-				 state.specialiseIRExpr(smses->data))));
+				 state.specialiseIRExpr(scopes, addr),
+				 state.specialiseIRExpr(scopes, smses->data))));
 		break;
 	}
 	case StateMachineSideEffect::Load: {
@@ -705,7 +756,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		} else {
 			val = IRExpr_Load(smsel->type, addr);
 		}
-		state.set_register(scopes, smsel->target, val, &pathConstraint, opt);
+		state.set_register(scopes, smsel->target, exprbdd::var(&scopes->exprs, &scopes->bools, val), &pathConstraint, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -714,7 +765,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		assert(smsec);
 		state.set_register(scopes,
 				   smsec->target,
-				   evalExprBDD(scopes, smsec->value, chooser, opt),
+				   exprbdd::var(&scopes->exprs, &scopes->bools, evalExprBDD(scopes, smsec->value, chooser, opt)),
 				   &pathConstraint,
 				   opt);
 		break;
@@ -881,7 +932,7 @@ EvalContext::advance(SMScopes *scopes,
 		auto smt = (StateMachineTerminal *)currentState;
 		result = smrbdd::ifelse(&scopes->smrs,
 					pathConstraint,
-					state.specialiseIRExpr(&scopes->smrs, &scopes->bools, smt->res),
+					state.specialiseIRExpr(scopes, smt->res),
 					result);
 		return;
 	}
@@ -898,7 +949,7 @@ EvalContext::advance(SMScopes *scopes,
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
-		bbdd *cond = state.specialiseIRExpr(&scopes->bools, smb->condition);
+		bbdd *cond = state.specialiseIRExpr(scopes, smb->condition);
 		trool res = evalBooleanExpression(scopes, cond, opt);
 		switch (res) {
 		case tr_true:

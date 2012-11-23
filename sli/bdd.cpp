@@ -1297,9 +1297,9 @@ public:
 
 template <typename constT, typename subtreeT> template <typename scopeT> subtreeT *
 _bdd<constT, subtreeT>::ifelse(scopeT *scope,
-				    bbdd *cond,
-				    subtreeT *ifTrue,
-				    subtreeT *ifFalse)
+			       bbdd *cond,
+			       subtreeT *ifTrue,
+			       subtreeT *ifFalse)
 {
 	return zip(scope, ifelse_zip_internal<subtreeT, scopeT>(cond, ifTrue, ifFalse));
 }
@@ -1462,6 +1462,86 @@ exprbdd_scope::runGc(HeapVisitor &hv)
 		newLeaves[it->first] = b;
 	}
 	leaves = newLeaves;
+}
+
+exprbdd *
+exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
+{
+	if (what->isLeaf)
+		return var(
+			scope,
+			bscope,
+			IRExpr_Unop(op, what->content.leaf));
+	else
+		return ifelse(
+			scope,
+			bbdd::var(bscope, what->content.condition),
+			unop(scope, bscope, op, what->content.trueBranch),
+			unop(scope, bscope, op, what->content.falseBranch));
+}
+
+exprbdd *
+exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, IRExpr *a, exprbdd *b)
+{
+	if (b->isLeaf)
+		return var(
+			scope,
+			bscope,
+			IRExpr_Binop(op, a, b->content.leaf));
+	else
+		return ifelse(
+			scope,
+			bbdd::var(bscope, b->content.condition),
+			exprbdd::binop(scope, bscope, op, a, b->content.trueBranch),
+			exprbdd::binop(scope, bscope, op, a, b->content.falseBranch));
+}
+
+exprbdd *
+exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, IRExpr *b)
+{
+	if (a->isLeaf)
+		return var(
+			scope,
+			bscope,
+			IRExpr_Binop(op, a->content.leaf, b));
+	else
+		return ifelse(
+			scope,
+			bbdd::var(bscope, a->content.condition),
+			exprbdd::binop(scope, bscope, op, a->content.trueBranch,  b),
+			exprbdd::binop(scope, bscope, op, a->content.falseBranch, b));
+}
+
+exprbdd *
+exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b)
+{
+	if (a->isLeaf && b->isLeaf)
+		return var(
+			scope,
+			bscope,
+			IRExpr_Binop(op, a->content.leaf, b->content.leaf));
+	else if (a->isLeaf)
+		return binop(scope, bscope, op, a->content.leaf, b);
+	else if (b->isLeaf)
+		return binop(scope, bscope, op, a, b->content.leaf);
+	else if (a->content.rank < b->content.rank)
+		return ifelse(
+			scope,
+			bbdd::var(bscope, a->content.condition),
+			binop(scope, bscope, op, a->content.trueBranch, b),
+			binop(scope, bscope, op, a->content.falseBranch, b));
+	else if (a->content.rank == b->content.rank)
+		return ifelse(
+			scope,
+			bbdd::var(bscope, a->content.condition),
+			binop(scope, bscope, op, a->content.trueBranch, b->content.trueBranch),
+			binop(scope, bscope, op, a->content.falseBranch, b->content.falseBranch));
+	else
+		return ifelse(
+			scope,
+			bbdd::var(bscope, b->content.condition),
+			binop(scope, bscope, op, a, b->content.trueBranch),
+			binop(scope, bscope, op, a, b->content.falseBranch));
 }
 
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
