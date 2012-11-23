@@ -3,10 +3,10 @@
 #include "state_machine.hpp"
 
 StateMachineSideEffectLoad *
-StateMachineTransformer::transformOneSideEffect(SMScopes *, StateMachineSideEffectLoad *l, bool *c)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectLoad *l, bool *c)
 {
 	bool b = false;
-	IRExpr *a = doit(l->addr, &b);
+	exprbdd *a = transform_exprbdd(&scopes->bools, &scopes->exprs, l->addr, &b);
 	if (b) {
 		*c = true;
 		return new StateMachineSideEffectLoad(l, a);
@@ -19,7 +19,7 @@ StateMachineSideEffectStore *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectStore *s, bool *c)
 {
 	bool b = false;
-	IRExpr *a = doit(s->addr, &b);
+	exprbdd *a = transform_exprbdd(&scopes->bools, &scopes->exprs, s->addr, &b);
 	exprbdd *d = transform_exprbdd(&scopes->bools, &scopes->exprs, s->data, &b);
 	if (b) {
 		*c = true;

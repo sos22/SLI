@@ -3208,11 +3208,49 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 	return res;
 }
 
+#define mk_exprbdd(name)						\
+	static bool							\
+	name(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt,	\
+	     std::set<std::pair<exprbdd *, exprbdd *> > &memo)		\
+	{								\
+		if (a->isLeaf && b->isLeaf)				\
+			return name(a->leaf(), b->leaf(), opt);		\
+		if (!memo.insert(std::pair<exprbdd *, exprbdd *>(a, b)).second)	\
+			return true;					\
+		if (a->isLeaf)						\
+			return name(a, b->internal().trueBranch,  opt, memo) &&	\
+				name(a, b->internal().falseBranch, opt, memo); \
+		if (b->isLeaf)						\
+			return name(a->internal().trueBranch,  b, opt, memo) &&	\
+				name(a->internal().falseBranch, b, opt, memo); \
+		if (a->internal().rank < b->internal().rank)		\
+			return name(a->internal().trueBranch,  b, opt, memo) &&	\
+				name(a->internal().falseBranch, b, opt, memo); \
+		if (a->internal().rank == b->internal().rank)		\
+			return name(a->internal().trueBranch,  b->internal().trueBranch,  opt, memo) &&	\
+				name(a->internal().falseBranch, b->internal().falseBranch, opt, memo); \
+		return name(a, b->internal().trueBranch,  opt, memo) &&	\
+			name(a, b->internal().falseBranch, opt, memo);	\
+	}								\
+	bool								\
+	name(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt)	\
+	{								\
+		std::set<std::pair<exprbdd *, exprbdd *> > memo;	\
+		return name(a, b, opt, memo);				\
+	}
+mk_exprbdd(definitelyEqual)
+mk_exprbdd(definitelyNotEqual)
+#undef mk_exprbdd
+
 bool
-isBadAddress(IRExpr *e)
+isBadAddress(exprbdd *e)
 {
-	return e->tag == Iex_Const &&
-		(long)((IRExprConst *)e)->Ico.U64 < 4096;
+	if (e->isLeaf)
+		return e->leaf()->tag == Iex_Const &&
+			(long)((IRExprConst *)e->leaf())->Ico.U64 < 4096;
+	else
+		return isBadAddress(e->internal().trueBranch) &&
+			isBadAddress(e->internal().falseBranch);
 }
 
 template <typename treeT, typename scopeT> treeT *

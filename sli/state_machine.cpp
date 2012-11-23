@@ -131,7 +131,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 StateMachineSideEffect *
 StateMachineSideEffectStore::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	addr = optimiseIRExprFP(addr, opt, done_something);
+	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt, done_something);
 	data = simplifyBDD(&scopes->exprs, &scopes->bools, data, opt, done_something);
 	if (isBadAddress(addr)) {
 		*done_something = true;
@@ -141,9 +141,9 @@ StateMachineSideEffectStore::optimise(SMScopes *scopes, const AllowableOptimisat
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectLoad::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectLoad::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	addr = optimiseIRExprFP(addr, opt, done_something);
+	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt, done_something);
 	if (isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();

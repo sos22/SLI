@@ -532,6 +532,7 @@ public:
 	void sanity_check(bdd_ordering *ordering = NULL) const;
 
 	static exprbdd *unop(scope *scope, bbdd::scope *, IROp, exprbdd *);
+	static exprbdd *load(scope *scope, bbdd::scope *, IRType, exprbdd *);
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, IRExpr *);
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, IRExpr *, exprbdd *);
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, exprbdd *);

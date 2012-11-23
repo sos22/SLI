@@ -515,7 +515,7 @@ ssaDeadCode(bbdd::scope *scope, StateMachine *sm, bool *done_something)
 					new StateMachineSideEffectAssertFalse(
 						bbdd::var(
 							scope,
-							IRExpr_Unop(Iop_BadPtr, smsel->addr)),
+							IRExpr_Unop(Iop_BadPtr, exprbdd::to_irexpr(smsel->addr))),
 						true);
 			}
 			break;
@@ -590,7 +590,7 @@ deadCodeElimination(bbdd::scope *scope, StateMachine *sm, bool *done_something, 
 					newEffect = new StateMachineSideEffectAssertFalse(
 						bbdd::var(
 							scope,
-							IRExpr_Unop(Iop_BadPtr, smsel->addr)),
+							IRExpr_Unop(Iop_BadPtr, exprbdd::to_irexpr(smsel->addr))),
 						true);
 				break;
 			}

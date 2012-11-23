@@ -1153,6 +1153,24 @@ Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, cons
 		irexprAliasingClass(b, *this, NULL, opt, false)).mightPoint();
 }
 
+bool
+Oracle::RegisterAliasingConfiguration::ptrsMightAlias(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt) const
+{
+	if (a->isLeaf && b->isLeaf)
+		return ptrsMightAlias(a->leaf(), b->leaf(), opt);
+	if (a->isLeaf)
+		return ptrsMightAlias(a, b->internal().trueBranch, opt) &&
+			ptrsMightAlias(a, b->internal().falseBranch, opt);
+	if (b->isLeaf || a->internal().rank < b->internal().rank)
+		return ptrsMightAlias(a->internal().trueBranch, b, opt) &&
+			ptrsMightAlias(a->internal().falseBranch, b, opt);
+	if (a->internal().rank == b->internal().rank)
+		return ptrsMightAlias(a->internal().trueBranch, b->internal().trueBranch, opt) &&
+			ptrsMightAlias(a->internal().falseBranch, b->internal().falseBranch, opt);
+	return ptrsMightAlias(a, b->internal().trueBranch, opt) &&
+		ptrsMightAlias(a, b->internal().falseBranch, opt);
+}
+
 void
 Oracle::RegisterAliasingConfiguration::operator |=(const RegisterAliasingConfiguration &config)
 {

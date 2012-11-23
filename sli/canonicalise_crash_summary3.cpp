@@ -1263,7 +1263,8 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 				assert(!definitelyAliasLds.count(*it));
 				definitelyAliasLds.insert(*it);
 				assert(it->second->ty == k.second->ty);
-			} else if (mat.ptrsMightAlias(k.first, k.second->addr, it->first, it->second->addr,
+			} else if (mat.ptrsMightAlias(k.first, exprbdd::var(&cs->scopes->exprs, &cs->scopes->bools, k.second->addr),
+						      it->first, exprbdd::var(&cs->scopes->exprs, &cs->scopes->bools, it->second->addr),
 						      AllowableOptimisations::defaultOptimisations.enableassumePrivateStack()) &&
 				   !definitelyNotEqual(k.second->addr, it->second->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
 				allowSubst = false;

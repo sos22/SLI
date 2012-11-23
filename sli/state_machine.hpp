@@ -191,6 +191,7 @@ public:
 	   also satisfy this one.  Returns true if we do anything or
 	   false otherwise. */
 	bool operator |=(const PointerAliasingSet &o);
+	bool operator <(const PointerAliasingSet &o) const;
 
 	bool mightPointAt(const FrameId fid) const {
 		if (!valid || otherStackPointer)
@@ -276,7 +277,6 @@ public:
 	}
 };
 
-class IRExprTransformer;
 class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
@@ -615,10 +615,10 @@ public:
 
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
 public:
-	IRExpr *addr;
+	exprbdd *addr;
 	MemoryAccessIdentifier rip;
 	MemoryTag tag;
-	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const MemoryAccessIdentifier &_rip,
+	StateMachineSideEffectMemoryAccess(exprbdd *_addr, const MemoryAccessIdentifier &_rip,
 					   const MemoryTag &_tag,
 					   StateMachineSideEffect::sideEffectType _type)
 		: StateMachineSideEffect(_type), addr(_addr), rip(_rip), tag(_tag)
@@ -628,8 +628,8 @@ public:
 		hv(addr);
 	}
 #ifndef NDEBUG
-	virtual void sanityCheck(SMScopes *) const {
-		addr->sanity_check();
+	virtual void sanityCheck(SMScopes *scopes) const {
+		addr->sanity_check(&scopes->ordering);
 		assert(addr->type() == Ity_I64);
 		rip.sanity_check();
 	}
@@ -638,21 +638,21 @@ public:
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, exprbdd *_data, const MemoryAccessIdentifier &_rip, const MemoryTag &_tag)
+	StateMachineSideEffectStore(exprbdd *_addr, exprbdd *_data, const MemoryAccessIdentifier &_rip, const MemoryTag &_tag)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
-	StateMachineSideEffectStore(const StateMachineSideEffectStore *base, IRExpr *_addr, exprbdd *_data)
+	StateMachineSideEffectStore(const StateMachineSideEffectStore *base, exprbdd *_addr, exprbdd *_data)
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
 	exprbdd *data;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "STORE (");
-		ppIRExpr(addr, f);
-		fprintf(f, "):%s@%s <-\n", tag.name(), rip.name());
+		fprintf(f, "STORE %s@%s\naddr = ", tag.name(), rip.name());
+		addr->prettyPrint(f);
+		fprintf(f, "data = ");
 		data->prettyPrint(f);
 	}
 	static bool parse(SMScopes *scopes,
@@ -660,17 +660,17 @@ public:
 			  const char *str,
 			  const char **suffix)
 	{
-		IRExpr *addr;
+		exprbdd *addr;
 		exprbdd *data;
 		MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
 		MemoryTag tag;
-		if (parseThisString("STORE (", str, &str) &&
-		    parseIRExpr(&addr, str, &str) &&
-		    parseThisString("):", str, &str) &&
+		if (parseThisString("STORE ", str, &str) &&
 		    tag.parse(str, &str) &&
-		    parseThisString("@", str, &str) &&
+		    parseThisChar('@', str, &str) &&
 		    rip.parse(str, &str) &&
-		    parseThisString(" <-\n", str, &str) &&
+		    parseThisString("\naddr = ", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &addr, str, &str) &&
+		    parseThisString("data = ", str, &str) &&
 		    exprbdd::parse(&scopes->exprs, &data, str, suffix)) {
 			*out = new StateMachineSideEffectStore(addr, data, rip, tag);
 			return true;
@@ -700,12 +700,12 @@ public:
 typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
 public:
-	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
+	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, exprbdd *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Load),
 		  target(alloc()), type(_type)
 	{
 	}
-	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
+	StateMachineSideEffectLoad(threadAndRegister reg, exprbdd *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Load),
 		  target(reg), type(_type)
 	{
@@ -714,45 +714,42 @@ public:
 		: StateMachineSideEffectMemoryAccess(base->addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(_reg), type(base->type)
 	{}
-	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, const threadAndRegister &_reg, IRExpr *_addr)
+	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, const threadAndRegister &_reg, exprbdd *_addr)
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(_reg), type(base->type)
 	{}
-	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, IRExpr *_addr)
+	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, exprbdd *_addr)
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(base->target), type(base->type)
 	{}
 	threadAndRegister target;
 	IRType type;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "LOAD ");
-		target.prettyPrint(f);
-		fprintf(f, ":");
+		fprintf(f, "LOAD %s@%s to %s, type ", tag.name(), rip.name(), target.name());
 		ppIRType(type, f);
-		fprintf(f, " <- *(");
-		ppIRExpr(addr, f);
-		fprintf(f, "):%s@%s", tag.name(), rip.name());
+		fprintf(f, "\naddr = ");
+		addr->prettyPrint(f);
 	}
-	static bool parse(SMScopes *,
+	static bool parse(SMScopes *scopes,
 			  StateMachineSideEffectLoad **out,
 			  const char *str,
 			  const char **suffix)
 	{
-		IRExpr *addr;
+		exprbdd *addr;
 		threadAndRegister key(threadAndRegister::invalid());
 		IRType type;
 		MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
 		MemoryTag tag;
 		if (parseThisString("LOAD ", str, &str) &&
-		    parseThreadAndRegister(&key, str, &str) &&
-		    parseThisString(":", str, &str) &&
-		    parseIRType(&type, str, &str) &&
-		    parseThisString(" <- *(", str, &str) &&
-		    parseIRExpr(&addr, str, &str) &&
-		    parseThisString("):", str, &str) &&
 		    tag.parse(str, &str) &&
-		    parseThisString("@", str, &str) &&
-		    rip.parse(str, suffix)) {
+		    parseThisChar('@', str, &str) &&
+		    rip.parse(str, &str) &&
+		    parseThisString(" to ", str, &str) &&
+		    parseThreadAndRegister(&key, str, &str) &&
+		    parseThisString(", type ", str, &str) &&
+		    parseIRType(&type, str, &str) &&
+		    parseThisString("\naddr = ", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &addr, str, suffix)) {
 			*out = new StateMachineSideEffectLoad(key, addr, rip, type, tag);
 			return true;
 		}

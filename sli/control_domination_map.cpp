@@ -154,7 +154,7 @@ ControlDominationMap::init(bbdd::scope *scope,
 								Iop_Not1,
 								IRExpr_Unop(
 									Iop_BadPtr,
-									m->addr))),
+									exprbdd::to_irexpr(m->addr)))),
 						exprAtEntry);
 					break;
 				}

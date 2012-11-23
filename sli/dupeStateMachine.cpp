@@ -186,21 +186,15 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 }
 
 static StateMachineSideEffectLoad *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectLoad *l)
+rawDupeS(duplication_context &, const StateMachineSideEffectLoad *l)
 {
-	StateMachineSideEffectLoad *res = new StateMachineSideEffectLoad(l, NULL);
-	ctxt(&res->addr, l->addr, rawDupe);
-	return res;
+	return new StateMachineSideEffectLoad(l, l->addr);
 }
 
 static StateMachineSideEffectStore *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectStore *l)
+rawDupeS(duplication_context &, const StateMachineSideEffectStore *l)
 {
-	StateMachineSideEffectStore *res = new StateMachineSideEffectStore(l,
-									   NULL,
-									   l->data);
-	ctxt(&res->addr, l->addr, rawDupe);
-	return res;
+	return new StateMachineSideEffectStore(l, l->addr, l->data);
 }
 
 static StateMachineSideEffectUnreached *

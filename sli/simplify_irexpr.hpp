@@ -8,9 +8,11 @@ class Oracle;
 class AllowableOptimisations;
 
 IRExpr *optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something);
-bool isBadAddress(IRExpr *e);
+bool isBadAddress(exprbdd *e);
 bool definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt);
+bool definitelyEqual(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt);
 bool definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt);
+bool definitelyNotEqual(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt);
 IRExpr *simplifyIRExpr(IRExpr *a, const IRExprOptimisations &opt);
 IRExpr *optimiseAssuming(IRExpr *iex, const IRExpr *assumption);
 void addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg);

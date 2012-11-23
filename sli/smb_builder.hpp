@@ -176,7 +176,7 @@ public:
 class SMBStatementStore : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectStore(
-			addr.content->compile(),
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
 			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, value.content->compile()),
 			state.getMai(),
 			tag);
@@ -200,7 +200,7 @@ class SMBStatementLoad : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectLoad(
 			target.content->compile(),
-			addr.content->compile(),
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
 			state.getMai(),
 			type,
 			tag);

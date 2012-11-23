@@ -486,7 +486,7 @@ cfgNodeToState(SMScopes *scopes,
 				   out later. */
 				StateMachineSideEffect *se =
 					new StateMachineSideEffectStore(
-						ist->addr,
+						exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
 						exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
 						mai(tid, target),
 						MemoryTag::normal());
@@ -535,7 +535,7 @@ cfgNodeToState(SMScopes *scopes,
 				new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectStore(
-						cas->addr,
+						exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
 						exprbdd::var(&scopes->exprs, &scopes->bools, cas->dataLo),
 						mai(tid, target),
 						MemoryTag::normal()),
@@ -551,7 +551,7 @@ cfgNodeToState(SMScopes *scopes,
 					target->rip,
 					new StateMachineSideEffectLoad(
 						tempreg,
-						cas->addr,
+						exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
 						mai(tid, target),
 						ty,
 						MemoryTag::normal()),
@@ -585,7 +585,7 @@ cfgNodeToState(SMScopes *scopes,
 				assert(ity != Ity_INVALID);
 				se = new StateMachineSideEffectLoad(
 					dirty->tmp,
-					dirty->args[0],
+					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
 					mai(tid, target),
 					ity,
 					MemoryTag::normal());

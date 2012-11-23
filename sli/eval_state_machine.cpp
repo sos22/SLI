@@ -540,7 +540,8 @@ private:
 		OracleInterface *oracle,
 		const IRExprOptimisations &opt);
 	bool expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
-	bool evalExpressionsEqual(SMScopes *scopes, IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool expressionIsTrue(SMScopes *scopes, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool evalExpressionsEqual(SMScopes *scopes, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
 	IRExpr *evalExprBDD(SMScopes *scopes, exprbdd *bdd, NdChooser &chooser, const IRExprOptimisations &opt);
 
 public:
@@ -603,16 +604,42 @@ EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, c
 }
 
 bool
-EvalContext::evalExpressionsEqual(SMScopes *scopes, IRExpr *exp1, IRExpr *exp2, NdChooser &chooser, const IRExprOptimisations &opt)
+EvalContext::expressionIsTrue(SMScopes *scopes, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
 {
-	return expressionIsTrue(scopes,
-				bbdd::var(&scopes->bools,
-					  IRExpr_Binop(
-						  Iop_CmpEQ64,
-						  exp1,
-						  exp2)),
-				chooser,
-				opt);
+	IRExpr *e = evalExprBDD(scopes, exp, chooser, opt);
+	assert(e->type() == Ity_I1);
+	if (e->tag == Iex_Const)
+		return ((IRExprConst *)e)->Ico.U1;
+	if (chooser.nd_choice(2) == 0) {
+		pathConstraint =
+			bbdd::And(
+				&scopes->bools,
+				pathConstraint,
+				bbdd::var(&scopes->bools, e));
+		return true;
+	} else {
+		pathConstraint =
+			bbdd::And(
+				&scopes->bools,
+				pathConstraint,
+				bbdd::invert(&scopes->bools, bbdd::var(&scopes->bools, e)));
+		return true;
+	}
+}
+
+bool
+EvalContext::evalExpressionsEqual(SMScopes *scopes, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt)
+{
+	return expressionIsTrue(
+		scopes,
+		exprbdd::binop(
+			&scopes->exprs,
+			&scopes->bools,
+			Iop_CmpEQ64,
+			exp1,
+			exp2),
+		chooser,
+		opt);
 }
 
 struct expr_bbdd_ordered_tuple {
@@ -699,14 +726,22 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					OracleInterface *oracle,
 					const IRExprOptimisations &opt)
 {
-	IRExpr *addr = NULL;
+	exprbdd *addr = NULL;
 	if (smse->type == StateMachineSideEffect::Load ||
 	    smse->type == StateMachineSideEffect::Store) {
 		StateMachineSideEffectMemoryAccess *smsema =
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
 		addr = state.specialiseIRExpr(scopes, smsema->addr);
-		if (expressionIsTrue(scopes, bbdd::var(&scopes->bools, IRExpr_Unop(Iop_BadPtr, addr)), chooser, opt))
+		if (expressionIsTrue(
+			    scopes,
+			    exprbdd::unop(
+				    &scopes->exprs,
+				    &scopes->bools,
+				    Iop_BadPtr,
+				    addr),
+			    chooser,
+			    opt))
 			return esme_escape;
 	}
 
@@ -765,7 +800,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				smsel->type,
 				satisfier->data);
 		} else {
-			val = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Load(smsel->type, addr));
+			val = exprbdd::load(&scopes->exprs, &scopes->bools, smsel->type, addr);
 		}
 		state.set_register(scopes, smsel->target, val, &pathConstraint, opt);
 		break;
@@ -1492,8 +1527,8 @@ buildCrossProductMachine(SMScopes *scopes,
 										     so need to invert the condition. */
 									IRExpr_Binop(
 										Iop_CmpEQ64,
-										probe_access->addr,
-										store_access->addr))),
+										exprbdd::to_irexpr(probe_access->addr),
+										exprbdd::to_irexpr(store_access->addr)))),
 							false),
 						nextStore);
 				} else {

@@ -64,7 +64,7 @@ public:
 
 	void clear() { sideEffects.clear(); assumption = NULL; _registers.clear(); }
 	void makeFalse(bbdd::scope *, bbdd *expr);
-	void dereference(bbdd::scope *, IRExpr *ptr, const AllowableOptimisations &opt);
+	void dereference(bbdd::scope *, exprbdd *ptr, const AllowableOptimisations &opt);
 	/* Merge @other into the current availability set.  Returns
 	   true if we do anything, and false otherwise. */
 	bool mergeIntersection(bbdd::scope *scope, const avail_t &other, bool is_ssa);
@@ -125,11 +125,11 @@ avail_t::makeFalse(bbdd::scope *scope, bbdd *expr)
 }
 
 void
-avail_t::dereference(bbdd::scope *scope, IRExpr *addr, const AllowableOptimisations &opt)
+avail_t::dereference(bbdd::scope *scope, exprbdd *addr, const AllowableOptimisations &opt)
 {
 	if (TIMEOUT)
 		return;
-	IRExpr *badPtr = IRExpr_Unop(Iop_BadPtr, addr);
+	IRExpr *badPtr = IRExpr_Unop(Iop_BadPtr, exprbdd::to_irexpr(addr));
 	badPtr = simplifyIRExpr(badPtr, opt);
 	makeFalse(scope, bbdd::var(scope, badPtr));
 }
@@ -392,7 +392,7 @@ updateAvailSetForSideEffect(bbdd::scope *scope,
 				dynamic_cast<StateMachineSideEffectStore *>(*it);
 			StateMachineSideEffectLoad *smsel2 =
 				dynamic_cast<StateMachineSideEffectLoad *>(*it);
-			IRExpr *addr;
+			exprbdd *addr;
 			if (smses2)
 				addr = smses2->addr;
 			else if (smsel2)
@@ -560,10 +560,10 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 	case StateMachineSideEffect::Store: {
 		StateMachineSideEffectStore *smses =
 			dynamic_cast<StateMachineSideEffectStore *>(smse);
-		IRExpr *newAddr;
+		exprbdd *newAddr;
 		exprbdd *newData;
 		bool doit = false;
-		newAddr = applyAvailSet(currentlyAvailable, smses->addr, &doit);
+		newAddr = applyAvailSet(scopes, currentlyAvailable, smses->addr, &doit);
 		newData = applyAvailSet(scopes, currentlyAvailable, smses->data, &doit);
 		if (doit) {
 			newEffect = new StateMachineSideEffectStore(
@@ -577,9 +577,9 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 	case StateMachineSideEffect::Load: {
 		StateMachineSideEffectLoad *smsel =
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
-		IRExpr *newAddr;
+		exprbdd *newAddr;
 		bool doit = false;
-		newAddr = applyAvailSet(currentlyAvailable, smsel->addr, &doit);
+		newAddr = applyAvailSet(scopes, currentlyAvailable, smsel->addr, &doit);
 		for (auto it2 = currentlyAvailable.beginSideEffects();
 		     !newEffect && it2 != currentlyAvailable.endSideEffects();
 		     it2++) {

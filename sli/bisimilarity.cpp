@@ -750,7 +750,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 				     it2++) {
 					StateMachineSideEffecting *o = (StateMachineSideEffecting *)*it2;
 					StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)o->sideEffect;
-					addr.insert(std::pair<StateMachineState *, IRExpr *>(o, l->addr));
+					addr.insert(std::pair<StateMachineState *, IRExpr *>(o, exprbdd::to_irexpr(l->addr)));
 					mais.insert(l->rip);
 					if (o != representative)
 						outputRegs.insert(l->target);
@@ -766,7 +766,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 						representative->dbg_origin,
 						new StateMachineSideEffectLoad(
 							l->target,
-							unifiedAddr,
+							exprbdd::var(&scopes->exprs, &scopes->bools, unifiedAddr),
 							newMai,
 							l->type,
 							l->tag),

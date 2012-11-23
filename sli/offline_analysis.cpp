@@ -735,9 +735,11 @@ truncateStateMachine(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, Stat
 			vr,
 			smrbdd::ifelse(
 				&scopes->smrs,
-				bbdd::var(&scopes->bools, IRExpr_Unop(
-						  Iop_BadPtr,
-						  truncateAt->addr)),
+				bbdd::var(
+					&scopes->bools,
+					IRExpr_Unop(
+						Iop_BadPtr,
+						exprbdd::to_irexpr(truncateAt->addr))),
 				scopes->smrs.cnst(smr_crash),
 				scopes->smrs.cnst(smr_survive)));
 	std::map<const StateMachineState *, StateMachineState *> map;

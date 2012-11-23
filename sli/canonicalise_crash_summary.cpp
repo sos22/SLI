@@ -42,8 +42,9 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 		if (smsel2)
 			smsel = smsel2;
 		*done_something = true;
-		IRExpr *addr = smsel->addr;
-		if (addr->tag != Iex_Get) {
+		exprbdd *addr = smsel->addr;
+		if (!addr->isLeaf ||
+		    addr->leaf()->tag != Iex_Get) {
 			auto it = freshVariables.find(addr);
 			if (it != freshVariables.end()) {
 				addr = IRExpr_Get(it->second, Ity_I64);

@@ -151,8 +151,8 @@ MachineAliasingTable::initialise(StateMachine *sm)
 
 bool
 MachineAliasingTable::ptrsMightAlias(StateMachineState *where,
-				     IRExpr *ptr1,
-				     IRExpr *ptr2,
+				     exprbdd *ptr1,
+				     exprbdd *ptr2,
 				     const IRExprOptimisations &opt) const
 {
 	auto it = configs.find(where);
@@ -163,9 +163,9 @@ MachineAliasingTable::ptrsMightAlias(StateMachineState *where,
 
 bool
 MachineAliasingTable::ptrsMightAlias(StateMachineState *where1,
-				     IRExpr *ptr1,
+				     exprbdd *ptr1,
 				     StateMachineState *where2,
-				     IRExpr *ptr2,
+				     exprbdd *ptr2,
 				     const IRExprOptimisations &opt) const
 {
 	auto it1 = configs.find(where1);

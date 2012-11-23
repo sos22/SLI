@@ -271,6 +271,7 @@ public:
 		   and @b are pointers i.e. it's not just asking
 		   whether @a and @b might be equal. */
 		bool ptrsMightAlias(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt) const;
+		bool ptrsMightAlias(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt) const;
 
 		/* Check whether there's any possibility of @a being a
 		   pointer to a non-stack location. */

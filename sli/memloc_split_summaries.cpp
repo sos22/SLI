@@ -12,19 +12,19 @@ nr_distinct_memory_locations(CrashSummary *summary)
 {
 	summary = internCrashSummary(summary);
 	struct {
-		static visit_result Load(std::set<IRExpr *> *addrs, const StateMachineSideEffectLoad *l) {
+		static visit_result Load(std::set<exprbdd *> *addrs, const StateMachineSideEffectLoad *l) {
 			addrs->insert(l->addr);
 			return visit_continue;
 		}
-		static visit_result Store(std::set<IRExpr *> *addrs, const StateMachineSideEffectStore *l) {
+		static visit_result Store(std::set<exprbdd *> *addrs, const StateMachineSideEffectStore *l) {
 			addrs->insert(l->addr);
 			return visit_continue;
 		}
 	} foo;
-	static state_machine_visitor<std::set<IRExpr *> > visitor;
+	static state_machine_visitor<std::set<exprbdd *> > visitor;
 	visitor.Load = foo.Load;
 	visitor.Store = foo.Store;
-	std::set<IRExpr *> addrs;
+	std::set<exprbdd *> addrs;
 	visit_crash_summary(&addrs, &visitor, summary);
 	return addrs.size();
 }

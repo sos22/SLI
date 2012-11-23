@@ -488,9 +488,9 @@ undefinednessSimplification(SMScopes *scopes,
 				switch (smse->sideEffect->type) {
 				case StateMachineSideEffect::Load: {
 					StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)newSe;
-					IRExpr *addr = undefinednessExpression(sm, l->addr, vdm, opt);
+					exprbdd *addr = undefinednessExprBDD(&scopes->exprs, &scopes->bools, sm, l->addr, vdm, opt);
 					if (addr != l->addr) {
-						if (addr == UNDEFINED_EXPR) {
+						if (addr == UNDEFINED_EXPRBDD) {
 							newSe = StateMachineSideEffectUnreached::get();
 						} else {
 							newSe = new StateMachineSideEffectLoad(
@@ -501,10 +501,10 @@ undefinednessSimplification(SMScopes *scopes,
 				}
 				case StateMachineSideEffect::Store: {
 					auto *s = (StateMachineSideEffectStore *)newSe;
-					IRExpr *addr = undefinednessExpression(sm, s->addr, vdm, opt);
+					exprbdd *addr = undefinednessExprBDD(&scopes->exprs, &scopes->bools, sm, s->addr, vdm, opt);
 					exprbdd *data = undefinednessExprBDD(&scopes->exprs, &scopes->bools, sm, s->data, vdm, opt);
 					if (addr != s->addr || data != s->data) {
-						if (addr == UNDEFINED_EXPR || data == UNDEFINED_EXPRBDD)
+						if (addr == UNDEFINED_EXPRBDD || data == UNDEFINED_EXPRBDD)
 							newSe = StateMachineSideEffectUnreached::get();
 						else
 							newSe = new StateMachineSideEffectStore(

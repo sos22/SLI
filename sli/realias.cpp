@@ -421,6 +421,11 @@ class PointsToTable {
 						  MachineAliasingTable &mat,
 						  StackLayoutTable &slt,
 						  StateMachine *machine);
+	PointerAliasingSet getInitialLoadAliasing(exprbdd *addr,
+						  StateMachineState *sm,
+						  MachineAliasingTable &mat,
+						  StackLayoutTable &slt,
+						  StateMachine *machine);
 
 public:
 	PointerAliasingSet pointsToSetForExpr(IRExpr *e,
@@ -609,6 +614,33 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 }
 
 PointerAliasingSet
+PointsToTable::getInitialLoadAliasing(exprbdd *addr,
+				      StateMachineState *sm,
+				      MachineAliasingTable &mat,
+				      StackLayoutTable &slt,
+				      StateMachine *machine)
+{
+	PointerAliasingSet acc(PointerAliasingSet::nothing);
+	std::set<exprbdd *> visited;
+	std::vector<exprbdd *> q;
+	q.push_back(addr);
+	while (!q.empty()) {
+		exprbdd *ee = q.back();
+		q.pop_back();
+		if (!visited.insert(ee).second)
+			continue;
+		if (ee->isLeaf) {
+			acc |= getInitialLoadAliasing(ee->leaf(), sm,
+						      mat, slt, machine);
+		} else {
+			q.push_back(ee->internal().trueBranch);
+			q.push_back(ee->internal().falseBranch);
+		}
+	}
+	return acc;
+}
+
+PointerAliasingSet
 PointsToTable::pointsToSetForExpr(exprbdd *e,
 				  StateMachineState *sm,
 				  Maybe<StackLayout> *sl,
@@ -626,11 +658,11 @@ PointsToTable::pointsToSetForExpr(exprbdd *e,
 		if (!visited.insert(ee).second)
 			continue;
 		if (e->isLeaf) {
-			acc |= pointsToSetForExpr(e->leaf(), sm, sl,
+			acc |= pointsToSetForExpr(ee->leaf(), sm, sl,
 						  mat, slt, machine);
 		} else {
-			q.push_back(e->internal().trueBranch);
-			q.push_back(e->internal().falseBranch);
+			q.push_back(ee->internal().trueBranch);
+			q.push_back(ee->internal().falseBranch);
 		}
 	}
 	return acc;
@@ -1286,19 +1318,18 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			it->first->sideEffect =
 					new StateMachineSideEffectCopy(
 						l->target,
-						exprbdd::var(
+						exprbdd::load(
 							&scopes->exprs,
 							&scopes->bools,
-							IRExpr_Load(
-								l->type,
-								l->addr)));
+							l->type,
+							l->addr));
 			it->first->target =
 				new StateMachineSideEffecting(
 					it->first->dbg_origin,
 					new StateMachineSideEffectAssertFalse(
 						bbdd::var(
 							&scopes->bools,
-							IRExpr_Unop(Iop_BadPtr, l->addr)),
+							IRExpr_Unop(Iop_BadPtr, exprbdd::to_irexpr(l->addr))),
 						true),
 					it->first->target);
 		} else if (it->second.stores.size() == 1 &&
@@ -1456,7 +1487,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 							&scopes->bools,
 							IRExpr_Unop(
 								Iop_BadPtr,
-								s->addr)),
+								exprbdd::to_irexpr(s->addr))),
 						true);
 				progress = true;
 			}

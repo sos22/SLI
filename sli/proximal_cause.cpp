@@ -140,7 +140,7 @@ getProximalCause(SMScopes *scopes,
 			IRStmtStore *ist = (IRStmtStore *)stmt;
 			prependSideEffect(
 				new StateMachineSideEffectStore(
-					ist->addr,
+					exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
 					exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
 					mai(tid, where),
 					MemoryTag::normal()));
@@ -197,7 +197,7 @@ getProximalCause(SMScopes *scopes,
 					rip,
 					new StateMachineSideEffectLoad(
 						tr,
-						cas->addr,
+						exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
 						mai(tid, where),
 						ty,
 						MemoryTag::normal()),
@@ -230,7 +230,7 @@ getProximalCause(SMScopes *scopes,
 			prependSideEffect(
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
-					dirty->args[0],
+					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
 					mai(tid, where),
 					ity,
 					MemoryTag::normal()));

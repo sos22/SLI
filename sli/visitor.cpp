@@ -106,7 +106,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->Load)
 			res = visitor->Load(ctxt, l);
 		if (res == visit_continue)
-			res = visit_irexpr(ctxt, &visitor->irexpr, l->addr);
+			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, l->addr);
 		return res;
 	}
 	case StateMachineSideEffect::Store: {
@@ -114,7 +114,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->Store)
 			res = visitor->Store(ctxt, s);
 		if (res == visit_continue)
-			res = visit_irexpr(ctxt, &visitor->irexpr, s->addr);
+			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->addr);
 		if (res == visit_continue)
 			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->data);
 		return res;

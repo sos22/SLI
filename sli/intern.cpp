@@ -252,7 +252,7 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 	case StateMachineSideEffect::Store: {
 		StateMachineSideEffectMemoryAccess *ma = dynamic_cast<StateMachineSideEffectMemoryAccess *>(s);
 		assert(ma);
-		ma->addr = internIRExpr(ma->addr, t);
+		ma->addr = intern_exprbdd(scopes, ma->addr, t);
 		if (s->type == StateMachineSideEffect::Store) {
 			StateMachineSideEffectStore *store = dynamic_cast<StateMachineSideEffectStore *>(ma);
 			assert(store);
