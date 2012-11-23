@@ -1520,15 +1520,16 @@ buildCrossProductMachine(SMScopes *scopes,
 					nextStore = new StateMachineSideEffecting(
 						nextStore->dbg_origin,
 						new StateMachineSideEffectAssertFalse(
-							bbdd::var(
+							bbdd::invert(
 								&scopes->bools,
-								IRExpr_Unop(
-									Iop_Not1, /* Remember, it's assertfalse,
-										     so need to invert the condition. */
-									IRExpr_Binop(
+								exprbdd::to_bbdd(
+									&scopes->bools,
+									exprbdd::binop(
+										&scopes->exprs,
+										&scopes->bools,
 										Iop_CmpEQ64,
-										exprbdd::to_irexpr(probe_access->addr),
-										exprbdd::to_irexpr(store_access->addr)))),
+										probe_access->addr,
+										store_access->addr))),
 							false),
 						nextStore);
 				} else {

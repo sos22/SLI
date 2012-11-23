@@ -377,6 +377,42 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	return it->second;
 }
 
+template <typename t> t *
+bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
+{
+	assert(a);
+	assert(b);
+	assert(a->isLeaf || ordering->before(cond, a));
+	assert(b->isLeaf || ordering->before(cond, b));
+	if (a == b)
+		return a;
+	if (cond->tag == Iex_Const) {
+		if ( ((IRExprConst *)cond)->Ico.U1 )
+			return a;
+		else
+			return b;
+	}
+
+	if (cond->tag == Iex_ControlFlow &&
+	    !a->isLeaf &&
+	    a->internal().condition->tag == Iex_ControlFlow &&
+	    ((IRExprControlFlow *)a->internal().condition)->thread == ((IRExprControlFlow *)cond)->thread &&
+	    ((IRExprControlFlow *)a->internal().condition)->cfg1 == ((IRExprControlFlow *)cond)->cfg1)  {
+		assert(((IRExprControlFlow *)a->internal().condition)->cfg2 != ((IRExprControlFlow *)cond)->cfg2);
+		a = a->internal().falseBranch;
+	}
+
+	auto it_did_insert = intern.insert(
+		std::pair<entry, t *>(
+			entry(cond, a, b),
+			(t *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert)
+		it->second = new t(r, cond, a, b);
+	return it->second;
+}
+
 template <typename constT, typename subtreeT> template <IRExpr *mkConst(constT)> IRExpr *
 const_bdd<constT, subtreeT>::to_irexpr(subtreeT *what, std::map<subtreeT *, IRExpr *> &memo)
 {

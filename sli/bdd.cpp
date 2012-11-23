@@ -1001,6 +1001,43 @@ exprbdd::coerceTypes(scope *scope, bbdd::scope *bscope, IRType to, exprbdd *what
 	return unop(scope, bscope, coerceTypesOp(what->type(), to), what);
 }
 
+bbdd *
+exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr, std::map<exprbdd *, bbdd *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<exprbdd *, bbdd *>(expr, (bbdd *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		if (expr->isLeaf) {
+			IRExpr *l = expr->leaf();
+			if (l->tag == Iex_Const) {
+				it->second = scope->cnst( ((IRExprConst *)l)->Ico.U1);
+			} else {
+				it->second =
+					scope->makeInternal(
+						l,
+						scope->cnst(true),
+						scope->cnst(false));
+			}
+		} else {
+			it->second = scope->makeInternal(
+				expr->internal().condition,
+				expr->internal().rank,
+				to_bbdd(scope, expr->internal().trueBranch, memo),
+				to_bbdd(scope, expr->internal().falseBranch, memo));
+		}
+	}
+	return it->second;				
+}
+
+bbdd *
+exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr)
+{
+	assert(expr->type() == Ity_I1);
+	std::map<exprbdd *, bbdd *> memo;
+	return to_bbdd(scope, expr, memo);
+}
+
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);

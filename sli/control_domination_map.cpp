@@ -36,7 +36,7 @@ computeMaxDistanceMap(StateMachine *sm, std::map<StateMachineState *, int> &dist
 }
 
 void
-ControlDominationMap::init(bbdd::scope *scope,
+ControlDominationMap::init(SMScopes *scopes,
 			   StateMachine *sm,
 			   const AllowableOptimisations &opt)
 {
@@ -61,7 +61,7 @@ ControlDominationMap::init(bbdd::scope *scope,
 	   states in the right order. */
 	typedef std::pair<int, StateMachineState *> needsUpdateEntryT;
 	std::set<needsUpdateEntryT> needsUpdate;
-	dominatingExpressions[sm->root] = scope->cnst(true);
+	dominatingExpressions[sm->root] = scopes->bools.cnst(true);
 	needsUpdate.insert(needsUpdateEntryT(0, sm->root));
 	struct _ {
 		const AllowableOptimisations &opt;
@@ -94,7 +94,7 @@ ControlDominationMap::init(bbdd::scope *scope,
 			  stateDistances(_stateDistances),
 			  needsUpdate(_needsUpdate)
 		{}
-	} discoverPathToState(opt, scope, dominatingExpressions, stateDistances, needsUpdate);
+	} discoverPathToState(opt, &scopes->bools, dominatingExpressions, stateDistances, needsUpdate);
 
 	while (!needsUpdate.empty() && !TIMEOUT) {
 		auto it = needsUpdate.begin();
@@ -125,12 +125,12 @@ ControlDominationMap::init(bbdd::scope *scope,
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
 			bbdd *trueCond = bbdd::And(
-				scope,
+				&scopes->bools,
 				smb->condition,
 				exprAtEntry);
 			bbdd *falseCond = bbdd::And(
-				scope,
-				bbdd::invert(scope, smb->condition),
+				&scopes->bools,
+				bbdd::invert(&scopes->bools, smb->condition),
 				exprAtEntry);
 			discoverPathToState(smb->trueTarget, trueCond);
 			discoverPathToState(smb->falseTarget, falseCond);
@@ -147,26 +147,28 @@ ControlDominationMap::init(bbdd::scope *scope,
 				case StateMachineSideEffect::Store: {
 					StateMachineSideEffectMemoryAccess *m = (StateMachineSideEffectMemoryAccess *)effecting->sideEffect;
 					exprAtExit = bbdd::And(
-						scope,
-						bbdd::var(
-							scope,
-							IRExpr_Unop(
-								Iop_Not1,
-								IRExpr_Unop(
+						&scopes->bools,
+						exprAtEntry,
+						bbdd::invert(
+							&scopes->bools,
+							exprbdd::to_bbdd(
+								&scopes->bools,
+								exprbdd::unop(
+									&scopes->exprs,
+									&scopes->bools,
 									Iop_BadPtr,
-									exprbdd::to_irexpr(m->addr)))),
-						exprAtEntry);
+									m->addr))));
 					break;
 				}
 				case StateMachineSideEffect::Unreached:
-					exprAtExit = scope->cnst(false);
+					exprAtExit = scopes->bools.cnst(false);
 					break;
 				case StateMachineSideEffect::AssertFalse: {
 					StateMachineSideEffectAssertFalse *a = (StateMachineSideEffectAssertFalse *)effecting->sideEffect;
 					exprAtExit = bbdd::And(
-						scope,
+						&scopes->bools,
 						bbdd::invert(
-							scope,
+							&scopes->bools,
 							a->value),
 						exprAtEntry);
 					break;

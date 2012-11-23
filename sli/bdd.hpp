@@ -297,6 +297,7 @@ class bdd_scope {
 	std::map<entry, t *> intern;
 public:
 	t *makeInternal(IRExpr *a, t *, t *);
+	t *makeInternal(IRExpr *a, const bdd_rank &r, t *, t *);
 	bdd_ordering *ordering;
 
 	bdd_scope(bdd_ordering *_ordering)
@@ -517,6 +518,7 @@ private:
 	{}
 	static exprbdd *_var(scope *scope, bbdd::scope *, IRExpr *);
 	static IRExpr *to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo);
+	static bbdd *to_bbdd(bbdd::scope *scope, exprbdd *, std::map<exprbdd *, bbdd *> &);
 public:
 	static bool parse(scope *scp, exprbdd **out, const char *str, const char **suffix) {
 		return parentT::_parse<scope, parseLeaf>(scp, out, str, suffix);
@@ -537,6 +539,8 @@ public:
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, IRExpr *, exprbdd *);
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, exprbdd *);
 	static exprbdd *coerceTypes(scope *, bbdd::scope *, IRType ty, exprbdd *);
+
+	static bbdd *to_bbdd(bbdd::scope *scope, exprbdd *);
 };
 
 #endif /* !BDD_HPP__ */

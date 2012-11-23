@@ -256,7 +256,7 @@ _optimiseStateMachine(SMScopes *scopes,
 			p = false;
 			do {
 				d = false;
-				sm = deadCodeElimination(&scopes->bools, sm, &d, is_ssa);
+				sm = deadCodeElimination(scopes, sm, &d, is_ssa);
 				p |= d;
 			} while (d);
 			if (debugOptimiseStateMachine && p) {
@@ -360,7 +360,7 @@ _optimiseStateMachine(SMScopes *scopes,
 
 		if (!done_something && is_ssa && !TIMEOUT) {
 			ControlDominationMap cdm;
-			cdm.init(&scopes->bools, sm, opt);
+			cdm.init(scopes, sm, opt);
 			if (TIMEOUT)
 				break;
 
@@ -735,11 +735,13 @@ truncateStateMachine(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, Stat
 			vr,
 			smrbdd::ifelse(
 				&scopes->smrs,
-				bbdd::var(
+				exprbdd::to_bbdd(
 					&scopes->bools,
-					IRExpr_Unop(
+					exprbdd::unop(
+						&scopes->exprs,
+						&scopes->bools,
 						Iop_BadPtr,
-						exprbdd::to_irexpr(truncateAt->addr))),
+						truncateAt->addr)),
 				scopes->smrs.cnst(smr_crash),
 				scopes->smrs.cnst(smr_survive)));
 	std::map<const StateMachineState *, StateMachineState *> map;

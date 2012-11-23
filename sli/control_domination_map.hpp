@@ -7,11 +7,12 @@ class StateMachineState;
 class IRExpr;
 class AllowableOptimisations;
 class StateMachine;
+class SMScopes;
 
 class ControlDominationMap {
 	std::map<StateMachineState *, bbdd *> dominatingExpressions;
 public:
-	void init(bbdd::scope *,
+	void init(SMScopes *scopes,
 		  StateMachine *sm,
 		  const AllowableOptimisations &opt);
 	void prettyPrint(FILE *f, const std::map<const StateMachineState *, int> &labels);
