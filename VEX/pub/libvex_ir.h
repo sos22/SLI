@@ -1049,7 +1049,9 @@ typedef
             for i in 0 .. 15 . result[i] = argL[ argR[i] ] 
          argR[i] values may only be in the range 0 .. 15, else behaviour
          is undefined. */
-      Iop_Perm8x16
+      Iop_Perm8x16,
+
+      Iop_Noop8, Iop_Noop16, Iop_Noop32, Iop_Noop64, Iop_Noop128,
    }
    IROp;
 

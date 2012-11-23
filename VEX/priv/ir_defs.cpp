@@ -300,7 +300,8 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
   iter(CasCmpEQ)				\
   iter(CasCmpNE)				\
   iter(Not)					\
-  iter(Neg)
+  iter(Neg)					\
+  iter(Noop)
 
 #define foreach_op_unsized(iter)		\
 	   iter(8Uto16)				\
@@ -749,6 +750,7 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(And1)				\
 	     iter(Or1)				\
 	     iter(Xor1)				\
+	     iter(Noop128)
 
 void ppIROp ( IROp op, FILE* f )
 {
@@ -1923,6 +1925,8 @@ bool inverseUnops(IROp a, IROp b)
 }
 
 IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
+   if (op >= Iop_Noop8 && op <= Iop_Noop128)
+     return arg;
    IRExprUnop* e       = new IRExprUnop();
    /* Short-circuit a bunch of redundant type conversions
       e.g. 64to1(1to64(x)) */
@@ -2300,20 +2304,20 @@ void typeOfPrimop ( IROp op,
                     IRType* t_arg3, IRType* t_arg4 )
 {
 #  define UNARY(_ta1,_td)                                      \
-      *t_dst = (_td); *t_arg1 = (_ta1); break
+      *t_dst = (_td); *t_arg1 = (_ta1); return
 #  define BINARY(_ta1,_ta2,_td)                                \
-     *t_dst = (_td); *t_arg1 = (_ta1); *t_arg2 = (_ta2); break
+     *t_dst = (_td); *t_arg1 = (_ta1); *t_arg2 = (_ta2); return
 #  define TERNARY(_ta1,_ta2,_ta3,_td)                          \
      *t_dst = (_td); *t_arg1 = (_ta1);                         \
-     *t_arg2 = (_ta2); *t_arg3 = (_ta3); break
+     *t_arg2 = (_ta2); *t_arg3 = (_ta3); return
 #  define QUATERNARY(_ta1,_ta2,_ta3,_ta4,_td)                  \
      *t_dst = (_td); *t_arg1 = (_ta1);                         \
      *t_arg2 = (_ta2); *t_arg3 = (_ta3);                       \
-     *t_arg4 = (_ta4); break
+     *t_arg4 = (_ta4); return
 #  define COMPARISON(_ta)                                      \
-     *t_dst = Ity_I1; *t_arg1 = *t_arg2 = (_ta); break;
+     *t_dst = Ity_I1; *t_arg1 = *t_arg2 = (_ta); return;
 #  define UNARY_COMPARISON(_ta)                                \
-     *t_dst = Ity_I1; *t_arg1 = (_ta); break;
+     *t_dst = Ity_I1; *t_arg1 = (_ta); return;
 
    /* Rounding mode values are always Ity_I32, encoded as per
       IRRoundingMode */
@@ -2325,6 +2329,8 @@ void typeOfPrimop ( IROp op,
    *t_arg3 = Ity_INVALID;
    *t_arg4 = Ity_INVALID;
    switch (op) {
+      case Iop_INVALID:
+         abort();
       case Iop_Add8: case Iop_Sub8: case Iop_Mul8: 
       case Iop_Or8:  case Iop_And8: case Iop_Xor8:
          BINARY(Ity_I8,Ity_I8, Ity_I8);
@@ -2382,15 +2388,19 @@ void typeOfPrimop ( IROp op,
 
       case Iop_Not8:
       case Iop_Neg8:
+      case Iop_Noop8:
          UNARY(Ity_I8, Ity_I8);
       case Iop_Not16:
       case Iop_Neg16:
+      case Iop_Noop16:
          UNARY(Ity_I16, Ity_I16);
       case Iop_Not32:
       case Iop_Neg32:
+      case Iop_Noop32:
          UNARY(Ity_I32, Ity_I32);
       case Iop_Not64:
       case Iop_Neg64:
+      case Iop_Noop64:
       case Iop_CmpNEZ32x2: case Iop_CmpNEZ16x4: case Iop_CmpNEZ8x8:
          UNARY(Ity_I64, Ity_I64);
 
@@ -2574,6 +2584,7 @@ void typeOfPrimop ( IROp op,
       case Iop_RoundF32x4_RP:
       case Iop_RoundF32x4_RN:
       case Iop_RoundF32x4_RZ:
+      case Iop_Noop128:
          UNARY(Ity_I128, Ity_I128);
 
       case Iop_64HLtoV128: BINARY(Ity_I64,Ity_I64, Ity_I128);
@@ -2675,16 +2686,15 @@ void typeOfPrimop ( IROp op,
 	  BINARY(Ity_I128, Ity_I128, Ity_I1);
       case Iop_CmpEQV128:
 	  BINARY(Ity_I128, Ity_I128, Ity_I1);
-
-      default:
-	 ppIROp(op, stderr);
-         vpanic("typeOfPrimop");
    }
 #  undef UNARY
 #  undef BINARY
 #  undef TERNARY
 #  undef COMPARISON
 #  undef UNARY_COMPARISON
+
+   ppIROp(op, stderr);
+   vpanic("typeOfPrimop");
 }
 
 
