@@ -308,8 +308,8 @@ avail_t::invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMach
 		{
 			if (expr->isLeaf)
 				return expr;
-			bbdd *t = invalidateRegister(scope, reg, expr->content.trueBranch);
-			bbdd *f = invalidateRegister(scope, reg, expr->content.falseBranch);
+			bbdd *t = invalidateRegister(scope, reg, expr->internal().trueBranch);
+			bbdd *f = invalidateRegister(scope, reg, expr->internal().falseBranch);
 			if (t == f)
 				return t;
 			static irexpr_visitor<ctxt> visitor;
@@ -317,16 +317,16 @@ avail_t::invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMach
 			ctxt ctxt;
 			ctxt.reg = reg;
 			ctxt.preserve = NULL;
-			if (visit_irexpr(&ctxt, &visitor, expr->content.condition) == visit_abort) {
+			if (visit_irexpr(&ctxt, &visitor, expr->internal().condition) == visit_abort) {
 				/* Behaviour depends on the register
 				   which we're trying to kill -> can't
 				   do anything */
 				return scope->cnst(true);
 			} else {
-				if (t == expr->content.trueBranch &&
-				    f == expr->content.falseBranch)
+				if (t == expr->internal().trueBranch &&
+				    f == expr->internal().falseBranch)
 					return expr;
-				return scope->makeInternal(expr->content.condition, t, f);
+				return scope->makeInternal(expr->internal().condition, t, f);
 			}
 		}
 	} f;

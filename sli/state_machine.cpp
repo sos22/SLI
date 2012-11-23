@@ -68,7 +68,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 	condition = simplifyBDD(&scopes->bools, condition, opt, done_something);
 	if (condition->isLeaf) {
 		*done_something = true;
-		if (condition->content.leaf)
+		if (condition->leaf())
 			return trueTarget->optimise(scopes, opt, done_something);
 		else
 			return falseTarget->optimise(scopes, opt, done_something);
@@ -164,7 +164,7 @@ StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOpt
 	value = simplifyBDD(&scopes->bools, value, opt, done_something);
 	if (value->isLeaf) {
 		*done_something = true;
-		if (value->content.leaf)
+		if (value->leaf())
 			return StateMachineSideEffectUnreached::get();
 		else
 			return NULL;

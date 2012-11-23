@@ -220,15 +220,15 @@ static exprbdd *
 intern_exprbdd(SMScopes *scopes, exprbdd *what, internIRExprTable &tab)
 {
 	if (what->isLeaf) {
-		IRExpr *l = internIRExpr(what->content.leaf, tab);
-		if (l == what->content.leaf)
+		IRExpr *l = internIRExpr(what->leaf(), tab);
+		if (l == what->leaf())
 			return what;
 		return exprbdd::var(&scopes->exprs, &scopes->bools, l);
 	}
-	IRExpr *condition = internIRExpr(what->content.condition, tab);
-	exprbdd *t = intern_exprbdd(scopes, what->content.trueBranch, tab);
-	exprbdd *f = intern_exprbdd(scopes, what->content.falseBranch, tab);
-	if (condition == what->content.condition && t == what->content.trueBranch && f == what->content.falseBranch)
+	IRExpr *condition = internIRExpr(what->internal().condition, tab);
+	exprbdd *t = intern_exprbdd(scopes, what->internal().trueBranch, tab);
+	exprbdd *f = intern_exprbdd(scopes, what->internal().falseBranch, tab);
+	if (condition == what->internal().condition && t == what->internal().trueBranch && f == what->internal().falseBranch)
 		return what;
 	return exprbdd::ifelse(
 		&scopes->exprs,
@@ -376,13 +376,13 @@ template <typename scopeT, typename subtreeT> static subtreeT *
 internBDD(scopeT *scope, bbdd::scope *bscope, subtreeT *what, internIRExprTable &tab)
 {
 	if (what->isLeaf)
-		return scope->cnst(what->content.leaf);
-	IRExpr *cond = internIRExpr(what->content.condition, tab);
-	subtreeT *t = internBDD(scope, bscope, what->content.trueBranch, tab);
-	subtreeT *f = internBDD(scope, bscope, what->content.falseBranch, tab);
-	if (cond == what->content.condition &&
-	    t == what->content.trueBranch &&
-	    f == what->content.falseBranch)
+		return scope->cnst(what->leaf());
+	IRExpr *cond = internIRExpr(what->internal().condition, tab);
+	subtreeT *t = internBDD(scope, bscope, what->internal().trueBranch, tab);
+	subtreeT *f = internBDD(scope, bscope, what->internal().falseBranch, tab);
+	if (cond == what->internal().condition &&
+	    t == what->internal().trueBranch &&
+	    f == what->internal().falseBranch)
 		return what;
 	return subtreeT::ifelse(
 		scope,

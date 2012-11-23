@@ -388,10 +388,10 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *
 {
 	if (e->isLeaf)
 		return e;
-	IRExpr *cond = setTemporary(scopes, reg, e->content.condition, opt);
-	bbdd *trueB = setTemporary(scopes, reg, e->content.trueBranch, opt);
-	bbdd *falseB = setTemporary(scopes, reg, e->content.falseBranch, opt);
-	if (cond == e->content.condition && trueB == e->content.trueBranch && falseB == e->content.falseBranch)
+	IRExpr *cond = setTemporary(scopes, reg, e->internal().condition, opt);
+	bbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt);
+	bbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt);
+	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch)
 		return e;
 	return bbdd::ifelse(&scopes->bools,
 			    bbdd::var(&scopes->bools, cond),
@@ -402,11 +402,11 @@ exprbdd *
 threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *e, const IRExprOptimisations &opt)
 {
 	if (e->isLeaf)
-		return exprbdd::var(&scopes->exprs, &scopes->bools, e->content.leaf);
-	IRExpr *cond = setTemporary(scopes, reg, e->content.condition, opt);
-	exprbdd *trueB = setTemporary(scopes, reg, e->content.trueBranch, opt);
-	exprbdd *falseB = setTemporary(scopes, reg, e->content.falseBranch, opt);
-	if (cond == e->content.condition && trueB == e->content.trueBranch && falseB == e->content.falseBranch)
+		return exprbdd::var(&scopes->exprs, &scopes->bools, e->leaf());
+	IRExpr *cond = setTemporary(scopes, reg, e->internal().condition, opt);
+	exprbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt);
+	exprbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt);
+	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch)
 		return e;
 	return exprbdd::ifelse(&scopes->exprs,
 			       bbdd::var(&scopes->bools, cond),
@@ -572,7 +572,7 @@ EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, c
 			exp,
 			pathConstraint);
 	if (simplifiedCondition->isLeaf)
-		return simplifiedCondition->content.leaf;
+		return simplifiedCondition->leaf();
 	std::map<bool, bbdd *> selectors(bbdd::to_selectors(&scopes->bools, simplifiedCondition));
 	assert(selectors.count(true));
 	assert(selectors.count(false));
@@ -652,13 +652,13 @@ EvalContext::evalExprBDD(SMScopes *scopes, exprbdd *expr, NdChooser &chooser, co
 		if (!visited.insert(e).second)
 			continue;
 		if (e->isLeaf) {
-			assert(!ordering.count(e->content.leaf));
+			assert(!ordering.count(e->leaf()));
 			int k = ordering.size();
-			ordering[e->content.leaf] = k;
+			ordering[e->leaf()] = k;
 			assert((int)ordering.size() == k + 1);
 		} else {
-			queue.push_back(e->content.trueBranch);
-			queue.push_back(e->content.falseBranch);
+			queue.push_back(e->internal().trueBranch);
+			queue.push_back(e->internal().falseBranch);
 		}
 	}
 	std::vector<expr_bbdd_ordered_tuple> sorted;
@@ -667,7 +667,7 @@ EvalContext::evalExprBDD(SMScopes *scopes, exprbdd *expr, NdChooser &chooser, co
 		bool b;
 		bbdd *spec_cond = simplifyBDD(&scopes->bools, state.specialiseIRExpr(scopes, it->second), opt, &b);
 		if (spec_cond->isLeaf) {
-			if (spec_cond->content.leaf)
+			if (spec_cond->leaf())
 				return state.specialiseIRExpr(scopes, it->first);
 		} else {
 			sorted.push_back(expr_bbdd_ordered_tuple(ordering[it->first], it->first, spec_cond));

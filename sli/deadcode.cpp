@@ -607,8 +607,8 @@ deadCodeElimination(bbdd::scope *scope, StateMachine *sm, bool *done_something, 
 				StateMachineSideEffectCopy *smsec =
 					(StateMachineSideEffectCopy *)e;
 				if (smsec->value->isLeaf &&
-				    smsec->value->content.leaf->tag == Iex_Get &&
-				    ((IRExprGet *)smsec->value->content.leaf)->reg == smsec->target) {
+				    smsec->value->leaf()->tag == Iex_Get &&
+				    ((IRExprGet *)smsec->value->leaf())->reg == smsec->target) {
 					/* Copying a register
 					   or temporary back
 					   to itself is always

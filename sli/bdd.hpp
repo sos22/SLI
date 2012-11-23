@@ -55,7 +55,7 @@ class bdd_ordering : public GcCallback<&ir_heap> {
 public:
 	template <typename leafT, typename subtreeT> bdd_rank rankVariable(const _bdd<leafT, subtreeT> *a) {
 		assert(!a->isLeaf);
-		return a->content.rank;
+		return a->internal().rank;
 	}
 	bdd_rank rankVariable(const IRExpr *e);
 	typedef enum { lt, eq, gt} ordT;
@@ -101,14 +101,14 @@ public:
 	{
 	}
 	template <typename subtreeT> subtreeT *trueBranch(subtreeT *bdd, const bdd_rank &cond) {
-		if (!bdd->isLeaf && cond == bdd->content.rank)
-			return bdd->content.trueBranch;
+		if (!bdd->isLeaf && cond == bdd->internal().rank)
+			return bdd->internal().trueBranch;
 		else
 			return bdd;
 	}
 	template <typename subtreeT> subtreeT *falseBranch(subtreeT *bdd, const bdd_rank &cond) {
-		if (!bdd->isLeaf && cond == bdd->content.rank)
-			return bdd->content.falseBranch;
+		if (!bdd->isLeaf && cond == bdd->internal().rank)
+			return bdd->internal().falseBranch;
 		else
 			return bdd;
 	}
@@ -121,7 +121,20 @@ class _bdd : public GarbageCollected<_bdd<_leafT, _subtreeT>, &ir_heap> {
 public:
 	typedef _leafT leafT;
 	typedef std::map<bbdd *, _subtreeT *> enablingTableT;
+	struct internalT {
+		bdd_rank rank;
+		/* Must be Ity_I1 */
+		IRExpr *condition;
+		_subtreeT *trueBranch;
+		_subtreeT *falseBranch;
+	};
+	const bool isLeaf;
 private:
+	union _contentT {
+		unsigned char _leaf[sizeof(leafT)];
+		unsigned char _internal[sizeof(internalT)];
+	} content;
+
 	template <typename scopeT,
 		  _subtreeT *parseLeaf(scopeT *, const char *, const char **)>
 	static _subtreeT *_parse(scopeT *scope,
@@ -133,6 +146,16 @@ private:
 		zipInternalT,
 		std::map<zipInternalT, _subtreeT *> &memo);
 	template <typename scopeT> static const typename std::map<leafT, bbdd *> &to_selectors(scopeT *, _subtreeT *, std::map<_subtreeT *, std::map<leafT, bbdd *> > &);
+
+	leafT &unsafe_leaf() {
+		assert(isLeaf);
+		return *(leafT *)content._leaf;
+	}
+	internalT &unsafe_internal() {
+		assert(!isLeaf);
+		return *(internalT *)content._internal;
+	}
+
 protected:
 	virtual void _visit(HeapVisitor &hv, leafT &leaf) const = 0;
 	virtual void _sanity_check(leafT leaf) const = 0;
@@ -141,17 +164,15 @@ protected:
 	_bdd(leafT leaf)
 		: isLeaf(true), content()
 	{
-		contentT *_content = const_cast<contentT *>(&content);
-		_content->leaf = leaf;
+		new (&unsafe_leaf()) leafT(leaf);
 	}
 	_bdd(const bdd_rank &rank, IRExpr *cond, _subtreeT *trueB, _subtreeT *falseB)
 		: isLeaf(false), content()
 	{
-		contentT *_content = const_cast<contentT *>(&content);
-		_content->rank = rank;
-		_content->condition = cond;
-		_content->trueBranch = trueB;
-		_content->falseBranch = falseB;
+		unsafe_internal().rank = rank;
+		unsafe_internal().condition = cond;
+		unsafe_internal().trueBranch = trueB;
+		unsafe_internal().falseBranch = falseB;
 	}
 	template <typename scopeT,
 		  _subtreeT *(*parseLeaf)(scopeT *, const char *, const char **)>
@@ -163,35 +184,39 @@ protected:
 		std::map<zipInternalT, _subtreeT *> memo;
 		return zip(scp, where, memo);
 	}
+
+	~_bdd()
+	{
+		if (isLeaf)
+			unsafe_leaf().~leafT();
+		else
+			unsafe_internal().rank.~bdd_rank();
+	}
 public:
-	const bool isLeaf;
-	union contentT {
-		leafT leaf;
-		struct {
-			bdd_rank rank;
-			/* Must be Ity_I1 */
-			IRExpr *condition;
-			_subtreeT *trueBranch;
-			_subtreeT *falseBranch;
-		};
-	};
-	const contentT content;
+	const leafT &leaf() const {
+		assert(isLeaf);
+		return *(const leafT *)content._leaf;
+	}
+	const internalT &internal() const {
+		assert(!isLeaf);
+		return *(const internalT *)content._internal;
+	}
 	void sanity_check(bdd_ordering *ordering = NULL) const {
 		assert(isLeaf == true || isLeaf == false);
 		if (isLeaf) {
-			_sanity_check(content.leaf);
+			_sanity_check(leaf());
 		} else {
-			content.condition->sanity_check();
-			assert(content.condition->type() == Ity_I1);
-			assert(content.condition->tag != Iex_Mux0X);
-			content.trueBranch->sanity_check(ordering);
-			content.falseBranch->sanity_check(ordering);
+			internal().condition->sanity_check();
+			assert(internal().condition->type() == Ity_I1);
+			assert(internal().condition->tag != Iex_Mux0X);
+			internal().trueBranch->sanity_check(ordering);
+			internal().falseBranch->sanity_check(ordering);
 			if (ordering) {
-				assert(content.rank == ordering->rankVariable(content.condition));
-				if (!content.trueBranch->isLeaf)
-					assert(ordering->before(content.condition, content.trueBranch->content.condition));
-				if (!content.falseBranch->isLeaf)
-					assert(ordering->before(content.condition, content.falseBranch->content.condition));
+				assert(internal().rank == ordering->rankVariable(internal().condition));
+				if (!internal().trueBranch->isLeaf)
+					assert(ordering->before(internal().condition, internal().trueBranch->internal().condition));
+				if (!internal().falseBranch->isLeaf)
+					assert(ordering->before(internal().condition, internal().falseBranch->internal().condition));
 			}
 		}
 	}
@@ -237,13 +262,12 @@ public:
 	void visit(HeapVisitor &hv) {
 		/* Bit of a hack: content is const except for things
 		   possibly being moved around by the GC. */
-		contentT *_content = const_cast<contentT *>(&content);
 		if (isLeaf) {
-			_visit(hv, _content->leaf);
+			_visit(hv, unsafe_leaf());
 		} else {
-			hv(_content->condition);
-			hv(_content->trueBranch);
-			hv(_content->falseBranch);
+			hv(unsafe_internal().condition);
+			hv(unsafe_internal().trueBranch);
+			hv(unsafe_internal().falseBranch);
 		}
 	}
 	NAMED_CLASS
@@ -501,9 +525,9 @@ public:
 	static exprbdd *var(scope *scope, bbdd::scope *, IRExpr *);
 	IRType type() const {
 		if (isLeaf)
-			return content.leaf->type();
+			return leaf()->type();
 		else
-			return content.trueBranch->type();
+			return internal().trueBranch->type();
 	}
 	void sanity_check(bdd_ordering *ordering = NULL) const;
 

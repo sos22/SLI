@@ -626,11 +626,11 @@ PointsToTable::pointsToSetForExpr(exprbdd *e,
 		if (!visited.insert(ee).second)
 			continue;
 		if (e->isLeaf) {
-			acc |= pointsToSetForExpr(e->content.leaf, sm, sl,
+			acc |= pointsToSetForExpr(e->leaf(), sm, sl,
 						  mat, slt, machine);
 		} else {
-			q.push_back(e->content.trueBranch);
-			q.push_back(e->content.falseBranch);
+			q.push_back(e->internal().trueBranch);
+			q.push_back(e->internal().falseBranch);
 		}
 	}
 	return acc;

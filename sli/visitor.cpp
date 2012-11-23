@@ -278,13 +278,13 @@ _visit_bdd(void *ctxt,
 	visit_result res = visit_continue;
 	if (bdd->isLeaf) {
 		if (visitLeaf)
-			res = visitLeaf(ctxt, visitor, bdd->content.leaf);
+			res = visitLeaf(ctxt, visitor, bdd->leaf());
 	} else {
-		res = _visit_irexpr(ctxt, visitor, bdd->content.condition);
+		res = _visit_irexpr(ctxt, visitor, bdd->internal().condition);
 		if (res == visit_continue)
-			res = _visit_bdd(ctxt, visitor, visitLeaf, bdd->content.trueBranch, visited);
+			res = _visit_bdd(ctxt, visitor, visitLeaf, bdd->internal().trueBranch, visited);
 		if (res == visit_continue)
-			res = _visit_bdd(ctxt, visitor, visitLeaf, bdd->content.falseBranch, visited);
+			res = _visit_bdd(ctxt, visitor, visitLeaf, bdd->internal().falseBranch, visited);
 	}
 	return res;
 }

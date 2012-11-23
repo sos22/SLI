@@ -349,11 +349,11 @@ undefinednessBBDD(bbdd::scope *scope,
 {
 	if (what->isLeaf)
 		return what;
-	IRExpr *c = undefinednessExpression(sm, what->content.condition, vdm, opt);
+	IRExpr *c = undefinednessExpression(sm, what->internal().condition, vdm, opt);
 	if (c == UNDEFINED_EXPR)
 		return UNDEFINED_BBDD;
-	bbdd *trueB = undefinednessBBDD(scope, sm, what->content.trueBranch, vdm, opt);
-	bbdd *falseB = undefinednessBBDD(scope, sm, what->content.falseBranch, vdm, opt);
+	bbdd *trueB = undefinednessBBDD(scope, sm, what->internal().trueBranch, vdm, opt);
+	bbdd *falseB = undefinednessBBDD(scope, sm, what->internal().falseBranch, vdm, opt);
 	if (trueB == UNDEFINED_BBDD)
 		return falseB;
 	if (falseB == UNDEFINED_BBDD)
@@ -370,11 +370,11 @@ undefinednessSmrBDD(smrbdd::scope *scope,
 {
 	if (what->isLeaf)
 		return what;
-	IRExpr *c = undefinednessExpression(sm, what->content.condition, vdm, opt);
+	IRExpr *c = undefinednessExpression(sm, what->internal().condition, vdm, opt);
 	if (c == UNDEFINED_EXPR)
 		return UNDEFINED_SMRBDD;
-	smrbdd *trueB = undefinednessSmrBDD(scope, sm, what->content.trueBranch, vdm, opt);
-	smrbdd *falseB = undefinednessSmrBDD(scope, sm, what->content.falseBranch, vdm, opt);
+	smrbdd *trueB = undefinednessSmrBDD(scope, sm, what->internal().trueBranch, vdm, opt);
+	smrbdd *falseB = undefinednessSmrBDD(scope, sm, what->internal().falseBranch, vdm, opt);
 	if (trueB == UNDEFINED_SMRBDD)
 		return falseB;
 	if (falseB == UNDEFINED_SMRBDD)
@@ -392,11 +392,11 @@ undefinednessExprBDD(exprbdd::scope *scope,
 {
 	if (what->isLeaf)
 		return what;
-	IRExpr *c = undefinednessExpression(sm, what->content.condition, vdm, opt);
+	IRExpr *c = undefinednessExpression(sm, what->internal().condition, vdm, opt);
 	if (c == UNDEFINED_EXPR)
 		return UNDEFINED_EXPRBDD;
-	exprbdd *trueB = undefinednessExprBDD(scope, bscope, sm, what->content.trueBranch, vdm, opt);
-	exprbdd *falseB = undefinednessExprBDD(scope, bscope, sm, what->content.falseBranch, vdm, opt);
+	exprbdd *trueB = undefinednessExprBDD(scope, bscope, sm, what->internal().trueBranch, vdm, opt);
+	exprbdd *falseB = undefinednessExprBDD(scope, bscope, sm, what->internal().falseBranch, vdm, opt);
 	if (trueB == UNDEFINED_EXPRBDD)
 		return falseB;
 	if (falseB == UNDEFINED_EXPRBDD)

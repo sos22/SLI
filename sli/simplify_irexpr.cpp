@@ -3220,17 +3220,17 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisa
 {
 	if (bdd->isLeaf)
 		return bdd;
-	IRExpr *cond = optimiseIRExprFP(bdd->content.condition, opt, done_something);
+	IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt, done_something);
 	assert(cond->type() == Ity_I1);
 	if (cond->tag == Iex_Const) {
 		if (((IRExprConst *)cond)->Ico.U1)
-			return simplifyBDD(scope, bscope, bdd->content.trueBranch, opt, done_something);
+			return simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something);
 		else
-			return simplifyBDD(scope, bscope, bdd->content.falseBranch, opt, done_something);
+			return simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something);
 	}
-	treeT *t = simplifyBDD(scope, bscope, bdd->content.trueBranch, opt, done_something);
-	treeT *f = simplifyBDD(scope, bscope, bdd->content.falseBranch, opt, done_something);
-	if (cond == bdd->content.condition && t == bdd->content.trueBranch && f == bdd->content.falseBranch)
+	treeT *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something);
+	treeT *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something);
+	if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
 		return bdd;
 	return treeT::ifelse(
 		scope,
@@ -3243,22 +3243,22 @@ template <> exprbdd *
 simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IRExprOptimisations &opt, bool *done_something)
 {
 	if (bdd->isLeaf) {
-		IRExpr *res = optimiseIRExprFP(bdd->content.leaf, opt, done_something);
-		if (res == bdd->content.leaf)
+		IRExpr *res = optimiseIRExprFP(bdd->leaf(), opt, done_something);
+		if (res == bdd->leaf())
 			return bdd;
 		return exprbdd::var(scope, bscope, res);
 	}
-	IRExpr *cond = optimiseIRExprFP(bdd->content.condition, opt, done_something);
+	IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt, done_something);
 	assert(cond->type() == Ity_I1);
 	if (cond->tag == Iex_Const) {
 		if (((IRExprConst *)cond)->Ico.U1)
-			return simplifyBDD(scope, bscope, bdd->content.trueBranch, opt, done_something);
+			return simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something);
 		else
-			return simplifyBDD(scope, bscope, bdd->content.falseBranch, opt, done_something);
+			return simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something);
 	}
-	exprbdd *t = simplifyBDD(scope, bscope, bdd->content.trueBranch, opt, done_something);
-	exprbdd *f = simplifyBDD(scope, bscope, bdd->content.falseBranch, opt, done_something);
-	if (cond == bdd->content.condition && t == bdd->content.trueBranch && f == bdd->content.falseBranch)
+	exprbdd *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something);
+	exprbdd *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something);
+	if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
 		return bdd;
 	return exprbdd::ifelse(
 		scope,

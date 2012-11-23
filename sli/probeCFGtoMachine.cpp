@@ -1099,16 +1099,16 @@ struct RspCanonicalisationState : public Named {
 	}
 	eval_res eval(exprbdd *expr) const {
 		if (expr->isLeaf)
-			return eval(expr->content.leaf);
-		eval_res r1(eval(expr->content.condition));
+			return eval(expr->leaf());
+		eval_res r1(eval(expr->internal().condition));
 		if (r1.tag == eval_res::eval_res_const) {
 			if (r1.val)
-				return eval(expr->content.trueBranch);
+				return eval(expr->internal().trueBranch);
 			else
-				return eval(expr->content.falseBranch);
+				return eval(expr->internal().falseBranch);
 		}
-		eval_res rt(eval(expr->content.trueBranch));
-		eval_res rf(eval(expr->content.falseBranch));
+		eval_res rt(eval(expr->internal().trueBranch));
+		eval_res rf(eval(expr->internal().falseBranch));
 		rt.merge(rf);
 		return rt;
 	}
