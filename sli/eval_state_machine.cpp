@@ -599,25 +599,7 @@ EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, c
 bool
 EvalContext::expressionIsTrue(SMScopes *scopes, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
 {
-	IRExpr *e = evalExprBDD(scopes, exp, chooser, opt);
-	assert(e->type() == Ity_I1);
-	if (e->tag == Iex_Const)
-		return ((IRExprConst *)e)->Ico.U1;
-	if (chooser.nd_choice(2) == 0) {
-		pathConstraint =
-			bbdd::And(
-				&scopes->bools,
-				pathConstraint,
-				bbdd::var(&scopes->bools, e));
-		return true;
-	} else {
-		pathConstraint =
-			bbdd::And(
-				&scopes->bools,
-				pathConstraint,
-				bbdd::invert(&scopes->bools, bbdd::var(&scopes->bools, e)));
-		return true;
-	}
+	return expressionIsTrue(scopes, exprbdd::to_bbdd(&scopes->bools, exp), chooser, opt);
 }
 
 bool
