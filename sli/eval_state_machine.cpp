@@ -576,23 +576,24 @@ EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, c
 	simplifiedCondition = simplifyBDD(&scopes->bools, simplifiedCondition, opt, &b);
 	if (simplifiedCondition->isLeaf)
 		return simplifiedCondition->leaf();
-	std::map<bool, bbdd *> selectors(bbdd::to_selectors(&scopes->bools, simplifiedCondition));
-	assert(selectors.count(true));
-	assert(selectors.count(false));
 
 	/* Can't prove it one way or another.  Use the
 	   non-deterministic chooser to guess. */
-	bool res;
-	if (chooser.nd_choice(2) == 0)
-		res = true;
-	else
-		res = false;
-	pathConstraint =
-		bbdd::And(
-			&scopes->bools,
-			selectors[res],
-			pathConstraint);
-	return res;
+	if (chooser.nd_choice(2) == 0) {
+		pathConstraint =
+			bbdd::And(
+				&scopes->bools,
+				exp,
+				pathConstraint);
+		return true;
+	} else {
+		pathConstraint =
+			bbdd::And(
+				&scopes->bools,
+				bbdd::invert(&scopes->bools, exp),
+				pathConstraint);
+		return false;
+	}
 }
 
 bool
