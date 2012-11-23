@@ -564,35 +564,30 @@ public:
 bool
 EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
 {
-	if (TIMEOUT)
+	bbdd *simplified;
+	switch (evalBooleanExpression(scopes, exp, &simplified, opt)) {
+	case tr_true:
 		return true;
-
-	bbdd *simplifiedCondition =
-		bbdd::assume(
-			&scopes->bools,
-			exp,
-			pathConstraint);
-	bool b;
-	simplifiedCondition = simplifyBDD(&scopes->bools, simplifiedCondition, opt, &b);
-	if (simplifiedCondition->isLeaf)
-		return simplifiedCondition->leaf();
-
-	/* Can't prove it one way or another.  Use the
-	   non-deterministic chooser to guess. */
-	if (chooser.nd_choice(2) == 0) {
-		pathConstraint =
-			bbdd::And(
-				&scopes->bools,
-				exp,
-				pathConstraint);
-		return true;
-	} else {
-		pathConstraint =
-			bbdd::And(
-				&scopes->bools,
-				bbdd::invert(&scopes->bools, exp),
-				pathConstraint);
+	case tr_false:
 		return false;
+	case tr_unknown:
+		/* Can't prove it one way or another.  Use the
+		   non-deterministic chooser to guess. */
+		if (chooser.nd_choice(2) == 0) {
+			pathConstraint =
+				bbdd::And(
+					&scopes->bools,
+					simplified,
+					pathConstraint);
+			return true;
+		} else {
+			pathConstraint =
+				bbdd::And(
+					&scopes->bools,
+					bbdd::invert(&scopes->bools, simplified),
+					pathConstraint);
+			return false;
+		}
 	}
 }
 
