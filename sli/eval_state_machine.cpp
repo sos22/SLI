@@ -589,6 +589,7 @@ EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, c
 			return false;
 		}
 	}
+	abort();
 }
 
 bool
@@ -1007,6 +1008,7 @@ enumEvalPaths(SMScopes *scopes,
 		if (loud && cntr++ % 100 == 0)
 			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
 	}
+	result->sanity_check(&scopes->ordering);
 	return result;
 }
 
