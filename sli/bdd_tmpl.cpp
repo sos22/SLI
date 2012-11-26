@@ -363,6 +363,24 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 		a = a->internal().falseBranch;
 	}
 
+	if (cond->tag == Iex_Binop &&
+	    ((IRExprBinop *)cond)->op >= Iop_CmpEQ8 &&
+	    ((IRExprBinop *)cond)->op <= Iop_CmpEQ64 &&
+	    !a->isLeaf &&
+	    a->internal().condition->tag == Iex_Binop &&
+	    ((IRExprBinop *)a->internal().condition)->op >= Iop_CmpEQ8 &&
+	    ((IRExprBinop *)a->internal().condition)->op <= Iop_CmpEQ64 &&
+	    ((IRExprBinop *)a->internal().condition)->arg2 ==
+		((IRExprBinop *)cond)->arg2 &&
+	    ((IRExprBinop *)cond)->arg1->tag == Iex_Const &&
+	    ((IRExprBinop *)a->internal().condition)->arg1->tag == Iex_Const &&
+	    !eqIRExprConst( (IRExprConst *)((IRExprBinop *)a->internal().condition)->arg1,
+			    (IRExprConst *)((IRExprBinop *)cond)->arg1) ) {
+		assert(((IRExprBinop *)a->internal().condition)->arg1 !=
+		       ((IRExprBinop *)cond)->arg1);
+		a = a->internal().falseBranch;
+	}
+	    
 	if (a == b)
 		return a;
 
