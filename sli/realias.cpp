@@ -3,7 +3,6 @@
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
 #include "maybe.hpp"
-#include "MachineAliasingTable.hpp"
 #include "control_domination_map.hpp"
 #include "sat_checker.hpp"
 #include "alloc_mai.hpp"
@@ -447,13 +446,11 @@ class PointsToTable {
 	PointerAliasingSet getInitialLoadAliasing(SMScopes *scopes,
 						  IRExpr *addr,
 						  StateMachineState *sm,
-						  MachineAliasingTable &mat,
 						  StackLayoutTable &slt,
 						  StateMachine *machine);
 	PointerAliasingSet getInitialLoadAliasing(SMScopes *scopes,
 						  exprbdd *addr,
 						  StateMachineState *sm,
-						  MachineAliasingTable &mat,
 						  StackLayoutTable &slt,
 						  StateMachine *machine);
 
@@ -462,14 +459,12 @@ public:
 					      IRExpr *e,
 					      StateMachineState *sm,
 					      Maybe<StackLayout> *sl,
-					      MachineAliasingTable &mat,
 					      StackLayoutTable &slt,
 					      StateMachine *machine);
 	PointerAliasingSet pointsToSetForExpr(SMScopes *scopes,
 					      exprbdd *e,
 					      StateMachineState *sm,
 					      Maybe<StackLayout> *sl,
-					      MachineAliasingTable &mat,
 					      StackLayoutTable &slt,
 					      StateMachine *machine);
 	bool build(StateMachine *sm);
@@ -483,51 +478,14 @@ public:
 	PointsToTable refine(SMScopes *scopes,
 			     AliasTable &at,
 			     StateMachine *sm,
-			     MachineAliasingTable &mat,
 			     StackLayoutTable &slt,
 			     bool *done_something);
 };
-
-static bool
-aliasConfigForState(StateMachineState *sm,
-		    unsigned thread,
-		    MachineAliasingTable &mat,
-		    Oracle::ThreadRegisterAliasingConfiguration *config)
-{
-	Oracle::RegisterAliasingConfiguration config2;
-
-	if (!mat.findConfig(sm, &config2))
-		return false;
-	for (auto it = config2.content.begin(); it != config2.content.end(); it++) {
-		if (it->first == thread) {
-			*config = it->second;
-			return true;
-		}
-	}
-	return false;
-}
-
-static PointerAliasingSet
-aliasConfigForReg(StateMachineState *sm,
-		  const threadAndRegister &reg,
-		  MachineAliasingTable &mat)
-{
-	assert(reg.isReg());
-	if (reg.gen() != (unsigned)-1 || reg.asReg() >= Oracle::NR_REGS * 8)
-		return PointerAliasingSet::anything;
-	assert(reg.asReg() % 8 == 0);
-
-	Oracle::ThreadRegisterAliasingConfiguration config;
-	if (!aliasConfigForState(sm, reg.tid(), mat, &config))
-		return PointerAliasingSet::anything;
-	return config.v[reg.asReg() / 8];
-}
 
 PointerAliasingSet
 PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
 				      IRExpr *addr,
 				      StateMachineState *sm,
-				      MachineAliasingTable &mat,
 				      StackLayoutTable &slt,
 				      StateMachine *machine)
 {
@@ -536,7 +494,6 @@ PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
 						      addr,
 						      sm,
 						      sl,
-						      mat,
 						      slt,
 						      machine));
 	PointerAliasingSet res = PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
@@ -565,7 +522,6 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 				  IRExpr *e,
 				  StateMachineState *sm,
 				  Maybe<StackLayout> *sl,
-				  MachineAliasingTable &mat,
 				  StackLayoutTable &slt,
 				  StateMachine *machine)
 {
@@ -611,12 +567,12 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 			}
 		}
 
-		return aliasConfigForReg(sm, iex->reg, mat);
+		return PointerAliasingSet::anything;
 	}
 
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)e;
-		return getInitialLoadAliasing(scopes, iel->addr, sm, mat, slt, machine);
+		return getInitialLoadAliasing(scopes, iel->addr, sm, slt, machine);
 	}
 	case Iex_Const:
 		return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
@@ -637,7 +593,7 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 		if (iex->op == Iop_Add64) {
 			PointerAliasingSet res(PointerAliasingSet::nothing);
 			for (int i = 0; i < iex->nr_arguments; i++)
-				res |= pointsToSetForExpr(scopes, iex->contents[i], sm, sl, mat, slt, machine);
+				res |= pointsToSetForExpr(scopes, iex->contents[i], sm, sl, slt, machine);
 			return res;
 		}
 
@@ -653,7 +609,6 @@ PointerAliasingSet
 PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
 				      exprbdd *addr,
 				      StateMachineState *sm,
-				      MachineAliasingTable &mat,
 				      StackLayoutTable &slt,
 				      StateMachine *machine)
 {
@@ -668,7 +623,7 @@ PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
 			continue;
 		if (ee->isLeaf) {
 			acc |= getInitialLoadAliasing(scopes, ee->leaf(), sm,
-						      mat, slt, machine);
+						      slt, machine);
 		} else {
 			q.push_back(ee->internal().trueBranch);
 			q.push_back(ee->internal().falseBranch);
@@ -682,7 +637,6 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 				  exprbdd *e,
 				  StateMachineState *sm,
 				  Maybe<StackLayout> *sl,
-				  MachineAliasingTable &mat,
 				  StackLayoutTable &slt,
 				  StateMachine *machine)
 {
@@ -697,7 +651,7 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 			continue;
 		if (e->isLeaf) {
 			acc |= pointsToSetForExpr(scopes, ee->leaf(), sm, sl,
-						  mat, slt, machine);
+						  slt, machine);
 		} else {
 			q.push_back(ee->internal().trueBranch);
 			q.push_back(ee->internal().falseBranch);
@@ -815,7 +769,6 @@ public:
 	}
 	void refine(SMScopes *scopes,
 		    PointsToTable &ptt,
-		    MachineAliasingTable &mat,
 		    StackLayoutTable &slt,
 		    StateMachine *sm,
 		    bool *done_something,
@@ -1041,7 +994,6 @@ PointsToTable
 PointsToTable::refine(SMScopes *scopes,
 		      AliasTable &at,
 		      StateMachine *sm,
-		      MachineAliasingTable &mat,
 		      StackLayoutTable &slt,
 		      bool *done_something)
 {
@@ -1069,7 +1021,7 @@ PointsToTable::refine(SMScopes *scopes,
 			if (e.mightLoadInitial)
 				newPts |= getInitialLoadAliasing( scopes,
 								  ((StateMachineSideEffectLoad *)effect)->addr,
-								  smse, mat, slt, sm);
+								  smse, slt, sm);
 			for (auto it2 = e.stores.begin(); it2 != e.stores.end(); it2++) {
 				StateMachineSideEffecting *satisfierState = *it2;
 				StateMachineSideEffect *satisfier = satisfierState->sideEffect;
@@ -1085,7 +1037,6 @@ PointsToTable::refine(SMScopes *scopes,
 							((StateMachineSideEffectStore *)satisfier)->data,
 							smse,
 							sl,
-							mat,
 							slt,
 							sm);
 				} else {
@@ -1121,7 +1072,7 @@ PointsToTable::refine(SMScopes *scopes,
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(scopes, c->value, smse, sl, mat, slt, sm);
+			newPts = pointsToSetForExpr(scopes, c->value, smse, sl, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
@@ -1129,10 +1080,16 @@ PointsToTable::refine(SMScopes *scopes,
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
 			     it++)
-				newPts |= pointsToSetForExpr(scopes, it->val, smse, sl, mat, slt, sm);
+				newPts |= pointsToSetForExpr(scopes, it->val, smse, sl, slt, sm);
 			break;
 		}
-		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::ImportRegister: {
+			StateMachineSideEffectImportRegister *r =
+				(StateMachineSideEffectImportRegister *)effect;
+			newPts = r->set;
+			break;
+		}
+
 		case StateMachineSideEffect::Store:
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::AssertFalse:
@@ -1154,7 +1111,6 @@ PointsToTable::refine(SMScopes *scopes,
 void
 AliasTable::refine(SMScopes *scopes,
 		   PointsToTable &ptt,
-		   MachineAliasingTable &mat,
 		   StackLayoutTable &slt,
 		   StateMachine *sm,
 		   bool *done_something,
@@ -1171,7 +1127,6 @@ AliasTable::refine(SMScopes *scopes,
 				l->addr,
 				it->first,
 				sl,
-				mat,
 				slt,
 				sm));
 		if (debug_refine_alias_table)
@@ -1186,7 +1141,6 @@ AliasTable::refine(SMScopes *scopes,
 							((StateMachineSideEffectMemoryAccess *)(*it2)->getSideEffect())->addr,
 							it->first,
 							sl2,
-							mat,
 							slt,
 							sm));
 			if (storePts.overlaps(loadPts)) {
@@ -1260,9 +1214,6 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		ptt.prettyPrint(stdout);
 	}
 
-	MachineAliasingTable mat;
-	mat.initialise(sm);
-
 	AliasTable at;
 	if (!at.build(decode, sm, stateLabels, opt, oracle)) {
 		if (any_debug)
@@ -1276,7 +1227,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 
 	while (1) {
 		bool p = false;
-		PointsToTable ptt2 = ptt.refine(scopes, at, sm, mat, stackLayout, &p);
+		PointsToTable ptt2 = ptt.refine(scopes, at, sm, stackLayout, &p);
 
 		if (p && debug_refine_points_to_table) {
 			printf("Refined points-to table:\n");
@@ -1284,7 +1235,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		}
 		ptt = ptt2;
 
-		at.refine(scopes, ptt, mat, stackLayout, sm, &p, stateLabels);
+		at.refine(scopes, ptt, stackLayout, sm, &p, stateLabels);
 		if (!p)
 			break;
 		if (debug_refine_alias_table) {
@@ -1311,7 +1262,6 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 					       l->addr,
 					       it->first,
 					       stackLayout.forState(it->first),
-					       mat,
 					       stackLayout,
 					       sm));
 		if (pas.otherStackPointer || !pas.valid) {
@@ -1602,7 +1552,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			break;
 		}
 			/* Don't do anything with these. */
-		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::ImportRegister:
 		case StateMachineSideEffect::Load:
 		case StateMachineSideEffect::Copy:
 		case StateMachineSideEffect::Unreached:

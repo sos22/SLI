@@ -538,7 +538,7 @@ undefinednessSimplification(SMScopes *scopes,
 				}
 				case StateMachineSideEffect::StartAtomic:
 				case StateMachineSideEffect::EndAtomic:
-				case StateMachineSideEffect::PointerAliasing:
+				case StateMachineSideEffect::ImportRegister:
 				case StateMachineSideEffect::StackLayout:
 				case StateMachineSideEffect::Unreached:
 					break;

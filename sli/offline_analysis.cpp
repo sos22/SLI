@@ -534,11 +534,11 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 			case StateMachineSideEffect::Phi:
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
+			case StateMachineSideEffect::ImportRegister:
 				return false;
 			case StateMachineSideEffect::AssertFalse:
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
-			case StateMachineSideEffect::PointerAliasing:
 			case StateMachineSideEffect::StackLayout:
 				return true;
 			}

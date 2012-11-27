@@ -355,9 +355,9 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 		StateMachineSideEffectEndFunction *sf = (StateMachineSideEffectEndFunction *)s;
 		do_search(EndFunction);
 	}
-	case StateMachineSideEffect::PointerAliasing: {
-		auto sf = (StateMachineSideEffectPointerAliasing *)s;
-		do_search(PointerAliasing);
+	case StateMachineSideEffect::ImportRegister: {
+		auto sf = (StateMachineSideEffectImportRegister *)s;
+		do_search(ImportRegister);
 	}
 	case StateMachineSideEffect::StackLayout: {
 		auto sf = (StateMachineSideEffectStackLayout *)s;
@@ -574,7 +574,7 @@ internStateMachineTable::_runGc(HeapVisitor &hv)
 	ds(StartFunction);
 	ds(EndFunction);
 	ds(StackLayout);
-	ds(PointerAliasing);
+	ds(ImportRegister);
 #undef ds
 	do_set(StateMachineBifurcate *, states_bifurcate);
 	do_set(StateMachineSideEffecting *, states_side_effect);

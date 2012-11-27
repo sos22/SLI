@@ -179,7 +179,7 @@ ControlDominationMap::init(SMScopes *scopes,
 				case StateMachineSideEffect::EndAtomic:
 				case StateMachineSideEffect::StartFunction:
 				case StateMachineSideEffect::EndFunction:
-				case StateMachineSideEffect::PointerAliasing:
+				case StateMachineSideEffect::ImportRegister:
 				case StateMachineSideEffect::StackLayout:
 					break;
 				}

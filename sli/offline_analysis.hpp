@@ -157,8 +157,8 @@ protected:
 		SMScopes *, StateMachineSideEffectStartFunction *, bool *);
 	virtual StateMachineSideEffectEndFunction *transformOneSideEffect(
 		SMScopes *, StateMachineSideEffectEndFunction *, bool *);
-	virtual StateMachineSideEffectPointerAliasing *transformOneSideEffect(
-		SMScopes *, StateMachineSideEffectPointerAliasing *, bool *)
+	virtual StateMachineSideEffectImportRegister *transformOneSideEffect(
+		SMScopes *, StateMachineSideEffectImportRegister *, bool *)
 	{ return NULL; }
 	virtual StateMachineSideEffectStackLayout *transformOneSideEffect(
 		SMScopes *, StateMachineSideEffectStackLayout *, bool *)

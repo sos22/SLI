@@ -169,7 +169,7 @@ equalModuloVariables(const StateMachineSideEffect *smse1,
 
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
-	case StateMachineSideEffect::PointerAliasing:
+	case StateMachineSideEffect::ImportRegister:
 	case StateMachineSideEffect::StackLayout:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:

@@ -171,7 +171,7 @@ _visit_side_effect(void *ctxt,
 		do_simple(Unreached)
 		do_simple(StartAtomic)
 		do_simple(EndAtomic)
-		do_simple(PointerAliasing)
+		do_simple(ImportRegister)
 		do_simple(StackLayout)
 #undef do_simple
 	}

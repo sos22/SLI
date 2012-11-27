@@ -404,7 +404,7 @@ public:
 	f(EndAtomic)				\
 	f(StartFunction)			\
 	f(EndFunction)				\
-	f(PointerAliasing)			\
+	f(ImportRegister)			\
 	f(StackLayout)
 	enum sideEffectType {
 #define mk_one(n) n,
@@ -1096,42 +1096,60 @@ public:
 		return rsp == o.rsp && frame == o.frame;
 	}
 };
-class StateMachineSideEffectPointerAliasing : public StateMachineSideEffect {
+class StateMachineSideEffectImportRegister : public StateMachineSideEffect {
 public:
 	threadAndRegister reg;
+	unsigned tid;
+	unsigned vex_offset;
 	PointerAliasingSet set;
-	StateMachineSideEffectPointerAliasing(
+	StateMachineSideEffectImportRegister(
 		const threadAndRegister &_reg,
+		unsigned _tid,
+		unsigned _vex_offset,
 		const PointerAliasingSet &_set)
-		: StateMachineSideEffect(StateMachineSideEffect::PointerAliasing),
-		  reg(_reg), set(_set)
+		: StateMachineSideEffect(StateMachineSideEffect::ImportRegister),
+		  reg(_reg), tid(_tid), vex_offset(_vex_offset), set(_set)
+	{}
+	StateMachineSideEffectImportRegister(
+		StateMachineSideEffectImportRegister *base,
+		const threadAndRegister &_reg)
+		: StateMachineSideEffect(StateMachineSideEffect::ImportRegister),
+		  reg(_reg), tid(base->tid), vex_offset(base->vex_offset),
+		  set(base->set)
 	{}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations&, bool*) { return this; }
 	void sanityCheck(SMScopes *) const {}
-	bool definesRegister(threadAndRegister &) const {
-		return false;
+	bool definesRegister(threadAndRegister &tr) const {
+		tr = reg;
+		return true;
 	}
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "ALIAS %s = %s",
-			reg.name(), set.name());
+		fprintf(f, "INITIALVALUE %s = %d:0x%x:%s",
+			reg.name(), tid, vex_offset, set.name());
 	}
-	static bool parse(SMScopes *, StateMachineSideEffectPointerAliasing **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectImportRegister **out, const char *str, const char **suffix)
 	{
 		threadAndRegister reg(threadAndRegister::invalid());
+		unsigned tid;
+		unsigned long vex_offset;
 		PointerAliasingSet set(PointerAliasingSet::nothing);
 
-		if (parseThisString("ALIAS ", str, &str) &&
+		if (parseThisString("INITIALVALUE ", str, &str) &&
 		    parseThreadAndRegister(&reg, str, &str) &&
 		    parseThisString(" = ", str, &str) &&
+		    parseDecimalUInt(&tid, str, &str) &&
+		    parseThisChar(':', str, &str) &&
+		    parseHexUlong(&vex_offset, str, &str) &&
+		    parseThisChar(':', str, &str) &&
 		    set.parse(str, suffix)) {
-			*out = new StateMachineSideEffectPointerAliasing(reg, set);
+			*out = new StateMachineSideEffectImportRegister(reg, tid, vex_offset, set);
 			return true;
 		}
 		return false;
 	}
-	bool operator==(const StateMachineSideEffectPointerAliasing &o) const {
-		return reg == o.reg && set == o.set;
+	bool operator==(const StateMachineSideEffectImportRegister &o) const {
+		return reg == o.reg && tid == o.tid && vex_offset == o.vex_offset && set == o.set;
 	}
 
 };

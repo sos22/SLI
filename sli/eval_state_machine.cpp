@@ -822,9 +822,9 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
 
-	case StateMachineSideEffect::PointerAliasing: {
-		StateMachineSideEffectPointerAliasing *p =
-			(StateMachineSideEffectPointerAliasing *)smse;
+	case StateMachineSideEffect::ImportRegister: {
+		StateMachineSideEffectImportRegister *p =
+			(StateMachineSideEffectImportRegister *)smse;
 		/* The only use we make of a PointerAliasing side
 		   effect is to say that things which aliasing says
 		   are definitely valid pointers really are definitely
@@ -1253,7 +1253,7 @@ definitelyDoesntRace(const MaiMap &decode,
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
-		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::ImportRegister:
 		case StateMachineSideEffect::StackLayout:
 			return true;
 		}

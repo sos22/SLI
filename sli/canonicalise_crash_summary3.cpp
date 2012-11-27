@@ -11,7 +11,6 @@
 #include "intern.hpp"
 #include "alloc_mai.hpp"
 #include "dummy_oracle.hpp"
-#include "MachineAliasingTable.hpp"
 #include "visitor.hpp"
 
 #ifndef NDEBUG
@@ -1236,10 +1235,6 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 	findAllLoads.currentState = NULL;
 	transformCrashSummary(cs, findAllLoads);
 
-	MachineAliasingTable mat;
-	mat.initialise(cs->storeMachine);
-	mat.initialise(cs->loadMachine);
-
 	/* We can degrade a load X to a free variable if we can
 	 * disambiguate every LD wrt X.  i.e. a LD X can be converted
 	 * to a free variable if, for every other LD Y, either X
@@ -1263,10 +1258,7 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 				assert(!definitelyAliasLds.count(*it));
 				definitelyAliasLds.insert(*it);
 				assert(it->second->ty == k.second->ty);
-			} else if (mat.ptrsMightAlias(k.first, exprbdd::var(&cs->scopes->exprs, &cs->scopes->bools, k.second->addr),
-						      it->first, exprbdd::var(&cs->scopes->exprs, &cs->scopes->bools, it->second->addr),
-						      AllowableOptimisations::defaultOptimisations.enableassumePrivateStack()) &&
-				   !definitelyNotEqual(k.second->addr, it->second->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
+			} else if (!definitelyNotEqual(k.second->addr, it->second->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
 				allowSubst = false;
 				/* If *it and k might alias then
 				   neither *it nor k can be converted

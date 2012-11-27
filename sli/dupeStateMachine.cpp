@@ -245,10 +245,10 @@ rawDupeS(const StateMachineSideEffectEndFunction *l)
 	return new StateMachineSideEffectEndFunction(l->rsp, l->frame);
 }
 
-static StateMachineSideEffectPointerAliasing *
-rawDupeS(const StateMachineSideEffectPointerAliasing *l)
+static StateMachineSideEffectImportRegister *
+rawDupeS(const StateMachineSideEffectImportRegister *l)
 {
-	return new StateMachineSideEffectPointerAliasing(l->reg, l->set);
+	return new StateMachineSideEffectImportRegister(*l);
 }
 
 static StateMachineSideEffectStackLayout *

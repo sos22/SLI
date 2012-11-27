@@ -17,7 +17,7 @@ public:
 	std::set<StateMachineSideEffectStartFunction *> StartFunction;
 	std::set<StateMachineSideEffectEndFunction *> EndFunction;
 	std::set<StateMachineSideEffectStackLayout *> StackLayout;
-	std::set<StateMachineSideEffectPointerAliasing *> PointerAliasing;
+	std::set<StateMachineSideEffectImportRegister *> ImportRegister;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineSideEffecting *> states_side_effect;
 	std::set<StateMachineTerminal *> states_terminal;

@@ -333,7 +333,7 @@ public:
 		case StateMachineSideEffect::StartAtomic:
 		case StateMachineSideEffect::EndAtomic:
 		case StateMachineSideEffect::StackLayout:
-		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::ImportRegister:
 			break;
 		case StateMachineSideEffect::AssertFalse:
 			useExpressionData( ((StateMachineSideEffectAssertFalse *)smse)->value );
@@ -535,8 +535,8 @@ ssaDeadCode(SMScopes *scopes, StateMachine *sm, bool *done_something)
 			}
 			break;
 		}
-		case StateMachineSideEffect::PointerAliasing: {
-			auto *p = (StateMachineSideEffectPointerAliasing *)effect;
+		case StateMachineSideEffect::ImportRegister: {
+			auto *p = (StateMachineSideEffectImportRegister *)effect;
 			if (!refed_regs.count(p->reg)) {
 				*done_something = true;
 				(*it)->sideEffect = NULL;
@@ -641,9 +641,9 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something, bo
 					dead = true;
 				break;
 			}
-			case StateMachineSideEffect::PointerAliasing: {
-				auto *p = (StateMachineSideEffectPointerAliasing *)e;
-				if (!alive.registerLivePointer(p->reg))
+			case StateMachineSideEffect::ImportRegister: {
+				auto *p = (StateMachineSideEffectImportRegister *)e;
+				if (!alive.registerLiveData(p->reg))
 					dead = true;
 				break;
 			}

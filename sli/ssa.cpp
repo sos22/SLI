@@ -65,21 +65,14 @@ assignLabelsToDefinitions(SMScopes *scopes,
 						      StateMachineSideEffect *se,
 						      bool *done_something) {
 			threadAndRegister tr(threadAndRegister::invalid());
-			if (se->type == StateMachineSideEffect::PointerAliasing) {
-				StateMachineSideEffectPointerAliasing *smsespas =
-					(StateMachineSideEffectPointerAliasing *)se;
-				se = new StateMachineSideEffectPointerAliasing(
-					smsespas->reg.setGen(-1),
-					smsespas->set);
-				*done_something = true;
-			} else if (se->definesRegister(tr)) {
+			if (se->definesRegister(tr)) {
 				/* Shouldn't be processing the same
 				 * side effect multiple times. */
+				assert(tr.gen() == 0);
 				switch (se->type) {
 				case StateMachineSideEffect::Load: {
 					StateMachineSideEffectLoad *smsel =
 						(StateMachineSideEffectLoad *)se;
-					assert(tr.gen() == 0);
 					tr = tr.setGen(++lastGeneration[tr]);
 					se = new StateMachineSideEffectLoad(
 						smsel,
@@ -97,9 +90,17 @@ assignLabelsToDefinitions(SMScopes *scopes,
 					*done_something = true;
 					break;
 				}
-				case StateMachineSideEffect::PointerAliasing:
-					/* Already handled */
-					abort();
+				case StateMachineSideEffect::ImportRegister: {
+					StateMachineSideEffectImportRegister *smseir =
+						(StateMachineSideEffectImportRegister *)se;
+					tr = tr.setGen(++lastGeneration[tr]);
+					se = new StateMachineSideEffectImportRegister(
+						smseir,
+						tr);
+					*done_something = true;
+					break;
+				}
+
 				case StateMachineSideEffect::Phi:
 					/* Shouldn't be in SSA form yet */
 					abort();

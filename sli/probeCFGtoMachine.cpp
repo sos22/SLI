@@ -9,6 +9,7 @@
 #include "offline_analysis.hpp"
 #include "smb_builder.hpp"
 #include "maybe.hpp"
+#include "visitor.hpp"
 
 #include "libvex_guest_offsets.h"
 
@@ -1216,12 +1217,18 @@ getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *del
 				}
 				break;
 			}
+
+			case StateMachineSideEffect::ImportRegister: {
+				StateMachineSideEffectImportRegister *r = (StateMachineSideEffectImportRegister *)se;
+				exitState.set(r->reg, RspCanonicalisationState::eval_res::failed());
+				break;
+			}
+
 				/* Most side effects are irrelevant here. */
 			case StateMachineSideEffect::Unreached:
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
 			case StateMachineSideEffect::StackLayout:
-			case StateMachineSideEffect::PointerAliasing:
 			case StateMachineSideEffect::AssertFalse:
 			case StateMachineSideEffect::StartFunction:
 				break;
@@ -1419,8 +1426,10 @@ addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachine
 		}
 		cursor = new StateMachineSideEffecting(
 			vr,
-			new StateMachineSideEffectPointerAliasing(
+			new StateMachineSideEffectImportRegister(
 				threadAndRegister::reg(tid, i * 8, 0),
+				tid,
+				i * 8,
 				v),
 			cursor);
 	}
@@ -1851,6 +1860,172 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	}
 }
 
+static visit_result
+findUsedRegs__Get(std::set<threadAndRegister> *s, const IRExprGet *ieg)
+{
+	s->insert(ieg->reg);
+	return visit_continue;
+}
+static void
+findUsedRegs(exprbdd *expr, std::set<threadAndRegister> &tr)
+{
+	static struct irexpr_visitor<std::set<threadAndRegister> > visitor;
+	visitor.Get = findUsedRegs__Get;
+	visit_bdd(&tr, &visitor, visit_irexpr<std::set<threadAndRegister> >, expr);
+}
+static void
+findUsedRegs(bbdd *expr, std::set<threadAndRegister> &tr)
+{
+	static struct irexpr_visitor<std::set<threadAndRegister> > visitor;
+	visitor.Get = findUsedRegs__Get;
+	visit_bdd(&tr, &visitor, expr);
+}
+static void
+findUsedRegs(smrbdd *expr, std::set<threadAndRegister> &tr)
+{
+	static struct irexpr_visitor<std::set<threadAndRegister> > visitor;
+	visitor.Get = findUsedRegs__Get;
+	visit_bdd(&tr, &visitor, expr);
+}
+
+static StateMachineState *
+importRegisters(StateMachineState *root)
+{
+	std::map<StateMachineState *, int> nrMissingPredecessors;
+	std::set<StateMachineState *> visited;
+	std::vector<StateMachineState *> q;
+	q.push_back(root);
+	while (!q.empty()) {
+		StateMachineState *s = q.back();
+		q.pop_back();
+		if (!visited.insert(s).second)
+			continue;
+		std::vector<StateMachineState *> succ;
+		s->targets(succ);
+		for (auto it = succ.begin(); it != succ.end(); it++) {
+			nrMissingPredecessors[*it]++;
+			q.push_back(*it);
+		}
+	}
+	visited.clear();
+
+	std::set<threadAndRegister> needImport;
+
+	q.push_back(root);
+	std::map<StateMachineState *, std::set<threadAndRegister> > definedRegs;
+	while (!q.empty()) {
+		StateMachineState *s = q.back();
+		q.pop_back();
+#ifndef NDEBUG
+		assert(visited.insert(s).second);
+#endif
+		assert(nrMissingPredecessors[s] == 0);
+		threadAndRegister tr(threadAndRegister::invalid());
+		std::set<threadAndRegister> usedRegs;
+		switch (s->type) {
+		case StateMachineState::Bifurcate:
+			findUsedRegs( ((StateMachineBifurcate *)s)->condition, usedRegs);
+			break;
+		case StateMachineState::Terminal:
+			findUsedRegs( ((StateMachineTerminal *)s)->res, usedRegs);
+			break;
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *e = (StateMachineSideEffecting *)s;
+			StateMachineSideEffect *se = e->sideEffect;
+			if (se) {
+				switch (se->type) {
+				case StateMachineSideEffect::Load:
+					findUsedRegs( ((StateMachineSideEffectLoad *)se)->addr, usedRegs );
+					break;
+				case StateMachineSideEffect::Store:
+					findUsedRegs( ((StateMachineSideEffectStore *)se)->addr, usedRegs );
+					findUsedRegs( ((StateMachineSideEffectStore *)se)->data, usedRegs );
+					break;
+				case StateMachineSideEffect::Copy:
+					findUsedRegs( ((StateMachineSideEffectCopy *)se)->value, usedRegs );
+					break;
+				case StateMachineSideEffect::AssertFalse:
+					findUsedRegs( ((StateMachineSideEffectAssertFalse *)se)->value, usedRegs );
+					break;
+				case StateMachineSideEffect::StartAtomic:
+					break;
+				case StateMachineSideEffect::EndAtomic:
+					break;
+				case StateMachineSideEffect::Phi: {
+					StateMachineSideEffectPhi *p = (StateMachineSideEffectPhi *)s;
+					for (auto it = p->generations.begin();
+					     it != p->generations.end();
+					     it++)
+						findUsedRegs(it->val, usedRegs);
+					break;
+				}
+				case StateMachineSideEffect::StartFunction:
+					findUsedRegs( ((StateMachineSideEffectStartFunction *)se)->rsp, usedRegs );
+					break;
+				case StateMachineSideEffect::EndFunction:
+					findUsedRegs( ((StateMachineSideEffectEndFunction *)se)->rsp, usedRegs );
+					break;
+				case StateMachineSideEffect::ImportRegister:
+					break;
+				case StateMachineSideEffect::StackLayout:
+					break;
+				case StateMachineSideEffect::Unreached:
+					break;
+				}
+			}
+			break;
+		}
+		}
+
+		std::set<threadAndRegister> defined(definedRegs[s]);
+		for (auto it = usedRegs.begin(); it != usedRegs.end(); it++) {
+			if (!defined.count(*it))
+				needImport.insert(*it);
+		}
+		if (s->getSideEffect() && s->getSideEffect()->definesRegister(tr))
+			defined.insert(tr);
+		std::vector<StateMachineState *> succ;
+		s->targets(succ);
+		for (auto it = succ.begin(); it != succ.end(); it++) {
+			auto it2_did_insert = definedRegs.insert(
+				(std::pair<StateMachineState *, std::set<threadAndRegister> >
+				 (*it, defined)));
+			auto it2 = it2_did_insert.first;
+			auto did_insert = it2_did_insert.second;
+			if (!did_insert) {
+				for (auto it3 = it2->second.begin();
+				     it3 != it2->second.end();
+					) {
+					if (defined.count(*it3))
+						it3++;
+					else
+						it2->second.erase(it3++);
+				}
+			}
+			nrMissingPredecessors[*it]--;
+			if (nrMissingPredecessors[*it] == 0)
+				q.push_back(*it);
+			assert(nrMissingPredecessors[*it] >= 0);
+		}
+	}
+
+	for (auto it = needImport.begin();
+	     it != needImport.end();
+	     it++) {
+		assert(it->isReg());
+		root = new StateMachineSideEffecting(
+			root->dbg_origin,
+			new StateMachineSideEffectImportRegister(
+				*it,
+				it->tid(),
+				it->asReg(),
+				PointerAliasingSet::anything),
+			root);
+	}
+
+	return root;
+}
+
 static StateMachine *
 probeCFGsToMachine(SMScopes *scopes,
 		   Oracle *oracle,
@@ -1913,7 +2088,7 @@ probeCFGsToMachine(SMScopes *scopes,
 	for (auto it = roots.begin(); !it.finished(); it.advance())
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
-	return new StateMachine(entryState(scopes, VexRip(), roots_this_sm2, tid, false), cfg_roots_this_sm);
+	return new StateMachine(importRegisters(entryState(scopes, VexRip(), roots_this_sm2, tid, false)), cfg_roots_this_sm);
 }
 
 static StateMachine *
@@ -1960,7 +2135,7 @@ storeCFGsToMachine(SMScopes *scopes,
 		entryStacks[s],
 		root->rip);
 	StateMachine *sm = new StateMachine(
-		s,
+		importRegisters(s),
 		roots);
 	return sm;
 }
