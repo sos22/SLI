@@ -627,3 +627,40 @@ _bdd<constT, subtreeT>::ifelse(scopeT *scope,
 	return zip(scope, ifelse_zip_internal<subtreeT, scopeT>(cond, ifTrue, ifFalse));
 }
 
+template <typename constT, typename subtreeT> subtreeT *
+const_bdd<constT, subtreeT>::replaceTerminal(scope *scp,
+					     constT from,
+					     constT to,
+					     subtreeT *in,
+					     std::map<subtreeT *, subtreeT *> &memo)
+{
+	if (in->isLeaf) {
+		if (in->leaf() == from)
+			return scp->cnst(to);
+		else
+			return in;
+	}
+	auto it_did_insert = memo.insert(std::pair<subtreeT *, subtreeT *>(in, (subtreeT *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		subtreeT *t = replaceTerminal(scp, from, to, in->internal().trueBranch, memo);
+		subtreeT *f = replaceTerminal(scp, from, to, in->internal().falseBranch, memo);
+		if (t != in->internal().trueBranch ||
+		    f != in->internal().falseBranch)
+			it->second = scp->makeInternal(in->internal().condition, t, f);
+		else
+			it->second = in;
+	}
+	return it->second;
+}
+
+template <typename constT, typename subtreeT> subtreeT *
+const_bdd<constT, subtreeT>::replaceTerminal(scope *scp,
+					     constT from,
+					     constT to,
+					     subtreeT *in)
+{
+	std::map<subtreeT *, subtreeT *> memo;
+	return replaceTerminal(scp, from, to, in, memo);
+}

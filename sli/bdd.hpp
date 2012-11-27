@@ -355,7 +355,18 @@ protected:
 	const_bdd(constT b)
 		: _bdd<constT, subtreeT>(b)
 	{}
+	static subtreeT *replaceTerminal(
+		scope *scp,
+		constT from,
+		constT to,
+		subtreeT *in,
+		std::map<subtreeT *, subtreeT *> &);
 public:
+	static subtreeT *replaceTerminal(
+		scope *scp,
+		constT from,
+		constT to,
+		subtreeT *in);
 };
 
 class bbdd : public const_bdd<bool, bbdd> {

@@ -502,7 +502,7 @@ private:
 
 	trool evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt);
 	void evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
-			    smrbdd *&result, std::vector<EvalContext> &pendingStates,
+			    smrbdd *&result, StateMachineRes unreachedIs, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
 
 	EvalContext(const EvalContext &o, StateMachineState *sms)
@@ -550,6 +550,7 @@ public:
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
+		     StateMachineRes unreachedIs,
 		     StateMachine *sm,
 		     smrbdd *&result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
@@ -879,7 +880,7 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplifi
 
 void
 EvalContext::evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
-			    smrbdd *&result, std::vector<EvalContext> &pendingStates,
+			    smrbdd *&result, StateMachineRes unreached, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
 {
 	NdChooser chooser;
@@ -903,7 +904,7 @@ EvalContext::evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine
 		case esme_escape:
 			result = smrbdd::ifelse(&scopes->smrs,
 						newContext.pathConstraint,
-						scopes->smrs.cnst(smr_unreached),
+						scopes->smrs.cnst(unreached),
 						result);
 			break;
 		}
@@ -921,23 +922,32 @@ EvalContext::advance(SMScopes *scopes,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
+		     StateMachineRes unreachedIs,
 		     StateMachine *sm,
 		     smrbdd *&result)
 {
 	switch (currentState->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)currentState;
-		result = smrbdd::ifelse(&scopes->smrs,
-					pathConstraint,
-					state.specialiseIRExpr(scopes, smt->res),
-					result);
+		result = smrbdd::ifelse(
+			&scopes->smrs,
+			pathConstraint,
+			state.specialiseIRExpr(
+				scopes,
+				smrbdd::replaceTerminal(
+					&scopes->smrs,
+					smr_unreached,
+					unreachedIs,
+					smt->res)),
+			result);
 		return;
 	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
 		if (sme->sideEffect) {
-			evalSideEffect(scopes, decode, sm, oracle, result, pendingStates,
+			evalSideEffect(scopes, decode, sm, oracle, result,
+				       unreachedIs, pendingStates,
 				       sme->sideEffect, opt);
 		} else {
 			pendingStates.push_back(*this);
@@ -988,6 +998,7 @@ enumEvalPaths(SMScopes *scopes,
 	      const VexPtr<bbdd, &ir_heap> &assumption,
 	      const VexPtr<OracleInterface> &oracle,
 	      const IRExprOptimisations &opt,
+	      StateMachineRes unreachedIs,
 	      GarbageCollectionToken &token,
 	      bool loud = false)
 {
@@ -995,7 +1006,7 @@ enumEvalPaths(SMScopes *scopes,
 	std::vector<EvalContext> pendingStates;
 	VexPtr<smrbdd, &ir_heap> result;
 
-	result = scopes->smrs.cnst( smr_unreached );
+	result = scopes->smrs.cnst(unreachedIs);
 
 	pendingStates.push_back(EvalContext(sm, assumption ? assumption.get() : scopes->bools.cnst(true)));
 
@@ -1004,7 +1015,7 @@ enumEvalPaths(SMScopes *scopes,
 
 		EvalContext ctxt(pendingStates.back());
 		pendingStates.pop_back();
-		ctxt.advance(scopes, *decode, oracle, opt, pendingStates, sm, result);
+		ctxt.advance(scopes, *decode, oracle, opt, pendingStates, unreachedIs, sm, result);
 		if (loud && cntr++ % 100 == 0)
 			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
 	}
@@ -1039,7 +1050,9 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 
 	if (assumption)
 		assumption->sanity_check(&scopes->ordering);
-	smrbdd *smr = enumEvalPaths(scopes, mai, sm, assumption, oracle, opt, token);
+	smrbdd *smr = enumEvalPaths(scopes, mai, sm, assumption, oracle, opt,
+				    escapingStatesSurvive ? smr_survive : smr_crash,
+				    token);
 	smr->sanity_check(&scopes->ordering);
 	std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scopes->bools, smr));
 	bbdd *crashIf, *surviveIf, *unreachedIf;
@@ -1826,6 +1839,6 @@ collectConstraints(SMScopes *scopes,
 		   std::vector<IRExpr *> &out,
 		   GarbageCollectionToken token)
 {
-	enumEvalPaths(scopes, mai, sm, scopes->bools.cnst(true), oracle, opt, token, true);
+	enumEvalPaths(scopes, mai, sm, scopes->bools.cnst(true), oracle, opt, smr_unreached, token, true);
 	scopes->ordering.enumVariables(out);
 }
