@@ -376,7 +376,6 @@ updateAvailSetForSideEffect(SMScopes *scopes,
 			    const MaiMap &decode,
 			    avail_t &outputAvail,
 			    StateMachineSideEffect *smse,
-			    StateMachineState *where,
 			    const AllowableOptimisations &opt,
 			    OracleInterface *oracle)
 {
@@ -535,7 +534,6 @@ applyAvailSet(SMScopes *scopes, const avail_t &avail, exprbdd *expr, bool *done_
 static StateMachineSideEffect *
 buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 					const MaiMap &decode,
-					StateMachineState *where,
 					StateMachineSideEffect *smse,
 					avail_t &currentlyAvailable,
 					OracleInterface *oracle,
@@ -720,7 +718,7 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 	}
 	if (!*done_something) assert(newEffect == smse);
 	if (newEffect)
-		updateAvailSetForSideEffect(scopes, decode, currentlyAvailable, newEffect, where, opt, oracle);
+		updateAvailSetForSideEffect(scopes, decode, currentlyAvailable, newEffect, opt, oracle);
 	currentlyAvailable.calcRegisterMap(&scopes->bools);
 	if (debug_substitutions) {
 		printf("New available set:\n");
@@ -768,7 +766,6 @@ buildNewStateMachineWithLoadsEliminated(
 		if (smp->sideEffect)
 			newEffect = buildNewStateMachineWithLoadsEliminated(scopes,
 									    decode,
-									    smp,
 									    smp->sideEffect,
 									    avail,
 									    oracle,
@@ -900,7 +897,7 @@ availExpressionAnalysis(SMScopes *scopes,
 			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
 			if (se)
 				updateAvailSetForSideEffect(scopes, decode, outputAvail,
-							    se, state, opt, oracle);
+							    se, opt, oracle);
 		}
 
 		std::vector<StateMachineState *> edges;
@@ -939,7 +936,7 @@ availExpressionAnalysis(SMScopes *scopes,
 			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
 			if (se)
 				updateAvailSetForSideEffect(scopes, decode, outputAvail,
-							    se, state, opt, oracle);
+							    se, opt, oracle);
 		}
 
 		std::vector<StateMachineState *> edges;
