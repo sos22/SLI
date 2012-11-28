@@ -935,22 +935,6 @@ public:
 		{}
 	};
 	std::vector<input> generations;
-	StateMachineSideEffectPhi(SMScopes *scopes,
-				  const threadAndRegister &_reg,
-				  IRType _ty,
-				  const std::set<unsigned> &_generations)
-		: StateMachineSideEffect(StateMachineSideEffect::Phi),
-		  reg(_reg),
-		  ty(_ty)
-	{
-		generations.reserve(_generations.size());
-		for (auto it = _generations.begin(); it != _generations.end(); it++) {
-			input item;
-			item.reg = reg.setGen(*it);
-			item.val = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(item.reg, ty));
-			generations.push_back(item);
-		}
-	}
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  IRType _ty,
 				  const std::vector<input> &_generations)
@@ -1111,7 +1095,7 @@ public:
 		  reg(_reg), tid(_tid), vex_offset(_vex_offset), set(_set)
 	{}
 	StateMachineSideEffectImportRegister(
-		StateMachineSideEffectImportRegister *base,
+		const StateMachineSideEffectImportRegister *base,
 		const threadAndRegister &_reg)
 		: StateMachineSideEffect(StateMachineSideEffect::ImportRegister),
 		  reg(_reg), tid(base->tid), vex_offset(base->vex_offset),
@@ -1378,7 +1362,8 @@ __enumStates(StateMachineState *root, containerType &states)
 	while (!toVisit.empty()) {
 		StateMachineState *s = toVisit.back();
 		toVisit.pop_back();
-		assert(s);
+		if (!s)
+			continue;
 		if (!visited.insert(s).second)
 			continue;
 		stateType *ss = dynamic_cast<stateType *>(s);
@@ -1398,7 +1383,8 @@ __enumStates(const StateMachineState *root, containerType &states)
 	while (!toVisit.empty()) {
 		const StateMachineState *s = toVisit.back();
 		toVisit.pop_back();
-		assert(s);
+		if (!s)
+			continue;
 		if (!visited.insert(s).second)
 			continue;
 		const stateType *ss = dynamic_cast<stateType *>(s);
