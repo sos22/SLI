@@ -698,10 +698,15 @@ bdd_rank
 bdd_ordering::rankVariable(const IRExpr *a)
 {
 	bdd_rank::clsT cls;
-	if (a->tag == Iex_EntryPoint || a->tag == Iex_ControlFlow)
-		cls = bdd_rank::cls_entry;
-	else
-		cls = bdd_rank::cls_norm;
+	if (a->tag == Iex_EntryPoint || a->tag == Iex_ControlFlow) {
+		cls.tag = bdd_rank::clsT::cls_entry;
+	} else if (a->tag == Iex_HappensBefore) {
+		cls.tag = bdd_rank::clsT::cls_hb;
+		cls.hb1 = -((IRExprHappensBefore *)a)->before.id;
+		cls.hb2 = ((IRExprHappensBefore *)a)->after.id;
+	} else {
+		cls.tag = bdd_rank::clsT::cls_norm;
+	}
 	long &rankNr(nextRanking[cls]);
 	bdd_rank rank;
 	rank.cls = cls;

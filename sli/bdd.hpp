@@ -17,9 +17,38 @@ template <typename _leafT, typename _subtreeT> class _bdd;
 class bdd_rank {
 	friend class bdd_ordering;
 	long val;
-	enum clsT {
-		cls_entry,
-		cls_norm
+	struct clsT {
+		enum { cls_entry, cls_hb, cls_norm} tag;
+		int hb1, hb2;
+		bool operator<(const clsT &o) const {
+			if (tag < o.tag)
+				return true;
+			else if (tag > o.tag || tag != cls_hb)
+				return false;
+			else if (hb1 < o.hb1)
+				return true;
+			else if (hb1 > o.hb1)
+				return false;
+			else
+				return hb2 < o.hb2;
+		}
+		bool operator>(const clsT &o) const {
+			if (tag > o.tag)
+				return true;
+			else if (tag < o.tag || tag != cls_hb)
+				return false;
+			else if (hb1 > o.hb1)
+				return true;
+			else if (hb1 < o.hb1)
+				return false;
+			else
+				return hb2 > o.hb2;
+		}
+		bool operator==(const clsT &o) const {
+			return tag == o.tag &&
+				(tag != cls_hb ||
+				 (hb1 == o.hb1 && hb2 == o.hb2));
+		}
 	} cls;
 public:
 	bool operator <(const bdd_rank &o) const
@@ -32,7 +61,7 @@ public:
 	}
 	bool operator==(const bdd_rank &o) const
 	{
-		return cls == o.cls && val == o.val;
+		return val == o.val && cls == o.cls;
 	}
 	bool parse(const char *, const char **);
 
