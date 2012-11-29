@@ -1316,6 +1316,11 @@ buildCrossProductMachine(SMScopes *scopes,
 					  crossState.p->getSideEffect()->type == StateMachineSideEffect::StartAtomic)) &&
 					!(crossState.p->getSideEffect() &&
 					  crossState.p->getSideEffect()->type == StateMachineSideEffect::EndAtomic);
+				bool pia =
+					crossState.probe_issued_access ||
+					(crossState.p->getSideEffect() &&
+					 (crossState.p->getSideEffect()->type == StateMachineSideEffect::Store ||
+					  crossState.p->getSideEffect()->type == StateMachineSideEffect::Load));
 				std::vector<StateMachineState **> targets;
 				res->targets(targets);
 				for (auto it = targets.begin(); it != targets.end(); it++) {
@@ -1325,7 +1330,7 @@ buildCrossProductMachine(SMScopes *scopes,
 							       **it,
 							       crossState.s,
 							       crossState.store_issued_store,
-							       true,
+							       pia,
 							       lockState,
 							       crossState.store_is_atomic
 							       )));
@@ -1346,7 +1351,10 @@ buildCrossProductMachine(SMScopes *scopes,
 					  crossState.s->getSideEffect()->type == StateMachineSideEffect::StartAtomic)) &&
 					!(crossState.s->getSideEffect() &&
 					  crossState.s->getSideEffect()->type == StateMachineSideEffect::EndAtomic);
-
+				bool sis =
+					crossState.store_issued_store ||
+					(crossState.s->getSideEffect() &&
+					 crossState.s->getSideEffect()->type == StateMachineSideEffect::Store);
 				std::vector<StateMachineState **> targets;
 				res->targets(targets);
 				for (auto it = targets.begin(); it != targets.end(); it++) {
@@ -1355,7 +1363,7 @@ buildCrossProductMachine(SMScopes *scopes,
 						       crossStateT(
 							       crossState.p,
 							       **it,
-							       true,
+							       sis,
 							       crossState.probe_issued_access,
 							       crossState.probe_is_atomic,
 							       lockState)));
