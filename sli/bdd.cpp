@@ -859,7 +859,7 @@ exprbdd::to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo)
 			what->internal().condition,
 			to_irexpr(what->internal().falseBranch, memo),
 			to_irexpr(what->internal().trueBranch, memo));
-       return it->second;
+	return it->second;
 }
 
 IRExpr *
