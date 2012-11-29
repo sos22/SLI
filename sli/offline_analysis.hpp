@@ -246,9 +246,6 @@ StateMachine *deadCodeElimination(SMScopes *, StateMachine *sm, bool *done_somet
 StateMachine *bisimilarityReduction(SMScopes *, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something);
 StateMachine *useInitialMemoryLoads(SMScopes *, const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 				    OracleInterface *oracle, bool *done_something);
-StateMachine *removeLocalSurvival(StateMachine *sm,
-				  const AllowableOptimisations &opt,
-				  bool *done_something);
 class ControlDominationMap;
 StateMachine *functionAliasAnalysis(SMScopes *scopes,
 				    const MaiMap &mai,

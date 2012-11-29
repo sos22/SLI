@@ -763,7 +763,6 @@ StateMachine::assertSSA() const
 		threadAndRegister tr(threadAndRegister::invalid());
 		if (smse->definesRegister(tr)) {
 			assert(tr.gen() != 0);
-			assert(tr.gen() != (unsigned)-1);
 			if (!discoveredAssignments.insert(tr).second)
 				abort();
 		}

@@ -318,17 +318,6 @@ _optimiseStateMachine(SMScopes *scopes,
 			}
 			done_something |= p;
 		}
-#if 0
-		if (opt.noLocalSurvival()) {
-			p = false;
-			sm = removeLocalSurvival(sm, opt, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("removeLocalSurvival:\n");
-				printStateMachine(sm, stdout);
-			}
-			done_something |= p;
-		}
-#endif
 		if (opt.mustStoreBeforeCrash()) {
 			p = false;
 			sm = enforceMustStoreBeforeCrash(scopes, sm, &p);

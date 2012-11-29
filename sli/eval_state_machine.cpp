@@ -354,19 +354,7 @@ public:
 				}
 			}
 		}
-		/* We haven't yet assigned to any registers in the
-		   input set of the Phi, so we're going to pick up the
-		   initial value of the super-register. */
-		threadAndRegister genM1(threadAndRegister::invalid());
-		for (auto it = phi->generations.begin();
-		     genM1.isInvalid() && it != phi->generations.end();
-		     it++)
-			if (it->reg.gen() == (unsigned)-1)
-				genM1 = it->reg;
-		assert(genM1.isValid());
-
-		/* Pick up initial value */
-		set_register(scopes, phi->reg, exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(genM1, Ity_I64)), assumption, opt);
+		abort();
 	}
 
 	bbdd *specialiseIRExpr(SMScopes *, bbdd *iex);
