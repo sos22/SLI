@@ -7,6 +7,7 @@
 #include "libvex_prof.hpp"
 #include "allowable_optimisations.hpp"
 #include "visitor.hpp"
+#include "either.hpp"
 
 /* Debug options: */
 #ifdef NDEBUG
@@ -66,7 +67,7 @@ public:
 	void dereference(SMScopes *scope, exprbdd *ptr, const AllowableOptimisations &opt);
 	/* Merge @other into the current availability set.  Returns
 	   true if we do anything, and false otherwise. */
-	bool mergeIntersection(bbdd::scope *scope, const avail_t &other, bool is_ssa);
+	bool mergeIntersection(bbdd::scope *scope, const avail_t &other);
 	bool mergeUnion(bbdd::scope *scope, const avail_t &other);
 
 	void calcRegisterMap(bbdd::scope *scope);
@@ -140,47 +141,10 @@ avail_t::dereference(SMScopes *scopes, exprbdd *addr, const AllowableOptimisatio
 
 bool
 avail_t::mergeIntersection(bbdd::scope *scope,
-			   const avail_t &other,
-			   bool is_ssa)
+			   const avail_t &other)
 {
 	bool res;
-
-	/* The merge rules are a little bit tricky.  The obvious
-	   answer is an intersection, but that's a bit more
-	   conservative than we need, at least for registers.  The
-	   observation is that if a parent doesn't define a register
-	   at all then it must be that if we came from that parent
-	   then we will never use that register, because otherwise
-	   we'd have a use-without-initialisation bug.  Therefore, if
-	   one parent defines a register and the other doesn't, we can
-	   just take the value from whichever parent *does* define it.
-
-	   i.e. the output is the *union* of inputs for
-	   register-defining side effects, unless we have conflicting
-	   definitions for the same register.
-
-	   In SSA form, we can't ever have conflicting definitions for
-	   a single register, because that would violate the SSA
-	   property, so this cunningness is safe in SSA form but not
-	   otherwise. */
-	/* We only do this for copies and phis, since those are the
-	   only ones for which it's safe. */
-	struct {
-		bool operator()(StateMachineSideEffect::sideEffectType t) {
-			return t == StateMachineSideEffect::Copy ||
-				t == StateMachineSideEffect::Phi;
-		}
-	} ssa_cunningness_safe;
 	res = false;
-	if (is_ssa) {
-		for (auto it = other.sideEffects.begin(); it != other.sideEffects.end(); it++) {
-			StateMachineSideEffect *smse = *it;
-			if (ssa_cunningness_safe(smse->type))
-				res |= sideEffects.insert(*it).second;
-		}
-	}
-
-	std::set<StateMachineSideEffect *> newEffectsToIntroduce;
 	auto it1 = sideEffects.begin();
 	auto it2 = other.sideEffects.begin();
 	while (it1 != sideEffects.end() && it2 != other.sideEffects.end()) {
@@ -188,39 +152,34 @@ avail_t::mergeIntersection(bbdd::scope *scope,
 			it1++;
 			it2++;
 		} else if (*it1 < *it2) {
-			if ( is_ssa && ssa_cunningness_safe((*it1)->type) ) {
-				it1++;
-			} else {
-				sideEffects.erase(it1++);
-			}
+			sideEffects.erase(it1++);
 			res = true;
 		} else {
 			assert(*it2 < *it1);
-			if ( is_ssa && ssa_cunningness_safe( (*it2)->type) )
-				newEffectsToIntroduce.insert(*it2);
 			it2++;
 		}
 	}
 	while (it1 != sideEffects.end()) {
 		res = true;
-		if ( is_ssa && ssa_cunningness_safe((*it1)->type) )
-			it1++;
-		else
-			sideEffects.erase(it1++);
+		sideEffects.erase(it1++);
 	}
-	sideEffects.insert(newEffectsToIntroduce.begin(), newEffectsToIntroduce.end());
 
 	/* We're supposed to take the intersection of the two sets
 	   i.e. we can only assume things which are true in both input
 	   sets, and so the new assumption is the union of the two
 	   input assumptions. */
+	bbdd *newAssumption;
 	if (assumption && other.assumption)
-		assumption = bbdd::Or(
+		newAssumption = bbdd::Or(
 			scope,
 			assumption,
 			other.assumption);
 	else
-		assumption = NULL;
+		newAssumption = NULL;
+	if (newAssumption != assumption) {
+		res = true;
+		assumption = newAssumption;
+	}
 	return res;
 }
 
@@ -832,7 +791,6 @@ availExpressionAnalysis(SMScopes *scopes,
 			const MaiMap &decode,
 			StateMachine *sm,
 			const AllowableOptimisations &opt,
-			bool is_ssa,
 			OracleInterface *oracle,
 			bool *done_something)
 {
@@ -942,7 +900,7 @@ availExpressionAnalysis(SMScopes *scopes,
 		std::vector<StateMachineState *> edges;
 		state->targets(edges);
 		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
-			if (availOnEntry[*it2].mergeIntersection(&scopes->bools, outputAvail, is_ssa)) {
+			if (availOnEntry[*it2].mergeIntersection(&scopes->bools, outputAvail)) {
 				phase2_useful = true;
 				statesNeedingRefresh.push(*it2);
 			}
@@ -986,6 +944,403 @@ availExpressionAnalysis(SMScopes *scopes,
 		edgeLabels);
 }
 
+typedef std::map<threadAndRegister, exprbdd *> regDefT;
+
+template <typename k, typename v> class sane_map : public std::map<k, v> {
+public:
+	std::pair<typename std::map<k,v>::iterator, bool> insert(const k &a, const v &b)
+	{
+		return std::map<k,v>::insert(std::pair<k, v>(a, b));
+	}
+};
+
+struct ssa_avail_state {
+	SMScopes *scopes;
+	regDefT defs;
+	sane_map<bbdd *, bbdd *> boolMemo;
+	sane_map<smrbdd *, smrbdd *> smrMemo;
+	sane_map<exprbdd *, exprbdd *> exprMemo;
+};
+
+typedef std::map<threadAndRegister, exprbdd *> substTableT;
+
+struct ssaEnumRegsState {
+	ssa_avail_state *s;
+	substTableT *out;
+};
+
+static void
+ssaEnumRegs(ssa_avail_state &state, const IRExpr *what, substTableT &out)
+{
+	struct {
+		static visit_result Get(ssaEnumRegsState *state, const IRExprGet *ieg) {
+			if (state->out->count(ieg->reg))
+				return visit_continue;
+			auto it = state->s->defs.find(ieg->reg);
+			if (it == state->s->defs.end())
+				return visit_continue;
+			(*state->out)[ieg->reg] = it->second;
+			return visit_continue;
+		}
+	} foo;
+	static irexpr_visitor<ssaEnumRegsState> visitor;
+	visitor.Get = foo.Get;
+	ssaEnumRegsState s;
+	s.s = &state;
+	s.out = &out;
+	visit_irexpr(&s, &visitor, what);
+}
+
+static IRExpr *
+applyLeafSubstTable(const substTableT &table, IRExpr *e)
+{
+	struct : public IRExprTransformer {
+		const substTableT *table;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			auto it = table->find(ieg->reg);
+			if (it == table->end())
+				return ieg;
+			assert(it->second->isLeaf);
+			if (it->second->leaf()->type() < ieg->type())
+				return ieg;
+			return coerceTypes(ieg->type(), it->second->leaf());
+		}
+	} trans;
+	trans.table = &table;
+	return trans.doit(e);
+}
+
+/* Take an atomic bool IRExpr and apply the transformation, converting
+   to a bbdd as we do so. */
+static bbdd *
+ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
+		      sane_map<std::pair<IRExpr *, substTableT>, bbdd *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, substTableT>(e, t),
+					 NULL);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		const bdd_rank *bestVar = NULL;
+		IRExpr *bestCond = (IRExpr *)0xf001;
+		for (auto it2 = t.begin();
+		     it2 != t.end();
+		     it2++) {
+			if ( it2->second->isLeaf )
+				continue;
+			if (!bestVar || it2->second->internal().rank < *bestVar) {
+				bestCond = it2->second->internal().condition;
+				bestVar = &it2->second->internal().rank;
+			}
+		}
+		if (bestVar == NULL) {
+			IRExpr *trans = applyLeafSubstTable(t, e);
+			it->second = bbdd::var(&state.scopes->bools, trans);
+		} else {
+			substTableT trueTable(t);
+			for (auto it2 = trueTable.begin(); it2 != trueTable.end(); it2++)
+				it2->second = state.scopes->ordering.trueBranch(it2->second, *bestVar);
+			substTableT falseTable(t);
+			for (auto it2 = falseTable.begin(); it2 != falseTable.end(); it2++)
+				it2->second = state.scopes->ordering.falseBranch(it2->second, *bestVar);
+			it->second = bbdd::ifelse(
+				&state.scopes->bools,
+				bbdd::var(&state.scopes->bools, bestCond),
+				ssaApplyAvailExprBool(state, trueTable, e, memo),
+				ssaApplyAvailExprBool(state, falseTable, e, memo));
+		}
+	}
+	return it->second;
+}
+static either<bbdd *, IRExpr *>
+ssaApplyAvailExprBool(ssa_avail_state &state, IRExpr *what)
+{
+	assert(what->type() == Ity_I1);
+	substTableT substTable;
+	ssaEnumRegs(state, what, substTable);
+	if (substTable.empty())
+		return either<bbdd *, IRExpr *>(what);
+	sane_map<std::pair<IRExpr *, substTableT>, bbdd *> memo;
+	return either<bbdd *, IRExpr *>(ssaApplyAvailExprBool(state, substTable, what, memo));
+}
+
+static exprbdd *
+ssaApplyAvailExprExpr(ssa_avail_state &state, const substTableT &t, IRExpr *e,
+		      sane_map<std::pair<IRExpr *, substTableT>, exprbdd *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, substTableT>(e, t),
+					 NULL);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		const bdd_rank *bestVar = NULL;
+		IRExpr *bestCond = (IRExpr *)0xf001;
+		for (auto it2 = t.begin();
+		     it2 != t.end();
+		     it2++) {
+			if ( it2->second->isLeaf )
+				continue;
+			if (!bestVar || it2->second->internal().rank < *bestVar) {
+				bestCond = it2->second->internal().condition;
+				bestVar = &it2->second->internal().rank;
+			}
+		}
+		if (bestVar == NULL) {
+			IRExpr *trans = applyLeafSubstTable(t, e);
+			it->second = exprbdd::var(&state.scopes->exprs, &state.scopes->bools, trans);
+		} else {
+			substTableT trueTable(t);
+			for (auto it2 = trueTable.begin(); it2 != trueTable.end(); it2++)
+				it2->second = state.scopes->ordering.trueBranch(it2->second, *bestVar);
+			substTableT falseTable(t);
+			for (auto it2 = falseTable.begin(); it2 != falseTable.end(); it2++)
+				it2->second = state.scopes->ordering.falseBranch(it2->second, *bestVar);
+			it->second = exprbdd::ifelse(
+				&state.scopes->exprs,
+				bbdd::var(&state.scopes->bools, bestCond),
+				ssaApplyAvailExprExpr(state, trueTable, e, memo),
+				ssaApplyAvailExprExpr(state, falseTable, e, memo));
+		}
+	}
+	return it->second;
+}
+static either<exprbdd *, IRExpr *>
+ssaApplyAvailExprExpr(ssa_avail_state &state, IRExpr *what)
+{
+	substTableT substTable;
+	ssaEnumRegs(state, what, substTable);
+	if (substTable.empty())
+		return either<exprbdd *, IRExpr *>(what);
+	sane_map<std::pair<IRExpr *, substTableT>, exprbdd *> memo;
+	return either<exprbdd *, IRExpr *>(ssaApplyAvailExprExpr(state, substTable, what, memo));
+}
+
+static bbdd *
+ssaApplyAvail(ssa_avail_state &state, bbdd *inp)
+{
+	auto it_did_insert = state.boolMemo.insert(inp, NULL);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		if (inp->isLeaf) {
+			it->second = inp;
+		} else {
+			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
+			bbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
+			bbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
+			if (!newCond.isLeft &&
+			    newCond.right() == inp->internal().condition &&
+			    t == inp->internal().trueBranch &&
+			    f == inp->internal().falseBranch) {
+				it->second = inp;
+			} else {
+				it->second = bbdd::ifelse(
+					&state.scopes->bools,
+					newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
+					t,
+					f);
+			}
+		}
+	}
+	return it->second;
+}
+
+static smrbdd *
+ssaApplyAvail(ssa_avail_state &state, smrbdd *inp)
+{
+	auto it_did_insert = state.smrMemo.insert(inp, NULL);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		if (inp->isLeaf) {
+			it->second = inp;
+		} else {
+			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
+			smrbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
+			smrbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
+			if (!newCond.isLeft &&
+			    newCond.right() == inp->internal().condition &&
+			    t == inp->internal().trueBranch &&
+			    f == inp->internal().falseBranch) {
+				it->second = inp;
+			} else {
+				it->second = smrbdd::ifelse(
+					&state.scopes->smrs,
+					newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
+					t,
+					f);
+			}
+		}
+	}
+	return it->second;
+}
+
+static exprbdd *
+ssaApplyAvail(ssa_avail_state &state, exprbdd *inp)
+{
+	auto it_did_insert = state.exprMemo.insert(inp, NULL);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		if (inp->isLeaf) {
+			auto newLeaf(ssaApplyAvailExprExpr(state, inp->leaf()));
+			if (!newLeaf.isLeft && newLeaf.right() == inp->leaf())
+				it->second = inp;
+			else if (newLeaf.isLeft)
+				it->second = newLeaf.left();
+			else
+				it->second = exprbdd::var(
+					&state.scopes->exprs,
+					&state.scopes->bools,
+					newLeaf.right());
+		} else {
+			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
+			exprbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
+			exprbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
+			if (!newCond.isLeft &&
+			    newCond.right() == inp->internal().condition &&
+			    t == inp->internal().trueBranch &&
+			    f == inp->internal().falseBranch) {
+				it->second = inp;
+			} else {
+				it->second = exprbdd::ifelse(
+					&state.scopes->exprs,
+					newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
+					t,
+					f);
+			}
+		}
+	}
+	return it->second;
+}
+
+template <typename t> static void
+rewrite_var(ssa_avail_state &state, t *&arg, bool *done_something)
+{
+	t *n = ssaApplyAvail(state, arg);
+	if (n != arg)
+		*done_something = n;
+	arg = n;
+}
+
+static void
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectLoad *inp,
+		bool *done_something)
+{
+	rewrite_var(state, inp->addr, done_something);
+}
+static void
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStore *inp,
+		bool *done_something)
+{
+	rewrite_var(state, inp->addr, done_something);
+	rewrite_var(state, inp->data, done_something);
+}
+static void
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectCopy *inp,
+		bool *done_something)
+{
+	rewrite_var(state, inp->value, done_something);
+}
+static void
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectUnreached *, bool *)
+{}
+static void
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectAssertFalse *inp,
+		bool *done_something)
+{
+	rewrite_var(state, inp->value, done_something);
+}
+static void
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectPhi *inp,
+		bool *done_something)
+{
+	for (auto it = inp->generations.begin(); it != inp->generations.end(); it++)
+		rewrite_var(state, it->val, done_something);
+}
+static void
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStartAtomic *, bool *)
+{}
+static void
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectEndAtomic *, bool *)
+{}
+static void
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStartFunction *inp,
+		bool *done_something)
+{
+	rewrite_var(state, inp->rsp, done_something);
+}
+static void
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectEndFunction *inp,
+		bool *done_something)
+{
+	rewrite_var(state, inp->rsp, done_something);
+}
+static void
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *, bool *)
+{}
+static void
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStackLayout *, bool *)
+{}
+
+static void
+rewrite_side_effect(ssa_avail_state &state, StateMachineSideEffect *inp,
+		    bool *done_something)
+{
+	if (!inp)
+		return;
+	switch (inp->type) {
+#define do_type(name)							\
+		case StateMachineSideEffect:: name :			\
+			ssaApplyAvailSE(				\
+				state,					\
+				(StateMachineSideEffect ## name *)inp,	\
+				done_something);			\
+			return;
+		all_side_effect_types(do_type)
+#undef do_type
+	}
+	abort();
+}
+
+static StateMachine *
+ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
+{
+	ssa_avail_state state;
+	state.scopes = scopes;
+	std::set<StateMachineSideEffectCopy *> sideEffects;
+	enumSideEffects(sm, sideEffects);
+	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
+		StateMachineSideEffectCopy *se = *it;
+		assert(!state.defs.count(se->target));
+		state.defs[se->target] = se->value;
+	}
+
+	std::vector<StateMachineState *> states;
+	enumStates(sm, &states);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		StateMachineState *s = *it;
+		switch (s->type) {
+		case StateMachineState::Terminal: {
+			auto smt = (StateMachineTerminal *)s;
+			rewrite_var(state, smt->res, done_something);
+			break;
+		}
+		case StateMachineState::Bifurcate: {
+			auto smb = (StateMachineBifurcate *)s;
+			rewrite_var(state, smb->condition, done_something);
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			auto sme = (StateMachineSideEffecting *)s;
+			rewrite_side_effect(state, sme->sideEffect, done_something);
+			break;
+		}
+		}
+	}
+	return sm;
+}
+
 /* End of namespace */
 }
 
@@ -998,12 +1353,8 @@ availExpressionAnalysis(SMScopes *scopes,
 			OracleInterface *oracle,
 			bool *done_something)
 {
-	sm->sanityCheck(decode);
 	if (is_ssa)
-		sm->assertSSA();
-	StateMachine *res = _availExpressionAnalysis::availExpressionAnalysis(scopes, decode, sm, opt, is_ssa, oracle, done_something);
-	res->sanityCheck(decode);
-	if (is_ssa)
-		res->assertSSA();
-	return res;
+		return _availExpressionAnalysis::ssaAvailAnalysis(scopes, sm, done_something);
+	else
+		return _availExpressionAnalysis::availExpressionAnalysis(scopes, decode, sm, opt, oracle, done_something);
 }
