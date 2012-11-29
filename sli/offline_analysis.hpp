@@ -12,6 +12,8 @@
 #define STORING_THREAD 97
 
 class IRExprTransformer {
+	exprbdd *transform_exprbdd(bbdd::scope *, exprbdd::scope *, exprbdd *what, bool *done_something,
+				   std::map<exprbdd *, exprbdd *> &);
 	IRExpr *_currentIRExpr;
 protected:
 	bool aborted;
@@ -115,7 +117,10 @@ public:
 		bool b;
 		return transform_smrbdd(scope, scope2, what, &b);
 	}
-	exprbdd *transform_exprbdd(bbdd::scope *, exprbdd::scope *, exprbdd *what, bool *done_something);
+	exprbdd *transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope, exprbdd *what, bool *done_something) {
+		std::map<exprbdd *, exprbdd *> memo;
+		return transform_exprbdd(bscope, scope, what, done_something, memo);
+	}
 	exprbdd *transform_exprbdd(bbdd::scope *scope, exprbdd::scope *scope2, exprbdd *what) {
 		bool b;
 		return transform_exprbdd(scope, scope2, what, &b);

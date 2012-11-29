@@ -217,24 +217,28 @@ internIRExpr(IRExpr *x)
       which match for condition and both successor branches.
 */
 static exprbdd *
-intern_exprbdd(SMScopes *scopes, exprbdd *what, internIRExprTable &tab)
+intern_exprbdd(SMScopes *scopes, exprbdd *what, internStateMachineTable &tab)
 {
-	if (what->isLeaf) {
-		IRExpr *l = internIRExpr(what->leaf(), tab);
-		if (l == what->leaf())
-			return what;
-		return exprbdd::var(&scopes->exprs, &scopes->bools, l);
+	auto it_did_insert = tab.exprbdds.insert(std::pair<exprbdd *, exprbdd *>(what, what));
+	exprbdd *&res(it_did_insert.first->second);
+	if (it_did_insert.second) {
+		if (what->isLeaf) {
+			IRExpr *l = internIRExpr(what->leaf(), tab);
+			if (l != what->leaf())
+				res = exprbdd::var(&scopes->exprs, &scopes->bools, l);
+		} else {
+			IRExpr *condition = internIRExpr(what->internal().condition, tab);
+			exprbdd *t = intern_exprbdd(scopes, what->internal().trueBranch, tab);
+			exprbdd *f = intern_exprbdd(scopes, what->internal().falseBranch, tab);
+			if (condition != what->internal().condition || t != what->internal().trueBranch || f != what->internal().falseBranch)
+				res = exprbdd::ifelse(
+					&scopes->exprs,
+					bbdd::var(&scopes->bools, condition),
+					t,
+					f);
+		}
 	}
-	IRExpr *condition = internIRExpr(what->internal().condition, tab);
-	exprbdd *t = intern_exprbdd(scopes, what->internal().trueBranch, tab);
-	exprbdd *f = intern_exprbdd(scopes, what->internal().falseBranch, tab);
-	if (condition == what->internal().condition && t == what->internal().trueBranch && f == what->internal().falseBranch)
-		return what;
-	return exprbdd::ifelse(
-		&scopes->exprs,
-		bbdd::var(&scopes->bools, condition),
-		t,
-		f);
+	return res;
 }
 
 static StateMachineSideEffect *
@@ -371,33 +375,37 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 
 /* Only sufficient on const bdds */
 template <typename scopeT, typename subtreeT> static subtreeT *
-internBDD(scopeT *scope, bbdd::scope *bscope, subtreeT *what, internIRExprTable &tab)
+internBDD(scopeT *scope, bbdd::scope *bscope, subtreeT *what, internIRExprTable &tab,
+	  std::map<subtreeT *, subtreeT *> &memo)
 {
 	if (what->isLeaf)
-		return scope->cnst(what->leaf());
-	IRExpr *cond = internIRExpr(what->internal().condition, tab);
-	subtreeT *t = internBDD(scope, bscope, what->internal().trueBranch, tab);
-	subtreeT *f = internBDD(scope, bscope, what->internal().falseBranch, tab);
-	if (cond == what->internal().condition &&
-	    t == what->internal().trueBranch &&
-	    f == what->internal().falseBranch)
 		return what;
-	return subtreeT::ifelse(
-		scope,
-		bbdd::var(bscope, cond),
-		t,
-		f);
+	auto it_did_insert = memo.insert(std::pair<subtreeT *, subtreeT *>(what, what));
+	if (it_did_insert.second) {
+		IRExpr *cond = internIRExpr(what->internal().condition, tab);
+		subtreeT *t = internBDD(scope, bscope, what->internal().trueBranch, tab, memo);
+		subtreeT *f = internBDD(scope, bscope, what->internal().falseBranch, tab, memo);
+		if (cond != what->internal().condition ||
+		    t != what->internal().trueBranch ||
+		    f != what->internal().falseBranch)
+			it_did_insert.first->second = subtreeT::ifelse(
+				scope,
+				bbdd::var(bscope, cond),
+				t,
+				f);
+	}
+	return it_did_insert.first->second;
 }
 
 bbdd *
-intern_bbdd(SMScopes *scopes, bbdd *bbdd, internIRExprTable &t)
+intern_bbdd(SMScopes *scopes, bbdd *bbdd, internStateMachineTable &t)
 {
-	return internBDD(&scopes->bools, &scopes->bools, bbdd, t);
+	return internBDD(&scopes->bools, &scopes->bools, bbdd, t, t.bbdds);
 }
 smrbdd *
-intern_smrbdd(SMScopes *scopes, smrbdd *smrbdd, internIRExprTable &t)
+intern_smrbdd(SMScopes *scopes, smrbdd *smrbdd, internStateMachineTable &t)
 {
-	return internBDD(&scopes->smrs, &scopes->bools, smrbdd, t);
+	return internBDD(&scopes->smrs, &scopes->bools, smrbdd, t, t.smrbdds);
 }
 
 static StateMachineState *

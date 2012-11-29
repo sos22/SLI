@@ -22,6 +22,9 @@ public:
 	std::set<StateMachineSideEffecting *> states_side_effect;
 	std::set<StateMachineTerminal *> states_terminal;
 	std::set<const CFGNode *> cfgNodesS;
+	std::map<bbdd *, bbdd *> bbdds;
+	std::map<smrbdd *, smrbdd *> smrbdds;
+	std::map<exprbdd *, exprbdd *> exprbdds;
 };
 
 IRExpr *internIRExpr(IRExpr *x);
