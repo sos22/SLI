@@ -12,6 +12,7 @@
 #include "sat_checker.hpp"
 #include "alloc_mai.hpp"
 #include "bdd.hpp"
+#include "ssa.hpp"
 
 #ifdef NDEBUG
 #define debug_survival_constraint false
@@ -1535,7 +1536,7 @@ buildCrossProductMachine(SMScopes *scopes,
 		if (!already_present)
 			cfg_roots.push_back(*it);
 	}
-        return new StateMachine(crossMachineRoot, cfg_roots);
+        return convertToSSA(scopes, new StateMachine(crossMachineRoot, cfg_roots));
 }
 
 static StateMachine *
@@ -1634,7 +1635,7 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			crossProductMachine,
 			opt,
 			oracle,
-			false,
+			true,
 			token);
 
 	return survivalConstraintIfExecutedAtomically(
