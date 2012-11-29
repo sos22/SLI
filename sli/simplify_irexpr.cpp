@@ -3253,56 +3253,91 @@ isBadAddress(exprbdd *e)
 			isBadAddress(e->internal().falseBranch);
 }
 
-template <typename treeT, typename scopeT> treeT *
-simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt, bool *done_something)
+template <typename treeT, typename scopeT> static treeT *
+simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
+	    bool *done_something, std::map<treeT *, treeT *> &memo)
 {
 	if (bdd->isLeaf)
 		return bdd;
+	typedef typename std::pair<treeT *, treeT *> treePairT;
+	auto it_did_insert = memo.insert(treePairT(bdd, (treeT *)NULL));
+	if (!it_did_insert.second)
+		return it_did_insert.first->second;
+	treeT *res;
+
 	IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt, done_something);
 	assert(cond->type() == Ity_I1);
 	if (cond->tag == Iex_Const) {
 		if (((IRExprConst *)cond)->Ico.U1)
-			return simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something);
+			res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
 		else
-			return simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something);
+			res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+	} else {
+		treeT *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
+		treeT *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+		if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
+			res = bdd;
+		else
+			res = treeT::ifelse(
+				scope,
+				bbdd::var(bscope, cond),
+				t,
+				f);
 	}
-	treeT *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something);
-	treeT *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something);
-	if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
-		return bdd;
-	return treeT::ifelse(
-		scope,
-		bbdd::var(bscope, cond),
-		t,
-		f);
+	it_did_insert.first->second = res;
+	return res;
+}
+/* Hideous hack: the normal template is actually *incorrect* at
+   exprbdds, so supply an explicit instantiation which does the right
+   thing.  Ulch. */
+template <> exprbdd *
+simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IRExprOptimisations &opt,
+	    bool *done_something, std::map<exprbdd *, exprbdd *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(bdd, (exprbdd *)NULL));
+	if (!it_did_insert.second)
+		return it_did_insert.first->second;
+	exprbdd *res;
+
+        if (bdd->isLeaf) {
+		IRExpr *r = optimiseIRExprFP(bdd->leaf(), opt, done_something);
+		if (r == bdd->leaf())
+			res = bdd;
+		else
+			res = exprbdd::var(scope, bscope, r);
+	} else {
+		IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt, done_something);
+		assert(cond->type() == Ity_I1);
+		if (cond->tag == Iex_Const) {
+			if (((IRExprConst *)cond)->Ico.U1)
+				res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
+			else
+				res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+		} else {
+			exprbdd *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
+			exprbdd *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+			if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
+				res = bdd;
+			else
+				res = exprbdd::ifelse(
+					scope,
+					bbdd::var(bscope, cond),
+					t,
+					f);
+		}
+	}
+	it_did_insert.first->second = res;
+	return res;
 }
 
-template <> exprbdd *
-simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IRExprOptimisations &opt, bool *done_something)
+template <typename treeT, typename scopeT> static treeT *
+simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
+	    bool *done_something)
 {
-	if (bdd->isLeaf) {
-		IRExpr *res = optimiseIRExprFP(bdd->leaf(), opt, done_something);
-		if (res == bdd->leaf())
-			return bdd;
-		return exprbdd::var(scope, bscope, res);
-	}
-	IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt, done_something);
-	assert(cond->type() == Ity_I1);
-	if (cond->tag == Iex_Const) {
-		if (((IRExprConst *)cond)->Ico.U1)
-			return simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something);
-		else
-			return simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something);
-	}
-	exprbdd *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something);
-	exprbdd *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something);
-	if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
-		return bdd;
-	return exprbdd::ifelse(
-		scope,
-		bbdd::var(bscope, cond),
-		t,
-		f);
+	std::map<treeT *, treeT *> memo;
+	return simplifyBDD(scope, bscope, bdd, opt, done_something, memo);
 }
+
 template bbdd   *simplifyBDD(bbdd::scope *,   bbdd::scope *, bbdd *,   const IRExprOptimisations &, bool *);
 template smrbdd *simplifyBDD(smrbdd::scope *, bbdd::scope *, smrbdd *, const IRExprOptimisations &, bool *);
+template exprbdd *simplifyBDD(exprbdd::scope *, bbdd::scope *, exprbdd *, const IRExprOptimisations &, bool *);
