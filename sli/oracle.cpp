@@ -3829,18 +3829,14 @@ Oracle::identifyLibraryCall(const VexRip &vr)
 PointerAliasingSet
 Oracle::RegisterAliasingConfiguration::lookupRegister(const threadAndRegister &r, bool buildingAliasTable) const
 {
-	/* This is only safe for SSA-form machines */
 	if (buildingAliasTable)
 		assert(r.gen() == 0);
-	else
-		assert(r.gen() != 0);
 
 	/* Assume that anything which isn't a GPR isn't a pointer.
-	   True for x86. */
+	   Reasonable for x86. */
 	if (r.asReg() >= Oracle::NR_REGS * 8)
 		return PointerAliasingSet::notAPointer;
-	/* Can't say anything about non-default generations. */
-	if (!buildingAliasTable && r.gen() != (unsigned)-1)
+	if (!buildingAliasTable)
 		return PointerAliasingSet::anything;
 	for (auto it = content.begin(); it != content.end(); it++) {
 		if (it->first == r.tid())
