@@ -62,33 +62,46 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 						   bbdd::scope *scope,
 						   std::map<const StateMachineState *, int> &labels)
 {
-	content[sm->root] = scope->cnst(true);
-	std::vector<StateMachineState *> pending;
-	pending.push_back(sm->root);
+	std::map<StateMachineState *, unsigned> pendingParents;
+	std::vector<StateMachineState *> allStates;
+	enumStates(sm, &allStates);
+	for (auto it = allStates.begin(); it != allStates.end(); it++) {
+		std::vector<StateMachineState *> t;
+		(*it)->targets(t);
+		for (auto it2 = t.begin(); it2 != t.end(); it2++)
+			pendingParents[*it2]++;
+	}
+	pendingParents[sm->root] = 0;
 
+	std::vector<StateMachineState *> pending;
 	struct {
 		std::vector<StateMachineState *> *pending;
+		std::map<StateMachineState *, unsigned> *pendingParents;
 		bbdd::scope *scope;
 		void operator()(bbdd *&slot,
 				bbdd *newPath,
 				StateMachineState *owner) {
-			if (slot) {
-				bbdd *n = bbdd::Or(scope, slot, newPath);
-				if (n != slot)
-					pending->push_back(owner);
-				slot = n;
-			} else {
+			if (slot)
+				slot = bbdd::Or(scope, slot, newPath);
+			else
 				slot = newPath;
+			(*pendingParents)[owner]--;
+			if ((*pendingParents)[owner] == 0)
 				pending->push_back(owner);
-			}
 		}
 	} addPath;
-#warning this would work better with a consistent advance structure rather than a fixed point iteration.
 	addPath.pending = &pending;
+	addPath.pendingParents = &pendingParents;
 	addPath.scope = scope;
+
+	content[sm->root] = scope->cnst(true);
+	pending.push_back(sm->root);
 	while (!pending.empty()) {
 		StateMachineState *s = pending.back();
 		pending.pop_back();
+		assert(pendingParents.count(s));
+		assert(pendingParents[s] == 0);
+
 		bbdd *dom = content[s];
 		assert(dom);
 		if (debug_control_dependence) {
