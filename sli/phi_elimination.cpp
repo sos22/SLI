@@ -94,6 +94,7 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 	addPath.pendingParents = &pendingParents;
 	addPath.scope = scope;
 
+	int nr_complete = 0;
 	content[sm->root] = scope->cnst(true);
 	pending.push_back(sm->root);
 	while (!pending.empty()) {
@@ -105,9 +106,10 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 		bbdd *dom = content[s];
 		assert(dom);
 		if (debug_control_dependence) {
-			printf("Redo control dependence of state l%d; current = \n", labels[s]);
+			printf("Redo control dependence of state l%d (%d/%zd complete); current = \n", labels[s], nr_complete, labels.size());
 			dom->prettyPrint(stdout);
 		}
+		nr_complete++;
 		switch (s->type) {
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
@@ -168,6 +170,8 @@ static exprbdd *
 build_selection_bdd(SMScopes *scopes,
 		    StateMachine *sm,
 		    StateMachineSideEffectPhi *phi,
+		    control_dependence_graph &cdg,
+		    predecessor_map &pm,
 		    std::map<const StateMachineState *, int> &labels,
 		    std::map<unsigned, exprbdd *> &canonResult)
 {
@@ -214,12 +218,6 @@ build_selection_bdd(SMScopes *scopes,
 	std::set<StateMachineSideEffecting *> sideEffecting;
 	enumStates(sm, &sideEffecting);
 
-	predecessor_map pm(sm);
-	control_dependence_graph cdg(sm, &scopes->bools, labels);
-
-	if (debug_build_paths)
-		cdg.prettyPrint(stdout, labels);
-
 	/* Map from states to an exprbdd which provides the result if
 	   we issue the phi immediately after that state. */
 	std::map<StateMachineState *, exprbdd *> m;
@@ -252,6 +250,8 @@ build_selection_bdd(SMScopes *scopes,
 			it->second->prettyPrint(stdout);
 		}
 	}
+
+	int done = 0;
 
 	/* Expand the map to get the final result. */
 	while (!toUpdate.empty()) {
@@ -288,6 +288,7 @@ build_selection_bdd(SMScopes *scopes,
 			}
 			if (missing)
 				continue;
+			done++;
 			exprbdd::enablingTableT enabling;
 			bbdd *assumption = cdg.domOf(state);
 			bool failed = false;
@@ -381,6 +382,12 @@ phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 
 	std::map<StateMachineSideEffect *, StateMachineSideEffect *> replacements;
 
+	predecessor_map pm(sm);
+	control_dependence_graph cdg(sm, &scopes->bools, labels);
+
+	if (debug_toplevel)
+		cdg.prettyPrint(stdout, labels);
+
 	std::set<StateMachineSideEffectPhi *> phiEffects;
 	internIRExprTable intern;
 	enumSideEffects(sm, phiEffects);
@@ -411,7 +418,7 @@ phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 			if (!found_one)
 				resultCanoniser[x] = expr;
 		}
-		exprbdd *sel_bdd = build_selection_bdd(scopes, sm, phi, labels, resultCanoniser);
+		exprbdd *sel_bdd = build_selection_bdd(scopes, sm, phi, cdg, pm, labels, resultCanoniser);
 		if (!sel_bdd) {
 			if (debug_toplevel)
 				printf("Failed to build bdd!\n");
