@@ -41,8 +41,6 @@ public:
 		}
 	}
 	bool isUndefined(StateMachineState *sm, const threadAndRegister &tr) const {
-		if (tr.gen() == (unsigned)-1)
-			return false;
 		auto it = content.find(sm);
 		assert(it != content.end());
 		return it->second.count(tr) == 0;

@@ -470,10 +470,8 @@ public:
 	bool build(StateMachine *sm);
 	void prettyPrint(FILE *f);
 	void sanity_check() const {
-		for (auto it = content.begin(); it != content.end(); it++) {
+		for (auto it = content.begin(); it != content.end(); it++)
 			assert(it->first.isValid());
-			assert(it->first.isTemp() || it->first.gen() != (unsigned)-1);
-		}
 	}
 	PointsToTable refine(SMScopes *scopes,
 			     AliasTable &at,
@@ -530,44 +528,24 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 	switch (e->tag) {
 	case Iex_Get: {
 		IRExprGet *iex = (IRExprGet *)e;
-		if (iex->reg.isTemp() || iex->reg.gen() != (unsigned)-1) {
-			if (!content.count(iex->reg)) {
-				/* This can actually happen sometimes
-				   during optimisation if, for
-				   instance, we determine that a load
-				   is definitely going to dereference
-				   a bad pointer and is replaced by an
-				   <unreached> side effect.  The
-				   temporary targeted by the load is
-				   then left uninitialised.  The
-				   optimiser will later remove all
-				   references to it, so it's not
-				   actually a problem, but we can
-				   sometimes see the intermediate
-				   state due to phase ordering
-				   problems.  Just do something
-				   vaguely sensible. */
-				warning("%s:%s:%d: Use of uninitialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
-				return PointerAliasingSet::nothing;
-			} else {
-				return content[iex->reg];
-			}
+		if (!content.count(iex->reg)) {
+			/* This can actually happen sometimes during
+			   optimisation if, for instance, we determine
+			   that a load is definitely going to
+			   dereference a bad pointer and is replaced
+			   by an <unreached> side effect.  The
+			   temporary targeted by the load is then left
+			   uninitialised.  The optimiser will later
+			   remove all references to it, so it's not
+			   actually a problem, but we can sometimes
+			   see the intermediate state due to phase
+			   ordering problems.  Just do something
+			   vaguely sensible. */
+			warning("%s:%s:%d: Use of uninitialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
+			return PointerAliasingSet::nothing;
+		} else {
+			return content[iex->reg];
 		}
-		if (iex->reg.isReg() &&
-		    iex->reg.asReg() == OFFSET_amd64_RSP) {
-			if (sl && sl->valid) {
-				FrameId f;
-				if (sl->content.identifyFrameFromPtr(exprbdd::var(&scopes->exprs, &scopes->bools, iex), &f)) {
-					return PointerAliasingSet::frame(f);
-				} else {
-					break;
-				}
-			} else {
-				return PointerAliasingSet::stackPointer;
-			}
-		}
-
-		return PointerAliasingSet::anything;
 	}
 
 	case Iex_Load: {

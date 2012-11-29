@@ -217,30 +217,17 @@ build_selection_bdd(SMScopes *scopes,
 	/* Set up initial map */
 	for (unsigned x = 0; x < phi->generations.size(); x++) {
 		const threadAndRegister &tr(phi->generations[x].reg);
-		if (tr.isReg() && tr.gen() == (unsigned)-1 ) {
-			/* gen -1; that'll be the result at the root
-			   and any other path which doesn't assign to
-			   one of the input registers. */
-			m[sm->root] = canonResult[x];
-			toUpdate.push(sm->root);
-			break;
-		} else {
-			/* Non-gen -1; need to plop this in at all of
-			   the places which define this register. */
-			bool found = false;
-			for (auto it2 = sideEffecting.begin();
-			     it2 != sideEffecting.end();
-			     it2++) {
-				StateMachineSideEffect *sr = (*it2)->sideEffect;
-				if (!sr)
-					continue;
-				threadAndRegister def(threadAndRegister::invalid());
-				if (sr->definesRegister(def) && def == tr) {
-					assert(!m.count(*it2));
-					m[*it2] = canonResult[x];
-					toUpdate.push(*it2);
-					found = true;
-				}
+		for (auto it2 = sideEffecting.begin();
+		     it2 != sideEffecting.end();
+		     it2++) {
+			StateMachineSideEffect *sr = (*it2)->sideEffect;
+			if (!sr)
+				continue;
+			threadAndRegister def(threadAndRegister::invalid());
+			if (sr->definesRegister(def) && def == tr) {
+				assert(!m.count(*it2));
+				m[*it2] = canonResult[x];
+				toUpdate.push(*it2);
 			}
 		}
 	}
