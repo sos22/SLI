@@ -111,6 +111,8 @@ class replaceInputRegsT : public StateMachineTransformer {
 		auto it = rs.find(ieg->reg);
 		if (it == rs.end())
 			return ieg;
+		if (it->second.size() == 1)
+			return IRExpr_Get(*it->second.begin(), ieg->ty);
 		auto it2 = out.find(std::pair<threadAndRegister, IRType>
 				    (ieg->reg, ieg->ty));
 		if (it2 != out.end())
@@ -214,6 +216,8 @@ replaceRegs(SMScopes *scopes,
 			auto it2 = regSets.find(it->reg);
 			if (it2 == regSets.end()) {
 				newInp.reg = it->reg;
+			} else if (it2->second.size() == 1) {
+				newInp.reg = *it2->second.begin();
 			} else {
 				auto it3 = newInputs.find(std::pair<threadAndRegister, IRType>
 							  (it->reg, ph->ty));
