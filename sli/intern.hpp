@@ -28,9 +28,8 @@ public:
 };
 
 IRExpr *internIRExpr(IRExpr *x);
-StateMachine *internStateMachine(SMScopes *scopes, StateMachine *sm);
+StateMachine *internStateMachine(StateMachine *sm);
 StateMachine *internStateMachine(
-	SMScopes *scopes,
 	StateMachine *sm,
 	internStateMachineTable &t);
 bbdd *intern_bbdd(SMScopes *scopes, bbdd *bbdd, internIRExprTable &t);

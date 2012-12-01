@@ -208,41 +208,8 @@ internIRExpr(IRExpr *x)
 	return internIRExpr(x, t);
 }
 
-/* Moderately tricky:
-
-   -- The ordering of conditions is guaranteed to be independent of
-      pointer ordering.
-   -- The leaves are not pointer-independent.
-   -- Internal nodes are already interned i.e. have no dupes
-      which match for condition and both successor branches.
-*/
-static exprbdd *
-intern_exprbdd(SMScopes *scopes, exprbdd *what, internStateMachineTable &tab)
-{
-	auto it_did_insert = tab.exprbdds.insert(std::pair<exprbdd *, exprbdd *>(what, what));
-	exprbdd *&res(it_did_insert.first->second);
-	if (it_did_insert.second) {
-		if (what->isLeaf) {
-			IRExpr *l = internIRExpr(what->leaf(), tab);
-			if (l != what->leaf())
-				res = exprbdd::var(&scopes->exprs, &scopes->bools, l);
-		} else {
-			IRExpr *condition = internIRExpr(what->internal().condition, tab);
-			exprbdd *t = intern_exprbdd(scopes, what->internal().trueBranch, tab);
-			exprbdd *f = intern_exprbdd(scopes, what->internal().falseBranch, tab);
-			if (condition != what->internal().condition || t != what->internal().trueBranch || f != what->internal().falseBranch)
-				res = exprbdd::ifelse(
-					&scopes->exprs,
-					bbdd::var(&scopes->bools, condition),
-					t,
-					f);
-		}
-	}
-	return res;
-}
-
 static StateMachineSideEffect *
-internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, internStateMachineTable &t)
+internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable &t)
 {
 	if (t.sideEffects.count(s))
 		return t.sideEffects[s];
@@ -256,11 +223,9 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 	case StateMachineSideEffect::Store: {
 		StateMachineSideEffectMemoryAccess *ma = dynamic_cast<StateMachineSideEffectMemoryAccess *>(s);
 		assert(ma);
-		ma->addr = intern_exprbdd(scopes, ma->addr, t);
 		if (s->type == StateMachineSideEffect::Store) {
 			StateMachineSideEffectStore *store = dynamic_cast<StateMachineSideEffectStore *>(ma);
 			assert(store);
-			store->data = intern_exprbdd(scopes, store->data, t);
 			for (auto it = t.stores.begin();
 			     it != t.stores.end();
 			     it++) {
@@ -295,7 +260,6 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 	case StateMachineSideEffect::Copy: {
 		StateMachineSideEffectCopy *copy = dynamic_cast<StateMachineSideEffectCopy *>(s);
 		assert(copy);
-		copy->value = intern_exprbdd(scopes, copy->value, t);
 		for (auto it = t.copies.begin(); it != t.copies.end(); it++) {
 			StateMachineSideEffectCopy *o = *it;
 			if (o->target == copy->target &&
@@ -311,8 +275,6 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *phi = dynamic_cast<StateMachineSideEffectPhi *>(s);
 		assert(phi);
-		for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
-			it->val = intern_exprbdd(scopes, it->val, t);
 		for (auto it = t.phis.begin(); it != t.phis.end(); it++) {
 			StateMachineSideEffectPhi *o = *it;
 			if (o->ty == phi->ty && o->reg == phi->reg && o->generations == phi->generations) {
@@ -373,43 +335,8 @@ internStateMachineSideEffect(SMScopes *scopes, StateMachineSideEffect *s, intern
 	abort();
 }
 
-/* Only sufficient on const bdds */
-template <typename scopeT, typename subtreeT> static subtreeT *
-internBDD(scopeT *scope, bbdd::scope *bscope, subtreeT *what, internIRExprTable &tab,
-	  std::map<subtreeT *, subtreeT *> &memo)
-{
-	if (what->isLeaf)
-		return what;
-	auto it_did_insert = memo.insert(std::pair<subtreeT *, subtreeT *>(what, what));
-	if (it_did_insert.second) {
-		IRExpr *cond = internIRExpr(what->internal().condition, tab);
-		subtreeT *t = internBDD(scope, bscope, what->internal().trueBranch, tab, memo);
-		subtreeT *f = internBDD(scope, bscope, what->internal().falseBranch, tab, memo);
-		if (cond != what->internal().condition ||
-		    t != what->internal().trueBranch ||
-		    f != what->internal().falseBranch)
-			it_did_insert.first->second = subtreeT::ifelse(
-				scope,
-				bbdd::var(bscope, cond),
-				t,
-				f);
-	}
-	return it_did_insert.first->second;
-}
-
-bbdd *
-intern_bbdd(SMScopes *scopes, bbdd *bbdd, internStateMachineTable &t)
-{
-	return internBDD(&scopes->bools, &scopes->bools, bbdd, t, t.bbdds);
-}
-smrbdd *
-intern_smrbdd(SMScopes *scopes, smrbdd *smrbdd, internStateMachineTable &t)
-{
-	return internBDD(&scopes->smrs, &scopes->bools, smrbdd, t, t.smrbdds);
-}
-
 static StateMachineState *
-internStateMachineState(SMScopes *scopes, StateMachineState *start, internStateMachineTable &t)
+internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 {
 	if (TIMEOUT)
 		return start;
@@ -419,7 +346,6 @@ internStateMachineState(SMScopes *scopes, StateMachineState *start, internStateM
 	switch (start->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)start;
-		smt->res = intern_smrbdd(scopes, smt->res, t);
 		for (auto it = t.states_terminal.begin();
 		     it != t.states_terminal.end();
 		     it++) {
@@ -435,8 +361,8 @@ internStateMachineState(SMScopes *scopes, StateMachineState *start, internStateM
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)start;
 		if (smse->sideEffect)
-			smse->sideEffect = internStateMachineSideEffect(scopes, smse->sideEffect, t);
-		smse->target = internStateMachineState(scopes, smse->target, t);
+			smse->sideEffect = internStateMachineSideEffect(smse->sideEffect, t);
+		smse->target = internStateMachineState(smse->target, t);
 		for (auto it = t.states_side_effect.begin();
 		     it != t.states_side_effect.end();
 		     it++) {
@@ -452,9 +378,8 @@ internStateMachineState(SMScopes *scopes, StateMachineState *start, internStateM
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)start;
-		smb->condition = intern_bbdd(scopes, smb->condition, t);
-		smb->trueTarget = internStateMachineState(scopes, smb->trueTarget, t);
-		smb->falseTarget = internStateMachineState(scopes, smb->falseTarget, t);
+		smb->trueTarget = internStateMachineState(smb->trueTarget, t);
+		smb->falseTarget = internStateMachineState(smb->falseTarget, t);
 		for (auto it = t.states_bifurcate.begin();
 		     it != t.states_bifurcate.end();
 		     it++) {
@@ -502,20 +427,20 @@ internCFG(const CFGNode *inp, internStateMachineTable &t)
 }
 
 StateMachine *
-internStateMachine(SMScopes *scopes, StateMachine *sm, internStateMachineTable &t)
+internStateMachine(StateMachine *sm, internStateMachineTable &t)
 {
 	__set_profiling(internStateMachine);
 	for (auto it = sm->cfg_roots.begin(); !TIMEOUT && it != sm->cfg_roots.end(); it++)
 		it->second = internCFG(it->second, t);
-	sm->root = internStateMachineState(scopes, sm->root, t);
+	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }
 
 StateMachine *
-internStateMachine(SMScopes *scopes, StateMachine *sm)
+internStateMachine(StateMachine *sm)
 {
 	internStateMachineTable t;
-	return internStateMachine(scopes, sm, t);
+	return internStateMachine(sm, t);
 }
 
 void
