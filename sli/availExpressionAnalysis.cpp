@@ -1303,6 +1303,34 @@ rewrite_side_effect(ssa_avail_state &state, StateMachineSideEffect *inp,
 	abort();
 }
 
+/* Avoid applying any definitions which will themselves need to be
+ * rewritten later. */
+static void
+definitionClosure(ssa_avail_state &state)
+{
+	struct {
+		static visit_result Get(ssa_avail_state *s, const IRExprGet *ieg) {
+			if (s->defs.count(ieg->reg))
+				return visit_abort;
+			else
+				return visit_continue;
+		}
+	} foo;
+	static irexpr_visitor<ssa_avail_state> visitor;
+	visitor.Get = foo.Get;
+	for (auto it = state.defs.begin();
+	     it != state.defs.end();
+		) {
+		if (visit_bdd(&state,
+			      &visitor,
+			      visit_irexpr<ssa_avail_state>,
+			      it->second) == visit_continue)
+			it++;
+		else
+			state.defs.erase(it++);
+	}
+}
+
 static StateMachine *
 ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
@@ -1315,6 +1343,10 @@ ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
 		assert(!state.defs.count(se->target));
 		state.defs[se->target] = se->value;
 	}
+	definitionClosure(state);
+
+	if (state.defs.empty())
+		return sm;
 
 	std::vector<StateMachineState *> states;
 	enumStates(sm, &states);
