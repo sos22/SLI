@@ -677,8 +677,7 @@ public:
 		     it++) {
 			assert(*it);
 			assert((*it)->getSideEffect());
-			assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store ||
-			       (*it)->getSideEffect()->type == StateMachineSideEffect::Load);
+			assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store);
 		}
 	}
 	AliasTableEntry(const std::set<StateMachineSideEffecting *> &_stores,
@@ -819,9 +818,8 @@ AliasTable::build(const MaiMap &decode,
 		assert(this_it != reaching.end());
 		std::set<StateMachineSideEffecting *> exitReaching(this_it->second);
 		if (s->getSideEffect() &&
-		    (s->getSideEffect()->type == StateMachineSideEffect::Store ||
-		     s->getSideEffect()->type == StateMachineSideEffect::Load)) {
-			StateMachineSideEffectMemoryAccess *acc = (StateMachineSideEffectMemoryAccess *)s->getSideEffect();
+		    s->getSideEffect()->type == StateMachineSideEffect::Store) {
+			StateMachineSideEffectStore *acc = (StateMachineSideEffectStore *)s->getSideEffect();
 			/* Kill off anything which we definitely clobber */
 			for (auto it = exitReaching.begin();
 			     it != exitReaching.end();
@@ -881,24 +879,14 @@ AliasTable::build(const MaiMap &decode,
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); ) {
 			StateMachineSideEffecting *o = *it2;
 			assert(o->getSideEffect());
-			assert(o->getSideEffect()->type == StateMachineSideEffect::Store ||
-			       o->getSideEffect()->type == StateMachineSideEffect::Load);
-			StateMachineSideEffectMemoryAccess *smses =
-				(StateMachineSideEffectMemoryAccess *)o->getSideEffect();
-			/* We preserve stores if there's any
-			   possibility that they overlap, but loads
-			   only if they definitely do.  That's because
-			   we can safely drop loads from the set
-			   without harming correctness, and we ideally
-			   want the set to be as small as possible,
-			   but losing a store is a disaster. */
+			assert(o->getSideEffect()->type == StateMachineSideEffect::Store);
+			StateMachineSideEffectStore *smses =
+				(StateMachineSideEffectStore *)o->getSideEffect();
 			/* The condition on types is unsound, but it's
 			   what eval_state_machine does. */
 #warning unsound
 			if (oracle->memoryAccessesMightAlias(decode, opt, smsel, smses) &&
-			    smsel->type <= smses->_type() &&
-			    (smses->type == StateMachineSideEffect::Store ||
-			     definitelyEqual(smses->addr, smsel->addr, opt))) {
+			    smsel->type <= smses->_type()) {
 				it2++;
 			} else {
 				it->second.erase(it2++);
@@ -1004,22 +992,15 @@ PointsToTable::refine(SMScopes *scopes,
 				StateMachineSideEffecting *satisfierState = *it2;
 				StateMachineSideEffect *satisfier = satisfierState->sideEffect;
 				assert(satisfier);
-				if (satisfier->type == StateMachineSideEffect::Load) {
-					auto *l = (StateMachineSideEffectLoad *)satisfier;
-					assert(content.count(l->target));
-					newPts |= content[l->target];
-				} else if (satisfier->type == StateMachineSideEffect::Store) {
-					newPts |=
-						pointsToSetForExpr(
-							scopes,
-							((StateMachineSideEffectStore *)satisfier)->data,
-							smse,
-							sl,
-							slt,
-							sm);
-				} else {
-					abort();
-				}
+				assert(satisfier->type == StateMachineSideEffect::Store);
+				newPts |=
+					pointsToSetForExpr(
+						scopes,
+						((StateMachineSideEffectStore *)satisfier)->data,
+						smse,
+						sl,
+						slt,
+						sm);
 			}
 
 			/* A load can only load from a frame if the
@@ -1114,9 +1095,11 @@ AliasTable::refine(SMScopes *scopes,
 		     it2 != it->second.stores.end();
 			) {
 			Maybe<StackLayout> *sl2 = slt.forState(*it2);
+			assert( (*it2)->getSideEffect() );
+			assert( (*it2)->getSideEffect()->type == StateMachineSideEffect::Store );
 			PointerAliasingSet storePts(
 				ptt.pointsToSetForExpr( scopes,
-							((StateMachineSideEffectMemoryAccess *)(*it2)->getSideEffect())->addr,
+							((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
 							it->first,
 							sl2,
 							slt,
