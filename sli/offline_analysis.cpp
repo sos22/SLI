@@ -247,7 +247,7 @@ _optimiseStateMachine(SMScopes *scopes,
 		}
 		done_something |= p;
 
-		sm = internStateMachine(scopes, sm);
+		sm = internStateMachine(sm);
 		if (TIMEOUT)
 			return sm;
 
@@ -270,7 +270,7 @@ _optimiseStateMachine(SMScopes *scopes,
 		if (p) {
 			if (is_ssa) {
 				/* Local optimisation only maintains SSA form if interned */
-				sm = internStateMachine(scopes, sm);
+				sm = internStateMachine(sm);
 				if (TIMEOUT)
 					return sm;
 			}

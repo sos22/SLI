@@ -199,8 +199,8 @@ CrashSummary *
 internCrashSummary(CrashSummary *cs)
 {
 	internStateMachineTable t;
-	cs->loadMachine = internStateMachine(cs->scopes, cs->loadMachine, t);
-	cs->storeMachine = internStateMachine(cs->scopes, cs->storeMachine, t);
+	cs->loadMachine = internStateMachine(cs->loadMachine, t);
+	cs->storeMachine = internStateMachine(cs->storeMachine, t);
 	cs->verificationCondition = internIRExpr(cs->verificationCondition, t);
 	return cs;
 }

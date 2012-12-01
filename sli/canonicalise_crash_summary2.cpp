@@ -162,8 +162,8 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 			cnf_condition = input->verificationCondition;
 
 		internStateMachineTable intern;
-		input->loadMachine = internStateMachine(input->scopes, input->loadMachine, intern);
-		input->storeMachine = internStateMachine(input->scopes, input->storeMachine, intern);
+		input->loadMachine = internStateMachine(input->loadMachine, intern);
+		input->storeMachine = internStateMachine(input->storeMachine, intern);
 		input->verificationCondition = internIRExpr(input->verificationCondition, intern);
 
 		if (TIMEOUT)
