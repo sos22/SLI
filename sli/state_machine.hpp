@@ -315,8 +315,9 @@ public:
 protected:
 	StateMachineState(const VexRip &_origin,
 			  enum stateType _type)
-		: type(_type), dbg_origin(_origin)
+		: last_optimisation_gen(0), type(_type), dbg_origin(_origin)
 	{}
+	unsigned last_optimisation_gen;
 public:
 	stateType type;
 	VexRip dbg_origin; /* RIP we were looking at when we

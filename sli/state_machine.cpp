@@ -18,6 +18,8 @@
 static int debug_state_machine_sanity_checks = 0;
 #endif
 
+static unsigned current_optimisation_gen;
+
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
 VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> StateMachineSideEffectStartAtomic::singleton;
 VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> StateMachineSideEffectEndAtomic::singleton;
@@ -29,6 +31,10 @@ AllowableOptimisations AllowableOptimisations::defaultOptimisations(7.3);
 StateMachine *
 StateMachine::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
+	current_optimisation_gen++;
+	if (current_optimisation_gen == 0)
+		current_optimisation_gen = 1;
+
 	bool b = false;
 	StateMachineState *new_root = root->optimise(opt, &b);
 	if (b) {
@@ -62,6 +68,10 @@ irexprUsesRegister(IRExpr *what, const threadAndRegister &tr)
 StateMachineState *
 StateMachineBifurcate::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
+	if (current_optimisation_gen == last_optimisation_gen)
+		return this;
+	last_optimisation_gen = current_optimisation_gen;
+
 	if (trueTarget == StateMachineUnreached::get()) {
 		*done_something = true;
 		if (falseTarget == StateMachineUnreached::get())
@@ -981,6 +991,9 @@ replaceRegister(const threadAndRegister &reg, IRExpr *replaceWith, IRExpr *repla
 StateMachineState *
 StateMachineSideEffecting::optimise(const AllowableOptimisations &opt, bool *done_something)
 {
+	if (current_optimisation_gen == last_optimisation_gen)
+		return this;
+	last_optimisation_gen = current_optimisation_gen;
 	if (!sideEffect) {
 		*done_something = true;
 		return target->optimise(opt, done_something);
