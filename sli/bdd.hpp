@@ -6,6 +6,7 @@
 #include <libvex_parse.h>
 
 #include "smr.hpp"
+#include "hash_table.hpp"
 
 class bbdd;
 template <typename _leafT, typename _subtreeT> class _bdd;
@@ -149,7 +150,7 @@ template <typename _leafT, typename _subtreeT>
 class _bdd : public GarbageCollected<_bdd<_leafT, _subtreeT>, &ir_heap> {
 public:
 	typedef _leafT leafT;
-	typedef std::map<bbdd *, _subtreeT *> enablingTableT;
+	typedef HashedMapSmall<HashedPtr<bbdd>, _subtreeT *> enablingTableT;
 	struct internalT {
 		bdd_rank rank;
 		/* Must be Ity_I1 */
@@ -287,6 +288,14 @@ public:
 		bbdd *cond,
 		_subtreeT *ifTrue,
 		_subtreeT *ifFalse);
+
+	unsigned long hash() const {
+		if (isLeaf)
+			return (unsigned long)leaf() * 57348958027;
+		return (unsigned long)internal().condition * 57349651 +
+			(unsigned long)internal().trueBranch * 57352199 +
+			(unsigned long)internal().falseBranch * 57356099;
+	}
 
 	void visit(HeapVisitor &hv) {
 		/* Bit of a hack: content is const except for things

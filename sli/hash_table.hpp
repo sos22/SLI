@@ -64,6 +64,7 @@
 #define HASH_TABLE_HPP__
 
 #include "maybe.hpp"
+#include "either.hpp"
 
 template <typename member, int _nr_heads = 2053, int _nr_per_elem = 4> class HashTable {
 public:
@@ -438,7 +439,7 @@ public:
 		}
 		return Maybe<_value>::nothing();
 	}
-	void set(const _key &k, _value &v) {
+	_value *getSlot(const _key &k, const _value &defaultV) {
 		typename contentT::elem *c = content.getHead(k.hash());
 		typename contentT::elem **last;
 		std::pair<_key, _value> *slot = NULL;
@@ -447,10 +448,8 @@ public:
 		while (c) {
 			for (int i = 0; i < contentT::nr_per_elem; i++) {
 				if ( (c->use_map & (1ul << i)) ) {
-					if (c->content[i].first == k ) {
-						c->content[i].second = v;
-						return;
-					}
+					if (c->content[i].first == k )
+						return &c->content[i].second;
 				} else if (!slot) {
 					slot = &c->content[i];
 					slot_use = &c->use_map;
@@ -462,15 +461,22 @@ public:
 		}
 		content.sz++;
 		if (slot) {
-			*slot = std::pair<_key, _value>(k, v);
+			*slot = std::pair<_key, _value>(k, defaultV);
 			*slot_use |= slot_use_mask;
-			return;
+			return &slot->second;
 		}
 		c = new typename contentT::elem();
 		c->use_map = 1;
 		c->content[0].first = k;
-		c->content[0].second = v;
+		c->content[0].second = defaultV;
 		*last = c;
+		return &c->content[0].second;
+	}
+	void set(const _key &k, const _value &v) {
+		*getSlot(k, v) = v;
+	}
+	size_t size() const {
+		return content.size();
 	}
 
 	class iterator {
@@ -502,6 +508,117 @@ public:
 		const _value &value() const { return it->second; }
 	};
 	const_iterator begin() const { return const_iterator(&content); }
+};
+
+/* Like a HashedMap, except that it has a special case for very small
+   tables, making it fast to set up when you don't have very many
+   items while only being slightly slower for larger tables. */
+template <typename _key, typename _value, int nr_small = 4,
+	  int nr_heads = 2043, int nr_per_elem = 4> class HashedMapSmall {
+	typedef HashedMap<_key, _value, nr_heads, nr_per_elem> largeT;
+	largeT *large;
+	int nr_small_used;
+	std::pair<_key, _value> small[nr_small];
+public:
+	HashedMapSmall()
+		: large(NULL),
+		  nr_small_used(0)
+	{}
+	~HashedMapSmall()
+	{
+		if (large)
+			delete large;
+	}
+	HashedMapSmall(const HashedMapSmall &o)
+		: large(NULL), nr_small_used(0)
+	{
+		if (o.large) {
+			large = new largeT(*o.large);
+		} else {
+			nr_small_used = o.nr_small_used;
+			for (int i = 0; i < o.nr_small_used; i++)
+				new (&small[i]) std::pair<_key, _value>(o.small[i]);
+		}
+	}
+	size_t size() const {
+		if (large)
+			return large->size();
+		else
+			return nr_small_used;
+	}
+	_value *getSlot(const _key &k, const _value &defaultV) {
+		if (large)
+			return large->getSlot(k, defaultV);
+		for (int i = 0; i < nr_small_used; i++) {
+			if (small[i].first == k)
+				return &small[i].second;
+		}
+		if (nr_small_used == nr_small) {
+			large = new largeT();
+			for (int i = 0; i < nr_small_used; i++)
+				large->set(small[i].first, small[i].second);
+			nr_small_used = 0;
+			return large->getSlot(k, defaultV);
+		}
+		small[nr_small_used].first = k;
+		small[nr_small_used].second = defaultV;
+		nr_small_used++;
+		return &small[nr_small_used-1].second;
+	}
+	void set(const _key &k, const _value &v) {
+		*getSlot(k, v) = v;
+	}
+
+	class const_iterator {
+		typedef either<typename largeT::const_iterator,
+			       typename std::pair<const HashedMapSmall *,
+						  int> > contentT;
+		contentT content;
+	public:
+		const_iterator(const HashedMapSmall *owner)
+			: content(owner->large ?
+				  contentT::Left(((const largeT *)owner->large)->begin()) :
+				  contentT::Right(std::pair<const HashedMapSmall *, int>
+						  (owner, 0)))
+		{
+		}
+		bool finished() const {
+			if (content.isLeft)
+				return content.left().finished();
+			else
+				return content.right().second ==
+					content.right().first->nr_small_used;
+		}
+		bool started() const {
+			if (content.isLeft)
+				return content.left().started();
+			else
+				return content.right().second != 0;
+		}
+		void advance() {
+			if (content.isLeft)
+				content.left().advance();
+			else
+				content.right().second++;
+		}
+		const _key &key() const {
+			if (content.isLeft) {
+				return content.left().key();
+			} else {
+				assert(content.right().second < content.right().first->nr_small_used);
+				return content.right().first->small[content.right().second].first;
+			}
+		}
+		const _value &value() const {
+			if (content.isLeft) {
+				return content.left().value();
+			} else {
+				assert(content.right().second < content.right().first->nr_small_used);
+				return content.right().first->small[content.right().second].second;
+			}
+		}
+	};
+	const_iterator begin() const { return const_iterator(this); }
 };
 
 template <typename ptr> class HashedPtr {

@@ -120,21 +120,21 @@ public:
 		else if (table.size() == 0)
 			return INTBDD_DONT_CARE;
 		else
-			return table.begin()->second;
+			return table.begin().value();
 	}
 	const bdd_rank &bestCond(IRExpr **cond) const {
 		IRExpr *c = NULL;
 		const bdd_rank *bestCond = NULL;
-		for (auto it = table.begin(); it != table.end(); it++) {
-			if (!it->first->isLeaf &&
-			    (!bestCond || it->first->internal().rank < *bestCond)) {
-				c = it->first->internal().condition;
-				bestCond = &it->first->internal().rank;
+		for (auto it = table.begin(); !it.finished(); it.advance()) {
+			if (!it.key()->isLeaf &&
+			    (!bestCond || it.key()->internal().rank < *bestCond)) {
+				c = it.key()->internal().condition;
+				bestCond = &it.key()->internal().rank;
 			}
-			if (!it->second->isLeaf &&
-			    (!bestCond || it->second->internal().rank < *bestCond)) {
-				c = it->second->internal().condition;
-				bestCond = &it->second->internal().rank;
+			if (!it.value()->isLeaf &&
+			    (!bestCond || it.value()->internal().rank < *bestCond)) {
+				c = it.value()->internal().condition;
+				bestCond = &it.value()->internal().rank;
 			}
 		}
 		assert(c);
@@ -145,13 +145,13 @@ public:
 	from_enabling_internal trueSucc(bdd_ordering *ordering, const bdd_rank &cond)
 	{
 		from_enabling_internal res(false);
-		for (auto it = table.begin(); it != table.end(); it++) {
-			bbdd *newGuard = ordering->trueBranch(it->first, cond);
+		for (auto it = table.begin(); !it.finished(); it.advance()) {
+			bbdd *newGuard = ordering->trueBranch(it.key().get(), cond);
 			if (newGuard->isLeaf && !newGuard->leaf())
 				continue;
-			subtreeT *newRes = ordering->trueBranch(it->second, cond);
-			auto it2_did_insert = res.table.insert(std::pair<bbdd *, subtreeT *>(newGuard, newRes));
-			if (it2_did_insert.first->second != newRes)
+			subtreeT *newRes = ordering->trueBranch(it.value(), cond);
+			subtreeT **newSlot = res.table.getSlot(newGuard, newRes);
+			if (*newSlot != newRes)
 				return from_enabling_internal(true);
 		}
 		return res;
@@ -159,13 +159,13 @@ public:
 	from_enabling_internal falseSucc(bdd_ordering *ordering, const bdd_rank &cond)
 	{
 		from_enabling_internal res(false);
-		for (auto it = table.begin(); it != table.end(); it++) {
-			bbdd *newGuard = ordering->falseBranch(it->first, cond);
+		for (auto it = table.begin(); !it.finished(); it.advance()) {
+			bbdd *newGuard = ordering->falseBranch(it.key().get(), cond);
 			if (newGuard->isLeaf && !newGuard->leaf())
 				continue;
-			subtreeT *newRes = ordering->falseBranch(it->second, cond);
-			auto it2_did_insert = res.table.insert(std::pair<bbdd *, subtreeT *>(newGuard, newRes));
-			if (it2_did_insert.first->second != newRes)
+			subtreeT *newRes = ordering->falseBranch(it.value(), cond);
+			subtreeT **newSlot = res.table.getSlot(newGuard, newRes);
+			if (*newSlot != newRes)
 				return from_enabling_internal(true);
 		}
 		return res;
@@ -181,7 +181,23 @@ public:
 		return scope->makeInternal(a, t, f);
 	}
 	bool operator<(const from_enabling_internal &o) const {
-		return table < o.table;
+		auto it1 = table.begin();
+		auto it2 = o.table.begin();
+		while (!it1.finished() && !it2.finished()) {
+			if (it1.key() < it2.key())
+				return true;
+			if (it1.key() > it2.key())
+				return false;
+			if (it1.value() < it2.value())
+				return true;
+			if (it1.value() > it2.value())
+				return false;
+			it1.advance();
+			it2.advance();
+		}
+		if (it1.finished() && !it2.finished())
+			return true;
+		return false;
 	}
 };
 
