@@ -301,14 +301,6 @@ _optimiseStateMachine(SMScopes *scopes,
 		}
 		done_something |= p;
 
-		if (is_ssa) {
-			p = false;
-			sm = undefinednessSimplification(scopes, sm, opt, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("Undefinedness:\n");
-				printStateMachine(sm, stdout);
-			}
-		}
 		if (opt.noExtend()) {
 			p = false;
 			sm = useInitialMemoryLoads(scopes, *mai, sm, opt, oracle, &p);

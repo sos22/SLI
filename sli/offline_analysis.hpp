@@ -255,7 +255,6 @@ StateMachine *functionAliasAnalysis(SMScopes *scopes,
 				    const ControlDominationMap &cdm,
 				    bool *done_something);
 StateMachine *phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something);
-StateMachine *undefinednessSimplification(SMScopes *scopes, StateMachine *sm, const IRExprOptimisations &opt, bool *done_something);
 
 StateMachine *removeAnnotations(SMScopes *scopes,
 				VexPtr<MaiMap, &ir_heap> &mai,

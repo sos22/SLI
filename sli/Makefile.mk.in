@@ -24,7 +24,7 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{mapping,elf_exec,offline_analysis,genfix,intern}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{StateMachineTransformer,IRExprTransformer,proximal_cause}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{availExpressionAnalysis,deadcode,control_domination_map}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{bisimilarity,nf,typesdb,timers,realias,undefinedness}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{bisimilarity,nf,typesdb,timers,realias}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{getStoreCFGs,dupeStateMachine}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{cfgnode,getProbeCFGs,probeCFGtoMachine,useInitialMemoryLoads}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{sat_checker,smb_builder}.cpp
