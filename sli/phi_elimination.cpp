@@ -296,11 +296,9 @@ build_selection_bdd(SMScopes *scopes,
 				bbdd *condition = bbdd::assume(&scopes->bools, cdg.domOf(*it), assumption);
 				exprbdd *res = exprbdd::assume(&scopes->exprs, m[*it], assumption);
 #warning Should be more cunning if the predecessor state is a bifurcate
-				if (enabling.count(condition) && enabling[condition] != res) {
+				exprbdd **slot = enabling.getSlot(condition, res);
+				if (*slot != res)
 					failed = true;
-				} else {
-					enabling[condition] = res;
-				}
 			}
 			if (failed) {
 				if (debug_build_paths)
@@ -309,15 +307,13 @@ build_selection_bdd(SMScopes *scopes,
 			}
 			if (debug_build_paths) {
 				printf("Enabling table:\n");
-				for (auto it = enabling.begin();
-				     it != enabling.end();
-				     it++) {
-					if (it != enabling.begin())
+				for (auto it = enabling.begin(); !it.finished(); it.advance()) {
+					if (it.started())
 						printf("------------------\n");
 					printf("Cond:\n");
-					it->first->prettyPrint(stdout);
+					it.key()->prettyPrint(stdout);
 					printf("Result:\n");
-					it->second->prettyPrint(stdout);
+					it.value()->prettyPrint(stdout);
 				}
 			}
 			exprbdd *flattened = exprbdd::from_enabling(&scopes->exprs, enabling, 0);

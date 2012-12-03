@@ -1391,7 +1391,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 					     it2 != possibleInputs.end();
 					     it2++) {
 						exprbdd *val = dataOfSideEffect(scopes, it2->first->getSideEffect(), l->type);
-						tab[it2->second] = val;
+						tab.set(it2->second, val);
 						dflt = val;
 					}
 					exprbdd *res = exprbdd::from_enabling(&scopes->exprs, tab, dflt);

@@ -65,10 +65,10 @@ enforceMustStoreBeforeCrash(SMScopes *scopes, StateMachine *sm, bool *progress)
 			continue;
 		smrbdd::enablingTableT tab;
 		if (selectors.count(smr_survive))
-			tab[selectors[smr_survive]] = scopes->smrs.cnst(smr_survive);
+			tab.set(selectors[smr_survive],  scopes->smrs.cnst(smr_survive));
 		if (selectors.count(smr_unreached))
-			tab[selectors[smr_unreached]] = scopes->smrs.cnst(smr_unreached);
-		tab[selectors[smr_crash]] = scopes->smrs.cnst(smr_unreached);
+			tab.set(selectors[smr_unreached], scopes->smrs.cnst(smr_unreached));
+		tab.set(selectors[smr_crash], scopes->smrs.cnst(smr_unreached));
 		*progress = true;
 		s->res = smrbdd::from_enabling(&scopes->smrs, tab, scopes->smrs.cnst(smr_unreached));
 	}
@@ -763,11 +763,11 @@ truncateStateMachine(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, Stat
 				std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scopes->bools, smt->res));
 				smrbdd::enablingTableT tab;
 				if (selectors.count(smr_crash))
-					tab[selectors[smr_crash]] = scopes->smrs.cnst(smr_survive);
+					tab.set(selectors[smr_crash], scopes->smrs.cnst(smr_survive));
 				if (selectors.count(smr_survive))
-					tab[selectors[smr_survive]] = scopes->smrs.cnst(smr_survive);
+					tab.set(selectors[smr_survive], scopes->smrs.cnst(smr_survive));
 				if (selectors.count(smr_unreached))
-					tab[selectors[smr_unreached]] = scopes->smrs.cnst(smr_unreached);
+					tab.set(selectors[smr_unreached], scopes->smrs.cnst(smr_unreached));
 				smrbdd *newRes = smrbdd::from_enabling(&scopes->smrs, tab, scopes->smrs.cnst(smr_unreached));
 				assert(newRes);
 				newRes->sanity_check(&scopes->ordering);
