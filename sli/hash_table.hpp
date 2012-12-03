@@ -445,6 +445,12 @@ public:
 		std::pair<_key, _value> *slot = NULL;
 		unsigned long *slot_use;
 		unsigned long slot_use_mask;
+
+		/* Shut compiler up */
+		slot_use = (unsigned long *)0xf001;
+		slot_use_mask = 0xaaaabbbb;
+		last = (typename contentT::elem **)0xdead;
+
 		while (c) {
 			for (int i = 0; i < contentT::nr_per_elem; i++) {
 				if ( (c->use_map & (1ul << i)) ) {
