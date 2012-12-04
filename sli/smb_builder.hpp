@@ -6,6 +6,7 @@
 #include "state_machine.hpp"
 #include "alloc_mai.hpp"
 #include "cfgnode.hpp"
+#include "offline_analysis.hpp"
 
 /* XXX doesn't really belong here */
 struct reloc_t {
@@ -134,20 +135,12 @@ operator!(const threadAndRegister &tr)
 struct SMBCompilerState {
 	const VexRip &vr;
 	const CFGNode *where;
-	int tid;
-	MaiMap &mai;
 	SMScopes *scopes;
 	SMBCompilerState(const VexRip &_vr,
 			 const CFGNode *_where,
-			 int _tid,
-			 MaiMap &_mai,
 			 SMScopes *_scopes)
-		: vr(_vr), where(_where), tid(_tid), mai(_mai), scopes(_scopes)
+		: vr(_vr), where(_where), scopes(_scopes)
 	{}
-	MemoryAccessIdentifier getMai()
-	{
-		return mai(tid, where);
-	}
 };
 /* ------------------------------ Statements ------------------------------------- */
 /* These correspond to side effects in the state machines we generate */
@@ -175,11 +168,14 @@ public:
 };
 class SMBStatementStore : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
-		return new StateMachineSideEffectStore(
-			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
-			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, value.content->compile()),
-			state.getMai(),
-			tag);
+		StateMachineSideEffectStore *res =
+			new StateMachineSideEffectStore(
+				exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
+				exprbdd::var(&state.scopes->exprs, &state.scopes->bools, value.content->compile()),
+				MemoryAccessIdentifier::uninitialised(),
+				tag);
+		mkPendingMai(&res->rip, state.where);
+		return res;
 	}
 public:
 	SMBPtr<SMBMemoryReference> addr;
@@ -198,12 +194,15 @@ public:
 };
 class SMBStatementLoad : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
-		return new StateMachineSideEffectLoad(
-			target.content->compile(),
-			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
-			state.getMai(),
-			type,
-			tag);
+		StateMachineSideEffectLoad *l =
+			new StateMachineSideEffectLoad(
+				target.content->compile(),
+				exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
+				MemoryAccessIdentifier::uninitialised(),
+				type,
+				tag);
+		mkPendingMai(&l->rip, state.where);
+		return l;
 	}
 public:
 	SMBPtr<SMBRegisterReference> target;

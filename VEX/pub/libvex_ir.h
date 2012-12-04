@@ -1941,7 +1941,7 @@ extern IRExpr* IRExpr_Associative (IRExprAssociative *);
 extern IRExprAssociative* IRExpr_Associative (int nr_arguments, IROp op);
 extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,
 				     const MemoryAccessIdentifier &after);
-static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty, bool isUnique) {
+static inline IRExprFreeVariable *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty, bool isUnique) {
     return new IRExprFreeVariable(id, ty, isUnique);
 }
 

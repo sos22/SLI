@@ -14,7 +14,6 @@ getProximalCause(SMScopes *scopes,
 		 MachineState *ms,
 		 Oracle *oracle,
 		 const VexRip &rip,
-		 MaiMap &mai,
 		 const CFGNode *where,
 		 int tid)
 {
@@ -138,12 +137,14 @@ getProximalCause(SMScopes *scopes,
 			break;
 		case Ist_Store: {
 			IRStmtStore *ist = (IRStmtStore *)stmt;
-			prependSideEffect(
+			StateMachineSideEffectStore *se =
 				new StateMachineSideEffectStore(
 					exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
 					exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
-					mai(tid, where),
-					MemoryTag::normal()));
+					MemoryAccessIdentifier::uninitialised(),
+					MemoryTag::normal());
+			prependSideEffect(se);
+			mkPendingMai(&se->rip, where);
 			crashIfBadPtr(ist->addr);
 			break;
 		}
@@ -192,15 +193,18 @@ getProximalCause(SMScopes *scopes,
 					bbdd::var(&scopes->bools, expr_eq(t_expr, cas->expdLo)),
 					l5,
 					l6);
+			StateMachineSideEffectLoad *le =
+				new StateMachineSideEffectLoad(
+					tr,
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
+					MemoryAccessIdentifier::uninitialised(),
+					ty,
+					MemoryTag::normal());
+			mkPendingMai(&le->rip, where);
 			StateMachineSideEffecting *l3 =
 				new StateMachineSideEffecting(
 					rip,
-					new StateMachineSideEffectLoad(
-						tr,
-						exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
-						mai(tid, where),
-						ty,
-						MemoryTag::normal()),
+					le,
 					l4);
 			StateMachineSideEffecting *l2 =
 				new StateMachineSideEffecting(
@@ -227,13 +231,15 @@ getProximalCause(SMScopes *scopes,
 			else
 				abort();
 			assert(ity != Ity_INVALID);
-			prependSideEffect(
+			StateMachineSideEffectLoad *l =
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
 					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
-					mai(tid, where),
+					MemoryAccessIdentifier::uninitialised(),
 					ity,
-					MemoryTag::normal()));
+					MemoryTag::normal());
+			prependSideEffect(l);
+			mkPendingMai(&l->rip, where);
 			crashIfBadPtr(dirty->args[0]);
 			break;
 		}
@@ -265,10 +271,9 @@ StateMachineState *
 getProximalCause(SMScopes *scopes,
 		 MachineState *ms,
 		 Oracle *oracle,
-		 MaiMap &mai,
 		 const CFGNode *where,
 		 const VexRip &rip,
 		 int tid)
 {
-	return ProximalCause::getProximalCause(scopes, ms, oracle, rip, mai, where, tid);
+	return ProximalCause::getProximalCause(scopes, ms, oracle, rip, where, tid);
 }
