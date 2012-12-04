@@ -7,7 +7,7 @@
 template <typename constT, typename subtreeT> template <typename scopeT, typename zipInternalT>
 subtreeT *
 _bdd<constT, subtreeT>::zip(scopeT *scope,
-			    zipInternalT where,
+			    const zipInternalT &where,
 			    std::map<zipInternalT, subtreeT *> &memo)
 {
 	if (where.isLeaf())
@@ -142,7 +142,7 @@ public:
 		*cond = c;
 		return *bestCond;
 	}
-	from_enabling_internal trueSucc(bdd_ordering *ordering, const bdd_rank &cond)
+	from_enabling_internal trueSucc(bdd_ordering *ordering, const bdd_rank &cond) const
 	{
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); !it.finished(); it.advance()) {
@@ -156,7 +156,7 @@ public:
 		}
 		return res;
 	}
-	from_enabling_internal falseSucc(bdd_ordering *ordering, const bdd_rank &cond)
+	from_enabling_internal falseSucc(bdd_ordering *ordering, const bdd_rank &cond) const
 	{
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); !it.finished(); it.advance()) {
@@ -170,7 +170,7 @@ public:
 		}
 		return res;
 	}
-	subtreeT *mkNode(scopeT *scope, IRExpr *a, subtreeT *t, subtreeT *f)
+	subtreeT *mkNode(scopeT *scope, IRExpr *a, subtreeT *t, subtreeT *f) const
 	{
 		if (t == NULL || f == NULL)
 			return NULL;
