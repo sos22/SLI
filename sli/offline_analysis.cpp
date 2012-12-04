@@ -1397,7 +1397,6 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		StateMachineState *t = getProximalCause(&scopes,
 							oracle->ms,
 							oracle,
-							*MaiMap::empty(),
 							NULL,
 							targetRip.toVexRip(),
 							tid);

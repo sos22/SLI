@@ -24,6 +24,21 @@ static bool debug_rsp_canonicalisation = false;
 namespace _probeCFGsToMachine {
 
 static void
+mkPendingMai(MemoryAccessIdentifier *where, const CFGNode *node)
+{
+	where->tid = (int)(unsigned long)node;
+	where->id = (int)((unsigned long)node >> 32);
+}
+
+static IRExpr *
+mkPendingFreeVar(IRType ty, const CFGNode *node, bool isUnique)
+{
+	IRExprFreeVariable *res = IRExpr_FreeVariable(MemoryAccessIdentifier::uninitialised(), ty, isUnique);
+	_probeCFGsToMachine::mkPendingMai(&res->id, node);
+	return res;
+}
+
+static void
 ndChoiceState(SMScopes *scopes,
 	      StateMachineState **slot,
 	      const ThreadRip &vr,
@@ -140,8 +155,7 @@ static StateMachineState *
 getLibraryStateMachine(SMScopes *scopes,
 		       CFGNode *cfgnode,
 		       unsigned tid,
-		       std::vector<reloc_t> &pendingRelocs,
-		       MaiMap &mai)
+		       std::vector<reloc_t> &pendingRelocs)
 {
 	threadAndRegister rax(threadAndRegister::reg(tid, OFFSET_amd64_RAX, 0));
 	threadAndRegister arg1(threadAndRegister::reg(tid, OFFSET_amd64_RDI, 0));
@@ -242,7 +256,7 @@ getLibraryStateMachine(SMScopes *scopes,
 		break;
 	}
 	case LibraryFunctionTemplate::malloc: {
-		acc = (!rax <<= smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, true))) >>
+		acc = (!rax <<= smb_expr(mkPendingFreeVar(Ity_I64, cfgnode, true))) >>
 			(AssertFalse(smb_expr(IRExpr_Unop(Iop_BadPtr, IRExpr_Get(rax, Ity_I64)))) >> end);
 		break;
 	}
@@ -250,7 +264,7 @@ getLibraryStateMachine(SMScopes *scopes,
 	case LibraryFunctionTemplate::free: {
 		acc = end;
 		for (int i = 0; i < 8; i++) {
-			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
+			SMBPtr<SMBExpression> fv(smb_expr(mkPendingFreeVar(Ity_I64, cfgnode, false)));
 			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
 				acc;
 		}
@@ -291,7 +305,7 @@ getLibraryStateMachine(SMScopes *scopes,
 	case LibraryFunctionTemplate::__assert_fail:
 		return new StateMachineTerminal(cfgnode->rip, scopes->smrs.cnst(smr_unreached));
 	case LibraryFunctionTemplate::time: {
-		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
+		SMBPtr<SMBExpression> fv(smb_expr(mkPendingFreeVar(Ity_I64, cfgnode, false)));
 		acc = (!rax <<= fv) >> end;
 		If(smb_reg(arg1, Ity_I64) == smb_const64(0),
 		   acc,
@@ -301,7 +315,7 @@ getLibraryStateMachine(SMScopes *scopes,
 	case LibraryFunctionTemplate::getrusage: {
 		acc = (!rax <<= smb_const64(0)) >> end;
 		for (unsigned i = 0; i < sizeof(struct rusage) / 8; i++) {
-			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
+			SMBPtr<SMBExpression> fv(smb_expr(mkPendingFreeVar(Ity_I64, cfgnode, false)));
 			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
 				acc;
 		}
@@ -338,7 +352,7 @@ getLibraryStateMachine(SMScopes *scopes,
 		printf(")\n");
 		abort();
 	}
-	SMBCompilerState state(cfgnode->rip, cfgnode, tid, mai, scopes);
+	SMBCompilerState state(cfgnode->rip, cfgnode, scopes);
 	return acc.content->compile(pendingRelocs, state);
 }
 
@@ -417,7 +431,6 @@ cfgNodeToState(SMScopes *scopes,
 	       unsigned tid,
 	       CFGNode *target,
 	       bool storeLike,
-	       MaiMap &mai,
 	       std::vector<reloc_t> &pendingRelocs)
 {
 	if (TIMEOUT)
@@ -426,7 +439,7 @@ cfgNodeToState(SMScopes *scopes,
 	ThreadRip tr(tid, target->rip);
 
 	StateMachineState *root;
-	root = getLibraryStateMachine(scopes, target, tid, pendingRelocs, mai);
+	root = getLibraryStateMachine(scopes, target, tid, pendingRelocs);
 	if (root)
 		return root;
 
@@ -485,12 +498,13 @@ cfgNodeToState(SMScopes *scopes,
 				   all functions by inlining), and it's
 				   sometimes a pain to optimise
 				   out later. */
-				StateMachineSideEffect *se =
+				StateMachineSideEffectStore *se =
 					new StateMachineSideEffectStore(
 						exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
 						exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
-						mai(tid, target),
+						MemoryAccessIdentifier::uninitialised(),
 						MemoryTag::normal());
+				_probeCFGsToMachine::mkPendingMai(&se->rip, target);
 				StateMachineSideEffecting *smse =
 					new StateMachineSideEffecting(
 						target->rip,
@@ -532,14 +546,17 @@ cfgNodeToState(SMScopes *scopes,
 					target->rip,
 					StateMachineSideEffectEndAtomic::get(),
 					l5);
+			StateMachineSideEffectStore *l3se =
+				new StateMachineSideEffectStore(
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->dataLo),
+					MemoryAccessIdentifier::uninitialised(),
+					MemoryTag::normal());
+			_probeCFGsToMachine::mkPendingMai(&l3se->rip, target);
 			StateMachineState *l3 =
 				new StateMachineSideEffecting(
 					target->rip,
-					new StateMachineSideEffectStore(
-						exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
-						exprbdd::var(&scopes->exprs, &scopes->bools, cas->dataLo),
-						mai(tid, target),
-						MemoryTag::normal()),
+					l3se,
 					l4);
 			StateMachineState *l2 =
 				new StateMachineBifurcate(
@@ -547,15 +564,18 @@ cfgNodeToState(SMScopes *scopes,
 					bbdd::var(&scopes->bools, expr_eq(t_expr, cas->expdLo)),
 					l3,
 					l4);
+			StateMachineSideEffectLoad *l1se =
+				new StateMachineSideEffectLoad(
+					tempreg,
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
+					MemoryAccessIdentifier::uninitialised(),
+					ty,
+					MemoryTag::normal());
+			_probeCFGsToMachine::mkPendingMai(&l1se->rip, target);
 			StateMachineState *l1 =
 				new StateMachineSideEffecting(
 					target->rip,
-					new StateMachineSideEffectLoad(
-						tempreg,
-						exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
-						mai(tid, target),
-						ty,
-						MemoryTag::normal()),
+					l1se,
 					l2);
 			StateMachineState *l0 =
 				new StateMachineSideEffecting (
@@ -584,16 +604,18 @@ cfgNodeToState(SMScopes *scopes,
 				else
 					abort();
 				assert(ity != Ity_INVALID);
-				se = new StateMachineSideEffectLoad(
+				auto sel = new StateMachineSideEffectLoad(
 					dirty->tmp,
 					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
-					mai(tid, target),
+					MemoryAccessIdentifier::uninitialised(),
 					ity,
 					MemoryTag::normal());
+				_probeCFGsToMachine::mkPendingMai(&sel->rip, target);
+				se = sel;
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 				se = new StateMachineSideEffectCopy(
 					dirty->tmp,
-					exprbdd::var(&scopes->exprs, &scopes->bools, mai.freeVariable(Ity_I64, tid, target, false)));
+					exprbdd::var(&scopes->exprs, &scopes->bools, mkPendingFreeVar(Ity_I64, target, false)));
 			} else {
 				abort();
 			}
@@ -2026,6 +2048,169 @@ importRegisters(StateMachineState *root)
 	return root;
 }
 
+static void
+assignMais(MemoryAccessIdentifier &ident, int tid, MaiMap &mm)
+{
+	const CFGNode *node =
+		(const CFGNode *)((unsigned long)(unsigned)ident.tid |
+				  ((unsigned long)ident.id << 32));
+	ident = mm(tid, node);
+}
+struct assignMaiTransformer : public IRExprTransformer {
+	int tid;
+	MaiMap &mm;
+	IRExpr *transformIex(IRExprFreeVariable *fv) {
+		assignMais(fv->id, tid, mm);
+		return fv;
+	}
+	IRExpr *transformIex(IRExprHappensBefore *) {
+		abort();
+	}
+	assignMaiTransformer(int _tid, MaiMap &_mm)
+		: tid(_tid), mm(_mm)
+	{}
+};
+static bbdd *
+assignMais(SMScopes *scopes, bbdd *cond, int tid, MaiMap &mm)
+{
+	assignMaiTransformer doit(tid, mm);
+	return doit.transform_bbdd(&scopes->bools, cond);
+}
+static smrbdd *
+assignMais(SMScopes *scopes, smrbdd *cond, int tid, MaiMap &mm)
+{
+	assignMaiTransformer doit(tid, mm);
+	return doit.transform_smrbdd(&scopes->bools, &scopes->smrs, cond);
+}
+static exprbdd *
+assignMais(SMScopes *scopes, exprbdd *cond, int tid, MaiMap &mm)
+{
+	assignMaiTransformer doit(tid, mm);
+	return doit.transform_exprbdd(&scopes->bools, &scopes->exprs, cond);
+}
+static void
+assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
+{
+	if (!se)
+		return;
+	switch (se->type) {
+	case StateMachineSideEffect::Load: {
+		auto l = (StateMachineSideEffectLoad *)se;
+		l->addr = assignMais(scopes, l->addr, tid, mm);
+		assignMais(l->rip, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::Store: {
+		auto l = (StateMachineSideEffectStore *)se;
+		l->addr = assignMais(scopes, l->addr, tid, mm);
+		l->data = assignMais(scopes, l->data, tid, mm);
+		assignMais(l->rip, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::Copy: {
+		auto l = (StateMachineSideEffectCopy *)se;
+		l->value = assignMais(scopes, l->value, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::AssertFalse: {
+		auto l = (StateMachineSideEffectAssertFalse *)se;
+		l->value = assignMais(scopes, l->value, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::Unreached:
+	case StateMachineSideEffect::StartAtomic:
+	case StateMachineSideEffect::EndAtomic:
+	case StateMachineSideEffect::ImportRegister:
+	case StateMachineSideEffect::StackLayout:
+		return;
+	case StateMachineSideEffect::Phi:
+		abort();
+	case StateMachineSideEffect::StartFunction: {
+		auto l = (StateMachineSideEffectStartFunction *)se;
+		l->rsp = assignMais(scopes, l->rsp, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::EndFunction: {
+		auto l = (StateMachineSideEffectEndFunction *)se;
+		l->rsp = assignMais(scopes, l->rsp, tid, mm);
+		return;
+	}
+	}
+	abort();
+}
+static void
+assignMais(SMScopes *scopes, StateMachineState *s, int tid, MaiMap &mm)
+{
+	switch (s->type) {
+	case StateMachineState::Bifurcate:
+		((StateMachineBifurcate *)s)->condition =
+			assignMais(scopes, ((StateMachineBifurcate *)s)->condition, tid, mm);
+		return;
+	case StateMachineState::Terminal:
+		((StateMachineTerminal *)s)->res =
+			assignMais(scopes, ((StateMachineTerminal *)s)->res, tid, mm);
+		return;
+	case StateMachineState::SideEffecting:
+		assignMais(scopes, ((StateMachineSideEffecting *)s)->sideEffect, tid, mm);
+		return;
+	}
+	abort();
+}
+
+/* Because the machine is acyclic, there is never simultaneously a
+   path from A to B and from B to A.  That means that ``there is a
+   path from A to B'' is a partial order.  We now derive that partial
+   order and topologically sort it to find the numerical memory access
+   identifiers for this thread.  The result is that if:
+
+   a) A and B are in the same thread, and
+   b) In this execution both A and B happen
+
+   then A <-< B is just a numerical comparison on the memory access
+   identifier ID component.
+
+   Note that if sub-condition (b) does not hold then A <-< B is
+   undefined, so we can just use the ID component test there as well.
+
+   The result is that we can always immediately check which of two
+   memory access identifies in a single thread happen first, without
+   further reference to the machine structure. */
+/* Optimisation: rather than explicitly building the partial order, we
+   do the toplogical sort directly on the state machine by making sure
+   that when we assign an MAI to A we have already assigned MAIs to
+   all of the possible predecessors of A. */
+static void
+setMais(SMScopes *scopes, StateMachineState *root, int tid, MaiMap &mai)
+{
+	std::map<StateMachineState *, int> predecessors;
+	std::set<StateMachineState *> states;
+	enumStates(root, &states);
+	predecessors[root] = 0;
+	for (auto it = states.begin(); it != states.end(); it++) {
+		StateMachineState *s = *it;
+		std::vector<StateMachineState *> targ;
+		s->targets(targ);
+		for (auto it2 = targ.begin(); it2 != targ.end(); it2++)
+			predecessors[*it2]++;
+	}
+	assert(predecessors[root] == 0);
+	std::vector<StateMachineState *> pending;
+	pending.push_back(root);
+	while (!pending.empty()) {
+		StateMachineState *s = pending.back();
+		pending.pop_back();
+		assert(predecessors[s] == 0);
+
+		assignMais(scopes, s, tid, mai);
+		std::vector<StateMachineState *> targ;
+		s->targets(targ);
+		for (auto it = targ.begin(); it != targ.end(); it++) {
+			if (--predecessors[*it] == 0)
+				pending.push_back(*it);
+		}
+	}
+}
+
 static StateMachine *
 probeCFGsToMachine(SMScopes *scopes,
 		   Oracle *oracle,
@@ -2035,7 +2220,6 @@ probeCFGsToMachine(SMScopes *scopes,
 		   MaiMap &mai)
 {
 	struct _ : public cfg_translator {
-		MaiMap &mai;
 		HashedSet<HashedPtr<const CFGNode> > &proximalNodes;
 		StateMachineState *operator()(SMScopes *scopes,
 					      CFGNode *e,
@@ -2046,19 +2230,17 @@ probeCFGsToMachine(SMScopes *scopes,
 				return getProximalCause(scopes,
 							oracle->ms,
 							oracle,
-							mai,
 							e,
 							e->rip,
 							tid);
 			} else {
-				return cfgNodeToState(scopes, oracle, tid, e, false, mai, pendingRelocations);
+				return cfgNodeToState(scopes, oracle, tid, e, false, pendingRelocations);
 			}
 		}
-		_(MaiMap &_mai,
-		  HashedSet<HashedPtr<const CFGNode> > &_proximalNodes)
-			: mai(_mai), proximalNodes(_proximalNodes)
+		_(HashedSet<HashedPtr<const CFGNode> > &_proximalNodes)
+			: proximalNodes(_proximalNodes)
 		{}
-	} doOne(mai, proximalNodes);
+	} doOne(proximalNodes);
 
 	assert(!roots.empty());
 
@@ -2088,7 +2270,10 @@ probeCFGsToMachine(SMScopes *scopes,
 	for (auto it = roots.begin(); !it.finished(); it.advance())
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
-	return new StateMachine(importRegisters(entryState(scopes, VexRip(), roots_this_sm2, tid, false)), cfg_roots_this_sm);
+	StateMachineState *root = entryState(scopes, VexRip(), roots_this_sm2, tid, false);
+	root = importRegisters(root);
+	setMais(scopes, root, tid, mai);
+	return new StateMachine(root, cfg_roots_this_sm);
 }
 
 static StateMachine *
@@ -2099,17 +2284,15 @@ storeCFGsToMachine(SMScopes *scopes,
 		   MaiMap &mai)
 {
 	struct _ : public cfg_translator {
-		MaiMap *mai;
 		StateMachineState *operator()(SMScopes *scopes,
 					      CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations)
 		{
-			return cfgNodeToState(scopes, oracle, tid, e, true, *mai, pendingRelocations);
+			return cfgNodeToState(scopes, oracle, tid, e, true, pendingRelocations);
 		}
 	} doOne;
-	doOne.mai = &mai;
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<std::pair<unsigned, const CFGNode *> > roots;
 	roots.push_back(std::pair<unsigned, const CFGNode *>(tid, root));
@@ -2127,6 +2310,7 @@ storeCFGsToMachine(SMScopes *scopes,
 	sm_roots.insert(s);
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	assignFrameIds(sm_roots, tid, entryStacks);
+	setMais(scopes, s, tid, mai);
 	s = addEntrySideEffects(
 		scopes,
 		oracle,
@@ -2134,10 +2318,9 @@ storeCFGsToMachine(SMScopes *scopes,
 		s,
 		entryStacks[s],
 		root->rip);
-	StateMachine *sm = new StateMachine(
+	return new StateMachine(
 		importRegisters(s),
 		roots);
-	return sm;
 }
 
 /* End of namespace */
@@ -2162,4 +2345,10 @@ storeCFGToMachine(SMScopes *scopes,
 		  MaiMap &mai)
 {
 	return _probeCFGsToMachine::storeCFGsToMachine(scopes, oracle, tid, root, mai);
+}
+
+void
+mkPendingMai(MemoryAccessIdentifier *where, const CFGNode *node)
+{
+	_probeCFGsToMachine::mkPendingMai(where, node);
 }
