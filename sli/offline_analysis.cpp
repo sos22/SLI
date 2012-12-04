@@ -145,7 +145,7 @@ public:
 		: prefix(NULL)
 	{}
 	~OptimisationRecorder() { free(prefix); }
-	void start(MaiMap *mai, StateMachine *sm, bool is_ssa,
+	void start(SMScopes *scopes, MaiMap *mai, StateMachine *sm, bool is_ssa,
 		   const AllowableOptimisations &opt)
 	{
 		if (random() % CONFIG_RECORD_MACHINE_OPTIMISATIONS) {
@@ -183,9 +183,12 @@ public:
 		else
 			fprintf(f, "false\n");
 		fclose(f);
+		f = fopenf("w", "%s/pre_scopes", prefix);
+		scopes->prettyPrint(f);
+		fclose(f);
 		fprintf(_logfile, "Optimisation log: %s\n", prefix);
 	}
-	void finish(MaiMap *mai, StateMachine *sm)
+	void finish(SMScopes *scopes, MaiMap *mai, StateMachine *sm)
 	{
 		if (skip)
 			return;
@@ -194,6 +197,9 @@ public:
 		fclose(f);
 		f = fopenf("w", "%s/post_machine", prefix);
 		printStateMachine(sm, f);
+		fclose(f);
+		f = fopenf("w", "%s/post_scopes", prefix);
+		scopes->prettyPrint(f);
 		fclose(f);
 	}
 #else
@@ -225,7 +231,7 @@ _optimiseStateMachine(SMScopes *scopes,
 	}
 
 	OptimisationRecorder optrec;
-	optrec.start(mai, sm, is_ssa, opt);
+	optrec.start(scopes, mai, sm, is_ssa, opt);
 
 	bool done_something;
 	do {
@@ -374,7 +380,7 @@ _optimiseStateMachine(SMScopes *scopes,
 	if (is_ssa)
 		sm->assertSSA();
 	if (!TIMEOUT)
-		optrec.finish(mai, sm);
+		optrec.finish(scopes, mai, sm);
 	return sm;
 }
 StateMachine *
