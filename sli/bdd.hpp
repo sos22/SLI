@@ -173,7 +173,7 @@ private:
 				 std::map<int, _subtreeT *> &labels);
 	template <typename scopeT, typename zipInternalT> static _subtreeT *zip(
 		scopeT *,
-		zipInternalT,
+		const zipInternalT &,
 		std::map<zipInternalT, _subtreeT *> &memo);
 	template <typename scopeT> static const typename std::map<leafT, bbdd *> &to_selectors(scopeT *, _subtreeT *, std::map<_subtreeT *, std::map<leafT, bbdd *> > &);
 

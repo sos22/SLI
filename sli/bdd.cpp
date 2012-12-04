@@ -659,7 +659,7 @@ public:
 	bbdd *mkNode(bbdd::scope *scope,
 		     IRExpr *a,
 		     bbdd *t,
-		     bbdd *f)
+		     bbdd *f) const
 	{
 		return scope->makeInternal(a, t, f);
 	}
