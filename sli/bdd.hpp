@@ -51,6 +51,7 @@ public:
 		else
 			return bdd;
 	}
+	void prettyPrint(FILE *) const;
 };
 
 template <typename _leafT, typename _subtreeT>

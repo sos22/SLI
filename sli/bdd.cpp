@@ -653,6 +653,19 @@ const_bdd<constT, subtreeT>::ifelse(scopeT *scope,
 	return zip(scope, ifelse_zip_internal<subtreeT, scopeT>(cond, ifTrue, ifFalse));
 }
 
+void
+bdd_ordering::prettyPrint(FILE *f) const
+{
+	fprintf(f, "Variable rankings:\n");
+	for (auto it = variableRankings.begin();
+	     it != variableRankings.end();
+	     it++) {
+		fprintf(f, "\t");
+		ppIRExpr(it->first, f);
+		fprintf(f, "\t -> \t%ld\n", it->second);
+	}
+}
+
 template void _bdd<int, intbdd>::prettyPrint(FILE *);
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *const_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
