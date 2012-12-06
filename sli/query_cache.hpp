@@ -34,7 +34,8 @@ public:
 	struct cache_entry cache[NR_ENTRIES];
 
 	QueryCache(const char *_name)
-		: nr_queries(0), nr_hits(0), nr_assoc_discards(0), name(_name)
+		: GcCallback<&ir_heap>(true), nr_queries(0),
+		  nr_hits(0), nr_assoc_discards(0), name(_name)
 	{
 		memset(cache, 0, sizeof(cache));
 	}
@@ -47,11 +48,28 @@ public:
 			       nr_queries, nr_hits, (double)nr_hits / nr_queries, nr_assoc_discards);
 	}
 
-	void runGc(HeapVisitor &) {
+	void runGc(HeapVisitor &hv) {
 		printf("%s cache: %d queries, %d hits, rate %e; %d associativity discards\n",
 		       name, nr_queries, nr_hits, (double)nr_hits / nr_queries,
 		       nr_assoc_discards);
-		memset(cache, 0, sizeof(cache));
+		for (unsigned i = 0; i < NR_ENTRIES; i++) {
+			struct cache_entry *e = &cache[i];
+			unsigned in_idx = 0;
+			unsigned out_idx = 0;
+			while (in_idx < e->nr_entries) {
+				e->p[in_idx].a = hv.visited(e->p[in_idx].a);
+				if (e->p[in_idx].a) {
+					e->p[in_idx].b = hv.visited(e->p[in_idx].b);
+					if (e->p[in_idx].b) {
+						e->p[out_idx] = e->p[in_idx];
+						out_idx++;
+					}
+				}
+				in_idx++;
+			}
+			e->nr_entries = out_idx;
+			e->prod_idx = out_idx;
+		}
 	}
 
 	static int hash(a_type *a, b_type *b) {
