@@ -47,7 +47,7 @@ public:
 			bdd<leafT> *falseBranch;
 		};
 	} content;
-	void sanity_check(const bdd_ordering *ordering = NULL) const {
+	void sanity_check(bdd_ordering *ordering = NULL) const {
 		assert(isLeaf == true || isLeaf == false);
 		if (isLeaf) {
 			_sanity_check(content.leaf);
