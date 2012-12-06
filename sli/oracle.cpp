@@ -197,17 +197,6 @@ getInstructionSize(AddressSpace *as, const VexRip &rip)
 	return getInstructionSize(as, StaticRip(rip));
 }
 
-bool
-Oracle::functionCanReturn(const VexRip &rip)
-{
-#warning Horrible, horrible hack
-	if (rip.unwrap_vexrip() == 0x768440 /* ut_dbg_assertion_failed */ ||
-	    rip.unwrap_vexrip() == 0x7683e0 /* ut_dbg_stop_thread */)
-		return false;
-	else
-		return true;
-}
-
 /* Try to find the RIPs of some stores which might conceivably have
    interfered with the observed load.  Stack accesses are not tracked
    by this mechanism. */

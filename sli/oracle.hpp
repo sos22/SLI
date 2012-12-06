@@ -366,7 +366,6 @@ public:
 	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store);
         void findRacingRips(const MaiMap &, StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
 	void findRacingRips(const MaiMap &, StateMachineSideEffectStore *, std::set<DynAnalysisRip> &);
-	bool functionCanReturn(const VexRip &rip);
 
 	static void findInstructions(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads,
 				     const callgraph_t &callgraph,
