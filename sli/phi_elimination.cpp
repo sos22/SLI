@@ -293,9 +293,21 @@ build_selection_bdd(SMScopes *scopes,
 			bbdd *assumption = cdg.domOf(state);
 			bool failed = false;
 			for (auto it = pred.begin(); !failed && it != pred.end(); it++) {
-				bbdd *condition = bbdd::assume(&scopes->bools, cdg.domOf(*it), assumption);
-				exprbdd *res = exprbdd::assume(&scopes->exprs, m[*it], assumption);
-#warning Should be more cunning if the predecessor state is a bifurcate
+				bbdd *ass = assumption;
+				if ( (*it)->type == StateMachineState::Bifurcate &&
+				     ((StateMachineBifurcate *)*it)->trueTarget !=
+				     ((StateMachineBifurcate *)*it)->falseTarget ) {
+					if ( ((StateMachineBifurcate *)*it)->trueTarget == state ) {
+						ass = bbdd::And(&scopes->bools, ass,
+								((StateMachineBifurcate *)*it)->condition);
+					} else {
+						assert(((StateMachineBifurcate *)*it)->falseTarget == state);
+						ass = bbdd::And(&scopes->bools, ass,
+								bbdd::invert(&scopes->bools, ((StateMachineBifurcate *)*it)->condition));
+					}
+				}
+				bbdd *condition = bbdd::assume(&scopes->bools, cdg.domOf(*it), ass);
+				exprbdd *res = exprbdd::assume(&scopes->exprs, m[*it], ass);
 				exprbdd **slot = enabling.getSlot(condition, res);
 				if (*slot != res)
 					failed = true;
