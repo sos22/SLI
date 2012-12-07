@@ -136,10 +136,32 @@ Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration
 	   guest program is doing something non-C-like. */
 	stackInStack = false;
 	stackInMemory = false;
-#warning non-argument registers should point at nothing.
-	for (int i = 0; i < NR_REGS; i++)
-		v[i] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
+	/* At the start of a function, no registers point at the
+	   stack.  Anything which is an arg register might contain a
+	   pointer; anything else is assumed to not contain one. */
+	/* (The idea is that if it's not arg register then it must be
+	   dead at the function head, so even if it is a pointer it's
+	   guaranteed to never be dereferenced, so it might as well
+	   not be.  This is helpful because it means that spilling
+	   call clobbered registers doesn't instantly mean that the
+	   stack frame contains non-stack pointers, which can make
+	   later bits of analysis a little more accurate). */
+	v[0] = PointerAliasingSet::notAPointer; /* rax */
+	v[1] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rcx */
+	v[2] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rdx */
+	v[3] = PointerAliasingSet::notAPointer; /* rbx */
 	v[4] = PointerAliasingSet::stackPointer; /* rsp */
+	v[5] = PointerAliasingSet::notAPointer; /* rbx */
+	v[6] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rsi */
+	v[7] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rdi */
+	v[8] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* r8 */
+	v[9] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* r9 */
+	v[10] = PointerAliasingSet::notAPointer; /* r10 */
+	v[11] = PointerAliasingSet::notAPointer; /* r11 */
+	v[12] = PointerAliasingSet::notAPointer; /* r12 */
+	v[13] = PointerAliasingSet::notAPointer; /* r13 */
+	v[14] = PointerAliasingSet::notAPointer; /* r14 */
+	v[15] = PointerAliasingSet::notAPointer; /* r15 */
 }
 
 Oracle::ThreadRegisterAliasingConfiguration Oracle::ThreadRegisterAliasingConfiguration::unknown(5.3f, 12);
