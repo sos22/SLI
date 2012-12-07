@@ -2889,7 +2889,17 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		if (stackEscapes)
 			tconfig.v[0] = tconfig.v[0] | PointerAliasingSet::stackPointer;
 		tconfig.v[0] = tconfig.v[0] | PointerAliasingSet::nonStackPointer;
-#warning What about clearing the state of call-clobbered registers?
+		/* Clear call-clobbered registers.  Shouldn't really
+		   make a great deal of difference, but it's a bit
+		   prettier like this. */
+		tconfig.v[1] = PointerAliasingSet::notAPointer; /* rcx */
+		tconfig.v[2] = PointerAliasingSet::notAPointer; /* rdx */
+		tconfig.v[6] = PointerAliasingSet::notAPointer; /* rsi */
+		tconfig.v[7] = PointerAliasingSet::notAPointer; /* rdi */
+		tconfig.v[8] = PointerAliasingSet::notAPointer; /* r8 */
+		tconfig.v[9] = PointerAliasingSet::notAPointer; /* r9 */
+		tconfig.v[10] = PointerAliasingSet::notAPointer; /* r10 */
+		tconfig.v[11] = PointerAliasingSet::notAPointer; /* r11 */
 #warning Should allow the stack pointer to taint the return address if the stack has leaked in config!
 #warning Should really say the stack has leaked in config if it escapes here!
 	}
