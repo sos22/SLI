@@ -44,7 +44,7 @@ validate_trace(Oracle *oracle, const std::vector<unsigned long> &rips)
 	HashedSet<HashedPtr<CFGNode> > roots;
 	HashedSet<HashedPtr<const CFGNode> > targetNodes;
 	getProbeCFGs(allocLabel, oracle, VexRip::invent_vex_rip(rips.back()),
-		     roots, targetNodes, rips.size(), rips.size());
+		     roots, targetNodes, rips.size());
 
 	std::set<CFGNode *> live;
 	for (auto it = roots.begin(); !it.finished(); it.advance())
