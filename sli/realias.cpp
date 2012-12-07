@@ -1123,7 +1123,7 @@ AliasTable::refine(SMScopes *scopes,
 }
 
 static exprbdd *
-dataOfSideEffect(SMScopes *scopes, StateMachineSideEffect *s_effect, IRType ty)
+dataOfSideEffect(SMScopes *scopes, const StateMachineSideEffect *s_effect, IRType ty)
 {
 	exprbdd *res;
 	if (s_effect->type == StateMachineSideEffect::Store) {
@@ -1307,94 +1307,27 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 				new StateMachineSideEffectCopy(
 					l->target, d);
 		} else if (!it->second.mightLoadInitial) {
-#warning convert to an enabling table.
-			std::vector<std::pair<StateMachineState *, bbdd *> > possibleInputs;
+			exprbdd::enablingTableT possibleInputs;
+			bool failed = false;
+			exprbdd *defaultVal = NULL;
 			bbdd *stateDominator = cdm.get(it->first);
-			possibleInputs.reserve(it->second.stores.size());
-			for (auto it2 = it->second.stores.begin(); it2 != it->second.stores.end(); it2++)
-				possibleInputs.push_back(
-					std::pair<StateMachineState *, bbdd *>(
-						*it2,
-						bbdd::assume(
-							&scopes->bools,
-							cdm.get(*it2),
-							stateDominator)));
-			if (debug_use_alias_table) {
-				printf("Consider replacing l%d with control-flow-based mux.\nState dominator:\n",
-				       stateLabels[it->first]);
-				stateDominator->prettyPrint(stdout);
-				for (auto it2 = possibleInputs.begin();
-				     it2 != possibleInputs.end();
-				     it2++) {
-					printf("l%d:\n", stateLabels[it2->first]);
-					it2->second->prettyPrint(stdout);
-				}
+			for (auto it2 = it->second.stores.begin();
+			     !failed && it2 != it->second.stores.end();
+			     it2++) {
+				bbdd *gate = bbdd::assume(&scopes->bools, cdm.get(*it2), stateDominator);
+				exprbdd *val = dataOfSideEffect(scopes, (*it2)->sideEffect, l->type);
+				defaultVal = val;
+				exprbdd **slot = possibleInputs.getSlot(gate, val);
+				if (*slot != val)
+					failed = true;
 			}
-			/* This is valid if it's guaranteed that
-			   precisely one of the input memory accesses
-			   has happened.  Check with a full n^2
-			   comparisons. */
-			bool ambiguous_resolution = false;
-			/* First check that at most one can be
-			   true. */
-			for (unsigned i = 0;
-			     !ambiguous_resolution && i < possibleInputs.size();
-			     i++) {
-				for (unsigned j = i + 1;
-				     !ambiguous_resolution && j < possibleInputs.size();
-				     j++) {
-					bbdd *check =
-						bbdd::assume(
-							&scopes->bools,
-							bbdd::And(
-								&scopes->bools,
-								possibleInputs[i].second,
-								possibleInputs[j].second),
-							stateDominator);
-					if (satisfiable(bbdd::to_irexpr(check), opt)) {
-						if (debug_use_alias_table) {
-							printf("Ambiguous resolution:\n");
-							possibleInputs[i].second->prettyPrint(stdout);
-							printf("--------- vs -----------\n");
-							possibleInputs[j].second->prettyPrint(stdout);
-						}
-						ambiguous_resolution = true;
-					}
-				}
-			}
-
-			if (!ambiguous_resolution) {
-				/* Now at least one must be true */
-				bbdd *checker = scopes->bools.cnst(false);
-				/* checker is true if any input is true */
-				for (unsigned x = 0; x < possibleInputs.size(); x++)
-					checker = bbdd::Or(
-						&scopes->bools,
-						checker,
-						possibleInputs[x].second);
-				/* We can assume that the dominator holds */
-				checker = bbdd::assume(
-					&scopes->bools,
-					checker,
-					stateDominator);
-				/* Now we need that to be unsatisfiable. */
-				checker = bbdd::invert(&scopes->bools, checker);
-				IRExpr *c = bbdd::to_irexpr(checker);
-				if (satisfiable(c, opt)) {
-					if (debug_use_alias_table)
-						printf("Potentially null resolution: %s is satisfiable\n",
-						       nameIRExpr(c));
-				} else {
-					exprbdd::enablingTableT tab;
-					exprbdd *dflt = (exprbdd *)0xdead;
-					for (auto it2 = possibleInputs.begin();
-					     it2 != possibleInputs.end();
-					     it2++) {
-						exprbdd *val = dataOfSideEffect(scopes, it2->first->getSideEffect(), l->type);
-						tab.set(it2->second, val);
-						dflt = val;
-					}
-					exprbdd *res = exprbdd::from_enabling(&scopes->exprs, tab, dflt);
+			assert(defaultVal != NULL);
+			if (!failed) {
+				exprbdd *res = exprbdd::from_enabling(
+					&scopes->exprs,
+					possibleInputs,
+					defaultVal);
+				if (res) {
 					if (debug_use_alias_table) {
 						printf("Replace l%d with mux:\n",
 						       stateLabels[it->first]);
