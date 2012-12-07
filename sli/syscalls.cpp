@@ -54,12 +54,12 @@ process_memory_records(VexPtr<AddressSpace> &addrSpace,
 }
 
 static void
-handle_clone(AddressSpace *addrSpace,
+handle_clone(AddressSpace *,
 	     Thread *thr,
 	     MachineState *&mach,
 	     unsigned long flags,
 	     unsigned long childRsp,
-	     unsigned long parent_tidptr,
+	     unsigned long ,
 	     unsigned long child_tidptr,
 	     unsigned long set_tls,
 	     unsigned pid,
