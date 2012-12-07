@@ -2844,7 +2844,6 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			ThreadRegisterAliasingConfiguration newExitConfig(bConfig);
 			newExitConfig |= tconfig;
 			if (newExitConfig != bConfig) {
-#warning This isn't even slightly right in the case where _branchRip hasn't been visited yet.
 				changed->push_back(_branchRip);
 				setAliasConfigOnEntryToInstruction(_branchRip, newExitConfig);
 			}
