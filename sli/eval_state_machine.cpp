@@ -1,4 +1,3 @@
-#warning It'd arguably make sense to strip out the effects we don't use before we start (e.g. PointerAliasing and StackLayout), because that might allow other simplifications.
 #include "sli.h"
 #include "state_machine.hpp"
 #include "oracle.hpp"
@@ -1729,6 +1728,67 @@ buildCrossProductMachine(const MaiMap &maiIn,
         return new StateMachine(crossMachineRoot, cfg_roots);
 }
 
+static StateMachine *
+stripUninterpretableAnnotations(StateMachine *inp)
+{
+	std::map<StateMachineState *, StateMachineState *> rewrites;
+	typedef std::pair<StateMachineState *, StateMachineState **> relocT;
+	std::vector<relocT> relocs;
+	StateMachineState *newRoot;
+	relocs.push_back(relocT(inp->root, &newRoot));
+	while (!relocs.empty()) {
+		relocT reloc(relocs.back());
+		relocs.pop_back();
+		auto it_did_insert = rewrites.insert(
+			std::pair<StateMachineState *, StateMachineState *>
+			(reloc.first, (StateMachineState *)NULL));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (did_insert) {
+			switch (reloc.first->type) {
+			case StateMachineState::Bifurcate: {
+				StateMachineBifurcate *old =
+					(StateMachineBifurcate *)reloc.first;
+				StateMachineBifurcate *nw =
+					new StateMachineBifurcate(
+						old->dbg_origin,
+						old->condition,
+						NULL,
+						NULL);
+				relocs.push_back(relocT(old->trueTarget, &nw->trueTarget));
+				relocs.push_back(relocT(old->falseTarget, &nw->falseTarget));
+				it->second = nw;
+				break;
+			}
+			case StateMachineState::Unreached:
+			case StateMachineState::Crash:
+			case StateMachineState::NoCrash:
+				it->second = it->first;
+				break;
+			case StateMachineState::SideEffecting: {
+				StateMachineSideEffecting *old =
+					(StateMachineSideEffecting *)reloc.first;
+				StateMachineSideEffecting *nw =
+					new StateMachineSideEffecting(
+						old->dbg_origin,
+						old->sideEffect,
+						NULL);
+				if (old->sideEffect->type == StateMachineSideEffect::StackLayout ||
+				    old->sideEffect->type == StateMachineSideEffect::StartFunction ||
+				    old->sideEffect->type == StateMachineSideEffect::EndFunction)
+					nw->sideEffect = NULL;
+				relocs.push_back(relocT(old->target, &nw->target));
+				it->second = nw;
+				break;
+			}
+			}
+		}
+		assert(it->second != NULL);
+		*reloc.second = it->second;
+	}
+	return new StateMachine(inp, newRoot);
+}
+
 IRExpr *
 crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachine,
 			       const VexPtr<StateMachine, &ir_heap> &storeMachine,
@@ -1751,8 +1811,8 @@ crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &probeMachin
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
 			*mai,
-			probeMachine,
-			storeMachine,
+			stripUninterpretableAnnotations(probeMachine),
+			stripUninterpretableAnnotations(storeMachine),
 			oracle,
 			decode.get(),
 			&fake_cntr,
