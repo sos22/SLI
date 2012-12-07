@@ -2874,6 +2874,8 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		/* This isn't perfectly accurate, but it's a pretty
 		   close approximation. */
 		bool stackEscapes = false;
+		if (tconfig.stackInMemory)
+			stackEscapes = true;
 		/* rcx = 2, rdx = 4, rsi = 0x40, rdi = 0x80,
 		 * r8 = 0x100, r9 = 0x200 */
 #define ARG_REGISTERS 0x3c6
@@ -2886,8 +2888,11 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				stackEscapes = true;
 		}
 #undef ARG_REGISTERS
-		if (stackEscapes)
+		if (stackEscapes) {
 			tconfig.v[0] = tconfig.v[0] | PointerAliasingSet::stackPointer;
+			tconfig.stackInStack = true;
+			tconfig.stackInMemory = true;
+		}
 		tconfig.v[0] = tconfig.v[0] | PointerAliasingSet::nonStackPointer;
 		/* Clear call-clobbered registers.  Shouldn't really
 		   make a great deal of difference, but it's a bit
@@ -2900,8 +2905,6 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		tconfig.v[9] = PointerAliasingSet::notAPointer; /* r9 */
 		tconfig.v[10] = PointerAliasingSet::notAPointer; /* r10 */
 		tconfig.v[11] = PointerAliasingSet::notAPointer; /* r11 */
-#warning Should allow the stack pointer to taint the return address if the stack has leaked in config!
-#warning Should really say the stack has leaked in config if it escapes here!
 	}
 	
 	std::vector<StaticRip> _fallThroughRips;
