@@ -356,18 +356,6 @@ public:
 	}
 
 	IRExpr *specialiseIRExpr(IRExpr *iex);
-
-	void purgeDeadRegisters(const std::set<threadAndRegister> &keep) {
-		for (auto it = registers.begin();
-		     it != registers.end();
-			) {
-			if (keep.count(it->first))
-				it++;
-			else
-				registers.erase(it++);
-		}
-	}
-
 	void visit(HeapVisitor &hv) {
 		for (auto it = registers.begin();
 		     it != registers.end();
@@ -396,7 +384,6 @@ threadState::setTemporary(const threadAndRegister &reg, IRExpr *e, const IRExprO
 	} doit(reg, this);
 	return simplifyIRExpr(doit.doit(e), opt);
 }
-
 
 IRExpr *
 threadState::specialiseIRExpr(IRExpr *iex)
@@ -483,7 +470,6 @@ private:
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
 		__attribute__((warn_unused_result));
 
-
 	void advance_state_trace()
 	{
 #ifndef NDEBUG
@@ -531,7 +517,6 @@ private:
 			accumulatedAssumption = simplifyIRExpr(accumulatedAssumption, opt);
 		advance_state_trace();
 	}
-
 	enum evalStateMachineSideEffectRes {
 		esme_normal,
 		esme_escape,
@@ -547,7 +532,6 @@ private:
 		const IRExprOptimisations &opt);
 	bool expressionIsTrue(IRExpr *exp, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
 	bool evalExpressionsEqual(IRExpr *exp1, IRExpr *exp2, bool addToAccConstraint, NdChooser &chooser, const IRExprOptimisations &opt);
-
 public:
 	bool advance(const MaiMap &decode,
 		     OracleInterface *oracle,
@@ -556,22 +540,6 @@ public:
 		     StateMachine *sm,
 		     EvalPathConsumer &consumer)
 		__attribute__((warn_unused_result));
-	enum smallStepResult { ssr_crash, ssr_survive, ssr_escape,
-			       ssr_ignore_path, ssr_failed, ssr_continue };
-	smallStepResult smallStepEvalStateMachine(const MaiMap &decode,
-						  StateMachine *rootMachine,
-						  NdChooser &chooser,
-						  bool noImplicitBadPtrs,
-						  OracleInterface *oracle,
-						  const IRExprOptimisations &opt);
-	enum bigStepResult { bsr_crash, bsr_survive, bsr_failed };
-	bigStepResult bigStepEvalStateMachine(const MaiMap &decode,
-					      StateMachine *rootMachine,
-					      bigStepResult preferred_result,
-					      bool noImplicitBadPtrs,
-					      NdChooser &chooser,
-					      OracleInterface *oracle,
-					      const IRExprOptimisations &opt);
 	EvalContext(StateMachine *sm, IRExpr *initialAssumption, bool useAccAssumptions,
 		    std::map<const StateMachineState*, int> &
 #ifndef NDEBUG
@@ -588,19 +556,6 @@ public:
 	{
 		advance_state_trace();
 	}
-	EvalContext(const EvalContext &o)
-		: assumption(o.assumption),
-		  accumulatedAssumption(o.accumulatedAssumption),
-		  state(o.state),
-		  memlog(o.memlog),
-		  atomic(o.atomic),
-		  currentState(o.currentState)
-#ifndef NDEBUG
-		, statePath(o.statePath)
-		, stateLabels(o.stateLabels)
-#endif
-	{
-	}	
 };
 
 bool
@@ -866,102 +821,6 @@ EvalContext::evalStateMachineSideEffect(const MaiMap &decode,
 		break;
 	}
 	return esme_normal;
-}
-
-/* Walk the state machine and figure out whether it's going to crash.
-   If we hit something which we can't solve statically or via the
-   oracle, ask the chooser which way we should go, and then emit a
-   path constraint saying which way we went.  Stubs are assumed to
-   never crash. */
-/* Returns tr_true if we crash, tr_false if we survive, and tr_unknown
-   if the machine isn't finished yet. */
-EvalContext::smallStepResult
-EvalContext::smallStepEvalStateMachine(const MaiMap &decode,
-				       StateMachine *rootMachine,
-				       NdChooser &chooser,
-				       bool noImplicitBadPtrs,
-				       OracleInterface *oracle,
-				       const IRExprOptimisations &opt)
-{
-	if (TIMEOUT)
-		return ssr_failed;
-
-	switch (currentState->type) {
-	case StateMachineState::Crash:
-		return ssr_crash;
-	case StateMachineState::NoCrash:
-		return ssr_survive;
-	case StateMachineState::SideEffecting: {
-		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
-		evalStateMachineSideEffectRes res =
-			evalStateMachineSideEffect(decode,
-						   rootMachine,
-						   sme->sideEffect,
-						   noImplicitBadPtrs,
-						   chooser,
-						   oracle,
-						   opt);
-		switch (res) {
-		case esme_escape:
-			return ssr_escape;
-		case esme_ignore_path:
-			return ssr_ignore_path;
-		case esme_normal:
-			currentState = sme->target;
-			return ssr_continue;
-		}
-		abort();
-	}
-	case StateMachineState::Bifurcate: {
-		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
-		if (expressionIsTrue(smb->condition, true, chooser, opt))
-			currentState = smb->trueTarget;
-		else
-			currentState = smb->falseTarget;
-		return ssr_continue;
-	}
-	case StateMachineState::Unreached:
-		/* Whoops... */
-		warning("Evaluating an unreachable state machine?\n");
-		return ssr_failed;
-	}
-
-	abort();
-}
-
-EvalContext::bigStepResult
-EvalContext::bigStepEvalStateMachine(const MaiMap &decode,
-				     StateMachine *rootMachine,
-				     bigStepResult preferred_result,
-				     bool noImplicitBadPtrs,
-				     NdChooser &chooser,
-				     OracleInterface *oracle,
-				     const IRExprOptimisations &opt)
-{
-	while (1) {
-		smallStepResult res =
-			smallStepEvalStateMachine(decode,
-						  rootMachine,
-						  chooser,
-						  noImplicitBadPtrs,
-						  oracle,
-						  opt);
-		switch (res) {
-		case EvalContext::ssr_crash:
-			return bsr_crash;
-		case ssr_survive:
-			return bsr_survive;
-		case ssr_escape:
-			return preferred_result;
-		case ssr_ignore_path:
-			return preferred_result;
-		case ssr_failed:
-			return bsr_failed;
-		case ssr_continue:
-			continue;
-		}
-		abort();
-	}
 }
 
 EvalContext::trool
