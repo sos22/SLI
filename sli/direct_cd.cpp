@@ -114,7 +114,7 @@ main(int argc, char *argv[])
 
 	DumpFix df(argv[5], DynAnalysisRip(vr));
 	diagnoseCrash(allocLabel, DynAnalysisRip(vr),
-		      probeMachine, oracle, df, false,
+		      probeMachine, oracle, df,
 		      opt, mai, ALLOW_GC);
 
 	return 0;

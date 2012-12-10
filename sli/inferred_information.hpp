@@ -16,8 +16,6 @@ public:
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
 	IRExpr *verificationCondition;
-	typedef std::pair<StateMachineSideEffectStore *, StateMachineSideEffectStore *> macroSectionT;
-	std::vector<macroSectionT> macroSections;
 	typedef std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> aliasingEntryT;
 	std::vector<aliasingEntryT> aliasing;
 	MaiMap *mai;
@@ -35,13 +33,11 @@ public:
 	CrashSummary(StateMachine *_loadMachine,
 		     StateMachine *_storeMachine,
 		     IRExpr *_verificationCondition,
-		     const std::vector<macroSectionT> &_macroSections,
 		     const std::vector<aliasingEntryT> &_aliasing,
 		     MaiMap *_mai)
 		: loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
 		  verificationCondition(_verificationCondition),
-		  macroSections(_macroSections),
 		  aliasing(_aliasing),
 		  mai(_mai)
 	{}
@@ -50,12 +46,6 @@ public:
 		hv(loadMachine);
 		hv(storeMachine);
 		hv(verificationCondition);
-		for (auto it = macroSections.begin();
-		     it != macroSections.end();
-		     it++) {
-			hv(it->first);
-			hv(it->second);
-		}
 		hv(mai);
 	}
 	NAMED_CLASS
@@ -89,7 +79,6 @@ bool diagnoseCrash(CfgLabelAllocator &allocLabel,
 		   VexPtr<StateMachine, &ir_heap> probeMachine,
 		   const VexPtr<Oracle> &oracle,
 		   FixConsumer &df,
-		   bool needRemoteMacroSections,
 		   const AllowableOptimisations &opt,
 		   VexPtr<MaiMap, &ir_heap> &mai,
 		   GarbageCollectionToken token);

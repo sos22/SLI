@@ -22,23 +22,6 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 	ppIRExpr(summary->verificationCondition, f);
 	fprintf(f, "\n");
 
-	if (summary->macroSections.size() == 0) {
-		fprintf(f, "No remote macro sections\n");
-	} else {
-		fprintf(f, "Remote macro sections:\n");
-		for (auto it = summary->macroSections.begin();
-		     it != summary->macroSections.end();
-		     it++) {
-			fprintf(f, "\t");
-			it->first->prettyPrint(f);
-			fprintf(f, " to ");
-			if (it->second)
-				it->second->prettyPrint(f);
-			else
-				fprintf(f, "<null>");
-			fprintf(f, "\n");
-		}
-	}
 	if (summary->aliasing.size() == 0) {
 		fprintf(f, "No aliasing information\n");
 	} else {
@@ -109,34 +92,14 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 	    !parseIRExpr(&verificationCondition, buf, &buf) ||
 	    !parseThisChar('\n', buf, &buf))
 		return false;
-	std::vector<CrashSummary::macroSectionT> macros;
-	if (parseThisString("No remote macro sections\n", buf, &buf)) {
-		/* Nothing */
-	} else if (parseThisString("Remote macro sections:\n", buf, &buf)) {
-		while (1) {
-			StateMachineSideEffect *start, *end;
-			const char *m;
-			if (!parseThisChar('\t', buf, &m) ||
-			    !StateMachineSideEffect::parse(&start, m, &m) ||
-			    !parseThisString(" to ", m, &m))
-				break;
-			if (parseThisString("<null>", m, &m)) {
-				end = NULL;
-			} else if (!StateMachineSideEffect::parse(&end, m, &m)) {
-				break;
-			}
-			if (!parseThisChar('\n', m, &m))
-					break;
-			StateMachineSideEffectStore *starts = dynamic_cast<StateMachineSideEffectStore *>(start);
-			StateMachineSideEffectStore *ends = dynamic_cast<StateMachineSideEffectStore *>(end);
-			if (!starts || (end && !ends) )
-				return false;
-			buf = m;
-			macros.push_back(CrashSummary::macroSectionT(starts, ends));
-		}
-	} else {
+	if (parseThisString("Remote macro sections:\n", buf, &buf)) {
+		/* This is an old version of the format which we no
+		 * longer support. */
 		return false;
 	}
+
+	/* Handle old format */
+	parseThisString("No remote macro sections\n", buf, &buf);
 	std::vector<CrashSummary::aliasingEntryT> aliasing;
 	if (parseThisString("No aliasing information\n", buf, &buf)) {
 		/* Nothing */
@@ -158,7 +121,7 @@ parseCrashSummary(CrashSummary **out, const char *buf,
 	if (!mai)
 		return false;
 	*succ = buf;
-	*out = new CrashSummary(loadMachine, storeMachine, verificationCondition, macros, aliasing, mai);
+	*out = new CrashSummary(loadMachine, storeMachine, verificationCondition, aliasing, mai);
 	return true;
 }
 

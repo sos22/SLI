@@ -953,7 +953,6 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		 const VexPtr<CFGNode, &ir_heap> cfg,
 		 const VexPtr<Oracle> &oracle,
 		 VexPtr<StateMachine, &ir_heap> probeMachine,
-		 bool needRemoteMacroSections,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
 		 const VexPtr<MaiMap, &ir_heap> &maiIn,
@@ -1116,26 +1115,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
-	VexPtr<CrashSummary, &ir_heap> res(new CrashSummary(probeMachine, sm_ssa, residual_verification_condition, oracle, mai));
-	if (needRemoteMacroSections) {
-		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
-		if (!findRemoteMacroSections(mai, probeMachine, sm_ssa, residual_verification_condition,
-					     oracleI, optIn, remoteMacroSections, token)) {
-			fprintf(_logfile, "\t\tChose a bad write machine...\n");
-			return NULL;
-		}
-		if (!fixSufficient(mai, sm, probeMachine, residual_verification_condition,
-				   oracleI, optIn, remoteMacroSections, token)) {
-			fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
-			return NULL;
-		}
-		for (remoteMacroSectionsT::iterator it = remoteMacroSections->begin();
-		     it != remoteMacroSections->end();
-		     it++)
-			res->macroSections.push_back(CrashSummary::macroSectionT(it->start, it->end));
-	}
-
-	return res;
+	return new CrashSummary(probeMachine, sm_ssa, residual_verification_condition, oracle, mai);
 }
 
 StateMachine *
@@ -1230,7 +1210,6 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 		      const VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
-		      bool needRemoteMacroSections,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
 		      const AllowableOptimisations &optIn,
 		      const VexPtr<MaiMap, &ir_heap> &maiIn,
@@ -1273,7 +1252,6 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 					   storeCFG,
 					   oracle,
 					   probeMachine,
-					   needRemoteMacroSections,
 					   STORING_THREAD + i,
 					   optIn.setinterestingStores(&potentiallyConflictingStores),
 					   maiIn,
@@ -1296,7 +1274,6 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 	      VexPtr<StateMachine, &ir_heap> probeMachine,
 	      const VexPtr<Oracle> &oracle,
 	      FixConsumer &df,
-	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
 	      VexPtr<MaiMap, &ir_heap> &mai,
 	      GarbageCollectionToken token)
@@ -1382,7 +1359,6 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 				     reducedProbeMachine,
 				     oracle,
 				     df,
-				     needRemoteMacroSections,
 				     potentiallyConflictingStores,
 				     optIn,
 				     mai,
@@ -1497,7 +1473,6 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	if (TIMEOUT)
 		return;
 	diagnoseCrash(allocLabel, targetRip, probeMachine, oracle,
-		      df, false, opt.enablenoLocalSurvival(),
-		      mai, token);
+		      df, opt.enablenoLocalSurvival(), mai, token);
 }
 

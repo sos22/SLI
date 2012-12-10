@@ -1302,7 +1302,6 @@ LoadCanonicaliser::canonicalise(CrashSummary *cs)
 	return new CrashSummary(loadM,
 				storeM,
 				cond,
-				cs->macroSections,
 				cs->aliasing,
 				cs->mai);
 }
@@ -1313,7 +1312,6 @@ LoadCanonicaliser::decanonicalise(CrashSummary *cs)
 	return new CrashSummary(decanonicalise(cs->loadMachine),
 				decanonicalise(cs->storeMachine),
 				decanonicalise(cs->verificationCondition),
-				cs->macroSections,
 				cs->aliasing,
 				cs->mai);
 }

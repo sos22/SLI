@@ -17,7 +17,6 @@ addAssumption(IRExpr *assumption,
 			Iop_And1,
 			what->verificationCondition,
 			isTrue ? assumption : IRExpr_Unop(Iop_Not1, assumption)),
-		what->macroSections,
 		what->aliasing,
 		what->mai);
 }
