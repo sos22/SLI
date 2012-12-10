@@ -62,9 +62,6 @@ EOF
 
 	for t in $targets
 	do
-	    cat <<EOF
-$t: ${input_base}/${t}.o
-	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm \$^ -o \$@
-EOF
+	    link $t ${input_base}/$t.o
 	done
 }

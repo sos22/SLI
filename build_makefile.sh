@@ -12,6 +12,21 @@ defvars() {
 rules() {
     true
 }
+link() {
+    local prog="$1"
+    shift
+    local objs="$*"
+    cat <<EOF
+ifeq (\$(VERBOSE),y)
+${prog}: ${objs}
+	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm \$^ -o \$@
+else
+${prog}: ${objs}
+	@printf "Link [%-40s]\\n" \$@ ; \\
+	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm \$^ -o \$@
+endif
+EOF
+}
 . "./$input"
 
 echo "# Generated from ${input} by $0; do not edit"
