@@ -772,7 +772,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		assert(smsec);
 		state.set_register(scopes,
 				   smsec->target,
-				   exprbdd::var(&scopes->exprs, &scopes->bools, evalExprBDD(scopes, smsec->value, chooser, opt)),
+				   state.specialiseIRExpr(scopes, smsec->value),
 				   &pathConstraint,
 				   opt);
 		break;
