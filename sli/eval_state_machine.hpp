@@ -67,22 +67,6 @@ IRExpr *crossProductSurvivalConstraint(const VexPtr<StateMachine, &ir_heap> &pro
 				       const AllowableOptimisations &opt,
 				       const VexPtr<MaiMap, &ir_heap> &mai,
 				       GarbageCollectionToken token);
-bool findRemoteMacroSections(const VexPtr<MaiMap, &ir_heap> &mai,
-			     const VexPtr<StateMachine, &ir_heap> &readMachine,
-			     const VexPtr<StateMachine, &ir_heap> &writeMachine,
-			     const VexPtr<IRExpr, &ir_heap> &assumption,
-			     const VexPtr<OracleInterface> &oracle,
-			     const IRExprOptimisations &opt,
-			     VexPtr<remoteMacroSectionsT, &ir_heap> &output,
-			     GarbageCollectionToken token);
-bool fixSufficient(const VexPtr<MaiMap, &ir_heap> &mai,
-		   const VexPtr<StateMachine, &ir_heap> &writeMachine,
-		   const VexPtr<StateMachine, &ir_heap> &probeMachine,
-		   const VexPtr<IRExpr, &ir_heap> &assumption,
-		   const VexPtr<OracleInterface> &oracle,
-		   const IRExprOptimisations &opt,
-		   const VexPtr<remoteMacroSectionsT, &ir_heap> &sections,
-		   GarbageCollectionToken token);
 IRExpr *writeMachineSuitabilityConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 					  const VexPtr<StateMachine, &ir_heap> &writeMachine,
 					  const VexPtr<StateMachine, &ir_heap> &readMachine,
