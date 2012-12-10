@@ -361,7 +361,6 @@ public:
 	bbdd *specialiseIRExpr(SMScopes *, bbdd *iex);
 	smrbdd *specialiseIRExpr(SMScopes *, smrbdd *iex);
 	exprbdd *specialiseIRExpr(SMScopes *, exprbdd *iex);
-	IRExpr *specialiseIRExpr(SMScopes *, IRExpr *iex);
 	void visit(HeapVisitor &hv) {
 		for (auto it = registers.begin();
 		     it != registers.end();
@@ -436,12 +435,6 @@ public:
 		: state(_state), scopes(_scopes)
 	{}
 };
-IRExpr *
-threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *iex)
-{
-	SpecialiseIRExpr s(*this, scopes);
-	return s.doit(iex);
-}
 bbdd *
 threadState::specialiseIRExpr(SMScopes *scopes, bbdd *bbdd)
 {
@@ -531,8 +524,6 @@ private:
 	bool expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
 	bool expressionIsTrue(SMScopes *scopes, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
 	bool evalExpressionsEqual(SMScopes *scopes, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
-	IRExpr *evalExprBDD(SMScopes *scopes, exprbdd *bdd, NdChooser &chooser, const IRExprOptimisations &opt);
-
 public:
 	void advance(SMScopes *scopes,
 		     const MaiMap &decode,
@@ -601,81 +592,6 @@ EvalContext::evalExpressionsEqual(SMScopes *scopes, exprbdd *exp1, exprbdd *exp2
 			exp2),
 		chooser,
 		opt);
-}
-
-struct expr_bbdd_ordered_tuple {
-	int rank;
-	IRExpr *expr;
-	bbdd *cond;
-	expr_bbdd_ordered_tuple(int _rank, IRExpr *_expr, bbdd *_cond)
-		: rank(_rank), expr(_expr), cond(_cond)
-	{}
-	bool operator<(const expr_bbdd_ordered_tuple &o) const {
-		if (rank < o.rank)
-			return true;
-		if (rank > o.rank)
-			return false;
-		assert(expr == o.expr);
-		return false;
-	}
-};
-
-IRExpr *
-EvalContext::evalExprBDD(SMScopes *scopes, exprbdd *expr, NdChooser &chooser, const IRExprOptimisations &opt)
-{
-	std::map<IRExpr *, bbdd *> selectors(exprbdd::to_selectors(&scopes->bools, expr));
-	assert(!selectors.empty());
-	if (selectors.size() == 1)
-		return selectors.begin()->first;
-	/* Need to make sure that we handle expressions in
-	   deterministic order, which means we can't use pointer
-	   order.  Use the structure of expr instead. */
-	std::vector<exprbdd *> queue;
-	std::set<exprbdd *> visited;
-	std::map<IRExpr *, int> ordering;
-	queue.push_back(expr);
-	while (!queue.empty()) {
-		exprbdd *e = queue.back();
-		queue.pop_back();
-		if (!visited.insert(e).second)
-			continue;
-		if (e->isLeaf) {
-			assert(!ordering.count(e->leaf()));
-			int k = ordering.size();
-			ordering[e->leaf()] = k;
-			assert((int)ordering.size() == k + 1);
-		} else {
-			queue.push_back(e->internal().trueBranch);
-			queue.push_back(e->internal().falseBranch);
-		}
-	}
-	std::vector<expr_bbdd_ordered_tuple> sorted;
-	for (auto it = selectors.begin(); it != selectors.end(); it++) {
-		assert(ordering.count(it->first));
-		bool b;
-		bbdd *spec_cond = simplifyBDD(&scopes->bools, state.specialiseIRExpr(scopes, it->second), opt, &b);
-		if (spec_cond->isLeaf) {
-			if (spec_cond->leaf())
-				return state.specialiseIRExpr(scopes, it->first);
-		} else {
-			sorted.push_back(expr_bbdd_ordered_tuple(ordering[it->first], it->first, spec_cond));
-		}
-	}
-	assert(!sorted.empty());
-	int choice;
-	if (sorted.size() == 1) {
-		choice = 0;
-	} else {
-		std::sort(sorted.begin(), sorted.end());
-		choice = chooser.nd_choice(sorted.size());
-	}
-	pathConstraint =
-		bbdd::And(
-			&scopes->bools,
-			sorted[choice].cond,
-			pathConstraint);
-	return state.specialiseIRExpr(scopes, sorted[choice].expr);
-
 }
 
 EvalContext::evalStateMachineSideEffectRes
