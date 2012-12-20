@@ -603,21 +603,6 @@ VAMap::freed_block(unsigned long start)
 	last_malloc_list_entry = new malloc_list_entry(start, malloc_cntr, last_malloc_list_entry);
 }
 
-void
-HandleMallocFree(Thread *thr, AddressSpace *as)
-{
-	if (thr->regs.rip() == MALLOC_ADDRESS) {
-		thr->malloc_return = as->fetch<unsigned long>(thr->regs.rsp(), thr);
-		thr->malloc_size = thr->regs.get_reg(REGISTER_IDX(RDI));
-	} else if (thr->regs.rip() == thr->malloc_return) {
-		as->vamap->malloced_block(thr->regs.get_reg(REGISTER_IDX(RAX)),
-					  thr->malloc_size);
-		thr->malloc_return = 0;
-	} else if (thr->regs.rip() == FREE_ADDRESS) {
-		as->vamap->freed_block(thr->regs.get_reg(REGISTER_IDX(RDI)));
-	}
-}
-
 unsigned long
 VAMap::findMallocForAddr(unsigned long addr)
 {
