@@ -5,13 +5,11 @@
 #endif
 
 PMapEntry *PMapEntry::alloc(PhysicalAddress pa,
-			    MemoryChunk *mc,
-			    bool readonly)
+			    MemoryChunk *mc)
 {
 	PMapEntry *work = new PMapEntry();
 	work->pa = pa;
 	work->mc = mc;
-	work->readonly = readonly;
 	work->next = NULL;
 	work->pprev = NULL;
 	return work;
@@ -46,14 +44,6 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 	unsigned h = paHash(pa);
 	PMapEntry *pme = findPme(pa, h);
 	if (pme) {
-		if (pme->readonly) {
-#if TRACE_PMAP
-			printf("%p: COW %p for %lx\n", this, pme->mc,
-			       pa._pa);
-#endif
-			pme->mc = pme->mc->dupeSelf();
-			pme->readonly = false;
-		}
 		*mc_start = pa - pme->pa;
 #if TRACE_PMAP
 		printf("%p: %lx -> %p\n", this, pa._pa, pme->mc);
@@ -67,7 +57,7 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 			return NULL;
 
 		PMapEntry *newPme;
-		newPme = PMapEntry::alloc(pa - *mc_start, parent_mc->dupeSelf(), false);
+		newPme = PMapEntry::alloc(pa - *mc_start, parent_mc->dupeSelf());
 		newPme->next = heads[h];
 		newPme->pprev = &heads[h];
 		if (newPme->next)
@@ -104,7 +94,7 @@ PhysicalAddress PMap::introduce(MemoryChunk *mc)
 	PhysicalAddress pa = nextPa;
 	mc->base = pa;
 	nextPa = nextPa + MemoryChunk::size;
-	PMapEntry *pme = PMapEntry::alloc(pa, mc, false);
+	PMapEntry *pme = PMapEntry::alloc(pa, mc);
 	unsigned h = paHash(pa);
 	pme->next = heads[h];
 	pme->pprev = &heads[h];
