@@ -292,6 +292,7 @@ char *nameIRExpr(IRExpr *a);
 void my_system(const char *arg1, ...);
 char *flattenStringFragmentsMalloc(std::vector<const char *> fragments, const char *sep = "",
 				   const char *prefix = "", const char *suffix = "");
+char *flattenStringFragments(std::vector<const char *> fragments);
 
 void warning(const char *fmt, ...) __attribute__((__format__(__printf__, 1, 2)));
 
