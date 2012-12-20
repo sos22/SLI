@@ -79,55 +79,6 @@ AddressSpace::writeMemory(unsigned long _start, unsigned size,
 	}
 }
 
-expression_result
-AddressSpace::load(unsigned long start, unsigned size,
-		   bool ignore_protection,
-		   Thread *thr)
-{
-	unsigned long b[16];
-	memset(b, 0, sizeof(unsigned long) * size);
-	for (unsigned x = 0; x < size; x++)
-		new (&b[x]) unsigned long();
-	readMemory(start, size, b, ignore_protection, thr);
-	expression_result res;
-	res.lo = 0ul;
-	res.hi = 0ul;
-	switch(size) {
-	case 16:
-		res.hi = b[8] +
-			(b[9] << 8ul) +
-			(b[10] << 16ul) +
-			(b[11] << 24ul) +
-			(b[12] << 32ul) +
-			(b[13] << 40ul) +
-			(b[14] << 48ul) +
-			(b[15] << 56ul);
-		/* Fall through */
-	case 8:
-		res.lo = res.lo +
-			(b[7] << 56ul) +
-			(b[6] << 48ul) +
-			(b[5] << 40ul) +
-			(b[4] << 32ul);
-		/* Fall through */
-	case 4:
-		res.lo = res.lo +
-			(b[3] << 24ul) +
-			(b[2] << 16ul);
-		/* Fall through */
-	case 2:
-		res.lo = res.lo + (b[1] << 8ul);
-		/* Fall through */
-	case 1:
-		res.lo = res.lo + b[0];
-		break;
-	default:
-		fail("load of bad size %d\n", size);
-	}
-
-	return res;
-}
-
 void AddressSpace::readMemory(unsigned long _start, unsigned size,
 			      unsigned long *contents, bool ignore_protection,
 			      Thread *thr)
