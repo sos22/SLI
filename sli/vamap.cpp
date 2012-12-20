@@ -13,39 +13,6 @@
 /* Distance in chunks */
 #define dchunk(start, end) (((end) - (start))/MEMORY_CHUNK_SIZE)
 
-VAMap::Protection::Protection(unsigned prot)
-{
-	readable = writable = executable = false;
-	if (prot & PROT_READ)
-		readable = true;
-	if (prot & PROT_WRITE)
-		writable = true;
-	if (prot & PROT_EXEC)
-		executable = true;
-}
-
-VAMap::Protection::operator unsigned long() const
-{
-	return (readable ? PROT_READ : 0) |
-		(writable ? PROT_WRITE : 0) |
-		(executable ? PROT_EXEC : 0);
-}
-
-VAMap::AllocFlags::AllocFlags(unsigned flags)
-{
-       expandsDown = false;
-       if (flags & MAP_GROWSDOWN) {
-               expandsDown = true;
-       }
-}
-
-VAMap::AllocFlags::operator unsigned long() const
-{
-	return expandsDown ? (MAP_GROWSDOWN|MAP_STACK) : 0;
-}
-
-const VAMap::AllocFlags VAMap::defaultFlags(false);
-
 void VAMap::VAMapEntry::visit(VAMapEntry *&ref, PMap *pmap, HeapVisitor &hv)
 {
 	unsigned x;
@@ -73,17 +40,13 @@ name: "VAMap::VAMapEntry"
 
 VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
 					    unsigned long end,
-					    PhysicalAddress *pa,
-					    Protection prot,
-					    AllocFlags alf)
+					    PhysicalAddress *pa)
 {
 	VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&main_heap, &vme_type);
 	memset(work, 0, sizeof(*work));
 	work->start = start;
 	work->end = end;
 	work->pa = pa;
-	work->prot = prot;
-	work->alf = alf;
 	return work;
 }
 
@@ -102,15 +65,13 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::dupeSelf() const
 }
 
 bool VAMap::translate(unsigned long va,
-		      PhysicalAddress *pa,
-		      Protection *prot,
-		      AllocFlags *alf) const
+		      PhysicalAddress *pa) const
 {
 #if TRACE_VAMAP & TRACE_VAMAP_LOOKUP
 	printf("%p: Translate %lx\n", this, va);
 #endif
 	if (parent)
-		return parent->translate(va, pa, prot, alf);
+		return parent->translate(va, pa);
 	if (!root)
 		return false;
 	/* Splay the target node to the root of the tree */
@@ -206,62 +167,6 @@ bool VAMap::translate(unsigned long va,
 			((va - root->start) % MEMORY_CHUNK_SIZE);
 		assert(pa->_pa != 0);
 	}
-	if (prot)
-		*prot = root->prot;
-	if (alf)
-		*alf = root->alf;
-	return true;
-}
-
-bool VAMap::findNextMapping(unsigned long from,
-			    unsigned long *va,
-			    PhysicalAddress *pa,
-			    Protection *prot,
-			    AllocFlags *alf) const
-{
-	if (parent)
-		return parent->findNextMapping(from, va, pa, prot, alf);
-
-	const VAMapEntry *vme, *bestVme;
-
-	bestVme = NULL;
-	vme = root;
-	while (vme) {
-		if (vme->end <= from) {
-			vme = vme->succ;
-			continue;
-		}
-		if (from >= vme->start) {
-			/* Found one which overlaps the target address
-			 * -> that's definitely the best bet. */
-			bestVme = vme;
-			break;
-		}
-		if (bestVme) {
-			assert(bestVme->start > from);
-			assert(bestVme->start > vme->start);
-		}
-		bestVme = vme;
-		vme = vme->prev;
-	}
-	if (!bestVme)
-		return false;
-	if (va) {
-		if (from >= bestVme->start)
-			*va = from;
-		else
-			*va = bestVme->start;
-	}
-	if (pa) {
-		if (from >= bestVme->start)
-			*pa = bestVme->pa[(from - bestVme->start)/MEMORY_CHUNK_SIZE];
-		else
-			*pa = bestVme->pa[0];
-	}
-	if (prot)
-		*prot = bestVme->prot;
-	if (alf)
-		*alf = bestVme->alf;
 	return true;
 }
 
@@ -274,14 +179,10 @@ void VAMap::forceCOW()
 }
 
 void VAMap::addTranslation(unsigned long start,
-			   PhysicalAddress pa,
-			   Protection prot,
-			   AllocFlags alf)
+			   PhysicalAddress pa)
 {
 #if TRACE_VAMAP & TRACE_VAMAP_CHANGE
-	printf("%p: Add translation %lx -> %lx (%d,%d,%d,%d)\n", this, start, pa._pa,
-	       prot.readable, prot.writable, prot.executable,
-	       alf.expandsDown);
+	printf("%p: Add translation %lx -> %lx\n", this, start, pa._pa);
 #endif
 	forceCOW();
 
@@ -296,7 +197,7 @@ void VAMap::addTranslation(unsigned long start,
 		PhysicalAddress *newPas =
 			(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress));
 		*newPas = pa;
-		root = VAMapEntry::alloc(start, end, newPas, prot, alf);
+		root = VAMapEntry::alloc(start, end, newPas);
 		return;
 	}
 
@@ -306,36 +207,34 @@ void VAMap::addTranslation(unsigned long start,
 		assert(end <= vme->start || start >= vme->end);
 
 		/* Try to merge with an existing node. */
-		if (prot == vme->prot && alf == vme->alf) {
-			if (end == vme->start) {
+		if (end == vme->start) {
 #if TRACE_VAMAP & TRACE_VAMAP_CHANGE_DETAILS
-				printf("%p, merge before with %lx:%lx\n", this,
-				       vme->start, vme->end);
+			printf("%p, merge before with %lx:%lx\n", this,
+			       vme->start, vme->end);
 #endif
-				vme->pa = (PhysicalAddress *)LibVEX_realloc(&main_heap,
-									    vme->pa,
-									    sizeof(vme->pa[0]) *
-									    dchunk(start, vme->end));
-				memmove(vme->pa + dchunk(start, vme->start),
-					vme->pa,
-					sizeof(vme->pa[0]) * dchunk(vme->start, vme->end));
-				vme->pa[0] = pa;
-				vme->start = start;
-				return;
-			}
-			if (start == vme->end) {
+			vme->pa = (PhysicalAddress *)LibVEX_realloc(&main_heap,
+								    vme->pa,
+								    sizeof(vme->pa[0]) *
+								    dchunk(start, vme->end));
+			memmove(vme->pa + dchunk(start, vme->start),
+				vme->pa,
+				sizeof(vme->pa[0]) * dchunk(vme->start, vme->end));
+			vme->pa[0] = pa;
+			vme->start = start;
+			return;
+		}
+		if (start == vme->end) {
 #if TRACE_VAMAP & TRACE_VAMAP_CHANGE_DETAILS
-				printf("%p, merge after with %lx:%lx\n", this,
-				       vme->start, vme->end);
+			printf("%p, merge after with %lx:%lx\n", this,
+			       vme->start, vme->end);
 #endif
-				vme->pa = (PhysicalAddress *)LibVEX_realloc(&main_heap,
-									    vme->pa,
-									    sizeof(vme->pa[0]) *
-									    dchunk(vme->start, end));
-				vme->pa[dchunk(vme->start, vme->end)] = pa;
-				vme->end = end;
-				return;
-			}
+			vme->pa = (PhysicalAddress *)LibVEX_realloc(&main_heap,
+								    vme->pa,
+								    sizeof(vme->pa[0]) *
+								    dchunk(vme->start, end));
+			vme->pa[dchunk(vme->start, vme->end)] = pa;
+			vme->end = end;
+			return;
 		}
 
 		/* Merge failed.  Either insert here or walk to
@@ -351,7 +250,7 @@ void VAMap::addTranslation(unsigned long start,
 				PhysicalAddress *newPas =
 					(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress));
 				*newPas = pa;
-				newVme = VAMapEntry::alloc(start, end, newPas, prot, alf);
+				newVme = VAMapEntry::alloc(start, end, newPas);
 				vme->prev = newVme;
 				return;
 			}
@@ -367,49 +266,10 @@ void VAMap::addTranslation(unsigned long start,
 				PhysicalAddress *newPas =
 					(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress));
 				*newPas = pa;
-				newVme = VAMapEntry::alloc(start, end, newPas, prot, alf);
+				newVme = VAMapEntry::alloc(start, end, newPas);
 				vme->succ = newVme;
 				return;
 			}
-		}
-	}
-}
-
-bool VAMap::protect(unsigned long start, unsigned long size, Protection prot)
-{
-	forceCOW();
-
-	VAMapEntry *vme;
-	unsigned long end = start + size;
-
-#if TRACE_VAMAP & TRACE_VAMAP_CHANGE
-	printf("%p: Protect %lx:%lx -> %d.%d.%d\n", this, start, end,
-	       prot.readable, prot.writable, prot.executable);
-#endif
-
-	vme = root;
-	while (1) {
-		if (!vme)
-			return false;
-		if (end <= vme->start) {
-			vme = vme->prev;
-		} else if (start >= vme->end) {
-			vme = vme->succ;
-		} else if (start < vme->start) {
-			if (!protect(start, vme->start - start, prot))
-				return false;
-			return protect(vme->start, end - vme->start, prot);
-		} else if (end > vme->end) {
-			if (!protect(start, vme->end - start, prot))
-				return false;
-			return protect(vme->end, end - vme->end, prot);
-		} else if (start != vme->start) {
-			vme->split(start);
-		} else if (end != vme->end) {
-			vme->split(end);
-		} else {
-			vme->prot = prot;
-			return true;
 		}
 	}
 }
@@ -526,16 +386,6 @@ VAMap *VAMap::empty()
 	return new VAMap();
 }
 
-VAMap *VAMap::dupeSelf()
-{
-	VAMap *work = empty();
-	if (parent)
-		work->parent = parent;
-	else
-		work->parent = this;
-	return work;
-}
-
 void VAMap::visit(HeapVisitor &hv)
 {
 	hv(parent);
@@ -562,7 +412,7 @@ void VAMap::VAMapEntry::split(unsigned long at)
 		return;
 	VAMapEntry *newVme;
 	if (!prev) {
-		newVme = alloc(start, at, pa, prot, alf);
+		newVme = alloc(start, at, pa);
 		start = at;
 		pa = (PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(pa[0]) * dchunk(start, end));
 		memcpy(pa,
@@ -579,7 +429,7 @@ void VAMap::VAMapEntry::split(unsigned long at)
 		memcpy(newPas,
 		       pa + dchunk(start, at),
 		       sizeof(pa[0]) * dchunk(at, end));
-		newVme = alloc(at, end, newPas, prot, alf);
+		newVme = alloc(at, end, newPas);
 		end = at;
 		newVme->succ = succ;
 		succ = newVme;

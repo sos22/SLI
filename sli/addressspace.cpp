@@ -7,8 +7,7 @@
 #define PAGE_MASK (~4095)
 
 void
-AddressSpace::allocateMemory(unsigned long _start, unsigned long _size,
-			     VAMap::Protection prot, VAMap::AllocFlags flags)
+AddressSpace::allocateMemory(unsigned long _start, unsigned long _size)
 {
 	unsigned long start = _start;
 	unsigned long size = _size;
@@ -19,7 +18,7 @@ AddressSpace::allocateMemory(unsigned long _start, unsigned long _size,
 	while (size != 0) {
 		MemoryChunk *chunk = new MemoryChunk();
 		PhysicalAddress pa = pmap->introduce(chunk);
-		vamap->addTranslation(start, pa, prot, flags);
+		vamap->addTranslation(start, pa);
 		start += MemoryChunk::size;
 		size -= MemoryChunk::size;
 	}
@@ -53,8 +52,7 @@ AddressSpace::writeMemory(unsigned long _start, unsigned size,
 
 	while (size != 0) {
 		PhysicalAddress pa;
-		VAMap::Protection prot(0);
-		if (vamap->translate(start, &pa, &prot)) {
+		if (vamap->translate(start, &pa)) {
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
 			MemoryChunk *mc = pmap->lookup(pa, &mc_start);
@@ -80,8 +78,7 @@ void AddressSpace::readMemory(unsigned long _start, unsigned size,
 	unsigned long start = _start;
 	while (size != 0) {
 		PhysicalAddress pa;
-		VAMap::Protection prot(0);
-		if (vamap->translate(start, &pa, &prot)) {
+		if (vamap->translate(start, &pa)) {
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
 			const MemoryChunk *mc = pmap->lookupConst(pa, &mc_start);
@@ -102,14 +99,7 @@ void AddressSpace::readMemory(unsigned long _start, unsigned size,
 
 bool AddressSpace::isReadable(unsigned long _start)
 {
-	unsigned long start = _start;
-	PhysicalAddress pa;
-	VAMap::Protection prot(0);
-	if (!vamap->translate(start, &pa, &prot))
-		return false;
-	if (!prot.readable)
-		return false;
-	return true;
+	return vamap->translate(_start);
 }
 
 AddressSpace *AddressSpace::initialAddressSpace()

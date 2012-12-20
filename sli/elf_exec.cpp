@@ -157,12 +157,7 @@ MachineState::readELFExec(const char *path)
 		unsigned long end = start + phdrs[p].p_memsz;
 		start = start & ~(PAGE_SIZE - 1);
 		end = (end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-		as->allocateMemory(start,
-				   end - start,
-				   VAMap::Protection(
-					   phdrs[p].p_flags & PF_R,
-					   phdrs[p].p_flags & PF_W,
-					   phdrs[p].p_flags & PF_X));
+		as->allocateMemory(start, end - start);
 		as->copyToClient(phdrs[p].p_vaddr,
 				 phdrs[p].p_filesz,
 				 m.window(phdrs[p].p_offset,

@@ -67,11 +67,7 @@ MachineState::readCoredump(const char *path)
 				return NULL;
 			}
 			as->allocateMemory(phdrs[p].p_vaddr,
-					   phdrs[p].p_memsz,
-					   VAMap::Protection(
-						   phdrs[p].p_flags & PF_R,
-						   phdrs[p].p_flags & PF_W,
-						   phdrs[p].p_flags & PF_X));
+					   phdrs[p].p_memsz);
 			as->copyToClient(phdrs[p].p_vaddr,
 					 phdrs[p].p_filesz,
 					 m.window(phdrs[p].p_offset,
