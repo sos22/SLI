@@ -228,7 +228,7 @@ done_prefixes:
 		if (generate_relocs) {
 			/* Can't cope with 8 bit relocs, so convert to
 			 * a 32 bit jump. */
-			Instruction<ThreadCfgLabel> *work = new Instruction<ThreadCfgLabel>(-1, label.label);
+			Instruction<ThreadCfgLabel> *work = new Instruction<ThreadCfgLabel>(label.label);
 			int delta = insn_fetch_type(char);
 			unsigned long target = ptr + delta;
 			work->rip = label;
@@ -246,7 +246,7 @@ done_prefixes:
 		break;
 	case 0x70 ... 0x7f: /* jcc 8 bit */
 		if (generate_relocs) {
-			Instruction<ThreadCfgLabel> *work = new Instruction<ThreadCfgLabel>(-1, label.label);
+			Instruction<ThreadCfgLabel> *work = new Instruction<ThreadCfgLabel>(label.label);
 			int delta = insn_fetch_type(char);
 			unsigned long target = ptr + delta;
 			work->rip = label;
@@ -277,7 +277,7 @@ done_prefixes:
 
 	/* Finished parsing, build and return result */
 
-	Instruction<ThreadCfgLabel> *work = new Instruction<ThreadCfgLabel>(-1, label.label);
+	Instruction<ThreadCfgLabel> *work = new Instruction<ThreadCfgLabel>(label.label);
 	work->rip = label;
 	work->len = ptr - init_ptr;
 	for (unsigned x = 0; x < work->len; x++)
@@ -421,13 +421,7 @@ CrashCfg::prettyPrint(FILE *f, bool verbose)
 				     it++) {
 					if (it != instr->relocs.begin())
 						fprintf(f, ", ");
-					if (auto rrr = dynamic_cast<RipRelativeRelocation<VexRip> *>(*it)) {
-						fprintf(f, "rrr(at=%d, size=%d, target=%s, nr_imm=%d)",
-							rrr->offset,
-							rrr->size,
-							rrr->target.name(),
-							rrr->nrImmediateBytes);
-					} else if (auto rrbr = dynamic_cast<RipRelativeBranchRelocation<VexRip> *>(*it)) {
+					if (auto rrbr = dynamic_cast<RipRelativeBranchRelocation<VexRip> *>(*it)) {
 						fprintf(f, "rrbr(at=%d, size=%d, target=%s)",
 							rrbr->offset,
 							rrbr->size,
@@ -559,10 +553,8 @@ CrashCfg::init(crashEnforcementRoots &roots,
 			ThreadCfgLabel succLabel(instr->rip.thread, srcSucc.instr->label);
 			assert(content.count(succLabel));
 			Instruction<ThreadCfgLabel>::successor_t destSucc(
-				srcSucc.type,
 				succLabel,
-				content[succLabel],
-				srcSucc.calledFunction);
+				content[succLabel]);
 			instr->successors.push_back(destSucc);
 		}
 		for (auto it2 = instr->relocs.begin();
