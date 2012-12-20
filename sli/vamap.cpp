@@ -533,13 +533,11 @@ VAMap *VAMap::dupeSelf()
 		work->parent = parent;
 	else
 		work->parent = this;
-	work->last_malloc_list_entry = last_malloc_list_entry;
 	return work;
 }
 
 void VAMap::visit(HeapVisitor &hv)
 {
-	hv(last_malloc_list_entry);
 	hv(parent);
 }
 
@@ -587,66 +585,5 @@ void VAMap::VAMapEntry::split(unsigned long at)
 		succ = newVme;
 		pa = (PhysicalAddress *)LibVEX_realloc(&main_heap, pa, sizeof(pa[0]) * dchunk(start, end));
 	}
-}
-
-void
-VAMap::malloced_block(unsigned long start, unsigned long size)
-{
-	malloc_cntr++;
-	last_malloc_list_entry = new malloc_list_entry(start, size, malloc_cntr, last_malloc_list_entry);
-}
-
-void
-VAMap::freed_block(unsigned long start)
-{
-	malloc_cntr++;
-	last_malloc_list_entry = new malloc_list_entry(start, malloc_cntr, last_malloc_list_entry);
-}
-
-unsigned long
-VAMap::findMallocForAddr(unsigned long addr)
-{
-	for (malloc_list_entry *mle = last_malloc_list_entry;
-	     mle;
-	     mle = mle->prev) {
-		if (!mle->isFree &&
-		    mle->start <= addr &&
-		    addr < mle->start + mle->size)
-			return mle->name;
-	}
-	return 0;
-}
-
-unsigned long
-VAMap::mallocKeyToDeathTime(unsigned long key)
-{
-	unsigned long address;
-	malloc_list_entry *mle;
-	unsigned long res;
-
-	for (mle = last_malloc_list_entry;
-	     mle;
-	     mle = mle->prev) {
-		if (!mle->isFree &&
-		    mle->name == key) {
-			address = mle->start;
-			break;
-		}
-	}
-	if (!mle)
-		return malloc_cntr + 1;
-	res = malloc_cntr + 1;
-	for (mle = last_malloc_list_entry;
-	     mle;
-	     mle = mle->prev) {
-		if (mle->isFree) {
-			if (mle->start == address)
-				res = mle->name;
-		} else {
-			if (mle->name == key)
-				break;
-		}
-	}
-	return res;
 }
 
