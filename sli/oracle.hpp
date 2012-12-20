@@ -14,11 +14,6 @@
 class TypesDb;
 class DynAnalysisRip;
 
-class InstructionSet {
-public:
-	std::set<VexRip> rips;
-};
-
 class AllowableOptimisations;
 
 /* Use these rather than VexRips for static analysis, because that
@@ -338,8 +333,6 @@ public:
 	void findConflictingStores(const MaiMap &mai,
 				   StateMachineSideEffectLoad *smsel,
 				   std::set<DynAnalysisRip> &out);
-	void clusterRips(const std::set<VexRip> &inputRips,
-			 std::set<InstructionSet > &outputClusters);
 
 	/* True if the access doesn't appear anywhere in the tag
 	   table.  This usually indicates that the relevant
@@ -408,26 +401,6 @@ public:
 			findNoReturnFunctions();
 	}
 };
-
-template <typename a, typename b> unsigned long
-hash_pair(const std::pair<a, b> &p)
-{
-	return __default_hash_function(p.first) + 11 * __default_hash_function(p.second);
-}
-
-typedef gc_map<std::pair<VexRip, VexRip>,
-	       bool,
-	       hash_pair,
-	       __default_eq_function<std::pair<VexRip, VexRip> >,
-	       __default_visit_function<std::pair<VexRip, VexRip>, bool>,
-	       &ir_heap> gc_pair_VexRip_set_t;
-//void mergeUlongSets(gc_pair_ulong_set_t *dest, const gc_pair_ulong_set_t *src);
-
-void findInstrSuccessorsAndCallees(Oracle *oracle,
-				   AddressSpace *as,
-				   const VexRip &rip,
-				   std::vector<VexRip> &directExits,
-				   gc_pair_VexRip_set_t *callees);
 
 StateMachine *introduceFreeVariables(StateMachine *sm,
 				     const Oracle::RegisterAliasingConfiguration *alias,
