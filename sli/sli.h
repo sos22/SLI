@@ -213,8 +213,7 @@ public:
 	   success, *mc_start is set to the offset of the address in
 	   the chunk. */
 	MemoryChunk *lookup(PhysicalAddress pa, unsigned long *mc_start);
-	const MemoryChunk *lookupConst(PhysicalAddress pa, unsigned long *mc_start,
-				       bool pull_up = true) const;
+	const MemoryChunk *lookupConst(PhysicalAddress pa, unsigned long *mc_start) const;
 
 	/* Add a new chunk to the map, and return a newly-assigned
 	   physical address for it. */
