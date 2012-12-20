@@ -25,19 +25,6 @@ AddressSpace::allocateMemory(unsigned long _start, unsigned long _size,
 	}
 }
 
-void
-AddressSpace::releaseMemory(unsigned long start, unsigned long size)
-{
-	vamap->unmap(start, size);
-}
-
-void
-AddressSpace::protectMemory(unsigned long start, unsigned long size,
-			    VAMap::Protection prot)
-{
-	vamap->protect(start, size, prot);
-}
-
 bool
 AddressSpace::copyToClient(unsigned long start, unsigned size,
 			   const void *contents, bool ignore_protection)
@@ -52,27 +39,6 @@ AddressSpace::copyToClient(unsigned long start, unsigned size,
 		writeMemory(start, size, buf, ignore_protection, NULL);
 	} catch (BadMemoryException &e) {
 		fault = true;
-	}
-	free(buf);
-	return fault;
-}
-
-bool
-AddressSpace::copyFromClient(unsigned long start, unsigned size, void *dest)
-{
-	unsigned long *buf = (unsigned long *)calloc(sizeof(unsigned long), size);
-	bool fault;
-
-	fault = false;
-	try {
-		readMemory(start, size, buf, false, NULL);
-	} catch (BadMemoryException &e) {
-		fault = true;
-	}
-	if (!fault) {
-		for (unsigned x = 0; x < size; x++) {
-			((unsigned char *)dest)[x] = buf[x];
-		}
 	}
 	free(buf);
 	return fault;
@@ -160,41 +126,6 @@ AddressSpace::load(unsigned long start, unsigned size,
 	}
 
 	return res;
-}
-
-void
-AddressSpace::store(unsigned long start, unsigned size,
-		    const expression_result &val, bool ignore_protection,
-		    Thread *thr)
-{
-	unsigned long b[16];
-	switch (size) {
-	case 16:
-		b[15] = (val.hi >> 56ul) & 0xfful;
-		b[14] = (val.hi >> 48ul) & 0xfful;
-		b[13] = (val.hi >> 40ul) & 0xfful;
-		b[12] = (val.hi >> 32ul) & 0xfful;
-		b[11] = (val.hi >> 24ul) & 0xfful;
-		b[10] = (val.hi >> 16ul) & 0xfful;
-		b[9] = (val.hi >> 8ul) & 0xfful;
-		b[8] = val.hi & 0xfful;
-	case 8:
-		b[7] = (val.lo >> 56ul) & 0xfful;
-		b[6] = (val.lo >> 48ul) & 0xfful;
-		b[5] = (val.lo >> 40ul) & 0xfful;
-		b[4] = (val.lo >> 32ul) & 0xfful;
-	case 4:
-		b[3] = (val.lo >> 24ul) & 0xfful;
-		b[2] = (val.lo >> 16ul) & 0xfful;
-	case 2:
-		b[1] = (val.lo >> 8ul) & 0xfful;
-	case 1:
-		b[0] = val.lo & 0xfful;
-		break;
-	default:
-		fail("store of bad size %d\n", size);
-	}
-	writeMemory(start, size, b, ignore_protection, thr);
 }
 
 void AddressSpace::readMemory(unsigned long _start, unsigned size,
