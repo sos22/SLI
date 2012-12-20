@@ -334,10 +334,6 @@ void dbg_break(const char *msg, ...);
 void printIRExpr(IRExpr *e);
 
 VexRip extract_call_follower(IRSB *irsb);
-expression_result eval_expression(const RegisterSet *rs,
-				  IRExpr *expr,
-				  const std::vector<expression_result> &temporaries);
-void put_stmt(RegisterSet *rs, unsigned put_offset, struct expression_result put_data, IRType put_type);
 
 template <typename t> const t
 AddressSpace::fetch(unsigned long start)
