@@ -203,9 +203,9 @@ public:
 		fclose(f);
 	}
 #else
-	void start(MaiMap *, StateMachine *, bool , const AllowableOptimisations &)
+	void start(SMScopes *, MaiMap *, StateMachine *, bool , const AllowableOptimisations &)
 	{}
-	void finish(MaiMap *, StateMachine *)
+	void finish(SMScopes *, MaiMap *, StateMachine *)
 	{}
 #endif
 };
