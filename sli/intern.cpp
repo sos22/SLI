@@ -175,32 +175,11 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		}
 
 		case Iex_Const:
-			if (!physicallyEqual(((IRExprConst *)e)->con,
-					     ((IRExprConst *)other)->con))
-				continue;
-			break;
-
 		case Iex_HappensBefore:
-			if (((IRExprHappensBefore *)e)->before != ((IRExprHappensBefore *)other)->before ||
-			    ((IRExprHappensBefore *)e)->after != ((IRExprHappensBefore *)other)->after)
-				continue;
-			break;
-
-		case Iex_FreeVariable: {
-			IRExprFreeVariable *ef = (IRExprFreeVariable *)e;
-			IRExprFreeVariable *of = (IRExprFreeVariable *)other;
-			if (ef->id != of->id || ef->ty != of->ty)
-				continue;
-			break;
-		}
-
+		case Iex_FreeVariable:
 		case Iex_EntryPoint:
-			if (*(IRExprEntryPoint *)e != *(IRExprEntryPoint *)other)
-				continue;
-			break;
-
 		case Iex_ControlFlow:
-			if (*(IRExprControlFlow *)e != *(IRExprControlFlow *)other)
+			if (!physicallyEqual(e, other))
 				continue;
 			break;
 		}
@@ -244,11 +223,9 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 	case StateMachineSideEffect::Store: {
 		StateMachineSideEffectMemoryAccess *ma = dynamic_cast<StateMachineSideEffectMemoryAccess *>(s);
 		assert(ma);
-		ma->addr = internIRExpr(ma->addr, t);
 		if (s->type == StateMachineSideEffect::Store) {
 			StateMachineSideEffectStore *store = dynamic_cast<StateMachineSideEffectStore *>(ma);
 			assert(store);
-			store->data = internIRExpr(store->data, t);
 			for (auto it = t.stores.begin();
 			     it != t.stores.end();
 			     it++) {
@@ -283,7 +260,6 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 	case StateMachineSideEffect::Copy: {
 		StateMachineSideEffectCopy *copy = dynamic_cast<StateMachineSideEffectCopy *>(s);
 		assert(copy);
-		copy->value = internIRExpr(copy->value, t);
 		for (auto it = t.copies.begin(); it != t.copies.end(); it++) {
 			StateMachineSideEffectCopy *o = *it;
 			if (o->target == copy->target &&
@@ -299,12 +275,9 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *phi = dynamic_cast<StateMachineSideEffectPhi *>(s);
 		assert(phi);
-		for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
-			if (it->second)
-				it->second = internIRExpr(it->second, t);
 		for (auto it = t.phis.begin(); it != t.phis.end(); it++) {
 			StateMachineSideEffectPhi *o = *it;
-			if (o->reg == phi->reg && o->generations == phi->generations) {
+			if (o->ty == phi->ty && o->reg == phi->reg && o->generations == phi->generations) {
 				t.sideEffects[s] = o;
 				return o;
 			}
@@ -316,7 +289,6 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 	case StateMachineSideEffect::AssertFalse: {
 		StateMachineSideEffectAssertFalse *af = dynamic_cast<StateMachineSideEffectAssertFalse *>(s);
 		assert(af);
-		af->value = internIRExpr(af->value, t);
 		for (auto it = t.asserts.begin(); it != t.asserts.end(); it++) {
 			StateMachineSideEffectAssertFalse *o = *it;
 			if (o->value == af->value) {
@@ -343,17 +315,15 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		} while (0)
 	case StateMachineSideEffect::StartFunction: {
 		StateMachineSideEffectStartFunction *sf = (StateMachineSideEffectStartFunction *)s;
-		sf->rsp = internIRExpr(sf->rsp, t);
 		do_search(StartFunction);
 	}
 	case StateMachineSideEffect::EndFunction: {
 		StateMachineSideEffectEndFunction *sf = (StateMachineSideEffectEndFunction *)s;
-		sf->rsp = internIRExpr(sf->rsp, t);
 		do_search(EndFunction);
 	}
-	case StateMachineSideEffect::PointerAliasing: {
-		auto sf = (StateMachineSideEffectPointerAliasing *)s;
-		do_search(PointerAliasing);
+	case StateMachineSideEffect::ImportRegister: {
+		auto sf = (StateMachineSideEffectImportRegister *)s;
+		do_search(ImportRegister);
 	}
 	case StateMachineSideEffect::StackLayout: {
 		auto sf = (StateMachineSideEffectStackLayout *)s;
@@ -365,8 +335,6 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 	abort();
 }
 
-static StateMachineState *internStateMachineState(StateMachineState *start, internStateMachineTable &t);
-
 static StateMachineState *
 internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 {
@@ -376,11 +344,20 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 		return t.states[start];
 	t.states[start] = start; /* Cycle breaking */
 	switch (start->type) {
-	case StateMachineState::Crash:
-	case StateMachineState::NoCrash:
-	case StateMachineState::Unreached:
+	case StateMachineState::Terminal: {
+		auto smt = (StateMachineTerminal *)start;
+		for (auto it = t.states_terminal.begin();
+		     it != t.states_terminal.end();
+		     it++) {
+			if ( (*it)->res == smt->res) {
+				t.states[start] = *it;
+				return *it;
+			}
+		}
 		t.states[start] = start;
+		t.states_terminal.insert(smt);
 		return start;
+	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)start;
 		if (smse->sideEffect)
@@ -401,7 +378,6 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 	}
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)start;
-		smb->condition = internIRExpr(smb->condition, t);
 		smb->trueTarget = internStateMachineState(smb->trueTarget, t);
 		smb->falseTarget = internStateMachineState(smb->falseTarget, t);
 		for (auto it = t.states_bifurcate.begin();
@@ -465,4 +441,76 @@ internStateMachine(StateMachine *sm)
 {
 	internStateMachineTable t;
 	return internStateMachine(sm, t);
+}
+
+void
+internIRExprTable::runGc(HeapVisitor &hv)
+{
+	for (int i = 0; i < nr_entries; i++) {
+		std::map<IRExpr *, IRExpr *> newTable;
+		for (auto it = lookups[i].begin();
+		     it != lookups[i].end();
+		     it++) {
+			if (it->first != it->second)
+				continue;
+			IRExpr *a = hv.visited(it->first);
+			if (!a)
+				continue;
+			newTable[a] = a;
+		}
+		lookups[i] = newTable;
+	}
+	_runGc(hv);
+}
+
+void
+internStateMachineTable::_runGc(HeapVisitor &hv)
+{
+#define do_map(typename, fieldname)					\
+	do {								\
+		std::map<typename, typename> newLookup;			\
+		for (auto it = fieldname.begin();			\
+		     it != fieldname.end();				\
+		     it++) {						\
+			if (it->first != it->second)			\
+				continue;				\
+			typename aa = hv.visited(it->first);		\
+			if (!aa)					\
+				continue;				\
+			newLookup[aa] = aa;				\
+		}							\
+		fieldname = newLookup;					\
+	} while (0)
+	do_map(StateMachineSideEffect *, sideEffects);
+	do_map(StateMachineState *, states);
+	do_map(const CFGNode *, cfgNodes);
+#undef do_map
+#define do_set(typename, fieldname)			\
+	do {						\
+		std::set<typename> newSet;		\
+		for (auto it = fieldname.begin();	\
+		     it != fieldname.end();		\
+		     it++) {				\
+			typename aa = hv.visited(*it);	\
+			if (aa)				\
+				newSet.insert(aa);	\
+		}					\
+		fieldname = newSet;			\
+	} while (0)
+	do_set(StateMachineSideEffectStore *, stores);
+	do_set(StateMachineSideEffectLoad *, loads);
+	do_set(StateMachineSideEffectCopy *, copies);
+	do_set(StateMachineSideEffectPhi *, phis);
+	do_set(StateMachineSideEffectAssertFalse *, asserts);
+#define ds(n)					\
+	do_set(StateMachineSideEffect ## n *, n)
+	ds(StartFunction);
+	ds(EndFunction);
+	ds(StackLayout);
+	ds(ImportRegister);
+#undef ds
+	do_set(StateMachineBifurcate *, states_bifurcate);
+	do_set(StateMachineSideEffecting *, states_side_effect);
+	do_set(const CFGNode *, cfgNodesS);
+#undef do_set
 }

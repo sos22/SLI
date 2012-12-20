@@ -104,7 +104,9 @@ main(int argc, char *argv[])
 		     
 	VexPtr<MaiMap, &ir_heap> mai(MaiMap::empty());
 	VexPtr<StateMachine, &ir_heap> probeMachine;
-	probeMachine = buildProbeMachine(allocLabel,
+	SMScopes scopes;
+	probeMachine = buildProbeMachine(&scopes,
+					 allocLabel,
 					 oracle,
 					 vr,
 					 thr->tid,
@@ -113,8 +115,8 @@ main(int argc, char *argv[])
 					 ALLOW_GC);
 
 	DumpFix df(argv[5], DynAnalysisRip(vr));
-	diagnoseCrash(allocLabel, DynAnalysisRip(vr),
-		      probeMachine, oracle, df, false,
+	diagnoseCrash(&scopes, allocLabel, DynAnalysisRip(vr),
+		      probeMachine, oracle, df,
 		      opt, mai, ALLOW_GC);
 
 	return 0;

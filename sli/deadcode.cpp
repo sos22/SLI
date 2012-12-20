@@ -3,6 +3,7 @@
 #include "sli.h"
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
+#include "visitor.hpp"
 
 namespace _deadCode {
 /* unconfuse emacs */
@@ -233,33 +234,83 @@ class LivenessEntry {
 	small_set<threadAndRegister, 8> liveDataOnly;
 	small_set<threadAndRegister, 8> livePointer;
 public:
-	void useExpressionData(IRExpr *e)
+	void useExpressionData(const bbdd *e)
 	{
-		class _ : public IRExprTransformer {
-			LivenessEntry &out;
-			IRExpr *transformIex(IRExprGet *g) {
-				if (!out.livePointer.contains(g->reg))
-					out.liveDataOnly.insert(g->reg);
-				return IRExprTransformer::transformIex(g);
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				if (!out->livePointer.contains(g->reg))
+					out->liveDataOnly.insert(g->reg);
+				return visit_continue;
 			}
-		public:
-			_(LivenessEntry &_out) : out(_out) {}
-		} t(*this);
-		t.doit(e);
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_const_bdd(this, &visitor, e);
+	}
+	void useExpressionData(const smrbdd *e)
+	{
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				if (!out->livePointer.contains(g->reg))
+					out->liveDataOnly.insert(g->reg);
+				return visit_continue;
+			}
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_const_bdd(this, &visitor, e);
+	}
+	void useExpressionData(const exprbdd *e)
+	{
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				if (!out->livePointer.contains(g->reg))
+					out->liveDataOnly.insert(g->reg);
+				return visit_continue;
+			}
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
+	}
+	void useExpressionData(const IRExpr *e)
+	{
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				if (!out->livePointer.contains(g->reg))
+					out->liveDataOnly.insert(g->reg);
+				return visit_continue;
+			}
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_irexpr(this, &visitor, e);
 	}
 	void useExpressionPointer(IRExpr *e)
 	{
-		class _ : public IRExprTransformer {
-			LivenessEntry &out;
-			IRExpr *transformIex(IRExprGet *g) {
-				out.livePointer.insert(g->reg);
-				out.liveDataOnly.erase(g->reg);
-				return IRExprTransformer::transformIex(g);
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				out->livePointer.insert(g->reg);
+				out->liveDataOnly.erase(g->reg);
+				return visit_continue;
 			}
-		public:
-			_(LivenessEntry &_out) : out(_out) {}
-		} t(*this);
-		t.doit(e);
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_irexpr(this, &visitor, e);
+	}
+	void useExpressionPointer(const exprbdd *e)
+	{
+		struct {
+			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
+				out->livePointer.insert(g->reg);
+				out->liveDataOnly.erase(g->reg);
+				return visit_continue;
+			}
+		} foo;
+		static irexpr_visitor<LivenessEntry> visitor;
+		visitor.Get = foo.f;
+		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
 	}
 
 	void useSideEffect(StateMachineSideEffect *smse)
@@ -267,36 +318,40 @@ public:
 		threadAndRegister def(threadAndRegister::invalid());
 		if (smse->definesRegister(def))
 			killRegister(def);
-		std::vector<IRExpr *> inp;
-		smse->inputExpressions(inp);
 		switch (smse->type) {
 		case StateMachineSideEffect::Load:
+			useExpressionPointer( ((StateMachineSideEffectLoad *)smse)->addr);
+			break;
 		case StateMachineSideEffect::Store:
+			useExpressionPointer( ((StateMachineSideEffectStore *)smse)->addr);
+			useExpressionPointer( ((StateMachineSideEffectStore *)smse)->data);
+			break;
 		case StateMachineSideEffect::Copy:
-			for (auto it = inp.begin(); it != inp.end(); it++)
-				useExpressionPointer(*it);
+			useExpressionData( ((StateMachineSideEffectCopy *)smse)->value);
 			break;
 		case StateMachineSideEffect::Unreached:
-		case StateMachineSideEffect::AssertFalse:
 		case StateMachineSideEffect::StartAtomic:
 		case StateMachineSideEffect::EndAtomic:
-		case StateMachineSideEffect::StartFunction:
-		case StateMachineSideEffect::EndFunction:
-		case StateMachineSideEffect::PointerAliasing:
 		case StateMachineSideEffect::StackLayout:
-			for (auto it = inp.begin(); it != inp.end(); it++)
-				useExpressionData(*it);
+		case StateMachineSideEffect::ImportRegister:
+			break;
+		case StateMachineSideEffect::AssertFalse:
+			useExpressionData( ((StateMachineSideEffectAssertFalse *)smse)->value );
+			break;
+		case StateMachineSideEffect::StartFunction:
+			useExpressionData( ((StateMachineSideEffectStartFunction *)smse)->rsp );
+			break;
+		case StateMachineSideEffect::EndFunction:
+			useExpressionData( ((StateMachineSideEffectEndFunction *)smse)->rsp );
 			break;
 
 		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *smsep =
 				(StateMachineSideEffectPhi *)smse;
-			for (auto it = inp.begin(); it != inp.end(); it++)
-				useExpressionData(*it);
-			for (auto it = smsep->generations.begin();
-			     it != smsep->generations.end();
-			     it++)
-				this->livePointer.insert(it->first);
+			for (auto it = smsep->generations.begin(); it != smsep->generations.end(); it++) {
+				useExpressionData(it->val);
+				livePointer.insert(it->reg);
+			}
 			break;
 		}
 		}
@@ -356,11 +411,11 @@ class LivenessMap {
 			res.useExpressionData(smb->condition);
 			break;
 		}
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
-			/* Nothing needed */
+		case StateMachineState::Terminal: {
+			StateMachineTerminal *smt = (StateMachineTerminal *)sm;
+			res.useExpressionData(smt->res);
 			break;
+		}
 		}
 		if (content[sm].merge(res))
 			*progress = true;
@@ -409,40 +464,32 @@ public:
 	}
 };
 
-static void
-enumRegisters(IRExpr *e, std::set<threadAndRegister> &regs)
-{
-	struct : public IRExprTransformer {
-		std::set<threadAndRegister> *out;
-		IRExpr *transformIex(IRExprGet *ieg) {
-			out->insert(ieg->reg);
-			return ieg;
-		}
-	} doit;
-	doit.out = &regs;
-	doit.doit(e);
-}
-
 static StateMachine *
-ssaDeadCode(StateMachine *sm, bool *done_something)
+ssaDeadCode(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
 	std::set<threadAndRegister> refed_regs;
 	std::set<StateMachineState *> states;
 	enumStates(sm, &states);
-	for (auto it = states.begin(); it != states.end(); it++) {
-		StateMachineState *s = *it;
-		std::vector<IRExpr *> exprs;
-		s->inputExpressions(exprs);
-		for (auto it = exprs.begin(); it != exprs.end(); it++)
-			enumRegisters(*it, refed_regs);
-		if (s->getSideEffect() && s->getSideEffect()->type == StateMachineSideEffect::Phi) {
-			StateMachineSideEffectPhi *p = (StateMachineSideEffectPhi *)s->getSideEffect();
-			for (auto it = p->generations.begin();
-			     it != p->generations.end();
-			     it++)
-				refed_regs.insert(it->first);
+	struct {
+		static visit_result Get(std::set<threadAndRegister> *refed_regs,
+					const IRExprGet *ieg) {
+			refed_regs->insert(ieg->reg);
+			return visit_continue;
 		}
-	}
+		static visit_result Phi(std::set<threadAndRegister> *refed_regs,
+					const StateMachineSideEffectPhi *phi) {
+			for (auto it = phi->generations.begin();
+			     it != phi->generations.end();
+			     it++)
+				refed_regs->insert(it->reg);
+			return visit_continue;
+		}
+	} foo;
+	static state_machine_visitor<std::set<threadAndRegister> > visitor;
+	visitor.irexpr.Get = foo.Get;
+	visitor.Phi = foo.Phi;
+	for (auto it = states.begin(); it != states.end(); it++)
+		visit_one_state(&refed_regs, &visitor, *it);
 	std::set<StateMachineSideEffecting *> ses;
 	enumStates(sm, &ses);
 	for (auto it = ses.begin(); it != ses.end(); it++) {
@@ -466,7 +513,15 @@ ssaDeadCode(StateMachine *sm, bool *done_something)
 				*done_something = true;
 				(*it)->sideEffect =
 					new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(Iop_BadPtr, smsel->addr),
+						bbdd::invert(
+							&scopes->bools,
+							exprbdd::to_bbdd(
+								&scopes->bools,
+								exprbdd::unop(
+									&scopes->exprs,
+									&scopes->bools,
+									Iop_BadPtr,
+									smsel->addr))),
 						true);
 			}
 			break;
@@ -480,8 +535,8 @@ ssaDeadCode(StateMachine *sm, bool *done_something)
 			}
 			break;
 		}
-		case StateMachineSideEffect::PointerAliasing: {
-			auto *p = (StateMachineSideEffectPointerAliasing *)effect;
+		case StateMachineSideEffect::ImportRegister: {
+			auto *p = (StateMachineSideEffectImportRegister *)effect;
 			if (!refed_regs.count(p->reg)) {
 				*done_something = true;
 				(*it)->sideEffect = NULL;
@@ -496,10 +551,10 @@ ssaDeadCode(StateMachine *sm, bool *done_something)
 }
 
 static StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
+deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something, bool is_ssa)
 {
 	if (is_ssa)
-		return ssaDeadCode(sm, done_something);
+		return ssaDeadCode(scopes, sm, done_something);
 
 	std::map<const StateMachineState *, int> stateLabels;
 
@@ -527,6 +582,7 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 	class _ {
 		LivenessMap &livenessMap;
 		bool *done_something;
+		SMScopes *scopes;
 
 		StateMachineSideEffect *doit(StateMachineSideEffect *e,
 					     const LivenessEntry &alive) {
@@ -538,7 +594,15 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 					(StateMachineSideEffectLoad *)e;
 				if (!alive.registerLiveData(smsel->target))
 					newEffect = new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(Iop_BadPtr, smsel->addr),
+						bbdd::invert(
+							&scopes->bools,
+							exprbdd::to_bbdd(
+								&scopes->bools,
+								exprbdd::unop(
+									&scopes->exprs,
+									&scopes->bools,
+									Iop_BadPtr,
+									smsel->addr))),
 						true);
 				break;
 			}
@@ -554,8 +618,9 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec =
 					(StateMachineSideEffectCopy *)e;
-				if (smsec->value->tag == Iex_Get &&
-				    ((IRExprGet *)smsec->value)->reg == smsec->target) {
+				if (smsec->value->isLeaf &&
+				    smsec->value->leaf()->tag == Iex_Get &&
+				    ((IRExprGet *)smsec->value->leaf())->reg == smsec->target) {
 					/* Copying a register
 					   or temporary back
 					   to itself is always
@@ -576,9 +641,9 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 					dead = true;
 				break;
 			}
-			case StateMachineSideEffect::PointerAliasing: {
-				auto *p = (StateMachineSideEffectPointerAliasing *)e;
-				if (!alive.registerLivePointer(p->reg))
+			case StateMachineSideEffect::ImportRegister: {
+				auto *p = (StateMachineSideEffectImportRegister *)e;
+				if (!alive.registerLiveData(p->reg))
 					dead = true;
 				break;
 			}
@@ -605,19 +670,18 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 				return;
 			}
 			case StateMachineState::Bifurcate:
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
-			case StateMachineState::Unreached:
+			case StateMachineState::Terminal:
 				/* Nothing needed */
 				return;
 			}
 			abort();
 		}
 
-		_(LivenessMap &_livenessMap, bool *_done_something)
-			: livenessMap(_livenessMap), done_something(_done_something)
+		_(LivenessMap &_livenessMap, bool *_done_something, SMScopes *_scopes)
+			: livenessMap(_livenessMap), done_something(_done_something),
+			  scopes(_scopes)
 		{}
-	} eliminateDeadCode(livenessMap, done_something);
+	} eliminateDeadCode(livenessMap, done_something, scopes);
 
 	for (auto it = allStates.begin();
 	     it != allStates.end();
@@ -638,8 +702,8 @@ deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
 }
 
 StateMachine *
-deadCodeElimination(StateMachine *sm, bool *done_something, bool is_ssa)
+deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something, bool is_ssa)
 {
-	return _deadCode::deadCodeElimination(sm, done_something, is_ssa);
+	return _deadCode::deadCodeElimination(scopes, sm, done_something, is_ssa);
 }
 

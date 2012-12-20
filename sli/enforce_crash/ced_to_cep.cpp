@@ -210,12 +210,6 @@ vex_type_to_bytecode_type(IRType ty)
 		return "bct_long";
 	case Ity_I128:
 		return "bct_longlong";
-	case Ity_F32:
-		return "bct_float";
-	case Ity_F64:
-		return "bct_double";
-	case Ity_V128:
-		return "bct_v128";
 	}
 	abort();
 }
@@ -270,21 +264,21 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 	case Iex_Const: {
 		IRExprConst *iec = (IRExprConst *)expr;
 		bytecode_op(f, "push_const", iec->type());
-		switch (iec->con->tag) {
-		case Ico_U1:
-			bytecode_const1(f, iec->con->Ico.U1);
+		switch (iec->ty) {
+		case Ity_I1:
+			bytecode_const1(f, iec->Ico.U1);
 			break;
-		case Ico_U8:
-			bytecode_const8(f, iec->con->Ico.U8);
+		case Ity_I8:
+			bytecode_const8(f, iec->Ico.U8);
 			break;
-		case Ico_U16:
-			bytecode_const16(f, iec->con->Ico.U16);
+		case Ity_I16:
+			bytecode_const16(f, iec->Ico.U16);
 			break;
-		case Ico_U32:
-			bytecode_const32(f, iec->con->Ico.U32);
+		case Ity_I32:
+			bytecode_const32(f, iec->Ico.U32);
 			break;
-		case Ico_U64:
-			bytecode_const64(f, iec->con->Ico.U64);
+		case Ity_I64:
+			bytecode_const64(f, iec->Ico.U64);
 			break;
 		default:
 			abort();

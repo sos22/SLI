@@ -15,6 +15,7 @@
 #include "query_cache.hpp"
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
+#include "visitor.hpp"
 
 #include "libvex_prof.hpp"
 #include "libvex_parse.h"
@@ -136,9 +137,32 @@ Oracle::ThreadRegisterAliasingConfiguration::ThreadRegisterAliasingConfiguration
 	   guest program is doing something non-C-like. */
 	stackInStack = false;
 	stackInMemory = false;
-	for (int i = 0; i < NR_REGS; i++)
-		v[i] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
+	/* At the start of a function, no registers point at the
+	   stack.  Anything which is an arg register might contain a
+	   pointer; anything else is assumed to not contain one. */
+	/* (The idea is that if it's not arg register then it must be
+	   dead at the function head, so even if it is a pointer it's
+	   guaranteed to never be dereferenced, so it might as well
+	   not be.  This is helpful because it means that spilling
+	   call clobbered registers doesn't instantly mean that the
+	   stack frame contains non-stack pointers, which can make
+	   later bits of analysis a little more accurate). */
+	v[0] = PointerAliasingSet::notAPointer; /* rax */
+	v[1] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rcx */
+	v[2] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rdx */
+	v[3] = PointerAliasingSet::notAPointer; /* rbx */
 	v[4] = PointerAliasingSet::stackPointer; /* rsp */
+	v[5] = PointerAliasingSet::notAPointer; /* rbx */
+	v[6] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rsi */
+	v[7] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* rdi */
+	v[8] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* r8 */
+	v[9] = PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer; /* r9 */
+	v[10] = PointerAliasingSet::notAPointer; /* r10 */
+	v[11] = PointerAliasingSet::notAPointer; /* r11 */
+	v[12] = PointerAliasingSet::notAPointer; /* r12 */
+	v[13] = PointerAliasingSet::notAPointer; /* r13 */
+	v[14] = PointerAliasingSet::notAPointer; /* r14 */
+	v[15] = PointerAliasingSet::notAPointer; /* r15 */
 }
 
 Oracle::ThreadRegisterAliasingConfiguration Oracle::ThreadRegisterAliasingConfiguration::unknown(5.3f, 12);
@@ -194,17 +218,6 @@ unsigned
 getInstructionSize(AddressSpace *as, const VexRip &rip)
 {
 	return getInstructionSize(as, StaticRip(rip));
-}
-
-bool
-Oracle::functionCanReturn(const VexRip &rip)
-{
-#warning Horrible, horrible hack
-	if (rip.unwrap_vexrip() == 0x768440 /* ut_dbg_assertion_failed */ ||
-	    rip.unwrap_vexrip() == 0x7683e0 /* ut_dbg_stop_thread */)
-		return false;
-	else
-		return true;
 }
 
 /* Try to find the RIPs of some stores which might conceivably have
@@ -905,24 +918,22 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 }
 
 static Oracle::LivenessSet
-irexprUsedValues(Oracle::LivenessSet old, IRExpr *w)
+irexprUsedValues(Oracle::LivenessSet old, const IRExpr *w)
 {
 	if (!w)
 		return old;
-	class _ : public IRExprTransformer {
-	public:
-		Oracle::LivenessSet old;
-		IRExpr *transformIex(IRExprGet *e) {
+	struct {
+		static visit_result Get(Oracle::LivenessSet *old, const IRExprGet *e) {
 			if (!e->reg.isTemp())
-				old = old.use(e->reg.asReg());
-			return IRExprTransformer::transformIex(e);
+				*old = old->use(e->reg.asReg());
+			return visit_continue;
 		}
-		_(Oracle::LivenessSet &_old)
-			: old(_old)
-		{}
-	} t(old);
-	t.doit(w);
-	return t.old;
+	} foo;
+	static irexpr_visitor<Oracle::LivenessSet> visitor;
+	visitor.Get = foo.Get;
+	Oracle::LivenessSet res(old);
+	visit_irexpr(&res, &visitor, w);
+	return res;
 }
 
 static PointerAliasingSet
@@ -950,11 +961,11 @@ irexprAliasingClass(IRExpr *expr,
 		}
 	}
 	case Iex_Const: {
-		IRConst *con = ((IRExprConst *)expr)->con;
+		IRExprConst *con = (IRExprConst *)expr;
 		if (con->Ico.U64 < 4096)
 			return PointerAliasingSet::notAPointer;
 		bool t;
-		if (opt.addressAccessible(((IRExprConst *)expr)->con->Ico.U64, &t) && !t)
+		if (opt.addressAccessible(((IRExprConst *)expr)->Ico.U64, &t) && !t)
 			return PointerAliasingSet::notAPointer;
 		else
 			return PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
@@ -1054,7 +1065,7 @@ irexprAliasingClass(IRExpr *expr,
 				/* Special case: if X points at space
 				   Y then X + k points at Y as well,
 				   if k is a small constant. */
-				long k = ((IRExprConst *)e->contents[0])->con->Ico.U64;
+				long k = ((IRExprConst *)e->contents[0])->Ico.U64;
 				if (k >= -4096 && k < 4096) {
 					return irexprAliasingClass(e->contents[1],
 								   config,
@@ -1140,6 +1151,24 @@ Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, cons
 {
 	return (irexprAliasingClass(a, *this, NULL, opt, false) &
 		irexprAliasingClass(b, *this, NULL, opt, false)).mightPoint();
+}
+
+bool
+Oracle::RegisterAliasingConfiguration::ptrsMightAlias(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt) const
+{
+	if (a->isLeaf && b->isLeaf)
+		return ptrsMightAlias(a->leaf(), b->leaf(), opt);
+	if (a->isLeaf)
+		return ptrsMightAlias(a, b->internal().trueBranch, opt) &&
+			ptrsMightAlias(a, b->internal().falseBranch, opt);
+	if (b->isLeaf || a->internal().rank < b->internal().rank)
+		return ptrsMightAlias(a->internal().trueBranch, b, opt) &&
+			ptrsMightAlias(a->internal().falseBranch, b, opt);
+	if (a->internal().rank == b->internal().rank)
+		return ptrsMightAlias(a->internal().trueBranch, b->internal().trueBranch, opt) &&
+			ptrsMightAlias(a->internal().falseBranch, b->internal().falseBranch, opt);
+	return ptrsMightAlias(a, b->internal().trueBranch, opt) &&
+		ptrsMightAlias(a, b->internal().falseBranch, opt);
 }
 
 void
@@ -1805,7 +1834,6 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 	printf("Calculate aliasing map...\n");
 	calculateAliasing(ths, token);
 	printf("Calculate RBP map...\n");
-	dbg_break("Here we are\n");
 	calculateRbpToRspOffsets(ths, token);
 	printf("Done static analysis phase\n");
 }
@@ -2559,12 +2587,12 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 			    a->contents[1]->tag == Iex_Get) {
 				IRExprGet *base = (IRExprGet *)a->contents[1];
 				if (base->reg.asReg() == OFFSET_amd64_RSP) {
-					delta_offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
+					delta_offset = ((IRExprConst *)a->contents[0])->Ico.U64;
 					if (debug_static_rbp_offsets)
 						printf("Set RSP = RSP+%ld\n", delta_offset);
 					goto join_predecessors;
 				} else if (base->reg.asReg() == OFFSET_amd64_RBP) {
-					offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
+					offset = ((IRExprConst *)a->contents[0])->Ico.U64;
 					state = RbpToRspOffsetStateValid;
 					if (debug_static_rbp_offsets)
 						printf("Set RSP = RBP+%ld\n", offset);
@@ -2597,7 +2625,7 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 			    a->contents[0]->tag == Iex_Const &&
 			    a->contents[1]->tag == Iex_Get) {
 				IRExprGet *base = (IRExprGet *)a->contents[1];
-				IRConst *o = ((IRExprConst *)a->contents[0])->con;
+				IRExprConst *o = (IRExprConst *)a->contents[0];
 				if (base->reg.asReg() == OFFSET_amd64_RBP) {
 					delta_offset = -o->Ico.U64;
 					if (debug_static_rbp_offsets)
@@ -2833,7 +2861,6 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 			ThreadRegisterAliasingConfiguration newExitConfig(bConfig);
 			newExitConfig |= tconfig;
 			if (newExitConfig != bConfig) {
-#warning This isn't even slightly right in the case where _branchRip hasn't been visited yet.
 				changed->push_back(_branchRip);
 				setAliasConfigOnEntryToInstruction(_branchRip, newExitConfig);
 			}
@@ -2864,6 +2891,8 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		/* This isn't perfectly accurate, but it's a pretty
 		   close approximation. */
 		bool stackEscapes = false;
+		if (tconfig.stackInMemory)
+			stackEscapes = true;
 		/* rcx = 2, rdx = 4, rsi = 0x40, rdi = 0x80,
 		 * r8 = 0x100, r9 = 0x200 */
 #define ARG_REGISTERS 0x3c6
@@ -2876,12 +2905,23 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				stackEscapes = true;
 		}
 #undef ARG_REGISTERS
-		if (stackEscapes)
+		if (stackEscapes) {
 			tconfig.v[0] = tconfig.v[0] | PointerAliasingSet::stackPointer;
+			tconfig.stackInStack = true;
+			tconfig.stackInMemory = true;
+		}
 		tconfig.v[0] = tconfig.v[0] | PointerAliasingSet::nonStackPointer;
-#warning What about clearing the state of call-clobbered registers?
-#warning Should allow the stack pointer to taint the return address if the stack has leaked in config!
-#warning Should really say the stack has leaked in config if it escapes here!
+		/* Clear call-clobbered registers.  Shouldn't really
+		   make a great deal of difference, but it's a bit
+		   prettier like this. */
+		tconfig.v[1] = PointerAliasingSet::notAPointer; /* rcx */
+		tconfig.v[2] = PointerAliasingSet::notAPointer; /* rdx */
+		tconfig.v[6] = PointerAliasingSet::notAPointer; /* rsi */
+		tconfig.v[7] = PointerAliasingSet::notAPointer; /* rdi */
+		tconfig.v[8] = PointerAliasingSet::notAPointer; /* r8 */
+		tconfig.v[9] = PointerAliasingSet::notAPointer; /* r9 */
+		tconfig.v[10] = PointerAliasingSet::notAPointer; /* r10 */
+		tconfig.v[11] = PointerAliasingSet::notAPointer; /* r11 */
 	}
 	
 	std::vector<StaticRip> _fallThroughRips;
@@ -3789,18 +3829,14 @@ Oracle::identifyLibraryCall(const VexRip &vr)
 PointerAliasingSet
 Oracle::RegisterAliasingConfiguration::lookupRegister(const threadAndRegister &r, bool buildingAliasTable) const
 {
-	/* This is only safe for SSA-form machines */
 	if (buildingAliasTable)
 		assert(r.gen() == 0);
-	else
-		assert(r.gen() != 0);
 
 	/* Assume that anything which isn't a GPR isn't a pointer.
-	   True for x86. */
+	   Reasonable for x86. */
 	if (r.asReg() >= Oracle::NR_REGS * 8)
 		return PointerAliasingSet::notAPointer;
-	/* Can't say anything about non-default generations. */
-	if (!buildingAliasTable && r.gen() != (unsigned)-1)
+	if (!buildingAliasTable)
 		return PointerAliasingSet::anything;
 	for (auto it = content.begin(); it != content.end(); it++) {
 		if (it->first == r.tid())
@@ -4048,7 +4084,7 @@ stack_offset(Oracle *oracle, unsigned long rip)
 					    ((IRExprGet *)iea->contents[1])->reg != p->target) {
 						failed = true;
 					} else {
-						q.second -= ((IRExprConst *)iea->contents[0])->con->Ico.U64;
+						q.second -= ((IRExprConst *)iea->contents[0])->Ico.U64;
 					}
 					break;
 				}

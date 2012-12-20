@@ -292,24 +292,21 @@ genRandomUlong()
 
 static IRExpr *mk_const(unsigned long val, IRType ty)
 {
-	IRConst *c;
 	switch (ty) {
 	case Ity_I8:
-		c = IRConst_U8(val);
-		break;
+		return IRExpr_Const_U8(val);
 	case Ity_I16:
-		c = IRConst_U16(val);
-		break;
+		return IRExpr_Const_U16(val);
 	case Ity_I32:
-		c = IRConst_U32(val);
-		break;
+		return IRExpr_Const_U32(val);
 	case Ity_I64:
-		c = IRConst_U64(val);
+		return IRExpr_Const_U64(val);
+	case Ity_INVALID:
+	case Ity_I1:
+	case Ity_I128:
 		break;
-	default:
-		abort();
 	}
-	return IRExpr_Const(c);
+	abort();
 }
 
 static evalExprRes evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom);
@@ -416,15 +413,13 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		auto *p = (StateMachineSideEffectPhi *)effect;
 		for (auto it = regOrder.rbegin(); it != regOrder.rend(); it++) {
 			for (auto it2 = p->generations.begin(); it2 != p->generations.end(); it2++) {
-				if (it2->first == *it) {
-					assert(currentState.regs.count(it2->first));
-					if (it2->second) {
-						assert(eval(it2->second) == currentState.regs[it2->first]);
-					}
-					currentState.regs[p->reg] = currentState.regs[it2->first];
+				if (it2->reg == *it) {
+					assert(currentState.regs.count(it2->reg));
+					assert(eval(it2->val) == currentState.regs[it2->reg]);
+					currentState.regs[p->reg] = currentState.regs[it2->reg];
 					regOrder.push_back(p->reg);
 					log(state, "phi satisfied by %s (%lx)",
-					    it2->first.name(),
+					    it2->reg.name(),
 					    currentState.regs[p->reg]);
 					return true;
 				}
@@ -436,26 +431,26 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		{
 			int nr_gen_m1 = 0;
 			for (auto it = p->generations.begin(); it != p->generations.end(); it++)
-				if (it->first.gen() == (unsigned)-1)
+				if (it->reg.gen() == (unsigned)-1)
 					nr_gen_m1++;
 			assert(nr_gen_m1 == 1);
 		}
 #endif
 		for (auto it = p->generations.begin(); it != p->generations.end(); it++) {
-			if (it->first.gen() == (unsigned)-1) {
-				if (!currentState.regs.count(it->first)) {
-					currentState.regs[it->first] = genRandomUlong();
+			if (it->reg.gen() == (unsigned)-1) {
+				if (!currentState.regs.count(it->reg)) {
+					currentState.regs[it->reg] = genRandomUlong();
 					log(state,
 					    "phi satisfied by initial load of %s, randomly generated %lx",
-					    it->first.name(),
-					    currentState.regs[it->first]);
+					    it->reg.name(),
+					    currentState.regs[it->reg]);
 				} else {
 					log(state,
 					    "phi satisfied by initial load of %s, already set to %lx",
-					    it->first.name(),
-					    currentState.regs[it->first]);
+					    it->reg.name(),
+					    currentState.regs[it->reg]);
 				}
-				currentState.regs[p->reg] = currentState.regs[it->first];
+				currentState.regs[p->reg] = currentState.regs[it->reg];
 				regOrder.push_back(p->reg);
 				return true;
 			}
@@ -506,21 +501,25 @@ top:
 		state = sme->target;
 		goto top;
 	}
-	case StateMachineState::Unreached:
-		log(state, "unreached");
-		return evalRes::unreached();
-	case StateMachineState::Crash:
-		log(state, "crash");
-		if (!currentState.consistent())
+	case StateMachineState::Terminal:
+		switch ( ((StateMachineTerminal *)state.get())->res ) {
+		case smr_unreached:
+			log(state, "unreached");
 			return evalRes::unreached();
-		if (opt.mustStoreBeforeCrash())
+		case smr_crash:
+			log(state, "crash");
+			if (!currentState.consistent())
+				return evalRes::unreached();
+			if (opt.mustStoreBeforeCrash())
+				return evalRes::survive();
+			return evalRes::crash();
+		case smr_survive:
+			log(state, "no-crash");
+			if (!currentState.consistent())
+				return evalRes::unreached();
 			return evalRes::survive();
-		return evalRes::crash();
-	case StateMachineState::NoCrash:
-		log(state, "no-crash");
-		if (!currentState.consistent())
-			return evalRes::unreached();
-		return evalRes::survive();
+		}
+		abort();
 	}
 	abort();
 }
@@ -539,29 +538,6 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 	struct : public IRExprTransformer {
 		EvalState *ctxt;
 		bool *usedRandom;
-		IRExpr *mk_const(unsigned long val, IRType ty) {
-			IRConst *c;
-			switch (ty) {
-			case Ity_I1:
-				c = IRConst_U1(val);
-				break;
-			case Ity_I8:
-				c = IRConst_U8(val);
-				break;
-			case Ity_I16:
-				c = IRConst_U16(val);
-				break;
-			case Ity_I32:
-				c = IRConst_U32(val);
-				break;
-			case Ity_I64:
-				c = IRConst_U64(val);
-				break;
-			default:
-				abort();
-			}
-			return IRExpr_Const(c);
-		}
 		IRExpr *transformIex(IRExprGet *ieg) {
 			if (!ctxt->regs.count(ieg->reg) &&
 			    usedRandom) {
@@ -585,7 +561,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 				return IRExpr_Load(e->ty, addr);
 			assert(addr->tag == Iex_Const);
 			assert(addr->type() == Ity_I64);
-			unsigned long address = ((IRExprConst *)addr)->con->Ico.U64;
+			unsigned long address = ((IRExprConst *)addr)->Ico.U64;
 			unsigned long val;
 			switch (ctxt->loadMemory(address, &val)) {
 			case EvalState::lmr_bad_ptr:
@@ -663,7 +639,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 				return IRExpr_Unop(e->op, arg);
 			assert(arg->tag == Iex_Const);
 			assert(arg->type() == Ity_I64);
-			unsigned long address = ((IRExprConst *)arg)->con->Ico.U64;
+			unsigned long address = ((IRExprConst *)arg)->Ico.U64;
 			evalExprRes err(ctxt->badPtr(address));
 			unsigned long res;
 			if (err.unpack(&res))
@@ -694,7 +670,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 	IRExpr *a = trans.doit(what);
 	a = simplifyIRExpr(a, AllowableOptimisations::defaultOptimisations);
 	if (a->tag == Iex_Const)
-		return evalExprRes::success(((IRExprConst *)a)->con->Ico.U64);
+		return evalExprRes::success(((IRExprConst *)a)->Ico.U64);
 	else
 		return evalExprRes::failed();
 }
@@ -1066,9 +1042,9 @@ static bool
 makeEq(EvalState &res, IRExpr *arg1, IRExpr *arg2, bool wantTrue, bool *usedRandom)
 {
 	if (arg1->tag == Iex_Const)
-		return makeEqConst(res, ((IRExprConst *)arg1)->con->Ico.U64, arg2, wantTrue, usedRandom);
+		return makeEqConst(res, ((IRExprConst *)arg1)->Ico.U64, arg2, wantTrue, usedRandom);
 	else if (arg2->tag == Iex_Const)
-		return makeEqConst(res, ((IRExprConst *)arg2)->con->Ico.U64, arg1, wantTrue, usedRandom);
+		return makeEqConst(res, ((IRExprConst *)arg2)->Ico.U64, arg1, wantTrue, usedRandom);
 	else
 		return makeEqConst(res, 0, arg1, true, usedRandom) &&
 			makeEqConst(res, 0, arg2, wantTrue, usedRandom);
@@ -1195,22 +1171,21 @@ generateConcreteSatisfier(EvalState &res, const satisfier &abstract_sat, bool *u
 	std::vector<IRExpr *> falsePrimaries;
 	std::vector<IRExpr *> trueBadPtrs;
 	std::vector<IRExpr *> falseBadPtrs;
-	for (auto it = abstract_sat.memo.begin(); it != abstract_sat.memo.end(); it++) {
-		if (!it->second.second)
-			continue;
-		if (it->second.first) {
-			if (it->first->tag == Iex_Unop &&
-			    ((IRExprUnop *)it->first)->op == Iop_BadPtr)
-				trueBadPtrs.push_back(it->first);
-			else
-				truePrimaries.push_back(it->first);
-		} else {
-			if (it->first->tag == Iex_Unop &&
-			    ((IRExprUnop *)it->first)->op == Iop_BadPtr)
-				falseBadPtrs.push_back(it->first);
-			else
-				falsePrimaries.push_back(it->first);
-		}
+	for (auto it = abstract_sat.trueBooleans.begin(); it != abstract_sat.trueBooleans.end(); it++) {
+		IRExpr *e = *it;
+		if (e->tag == Iex_Unop &&
+		    ((IRExprUnop *)e)->op == Iop_BadPtr)
+			trueBadPtrs.push_back(e);
+		else
+			truePrimaries.push_back(e);
+	}
+	for (auto it = abstract_sat.falseBooleans.begin(); it != abstract_sat.falseBooleans.end(); it++) {
+		IRExpr *e = *it;
+		if (e->tag == Iex_Unop &&
+		    ((IRExprUnop *)e)->op == Iop_BadPtr)
+			falseBadPtrs.push_back(e);
+		else
+			falsePrimaries.push_back(e);
 	}
 
 	/* If we're allowed to randomise, take the expressions in

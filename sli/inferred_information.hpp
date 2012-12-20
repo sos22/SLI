@@ -6,6 +6,7 @@
 
 #include "state_machine.hpp"
 #include "alloc_mai.hpp"
+#include "visitor.hpp"
 
 class Oracle;
 class OracleInterface;
@@ -13,18 +14,19 @@ class OracleInterface;
 class CrashSummary : public GarbageCollected<CrashSummary, &ir_heap> {
 	void buildAliasingTable(Oracle *);
 public:
+	SMScopes *scopes;
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
 	IRExpr *verificationCondition;
-	typedef std::pair<StateMachineSideEffectStore *, StateMachineSideEffectStore *> macroSectionT;
-	std::vector<macroSectionT> macroSections;
 	typedef std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> aliasingEntryT;
 	std::vector<aliasingEntryT> aliasing;
 	MaiMap *mai;
-	CrashSummary(StateMachine *_loadMachine, StateMachine *_storeMachine,
+	CrashSummary(SMScopes *_scopes, StateMachine *_loadMachine,
+		     StateMachine *_storeMachine,
 		     IRExpr *_verificationCondition, Oracle *oracle,
 		     MaiMap *_mai)
-		: loadMachine(_loadMachine),
+		: scopes(_scopes),
+		  loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
 		  verificationCondition(_verificationCondition),
 		  mai(_mai)
@@ -32,16 +34,16 @@ public:
 		buildAliasingTable(oracle);
 	}
 
-	CrashSummary(StateMachine *_loadMachine,
+	CrashSummary(SMScopes *_scopes,
+		     StateMachine *_loadMachine,
 		     StateMachine *_storeMachine,
 		     IRExpr *_verificationCondition,
-		     const std::vector<macroSectionT> &_macroSections,
 		     const std::vector<aliasingEntryT> &_aliasing,
 		     MaiMap *_mai)
-		: loadMachine(_loadMachine),
+		: scopes(_scopes),
+		  loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
 		  verificationCondition(_verificationCondition),
-		  macroSections(_macroSections),
 		  aliasing(_aliasing),
 		  mai(_mai)
 	{}
@@ -50,23 +52,18 @@ public:
 		hv(loadMachine);
 		hv(storeMachine);
 		hv(verificationCondition);
-		for (auto it = macroSections.begin();
-		     it != macroSections.end();
-		     it++) {
-			hv(it->first);
-			hv(it->second);
-		}
 		hv(mai);
 	}
 	NAMED_CLASS
 };
 
 void printCrashSummary(CrashSummary *cs, FILE *f);
-CrashSummary *readCrashSummary(int fd);
-bool parseCrashSummary(CrashSummary **out, const char *buf, const char **succ);
-CrashSummary *readBugReport(const char *name, char **metadata);
+CrashSummary *readCrashSummary(SMScopes *scopes, int fd);
+bool parseCrashSummary(SMScopes *scopes, CrashSummary **out, const char *buf, const char **succ);
+CrashSummary *readBugReport(SMScopes *scopes, const char *name, char **metadata);
 class StateMachineTransformer;
-CrashSummary *transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans,
+CrashSummary *transformCrashSummary(CrashSummary *input,
+				    StateMachineTransformer &trans,
 				    bool *done_something = NULL);
 CrashSummary *internCrashSummary(CrashSummary *cs);
 
@@ -77,19 +74,20 @@ public:
 };
 
 typedef gc_heap_map<VexRip, StateMachineState, &ir_heap>::type InferredInformation;
-StateMachine *buildProbeMachine(CfgLabelAllocator &allocLabel,
+StateMachine *buildProbeMachine(SMScopes *scopes,
+				CfgLabelAllocator &allocLabel,
 				const VexPtr<Oracle> &oracle,
 				const VexRip &interestingRip,
 				ThreadId tid,
 				const AllowableOptimisations &opt,
 				VexPtr<MaiMap, &ir_heap> &mai,
 				GarbageCollectionToken token);
-bool diagnoseCrash(CfgLabelAllocator &allocLabel,
+bool diagnoseCrash(SMScopes *scopes,
+		   CfgLabelAllocator &allocLabel,
 		   const DynAnalysisRip &,
 		   VexPtr<StateMachine, &ir_heap> probeMachine,
 		   const VexPtr<Oracle> &oracle,
 		   FixConsumer &df,
-		   bool needRemoteMacroSections,
 		   const AllowableOptimisations &opt,
 		   VexPtr<MaiMap, &ir_heap> &mai,
 		   GarbageCollectionToken token);
@@ -99,9 +97,34 @@ void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 FixConsumer &haveAFix,
 				 bool considerEverything,
 				 GarbageCollectionToken token);
-IRExpr *findHappensBeforeRelations(const VexPtr<CrashSummary, &ir_heap> &summary,
-				   const VexPtr<OracleInterface> &oracle,
-				   const AllowableOptimisations &opt,
-				   GarbageCollectionToken token);
+
+template <typename ctxtT> static visit_result
+visit_crash_summary(ctxtT *ctxt,
+		    const state_machine_visitor<ctxtT> *visitor,
+		    const CrashSummary *sm)
+{
+	std::set<const StateMachineState *> memo;
+	visit_result res;
+	res = visit_irexpr(ctxt, &visitor->irexpr, sm->verificationCondition);
+	if (res == visit_continue)
+		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
+	if (res == visit_continue)
+		res = visit_state_machine(ctxt, visitor, sm->storeMachine, memo);
+	return res;
+}
+template <typename ctxtT> static visit_result
+visit_crash_summary(ctxtT *ctxt,
+		    const irexpr_visitor<ctxtT> *visitor,
+		    const CrashSummary *sm)
+{
+	std::set<const StateMachineState *> memo;
+	visit_result res;
+	res = visit_irexpr(ctxt, visitor, sm->verificationCondition);
+	if (res == visit_continue)
+		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
+	if (res == visit_continue)
+		res = visit_state_machine(ctxt, visitor, sm->storeMachine, memo);
+	return res;
+}
 
 #endif /* !INFERRED_INFORMATION_HPP__ */

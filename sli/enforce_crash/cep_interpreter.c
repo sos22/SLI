@@ -40,6 +40,7 @@
 static unsigned long prng_state = 0xe6b16c0386053e31;
 static int disable_sideconditions;
 static int force_delay; /* -1 -> on send, 0 -> use rebalancer, 1 -> on receive */
+static int skip_context_check;
 
 extern void clone(void);
 static void (*__GI__exit)(int res);
@@ -400,6 +401,8 @@ static int
 ctxt_matches(const struct cep_entry_ctxt *ctxt, const struct reg_struct *regs)
 {
 	unsigned x;
+	if (skip_context_check)
+		return 1;
 	for (x = 0; x < ctxt->nr_stack_slots; x++) {
 		unsigned long guest_val;
 		if (!fetch_guest(&guest_val, regs->rsp + ctxt->stack[x].offset))
@@ -732,12 +735,10 @@ bytecode_fetch_const(const unsigned short **bytecode,
 		(*bytecode)++;
 		break;
 	case bct_int:
-	case bct_float:
 		res = (*bytecode)[0] | ((unsigned)(*bytecode)[1] << 16);
 		(*bytecode) += 2;
 		break;
 	case bct_long:
-	case bct_double:
 		res = (*bytecode)[0] |
 			((unsigned long)(*bytecode)[1] << 16) |
 			((unsigned long)(*bytecode)[2] << 32) |
@@ -745,7 +746,6 @@ bytecode_fetch_const(const unsigned short **bytecode,
 		(*bytecode) += 4;
 		break;
 	case bct_longlong:
-	case bct_v128:
 		/* Can't just return these as longs */
 		abort();
 	}
@@ -763,13 +763,10 @@ bytecode_mask(unsigned long val, enum byte_code_type type)
 	case bct_short:
 		return val & 0xffff;
 	case bct_int:
-	case bct_float:
 		return val & 0xffffffff;
 	case bct_long:
-	case bct_double:
 		return val;
 	case bct_longlong:
-	case bct_v128:
 		/* Can't just return these as longs */
 		abort();
 	}
@@ -932,9 +929,6 @@ bct_size(enum byte_code_type type)
 	case bct_int: return 4;
 	case bct_long: return 8;
 	case bct_longlong: return 16;
-	case bct_float: return 4;
-	case bct_double: return 8;
-	case bct_v128: return 16;
 	}
 	abort();
 }
@@ -1182,7 +1176,7 @@ eval_bytecode(const unsigned short *bytecode,
 				res = 0;
 				goto out;
 			}
-			if (type == bct_longlong || type == bct_v128) {
+			if (type == bct_longlong) {
 				bytecode_push_longlong(&stack, buf);
 			} else {
 				unsigned long data = bytecode_mask(*(unsigned long *)buf, type);
@@ -2991,6 +2985,8 @@ activate(void)
 		force_delay = -1;
 	else if (getenv("SOS22_DELAY_RX"))
 		force_delay = 1;
+	if (getenv("SOS22_DISABLE_CTXT_CHECK"))
+		skip_context_check = 1;
 
 	printf("Patching %s\n", buf);
 

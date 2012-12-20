@@ -1,4 +1,4 @@
-#! /bin/sh
+#! /bin/bash
 
 exe="$1"
 preload="$2"
@@ -6,30 +6,32 @@ data="$3"
 
 sample() {
     t=$(mktemp)
-    while true
+    cntr=0
+    while [ $cntr -lt 100 ]
     do
 	LD_PRELOAD=$preload $exe > $t && break
+	cntr=$(($cntr + 1))
     done
     grep "Survived" $t | sed 's/Survived, \([0-9]*\) read events and \([0-9]*\) write events.*/\1 \2/'
+    rm -f "$t"
 }
 
 get_dist() {
+    t2=$(mktemp)
+    cat > "$t2"
     t=$(mktemp)
-    check_dist > $t
+    cat "$t2" | check_dist > $t
     if grep -q "Cannot reject normality " "$t"
     then
 	mean=$(grep "pop stats" "$t" | sed 's/.*mean = \([-0-9.]*\),.*/\1/')
 	sd=$(grep "pop stats" "$t" | sed 's/.*sd = \([-0-9.]*\),.*/\1/')
+	read mean sd < <(./tests/minimal_direct/sane_round.py "$mean" "$sd")
 	echo "\$$mean \\pm $sd\$"
-    elif grep -q "Might be uniform" "$t"
-    then
-	low=$(grep "Might be uniform" "$t" | sed 's/.*uniform(\([0-9.-]*\),.*/\1/')
-	high=$(grep "Might be uniform" "$t" | sed 's/.*uniform(\([0-9.-]*\), \([0-9.-]*\)).*/\2/')
-	echo "\$\[$low, $high\]\$"
     else
-	echo "failed"
+	cat "$t2" | ./tests/minimal_direct/characterise_percentiles.py ""
     fi
     rm "$t"
+    rm "$t2"
 }
 
 : > "$data"
@@ -40,12 +42,5 @@ done
 
 t_read=$(cut -d' ' -f 1 $data | discard_outliers.py 0.05 | get_dist)
 t_write=$(cut -d' ' -f 2 $data | discard_outliers.py 0.05 | get_dist)
-if [ "$t_read" != "failed" ] && [ "$t_write" != "failed" ]
-then
-    echo "Read = $t_read ; Write = $t_write"
-    exit 0
-fi
-
-echo "Failed with simple characterisation; try with more data" >&2
-
-echo "Stats failed!"
+echo "Read = $t_read ; Write = $t_write"
+exit 0

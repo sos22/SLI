@@ -13,12 +13,16 @@
 int
 main(int argc, char *argv[])
 {
-	if (argc < 4)
+	if (argc < 7)
 		errx(1, "not enough arguments");
 
 	init_sli();
 
-	VexPtr<StateMachine, &ir_heap> sm(readStateMachine(0));
+	SMScopes scopes;
+	if (!scopes.read(argv[6]))
+		errx(1, "reading %s as scopes file", argv[6]);
+
+	VexPtr<StateMachine, &ir_heap> sm(readStateMachine(&scopes, 0));
 
 	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
 	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
@@ -29,7 +33,7 @@ main(int argc, char *argv[])
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack();
-	sm = optimiseStateMachine(mai, sm, opt, oracle, true, ALLOW_GC);
+	sm = optimiseStateMachine(&scopes, mai, sm, opt, oracle, true, ALLOW_GC);
 	printStateMachine(sm, stdout);
 
 	return 0;

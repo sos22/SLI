@@ -83,23 +83,23 @@ operationAssociates(IROp op)
 /*---------------------------------------------------------------*/
 /*--- Printing the IR                                         ---*/
 /*---------------------------------------------------------------*/
+const char *nameIRType(IRType ty)
+{
+   switch (ty) {
+      case Ity_INVALID: return "Ity_INVALID";
+      case Ity_I1:      return "I1";
+      case Ity_I8:      return "I8";
+      case Ity_I16:     return "I16";
+      case Ity_I32:     return "I32";
+      case Ity_I64:     return "I64";
+      case Ity_I128:    return "I128";
+   }
+   return vex_asprintf("ty(0x%x)", ty);
+}
 
 void ppIRType ( IRType ty, FILE *f )
 {
-   switch (ty) {
-      case Ity_INVALID: fprintf(f, "Ity_INVALID"); break;
-      case Ity_I1:      fprintf(f,  "I1");   break;
-      case Ity_I8:      fprintf(f,  "I8");   break;
-      case Ity_I16:     fprintf(f,  "I16");  break;
-      case Ity_I32:     fprintf(f,  "I32");  break;
-      case Ity_I64:     fprintf(f,  "I64");  break;
-      case Ity_I128:    fprintf(f,  "I128"); break;
-      case Ity_F32:     fprintf(f,  "F32");  break;
-      case Ity_F64:     fprintf(f,  "F64");  break;
-      case Ity_V128:    fprintf(f,  "V128"); break;
-      default: fprintf(f, "ty = 0x%x\n", (Int)ty);
-               vpanic("ppIRType");
-   }
+  fprintf(f, "%s", nameIRType(ty));
 }
 
 bool parseIRType(IRType *out, const char *str, const char **suffix)
@@ -119,34 +119,28 @@ bool parseIRType(IRType *out, const char *str, const char **suffix)
   do_type(I32);
   do_type(I64);
   do_type(I128);
-  do_type(F32);
-  do_type(F64);
-  do_type(V128);
   do_type(I1);
 #undef do_type
   return false;
 }
 
-void ppIRConst ( IRConst* con, FILE* f )
+static void ppIRConst ( const IRExprConst *con, FILE* f )
 {
-   union { ULong i64; Double f64; } u;
    vassert(sizeof(ULong) == sizeof(Double));
-   switch (con->tag) {
-      case Ico_U1:   fprintf(f,  "%d:I1",        con->Ico.U1 ? 1 : 0); break;
-      case Ico_U8:   fprintf(f,  "0x%x:I8",      (UInt)(con->Ico.U8)); break;
-      case Ico_U16:  fprintf(f,  "0x%x:I16",     (UInt)(con->Ico.U16)); break;
-      case Ico_U32:  fprintf(f,  "0x%x:I32",     (UInt)(con->Ico.U32)); break;
-      case Ico_U64:  fprintf(f,  "0x%llx:I64",   (ULong)(con->Ico.U64)); break;
-      case Ico_F64:  u.f64 = con->Ico.F64;
-                     fprintf(f,  "F64{0x%llx}",  u.i64);
-                     break;
-      case Ico_F64i: fprintf(f,  "F64i{0x%llx}", con->Ico.F64i); break;
-      case Ico_V128: fprintf(f,  "V128{0x%04x}", (UInt)(con->Ico.V128)); break;
-      default: vpanic("ppIRConst");
+   switch (con->ty) {
+      case Ity_I1:   fprintf(f,  "%d:I1",        con->Ico.U1 ? 1 : 0); return;
+      case Ity_I8:   fprintf(f,  "0x%x:I8",      (UInt)(con->Ico.U8)); return;
+      case Ity_I16:  fprintf(f,  "0x%x:I16",     (UInt)(con->Ico.U16)); return;
+      case Ity_I32:  fprintf(f,  "0x%x:I32",     (UInt)(con->Ico.U32)); return;
+      case Ity_I64:  fprintf(f,  "0x%llx:I64",   (ULong)(con->Ico.U64)); return;
+      case Ity_I128: fprintf(f,  "U128{0x%llx, 0x%llx}", con->Ico.U128.hi, con->Ico.U128.lo); return;
+      case Ity_INVALID:
+	break;
    }
+   abort();
 }
 
-static bool parseIRConst(IRConst **out, const char *str, const char **suffix)
+static bool parseIRConst(IRExprConst **out, const char *str, const char **suffix)
 {
   int val1;
   unsigned long val2;
@@ -154,20 +148,20 @@ static bool parseIRConst(IRConst **out, const char *str, const char **suffix)
 
   if (parseDecimalInt(&val1, str, &str2) &&
       parseThisString(":I1", str2, suffix)) {
-    *out = IRConst_U1(val1);
+    *out = IRExpr_Const_U1(val1);
     return true;
   }
   if (parseThisString("0x", str, &str2) &&
       parseHexUlong(&val2, str2, &str)) {
     *out = NULL;
     if (parseThisString(":I8", str, suffix))
-      *out = IRConst_U8(val2);
+      *out = IRExpr_Const_U8(val2);
     else if (parseThisString(":I16", str, suffix))
-      *out = IRConst_U16(val2);
+      *out = IRExpr_Const_U16(val2);
     else if (parseThisString(":I32", str, suffix))
-      *out = IRConst_U32(val2);
+      *out = IRExpr_Const_U32(val2);
     else if (parseThisString(":I64", str, suffix))
-      *out = IRConst_U64(val2);
+      *out = IRExpr_Const_U64(val2);
     if (*out)
       return true;
   }
@@ -176,19 +170,28 @@ static bool parseIRConst(IRConst **out, const char *str, const char **suffix)
       parseThisChar('}', str, suffix)) {
     union { ULong x; Double y; } u;
     u.x = val2;
-    *out = IRConst_F64(u.y);
+    *out = IRExpr_Const_F64(u.y);
     return true;
   }
   if (parseThisString("F64i{0x", str, &str) &&
       parseHexUlong(&val2, str, &str) &&
       parseThisChar('}', str, suffix)) {
-    *out = IRConst_F64i(val2);
+    *out = IRExpr_Const_F64i(val2);
     return true;
   }
   if (parseThisString("V128{0x", str, &str) &&
       parseHexUlong(&val2, str, &str) &&
       parseThisChar('}', str, suffix)) {
-    *out = IRConst_V128(val2);
+    *out = IRExpr_Const_V128(val2);
+    return true;
+  }
+  unsigned long val3;
+  if (parseThisString("U128{0x", str, &str) &&
+      parseHexUlong(&val2, str, &str) &&
+      parseThisString(", 0x", str, &str) &&
+      parseHexUlong(&val3, str, &str) &&
+      parseThisString("}", str, suffix)) {
+    *out = IRExpr_Const_U128(val2, val3);
     return true;
   }
   return false;
@@ -297,7 +300,8 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
   iter(CasCmpEQ)				\
   iter(CasCmpNE)				\
   iter(Not)					\
-  iter(Neg)
+  iter(Neg)					\
+  iter(Noop)
 
 #define foreach_op_unsized(iter)		\
 	   iter(8Uto16)				\
@@ -746,6 +750,7 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(And1)				\
 	     iter(Or1)				\
 	     iter(Xor1)				\
+	     iter(Noop128)
 
 void ppIROp ( IROp op, FILE* f )
 {
@@ -1124,9 +1129,9 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
     }
   } else if (str[0] == 'F') {
     /* Could be a float const */
-    IRConst *c;
+    IRExprConst *c;
     if (parseIRConst(&c, str, suffix)) {
-      *out = IRExpr_Const(c);
+      *out = c;
       return true;
     }
 
@@ -1153,9 +1158,9 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
     /* Fall through and try to parse as a prefix irop. */
   } else if ((str[0] >= '0' && str[0] <= '9') || str[0] == 'V' || str[0] == '-') {
     /* Constant of some sort. */
-    IRConst *c;
+    IRExprConst *c;
     if (parseIRConst(&c, str, suffix)) {
-      *out = IRExpr_Const(c);
+      *out = c;
       return true;
     }
 
@@ -1430,7 +1435,7 @@ IRExprLoad::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
 void
 IRExprConst::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const
 {
-      ppIRConst(con, f);
+  ppIRConst(this, f);
 }
 void
 IRExprCCall::_prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &tags) const
@@ -1657,72 +1662,84 @@ void ppIRSB ( IRSB* bb, FILE* f )
 
 /* Constructors -- IRConst */
 
-IRConst* IRConst_U1 ( Bool bit )
+IRExprConst* IRExpr_Const_U1 ( bool bit )
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U1;
+   IRExprConst* c = new IRExprConst();
+   c->ty     = Ity_I1;
    c->Ico.U1  = bit;
-   /* call me paranoid; I don't care :-) */
    vassert(bit == False || bit == True);
    return c;
 }
-IRConst* IRConst_U8 ( UChar u8 )
+IRExprConst* IRExpr_Const_U8 ( unsigned char u8)
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U8;
+   IRExprConst* c = new IRExprConst();
+   c->ty     = Ity_I8;
    c->Ico.U8  = u8;
    return c;
 }
-IRConst* IRConst_U16 ( UShort u16 )
+IRExprConst* IRExpr_Const_U16 ( unsigned short u16 )
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U16;
+   IRExprConst* c = new IRExprConst();
+   c->ty     = Ity_I16;
    c->Ico.U16 = u16;
    return c;
 }
-IRConst* IRConst_U32 ( UInt u32 )
+IRExprConst* IRExpr_Const_U32 ( unsigned u32 )
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U32;
+   IRExprConst* c = new IRExprConst();
+   c->ty      = Ity_I32;
    c->Ico.U32 = u32;
    return c;
 }
-static VexPtr<IRConst, &ir_heap> magicConstant0;
-IRConst* IRConst_U64 ( ULong u64 )
+static VexPtr<IRExprConst, &ir_heap> magicConstant0;
+IRExprConst* IRExpr_Const_U64 ( unsigned long u64 )
 {
    if (u64 == 0) {
      if (!magicConstant0) {
-       magicConstant0 = new IRConst();
-       magicConstant0->tag = Ico_U64;
+       magicConstant0 = new IRExprConst();
+       magicConstant0->ty = Ity_I64;
        magicConstant0->Ico.U64 = 0;
      }
      return magicConstant0;
    }
 
-   IRConst* c = new IRConst();
-   c->tag     = Ico_U64;
+   IRExprConst* c = new IRExprConst();
+   c->ty      = Ity_I64;
    c->Ico.U64 = u64;
    return c;
 }
-IRConst* IRConst_F64 ( Double f64 )
+IRExprConst* IRExpr_Const_F64 ( Double f64 )
 {
-   IRConst* c = new IRConst();
-   c->tag     = Ico_F64;
-   c->Ico.F64 = f64;
+   IRExprConst* c = new IRExprConst();
+   c->ty     = Ity_I64;
+   *(double *)&c->Ico.U64 = f64;
    return c;
 }
-IRConst* IRConst_F64i ( ULong f64i )
+IRExprConst* IRExpr_Const_F64i ( unsigned long f64i )
 {
-   IRConst* c = new IRConst();
-   c->tag      = Ico_F64i;
-   c->Ico.F64i = f64i;
+   IRExprConst* c = new IRExprConst();
+   c->ty      = Ity_I64;
+   c->Ico.U64 = f64i;
    return c;
 }
-IRConst* IRConst_V128 ( UShort con )
+IRExprConst* IRExpr_Const_V128 ( unsigned short con )
 {
-   IRConst* c = new IRConst();
-   c->tag      = Ico_V128;
-   c->Ico.V128 = con;
+   IRExprConst* c = new IRExprConst();
+   unsigned long a = con;
+   a <<= 16;
+   a |= con;
+   a = a | (a << 32);
+   c->ty      = Ity_I128;
+   c->Ico.U128.lo = a;
+   c->Ico.U128.hi = a;
+   return c;
+}
+IRExprConst* IRExpr_Const_U128 ( unsigned long hi, unsigned long lo )
+{
+   IRExprConst* c = new IRExprConst();
+   c->ty      = Ity_I128;
+   c->Ico.U128.lo = lo;
+   c->Ico.U128.hi = hi;
    return c;
 }
 
@@ -1758,11 +1775,10 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 
 /* Constructors -- IRExpr */
 
-IRExpr* IRExpr_Get ( threadAndRegister reg, IRType ty) {
-   IRExpr *e = new IRExprGet(reg, ty);
-   return e;
+IRExprGet* IRExpr_Get ( threadAndRegister reg, IRType ty) {
+   return new IRExprGet(reg, ty);
 }
-IRExpr* IRExpr_Get ( Int off, IRType ty, unsigned tid, unsigned generation ) {
+IRExprGet* IRExpr_Get ( Int off, IRType ty, unsigned tid, unsigned generation ) {
    return IRExpr_Get(threadAndRegister::reg(tid, off, generation), ty);
 }
 IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
@@ -1908,6 +1924,8 @@ bool inverseUnops(IROp a, IROp b)
 }
 
 IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
+   if (op >= Iop_Noop8 && op <= Iop_Noop128)
+     return arg;
    IRExprUnop* e       = new IRExprUnop();
    /* Short-circuit a bunch of redundant type conversions
       e.g. 64to1(1to64(x)) */
@@ -1927,19 +1945,6 @@ IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
    IRExprLoad* e        = new IRExprLoad();
    e->ty   = ty;
    e->addr = addr;
-   return e;
-}
-IRExpr* IRExpr_Const ( IRConst* con ) {
-   if (con == magicConstant0) {
-     static VexPtr<IRExprConst, &ir_heap> cached;
-     if (!cached) {
-       cached = new IRExprConst();
-       cached->con = con;
-     }
-     return cached;
-   }
-   IRExprConst* e        = new IRExprConst();
-   e->con = con;
    return e;
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
@@ -1996,7 +2001,7 @@ IRExpr* IRExpr_Associative(IROp op, ...)
        if (argsL[src]->tag == Iex_Const) {
 	 IRExprConst *iec = (IRExprConst *)argsL[src];
 	 foundConstant = iec;
-	 acc += iec->con->Ico.U64;
+	 acc += iec->Ico.U64;
        } else {
 	 argsL[dest] = argsL[src];
 	 dest--;
@@ -2011,7 +2016,7 @@ IRExpr* IRExpr_Associative(IROp op, ...)
        argsL[0] = foundConstant;
      } else if (dest > 0) {
        /* Found multiple constants -> fold them together. */
-       argsL[0] = IRExpr_Const(IRConst_U64(acc));
+       argsL[0] = IRExpr_Const_U64(acc);
        if (nr_args == dest + 1) {
 	 /* Everything was a constant */
 	 return argsL[0];
@@ -2298,20 +2303,20 @@ void typeOfPrimop ( IROp op,
                     IRType* t_arg3, IRType* t_arg4 )
 {
 #  define UNARY(_ta1,_td)                                      \
-      *t_dst = (_td); *t_arg1 = (_ta1); break
+      *t_dst = (_td); *t_arg1 = (_ta1); return
 #  define BINARY(_ta1,_ta2,_td)                                \
-     *t_dst = (_td); *t_arg1 = (_ta1); *t_arg2 = (_ta2); break
+     *t_dst = (_td); *t_arg1 = (_ta1); *t_arg2 = (_ta2); return
 #  define TERNARY(_ta1,_ta2,_ta3,_td)                          \
      *t_dst = (_td); *t_arg1 = (_ta1);                         \
-     *t_arg2 = (_ta2); *t_arg3 = (_ta3); break
+     *t_arg2 = (_ta2); *t_arg3 = (_ta3); return
 #  define QUATERNARY(_ta1,_ta2,_ta3,_ta4,_td)                  \
      *t_dst = (_td); *t_arg1 = (_ta1);                         \
      *t_arg2 = (_ta2); *t_arg3 = (_ta3);                       \
-     *t_arg4 = (_ta4); break
+     *t_arg4 = (_ta4); return
 #  define COMPARISON(_ta)                                      \
-     *t_dst = Ity_I1; *t_arg1 = *t_arg2 = (_ta); break;
+     *t_dst = Ity_I1; *t_arg1 = *t_arg2 = (_ta); return;
 #  define UNARY_COMPARISON(_ta)                                \
-     *t_dst = Ity_I1; *t_arg1 = (_ta); break;
+     *t_dst = Ity_I1; *t_arg1 = (_ta); return;
 
    /* Rounding mode values are always Ity_I32, encoded as per
       IRRoundingMode */
@@ -2323,6 +2328,8 @@ void typeOfPrimop ( IROp op,
    *t_arg3 = Ity_INVALID;
    *t_arg4 = Ity_INVALID;
    switch (op) {
+      case Iop_INVALID:
+         abort();
       case Iop_Add8: case Iop_Sub8: case Iop_Mul8: 
       case Iop_Or8:  case Iop_And8: case Iop_Xor8:
          BINARY(Ity_I8,Ity_I8, Ity_I8);
@@ -2380,15 +2387,19 @@ void typeOfPrimop ( IROp op,
 
       case Iop_Not8:
       case Iop_Neg8:
+      case Iop_Noop8:
          UNARY(Ity_I8, Ity_I8);
       case Iop_Not16:
       case Iop_Neg16:
+      case Iop_Noop16:
          UNARY(Ity_I16, Ity_I16);
       case Iop_Not32:
       case Iop_Neg32:
+      case Iop_Noop32:
          UNARY(Ity_I32, Ity_I32);
       case Iop_Not64:
       case Iop_Neg64:
+      case Iop_Noop64:
       case Iop_CmpNEZ32x2: case Iop_CmpNEZ16x4: case Iop_CmpNEZ8x8:
          UNARY(Ity_I64, Ity_I64);
 
@@ -2508,61 +2519,61 @@ void typeOfPrimop ( IROp op,
       case Iop_MulF64:    case Iop_DivF64:
       case Iop_AddF64r32: case Iop_SubF64r32: 
       case Iop_MulF64r32: case Iop_DivF64r32:
-         TERNARY(ity_RMode,Ity_F64,Ity_F64, Ity_F64);
+         TERNARY(ity_RMode,Ity_I64,Ity_I64, Ity_I64);
 
       case Iop_NegF64: case Iop_AbsF64: 
-         UNARY(Ity_F64, Ity_F64);
+         UNARY(Ity_I64, Ity_I64);
 
       case Iop_SqrtF64:
       case Iop_SqrtF64r32:
-         BINARY(ity_RMode,Ity_F64, Ity_F64);
+         BINARY(ity_RMode,Ity_I64, Ity_I64);
 
       case Iop_CmpF64:
-         BINARY(Ity_F64,Ity_F64, Ity_I32);
+         BINARY(Ity_I64,Ity_I64, Ity_I32);
       case Iop_CmpF32:
-         BINARY(Ity_F32,Ity_F32, Ity_I32);
+         BINARY(Ity_I32,Ity_I32, Ity_I32);
 
-      case Iop_F64toI16: BINARY(ity_RMode,Ity_F64, Ity_I16);
-      case Iop_F64toI32: BINARY(ity_RMode,Ity_F64, Ity_I32);
-      case Iop_F64toI64: BINARY(ity_RMode,Ity_F64, Ity_I64);
+      case Iop_F64toI16: BINARY(ity_RMode,Ity_I64, Ity_I16);
+      case Iop_F64toI32: BINARY(ity_RMode,Ity_I64, Ity_I32);
+      case Iop_F64toI64: BINARY(ity_RMode,Ity_I64, Ity_I64);
 
-      case Iop_I16toF64: UNARY(Ity_I16, Ity_F64);
-      case Iop_I32toF64: UNARY(Ity_I32, Ity_F64);
-      case Iop_I64toF64: BINARY(ity_RMode,Ity_I64, Ity_F64);
+      case Iop_I16toF64: UNARY(Ity_I16, Ity_I64);
+      case Iop_I32toF64: UNARY(Ity_I32, Ity_I64);
+      case Iop_I64toF64: BINARY(ity_RMode,Ity_I64, Ity_I64);
 
-      case Iop_F32toF64: UNARY(Ity_F32, Ity_F64);
-      case Iop_F64toF32: BINARY(ity_RMode,Ity_F64, Ity_F32);
+      case Iop_F32toF64: UNARY(Ity_I32, Ity_I64);
+      case Iop_F64toF32: BINARY(ity_RMode,Ity_I64, Ity_I32);
 
-      case Iop_ReinterpI64asF64: UNARY(Ity_I64, Ity_F64);
-      case Iop_ReinterpF64asI64: UNARY(Ity_F64, Ity_I64);
-      case Iop_ReinterpI32asF32: UNARY(Ity_I32, Ity_F32);
-      case Iop_ReinterpF32asI32: UNARY(Ity_F32, Ity_I32);
+      case Iop_ReinterpI64asF64: UNARY(Ity_I64, Ity_I64);
+      case Iop_ReinterpF64asI64: UNARY(Ity_I64, Ity_I64);
+      case Iop_ReinterpI32asF32: UNARY(Ity_I32, Ity_I32);
+      case Iop_ReinterpF32asI32: UNARY(Ity_I32, Ity_I32);
 
       case Iop_AtanF64: case Iop_Yl2xF64:  case Iop_Yl2xp1F64: 
       case Iop_ScaleF64: case Iop_PRemF64: case Iop_PRem1F64:
-         TERNARY(ity_RMode,Ity_F64,Ity_F64, Ity_F64);
+         TERNARY(ity_RMode,Ity_I64,Ity_I64, Ity_I64);
 
       case Iop_PRemC3210F64: case Iop_PRem1C3210F64:
-         TERNARY(ity_RMode,Ity_F64,Ity_F64, Ity_I32);
+         TERNARY(ity_RMode,Ity_I64,Ity_I64, Ity_I32);
 
       case Iop_SinF64: case Iop_CosF64: case Iop_TanF64: 
       case Iop_2xm1F64:
-      case Iop_RoundF64toInt: BINARY(ity_RMode,Ity_F64, Ity_F64);
+      case Iop_RoundF64toInt: BINARY(ity_RMode,Ity_I64, Ity_I64);
 
       case Iop_MAddF64: case Iop_MSubF64:
       case Iop_MAddF64r32: case Iop_MSubF64r32:
-         QUATERNARY(ity_RMode,Ity_F64,Ity_F64,Ity_F64, Ity_F64);
+         QUATERNARY(ity_RMode,Ity_I64,Ity_I64,Ity_I64, Ity_I64);
 
       case Iop_Est5FRSqrt:
       case Iop_RoundF64toF64_NEAREST: case Iop_RoundF64toF64_NegINF:
       case Iop_RoundF64toF64_PosINF: case Iop_RoundF64toF64_ZERO:
-         UNARY(Ity_F64, Ity_F64);
+         UNARY(Ity_I64, Ity_I64);
       case Iop_RoundF64toF32:
-         BINARY(ity_RMode,Ity_F64, Ity_F64);
+         BINARY(ity_RMode,Ity_I64, Ity_I64);
       case Iop_CalcFPRF:
-         UNARY(Ity_F64, Ity_I32);
+         UNARY(Ity_I64, Ity_I32);
       case Iop_TruncF64asF32:
-         UNARY(Ity_F64, Ity_F32);
+         UNARY(Ity_I64, Ity_I32);
 
       case Iop_I32UtoFx4:
       case Iop_I32StoFx4:
@@ -2572,21 +2583,22 @@ void typeOfPrimop ( IROp op,
       case Iop_RoundF32x4_RP:
       case Iop_RoundF32x4_RN:
       case Iop_RoundF32x4_RZ:
-         UNARY(Ity_V128, Ity_V128);
+      case Iop_Noop128:
+         UNARY(Ity_I128, Ity_I128);
 
-      case Iop_64HLtoV128: BINARY(Ity_I64,Ity_I64, Ity_V128);
+      case Iop_64HLtoV128: BINARY(Ity_I64,Ity_I64, Ity_I128);
       case Iop_V128to64: case Iop_V128HIto64: 
-         UNARY(Ity_V128, Ity_I64);
+         UNARY(Ity_I128, Ity_I64);
 
-      case Iop_V128to32:    UNARY(Ity_V128, Ity_I32);
-      case Iop_32UtoV128:   UNARY(Ity_I32, Ity_V128);
-      case Iop_64UtoV128:   UNARY(Ity_I64, Ity_V128);
-      case Iop_SetV128lo32: BINARY(Ity_V128,Ity_I32, Ity_V128);
-      case Iop_SetV128lo64: BINARY(Ity_V128,Ity_I64, Ity_V128);
+      case Iop_V128to32:    UNARY(Ity_I128, Ity_I32);
+      case Iop_32UtoV128:   UNARY(Ity_I32, Ity_I128);
+      case Iop_64UtoV128:   UNARY(Ity_I64, Ity_I128);
+      case Iop_SetV128lo32: BINARY(Ity_I128,Ity_I32, Ity_I128);
+      case Iop_SetV128lo64: BINARY(Ity_I128,Ity_I64, Ity_I128);
 
-      case Iop_Dup8x16: UNARY(Ity_I8, Ity_V128);
-      case Iop_Dup16x8: UNARY(Ity_I16, Ity_V128);
-      case Iop_Dup32x4: UNARY(Ity_I32, Ity_V128);
+      case Iop_Dup8x16: UNARY(Ity_I8, Ity_I128);
+      case Iop_Dup16x8: UNARY(Ity_I16, Ity_I128);
+      case Iop_Dup32x4: UNARY(Ity_I32, Ity_I128);
 
       case Iop_CmpEQ32Fx4: case Iop_CmpLT32Fx4:
       case Iop_CmpEQ64Fx2: case Iop_CmpLT64Fx2:
@@ -2644,7 +2656,7 @@ void typeOfPrimop ( IROp op,
       case Iop_InterleaveLO8x16: case Iop_InterleaveLO16x8: 
       case Iop_InterleaveLO32x4: case Iop_InterleaveLO64x2:
       case Iop_Perm8x16:
-         BINARY(Ity_V128,Ity_V128, Ity_V128);
+         BINARY(Ity_I128,Ity_I128, Ity_I128);
 
       case Iop_NotV128:
       case Iop_Recip32Fx4: case Iop_Recip32F0x4:
@@ -2655,7 +2667,7 @@ void typeOfPrimop ( IROp op,
       case Iop_Sqrt64Fx2:  case Iop_Sqrt64F0x2:
       case Iop_CmpNEZ8x16: case Iop_CmpNEZ16x8:
       case Iop_CmpNEZ32x4: case Iop_CmpNEZ64x2:
-         UNARY(Ity_V128, Ity_V128);
+         UNARY(Ity_I128, Ity_I128);
 
       case Iop_ShlV128: case Iop_ShrV128:
       case Iop_ShlN8x16: case Iop_ShlN16x8: 
@@ -2663,26 +2675,25 @@ void typeOfPrimop ( IROp op,
       case Iop_ShrN8x16: case Iop_ShrN16x8: 
       case Iop_ShrN32x4: case Iop_ShrN64x2:
       case Iop_SarN8x16: case Iop_SarN16x8: case Iop_SarN32x4:
-         BINARY(Ity_V128,Ity_I8, Ity_V128);
+         BINARY(Ity_I128,Ity_I8, Ity_I128);
 
       case Iop_CmpEQF32:
-	  BINARY(Ity_F32, Ity_F32, Ity_I1);
+	  BINARY(Ity_I32, Ity_I32, Ity_I1);
       case Iop_CmpEQF64:
-	  BINARY(Ity_F64, Ity_F64, Ity_I1);
+	  BINARY(Ity_I64, Ity_I64, Ity_I1);
       case Iop_CmpEQI128:
 	  BINARY(Ity_I128, Ity_I128, Ity_I1);
       case Iop_CmpEQV128:
-	  BINARY(Ity_V128, Ity_V128, Ity_I1);
-
-      default:
-	 ppIROp(op, stderr);
-         vpanic("typeOfPrimop");
+	  BINARY(Ity_I128, Ity_I128, Ity_I1);
    }
 #  undef UNARY
 #  undef BINARY
 #  undef TERNARY
 #  undef COMPARISON
 #  undef UNARY_COMPARISON
+
+   ppIROp(op, stderr);
+   vpanic("typeOfPrimop");
 }
 
 
@@ -2724,19 +2735,19 @@ IRTemp newIRTemp ( IRTypeEnv* env )
 /*--- Helper functions for the IR -- finding types of exprs   ---*/
 /*---------------------------------------------------------------*/
 
-IRType typeOfIRConst ( IRConst* con )
+IRType typeOfIRExprConst ( IRExprConst* con )
 {
-   switch (con->tag) {
-      case Ico_U1:    return Ity_I1;
-      case Ico_U8:    return Ity_I8;
-      case Ico_U16:   return Ity_I16;
-      case Ico_U32:   return Ity_I32;
-      case Ico_U64:   return Ity_I64;
-      case Ico_F64:   return Ity_F64;
-      case Ico_F64i:  return Ity_F64;
-      case Ico_V128:  return Ity_V128;
-      default: vpanic("typeOfIRConst");
+   switch (con->ty) {
+      case Ity_I1:    return Ity_I1;
+      case Ity_I8:    return Ity_I8;
+      case Ity_I16:   return Ity_I16;
+      case Ity_I32:   return Ity_I32;
+      case Ity_I64:   return Ity_I64;
+      case Ity_I128:  return Ity_I128;
+      case Ity_INVALID:
+	break;
    }
+   abort();
 }
 
 /* Is this any value actually in the enumeration 'IRType' ? */
@@ -2746,8 +2757,6 @@ Bool isPlausibleIRType ( IRType ty )
       case Ity_INVALID: case Ity_I1:
       case Ity_I8: case Ity_I16: case Ity_I32: 
       case Ity_I64: case Ity_I128:
-      case Ity_F32: case Ity_F64:
-      case Ity_V128:
          return True;
       default: 
          return False;
@@ -2797,22 +2806,23 @@ void sanityCheckFail ( IRSB* bb, IRStmt* stmt, const char* what )
 /*--- Misc helper functions                                   ---*/
 /*---------------------------------------------------------------*/
 
-Bool eqIRConst ( IRConst* c1, IRConst* c2 )
+Bool eqIRExprConst ( const IRExprConst* c1, const IRExprConst* c2 )
 {
-   if (c1->tag != c2->tag)
+   if (c1->ty != c2->ty)
       return False;
 
-   switch (c1->tag) {
-      case Ico_U1:  return toBool( (1 & c1->Ico.U1) == (1 & c2->Ico.U1) );
-      case Ico_U8:  return toBool( c1->Ico.U8  == c2->Ico.U8 );
-      case Ico_U16: return toBool( c1->Ico.U16 == c2->Ico.U16 );
-      case Ico_U32: return toBool( c1->Ico.U32 == c2->Ico.U32 );
-      case Ico_U64: return toBool( c1->Ico.U64 == c2->Ico.U64 );
-      case Ico_F64: return toBool( c1->Ico.F64 == c2->Ico.F64 );
-      case Ico_F64i: return toBool( c1->Ico.F64i == c2->Ico.F64i );
-      case Ico_V128: return toBool( c1->Ico.V128 == c2->Ico.V128 );
-      default: vpanic("eqIRConst");
+   switch (c1->ty) {
+      case Ity_I1:  return toBool( (1 & c1->Ico.U1) == (1 & c2->Ico.U1) );
+      case Ity_I8:  return toBool( c1->Ico.U8  == c2->Ico.U8 );
+      case Ity_I16: return toBool( c1->Ico.U16 == c2->Ico.U16 );
+      case Ity_I32: return toBool( c1->Ico.U32 == c2->Ico.U32 );
+      case Ity_I64: return toBool( c1->Ico.U64 == c2->Ico.U64 );
+      case Ity_I128:
+	return toBool( c1->Ico.U128.hi == c2->Ico.U128.hi &&
+		       c1->Ico.U128.lo == c2->Ico.U128.lo );
+      case Ity_INVALID: break;
    }
+  vpanic("eqIRExprConst");
 }
 
 Int sizeofIRType ( IRType ty )
@@ -2822,21 +2832,22 @@ Int sizeofIRType ( IRType ty )
       case Ity_I16:  return 2;
       case Ity_I32:  return 4;
       case Ity_I64:  return 8;
-      case Ity_F32:  return 4;
-      case Ity_F64:  return 8;
-      case Ity_V128: return 16;
-      default: fprintf(stderr, "\n"); ppIRType(ty, stderr); fprintf(stderr, "\n");
-               vpanic("sizeofIRType");
+      case Ity_I128: return 16;
+      case Ity_I1:
+      case Ity_INVALID:
+	break;
    }
+   fprintf(stderr, "\n"); ppIRType(ty, stderr); fprintf(stderr, "\n");
+   vpanic("sizeofIRType");
 }
 
 IRExpr* mkIRExpr_HWord ( HWord hw )
 {
    vassert(sizeof(void*) == sizeof(HWord));
    if (sizeof(HWord) == 4)
-      return IRExpr_Const(IRConst_U32((UInt)hw));
+      return IRExpr_Const_U32((UInt)hw);
    if (sizeof(HWord) == 8)
-      return IRExpr_Const(IRConst_U64((ULong)hw));
+      return IRExpr_Const_U64((ULong)hw);
    vpanic("mkIRExpr_HWord");
 }
 
@@ -2845,7 +2856,7 @@ IRDirty* unsafeIRDirty_0_N ( Int regparms, const char* name, void* addr,
 {
    IRDirty* d = emptyIRDirty();
    d->cee   = mkIRCallee ( regparms, name, addr );
-   d->guard = IRExpr_Const(IRConst_U1(True));
+   d->guard = IRExpr_Const_U1(True);
    d->args  = args;
    return d;
 }
@@ -2856,7 +2867,7 @@ IRDirty* unsafeIRDirty_1_N ( threadAndRegister dst,
 {
    IRDirty* d = emptyIRDirty();
    d->cee   = mkIRCallee ( regparms, name, addr );
-   d->guard = IRExpr_Const(IRConst_U1(True));
+   d->guard = IRExpr_Const_U1(True);
    d->args  = args;
    d->tmp   = dst;
    return d;

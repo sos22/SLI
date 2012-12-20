@@ -36,7 +36,8 @@ computeMaxDistanceMap(StateMachine *sm, std::map<StateMachineState *, int> &dist
 }
 
 void
-ControlDominationMap::init(StateMachine *sm,
+ControlDominationMap::init(SMScopes *scopes,
+			   StateMachine *sm,
 			   const AllowableOptimisations &opt)
 {
 	stateLabelT stateLabels;
@@ -60,41 +61,40 @@ ControlDominationMap::init(StateMachine *sm,
 	   states in the right order. */
 	typedef std::pair<int, StateMachineState *> needsUpdateEntryT;
 	std::set<needsUpdateEntryT> needsUpdate;
-	dominatingExpressions[sm->root] = IRExpr_Const(IRConst_U1(1));
+	dominatingExpressions[sm->root] = scopes->bools.cnst(true);
 	needsUpdate.insert(needsUpdateEntryT(0, sm->root));
 	struct _ {
 		const AllowableOptimisations &opt;
-		std::map<StateMachineState *, IRExpr *> &dominatingExpressions;
+		bbdd::scope *scope;
+		std::map<StateMachineState *, bbdd *> &dominatingExpressions;
 		std::map<StateMachineState *, int> &stateDistances;
 		std::set<needsUpdateEntryT> &needsUpdate;
-		void operator()(StateMachineState *s, IRExpr *cond) {
-			cond = simplifyIRExpr(cond, opt);
+		void operator()(StateMachineState *s, bbdd *cond) {
 			auto it_did_insert = dominatingExpressions.insert(
-				std::pair<StateMachineState *, IRExpr *>(s, cond));
+				std::pair<StateMachineState *, bbdd *>(s, cond));
 			auto it = it_did_insert.first;
 			auto did_insert = it_did_insert.second;
 			if (did_insert) {
 				needsUpdate.insert(needsUpdateEntryT(stateDistances[s], s));
 				return;
 			}
-			IRExpr *oldCond = it->second;
-			it->second = IRExpr_Binop(Iop_Or1,
-						  oldCond,
-						  cond);
-			it->second = simplify_via_anf(simplifyIRExpr(it->second, opt));
-			if (!definitelyEqual(it->second, oldCond, opt))
+			bbdd *oldCond = it->second;
+			it->second = bbdd::Or(scope, oldCond, cond);
+			if (it->second != oldCond)
 				needsUpdate.insert(needsUpdateEntryT(stateDistances[s], s));
 		}
 		_(const AllowableOptimisations &_opt,
-		  std::map<StateMachineState *, IRExpr *> &_dominatingExpressions,
+		  bbdd::scope *_scope,
+		  std::map<StateMachineState *, bbdd *> &_dominatingExpressions,
 		  std::map<StateMachineState *, int> &_stateDistances,
 		  std::set<needsUpdateEntryT> &_needsUpdate)
 			: opt(_opt),
+			  scope(_scope),
 			  dominatingExpressions(_dominatingExpressions),
 			  stateDistances(_stateDistances),
 			  needsUpdate(_needsUpdate)
 		{}
-	} discoverPathToState(opt, dominatingExpressions, stateDistances, needsUpdate);
+	} discoverPathToState(opt, &scopes->bools, dominatingExpressions, stateDistances, needsUpdate);
 
 	while (!needsUpdate.empty() && !TIMEOUT) {
 		auto it = needsUpdate.begin();
@@ -114,25 +114,23 @@ ControlDominationMap::init(StateMachine *sm,
 		/* Build the exprAtExit starting from the expression
 		   at entry to the state. */
 
-		IRExpr *exprAtEntry = dominatingExpressions[s];
+		bbdd *exprAtEntry = dominatingExpressions[s];
 		assert(exprAtEntry); /* should definitely have been
 					populated by now */
 		switch (s->type) {
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
+		case StateMachineState::Terminal:
 			/* No exit states, so it doesn't matter what
 			 * the exprAtExit is. */
 			break;
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-			IRExpr *trueCond = IRExpr_Binop(
-				Iop_And1,
+			bbdd *trueCond = bbdd::And(
+				&scopes->bools,
 				smb->condition,
 				exprAtEntry);
-			IRExpr *falseCond = IRExpr_Binop(
-				Iop_And1,
-				IRExpr_Unop(Iop_Not1, smb->condition),
+			bbdd *falseCond = bbdd::And(
+				&scopes->bools,
+				bbdd::invert(&scopes->bools, smb->condition),
 				exprAtEntry);
 			discoverPathToState(smb->trueTarget, trueCond);
 			discoverPathToState(smb->falseTarget, falseCond);
@@ -142,31 +140,35 @@ ControlDominationMap::init(StateMachine *sm,
 			/* The side effect can also tell us something
 			   interesting about what happens next. */
 			StateMachineSideEffecting *effecting = (StateMachineSideEffecting *)s;
-			IRExpr *exprAtExit = exprAtEntry;
+			bbdd *exprAtExit = exprAtEntry;
 			if (effecting->sideEffect) {
 				switch (effecting->sideEffect->type) {
 				case StateMachineSideEffect::Load:
 				case StateMachineSideEffect::Store: {
 					StateMachineSideEffectMemoryAccess *m = (StateMachineSideEffectMemoryAccess *)effecting->sideEffect;
-					exprAtExit = IRExpr_Binop(
-						Iop_And1,
-						IRExpr_Unop(
-							Iop_Not1,
-							IRExpr_Unop(
-								Iop_BadPtr,
-								m->addr)),
-						exprAtEntry);
+					exprAtExit = bbdd::And(
+						&scopes->bools,
+						exprAtEntry,
+						bbdd::invert(
+							&scopes->bools,
+							exprbdd::to_bbdd(
+								&scopes->bools,
+								exprbdd::unop(
+									&scopes->exprs,
+									&scopes->bools,
+									Iop_BadPtr,
+									m->addr))));
 					break;
 				}
 				case StateMachineSideEffect::Unreached:
-					exprAtExit = IRExpr_Const(IRConst_U1(0));
+					exprAtExit = scopes->bools.cnst(false);
 					break;
 				case StateMachineSideEffect::AssertFalse: {
 					StateMachineSideEffectAssertFalse *a = (StateMachineSideEffectAssertFalse *)effecting->sideEffect;
-					exprAtExit = IRExpr_Binop(
-						Iop_And1,
-						IRExpr_Unop(
-							Iop_Not1,
+					exprAtExit = bbdd::And(
+						&scopes->bools,
+						bbdd::invert(
+							&scopes->bools,
 							a->value),
 						exprAtEntry);
 					break;
@@ -177,7 +179,7 @@ ControlDominationMap::init(StateMachine *sm,
 				case StateMachineSideEffect::EndAtomic:
 				case StateMachineSideEffect::StartFunction:
 				case StateMachineSideEffect::EndFunction:
-				case StateMachineSideEffect::PointerAliasing:
+				case StateMachineSideEffect::ImportRegister:
 				case StateMachineSideEffect::StackLayout:
 					break;
 				}
@@ -201,6 +203,7 @@ ControlDominationMap::prettyPrint(FILE *f, const stateLabelT &labels)
 	     it != dominatingExpressions.end();
 	     it++) {
 		auto it2 = labels.find(it->first);
-		fprintf(f, "l%d: %s\n", it2 == labels.end() ? -1 : it2->second, nameIRExpr(it->second));
+		fprintf(f, "l%d:\n", it2 == labels.end() ? -1 : it2->second);
+		it->second->prettyPrint(stdout);
 	}
 }

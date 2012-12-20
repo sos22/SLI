@@ -8,9 +8,11 @@
 #include "offline_analysis.hpp"
 #include "nf.hpp"
 #include "dummy_oracle.hpp"
+#include "visitor.hpp"
 
 static StateMachine *
-optimiseStateMachineAssuming(StateMachine *sm,
+optimiseStateMachineAssuming(SMScopes *scopes,
+			     StateMachine *sm,
 			     IRExpr *assumption,
 			     bool assumptionIsTrue)
 {
@@ -20,7 +22,9 @@ optimiseStateMachineAssuming(StateMachine *sm,
 		if ( (assumptionIsTrue && a->op == Iop_And1) ||
 		     (!assumptionIsTrue && a->op == Iop_Or1) ) {
 			for (int i = 0; i < a->nr_arguments; i++)
-				sm = optimiseStateMachineAssuming(sm, a->contents[i],
+				sm = optimiseStateMachineAssuming(scopes,
+								  sm,
+								  a->contents[i],
 								  assumptionIsTrue);
 			return sm;
 		}
@@ -28,7 +32,7 @@ optimiseStateMachineAssuming(StateMachine *sm,
 	if (assumption->tag == Iex_Unop) {
 		IRExprUnop *a = (IRExprUnop *)assumption;
 		if (a->op == Iop_Not1)
-			return optimiseStateMachineAssuming(sm, a->arg,
+			return optimiseStateMachineAssuming(scopes, sm, a->arg,
 							    !assumptionIsTrue);
 	}
 
@@ -58,7 +62,7 @@ optimiseStateMachineAssuming(StateMachine *sm,
 		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 			if (e == assumption) {
 				*done_something = true;
-				return IRExpr_Const(IRConst_U1(assumptionIsTrue));
+				return IRExpr_Const_U1(assumptionIsTrue);
 			}
 			if (assumptionIsTrue &&
 			    e->tag == Iex_EntryPoint &&
@@ -68,7 +72,7 @@ optimiseStateMachineAssuming(StateMachine *sm,
 				assert( ((IRExprEntryPoint *)e)->label != ((IRExprEntryPoint *)assumption)->label);
 				/* If we entered at t1:labelA we can't
 				 * also have entered at t1:labelB */
-				return IRExpr_Const(IRConst_U1(0));
+				return IRExpr_Const_U1(false);
 			}
 			return StateMachineTransformer::transformIRExpr(e, done_something);
 		}
@@ -76,32 +80,34 @@ optimiseStateMachineAssuming(StateMachine *sm,
 	} doit;
 	doit.assumption = assumption;
 	doit.assumptionIsTrue = assumptionIsTrue;
-	return doit.transform(sm);
+	return doit.transform(scopes, sm);
 }
 
 static void
-findAllMais(CrashSummary *summary, std::set<MemoryAccessIdentifier> &out)
+findAllMais(const CrashSummary *summary, std::set<MemoryAccessIdentifier> &out)
 {
 	std::set<StateMachineSideEffectMemoryAccess *> acc;
 	enumSideEffects(summary->loadMachine, acc);
 	enumSideEffects(summary->storeMachine, acc);
 	for (auto it = acc.begin(); it != acc.end(); it++)
 		out.insert( (*it)->rip );
-	struct : public StateMachineTransformer {
-		std::set<MemoryAccessIdentifier> *out;
-		IRExpr *transformIex(IRExprHappensBefore *hb) {
+	struct {
+		static visit_result HappensBefore(std::set<MemoryAccessIdentifier> *out,
+						  const IRExprHappensBefore *hb) {
 			out->insert(hb->before);
 			out->insert(hb->after);
-			return hb;
+			return visit_continue;
 		}
-		IRExpr *transformIex(IRExprFreeVariable *f) {
+		static visit_result FreeVariable(std::set<MemoryAccessIdentifier> *out,
+						 const IRExprFreeVariable *f) {
 			out->insert(f->id);
-			return f;
+			return visit_continue;
 		}
-		bool rewriteNewStates() const { return false; }
-	} d;
-	d.out = &out;
-	transformCrashSummary(summary, d);
+	} foo;
+	static irexpr_visitor<std::set<MemoryAccessIdentifier> > visitor;
+	visitor.HappensBefore = foo.HappensBefore;
+	visitor.FreeVariable = foo.FreeVariable;
+	visit_crash_summary(&out, &visitor, summary);
 }
 
 static void
@@ -134,7 +140,7 @@ removeImpossibleRoots(IRExpr *a, const std::set<std::pair<unsigned, CfgLabel> > 
 		const std::set<std::pair<unsigned, CfgLabel> > *roots;
 		IRExpr *transformIex(IRExprEntryPoint *iep) {
 			if (!roots->count(std::pair<unsigned, CfgLabel>(iep->thread, iep->label)))
-				return IRExpr_Const(IRConst_U1(0));
+				return IRExpr_Const_U1(false);
 			return iep;
 		}
 	} doit;
@@ -164,22 +170,22 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 			return input;
 
 		cnf_condition = internIRExpr(cnf_condition, intern);
-		input->loadMachine = optimiseStateMachineAssuming(input->loadMachine, cnf_condition,
+		input->loadMachine = optimiseStateMachineAssuming(input->scopes,
+								  input->loadMachine,
+								  cnf_condition,
 								  true);
-		input->storeMachine = optimiseStateMachineAssuming(input->storeMachine, cnf_condition,
+		input->storeMachine = optimiseStateMachineAssuming(input->scopes,
+								   input->storeMachine,
+								   cnf_condition,
 								   true);
 	}
 
 	sm = input->loadMachine;
 	VexPtr<MaiMap, &ir_heap> mai(input->mai);
-	input->loadMachine = removeAnnotations(mai, input->loadMachine, optIn.enableignoreSideEffects(), oracle, true, token);
+	input->loadMachine = removeAnnotations(input->scopes, mai, input->loadMachine, optIn.enableignoreSideEffects(), oracle, true, token);
 
 	sm = input->storeMachine;
-	input->storeMachine = removeAnnotations(mai, input->storeMachine, optIn, oracle, true, token);
-
-	if (input->loadMachine->root->type == StateMachineState::Unreached ||
-	    input->storeMachine->root->type == StateMachineState::Unreached)
-		input->verificationCondition = IRExpr_Const(IRConst_U1(0));
+	input->storeMachine = removeAnnotations(input->scopes, mai, input->storeMachine, optIn, oracle, true, token);
 
 	std::set<std::pair<unsigned, CfgLabel> > machineRoots;
 	for (auto it = input->loadMachine->cfg_roots.begin();
@@ -211,7 +217,8 @@ main(int argc, char *argv[])
 	VexPtr<CrashSummary, &ir_heap> summary;
 	char *first_line;
 
-	summary = readBugReport(argv[1], &first_line);
+	SMScopes scopes;
+	summary = readBugReport(&scopes, argv[1], &first_line);
 	VexPtr<OracleInterface> oracle(new DummyOracle(summary));
 
 	summary = canonicalise_crash_summary(

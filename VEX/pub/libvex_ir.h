@@ -353,11 +353,11 @@ class MemoryAccessIdentifier : public Named {
 	char *mkName() const {
 		return my_asprintf("mai%d:%d", tid, id);
 	}
-	int id;
 	MemoryAccessIdentifier(int _id, int _tid)
 		: id(_id), tid(_tid)
 	{}
 public:
+	int id;
 	int tid;
 
 	MemoryAccessIdentifier setTid(int tid) const {
@@ -558,68 +558,6 @@ extern Heap ir_heap;
      but does not copy any sub-objects.  Only some types have a
      shallow copy constructor.
 */
-
-/* ------------------ Constants ------------------ */
-
-/* IRConsts are used within 'Const' and 'Exit' IRExprs. */
-
-/* The various kinds of constant. */
-typedef
-   enum { 
-      Ico_U1=0x13000,
-      Ico_U8, 
-      Ico_U16, 
-      Ico_U32, 
-      Ico_U64,
-      Ico_F64,   /* 64-bit IEEE754 floating */
-      Ico_F64i,  /* 64-bit unsigned int to be interpreted literally
-                    as a IEEE754 double value. */
-      Ico_V128   /* 128-bit restricted vector constant, with 1 bit
-                    (repeated 8 times) for each of the 16 x 1-byte lanes */
-   }
-   IRConstTag;
-
-/* A constant.  Stored as a tagged union.  'tag' indicates what kind of
-   constant this is.  'Ico' is the union that holds the fields.  If an
-   IRConst 'c' has c.tag equal to Ico_U32, then it's a 32-bit constant,
-   and its value can be accessed with 'c.Ico.U32'. */
-typedef
-struct _IRConst : public GarbageCollected<_IRConst, &ir_heap>{
-      IRConstTag tag;
-      union {
-         Bool   U1;
-         UChar  U8;
-         UShort U16;
-         UInt   U32;
-         ULong  U64;
-         Double F64;
-         ULong  F64i;
-         UShort V128;   /* 16-bit value; see Ico_V128 comment above */
-      } Ico;
-      unsigned long hashval() const { return tag * 103 + Ico.U64 * 607; }
-      void visit(HeapVisitor &) {}
-      void sanity_check() const {
-	 assert(tag >= Ico_U1 && tag <= Ico_V128);
-      }
-      NAMED_CLASS
-   }
-   IRConst;
-
-/* IRConst constructors */
-extern IRConst* IRConst_U1   ( Bool );
-extern IRConst* IRConst_U8   ( UChar );
-extern IRConst* IRConst_U16  ( UShort );
-extern IRConst* IRConst_U32  ( UInt );
-extern IRConst* IRConst_U64  ( ULong );
-extern IRConst* IRConst_F64  ( Double );
-extern IRConst* IRConst_F64i ( ULong );
-extern IRConst* IRConst_V128 ( UShort );
-
-/* Pretty-print an IRConst */
-extern void ppIRConst ( IRConst*, FILE* );
-
-/* Compare two IRConsts for equality */
-extern Bool eqIRConst ( IRConst*, IRConst* );
 
 /* --------------- Primops (arity 1,2,3 and 4) --------------- */
 
@@ -1111,7 +1049,9 @@ typedef
             for i in 0 .. 15 . result[i] = argL[ argR[i] ] 
          argR[i] values may only be in the range 0 .. 15, else behaviour
          is undefined. */
-      Iop_Perm8x16
+      Iop_Perm8x16,
+
+      Iop_Noop8, Iop_Noop16, Iop_Noop32, Iop_Noop64, Iop_Noop128,
    }
    IROp;
 
@@ -1178,10 +1118,7 @@ typedef
       Ity_I16, 
       Ity_I32, 
       Ity_I64,
-      Ity_I128,  /* 128-bit scalar */
-      Ity_F32,   /* IEEE 754 float */
-      Ity_F64,   /* IEEE 754 double */
-      Ity_V128   /* 128-bit SIMD */
+      Ity_I128,
    }
    IRType;
 
@@ -1191,12 +1128,13 @@ static inline void sanity_check_irtype(IRType i
 #endif
 	)
 {
-   assert(i > Ity_INVALID && i <= Ity_V128);
+   assert(i > Ity_INVALID && i <= Ity_I128);
 }
 
 /* Pretty-print an IRType */
 extern void ppIRType ( IRType, FILE *f );
 extern bool parseIRType ( IRType *, const char *, const char ** );
+extern const char *nameIRType(IRType ty);
 
 /* Get the size (in bytes) of an IRType */ 
 extern Int sizeofIRType ( IRType );
@@ -1216,7 +1154,6 @@ struct _IRTypeEnv : public GarbageCollected<_IRTypeEnv, &ir_heap> {
    }
    IRTypeEnv;
 
-extern IRType typeOfIRConst ( IRConst* );
 extern void typeOfPrimop ( IROp op,
 			   /*OUTs*/
 			   IRType* t_dst,
@@ -1291,23 +1228,32 @@ extern Bool eqIRRegArray ( IRRegArray*, IRRegArray* );
 
 /* The different kinds of expressions.  Their meaning is explained below
    in the comments for IRExpr. */
+#define __IREXPR_TYPES(first, iter, last)	\
+  first(Get)				\
+  iter(GetI)				\
+  iter(Qop)				\
+  iter(Triop)				\
+  iter(Binop)				\
+  iter(Unop)				\
+  iter(Const)				\
+  iter(Mux0X)				\
+  iter(CCall)				\
+  iter(Associative)			\
+  iter(Load)				\
+  iter(HappensBefore)			\
+  iter(FreeVariable)			\
+  iter(EntryPoint)			\
+  last(ControlFlow)
+#define IREXPR_TYPES(f) __IREXPR_TYPES(f, f, f)
 typedef
    enum { 
-      Iex_Get = 0x15001,
-      Iex_GetI,
-      Iex_Qop,
-      Iex_Triop,
-      Iex_Binop,
-      Iex_Unop,
-      Iex_Const,
-      Iex_Mux0X,
-      Iex_CCall,
-      Iex_Associative, /* n-ary associative operator */
-      Iex_Load,
-      Iex_HappensBefore,
-      Iex_FreeVariable,
-      Iex_EntryPoint,
-      Iex_ControlFlow,
+#define first_type(name) Iex_ ## name = 0x15001,
+#define iter_type(name) Iex_ ## name,
+#define last_type(name) Iex_ ## name
+  __IREXPR_TYPES(first_type, iter_type, last_type)
+#undef last_type
+#undef iter_type
+#undef first_type
    }
    IRExprTag;
 
@@ -1676,7 +1622,19 @@ struct IRExprLoad : public IRExpr {
    ppIRExpr output: <con>, eg. 0x4:I32
 */
 struct IRExprConst : public IRExpr {
-   IRConst* con;     /* The constant itself */
+   IRType ty;
+   union {
+      Bool   U1;
+      UChar  U8;
+      UShort U16;
+      UInt   U32;
+      ULong  U64;
+      struct {
+	 ULong lo;
+	 ULong hi;
+      } U128;
+   } Ico;
+
    IRExprConst()
        : IRExpr(Iex_Const)
    {
@@ -1685,15 +1643,16 @@ struct IRExprConst : public IRExpr {
 	  optimised. */
        optimisationsApplied = ~0u;
    }
-   void visit(HeapVisitor &hv) { hv(con); }
-   unsigned long hashval() const { return con->hashval(); }
+   void visit(HeapVisitor &) { }
+   unsigned long hashval() const { return Ico.U64; }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
-   IRType type() const { return typeOfIRConst(con); }
+   IRType type() const { return ty; }
  private:
    void _sanity_check(unsigned) const {
-      con->sanity_check();
    }
 };
+
+Bool eqIRExprConst ( const IRExprConst* c1, const IRExprConst* c2 );
 
 /* A call to a pure (no side-effects) helper C function.
 
@@ -1952,8 +1911,8 @@ struct IRExprControlFlow : public IRExpr {
 };
 
 /* Expression constructors. */
-extern IRExpr* IRExpr_Get    ( Int off, IRType ty, unsigned tid, unsigned generation );
-extern IRExpr* IRExpr_Get    ( threadAndRegister r, IRType ty );
+extern IRExprGet* IRExpr_Get    ( Int off, IRType ty, unsigned tid, unsigned generation );
+extern IRExprGet* IRExpr_Get    ( threadAndRegister r, IRType ty );
 extern IRExpr* IRExpr_GetI   ( IRRegArray* descr, IRExpr* ix, Int bias,
 			       unsigned tid );
 extern IRExpr* IRExpr_RdTmp  ( IRTemp tmp, IRType ty, unsigned tid, unsigned generation );
@@ -1966,7 +1925,15 @@ extern bool shortCircuitableUnops(IROp a, IROp b, IROp *c);
 extern bool inverseUnops(IROp a, IROp b);
 extern IRExpr* IRExpr_Unop   ( IROp op, IRExpr* arg );
 extern IRExpr* IRExpr_Load   ( IRType ty, IRExpr* addr );
-extern IRExpr* IRExpr_Const  ( IRConst* con );
+extern IRExprConst* IRExpr_Const_U1 ( bool b);
+extern IRExprConst* IRExpr_Const_U8 (unsigned char c);
+extern IRExprConst* IRExpr_Const_U16 (unsigned short c);
+extern IRExprConst* IRExpr_Const_U32 (unsigned c);
+extern IRExprConst* IRExpr_Const_U64 (unsigned long c);
+extern IRExprConst* IRExpr_Const_F64 (double c);
+extern IRExprConst* IRExpr_Const_F64i (unsigned long c);
+extern IRExprConst* IRExpr_Const_V128 (unsigned short c);
+extern IRExprConst* IRExpr_Const_U128 (unsigned long hi, unsigned long lo);
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
 extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
@@ -1974,7 +1941,7 @@ extern IRExpr* IRExpr_Associative (IRExprAssociative *);
 extern IRExprAssociative* IRExpr_Associative (int nr_arguments, IROp op);
 extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,
 				     const MemoryAccessIdentifier &after);
-static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty, bool isUnique) {
+static inline IRExprFreeVariable *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty, bool isUnique) {
     return new IRExprFreeVariable(id, ty, isUnique);
 }
 

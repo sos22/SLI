@@ -11,6 +11,7 @@
 #include "intern.hpp"
 #include "sat_checker.hpp"
 #include "nf.hpp"
+#include "visitor.hpp"
 
 class RegisterCanonicaliser : public StateMachineTransformer {
 	std::map<threadAndRegister, threadAndRegister, threadAndRegister::partialCompare> canonTable;
@@ -35,14 +36,15 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 		return IRExpr_Get(canon_reg(ieg->reg), ieg->ty);
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
-		StateMachineSideEffectLoad *smsel, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectLoad *smsel, bool *done_something)
 	{
-		StateMachineSideEffectLoad *smsel2 = StateMachineTransformer::transformOneSideEffect(smsel, done_something);
+		StateMachineSideEffectLoad *smsel2 = StateMachineTransformer::transformOneSideEffect(scopes, smsel, done_something);
 		if (smsel2)
 			smsel = smsel2;
 		*done_something = true;
-		IRExpr *addr = smsel->addr;
-		if (addr->tag != Iex_Get) {
+		exprbdd *addr = smsel->addr;
+		if (!addr->isLeaf ||
+		    addr->leaf()->tag != Iex_Get) {
 			auto it = freshVariables.find(addr);
 			if (it != freshVariables.end()) {
 				addr = IRExpr_Get(it->second, Ity_I64);
@@ -57,9 +59,9 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 		return new StateMachineSideEffectLoad(smsel, canon_reg(smsel->target), addr);
 	}
 	StateMachineSideEffectCopy *transformOneSideEffect(
-		StateMachineSideEffectCopy *smsec, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectCopy *smsec, bool *done_something)
 	{
-		StateMachineSideEffectCopy *smsec2 = StateMachineTransformer::transformOneSideEffect(smsec, done_something);
+		StateMachineSideEffectCopy *smsec2 = StateMachineTransformer::transformOneSideEffect(scopes, smsec, done_something);
 		if (smsec2)
 			smsec = smsec2;
 		*done_something = true;
@@ -68,20 +70,21 @@ class RegisterCanonicaliser : public StateMachineTransformer {
 			smsec->value);
 	}
 	StateMachineSideEffectPhi *transformOneSideEffect(
-		StateMachineSideEffectPhi *smsep, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectPhi *smsep, bool *done_something)
 	{
-		StateMachineSideEffectPhi *smsep2 = StateMachineTransformer::transformOneSideEffect(smsep, done_something);
+		StateMachineSideEffectPhi *smsep2 = StateMachineTransformer::transformOneSideEffect(scopes, smsep, done_something);
 		if (smsep2)
 			smsep2 = smsep;
 		*done_something = true;
 		return new StateMachineSideEffectPhi(
 			canon_reg(smsep->reg),
+			smsep->ty,
 			smsep->generations);
 	}
 	StateMachineSideEffectStore *transformOneSideEffect(
-		StateMachineSideEffectStore *store, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectStore *store, bool *done_something)
 	{
-		StateMachineSideEffectStore *store2 = StateMachineTransformer::transformOneSideEffect(store, done_something);
+		StateMachineSideEffectStore *store2 = StateMachineTransformer::transformOneSideEffect(scopes, store, done_something);
 		if (!store2)
 			store2 = store;
 		if (store2->addr->tag != Iex_Get) {
@@ -110,20 +113,18 @@ public:
 static bool
 expressionIsClosed(IRExpr *a)
 {
-	struct : public IRExprTransformer {
-		bool res;
-		IRExpr *transformIex(IRExprGet *ieg) {
+	struct {
+		static visit_result f(void *, const IRExprGet *ieg) {
 			if (!ieg->reg.isReg() &&
-			    ieg->reg.tid() != (unsigned)-1) {
-				res = false;
-				abortTransform();
-			}
-			return IRExprTransformer::transformIex(ieg);
+			    ieg->reg.tid() != (unsigned) -1)
+				return visit_abort;
+			else
+				return visit_continue;
 		}
-	} doit;
-	doit.res = true;
-	doit.doit(a);
-	return doit.res;
+	} foo;
+	static irexpr_visitor<void> visit;
+	visit.Get = foo.f;
+	return visit_irexpr((void *)NULL, &visit, a) == visit_continue;
 }
 
 /* Caution: this is done partly in-place. */
@@ -132,7 +133,7 @@ class SplitSsaGenerations : public StateMachineTransformer {
 	std::set<threadAndRegister> &generatedRegisters;
 	std::map<threadAndRegister, threadAndRegister> canonTable;
 	std::map<IRExprLoad *, threadAndRegister> canonLoadTable;
-	std::map<IRConst *, threadAndRegister> canonConstTable;
+	std::map<IRExprConst *, threadAndRegister> canonConstTable;
 	std::map<unsigned, unsigned> next_temp_id;
 	internIRExprTable &internTable;
 
@@ -162,9 +163,9 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			it->second = threadAndRegister::temp(-1, alloc_temp_id(-1), 0);
 		return it->second;
 	}
-	threadAndRegister canon_const(IRConst *iec)
+	threadAndRegister canon_const(IRExprConst *iec)
 	{
-		auto it_did_insert = canonConstTable.insert(std::pair<IRConst *, threadAndRegister>(iec, threadAndRegister::invalid()));
+		auto it_did_insert = canonConstTable.insert(std::pair<IRExprConst *, threadAndRegister>(iec, threadAndRegister::invalid()));
 		auto it = it_did_insert.first;
 		auto did_insert = it_did_insert.second;
 		if (did_insert)
@@ -182,12 +183,12 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			return IRExprTransformer::transformIex(iel);
 	}
 	IRExpr *transformIex(IRExprConst *iec) {
-		switch (iec->con->tag) {
-		case Ico_U1:
+		switch (iec->ty) {
+		case Ity_I1:
 			return iec;
 #define do_type(n)						\
-			case Ico_U ## n :			\
-				if (iec->con->Ico.U ## n  == 0)	\
+			case Ity_I ## n :			\
+				if (iec->Ico.U ## n  == 0)	\
 					return iec;		\
 				break
 			do_type(8);
@@ -195,12 +196,15 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			do_type(32);
 			do_type(64);
 #undef do_type
-		case Ico_F64:
-		case Ico_F64i:
-		case Ico_V128:
+		case Ity_I128:
+			if (iec->Ico.U128.hi == 0 &&
+			    iec->Ico.U128.lo == 0)
+				return iec;
 			break;
+		case Ity_INVALID:
+			abort();
 		}
-		return IRExpr_Get(canon_const(iec->con), iec->type());
+		return IRExpr_Get(canon_const(iec), iec->type());
 	}
 	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 		IRExpr *res = IRExprTransformer::transformIRExpr(e, done_something);
@@ -209,18 +213,18 @@ class SplitSsaGenerations : public StateMachineTransformer {
 		return internIRExpr(res, internTable);
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
-		StateMachineSideEffectLoad *smsel, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectLoad *smsel, bool *done_something)
 	{
-		StateMachineSideEffectLoad *smsel2 = StateMachineTransformer::transformOneSideEffect(smsel, done_something);
+		StateMachineSideEffectLoad *smsel2 = StateMachineTransformer::transformOneSideEffect(scopes, smsel, done_something);
 		if (smsel2)
 			smsel = smsel2;
 		*done_something = true;
 		return new StateMachineSideEffectLoad(smsel, canon_reg(smsel->target));
 	}
 	StateMachineSideEffectCopy *transformOneSideEffect(
-		StateMachineSideEffectCopy *smsec, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectCopy *smsec, bool *done_something)
 	{
-		StateMachineSideEffectCopy *smsec2 = StateMachineTransformer::transformOneSideEffect(smsec, done_something);
+		StateMachineSideEffectCopy *smsec2 = StateMachineTransformer::transformOneSideEffect(scopes, smsec, done_something);
 		if (smsec2)
 			smsec = smsec2;
 		*done_something = true;
@@ -229,13 +233,13 @@ class SplitSsaGenerations : public StateMachineTransformer {
 			smsec->value);
 	}
 	StateMachineSideEffectPhi *transformOneSideEffect(
-		StateMachineSideEffectPhi *smsep, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectPhi *smsep, bool *done_something)
 	{
-		StateMachineSideEffectPhi *smsep2 = StateMachineTransformer::transformOneSideEffect(smsep, done_something);
+		StateMachineSideEffectPhi *smsep2 = StateMachineTransformer::transformOneSideEffect(scopes, smsep, done_something);
 		if (smsep2)
 			smsep = smsep2;
 		for (auto it = smsep->generations.begin(); it != smsep->generations.end(); ) {
-			if (!generatedRegisters.count(it->first) ) {
+			if (!generatedRegisters.count(it->reg) ) {
 				*done_something = true;
 				it = smsep->generations.erase(it);
 			} else {
@@ -317,7 +321,7 @@ private:
 			ief->isUnique);
 	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
-		StateMachineSideEffectLoad *l, bool *done_something)
+		SMScopes *, StateMachineSideEffectLoad *l, bool *done_something)
 	{
 		bool ign;
 		IRExpr *addr = doit(l->addr, &ign);
@@ -332,13 +336,13 @@ private:
 			l->tag);
 	}
 	StateMachineSideEffectStore *transformOneSideEffect(
-		StateMachineSideEffectStore *l, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectStore *l, bool *done_something)
 	{
 		bool ign;
 		IRExpr *addr = doit(l->addr, &ign);
 		if (!addr)
 			addr = l->addr;
-		IRExpr *data = doit(l->data, &ign);
+		exprbdd *data = transform_exprbdd(&scopes->bools, &scopes->exprs, l->data, &ign);
 		if (!data)
 			data = l->data;
 		*done_something = true;
@@ -349,10 +353,9 @@ private:
 			l->tag);
 	}
 	StateMachineSideEffectCopy *transformOneSideEffect(
-		StateMachineSideEffectCopy *l, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectCopy *l, bool *done_something)
 	{
-		bool ign;
-		IRExpr *value = doit(l->value, &ign);
+		exprbdd *value = transform_exprbdd(&scopes->bools, &scopes->exprs, l->value);
 		if (!value)
 			value = l->value;
 		*done_something = true;
@@ -361,14 +364,15 @@ private:
 			value);
 	}
 	StateMachineSideEffectPhi *transformOneSideEffect(
-		StateMachineSideEffectPhi *p, bool *done_something)
+		SMScopes *scopes, StateMachineSideEffectPhi *p, bool *done_something)
 	{
-		StateMachineSideEffectPhi *p2 = StateMachineTransformer::transformOneSideEffect(p, done_something);
+		StateMachineSideEffectPhi *p2 = StateMachineTransformer::transformOneSideEffect(scopes, p, done_something);
 		if (p2)
 			p = p2;
 		*done_something = true;
 		return new StateMachineSideEffectPhi(
 			canon_reg(p->reg),
+			p->ty,
 			p->generations);
 	}
 	bool rewriteNewStates() const { return false; };
@@ -464,27 +468,26 @@ canonicalise_crash_summary(CrashSummary *input)
 	CanonicaliseThreadIds thread_canon;
 	input = transformCrashSummary(input, thread_canon);
 
-	struct : public StateMachineTransformer {
-		std::set<threadAndRegister> res;
-		StateMachineSideEffectPhi *transformOneSideEffect(
-			StateMachineSideEffectPhi *smsep, bool *done_something)
+	struct {
+		static visit_result Phi(std::set<threadAndRegister> *res,
+					const StateMachineSideEffectPhi *smsep)
 		{
 			for (auto it = smsep->generations.begin();
 			     it != smsep->generations.end();
 			     it++)
-				res.insert(it->first);
-			res.insert(smsep->reg);
-			return StateMachineTransformer::transformOneSideEffect(smsep, done_something);
+				res->insert(it->reg);
+			res->insert(smsep->reg);
+			return visit_continue;
 		}
-		bool rewriteNewStates() const { return false; }
-	} phiRegs;
-	phiRegs.transform(input->loadMachine);
-	phiRegs.transform(input->storeMachine);
-	phiRegs.doit(input->verificationCondition);
+	} foo;
+	static state_machine_visitor<std::set<threadAndRegister> > visitor;
+	visitor.Phi = foo.Phi;
+	std::set<threadAndRegister> phiRegs;
+	visit_crash_summary(&phiRegs, &visitor, input);
 
 	internStateMachineTable t;
-	input->loadMachine = internStateMachine(input->loadMachine, t);
-	input->storeMachine = internStateMachine(input->storeMachine, t);
+	input->loadMachine = internStateMachine(input->scopes, input->loadMachine, t);
+	input->storeMachine = internStateMachine(input->scopes, input->storeMachine, t);
 	input->verificationCondition = internIRExpr(input->verificationCondition, t);
 
 	if (TIMEOUT)
@@ -500,7 +503,7 @@ canonicalise_crash_summary(CrashSummary *input)
 			generatedRegisters.insert(r);
 	}
 
-	SplitSsaGenerations splitter(phiRegs.res, generatedRegisters, t);
+	SplitSsaGenerations splitter(phiRegs, generatedRegisters, t);
 	input = transformCrashSummary(input, splitter);
 
 	RegisterCanonicaliser reg_canon;
@@ -533,11 +536,9 @@ main(int argc, char *argv[])
 
 	CrashSummary *summary;
 	char *first_line;
-
-	summary = readBugReport(argv[1], &first_line);
-
+	SMScopes scopes;
+	summary = readBugReport(&scopes, argv[1], &first_line);
 	summary = canonicalise_crash_summary(summary);
-
 	FILE *f = fopen(argv[2], "w");
 	fprintf(f, "%s\n", first_line);
 	printCrashSummary(summary, f);

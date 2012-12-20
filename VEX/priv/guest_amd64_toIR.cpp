@@ -235,28 +235,10 @@ static IRExpr* mkexpr ( IRTemp tmp, unsigned tid, IRType ty )
    return IRExpr_RdTmp(tmp, ty, tid, 0);
 }
 
-static IRExpr* mkU8 ( ULong i )
-{
-   vassert(i < 256);
-   return IRExpr_Const(IRConst_U8( (UChar)i ));
-}
-
-static IRExpr* mkU16 ( ULong i )
-{
-   vassert(i < 0x10000ULL);
-   return IRExpr_Const(IRConst_U16( (UShort)i ));
-}
-
-static IRExpr* mkU32 ( ULong i )
-{
-   vassert(i < 0x100000000ULL);
-   return IRExpr_Const(IRConst_U32( (UInt)i ));
-}
-
-static IRExpr* mkU64 ( ULong i )
-{
-   return IRExpr_Const(IRConst_U64(i));
-}
+#define mkU8 IRExpr_Const_U8
+#define mkU16 IRExpr_Const_U16
+#define mkU32 IRExpr_Const_U32
+#define mkU64 IRExpr_Const_U64
 
 static IRExpr* mkU ( IRType ty, ULong i )
 {
@@ -1295,7 +1277,7 @@ static threadAndRegister xmmGuestRegLane64offset ( UInt xmmreg, Int laneno )
 
 static IRExpr* getXMMReg ( UInt xmmreg )
 {
-   return IRExpr_Get( xmmGuestRegOffset(xmmreg), Ity_V128 );
+   return IRExpr_Get( xmmGuestRegOffset(xmmreg), Ity_I128 );
 }
 
 static IRExpr* getXMMRegLane64 ( UInt xmmreg, Int laneno )
@@ -1305,7 +1287,7 @@ static IRExpr* getXMMRegLane64 ( UInt xmmreg, Int laneno )
 
 static IRExpr* getXMMRegLane64F ( UInt xmmreg, Int laneno )
 {
-   return IRExpr_Get( xmmGuestRegLane64offset(xmmreg,laneno), Ity_F64 );
+   return IRExpr_Get( xmmGuestRegLane64offset(xmmreg,laneno), Ity_I64 );
 }
 
 static IRExpr* getXMMRegLane32 ( UInt xmmreg, Int laneno )
@@ -1315,12 +1297,12 @@ static IRExpr* getXMMRegLane32 ( UInt xmmreg, Int laneno )
 
 static IRExpr* getXMMRegLane32F ( UInt xmmreg, Int laneno )
 {
-   return IRExpr_Get( xmmGuestRegLane32offset(xmmreg,laneno), Ity_F32 );
+   return IRExpr_Get( xmmGuestRegLane32offset(xmmreg,laneno), Ity_I32 );
 }
 
 static void putXMMReg ( UInt xmmreg, IRExpr* e )
 {
-   vassert(e->type() == Ity_V128);
+   vassert(e->type() == Ity_I128);
    stmt( IRStmt_Put( xmmGuestRegOffset(xmmreg), e ) );
 }
 
@@ -1332,13 +1314,13 @@ static void putXMMRegLane64 ( UInt xmmreg, Int laneno, IRExpr* e )
 
 static void putXMMRegLane64F ( UInt xmmreg, Int laneno, IRExpr* e )
 {
-   vassert(e->type() == Ity_F64);
+   vassert(e->type() == Ity_I64);
    stmt( IRStmt_Put( xmmGuestRegLane64offset(xmmreg,laneno), e ) );
 }
 
 static void putXMMRegLane32F ( UInt xmmreg, Int laneno, IRExpr* e )
 {
-   vassert(e->type() == Ity_F32);
+   vassert(e->type() == Ity_I32);
    stmt( IRStmt_Put( xmmGuestRegLane32offset(xmmreg,laneno), e ) );
 }
 
@@ -1356,7 +1338,7 @@ static void putXMMRegLane16 ( UInt xmmreg, Int laneno, IRExpr* e )
 
 static IRExpr* mkV128 ( UShort mask )
 {
-   return IRExpr_Const(IRConst_V128(mask));
+   return IRExpr_Const_V128(mask);
 }
 
 static IRExpr* mkAnd1 ( IRExpr* x, IRExpr* y )
@@ -3077,7 +3059,7 @@ bangBangOperator8(IRExpr *inp)
     return IRExpr_Unop(Iop_Not1,
 		       IRExpr_Binop(Iop_CmpEQ8,
 				    inp,
-				    IRExpr_Const(IRConst_U8(0))));
+				    IRExpr_Const_U8(0)));
 }
 
 /* Group 2 extended opcodes.  shift_expr must be an 8-bit typed
@@ -4168,7 +4150,7 @@ static IRExpr* mkQNaN64 ( void )
      == 0b 11111111111b 1 0(51times)
      == 0x7FF8 0000 0000 0000
    */
-   return IRExpr_Const(IRConst_F64i(0x7FF8000000000000ULL));
+   return IRExpr_Const_F64i(0x7FF8000000000000ULL);
 }
 
 /* --------- Get/put the top-of-stack pointer :: Ity_I32 --------- */
@@ -4258,8 +4240,8 @@ static IRExpr* get_ST_TAG ( unsigned tid, Int i )
 static void put_ST_UNCHECKED ( unsigned tid, Int i, IRExpr* value )
 {
    IRRegArray* descr;
-   vassert(value->type() == Ity_F64);
-   descr = mkIRRegArray( OFFB_FPREGS, Ity_F64, 8 );
+   vassert(value->type() == Ity_I64);
+   descr = mkIRRegArray( OFFB_FPREGS, Ity_I64, 8 );
    stmt( IRStmt_PutI( descr, get_ftop(tid), i, value ) );
    /* Mark the register as in-use. */
    put_ST_TAG(tid, i, mkU8(1));
@@ -4288,7 +4270,7 @@ static void put_ST ( unsigned tid, Int i, IRExpr* value )
 
 static IRExpr* get_ST_UNCHECKED ( Int i, unsigned tid )
 {
-   IRRegArray* descr = mkIRRegArray( OFFB_FPREGS, Ity_F64, 8 );
+   IRRegArray* descr = mkIRRegArray( OFFB_FPREGS, Ity_I64, 8 );
    return IRExpr_GetI( descr, get_ftop(tid), i, tid );
 }
 
@@ -4368,14 +4350,14 @@ void fp_do_op_mem_ST_0 ( unsigned tid,
          triop( op, 
                 get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
                 get_ST(tid, 0), 
-                loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64))
+                loadLE(Ity_I64,mkexpr(addr, tid, Ity_I64))
          ));
    } else {
       put_ST_UNCHECKED(tid, 0, 
          triop( op, 
                 get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
                 get_ST(tid, 0), 
-                unop(Iop_F32toF64, loadLE(Ity_F32,mkexpr(addr, tid, Ity_I64)))
+                unop(Iop_F32toF64, loadLE(Ity_I32,mkexpr(addr, tid, Ity_I64)))
          ));
    }
 }
@@ -4394,14 +4376,14 @@ void fp_do_oprev_mem_ST_0 ( unsigned tid,
       put_ST_UNCHECKED(tid,0, 
          triop( op, 
                 get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64)),
+                loadLE(Ity_I64,mkexpr(addr, tid, Ity_I64)),
                 get_ST(tid, 0)
          ));
    } else {
       put_ST_UNCHECKED(tid,0, 
          triop( op, 
                 get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                unop(Iop_F32toF64, loadLE(Ity_F32,mkexpr(addr, tid, Ity_I64))),
+                unop(Iop_F32toF64, loadLE(Ity_I32,mkexpr(addr, tid, Ity_I64))),
                 get_ST(tid, 0)
          ));
    }
@@ -4530,7 +4512,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 //..                                 binop(Iop_CmpF64, 
 //..                                       get_ST(tid, 0),
 //..                                       unop(Iop_F32toF64, 
-//..                                            loadLE(Ity_F32,mkexpr(addr, tid, Ity_I64)))),
+//..                                            loadLE(Ity_I32,mkexpr(addr, tid, Ity_I64)))),
 //..                                 mkU8(8)),
 //..                           mkU32(0x4500)
 //..                    ));
@@ -4545,7 +4527,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 //..                                 binop(Iop_CmpF64, 
 //..                                       get_ST(tid, 0),
 //..                                       unop(Iop_F32toF64, 
-//..                                            loadLE(Ity_F32,mkexpr(addr, tid, Ity_I64)))),
+//..                                            loadLE(Ity_I32,mkexpr(addr, tid, Ity_I64)))),
 //..                                 mkU8(8)),
 //..                           mkU32(0x4500)
 //..                    ));
@@ -4649,7 +4631,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("flds %s\n", dis_buf);
                fp_push(tid);
                put_ST(tid, 0, unop(Iop_F32toF64,
-				   loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64))));
+				   loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64))));
                break;
 
             case 2: /* FST single-real */
@@ -4836,7 +4818,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                t1 = newTemp();
                assign(t1, get_ST(tid, r_src));
                fp_push(tid);
-               put_ST(tid,0, mkexpr(t1, tid, Ity_F64));
+               put_ST(tid,0, mkexpr(t1, tid, Ity_I64));
                break;
 
             case 0xC8 ... 0xCF: /* FXCH %st(?) */
@@ -4846,8 +4828,8 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                t2 = newTemp();
                assign(t1, get_ST(tid, 0));
                assign(t2, get_ST(tid, r_src));
-               put_ST_UNCHECKED(tid,0, mkexpr(t2, tid, Ity_F64));
-               put_ST_UNCHECKED(tid,r_src, mkexpr(t1, tid, Ity_F64));
+               put_ST_UNCHECKED(tid,0, mkexpr(t2, tid, Ity_I64));
+               put_ST_UNCHECKED(tid,r_src, mkexpr(t1, tid, Ity_I64));
                break;
 
             case 0xE0: /* FCHS */
@@ -4884,49 +4866,49 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                DIP("fld1\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(1.0))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x3ff0000000000000ULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x3ff0000000000000ULL));
                break;
 
             case 0xE9: /* FLDL2T */
                DIP("fldl2t\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(3.32192809488736234781))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x400a934f0979a371ULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x400a934f0979a371ULL));
                break;
 
             case 0xEA: /* FLDL2E */
                DIP("fldl2e\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(1.44269504088896340739))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x3ff71547652b82feULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x3ff71547652b82feULL));
                break;
 
             case 0xEB: /* FLDPI */
                DIP("fldpi\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(3.14159265358979323851))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x400921fb54442d18ULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x400921fb54442d18ULL));
                break;
 
             case 0xEC: /* FLDLG2 */
                DIP("fldlg2\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(0.301029995663981143))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x3fd34413509f79ffULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x3fd34413509f79ffULL));
                break;
 
             case 0xED: /* FLDLN2 */
                DIP("fldln2\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(0.69314718055994530942))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x3fe62e42fefa39efULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x3fe62e42fefa39efULL));
                break;
 
             case 0xEE: /* FLDZ */
                DIP("fldz\n");
                fp_push(tid);
                /* put_ST(tid,0, IRExpr_Const(IRConst_F64(0.0))); */
-               put_ST(tid,0, IRExpr_Const(IRConst_F64i(0x0000000000000000ULL)));
+               put_ST(tid,0, IRExpr_Const_F64i(0x0000000000000000ULL));
                break;
 
             case 0xF0: /* F2XM1 */
@@ -4954,7 +4936,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
                         get_ST(tid, 0)));
                fp_push(tid);
-               put_ST(tid,0, IRExpr_Const(IRConst_F64(1.0)));
+               put_ST(tid,0, IRExpr_Const_F64i(1.0));
                clear_C2(tid); /* HACK */
                break;
 
@@ -4977,7 +4959,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                IRTemp expI = newTemp();
                DIP("fxtract\n");
                assign( argF, get_ST(tid, 0) );
-               assign( argI, unop(Iop_ReinterpF64asI64, mkexpr(argF, tid, Ity_F64)));
+               assign( argI, unop(Iop_ReinterpF64asI64, mkexpr(argF, tid, Ity_I64)));
                assign( sigI, 
                        mkIRExprCCall(
                           Ity_I64, 0/*regparms*/, 
@@ -4997,10 +4979,10 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                assign( sigF, unop(Iop_ReinterpI64asF64, mkexpr(sigI, tid, Ity_I64)) );
                assign( expF, unop(Iop_ReinterpI64asF64, mkexpr(expI, tid, Ity_I64)) );
                /* exponent */
-               put_ST_UNCHECKED(tid,0, mkexpr(expF, tid, Ity_F64) );
+               put_ST_UNCHECKED(tid,0, mkexpr(expF, tid, Ity_I64) );
                fp_push(tid);
                /* significand */
-               put_ST(tid,0, mkexpr(sigF, tid, Ity_F64) );
+               put_ST(tid,0, mkexpr(sigF, tid, Ity_I64) );
                break;
             }
 
@@ -5015,14 +4997,14 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                put_ST_UNCHECKED(tid,0,
                   triop(Iop_PRem1F64,
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid, Ity_F64),
-                        mkexpr(a2, tid, Ity_F64)));
+                        mkexpr(a1, tid, Ity_I64),
+                        mkexpr(a2, tid, Ity_I64)));
                put_C3210(
                   unop(Iop_32Uto64,
                   triop(Iop_PRem1C3210F64,
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid, Ity_F64),
-                        mkexpr(a2, tid, Ity_F64)) ));
+                        mkexpr(a1, tid, Ity_I64),
+                        mkexpr(a2, tid, Ity_I64)) ));
                break;
             }
 
@@ -5042,14 +5024,14 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                put_ST_UNCHECKED(tid,0,
                   triop(Iop_PRemF64,
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid, Ity_F64),
-                        mkexpr(a2, tid, Ity_F64)));
+                        mkexpr(a1, tid, Ity_I64),
+                        mkexpr(a2, tid, Ity_I64)));
                put_C3210(
                   unop(Iop_32Uto64,
                   triop(Iop_PRemC3210F64,
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid, Ity_F64),
-                        mkexpr(a2, tid, Ity_F64)) ));
+                        mkexpr(a1, tid, Ity_I64),
+                        mkexpr(a2, tid, Ity_I64)) ));
                break;
             }
 
@@ -5078,12 +5060,12 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
                put_ST_UNCHECKED(tid,0, 
                   binop(Iop_SinF64, 
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid, Ity_F64)));
+                        mkexpr(a1, tid, Ity_I64)));
                fp_push(tid);
                put_ST(tid,0, 
                   binop(Iop_CosF64, 
                         get_FAKE_roundingmode(), /* XXXROUNDINGFIXME */
-                        mkexpr(a1, tid, Ity_F64)));
+                        mkexpr(a1, tid, Ity_I64)));
                clear_C2(tid); /* HACK */
                break;
             }
@@ -5494,7 +5476,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 //..                           binop(Iop_Shl32, 
 //..                                 binop(Iop_CmpF64, 
 //..                                       get_ST(tid, 0),
-//..                                       loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64))),
+//..                                       loadLE(Ity_I64,mkexpr(addr, tid, Ity_I64))),
 //..                                 mkU8(8)),
 //..                           mkU32(0x4500)
 //..                    ));
@@ -5508,7 +5490,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
 			binop(Iop_Shl32, 
 			      binop(Iop_CmpF64, 
 				    get_ST(tid, 0),
-				    loadLE(Ity_F64,mkexpr(addr, tid, Ity_I64))),
+				    loadLE(Ity_I64,mkexpr(addr, tid, Ity_I64))),
 			      mkU8(8))));
                fp_pop(tid);
                break;  
@@ -5587,7 +5569,7 @@ ULong dis_FPU ( unsigned tid, GuestMemoryFetcher &guest_code, /*OUT*/Bool* decod
             case 0: /* FLD double-real */
                DIP("fldl %s\n", dis_buf);
                fp_push(tid);
-               put_ST(tid,0, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64)));
+               put_ST(tid,0, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64)));
                break;
 
             case 1: /* FISTTPQ m64 (SSE3) */
@@ -7643,7 +7625,7 @@ static ULong dis_SSE_E_to_G_all_wrk (
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       putXMMReg( gregOfRexRM(pfx,rm), 
                  binop(op, gpart,
-		       loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64))) );
+		       loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64))) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -7701,7 +7683,7 @@ static ULong dis_SSE_E_to_G_lo32 ( unsigned tid, GuestMemoryFetcher &guest_code,
       assign( epart, unop( Iop_32UtoV128,
                            loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64))) );
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 binop(op, gpart, mkexpr(epart, tid, Ity_V128)) );
+                 binop(op, gpart, mkexpr(epart, tid, Ity_I128)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -7739,7 +7721,7 @@ static ULong dis_SSE_E_to_G_lo64 ( unsigned tid,
       assign( epart, unop( Iop_64UtoV128,
                            loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64))) );
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 binop(op, gpart, mkexpr(epart, tid, Ity_V128)) );
+                 binop(op, gpart, mkexpr(epart, tid, Ity_I128)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -7772,7 +7754,7 @@ static ULong dis_SSE_E_to_G_unary_all (
    } else {
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 unop(op, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64))) );
+                 unop(op, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64))) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -7805,9 +7787,9 @@ static ULong dis_SSE_E_to_G_unary_lo32 (
    if (epartIsReg(rm)) {
       assign( oldG1, 
               binop( Iop_SetV128lo32,
-                     mkexpr(oldG0, tid, Ity_V128),
+                     mkexpr(oldG0, tid, Ity_I128),
                      getXMMRegLane32(eregOfRexRM(pfx,rm), 0)) );
-      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_V128)) );
+      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_I128)) );
       DIP("%s %s,%s\n", opname,
                         nameXMMReg(eregOfRexRM(pfx,rm)),
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -7816,9 +7798,9 @@ static ULong dis_SSE_E_to_G_unary_lo32 (
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( oldG1, 
               binop( Iop_SetV128lo32,
-                     mkexpr(oldG0, tid, Ity_V128),
+                     mkexpr(oldG0, tid, Ity_I128),
                      loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64)) ));
-      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_V128)) );
+      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_I128)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -7851,9 +7833,9 @@ static ULong dis_SSE_E_to_G_unary_lo64 (
    if (epartIsReg(rm)) {
       assign( oldG1, 
               binop( Iop_SetV128lo64,
-                     mkexpr(oldG0, tid, Ity_V128),
+                     mkexpr(oldG0, tid, Ity_I128),
                      getXMMRegLane64(eregOfRexRM(pfx,rm), 0)) );
-      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_V128)) );
+      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_I128)) );
       DIP("%s %s,%s\n", opname,
                         nameXMMReg(eregOfRexRM(pfx,rm)),
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -7862,9 +7844,9 @@ static ULong dis_SSE_E_to_G_unary_lo64 (
       addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
       assign( oldG1, 
               binop( Iop_SetV128lo64,
-                     mkexpr(oldG0, tid, Ity_V128),
+                     mkexpr(oldG0, tid, Ity_I128),
                      loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64)) ));
-      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_V128)) );
+      putXMMReg( gregOfRexRM(pfx,rm), unop(op, mkexpr(oldG1, tid, Ity_I128)) );
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -7900,7 +7882,7 @@ static ULong dis_SSEint_E_to_G(
       delta += 1;
    } else {
       addr  = disAMode ( tid, guest_code, &alen, vbi, pfx, delta, dis_buf, 0 );
-      epart = loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64));
+      epart = loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64));
       DIP("%s %s,%s\n", opname,
                         dis_buf,
                         nameXMMReg(gregOfRexRM(pfx,rm)) );
@@ -8000,7 +7982,7 @@ static ULong dis_SSEcmp_E_to_G ( unsigned tid,
               binop(
                  op,
                  getXMMReg(gregOfRexRM(pfx,rm)), 
-                   all_lanes  ? loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64))
+                   all_lanes  ? loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64))
                  : sz == 8    ? unop( Iop_64UtoV128, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64)))
                  : /*sz==4*/    unop( Iop_32UtoV128, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64)))
 	      ) 
@@ -8014,16 +7996,16 @@ static ULong dis_SSEcmp_E_to_G ( unsigned tid,
 
    if (needNot && all_lanes) {
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 unop(Iop_NotV128, mkexpr(plain, tid, Ity_V128)) );
+                 unop(Iop_NotV128, mkexpr(plain, tid, Ity_I128)) );
    }
    else
    if (needNot && !all_lanes) {
       mask = toUShort(sz==4 ? 0x000F : 0x00FF);
       putXMMReg( gregOfRexRM(pfx,rm), 
-                 binop(Iop_XorV128, mkexpr(plain, tid, Ity_V128), mkV128(mask)) );
+                 binop(Iop_XorV128, mkexpr(plain, tid, Ity_I128), mkV128(mask)) );
    }
    else {
-      putXMMReg( gregOfRexRM(pfx,rm), mkexpr(plain, tid, Ity_V128) );
+      putXMMReg( gregOfRexRM(pfx,rm), mkexpr(plain, tid, Ity_I128) );
    }
 
    return delta;
@@ -8085,7 +8067,7 @@ static ULong dis_SSE_shiftG_byE ( unsigned tid,
         IRExpr_Mux0X(
 	    binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid, Ity_I32)), mkU64(size)),
            mkV128(0x0000),
-           binop(op, mkexpr(g0, tid, Ity_V128), mkexpr(amt8, tid, Ity_I8))
+           binop(op, mkexpr(g0, tid, Ity_I128), mkexpr(amt8, tid, Ity_I8))
         )
      );
    } else 
@@ -8094,15 +8076,15 @@ static ULong dis_SSE_shiftG_byE ( unsigned tid,
         g1,
         IRExpr_Mux0X(
 	    binop(Iop_CmpLT64U, unop(Iop_32Uto64,mkexpr(amt, tid, Ity_I32)), mkU64(size)),
-           binop(op, mkexpr(g0, tid, Ity_V128), mkU8(size-1)),
-           binop(op, mkexpr(g0, tid, Ity_V128), mkexpr(amt8, tid, Ity_I8))
+           binop(op, mkexpr(g0, tid, Ity_I128), mkU8(size-1)),
+           binop(op, mkexpr(g0, tid, Ity_I128), mkexpr(amt8, tid, Ity_I8))
         )
      );
    } else {
       vassert(0);
    }
 
-   putXMMReg( gregOfRexRM(pfx,rm), mkexpr(g1, tid, Ity_V128) );
+   putXMMReg( gregOfRexRM(pfx,rm), mkexpr(g1, tid, Ity_I128) );
    return delta;
 }
 
@@ -8145,19 +8127,19 @@ ULong dis_SSE_shiftE_imm ( unsigned tid, GuestMemoryFetcher &guest_code, Prefix 
    if (shl || shr) {
      assign( e1, amt >= size 
                     ? mkV128(0x0000)
-                    : binop(op, mkexpr(e0, tid, Ity_V128), mkU8(amt))
+                    : binop(op, mkexpr(e0, tid, Ity_I128), mkU8(amt))
      );
    } else 
    if (sar) {
      assign( e1, amt >= size 
-                    ? binop(op, mkexpr(e0, tid, Ity_V128), mkU8(size-1))
-                    : binop(op, mkexpr(e0, tid, Ity_V128), mkU8(amt))
+                    ? binop(op, mkexpr(e0, tid, Ity_I128), mkU8(size-1))
+                    : binop(op, mkexpr(e0, tid, Ity_I128), mkU8(amt))
      );
    } else {
       vassert(0);
    }
 
-   putXMMReg( eregOfRexRM(pfx,rm), mkexpr(e1, tid, Ity_V128) );
+   putXMMReg( eregOfRexRM(pfx,rm), mkexpr(e1, tid, Ity_I128) );
    return delta;
 }
 
@@ -8190,8 +8172,8 @@ static void breakup128to32s ( unsigned tid,
 {
    IRTemp hi64 = newTemp();
    IRTemp lo64 = newTemp();
-   assign( hi64, unop(Iop_V128HIto64, mkexpr(t128, tid, Ity_V128)) );
-   assign( lo64, unop(Iop_V128to64,   mkexpr(t128, tid, Ity_V128)) );
+   assign( hi64, unop(Iop_V128HIto64, mkexpr(t128, tid, Ity_I128)) );
+   assign( lo64, unop(Iop_V128to64,   mkexpr(t128, tid, Ity_I128)) );
 
    vassert(t0 && *t0 == IRTemp_INVALID);
    vassert(t1 && *t1 == IRTemp_INVALID);
@@ -8910,7 +8892,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-	 assign( argR, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64)) );
+	 assign( argR, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("%scomiss %s,%s\n", guest_code[delta+1]==0x2E ? "u" : "",
                                  dis_buf,
@@ -8925,8 +8907,8 @@ DisResult disInstr_AMD64_WRK (
                mk_reg(OFFB_CC_DEP1),
 	       unop( Iop_32Uto64,
 		     binop(Iop_CmpF64, 
-			   unop(Iop_F32toF64,mkexpr(argL, tid, Ity_F32)),
-			   unop(Iop_F32toF64,mkexpr(argR, tid, Ity_F32))))));
+			   unop(Iop_F32toF64,mkexpr(argL, tid, Ity_I32)),
+			   unop(Iop_F32toF64,mkexpr(argR, tid, Ity_I32))))));
 
       goto decode_success;
    }
@@ -9050,8 +9032,8 @@ DisResult disInstr_AMD64_WRK (
                                    nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f32lo, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64)));
-         assign(f32hi, loadLE(Ity_F32, binop( Iop_Add64, 
+         assign(f32lo, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64)));
+         assign(f32hi, loadLE(Ity_I32, binop( Iop_Add64, 
                                               mkexpr(addr, tid, Ity_I64), 
                                               mkU64(4) )));
          delta += 2+alen;
@@ -9071,10 +9053,10 @@ DisResult disInstr_AMD64_WRK (
          binop( Iop_32HLto64,
                 binop( Iop_F64toI32, 
                        mkexpr(rmode, tid, Ity_I32), 
-                       unop( Iop_F32toF64, mkexpr(f32hi, tid, Ity_F32) ) ),
+                       unop( Iop_F32toF64, mkexpr(f32hi, tid, Ity_I32) ) ),
                 binop( Iop_F64toI32, 
                        mkexpr(rmode, tid, Ity_I32), 
-                       unop( Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32) ) )
+                       unop( Iop_F32toF64, mkexpr(f32lo, tid, Ity_I32) ) )
               )
       );
 
@@ -9111,7 +9093,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameIReg(sz, gregOfRexRM(pfx,modrm), False));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f32lo, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64)));
+         assign(f32lo, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64)));
          delta += 2+alen;
          DIP("cvt%sss2si %s,%s\n", r2zero ? "t" : "",
                                    dis_buf,
@@ -9128,12 +9110,12 @@ DisResult disInstr_AMD64_WRK (
          putIReg32( gregOfRexRM(pfx,modrm),
                     binop( Iop_F64toI32, 
                            mkexpr(rmode, tid, Ity_I32), 
-                           unop(Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32))) );
+                           unop(Iop_F32toF64, mkexpr(f32lo, tid, Ity_I32))) );
       } else {
          putIReg64( gregOfRexRM(pfx,modrm),
                     binop( Iop_F64toI64, 
                            mkexpr(rmode, tid, Ity_I32), 
-                           unop(Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32))) );
+                           unop(Iop_F32toF64, mkexpr(f32lo, tid, Ity_I32))) );
       }
 
       goto decode_success;
@@ -9256,7 +9238,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+                    loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("mov[ua]ps %s,%s\n", dis_buf,
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -9848,7 +9830,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte at end of insn*/ );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          select = (Int)guest_code[delta+2+alen];
          delta += 3+alen;
          DIP("shufps $%d,%s,%s\n", select, 
@@ -9953,7 +9935,7 @@ DisResult disInstr_AMD64_WRK (
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("unpck%sps %s,%s\n", hi ? "h" : "l",
                                   dis_buf,
@@ -10047,7 +10029,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argR, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64)) );
+         assign( argR, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("%scomisd %s,%s\n", guest_code[delta+1]==0x2E ? "u" : "",
                                  dis_buf,
@@ -10061,7 +10043,7 @@ DisResult disInstr_AMD64_WRK (
       stmt( IRStmt_Put( 
                mk_reg(OFFB_CC_DEP1),
 	       unop( Iop_32Uto64, 
-		     binop(Iop_CmpF64, mkexpr(argL, tid, Ity_F64), mkexpr(argR, tid, Ity_F64)) )));
+		     binop(Iop_CmpF64, mkexpr(argL, tid, Ity_I64), mkexpr(argR, tid, Ity_I64)) )));
 
       goto decode_success;
    }
@@ -10114,7 +10096,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)));
+         assign( argV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)));
          delta += 2+alen;
          DIP("cvtdq2ps %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -10159,7 +10141,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( argV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("cvt%spd2dq %s,%s\n", r2zero ? "t" : "",
                                    dis_buf,
@@ -10175,13 +10157,13 @@ DisResult disInstr_AMD64_WRK (
       t0 = newTemp();
       t1 = newTemp();
       assign( t0, unop(Iop_ReinterpI64asF64, 
-                       unop(Iop_V128to64, mkexpr(argV, tid, Ity_V128))) );
+                       unop(Iop_V128to64, mkexpr(argV, tid, Ity_I128))) );
       assign( t1, unop(Iop_ReinterpI64asF64, 
-                       unop(Iop_V128HIto64, mkexpr(argV, tid, Ity_V128))) );
+                       unop(Iop_V128HIto64, mkexpr(argV, tid, Ity_I128))) );
       
 #     define CVT(_t)  binop( Iop_F64toI32,                    \
                              mkexpr(rmode, tid, Ity_I32),                   \
-                             mkexpr(_t, tid, Ity_F32) )
+                             mkexpr(_t, tid, Ity_I32) )
       
       putXMMRegLane32( gregOfRexRM(pfx,modrm), 3, mkU32(0) );
       putXMMRegLane32( gregOfRexRM(pfx,modrm), 2, mkU32(0) );
@@ -10217,8 +10199,8 @@ DisResult disInstr_AMD64_WRK (
                                    nameMMXReg(gregLO3ofRM(modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f64lo, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64)));
-         assign(f64hi, loadLE(Ity_F64, binop( Iop_Add64, 
+         assign(f64lo, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64)));
+         assign(f64hi, loadLE(Ity_I64, binop( Iop_Add64, 
                                               mkexpr(addr, tid, Ity_I64), 
                                               mkU64(8) )));
          delta += 2+alen;
@@ -10236,8 +10218,8 @@ DisResult disInstr_AMD64_WRK (
       assign( 
          dst64,
          binop( Iop_32HLto64,
-                binop( Iop_F64toI32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64hi, tid, Ity_F64) ),
-                binop( Iop_F64toI32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_F64) )
+                binop( Iop_F64toI32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64hi, tid, Ity_I64) ),
+                binop( Iop_F64toI32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_I64) )
               )
       );
 
@@ -10264,7 +10246,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( argV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("cvtpd2ps %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -10274,13 +10256,13 @@ DisResult disInstr_AMD64_WRK (
       t0 = newTemp();
       t1 = newTemp();
       assign( t0, unop(Iop_ReinterpI64asF64, 
-                       unop(Iop_V128to64, mkexpr(argV, tid, Ity_V128))) );
+                       unop(Iop_V128to64, mkexpr(argV, tid, Ity_I128))) );
       assign( t1, unop(Iop_ReinterpI64asF64, 
-                       unop(Iop_V128HIto64, mkexpr(argV, tid, Ity_V128))) );
+                       unop(Iop_V128HIto64, mkexpr(argV, tid, Ity_I128))) );
       
 #     define CVT(_t)  binop( Iop_F64toF32,                    \
                              mkexpr(rmode, tid, Ity_I32),                   \
-                             mkexpr(_t, tid, Ity_F64) )
+                             mkexpr(_t, tid, Ity_I64) )
       
       putXMMRegLane32(  gregOfRexRM(pfx,modrm), 3, mkU32(0) );
       putXMMRegLane32(  gregOfRexRM(pfx,modrm), 2, mkU32(0) );
@@ -10346,7 +10328,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( argV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( argV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("cvtps2dq %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)) );
@@ -10394,8 +10376,8 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-	 assign( f32lo, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64)) );
-	 assign( f32hi, loadLE(Ity_F32, 
+	 assign( f32lo, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64)) );
+	 assign( f32hi, loadLE(Ity_I32, 
                                binop(Iop_Add64,mkexpr(addr, tid, Ity_I64),mkU64(4))) );
          delta += 2+alen;
          DIP("cvtps2pd %s,%s\n", dis_buf,
@@ -10403,9 +10385,9 @@ DisResult disInstr_AMD64_WRK (
       }
 
       putXMMRegLane64F( gregOfRexRM(pfx,modrm), 1,
-                        unop(Iop_F32toF64, mkexpr(f32hi, tid, Ity_F32)) );
+                        unop(Iop_F32toF64, mkexpr(f32hi, tid, Ity_I32)) );
       putXMMRegLane64F( gregOfRexRM(pfx,modrm), 0,
-                        unop(Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32)) );
+                        unop(Iop_F32toF64, mkexpr(f32lo, tid, Ity_I32)) );
 
       goto decode_success;
    }
@@ -10439,7 +10421,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameIReg(sz, gregOfRexRM(pfx,modrm), False));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f64lo, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64)));
+         assign(f64lo, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64)));
          delta += 2+alen;
          DIP("cvt%ssd2si %s,%s\n", r2zero ? "t" : "",
                                    dis_buf,
@@ -10454,10 +10436,10 @@ DisResult disInstr_AMD64_WRK (
 
       if (sz == 4) {
          putIReg32( gregOfRexRM(pfx,modrm),
-                    binop( Iop_F64toI32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_F64)) );
+                    binop( Iop_F64toI32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_I64)) );
       } else {
          putIReg64( gregOfRexRM(pfx,modrm),
-                    binop( Iop_F64toI64, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_F64)) );
+                    binop( Iop_F64toI64, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_I64)) );
       }
 
       goto decode_success;
@@ -10479,7 +10461,7 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f64lo, loadLE(Ity_F64, mkexpr(addr, tid, Ity_I64)));
+         assign(f64lo, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64)));
          delta += 2+alen;
          DIP("cvtsd2ss %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -10488,7 +10470,7 @@ DisResult disInstr_AMD64_WRK (
       assign( rmode, get_sse_roundingmode(tid) );
       putXMMRegLane32F( 
          gregOfRexRM(pfx,modrm), 0, 
-         binop( Iop_F64toF32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_F64) )
+         binop( Iop_F64toF32, mkexpr(rmode, tid, Ity_I32), mkexpr(f64lo, tid, Ity_I64) )
       );
 
       goto decode_success;
@@ -10562,14 +10544,14 @@ DisResult disInstr_AMD64_WRK (
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign(f32lo, loadLE(Ity_F32, mkexpr(addr, tid, Ity_I64)));
+         assign(f32lo, loadLE(Ity_I32, mkexpr(addr, tid, Ity_I64)));
          delta += 2+alen;
          DIP("cvtss2sd %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
       putXMMRegLane64F( gregOfRexRM(pfx,modrm), 0, 
-                        unop( Iop_F32toF64, mkexpr(f32lo, tid, Ity_F32) ) );
+                        unop( Iop_F32toF64, mkexpr(f32lo, tid, Ity_I32) ) );
 
       goto decode_success;
    }
@@ -10649,7 +10631,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+                    loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("mov%s %s,%s\n", wot, dis_buf,
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -10776,7 +10758,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+                    loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("movdqu %s,%s\n", dis_buf,
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -10951,16 +10933,16 @@ DisResult disInstr_AMD64_WRK (
                   binop(Iop_SarN8x8, 
                         getXMMRegLane64(eregOfRexRM(pfx,modrm), 0 ), 
                         mkU8(7) ) ));
-         assign( olddata, loadLE( Ity_V128, mkexpr(addr, tid, Ity_I64)));
+         assign( olddata, loadLE( Ity_I128, mkexpr(addr, tid, Ity_I64)));
          assign( newdata, 
                  binop(Iop_OrV128, 
                        binop(Iop_AndV128, 
-                             mkexpr(regD, tid, Ity_V128), 
-                             mkexpr(mask, tid, Ity_V128) ),
+                             mkexpr(regD, tid, Ity_I128), 
+                             mkexpr(mask, tid, Ity_I128) ),
                        binop(Iop_AndV128, 
-                             mkexpr(olddata, tid, Ity_V128),
-                             unop(Iop_NotV128, mkexpr(mask, tid, Ity_V128)))) );
-         storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(newdata, tid, Ity_V128) );
+                             mkexpr(olddata, tid, Ity_I128),
+                             unop(Iop_NotV128, mkexpr(mask, tid, Ity_I128)))) );
+         storeLE( mkexpr(addr, tid, Ity_I64), mkexpr(newdata, tid, Ity_I128) );
 
          delta += 2+1;
          DIP("maskmovdqu %s,%s\n", nameXMMReg( eregOfRexRM(pfx,modrm) ),
@@ -11145,7 +11127,7 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 1 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          select = (Int)guest_code[delta+2+alen];
          delta += 3+alen;
          DIP("shufpd $%d,%s,%s\n", select, 
@@ -11153,10 +11135,10 @@ DisResult disInstr_AMD64_WRK (
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( d1, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
-      assign( d0, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
-      assign( s1, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( s0, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
+      assign( d1, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_I128)) );
+      assign( d0, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_I128)) );
+      assign( s1, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( s0, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_I128)) );
 
 #     define SELD(n) mkexpr((n)==0 ? d0 : d1, tid, Ity_I64)
 #     define SELS(n) mkexpr((n)==0 ? s0 : s1, tid, Ity_I64)
@@ -11228,17 +11210,17 @@ DisResult disInstr_AMD64_WRK (
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("unpck%sps %s,%s\n", hi ? "h" : "l",
                                   dis_buf,
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( d1, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
-      assign( d0, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
-      assign( s1, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( s0, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
+      assign( d1, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_I128)) );
+      assign( d0, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_I128)) );
+      assign( s1, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( s0, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_I128)) );
 
       if (hi) {
          putXMMReg( gregOfRexRM(pfx,modrm), 
@@ -11520,16 +11502,16 @@ DisResult disInstr_AMD64_WRK (
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( s1V, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( s1V, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("pmaddwd %s,%s\n", dis_buf,
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
       assign( s2V, getXMMReg(gregOfRexRM(pfx,modrm)) );
-      assign( s1Hi, unop(Iop_V128HIto64, mkexpr(s1V, tid, Ity_V128)) );
-      assign( s1Lo, unop(Iop_V128to64,   mkexpr(s1V, tid, Ity_V128)) );
-      assign( s2Hi, unop(Iop_V128HIto64, mkexpr(s2V, tid, Ity_V128)) );
-      assign( s2Lo, unop(Iop_V128to64,   mkexpr(s2V, tid, Ity_V128)) );
+      assign( s1Hi, unop(Iop_V128HIto64, mkexpr(s1V, tid, Ity_I128)) );
+      assign( s1Lo, unop(Iop_V128to64,   mkexpr(s1V, tid, Ity_I128)) );
+      assign( s2Hi, unop(Iop_V128HIto64, mkexpr(s2V, tid, Ity_I128)) );
+      assign( s2Lo, unop(Iop_V128to64,   mkexpr(s2V, tid, Ity_I128)) );
       assign( dHi, mkIRExprCCall(
                       Ity_I64, 0/*regparms*/,
                       "amd64g_calculate_mmx_pmaddwd", 
@@ -11543,7 +11525,7 @@ DisResult disInstr_AMD64_WRK (
                       mkIRExprVec_2( mkexpr(s1Lo, tid, Ity_I64), mkexpr(s2Lo, tid, Ity_I64))
                    ));
       assign( dV, binop(Iop_64HLtoV128, mkexpr(dHi, tid, Ity_I64), mkexpr(dLo, tid, Ity_I64))) ;
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_I128));
       goto decode_success;
    }
 
@@ -11690,7 +11672,7 @@ DisResult disInstr_AMD64_WRK (
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("pmuludq %s,%s\n", dis_buf,
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -11734,16 +11716,16 @@ DisResult disInstr_AMD64_WRK (
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( s1V, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( s1V, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 2+alen;
          DIP("psadbw %s,%s\n", dis_buf,
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
       assign( s2V, getXMMReg(gregOfRexRM(pfx,modrm)) );
-      assign( s1Hi, unop(Iop_V128HIto64, mkexpr(s1V, tid, Ity_V128)) );
-      assign( s1Lo, unop(Iop_V128to64,   mkexpr(s1V, tid, Ity_V128)) );
-      assign( s2Hi, unop(Iop_V128HIto64, mkexpr(s2V, tid, Ity_V128)) );
-      assign( s2Lo, unop(Iop_V128to64,   mkexpr(s2V, tid, Ity_V128)) );
+      assign( s1Hi, unop(Iop_V128HIto64, mkexpr(s1V, tid, Ity_I128)) );
+      assign( s1Lo, unop(Iop_V128to64,   mkexpr(s1V, tid, Ity_I128)) );
+      assign( s2Hi, unop(Iop_V128HIto64, mkexpr(s2V, tid, Ity_I128)) );
+      assign( s2Lo, unop(Iop_V128to64,   mkexpr(s2V, tid, Ity_I128)) );
       assign( dHi, mkIRExprCCall(
                       Ity_I64, 0/*regparms*/,
                       "amd64g_calculate_mmx_psadbw", 
@@ -11757,7 +11739,7 @@ DisResult disInstr_AMD64_WRK (
                       mkIRExprVec_2( mkexpr(s1Lo, tid, Ity_I64), mkexpr(s2Lo, tid, Ity_I64))
                    ));
       assign( dV, binop(Iop_64HLtoV128, mkexpr(dHi, tid, Ity_I64), mkexpr(dLo, tid, Ity_I64))) ;
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_I128));
       goto decode_success;
    }
 
@@ -11780,7 +11762,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
 	 order = (Int)guest_code[delta+2+alen];
          delta += 2+alen+1;
          DIP("pshufd $%d,%s,%s\n", order, 
@@ -11795,7 +11777,7 @@ DisResult disInstr_AMD64_WRK (
 	     mk128from32s(tid, SEL((order>>6)&3), SEL((order>>4)&3),
                            SEL((order>>2)&3), SEL((order>>0)&3) )
       );
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_I128));
 #     undef SEL
       goto decode_success;
    }
@@ -11822,14 +11804,14 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
 	 order = (Int)guest_code[delta+2+alen];
          delta += 2+alen+1;
          DIP("pshufhw $%d,%s,%s\n", order, 
                                     dis_buf,
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
-      assign( sVhi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
+      assign( sVhi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
       breakup64to16s(tid,  sVhi, &s3, &s2, &s1, &s0 );
 
 #     define SEL(n) \
@@ -11840,8 +11822,8 @@ DisResult disInstr_AMD64_WRK (
       );
       assign(dV, binop( Iop_64HLtoV128, 
                         mkexpr(dVhi, tid, Ity_I64),
-                        unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128))) );
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
+                        unop(Iop_V128to64, mkexpr(sV, tid, Ity_I128))) );
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_I128));
 #     undef SEL
       goto decode_success;
    }
@@ -11868,14 +11850,14 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 
                            1/*byte after the amode*/ );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
 	 order = (Int)guest_code[delta+2+alen];
          delta += 2+alen+1;
          DIP("pshuflw $%d,%s,%s\n", order, 
                                     dis_buf,
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
-      assign( sVlo, unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128)) );
+      assign( sVlo, unop(Iop_V128to64, mkexpr(sV, tid, Ity_I128)) );
       breakup64to16s(tid,  sVlo, &s3, &s2, &s1, &s0 );
 
 #     define SEL(n) \
@@ -11885,9 +11867,9 @@ DisResult disInstr_AMD64_WRK (
                           SEL((order>>2)&3), SEL((order>>0)&3) )
       );
       assign(dV, binop( Iop_64HLtoV128,
-                        unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)),
+                        unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)),
                         mkexpr(dVlo, tid, Ity_I64) ) );
-      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_V128));
+      putXMMReg(gregOfRexRM(pfx,modrm), mkexpr(dV, tid, Ity_I128));
 #     undef SEL
       goto decode_success;
    }
@@ -11934,8 +11916,8 @@ DisResult disInstr_AMD64_WRK (
       }
 
       assign( sV, getXMMReg(reg) );
-      assign( hi64, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( lo64, unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128)) );
+      assign( hi64, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( lo64, unop(Iop_V128to64, mkexpr(sV, tid, Ity_I128)) );
 
       if (imm == 0) {
          assign( lo64r, mkexpr(lo64, tid, Ity_I64) );
@@ -11966,7 +11948,7 @@ DisResult disInstr_AMD64_WRK (
                );
       }
       assign( dV, binop(Iop_64HLtoV128, mkexpr(hi64r, tid, Ity_I64), mkexpr(lo64r, tid, Ity_I64)) );
-      putXMMReg(reg, mkexpr(dV, tid, Ity_V128));
+      putXMMReg(reg, mkexpr(dV, tid, Ity_I128));
       goto decode_success;
    }
 
@@ -12076,8 +12058,8 @@ DisResult disInstr_AMD64_WRK (
       }
 
       assign( sV, getXMMReg(reg) );
-      assign( hi64, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( lo64, unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128)) );
+      assign( hi64, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( lo64, unop(Iop_V128to64, mkexpr(sV, tid, Ity_I128)) );
 
       if (imm == 0) {
          assign( lo64r, mkexpr(lo64, tid, Ity_I64) );
@@ -12109,7 +12091,7 @@ DisResult disInstr_AMD64_WRK (
       }
 
       assign( dV, binop(Iop_64HLtoV128, mkexpr(hi64r, tid, Ity_I64), mkexpr(lo64r, tid, Ity_I64)) );
-      putXMMReg(reg, mkexpr(dV, tid, Ity_V128));
+      putXMMReg(reg, mkexpr(dV, tid, Ity_I128));
       goto decode_success;
    }
 
@@ -12374,7 +12356,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("movs%cdup %s,%s\n", isH ? 'h' : 'l',
 	     dis_buf,
              nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -12402,7 +12384,7 @@ DisResult disInstr_AMD64_WRK (
          DIP("movddup %s,%s\n", nameXMMReg(eregOfRexRM(pfx,modrm)),
                                 nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+1;
-         assign ( d0, unop(Iop_V128to64, mkexpr(sV, tid, Ity_V128)) );
+         assign ( d0, unop(Iop_V128to64, mkexpr(sV, tid, Ity_I128)) );
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          assign( d0, loadLE(Ity_I64, mkexpr(addr, tid, Ity_I64)) );
@@ -12434,7 +12416,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( eV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("addsubps %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12442,8 +12424,8 @@ DisResult disInstr_AMD64_WRK (
 
       assign( gV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
-      assign( addV, binop(Iop_Add32Fx4, mkexpr(gV, tid, Ity_V128), mkexpr(eV, tid, Ity_V128)) );
-      assign( subV, binop(Iop_Sub32Fx4, mkexpr(gV, tid, Ity_V128), mkexpr(eV, tid, Ity_V128)) );
+      assign( addV, binop(Iop_Add32Fx4, mkexpr(gV, tid, Ity_I128), mkexpr(eV, tid, Ity_I128)) );
+      assign( subV, binop(Iop_Sub32Fx4, mkexpr(gV, tid, Ity_I128), mkexpr(eV, tid, Ity_I128)) );
 
       breakup128to32s(tid,  addV, &a3, &a2, &a1, &a0 );
       breakup128to32s(tid,  subV, &s3, &s2, &s1, &s0 );
@@ -12470,7 +12452,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( eV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("addsubpd %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12478,11 +12460,11 @@ DisResult disInstr_AMD64_WRK (
 
       assign( gV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
-      assign( addV, binop(Iop_Add64Fx2, mkexpr(gV, tid, Ity_V128), mkexpr(eV, tid, Ity_V128)) );
-      assign( subV, binop(Iop_Sub64Fx2, mkexpr(gV, tid, Ity_V128), mkexpr(eV, tid, Ity_V128)) );
+      assign( addV, binop(Iop_Add64Fx2, mkexpr(gV, tid, Ity_I128), mkexpr(eV, tid, Ity_I128)) );
+      assign( subV, binop(Iop_Sub64Fx2, mkexpr(gV, tid, Ity_I128), mkexpr(eV, tid, Ity_I128)) );
 
-      assign( a1, unop(Iop_V128HIto64, mkexpr(addV, tid, Ity_V128) ));
-      assign( s0, unop(Iop_V128to64,   mkexpr(subV, tid, Ity_V128) ));
+      assign( a1, unop(Iop_V128HIto64, mkexpr(addV, tid, Ity_I128) ));
+      assign( s0, unop(Iop_V128to64,   mkexpr(subV, tid, Ity_I128) ));
 
       putXMMReg( gregOfRexRM(pfx,modrm), 
                  binop(Iop_64HLtoV128, mkexpr(a1, tid, Ity_I64), mkexpr(s0, tid, Ity_I64)) );
@@ -12510,7 +12492,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( eV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("h%sps %s,%s\n", str, dis_buf,
                                    nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12526,7 +12508,7 @@ DisResult disInstr_AMD64_WRK (
 
       putXMMReg( gregOfRexRM(pfx,modrm), 
                  binop(isAdd ? Iop_Add32Fx4 : Iop_Sub32Fx4, 
-                       mkexpr(leftV, tid, Ity_V128), mkexpr(rightV, tid, Ity_V128) ) );
+                       mkexpr(leftV, tid, Ity_I128), mkexpr(rightV, tid, Ity_I128) ) );
       goto decode_success;
    }
 
@@ -12553,7 +12535,7 @@ DisResult disInstr_AMD64_WRK (
          delta += 2+1;
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
-         assign( eV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( eV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("h%spd %s,%s\n", str, dis_buf,
                               nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12561,17 +12543,17 @@ DisResult disInstr_AMD64_WRK (
 
       assign( gV, getXMMReg(gregOfRexRM(pfx,modrm)) );
 
-      assign( e1, unop(Iop_V128HIto64, mkexpr(eV, tid, Ity_V128) ));
-      assign( e0, unop(Iop_V128to64, mkexpr(eV, tid, Ity_V128) ));
-      assign( g1, unop(Iop_V128HIto64, mkexpr(gV, tid, Ity_V128) ));
-      assign( g0, unop(Iop_V128to64, mkexpr(gV, tid, Ity_V128) ));
+      assign( e1, unop(Iop_V128HIto64, mkexpr(eV, tid, Ity_I128) ));
+      assign( e0, unop(Iop_V128to64, mkexpr(eV, tid, Ity_I128) ));
+      assign( g1, unop(Iop_V128HIto64, mkexpr(gV, tid, Ity_I128) ));
+      assign( g0, unop(Iop_V128to64, mkexpr(gV, tid, Ity_I128) ));
 
       assign( leftV,  binop(Iop_64HLtoV128, mkexpr(e0, tid, Ity_I64),mkexpr(g0, tid, Ity_I64)) );
       assign( rightV, binop(Iop_64HLtoV128, mkexpr(e1, tid, Ity_I64),mkexpr(g1, tid, Ity_I64)) );
 
       putXMMReg( gregOfRexRM(pfx,modrm), 
                  binop(isAdd ? Iop_Add64Fx2 : Iop_Sub64Fx2, 
-                       mkexpr(leftV, tid, Ity_V128), mkexpr(rightV, tid, Ity_V128) ) );
+                       mkexpr(leftV, tid, Ity_I128), mkexpr(rightV, tid, Ity_I128) ) );
       goto decode_success;
    }
 
@@ -12584,7 +12566,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+2, dis_buf, 0 );
          putXMMReg( gregOfRexRM(pfx,modrm), 
-                    loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+                    loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("lddqu %s,%s\n", dis_buf,
                               nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 2+alen;
@@ -12676,7 +12658,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 3+alen;
          DIP("pmaddubsw %s,%s\n", dis_buf,
                                   nameXMMReg(gregOfRexRM(pfx,modrm)));
@@ -12684,23 +12666,23 @@ DisResult disInstr_AMD64_WRK (
 
       /* compute dV unsigned x sV signed */
       assign( sVoddsSX,
-              binop(Iop_SarN16x8, mkexpr(sV, tid, Ity_V128), mkU8(8)) );
+              binop(Iop_SarN16x8, mkexpr(sV, tid, Ity_I128), mkU8(8)) );
       assign( sVevensSX,
               binop(Iop_SarN16x8, 
-                    binop(Iop_ShlN16x8, mkexpr(sV, tid, Ity_V128), mkU8(8)), 
+                    binop(Iop_ShlN16x8, mkexpr(sV, tid, Ity_I128), mkU8(8)), 
                     mkU8(8)) );
       assign( dVoddsZX,
-              binop(Iop_ShrN16x8, mkexpr(dV, tid, Ity_V128), mkU8(8)) );
+              binop(Iop_ShrN16x8, mkexpr(dV, tid, Ity_I128), mkU8(8)) );
       assign( dVevensZX,
               binop(Iop_ShrN16x8,
-                    binop(Iop_ShlN16x8, mkexpr(dV, tid, Ity_V128), mkU8(8)),
+                    binop(Iop_ShlN16x8, mkexpr(dV, tid, Ity_I128), mkU8(8)),
                     mkU8(8)) );
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
          binop(Iop_QAdd16Sx8,
-               binop(Iop_Mul16x8, mkexpr(sVoddsSX, tid, Ity_V128), mkexpr(dVoddsZX, tid, Ity_V128)),
-               binop(Iop_Mul16x8, mkexpr(sVevensSX, tid, Ity_V128), mkexpr(dVevensZX, tid, Ity_V128))
+               binop(Iop_Mul16x8, mkexpr(sVoddsSX, tid, Ity_I128), mkexpr(dVoddsZX, tid, Ity_I128)),
+               binop(Iop_Mul16x8, mkexpr(sVevensSX, tid, Ity_I128), mkexpr(dVevensZX, tid, Ity_I128))
          )
       );
       goto decode_success;
@@ -12829,16 +12811,16 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          DIP("ph%s %s,%s\n", str, dis_buf,
                              nameXMMReg(gregOfRexRM(pfx,modrm)));
          delta += 3+alen;
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_I128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_I128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_I128)) );
 
       /* This isn't a particularly efficient way to compute the
          result, but at least it avoids a proliferation of IROps,
@@ -12914,16 +12896,16 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 3+alen;
          DIP("pmulhrsw %s,%s\n", dis_buf,
                                  nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_I128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_I128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_I128)) );
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
@@ -13012,16 +12994,16 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 3+alen;
          DIP("psign%s %s,%s\n", str, dis_buf,
                                      nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_I128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_I128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_I128)) );
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
@@ -13104,14 +13086,14 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 3+alen;
          DIP("pabs%s %s,%s\n", str, dis_buf,
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_I128)) );
 
       putXMMReg(
          gregOfRexRM(pfx,modrm),
@@ -13203,7 +13185,7 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 1 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          d64 = (Long)guest_code[delta+3+alen];
          delta += 3+alen+1;
          DIP("palignr $%d,%s,%s\n", (Int)d64,
@@ -13211,10 +13193,10 @@ DisResult disInstr_AMD64_WRK (
                                     nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_I128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_I128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_I128)) );
 
       if (d64 == 0) {
          assign( rHi, mkexpr(sHi, tid, Ity_I64) );
@@ -13336,16 +13318,16 @@ DisResult disInstr_AMD64_WRK (
       } else {
          addr = disAMode ( tid, guest_code, &alen, vbi, pfx, delta+3, dis_buf, 0 );
          gen_SEGV_if_not_16_aligned( tid, addr );
-         assign( sV, loadLE(Ity_V128, mkexpr(addr, tid, Ity_I64)) );
+         assign( sV, loadLE(Ity_I128, mkexpr(addr, tid, Ity_I64)) );
          delta += 3+alen;
          DIP("pshufb %s,%s\n", dis_buf,
                                nameXMMReg(gregOfRexRM(pfx,modrm)));
       }
 
-      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_V128)) );
-      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_V128)) );
-      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_V128)) );
-      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_V128)) );
+      assign( dHi, unop(Iop_V128HIto64, mkexpr(dV, tid, Ity_I128)) );
+      assign( dLo, unop(Iop_V128to64,   mkexpr(dV, tid, Ity_I128)) );
+      assign( sHi, unop(Iop_V128HIto64, mkexpr(sV, tid, Ity_I128)) );
+      assign( sLo, unop(Iop_V128to64,   mkexpr(sV, tid, Ity_I128)) );
 
       assign( sevens, mkU64(0x0707070707070707ULL) );
 

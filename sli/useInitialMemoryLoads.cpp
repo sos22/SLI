@@ -143,7 +143,7 @@ ReachingMap::get(const StateMachineState *s) const
 }
 
 static StateMachine *
-useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
+useInitialMemoryLoads(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 		      OracleInterface *oracle, bool *done_something)
 {
 	ReachingMap rm;
@@ -176,13 +176,19 @@ useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimi
 			rewrites[s] = new StateMachineSideEffecting(
 				s->dbg_origin,
 				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(Iop_BadPtr, load->addr),
+					exprbdd::to_bbdd(
+						&scopes->bools,
+						exprbdd::unop(
+							&scopes->exprs,
+							&scopes->bools,
+							Iop_BadPtr,
+							load->addr)),
 					true),
 				new StateMachineSideEffecting(
 					s->dbg_origin,
 					new StateMachineSideEffectCopy(
 						load->target,
-						IRExpr_Load(load->type, load->addr)),
+						exprbdd::load(&scopes->exprs, &scopes->bools, load->type, load->addr)),
 					s->target));
 		}
 	}
@@ -212,9 +218,7 @@ useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimi
 			newS = it2->second;
 		} else {
 			switch (s->type) {
-			case StateMachineState::Unreached:
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
+			case StateMachineState::Terminal:
 				newS = s;
 				break;
 			case StateMachineState::Bifurcate:
@@ -242,8 +246,8 @@ useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimi
 };
 
 StateMachine *
-useInitialMemoryLoads(const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
+useInitialMemoryLoads(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 		      OracleInterface *oracle, bool *done_something)
 {
-	return _useInitialMemoryLoads::useInitialMemoryLoads(mai, sm, opt, oracle, done_something);
+	return _useInitialMemoryLoads::useInitialMemoryLoads(scopes, mai, sm, opt, oracle, done_something);
 }

@@ -5,6 +5,7 @@
 #include "allowable_optimisations.hpp"
 #include "state_machine.hpp"
 #include "sat_checker.hpp"
+#include "visitor.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -268,6 +269,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 {
 	VexPtr<MaiMap, &ir_heap> mai(cs->mai);
 	cs->loadMachine = optimiseStateMachine(
+		cs->scopes,
 		mai,
 		cs->loadMachine,
 		AllowableOptimisations::defaultOptimisations.
@@ -278,6 +280,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		true,
 		token);
 	cs->storeMachine = optimiseStateMachine(
+		cs->scopes,
 		mai,
 		cs->storeMachine,
 		AllowableOptimisations::defaultOptimisations.
@@ -333,18 +336,17 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 
 	/* Find references of the second sense */
 	{
-		struct : public StateMachineTransformer {
-			bool res;
-			IRExpr *transformIex(IRExprGet *ieg) {
+		struct {
+			static visit_result Get(void *, const IRExprGet *ieg) {
 				if (ieg->reg.isReg())
-					res = true;
-				return ieg;
+					return visit_abort;
+				else
+					return visit_continue;
 			}
-			bool rewriteNewStates() const { return false; }
-		} checkForRegisterReferences;
-		checkForRegisterReferences.res = false;
-		transformCrashSummary(cs, checkForRegisterReferences);
-		if (checkForRegisterReferences.res) {
+		} foo;
+		static irexpr_visitor<void> visitor;
+		visitor.Get = foo.Get;
+		if (visit_crash_summary((void *)NULL, &visitor, cs) == visit_abort) {
 			for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
 						       saneIterator(cs->storeMachine->cfg_roots));
 			     !it.finished();
@@ -640,7 +642,8 @@ main(int argc, char *argv[])
 	CrashSummary *summary;
 	char *first_line;
 
-	summary = readBugReport(argv[1], &first_line);
+	SMScopes scopes;
+	summary = readBugReport(&scopes, argv[1], &first_line);
 
 	summary = optimise_crash_summary(summary, new DummyOracle(summary), ALLOW_GC);
 

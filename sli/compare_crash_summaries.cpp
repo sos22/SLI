@@ -18,6 +18,18 @@ localSimilarity(IRExpr *a, IRExpr *b)
 }
 
 static bool
+localSimilarity(bbdd *a, bbdd *b)
+{
+	if (a == b)
+		return true;
+	if (a->isLeaf || b->isLeaf)
+		return false;
+	return localSimilarity(a->content.condition, b->content.condition) &&
+		localSimilarity(a->content.trueBranch, b->content.trueBranch) &&
+		localSimilarity(a->content.falseBranch, b->content.falseBranch);
+}
+
+static bool
 localSimilarity2(StateMachineSideEffectLoad *smsel1, StateMachineSideEffectLoad *smsel2)
 {
 	return localSimilarity(smsel1->addr, smsel2->addr) &&
@@ -74,14 +86,14 @@ localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2)
 	for (auto it1 = e1->generations.begin(); it1 != e1->generations.end(); it1++) {
 		bool found_one = false;
 		for (auto it2 = e2->generations.begin(); !found_one && it2 != e2->generations.end(); it2++)
-			found_one = it1->first == it2->first;
+			found_one = it1->reg == it2->reg;
 		if (!found_one)
 			return false;
 	}
 	for (auto it1 = e2->generations.begin(); it1 != e2->generations.end(); it1++) {
 		bool found_one = false;
 		for (auto it2 = e1->generations.begin(); !found_one && it2 != e1->generations.end(); it2++)
-			found_one = it1->first == it2->first;
+			found_one = it1->reg == it2->reg;
 		if (!found_one)
 			return false;
 	}
@@ -129,21 +141,9 @@ localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2)
 }
 
 static bool
-localSimilarity(StateMachineUnreached *, StateMachineUnreached *)
+localSimilarity(StateMachineTerminal *a, StateMachineTerminal *b)
 {
-	return true;
-}
-
-static bool
-localSimilarity(StateMachineCrash *, StateMachineCrash *)
-{
-	return true;
-}
-
-static bool
-localSimilarity(StateMachineNoCrash *, StateMachineNoCrash *)
-{
-	return true;
+	return a->res == b->res;
 }
 
 static bool

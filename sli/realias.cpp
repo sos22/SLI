@@ -3,7 +3,6 @@
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
 #include "maybe.hpp"
-#include "MachineAliasingTable.hpp"
 #include "control_domination_map.hpp"
 #include "sat_checker.hpp"
 #include "alloc_mai.hpp"
@@ -40,27 +39,6 @@ static void enable_debug() {
 
 class AliasTable;
 
-static char *
-flattenStringFragmentsMalloc(const std::vector<const char *> &fragments)
-{
-	size_t s = 0;
-	for (auto it = fragments.begin();
-	     it != fragments.end();
-	     it++)
-		s += strlen(*it);
-	char *res = (char *)malloc(s + 1);
-	s = 0;
-	for (auto it = fragments.begin();
-	     it != fragments.end();
-	     it++) {
-		size_t s2 = strlen(*it);
-		memcpy(res + s, *it, s2);
-		s += s2;
-	}
-	res[s] = 0;
-	return res;
-}
-
 /* set dest to dest \union src.  Returns true if we had to do
    anything, or false otherwise. */
 template <typename t> static bool
@@ -75,24 +53,24 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 }
 
 #warning Fuck, this is incorrect for multi-threaded machines.  Need to have one StackLayout for each thread.
-class StackLayout : public Named {
-	char *mkName() const {
+class StackLayout {
+public:
+	std::vector<FrameId> functions;
+	std::vector<exprbdd *> rsps;
+
+	void prettyPrint(FILE *f) const {
 		std::vector<const char *> fragments;
 		auto it1 = rsps.begin();
 		auto it2 = functions.begin();
 		while (it1 != rsps.end()) {
-			fragments.push_back(vex_asprintf("%s <%s> ",
-							 it2->name(),
-							 nameIRExpr(*it1)));
+			fprintf(f, "%s --- ", it2->name());
+			(*it1)->prettyPrint(f);
 			it1++;
 			it2++;
 		}
-		fragments.push_back(it2->name());
-		return flattenStringFragmentsMalloc(fragments);
+		fprintf(f, "%s\n", it2->name());
 	}
-public:
-	std::vector<FrameId> functions;
-	std::vector<IRExpr *> rsps;
+
 	void sanity_check() const {
 #ifndef NDEBUG
 		assert(functions.size() == rsps.size() + 1);
@@ -122,7 +100,7 @@ public:
 		return !(*this == o);
 	}
 	
-	bool identifyFrameFromPtr(IRExpr *ptr, FrameId *out);
+	bool identifyFrameFromPtr(exprbdd *ptr, FrameId *out);
 	size_t size() { return rsps.size(); }
 };
 
@@ -133,7 +111,10 @@ enum compare_expressions_res {
 	compare_expressions_unknown
 };
 
-static compare_expressions_res
+/* This has to be non-static because it's invoked from a template.
+   Why do template parameters have to be non-static?  Nobody seems to
+   know. */
+compare_expressions_res
 compare_expressions(IRExpr *a, IRExpr *b)
 {
 	assert(a->type() == Ity_I64);
@@ -141,7 +122,7 @@ compare_expressions(IRExpr *a, IRExpr *b)
 	struct reg_plus_offset {
 		threadAndRegister tr;
 		long offset;
-		reg_plus_offset(IRExpr *ex)
+		reg_plus_offset(const IRExpr *ex)
 			: tr(threadAndRegister::invalid()),
 			  offset(0)
 		{
@@ -154,7 +135,7 @@ compare_expressions(IRExpr *a, IRExpr *b)
 				    a->contents[0]->tag == Iex_Const &&
 				    a->contents[1]->tag == Iex_Get) {
 					tr = ((IRExprGet *)a->contents[1])->reg;
-					offset = ((IRExprConst *)a->contents[0])->con->Ico.U64;
+					offset = ((IRExprConst *)a->contents[0])->Ico.U64;
 				}
 			}
 		}
@@ -171,16 +152,51 @@ compare_expressions(IRExpr *a, IRExpr *b)
 		return compare_expressions_gt;
 }
 
+template <typename bdd1, typename bdd2, typename rt,
+	  rt (*zip)(typename bdd1::leafT, typename bdd2::leafT),
+	  rt (*fold)(rt, rt)>
+static rt
+foldzipbdds(const bdd1 *a, const bdd2 *b)
+{
+	if (a->isLeaf && b->isLeaf)
+		return zip(a->leaf(), b->leaf());
+	if (a->isLeaf)
+		return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().trueBranch),
+			    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().falseBranch));
+	if (b->isLeaf || a->internal().rank < b->internal().rank)
+		return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().trueBranch, b),
+			    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().falseBranch, b));
+	if (a->internal().rank == b->internal().rank)
+		return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().trueBranch, b->internal().trueBranch),
+			    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().falseBranch, b->internal().falseBranch));
+	return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().trueBranch),
+		    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().falseBranch));
+}
+/* Like compare_expressions(IRExpr *, IRExpr *), only non-static to
+   work around language bugs. */
+compare_expressions_res
+combine_expression_res(compare_expressions_res a,
+		       compare_expressions_res b) {
+	if (a == b)
+		return a;
+	else
+		return compare_expressions_unknown;
+}
+static compare_expressions_res
+compare_expressions(const exprbdd *a, const exprbdd *b)
+{
+	return foldzipbdds<exprbdd, exprbdd, compare_expressions_res, compare_expressions, combine_expression_res>(a, b);
+}
 
 bool
-StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
+StackLayout::identifyFrameFromPtr(exprbdd *ptr, FrameId *out)
 {
 	*out = FrameId();
 	bool definitelyStack = false;
 	assert(ptr->type() == Ity_I64);
 	auto it2 = functions.begin();
 	for (auto it = rsps.begin(); it != rsps.end(); it++) {
-		IRExpr *rsp = *it;
+		exprbdd *rsp = *it;
 		switch (compare_expressions(ptr, rsp)) {
 		case compare_expressions_gt:
 		case compare_expressions_eq:
@@ -217,8 +233,11 @@ public:
 		for (auto it = content.begin(); it != content.end(); it++) {
 			auto i = labels.find(it->first);
 			assert(i != labels.end());
-			fprintf(f, "%d: %s\n", i->second,
-				it->second.valid ? it->second.content.name() : "<none>");
+			fprintf(f, "%d: ", i->second);
+			if (it->second.valid)
+				it->second.content.prettyPrint(f);
+			else
+				fprintf(f, "<none>");
 		}
 	}
 	void sanity_check() const {
@@ -270,7 +289,7 @@ StackLayoutTable::updateLayout(StateMachineState *s, const Maybe<StackLayout> &n
 bool
 StackLayoutTable::build(StateMachine *inp)
 {
-	std::map<FrameId, IRExpr *> frameBoundaries;
+	std::map<FrameId, exprbdd *> frameBoundaries;
 	{
 		std::set<StateMachineSideEffectStartFunction *> startFunctions;
 		std::set<StateMachineSideEffectEndFunction *> endFunctions;
@@ -278,35 +297,41 @@ StackLayoutTable::build(StateMachine *inp)
 		enumSideEffects(inp, endFunctions);
 		for (auto it = startFunctions.begin(); it != startFunctions.end(); it++) {
 			auto it2_did_insert = frameBoundaries.insert(
-				std::pair<FrameId, IRExpr*>
+				std::pair<FrameId, exprbdd*>
 				( (*it)->frame, (*it)->rsp ));
 			auto it2 = it2_did_insert.first;
 			auto did_insert = it2_did_insert.second;
 			if (!did_insert &&
 			    it2->second != (*it)->rsp) {
-				if (debug_build_stack_layout)
-					printf("Cannot build stack layout because %s(%p) != %s(%p)\n",
-					       nameIRExpr(it2->second),
+				if (debug_build_stack_layout) {
+					printf("Cannot build stack layout because %p != %p\n",
 					       it2->second,
-					       nameIRExpr( (*it)->rsp),
 					       (*it)->rsp);
+					printf("arg1 = ");
+					it2->second->prettyPrint(stdout);
+					printf("arg2 = ");
+					(*it)->rsp->prettyPrint(stdout);
+				}
 				return false;
 			}
 		}
 		for (auto it = endFunctions.begin(); it != endFunctions.end(); it++) {
 			auto it2_did_insert = frameBoundaries.insert(
-				std::pair<FrameId, IRExpr*>
+				std::pair<FrameId, exprbdd*>
 				( (*it)->frame, (*it)->rsp ));
 			auto it2 = it2_did_insert.first;
 			auto did_insert = it2_did_insert.second;
 			if (!did_insert &&
 			    it2->second != (*it)->rsp) {
-				if (debug_build_stack_layout)
-					printf("Cannot build stack layout because %s(%p) != %s(%p)\n",
-					       nameIRExpr(it2->second),
+				if (debug_build_stack_layout) {
+					printf("Cannot build stack layout because %p != %p (EndFunction)\n",
 					       it2->second,
-					       nameIRExpr( (*it)->rsp),
 					       (*it)->rsp);
+					printf("arg1 = ");
+					it2->second->prettyPrint(stdout);
+					printf("arg2 = ");
+					(*it)->rsp->prettyPrint(stdout);
+				}
 				return false;
 			}
 		}
@@ -315,8 +340,10 @@ StackLayoutTable::build(StateMachine *inp)
 		printf("Frame -> RSP correspondence:\n");
 		for (auto it = frameBoundaries.begin();
 		     it != frameBoundaries.end();
-		     it++)
-			printf("\t%s -> %s\n", it->first.name(), nameIRExpr(it->second));
+		     it++) {
+			printf("\t%s -> ", it->first.name());
+			it->second->prettyPrint(stdout);
+		}
 	}
 	std::queue<StateMachineState *> needingUpdate;
 	enumStates(inp, &needingUpdate);
@@ -416,81 +443,55 @@ StackLayoutTable::build(StateMachine *inp)
 
 class PointsToTable {
 	std::map<threadAndRegister, PointerAliasingSet> content;
-	PointerAliasingSet getInitialLoadAliasing(IRExpr *addr,
+	PointerAliasingSet getInitialLoadAliasing(SMScopes *scopes,
+						  IRExpr *addr,
 						  StateMachineState *sm,
-						  MachineAliasingTable &mat,
+						  StackLayoutTable &slt,
+						  StateMachine *machine);
+	PointerAliasingSet getInitialLoadAliasing(SMScopes *scopes,
+						  exprbdd *addr,
+						  StateMachineState *sm,
 						  StackLayoutTable &slt,
 						  StateMachine *machine);
 
 public:
-	PointerAliasingSet pointsToSetForExpr(IRExpr *e,
+	PointerAliasingSet pointsToSetForExpr(SMScopes *scopes,
+					      IRExpr *e,
 					      StateMachineState *sm,
 					      Maybe<StackLayout> *sl,
-					      MachineAliasingTable &mat,
+					      StackLayoutTable &slt,
+					      StateMachine *machine);
+	PointerAliasingSet pointsToSetForExpr(SMScopes *scopes,
+					      exprbdd *e,
+					      StateMachineState *sm,
+					      Maybe<StackLayout> *sl,
 					      StackLayoutTable &slt,
 					      StateMachine *machine);
 	bool build(StateMachine *sm);
 	void prettyPrint(FILE *f);
 	void sanity_check() const {
-		for (auto it = content.begin(); it != content.end(); it++) {
+		for (auto it = content.begin(); it != content.end(); it++)
 			assert(it->first.isValid());
-			assert(it->first.isTemp() || it->first.gen() != (unsigned)-1);
-		}
 	}
-	PointsToTable refine(AliasTable &at,
+	PointsToTable refine(SMScopes *scopes,
+			     AliasTable &at,
 			     StateMachine *sm,
-			     MachineAliasingTable &mat,
 			     StackLayoutTable &slt,
 			     bool *done_something);
 };
 
-static bool
-aliasConfigForState(StateMachineState *sm,
-		    unsigned thread,
-		    MachineAliasingTable &mat,
-		    Oracle::ThreadRegisterAliasingConfiguration *config)
-{
-	Oracle::RegisterAliasingConfiguration config2;
-
-	if (!mat.findConfig(sm, &config2))
-		return false;
-	for (auto it = config2.content.begin(); it != config2.content.end(); it++) {
-		if (it->first == thread) {
-			*config = it->second;
-			return true;
-		}
-	}
-	return false;
-}
-
-static PointerAliasingSet
-aliasConfigForReg(StateMachineState *sm,
-		  const threadAndRegister &reg,
-		  MachineAliasingTable &mat)
-{
-	assert(reg.isReg());
-	if (reg.gen() != (unsigned)-1 || reg.asReg() >= Oracle::NR_REGS * 8)
-		return PointerAliasingSet::anything;
-	assert(reg.asReg() % 8 == 0);
-
-	Oracle::ThreadRegisterAliasingConfiguration config;
-	if (!aliasConfigForState(sm, reg.tid(), mat, &config))
-		return PointerAliasingSet::anything;
-	return config.v[reg.asReg() / 8];
-}
-
 PointerAliasingSet
-PointsToTable::getInitialLoadAliasing(IRExpr *addr,
+PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
+				      IRExpr *addr,
 				      StateMachineState *sm,
-				      MachineAliasingTable &mat,
 				      StackLayoutTable &slt,
 				      StateMachine *machine)
 {
 	Maybe<StackLayout> *sl = slt.initialStackLayout(sm, machine);
-	PointerAliasingSet addrPts(pointsToSetForExpr(addr,
+	PointerAliasingSet addrPts(pointsToSetForExpr(scopes,
+						      addr,
 						      sm,
 						      sl,
-						      mat,
 						      slt,
 						      machine));
 	PointerAliasingSet res = PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
@@ -515,10 +516,10 @@ PointsToTable::getInitialLoadAliasing(IRExpr *addr,
 }
 
 PointerAliasingSet
-PointsToTable::pointsToSetForExpr(IRExpr *e,
+PointsToTable::pointsToSetForExpr(SMScopes *scopes,
+				  IRExpr *e,
 				  StateMachineState *sm,
 				  Maybe<StackLayout> *sl,
-				  MachineAliasingTable &mat,
 				  StackLayoutTable &slt,
 				  StateMachine *machine)
 {
@@ -527,49 +528,29 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 	switch (e->tag) {
 	case Iex_Get: {
 		IRExprGet *iex = (IRExprGet *)e;
-		if (iex->reg.isTemp() || iex->reg.gen() != (unsigned)-1) {
-			if (!content.count(iex->reg)) {
-				/* This can actually happen sometimes
-				   during optimisation if, for
-				   instance, we determine that a load
-				   is definitely going to dereference
-				   a bad pointer and is replaced by an
-				   <unreached> side effect.  The
-				   temporary targeted by the load is
-				   then left uninitialised.  The
-				   optimiser will later remove all
-				   references to it, so it's not
-				   actually a problem, but we can
-				   sometimes see the intermediate
-				   state due to phase ordering
-				   problems.  Just do something
-				   vaguely sensible. */
-				warning("%s:%s:%d: Use of uninitialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
-				return PointerAliasingSet::nothing;
-			} else {
-				return content[iex->reg];
-			}
+		if (!content.count(iex->reg)) {
+			/* This can actually happen sometimes during
+			   optimisation if, for instance, we determine
+			   that a load is definitely going to
+			   dereference a bad pointer and is replaced
+			   by an <unreached> side effect.  The
+			   temporary targeted by the load is then left
+			   uninitialised.  The optimiser will later
+			   remove all references to it, so it's not
+			   actually a problem, but we can sometimes
+			   see the intermediate state due to phase
+			   ordering problems.  Just do something
+			   vaguely sensible. */
+			warning("%s:%s:%d: Use of uninitialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
+			return PointerAliasingSet::nothing;
+		} else {
+			return content[iex->reg];
 		}
-		if (iex->reg.isReg() &&
-		    iex->reg.asReg() == OFFSET_amd64_RSP) {
-			if (sl && sl->valid) {
-				FrameId f;
-				if (sl->content.identifyFrameFromPtr(iex, &f)) {
-					return PointerAliasingSet::frame(f);
-				} else {
-					break;
-				}
-			} else {
-				return PointerAliasingSet::stackPointer;
-			}
-		}
-
-		return aliasConfigForReg(sm, iex->reg, mat);
 	}
 
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)e;
-		return getInitialLoadAliasing(iel->addr, sm, mat, slt, machine);
+		return getInitialLoadAliasing(scopes, iel->addr, sm, slt, machine);
 	}
 	case Iex_Const:
 		return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
@@ -584,13 +565,13 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		    ((IRExprGet *)iex->contents[1])->reg.isReg() &&
 		    ((IRExprGet *)iex->contents[1])->reg.asReg() == OFFSET_amd64_RSP) {
 			FrameId f;
-			if (sl->content.identifyFrameFromPtr(iex, &f))
+			if (sl->content.identifyFrameFromPtr(exprbdd::var(&scopes->exprs, &scopes->bools, iex), &f))
 				return PointerAliasingSet::frame(f);
 		}
 		if (iex->op == Iop_Add64) {
 			PointerAliasingSet res(PointerAliasingSet::nothing);
 			for (int i = 0; i < iex->nr_arguments; i++)
-				res |= pointsToSetForExpr(iex->contents[i], sm, sl, mat, slt, machine);
+				res |= pointsToSetForExpr(scopes, iex->contents[i], sm, sl, slt, machine);
 			return res;
 		}
 
@@ -600,6 +581,61 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		break;
 	}
 	return PointerAliasingSet::anything;
+}
+
+PointerAliasingSet
+PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
+				      exprbdd *addr,
+				      StateMachineState *sm,
+				      StackLayoutTable &slt,
+				      StateMachine *machine)
+{
+	PointerAliasingSet acc(PointerAliasingSet::nothing);
+	std::set<exprbdd *> visited;
+	std::vector<exprbdd *> q;
+	q.push_back(addr);
+	while (!q.empty()) {
+		exprbdd *ee = q.back();
+		q.pop_back();
+		if (!visited.insert(ee).second)
+			continue;
+		if (ee->isLeaf) {
+			acc |= getInitialLoadAliasing(scopes, ee->leaf(), sm,
+						      slt, machine);
+		} else {
+			q.push_back(ee->internal().trueBranch);
+			q.push_back(ee->internal().falseBranch);
+		}
+	}
+	return acc;
+}
+
+PointerAliasingSet
+PointsToTable::pointsToSetForExpr(SMScopes *scopes,
+				  exprbdd *e,
+				  StateMachineState *sm,
+				  Maybe<StackLayout> *sl,
+				  StackLayoutTable &slt,
+				  StateMachine *machine)
+{
+	PointerAliasingSet acc(PointerAliasingSet::nothing);
+	std::set<exprbdd *> visited;
+	std::vector<exprbdd *> q;
+	q.push_back(e);
+	while (!q.empty()) {
+		exprbdd *ee = q.back();
+		q.pop_back();
+		if (!visited.insert(ee).second)
+			continue;
+		if (e->isLeaf) {
+			acc |= pointsToSetForExpr(scopes, ee->leaf(), sm, sl,
+						  slt, machine);
+		} else {
+			q.push_back(ee->internal().trueBranch);
+			q.push_back(ee->internal().falseBranch);
+		}
+	}
+	return acc;
 }
 
 bool
@@ -641,8 +677,7 @@ public:
 		     it++) {
 			assert(*it);
 			assert((*it)->getSideEffect());
-			assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store ||
-			       (*it)->getSideEffect()->type == StateMachineSideEffect::Load);
+			assert((*it)->getSideEffect()->type == StateMachineSideEffect::Store);
 		}
 	}
 	AliasTableEntry(const std::set<StateMachineSideEffecting *> &_stores,
@@ -709,8 +744,8 @@ public:
 		assert(it != content.end());
 		return it->second;
 	}
-	void refine(PointsToTable &ptt,
-		    MachineAliasingTable &mat,
+	void refine(SMScopes *scopes,
+		    PointsToTable &ptt,
 		    StackLayoutTable &slt,
 		    StateMachine *sm,
 		    bool *done_something,
@@ -783,9 +818,8 @@ AliasTable::build(const MaiMap &decode,
 		assert(this_it != reaching.end());
 		std::set<StateMachineSideEffecting *> exitReaching(this_it->second);
 		if (s->getSideEffect() &&
-		    (s->getSideEffect()->type == StateMachineSideEffect::Store ||
-		     s->getSideEffect()->type == StateMachineSideEffect::Load)) {
-			StateMachineSideEffectMemoryAccess *acc = (StateMachineSideEffectMemoryAccess *)s->getSideEffect();
+		    s->getSideEffect()->type == StateMachineSideEffect::Store) {
+			StateMachineSideEffectStore *acc = (StateMachineSideEffectStore *)s->getSideEffect();
 			/* Kill off anything which we definitely clobber */
 			for (auto it = exitReaching.begin();
 			     it != exitReaching.end();
@@ -845,24 +879,14 @@ AliasTable::build(const MaiMap &decode,
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); ) {
 			StateMachineSideEffecting *o = *it2;
 			assert(o->getSideEffect());
-			assert(o->getSideEffect()->type == StateMachineSideEffect::Store ||
-			       o->getSideEffect()->type == StateMachineSideEffect::Load);
-			StateMachineSideEffectMemoryAccess *smses =
-				(StateMachineSideEffectMemoryAccess *)o->getSideEffect();
-			/* We preserve stores if there's any
-			   possibility that they overlap, but loads
-			   only if they definitely do.  That's because
-			   we can safely drop loads from the set
-			   without harming correctness, and we ideally
-			   want the set to be as small as possible,
-			   but losing a store is a disaster. */
+			assert(o->getSideEffect()->type == StateMachineSideEffect::Store);
+			StateMachineSideEffectStore *smses =
+				(StateMachineSideEffectStore *)o->getSideEffect();
 			/* The condition on types is unsound, but it's
 			   what eval_state_machine does. */
 #warning unsound
 			if (oracle->memoryAccessesMightAlias(decode, opt, smsel, smses) &&
-			    smsel->type <= smses->_type() &&
-			    (smses->type == StateMachineSideEffect::Store ||
-			     definitelyEqual(smses->addr, smsel->addr, opt))) {
+			    smsel->type <= smses->_type()) {
 				it2++;
 			} else {
 				it->second.erase(it2++);
@@ -933,9 +957,9 @@ sideEffectDefiningRegister(StateMachine *sm, const threadAndRegister &tr)
 }
 
 PointsToTable
-PointsToTable::refine(AliasTable &at,
+PointsToTable::refine(SMScopes *scopes,
+		      AliasTable &at,
 		      StateMachine *sm,
-		      MachineAliasingTable &mat,
 		      StackLayoutTable &slt,
 		      bool *done_something)
 {
@@ -961,28 +985,22 @@ PointsToTable::refine(AliasTable &at,
 			if (e.mightHaveExternalStores)
 				newPts |= PointerAliasingSet::nonStackPointer;
 			if (e.mightLoadInitial)
-				newPts |= getInitialLoadAliasing( ((StateMachineSideEffectLoad *)effect)->addr,
-								  smse, mat, slt, sm);
+				newPts |= getInitialLoadAliasing( scopes,
+								  ((StateMachineSideEffectLoad *)effect)->addr,
+								  smse, slt, sm);
 			for (auto it2 = e.stores.begin(); it2 != e.stores.end(); it2++) {
 				StateMachineSideEffecting *satisfierState = *it2;
 				StateMachineSideEffect *satisfier = satisfierState->sideEffect;
 				assert(satisfier);
-				if (satisfier->type == StateMachineSideEffect::Load) {
-					auto *l = (StateMachineSideEffectLoad *)satisfier;
-					assert(content.count(l->target));
-					newPts |= content[l->target];
-				} else if (satisfier->type == StateMachineSideEffect::Store) {
-					newPts |=
-						pointsToSetForExpr(
-							((StateMachineSideEffectStore *)satisfier)->data,
-							smse,
-							sl,
-							mat,
-							slt,
-							sm);
-				} else {
-					abort();
-				}
+				assert(satisfier->type == StateMachineSideEffect::Store);
+				newPts |=
+					pointsToSetForExpr(
+						scopes,
+						((StateMachineSideEffectStore *)satisfier)->data,
+						smse,
+						sl,
+						slt,
+						sm);
 			}
 
 			/* A load can only load from a frame if the
@@ -1013,33 +1031,24 @@ PointsToTable::refine(AliasTable &at,
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(c->value, smse, sl, mat, slt, sm);
+			newPts = pointsToSetForExpr(scopes, c->value, smse, sl, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *p = (StateMachineSideEffectPhi *)effect;
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
-			     it++) {
-				auto i = content.find(it->first);
-				if (i == content.end()) {
-					if (it->first.isReg()) {
-						newPts |= aliasConfigForReg(smse, it->first, mat);
-					} else {
-						/* We've not got any
-						 * assignments to this
-						 * temporary.  That
-						 * means that the Phi
-						 * can't pull its
-						 * value, so we just
-						 * ignore it here. */
-					}
-				} else
-					newPts |= i->second;
-			}
+			     it++)
+				newPts |= pointsToSetForExpr(scopes, it->val, smse, sl, slt, sm);
 			break;
 		}
-		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::ImportRegister: {
+			StateMachineSideEffectImportRegister *r =
+				(StateMachineSideEffectImportRegister *)effect;
+			newPts = r->set;
+			break;
+		}
+
 		case StateMachineSideEffect::Store:
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::AssertFalse:
@@ -1059,8 +1068,8 @@ PointsToTable::refine(AliasTable &at,
 }
 
 void
-AliasTable::refine(PointsToTable &ptt,
-		   MachineAliasingTable &mat,
+AliasTable::refine(SMScopes *scopes,
+		   PointsToTable &ptt,
 		   StackLayoutTable &slt,
 		   StateMachine *sm,
 		   bool *done_something,
@@ -1073,10 +1082,10 @@ AliasTable::refine(PointsToTable &ptt,
 		Maybe<StackLayout> *sl = slt.forState(it->first);
 		PointerAliasingSet loadPts(
 			ptt.pointsToSetForExpr(
+				scopes,
 				l->addr,
 				it->first,
 				sl,
-				mat,
 				slt,
 				sm));
 		if (debug_refine_alias_table)
@@ -1086,11 +1095,13 @@ AliasTable::refine(PointsToTable &ptt,
 		     it2 != it->second.stores.end();
 			) {
 			Maybe<StackLayout> *sl2 = slt.forState(*it2);
+			assert( (*it2)->getSideEffect() );
+			assert( (*it2)->getSideEffect()->type == StateMachineSideEffect::Store );
 			PointerAliasingSet storePts(
-				ptt.pointsToSetForExpr( ((StateMachineSideEffectMemoryAccess *)(*it2)->getSideEffect())->addr,
+				ptt.pointsToSetForExpr( scopes,
+							((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
 							it->first,
 							sl2,
-							mat,
 							slt,
 							sm));
 			if (storePts.overlaps(loadPts)) {
@@ -1111,26 +1122,30 @@ AliasTable::refine(PointsToTable &ptt,
 	}
 }
 
-static IRExpr *
-dataOfSideEffect(StateMachineSideEffect *s_effect, IRType ty)
+static exprbdd *
+dataOfSideEffect(SMScopes *scopes, const StateMachineSideEffect *s_effect, IRType ty)
 {
-	IRExpr *res;
+	exprbdd *res;
 	if (s_effect->type == StateMachineSideEffect::Store) {
 		res = ((StateMachineSideEffectStore *)s_effect)->data;
 	} else if (s_effect->type == StateMachineSideEffect::Load) {
-		res = IRExpr_Get(
-			((StateMachineSideEffectLoad *)s_effect)->target,
-			((StateMachineSideEffectLoad *)s_effect)->type);
+		res = exprbdd::var(
+			&scopes->exprs,
+			&scopes->bools,
+			IRExpr_Get(
+				((StateMachineSideEffectLoad *)s_effect)->target,
+				((StateMachineSideEffectLoad *)s_effect)->type));
 	} else if (s_effect->type == StateMachineSideEffect::Copy) {
 		res = ((StateMachineSideEffectCopy *)s_effect)->value;
 	} else {
 		abort();
 	}
-	return coerceTypes(ty, res);
+	return exprbdd::coerceTypes(&scopes->exprs, &scopes->bools, ty, res);
 }
 
 static StateMachine *
-functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOptimisations &opt, OracleInterface *oracle,
+functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
+		      const AllowableOptimisations &opt, OracleInterface *oracle,
 		      const ControlDominationMap &cdm, bool *done_something)
 {
 	StackLayoutTable stackLayout;
@@ -1160,9 +1175,6 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 		ptt.prettyPrint(stdout);
 	}
 
-	MachineAliasingTable mat;
-	mat.initialise(sm);
-
 	AliasTable at;
 	if (!at.build(decode, sm, stateLabels, opt, oracle)) {
 		if (any_debug)
@@ -1176,7 +1188,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 
 	while (1) {
 		bool p = false;
-		PointsToTable ptt2 = ptt.refine(at, sm, mat, stackLayout, &p);
+		PointsToTable ptt2 = ptt.refine(scopes, at, sm, stackLayout, &p);
 
 		if (p && debug_refine_points_to_table) {
 			printf("Refined points-to table:\n");
@@ -1184,7 +1196,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 		}
 		ptt = ptt2;
 
-		at.refine(ptt, mat, stackLayout, sm, &p, stateLabels);
+		at.refine(scopes, ptt, stackLayout, sm, &p, stateLabels);
 		if (!p)
 			break;
 		if (debug_refine_alias_table) {
@@ -1207,10 +1219,10 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 	for (auto it = at.content.begin(); !allFramesLive && it != at.content.end(); it++) {
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
 		PointerAliasingSet pas(ptt.pointsToSetForExpr(
+					       scopes,
 					       l->addr,
 					       it->first,
 					       stackLayout.forState(it->first),
-					       mat,
 					       stackLayout,
 					       sm));
 		if (pas.otherStackPointer || !pas.valid) {
@@ -1263,14 +1275,22 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 			it->first->sideEffect =
 					new StateMachineSideEffectCopy(
 						l->target,
-						IRExpr_Load(
+						exprbdd::load(
+							&scopes->exprs,
+							&scopes->bools,
 							l->type,
 							l->addr));
 			it->first->target =
 				new StateMachineSideEffecting(
 					it->first->dbg_origin,
 					new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(Iop_BadPtr, l->addr),
+						exprbdd::to_bbdd(
+							&scopes->bools,
+							exprbdd::unop(
+								&scopes->exprs,
+								&scopes->bools,
+								Iop_BadPtr,
+								l->addr)),
 						true),
 					it->first->target);
 		} else if (it->second.stores.size() == 1 &&
@@ -1282,99 +1302,40 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 				       stateLabels[it->first], stateLabels[s_state]);
 			assert(s_effect);
 			progress = true;
-			IRExpr *d = dataOfSideEffect(s_effect, l->type);
+			exprbdd *d = dataOfSideEffect(scopes, s_effect, l->type);
 			it->first->sideEffect =
 				new StateMachineSideEffectCopy(
 					l->target, d);
 		} else if (!it->second.mightLoadInitial) {
-			std::vector<std::pair<StateMachineState *, IRExpr *> > possibleInputs;
-			IRExpr *stateDominator = simplifyIRExpr(simplify_via_anf(cdm.get(it->first)), opt);
-			possibleInputs.reserve(it->second.stores.size());
-			for (auto it2 = it->second.stores.begin(); it2 != it->second.stores.end(); it2++)
-				possibleInputs.push_back(
-					std::pair<StateMachineState *, IRExpr *>(
-						*it2,
-						simplifyIRExpr(
-							simplify_via_anf(
-								optimiseAssuming(
-									cdm.get(*it2),
-									stateDominator)),
-							opt)));
-			if (debug_use_alias_table) {
-				printf("Consider replacing l%d (%s) with control-flow-based mux: ",
-				       stateLabels[it->first],
-				       nameIRExpr(stateDominator));
-				for (auto it2 = possibleInputs.begin();
-				     it2 != possibleInputs.end();
-				     it2++) {
-					if (it2 != possibleInputs.begin())
-						printf(", ");
-					printf("l%d[%s]", stateLabels[it2->first], nameIRExpr(it2->second));
-				}
-				printf("\n");
+			exprbdd::enablingTableT possibleInputs;
+			bool failed = false;
+			exprbdd *defaultVal = NULL;
+			bbdd *stateDominator = cdm.get(it->first);
+			for (auto it2 = it->second.stores.begin();
+			     !failed && it2 != it->second.stores.end();
+			     it2++) {
+				bbdd *gate = bbdd::assume(&scopes->bools, cdm.get(*it2), stateDominator);
+				exprbdd *val = dataOfSideEffect(scopes, (*it2)->sideEffect, l->type);
+				defaultVal = val;
+				exprbdd **slot = possibleInputs.getSlot(gate, val);
+				if (*slot != val)
+					failed = true;
 			}
-			/* This is valid if it's guaranteed that
-			   precisely one of the input memory accesses
-			   has happened.  Check with a full n^2
-			   comparisons. */
-			bool ambiguous_resolution = false;
-			/* First check that at most one can be
-			   true. */
-			for (unsigned i = 0;
-			     !ambiguous_resolution && i < possibleInputs.size();
-			     i++) {
-				for (unsigned j = i + 1;
-				     !ambiguous_resolution && j < possibleInputs.size();
-				     j++) {
-					IRExpr *check =
-						IRExpr_Binop(
-							Iop_And1,
-							possibleInputs[i].second,
-							possibleInputs[j].second);
-					if (satisfiable(check, opt)) {
-						if (debug_use_alias_table)
-							printf("Ambiguous resolution: %s vs %s\n",
-							       nameIRExpr(possibleInputs[i].second),
-							       nameIRExpr(possibleInputs[j].second));
-						ambiguous_resolution = true;
+			assert(defaultVal != NULL);
+			if (!failed) {
+				exprbdd *res = exprbdd::from_enabling(
+					&scopes->exprs,
+					possibleInputs,
+					defaultVal);
+				if (res) {
+					if (debug_use_alias_table) {
+						printf("Replace l%d with mux:\n",
+						       stateLabels[it->first]);
+						res->prettyPrint(stdout);
 					}
-				}
-			}
-
-			if (!ambiguous_resolution) {
-				/* Now at least one must be true */
-				IRExprAssociative *checker =
-					IRExpr_Associative(
-						possibleInputs.size(),
-						Iop_Or1);
-				for (unsigned x = 0; x < possibleInputs.size(); x++)
-					checker->contents[x] = possibleInputs[x].second;
-				checker->nr_arguments = possibleInputs.size();
-				IRExpr *c =
-					IRExpr_Binop(
-						Iop_And1,
-						stateDominator,
-						IRExpr_Unop(Iop_Not1, checker));
-				if (satisfiable(c, opt)) {
-					if (debug_use_alias_table)
-						printf("Potentially null resolution: %s is satisfiable\n",
-						       nameIRExpr(c));
-				} else {
-					IRExpr *acc = dataOfSideEffect(possibleInputs[0].first->getSideEffect(), l->type);
-					for (unsigned x = 1;
-					     x < possibleInputs.size();
-					     x++)
-						acc = IRExpr_Mux0X(
-							possibleInputs[x].second,
-							acc,
-							dataOfSideEffect(possibleInputs[x].first->getSideEffect(), l->type));
-					if (debug_use_alias_table)
-						printf("Replace l%d with mux %s\n",
-						       stateLabels[it->first],
-						       nameIRExpr(acc));
 					it->first->sideEffect =
 						new StateMachineSideEffectCopy(
-							l->target, acc);
+							l->target, res);
 					progress = true;
 				}
 			}
@@ -1416,9 +1377,13 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 					       stateLabels[*it]);
 				(*it)->sideEffect = 
 					new StateMachineSideEffectAssertFalse(
-						IRExpr_Unop(
-							Iop_BadPtr,
-							s->addr),
+						exprbdd::to_bbdd(
+							&scopes->bools,
+							exprbdd::unop(
+								&scopes->exprs,
+								&scopes->bools,
+								Iop_BadPtr,
+								s->addr)),
 						true);
 				progress = true;
 			}
@@ -1481,7 +1446,7 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 			break;
 		}
 			/* Don't do anything with these. */
-		case StateMachineSideEffect::PointerAliasing:
+		case StateMachineSideEffect::ImportRegister:
 		case StateMachineSideEffect::Load:
 		case StateMachineSideEffect::Copy:
 		case StateMachineSideEffect::Unreached:
@@ -1509,9 +1474,9 @@ functionAliasAnalysis(const MaiMap &decode, StateMachine *sm, const AllowableOpt
 }
 
 StateMachine *
-functionAliasAnalysis(const MaiMap &decode, StateMachine *machine,
+functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *machine,
 		      const AllowableOptimisations &opt, OracleInterface *oracle,
 		      const ControlDominationMap &cdm, bool *done_something)
 {
-	return _realias::functionAliasAnalysis(decode, machine, opt, oracle, cdm, done_something);
+	return _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdm, done_something);
 }

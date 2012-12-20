@@ -9,6 +9,7 @@
 #include "offline_analysis.hpp"
 #include "smb_builder.hpp"
 #include "maybe.hpp"
+#include "visitor.hpp"
 
 #include "libvex_guest_offsets.h"
 
@@ -23,7 +24,23 @@ static bool debug_rsp_canonicalisation = false;
 namespace _probeCFGsToMachine {
 
 static void
-ndChoiceState(StateMachineState **slot,
+mkPendingMai(MemoryAccessIdentifier *where, const CFGNode *node)
+{
+	where->tid = (int)(unsigned long)node;
+	where->id = (int)((unsigned long)node >> 32);
+}
+
+static IRExpr *
+mkPendingFreeVar(IRType ty, const CFGNode *node, bool isUnique)
+{
+	IRExprFreeVariable *res = IRExpr_FreeVariable(MemoryAccessIdentifier::uninitialised(), ty, isUnique);
+	_probeCFGsToMachine::mkPendingMai(&res->id, node);
+	return res;
+}
+
+static void
+ndChoiceState(SMScopes *scopes,
+	      StateMachineState **slot,
 	      const ThreadRip &vr,
 	      CFGNode *node,
 	      std::vector<reloc_t> &pendingRelocs,
@@ -33,9 +50,9 @@ ndChoiceState(StateMachineState **slot,
 {
 	if (targets.empty()) {
 		if (storeLike)
-			*slot = StateMachineCrash::get();
+			*slot = new StateMachineTerminal(vr.rip, scopes->smrs.cnst(smr_crash));
 		else
-			*slot = StateMachineNoCrash::get();
+			*slot = new StateMachineTerminal(vr.rip, scopes->smrs.cnst(smr_survive));
 	} else if (targets.size() == 1) {
 		if (usedExits)
 			usedExits->insert(targets[0]);
@@ -47,12 +64,14 @@ ndChoiceState(StateMachineState **slot,
 			new StateMachineSideEffecting(
 				vr.rip,
 				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(
-						Iop_Not1,
-						new IRExprControlFlow(
-							vr.thread,
-							node->label,
-							targets[0]->label)),
+					bbdd::var(
+						&scopes->bools,
+						IRExpr_Unop(
+							Iop_Not1,
+							new IRExprControlFlow(
+								vr.thread,
+								node->label,
+								targets[0]->label))),
 					true),
 				NULL);
 		assert(targets[0] != NULL);
@@ -65,10 +84,12 @@ ndChoiceState(StateMachineState **slot,
 			StateMachineBifurcate *b = 
 				new StateMachineBifurcate(
 					vr.rip,
-					new IRExprControlFlow(
-						vr.thread,
-						node->label,
-						targets[x]->label),
+					bbdd::var(
+						&scopes->bools,
+						new IRExprControlFlow(
+							vr.thread,
+							node->label,
+							targets[x]->label)),
 					NULL,
 					acc);
 			pendingRelocs.push_back(
@@ -83,15 +104,17 @@ ndChoiceState(StateMachineState **slot,
 }
 
 static StateMachineState *
-entryState(const std::vector<std::pair<CFGNode *, StateMachineState *> > &targets,
+entryState(SMScopes *scopes,
+	   const VexRip &vr,
+	   const std::vector<std::pair<CFGNode *, StateMachineState *> > &targets,
 	   unsigned thread,
 	   bool storeLike)
 {
 	if (targets.empty()) {
 		if (storeLike)
-			return StateMachineCrash::get();
+			return new StateMachineTerminal(vr, scopes->smrs.cnst(smr_crash));
 		else
-			return StateMachineNoCrash::get();
+			return new StateMachineTerminal(vr, scopes->smrs.cnst(smr_survive));
 	} else if (targets.size() == 1) {
 		return targets[0].second;
 	} else {
@@ -99,9 +122,11 @@ entryState(const std::vector<std::pair<CFGNode *, StateMachineState *> > &target
 			new StateMachineSideEffecting(
 				targets[0].first->rip,
 				new StateMachineSideEffectAssertFalse(
-					IRExpr_Unop(
-						Iop_Not1,
-						new IRExprEntryPoint(thread, targets[0].first->label)),
+					bbdd::var(
+						&scopes->bools,
+						IRExpr_Unop(
+							Iop_Not1,
+							new IRExprEntryPoint(thread, targets[0].first->label))),
 					true),
 				targets[0].second);
 		StateMachineState *acc = r;
@@ -109,7 +134,7 @@ entryState(const std::vector<std::pair<CFGNode *, StateMachineState *> > &target
 			StateMachineBifurcate *b = 
 				new StateMachineBifurcate(
 					targets[0].first->rip,
-					new IRExprEntryPoint(thread, targets[x].first->label),
+					bbdd::var(&scopes->bools, new IRExprEntryPoint(thread, targets[x].first->label)),
 					targets[x].second,
 					acc);
 			acc = b;
@@ -127,9 +152,10 @@ getTargets(CFGNode *node, const VexRip &vr, std::vector<CFGNode *> &targets)
 }
 
 static StateMachineState *
-getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
-		       std::vector<reloc_t> &pendingRelocs,
-		       MaiMap &mai)
+getLibraryStateMachine(SMScopes *scopes,
+		       CFGNode *cfgnode,
+		       unsigned tid,
+		       std::vector<reloc_t> &pendingRelocs)
 {
 	threadAndRegister rax(threadAndRegister::reg(tid, OFFSET_amd64_RAX, 0));
 	threadAndRegister arg1(threadAndRegister::reg(tid, OFFSET_amd64_RDI, 0));
@@ -230,7 +256,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		break;
 	}
 	case LibraryFunctionTemplate::malloc: {
-		acc = (!rax <<= smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, true))) >>
+		acc = (!rax <<= smb_expr(mkPendingFreeVar(Ity_I64, cfgnode, true))) >>
 			(AssertFalse(smb_expr(IRExpr_Unop(Iop_BadPtr, IRExpr_Get(rax, Ity_I64)))) >> end);
 		break;
 	}
@@ -238,7 +264,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	case LibraryFunctionTemplate::free: {
 		acc = end;
 		for (int i = 0; i < 8; i++) {
-			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
+			SMBPtr<SMBExpression> fv(smb_expr(mkPendingFreeVar(Ity_I64, cfgnode, false)));
 			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
 				acc;
 		}
@@ -277,9 +303,9 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	}
 	case LibraryFunctionTemplate::__stack_chk_fail:
 	case LibraryFunctionTemplate::__assert_fail:
-		return StateMachineUnreached::get();
+		return new StateMachineTerminal(cfgnode->rip, scopes->smrs.cnst(smr_unreached));
 	case LibraryFunctionTemplate::time: {
-		SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
+		SMBPtr<SMBExpression> fv(smb_expr(mkPendingFreeVar(Ity_I64, cfgnode, false)));
 		acc = (!rax <<= fv) >> end;
 		If(smb_reg(arg1, Ity_I64) == smb_const64(0),
 		   acc,
@@ -289,7 +315,7 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 	case LibraryFunctionTemplate::getrusage: {
 		acc = (!rax <<= smb_const64(0)) >> end;
 		for (unsigned i = 0; i < sizeof(struct rusage) / 8; i++) {
-			SMBPtr<SMBExpression> fv(smb_expr(mai.freeVariable(Ity_I64, tid, cfgnode, false)));
+			SMBPtr<SMBExpression> fv(smb_expr(mkPendingFreeVar(Ity_I64, cfgnode, false)));
 			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
 				acc;
 		}
@@ -326,12 +352,12 @@ getLibraryStateMachine(CFGNode *cfgnode, unsigned tid,
 		printf(")\n");
 		abort();
 	}
-	SMBCompilerState state(cfgnode->rip, cfgnode, tid, mai);
+	SMBCompilerState state(cfgnode->rip, cfgnode, scopes);
 	return acc.content->compile(pendingRelocs, state);
 }
 
 static void
-canonicaliseRbp(StateMachineState *root, const VexRip &rip, Oracle *oracle)
+canonicaliseRbp(SMScopes *scopes, StateMachineState *root, const VexRip &rip, Oracle *oracle)
 {
 	long delta;
 	if (oracle->getRbpToRspDelta(rip, &delta)) {
@@ -348,8 +374,7 @@ canonicaliseRbp(StateMachineState *root, const VexRip &rip, Oracle *oracle)
 						canonedRbp =
 							IRExpr_Binop(
 								Iop_Add64,
-								IRExpr_Const(
-									IRConst_U64(-delta)),
+								IRExpr_Const_U64(-delta),
 								IRExpr_Get(
 									threadAndRegister::reg(
 										ieg->reg.tid(),
@@ -378,19 +403,17 @@ canonicaliseRbp(StateMachineState *root, const VexRip &rip, Oracle *oracle)
 			switch (s->type) {
 			case StateMachineState::Bifurcate: {
 				StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-				smb->condition = doit.doit(smb->condition);
+				smb->condition = doit.transform_bbdd(&scopes->bools, smb->condition);
 				break;
 			}
-			case StateMachineState::Crash:
-			case StateMachineState::NoCrash:
-			case StateMachineState::Unreached:
+			case StateMachineState::Terminal:
 				break;
 			case StateMachineState::SideEffecting: {
 				StateMachineSideEffect *smse = s->getSideEffect();
 				if (smse) {
 					bool b;
 					StateMachineSideEffect *new_smse =
-						doit.transformSideEffect(smse, &b);
+						doit.transformSideEffect(scopes, smse, &b);
 					if (new_smse)
 						((StateMachineSideEffecting *)s)->sideEffect =
 							new_smse;
@@ -403,11 +426,11 @@ canonicaliseRbp(StateMachineState *root, const VexRip &rip, Oracle *oracle)
 }
 
 static StateMachineState *
-cfgNodeToState(Oracle *oracle,
+cfgNodeToState(SMScopes *scopes,
+	       Oracle *oracle,
 	       unsigned tid,
 	       CFGNode *target,
 	       bool storeLike,
-	       MaiMap &mai,
 	       std::vector<reloc_t> &pendingRelocs)
 {
 	if (TIMEOUT)
@@ -416,7 +439,7 @@ cfgNodeToState(Oracle *oracle,
 	ThreadRip tr(tid, target->rip);
 
 	StateMachineState *root;
-	root = getLibraryStateMachine(target, tid, pendingRelocs, mai);
+	root = getLibraryStateMachine(scopes, target, tid, pendingRelocs);
 	if (root)
 		return root;
 
@@ -424,7 +447,7 @@ cfgNodeToState(Oracle *oracle,
 	try {
 		irsb = oracle->ms->addressSpace->getIRSBForAddress(tr, true);
 	} catch (BadMemoryException &e) {
-		return StateMachineUnreached::get();
+		return new StateMachineTerminal(target->rip, scopes->smrs.cnst(smr_unreached));
 	}
 	HashedSet<HashedPtr<CFGNode> > usedExits;
 	StateMachineState **cursor = &root;
@@ -444,7 +467,7 @@ cfgNodeToState(Oracle *oracle,
 			StateMachineSideEffect *se =
 				new StateMachineSideEffectCopy(
 					isp->target,
-					isp->data);
+					exprbdd::var(&scopes->exprs, &scopes->bools, isp->data));
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -475,12 +498,13 @@ cfgNodeToState(Oracle *oracle,
 				   all functions by inlining), and it's
 				   sometimes a pain to optimise
 				   out later. */
-				StateMachineSideEffect *se =
+				StateMachineSideEffectStore *se =
 					new StateMachineSideEffectStore(
-						ist->addr,
-						ist->data,
-						mai(tid, target),
+						exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
+						exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
+						MemoryAccessIdentifier::uninitialised(),
 						MemoryTag::normal());
+				_probeCFGsToMachine::mkPendingMai(&se->rip, target);
 				StateMachineSideEffecting *smse =
 					new StateMachineSideEffecting(
 						target->rip,
@@ -515,37 +539,43 @@ cfgNodeToState(Oracle *oracle,
 					target->rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
-						t_expr),
+						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr)),
 					NULL);
 			StateMachineSideEffecting *l4 =
 				new StateMachineSideEffecting(
 					target->rip,
 					StateMachineSideEffectEndAtomic::get(),
 					l5);
+			StateMachineSideEffectStore *l3se =
+				new StateMachineSideEffectStore(
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->dataLo),
+					MemoryAccessIdentifier::uninitialised(),
+					MemoryTag::normal());
+			_probeCFGsToMachine::mkPendingMai(&l3se->rip, target);
 			StateMachineState *l3 =
 				new StateMachineSideEffecting(
 					target->rip,
-					new StateMachineSideEffectStore(
-						cas->addr,
-						cas->dataLo,
-						mai(tid, target),
-						MemoryTag::normal()),
+					l3se,
 					l4);
 			StateMachineState *l2 =
 				new StateMachineBifurcate(
 					target->rip,
-					expr_eq(t_expr, cas->expdLo),
+					bbdd::var(&scopes->bools, expr_eq(t_expr, cas->expdLo)),
 					l3,
 					l4);
+			StateMachineSideEffectLoad *l1se =
+				new StateMachineSideEffectLoad(
+					tempreg,
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
+					MemoryAccessIdentifier::uninitialised(),
+					ty,
+					MemoryTag::normal());
+			_probeCFGsToMachine::mkPendingMai(&l1se->rip, target);
 			StateMachineState *l1 =
 				new StateMachineSideEffecting(
 					target->rip,
-					new StateMachineSideEffectLoad(
-						tempreg,
-						cas->addr,
-						mai(tid, target),
-						ty,
-						MemoryTag::normal()),
+					l1se,
 					l2);
 			StateMachineState *l0 =
 				new StateMachineSideEffecting (
@@ -574,16 +604,18 @@ cfgNodeToState(Oracle *oracle,
 				else
 					abort();
 				assert(ity != Ity_INVALID);
-				se = new StateMachineSideEffectLoad(
+				auto sel = new StateMachineSideEffectLoad(
 					dirty->tmp,
-					dirty->args[0],
-					mai(tid, target),
+					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
+					MemoryAccessIdentifier::uninitialised(),
 					ity,
 					MemoryTag::normal());
+				_probeCFGsToMachine::mkPendingMai(&sel->rip, target);
+				se = sel;
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 				se = new StateMachineSideEffectCopy(
 					dirty->tmp,
-					mai.freeVariable(Ity_I64, tid, target, false));
+					exprbdd::var(&scopes->exprs, &scopes->bools, mkPendingFreeVar(Ity_I64, target, false)));
 			} else {
 				abort();
 			}
@@ -605,10 +637,10 @@ cfgNodeToState(Oracle *oracle,
 			StateMachineBifurcate *smb;
 			smb = new StateMachineBifurcate(
 				target->rip,
-				stmt->guard,
+				bbdd::var(&scopes->bools, stmt->guard),
 				NULL,
 				NULL);
-			ndChoiceState(&smb->trueTarget, tr, target, pendingRelocs,
+			ndChoiceState(scopes, &smb->trueTarget, tr, target, pendingRelocs,
 				      targets, storeLike, &usedExits);
 			*cursor = smb;
 			cursor = &smb->falseTarget;
@@ -656,7 +688,7 @@ cfgNodeToState(Oracle *oracle,
 
 	assert(*cursor == NULL);
 
-	canonicaliseRbp(root, target->rip, oracle);
+	canonicaliseRbp(scopes, root, target->rip, oracle);
 
 	std::vector<CFGNode *> targets;
 	if (i == irsb->stmts_used) {
@@ -665,12 +697,15 @@ cfgNodeToState(Oracle *oracle,
 				new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectStartFunction(
-						IRExpr_Get(
-							threadAndRegister::reg(
-								tid,
-								OFFSET_amd64_RSP,
-								0),
-							Ity_I64),
+						exprbdd::var(
+							&scopes->exprs,
+							&scopes->bools,
+							IRExpr_Get(
+								threadAndRegister::reg(
+									tid,
+									OFFSET_amd64_RSP,
+									0),
+								Ity_I64)),
 						FrameId()),
 					NULL);
 			*cursor = smp;
@@ -684,16 +719,18 @@ cfgNodeToState(Oracle *oracle,
 				smp = new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectEndFunction(
-						IRExpr_Binop(
-							Iop_Add64,
-							IRExpr_Get(
-								threadAndRegister::reg(
-									tid,
-									OFFSET_amd64_RSP,
-									0),
-								Ity_I64),
-							IRExpr_Const(
-								IRConst_U64(-8))),
+						exprbdd::var(
+							&scopes->exprs,
+							&scopes->bools,
+							IRExpr_Binop(
+								Iop_Add64,
+								IRExpr_Get(
+									threadAndRegister::reg(
+										tid,
+										OFFSET_amd64_RSP,
+										0),
+									Ity_I64),
+								IRExpr_Const_U64(-8))),
 						FrameId()),
 					NULL);
 				*cursor = smp;
@@ -705,15 +742,18 @@ cfgNodeToState(Oracle *oracle,
 							tid,
 							OFFSET_amd64_RSP,
 							0),
-						IRExpr_Binop(
-							Iop_Add64,
-							IRExpr_Const(IRConst_U64(8)),
-							IRExpr_Get(
-								threadAndRegister::reg(
-									tid,
-									OFFSET_amd64_RSP,
-									0),
-								Ity_I64))),
+						exprbdd::var(
+							&scopes->exprs,
+							&scopes->bools,
+							IRExpr_Binop(
+								Iop_Add64,
+								IRExpr_Const_U64(8),
+								IRExpr_Get(
+									threadAndRegister::reg(
+										tid,
+										OFFSET_amd64_RSP,
+										0),
+									Ity_I64)))),
 					NULL);
 				*cursor = smp;
 				cursor = &smp->target;
@@ -723,16 +763,18 @@ cfgNodeToState(Oracle *oracle,
 				new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectEndFunction(
-						IRExpr_Binop(
-							Iop_Add64,
-							IRExpr_Get(
-								threadAndRegister::reg(
-									tid,
-									OFFSET_amd64_RSP,
-									0),
-								Ity_I64),
-							IRExpr_Const(
-								IRConst_U64(-8))),
+						exprbdd::var(
+							&scopes->exprs,
+							&scopes->bools,
+							IRExpr_Binop(
+								Iop_Add64,
+								IRExpr_Get(
+									threadAndRegister::reg(
+										tid,
+										OFFSET_amd64_RSP,
+										0),
+									Ity_I64),
+								IRExpr_Const_U64(-8))),
 						FrameId()),
 					NULL);
 			*cursor = smp;
@@ -753,20 +795,22 @@ cfgNodeToState(Oracle *oracle,
 		IRStmtIMark *mark = (IRStmtIMark *)irsb->stmts[i];
 		getTargets(target, mark->addr.rip, targets);
 	}
-	ndChoiceState(cursor, tr, target, pendingRelocs, targets, storeLike, NULL);
+	ndChoiceState(scopes, cursor, tr, target, pendingRelocs, targets, storeLike, NULL);
 
 	return root;
 }
 
 struct cfg_translator {
-	virtual StateMachineState *operator()(CFGNode *src,
+	virtual StateMachineState *operator()(SMScopes *scopes,
+					      CFGNode *src,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations) = 0;
 };
 
 static StateMachineState *
-performTranslation(std::map<CFGNode *, StateMachineState *> &results,
+performTranslation(SMScopes *scopes,
+		   std::map<CFGNode *, StateMachineState *> &results,
 		   CFGNode *rootCfg,
 		   Oracle *oracle,
 		   unsigned tid,
@@ -789,7 +833,7 @@ performTranslation(std::map<CFGNode *, StateMachineState *> &results,
 		if (!inserted)
 			assert(slot->second);
 		else 
-			slot->second = node_translator(r.target, oracle, tid, pendingRelocations);
+			slot->second = node_translator(scopes, r.target, oracle, tid, pendingRelocations);
 		*r.ptr = slot->second;
 	}
 	return root;
@@ -1044,8 +1088,8 @@ struct RspCanonicalisationState : public Named {
 		}
 		case Iex_Const: {
 			IRExprConst *iec = (IRExprConst *)a;
-			if (iec->con->tag == Ico_U64)
-				res = eval_res::cnst(iec->con->Ico.U64);
+			if (iec->ty == Ity_I64)
+				res = eval_res::cnst(iec->Ico.U64);
 			break;
 		}
 		case Iex_Get: {
@@ -1085,13 +1129,28 @@ struct RspCanonicalisationState : public Named {
 		}
 		return res;
 	}
+	eval_res eval(exprbdd *expr) const {
+		if (expr->isLeaf)
+			return eval(expr->leaf());
+		eval_res r1(eval(expr->internal().condition));
+		if (r1.tag == eval_res::eval_res_const) {
+			if (r1.val)
+				return eval(expr->internal().trueBranch);
+			else
+				return eval(expr->internal().falseBranch);
+		}
+		eval_res rt(eval(expr->internal().trueBranch));
+		eval_res rf(eval(expr->internal().falseBranch));
+		rt.merge(rf);
+		return rt;
+	}
 };
 
 /* Find the delta between the start RSP and the RSP at the final crash
  * state.  Subtracting that out from RSP at the start tends to make it
  * much easier to merge machines which start in different places. */
 static bool
-getRspCanonicalisationDelta(StateMachineState *root, long *delta)
+getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *delta)
 {
 	std::map<const StateMachineState *, int> stateLabels;
 	if (debug_rsp_canonicalisation) {
@@ -1180,12 +1239,18 @@ getRspCanonicalisationDelta(StateMachineState *root, long *delta)
 				}
 				break;
 			}
+
+			case StateMachineSideEffect::ImportRegister: {
+				StateMachineSideEffectImportRegister *r = (StateMachineSideEffectImportRegister *)se;
+				exitState.set(r->reg, RspCanonicalisationState::eval_res::failed());
+				break;
+			}
+
 				/* Most side effects are irrelevant here. */
 			case StateMachineSideEffect::Unreached:
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
 			case StateMachineSideEffect::StackLayout:
-			case StateMachineSideEffect::PointerAliasing:
 			case StateMachineSideEffect::AssertFalse:
 			case StateMachineSideEffect::StartFunction:
 				break;
@@ -1218,18 +1283,21 @@ getRspCanonicalisationDelta(StateMachineState *root, long *delta)
 	/* So that's as much as we're going to get from that.
 	   Hopefully, it'll be enough to assign a label to <crash>
 	   state, in which case we have our answer. */
-	auto it = res.find(StateMachineCrash::get());
+	auto it = res.begin();
+	while (it != res.end()) {
+		if ( it->first->type == StateMachineState::Terminal &&
+		     ((StateMachineTerminal *)it->first)->res == scopes->smrs.cnst(smr_crash) &&
+		     it->second.regs.count(OFFSET_amd64_RSP) )
+			break;
+		it++;
+	}
 	if (it == res.end()) {
 		if (debug_rsp_canonicalisation)
 			printf("No RSP delta for crash state\n");
 		return false;
 	}
 	auto it2 = it->second.regs.find(OFFSET_amd64_RSP);
-	if (it2 == it->second.regs.end()) {
-		if (debug_rsp_canonicalisation)
-			printf("Crash state has no delta for RSP\n");
-		return false;
-	}
+	assert(it2 != it->second.regs.end());
 	if (debug_rsp_canonicalisation)
 		printf("Crash RSP state %s\n", it2->second.name());
 	if (it2->second.tag != RspCanonicalisationState::eval_res::eval_res_delta)
@@ -1240,7 +1308,7 @@ getRspCanonicalisationDelta(StateMachineState *root, long *delta)
 }
 
 static StateMachineState *
-addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, const std::vector<FrameId> &entryStack, const VexRip &vr)
+addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachineState *final, const std::vector<FrameId> &entryStack, const VexRip &vr)
 {
 	StateMachineState *cursor = final;
 	long delta;
@@ -1250,30 +1318,34 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 			vr,
 			new StateMachineSideEffectCopy(
 				threadAndRegister::reg(tid, OFFSET_amd64_RBP, 0),
-				IRExpr_Associative(
-					Iop_Add64,
-					IRExpr_Get(
-						threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
-						Ity_I64),
-					IRExpr_Const(
-						IRConst_U64(-delta)),
-					NULL)),
+				exprbdd::var(
+					&scopes->exprs,
+					&scopes->bools,
+					IRExpr_Associative(
+						Iop_Add64,
+						IRExpr_Get(
+							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
+							Ity_I64),
+						IRExpr_Const_U64(-delta),
+						NULL))),
 			cursor);
 	}
 
-	if (getRspCanonicalisationDelta(final, &delta)) {
+	if (getRspCanonicalisationDelta(scopes, final, &delta)) {
 		cursor = new StateMachineSideEffecting(
 			vr,
 			new StateMachineSideEffectCopy(
 				threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
-				IRExpr_Associative(
-					Iop_Add64,
-					IRExpr_Get(
-						threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
-						Ity_I64),
-					IRExpr_Const(
-						IRConst_U64(-delta)),
-					NULL)),
+				exprbdd::var(
+					&scopes->exprs,
+					&scopes->bools,
+					IRExpr_Associative(
+						Iop_Add64,
+						IRExpr_Get(
+							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
+							Ity_I64),
+						IRExpr_Const_U64(-delta),
+						NULL))),
 			cursor);
 	} else {
 		warning("Failed to get RSP canonicalisation delta\n");
@@ -1376,8 +1448,10 @@ addEntrySideEffects(Oracle *oracle, unsigned tid, StateMachineState *final, cons
 		}
 		cursor = new StateMachineSideEffecting(
 			vr,
-			new StateMachineSideEffectPointerAliasing(
+			new StateMachineSideEffectImportRegister(
 				threadAndRegister::reg(tid, i * 8, 0),
+				tid,
+				i * 8,
 				v),
 			cursor);
 	}
@@ -1518,9 +1592,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 		StateMachineState *s = *it;
 		callStackT *entryState = &stacks[s];
 		switch (s->type) {
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
+		case StateMachineState::Terminal:
 			if (debug_assign_frame_ids)
 				printf("\tl%d: <terminal>\n",
 				       stateLabels[s]);
@@ -1582,18 +1654,22 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	/* The <survive> and <crash> states are special, because they
 	 * can have several different contexts.  Easy fix: just don't
 	 * try to assign a stack to them at all. */
-	callStackT *surviveStack = &stacks[StateMachineNoCrash::get()];
-	callStackT *crashStack = &stacks[StateMachineCrash::get()];
+	std::set<callStackT *> specialStacks;
+	for (auto it = stacks.begin(); it != stacks.end(); it++) {
+		if ( it->first->type == StateMachineState::Terminal &&
+		     ((StateMachineTerminal *)it->first)->res->isLeaf )
+			specialStacks.insert(&it->second);
+	}
 	for (auto it = eq_constraints.begin(); it != eq_constraints.end(); ) {
-		if (it->first == surviveStack || it->first == crashStack ||
-		    it->second == surviveStack || it->second == crashStack)
+		if (specialStacks.count(it->first) ||
+		    specialStacks.count(it->second))
 			eq_constraints.erase(it++);
 		else
 			it++;
 	}
 	for (auto it = constraints.begin(); it != constraints.end(); ) {
-		if (it->beforeExtension == surviveStack || it->beforeExtension == crashStack ||
-		    it->afterExtension  == surviveStack || it->afterExtension  == crashStack)
+		if (specialStacks.count(it->beforeExtension) ||
+		    specialStacks.count(it->afterExtension))
 			constraints.erase(it++);
 		else
 			it++;
@@ -1806,42 +1882,371 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	}
 }
 
+static visit_result
+findUsedRegs__Get(std::set<threadAndRegister> *s, const IRExprGet *ieg)
+{
+	s->insert(ieg->reg);
+	return visit_continue;
+}
+static void
+findUsedRegs(exprbdd *expr, std::set<threadAndRegister> &tr)
+{
+	static struct irexpr_visitor<std::set<threadAndRegister> > visitor;
+	visitor.Get = findUsedRegs__Get;
+	visit_bdd(&tr, &visitor, visit_irexpr<std::set<threadAndRegister> >, expr);
+}
+static void
+findUsedRegs(bbdd *expr, std::set<threadAndRegister> &tr)
+{
+	static struct irexpr_visitor<std::set<threadAndRegister> > visitor;
+	visitor.Get = findUsedRegs__Get;
+	visit_bdd(&tr, &visitor, expr);
+}
+static void
+findUsedRegs(smrbdd *expr, std::set<threadAndRegister> &tr)
+{
+	static struct irexpr_visitor<std::set<threadAndRegister> > visitor;
+	visitor.Get = findUsedRegs__Get;
+	visit_bdd(&tr, &visitor, expr);
+}
+
+static StateMachineState *
+importRegisters(StateMachineState *root)
+{
+	std::map<StateMachineState *, int> nrMissingPredecessors;
+	std::set<StateMachineState *> visited;
+	std::vector<StateMachineState *> q;
+	q.push_back(root);
+	while (!q.empty()) {
+		StateMachineState *s = q.back();
+		q.pop_back();
+		if (!visited.insert(s).second)
+			continue;
+		std::vector<StateMachineState *> succ;
+		s->targets(succ);
+		for (auto it = succ.begin(); it != succ.end(); it++) {
+			nrMissingPredecessors[*it]++;
+			q.push_back(*it);
+		}
+	}
+	visited.clear();
+
+	std::set<threadAndRegister> needImport;
+
+	q.push_back(root);
+	std::map<StateMachineState *, std::set<threadAndRegister> > definedRegs;
+	while (!q.empty()) {
+		StateMachineState *s = q.back();
+		q.pop_back();
+#ifndef NDEBUG
+		assert(visited.insert(s).second);
+#endif
+		assert(nrMissingPredecessors[s] == 0);
+		threadAndRegister tr(threadAndRegister::invalid());
+		std::set<threadAndRegister> usedRegs;
+		switch (s->type) {
+		case StateMachineState::Bifurcate:
+			findUsedRegs( ((StateMachineBifurcate *)s)->condition, usedRegs);
+			break;
+		case StateMachineState::Terminal:
+			findUsedRegs( ((StateMachineTerminal *)s)->res, usedRegs);
+			break;
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *e = (StateMachineSideEffecting *)s;
+			StateMachineSideEffect *se = e->sideEffect;
+			if (se) {
+				switch (se->type) {
+				case StateMachineSideEffect::Load:
+					findUsedRegs( ((StateMachineSideEffectLoad *)se)->addr, usedRegs );
+					break;
+				case StateMachineSideEffect::Store:
+					findUsedRegs( ((StateMachineSideEffectStore *)se)->addr, usedRegs );
+					findUsedRegs( ((StateMachineSideEffectStore *)se)->data, usedRegs );
+					break;
+				case StateMachineSideEffect::Copy:
+					findUsedRegs( ((StateMachineSideEffectCopy *)se)->value, usedRegs );
+					break;
+				case StateMachineSideEffect::AssertFalse:
+					findUsedRegs( ((StateMachineSideEffectAssertFalse *)se)->value, usedRegs );
+					break;
+				case StateMachineSideEffect::StartAtomic:
+					break;
+				case StateMachineSideEffect::EndAtomic:
+					break;
+				case StateMachineSideEffect::Phi: {
+					StateMachineSideEffectPhi *p = (StateMachineSideEffectPhi *)s;
+					for (auto it = p->generations.begin();
+					     it != p->generations.end();
+					     it++)
+						findUsedRegs(it->val, usedRegs);
+					break;
+				}
+				case StateMachineSideEffect::StartFunction:
+					findUsedRegs( ((StateMachineSideEffectStartFunction *)se)->rsp, usedRegs );
+					break;
+				case StateMachineSideEffect::EndFunction:
+					findUsedRegs( ((StateMachineSideEffectEndFunction *)se)->rsp, usedRegs );
+					break;
+				case StateMachineSideEffect::ImportRegister:
+					break;
+				case StateMachineSideEffect::StackLayout:
+					break;
+				case StateMachineSideEffect::Unreached:
+					break;
+				}
+			}
+			break;
+		}
+		}
+
+		std::set<threadAndRegister> defined(definedRegs[s]);
+		for (auto it = usedRegs.begin(); it != usedRegs.end(); it++) {
+			if (!defined.count(*it))
+				needImport.insert(*it);
+		}
+		if (s->getSideEffect() && s->getSideEffect()->definesRegister(tr))
+			defined.insert(tr);
+		std::vector<StateMachineState *> succ;
+		s->targets(succ);
+		for (auto it = succ.begin(); it != succ.end(); it++) {
+			auto it2_did_insert = definedRegs.insert(
+				(std::pair<StateMachineState *, std::set<threadAndRegister> >
+				 (*it, defined)));
+			auto it2 = it2_did_insert.first;
+			auto did_insert = it2_did_insert.second;
+			if (!did_insert) {
+				for (auto it3 = it2->second.begin();
+				     it3 != it2->second.end();
+					) {
+					if (defined.count(*it3))
+						it3++;
+					else
+						it2->second.erase(it3++);
+				}
+			}
+			nrMissingPredecessors[*it]--;
+			if (nrMissingPredecessors[*it] == 0)
+				q.push_back(*it);
+			assert(nrMissingPredecessors[*it] >= 0);
+		}
+	}
+
+	for (auto it = needImport.begin();
+	     it != needImport.end();
+	     it++) {
+		assert(it->isReg());
+		root = new StateMachineSideEffecting(
+			root->dbg_origin,
+			new StateMachineSideEffectImportRegister(
+				*it,
+				it->tid(),
+				it->asReg(),
+				PointerAliasingSet::anything),
+			root);
+	}
+
+	return root;
+}
+
+static void
+assignMais(MemoryAccessIdentifier &ident, int tid, MaiMap &mm)
+{
+	const CFGNode *node =
+		(const CFGNode *)((unsigned long)(unsigned)ident.tid |
+				  ((unsigned long)ident.id << 32));
+	ident = mm(tid, node);
+}
+struct assignMaiTransformer : public IRExprTransformer {
+	int tid;
+	MaiMap &mm;
+	IRExpr *transformIex(IRExprFreeVariable *fv) {
+		assignMais(fv->id, tid, mm);
+		return fv;
+	}
+	IRExpr *transformIex(IRExprHappensBefore *) {
+		abort();
+	}
+	assignMaiTransformer(int _tid, MaiMap &_mm)
+		: tid(_tid), mm(_mm)
+	{}
+};
+static bbdd *
+assignMais(SMScopes *scopes, bbdd *cond, int tid, MaiMap &mm)
+{
+	assignMaiTransformer doit(tid, mm);
+	return doit.transform_bbdd(&scopes->bools, cond);
+}
+static smrbdd *
+assignMais(SMScopes *scopes, smrbdd *cond, int tid, MaiMap &mm)
+{
+	assignMaiTransformer doit(tid, mm);
+	return doit.transform_smrbdd(&scopes->bools, &scopes->smrs, cond);
+}
+static exprbdd *
+assignMais(SMScopes *scopes, exprbdd *cond, int tid, MaiMap &mm)
+{
+	assignMaiTransformer doit(tid, mm);
+	return doit.transform_exprbdd(&scopes->bools, &scopes->exprs, cond);
+}
+static void
+assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
+{
+	if (!se)
+		return;
+	switch (se->type) {
+	case StateMachineSideEffect::Load: {
+		auto l = (StateMachineSideEffectLoad *)se;
+		l->addr = assignMais(scopes, l->addr, tid, mm);
+		assignMais(l->rip, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::Store: {
+		auto l = (StateMachineSideEffectStore *)se;
+		l->addr = assignMais(scopes, l->addr, tid, mm);
+		l->data = assignMais(scopes, l->data, tid, mm);
+		assignMais(l->rip, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::Copy: {
+		auto l = (StateMachineSideEffectCopy *)se;
+		l->value = assignMais(scopes, l->value, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::AssertFalse: {
+		auto l = (StateMachineSideEffectAssertFalse *)se;
+		l->value = assignMais(scopes, l->value, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::Unreached:
+	case StateMachineSideEffect::StartAtomic:
+	case StateMachineSideEffect::EndAtomic:
+	case StateMachineSideEffect::ImportRegister:
+	case StateMachineSideEffect::StackLayout:
+		return;
+	case StateMachineSideEffect::Phi:
+		abort();
+	case StateMachineSideEffect::StartFunction: {
+		auto l = (StateMachineSideEffectStartFunction *)se;
+		l->rsp = assignMais(scopes, l->rsp, tid, mm);
+		return;
+	}
+	case StateMachineSideEffect::EndFunction: {
+		auto l = (StateMachineSideEffectEndFunction *)se;
+		l->rsp = assignMais(scopes, l->rsp, tid, mm);
+		return;
+	}
+	}
+	abort();
+}
+static void
+assignMais(SMScopes *scopes, StateMachineState *s, int tid, MaiMap &mm)
+{
+	switch (s->type) {
+	case StateMachineState::Bifurcate:
+		((StateMachineBifurcate *)s)->condition =
+			assignMais(scopes, ((StateMachineBifurcate *)s)->condition, tid, mm);
+		return;
+	case StateMachineState::Terminal:
+		((StateMachineTerminal *)s)->res =
+			assignMais(scopes, ((StateMachineTerminal *)s)->res, tid, mm);
+		return;
+	case StateMachineState::SideEffecting:
+		assignMais(scopes, ((StateMachineSideEffecting *)s)->sideEffect, tid, mm);
+		return;
+	}
+	abort();
+}
+
+/* Because the machine is acyclic, there is never simultaneously a
+   path from A to B and from B to A.  That means that ``there is a
+   path from A to B'' is a partial order.  We now derive that partial
+   order and topologically sort it to find the numerical memory access
+   identifiers for this thread.  The result is that if:
+
+   a) A and B are in the same thread, and
+   b) In this execution both A and B happen
+
+   then A <-< B is just a numerical comparison on the memory access
+   identifier ID component.
+
+   Note that if sub-condition (b) does not hold then A <-< B is
+   undefined, so we can just use the ID component test there as well.
+
+   The result is that we can always immediately check which of two
+   memory access identifies in a single thread happen first, without
+   further reference to the machine structure. */
+/* Optimisation: rather than explicitly building the partial order, we
+   do the toplogical sort directly on the state machine by making sure
+   that when we assign an MAI to A we have already assigned MAIs to
+   all of the possible predecessors of A. */
+static void
+setMais(SMScopes *scopes, StateMachineState *root, int tid, MaiMap &mai)
+{
+	std::map<StateMachineState *, int> predecessors;
+	std::set<StateMachineState *> states;
+	enumStates(root, &states);
+	predecessors[root] = 0;
+	for (auto it = states.begin(); it != states.end(); it++) {
+		StateMachineState *s = *it;
+		std::vector<StateMachineState *> targ;
+		s->targets(targ);
+		for (auto it2 = targ.begin(); it2 != targ.end(); it2++)
+			predecessors[*it2]++;
+	}
+	assert(predecessors[root] == 0);
+	std::vector<StateMachineState *> pending;
+	pending.push_back(root);
+	while (!pending.empty()) {
+		StateMachineState *s = pending.back();
+		pending.pop_back();
+		assert(predecessors[s] == 0);
+
+		assignMais(scopes, s, tid, mai);
+		std::vector<StateMachineState *> targ;
+		s->targets(targ);
+		for (auto it = targ.begin(); it != targ.end(); it++) {
+			if (--predecessors[*it] == 0)
+				pending.push_back(*it);
+		}
+	}
+}
+
 static StateMachine *
-probeCFGsToMachine(Oracle *oracle,
+probeCFGsToMachine(SMScopes *scopes,
+		   Oracle *oracle,
 		   unsigned tid,
 		   HashedSet<HashedPtr<CFGNode> > &roots,
 		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
 		   MaiMap &mai)
 {
 	struct _ : public cfg_translator {
-		MaiMap &mai;
 		HashedSet<HashedPtr<const CFGNode> > &proximalNodes;
-		StateMachineState *operator()(CFGNode *e,
+		StateMachineState *operator()(SMScopes *scopes,
+					      CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations) {
 			if (proximalNodes.contains(e)) {
-				return getProximalCause(oracle->ms,
+				return getProximalCause(scopes,
+							oracle->ms,
 							oracle,
-							mai,
 							e,
 							e->rip,
 							tid);
 			} else {
-				return cfgNodeToState(oracle, tid, e, false, mai, pendingRelocations);
+				return cfgNodeToState(scopes, oracle, tid, e, false, pendingRelocations);
 			}
 		}
-		_(MaiMap &_mai,
-		  HashedSet<HashedPtr<const CFGNode> > &_proximalNodes)
-			: mai(_mai), proximalNodes(_proximalNodes)
+		_(HashedSet<HashedPtr<const CFGNode> > &_proximalNodes)
+			: proximalNodes(_proximalNodes)
 		{}
-	} doOne(mai, proximalNodes);
+	} doOne(proximalNodes);
 
 	assert(!roots.empty());
 
 	std::map<CFGNode *, StateMachineState *> results;
 	for (auto it = roots.begin(); !it.finished(); it.advance())
-		performTranslation(results, *it, oracle, tid, doOne);
+		performTranslation(scopes, results, *it, oracle, tid, doOne);
 
 	if (TIMEOUT)
 		return NULL;
@@ -1857,7 +2262,7 @@ probeCFGsToMachine(Oracle *oracle,
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		CFGNode *cfgnode = *it;
 		StateMachineState *root = results[*it];
-		root = addEntrySideEffects(oracle, tid, root, entryStacks[root], cfgnode->rip);
+		root = addEntrySideEffects(scopes, oracle, tid, root, entryStacks[root], cfgnode->rip);
 		roots_this_sm2.push_back(std::pair<CFGNode *, StateMachineState *>(cfgnode, root));
 	}
 
@@ -1865,29 +2270,35 @@ probeCFGsToMachine(Oracle *oracle,
 	for (auto it = roots.begin(); !it.finished(); it.advance())
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
-	return new StateMachine(entryState(roots_this_sm2, tid, false), cfg_roots_this_sm);
+	StateMachineState *root = entryState(scopes, VexRip(), roots_this_sm2, tid, false);
+	root = importRegisters(root);
+	setMais(scopes, root, tid, mai);
+	return new StateMachine(root, cfg_roots_this_sm);
 }
 
 static StateMachine *
-storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
+storeCFGsToMachine(SMScopes *scopes,
+		   Oracle *oracle,
+		   unsigned tid,
+		   CFGNode *root,
 		   MaiMap &mai)
 {
 	struct _ : public cfg_translator {
-		MaiMap *mai;
-		StateMachineState *operator()(CFGNode *e,
+		StateMachineState *operator()(SMScopes *scopes,
+					      CFGNode *e,
 					      Oracle *oracle,
 					      unsigned tid,
 					      std::vector<reloc_t> &pendingRelocations)
 		{
-			return cfgNodeToState(oracle, tid, e, true, *mai, pendingRelocations);
+			return cfgNodeToState(scopes, oracle, tid, e, true, pendingRelocations);
 		}
 	} doOne;
-	doOne.mai = &mai;
 	std::map<CFGNode *, StateMachineState *> results;
 	std::vector<std::pair<unsigned, const CFGNode *> > roots;
 	roots.push_back(std::pair<unsigned, const CFGNode *>(tid, root));
 	StateMachineState *s =
 		performTranslation(
+			scopes,
 			results,
 			root,
 			oracle,
@@ -1899,47 +2310,45 @@ storeCFGsToMachine(Oracle *oracle, unsigned tid, CFGNode *root,
 	sm_roots.insert(s);
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	assignFrameIds(sm_roots, tid, entryStacks);
+	setMais(scopes, s, tid, mai);
 	s = addEntrySideEffects(
-			oracle,
-			tid,
-			s,
-			entryStacks[s],
-			root->rip);
-	StateMachine *sm = new StateMachine(
+		scopes,
+		oracle,
+		tid,
 		s,
+		entryStacks[s],
+		root->rip);
+	return new StateMachine(
+		importRegisters(s),
 		roots);
-	return sm;
 }
 
 /* End of namespace */
 };
 
 StateMachine *
-probeCFGsToMachine(Oracle *oracle,
+probeCFGsToMachine(SMScopes *scopes,
+		   Oracle *oracle,
 		   unsigned tid,
 		   HashedSet<HashedPtr<CFGNode> > &roots,
 		   HashedSet<HashedPtr<const CFGNode> > &proximalNodes,
 		   MaiMap &mai)
 {
-	StateMachine *sm = _probeCFGsToMachine::probeCFGsToMachine(oracle, tid, roots, proximalNodes, mai);
-#if 0
-	sm->root = new StateMachineSideEffecting(
-		sm->root->dbg_origin,
-		new StateMachineSideEffectAssertFalse(
-			IRExpr_Unop(
-				Iop_Not1,
-				new IRExprEntryPoint(tid, CfgLabel(51))),
-			true),
-		sm->root);
-#endif
-	return sm;
+	return _probeCFGsToMachine::probeCFGsToMachine(scopes, oracle, tid, roots, proximalNodes, mai);
 }
 
 StateMachine *
-storeCFGToMachine(Oracle *oracle,
+storeCFGToMachine(SMScopes *scopes,
+		  Oracle *oracle,
 		  unsigned tid,
 		  CFGNode *root,
 		  MaiMap &mai)
 {
-	return _probeCFGsToMachine::storeCFGsToMachine(oracle, tid, root, mai);
+	return _probeCFGsToMachine::storeCFGsToMachine(scopes, oracle, tid, root, mai);
+}
+
+void
+mkPendingMai(MemoryAccessIdentifier *where, const CFGNode *node)
+{
+	_probeCFGsToMachine::mkPendingMai(where, node);
 }

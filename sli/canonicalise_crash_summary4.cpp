@@ -65,7 +65,6 @@ class EnumRegistersTransformer : public IRExprTransformer {
 		return iex;
 	}
 	reg_set_t &res;
-	bool rewriteNewStates() const { return false; }
 public:
 	EnumRegistersTransformer(reg_set_t &_res)
 		: res(_res)
@@ -480,7 +479,8 @@ main(int argc, char *argv[])
 {
 	init_sli();
 	char *first_line;
-	CrashSummary *summary = readBugReport(argv[1], &first_line);
+	SMScopes scopes;
+	CrashSummary *summary = readBugReport(&scopes, argv[1], &first_line);
 	bool progress = true;
 	int f_cntr = 0;
 	while (progress) {

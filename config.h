@@ -30,7 +30,7 @@
 #endif
 
 #ifndef CONFIG_CLUSTER_THRESHOLD
-#define CONFIG_CLUSTER_THRESHOLD 20
+#define CONFIG_CLUSTER_THRESHOLD 40
 #endif
 
 /* We do an initial clustering using @STORE_CLUSTER_THRESHOLD, and
@@ -44,14 +44,8 @@
 #define CONFIG_MAX_STORE_BACKTRACK 10
 #endif
 
-/* We always reach threshold1, and we can expand up to threshold2 if
-   that looks like it'll reach a convenient place in the program to do
-   analysis from. */
-#ifndef PROBE_CLUSTER_THRESHOLD1
-#define PROBE_CLUSTER_THRESHOLD1 CONFIG_CLUSTER_THRESHOLD
-#endif
-#ifndef PROBE_CLUSTER_THRESHOLD2
-#define PROBE_CLUSTER_THRESHOLD2 CONFIG_CLUSTER_THRESHOLD
+#ifndef PROBE_CLUSTER_THRESHOLD
+#define PROBE_CLUSTER_THRESHOLD CONFIG_CLUSTER_THRESHOLD
 #endif
 
 #ifndef CONFIG_DATABASE_RIP_DEPTH

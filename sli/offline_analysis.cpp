@@ -25,64 +25,8 @@ static bool debugOptimiseStateMachine = false;
 #define debugOptimiseStateMachine false
 #endif
 
-/* Find all of the states which definitely reach <survive> rather than
-   <crash> and reduce them to just <survive> */
-static void
-removeSurvivingStates(StateMachine *sm, const AllowableOptimisations &opt, bool *done_something)
-{
-	std::set<StateMachineState *> survivingStates;
-	std::set<StateMachineState *> allStates;
-	bool progress;
-	enumStates(sm, &survivingStates);
-	allStates = survivingStates;
-	do {
-		progress = false;
-		for (auto it = survivingStates.begin(); it != survivingStates.end(); ) {
-			StateMachineState *s = *it;
-			bool definitely_survives = true;
-			if (dynamic_cast<StateMachineCrash *>(s) ||
-			    dynamic_cast<StateMachineUnreached *>(s))
-				definitely_survives = false;
-			if (s->getSideEffect() &&
-			    s->getSideEffect()->type == StateMachineSideEffect::AssertFalse &&
-			    opt.preferCrash())
-				definitely_survives = false;
-			if (definitely_survives) {
-				std::vector<StateMachineState *> targets;
-				s->targets(targets);
-				for (auto it = targets.begin(); definitely_survives && it != targets.end(); it++)
-					if (!survivingStates.count(*it))
-						definitely_survives = false;
-			}
-			if (!definitely_survives) {
-				survivingStates.erase(it++);
-				progress = true;
-			} else {
-				it++;
-			}
-		}
-	} while (progress);
-
-	for (auto it = allStates.begin(); it != allStates.end(); it++) {
-		StateMachineState *s = *it;
-		StateMachineBifurcate *smb = dynamic_cast<StateMachineBifurcate *>(s);
-		if (!smb)
-			continue;
-		if (smb->trueTarget != StateMachineNoCrash::get() &&
-		    survivingStates.count(smb->trueTarget)) {
-			smb->trueTarget = StateMachineNoCrash::get();
-			*done_something = true;
-		}
-		if (smb->falseTarget != StateMachineNoCrash::get() &&
-		    survivingStates.count(smb->falseTarget)) {
-			smb->falseTarget = StateMachineNoCrash::get();
-			*done_something = true;
-		}
-	}
-}
-
 static StateMachine *
-enforceMustStoreBeforeCrash(StateMachine *sm, bool *progress)
+enforceMustStoreBeforeCrash(SMScopes *scopes, StateMachine *sm, bool *progress)
 {
 	/* We're not allowed to branch from state X to state Crash if
 	   there's no way for the machine to issue a store before
@@ -108,20 +52,25 @@ enforceMustStoreBeforeCrash(StateMachine *sm, bool *progress)
 		s->targets(targets);
 		todo.insert(todo.end(), targets.begin(), targets.end());
 	}
-	std::set<StateMachineState *> allStates;
-	enumStates(sm, &allStates);
-	for (auto it = allStates.begin(); it != allStates.end(); it++) {
-		StateMachineState *s = *it;
+	std::set<StateMachineTerminal *> terminals;
+	enumStates(sm, &terminals);
+	for (auto it = terminals.begin(); it != terminals.end(); it++) {
+		StateMachineTerminal *s = *it;
 		if (storeStates.count(s))
 			continue;
-		std::vector<StateMachineState **> targets;
-		s->targets(targets);
-		for (auto it = targets.begin(); it != targets.end(); it++) {
-			if (**it == StateMachineCrash::get()) {
-				*progress = true;
-				**it = StateMachineNoCrash::get();
-			}
-		}
+		if (s->res == scopes->smrs.cnst(smr_survive) || s->res == scopes->smrs.cnst(smr_unreached))
+			continue;
+		std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scopes->bools, s->res));
+		if (!selectors.count(smr_crash))
+			continue;
+		smrbdd::enablingTableT tab;
+		if (selectors.count(smr_survive))
+			tab.set(selectors[smr_survive],  scopes->smrs.cnst(smr_survive));
+		if (selectors.count(smr_unreached))
+			tab.set(selectors[smr_unreached], scopes->smrs.cnst(smr_unreached));
+		tab.set(selectors[smr_crash], scopes->smrs.cnst(smr_unreached));
+		*progress = true;
+		s->res = smrbdd::from_enabling(&scopes->smrs, tab, scopes->smrs.cnst(smr_unreached));
 	}
 	return sm;
 }
@@ -196,7 +145,7 @@ public:
 		: prefix(NULL)
 	{}
 	~OptimisationRecorder() { free(prefix); }
-	void start(MaiMap *mai, StateMachine *sm, bool is_ssa,
+	void start(SMScopes *scopes, MaiMap *mai, StateMachine *sm, bool is_ssa,
 		   const AllowableOptimisations &opt)
 	{
 		if (random() % CONFIG_RECORD_MACHINE_OPTIMISATIONS) {
@@ -234,9 +183,12 @@ public:
 		else
 			fprintf(f, "false\n");
 		fclose(f);
+		f = fopenf("w", "%s/pre_scopes", prefix);
+		scopes->prettyPrint(f);
+		fclose(f);
 		fprintf(_logfile, "Optimisation log: %s\n", prefix);
 	}
-	void finish(MaiMap *mai, StateMachine *sm)
+	void finish(SMScopes *scopes, MaiMap *mai, StateMachine *sm)
 	{
 		if (skip)
 			return;
@@ -245,6 +197,9 @@ public:
 		fclose(f);
 		f = fopenf("w", "%s/post_machine", prefix);
 		printStateMachine(sm, f);
+		fclose(f);
+		f = fopenf("w", "%s/post_scopes", prefix);
+		scopes->prettyPrint(f);
 		fclose(f);
 	}
 #else
@@ -256,7 +211,8 @@ public:
 };
 
 static StateMachine *
-_optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
+_optimiseStateMachine(SMScopes *scopes,
+		      VexPtr<MaiMap, &ir_heap> &mai,
 		      VexPtr<StateMachine, &ir_heap> sm,
 		      const AllowableOptimisations &opt,
 		      const VexPtr<OracleInterface> &oracle,
@@ -275,7 +231,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 	}
 
 	OptimisationRecorder optrec;
-	optrec.start(mai, sm, is_ssa, opt);
+	optrec.start(scopes, mai, sm, is_ssa, opt);
 
 	bool done_something;
 	do {
@@ -284,7 +240,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		done_something = false;
 
 		bool p = false;
-		sm = sm->optimise(opt, &p);
+		sm = sm->optimise(scopes, opt, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("Local optimise 1:\n");
 			printStateMachine(sm, stdout);
@@ -294,22 +250,13 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		sm = internStateMachine(sm);
 		if (TIMEOUT)
 			return sm;
-		if (opt.ignoreSideEffects()) {
-			p = false;
-			removeSurvivingStates(sm, opt, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("Remove surviving stores:\n");
-				printStateMachine(sm, stdout);
-			}
-			done_something |= p;
-		}
 
 		{
 			bool d;
 			p = false;
 			do {
 				d = false;
-				sm = deadCodeElimination(sm, &d, is_ssa);
+				sm = deadCodeElimination(scopes, sm, &d, is_ssa);
 				p |= d;
 			} while (d);
 			if (debugOptimiseStateMachine && p) {
@@ -319,10 +266,11 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 			done_something |= p;
 		}
 		p = false;
-		sm = sm->optimise(opt, &p);
+		sm = sm->optimise(scopes, opt, &p);
 		if (p) {
 			if (is_ssa) {
-				sm = internStateMachine(sm); /* Local optimisation only maintains SSA form if interned */
+				/* Local optimisation only maintains SSA form if interned */
+				sm = internStateMachine(sm);
 				if (TIMEOUT)
 					return sm;
 			}
@@ -336,7 +284,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		LibVEX_maybe_gc(token);
 
 		p = false;
-		sm = availExpressionAnalysis(*mai, sm, opt, is_ssa, oracle, &p);
+		sm = availExpressionAnalysis(scopes, *mai, sm, opt, is_ssa, oracle, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("availExpressionAnalysis:\n");
 			printStateMachine(sm, stdout);
@@ -346,42 +294,25 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		LibVEX_maybe_gc(token);
 
 		p = false;
-		sm = bisimilarityReduction(sm, is_ssa, *mai, &p);
+		sm = bisimilarityReduction(scopes, sm, is_ssa, *mai, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("bisimilarityReduction:\n");
 			printStateMachine(sm, stdout);
 		}
 		done_something |= p;
 
-		if (is_ssa) {
-			p = false;
-			sm = undefinednessSimplification(sm, opt, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("Undefinedness:\n");
-				printStateMachine(sm, stdout);
-			}
-		}
 		if (opt.noExtend()) {
 			p = false;
-			sm = useInitialMemoryLoads(*mai, sm, opt, oracle, &p);
+			sm = useInitialMemoryLoads(scopes, *mai, sm, opt, oracle, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("useInitialMemoryLoads:\n");
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
 		}
-		if (opt.noLocalSurvival()) {
-			p = false;
-			sm = removeLocalSurvival(sm, opt, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("removeLocalSurvival:\n");
-				printStateMachine(sm, stdout);
-			}
-			done_something |= p;
-		}
 		if (opt.mustStoreBeforeCrash()) {
 			p = false;
-			sm = enforceMustStoreBeforeCrash(sm, &p);
+			sm = enforceMustStoreBeforeCrash(scopes, sm, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("enforceMustStoreBeforeCrash:\n");
 				printStateMachine(sm, stdout);
@@ -400,7 +331,7 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		}
 
 		if (!done_something && is_ssa) {
-			sm = phiElimination(sm, &p);
+			sm = phiElimination(scopes, sm, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("phiElimination:\n");
 				printStateMachine(sm, stdout);
@@ -410,12 +341,12 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 
 		if (!done_something && is_ssa && !TIMEOUT) {
 			ControlDominationMap cdm;
-			cdm.init(sm, opt);
+			cdm.init(scopes, sm, opt);
 			if (TIMEOUT)
 				break;
 
 			p = false;
-			sm = functionAliasAnalysis(*mai, sm, opt, oracle, cdm, &p);
+			sm = functionAliasAnalysis(scopes, *mai, sm, opt, oracle, cdm, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("functionAliasAnalysis:\n");
 				printStateMachine(sm, stdout);
@@ -431,11 +362,12 @@ _optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 	if (is_ssa)
 		sm->assertSSA();
 	if (!TIMEOUT)
-		optrec.finish(mai, sm);
+		optrec.finish(scopes, mai, sm);
 	return sm;
 }
 StateMachine *
-optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
+optimiseStateMachine(SMScopes *scopes,
+		     VexPtr<MaiMap, &ir_heap> &mai,
 		     VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
 		     const VexPtr<OracleInterface> &oracle,
@@ -443,10 +375,11 @@ optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		     GarbageCollectionToken token,
 		     bool *progress)
 {
-	return _optimiseStateMachine(mai, sm, opt, oracle, is_ssa, token, progress);
+	return _optimiseStateMachine(scopes, mai, sm, opt, oracle, is_ssa, token, progress);
 }
 StateMachine *
-optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
+optimiseStateMachine(SMScopes *scopes,
+		     VexPtr<MaiMap, &ir_heap> &mai,
 		     VexPtr<StateMachine, &ir_heap> sm,
 		     const AllowableOptimisations &opt,
 		     const VexPtr<Oracle> &oracle,
@@ -455,7 +388,7 @@ optimiseStateMachine(VexPtr<MaiMap, &ir_heap> &mai,
 		     bool *progress)
 {
 	VexPtr<OracleInterface> oracleI(oracle);
-	return _optimiseStateMachine(mai, sm, opt, oracleI, is_ssa, token, progress);
+	return _optimiseStateMachine(scopes, mai, sm, opt, oracleI, is_ssa, token, progress);
 }
 
 static void
@@ -538,8 +471,9 @@ singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, State
 	return true;
 }
 
-static IRExpr *
-atomicSurvivalConstraint(VexPtr<MaiMap, &ir_heap> &mai,
+static bbdd *
+atomicSurvivalConstraint(SMScopes *scopes,
+			 VexPtr<MaiMap, &ir_heap> &mai,
 			 VexPtr<StateMachine, &ir_heap> &machine,
 			 StateMachine **_atomicMachine,
 			 VexPtr<OracleInterface> &oracle,
@@ -548,21 +482,14 @@ atomicSurvivalConstraint(VexPtr<MaiMap, &ir_heap> &mai,
 {
 	VexPtr<StateMachine, &ir_heap> atomicMachine;
 	atomicMachine = duplicateStateMachine(machine);
-	atomicMachine = optimiseStateMachine(mai, atomicMachine, opt, oracle, true, token);
-	VexPtr<IRExpr, &ir_heap> nullexpr(NULL);
+	atomicMachine = optimiseStateMachine(scopes, mai, atomicMachine, opt, oracle, true, token);
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;
-	if (atomicMachine->root->type == StateMachineState::Unreached) {
-		/* This machine can definitely never survive if run
-		 * atomically! */
-		return IRExpr_Const(IRConst_U1(0));
-	}
-	IRExpr *survive = survivalConstraintIfExecutedAtomically(mai, atomicMachine, nullexpr, oracle, false, opt, token);
-	if (!survive) {
+	VexPtr<bbdd, &ir_heap> nullexpr(NULL);
+	bbdd *survive = survivalConstraintIfExecutedAtomically(scopes, mai, atomicMachine, nullexpr, oracle, false, opt, token);
+	if (!survive)
 		fprintf(_logfile, "\tTimed out computing survival constraint\n");
-		return NULL;
-	}
-	return simplifyIRExpr(survive, opt);
+	return survive;
 }
 
 static AllowableOptimisations
@@ -588,11 +515,11 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 			case StateMachineSideEffect::Phi:
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
+			case StateMachineSideEffect::ImportRegister:
 				return false;
 			case StateMachineSideEffect::AssertFalse:
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
-			case StateMachineSideEffect::PointerAliasing:
 			case StateMachineSideEffect::StackLayout:
 				return true;
 			}
@@ -621,9 +548,7 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 		 * to. */
 		StateMachineState *newState = (StateMachineState *)0xf001deadul;
 		switch (oldState->type) {
-		case StateMachineState::Unreached:
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
+		case StateMachineState::Terminal:
 			/* Singletons are easy. */
 			newState = (StateMachineState *)oldState;
 			break;
@@ -657,7 +582,8 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 }
 
 StateMachine *
-removeAnnotations(VexPtr<MaiMap, &ir_heap> &mai,
+removeAnnotations(SMScopes *scopes,
+		  VexPtr<MaiMap, &ir_heap> &mai,
 		  VexPtr<StateMachine, &ir_heap> sm,
 		  const AllowableOptimisations &opt,
 		  const VexPtr<OracleInterface> &oracle,
@@ -674,7 +600,7 @@ removeAnnotations(VexPtr<MaiMap, &ir_heap> &mai,
 		if (!done_something)
 			break;
 		done_something = false;
-		sm = optimiseStateMachine(mai, sm, opt, oracle, is_ssa,
+		sm = optimiseStateMachine(scopes, mai, sm, opt, oracle, is_ssa,
 					  token, &done_something);
 		if (!done_something)
 			break;
@@ -683,7 +609,8 @@ removeAnnotations(VexPtr<MaiMap, &ir_heap> &mai,
 }
       
 static IRExpr *
-verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachine,
+verificationConditionForStoreMachine(SMScopes *scopes,
+				     VexPtr<StateMachine, &ir_heap> &storeMachine,
 				     VexPtr<StateMachine, &ir_heap> probeMachine,
 				     VexPtr<OracleInterface> &oracle,
 				     VexPtr<MaiMap, &ir_heap> &mai,
@@ -701,20 +628,12 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 
 	VexPtr<StateMachine, &ir_heap> sm;
 	sm = duplicateStateMachine(storeMachine);
-	sm = optimiseStateMachine(mai, sm, storeOptimisations, oracle, true, token);
-
-	if (dynamic_cast<StateMachineUnreached *>(sm->root)) {
-		/* This store machine is unusable, probably because we
-		 * don't have the machine code for the relevant
-		 * library */
-		fprintf(_logfile, "\t\tStore machine is unusable\n");
-		return NULL;
-	}
+	sm = optimiseStateMachine(scopes, mai, sm, storeOptimisations, oracle, true, token);
 
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm, _logfile);
 
-	probeMachine = optimiseStateMachine(mai, probeMachine, probeOptimisations, oracle, true, token);
+	probeMachine = optimiseStateMachine(scopes, mai, probeMachine, probeOptimisations, oracle, true, token);
 
 	fprintf(_logfile, "\t\tAssertion-free probe machine:\n");
 	printStateMachine(probeMachine, _logfile);
@@ -728,16 +647,15 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 		return NULL;
 	}
 
-	VexPtr<IRExpr, &ir_heap> assumption;
-	assumption = atomicSurvivalConstraint(mai, probeMachine, NULL, oracle,
+	VexPtr<bbdd, &ir_heap> assumption;
+	assumption = atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracle,
 					      atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
 					      token);
 	if (!assumption)
 		return NULL;
 
-	assumption = simplifyIRExpr(interval_simplify(simplify_via_anf(assumption)), optIn);
-
 	assumption = writeMachineSuitabilityConstraint(
+		scopes,
 		mai,
 		sm,
 		probeMachine,
@@ -751,12 +669,11 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 		return NULL;
 	}
 
-	assumption = simplifyIRExpr(interval_simplify(simplify_via_anf(assumption)), optIn);
-
 	/* Figure out when the cross product machine will be at risk
 	 * of crashing. */
-	IRExpr *crash_constraint =
+	bbdd *crash_constraint =
 		crossProductSurvivalConstraint(
+			scopes,
 			probeMachine,
 			sm,
 			oracle,
@@ -775,12 +692,13 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 	   those states which might suffer a bug of the desired
 	   kind. */
 	IRExpr *verification_condition =
-		IRExpr_Binop(
-			Iop_And1,
-			assumption,
-			IRExpr_Unop(
-				Iop_Not1,
-				crash_constraint));
+		bbdd::to_irexpr(
+			bbdd::And(
+				&scopes->bools,
+				bbdd::invert(
+					&scopes->bools,
+					crash_constraint),
+				assumption));
 	verification_condition = simplifyIRExpr(verification_condition, optIn);
 	verification_condition = simplify_via_anf(verification_condition);
 	verification_condition = simplifyIRExpr(verification_condition, optIn);
@@ -790,16 +708,23 @@ verificationConditionForStoreMachine(VexPtr<StateMachine, &ir_heap> &storeMachin
 }
 
 static StateMachine *
-truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
+truncateStateMachine(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, StateMachineSideEffectMemoryAccess *truncateAt)
 {
-	StateMachineBifurcate *newTerminal =
-		new StateMachineBifurcate(
-			mai.begin(truncateAt->rip).node()->rip,
-			IRExpr_Unop(
-				Iop_BadPtr,
-				truncateAt->addr),
-			StateMachineCrash::get(),
-			StateMachineNoCrash::get());
+	const VexRip &vr(mai.begin(truncateAt->rip).node()->rip);
+	StateMachineTerminal *newTerminal =
+		new StateMachineTerminal(
+			vr,
+			smrbdd::ifelse(
+				&scopes->smrs,
+				exprbdd::to_bbdd(
+					&scopes->bools,
+					exprbdd::unop(
+						&scopes->exprs,
+						&scopes->bools,
+						Iop_BadPtr,
+						truncateAt->addr)),
+				scopes->smrs.cnst(smr_crash),
+				scopes->smrs.cnst(smr_survive)));
 	std::map<const StateMachineState *, StateMachineState *> map;
 	std::queue<StateMachineState **> relocs;
 	StateMachineState *newRoot = sm->root;
@@ -814,6 +739,8 @@ truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffect
 		auto did_insert = it_did_insert.second;
 		if (did_insert) {
 			StateMachineState *newState;
+			/* Shut compiler up */
+			newState = (StateMachineState *)0xdead;
 			switch (oldState->type) {
 			case StateMachineState::Bifurcate: {
 				auto smb = (const StateMachineBifurcate *)oldState;
@@ -830,15 +757,23 @@ truncateStateMachine(const MaiMap &mai, StateMachine *sm, StateMachineSideEffect
 				}
 				break;
 			}
-			case StateMachineState::Crash:
+			case StateMachineState::Terminal: {
 				/* Get rid of the old way of crashing. */
-				newState = StateMachineNoCrash::get();
+				auto smt = (const StateMachineTerminal *)oldState;
+				std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scopes->bools, smt->res));
+				smrbdd::enablingTableT tab;
+				if (selectors.count(smr_crash))
+					tab.set(selectors[smr_crash], scopes->smrs.cnst(smr_survive));
+				if (selectors.count(smr_survive))
+					tab.set(selectors[smr_survive], scopes->smrs.cnst(smr_survive));
+				if (selectors.count(smr_unreached))
+					tab.set(selectors[smr_unreached], scopes->smrs.cnst(smr_unreached));
+				smrbdd *newRes = smrbdd::from_enabling(&scopes->smrs, tab, scopes->smrs.cnst(smr_unreached));
+				assert(newRes);
+				newRes->sanity_check(&scopes->ordering);
+				newState = new StateMachineTerminal(smt->dbg_origin, newRes);
 				break;
-			case StateMachineState::NoCrash:
-				newState = StateMachineNoCrash::get();
-				break;
-			case StateMachineState::Unreached:
-				abort();
+			}
 			}
 			it->second = newState;
 			if (newState != newTerminal) {
@@ -869,7 +804,8 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 }
 
 static StateMachine *
-localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
+localiseLoads(SMScopes *scopes,
+	      VexPtr<MaiMap, &ir_heap> &mai,
 	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      const VexPtr<StateMachine, &ir_heap> &storeMachine,
 	      const AllowableOptimisations &opt,
@@ -902,6 +838,7 @@ localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 		}
 	}
 	return optimiseStateMachine(
+		scopes,
 		mai,
 		probeMachine,
 		opt.setnonLocalLoads(&nonLocalLoads),
@@ -912,7 +849,8 @@ localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 }
 
 static StateMachine *
-localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
+localiseLoads(SMScopes *scopes,
+	      VexPtr<MaiMap, &ir_heap> &mai,
 	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
 	      const std::set<DynAnalysisRip> &stores,
 	      const AllowableOptimisations &opt,
@@ -939,6 +877,7 @@ localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 		}
 	}
 	return optimiseStateMachine(
+		scopes,
 		mai,
 		probeMachine,
 		opt.setnonLocalLoads(&nonLocalLoads),
@@ -949,11 +888,11 @@ localiseLoads(VexPtr<MaiMap, &ir_heap> &mai,
 }
 
 static CrashSummary *
-considerStoreCFG(const DynAnalysisRip &target_rip,
+considerStoreCFG(SMScopes *scopes,
+		 const DynAnalysisRip &target_rip,
 		 const VexPtr<CFGNode, &ir_heap> cfg,
 		 const VexPtr<Oracle> &oracle,
 		 VexPtr<StateMachine, &ir_heap> probeMachine,
-		 bool needRemoteMacroSections,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
 		 const VexPtr<MaiMap, &ir_heap> &maiIn,
@@ -961,7 +900,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 {
 	__set_profiling(considerStoreCFG);
 	VexPtr<MaiMap, &ir_heap> mai(maiIn->dupe());
-	VexPtr<StateMachine, &ir_heap> sm(storeCFGToMachine(oracle, tid, cfg, *mai));
+	VexPtr<StateMachine, &ir_heap> sm(storeCFGToMachine(scopes, oracle, tid, cfg, *mai));
 	if (!sm) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return NULL;
@@ -976,6 +915,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 			enableignoreSideEffects();
 	VexPtr<OracleInterface> oracleI(oracle);
 	sm = optimiseStateMachine(
+		scopes,
 		mai,
 		sm,
 		storeOptimisations,
@@ -983,11 +923,12 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		false,
 		token);
 
-	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(sm));
+	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(scopes, sm));
 	if (!sm_ssa || TIMEOUT)
 		return NULL;
 
 	sm_ssa = optimiseStateMachine(
+		scopes,
 		mai,
 		sm_ssa,
 		storeOptimisations,
@@ -995,7 +936,8 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 		true,
 		token);
 	probeMachine = duplicateStateMachine(probeMachine);
-	probeMachine = localiseLoads(mai,
+	probeMachine = localiseLoads(scopes,
+				     mai,
 				     probeMachine,
 				     sm_ssa,
 				     probeOptimisations,
@@ -1006,6 +948,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 
 	VexPtr<IRExpr, &ir_heap> base_verification_condition(
 		verificationConditionForStoreMachine(
+			scopes,
 			sm_ssa,
 			probeMachine,
 			oracleI,
@@ -1063,11 +1006,13 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 				return NULL;
 			VexPtr<StateMachine, &ir_heap> truncatedMachine(
 				truncateStateMachine(
+					scopes,
 					*mai,
 					probeMachine,
 					inductionAccesses[x]));
-			truncatedMachine = optimiseStateMachine(mai, truncatedMachine, optIn, oracle, true, token);
+			truncatedMachine = optimiseStateMachine(scopes, mai, truncatedMachine, optIn, oracle, true, token);
 			IRExpr *t = verificationConditionForStoreMachine(
+				scopes,
 				sm_ssa,
 				truncatedMachine,
 				oracleI,
@@ -1076,7 +1021,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 				token);
 			if (!t || t == residual_verification_condition ||
 			    (t->tag == Iex_Const &&
-			     ((IRExprConst *)t)->con->Ico.U1 == 0))
+			     ((IRExprConst *)t)->Ico.U1 == 0))
 				continue;
 			fprintf(_logfile, "Induction probe machine:\n");
 			printStateMachine(truncatedMachine, _logfile);
@@ -1101,7 +1046,7 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 			for (auto it = mai->begin(inductionAccesses[x]->rip); !it.finished(); it.advance())
 				logUseOfInduction(target_rip, it.dr());
 			if (residual_verification_condition->tag == Iex_Const &&
-			    ((IRExprConst *)residual_verification_condition.get())->con->Ico.U1 == 0) {
+			    ((IRExprConst *)residual_verification_condition.get())->Ico.U1 == 0) {
 				fprintf(_logfile, "\t\tCrash impossible.\n");
 				return NULL;
 			}
@@ -1116,30 +1061,12 @@ considerStoreCFG(const DynAnalysisRip &target_rip,
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
-	VexPtr<CrashSummary, &ir_heap> res(new CrashSummary(probeMachine, sm_ssa, residual_verification_condition, oracle, mai));
-	if (needRemoteMacroSections) {
-		VexPtr<remoteMacroSectionsT, &ir_heap> remoteMacroSections(new remoteMacroSectionsT);
-		if (!findRemoteMacroSections(mai, probeMachine, sm_ssa, residual_verification_condition,
-					     oracleI, optIn, remoteMacroSections, token)) {
-			fprintf(_logfile, "\t\tChose a bad write machine...\n");
-			return NULL;
-		}
-		if (!fixSufficient(mai, sm, probeMachine, residual_verification_condition,
-				   oracleI, optIn, remoteMacroSections, token)) {
-			fprintf(_logfile, "\t\tHave a fix, but it was insufficient...\n");
-			return NULL;
-		}
-		for (remoteMacroSectionsT::iterator it = remoteMacroSections->begin();
-		     it != remoteMacroSections->end();
-		     it++)
-			res->macroSections.push_back(CrashSummary::macroSectionT(it->start, it->end));
-	}
-
-	return res;
+	return new CrashSummary(scopes, probeMachine, sm_ssa, residual_verification_condition, oracle, mai);
 }
 
 StateMachine *
-buildProbeMachine(CfgLabelAllocator &allocLabel,
+buildProbeMachine(SMScopes *scopes,
+		  CfgLabelAllocator &allocLabel,
 		  const VexPtr<Oracle> &oracle,
 		  const VexRip &targetRip,
 		  ThreadId tid,
@@ -1161,7 +1088,7 @@ buildProbeMachine(CfgLabelAllocator &allocLabel,
 			fprintf(_logfile, "Cannot get probe CFGs!\n");
 			return NULL;
 		}
-		sm = probeCFGsToMachine(oracle, tid._tid(),
+		sm = probeCFGsToMachine(scopes, oracle, tid._tid(),
 					roots,
 					proximalNodes,
 					*mai);
@@ -1172,18 +1099,20 @@ buildProbeMachine(CfgLabelAllocator &allocLabel,
 	LibVEX_maybe_gc(token);
 
 	sm->sanityCheck(*mai);
-	sm = optimiseStateMachine(mai,
+	sm = optimiseStateMachine(scopes,
+				  mai,
 				  sm,
 				  opt,
 				  oracle,
 				  false,
 				  token);
 	
-	sm = convertToSSA(sm);
+	sm = convertToSSA(scopes, sm);
 	if (TIMEOUT)
 		return NULL;
 	sm->sanityCheck(*mai);
-	sm = optimiseStateMachine(mai,
+	sm = optimiseStateMachine(scopes,
+				  mai,
 				  sm,
 				  opt,
 				  oracle,
@@ -1224,13 +1153,13 @@ machineHasOneRacingLoad(const MaiMap &mai, StateMachine *sm, const VexRip &vr, O
 }
 
 static bool
-probeMachineToSummary(CfgLabelAllocator &allocLabel,
+probeMachineToSummary(SMScopes *scopes,
+		      CfgLabelAllocator &allocLabel,
 		      const DynAnalysisRip &targetRip,
 		      const VexPtr<StateMachine, &ir_heap> &probeMachine,
 		      const VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
-		      bool needRemoteMacroSections,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
 		      const AllowableOptimisations &optIn,
 		      const VexPtr<MaiMap, &ir_heap> &maiIn,
@@ -1269,11 +1198,11 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 		VexPtr<CrashSummary, &ir_heap> summary;
 
-		summary = considerStoreCFG(targetRip,
+		summary = considerStoreCFG(scopes,
+					   targetRip,
 					   storeCFG,
 					   oracle,
 					   probeMachine,
-					   needRemoteMacroSections,
 					   STORING_THREAD + i,
 					   optIn.setinterestingStores(&potentiallyConflictingStores),
 					   maiIn,
@@ -1291,12 +1220,12 @@ probeMachineToSummary(CfgLabelAllocator &allocLabel,
 }
 
 bool
-diagnoseCrash(CfgLabelAllocator &allocLabel,
+diagnoseCrash(SMScopes *scopes,
+	      CfgLabelAllocator &allocLabel,
 	      const DynAnalysisRip &targetRip,
 	      VexPtr<StateMachine, &ir_heap> probeMachine,
 	      const VexPtr<Oracle> &oracle,
 	      FixConsumer &df,
-	      bool needRemoteMacroSections,
 	      const AllowableOptimisations &optIn,
 	      VexPtr<MaiMap, &ir_heap> &mai,
 	      GarbageCollectionToken token)
@@ -1331,7 +1260,7 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
 
 	VexPtr<OracleInterface> oracleI(oracle);
-	reducedProbeMachine = removeAnnotations(mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
+	reducedProbeMachine = removeAnnotations(scopes, mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 	if (!reducedProbeMachine)
 		return NULL;
 	getConflictingStores(*mai, reducedProbeMachine, oracle, potentiallyConflictingStores);
@@ -1340,7 +1269,8 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 		return NULL;
 	}
 	bool localised_loads = false;
-	probeMachine = localiseLoads(mai,
+	probeMachine = localiseLoads(scopes,
+				     mai,
 				     probeMachine,
 				     potentiallyConflictingStores,
 				     optIn.enableignoreSideEffects(),
@@ -1350,7 +1280,7 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 	if (localised_loads) {
 		std::set<DynAnalysisRip> newPotentiallyConflictingStores;
 		while (1) {
-			reducedProbeMachine = removeAnnotations(mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
+			reducedProbeMachine = removeAnnotations(scopes, mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 			if (!reducedProbeMachine)
 				return NULL;
 			getConflictingStores(*mai, reducedProbeMachine, oracle, newPotentiallyConflictingStores);
@@ -1362,7 +1292,7 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 				break;
 			potentiallyConflictingStores = newPotentiallyConflictingStores;
 			localised_loads = false;
-			probeMachine = localiseLoads(mai, probeMachine,
+			probeMachine = localiseLoads(scopes, mai, probeMachine,
 						     potentiallyConflictingStores,
 						     optIn.enableignoreSideEffects(),
 						     oracleI, token, &localised_loads);
@@ -1376,13 +1306,13 @@ diagnoseCrash(CfgLabelAllocator &allocLabel,
 		return NULL;
 	}
 
-	return probeMachineToSummary(allocLabel,
+	return probeMachineToSummary(scopes,
+				     allocLabel,
 				     targetRip,
 				     probeMachine,
 				     reducedProbeMachine,
 				     oracle,
 				     df,
-				     needRemoteMacroSections,
 				     potentiallyConflictingStores,
 				     optIn,
 				     mai,
@@ -1459,17 +1389,24 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				const AllowableOptimisations &opt,
 				GarbageCollectionToken token)
 {
+	SMScopes scopes;
+
 	/* Quick pre-check: see whether this instruction might crash
 	 * in isolation.  A lot can't (e.g. accesses to BSS) */
 	{
-		if (getProximalCause(oracle->ms,
-				     oracle,
-				     *MaiMap::empty(),
-				     NULL,
-				     targetRip.toVexRip(),
-				     tid)->type == StateMachineState::NoCrash) {
-			fprintf(_logfile, "Instruction is definitely non-crashing\n");
-			return;
+		StateMachineState *t = getProximalCause(&scopes,
+							oracle->ms,
+							oracle,
+							NULL,
+							targetRip.toVexRip(),
+							tid);
+		if (t->type == StateMachineState::Terminal) {
+			auto term = (StateMachineTerminal *)t;
+			if (term->res == scopes.smrs.cnst(smr_unreached) ||
+			    term->res == scopes.smrs.cnst(smr_survive)) {
+				fprintf(_logfile, "Instruction is definitely non-crashing\n");
+				return;
+			}
 		}
 	}
 
@@ -1480,7 +1417,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	{
 		struct timeval start;
 		gettimeofday(&start, NULL);
-		probeMachine = buildProbeMachine(allocLabel, oracle, targetRip.toVexRip(),
+		probeMachine = buildProbeMachine(&scopes, allocLabel, oracle, targetRip.toVexRip(),
 						 tid, opt, mai, token);
 		if (!probeMachine)
 			return;
@@ -1496,8 +1433,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	}
 	if (TIMEOUT)
 		return;
-	diagnoseCrash(allocLabel, targetRip, probeMachine, oracle,
-		      df, false, opt.enablenoLocalSurvival(),
-		      mai, token);
+	diagnoseCrash(&scopes, allocLabel, targetRip, probeMachine, oracle,
+		      df, opt.enablenoLocalSurvival(), mai, token);
 }
 

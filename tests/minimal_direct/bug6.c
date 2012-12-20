@@ -5,13 +5,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "test.h"
+
 static int *volatile global_ptr1;
 static int *volatile global_ptr2;
-
-static volatile bool force_quit;
-
-#define STOP_ANALYSIS()					\
-	asm (".fill 100,1,0x90\n")
 
 static void
 f(int *volatile *ptr)
@@ -34,6 +31,7 @@ thr_main(void *ign)
 			f(&global_ptr2);
 		}
 		STOP_ANALYSIS();
+		read_cntr++;
 	}
 	return NULL;
 }
@@ -59,7 +57,14 @@ main()
 		STOP_ANALYSIS();
 		global_ptr1 = NULL;
 		STOP_ANALYSIS();
+		write_cntr++;
 	}
+
+	force_quit = true;
+	pthread_join(thr, NULL);
+
+	printf("Survived, %d read events and %d write events\n",
+	       read_cntr, write_cntr);
 
 	return 0;
 }

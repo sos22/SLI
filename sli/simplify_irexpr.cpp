@@ -35,28 +35,6 @@ operationCommutes(IROp op)
 		(op == Iop_CmpEQ1);
 }
 
-bool
-physicallyEqual(const IRConst *a, const IRConst *b)
-{
-	if (a->tag != b->tag)
-		return false;
-	switch (a->tag) {
-#define do_case(t)					\
-		case Ico_ ## t:				\
-			return a->Ico. t == b->Ico. t
-		do_case(U1);
-		do_case(U8);
-		do_case(U16);
-		do_case(U32);
-		do_case(U64);
-		do_case(F64);
-		do_case(F64i);
-		do_case(V128);
-#undef do_case
-	}
-	abort();
-}
-
 static bool
 physicallyEqual(const IRRegArray *a, const IRRegArray *b)
 {
@@ -128,7 +106,7 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 			physicallyEqual(a->addr, b->addr);
 	footer();
 	hdr(Const)
-		return physicallyEqual(a->con, b->con);
+		return eqIRExprConst(a, b);
 	footer()
 	hdr(CCall)
 		if (a->retty != b->retty || !physicallyEqual(a->cee, b->cee))
@@ -189,8 +167,8 @@ optimise_condition_calculation(
 	/* We only handle a few very special cases here. */
 	if (_cond->tag != Iex_Const || cc_op->tag != Iex_Const)
 		return NULL;
-	cond = ((IRExprConst *)_cond)->con->Ico.U64;
-	op = ((IRExprConst *)cc_op)->con->Ico.U64;
+	cond = ((IRExprConst *)_cond)->Ico.U64;
+	op = ((IRExprConst *)cc_op)->Ico.U64;
 	invert = cond & 1;
 	cond &= ~1ul;
 	res = NULL;
@@ -203,9 +181,7 @@ optimise_condition_calculation(
 			IRExpr_Binop(
 				Iop_Shr64,
 				dep1,
-				IRExpr_Const(
-					IRConst_U8(
-						7))));
+				IRExpr_Const_U8(7)));
 		cf = IRExpr_Unop(
 			Iop_64to1, dep1);
 		zf = IRExpr_Unop(
@@ -213,17 +189,13 @@ optimise_condition_calculation(
 			IRExpr_Binop(
 				Iop_Shr64,
 				dep1,
-				IRExpr_Const(
-					IRConst_U8(
-						6))));
+				IRExpr_Const_U8(6)));
 		of = IRExpr_Unop(
 			Iop_64to1,
 			IRExpr_Binop(
 				Iop_Shr64,
 				dep1,
-				IRExpr_Const(
-					IRConst_U8(
-						11))));
+				IRExpr_Const_U1(11)));
 		break;
 #define coerce8(x) IRExpr_Unop(Iop_64to8, (x))
 #define coerce16(x) IRExpr_Unop(Iop_64to16, (x))
@@ -265,12 +237,12 @@ optimise_condition_calculation(
 		zf = IRExpr_Binop(				\
 			Iop_CmpEQ ## type ,			\
 			coerce(dep1),				\
-			IRExpr_Const(IRConst_U ## type (0)));	\
+			IRExpr_Const_U ## type(0));		\
 		sf = IRExpr_Binop(				\
 			Iop_CmpLT ## type ## S,			\
 			coerce(dep1),				\
-			IRExpr_Const(IRConst_U ## type (0)));	\
-		of = IRExpr_Const(IRConst_U1(0))
+			IRExpr_Const_U ## type(0));	\
+		of = IRExpr_Const_U1(0)
 #define do_logic(type) _do_logic(type, coerce ## type)
 	case AMD64G_CC_OP_LOGICB:
 		do_logic(8);
@@ -294,7 +266,7 @@ optimise_condition_calculation(
 				coerce(dep1),				\
 				coerce(dep2));				\
 			IRExpr *zero =					\
-				IRExpr_Const(IRConst_U ## type (0));	\
+				IRExpr_Const_U ## type (0);		\
 			cf = IRExpr_Binop(Iop_CmpLT ## type ## U,	\
 					  res,				\
 					  coerce(dep1));		\
@@ -420,25 +392,33 @@ _sortIntegers(t a, t b)
 }
 
 static sort_ordering
-_sortIRConsts(const IRConst *a, const IRConst *b)
+_sortIRConsts(const IRExprConst *a, const IRExprConst *b)
 {
-	if (a->tag < b->tag)
+	if (a->ty < b->ty)
 		return less_than;
-	if (a->tag > b->tag)
+	if (a->ty > b->ty)
 		return greater_than;
-	switch (a->tag) {
+	switch (a->ty) {
 #define do_type(t)							\
-		case Ico_ ## t :					\
-			return _sortIntegers(a->Ico. t, b->Ico. t)
-		do_type(U1);
-		do_type(U8);
-		do_type(U16);
-		do_type(U32);
-		do_type(U64);
-		do_type(F64);
-		do_type(F64i);
-		do_type(V128);
+		case Ity_I ## t :					\
+			return _sortIntegers(a->Ico.U ## t, b->Ico.U ## t)
+		do_type(1);
+		do_type(8);
+		do_type(16);
+		do_type(32);
+		do_type(64);
 #undef do_type
+	case Ity_I128: {
+		sort_ordering h = _sortIntegers(a->Ico.U128.hi,
+						b->Ico.U128.hi);
+		if (h == equal_to)
+			return _sortIntegers(a->Ico.U128.lo,
+					     b->Ico.U128.lo);
+		else
+			return h;
+	}
+	case Ity_INVALID:
+		break;
 	}
 	abort();
 }
@@ -486,7 +466,7 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 	if (_a->tag == Iex_Const && _b->tag == Iex_Const) {
 		IRExprConst *a = (IRExprConst *)_a;
 		IRExprConst *b = (IRExprConst *)_b;
-		return _sortIRConsts(a->con, b->con);
+		return _sortIRConsts(a, b);
 	}
 	if (_a->tag == Iex_Const)
 		return less_than;
@@ -611,7 +591,7 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 	hdr(Load)
 		return _sortIRExprs(a->addr, b->addr);
 	hdr(Const)
-		return _sortIRConsts(a->con, b->con);
+		return _sortIRConsts(a, b);
 	hdr(CCall) {
 		int r = strcmp(a->cee->name,
 			       b->cee->name);
@@ -721,11 +701,8 @@ optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something
 	progress = false;
 	IRExpr *e2;
 	e2 = optimiseIRExpr(e, opt, &progress);
-	if (e2 != e) {
-		if (!opt.noSanityChecking())
-			quickcheck_exprs_eq(e, e2);
+	if (e2 != e)
 		progress = true;
-	}
 	e = e2;
 	if (progress) {
 		*done_something = true;
@@ -740,11 +717,8 @@ optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something
 			}
 			progress = false;
 			e2 = optimiseIRExpr(e, opt, &progress);
-			if (e2 != e) {
-				if (!opt.noSanityChecking())
-					quickcheck_exprs_eq(e, e2);
+			if (e2 != e)
 				progress = true;
-			}
 			e = e2;
 		}
 	}
@@ -1177,14 +1151,14 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 
 	if (_sortIRExprs(iex, assumption) == equal_to) {
 		*done_something = true;
-		return IRExpr_Const(IRConst_U1(invertAssumption ? 0 : 1));
+		return IRExpr_Const_U1(!invertAssumption);
 	}
 	if (iex->tag == Iex_Unop) {
 		const IRExprUnop *u = (IRExprUnop *)iex;
 		if (u->op == Iop_Not1 &&
 		    _sortIRExprs(u->arg, assumption) == equal_to) {
 			*done_something = true;
-			return IRExpr_Const(IRConst_U1(invertAssumption ? 1 : 0));
+			return IRExpr_Const_U1(invertAssumption);
 		}
 		return iex;
 	}
@@ -1207,7 +1181,7 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 				/* We're assuming X, and this
 				   expression is X|Y, so reduce to
 				   constant 1. */
-				return IRExpr_Const(IRConst_U1(1));
+				return IRExpr_Const_U1(true);
 			}
 		} else if (assoc->contents[i]->tag == Iex_Unop) {
 			IRExprUnop *u = (IRExprUnop *)assoc->contents[i];
@@ -1218,7 +1192,7 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 					/* We're assuming ~x and we
 					   found ~x|y -> result is
 					   constant 1. */
-					return IRExpr_Const(IRConst_U1(1));
+					return IRExpr_Const_U1(true);
 				} else {
 					/* We'are assuming X and found
 					   ~X|Y, so just turn it into
@@ -1248,106 +1222,98 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption)
 	return iex;
 }
 
-/* Down-cast @expr so that it is of type @desiredType. */
-IRExpr *
-coerceTypes(IRType desiredType, IRExpr *expr)
+IROp
+coerceTypesOp(IRType from, IRType to)
 {
-	IRType origType = expr->type();
-	switch (origType) {
+	switch (from) {
 	case Ity_I64:
-		switch (desiredType) {
+		switch (to) {
 		case Ity_I8:
-			return IRExpr_Unop(Iop_64to8, expr);
+			return Iop_64to8;
 		case Ity_I16:
-			return IRExpr_Unop(Iop_64to16, expr);
+			return Iop_64to16;
 		case Ity_I32:
-			return IRExpr_Unop(Iop_64to32, expr);
-		case Ity_F64:
-			return IRExpr_Unop(Iop_ReinterpI64asF64, expr);
+			return Iop_64to32;
+		case Ity_I64:
+			return Iop_Noop64;
 		default:
 			break;
 		}
 		break;
 	case Ity_I32:
-		switch (desiredType) {
+		switch (to) {
 		case Ity_I8:
-			return IRExpr_Unop(Iop_32to8, expr);
+			return Iop_32to8;
 		case Ity_I16:
-			return IRExpr_Unop(Iop_32to16, expr);
-		case Ity_F32:
-			return IRExpr_Unop(Iop_ReinterpI32asF32, expr);
-		default:
-			break;
-		}
-		break;
-	case Ity_F32:
-		switch (desiredType) {
+			return Iop_32to16;
 		case Ity_I32:
-			return IRExpr_Unop(Iop_ReinterpF32asI32, expr);
+			return Iop_Noop32;
 		default:
 			break;
 		}
 		break;
 	case Ity_I16:
-		switch (desiredType) {
+		switch (to) {
 		case Ity_I8:
-			return IRExpr_Unop(Iop_16to8, expr);
+			return Iop_16to8;
+		case Ity_I16:
+			return Iop_Noop16;
 		default:
 			break;
 		}
 		break;
 	case Ity_I8:
-		switch (desiredType) {
+		switch (to) {
 		case Ity_I1:
-			return IRExpr_Unop(Iop_8to1, expr);
+			return Iop_8to1;
+		case Ity_I8:
+			return Iop_Noop8;
 		default:
 			break;
 		}
 		break;
-	case Ity_F64:
-		switch (desiredType) {
+	case Ity_I128:
+		switch (to) {
 		case Ity_I64:
-			return IRExpr_Unop(Iop_ReinterpF64asI64, expr);
-		default:
-			break;
-		}
-		break;
-	case Ity_V128:
-		switch (desiredType) {
-		case Ity_F64:
-			return coerceTypes(desiredType, coerceTypes(Ity_I64, expr));
-		case Ity_F32:
-			return coerceTypes(desiredType, coerceTypes(Ity_I32, expr));
-		case Ity_I64:
-			return IRExpr_Unop(Iop_V128to64, expr);
+			return Iop_128to64;
 		case Ity_I32:
-			return IRExpr_Unop(Iop_V128to32, expr);
+			return Iop_V128to32;
+		case Ity_I128:
+			return Iop_Noop128;
 		default:
 			break;
 		}
 	default:
 		break;
 	}
-	if (desiredType != origType)
-		abort();
-	return expr;
+	abort();
+}
+
+/* Down-cast @expr so that it is of type @desiredType. */
+IRExpr *
+coerceTypes(IRType desiredType, IRExpr *expr)
+{
+	return IRExpr_Unop(coerceTypesOp(expr->type(), desiredType), expr);
 }
 
 static bool
-isZero(const IRConst *iec)
+isZero(const IRExprConst *iec)
 {
-	switch (iec->tag) {
+	switch (iec->ty) {
 #define do_tag(n)				\
-		case Ico_ ## n :		\
-			return iec->Ico. n == 0
-		do_tag(U1);
-		do_tag(U8);
-		do_tag(U16);
-		do_tag(U32);
-		do_tag(U64);
-		do_tag(F64);
-		do_tag(F64i);
-		do_tag(V128);
+		case Ity_I ## n :		\
+			return iec->Ico.U ## n == 0
+		do_tag(1);
+		do_tag(8);
+		do_tag(16);
+		do_tag(32);
+		do_tag(64);
+#undef do_tag
+	case Ity_I128:
+		return iec->Ico.U128.hi == 0 &&
+			iec->Ico.U128.lo == 0;
+	case Ity_INVALID:
+		break;
 	}
 	abort();
 }
@@ -1497,7 +1463,7 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
 		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 			if (physicallyEqual(e, from)) {
 				if (!_to)
-					_to = IRExpr_Const(IRConst_U1(to));
+					_to = IRExpr_Const_U1(to);
 				*done_something = true;
 				return _to;
 			}
@@ -1511,7 +1477,7 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
 			    ((IRExprEntryPoint *)e)->thread == ((IRExprEntryPoint *)from)->thread &&
 			    ((IRExprEntryPoint *)e)->label != ((IRExprEntryPoint *)from)->label) {
 				*done_something = true;
-				return IRExpr_Const(IRConst_U1(0));
+				return IRExpr_Const_U1(false);
 			}
 			if (!rewriteFrom && e->type() != Ity_I1 && e->tag != Iex_Mux0X)
 				return e;
@@ -1657,14 +1623,14 @@ top:
 				b = e->contents[x+1];
 				if (a->tag == Iex_Const && b->tag == Iex_Const) {
 					IRExpr *res;
-					IRConst *l, *r;
-					l = ((IRExprConst *)a)->con;
-					r = ((IRExprConst *)b)->con;
+					IRExprConst *l, *r;
+					l = (IRExprConst *)a;
+					r = (IRExprConst *)b;
 					switch (e->op) {
 #define do_sized_op(name, sz, op)					\
 						case Iop_ ## name ## sz: \
-							res = IRExpr_Const(IRConst_U ## sz \
-									   (l->Ico.U ## sz op r->Ico.U ## sz));	\
+							res = IRExpr_Const_U ## sz( \
+								l->Ico.U ## sz op r->Ico.U ## sz); \
 							break
 #define do_op(name, op)							\
 						do_sized_op(name, 8, op); \
@@ -1679,13 +1645,13 @@ top:
 #undef do_op
 #undef do_sized_op
 					case Iop_And1:
-						res = IRExpr_Const(IRConst_U1(l->Ico.U1 & r->Ico.U1));
+						res = IRExpr_Const_U1(l->Ico.U1 & r->Ico.U1);
 						break;
 					case Iop_Or1:
-						res = IRExpr_Const(IRConst_U1(l->Ico.U1 | r->Ico.U1));
+						res = IRExpr_Const_U1(l->Ico.U1 | r->Ico.U1);
 						break;
 					case Iop_Xor1:
-						res = IRExpr_Const(IRConst_U1(l->Ico.U1 ^ r->Ico.U1));
+						res = IRExpr_Const_U1(l->Ico.U1 ^ r->Ico.U1);
 						break;
 					default:
 						printf("Warning: can't constant-fold associative op %d\n", e->op);
@@ -1712,7 +1678,7 @@ top:
 			/* If there are any constants, they'll be at the start. */
 			if (e->nr_arguments > 1 &&
 			    e->contents[0]->tag == Iex_Const) {
-				IRConst *c = ((IRExprConst *)e->contents[0])->con;
+				auto c = (IRExprConst *)e->contents[0];
 				if (c->Ico.U1) {
 					progress = true;
 					purgeAssocArgument(e, 0);
@@ -1727,7 +1693,7 @@ top:
 			__set_profiling(optimise_assoc_or1);
 			if (e->nr_arguments > 1 &&
 			    e->contents[0]->tag == Iex_Const) {
-				IRConst *c = ((IRExprConst *)e->contents[0])->con;
+				auto c = (IRExprConst *)e->contents[0];
 				if (!c->Ico.U1) {
 					progress = true;
 					purgeAssocArgument(e, 0);
@@ -1742,7 +1708,7 @@ top:
 			__set_profiling(optimise_assoc_or1);
 			if (e->nr_arguments > 1 &&
 			    e->contents[0]->tag == Iex_Const) {
-				IRConst *c = ((IRExprConst *)e->contents[0])->con;
+				auto c = (IRExprConst *)e->contents[0];
 				if (c->Ico.U1) {
 					if (e->nr_arguments == 2) {
 						res = IRExpr_Unop(Iop_Not1, e->contents[1]);
@@ -1762,7 +1728,7 @@ top:
 		if (e->op == Iop_Add64) {
 			if (e->nr_arguments > 1 &&
 			    e->contents[0]->tag == Iex_Const &&
-			    ((IRExprConst *)e->contents[0])->con->Ico.U64 == 0) {
+			    ((IRExprConst *)e->contents[0])->Ico.U64 == 0) {
 				purgeAssocArgument(e, 0);
 				progress = true;
 			}
@@ -1801,7 +1767,7 @@ top:
 						(IRExprHappensBefore *)e->contents[i2];
 					if ( a1->before == a2->after &&
 					     a1->after == a2->before ) {
-						res = IRExpr_Const(IRConst_U1(1));
+						res = IRExpr_Const_U1(true);
 						p = true;
 					}
 				}
@@ -1822,7 +1788,7 @@ top:
 				    ((IRExprUnop *)e->contents[i+1])->op == Iop_Not1 &&
 				    _sortIRExprs(((IRExprUnop *)e->contents[i+1])->arg,
 						 e->contents[i]) == equal_to) {
-					res = IRExpr_Const(IRConst_U1(1));
+					res = IRExpr_Const_U1(true);
 					p = true;
 				}
 			}
@@ -1941,38 +1907,38 @@ top:
 
 						if (purge) {
 							progress = true;
-							IRConst *result;
+							IRExprConst *result;
 							switch (e->op) {
 							case Iop_And8:
 							case Iop_Xor8:
 							case Iop_Add8:
-								result = IRConst_U8(0);
+								result = IRExpr_Const_U8(0);
 								break;
 							case Iop_And16:
 							case Iop_Xor16:
 							case Iop_Add16:
-								result = IRConst_U16(0);
+								result = IRExpr_Const_U16(0);
 								break;
 							case Iop_And32:
 							case Iop_Xor32:
 							case Iop_Add32:
-								result = IRConst_U32(0);
+								result = IRExpr_Const_U32(0);
 								break;
 							case Iop_And64:
 							case Iop_Xor64:
 							case Iop_Add64:
-								result = IRConst_U64(0);
+								result = IRExpr_Const_U64(0);
 								break;
 							case Iop_And1:
 							case Iop_Xor1:
-								result = IRConst_U1(0);
+								result = IRExpr_Const_U1(0);
 								break;
 							default:
 								abort();
 							}
 							if (and_like) {
 								/* x & ~x -> 0 and eliminates the entire expression. */
-								res = IRExpr_Const(result);
+								res = result;
 								p = true;
 								break;
 							}
@@ -1981,10 +1947,10 @@ top:
 							   other index remains valid. */
 							if (it1 < it2) {
 								purgeAssocArgument(e, it2);
-								e->contents[it1] = IRExpr_Const(result);
+								e->contents[it1] = result;
 							} else {
 								purgeAssocArgument(e, it1);
-								e->contents[it2] = IRExpr_Const(result);
+								e->contents[it2] = result;
 							}
 							break;
 						}
@@ -1998,38 +1964,38 @@ top:
 				switch (e->op) {
 				case Iop_Add8:
 				case Iop_Xor8:
-					res = IRExpr_Const(IRConst_U8(0));
+					res = IRExpr_Const_U8(0);
 					break;
 				case Iop_Add16:
 				case Iop_Xor16:
-					res = IRExpr_Const(IRConst_U16(0));
+					res = IRExpr_Const_U16(0);
 					break;
 				case Iop_Add32:
 				case Iop_Xor32:
-					res = IRExpr_Const(IRConst_U32(0));
+					res = IRExpr_Const_U32(0);
 					break;
 				case Iop_Add64:
 				case Iop_Xor64:
-					res = IRExpr_Const(IRConst_U64(0));
+					res = IRExpr_Const_U64(0);
 					break;
 				case Iop_And1:
-					res = IRExpr_Const(IRConst_U1(1));
+					res = IRExpr_Const_U1(true);
 					break;
 				case Iop_And8:
-					res = IRExpr_Const(IRConst_U8(0xff));
+					res = IRExpr_Const_U8(0xff);
 					break;
 				case Iop_And16:
-					res = IRExpr_Const(IRConst_U16(0xffff));
+					res = IRExpr_Const_U16(0xffff);
 					break;
 				case Iop_And32:
-					res = IRExpr_Const(IRConst_U32(0xffffffff));
+					res = IRExpr_Const_U32(0xffffffff);
 					break;
 				case Iop_And64:
-					res = IRExpr_Const(IRConst_U64(0xfffffffffffffffful));
+					res = IRExpr_Const_U64(0xfffffffffffffffful);
 					break;
 				case Iop_Xor1:
 				case Iop_Or1:
-					res = IRExpr_Const(IRConst_U1(0));
+					res = IRExpr_Const_U1(0);
 					break;
 				default:
 					abort();
@@ -2085,7 +2051,7 @@ top:
 				break;
 			}
 			if (e->op == Iop_ReinterpI32asF32) {
-				res = IRExpr_Get(argg->reg, Ity_F32);
+				res = IRExpr_Get(argg->reg, Ity_I32);
 				break;
 			}
 		}
@@ -2097,7 +2063,7 @@ top:
 				break;
 			}
 			if (e->op == Iop_ReinterpI32asF32) {
-				res = IRExpr_Load(Ity_F32, argl->addr);
+				res = IRExpr_Load(Ity_I32, argl->addr);
 				break;
 			}
 		}
@@ -2195,7 +2161,7 @@ top:
 
 		if (e->op == Iop_BadPtr) {
 			if (opt.allPointersGood()) {
-				res = IRExpr_Const(IRConst_U1(0));
+				res = IRExpr_Const_U1(false);
 				break;
 			}
 			if (e->arg->tag == Iex_Associative &&
@@ -2215,7 +2181,7 @@ top:
 				 * them together. */
 				IRExprAssociative *assoc = (IRExprAssociative *)e->arg;
 				IRExprConst *cnst = (IRExprConst *)assoc->contents[0];
-				unsigned long old_delta = cnst->con->Ico.U64;
+				unsigned long old_delta = cnst->Ico.U64;
 				unsigned long new_delta = old_delta & ~((1ul << 22) - 1);
 				if (assoc->contents[1]->tag == Iex_Get &&
 				    ((IRExprGet *)assoc->contents[1])->reg.isReg() &&
@@ -2223,7 +2189,7 @@ top:
 				     ((IRExprGet *)assoc->contents[1])->reg.asReg() == offsetof(VexGuestAMD64State, guest_RSP))) {
 					/* Special case: BadPtr(k+x) is always false
 					   if x == RSP or x == FS_ZERO */
-					res = IRExpr_Const(IRConst_U1(0));
+					res = IRExpr_Const_U1(false);
 					break;
 				}
 
@@ -2234,9 +2200,8 @@ top:
 						e->arg =
 							IRExpr_Binop(
 								Iop_Add64,
-								IRExpr_Const(
-									IRConst_U64(
-										cnst->con->Ico.U64 & ~((1ul << 22) - 1))),
+								IRExpr_Const_U64(
+									cnst->Ico.U64 & ~((1ul << 22) - 1)),
 								assoc->contents[1]);
 					progress = true;
 					break;
@@ -2249,7 +2214,7 @@ top:
 				/* The FS and RSP registers are
 				   assumed to always point at valid
 				   memory. */
-				res = IRExpr_Const(IRConst_U1(0));
+				res = IRExpr_Const_U1(false);
 				break;
 			}
 		}
@@ -2267,113 +2232,113 @@ top:
 		}
 
 		if (e->arg->tag == Iex_Const) {
-			IRConst *c = ((IRExprConst *)e->arg)->con;
+			IRExprConst *c = (IRExprConst *)e->arg;
 			switch (e->op) {
 			case Iop_Neg8:
-				res = IRExpr_Const(IRConst_U8(-c->Ico.U8));
+				res = IRExpr_Const_U8(-c->Ico.U8);
 				break;
 			case Iop_Neg16:
-				res = IRExpr_Const(IRConst_U16(-c->Ico.U16));
+				res = IRExpr_Const_U16(-c->Ico.U16);
 				break;
 			case Iop_Neg32:
-				res = IRExpr_Const(IRConst_U32(-c->Ico.U32));
+				res = IRExpr_Const_U32(-c->Ico.U32);
 				break;
 			case Iop_Neg64:
-				res = IRExpr_Const(IRConst_U64(-c->Ico.U64));
+				res = IRExpr_Const_U64(-c->Ico.U64);
 				break;
 			case Iop_Not8:
-				res = IRExpr_Const(IRConst_U8(~c->Ico.U8));
+				res = IRExpr_Const_U8(~c->Ico.U8);
 				break;
 			case Iop_Not16:
-				res = IRExpr_Const(IRConst_U16(~c->Ico.U16));
+				res = IRExpr_Const_U16(~c->Ico.U16);
 				break;
 			case Iop_Not32:
-				res = IRExpr_Const(IRConst_U32(~c->Ico.U32));
+				res = IRExpr_Const_U32(~c->Ico.U32);
 				break;
 			case Iop_Not64:
-				res = IRExpr_Const(IRConst_U64(~c->Ico.U64));
+				res = IRExpr_Const_U64(~c->Ico.U64);
 				break;
 			case Iop_Not1:
-				res = IRExpr_Const(IRConst_U1(!c->Ico.U1));
+				res = IRExpr_Const_U1(!c->Ico.U1);
 				break;
 			case Iop_1Uto8:
-				res = IRExpr_Const(IRConst_U8(c->Ico.U1));
+				res = IRExpr_Const_U8(c->Ico.U1);
 				break;
 			case Iop_1Uto32:
-				res = IRExpr_Const(IRConst_U32(c->Ico.U1));
+				res = IRExpr_Const_U32(c->Ico.U1);
 				break;
 			case Iop_1Uto64:
-				res = IRExpr_Const(IRConst_U64(c->Ico.U1));
+				res = IRExpr_Const_U64(c->Ico.U1);
 				break;
 			case Iop_8Uto16:
-				res = IRExpr_Const(IRConst_U16(c->Ico.U8));
+				res = IRExpr_Const_U16(c->Ico.U8);
 				break;
 			case Iop_8Uto32:
-				res = IRExpr_Const(IRConst_U32(c->Ico.U8));
+				res = IRExpr_Const_U32(c->Ico.U8);
 				break;
 			case Iop_8Uto64:
-				res = IRExpr_Const(IRConst_U64(c->Ico.U8));
+				res = IRExpr_Const_U64(c->Ico.U8);
 				break;
 			case Iop_16Uto32:
-				res = IRExpr_Const(IRConst_U32(c->Ico.U16));
+				res = IRExpr_Const_U32(c->Ico.U16);
 				break;
 			case Iop_16Uto64:
-				res = IRExpr_Const(IRConst_U64(c->Ico.U16));
+				res = IRExpr_Const_U64(c->Ico.U16);
 				break;
 			case Iop_32Uto64:
-				res = IRExpr_Const(IRConst_U64(c->Ico.U32));
+				res = IRExpr_Const_U64(c->Ico.U32);
 				break;
 			case Iop_64to32:
-				res = IRExpr_Const(IRConst_U32(c->Ico.U64));
+				res = IRExpr_Const_U32(c->Ico.U64);
 				break;
 			case Iop_64to16:
-				res = IRExpr_Const(IRConst_U16(c->Ico.U64));
+				res = IRExpr_Const_U16(c->Ico.U64);
 				break;
 			case Iop_64to8:
-				res = IRExpr_Const(IRConst_U8(c->Ico.U64));
+				res = IRExpr_Const_U8(c->Ico.U64);
 				break;
 			case Iop_64to1:
-				res = IRExpr_Const(IRConst_U1(c->Ico.U64 & 1));
+				res = IRExpr_Const_U1(c->Ico.U64 & 1);
 				break;
 			case Iop_32to16:
-				res = IRExpr_Const(IRConst_U16(c->Ico.U32));
+				res = IRExpr_Const_U16(c->Ico.U32);
 				break;
 			case Iop_32to8:
-				res = IRExpr_Const(IRConst_U8(c->Ico.U32));
+				res = IRExpr_Const_U8(c->Ico.U32);
 				break;
 			case Iop_32to1:
-				res = IRExpr_Const(IRConst_U1(c->Ico.U32 & 1));
+				res = IRExpr_Const_U1(c->Ico.U32 & 1);
 				break;
 			case Iop_16to8:
-				res = IRExpr_Const(IRConst_U8(c->Ico.U16));
+				res = IRExpr_Const_U8(c->Ico.U16);
 				break;
 			case Iop_16to1:
-				res = IRExpr_Const(IRConst_U1(c->Ico.U16 & 1));
+				res = IRExpr_Const_U1(c->Ico.U16 & 1);
 				break;
 			case Iop_8to1:
-				res = IRExpr_Const(IRConst_U1(c->Ico.U8 & 1));
+				res = IRExpr_Const_U1(c->Ico.U8 & 1);
 				break;
 			case Iop_8Sto16:
-				res = IRExpr_Const(IRConst_U16( (char)c->Ico.U8));
+				res = IRExpr_Const_U16( (char)c->Ico.U8);
 				break;
 			case Iop_8Sto32:
-				res = IRExpr_Const(IRConst_U32( (char)c->Ico.U8));
+				res = IRExpr_Const_U32( (char)c->Ico.U8);
 				break;
 			case Iop_8Sto64:
-				res = IRExpr_Const(IRConst_U64( (char)c->Ico.U8));
+				res = IRExpr_Const_U64( (char)c->Ico.U8);
 				break;
 			case Iop_16Sto32:
-				res = IRExpr_Const(IRConst_U32( (short)c->Ico.U16));
+				res = IRExpr_Const_U32( (short)c->Ico.U16);
 				break;
 			case Iop_16Sto64:
-				res = IRExpr_Const(IRConst_U64( (short)c->Ico.U16));
+				res = IRExpr_Const_U64( (short)c->Ico.U16);
 				break;
 			case Iop_32Sto64:
-				res = IRExpr_Const(IRConst_U64( (int)c->Ico.U32));
+				res = IRExpr_Const_U64( (int)c->Ico.U32);
 				break;
 			case Iop_BadPtr:
 				if (c->Ico.U64 < 4096) {
-					res = IRExpr_Const(IRConst_U1(1));
+					res = IRExpr_Const_U1(true);
 				} else {
 					/* We assume here that
 					   anything which has a fixed
@@ -2408,7 +2373,7 @@ top:
 					   constant.) */
 					bool t;
 					if (opt.addressAccessible(c->Ico.U64, &t))
-						res = IRExpr_Const(IRConst_U1(!t));
+						res = IRExpr_Const_U1(!t);
 				}
 				break;
 			default:
@@ -2490,8 +2455,8 @@ top:
 		if (((e->op >= Iop_Shl8 && e->op <= Iop_Shl64) ||
 		     (e->op >= Iop_Shr8 && e->op <= Iop_Shr64) ||
 		     (e->op >= Iop_Sar8 && e->op <= Iop_Sar64)) &&
-		    ((r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U8 == 0) ||
-		     (l->tag == Iex_Const && ((IRExprConst *)l)->con->Ico.U64 == 0))) {
+		    ((r->tag == Iex_Const && ((IRExprConst *)r)->Ico.U8 == 0) ||
+		     (l->tag == Iex_Const && ((IRExprConst *)l)->Ico.U64 == 0))) {
 			res = l;
 		}
 
@@ -2504,7 +2469,7 @@ top:
 		      e->op == Iop_CmpEQV128 ||
 		      (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64)) &&
 		     physicallyEqual(l, r) ) {
-			res = IRExpr_Const(IRConst_U1(1));
+			res = IRExpr_Const_U1(true);
 			break;
 		}
 
@@ -2521,7 +2486,7 @@ top:
 		if ( e->op >= Iop_CmpLT8S &&
 		     e->op <= Iop_CmpLT64S &&
 		     physicallyEqual(e->arg1,e->arg2) ) {
-			res = IRExpr_Const(IRConst_U1(0));
+			res = IRExpr_Const_U1(false);
 			break;
 		}
 
@@ -2533,7 +2498,7 @@ top:
 		     (e->arg2->tag == Iex_Unop &&
 		      ((IRExprUnop *)e->arg2)->op == Iop_Not1 &&
 		      ((IRExprUnop *)e->arg2)->arg == e->arg1))) {
-			res = IRExpr_Const(IRConst_U1(0));
+			res = IRExpr_Const_U1(false);
 			break;
 		}
 		     
@@ -2548,7 +2513,7 @@ top:
 
 		if ( (e->op == Iop_CmpF32 || e->op == Iop_CmpF64) &&
 		     physicallyEqual(e->arg1, e->arg2) ) {
-			res = IRExpr_Const(IRConst_U32(0x40));
+			res = IRExpr_Const_U32(0x40);
 			break;
 		}
 
@@ -2599,28 +2564,28 @@ top:
 								   IRExpr_Unop(
 									   Iop_Neg8,
 									   cnst));
-						cnst = IRExpr_Const(IRConst_U8(0));
+						cnst = IRExpr_Const_U8(0);
 						break;
 					case Iop_Add16:
 						addArgumentToAssoc(newR,
 								   IRExpr_Unop(
 									   Iop_Neg16,
 									   cnst));
-						cnst = IRExpr_Const(IRConst_U16(0));
+						cnst = IRExpr_Const_U16(0);
 						break;
 					case Iop_Add32:
 						addArgumentToAssoc(newR,
 								   IRExpr_Unop(
 									   Iop_Neg32,
 									   cnst));
-						cnst = IRExpr_Const(IRConst_U32(0));
+						cnst = IRExpr_Const_U32(0);
 						break;
 					case Iop_Add64:
 						addArgumentToAssoc(newR,
 								   IRExpr_Unop(
 									   Iop_Neg64,
 									   cnst));
-						cnst = IRExpr_Const(IRConst_U64(0));
+						cnst = IRExpr_Const_U64(0);
 						break;
 					default:
 						abort();
@@ -2633,7 +2598,7 @@ top:
 
 			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
 			if (l->tag != Iex_Const && e->op == Iop_CmpEQ64) {
-				e->arg1 = IRExpr_Const(IRConst_U64(0));
+				e->arg1 = IRExpr_Const_U64(0);
 				e->arg2 =
 					IRExpr_Binop(
 						Iop_Add64,
@@ -2657,27 +2622,27 @@ top:
 			    e->op == Iop_CmpEQ64) {
 				IRExprConst *lc = (IRExprConst *)l;
 				IRExprUnop *ru = (IRExprUnop *)r;
-				assert(lc->con->tag == Ico_U64);
+				assert(lc->ty == Ity_I64);
 				/* Only consider the cases b =
 				 * 1U and b = 32U */
 				if (ru->op == Iop_1Uto64) {
-					if (lc->con->Ico.U64 & 0xfffffffffffffffeul) {
-						res = IRExpr_Const(IRConst_U1(0));
+					if (lc->Ico.U64 & 0xfffffffffffffffeul) {
+						res = IRExpr_Const_U1(false);
 					} else {
 						progress = true;
 						e->op = Iop_CmpEQ1;
-						e->arg1 = IRExpr_Const(IRConst_U1(lc->con->Ico.U64));
+						e->arg1 = IRExpr_Const_U1(lc->Ico.U64);
 						e->arg2 = ru->arg;
 					}
 					break;
 				}
 				if (ru->op == Iop_32Uto64) {
-					if (lc->con->Ico.U64 & 0xffffffff00000000ul) {
-						res = IRExpr_Const(IRConst_U1(0));
+					if (lc->Ico.U64 & 0xffffffff00000000ul) {
+						res = IRExpr_Const_U1(false);
 					} else {
 						progress = true;
 						e->op = Iop_CmpEQ32;
-						e->arg1 = IRExpr_Const(IRConst_U32(lc->con->Ico.U64));
+						e->arg1 = IRExpr_Const_U32(lc->Ico.U64);
 						e->arg2 = ru->arg;
 					}
 					break;
@@ -2689,7 +2654,7 @@ top:
 				   better to convert that to
 				   -k = foo */
 				if (ru->op == Iop_Neg64) {
-					e->arg1 = IRExpr_Const(IRConst_U64(-lc->con->Ico.U64));
+					e->arg1 = IRExpr_Const_U64(-lc->Ico.U64);
 					e->arg2 = ru->arg;
 					progress = true;
 					break;
@@ -2719,7 +2684,7 @@ top:
 						if (ra1a->reg.isReg() &&
 						    ra1a->reg.asReg() == OFFSET_amd64_RSP &&
 						    ra1a->reg.tid() != ra0->reg.tid()) {
-							res = IRExpr_Const(IRConst_U1(0));
+							res = IRExpr_Const_U1(false);
 							break;
 						}
 					}
@@ -2756,29 +2721,29 @@ top:
 									a);
 					}
 					new_r->optimisationsApplied = 0;
-					IRConst *new_l;
-					IRConst *lc = ((IRExprConst *)l)->con;
+					IRExprConst *new_l;
+					IRExprConst *lc = (IRExprConst *)l;
 					switch (e->op) {
 					case Iop_CmpEQ8:
-						new_l = IRConst_U8(
+						new_l = IRExpr_Const_U8(
 							-lc->Ico.U8);
 						break;
 					case Iop_CmpEQ16:
-						new_l = IRConst_U16(
+						new_l = IRExpr_Const_U16(
 							-lc->Ico.U16);
 						break;
 					case Iop_CmpEQ32:
-						new_l = IRConst_U32(
+						new_l = IRExpr_Const_U32(
 							-lc->Ico.U32);
 						break;
 					case Iop_CmpEQ64:
-						new_l = IRConst_U64(
+						new_l = IRExpr_Const_U64(
 							-lc->Ico.U64);
 						break;
 					default:
 						abort();
 					}
-					l = e->arg1 = IRExpr_Const(new_l);
+					l = e->arg1 = new_l;
 					r = e->arg2 = new_r;
 					progress = true;
 				}
@@ -2787,7 +2752,7 @@ top:
 		/* 0 == x -> !x if we're at the type U1. 1 == x is just x. */
 		if (e->op == Iop_CmpEQ1 &&
 		    l->tag == Iex_Const) {
-			if ( ((IRExprConst *)l)->con->Ico.U1 )
+			if ( ((IRExprConst *)l)->Ico.U1 )
 				res = r;
 			else
 				res = IRExpr_Unop(Iop_Not1, r);
@@ -2804,7 +2769,7 @@ top:
 		    ((IRExprUnop *)r)->op <= Iop_1Uto64) {
 			IRExprConst *lc = (IRExprConst *)l;
 			IRExprUnop *ru = (IRExprUnop *)r;
-			if (lc->con->Ico.U1)
+			if (lc->Ico.U1)
 				res = ru->arg;
 			else
 				res = IRExpr_Unop(Iop_Not1, ru->arg);
@@ -2817,8 +2782,8 @@ top:
 		    ((IRExprUnop *)l)->op == Iop_Neg64 &&
 		    r->tag == Iex_Const) {
 			e->arg1 = ((IRExprUnop *)l)->arg;
-			e->arg2 = IRExpr_Const(
-				IRConst_U64(-((IRExprConst *)r)->con->Ico.U64));
+			e->arg2 = IRExpr_Const_U64(
+				-((IRExprConst *)r)->Ico.U64);
 			progress = true;
 			break;
 		}
@@ -2833,7 +2798,7 @@ top:
 		    !((IRExprGet *)r)->reg.isTemp() &&
 		    ((IRExprGet *)r)->reg.asReg() == OFFSET_amd64_RSP &&
 		    l->tag == Iex_Const) {
-			res = IRExpr_Const(IRConst_U1(0));
+			res = IRExpr_Const_U1(false);
 			break;
 		}
 
@@ -2863,7 +2828,7 @@ top:
 		   false. */
 		if (e->op >= Iop_CmpLT8U && e->op <= Iop_CmpLT64U) {
 			if (e->arg1->tag == Iex_Const &&
-			    isZero( ((IRExprConst *)e->arg1)->con ) ) {
+			    isZero( (IRExprConst *)e->arg1 ) ) {
 				res = IRExpr_Unop(
 					Iop_Not1,
 					IRExpr_Binop(
@@ -2875,8 +2840,8 @@ top:
 				break;
 			}
 			if (e->arg2->tag == Iex_Const &&
-			    isZero( ((IRExprConst *)e->arg2)->con ) ) {
-				res = IRExpr_Const(IRConst_U1(0));
+			    isZero( (IRExprConst *)e->arg2 ) ) {
+				res = IRExpr_Const_U1(false);
 				break;
 			}
 		}
@@ -2931,120 +2896,106 @@ top:
 		    r->tag == Iex_Const) {
 			switch (e->op) {
 			case Iop_CmpEQ32:
-				res = IRExpr_Const(
-					IRConst_U1(
-						((IRExprConst *)l)->con->Ico.U32 ==
-						((IRExprConst *)r)->con->Ico.U32));
+				res = IRExpr_Const_U1(
+					((IRExprConst *)l)->Ico.U32 ==
+					((IRExprConst *)r)->Ico.U32);
 				break;
 			case Iop_CmpLT64S:
-				res = IRExpr_Const(
-					IRConst_U1(
-						(long)((IRExprConst *)l)->con->Ico.U64 <
-						(long)((IRExprConst *)r)->con->Ico.U64));
+				res = IRExpr_Const_U1(
+					(long)((IRExprConst *)l)->Ico.U64 <
+					(long)((IRExprConst *)r)->Ico.U64);
 				break;
 			case Iop_CmpLT64U:
-				res = IRExpr_Const(
-					IRConst_U1(
-						((IRExprConst *)l)->con->Ico.U64 <
-						((IRExprConst *)r)->con->Ico.U64));
+				res = IRExpr_Const_U1(
+					((IRExprConst *)l)->Ico.U64 <
+					((IRExprConst *)r)->Ico.U64);
 				break;
 			case Iop_CmpLE64U:
-				res = IRExpr_Const(
-					IRConst_U1(
-						((IRExprConst *)l)->con->Ico.U64 <=
-						((IRExprConst *)r)->con->Ico.U64));
+				res = IRExpr_Const_U1(
+					((IRExprConst *)l)->Ico.U64 <=
+					((IRExprConst *)r)->Ico.U64);
 				break;
 			case Iop_CmpLT16U:
-				res = IRExpr_Const(
-					IRConst_U1(((IRExprConst *)l)->con->Ico.U16 <
-						   ((IRExprConst *)r)->con->Ico.U16));
+				res = IRExpr_Const_U1(
+					((IRExprConst *)l)->Ico.U16 <
+					((IRExprConst *)r)->Ico.U16);
 				break;
 			case Iop_CmpLT16S:
-				res = IRExpr_Const(
-					IRConst_U1((short)((IRExprConst *)l)->con->Ico.U16 <
-						   (short)((IRExprConst *)r)->con->Ico.U16));
+				res = IRExpr_Const_U1(
+					(short)((IRExprConst *)l)->Ico.U16 <
+					(short)((IRExprConst *)r)->Ico.U16);
 				break;
 			case Iop_CmpLT32U:
-				res = IRExpr_Const(
-					IRConst_U1(((IRExprConst *)l)->con->Ico.U32 <
-						   ((IRExprConst *)r)->con->Ico.U32));
+				res = IRExpr_Const_U1(
+					((IRExprConst *)l)->Ico.U32 <
+					((IRExprConst *)r)->Ico.U32);
 				break;
 			case Iop_CmpLT32S:
-				res = IRExpr_Const(
-					IRConst_U1((int)((IRExprConst *)l)->con->Ico.U32 <
-						   (int)((IRExprConst *)r)->con->Ico.U32));
+				res = IRExpr_Const_U1(
+					(int)((IRExprConst *)l)->Ico.U32 <
+					(int)((IRExprConst *)r)->Ico.U32);
 				break;
 			case Iop_CmpEQ8:
-				res = IRExpr_Const(
-					IRConst_U1(
-						((IRExprConst *)l)->con->Ico.U8 ==
-						((IRExprConst *)r)->con->Ico.U8));
+				res = IRExpr_Const_U1(
+					((IRExprConst *)l)->Ico.U8 ==
+					((IRExprConst *)r)->Ico.U8);
 				break;
 			case Iop_CmpEQ16:
-				res = IRExpr_Const(
-					IRConst_U1(
-						((IRExprConst *)l)->con->Ico.U16 ==
-						((IRExprConst *)r)->con->Ico.U16));
+				res = IRExpr_Const_U1(
+					((IRExprConst *)l)->Ico.U16 ==
+					((IRExprConst *)r)->Ico.U16);
 				break;
 			case Iop_CmpEQ64:
-				res = IRExpr_Const(
-					IRConst_U1(
-						((IRExprConst *)l)->con->Ico.U64 ==
-						((IRExprConst *)r)->con->Ico.U64));
+				res = IRExpr_Const_U1(
+					((IRExprConst *)l)->Ico.U64 ==
+					((IRExprConst *)r)->Ico.U64);
 				break;
 			case Iop_Sar32:
-				res = IRExpr_Const(
-					IRConst_U32(
-						(int)((IRExprConst *)l)->con->Ico.U32 >>
-						((IRExprConst *)r)->con->Ico.U8));
+				res = IRExpr_Const_U32(
+					(int)((IRExprConst *)l)->Ico.U32 >>
+					((IRExprConst *)r)->Ico.U8);
 				break;
 			case Iop_Sar64:
-				res = IRExpr_Const(
-					IRConst_U64(
-						(long)((IRExprConst *)l)->con->Ico.U64 >>
-						((IRExprConst *)r)->con->Ico.U8));
+				res = IRExpr_Const_U64(
+					(long)((IRExprConst *)l)->Ico.U64 >>
+					((IRExprConst *)r)->Ico.U8);
 				break;
 			case Iop_Shr32:
-				res = IRExpr_Const(
-					IRConst_U32(
-						((IRExprConst *)l)->con->Ico.U32 >>
-						((IRExprConst *)r)->con->Ico.U8));
+				res = IRExpr_Const_U32(
+					((IRExprConst *)l)->Ico.U32 >>
+					((IRExprConst *)r)->Ico.U8);
 				break;
 			case Iop_Shr64:
-				res = IRExpr_Const(
-					IRConst_U64(
-						((IRExprConst *)l)->con->Ico.U64 >>
-						((IRExprConst *)r)->con->Ico.U8));
+				res = IRExpr_Const_U64(
+					((IRExprConst *)l)->Ico.U64 >>
+					((IRExprConst *)r)->Ico.U8);
 				break;
 			case Iop_Shl64:
-				res = IRExpr_Const(
-					IRConst_U64(
-						((IRExprConst *)l)->con->Ico.U64 <<
-						((IRExprConst *)r)->con->Ico.U8));
+				res = IRExpr_Const_U64(
+					((IRExprConst *)l)->Ico.U64 <<
+					((IRExprConst *)r)->Ico.U8);
 				break;
 			case Iop_CmpLT8U:
-				res = IRExpr_Const(
-					IRConst_U1(((IRExprConst *)l)->con->Ico.U8 <
-						   ((IRExprConst *)r)->con->Ico.U8));
+				res = IRExpr_Const_U1(
+					((IRExprConst *)l)->Ico.U8 <
+					((IRExprConst *)r)->Ico.U8);
 				break;
 			case Iop_CmpLT8S: {
-				char a = ((IRExprConst *)l)->con->Ico.U8;
-				char b = ((IRExprConst *)r)->con->Ico.U8;
-				res = IRExpr_Const(
-					IRConst_U1(a < b));
+				char a = ((IRExprConst *)l)->Ico.U8;
+				char b = ((IRExprConst *)r)->Ico.U8;
+				res = IRExpr_Const_U1(a < b);
 				break;
 			}
 			case Iop_32HLto64:
-				res = IRExpr_Const(
-					IRConst_U64(
-						((unsigned long)((IRExprConst *)l)->con->Ico.U32 << 32) |
-						((IRExprConst *)r)->con->Ico.U32));
+				res = IRExpr_Const_U64(
+					((unsigned long)((IRExprConst *)l)->Ico.U32 << 32) |
+					((IRExprConst *)r)->Ico.U32);
 				break;
 
 			case Iop_64HLto128:
-				/* We can't constant fold this because
-				   we have no way of representing 128
-				   bit constants. */
+				res = IRExpr_Const_U128(
+					((IRExprConst *)l)->Ico.U64,
+					((IRExprConst *)r)->Ico.U64);
 				break;
 
 			default:
@@ -3066,7 +3017,7 @@ top:
 		e->exprX = rewriteBoolean(e->cond, true, e->exprX, done_something);
 		e->exprX = optimiseIRExpr(e->exprX, opt, done_something);
 		if (e->cond->tag == Iex_Const) {
-			if (((IRExprConst *)e->cond)->con->Ico.U1)
+			if (((IRExprConst *)e->cond)->Ico.U1)
 				res = e->exprX;
 			else
 				res = e->expr0;
@@ -3205,15 +3156,10 @@ expr_eq(IRExpr *a, IRExpr *b)
 		return IRExpr_Binop(Iop_CmpEQ64, a, b);
 	case Ity_I128:
 		return IRExpr_Binop(Iop_CmpEQI128, a, b);
-	case Ity_F32:
-		return IRExpr_Binop(Iop_CmpEQF32, a, b);
-	case Ity_F64:
-		return IRExpr_Binop(Iop_CmpEQF64, a, b);
-	case Ity_V128:
-		return IRExpr_Binop(Iop_CmpEQV128, a, b);
-	default:
-		abort();
+	case Ity_INVALID:
+		break;
 	}
+	abort();
 }
 
 QueryCache<IRExpr, IRExpr, bool> definitelyEqualCache("Definitely equal");
@@ -3233,29 +3179,14 @@ definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 		/* Special fast path for comparing two constants. */
 		IRExprConst *ac = (IRExprConst *)a;
 		IRExprConst *bc = (IRExprConst *)b;
-		assert(ac->con->tag == bc->con->tag);
-		switch (ac->con->tag) {
-#define do_type(n)							\
-			case Ico_ ## n :				\
-				return ac->con->Ico. n == bc->con->Ico. n
-			do_type(U1);
-			do_type(U8);
-			do_type(U16);
-			do_type(U32);
-			do_type(U64);
-			do_type(F64);
-			do_type(F64i);
-			do_type(V128);
-#undef do_type
-		}
-		abort();
+		return physicallyEqual(ac, bc);
 	}
 	int idx = definitelyEqualCache.hash(a, b);
 	bool res;
 	if (definitelyEqualCache.query(a, b, idx, &res))
 		return res;
 	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
-	res = (r->tag == Iex_Const && ((IRExprConst *)r)->con->Ico.U1);
+	res = (r->tag == Iex_Const && ((IRExprConst *)r)->Ico.U1);
 	if (!TIMEOUT)
 		definitelyEqualCache.set(a, b, idx, res);
 	return res;
@@ -3271,37 +3202,142 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 	if (definitelyNotEqualCache.query(a, b, idx, &res))
 		return res;
 	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
-	res = (r->tag == Iex_Const && !((IRExprConst *)r)->con->Ico.U1);
+	res = (r->tag == Iex_Const && !((IRExprConst *)r)->Ico.U1);
 	if (!TIMEOUT)
 		definitelyNotEqualCache.set(a, b, idx, res);
 	return res;
 }
 
+#define mk_exprbdd(name)						\
+	static bool							\
+	name(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt,	\
+	     std::set<std::pair<exprbdd *, exprbdd *> > &memo)		\
+	{								\
+		if (a->isLeaf && b->isLeaf)				\
+			return name(a->leaf(), b->leaf(), opt);		\
+		if (!memo.insert(std::pair<exprbdd *, exprbdd *>(a, b)).second)	\
+			return true;					\
+		if (a->isLeaf)						\
+			return name(a, b->internal().trueBranch,  opt, memo) &&	\
+				name(a, b->internal().falseBranch, opt, memo); \
+		if (b->isLeaf)						\
+			return name(a->internal().trueBranch,  b, opt, memo) &&	\
+				name(a->internal().falseBranch, b, opt, memo); \
+		if (a->internal().rank < b->internal().rank)		\
+			return name(a->internal().trueBranch,  b, opt, memo) &&	\
+				name(a->internal().falseBranch, b, opt, memo); \
+		if (a->internal().rank == b->internal().rank)		\
+			return name(a->internal().trueBranch,  b->internal().trueBranch,  opt, memo) &&	\
+				name(a->internal().falseBranch, b->internal().falseBranch, opt, memo); \
+		return name(a, b->internal().trueBranch,  opt, memo) &&	\
+			name(a, b->internal().falseBranch, opt, memo);	\
+	}								\
+	bool								\
+	name(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt)	\
+	{								\
+		std::set<std::pair<exprbdd *, exprbdd *> > memo;	\
+		return name(a, b, opt, memo);				\
+	}
+mk_exprbdd(definitelyEqual)
+mk_exprbdd(definitelyNotEqual)
+#undef mk_exprbdd
+
 bool
-isBadAddress(IRExpr *e)
+isBadAddress(exprbdd *e)
 {
-	return e->tag == Iex_Const &&
-		(long)((IRExprConst *)e)->con->Ico.U64 < 4096;
+	if (e->isLeaf)
+		return e->leaf()->tag == Iex_Const &&
+			(long)((IRExprConst *)e->leaf())->Ico.U64 < 4096;
+	else
+		return isBadAddress(e->internal().trueBranch) &&
+			isBadAddress(e->internal().falseBranch);
 }
 
-bool
-definitelyUnevaluatable(IRExpr *e)
+template <typename treeT, typename scopeT> static treeT *
+simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
+	    bool *done_something, std::map<treeT *, treeT *> &memo)
 {
-	if (TIMEOUT)
-		return false;
-	class _ : public IRExprTransformer {
-	public:
-		bool res;
+	if (bdd->isLeaf)
+		return bdd;
+	typedef typename std::pair<treeT *, treeT *> treePairT;
+	auto it_did_insert = memo.insert(treePairT(bdd, (treeT *)NULL));
+	if (!it_did_insert.second)
+		return it_did_insert.first->second;
+	treeT *res;
 
-		IRExpr *transformIex(IRExprLoad *e) {
-			if (isBadAddress(e->addr))
-				res = true;
-			return IRExprTransformer::transformIex(e);
+	IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt, done_something);
+	assert(cond->type() == Ity_I1);
+	if (cond->tag == Iex_Const) {
+		if (((IRExprConst *)cond)->Ico.U1)
+			res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
+		else
+			res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+	} else {
+		treeT *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
+		treeT *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+		if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
+			res = bdd;
+		else
+			res = treeT::ifelse(
+				scope,
+				bbdd::var(bscope, cond),
+				t,
+				f);
+	}
+	it_did_insert.first->second = res;
+	return res;
+}
+/* Hideous hack: the normal template is actually *incorrect* at
+   exprbdds, so supply an explicit instantiation which does the right
+   thing.  Ulch. */
+template <> exprbdd *
+simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IRExprOptimisations &opt,
+	    bool *done_something, std::map<exprbdd *, exprbdd *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(bdd, (exprbdd *)NULL));
+	if (!it_did_insert.second)
+		return it_did_insert.first->second;
+	exprbdd *res;
+
+        if (bdd->isLeaf) {
+		IRExpr *r = optimiseIRExprFP(bdd->leaf(), opt, done_something);
+		if (r == bdd->leaf())
+			res = bdd;
+		else
+			res = exprbdd::var(scope, bscope, r);
+	} else {
+		IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt, done_something);
+		assert(cond->type() == Ity_I1);
+		if (cond->tag == Iex_Const) {
+			if (((IRExprConst *)cond)->Ico.U1)
+				res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
+			else
+				res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+		} else {
+			exprbdd *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
+			exprbdd *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+			if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
+				res = bdd;
+			else
+				res = exprbdd::ifelse(
+					scope,
+					bbdd::var(bscope, cond),
+					t,
+					f);
 		}
-		_() : res (false)
-		{}
-	} t;
-	t.doit(e);
-	return t.res;
+	}
+	it_did_insert.first->second = res;
+	return res;
 }
 
+template <typename treeT, typename scopeT> static treeT *
+simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
+	    bool *done_something)
+{
+	std::map<treeT *, treeT *> memo;
+	return simplifyBDD(scope, bscope, bdd, opt, done_something, memo);
+}
+
+template bbdd   *simplifyBDD(bbdd::scope *,   bbdd::scope *, bbdd *,   const IRExprOptimisations &, bool *);
+template smrbdd *simplifyBDD(smrbdd::scope *, bbdd::scope *, smrbdd *, const IRExprOptimisations &, bool *);
+template exprbdd *simplifyBDD(exprbdd::scope *, bbdd::scope *, exprbdd *, const IRExprOptimisations &, bool *);

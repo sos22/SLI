@@ -132,8 +132,7 @@ bool getProbeCFGs(CfgLabelAllocator &allocLabel,
 		  Oracle *oracle, const VexRip &vr,
 		  HashedSet<HashedPtr<CFGNode> > &out,
 		  HashedSet<HashedPtr<const CFGNode> > &targetNodes,
-		  int thresh1,
-		  int thresh2);
+		  int thresh);
 
 void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 			       const std::set<DynAnalysisRip> &roots);
@@ -141,11 +140,14 @@ void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 class StateMachine;
 class MaiMap;
 class StateMachineState;
-StateMachine *storeCFGToMachine(Oracle *oracle,
+class SMScopes;
+StateMachine *storeCFGToMachine(SMScopes *,
+				Oracle *oracle,
 				unsigned tid,
 				CFGNode *root,
 				MaiMap &mai);
-StateMachine *probeCFGsToMachine(Oracle *oracle,
+StateMachine *probeCFGsToMachine(SMScopes *,
+				 Oracle *oracle,
 				 unsigned tid,
 				 HashedSet<HashedPtr<CFGNode> > &roots,
 				 HashedSet<HashedPtr<const CFGNode> > &proximalNodes,

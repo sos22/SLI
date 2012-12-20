@@ -48,7 +48,7 @@ predecessor_map::predecessor_map(StateMachine *sm)
 class control_dependence_graph {
 	std::map<StateMachineState *, bbdd *> content;
 public:
-	control_dependence_graph(StateMachine *sm, bbdd_scope *scope,
+	control_dependence_graph(StateMachine *sm, bbdd::scope *scope,
 				 std::map<const StateMachineState *, int> &labels);
 	bbdd *domOf(StateMachineState *s) const {
 		auto i = content.find(s);
@@ -59,46 +59,61 @@ public:
 };
 
 control_dependence_graph::control_dependence_graph(StateMachine *sm,
-						   bbdd_scope *scope,
+						   bbdd::scope *scope,
 						   std::map<const StateMachineState *, int> &labels)
 {
-	content[sm->root] = bbdd::cnst(true);
-	std::vector<StateMachineState *> pending;
-	pending.push_back(sm->root);
+	std::map<StateMachineState *, unsigned> pendingParents;
+	std::vector<StateMachineState *> allStates;
+	enumStates(sm, &allStates);
+	for (auto it = allStates.begin(); it != allStates.end(); it++) {
+		std::vector<StateMachineState *> t;
+		(*it)->targets(t);
+		for (auto it2 = t.begin(); it2 != t.end(); it2++)
+			pendingParents[*it2]++;
+	}
+	pendingParents[sm->root] = 0;
 
+	std::vector<StateMachineState *> pending;
 	struct {
 		std::vector<StateMachineState *> *pending;
-		bbdd_scope *scope;
+		std::map<StateMachineState *, unsigned> *pendingParents;
+		bbdd::scope *scope;
 		void operator()(bbdd *&slot,
 				bbdd *newPath,
 				StateMachineState *owner) {
-			if (slot) {
-				bbdd *n = bbdd::Or(scope, slot, newPath);
-				if (n != slot)
-					pending->push_back(owner);
-				slot = n;
-			} else {
+			if (slot)
+				slot = bbdd::Or(scope, slot, newPath);
+			else
 				slot = newPath;
+			(*pendingParents)[owner]--;
+			if ((*pendingParents)[owner] == 0)
 				pending->push_back(owner);
-			}
 		}
 	} addPath;
-#warning this would work better with a consistent advance structure rather than a fixed point iteration.
 	addPath.pending = &pending;
+	addPath.pendingParents = &pendingParents;
 	addPath.scope = scope;
+
+	int nr_complete = 0;
+	content[sm->root] = scope->cnst(true);
+	pending.push_back(sm->root);
 	while (!pending.empty()) {
 		StateMachineState *s = pending.back();
 		pending.pop_back();
+		assert(pendingParents.count(s));
+		assert(pendingParents[s] == 0);
+
 		bbdd *dom = content[s];
 		assert(dom);
 		if (debug_control_dependence) {
-			printf("Redo control dependence of state l%d; current = \n", labels[s]);
+			printf("Redo control dependence of state l%d (%d/%zd complete); current = \n", labels[s], nr_complete, labels.size());
 			dom->prettyPrint(stdout);
 		}
+		nr_complete++;
 		switch (s->type) {
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-			bbdd *cond = bbdd::var(scope, smb->condition);
+			bbdd *cond = smb->condition;
 			bbdd *trueCond = bbdd::And(scope, dom, cond);
 			bbdd *falseCond = bbdd::And(scope, dom, bbdd::invert(scope, cond));
 			addPath(content[smb->trueTarget],
@@ -108,7 +123,7 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 				falseCond,
 				smb->falseTarget);
 			if (debug_control_dependence) {
-				printf("Convert %s to BBDD ->\n", nameIRExpr(smb->condition));
+				printf("Condition:\n");
 				cond->prettyPrint(stdout);
 				printf("Combine with dom constraint\n");
 				dom->prettyPrint(stdout);
@@ -135,9 +150,7 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 			}
 			break;
 		}
-		case StateMachineState::Crash:
-		case StateMachineState::NoCrash:
-		case StateMachineState::Unreached:
+		case StateMachineState::Terminal:
 			break;
 		}
 	}
@@ -153,12 +166,14 @@ control_dependence_graph::prettyPrint(FILE *f, std::map<const StateMachineState 
 	}
 }
 
-static intbdd *
-build_selection_bdd(StateMachine *sm,
+static exprbdd *
+build_selection_bdd(SMScopes *scopes,
+		    StateMachine *sm,
 		    StateMachineSideEffectPhi *phi,
+		    control_dependence_graph &cdg,
+		    predecessor_map &pm,
 		    std::map<const StateMachineState *, int> &labels,
-		    std::map<unsigned, unsigned> &canonResult,
-		    intbdd_scope *iscope)
+		    std::map<unsigned, exprbdd *> &canonResult)
 {
 	std::set<StateMachineState *> mightReachPhi;
 	{
@@ -203,47 +218,27 @@ build_selection_bdd(StateMachine *sm,
 	std::set<StateMachineSideEffecting *> sideEffecting;
 	enumStates(sm, &sideEffecting);
 
-	bbdd_scope scope;
-	predecessor_map pm(sm);
-	control_dependence_graph cdg(sm, &scope, labels);
-
-	if (debug_build_paths)
-		cdg.prettyPrint(stdout, labels);
-
-	/* Map from states to an intbdd which provides the result if
+	/* Map from states to an exprbdd which provides the result if
 	   we issue the phi immediately after that state. */
-	std::map<StateMachineState *, intbdd *> m;
+	std::map<StateMachineState *, exprbdd *> m;
 
 	/* States whose success entries in @m might need updating */
 	std::queue<StateMachineState *> toUpdate;
 
 	/* Set up initial map */
 	for (unsigned x = 0; x < phi->generations.size(); x++) {
-		const threadAndRegister &tr(phi->generations[x].first);
-		if (tr.isReg() && tr.gen() == (unsigned)-1 ) {
-			/* gen -1; that'll be the result at the root
-			   and any other path which doesn't assign to
-			   one of the input registers. */
-			m[sm->root] = intbdd::cnst(iscope, canonResult[x]);
-			toUpdate.push(sm->root);
-			break;
-		} else {
-			/* Non-gen -1; need to plop this in at all of
-			   the places which define this register. */
-			bool found = false;
-			for (auto it2 = sideEffecting.begin();
-			     it2 != sideEffecting.end();
-			     it2++) {
-				StateMachineSideEffect *sr = (*it2)->sideEffect;
-				if (!sr)
-					continue;
-				threadAndRegister def(threadAndRegister::invalid());
-				if (sr->definesRegister(def) && def == tr) {
-					assert(!m.count(*it2));
-					m[*it2] = intbdd::cnst(iscope, canonResult[x]);
-					toUpdate.push(*it2);
-					found = true;
-				}
+		const threadAndRegister &tr(phi->generations[x].reg);
+		for (auto it2 = sideEffecting.begin();
+		     it2 != sideEffecting.end();
+		     it2++) {
+			StateMachineSideEffect *sr = (*it2)->sideEffect;
+			if (!sr)
+				continue;
+			threadAndRegister def(threadAndRegister::invalid());
+			if (sr->definesRegister(def) && def == tr) {
+				assert(!m.count(*it2));
+				m[*it2] = canonResult[x];
+				toUpdate.push(*it2);
 			}
 		}
 	}
@@ -255,6 +250,8 @@ build_selection_bdd(StateMachine *sm,
 			it->second->prettyPrint(stdout);
 		}
 	}
+
+	int done = 0;
 
 	/* Expand the map to get the final result. */
 	while (!toUpdate.empty()) {
@@ -291,18 +288,29 @@ build_selection_bdd(StateMachine *sm,
 			}
 			if (missing)
 				continue;
-			std::map<bbdd *, intbdd *> enabling;
+			done++;
+			exprbdd::enablingTableT enabling;
 			bbdd *assumption = cdg.domOf(state);
 			bool failed = false;
 			for (auto it = pred.begin(); !failed && it != pred.end(); it++) {
-				bbdd *condition = bbdd::assume(&scope, cdg.domOf(*it), assumption);
-				intbdd *res = intbdd::assume(iscope, m[*it], assumption);
-#warning Should be more cunning if the predecessor state is a bifurcate
-				if (enabling.count(condition) && enabling[condition] != res) {
-					failed = true;
-				} else {
-					enabling[condition] = res;
+				bbdd *ass = assumption;
+				if ( (*it)->type == StateMachineState::Bifurcate &&
+				     ((StateMachineBifurcate *)*it)->trueTarget !=
+				     ((StateMachineBifurcate *)*it)->falseTarget ) {
+					if ( ((StateMachineBifurcate *)*it)->trueTarget == state ) {
+						ass = bbdd::And(&scopes->bools, ass,
+								((StateMachineBifurcate *)*it)->condition);
+					} else {
+						assert(((StateMachineBifurcate *)*it)->falseTarget == state);
+						ass = bbdd::And(&scopes->bools, ass,
+								bbdd::invert(&scopes->bools, ((StateMachineBifurcate *)*it)->condition));
+					}
 				}
+				bbdd *condition = bbdd::assume(&scopes->bools, cdg.domOf(*it), ass);
+				exprbdd *res = exprbdd::assume(&scopes->exprs, m[*it], ass);
+				exprbdd **slot = enabling.getSlot(condition, res);
+				if (*slot != res)
+					failed = true;
 			}
 			if (failed) {
 				if (debug_build_paths)
@@ -311,18 +319,16 @@ build_selection_bdd(StateMachine *sm,
 			}
 			if (debug_build_paths) {
 				printf("Enabling table:\n");
-				for (auto it = enabling.begin();
-				     it != enabling.end();
-				     it++) {
-					if (it != enabling.begin())
+				for (auto it = enabling.begin(); !it.finished(); it.advance()) {
+					if (it.started())
 						printf("------------------\n");
 					printf("Cond:\n");
-					it->first->prettyPrint(stdout);
+					it.key()->prettyPrint(stdout);
 					printf("Result:\n");
-					it->second->prettyPrint(stdout);
+					it.value()->prettyPrint(stdout);
 				}
 			}
-			intbdd *flattened = intbdd::from_enabling(iscope, enabling);
+			exprbdd *flattened = exprbdd::from_enabling(&scopes->exprs, enabling, 0);
 			if (!flattened) {
 				if (debug_build_paths)
 					printf("Failed to flatten enabling table\n");
@@ -349,38 +355,13 @@ build_selection_bdd(StateMachine *sm,
 	return NULL;
 }
 
-static IRExpr *
-build_mux(StateMachineSideEffectPhi *phi,
-	  IRType ty,
-	  bdd<int> *from,
-	  std::map<bdd<int> *, IRExpr *> &memo)
-{
-	if (memo.count(from))
-		return memo[from];
-
-	IRExpr *res;
-	if (from->isLeaf) {
-		int idx = from->content.leaf;
-		if (phi->generations[idx].second)
-			res = phi->generations[idx].second;
-		else
-			res = IRExpr_Get(phi->generations[idx].first, ty);
-	} else {
-		res = IRExpr_Mux0X(
-			from->content.condition,
-			build_mux(phi, ty, from->content.falseBranch, memo),
-			build_mux(phi, ty, from->content.trueBranch, memo));
-	}
-	memo[from] = res;
-	return res;
-}
-
 static StateMachine *
-replaceSideEffects(StateMachine *sm, std::map<StateMachineSideEffect *, StateMachineSideEffect *> &rewrites)
+replaceSideEffects(SMScopes *scopes, StateMachine *sm, std::map<StateMachineSideEffect *, StateMachineSideEffect *> &rewrites)
 {
 	struct : public StateMachineTransformer {
 		std::map<StateMachineSideEffect *, StateMachineSideEffect *> *rewrites;
-		StateMachineSideEffecting *transformOneState(StateMachineSideEffecting *smse,
+		StateMachineSideEffecting *transformOneState(SMScopes *,
+							     StateMachineSideEffecting *smse,
 							     bool *done_something)
 		{
 			if (!smse->sideEffect)
@@ -394,11 +375,11 @@ replaceSideEffects(StateMachine *sm, std::map<StateMachineSideEffect *, StateMac
 		bool rewriteNewStates() const { return true; }
 	} doit;
 	doit.rewrites = &rewrites;
-	return doit.transform(sm);
+	return doit.transform(scopes, sm);
 }
 
 static StateMachine *
-phiElimination(StateMachine *sm, bool *done_something)
+phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
 	std::map<const StateMachineState *, int> labels;
 
@@ -408,6 +389,12 @@ phiElimination(StateMachine *sm, bool *done_something)
 	}
 
 	std::map<StateMachineSideEffect *, StateMachineSideEffect *> replacements;
+
+	predecessor_map pm(sm);
+	control_dependence_graph cdg(sm, &scopes->bools, labels);
+
+	if (debug_toplevel)
+		cdg.prettyPrint(stdout, labels);
 
 	std::set<StateMachineSideEffectPhi *> phiEffects;
 	internIRExprTable intern;
@@ -420,61 +407,37 @@ phiElimination(StateMachine *sm, bool *done_something)
 			phi->prettyPrint(stdout);
 			printf("\n");
 		}
-		IRType ity = Ity_INVALID;
-		bool failed = false;
-		std::map<unsigned, unsigned> resultCanoniser;
+		/* The result canoniser is a mapping from indexes in
+		   the generation array to the exprbdd which we select
+		   if we pick thaht generation.  This allows us to
+		   merge generations which ultimately produce the same
+		   value, which can sometimes result in simpler
+		   intbdds. */
+		std::map<unsigned, exprbdd *> resultCanoniser;
 		for (unsigned x = 0; x < phi->generations.size(); x++) {
-			IRExpr *expr = phi->generations[x].second;
-			if (expr) {
-				if (ity == Ity_INVALID)
-					ity = expr->type();
-				else if (ity != expr->type())
-					failed = true;
-				bool found_one = false;
-				for (unsigned y = 0; !found_one && y < x; y++) {
-					if (phi->generations[y].second == expr) {
-						resultCanoniser[x] = y;
-						found_one = true;
-					}
+			exprbdd *expr = phi->generations[x].val;
+			bool found_one = false;
+			for (unsigned y = 0; !found_one && y < x; y++) {
+				if (phi->generations[y].val == expr) {
+					resultCanoniser[x] = resultCanoniser[y];
+					found_one = true;
 				}
-				if (!found_one)
-					resultCanoniser[x] = x;
-			} else {
-				bool found_one = false;
-				for (unsigned y = 0; !found_one && y < x; y++) {
-					if (phi->generations[y].first == 
-					    phi->generations[x].first) {
-						resultCanoniser[x] = y;
-						found_one = true;
-					}
-				}
-				if (!found_one)
-					resultCanoniser[x] = x;
 			}
+			if (!found_one)
+				resultCanoniser[x] = expr;
 		}
-		if (ity == Ity_INVALID || failed) {
-			if (debug_toplevel)
-				printf("Failed: unknown type\n");
-			continue;
-		}
-		intbdd_scope iscope;
-		intbdd *sel_bdd = build_selection_bdd(sm, phi, labels, resultCanoniser, &iscope);
+		exprbdd *sel_bdd = build_selection_bdd(scopes, sm, phi, cdg, pm, labels, resultCanoniser);
 		if (!sel_bdd) {
 			if (debug_toplevel)
 				printf("Failed to build bdd!\n");
 			continue;
 		}
-		std::map<bdd<int> *, IRExpr *> memo;
-		IRExpr *e = build_mux(phi, ity, sel_bdd, memo);
-		if (e) {
-			if (debug_toplevel)
-				printf("Replace side effect with %s\n", nameIRExpr(e));
-			replacements[phi] = new StateMachineSideEffectCopy(
-				phi->reg, e);
-		} else {
-			if (debug_toplevel)
-				printf("Failed to build mux expression\n");
+		if (debug_toplevel) {
+			printf("Replace side effect with:\n");
+			sel_bdd->prettyPrint(stdout);
 		}
+		replacements[phi] = new StateMachineSideEffectCopy(
+			phi->reg, sel_bdd);
 	}
 
 	if (replacements.empty()) {
@@ -492,14 +455,14 @@ phiElimination(StateMachine *sm, bool *done_something)
 		}
 	}
 	*done_something = true;
-	return replaceSideEffects(sm, replacements);
+	return replaceSideEffects(scopes, sm, replacements);
 }
 
 /* End of namespace */
 };
 
 StateMachine *
-phiElimination(StateMachine *sm, bool *done_something)
+phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
-	return _phi_elimination::phiElimination(sm, done_something);
+	return _phi_elimination::phiElimination(scopes, sm, done_something);
 }

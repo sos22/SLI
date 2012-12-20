@@ -6,6 +6,7 @@
 #include "state_machine.hpp"
 #include "alloc_mai.hpp"
 #include "cfgnode.hpp"
+#include "offline_analysis.hpp"
 
 /* XXX doesn't really belong here */
 struct reloc_t {
@@ -49,17 +50,17 @@ public:
 static inline SMBPtr<SMBExpression>
 smb_const64(uint64_t k)
 {
-	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const(IRConst_U64(k))));
+	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const_U64(k)));
 }
 static inline SMBPtr<SMBExpression>
 smb_const32(uint32_t k)
 {
-	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const(IRConst_U32(k))));
+	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const_U32(k)));
 }
 static inline SMBPtr<SMBExpression>
 smb_const8(uint8_t k)
 {
-	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const(IRConst_U8(k))));
+	return SMBPtr<SMBExpression>(new SMBExpression(IRExpr_Const_U8(k)));
 }
 static inline SMBPtr<SMBExpression>
 smb_reg(const threadAndRegister &tr, IRType ty)
@@ -134,18 +135,12 @@ operator!(const threadAndRegister &tr)
 struct SMBCompilerState {
 	const VexRip &vr;
 	const CFGNode *where;
-	int tid;
-	MaiMap &mai;
+	SMScopes *scopes;
 	SMBCompilerState(const VexRip &_vr,
 			 const CFGNode *_where,
-			 int _tid,
-			 MaiMap &_mai)
-		: vr(_vr), where(_where), tid(_tid), mai(_mai)
+			 SMScopes *_scopes)
+		: vr(_vr), where(_where), scopes(_scopes)
 	{}
-	MemoryAccessIdentifier getMai()
-	{
-		return mai(tid, where);
-	}
 };
 /* ------------------------------ Statements ------------------------------------- */
 /* These correspond to side effects in the state machines we generate */
@@ -155,10 +150,10 @@ public:
 	NAMED_CLASS
 };
 class SMBStatementCopy : public SMBStatement {
-	StateMachineSideEffect *compile(SMBCompilerState &) const {
+	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectCopy(
 			lvalue.content->compile(),
-			rvalue.content->compile());
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, rvalue.content->compile()));
 	}
 public:
 	SMBPtr<SMBRegisterReference> lvalue;
@@ -173,11 +168,14 @@ public:
 };
 class SMBStatementStore : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
-		return new StateMachineSideEffectStore(
-			addr.content->compile(),
-			value.content->compile(),
-			state.getMai(),
-			tag);
+		StateMachineSideEffectStore *res =
+			new StateMachineSideEffectStore(
+				exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
+				exprbdd::var(&state.scopes->exprs, &state.scopes->bools, value.content->compile()),
+				MemoryAccessIdentifier::uninitialised(),
+				tag);
+		mkPendingMai(&res->rip, state.where);
+		return res;
 	}
 public:
 	SMBPtr<SMBMemoryReference> addr;
@@ -196,12 +194,15 @@ public:
 };
 class SMBStatementLoad : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
-		return new StateMachineSideEffectLoad(
-			target.content->compile(),
-			addr.content->compile(),
-			state.getMai(),
-			type,
-			tag);
+		StateMachineSideEffectLoad *l =
+			new StateMachineSideEffectLoad(
+				target.content->compile(),
+				exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
+				MemoryAccessIdentifier::uninitialised(),
+				type,
+				tag);
+		mkPendingMai(&l->rip, state.where);
+		return l;
 	}
 public:
 	SMBPtr<SMBRegisterReference> target;
@@ -222,9 +223,9 @@ public:
 	}
 };
 class SMBStatementAssertFalse : public SMBStatement {
-	StateMachineSideEffect *compile(SMBCompilerState &) const {
+	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectAssertFalse(
-			expr.content->compile(),
+			bbdd::var(&state.scopes->bools, expr.content->compile()),
 			realAssertion);
 	}
 public:
@@ -364,10 +365,11 @@ class SMBStateIf : public SMBState {
 				    std::vector<reloc2> &relocs2,
 				    SMBCompilerState &state) const {
 		StateMachineBifurcate *smb =
-			new StateMachineBifurcate(state.vr,
-						  cond.content->compile(),
-						  NULL,
-						  NULL);
+			new StateMachineBifurcate(
+				state.vr,
+				bbdd::var(&state.scopes->bools, cond.content->compile()),
+				NULL,
+				NULL);
 		relocs2.push_back(reloc2(trueTarg.content, &smb->trueTarget));
 		relocs2.push_back(reloc2(falseTarg.content, &smb->falseTarget));
 		return smb;

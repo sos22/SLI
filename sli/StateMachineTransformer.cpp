@@ -3,10 +3,10 @@
 #include "state_machine.hpp"
 
 StateMachineSideEffectLoad *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, bool *c)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectLoad *l, bool *c)
 {
 	bool b = false;
-	IRExpr *a = doit(l->addr, &b);
+	exprbdd *a = transform_exprbdd(&scopes->bools, &scopes->exprs, l->addr, &b);
 	if (b) {
 		*c = true;
 		return new StateMachineSideEffectLoad(l, a);
@@ -16,10 +16,11 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectLoad *l, b
 }
 
 StateMachineSideEffectStore *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStore *s, bool *c)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectStore *s, bool *c)
 {
 	bool b = false;
-	IRExpr *a = doit(s->addr, &b), *d = doit(s->data, &b);
+	exprbdd *a = transform_exprbdd(&scopes->bools, &scopes->exprs, s->addr, &b);
+	exprbdd *d = transform_exprbdd(&scopes->bools, &scopes->exprs, s->data, &b);
 	if (b) {
 		*c = true;
 		return new StateMachineSideEffectStore(s, a, d);
@@ -29,10 +30,10 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStore *s, 
 }
 
 StateMachineSideEffectAssertFalse *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFalse *a, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectAssertFalse *a, bool *d)
 {
 	bool b = false;
-	IRExpr *v = doit(a->value, &b);
+	bbdd *v = transform_bbdd(&scopes->bools, a->value, &b);
 	if (b) {
 		*d = true;
 		return new StateMachineSideEffectAssertFalse(v, a->reflectsActualProgram);
@@ -42,10 +43,10 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectAssertFals
 }
 
 StateMachineSideEffectStartFunction *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStartFunction *a, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectStartFunction *a, bool *d)
 {
 	bool b = false;
-	IRExpr *v = doit(a->rsp, &b);
+	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, a->rsp, &b);
 	if (b) {
 		*d = true;
 		return new StateMachineSideEffectStartFunction(v, a->frame);
@@ -55,10 +56,10 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectStartFunct
 }
 
 StateMachineSideEffectEndFunction *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectEndFunction *a, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectEndFunction *a, bool *d)
 {
 	bool b = false;
-	IRExpr *v = doit(a->rsp, &b);
+	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, a->rsp, &b);
 	if (b) {
 		*d = true;
 		return new StateMachineSideEffectEndFunction(v, a->frame);
@@ -68,10 +69,10 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectEndFunctio
 }
 
 StateMachineSideEffectCopy *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectCopy *c, bool *d)
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectCopy *c, bool *d)
 {
 	bool b = false;
-	IRExpr *v = doit(c->value, &b);
+	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, c->value, &b);
 	if (b) {
 		*d = true;
 		return new StateMachineSideEffectCopy(c->target, v);
@@ -81,12 +82,12 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectCopy *c, b
 }
 
 StateMachineSideEffect *
-StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *done_something)
+StateMachineTransformer::transformSideEffect(SMScopes *scopes, StateMachineSideEffect *se, bool *done_something)
 {
 	switch (se->type) {
 #define do_type(t)							\
 		case StateMachineSideEffect:: t:			\
-			return transformOneSideEffect(			\
+			return transformOneSideEffect(scopes,		\
 				(StateMachineSideEffect ## t *)se,	\
 				done_something);
 		all_side_effect_types(do_type);
@@ -96,12 +97,12 @@ StateMachineTransformer::transformSideEffect(StateMachineSideEffect *se, bool *d
 }
 
 StateMachineState *
-StateMachineTransformer::transformState(StateMachineState *s, bool *done_something)
+StateMachineTransformer::transformState(SMScopes *scopes, StateMachineState *s, bool *done_something)
 {
 	switch (s->type) {
 #define do_type(name)							\
 		case StateMachineState:: name :				\
-			return transformOneState((StateMachine ## name *)s, done_something);
+			return transformOneState(scopes, (StateMachine ## name *)s, done_something);
 		all_state_types(do_type);
 #undef do_type
 	}
@@ -143,9 +144,6 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 				/* Need to rewrite this one as well. */
 				progress = true;
 
-				/* Because terminals don't have targets. */
-				assert(!StateMachineState::stateTypeIsTerminal(s->type));
-
 				switch (s->type) {
 				case StateMachineState::SideEffecting: {
 					StateMachineSideEffecting *smp = (StateMachineSideEffecting *)s;
@@ -158,9 +156,7 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 					break;
 				}
 
-				case StateMachineState::Unreached:
-				case StateMachineState::Crash:
-				case StateMachineState::NoCrash:
+				case StateMachineState::Terminal:
 					abort();
 				}
 			}
@@ -193,7 +189,7 @@ StateMachineTransformer::rewriteMachine(const StateMachine *sm,
 }
 
 StateMachine *
-StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
+StateMachineTransformer::transform(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
 	aborted = false;
 	currentState = NULL;
@@ -212,7 +208,7 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 		StateMachineState *s = *it;
 		assert(currentState == NULL);
 		currentState = s;
-		StateMachineState *res = transformState(s, done_something);
+		StateMachineState *res = transformState(scopes, s, done_something);
 		assert(currentState == s);
 		currentState = NULL;
 
@@ -245,17 +241,18 @@ StateMachineTransformer::transform(StateMachine *sm, bool *done_something)
 }
 
 StateMachineSideEffectPhi *
-StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectPhi *phi,
+StateMachineTransformer::transformOneSideEffect(SMScopes *scopes,
+						StateMachineSideEffectPhi *phi,
 						bool *done_something)
 {
 	bool t = false;
 	unsigned x = 0;
-	IRExpr *newE;
+	exprbdd *newE;
 
-	newE = (IRExpr *)0xf001deadul; /* Shut the compiler up */
+	newE = (exprbdd *)0xf001deadul; /* Shut the compiler up */
 	for (x = 0; x < phi->generations.size(); x++) {
-		if (phi->generations[x].second)
-			newE = transformIRExpr(phi->generations[x].second, &t);
+		if (phi->generations[x].val)
+			newE = transform_exprbdd(&scopes->bools, &scopes->exprs, phi->generations[x].val, &t);
 		if (t)
 			break;
 	}
@@ -263,13 +260,13 @@ StateMachineTransformer::transformOneSideEffect(StateMachineSideEffectPhi *phi,
 		return NULL;
 	*done_something = true;
 	StateMachineSideEffectPhi *newPhi = new StateMachineSideEffectPhi(*phi);
-	newPhi->generations[x].second = newE;
+	newPhi->generations[x].val = newE;
 
 	x++;
 	while (x < newPhi->generations.size()) {
-		if (newPhi->generations[x].second)
-			newPhi->generations[x].second =
-				transformIRExpr(newPhi->generations[x].second, &t);
+		if (newPhi->generations[x].val)
+			newPhi->generations[x].val =
+				transform_exprbdd(&scopes->bools, &scopes->exprs, newPhi->generations[x].val, &t);
 		x++;
 	}
 	return newPhi;

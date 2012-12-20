@@ -272,7 +272,7 @@ heuristicSimplify(IRExpr *e)
 	/* First rule: 0 == a - b -> a == b */
 	IRExprBinop *ieb = (IRExprBinop *)e;
 	if (ieb->arg1->tag == Iex_Const &&
-	    ((IRExprConst *)ieb->arg1)->con->Ico.U64 == 0 &&
+	    ((IRExprConst *)ieb->arg1)->Ico.U64 == 0 &&
 	    ieb->arg2->tag == Iex_Associative &&
 	    ((IRExprAssociative *)ieb->arg2)->op == Iop_Add64 &&
 	    ((IRExprAssociative *)ieb->arg2)->nr_arguments == 2 &&
@@ -300,9 +300,9 @@ heuristicSimplify(IRExpr *e)
 					 * overflow. */
 				if (r->arg2->tag == Iex_Const &&
 				    l->arg2->tag == Iex_Const &&
-				    ((IRExprConst *)r->arg2)->con->Ico.U8 ==
-				         ((IRExprConst *)l->arg2)->con->Ico.U8 &&
-				    ((IRExprConst *)l->arg2)->con->Ico.U8 < 8) {
+				    ((IRExprConst *)r->arg2)->Ico.U8 ==
+				         ((IRExprConst *)l->arg2)->Ico.U8 &&
+				    ((IRExprConst *)l->arg2)->Ico.U8 < 8) {
 					ieb->arg1 = l->arg1;
 					ieb->arg2 = r->arg1;
 					done_something = true;
@@ -517,10 +517,10 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 		if (errors_allowed && (!expr0 || !exprX) && expr0->type() == Ity_I1) {
 			IRExpr *def;
 			if (errors_allowed & ERROR_POSITIVE) {
-				def = IRExpr_Const(IRConst_U1(1));
+				def = IRExpr_Const_U1(true);
 				*errors_produced |= ERROR_POSITIVE;
 			} else {
-				def = IRExpr_Const(IRConst_U1(0));
+				def = IRExpr_Const_U1(false);
 				*errors_produced |= ERROR_NEGATIVE;
 			}
 			if (!expr0)
@@ -699,7 +699,7 @@ public:
 static sliced_expr
 slice_by_exprs(IRExpr *expr, const std::set<IRExpr *> &sliceby)
 {
-	if (sliceby.empty()) {
+	if (sliceby.empty() || expr->tag == Iex_Const) {
 		expr_slice theSlice;
 		theSlice.leftOver =
 			simplify_via_anf(
@@ -773,7 +773,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		) {
 		it->leftOver = heuristicSimplify(it->leftOver);
 		if ( (it->leftOver->tag != Iex_Const ||
-		      ((IRExprConst *)it->leftOver)->con->Ico.U1) &&
+		      ((IRExprConst *)it->leftOver)->Ico.U1) &&
 		     !consistentOrdering(*it) ) {
 			it++;
 		} else {
@@ -1301,7 +1301,8 @@ main(int argc, char *argv[])
 	ThreadAbstracter abs;
 	crashEnforcementData accumulator;
 	for (int i = 6; i < argc; i++) {
-		CrashSummary *summary = readBugReport(argv[i], NULL);
+		SMScopes scopes;
+		CrashSummary *summary = readBugReport(&scopes, argv[i], NULL);
 		crashEnforcementData acc = enforceCrashForMachine(SummaryId(i - 5), summary, oracle, abs, next_hb_id);
 		optimiseHBEdges(acc);
 		optimiseStashPoints(acc, oracle);

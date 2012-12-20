@@ -17,6 +17,7 @@
 #include "oracle.hpp"
 #include "crashcfg.hpp"
 #include "offline_analysis.hpp"
+#include "visitor.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -1363,18 +1364,20 @@ buildPatch(patch &p,
 }
 
 static void
-findRelevantMais(IRExpr *iex, std::set<MemoryAccessIdentifier> &out)
+findRelevantMais(const IRExpr *iex, std::set<MemoryAccessIdentifier> &out)
 {
-	struct : public IRExprTransformer {
-		std::set<MemoryAccessIdentifier> *out;
-		IRExpr *transformIex(IRExprHappensBefore *hb) {
+	struct {
+		static visit_result HappensBefore(
+			std::set<MemoryAccessIdentifier> *out,
+			const IRExprHappensBefore *hb) {
 			out->insert(hb->before);
 			out->insert(hb->after);
-			return hb;
+			return visit_continue;
 		}
-	} doit;
-	doit.out = &out;
-	doit.doit(iex);
+	} foo;
+	static irexpr_visitor<std::set<MemoryAccessIdentifier> > visitor;
+	visitor.HappensBefore = foo.HappensBefore;
+	visit_irexpr(&out, &visitor, iex);
 }
 
 static void
@@ -1648,8 +1651,10 @@ main(int argc, char *const argv[])
 	oracle->loadCallGraph(oracle, callgraph, staticdb, ALLOW_GC);
 
 	std::map<SummaryId, CrashSummary *> summaries;
-	for (int i = 0; i < nr_summaries; i++)
-		summaries[SummaryId(i + 1)] = readBugReport(summary_fnames[i], NULL);
+	for (int i = 0; i < nr_summaries; i++) {
+		SMScopes scopes;
+		summaries[SummaryId(i + 1)] = readBugReport(&scopes, summary_fnames[i], NULL);
+	}
 
 	char *patch = buildPatchForCrashSummary(oracle, summaries);
 	printf("Patch is:\n%s\n", patch);

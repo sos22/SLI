@@ -1,4 +1,4 @@
-targets="enforce_crash ced_to_patch ced_to_cep cep_interpreter.o"
+targets="enforce_crash ced_to_cep cep_interpreter.o"
 # foo={a,b,c} turns out not to do brace expansion; not sure why.  $()
 # expansion does, though, so use that instead.  Meh.
 sources=$(echo {simplify_ordering,enumNeededExpressions,expressiondominatormap,instructiondominatormap,intern,thread_cfg_decode,expressionstashmapt}.cpp)

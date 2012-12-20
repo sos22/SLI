@@ -6,18 +6,19 @@
 #include "intern.hpp"
 
 static CrashSummary *
-addAssumption(IRExpr *assumption,
+addAssumption(bbdd *assumption,
 	      bool isTrue,
 	      CrashSummary *what)
 {
+	IRExpr *ass = bbdd::to_irexpr(assumption);
 	return new CrashSummary(
+		what->scopes,
 		what->loadMachine,
 		what->storeMachine,
 		IRExpr_Binop(
 			Iop_And1,
 			what->verificationCondition,
-			isTrue ? assumption : IRExpr_Unop(Iop_Not1, assumption)),
-		what->macroSections,
+			isTrue ? ass : IRExpr_Unop(Iop_Not1, ass)),
 		what->aliasing,
 		what->mai);
 }
@@ -82,7 +83,8 @@ main(int argc, char *argv[])
 			continue;
 		char *path = my_asprintf("%s/%s", argv[1], de->d_name);
 		char *metadata;
-		CrashSummary *summary = readBugReport(path, &metadata);
+		SMScopes scopes;
+		CrashSummary *summary = readBugReport(&scopes, path, &metadata);
 		free(path);
 
 		case_split_summary(summary, metadata, argv[2], &idx);

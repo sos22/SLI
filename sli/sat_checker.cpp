@@ -55,7 +55,7 @@ isTrue(IRExpr *e)
 	if (e->tag != Iex_Const)
 		return Maybe<bool>::nothing();
 	IRExprConst *iec = (IRExprConst *)e;
-	if (iec->con->Ico.U1)
+	if (iec->Ico.U1)
 		return Maybe<bool>::just(true);
 	else
 		return Maybe<bool>::just(false);
@@ -554,15 +554,15 @@ pureSimplify(IRExpr *what, internIRExprTable &internTable)
 			    ieb->contents[1]->tag == Iex_Unop &&
 			    ((IRExprUnop *)ieb->contents[1])->op == Iop_Neg64 &&
 			    ((IRExprUnop *)ieb->contents[1])->arg == ieb->contents[0])
-				return IRExpr_Const(IRConst_U64(0));
+				return IRExpr_Const_U64(0);
 			if (ieb->op == Iop_And1) {
 				IRExpr *new_args[ieb->nr_arguments];
 				int new_nr_args = 0;
 				for (int i = 0; i < ieb->nr_arguments; i++) {
 					if (ieb->contents[i]->tag == Iex_Const) {
 						IRExprConst *iec = (IRExprConst *)ieb->contents[i];
-						if (!iec->con->Ico.U1)
-							return IRExpr_Const(IRConst_U1(0));
+						if (!iec->Ico.U1)
+							return IRExpr_Const_U1(false);
 					} else {
 						new_args[new_nr_args++] = ieb->contents[i];
 					}
@@ -581,14 +581,14 @@ pureSimplify(IRExpr *what, internIRExprTable &internTable)
 		IRExpr *transformIex(IRExprUnop *ieu) {
 			if (ieu->op == Iop_Not1 &&
 			    ieu->arg->tag == Iex_Const) {
-				return IRExpr_Const(IRConst_U1(!((IRExprConst *)ieu->arg)->con->Ico.U1));
+				return IRExpr_Const_U1(!((IRExprConst *)ieu->arg)->Ico.U1);
 			}
 			return IRExprTransformer::transformIex(ieu);
 		}
 		IRExpr *transformIex(IRExprBinop *ieb) {
 			if (ieb->op == Iop_CmpEQ64 &&
 			    ieb->arg1 == ieb->arg2)
-				return IRExpr_Const(IRConst_U1(1));
+				return IRExpr_Const_U1(true);
 			return IRExprTransformer::transformIex(ieb);
 		}
 		IRExpr *transformIRExpr(IRExpr *a, bool *done_something)
@@ -670,7 +670,7 @@ anf_context::addAssumption(IRExpr *a)
 		    ieb->op <= Iop_CmpEQ64) {
 			if (ieb->op == Iop_CmpEQ64 &&
 			    ieb->arg1->tag == Iex_Const &&
-			    ((IRExprConst *)ieb->arg1)->con->Ico.U64 == 0 &&
+			    ((IRExprConst *)ieb->arg1)->Ico.U64 == 0 &&
 			    ieb->arg2->tag == Iex_Associative &&
 			    ((IRExprAssociative *)ieb->arg2)->op == Iop_Add64 &&
 			    ((IRExprAssociative *)ieb->arg2)->nr_arguments == 2 &&
@@ -727,7 +727,7 @@ anf_context::simplify(IRExpr *a)
 				for (auto it = eqRules.begin(); it != eqRules.end(); it++) {
 					if ( (it->first == ieb->contents[0] && it->second == ieu->arg) ||
 					     (it->second == ieb->contents[0] && it->first == ieu->arg) )
-						return internIRExpr(IRExpr_Const(IRConst_U64(0)), intern);
+						return internIRExpr(IRExpr_Const_U64(0), intern);
 				}
 			}
 		}
@@ -736,15 +736,15 @@ anf_context::simplify(IRExpr *a)
 	if (a->type() != Ity_I1)
 		return a;
 	if (definitelyTrue.count(a))
-		return internIRExpr(IRExpr_Const(IRConst_U1(1)), intern);
+		return internIRExpr(IRExpr_Const_U1(true), intern);
 	if (definitelyFalse.count(a))
-		return internIRExpr(IRExpr_Const(IRConst_U1(0)), intern);
+		return internIRExpr(IRExpr_Const_U1(false), intern);
 	for (auto it = definitelyTrue.begin(); it != definitelyTrue.end(); it++)
 		if (matches(a, *it))
-			return internIRExpr(IRExpr_Const(IRConst_U1(1)), intern);
+			return internIRExpr(IRExpr_Const_U1(true), intern);
 	for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++)
 		if (matches(a, *it))
-			return internIRExpr(IRExpr_Const(IRConst_U1(0)), intern);
+			return internIRExpr(IRExpr_Const_U1(false), intern);
 
 	if (!badPointers.empty() && loadsBadPointer(a))
 		return UNEVALUATABLE;
@@ -758,7 +758,7 @@ anf_context::simplify(IRExpr *a)
 			return UNEVALUATABLE;
 		if (arg->tag == Iex_Const) {
 			IRExprConst *iec = (IRExprConst *)arg;
-			return internIRExpr(IRExpr_Const(IRConst_U1(!iec->con->Ico.U1)), intern);
+			return internIRExpr(IRExpr_Const_U1(!iec->Ico.U1), intern);
 		}
 		if (arg->tag == Iex_Unop &&
 		    ((IRExprUnop *)arg)->op == Iop_Not1)
@@ -790,7 +790,7 @@ anf_context::simplify(IRExpr *a)
 			if (arg != UNEVALUATABLE) {
 				if (arg->tag == Iex_Const) {
 					IRExprConst *iec = (IRExprConst *)arg;
-					if (!iec->con->Ico.U1)
+					if (!iec->Ico.U1)
 						return arg;
 				} else if (arg->tag == Iex_Associative &&
 					   ((IRExprAssociative *)arg)->op == Iop_And1) {
@@ -808,7 +808,7 @@ anf_context::simplify(IRExpr *a)
 		if (res->nr_arguments == 1)
 			return res->contents[0];
 		if (res->nr_arguments == 0)
-			return internIRExpr(IRExpr_Const(IRConst_U1(1)), intern);
+			return internIRExpr(IRExpr_Const_U1(true), intern);
 		sort_and_arguments(res->contents, res->nr_arguments);
 		a = internIRExpr(res, intern);
 
@@ -819,7 +819,7 @@ anf_context::simplify(IRExpr *a)
 		   definitely false, though. */
 		for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++)
 			if (matches(a, *it))
-				return internIRExpr(IRExpr_Const(IRConst_U1(0)), intern);
+				return internIRExpr(IRExpr_Const_U1(false), intern);
 		return a;
 	} else {
 		return a;
@@ -989,7 +989,7 @@ expressionImpliesRewrite(IRExpr *what, IRExpr **from, IRExpr **to)
 		   sometimes better off rewriting x to k or vice-versa
 		   rather than rewriting k - x to 0. */
 		if ( whatb->arg1->tag == Iex_Const &&
-		     ((IRExprConst *)whatb->arg1)->con->Ico.U64 == 0 &&
+		     ((IRExprConst *)whatb->arg1)->Ico.U64 == 0 &&
 		     whatb->arg2->tag == Iex_Associative &&
 		     ((IRExprAssociative *)whatb->arg2)->op >= Iop_Add8 &&
 		     ((IRExprAssociative *)whatb->arg2)->op <= Iop_Add64 &&
@@ -1057,7 +1057,7 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 				   the transformIRExpr() case should
 				   catch this. */
 				assert(e->cfg2 != ((IRExprControlFlow *)variable)->cfg2);
-				return IRExpr_Const(IRConst_U1(0));
+				return IRExpr_Const_U1(false);
 			}
 			return e;
 		}
@@ -1066,7 +1066,7 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 			    variable->tag == Iex_EntryPoint &&
 			    ((IRExprEntryPoint *)variable)->thread == e->thread) {
 				assert(e->label != ((IRExprEntryPoint *)variable)->label);
-				return IRExpr_Const(IRConst_U1(0));
+				return IRExpr_Const_U1(false);
 			}
 			return e;
 		}
@@ -1088,74 +1088,74 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 					   to @value and we just
 					   encounted b < a.  Set
 					   b < a to ~@value. */
-					return IRExpr_Const(IRConst_U1(!value));
+					return IRExpr_Const_U1(!value);
 				}
 				if (value) {
 					if (a->tag == Iex_Const) {
-						unsigned long k = ((IRExprConst *)a)->con->Ico.U64;
+						unsigned long k = ((IRExprConst *)a)->Ico.U64;
 						/* Our assumption is that k < b */
 						if (e->arg1->tag == Iex_Const &&
 						    e->arg2 == b) {
-							unsigned long k2 = ((IRExprConst *)e->arg1)->con->Ico.U64;
+							unsigned long k2 = ((IRExprConst *)e->arg1)->Ico.U64;
 							/* Trying to eval k2 < b */
 							if (k2 >= k)
-								return IRExpr_Const(IRConst_U1(1));
+								return IRExpr_Const_U1(true);
 						} else if (e->arg2->tag == Iex_Const &&
 							   e->arg1 == b) {
-							unsigned long k2 = ((IRExprConst *)e->arg2)->con->Ico.U64;
+							unsigned long k2 = ((IRExprConst *)e->arg2)->Ico.U64;
 							/* Trying to eval b < k2 */
 							if (k2 <= k + 1)
-								return IRExpr_Const(IRConst_U1(0));
+								return IRExpr_Const_U1(false);
 						}
 					} else if (b->tag == Iex_Const) {
-						unsigned long k = ((IRExprConst *)b)->con->Ico.U64;
+						unsigned long k = ((IRExprConst *)b)->Ico.U64;
 						/* Our assumption is that b < k */
 						if (e->arg1->tag == Iex_Const &&
 						    e->arg2 == b) {
-							unsigned long k2 = ((IRExprConst *)e->arg1)->con->Ico.U64;
+							unsigned long k2 = ((IRExprConst *)e->arg1)->Ico.U64;
 							/* Trying to eval k2 < b */
 							if (k <= k2 + 1)
-								return IRExpr_Const(IRConst_U1(0));
+								return IRExpr_Const_U1(false);
 						} else if (e->arg2->tag == Iex_Const &&
 							   e->arg1 == b) {
-							unsigned long k2 = ((IRExprConst *)e->arg2)->con->Ico.U64;
+							unsigned long k2 = ((IRExprConst *)e->arg2)->Ico.U64;
 							/* Trying to eval b < k2 */
 							if (k >= k2)
-								return IRExpr_Const(IRConst_U1(1));
+								return IRExpr_Const_U1(true);
 						}
 					}
 				} else {
 					if (a->tag == Iex_Const) {
-						unsigned long k = ((IRExprConst *)a)->con->Ico.U64;
+						unsigned long k = ((IRExprConst *)a)->Ico.U64;
 						/* Our assumption is that k >= b */
 						if (e->arg1->tag == Iex_Const &&
 						    e->arg2 == b) {
-							unsigned long k2 = ((IRExprConst *)e->arg1)->con->Ico.U64;
+							unsigned long k2 = ((IRExprConst *)e->arg1)->Ico.U64;
 							/* Trying to eval k2 < b */
 							if (k <= k2)
-								return IRExpr_Const(IRConst_U1(0));
+								return IRExpr_Const_U1(false);
 						} else if (e->arg2->tag == Iex_Const &&
 							   e->arg1 == b) {
-							unsigned long k2 = ((IRExprConst *)e->arg2)->con->Ico.U64;
+							unsigned long k2 = ((IRExprConst *)e->arg2)->Ico.U64;
 							/* Trying to eval b < k2 */
 							if (k > k2)
-								return IRExpr_Const(IRConst_U1(1));
+								return IRExpr_Const_U1(true);
 						}
 					} else if (b->tag == Iex_Const) {
-						unsigned long k = ((IRExprConst *)b)->con->Ico.U64;
+						unsigned long k = ((IRExprConst *)b)->Ico.U64;
 						/* Our assumption is that b >= k */
 						if (e->arg1->tag == Iex_Const &&
 						    e->arg2 == b) {
-							unsigned long k2 = ((IRExprConst *)e->arg1)->con->Ico.U64;
+							unsigned long k2 = ((IRExprConst *)e->arg1)->Ico.U64;
 							/* Trying to eval k2 < b */
 							if (k + 1 < k2)
-								return IRExpr_Const(IRConst_U1(1));
+								return IRExpr_Const_U1(true);
 						} else if (e->arg2->tag == Iex_Const &&
 							   e->arg1 == b) {
-							unsigned long k2 = ((IRExprConst *)e->arg2)->con->Ico.U64;
+							unsigned long k2 = ((IRExprConst *)e->arg2)->Ico.U64;
 							/* Trying to eval b < k2 */
 							if (k2 <= k)
-								return IRExpr_Const(IRConst_U1(0));
+								return IRExpr_Const_U1(false);
 						}
 					}
 				}
@@ -1165,9 +1165,63 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
 			if (e == variable) {
 				*done_something = true;
-				return IRExpr_Const(IRConst_U1(value));
+				return IRExpr_Const_U1(value);
 			}
 			return IRExprTransformer::transformIRExpr(e, done_something);
+		}
+		IRExpr *transformIex(IRExprUnop *e) {
+			IRExpr *e2 = IRExprTransformer::transformIex(e);
+			if (!e2 || e2 == e || e2->tag != Iex_Unop)
+				return e2;
+			e = (IRExprUnop *)e2;
+			if (e->op != Iop_Not1 || e->arg->tag != Iex_Const)
+				return e;
+			return IRExpr_Const_U1(!((IRExprConst *)e->arg)->Ico.U1);
+		}
+		IRExpr *transformIex(IRExprAssociative *e) {
+			if (e->op != Iop_Or1 && e->op != Iop_And1)
+				return IRExprTransformer::transformIex(e);
+			/* identity is the identity element for this
+			   operation (true for and, false for or), and
+			   suppress is the ``suppressor'' element such
+			   that x <op> suppressor = suppressor, for
+			   any x (true for or, false for and). */
+			bool identity = e->op == Iop_And1;
+			bool suppress = e->op == Iop_Or1;
+			bool t = false;
+			int in_idx = 0;
+			int out_idx = 0;
+			IRExpr *newE;
+			while (in_idx < e->nr_arguments) {
+				newE = transformIRExpr(e->contents[in_idx++], &t);
+				if (t)
+					break;
+				out_idx++;
+			}
+			if (!t)
+				return NULL;
+			if (newE->tag == Iex_Const &&
+			    ((IRExprConst *)newE)->Ico.U1 == suppress)
+				return newE;
+
+			IRExprAssociative *r = (IRExprAssociative *)IRExpr_Associative(e);
+			if (newE->tag == Iex_Const) {
+				assert(((IRExprConst *)newE)->Ico.U1 == identity);
+			} else {
+				r->contents[out_idx++] = newE;
+			}
+			while (in_idx < e->nr_arguments) {
+				newE = transformIRExpr(e->contents[in_idx++], &t);
+				if (newE->tag == Iex_Const) {
+					if ( ((IRExprConst *)newE)->Ico.U1 == suppress )
+						return newE;
+					assert(((IRExprConst *)newE)->Ico.U1 == identity);
+				} else {
+					r->contents[out_idx++] = newE;
+				}
+			}
+			r->nr_arguments = out_idx;
+			return r;
 		}
 	} boolRewrite;
 	boolRewrite.variable = variable;
@@ -1273,7 +1327,7 @@ sat_enumerator::skipToSatisfying()
 		}
 		if (frame.remainder->tag == Iex_Const) {
 			IRExprConst *c = (IRExprConst *)frame.remainder;
-			if (c->con->Ico.U1) {
+			if (c->Ico.U1) {
 				/* We're done */
 				if (debug_satisfier)
 					printf("Satisfier complete\n");
@@ -1450,6 +1504,8 @@ sat_enumerator::skipToSatisfying()
 				abort();
 			}
 		}
+
+		assert(chosenVar != NULL);
 
 		/* Do a case split on this variable. */
 

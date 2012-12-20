@@ -54,14 +54,6 @@ static IRRegArray *rawDupe(duplication_context &, const IRRegArray *inp)
 	return res;
 }
 
-static IRConst *rawDupe(duplication_context &, const IRConst *inp)
-{
-	IRConst *res = new IRConst();
-	res->tag = inp->tag;
-	res->Ico = inp->Ico;
-	return res;
-}
-
 static IRCallee *rawDupe(duplication_context &, const IRCallee *inp)
 {
 	IRCallee *res = new IRCallee();
@@ -132,7 +124,8 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	case Iex_Const: {
 		const IRExprConst *i = (const IRExprConst *)inp;
 		IRExprConst *res = new IRExprConst();
-		ctxt(&res->con, i->con, rawDupe);
+		res->ty = i->ty;
+		res->Ico = i->Ico;
 		return res;
 	}
 	case Iex_CCall: {
@@ -193,106 +186,84 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 }
 
 static StateMachineSideEffectLoad *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectLoad *l)
+rawDupeS(const StateMachineSideEffectLoad *l)
 {
-	StateMachineSideEffectLoad *res = new StateMachineSideEffectLoad(l, NULL);
-	ctxt(&res->addr, l->addr, rawDupe);
-	return res;
+	return new StateMachineSideEffectLoad(l, l->addr);
 }
 
 static StateMachineSideEffectStore *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectStore *l)
+rawDupeS(const StateMachineSideEffectStore *l)
 {
-	StateMachineSideEffectStore *res = new StateMachineSideEffectStore(l,
-									   NULL,
-									   NULL);
-	ctxt(&res->addr, l->addr, rawDupe);
-	ctxt(&res->data, l->data, rawDupe);
-	return res;
+	return new StateMachineSideEffectStore(l, l->addr, l->data);
 }
 
 static StateMachineSideEffectUnreached *
-rawDupeS(duplication_context &, const StateMachineSideEffectUnreached *)
+rawDupeS(const StateMachineSideEffectUnreached *)
 {
 	return StateMachineSideEffectUnreached::get();
 }
 
 static StateMachineSideEffectStartAtomic *
-rawDupeS(duplication_context &, const StateMachineSideEffectStartAtomic *)
+rawDupeS(const StateMachineSideEffectStartAtomic *)
 {
 	return StateMachineSideEffectStartAtomic::get();
 }
 
 static StateMachineSideEffectEndAtomic *
-rawDupeS(duplication_context &, const StateMachineSideEffectEndAtomic *)
+rawDupeS(const StateMachineSideEffectEndAtomic *)
 {
 	return StateMachineSideEffectEndAtomic::get();
 }
 
 static StateMachineSideEffectAssertFalse *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectAssertFalse *l)
+rawDupeS(const StateMachineSideEffectAssertFalse *l)
 {
-	StateMachineSideEffectAssertFalse *res = new StateMachineSideEffectAssertFalse(NULL, l->reflectsActualProgram);
-	ctxt(&res->value, l->value, rawDupe);
-	return res;
+	return new StateMachineSideEffectAssertFalse(l->value, l->reflectsActualProgram);
 }
 
 static StateMachineSideEffectCopy *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectCopy *l)
+rawDupeS(const StateMachineSideEffectCopy *l)
 {
-	StateMachineSideEffectCopy *res = new StateMachineSideEffectCopy(l->target,
-									 NULL);
-	ctxt(&res->value, l->value, rawDupe);
-	return res;
+	return new StateMachineSideEffectCopy(l->target, l->value);
 }
 
 static StateMachineSideEffectPhi *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectPhi *l)
+rawDupeS(const StateMachineSideEffectPhi *l)
 {
-	StateMachineSideEffectPhi *res = new StateMachineSideEffectPhi(l->reg, l->generations);
-	for (unsigned x = 0; x < l->generations.size(); x++) {
-		if (l->generations[x].second)
-			ctxt(&res->generations[x].second, l->generations[x].second, rawDupe);
-	}
-	return res;
+	return new StateMachineSideEffectPhi(l->reg, l->ty, l->generations);
 }
 
 static StateMachineSideEffectStartFunction *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectStartFunction *l)
+rawDupeS(const StateMachineSideEffectStartFunction *l)
 {
-	auto *res = new StateMachineSideEffectStartFunction(NULL, l->frame);
-	ctxt(&res->rsp, l->rsp, rawDupe);
-	return res;
+	return new StateMachineSideEffectStartFunction(l->rsp, l->frame);
 }
 
 static StateMachineSideEffectEndFunction *
-rawDupeS(duplication_context &ctxt, const StateMachineSideEffectEndFunction *l)
+rawDupeS(const StateMachineSideEffectEndFunction *l)
 {
-	auto *res = new StateMachineSideEffectEndFunction(NULL, l->frame);
-	ctxt(&res->rsp, l->rsp, rawDupe);
-	return res;
+	return new StateMachineSideEffectEndFunction(l->rsp, l->frame);
 }
 
-static StateMachineSideEffectPointerAliasing *
-rawDupeS(duplication_context &, const StateMachineSideEffectPointerAliasing *l)
+static StateMachineSideEffectImportRegister *
+rawDupeS(const StateMachineSideEffectImportRegister *l)
 {
-	return new StateMachineSideEffectPointerAliasing(l->reg, l->set);
+	return new StateMachineSideEffectImportRegister(*l);
 }
 
 static StateMachineSideEffectStackLayout *
-rawDupeS(duplication_context &, const StateMachineSideEffectStackLayout *l)
+rawDupeS(const StateMachineSideEffectStackLayout *l)
 {
 	return new StateMachineSideEffectStackLayout(l->functions);
 }
 
 static StateMachineSideEffect *
-rawDupe(duplication_context &ctxt, const StateMachineSideEffect *smse)
+rawDupe(const StateMachineSideEffect *smse)
 {
 	switch (smse->type) {
 #define do_case(n)							\
 		case StateMachineSideEffect::n:				\
-			return rawDupeS(ctxt,				\
-					(const StateMachineSideEffect ## n *)smse);
+			return rawDupeS((const StateMachineSideEffect ## n *)smse);
 		all_side_effect_types(do_case);
 #undef do_case
 	}
@@ -307,8 +278,7 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 	switch (inp->type) {
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)inp;
-		StateMachineBifurcate *res = new StateMachineBifurcate(smb->dbg_origin, NULL, NULL, NULL);
-		ctxt(&res->condition, smb->condition, rawDupe);
+		StateMachineBifurcate *res = new StateMachineBifurcate(smb->dbg_origin, smb->condition, NULL, NULL);
 		ctxt(&res->trueTarget, smb->trueTarget, rawDupe);
 		ctxt(&res->falseTarget, smb->falseTarget, rawDupe);
 		return res;
@@ -316,17 +286,15 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)inp;
 		StateMachineSideEffecting *res = new StateMachineSideEffecting(sme->dbg_origin,
-									       sme->sideEffect ? rawDupe(ctxt, sme->sideEffect) : NULL,
+									       sme->sideEffect ? rawDupe(sme->sideEffect) : NULL,
 									       NULL);
 		ctxt(&res->target, sme->target, rawDupe);
 		return res;
 	}
-	case StateMachineState::Unreached:
-		return StateMachineUnreached::get();
-	case StateMachineState::Crash:
-		return StateMachineCrash::get();
-	case StateMachineState::NoCrash:
-		return StateMachineNoCrash::get();
+	case StateMachineState::Terminal: {
+		StateMachineTerminal *smt = (StateMachineTerminal *)inp;
+		return new StateMachineTerminal(smt->dbg_origin, smt->res);
+	}
 	}
 	abort();
 }

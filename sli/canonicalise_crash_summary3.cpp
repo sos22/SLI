@@ -11,7 +11,7 @@
 #include "intern.hpp"
 #include "alloc_mai.hpp"
 #include "dummy_oracle.hpp"
-#include "MachineAliasingTable.hpp"
+#include "visitor.hpp"
 
 #ifndef NDEBUG
 static bool debug_simplify_assuming_survive = false;
@@ -74,19 +74,20 @@ static TimeoutTimer timeoutTimer;
 static void
 enumRegisters(const IRExpr *input, reg_set_t *out)
 {
-	struct : public IRExprTransformer {
-		reg_set_t *out;
-		IRExpr *transformIex(IRExprGet *ieg) {
+	struct {
+		static visit_result f(reg_set_t *out, const IRExprGet *ieg) {
 			out->insert(reg_or_free_var(ieg->reg));
-			return ieg;
+			return visit_continue;
 		}
-		IRExpr *transformIex(IRExprFreeVariable *ieg) {
+		static visit_result g(reg_set_t *out, const IRExprFreeVariable *ieg) {
 			out->insert(reg_or_free_var(ieg->id));
-			return ieg;
+			return visit_continue;
 		}
-	} doit;
-	doit.out = out;
-	doit.doit(const_cast<IRExpr *>(input));
+	} foo;
+	static irexpr_visitor<reg_set_t> visitor;
+	visitor.Get = foo.f;
+	visitor.FreeVariable = foo.g;
+	visit_irexpr(out, &visitor, input);
 }
 
 template <typename t, typename compare>
@@ -139,28 +140,48 @@ struct _findRegisterMultiplicity : public IRExprTransformer {
 	{}
 };
 
+struct _findRegCtxt {
+	const reg_or_free_var &r;
+	int multiplicity;
+	_findRegCtxt(const reg_or_free_var &_r)
+		: r(_r), multiplicity(0)
+	{}
+};
+
 static int
 findRegisterMultiplicity(const IRExpr *iex, const reg_or_free_var &r)
 {
-	_findRegisterMultiplicity doit(r);
-	doit.doit(const_cast<IRExpr *>(iex));
-	return doit.multiplicity;
+	struct {
+		static visit_result Get(_findRegCtxt *ctxt, const IRExprGet *ieg) {
+			if (ieg == ctxt->r)
+				ctxt->multiplicity++;
+			return visit_continue;
+		}
+		static visit_result FreeVariable(_findRegCtxt *ctxt, const IRExprFreeVariable *ieg) {
+			if (ieg == ctxt->r)
+				ctxt->multiplicity++;
+			return visit_continue;
+		}
+	} foo;
+	static irexpr_visitor<_findRegCtxt> visitor;
+	visitor.Get = foo.Get;
+	visitor.FreeVariable = foo.FreeVariable;
+	_findRegCtxt ctxt(r);
+	visit_irexpr(&ctxt, &visitor, iex);
+	return ctxt.multiplicity;
 }
 
 static bool
-mentionsHBEdge(IRExpr *a)
+mentionsHBEdge(const IRExpr *a)
 {
-	struct : public IRExprTransformer {
-		bool res;
-		IRExpr *transformIex(IRExprHappensBefore *hb) {
-			res = true;
-			abortTransform();
-			return hb;
+	struct {
+		static visit_result HappensBefore(void *, const IRExprHappensBefore *) {
+			return visit_abort;
 		}
-	} doit;
-	doit.res = false;
-	doit.doit(a);
-	return doit.res;
+	} foo;
+	static irexpr_visitor<void> visitor;
+	visitor.HappensBefore = foo.HappensBefore;
+	return visit_irexpr((void *)NULL, &visitor, a) == visit_abort;
 }
 
 static IRExpr *
@@ -232,7 +253,7 @@ removeRedundantClauses(IRExpr *verificationCondition,
 		*done_something = true;
 
 	if (nr_kept == 0) {
-		return IRExpr_Const(IRConst_U1(1));
+		return IRExpr_Const_U1(true);
 	} else if (nr_kept == 1) {
 		for (int i = 0; i < nr_verification_clauses; i++)
 			if (precious[i])
@@ -327,7 +348,7 @@ clauseUnderspecified(IRExpr *clause,
 			    ((IRExprUnop *)ieb->arg1)->arg->tag == Iex_Binop &&
 			    ((IRExprBinop *)((IRExprUnop *)ieb->arg1)->arg)->op == Iop_CmpF32 &&
 			    ieb->arg2->tag == Iex_Const &&
-			    ((IRExprConst *)ieb->arg2)->con->Ico.U8 == 6)
+			    ((IRExprConst *)ieb->arg2)->Ico.U8 == 6)
 				return true;
 		case Iop_Shr32:
 		case Iop_Shl64:
@@ -503,12 +524,13 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 		    reg_set_t *targetRegisters,
 		    GarbageCollectionToken token)
 {
-	IRExpr *reducedSurvivalConstraint =
+	bbdd *reducedSurvivalConstraint =
 		crossProductSurvivalConstraint(
+			summary->scopes,
 			summary->loadMachine,
 			summary->storeMachine,
 			oracle,
-			IRExpr_Const(IRConst_U1(1)),
+			summary->scopes->bools.cnst(true),
 			AllowableOptimisations::defaultOptimisations,
 			summary->mai,
 			token);
@@ -517,13 +539,7 @@ findTargetRegisters(const VexPtr<CrashSummary, &ir_heap> &summary,
 		return false;
 	}
 
-	reducedSurvivalConstraint = simplify_via_anf(reducedSurvivalConstraint);
-	if (!reducedSurvivalConstraint) {
-		fprintf(stderr, "can't convert reduced survival constraint to CNF\n");
-		return false;
-	}
-
-	enumRegisters(reducedSurvivalConstraint, targetRegisters);
+	enumRegisters(bbdd::to_irexpr(reducedSurvivalConstraint), targetRegisters);
 
 	return true;
 }
@@ -554,7 +570,7 @@ extractDefinitelyTrueFalse(std::set<IRExpr *> *definitelyTrue,
 	}
 
 	if (expr->tag == Iex_Const) {
-		assert(((IRExprConst *)expr)->con->Ico.U1 == exprIsTrue);
+		assert(((IRExprConst *)expr)->Ico.U1 == exprIsTrue);
 		return;
 	}
 
@@ -598,11 +614,11 @@ simplifyAssuming(IRExpr *expr,
 		IRExpr *transformIRExpr(IRExpr *what, bool *done_something) {
 			if (definitelyTrue.count(what)) {
 				*done_something = true;
-				return IRExpr_Const(IRConst_U1(1));
+				return IRExpr_Const_U1(true);
 			}
 			if (definitelyFalse.count(what)) {
 				*done_something = true;
-				return IRExpr_Const(IRConst_U1(0));
+				return IRExpr_Const_U1(false);
 			}
 			return IRExprTransformer::transformIRExpr(what, done_something);
 		}
@@ -617,7 +633,8 @@ simplifyAssuming(IRExpr *expr,
 }
 
 static IRExpr *
-simplifyAssumingMachineSurvives(const VexPtr<MaiMap, &ir_heap> &mai,
+simplifyAssumingMachineSurvives(SMScopes *scopes,
+				const VexPtr<MaiMap, &ir_heap> &mai,
 				const VexPtr<StateMachine, &ir_heap> &machine,
 				bool doesSurvive,
 				const VexPtr<IRExpr, &ir_heap> &expr,
@@ -634,21 +651,23 @@ simplifyAssumingMachineSurvives(const VexPtr<MaiMap, &ir_heap> &mai,
 		printf("\n");
 	}
 
-	IRExpr *survival_constraint;
+	bbdd *survival_constraint;
 	if (doesSurvive) {
 		survival_constraint = survivalConstraintIfExecutedAtomically(
+			scopes,
 			mai,
 			machine,
-			IRExpr_Const(IRConst_U1(1)),
+			scopes->bools.cnst(true),
 			oracle,
 			false,
 			AllowableOptimisations::defaultOptimisations,
 			token);
 	} else {
 		survival_constraint = crashingConstraintIfExecutedAtomically(
+			scopes,
 			mai,
 			machine,
-			IRExpr_Const(IRConst_U1(1)),
+			scopes->bools.cnst(true),
 			oracle,
 			true,
 			AllowableOptimisations::defaultOptimisations,
@@ -661,15 +680,15 @@ simplifyAssumingMachineSurvives(const VexPtr<MaiMap, &ir_heap> &mai,
 
 	if (debug_simplify_assuming_survive) {
 		printf("survival_constraint: ");
-		ppIRExpr(survival_constraint, stdout);
+		survival_constraint->prettyPrint(stdout);
 		printf("\n");
 	}
 
 	internIRExprTable intern;
 	IRExpr *expri = internIRExpr(expr.get(), intern);
-	survival_constraint = internIRExpr(survival_constraint, intern);
+	IRExpr *survive = internIRExpr(bbdd::to_irexpr(survival_constraint), intern);
 
-	IRExpr *res = simplifyAssuming(expri, survival_constraint,
+	IRExpr *res = simplifyAssuming(expri, survive,
 				       debug_simplify_assuming_survive,
 				       true, progress);
 	if (debug_simplify_assuming_survive) {
@@ -1072,6 +1091,7 @@ nonFunctionalSimplifications(
 				stripFloatingPoint(summary->verificationCondition, &p);
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
+					summary->scopes,
 					summary->mai,
 					summary->loadMachine,
 					true,
@@ -1081,6 +1101,7 @@ nonFunctionalSimplifications(
 					token);
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
+					summary->scopes,
 					summary->mai,
 					summary->storeMachine,
 					false,
@@ -1096,7 +1117,7 @@ nonFunctionalSimplifications(
 				simplifyUsingUnderspecification(
 					summary->verificationCondition,
 					targetRegisters,
-					IRExpr_Const(IRConst_U1(1)),
+					IRExpr_Const_U1(true),
 					&progress);
 		}
 	}
@@ -1119,7 +1140,7 @@ functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
 				targetRegisters,
 				1);
 		if (e == underspecExpression)
-			summary->verificationCondition = IRExpr_Const(IRConst_U1(1));
+			summary->verificationCondition = IRExpr_Const_U1(true);
 		else
 			summary->verificationCondition = simplify_via_anf(e);
 	}
@@ -1129,9 +1150,9 @@ functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
 class LoadCanonicaliser : public GarbageCollected<LoadCanonicaliser, &ir_heap> {
 	std::vector<std::pair<IRExprLoad *, IRExprFreeVariable *> > canonMap;
 
-	StateMachine *canonicalise(StateMachine *sm);
+	StateMachine *canonicalise(SMScopes *scopes, StateMachine *sm);
 	IRExpr *canonicalise(IRExpr *iex);
-	StateMachine *decanonicalise(StateMachine *sm);
+	StateMachine *decanonicalise(SMScopes *scopes, StateMachine *sm);
 	IRExpr *decanonicalise(IRExpr *iex);
 	class canon_transformer : public StateMachineTransformer {
 		LoadCanonicaliser *_this;
@@ -1191,11 +1212,11 @@ struct LCPrivateTransformer : public StateMachineTransformer {
 		res.insert(std::pair<StateMachineState *, IRExprLoad *>(currentState, iex));
 		return StateMachineTransformer::transformIex(iex);
 	}
-	StateMachineState *transformState(StateMachineState *s, bool *d) {
+	StateMachineState *transformState(SMScopes *scopes, StateMachineState *s, bool *d) {
 		assert(currentState == NULL);
 		assert(!*d);
 		currentState = s;
-		StateMachineState *s2 = StateMachineTransformer::transformState(s, d);
+		StateMachineState *s2 = StateMachineTransformer::transformState(scopes, s, d);
 		assert(s2 == NULL);
 		assert(!*d);
 		assert(currentState == s);
@@ -1213,10 +1234,6 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 	LCPrivateTransformer findAllLoads;
 	findAllLoads.currentState = NULL;
 	transformCrashSummary(cs, findAllLoads);
-
-	MachineAliasingTable mat;
-	mat.initialise(cs->storeMachine);
-	mat.initialise(cs->loadMachine);
 
 	/* We can degrade a load X to a free variable if we can
 	 * disambiguate every LD wrt X.  i.e. a LD X can be converted
@@ -1241,9 +1258,7 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 				assert(!definitelyAliasLds.count(*it));
 				definitelyAliasLds.insert(*it);
 				assert(it->second->ty == k.second->ty);
-			} else if (mat.ptrsMightAlias(k.first, k.second->addr, it->first, it->second->addr,
-						      AllowableOptimisations::defaultOptimisations.enableassumePrivateStack()) &&
-				   !definitelyNotEqual(k.second->addr, it->second->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
+			} else if (!definitelyNotEqual(k.second->addr, it->second->addr, AllowableOptimisations::defaultOptimisations.enableassumePrivateStack())) {
 				allowSubst = false;
 				/* If *it and k might alias then
 				   neither *it nor k can be converted
@@ -1266,10 +1281,10 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 }
 
 StateMachine *
-LoadCanonicaliser::canonicalise(StateMachine *sm)
+LoadCanonicaliser::canonicalise(SMScopes *scopes, StateMachine *sm)
 {
 	canon_transformer t(this);
-	return t.transform(sm);
+	return t.transform(scopes, sm);
 }
 
 IRExpr *
@@ -1280,10 +1295,10 @@ LoadCanonicaliser::canonicalise(IRExpr *iex)
 }
 
 StateMachine *
-LoadCanonicaliser::decanonicalise(StateMachine *sm)
+LoadCanonicaliser::decanonicalise(SMScopes *scopes, StateMachine *sm)
 {
 	decanon_transformer t(this);
-	return t.transform(sm);
+	return t.transform(scopes, sm);
 }
 
 IRExpr *
@@ -1296,13 +1311,13 @@ LoadCanonicaliser::decanonicalise(IRExpr *iex)
 CrashSummary *
 LoadCanonicaliser::canonicalise(CrashSummary *cs)
 {
-	StateMachine *loadM = canonicalise(cs->loadMachine);
-	StateMachine *storeM = canonicalise(cs->storeMachine);
+	StateMachine *loadM = canonicalise(cs->scopes, cs->loadMachine);
+	StateMachine *storeM = canonicalise(cs->scopes, cs->storeMachine);
 	IRExpr *cond = canonicalise(cs->verificationCondition);
-	return new CrashSummary(loadM,
+	return new CrashSummary(cs->scopes,
+				loadM,
 				storeM,
 				cond,
-				cs->macroSections,
 				cs->aliasing,
 				cs->mai);
 }
@@ -1310,10 +1325,10 @@ LoadCanonicaliser::canonicalise(CrashSummary *cs)
 CrashSummary *
 LoadCanonicaliser::decanonicalise(CrashSummary *cs)
 {
-	return new CrashSummary(decanonicalise(cs->loadMachine),
-				decanonicalise(cs->storeMachine),
+	return new CrashSummary(cs->scopes,
+				decanonicalise(cs->scopes, cs->loadMachine),
+				decanonicalise(cs->scopes, cs->storeMachine),
 				decanonicalise(cs->verificationCondition),
-				cs->macroSections,
 				cs->aliasing,
 				cs->mai);
 }
@@ -1329,7 +1344,8 @@ main(int argc, char *argv[])
 	timeoutTimer.nextDue = now() + 30;
 	timeoutTimer.schedule();
 
-	summary = readBugReport(argv[1], &first_line);
+	SMScopes scopes;
+	summary = readBugReport(&scopes, argv[1], &first_line);
 	MachineState *ms = MachineState::readELFExec(argv[2]);
 	Thread *thr = ms->findThread(ThreadId(1));
 	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[3]));

@@ -10,11 +10,26 @@
 #include "typesdb.hpp"
 #include "libvex_parse.h"
 #include "cfgnode.hpp"
+#include "smr.hpp"
+#include "bdd.hpp"
 
 class StateMachine;
 class StateMachineSideEffect;
 class MaiMap;
 class AllowableOptimisations;
+
+struct SMScopes {
+	bdd_ordering ordering;
+	bbdd::scope bools;
+	smrbdd::scope smrs;
+	exprbdd::scope exprs;
+	SMScopes()
+		: bools(&ordering), smrs(&ordering), exprs(&ordering)
+	{}
+	bool read(const char *fname);
+	bool parse(const char *buf, const char **end);
+	void prettyPrint(FILE *f) const;
+};
 
 class FrameId : public Named {
 	unsigned id;
@@ -176,6 +191,7 @@ public:
 	   also satisfy this one.  Returns true if we do anything or
 	   false otherwise. */
 	bool operator |=(const PointerAliasingSet &o);
+	bool operator <(const PointerAliasingSet &o) const;
 
 	bool mightPointAt(const FrameId fid) const {
 		if (!valid || otherStackPointer)
@@ -261,7 +277,6 @@ public:
 	}
 };
 
-class IRExprTransformer;
 class StateMachineState;
 
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
@@ -280,7 +295,8 @@ public:
 	StateMachine(StateMachine *parent, StateMachineState *_root)
 		: root(_root), cfg_roots(parent->cfg_roots)
 	{}
-	StateMachine *optimise(const AllowableOptimisations &opt,
+	StateMachine *optimise(SMScopes *scopes,
+			       const AllowableOptimisations &opt,
 			       bool *done_something);
 	void visit(HeapVisitor &hv) {
 		hv(root);
@@ -288,11 +304,11 @@ public:
 			hv(it->second);
 	}
 #ifdef NDEBUG
-	void sanityCheck(const MaiMap &) const {}
+	void sanityCheck(const MaiMap &, SMScopes * = NULL) const {}
 	void assertAcyclic() const {}
 	void assertSSA() const {}
 #else
-	void sanityCheck(const MaiMap &) const;
+	void sanityCheck(const MaiMap &, SMScopes * = NULL) const;
 	void assertAcyclic() const;
 	void assertSSA() const;
 #endif
@@ -303,20 +319,18 @@ public:
 class StateMachineState : public GarbageCollected<StateMachineState, &ir_heap> {
 public:
 #define all_state_types(f)						\
-	f(Unreached) f(Crash) f(NoCrash) f(Bifurcate) f(SideEffecting)
+	f(Terminal) f(Bifurcate) f(SideEffecting)
 #define mk_state_type(name) name ,
 	enum stateType {
 		all_state_types(mk_state_type)
 	};
 #undef mk_state_type
-	static bool stateTypeIsTerminal(enum stateType t) {
-		return t == Unreached || t == Crash || t == NoCrash;
-	}
 protected:
 	StateMachineState(const VexRip &_origin,
 			  enum stateType _type)
-		: type(_type), dbg_origin(_origin)
+		: last_optimisation_gen(0), type(_type), dbg_origin(_origin)
 	{}
+	unsigned last_optimisation_gen;
 public:
 	stateType type;
 	VexRip dbg_origin; /* RIP we were looking at when we
@@ -324,27 +338,10 @@ public:
 			    * meaningful, but occasionally provides
 			    * useful hints for debugging.*/
 
-	bool isTerminal() const {
-		return stateTypeIsTerminal(type);
-	}
-
 	/* Another peephole optimiser.  Again, must be
 	   context-independent and result in no changes to the
 	   semantic value of the machine, and can mutate in-place. */
-	virtual StateMachineState *optimise(const AllowableOptimisations &, bool *) = 0;
-	void findLoadedAddresses(std::set<IRExpr *> &out, const AllowableOptimisations &opt);
-	bool canCrash(std::set<const StateMachineState *> &memo) const {
-		if (type == Crash)
-			return true;
-		if (!memo.insert(this).second)
-			return false;
-		std::vector<const StateMachineState *> s;
-		targets(s);
-		for (auto it = s.begin(); it != s.end(); it++)
-			if ((*it)->canCrash(memo))
-				return true;
-		return false;
-	}
+	virtual StateMachineState *optimise(SMScopes *, const AllowableOptimisations &, bool *) = 0;
 	virtual void targets(std::vector<StateMachineState **> &) = 0;
 	virtual void targets(std::vector<const StateMachineState *> &) const = 0;
 	void targets(std::vector<StateMachineState *> &out) {
@@ -379,12 +376,10 @@ public:
 		return const_cast<StateMachineState *>(this)->getSideEffect();
 	}
 
-	virtual void inputExpressions(std::vector<IRExpr *> &out) = 0;
-
 #ifdef NDEBUG
-	void sanityCheck() const {}
+	void sanityCheck(SMScopes *) const {}
 #else
-	virtual void sanityCheck() const = 0;
+	virtual void sanityCheck(SMScopes *) const = 0;
 #endif
 
 #ifndef NDEBUG
@@ -409,7 +404,7 @@ public:
 	f(EndAtomic)				\
 	f(StartFunction)			\
 	f(EndFunction)				\
-	f(PointerAliasing)			\
+	f(ImportRegister)			\
 	f(StackLayout)
 	enum sideEffectType {
 #define mk_one(n) n,
@@ -421,91 +416,38 @@ protected:
 		: type(_type)
 	{}
 public:
-	virtual StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) = 0;
-	virtual void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) = 0;
+	virtual StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &, bool *) = 0;
 #ifdef NDEBUG
-	void sanityCheck() const {}
+	void sanityCheck(SMScopes *) const {}
 #else
-	virtual void sanityCheck() const = 0;
+	virtual void sanityCheck(SMScopes *) const = 0;
 #endif
 	virtual bool definesRegister(threadAndRegister &res) const = 0;
-	virtual void inputExpressions(std::vector<IRExpr *> &exprs) = 0;
 	virtual void prettyPrint(FILE *f) const = 0;
-	static bool parse(StateMachineSideEffect **out, const char *str, const char **suffix);
+	static bool parse(SMScopes *scopes, StateMachineSideEffect **out, const char *str, const char **suffix);
 	NAMED_CLASS
 };
 
 class StateMachineTerminal : public StateMachineState {
-protected:
-	virtual void prettyPrint(FILE *f) const = 0;
-	StateMachineTerminal(const VexRip &rip, StateMachineState::stateType type) : StateMachineState(rip, type) {}
 public:
-	StateMachineState *optimise(const AllowableOptimisations &, bool *)
-	{ return this; }
-	virtual void visit(HeapVisitor &) {}
+	StateMachineTerminal(const VexRip &vr, smrbdd * _res)
+		: StateMachineState(vr, StateMachineState::Terminal),
+		  res(_res)
+	{}
+	StateMachineTerminal(StateMachineTerminal *base, smrbdd *_res)
+		: StateMachineState(base->dbg_origin, StateMachineState::Terminal),
+		  res(_res)
+	{}
+	smrbdd *res;
+	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &, bool *);
+	void visit(HeapVisitor &hv) { hv(res); }
 	void targets(std::vector<StateMachineState **> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const { prettyPrint(f); }
 	StateMachineSideEffect *getSideEffect() { return NULL; }
-	void inputExpressions(std::vector<IRExpr *> &) {}
-	void sanityCheck() const { return; }
-};
+	void sanityCheck(SMScopes *scopes) const { res->sanity_check(&scopes->ordering); }
 
-class StateMachineUnreached : public StateMachineTerminal {
-	StateMachineUnreached() : StateMachineTerminal(VexRip(), StateMachineState::Unreached) {}
-	static VexPtr<StateMachineUnreached, &ir_heap> _this;
-	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-public:
-	static StateMachineUnreached *get() {
-		if (!_this) _this = new StateMachineUnreached();
-		return _this;
-	}
-	static bool parse(StateMachineUnreached **out, const char *str, const char **suffix)
-	{
-		if (parseThisString("<unreached>", str, suffix)) {
-			*out = StateMachineUnreached::get();
-			return true;
-		}
-		return false;
-	}
-};
-
-class StateMachineCrash : public StateMachineTerminal {
-	StateMachineCrash() : StateMachineTerminal(VexRip(), StateMachineState::Crash) {}
-	static VexPtr<StateMachineCrash, &ir_heap> _this;
-	void prettyPrint(FILE *f) const { fprintf(f, "<crash>"); }
-public:
-	static StateMachineCrash *get() {
-		if (!_this) _this = new StateMachineCrash();
-		return _this;
-	}
-	static bool parse(StateMachineCrash **out, const char *str, const char **suffix)
-	{
-		if (parseThisString("<crash>", str, suffix)) {
-			*out = StateMachineCrash::get();
-			return true;
-		}
-		return false;
-	}
-};
-
-class StateMachineNoCrash : public StateMachineTerminal {
-	StateMachineNoCrash() : StateMachineTerminal(VexRip(), StateMachineState::NoCrash) {}
-	static VexPtr<StateMachineNoCrash, &ir_heap> _this;
-	void prettyPrint(FILE *f) const { fprintf(f, "<survive>"); }
-public:
-	static StateMachineNoCrash *get() {
-		if (!_this) _this = new StateMachineNoCrash();
-		return _this;
-	}
-	static bool parse(StateMachineNoCrash **out, const char *str, const char **suffix)
-	{
-		if (parseThisString("<survive>", str, suffix)) {
-			*out = StateMachineNoCrash::get();
-			return true;
-		}
-		return false;
-	}
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &) const;
+	static bool parse(SMScopes *scopes, StateMachineTerminal **out, const char *str, const char **suffix);
 };
 
 class StateMachineSideEffecting : public StateMachineState {
@@ -538,7 +480,7 @@ public:
 			sideEffect->prettyPrint(f);
 		fprintf(f, " then l%d}", labels[target]);
 	}
-	static bool parse(StateMachineSideEffecting **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffecting **out, const char *str, const char **suffix)
 	{
 		VexRip origin;
 		int target;
@@ -547,11 +489,14 @@ public:
 		    !parseVexRip(&origin, str, &str) ||
 		    !parseThisChar(':', str, &str))
 			return false;
-		if (!StateMachineSideEffect::parse(&sme, str, &str))
+		if (!StateMachineSideEffect::parse(scopes, &sme, str, &str))
 			sme = NULL;
-		if (parseThisString(" then l", str, &str) &&
+		/* Some side-effect parsers consume trailing space and
+		   some don't.  Fix it up.  Bit of a hack. */
+		parseThisChar(' ', str, &str);
+		if (parseThisString("then l", str, &str) &&
 		    parseDecimalInt(&target, str, &str) &&
-		    parseThisChar('}', str, suffix)) {
+		    parseThisString("}\n", str, suffix)) {
 			*out = new StateMachineSideEffecting(origin, sme, (StateMachineState *)target);
 			return true;
 		}
@@ -564,19 +509,19 @@ public:
 	}
 	void prependSideEffect(StateMachineSideEffect *sideEffect);
 
-	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something);
+	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
 	void targets(std::vector<StateMachineState **> &out) { out.push_back(&target); }
 	void targets(std::vector<const StateMachineState *> &out) const { out.push_back(target); }
 	StateMachineSideEffect *getSideEffect() { return sideEffect; }
-	void inputExpressions(std::vector<IRExpr *> &out) {
-		if (sideEffect)
-			sideEffect->inputExpressions(out);
-	}
-	void sanityCheck() const
+	void sanityCheck(SMScopes *
+#ifndef NDEBUG
+			 scopes
+#endif
+			 ) const
 	{
 #ifndef NDEBUG
 		if (sideEffect)
-			sideEffect->sanityCheck();
+			sideEffect->sanityCheck(scopes);
 		if (sideEffect && sideEffect->type == StateMachineSideEffect::EndAtomic &&
 		    target && target->type == StateMachineState::SideEffecting &&
 		    ((StateMachineSideEffecting *)target)->sideEffect &&
@@ -589,7 +534,7 @@ public:
 class StateMachineBifurcate : public StateMachineState {
 public:
 	StateMachineBifurcate(const VexRip &origin,
-			      IRExpr *_condition,
+			      bbdd *_condition,
 			      StateMachineState *t,
 			      StateMachineState *f)
 		: StateMachineState(origin, StateMachineState::Bifurcate),
@@ -599,7 +544,7 @@ public:
 	{
 	}
 	StateMachineBifurcate(StateMachineBifurcate *base,
-			      IRExpr *_condition)
+			      bbdd *_condition)
 		: StateMachineState(base->dbg_origin, StateMachineState::Bifurcate),
 		  condition(_condition),
 		  trueTarget(base->trueTarget),
@@ -614,39 +559,12 @@ public:
 	{
 	}
 
-	IRExpr *condition; /* Should be typed Ity_I1.  If zero, we go
-			      to the false target.  Otherwise, we go
-			      to the true one. */
+	bbdd *condition;
 	StateMachineState *trueTarget;
 	StateMachineState *falseTarget;
 
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
-	{
-		fprintf(f, "%s: if (", dbg_origin.name());
-		ppIRExpr(condition, f);
-		fprintf(f, ") then l%d else l%d",
-			labels[trueTarget], labels[falseTarget]);
-	}
-	static bool parse(StateMachineBifurcate **out, const char *str, const char **suffix)
-	{
-		VexRip origin;
-		IRExpr *condition;
-		int target1;
-		int target2;
-		if (parseVexRip(&origin, str, &str) &&
-		    parseThisString(": if (", str, &str) &&
-		    parseIRExpr(&condition, str, &str) &&
-		    parseThisString(") then l", str, &str) &&
-		    parseDecimalInt(&target1, str, &str) &&
-		    parseThisString(" else l", str, &str) &&
-		    parseDecimalInt(&target2, str, suffix)) {
-			*out = new StateMachineBifurcate(origin, condition,
-							 (StateMachineState *)target1,
-							 (StateMachineState *)target2);
-			return true;
-		}
-		return false;
-	}
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const;
+	static bool parse(SMScopes *scopes, StateMachineBifurcate **out, const char *str, const char **suffix);
 
 	void visit(HeapVisitor &hv)
 	{
@@ -654,7 +572,7 @@ public:
 		hv(falseTarget);
 		hv(condition);
 	}
-	StateMachineState *optimise(const AllowableOptimisations &opt, bool *done_something);
+	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
 	void targets(std::vector<StateMachineState **> &out) {
 		out.push_back(&falseTarget);
 		out.push_back(&trueTarget);
@@ -663,28 +581,23 @@ public:
 		out.push_back(falseTarget);
 		out.push_back(trueTarget);
 	}
-	void sanityCheck() const
+	void sanityCheck(SMScopes *scopes) const
 	{
-		condition->sanity_check();
-		assert(condition->type() == Ity_I1);
+		condition->sanity_check(&scopes->ordering);
 	}
 	StateMachineSideEffect *getSideEffect() { return NULL; }
-	void inputExpressions(std::vector<IRExpr *> &out) {
-		out.push_back(condition);
-	}
 };
 
 class StateMachineSideEffectUnreached : public StateMachineSideEffect {
 	static VexPtr<StateMachineSideEffectUnreached, &ir_heap> _this;
 	StateMachineSideEffectUnreached() : StateMachineSideEffect(StateMachineSideEffect::Unreached) {}
-	void inputExpressions(std::vector<IRExpr *> &) {}
 public:
 	static StateMachineSideEffectUnreached *get() {
 		if (!_this) _this = new StateMachineSideEffectUnreached();
 		return _this;
 	}
 	void prettyPrint(FILE *f) const { fprintf(f, "<unreached>"); }
-	static bool parse(StateMachineSideEffectUnreached **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectUnreached **out, const char *str, const char **suffix)
 	{
 		if (parseThisString("<unreached>", str, suffix)) {
 			*out = StateMachineSideEffectUnreached::get();
@@ -692,37 +605,31 @@ public:
 		}
 		return false;
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &, bool *) { return this; }
 	void visit(HeapVisitor &) {}
-	void sanityCheck() const {}
+	void sanityCheck(SMScopes *) const {}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
 };
 
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
-	virtual void _inputExpressions(std::vector<IRExpr *> &exprs) = 0;
-protected:
-	void inputExpressions(std::vector<IRExpr *> &exprs) { _inputExpressions(exprs); exprs.push_back(addr); }
 public:
-	IRExpr *addr;
+	exprbdd *addr;
 	MemoryAccessIdentifier rip;
 	MemoryTag tag;
-	StateMachineSideEffectMemoryAccess(IRExpr *_addr, const MemoryAccessIdentifier &_rip,
+	StateMachineSideEffectMemoryAccess(exprbdd *_addr, const MemoryAccessIdentifier &_rip,
 					   const MemoryTag &_tag,
 					   StateMachineSideEffect::sideEffectType _type)
 		: StateMachineSideEffect(_type), addr(_addr), rip(_rip), tag(_tag)
 	{
-		if (addr)
-			sanityCheck();
 	}
 	virtual void visit(HeapVisitor &hv) {
 		hv(addr);
 	}
 #ifndef NDEBUG
-	virtual void sanityCheck() const {
-		addr->sanity_check();
+	virtual void sanityCheck(SMScopes *scopes) const {
+		addr->sanity_check(&scopes->ordering);
 		assert(addr->type() == Ity_I64);
 		rip.sanity_check();
 	}
@@ -730,42 +637,41 @@ public:
 	virtual IRType _type() const = 0;
 };
 class StateMachineSideEffectStore : public StateMachineSideEffectMemoryAccess {
-	void _inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(data); }
 public:
-	StateMachineSideEffectStore(IRExpr *_addr, IRExpr *_data, const MemoryAccessIdentifier &_rip, const MemoryTag &_tag)
+	StateMachineSideEffectStore(exprbdd *_addr, exprbdd *_data, const MemoryAccessIdentifier &_rip, const MemoryTag &_tag)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
-	StateMachineSideEffectStore(const StateMachineSideEffectStore *base, IRExpr *_addr, IRExpr *_data)
+	StateMachineSideEffectStore(const StateMachineSideEffectStore *base, exprbdd *_addr, exprbdd *_data)
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Store),
 		  data(_data)
 	{
 	}
-	IRExpr *data;
+	exprbdd *data;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "*(");
-		ppIRExpr(addr, f);
-		fprintf(f, "):%s <- ", tag.name());
-		ppIRExpr(data, f);
-		fprintf(f, " @ %s", rip.name());
+		fprintf(f, "STORE %s@%s\naddr = ", tag.name(), rip.name());
+		addr->prettyPrint(f);
+		fprintf(f, "data = ");
+		data->prettyPrint(f);
 	}
-	static bool parse(StateMachineSideEffectStore **out,
+	static bool parse(SMScopes *scopes,
+			  StateMachineSideEffectStore **out,
 			  const char *str,
 			  const char **suffix)
 	{
-		IRExpr *addr;
-		IRExpr *data;
+		exprbdd *addr;
+		exprbdd *data;
 		MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
 		MemoryTag tag;
-		if (parseThisString("*(", str, &str) &&
-		    parseIRExpr(&addr, str, &str) &&
-		    parseThisString("):", str, &str) &&
+		if (parseThisString("STORE ", str, &str) &&
 		    tag.parse(str, &str) &&
-		    parseThisString(" <- ", str, &str) &&
-		    parseIRExpr(&data, str, &str) &&
-		    parseThisString(" @ ", str, &str) &&
-		    rip.parse(str, suffix)) {
+		    parseThisChar('@', str, &str) &&
+		    rip.parse(str, &str) &&
+		    parseThisString("\naddr = ", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &addr, str, &str) &&
+		    parseThisString("data = ", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &data, str, suffix)) {
 			*out = new StateMachineSideEffectStore(addr, data, rip, tag);
 			return true;
 		}
@@ -775,11 +681,10 @@ public:
 		StateMachineSideEffectMemoryAccess::visit(hv);
 		hv(data);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &opt);
-	void sanityCheck() const {
-		StateMachineSideEffectMemoryAccess::sanityCheck();
-		data->sanity_check();
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *scopes) const {
+		StateMachineSideEffectMemoryAccess::sanityCheck(scopes);
+		data->sanity_check(&scopes->ordering);
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -794,14 +699,13 @@ public:
 };
 typedef nullaryFunction<threadAndRegister> threadAndRegisterAllocator;
 class StateMachineSideEffectLoad : public StateMachineSideEffectMemoryAccess {
-	void _inputExpressions(std::vector<IRExpr *> &) {}
 public:
-	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
+	StateMachineSideEffectLoad(threadAndRegisterAllocator &alloc, exprbdd *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Load),
 		  target(alloc()), type(_type)
 	{
 	}
-	StateMachineSideEffectLoad(threadAndRegister reg, IRExpr *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
+	StateMachineSideEffectLoad(threadAndRegister reg, exprbdd *_addr, const MemoryAccessIdentifier &_rip, IRType _type, const MemoryTag &_tag)
 		: StateMachineSideEffectMemoryAccess(_addr, _rip, _tag, StateMachineSideEffect::Load),
 		  target(reg), type(_type)
 	{
@@ -810,53 +714,48 @@ public:
 		: StateMachineSideEffectMemoryAccess(base->addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(_reg), type(base->type)
 	{}
-	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, const threadAndRegister &_reg, IRExpr *_addr)
+	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, const threadAndRegister &_reg, exprbdd *_addr)
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(_reg), type(base->type)
 	{}
-	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, IRExpr *_addr)
+	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, exprbdd *_addr)
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(base->target), type(base->type)
 	{}
 	threadAndRegister target;
 	IRType type;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "LOAD ");
-		target.prettyPrint(f);
-		fprintf(f, ":");
+		fprintf(f, "LOAD %s@%s to %s, type ", tag.name(), rip.name(), target.name());
 		ppIRType(type, f);
-		fprintf(f, " <- *(");
-		ppIRExpr(addr, f);
-		fprintf(f, "):%s@%s", tag.name(), rip.name());
+		fprintf(f, "\naddr = ");
+		addr->prettyPrint(f);
 	}
-	static bool parse(StateMachineSideEffectLoad **out,
+	static bool parse(SMScopes *scopes,
+			  StateMachineSideEffectLoad **out,
 			  const char *str,
 			  const char **suffix)
 	{
-		IRExpr *addr;
+		exprbdd *addr;
 		threadAndRegister key(threadAndRegister::invalid());
 		IRType type;
 		MemoryAccessIdentifier rip(MemoryAccessIdentifier::uninitialised());
 		MemoryTag tag;
 		if (parseThisString("LOAD ", str, &str) &&
-		    parseThreadAndRegister(&key, str, &str) &&
-		    parseThisString(":", str, &str) &&
-		    parseIRType(&type, str, &str) &&
-		    parseThisString(" <- *(", str, &str) &&
-		    parseIRExpr(&addr, str, &str) &&
-		    parseThisString("):", str, &str) &&
 		    tag.parse(str, &str) &&
-		    parseThisString("@", str, &str) &&
-		    rip.parse(str, suffix)) {
+		    parseThisChar('@', str, &str) &&
+		    rip.parse(str, &str) &&
+		    parseThisString(" to ", str, &str) &&
+		    parseThreadAndRegister(&key, str, &str) &&
+		    parseThisString(", type ", str, &str) &&
+		    parseIRType(&type, str, &str) &&
+		    parseThisString("\naddr = ", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &addr, str, suffix)) {
 			*out = new StateMachineSideEffectLoad(key, addr, rip, type, tag);
 			return true;
 		}
 		return false;
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &l, const AllowableOptimisations &) {
-		l.insert(addr);
-	}
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
 	bool definesRegister(threadAndRegister &reg) const {
 		reg = target;
 		return true;
@@ -864,29 +763,28 @@ public:
 	IRType _type() const { return type; }
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(value); }
 public:
-	StateMachineSideEffectCopy(threadAndRegister k, IRExpr *_value)
+	StateMachineSideEffectCopy(threadAndRegister k, exprbdd *_value)
 		: StateMachineSideEffect(StateMachineSideEffect::Copy),
 		  target(k), value(_value)
 	{
 	}
 	threadAndRegister target;
-	IRExpr *value;
+	exprbdd *value;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "COPY ");
 		target.prettyPrint(f);
-		fprintf(f, " = ");
-		ppIRExpr(value, f);
+		fprintf(f, " =\n");
+		value->prettyPrint(f);
 	}
-	static bool parse(StateMachineSideEffectCopy **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectCopy **out, const char *str, const char **suffix)
 	{
-		IRExpr *data;
+		exprbdd *data;
 		threadAndRegister key(threadAndRegister::invalid());
 		if (parseThisString("COPY ", str, &str) &&
 		    parseThreadAndRegister(&key, str, &str) &&
-		    parseThisString(" = ", str, &str) &&
-		    parseIRExpr(&data, str, suffix)) {
+		    parseThisString(" =\n", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &data, str, suffix)) {
 			*out = new StateMachineSideEffectCopy(key, data);
 			return true;
 		}
@@ -895,10 +793,9 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
-	void sanityCheck() const {
-		value->sanity_check();
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *scopes) const {
+		value->sanity_check(&scopes->ordering);
 	}
 	bool definesRegister(threadAndRegister &reg) const {
 		reg = target;
@@ -906,50 +803,46 @@ public:
 	}
 };
 class StateMachineSideEffectAssertFalse : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(value); }
 public:
-	StateMachineSideEffectAssertFalse(IRExpr *_value, bool _reflectsActualProgram)
+	StateMachineSideEffectAssertFalse(bbdd *_value, bool _reflectsActualProgram)
 		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
 		  value(_value),
 		  reflectsActualProgram(_reflectsActualProgram)
 	{
 	}
-	IRExpr *value;
+	bbdd *value;
 	bool reflectsActualProgram;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "Assert !(");
-		ppIRExpr(value, f);
-		fprintf(f, ") %s", reflectsActualProgram ? "REAL" : "FAKE");
+		fprintf(f, "ASSERT %s !", reflectsActualProgram ? "REAL" : "FAKE");
+		value->prettyPrint(f);
 	}
-	static bool parse(StateMachineSideEffectAssertFalse **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectAssertFalse **out, const char *str, const char **suffix)
 	{
-		IRExpr *data;
-		if (parseThisString("Assert !(", str, &str) &&
-		    parseIRExpr(&data, str, &str) &&
-		    parseThisChar(')', str, &str)) {
-			bool isReal;
-			if (parseThisString(" REAL", str, suffix)) {
-				isReal = true;
-			} else if (parseThisString(" FAKE", str, suffix)) {
-				isReal = false;
-			} else {
-				return false;
-			}
-			*out = new StateMachineSideEffectAssertFalse(data, isReal);
-			return true;
+		bbdd *data;
+		if (!parseThisString("ASSERT ", str, &str))
+			return false;
+		bool isReal;
+		if (parseThisString("REAL ", str, &str)) {
+			isReal = true;
+		} else if (parseThisString("FAKE ", str, &str)) {
+			isReal = false;
+		} else {
+			return false;
 		}
-		return false;
+		if (!parseThisChar('!', str, &str) ||
+		    !bbdd::parse(&scopes->bools, &data, str, suffix))
+			return false;
+		*out = new StateMachineSideEffectAssertFalse(data, isReal);
+		return true;
 	}
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *scopes) const {
 		assert(reflectsActualProgram == true ||
 		       reflectsActualProgram == false);
-		value->sanity_check();
-		assert(value->type() == Ity_I1);
+		value->sanity_check(&scopes->ordering);
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -960,7 +853,6 @@ class StateMachineSideEffectStartAtomic : public StateMachineSideEffect {
 		: StateMachineSideEffect(StateMachineSideEffect::StartAtomic)
 	{}
 	static VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> singleton;
-	void inputExpressions(std::vector<IRExpr *> &) { }
 public:
 	static StateMachineSideEffectStartAtomic *get() {
 		if (!singleton)
@@ -970,7 +862,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "START_ATOMIC");
 	}
-	static bool parse(StateMachineSideEffectStartAtomic **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectStartAtomic **out, const char *str, const char **suffix)
 	{
 		if (parseThisString("START_ATOMIC", str, suffix)) {
 			*out = StateMachineSideEffectStartAtomic::get();
@@ -979,9 +871,8 @@ public:
 		return false;
 	}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *) const {
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -992,7 +883,6 @@ class StateMachineSideEffectEndAtomic : public StateMachineSideEffect {
 		: StateMachineSideEffect(StateMachineSideEffect::EndAtomic)
 	{}
 	static VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> singleton;
-	void inputExpressions(std::vector<IRExpr *> &) { }
 public:
 	static StateMachineSideEffectEndAtomic *get() {
 		if (!singleton)
@@ -1002,7 +892,7 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "END_ATOMIC");
 	}
-	static bool parse(StateMachineSideEffectEndAtomic **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectEndAtomic **out, const char *str, const char **suffix)
 	{
 		if (parseThisString("END_ATOMIC", str, suffix)) {
 			*out = StateMachineSideEffectEndAtomic::get();
@@ -1011,100 +901,96 @@ public:
 		return false;
 	}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *) const {
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) {
-		for (auto it = generations.begin(); it != generations.end(); it++)
-			if (it->second)
-				exprs.push_back(it->second);
-	}
 public:
 	threadAndRegister reg;
-	std::vector<std::pair<threadAndRegister, IRExpr *> > generations;
-	StateMachineSideEffectPhi(const threadAndRegister &_reg,
-				  const std::set<unsigned> &_generations)
-		: StateMachineSideEffect(StateMachineSideEffect::Phi),
-		  reg(_reg)
-	{
-		generations.reserve(_generations.size());
-		for (auto it = _generations.begin(); it != _generations.end(); it++) {
-			std::pair<threadAndRegister, IRExpr *> item;
-			item.first = reg.setGen(*it);
-			item.second = NULL;
-			generations.push_back(item);
+	IRType ty;
+	class input {
+	public:
+		threadAndRegister reg;
+		exprbdd *val;
+		bool operator==(const input &i) const {
+			return reg == i.reg && val == i.val;
 		}
-	}
+		bool operator<(const input &o) const {
+			if (val < o.val)
+				return true;
+			if (val > o.val)
+				return false;
+			return reg < o.reg;
+		}
+		input(const threadAndRegister &_reg, exprbdd *_val)
+			: reg(_reg), val(_val)
+		{}
+		input()
+			: reg(threadAndRegister::invalid()),
+			  val(NULL)
+		{}
+	};
+	std::vector<input> generations;
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
-				  const std::vector<std::pair<threadAndRegister, IRExpr *> > &_generations)
+				  IRType _ty,
+				  const std::vector<input> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
-		  reg(_reg), generations(_generations)
+		  reg(_reg), ty(_ty), generations(_generations)
 	{
+		for (auto it = generations.begin(); it != generations.end(); it++)
+			assert(it->val);
 	}
 	StateMachineSideEffectPhi(const StateMachineSideEffectPhi *base,
-				  const std::vector<std::pair<threadAndRegister, IRExpr *> > &_generations)
+				  const std::vector<input> &_generations)
 		: StateMachineSideEffect(StateMachineSideEffect::Phi),
-		  reg(base->reg), generations(_generations)
-	{}
+		  reg(base->reg), ty(base->ty), generations(_generations)
+	{
+		for (auto it = generations.begin(); it != generations.end(); it++)
+			assert(it->val);
+	}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Phi");
 		reg.prettyPrint(f);
-		fprintf(f, "(");
+		fprintf(f, ":%s:\n", nameIRType(ty));
 		for (auto it = generations.begin(); it != generations.end(); it++) {
-			if (it != generations.begin())
-				fprintf(f, ", ");
-			fprintf(f, "%s", it->first.name());
-			if (it->second) {
-				fprintf(f, "=");
-				ppIRExpr(it->second, f);
-			}
+			fprintf(f, "%s --> ", it->reg.name());
+			it->val->prettyPrint(f);
 		}
-		fprintf(f, ")");
 	}
-	static bool parse(StateMachineSideEffectPhi **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectPhi **out, const char *str, const char **suffix)
 	{
 		threadAndRegister key(threadAndRegister::invalid());
+		IRType ty;
 		if (parseThisString("Phi", str, &str) &&
 		    parseThreadAndRegister(&key, str, &str) &&
-		    parseThisString("(", str, &str)) {
-			std::vector<std::pair<threadAndRegister, IRExpr *> > generations;
-			if (!parseThisChar(')', str, suffix)) {
-				while (1) {
-					threadAndRegister x(threadAndRegister::invalid());
-					IRExpr *val;
-					if (!parseThreadAndRegister(&x, str, &str))
-						return false;
-					if (parseThisChar('=', str, &str)) {
-						if (!parseIRExpr(&val, str, &str))
-							return false;
-					} else {
-						val = NULL;
-					}
-					generations.push_back(std::pair<threadAndRegister, IRExpr *>(x, val));
-					if (parseThisChar(')', str, suffix))
-						break;
-					if (!parseThisString(", ", str, &str))
-						return false;
-				}
+		    parseThisChar(':', str, &str) &&
+		    parseIRType(&ty, str, &str) &&
+		    parseThisString(":\n", str, &str)) {
+			std::vector<input> generations;
+			while (1) {
+				input item;
+				if (!parseThreadAndRegister(&item.reg, str, &str) ||
+				    !parseThisString(" --> ", str, &str) ||
+				    !exprbdd::parse(&scopes->exprs, &item.val, str, &str))
+					break;
+				generations.push_back(item);
 			}
-			*out = new StateMachineSideEffectPhi(key, generations);
+			*suffix = str;
+			*out = new StateMachineSideEffectPhi(key, ty, generations);
 			return true;
 		}
 		return false;
 	}
 	void visit(HeapVisitor &hv) {
 		for (auto it = generations.begin(); it != generations.end(); it++)
-			hv(it->second);
+			hv(it->val);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *) const {
 		assert(generations.size() != 0);
 	}
 	bool definesRegister(threadAndRegister &reg) const {
@@ -1113,38 +999,27 @@ public:
 	}
 };
 class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) {
-		if (rsp)
-			exprs.push_back(rsp);
-	}
 public:
-	StateMachineSideEffectStartFunction(IRExpr *_rsp, FrameId _frame)
+	StateMachineSideEffectStartFunction(exprbdd *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
 		  rsp(_rsp), frame(_frame)
 	{
 	}
-	IRExpr *rsp;
+	exprbdd *rsp;
 	FrameId frame;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "StartFunction(%s) rsp = ", frame.name());
-		if (rsp)
-			ppIRExpr(rsp, f);
-		else
-			fprintf(f, "<inf>");
+		rsp->prettyPrint(f);
 	}
-	static bool parse(StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectStartFunction **out, const char *str, const char **suffix)
 	{
-		IRExpr *data;
+		exprbdd *data;
 		FrameId frame;
 		if (parseThisString("StartFunction(", str, &str) &&
 		    FrameId::parse(&frame, str, &str) &&
-		    parseThisString(") rsp = ", str, &str)) {
-			if (parseThisString("<inf>", str, suffix))
-				*out = new StateMachineSideEffectStartFunction(NULL, frame);
-			else if (parseIRExpr(&data, str, suffix))
-				*out = new StateMachineSideEffectStartFunction(data, frame);
-			else
-				return false;
+		    parseThisString(") rsp = ", str, &str) &&
+		    exprbdd::parse(&scopes->exprs, &data, str, suffix)) {
+			*out = new StateMachineSideEffectStartFunction(data, frame);
 			return true;
 		}
 		return false;
@@ -1152,13 +1027,10 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(rsp);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
-	void sanityCheck() const {
-		if (rsp) {
-			rsp->sanity_check();
-			assert(rsp->type() == Ity_I64);
-		}
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *scopes) const {
+		rsp->sanity_check(&scopes->ordering);
+		assert(rsp->type() == Ity_I64);
 	}
 	bool definesRegister(threadAndRegister &) const {
 		return false;
@@ -1168,27 +1040,26 @@ public:
 	}
 };
 class StateMachineSideEffectEndFunction : public StateMachineSideEffect {
-	void inputExpressions(std::vector<IRExpr *> &exprs) { exprs.push_back(rsp); }
 public:
-	StateMachineSideEffectEndFunction(IRExpr *_rsp, FrameId _frame)
+	StateMachineSideEffectEndFunction(exprbdd *_rsp, FrameId _frame)
 		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
 		  rsp(_rsp), frame(_frame)
 	{
 	}
-	IRExpr *rsp;
+	exprbdd *rsp;
 	FrameId frame;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "EndFunction(%s) rsp = ", frame.name());
-		ppIRExpr(rsp, f);
+		rsp->prettyPrint(f);
 	}
-	static bool parse(StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *scopes, StateMachineSideEffectEndFunction **out, const char *str, const char **suffix)
 	{
-		IRExpr *rsp;
+		exprbdd *rsp;
 		FrameId frame;
 		if (parseThisString("EndFunction(", str, &str) &&
 		    FrameId::parse(&frame, str, &str) &&
 		    parseThisString(") rsp = ", str, &str) &&
-		    parseIRExpr(&rsp, str, suffix)) {
+		    exprbdd::parse(&scopes->exprs, &rsp, str, suffix)) {
 			*out = new StateMachineSideEffectEndFunction(rsp, frame);
 			return true;
 		}
@@ -1197,10 +1068,9 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(rsp);
 	}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &opt, bool *done_something);
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) { }
-	void sanityCheck() const {
-		rsp->sanity_check();
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	void sanityCheck(SMScopes *scopes) const {
+		rsp->sanity_check(&scopes->ordering);
 		assert(rsp->type() == Ity_I64);
 	}
 	bool definesRegister(threadAndRegister &) const {
@@ -1210,44 +1080,60 @@ public:
 		return rsp == o.rsp && frame == o.frame;
 	}
 };
-class StateMachineSideEffectPointerAliasing : public StateMachineSideEffect {
+class StateMachineSideEffectImportRegister : public StateMachineSideEffect {
 public:
 	threadAndRegister reg;
+	unsigned tid;
+	unsigned vex_offset;
 	PointerAliasingSet set;
-	StateMachineSideEffectPointerAliasing(
+	StateMachineSideEffectImportRegister(
 		const threadAndRegister &_reg,
+		unsigned _tid,
+		unsigned _vex_offset,
 		const PointerAliasingSet &_set)
-		: StateMachineSideEffect(StateMachineSideEffect::PointerAliasing),
-		  reg(_reg), set(_set)
+		: StateMachineSideEffect(StateMachineSideEffect::ImportRegister),
+		  reg(_reg), tid(_tid), vex_offset(_vex_offset), set(_set)
+	{}
+	StateMachineSideEffectImportRegister(
+		const StateMachineSideEffectImportRegister *base,
+		const threadAndRegister &_reg)
+		: StateMachineSideEffect(StateMachineSideEffect::ImportRegister),
+		  reg(_reg), tid(base->tid), vex_offset(base->vex_offset),
+		  set(base->set)
 	{}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations&, bool*) { return this; }
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck() const {}
-	bool definesRegister(threadAndRegister &) const {
-		return false;
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations&, bool*) { return this; }
+	void sanityCheck(SMScopes *) const {}
+	bool definesRegister(threadAndRegister &tr) const {
+		tr = reg;
+		return true;
 	}
-	void inputExpressions(std::vector<IRExpr *> &) {}
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "ALIAS %s = %s",
-			reg.name(), set.name());
+		fprintf(f, "INITIALVALUE %s = %d:0x%x:%s",
+			reg.name(), tid, vex_offset, set.name());
 	}
-	static bool parse(StateMachineSideEffectPointerAliasing **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectImportRegister **out, const char *str, const char **suffix)
 	{
 		threadAndRegister reg(threadAndRegister::invalid());
+		unsigned tid;
+		unsigned long vex_offset;
 		PointerAliasingSet set(PointerAliasingSet::nothing);
 
-		if (parseThisString("ALIAS ", str, &str) &&
+		if (parseThisString("INITIALVALUE ", str, &str) &&
 		    parseThreadAndRegister(&reg, str, &str) &&
 		    parseThisString(" = ", str, &str) &&
+		    parseDecimalUInt(&tid, str, &str) &&
+		    parseThisChar(':', str, &str) &&
+		    parseHexUlong(&vex_offset, str, &str) &&
+		    parseThisChar(':', str, &str) &&
 		    set.parse(str, suffix)) {
-			*out = new StateMachineSideEffectPointerAliasing(reg, set);
+			*out = new StateMachineSideEffectImportRegister(reg, tid, vex_offset, set);
 			return true;
 		}
 		return false;
 	}
-	bool operator==(const StateMachineSideEffectPointerAliasing &o) const {
-		return reg == o.reg && set == o.set;
+	bool operator==(const StateMachineSideEffectImportRegister &o) const {
+		return reg == o.reg && tid == o.tid && vex_offset == o.vex_offset && set == o.set;
 	}
 
 };
@@ -1319,9 +1205,8 @@ public:
 		  functions(_functions)
 	{}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(const AllowableOptimisations &, bool *) { return this; }
-	void updateLoadedAddresses(std::set<IRExpr *> &, const AllowableOptimisations &) {}
-	void sanityCheck() const {
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &, bool *) { return this; }
+	void sanityCheck(SMScopes *) const {
 #ifndef NDEBUG
 		/* No dupes */
 		for (auto it1 = functions.begin();
@@ -1341,8 +1226,6 @@ public:
 	bool definesRegister(threadAndRegister &) const {
 		return false;
 	}
-	void inputExpressions(std::vector<IRExpr *> &) {
-	}
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "STACKLAYOUT = {");
 		for (auto it = functions.begin(); it != functions.end(); it++) {
@@ -1352,7 +1235,7 @@ public:
 		}
 		fprintf(f, "}");
 	}
-	static bool parse(StateMachineSideEffectStackLayout **out, const char *str, const char **suffix)
+	static bool parse(SMScopes *, StateMachineSideEffectStackLayout **out, const char *str, const char **suffix)
 	{
 		std::vector<entry> functions;
 
@@ -1405,19 +1288,21 @@ void printStateMachine(const std::set<const StateMachineState *> &sm,
 bool sideEffectsBisimilar(StateMachineSideEffect *smse1,
 			  StateMachineSideEffect *smse2,
 			  const AllowableOptimisations &opt);
-bool parseStateMachine(StateMachine **out,
+bool parseStateMachine(SMScopes *scopes,
+		       StateMachine **out,
 		       const char *str,
 		       const char **suffix,
 		       std::map<CfgLabel, const CFGNode *> &labels);
-static inline bool parseStateMachine(StateMachine **out,
+static inline bool parseStateMachine(SMScopes *scopes,
+				     StateMachine **out,
 				     const char *str,
 				     const char **suffix)
 {
 	std::map<CfgLabel, const CFGNode *> labels;
-	return parseStateMachine(out, str, suffix, labels);
+	return parseStateMachine(scopes, out, str, suffix, labels);
 }	
-StateMachine *readStateMachine(int fd);
-StateMachine *readStateMachine(const char *fname);
+StateMachine *readStateMachine(SMScopes *scopes, int fd);
+StateMachine *readStateMachine(SMScopes *scopes, const char *fname);
 
 StateMachine *duplicateStateMachine(const StateMachine *inp);
 
@@ -1477,7 +1362,8 @@ __enumStates(StateMachineState *root, containerType &states)
 	while (!toVisit.empty()) {
 		StateMachineState *s = toVisit.back();
 		toVisit.pop_back();
-		assert(s);
+		if (!s)
+			continue;
 		if (!visited.insert(s).second)
 			continue;
 		stateType *ss = dynamic_cast<stateType *>(s);
@@ -1497,7 +1383,8 @@ __enumStates(const StateMachineState *root, containerType &states)
 	while (!toVisit.empty()) {
 		const StateMachineState *s = toVisit.back();
 		toVisit.pop_back();
-		assert(s);
+		if (!s)
+			continue;
 		if (!visited.insert(s).second)
 			continue;
 		const stateType *ss = dynamic_cast<stateType *>(s);

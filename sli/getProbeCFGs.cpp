@@ -62,8 +62,7 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 		      HashedSet<HashedPtr<const CFGNode> > &targetNodes,
 		      std::set<VexRip> &newStartingRips,
 		      CfgSuccMap<VexRip, VexRip> &succMap,
-		      unsigned maxPathLength1,
-		      unsigned maxPathLength2)
+		      unsigned maxPathLength)
 {
 	std::vector<VexRip> pendingAtCurrentDepth;
 	std::vector<VexRip> neededAtNextDepth;
@@ -75,9 +74,9 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 		printf("Exploring from %s...\n", startingVexRip.name());
 	pendingAtCurrentDepth.push_back(startingVexRip);
 	depth = 0;
-	while (depth < maxPathLength2) {
+	while (depth < maxPathLength) {
 		if (debug_exploration)
-			printf("\tAt depth %d/(%d,%d)\n", depth, maxPathLength1, maxPathLength2);
+			printf("\tAt depth %d/%d\n", depth, maxPathLength);
 		while (!pendingAtCurrentDepth.empty()) {
 			VexRip vr(pendingAtCurrentDepth.back());
 			pendingAtCurrentDepth.pop_back();
@@ -133,20 +132,8 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 						       vr.name());
 				}
 			}
-			if (depth < maxPathLength1) {
-				oracle->findPredecessors(vr, true,
-							 neededAtNextDepth);
-			} else {
-				std::vector<VexRip> pred;
-				oracle->findPredecessors(vr, true, pred);
-				/* If we're past the intended max
-				   depth then we only consider
-				   unambiguous non-call
-				   predecessors. */
-				if (pred.size() == 1 &&
-				    pred[0].stack.size() == vr.stack.size())
-					neededAtNextDepth.push_back(pred[0]);
-			}
+			oracle->findPredecessors(vr, true,
+						 neededAtNextDepth);
 		}
 		depth++;
 		pendingAtCurrentDepth = neededAtNextDepth;
@@ -165,8 +152,7 @@ initialExploration(CfgLabelAllocator &allocLabel,
 		   const VexRip &targetRip,
 		   std::map<VexRip, CFGNode *> &out,
 		   HashedSet<HashedPtr<const CFGNode> > &targetInstrs,
-		   unsigned maxPathLength1,
-		   unsigned maxPathLength2)
+		   unsigned maxPathLength)
 {
 	std::set<VexRip> startingRips;
 	startingRips.insert(targetRip);
@@ -189,8 +175,7 @@ initialExploration(CfgLabelAllocator &allocLabel,
 						  targetInstrs,
 						  newStartingRips,
 						  succMap,
-						  maxPathLength1,
-						  maxPathLength2)) {
+						  maxPathLength)) {
 				failed = true;
 			} else {
 				newStartingRips.insert(*it);
@@ -661,11 +646,10 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	    const VexRip &targetInstr,
 	    HashedSet<HashedPtr<CFGNode> > &out,
 	    HashedSet<HashedPtr<const CFGNode> > &targetNodes,
-	    unsigned maxPathLength1,
-	    unsigned maxPathLength2)
+	    unsigned maxPathLength)
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
-	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength2, maxPathLength2);
+	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength);
 
 	if (debug_exploration) {
 		printf("Initial ripsToCFGNodes table:\n");
@@ -684,14 +668,14 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 		debug_dump(out, "\t");
 	}
 
-	unrollAndCycleBreak(allocLabel, nodes, targetNodes, out, maxPathLength2);
+	unrollAndCycleBreak(allocLabel, nodes, targetNodes, out, maxPathLength);
 
 	if (debug_exploration) {
 		printf("Before trimming:\n");
 		debug_dump(out, "\t");
 	}
 
-	trimExcessNodes(oracle, nodes, targetNodes, maxPathLength2);
+	trimExcessNodes(oracle, nodes, targetNodes, maxPathLength);
 
 	findRoots(nodes, targetNodes, out, false);
 	if (debug_exploration) {
@@ -709,12 +693,12 @@ bool
 getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const VexRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
 	     HashedSet<HashedPtr<const CFGNode> > &targetNodes)
 {
-	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, PROBE_CLUSTER_THRESHOLD1, PROBE_CLUSTER_THRESHOLD2);
+	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, PROBE_CLUSTER_THRESHOLD);
 }
 
 bool
 getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const VexRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
-	     HashedSet<HashedPtr<const CFGNode> > &targetNodes, int threshold1, int threshold2)
+	     HashedSet<HashedPtr<const CFGNode> > &targetNodes, int threshold)
 {
-	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, threshold1, threshold2);
+	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, threshold);
 }

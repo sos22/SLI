@@ -57,6 +57,6 @@ main()
 
 	force_quit = true;
 	pthread_join(thr, NULL);
-	printf("%d read, %d write events\n", read_cntr, write_cntr);
+	printf("Survived, %d read events and %d write events\n", read_cntr, write_cntr);
 	return 0;
 }

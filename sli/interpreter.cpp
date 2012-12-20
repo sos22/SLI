@@ -14,6 +14,7 @@
 #include "main_util.h"
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
+#include "visitor.hpp"
 
 #define FOOTSTEP_REGS_ONLY
 #include "ppres.h"
@@ -630,17 +631,15 @@ eval_expression(const RegisterSet *rs,
 		v1 = read_reg(rs, getOffset - sub_word_offset);
 		switch (getType) {
 		case Ity_I64:
-		case Ity_F64:
 			assert(!sub_word_offset);
 			dest->lo = v1;
 			break;
-		case Ity_V128:
+		case Ity_I128:
 			assert(!sub_word_offset);
 			dest->lo = v1;
 			dest->hi = read_reg(rs, getOffset - sub_word_offset + 8);
 			break;
 		case Ity_I32:
-		case Ity_F32:
 			assert(!(sub_word_offset % 4));
 			dest->lo = (v1 >> (sub_word_offset * 8)) & 0xfffffffful;
 			break;
@@ -673,33 +672,27 @@ eval_expression(const RegisterSet *rs,
 		throw SliException("transform_expr failed to remove all load expressions\n");
 
 	case Iex_Const: {
-		IRExprConst *e = (IRExprConst *)expr;
-		IRConst *cnst = e->con;
-		switch (cnst->tag) {
-		case Ico_U1:
+		IRExprConst *cnst = (IRExprConst *)expr;
+		switch (cnst->ty) {
+		case Ity_I1:
 			dest->lo = (cnst->Ico.U1);
 			break;
-		case Ico_U8:
+		case Ity_I8:
 			dest->lo = (cnst->Ico.U8);
 			break;
-		case Ico_U16:
+		case Ity_I16:
 			dest->lo = (cnst->Ico.U16);
 			break;
-		case Ico_U32:
+		case Ity_I32:
 			dest->lo = (cnst->Ico.U32);
 			break;
-		case Ico_U64:
-		case Ico_F64:
-		case Ico_F64i:
+		case Ity_I64:
 			dest->lo = (cnst->Ico.U64);
 			break;
-		case Ico_V128: {
-			unsigned long r = cnst->Ico.V128;
-			r = r | (r << 16) | (r << 32) | (r << 48);
-			dest->lo = (r);
-			dest->hi = dest->lo;
+		case Ity_I128:
+			dest->lo = cnst->Ico.U128.lo;
+			dest->lo = cnst->Ico.U128.hi;
 			break;
-		}
 		default:
 			ppIRExpr(expr, stderr);
 			throw NotImplementedException();
@@ -1127,12 +1120,7 @@ eval_expression(const RegisterSet *rs,
 		case Ity_I64:
 			break;
 
-		case Ity_F32:
-		case Ity_F64:
-			break;
-
 		case Ity_I128:
-		case Ity_V128:
 			break;
 
 		default:
@@ -1514,27 +1502,22 @@ optimiseIRSB(IRSB *irsb)
 	} useTmps;
 	useTmps.tmps = &tmps;
 	struct {
-		struct mentionsRegister : public IRExprTransformer {
-			const threadAndRegister &tr;
-			mentionsRegister(const threadAndRegister &_tr)
-				: tr(_tr)
-			{}
-			IRExpr *transformIex(IRExprGet *ieg) {
-				if (ieg->reg == tr)
-					abortTransform();
-				return ieg;
-			}
-			bool operator()(IRExpr *a) {
-				aborted = false;
-				doit(a);
-				return aborted;
-			}
-		};
+		static visit_result Get(const threadAndRegister *c, const IRExprGet *ieg) {
+			if (ieg->reg == *c)
+				return visit_abort;
+			else
+				return visit_continue;
+		}
+		bool mentionsRegister(const threadAndRegister &tr, const IRExpr *e)
+		{
+			static irexpr_visitor<const threadAndRegister> visitor;
+			visitor.Get = Get;
+			return visit_irexpr(&tr, &visitor, e) == visit_abort;
+		}
 		std::map<threadAndRegister, IRExpr *> *tmps;
 		void operator()(const threadAndRegister &tr) {
-			mentionsRegister mr(tr);
 			for (auto it = tmps->begin(); it != tmps->end(); ) {
-				if (mr(it->second))
+				if (mentionsRegister(tr, it->second))
 					tmps->erase(it++);
 				else
 					it++;
@@ -1604,14 +1587,16 @@ optimiseIRSB(IRSB *irsb)
 	std::set<threadAndRegister> neededRegs;
 	struct : public IRExprTransformer {
 		std::set<threadAndRegister> *neededRegs;
-		IRExpr *transformIex(IRExprGet *ieg) {
+		static visit_result Get(std::set<threadAndRegister> *neededRegs, const IRExprGet *ieg) {
 			neededRegs->insert(ieg->reg);
-			return ieg;
+			return visit_continue;
 		}
 		void operator()(IRExpr **i) {
+			static irexpr_visitor<std::set<threadAndRegister> > visitor;
+			visitor.Get = Get;
 			if (*i) {
 				*i = simplifyIRExpr(*i, AllowableOptimisations::defaultOptimisations);
-				doit(*i);
+				visit_irexpr(neededRegs, &visitor, *i);
 			}
 		}
 	} useExpr;
@@ -1830,7 +1815,7 @@ extract_call_follower(IRSB *irsb)
 		idx--;
 	assert(idx >= 0);
 	VexRip r( ((IRStmtIMark *)irsb->stmts[idx])->addr.rip );
-	r.jump(((IRExprConst *)s->data)->con->Ico.U64);
+	r.jump(((IRExprConst *)s->data)->Ico.U64);
 	return r;
 }
 
@@ -1852,20 +1837,17 @@ put_stmt(RegisterSet *rs, unsigned put_offset, struct expression_result put_data
 		break;
 
 	case Ity_I32:
-	case Ity_F32:
 		assert(!(byte_offset % 4));
 		dest &= ~(0xFFFFFFFFul << (byte_offset * 8));
 		dest |= put_data.lo << (byte_offset * 8);
 		break;
 
 	case Ity_I64:
-	case Ity_F64:
 		assert(byte_offset == 0);
 		dest = put_data.lo;
 		break;
 
 	case Ity_I128:
-	case Ity_V128:
 		assert(byte_offset == 0);
 		dest = put_data.lo;
 		write_reg(rs,

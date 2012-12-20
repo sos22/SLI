@@ -7,23 +7,21 @@
 #include "offline_analysis.hpp"
 #include "state_machine.hpp"
 #include "inferred_information.hpp"
+#include "visitor.hpp"
 
 static bool
-irexprUsesBadPtr(const IRExpr *e)
+irexprUsesBadPtr(const bbdd *e)
 {
-	struct : public IRExprTransformer {
-		bool res;
-		IRExpr *transformIex(IRExprUnop *ieg) {
+	struct {
+		static visit_result Unop(void *, const IRExprUnop *ieg) {
 			if (ieg->op == Iop_BadPtr)
-				res = true;
-			return IRExprTransformer::transformIex(ieg);
+				return visit_abort;
+			return visit_continue;
 		}
-	} doit;
-	doit.res = false;
-	doit.doit(const_cast<IRExpr *>(e));
-	if (TIMEOUT)
-		abort();
-	return doit.res;
+	} foo;
+	static irexpr_visitor<void> visitor;
+	visitor.Unop = foo.Unop;
+	return visit_const_bdd((void *)NULL, &visitor, e) == visit_abort;
 }
 
 static bool
@@ -50,9 +48,11 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
+	SMScopes scopes;
+
 	if (argc == 2) {
 		CrashSummary *summary;
-		summary = readBugReport(argv[1], NULL);
+		summary = readBugReport(&scopes, argv[1], NULL);
 
 		if (summaryUsesBadPtr(summary)){
 			printf("Uses badptr\n");
@@ -77,7 +77,7 @@ main(int argc, char *argv[])
 		}
 		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
 			continue;
-		CrashSummary *summary = readBugReport(de->d_name, NULL);
+		CrashSummary *summary = readBugReport(&scopes, de->d_name, NULL);
 		if (!summaryUsesBadPtr(summary))
 			unlink(de->d_name);
 		LibVEX_maybe_gc(ALLOW_GC);

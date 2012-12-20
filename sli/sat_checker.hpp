@@ -57,7 +57,7 @@ public:
 	const satisfier &get() {
 		assert(!stack.empty());
 		assert(stack.back().remainder->tag == Iex_Const);
-		assert( ((IRExprConst *)stack.back().remainder)->con->Ico.U1 );
+		assert( ((IRExprConst *)stack.back().remainder)->Ico.U1 );
 		return stack.back().partial_sat;
 	}
 };
