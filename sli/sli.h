@@ -413,23 +413,10 @@ public:
 	NAMED_CLASS
 };
 
-void debugger_attach(void);
-
 void init_sli(void);
 
-void gdb_concrete(const MachineState *ms);
-void gdb(void);
 void dbg_break(const char *msg, ...);
 void printIRExpr(IRExpr *e);
-
-/* force some functions to be included even when they're not needed,
-   so that they're available for calling from the debugger. */
-static void force_linkage() __attribute__((unused, used));
-static void
-force_linkage()
-{
-	printIRExpr(NULL);
-}
 
 VexRip extract_call_follower(IRSB *irsb);
 expression_result eval_expression(const RegisterSet *rs,
@@ -451,8 +438,6 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 	return tt;
 }
 
-class VexRip;
-
 void getDominators(Thread *thr, MachineState *ms, std::vector<VexRip> &dominators,
 		   std::vector<VexRip> &fheads);
 template <typename ripType> void findDominators(const ripType &functionHead,
@@ -469,11 +454,6 @@ IRSB *instrument_func(unsigned tid,
 		      IRType gWordTy,
 		      IRType hWordTy);
 
-#define DUMMY_EVENT ((ThreadEvent *)1)
-#define FINISHED_BLOCK ((ThreadEvent *)2)
-
-void HandleMallocFree(Thread *thr, AddressSpace *as);
-
 class internIRExprTable : public GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv);
 protected:
@@ -489,11 +469,6 @@ char *nameIRExpr(IRExpr *a);
 void my_system(const char *arg1, ...);
 char *flattenStringFragmentsMalloc(std::vector<const char *> fragments, const char *sep = "",
 				   const char *prefix = "", const char *suffix = "");
-
-/* Do it this way so that we still get format argument checking even
-   when a particular type of debug is disabled. */
-#define DBG_DISCARD(fmt, ...) do { if (0) { printf(fmt, ## __VA_ARGS__ ); } } while (0)
-#define DBG_PRINT(fmt, ...) do { printf(fmt, ## __VA_ARGS__ ); } while (0)
 
 void warning(const char *fmt, ...) __attribute__((__format__(__printf__, 1, 2)));
 
