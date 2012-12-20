@@ -311,9 +311,6 @@ AddressSpace::getIRSBForAddress(const ThreadRip &tr, bool singleInstr)
 {
 	unsigned tid = tr.thread;
 
-	if (tr.rip.unwrap_vexrip() == ASSERT_FAILED_ADDRESS)
-		throw ForceFailureException(ASSERT_FAILED_ADDRESS);
-
 	if (!decode_cache.get())
 		decode_cache.set(new WeakRef<DecodeCache, &ir_heap>());
 	DecodeCache *dc = decode_cache.get()->get();
@@ -348,7 +345,7 @@ AddressSpace::getIRSBForAddress(const ThreadRip &tr, bool singleInstr)
 				NULL,
 				singleInstr);
 		if (!irsb)
-			throw InstructionDecodeFailedException();
+			abort();
 
 		irsb->sanity_check();
 

@@ -49,64 +49,6 @@ public:
 	}
 };
 
-class ReplayFailedException : public SliException {
-public:
-	ReplayFailedException(const char *fmt, ...) __attribute__((__format__ (__printf__,2,3)))
-	{
-		va_list args;
-		va_start(args, fmt);
-		setMessage(args, fmt);
-		va_end(args);
-	}
-};
-
-class ReplayFailedBadRegister : public ReplayFailedException {
-public:
-	const char *reg_name;
-	unsigned long observed;
-	unsigned long expected;
-	ReplayFailedBadRegister(const char *_name,
-				unsigned long _observed,
-				unsigned long _expected) :
-		ReplayFailedException(
-			"replay failed due to bad register %s: wanted %lx, got %lx\n",
-			_name,
-			_expected,
-			_observed),
-		reg_name(_name),
-		observed(_observed),
-		expected(_expected)
-	{
-	}
-};
-
-class InstructionDecodeFailedException : public SliException {
-};
-
-class NotImplementedException : public SliException {
-public:
-	char *reason;
-	NotImplementedException(const char *fmt, ...) __attribute__((__format__ (__printf__,2,3)))
-	{
-		va_list args;
-		
-		va_start(args, fmt);
-		int r = vasprintf(&reason, fmt, args);
-		(void)r;
-		va_end(args);
-		setMessage("not implemented: %s", reason);
-	}
-	NotImplementedException() :
-		SliException("not implemented"),
-		reason(NULL)
-	{
-	}
-
-	~NotImplementedException() throw () {
-		free(reason);
-	}
-};
-
 class BadMemoryException : public SliException {
 public:
 	bool isWrite;
@@ -122,27 +64,6 @@ public:
 		isWrite(_isWrite),
 		ptr(_ptr),
 		size(_size)
-	{
-	}
-};
-
-class ForceFailureException : public SliException {
-public:
-	unsigned long rip;
-	ForceFailureException(unsigned long _rip)
-		: SliException(
-			"forced failure at %lx\n", _rip),
-		  rip(_rip)
-	{
-	}
-};
-
-class UnknownSyscallException : public SliException {
-public:
-	unsigned nr;
-	UnknownSyscallException(unsigned _nr) :
-		SliException("unknown syscall %d\n", _nr),
-		nr(_nr)
 	{
 	}
 };

@@ -103,11 +103,9 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 #define HLP(x) helper_name = "helper_load_" #x ; helper = (void *)helper_load_ ## x ;
 		switch (e->ty) {
 		case Ity_INVALID:
-			throw NotImplementedException("Bad type 1");
+			abort();
 		case Ity_I1:
-			throw NotImplementedException("Bad type 2");
-		default:
-			throw NotImplementedException("Bad type 3");
+			abort();
 		case Ity_I8:
 			HLP(8);
 			break;
@@ -161,7 +159,7 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 	case Iex_HappensBefore:
 		abort();
 	}
-	throw NotImplementedException("Something bad");
+	abort();
 }
 
 IRSB *
