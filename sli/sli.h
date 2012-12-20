@@ -126,10 +126,6 @@ public:
 private:
 	/* Mutable because we splay the tree on lookup */
 	mutable VAMapEntry *root;
-
-	VAMap *parent;
-
-	void forceCOW();
 public:
 	bool translate(unsigned long va,
 		       PhysicalAddress *pa = NULL) const;
@@ -138,7 +134,7 @@ public:
 
 	static VAMap *empty();
 	static void visit(VAMap *&ref, HeapVisitor &hv, PMap *pmap);
-	void visit(HeapVisitor &hv);
+	void visit(HeapVisitor &) {}
 
 	NAMED_CLASS
 };
