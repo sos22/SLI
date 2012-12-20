@@ -4,6 +4,29 @@
 #define TRACE_PMAP 0
 #endif
 
+static bool
+operator<(const PhysicalAddress &a, const PhysicalAddress &b)
+{
+	return a._pa < b._pa;
+}
+static bool
+operator>=(const PhysicalAddress &a, const PhysicalAddress &b)
+{
+	return a._pa >= b._pa;
+}
+static PhysicalAddress
+operator+(const PhysicalAddress &a, unsigned long x)
+{
+	PhysicalAddress r;
+	r._pa = a._pa + x;
+	return r;
+}
+static unsigned long
+operator-(const PhysicalAddress &a, const PhysicalAddress &b)
+{
+	return a._pa - b._pa;
+}
+
 PMapEntry *PMapEntry::alloc(PhysicalAddress pa,
 			    MemoryChunk *mc)
 {
@@ -70,7 +93,6 @@ const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start
 PhysicalAddress PMap::introduce(MemoryChunk *mc)
 {
 	PhysicalAddress pa = nextPa;
-	mc->base = pa;
 	nextPa = nextPa + MemoryChunk::size;
 	PMapEntry *pme = PMapEntry::alloc(pa, mc);
 	unsigned h = paHash(pa);

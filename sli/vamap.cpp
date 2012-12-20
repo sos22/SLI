@@ -147,7 +147,7 @@ bool VAMap::translate(unsigned long va,
 	       root->pa[(va - root->start) / MEMORY_CHUNK_SIZE]._pa);
 #endif
 	if (pa) {
-		*pa = root->pa[(va - root->start) / MEMORY_CHUNK_SIZE] +
+		pa->_pa = root->pa[(va - root->start) / MEMORY_CHUNK_SIZE]._pa +
 			((va - root->start) % MEMORY_CHUNK_SIZE);
 		assert(pa->_pa != 0);
 	}

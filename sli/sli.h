@@ -38,23 +38,6 @@ class PhysicalAddress {
 public:
 	unsigned long _pa;
 	PhysicalAddress() : _pa(0) {}
-	bool operator<(PhysicalAddress b) const { return _pa < b._pa; }
-	bool operator>=(PhysicalAddress b) const { return _pa >= b._pa; }
-	bool operator!=(PhysicalAddress b) const { return _pa != b._pa; }
-	bool operator==(PhysicalAddress b) const { return _pa == b._pa; }
-	PhysicalAddress operator+(unsigned long x) const
-	{
-		PhysicalAddress r;
-		r._pa = _pa + x;
-		return r;
-	}
-	PhysicalAddress operator-(unsigned long x) const
-	{
-		PhysicalAddress r;
-		r._pa = _pa - x;
-		return r;
-	}
-	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
 };
 
 class RegisterSet {
@@ -62,37 +45,26 @@ public:
 	static const unsigned NR_REGS = sizeof(VexGuestAMD64State) / 8;
 #define REGISTER_IDX(x) (offsetof(VexGuestAMD64State, guest_ ## x) / 8)
 	unsigned long registers[NR_REGS];
-	RegisterSet(const VexGuestAMD64State &r);
 	RegisterSet() {};
-	unsigned long &get_reg(unsigned idx) { assert(idx < NR_REGS); return registers[idx]; }
-	const unsigned long &get_reg(unsigned idx) const { assert(idx < NR_REGS); return registers[idx]; }
+	unsigned long get_reg(unsigned idx) { assert(idx < NR_REGS); return registers[idx]; }
 	void set_reg(unsigned idx, unsigned long val)
 	{
 		assert(idx < NR_REGS);
 		registers[idx] = val;
 	}
-	unsigned long &rip() { return get_reg(REGISTER_IDX(RIP)); }
-	unsigned long &rsp() { return get_reg(REGISTER_IDX(RSP)); }
-
-	void pretty_print() const {
-		for (unsigned x = 0; x < NR_REGS; x++)
-			printf("\treg%d: %lx\n", x, registers[x]);
-	}
+	unsigned long rip() { return get_reg(REGISTER_IDX(RIP)); }
+	unsigned long rsp() { return get_reg(REGISTER_IDX(RSP)); }
 };
 
 class MachineState;
 class AddressSpace;
 class PMap;
-class ThreadEvent;
 
 class Thread : public GarbageCollected<Thread> {
 public:
 
 	ThreadId tid;
 	RegisterSet regs;
-	bool crashed;
-
-	void pretty_print() const;
 
 	void visit(HeapVisitor &) {}
 
@@ -140,7 +112,6 @@ public:
 	void write(unsigned offset, const unsigned long *source, unsigned nr_bytes);
 	void read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const;
 
-	PhysicalAddress base;
 	void visit(HeapVisitor &) {}
 
 	NAMED_CLASS
@@ -225,8 +196,6 @@ class MachineState : public GarbageCollected<MachineState> {
 public:
 	std::vector<Thread *> threads;
 
-	ThreadId nextTid;
-
 	AddressSpace *addressSpace;
 	ElfData *elfData;
 
@@ -246,22 +215,13 @@ public:
 		t->tid = tid;
 		threads.push_back(t);
 	}
-	Thread *findThread(ThreadId id, bool allow_failure = false) {
+	Thread *findThread(ThreadId id) {
 		unsigned x;
 		for (x = 0; x < threads.size(); x++)
 			if (threads[x]->tid == id)
 				return threads[x];
-		assert(allow_failure);
-		return NULL;
+		abort();
 	}
-	const Thread *findThread(ThreadId id) const {
-		unsigned x;
-		for (x = 0; x < threads.size(); x++)
-			if (threads[x]->tid == id)
-				return threads[x];
-		return NULL;
-	}
-
 	void visit(HeapVisitor &hv);
 
 	NAMED_CLASS
