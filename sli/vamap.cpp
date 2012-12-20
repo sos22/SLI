@@ -70,8 +70,6 @@ bool VAMap::translate(unsigned long va,
 #if TRACE_VAMAP & TRACE_VAMAP_LOOKUP
 	printf("%p: Translate %lx\n", this, va);
 #endif
-	if (parent)
-		return parent->translate(va, pa);
 	if (!root)
 		return false;
 	/* Splay the target node to the root of the tree */
@@ -170,22 +168,12 @@ bool VAMap::translate(unsigned long va,
 	return true;
 }
 
-void VAMap::forceCOW()
-{
-	if (parent) {
-		root = parent->root->dupeSelf();
-		parent = NULL;
-	}
-}
-
 void VAMap::addTranslation(unsigned long start,
 			   PhysicalAddress pa)
 {
 #if TRACE_VAMAP & TRACE_VAMAP_CHANGE
 	printf("%p: Add translation %lx -> %lx\n", this, start, pa._pa);
 #endif
-	forceCOW();
-
 	VAMapEntry *vme;
 	VAMapEntry *newVme;
 	unsigned long end = start + MEMORY_CHUNK_SIZE;
@@ -279,22 +267,11 @@ VAMap *VAMap::empty()
 	return new VAMap();
 }
 
-void VAMap::visit(HeapVisitor &hv)
-{
-	hv(parent);
-}
-
 void VAMap::visit(VAMap *&ref, HeapVisitor &hv, PMap *pmap)
 {
 	hv(ref);
-	if (ref->root) {
-		assert(!ref->parent);
+	if (ref->root)
 		ref->root->visit(ref->root, pmap, hv);
-	}
-	if (ref->parent) {
-		assert(!ref->root);
-		ref->parent->visit(ref->parent, hv, pmap);
-	}
 }
 
 void VAMap::VAMapEntry::split(unsigned long at)
