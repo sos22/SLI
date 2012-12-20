@@ -142,7 +142,7 @@ MachineState::readELFExec(const char *path)
 	if (!phdrs)
 		return NULL;
 
-	AddressSpace *as = AddressSpace::initialAddressSpace(0);
+	AddressSpace *as = AddressSpace::initialAddressSpace();
 	MachineState *work = new MachineState();
 	work->addressSpace = as;
 	for (int p = 0; p < eh->e_phnum; p++) {

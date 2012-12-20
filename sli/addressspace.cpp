@@ -270,24 +270,12 @@ bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
 	return true;
 }
 
-AddressSpace *AddressSpace::initialAddressSpace(unsigned long _initialBrk)
+AddressSpace *AddressSpace::initialAddressSpace()
 {
-	unsigned long initialBrk = _initialBrk;
 	AddressSpace *work = new AddressSpace();
-	work->brkptr = initialBrk;
-	work->brkMapPtr = initialBrk /*+ 4096*/;
 	work->pmap = PMap::empty();
 	work->vamap = VAMap::empty();
 	return work;	
-}
-
-AddressSpace *AddressSpace::dupeSelf() const
-{
-	AddressSpace *work = new AddressSpace();
-	*work = *this;
-	work->pmap = pmap->dupeSelf();
-	work->vamap = vamap->dupeSelf();
-	return work;
 }
 
 void AddressSpace::visit(HeapVisitor &hv)
@@ -313,29 +301,4 @@ bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
 	ptr &= PAGE_MASK;
 	allocateMemory(ptr, va - ptr, prot, flags);
 	return true;
-}
-
-char *
-AddressSpace::readString(unsigned long start, Thread *thr)
-{
-	char *buf;
-	unsigned offset;
-	unsigned buf_size;
-
-	buf_size = 64;
-	buf = (char *)malloc(buf_size);
-	offset = 0;
-	while (1) {
-		unsigned long b;
-		readMemory(start + offset, 1, &b, false, thr);
-		buf[offset] = b;
-		if (!buf[offset])
-			break;
-		offset++;
-		if (offset >= buf_size) {
-			buf_size *= 2;
-			buf = (char *)realloc(buf, buf_size);
-		}
-	}
-	return buf;
 }

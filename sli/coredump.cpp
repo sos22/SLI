@@ -43,7 +43,7 @@ MachineState::readCoredump(const char *path)
 	   -- nrEvents (XXX is this still needed?)
 	*/
 
-	AddressSpace *as = AddressSpace::initialAddressSpace(0); /* XXX don't know the BRK */
+	AddressSpace *as = AddressSpace::initialAddressSpace();
 	MachineState *work = new MachineState();
 	work->addressSpace = as;
 	for (int p = 0; p < eh->e_phnum; p++) {

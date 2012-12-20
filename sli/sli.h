@@ -366,8 +366,6 @@ visit_container(t &vector, HeapVisitor &hv)
 
 class AddressSpace : public GarbageCollected<AddressSpace > {
 public:
-	unsigned long brkptr;
-	unsigned long brkMapPtr;
 	VAMap *vamap;
 	PMap *pmap;
 
@@ -409,11 +407,8 @@ public:
 		return isAccessible(start, size, false, thr);
 	}
 
-	static AddressSpace *initialAddressSpace(unsigned long initialBrk);
-	AddressSpace *dupeSelf() const;
+	static AddressSpace *initialAddressSpace();
 	void visit(HeapVisitor &hv);
-
-	char *readString(unsigned long start, Thread *thr);
 
 	NAMED_CLASS
 };
