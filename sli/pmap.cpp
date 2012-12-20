@@ -49,27 +49,8 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 		printf("%p: %lx -> %p\n", this, pa._pa, pme->mc);
 #endif
 		return pme->mc;
-	} else if (!parent) {
+	} else
 		return NULL;
-	} else {
-		const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start);
-		if (!parent_mc)
-			return NULL;
-
-		PMapEntry *newPme;
-		newPme = PMapEntry::alloc(pa - *mc_start, parent_mc->dupeSelf());
-		newPme->next = heads[h];
-		newPme->pprev = &heads[h];
-		if (newPme->next)
-			newPme->next->pprev = &newPme->next;
-		heads[h] = newPme;
-
-#if TRACE_PMAP
-		printf("%p: pull up non-const %lx -> %p from %p\n", this,
-		       pa._pa, newPme->mc, parent_mc);
-#endif
-		return newPme->mc;
-	}
 }
 
 const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start) const
@@ -82,11 +63,8 @@ const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start
 		printf("%p: %lx const -> %p\n", this, pa._pa, pme->mc);
 #endif
 		return pme->mc;
-	} else if (parent) {
-		return  parent->lookupConst(pa, mc_start);
-	} else {
+	} else
 		return NULL;
-	}
 }
 
 PhysicalAddress PMap::introduce(MemoryChunk *mc)
@@ -122,32 +100,21 @@ unsigned PMap::paHash(PhysicalAddress pa)
 void PMap::visitPA(PhysicalAddress pa, HeapVisitor &hv)
 {
 	unsigned h = paHash(pa);
-	PMap *cursor = this;
 
-	while (1) {
-		assert(cursor);
-		/* Double indirection because the hv() might want to
-		   relocate it. */
-		PMapEntry **pme;
+	/* Double indirection because the hv() might want to relocate
+	   it. */
+	PMapEntry **pme;
 	
-		pme = &cursor->heads[h];
-		while (*pme) {
-			if ( pa >= (*pme)->pa &&
-			     pa < (*pme)->pa + MemoryChunk::size ) {
-				hv(*pme);
-				return;
-			}
-			pme = &(*pme)->next;
+	pme = &heads[h];
+	while (*pme) {
+		if ( pa >= (*pme)->pa &&
+		     pa < (*pme)->pa + MemoryChunk::size ) {
+			hv(*pme);
+			return;
 		}
-		hv(cursor->parent);
-		assert(cursor->parent);
-		cursor = cursor->parent;
+		pme = &(*pme)->next;
 	}
-}
-
-void PMap::visit(HeapVisitor &hv)
-{
-	hv(parent);
+	abort();
 }
 
 void

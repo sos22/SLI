@@ -202,7 +202,6 @@ public:
 	 * The denotation of the mapping is unchanged, but its
 	 * physical structure is. */
 	mutable PMapEntry *heads[nrHashBuckets];
-	PMap *parent;
 
 private:
 	PMapEntry *findPme(PhysicalAddress pa, unsigned h) const;
@@ -220,7 +219,7 @@ public:
 	static PMap *empty();
 
 	void visitPA(PhysicalAddress pa, HeapVisitor &hv);
-	void visit(HeapVisitor &hv);
+	void visit(HeapVisitor &) {}
 	void relocate(PMap *target, size_t sz);
 
 	NAMED_CLASS
