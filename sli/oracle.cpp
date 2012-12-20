@@ -198,13 +198,6 @@ Oracle::RegisterAliasingConfiguration::prettyPrint(FILE *f) const
 	}
 }
 
-void
-Oracle::findPreviousInstructions(std::vector<VexRip> &out)
-{
-	std::vector<VexRip> fheads;
-	getDominators(crashedThread, ms, out, fheads);
-}
-
 unsigned
 getInstructionSize(AddressSpace *as, const StaticRip &rip)
 {
@@ -1850,60 +1843,6 @@ Oracle::findPossibleJumpTargets(const StaticRip &rip,
 	output.reserve(it->second.targets.size());
 	for (auto it2 = it->second.targets.begin(); it2 != it->second.targets.end(); it2++)
 		output.push_back(StaticRip(*it2));
-}
-
-void
-Oracle::findPreviousInstructions(std::vector<VexRip> &output,
-				 const VexRip &rip)
-{
-	StaticRip sr(functionHeadForInstruction(StaticRip(rip)));
-	if (!sr.rip) {
-		warning("No function for %s\n", rip.name());
-		return;
-	}
-	Function f(sr);
-
-	/* Build the shortest path from the start of the function to
-	   the desired rip using Dijkstra's algorithm.  */
-	/* Distance from start of function to key.  Non-present keys
-	 * should be assumed to have an infinite length. */
-	std::map<StaticRip, unsigned> pathLengths;
-	/* Predecessor on best path from start to key. */
-	std::map<StaticRip, StaticRip> predecessors; 
-	/* We push stuff in here when we discover a new shortest path
-	   to that node. */
-	std::priority_queue<std::pair<unsigned, StaticRip> > grey;
-
-	pathLengths[f.rip] = 0;
-	grey.push(std::pair<unsigned, StaticRip>(0, f.rip));
-	while (!grey.empty()) {
-		std::pair<unsigned, StaticRip> e(grey.top());
-		grey.pop();
-
-		assert(pathLengths.count(e.second));
-		unsigned p = pathLengths[e.second] + 1;
-		std::vector<StaticRip> successors;
-		f.getSuccessors(e.second, successors);
-		for (auto it = successors.begin();
-		     it != successors.end();
-		     it++) {
-			if (!pathLengths.count(*it) || pathLengths[*it] >= p) {
-				pathLengths[*it] = p;
-				predecessors[*it] = e.second;
-				grey.push(std::pair<unsigned, StaticRip>(p, *it));
-			}
-		}
-	}
-	
-	if (!predecessors.count(StaticRip(rip))) {
-		/* This can happen if the information from the oracle
-		   is inconsistent. */
-		warning("Dijkstra failed in %s\n", __func__);
-		return;
-	}
-
-	for (auto i = predecessors[StaticRip(rip)]; i.rip != 0; i = predecessors[i])
-		output.push_back(i.makeVexRip(rip));
 }
 
 void
