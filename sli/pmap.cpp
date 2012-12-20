@@ -62,7 +62,7 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 	} else if (!parent) {
 		return NULL;
 	} else {
-		const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start, false);
+		const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start);
 		if (!parent_mc)
 			return NULL;
 
@@ -82,8 +82,7 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 	}
 }
 
-const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start,
-						    bool pull_up) const
+const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start) const
 {
 	unsigned h = paHash(pa);
 	PMapEntry *pme = findPme(pa, h);
@@ -94,21 +93,7 @@ const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start
 #endif
 		return pme->mc;
 	} else if (parent) {
-		const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start, false);
-		if (pull_up) {
-			PMapEntry *newPme;
-			newPme = PMapEntry::alloc(pa - *mc_start, const_cast<MemoryChunk *>(parent_mc), true);
-			newPme->next = heads[h];
-			newPme->pprev = &heads[h];
-			if (newPme->next)
-				newPme->next->pprev = &newPme->next;
-			heads[h] = newPme;
-#if TRACE_PMAP
-			printf("%p: pull up const %lx -> %p\n", this,
-			       pa._pa, parent_mc);
-#endif
-		}
-		return parent_mc;
+		return  parent->lookupConst(pa, mc_start);
 	} else {
 		return NULL;
 	}
