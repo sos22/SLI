@@ -17,4 +17,4 @@ cd ${jobid}
 ln -s ../static.db
 mkdir logs
 mkdir crash_summaries
-../../minimal_direct ../mysqld ../types.dat.canon ../callgraph-newformat.dat ${start}...${end}
+SOS22_MINIMAL_DIRECT_TIMEOUT=180 ../../minimal_direct ../mysqld ../types.dat.canon ../callgraph1.dat ${start}...${end}
