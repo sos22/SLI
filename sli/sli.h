@@ -64,17 +64,6 @@ public:
 	unsigned long operator-(PhysicalAddress b) { return _pa - b._pa; }
 };
 
-struct expression_result : public Named {
-protected:
-	char *mkName() const {
-		return my_asprintf("{%lx, %lx}", lo, hi);
-	}
-public:
-	unsigned long lo;
-	unsigned long hi;
-	expression_result() : Named(), lo(0), hi(0) {}
-};
-
 class RegisterSet {
 public:
 	static const unsigned NR_REGS = sizeof(VexGuestAMD64State) / 8;
