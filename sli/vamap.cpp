@@ -50,20 +50,6 @@ VAMap::VAMapEntry *VAMap::VAMapEntry::alloc(unsigned long start,
 	return work;
 }
 
-VAMap::VAMapEntry *VAMap::VAMapEntry::dupeSelf() const
-{
-	VAMapEntry *work = (VAMapEntry *)__LibVEX_Alloc(&main_heap, &vme_type);
-	*work = *this;
-	if (prev)
-		work->prev = prev->dupeSelf();
-	if (succ)
-		work->succ = succ->dupeSelf();
-	work->pa =
-		(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress) * dchunk(start, end));
-	memcpy(work->pa, pa, sizeof(PhysicalAddress) * dchunk(start, end));
-	return work;
-}
-
 bool VAMap::translate(unsigned long va,
 		      PhysicalAddress *pa) const
 {

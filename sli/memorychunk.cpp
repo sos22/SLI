@@ -1,12 +1,5 @@
 #include "sli.h"
 
-MemoryChunk *MemoryChunk::dupeSelf() const
-{
-	MemoryChunk *r = new MemoryChunk();
-	memcpy(r, this, sizeof(*r));
-	return r;
-}
-
 void MemoryChunk::write(unsigned offset, const unsigned long *source, unsigned nr_bytes)
 {
 	assert(offset < size);
