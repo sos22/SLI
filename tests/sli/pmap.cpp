@@ -31,7 +31,7 @@ main()
 	mc1 = pmap1->lookup(PhysicalAddress(), &off1);
 	assert(mc1 == NULL);
 
-	mc1 = MemoryChunk::allocate();
+	mc1 = new MemoryChunk();
 	PhysicalAddress pa1;
 
 	printf("Introduce a memory chunk and make sure we can get it back again.\n");
@@ -49,7 +49,7 @@ main()
 	assert(mc2 == NULL);
 
 	printf("Introduce a second chunk and make sure that they stay separate.\n");
-	mc2 = MemoryChunk::allocate();
+	mc2 = new MemoryChunk();
 	PhysicalAddress pa2 = pmap1->introduce(mc2);
 	printf("pa2 %lx\n", pa2._pa);
 	assert(pa2 != pa1);
@@ -69,10 +69,8 @@ main()
 	assert(mc2 == NULL);
 
 	printf("Now check that it's possible to hold references to the chunks\n");
-	mc1 = MemoryChunk::allocate();
-	mc2 = MemoryChunk::allocate();
-	unsigned mc1_serial = mc1->serial;
-	unsigned mc2_serial = mc2->serial;
+	mc1 = new MemoryChunk();
+	mc2 = new MemoryChunk();
 	pa1 = pmap1->introduce(mc1);
 	pa2 = pmap1->introduce(mc2);
 
@@ -87,9 +85,7 @@ main()
 	pmap1 = k->pmap;
 
 	mc3 = pmap1->lookup(pa1, &off1);
-	assert(mc3->serial == mc1_serial);
 	mc3 = pmap1->lookup(pa2, &off1);
-	assert(mc3->serial == mc2_serial);
 
 	printf("Unregister the keeper and check that everything drops away\n");
 	vexUnregisterGCRoot(&main_heap, (void **)&k);
@@ -100,7 +96,7 @@ main()
 	assert(mc3 == NULL);
 
 	printf("State forking...\n");
-	mc1 = MemoryChunk::allocate();
+	mc1 = new MemoryChunk();
 	unsigned long b[12];
 	for (unsigned x = 0; x < 12; x++)
 		b[x] = "Hello world"[x];

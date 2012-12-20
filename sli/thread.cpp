@@ -1,7 +1,5 @@
 #include "sli.h"
 
-const ThreadId ThreadId::invalidTid;
-
 RegisterSet::RegisterSet(VexGuestAMD64State const&r)
 {
 	for (unsigned x = 0; x < NR_REGS; x++)

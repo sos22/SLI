@@ -8,12 +8,3 @@ void MachineState::visit(HeapVisitor &hv)
 	hv(addressSpace);
 	hv(elfData);
 }
-
-bool MachineState::crashed() const
-{
-	unsigned x;
-	for (x = 0; x < threads.size(); x++)
-		if (threads[x]->crashed)
-			return true;
-	return false;
-}
