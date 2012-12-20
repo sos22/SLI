@@ -699,7 +699,7 @@ public:
 static sliced_expr
 slice_by_exprs(IRExpr *expr, const std::set<IRExpr *> &sliceby)
 {
-	if (sliceby.empty()) {
+	if (sliceby.empty() || expr->tag == Iex_Const) {
 		expr_slice theSlice;
 		theSlice.leftOver =
 			simplify_via_anf(

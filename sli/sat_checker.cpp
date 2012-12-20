@@ -1169,6 +1169,60 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 			}
 			return IRExprTransformer::transformIRExpr(e, done_something);
 		}
+		IRExpr *transformIex(IRExprUnop *e) {
+			IRExpr *e2 = IRExprTransformer::transformIex(e);
+			if (!e2 || e2 == e || e2->tag != Iex_Unop)
+				return e2;
+			e = (IRExprUnop *)e2;
+			if (e->op != Iop_Not1 || e->arg->tag != Iex_Const)
+				return e;
+			return IRExpr_Const_U1(!((IRExprConst *)e->arg)->Ico.U1);
+		}
+		IRExpr *transformIex(IRExprAssociative *e) {
+			if (e->op != Iop_Or1 && e->op != Iop_And1)
+				return IRExprTransformer::transformIex(e);
+			/* identity is the identity element for this
+			   operation (true for and, false for or), and
+			   suppress is the ``suppressor'' element such
+			   that x <op> suppressor = suppressor, for
+			   any x (true for or, false for and). */
+			bool identity = e->op == Iop_And1;
+			bool suppress = e->op == Iop_Or1;
+			bool t = false;
+			int in_idx = 0;
+			int out_idx = 0;
+			IRExpr *newE;
+			while (in_idx < e->nr_arguments) {
+				newE = transformIRExpr(e->contents[in_idx++], &t);
+				if (t)
+					break;
+				out_idx++;
+			}
+			if (!t)
+				return NULL;
+			if (newE->tag == Iex_Const &&
+			    ((IRExprConst *)newE)->Ico.U1 == suppress)
+				return newE;
+
+			IRExprAssociative *r = (IRExprAssociative *)IRExpr_Associative(e);
+			if (newE->tag == Iex_Const) {
+				assert(((IRExprConst *)newE)->Ico.U1 == identity);
+			} else {
+				r->contents[out_idx++] = newE;
+			}
+			while (in_idx < e->nr_arguments) {
+				newE = transformIRExpr(e->contents[in_idx++], &t);
+				if (newE->tag == Iex_Const) {
+					if ( ((IRExprConst *)newE)->Ico.U1 == suppress )
+						return newE;
+					assert(((IRExprConst *)newE)->Ico.U1 == identity);
+				} else {
+					r->contents[out_idx++] = newE;
+				}
+			}
+			r->nr_arguments = out_idx;
+			return r;
+		}
 	} boolRewrite;
 	boolRewrite.variable = variable;
 	boolRewrite.value = value;
