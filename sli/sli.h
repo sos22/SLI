@@ -212,23 +212,18 @@ public:
 class MemoryChunk : public GarbageCollected<MemoryChunk> {
 public:
 	static const unsigned long size = MEMORY_CHUNK_SIZE;
-	static MemoryChunk *allocate();
 
 	void write(unsigned offset, const unsigned long *source, unsigned nr_bytes);
-	void read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
-		  unsigned long *sa = NULL) const;
+	void read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const;
 
 	MemoryChunk *dupeSelf() const;
 
 	PhysicalAddress base;
-	unsigned serial;
 	void visit(HeapVisitor &) {}
 
 	NAMED_CLASS
 
 private:
-	static unsigned serial_start;
-	mutable bool frozen;
 	unsigned char content[size];
 };
 
@@ -348,7 +343,6 @@ public:
 				return threads[x];
 		return NULL;
 	}
-	bool crashed() const;
 
 	void visit(HeapVisitor &hv);
 
@@ -394,8 +388,7 @@ public:
 					    Thread *thr);
 	void readMemory(unsigned long start, unsigned size,
 			unsigned long *contents, bool ignore_protection,
-			Thread *thr,
-			unsigned long *storeAddr = NULL);
+			Thread *thr);
 	bool isAccessible(unsigned long start, unsigned size,
 			  bool isWrite, Thread *thr);
 	bool isWritable(unsigned long start, unsigned size,

@@ -17,7 +17,7 @@ AddressSpace::allocateMemory(unsigned long _start, unsigned long _size,
 
 	vamap->unmap(start, size);
 	while (size != 0) {
-		MemoryChunk *chunk = MemoryChunk::allocate();
+		MemoryChunk *chunk = new MemoryChunk();
 		PhysicalAddress pa = pmap->introduce(chunk);
 		vamap->addTranslation(start, pa, prot, flags);
 		start += MemoryChunk::size;
@@ -65,7 +65,7 @@ AddressSpace::copyFromClient(unsigned long start, unsigned size, void *dest)
 
 	fault = false;
 	try {
-		readMemory(start, size, buf, false, NULL, NULL);
+		readMemory(start, size, buf, false, NULL);
 	} catch (BadMemoryException &e) {
 		fault = true;
 	}
@@ -119,11 +119,10 @@ AddressSpace::load(unsigned long start, unsigned size,
 		   Thread *thr)
 {
 	unsigned long b[16];
-	unsigned long storeAddr;
 	memset(b, 0, sizeof(unsigned long) * size);
 	for (unsigned x = 0; x < size; x++)
 		new (&b[x]) unsigned long();
-	readMemory(start, size, b, ignore_protection, thr, &storeAddr);
+	readMemory(start, size, b, ignore_protection, thr);
 	expression_result res;
 	res.lo = 0ul;
 	res.hi = 0ul;
@@ -200,12 +199,9 @@ AddressSpace::store(unsigned long start, unsigned size,
 
 void AddressSpace::readMemory(unsigned long _start, unsigned size,
 			      unsigned long *contents, bool ignore_protection,
-			      Thread *thr,
-			      unsigned long *storeAddr)
+			      Thread *thr)
 {
 	unsigned long start = _start;
-	if (storeAddr)
-		*storeAddr = start;
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
@@ -219,8 +215,7 @@ void AddressSpace::readMemory(unsigned long _start, unsigned size,
 			to_copy_this_time = size;
 			if (to_copy_this_time > mc->size - mc_start)
 				to_copy_this_time = mc->size - mc_start;
-			mc->read(mc_start, contents, to_copy_this_time,
-				 storeAddr);
+			mc->read(mc_start, contents, to_copy_this_time);
 
 			start += to_copy_this_time;
 			size -= to_copy_this_time;

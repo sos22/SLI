@@ -1,14 +1,4 @@
-#include <bitset>
 #include "sli.h"
-
-unsigned MemoryChunk::serial_start = 0xbeeffeed;
-
-MemoryChunk *MemoryChunk::allocate()
-{
-	MemoryChunk *mc = new MemoryChunk();
-	mc->serial = serial_start++;
-	return mc;
-}
 
 MemoryChunk *MemoryChunk::dupeSelf() const
 {
@@ -19,7 +9,6 @@ MemoryChunk *MemoryChunk::dupeSelf() const
 
 void MemoryChunk::write(unsigned offset, const unsigned long *source, unsigned nr_bytes)
 {
-	assert(!frozen);
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
 	for (unsigned x = 0; x < nr_bytes; x++) {
@@ -27,11 +16,8 @@ void MemoryChunk::write(unsigned offset, const unsigned long *source, unsigned n
 	}
 }
 
-void MemoryChunk::read(unsigned offset, unsigned long *dest, unsigned nr_bytes,
-		       unsigned long *storeAddr) const
+void MemoryChunk::read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const
 {
-	if (storeAddr)
-		*storeAddr = 0xbeeffeed;
 	assert(offset < size);
 	assert(offset + nr_bytes <= size);
 	for (unsigned x = 0; x < nr_bytes; x++)
