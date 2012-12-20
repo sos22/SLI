@@ -137,7 +137,6 @@ public:
 			    PhysicalAddress pa);
 
 	static VAMap *empty();
-	VAMap *dupeSelf();
 	static void visit(VAMap *&ref, HeapVisitor &hv, PMap *pmap);
 	void visit(HeapVisitor &hv);
 
@@ -219,7 +218,6 @@ public:
 	PhysicalAddress introduce(MemoryChunk *mc);
 
 	static PMap *empty();
-	PMap *dupeSelf() const;
 
 	void visitPA(PhysicalAddress pa, HeapVisitor &hv);
 	void visit(HeapVisitor &hv);
