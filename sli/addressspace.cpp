@@ -240,7 +240,7 @@ void AddressSpace::readMemory(unsigned long _start, unsigned size,
 }
 
 bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
-				     bool isWrite, Thread *thr)
+				bool isWrite, Thread *thr)
 {
 	unsigned long start = _start;
 	while (size != 0) {
@@ -268,23 +268,6 @@ bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
 		}
 	}
 	return true;
-}
-
-unsigned long AddressSpace::setBrk(unsigned long _newBrk)
-{
-	unsigned long newBrk = _newBrk;
-	unsigned long newBrkMap = (newBrk + 4095) & PAGE_MASK;
-
-	if (newBrk != 0) {
-		if (newBrkMap > brkMapPtr)
-			allocateMemory(brkMapPtr, newBrkMap - brkMapPtr, VAMap::Protection(true, true, false));
-		else
-			releaseMemory(newBrkMap, brkMapPtr - newBrkMap);
-		brkptr = newBrk;
-		brkMapPtr = newBrkMap;
-	}
-
-	return brkptr;
 }
 
 AddressSpace *AddressSpace::initialAddressSpace(unsigned long _initialBrk)
@@ -330,81 +313,6 @@ bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
 	ptr &= PAGE_MASK;
 	allocateMemory(ptr, va - ptr, prot, flags);
 	return true;
-}
-
-void AddressSpace::dumpBrkPtr(LogWriter *lw) const
-{
-	lw->append(new LogRecordInitialBrk(ThreadId(0), brkptr));
-}
-
-void AddressSpace::dumpSnapshot(LogWriter *lw) const
-{
-	unsigned long end_of_last_block = 0;
-
-	while (1) {
-		unsigned long start_va;
-		PhysicalAddress pa;
-		VAMap::Protection prot(0);
-		VAMap::AllocFlags alf(false);
-
-		if (!vamap->findNextMapping(end_of_last_block, &start_va, &pa, &prot, &alf))
-			return;
-
-		/* Do this in two steps.  First, dump all the allocate
-		   records, and then go back and do the populate ones.
-		   This makes it easier to merge adjacent
-		   allocations. */
-		unsigned long end_va = start_va;
-		while (1) {
-			unsigned long next_va;
-			VAMap::Protection prot2(0);
-			VAMap::AllocFlags alf2(false);
-			if (!vamap->findNextMapping(end_va + 4096, &next_va, &pa, &prot2, &alf2))
-				break;
-			if (next_va != end_va + 4096 || prot != prot2 || alf != alf2)
-				break;
-			end_va = next_va;
-		}
-
-		end_va += 4096;
-
-		lw->append(new LogRecordAllocateMemory(ThreadId(0),
-						       start_va,
-						       end_va - start_va,
-						       (unsigned long)prot,
-						       (unsigned long)alf));
-
-		/* Now do the contents of the block */
-
-		/* We cheat just a little bit and only bother dumping
-		   stuff which can be read or executed.  In principle,
-		   other bits of address space could be relevant,
-		   because someone might mprotect() them to be
-		   readable, but that's rather unlikely.  This allows
-		   us to avoid dumping reserved areas of address
-		   space, which can be hundreds of megabytes of data
-		   in some cases. */
-		if (prot.readable || prot.executable) {
-			unsigned long cursor_va;
-			for (cursor_va = start_va; cursor_va < end_va; cursor_va += 4096) {
-				bool r;
-				PhysicalAddress pa;
-				r = vamap->translate(cursor_va, &pa);
-				assert(r);
-				unsigned long off;
-				const MemoryChunk *mc = pmap->lookupConst(pa, &off);
-				assert(off == 0);
-				unsigned long *buf = (unsigned long *)calloc(MemoryChunk::size, sizeof(unsigned long));
-				mc->read(0, buf, MemoryChunk::size);
-				lw->append(new LogRecordMemory(ThreadId(0),
-							       MemoryChunk::size,
-							       cursor_va,
-							       buf));
-			}
-		}
-
-		end_of_last_block = end_va;
-	}
 }
 
 char *
