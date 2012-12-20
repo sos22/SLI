@@ -29,9 +29,7 @@ main()
 	MemoryChunk *mc1 = new MemoryChunk();
 	PhysicalAddress pa1 = pmap->introduce(mc1);
 	printf("Introduce a mapping and check that it comes back\n");
-	vamap->addTranslation(0x10000, pa1,
-			      VAMap::Protection(true, true, false),
-			      VAMap::AllocFlags(false));
+	vamap->addTranslation(0x10000, pa1);
 	bool r;
 	r = vamap->translate(0x10000);
 	assert(r);
@@ -42,16 +40,10 @@ main()
 	r = vamap->translate(0x10005, &pa2);
 	assert(r);
 	assert(pa2 == pa1 + 5);
-	VAMap::Protection prot(0);
-	r = vamap->translate(0x10000, NULL, &prot);
+	r = vamap->translate(0x10000, NULL);
 	assert(r);
-	assert(prot.readable);
-	assert(prot.writable);
-	assert(!prot.executable);
-	VAMap::AllocFlags alf(false);
-	r = vamap->translate(0x10000, NULL, NULL, &alf);
+	r = vamap->translate(0x10000, NULL);
 	assert(r);
-	assert(!alf.expandsDown);
 
 	printf("Check that bad mappings are still bad\n");
 	r = vamap->translate(0);
@@ -64,65 +56,28 @@ main()
 	printf("Introduce another mapping and check that they stay separate.\n");
 	MemoryChunk *mc2 = new MemoryChunk();
 	pa2 = pmap->introduce(mc2);
-	vamap->addTranslation(0x11000, pa2,
-			      VAMap::Protection(true, false, true),
-			      VAMap::AllocFlags(true));
+	vamap->addTranslation(0x11000, pa2);
 	PhysicalAddress pa3;
-	r = vamap->translate(0x10000,
-			     &pa3,
-			     &prot,
-			     &alf);
+	r = vamap->translate(0x10000, &pa3);
 	assert(r);
 	assert(pa3 == pa1);
-	assert(prot == VAMap::Protection(true, true, false));
-	assert(alf == VAMap::AllocFlags(false));
 
-	r = vamap->translate(0x11000,
-			     &pa3,
-			     &prot,
-			     &alf);
+	r = vamap->translate(0x11000, &pa3);
 	assert(r);
 	assert(pa3 == pa2);
-	assert(prot == VAMap::Protection(true, false, true));
-	assert(alf == VAMap::AllocFlags(true));
 
 	printf("Try unmapping something\n");
 	vamap->unmap(0x11000, 0x1000);
 	r = vamap->translate(0x11000);
 	assert(!r);
-	r = vamap->translate(0x10000,
-			     &pa3,
-			     &prot,
-			     &alf);
+	r = vamap->translate(0x10000, &pa3);
 	assert(r);
 	assert(pa3 == pa1);
-	assert(prot == VAMap::Protection(true, true, false));
-	assert(alf == VAMap::AllocFlags(false));
 
-	printf("mprotect()\n");
-	r = vamap->protect(0x10000, 0x1000, VAMap::Protection(false, false, true));
 	assert(r);
-	r = vamap->translate(0x10000,
-			     &pa3,
-			     &prot,
-			     &alf);
+	r = vamap->translate(0x10000, &pa3);
 	assert(r);
 	assert(pa3 == pa1);
-	assert(prot == VAMap::Protection(false, false, true));
-	assert(alf == VAMap::AllocFlags(false));
-
-	printf("mprotect() bad\n");
-	r = vamap->protect(0x11000, 0x1000, VAMap::Protection(false, false, true));
-	assert(!r);
-
-	unsigned long va;
-	printf("findNextMapping\n");
-	r = vamap->findNextMapping(0x5000, &va, &pa3, &prot, &alf);
-	assert(r);
-	assert(va == 0x10000);
-	assert(pa3 == pa1);
-	assert(prot == VAMap::Protection(false, false, true));
-	assert(alf == VAMap::AllocFlags(false));
 
 	printf("Check GC behaviour: VAMap keeps physical addresses live\n");
 	VexPtr<VAPMap> vap(new VAPMap());
@@ -149,9 +104,7 @@ main()
 		block1Mc[x] = new MemoryChunk();
 		block1Pa[x] = pmap->introduce(block1Mc[x]);
 		vamap->addTranslation(0x70000 + x * 0x1000,
-				      block1Pa[x],
-				      VAMap::Protection(true, false, true),
-				      VAMap::AllocFlags(false));
+				      block1Pa[x]);
 	}
 	for (x = 0; x < 5; x++) {
 		r = vamap->translate(0x70000 + x * 0x1000, &pa3);
@@ -159,9 +112,6 @@ main()
 		assert(pa3 == block1Pa[x]);
 	}
 	printf("...protect last few pages away...\n");
-	vamap->protect(0x72000, 0x1000, VAMap::Protection(false, false, false));
-	vamap->protect(0x73000, 0x1000, VAMap::Protection(false, false, false));
-	vamap->protect(0x74000, 0x1000, VAMap::Protection(false, false, false));
 	for (x = 0; x < 5; x++) {
 		r = vamap->translate(0x70000 + x * 0x1000, &pa3);
 		assert(pa3 == block1Pa[x]);
@@ -182,9 +132,7 @@ main()
 		block1Mc[x] = new MemoryChunk();
 		block1Pa[x] = pmap->introduce(block1Mc[x]);
 		vamap->addTranslation(0x70000 + x * 0x1000,
-				      block1Pa[x],
-				      VAMap::Protection(true, true, false),
-				      VAMap::AllocFlags(false));
+				      block1Pa[x]);
 	}
 	printf("...check results\n");
 	r = vamap->translate(0x70000, &pa3);

@@ -119,40 +119,6 @@ public:
 
 class VAMap : public GarbageCollected<VAMap> {
 public:
-	class Protection {
-	public:
-		bool readable;
-		bool writable;
-		bool executable;
-		Protection(bool r, bool w, bool x) :
-			readable(r),
-			writable(w),
-			executable(x)
-		{
-		}
-		Protection(unsigned prot); /* PROT_* flags */
-		bool operator==(const Protection &p) const {
-			return readable == p.readable &&
-				writable == p.writable &&
-				executable == p.executable;
-		}
-		operator unsigned long() const;
-	};
-	class AllocFlags {
-	public:
-		bool expandsDown;
-		AllocFlags(bool _e) :
-			expandsDown(_e)
-		{
-		}
-		AllocFlags(unsigned flags); /* MAP_* flags */
-		bool operator==(const AllocFlags alf) const {
-			return expandsDown == alf.expandsDown;
-		}
-		operator unsigned long() const;
-	};
-	static const AllocFlags defaultFlags;
-
 	class VAMapEntry {
 	public:
 		VAMapEntry *prev;
@@ -160,13 +126,9 @@ public:
 		unsigned long start; /* Inclusive */
 		unsigned long end; /* Exclusive */
 		PhysicalAddress *pa;
-		Protection prot;
-		AllocFlags alf;
 		static VAMapEntry *alloc(unsigned long start,
 					 unsigned long end,
-					 PhysicalAddress *pa,
-					 Protection prot,
-					 AllocFlags alf);
+					 PhysicalAddress *pa);
 		void split(unsigned long where);
 		static void visit(VAMapEntry *&ref, PMap *pmap, HeapVisitor &hv);
 		VAMapEntry *promoteSmallest();
@@ -182,21 +144,9 @@ private:
 	void forceCOW();
 public:
 	bool translate(unsigned long va,
-		       PhysicalAddress *pa = NULL,
-		       Protection *prot = NULL,
-		       AllocFlags *alf = NULL) const;
-	bool findNextMapping(unsigned long from,
-			     unsigned long *va = NULL,
-			     PhysicalAddress *pa = NULL,
-			     Protection *prot = NULL,
-			     AllocFlags *alf = NULL) const;
+		       PhysicalAddress *pa = NULL) const;
 	void addTranslation(unsigned long va,
-			    PhysicalAddress pa,
-			    Protection prot,
-			    AllocFlags alf);
-	bool protect(unsigned long start,
-		     unsigned long size,
-		     Protection prot);
+			    PhysicalAddress pa);
 	void unmap(unsigned long start, unsigned long size);
 
 	static VAMap *empty();
@@ -365,8 +315,7 @@ public:
 
 	IRSB *getIRSBForAddress(const ThreadRip &rip, bool singleInstr);
 
-	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
-			    VAMap::AllocFlags flags = VAMap::defaultFlags);
+	void allocateMemory(unsigned long start, unsigned long size);
 	void writeMemory(unsigned long start, unsigned size,
 			 const unsigned long *contents);
 	bool copyToClient(unsigned long start, unsigned size, const void *source);
