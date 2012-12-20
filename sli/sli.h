@@ -16,7 +16,6 @@
 #include "exceptions.h"
 
 #include "map.h"
-#include "ring_buffer.h"
 
 FILE *fopenf(const char *mode, const char *fmt, ...) __attribute__((__format__ (__printf__, 2, 3)));
 
@@ -25,19 +24,14 @@ char *readfile(int fd);
 class ThreadId {
 	unsigned tid;
 public:
-	bool valid() const { return tid != 0xf001beef && tid != 0xa1b2c3d4 && tid != 0xaabbccdd; }
 	ThreadId(unsigned _tid) : tid(_tid) {}
 	ThreadId() : tid(0xf001beef) {}
 	bool operator==(const ThreadId &b) const { return b.tid == tid; }
-	bool operator!=(const ThreadId &b) const { return b.tid != tid; }
-	bool operator<(const ThreadId &b) const { return tid < b.tid; }
-	bool operator>(const ThreadId &b) const { return tid > b.tid; }
 	ThreadId operator++() {
 		tid++;
 		return *this;
 	}
 	const unsigned _tid() const { return tid; }
-	unsigned long hash() const { return tid; }
 };
 
 class PhysicalAddress {

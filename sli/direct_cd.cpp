@@ -1,6 +1,7 @@
 /* Re-implementation of direct which tries to work off of just a core
    dump, rather than needing the full trace. */
 #include <err.h>
+#include <errno.h>
 
 #include <algorithm>
 #include <queue>
