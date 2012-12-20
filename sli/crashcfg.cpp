@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 #include "sli.h"
 #include "crashcfg.hpp"
 #include "alloc_mai.hpp"

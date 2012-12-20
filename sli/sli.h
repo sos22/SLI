@@ -1,21 +1,9 @@
 #ifndef SLI_H__
 #define SLI_H__
 
-#include <signal.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <vector>
-#include <algorithm>
-#include <map>
-
 #include "libvex_guest_amd64.h"
-#include "libvex_ir.h"
 #include "libvex.h"
-
 #include "exceptions.h"
-
-#include "map.h"
 
 FILE *fopenf(const char *mode, const char *fmt, ...) __attribute__((__format__ (__printf__, 2, 3)));
 

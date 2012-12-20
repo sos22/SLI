@@ -7,6 +7,7 @@
 #include "libvex_guest_offsets.h"
 #include "library.hpp"
 #include "cfgnode.hpp"
+#include "map.h"
 
 #include <set>
 #include <map>

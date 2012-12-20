@@ -9,16 +9,7 @@
 #include "libvex_parse.h"
 #include "timers.hpp"
 #include "profile.hpp"
-
-void
-debugger_attach(void)
-{
-	volatile bool debugger_ready;
-	debugger_ready = false;
-	printf("Waiting for debugger in pid %d\n", getpid());
-	while (!debugger_ready)
-		sleep(1);
-}
+#include "map.h"
 
 static __attribute__ ((noreturn)) void
 failure_exit(void)
@@ -60,11 +51,13 @@ init_sli(void)
 	initialise_profiling();
 }
 
+#if 0
 template <> unsigned long
 __default_hash_function(const unsigned long &key)
 {
 	return key;
 }
+#endif
 
 char *
 readfile(int fd)

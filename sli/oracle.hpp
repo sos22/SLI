@@ -5,6 +5,7 @@
 #include "state_machine.hpp"
 #include "mapping.hpp"
 #include "library.hpp"
+#include "map.h"
 
 #include "libvex_guest_offsets.h"
 

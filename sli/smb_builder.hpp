@@ -3,6 +3,8 @@
 #ifndef SMB_BUILDER_HPP__
 #define SMB_BUILDER_HPP__
 
+#include <stdint.h>
+
 #include "state_machine.hpp"
 #include "alloc_mai.hpp"
 #include "cfgnode.hpp"
