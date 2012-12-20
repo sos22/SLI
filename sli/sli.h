@@ -370,17 +370,11 @@ public:
 
 	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);
-	void releaseMemory(unsigned long start, unsigned long size);
-	void protectMemory(unsigned long start, unsigned long size, VAMap::Protection prot);
-	void store(unsigned long start, unsigned size, const expression_result &val,
-		   bool ignore_protection = false,
-		   Thread *thr = NULL);
 	void writeMemory(unsigned long start, unsigned size,
 			 const unsigned long *contents, bool ignore_protection,
 			 Thread *thr);
 	bool copyToClient(unsigned long start, unsigned size, const void *source,
 			  bool ignore_protection = false);
-	bool copyFromClient(unsigned long start, unsigned size, void *dest);
 	expression_result load(unsigned long start, unsigned size,
 			       bool ignore_protection = false,
 			       Thread *thr = NULL);
