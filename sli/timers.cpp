@@ -1,6 +1,7 @@
 /* Very simple timer infrastructure, so that we can use SIGPROF for
    both profiling and timeouts. */
 #include <sys/time.h>
+#include <signal.h>
 
 #include "timers.hpp"
 #include "sli.h"
