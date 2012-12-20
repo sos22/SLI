@@ -617,11 +617,11 @@ class Interpreter {
 			    LogReaderPtr startOffset,
 			    LogReaderPtr *endOffset);
 
-public:
-	VexPtr<MachineState > currentState;
 	Interpreter(MachineState *rootMachine) : currentState(rootMachine)
 	{
 	}
+public:
+	VexPtr<MachineState > currentState;
 	void replayLogfile(VexPtr<LogReader > &lf,
 			   LogReaderPtr startingPoint,
 			   GarbageCollectionToken,
