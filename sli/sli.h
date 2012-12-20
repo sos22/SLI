@@ -25,7 +25,6 @@ char *readfile(int fd);
 class ThreadId {
 	unsigned tid;
 public:
-	static const ThreadId invalidTid;
 	bool valid() const { return tid != 0xf001beef && tid != 0xa1b2c3d4 && tid != 0xaabbccdd; }
 	ThreadId(unsigned _tid) : tid(_tid) {}
 	ThreadId() : tid(0xf001beef) {}
@@ -120,7 +119,6 @@ public:
 					 PhysicalAddress *pa);
 		void split(unsigned long where);
 		static void visit(VAMapEntry *&ref, PMap *pmap, HeapVisitor &hv);
-		VAMapEntry *dupeSelf() const;
 	};
 
 private:
@@ -147,8 +145,6 @@ public:
 
 	void write(unsigned offset, const unsigned long *source, unsigned nr_bytes);
 	void read(unsigned offset, unsigned long *dest, unsigned nr_bytes) const;
-
-	MemoryChunk *dupeSelf() const;
 
 	PhysicalAddress base;
 	void visit(HeapVisitor &) {}
