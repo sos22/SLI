@@ -375,9 +375,6 @@ public:
 			 Thread *thr);
 	bool copyToClient(unsigned long start, unsigned size, const void *source,
 			  bool ignore_protection = false);
-	expression_result load(unsigned long start, unsigned size,
-			       bool ignore_protection = false,
-			       Thread *thr = NULL);
 	template <typename t> const t fetch(unsigned long addr,
 					    Thread *thr);
 	void readMemory(unsigned long start, unsigned size,
