@@ -32,7 +32,7 @@ decode_instr(AddressSpace *as, unsigned long ptr, const ThreadCfgLabel &label,
 
 	op_bytes = 4;
 
-#define insn_fetch_type(ty) ({ty res = as->fetch<ty>(ptr, NULL); ptr += sizeof(ty); res; })
+#define insn_fetch_type(ty) ({ty res = as->fetch<ty>(ptr); ptr += sizeof(ty); res; })
 
 	/* Prefix bytes. */
 	while (1) {
@@ -279,7 +279,7 @@ done_prefixes:
 	work->rip = label;
 	work->len = ptr - init_ptr;
 	for (unsigned x = 0; x < work->len; x++)
-		work->content[x] = as->fetch<unsigned char>(init_ptr + x, NULL);
+		work->content[x] = as->fetch<unsigned char>(init_ptr + x);
 	work->relocs = emit_reloc.r;
 	if (true_size)
 		*true_size = work->len;

@@ -30,7 +30,7 @@ getThreadRip(Oracle *oracle, unsigned long rip, unsigned long rsp)
 		if (offset == 0)
 			break;
 		printf("RIP %lx, rsp %lx, offset 0x%x\n", rip, rsp, offset);
-		unsigned long ra = oracle->ms->addressSpace->fetch<unsigned long>(rsp + offset, NULL);
+		unsigned long ra = oracle->ms->addressSpace->fetch<unsigned long>(rsp + offset);
 		callStack.push_back(ra);
 		rsp += offset;
 		rip = ra;

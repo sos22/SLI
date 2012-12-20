@@ -27,9 +27,9 @@ rip_t::read(FILE *f, AddressSpace *as)
 		content[nr_items - 1] &= ~(1ul << 63);
 	}
 	for (unsigned x = 0; x < nr_items; x++)
-		if (!as || as->isReadable(content[x], 1))
+		if (!as || as->isReadable(content[x]))
 			stack.push_back(content[x]);
-	if (as && !as->isReadable(content[nr_items - 1], 1))
+	if (as && !as->isReadable(content[nr_items - 1]))
 		return false;
 	return true;
 }

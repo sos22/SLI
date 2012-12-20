@@ -118,7 +118,7 @@ ElfData::getPltAddress(AddressSpace *as, const char *name) const
 	if (idx == -1)
 		return 0;
 	for (unsigned long res = plt_start; res < plt_end; res += 16)
-		if (as->fetch<int>(res + 7, NULL) == idx)
+		if (as->fetch<int>(res + 7) == idx)
 			return res;
 	return -1;
 }
@@ -166,8 +166,7 @@ MachineState::readELFExec(const char *path)
 		as->copyToClient(phdrs[p].p_vaddr,
 				 phdrs[p].p_filesz,
 				 m.window(phdrs[p].p_offset,
-					  phdrs[p].p_filesz),
-				 true);
+					  phdrs[p].p_filesz));
 	}
 
 	ElfData *ed = new ElfData();
