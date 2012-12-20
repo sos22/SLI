@@ -183,8 +183,7 @@ public:
 	MemoryChunk *mc;
 	PMapEntry *next;
 	PMapEntry **pprev;
-	bool readonly;
-	static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk *mc, bool readonly);
+	static PMapEntry *alloc(PhysicalAddress pa, MemoryChunk *mc);
 	void visit(HeapVisitor &hv) { hv(mc); }
 	~PMapEntry() {
 		*pprev = next;
