@@ -9,18 +9,6 @@ void MachineState::visit(HeapVisitor &hv)
 	hv(elfData);
 }
 
-MachineState *MachineState::dupeSelf() const
-{
-	MachineState *work = new MachineState();
-	*work = *this;
-
-	work->addressSpace = addressSpace->dupeSelf();
-	work->threads.resize(threads.size());
-	for (unsigned x = 0; x < threads.size(); x++)
-		work->threads[x] = threads[x]->dupeSelf();
-	return work;
-}
-
 bool MachineState::crashed() const
 {
 	unsigned x;

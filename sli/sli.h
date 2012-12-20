@@ -106,25 +106,13 @@ class ThreadEvent;
 class Thread : public GarbageCollected<Thread> {
 public:
 
-	unsigned decode_counter;
 	ThreadId tid;
 	RegisterSet regs;
-	bool exitted;
 	bool crashed;
 
-	VexPtr<IRSB, &ir_heap> currentIRSB;
-	unsigned long currentIRSBRip;
-	int currentIRSBOffset;
-
 	void pretty_print() const;
-public:
-	Thread *dupeSelf() const;
 
 	void visit(HeapVisitor &) {}
-
-	void relocate(Thread *thr, size_t) {
-		currentIRSB.relocate(&thr->currentIRSB);
-	}
 
 	NAMED_CLASS
 };
@@ -368,11 +356,6 @@ public:
 		tid = 1;
 	top:
 		for (unsigned x = 0; x < threads.size(); x++) {
-			if (threads[x]->exitted) {
-				t->tid = tid;
-				threads[x] = t;
-				return;
-			}
 			if (threads[x]->tid == tid) {
 				++tid;
 				goto top;
@@ -396,13 +379,7 @@ public:
 				return threads[x];
 		return NULL;
 	}
-	void exitGroup(unsigned long result) {
-		exitted = true;
-		exit_status = result;
-	}
 	bool crashed() const;
-
-	MachineState *dupeSelf() const;
 
 	void visit(HeapVisitor &hv);
 
