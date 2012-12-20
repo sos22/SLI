@@ -75,8 +75,7 @@ MachineState::readCoredump(const char *path)
 			as->copyToClient(phdrs[p].p_vaddr,
 					 phdrs[p].p_filesz,
 					 m.window(phdrs[p].p_offset,
-						  phdrs[p].p_filesz),
-					 true);
+						  phdrs[p].p_filesz));
 		} else if (phdrs[p].p_type == PT_NOTE) {
 			printf("Notes section\n");
 			off_t off = phdrs[p].p_offset;

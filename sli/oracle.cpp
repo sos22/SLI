@@ -1209,7 +1209,7 @@ read_cg_vexrip(FILE *f, DynAnalysisRip *out, AddressSpace *as, bool *is_private)
 		unsigned long a;
 		if (fread(&a, sizeof(a), 1, f) != 1)
 			return read_cg_vexrip_error;
-		if (as->isReadable(a, 1))
+		if (as->isReadable(a))
 			stack.push_back(a);
 	}
 	if (rip & (1ul << 63)) {
@@ -1219,7 +1219,7 @@ read_cg_vexrip(FILE *f, DynAnalysisRip *out, AddressSpace *as, bool *is_private)
 		*is_private = false;
 	}
 	read_cg_vexrip_res res;
-	if (as->isReadable(rip, 1)) {
+	if (as->isReadable(rip)) {
 		stack.push_back(rip);
 		res = read_cg_vexrip_take;
 	} else {
@@ -3438,7 +3438,7 @@ Oracle::getRbpToRspDelta(const VexRip &rip, long *out)
 	 * ``push rbp'' instruction. */
 	StaticRip head(functionHeadForInstruction(StaticRip(rip)));
 	if (rip.unwrap_vexrip() == head.rip + 1 &&
-	    ms->addressSpace->fetch<unsigned char>(head.rip, NULL) == 0x55) {
+	    ms->addressSpace->fetch<unsigned char>(head.rip) == 0x55) {
 		/* The first instruction in the function is push rbp,
 		   and we're the second instruction -> can calculate
 		   our delta from the parent function's delta. */
@@ -3749,7 +3749,7 @@ Oracle::identifyLibraryCall(const VexRip &vr)
 	/* Bit of a hack: we know what a PLT entry looks like, so we
 	 * can do the symbol lookup. */
 	unsigned long r = vr.unwrap_vexrip();
-	unsigned idx = ms->addressSpace->fetch<unsigned>(r + 7, NULL);
+	unsigned idx = ms->addressSpace->fetch<unsigned>(r + 7);
 	const char *name;
 
 	name = ms->elfData->lookupPltSymbol(idx);

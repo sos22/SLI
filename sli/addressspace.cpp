@@ -27,7 +27,7 @@ AddressSpace::allocateMemory(unsigned long _start, unsigned long _size,
 
 bool
 AddressSpace::copyToClient(unsigned long start, unsigned size,
-			   const void *contents, bool ignore_protection)
+			   const void *contents)
 {
 	unsigned long *buf = (unsigned long *)malloc(sizeof(unsigned long) * size);
 	bool fault;
@@ -36,7 +36,7 @@ AddressSpace::copyToClient(unsigned long start, unsigned size,
 		buf[x] = ((unsigned char *)contents)[x];
 	fault = false;
 	try {
-		writeMemory(start, size, buf, ignore_protection, NULL);
+		writeMemory(start, size, buf);
 	} catch (BadMemoryException &e) {
 		fault = true;
 	}
@@ -46,8 +46,7 @@ AddressSpace::copyToClient(unsigned long start, unsigned size,
 
 void
 AddressSpace::writeMemory(unsigned long _start, unsigned size,
-			  const unsigned long *contents, bool ignore_protection,
-			  Thread *thr)
+			  const unsigned long *contents)
 {
 	unsigned long start = _start;
 	unsigned off = 0;
@@ -56,8 +55,6 @@ AddressSpace::writeMemory(unsigned long _start, unsigned size,
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
 		if (vamap->translate(start, &pa, &prot)) {
-			if (!ignore_protection && !prot.writable)
-				throw BadMemoryException(true, _start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
 			MemoryChunk *mc = pmap->lookup(pa, &mc_start);
@@ -71,8 +68,6 @@ AddressSpace::writeMemory(unsigned long _start, unsigned size,
 			size -= to_copy_this_time;
 			off += to_copy_this_time;
 			contents = contents + to_copy_this_time;
-		} else if (thr && extendStack(start, thr->regs.rsp())) {
-			continue;
 		} else {
 			throw BadMemoryException(true, _start, size);
 		}
@@ -80,16 +75,13 @@ AddressSpace::writeMemory(unsigned long _start, unsigned size,
 }
 
 void AddressSpace::readMemory(unsigned long _start, unsigned size,
-			      unsigned long *contents, bool ignore_protection,
-			      Thread *thr)
+			      unsigned long *contents)
 {
 	unsigned long start = _start;
 	while (size != 0) {
 		PhysicalAddress pa;
 		VAMap::Protection prot(0);
 		if (vamap->translate(start, &pa, &prot)) {
-			if (!ignore_protection && !prot.readable)
-				throw BadMemoryException(false, _start, size);
 			unsigned long mc_start;
 			unsigned to_copy_this_time;
 			const MemoryChunk *mc = pmap->lookupConst(pa, &mc_start);
@@ -102,48 +94,21 @@ void AddressSpace::readMemory(unsigned long _start, unsigned size,
 			start += to_copy_this_time;
 			size -= to_copy_this_time;
 			contents = contents + to_copy_this_time;
-		} else if (thr && extendStack(start, thr->regs.rsp())) {
-			/* This is what Linux does, but it doesn't
-			   make a great deal of sense: any time you
-			   hit this the program will definitely have
-			   accessed uninitialised stack memory, so
-			   it's definitely not a good thing. */
-			warning("Huh? Extended stack for a read?\n");
-			continue;
 		} else {
 			throw BadMemoryException(false, _start, size);
 		}
 	}
 }
 
-bool AddressSpace::isAccessible(unsigned long _start, unsigned size,
-				bool isWrite, Thread *thr)
+bool AddressSpace::isReadable(unsigned long _start)
 {
 	unsigned long start = _start;
-	while (size != 0) {
-		PhysicalAddress pa;
-		VAMap::Protection prot(0);
-		if (vamap->translate(start, &pa, &prot)) {
-			if ((!isWrite && !prot.readable) ||
-			    ( isWrite && !prot.writable))
-				return false;
-			unsigned long mc_start;
-			unsigned to_copy_this_time;
-			const MemoryChunk *mc = pmap->lookupConst(pa, &mc_start);
-			assert(mc);
-			to_copy_this_time = size;
-			if (to_copy_this_time >
-			    mc_start + mc->size - start)
-				to_copy_this_time = mc_start + mc->size - start;
-
-			start += to_copy_this_time;
-			size -= to_copy_this_time;
-		} else if (thr && extendStack(start, thr->regs.rsp())) {
-			continue;
-		} else {
-			return false;
-		}
-	}
+	PhysicalAddress pa;
+	VAMap::Protection prot(0);
+	if (!vamap->translate(start, &pa, &prot))
+		return false;
+	if (!prot.readable)
+		return false;
 	return true;
 }
 
@@ -159,23 +124,4 @@ void AddressSpace::visit(HeapVisitor &hv)
 {
 	hv(pmap);
 	vamap->visit(vamap, hv, pmap);
-}
-
-bool AddressSpace::extendStack(unsigned long ptr, unsigned long rsp)
-{
-	if (ptr + 65536 + 32 * sizeof(unsigned long) < rsp)
-		return false;
-
-	unsigned long va;
-	VAMap::Protection prot(0);
-	VAMap::AllocFlags flags(false);
-	if (!vamap->findNextMapping(ptr, &va, NULL, &prot, &flags))
-		return false;
-	if (!flags.expandsDown)
-		return false;
-
-	printf("Extending stack from %lx to %lx\n", ptr, va);
-	ptr &= PAGE_MASK;
-	allocateMemory(ptr, va - ptr, prot, flags);
-	return true;
 }

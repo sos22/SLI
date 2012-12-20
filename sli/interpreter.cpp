@@ -1219,7 +1219,7 @@ public:
 			return cache[desired - cache_start];
 		cache_start = desired;
 		unsigned long v[16];
-		aspace->readMemory(desired, 16, v, false, NULL);
+		aspace->readMemory(desired, 16, v);
 		for (unsigned x = 0; x < sizeof(cache); x++)
 			cache[x] = v[x];
 		have_cache = true;

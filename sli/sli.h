@@ -363,33 +363,17 @@ public:
 	VAMap *vamap;
 	PMap *pmap;
 
-private:
-	bool extendStack(unsigned long ptr, unsigned long rsp);
-public:
 	IRSB *getIRSBForAddress(const ThreadRip &rip, bool singleInstr);
 
 	void allocateMemory(unsigned long start, unsigned long size, VAMap::Protection prot,
 			    VAMap::AllocFlags flags = VAMap::defaultFlags);
 	void writeMemory(unsigned long start, unsigned size,
-			 const unsigned long *contents, bool ignore_protection,
-			 Thread *thr);
-	bool copyToClient(unsigned long start, unsigned size, const void *source,
-			  bool ignore_protection = false);
-	template <typename t> const t fetch(unsigned long addr,
-					    Thread *thr);
+			 const unsigned long *contents);
+	bool copyToClient(unsigned long start, unsigned size, const void *source);
+	template <typename t> const t fetch(unsigned long addr);
 	void readMemory(unsigned long start, unsigned size,
-			unsigned long *contents, bool ignore_protection,
-			Thread *thr);
-	bool isAccessible(unsigned long start, unsigned size,
-			  bool isWrite, Thread *thr);
-	bool isWritable(unsigned long start, unsigned size,
-			Thread *thr = NULL) {
-		return isAccessible(start, size, true, thr);
-	}
-	bool isReadable(unsigned long start, unsigned size,
-			Thread *thr = NULL) {
-		return isAccessible(start, size, false, thr);
-	}
+			unsigned long *contents);
+	bool isReadable(unsigned long start);
 
 	static AddressSpace *initialAddressSpace();
 	void visit(HeapVisitor &hv);
@@ -409,12 +393,12 @@ expression_result eval_expression(const RegisterSet *rs,
 void put_stmt(RegisterSet *rs, unsigned put_offset, struct expression_result put_data, IRType put_type);
 
 template <typename t> const t
-AddressSpace::fetch(unsigned long start, Thread *thr)
+AddressSpace::fetch(unsigned long start)
 {
 	unsigned long *res;
 
 	res = (unsigned long *)malloc(sizeof(unsigned long) * sizeof(t));
-	readMemory(start, sizeof(t), res, false, thr);
+	readMemory(start, sizeof(t), res);
 	t tt;
 	for (unsigned x = 0; x < sizeof(t); x++)
 		((unsigned char *)&tt)[x] = res[x];

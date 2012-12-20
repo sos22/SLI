@@ -128,7 +128,7 @@ public:
 		}
 		if (!_as)
 			return false;
-		*res = _as->isReadable(addr, 1);
+		*res = _as->isReadable(addr);
 		return true;
 	}
 
