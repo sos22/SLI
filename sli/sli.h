@@ -131,7 +131,6 @@ public:
 					 PhysicalAddress *pa);
 		void split(unsigned long where);
 		static void visit(VAMapEntry *&ref, PMap *pmap, HeapVisitor &hv);
-		VAMapEntry *promoteSmallest();
 		VAMapEntry *dupeSelf() const;
 	};
 
@@ -147,7 +146,6 @@ public:
 		       PhysicalAddress *pa = NULL) const;
 	void addTranslation(unsigned long va,
 			    PhysicalAddress pa);
-	void unmap(unsigned long start, unsigned long size);
 
 	static VAMap *empty();
 	VAMap *dupeSelf();
