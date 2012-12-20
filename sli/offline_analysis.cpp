@@ -2,6 +2,7 @@
 #include <limits.h>
 #include <queue>
 #include <sys/time.h>
+#include <errno.h>
 
 #include "sli.h"
 #include "range_tree.h"
