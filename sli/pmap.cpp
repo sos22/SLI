@@ -114,15 +114,6 @@ PMap *PMap::empty()
 	return work;	
 }
 
-PMap *PMap::dupeSelf(void) const
-{
-	PMap *work = empty();
-	
-	work->nextPa = nextPa;
-	work->parent = (PMap *)this;
-	return work;
-}
-
 unsigned PMap::paHash(PhysicalAddress pa)
 {
 	return (pa._pa / MemoryChunk::size) % nrHashBuckets;
