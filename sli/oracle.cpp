@@ -46,7 +46,6 @@ hash_ulong_pair(const std::pair<unsigned long, unsigned long> &p)
 	return p.first + p.second * 59;
 }
 
-Oracle::LivenessSet Oracle::LivenessSet::everything(~0ul);
 Oracle::LivenessSet Oracle::LivenessSet::argRegisters(
 	0x01 | /* rax -- not strictly an arg register, but treated
 	       as one for variadic functions. */
@@ -106,15 +105,6 @@ Oracle::LivenessSet::define(threadAndRegister r)
 		return *this;
 	else
 		return LivenessSet(mask & ~(1ul << (r.asReg() / 8)));
-}
-
-bool
-Oracle::LivenessSet::isLive(Int offset) const
-{
-	if (offset >= 8 * NR_REGS)
-		return true;
-	else
-		return !!(mask & (1ul << (offset / 8)));
 }
 
 const PointerAliasingSet PointerAliasingSet::nothing(0);
@@ -201,11 +191,6 @@ getInstructionSize(AddressSpace *as, const StaticRip &rip)
 	assert(irsb->stmts[0]->tag == Ist_IMark);
 	return ((IRStmtIMark *)irsb->stmts[0])->len;
 }
-unsigned
-getInstructionSize(AddressSpace *as, const VexRip &rip)
-{
-	return getInstructionSize(as, StaticRip(rip));
-}
 
 /* Try to find the RIPs of some stores which might conceivably have
    interfered with the observed load.  Stack accesses are not tracked
@@ -236,13 +221,6 @@ Oracle::findConflictingStores(const MaiMap &mai,
 			if (!it->is_private)
 				out.insert(it->rip);
 	}
-}
-
-bool
-Oracle::notInTagTable(const DynAnalysisRip &dr)
-{
-	__set_profiling(notInTagTable);
-	return !type_db->ripPresent(dr);
 }
 
 bool
@@ -568,84 +546,6 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 }
 
 void
-Oracle::findRacingRips(const MaiMap &mai, StateMachineSideEffectLoad *smsel, std::set<DynAnalysisRip> &out)
-{
-	findConflictingStores(mai, smsel, out);
-}
-
-void
-Oracle::findRacingRips(const MaiMap &mai, StateMachineSideEffectStore *smses, std::set<DynAnalysisRip> &out)
-{
-	__set_profiling(findRacingRips__store);
-	std::vector<TypesDb::types_entry> loads, stores;
-	for (auto it = mai.begin(smses->rip); !it.finished(); it.advance()) {
-		if (!type_db->lookupEntry(it.dr(), loads, stores))
-			continue;
-		for (auto it = loads.begin(); it != loads.end(); it++)
-			if (!it->is_private)
-				out.insert(it->rip);
-	}
-}
-
-template <typename t>
-class union_find {
-public:
-	struct entry {
-		entry(const t &_parent, unsigned _d)
-			: parent(_parent), depth(_d)
-		{}
-		entry() { abort(); /* shouldn't happen */ }
-		t parent;
-		unsigned depth;
-	};
-	std::map<t, entry> content;
-
-	/* Check whether we know anything at all about x */
-	bool present(t x) { return content.count(x) != 0; }
-
-	/* Insert x into the structure as a singleton, if it's not
-	   already present. */
-	void insert(t x) { if (!present(x)) content.insert(std::pair<t, entry>(x, entry(x, 0))); }
-
-	/* Insert x and y into the structure, if they're not present,
-	   and then merge their containing sets. */
-	void insert(t x, t y) {
-		t xr = representative(x);
-		t yr = representative(y);
-		if (xr != yr) {
-			entry &xe(content[xr]);
-			entry &ye(content[yr]);
-			if (xe.depth < ye.depth)
-				xe.parent = yr;
-			else
-				ye.parent = xr;
-		}
-		assert(representative(x) == representative(y));
-	}
-
-	/* Find the representative for the set to which a given item
-	   belongs.  Create the item as a singleton if it isn't
-	   already present. */
-	t representative(t x) {
-		if (!present(x)) {
-			insert(x);
-			return x;
-		}
-		while (1) {
-			assert(content.count(x) != 0);
-			entry *e = &content[x];
-			if (e->parent == x)
-				return x;
-			assert(content.count(e->parent) != 0);
-			entry *pe = &content[e->parent];
-			if (pe->parent.isValid())
-				e->parent = pe->parent;
-			x = e->parent;
-		}
-	}
-};
-
-void
 Oracle::loadTagTable(const char *path)
 {
 	__set_profiling(loadTagTable);
@@ -950,48 +850,6 @@ irexprAliasingClass(IRExpr *expr,
 	return PointerAliasingSet::anything;
 }
 
-bool
-Oracle::RegisterAliasingConfiguration::mightPointOutsideStack(IRExpr *a, const IRExprOptimisations &opt) const
-{
-	PointerAliasingSet as = irexprAliasingClass(a, *this, NULL, opt, false);
-	if (as.mightPointAtNonStack())
-		return true;
-	else
-		return false;
-}
-
-bool
-Oracle::RegisterAliasingConfiguration::ptrsMightAlias(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt) const
-{
-	return (irexprAliasingClass(a, *this, NULL, opt, false) &
-		irexprAliasingClass(b, *this, NULL, opt, false)).mightPoint();
-}
-
-bool
-Oracle::RegisterAliasingConfiguration::ptrsMightAlias(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt) const
-{
-	if (a->isLeaf && b->isLeaf)
-		return ptrsMightAlias(a->leaf(), b->leaf(), opt);
-	if (a->isLeaf)
-		return ptrsMightAlias(a, b->internal().trueBranch, opt) &&
-			ptrsMightAlias(a, b->internal().falseBranch, opt);
-	if (b->isLeaf || a->internal().rank < b->internal().rank)
-		return ptrsMightAlias(a->internal().trueBranch, b, opt) &&
-			ptrsMightAlias(a->internal().falseBranch, b, opt);
-	if (a->internal().rank == b->internal().rank)
-		return ptrsMightAlias(a->internal().trueBranch, b->internal().trueBranch, opt) &&
-			ptrsMightAlias(a->internal().falseBranch, b->internal().falseBranch, opt);
-	return ptrsMightAlias(a, b->internal().trueBranch, opt) &&
-		ptrsMightAlias(a, b->internal().falseBranch, opt);
-}
-
-void
-Oracle::RegisterAliasingConfiguration::operator |=(const RegisterAliasingConfiguration &config)
-{
-	for (auto it = config.content.begin(); it != config.content.end(); it++)
-		addConfig(it->first, it->second);
-}
-
 Oracle::ThreadRegisterAliasingConfiguration
 Oracle::getAliasingConfigurationForRip(const StaticRip &rip)
 {
@@ -1003,11 +861,6 @@ Oracle::getAliasingConfigurationForRip(const VexRip &rip)
 {
 	return getAliasingConfigurationForRip(StaticRip(rip));
 }
-
-struct cg_header {
-	unsigned long rip;
-	unsigned long nr;
-};
 
 enum read_cg_vexrip_res {
 	read_cg_vexrip_error,
@@ -1835,14 +1688,6 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b)
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
 	*b = true;
-	return res;
-}
-
-bool
-Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, Oracle::ThreadRegisterAliasingConfiguration *out)
-{
-	bool res;
-	*out = aliasConfigOnEntryToInstruction(rip, &res);
 	return res;
 }
 
@@ -2852,133 +2697,6 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(const StaticRip &r,
 	sqlite3_reset(stmt);
 }
 
-bool
-Oracle::Function::addInstruction(const StaticRip &rip,
-				 bool isReturn,
-				 const std::vector<StaticRip> &callees,
-				 const std::vector<StaticRip> &fallThrough,
-				 const std::vector<StaticRip> &callSucc,
-				 const std::vector<StaticRip> &branch)
-{
-	static sqlite3_stmt *stmt1;
-	static sqlite3_stmt *stmt2;
-	static sqlite3_stmt *stmt3;
-	static sqlite3_stmt *stmt4;
-	static sqlite3_stmt *stmt5;
-	static sqlite3_stmt *stmt6;
-	int rc;
-
-	if (!stmt1)
-		stmt1 = prepare_statement("INSERT INTO instructionAttributes (rip, functionHead) VALUES (?, ?)");
-	bind_oraclerip(stmt1, 1, rip);
-	bind_oraclerip(stmt1, 2, this->rip);
-	rc = sqlite3_step(stmt1);
-	sqlite3_reset(stmt1);
-	if (rc == SQLITE_CONSTRAINT) {
-		/* We have a duplicte of this instruction.  Fail the insert. */
-		return false;
-	}
-	assert(rc == SQLITE_DONE);
-
-	if (!stmt2)
-		stmt2 = prepare_statement("INSERT INTO fallThroughRips (rip, dest) VALUES (?, ?)");
-	for (auto it = fallThrough.begin();
-	     it != fallThrough.end();
-	     it++) {
-		bind_oraclerip(stmt2, 1, rip);
-		bind_oraclerip(stmt2, 2, *it);
-		rc = sqlite3_step(stmt2);
-		assert(rc == SQLITE_DONE);
-		rc = sqlite3_reset(stmt2);
-		assert(rc == SQLITE_OK);
-	}
-
-	if (!stmt6)
-		stmt6 = prepare_statement("INSERT INTO callSuccRips (rip, dest) VALUES (?, ?)");
-	for (auto it = callSucc.begin();
-	     it != callSucc.end();
-	     it++) {
-		bind_oraclerip(stmt6, 1, rip);
-		bind_oraclerip(stmt6, 2, *it);
-		rc = sqlite3_step(stmt6);
-		assert(rc == SQLITE_DONE);
-		rc = sqlite3_reset(stmt6);
-		assert(rc == SQLITE_OK);
-	}
-
-	if (!stmt3)
-		stmt3 = prepare_statement("INSERT INTO branchRips (rip, dest) VALUES (?, ?)");
-	for (auto it = branch.begin();
-	     it != branch.end();
-	     it++) {
-		bind_oraclerip(stmt3, 1, rip);
-		bind_oraclerip(stmt3, 2, *it);
-		rc = sqlite3_step(stmt3);
-		assert(rc == SQLITE_DONE);
-		rc = sqlite3_reset(stmt3);
-		assert(rc == SQLITE_OK);
-	}
-
-	if (!stmt4)
-		stmt4 = prepare_statement("INSERT INTO callRips (rip, dest) VALUES (?, ?)");
-	for (auto it = callees.begin();
-	     it != callees.end();
-	     it++) {
-		bind_oraclerip(stmt4, 1, rip);
-		bind_oraclerip(stmt4, 2, *it);
-		rc = sqlite3_step(stmt4);
-		assert(rc == SQLITE_DONE);
-		rc = sqlite3_reset(stmt4);
-		assert(rc == SQLITE_OK);
-	}
-
-	if (isReturn) {
-		if (!stmt5)
-			stmt5 = prepare_statement("INSERT INTO returnRips (rip, dest) VALUES (?, 0)");
-		bind_oraclerip(stmt5, 1, rip);
-		rc = sqlite3_step(stmt5);
-		assert(rc == SQLITE_DONE);
-		rc = sqlite3_reset(stmt5);
-		assert(rc == SQLITE_OK);
-	}
-
-	return true;
-}
-
-void
-Oracle::purgeFunction(const StaticRip &functionHead)
-{
-	Function f(functionHead);
-	std::vector<StaticRip> rips;
-
-	f.getInstructionsInFunction(rips);
-
-	static prepared_stmt purgeInstrAttributes("DELETE FROM instructionAttributes WHERE functionHead = ?");
-	purgeInstrAttributes.bindOracleRip(1, functionHead);
-	purgeInstrAttributes.run();
-
-	struct {
-		void operator()(const char *tableName, std::vector<StaticRip> &rips) {
-			char *p = my_asprintf("DELETE FROM %sRips WHERE rip = ? OR dest = ?", tableName);
-			prepared_stmt stmt(p);
-			for (auto it = rips.begin(); it != rips.end(); it++) {
-				stmt.bindOracleRip(1, *it);
-				stmt.bindOracleRip(2, *it);
-				stmt.run();
-			}
-			free(p);
-		}
-	} doit;
-	doit("fallThrough", rips);
-	doit("callSucc", rips);
-	doit("branch", rips);
-	doit("call", rips);
-	doit("return", rips);
-	static prepared_stmt purge_function_attribs("DELETE FROM functionAttribs WHERE functionHead = ?");
-	purge_function_attribs.bindOracleRip(1, functionHead);
-	purge_function_attribs.run();
-}
-
 void
 Oracle::Function::getInstructionCallees(const StaticRip &rip, std::vector<StaticRip> &out)
 {
@@ -3634,16 +3352,6 @@ Oracle::RegisterAliasingConfiguration::addConfig(unsigned tid, const ThreadRegis
 	content.push_back(std::pair<unsigned, ThreadRegisterAliasingConfiguration>(tid, config));
 }
 
-Oracle::RegisterAliasingConfiguration
-Oracle::getAliasingConfiguration(const std::vector<std::pair<unsigned, VexRip> > &origins)
-{
-	RegisterAliasingConfiguration rac;
-	for (auto it = origins.begin(); it != origins.end(); it++)
-		rac.addConfig(it->first,
-			      getAliasingConfigurationForRip(it->second));
-	return rac;
-}
-
 PointerAliasingSet
 PointerAliasingSet::operator |(const PointerAliasingSet &o) const
 {
@@ -3661,30 +3369,6 @@ PointerAliasingSet::operator |(const PointerAliasingSet &o) const
 		std::sort(res.stackPointers.begin(), res.stackPointers.end());
 		auto i = std::unique(res.stackPointers.begin(), res.stackPointers.end());
 		res.stackPointers.erase(i, res.stackPointers.end());
-	}
-	res.valid = true;
-	return res;
-}
-
-PointerAliasingSet
-PointerAliasingSet::operator &(const PointerAliasingSet &o) const
-{
-	PointerAliasingSet res;
-	if (!valid)
-		return o;
-	if (!o.valid)
-		return *this;
-	res.nonPointer = nonPointer & o.nonPointer;
-	res.nonStckPointer = nonStckPointer & o.nonStckPointer;
-	res.otherStackPointer = otherStackPointer & o.otherStackPointer;
-	if (!res.otherStackPointer) {
-		if (!otherStackPointer) {
-			for (auto it = stackPointers.begin(); it != stackPointers.end(); it++)
-				if (o.mightPointAt(*it))
-					res.stackPointers.push_back(*it);
-		} else {
-			res.stackPointers = o.stackPointers;
-		}
 	}
 	res.valid = true;
 	return res;
@@ -3775,16 +3459,6 @@ PointerAliasingSet::operator|=(const PointerAliasingSet &o)
 
 	if (res)
 		clearName();
-	return res;
-}
-
-PointerAliasingSet
-PointerAliasingSet::frames(const std::set<FrameId> &inp)
-{
-	PointerAliasingSet res(PointerAliasingSet::nothing);
-	res.stackPointers.reserve(inp.size());
-	for (auto it = inp.begin(); it != inp.end(); it++)
-		res.stackPointers.push_back(*it);
 	return res;
 }
 
@@ -3901,19 +3575,6 @@ stack_offset(Oracle *oracle, unsigned long rip)
 	return offsets[sr];
 }
 
-unsigned long
-Oracle::findCallPredecessor(unsigned long rip)
-{
-	StaticRip sr(rip);
-	std::vector<StaticRip> pred;
-	Function(sr).addPredecessorsCall(sr, pred);
-	if (pred.empty())
-		return 0;
-	assert(pred.size() == 1);
-	return pred[0].rip;
-}
-
-
 bool
 Oracle::isCrashingAddr(const VexRip &vr) const
 {
@@ -3936,4 +3597,68 @@ Oracle::findAssertions(std::vector<DynAnalysisRip> &drs)
 		for (auto it = res.begin(); it != res.end(); it++)
 			drs.push_back(DynAnalysisRip(VexRip::invent_vex_rip(it->rip)));
 	}
+}
+
+bool
+OracleInterface::memoryAccessesMightAlias(const MaiMap &decode, const IRExprOptimisations &opt,
+					  StateMachineSideEffectMemoryAccess *a,
+					  StateMachineSideEffectMemoryAccess *b) {
+	if (a->type == StateMachineSideEffect::Load) {
+		if (b->type == StateMachineSideEffect::Load)
+			return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)a, (StateMachineSideEffectLoad *)b);
+		else
+			return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)a, (StateMachineSideEffectStore *)b);
+	} else {
+		if (b->type == StateMachineSideEffect::Load)
+			return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)b, (StateMachineSideEffectStore *)a);
+		else
+			return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectStore *)a, (StateMachineSideEffectStore *)b);
+	}
+}
+
+char *
+Oracle::LivenessSet::mkName() const
+{
+	int i;
+	char *acc;
+	char *acc2;
+	bool first = true;
+	acc = strdup("<");
+	for (i = 0; i < NR_REGS; i++) {
+		if (!(mask & (1ul << i)))
+			continue;
+		if (!first) {
+			acc2 = my_asprintf("%s|", acc);
+			free(acc);
+			acc = acc2;
+		}
+		first = false;
+		switch (i * 8) {
+#define do_reg(name) case OFFSET_amd64_ ## name : acc2 = my_asprintf("%s" #name , acc); break
+			do_reg(RAX);
+			do_reg(RDX);
+			do_reg(RCX);
+			do_reg(RBX);
+			do_reg(RSP);
+			do_reg(RBP);
+			do_reg(RSI);
+			do_reg(RDI);
+			do_reg(R8);
+			do_reg(R9);
+			do_reg(R10);
+			do_reg(R11);
+			do_reg(R12);
+			do_reg(R13);
+			do_reg(R14);
+			do_reg(R15);
+#undef do_reg
+		default:
+			abort();
+		}
+		free(acc);
+		acc = acc2;
+	}
+	acc2 = my_asprintf("%s>", acc);
+	free(acc);
+	return acc2;
 }

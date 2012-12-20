@@ -28,20 +28,13 @@ public:
 	explicit StaticRip(const DynAnalysisRip &r)
 		: rip(r.rips[r.nr_rips-1])
 	{}
-
 	StaticRip() : rip(0) {}
-
-	bool isValid() const { return rip != 0; }
 	VexRip makeVexRip(const VexRip &useStackOf);
 
 #define mk_operator(op)							\
 	bool operator op (const StaticRip &r) const { return rip op r.rip; }
 	mk_operator(==)
-	mk_operator(!=)
 	mk_operator(<)
-	mk_operator(<=)
-	mk_operator(>)
-	mk_operator(>=)
 #undef mk_operator
 
 	unsigned long rip;
@@ -54,19 +47,7 @@ public:
 	virtual bool memoryAccessesMightAlias(const MaiMap &, const IRExprOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *) = 0;
 	bool memoryAccessesMightAlias(const MaiMap &decode, const IRExprOptimisations &opt,
 				      StateMachineSideEffectMemoryAccess *a,
-				      StateMachineSideEffectMemoryAccess *b) {
-		if (a->type == StateMachineSideEffect::Load) {
-			if (b->type == StateMachineSideEffect::Load)
-				return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)a, (StateMachineSideEffectLoad *)b);
-			else
-				return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)a, (StateMachineSideEffectStore *)b);
-		} else {
-			if (b->type == StateMachineSideEffect::Load)
-				return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)b, (StateMachineSideEffectStore *)a);
-			else
-				return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectStore *)a, (StateMachineSideEffectStore *)b);
-		}
-	}
+				      StateMachineSideEffectMemoryAccess *b);
 	virtual bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) = 0;
 	bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store){
 		return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load), DynAnalysisRip(store));
@@ -103,55 +84,10 @@ public:
 		void operator |=(const LivenessSet x) { mask |= x.mask; clearName(); }
 		bool operator !=(const LivenessSet x) { return mask != x.mask; }
 		LivenessSet operator &(const LivenessSet x) { return LivenessSet(mask & x.mask); }
-		bool isLive(Int offset) const;
-		static LivenessSet everything;
 		static LivenessSet argRegisters;
 		LivenessSet(unsigned long _m) : mask(_m) {}
 	private:
-		char *mkName() const {
-			int i;
-			char *acc;
-			char *acc2;
-			bool first = true;
-			acc = strdup("<");
-			for (i = 0; i < NR_REGS; i++) {
-				if (!(mask & (1ul << i)))
-					continue;
-				if (!first) {
-					acc2 = my_asprintf("%s|", acc);
-					free(acc);
-					acc = acc2;
-				}
-				first = false;
-				switch (i * 8) {
-#define do_reg(name) case OFFSET_amd64_ ## name : acc2 = my_asprintf("%s" #name , acc); break
-					do_reg(RAX);
-					do_reg(RDX);
-					do_reg(RCX);
-					do_reg(RBX);
-					do_reg(RSP);
-					do_reg(RBP);
-					do_reg(RSI);
-					do_reg(RDI);
-					do_reg(R8);
-					do_reg(R9);
-					do_reg(R10);
-					do_reg(R11);
-					do_reg(R12);
-					do_reg(R13);
-					do_reg(R14);
-					do_reg(R15);
-#undef do_reg
-				default:
-					abort();
-				}
-				free(acc);
-				acc = acc2;
-			}
-			acc2 = my_asprintf("%s>", acc);
-			free(acc);
-			return acc2;
-		}
+		char *mkName() const;
 	};
 
 	class ThreadRegisterAliasingConfiguration;
@@ -191,17 +127,10 @@ public:
 			: rip(_rip)
 		{}
 
-		bool aliasConfigOnEntryToInstruction(const StaticRip &rip, ThreadRegisterAliasingConfiguration *out);
 		ThreadRegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip);
 		ThreadRegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b);
 		void setAliasConfigOnEntryToInstruction(const StaticRip &rip, const ThreadRegisterAliasingConfiguration &config);
 		void resolveCallGraph(Oracle *oracle);
-		bool addInstruction(const StaticRip &rip,
-				    bool isReturn,
-				    const std::vector<StaticRip> &callees,
-				    const std::vector<StaticRip> &fallThrough,
-				    const std::vector<StaticRip> &callSucc,
-				    const std::vector<StaticRip> &branch);
 		void calculateRegisterLiveness(Oracle *oracle, AddressSpace *as, bool *done_something);
 		void calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle);
 		void calculateAliasing(AddressSpace *as, Oracle *oracle, bool *done_something);
@@ -258,25 +187,9 @@ public:
 		PointerAliasingSet lookupRegister(const threadAndRegister &r, bool buildingAliasTable) const;
 		void set(const threadAndRegister &, const PointerAliasingSet &);
 		void addConfig(unsigned tid, const ThreadRegisterAliasingConfiguration &config);
-		void operator |=(const RegisterAliasingConfiguration &config);
-
-		/* Check whether a and b might point at the same bit of
-		   memory (i.e. have intersecting pointer aliasing
-		   sets) given @this's register aliasing
-		   configuration.  Note that this assumes that both @a
-		   and @b are pointers i.e. it's not just asking
-		   whether @a and @b might be equal. */
-		bool ptrsMightAlias(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt) const;
-		bool ptrsMightAlias(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt) const;
-
-		/* Check whether there's any possibility of @a being a
-		   pointer to a non-stack location. */
-		bool mightPointOutsideStack(IRExpr *a, const IRExprOptimisations &opt) const;
 
 		void prettyPrint(FILE *) const;
 	};
-
-	RegisterAliasingConfiguration getAliasingConfiguration(const std::vector<std::pair<unsigned, VexRip> > &rips);
 
 	struct callgraph_entry {
 		bool is_call;
@@ -301,8 +214,6 @@ private:
 public:
 	StaticRip functionHeadForInstruction(const StaticRip &rip);
 private:
-	void purgeFunction(const StaticRip &head);
-
 	enum RbpToRspOffsetState {
 		RbpToRspOffsetStateImpossible,
 		RbpToRspOffsetStateValid,
@@ -338,7 +249,6 @@ public:
 	   table.  This usually indicates that the relevant
 	   instruction is accessing the stack. */
 private:
-	bool notInTagTable(const DynAnalysisRip &);
 	bool hasConflictingRemoteStores(const DynAnalysisRip &dr);
 public:
 	bool hasConflictingRemoteStores(const MaiMap &, const AllowableOptimisations &opt, StateMachineSideEffectMemoryAccess *access);
@@ -357,8 +267,6 @@ public:
 	bool memoryAccessesMightAlias(const MaiMap &,const IRExprOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(const MaiMap &,const IRExprOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store);
-        void findRacingRips(const MaiMap &, StateMachineSideEffectLoad *, std::set<DynAnalysisRip> &);
-	void findRacingRips(const MaiMap &, StateMachineSideEffectStore *, std::set<DynAnalysisRip> &);
 
 	static void findInstructions(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads,
 				     const callgraph_t &callgraph,
@@ -384,7 +292,6 @@ public:
 	void findPredecessors(const VexRip &vr, bool includeCallPredecessors,
 			      std::vector<VexRip> &out);
 	void findPredecessors(unsigned long rip, std::set<unsigned long> &out);
-	unsigned long findCallPredecessor(unsigned long rip);
 
 	bool isPltCall(const VexRip &vr);
 	LibraryFunctionType identifyLibraryCall(const VexRip &vr);
@@ -408,7 +315,6 @@ StateMachine *introduceFreeVariables(StateMachine *sm,
 				     Oracle *oracle,
 				     bool *done_something);
 
-unsigned getInstructionSize(AddressSpace *as, const VexRip &rip);
 unsigned getInstructionSize(AddressSpace *as, const StaticRip &rip);
 unsigned stack_offset(Oracle *oracle, unsigned long rip);
 
