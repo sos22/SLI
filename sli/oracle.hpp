@@ -334,8 +334,6 @@ public:
 
 	static const unsigned STATIC_THREAD = 712;
 
-	void findPreviousInstructions(std::vector<VexRip> &output);
-	void findPreviousInstructions(std::vector<VexRip> &output, const VexRip &rip);
 	void findConflictingStores(const MaiMap &mai,
 				   StateMachineSideEffectLoad *smsel,
 				   std::set<DynAnalysisRip> &out);

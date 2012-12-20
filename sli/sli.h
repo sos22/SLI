@@ -438,12 +438,6 @@ AddressSpace::fetch(unsigned long start, Thread *thr)
 	return tt;
 }
 
-void getDominators(Thread *thr, MachineState *ms, std::vector<VexRip> &dominators,
-		   std::vector<VexRip> &fheads);
-template <typename ripType> void findDominators(const ripType &functionHead,
-						const ripType &rip,
-						AddressSpace *as,
-						std::vector<ripType> &out);
 IRExpr *readIRExpr(int fd);
 
 IRSB *instrument_func(unsigned tid,
