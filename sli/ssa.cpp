@@ -296,11 +296,14 @@ buildReplacement(SMScopes *scopes,
 		 const std::map<const StateMachineSideEffecting *, threadAndRegister> &)
 {
 	neededPhisT neededPhis;
+	bbdd *cond = replaceInputRegs(&scopes->bools, smb->condition,
+				      regSets, usedGens, neededPhis);
+	if (TIMEOUT)
+		return NULL;
 	StateMachineBifurcate *res =
 		new StateMachineBifurcate(
 			smb->dbg_origin,
-			replaceInputRegs(&scopes->bools, smb->condition, regSets,
-					 usedGens, neededPhis),
+			cond,
 			NULL,
 			NULL);
 	relocs.push_back(relocT(&res->trueTarget, smb->trueTarget));
@@ -317,10 +320,10 @@ buildReplacement(SMScopes *scopes,
 		 const std::map<const StateMachineSideEffecting *, threadAndRegister> &)
 {
 	neededPhisT neededPhis;
-	StateMachineTerminal *res =
-		new StateMachineTerminal(
-			smt->dbg_origin,
-			replaceInputRegs(&scopes->bools, &scopes->smrs, smt->res, regSets, usedGens, neededPhis));
+	smrbdd *r = replaceInputRegs(&scopes->bools, &scopes->smrs, smt->res, regSets, usedGens, neededPhis);
+	if (TIMEOUT)
+		return NULL;
+	StateMachineTerminal *res = new StateMachineTerminal(smt->dbg_origin, r);
 	return addPhiPrefix(scopes, res, neededPhis);
 }
 
@@ -442,6 +445,8 @@ convertToSSA(SMScopes *scopes, StateMachine *inp)
 			printStateMachine(outState, stdout);
 		}
 	}
+	if (TIMEOUT)
+		return NULL;
 	for (auto it = relocs.begin();
 	     it != relocs.end();
 	     it++) {

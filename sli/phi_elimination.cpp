@@ -295,6 +295,13 @@ build_selection_bdd(SMScopes *scopes,
 			done++;
 			exprbdd::enablingTableT enabling;
 			bbdd *assumption = cdg.domOf(state);
+			if (assumption == scopes->bools.cnst(false)) {
+				/* This state is completely
+				 * unreachable.  Hmm. */
+				if (debug_build_paths)
+					printf("Unreachable state l%d?\n", labels[state]);
+				return NULL;
+			}
 			bool failed = false;
 			for (auto it = pred.begin(); !failed && it != pred.end(); it++) {
 				bbdd *ass = assumption;

@@ -130,7 +130,7 @@ static bool
 equalModuloVariables(const StateMachineSideEffect *smse1,
 		     const StateMachineSideEffect *smse2)
 {
-	if (smse1 == NULL || smse2 == NULL)
+	if (smse1 == NULL || smse2 == NULL || TIMEOUT)
 		return false;
 	if (smse1->type != smse2->type)
 		return false;

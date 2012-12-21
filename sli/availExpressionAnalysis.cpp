@@ -549,6 +549,10 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 		exprbdd *newAddr;
 		bool doit = false;
 		newAddr = applyAvailSet(scopes, currentlyAvailable, smsel->addr, &doit);
+		if (TIMEOUT) {
+			newEffect = smse;
+			break;
+		}
 		for (auto it2 = currentlyAvailable.beginSideEffects();
 		     !newEffect && it2 != currentlyAvailable.endSideEffects();
 		     it2++) {
@@ -1243,6 +1247,8 @@ template <typename t> static void
 rewrite_var(ssa_avail_state &state, t *&arg, bool *done_something)
 {
 	t *n = ssaApplyAvail(state, arg);
+	if (TIMEOUT)
+		return;
 	if (n != arg)
 		*done_something = n;
 	arg = n;

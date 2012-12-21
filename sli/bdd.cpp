@@ -756,11 +756,12 @@ bbdd::invert(scope *scope, bbdd *a)
 		return NULL;
 	if (a->isLeaf)
 		return scope->cnst(!a->leaf());
-	else
-		return scope->makeInternal(
-			a->internal().condition,
-			bbdd::invert(scope, a->internal().trueBranch),
-			bbdd::invert(scope, a->internal().falseBranch));
+
+	bbdd *t = bbdd::invert(scope, a->internal().trueBranch);
+	bbdd *f = bbdd::invert(scope, a->internal().falseBranch);
+	if (!t || !f)
+		return NULL;
+	return scope->makeInternal(a->internal().condition, t, f);
 }
 
 bdd_rank
