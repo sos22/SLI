@@ -627,7 +627,7 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 		q.pop_back();
 		if (!visited.insert(ee).second)
 			continue;
-		if (e->isLeaf) {
+		if (ee->isLeaf) {
 			acc |= pointsToSetForExpr(scopes, ee->leaf(), sm, sl,
 						  slt, machine);
 		} else {
