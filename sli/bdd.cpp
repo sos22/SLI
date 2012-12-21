@@ -345,6 +345,8 @@ quickSimplify(IRExpr *a)
 			IRExprConst *arg1c = (IRExprConst *)ieb->arg1;
 			IRExprConst *arg2c = (IRExprConst *)ieb->arg2;
 			switch (ieb->op) {
+			case Iop_CmpEQ8:
+				return IRExpr_Const_U1(arg1c->Ico.U8 == arg2c->Ico.U8);
 			case Iop_CmpEQ32:
 				return IRExpr_Const_U1(arg1c->Ico.U32 == arg2c->Ico.U32);
 			case Iop_CmpEQ64:
