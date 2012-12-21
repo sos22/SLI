@@ -57,13 +57,15 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 	if (trueTarget->type == StateMachineState::Terminal &&
 	    falseTarget->type == StateMachineState::Terminal) {
 		*done_something = true;
-		return new StateMachineTerminal(
-			dbg_origin,
+		smrbdd *n = 
 			smrbdd::ifelse(
 				&scopes->smrs,
 				condition,
 				((StateMachineTerminal *)trueTarget)->res,
-				((StateMachineTerminal *)falseTarget)->res));
+				((StateMachineTerminal *)falseTarget)->res);
+		if (TIMEOUT)
+			return this;
+		return new StateMachineTerminal(dbg_origin, n);
 	}
 	set_condition(simplifyBDD(&scopes->bools, condition, opt, done_something));
 	if (condition->isLeaf) {
