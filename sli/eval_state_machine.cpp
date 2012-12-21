@@ -730,6 +730,14 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 	case StateMachineSideEffect::ImportRegister: {
 		StateMachineSideEffectImportRegister *p =
 			(StateMachineSideEffectImportRegister *)smse;
+		state.set_register(scopes,
+				   p->reg,
+				   exprbdd::var(
+					   &scopes->exprs,
+					   &scopes->bools,
+					   IRExpr_Get(threadAndRegister::reg(p->tid, p->vex_offset, -1), Ity_I64)),
+				   &pathConstraint,
+				   opt);
 		/* The only use we make of a PointerAliasing side
 		   effect is to say that things which aliasing says
 		   are definitely valid pointers really are definitely
