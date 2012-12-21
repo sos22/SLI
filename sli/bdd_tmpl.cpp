@@ -109,10 +109,8 @@ public:
 	from_enabling_internal(const typename subtreeT::enablingTableT &_table)
 		: failed(false)
 	{
-		for (auto it = _table.begin();
-		     it != _table.end();
-		     it++)
-			if (!it.key()->isLeaf() ||
+		for (auto it = _table.begin(); !it.finished(); it.advance())
+			if (!it.key()->isLeaf ||
 			    it.key()->leaf())
 				table.set(it.key(), it.value());
 	}

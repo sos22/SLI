@@ -403,7 +403,7 @@ quickSimplify(IRExpr *a)
 			case Iop_CmpLT32S:
 				return IRExpr_Const_U1((int)arg1c->Ico.U32 < (int)arg2c->Ico.U32);
 			case Iop_CmpLT64S:
-				return IRExpr_Const_U1((long)arg1c->Ico.U64 < (long)arg2c->Ico.U645);
+				return IRExpr_Const_U1((long)arg1c->Ico.U64 < (long)arg2c->Ico.U64);
 			case Iop_Shl64:
 				return IRExpr_Const_U64(arg1c->Ico.U64 << arg2c->Ico.U8);
 			default:
