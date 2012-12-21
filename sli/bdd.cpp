@@ -406,6 +406,8 @@ quickSimplify(IRExpr *a)
 				return IRExpr_Const_U1((long)arg1c->Ico.U64 < (long)arg2c->Ico.U64);
 			case Iop_Shl64:
 				return IRExpr_Const_U64(arg1c->Ico.U64 << arg2c->Ico.U8);
+			case Iop_Shr64:
+				return IRExpr_Const_U64(arg1c->Ico.U64 >> arg2c->Ico.U8);
 			default:
 				abort();
 			}
@@ -750,6 +752,8 @@ bbdd::Or(scope *scope, bbdd *a, bbdd *b)
 bbdd *
 bbdd::invert(scope *scope, bbdd *a)
 {
+	if (TIMEOUT)
+		return NULL;
 	if (a->isLeaf)
 		return scope->cnst(!a->leaf());
 	else
