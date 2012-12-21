@@ -714,6 +714,8 @@ public:
 		     bbdd *t,
 		     bbdd *f) const
 	{
+		if (!t || !f)
+			return NULL;
 		return scope->makeInternal(a, t, f);
 	}
 	bool operator<(const binary_zip_internal &o) const {
