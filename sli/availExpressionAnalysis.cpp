@@ -248,6 +248,7 @@ avail_t::invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMach
 					return visit_abort;
 			return visit_continue;
 		}
+		std::map<bbdd *, bbdd *> memo;
 	public:
 		bool isPresent(const threadAndRegister &reg, const StateMachineSideEffect *preserve,
 			       const StateMachineSideEffect *se)
@@ -271,10 +272,17 @@ avail_t::invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMach
 		{
 			if (expr->isLeaf)
 				return expr;
+			auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(expr, NULL));
+			auto it = it_did_insert.first;
+			auto did_insert = it_did_insert.second;
+			if (!did_insert)
+				return it->second;
 			bbdd *t = invalidateRegister(scope, reg, expr->internal().trueBranch);
 			bbdd *f = invalidateRegister(scope, reg, expr->internal().falseBranch);
-			if (t == f)
+			if (t == f) {
+				it->second = t;
 				return t;
+			}
 			static irexpr_visitor<ctxt> visitor;
 			visitor.Get = Get;
 			ctxt ctxt;
@@ -284,13 +292,16 @@ avail_t::invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMach
 				/* Behaviour depends on the register
 				   which we're trying to kill -> can't
 				   do anything */
-				return scope->cnst(true);
+				it->second = scope->cnst(true);
 			} else {
 				if (t == expr->internal().trueBranch &&
-				    f == expr->internal().falseBranch)
-					return expr;
-				return scope->makeInternal(expr->internal().condition, t, f);
+				    f == expr->internal().falseBranch) {
+					it->second = expr;
+				} else {
+					it->second = scope->makeInternal(expr->internal().condition, t, f);
+				}
 			}
+			return it->second;
 		}
 	} f;
 
