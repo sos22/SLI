@@ -793,7 +793,7 @@ StateMachineSideEffecting::prependSideEffect(StateMachineSideEffect *se)
 StateMachineState *
 StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	if (current_optimisation_gen == last_optimisation_gen)
+	if (current_optimisation_gen == last_optimisation_gen || TIMEOUT)
 		return this;
 	last_optimisation_gen = current_optimisation_gen;
 	if (!sideEffect) {

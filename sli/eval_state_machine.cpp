@@ -681,7 +681,8 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		} else {
 			val = exprbdd::load(&scopes->exprs, &scopes->bools, smsel->type, addr);
 		}
-		state.set_register(scopes, smsel->target, val, &pathConstraint, opt);
+		if (!TIMEOUT)
+			state.set_register(scopes, smsel->target, val, &pathConstraint, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -1560,6 +1561,8 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			&fake_cntr,
 			opt,
 			ssaCorrespondence));
+	if (!crossProductMachine)
+		return NULL;
 	crossProductMachine =
 		optimiseStateMachine(
 			scopes,
