@@ -71,6 +71,20 @@ protected:
 	{
 		h->callbacks.erase(this);
 	}
+	__GcCallback(const __GcCallback &o)
+		: h(o.h), is_late(o.is_late)
+	{
+		h->callbacks.insert(this);
+	}
+	void operator=(const __GcCallback &o)
+	{
+		if (h != o.h) {
+			h->callbacks.erase(this);
+			o.h->callbacks.insert(this);
+		}
+		h = o.h;
+		is_late = o.is_late;
+	}
 	virtual void runGc(HeapVisitor &hv) = 0;
 public:
 	void operator()(HeapVisitor &hv, bool late) { if (late == is_late) runGc(hv); }
