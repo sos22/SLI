@@ -735,9 +735,11 @@ buildNewStateMachineWithLoadsEliminated(
 		switch (sm->type) {
 		case StateMachineState::Bifurcate: {
 			StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-			res = new StateMachineBifurcate(
-				smb,
-				applyAvailSet(&scopes->bools, avail, smb->condition, done_something));
+			bbdd *newCond = applyAvailSet(&scopes->bools, avail, smb->condition, done_something);
+			if (newCond)
+				res = new StateMachineBifurcate(smb, newCond);
+			else
+				res = smb;
 			break;
 		}
 		case StateMachineState::SideEffecting: {
@@ -758,9 +760,11 @@ buildNewStateMachineWithLoadsEliminated(
 		}
 		case StateMachineState::Terminal: {
 			StateMachineTerminal *smt = (StateMachineTerminal *)sm;
-			res = new StateMachineTerminal(
-				smt,
-				applyAvailSet(scopes, avail, smt->res, done_something));
+			smrbdd *newres = applyAvailSet(scopes, avail, smt->res, done_something);
+			if (newres)
+				res = new StateMachineTerminal(smt, newres);
+			else
+				res = smt;
 			break;
 		}
 		}
