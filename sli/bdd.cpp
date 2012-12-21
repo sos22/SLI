@@ -955,6 +955,7 @@ exprbdd_scope::runGc(HeapVisitor &hv)
 		newLeaves[it->first] = b;
 	}
 	leaves = newLeaves;
+	bdd_scope<exprbdd>::runGc(hv);
 }
 
 exprbdd *
@@ -1100,6 +1101,7 @@ template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);
 template bbdd *_bdd<bool, bbdd>::ifelse(const_bdd_scope<bbdd> *, bbdd *, bbdd *, bbdd *);
+template void const_bdd_scope<bbdd>::runGc(HeapVisitor &hv);
 
 template void _bdd<int, intbdd>::prettyPrint(FILE *);
 template bool _bdd<bool, bbdd>::_parse<const_bdd_scope<bbdd>, bbdd::parseBool>(const_bdd_scope<bbdd>*, bbdd **, const char *, const char **);
@@ -1113,6 +1115,7 @@ template smrbdd *_bdd<StateMachineRes, smrbdd>::ifelse(const_bdd_scope<smrbdd> *
 template std::map<StateMachineRes, bbdd *> _bdd<StateMachineRes, smrbdd>::to_selectors(const_bdd_scope<bbdd> *, smrbdd *);
 template smrbdd *_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, smrbdd *);
 template smrbdd *const_bdd<StateMachineRes, smrbdd>::replaceTerminal(const_bdd_scope<smrbdd> *, StateMachineRes, StateMachineRes, smrbdd *);
+template void const_bdd_scope<smrbdd>::runGc(HeapVisitor &hv);
 
 template void _bdd<IRExpr *, exprbdd>::prettyPrint(FILE *);
 template bool _bdd<IRExpr *, exprbdd>::_parse<exprbdd_scope, exprbdd::parseLeaf>(exprbdd_scope *, exprbdd **, const char *, const char **);

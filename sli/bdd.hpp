@@ -335,6 +335,8 @@ class bdd_scope {
 		}
 	};
 	std::map<entry, t *> intern;
+protected:
+	void runGc(HeapVisitor &hv);
 public:
 	t *makeInternal(IRExpr *a, t *, t *);
 	t *makeInternal(IRExpr *a, const bdd_rank &r, t *, t *);
@@ -360,6 +362,7 @@ template <typename t> class const_bdd_scope
 			else
 				it++;
 		}
+		bdd_scope<t>::runGc(hv);
 	}
 public:
 	t *cnst(const typename t::leafT &i) {
@@ -378,7 +381,8 @@ public:
 
 class bbdd;
 
-template <typename constT, typename subtreeT> class const_bdd : public _bdd<constT, subtreeT> {
+template <typename constT, typename subtreeT> class const_bdd
+	: public _bdd<constT, subtreeT> {
 public:
 	typedef constT leafT;
 	typedef const_bdd_scope<subtreeT> scope;
