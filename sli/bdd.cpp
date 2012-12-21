@@ -396,6 +396,14 @@ quickSimplify(IRExpr *a)
 				do_type(32);
 				do_type(64);
 #undef do_type
+			case Iop_CmpLT8S:
+				return IRExpr_Const_U1((char)arg1c->Ico.U8 < (char)arg2c->Ico.U8);
+			case Iop_CmpLT16S:
+				return IRExpr_Const_U1((short)arg1c->Ico.U16 < (short)arg2c->Ico.U16);
+			case Iop_CmpLT32S:
+				return IRExpr_Const_U1((int)arg1c->Ico.U32 < (int)arg2c->Ico.U32);
+			case Iop_CmpLT64S:
+				return IRExpr_Const_U1((long)arg1c->Ico.U64 < (long)arg2c->Ico.U645);
 			case Iop_Shl64:
 				return IRExpr_Const_U64(arg1c->Ico.U64 << arg2c->Ico.U8);
 			default:
