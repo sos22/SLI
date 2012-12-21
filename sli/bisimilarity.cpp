@@ -436,6 +436,8 @@ unifyExpressions(SMScopes *scopes,
 				definedReg.second = ((StateMachineSideEffectLoad *)se)->type;
 			else if (se->type == StateMachineSideEffect::Phi)
 				definedReg.second = ((StateMachineSideEffectPhi *)se)->ty;
+			else if (se->type == StateMachineSideEffect::ImportRegister)
+				definedReg.second = Ity_I64;
 			else
 				abort();
 			auto it = unifier.find(definedReg);

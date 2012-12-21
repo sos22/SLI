@@ -433,14 +433,28 @@ public:
 	StateMachineTerminal(const VexRip &vr, smrbdd * _res)
 		: StateMachineState(vr, StateMachineState::Terminal),
 		  res(_res)
-	{}
+	{
+		assert(res);
+	}
 	StateMachineTerminal(StateMachineTerminal *base, smrbdd *_res)
 		: StateMachineState(base->dbg_origin, StateMachineState::Terminal),
 		  res(_res)
-	{}
-	smrbdd *res;
+	{
+		assert(res);
+	}
+	smrbdd *const res;
+	void set_res(smrbdd *_res)
+	{
+		assert(_res);
+		*(smrbdd **)&res = _res;
+	}
+
 	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &, bool *);
-	void visit(HeapVisitor &hv) { hv(res); }
+	void visit(HeapVisitor &hv) {
+		smrbdd *r = res;
+		hv(r);
+		set_res(r);
+	}
 	void targets(std::vector<StateMachineState **> &) { }
 	void targets(std::vector<const StateMachineState *> &) const { }
 	StateMachineSideEffect *getSideEffect() { return NULL; }
