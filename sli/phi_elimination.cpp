@@ -116,6 +116,10 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 			bbdd *cond = smb->condition;
 			bbdd *trueCond = bbdd::And(scope, dom, cond);
 			bbdd *falseCond = bbdd::And(scope, dom, bbdd::invert(scope, cond));
+			if (TIMEOUT)
+				break;
+			assert(trueCond);
+			assert(falseCond);
 			addPath(content[smb->trueTarget],
 				trueCond,
 				smb->trueTarget);

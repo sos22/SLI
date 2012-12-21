@@ -545,6 +545,8 @@ public:
 bool
 EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
 {
+	if (TIMEOUT)
+		return true;
 	bbdd *simplified;
 	switch (evalBooleanExpression(scopes, exp, &simplified, opt)) {
 	case tr_true:
@@ -610,15 +612,15 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
 		addr = state.specialiseIRExpr(scopes, smsema->addr);
-		if (expressionIsTrue(
-			    scopes,
-			    exprbdd::unop(
+		exprbdd *a = exprbdd::unop(
 				    &scopes->exprs,
 				    &scopes->bools,
 				    Iop_BadPtr,
-				    addr),
-			    chooser,
-			    opt))
+				    addr);
+		if (TIMEOUT)
+			return esme_escape;
+		assert(a);
+		if (expressionIsTrue(scopes, a, chooser, opt))
 			return esme_escape;
 	}
 

@@ -107,8 +107,15 @@ public:
 	bool failed;
 	typename subtreeT::enablingTableT table;
 	from_enabling_internal(const typename subtreeT::enablingTableT &_table)
-		: failed(false), table(_table)
-	{}
+		: failed(false)
+	{
+		for (auto it = _table.begin();
+		     it != _table.end();
+		     it++)
+			if (!it.key()->isLeaf() ||
+			    it.key()->leaf())
+				table.set(it.key(), it.value());
+	}
 	from_enabling_internal(bool _failed)
 		: failed(_failed)
 	{}

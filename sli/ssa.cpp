@@ -176,6 +176,8 @@ replaceRegs(SMScopes *scopes,
 	    neededPhisT &newInputs,
 	    const threadAndRegister *newOutput)
 {
+	if (TIMEOUT)
+		return what;
 	switch (what->type) {
 	case StateMachineSideEffect::Unreached:
 	case StateMachineSideEffect::StackLayout:

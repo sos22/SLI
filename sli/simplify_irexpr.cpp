@@ -3257,6 +3257,8 @@ template <typename treeT, typename scopeT> static treeT *
 simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
 	    bool *done_something, std::map<treeT *, treeT *> &memo)
 {
+	if (TIMEOUT)
+		return bdd;
 	if (bdd->isLeaf)
 		return bdd;
 	typedef typename std::pair<treeT *, treeT *> treePairT;
@@ -3294,6 +3296,8 @@ template <> exprbdd *
 simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IRExprOptimisations &opt,
 	    bool *done_something, std::map<exprbdd *, exprbdd *> &memo)
 {
+	if (TIMEOUT)
+		return bdd;
 	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(bdd, (exprbdd *)NULL));
 	if (!it_did_insert.second)
 		return it_did_insert.first->second;

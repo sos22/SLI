@@ -184,7 +184,8 @@ ControlDominationMap::init(SMScopes *scopes,
 					break;
 				}
 			}
-			discoverPathToState(effecting->target, exprAtExit);
+			if (!TIMEOUT)
+				discoverPathToState(effecting->target, exprAtExit);
 			break;
 		}
 		}

@@ -922,6 +922,8 @@ exprbdd::to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo)
 IRExpr *
 exprbdd::to_irexpr(exprbdd *what)
 {
+	if (!what)
+		return NULL;
 	std::map<exprbdd *, IRExpr *> memo;
 	return to_irexpr(what, memo);
 }
@@ -965,6 +967,8 @@ exprbdd_scope::runGc(HeapVisitor &hv)
 exprbdd *
 exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 {
+	if (TIMEOUT)
+		return NULL;
 	if (what->isLeaf)
 		return var(
 			scope,
@@ -981,6 +985,8 @@ exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 exprbdd *
 exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, IRExpr *a, exprbdd *b)
 {
+	if (TIMEOUT)
+		return NULL;
 	if (b->isLeaf)
 		return var(
 			scope,
@@ -997,6 +1003,8 @@ exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, IRExpr *a, exprbdd *b
 exprbdd *
 exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, IRExpr *b)
 {
+	if (TIMEOUT)
+		return NULL;
 	if (a->isLeaf)
 		return var(
 			scope,
@@ -1013,6 +1021,8 @@ exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, IRExpr *b
 exprbdd *
 exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b)
 {
+	if (TIMEOUT)
+		return NULL;
 	if (a->isLeaf && b->isLeaf)
 		return var(
 			scope,
@@ -1045,6 +1055,8 @@ exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *
 exprbdd *
 exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *what)
 {
+	if (TIMEOUT)
+		return NULL;
 	if (what->isLeaf)
 		return var(
 			scope,
@@ -1096,6 +1108,8 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr, std::map<exprbdd *, bbdd *> 
 bbdd *
 exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr)
 {
+	if (TIMEOUT)
+		return NULL;
 	assert(expr->type() == Ity_I1);
 	std::map<exprbdd *, bbdd *> memo;
 	return to_bbdd(scope, expr, memo);
