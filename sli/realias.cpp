@@ -506,8 +506,10 @@ PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
 		for (auto it = addrPts.stackPointers.begin();
 		     it != addrPts.stackPointers.end();
 		     it++) {
-			assert(slt.initialLoadAliasing.count(Maybe<FrameId>::just(*it)));
-			res |= slt.initialLoadAliasing[Maybe<FrameId>::just(*it)];
+			if (slt.initialLoadAliasing.count(Maybe<FrameId>::just(*it)))
+				res |= slt.initialLoadAliasing[Maybe<FrameId>::just(*it)];
+			else
+				return PointerAliasingSet::anything;
 		}
 	}
 	if (addrPts.mightPointAtNonStack())
