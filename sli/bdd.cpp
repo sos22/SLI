@@ -428,7 +428,7 @@ quickSimplify(IRExpr *a)
 			    ((IRExprAssociative *)iea->contents[i])->op == iea->op) {
 				haveNested = true;
 				IRExprAssociative *arg = (IRExprAssociative *)iea->contents[i];
-				for (int j = 0; j < iea->nr_arguments; j++) {
+				for (int j = 0; j < arg->nr_arguments; j++) {
 					if (arg->contents[j]->tag == Iex_Const) {
 						if (!haveConsts)
 							new_nr_args++;
