@@ -2,6 +2,7 @@
    remove any which never compute BadPtr expressions, because they
    tend to be far less interesting than those which do. */
 #include <dirent.h>
+#include <errno.h>
 
 #include "sli.h"
 #include "offline_analysis.hpp"

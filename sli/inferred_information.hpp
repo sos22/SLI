@@ -7,6 +7,7 @@
 #include "state_machine.hpp"
 #include "alloc_mai.hpp"
 #include "visitor.hpp"
+#include "map.h"
 
 class Oracle;
 class OracleInterface;

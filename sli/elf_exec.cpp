@@ -118,7 +118,7 @@ ElfData::getPltAddress(AddressSpace *as, const char *name) const
 	if (idx == -1)
 		return 0;
 	for (unsigned long res = plt_start; res < plt_end; res += 16)
-		if (as->fetch<int>(res + 7, NULL) == idx)
+		if (as->fetch<int>(res + 7) == idx)
 			return res;
 	return -1;
 }
@@ -142,7 +142,7 @@ MachineState::readELFExec(const char *path)
 	if (!phdrs)
 		return NULL;
 
-	AddressSpace *as = AddressSpace::initialAddressSpace(0);
+	AddressSpace *as = AddressSpace::initialAddressSpace();
 	MachineState *work = new MachineState();
 	work->addressSpace = as;
 	for (int p = 0; p < eh->e_phnum; p++) {
@@ -157,17 +157,11 @@ MachineState::readELFExec(const char *path)
 		unsigned long end = start + phdrs[p].p_memsz;
 		start = start & ~(PAGE_SIZE - 1);
 		end = (end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-		as->allocateMemory(start,
-				   end - start,
-				   VAMap::Protection(
-					   phdrs[p].p_flags & PF_R,
-					   phdrs[p].p_flags & PF_W,
-					   phdrs[p].p_flags & PF_X));
+		as->allocateMemory(start, end - start);
 		as->copyToClient(phdrs[p].p_vaddr,
 				 phdrs[p].p_filesz,
 				 m.window(phdrs[p].p_offset,
-					  phdrs[p].p_filesz),
-				 true);
+					  phdrs[p].p_filesz));
 	}
 
 	ElfData *ed = new ElfData();

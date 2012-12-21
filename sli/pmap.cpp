@@ -4,14 +4,35 @@
 #define TRACE_PMAP 0
 #endif
 
+static bool
+operator<(const PhysicalAddress &a, const PhysicalAddress &b)
+{
+	return a._pa < b._pa;
+}
+static bool
+operator>=(const PhysicalAddress &a, const PhysicalAddress &b)
+{
+	return a._pa >= b._pa;
+}
+static PhysicalAddress
+operator+(const PhysicalAddress &a, unsigned long x)
+{
+	PhysicalAddress r;
+	r._pa = a._pa + x;
+	return r;
+}
+static unsigned long
+operator-(const PhysicalAddress &a, const PhysicalAddress &b)
+{
+	return a._pa - b._pa;
+}
+
 PMapEntry *PMapEntry::alloc(PhysicalAddress pa,
-			    MemoryChunk *mc,
-			    bool readonly)
+			    MemoryChunk *mc)
 {
 	PMapEntry *work = new PMapEntry();
 	work->pa = pa;
 	work->mc = mc;
-	work->readonly = readonly;
 	work->next = NULL;
 	work->pprev = NULL;
 	return work;
@@ -46,44 +67,16 @@ MemoryChunk *PMap::lookup(PhysicalAddress pa, unsigned long *mc_start)
 	unsigned h = paHash(pa);
 	PMapEntry *pme = findPme(pa, h);
 	if (pme) {
-		if (pme->readonly) {
-#if TRACE_PMAP
-			printf("%p: COW %p for %lx\n", this, pme->mc,
-			       pa._pa);
-#endif
-			pme->mc = pme->mc->dupeSelf();
-			pme->readonly = false;
-		}
 		*mc_start = pa - pme->pa;
 #if TRACE_PMAP
 		printf("%p: %lx -> %p\n", this, pa._pa, pme->mc);
 #endif
 		return pme->mc;
-	} else if (!parent) {
+	} else
 		return NULL;
-	} else {
-		const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start, false);
-		if (!parent_mc)
-			return NULL;
-
-		PMapEntry *newPme;
-		newPme = PMapEntry::alloc(pa - *mc_start, parent_mc->dupeSelf(), false);
-		newPme->next = heads[h];
-		newPme->pprev = &heads[h];
-		if (newPme->next)
-			newPme->next->pprev = &newPme->next;
-		heads[h] = newPme;
-
-#if TRACE_PMAP
-		printf("%p: pull up non-const %lx -> %p from %p\n", this,
-		       pa._pa, newPme->mc, parent_mc);
-#endif
-		return newPme->mc;
-	}
 }
 
-const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start,
-						    bool pull_up) const
+const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start) const
 {
 	unsigned h = paHash(pa);
 	PMapEntry *pme = findPme(pa, h);
@@ -93,33 +86,15 @@ const MemoryChunk *PMap::lookupConst(PhysicalAddress pa, unsigned long *mc_start
 		printf("%p: %lx const -> %p\n", this, pa._pa, pme->mc);
 #endif
 		return pme->mc;
-	} else if (parent) {
-		const MemoryChunk *parent_mc = parent->lookupConst(pa, mc_start, false);
-		if (pull_up) {
-			PMapEntry *newPme;
-			newPme = PMapEntry::alloc(pa - *mc_start, const_cast<MemoryChunk *>(parent_mc), true);
-			newPme->next = heads[h];
-			newPme->pprev = &heads[h];
-			if (newPme->next)
-				newPme->next->pprev = &newPme->next;
-			heads[h] = newPme;
-#if TRACE_PMAP
-			printf("%p: pull up const %lx -> %p\n", this,
-			       pa._pa, parent_mc);
-#endif
-		}
-		return parent_mc;
-	} else {
+	} else
 		return NULL;
-	}
 }
 
 PhysicalAddress PMap::introduce(MemoryChunk *mc)
 {
 	PhysicalAddress pa = nextPa;
-	mc->base = pa;
 	nextPa = nextPa + MemoryChunk::size;
-	PMapEntry *pme = PMapEntry::alloc(pa, mc, false);
+	PMapEntry *pme = PMapEntry::alloc(pa, mc);
 	unsigned h = paHash(pa);
 	pme->next = heads[h];
 	pme->pprev = &heads[h];
@@ -139,15 +114,6 @@ PMap *PMap::empty()
 	return work;	
 }
 
-PMap *PMap::dupeSelf(void) const
-{
-	PMap *work = empty();
-	
-	work->nextPa = nextPa;
-	work->parent = (PMap *)this;
-	return work;
-}
-
 unsigned PMap::paHash(PhysicalAddress pa)
 {
 	return (pa._pa / MemoryChunk::size) % nrHashBuckets;
@@ -156,32 +122,21 @@ unsigned PMap::paHash(PhysicalAddress pa)
 void PMap::visitPA(PhysicalAddress pa, HeapVisitor &hv)
 {
 	unsigned h = paHash(pa);
-	PMap *cursor = this;
 
-	while (1) {
-		assert(cursor);
-		/* Double indirection because the hv() might want to
-		   relocate it. */
-		PMapEntry **pme;
+	/* Double indirection because the hv() might want to relocate
+	   it. */
+	PMapEntry **pme;
 	
-		pme = &cursor->heads[h];
-		while (*pme) {
-			if ( pa >= (*pme)->pa &&
-			     pa < (*pme)->pa + MemoryChunk::size ) {
-				hv(*pme);
-				return;
-			}
-			pme = &(*pme)->next;
+	pme = &heads[h];
+	while (*pme) {
+		if ( pa >= (*pme)->pa &&
+		     pa < (*pme)->pa + MemoryChunk::size ) {
+			hv(*pme);
+			return;
 		}
-		hv(cursor->parent);
-		assert(cursor->parent);
-		cursor = cursor->parent;
+		pme = &(*pme)->next;
 	}
-}
-
-void PMap::visit(HeapVisitor &hv)
-{
-	hv(parent);
+	abort();
 }
 
 void

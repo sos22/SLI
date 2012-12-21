@@ -1320,11 +1320,3 @@ main(int argc, char *argv[])
 	return 0;
 }
 
-
-/* For the compiler to instantiate CFG<ThreadRip>::print, so that it's
-   available in gdb. */
-void
-force_compilation(CFG<ThreadRip> *r)
-{
-	r->print(stdout);
-}

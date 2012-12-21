@@ -29,18 +29,6 @@ static bool debug_stack_validation = false;
 #define debug_stack_validation false
 #endif
 
-class AddExitCallPatch : public PatchFragment<ThreadRip> {
-protected:
-	void generateEpilogue(const CfgLabel &l, ThreadRip exitRip);
-	/* XXX should really override emitInstruction here to catch
-	   indirect jmp and ret instructions; oh well. */
-public:
-	AddExitCallPatch(const std::set<ThreadRip> &roots)
-		: PatchFragment<ThreadRip>(roots)
-	{}
-};
-
-
 static void
 trimCfg(StateMachine *machine, const std::set<std::pair<unsigned, CfgLabel> > &neededCfg)
 {

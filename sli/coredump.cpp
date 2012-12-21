@@ -43,7 +43,7 @@ MachineState::readCoredump(const char *path)
 	   -- nrEvents (XXX is this still needed?)
 	*/
 
-	AddressSpace *as = AddressSpace::initialAddressSpace(0); /* XXX don't know the BRK */
+	AddressSpace *as = AddressSpace::initialAddressSpace();
 	MachineState *work = new MachineState();
 	work->addressSpace = as;
 	for (int p = 0; p < eh->e_phnum; p++) {
@@ -67,16 +67,11 @@ MachineState::readCoredump(const char *path)
 				return NULL;
 			}
 			as->allocateMemory(phdrs[p].p_vaddr,
-					   phdrs[p].p_memsz,
-					   VAMap::Protection(
-						   phdrs[p].p_flags & PF_R,
-						   phdrs[p].p_flags & PF_W,
-						   phdrs[p].p_flags & PF_X));
+					   phdrs[p].p_memsz);
 			as->copyToClient(phdrs[p].p_vaddr,
 					 phdrs[p].p_filesz,
 					 m.window(phdrs[p].p_offset,
-						  phdrs[p].p_filesz),
-					 true);
+						  phdrs[p].p_filesz));
 		} else if (phdrs[p].p_type == PT_NOTE) {
 			printf("Notes section\n");
 			off_t off = phdrs[p].p_offset;

@@ -1,6 +1,7 @@
 /* Re-implementation of direct which tries to work off of just a core
    dump, rather than needing the full trace. */
 #include <err.h>
+#include <errno.h>
 
 #include <algorithm>
 #include <queue>
@@ -16,7 +17,6 @@
 #include "eval_state_machine.hpp"
 #include "inferred_information.hpp"
 #include "offline_analysis.hpp"
-#include "genfix.hpp"
 #include "allowable_optimisations.hpp"
 
 static VexRip
@@ -30,7 +30,7 @@ getThreadRip(Oracle *oracle, unsigned long rip, unsigned long rsp)
 		if (offset == 0)
 			break;
 		printf("RIP %lx, rsp %lx, offset 0x%x\n", rip, rsp, offset);
-		unsigned long ra = oracle->ms->addressSpace->fetch<unsigned long>(rsp + offset, NULL);
+		unsigned long ra = oracle->ms->addressSpace->fetch<unsigned long>(rsp + offset);
 		callStack.push_back(ra);
 		rsp += offset;
 		rip = ra;
