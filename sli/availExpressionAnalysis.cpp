@@ -1374,7 +1374,9 @@ ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
 		switch (s->type) {
 		case StateMachineState::Terminal: {
 			auto smt = (StateMachineTerminal *)s;
-			rewrite_var(state, smt->res, done_something);
+			smrbdd *res = smt->res;
+			rewrite_var(state, res, done_something);
+			smt->set_res(res);
 			break;
 		}
 		case StateMachineState::Bifurcate: {

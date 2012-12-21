@@ -2147,8 +2147,8 @@ assignMais(SMScopes *scopes, StateMachineState *s, int tid, MaiMap &mm)
 			assignMais(scopes, ((StateMachineBifurcate *)s)->condition, tid, mm);
 		return;
 	case StateMachineState::Terminal:
-		((StateMachineTerminal *)s)->res =
-			assignMais(scopes, ((StateMachineTerminal *)s)->res, tid, mm);
+		((StateMachineTerminal *)s)->set_res(
+			assignMais(scopes, ((StateMachineTerminal *)s)->res, tid, mm));
 		return;
 	case StateMachineState::SideEffecting:
 		assignMais(scopes, ((StateMachineSideEffecting *)s)->sideEffect, tid, mm);

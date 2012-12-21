@@ -1282,6 +1282,6 @@ StateMachineTerminal::optimise(SMScopes *scopes, const AllowableOptimisations &o
 		return this;
 	last_optimisation_gen = current_optimisation_gen;
 
-	res = simplifyBDD(&scopes->smrs, &scopes->bools, res, opt, done_something);
+	set_res(simplifyBDD(&scopes->smrs, &scopes->bools, res, opt, done_something));
 	return this;
 }

@@ -71,7 +71,7 @@ enforceMustStoreBeforeCrash(SMScopes *scopes, StateMachine *sm, bool *progress)
 			tab.set(selectors[smr_unreached], scopes->smrs.cnst(smr_unreached));
 		tab.set(selectors[smr_crash], scopes->smrs.cnst(smr_unreached));
 		*progress = true;
-		s->res = smrbdd::from_enabling(&scopes->smrs, tab, scopes->smrs.cnst(smr_unreached));
+		s->set_res(smrbdd::from_enabling(&scopes->smrs, tab, scopes->smrs.cnst(smr_unreached)));
 	}
 	return sm;
 }
