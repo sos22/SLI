@@ -713,40 +713,44 @@ buildNewStateMachineWithLoadsEliminated(
 	StateMachineState *res;
 	/* Shut compiler up */
 	res = (StateMachineState *)0xf001ul;
-	switch (sm->type) {
-	case StateMachineState::Bifurcate: {
-		StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-		avail.calcRegisterMap(&scopes->bools);
-		res = new StateMachineBifurcate(
-			smb,
-			applyAvailSet(&scopes->bools, avail, smb->condition, done_something));
-		break;
-	}
-	case StateMachineState::SideEffecting: {
-		StateMachineSideEffecting *smp = (StateMachineSideEffecting *)sm;
-		StateMachineSideEffect *newEffect;
-		avail.calcRegisterMap(&scopes->bools);
-		if (smp->sideEffect)
-			newEffect = buildNewStateMachineWithLoadsEliminated(scopes,
-									    decode,
-									    smp->sideEffect,
-									    avail,
-									    oracle,
-									    done_something,
-									    opt);
-		else
-			newEffect = NULL;
-		res = new StateMachineSideEffecting(smp, newEffect);
-		break;
-	}
-	case StateMachineState::Terminal: {
-		StateMachineTerminal *smt = (StateMachineTerminal *)sm;
-		avail.calcRegisterMap(&scopes->bools);
+	avail.calcRegisterMap(&scopes->bools);
+	if (avail.assumption == scopes->bools.cnst(false)) {
 		res = new StateMachineTerminal(
-			smt,
-			applyAvailSet(scopes, avail, smt->res, done_something));
-		break;
-	}
+			sm->dbg_origin,
+			scopes->smrs.cnst(smr_unreached));
+	} else {
+		switch (sm->type) {
+		case StateMachineState::Bifurcate: {
+			StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
+			res = new StateMachineBifurcate(
+				smb,
+				applyAvailSet(&scopes->bools, avail, smb->condition, done_something));
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *smp = (StateMachineSideEffecting *)sm;
+			StateMachineSideEffect *newEffect;
+			if (smp->sideEffect)
+				newEffect = buildNewStateMachineWithLoadsEliminated(scopes,
+										    decode,
+										    smp->sideEffect,
+										    avail,
+										    oracle,
+										    done_something,
+										    opt);
+			else
+				newEffect = NULL;
+			res = new StateMachineSideEffecting(smp, newEffect);
+			break;
+		}
+		case StateMachineState::Terminal: {
+			StateMachineTerminal *smt = (StateMachineTerminal *)sm;
+			res = new StateMachineTerminal(
+				smt,
+				applyAvailSet(scopes, avail, smt->res, done_something));
+			break;
+		}
+		}
 	}
 
 	memo[sm] = res;
