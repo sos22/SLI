@@ -924,7 +924,6 @@ enumEvalPaths(SMScopes *scopes,
 		if (loud && cntr++ % 100 == 0)
 			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
 	}
-	result->sanity_check(&scopes->ordering);
 	return result;
 }
 
@@ -953,14 +952,11 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 		printStateMachine(sm, stdout);
 	}
 
-	if (assumption)
-		assumption->sanity_check(&scopes->ordering);
 	smrbdd *smr = enumEvalPaths(scopes, mai, sm, assumption, oracle, opt,
 				    escapingStatesSurvive ? smr_survive : smr_crash,
 				    token);
 	if (!smr)
 		return NULL;
-	smr->sanity_check(&scopes->ordering);
 	std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scopes->bools, smr));
 	bbdd *crashIf, *surviveIf, *unreachedIf;
 	if (selectors.count(smr_crash))
@@ -975,15 +971,10 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 		unreachedIf = selectors[smr_unreached];
 	else
 		unreachedIf = scopes->bools.cnst(false);
-	crashIf->sanity_check(&scopes->ordering);
-	surviveIf->sanity_check(&scopes->ordering);
-	unreachedIf->sanity_check(&scopes->ordering);
 	if (escapingStatesSurvive)
 		surviveIf = bbdd::Or(&scopes->bools, surviveIf, unreachedIf);
 	else
 		crashIf = bbdd::Or(&scopes->bools, crashIf, unreachedIf);
-	crashIf->sanity_check(&scopes->ordering);
-	surviveIf->sanity_check(&scopes->ordering);
 	bbdd *resBdd;
 	if (wantCrash)
 		resBdd = crashIf;
