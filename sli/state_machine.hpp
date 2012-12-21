@@ -556,6 +556,7 @@ public:
 		  trueTarget(t),
 		  falseTarget(f)
 	{
+		assert(condition);
 	}
 	StateMachineBifurcate(StateMachineBifurcate *base,
 			      bbdd *_condition)
@@ -564,6 +565,7 @@ public:
 		  trueTarget(base->trueTarget),
 		  falseTarget(base->falseTarget)
 	{
+		assert(condition);
 	}
 	StateMachineBifurcate(StateMachineBifurcate *base)
 		: StateMachineState(base->dbg_origin, StateMachineState::Bifurcate),
@@ -571,9 +573,16 @@ public:
 		  trueTarget(base->trueTarget),
 		  falseTarget(base->falseTarget)
 	{
+		assert(condition);
 	}
 
-	bbdd *condition;
+	bbdd *const condition;
+	void set_condition(bbdd *_cond)
+	{
+		assert(_cond);
+		*(bbdd **)&condition = _cond;
+	}
+
 	StateMachineState *trueTarget;
 	StateMachineState *falseTarget;
 
@@ -584,7 +593,9 @@ public:
 	{
 		hv(trueTarget);
 		hv(falseTarget);
-		hv(condition);
+		bbdd *cond = condition;
+		hv(cond);
+		set_condition(cond);
 	}
 	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
 	void targets(std::vector<StateMachineState **> &out) {
