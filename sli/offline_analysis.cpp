@@ -692,14 +692,13 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 	   is (assumption) & ~(crash_condition), and is 1 in precisely
 	   those states which might suffer a bug of the desired
 	   kind. */
-	IRExpr *verification_condition =
-		bbdd::to_irexpr(
-			bbdd::And(
-				&scopes->bools,
-				bbdd::invert(
-					&scopes->bools,
-					crash_constraint),
-				assumption));
+	bbdd *a = bbdd::invert(&scopes->bools, crash_constraint);
+	if (!a) return NULL;
+	a = bbdd::And(&scopes->bools, a, assumption);
+	if (!a) return NULL;
+	IRExpr *verification_condition = bbdd::to_irexpr(a);
+	if (!verification_condition)
+		return NULL;
 	verification_condition = simplifyIRExpr(verification_condition, optIn);
 	verification_condition = simplify_via_anf(verification_condition);
 	verification_condition = simplifyIRExpr(verification_condition, optIn);
