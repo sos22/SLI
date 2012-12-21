@@ -403,7 +403,7 @@ canonicaliseRbp(SMScopes *scopes, StateMachineState *root, const VexRip &rip, Or
 			switch (s->type) {
 			case StateMachineState::Bifurcate: {
 				StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-				smb->condition = doit.transform_bbdd(&scopes->bools, smb->condition);
+				smb->set_condition(doit.transform_bbdd(&scopes->bools, smb->condition));
 				break;
 			}
 			case StateMachineState::Terminal:
@@ -2143,8 +2143,8 @@ assignMais(SMScopes *scopes, StateMachineState *s, int tid, MaiMap &mm)
 {
 	switch (s->type) {
 	case StateMachineState::Bifurcate:
-		((StateMachineBifurcate *)s)->condition =
-			assignMais(scopes, ((StateMachineBifurcate *)s)->condition, tid, mm);
+		((StateMachineBifurcate *)s)->set_condition(
+			assignMais(scopes, ((StateMachineBifurcate *)s)->condition, tid, mm));
 		return;
 	case StateMachineState::Terminal:
 		((StateMachineTerminal *)s)->set_res(

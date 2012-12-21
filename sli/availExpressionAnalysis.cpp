@@ -1383,7 +1383,9 @@ ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
 		}
 		case StateMachineState::Bifurcate: {
 			auto smb = (StateMachineBifurcate *)s;
-			rewrite_var(state, smb->condition, done_something);
+			bbdd *cond = smb->condition;
+			rewrite_var(state, cond, done_something);
+			smb->set_condition(cond);
 			break;
 		}
 		case StateMachineState::SideEffecting: {

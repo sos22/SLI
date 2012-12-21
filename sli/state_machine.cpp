@@ -65,7 +65,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 				((StateMachineTerminal *)trueTarget)->res,
 				((StateMachineTerminal *)falseTarget)->res));
 	}
-	condition = simplifyBDD(&scopes->bools, condition, opt, done_something);
+	set_condition(simplifyBDD(&scopes->bools, condition, opt, done_something));
 	if (condition->isLeaf) {
 		*done_something = true;
 		if (condition->leaf())
@@ -81,18 +81,18 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		if (falseTarget != falseBifur->falseTarget &&
 		    trueTarget == falseBifur->trueTarget) {
 			falseTarget = falseBifur->falseTarget;
-			condition = bbdd::Or(&scopes->bools, condition, falseBifur->condition);
+			set_condition(bbdd::Or(&scopes->bools, condition, falseBifur->condition));
 			*done_something = true;
 			return this;
 		}
 		if (falseTarget != falseBifur->trueTarget &&
 		    trueTarget == falseBifur->falseTarget) {
 			falseTarget = falseBifur->trueTarget;
-			condition =
+			set_condition(
 				bbdd::Or(&scopes->bools,
 					 condition,
 					 bbdd::invert(&scopes->bools,
-						      falseBifur->condition));
+						      falseBifur->condition)));
 			*done_something = true;
 			return this;
 		}
@@ -102,24 +102,24 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		if (trueTarget != trueBifur->trueTarget &&
 		    falseTarget == trueBifur->falseTarget) {
 			trueTarget = trueBifur->trueTarget;
-			condition =
+			set_condition(
 				bbdd::And(
 					&scopes->bools,
 					condition,
-					trueBifur->condition);
+					trueBifur->condition));
 			*done_something = true;
 			return this;
 		}
 		if (trueTarget != trueBifur->falseTarget &&
 		    falseTarget == trueBifur->trueTarget) {
 			trueTarget = trueBifur->falseTarget;
-			condition =
+			set_condition(
 				bbdd::And(
 					&scopes->bools,
 					condition,
 					bbdd::invert(
 						&scopes->bools,
-						trueBifur->condition));
+						trueBifur->condition)));
 			*done_something = true;
 			return this;
 		}
