@@ -507,6 +507,10 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 		printf("\n");
 	}
 
+	if (currentlyAvailable.assumption &&
+	    currentlyAvailable.assumption == scopes->bools.cnst(false))
+		return StateMachineSideEffectUnreached::get();
+
 	newEffect = NULL;
 	switch (smse->type) {
 	case StateMachineSideEffect::Store: {
