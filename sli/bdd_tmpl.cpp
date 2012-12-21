@@ -359,6 +359,7 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 {
 	assert(a);
 	assert(b);
+	assert(a->isLeaf == true || a->isLeaf == false);
 	assert(a->isLeaf || ordering->before(cond, a));
 	assert(b->isLeaf || ordering->before(cond, b));
 	if (a == b)
@@ -710,4 +711,24 @@ const_bdd<constT, subtreeT>::replaceTerminal(scope *scp,
 {
 	std::map<subtreeT *, subtreeT *> memo;
 	return replaceTerminal(scp, from, to, in, memo);
+}
+
+template <typename t> void
+bdd_scope<t>::runGc(HeapVisitor &hv)
+{
+	std::map<entry, t *> newIntern;
+	for (auto it = intern.begin();
+	     it != intern.end();
+	     it++) {
+		t *value = hv.visited(it->second);
+		if (!value)
+			continue;
+		entry e(it->first);
+		e.cond = hv.visited(e.cond);
+		e.trueB = hv.visited(e.trueB);
+		e.falseB = hv.visited(e.falseB);
+		assert(e.cond && e.trueB && e.falseB);
+		newIntern.insert(std::pair<entry, t *>(e, value));
+	}
+	intern = newIntern;
 }
