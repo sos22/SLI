@@ -10,6 +10,9 @@ _bdd<constT, subtreeT>::zip(scopeT *scope,
 			    const zipInternalT &where,
 			    std::map<zipInternalT, subtreeT *> &memo)
 {
+	if (TIMEOUT)
+		return NULL;
+
 	if (where.isLeaf())
 		return where.leafzip();
 
@@ -17,10 +20,8 @@ _bdd<constT, subtreeT>::zip(scopeT *scope,
 		std::pair<zipInternalT, subtreeT *>(where, (subtreeT *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
-	if (!did_insert) {
-		assert(it->second);
+	if (!did_insert)
 		return it->second;
-	}
 
 	IRExpr *bestCond;
 	const bdd_rank &bestRank(where.bestCond(&bestCond));
@@ -651,6 +652,8 @@ public:
 			ordering->falseBranch(ifFalse, on));
 	}
 	subtreeT *mkNode(scopeT *scope, IRExpr *cond, subtreeT *trueB, subtreeT *falseB) const {
+		if (!trueB || !falseB)
+			return NULL;
 		return scope->makeInternal(cond, trueB, falseB);
 	}
 	bool operator<(const ifelse_zip_internal &o) const {
