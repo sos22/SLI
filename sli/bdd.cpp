@@ -386,14 +386,16 @@ quickSimplify(IRExpr *a)
 			IRExprConst *arg1c = (IRExprConst *)ieb->arg1;
 			IRExprConst *arg2c = (IRExprConst *)ieb->arg2;
 			switch (ieb->op) {
-			case Iop_CmpEQ8:
-				return IRExpr_Const_U1(arg1c->Ico.U8 == arg2c->Ico.U8);
-			case Iop_CmpEQ32:
-				return IRExpr_Const_U1(arg1c->Ico.U32 == arg2c->Ico.U32);
-			case Iop_CmpEQ64:
-				return IRExpr_Const_U1(arg1c->Ico.U64 == arg2c->Ico.U64);
-			case Iop_CmpLT64U:
-				return IRExpr_Const_U1(arg1c->Ico.U64 < arg2c->Ico.U64);
+#define do_type(sz)							\
+				case Iop_CmpEQ ## sz:			\
+					return IRExpr_Const_U1(arg1c->Ico.U ## sz == arg2c->Ico.U ## sz); \
+			case Iop_CmpLT ## sz ## U:			\
+				return IRExpr_Const_U1(arg1c->Ico.U ## sz < arg2c->Ico.U ## sz)
+				do_type(8);
+				do_type(16);
+				do_type(32);
+				do_type(64);
+#undef do_type
 			case Iop_Shl64:
 				return IRExpr_Const_U64(arg1c->Ico.U64 << arg2c->Ico.U8);
 			default:
