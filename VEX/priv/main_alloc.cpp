@@ -219,11 +219,15 @@ void *
 GcVisitor::_visited(void *what)
 {
 	struct allocation_header *what_header;
+	struct allocation_header *new_header;
 	if (!what)
 		return what;
 	assert_gc_allocated(what);
 	what_header = alloc_to_header(what);
-	return what_header->redirection(h);
+	new_header = what_header->redirection(h);
+	if (!new_header)
+		return NULL;
+	return new_header + 1;
 }
 
 void
