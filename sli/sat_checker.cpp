@@ -4,6 +4,8 @@
    use the simplifier for most checks as you're running along, and
    then use this right at the end as a final check before reporting a
    bug. */
+#include <climits>
+
 #include "sli.h"
 #include "sat_checker.hpp"
 #include "maybe.hpp"
@@ -25,10 +27,6 @@ namespace _sat_checker {
 
 static struct stats {
 	unsigned nr_invoked;
-	unsigned initial_constant;
-	unsigned anf_resolved;
-	unsigned cnf_resolved;
-	unsigned dnf_resolved;
 	unsigned exhaustive_resolved;
 	unsigned failed;
 	unsigned timeout;
@@ -38,10 +36,6 @@ static struct stats {
 		printf("Sat checker invoked %d times.  Results:\n", nr_invoked);
 #define do_field(name)							\
 		printf("\t" # name ":\t%f%%\n", 100.0 * name / nr_invoked)
-		do_field(initial_constant);
-		do_field(anf_resolved);
-		do_field(cnf_resolved);
-		do_field(dnf_resolved);
 		do_field(exhaustive_resolved);
 		do_field(timeout);
 		do_field(failed);
@@ -857,30 +851,11 @@ simplify_via_anf(IRExpr *a, IRExpr *assumption = NULL)
 	return anf_simplify(normed, normed_ass, table);
 }
 
-static IRExpr *
-conjunctive_normal_form(IRExpr *what)
-{
-	IRExpr *res = convert_to_cnf(what);
-	if (res)
-		return res;
-	else
-		return what;
-}
-
-static IRExpr *
-disjunctive_normal_form(IRExpr *what)
-{
-	IRExpr *res = convert_to_dnf(what);
-	if (res)
-		return res;
-	else
-		return what;
-}
-
 static bool
 exhaustive_satisfiable(IRExpr *e, const IRExprOptimisations &opt, bool print_all)
 {
 	bool res = false;
+	sat_checker_counters.nr_invoked++;
 	for (auto it = sat_enumerator(e, opt); !it.finished(); it.advance()) {
 		fprintf(_logfile, "Satisfying assignment:\n");
 		it.get().prettyPrint(_logfile);
@@ -899,62 +874,10 @@ exhaustive_satisfiable(IRExpr *e, const IRExprOptimisations &opt, bool print_all
 	return res;
 }
 
-static IRExpr *
-sat_simplify(IRExpr *a, const IRExprOptimisations &opt)
-{
-	sat_checker_counters.nr_invoked++;
-
-	assert(a->type() == Ity_I1);
-	Maybe<bool> res(isTrue(a));
-
-	if (res.valid) {
-		sat_checker_counters.initial_constant++;
-		return a;
-	}
-
-	internIRExprTable intern;
-	a = internIRExpr(a, intern);
-
-	IRExpr *norm1 = and_normal_form(a, intern);
-	if (!norm1)
-		return a;
-	check_and_normal_form(norm1);
-	norm1 = anf_simplify(norm1, NULL, intern);
-	norm1 = simplifyIRExpr(norm1, opt);
-	res = isTrue(norm1);
-	if (res.valid) {
-		sat_checker_counters.anf_resolved++;
-		return norm1;
-	}
-	norm1 = internIRExpr(norm1, intern);
-
-	IRExpr *norm2 = conjunctive_normal_form(norm1);
-	norm2 = simplifyIRExpr(norm2, opt);
-	res = isTrue(norm2);
-	if (res.valid) {
-		sat_checker_counters.cnf_resolved++;
-		return norm2;
-	}
-	norm2 = internIRExpr(norm2, intern);
-
-	IRExpr *norm3 = disjunctive_normal_form(norm2);
-	norm3 = simplifyIRExpr(norm3, opt);
-	res = isTrue(norm3);
-	if (res.valid) {
-		sat_checker_counters.dnf_resolved++;
-		return norm3;
-	}
-
-	norm3 = internIRExpr(norm3, intern);
-	return norm3;
-}
-
 static bool
 satisfiable(IRExpr *e, const IRExprOptimisations &opt)
 {
 	assert(e->type() == Ity_I1);
-
-	e = _sat_checker::sat_simplify(e, opt);
 
 	Maybe<bool> res(isTrue(e));
 	if (res.valid)
@@ -1299,12 +1222,6 @@ simplify_via_anf(IRExpr *a, IRExpr *assumption)
 	return _sat_checker::simplify_via_anf(a, assumption);
 }
 
-IRExpr *
-sat_simplify(IRExpr *a, const IRExprOptimisations &opt)
-{
-	return _sat_checker::sat_simplify(a, opt);
-}
-
 void
 sat_enumerator::skipToSatisfying()
 {
@@ -1436,6 +1353,10 @@ sat_enumerator::skipToSatisfying()
 		assert(!allBooleans.empty());
 		IRExpr *chosenVar = NULL;
 		int chosenVarMult;
+
+		/* Shut compiler up */
+		chosenVarMult = INT_MAX;
+
 		for (auto it = allBooleans.begin();
 		     it != allBooleans.end();
 		     it++) {
