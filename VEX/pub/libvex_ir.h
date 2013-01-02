@@ -138,12 +138,18 @@ class __timer_message_filter {
 	static __timer_message_filter *head;
 	__timer_message_filter *next;
 	int cntr;
+	bool registered;
 public:
-	__timer_message_filter() : cntr(0) {
-		next = head;
-		head = this;
-	}
 	bool operator()() {
+		if (!registered) {
+			/* Do this here rather than in the constructor
+			   so as to avoid acquiring static
+			   initialisation lock on every timeout
+			   check. */
+			next = head;
+			head = this;
+			registered = true;
+		}
 		if (cntr > 10)
 			return false;
 		if (cntr == 10)
