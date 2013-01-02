@@ -752,18 +752,24 @@ bbdd::Or(scope *scope, bbdd *a, bbdd *b)
 }
 
 bbdd *
-bbdd::invert(scope *scope, bbdd *a)
+bbdd::invert(scope *scope, bbdd *a, std::map<bbdd *, bbdd *> &memo)
 {
 	if (TIMEOUT)
 		return NULL;
 	if (a->isLeaf)
 		return scope->cnst(!a->leaf());
 
-	bbdd *t = bbdd::invert(scope, a->internal().trueBranch);
-	bbdd *f = bbdd::invert(scope, a->internal().falseBranch);
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(a, NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert)
+		return it->second;
+	bbdd *t = bbdd::invert(scope, a->internal().trueBranch, memo);
+	bbdd *f = bbdd::invert(scope, a->internal().falseBranch, memo);
 	if (!t || !f)
 		return NULL;
-	return scope->makeInternal(a->internal().condition, t, f);
+	it->second = scope->makeInternal(a->internal().condition, t, f);
+	return it->second;
 }
 
 bdd_rank
