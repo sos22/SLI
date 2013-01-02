@@ -390,7 +390,8 @@ exprbdd *
 threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *e, const IRExprOptimisations &opt)
 {
 	if (e->isLeaf)
-		return exprbdd::var(&scopes->exprs, &scopes->bools, e->leaf());
+		return exprbdd::var(&scopes->exprs, &scopes->bools,
+				    setTemporary(scopes, reg, e->leaf(), opt));
 	IRExpr *cond = setTemporary(scopes, reg, e->internal().condition, opt);
 	exprbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt);
 	exprbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt);
