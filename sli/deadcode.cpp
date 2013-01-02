@@ -427,7 +427,7 @@ public:
 		do {
 			progress = false;
 			for (auto it = allStates.begin();
-			     it != allStates.end();
+			     !TIMEOUT && it != allStates.end();
 			     it++)
 				updateState(*it, &progress);
 		} while (progress && !TIMEOUT);
@@ -488,11 +488,11 @@ ssaDeadCode(SMScopes *scopes, StateMachine *sm, bool *done_something)
 	static state_machine_visitor<std::set<threadAndRegister> > visitor;
 	visitor.irexpr.Get = foo.Get;
 	visitor.Phi = foo.Phi;
-	for (auto it = states.begin(); it != states.end(); it++)
+	for (auto it = states.begin(); !TIMEOUT && it != states.end(); it++)
 		visit_one_state(&refed_regs, &visitor, *it);
 	std::set<StateMachineSideEffecting *> ses;
 	enumStates(sm, &ses);
-	for (auto it = ses.begin(); it != ses.end(); it++) {
+	for (auto it = ses.begin(); !TIMEOUT && it != ses.end(); it++) {
 		StateMachineSideEffect *effect = (*it)->sideEffect;
 		if (!effect)
 			continue;

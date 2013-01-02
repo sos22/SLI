@@ -97,7 +97,7 @@ control_dependence_graph::control_dependence_graph(StateMachine *sm,
 	int nr_complete = 0;
 	content[sm->root] = scope->cnst(true);
 	pending.push_back(sm->root);
-	while (!pending.empty()) {
+	while (!TIMEOUT && !pending.empty()) {
 		StateMachineState *s = pending.back();
 		pending.pop_back();
 		assert(pendingParents.count(s));
