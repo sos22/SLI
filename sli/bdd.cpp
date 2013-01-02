@@ -457,6 +457,7 @@ quickSimplify(IRExpr *a)
 		}
 		acc = defaultValue;
 		int new_nr_args = 0;
+		assert(iea->nr_arguments != 0);
 		for (int i = 0; i < iea->nr_arguments; i++) {
 			iea->contents[i] = quickSimplify(iea->contents[i]);
 			if (iea->contents[i]->tag == Iex_Const) {
@@ -569,6 +570,7 @@ quickSimplify(IRExpr *a)
 					return iea->contents[i];
 			abort();
 		}
+		assert(new_nr_args != 0);
 		if (!haveNested && new_nr_args == iea->nr_arguments)
 			return iea;
 		static libvex_allocation_site __las = {0, __FILE__, __LINE__};
