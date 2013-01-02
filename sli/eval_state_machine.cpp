@@ -92,8 +92,21 @@ class threadState {
 	}
 
 	IRExpr *setTemporary(SMScopes *scopes, const threadAndRegister &reg, IRExpr *inp, const IRExprOptimisations &opt);
-	bbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *inp, const IRExprOptimisations &opt);
-	exprbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *inp, const IRExprOptimisations &opt);
+	bbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *inp,
+			   const IRExprOptimisations &opt,
+			   std::map<bbdd *, bbdd *> &memo);
+	exprbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *inp,
+			      const IRExprOptimisations &opt,
+			      std::map<exprbdd *, exprbdd *> &memo);
+	bbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *inp,
+			   const IRExprOptimisations &opt) {
+		std::map<bbdd *, bbdd *> memo;
+		return setTemporary(scopes, reg, inp, opt, memo);
+	}
+	exprbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *inp, const IRExprOptimisations &opt) {
+		std::map<exprbdd *, exprbdd *> memo;
+		return setTemporary(scopes, reg, inp, opt, memo);
+	}
 public:
 	exprbdd *register_value(SMScopes *scopes,
 				const threadAndRegister &reg,
@@ -372,35 +385,55 @@ public:
 
 /* Rewrite @e now that we know the value of @reg */
 bbdd *
-threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *e, const IRExprOptimisations &opt)
+threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *e, const IRExprOptimisations &opt,
+			  std::map<bbdd *, bbdd *> &memo)
 {
 	if (e->isLeaf)
 		return e;
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(e, (bbdd *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert)
+		return it->second;
 	IRExpr *cond = setTemporary(scopes, reg, e->internal().condition, opt);
-	bbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt);
-	bbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt);
+	bbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt, memo);
+	bbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt, memo);
+	bbdd *res;
 	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch)
-		return e;
-	return bbdd::ifelse(&scopes->bools,
-			    bbdd::var(&scopes->bools, cond),
-			    trueB,
-			    falseB);
+		res = e;
+	else
+		res = bbdd::ifelse(&scopes->bools,
+				   bbdd::var(&scopes->bools, cond),
+				   trueB,
+				   falseB);
+	it->second = res;
+	return res;
 }
 exprbdd *
-threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *e, const IRExprOptimisations &opt)
+threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *e, const IRExprOptimisations &opt,
+			  std::map<exprbdd *, exprbdd *> &memo)
 {
 	if (e->isLeaf)
 		return exprbdd::var(&scopes->exprs, &scopes->bools,
 				    setTemporary(scopes, reg, e->leaf(), opt));
+	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(e, (exprbdd *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert)
+		return it->second;
 	IRExpr *cond = setTemporary(scopes, reg, e->internal().condition, opt);
-	exprbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt);
-	exprbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt);
+	exprbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt, memo);
+	exprbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt, memo);
+	exprbdd *res;
 	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch)
-		return e;
-	return exprbdd::ifelse(&scopes->exprs,
-			       bbdd::var(&scopes->bools, cond),
-			       trueB,
-			       falseB);
+		res = e;
+	else
+		res = exprbdd::ifelse(&scopes->exprs,
+				      bbdd::var(&scopes->bools, cond),
+				      trueB,
+				      falseB);
+	it->second = res;
+	return res;
 }
 IRExpr *
 threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, IRExpr *e, const IRExprOptimisations &opt)
