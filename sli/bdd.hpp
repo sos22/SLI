@@ -442,11 +442,15 @@ class bbdd : public const_bdd<bool, bbdd> {
 		return IRExpr_Const_U1(b);
 	}
 	static bbdd *_var(scope *, IRExpr *a);
+	static bbdd *invert(scope *, bbdd *a, std::map<bbdd *, bbdd *> &memo);
 public:
 	static bbdd *Or(scope *, bbdd *a, bbdd *b);
 	static bbdd *And(scope *, bbdd *a, bbdd *b);
 	static bbdd *var(scope *, IRExpr *a);
-	static bbdd *invert(scope *, bbdd *a);
+	static bbdd *invert(scope *scp, bbdd *a) {
+		std::map<bbdd *, bbdd *> memo;
+		return invert(scp, a, memo);
+	}
 	static bbdd *assume(scope *scp,
 			    bbdd *thing,
 			    bbdd *assumption) {
