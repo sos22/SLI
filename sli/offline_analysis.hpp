@@ -14,6 +14,10 @@
 class IRExprTransformer {
 	exprbdd *transform_exprbdd(bbdd::scope *, exprbdd::scope *, exprbdd *what, bool *done_something,
 				   std::map<exprbdd *, exprbdd *> &);
+	smrbdd *transform_smrbdd(bbdd::scope *, smrbdd::scope *, smrbdd *what, bool *done_something,
+				  std::map<smrbdd *, smrbdd *> &);
+	bbdd *transform_bbdd(bbdd::scope *, bbdd *what, bool *done_something,
+				std::map<bbdd *, bbdd *> &);
 	IRExpr *_currentIRExpr;
 protected:
 	bool aborted;
@@ -112,7 +116,10 @@ protected:
 public:
 	IRExpr *doit(IRExpr *e, bool *done_something) { aborted = false; return transformIRExpr(e, done_something); }
 	IRExpr *doit(IRExpr *e) { bool t; return doit(e, &t); }
-	smrbdd *transform_smrbdd(bbdd::scope *, smrbdd::scope *, smrbdd *what, bool *done_something);
+	smrbdd *transform_smrbdd(bbdd::scope *s, smrbdd::scope *s2, smrbdd *what, bool *done_something) {
+		std::map<smrbdd *, smrbdd *> memo;
+		return transform_smrbdd(s, s2, what, done_something, memo);
+	}
 	smrbdd *transform_smrbdd(bbdd::scope *scope, smrbdd::scope *scope2, smrbdd *what) {
 		bool b;
 		return transform_smrbdd(scope, scope2, what, &b);
@@ -125,7 +132,10 @@ public:
 		bool b;
 		return transform_exprbdd(scope, scope2, what, &b);
 	}
-	bbdd *transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_something);
+	bbdd *transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_something) {
+		std::map<bbdd *, bbdd *> memo;
+		return transform_bbdd(scope, what, done_something, memo);
+	}
 	bbdd *transform_bbdd(bbdd::scope *scope, bbdd *what) {
 		bool b;
 		return transform_bbdd(scope, what, &b);

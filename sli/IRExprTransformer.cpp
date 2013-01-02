@@ -93,41 +93,61 @@ IRExprTransformer::transformIex(IRExprAssociative *e)
 }
 
 bbdd *
-IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_something)
+IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_something,
+				  std::map<bbdd *, bbdd *> &memo)
 {
 	if (what->isLeaf)
 		return what;
-	bool b = false;
-	IRExpr *e = doit(what->internal().condition, &b);
-	bbdd *t = transform_bbdd(scope, what->internal().trueBranch, &b);
-	bbdd *f = transform_bbdd(scope, what->internal().falseBranch, &b);
-	if (!b)
-		return what;
-	*done_something = true;
-	return bbdd::ifelse(
-		scope,
-		bbdd::var(scope, e),
-		t,
-		f);
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(what, NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	bbdd *&res(it->second);
+	if (did_insert) {
+		bool b = false;
+		IRExpr *e = doit(what->internal().condition, &b);
+		bbdd *t = transform_bbdd(scope, what->internal().trueBranch, &b, memo);
+		bbdd *f = transform_bbdd(scope, what->internal().falseBranch, &b, memo);
+		if (!b) {
+			res = what;
+		} else {
+			*done_something = true;
+			res = bbdd::ifelse(
+				scope,
+				bbdd::var(scope, e),
+				t,
+				f);
+		}
+	}
+	return res;
 }
 
 smrbdd *
-IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, smrbdd *what, bool *done_something)
+IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, smrbdd *what, bool *done_something,
+				    std::map<smrbdd *, smrbdd *> &memo)
 {
 	if (what->isLeaf)
 		return what;
-	bool b = false;
-	IRExpr *e = doit(what->internal().condition, &b);
-	smrbdd *t = transform_smrbdd(bscope, scope, what->internal().trueBranch, &b);
-	smrbdd *f = transform_smrbdd(bscope, scope, what->internal().falseBranch, &b);
-	if (!b)
-		return what;
-	*done_something = true;
-	return smrbdd::ifelse(
-		scope,
-		bbdd::var(bscope, e),
-		t,
-		f);
+	auto it_did_insert = memo.insert(std::pair<smrbdd *, smrbdd *>(what, NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	smrbdd *&res(it->second);
+	if (did_insert) {
+		bool b = false;
+		IRExpr *e = doit(what->internal().condition, &b);
+		smrbdd *t = transform_smrbdd(bscope, scope, what->internal().trueBranch, &b, memo);
+		smrbdd *f = transform_smrbdd(bscope, scope, what->internal().falseBranch, &b, memo);
+		if (!b) {
+			res = what;
+		} else {
+			*done_something = true;
+			res = smrbdd::ifelse(
+				scope,
+				bbdd::var(bscope, e),
+				t,
+				f);
+		}
+	}
+	return res;
 }
 
 exprbdd *
