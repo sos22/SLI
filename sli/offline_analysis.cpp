@@ -901,7 +901,7 @@ considerStoreCFG(SMScopes *scopes,
 	__set_profiling(considerStoreCFG);
 	VexPtr<MaiMap, &ir_heap> mai(maiIn->dupe());
 	VexPtr<StateMachine, &ir_heap> sm(storeCFGToMachine(scopes, oracle, tid, cfg, *mai));
-	if (!sm) {
+	if (!sm || TIMEOUT) {
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return NULL;
 	}

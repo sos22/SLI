@@ -1935,7 +1935,7 @@ importRegisters(StateMachineState *root)
 
 	q.push_back(root);
 	std::map<StateMachineState *, std::set<threadAndRegister> > definedRegs;
-	while (!q.empty()) {
+	while (!TIMEOUT && !q.empty()) {
 		StateMachineState *s = q.back();
 		q.pop_back();
 #ifndef NDEBUG
