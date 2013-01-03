@@ -98,14 +98,14 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 		return (IRExprConst *)inp;
 	case Iex_CCall: {
 		const IRExprCCall *i = (const IRExprCCall *)inp;
-		IRExprCCall *res = new IRExprCCall(i->cee, i->retty);
 		int nr_args;
 		for (nr_args = 0; i->args[nr_args]; nr_args++)
 			;
-		res->args = alloc_irexpr_array(nr_args + 1);
+		IRExpr **args = alloc_irexpr_array(nr_args + 1);
+		IRExprCCall *res = new IRExprCCall(i->cee, i->retty, args);
 		for (nr_args = 0; i->args[nr_args]; nr_args++)
-			ctxt(&res->args[nr_args], i->args[nr_args], rawDupe);
-		res->args[nr_args] = NULL;
+			ctxt(&args[nr_args], i->args[nr_args], rawDupe);
+		args[nr_args] = NULL;
 		return res;
 	}
 	case Iex_Mux0X: {
