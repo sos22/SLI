@@ -1373,11 +1373,9 @@ static IRExpr* mk_amd64g_calculate_rflags_all ( unsigned tid )
            0/*regparm*/, 
            "amd64g_calculate_rflags_all",
 	   (void *)amd64g_calculate_rflags_all,
-           args
+           args,
+	   (1<<0) | (1<<3)
         );
-   /* Exclude OP and NDEP from definedness checking.  We're only
-      interested in DEP1 and DEP2. */
-   call->cee->mcx_mask = (1<<0) | (1<<3);
    return call;
 }
 
@@ -1397,11 +1395,9 @@ static IRExpr* mk_amd64g_calculate_condition ( AMD64Condcode cond, unsigned tid 
            Ity_I64,
            0/*regparm*/, 
            "amd64g_calculate_condition", (void *)amd64g_calculate_condition,
-           args
+           args,
+	   (1<<0) | (1<<1) | (1<<4)
         );
-   /* Exclude the requested condition, OP and NDEP from definedness
-      checking.  We're only interested in DEP1 and DEP2. */
-   call->cee->mcx_mask = (1<<0) | (1<<1) | (1<<4);
    return unop(Iop_64to1, call);
 }
 
@@ -1419,11 +1415,10 @@ static IRExpr* mk_amd64g_calculate_rflags_c ( unsigned tid )
            Ity_I64,
            0/*regparm*/, 
            "amd64g_calculate_rflags_c", (void *)amd64g_calculate_rflags_c,
-           args
+           args,
+	   (1<<0) | (1<<3)
         );
-   /* Exclude OP and NDEP from definedness checking.  We're only
-      interested in DEP1 and DEP2. */
-   call->cee->mcx_mask = (1<<0) | (1<<3);
+
    return call;
 }
 

@@ -247,8 +247,7 @@ static bool parseIRCallee(IRCallee **out, const char *str, const char **suffix)
     return false;
   if (!parseThisChar('}', str, suffix))
     return false;
-  *out = mkIRCallee(regparms, name, (void *)addr);
-  (*out)->mcx_mask = mcx_mask;
+  *out = new IRCallee(regparms, name, (void *)addr, mcx_mask);
   return true;      
 }
 
@@ -1654,97 +1653,78 @@ void ppIRSB ( IRSB* bb, FILE* f )
 
 IRExprConst* IRExpr_Const_U1 ( bool bit )
 {
-   IRExprConst* c = new IRExprConst();
-   c->ty     = Ity_I1;
-   c->Ico.U1  = bit;
    vassert(bit == False || bit == True);
-   return c;
+   IRExprConst::_Ico c;
+   c.U1 = bit;
+   return new IRExprConst(Ity_I1, c);
 }
 IRExprConst* IRExpr_Const_U8 ( unsigned char u8)
 {
-   IRExprConst* c = new IRExprConst();
-   c->ty     = Ity_I8;
-   c->Ico.U8  = u8;
-   return c;
+   IRExprConst::_Ico c;
+   c.U8 = u8;
+   return new IRExprConst(Ity_I8, c);
 }
 IRExprConst* IRExpr_Const_U16 ( unsigned short u16 )
 {
-   IRExprConst* c = new IRExprConst();
-   c->ty     = Ity_I16;
-   c->Ico.U16 = u16;
-   return c;
+   IRExprConst::_Ico c;
+   c.U16 = u16;
+   return new IRExprConst(Ity_I16, c);
 }
 IRExprConst* IRExpr_Const_U32 ( unsigned u32 )
 {
-   IRExprConst* c = new IRExprConst();
-   c->ty      = Ity_I32;
-   c->Ico.U32 = u32;
-   return c;
+   IRExprConst::_Ico c;
+   c.U32 = u32;
+   return new IRExprConst(Ity_I32, c);
 }
 static VexPtr<IRExprConst, &ir_heap> magicConstant0;
 IRExprConst* IRExpr_Const_U64 ( unsigned long u64 )
 {
+   IRExprConst::_Ico c;
+   c.U64 = u64;
    if (u64 == 0) {
-     if (!magicConstant0) {
-       magicConstant0 = new IRExprConst();
-       magicConstant0->ty = Ity_I64;
-       magicConstant0->Ico.U64 = 0;
-     }
+     if (!magicConstant0)
+       magicConstant0 = new IRExprConst(Ity_I64, c);
      return magicConstant0;
    }
 
-   IRExprConst* c = new IRExprConst();
-   c->ty      = Ity_I64;
-   c->Ico.U64 = u64;
-   return c;
+   return new IRExprConst(Ity_I64, c);
 }
 IRExprConst* IRExpr_Const_F64 ( Double f64 )
 {
-   IRExprConst* c = new IRExprConst();
-   c->ty     = Ity_I64;
-   *(double *)&c->Ico.U64 = f64;
-   return c;
+   IRExprConst::_Ico c;
+   *(double *)&c.U64 = f64;
+   return new IRExprConst(Ity_I64, c);
 }
 IRExprConst* IRExpr_Const_F64i ( unsigned long f64i )
 {
-   IRExprConst* c = new IRExprConst();
-   c->ty      = Ity_I64;
-   c->Ico.U64 = f64i;
-   return c;
+   return IRExpr_Const_U64(f64i);
 }
 IRExprConst* IRExpr_Const_V128 ( unsigned short con )
 {
-   IRExprConst* c = new IRExprConst();
    unsigned long a = con;
    a <<= 16;
    a |= con;
    a = a | (a << 32);
-   c->ty      = Ity_I128;
-   c->Ico.U128.lo = a;
-   c->Ico.U128.hi = a;
-   return c;
+   IRExprConst::_Ico c;
+   c.U128.lo = a;
+   c.U128.hi = a;
+   return new IRExprConst(Ity_I128, c);
 }
 IRExprConst* IRExpr_Const_U128 ( unsigned long hi, unsigned long lo )
 {
-   IRExprConst* c = new IRExprConst();
-   c->ty      = Ity_I128;
-   c->Ico.U128.lo = lo;
-   c->Ico.U128.hi = hi;
-   return c;
+   IRExprConst::_Ico c;
+   c.U128.lo = lo;
+   c.U128.hi = hi;
+   return new IRExprConst(Ity_I128, c);
 }
 
 /* Constructors -- IRCallee */
 
-IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr )
+IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr, UInt mcx_mask )
 {
-   IRCallee* ce = new IRCallee();
-   ce->regparms = regparms;
-   ce->name     = name;
-   ce->addr     = addr;
-   ce->mcx_mask = 0;
    vassert(regparms >= 0 && regparms <= 3);
    vassert(name != NULL);
-   return ce;
+   return new IRCallee(regparms, name, addr, mcx_mask);
 }
 
 
@@ -1919,8 +1899,7 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    return e;
 }
 IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
-   IRExprLoad* e        = new IRExprLoad();
-   e->ty   = ty;
+   IRExprLoad* e        = new IRExprLoad(ty);
    e->addr = addr;
    return e;
 }
@@ -2832,7 +2811,7 @@ IRDirty* unsafeIRDirty_0_N ( Int regparms, const char* name, void* addr,
                              IRExpr** args ) 
 {
    IRDirty* d = emptyIRDirty();
-   d->cee   = mkIRCallee ( regparms, name, addr );
+   d->cee   = mkIRCallee ( regparms, name, addr, 0 );
    d->guard = IRExpr_Const_U1(True);
    d->args  = args;
    return d;
@@ -2843,7 +2822,7 @@ IRDirty* unsafeIRDirty_1_N ( threadAndRegister dst,
                              IRExpr** args ) 
 {
    IRDirty* d = emptyIRDirty();
-   d->cee   = mkIRCallee ( regparms, name, addr );
+   d->cee   = mkIRCallee ( regparms, name, addr, 0 );
    d->guard = IRExpr_Const_U1(True);
    d->args  = args;
    d->tmp   = dst;
@@ -2852,9 +2831,10 @@ IRDirty* unsafeIRDirty_1_N ( threadAndRegister dst,
 
 IRExpr* mkIRExprCCall ( IRType retty,
                         Int regparms, const char* name, void* addr, 
-                        IRExpr** args )
+                        IRExpr** args,
+			UInt mcx_mask)
 {
-   return IRExpr_CCall ( mkIRCallee ( regparms, name, addr ), 
+  return IRExpr_CCall ( mkIRCallee ( regparms, name, addr, mcx_mask ), 
                          retty, args );
 }
 

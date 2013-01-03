@@ -1185,19 +1185,24 @@ extern void typeOfPrimop ( IROp op,
 
 typedef
    struct _IRCallee : public GarbageCollected<_IRCallee, &ir_heap>{
-      Int    regparms;
-      const char* name;
-      void*  addr;
-      UInt   mcx_mask;
+      Int    const regparms;
+      const char* const name;
+      void*  const addr;
+      UInt   const mcx_mask;
       void visit(HeapVisitor &) {}
       unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
       void sanity_check() const {}
+      _IRCallee(Int _regparms, const char *_name,
+		void *_addr, UInt _mcx_mask)
+	  : regparms(_regparms), name(_name),
+	    addr(_addr), mcx_mask(_mcx_mask)
+      {}
       NAMED_CLASS
    }
    IRCallee;
 
 /* Create an IRCallee. */
-extern IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr );
+extern IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr, UInt mcx_mask );
 
 /* Pretty-print an IRCallee. */
 extern void ppIRCallee ( IRCallee*, FILE* );
@@ -1641,11 +1646,11 @@ struct IRExprUnop : public IRExpr {
    ppIRExpr output: LD<end>:<ty>(<addr>), eg. LDle:I32(t1)
 */
 struct IRExprLoad : public IRExpr {
-   IRType    ty;     /* Type of the loaded value */
+   const IRType    ty;     /* Type of the loaded value */
    IRExpr*   addr;   /* Address being loaded from */
 
-   IRExprLoad()
-       : IRExpr(Iex_Load)
+   IRExprLoad(IRType _ty)
+       : IRExpr(Iex_Load), ty(_ty)
    {}
    void visit(HeapVisitor &hv) { hv(addr); }
    unsigned long hashval() const {
@@ -1664,8 +1669,8 @@ struct IRExprLoad : public IRExpr {
    ppIRExpr output: <con>, eg. 0x4:I32
 */
 struct IRExprConst : public IRExpr {
-   IRType ty;
-   union {
+   const IRType ty;
+   const union _Ico {
       Bool   U1;
       UChar  U8;
       UShort U16;
@@ -1677,8 +1682,8 @@ struct IRExprConst : public IRExpr {
       } U128;
    } Ico;
 
-   IRExprConst()
-       : IRExpr(Iex_Const)
+   IRExprConst(const IRType _ty, const _Ico &content)
+       : IRExpr(Iex_Const), ty(_ty), Ico(content)
    {
        /* There's not much point in attempting to optimise constants,
 	  so just set the flag saying that it's already been fully
@@ -2027,7 +2032,8 @@ extern IRExpr* mkIRExpr_HWord ( HWord );
 extern 
 IRExpr* mkIRExprCCall ( IRType retty,
                         Int regparms, const char* name, void* addr, 
-                        IRExpr** args );
+                        IRExpr** args,
+			UInt mcx_mask = 0);
 
 
 IRExpr **alloc_irexpr_array(unsigned nr);
