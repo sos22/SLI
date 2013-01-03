@@ -964,7 +964,12 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 		IRExpr *arg = stripFloatingPoint(i->arg4, p);
 		if (arg == FP_EXPRESSION)
 			return FP_EXPRESSION;
-		i->arg4 = arg;
+		if (arg != i->arg4)
+			expr = new IRExprQop(i->op,
+					     arg,
+					     i->arg3,
+					     i->arg2,
+					     i->arg1);
 	}
 		/* fall through */
 	case Iex_Triop: {

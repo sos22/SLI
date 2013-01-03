@@ -1755,12 +1755,7 @@ IRExpr* IRExpr_RdTmp ( IRTemp tmp, IRType ty, unsigned tid, unsigned generation 
 }
 IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                               IRExpr* arg3, IRExpr* arg4 ) {
-   IRExprQop* e       = new IRExprQop(op);
-   e->arg1 = arg1;
-   e->arg2 = arg2;
-   e->arg3 = arg3;
-   e->arg4 = arg4;
-   return e;
+   return new IRExprQop(op, arg1, arg2, arg3, arg4);
 }
 IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
                                  IRExpr* arg2, IRExpr* arg3 ) {

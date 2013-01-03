@@ -62,19 +62,17 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		break;
 	case Iex_GetI: {
 		auto ee = (IRExprGetI *)e;
-		IRExpr *ix = internIRExpr(ee->ix, lookupTable);
-		if (ix != ee->ix)
-			e = new IRExprGetI(ee, ix);
+		*(IRExpr **)&ee->ix = internIRExpr(ee->ix, lookupTable);
 		break;
 	}
 	case Iex_Qop:
-		((IRExprQop *)e)->arg4 = internIRExpr(((IRExprQop *)e)->arg4, lookupTable);
+		*(IRExpr **)&((IRExprQop *)e)->arg4 = internIRExpr(((IRExprQop *)e)->arg4, lookupTable);
 	case Iex_Triop:
-		((IRExprQop *)e)->arg3 = internIRExpr(((IRExprQop *)e)->arg3, lookupTable);
+		((IRExprTriop *)e)->arg3 = internIRExpr(((IRExprTriop *)e)->arg3, lookupTable);
 	case Iex_Binop:
-		((IRExprQop *)e)->arg2 = internIRExpr(((IRExprQop *)e)->arg2, lookupTable);
+		((IRExprBinop *)e)->arg2 = internIRExpr(((IRExprBinop *)e)->arg2, lookupTable);
 	case Iex_Unop:
-		((IRExprQop *)e)->arg1 = internIRExpr(((IRExprQop *)e)->arg1, lookupTable);
+		((IRExprUnop *)e)->arg = internIRExpr(((IRExprUnop *)e)->arg, lookupTable);
 		break;
 	case Iex_Load:
 		((IRExprLoad *)e)->addr = internIRExpr(((IRExprLoad *)e)->addr, lookupTable);

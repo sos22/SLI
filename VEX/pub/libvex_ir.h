@@ -1457,14 +1457,19 @@ struct IRExprGetI : public IRExpr {
 */
 struct IRExprQop : public IRExpr {
    IROp const op;          /* op-code   */
-   IRExpr* arg1;     /* operand 1 */
-   IRExpr* arg2;     /* operand 2 */
-   IRExpr* arg3;     /* operand 3 */
-   IRExpr* arg4;     /* operand 4 */
+   IRExpr* const arg1;     /* operand 1 */
+   IRExpr* const arg2;     /* operand 2 */
+   IRExpr* const arg3;     /* operand 3 */
+   IRExpr* const arg4;     /* operand 4 */
 
-   IRExprQop(IROp _op)
+    IRExprQop(IROp _op, IRExpr *_arg1, IRExpr *_arg2,
+	      IRExpr *_arg3, IRExpr *_arg4)
        : IRExpr(Iex_Qop),
-	 op(_op)
+	 op(_op),
+	 arg1(_arg1),
+	 arg2(_arg2),
+	 arg3(_arg3),
+	 arg4(_arg4)
    {}
    void visit(HeapVisitor &hv) {
        hv(arg1);

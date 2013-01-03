@@ -3066,10 +3066,13 @@ top:
 
 	case Iex_Qop: {
 		IRExprQop *q = (IRExprQop *)src;
-		q->arg1 = optimiseIRExpr(q->arg1, opt, done_something);
-		q->arg2 = optimiseIRExpr(q->arg2, opt, done_something);
-		q->arg3 = optimiseIRExpr(q->arg3, opt, done_something);
-		q->arg4 = optimiseIRExpr(q->arg4, opt, done_something);
+		auto arg1 = optimiseIRExpr(q->arg1, opt, done_something);
+		auto arg2 = optimiseIRExpr(q->arg2, opt, done_something);
+		auto arg3 = optimiseIRExpr(q->arg3, opt, done_something);
+		auto arg4 = optimiseIRExpr(q->arg4, opt, done_something);
+		if (arg1 != q->arg1 || arg2 != q->arg2 ||
+		    arg3 != q->arg3 || arg4 != q->arg4)
+			res = new IRExprQop(q->op, arg1, arg2, arg3, arg4);
 		break;
 	}
 
