@@ -2388,7 +2388,7 @@ top:
 			/* Replace a - b with a + (-b), so as to
 			   eliminate binary -. */
 			progress = true;
-			e->op = (IROp)(e->op - Iop_Sub8 + Iop_Add8);
+			e = new IRExprBinop(e, (IROp)(e->op - Iop_Sub8 + Iop_Add8));
 			r = e->arg2 =
 				optimiseIRExprFP(
 					IRExpr_Unop( (IROp)((e->op - Iop_Add8) + Iop_Neg8),
@@ -2597,9 +2597,10 @@ top:
 						res = IRExpr_Const_U1(false);
 					} else {
 						progress = true;
-						e->op = Iop_CmpEQ1;
-						e->arg1 = IRExpr_Const_U1(lc->Ico.U64);
-						e->arg2 = ru->arg;
+						e = (IRExprBinop *)
+							IRExpr_Binop(Iop_CmpEQ1,
+								     IRExpr_Const_U1(lc->Ico.U64),
+								     ru->arg);
 					}
 					break;
 				}
@@ -2608,9 +2609,10 @@ top:
 						res = IRExpr_Const_U1(false);
 					} else {
 						progress = true;
-						e->op = Iop_CmpEQ32;
-						e->arg1 = IRExpr_Const_U32(lc->Ico.U64);
-						e->arg2 = ru->arg;
+						e = (IRExprBinop *)
+							IRExpr_Binop(Iop_CmpEQ32,
+								     IRExpr_Const_U32(lc->Ico.U64),
+								     ru->arg);
 					}
 					break;
 				}

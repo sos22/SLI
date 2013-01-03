@@ -1775,8 +1775,7 @@ IRExpr* IRExpr_RdTmp ( IRTemp tmp, IRType ty, unsigned tid, unsigned generation 
 }
 IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                               IRExpr* arg3, IRExpr* arg4 ) {
-   IRExprQop* e       = new IRExprQop();
-   e->op   = op;
+   IRExprQop* e       = new IRExprQop(op);
    e->arg1 = arg1;
    e->arg2 = arg2;
    e->arg3 = arg3;
@@ -1785,8 +1784,7 @@ IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2,
 }
 IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
                                  IRExpr* arg2, IRExpr* arg3 ) {
-   IRExprTriop* e         = new IRExprTriop();
-   e->op   = op;
+   IRExprTriop* e         = new IRExprTriop(op);
    e->arg1 = arg1;
    e->arg2 = arg2;
    e->arg3 = arg3;
@@ -1818,8 +1816,7 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
      }
    }
 
-   IRExprBinop* e         = new IRExprBinop();
-   e->op   = op;
+   IRExprBinop* e         = new IRExprBinop(op);
    e->arg1 = arg1;
    e->arg2 = arg2;
    return e;
@@ -1907,7 +1904,6 @@ bool inverseUnops(IROp a, IROp b)
 IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    if (op >= Iop_Noop8 && op <= Iop_Noop128)
      return arg;
-   IRExprUnop* e       = new IRExprUnop();
    /* Short-circuit a bunch of redundant type conversions
       e.g. 64to1(1to64(x)) */
    if (arg->tag == Iex_Unop) {
@@ -1918,7 +1914,7 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
      if (shortCircuitableUnops(op, argu->op, &ss))
        return IRExpr_Unop(ss, argu->arg);
    }
-   e->op  = op;
+   IRExprUnop* e       = new IRExprUnop(op);
    e->arg = arg;
    return e;
 }

@@ -70,8 +70,7 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Qop: {
 		const IRExprQop *i = (const IRExprQop *)inp;
-		IRExprQop *res = new IRExprQop();
-		res->op = i->op;
+		IRExprQop *res = new IRExprQop(i->op);
 		ctxt(&res->arg1, i->arg1, rawDupe);
 		ctxt(&res->arg2, i->arg2, rawDupe);
 		ctxt(&res->arg3, i->arg3, rawDupe);
@@ -80,8 +79,7 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Triop: {
 		const IRExprTriop *i = (const IRExprTriop *)inp;
-		IRExprTriop *res = new IRExprTriop();
-		res->op = i->op;
+		IRExprTriop *res = new IRExprTriop(i->op);
 		ctxt(&res->arg1, i->arg1, rawDupe);
 		ctxt(&res->arg2, i->arg2, rawDupe);
 		ctxt(&res->arg3, i->arg3, rawDupe);
@@ -89,16 +87,14 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Binop: {
 		const IRExprBinop *i = (const IRExprBinop *)inp;
-		IRExprBinop *res = new IRExprBinop();
-		res->op = i->op;
+		IRExprBinop *res = new IRExprBinop(i->op);
 		ctxt(&res->arg1, i->arg1, rawDupe);
 		ctxt(&res->arg2, i->arg2, rawDupe);
 		return res;
 	}
 	case Iex_Unop: {
 		const IRExprUnop *i = (const IRExprUnop *)inp;
-		IRExprUnop *res = new IRExprUnop();
-		res->op = i->op;
+		IRExprUnop *res = new IRExprUnop(i->op);
 		ctxt(&res->arg, i->arg, rawDupe);
 		return res;
 	}
