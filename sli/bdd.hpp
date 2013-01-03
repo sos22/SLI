@@ -52,17 +52,26 @@ class bdd_rank {
 		}
 	} cls;
 public:
-	bool operator <(const bdd_rank &o) const
+	enum ordering { lt, gt, eq };
+	ordering compare(const bdd_rank &o) const
 	{
 		if (cls < o.cls)
-			return true;
+			return lt;
 		if (cls > o.cls)
-			return false;
-		return val < o.val;
+			return gt;
+		if (val < o.val)
+			return lt;
+		if (val > o.val)
+			return gt;
+		return eq;
+	}
+	bool operator <(const bdd_rank &o) const
+	{
+		return compare(o) == lt;
 	}
 	bool operator==(const bdd_rank &o) const
 	{
-		return val == o.val && cls == o.cls;
+		return compare(o) == eq;
 	}
 	bool parse(const char *, const char **);
 
@@ -316,17 +325,21 @@ public:
 template <typename t>
 class bdd_scope {
 	struct entry {
-		IRExpr *cond;
+		bdd_rank rank;
 		t *trueB;
 		t *falseB;
-		entry(IRExpr *_cond, t *_trueB, t *_falseB)
-			: cond(_cond), trueB(_trueB), falseB(_falseB)
+		entry(const bdd_rank &_rank, t *_trueB, t *_falseB)
+			: rank(_rank), trueB(_trueB), falseB(_falseB)
 		{}
 		bool operator<(const entry &o) const {
-			if (cond < o.cond)
+			switch (rank.compare(o.rank)) {
+			case bdd_rank::lt:
 				return true;
-			if (cond > o.cond)
+			case bdd_rank::gt:
 				return false;
+			case bdd_rank::eq:
+				break;
+			}
 			if (trueB < o.trueB)
 				return true;
 			if (trueB > o.trueB)

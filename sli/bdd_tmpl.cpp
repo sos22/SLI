@@ -438,14 +438,15 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	if (a == b)
 		return a;
 
+	bdd_rank r(ordering->rankVariable(cond));
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
-			entry(cond, a, b),
+			entry(r, a, b),
 			(t *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
-		it->second = new t(ordering->rankVariable(cond), cond, a, b);
+		it->second = new t(r, cond, a, b);
 	return it->second;
 }
 
@@ -474,9 +475,58 @@ bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 		a = a->internal().falseBranch;
 	}
 
+	if (cond->tag == Iex_Binop &&
+	    ((IRExprBinop *)cond)->op >= Iop_CmpEQ8 &&
+	    ((IRExprBinop *)cond)->op <= Iop_CmpEQ64 &&
+	    !a->isLeaf &&
+	    a->internal().condition->tag == Iex_Binop &&
+	    ((IRExprBinop *)a->internal().condition)->op >= Iop_CmpEQ8 &&
+	    ((IRExprBinop *)a->internal().condition)->op <= Iop_CmpEQ64 &&
+	    ((IRExprBinop *)a->internal().condition)->arg2 ==
+		((IRExprBinop *)cond)->arg2 &&
+	    ((IRExprBinop *)cond)->arg1->tag == Iex_Const &&
+	    ((IRExprBinop *)a->internal().condition)->arg1->tag == Iex_Const &&
+	    !eqIRExprConst( (IRExprConst *)((IRExprBinop *)a->internal().condition)->arg1,
+			    (IRExprConst *)((IRExprBinop *)cond)->arg1) ) {
+		assert(((IRExprBinop *)a->internal().condition)->arg1 !=
+		       ((IRExprBinop *)cond)->arg1);
+		a = a->internal().falseBranch;
+	}
+
+	if (cond->tag == Iex_HappensBefore &&
+	    !a->isLeaf &&
+	    a->internal().condition->tag == Iex_HappensBefore) {
+		const IRExprHappensBefore *condhb =
+			(const IRExprHappensBefore *)cond;
+		const IRExprHappensBefore *ahb =
+			(const IRExprHappensBefore *)a->internal().condition;
+		if (condhb->before.tid == ahb->before.tid &&
+		    condhb->after.tid == ahb->after.tid &&
+		    condhb->before.id >= ahb->before.id &&
+		    condhb->after.id <= ahb->after.id) {
+			/* @cond is (tA:idA <-< tB:idB) and @a's first
+			   condition is (tA:idC <-< tB:idD).  We
+			   further have that idA >= idC and idB <=
+			   idD.  Because of the way we assign MAIs to
+			   memory accesses (see setMais in
+			   probeCFGstoMachine.cpp) idC <= idA implies
+			   tA:idC <-< tA:idA, and likewise
+			   idB <= idD implies tB:idB <-< tB:idD.
+			   Combining these with cond gives us
+			   
+			   tA:idC <-< tA:idA <-< tB:idB <-< tB:idD
+
+			   i.e.
+
+			   tA:idC <-< tB:idD and we can replace @a
+			   with @a->trueBranch. */
+			a = a->internal().trueBranch;
+		}
+	}
+
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
-			entry(cond, a, b),
+			entry(r, a, b),
 			(t *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
@@ -732,10 +782,9 @@ bdd_scope<t>::runGc(HeapVisitor &hv)
 		if (!value)
 			continue;
 		entry e(it->first);
-		e.cond = hv.visited(e.cond);
 		e.trueB = hv.visited(e.trueB);
 		e.falseB = hv.visited(e.falseB);
-		assert(e.cond && e.trueB && e.falseB);
+		assert(e.trueB && e.falseB);
 		newIntern.insert(std::pair<entry, t *>(e, value));
 	}
 	intern = newIntern;
