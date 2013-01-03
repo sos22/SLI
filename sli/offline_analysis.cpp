@@ -696,6 +696,10 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 	if (!a) return NULL;
 	a = bbdd::And(&scopes->bools, a, assumption);
 	if (!a) return NULL;
+
+	fprintf(_logfile, "\t\tVerification condition:\n");
+	a->prettyPrint(_logfile);
+
 	IRExpr *verification_condition = bbdd::to_irexpr(a);
 	if (!verification_condition)
 		return NULL;
@@ -957,7 +961,7 @@ considerStoreCFG(SMScopes *scopes,
 			mai,
 			optIn,
 			token));
-	if (!base_verification_condition)
+	if (!base_verification_condition || TIMEOUT)
 		return NULL;
 
 	fprintf(_logfile, "\t\tBase verification condition: ");
