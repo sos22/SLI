@@ -1746,10 +1746,12 @@ Bool eqIRExprConst ( const IRExprConst* c1, const IRExprConst* c2 );
    eg. foo{0x80489304}(t1, t2):I32
 */
 struct IRExprCCall : public IRExpr {
-   IRCallee* cee;    /* Function to call. */
-   IRType    retty;  /* Type of return value. */
+   IRCallee* const cee;    /* Function to call. */
+   IRType    const retty;  /* Type of return value. */
    IRExpr**  args;   /* Vector of argument expressions. */
-   IRExprCCall() : IRExpr(Iex_CCall) {}
+   IRExprCCall(IRCallee *_cee, IRType _retty)
+       : IRExpr(Iex_CCall), cee(_cee), retty(_retty)
+   {}
    void visit(HeapVisitor &hv) {
        hv(cee);
        hv(args);
@@ -1869,9 +1871,9 @@ struct IRExprHappensBefore : public IRExpr {
 };
 
 struct IRExprFreeVariable : public IRExpr {
-    MemoryAccessIdentifier id;
-    IRType ty;
-    bool isUnique;
+    MemoryAccessIdentifier const id;
+    IRType const ty;
+    bool const isUnique;
     IRExprFreeVariable(const MemoryAccessIdentifier _id, IRType _ty, bool _isUnique)
 	: IRExpr(Iex_FreeVariable), id(_id), ty(_ty), isUnique(_isUnique)
     {}
@@ -1892,8 +1894,8 @@ struct IRExprFreeVariable : public IRExpr {
 };
 
 struct IRExprEntryPoint : public IRExpr {
-    unsigned thread;
-    CfgLabel label;
+    unsigned const thread;
+    CfgLabel const label;
     IRExprEntryPoint(unsigned _thread, const CfgLabel &_label)
 	: IRExpr(Iex_EntryPoint), thread(_thread), label(_label)
     {
@@ -1927,9 +1929,9 @@ struct IRExprEntryPoint : public IRExpr {
 };
 
 struct IRExprControlFlow : public IRExpr {
-    unsigned thread;
-    CfgLabel cfg1;
-    CfgLabel cfg2;
+    unsigned const thread;
+    CfgLabel const cfg1;
+    CfgLabel const cfg2;
     IRExprControlFlow(unsigned _thread, const CfgLabel &_cfg1, const CfgLabel &_cfg2)
 	: IRExpr(Iex_ControlFlow), thread(_thread), cfg1(_cfg1), cfg2(_cfg2)
     {
