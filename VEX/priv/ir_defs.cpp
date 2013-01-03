@@ -1890,9 +1890,7 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    return e;
 }
 IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
-   IRExprLoad* e        = new IRExprLoad(ty);
-   e->addr = addr;
-   return e;
+   return new IRExprLoad(ty, addr);
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
    IRExprCCall* e          = new IRExprCCall(cee, retty);
