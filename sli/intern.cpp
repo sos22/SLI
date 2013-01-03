@@ -60,9 +60,13 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	case Iex_EntryPoint:
 	case Iex_ControlFlow:
 		break;
-	case Iex_GetI:
-		((IRExprGetI *)e)->ix = internIRExpr(((IRExprGetI *)e)->ix, lookupTable);
+	case Iex_GetI: {
+		auto ee = (IRExprGetI *)e;
+		IRExpr *ix = internIRExpr(ee->ix, lookupTable);
+		if (ix != ee->ix)
+			e = new IRExprGetI(ee, ix);
 		break;
+	}
 	case Iex_Qop:
 		((IRExprQop *)e)->arg4 = internIRExpr(((IRExprQop *)e)->arg4, lookupTable);
 	case Iex_Triop:

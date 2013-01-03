@@ -45,15 +45,6 @@ public:
 	}
 };
 
-static IRRegArray *rawDupe(duplication_context &, const IRRegArray *inp)
-{
-	IRRegArray *res = new IRRegArray();
-	res->base = inp->base;
-	res->elemTy = inp->elemTy;
-	res->nElems = inp->nElems;
-	return res;
-}
-
 static IRCallee *rawDupe(duplication_context &, const IRCallee *inp)
 {
 	IRCallee *res = new IRCallee();
@@ -73,11 +64,8 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_GetI: {
 		const IRExprGetI *i = (const IRExprGetI *)inp;
-		IRExprGetI *res = new IRExprGetI();
-		ctxt(&res->descr, i->descr, rawDupe);
-		ctxt(&res->ix, i->ix, rawDupe);
-		res->bias = i->bias;
-		res->tid = i->tid;
+		IRExprGetI *res = new IRExprGetI(i, NULL);
+		ctxt((IRExpr **)&res->ix, i->ix, rawDupe);
 		return res;
 	}
 	case Iex_Qop: {

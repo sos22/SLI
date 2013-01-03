@@ -43,11 +43,11 @@ class HeapVisitor {
 	virtual void *_visited(void *x) = 0;
 public:
 	virtual void visit(void *&ptr) = 0;
-	template <typename t> void operator()(t *&p) {
+	template <typename t> void operator()(t *const&p) {
 		if (p) {
 			void *p2 = (void *)p;
 			visit(p2);
-			p = (t *)p2;
+			*(t **)&p = (t *)p2;
 			assert(p);
 		}
 	}

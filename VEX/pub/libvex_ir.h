@@ -1210,9 +1210,12 @@ extern void ppIRCallee ( IRCallee*, FILE* );
    indexed or rotating register files on the guest. */
 typedef
 struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
-      Int    base;   /* guest state offset of start of indexed area */
-      IRType elemTy; /* type of each element in the indexed area */
-      Int    nElems; /* number of elements in the indexed area */
+      _IRRegArray(Int _base, IRType _elemTy, Int _nElems)
+	  : base(_base), elemTy(_elemTy), nElems(_nElems)
+      {}
+      const Int    base;   /* guest state offset of start of indexed area */
+      const IRType elemTy; /* type of each element in the indexed area */
+      const Int    nElems; /* number of elements in the indexed area */
       void visit(HeapVisitor &) {}
       unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
       void sanity_check() const {
@@ -1329,8 +1332,8 @@ public:
 /* Read a guest register, at a fixed offset in the guest state.
    ppIRExpr output: GET:<ty>(<offset>), eg. GET:I32(0) */
 struct IRExprGet : public IRExpr {
-   threadAndRegister reg;
-   IRType ty;
+   const threadAndRegister reg;
+   const IRType ty;
 
    IRExprGet(threadAndRegister _reg, IRType _ty)
 	   : IRExpr(Iex_Get), reg(_reg), ty(_ty)
@@ -1395,13 +1398,31 @@ struct IRExprGet : public IRExpr {
    eg. GETI(128:8xI8)[t1,0]
 */
 struct IRExprGetI : public IRExpr {
-   IRRegArray* descr; /* Part of guest state treated as circular */
-   IRExpr*     ix;    /* Variable part of index into array */
-   Int         bias;  /* Constant offset part of index into array */
-   unsigned tid;     /* The thread whose register is to be read */
+   IRRegArray* const descr; /* Part of guest state treated as circular */
+   IRExpr*     const ix;    /* Variable part of index into array */
+   Int         const bias;  /* Constant offset part of index into array */
+   unsigned    const tid;     /* The thread whose register is to be read */
 
-   IRExprGetI() : IRExpr(Iex_GetI) {}
+   IRExprGetI(IRRegArray *_descr,
+	      IRExpr *_ix,
+	      Int _bias,
+	      unsigned _tid)
+       : IRExpr(Iex_GetI),
+	 descr(_descr),
+	 ix(_ix),
+	 bias(_bias),
+	 tid(_tid)
+   {}
    
+   IRExprGetI(const IRExprGetI *base,
+	      IRExpr *_ix)
+       : IRExpr(Iex_GetI),
+	 descr(base->descr),
+	 ix(_ix),
+	 bias(base->bias),
+	 tid(base->tid)
+   {}
+
    void visit(HeapVisitor &hv) {
        hv(descr);
        hv(ix);
