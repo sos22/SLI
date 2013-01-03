@@ -25,36 +25,6 @@ static bool debug_satisfier = false;
 
 namespace _sat_checker {
 
-static struct stats {
-	unsigned nr_invoked;
-	unsigned exhaustive_resolved;
-	unsigned failed;
-	unsigned timeout;
-	~stats() {
-		if (nr_invoked == 0)
-			return;
-		printf("Sat checker invoked %d times.  Results:\n", nr_invoked);
-#define do_field(name)							\
-		printf("\t" # name ":\t%f%%\n", 100.0 * name / nr_invoked)
-		do_field(exhaustive_resolved);
-		do_field(timeout);
-		do_field(failed);
-#undef do_field
-	}
-} sat_checker_counters;
-
-static Maybe<bool>
-isTrue(IRExpr *e)
-{
-	if (e->tag != Iex_Const)
-		return Maybe<bool>::nothing();
-	IRExprConst *iec = (IRExprConst *)e;
-	if (iec->Ico.U1)
-		return Maybe<bool>::just(true);
-	else
-		return Maybe<bool>::just(false);
-}
-
 static int
 anf_depth(const IRExpr *a)
 {
@@ -851,41 +821,6 @@ simplify_via_anf(IRExpr *a, IRExpr *assumption = NULL)
 	return anf_simplify(normed, normed_ass, table);
 }
 
-static bool
-exhaustive_satisfiable(IRExpr *e, const IRExprOptimisations &opt, bool print_all)
-{
-	bool res = false;
-	sat_checker_counters.nr_invoked++;
-	for (auto it = sat_enumerator(e, opt); !it.finished(); it.advance()) {
-		fprintf(_logfile, "Satisfying assignment:\n");
-		it.get().prettyPrint(_logfile);
-		if (!print_all) {
-			sat_checker_counters.failed++;
-			return true;
-		}
-		res = true;
-	}
-	if (res)
-		sat_checker_counters.failed++;
-	else if (TIMEOUT)
-		sat_checker_counters.timeout++;
-	else
-		sat_checker_counters.exhaustive_resolved++;
-	return res;
-}
-
-static bool
-satisfiable(IRExpr *e, const IRExprOptimisations &opt)
-{
-	assert(e->type() == Ity_I1);
-
-	Maybe<bool> res(isTrue(e));
-	if (res.valid)
-		return res.content;
-
-	return exhaustive_satisfiable(e, opt, false);
-}
-
 /* Is a rewrite from @from to @to preferred over one from @to to
    @from? */
 static bool
@@ -1209,12 +1144,6 @@ findBooleans(IRExpr *expr, std::set<IRExpr *> &booleans)
 
 /* End of namespace */
 };
-
-bool
-satisfiable(IRExpr *e, const IRExprOptimisations &opt)
-{
-	return _sat_checker::satisfiable(e, opt);
-}
 
 IRExpr *
 simplify_via_anf(IRExpr *a, IRExpr *assumption)
