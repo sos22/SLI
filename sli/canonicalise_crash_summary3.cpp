@@ -632,12 +632,12 @@ simplifyAssuming(IRExpr *expr,
 	return doit.doit(expr, progress);
 }
 
-static IRExpr *
+static bbdd *
 simplifyAssumingMachineSurvives(SMScopes *scopes,
 				const VexPtr<MaiMap, &ir_heap> &mai,
 				const VexPtr<StateMachine, &ir_heap> &machine,
 				bool doesSurvive,
-				const VexPtr<IRExpr, &ir_heap> &expr,
+				const VexPtr<bbdd, &ir_heap> &expr,
 				const VexPtr<OracleInterface> &oracle,
 				bool *progress,
 				GarbageCollectionToken token)
@@ -647,7 +647,7 @@ simplifyAssumingMachineSurvives(SMScopes *scopes,
 		printStateMachine(machine, stdout);
 		printf("doesSurvive = %s\n", doesSurvive ? "true" : "false");
 		printf("expr = ");
-		ppIRExpr(expr, stdout);
+		expr->prettyPrint(stdout);
 		printf("\n");
 	}
 
@@ -684,18 +684,14 @@ simplifyAssumingMachineSurvives(SMScopes *scopes,
 		printf("\n");
 	}
 
-	internIRExprTable intern;
-	IRExpr *expri = internIRExpr(expr.get(), intern);
-	IRExpr *survive = internIRExpr(bbdd::to_irexpr(survival_constraint), intern);
-
-	IRExpr *res = simplifyAssuming(expri, survive,
-				       debug_simplify_assuming_survive,
-				       true, progress);
+	bbdd *res = bbdd::assume(&scopes->bools, expr, survival_constraint);
 	if (debug_simplify_assuming_survive) {
 		printf("Final result: ");
-		ppIRExpr(res, stdout);
+		res->prettyPrint(stdout);
 		printf("\n");
 	}
+	if (res != expr)
+		*progress = true;
 	return res;
 }
 
@@ -941,6 +937,7 @@ functionalUnderspecification(IRExpr *input,
 }
 
 #define FP_EXPRESSION ((IRExpr *)1)
+#define FP_BBDD ((bbdd *)1)
 
 static IRExpr *
 stripFloatingPoint(IRExpr *expr, bool *p)
@@ -1073,6 +1070,46 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 	abort();
 }
 
+static bbdd *
+stripFloatingPoint(bbdd::scope *scope, bbdd *what, bool *done_something,
+		   std::map<bbdd *, bbdd *> &memo)
+{
+	if (what->isLeaf)
+		return what;
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(what, NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		bool b = false;
+		IRExpr *nCond = stripFloatingPoint(what->internal().condition, &b);
+		bbdd *t = stripFloatingPoint(scope, what->internal().trueBranch, &b, memo);
+		bbdd *f = stripFloatingPoint(scope, what->internal().falseBranch, &b, memo);
+		if (!b) {
+			it->second = what;
+		} else if (t == f || f == FP_BBDD) {
+			it->second = t;
+		} else if (t == FP_BBDD) {
+			it->second = f;
+		} else if (nCond == FP_EXPRESSION) {
+			it->second = FP_BBDD;
+		} else {
+			*done_something = true;
+			it->second = scope->makeInternal(nCond, t, f);
+		}
+	}
+	return it->second;
+}
+
+static bbdd *
+stripFloatingPoint(bbdd::scope *scope, bbdd *what, bool *done_something)
+{
+	std::map<bbdd *, bbdd *> memo;
+	bbdd *res = stripFloatingPoint(scope, what, done_something, memo);
+	if (res == FP_BBDD)
+		res = scope->cnst(true);
+	return res;
+}
+
 static CrashSummary *
 nonFunctionalSimplifications(
 	VexPtr<CrashSummary, &ir_heap> summary,
@@ -1088,7 +1125,7 @@ nonFunctionalSimplifications(
 		while (!TIMEOUT && p) {
 			p = false;
 			summary->verificationCondition =
-				stripFloatingPoint(summary->verificationCondition, &p);
+				stripFloatingPoint(&summary->scopes->bools, summary->verificationCondition, &p);
 			summary->verificationCondition =
 				simplifyAssumingMachineSurvives(
 					summary->scopes,
@@ -1114,11 +1151,13 @@ nonFunctionalSimplifications(
 		reg_set_t targetRegisters;
 		if (findTargetRegisters(summary, oracle, &targetRegisters, token)) {
 			summary->verificationCondition =
-				simplifyUsingUnderspecification(
-					summary->verificationCondition,
-					targetRegisters,
-					IRExpr_Const_U1(true),
-					&progress);
+				bbdd::var(
+					&summary->scopes->bools,
+					simplifyUsingUnderspecification(
+						bbdd::to_irexpr(summary->verificationCondition),
+						targetRegisters,
+						IRExpr_Const_U1(true),
+						&progress));
 		}
 	}
 
@@ -1135,14 +1174,14 @@ functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
 		internIRExprTable intern;
 		IRExpr *e = 
 			functionalUnderspecification(
-				summary->verificationCondition,
+				bbdd::to_irexpr(summary->verificationCondition),
 				intern,
 				targetRegisters,
 				1);
 		if (e == underspecExpression)
-			summary->verificationCondition = IRExpr_Const_U1(true);
+			summary->verificationCondition = summary->scopes->bools.cnst(true);
 		else
-			summary->verificationCondition = simplify_via_anf(e);
+			summary->verificationCondition = bbdd::var(&summary->scopes->bools, simplify_via_anf(e));
 	}
 	return summary;
 }
@@ -1152,8 +1191,10 @@ class LoadCanonicaliser : public GarbageCollected<LoadCanonicaliser, &ir_heap> {
 
 	StateMachine *canonicalise(SMScopes *scopes, StateMachine *sm);
 	IRExpr *canonicalise(IRExpr *iex);
+	bbdd *canonicalise(bbdd::scope *, bbdd *);
 	StateMachine *decanonicalise(SMScopes *scopes, StateMachine *sm);
 	IRExpr *decanonicalise(IRExpr *iex);
+	bbdd *decanonicalise(bbdd::scope *, bbdd *);
 	class canon_transformer : public StateMachineTransformer {
 		LoadCanonicaliser *_this;
 		IRExpr *transformIex(IRExprLoad *e) {
@@ -1294,6 +1335,13 @@ LoadCanonicaliser::canonicalise(IRExpr *iex)
 	return t.doit(iex);
 }
 
+bbdd *
+LoadCanonicaliser::canonicalise(bbdd::scope *scope, bbdd *iex)
+{
+	canon_transformer t(this);
+	return t.transform_bbdd(scope, iex);
+}
+
 StateMachine *
 LoadCanonicaliser::decanonicalise(SMScopes *scopes, StateMachine *sm)
 {
@@ -1308,12 +1356,19 @@ LoadCanonicaliser::decanonicalise(IRExpr *iex)
 	return t.doit(iex);
 }
 
+bbdd *
+LoadCanonicaliser::decanonicalise(bbdd::scope *scope, bbdd *iex)
+{
+	decanon_transformer t(this);
+	return t.transform_bbdd(scope, iex);
+}
+
 CrashSummary *
 LoadCanonicaliser::canonicalise(CrashSummary *cs)
 {
 	StateMachine *loadM = canonicalise(cs->scopes, cs->loadMachine);
 	StateMachine *storeM = canonicalise(cs->scopes, cs->storeMachine);
-	IRExpr *cond = canonicalise(cs->verificationCondition);
+	bbdd *cond = canonicalise(&cs->scopes->bools, cs->verificationCondition);
 	return new CrashSummary(cs->scopes,
 				loadM,
 				storeM,
@@ -1328,7 +1383,7 @@ LoadCanonicaliser::decanonicalise(CrashSummary *cs)
 	return new CrashSummary(cs->scopes,
 				decanonicalise(cs->scopes, cs->loadMachine),
 				decanonicalise(cs->scopes, cs->storeMachine),
-				decanonicalise(cs->verificationCondition),
+				decanonicalise(&cs->scopes->bools, cs->verificationCondition),
 				cs->aliasing,
 				cs->mai);
 }

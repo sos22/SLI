@@ -18,13 +18,13 @@ public:
 	SMScopes *scopes;
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
-	IRExpr *verificationCondition;
+	bbdd *verificationCondition;
 	typedef std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> aliasingEntryT;
 	std::vector<aliasingEntryT> aliasing;
 	MaiMap *mai;
 	CrashSummary(SMScopes *_scopes, StateMachine *_loadMachine,
 		     StateMachine *_storeMachine,
-		     IRExpr *_verificationCondition, Oracle *oracle,
+		     bbdd *_verificationCondition, Oracle *oracle,
 		     MaiMap *_mai)
 		: scopes(_scopes),
 		  loadMachine(_loadMachine),
@@ -38,7 +38,7 @@ public:
 	CrashSummary(SMScopes *_scopes,
 		     StateMachine *_loadMachine,
 		     StateMachine *_storeMachine,
-		     IRExpr *_verificationCondition,
+		     bbdd *_verificationCondition,
 		     const std::vector<aliasingEntryT> &_aliasing,
 		     MaiMap *_mai)
 		: scopes(_scopes),
@@ -106,7 +106,7 @@ visit_crash_summary(ctxtT *ctxt,
 {
 	std::set<const StateMachineState *> memo;
 	visit_result res;
-	res = visit_irexpr(ctxt, &visitor->irexpr, sm->verificationCondition);
+	res = visit_const_bdd(ctxt, &visitor->irexpr, sm->verificationCondition);
 	if (res == visit_continue)
 		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
 	if (res == visit_continue)
@@ -120,7 +120,7 @@ visit_crash_summary(ctxtT *ctxt,
 {
 	std::set<const StateMachineState *> memo;
 	visit_result res;
-	res = visit_irexpr(ctxt, visitor, sm->verificationCondition);
+	res = visit_const_bdd(ctxt, visitor, sm->verificationCondition);
 	if (res == visit_continue)
 		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
 	if (res == visit_continue)

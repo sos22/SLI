@@ -7,19 +7,19 @@
 #include "intern.hpp"
 
 static CrashSummary *
-addAssumption(bbdd *assumption,
+addAssumption(bbdd::scope *scope,
+	      bbdd *assumption,
 	      bool isTrue,
 	      CrashSummary *what)
 {
-	IRExpr *ass = bbdd::to_irexpr(assumption);
 	return new CrashSummary(
 		what->scopes,
 		what->loadMachine,
 		what->storeMachine,
-		IRExpr_Binop(
-			Iop_And1,
+		bbdd::And(
+			scope,
 			what->verificationCondition,
-			isTrue ? ass : IRExpr_Unop(Iop_Not1, ass)),
+			isTrue ? assumption : bbdd::invert(scope, assumption)),
 		what->aliasing,
 		what->mai);
 }
@@ -48,12 +48,14 @@ case_split_summary(CrashSummary *summary,
 	if (summary->loadMachine->root->type == StateMachineState::Bifurcate) {
 		CrashSummary *ifTrue =
 			addAssumption(
+				&summary->scopes->bools,
 				((StateMachineBifurcate *)summary->loadMachine->root)->condition,
 				true,
 				summary);
 		write_out(ifTrue, metadata, dir, cntr);
 		CrashSummary *ifFalse =
 			addAssumption(
+				&summary->scopes->bools,
 				((StateMachineBifurcate *)summary->loadMachine->root)->condition,
 				false,
 				summary);

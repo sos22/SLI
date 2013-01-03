@@ -1352,7 +1352,7 @@ buildPatch(patch &p,
 }
 
 static void
-findRelevantMais(const IRExpr *iex, std::set<MemoryAccessIdentifier> &out)
+findRelevantMais(const bbdd *iex, std::set<MemoryAccessIdentifier> &out)
 {
 	struct {
 		static visit_result HappensBefore(
@@ -1365,7 +1365,7 @@ findRelevantMais(const IRExpr *iex, std::set<MemoryAccessIdentifier> &out)
 	} foo;
 	static irexpr_visitor<std::set<MemoryAccessIdentifier> > visitor;
 	visitor.HappensBefore = foo.HappensBefore;
-	visit_irexpr(&out, &visitor, iex);
+	visit_const_bdd(&out, &visitor, iex);
 }
 
 static void

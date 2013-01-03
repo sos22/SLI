@@ -752,7 +752,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 
 	VexPtr<OracleInterface> oracleI(oracle);
 
-	IRExpr *requirement = summary->verificationCondition;
+	IRExpr *requirement = bbdd::to_irexpr(summary->verificationCondition);
 	int ignore;
 	requirement = removeFreeVariables(requirement, ERROR_POSITIVE, &ignore);
 	requirement = internIRExpr(simplify_via_anf(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations)));
