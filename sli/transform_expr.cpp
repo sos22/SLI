@@ -141,11 +141,14 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 	case Iex_CCall: {
 		IRExprCCall *e = (IRExprCCall *)exp;
 		IRExpr **args;
-		unsigned x;
-
-		args = shallowCopyIRExprVec(e->args);
-		for (x = 0; args[x]; x++)
-			args[x] = log_reads_expr(tid, sb, args[x]);
+		int x;
+		int nr_args;
+		for (nr_args = 0; e->args[nr_args]; nr_args++)
+			;
+		args = alloc_irexpr_array(nr_args + 1);
+		args[nr_args] = NULL;
+		for (x = 0; x < nr_args; x++)
+			args[x] = log_reads_expr(tid, sb, e->args[x]);
 		return IRExpr_CCall(e->cee,
 				    e->retty,
 				    args);

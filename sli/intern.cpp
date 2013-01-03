@@ -79,7 +79,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		break;
 	case Iex_CCall:
 		for (int x = 0; ((IRExprCCall *)e)->args[x]; x++)
-			((IRExprCCall *)e)->args[x] =
+			*(IRExpr **)&((IRExprCCall *)e)->args[x] =
 				internIRExpr(((IRExprCCall *)e)->args[x], lookupTable);
 		break;
 	case Iex_Mux0X:

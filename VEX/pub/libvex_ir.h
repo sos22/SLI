@@ -1748,8 +1748,8 @@ Bool eqIRExprConst ( const IRExprConst* c1, const IRExprConst* c2 );
 struct IRExprCCall : public IRExpr {
    IRCallee* const cee;    /* Function to call. */
    IRType    const retty;  /* Type of return value. */
-   IRExpr**  const args;   /* Vector of argument expressions. */
-   IRExprCCall(IRCallee *_cee, IRType _retty, IRExpr ** _args)
+   IRExpr*const *  const args;   /* Vector of argument expressions. */
+   IRExprCCall(IRCallee *_cee, IRType _retty, IRExpr *const* _args)
        : IRExpr(Iex_CCall), cee(_cee), retty(_retty), args(_args)
    {}
    void visit(HeapVisitor &hv) {

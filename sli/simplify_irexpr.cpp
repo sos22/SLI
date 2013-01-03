@@ -1552,16 +1552,32 @@ top:
 	switch (src->tag) {
 	case Iex_CCall: {
 		IRExprCCall *c = (IRExprCCall *)src;
-		for (int i = 0; c->args[i]; i++)
-			c->args[i] = optimiseIRExpr(c->args[i], opt, done_something);
+		int nr_args;
+		for (nr_args = 0; c->args[nr_args]; nr_args++)
+			;
+		IRExpr *args[nr_args];
+		bool realloc = false;
+		for (int i = 0; c->args[i]; i++) {
+			args[i] = optimiseIRExpr(c->args[i], opt, done_something);
+			if (args[i] != c->args[i])
+				realloc = true;
+		}
 		if (!strcmp(c->cee->name, "amd64g_calculate_condition")) {
 			IRExpr *a = optimise_condition_calculation(
-				c->args[0],
-				c->args[1],
-				c->args[2],
-				c->args[3]);
-			if (a)
+				args[0],
+				args[1],
+				args[2],
+				args[3]);
+			if (a) {
 				res = a;
+				realloc = false;
+			}
+		}
+		if (realloc) {
+			IRExpr **nargs = alloc_irexpr_array(nr_args + 1);
+			memcpy(nargs, args, sizeof(nargs[0]) * nr_args);
+			nargs[nr_args] = NULL;
+			res = new IRExprCCall(c->cee, c->retty, nargs);
 		}
 		break;
 	}
