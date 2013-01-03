@@ -448,7 +448,8 @@ introduceCompoundFunctions(CrashSummary *summary,
 					cee = mkIRCallee(
 						0,
 						my_asprintf("f%d", (*f_cntr)++), /* XXX memory leak XXX */
-						NULL);
+						NULL,
+						0);
 				IRExpr **args;
 				args = alloc_irexpr_array(argVals.size() + 1);
 				for (int i = 0; i < (int)argVals.size(); i++) {

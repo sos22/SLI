@@ -45,22 +45,12 @@ public:
 	}
 };
 
-static IRCallee *rawDupe(duplication_context &, const IRCallee *inp)
-{
-	IRCallee *res = new IRCallee();
-	res->regparms = inp->regparms;
-	res->name = inp->name;
-	res->addr = inp->addr;
-	res->mcx_mask = inp->mcx_mask;
-	return res;
-}
-
 static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 {
 	switch (inp->tag) {
 	case Iex_Get: {
 		const IRExprGet *i = (const IRExprGet *)inp;
-		return new IRExprGet(i->reg, i->ty);
+		return (IRExprGet *)i;
 	}
 	case Iex_GetI: {
 		const IRExprGetI *i = (const IRExprGetI *)inp;
@@ -100,22 +90,16 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Load: {
 		const IRExprLoad *i = (const IRExprLoad *)inp;
-		IRExprLoad *res = new IRExprLoad();
-		res->ty = i->ty;
+		IRExprLoad *res = new IRExprLoad(i->ty);
 		ctxt(&res->addr, i->addr, rawDupe);
 		return res;
 	}
-	case Iex_Const: {
-		const IRExprConst *i = (const IRExprConst *)inp;
-		IRExprConst *res = new IRExprConst();
-		res->ty = i->ty;
-		res->Ico = i->Ico;
-		return res;
-	}
+	case Iex_Const:
+		return (IRExprConst *)inp;
 	case Iex_CCall: {
 		const IRExprCCall *i = (const IRExprCCall *)inp;
 		IRExprCCall *res = new IRExprCCall();
-		ctxt(&res->cee, i->cee, rawDupe);
+		res->cee = i->cee;
 		res->retty = i->retty;
 		int nr_args;
 		for (nr_args = 0; i->args[nr_args]; nr_args++)
