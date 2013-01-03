@@ -1752,14 +1752,10 @@ IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr )
 
 IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
 {
-   IRRegArray* arr = new IRRegArray();
-   arr->base       = base;
-   arr->elemTy     = elemTy;
-   arr->nElems     = nElems;
-   vassert(!(arr->base < 0 || arr->base > 10000 /* somewhat arbitrary */));
-   vassert(!(arr->elemTy == Ity_I1));
-   vassert(!(arr->nElems <= 0 || arr->nElems > 500 /* somewhat arbitrary */));
-   return arr;
+   vassert(!(base < 0 || base > 10000 /* somewhat arbitrary */));
+   vassert(!(elemTy == Ity_I1));
+   vassert(!(nElems <= 0 || nElems > 500 /* somewhat arbitrary */));
+   return new IRRegArray(base, elemTy, nElems);
 }
 
 
@@ -1772,12 +1768,7 @@ IRExprGet* IRExpr_Get ( Int off, IRType ty, unsigned tid, unsigned generation ) 
    return IRExpr_Get(threadAndRegister::reg(tid, off, generation), ty);
 }
 IRExpr* IRExpr_GetI ( IRRegArray* descr, IRExpr* ix, Int bias, unsigned tid ) {
-   IRExprGetI* e         = new IRExprGetI();
-   e->descr = descr;
-   e->ix    = ix;
-   e->bias  = bias;
-   e->tid   = tid;
-   return e;
+   return new IRExprGetI(descr, ix, bias, tid);
 }
 IRExpr* IRExpr_RdTmp ( IRTemp tmp, IRType ty, unsigned tid, unsigned generation ) {
    return IRExpr_Get(-tmp - 1, ty, tid, generation);

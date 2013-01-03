@@ -3050,7 +3050,9 @@ top:
 
 	case Iex_GetI: {
 		IRExprGetI *g = (IRExprGetI *)src;
-		g->ix = optimiseIRExpr(g->ix, opt, done_something);
+		IRExpr *ix = optimiseIRExpr(g->ix, opt, done_something);
+		if (ix != g->ix)
+			res = new IRExprGetI(g, ix);
 		break;
 	}
 
