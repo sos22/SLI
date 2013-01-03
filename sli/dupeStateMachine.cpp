@@ -98,9 +98,7 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 		return (IRExprConst *)inp;
 	case Iex_CCall: {
 		const IRExprCCall *i = (const IRExprCCall *)inp;
-		IRExprCCall *res = new IRExprCCall();
-		res->cee = i->cee;
-		res->retty = i->retty;
+		IRExprCCall *res = new IRExprCCall(i->cee, i->retty);
 		int nr_args;
 		for (nr_args = 0; i->args[nr_args]; nr_args++)
 			;

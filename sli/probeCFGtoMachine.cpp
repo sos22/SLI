@@ -34,7 +34,7 @@ static IRExpr *
 mkPendingFreeVar(IRType ty, const CFGNode *node, bool isUnique)
 {
 	IRExprFreeVariable *res = IRExpr_FreeVariable(MemoryAccessIdentifier::uninitialised(), ty, isUnique);
-	_probeCFGsToMachine::mkPendingMai(&res->id, node);
+	_probeCFGsToMachine::mkPendingMai((MemoryAccessIdentifier *)&res->id, node);
 	return res;
 }
 
@@ -2060,7 +2060,7 @@ struct assignMaiTransformer : public IRExprTransformer {
 	int tid;
 	MaiMap &mm;
 	IRExpr *transformIex(IRExprFreeVariable *fv) {
-		assignMais(fv->id, tid, mm);
+		assignMais(*(MemoryAccessIdentifier *)&fv->id, tid, mm);
 		return fv;
 	}
 	IRExpr *transformIex(IRExprHappensBefore *) {

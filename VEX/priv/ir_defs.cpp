@@ -1895,9 +1895,7 @@ IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
    return e;
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
-   IRExprCCall* e          = new IRExprCCall();
-   e->cee   = cee;
-   e->retty = retty;
+   IRExprCCall* e          = new IRExprCCall(cee, retty);
    e->args  = args;
    return e;
 }
