@@ -1781,10 +1781,13 @@ struct IRExprCCall : public IRExpr {
    eg. Mux0X(t6,t7,t8)
 */
 struct IRExprMux0X : public IRExpr {
-   IRExpr* cond;     /* Condition */
-   IRExpr* expr0;    /* True expression */
-   IRExpr* exprX;    /* False expression */
-   IRExprMux0X() : IRExpr(Iex_Mux0X) {}
+   IRExpr* const cond;     /* Condition */
+   IRExpr* const expr0;    /* True expression */
+   IRExpr* const exprX;    /* False expression */
+   IRExprMux0X(IRExpr *_cond, IRExpr *_expr0, IRExpr *_exprX)
+       : IRExpr(Iex_Mux0X), cond(_cond), expr0(_expr0),
+	 exprX(_exprX)
+   {}
    void visit(HeapVisitor &hv) {
        hv(cond);
        hv(expr0);

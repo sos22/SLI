@@ -2995,26 +2995,26 @@ top:
 	}
 
 	case Iex_Mux0X: {
-		IRExprMux0X *e = (IRExprMux0X *)src;
-		e->cond = optimiseIRExpr(e->cond, opt, done_something);
-		e->expr0 = rewriteBoolean(e->cond, false, e->expr0, done_something);
-		e->expr0 = optimiseIRExpr(e->expr0, opt, done_something);
-		e->exprX = rewriteBoolean(e->cond, true, e->exprX, done_something);
-		e->exprX = optimiseIRExpr(e->exprX, opt, done_something);
-		if (e->cond->tag == Iex_Const) {
-			if (((IRExprConst *)e->cond)->Ico.U1)
-				res = e->exprX;
+		IRExprMux0X *_e = (IRExprMux0X *)src;
+		auto cond = optimiseIRExpr(_e->cond, opt, done_something);
+		auto expr0 = rewriteBoolean(cond, false, _e->expr0, done_something);
+		expr0 = optimiseIRExpr(expr0, opt, done_something);
+		auto exprX = rewriteBoolean(cond, true, _e->exprX, done_something);
+		exprX = optimiseIRExpr(exprX, opt, done_something);
+		if (cond->tag == Iex_Const) {
+			if (((IRExprConst *)cond)->Ico.U1)
+				res = exprX;
 			else
-				res = e->expr0;
+				res = expr0;
 			break;
 		}
 
-		if (_sortIRExprs(e->exprX, e->expr0) == equal_to) {
-			res = e->exprX;
+		if (_sortIRExprs(exprX, expr0) == equal_to) {
+			res = exprX;
 			break;
 		}
 
-		if (e->type() == Ity_I1) {
+		if (_e->type() == Ity_I1) {
 			/* If we're working at boolean type
 			   then the whole thing turns into a
 			   sequence of boolean operations. */
@@ -3024,19 +3024,19 @@ top:
 					Iop_And1,
 					IRExpr_Unop(
 						Iop_Not1,
-						e->cond),
-					e->expr0),
+						cond),
+					expr0),
 				IRExpr_Binop(
 					Iop_And1,
-					e->cond,
-					e->exprX));
+					cond,
+					exprX));
 			break;
 		}
 
-		if (e->expr0->tag == Iex_Mux0X &&
-		    e->exprX->tag == Iex_Mux0X) {
-			IRExprMux0X *e0 = (IRExprMux0X *)e->expr0;
-			IRExprMux0X *eX = (IRExprMux0X *)e->exprX;
+		if (expr0->tag == Iex_Mux0X &&
+		    exprX->tag == Iex_Mux0X) {
+			IRExprMux0X *e0 = (IRExprMux0X *)expr0;
+			IRExprMux0X *eX = (IRExprMux0X *)exprX;
 			if (physicallyEqual(e0->expr0, eX->expr0) &&
 			    physicallyEqual(e0->exprX, eX->exprX)) {
 				/* Rewrite Mux0X(a, Mux0X(b, x, y), Mux0X(c, x, y))
@@ -3048,21 +3048,25 @@ top:
 							Iop_And1,
 							IRExpr_Unop(
 								Iop_Not1,
-								e->cond),
+								cond),
 							IRExpr_Unop(
 								Iop_Not1,
 								e0->cond)),
 						IRExpr_Binop(
 							Iop_And1,
-							e->cond,
+							cond,
 							IRExpr_Unop(
 								Iop_Not1,
 								eX->cond))),
 					e0->expr0,
 					e0->exprX);
 			}
+			break;
 		}
 
+		if (cond != _e->cond || expr0 != _e->expr0 ||
+		    exprX != _e->exprX)
+			res = new IRExprMux0X(cond, expr0, exprX);
 		break;
 	}
 
