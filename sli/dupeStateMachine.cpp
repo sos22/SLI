@@ -80,8 +80,8 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Unop: {
 		const IRExprUnop *i = (const IRExprUnop *)inp;
-		IRExprUnop *res = new IRExprUnop(i->op);
-		ctxt(&res->arg, i->arg, rawDupe);
+		IRExprUnop *res = new IRExprUnop(i->op, NULL);
+		ctxt((IRExpr **)&res->arg, i->arg, rawDupe);
 		return res;
 	}
 	case Iex_Load: {

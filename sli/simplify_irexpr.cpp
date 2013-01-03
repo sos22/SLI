@@ -2018,65 +2018,64 @@ top:
 	}
 
 	case Iex_Unop: {
-		IRExprUnop *e = (IRExprUnop *)res;
-		e->arg = optimiseIRExpr(e->arg, opt, done_something);
+		IRExprUnop *_e = (IRExprUnop *)res;
+		auto arg = optimiseIRExpr(_e->arg, opt, done_something);
+		auto op = _e->op;
 		__set_profiling(optimise_unop);
 
-		if (e->arg->tag == Iex_Unop) {
-			IRExprUnop *argu = (IRExprUnop *)e->arg;
-			if (inverseUnops(e->op, argu->op)) {
+		if (arg->tag == Iex_Unop) {
+			IRExprUnop *argu = (IRExprUnop *)arg;
+			if (inverseUnops(op, argu->op)) {
 				res = argu->arg;
 				break;
 			}
 			IROp ss;
-			if (shortCircuitableUnops(e->op, argu->op, &ss)) {
-				res = optimiseIRExprFP(IRExpr_Unop(ss, argu->arg),
-						       opt,
-						       &progress);
-				break;
+			if (shortCircuitableUnops(op, argu->op, &ss)) {
+				op = ss;
+				arg = argu->arg;
 			}
 		}
 
-		if (e->arg->tag == Iex_Get) {
-			IRExprGet *argg = (IRExprGet *)e->arg;
-			if (e->op == Iop_64to32) {
+		if (arg->tag == Iex_Get) {
+			IRExprGet *argg = (IRExprGet *)arg;
+			if (op == Iop_64to32) {
 				res = IRExpr_Get(argg->reg, Ity_I32);
 				break;
 			}
-			if (e->op == Iop_64to16 || e->op == Iop_32to16) {
+			if (op == Iop_64to16 || op == Iop_32to16) {
 				res = IRExpr_Get(argg->reg, Ity_I16);
 				break;
 			}
-			if (e->op == Iop_64to8 || e->op == Iop_32to8 || e->op == Iop_16to8) {
+			if (op == Iop_64to8 || op == Iop_32to8 || op == Iop_16to8) {
 				res = IRExpr_Get(argg->reg, Ity_I8);
 				break;
 			}
-			if (e->op == Iop_V128to32) {
+			if (op == Iop_V128to32) {
 				res = IRExpr_Get(argg->reg, Ity_I32);
 				break;
 			}
-			if (e->op == Iop_ReinterpI32asF32) {
+			if (op == Iop_ReinterpI32asF32) {
 				res = IRExpr_Get(argg->reg, Ity_I32);
 				break;
 			}
 		}
 
-		if (e->arg->tag == Iex_Load) {
-			IRExprLoad *argl = (IRExprLoad *)e->arg;
-			if (e->op == Iop_64to32) {
+		if (arg->tag == Iex_Load) {
+			IRExprLoad *argl = (IRExprLoad *)arg;
+			if (op == Iop_64to32) {
 				res = IRExpr_Load(Ity_I32, argl->addr);
 				break;
 			}
-			if (e->op == Iop_ReinterpI32asF32) {
+			if (op == Iop_ReinterpI32asF32) {
 				res = IRExpr_Load(Ity_I32, argl->addr);
 				break;
 			}
 		}
 
-		if (e->arg->tag == Iex_Associative) {
-			IRExprAssociative *arga = (IRExprAssociative *)e->arg;
-			if ((e->op == Iop_Not1 && (arga->op == Iop_And1 || arga->op == Iop_Or1)) ||
-			    (e->op == Iop_Neg64 && arga->op == Iop_Add64)) {
+		if (arg->tag == Iex_Associative) {
+			IRExprAssociative *arga = (IRExprAssociative *)arg;
+			if ((op == Iop_Not1 && (arga->op == Iop_And1 || arga->op == Iop_Or1)) ||
+			    (op == Iop_Neg64 && arga->op == Iop_Add64)) {
 				/* Convert ~(x & y) to ~x | ~y and -(x + y) to -x + -y. */
 				IRExprAssociative *a =
 					(IRExprAssociative *)IRExpr_Associative(arga);
@@ -2086,7 +2085,7 @@ top:
 					a->contents[i] =
 						optimiseIRExprFP(
 							IRExpr_Unop(
-								e->op,
+								op,
 								a->contents[i]),
 							opt,
 							&progress);
@@ -2107,13 +2106,13 @@ top:
 			bool isXor = arga->op >= Iop_Xor8 && arga->op <= Iop_Xor64;
 			bool isAdd = arga->op >= Iop_Add8 && arga->op <= Iop_Add64;
 			bool isDowncast = 
-				e->op == Iop_64to32 || e->op == Iop_64to16 || e->op == Iop_64to8 ||
-				e->op == Iop_32to16 || e->op == Iop_32to8 ||
-				e->op == Iop_16to8;
+				op == Iop_64to32 || op == Iop_64to16 || op == Iop_64to8 ||
+				op == Iop_32to16 || op == Iop_32to8 ||
+				op == Iop_16to8;
 			bool isUnsignedUpcast =
-				e->op == Iop_8Uto64  || e->op == Iop_8Uto32  || e->op == Iop_8Uto16 ||
-				e->op == Iop_16Uto64 || e->op == Iop_16Uto32 ||
-				e->op == Iop_32Uto64;
+				op == Iop_8Uto64  || op == Iop_8Uto32  || op == Iop_8Uto16 ||
+				op == Iop_16Uto64 || op == Iop_16Uto32 ||
+				op == Iop_32Uto64;
 
 			if ( (isDowncast && (isOr || isAnd || isXor || isAdd) ) ||
 			     (isUnsignedUpcast && (isOr || isAnd || isXor) ) ) {
@@ -2125,7 +2124,7 @@ top:
 					a->contents[i] =
 						optimiseIRExprFP(
 							IRExpr_Unop(
-								e->op,
+								op,
 								a->contents[i]),
 							opt,
 							&progress);
@@ -2164,15 +2163,15 @@ top:
 			}
 		}
 
-		if (e->op == Iop_BadPtr) {
+		if (op == Iop_BadPtr) {
 			if (opt.allPointersGood()) {
 				res = IRExpr_Const_U1(false);
 				break;
 			}
-			if (e->arg->tag == Iex_Associative &&
-			    ((IRExprAssociative *)e->arg)->op == Iop_Add64 &&
-			    ((IRExprAssociative *)e->arg)->nr_arguments == 2 &&
-			    ((IRExprAssociative *)e->arg)->contents[0]->tag == Iex_Const) {
+			if (arg->tag == Iex_Associative &&
+			    ((IRExprAssociative *)arg)->op == Iop_Add64 &&
+			    ((IRExprAssociative *)arg)->nr_arguments == 2 &&
+			    ((IRExprAssociative *)arg)->contents[0]->tag == Iex_Const) {
 				/* Simplify BadPtr(k+x) a
 				 * little bit if k is a
 				 * constant.  The basic rule
@@ -2184,7 +2183,7 @@ top:
 				 * pointer to the same
 				 * structure, so we can mosh
 				 * them together. */
-				IRExprAssociative *assoc = (IRExprAssociative *)e->arg;
+				IRExprAssociative *assoc = (IRExprAssociative *)arg;
 				IRExprConst *cnst = (IRExprConst *)assoc->contents[0];
 				unsigned long old_delta = cnst->Ico.U64;
 				unsigned long new_delta = old_delta & ~((1ul << 22) - 1);
@@ -2200,22 +2199,20 @@ top:
 
 				if (old_delta != new_delta) {
 					if (new_delta == 0)
-						e->arg = assoc->contents[1];
+						arg = assoc->contents[1];
 					else
-						e->arg =
+						arg =
 							IRExpr_Binop(
 								Iop_Add64,
 								IRExpr_Const_U64(
 									cnst->Ico.U64 & ~((1ul << 22) - 1)),
 								assoc->contents[1]);
-					progress = true;
-					break;
 				}
 			}
-			if (e->arg->tag == Iex_Get &&
-			    !((IRExprGet *)e->arg)->reg.isTemp() &&
-			    (((IRExprGet *)e->arg)->reg.asReg() == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
-			     ((IRExprGet *)e->arg)->reg.asReg() == offsetof(VexGuestAMD64State, guest_RSP))) {
+			if (arg->tag == Iex_Get &&
+			    !((IRExprGet *)arg)->reg.isTemp() &&
+			    (((IRExprGet *)arg)->reg.asReg() == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
+			     ((IRExprGet *)arg)->reg.asReg() == offsetof(VexGuestAMD64State, guest_RSP))) {
 				/* The FS and RSP registers are
 				   assumed to always point at valid
 				   memory. */
@@ -2224,21 +2221,22 @@ top:
 			}
 		}
 
-		if (e->arg->tag == Iex_Mux0X) {
-			IRExprMux0X *arg = (IRExprMux0X *)e->arg;
+		if (arg->tag == Iex_Mux0X) {
+			IRExprMux0X *arg = (IRExprMux0X *)arg;
 			res = IRExpr_Mux0X(arg->cond,
 					   IRExpr_Unop(
-						   e->op,
+						   op,
 						   arg->expr0),
 					   IRExpr_Unop(
-						   e->op,
+						   op,
 						   arg->exprX));
 			break;
 		}
 
-		if (e->arg->tag == Iex_Const) {
-			IRExprConst *c = (IRExprConst *)e->arg;
-			switch (e->op) {
+		if (arg->tag == Iex_Const) {
+			IRExprConst *c = (IRExprConst *)arg;
+			bool bb = true;
+			switch (op) {
 			case Iop_Neg8:
 				res = IRExpr_Const_U8(-c->Ico.U8);
 				break;
@@ -2379,16 +2377,22 @@ top:
 					bool t;
 					if (opt.addressAccessible(c->Ico.U64, &t))
 						res = IRExpr_Const_U1(!t);
+					else
+						bb = false;
 				}
 				break;
 			default:
-				warning("cannot constant fold unop %d\n", e->op);
-				printf("Cannot constant fold unop %d (", e->op);
-				ppIROp(e->op, stdout);
+				warning("cannot constant fold unop %d\n", op);
+				printf("Cannot constant fold unop %d (", op);
+				ppIROp(op, stdout);
 				printf(")\n");
 				break;
 			}
+			if (bb)
+				break;
 		}
+		if (op != _e->op || arg != _e->arg)
+			res = new IRExprUnop(op, arg);
 		break;
 	}
 	

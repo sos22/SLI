@@ -1019,11 +1019,13 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 
 	case Iex_Unop: {
 		IRExprUnop *i = (IRExprUnop *)expr;
-		IRExpr *arg = stripFloatingPoint(i->arg, p);
+		auto arg = stripFloatingPoint(i->arg, p);
 		if (arg == FP_EXPRESSION)
 			return FP_EXPRESSION;
-		i->arg = arg;
-		return i;
+		if (arg == i->arg)
+			return expr;
+		else
+			return new IRExprUnop(i->op, arg);
 	}
 	case Iex_Const:
 		return expr;

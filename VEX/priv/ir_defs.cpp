@@ -1882,9 +1882,7 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
      if (shortCircuitableUnops(op, argu->op, &ss))
        return IRExpr_Unop(ss, argu->arg);
    }
-   IRExprUnop* e       = new IRExprUnop(op);
-   e->arg = arg;
-   return e;
+   return new IRExprUnop(op, arg);
 }
 IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
    return new IRExprLoad(ty, addr);
