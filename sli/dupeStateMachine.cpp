@@ -48,10 +48,6 @@ public:
 static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 {
 	switch (inp->tag) {
-	case Iex_Get: {
-		const IRExprGet *i = (const IRExprGet *)inp;
-		return (IRExprGet *)i;
-	}
 	case Iex_GetI: {
 		const IRExprGetI *i = (const IRExprGetI *)inp;
 		IRExprGetI *res = new IRExprGetI(i, NULL);
@@ -77,9 +73,9 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Binop: {
 		const IRExprBinop *i = (const IRExprBinop *)inp;
-		IRExprBinop *res = new IRExprBinop(i->op);
-		ctxt(&res->arg1, i->arg1, rawDupe);
-		ctxt(&res->arg2, i->arg2, rawDupe);
+		IRExprBinop *res = new IRExprBinop(i->op, NULL, NULL);
+		ctxt((IRExpr **)&res->arg1, i->arg1, rawDupe);
+		ctxt((IRExpr **)&res->arg2, i->arg2, rawDupe);
 		return res;
 	}
 	case Iex_Unop: {
@@ -94,8 +90,6 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 		ctxt((IRExpr **)&res->addr, i->addr, rawDupe);
 		return res;
 	}
-	case Iex_Const:
-		return (IRExprConst *)inp;
 	case Iex_CCall: {
 		const IRExprCCall *i = (const IRExprCCall *)inp;
 		int nr_args;
@@ -131,22 +125,13 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 			ctxt(&res->contents[j], i->contents[j], rawDupe);
 		return res;
 	}
-	case Iex_HappensBefore: {
-		const IRExprHappensBefore *i = (const IRExprHappensBefore *)inp;
-		return new IRExprHappensBefore(i->before, i->after);
-	}
-	case Iex_FreeVariable: {
-		const IRExprFreeVariable *i = (const IRExprFreeVariable *)inp;
-		return new IRExprFreeVariable(i->id, i->ty, i->isUnique);
-	}
-	case Iex_EntryPoint: {
-		const IRExprEntryPoint *i = (const IRExprEntryPoint *)inp;
-		return new IRExprEntryPoint(*i);
-	}
-	case Iex_ControlFlow: {
-		const IRExprControlFlow *i = (const IRExprControlFlow *)inp;
-		return new IRExprControlFlow(*i);
-	}
+	case Iex_Get:
+	case Iex_Const:
+	case Iex_FreeVariable:
+	case Iex_HappensBefore:
+	case Iex_EntryPoint:
+	case Iex_ControlFlow:
+		return (IRExpr *)inp;
 	}
 	abort();
 }

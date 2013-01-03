@@ -2393,30 +2393,28 @@ top:
 	}
 	
 	case Iex_Binop: {
-		IRExprBinop *e = (IRExprBinop *)src;
-		e->arg1 = optimiseIRExpr(e->arg1, opt, done_something);
-		e->arg2 = optimiseIRExpr(e->arg2, opt, done_something);
+		IRExprBinop *_e = (IRExprBinop *)src;
+		IRExpr *l = optimiseIRExpr(_e->arg1, opt, done_something);
+		IRExpr *r = optimiseIRExpr(_e->arg2, opt, done_something);
+		IROp op = _e->op;
 		__set_profiling(optimise_binop);
-		IRExpr *l = e->arg1;
-		IRExpr *r = e->arg2;
-		if (e->op >= Iop_Sub8 &&
-		    e->op <= Iop_Sub64) {
+		if (op >= Iop_Sub8 &&
+		    op <= Iop_Sub64) {
 			/* Replace a - b with a + (-b), so as to
 			   eliminate binary -. */
 			progress = true;
-			e = new IRExprBinop(e, (IROp)(e->op - Iop_Sub8 + Iop_Add8));
-			r = e->arg2 =
-				optimiseIRExprFP(
-					IRExpr_Unop( (IROp)((e->op - Iop_Add8) + Iop_Neg8),
-						     r ),
-					opt,
-					&progress);
+			op = (IROp)(op - Iop_Sub8 + Iop_Add8);
+			r = optimiseIRExprFP(
+				IRExpr_Unop( (IROp)((op - Iop_Add8) + Iop_Neg8),
+					     r ),
+				opt,
+				&progress);
 		}
-		if (operationAssociates(e->op)) {
+		if (operationAssociates(op)) {
 			/* Convert to an associative operation. */
 			res = optimiseIRExpr(
 				IRExpr_Associative(
-					e->op,
+					op,
 					l,
 					r,
 					NULL),
@@ -2425,77 +2423,79 @@ top:
 			break;
 		}
 		/* If a op b commutes, sort the arguments. */
-		if (operationCommutes(e->op) &&
-		    sortIRExprs(r, l)) {
-			e->arg1 = r;
-			e->arg2 = l;
-			l = e->arg1;
-			r = e->arg2;
+		if (operationCommutes(op) &&  sortIRExprs(r, l)) {
+			IRExpr *t = l;
+			l = r;
+			r = t;
 			progress = true;
 		}
 
 		/* 0 << x -> 0, and x << 0 -> x */
-		if (((e->op >= Iop_Shl8 && e->op <= Iop_Shl64) ||
-		     (e->op >= Iop_Shr8 && e->op <= Iop_Shr64) ||
-		     (e->op >= Iop_Sar8 && e->op <= Iop_Sar64)) &&
+		if (((op >= Iop_Shl8 && op <= Iop_Shl64) ||
+		     (op >= Iop_Shr8 && op <= Iop_Shr64) ||
+		     (op >= Iop_Sar8 && op <= Iop_Sar64)) &&
 		    ((r->tag == Iex_Const && ((IRExprConst *)r)->Ico.U8 == 0) ||
 		     (l->tag == Iex_Const && ((IRExprConst *)l)->Ico.U64 == 0))) {
 			res = l;
+			break;
 		}
 
 		/* If, in a == b, a and b are physically
 		 * identical, the result is a constant 1. */
-		if ( (e->op == Iop_CmpEQ1 ||
-		      e->op == Iop_CmpEQF32 ||
-		      e->op == Iop_CmpEQF64 ||
-		      e->op == Iop_CmpEQI128 ||
-		      e->op == Iop_CmpEQV128 ||
-		      (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64)) &&
+		if ( (op == Iop_CmpEQ1 ||
+		      op == Iop_CmpEQF32 ||
+		      op == Iop_CmpEQF64 ||
+		      op == Iop_CmpEQI128 ||
+		      op == Iop_CmpEQV128 ||
+		      (op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64)) &&
 		     physicallyEqual(l, r) ) {
 			res = IRExpr_Const_U1(true);
 			break;
 		}
 
-		if (e->op == Iop_CmpEQ1 &&
-		    e->arg1->tag == Iex_Unop &&
-		    e->arg2->tag == Iex_Unop &&
-		    ((IRExprUnop *)e->arg1)->op == Iop_Not1 &&
-		    ((IRExprUnop *)e->arg2)->op == Iop_Not1) {
-			l = e->arg1 = ((IRExprUnop *)e->arg1)->arg;
-			r = e->arg2 = ((IRExprUnop *)e->arg2)->arg;
+		/* !x == !y -> x == y */
+		if (op == Iop_CmpEQ1 &&
+		    l->tag == Iex_Unop &&
+		    r->tag == Iex_Unop &&
+		    ((IRExprUnop *)l)->op == Iop_Not1 &&
+		    ((IRExprUnop *)r)->op == Iop_Not1) {
+			l = ((IRExprUnop *)l)->arg;
+			r = ((IRExprUnop *)r)->arg;
 			progress = true;
 		}
 
-		if ( e->op >= Iop_CmpLT8S &&
-		     e->op <= Iop_CmpLT64S &&
-		     physicallyEqual(e->arg1,e->arg2) ) {
+		/* x < x -> false */
+		if ( op >= Iop_CmpLT8S &&
+		     op <= Iop_CmpLT64S &&
+		     physicallyEqual(l, r) ) {
 			res = IRExpr_Const_U1(false);
 			break;
 		}
 
 		/* !x != x, for any x */
-		if (e->op == Iop_CmpEQ1 &&
-		    ((e->arg1->tag == Iex_Unop &&
-		      ((IRExprUnop *)e->arg1)->op == Iop_Not1 &&
-		      ((IRExprUnop *)e->arg1)->arg == e->arg2) ||
-		     (e->arg2->tag == Iex_Unop &&
-		      ((IRExprUnop *)e->arg2)->op == Iop_Not1 &&
-		      ((IRExprUnop *)e->arg2)->arg == e->arg1))) {
+		if (op == Iop_CmpEQ1 &&
+		    ((l->tag == Iex_Unop &&
+		      ((IRExprUnop *)l)->op == Iop_Not1 &&
+		      ((IRExprUnop *)l)->arg == r) ||
+		     (r->tag == Iex_Unop &&
+		      ((IRExprUnop *)r)->op == Iop_Not1 &&
+		      ((IRExprUnop *)r)->arg == l))) {
 			res = IRExpr_Const_U1(false);
 			break;
 		}
 		     
-		if (e->op == Iop_CmpF64 &&
-		    e->arg1->tag == Iex_Unop &&
-		    e->arg2->tag == Iex_Unop &&
-		    ((IRExprUnop *)e->arg1)->op == Iop_F32toF64 &&
-		    ((IRExprUnop *)e->arg2)->op == Iop_F32toF64) {
-			res = IRExpr_Binop(Iop_CmpF32, ((IRExprUnop *)e->arg1)->arg, ((IRExprUnop *)e->arg2)->arg);
-			break;
+		if (op == Iop_CmpF64 &&
+		    l->tag == Iex_Unop &&
+		    r->tag == Iex_Unop &&
+		    ((IRExprUnop *)l)->op == Iop_F32toF64 &&
+		    ((IRExprUnop *)r)->op == Iop_F32toF64) {
+			op = Iop_CmpF32;
+			l = ((IRExprUnop *)l)->arg;
+			r = ((IRExprUnop *)r)->arg;
 		}
 
-		if ( (e->op == Iop_CmpF32 || e->op == Iop_CmpF64) &&
-		     physicallyEqual(e->arg1, e->arg2) ) {
+		if ( (op == Iop_CmpF32 || op == Iop_CmpF64) &&
+		     physicallyEqual(l, r) ) {
 			res = IRExpr_Const_U32(0x40);
 			break;
 		}
@@ -2504,7 +2504,7 @@ top:
 		   and right by trying to move all of the constants to
 		   the left and all of the non-constants to the
 		   right. */
-		if (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64) {
+		if (op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64) {
 			if (r->tag == Iex_Associative &&
 			    ((IRExprAssociative *)r)->op >= Iop_Add8 &&
 			    ((IRExprAssociative *)r)->op <= Iop_Add64 &&
@@ -2521,8 +2521,8 @@ top:
 						cnst),
 					l,
 					NULL);
-				l = e->arg1 = optimiseIRExprFP(newLeft, opt, &progress);
-				r = e->arg2 = optimiseIRExprFP(newRight, opt, &progress);
+				l = optimiseIRExprFP(newLeft, opt, &progress);
+				r = optimiseIRExprFP(newRight, opt, &progress);
 				progress = true;
 			}
 			if (l->tag == Iex_Associative &&
@@ -2574,21 +2574,20 @@ top:
 						abort();
 					}
 				}
-				l = e->arg1 = cnst;
-				r = e->arg2 = optimiseIRExprFP(newR, opt, &progress);
+				l = cnst;
+				r = optimiseIRExprFP(newR, opt, &progress);
 				progress = true;
 			}
 
 			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
-			if (l->tag != Iex_Const && e->op == Iop_CmpEQ64) {
-				e->arg1 = IRExpr_Const_U64(0);
-				e->arg2 =
-					IRExpr_Binop(
-						Iop_Add64,
-						r,
-						IRExpr_Unop(
-							Iop_Neg64,
-							l));
+			if (l->tag != Iex_Const && op == Iop_CmpEQ64) {
+				l = IRExpr_Const_U64(0);
+				r = IRExpr_Binop(
+					Iop_Add64,
+					r,
+					IRExpr_Unop(
+						Iop_Neg64,
+						l));
 				progress = true;
 			}
 
@@ -2602,7 +2601,7 @@ top:
 			   a bit further. */
 			if (l->tag == Iex_Const &&
 			    r->tag == Iex_Unop &&
-			    e->op == Iop_CmpEQ64) {
+			    op == Iop_CmpEQ64) {
 				IRExprConst *lc = (IRExprConst *)l;
 				IRExprUnop *ru = (IRExprUnop *)r;
 				assert(lc->ty == Ity_I64);
@@ -2611,38 +2610,27 @@ top:
 				if (ru->op == Iop_1Uto64) {
 					if (lc->Ico.U64 & 0xfffffffffffffffeul) {
 						res = IRExpr_Const_U1(false);
-					} else {
-						progress = true;
-						e = (IRExprBinop *)
-							IRExpr_Binop(Iop_CmpEQ1,
-								     IRExpr_Const_U1(lc->Ico.U64),
-								     ru->arg);
+						break;
 					}
-					break;
-				}
-				if (ru->op == Iop_32Uto64) {
+					op = Iop_CmpEQ1;
+					l = IRExpr_Const_U1(lc->Ico.U64);
+					r = ru->arg;
+				} else if (ru->op == Iop_32Uto64) {
 					if (lc->Ico.U64 & 0xffffffff00000000ul) {
 						res = IRExpr_Const_U1(false);
-					} else {
-						progress = true;
-						e = (IRExprBinop *)
-							IRExpr_Binop(Iop_CmpEQ32,
-								     IRExpr_Const_U32(lc->Ico.U64),
-								     ru->arg);
-					}
-					break;
-				}
-
-				/* Another special case: if
-				   you have k = -(foo), where
-				   k is a constant, it's
-				   better to convert that to
-				   -k = foo */
-				if (ru->op == Iop_Neg64) {
-					e->arg1 = IRExpr_Const_U64(-lc->Ico.U64);
-					e->arg2 = ru->arg;
-					progress = true;
-					break;
+						break;
+					} 
+					op = Iop_CmpEQ32;
+					l = IRExpr_Const_U32(lc->Ico.U64);
+					r = ru->arg;
+				} else if (ru->op == Iop_Neg64) {
+					/* Another special case: if
+					   you have k = -(foo), where
+					   k is a constant, it's
+					   better to convert that to
+					   -k = foo */
+					l = IRExpr_Const_U64(-lc->Ico.U64);
+					r = ru->arg;
 				}
 			}
 
@@ -2651,7 +2639,7 @@ top:
 			   t1 != t2 and we have
 			   assumePrivateStacks set. */
 			if (opt.assumePrivateStack() &&
-			    e->op == Iop_CmpEQ64 &&
+			    op == Iop_CmpEQ64 &&
 			    l->tag == Iex_Const &&
 			    r->tag == Iex_Associative) {
 				IRExprAssociative *ra = (IRExprAssociative *)r;
@@ -2682,7 +2670,7 @@ top:
 		   Y then we turn it into -k == X + -Y
 		   (i.e. normalise so that the leading term of
 		   additions isn't negated, if possible). */
-		if (e->op >= Iop_CmpEQ8 && e->op <= Iop_CmpEQ64 &&
+		if (op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64 &&
 		    l->tag == Iex_Const && r->tag == Iex_Associative) {
 			IRExprAssociative *ra = (IRExprAssociative *)r;
 			if (ra->op >= Iop_Add8 && ra->op <= Iop_Add64 &&
@@ -2706,36 +2694,34 @@ top:
 									a);
 					}
 					new_r->optimisationsApplied = 0;
-					IRExprConst *new_l;
 					IRExprConst *lc = (IRExprConst *)l;
-					switch (e->op) {
+					switch (op) {
 					case Iop_CmpEQ8:
-						new_l = IRExpr_Const_U8(
+						l = IRExpr_Const_U8(
 							-lc->Ico.U8);
 						break;
 					case Iop_CmpEQ16:
-						new_l = IRExpr_Const_U16(
+						l = IRExpr_Const_U16(
 							-lc->Ico.U16);
 						break;
 					case Iop_CmpEQ32:
-						new_l = IRExpr_Const_U32(
+						l = IRExpr_Const_U32(
 							-lc->Ico.U32);
 						break;
 					case Iop_CmpEQ64:
-						new_l = IRExpr_Const_U64(
+						l = IRExpr_Const_U64(
 							-lc->Ico.U64);
 						break;
 					default:
 						abort();
 					}
-					l = e->arg1 = new_l;
-					r = e->arg2 = new_r;
+					r = new_r;
 					progress = true;
 				}
 			}
 		}
 		/* 0 == x -> !x if we're at the type U1. 1 == x is just x. */
-		if (e->op == Iop_CmpEQ1 &&
+		if (op == Iop_CmpEQ1 &&
 		    l->tag == Iex_Const) {
 			if ( ((IRExprConst *)l)->Ico.U1 )
 				res = r;
@@ -2747,8 +2733,8 @@ top:
 		   0:X == 1UtoX(x) -> !x for any type X, and
 		   1:X == 1UtoX(x) -> x */
 		if (l->tag == Iex_Const &&
-		    e->op >= Iop_CmpEQ8 &&
-		    e->op <= Iop_CmpEQ64 &&
+		    op >= Iop_CmpEQ8 &&
+		    op <= Iop_CmpEQ64 &&
 		    r->tag == Iex_Unop &&
 		    ((IRExprUnop *)r)->op >= Iop_1Uto8 &&
 		    ((IRExprUnop *)r)->op <= Iop_1Uto64) {
@@ -2762,15 +2748,13 @@ top:
 		}
 
 		/* And another one: -x == c -> x == -c if c is a constant. */
-		if (e->op == Iop_CmpEQ64 &&
+		if (op == Iop_CmpEQ64 &&
 		    l->tag == Iex_Unop &&
 		    ((IRExprUnop *)l)->op == Iop_Neg64 &&
 		    r->tag == Iex_Const) {
-			e->arg1 = ((IRExprUnop *)l)->arg;
-			e->arg2 = IRExpr_Const_U64(
+			l = ((IRExprUnop *)l)->arg;
+			r = IRExpr_Const_U64(
 				-((IRExprConst *)r)->Ico.U64);
-			progress = true;
-			break;
 		}
 
 		/* If enabled, assume that the stack is ``private'',
@@ -2778,7 +2762,7 @@ top:
 		   variables, and is therefore never equal to any
 		   constants which are present in the machine code. */
 		if (opt.assumePrivateStack() &&
-		    e->op == Iop_CmpEQ64 &&
+		    op == Iop_CmpEQ64 &&
 		    r->tag == Iex_Get &&
 		    !((IRExprGet *)r)->reg.isTemp() &&
 		    ((IRExprGet *)r)->reg.asReg() == OFFSET_amd64_RSP &&
@@ -2788,44 +2772,42 @@ top:
 		}
 
 		/* Convert CmpLE into CmpLT and CmpEQ */
-		if (e->op == Iop_CmpLE32S || e->op == Iop_CmpLE64S ||
-		    e->op == Iop_CmpLE32U || e->op == Iop_CmpLE64U) {
-			res = IRExpr_Binop(
-				Iop_Or1,
-				IRExpr_Binop(
-					(e->op == Iop_CmpLE32S ||
-					 e->op == Iop_CmpLE32U) ?
-					Iop_CmpEQ32 : Iop_CmpEQ64,
-					e->arg1,
-					e->arg2),
-				IRExpr_Binop(
-					e->op == Iop_CmpLE32S ? Iop_CmpLT32S :
-					(e->op == Iop_CmpLE32U ? Iop_CmpLE32U :
-					 (e->op == Iop_CmpLE64S ? Iop_CmpLT64S :
-					  Iop_CmpLT64U)),
-					e->arg1,
-					e->arg2));
-			break;
+		if (op == Iop_CmpLE32S || op == Iop_CmpLE64S ||
+		    op == Iop_CmpLE32U || op == Iop_CmpLE64U) {
+			IRExpr *t = l;
+			op = Iop_Or1;
+			l =  IRExpr_Binop(
+				(op == Iop_CmpLE32S || op == Iop_CmpLE32U) ?
+				Iop_CmpEQ32 : Iop_CmpEQ64,
+				l,
+				r);
+			r = IRExpr_Binop(
+				op == Iop_CmpLE32S ? Iop_CmpLT32S :
+				(op == Iop_CmpLE32U ? Iop_CmpLE32U :
+				 (op == Iop_CmpLE64S ? Iop_CmpLT64S :
+				  Iop_CmpLT64U)),
+				t,
+				r);
 		}
 
 		/* A couple of special rules: cmp_ltXu(0, x)
 		   is just x != 0, and cmp_ltXu(x, 0) is just
 		   false. */
-		if (e->op >= Iop_CmpLT8U && e->op <= Iop_CmpLT64U) {
-			if (e->arg1->tag == Iex_Const &&
-			    isZero( (IRExprConst *)e->arg1 ) ) {
+		if (op >= Iop_CmpLT8U && op <= Iop_CmpLT64U) {
+			if (l->tag == Iex_Const &&
+			    isZero( (IRExprConst *)l ) ) {
 				res = IRExpr_Unop(
 					Iop_Not1,
 					IRExpr_Binop(
 						(IROp)((int)Iop_CmpEQ8 +
-						       (int)e->op -
+						       (int)op -
 						       (int)Iop_CmpLT8U),
-						e->arg1,
-						e->arg2));
+						l,
+						r));
 				break;
 			}
-			if (e->arg2->tag == Iex_Const &&
-			    isZero( (IRExprConst *)e->arg2 ) ) {
+			if (r->tag == Iex_Const &&
+			    isZero( (IRExprConst *)r ) ) {
 				res = IRExpr_Const_U1(false);
 				break;
 			}
@@ -2838,10 +2820,10 @@ top:
 				if (physicallyEqual(lm->cond, rm->cond)) {
 					res = IRExpr_Mux0X(
 						lm->cond,
-						IRExpr_Binop(e->op,
+						IRExpr_Binop(op,
 							     lm->expr0,
 							     rm->expr0),
-						IRExpr_Binop(e->op,
+						IRExpr_Binop(op,
 							     lm->exprX,
 							     rm->exprX));
 					break;
@@ -2850,11 +2832,11 @@ top:
 				res = IRExpr_Mux0X(
 					lm->cond,
 					IRExpr_Binop(
-						e->op,
+						op,
 						lm->expr0,
 						r),
 					IRExpr_Binop(
-						e->op,
+						op,
 						lm->exprX,
 						r));
 				break;
@@ -2865,11 +2847,11 @@ top:
 			res = IRExpr_Mux0X(
 				rm->cond,
 				IRExpr_Binop(
-					e->op,
+					op,
 					l,
 					rm->expr0),
 				IRExpr_Binop(
-					e->op,
+					op,
 					l,
 					rm->exprX));
 			break;
@@ -2879,7 +2861,7 @@ top:
 		 * fold everything away. */
 		if (l->tag == Iex_Const &&
 		    r->tag == Iex_Const) {
-			switch (e->op) {
+			switch (op) {
 			case Iop_CmpEQ32:
 				res = IRExpr_Const_U1(
 					((IRExprConst *)l)->Ico.U32 ==
@@ -2984,13 +2966,16 @@ top:
 				break;
 
 			default:
-				warning("cannot constant fold binop %d\n", e->op);
-				printf("Cannot constant fold binop %d (", e->op);
-				ppIROp(e->op, stdout);
+				warning("cannot constant fold binop %d\n", op);
+				printf("Cannot constant fold binop %d (", op);
+				ppIROp(op, stdout);
 				printf(")\n");
 				break;
 			}
 		}
+
+		if (op != _e->op || l != _e->arg1 || r != _e->arg2)
+			res = new IRExprBinop(op, l, r);
 		break;
 	}
 

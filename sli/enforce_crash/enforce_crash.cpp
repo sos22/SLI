@@ -278,8 +278,9 @@ heuristicSimplify(IRExpr *e)
 	    ((IRExprAssociative *)ieb->arg2)->nr_arguments == 2 &&
 	    ((IRExprAssociative *)ieb->arg2)->contents[1]->tag == Iex_Unop &&
 	    ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->op == Iop_Neg64) {
-		ieb->arg1 = ((IRExprAssociative *)ieb->arg2)->contents[0];
-		ieb->arg2 = ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->arg;
+		ieb = new IRExprBinop(ieb->op,
+				      ((IRExprAssociative *)ieb->arg2)->contents[0],
+				      ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->arg);
 		done_something = true;
 	}
 
@@ -303,8 +304,9 @@ heuristicSimplify(IRExpr *e)
 				    ((IRExprConst *)r->arg2)->Ico.U8 ==
 				         ((IRExprConst *)l->arg2)->Ico.U8 &&
 				    ((IRExprConst *)l->arg2)->Ico.U8 < 8) {
-					ieb->arg1 = l->arg1;
-					ieb->arg2 = r->arg1;
+					ieb = new IRExprBinop(ieb->op,
+							      l->arg1,
+							      r->arg1);
 					done_something = true;
 				}
 				break;
@@ -321,8 +323,7 @@ heuristicSimplify(IRExpr *e)
 			switch (l->op) {
 			case Iop_32Sto64:
 				/* This one actually is injective */
-				ieb->arg1 = l->arg;
-				ieb->arg2 = r->arg;
+				ieb = new IRExprBinop(ieb->op, l->arg, r->arg);
 				done_something = true;
 				break;
 			default:

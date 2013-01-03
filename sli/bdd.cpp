@@ -378,14 +378,14 @@ quickSimplify(IRExpr *a)
 			abort();
 		}
 	} else if (a->tag == Iex_Binop) {
-		IRExprBinop *ieb = (IRExprBinop *)a;
-		ieb->arg1 = quickSimplify(ieb->arg1);
-		ieb->arg2 = quickSimplify(ieb->arg2);
-		if (ieb->arg1->tag == Iex_Const &&
-		    ieb->arg2->tag == Iex_Const) {
-			IRExprConst *arg1c = (IRExprConst *)ieb->arg1;
-			IRExprConst *arg2c = (IRExprConst *)ieb->arg2;
-			switch (ieb->op) {
+		IRExprBinop *_ieb = (IRExprBinop *)a;
+		auto arg1 = quickSimplify(_ieb->arg1);
+		auto arg2 = quickSimplify(_ieb->arg2);
+		if (arg1->tag == Iex_Const &&
+		    arg2->tag == Iex_Const) {
+			IRExprConst *arg1c = (IRExprConst *)arg1;
+			IRExprConst *arg2c = (IRExprConst *)arg2;
+			switch (_ieb->op) {
 #define do_type(sz)							\
 				case Iop_CmpEQ ## sz:			\
 					return IRExpr_Const_U1(arg1c->Ico.U ## sz == arg2c->Ico.U ## sz); \
@@ -412,26 +412,28 @@ quickSimplify(IRExpr *a)
 				abort();
 			}
 		}
-		if (ieb->op == Iop_CmpEQ32 &&
-		    ieb->arg1->tag == Iex_Const &&
-		    ieb->arg2->tag == Iex_Associative &&
-		    ((IRExprAssociative *)ieb->arg2)->op == Iop_Add32 &&
-		    ((IRExprAssociative *)ieb->arg2)->nr_arguments >= 2 &&
-		    ((IRExprAssociative *)ieb->arg2)->contents[0]->tag == Iex_Const) {
-			IRExprConst *arg1 = (IRExprConst *)ieb->arg1;
-			IRExprAssociative *arg2 = (IRExprAssociative *)ieb->arg2;
-			IRExprConst *arg2a = (IRExprConst *)arg2->contents[0];
-			IRExprConst *newArg1 = IRExpr_Const_U32(arg1->Ico.U32 - arg2a->Ico.U32);
+		if (_ieb->op == Iop_CmpEQ32 &&
+		    arg1->tag == Iex_Const &&
+		    arg2->tag == Iex_Associative &&
+		    ((IRExprAssociative *)arg2)->op == Iop_Add32 &&
+		    ((IRExprAssociative *)arg2)->nr_arguments >= 2 &&
+		    ((IRExprAssociative *)arg2)->contents[0]->tag == Iex_Const) {
+			IRExprConst *arg1c = (IRExprConst *)arg1;
+			IRExprAssociative *arg2a = (IRExprAssociative *)arg2;
+			IRExprConst *arg2c = (IRExprConst *)arg2a->contents[0];
+			IRExprConst *newArg1 = IRExpr_Const_U32(arg1c->Ico.U32 - arg2c->Ico.U32);
 			IRExpr *newArg2;
-			if (arg2->nr_arguments == 2) {
-				newArg2 = arg2->contents[1];
+			if (arg2a->nr_arguments == 2) {
+				newArg2 = arg2a->contents[1];
 			} else {
-				IRExprAssociative *newArg2a = IRExpr_Associative(arg2->nr_arguments - 1, Iop_Add32);
-				memcpy(newArg2a->contents, arg2->contents + 1, sizeof(IRExpr *) * (arg2->nr_arguments - 1));
+				IRExprAssociative *newArg2a = IRExpr_Associative(arg2a->nr_arguments - 1, Iop_Add32);
+				memcpy(newArg2a->contents, arg2a->contents + 1, sizeof(IRExpr *) * (arg2a->nr_arguments - 1));
 				newArg2 = newArg2a;
 			}
-			return IRExpr_Binop(ieb->op, newArg1, newArg2);
+			return IRExpr_Binop(_ieb->op, newArg1, newArg2);
 		}
+		if (arg1 != _ieb->arg1 || arg2 != _ieb->arg2)
+			a = new IRExprBinop(_ieb->op, arg1, arg2);
 	} else if (a->tag == Iex_Associative) {
 		IRExprAssociative *iea = (IRExprAssociative *)a;
 		bool haveConsts = false;
