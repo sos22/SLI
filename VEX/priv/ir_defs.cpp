@@ -1893,9 +1893,7 @@ IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
    return new IRExprLoad(ty, addr);
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
-   IRExprCCall* e          = new IRExprCCall(cee, retty);
-   e->args  = args;
-   return e;
+   return new IRExprCCall(cee, retty, args);
 }
 IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
    IRExprMux0X* e          = new IRExprMux0X();
