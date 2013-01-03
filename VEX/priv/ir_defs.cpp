@@ -1759,11 +1759,7 @@ IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2,
 }
 IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
                                  IRExpr* arg2, IRExpr* arg3 ) {
-   IRExprTriop* e         = new IRExprTriop(op);
-   e->arg1 = arg1;
-   e->arg2 = arg2;
-   e->arg3 = arg3;
-   return e;
+   return new IRExprTriop(op, arg1, arg2, arg3);
 }
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
    assert(arg1);

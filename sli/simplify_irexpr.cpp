@@ -3078,9 +3078,11 @@ top:
 
 	case Iex_Triop: {
 		IRExprTriop *t = (IRExprTriop *)src;
-		t->arg1 = optimiseIRExpr(t->arg1, opt, done_something);
-		t->arg2 = optimiseIRExpr(t->arg2, opt, done_something);
-		t->arg3 = optimiseIRExpr(t->arg3, opt, done_something);
+		auto arg1 = optimiseIRExpr(t->arg1, opt, done_something);
+		auto arg2 = optimiseIRExpr(t->arg2, opt, done_something);
+		auto arg3 = optimiseIRExpr(t->arg3, opt, done_something);
+		if (arg1 != t->arg1 || arg2 != t->arg2 || arg3 != t->arg3)
+			res = new IRExprTriop(t->op, arg1, arg2, arg3);
 		break;
 	}
 

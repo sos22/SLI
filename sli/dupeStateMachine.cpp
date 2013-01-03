@@ -69,10 +69,10 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Triop: {
 		const IRExprTriop *i = (const IRExprTriop *)inp;
-		IRExprTriop *res = new IRExprTriop(i->op);
-		ctxt(&res->arg1, i->arg1, rawDupe);
-		ctxt(&res->arg2, i->arg2, rawDupe);
-		ctxt(&res->arg3, i->arg3, rawDupe);
+		IRExprTriop *res = new IRExprTriop(i->op, NULL, NULL, NULL);
+		ctxt((IRExpr **)&res->arg1, i->arg1, rawDupe);
+		ctxt((IRExpr **)&res->arg2, i->arg2, rawDupe);
+		ctxt((IRExpr **)&res->arg3, i->arg3, rawDupe);
 		return res;
 	}
 	case Iex_Binop: {
