@@ -1613,10 +1613,10 @@ struct IRExprBinop : public IRExpr {
 */
 struct IRExprUnop : public IRExpr {
    IROp    const op;       /* op-code */
-   IRExpr* arg;      /* operand */
+   IRExpr* const arg;      /* operand */
 
-   IRExprUnop(IROp _op)
-       : IRExpr(Iex_Unop), op(_op)
+   IRExprUnop(IROp _op, IRExpr *_arg)
+       : IRExpr(Iex_Unop), op(_op), arg(_arg)
    {}
    void visit(HeapVisitor &hv) {
        hv(arg);

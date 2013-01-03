@@ -72,7 +72,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	case Iex_Binop:
 		*(IRExpr **)&((IRExprBinop *)e)->arg2 = internIRExpr(((IRExprBinop *)e)->arg2, lookupTable);
 	case Iex_Unop:
-		((IRExprUnop *)e)->arg = internIRExpr(((IRExprUnop *)e)->arg, lookupTable);
+		*(IRExpr **)&((IRExprUnop *)e)->arg = internIRExpr(((IRExprUnop *)e)->arg, lookupTable);
 		break;
 	case Iex_Load:
 		*(IRExpr **)&((IRExprLoad *)e)->addr = internIRExpr(((IRExprLoad *)e)->addr, lookupTable);

@@ -314,14 +314,18 @@ quickSimplify(IRExpr *a)
 		return a;
 	if (a->tag == Iex_Unop) {
 		IRExprUnop *au = (IRExprUnop *)a;
-		au->arg = quickSimplify(au->arg);
-		if (au->arg->tag != Iex_Const)
-			return au;
-		IRExprConst *arg = (IRExprConst *)au->arg;
+		auto arg = quickSimplify(au->arg);
+		if (arg->tag != Iex_Const) {
+			if (arg == au->arg)
+				return au;
+			else
+				return new IRExprUnop(au->op, arg);
+		}
+		IRExprConst *argc = (IRExprConst *)arg;
 		switch (au->op) {
 #define do_uconv(_from, _to)						\
 			case Iop_ ## _from ## Uto ## _to:		\
-				return IRExpr_Const_U ## _to (arg->Ico.U ## _from)
+				return IRExpr_Const_U ## _to (argc->Ico.U ## _from)
 			do_uconv(1, 8);
 			//do_uconv(1, 16); /*1Uto16 doesn't exist, for some reason */
 			do_uconv(1, 32);
@@ -336,7 +340,7 @@ quickSimplify(IRExpr *a)
 #define do_sconv(_from, _fromt, _to, _tot)				\
 			case Iop_ ## _from ## Sto ## _to:		\
 				return IRExpr_Const_U ## _to (		\
-					(_tot)(_fromt)arg->Ico.U ## _from )
+					(_tot)(_fromt)argc->Ico.U ## _from )
 			do_sconv(8, char, 16, short);
 			do_sconv(8, char, 32, int);
 			do_sconv(8, char, 64, long);
@@ -346,7 +350,7 @@ quickSimplify(IRExpr *a)
 #undef do_sconv
 #define do_downconv(_from, _to)						\
 			case Iop_ ## _from ## to ## _to:		\
-				return IRExpr_Const_U ## _to (arg->Ico.U ## _from)
+				return IRExpr_Const_U ## _to (argc->Ico.U ## _from)
 			do_downconv(64, 1);
 			do_downconv(64, 8);
 			do_downconv(64, 16);
@@ -359,21 +363,25 @@ quickSimplify(IRExpr *a)
 			do_downconv(8, 1);
 #undef do_downconv
 		case Iop_Not1:
-			return IRExpr_Const_U1(!arg->Ico.U1);
+			return IRExpr_Const_U1(!argc->Ico.U1);
 		case Iop_BadPtr:
 			/* Can't constant fold these without an
 			 * IRExprOptimisations struct. */
-			if (arg->Ico.U64 < 4096)
+			if (argc->Ico.U64 < 4096)
 				return IRExpr_Const_U1(true);
+			if (arg == au->arg)
+				return au;
+			else
+				return new IRExprUnop(au->op, arg);
 			break;
 		case Iop_Neg8:
-			return IRExpr_Const_U8(-arg->Ico.U8);
+			return IRExpr_Const_U8(-argc->Ico.U8);
 		case Iop_Neg16:
-			return IRExpr_Const_U16(-arg->Ico.U16);
+			return IRExpr_Const_U16(-argc->Ico.U16);
 		case Iop_Neg32:
-			return IRExpr_Const_U32(-arg->Ico.U32);
+			return IRExpr_Const_U32(-argc->Ico.U32);
 		case Iop_Neg64:
-			return IRExpr_Const_U64(-arg->Ico.U64);
+			return IRExpr_Const_U64(-argc->Ico.U64);
 		default:
 			abort();
 		}
