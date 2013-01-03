@@ -1851,8 +1851,8 @@ struct IRExprAssociative : public IRExpr {
 };
 
 struct IRExprHappensBefore : public IRExpr {
-    MemoryAccessIdentifier before;
-    MemoryAccessIdentifier after;
+    MemoryAccessIdentifier const before;
+    MemoryAccessIdentifier const after;
     IRExprHappensBefore(const MemoryAccessIdentifier &_before,
 			const MemoryAccessIdentifier &_after)
 	: IRExpr(Iex_HappensBefore),
