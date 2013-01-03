@@ -289,16 +289,6 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		oracle,
 		true,
 		token);
-	cs->verificationCondition = simplifyIRExpr(
-		cs->verificationCondition,
-		AllowableOptimisations::defaultOptimisations);
-	cs->verificationCondition = simplify_via_anf(
-		cs->verificationCondition);
-	cs->verificationCondition = interval_simplify(
-		cs->verificationCondition);
-	cs->verificationCondition = simplifyIRExpr(
-		cs->verificationCondition,
-		AllowableOptimisations::defaultOptimisations);
 	cs->mai = mai;
 
 	/* The only reason we maintain the CFG is so that we can

@@ -21,7 +21,7 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 			      f);
 
 	fprintf(f, "Verification condition: ");
-	ppIRExpr(summary->verificationCondition, f);
+	summary->verificationCondition->prettyPrint(f);
 	fprintf(f, "\n");
 
 	if (summary->aliasing.size() == 0) {
@@ -86,7 +86,7 @@ parseCrashSummary(SMScopes *scopes,
 {
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
-	IRExpr *verificationCondition;
+	bbdd *verificationCondition;
 	std::map<CfgLabel, const CFGNode *> labels;
 	if (!parseThisString("Scopes:\n", buf, &buf) ||
 	    !scopes->parse(buf, &buf) ||
@@ -95,7 +95,7 @@ parseCrashSummary(SMScopes *scopes,
 	    !parseThisString("Store Machine:\n", buf, &buf) ||
 	    !parseStateMachine(scopes, &storeMachine, buf, &buf, labels) ||
 	    !parseThisString("Verification condition: ", buf, &buf) ||
-	    !parseIRExpr(&verificationCondition, buf, &buf) ||
+	    !bbdd::parse(&scopes->bools, &verificationCondition, buf, &buf) ||
 	    !parseThisChar('\n', buf, &buf))
 		return false;
 	if (parseThisString("Remote macro sections:\n", buf, &buf)) {
@@ -191,7 +191,7 @@ transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans, bool 
 	if (!done_something) done_something = &b;
 	input->loadMachine = trans.transform(input->scopes, input->loadMachine, done_something);
 	input->storeMachine = trans.transform(input->scopes, input->storeMachine, done_something);
-	input->verificationCondition = trans.doit(input->verificationCondition, done_something);
+	input->verificationCondition = trans.transform_bbdd(&input->scopes->bools, input->verificationCondition, done_something);
 	return input;
 }
 
@@ -201,6 +201,5 @@ internCrashSummary(CrashSummary *cs)
 	internStateMachineTable t;
 	cs->loadMachine = internStateMachine(cs->loadMachine, t);
 	cs->storeMachine = internStateMachine(cs->storeMachine, t);
-	cs->verificationCondition = internIRExpr(cs->verificationCondition, t);
 	return cs;
 }

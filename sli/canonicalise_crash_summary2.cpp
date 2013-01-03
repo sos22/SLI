@@ -133,8 +133,8 @@ enumCfgNodes(CrashSummary *input, std::set<const CFGNode *> &out)
 	}
 }
 
-static IRExpr *
-removeImpossibleRoots(IRExpr *a, const std::set<std::pair<unsigned, CfgLabel> > &roots)
+static bbdd *
+removeImpossibleRoots(bbdd::scope *scope, bbdd *a, const std::set<std::pair<unsigned, CfgLabel> > &roots)
 {
 	struct : public IRExprTransformer {
 		const std::set<std::pair<unsigned, CfgLabel> > *roots;
@@ -145,7 +145,7 @@ removeImpossibleRoots(IRExpr *a, const std::set<std::pair<unsigned, CfgLabel> > 
 		}
 	} doit;
 	doit.roots = &roots;
-	return doit.doit(a);
+	return doit.transform_bbdd(scope, a);
 }
 
 static CrashSummary *
@@ -156,15 +156,15 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 {
 	VexPtr<StateMachine, &ir_heap> sm;
 	{
-		IRExpr * cnf_condition;
-		cnf_condition = convert_to_cnf(input->verificationCondition);
+		IRExpr *cond = bbdd::to_irexpr(input->verificationCondition);
+		IRExpr *cnf_condition;
+		cnf_condition = convert_to_cnf(cond);
 		if (!cnf_condition)
-			cnf_condition = input->verificationCondition;
+			cnf_condition = cond;
 
 		internStateMachineTable intern;
 		input->loadMachine = internStateMachine(input->loadMachine, intern);
 		input->storeMachine = internStateMachine(input->storeMachine, intern);
-		input->verificationCondition = internIRExpr(input->verificationCondition, intern);
 
 		if (TIMEOUT)
 			return input;
@@ -197,7 +197,7 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 	     it++)
 		machineRoots.insert(std::pair<unsigned, CfgLabel>(it->first, it->second->label));
 
-	input->verificationCondition = removeImpossibleRoots(input->verificationCondition, machineRoots);
+	input->verificationCondition = removeImpossibleRoots(&input->scopes->bools, input->verificationCondition, machineRoots);
 
 	std::set<MemoryAccessIdentifier> neededMais;
 	findAllMais(input, neededMais);

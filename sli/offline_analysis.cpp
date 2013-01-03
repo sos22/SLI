@@ -609,7 +609,7 @@ removeAnnotations(SMScopes *scopes,
 	return sm;
 }
       
-static IRExpr *
+static bbdd *
 verificationConditionForStoreMachine(SMScopes *scopes,
 				     VexPtr<StateMachine, &ir_heap> &storeMachine,
 				     VexPtr<StateMachine, &ir_heap> probeMachine,
@@ -700,15 +700,7 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 	fprintf(_logfile, "\t\tVerification condition:\n");
 	a->prettyPrint(_logfile);
 
-	IRExpr *verification_condition = bbdd::to_irexpr(a);
-	if (!verification_condition)
-		return NULL;
-	verification_condition = simplifyIRExpr(verification_condition, optIn);
-	verification_condition = simplify_via_anf(verification_condition);
-	verification_condition = simplifyIRExpr(verification_condition, optIn);
-	verification_condition = interval_simplify(verification_condition);
-	verification_condition = simplifyIRExpr(verification_condition, optIn);
-	return verification_condition;
+	return a;
 }
 
 static StateMachine *
@@ -950,7 +942,7 @@ considerStoreCFG(SMScopes *scopes,
 	if (TIMEOUT)
 		return NULL;
 
-	VexPtr<IRExpr, &ir_heap> base_verification_condition(
+	VexPtr<bbdd, &ir_heap> base_verification_condition(
 		verificationConditionForStoreMachine(
 			scopes,
 			sm_ssa,
@@ -962,16 +954,12 @@ considerStoreCFG(SMScopes *scopes,
 	if (!base_verification_condition || TIMEOUT)
 		return NULL;
 
-	fprintf(_logfile, "\t\tBase verification condition: ");
-	ppIRExpr(base_verification_condition, _logfile);
-	fprintf(_logfile, "\n");
-
-	if (!satisfiable(base_verification_condition, optIn)) {
+	if (base_verification_condition == scopes->bools.cnst(false)) {
 		fprintf(_logfile, "\t\tCrash impossible.\n");
 		return NULL;
 	}
 
-	VexPtr<IRExpr, &ir_heap> residual_verification_condition(base_verification_condition);
+	VexPtr<bbdd, &ir_heap> residual_verification_condition(base_verification_condition);
 	if (CONFIG_USE_INDUCTION && !optIn.allPointersGood()) {
 		/* Now have a look at whether we have anything we can use the
 		 * induction rule on.  That means look at the probe machine
@@ -1003,7 +991,6 @@ considerStoreCFG(SMScopes *scopes,
 			}
 			assert(nrInductionAccesses == typeDbProbeAccesses.size());
 		}
-		VexPtr<IRExpr, &ir_heap> residual_verification_condition(base_verification_condition);
 		std::set<DynAnalysisRip> inductionRips;
 		for (unsigned x = 0; x < nrInductionAccesses; x++) {
 			if (TIMEOUT)
@@ -1015,7 +1002,7 @@ considerStoreCFG(SMScopes *scopes,
 					probeMachine,
 					inductionAccesses[x]));
 			truncatedMachine = optimiseStateMachine(scopes, mai, truncatedMachine, optIn, oracle, true, token);
-			IRExpr *t = verificationConditionForStoreMachine(
+			bbdd *t = verificationConditionForStoreMachine(
 				scopes,
 				sm_ssa,
 				truncatedMachine,
@@ -1024,42 +1011,26 @@ considerStoreCFG(SMScopes *scopes,
 				optIn,
 				token);
 			if (!t || t == residual_verification_condition ||
-			    (t->tag == Iex_Const &&
-			     ((IRExprConst *)t)->Ico.U1 == 0))
+			    t == scopes->bools.cnst(false))
 				continue;
 			fprintf(_logfile, "Induction probe machine:\n");
 			printStateMachine(truncatedMachine, _logfile);
 			fprintf(_logfile, "Induction rule: ");
-			ppIRExpr(t, _logfile);
-			fprintf(_logfile, "\n");
-			fprintf(_logfile, "Residual:       ");
-			ppIRExpr(residual_verification_condition, _logfile);
+			t->prettyPrint(_logfile);
 			fprintf(_logfile, "\n");
 			residual_verification_condition =
-				IRExpr_Binop(
-					Iop_And1,
-					residual_verification_condition,
-					IRExpr_Unop(
-						Iop_Not1,
-						t));
-			residual_verification_condition =
-				simplifyIRExpr(residual_verification_condition, optIn);
+				bbdd::assume(&scopes->bools,
+					     residual_verification_condition,
+					     bbdd::invert(&scopes->bools, t));
 			fprintf(_logfile, "After simplification: ");
-			ppIRExpr(residual_verification_condition,  _logfile);
+			residual_verification_condition->prettyPrint(_logfile);
 			fprintf(_logfile, "\n");
 			for (auto it = mai->begin(inductionAccesses[x]->rip); !it.finished(); it.advance())
 				logUseOfInduction(target_rip, it.dr());
-			if (residual_verification_condition->tag == Iex_Const &&
-			    ((IRExprConst *)residual_verification_condition.get())->Ico.U1 == 0) {
+			if (residual_verification_condition == scopes->bools.cnst(false)) {
 				fprintf(_logfile, "\t\tCrash impossible.\n");
 				return NULL;
 			}
-		}
-
-		/* Okay, final check: is the verification condition satisfiable? */
-		if (!satisfiable(residual_verification_condition, optIn)) {
-			fprintf(_logfile, "\t\tVerification condition is unsatisfiable -> no bug\n");
-			return NULL;
 		}
 	}
 
