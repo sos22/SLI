@@ -961,23 +961,46 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 	}
 	case Iex_Qop: {
 		IRExprQop *i = (IRExprQop *)expr;
-		IRExpr *arg = stripFloatingPoint(i->arg4, p);
-		if (arg == FP_EXPRESSION)
+		auto arg1 = stripFloatingPoint(i->arg1, p);
+		if (arg1 == FP_EXPRESSION)
 			return FP_EXPRESSION;
-		if (arg != i->arg4)
-			expr = new IRExprQop(i->op,
-					     arg,
-					     i->arg3,
-					     i->arg2,
-					     i->arg1);
+		auto arg2 = stripFloatingPoint(i->arg2, p);
+		if (arg2 == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		auto arg3 = stripFloatingPoint(i->arg3, p);
+		if (arg3 == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		auto arg4 = stripFloatingPoint(i->arg4, p);
+		if (arg4 == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		if (arg1 != i->arg1 || arg2 != i->arg2 ||
+		    arg3 != i->arg3 || arg4 != i->arg4)
+			return new IRExprQop(i->op,
+					     arg1,
+					     arg2,
+					     arg3,
+					     arg4);
+		return expr;
 	}
-		/* fall through */
+
 	case Iex_Triop: {
 		IRExprTriop *i = (IRExprTriop *)expr;
-		IRExpr *arg = stripFloatingPoint(i->arg3, p);
-		if (arg == FP_EXPRESSION)
+		auto arg1 = stripFloatingPoint(i->arg1, p);
+		if (arg1 == FP_EXPRESSION)
 			return FP_EXPRESSION;
-		i->arg3 = arg;
+		auto arg2 = stripFloatingPoint(i->arg2, p);
+		if (arg2 == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		auto arg3 = stripFloatingPoint(i->arg3, p);
+		if (arg3 == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		if (arg1 != i->arg1 || arg2 != i->arg2 ||
+		    arg3 != i->arg3)
+			return new IRExprTriop(i->op,
+					       arg1,
+					       arg2,
+					       arg3);
+		return expr;
 	}
 		/* fall through */
 	case Iex_Binop: {

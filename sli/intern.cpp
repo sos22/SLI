@@ -68,7 +68,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 	case Iex_Qop:
 		*(IRExpr **)&((IRExprQop *)e)->arg4 = internIRExpr(((IRExprQop *)e)->arg4, lookupTable);
 	case Iex_Triop:
-		((IRExprTriop *)e)->arg3 = internIRExpr(((IRExprTriop *)e)->arg3, lookupTable);
+		*(IRExpr **)&((IRExprTriop *)e)->arg3 = internIRExpr(((IRExprTriop *)e)->arg3, lookupTable);
 	case Iex_Binop:
 		((IRExprBinop *)e)->arg2 = internIRExpr(((IRExprBinop *)e)->arg2, lookupTable);
 	case Iex_Unop:
