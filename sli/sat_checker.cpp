@@ -206,7 +206,6 @@ check_and_normal_form(const IRExpr *e)
 	if (e->tag == Iex_Associative) {
 		IRExprAssociative *iex = (IRExprAssociative *)e;
 		assert(iex->op != Iop_Or1);
-		assert(iex->op != Iop_Xor1);
 		if (iex->op != Iop_And1)
 			return;
 		for (int i = 0; i < iex->nr_arguments; i++)
@@ -271,64 +270,6 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 			res->nr_arguments = iea->nr_arguments;
 			sort_and_arguments(res->contents, res->nr_arguments);
 			e = internIRExpr(IRExpr_Unop(Iop_Not1, res), intern);
-		} else if (iea->op == Iop_Xor1) {
-			/* This goes horribly wrong for large xor
-			   expressions, due to the exponential
-			   blow-up.  Fortunately, we never actually
-			   generate any. */
-			assert(iea->nr_arguments < 10);
-			/* We convert (a ^ b ^ c ... ) into
-			   !(!(a & b & c & ... ) & !(a & !b & !c & ... )
-			   ...)
-			   where each conjunction has an odd number of positive
-			   terms. */
-			IRExpr *positive_terms[iea->nr_arguments];
-			IRExpr *negative_terms[iea->nr_arguments];
-			for (int i = 0; i < iea->nr_arguments; i++) {
-				positive_terms[i] = and_normal_form(iea->contents[i], intern);
-				if (!positive_terms[i])
-					return NULL;
-				if (positive_terms[i]->tag == Iex_Unop &&
-				    ((IRExprUnop *)positive_terms[i])->op == Iop_Not1)
-					negative_terms[i] =
-						((IRExprUnop *)positive_terms[i])->arg;
-				else
-					negative_terms[i] =
-						internIRExpr(
-							IRExpr_Unop(
-								Iop_Not1,
-								positive_terms[i]),
-							intern);
-			}
-			int new_nr_args = 1 << (iea->nr_arguments - 1);
-			IRExprAssociative *newAssoc =
-				IRExpr_Associative(new_nr_args, Iop_And1);
-			for (int i = 0; i < new_nr_args * 2; i++) {
-				int nr_bits_set = 0;
-				for (int j = 0; j < iea->nr_arguments; j++)
-					if (i & (1 << j))
-						nr_bits_set++;
-				if (nr_bits_set % 2 == 0)
-					continue;
-				IRExprAssociative *arg = IRExpr_Associative(
-					iea->nr_arguments, Iop_And1);
-				for (int j = 0; j < iea->nr_arguments; j++) {
-					if (i & (1 << j))
-						arg->contents[j] = positive_terms[j];
-					else
-						arg->contents[j] = negative_terms[j];
-				}
-				arg->nr_arguments = iea->nr_arguments;
-				arg = (IRExprAssociative *)internIRExpr(arg, intern);
-				sort_and_arguments(arg->contents, arg->nr_arguments);
-				newAssoc->contents[newAssoc->nr_arguments++] =
-					IRExpr_Unop(
-						Iop_Not1,
-						arg);
-			}
-			newAssoc = (IRExprAssociative *)internIRExpr(newAssoc, intern);
-			sort_and_arguments(newAssoc->contents, newAssoc->nr_arguments);
-			e = internIRExpr(IRExpr_Unop(Iop_Not1, newAssoc), intern);
 		}
 	}
 	check_and_normal_form(e);
@@ -744,7 +685,6 @@ anf_context::simplify(IRExpr *a)
 	} else if (a->tag == Iex_Associative) {
 		IRExprAssociative *iea = (IRExprAssociative *)a;
 		assert(iea->op != Iop_Or1);
-		assert(iea->op != Iop_Xor1);
 		if (iea->op != Iop_And1)
 			return a;
 		anf_context sub_context(*this);

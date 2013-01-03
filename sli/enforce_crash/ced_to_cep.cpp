@@ -423,7 +423,6 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 			case Iop_Or64:
 				bytecode_op(f, "or", iea->type());
 				break;
-			case Iop_Xor1:
 			case Iop_Xor8:
 			case Iop_Xor16:
 			case Iop_Xor32:

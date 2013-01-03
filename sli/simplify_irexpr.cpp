@@ -31,7 +31,6 @@ operationCommutes(IROp op)
 		(op >= Iop_Xor8 && op <= Iop_Xor64) ||
 		(op == Iop_And1) ||
 		(op == Iop_Or1) ||
-		(op == Iop_Xor1) ||
 		(op == Iop_CmpEQ1);
 }
 
@@ -215,9 +214,15 @@ optimise_condition_calculation(
 			coerce(dep1),					\
 			coerce(dep2));					\
 		of = IRExpr_Binop(					\
-			Iop_Xor1,					\
-			cf,						\
-			sf);
+			Iop_Or1,					\
+			IRExpr_Binop(					\
+				Iop_And1,				\
+				cf,					\
+				sf),					\
+			IRExpr_Binop(					\
+				Iop_And1,				\
+				IRExpr_Unop(Iop_Not1, cf),		\
+				IRExpr_Unop(Iop_Not1, sf)));
 #define do_sub(type) _do_sub(type, coerce ## type)
 	case AMD64G_CC_OP_SUBB:
 		do_sub(8);
@@ -322,21 +327,32 @@ optimise_condition_calculation(
 	case AMD64CondL:
 		if (sf && of)
 			res = IRExpr_Binop(
-				Iop_Xor1,
-				sf,
-				of);
+				Iop_Or1,
+				IRExpr_Binop(
+					Iop_And1,
+					sf,
+					of),
+				IRExpr_Binop(
+					Iop_And1,
+					IRExpr_Unop(Iop_Not1, sf),
+					IRExpr_Unop(Iop_Not1, of)));
 		else
 			warning("CondL needs both sf and of; op %lx\n", op);
 		break;
 	case AMD64CondLE:
 		if (sf && of && zf)
-			res = IRExpr_Binop(
+			res = IRExpr_Associative(
 				Iop_Or1,
+				zf,
 				IRExpr_Binop(
-					Iop_Xor1,
+					Iop_And1,
 					sf,
 					of),
-				zf);
+				IRExpr_Binop(
+					Iop_And1,
+					IRExpr_Unop(Iop_Not1, sf),
+					IRExpr_Unop(Iop_Not1, of)),
+				NULL);
 		else
 			warning("CondLE needs sf, of, and zf; op %lx\n", op);
 		break;
@@ -1650,9 +1666,6 @@ top:
 					case Iop_Or1:
 						res = IRExpr_Const_U1(l->Ico.U1 | r->Ico.U1);
 						break;
-					case Iop_Xor1:
-						res = IRExpr_Const_U1(l->Ico.U1 ^ r->Ico.U1);
-						break;
 					default:
 						printf("Warning: can't constant-fold associative op %d\n", e->op);
 						res = NULL;
@@ -1700,27 +1713,6 @@ top:
 				} else {
 					res = e->contents[0];
 					break;
-				}
-			}
-		}
-		/* And for Xor1. */
-		if (e->op == Iop_Xor1) {
-			__set_profiling(optimise_assoc_or1);
-			if (e->nr_arguments > 1 &&
-			    e->contents[0]->tag == Iex_Const) {
-				auto c = (IRExprConst *)e->contents[0];
-				if (c->Ico.U1) {
-					if (e->nr_arguments == 2) {
-						res = IRExpr_Unop(Iop_Not1, e->contents[1]);
-					} else {
-						IRExprAssociative *a = (IRExprAssociative *)IRExpr_Associative(e);
-						purgeAssocArgument(a, 0);
-						res = IRExpr_Unop(Iop_Not1, a);
-					}
-					break;
-				} else {
-					progress = true;
-					purgeAssocArgument(e, 0);
 				}
 			}
 		}
@@ -1865,8 +1857,7 @@ top:
 			plus_like = e->op >= Iop_Add8 && e->op <= Iop_Add64;
 			and_like = (e->op >= Iop_And8 && e->op <= Iop_And64) ||
 				e->op == Iop_And1;
-			xor_like = (e->op >= Iop_Xor8 && e->op <= Iop_Xor64) ||
-				e->op == Iop_Xor1;
+			xor_like = e->op >= Iop_Xor8 && e->op <= Iop_Xor64;
 			if (plus_like || and_like || xor_like) {
 				for (int it1 = 0;
 				     !p && it1 < e->nr_arguments;
@@ -1930,7 +1921,6 @@ top:
 								result = IRExpr_Const_U64(0);
 								break;
 							case Iop_And1:
-							case Iop_Xor1:
 								result = IRExpr_Const_U1(0);
 								break;
 							default:
@@ -1993,7 +1983,6 @@ top:
 				case Iop_And64:
 					res = IRExpr_Const_U64(0xfffffffffffffffful);
 					break;
-				case Iop_Xor1:
 				case Iop_Or1:
 					res = IRExpr_Const_U1(0);
 					break;
@@ -2394,28 +2383,6 @@ top:
 		__set_profiling(optimise_binop);
 		IRExpr *l = e->arg1;
 		IRExpr *r = e->arg2;
-		if (e->op == Iop_Xor1) {
-			/* Convert A ^ B to (A & ~B) | (~A & B).  It's
-			   bigger, but it's worth it just normalise
-			   things. */
-			res = optimiseIRExpr(
-				IRExpr_Associative(
-					Iop_Or1,
-					IRExpr_Associative(
-						Iop_And1,
-						l,
-						IRExpr_Unop(Iop_Not1, r),
-						NULL),
-					IRExpr_Associative(
-						Iop_And1,
-						r,
-						IRExpr_Unop(Iop_Not1, l),
-						NULL),
-					NULL),
-				opt,
-				&progress);
-			break;
-		}
 		if (e->op >= Iop_Sub8 &&
 		    e->op <= Iop_Sub64) {
 			/* Replace a - b with a + (-b), so as to
