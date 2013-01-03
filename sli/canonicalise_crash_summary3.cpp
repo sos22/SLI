@@ -1047,14 +1047,23 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 		for (nr_args = 0; cee->args[nr_args]; nr_args++)
 			;
 		IRExpr *args[nr_args];
+		bool realloc = false;
 		for (int i = 0; i < nr_args; i++) {
 			IRExpr *arg = stripFloatingPoint(cee->args[i], p);
 			if (arg == FP_EXPRESSION)
 				return FP_EXPRESSION;
 			args[i] = arg;
+			if (args[i] != arg)
+				realloc = true;
 		}
-		memcpy(cee->args, args, nr_args * sizeof(IRExpr *));
-		return cee;
+		if (realloc) {
+			IRExpr **new_args = alloc_irexpr_array(nr_args + 1);
+			new_args[nr_args] = NULL;
+			memcpy(new_args, args, nr_args * sizeof(IRExpr *));
+			return new IRExprCCall(cee->cee, cee->retty, new_args);
+		} else {
+			return cee;
+		}
 	}
 	case Iex_Associative: {
 		IRExprAssociative *a = (IRExprAssociative *)expr;
