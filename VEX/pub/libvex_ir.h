@@ -1653,11 +1653,11 @@ struct IRExprUnop : public IRExpr {
    ppIRExpr output: LD<end>:<ty>(<addr>), eg. LDle:I32(t1)
 */
 struct IRExprLoad : public IRExpr {
-   const IRType    ty;     /* Type of the loaded value */
-   IRExpr*   addr;   /* Address being loaded from */
+   IRType    const ty;     /* Type of the loaded value */
+   IRExpr*   const addr;   /* Address being loaded from */
 
-   IRExprLoad(IRType _ty)
-       : IRExpr(Iex_Load), ty(_ty)
+   IRExprLoad(IRType _ty, IRExpr *_addr)
+       : IRExpr(Iex_Load), ty(_ty), addr(_addr)
    {}
    void visit(HeapVisitor &hv) { hv(addr); }
    unsigned long hashval() const {

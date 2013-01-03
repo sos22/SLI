@@ -1088,8 +1088,10 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 		IRExpr *a = stripFloatingPoint(l->addr, p);
 		if (a == FP_EXPRESSION)
 			return FP_EXPRESSION;
-		l->addr = a;
-		return l;
+		if (a == l->addr)
+			return a;
+		else
+			return new IRExprLoad(l->ty, a);
 	}
 	case Iex_HappensBefore:
 	case Iex_FreeVariable:

@@ -75,7 +75,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		((IRExprUnop *)e)->arg = internIRExpr(((IRExprUnop *)e)->arg, lookupTable);
 		break;
 	case Iex_Load:
-		((IRExprLoad *)e)->addr = internIRExpr(((IRExprLoad *)e)->addr, lookupTable);
+		*(IRExpr **)&((IRExprLoad *)e)->addr = internIRExpr(((IRExprLoad *)e)->addr, lookupTable);
 		break;
 	case Iex_CCall:
 		for (int x = 0; ((IRExprCCall *)e)->args[x]; x++)

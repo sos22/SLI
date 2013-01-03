@@ -3060,7 +3060,9 @@ top:
 
 	case Iex_Load: {
 		IRExprLoad *l = (IRExprLoad *)src;
-		l->addr = optimiseIRExpr(l->addr, opt, done_something);
+		auto addr = optimiseIRExpr(l->addr, opt, done_something);
+		if (addr != l->addr)
+			res = new IRExprLoad(l->ty, addr);
 		break;
 	}
 
