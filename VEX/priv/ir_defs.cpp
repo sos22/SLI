@@ -1896,11 +1896,7 @@ IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
    return new IRExprCCall(cee, retty, args);
 }
 IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
-   IRExprMux0X* e          = new IRExprMux0X();
-   e->cond  = cond;
-   e->expr0 = expr0;
-   e->exprX = exprX;
-   return e;
+   return new IRExprMux0X(cond, expr0, exprX);
 }
 IRExpr* IRExpr_Associative(IROp op, ...)
 {

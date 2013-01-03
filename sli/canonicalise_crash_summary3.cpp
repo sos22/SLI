@@ -1030,15 +1030,14 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 				return a;
 			return stripFloatingPoint(i->exprX, p);
 		}
-		i->cond = cond;
 		IRExpr *expr0 = stripFloatingPoint(i->expr0, p);
 		if (expr0 == FP_EXPRESSION)
 			return stripFloatingPoint(i->exprX, p);
-		i->expr0 = expr0;
 		IRExpr *exprX = stripFloatingPoint(i->exprX, p);
 		if (exprX == FP_EXPRESSION)
-			return i->expr0;
-		i->exprX = exprX;
+			return expr0;
+		if (cond != i->cond || expr0 != i->expr0 || exprX != i->exprX)
+			return new IRExprMux0X(cond, expr0, exprX);
 		return i;
 	}
 	case Iex_CCall: {

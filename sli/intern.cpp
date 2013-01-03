@@ -83,9 +83,9 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 				internIRExpr(((IRExprCCall *)e)->args[x], lookupTable);
 		break;
 	case Iex_Mux0X:
-		((IRExprMux0X *)e)->cond = internIRExpr(((IRExprMux0X *)e)->cond, lookupTable);
-		((IRExprMux0X *)e)->expr0 = internIRExpr(((IRExprMux0X *)e)->expr0, lookupTable);
-		((IRExprMux0X *)e)->exprX = internIRExpr(((IRExprMux0X *)e)->exprX, lookupTable);
+		*(IRExpr **)&((IRExprMux0X *)e)->cond = internIRExpr(((IRExprMux0X *)e)->cond, lookupTable);
+		*(IRExpr **)&((IRExprMux0X *)e)->expr0 = internIRExpr(((IRExprMux0X *)e)->expr0, lookupTable);
+		*(IRExpr **)&((IRExprMux0X *)e)->exprX = internIRExpr(((IRExprMux0X *)e)->exprX, lookupTable);
 		break;
 	case Iex_Associative:
 		for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++)

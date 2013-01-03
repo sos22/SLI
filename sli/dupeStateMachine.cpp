@@ -110,10 +110,10 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Mux0X: {
 		const IRExprMux0X *i = (const IRExprMux0X *)inp;
-		IRExprMux0X *res = new IRExprMux0X();
-		ctxt(&res->cond, i->cond, rawDupe);
-		ctxt(&res->expr0, i->expr0, rawDupe);
-		ctxt(&res->exprX, i->exprX, rawDupe);
+		IRExprMux0X *res = new IRExprMux0X(NULL, NULL, NULL);
+		ctxt((IRExpr **)&res->cond, i->cond, rawDupe);
+		ctxt((IRExpr **)&res->expr0, i->expr0, rawDupe);
+		ctxt((IRExpr **)&res->exprX, i->exprX, rawDupe);
 		return res;
 	}
 	case Iex_Associative: {

@@ -622,9 +622,12 @@ quickSimplify(IRExpr *a)
 		iea->contents = newArgs;
 	} else if (a->tag == Iex_Mux0X) {
 		IRExprMux0X *m = (IRExprMux0X *)a;
-		m->cond = quickSimplify(m->cond);
-		m->expr0 = quickSimplify(m->expr0);
-		m->exprX = quickSimplify(m->exprX);
+		auto cond = quickSimplify(m->cond);
+		auto expr0 = quickSimplify(m->expr0);
+		auto exprX = quickSimplify(m->exprX);
+		if (cond != m->cond || expr0 != m->expr0 ||
+		    exprX != m->exprX)
+			a = new IRExprMux0X(cond, expr0, exprX);
 	}
 	return a;
 }
