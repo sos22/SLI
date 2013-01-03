@@ -1002,15 +1002,21 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 					       arg3);
 		return expr;
 	}
-		/* fall through */
 	case Iex_Binop: {
 		IRExprBinop *i = (IRExprBinop *)expr;
-		IRExpr *arg = stripFloatingPoint(i->arg2, p);
-		if (arg == FP_EXPRESSION)
+		auto arg1 = stripFloatingPoint(i->arg1, p);
+		if (arg1 == FP_EXPRESSION)
 			return FP_EXPRESSION;
-		i->arg2 = arg;
+		auto arg2 = stripFloatingPoint(i->arg2, p);
+		if (arg2 == FP_EXPRESSION)
+			return FP_EXPRESSION;
+		if (arg1 != i->arg1 || arg2 != i->arg2)
+			return new IRExprBinop(i->op,
+					       arg1,
+					       arg2);
+		return expr;
 	}
-		/* fall through */
+
 	case Iex_Unop: {
 		IRExprUnop *i = (IRExprUnop *)expr;
 		IRExpr *arg = stripFloatingPoint(i->arg, p);

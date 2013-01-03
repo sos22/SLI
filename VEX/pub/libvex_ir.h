@@ -1571,11 +1571,11 @@ struct IRExprTriop : public IRExpr {
 */
 struct IRExprBinop : public IRExpr {
    IROp const op;          /* op-code   */
-   IRExpr* arg1;     /* operand 1 */
-   IRExpr* arg2;     /* operand 2 */
+   IRExpr* const arg1;     /* operand 1 */
+   IRExpr* const arg2;     /* operand 2 */
 
-   IRExprBinop(IROp _op)
-       : IRExpr(Iex_Binop), op(_op)
+   IRExprBinop(IROp _op, IRExpr *_arg1, IRExpr *_arg2)
+       : IRExpr(Iex_Binop), op(_op), arg1(_arg1), arg2(_arg2)
    {}
    IRExprBinop(const IRExprBinop *base, IROp _op)
        : IRExpr(Iex_Binop),

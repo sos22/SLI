@@ -1787,10 +1787,7 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
      }
    }
 
-   IRExprBinop* e         = new IRExprBinop(op);
-   e->arg1 = arg1;
-   e->arg2 = arg2;
-   return e;
+   return new IRExprBinop(op, arg1, arg2);
 }
 
 /* Check whether a(b(X)) can be converted to a single operator c(X).
