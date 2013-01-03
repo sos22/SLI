@@ -446,7 +446,7 @@ quickSimplify(IRExpr *a)
 		case Iop_And16:                                mask = 0xffff; defaultValue = mask; break;
 		case Iop_And32:                                mask = ~0u;    defaultValue = mask; break;
 		case Iop_And64:                                mask = ~0ul;   defaultValue = mask; break;
-		case Iop_Xor1:  case Iop_Or1:                  mask = 1;      defaultValue = 0; break;
+		                case Iop_Or1:                  mask = 1;      defaultValue = 0; break;
 		case Iop_Xor8:  case Iop_Or8:  case Iop_Add8:  mask = 0xff;   defaultValue = 0; break;
 		case Iop_Xor16: case Iop_Or16: case Iop_Add16: mask = 0xffff; defaultValue = 0; break;
 		case Iop_Xor32: case Iop_Or32: case Iop_Add32: mask = ~0u;    defaultValue = 0; break;
@@ -473,7 +473,7 @@ quickSimplify(IRExpr *a)
 				case Iop_Or32: case Iop_Or64:
 					acc |= ((IRExprConst *)iea->contents[i])->Ico.U64;
 					break;
-				case Iop_Xor1: case Iop_Xor8: case Iop_Xor16:
+				case Iop_Xor8: case Iop_Xor16:
 				case Iop_Xor32: case Iop_Xor64:
 					acc ^= ((IRExprConst *)iea->contents[i])->Ico.U64;
 					break;
@@ -502,7 +502,7 @@ quickSimplify(IRExpr *a)
 						case Iop_Or32: case Iop_Or64:
 							acc |= ((IRExprConst *)arg->contents[j])->Ico.U64;
 							break;
-						case Iop_Xor1: case Iop_Xor8: case Iop_Xor16:
+						case Iop_Xor8: case Iop_Xor16:
 						case Iop_Xor32: case Iop_Xor64:
 							acc ^= ((IRExprConst *)arg->contents[j])->Ico.U64;
 							break;

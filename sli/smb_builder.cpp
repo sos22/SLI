@@ -10,8 +10,7 @@ operator+(SMBPtr<SMBExpression> a, SMBPtr<SMBExpression> b)
 	IROp op = Iop_INVALID;
 	switch (a.content->what->type()) {
 	case Ity_I1:
-		op = Iop_Xor1;
-		break;
+		abort();
 	case Ity_I8:
 		op = Iop_Add8;
 		break;

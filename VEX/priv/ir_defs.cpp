@@ -75,9 +75,7 @@ operationAssociates(IROp op)
 {
 	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1) ||
 		(op >= Iop_And8 && op <= Iop_And64) || (op >= Iop_Xor8 && op <= Iop_Xor64) ||
-		(op >= Iop_Or8 && op <= Iop_Or64) || (op == Iop_Or1) ||
-		(op == Iop_Xor1)
-		;
+		(op >= Iop_Or8 && op <= Iop_Or64) || (op == Iop_Or1);
 }
 
 /*---------------------------------------------------------------*/
@@ -749,7 +747,6 @@ void ppIRTemp ( IRTemp tmp, FILE* f )
 	     iter(64to1)			\
 	     iter(And1)				\
 	     iter(Or1)				\
-	     iter(Xor1)				\
 	     iter(Noop128)
 
 void ppIROp ( IROp op, FILE* f )
@@ -922,8 +919,6 @@ static const char *irOpSimpleChar(IROp op)
     return "&&";
   case Iop_Or1:
     return "||";
-  case Iop_Xor1:
-    return "^^";
   case Iop_CmpEQ8 ... Iop_CmpEQ64:
     return "==";
   case Iop_Not1:
@@ -970,11 +965,6 @@ static bool parseIROpSimple(IROp *out, IRType ty, const char *str, const char **
   if (parseThisString("||", str, suffix)) {
     if (delta != -1) return false;
     *out = Iop_Or1;
-    return true;
-  }
-  if (parseThisString("^^", str, suffix)) {
-    if (delta != -1) return false;
-    *out = Iop_Xor1;
     return true;
   }
   if (parseThisChar('&', str, suffix)) {
@@ -2489,7 +2479,7 @@ void typeOfPrimop ( IROp op,
       case Iop_16to1:  UNARY(Ity_I16, Ity_I1);
       case Iop_32to1:  UNARY(Ity_I32, Ity_I1);
       case Iop_64to1:  UNARY(Ity_I64, Ity_I1);
-      case Iop_CmpEQ1: case Iop_And1: case Iop_Or1: case Iop_Xor1: BINARY(Ity_I1, Ity_I1, Ity_I1);
+      case Iop_CmpEQ1: case Iop_And1: case Iop_Or1: BINARY(Ity_I1, Ity_I1, Ity_I1);
       case Iop_BadPtr: UNARY(Ity_I64, Ity_I1);
 
       case Iop_8Uto32: case Iop_8Sto32:
