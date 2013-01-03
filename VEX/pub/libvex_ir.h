@@ -1451,13 +1451,16 @@ struct IRExprGetI : public IRExpr {
    eg. MAddF64r32(t1, t2, t3, t4)
 */
 struct IRExprQop : public IRExpr {
-   IROp op;          /* op-code   */
+   IROp const op;          /* op-code   */
    IRExpr* arg1;     /* operand 1 */
    IRExpr* arg2;     /* operand 2 */
    IRExpr* arg3;     /* operand 3 */
    IRExpr* arg4;     /* operand 4 */
 
-   IRExprQop() : IRExpr(Iex_Qop) {}
+   IRExprQop(IROp _op)
+       : IRExpr(Iex_Qop),
+	 op(_op)
+   {}
    void visit(HeapVisitor &hv) {
        hv(arg1);
        hv(arg2);
@@ -1506,11 +1509,13 @@ struct IRExprQop : public IRExpr {
    eg. MulF64(1, 2.0, 3.0)
 */
 struct IRExprTriop : public IRExpr {
-   IROp op;          /* op-code   */
+   IROp const op;          /* op-code   */
    IRExpr* arg1;     /* operand 1 */
    IRExpr* arg2;     /* operand 2 */
    IRExpr* arg3;     /* operand 3 */
-   IRExprTriop() : IRExpr(Iex_Triop) {}
+   IRExprTriop(IROp _op)
+       : IRExpr(Iex_Triop), op(_op)
+   {}
    void visit(HeapVisitor &hv) {
        hv(arg1);
        hv(arg2);
@@ -1553,11 +1558,19 @@ struct IRExprTriop : public IRExpr {
    ppIRExpr output: <op>(<arg1>, <arg2>), eg. Add32(t1,t2)
 */
 struct IRExprBinop : public IRExpr {
-   IROp op;          /* op-code   */
+   IROp const op;          /* op-code   */
    IRExpr* arg1;     /* operand 1 */
    IRExpr* arg2;     /* operand 2 */
 
-   IRExprBinop() : IRExpr(Iex_Binop) {}
+   IRExprBinop(IROp _op)
+       : IRExpr(Iex_Binop), op(_op)
+   {}
+   IRExprBinop(const IRExprBinop *base, IROp _op)
+       : IRExpr(Iex_Binop),
+	 op(_op),
+	 arg1(base->arg1),
+	 arg2(base->arg2)
+   {}
    void visit(HeapVisitor &hv) {
        hv(arg1);
        hv(arg2);
@@ -1587,10 +1600,12 @@ struct IRExprBinop : public IRExpr {
    ppIRExpr output: <op>(<arg>), eg. Neg8(t1)
 */
 struct IRExprUnop : public IRExpr {
-   IROp    op;       /* op-code */
+   IROp    const op;       /* op-code */
    IRExpr* arg;      /* operand */
 
-   IRExprUnop() : IRExpr(Iex_Unop) {}
+   IRExprUnop(IROp _op)
+       : IRExpr(Iex_Unop), op(_op)
+   {}
    void visit(HeapVisitor &hv) {
        hv(arg);
    }
