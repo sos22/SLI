@@ -43,7 +43,7 @@ ifeq ($(VERBOSE),y)
 	g++ $(CPPFLAGS) -MG -M -MD -MT $(patsubst %.cpp,%.o,$<) -o $@ $<
 else
 %.cpp.d: %.cpp
-	@printf "Depend [%-40s]\n" $@ ; \
+	@printf "Depend [%-41s]\n" $@ ; \
 	g++ $(CPPFLAGS) -MG -M -MD -MT $(patsubst %.cpp,%.o,$<) -o $@ $<
 endif
 

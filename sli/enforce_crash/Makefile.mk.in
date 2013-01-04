@@ -20,15 +20,14 @@ rules() {
 \$(ECRASH_DEPS): CPPFLAGS+=-Isli -I\$(libvex)/pub
 $targets: slir.a libVEX.a
 
-enforce_crash: \$(ECRASH_COMMON_OBJECTS) ${input_base}/enforce_crash.o
-	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
-ced_to_patch: \$(ECRASH_COMMON_OBJECTS) ${input_base}/ced_to_patch.o
-	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
-ced_to_cep: \$(ECRASH_COMMON_OBJECTS) ${input_base}/ced_to_cep.o
-	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lstdc++ \$^ -o \$@
 cep_interpreter.o: ${input_base}/cep_interpreter.h ${input_base}/cep_interpreter.c
 	gcc -g -fPIC -Wall ${input_base}/cep_interpreter.c -c -o \$@
 ${input_base}/cep_interpreter.cpp.o.d: # Silly hack to keep build system happy
 	touch ${input_base}$@
 EOF
+	for t in enforce_crash ced_to_patch ced_to_cep
+	do
+		echo "$t: \$(ECRASH_COMMON_OBJECTS)"
+		link $t ${input_base}/$t.o
+	done
 }

@@ -9,8 +9,7 @@ rules() {
     echo "$objects: CPPFLAGS+=-Isli -I\$(libvex)/pub -I\$(libvex)/priv"
     for t in $sli_tests
     do
-	echo "${input_base}/${t}.o: ${input_base}/${t}.cpp"
-	echo "${input_base}/$t: ${input_base}/${t}.o slir.a libVEX.a"
-	echo -e '\tgcc -lrt -lstdc++ $(CFLAGS) $(CPPFLAGS) -lsqlite3 -lm $^ -o $@'
+        echo "${input_base}/$t: slir.a libVEX.a"
+        link ${input_base}/$t ${input_base}/${t}.o
     done
 }
