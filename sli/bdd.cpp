@@ -440,11 +440,9 @@ quickSimplify(IRExpr *a)
 		IRExprAssociative *_iea = (IRExprAssociative *)a;
 		int nr_arguments = _iea->nr_arguments;
 		IROp op = _iea->op;
-		bool haveConsts = false;
 		unsigned long mask;
 		unsigned long acc;
 		unsigned long defaultValue;
-		bool haveNested = false;
 		int new_nr_args = 0;
 		IRExpr *simpleArgs[nr_arguments];
 		bool realloc = false;
@@ -472,9 +470,6 @@ quickSimplify(IRExpr *a)
 			if (simpleArgs[i] != _iea->contents[i])
 				realloc = true;
 			if (simpleArgs[i]->tag == Iex_Const) {
-				if (!haveConsts)
-					new_nr_args++;
-				haveConsts = true;
 				switch (op) {
 				case Iop_And1: case Iop_And8: case Iop_And16:
 				case Iop_And32: case Iop_And64:
@@ -497,13 +492,10 @@ quickSimplify(IRExpr *a)
 				}
 			} else if (simpleArgs[i]->tag == Iex_Associative &&
 				   ((IRExprAssociative *)simpleArgs[i])->op == op) {
-				haveNested = true;
+				realloc = true;
 				IRExprAssociative *arg = (IRExprAssociative *)simpleArgs[i];
 				for (int j = 0; j < arg->nr_arguments; j++) {
 					if (arg->contents[j]->tag == Iex_Const) {
-						if (!haveConsts)
-							new_nr_args++;
-						haveConsts = true;
 						switch (op) {
 						case Iop_And1: case Iop_And8: case Iop_And16:
 						case Iop_And32: case Iop_And64:
@@ -533,37 +525,15 @@ quickSimplify(IRExpr *a)
 			}
 		}
 		acc &= mask;
-		if ((op == Iop_And1 || op == Iop_Or1) && haveConsts) {
-			if (op == Iop_And1) {
-				if (acc) {
-					haveConsts = false;
-					new_nr_args--;
-				} else {
-					return IRExpr_Const_U1(false);
-				}
-			} else {
-				if (!acc) {
-					haveConsts = false;
-					new_nr_args--;
-				} else {
-					return IRExpr_Const_U1(true);
-				}
-			}
-		}
-		if (haveConsts && acc == defaultValue) {
-			haveConsts = false;
-			new_nr_args--;
-		}
+		if (op == Iop_And1 && acc == 0)
+			return IRExpr_Const_U1(false);
+		if (op == Iop_Or1 && acc == 1)
+			return IRExpr_Const_U1(true);
 		if (new_nr_args == 0) {
-			acc = defaultValue;
-			haveConsts = true;
-			new_nr_args = 1;
-		}
-		if (new_nr_args == 1 && haveConsts) {
 			switch (_iea->type()) {
 #define do_ty(n)							\
-				case Ity_I ## n :			\
-					return IRExpr_Const_U ## n(acc);
+			case Ity_I ## n :				\
+				return IRExpr_Const_U ## n(acc);
 				do_ty(1);
 				do_ty(8);
 				do_ty(16);
@@ -574,18 +544,19 @@ quickSimplify(IRExpr *a)
 				abort();
 			}
 		}
-		if (new_nr_args == 1) {
+		if (new_nr_args == 1 && acc == defaultValue) {
 			for (int i = 0; i < nr_arguments; i++)
 				if (simpleArgs[i]->tag != Iex_Const)
 					return simpleArgs[i];
 			abort();
 		}
-		assert(new_nr_args != 0);
-		if (!haveNested && new_nr_args == nr_arguments && !realloc)
+		if (acc != defaultValue)
+			new_nr_args++;
+		if (new_nr_args == nr_arguments && !realloc)
 			return _iea;
 		IRExpr **newArgs = alloc_irexpr_array(new_nr_args);
 		int outIdx = 0;
-		if (haveConsts) {
+		if (acc != defaultValue) {
 			switch (_iea->type()) {
 #define do_ty(n)							\
 				case Ity_I ## n :			\
@@ -609,11 +580,11 @@ quickSimplify(IRExpr *a)
 			} else if (simpleArgs[i]->tag == Iex_Associative &&
 				   ((IRExprAssociative *)simpleArgs[i])->op == op) {
 				IRExprAssociative *arg = (IRExprAssociative *)simpleArgs[i];
-				for (int j = 0; j < nr_arguments; j++) {
+				for (int j = 0; j < arg->nr_arguments; j++) {
 					if (arg->contents[j]->tag == Iex_Const) {
 						/* Already handled */
 					} else {
-						newArgs[outIdx] = simpleArgs[j];
+						newArgs[outIdx] = arg->contents[j];
 						outIdx++;
 					}
 				}
