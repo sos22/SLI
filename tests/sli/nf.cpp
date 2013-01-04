@@ -37,11 +37,10 @@ r_expr(int nr_variables, double expandProb)
 				op = Iop_Or1;
 			else
 				op = Iop_And1;
-			IRExprAssociative *res = IRExpr_Associative(nr_args, op);
+			IRExpr *args[nr_args];
 			for (int i = 0; i < nr_args; i++)
-				res->contents[i] = r_expr(nr_variables, expandProb / 2);
-			res->nr_arguments = nr_args;
-			return res;
+				args[i] = r_expr(nr_variables, expandProb / 2);
+			return IRExpr_Associative_Copy(op, nr_args, args);
 		}
 	} else {
 		return IRExpr_Get(

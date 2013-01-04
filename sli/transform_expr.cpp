@@ -77,13 +77,13 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 	}
 	case Iex_Associative: {
 		IRExprAssociative *e = (IRExprAssociative *)exp;
-		IRExprAssociative *out = (IRExprAssociative *)IRExpr_Associative(e);
+		IRExpr **newArgs = alloc_irexpr_array(e->nr_arguments);
 		for (int x = 0;
 		     x < e->nr_arguments;
 		     x++)
-			out->contents[x] =
-				log_reads_expr(tid, sb, out->contents[x]);
-		return out;
+			newArgs[x] =
+				log_reads_expr(tid, sb, e->contents[x]);
+		return IRExpr_Associative_Claim(e->op, e->nr_arguments, newArgs);
 	}
 	case Iex_Unop: {
 		IRExprUnop *e = (IRExprUnop *)exp;

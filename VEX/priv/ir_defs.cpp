@@ -1202,11 +1202,10 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 	return false;
       args.push_back(arg);
     }
-    IRExprAssociative *r = IRExpr_Associative(args.size(), op);
-    r->nr_arguments = args.size();
+    IRExpr **newArgs = alloc_irexpr_array(args.size());
     for (unsigned i = 0; i < args.size(); i++)
-      r->contents[i] = args[i];
-    *out = r;
+      newArgs[i] = args[i];
+    *out = IRExpr_Associative_Claim(op, args.size(), newArgs);
     return true;
   } else if (str[0] == 'C') {
     if (parseThisString("Control(", str, &str)) {
@@ -1316,7 +1315,7 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
     if (parseIROp(&op, str, &str) &&
 	operationAssociates(op) &&
 	parseThisChar(']', str, suffix)) {
-      *out = IRExpr_Associative(op, NULL);
+      *out = IRExpr_Associative_V(op, NULL);
       return true;
     }
     return false;
@@ -1339,11 +1338,10 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 	return false;
       args.push_back(arg);
     }
-    IRExprAssociative *e = IRExpr_Associative(args.size(), op);
-    e->nr_arguments = args.size();
+    IRExpr **newArgs = alloc_irexpr_array(args.size());
     for (unsigned i = 0; i < args.size(); i++)
-      e->contents[i] = args[i];
-    *out = e;
+      newArgs[i] = args[i];
+    *out = IRExpr_Associative_Claim(op, args.size(), newArgs);
     return true;
   }
 
@@ -1777,7 +1775,7 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
 				     arg2));
 
    if (operationAssociates(op))
-     return IRExpr_Associative(op, arg1, arg2, NULL);
+     return IRExpr_Associative_V(op, arg1, arg2, NULL);
 
    if (op == Iop_CmpEQ64) {
      if (arg2->tag == Iex_Const && arg1->tag != Iex_Const) {
@@ -1893,11 +1891,8 @@ IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
 IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
    return new IRExprMux0X(cond, expr0, exprX);
 }
-IRExpr* IRExpr_Associative(IROp op, ...)
+IRExpr* IRExpr_Associative_V(IROp op, ...)
 {
-   IRExprAssociative* e          = new IRExprAssociative();
-   e->op = op;
-
    va_list args;
    int nr_args;
    IRExpr *arg;
@@ -1959,47 +1954,17 @@ IRExpr* IRExpr_Associative(IROp op, ...)
        assert(dest == -1);
      }
    }
-
-   e->nr_arguments_allocated = nr_args * 2;
-   static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-   e->contents =
-      (IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(e->contents[0]) * nr_args * 2, &__las);
-   e->nr_arguments = nr_args;
-   memcpy(e->contents, argsL, sizeof(argsL[0]) * e->nr_arguments);
-   va_end(args);
-   return e;
+   return IRExpr_Associative_Copy(op, nr_args, argsL);
 }
-IRExpr* IRExpr_Associative(IRExprAssociative *src)
+IRExprAssociative* IRExpr_Associative_Claim(IROp op, int nr_arguments, IRExpr *const *contents)
 {
-   IRExprAssociative* e           = new IRExprAssociative();
-   e->op = src->op;
-   e->nr_arguments = src->nr_arguments;
-   e->nr_arguments_allocated = src->nr_arguments * 2;
-   static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-   e->contents = (IRExpr **)
-      __LibVEX_Alloc_Bytes(&ir_heap,
-			   sizeof(e->contents[0]) *
-			   e->nr_arguments_allocated,
-			   &__las);
-   memcpy(e->contents,
-	  src->contents,
-	  sizeof(e->contents[0]) *
-	  e->nr_arguments);
-   return e;
+  return new IRExprAssociative(op, nr_arguments, contents);
 }
-IRExprAssociative* IRExpr_Associative(int nr_arguments, IROp op)
+IRExprAssociative* IRExpr_Associative_Copy(IROp op, int nr_arguments, IRExpr *const *contents)
 {
-  IRExprAssociative *e = new IRExprAssociative();
-  e->op = op;
-  e->nr_arguments = 0;
-  e->nr_arguments_allocated = nr_arguments;
-  static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-  e->contents = (IRExpr **)
-    __LibVEX_Alloc_Bytes(&ir_heap,
-			 sizeof(e->contents[0]) *
-			 e->nr_arguments_allocated,
-			 &__las);
-  return e;
+  IRExpr **c = alloc_irexpr_array(nr_arguments);
+  memcpy(c, contents, sizeof(c[0]) * nr_arguments);
+  return new IRExprAssociative(op, nr_arguments, c);
 }
 IRExpr* IRExpr_HappensBefore ( const MemoryAccessIdentifier &before,
 			       const MemoryAccessIdentifier &after )

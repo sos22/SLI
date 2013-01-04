@@ -44,6 +44,8 @@ shallow_hash(const IRExpr *e)
 	abort();
 }
 
+/* This is allowed to modify the const pointers, because the thing it
+   writes over is semantically identical to the previous value. */
 IRExpr *
 internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 {
@@ -89,7 +91,7 @@ internIRExpr(IRExpr *e, internIRExprTable &lookupTable)
 		break;
 	case Iex_Associative:
 		for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++)
-			((IRExprAssociative *)e)->contents[x] =
+			*(IRExpr **)&((IRExprAssociative *)e)->contents[x] =
 				internIRExpr(((IRExprAssociative *)e)->contents[x], lookupTable);
 		break;
 	}

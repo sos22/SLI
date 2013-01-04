@@ -710,10 +710,10 @@ out:
 /* i.e. convert @out to
    @out `termOp` fragments[0] `termOp` fragments[1] ... `termOp` fragments[nr_fragments-1]
 */
-static bool nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
+static bool nf_counterjoin(IRExpr *const*fragments, int nr_fragments, NF_Expression &out,
 			   IROp expressionOp, IROp termOp) __attribute__((warn_unused_result));
 static bool
-nf_counterjoin(IRExpr **fragments, int nr_fragments, NF_Expression &out,
+nf_counterjoin(IRExpr *const*fragments, int nr_fragments, NF_Expression &out,
 	       IROp expressionOp, IROp termOp)
 {
 top:
@@ -945,16 +945,10 @@ convert_from_nf(NF_Term &inp, IROp op)
 		return IRExpr_Const_U1(op == Iop_And1);
 	if (inp.size() == 1)
 		return convert_from_nf(inp[0]);
-	IRExprAssociative *acc = new IRExprAssociative();
-	acc->op = op;
-	acc->nr_arguments = inp.size();
-	acc->nr_arguments_allocated = acc->nr_arguments * 2;
-	static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-	acc->contents =
-		(IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(acc->contents[0]) * acc->nr_arguments, &__las);
-	for (unsigned x = 0; x < inp.size(); x++)
-		acc->contents[x] = convert_from_nf(inp[x]);
-	return acc;
+	IRExpr *newArgs[inp.size()];
+	for (unsigned i = 0; i < inp.size(); i++)
+		newArgs[i] = convert_from_nf(inp[i]);
+	return IRExpr_Associative_Copy(op, inp.size(), newArgs);
 }
 
 static IRExpr *
@@ -964,16 +958,10 @@ convert_from_nf(NF_Expression &inp, IROp expressionOp, IROp termOp)
 		return IRExpr_Const_U1(expressionOp == Iop_And1);
 	if (inp.size() == 1)
 		return convert_from_nf(inp[0], termOp);
-	IRExprAssociative *acc = new IRExprAssociative();
-	acc->op = expressionOp;
-	acc->nr_arguments = inp.size();
-	acc->nr_arguments_allocated = acc->nr_arguments * 2;
-	static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-	acc->contents =
-		(IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap, sizeof(acc->contents[0]) * acc->nr_arguments, &__las);
-	for (unsigned x = 0; x < inp.size(); x++)
-		acc->contents[x] = convert_from_nf(inp[x], termOp);
-	return acc;
+	IRExpr *newArgs[inp.size()];
+	for (unsigned i = 0; i < inp.size(); i++)
+		newArgs[i] = convert_from_nf(inp[i], termOp);
+	return IRExpr_Associative_Copy(expressionOp, inp.size(), newArgs);
 }
 
 } /* End of namespace __nf */

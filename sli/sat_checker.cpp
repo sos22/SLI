@@ -251,24 +251,22 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 				newArgs[x] = and_normal_form(iea->contents[x], intern);
 			if (TIMEOUT)
 				return NULL;
-			IRExprAssociative *res = IRExpr_Associative(iea->nr_arguments, iea->op);
-			res->nr_arguments = iea->nr_arguments;
-			memcpy(res->contents, newArgs, sizeof(IRExpr *) * iea->nr_arguments);
-			sort_and_arguments(res->contents, iea->nr_arguments);
+			sort_and_arguments(newArgs, iea->nr_arguments);
+			IRExpr *res = IRExpr_Associative_Copy(iea->op, iea->nr_arguments, newArgs);
 			e = internIRExpr(res, intern);
 		} else if (iea->op == Iop_Or1) {
-			IRExprAssociative *res = IRExpr_Associative(iea->nr_arguments, Iop_And1);
+			IRExpr *newArgs[iea->nr_arguments];
 			for (int x = 0; x < iea->nr_arguments; x++)
-				res->contents[x] =
+				newArgs[x] =
 					and_normal_form(
 						IRExpr_Unop(
 							Iop_Not1,
 							iea->contents[x]),
 						intern);
+			sort_and_arguments(newArgs, iea->nr_arguments);
 			if (TIMEOUT)
 				return NULL;
-			res->nr_arguments = iea->nr_arguments;
-			sort_and_arguments(res->contents, res->nr_arguments);
+			IRExprAssociative *res = IRExpr_Associative_Copy(Iop_And1, iea->nr_arguments, newArgs);
 			e = internIRExpr(IRExpr_Unop(Iop_Not1, res), intern);
 		}
 	}
@@ -474,12 +472,8 @@ pureSimplify(IRExpr *what, internIRExprTable &internTable)
 				}
 				if (new_nr_args == 1)
 					return new_args[0];
-				if (new_nr_args != ieb->nr_arguments) {
-					IRExprAssociative *iea = IRExpr_Associative(new_nr_args, Iop_And1);
-					memcpy(iea->contents, new_args, sizeof(IRExpr *) * new_nr_args);
-					iea->nr_arguments = new_nr_args;
-					return iea;
-				}
+				if (new_nr_args != ieb->nr_arguments)
+					return IRExpr_Associative_Copy(Iop_And1, new_nr_args, new_args);
 			}
 			return IRExprTransformer::transformIex(ieb);
 		}
@@ -688,7 +682,19 @@ anf_context::simplify(IRExpr *a)
 		if (iea->op != Iop_And1)
 			return a;
 		anf_context sub_context(*this);
-		IRExprAssociative *res = IRExpr_Associative(iea->nr_arguments, Iop_And1);
+		int nr_args_needed = 0;
+		for (int i = 0; i < iea->nr_arguments; i++) {
+			IRExpr *arg = iea->contents[i];
+			if (arg->tag == Iex_Const) {
+			} else if (arg->tag == Iex_Associative &&
+				   ((IRExprAssociative *)arg)->op == Iop_And1) {
+				nr_args_needed += ((IRExprAssociative *)arg)->nr_arguments;
+			} else {
+				nr_args_needed++;
+			}
+		}
+		IRExpr *newArgs[nr_args_needed];
+		int newNrArgs = 0;
 		for (int i = 0; i < iea->nr_arguments; i++) {
 			IRExpr *arg = sub_context.simplify(iea->contents[i]);
 			if (arg != UNEVALUATABLE) {
@@ -701,19 +707,21 @@ anf_context::simplify(IRExpr *a)
 					IRExprAssociative *argA = (IRExprAssociative *)arg;
 					for (int i = 0; i < argA->nr_arguments; i++) {
 						sub_context.addAssumption(argA->contents[i]);
-						addArgumentToAssoc(res, argA->contents[i]);
+						newArgs[newNrArgs++] = argA->contents[i];
 					}
 				} else {
 					sub_context.addAssumption(arg);
-					addArgumentToAssoc(res, arg);
+					newArgs[newNrArgs++] = arg;
 				}
 			}
 		}
-		if (res->nr_arguments == 1)
-			return res->contents[0];
-		if (res->nr_arguments == 0)
+		if (newNrArgs == 1)
+			return newArgs[0];
+		if (newNrArgs == 0)
 			return internIRExpr(IRExpr_Const_U1(true), intern);
-		sort_and_arguments(res->contents, res->nr_arguments);
+		sort_and_arguments(newArgs, newNrArgs);
+
+		IRExprAssociative *res = IRExpr_Associative_Copy(Iop_And1, newNrArgs, newArgs);
 		a = internIRExpr(res, intern);
 
 		/* Don't need to check against the definitely true
@@ -987,39 +995,25 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 			bool identity = e->op == Iop_And1;
 			bool suppress = e->op == Iop_Or1;
 			bool t = false;
-			int in_idx = 0;
-			int out_idx = 0;
-			IRExpr *newE;
-			while (in_idx < e->nr_arguments) {
-				newE = transformIRExpr(e->contents[in_idx++], &t);
-				if (t)
-					break;
-				out_idx++;
-			}
-			if (!t)
-				return NULL;
-			if (newE->tag == Iex_Const &&
-			    ((IRExprConst *)newE)->Ico.U1 == suppress)
-				return newE;
-
-			IRExprAssociative *r = (IRExprAssociative *)IRExpr_Associative(e);
-			if (newE->tag == Iex_Const) {
-				assert(((IRExprConst *)newE)->Ico.U1 == identity);
-			} else {
-				r->contents[out_idx++] = newE;
-			}
-			while (in_idx < e->nr_arguments) {
-				newE = transformIRExpr(e->contents[in_idx++], &t);
-				if (newE->tag == Iex_Const) {
-					if ( ((IRExprConst *)newE)->Ico.U1 == suppress )
-						return newE;
-					assert(((IRExprConst *)newE)->Ico.U1 == identity);
+			IRExpr *newArgs[e->nr_arguments];
+			int outIdx = 0;
+			for (int inIdx = 0; inIdx < e->nr_arguments; inIdx++) {
+				newArgs[outIdx] = transformIRExpr(e->contents[inIdx], &t);
+				if (newArgs[outIdx]->tag == Iex_Const) {
+					IRExprConst *c = (IRExprConst *)newArgs[outIdx];
+					if (c->Ico.U1 == suppress)
+						return c;
+					assert(c->Ico.U1 == identity);
+					t = true;
 				} else {
-					r->contents[out_idx++] = newE;
+					t |= newArgs[outIdx] != e->contents[inIdx];
+					outIdx++;
 				}
 			}
-			r->nr_arguments = out_idx;
-			return r;
+			if (t)
+				return IRExpr_Associative_Copy(e->op, outIdx, newArgs);
+			else
+				return e;
 		}
 	} boolRewrite;
 	boolRewrite.variable = variable;

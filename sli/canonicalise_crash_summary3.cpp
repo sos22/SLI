@@ -207,13 +207,13 @@ removeRedundantClauses(IRExpr *verificationCondition,
 
 	if (verificationCondition->tag != Iex_Associative ||
 	    ((IRExprAssociative *)verificationCondition)->op != Iop_And1)
-		verificationCondition = IRExpr_Associative(Iop_And1, verificationCondition, NULL);
+		verificationCondition = IRExpr_Associative_V(Iop_And1, verificationCondition, NULL);
 
 	/* First rule: we only want to keep clauses which interfere
 	   with the the target variables in some sense or which
 	   contain HB edges. */
 	int nr_verification_clauses = ((IRExprAssociative *)verificationCondition)->nr_arguments;
-	IRExpr **verification_clauses = ((IRExprAssociative *)verificationCondition)->contents;
+	IRExpr *const *verification_clauses = ((IRExprAssociative *)verificationCondition)->contents;
 	bool precious[nr_verification_clauses];
 	for (int i = 0; i < nr_verification_clauses; i++)
 		precious[i] = false;
@@ -260,11 +260,12 @@ removeRedundantClauses(IRExpr *verificationCondition,
 				return verification_clauses[i];
 		abort();
 	} else if (nr_kept != nr_verification_clauses) {
-		IRExprAssociative *k = IRExpr_Associative(nr_kept, Iop_And1);
+		IRExpr *args[nr_kept];
+		int j = 0;
 		for (int i = 0; i < nr_verification_clauses; i++)
 			if (precious[i])
-				k->contents[k->nr_arguments++] = verification_clauses[i];
-		return k;
+				args[j++] = verification_clauses[i];
+		return IRExpr_Associative_Copy(Iop_And1, nr_kept, args);
 	} else {
 		return verificationCondition;
 	}
@@ -487,7 +488,7 @@ removeUnderspecifiedClauses(IRExpr *input,
 	}
 
 	int nr_clauses;
-	IRExpr **clauses;
+	IRExpr *const *clauses;
 	if (input->tag == Iex_Associative &&
 	    ((IRExprAssociative *)input)->op == Iop_And1) {
 		nr_clauses = ((IRExprAssociative *)input)->nr_arguments;
@@ -512,10 +513,7 @@ removeUnderspecifiedClauses(IRExpr *input,
 	if (nr_kept == 1) {
 		return kept[0];
 	}
-	IRExprAssociative *res = IRExpr_Associative(nr_kept, Iop_And1);
-	memcpy(res->contents, kept, sizeof(IRExpr *) * nr_kept);
-	res->nr_arguments = nr_kept;
-	return res;
+	return IRExpr_Associative_Copy(Iop_And1, nr_kept, kept);
 }
 	
 static bool
@@ -1074,30 +1072,26 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 	}
 	case Iex_Associative: {
 		IRExprAssociative *a = (IRExprAssociative *)expr;
-		if (a->op == Iop_And1 || a->op == Iop_Or1) {
-			for (int i = 0; i < a->nr_arguments; i++) {
-				a->contents[i] = stripFloatingPoint(a->contents[i], p);
-				if (a->contents[i] == FP_EXPRESSION) {
-					memmove(a->contents + i,
-						a->contents + i + 1,
-						sizeof(IRExpr *) * (a->nr_arguments - i - 1));
-					i--;
-					a->nr_arguments--;
-				}
-			}
-			if (a->nr_arguments == 0)
+		IRExpr *newArgs[a->nr_arguments];
+		bool realloc = false;
+		int nrNewArgs = 0;
+		for (int i = 0; i < a->nr_arguments; i++) {
+			newArgs[nrNewArgs] = stripFloatingPoint(a->contents[i], p);
+			if (newArgs[nrNewArgs] != a->contents[i])
+				realloc = true;
+			if (newArgs[nrNewArgs] != FP_EXPRESSION)
+				nrNewArgs++;
+			else if (a->op != Iop_And1 && a->op != Iop_Or1)
 				return FP_EXPRESSION;
-		} else {
-			IRExpr *args[a->nr_arguments];
-			for (int i = 0; i < a->nr_arguments; i++) {
-				IRExpr *arg = stripFloatingPoint(a->contents[i], p);
-				if (arg == FP_EXPRESSION)
-					return FP_EXPRESSION;
-				args[i] = arg;
-			}
-			memcpy(a->contents, args, a->nr_arguments * sizeof(IRExpr *));
 		}
-		return a;
+		if (nrNewArgs == 0)
+			return FP_EXPRESSION;
+		if (realloc) {
+			return IRExpr_Associative_Copy(a->op, nrNewArgs, newArgs);
+		} else {
+			assert(nrNewArgs == a->nr_arguments);
+			return a;
+		}
 	}
 	case Iex_Load: {
 		IRExprLoad *l = (IRExprLoad *)expr;

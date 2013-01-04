@@ -1813,11 +1813,15 @@ struct IRExprMux0X : public IRExpr {
    Because it's associative, the exact nesting order doesn't
    matter. */
 struct IRExprAssociative : public IRExpr {
-   IROp op;
-   int nr_arguments;
-   int nr_arguments_allocated;
-   IRExpr **contents;
-   IRExprAssociative() : IRExpr(Iex_Associative) {}
+   IROp const op;
+   int const nr_arguments;
+   IRExpr *const *const contents;
+   IRExprAssociative(IROp _op, int _nr_arguments, IRExpr *const *_contents)
+       : IRExpr(Iex_Associative),
+	 op(_op),
+	 nr_arguments(_nr_arguments),
+	 contents(_contents)
+   {}
    void visit(HeapVisitor &hv) {
        hv(contents);
        for (int i = 0; i < nr_arguments; i++)
@@ -1841,8 +1845,6 @@ struct IRExprAssociative : public IRExpr {
 	 return;
       sanity_check_irop(op);
       assert(nr_arguments >= 0);
-      assert(nr_arguments_allocated >= 0);
-      assert(nr_arguments <= nr_arguments_allocated);
       IRType a, b, c, d, e;
       typeOfPrimop(op, &a, &b, &c, &d, &e);
       assert(b == c);
@@ -1995,9 +1997,9 @@ extern IRExprConst* IRExpr_Const_V128 (unsigned short c);
 extern IRExprConst* IRExpr_Const_U128 (unsigned long hi, unsigned long lo);
 extern IRExpr* IRExpr_CCall  ( IRCallee* cee, IRType retty, IRExpr** args );
 extern IRExpr* IRExpr_Mux0X  ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX );
-extern IRExpr* IRExpr_Associative ( IROp op, ...) __attribute__((sentinel));
-extern IRExpr* IRExpr_Associative (IRExprAssociative *);
-extern IRExprAssociative* IRExpr_Associative (int nr_arguments, IROp op);
+extern IRExpr* IRExpr_Associative_V ( IROp op, ...) __attribute__((sentinel));
+extern IRExprAssociative* IRExpr_Associative_Claim (IROp op, int nr_arguments, IRExpr *const *contents);
+extern IRExprAssociative* IRExpr_Associative_Copy (IROp op, int nr_arguments, IRExpr *const *contents);
 extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,
 				     const MemoryAccessIdentifier &after);
 static inline IRExprFreeVariable *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty, bool isUnique) {

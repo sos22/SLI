@@ -254,22 +254,14 @@ muxify(IRExpr *what)
 		}
 		if (i == iea->nr_arguments)
 			return what;
-		IRExpr **newArgs0 = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, iea->nr_arguments);
+		IRExpr *newArgs0[iea->nr_arguments];
 		memcpy(newArgs0, iea->contents, sizeof(iea->contents[0]) * iea->nr_arguments);
 		newArgs0[i] = ((IRExprMux0X *)a)->expr0;
-		IRExpr **newArgsX = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, iea->nr_arguments);
+		IRExpr *newArgsX[iea->nr_arguments];
 		memcpy(newArgsX, iea->contents, sizeof(iea->contents[0]) * iea->nr_arguments);
 		newArgsX[i] = ((IRExprMux0X *)a)->exprX;
-		IRExprAssociative *exp0 = new IRExprAssociative();
-		exp0->op = iea->op;
-		exp0->nr_arguments = iea->nr_arguments;
-		exp0->nr_arguments_allocated = iea->nr_arguments;
-		exp0->contents = newArgs0;
-		IRExprAssociative *expX = new IRExprAssociative();
-		expX->op = iea->op;
-		expX->nr_arguments = iea->nr_arguments;
-		expX->nr_arguments_allocated = iea->nr_arguments;
-		expX->contents = newArgsX;
+		IRExprAssociative *exp0 = IRExpr_Associative_Copy(iea->op, iea->nr_arguments, newArgs0);
+		IRExprAssociative *expX = IRExpr_Associative_Copy(iea->op, iea->nr_arguments, newArgsX);
 		return muxify(
 			IRExpr_Mux0X(
 				((IRExprMux0X *)a)->cond,
@@ -434,23 +426,26 @@ quickSimplify(IRExpr *a)
 			if (arg2a->nr_arguments == 2) {
 				newArg2 = arg2a->contents[1];
 			} else {
-				IRExprAssociative *newArg2a = IRExpr_Associative(arg2a->nr_arguments - 1, Iop_Add32);
-				memcpy(newArg2a->contents, arg2a->contents + 1, sizeof(IRExpr *) * (arg2a->nr_arguments - 1));
-				newArg2 = newArg2a;
+				newArg2 = IRExpr_Associative_Copy(Iop_Add32, arg2a->nr_arguments - 1, arg2a->contents + 1);
 			}
 			return IRExpr_Binop(_ieb->op, newArg1, newArg2);
 		}
 		if (arg1 != _ieb->arg1 || arg2 != _ieb->arg2)
 			a = new IRExprBinop(_ieb->op, arg1, arg2);
 	} else if (a->tag == Iex_Associative) {
-		IRExprAssociative *iea = (IRExprAssociative *)a;
-		bool haveConsts = false;
+		IRExprAssociative *_iea = (IRExprAssociative *)a;
+		int const nr_arguments = _iea->nr_arguments;
+		IROp const op = _iea->op;
 		unsigned long mask;
 		unsigned long acc;
 		unsigned long defaultValue;
-		bool haveNested = false;
+		int new_nr_args = 0;
+		IRExpr *simpleArgs[nr_arguments];
+		bool realloc = false;
 
-		switch (iea->op) {
+		assert(nr_arguments != 0);
+
+		switch (op) {
 		case Iop_And1:                                 mask = 1;      defaultValue = mask; break;
 		case Iop_And8:                                 mask = 0xff;   defaultValue = mask; break;
 		case Iop_And16:                                mask = 0xffff; defaultValue = mask; break;
@@ -466,44 +461,38 @@ quickSimplify(IRExpr *a)
 			abort();
 		}
 		acc = defaultValue;
-		int new_nr_args = 0;
-		assert(iea->nr_arguments != 0);
-		for (int i = 0; i < iea->nr_arguments; i++) {
-			iea->contents[i] = quickSimplify(iea->contents[i]);
-			if (iea->contents[i]->tag == Iex_Const) {
-				if (!haveConsts)
-					new_nr_args++;
-				haveConsts = true;
-				switch (iea->op) {
+		for (int i = 0; i < nr_arguments; i++) {
+			simpleArgs[i] = quickSimplify(_iea->contents[i]);
+			if (simpleArgs[i] != _iea->contents[i])
+				realloc = true;
+			if (simpleArgs[i]->tag == Iex_Const) {
+				switch (op) {
 				case Iop_And1: case Iop_And8: case Iop_And16:
 				case Iop_And32: case Iop_And64:
-					acc &= ((IRExprConst *)iea->contents[i])->Ico.U64;
+					acc &= ((IRExprConst *)simpleArgs[i])->Ico.U64;
 					break;
 				case Iop_Or1: case Iop_Or8: case Iop_Or16:
 				case Iop_Or32: case Iop_Or64:
-					acc |= ((IRExprConst *)iea->contents[i])->Ico.U64;
+					acc |= ((IRExprConst *)simpleArgs[i])->Ico.U64;
 					break;
 				case Iop_Xor8: case Iop_Xor16:
 				case Iop_Xor32: case Iop_Xor64:
-					acc ^= ((IRExprConst *)iea->contents[i])->Ico.U64;
+					acc ^= ((IRExprConst *)simpleArgs[i])->Ico.U64;
 					break;
 				case Iop_Add8: case Iop_Add16:
 				case Iop_Add32: case Iop_Add64:
-					acc += ((IRExprConst *)iea->contents[i])->Ico.U64;
+					acc += ((IRExprConst *)simpleArgs[i])->Ico.U64;
 					break;
 				default:
 					abort();
 				}
-			} else if (iea->contents[i]->tag == Iex_Associative &&
-			    ((IRExprAssociative *)iea->contents[i])->op == iea->op) {
-				haveNested = true;
-				IRExprAssociative *arg = (IRExprAssociative *)iea->contents[i];
+			} else if (simpleArgs[i]->tag == Iex_Associative &&
+				   ((IRExprAssociative *)simpleArgs[i])->op == op) {
+				realloc = true;
+				IRExprAssociative *arg = (IRExprAssociative *)simpleArgs[i];
 				for (int j = 0; j < arg->nr_arguments; j++) {
 					if (arg->contents[j]->tag == Iex_Const) {
-						if (!haveConsts)
-							new_nr_args++;
-						haveConsts = true;
-						switch (iea->op) {
+						switch (op) {
 						case Iop_And1: case Iop_And8: case Iop_And16:
 						case Iop_And32: case Iop_And64:
 							acc &= ((IRExprConst *)arg->contents[j])->Ico.U64;
@@ -532,35 +521,12 @@ quickSimplify(IRExpr *a)
 			}
 		}
 		acc &= mask;
-		if ((iea->op == Iop_And1 || iea->op == Iop_Or1) &&
-		    haveConsts) {
-			if (iea->op == Iop_And1) {
-				if (acc) {
-					haveConsts = false;
-					new_nr_args--;
-				} else {
-					return IRExpr_Const_U1(false);
-				}
-			} else {
-				if (!acc) {
-					haveConsts = false;
-					new_nr_args--;
-				} else {
-					return IRExpr_Const_U1(true);
-				}
-			}
-		}
-		if (haveConsts && acc == defaultValue) {
-			haveConsts = false;
-			new_nr_args--;
-		}
+		if (op == Iop_And1 && acc == 0)
+			return IRExpr_Const_U1(false);
+		if (op == Iop_Or1 && acc == 1)
+			return IRExpr_Const_U1(true);
 		if (new_nr_args == 0) {
-			acc = defaultValue;
-			haveConsts = true;
-			new_nr_args = 1;
-		}
-		if (new_nr_args == 1 && haveConsts) {
-			switch (iea->type()) {
+			switch (_iea->type()) {
 #define do_ty(n)							\
 				case Ity_I ## n :			\
 					return IRExpr_Const_U ## n(acc);
@@ -574,23 +540,20 @@ quickSimplify(IRExpr *a)
 				abort();
 			}
 		}
+		if (acc != defaultValue)
+			new_nr_args++;
 		if (new_nr_args == 1) {
-			for (int i = 0; i < iea->nr_arguments; i++)
-				if (iea->contents[i]->tag != Iex_Const)
-					return iea->contents[i];
+			for (int i = 0; i < nr_arguments; i++)
+				if (simpleArgs[i]->tag != Iex_Const)
+					return simpleArgs[i];
 			abort();
 		}
-		assert(new_nr_args != 0);
-		if (!haveNested && new_nr_args == iea->nr_arguments)
-			return iea;
-		static libvex_allocation_site __las = {0, __FILE__, __LINE__};
-		IRExpr **newArgs = (IRExpr **)
-			__LibVEX_Alloc_Bytes(&ir_heap,
-					     sizeof(IRExpr *) * new_nr_args,
-					     &__las);
+		if (!realloc && new_nr_args == nr_arguments)
+			return _iea;
+		IRExpr **newArgs = alloc_irexpr_array(new_nr_args);
 		int outIdx = 0;
-		if (haveConsts) {
-			switch (iea->type()) {
+		if (acc != defaultValue) {
+			switch (_iea->type()) {
 #define do_ty(n)							\
 				case Ity_I ## n :			\
 					newArgs[0] = IRExpr_Const_U ## n(acc); \
@@ -607,12 +570,12 @@ quickSimplify(IRExpr *a)
 			outIdx++;
 		}
 
-		for (int i = 0; i < iea->nr_arguments; i++) {
-			if (iea->contents[i]->tag == Iex_Const) {
+		for (int i = 0; i < nr_arguments; i++) {
+			if (simpleArgs[i]->tag == Iex_Const) {
 				/* Already handled */
-			} else if (iea->contents[i]->tag == Iex_Associative &&
-				   ((IRExprAssociative *)iea->contents[i])->op == iea->op) {
-				IRExprAssociative *arg = (IRExprAssociative *)iea->contents[i];
+			} else if (simpleArgs[i]->tag == Iex_Associative &&
+				   ((IRExprAssociative *)simpleArgs[i])->op == op) {
+				IRExprAssociative *arg = (IRExprAssociative *)simpleArgs[i];
 				for (int j = 0; j < arg->nr_arguments; j++) {
 					if (arg->contents[j]->tag == Iex_Const) {
 						/* Already handled */
@@ -622,14 +585,12 @@ quickSimplify(IRExpr *a)
 					}
 				}
 			} else {
-				newArgs[outIdx] = iea->contents[i];
+				newArgs[outIdx] = simpleArgs[i];
 				outIdx++;
 			}
 		}
 		assert(outIdx == new_nr_args);
-		iea->nr_arguments = new_nr_args;
-		iea->nr_arguments_allocated = new_nr_args;
-		iea->contents = newArgs;
+		a = IRExpr_Associative_Claim(op, new_nr_args, newArgs);
 	} else if (a->tag == Iex_Mux0X) {
 		IRExprMux0X *m = (IRExprMux0X *)a;
 		auto cond = quickSimplify(m->cond);

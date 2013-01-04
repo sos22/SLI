@@ -112,18 +112,10 @@ static IRExpr *rawDupe(duplication_context &ctxt, const IRExpr *inp)
 	}
 	case Iex_Associative: {
 		const IRExprAssociative *i = (const IRExprAssociative *)inp;
-		IRExprAssociative *res = new IRExprAssociative();
-		res->op = i->op;
-		res->nr_arguments = i->nr_arguments;
-		res->nr_arguments_allocated = i->nr_arguments;
-		static libvex_allocation_site __las = {0, __FILE__, __LINE__};		
-		res->contents =
-			(IRExpr **)__LibVEX_Alloc_Bytes(&ir_heap,
-							sizeof(res->contents[0]) * res->nr_arguments,
-							&__las);
-		for (int j = 0; j < res->nr_arguments; j++)
-			ctxt(&res->contents[j], i->contents[j], rawDupe);
-		return res;
+		IRExpr **newArgs = alloc_irexpr_array(i->nr_arguments);
+		for (int ix = 0; ix < i->nr_arguments; ix++)
+			ctxt(&newArgs[ix], i->contents[ix], rawDupe);
+		return IRExpr_Associative_Claim(i->op, i->nr_arguments, newArgs);
 	}
 	case Iex_Get:
 	case Iex_Const:
