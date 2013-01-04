@@ -22,7 +22,7 @@ ${prog}: ${objs}
 	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm \$^ -o \$@
 else
 ${prog}: ${objs}
-	@printf "Link [%-40s]\\n" \$@ ; \\
+	@printf "Link [%-43s]\\n" \$@ ; \\
 	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm \$^ -o \$@
 endif
 EOF
