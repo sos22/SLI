@@ -372,6 +372,10 @@ public:
 		   then the phi doesn't matter, so just pick some
 		   arbitrary constants. */
 		IRExpr *c;
+
+		/* shut compiler up */
+		c = (IRExpr *)0xf001;
+
 		switch (phi->ty) {
 #define do_ty(n)						\
 			case Ity_I ## n :			\
@@ -388,6 +392,7 @@ public:
 			break;
 		case Ity_INVALID:
 			abort();
+			break;
 		}
 		set_register(scopes, phi->reg,
 			     exprbdd::var(&scopes->exprs, &scopes->bools, c),
