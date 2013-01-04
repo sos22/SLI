@@ -198,6 +198,10 @@ muxify(IRExpr *what)
 		IRExprCCall *cee = (IRExprCCall *)what;
 		IRExpr *a;
 		int i;
+
+		/* Shut compiler up */
+		a = (IRExpr *)0xf001;
+
 		for (i = 0; cee->args[i]; i++) {
 			a = muxify(cee->args[i]);
 			if (a->tag == Iex_Mux0X)
@@ -606,7 +610,7 @@ quickSimplify(IRExpr *a)
 				   ((IRExprAssociative *)simpleArgs[i])->op == op) {
 				IRExprAssociative *arg = (IRExprAssociative *)simpleArgs[i];
 				for (int j = 0; j < nr_arguments; j++) {
-					if (simpleArgs[j]->tag == Iex_Const) {
+					if (arg->contents[j]->tag == Iex_Const) {
 						/* Already handled */
 					} else {
 						newArgs[outIdx] = simpleArgs[j];

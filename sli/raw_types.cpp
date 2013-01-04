@@ -39,9 +39,9 @@ input_record::read(FILE *f, AddressSpace *as)
 {
 	int nr_loads, nr_stores;
 	bool res;
-	if (fread(&nr_loads, sizeof(nr_loads), 1, f) != 1)
+	if (fread(&nr_loads, sizeof(nr_loads), 1, f) != 1 ||
+	    fread(&nr_stores, sizeof(nr_stores), 1, f) != 1)
 		return false;
-	fread(&nr_stores, sizeof(nr_stores), 1, f);
 	res = rip.read(f, as);
 	for (int i = 0; i < nr_loads; i++) {
 		rip_t r;

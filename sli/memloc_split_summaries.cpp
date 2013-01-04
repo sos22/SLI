@@ -33,6 +33,9 @@ nr_distinct_memory_locations(CrashSummary *summary)
 int
 main(int argc, char *argv[])
 {
+	if (argc != 2)
+		errx(1, "need a single argument: the input directory");
+
 	DIR *d = opendir(argv[1]);
 	if (!d)
 		err(1, "opening %s", argv[1]);

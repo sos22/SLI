@@ -74,7 +74,6 @@ IRExprTransformer::transformIex(IRExprAssociative *e)
 	bool t = false;
 	int x = 0;
 	IRExpr *newArgs[e->nr_arguments];
-	IRExpr *newE;
 	while (x < e->nr_arguments) {
 		newArgs[x] = transformIRExpr(e->contents[x], &t);
 		x++;

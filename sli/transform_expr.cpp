@@ -100,6 +100,10 @@ log_reads_expr(unsigned tid, IRSB *sb, IRExpr *exp)
 
 		assert(e->addr->type() == Ity_I64);
 
+		/* Shut compiler up */
+		helper = (void *)0xf001;
+		helper_name = (const char *)0xdead;
+
 #define HLP(x) helper_name = "helper_load_" #x ; helper = (void *)helper_load_ ## x ;
 		switch (e->ty) {
 		case Ity_INVALID:
