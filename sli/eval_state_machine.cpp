@@ -368,7 +368,31 @@ public:
 				}
 			}
 		}
-		abort();
+		/* If none of the phi inputs have been assigned to
+		   then the phi doesn't matter, so just pick some
+		   arbitrary constants. */
+		IRExpr *c;
+		switch (phi->ty) {
+#define do_ty(n)						\
+			case Ity_I ## n :			\
+				c = IRExpr_Const_U ## n(0);	\
+				break
+			do_ty(1);
+			do_ty(8);
+			do_ty(16);
+			do_ty(32);
+			do_ty(64);
+#undef do_ty
+		case Ity_I128:
+			c = IRExpr_Const_U128(0, 0);
+			break;
+		case Ity_INVALID:
+			abort();
+		}
+		set_register(scopes, phi->reg,
+			     exprbdd::var(&scopes->exprs, &scopes->bools, c),
+			     assumption, opt);
+		return;
 	}
 
 	bbdd *specialiseIRExpr(SMScopes *, bbdd *iex);
