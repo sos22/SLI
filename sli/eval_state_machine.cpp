@@ -831,6 +831,10 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplifi
 		return tr_true;
 	}
 	simplifiedCondition = simplifyBDD(&scopes->bools, simplifiedCondition, opt);
+	if (TIMEOUT) {
+		/* Guess; we'll ignore the result, anyway. */
+		return tr_true;
+	}
 	if (simplifiedCondition->isLeaf) {
 		if (simplifiedCondition->leaf())
 			return tr_true;
