@@ -5,9 +5,8 @@
 StateMachineSideEffectLoad *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectLoad *l, bool *c)
 {
-	bool b = false;
-	exprbdd *a = transform_exprbdd(&scopes->bools, &scopes->exprs, l->addr, &b);
-	if (b) {
+	exprbdd *a = transform_exprbdd(&scopes->bools, &scopes->exprs, l->addr);
+	if (a != l->addr) {
 		*c = true;
 		return new StateMachineSideEffectLoad(l, a);
 	} else {
@@ -18,10 +17,9 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 StateMachineSideEffectStore *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectStore *s, bool *c)
 {
-	bool b = false;
-	exprbdd *a = transform_exprbdd(&scopes->bools, &scopes->exprs, s->addr, &b);
-	exprbdd *d = transform_exprbdd(&scopes->bools, &scopes->exprs, s->data, &b);
-	if (b) {
+	exprbdd *a = transform_exprbdd(&scopes->bools, &scopes->exprs, s->addr);
+	exprbdd *d = transform_exprbdd(&scopes->bools, &scopes->exprs, s->data);
+	if (a != s->addr || d != s->data) {
 		*c = true;
 		return new StateMachineSideEffectStore(s, a, d);
 	} else {
@@ -32,9 +30,8 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 StateMachineSideEffectAssertFalse *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectAssertFalse *a, bool *d)
 {
-	bool b = false;
-	bbdd *v = transform_bbdd(&scopes->bools, a->value, &b);
-	if (b) {
+	bbdd *v = transform_bbdd(&scopes->bools, a->value);
+	if (v != a->value) {
 		*d = true;
 		return new StateMachineSideEffectAssertFalse(v, a->reflectsActualProgram);
 	} else {
@@ -45,9 +42,8 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 StateMachineSideEffectStartFunction *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectStartFunction *a, bool *d)
 {
-	bool b = false;
-	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, a->rsp, &b);
-	if (b) {
+	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, a->rsp);
+	if (v != a->rsp) {
 		*d = true;
 		return new StateMachineSideEffectStartFunction(v, a->frame);
 	} else {
@@ -58,9 +54,8 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 StateMachineSideEffectEndFunction *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectEndFunction *a, bool *d)
 {
-	bool b = false;
-	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, a->rsp, &b);
-	if (b) {
+	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, a->rsp);
+	if (v != a->rsp) {
 		*d = true;
 		return new StateMachineSideEffectEndFunction(v, a->frame);
 	} else {
@@ -71,9 +66,8 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 StateMachineSideEffectCopy *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectCopy *c, bool *d)
 {
-	bool b = false;
-	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, c->value, &b);
-	if (b) {
+	exprbdd *v = transform_exprbdd(&scopes->bools, &scopes->exprs, c->value);
+	if (v != c->value) {
 		*d = true;
 		return new StateMachineSideEffectCopy(c->target, v);
 	} else {
@@ -245,16 +239,16 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes,
 						StateMachineSideEffectPhi *phi,
 						bool *done_something)
 {
-	bool t = false;
 	unsigned x = 0;
 	exprbdd *newE;
 
 	newE = (exprbdd *)0xf001deadul; /* Shut the compiler up */
 	for (x = 0; x < phi->generations.size(); x++) {
-		if (phi->generations[x].val)
-			newE = transform_exprbdd(&scopes->bools, &scopes->exprs, phi->generations[x].val, &t);
-		if (t)
-			break;
+		if (phi->generations[x].val) {
+			newE = transform_exprbdd(&scopes->bools, &scopes->exprs, phi->generations[x].val);
+			if (newE != phi->generations[x].val)
+				break;
+		}
 	}
 	if (x == phi->generations.size())
 		return NULL;
@@ -266,7 +260,7 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes,
 	while (x < newPhi->generations.size()) {
 		if (newPhi->generations[x].val)
 			newPhi->generations[x].val =
-				transform_exprbdd(&scopes->bools, &scopes->exprs, newPhi->generations[x].val, &t);
+				transform_exprbdd(&scopes->bools, &scopes->exprs, newPhi->generations[x].val);
 		x++;
 	}
 	return newPhi;

@@ -136,8 +136,7 @@ avail_t::dereference(SMScopes *scopes, exprbdd *addr, const AllowableOptimisatio
 		addr);
 	if (!badPtr)
 		return;
-	bool b;
-	badPtr = simplifyBDD(&scopes->exprs, &scopes->bools, badPtr, opt, &b);
+	badPtr = simplifyBDD(&scopes->exprs, &scopes->bools, badPtr, opt);
 	makeFalse(&scopes->bools, exprbdd::to_bbdd(&scopes->bools, badPtr));
 }
 
@@ -458,7 +457,9 @@ static bbdd *
 applyAvailSet(bbdd::scope *scope, const avail_t &avail, bbdd *expr, bool *done_something)
 {
 	applyAvailTransformer aat(avail);
-	bbdd *e = aat.transform_bbdd(scope, expr, done_something);
+	bbdd *e = aat.transform_bbdd(scope, expr);
+	if (e != expr)
+		*done_something = true;
 	if (!avail.assumption)
 		return e;
 	bbdd *e2 = bbdd::assume(
@@ -473,7 +474,9 @@ static smrbdd *
 applyAvailSet(SMScopes *scopes, const avail_t &avail, smrbdd *expr, bool *done_something)
 {
 	applyAvailTransformer aat(avail);
-	smrbdd *e = aat.transform_smrbdd(&scopes->bools, &scopes->smrs, expr, done_something);
+	smrbdd *e = aat.transform_smrbdd(&scopes->bools, &scopes->smrs, expr);
+	if (e != expr)
+		*done_something = true;
 	if (!avail.assumption)
 		return e;
 	smrbdd *e2 = smrbdd::assume(
@@ -488,7 +491,9 @@ static exprbdd *
 applyAvailSet(SMScopes *scopes, const avail_t &avail, exprbdd *expr, bool *done_something)
 {
 	applyAvailTransformer aat(avail);
-	exprbdd *e = aat.transform_exprbdd(&scopes->bools, &scopes->exprs, expr, done_something);
+	exprbdd *e = aat.transform_exprbdd(&scopes->bools, &scopes->exprs, expr);
+	if (e != expr)
+		*done_something = true;
 	if (!avail.assumption)
 		return e;
 	exprbdd *e2 = exprbdd::assume(

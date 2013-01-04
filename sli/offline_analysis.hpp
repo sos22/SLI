@@ -12,133 +12,107 @@
 #define STORING_THREAD 97
 
 class IRExprTransformer {
-	exprbdd *transform_exprbdd(bbdd::scope *, exprbdd::scope *, exprbdd *what, bool *done_something,
-				   std::map<exprbdd *, exprbdd *> &);
-	smrbdd *transform_smrbdd(bbdd::scope *, smrbdd::scope *, smrbdd *what, bool *done_something,
-				  std::map<smrbdd *, smrbdd *> &);
-	bbdd *transform_bbdd(bbdd::scope *, bbdd *what, bool *done_something,
-				std::map<bbdd *, bbdd *> &);
+	exprbdd *transform_exprbdd(bbdd::scope *, exprbdd::scope *, exprbdd *what, std::map<exprbdd *, exprbdd *> &);
+	smrbdd *transform_smrbdd(bbdd::scope *, smrbdd::scope *, smrbdd *what, std::map<smrbdd *, smrbdd *> &);
+	bbdd *transform_bbdd(bbdd::scope *, bbdd *what, std::map<bbdd *, bbdd *> &);
 	IRExpr *_currentIRExpr;
 protected:
 	bool aborted;
 	void abortTransform() { aborted = true; }
 	IRExpr *currentIRExpr() { return _currentIRExpr; }
-	virtual IRExpr *transformIex(IRExprGet *) { return NULL; }
+	virtual IRExpr *transformIex(IRExprGet *g) { return g; }
 	virtual IRExpr *transformIex(IRExprGetI *e)
 	{
-		bool t = false;
-		IRExpr *e2 = transformIRExpr(e->ix, &t);
-		
-		if (!t)
-			return NULL;
+		IRExpr *ix = transformIRExpr(e->ix);
+		if (ix == e->ix)
+			return e;
 		else
-			return IRExpr_GetI(e->descr, e2, e->bias, e->tid);
+			return IRExpr_GetI(e->descr, ix, e->bias, e->tid);
 	}
 	virtual IRExpr *transformIex(IRExprQop *e)
 	{
-		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->arg1, &t);
-		IRExpr *a2 = transformIRExpr(e->arg2, &t);
-		IRExpr *a3 = transformIRExpr(e->arg3, &t);
-		IRExpr *a4 = transformIRExpr(e->arg4, &t);
-		
-		if (!t)
-			return NULL;
+		IRExpr *a1 = transformIRExpr(e->arg1);
+		IRExpr *a2 = transformIRExpr(e->arg2);
+		IRExpr *a3 = transformIRExpr(e->arg3);
+		IRExpr *a4 = transformIRExpr(e->arg4);
+		if (a1 == e->arg1 && a2 == e->arg2 && a3 == e->arg3 &&
+		    a4 == e->arg4)
+			return e;
 		else
 			return IRExpr_Qop(e->op, a1, a2, a3, a4);
+
 	}
 	virtual IRExpr *transformIex(IRExprTriop *e)
 	{
-		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->arg1, &t);
-		IRExpr *a2 = transformIRExpr(e->arg2, &t);
-		IRExpr *a3 = transformIRExpr(e->arg3, &t);
-		
-		if (!t)
-			return NULL;
+		IRExpr *a1 = transformIRExpr(e->arg1);
+		IRExpr *a2 = transformIRExpr(e->arg2);
+		IRExpr *a3 = transformIRExpr(e->arg3);
+		if (a1 == e->arg1 && a2 == e->arg2 && a3 == e->arg3)
+			return e;
 		else
 			return IRExpr_Triop(e->op, a1, a2, a3);
 	}
 	virtual IRExpr *transformIex(IRExprBinop *e)
 	{
-		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->arg1, &t);
-		IRExpr *a2 = transformIRExpr(e->arg2, &t);
-		
-		if (!t)
-			return NULL;
+		IRExpr *a1 = transformIRExpr(e->arg1);
+		IRExpr *a2 = transformIRExpr(e->arg2);
+		if (a1 == e->arg1 && a2 == e->arg2)
+			return e;
 		else
 			return IRExpr_Binop(e->op, a1, a2);
 	}
 	virtual IRExpr *transformIex(IRExprUnop *e)
 	{
-		bool t = false;
-		IRExpr *a1 = transformIRExpr(e->arg, &t);
-		
-		if (!t)
-			return NULL;
+		IRExpr *a1 = transformIRExpr(e->arg);
+		if (a1 == e->arg)
+			return e;
 		else
 			return IRExpr_Unop(e->op, a1);
 	}
 	virtual IRExpr *transformIex(IRExprLoad *e)
 	{
-		bool t = false;
-		IRExpr *addr = transformIRExpr(e->addr, &t);
-		
-		if (!t)
-			return NULL;
+		IRExpr *addr = transformIRExpr(e->addr);
+		if (addr == e->addr)
+			return e;
 		else
 			return IRExpr_Load(e->ty, addr);
 	}
-	virtual IRExpr *transformIex(IRExprConst *)
+	virtual IRExpr *transformIex(IRExprConst *c)
 	{
-		return NULL;
+		return c;
 	}
 	virtual IRExpr *transformIex(IRExprMux0X *e)
 	{
-		bool t = false;
-		IRExpr *c = transformIRExpr(e->cond, &t);
-		IRExpr *z = transformIRExpr(e->expr0, &t);
-		IRExpr *x = transformIRExpr(e->exprX, &t);
-		
-		if (!t)
-			return NULL;
+		IRExpr *c = transformIRExpr(e->cond);
+		IRExpr *z = transformIRExpr(e->expr0);
+		IRExpr *x = transformIRExpr(e->exprX);
+
+		if (c == e->cond && z == e->expr0 && x == e->exprX)
+			return e;
 		else
 			return IRExpr_Mux0X(c, z, x);
 	}
 	virtual IRExpr *transformIex(IRExprCCall *);
 	virtual IRExpr *transformIex(IRExprAssociative *);
-	virtual IRExpr *transformIex(IRExprHappensBefore *) { return NULL; }
-	virtual IRExpr *transformIex(IRExprFreeVariable *) { return NULL; }
-	virtual IRExpr *transformIex(IRExprEntryPoint *) { return NULL; }
-	virtual IRExpr *transformIex(IRExprControlFlow *) { return NULL; }
-	virtual IRExpr *transformIRExpr(IRExpr *e, bool *done_something);
+	virtual IRExpr *transformIex(IRExprHappensBefore *e) { return e; }
+	virtual IRExpr *transformIex(IRExprFreeVariable *e) { return e; }
+	virtual IRExpr *transformIex(IRExprEntryPoint *e) { return e; }
+	virtual IRExpr *transformIex(IRExprControlFlow *e) { return e; }
+	virtual int transformIRExpr(IRExpr *, bool *) { return 0; }
+	virtual IRExpr *transformIRExpr(IRExpr *e);
 public:
-	IRExpr *doit(IRExpr *e, bool *done_something) { aborted = false; return transformIRExpr(e, done_something); }
-	IRExpr *doit(IRExpr *e) { bool t; return doit(e, &t); }
-	smrbdd *transform_smrbdd(bbdd::scope *s, smrbdd::scope *s2, smrbdd *what, bool *done_something) {
+	IRExpr *doit(IRExpr *e) { aborted = false; return transformIRExpr(e); }
+	smrbdd *transform_smrbdd(bbdd::scope *s, smrbdd::scope *s2, smrbdd *what) {
 		std::map<smrbdd *, smrbdd *> memo;
-		return transform_smrbdd(s, s2, what, done_something, memo);
+		return transform_smrbdd(s, s2, what, memo);
 	}
-	smrbdd *transform_smrbdd(bbdd::scope *scope, smrbdd::scope *scope2, smrbdd *what) {
-		bool b;
-		return transform_smrbdd(scope, scope2, what, &b);
-	}
-	exprbdd *transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope, exprbdd *what, bool *done_something) {
+	exprbdd *transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope, exprbdd *what) {
 		std::map<exprbdd *, exprbdd *> memo;
-		return transform_exprbdd(bscope, scope, what, done_something, memo);
-	}
-	exprbdd *transform_exprbdd(bbdd::scope *scope, exprbdd::scope *scope2, exprbdd *what) {
-		bool b;
-		return transform_exprbdd(scope, scope2, what, &b);
-	}
-	bbdd *transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_something) {
-		std::map<bbdd *, bbdd *> memo;
-		return transform_bbdd(scope, what, done_something, memo);
+		return transform_exprbdd(bscope, scope, what, memo);
 	}
 	bbdd *transform_bbdd(bbdd::scope *scope, bbdd *what) {
-		bool b;
-		return transform_bbdd(scope, what, &b);
+		std::map<bbdd *, bbdd *> memo;
+		return transform_bbdd(scope, what, memo);
 	}
 };
 
@@ -182,9 +156,8 @@ protected:
 							StateMachineTerminal *smt,
 							bool *done_something)
 	{
-		bool b = false;
-		smrbdd *smr = transform_smrbdd(&scopes->bools, &scopes->smrs, smt->res, &b);
-		if (b) {
+		smrbdd *smr = transform_smrbdd(&scopes->bools, &scopes->smrs, smt->res);
+		if (smr != smt->res) {
 			*done_something = true;
 			return new StateMachineTerminal(smt, smr);
 		} else {
@@ -209,9 +182,8 @@ protected:
 							 StateMachineBifurcate *s,
 							 bool *done_something)
 	{
-		bool b = false;
-		bbdd *c = transform_bbdd(&scopes->bools, s->condition, &b);
-		if (b) {
+		bbdd *c = transform_bbdd(&scopes->bools, s->condition);
+		if (c != s->condition) {
 			*done_something = true;
 			return new StateMachineBifurcate(s, c);
 		} else {

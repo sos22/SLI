@@ -36,8 +36,7 @@ main(int argc, char *argv[])
 
 	survive = survivalConstraintIfExecutedAtomically(&scopes, mai, sm, nullBBDD, oracle, false, opt, ALLOW_GC);
 
-	bool ignore;
-	survive = simplifyBDD(&scopes.bools, survive, opt, &ignore);
+	survive = simplifyBDD(&scopes.bools, survive, opt);
 
 	survive->prettyPrint(stdout);
 

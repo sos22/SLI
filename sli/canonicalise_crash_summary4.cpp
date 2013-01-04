@@ -38,8 +38,8 @@ template <typename exprTransformer>
 class StateIRExprTransformer : public StateMachineTransformer {
 	exprTransformer &et;
 	bool rewriteNewStates() const { return false; }
-	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
-		return et.doit(e, done_something);
+	IRExpr *transformIRExpr(IRExpr *e) {
+		return et.doit(e);
 	}
 public:
 	StateIRExprTransformer(exprTransformer &_et)
@@ -386,7 +386,7 @@ introduceCompoundFunctions(CrashSummary *summary,
 		struct _ : public StateMachineTransformer {
 			std::map<Function *, int> &possibleFunctions;
 			std::set<threadAndRegister> &constRegisters;
-			IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+			IRExpr *transformIRExpr(IRExpr *e) {
 				bool found_one = false;
 				for (auto it = possibleFunctions.begin(); it != possibleFunctions.end(); it++) {
 					if (it->first->matches(e)) {
@@ -396,7 +396,7 @@ introduceCompoundFunctions(CrashSummary *summary,
 				}
 				if (!found_one)
 					introduceCandidateFunction(e, possibleFunctions, constRegisters);
-				return IRExprTransformer::transformIRExpr(e, done_something);
+				return IRExprTransformer::transformIRExpr(e);
 			}
 			bool rewriteNewStates() const { return false; }
 		public:
@@ -440,10 +440,9 @@ introduceCompoundFunctions(CrashSummary *summary,
 		Function *f;
 		IRCallee *cee;
 		int *f_cntr;
-		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+		IRExpr *transformIRExpr(IRExpr *e) {
 			std::map<int, IRExpr *> argVals;
 			if (f->matches(e, argVals)) {
-				*done_something = true;
 				if (!cee)
 					cee = mkIRCallee(
 						0,
@@ -465,7 +464,7 @@ introduceCompoundFunctions(CrashSummary *summary,
 					       f->name());
 				return res;
 			}
-			return StateMachineTransformer::transformIRExpr(e, done_something);
+			return StateMachineTransformer::transformIRExpr(e);
 		}
 		bool rewriteNewStates() const { return false; }
 	} doit;

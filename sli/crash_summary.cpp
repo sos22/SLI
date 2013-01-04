@@ -191,7 +191,10 @@ transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans, bool 
 	if (!done_something) done_something = &b;
 	input->loadMachine = trans.transform(input->scopes, input->loadMachine, done_something);
 	input->storeMachine = trans.transform(input->scopes, input->storeMachine, done_something);
-	input->verificationCondition = trans.transform_bbdd(&input->scopes->bools, input->verificationCondition, done_something);
+	auto vc = trans.transform_bbdd(&input->scopes->bools, input->verificationCondition);
+	if (vc != input->verificationCondition)
+		*done_something = true;
+	input->verificationCondition = vc;
 	return input;
 }
 

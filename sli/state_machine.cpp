@@ -67,7 +67,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 			return this;
 		return new StateMachineTerminal(dbg_origin, n);
 	}
-	set_condition(simplifyBDD(&scopes->bools, condition, opt, done_something));
+	set_condition(simplifyBDD(&scopes->bools, condition, opt));
 	if (condition->isLeaf) {
 		*done_something = true;
 		if (condition->leaf())
@@ -133,8 +133,8 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 StateMachineSideEffect *
 StateMachineSideEffectStore::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt, done_something);
-	data = simplifyBDD(&scopes->exprs, &scopes->bools, data, opt, done_something);
+	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt);
+	data = simplifyBDD(&scopes->exprs, &scopes->bools, data, opt);
 	if (isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
@@ -145,7 +145,7 @@ StateMachineSideEffectStore::optimise(SMScopes *scopes, const AllowableOptimisat
 StateMachineSideEffect *
 StateMachineSideEffectLoad::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt, done_something);
+	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt);
 	if (isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
@@ -154,16 +154,16 @@ StateMachineSideEffectLoad::optimise(SMScopes *scopes, const AllowableOptimisati
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *)
 {
-	value = simplifyBDD(&scopes->exprs, &scopes->bools, value, opt, done_something);
+	value = simplifyBDD(&scopes->exprs, &scopes->bools, value, opt);
 	return this;
 }
 
 StateMachineSideEffect *
 StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	value = simplifyBDD(&scopes->bools, value, opt, done_something);
+	value = simplifyBDD(&scopes->bools, value, opt);
 	if (value->isLeaf) {
 		*done_something = true;
 		if (value->leaf())
@@ -175,16 +175,16 @@ StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOpt
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *)
 {
-	rsp = simplifyBDD(&scopes->exprs, &scopes->bools, rsp, opt, done_something);
+	rsp = simplifyBDD(&scopes->exprs, &scopes->bools, rsp, opt);
 	return this;
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectEndFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectEndFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *)
 {
-	rsp = simplifyBDD(&scopes->exprs, &scopes->bools, rsp, opt, done_something);
+	rsp = simplifyBDD(&scopes->exprs, &scopes->bools, rsp, opt);
 	return this;
 }
 
@@ -1278,12 +1278,12 @@ SMScopes::parse(const char *buf, const char **end)
 }
 
 StateMachineState *
-StateMachineTerminal::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineTerminal::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *)
 {
 	if (current_optimisation_gen == last_optimisation_gen)
 		return this;
 	last_optimisation_gen = current_optimisation_gen;
 
-	set_res(simplifyBDD(&scopes->smrs, &scopes->bools, res, opt, done_something));
+	set_res(simplifyBDD(&scopes->smrs, &scopes->bools, res, opt));
 	return this;
 }
