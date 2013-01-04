@@ -532,8 +532,8 @@ quickSimplify(IRExpr *a)
 		if (new_nr_args == 0) {
 			switch (_iea->type()) {
 #define do_ty(n)							\
-				case Ity_I ## n :			\
-					return IRExpr_Const_U ## n(acc);
+			case Ity_I ## n :				\
+				return IRExpr_Const_U ## n(acc);
 				do_ty(1);
 				do_ty(8);
 				do_ty(16);
