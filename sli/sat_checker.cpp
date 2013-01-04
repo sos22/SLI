@@ -490,26 +490,15 @@ pureSimplify(IRExpr *what, internIRExprTable &internTable)
 				return IRExpr_Const_U1(true);
 			return IRExprTransformer::transformIex(ieb);
 		}
-		IRExpr *transformIRExpr(IRExpr *a, bool *done_something)
+		IRExpr *transformIRExpr(IRExpr *a)
 		{
-			bool b = false;
-			IRExpr *res = IRExprTransformer::transformIRExpr(a, &b);
-			if (b)
-				assert(res != a);
-			if (res != a) {
-				res = internIRExpr(res, *internTable);
-				*done_something = true;
-			}
-			return res;
+			IRExpr *res = IRExprTransformer::transformIRExpr(a);
+			return internIRExpr(res, *internTable);
 		}
 	} doit;
 	doit.internTable = &internTable;
-	bool done_something = false;
-	IRExpr *a = doit.doit(what, &done_something);
-	if (done_something)
-		return a;
-	else
-		return internIRExpr(a, internTable);
+	IRExpr *a = doit.doit(what);
+	return internIRExpr(a, internTable);
 }
 
 static IRExpr *
@@ -518,12 +507,10 @@ rewriteIRExpr(IRExpr *what, IRExpr *from, IRExpr *to, internIRExprTable &internT
 	struct : public IRExprTransformer {
 		IRExpr *from;
 		IRExpr *to;
-		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
-			if (e == from) {
-				*done_something = true;
+		IRExpr *transformIRExpr(IRExpr *e) {
+			if (e == from)
 				return to;
-			}
-			return IRExprTransformer::transformIRExpr(e, done_something);
+			return IRExprTransformer::transformIRExpr(e);
 		}
 	} doit;
 	doit.from = from;
@@ -834,12 +821,12 @@ variableMultiplicity(IRExpr *expression, IRExpr *variable)
 	struct : public IRExprTransformer {
 		int cntr;
 		IRExpr *expr;
-		IRExpr *transformIRExpr(IRExpr *a, bool *done_something) {
+		IRExpr *transformIRExpr(IRExpr *a) {
 			if (a == expr) {
 				cntr++;
 				return a;
 			}
-			return IRExprTransformer::transformIRExpr(a, done_something);
+			return IRExprTransformer::transformIRExpr(a);
 		}
 	} doit;
 	doit.cntr = 0;
@@ -968,12 +955,10 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 			}
 			return IRExprTransformer::transformIex(e);
 		}
-		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
-			if (e == variable) {
-				*done_something = true;
+		IRExpr *transformIRExpr(IRExpr *e) {
+			if (e == variable)
 				return IRExpr_Const_U1(value);
-			}
-			return IRExprTransformer::transformIRExpr(e, done_something);
+			return IRExprTransformer::transformIRExpr(e);
 		}
 		IRExpr *transformIex(IRExprUnop *e) {
 			IRExpr *e2 = IRExprTransformer::transformIex(e);
@@ -998,7 +983,8 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 			IRExpr *newArgs[e->nr_arguments];
 			int outIdx = 0;
 			for (int inIdx = 0; inIdx < e->nr_arguments; inIdx++) {
-				newArgs[outIdx] = transformIRExpr(e->contents[inIdx], &t);
+				newArgs[outIdx] = transformIRExpr(e->contents[inIdx]);
+				t |= newArgs[outIdx] != e->contents[inIdx];
 				if (newArgs[outIdx]->tag == Iex_Const) {
 					IRExprConst *c = (IRExprConst *)newArgs[outIdx];
 					if (c->Ico.U1 == suppress)
@@ -1023,12 +1009,10 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 	struct : public IRExprTransformer {
 		IRExpr *from;
 		IRExpr *to;
-		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
-			if (e == from) {
-				*done_something = true;
+		IRExpr *transformIRExpr(IRExpr *e) {
+			if (e == from)
 				return to;
-			}
-			return IRExprTransformer::transformIRExpr(e, done_something);
+			return IRExprTransformer::transformIRExpr(e);
 		}
 	} arithRewrite;
 	if (value && expressionImpliesRewrite(variable, &arithRewrite.from, &arithRewrite.to))
@@ -1064,10 +1048,10 @@ findBooleans(IRExpr *expr, std::set<IRExpr *> &booleans)
 {
 	struct _ : public IRExprTransformer {
 		std::set<IRExpr *> &booleans;
-		IRExpr *transformIRExpr(IRExpr *a, bool *done_something) {
+		IRExpr *transformIRExpr(IRExpr *a) {
 			if (a->type() == Ity_I1 && isSimpleBoolean(a))
 				booleans.insert(a);
-			return IRExprTransformer::transformIRExpr(a, done_something);
+			return IRExprTransformer::transformIRExpr(a);
 		}
 		_(std::set<IRExpr *> &_booleans)
 			: booleans(_booleans)

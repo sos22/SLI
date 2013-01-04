@@ -59,11 +59,9 @@ optimiseStateMachineAssuming(SMScopes *scopes,
 		IRExpr *assumption;
 		bool assumptionIsTrue;
 
-		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
-			if (e == assumption) {
-				*done_something = true;
+		IRExpr *transformIRExpr(IRExpr *e) {
+			if (e == assumption)
 				return IRExpr_Const_U1(assumptionIsTrue);
-			}
 			if (assumptionIsTrue &&
 			    e->tag == Iex_EntryPoint &&
 			    assumption->tag == Iex_EntryPoint &&
@@ -74,7 +72,7 @@ optimiseStateMachineAssuming(SMScopes *scopes,
 				 * also have entered at t1:labelB */
 				return IRExpr_Const_U1(false);
 			}
-			return StateMachineTransformer::transformIRExpr(e, done_something);
+			return StateMachineTransformer::transformIRExpr(e);
 		}
 		bool rewriteNewStates() const { return false; }
 	} doit;

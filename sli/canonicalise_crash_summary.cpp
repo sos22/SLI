@@ -206,8 +206,8 @@ class SplitSsaGenerations : public StateMachineTransformer {
 		}
 		return IRExpr_Get(canon_const(iec), iec->type());
 	}
-	IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
-		IRExpr *res = IRExprTransformer::transformIRExpr(e, done_something);
+	IRExpr *transformIRExpr(IRExpr *e) {
+		IRExpr *res = IRExprTransformer::transformIRExpr(e);
 		if (!res)
 			return NULL;
 		return internIRExpr(res, internTable);

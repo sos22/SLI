@@ -3,7 +3,7 @@
 #include "offline_analysis.hpp"
 
 IRExpr *
-IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
+IRExprTransformer::transformIRExpr(IRExpr *e)
 {
 	if (TIMEOUT)
 		return e;
@@ -34,14 +34,7 @@ IRExprTransformer::transformIRExpr(IRExpr *e, bool *done_something)
 		do_case(ControlFlow);
 #undef do_case
 	}
-	/* res == e shouldn't really happen, but it's just about
-	   possible that expression internment could make it happen in
-	   otherwise correct code, so handle it correctly. */
-	if (res && res != e) {
-		*done_something = true;
-	} else {
-		res = e;
-	}
+	assert(res != NULL);
 	_currentIRExpr = oldCurrent;
 	return res;
 }
@@ -57,11 +50,13 @@ IRExprTransformer::transformIex(IRExprCCall *e)
 	for (nr_args = 0; e->args[nr_args]; nr_args++)
 		;
 	newArgs = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, nr_args + 1);
-	for (x = 0; x < nr_args; x++)
-		newArgs[x] = transformIRExpr(e->args[x], &t);
+	for (x = 0; x < nr_args; x++) {
+		newArgs[x] = transformIRExpr(e->args[x]);
+		t |= newArgs[x] != e->args[x];
+	}
 	newArgs[nr_args] = NULL;
 	if (!t)
-		return NULL;
+		return e;
 	else
 		return IRExpr_CCall(e->cee,
 				    e->retty,
@@ -75,7 +70,7 @@ IRExprTransformer::transformIex(IRExprAssociative *e)
 	int x = 0;
 	IRExpr *newArgs[e->nr_arguments];
 	while (x < e->nr_arguments) {
-		newArgs[x] = transformIRExpr(e->contents[x], &t);
+		newArgs[x] = transformIRExpr(e->contents[x]);
 		t |= newArgs[x] != e->contents[x];
 		x++;
 	}
@@ -86,8 +81,7 @@ IRExprTransformer::transformIex(IRExprAssociative *e)
 }
 
 bbdd *
-IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_something,
-				  std::map<bbdd *, bbdd *> &memo)
+IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, std::map<bbdd *, bbdd *> &memo)
 {
 	if (what->isLeaf)
 		return what;
@@ -96,14 +90,14 @@ IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_som
 	auto did_insert = it_did_insert.second;
 	bbdd *&res(it->second);
 	if (did_insert) {
-		bool b = false;
-		IRExpr *e = doit(what->internal().condition, &b);
-		bbdd *t = transform_bbdd(scope, what->internal().trueBranch, &b, memo);
-		bbdd *f = transform_bbdd(scope, what->internal().falseBranch, &b, memo);
-		if (!b) {
+		IRExpr *e = doit(what->internal().condition);
+		bbdd *t = transform_bbdd(scope, what->internal().trueBranch, memo);
+		bbdd *f = transform_bbdd(scope, what->internal().falseBranch, memo);
+		if (e == what->internal().condition &&
+		    t == what->internal().trueBranch &&
+		    f == what->internal().falseBranch) {
 			res = what;
 		} else {
-			*done_something = true;
 			res = bbdd::ifelse(
 				scope,
 				bbdd::var(scope, e),
@@ -115,8 +109,7 @@ IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, bool *done_som
 }
 
 smrbdd *
-IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, smrbdd *what, bool *done_something,
-				    std::map<smrbdd *, smrbdd *> &memo)
+IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, smrbdd *what, std::map<smrbdd *, smrbdd *> &memo)
 {
 	if (what->isLeaf)
 		return what;
@@ -125,14 +118,14 @@ IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, s
 	auto did_insert = it_did_insert.second;
 	smrbdd *&res(it->second);
 	if (did_insert) {
-		bool b = false;
-		IRExpr *e = doit(what->internal().condition, &b);
-		smrbdd *t = transform_smrbdd(bscope, scope, what->internal().trueBranch, &b, memo);
-		smrbdd *f = transform_smrbdd(bscope, scope, what->internal().falseBranch, &b, memo);
-		if (!b) {
+		IRExpr *e = doit(what->internal().condition);
+		smrbdd *t = transform_smrbdd(bscope, scope, what->internal().trueBranch, memo);
+		smrbdd *f = transform_smrbdd(bscope, scope, what->internal().falseBranch, memo);
+		if (e == what->internal().condition &&
+		    t == what->internal().trueBranch &&
+		    f == what->internal().falseBranch) {
 			res = what;
 		} else {
-			*done_something = true;
 			res = smrbdd::ifelse(
 				scope,
 				bbdd::var(bscope, e),
@@ -145,7 +138,7 @@ IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, s
 
 exprbdd *
 IRExprTransformer::transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope, exprbdd *what,
-				     bool *done_something, std::map<exprbdd *, exprbdd *> &memo)
+				     std::map<exprbdd *, exprbdd *> &memo)
 {
 	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(what, what));
 	auto it = it_did_insert.first;
@@ -153,20 +146,16 @@ IRExprTransformer::transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope,
 	exprbdd *&res(it->second);
 	if (did_insert) {
 		if (what->isLeaf) {
-			IRExpr *newLeaf = doit(what->leaf(), done_something);
+			IRExpr *newLeaf = doit(what->leaf());
 			if (what->leaf() != newLeaf)
 				res = exprbdd::var(scope, bscope, newLeaf);
 		} else {
-			bool b = false;
-			IRExpr *e = doit(what->internal().condition, &b);
-			exprbdd *t = transform_exprbdd(bscope, scope, what->internal().trueBranch, &b, memo);
-			exprbdd *f = transform_exprbdd(bscope, scope, what->internal().falseBranch, &b, memo);
-			if (b)
-				*done_something = true;
+			IRExpr *e = doit(what->internal().condition);
+			exprbdd *t = transform_exprbdd(bscope, scope, what->internal().trueBranch, memo);
+			exprbdd *f = transform_exprbdd(bscope, scope, what->internal().falseBranch, memo);
 			if (e != what->internal().condition ||
 			    t != what->internal().trueBranch ||
 			    f != what->internal().falseBranch) {
-				*done_something = true;
 				res = exprbdd::ifelse(
 					scope,
 					bbdd::var(bscope, e),

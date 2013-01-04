@@ -806,8 +806,7 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplifi
 		 * like and it won't actually matter. */
 		return tr_true;
 	}
-	bool b;
-	simplifiedCondition = simplifyBDD(&scopes->bools, simplifiedCondition, opt, &b);
+	simplifiedCondition = simplifyBDD(&scopes->bools, simplifiedCondition, opt);
 	if (simplifiedCondition->isLeaf) {
 		if (simplifiedCondition->leaf())
 			return tr_true;

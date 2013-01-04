@@ -609,16 +609,12 @@ simplifyAssuming(IRExpr *expr,
 	struct _ : public IRExprTransformer {
 		const std::set<IRExpr *> &definitelyTrue;
 		const std::set<IRExpr *> &definitelyFalse;
-		IRExpr *transformIRExpr(IRExpr *what, bool *done_something) {
-			if (definitelyTrue.count(what)) {
-				*done_something = true;
+		IRExpr *transformIRExpr(IRExpr *what) {
+			if (definitelyTrue.count(what))
 				return IRExpr_Const_U1(true);
-			}
-			if (definitelyFalse.count(what)) {
-				*done_something = true;
+			if (definitelyFalse.count(what))
 				return IRExpr_Const_U1(false);
-			}
-			return IRExprTransformer::transformIRExpr(what, done_something);
+			return IRExprTransformer::transformIRExpr(what);
 		}
 		_(const std::set<IRExpr *> &_definitelyTrue,
 		  const std::set<IRExpr *> &_definitelyFalse)
@@ -627,7 +623,10 @@ simplifyAssuming(IRExpr *expr,
 		{}
 	} doit(definitelyTrue, definitelyFalse);
 
-	return doit.doit(expr, progress);
+	auto res = doit.doit(expr);
+	if (res != expr)
+		*progress = true;
+	return res;
 }
 
 static bbdd *

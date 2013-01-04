@@ -136,7 +136,7 @@ printIRExpr(IRExpr *e)
 {
 	struct : public IRExprTransformer {
 		std::map<IRExpr *, unsigned> multiplicity;
-		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+		IRExpr *transformIRExpr(IRExpr *e) {
 			bool counts = false;
 			if (e->tag != Iex_Const && e->tag != Iex_Get &&
 			    e->tag != Iex_HappensBefore && e->tag != Iex_FreeVariable &&
@@ -151,7 +151,7 @@ printIRExpr(IRExpr *e)
 				if (multiplicity[e] > 1)
 					return e;
 			}
-			return IRExprTransformer::transformIRExpr(e, done_something);
+			return IRExprTransformer::transformIRExpr(e);
 		}
 	} buildMult;
 	buildMult.doit(e);

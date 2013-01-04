@@ -664,10 +664,10 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 	abort();
 }
 
-static IRExpr *optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt, bool *done_something);
+static IRExpr *optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt);
 
-IRExpr *
-optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something)
+static IRExpr *
+optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt)
 {
 #if MANUAL_PROFILING
 	static ProfilingSite __site("optimiseIRExprFP");
@@ -677,7 +677,6 @@ optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something
 	unsigned long s = do_profiling ? SetProfiling::rdtsc() : 0;
 	live = true;
 #endif
-	bool progress;
 
 	if (!(opt.asUnsigned() & ~e->optimisationsApplied))
 		return e;
@@ -688,33 +687,8 @@ optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something
 #ifndef NDEBUG
 	e->sanity_check();
 #endif
-	progress = false;
-	IRExpr *e2;
-	e2 = optimiseIRExpr(e, opt, &progress);
-	if (e2 != e)
-		progress = true;
-	e = e2;
-	if (progress) {
-		*done_something = true;
-		while (progress) {
-			if (TIMEOUT) {
-#if MANUAL_PROFILING
-				live = false;
-#endif
-				if (debug_optimise_irexpr)
-					printf("TIMEOUT\n");
-				return e;
-			}
-			progress = false;
-			e2 = optimiseIRExpr(e, opt, &progress);
-			if (e2 != e)
-				progress = true;
-			e = e2;
-		}
-	}
-	if (TIMEOUT)
-		return e;
-	e->optimisationsApplied |= opt.asUnsigned();
+	e = optimiseIRExpr(e, opt);
+
 #if MANUAL_PROFILING
 	if (do_profiling) {
 		__site.accumulated_ticks += SetProfiling::rdtsc() - s;
@@ -1444,7 +1418,7 @@ rewriteOrdering(IRExpr *a, IRExpr *b)
 }
 
 static IRExpr *
-rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
+rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp)
 {
 	struct : public IRExprTransformer {
 		IRExpr *from;
@@ -1452,28 +1426,24 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
 		IRExpr *_to;
 		IRExpr *rewriteFrom;
 		IRExpr *rewriteTo;
-		IRExpr *transformIRExpr(IRExpr *e, bool *done_something) {
+		IRExpr *transformIRExpr(IRExpr *e) {
 			if (physicallyEqual(e, from)) {
 				if (!_to)
 					_to = IRExpr_Const_U1(to);
-				*done_something = true;
 				return _to;
 			}
-			if (rewriteFrom && physicallyEqual(e, rewriteFrom)) {
-				*done_something = true;
+			if (rewriteFrom && physicallyEqual(e, rewriteFrom))
 				return rewriteTo;
-			}
 			if (to &&
 			    from->tag == Iex_EntryPoint &&
 			    e->tag == Iex_EntryPoint &&
 			    ((IRExprEntryPoint *)e)->thread == ((IRExprEntryPoint *)from)->thread &&
 			    ((IRExprEntryPoint *)e)->label != ((IRExprEntryPoint *)from)->label) {
-				*done_something = true;
 				return IRExpr_Const_U1(false);
 			}
 			if (!rewriteFrom && e->type() != Ity_I1 && e->tag != Iex_Mux0X)
 				return e;
-			return IRExprTransformer::transformIRExpr(e, done_something);
+			return IRExprTransformer::transformIRExpr(e);
 		}
 	} doit;
 	if (expr->tag == Iex_Unop) {
@@ -1510,11 +1480,11 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp, bool *done_something)
 			}
 		}
 	}
-	return doit.doit(inp, done_something);
+	return doit.doit(inp);
 }
 
 static IRExpr *
-optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt, bool *done_something)
+optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt)
 {
 	if (TIMEOUT)
 		return src;
@@ -1523,7 +1493,6 @@ optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt, bool *done_something
 		return src;
 
 top:
-	bool progress = false;
 	IRExpr *res = src;
 	switch (src->tag) {
 	case Iex_CCall: {
@@ -1534,7 +1503,7 @@ top:
 		IRExpr *args[nr_args];
 		bool realloc = false;
 		for (int i = 0; c->args[i]; i++) {
-			args[i] = optimiseIRExpr(c->args[i], opt, done_something);
+			args[i] = optimiseIRExpr(c->args[i], opt);
 			if (args[i] != c->args[i])
 				realloc = true;
 		}
@@ -1564,7 +1533,7 @@ top:
 		IRExpr *contents[_e->nr_arguments];
 		bool realloc = false;
 		for (int i = 0; i < nr_arguments; i++) {
-			contents[i] = optimiseIRExpr(_e->contents[i], opt, done_something);
+			contents[i] = optimiseIRExpr(_e->contents[i], opt);
 			if (contents[i] != _e->contents[i])
 				realloc = true;
 		}
@@ -1595,15 +1564,13 @@ top:
 								op,
 								nr_arguments,
 								args0),
-							opt,
-							done_something),
+							opt),
 						optimiseIRExpr(
 							IRExpr_Associative_Copy(
 								op,
 								nr_arguments,
 								argsX),
-							opt,
-							done_something));
+							opt));
 					p = true;
 				}
 			}
@@ -1841,22 +1808,16 @@ top:
 			}
 		}
 
-		if (op == Iop_Or1) {
+		if (op == Iop_Or1 || op == Iop_And1) {
 			for (int idx1 = 0; idx1 < nr_arguments - 1; idx1++)
-				for (int idx2 = idx1 + 1; idx2 < nr_arguments; idx2++)
-					contents[idx2] = rewriteBoolean(contents[idx1],
-									false,
-									contents[idx2],
-									&realloc);
-		}
-
-		if (op == Iop_And1) {
-			for (int idx1 = 0; idx1 < nr_arguments - 1; idx1++)
-				for (int idx2 = idx1 + 1; idx2 < nr_arguments; idx2++)
-					contents[idx2] = rewriteBoolean(contents[idx1],
-									true,
-									contents[idx2],
-									&realloc);
+				for (int idx2 = idx1 + 1; idx2 < nr_arguments; idx2++) {
+					IRExpr *e = rewriteBoolean(contents[idx1],
+								   op == Iop_And1,
+								   contents[idx2]);
+					if (e != contents[idx2])
+						realloc = true;
+					contents[idx2] = e;
+				}
 		}
 
 		/* x + -x -> 0, for any plus-like operator, so remove
@@ -1911,7 +1872,6 @@ top:
 						}
 
 						if (purge) {
-							progress = true;
 							IRExprConst *result;
 							switch (op) {
 							case Iop_And8:
@@ -2026,7 +1986,7 @@ top:
 
 	case Iex_Unop: {
 		IRExprUnop *_e = (IRExprUnop *)res;
-		auto arg = optimiseIRExpr(_e->arg, opt, done_something);
+		auto arg = optimiseIRExpr(_e->arg, opt);
 		auto op = _e->op;
 		__set_profiling(optimise_unop);
 
@@ -2105,8 +2065,7 @@ top:
 							IRExpr_Unop(
 								op,
 								arga->contents[i]),
-							opt,
-							&progress);
+							opt);
 				res = IRExpr_Associative_Copy(nop, arga->nr_arguments, nargs);
 				break;
 			}
@@ -2134,8 +2093,7 @@ top:
 							IRExpr_Unop(
 								op,
 								arga->contents[i]),
-							opt,
-							&progress);
+							opt);
 				IROp base_op = Iop_INVALID;
 #define do_op(name)							\
 				if (arga->op >= Iop_ ## name ## 8	\
@@ -2405,21 +2363,19 @@ top:
 	
 	case Iex_Binop: {
 		IRExprBinop *_e = (IRExprBinop *)src;
-		IRExpr *l = optimiseIRExpr(_e->arg1, opt, done_something);
-		IRExpr *r = optimiseIRExpr(_e->arg2, opt, done_something);
+		IRExpr *l = optimiseIRExpr(_e->arg1, opt);
+		IRExpr *r = optimiseIRExpr(_e->arg2, opt);
 		IROp op = _e->op;
 		__set_profiling(optimise_binop);
 		if (op >= Iop_Sub8 &&
 		    op <= Iop_Sub64) {
 			/* Replace a - b with a + (-b), so as to
 			   eliminate binary -. */
-			progress = true;
 			op = (IROp)(op - Iop_Sub8 + Iop_Add8);
 			r = optimiseIRExprFP(
 				IRExpr_Unop( (IROp)((op - Iop_Add8) + Iop_Neg8),
 					     r ),
-				opt,
-				&progress);
+				opt);
 		}
 		if (operationAssociates(op)) {
 			/* Convert to an associative operation. */
@@ -2429,8 +2385,7 @@ top:
 					l,
 					r,
 					NULL),
-				opt,
-				&progress);
+				opt);
 			break;
 		}
 		/* If a op b commutes, sort the arguments. */
@@ -2438,7 +2393,6 @@ top:
 			IRExpr *t = l;
 			l = r;
 			r = t;
-			progress = true;
 		}
 
 		/* 0 << x -> 0, and x << 0 -> x */
@@ -2472,7 +2426,6 @@ top:
 		    ((IRExprUnop *)r)->op == Iop_Not1) {
 			l = ((IRExprUnop *)l)->arg;
 			r = ((IRExprUnop *)r)->arg;
-			progress = true;
 		}
 
 		/* x < x -> false */
@@ -2533,9 +2486,8 @@ top:
 						cnst),
 					l,
 					NULL);
-				l = optimiseIRExprFP(newLeft, opt, &progress);
-				r = optimiseIRExprFP(newRight, opt, &progress);
-				progress = true;
+				l = optimiseIRExprFP(newLeft, opt);
+				r = optimiseIRExprFP(newRight, opt);
 			}
 			if (l->tag == Iex_Associative &&
 			    ((IRExprAssociative *)l)->op >= Iop_Add8 &&
@@ -2590,9 +2542,8 @@ top:
                                         }
 				}
 				r = IRExpr_Associative_Copy(oldLeft->op, newNrArgs, newRightArgs);
-				r = optimiseIRExpr(r, opt, done_something);
+				r = optimiseIRExpr(r, opt);
 				l = cnst;
-				progress = true;
 			}
 
 			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
@@ -2604,7 +2555,6 @@ top:
 					IRExpr_Unop(
 						Iop_Neg64,
 						l));
-				progress = true;
 			}
 
 			/* Special case: const:64 == {b}to64(X)
@@ -2731,8 +2681,7 @@ top:
 					default:
 						abort();
 					}
-					r = optimiseIRExpr(new_r, opt, done_something);
-					progress = true;
+					r = optimiseIRExpr(new_r, opt);
 				}
 			}
 		}
@@ -2859,7 +2808,6 @@ top:
 			}
 		} else if (r->tag == Iex_Mux0X) {
 			IRExprMux0X *rm = (IRExprMux0X *)r;
-			progress = true;
 			res = IRExpr_Mux0X(
 				rm->cond,
 				IRExpr_Binop(
@@ -2997,11 +2945,11 @@ top:
 
 	case Iex_Mux0X: {
 		IRExprMux0X *_e = (IRExprMux0X *)src;
-		auto cond = optimiseIRExpr(_e->cond, opt, done_something);
-		auto expr0 = rewriteBoolean(cond, false, _e->expr0, done_something);
-		expr0 = optimiseIRExpr(expr0, opt, done_something);
-		auto exprX = rewriteBoolean(cond, true, _e->exprX, done_something);
-		exprX = optimiseIRExpr(exprX, opt, done_something);
+		auto cond = optimiseIRExpr(_e->cond, opt);
+		auto expr0 = rewriteBoolean(cond, false, _e->expr0);
+		expr0 = optimiseIRExpr(expr0, opt);
+		auto exprX = rewriteBoolean(cond, true, _e->exprX);
+		exprX = optimiseIRExpr(exprX, opt);
 		if (cond->tag == Iex_Const) {
 			if (((IRExprConst *)cond)->Ico.U1)
 				res = exprX;
@@ -3073,7 +3021,7 @@ top:
 
 	case Iex_GetI: {
 		IRExprGetI *g = (IRExprGetI *)src;
-		IRExpr *ix = optimiseIRExpr(g->ix, opt, done_something);
+		IRExpr *ix = optimiseIRExpr(g->ix, opt);
 		if (ix != g->ix)
 			res = new IRExprGetI(g, ix);
 		break;
@@ -3081,7 +3029,7 @@ top:
 
 	case Iex_Load: {
 		IRExprLoad *l = (IRExprLoad *)src;
-		auto addr = optimiseIRExpr(l->addr, opt, done_something);
+		auto addr = optimiseIRExpr(l->addr, opt);
 		if (addr != l->addr)
 			res = new IRExprLoad(l->ty, addr);
 		break;
@@ -3089,10 +3037,10 @@ top:
 
 	case Iex_Qop: {
 		IRExprQop *q = (IRExprQop *)src;
-		auto arg1 = optimiseIRExpr(q->arg1, opt, done_something);
-		auto arg2 = optimiseIRExpr(q->arg2, opt, done_something);
-		auto arg3 = optimiseIRExpr(q->arg3, opt, done_something);
-		auto arg4 = optimiseIRExpr(q->arg4, opt, done_something);
+		auto arg1 = optimiseIRExpr(q->arg1, opt);
+		auto arg2 = optimiseIRExpr(q->arg2, opt);
+		auto arg3 = optimiseIRExpr(q->arg3, opt);
+		auto arg4 = optimiseIRExpr(q->arg4, opt);
 		if (arg1 != q->arg1 || arg2 != q->arg2 ||
 		    arg3 != q->arg3 || arg4 != q->arg4)
 			res = new IRExprQop(q->op, arg1, arg2, arg3, arg4);
@@ -3101,9 +3049,9 @@ top:
 
 	case Iex_Triop: {
 		IRExprTriop *t = (IRExprTriop *)src;
-		auto arg1 = optimiseIRExpr(t->arg1, opt, done_something);
-		auto arg2 = optimiseIRExpr(t->arg2, opt, done_something);
-		auto arg3 = optimiseIRExpr(t->arg3, opt, done_something);
+		auto arg1 = optimiseIRExpr(t->arg1, opt);
+		auto arg2 = optimiseIRExpr(t->arg2, opt);
+		auto arg3 = optimiseIRExpr(t->arg3, opt);
 		if (arg1 != t->arg1 || arg2 != t->arg2 || arg3 != t->arg3)
 			res = new IRExprTriop(t->op, arg1, arg2, arg3);
 		break;
@@ -3119,11 +3067,7 @@ top:
 	}
 
 	if (res != src) {
-		progress = true;
 		src = res;
-	}
-	if (progress) {
-		*done_something = true;
 		goto top;
 	}
 
@@ -3134,8 +3078,7 @@ top:
 IRExpr *
 simplifyIRExpr(IRExpr *a, const IRExprOptimisations &opt)
 {
-	bool progress;
-	return optimiseIRExprFP(a, opt, &progress);
+	return optimiseIRExprFP(a, opt);
 }
 
 IRExpr *
@@ -3254,7 +3197,7 @@ isBadAddress(exprbdd *e)
 
 template <typename treeT, typename scopeT> static treeT *
 simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
-	    bool *done_something, std::map<treeT *, treeT *> &memo)
+	    std::map<treeT *, treeT *> &memo)
 {
 	if (TIMEOUT)
 		return bdd;
@@ -3266,16 +3209,16 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisa
 		return it_did_insert.first->second;
 	treeT *res;
 
-	IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt, done_something);
+	IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt);
 	assert(cond->type() == Ity_I1);
 	if (cond->tag == Iex_Const) {
 		if (((IRExprConst *)cond)->Ico.U1)
-			res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
+			res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, memo);
 		else
-			res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+			res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, memo);
 	} else {
-		treeT *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
-		treeT *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+		treeT *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, memo);
+		treeT *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, memo);
 		if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
 			res = bdd;
 		else
@@ -3293,7 +3236,7 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisa
    thing.  Ulch. */
 template <> exprbdd *
 simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IRExprOptimisations &opt,
-	    bool *done_something, std::map<exprbdd *, exprbdd *> &memo)
+	    std::map<exprbdd *, exprbdd *> &memo)
 {
 	if (TIMEOUT)
 		return bdd;
@@ -3303,22 +3246,22 @@ simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IREx
 	exprbdd *res;
 
         if (bdd->isLeaf) {
-		IRExpr *r = optimiseIRExprFP(bdd->leaf(), opt, done_something);
+		IRExpr *r = optimiseIRExprFP(bdd->leaf(), opt);
 		if (r == bdd->leaf())
 			res = bdd;
 		else
 			res = exprbdd::var(scope, bscope, r);
 	} else {
-		IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt, done_something);
+		IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt);
 		assert(cond->type() == Ity_I1);
 		if (cond->tag == Iex_Const) {
 			if (((IRExprConst *)cond)->Ico.U1)
-				res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
+				res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, memo);
 			else
-				res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+				res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, memo);
 		} else {
-			exprbdd *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, done_something, memo);
-			exprbdd *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, done_something, memo);
+			exprbdd *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, memo);
+			exprbdd *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, memo);
 			if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
 				res = bdd;
 			else
@@ -3334,13 +3277,12 @@ simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IREx
 }
 
 template <typename treeT, typename scopeT> static treeT *
-simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
-	    bool *done_something)
+simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt)
 {
 	std::map<treeT *, treeT *> memo;
-	return simplifyBDD(scope, bscope, bdd, opt, done_something, memo);
+	return simplifyBDD(scope, bscope, bdd, opt, memo);
 }
 
-template bbdd   *simplifyBDD(bbdd::scope *,   bbdd::scope *, bbdd *,   const IRExprOptimisations &, bool *);
-template smrbdd *simplifyBDD(smrbdd::scope *, bbdd::scope *, smrbdd *, const IRExprOptimisations &, bool *);
-template exprbdd *simplifyBDD(exprbdd::scope *, bbdd::scope *, exprbdd *, const IRExprOptimisations &, bool *);
+template bbdd   *simplifyBDD(bbdd::scope *,   bbdd::scope *, bbdd *,   const IRExprOptimisations &);
+template smrbdd *simplifyBDD(smrbdd::scope *, bbdd::scope *, smrbdd *, const IRExprOptimisations &);
+template exprbdd *simplifyBDD(exprbdd::scope *, bbdd::scope *, exprbdd *, const IRExprOptimisations &);

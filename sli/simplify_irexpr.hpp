@@ -7,7 +7,6 @@ class IRExprOptimisations;
 class Oracle;
 class AllowableOptimisations;
 
-IRExpr *optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt, bool *done_something);
 bool isBadAddress(exprbdd *e);
 bool definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt);
 bool definitelyEqual(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt);
@@ -20,10 +19,10 @@ IRExpr *coerceTypes(IRType, IRExpr *);
 IROp coerceTypesOp(IRType from, IRType to);
 IRExpr *expr_eq(IRExpr *, IRExpr *);
 
-template <typename treeT, typename scopeT> treeT *simplifyBDD(scopeT *scope, bbdd::scope *, treeT *bdd, const IRExprOptimisations &opt, bool *done_something);
-static inline bbdd *simplifyBDD(bbdd::scope *scope, bbdd *bdd, const IRExprOptimisations &opt, bool *done_something)
+template <typename treeT, typename scopeT> treeT *simplifyBDD(scopeT *scope, bbdd::scope *, treeT *bdd, const IRExprOptimisations &opt);
+static inline bbdd *simplifyBDD(bbdd::scope *scope, bbdd *bdd, const IRExprOptimisations &opt)
 {
-	return simplifyBDD(scope, scope, bdd, opt, done_something);
+	return simplifyBDD(scope, scope, bdd, opt);
 }
 
 void sanity_check_irexpr_sorter(void);
