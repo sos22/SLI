@@ -478,6 +478,9 @@ introduceCompoundFunctions(CrashSummary *summary,
 int
 main(int argc, char *argv[])
 {
+	if (argc != 3)
+		errx(1, "need two arguments: input and output summaries");
+
 	init_sli();
 	char *first_line;
 	SMScopes scopes;

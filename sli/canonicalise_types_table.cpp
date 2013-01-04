@@ -24,9 +24,10 @@ static void
 copy_record(FILE *input, sane_write_file &output)
 {
 	int nr_loads, nr_stores;
-	fread(&nr_loads, sizeof(nr_loads), 1, input);
+	if (fread(&nr_loads, sizeof(nr_loads), 1, input) != 1 ||
+	    fread(&nr_stores, sizeof(nr_stores), 1, input) != 1)
+		err(1, "reading in copy_record");
 	output.write(nr_loads);
-	fread(&nr_stores, sizeof(nr_stores), 1, input);
 	output.write(nr_stores);
 	for (int i = 0; i < nr_loads; i++)
 		copy_rip(input, output);
@@ -46,7 +47,8 @@ rewrite_index_entry(FILE *input, sane_write_file &output, unsigned long delta)
 {
 	copy_rip(input, output);
 	unsigned long offset;
-	fread(&offset, sizeof(offset), 1, input);
+	if (fread(&offset, sizeof(offset), 1, input) != 1)
+		err(1, "reading input");
 	offset += delta;
 	output.write(offset);
 }

@@ -1433,6 +1433,8 @@ LoadCanonicaliser::decanonicalise(CrashSummary *cs)
 int
 main(int argc, char *argv[])
 {
+	if (argc != 5)
+		errx(1, "need four arguments: bug report, binary, tags file, and output\n");
 	init_sli();
 
 	VexPtr<CrashSummary, &ir_heap> summary;

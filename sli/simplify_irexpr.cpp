@@ -2229,14 +2229,14 @@ top:
 		}
 
 		if (arg->tag == Iex_Mux0X) {
-			IRExprMux0X *arg = (IRExprMux0X *)arg;
-			res = IRExpr_Mux0X(arg->cond,
+			IRExprMux0X *argM = (IRExprMux0X *)arg;
+			res = IRExpr_Mux0X(argM->cond,
 					   IRExpr_Unop(
 						   op,
-						   arg->expr0),
+						   argM->expr0),
 					   IRExpr_Unop(
 						   op,
-						   arg->exprX));
+						   argM->exprX));
 			break;
 		}
 

@@ -68,6 +68,9 @@ case_split_summary(CrashSummary *summary,
 int
 main(int argc, char *argv[])
 {
+	if (argc != 3)
+		errx(1, "need two arguments: input and output directories");
+
 	init_sli();
 
 	int idx = 0;

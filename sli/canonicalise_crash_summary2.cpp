@@ -212,6 +212,8 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 int
 main(int argc, char *argv[])
 {
+	if (argc != 3)
+		errx(1, "need two arguments: input and output summaries");
 	init_sli();
 
 	VexPtr<CrashSummary, &ir_heap> summary;

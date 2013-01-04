@@ -430,9 +430,13 @@ class bbdd : public const_bdd<bool, bbdd> {
 	friend class const_bdd_scope<bbdd>;
 	friend class bdd_scope<bbdd>;
 
+#ifdef NDEBUG
+	void _sanity_check(bool) const {}
+#else
 	void _sanity_check(bool b) const {
 		assert(b == true || b == false);
 	}
+#endif
 	void _prettyPrint(FILE *f, bool b) const {
 		fprintf(f, "%s", b ? "<true>" : "<false>");
 	}
@@ -514,9 +518,13 @@ public:
 class smrbdd : public const_bdd<StateMachineRes, smrbdd> {
 	friend class const_bdd_scope<smrbdd>;
 	friend class bdd_scope<smrbdd>;
+#ifdef NDEBUG
+	void _sanity_check(StateMachineRes) const {}
+#else
 	void _sanity_check(StateMachineRes r) const {
 		assert(r == smr_crash || r == smr_survive || r == smr_unreached);
 	}
+#endif
 	void _prettyPrint(FILE *f, StateMachineRes r) const {
 		fprintf(f, "<%s>", nameSmr(r));
 	}

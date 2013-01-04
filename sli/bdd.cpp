@@ -198,6 +198,10 @@ muxify(IRExpr *what)
 		IRExprCCall *cee = (IRExprCCall *)what;
 		IRExpr *a;
 		int i;
+
+		/* Shut compiler up */
+		a = (IRExpr *)0xf001;
+
 		for (i = 0; cee->args[i]; i++) {
 			a = muxify(cee->args[i]);
 			if (a->tag == Iex_Mux0X)
