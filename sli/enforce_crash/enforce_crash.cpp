@@ -570,9 +570,9 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 		}
 		if (idx == i->nr_arguments)
 			return i;
-		IRExprAssociative *newI = (IRExprAssociative *)IRExpr_Associative(i->nr_arguments, i->op);
+		IRExpr **args = alloc_irexpr_array(i->nr_arguments);
+		memcpy(args, i->contents, idx * sizeof(IRExpr *));
 		int idx2 = idx;
-		memcpy(newI->contents, i->contents, idx * sizeof(IRExpr *));
 		goto l1;
 
 		while (idx < i->nr_arguments) {
@@ -606,7 +606,7 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 					} else {
 						assert(err_a == errors_allowed);
 						*errors_produced |= err_a;
-						newI->contents[idx2] = a;
+						args[idx2] = a;
 						idx2++;
 					}
 					break;
@@ -628,7 +628,7 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 					} else {
 						assert(err_a == errors_allowed);
 						*errors_produced |= err_a;
-						newI->contents[idx2] = a;
+						args[idx2] = a;
 						idx2++;
 					}
 					break;
@@ -636,15 +636,14 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 					abort();
 				}
 			} else {
-				newI->contents[idx2] = a;
+				args[idx2] = a;
 				idx2++;
 			}
 			idx++;
 		}
 		if (idx2 == 0)
 			return NULL;
-		newI->nr_arguments = idx2;
-		return newI;
+		return IRExpr_Associative_Claim(i->op, i->nr_arguments, args);
 	}
 	case Iex_HappensBefore:
 		return what;

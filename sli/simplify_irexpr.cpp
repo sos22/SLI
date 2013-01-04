@@ -341,7 +341,7 @@ optimise_condition_calculation(
 		break;
 	case AMD64CondLE:
 		if (sf && of && zf)
-			res = IRExpr_Associative(
+			res = IRExpr_Associative_V(
 				Iop_Or1,
 				zf,
 				IRExpr_Binop(
@@ -664,32 +664,6 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 	abort();
 }
 
-void
-addArgumentToAssoc(IRExprAssociative *e, IRExpr *arg)
-{
-	assert( (e->optimisationsApplied & ~arg->optimisationsApplied) == 0);
-	if (e->nr_arguments == e->nr_arguments_allocated) {
-		e->nr_arguments_allocated += 8;
-		e->contents = (IRExpr **)
-			LibVEX_realloc(&ir_heap,
-				       e->contents,
-				       sizeof(IRExpr *) * e->nr_arguments_allocated);
-	}
-	e->contents[e->nr_arguments] = arg;
-	e->nr_arguments++;
-}
-
-static void
-purgeAssocArgument(IRExprAssociative *e, int idx)
-{
-	assert(idx < e->nr_arguments);
-	memmove(e->contents + idx,
-		e->contents + idx + 1,
-		sizeof(IRExpr *) * (e->nr_arguments - idx - 1));
-	e->nr_arguments--;
-	e->optimisationsApplied = 0;
-}
-
 static IRExpr *optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt, bool *done_something);
 
 IRExpr *
@@ -775,21 +749,21 @@ performInsertion(IRExpr **list, int nr_items, IRExpr *newItem)
 }
 
 template <bool ordering(const IRExpr *, const IRExpr *)> static void
-_sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
+_sortAssociativeArguments(IRExpr **args, int nr_arguments, bool *done_something)
 {
         /* All indexes [0, first_unsorted) are definitely already sorted */
         int first_unsorted;
 
         first_unsorted = 1;
-        while (first_unsorted < ae->nr_arguments) {
-                if (ordering(ae->contents[first_unsorted],
-			     ae->contents[first_unsorted-1])) {
+        while (first_unsorted < nr_arguments) {
+                if (ordering(args[first_unsorted],
+			     args[first_unsorted-1])) {
                         /* Not already in right place -> need to go
                            and insert it. */
                         *done_something = true;
-                        performInsertion<ordering>(ae->contents,
+                        performInsertion<ordering>(args,
 						   first_unsorted,
-						   ae->contents[first_unsorted]);
+						   args[first_unsorted]);
                 }
 		first_unsorted++;
         }
@@ -1030,7 +1004,7 @@ arith_addition_sort(const IRExpr *a, const IRExpr *b)
 }
 
 static void
-sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
+sortAssociativeArguments(IROp op, IRExpr **args, int nr_arguments, bool *done_something)
 {
         __set_profiling(sort_associative_arguments);
 
@@ -1046,14 +1020,14 @@ sortAssociativeArguments(IRExprAssociative *ae, bool *done_something)
 	   the type of thing which we're sorting.  The aim here is to
 	   produce the same ordering as CNF conversion would, since
 	   that makes optimisation much easier. */
-	if (ae->op == Iop_Or1)
-		_sortAssociativeArguments<cnf_disjunction_sort>(ae, done_something);
-	else if (ae->op == Iop_And1)
-		_sortAssociativeArguments<cnf_conjunction_sort>(ae, done_something);
-	else if (ae->op >= Iop_Add8 && ae->op <= Iop_Add64)
-		_sortAssociativeArguments<arith_addition_sort>(ae, done_something);
+	if (op == Iop_Or1)
+		_sortAssociativeArguments<cnf_disjunction_sort>(args, nr_arguments, done_something);
+	else if (op == Iop_And1)
+		_sortAssociativeArguments<cnf_conjunction_sort>(args, nr_arguments, done_something);
+	else if (op >= Iop_Add8 && op <= Iop_Add64)
+		_sortAssociativeArguments<arith_addition_sort>(args, nr_arguments, done_something);
 	else
-		_sortAssociativeArguments<sortIRExprs>(ae, done_something);
+		_sortAssociativeArguments<sortIRExprs>(args, nr_arguments, done_something);
 }
 
 /* CNF subsetting relationship.  Essentially, does @a imply @b.  We
@@ -1184,23 +1158,29 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 	if (assoc->op != Iop_Or1)
 		return iex;
 
-	for (int i = 0; i < assoc->nr_arguments; ) {
-		if (_sortIRExprs(assoc->contents[i], assumption) == equal_to) {
+	IRExpr *newArgs[assoc->nr_arguments];
+	int inpIdx;
+	int outIdx = 0;
+	for (inpIdx = 0; inpIdx < assoc->nr_arguments; inpIdx++) {
+		IRExpr *inp = assoc->contents[inpIdx];
+		newArgs[outIdx] = inp;
+		outIdx++;
+		if (_sortIRExprs(inp, assumption) == equal_to) {
 			*done_something = true;
 			if (invertAssumption) {
 				/* We're assuming ~X and this
-				   expression is X|Y, so just reduce
-				   to Y. */
-				assoc = dynamic_cast<IRExprAssociative *>(IRExpr_Associative(assoc));
-				purgeAssocArgument(assoc, i);
+				   expression is X|Y, so just skip
+				   copying this one over so as to
+				   reduce the output to just Y. */
+				outIdx--;
 			} else {
 				/* We're assuming X, and this
 				   expression is X|Y, so reduce to
 				   constant 1. */
 				return IRExpr_Const_U1(true);
 			}
-		} else if (assoc->contents[i]->tag == Iex_Unop) {
-			IRExprUnop *u = (IRExprUnop *)assoc->contents[i];
+		} else if (inp->tag == Iex_Unop) {
+			IRExprUnop *u = (IRExprUnop *)inp;
 			if (u->op == Iop_Not1 &&
 			    _sortIRExprs(u->arg, assumption) == equal_to) {
 				*done_something = true;
@@ -1211,20 +1191,16 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 					return IRExpr_Const_U1(true);
 				} else {
 					/* We'are assuming X and found
-					   ~X|Y, so just turn it into
-					   Y. */
-					assoc = dynamic_cast<IRExprAssociative *>(IRExpr_Associative(assoc));
-					purgeAssocArgument(assoc, i);
+					   ~X|Y, so just drop it. */
+					outIdx--;
 				}
-			} else {
-				i++;
 			}
-		} else {
-			i++;
 		}
 	}
-
-	return assoc;
+	if (outIdx != inpIdx)
+		return IRExpr_Associative_Copy(assoc->op, outIdx, newArgs);
+	else
+		return assoc;
 }
 
 IRExpr *
@@ -1582,32 +1558,46 @@ top:
 		break;
 	}
 	case Iex_Associative: {
-		IRExprAssociative *e = (IRExprAssociative *)res;
-		for (int i = 0; i < e->nr_arguments; i++)
-			e->contents[i] = optimiseIRExpr(e->contents[i], opt, done_something);
+		IRExprAssociative *_e = (IRExprAssociative *)res;
+		int nr_arguments = _e->nr_arguments;
+		IROp op = _e->op;
+		IRExpr *contents[_e->nr_arguments];
+		bool realloc = false;
+		for (int i = 0; i < nr_arguments; i++) {
+			contents[i] = optimiseIRExpr(_e->contents[i], opt, done_something);
+			if (contents[i] != _e->contents[i])
+				realloc = true;
+		}
 		__set_profiling(optimise_associative);
 
 		/* Rewrite to pull muxes up: Mux0X(a, b, c) + d ->
 		 * Mux0X(a, b + d, c + d) */
 		{
 			bool p = false;
-			for (int x = 0; !p && x < e->nr_arguments; x++) {
-				if (e->contents[x]->tag == Iex_Mux0X) {
-					IRExprMux0X *mux = (IRExprMux0X *)e->contents[x];
-					IRExprAssociative *assoc0 = (IRExprAssociative *)IRExpr_Associative(e);
-					IRExprAssociative *assocX = (IRExprAssociative *)IRExpr_Associative(e);
-					assoc0->optimisationsApplied = 0;
-					assocX->optimisationsApplied = 0;
-					for (int y = 0; y < e->nr_arguments; y++) {
-						if (e->contents[y]->tag == Iex_Mux0X) {
-							IRExprMux0X *mux2 = (IRExprMux0X *)e->contents[y];
-							if (mux2->cond == mux->cond) {
-								assoc0->contents[y] = mux2->expr0;
-								assocX->contents[y] = mux2->exprX;
-							}
+			for (int x = 0; !p && x < nr_arguments; x++) {
+				if (contents[x]->tag == Iex_Mux0X) {
+					IRExprMux0X *mux = (IRExprMux0X *)contents[x];
+					IRExpr *args0[nr_arguments];
+					IRExpr *argsX[nr_arguments];
+					for (int y = 0; y < nr_arguments; y++) {
+						if (contents[y]->tag == Iex_Mux0X &&
+						    ((IRExprMux0X *)contents[y])->cond == mux->cond) {
+							args0[y] = ((IRExprMux0X *)contents[y])->expr0;
+							argsX[y] = ((IRExprMux0X *)contents[y])->exprX;
+						} else {
+							args0[y] = argsX[y] = contents[y];
 						}
 					}
-					res = IRExpr_Mux0X(mux->cond, assoc0, assocX);
+					res = IRExpr_Mux0X(
+						mux->cond,
+						IRExpr_Associative_Copy(
+							op,
+							nr_arguments,
+							args0),
+						IRExpr_Associative_Copy(
+							op,
+							nr_arguments,
+							argsX));
 					p = true;
 				}
 			}
@@ -1615,33 +1605,41 @@ top:
 				break;
 		}
 		/* Drag up nested associatives. */
+		int argsWithNest = 0;
 		bool haveNestedAssocs = false;
-		for (int x = 0; !haveNestedAssocs && x < e->nr_arguments; x++)
-			if (e->contents[x]->tag == Iex_Associative &&
-			    ((IRExprAssociative *)e->contents[x])->op == e->op)
+		for (int x = 0; x < nr_arguments; x++) {
+			if (contents[x]->tag == Iex_Associative &&
+			    ((IRExprAssociative *)contents[x])->op == op) {
+				argsWithNest += ((IRExprAssociative *)contents[x])->nr_arguments;
 				haveNestedAssocs = true;
+			} else {
+				argsWithNest++;
+			}
+		}
 		if (haveNestedAssocs) {
 			__set_profiling(pull_up_nested_associatives);
-			IRExprAssociative *ne = (IRExprAssociative *)IRExpr_Associative(e->op, NULL);
-			for (int x = 0; x < e->nr_arguments; x++) {
-				IRExpr *arg = e->contents[x];
+			IRExpr *newArgs[argsWithNest];
+			int inIdx = 0;
+			int outIdx = 0;
+			for (inIdx = 0; inIdx < nr_arguments; inIdx++) {
+				IRExpr *arg = contents[inIdx];
 				if (arg->tag == Iex_Associative &&
-				    ((IRExprAssociative *)arg)->op == e->op) {
-					IRExprAssociative *_arg = (IRExprAssociative *)arg;
-					for (int y = 0; y < _arg->nr_arguments; y++)
-						addArgumentToAssoc(ne, _arg->contents[y]);
+				    ((IRExprAssociative *)arg)->op == op) {
+					IRExprAssociative *arga = (IRExprAssociative *)arg;
+					for (int inIdx2 = 0; inIdx2 < arga->nr_arguments; inIdx2++)
+						newArgs[outIdx++] = arga->contents[inIdx2];
 				} else {
-					addArgumentToAssoc(ne, arg);
+					newArgs[outIdx++] = arg;
 				}
 			}
-			res = ne;
-			e = ne;
+			res = IRExpr_Associative_Copy(op, outIdx, newArgs);
+			break;
 		}
 
 		/* Sort IRExprs so that ``related'' expressions are likely to
 		 * be close together. */
-		if (operationCommutes(e->op))
-			sortAssociativeArguments(e, &progress);
+		if (operationCommutes(op))
+			sortAssociativeArguments(op, contents, nr_arguments, &realloc);
 
 		/* Fold together constants.  For commutative
 		   operations they'll all be at the beginning, but
@@ -1649,16 +1647,16 @@ top:
 		   commutativity. */
 		{
 			__set_profiling(associative_constant_fold);
-			for (int x = 0; x + 1 < e->nr_arguments; x++) {
+			for (int x = 0; x + 1 < nr_arguments; x++) {
 				IRExpr *a, *b;
-				a = e->contents[x];
-				b = e->contents[x+1];
+				a = contents[x];
+				b = contents[x+1];
 				if (a->tag == Iex_Const && b->tag == Iex_Const) {
 					IRExpr *res;
 					IRExprConst *l, *r;
 					l = (IRExprConst *)a;
 					r = (IRExprConst *)b;
-					switch (e->op) {
+					switch (op) {
 #define do_sized_op(name, sz, op)					\
 						case Iop_ ## name ## sz: \
 							res = IRExpr_Const_U ## sz( \
@@ -1683,77 +1681,68 @@ top:
 						res = IRExpr_Const_U1(l->Ico.U1 | r->Ico.U1);
 						break;
 					default:
-						printf("Warning: can't constant-fold associative op %d\n", e->op);
+						printf("Warning: can't constant-fold associative op %d\n", op);
 						res = NULL;
 						break;
 					}
 					if (res) {
-						memmove(e->contents + x + 1,
-							e->contents + x + 2,
-							sizeof(IRExpr *) * (e->nr_arguments - x - 2));
-						e->nr_arguments--;
-						e->contents[x] = res;
-						progress = true;
+						memmove(contents + x + 1,
+							contents + x + 2,
+							sizeof(IRExpr *) * (nr_arguments - x - 2));
+						nr_arguments--;
+						contents[x] = res;
 						x--;
+						realloc = true;
 					}
-				} else if (!operationCommutes(e->op)) {
+				} else if (!operationCommutes(op)) {
 					break;
 				}
 			}
 		}
 		/* Some special cases for And1: 1 & x -> x, 0 & x -> 0 */
-		if (e->op == Iop_And1) {
+		/* Likewise for Or1 */
+		if (op == Iop_And1 || op == Iop_Or1) {
 			__set_profiling(optimise_assoc_and1);
 			/* If there are any constants, they'll be at the start. */
-			if (e->nr_arguments > 1 &&
-			    e->contents[0]->tag == Iex_Const) {
-				auto c = (IRExprConst *)e->contents[0];
-				if (c->Ico.U1) {
-					progress = true;
-					purgeAssocArgument(e, 0);
+			if (nr_arguments > 1 &&
+			    contents[0]->tag == Iex_Const) {
+				auto c = (IRExprConst *)contents[0];
+				if (c->Ico.U1 == (op == Iop_And1)) {
+					memmove(contents, contents + 1, sizeof(IRExpr *) * (nr_arguments - 1));
+					nr_arguments--;
+					realloc = true;
 				} else {
-					res = e->contents[0];
-					break;
-				}
-			}
-		}
-		/* Likewise for Or1 */
-		if (e->op == Iop_Or1) {
-			__set_profiling(optimise_assoc_or1);
-			if (e->nr_arguments > 1 &&
-			    e->contents[0]->tag == Iex_Const) {
-				auto c = (IRExprConst *)e->contents[0];
-				if (!c->Ico.U1) {
-					progress = true;
-					purgeAssocArgument(e, 0);
-				} else {
-					res = e->contents[0];
+					res = contents[0];
 					break;
 				}
 			}
 		}
 		/* And for Add */
-		if (e->op == Iop_Add64) {
-			if (e->nr_arguments > 1 &&
-			    e->contents[0]->tag == Iex_Const &&
-			    ((IRExprConst *)e->contents[0])->Ico.U64 == 0) {
-				purgeAssocArgument(e, 0);
-				progress = true;
+		if (op == Iop_Add64) {
+			if (nr_arguments > 1 &&
+			    contents[0]->tag == Iex_Const &&
+			    ((IRExprConst *)contents[0])->Ico.U64 == 0) {
+				memmove(contents, contents + 1, sizeof(IRExpr *) * (nr_arguments - 1));
+				nr_arguments--;
+				realloc = true;
 			}
 		}
 		/* x & x -> x, for any and-like or or-like
 		   operator. */
-		if ((e->op >= Iop_And8 && e->op <= Iop_And64) ||
-		    (e->op >= Iop_Or8 && e->op <= Iop_Or64) ||
-		    e->op == Iop_And1 ||
-		    e->op == Iop_Or1) {
+		if ((op >= Iop_And8 && op <= Iop_And64) ||
+		    (op >= Iop_Or8 && op <= Iop_Or64) ||
+		    op == Iop_And1 ||
+		    op == Iop_Or1) {
 			__set_profiling(optimise_assoc_x_and_x);
 			for (int it1 = 0;
-			     it1 < e->nr_arguments - 1;
+			     it1 < nr_arguments - 1;
 				) {
-				if (_sortIRExprs(e->contents[it1], e->contents[it1 + 1]) == equal_to) {
-					progress = true;
-					purgeAssocArgument(e, it1 + 1);
+				if (_sortIRExprs(contents[it1], contents[it1 + 1]) == equal_to) {
+					memmove(contents + it1,
+						contents + it1 + 1,
+						sizeof(IRExpr *) * (nr_arguments - it1 - 1));
+					nr_arguments--;
+					realloc = true;
 				} else {
 					it1++;
 				}
@@ -1761,18 +1750,18 @@ top:
 		}
 
 		/* a <-< b || b <-< a is definitely true. */
-		if (e->op == Iop_Or1) {
+		if (op == Iop_Or1) {
 			__set_profiling(optimise_assoc_happens_before);
 			bool p = false;
-			for (int i1 = 0; !p && i1 < e->nr_arguments; i1++) {
-				if (e->contents[i1]->tag != Iex_HappensBefore)
+			for (int i1 = 0; !p && i1 < nr_arguments; i1++) {
+				if (contents[i1]->tag != Iex_HappensBefore)
 					continue;
-				IRExprHappensBefore *a1 = (IRExprHappensBefore *)e->contents[i1];
-				for (int i2 = i1 + 1; !p && i2 < e->nr_arguments; i2++) {
-					if (e->contents[i2]->tag != Iex_HappensBefore)
+				IRExprHappensBefore *a1 = (IRExprHappensBefore *)contents[i1];
+				for (int i2 = i1 + 1; !p && i2 < nr_arguments; i2++) {
+					if (contents[i2]->tag != Iex_HappensBefore)
 						continue;
 					IRExprHappensBefore *a2 =
-						(IRExprHappensBefore *)e->contents[i2];
+						(IRExprHappensBefore *)contents[i2];
 					if ( a1->before == a2->after &&
 					     a1->after == a2->before ) {
 						res = IRExpr_Const_U1(true);
@@ -1788,14 +1777,14 @@ top:
 		   if any such pairs are present then they'll
 		   be adjacent and x will be before ~x, which
 		   is handy. */
-		if (e->op == Iop_Or1) {
+		if (op == Iop_Or1) {
 			__set_profiling(optimise_assoc_x_or_not_x);
 			bool p = false;
-			for (int i = 0; !p && i < e->nr_arguments - 1; i++) {
-				if (e->contents[i+1]->tag == Iex_Unop &&
-				    ((IRExprUnop *)e->contents[i+1])->op == Iop_Not1 &&
-				    _sortIRExprs(((IRExprUnop *)e->contents[i+1])->arg,
-						 e->contents[i]) == equal_to) {
+			for (int i = 0; !p && i < nr_arguments - 1; i++) {
+				if (contents[i+1]->tag == Iex_Unop &&
+				    ((IRExprUnop *)contents[i+1])->op == Iop_Not1 &&
+				    _sortIRExprs(((IRExprUnop *)contents[i+1])->arg,
+						 contents[i]) == equal_to) {
 					res = IRExpr_Const_U1(true);
 					p = true;
 				}
@@ -1804,7 +1793,7 @@ top:
 				break;
 		}
 
-		if (e->op == Iop_And1) {
+		if (op == Iop_And1) {
 			/* Assume here that the expression is
 			   in conjunctive normal form.  Now
 			   search for arguments X and Y such
@@ -1818,11 +1807,14 @@ top:
 			   before Y in the list. */
 			/* (i.e. take anything which says
 			   X&(X|Y) and turn it into just X) */
-			for (int idx1 = 0; idx1 < e->nr_arguments - 1; idx1++) {
-				for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; ) {
-					if (isCnfSubset(e->contents[idx1], e->contents[idx2])) {
-						purgeAssocArgument(e, idx2);
-						progress = true;
+			for (int idx1 = 0; idx1 < nr_arguments - 1; idx1++) {
+				for (int idx2 = idx1 + 1; idx2 < nr_arguments; ) {
+					if (isCnfSubset(contents[idx1], contents[idx2])) {
+						memcpy(contents + idx2,
+						       contents + idx2 + 1,
+						       sizeof(IRExpr *) * (nr_arguments - idx2 - 1));
+						nr_arguments--;
+						realloc = true;
 					} else {
 						idx2++;
 					}
@@ -1833,32 +1825,32 @@ top:
 				   have anything like
 				   X&(~X|Y).  If we do, turn
 				   it into just X&Y. */
-				if (e->contents[idx1]->tag != Iex_Associative ||
-				    ((IRExprAssociative *)e->contents[idx1])->op != Iop_Or1) {
-					for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; idx2++)
-						e->contents[idx2] = optimiseAssuming(e->contents[idx2],
-										     e->contents[idx1],
-										     &progress);
+				if (contents[idx1]->tag != Iex_Associative ||
+				    ((IRExprAssociative *)contents[idx1])->op != Iop_Or1) {
+					for (int idx2 = idx1 + 1; idx2 < nr_arguments; idx2++)
+						contents[idx2] = optimiseAssuming(contents[idx2],
+										  contents[idx1],
+										  &realloc);
 				}
 			}
 		}
 
-		if (e->op == Iop_Or1) {
-			for (int idx1 = 0; idx1 < e->nr_arguments - 1; idx1++)
-				for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; idx2++)
-					e->contents[idx2] = rewriteBoolean(e->contents[idx1],
-									   false,
-									   e->contents[idx2],
-									   &progress);
+		if (op == Iop_Or1) {
+			for (int idx1 = 0; idx1 < nr_arguments - 1; idx1++)
+				for (int idx2 = idx1 + 1; idx2 < nr_arguments; idx2++)
+					contents[idx2] = rewriteBoolean(contents[idx1],
+									false,
+									contents[idx2],
+									&realloc);
 		}
 
-		if (e->op == Iop_And1) {
-			for (int idx1 = 0; idx1 < e->nr_arguments - 1; idx1++)
-				for (int idx2 = idx1 + 1; idx2 < e->nr_arguments; idx2++)
-					e->contents[idx2] = rewriteBoolean(e->contents[idx1],
-									   true,
-									   e->contents[idx2],
-									   &progress);
+		if (op == Iop_And1) {
+			for (int idx1 = 0; idx1 < nr_arguments - 1; idx1++)
+				for (int idx2 = idx1 + 1; idx2 < nr_arguments; idx2++)
+					contents[idx2] = rewriteBoolean(contents[idx1],
+									true,
+									contents[idx2],
+									&realloc);
 		}
 
 		/* x + -x -> 0, for any plus-like operator, so remove
@@ -1870,22 +1862,22 @@ top:
 			bool and_like;
 			bool xor_like;
 			bool p = false;
-			plus_like = e->op >= Iop_Add8 && e->op <= Iop_Add64;
-			and_like = (e->op >= Iop_And8 && e->op <= Iop_And64) ||
-				e->op == Iop_And1;
-			xor_like = e->op >= Iop_Xor8 && e->op <= Iop_Xor64;
+			plus_like = op >= Iop_Add8 && op <= Iop_Add64;
+			and_like = (op >= Iop_And8 && op <= Iop_And64) ||
+				op == Iop_And1;
+			xor_like = op >= Iop_Xor8 && op <= Iop_Xor64;
 			if (plus_like || and_like || xor_like) {
 				for (int it1 = 0;
-				     !p && it1 < e->nr_arguments;
+				     !p && it1 < nr_arguments;
 					) {
-					IRExpr *l = e->contents[it1];
+					IRExpr *l = contents[it1];
 					int it2;
 					for (it2 = 0;
-					     it2 < e->nr_arguments;
+					     it2 < nr_arguments;
 					     it2++) {
 						if (it2 == it1)
 							continue;
-						IRExpr *r = e->contents[it2];
+						IRExpr *r = contents[it2];
 						bool purge;
 						if (plus_like) {
 							if (r->tag == Iex_Unop) {
@@ -1915,7 +1907,7 @@ top:
 						if (purge) {
 							progress = true;
 							IRExprConst *result;
-							switch (e->op) {
+							switch (op) {
 							case Iop_And8:
 							case Iop_Xor8:
 							case Iop_Add8:
@@ -1952,22 +1944,28 @@ top:
 							/* Careful: do the largest index first so that the
 							   other index remains valid. */
 							if (it1 < it2) {
-								purgeAssocArgument(e, it2);
-								e->contents[it1] = result;
+								memcpy(contents + it2,
+								       contents + it2 + 1,
+								       sizeof(IRExpr *) * (nr_arguments - 1 - it2));
+								contents[it1] = result;
 							} else {
-								purgeAssocArgument(e, it1);
-								e->contents[it2] = result;
+								memcpy(contents + it1,
+								       contents + it1 + 1,
+								       sizeof(IRExpr *) * (nr_arguments - 1 - it1));
+								contents[it2] = result;
 							}
+							nr_arguments--;
+							realloc = true;
 							break;
 						}
 					}
-					if (it2 == e->nr_arguments)
+					if (it2 == nr_arguments)
 						it1++;
 				}
 			}
-			if (e->nr_arguments == 0) {
+			if (nr_arguments == 0) {
 				p = true;
-				switch (e->op) {
+				switch (op) {
 				case Iop_Add8:
 				case Iop_Xor8:
 					res = IRExpr_Const_U8(0);
@@ -2011,8 +2009,14 @@ top:
 		}
 
 		/* If the size is reduced to one, eliminate the assoc list */
-		if (e->nr_arguments == 1)
-			res = e->contents[0];
+		if (nr_arguments == 1) {
+			res = contents[0];
+			break;
+		}
+
+		assert(nr_arguments == _e->nr_arguments || realloc);
+		if (op != _e->op || realloc)
+			res = IRExpr_Associative_Copy(op, nr_arguments, contents);
 
 		break;
 	}
@@ -2077,28 +2081,30 @@ top:
 			if ((op == Iop_Not1 && (arga->op == Iop_And1 || arga->op == Iop_Or1)) ||
 			    (op == Iop_Neg64 && arga->op == Iop_Add64)) {
 				/* Convert ~(x & y) to ~x | ~y and -(x + y) to -x + -y. */
-				IRExprAssociative *a =
-					(IRExprAssociative *)IRExpr_Associative(arga);
-				for (int i = 0;
-				     i < a->nr_arguments;
-				     i++) {
-					a->contents[i] =
+				IROp nop;
+				switch (op) {
+				case Iop_And1:
+					nop = Iop_Or1;
+					break;
+				case Iop_Or1:
+					nop = Iop_And1;
+					break;
+				case Iop_Add64:
+					nop = Iop_Add64;
+					break;
+				default:
+					abort();
+				}
+				IRExpr *nargs[arga->nr_arguments];
+				for (int i = 0; i < arga->nr_arguments; i++)
+					nargs[i] =
 						optimiseIRExprFP(
 							IRExpr_Unop(
 								op,
-								a->contents[i]),
+								arga->contents[i]),
 							opt,
 							&progress);
-				}
-				if (a->op == Iop_And1)
-					a->op = Iop_Or1;
-				else if (a->op == Iop_Or1)
-					a->op = Iop_And1;
-				else if (a->op == Iop_Add64)
-					a->op = Iop_Add64;
-				else
-					abort();
-				res = a;
+				res = IRExpr_Associative_Copy(nop, arga->nr_arguments, nargs);
 				break;
 			}
 			bool isOr = arga->op >= Iop_Or8 && arga->op <= Iop_Or64;
@@ -2118,14 +2124,13 @@ top:
 			     (isUnsignedUpcast && (isOr || isAnd || isXor) ) ) {
 				/* Push downcasts through and/or/xor/add operations,
 				   and unsigned upcasts through and/or/xor ones. */
-				IRExprAssociative *a =
-					(IRExprAssociative *)IRExpr_Associative(arga);
-				for (int i = 0; i < a->nr_arguments; i++)
-					a->contents[i] =
+				IRExpr *newArgs[arga->nr_arguments];
+				for (int i = 0; i < arga->nr_arguments; i++)
+					newArgs[i] =
 						optimiseIRExprFP(
 							IRExpr_Unop(
 								op,
-								a->contents[i]),
+								arga->contents[i]),
 							opt,
 							&progress);
 				IROp base_op = Iop_INVALID;
@@ -2140,7 +2145,7 @@ top:
 #undef do_op
 				assert(base_op != Iop_INVALID);
 				IROp op = Iop_INVALID;
-				switch (a->contents[0]->type()) {
+				switch (arga->contents[0]->type()) {
 				case Ity_I8:
 					op = base_op;
 					break;
@@ -2157,8 +2162,7 @@ top:
 					break;
 				}
 				assert(op != Iop_INVALID);
-				a->op = op;
-				res = a;
+				res = IRExpr_Associative_Copy(op, arga->nr_arguments, newArgs);
 				break;
 			}
 		}
@@ -2417,7 +2421,7 @@ top:
 		if (operationAssociates(op)) {
 			/* Convert to an associative operation. */
 			res = optimiseIRExpr(
-				IRExpr_Associative(
+				IRExpr_Associative_V(
 					op,
 					l,
 					r,
@@ -2515,13 +2519,14 @@ top:
 			    ((IRExprAssociative *)r)->contents[0]->tag == Iex_Const) {
 				assert(((IRExprAssociative *)r)->nr_arguments > 1);
 				/* a == C + b -> -C + a == b */
-				IRExpr *cnst = ((IRExprAssociative *)r)->contents[0];
-				IRExprAssociative *newRight = (IRExprAssociative *)IRExpr_Associative((IRExprAssociative *)r);
-				purgeAssocArgument(newRight, 0);
-				IRExpr *newLeft = IRExpr_Associative(
-					((IRExprAssociative *)r)->op,
+				IRExprAssociative *oldRight = (IRExprAssociative *)r;
+				IRExpr *cnst = oldRight->contents[0];
+				IRExpr *newRight = IRExpr_Associative_Copy(oldRight->op, oldRight->nr_arguments - 1,
+									   oldRight->contents + 1);
+				IRExpr *newLeft = IRExpr_Associative_V(
+					oldRight->op,
 					IRExpr_Unop(
-						(IROp)(Iop_Neg8 + (((IRExprAssociative *)r)->op - Iop_Add8)),
+						(IROp)(Iop_Neg8 + oldRight->op - Iop_Add8),
 						cnst),
 					l,
 					NULL);
@@ -2532,52 +2537,46 @@ top:
 			if (l->tag == Iex_Associative &&
 			    ((IRExprAssociative *)l)->op >= Iop_Add8 &&
 			    ((IRExprAssociative *)l)->op <= Iop_Add64) {
+				auto *oldLeft = (IRExprAssociative *)l;
 				/* C + a == b -> C == b - a */
-				assert(((IRExprAssociative *)l)->nr_arguments > 1);
-				IRExprAssociative *newR =
-					(IRExprAssociative *)IRExpr_Associative(((IRExprAssociative *)l)->op, r, NULL);
-				for (int it = 1;
-				     it < ((IRExprAssociative *)l)->nr_arguments;
-				     it++)
-					addArgumentToAssoc(newR,
-							   IRExpr_Unop(
-								   (IROp)(Iop_Neg8 + (((IRExprAssociative *)l)->op - Iop_Add8)),
-								   ((IRExprAssociative *)l)->contents[it]));
-				IRExpr *cnst = ((IRExprAssociative *)l)->contents[0];
+				assert(oldLeft->nr_arguments > 1);
+				IRExpr *newArgs[oldLeft->nr_arguments];
+				int newNrArgs = 0;
+				for (int it = 1; it < oldLeft->nr_arguments; it++)
+					newArgs[newNrArgs++] = 
+						IRExpr_Unop(
+							(IROp)(Iop_Neg8 + oldLeft->op - Iop_Add8),
+							oldLeft->contents[it]);
+				IRExpr *cnst = oldLeft->contents[0];
 				if (cnst->tag != Iex_Const) {
-					switch (((IRExprAssociative *)l)->op) {
+					IRExprConst *c = (IRExprConst *)cnst;
+					switch (oldLeft->op) {
 					case Iop_Add8:
-						addArgumentToAssoc(newR,
-								   IRExpr_Unop(
-									   Iop_Neg8,
-									   cnst));
+						newArgs[newNrArgs++] =
+							IRExpr_Const_U8(-c->Ico.U8);
 						cnst = IRExpr_Const_U8(0);
 						break;
 					case Iop_Add16:
-						addArgumentToAssoc(newR,
-								   IRExpr_Unop(
-									   Iop_Neg16,
-									   cnst));
+						newArgs[newNrArgs++] =
+							IRExpr_Const_U16(-c->Ico.U16);
 						cnst = IRExpr_Const_U16(0);
 						break;
 					case Iop_Add32:
-						addArgumentToAssoc(newR,
-								   IRExpr_Unop(
-									   Iop_Neg32,
-									   cnst));
+						newArgs[newNrArgs++] =
+							IRExpr_Const_U16(-c->Ico.U32);
 						cnst = IRExpr_Const_U32(0);
 						break;
 					case Iop_Add64:
-						addArgumentToAssoc(newR,
-								   IRExpr_Unop(
-									   Iop_Neg64,
-									   cnst));
+						newArgs[newNrArgs++] =
+							IRExpr_Const_U16(-c->Ico.U64);
 						cnst = IRExpr_Const_U64(0);
 						break;
 					default:
 						abort();
 					}
 				}
+				IRExpr *newR =
+					IRExpr_Associative_Copy(oldLeft->op, newNrArgs, newArgs);
 				l = cnst;
 				r = optimiseIRExprFP(newR, opt, &progress);
 				progress = true;
@@ -2684,20 +2683,20 @@ top:
 				assert(!(opt.asUnsigned() & ~leader->optimisationsApplied));
 				if (leader->op >= Iop_Neg8 && leader->op <= Iop_Neg64) {
 					/* Do it */
-					IRExprAssociative *new_r = new IRExprAssociative(*ra);
-					for (int i = 0; i < new_r->nr_arguments; i++) {
-						IRExpr *a = new_r->contents[i];
+					IRExpr *newArgs[ra->nr_arguments];
+					for (int i = 0; i < ra->nr_arguments; i++) {
+						IRExpr *a = ra->contents[i];
 						assert(!(opt.asUnsigned() & ~a->optimisationsApplied));
 						if (a->tag == Iex_Unop &&
 						    ((IRExprUnop *)a)->op == leader->op)
-							new_r->contents[i] = ((IRExprUnop *)a)->arg;
+							newArgs[i] = ((IRExprUnop *)a)->arg;
 						else
-							new_r->contents[i] =
+							newArgs[i] =
 								IRExpr_Unop(
 									leader->op,
 									a);
 					}
-					new_r->optimisationsApplied = 0;
+					IRExprAssociative *new_r = new IRExprAssociative(ra->op, ra->nr_arguments, newArgs);
 					IRExprConst *lc = (IRExprConst *)l;
 					switch (op) {
 					case Iop_CmpEQ8:

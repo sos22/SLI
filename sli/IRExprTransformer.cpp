@@ -73,23 +73,16 @@ IRExprTransformer::transformIex(IRExprAssociative *e)
 {
 	bool t = false;
 	int x = 0;
+	IRExpr *newArgs[e->nr_arguments];
 	IRExpr *newE;
 	while (x < e->nr_arguments) {
-		newE = transformIRExpr(e->contents[x], &t);
-		if (t)
-			break;
+		newArgs[x] = transformIRExpr(e->contents[x], &t);
 		x++;
 	}
-	if (!t)
-		return NULL;
-	IRExprAssociative *r = (IRExprAssociative *)IRExpr_Associative(e);
-	r->contents[x] = newE;
-	x++;
-	while (x < e->nr_arguments) {
-		r->contents[x] = transformIRExpr(e->contents[x], &t);
-		x++;
-	}
-	return r;
+	if (t)
+		return IRExpr_Associative_Copy(e->op, e->nr_arguments, newArgs);
+	else
+		return e;
 }
 
 bbdd *

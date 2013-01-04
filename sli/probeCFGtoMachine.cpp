@@ -1321,7 +1321,7 @@ addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachine
 				exprbdd::var(
 					&scopes->exprs,
 					&scopes->bools,
-					IRExpr_Associative(
+					IRExpr_Associative_V(
 						Iop_Add64,
 						IRExpr_Get(
 							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
@@ -1339,7 +1339,7 @@ addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachine
 				exprbdd::var(
 					&scopes->exprs,
 					&scopes->bools,
-					IRExpr_Associative(
+					IRExpr_Associative_V(
 						Iop_Add64,
 						IRExpr_Get(
 							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
