@@ -2028,7 +2028,7 @@ protected:
 		if (what->reg == idx)
 			return to;
 		else
-			return NULL;
+			return what;
 	}
 public:
 	RewriteRegisterExpr(threadAndRegister _idx, IRExpr *_to)
