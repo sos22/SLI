@@ -666,6 +666,8 @@ _sortIRExprs(const IRExpr *_a, const IRExpr *_b)
 
 static IRExpr *optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt);
 
+/* Kind of misnamed: like optimiseIRExpr(), but with some sanity
+   checking and profiling stuff wrapped around it. */
 static IRExpr *
 optimiseIRExprFP(IRExpr *e, const IRExprOptimisations &opt)
 {
@@ -1094,8 +1096,8 @@ top2:
 /* We know from context that @assumption is true when evaluating @iex,
    and with fairly high probability @iex is a CNF disjunction.
    Optimise under that assumption. */
-static IRExpr *
-optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
+IRExpr *
+optimiseAssuming(IRExpr *iex, const IRExpr *assumption)
 {
 	if (iex->tag == Iex_Const) {
 		/* Nothing to do in this case, and an early exit means
@@ -1113,15 +1115,12 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 		}
 	}
 
-	if (_sortIRExprs(iex, assumption) == equal_to) {
-		*done_something = true;
+	if (_sortIRExprs(iex, assumption) == equal_to)
 		return IRExpr_Const_U1(!invertAssumption);
-	}
 	if (iex->tag == Iex_Unop) {
 		const IRExprUnop *u = (IRExprUnop *)iex;
 		if (u->op == Iop_Not1 &&
 		    _sortIRExprs(u->arg, assumption) == equal_to) {
-			*done_something = true;
 			return IRExpr_Const_U1(invertAssumption);
 		}
 		return iex;
@@ -1140,7 +1139,6 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 		newArgs[outIdx] = inp;
 		outIdx++;
 		if (_sortIRExprs(inp, assumption) == equal_to) {
-			*done_something = true;
 			if (invertAssumption) {
 				/* We're assuming ~X and this
 				   expression is X|Y, so just skip
@@ -1157,7 +1155,6 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 			IRExprUnop *u = (IRExprUnop *)inp;
 			if (u->op == Iop_Not1 &&
 			    _sortIRExprs(u->arg, assumption) == equal_to) {
-				*done_something = true;
 				if (invertAssumption) {
 					/* We're assuming ~x and we
 					   found ~x|y -> result is
@@ -1175,17 +1172,6 @@ optimiseAssuming(IRExpr *iex, const IRExpr *assumption, bool *done_something)
 		return IRExpr_Associative_Copy(assoc->op, outIdx, newArgs);
 	else
 		return assoc;
-}
-
-IRExpr *
-optimiseAssuming(IRExpr *iex, const IRExpr *assumption)
-{
-	bool p = true;
-	while (p) {
-		p = false;
-		iex = optimiseAssuming(iex, assumption, &p);
-	}
-	return iex;
 }
 
 IROp
@@ -1559,14 +1545,18 @@ top:
 					}
 					res = IRExpr_Mux0X(
 						mux->cond,
-						IRExpr_Associative_Copy(
-							op,
-							nr_arguments,
-							args0),
-						IRExpr_Associative_Copy(
-							op,
-							nr_arguments,
-							argsX));
+						optimiseIRExpr(
+							IRExpr_Associative_Copy(
+								op,
+								nr_arguments,
+								args0),
+							opt),
+						optimiseIRExpr(
+							IRExpr_Associative_Copy(
+								op,
+								nr_arguments,
+								argsX),
+							opt));
 					p = true;
 				}
 			}
@@ -1796,10 +1786,17 @@ top:
 				   it into just X&Y. */
 				if (contents[idx1]->tag != Iex_Associative ||
 				    ((IRExprAssociative *)contents[idx1])->op != Iop_Or1) {
-					for (int idx2 = idx1 + 1; idx2 < nr_arguments; idx2++)
-						contents[idx2] = optimiseAssuming(contents[idx2],
-										  contents[idx1],
-										  &realloc);
+					for (int idx2 = idx1 + 1; idx2 < nr_arguments; idx2++) {
+						IRExpr *e =
+							optimiseIRExpr(
+								optimiseAssuming(
+									contents[idx2],
+									contents[idx1]),
+								opt);
+						if (e != contents[idx2])
+							realloc = true;
+						contents[idx2] = e;
+					}
 				}
 			}
 		}
@@ -1807,9 +1804,12 @@ top:
 		if (op == Iop_Or1 || op == Iop_And1) {
 			for (int idx1 = 0; idx1 < nr_arguments - 1; idx1++)
 				for (int idx2 = idx1 + 1; idx2 < nr_arguments; idx2++) {
-					IRExpr *e = rewriteBoolean(contents[idx1],
-								   op == Iop_And1,
-								   contents[idx2]);
+					IRExpr *e =
+						optimiseIRExpr(
+							rewriteBoolean(contents[idx1],
+								       op == Iop_And1,
+								       contents[idx2]),
+							opt);
 					if (e != contents[idx2])
 						realloc = true;
 					contents[idx2] = e;
@@ -2044,7 +2044,7 @@ top:
 			    (op == Iop_Neg64 && arga->op == Iop_Add64)) {
 				/* Convert ~(x & y) to ~x | ~y and -(x + y) to -x + -y. */
 				IROp nop;
-				switch (op) {
+				switch (arga->op) {
 				case Iop_And1:
 					nop = Iop_Or1;
 					break;
@@ -2060,7 +2060,7 @@ top:
 				IRExpr *nargs[arga->nr_arguments];
 				for (int i = 0; i < arga->nr_arguments; i++)
 					nargs[i] =
-						optimiseIRExprFP(
+						optimiseIRExpr(
 							IRExpr_Unop(
 								op,
 								arga->contents[i]),
@@ -2088,7 +2088,7 @@ top:
 				IRExpr *newArgs[arga->nr_arguments];
 				for (int i = 0; i < arga->nr_arguments; i++)
 					newArgs[i] =
-						optimiseIRExprFP(
+						optimiseIRExpr(
 							IRExpr_Unop(
 								op,
 								arga->contents[i]),
@@ -2105,7 +2105,7 @@ top:
 #undef do_op
 				assert(base_op != Iop_INVALID);
 				IROp op = Iop_INVALID;
-				switch (arga->contents[0]->type()) {
+				switch (newArgs[0]->type()) {
 				case Ity_I8:
 					op = base_op;
 					break;
@@ -2166,11 +2166,13 @@ top:
 						arg = assoc->contents[1];
 					else
 						arg =
-							IRExpr_Binop(
-								Iop_Add64,
-								IRExpr_Const_U64(
-									cnst->Ico.U64 & ~((1ul << 22) - 1)),
-								assoc->contents[1]);
+							optimiseIRExpr(
+								IRExpr_Binop(
+									Iop_Add64,
+									IRExpr_Const_U64(
+										cnst->Ico.U64 & ~((1ul << 22) - 1)),
+									assoc->contents[1]),
+								opt);
 				}
 			}
 			if (arg->tag == Iex_Get &&
@@ -2187,13 +2189,18 @@ top:
 
 		if (arg->tag == Iex_Mux0X) {
 			IRExprMux0X *argM = (IRExprMux0X *)arg;
-			res = IRExpr_Mux0X(argM->cond,
-					   IRExpr_Unop(
-						   op,
-						   argM->expr0),
-					   IRExpr_Unop(
-						   op,
-						   argM->exprX));
+			res = IRExpr_Mux0X(
+				argM->cond,
+				optimiseIRExpr(
+					IRExpr_Unop(
+						op,
+						argM->expr0),
+					opt),
+				optimiseIRExpr(
+					IRExpr_Unop(
+						op,
+						argM->exprX),
+					opt));
 			break;
 		}
 
@@ -2366,25 +2373,22 @@ top:
 		IRExpr *r = optimiseIRExpr(_e->arg2, opt);
 		IROp op = _e->op;
 		__set_profiling(optimise_binop);
-		if (op >= Iop_Sub8 &&
-		    op <= Iop_Sub64) {
+		if (op >= Iop_Sub8 && op <= Iop_Sub64) {
 			/* Replace a - b with a + (-b), so as to
 			   eliminate binary -. */
 			op = (IROp)(op - Iop_Sub8 + Iop_Add8);
-			r = optimiseIRExprFP(
+			r = optimiseIRExpr(
 				IRExpr_Unop( (IROp)((op - Iop_Add8) + Iop_Neg8),
 					     r ),
 				opt);
 		}
 		if (operationAssociates(op)) {
 			/* Convert to an associative operation. */
-			res = optimiseIRExpr(
-				IRExpr_Associative_V(
-					op,
-					l,
-					r,
-					NULL),
-				opt);
+			res = IRExpr_Associative_V(
+				op,
+				l,
+				r,
+				NULL);
 			break;
 		}
 		/* If a op b commutes, sort the arguments. */
@@ -2485,8 +2489,8 @@ top:
 						cnst),
 					l,
 					NULL);
-				l = optimiseIRExprFP(newLeft, opt);
-				r = optimiseIRExprFP(newRight, opt);
+				l = optimiseIRExpr(newLeft, opt);
+				r = optimiseIRExpr(newRight, opt);
 			}
 			if (l->tag == Iex_Associative &&
 			    ((IRExprAssociative *)l)->op >= Iop_Add8 &&
@@ -2497,7 +2501,7 @@ top:
 				IRExpr *newArgs[oldLeft->nr_arguments];
 				int newNrArgs = 0;
 				for (int it = 1; it < oldLeft->nr_arguments; it++)
-					newArgs[newNrArgs++] = 
+					newArgs[newNrArgs++] =
 						IRExpr_Unop(
 							(IROp)(Iop_Neg8 + oldLeft->op - Iop_Add8),
 							oldLeft->contents[it]);
@@ -2517,12 +2521,12 @@ top:
 						break;
 					case Iop_Add32:
 						newArgs[newNrArgs++] =
-							IRExpr_Const_U16(-c->Ico.U32);
+							IRExpr_Const_U32(-c->Ico.U32);
 						cnst = IRExpr_Const_U32(0);
 						break;
 					case Iop_Add64:
 						newArgs[newNrArgs++] =
-							IRExpr_Const_U16(-c->Ico.U64);
+							IRExpr_Const_U64(-c->Ico.U64);
 						cnst = IRExpr_Const_U64(0);
 						break;
 					default:
@@ -2532,7 +2536,7 @@ top:
 				IRExpr *newR =
 					IRExpr_Associative_Copy(oldLeft->op, newNrArgs, newArgs);
 				l = cnst;
-				r = optimiseIRExprFP(newR, opt);
+				r = optimiseIRExpr(newR, opt);
 			}
 
 			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
@@ -2544,6 +2548,7 @@ top:
 					IRExpr_Unop(
 						Iop_Neg64,
 						l));
+				r = optimiseIRExpr(r, opt);
 			}
 
 			/* Special case: const:64 == {b}to64(X)
@@ -2648,7 +2653,7 @@ top:
 									leader->op,
 									a);
 					}
-					IRExprAssociative *new_r = new IRExprAssociative(ra->op, ra->nr_arguments, newArgs);
+					IRExprAssociative *new_r = IRExpr_Associative_Copy(ra->op, ra->nr_arguments, newArgs);
 					IRExprConst *lc = (IRExprConst *)l;
 					switch (op) {
 					case Iop_CmpEQ8:
@@ -2670,7 +2675,7 @@ top:
 					default:
 						abort();
 					}
-					r = new_r;
+					r = optimiseIRExpr(new_r, opt);
 				}
 			}
 		}
@@ -2742,6 +2747,8 @@ top:
 				  Iop_CmpLT64U)),
 				t,
 				r);
+			l = optimiseIRExpr(l, opt);
+			r = optimiseIRExpr(r, opt);
 		}
 
 		/* A couple of special rules: cmp_ltXu(0, x)
@@ -2752,12 +2759,14 @@ top:
 			    isZero( (IRExprConst *)l ) ) {
 				res = IRExpr_Unop(
 					Iop_Not1,
-					IRExpr_Binop(
-						(IROp)((int)Iop_CmpEQ8 +
-						       (int)op -
-						       (int)Iop_CmpLT8U),
-						l,
-						r));
+					optimiseIRExpr(
+						IRExpr_Binop(
+							(IROp)((int)Iop_CmpEQ8 +
+							       (int)op -
+							       (int)Iop_CmpLT8U),
+							l,
+							r),
+						opt));
 				break;
 			}
 			if (r->tag == Iex_Const &&
@@ -2774,39 +2783,51 @@ top:
 				if (physicallyEqual(lm->cond, rm->cond)) {
 					res = IRExpr_Mux0X(
 						lm->cond,
-						IRExpr_Binop(op,
-							     lm->expr0,
-							     rm->expr0),
-						IRExpr_Binop(op,
-							     lm->exprX,
-							     rm->exprX));
+						optimiseIRExpr(
+							IRExpr_Binop(op,
+								     lm->expr0,
+								     rm->expr0),
+							opt),
+						optimiseIRExpr(
+							IRExpr_Binop(op,
+								     lm->exprX,
+								     rm->exprX),
+							opt));
 					break;
 				}
 			} else {
 				res = IRExpr_Mux0X(
 					lm->cond,
-					IRExpr_Binop(
-						op,
-						lm->expr0,
-						r),
-					IRExpr_Binop(
-						op,
-						lm->exprX,
-						r));
+					optimiseIRExpr(
+						IRExpr_Binop(
+							op,
+							lm->expr0,
+							r),
+						opt),
+					optimiseIRExpr(
+						IRExpr_Binop(
+							op,
+							lm->exprX,
+							r),
+						opt));
 				break;
 			}
 		} else if (r->tag == Iex_Mux0X) {
 			IRExprMux0X *rm = (IRExprMux0X *)r;
 			res = IRExpr_Mux0X(
 				rm->cond,
-				IRExpr_Binop(
-					op,
-					l,
-					rm->expr0),
-				IRExpr_Binop(
-					op,
-					l,
-					rm->exprX));
+				optimiseIRExpr(
+					IRExpr_Binop(
+						op,
+						l,
+						rm->expr0),
+					opt),
+				optimiseIRExpr(
+					IRExpr_Binop(
+						op,
+						l,
+						rm->exprX),
+					opt));
 			break;
 		}
 
@@ -2958,16 +2979,20 @@ top:
 			   sequence of boolean operations. */
 			res = IRExpr_Binop(
 				Iop_Or1,
-				IRExpr_Binop(
-					Iop_And1,
-					IRExpr_Unop(
-						Iop_Not1,
-						cond),
-					expr0),
-				IRExpr_Binop(
-					Iop_And1,
-					cond,
-					exprX));
+				optimiseIRExpr(
+					IRExpr_Binop(
+						Iop_And1,
+						IRExpr_Unop(
+							Iop_Not1,
+							cond),
+						expr0),
+					opt),
+				optimiseIRExpr(
+					IRExpr_Binop(
+						Iop_And1,
+						cond,
+						exprX),
+					opt));
 			break;
 		}
 
@@ -2980,26 +3005,28 @@ top:
 				/* Rewrite Mux0X(a, Mux0X(b, x, y), Mux0X(c, x, y))
 				   to Mux0X( (!a && !b) || (a && !c), x, y) */
 				res = IRExpr_Mux0X(
-					IRExpr_Binop(
-						Iop_Or1,
+					optimiseIRExpr(
 						IRExpr_Binop(
-							Iop_And1,
-							IRExpr_Unop(
-								Iop_Not1,
-								cond),
-							IRExpr_Unop(
-								Iop_Not1,
-								e0->cond)),
-						IRExpr_Binop(
-							Iop_And1,
-							cond,
-							IRExpr_Unop(
-								Iop_Not1,
-								eX->cond))),
+							Iop_Or1,
+							IRExpr_Binop(
+								Iop_And1,
+								IRExpr_Unop(
+									Iop_Not1,
+									cond),
+								IRExpr_Unop(
+									Iop_Not1,
+									e0->cond)),
+							IRExpr_Binop(
+								Iop_And1,
+								cond,
+								IRExpr_Unop(
+									Iop_Not1,
+									eX->cond))),
+						opt),
 					e0->expr0,
 					e0->exprX);
+				break;
 			}
-			break;
 		}
 
 		if (cond != _e->cond || expr0 != _e->expr0 ||
