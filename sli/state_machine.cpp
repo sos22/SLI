@@ -68,6 +68,8 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		return new StateMachineTerminal(dbg_origin, n);
 	}
 	set_condition(simplifyBDD(&scopes->bools, condition, opt));
+	if (TIMEOUT)
+		return this;
 	if (condition->isLeaf) {
 		*done_something = true;
 		if (condition->leaf())
@@ -135,6 +137,8 @@ StateMachineSideEffectStore::optimise(SMScopes *scopes, const AllowableOptimisat
 {
 	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt);
 	data = simplifyBDD(&scopes->exprs, &scopes->bools, data, opt);
+	if (TIMEOUT)
+		return this;
 	if (isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
@@ -146,7 +150,7 @@ StateMachineSideEffect *
 StateMachineSideEffectLoad::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
 	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt);
-	if (isBadAddress(addr)) {
+	if (!TIMEOUT && isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
@@ -164,7 +168,7 @@ StateMachineSideEffect *
 StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
 	value = simplifyBDD(&scopes->bools, value, opt);
-	if (value->isLeaf) {
+	if (!TIMEOUT && value->isLeaf) {
 		*done_something = true;
 		if (value->leaf())
 			return StateMachineSideEffectUnreached::get();
