@@ -412,6 +412,22 @@ quickSimplify(IRExpr *a)
 				return IRExpr_Const_U64(arg1c->Ico.U64 << arg2c->Ico.U8);
 			case Iop_Shr64:
 				return IRExpr_Const_U64(arg1c->Ico.U64 >> arg2c->Ico.U8);
+			case Iop_32HLto64:
+				return IRExpr_Const_U64(arg1c->Ico.U32 | ((unsigned long)arg2c->Ico.U32 << 32));
+			case Iop_DivModU64to32: {
+				unsigned long num = arg1c->Ico.U64;
+				unsigned long denom = arg2c->Ico.U32;
+				if (denom == 0) {
+					warning("Constant division by zero (%ld/%ld)?\n",
+						num, denom);
+					break;
+				}
+				unsigned long div = num / denom;
+				unsigned long mod = num % denom;
+				return IRExpr_Const_U64((div << 32) | (mod & 0xffffffff));
+			}
+			case Iop_Mul64:
+				return IRExpr_Const_U64(arg1c->Ico.U64 * arg2c->Ico.U64);
 			default:
 				abort();
 			}
