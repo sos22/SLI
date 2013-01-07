@@ -305,6 +305,9 @@ public:
 			rv.val64 = res;
 			return res;
 		}
+		case Ity_I128:
+			/* Cheat and just zero-extend the low 64 bits. */
+			return exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_64UtoV128, register_value(scopes, reg, Ity_I64));
 		default:
 			abort();
 		}
