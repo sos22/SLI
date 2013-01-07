@@ -1313,32 +1313,45 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			bool failed = false;
 			exprbdd *defaultVal = NULL;
 			bbdd *stateDominator = cdm.get(it->first);
-			for (auto it2 = it->second.stores.begin();
-			     !failed && it2 != it->second.stores.end();
-			     it2++) {
-				bbdd *gate = bbdd::assume(&scopes->bools, cdm.get(*it2), stateDominator);
-				exprbdd *val = dataOfSideEffect(scopes, (*it2)->sideEffect, l->type);
-				defaultVal = val;
-				exprbdd **slot = possibleInputs.getSlot(gate, val);
-				if (*slot != val)
-					failed = true;
-			}
-			assert(defaultVal != NULL);
-			if (!failed) {
-				exprbdd *res = exprbdd::from_enabling(
-					&scopes->exprs,
-					possibleInputs,
-					defaultVal);
-				if (res) {
-					if (debug_use_alias_table) {
-						printf("Replace l%d with mux:\n",
-						       stateLabels[it->first]);
-						res->prettyPrint(stdout);
+			if (stateDominator == scopes->bools.cnst(false)) {
+				/* This state is unreachable. */
+				/* (Note that this isn't just an
+				   optimisation: unreachable states
+				   screw up the mightLoadInitial flag,
+				   so if you leave the load in you get
+				   problems later on) */
+				it->first->sideEffect =
+					StateMachineSideEffectUnreached::get();
+			} else {
+				for (auto it2 = it->second.stores.begin();
+				     !failed && it2 != it->second.stores.end();
+				     it2++) {
+					bbdd *gate = bbdd::assume(&scopes->bools, cdm.get(*it2), stateDominator);
+					if (!gate)
+						continue;
+					exprbdd *val = dataOfSideEffect(scopes, (*it2)->sideEffect, l->type);
+					defaultVal = val;
+					exprbdd **slot = possibleInputs.getSlot(gate, val);
+					if (*slot != val)
+						failed = true;
+				}
+				assert(defaultVal != NULL);
+				if (!failed) {
+					exprbdd *res = exprbdd::from_enabling(
+						&scopes->exprs,
+						possibleInputs,
+						defaultVal);
+					if (res) {
+						if (debug_use_alias_table) {
+							printf("Replace l%d with mux:\n",
+							       stateLabels[it->first]);
+							res->prettyPrint(stdout);
+						}
+						it->first->sideEffect =
+							new StateMachineSideEffectCopy(
+								l->target, res);
+						progress = true;
 					}
-					it->first->sideEffect =
-						new StateMachineSideEffectCopy(
-							l->target, res);
-					progress = true;
 				}
 			}
 		} else {
