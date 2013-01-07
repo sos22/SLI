@@ -428,6 +428,8 @@ quickSimplify(IRExpr *a)
 			}
 			case Iop_Mul64:
 				return IRExpr_Const_U64(arg1c->Ico.U64 * arg2c->Ico.U64);
+			case Iop_64HLto128:
+				return IRExpr_Const_U128(arg1c->Ico.U64, arg2c->Ico.U64);
 			default:
 				abort();
 			}
