@@ -977,8 +977,16 @@ exprbdd_scope::runGc(HeapVisitor &hv)
 {
 	std::map<IRExpr *, exprbdd *> newLeaves;
 	for (auto it = leaves.begin(); it != leaves.end(); it++) {
-		exprbdd *b = hv.visited(it->second);
-		newLeaves[it->first] = b;
+		IRExpr *k = it->first;
+		k = hv.visited(k);
+		if (!k)
+			continue;
+		exprbdd *old = it->second;
+		exprbdd *nw = hv.visited(old);
+		if (nw) {
+			newLeaves[k] = nw;
+			assert(nw->type() == k->type());
+		}
 	}
 	leaves = newLeaves;
 	bdd_scope<exprbdd>::runGc(hv);
