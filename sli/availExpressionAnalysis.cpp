@@ -1268,122 +1268,102 @@ rewrite_var(ssa_avail_state &state, t *&arg, bool *done_something)
 }
 
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectLoad *inp,
-		bool *done_something)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectLoad *inp)
 {
-	exprbdd *addr = inp->addr;
-	rewrite_var(state, addr, done_something);
+	exprbdd *addr = ssaApplyAvail(state, inp->addr);
 	if (addr == inp->addr)
 		return inp;
 	return new StateMachineSideEffectLoad(inp, addr);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStore *inp,
-		bool *done_something)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStore *inp)
 {
-	exprbdd *addr = inp->addr;
-	exprbdd *data = inp->data;
-	rewrite_var(state, addr, done_something);
-	rewrite_var(state, data, done_something);
+	exprbdd *addr = ssaApplyAvail(state, inp->addr);
+	exprbdd *data = ssaApplyAvail(state, inp->data);
 	if (addr == inp->addr && data == inp->data)
 		return inp;
 	return new StateMachineSideEffectStore(inp, addr, inp->data);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectCopy *inp,
-		bool *done_something)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectCopy *inp)
 {
-	exprbdd *data = inp->value;
-	rewrite_var(state, data, done_something);
+	exprbdd *data = ssaApplyAvail(state, inp->value);
 	if (data == inp->value)
 		return inp;
 	return new StateMachineSideEffectCopy(inp, data);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectUnreached *inp, bool *)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectUnreached *inp)
 {
 	return inp;
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectAssertFalse *inp,
-		bool *done_something)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectAssertFalse *inp)
 {
-	bbdd *value = inp->value;
-	rewrite_var(state, value, done_something);
+	bbdd *value = ssaApplyAvail(state, inp->value);
 	if (value == inp->value)
 		return inp;
-	*done_something = true;
 	return new StateMachineSideEffectAssertFalse(inp, value);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectPhi *inp,
-		bool *done_something)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectPhi *inp)
 {
 	unsigned x;
 	exprbdd *e;
 	x = 0;
 	while (x < inp->generations.size()) {
-		e = inp->generations[x].val;
-		rewrite_var(state, e, done_something);
+		e = ssaApplyAvail(state, inp->generations[x].val);
 		if (e != inp->generations[x].val)
 			break;
 		x++;
 	}
 	if (x == inp->generations.size())
 		return inp;
-	*done_something = true;
 	std::vector<StateMachineSideEffectPhi::input> inputs(inp->generations);
 	inputs[x].val = e;
 	for (x++; x < inp->generations.size(); x++)
-		rewrite_var(state, inputs[x].val, done_something);
+		inputs[x].val = ssaApplyAvail(state, inputs[x].val);
 	return new StateMachineSideEffectPhi(inp, inputs);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStartAtomic *inp, bool *)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStartAtomic *inp)
 {
 	return inp;
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectEndAtomic *inp, bool *)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectEndAtomic *inp)
 {
 	return inp;
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStartFunction *inp,
-		bool *done_something)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStartFunction *inp)
 {
-	exprbdd *rsp = inp->rsp;
-	rewrite_var(state, rsp, done_something);
+	exprbdd *rsp = ssaApplyAvail(state, inp->rsp);
 	if (rsp == inp->rsp)
 		return inp;
-	*done_something = true;
 	return new StateMachineSideEffectStartFunction(inp, rsp);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectEndFunction *inp,
-		bool *done_something)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectEndFunction *inp)
 {
-	exprbdd *rsp = inp->rsp;
-	rewrite_var(state, rsp, done_something);
+	exprbdd *rsp = ssaApplyAvail(state, inp->rsp);
 	if (rsp == inp->rsp)
 		return inp;
-	*done_something = true;
 	return new StateMachineSideEffectEndFunction(inp, rsp);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *inp, bool *)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *inp)
 {
 	return inp;
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStackLayout *inp, bool *)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStackLayout *inp)
 {
 	return inp;
 }
 
 static StateMachineSideEffect *
-rewrite_side_effect(ssa_avail_state &state, StateMachineSideEffect *inp,
-		    bool *done_something)
+rewrite_side_effect(ssa_avail_state &state, StateMachineSideEffect *inp)
 {
 	if (!inp)
 		return NULL;
@@ -1392,8 +1372,7 @@ rewrite_side_effect(ssa_avail_state &state, StateMachineSideEffect *inp,
 		case StateMachineSideEffect:: name :			\
 			return ssaApplyAvailSE(				\
 				state,					\
-				(StateMachineSideEffect ## name *)inp,	\
-				done_something);
+				(StateMachineSideEffect ## name *)inp);
 		all_side_effect_types(do_type)
 #undef do_type
 	}
@@ -1466,7 +1445,10 @@ ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
 		}
 		case StateMachineState::SideEffecting: {
 			auto sme = (StateMachineSideEffecting *)s;
-			sme->sideEffect = rewrite_side_effect(state, sme->sideEffect, done_something);
+			StateMachineSideEffect *n = rewrite_side_effect(state, sme->sideEffect);
+			if (n != sme->sideEffect)
+				*done_something = true;
+			sme->sideEffect = n;
 			break;
 		}
 		}
