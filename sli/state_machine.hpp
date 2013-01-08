@@ -1042,8 +1042,13 @@ public:
 		  rsp(_rsp), frame(_frame)
 	{
 	}
-	exprbdd *rsp;
-	FrameId frame;
+	StateMachineSideEffectStartFunction(StateMachineSideEffectStartFunction *base, exprbdd *_rsp)
+		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
+		  rsp(_rsp), frame(base->frame)
+	{
+	}
+	exprbdd *const rsp;
+	FrameId const frame;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "StartFunction(%s) rsp = ", frame.name());
 		rsp->prettyPrint(f);
@@ -1083,8 +1088,13 @@ public:
 		  rsp(_rsp), frame(_frame)
 	{
 	}
-	exprbdd *rsp;
-	FrameId frame;
+	StateMachineSideEffectEndFunction(StateMachineSideEffectEndFunction *base, exprbdd *_rsp)
+		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
+		  rsp(_rsp), frame(base->frame)
+	{
+	}
+	exprbdd *const rsp;
+	FrameId const frame;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "EndFunction(%s) rsp = ", frame.name());
 		rsp->prettyPrint(f);
