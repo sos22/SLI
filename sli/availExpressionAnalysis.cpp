@@ -1259,80 +1259,99 @@ rewrite_var(ssa_avail_state &state, t *&arg, bool *done_something)
 	arg = n;
 }
 
-static void
+static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectLoad *inp,
 		bool *done_something)
 {
-	rewrite_var(state, inp->addr, done_something);
+	exprbdd *addr = inp->addr;
+	rewrite_var(state, addr, done_something);
+	return new StateMachineSideEffectLoad(inp, addr);
 }
-static void
+static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStore *inp,
 		bool *done_something)
 {
-	rewrite_var(state, inp->addr, done_something);
-	rewrite_var(state, inp->data, done_something);
+	exprbdd *addr = inp->addr;
+	exprbdd *data = inp->data;
+	rewrite_var(state, addr, done_something);
+	rewrite_var(state, data, done_something);
+	return new StateMachineSideEffectStore(inp, addr, inp->data);
 }
-static void
+static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectCopy *inp,
 		bool *done_something)
 {
 	rewrite_var(state, inp->value, done_something);
+	return inp;
 }
-static void
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectUnreached *, bool *)
-{}
-static void
+static StateMachineSideEffect *
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectUnreached *inp, bool *)
+{
+	return inp;
+}
+static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectAssertFalse *inp,
 		bool *done_something)
 {
 	rewrite_var(state, inp->value, done_something);
+	return inp;
 }
-static void
+static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectPhi *inp,
 		bool *done_something)
 {
 	for (auto it = inp->generations.begin(); it != inp->generations.end(); it++)
 		rewrite_var(state, it->val, done_something);
+	return inp;
 }
-static void
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStartAtomic *, bool *)
-{}
-static void
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectEndAtomic *, bool *)
-{}
-static void
+static StateMachineSideEffect *
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStartAtomic *inp, bool *)
+{
+	return inp;
+}
+static StateMachineSideEffect *
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectEndAtomic *inp, bool *)
+{
+	return inp;
+}
+static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStartFunction *inp,
 		bool *done_something)
 {
 	rewrite_var(state, inp->rsp, done_something);
+	return inp;
 }
-static void
+static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectEndFunction *inp,
 		bool *done_something)
 {
 	rewrite_var(state, inp->rsp, done_something);
+	return inp;
 }
-static void
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *, bool *)
-{}
-static void
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStackLayout *, bool *)
-{}
+static StateMachineSideEffect *
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *inp, bool *)
+{
+	return inp;
+}
+static StateMachineSideEffect *
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStackLayout *inp, bool *)
+{
+	return inp;
+}
 
-static void
+static StateMachineSideEffect *
 rewrite_side_effect(ssa_avail_state &state, StateMachineSideEffect *inp,
 		    bool *done_something)
 {
 	if (!inp)
-		return;
+		return NULL;
 	switch (inp->type) {
 #define do_type(name)							\
 		case StateMachineSideEffect:: name :			\
-			ssaApplyAvailSE(				\
+			return ssaApplyAvailSE(				\
 				state,					\
 				(StateMachineSideEffect ## name *)inp,	\
-				done_something);			\
-			return;
+				done_something);
 		all_side_effect_types(do_type)
 #undef do_type
 	}
@@ -1405,7 +1424,7 @@ ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
 		}
 		case StateMachineState::SideEffecting: {
 			auto sme = (StateMachineSideEffecting *)s;
-			rewrite_side_effect(state, sme->sideEffect, done_something);
+			sme->sideEffect = rewrite_side_effect(state, sme->sideEffect, done_something);
 			break;
 		}
 		}

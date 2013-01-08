@@ -259,7 +259,7 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     const AllowableOptimisations &opt,
 				     GarbageCollectionToken token);
 
-void mkPendingMai(MemoryAccessIdentifier *where, const CFGNode *node);
+MemoryAccessIdentifier mkPendingMai(const CFGNode *node);
 StateMachineState *getProximalCause(SMScopes *scopes, MachineState *ms, Oracle *oracle, const CFGNode *where, const VexRip &rip, int tid);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

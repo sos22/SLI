@@ -170,14 +170,11 @@ public:
 };
 class SMBStatementStore : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
-		StateMachineSideEffectStore *res =
-			new StateMachineSideEffectStore(
-				exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
-				exprbdd::var(&state.scopes->exprs, &state.scopes->bools, value.content->compile()),
-				MemoryAccessIdentifier::uninitialised(),
-				tag);
-		mkPendingMai(&res->rip, state.where);
-		return res;
+		return new StateMachineSideEffectStore(
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, value.content->compile()),
+			mkPendingMai(state.where),
+			tag);
 	}
 public:
 	SMBPtr<SMBMemoryReference> addr;
@@ -196,15 +193,12 @@ public:
 };
 class SMBStatementLoad : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
-		StateMachineSideEffectLoad *l =
-			new StateMachineSideEffectLoad(
-				target.content->compile(),
-				exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
-				MemoryAccessIdentifier::uninitialised(),
-				type,
-				tag);
-		mkPendingMai(&l->rip, state.where);
-		return l;
+		return new StateMachineSideEffectLoad(
+			target.content->compile(),
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
+			mkPendingMai(state.where),
+			type,
+			tag);
 	}
 public:
 	SMBPtr<SMBRegisterReference> target;
