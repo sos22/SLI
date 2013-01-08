@@ -178,15 +178,17 @@ StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisati
 StateMachineSideEffect *
 StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	value = simplifyBDD(&scopes->bools, value, opt);
-	if (!TIMEOUT && value->isLeaf) {
-		*done_something = true;
+	bbdd *value = simplifyBDD(&scopes->bools, this->value, opt);
+	if (TIMEOUT || value == this->value)
+		return this;
+	*done_something = true;
+	if (value->isLeaf) {
 		if (value->leaf())
 			return StateMachineSideEffectUnreached::get();
 		else
 			return NULL;
 	}
-	return this;
+	return new StateMachineSideEffectAssertFalse(this, value);
 }
 
 StateMachineSideEffect *

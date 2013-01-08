@@ -2075,8 +2075,8 @@ assignMais(SMScopes *scopes, exprbdd *cond, int tid, MaiMap &mm)
 	assignMaiTransformer doit(tid, mm);
 	return doit.transform_exprbdd(&scopes->bools, &scopes->exprs, cond);
 }
-/* This is allowed to cast away the consts because there is no sharing
-   at this stage. */
+/* This is allowed to cast away the consts because it's effectively
+   part of building the machine. */
 static void
 assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 {
@@ -2103,7 +2103,7 @@ assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 	}
 	case StateMachineSideEffect::AssertFalse: {
 		auto l = (StateMachineSideEffectAssertFalse *)se;
-		l->value = assignMais(scopes, l->value, tid, mm);
+		*(bbdd **)&l->value = assignMais(scopes, l->value, tid, mm);
 		return;
 	}
 	case StateMachineSideEffect::Unreached:
