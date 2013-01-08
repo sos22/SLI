@@ -133,55 +133,47 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStore::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectStore::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
-	if (isBadAddress(addr)) {
-		*done_something = true;
+	if (isBadAddress(addr))
 		return StateMachineSideEffectUnreached::get();
-	}
 	exprbdd *addr = simplifyBDD(&scopes->exprs, &scopes->bools, this->addr, opt);
 	exprbdd *data = simplifyBDD(&scopes->exprs, &scopes->bools, this->data, opt);
 	if (TIMEOUT || (addr == this->addr && data == this->data))
 		return this;
-	*done_something = true;
 	if (isBadAddress(addr))
 		return StateMachineSideEffectUnreached::get();
 	return new StateMachineSideEffectStore(this, addr, data);
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectLoad::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectLoad::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
-	if (isBadAddress(addr)) {
-		*done_something = true;
+	if (isBadAddress(addr))
 		return StateMachineSideEffectUnreached::get();
-	}
 	exprbdd *addr = simplifyBDD(&scopes->exprs, &scopes->bools, this->addr, opt);
 	if (TIMEOUT || addr == this->addr)
 		return this;
-	*done_something = true;
 	if (isBadAddress(addr))
 		return StateMachineSideEffectUnreached::get();
 	return new StateMachineSideEffectLoad(this, addr);
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
 	exprbdd *value = simplifyBDD(&scopes->exprs, &scopes->bools, this->value, opt);
 	if (TIMEOUT || value == this->value)
 		return this;
-	*done_something = true;
 	return new StateMachineSideEffectCopy(this, value);
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
 	bbdd *value = simplifyBDD(&scopes->bools, this->value, opt);
 	if (TIMEOUT || value == this->value)
 		return this;
-	*done_something = true;
 	if (value->isLeaf) {
 		if (value->leaf())
 			return StateMachineSideEffectUnreached::get();
@@ -192,42 +184,36 @@ StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOpt
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
 	exprbdd *rsp = simplifyBDD(&scopes->exprs, &scopes->bools, this->rsp, opt);
 	if (TIMEOUT || rsp == this->rsp)
 		return this;
-	*done_something = true;
 	return new StateMachineSideEffectStartFunction(this, rsp);
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectEndFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectEndFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
 	exprbdd *rsp = simplifyBDD(&scopes->exprs, &scopes->bools, this->rsp, opt);
 	if (TIMEOUT || rsp == this->rsp)
 		return this;
-	*done_something = true;
 	return new StateMachineSideEffectEndFunction(this, rsp);
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStartAtomic::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectStartAtomic::optimise(SMScopes *, const AllowableOptimisations &opt)
 {
-	if (opt.assumeExecutesAtomically()) {
-		*done_something = true;
+	if (opt.assumeExecutesAtomically())
 		return NULL;
-	}
 	return this;
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectEndAtomic::optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something)
+StateMachineSideEffectEndAtomic::optimise(SMScopes *, const AllowableOptimisations &opt)
 {
-	if (opt.assumeExecutesAtomically()) {
-		*done_something = true;
+	if (opt.assumeExecutesAtomically())
 		return NULL;
-	}
 	return this;
 }
 
@@ -833,12 +819,14 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		*done_something = true;
 		return new StateMachineTerminal(dbg_origin, scopes->smrs.cnst(smr_unreached));
 	}
-	sideEffect = sideEffect->optimise(scopes, opt, done_something);
+
 	target = target->optimise(scopes, opt, done_something);
-	if (!sideEffect) {
-		assert(*done_something);
+	StateMachineSideEffect *newSideEffect = this->sideEffect->optimise(scopes, opt);
+	if (!newSideEffect)
 		return target;
-	}
+	if (newSideEffect != sideEffect)
+		*done_something = true;
+	sideEffect = newSideEffect;
 
 	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    target->type == StateMachineState::SideEffecting &&
@@ -940,9 +928,8 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 				((StateMachineSideEffectAssertFalse *)sideEffect)->value,
 				((StateMachineSideEffectAssertFalse *)((StateMachineSideEffecting *)target)->sideEffect)->value),
 			((StateMachineSideEffectAssertFalse *)sideEffect)->reflectsActualProgram);
-		sideEffect = sideEffect->optimise(scopes, opt, done_something);
+		sideEffect = sideEffect->optimise(scopes, opt);
 		target = ((StateMachineSideEffecting *)target)->target;
-		return this;
 	}
 
 	return this;

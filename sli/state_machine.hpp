@@ -416,7 +416,7 @@ protected:
 		: type(_type)
 	{}
 public:
-	virtual StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &, bool *) = 0;
+	virtual StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &) = 0;
 #ifdef NDEBUG
 	void sanityCheck(SMScopes *) const {}
 #else
@@ -630,7 +630,7 @@ public:
 		}
 		return false;
 	}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &, bool *) { return this; }
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &) { return this; }
 	void visit(HeapVisitor &) {}
 	void sanityCheck(SMScopes *) const {}
 	bool definesRegister(threadAndRegister &) const {
@@ -706,7 +706,7 @@ public:
 		StateMachineSideEffectMemoryAccess::visit(hv);
 		hv(data);
 	}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt);
 	void sanityCheck(SMScopes *scopes) const {
 		StateMachineSideEffectMemoryAccess::sanityCheck(scopes);
 		data->sanity_check(&scopes->ordering);
@@ -780,7 +780,7 @@ public:
 		}
 		return false;
 	}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt);
 	bool definesRegister(threadAndRegister &reg) const {
 		reg = target;
 		return true;
@@ -823,7 +823,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt);
 	void sanityCheck(SMScopes *scopes) const {
 		value->sanity_check(&scopes->ordering);
 	}
@@ -875,7 +875,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(value);
 	}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt);
 	void sanityCheck(SMScopes *scopes) const {
 		assert(reflectsActualProgram == true ||
 		       reflectsActualProgram == false);
@@ -908,7 +908,7 @@ public:
 		return false;
 	}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt);
 	void sanityCheck(SMScopes *) const {
 	}
 	bool definesRegister(threadAndRegister &) const {
@@ -938,7 +938,7 @@ public:
 		return false;
 	}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt);
 	void sanityCheck(SMScopes *) const {
 	}
 	bool definesRegister(threadAndRegister &) const {
@@ -1026,7 +1026,7 @@ public:
 		for (auto it = generations.begin(); it != generations.end(); it++)
 			hv(it->val);
 	}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt);
 	void sanityCheck(SMScopes *) const {
 		assert(generations.size() != 0);
 	}
@@ -1069,7 +1069,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(rsp);
 	}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt);
 	void sanityCheck(SMScopes *scopes) const {
 		rsp->sanity_check(&scopes->ordering);
 		assert(rsp->type() == Ity_I64);
@@ -1115,7 +1115,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(rsp);
 	}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt, bool *done_something);
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &opt);
 	void sanityCheck(SMScopes *scopes) const {
 		rsp->sanity_check(&scopes->ordering);
 		assert(rsp->type() == Ity_I64);
@@ -1149,7 +1149,7 @@ public:
 		  set(base->set)
 	{}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations&, bool*) { return this; }
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations&) { return this; }
 	void sanityCheck(SMScopes *) const {}
 	bool definesRegister(threadAndRegister &tr) const {
 		tr = reg;
@@ -1252,7 +1252,7 @@ public:
 		  functions(_functions)
 	{}
 	void visit(HeapVisitor &) {}
-	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &, bool *) { return this; }
+	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations &) { return this; }
 	void sanityCheck(SMScopes *) const {
 #ifndef NDEBUG
 		/* No dupes */

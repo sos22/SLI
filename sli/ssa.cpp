@@ -474,7 +474,7 @@ convertToSSA(SMScopes *scopes, StateMachine *inp, std::map<threadAndRegister, th
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectPhi::optimise(SMScopes *, const AllowableOptimisations &, bool *done_something)
+StateMachineSideEffectPhi::optimise(SMScopes *, const AllowableOptimisations &)
 {
 	if (generations.size() == 0)
 		return StateMachineSideEffectUnreached::get();
@@ -484,7 +484,6 @@ StateMachineSideEffectPhi::optimise(SMScopes *, const AllowableOptimisations &, 
 		if (generations[x].val != v)
 			return this;
 	}
-	*done_something = true;
 	return new StateMachineSideEffectCopy(reg, v);
 }
 
