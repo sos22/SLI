@@ -135,26 +135,34 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 StateMachineSideEffect *
 StateMachineSideEffectStore::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt);
-	data = simplifyBDD(&scopes->exprs, &scopes->bools, data, opt);
-	if (TIMEOUT)
-		return this;
 	if (isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
-	return this;
+	exprbdd *addr = simplifyBDD(&scopes->exprs, &scopes->bools, this->addr, opt);
+	exprbdd *data = simplifyBDD(&scopes->exprs, &scopes->bools, this->data, opt);
+	if (TIMEOUT || (addr == this->addr && data == this->data))
+		return this;
+	*done_something = true;
+	if (isBadAddress(addr))
+		return StateMachineSideEffectUnreached::get();
+	return new StateMachineSideEffectStore(this, addr, data);
 }
 
 StateMachineSideEffect *
 StateMachineSideEffectLoad::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	addr = simplifyBDD(&scopes->exprs, &scopes->bools, addr, opt);
-	if (!TIMEOUT && isBadAddress(addr)) {
+	if (isBadAddress(addr)) {
 		*done_something = true;
 		return StateMachineSideEffectUnreached::get();
 	}
-	return this;
+	exprbdd *addr = simplifyBDD(&scopes->exprs, &scopes->bools, this->addr, opt);
+	if (TIMEOUT || addr == this->addr)
+		return this;
+	*done_something = true;
+	if (isBadAddress(addr))
+		return StateMachineSideEffectUnreached::get();
+	return new StateMachineSideEffectLoad(this, addr);
 }
 
 StateMachineSideEffect *

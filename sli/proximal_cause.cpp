@@ -141,10 +141,9 @@ getProximalCause(SMScopes *scopes,
 				new StateMachineSideEffectStore(
 					exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
 					exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
-					MemoryAccessIdentifier::uninitialised(),
+					mkPendingMai(where),
 					MemoryTag::normal());
 			prependSideEffect(se);
-			mkPendingMai(&se->rip, where);
 			crashIfBadPtr(ist->addr);
 			break;
 		}
@@ -197,10 +196,9 @@ getProximalCause(SMScopes *scopes,
 				new StateMachineSideEffectLoad(
 					tr,
 					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
-					MemoryAccessIdentifier::uninitialised(),
+					mkPendingMai(where),
 					ty,
 					MemoryTag::normal());
-			mkPendingMai(&le->rip, where);
 			StateMachineSideEffecting *l3 =
 				new StateMachineSideEffecting(
 					rip,
@@ -235,11 +233,10 @@ getProximalCause(SMScopes *scopes,
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
 					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
-					MemoryAccessIdentifier::uninitialised(),
+					mkPendingMai(where),
 					ity,
 					MemoryTag::normal());
 			prependSideEffect(l);
-			mkPendingMai(&l->rip, where);
 			crashIfBadPtr(dirty->args[0]);
 			break;
 		}

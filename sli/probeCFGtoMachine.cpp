@@ -23,19 +23,10 @@ static bool debug_rsp_canonicalisation = false;
 
 namespace _probeCFGsToMachine {
 
-static void
-mkPendingMai(MemoryAccessIdentifier *where, const CFGNode *node)
-{
-	where->tid = (int)(unsigned long)node;
-	where->id = (int)((unsigned long)node >> 32);
-}
-
 static IRExpr *
 mkPendingFreeVar(IRType ty, const CFGNode *node, bool isUnique)
 {
-	IRExprFreeVariable *res = IRExpr_FreeVariable(MemoryAccessIdentifier::uninitialised(), ty, isUnique);
-	_probeCFGsToMachine::mkPendingMai((MemoryAccessIdentifier *)&res->id, node);
-	return res;
+	return IRExpr_FreeVariable(mkPendingMai(node), ty, isUnique);
 }
 
 static void
@@ -502,9 +493,8 @@ cfgNodeToState(SMScopes *scopes,
 					new StateMachineSideEffectStore(
 						exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
 						exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
-						MemoryAccessIdentifier::uninitialised(),
+						mkPendingMai(target),
 						MemoryTag::normal());
-				_probeCFGsToMachine::mkPendingMai(&se->rip, target);
 				StateMachineSideEffecting *smse =
 					new StateMachineSideEffecting(
 						target->rip,
@@ -550,9 +540,8 @@ cfgNodeToState(SMScopes *scopes,
 				new StateMachineSideEffectStore(
 					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
 					exprbdd::var(&scopes->exprs, &scopes->bools, cas->dataLo),
-					MemoryAccessIdentifier::uninitialised(),
+					mkPendingMai(target),
 					MemoryTag::normal());
-			_probeCFGsToMachine::mkPendingMai(&l3se->rip, target);
 			StateMachineState *l3 =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -568,10 +557,9 @@ cfgNodeToState(SMScopes *scopes,
 				new StateMachineSideEffectLoad(
 					tempreg,
 					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
-					MemoryAccessIdentifier::uninitialised(),
+					mkPendingMai(target),
 					ty,
 					MemoryTag::normal());
-			_probeCFGsToMachine::mkPendingMai(&l1se->rip, target);
 			StateMachineState *l1 =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -607,10 +595,9 @@ cfgNodeToState(SMScopes *scopes,
 				auto sel = new StateMachineSideEffectLoad(
 					dirty->tmp,
 					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
-					MemoryAccessIdentifier::uninitialised(),
+					mkPendingMai(target),
 					ity,
 					MemoryTag::normal());
-				_probeCFGsToMachine::mkPendingMai(&sel->rip, target);
 				se = sel;
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 				se = new StateMachineSideEffectCopy(
@@ -2088,6 +2075,8 @@ assignMais(SMScopes *scopes, exprbdd *cond, int tid, MaiMap &mm)
 	assignMaiTransformer doit(tid, mm);
 	return doit.transform_exprbdd(&scopes->bools, &scopes->exprs, cond);
 }
+/* This is allowed to cast away the consts because there is no sharing
+   at this stage. */
 static void
 assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 {
@@ -2096,15 +2085,15 @@ assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 	switch (se->type) {
 	case StateMachineSideEffect::Load: {
 		auto l = (StateMachineSideEffectLoad *)se;
-		l->addr = assignMais(scopes, l->addr, tid, mm);
-		assignMais(l->rip, tid, mm);
+		*(exprbdd **)&l->addr = assignMais(scopes, l->addr, tid, mm);
+		assignMais(*(MemoryAccessIdentifier *)&l->rip, tid, mm);
 		return;
 	}
 	case StateMachineSideEffect::Store: {
 		auto l = (StateMachineSideEffectStore *)se;
-		l->addr = assignMais(scopes, l->addr, tid, mm);
-		l->data = assignMais(scopes, l->data, tid, mm);
-		assignMais(l->rip, tid, mm);
+		*(exprbdd **)&l->addr = assignMais(scopes, l->addr, tid, mm);
+		*(exprbdd **)&l->data = assignMais(scopes, l->data, tid, mm);
+		assignMais(*(MemoryAccessIdentifier *)&l->rip, tid, mm);
 		return;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -2347,8 +2336,11 @@ storeCFGToMachine(SMScopes *scopes,
 	return _probeCFGsToMachine::storeCFGsToMachine(scopes, oracle, tid, root, mai);
 }
 
-void
-mkPendingMai(MemoryAccessIdentifier *where, const CFGNode *node)
+MemoryAccessIdentifier
+mkPendingMai(const CFGNode *node)
 {
-	_probeCFGsToMachine::mkPendingMai(where, node);
+	MemoryAccessIdentifier where(MemoryAccessIdentifier::uninitialised());
+	where.tid = (int)(unsigned long)node;
+	where.id = (int)((unsigned long)node >> 32);
+	return where;
 }

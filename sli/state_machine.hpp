@@ -640,9 +640,9 @@ public:
 
 class StateMachineSideEffectMemoryAccess : public StateMachineSideEffect {
 public:
-	exprbdd *addr;
-	MemoryAccessIdentifier rip;
-	MemoryTag tag;
+	exprbdd *const addr;
+	MemoryAccessIdentifier const rip;
+	MemoryTag const tag;
 	StateMachineSideEffectMemoryAccess(exprbdd *_addr, const MemoryAccessIdentifier &_rip,
 					   const MemoryTag &_tag,
 					   StateMachineSideEffect::sideEffectType _type)
@@ -673,7 +673,7 @@ public:
 		  data(_data)
 	{
 	}
-	exprbdd *data;
+	exprbdd *const data;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "STORE %s@%s\naddr = ", tag.name(), rip.name());
 		addr->prettyPrint(f);
@@ -747,8 +747,8 @@ public:
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(base->target), type(base->type)
 	{}
-	threadAndRegister target;
-	IRType type;
+	threadAndRegister const target;
+	IRType const type;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "LOAD %s@%s to %s, type ", tag.name(), rip.name(), target.name());
 		ppIRType(type, f);
