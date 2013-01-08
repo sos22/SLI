@@ -1352,15 +1352,23 @@ static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStartFunction *inp,
 		bool *done_something)
 {
-	rewrite_var(state, inp->rsp, done_something);
-	return inp;
+	exprbdd *rsp = inp->rsp;
+	rewrite_var(state, rsp, done_something);
+	if (rsp == inp->rsp)
+		return inp;
+	*done_something = true;
+	return new StateMachineSideEffectStartFunction(inp, rsp);
 }
 static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectEndFunction *inp,
 		bool *done_something)
 {
-	rewrite_var(state, inp->rsp, done_something);
-	return inp;
+	exprbdd *rsp = inp->rsp;
+	rewrite_var(state, rsp, done_something);
+	if (rsp == inp->rsp)
+		return inp;
+	*done_something = true;
+	return new StateMachineSideEffectEndFunction(inp, rsp);
 }
 static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *inp, bool *)

@@ -192,17 +192,23 @@ StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOpt
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *)
+StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	rsp = simplifyBDD(&scopes->exprs, &scopes->bools, rsp, opt);
-	return this;
+	exprbdd *rsp = simplifyBDD(&scopes->exprs, &scopes->bools, this->rsp, opt);
+	if (TIMEOUT || rsp == this->rsp)
+		return this;
+	*done_something = true;
+	return new StateMachineSideEffectStartFunction(this, rsp);
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectEndFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *)
+StateMachineSideEffectEndFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	rsp = simplifyBDD(&scopes->exprs, &scopes->bools, rsp, opt);
-	return this;
+	exprbdd *rsp = simplifyBDD(&scopes->exprs, &scopes->bools, this->rsp, opt);
+	if (TIMEOUT || rsp == this->rsp)
+		return this;
+	*done_something = true;
+	return new StateMachineSideEffectEndFunction(this, rsp);
 }
 
 StateMachineSideEffect *

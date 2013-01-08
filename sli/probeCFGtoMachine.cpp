@@ -1607,7 +1607,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 			if (se && se->type == StateMachineSideEffect::StartFunction) {
 				StackConstraint sc(
 					entryState,
-					&((StateMachineSideEffectStartFunction *)se)->frame,
+					(FrameId *)&((StateMachineSideEffectStartFunction *)se)->frame,
 					&stacks[smse->target]);
 				if (debug_assign_frame_ids)
 					printf("\tl%d: %s\n",
@@ -1616,7 +1616,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 				constraints.insert(sc);
 			} else if (se && se->type == StateMachineSideEffect::EndFunction) {
 				StackConstraint sc(&stacks[smse->target],
-						  &((StateMachineSideEffectEndFunction *)se)->frame,
+						   (FrameId *)&((StateMachineSideEffectEndFunction *)se)->frame,
 						  entryState);
 				if (debug_assign_frame_ids)
 					printf("\tl%d: %s\n",
@@ -2116,12 +2116,12 @@ assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 		abort();
 	case StateMachineSideEffect::StartFunction: {
 		auto l = (StateMachineSideEffectStartFunction *)se;
-		l->rsp = assignMais(scopes, l->rsp, tid, mm);
+		*(exprbdd **)&l->rsp = assignMais(scopes, l->rsp, tid, mm);
 		return;
 	}
 	case StateMachineSideEffect::EndFunction: {
 		auto l = (StateMachineSideEffectEndFunction *)se;
-		l->rsp = assignMais(scopes, l->rsp, tid, mm);
+		*(exprbdd **)&l->rsp = assignMais(scopes, l->rsp, tid, mm);
 		return;
 	}
 	}
