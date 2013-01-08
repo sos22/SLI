@@ -1129,10 +1129,10 @@ public:
 };
 class StateMachineSideEffectImportRegister : public StateMachineSideEffect {
 public:
-	threadAndRegister reg;
-	unsigned tid;
-	unsigned vex_offset;
-	PointerAliasingSet set;
+	threadAndRegister const reg;
+	unsigned const tid;
+	unsigned const vex_offset;
+	PointerAliasingSet const set;
 	StateMachineSideEffectImportRegister(
 		const threadAndRegister &_reg,
 		unsigned _tid,
