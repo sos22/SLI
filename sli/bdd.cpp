@@ -358,6 +358,8 @@ quickSimplify(IRExpr *a)
 			do_downconv(16, 8);
 			do_downconv(8, 1);
 #undef do_downconv
+		case Iop_128to64:
+			return IRExpr_Const_U64(argc->Ico.U128.lo);
 		case Iop_Not1:
 			return IRExpr_Const_U1(!argc->Ico.U1);
 		case Iop_BadPtr:
@@ -412,6 +414,8 @@ quickSimplify(IRExpr *a)
 				return IRExpr_Const_U64(arg1c->Ico.U64 << arg2c->Ico.U8);
 			case Iop_Shr64:
 				return IRExpr_Const_U64(arg1c->Ico.U64 >> arg2c->Ico.U8);
+			case Iop_Sar64:
+			  return IRExpr_Const_U64((long)arg1c->Ico.U64 >> arg2c->Ico.U8);
 			case Iop_32HLto64:
 				return IRExpr_Const_U64(arg1c->Ico.U32 | ((unsigned long)arg2c->Ico.U32 << 32));
 			case Iop_DivModU64to32: {
