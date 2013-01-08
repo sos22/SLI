@@ -1265,6 +1265,8 @@ ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectLoad *inp,
 {
 	exprbdd *addr = inp->addr;
 	rewrite_var(state, addr, done_something);
+	if (addr == inp->addr)
+		return inp;
 	return new StateMachineSideEffectLoad(inp, addr);
 }
 static StateMachineSideEffect *
@@ -1275,14 +1277,19 @@ ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStore *inp,
 	exprbdd *data = inp->data;
 	rewrite_var(state, addr, done_something);
 	rewrite_var(state, data, done_something);
+	if (addr == inp->addr && data == inp->data)
+		return inp;
 	return new StateMachineSideEffectStore(inp, addr, inp->data);
 }
 static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectCopy *inp,
 		bool *done_something)
 {
-	rewrite_var(state, inp->value, done_something);
-	return inp;
+	exprbdd *data = inp->value;
+	rewrite_var(state, data, done_something);
+	if (data == inp->value)
+		return inp;
+	return new StateMachineSideEffectCopy(inp, data);
 }
 static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectUnreached *inp, bool *)

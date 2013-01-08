@@ -166,10 +166,13 @@ StateMachineSideEffectLoad::optimise(SMScopes *scopes, const AllowableOptimisati
 }
 
 StateMachineSideEffect *
-StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *)
+StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	value = simplifyBDD(&scopes->exprs, &scopes->bools, value, opt);
-	return this;
+	exprbdd *value = simplifyBDD(&scopes->exprs, &scopes->bools, this->value, opt);
+	if (TIMEOUT || value == this->value)
+		return this;
+	*done_something = true;
+	return new StateMachineSideEffectCopy(this, value);
 }
 
 StateMachineSideEffect *

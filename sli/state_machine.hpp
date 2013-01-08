@@ -794,8 +794,13 @@ public:
 		  target(k), value(_value)
 	{
 	}
-	threadAndRegister target;
-	exprbdd *value;
+	StateMachineSideEffectCopy(const StateMachineSideEffectCopy *base, exprbdd *_value)
+		: StateMachineSideEffect(StateMachineSideEffect::Copy),
+		  target(base->target),
+		  value(_value)
+	{}
+	threadAndRegister const target;
+	exprbdd *const value;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "COPY ");
 		target.prettyPrint(f);

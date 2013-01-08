@@ -2098,7 +2098,7 @@ assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 	}
 	case StateMachineSideEffect::Copy: {
 		auto l = (StateMachineSideEffectCopy *)se;
-		l->value = assignMais(scopes, l->value, tid, mm);
+		*(exprbdd **)&l->value = assignMais(scopes, l->value, tid, mm);
 		return;
 	}
 	case StateMachineSideEffect::AssertFalse: {
