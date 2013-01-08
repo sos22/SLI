@@ -646,25 +646,33 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *phi =
 			(StateMachineSideEffectPhi *)smse;
-		StateMachineSideEffectPhi *newPhi = NULL;
-		for (unsigned x = 0; x < phi->generations.size(); x++) {
+		unsigned x = 0;
+		exprbdd *e;
+		e = (exprbdd *)0xdead; /* shut compiler up */
+		while (x < phi->generations.size()) {
 			bool t = false;
-			exprbdd *e = applyAvailSet(scopes,
-						   currentlyAvailable,
-						   phi->generations[x].val,
-						   &t);
-			if (t) {
-				if (!newPhi)
-					newPhi = new StateMachineSideEffectPhi(*phi);
-				newPhi->generations[x].val = e;
-			}
+			e = applyAvailSet(scopes,
+					  currentlyAvailable,
+					  phi->generations[x].val,
+					  &t);
+			*done_something |= t;
+			if (e != phi->generations[x].val)
+				break;
+			x++;
 		}
-		if (newPhi) {
-			newEffect = newPhi;
-			*done_something = true;
-		} else {
+		if (x == phi->generations.size()) {
 			newEffect = phi;
+			break;
 		}
+		std::vector<StateMachineSideEffectPhi::input> inputs(phi->generations);
+		inputs[x].val = e;
+		for (x++; x < phi->generations.size(); x++)
+			inputs[x].val = applyAvailSet(scopes,
+						      currentlyAvailable,
+						      phi->generations[x].val,
+						      done_something);
+		*done_something = true;
+		newEffect = new StateMachineSideEffectPhi(phi, inputs);
 		break;
 	}
 	case StateMachineSideEffect::StartFunction: {
@@ -1311,9 +1319,24 @@ static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectPhi *inp,
 		bool *done_something)
 {
-	for (auto it = inp->generations.begin(); it != inp->generations.end(); it++)
-		rewrite_var(state, it->val, done_something);
-	return inp;
+	unsigned x;
+	exprbdd *e;
+	x = 0;
+	while (x < inp->generations.size()) {
+		e = inp->generations[x].val;
+		rewrite_var(state, e, done_something);
+		if (e != inp->generations[x].val)
+			break;
+		x++;
+	}
+	if (x == inp->generations.size())
+		return inp;
+	*done_something = true;
+	std::vector<StateMachineSideEffectPhi::input> inputs(inp->generations);
+	inputs[x].val = e;
+	for (x++; x < inp->generations.size(); x++)
+		rewrite_var(state, inputs[x].val, done_something);
+	return new StateMachineSideEffectPhi(inp, inputs);
 }
 static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStartAtomic *inp, bool *)

@@ -253,16 +253,16 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes,
 	if (x == phi->generations.size())
 		return NULL;
 	*done_something = true;
-	StateMachineSideEffectPhi *newPhi = new StateMachineSideEffectPhi(*phi);
-	newPhi->generations[x].val = newE;
+	std::vector<StateMachineSideEffectPhi::input> inputs(phi->generations);
+	inputs[x].val = newE;
 
 	x++;
-	while (x < newPhi->generations.size()) {
-		if (newPhi->generations[x].val)
-			newPhi->generations[x].val =
-				transform_exprbdd(&scopes->bools, &scopes->exprs, newPhi->generations[x].val);
+	while (x < inputs.size()) {
+		if (inputs[x].val)
+			inputs[x].val =
+				transform_exprbdd(&scopes->bools, &scopes->exprs, inputs[x].val);
 		x++;
 	}
-	return newPhi;
+	return new StateMachineSideEffectPhi(phi, inputs);
 }
 

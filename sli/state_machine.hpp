@@ -947,8 +947,8 @@ public:
 };
 class StateMachineSideEffectPhi : public StateMachineSideEffect {
 public:
-	threadAndRegister reg;
-	IRType ty;
+	threadAndRegister const reg;
+	IRType const ty;
 	class input {
 	public:
 		threadAndRegister reg;
@@ -971,7 +971,7 @@ public:
 			  val(NULL)
 		{}
 	};
-	std::vector<input> generations;
+	std::vector<input> const generations;
 	StateMachineSideEffectPhi(const threadAndRegister &_reg,
 				  IRType _ty,
 				  const std::vector<input> &_generations)
