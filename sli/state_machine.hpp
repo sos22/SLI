@@ -1245,7 +1245,7 @@ public:
 			return true;
 		}
 	};
-	std::vector<entry> functions;
+	std::vector<entry> const functions;
 	StateMachineSideEffectStackLayout(
 		const std::vector<entry> &_functions)
 		: StateMachineSideEffect(StateMachineSideEffect::StackLayout),
