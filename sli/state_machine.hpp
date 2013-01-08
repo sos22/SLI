@@ -840,8 +840,15 @@ public:
 		  reflectsActualProgram(_reflectsActualProgram)
 	{
 	}
-	bbdd *value;
-	bool reflectsActualProgram;
+	StateMachineSideEffectAssertFalse(const StateMachineSideEffectAssertFalse *base,
+					  bbdd *_value)
+		: StateMachineSideEffect(StateMachineSideEffect::AssertFalse),
+		  value(_value),
+		  reflectsActualProgram(base->reflectsActualProgram)
+	{
+	}
+	bbdd *const value;
+	bool const reflectsActualProgram;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "ASSERT %s !", reflectsActualProgram ? "REAL" : "FAKE");
 		value->prettyPrint(f);

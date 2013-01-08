@@ -1300,8 +1300,12 @@ static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectAssertFalse *inp,
 		bool *done_something)
 {
-	rewrite_var(state, inp->value, done_something);
-	return inp;
+	bbdd *value = inp->value;
+	rewrite_var(state, value, done_something);
+	if (value == inp->value)
+		return inp;
+	*done_something = true;
+	return new StateMachineSideEffectAssertFalse(inp, value);
 }
 static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectPhi *inp,
