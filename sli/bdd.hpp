@@ -139,18 +139,6 @@ public:
 		: GcCallback<&ir_heap>(true)
 	{
 	}
-	template <typename subtreeT> subtreeT *trueBranch(subtreeT *bdd, const bdd_rank &cond) {
-		if (!bdd->isLeaf() && cond == bdd->internal().rank)
-			return bdd->internal().trueBranch;
-		else
-			return bdd;
-	}
-	template <typename subtreeT> subtreeT *falseBranch(subtreeT *bdd, const bdd_rank &cond) {
-		if (!bdd->isLeaf() && cond == bdd->internal().rank)
-			return bdd->internal().falseBranch;
-		else
-			return bdd;
-	}
 	void prettyPrint(FILE *) const;
 	bool parse(const char *buf, const char **end);
 };
@@ -302,6 +290,19 @@ public:
 		bbdd *cond,
 		_subtreeT *ifTrue,
 		_subtreeT *ifFalse);
+
+	_subtreeT *trueBranch(const bdd_rank &cond) {
+		if (!isLeaf() && cond == internal().rank)
+			return internal().trueBranch;
+		else
+			return (_subtreeT *)this;
+	}
+	_subtreeT *falseBranch(const bdd_rank &cond) {
+		if (!isLeaf() && cond == internal().rank)
+			return internal().falseBranch;
+		else
+			return (_subtreeT *)this;
+	}
 
 	unsigned long hash() const {
 		if (isLeaf())

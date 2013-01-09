@@ -25,8 +25,8 @@ _bdd<constT, subtreeT>::zip(scopeT *scope,
 
 	IRExpr *bestCond;
 	const bdd_rank &bestRank(where.bestCond(&bestCond));
-	subtreeT *trueSucc = zip(scope, where.trueSucc(scope->ordering, bestRank), memo);
-	subtreeT *falseSucc = zip(scope, where.falseSucc(scope->ordering, bestRank), memo);
+	subtreeT *trueSucc = zip(scope, where.trueSucc(bestRank), memo);
+	subtreeT *falseSucc = zip(scope, where.falseSucc(bestRank), memo);
 	it->second = where.mkNode(scope, bestCond, trueSucc, falseSucc);
 	return it->second;
 }
@@ -54,15 +54,15 @@ public:
 			return assumption->internal().rank;
 		}
 	}
-	assume_zip_internal trueSucc(bdd_ordering *ordering, const bdd_rank &cond) const {
+	assume_zip_internal trueSucc(const bdd_rank &cond) const {
 		return assume_zip_internal(
-			ordering->trueBranch(thing, cond),
-			ordering->trueBranch(assumption, cond));
+			thing->trueBranch(cond),
+			assumption->trueBranch(cond));
 	}
-	assume_zip_internal falseSucc(bdd_ordering *ordering, const bdd_rank &cond) const {
+	assume_zip_internal falseSucc(const bdd_rank &cond) const {
 		return assume_zip_internal(
-			ordering->falseBranch(thing, cond),
-			ordering->falseBranch(assumption, cond));
+			thing->falseBranch(cond),
+			assumption->falseBranch(cond));
 	}
 	bool isLeaf() const {
 		return assumption->isLeaf() || thing->isLeaf();
@@ -148,28 +148,28 @@ public:
 		*cond = c;
 		return *bestCond;
 	}
-	from_enabling_internal trueSucc(bdd_ordering *ordering, const bdd_rank &cond) const
+	from_enabling_internal trueSucc(const bdd_rank &cond) const
 	{
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); !it.finished(); it.advance()) {
-			bbdd *newGuard = ordering->trueBranch(it.key().get(), cond);
+			bbdd *newGuard = it.key().get()->trueBranch(cond);
 			if (newGuard->isLeaf() && !newGuard->leaf())
 				continue;
-			subtreeT *newRes = ordering->trueBranch(it.value(), cond);
+			subtreeT *newRes = it.value()->trueBranch(cond);
 			subtreeT **newSlot = res.table.getSlot(newGuard, newRes);
 			if (*newSlot != newRes)
 				return from_enabling_internal(true);
 		}
 		return res;
 	}
-	from_enabling_internal falseSucc(bdd_ordering *ordering, const bdd_rank &cond) const
+	from_enabling_internal falseSucc(const bdd_rank &cond) const
 	{
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); !it.finished(); it.advance()) {
-			bbdd *newGuard = ordering->falseBranch(it.key().get(), cond);
+			bbdd *newGuard = it.key().get()->falseBranch(cond);
 			if (newGuard->isLeaf() && !newGuard->leaf())
 				continue;
-			subtreeT *newRes = ordering->falseBranch(it.value(), cond);
+			subtreeT *newRes = it.value()->falseBranch(cond);
 			subtreeT **newSlot = res.table.getSlot(newGuard, newRes);
 			if (*newSlot != newRes)
 				return from_enabling_internal(true);
@@ -694,17 +694,17 @@ public:
 		}
 		return *best;
 	}
-	ifelse_zip_internal trueSucc(bdd_ordering *ordering, const bdd_rank &on) const {
+	ifelse_zip_internal trueSucc(const bdd_rank &on) const {
 		return ifelse_zip_internal(
-			ordering->trueBranch(cond, on),
-			ordering->trueBranch(ifTrue, on),
-			ordering->trueBranch(ifFalse, on));
+			cond->trueBranch(on),
+			ifTrue->trueBranch(on),
+			ifFalse->trueBranch(on));
 	}
-	ifelse_zip_internal falseSucc(bdd_ordering *ordering, const bdd_rank &on) const {
+	ifelse_zip_internal falseSucc(const bdd_rank &on) const {
 		return ifelse_zip_internal(
-			ordering->falseBranch(cond, on),
-			ordering->falseBranch(ifTrue, on),
-			ordering->falseBranch(ifFalse, on));
+			cond->falseBranch(on),
+			ifTrue->falseBranch(on),
+			ifFalse->falseBranch(on));
 	}
 	subtreeT *mkNode(scopeT *scope, IRExpr *cond, subtreeT *trueB, subtreeT *falseB) const {
 		if (!trueB || !falseB)

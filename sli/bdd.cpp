@@ -680,17 +680,17 @@ public:
 			return second->internal().rank;
 		}
 	}
-	binary_zip_internal trueSucc(bdd_ordering *ordering, const bdd_rank &cond) const {
+	binary_zip_internal trueSucc(const bdd_rank &cond) const {
 		return binary_zip_internal(
 			isAnd,
-			ordering->trueBranch(first, cond),
-			ordering->trueBranch(second, cond));
+			first->trueBranch(cond),
+			second->trueBranch(cond));
 	}
-	binary_zip_internal falseSucc(bdd_ordering *ordering, const bdd_rank &cond) const {
+	binary_zip_internal falseSucc(const bdd_rank &cond) const {
 		return binary_zip_internal(
 			isAnd,
-			ordering->falseBranch(first, cond),
-			ordering->falseBranch(second, cond));
+			first->falseBranch(cond),
+			second->falseBranch(cond));
 	}
 	binary_zip_internal(bool _isAnd, bbdd *_first, bbdd *_second)
 		: isAnd(_isAnd), first(_first), second(_second)

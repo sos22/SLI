@@ -1081,10 +1081,10 @@ ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 		} else {
 			substTableT trueTable(t);
 			for (auto it2 = trueTable.begin(); it2 != trueTable.end(); it2++)
-				it2->second = state.scopes->ordering.trueBranch(it2->second, *bestVar);
+				it2->second = it2->second->trueBranch(*bestVar);
 			substTableT falseTable(t);
 			for (auto it2 = falseTable.begin(); it2 != falseTable.end(); it2++)
-				it2->second = state.scopes->ordering.falseBranch(it2->second, *bestVar);
+				it2->second = it2->second->falseBranch(*bestVar);
 			it->second = bbdd::ifelse(
 				&state.scopes->bools,
 				bbdd::var(&state.scopes->bools, bestCond),
@@ -1133,10 +1133,10 @@ ssaApplyAvailExprExpr(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 		} else {
 			substTableT trueTable(t);
 			for (auto it2 = trueTable.begin(); it2 != trueTable.end(); it2++)
-				it2->second = state.scopes->ordering.trueBranch(it2->second, *bestVar);
+				it2->second = it2->second->trueBranch(*bestVar);
 			substTableT falseTable(t);
 			for (auto it2 = falseTable.begin(); it2 != falseTable.end(); it2++)
-				it2->second = state.scopes->ordering.falseBranch(it2->second, *bestVar);
+				it2->second = it2->second->falseBranch(*bestVar);
 			it->second = exprbdd::ifelse(
 				&state.scopes->exprs,
 				bbdd::var(&state.scopes->bools, bestCond),
