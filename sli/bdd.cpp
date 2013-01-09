@@ -360,8 +360,8 @@ quickSimplify(IRExpr *a)
 #undef do_downconv
 		case Iop_128to64:
 			return IRExpr_Const_U64(argc->Ico.U128.lo);
-		case Iop_Not1:
-			return IRExpr_Const_U1(!argc->Ico.U1);
+		case Iop_64UtoV128:
+			return IRExpr_Const_U128(0, argc->Ico.U64);
 		case Iop_BadPtr:
 			/* Can't constant fold these without an
 			 * IRExprOptimisations struct. */
@@ -380,6 +380,16 @@ quickSimplify(IRExpr *a)
 			return IRExpr_Const_U32(-argc->Ico.U32);
 		case Iop_Neg64:
 			return IRExpr_Const_U64(-argc->Ico.U64);
+		case Iop_Not1:
+			return IRExpr_Const_U1(!argc->Ico.U1);
+		case Iop_Not8:
+			return IRExpr_Const_U8(~argc->Ico.U8);
+		case Iop_Not16:
+			return IRExpr_Const_U16(~argc->Ico.U16);
+		case Iop_Not32:
+			return IRExpr_Const_U32(~argc->Ico.U32);
+		case Iop_Not64:
+			return IRExpr_Const_U64(~argc->Ico.U64);
 		default:
 			abort();
 		}
