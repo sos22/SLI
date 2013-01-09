@@ -39,11 +39,11 @@ public:
 		: thing(_thing), assumption(_assumption)
 	{}
 	const bdd_rank &bestCond(IRExpr **cond) const {
-		assert(!(thing->isLeaf && assumption->isLeaf));
-		if (thing->isLeaf) {
+		assert(!(thing->isLeaf() && assumption->isLeaf()));
+		if (thing->isLeaf()) {
 			*cond = assumption->internal().condition;
 			return assumption->internal().rank;
-		} else if (assumption->isLeaf) {
+		} else if (assumption->isLeaf()) {
 			*cond = thing->internal().condition;
 			return thing->internal().rank;
 		} else if (thing->internal().rank < assumption->internal().rank) {
@@ -65,16 +65,16 @@ public:
 			ordering->falseBranch(assumption, cond));
 	}
 	bool isLeaf() const {
-		return assumption->isLeaf || thing->isLeaf;
+		return assumption->isLeaf() || thing->isLeaf();
 	}
 	subtreeT *leafzip() const {
-		if (assumption->isLeaf) {
+		if (assumption->isLeaf()) {
 			if (assumption->leaf())
 				return thing;
 			else
 				return NULL;
 		} else {
-			assert(thing->isLeaf);
+			assert(thing->isLeaf());
 			return thing;
 		}
 	}
@@ -110,7 +110,7 @@ public:
 		: failed(false)
 	{
 		for (auto it = _table.begin(); !it.finished(); it.advance())
-			if (!it.key()->isLeaf ||
+			if (!it.key()->isLeaf() ||
 			    it.key()->leaf())
 				table.set(it.key(), it.value());
 	}
@@ -132,12 +132,12 @@ public:
 		IRExpr *c = NULL;
 		const bdd_rank *bestCond = NULL;
 		for (auto it = table.begin(); !it.finished(); it.advance()) {
-			if (!it.key()->isLeaf &&
+			if (!it.key()->isLeaf() &&
 			    (!bestCond || it.key()->internal().rank < *bestCond)) {
 				c = it.key()->internal().condition;
 				bestCond = &it.key()->internal().rank;
 			}
-			if (!it.value()->isLeaf &&
+			if (!it.value()->isLeaf() &&
 			    (!bestCond || it.value()->internal().rank < *bestCond)) {
 				c = it.value()->internal().condition;
 				bestCond = &it.value()->internal().rank;
@@ -153,7 +153,7 @@ public:
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); !it.finished(); it.advance()) {
 			bbdd *newGuard = ordering->trueBranch(it.key().get(), cond);
-			if (newGuard->isLeaf && !newGuard->leaf())
+			if (newGuard->isLeaf() && !newGuard->leaf())
 				continue;
 			subtreeT *newRes = ordering->trueBranch(it.value(), cond);
 			subtreeT **newSlot = res.table.getSlot(newGuard, newRes);
@@ -167,7 +167,7 @@ public:
 		from_enabling_internal res(false);
 		for (auto it = table.begin(); !it.finished(); it.advance()) {
 			bbdd *newGuard = ordering->falseBranch(it.key().get(), cond);
-			if (newGuard->isLeaf && !newGuard->leaf())
+			if (newGuard->isLeaf() && !newGuard->leaf())
 				continue;
 			subtreeT *newRes = ordering->falseBranch(it.value(), cond);
 			subtreeT **newSlot = res.table.getSlot(newGuard, newRes);
@@ -243,7 +243,7 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 				nextLabel++;
 			}
 			seen.insert(l);
-			if (!l->isLeaf) {
+			if (!l->isLeaf()) {
 				assert(l->internal().trueBranch);
 				assert(l->internal().falseBranch);
 				pending.push_back(l->internal().trueBranch);
@@ -278,7 +278,7 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 			fprintf(f, "[->%d]", labels[what]);
 		} else {
 			printed.insert(what);
-			if (what->isLeaf) {
+			if (what->isLeaf()) {
 				fprintf(f, "Leaf: ");
 				what->_prettyPrint(f, what->leaf());
 			} else {
@@ -365,9 +365,9 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 {
 	assert(a);
 	assert(b);
-	assert(a->isLeaf == true || a->isLeaf == false);
-	assert(a->isLeaf || ordering->before(cond, a));
-	assert(b->isLeaf || ordering->before(cond, b));
+	assert(a->isLeaf() == true || a->isLeaf() == false);
+	assert(a->isLeaf() || ordering->before(cond, a));
+	assert(b->isLeaf() || ordering->before(cond, b));
 	if (a == b)
 		return a;
 	if (cond->tag == Iex_Const) {
@@ -378,7 +378,7 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	}
 
 	if (cond->tag == Iex_ControlFlow &&
-	    !a->isLeaf &&
+	    !a->isLeaf() &&
 	    a->internal().condition->tag == Iex_ControlFlow &&
 	    ((IRExprControlFlow *)a->internal().condition)->thread == ((IRExprControlFlow *)cond)->thread &&
 	    ((IRExprControlFlow *)a->internal().condition)->cfg1 == ((IRExprControlFlow *)cond)->cfg1)  {
@@ -389,7 +389,7 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	if (cond->tag == Iex_Binop &&
 	    ((IRExprBinop *)cond)->op >= Iop_CmpEQ8 &&
 	    ((IRExprBinop *)cond)->op <= Iop_CmpEQ64 &&
-	    !a->isLeaf &&
+	    !a->isLeaf() &&
 	    a->internal().condition->tag == Iex_Binop &&
 	    ((IRExprBinop *)a->internal().condition)->op >= Iop_CmpEQ8 &&
 	    ((IRExprBinop *)a->internal().condition)->op <= Iop_CmpEQ64 &&
@@ -405,7 +405,7 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	}
 
 	if (cond->tag == Iex_HappensBefore &&
-	    !a->isLeaf &&
+	    !a->isLeaf() &&
 	    a->internal().condition->tag == Iex_HappensBefore) {
 		const IRExprHappensBefore *condhb =
 			(const IRExprHappensBefore *)cond;
@@ -455,8 +455,8 @@ bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 {
 	assert(a);
 	assert(b);
-	assert(a->isLeaf || ordering->before(cond, a));
-	assert(b->isLeaf || ordering->before(cond, b));
+	assert(a->isLeaf() || ordering->before(cond, a));
+	assert(b->isLeaf() || ordering->before(cond, b));
 	if (a == b)
 		return a;
 	if (cond->tag == Iex_Const) {
@@ -467,7 +467,7 @@ bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	}
 
 	if (cond->tag == Iex_ControlFlow &&
-	    !a->isLeaf &&
+	    !a->isLeaf() &&
 	    a->internal().condition->tag == Iex_ControlFlow &&
 	    ((IRExprControlFlow *)a->internal().condition)->thread == ((IRExprControlFlow *)cond)->thread &&
 	    ((IRExprControlFlow *)a->internal().condition)->cfg1 == ((IRExprControlFlow *)cond)->cfg1)  {
@@ -478,7 +478,7 @@ bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	if (cond->tag == Iex_Binop &&
 	    ((IRExprBinop *)cond)->op >= Iop_CmpEQ8 &&
 	    ((IRExprBinop *)cond)->op <= Iop_CmpEQ64 &&
-	    !a->isLeaf &&
+	    !a->isLeaf() &&
 	    a->internal().condition->tag == Iex_Binop &&
 	    ((IRExprBinop *)a->internal().condition)->op >= Iop_CmpEQ8 &&
 	    ((IRExprBinop *)a->internal().condition)->op <= Iop_CmpEQ64 &&
@@ -494,7 +494,7 @@ bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	}
 
 	if (cond->tag == Iex_HappensBefore &&
-	    !a->isLeaf &&
+	    !a->isLeaf() &&
 	    a->internal().condition->tag == Iex_HappensBefore) {
 		const IRExprHappensBefore *condhb =
 			(const IRExprHappensBefore *)cond;
@@ -542,7 +542,7 @@ const_bdd<constT, subtreeT>::to_irexpr(subtreeT *what, std::map<subtreeT *, IREx
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
-		if (what->isLeaf) {
+		if (what->isLeaf()) {
 			it->second = mkConst(what->leaf());
 		} else {
 			it->second = IRExpr_Mux0X(
@@ -574,7 +574,7 @@ _bdd<constT, subtreeT>::to_selectors(scopeT *scope,
 	if (did_insert) {
 		std::map<constT, bbdd *> &res(it->second);
 		assert(res.empty());
-		if (what->isLeaf) {
+		if (what->isLeaf()) {
 			res[what->leaf()] = scope->cnst(true);
 		} else {
 			const std::map<constT, bbdd *> &trueB(to_selectors(scope, what->internal().trueBranch, memo));
@@ -667,10 +667,10 @@ public:
 		: cond(_cond), ifTrue(_ifTrue), ifFalse(_ifFalse)
 	{}
 	bool isLeaf() const {
-		return cond->isLeaf || (ifTrue == ifFalse);
+		return cond->isLeaf() || (ifTrue == ifFalse);
 	}
 	subtreeT *leafzip() const {
-		if (cond->isLeaf) {
+		if (cond->isLeaf()) {
 			if (cond->leaf())
 				return ifTrue;
 			else
@@ -681,14 +681,14 @@ public:
 		abort();
 	}
 	const bdd_rank &bestCond(IRExpr **c) const {
-		assert(!cond->isLeaf);
+		assert(!cond->isLeaf());
 		const bdd_rank *best = &cond->internal().rank;
 		*c = cond->internal().condition;
-		if (!ifTrue->isLeaf && ifTrue->internal().rank < *best) {
+		if (!ifTrue->isLeaf() && ifTrue->internal().rank < *best) {
 			best = &ifTrue->internal().rank;
 			*c = ifTrue->internal().condition;
 		}
-		if (!ifFalse->isLeaf && ifFalse->internal().rank < *best) {
+		if (!ifFalse->isLeaf() && ifFalse->internal().rank < *best) {
 			best = &ifFalse->internal().rank;
 			*c = ifFalse->internal().condition;
 		}
@@ -740,7 +740,7 @@ const_bdd<constT, subtreeT>::replaceTerminal(scope *scp,
 					     subtreeT *in,
 					     std::map<subtreeT *, subtreeT *> &memo)
 {
-	if (in->isLeaf) {
+	if (in->isLeaf()) {
 		if (in->leaf() == from)
 			return scp->cnst(to);
 		else

@@ -618,7 +618,7 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something, bo
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec =
 					(StateMachineSideEffectCopy *)e;
-				if (smsec->value->isLeaf &&
+				if (smsec->value->isLeaf() &&
 				    smsec->value->leaf()->tag == Iex_Get &&
 				    ((IRExprGet *)smsec->value->leaf())->reg == smsec->target) {
 					/* Copying a register

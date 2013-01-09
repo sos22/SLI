@@ -93,7 +93,7 @@ class bdd_ordering : public GcCallback<&ir_heap> {
 	std::map<bdd_rank::clsT, long> nextRanking;
 public:
 	template <typename leafT, typename subtreeT> bdd_rank rankVariable(const _bdd<leafT, subtreeT> *a) {
-		assert(!a->isLeaf);
+		assert(!a->isLeaf());
 		return a->internal().rank;
 	}
 	bdd_rank rankVariable(const IRExpr *e);
@@ -140,13 +140,13 @@ public:
 	{
 	}
 	template <typename subtreeT> subtreeT *trueBranch(subtreeT *bdd, const bdd_rank &cond) {
-		if (!bdd->isLeaf && cond == bdd->internal().rank)
+		if (!bdd->isLeaf() && cond == bdd->internal().rank)
 			return bdd->internal().trueBranch;
 		else
 			return bdd;
 	}
 	template <typename subtreeT> subtreeT *falseBranch(subtreeT *bdd, const bdd_rank &cond) {
-		if (!bdd->isLeaf && cond == bdd->internal().rank)
+		if (!bdd->isLeaf() && cond == bdd->internal().rank)
 			return bdd->internal().falseBranch;
 		else
 			return bdd;
@@ -167,8 +167,8 @@ public:
 		_subtreeT *trueBranch;
 		_subtreeT *falseBranch;
 	};
-	const bool isLeaf;
 private:
+	const bool _isLeaf;
 	union _contentT {
 		unsigned char _leaf[sizeof(leafT)];
 		unsigned char _internal[sizeof(internalT)];
@@ -187,11 +187,11 @@ private:
 	template <typename scopeT> static const typename std::map<leafT, bbdd *> &to_selectors(scopeT *, _subtreeT *, std::map<_subtreeT *, std::map<leafT, bbdd *> > &);
 
 	leafT &unsafe_leaf() {
-		assert(isLeaf);
+		assert(isLeaf());
 		return *(leafT *)content._leaf;
 	}
 	internalT &unsafe_internal() {
-		assert(!isLeaf);
+		assert(!isLeaf());
 		return *(internalT *)content._internal;
 	}
 
@@ -201,12 +201,12 @@ protected:
 	virtual void _prettyPrint(FILE *f, leafT what) const = 0;
 
 	_bdd(leafT leaf)
-		: isLeaf(true), content()
+		: _isLeaf(true), content()
 	{
 		new (&unsafe_leaf()) leafT(leaf);
 	}
 	_bdd(const bdd_rank &rank, IRExpr *cond, _subtreeT *trueB, _subtreeT *falseB)
-		: isLeaf(false), content()
+		: _isLeaf(false), content()
 	{
 		unsafe_internal().rank = rank;
 		unsafe_internal().condition = cond;
@@ -226,25 +226,28 @@ protected:
 
 	~_bdd()
 	{
-		if (isLeaf)
+		if (isLeaf())
 			unsafe_leaf().~leafT();
 		else
 			unsafe_internal().rank.~bdd_rank();
 	}
 public:
+	bool isLeaf() const {
+		return _isLeaf;
+	}
 	const leafT &leaf() const {
-		assert(isLeaf);
+		assert(isLeaf());
 		return *(const leafT *)content._leaf;
 	}
 	const internalT &internal() const {
-		assert(!isLeaf);
+		assert(!isLeaf());
 		return *(const internalT *)content._internal;
 	}
 	void sanity_check(bdd_ordering *ordering = NULL) const {
 		if (TIMEOUT)
 			return;
-		assert(isLeaf == true || isLeaf == false);
-		if (isLeaf) {
+		assert(_isLeaf == true || _isLeaf == false);
+		if (isLeaf()) {
 			_sanity_check(leaf());
 		} else {
 			internal().condition->sanity_check();
@@ -254,9 +257,9 @@ public:
 			internal().falseBranch->sanity_check(ordering);
 			if (ordering) {
 				assert(internal().rank == ordering->rankVariable(internal().condition));
-				if (!internal().trueBranch->isLeaf)
+				if (!internal().trueBranch->isLeaf())
 					assert(ordering->before(internal().condition, internal().trueBranch->internal().condition));
-				if (!internal().falseBranch->isLeaf)
+				if (!internal().falseBranch->isLeaf())
 					assert(ordering->before(internal().condition, internal().falseBranch->internal().condition));
 			}
 		}
@@ -301,7 +304,7 @@ public:
 		_subtreeT *ifFalse);
 
 	unsigned long hash() const {
-		if (isLeaf)
+		if (isLeaf())
 			return (unsigned long)leaf() * 57348958027;
 		return (unsigned long)internal().condition * 57349651 +
 			(unsigned long)internal().trueBranch * 57352199 +
@@ -311,7 +314,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		/* Bit of a hack: content is const except for things
 		   possibly being moved around by the GC. */
-		if (isLeaf) {
+		if (isLeaf()) {
 			_visit(hv, unsafe_leaf());
 		} else {
 			hv(unsafe_internal().condition);
@@ -606,7 +609,7 @@ public:
 	static IRExpr *to_irexpr(exprbdd *);
 	static exprbdd *var(scope *scope, bbdd::scope *, IRExpr *);
 	IRType type() const {
-		if (isLeaf)
+		if (isLeaf())
 			return leaf()->type();
 		else
 			return internal().trueBranch->type();

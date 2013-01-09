@@ -1117,7 +1117,7 @@ struct RspCanonicalisationState : public Named {
 		return res;
 	}
 	eval_res eval(exprbdd *expr) const {
-		if (expr->isLeaf)
+		if (expr->isLeaf())
 			return eval(expr->leaf());
 		eval_res r1(eval(expr->internal().condition));
 		if (r1.tag == eval_res::eval_res_const) {
@@ -1644,7 +1644,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 	std::set<callStackT *> specialStacks;
 	for (auto it = stacks.begin(); it != stacks.end(); it++) {
 		if ( it->first->type == StateMachineState::Terminal &&
-		     ((StateMachineTerminal *)it->first)->res->isLeaf )
+		     ((StateMachineTerminal *)it->first)->res->isLeaf() )
 			specialStacks.insert(&it->second);
 	}
 	for (auto it = eq_constraints.begin(); it != eq_constraints.end(); ) {
