@@ -158,12 +158,12 @@ template <typename bdd1, typename bdd2, typename rt,
 static rt
 foldzipbdds(const bdd1 *a, const bdd2 *b)
 {
-	if (a->isLeaf && b->isLeaf)
+	if (a->isLeaf() && b->isLeaf())
 		return zip(a->leaf(), b->leaf());
-	if (a->isLeaf)
+	if (a->isLeaf())
 		return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().trueBranch),
 			    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().falseBranch));
-	if (b->isLeaf || a->internal().rank < b->internal().rank)
+	if (b->isLeaf() || a->internal().rank < b->internal().rank)
 		return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().trueBranch, b),
 			    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().falseBranch, b));
 	if (a->internal().rank == b->internal().rank)
@@ -601,7 +601,7 @@ PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
 		q.pop_back();
 		if (!visited.insert(ee).second)
 			continue;
-		if (ee->isLeaf) {
+		if (ee->isLeaf()) {
 			acc |= getInitialLoadAliasing(scopes, ee->leaf(), sm,
 						      slt, machine);
 		} else {
@@ -629,7 +629,7 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 		q.pop_back();
 		if (!visited.insert(ee).second)
 			continue;
-		if (ee->isLeaf) {
+		if (ee->isLeaf()) {
 			acc |= pointsToSetForExpr(scopes, ee->leaf(), sm, sl,
 						  slt, machine);
 		} else {

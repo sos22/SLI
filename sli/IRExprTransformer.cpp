@@ -83,7 +83,7 @@ IRExprTransformer::transformIex(IRExprAssociative *e)
 bbdd *
 IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, std::map<bbdd *, bbdd *> &memo)
 {
-	if (what->isLeaf)
+	if (what->isLeaf())
 		return what;
 	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(what, NULL));
 	auto it = it_did_insert.first;
@@ -111,7 +111,7 @@ IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, std::map<bbdd 
 smrbdd *
 IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, smrbdd *what, std::map<smrbdd *, smrbdd *> &memo)
 {
-	if (what->isLeaf)
+	if (what->isLeaf())
 		return what;
 	auto it_did_insert = memo.insert(std::pair<smrbdd *, smrbdd *>(what, NULL));
 	auto it = it_did_insert.first;
@@ -145,7 +145,7 @@ IRExprTransformer::transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope,
 	auto did_insert = it_did_insert.second;
 	exprbdd *&res(it->second);
 	if (did_insert) {
-		if (what->isLeaf) {
+		if (what->isLeaf()) {
 			IRExpr *newLeaf = doit(what->leaf());
 			if (what->leaf() != newLeaf)
 				res = exprbdd::var(scope, bscope, newLeaf);

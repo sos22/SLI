@@ -276,7 +276,7 @@ _visit_bdd(void *ctxt,
 	if (!visited.insert(bdd).second)
 		return visit_continue;
 	visit_result res = visit_continue;
-	if (bdd->isLeaf) {
+	if (bdd->isLeaf()) {
 		if (visitLeaf)
 			res = visitLeaf(ctxt, visitor, bdd->leaf());
 	} else {

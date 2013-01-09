@@ -665,11 +665,11 @@ public:
 	bbdd *first;
 	bbdd *second;
 	const bdd_rank &bestCond(IRExpr **cond) const {
-		assert(!(first->isLeaf && second->isLeaf));
-		if (first->isLeaf) {
+		assert(!(first->isLeaf() && second->isLeaf()));
+		if (first->isLeaf()) {
 			*cond = second->internal().condition;
 			return second->internal().rank;
-		} else if (second->isLeaf) {
+		} else if (second->isLeaf()) {
 			*cond = first->internal().condition;
 			return first->internal().rank;
 		} else if (first->internal().rank < second->internal().rank) {
@@ -698,13 +698,13 @@ public:
 	bool isLeaf() const {
 		if (first == second)
 			return true;
-		return first->isLeaf || second->isLeaf;
+		return first->isLeaf() || second->isLeaf();
 	}
 	bbdd *leafzip() const {
 		assert(isLeaf());
 		if (first == second)
 			return first;
-		if (first->isLeaf) {
+		if (first->isLeaf()) {
 			if (first->leaf()) {
 				if (isAnd)
 					return second;
@@ -716,7 +716,7 @@ public:
 				else
 					return second;
 			}
-		} else if (second->isLeaf) {
+		} else if (second->isLeaf()) {
 			if (second->leaf()) {
 				if (isAnd)
 					return first;
@@ -766,7 +766,7 @@ bbdd::invert(scope *scope, bbdd *a, std::map<bbdd *, bbdd *> &memo)
 {
 	if (TIMEOUT)
 		return NULL;
-	if (a->isLeaf)
+	if (a->isLeaf())
 		return scope->cnst(!a->leaf());
 
 	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(a, NULL));
@@ -896,7 +896,7 @@ exprbdd::sanity_check(bdd_ordering *ordering) const
 		q.pop_back();
 		if (!visited.insert(e).second)
 			continue;
-		if (e->isLeaf) {
+		if (e->isLeaf()) {
 			assert(e->leaf()->tag != Iex_Mux0X);
 			if (ty == Ity_INVALID)
 				ty = e->leaf()->type();
@@ -940,7 +940,7 @@ exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
 IRExpr *
 exprbdd::to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo)
 {
-	if (what->isLeaf)
+	if (what->isLeaf())
 		return what->leaf();
 	auto it_did_insert = memo.insert(std::pair<exprbdd *, IRExpr *>(what, (IRExpr *)NULL));
 	auto it = it_did_insert.first;
@@ -1011,7 +1011,7 @@ exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 {
 	if (TIMEOUT)
 		return NULL;
-	if (what->isLeaf)
+	if (what->isLeaf())
 		return var(
 			scope,
 			bscope,
@@ -1029,7 +1029,7 @@ exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, IRExpr *a, exprbdd *b
 {
 	if (TIMEOUT)
 		return NULL;
-	if (b->isLeaf)
+	if (b->isLeaf())
 		return var(
 			scope,
 			bscope,
@@ -1047,7 +1047,7 @@ exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, IRExpr *b
 {
 	if (TIMEOUT)
 		return NULL;
-	if (a->isLeaf)
+	if (a->isLeaf())
 		return var(
 			scope,
 			bscope,
@@ -1065,14 +1065,14 @@ exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *
 {
 	if (TIMEOUT)
 		return NULL;
-	if (a->isLeaf && b->isLeaf)
+	if (a->isLeaf() && b->isLeaf())
 		return var(
 			scope,
 			bscope,
 			IRExpr_Binop(op, a->leaf(), b->leaf()));
-	else if (a->isLeaf)
+	else if (a->isLeaf())
 		return binop(scope, bscope, op, a->leaf(), b);
-	else if (b->isLeaf)
+	else if (b->isLeaf())
 		return binop(scope, bscope, op, a, b->leaf());
 	else if (a->internal().rank < b->internal().rank)
 		return ifelse(
@@ -1099,7 +1099,7 @@ exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *what)
 {
 	if (TIMEOUT)
 		return NULL;
-	if (what->isLeaf)
+	if (what->isLeaf())
 		return var(
 			scope,
 			bscope,
@@ -1125,7 +1125,7 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr, std::map<exprbdd *, bbdd *> 
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
-		if (expr->isLeaf) {
+		if (expr->isLeaf()) {
 			IRExpr *l = expr->leaf();
 			if (l->tag == Iex_Const) {
 				it->second = scope->cnst( ((IRExprConst *)l)->Ico.U1);

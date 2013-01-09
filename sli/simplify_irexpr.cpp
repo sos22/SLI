@@ -3171,14 +3171,14 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 	name(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt,	\
 	     std::set<std::pair<exprbdd *, exprbdd *> > &memo)		\
 	{								\
-		if (a->isLeaf && b->isLeaf)				\
+		if (a->isLeaf() && b->isLeaf())				\
 			return name(a->leaf(), b->leaf(), opt);		\
 		if (!memo.insert(std::pair<exprbdd *, exprbdd *>(a, b)).second)	\
 			return true;					\
-		if (a->isLeaf)						\
+		if (a->isLeaf())						\
 			return name(a, b->internal().trueBranch,  opt, memo) &&	\
 				name(a, b->internal().falseBranch, opt, memo); \
-		if (b->isLeaf)						\
+		if (b->isLeaf())						\
 			return name(a->internal().trueBranch,  b, opt, memo) &&	\
 				name(a->internal().falseBranch, b, opt, memo); \
 		if (a->internal().rank < b->internal().rank)		\
@@ -3203,7 +3203,7 @@ mk_exprbdd(definitelyNotEqual)
 bool
 isBadAddress(exprbdd *e)
 {
-	if (e->isLeaf)
+	if (e->isLeaf())
 		return e->leaf()->tag == Iex_Const &&
 			(long)((IRExprConst *)e->leaf())->Ico.U64 < 4096;
 	else
@@ -3217,7 +3217,7 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisa
 {
 	if (TIMEOUT)
 		return bdd;
-	if (bdd->isLeaf)
+	if (bdd->isLeaf())
 		return bdd;
 	typedef typename std::pair<treeT *, treeT *> treePairT;
 	auto it_did_insert = memo.insert(treePairT(bdd, (treeT *)NULL));
@@ -3261,7 +3261,7 @@ simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IREx
 		return it_did_insert.first->second;
 	exprbdd *res;
 
-        if (bdd->isLeaf) {
+        if (bdd->isLeaf()) {
 		IRExpr *r = optimiseIRExprFP(bdd->leaf(), opt);
 		if (r == bdd->leaf())
 			res = bdd;

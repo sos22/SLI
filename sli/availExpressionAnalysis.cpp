@@ -271,7 +271,7 @@ avail_t::invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMach
 					 const threadAndRegister reg,
 					 bbdd *expr)
 		{
-			if (expr->isLeaf)
+			if (expr->isLeaf())
 				return expr;
 			auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(expr, NULL));
 			auto it = it_did_insert.first;
@@ -1042,7 +1042,7 @@ applyLeafSubstTable(const substTableT &table, IRExpr *e)
 			auto it = table->find(ieg->reg);
 			if (it == table->end())
 				return ieg;
-			assert(it->second->isLeaf);
+			assert(it->second->isLeaf());
 			if (it->second->leaf()->type() < ieg->type())
 				return ieg;
 			return coerceTypes(ieg->type(), it->second->leaf());
@@ -1068,7 +1068,7 @@ ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 		for (auto it2 = t.begin();
 		     it2 != t.end();
 		     it2++) {
-			if ( it2->second->isLeaf )
+			if ( it2->second->isLeaf() )
 				continue;
 			if (!bestVar || it2->second->internal().rank < *bestVar) {
 				bestCond = it2->second->internal().condition;
@@ -1120,7 +1120,7 @@ ssaApplyAvailExprExpr(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 		for (auto it2 = t.begin();
 		     it2 != t.end();
 		     it2++) {
-			if ( it2->second->isLeaf )
+			if ( it2->second->isLeaf() )
 				continue;
 			if (!bestVar || it2->second->internal().rank < *bestVar) {
 				bestCond = it2->second->internal().condition;
@@ -1164,7 +1164,7 @@ ssaApplyAvail(ssa_avail_state &state, bbdd *inp)
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
-		if (inp->isLeaf) {
+		if (inp->isLeaf()) {
 			it->second = inp;
 		} else {
 			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
@@ -1194,7 +1194,7 @@ ssaApplyAvail(ssa_avail_state &state, smrbdd *inp)
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
-		if (inp->isLeaf) {
+		if (inp->isLeaf()) {
 			it->second = inp;
 		} else {
 			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
@@ -1224,7 +1224,7 @@ ssaApplyAvail(ssa_avail_state &state, exprbdd *inp)
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
-		if (inp->isLeaf) {
+		if (inp->isLeaf()) {
 			auto newLeaf(ssaApplyAvailExprExpr(state, inp->leaf()));
 			if (!newLeaf.isLeft && newLeaf.right() == inp->leaf())
 				it->second = inp;

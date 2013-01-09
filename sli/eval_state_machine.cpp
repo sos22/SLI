@@ -420,7 +420,7 @@ bbdd *
 threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *e, const IRExprOptimisations &opt,
 			  std::map<bbdd *, bbdd *> &memo)
 {
-	if (e->isLeaf)
+	if (e->isLeaf())
 		return e;
 	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(e, NULL));
 	auto it = it_did_insert.first;
@@ -445,7 +445,7 @@ exprbdd *
 threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *e, const IRExprOptimisations &opt,
 			  std::map<exprbdd *, exprbdd *> &memo)
 {
-	if (e->isLeaf)
+	if (e->isLeaf())
 		return exprbdd::var(&scopes->exprs, &scopes->bools,
 				    setTemporary(scopes, reg, e->leaf(), opt));
 	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(e, NULL));
@@ -851,7 +851,7 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplifi
 		/* Guess; we'll ignore the result, anyway. */
 		return tr_true;
 	}
-	if (simplifiedCondition->isLeaf) {
+	if (simplifiedCondition->isLeaf()) {
 		if (simplifiedCondition->leaf())
 			return tr_true;
 		else
