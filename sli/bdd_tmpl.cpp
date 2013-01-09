@@ -799,13 +799,15 @@ _bdd<constT, subtreeT>::reduceBdd(scopeT *scope, std::map<subtreeT *, subtreeT *
 	start->unsafe_internal().trueBranch = reduceBdd<scopeT, zipInternalT>(scope, reduced, start->internal().trueBranch);
 	start->unsafe_internal().falseBranch = reduceBdd<scopeT, zipInternalT>(scope, reduced, start->internal().falseBranch);
 	subtreeT *fixed = zipInternalT::fixup(start);
-	if (fixed != start)
-		start = fixed;
-	it->second = scope->internBdd(start);
-	start = it->second;
-	assert(!start->isLeaf());
-	assert(start->internal().trueBranch);
-	assert(start->internal().falseBranch);
+	if (fixed != start) {
+		if (!fixed->isLeaf())
+			it->second = scope->internBdd(fixed);
+		else
+			it->second = fixed;
+	} else {
+		assert(!fixed->isLeaf());
+		it->second = scope->internBdd(start);
+	}
 	return it->second;
 }
 
