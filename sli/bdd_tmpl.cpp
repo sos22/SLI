@@ -862,6 +862,9 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 	std::vector<relocT> leafRelocs;
 
 	while (!relocs.empty()) {
+		if (TIMEOUT)
+			return NULL;
+
 		auto it = relocs.begin();
 		const relocKeyT key(it->first);
 		const std::vector<relocT> &rq(it->second);
@@ -933,6 +936,9 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 	std::map<zipInternalT, subtreeT *> leafMemo;
 
 	for (auto it = leafRelocs.begin(); it != leafRelocs.end(); it++) {
+		if (TIMEOUT)
+			return NULL;
+
 		subtreeT **relocPtr = it->first;
 		const zipInternalT &relocWhere(it->second);
 		assert(relocWhere.isLeaf());
