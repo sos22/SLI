@@ -2,34 +2,59 @@
    #include'd into a bunch of other files. */
 
 
+/* Methods for a zipInternalT:
+
+   const bdd_rank &bestCond(IRExpr **cond) const;
+
+   Figure out what variable needs to be tested next.  Return its rank
+   and set @cond to the actual IRExpr.
 
 
-template <typename constT, typename subtreeT> template <typename scopeT, typename zipInternalT>
-subtreeT *
-_bdd<constT, subtreeT>::zip(scopeT *scope,
-			    const zipInternalT &where,
-			    std::map<zipInternalT, subtreeT *> &memo)
-{
-	if (TIMEOUT)
-		return NULL;
+   bool isLeaf() const
 
-	if (where.isLeaf())
-		return where.leafzip();
+   Return true if calling ::leafzip() is safe.
 
-	auto it_did_insert = memo.insert(
-		std::pair<zipInternalT, subtreeT *>(where, (subtreeT *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (!did_insert)
-		return it->second;
 
-	IRExpr *bestCond;
-	const bdd_rank &bestRank(where.bestCond(&bestCond));
-	subtreeT *trueSucc = zip(scope, where.trueSucc(bestRank), memo);
-	subtreeT *falseSucc = zip(scope, where.falseSucc(bestRank), memo);
-	it->second = where.mkNode(scope, bestCond, trueSucc, falseSucc);
-	return it->second;
-}
+   subtreeT *leafzip() const;
+
+   Return a BDD representing this point in the zip.  Only called if
+   ::isLeaf() returns true.
+
+
+   zipInternalT trueSucc(const bdd_rank &cond) const;
+
+   Generate a new zipInternalT assuming that @cond is true.  @cond
+   will be the result of ::bestCond().  Only called when ::isLeaf()
+   returns false.
+
+
+   zipInternalT falseSucc(const bdd_rank &cond) const;
+
+   Like trueSucc, but assuming that @cond is false.
+
+
+   bool operator<(const zipInternalT &o) const;
+
+   Standard ordering operator, used to build std::map<> over the
+   zipInternalT.  There are no semantic requirements on the order,
+   beyond those needed for std::map to work.
+
+
+   static subtreeT *fixup(subtreeT *what);
+
+   Called for each node in the BDD once we've fixed its contents.  It
+   can replace the node with another one (but probably shouldn't
+   allocate any new stuff).  @what is potentially unreduced, but its
+   true and false branches will be fully reduced.  This is used to
+   e.g. remove _|_ nodes in assume operations.
+
+   static bool badPtr(subtreeT *what);
+
+   Return true if @what is a bad pointer and should not be
+   dereferenced by the zip machinery.  Such pointers should be removed
+   by ::fixup() later on.
+
+*/
 
 template <typename subtreeT> class assume_zip_internal {
 public:
@@ -78,20 +103,24 @@ public:
 			return thing;
 		}
 	}
-	subtreeT *mkNode(bdd_scope<subtreeT> *scope, IRExpr *cond, subtreeT *t, subtreeT *f) const
-	{
-		if (!t)
-			return f;
-		if (!f)
-			return t;
-		return scope->makeInternal(cond, t, f);
-	}
 	bool operator<(const assume_zip_internal &o) const {
 		if (thing < o.thing)
 			return true;
 		if (thing > o.thing)
 			return false;
 		return assumption < o.assumption;
+	}
+	static subtreeT *fixup(subtreeT *what) {
+		if (what->isLeaf())
+			return what;
+		if (what->internal().trueBranch == NULL)
+			return what->internal().falseBranch;
+		if (what->internal().falseBranch == NULL)
+			return what->internal().trueBranch;
+		return what;
+	}
+	static bool badPtr(subtreeT *what) {
+		return what == NULL;
 	}
 };
 template <typename constT, typename subtreeT> template <typename scopeT> subtreeT *
@@ -176,15 +205,18 @@ public:
 		}
 		return res;
 	}
-	subtreeT *mkNode(scopeT *scope, IRExpr *a, subtreeT *t, subtreeT *f) const
-	{
-		if (t == NULL || f == NULL)
+	static subtreeT *fixup(subtreeT *what) {
+		if (what->internal().trueBranch == NULL ||
+		    what->internal().falseBranch == NULL)
 			return NULL;
-		if (t == INTBDD_DONT_CARE)
-			return f;
-		if (f == INTBDD_DONT_CARE)
-			return t;
-		return scope->makeInternal(a, t, f);
+		if (what->internal().trueBranch == INTBDD_DONT_CARE)
+			return what->internal().falseBranch;
+		if (what->internal().falseBranch == INTBDD_DONT_CARE)
+			return what->internal().trueBranch;
+		return what;
+	}
+	static bool badPtr(subtreeT *what) {
+		return what == NULL || what == INTBDD_DONT_CARE;
 	}
 	bool operator<(const from_enabling_internal &o) const {
 		auto it1 = table.begin();
@@ -233,9 +265,8 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 		pending.push_back(this);
 		while (!pending.empty()) {
 			auto l = pending.back();
-			assert(l);
 			pending.pop_back();
-			if (labels.count(l))
+			if (!l || labels.count(l))
 				continue;
 			if (seen.count(l)) {
 				/* Need a label */
@@ -244,8 +275,6 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 			}
 			seen.insert(l);
 			if (!l->isLeaf()) {
-				assert(l->internal().trueBranch);
-				assert(l->internal().falseBranch);
 				pending.push_back(l->internal().trueBranch);
 				pending.push_back(l->internal().falseBranch);
 			}
@@ -268,12 +297,14 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 		auto what = pending.back().second;
 		pending.pop_back();
 
-		if (labels.count(what) && !printed.count(what))
+		if (what && labels.count(what) && !printed.count(what))
 			fprintf(f, "[%*d]", lsize, labels[what]);
 		else
 			fprintf(f, "%*s", lsize + 2, "");
 		fprintf(f, "%*s", depth, "");
-		if (printed.count(what)) {
+		if (!what) {
+			fprintf(f, "!!!NULL!!!");
+		} else if (printed.count(what)) {
 			assert(labels.count(what));
 			fprintf(f, "[->%d]", labels[what]);
 		} else {
@@ -360,22 +391,14 @@ _bdd<leafT, subtreeT>::_parse(scopeT *scope, subtreeT **root, const char *str, c
 	}
 }
 
-template <typename t> t *
-bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
+template <typename t> void
+bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 {
 	assert(a);
 	assert(b);
 	assert(a->isLeaf() == true || a->isLeaf() == false);
 	assert(a->isLeaf() || ordering->before(cond, a));
 	assert(b->isLeaf() || ordering->before(cond, b));
-	if (a == b)
-		return a;
-	if (cond->tag == Iex_Const) {
-		if ( ((IRExprConst *)cond)->Ico.U1 )
-			return a;
-		else
-			return b;
-	}
 
 	if (cond->tag == Iex_ControlFlow &&
 	    !a->isLeaf() &&
@@ -434,10 +457,43 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 			a = a->internal().trueBranch;
 		}
 	}
-	    
+}
+
+template <typename t> t *
+bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
+{
+	if (a == b)
+		return a;
+	assert(cond->tag != Iex_Const);
+	normalise(cond, a, b);
 	if (a == b)
 		return a;
 
+	auto it_did_insert = intern.insert(
+		std::pair<entry, t *>(
+			entry(r, a, b),
+			(t *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert)
+		it->second = new t(r, cond, a, b);
+	return it->second;
+}
+
+template <typename t> t *
+bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
+{
+	if (a == b)
+		return a;
+	if (cond->tag == Iex_Const) {
+		if ( ((IRExprConst *)cond)->Ico.U1 )
+			return a;
+		else
+			return b;
+	}
+	normalise(cond, a, b);
+	if (a == b)
+		return a;
 	bdd_rank r(ordering->rankVariable(cond));
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
@@ -451,88 +507,24 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 }
 
 template <typename t> t *
-bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
+bdd_scope<t>::internBdd(t *what)
 {
-	assert(a);
-	assert(b);
-	assert(a->isLeaf() || ordering->before(cond, a));
-	assert(b->isLeaf() || ordering->before(cond, b));
-	if (a == b)
-		return a;
-	if (cond->tag == Iex_Const) {
-		if ( ((IRExprConst *)cond)->Ico.U1 )
-			return a;
-		else
-			return b;
-	}
-
-	if (cond->tag == Iex_ControlFlow &&
-	    !a->isLeaf() &&
-	    a->internal().condition->tag == Iex_ControlFlow &&
-	    ((IRExprControlFlow *)a->internal().condition)->thread == ((IRExprControlFlow *)cond)->thread &&
-	    ((IRExprControlFlow *)a->internal().condition)->cfg1 == ((IRExprControlFlow *)cond)->cfg1)  {
-		assert(((IRExprControlFlow *)a->internal().condition)->cfg2 != ((IRExprControlFlow *)cond)->cfg2);
-		a = a->internal().falseBranch;
-	}
-
-	if (cond->tag == Iex_Binop &&
-	    ((IRExprBinop *)cond)->op >= Iop_CmpEQ8 &&
-	    ((IRExprBinop *)cond)->op <= Iop_CmpEQ64 &&
-	    !a->isLeaf() &&
-	    a->internal().condition->tag == Iex_Binop &&
-	    ((IRExprBinop *)a->internal().condition)->op >= Iop_CmpEQ8 &&
-	    ((IRExprBinop *)a->internal().condition)->op <= Iop_CmpEQ64 &&
-	    ((IRExprBinop *)a->internal().condition)->arg2 ==
-		((IRExprBinop *)cond)->arg2 &&
-	    ((IRExprBinop *)cond)->arg1->tag == Iex_Const &&
-	    ((IRExprBinop *)a->internal().condition)->arg1->tag == Iex_Const &&
-	    !eqIRExprConst( (IRExprConst *)((IRExprBinop *)a->internal().condition)->arg1,
-			    (IRExprConst *)((IRExprBinop *)cond)->arg1) ) {
-		assert(((IRExprBinop *)a->internal().condition)->arg1 !=
-		       ((IRExprBinop *)cond)->arg1);
-		a = a->internal().falseBranch;
-	}
-
-	if (cond->tag == Iex_HappensBefore &&
-	    !a->isLeaf() &&
-	    a->internal().condition->tag == Iex_HappensBefore) {
-		const IRExprHappensBefore *condhb =
-			(const IRExprHappensBefore *)cond;
-		const IRExprHappensBefore *ahb =
-			(const IRExprHappensBefore *)a->internal().condition;
-		if (condhb->before.tid == ahb->before.tid &&
-		    condhb->after.tid == ahb->after.tid &&
-		    condhb->before.id >= ahb->before.id &&
-		    condhb->after.id <= ahb->after.id) {
-			/* @cond is (tA:idA <-< tB:idB) and @a's first
-			   condition is (tA:idC <-< tB:idD).  We
-			   further have that idA >= idC and idB <=
-			   idD.  Because of the way we assign MAIs to
-			   memory accesses (see setMais in
-			   probeCFGstoMachine.cpp) idC <= idA implies
-			   tA:idC <-< tA:idA, and likewise
-			   idB <= idD implies tB:idB <-< tB:idD.
-			   Combining these with cond gives us
-			   
-			   tA:idC <-< tA:idA <-< tB:idB <-< tB:idD
-
-			   i.e.
-
-			   tA:idC <-< tB:idD and we can replace @a
-			   with @a->trueBranch. */
-			a = a->internal().trueBranch;
-		}
-	}
-
+	assert(what);
+	assert(!what->isLeaf());
+	if (what->internal().trueBranch == what->internal().falseBranch)
+		return what->internal().trueBranch;
+	normalise(what->internal().condition,
+		  what->unsafe_internal().trueBranch,
+		  what->unsafe_internal().falseBranch);
+	if (what->internal().trueBranch == what->internal().falseBranch)
+		return what->internal().trueBranch;
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
-			entry(r, a, b),
-			(t *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert)
-		it->second = new t(r, cond, a, b);
-	return it->second;
+			entry(what->internal().rank,
+			      what->internal().trueBranch,
+			      what->internal().falseBranch),
+			what));
+	return it_did_insert.first->second;
 }
 
 template <typename constT, typename subtreeT> template <IRExpr *mkConst(constT)> IRExpr *
@@ -706,10 +698,11 @@ public:
 			ifTrue->falseBranch(on),
 			ifFalse->falseBranch(on));
 	}
-	subtreeT *mkNode(scopeT *scope, IRExpr *cond, subtreeT *trueB, subtreeT *falseB) const {
-		if (!trueB || !falseB)
-			return NULL;
-		return scope->makeInternal(cond, trueB, falseB);
+	static subtreeT *fixup(subtreeT *what) {
+		return what;
+	}
+	static bool badPtr(subtreeT *) {
+		return false;
 	}
 	bool operator<(const ifelse_zip_internal &o) const {
 		if (cond < o.cond)
@@ -788,4 +781,175 @@ bdd_scope<t>::runGc(HeapVisitor &hv)
 		newIntern.insert(std::pair<entry, t *>(e, value));
 	}
 	intern = newIntern;
+}
+
+template <typename constT, typename subtreeT> template <typename scopeT, typename zipInternalT>
+subtreeT *
+_bdd<constT, subtreeT>::reduceBdd(scopeT *scope, std::map<subtreeT *, subtreeT *> &reduced, subtreeT *start)
+{
+	if (zipInternalT::badPtr(start))
+		return start;
+	if (start->isLeaf())
+		return start;
+	auto it_did_insert = reduced.insert(std::pair<subtreeT *, subtreeT *>(start, start));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert)
+		return it->second;
+	start->unsafe_internal().trueBranch = reduceBdd<scopeT, zipInternalT>(scope, reduced, start->internal().trueBranch);
+	start->unsafe_internal().falseBranch = reduceBdd<scopeT, zipInternalT>(scope, reduced, start->internal().falseBranch);
+	subtreeT *fixed = zipInternalT::fixup(start);
+	if (fixed != start)
+		start = fixed;
+	it->second = scope->internBdd(start);
+	start = it->second;
+	assert(!start->isLeaf());
+	assert(start->internal().trueBranch);
+	assert(start->internal().falseBranch);
+	return it->second;
+}
+
+template <typename constT, typename subtreeT> template <typename scopeT, typename zipInternalT>
+subtreeT *
+_bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
+{
+	if (rootZip.isLeaf())
+		return rootZip.leafzip();
+
+	subtreeT *newRoot;
+	typedef std::pair<subtreeT **, zipInternalT> relocT;
+	typedef std::pair<const bdd_rank &, IRExpr *> relocKeyT;
+	std::map<relocKeyT, std::vector<relocT> > relocs;
+
+	/* Set up root relocation */
+	{
+		IRExpr *rootCond;
+		const bdd_rank &rootRank(rootZip.bestCond(&rootCond));
+		relocs[relocKeyT(rootRank, rootCond)].push_back(relocT(&newRoot, rootZip));
+	}
+
+	/* Resolve relocs.  This is a little bit cunning.  The idea is
+	   to construct the new nodes in ascending order of the BDD
+	   rank, so that we never need to build up a memo table for
+	   the entire zip operation.  That's helpful because such a
+	   memo table could easily be far larger than the final
+	   BDD. */
+	/* You can kind of think of this as doing the build
+	   breadth-first, if that helps at all: we start at a root,
+	   then do all of the depth-1 nodes, then all of the depth-2
+	   nodes, and so on.  It's a little bit more complicated than
+	   that, though, because some edges cross multiple levels; in
+	   that case, we compute edges in ascending order of the
+	   *destination* depth. */
+	/* Another way of thinking about this is to say that we have a
+	   kind of implicit operator node, which is a bit like an
+	   instance of the zipInternalT type.  The relocs show how to
+	   tie these operators back into the BDD we're building.  It's
+	   a little more complicated than that, though, again, because
+	   our operator nodes are n-ary, and the BDDs are always
+	   binary. */
+
+	/* This is guaranteed to produce a ``locally'' reduced BDD, so
+	   that there are no non-interned duplicates in the result,
+	   but it's not globally reduced, so there might be duplicates
+	   elsewhere in the scope.  You have to intern the results in
+	   order to produce a fully reduced BDD. */
+
+	/* Leaves are special, because they don't test any
+	   expressions.  Process them last. */
+	std::vector<relocT> leafRelocs;
+
+	while (!relocs.empty()) {
+		auto it = relocs.begin();
+		const relocKeyT key(it->first);
+		const std::vector<relocT> &rq(it->second);
+
+		/* Construct all nodes which test key.first. */
+		assert(key.first == scope->ordering->rankVariable(key.second));
+
+		std::map<zipInternalT, subtreeT *> memo;
+		for (auto it2 = rq.begin(); it2 != rq.end(); it2++) {
+			subtreeT **relocPtr = it2->first;
+			const zipInternalT &relocWhere(it2->second);
+			assert(!relocWhere.isLeaf());
+#ifndef NDEBUG
+			{
+				IRExpr *relocExpr;
+				const bdd_rank relocRank(relocWhere.bestCond(&relocExpr));
+				assert(relocRank == key.first);
+				assert(physicallyEqual(relocExpr, key.second));
+			}
+#endif
+			auto it3_did_insert = memo.insert(std::pair<zipInternalT, subtreeT *>(relocWhere, (subtreeT *)NULL));
+			auto it3 = it3_did_insert.first;
+			auto did_insert = it3_did_insert.second;
+			if (did_insert) {
+				/* Not encounted this zip point
+				 * before, figure out what we're doing
+				 * next. */
+				zipInternalT trueSucc(relocWhere.trueSucc(key.first));
+				zipInternalT falseSucc(relocWhere.falseSucc(key.first));
+				assert(trueSucc < falseSucc || falseSucc < trueSucc);
+
+				/* Construct a new node */
+				subtreeT *newNode = new subtreeT(key.first, key.second,
+								 NULL, NULL);
+				/* Set up relocations for the true and
+				 * false branches */
+				if (trueSucc.isLeaf()) {
+					leafRelocs.push_back(relocT(&newNode->unsafe_internal().trueBranch, trueSucc));
+				} else {
+					IRExpr *cond;
+					const bdd_rank &rank(trueSucc.bestCond(&cond));
+					assert(key.first < rank);
+					relocs[relocKeyT(rank, cond)].push_back(relocT(&newNode->unsafe_internal().trueBranch, trueSucc));
+				}
+				if (falseSucc.isLeaf()) {
+					leafRelocs.push_back(relocT(&newNode->unsafe_internal().falseBranch, falseSucc));
+				} else {
+					IRExpr *cond;
+					const bdd_rank &rank(falseSucc.bestCond(&cond));
+					assert(key.first < rank);
+					relocs[relocKeyT(rank, cond)].push_back(relocT(&newNode->unsafe_internal().falseBranch, falseSucc));
+				}
+
+				it3->second = newNode;
+			} else {
+				/* Already have a node for this zip point, so just
+				   reuse it. */
+			}
+			assert(it3->second);
+			*relocPtr = it3->second;
+		}
+
+		relocs.erase(it);
+	}
+
+	std::map<subtreeT *, subtreeT *> reduced;
+
+	/* Now process leaf relocations */
+	std::map<zipInternalT, subtreeT *> leafMemo;
+
+	for (auto it = leafRelocs.begin(); it != leafRelocs.end(); it++) {
+		subtreeT **relocPtr = it->first;
+		const zipInternalT &relocWhere(it->second);
+		assert(relocWhere.isLeaf());
+		auto it2_did_insert = leafMemo.insert(std::pair<zipInternalT, subtreeT *>(relocWhere, (subtreeT *)NULL));
+		auto it2 = it2_did_insert.first;
+		auto did_insert = it2_did_insert.second;
+		if (did_insert) {
+			it2->second = relocWhere.leafzip();
+			/* We rely on the zip type returning fully
+			 * reduced leaves. */
+			reduced[it2->second] = it2->second;
+		}
+		*relocPtr = it2->second;
+	}
+
+	/* Now use the scope to fully reduce it. */
+	newRoot = reduceBdd<scopeT, zipInternalT>(scope, reduced, newRoot);
+
+	newRoot->sanity_check(scope->ordering);
+
+	return newRoot;
 }

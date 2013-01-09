@@ -733,14 +733,11 @@ public:
 		}
 
 	}
-	bbdd *mkNode(bbdd::scope *scope,
-		     IRExpr *a,
-		     bbdd *t,
-		     bbdd *f) const
-	{
-		if (!t || !f)
-			return NULL;
-		return scope->makeInternal(a, t, f);
+	static bbdd *fixup(bbdd *what) {
+		return what;
+	}
+	static bool badPtr(bbdd *) {
+		return false;
 	}
 	bool operator<(const binary_zip_internal &o) const {
 		if (first < o.first)

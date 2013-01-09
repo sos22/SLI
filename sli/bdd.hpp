@@ -168,16 +168,17 @@ private:
 				 const char *,
 				 const char **,
 				 std::map<int, _subtreeT *> &labels);
-	template <typename scopeT, typename zipInternalT> static _subtreeT *zip(
-		scopeT *,
-		const zipInternalT &,
-		std::map<zipInternalT, _subtreeT *> &memo);
 	template <typename scopeT> static const typename std::map<leafT, bbdd *> &to_selectors(scopeT *, _subtreeT *, std::map<_subtreeT *, std::map<leafT, bbdd *> > &);
+	/* This should only be used by ::zip(); everything else
+	 * produces ready-reduced BDDs. */
+	template <typename scopeT, typename zipInternalT> static _subtreeT *reduceBdd(scopeT *scope, std::map<_subtreeT *, _subtreeT *> &reduced, _subtreeT *start);
 
 	leafT &unsafe_leaf() {
 		assert(isLeaf());
 		return *(leafT *)content._leaf;
 	}
+
+public:
 	internalT &unsafe_internal() {
 		assert(!isLeaf());
 		return *(internalT *)content._internal;
@@ -188,7 +189,7 @@ protected:
 	virtual void _sanity_check(leafT leaf) const = 0;
 	virtual void _prettyPrint(FILE *f, leafT what) const = 0;
 
-	_bdd(leafT leaf)
+	explicit _bdd(leafT leaf)
 		: _isLeaf(true), content()
 	{
 		new (&unsafe_leaf()) leafT(leaf);
@@ -207,10 +208,7 @@ protected:
 
 	template <typename scopeT, typename zipInternalT> static _subtreeT *zip(
 		scopeT *scp,
-		zipInternalT where) {
-		std::map<zipInternalT, _subtreeT *> memo;
-		return zip(scp, where, memo);
-	}
+		const zipInternalT &where);
 
 	~_bdd()
 	{
@@ -234,7 +232,6 @@ public:
 	void sanity_check(bdd_ordering *ordering = NULL) const {
 		if (TIMEOUT)
 			return;
-		assert(_isLeaf == true || _isLeaf == false);
 		if (isLeaf()) {
 			_sanity_check(leaf());
 		} else {
@@ -352,11 +349,13 @@ class bdd_scope {
 		}
 	};
 	std::map<entry, t *> intern;
+	void normalise(IRExpr *cond, t *&, t *&);
 protected:
 	void runGc(HeapVisitor &hv);
 public:
 	t *makeInternal(IRExpr *a, t *, t *);
 	t *makeInternal(IRExpr *a, const bdd_rank &r, t *, t *);
+	t *internBdd(t *);
 	bdd_ordering *ordering;
 
 	bdd_scope(bdd_ordering *_ordering)
@@ -433,6 +432,7 @@ public:
 class bbdd : public const_bdd<bool, bbdd> {
 	friend class const_bdd_scope<bbdd>;
 	friend class bdd_scope<bbdd>;
+	friend class _bdd<bool, bbdd>;
 
 #ifdef NDEBUG
 	void _sanity_check(bool) const {}
@@ -488,6 +488,7 @@ public:
 class intbdd : public const_bdd<int, intbdd> {
 	friend class const_bdd_scope<intbdd>;
 	friend class bdd_scope<intbdd>;
+	friend class _bdd<int, intbdd>;
 	void _sanity_check(int) const {
 	}
 	void _prettyPrint(FILE *f, int k) const {
@@ -522,6 +523,7 @@ public:
 class smrbdd : public const_bdd<StateMachineRes, smrbdd> {
 	friend class const_bdd_scope<smrbdd>;
 	friend class bdd_scope<smrbdd>;
+	friend class _bdd<StateMachineRes, smrbdd>;
 #ifdef NDEBUG
 	void _sanity_check(StateMachineRes) const {}
 #else
@@ -579,6 +581,7 @@ public:
 private:
 	friend class bdd_scope<exprbdd>;
 	friend class exprbdd_scope;
+	friend class _bdd<IRExpr *, exprbdd>;
 
 	typedef _bdd<IRExpr *, exprbdd> parentT;
 
