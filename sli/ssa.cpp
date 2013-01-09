@@ -354,7 +354,7 @@ buildReplacement(SMScopes *scopes,
 }
 	
 static StateMachine *
-convertToSSA(SMScopes *scopes, StateMachine *inp)
+convertToSSA(SMScopes *scopes, StateMachine *inp, std::map<threadAndRegister, threadAndRegister> &correspondence)
 {
 	std::map<const StateMachineState *, int> labels;
 	if (debug_ssa_conversion) {
@@ -391,8 +391,11 @@ convertToSSA(SMScopes *scopes, StateMachine *inp)
 		const StateMachineSideEffect *se = it->first->sideEffect;
 		assert(se != NULL);
 		threadAndRegister tr(threadAndRegister::invalid());
-		if (se->definesRegister(tr))
+		if (se->definesRegister(tr)) {
 			subRegisters[tr].insert(it->second);
+			assert(!correspondence.count(it->second));
+			correspondence[it->second] = tr;
+		}
 	}
 
 	if (debug_ssa_conversion) {
@@ -458,9 +461,9 @@ convertToSSA(SMScopes *scopes, StateMachine *inp)
 }
 
 StateMachine *
-convertToSSA(SMScopes *scopes, StateMachine *inp)
+convertToSSA(SMScopes *scopes, StateMachine *inp, std::map<threadAndRegister, threadAndRegister> &correspondence)
 {
-	return SSA::convertToSSA(scopes, inp);
+	return SSA::convertToSSA(scopes, inp, correspondence);
 }
 
 StateMachineSideEffect *

@@ -1282,7 +1282,8 @@ buildCrossProductMachine(SMScopes *scopes,
 			 OracleInterface *oracle,
 			 MaiMap *&maiOut,
 			 int *next_fake_free_variable,
-			 const IRExprOptimisations &opt)
+			 const IRExprOptimisations &opt,
+			 std::map<threadAndRegister, threadAndRegister> &ssaCorrespondence)
 {
 	maiOut = maiIn.dupe();
 
@@ -1536,7 +1537,7 @@ buildCrossProductMachine(SMScopes *scopes,
 		if (!already_present)
 			cfg_roots.push_back(*it);
 	}
-        return convertToSSA(scopes, new StateMachine(crossMachineRoot, cfg_roots));
+        return convertToSSA(scopes, new StateMachine(crossMachineRoot, cfg_roots), ssaCorrespondence);
 }
 
 static StateMachine *
@@ -1598,6 +1599,24 @@ stripUninterpretableAnnotations(StateMachine *inp)
 	return new StateMachine(inp, newRoot);
 }
 
+static bbdd *
+deSsa(bbdd::scope *scope, bbdd *what, const std::map<threadAndRegister, threadAndRegister> &correspondence)
+{
+	struct : public IRExprTransformer {
+		const std::map<threadAndRegister, threadAndRegister> *correspondence;
+		IRExpr *transformIex(IRExprGet *ieg) {
+			auto it = correspondence->find(ieg->reg);
+			if (it == correspondence->end()) {
+				return ieg;
+			} else {
+				return IRExpr_Get(it->second, ieg->ty);
+			}
+		}
+	} doit;
+	doit.correspondence = &correspondence;
+	return doit.transform_bbdd(scope, what);
+}
+
 bbdd *
 crossProductSurvivalConstraint(SMScopes *scopes,
 			       const VexPtr<StateMachine, &ir_heap> &probeMachine,
@@ -1618,6 +1637,7 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 		    .enableassumeNoInterferingStores()
 		    .enablenoExtend();
 	VexPtr<MaiMap, &ir_heap> decode;
+	std::map<threadAndRegister, threadAndRegister> ssaCorrespondence;
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
 			scopes,
@@ -1627,7 +1647,8 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			oracle,
 			decode.get(),
 			&fake_cntr,
-			opt));
+			opt,
+			ssaCorrespondence));
 	crossProductMachine =
 		optimiseStateMachine(
 			scopes,
@@ -1638,7 +1659,7 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			true,
 			token);
 
-	return survivalConstraintIfExecutedAtomically(
+	bbdd *res_ssa = survivalConstraintIfExecutedAtomically(
 		scopes,
 		decode,
 		crossProductMachine,
@@ -1647,6 +1668,7 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 		true,
 		opt,
 		token);
+	return deSsa(&scopes->bools, res_ssa, ssaCorrespondence);
 }
 
 /* Transform @machine so that wherever it would previously branch to

@@ -923,7 +923,9 @@ considerStoreCFG(SMScopes *scopes,
 		false,
 		token);
 
-	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(scopes, sm));
+	std::map<threadAndRegister, threadAndRegister> ssaCorrespondence;
+	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(scopes, sm, ssaCorrespondence));
+	ssaCorrespondence.clear();
 	if (!sm_ssa || TIMEOUT)
 		return NULL;
 
@@ -1107,7 +1109,8 @@ buildProbeMachine(SMScopes *scopes,
 				  false,
 				  token);
 	
-	sm = convertToSSA(scopes, sm);
+	std::map<threadAndRegister, threadAndRegister> ssaCorrespondence;
+	sm = convertToSSA(scopes, sm, ssaCorrespondence);
 	if (TIMEOUT)
 		return NULL;
 	sm->sanityCheck(*mai);
