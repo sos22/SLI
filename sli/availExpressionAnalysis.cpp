@@ -273,7 +273,7 @@ avail_t::invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMach
 		{
 			if (expr->isLeaf())
 				return expr;
-			auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(expr, NULL));
+			auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(expr, (bbdd *)NULL));
 			auto it = it_did_insert.first;
 			auto did_insert = it_did_insert.second;
 			if (!did_insert)

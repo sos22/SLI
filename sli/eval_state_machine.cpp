@@ -422,7 +422,7 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *
 {
 	if (e->isLeaf())
 		return e;
-	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(e, NULL));
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(e, (bbdd *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert)
@@ -448,7 +448,7 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbd
 	if (e->isLeaf())
 		return exprbdd::var(&scopes->exprs, &scopes->bools,
 				    setTemporary(scopes, reg, e->leaf(), opt));
-	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(e, NULL));
+	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(e, (exprbdd *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert)

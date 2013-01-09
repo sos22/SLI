@@ -766,7 +766,7 @@ bbdd::invert(scope *scope, bbdd *a, std::map<bbdd *, bbdd *> &memo)
 	if (a->isLeaf())
 		return scope->cnst(!a->leaf());
 
-	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(a, NULL));
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(a, (bbdd *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert)
