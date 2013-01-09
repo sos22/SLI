@@ -957,7 +957,5 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 	/* Now use the scope to fully reduce it. */
 	newRoot = reduceBdd<scopeT, zipInternalT>(scope, reduced, newRoot);
 
-	newRoot->sanity_check(scope->ordering);
-
 	return newRoot;
 }
