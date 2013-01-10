@@ -1769,9 +1769,9 @@ top:
 			for (int idx1 = 0; idx1 < nr_arguments - 1; idx1++) {
 				for (int idx2 = idx1 + 1; idx2 < nr_arguments; ) {
 					if (isCnfSubset(contents[idx1], contents[idx2])) {
-						memcpy(contents + idx2,
-						       contents + idx2 + 1,
-						       sizeof(IRExpr *) * (nr_arguments - idx2 - 1));
+						memmove(contents + idx2,
+							contents + idx2 + 1,
+							sizeof(IRExpr *) * (nr_arguments - idx2 - 1));
 						nr_arguments--;
 						realloc = true;
 					} else {
@@ -1906,14 +1906,14 @@ top:
 							/* Careful: do the largest index first so that the
 							   other index remains valid. */
 							if (it1 < it2) {
-								memcpy(contents + it2,
-								       contents + it2 + 1,
-								       sizeof(IRExpr *) * (nr_arguments - 1 - it2));
+								memmove(contents + it2,
+									contents + it2 + 1,
+									sizeof(IRExpr *) * (nr_arguments - 1 - it2));
 								contents[it1] = result;
 							} else {
-								memcpy(contents + it1,
-								       contents + it1 + 1,
-								       sizeof(IRExpr *) * (nr_arguments - 1 - it1));
+								memmove(contents + it1,
+									contents + it1 + 1,
+									sizeof(IRExpr *) * (nr_arguments - 1 - it1));
 								contents[it2] = result;
 							}
 							nr_arguments--;
@@ -1958,9 +1958,6 @@ top:
 					break;
 				case Iop_And64:
 					res = IRExpr_Const_U64(0xfffffffffffffffful);
-					break;
-				case Iop_Or1:
-					res = IRExpr_Const_U1(0);
 					break;
 				default:
 					abort();
@@ -2498,45 +2495,52 @@ top:
 				auto *oldLeft = (IRExprAssociative *)l;
 				/* C + a == b -> C == b - a */
 				assert(oldLeft->nr_arguments > 1);
-				IRExpr *newArgs[oldLeft->nr_arguments];
+				IRExpr *newArgs[oldLeft->nr_arguments + 1];
 				int newNrArgs = 0;
+				newArgs[newNrArgs++] = r;
 				for (int it = 1; it < oldLeft->nr_arguments; it++)
 					newArgs[newNrArgs++] =
 						IRExpr_Unop(
 							(IROp)(Iop_Neg8 + oldLeft->op - Iop_Add8),
 							oldLeft->contents[it]);
 				IRExpr *cnst = oldLeft->contents[0];
-				if (cnst->tag != Iex_Const) {
-					IRExprConst *c = (IRExprConst *)cnst;
+                                if (cnst->tag != Iex_Const) {
 					switch (oldLeft->op) {
-					case Iop_Add8:
+                                        case Iop_Add8:
 						newArgs[newNrArgs++] =
-							IRExpr_Const_U8(-c->Ico.U8);
-						cnst = IRExpr_Const_U8(0);
-						break;
-					case Iop_Add16:
+							IRExpr_Unop(
+								Iop_Neg8,
+								cnst);
+                                                cnst = IRExpr_Const_U8(0);
+                                                break;
+                                        case Iop_Add16:
 						newArgs[newNrArgs++] =
-							IRExpr_Const_U16(-c->Ico.U16);
+							IRExpr_Unop(
+								Iop_Neg16,
+								cnst);
 						cnst = IRExpr_Const_U16(0);
-						break;
-					case Iop_Add32:
+                                                break;
+                                        case Iop_Add32:
 						newArgs[newNrArgs++] =
-							IRExpr_Const_U32(-c->Ico.U32);
-						cnst = IRExpr_Const_U32(0);
-						break;
-					case Iop_Add64:
+							IRExpr_Unop(
+								Iop_Neg32,
+								cnst);
+                                                cnst = IRExpr_Const_U32(0);
+                                                break;
+                                        case Iop_Add64:
 						newArgs[newNrArgs++] =
-							IRExpr_Const_U64(-c->Ico.U64);
-						cnst = IRExpr_Const_U64(0);
-						break;
-					default:
-						abort();
-					}
+							IRExpr_Unop(
+								Iop_Neg64,
+								cnst);
+                                                cnst = IRExpr_Const_U64(0);
+                                                break;
+                                        default:
+                                                abort();
+                                        }
 				}
-				IRExpr *newR =
-					IRExpr_Associative_Copy(oldLeft->op, newNrArgs, newArgs);
+				r = IRExpr_Associative_Copy(oldLeft->op, newNrArgs, newArgs);
+				r = optimiseIRExpr(r, opt);
 				l = cnst;
-				r = optimiseIRExpr(newR, opt);
 			}
 
 			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */

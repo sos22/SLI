@@ -680,7 +680,7 @@ anf_context::simplify(IRExpr *a)
 				nr_args_needed++;
 			}
 		}
-		IRExpr *newArgs[nr_args_needed + 1];
+		IRExpr *newArgs[nr_args_needed];
 		int newNrArgs = 0;
 		for (int i = 0; i < iea->nr_arguments; i++) {
 			IRExpr *arg = sub_context.simplify(iea->contents[i]);

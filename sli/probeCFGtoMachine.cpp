@@ -1310,10 +1310,10 @@ addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachine
 					&scopes->bools,
 					IRExpr_Associative_V(
 						Iop_Add64,
+						IRExpr_Const_U64(-delta),
 						IRExpr_Get(
 							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
 							Ity_I64),
-						IRExpr_Const_U64(-delta),
 						NULL))),
 			cursor);
 	}
@@ -1328,10 +1328,10 @@ addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachine
 					&scopes->bools,
 					IRExpr_Associative_V(
 						Iop_Add64,
+						IRExpr_Const_U64(-delta),
 						IRExpr_Get(
 							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
 							Ity_I64),
-						IRExpr_Const_U64(-delta),
 						NULL))),
 			cursor);
 	} else {

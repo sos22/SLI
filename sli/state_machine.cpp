@@ -54,6 +54,20 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		*done_something = true;
 		return trueTarget;
 	}
+
+	set_condition(simplifyBDD(&scopes->bools, condition, opt));
+	if (TIMEOUT)
+		return this;
+	if (condition->isLeaf()) {
+		*done_something = true;
+		if (condition->leaf())
+			return trueTarget->optimise(scopes, opt, done_something);
+		else
+			return falseTarget->optimise(scopes, opt, done_something);
+	}
+	trueTarget = trueTarget->optimise(scopes, opt, done_something);
+	falseTarget = falseTarget->optimise(scopes, opt, done_something);
+
 	if (trueTarget->type == StateMachineState::Terminal &&
 	    falseTarget->type == StateMachineState::Terminal) {
 		*done_something = true;
@@ -67,18 +81,6 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 			return this;
 		return new StateMachineTerminal(dbg_origin, n);
 	}
-	set_condition(simplifyBDD(&scopes->bools, condition, opt));
-	if (TIMEOUT)
-		return this;
-	if (condition->isLeaf()) {
-		*done_something = true;
-		if (condition->leaf())
-			return trueTarget->optimise(scopes, opt, done_something);
-		else
-			return falseTarget->optimise(scopes, opt, done_something);
-	}
-	trueTarget = trueTarget->optimise(scopes, opt, done_something);
-	falseTarget = falseTarget->optimise(scopes, opt, done_something);
 
 	if (falseTarget->type == StateMachineState::Bifurcate) {
 		StateMachineBifurcate *falseBifur = (StateMachineBifurcate *)falseTarget;
@@ -932,6 +934,19 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		target = ((StateMachineSideEffecting *)target)->target;
 	}
 
+	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
+	    target->type == StateMachineState::Terminal) {
+		StateMachineSideEffectAssertFalse *se = (StateMachineSideEffectAssertFalse *)sideEffect;
+		StateMachineTerminal *term = (StateMachineTerminal *)target;
+		*done_something = true;
+		return new StateMachineTerminal(
+			dbg_origin,
+			smrbdd::ifelse(
+				&scopes->smrs,
+				se->value,
+				scopes->smrs.cnst(smr_unreached),
+				term->res));
+	}
 	return this;
 }
 

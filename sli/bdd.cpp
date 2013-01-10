@@ -258,10 +258,10 @@ muxify(IRExpr *what)
 		}
 		if (i == iea->nr_arguments)
 			return what;
-		IRExpr **newArgs0 = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, iea->nr_arguments);
+		IRExpr **newArgs0 = alloc_irexpr_array(iea->nr_arguments);
 		memcpy(newArgs0, iea->contents, sizeof(iea->contents[0]) * iea->nr_arguments);
 		newArgs0[i] = ((IRExprMux0X *)a)->expr0;
-		IRExpr **newArgsX = (IRExpr **)__LibVEX_Alloc_Ptr_Array(&ir_heap, iea->nr_arguments);
+		IRExpr **newArgsX = alloc_irexpr_array(iea->nr_arguments);
 		memcpy(newArgsX, iea->contents, sizeof(iea->contents[0]) * iea->nr_arguments);
 		newArgsX[i] = ((IRExprMux0X *)a)->exprX;
 		IRExprAssociative *exp0 = IRExpr_Associative_Claim(iea->op, iea->nr_arguments, newArgs0);
@@ -470,8 +470,8 @@ quickSimplify(IRExpr *a)
 			a = new IRExprBinop(_ieb->op, arg1, arg2);
 	} else if (a->tag == Iex_Associative) {
 		IRExprAssociative *_iea = (IRExprAssociative *)a;
-		int nr_arguments = _iea->nr_arguments;
-		IROp op = _iea->op;
+		int const nr_arguments = _iea->nr_arguments;
+		IROp const op = _iea->op;
 		unsigned long mask;
 		unsigned long acc;
 		unsigned long defaultValue;
@@ -576,15 +576,15 @@ quickSimplify(IRExpr *a)
 				abort();
 			}
 		}
-		if (new_nr_args == 1 && acc == defaultValue) {
+		if (acc != defaultValue)
+			new_nr_args++;
+		if (new_nr_args == 1) {
 			for (int i = 0; i < nr_arguments; i++)
 				if (simpleArgs[i]->tag != Iex_Const)
 					return simpleArgs[i];
 			abort();
 		}
-		if (acc != defaultValue)
-			new_nr_args++;
-		if (new_nr_args == nr_arguments && !realloc)
+		if (!realloc && new_nr_args == nr_arguments)
 			return _iea;
 		IRExpr **newArgs = alloc_irexpr_array(new_nr_args);
 		int outIdx = 0;
