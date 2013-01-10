@@ -2493,14 +2493,14 @@ top:
 			    ((IRExprAssociative *)l)->op >= Iop_Add8 &&
 			    ((IRExprAssociative *)l)->op <= Iop_Add64) {
 				auto *oldLeft = (IRExprAssociative *)l;
-				/* C + a == C' + b -> C - C' == b - a */
+				/* C + a == b -> C == b - a */
 				assert(oldLeft->nr_arguments > 1);
 
-				IRExpr *newRightArgs[oldLeft->nr_arguments + 1];
+				IRExpr *newArgs[oldLeft->nr_arguments + 1];
 				int newNrArgs = 0;
-				newRightArgs[newNrArgs++] = r;
+				newArgs[newNrArgs++] = r;
 				for (int it = 1; it < oldLeft->nr_arguments; it++)
-					newRightArgs[newNrArgs++] =
+					newArgs[newNrArgs++] =
 						IRExpr_Unop(
 							(IROp)(Iop_Neg8 + oldLeft->op - Iop_Add8),
 							oldLeft->contents[it]);
@@ -2508,28 +2508,28 @@ top:
                                 if (cnst->tag != Iex_Const) {
 					switch (oldLeft->op) {
                                         case Iop_Add8:
-						newRightArgs[newNrArgs++] =
+						newArgs[newNrArgs++] =
 							IRExpr_Unop(
 								Iop_Neg8,
 								cnst);
                                                 cnst = IRExpr_Const_U8(0);
                                                 break;
                                         case Iop_Add16:
-						newRightArgs[newNrArgs++] =
+						newArgs[newNrArgs++] =
 							IRExpr_Unop(
 								Iop_Neg16,
 								cnst);
 						cnst = IRExpr_Const_U16(0);
                                                 break;
                                         case Iop_Add32:
-						newRightArgs[newNrArgs++] =
+						newArgs[newNrArgs++] =
 							IRExpr_Unop(
 								Iop_Neg32,
 								cnst);
                                                 cnst = IRExpr_Const_U32(0);
                                                 break;
                                         case Iop_Add64:
-						newRightArgs[newNrArgs++] =
+						newArgs[newNrArgs++] =
 							IRExpr_Unop(
 								Iop_Neg64,
 								cnst);
@@ -2539,7 +2539,7 @@ top:
                                                 abort();
                                         }
 				}
-				r = IRExpr_Associative_Copy(oldLeft->op, newNrArgs, newRightArgs);
+				r = IRExpr_Associative_Copy(oldLeft->op, newNrArgs, newArgs);
 				r = optimiseIRExpr(r, opt);
 				l = cnst;
 			}
