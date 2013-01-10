@@ -147,7 +147,14 @@ public:
 		: failed(_failed)
 	{}
 	bool isLeaf() const {
-		return failed || table.size() <= 1;
+		if (failed || table.size() == 0)
+			return true;
+		bool allValuesSame = true;
+		auto it = table.begin();
+		subtreeT *v = it.value();
+		for (it.advance(); allValuesSame && !it.finished(); it.advance())
+			allValuesSame &= it.value() == v;
+		return allValuesSame;
 	}
 	subtreeT *leafzip() const {
 		if (failed)
