@@ -279,6 +279,7 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 				/* Need a label */
 				labels[l] = nextLabel;
 				nextLabel++;
+				continue;
 			}
 			seen.insert(l);
 			if (!l->isLeaf()) {
