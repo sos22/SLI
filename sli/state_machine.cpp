@@ -934,7 +934,8 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		target = ((StateMachineSideEffecting *)target)->target;
 	}
 
-	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
+	if (sideEffect &&
+	    sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    target->type == StateMachineState::Terminal) {
 		StateMachineSideEffectAssertFalse *se = (StateMachineSideEffectAssertFalse *)sideEffect;
 		StateMachineTerminal *term = (StateMachineTerminal *)target;
