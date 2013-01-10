@@ -799,6 +799,15 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 	case StateMachineSideEffect::ImportRegister: {
 		StateMachineSideEffectImportRegister *p =
 			(StateMachineSideEffectImportRegister *)smse;
+		threadAndRegister tr(threadAndRegister::reg(p->tid, p->vex_offset, -1));
+		state.set_register(scopes,
+				   p->reg,
+				   exprbdd::var(
+					   &scopes->exprs,
+					   &scopes->bools,
+					   IRExpr_Get(tr, Ity_I64)),
+				   &pathConstraint,
+				   opt);
 		/* The only use we make of a PointerAliasing side
 		   effect is to say that things which aliasing says
 		   are definitely valid pointers really are definitely
@@ -809,7 +818,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			    scopes,
 			    bbdd::var(&scopes->bools, IRExpr_Unop(
 					      Iop_BadPtr,
-					      IRExpr_Get(p->reg, Ity_I64))),
+					      IRExpr_Get(tr, Ity_I64))),
 			    chooser,
 			    opt)) {
 			return esme_escape;
