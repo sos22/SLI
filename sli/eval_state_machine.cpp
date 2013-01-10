@@ -769,7 +769,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
 		if (expressionIsTrue(
 			    scopes,
-			    smseaf->value,
+			    state.specialiseIRExpr(scopes, smseaf->value),
 			    chooser,
 			    opt)) {
 			if (smseaf->reflectsActualProgram)
