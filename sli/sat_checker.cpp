@@ -992,7 +992,6 @@ setVariable(IRExpr *expression, IRExpr *variable, bool value)
 					assert(c->Ico.U1 == identity);
 					t = true;
 				} else {
-					t |= newArgs[outIdx] != e->contents[inIdx];
 					outIdx++;
 				}
 			}

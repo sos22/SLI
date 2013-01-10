@@ -2495,7 +2495,6 @@ top:
 				auto *oldLeft = (IRExprAssociative *)l;
 				/* C + a == b -> C == b - a */
 				assert(oldLeft->nr_arguments > 1);
-
 				IRExpr *newArgs[oldLeft->nr_arguments + 1];
 				int newNrArgs = 0;
 				newArgs[newNrArgs++] = r;

@@ -54,6 +54,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		*done_something = true;
 		return trueTarget;
 	}
+
 	set_condition(simplifyBDD(&scopes->bools, condition, opt));
 	if (TIMEOUT)
 		return this;
