@@ -2035,20 +2035,19 @@ importRegisters(StateMachineState *root)
 	return root;
 }
 
-static void
-assignMais(MemoryAccessIdentifier &ident, int tid, MaiMap &mm)
+static MemoryAccessIdentifier
+assignMais(const MemoryAccessIdentifier &ident, int tid, MaiMap &mm)
 {
 	const CFGNode *node =
 		(const CFGNode *)((unsigned long)(unsigned)ident.tid |
 				  ((unsigned long)ident.id << 32));
-	ident = mm(tid, node);
+	return mm(tid, node);
 }
 struct assignMaiTransformer : public IRExprTransformer {
 	int tid;
 	MaiMap &mm;
 	IRExpr *transformIex(IRExprFreeVariable *fv) {
-		assignMais(*(MemoryAccessIdentifier *)&fv->id, tid, mm);
-		return fv;
+		return IRExpr_FreeVariable(assignMais(fv->id, tid, mm), fv->ty, fv->isUnique);
 	}
 	IRExpr *transformIex(IRExprHappensBefore *) {
 		abort();
@@ -2075,54 +2074,59 @@ assignMais(SMScopes *scopes, exprbdd *cond, int tid, MaiMap &mm)
 	assignMaiTransformer doit(tid, mm);
 	return doit.transform_exprbdd(&scopes->bools, &scopes->exprs, cond);
 }
-/* This is allowed to cast away the consts because it's effectively
-   part of building the machine. */
-static void
+static StateMachineSideEffect *
 assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 {
 	if (!se)
-		return;
+		return NULL;
 	switch (se->type) {
 	case StateMachineSideEffect::Load: {
 		auto l = (StateMachineSideEffectLoad *)se;
-		*(exprbdd **)&l->addr = assignMais(scopes, l->addr, tid, mm);
-		assignMais(*(MemoryAccessIdentifier *)&l->rip, tid, mm);
-		return;
+		return new StateMachineSideEffectLoad(
+			l->target,
+			assignMais(scopes, l->addr, tid, mm),
+			assignMais(l->rip, tid, mm),
+			l->type, l->tag);
 	}
 	case StateMachineSideEffect::Store: {
 		auto l = (StateMachineSideEffectStore *)se;
-		*(exprbdd **)&l->addr = assignMais(scopes, l->addr, tid, mm);
-		*(exprbdd **)&l->data = assignMais(scopes, l->data, tid, mm);
-		assignMais(*(MemoryAccessIdentifier *)&l->rip, tid, mm);
-		return;
+		return new StateMachineSideEffectStore(
+			assignMais(scopes, l->addr, tid, mm),
+			assignMais(scopes, l->data, tid, mm),
+			assignMais(l->rip, tid, mm),
+			l->tag);
 	}
 	case StateMachineSideEffect::Copy: {
 		auto l = (StateMachineSideEffectCopy *)se;
-		*(exprbdd **)&l->value = assignMais(scopes, l->value, tid, mm);
-		return;
+		return new StateMachineSideEffectCopy(
+			l,
+			assignMais(scopes, l->value, tid, mm));
 	}
 	case StateMachineSideEffect::AssertFalse: {
 		auto l = (StateMachineSideEffectAssertFalse *)se;
-		*(bbdd **)&l->value = assignMais(scopes, l->value, tid, mm);
-		return;
+		return new StateMachineSideEffectAssertFalse(
+			l,
+			assignMais(scopes, l->value, tid, mm));
 	}
 	case StateMachineSideEffect::Unreached:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
 	case StateMachineSideEffect::ImportRegister:
 	case StateMachineSideEffect::StackLayout:
-		return;
+		return se;
 	case StateMachineSideEffect::Phi:
 		abort();
 	case StateMachineSideEffect::StartFunction: {
 		auto l = (StateMachineSideEffectStartFunction *)se;
-		*(exprbdd **)&l->rsp = assignMais(scopes, l->rsp, tid, mm);
-		return;
+		return new StateMachineSideEffectStartFunction(
+			l,
+			assignMais(scopes, l->rsp, tid, mm));
 	}
 	case StateMachineSideEffect::EndFunction: {
 		auto l = (StateMachineSideEffectEndFunction *)se;
-		*(exprbdd **)&l->rsp = assignMais(scopes, l->rsp, tid, mm);
-		return;
+		return new StateMachineSideEffectEndFunction(
+			l,
+			assignMais(scopes, l->rsp, tid, mm));
 	}
 	}
 	abort();
@@ -2131,17 +2135,21 @@ static void
 assignMais(SMScopes *scopes, StateMachineState *s, int tid, MaiMap &mm)
 {
 	switch (s->type) {
-	case StateMachineState::Bifurcate:
-		((StateMachineBifurcate *)s)->set_condition(
-			assignMais(scopes, ((StateMachineBifurcate *)s)->condition, tid, mm));
+	case StateMachineState::Bifurcate: {
+		auto smb = (StateMachineBifurcate *)s;
+		smb->set_condition(assignMais(scopes, smb->condition, tid, mm));
 		return;
-	case StateMachineState::Terminal:
-		((StateMachineTerminal *)s)->set_res(
-			assignMais(scopes, ((StateMachineTerminal *)s)->res, tid, mm));
+	}
+	case StateMachineState::Terminal: {
+		auto smt = (StateMachineTerminal *)s;
+		smt->set_res(assignMais(scopes, smt->res, tid, mm));
 		return;
-	case StateMachineState::SideEffecting:
-		assignMais(scopes, ((StateMachineSideEffecting *)s)->sideEffect, tid, mm);
+	}
+	case StateMachineState::SideEffecting: {
+		auto se = (StateMachineSideEffecting *)s;
+		se->sideEffect = assignMais(scopes, se->sideEffect, tid, mm);
 		return;
+	}
 	}
 	abort();
 }
