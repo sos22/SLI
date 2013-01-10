@@ -808,7 +808,7 @@ _bdd<constT, subtreeT>::reduceBdd(scopeT *scope, std::map<subtreeT *, subtreeT *
 	start->unsafe_internal().falseBranch = reduceBdd<scopeT, zipInternalT>(scope, reduced, start->internal().falseBranch);
 	subtreeT *fixed = zipInternalT::fixup(start);
 	if (fixed != start) {
-		if (!fixed->isLeaf())
+		if (!zipInternalT::badPtr(fixed) && !fixed->isLeaf())
 			it->second = scope->internBdd(fixed);
 		else
 			it->second = fixed;
