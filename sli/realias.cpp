@@ -772,8 +772,7 @@ mightLoadInitialValue(StateMachineSideEffecting *smse,
 		if (s == smse)
 			return true;
 		if (s->getSideEffect() &&
-		    (s->getSideEffect()->type == StateMachineSideEffect::Store ||
-		     s->getSideEffect()->type == StateMachineSideEffect::Load)) {
+		    s->getSideEffect()->type == StateMachineSideEffect::Store) {
 			StateMachineSideEffectMemoryAccess *store = (StateMachineSideEffectMemoryAccess *)s->getSideEffect();
 			/* Note that checking the oracle is
 			   *mandatory* here.  Otherwise, when the
