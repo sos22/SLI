@@ -258,14 +258,14 @@ muxify(IRExpr *what)
 		}
 		if (i == iea->nr_arguments)
 			return what;
-		IRExpr *newArgs0[iea->nr_arguments];
+		IRExpr **newArgs0 = alloc_irexpr_array(iea->nr_arguments);
 		memcpy(newArgs0, iea->contents, sizeof(iea->contents[0]) * iea->nr_arguments);
 		newArgs0[i] = ((IRExprMux0X *)a)->expr0;
-		IRExpr *newArgsX[iea->nr_arguments];
+		IRExpr **newArgsX = alloc_irexpr_array(iea->nr_arguments);
 		memcpy(newArgsX, iea->contents, sizeof(iea->contents[0]) * iea->nr_arguments);
 		newArgsX[i] = ((IRExprMux0X *)a)->exprX;
-		IRExprAssociative *exp0 = IRExpr_Associative_Copy(iea->op, iea->nr_arguments, newArgs0);
-		IRExprAssociative *expX = IRExpr_Associative_Copy(iea->op, iea->nr_arguments, newArgsX);
+		IRExprAssociative *exp0 = IRExpr_Associative_Claim(iea->op, iea->nr_arguments, newArgs0);
+		IRExprAssociative *expX = IRExpr_Associative_Claim(iea->op, iea->nr_arguments, newArgsX);
 		return muxify(
 			IRExpr_Mux0X(
 				((IRExprMux0X *)a)->cond,
