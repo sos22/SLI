@@ -823,6 +823,9 @@ template <typename constT, typename subtreeT> template <typename scopeT, typenam
 subtreeT *
 _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 {
+	if (TIMEOUT)
+		return NULL;
+
 	if (rootZip.isLeaf())
 		return rootZip.leafzip();
 
