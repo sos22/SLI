@@ -932,6 +932,19 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		target = ((StateMachineSideEffecting *)target)->target;
 	}
 
+	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
+	    target->type == StateMachineState::Terminal) {
+		StateMachineSideEffectAssertFalse *se = (StateMachineSideEffectAssertFalse *)sideEffect;
+		StateMachineTerminal *term = (StateMachineTerminal *)target;
+		*done_something = true;
+		return new StateMachineTerminal(
+			dbg_origin,
+			smrbdd::ifelse(
+				&scopes->smrs,
+				se->value,
+				scopes->smrs.cnst(smr_unreached),
+				term->res));
+	}
 	return this;
 }
 
