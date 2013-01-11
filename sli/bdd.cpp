@@ -308,7 +308,8 @@ quickSimplify(IRExpr *a)
 {
 	if (a->optimisationsApplied)
 		return a;
-	if (a->tag == Iex_Unop) {
+	switch (a->tag) {
+	case Iex_Unop: {
 		IRExprUnop *au = (IRExprUnop *)a;
 		auto arg = quickSimplify(au->arg);
 		if (arg->tag != Iex_Const) {
@@ -393,7 +394,9 @@ quickSimplify(IRExpr *a)
 		default:
 			abort();
 		}
-	} else if (a->tag == Iex_Binop) {
+		break;
+	}
+	case Iex_Binop: {
 		IRExprBinop *_ieb = (IRExprBinop *)a;
 		auto arg1 = quickSimplify(_ieb->arg1);
 		auto arg2 = quickSimplify(_ieb->arg2);
@@ -485,7 +488,9 @@ quickSimplify(IRExpr *a)
 		}
 		if (arg1 != _ieb->arg1 || arg2 != _ieb->arg2)
 			a = new IRExprBinop(_ieb->op, arg1, arg2);
-	} else if (a->tag == Iex_Associative) {
+		break;
+	}
+	case Iex_Associative: {
 		IRExprAssociative *_iea = (IRExprAssociative *)a;
 		int const nr_arguments = _iea->nr_arguments;
 		IROp const op = _iea->op;
@@ -644,7 +649,9 @@ quickSimplify(IRExpr *a)
 		}
 		assert(outIdx == new_nr_args);
 		a = IRExpr_Associative_Claim(op, new_nr_args, newArgs);
-	} else if (a->tag == Iex_Mux0X) {
+		break;
+	}
+	case Iex_Mux0X: {
 		IRExprMux0X *m = (IRExprMux0X *)a;
 		auto cond = quickSimplify(m->cond);
 		auto expr0 = quickSimplify(m->expr0);
@@ -652,6 +659,62 @@ quickSimplify(IRExpr *a)
 		if (cond != m->cond || expr0 != m->expr0 ||
 		    exprX != m->exprX)
 			a = new IRExprMux0X(cond, expr0, exprX);
+		break;
+	}
+	case Iex_Load: {
+		IRExprLoad *l = (IRExprLoad *)a;
+		auto addr = quickSimplify(l->addr);
+		if (addr != l->addr)
+			a = new IRExprLoad(l->ty, addr);
+		break;
+	}
+	case Iex_Get:
+	case Iex_GetI:
+	case Iex_Const:
+	case Iex_HappensBefore:
+	case Iex_FreeVariable:
+	case Iex_EntryPoint:
+	case Iex_ControlFlow:
+		break;
+	case Iex_Qop: {
+		IRExprQop *q = (IRExprQop *)a;
+		auto a1 = quickSimplify(q->arg1);
+		auto a2 = quickSimplify(q->arg2);
+		auto a3 = quickSimplify(q->arg3);
+		auto a4 = quickSimplify(q->arg4);
+		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3 || a4 != q->arg4)
+			a = new IRExprQop(q->op, a1, a2, a3, a4);
+		break;
+	}
+	case Iex_Triop: {
+		IRExprTriop *q = (IRExprTriop *)a;
+		auto a1 = quickSimplify(q->arg1);
+		auto a2 = quickSimplify(q->arg2);
+		auto a3 = quickSimplify(q->arg3);
+		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3)
+			a = new IRExprTriop(q->op, a1, a2, a3);
+		break;
+	}
+	case Iex_CCall: {
+		auto c = (IRExprCCall *)a;
+		int nr_args;
+		for (nr_args = 0; c->args[nr_args]; nr_args++)
+			;
+		IRExpr *newArgs[nr_args + 1];
+		newArgs[nr_args] = NULL;
+		bool realloc = false;
+		for (int i = 0; i < nr_args; i++) {
+			newArgs[i] = quickSimplify(c->args[i]);
+			if (newArgs[i] != c->args[i])
+				realloc = true;
+		}
+		if (realloc) {
+			IRExpr **n = alloc_irexpr_array(nr_args+1);
+			memcpy(n, newArgs, (nr_args+1) * sizeof(IRExpr *));
+			a = IRExpr_CCall(c->cee, c->retty, n);
+		}
+		break;
+	}
 	}
 	return a;
 }
