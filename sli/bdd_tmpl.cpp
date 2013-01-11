@@ -970,3 +970,44 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 
 	return newRoot;
 }
+
+/* ``Restructuring'' zips are used for things which are a bit more
+   involved than ordinary zips, so that we can't do the breadth-first
+   trick.  The canonical example is transforming the leaves of an
+   exprbdd, which can end up getting to the leaves and then
+   discovering that there was something involved we should have done
+   much earlier on. */
+template <typename leafT, typename subtreeT> template <typename scopeT, typename bscopeT, typename zipT> subtreeT *
+_bdd<leafT, subtreeT>::restructure_zip(scopeT *scope, bscopeT *bscope, const zipT &what, std::map<zipT, subtreeT *> &memo)
+{
+	if (TIMEOUT)
+		return NULL;
+	auto it_did_insert = memo.insert(std::pair<zipT, subtreeT *>(what, (subtreeT *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		if (what.isLeaf()) {
+			it->second = what.leaf(scope, bscope);
+		} else {
+			bbdd *cond = bscope->makeInternal(what.condition(),
+							  what.rank(),
+							  bscope->cnst(true),
+							  bscope->cnst(false));
+			if (cond) {
+				subtreeT *t = restructure_zip(scope, bscope, what.trueBranch(), memo);
+				if (t) {
+					subtreeT *f = restructure_zip(scope, bscope, what.falseBranch(), memo);
+					if (f)
+						it->second = ifelse(scope, cond, t, f);
+				}
+			}
+		}
+	}
+	return it->second;
+}
+template <typename leafT, typename subtreeT> template <typename scopeT, typename bscopeT, typename zipT> subtreeT *
+_bdd<leafT, subtreeT>::restructure_zip(scopeT *scope, bscopeT *bscope, const zipT &root)
+{
+	std::map<zipT, subtreeT *> memo;
+	return restructure_zip(scope, bscope, root, memo);
+}

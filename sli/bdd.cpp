@@ -1020,212 +1020,170 @@ exprbdd_scope::runGc(HeapVisitor &hv)
 	bdd_scope<exprbdd>::runGc(hv);
 }
 
-exprbdd *
-exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what, std::map<exprbdd *, exprbdd *> &memo)
-{
-	if (TIMEOUT)
-		return NULL;
-	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(what, (exprbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert) {
-		if (what->isLeaf()) {
-			it->second = var(
-				scope,
-				bscope,
-				IRExpr_Unop(op, what->leaf()));
-		} else {
-			bbdd *cond =
-				bscope->makeInternal(what->internal().condition,
-						     what->internal().rank,
-						     bscope->cnst(true),
-						     bscope->cnst(false));
-			exprbdd *l = unop(scope, bscope, op, what->internal().trueBranch, memo);
-			exprbdd *r = unop(scope, bscope, op, what->internal().falseBranch, memo);
-			if (l && r && cond)
-				it->second = ifelse(scope, cond, l, r);
-			else
-				assert(TIMEOUT);
-		}
+class unop_zipper {
+	IROp op;
+	exprbdd *what;
+public:
+	unop_zipper(IROp _op, exprbdd *_what)
+		: op(_op), what(_what)
+	{}
+	bool isLeaf() const { return what->isLeaf(); }
+	exprbdd *leaf(exprbdd::scope *scope,
+		      bbdd::scope *bscope) const {
+		return exprbdd::var(
+			scope,
+			bscope,
+			IRExpr_Unop(op, what->leaf()));
 	}
-	return it->second;
-}
-
+	IRExpr *condition() const {
+		return what->internal().condition;
+	}
+	const bdd_rank &rank() const {
+		return what->internal().rank;
+	}
+	unop_zipper trueBranch() const {
+		return unop_zipper(op, what->internal().trueBranch);
+	}
+	unop_zipper falseBranch() const {
+		return unop_zipper(op, what->internal().falseBranch);
+	}
+	bool operator<(const unop_zipper &o) const {
+		if (what < o.what)
+			return true;
+		if (what > o.what)
+			return false;
+		return op < o.op;
+	}
+};
 exprbdd *
 exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 {
-	std::map<exprbdd *, exprbdd *> memo;
-	return unop(scope, bscope, op, what, memo);
+	return exprbdd::restructure_zip(scope, bscope, unop_zipper(op, what));
 }
 
-exprbdd *
-exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, IRExpr *a, exprbdd *b, std::map<std::pair<IRExpr *, exprbdd *>, exprbdd *> &memo)
-{
-	if (TIMEOUT)
-		return NULL;
-	auto it_did_insert = memo.insert(std::pair<std::pair<IRExpr *, exprbdd *>, exprbdd *>(std::pair<IRExpr *, exprbdd *>(a, b), (exprbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert) {
-		if (b->isLeaf()) {
-			it->second = var(
-				scope,
-				bscope,
-				IRExpr_Binop(op, a, b->leaf()));
-		} else {
-			bbdd *cond =
-				bscope->makeInternal(b->internal().condition,
-						     b->internal().rank,
-						     bscope->cnst(true),
-						     bscope->cnst(false));
-			exprbdd *l = binop(scope, bscope, op, a, b->internal().trueBranch, memo);
-			exprbdd *r = binop(scope, bscope, op, a, b->internal().falseBranch, memo);
-			if (l && r && cond)
-				it->second = ifelse(scope, cond, l, r);
-			else
-				assert(TIMEOUT);
-		}
+class binop_zip {
+	IROp op;
+	exprbdd *a;
+	exprbdd *b;
+public:
+	binop_zip(IROp _op, exprbdd *_a, exprbdd *_b)
+		: op(_op), a(_a), b(_b)
+	{}
+	bool isLeaf() const {
+		return a->isLeaf() && b->isLeaf();
 	}
-	return it->second;
-}
-
-exprbdd *
-exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, IRExpr *b, std::map<std::pair<exprbdd *, IRExpr *>, exprbdd *> &memo)
-{
-	if (TIMEOUT)
-		return NULL;
-	auto it_did_insert = memo.insert(std::pair<std::pair<exprbdd *, IRExpr *>, exprbdd *>(std::pair<exprbdd *, IRExpr *>(a, b), (exprbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert) {
+	exprbdd *leaf(exprbdd::scope *scope, bbdd::scope *bscope) const {
+		return exprbdd::var(scope, bscope, IRExpr_Binop(op, a->leaf(), b->leaf()));
+	}
+	IRExpr *condition() const {
 		if (a->isLeaf()) {
-			it->second = var(
-				scope,
-				bscope,
-				IRExpr_Binop(op, a->leaf(), b));
-		} else {
-			bbdd *cond =
-				bscope->makeInternal(a->internal().condition,
-						     a->internal().rank,
-						     bscope->cnst(true),
-						     bscope->cnst(false));
-			exprbdd *l = binop(scope, bscope, op, a->internal().trueBranch, b, memo);
-			exprbdd *r = binop(scope, bscope, op, a->internal().falseBranch, b, memo);
-			if (l && r && cond)
-				it->second = ifelse(scope, cond, l, r);
-			else
-				assert(TIMEOUT);
-		}
-	}
-	return it->second;
-}
-
-exprbdd *
-exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b,
-	       binop_memo &memo)
-{
-	if (TIMEOUT)
-		return NULL;
-	auto it_did_insert = memo.bb.insert(
-		std::pair<std::pair<exprbdd *, exprbdd *>, exprbdd *>(
-			std::pair<exprbdd *, exprbdd *>(a, b),
-			(exprbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert) {
-		if (a->isLeaf() && b->isLeaf()) {
-			it->second = var(
-				scope,
-				bscope,
-				IRExpr_Binop(op, a->leaf(), b->leaf()));
-		} else if (a->isLeaf()) {
-			it->second = binop(scope, bscope, op, a->leaf(), b, memo.ib);
+			assert(!b->isLeaf());
+			return b->internal().condition;
 		} else if (b->isLeaf()) {
-			it->second = binop(scope, bscope, op, a, b->leaf(), memo.bi);
-		} else if (a->internal().rank < b->internal().rank) {
-			bbdd *cond =
-				bscope->makeInternal(a->internal().condition,
-						     a->internal().rank,
-						     bscope->cnst(true),
-						     bscope->cnst(false));
-			exprbdd *l = binop(scope, bscope, op, a->internal().trueBranch, b, memo);
-			exprbdd *r = binop(scope, bscope, op, a->internal().falseBranch, b, memo);
-			if (l && r && cond)
-				it->second = ifelse(scope, cond, l, r);
-			else
-				assert(TIMEOUT);
-		} else if (a->internal().rank == b->internal().rank) {
-			bbdd *cond =
-				bscope->makeInternal(a->internal().condition,
-						     a->internal().rank,
-						     bscope->cnst(true),
-						     bscope->cnst(false));
-			exprbdd *l = binop(scope, bscope, op, a->internal().trueBranch, b->internal().trueBranch, memo);
-			exprbdd *r = binop(scope, bscope, op, a->internal().falseBranch, b->internal().falseBranch, memo);
-			if (l && r && cond)
-				it->second = ifelse(scope, cond, l, r);
-			else
-				assert(TIMEOUT);
+			return a->internal().condition;
+		} else if (a->internal().rank <= b->internal().rank) {
+			return a->internal().condition;
 		} else {
-			bbdd *cond =
-				bscope->makeInternal(b->internal().condition,
-						     b->internal().rank,
-						     bscope->cnst(true),
-						     bscope->cnst(false));
-			exprbdd *l = binop(scope, bscope, op, a, b->internal().trueBranch, memo);
-			exprbdd *r = binop(scope, bscope, op, a, b->internal().falseBranch, memo);
-			if (l && r && cond)
-				it->second = ifelse(scope, cond, l, r);
-			else
-				assert(TIMEOUT);
+			return b->internal().condition;
 		}
 	}
-	return it->second;
-}
-
+	const bdd_rank &rank() const {
+		if (a->isLeaf()) {
+			assert(!b->isLeaf());
+			return b->internal().rank;
+		} else if (b->isLeaf()) {
+			return a->internal().rank;
+		} else if (a->internal().rank <= b->internal().rank) {
+			return a->internal().rank;
+		} else {
+			return b->internal().rank;
+		}
+	}
+	binop_zip trueBranch() const {
+		if (a->isLeaf()) {
+			assert(!b->isLeaf());
+			return binop_zip(op, a, b->internal().trueBranch);
+		} else if (b->isLeaf()) {
+			return binop_zip(op, a->internal().trueBranch, b);
+		} else if (a->internal().rank < b->internal().rank) {
+			return binop_zip(op, a->internal().trueBranch, b);
+		} else if (a->internal().rank == b->internal().rank) {
+			return binop_zip(op, a->internal().trueBranch, b->internal().trueBranch);
+		} else {
+			return binop_zip(op, a, b->internal().trueBranch);
+		}
+	}
+	binop_zip falseBranch() const {
+		if (a->isLeaf()) {
+			assert(!b->isLeaf());
+			return binop_zip(op, a, b->internal().falseBranch);
+		} else if (b->isLeaf()) {
+			return binop_zip(op, a->internal().falseBranch, b);
+		} else if (a->internal().rank < b->internal().rank) {
+			return binop_zip(op, a->internal().falseBranch, b);
+		} else if (a->internal().rank == b->internal().rank) {
+			return binop_zip(op, a->internal().falseBranch, b->internal().falseBranch);
+		} else {
+			return binop_zip(op, a, b->internal().falseBranch);
+		}
+	}
+	bool operator<(const binop_zip &o) const {
+		if (a < o.a)
+			return true;
+		if (a > o.a)
+			return false;
+		if (b < o.b)
+			return true;
+		if (b > o.b)
+			return false;
+		return op < o.op;
+	}
+};
 exprbdd *
 exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b)
 {
-	binop_memo memo;
-	return binop(scope, bscope, op, a, b, memo);
+	return restructure_zip(scope, bscope, binop_zip(op, a, b));
 }
 
-exprbdd *
-exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *what, std::map<exprbdd *, exprbdd *> &memo)
-{
-	if (TIMEOUT)
-		return NULL;
-	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(what, (exprbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert) {
-		if (what->isLeaf()) {
-			it->second = var(
-				scope,
-				bscope,
-				IRExpr_Load(ty, what->leaf()));
-		} else {
-			bbdd *cond =
-				bscope->makeInternal(what->internal().condition,
-						     what->internal().rank,
-						     bscope->cnst(true),
-						     bscope->cnst(false));
-			exprbdd *l = load(scope, bscope, ty, what->internal().trueBranch, memo);
-			exprbdd *r = load(scope, bscope, ty, what->internal().falseBranch, memo);
-			if (l && r && cond)
-				it->second = ifelse(scope, cond, l, r);
-			else
-				assert(TIMEOUT);
-		}
+class load_zipper {
+	IRType ty;
+	exprbdd *what;
+public:
+	load_zipper(IRType _ty, exprbdd *_what)
+		: ty(_ty), what(_what)
+	{}
+	bool isLeaf() const { return what->isLeaf(); }
+	exprbdd *leaf(exprbdd::scope *scope,
+		      bbdd::scope *bscope) const {
+		return exprbdd::var(
+			scope,
+			bscope,
+			IRExpr_Load(ty, what->leaf()));
 	}
-	return it->second;
-}
-
+	IRExpr *condition() const {
+		return what->internal().condition;
+	}
+	const bdd_rank &rank() const {
+		return what->internal().rank;
+	}
+	load_zipper trueBranch() const {
+		return load_zipper(ty, what->internal().trueBranch);
+	}
+	load_zipper falseBranch() const {
+		return load_zipper(ty, what->internal().falseBranch);
+	}
+	bool operator<(const load_zipper &o) const {
+		if (what < o.what)
+			return true;
+		if (what > o.what)
+			return false;
+		return ty < o.ty;
+	}
+};
 exprbdd *
 exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *what)
 {
-	std::map<exprbdd *, exprbdd *> memo;
-	return load(scope, bscope, ty, what, memo);
+	return restructure_zip(scope, bscope, load_zipper(ty, what));
 }
 
 exprbdd *
