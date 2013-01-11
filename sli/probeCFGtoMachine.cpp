@@ -2269,6 +2269,8 @@ probeCFGsToMachine(SMScopes *scopes,
 
 	StateMachineState *root = entryState(scopes, VexRip(), roots_this_sm2, tid, false);
 	root = importRegisters(root);
+	if (TIMEOUT)
+		return NULL;
 	setMais(scopes, root, tid, mai);
 	return new StateMachine(root, cfg_roots_this_sm);
 }
@@ -2307,6 +2309,8 @@ storeCFGsToMachine(SMScopes *scopes,
 	sm_roots.insert(s);
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	assignFrameIds(sm_roots, tid, entryStacks);
+	if (TIMEOUT)
+		return NULL;
 	setMais(scopes, s, tid, mai);
 	s = addEntrySideEffects(
 		scopes,
