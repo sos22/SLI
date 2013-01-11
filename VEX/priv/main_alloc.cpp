@@ -445,7 +445,7 @@ alloc_bytes(Heap *h, VexAllocType *type, unsigned long size)
 
 static VexAllocType byte_alloc_type = { -1, NULL, NULL, NULL, "<bytes>" };
 void *
-__LibVEX_Alloc_Bytes(Heap *h, unsigned long nbytes, struct libvex_allocation_site *)
+LibVEX_Alloc_Bytes(Heap *h, unsigned long nbytes)
 {
 	return alloc_bytes(h, &byte_alloc_type, nbytes);
 }
@@ -762,7 +762,7 @@ vex_vasprintf(const char *fmt, va_list args)
 	char *r;
 	int x = vasprintf(&r, fmt, args);
 
-	char *r2 = (char *)LibVEX_Alloc_Bytes(x + 1);
+	char *r2 = (char *)LibVEX_Alloc_Bytes(&main_heap, x + 1);
 	memcpy(r2, r, x + 1);
 	free(r);
 	return r2;

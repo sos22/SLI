@@ -116,13 +116,6 @@ typedef
    }
    VexAllocType;
 
-struct libvex_allocation_site {
-	unsigned long nr_bytes;
-	const char *file;
-	unsigned line;
-	unsigned flags;
-};
-
 struct libvex_alloc_type;
 
 void assert_gc_allocated(const void *ptr);
@@ -136,15 +129,8 @@ __LibVEX_free(const GarbageCollected<t, h> *, void *ptr)
 }
 #define LibVEX_free(x) __LibVEX_free((x), (x))
 
-extern void *__LibVEX_Alloc_Bytes(Heap *h,
-				  unsigned long nbytes,
-				  struct libvex_allocation_site *las);
-#define LibVEX_Alloc_Bytes(_n)						\
-	({								\
-		static libvex_allocation_site __las = {0, __FILE__,	\
-						       __LINE__};	\
-		__LibVEX_Alloc_Bytes(&main_heap, (_n), &__las);		\
-	})
+extern void *LibVEX_Alloc_Bytes(Heap *h,
+				unsigned long nbytes);
 extern size_t __LibVEX_Alloc_Size(const void *ptr);
 
 extern void *LibVEX_Alloc_Sized(Heap *h, VexAllocType *t, unsigned long size);

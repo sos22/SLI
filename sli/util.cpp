@@ -179,9 +179,8 @@ static ssize_t
 __nameIRExpr_write(void *cookie, const char *buffer, size_t sz)
 {
 	struct __nameIRExpr_context *c = (struct __nameIRExpr_context *)cookie;
-	static struct libvex_allocation_site site = {0, __FILE__, __LINE__};
 	if (!c->buffer)
-		c->buffer = (char *)__LibVEX_Alloc_Bytes(&ir_heap, sz * 2, &site);
+		c->buffer = (char *)LibVEX_Alloc_Bytes(&ir_heap, sz * 2);
 	else
 		c->buffer = (char *)LibVEX_realloc(&ir_heap, c->buffer, c->buffer_used + sz);
 	memcpy(c->buffer + c->buffer_used, buffer, sz);
@@ -211,7 +210,7 @@ flattenStringFragments(std::vector<const char *> fragments)
 	size_t sz = 1;
 	for (unsigned x = 0; x < fragments.size(); x++)
 		sz += strlen(fragments[x]);
-	char *res = (char *)LibVEX_Alloc_Bytes(sz);
+	char *res = (char *)LibVEX_Alloc_Bytes(&main_heap, sz);
 	char *cursor = res;
 	for (unsigned x = 0; x < fragments.size(); x++) {
 		memcpy(cursor, fragments[x], strlen(fragments[x]));
