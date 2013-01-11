@@ -606,6 +606,19 @@ private:
 	static exprbdd *_var(scope *scope, bbdd::scope *, IRExpr *);
 	static IRExpr *to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo);
 	static bbdd *to_bbdd(bbdd::scope *scope, exprbdd *, std::map<exprbdd *, bbdd *> &);
+
+	static exprbdd *unop(scope *, bbdd::scope *, IROp, exprbdd *, std::map<exprbdd *, exprbdd *> &);
+	static exprbdd *load(scope *, bbdd::scope *, IRType, exprbdd *, std::map<exprbdd *, exprbdd *> &);
+
+	struct binop_memo {
+		std::map<std::pair<exprbdd *, exprbdd *>, exprbdd *> bb;
+		std::map<std::pair<IRExpr *, exprbdd *>, exprbdd *> ib;
+		std::map<std::pair<exprbdd *, IRExpr *>, exprbdd *> bi;
+	};
+	static exprbdd *binop(scope *, bbdd::scope *, IROp, exprbdd *, IRExpr *, std::map<std::pair<exprbdd *, IRExpr *>, exprbdd *> &);
+	static exprbdd *binop(scope *, bbdd::scope *, IROp, IRExpr *, exprbdd *, std::map<std::pair<IRExpr *, exprbdd *>, exprbdd *> &);
+	static exprbdd *binop(scope *, bbdd::scope *, IROp, exprbdd *, exprbdd *, binop_memo &);
+
 public:
 	static bool parse(scope *scp, exprbdd **out, const char *str, const char **suffix) {
 		return parentT::_parse<scope, parseLeaf>(scp, out, str, suffix);
@@ -622,8 +635,6 @@ public:
 
 	static exprbdd *unop(scope *scope, bbdd::scope *, IROp, exprbdd *);
 	static exprbdd *load(scope *scope, bbdd::scope *, IRType, exprbdd *);
-	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, IRExpr *);
-	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, IRExpr *, exprbdd *);
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, exprbdd *);
 	static exprbdd *coerceTypes(scope *, bbdd::scope *, IRType ty, exprbdd *);
 
