@@ -444,6 +444,23 @@ quickSimplify(IRExpr *a)
 				return IRExpr_Const_U64(arg1c->Ico.U64 * arg2c->Ico.U64);
 			case Iop_64HLto128:
 				return IRExpr_Const_U128(arg1c->Ico.U64, arg2c->Ico.U64);
+			case Iop_DivModU128to64: {
+				__uint128_t num;
+				unsigned long denom = arg2c->Ico.U64;
+				num = arg1c->Ico.U128.hi;
+				num <<= 64;
+				num |= arg1c->Ico.U128.lo;
+				if (denom == 0) {
+					warning("Constant division by zero (%ld:%ld/%ld)?\n",
+						(unsigned long)(num >> 64),
+						(unsigned long)num,
+						denom);
+					break;
+				}
+				unsigned long div = num / denom;
+				unsigned long mod = num % denom;
+				return IRExpr_Const_U128(mod, div);
+			}
 			default:
 				abort();
 			}
