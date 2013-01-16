@@ -191,7 +191,6 @@ public:
 	   also satisfy this one.  Returns true if we do anything or
 	   false otherwise. */
 	bool operator |=(const PointerAliasingSet &o);
-	bool operator <(const PointerAliasingSet &o) const;
 
 	bool mightPointAt(const FrameId fid) const {
 		if (!valid || otherStackPointer)

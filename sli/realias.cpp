@@ -1062,8 +1062,10 @@ PointsToTable::refine(SMScopes *scopes,
 			/* These aren't supposed to define registers */
 			abort();
 		}
+		newPts = newPts & it->second;
 		if (newPts != it->second)
 			*done_something = true;
+		assert(!res.content.count(it->first));
 		res.content.insert(std::pair<threadAndRegister, PointerAliasingSet>(it->first, newPts));
 	}
 	return res;
@@ -1091,8 +1093,8 @@ AliasTable::refine(SMScopes *scopes,
 				slt,
 				sm));
 		if (debug_refine_alias_table)
-			printf("Examining alias table for state %d\n",
-			       labels[it->first]);
+			printf("Examining alias table for state %d (currently %s)\n",
+			       labels[it->first], loadPts.name());
 		for (auto it2 = it->second.stores.begin();
 		     it2 != it->second.stores.end();
 			) {
@@ -1308,6 +1310,11 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			continue;
 		}
 
+		if (debug_use_alias_table) {
+			printf("Trying to remove load at l%d\n",
+			       stateLabels[it->first]);
+		}
+
 		/* A couple of easy special cases: */
 		if (it->second.stores.size() == 0) {
 			/* Load always loads initial memory value. */
@@ -1417,11 +1424,6 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		/* Map from states to what we'd load if we issued the
 		   load immediately after that state. */
 		std::map<StateMachineState *, exprbdd *> replacements;
-
-		if (debug_use_alias_table) {
-			printf("Trying to remove load at l%d\n",
-			       stateLabels[it->first]);
-		}
 
 		/* Bit of a hack: treat NULL as a special initial
 		   state which executes immediately before the machine
