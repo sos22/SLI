@@ -176,7 +176,7 @@ cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg, b
 	std::vector<std::pair<StateMachineState *, StateMachineState *> > killedEdges;
 	std::vector<StateMachineState *> states;
 	enumStates(sm, &states);
-	for (auto it = states.begin(); it != states.end(); it++) {
+	for (auto it = states.begin(); !TIMEOUT && it != states.end(); it++) {
 		std::vector<StateMachineState **> targs;
 		(*it)->targets(targs);
 		for (auto it2 = targs.begin(); it2 != targs.end(); it2++) {
