@@ -25,9 +25,9 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{StateMachineTransformer,IRExprTransformer,proximal_cause}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{availExpressionAnalysis,deadcode,control_domination_map}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{bisimilarity,nf,typesdb,timers,realias}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{getStoreCFGs,dupeStateMachine}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{getStoreCFGs,dupeStateMachine,control_dependence_graph}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{cfgnode,getProbeCFGs,probeCFGtoMachine,useInitialMemoryLoads}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{sat_checker,smb_builder}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{sat_checker,smb_builder,predecessor_map}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{raw_types,crashcfg,bdd}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF

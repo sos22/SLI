@@ -9,166 +9,18 @@
 #include "state_machine.hpp"
 #include "offline_analysis.hpp"
 #include "bdd.hpp"
+#include "predecessor_map.hpp"
+#include "control_dependence_graph.hpp"
 
 #ifndef NDEBUG
 static bool debug_build_paths = false;
-static bool debug_control_dependence = false;
 static bool debug_toplevel = false;
 #else
 #define debug_build_paths false
-#define debug_control_dependence false
 #define debug_toplevel false
 #endif
 
 namespace _phi_elimination {
-
-class predecessor_map {
-	std::map<StateMachineState *, std::set<StateMachineState *> > content;
-public:
-	predecessor_map(StateMachine *sm);
-	void getPredecessors(StateMachineState *s, std::vector<StateMachineState *> &out) const {
-		auto i = content.find(s);
-		assert(i != content.end());
-		out.insert(out.end(), i->second.begin(), i->second.end());
-	}
-};
-
-predecessor_map::predecessor_map(StateMachine *sm)
-{
-	std::set<StateMachineState *> s;
-	enumStates(sm, &s);
-	for (auto it = s.begin(); it != s.end(); it++) {
-		std::vector<StateMachineState *> ss;
-		(*it)->targets(ss);
-		for (auto it2 = ss.begin(); it2 != ss.end(); it2++)
-			content[*it2].insert(*it);
-	}
-}
-
-class control_dependence_graph {
-	std::map<StateMachineState *, bbdd *> content;
-public:
-	control_dependence_graph(StateMachine *sm, bbdd::scope *scope,
-				 std::map<const StateMachineState *, int> &labels);
-	bbdd *domOf(StateMachineState *s) const {
-		auto i = content.find(s);
-		assert(i != content.end());
-		return i->second;
-	}
-	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const;
-};
-
-control_dependence_graph::control_dependence_graph(StateMachine *sm,
-						   bbdd::scope *scope,
-						   std::map<const StateMachineState *, int> &labels)
-{
-	std::map<StateMachineState *, unsigned> pendingParents;
-	std::vector<StateMachineState *> allStates;
-	enumStates(sm, &allStates);
-	for (auto it = allStates.begin(); it != allStates.end(); it++) {
-		std::vector<StateMachineState *> t;
-		(*it)->targets(t);
-		for (auto it2 = t.begin(); it2 != t.end(); it2++)
-			pendingParents[*it2]++;
-	}
-	pendingParents[sm->root] = 0;
-
-	std::vector<StateMachineState *> pending;
-	struct {
-		std::vector<StateMachineState *> *pending;
-		std::map<StateMachineState *, unsigned> *pendingParents;
-		bbdd::scope *scope;
-		void operator()(bbdd *&slot,
-				bbdd *newPath,
-				StateMachineState *owner) {
-			if (slot)
-				slot = bbdd::Or(scope, slot, newPath);
-			else
-				slot = newPath;
-			(*pendingParents)[owner]--;
-			if ((*pendingParents)[owner] == 0)
-				pending->push_back(owner);
-		}
-	} addPath;
-	addPath.pending = &pending;
-	addPath.pendingParents = &pendingParents;
-	addPath.scope = scope;
-
-	int nr_complete = 0;
-	content[sm->root] = scope->cnst(true);
-	pending.push_back(sm->root);
-	while (!TIMEOUT && !pending.empty()) {
-		StateMachineState *s = pending.back();
-		pending.pop_back();
-		assert(pendingParents.count(s));
-		assert(pendingParents[s] == 0);
-
-		bbdd *dom = content[s];
-		assert(dom);
-		if (debug_control_dependence) {
-			printf("Redo control dependence of state l%d (%d/%zd complete); current = \n", labels[s], nr_complete, labels.size());
-			dom->prettyPrint(stdout);
-		}
-		nr_complete++;
-		switch (s->type) {
-		case StateMachineState::Bifurcate: {
-			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-			bbdd *cond = smb->condition;
-			bbdd *trueCond = bbdd::And(scope, dom, cond);
-			bbdd *falseCond = bbdd::And(scope, dom, bbdd::invert(scope, cond));
-			if (TIMEOUT)
-				break;
-			assert(trueCond);
-			assert(falseCond);
-			addPath(content[smb->trueTarget],
-				trueCond,
-				smb->trueTarget);
-			addPath(content[smb->falseTarget],
-				falseCond,
-				smb->falseTarget);
-			if (debug_control_dependence) {
-				printf("Condition:\n");
-				cond->prettyPrint(stdout);
-				printf("Combine with dom constraint\n");
-				dom->prettyPrint(stdout);
-				printf("-> true\n");
-				trueCond->prettyPrint(stdout);
-				printf("-> false\n");
-				falseCond->prettyPrint(stdout);
-
-				printf("Update l%d to:\n", labels[smb->trueTarget]);
-				content[smb->trueTarget]->prettyPrint(stdout);
-				printf("Update l%d to:\n", labels[smb->falseTarget]);
-				content[smb->falseTarget]->prettyPrint(stdout);
-			}
-			break;
-		}
-		case StateMachineState::SideEffecting: {
-			StateMachineSideEffecting *sme = (StateMachineSideEffecting *)s;
-			addPath(content[sme->target],
-				dom,
-				sme->target);
-			if (debug_control_dependence) {
-				printf("Update l%d to:\n", labels[sme->target]);
-				content[sme->target]->prettyPrint(stdout);
-			}
-			break;
-		}
-		case StateMachineState::Terminal:
-			break;
-		}
-	}
-}
-
-void
-control_dependence_graph::prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels) const
-{
-	fprintf(f, "CDG:\n");
-	for (auto it = content.begin(); it != content.end(); it++) {
-		fprintf(f, "l%d:\n", labels[it->first]);
-		it->second->prettyPrint(f);
-	}
-}
 
 static exprbdd *
 build_selection_bdd(SMScopes *scopes,
@@ -393,7 +245,9 @@ replaceSideEffects(SMScopes *scopes, StateMachine *sm, std::map<StateMachineSide
 }
 
 static StateMachine *
-phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
+phiElimination(SMScopes *scopes, StateMachine *sm,
+	       predecessor_map &pm, control_dependence_graph &cdg,
+	       bool *done_something)
 {
 	std::map<const StateMachineState *, int> labels;
 
@@ -403,9 +257,6 @@ phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 	}
 
 	std::map<StateMachineSideEffect *, StateMachineSideEffect *> replacements;
-
-	predecessor_map pm(sm);
-	control_dependence_graph cdg(sm, &scopes->bools, labels);
 
 	if (debug_toplevel)
 		cdg.prettyPrint(stdout, labels);
@@ -476,7 +327,9 @@ phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
 };
 
 StateMachine *
-phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something)
+phiElimination(SMScopes *scopes, StateMachine *sm,
+	       predecessor_map &pred, control_dependence_graph &cdg,
+	       bool *done_something)
 {
-	return _phi_elimination::phiElimination(scopes, sm, done_something);
+	return _phi_elimination::phiElimination(scopes, sm, pred, cdg, done_something);
 }

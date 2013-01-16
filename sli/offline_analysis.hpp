@@ -241,7 +241,12 @@ StateMachine *functionAliasAnalysis(SMScopes *scopes,
 				    OracleInterface *oracle,
 				    const ControlDominationMap &cdm,
 				    bool *done_something);
-StateMachine *phiElimination(SMScopes *scopes, StateMachine *sm, bool *done_something);
+class predecessor_map;
+class control_dependence_graph;
+StateMachine *phiElimination(SMScopes *scopes, StateMachine *sm,
+			     predecessor_map &pred,
+			     control_dependence_graph &cdg,
+			     bool *done_something);
 
 StateMachine *removeAnnotations(SMScopes *scopes,
 				VexPtr<MaiMap, &ir_heap> &mai,

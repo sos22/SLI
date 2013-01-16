@@ -19,6 +19,8 @@
 #include "sat_checker.hpp"
 #include "allowable_optimisations.hpp"
 #include "control_domination_map.hpp"
+#include "predecessor_map.hpp"
+#include "control_dependence_graph.hpp"
 
 #ifndef NDEBUG
 static bool debugOptimiseStateMachine = false;
@@ -332,7 +334,10 @@ _optimiseStateMachine(SMScopes *scopes,
 		}
 
 		if (!done_something && is_ssa) {
-			sm = phiElimination(scopes, sm, &p);
+			predecessor_map pred(sm);
+			control_dependence_graph cdg(sm, &scopes->bools);
+
+			sm = phiElimination(scopes, sm, pred, cdg, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("phiElimination:\n");
 				printStateMachine(sm, stdout);
