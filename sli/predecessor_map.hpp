@@ -12,6 +12,12 @@ class predecessor_map {
 public:
 	predecessor_map(StateMachine *sm);
 	void getPredecessors(StateMachineState *s, std::vector<StateMachineState *> &out) const;
+	/* Update map now that @predecessor is no longer a predecessor
+	 * of @state. */
+	void removePredecessor(StateMachineState *state, StateMachineState *predecessor);
+	/* Update map to note that @predecessor is now a predecessor
+	 * of @state. */
+	void addPredecessor(StateMachineState *state, StateMachineState *predecessor);
 };
 
 #endif /* !PREDECESSOR_MAP_HPP__ */

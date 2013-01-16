@@ -344,6 +344,14 @@ _optimiseStateMachine(SMScopes *scopes,
 			}
 			done_something |= p;
 
+			sm = functionAliasAnalysis(scopes, *mai, sm, opt,
+						   oracle, cdg, pred, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("functionAliasAnalysis:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+
 			p = false;
 			sm = phiElimination(scopes, sm, pred, cdg, &p);
 			if (debugOptimiseStateMachine && p) {
@@ -351,16 +359,6 @@ _optimiseStateMachine(SMScopes *scopes,
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
-
-			if (!p) {
-				sm = functionAliasAnalysis(scopes, *mai, sm, opt,
-							   oracle, cdg, &p);
-				if (debugOptimiseStateMachine && p) {
-					printf("functionAliasAnalysis:\n");
-					printStateMachine(sm, stdout);
-				}
-				done_something |= p;
-			}
 		}
 
 		if (progress)

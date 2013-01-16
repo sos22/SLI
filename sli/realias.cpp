@@ -6,6 +6,7 @@
 #include "control_dependence_graph.hpp"
 #include "sat_checker.hpp"
 #include "alloc_mai.hpp"
+#include "predecessor_map.hpp"
 
 namespace _realias {
 
@@ -1123,6 +1124,86 @@ AliasTable::refine(SMScopes *scopes,
 	}
 }
 
+/* Enumerate all of the states which can reach @startFrom, starting
+   from the root, such that by the time state T is enumerated all of
+   the predecessors of T have already been enumerated.  That's a bit
+   like a breadth-first enumeration, in the sense that all of the
+   nodes at depth N will be enumerated before we start enumerating
+   things at depth N+1, if you define the depth of a node to be the
+   length of the longest path from the root to that node. */
+static void
+breadthFirstEnumBackwards(const predecessor_map &pm,
+			  StateMachineState *startFrom,
+			  StateMachineState *root,
+			  std::vector<StateMachineState *> &out)
+{
+	/* Map from states to the number of predecessors of that node
+	   which have not yet been enumerated.  Only contains entries
+	   for states which can reach @startFrom. */
+	std::map<StateMachineState *, int> neededPredecessors;
+	std::vector<StateMachineState *> pending;
+	pending.push_back(startFrom);
+	while (!pending.empty()) {
+		StateMachineState *s = pending.back();
+		pending.pop_back();
+		auto it_did_insert = neededPredecessors.insert(std::pair<StateMachineState *, int>(s, -99));
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (!did_insert) {
+			/* Already did this one. */
+			continue;
+		}
+		std::vector<StateMachineState *> pred;
+		pm.getPredecessors(s, pred);
+		it->second = pred.size();
+		if (pred.size() == 0)
+			assert(s == root);
+		for (auto it = pred.begin(); it != pred.end(); it++)
+			pending.push_back(*it);
+	}
+
+	/* Now do the actual enumeration, starting from the root. */
+	out.reserve(neededPredecessors.size());
+	assert(neededPredecessors.count(root));
+	assert(neededPredecessors[root] == 0);
+	pending.push_back(root);
+#ifndef NDEBUG
+	std::set<StateMachineState *> emitted;
+#endif
+	while (!pending.empty()) {
+		StateMachineState *s = pending.back();
+		pending.pop_back();
+		assert(neededPredecessors.count(s));
+		assert(neededPredecessors[s] == 0);
+#ifndef NDEBUG
+		assert(!emitted.count(s));
+		emitted.insert(s);
+#endif
+		out.push_back(s);
+		std::vector<StateMachineState *> targs;
+		s->targets(targs);
+		for (auto it = targs.begin(); it != targs.end(); it++) {
+			StateMachineState *target = *it;
+			auto it2 = neededPredecessors.find(target);
+			if (it2 == neededPredecessors.end()) {
+				/* This successor can never reach
+				 * @startFrom -> ignore it */
+				continue;
+			}
+			assert(it2->second > 0);
+			it2->second--;
+			if (it2->second == 0) {
+				/* All predecessors of this target
+				   emitted -> emit the target. */
+				pending.push_back(target);
+			}
+		}
+	}
+#ifndef NDEBUG
+	assert(emitted.size() == neededPredecessors.size());
+#endif
+}
+
 static exprbdd *
 dataOfSideEffect(SMScopes *scopes, const StateMachineSideEffect *s_effect, IRType ty)
 {
@@ -1147,7 +1228,9 @@ dataOfSideEffect(SMScopes *scopes, const StateMachineSideEffect *s_effect, IRTyp
 static StateMachine *
 functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		      const AllowableOptimisations &opt, OracleInterface *oracle,
-		      const control_dependence_graph &cdg, bool *done_something)
+		      control_dependence_graph &cdg,
+		      predecessor_map &predMap,
+		      bool *done_something)
 {
 	StackLayoutTable stackLayout;
 	stateLabelT stateLabels;
@@ -1212,12 +1295,322 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		at.prettyPrint(stdout, stateLabels);
 	}
 
+	bool progress = false;
+	bool killedAllLoads = true;
+
+	/* Use the aliasing table to resolve loads wherever possible. */
+	for (auto it = at.content.begin(); it != at.content.end(); it++) {
+		assert(it->first->getSideEffect());
+		assert(it->first->getSideEffect()->type == StateMachineSideEffect::Load);
+		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
+		if (it->second.mightHaveExternalStores) {
+			killedAllLoads = false;
+			continue;
+		}
+
+		/* A couple of easy special cases: */
+		if (it->second.stores.size() == 0) {
+			/* Load always loads initial memory value. */
+			assert(it->second.mightLoadInitial);
+			if (debug_use_alias_table)
+				printf("Replace l%d with initial load\n",
+                                      stateLabels[it->first]);
+			progress = true;
+			it->first->sideEffect =
+				new StateMachineSideEffectCopy(
+					l->target,
+					exprbdd::load(
+						&scopes->exprs,
+						&scopes->bools,
+						l->type,
+						l->addr));
+			StateMachineState *t =
+				new StateMachineSideEffecting(
+					it->first->dbg_origin,
+					new StateMachineSideEffectAssertFalse(
+						exprbdd::to_bbdd(
+							&scopes->bools,
+							exprbdd::unop(
+								&scopes->exprs,
+								&scopes->bools,
+								Iop_BadPtr,
+								l->addr)),
+						true),
+					it->first->target);
+			predMap.removePredecessor(it->first->target, it->first);
+			predMap.addPredecessor(t, it->first);
+			predMap.addPredecessor(it->first->target, t);
+			cdg.introduceState(t, cdg.domOf(it->first));
+			it->first->target = t;
+			continue;
+		} else if (it->second.stores.size() == 1 &&
+			   !it->second.mightLoadInitial) {
+			/* Load always loads from one specific store. */
+			StateMachineSideEffecting *s_state = *it->second.stores.begin();
+			StateMachineSideEffect *s_effect = s_state->getSideEffect();
+			if (debug_use_alias_table)
+				printf("Replace l%d with forward from l%d\n",
+				       stateLabels[it->first], stateLabels[s_state]);
+			assert(s_effect);
+			progress = true;
+			exprbdd *d = dataOfSideEffect(scopes, s_effect, l->type);
+			it->first->sideEffect =
+				new StateMachineSideEffectCopy(
+					l->target, d);
+			continue;
+		} else if (!it->second.mightLoadInitial) {
+			/* Maybe the CDG can show that only one store
+			   is ever present on any path from the root
+			   to the load?  In that case, we don't need
+			   to do the more complicated path-dependent
+			   algorithm. */
+			exprbdd::enablingTableT possibleInputs;
+			bool failed = false;
+			exprbdd *defaultVal = NULL;
+			bbdd *stateDominator = cdg.domOf(it->first);
+
+			/* CDG optimiseation should have eliminated
+			   all unreachable states already. */
+			assert(stateDominator != scopes->bools.cnst(false));
+			for (auto it2 = it->second.stores.begin();
+			     !failed && it2 != it->second.stores.end();
+			     it2++) {
+				bbdd *gate = bbdd::assume(&scopes->bools, cdg.domOf(*it2), stateDominator);
+				if (!gate)
+					continue;
+				exprbdd *val = dataOfSideEffect(scopes, (*it2)->sideEffect, l->type);
+				defaultVal = val;
+				exprbdd **slot = possibleInputs.getSlot(gate, val);
+				if (*slot != val) {
+					if (debug_use_alias_table) {
+						printf("Can't do quick load resolution because of conflict detected at l%d\n",
+						       stateLabels[*it2]);
+					}
+					failed = true;
+				}
+			}
+			assert(defaultVal != NULL);
+			if (!failed) {
+				exprbdd *res = exprbdd::from_enabling(
+					&scopes->exprs,
+					possibleInputs,
+					defaultVal);
+				if (res) {
+					if (debug_use_alias_table) {
+						printf("Replace l%d with simple mux:\n",
+						       stateLabels[it->first]);
+						res->prettyPrint(stdout);
+					}
+					it->first->sideEffect =
+						new StateMachineSideEffectCopy(
+							l->target, res);
+					progress = true;
+					continue;
+				}
+			}
+		}
+
+		if (debug_use_alias_table) {
+			printf("All simple rules failed, applying full load elimination rule.\n");
+		}
+
+		/* Map from states to what we'd load if we issued the
+		   load immediately after that state. */
+		std::map<StateMachineState *, exprbdd *> replacements;
+
+		if (debug_use_alias_table) {
+			printf("Trying to remove load at l%d\n",
+			       stateLabels[it->first]);
+		}
+
+		/* Bit of a hack: treat NULL as a special initial
+		   state which executes immediately before the machine
+		   starts. */
+		replacements[NULL] =
+			exprbdd::load(
+				&scopes->exprs,
+				&scopes->bools,
+				l->type,
+				l->addr);
+
+		/* Figure out what order to visit states in so as to
+		 * avoid revisiting any states. */
+		std::vector<StateMachineState *> statesToVisit;
+		breadthFirstEnumBackwards(predMap, it->first, sm->root, statesToVisit);
+
+		if (debug_use_alias_table) {
+			printf("State visit order: ");
+			for (auto it = statesToVisit.begin();
+			     it != statesToVisit.end();
+			     it++)
+				printf("l%d ", stateLabels[*it]);
+			printf("\n");
+		}
+		for (auto it2 = statesToVisit.begin();
+		     it2 != statesToVisit.end();
+		     it2++) {
+			StateMachineState *state = *it2;
+			assert(!replacements.count(state));
+
+			if (debug_use_alias_table) {
+				printf("Consider state l%d\n", stateLabels[state]);
+			}
+
+			std::vector<StateMachineState *> predecessors;
+			predMap.getPredecessors(state, predecessors);
+#ifndef NDEBUG
+			for (auto it3 = predecessors.begin();
+			     it3 != predecessors.end();
+			     it3++) {
+				assert(replacements.count(*it3));
+			}
+#endif
+			bbdd *assumption = cdg.domOf(state);
+			if (assumption == scopes->bools.cnst(false)) {
+				/* This state is completely
+				   unreachable.  Hmm.  That should
+				   have been dealt with by the CDG
+				   optimisation already. */
+				if (debug_use_alias_table) {
+					printf("Failed because state l%d is unreachable?\n",
+					       stateLabels[state]);
+				}
+				assert(TIMEOUT);
+				return sm;
+			}
+			if (state == sm->root) {
+				predecessors.push_back(NULL);
+			}
+			exprbdd::enablingTableT tabAtStartOfState;
+			for (auto it3 = predecessors.begin();
+			     it3 != predecessors.end();
+			     it3++) {
+				StateMachineState *predState = *it3;
+				bbdd *condition;
+				if (predState) {
+					condition = cdg.edgeCondition(scopes, predState, state);
+				} else {
+					condition = scopes->bools.cnst(true);
+				}
+				condition = bbdd::assume(&scopes->bools, condition, assumption);
+				if (!condition) {
+					/* Can't actually take this edge. */
+					continue;
+				}
+				assert(replacements.count(predState));
+				exprbdd **slot = tabAtStartOfState.getSlot(
+					condition,
+					replacements[predState]);
+				assert(*slot == replacements[predState]);
+				if (debug_use_alias_table) {
+					printf("Consider edge l%d -> l%d\n",
+					       stateLabels[predState],
+					       stateLabels[state]);
+					printf("Edge condition ");
+					condition->prettyPrint(stdout);
+					printf("Value ");
+					replacements[predState]->prettyPrint(stdout);
+				}
+			}
+			if (TIMEOUT) {
+				return sm;
+			}
+			/* What would be loaded at the start of this state? */
+			exprbdd *startOfState = exprbdd::from_enabling(&scopes->exprs,
+								       tabAtStartOfState,
+								       NULL);
+			if (!startOfState) {
+				warning("Failed to flatten start-of-state enabling table for state l%d\n",
+					stateLabels[state]);
+				break;
+			}
+
+			if (debug_use_alias_table) {
+				printf("startOfState for l%d: ",
+				       stateLabels[state]);
+				startOfState->prettyPrint(stdout);
+			}
+
+			/* Figure out what we'd load at the end of the
+			 * state. */
+			exprbdd *endOfState = startOfState;
+			if (state->type == StateMachineState::SideEffecting &&
+			    ((StateMachineSideEffecting *)state)->sideEffect &&
+			    ((StateMachineSideEffecting *)state)->sideEffect->type == StateMachineSideEffect::Store &&
+			    it->second.stores.count((StateMachineSideEffecting *)state)) {
+				StateMachineSideEffectStore *st =
+					(StateMachineSideEffectStore *)state->getSideEffect();
+				assert(st);
+				assert(st->type == StateMachineSideEffect::Store);
+				endOfState = exprbdd::ifelse(
+					&scopes->exprs,
+					exprbdd::to_bbdd(
+						&scopes->bools,
+						exprbdd::binop(
+							&scopes->exprs,
+							&scopes->bools,
+							Iop_CmpEQ64,
+							st->addr,
+							l->addr)),
+					st->data,
+					startOfState);
+				if (debug_use_alias_table && !TIMEOUT) {
+					printf("endOfState for l%d:\n",
+					       stateLabels[state]);
+					endOfState->prettyPrint(stdout);
+				}
+			}
+
+			replacements[state] = endOfState;
+		}
+		
+		if (!replacements.count(it->first)) {
+			warning("No replacement for load in l%d?\n",
+				stateLabels[it->first]);
+			continue;
+		}
+		exprbdd *repl = replacements[it->first];
+		if (!repl) {
+			assert(TIMEOUT);
+		} else {
+			if (debug_use_alias_table) {
+				printf("Mux for l%d is:\n", stateLabels[it->first]);
+				repl->prettyPrint(stdout);
+			}
+			it->first->sideEffect = new StateMachineSideEffectCopy(
+				l->target,
+				repl);
+			StateMachineState *t = new StateMachineSideEffecting(
+				it->first->dbg_origin,
+				new StateMachineSideEffectAssertFalse(
+					exprbdd::to_bbdd(
+						&scopes->bools,
+						exprbdd::unop(
+							&scopes->exprs,
+							&scopes->bools,
+							Iop_BadPtr,
+							l->addr)),
+					true),
+				it->first->target);
+			predMap.removePredecessor(it->first->target, it->first);
+			predMap.addPredecessor(t, it->first);
+			predMap.addPredecessor(it->first->target, t);
+			cdg.introduceState(t, cdg.domOf(it->first));
+			it->first->target = t;
+			progress = true;
+		}
+	}
+
 	/* Figure out which frames might actually be accessed by the
 	   machine.  There's not much point in keeping any of the
 	   other ones hanging around. */
 	std::set<FrameId> liveFrames;
 	bool allFramesLive = false;
 	for (auto it = at.content.begin(); !allFramesLive && it != at.content.end(); it++) {
+		/* This load might already have been eliminated. */
+		if (!it->first->getSideEffect() ||
+		    it->first->getSideEffect()->type != StateMachineSideEffect::Load)
+			continue;
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
 		PointerAliasingSet pas(ptt.pointsToSetForExpr(
 					       scopes,
@@ -1258,108 +1651,6 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		printf("}\n");
 	}
 
-	bool progress = false;
-
-	/* Use the aliasing table to resolve loads wherever possible. */
-	for (auto it = at.content.begin(); it != at.content.end(); it++) {
-		assert(it->first->getSideEffect());
-		assert(it->first->getSideEffect()->type == StateMachineSideEffect::Load);
-		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
-		if (it->second.mightHaveExternalStores)
-			continue;
-		if (it->second.stores.size() == 0) {
-			assert(it->second.mightLoadInitial);
-			if (debug_use_alias_table)
-				printf("Replace l%d with initial load\n",
-				       stateLabels[it->first]);
-			progress = true;
-			it->first->sideEffect =
-					new StateMachineSideEffectCopy(
-						l->target,
-						exprbdd::load(
-							&scopes->exprs,
-							&scopes->bools,
-							l->type,
-							l->addr));
-			it->first->target =
-				new StateMachineSideEffecting(
-					it->first->dbg_origin,
-					new StateMachineSideEffectAssertFalse(
-						exprbdd::to_bbdd(
-							&scopes->bools,
-							exprbdd::unop(
-								&scopes->exprs,
-								&scopes->bools,
-								Iop_BadPtr,
-								l->addr)),
-						true),
-					it->first->target);
-		} else if (it->second.stores.size() == 1 &&
-			   !it->second.mightLoadInitial) {
-			StateMachineSideEffecting *s_state = *it->second.stores.begin();
-			StateMachineSideEffect *s_effect = s_state->getSideEffect();
-			if (debug_use_alias_table)
-				printf("Replace l%d with forward from l%d\n",
-				       stateLabels[it->first], stateLabels[s_state]);
-			assert(s_effect);
-			progress = true;
-			exprbdd *d = dataOfSideEffect(scopes, s_effect, l->type);
-			it->first->sideEffect =
-				new StateMachineSideEffectCopy(
-					l->target, d);
-		} else if (!it->second.mightLoadInitial) {
-			exprbdd::enablingTableT possibleInputs;
-			bool failed = false;
-			exprbdd *defaultVal = NULL;
-			bbdd *stateDominator = cdg.domOf(it->first);
-			if (stateDominator == scopes->bools.cnst(false)) {
-				/* This state is unreachable. */
-				/* (Note that this isn't just an
-				   optimisation: unreachable states
-				   screw up the mightLoadInitial flag,
-				   so if you leave the load in you get
-				   problems later on) */
-				it->first->sideEffect =
-					StateMachineSideEffectUnreached::get();
-			} else {
-				for (auto it2 = it->second.stores.begin();
-				     !failed && it2 != it->second.stores.end();
-				     it2++) {
-					bbdd *gate = bbdd::assume(&scopes->bools, cdg.domOf(*it2), stateDominator);
-					if (!gate)
-						continue;
-					exprbdd *val = dataOfSideEffect(scopes, (*it2)->sideEffect, l->type);
-					defaultVal = val;
-					exprbdd **slot = possibleInputs.getSlot(gate, val);
-					if (*slot != val)
-						failed = true;
-				}
-				assert(defaultVal != NULL);
-				if (!failed) {
-					exprbdd *res = exprbdd::from_enabling(
-						&scopes->exprs,
-						possibleInputs,
-						defaultVal);
-					if (res) {
-						if (debug_use_alias_table) {
-							printf("Replace l%d with mux:\n",
-							       stateLabels[it->first]);
-							res->prettyPrint(stdout);
-						}
-						it->first->sideEffect =
-							new StateMachineSideEffectCopy(
-								l->target, res);
-						progress = true;
-					}
-				}
-			}
-		} else {
-			if (debug_use_alias_table)
-				printf("Can't do anything with load l%d\n",
-				       stateLabels[it->first]);
-		}
-	}
-
 	/* Let's also have a go at ripping out redundant stores and
 	   stack annotations. */
 	std::set<StateMachineSideEffecting *> sideEffects;
@@ -1377,7 +1668,9 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			if (!ignore)
 				break;
 			bool noConflictingLoads = true;
-			for (auto it2 = at.content.begin(); noConflictingLoads && it2 != at.content.end(); it2++) {
+			for (auto it2 = at.content.begin();
+			     !killedAllLoads && noConflictingLoads && it2 != at.content.end();
+			     it2++) {
 				if (it2->second.stores.count(*it)) {
 					if (debug_use_alias_table)
 						printf("Can't remove store l%d because of load l%d\n",
@@ -1490,7 +1783,8 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 StateMachine *
 functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *machine,
 		      const AllowableOptimisations &opt, OracleInterface *oracle,
-		      const control_dependence_graph &cdg, bool *done_something)
+		      control_dependence_graph &cdg, predecessor_map &pm,
+		      bool *done_something)
 {
-	return _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdg, done_something);
+	return _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdg, pm, done_something);
 }

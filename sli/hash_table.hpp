@@ -427,6 +427,19 @@ template <typename _key, typename _value, int nr_heads = 2053, int nr_per_elem =
 	typedef HashTable<std::pair<_key, _value>, nr_heads, nr_per_elem> contentT;
 	contentT content;
 public:
+	bool hasKey(const _key &k) const {
+		const typename contentT::elem *c = content.getHead(k.hash());
+		while (c) {
+			for (int i = 0; i < contentT::nr_per_elem; i++) {
+				if ( (c->use_map & (1ul << i)) &&
+				     c->content[i].first == k ) {
+					return true;
+				}
+			}
+			c = c->next;
+		}
+		return false;
+	}
 	Maybe<_value> get(const _key &k) const {
 		const typename contentT::elem *c = content.getHead(k.hash());
 		while (c) {
@@ -545,6 +558,16 @@ public:
 			for (int i = 0; i < o.nr_small_used; i++)
 				new (&small[i]) std::pair<_key, _value>(o.small[i]);
 		}
+	}
+	bool hasKey(const _key &k) const {
+		if (large)
+			return large->hasKey(k);
+		for (int i = 0; i < nr_small_used; i++) {
+			if (small[i].first == k) {
+				return true;
+			}
+		}
+		return false;
 	}
 	size_t size() const {
 		if (large)
