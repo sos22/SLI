@@ -233,16 +233,15 @@ StateMachine *deadCodeElimination(SMScopes *, StateMachine *sm, bool *done_somet
 StateMachine *bisimilarityReduction(SMScopes *, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something);
 StateMachine *useInitialMemoryLoads(SMScopes *, const MaiMap &mai, StateMachine *sm, const AllowableOptimisations &opt,
 				    OracleInterface *oracle, bool *done_something);
-class ControlDominationMap;
+class predecessor_map;
+class control_dependence_graph;
 StateMachine *functionAliasAnalysis(SMScopes *scopes,
 				    const MaiMap &mai,
 				    StateMachine *machine,
 				    const AllowableOptimisations &opt,
 				    OracleInterface *oracle,
-				    const ControlDominationMap &cdm,
+				    const control_dependence_graph &cdg,
 				    bool *done_something);
-class predecessor_map;
-class control_dependence_graph;
 StateMachine *phiElimination(SMScopes *scopes, StateMachine *sm,
 			     predecessor_map &pred,
 			     control_dependence_graph &cdg,

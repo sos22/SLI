@@ -18,7 +18,6 @@
 #include "alloc_mai.hpp"
 #include "sat_checker.hpp"
 #include "allowable_optimisations.hpp"
-#include "control_domination_map.hpp"
 #include "predecessor_map.hpp"
 #include "control_dependence_graph.hpp"
 
@@ -352,21 +351,16 @@ _optimiseStateMachine(SMScopes *scopes,
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
-		}
 
-		if (!done_something && is_ssa && !TIMEOUT) {
-			ControlDominationMap cdm;
-			cdm.init(scopes, sm, opt);
-			if (TIMEOUT)
-				break;
-
-			p = false;
-			sm = functionAliasAnalysis(scopes, *mai, sm, opt, oracle, cdm, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("functionAliasAnalysis:\n");
-				printStateMachine(sm, stdout);
+			if (!p) {
+				sm = functionAliasAnalysis(scopes, *mai, sm, opt,
+							   oracle, cdg, &p);
+				if (debugOptimiseStateMachine && p) {
+					printf("functionAliasAnalysis:\n");
+					printStateMachine(sm, stdout);
+				}
+				done_something |= p;
 			}
-			done_something |= p;
 		}
 
 		if (progress)

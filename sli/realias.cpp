@@ -3,7 +3,7 @@
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
 #include "maybe.hpp"
-#include "control_domination_map.hpp"
+#include "control_dependence_graph.hpp"
 #include "sat_checker.hpp"
 #include "alloc_mai.hpp"
 
@@ -1147,7 +1147,7 @@ dataOfSideEffect(SMScopes *scopes, const StateMachineSideEffect *s_effect, IRTyp
 static StateMachine *
 functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		      const AllowableOptimisations &opt, OracleInterface *oracle,
-		      const ControlDominationMap &cdm, bool *done_something)
+		      const control_dependence_graph &cdg, bool *done_something)
 {
 	StackLayoutTable stackLayout;
 	stateLabelT stateLabels;
@@ -1311,7 +1311,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			exprbdd::enablingTableT possibleInputs;
 			bool failed = false;
 			exprbdd *defaultVal = NULL;
-			bbdd *stateDominator = cdm.get(it->first);
+			bbdd *stateDominator = cdg.domOf(it->first);
 			if (stateDominator == scopes->bools.cnst(false)) {
 				/* This state is unreachable. */
 				/* (Note that this isn't just an
@@ -1325,7 +1325,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 				for (auto it2 = it->second.stores.begin();
 				     !failed && it2 != it->second.stores.end();
 				     it2++) {
-					bbdd *gate = bbdd::assume(&scopes->bools, cdm.get(*it2), stateDominator);
+					bbdd *gate = bbdd::assume(&scopes->bools, cdg.domOf(*it2), stateDominator);
 					if (!gate)
 						continue;
 					exprbdd *val = dataOfSideEffect(scopes, (*it2)->sideEffect, l->type);
@@ -1490,7 +1490,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 StateMachine *
 functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *machine,
 		      const AllowableOptimisations &opt, OracleInterface *oracle,
-		      const ControlDominationMap &cdm, bool *done_something)
+		      const control_dependence_graph &cdg, bool *done_something)
 {
-	return _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdm, done_something);
+	return _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdg, done_something);
 }
