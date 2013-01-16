@@ -425,6 +425,9 @@ convertToSSA(SMScopes *scopes, StateMachine *inp, std::map<threadAndRegister, th
 	std::map<const StateMachineState *, StateMachineState *> rewrites;
 	std::vector<std::pair<StateMachineState **, const StateMachineState *> > relocs;
 
+	if (TIMEOUT)
+		return NULL;
+
 	for (auto it = allStates.begin(); it != allStates.end(); it++) {
 		const StateMachineState *inpState = *it;
 		StateMachineState *outState = (StateMachineState *)0xdead;
