@@ -1282,7 +1282,7 @@ ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStore *inp)
 	exprbdd *data = ssaApplyAvail(state, inp->data);
 	if (addr == inp->addr && data == inp->data)
 		return inp;
-	return new StateMachineSideEffectStore(inp, addr, inp->data);
+	return new StateMachineSideEffectStore(inp, addr, data);
 }
 static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectCopy *inp)

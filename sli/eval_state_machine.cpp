@@ -1660,6 +1660,9 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 		true,
 		opt,
 		token);
+	if (!res_ssa)
+		return NULL;
+
 	return deSsa(&scopes->bools, res_ssa, ssaCorrespondence);
 }
 

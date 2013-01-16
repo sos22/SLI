@@ -69,6 +69,11 @@ public:
 	{
 		return compare(o) == lt;
 	}
+	bool operator <=(const bdd_rank &o) const
+	{
+		auto c = compare(o);
+		return c == lt || c == eq;
+	}
 	bool operator==(const bdd_rank &o) const
 	{
 		return compare(o) == eq;
@@ -178,6 +183,11 @@ private:
 		return *(leafT *)content._leaf;
 	}
 
+	template <typename scopeT, typename bscopeT, typename zipT> static _subtreeT *restructure_zip(
+		scopeT *scp,
+		bscopeT *bscope,
+		const zipT &root,
+		std::map<zipT, _subtreeT *> &memo);
 public:
 	internalT &unsafe_internal() {
 		assert(!isLeaf());
@@ -287,6 +297,13 @@ public:
 		bbdd *cond,
 		_subtreeT *ifTrue,
 		_subtreeT *ifFalse);
+
+	/* Like a zip, but allows the BDD to be ``restructured'' as we
+	   walk our way down the tree. */
+	template <typename scopeT, typename bscopeT, typename zipT> static _subtreeT *restructure_zip(
+		scopeT *scp,
+		bscopeT *bscope,
+		const zipT &root);
 
 	_subtreeT *trueBranch(const bdd_rank &cond) {
 		if (!isLeaf() && cond == internal().rank)
@@ -606,6 +623,9 @@ private:
 	static exprbdd *_var(scope *scope, bbdd::scope *, IRExpr *);
 	static IRExpr *to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo);
 	static bbdd *to_bbdd(bbdd::scope *scope, exprbdd *, std::map<exprbdd *, bbdd *> &);
+
+	static exprbdd *load(scope *, bbdd::scope *, IRType, exprbdd *, std::map<exprbdd *, exprbdd *> &);
+
 public:
 	static bool parse(scope *scp, exprbdd **out, const char *str, const char **suffix) {
 		return parentT::_parse<scope, parseLeaf>(scp, out, str, suffix);
@@ -622,8 +642,6 @@ public:
 
 	static exprbdd *unop(scope *scope, bbdd::scope *, IROp, exprbdd *);
 	static exprbdd *load(scope *scope, bbdd::scope *, IRType, exprbdd *);
-	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, IRExpr *);
-	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, IRExpr *, exprbdd *);
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, exprbdd *);
 	static exprbdd *coerceTypes(scope *, bbdd::scope *, IRType ty, exprbdd *);
 

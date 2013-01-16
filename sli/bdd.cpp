@@ -308,7 +308,8 @@ quickSimplify(IRExpr *a)
 {
 	if (a->optimisationsApplied)
 		return a;
-	if (a->tag == Iex_Unop) {
+	switch (a->tag) {
+	case Iex_Unop: {
 		IRExprUnop *au = (IRExprUnop *)a;
 		auto arg = quickSimplify(au->arg);
 		if (arg->tag != Iex_Const) {
@@ -393,7 +394,9 @@ quickSimplify(IRExpr *a)
 		default:
 			abort();
 		}
-	} else if (a->tag == Iex_Binop) {
+		break;
+	}
+	case Iex_Binop: {
 		IRExprBinop *_ieb = (IRExprBinop *)a;
 		auto arg1 = quickSimplify(_ieb->arg1);
 		auto arg2 = quickSimplify(_ieb->arg2);
@@ -444,6 +447,23 @@ quickSimplify(IRExpr *a)
 				return IRExpr_Const_U64(arg1c->Ico.U64 * arg2c->Ico.U64);
 			case Iop_64HLto128:
 				return IRExpr_Const_U128(arg1c->Ico.U64, arg2c->Ico.U64);
+			case Iop_DivModU128to64: {
+				__uint128_t num;
+				unsigned long denom = arg2c->Ico.U64;
+				num = arg1c->Ico.U128.hi;
+				num <<= 64;
+				num |= arg1c->Ico.U128.lo;
+				if (denom == 0) {
+					warning("Constant division by zero (%ld:%ld/%ld)?\n",
+						(unsigned long)(num >> 64),
+						(unsigned long)num,
+						denom);
+					break;
+				}
+				unsigned long div = num / denom;
+				unsigned long mod = num % denom;
+				return IRExpr_Const_U128(mod, div);
+			}
 			default:
 				abort();
 			}
@@ -468,7 +488,9 @@ quickSimplify(IRExpr *a)
 		}
 		if (arg1 != _ieb->arg1 || arg2 != _ieb->arg2)
 			a = new IRExprBinop(_ieb->op, arg1, arg2);
-	} else if (a->tag == Iex_Associative) {
+		break;
+	}
+	case Iex_Associative: {
 		IRExprAssociative *_iea = (IRExprAssociative *)a;
 		int const nr_arguments = _iea->nr_arguments;
 		IROp const op = _iea->op;
@@ -627,7 +649,9 @@ quickSimplify(IRExpr *a)
 		}
 		assert(outIdx == new_nr_args);
 		a = IRExpr_Associative_Claim(op, new_nr_args, newArgs);
-	} else if (a->tag == Iex_Mux0X) {
+		break;
+	}
+	case Iex_Mux0X: {
 		IRExprMux0X *m = (IRExprMux0X *)a;
 		auto cond = quickSimplify(m->cond);
 		auto expr0 = quickSimplify(m->expr0);
@@ -635,6 +659,62 @@ quickSimplify(IRExpr *a)
 		if (cond != m->cond || expr0 != m->expr0 ||
 		    exprX != m->exprX)
 			a = new IRExprMux0X(cond, expr0, exprX);
+		break;
+	}
+	case Iex_Load: {
+		IRExprLoad *l = (IRExprLoad *)a;
+		auto addr = quickSimplify(l->addr);
+		if (addr != l->addr)
+			a = new IRExprLoad(l->ty, addr);
+		break;
+	}
+	case Iex_Get:
+	case Iex_GetI:
+	case Iex_Const:
+	case Iex_HappensBefore:
+	case Iex_FreeVariable:
+	case Iex_EntryPoint:
+	case Iex_ControlFlow:
+		break;
+	case Iex_Qop: {
+		IRExprQop *q = (IRExprQop *)a;
+		auto a1 = quickSimplify(q->arg1);
+		auto a2 = quickSimplify(q->arg2);
+		auto a3 = quickSimplify(q->arg3);
+		auto a4 = quickSimplify(q->arg4);
+		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3 || a4 != q->arg4)
+			a = new IRExprQop(q->op, a1, a2, a3, a4);
+		break;
+	}
+	case Iex_Triop: {
+		IRExprTriop *q = (IRExprTriop *)a;
+		auto a1 = quickSimplify(q->arg1);
+		auto a2 = quickSimplify(q->arg2);
+		auto a3 = quickSimplify(q->arg3);
+		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3)
+			a = new IRExprTriop(q->op, a1, a2, a3);
+		break;
+	}
+	case Iex_CCall: {
+		auto c = (IRExprCCall *)a;
+		int nr_args;
+		for (nr_args = 0; c->args[nr_args]; nr_args++)
+			;
+		IRExpr *newArgs[nr_args + 1];
+		newArgs[nr_args] = NULL;
+		bool realloc = false;
+		for (int i = 0; i < nr_args; i++) {
+			newArgs[i] = quickSimplify(c->args[i]);
+			if (newArgs[i] != c->args[i])
+				realloc = true;
+		}
+		if (realloc) {
+			IRExpr **n = alloc_irexpr_array(nr_args+1);
+			memcpy(n, newArgs, (nr_args+1) * sizeof(IRExpr *));
+			a = IRExpr_CCall(c->cee, c->retty, n);
+		}
+		break;
+	}
 	}
 	return a;
 }
@@ -1003,110 +1083,170 @@ exprbdd_scope::runGc(HeapVisitor &hv)
 	bdd_scope<exprbdd>::runGc(hv);
 }
 
-exprbdd *
-exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
-{
-	if (TIMEOUT)
-		return NULL;
-	if (what->isLeaf())
-		return var(
+class unop_zipper {
+	IROp op;
+	exprbdd *what;
+public:
+	unop_zipper(IROp _op, exprbdd *_what)
+		: op(_op), what(_what)
+	{}
+	bool isLeaf() const { return what->isLeaf(); }
+	exprbdd *leaf(exprbdd::scope *scope,
+		      bbdd::scope *bscope) const {
+		return exprbdd::var(
 			scope,
 			bscope,
 			IRExpr_Unop(op, what->leaf()));
-	else
-		return ifelse(
-			scope,
-			bbdd::var(bscope, what->internal().condition),
-			unop(scope, bscope, op, what->internal().trueBranch),
-			unop(scope, bscope, op, what->internal().falseBranch));
-}
-
+	}
+	IRExpr *condition() const {
+		return what->internal().condition;
+	}
+	const bdd_rank &rank() const {
+		return what->internal().rank;
+	}
+	unop_zipper trueBranch() const {
+		return unop_zipper(op, what->internal().trueBranch);
+	}
+	unop_zipper falseBranch() const {
+		return unop_zipper(op, what->internal().falseBranch);
+	}
+	bool operator<(const unop_zipper &o) const {
+		if (what < o.what)
+			return true;
+		if (what > o.what)
+			return false;
+		return op < o.op;
+	}
+};
 exprbdd *
-exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, IRExpr *a, exprbdd *b)
+exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 {
-	if (TIMEOUT)
-		return NULL;
-	if (b->isLeaf())
-		return var(
-			scope,
-			bscope,
-			IRExpr_Binop(op, a, b->leaf()));
-	else
-		return ifelse(
-			scope,
-			bbdd::var(bscope, b->internal().condition),
-			exprbdd::binop(scope, bscope, op, a, b->internal().trueBranch),
-			exprbdd::binop(scope, bscope, op, a, b->internal().falseBranch));
+	return exprbdd::restructure_zip(scope, bscope, unop_zipper(op, what));
 }
 
-exprbdd *
-exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, IRExpr *b)
-{
-	if (TIMEOUT)
-		return NULL;
-	if (a->isLeaf())
-		return var(
-			scope,
-			bscope,
-			IRExpr_Binop(op, a->leaf(), b));
-	else
-		return ifelse(
-			scope,
-			bbdd::var(bscope, a->internal().condition),
-			exprbdd::binop(scope, bscope, op, a->internal().trueBranch,  b),
-			exprbdd::binop(scope, bscope, op, a->internal().falseBranch, b));
-}
-
+class binop_zip {
+	IROp op;
+	exprbdd *a;
+	exprbdd *b;
+public:
+	binop_zip(IROp _op, exprbdd *_a, exprbdd *_b)
+		: op(_op), a(_a), b(_b)
+	{}
+	bool isLeaf() const {
+		return a->isLeaf() && b->isLeaf();
+	}
+	exprbdd *leaf(exprbdd::scope *scope, bbdd::scope *bscope) const {
+		return exprbdd::var(scope, bscope, IRExpr_Binop(op, a->leaf(), b->leaf()));
+	}
+	IRExpr *condition() const {
+		if (a->isLeaf()) {
+			assert(!b->isLeaf());
+			return b->internal().condition;
+		} else if (b->isLeaf()) {
+			return a->internal().condition;
+		} else if (a->internal().rank <= b->internal().rank) {
+			return a->internal().condition;
+		} else {
+			return b->internal().condition;
+		}
+	}
+	const bdd_rank &rank() const {
+		if (a->isLeaf()) {
+			assert(!b->isLeaf());
+			return b->internal().rank;
+		} else if (b->isLeaf()) {
+			return a->internal().rank;
+		} else if (a->internal().rank <= b->internal().rank) {
+			return a->internal().rank;
+		} else {
+			return b->internal().rank;
+		}
+	}
+	binop_zip trueBranch() const {
+		if (a->isLeaf()) {
+			assert(!b->isLeaf());
+			return binop_zip(op, a, b->internal().trueBranch);
+		} else if (b->isLeaf()) {
+			return binop_zip(op, a->internal().trueBranch, b);
+		} else if (a->internal().rank < b->internal().rank) {
+			return binop_zip(op, a->internal().trueBranch, b);
+		} else if (a->internal().rank == b->internal().rank) {
+			return binop_zip(op, a->internal().trueBranch, b->internal().trueBranch);
+		} else {
+			return binop_zip(op, a, b->internal().trueBranch);
+		}
+	}
+	binop_zip falseBranch() const {
+		if (a->isLeaf()) {
+			assert(!b->isLeaf());
+			return binop_zip(op, a, b->internal().falseBranch);
+		} else if (b->isLeaf()) {
+			return binop_zip(op, a->internal().falseBranch, b);
+		} else if (a->internal().rank < b->internal().rank) {
+			return binop_zip(op, a->internal().falseBranch, b);
+		} else if (a->internal().rank == b->internal().rank) {
+			return binop_zip(op, a->internal().falseBranch, b->internal().falseBranch);
+		} else {
+			return binop_zip(op, a, b->internal().falseBranch);
+		}
+	}
+	bool operator<(const binop_zip &o) const {
+		if (a < o.a)
+			return true;
+		if (a > o.a)
+			return false;
+		if (b < o.b)
+			return true;
+		if (b > o.b)
+			return false;
+		return op < o.op;
+	}
+};
 exprbdd *
 exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b)
 {
-	if (TIMEOUT)
-		return NULL;
-	if (a->isLeaf() && b->isLeaf())
-		return var(
-			scope,
-			bscope,
-			IRExpr_Binop(op, a->leaf(), b->leaf()));
-	else if (a->isLeaf())
-		return binop(scope, bscope, op, a->leaf(), b);
-	else if (b->isLeaf())
-		return binop(scope, bscope, op, a, b->leaf());
-	else if (a->internal().rank < b->internal().rank)
-		return ifelse(
-			scope,
-			bbdd::var(bscope, a->internal().condition),
-			binop(scope, bscope, op, a->internal().trueBranch, b),
-			binop(scope, bscope, op, a->internal().falseBranch, b));
-	else if (a->internal().rank == b->internal().rank)
-		return ifelse(
-			scope,
-			bbdd::var(bscope, a->internal().condition),
-			binop(scope, bscope, op, a->internal().trueBranch, b->internal().trueBranch),
-			binop(scope, bscope, op, a->internal().falseBranch, b->internal().falseBranch));
-	else
-		return ifelse(
-			scope,
-			bbdd::var(bscope, b->internal().condition),
-			binop(scope, bscope, op, a, b->internal().trueBranch),
-			binop(scope, bscope, op, a, b->internal().falseBranch));
+	return restructure_zip(scope, bscope, binop_zip(op, a, b));
 }
 
-exprbdd *
-exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *what)
-{
-	if (TIMEOUT)
-		return NULL;
-	if (what->isLeaf())
-		return var(
+class load_zipper {
+	IRType ty;
+	exprbdd *what;
+public:
+	load_zipper(IRType _ty, exprbdd *_what)
+		: ty(_ty), what(_what)
+	{}
+	bool isLeaf() const { return what->isLeaf(); }
+	exprbdd *leaf(exprbdd::scope *scope,
+		      bbdd::scope *bscope) const {
+		return exprbdd::var(
 			scope,
 			bscope,
 			IRExpr_Load(ty, what->leaf()));
-	else
-		return ifelse(
-			scope,
-			bbdd::var(bscope, what->internal().condition),
-			load(scope, bscope, ty, what->internal().trueBranch),
-			load(scope, bscope, ty, what->internal().falseBranch));	
+	}
+	IRExpr *condition() const {
+		return what->internal().condition;
+	}
+	const bdd_rank &rank() const {
+		return what->internal().rank;
+	}
+	load_zipper trueBranch() const {
+		return load_zipper(ty, what->internal().trueBranch);
+	}
+	load_zipper falseBranch() const {
+		return load_zipper(ty, what->internal().falseBranch);
+	}
+	bool operator<(const load_zipper &o) const {
+		if (what < o.what)
+			return true;
+		if (what > o.what)
+			return false;
+		return ty < o.ty;
+	}
+};
+exprbdd *
+exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *what)
+{
+	return restructure_zip(scope, bscope, load_zipper(ty, what));
 }
 
 exprbdd *

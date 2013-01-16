@@ -169,7 +169,7 @@ void VAMap::addTranslation(unsigned long start,
 		printf("%p, new root\n", this);
 #endif
 		PhysicalAddress *newPas =
-			(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress));
+			(PhysicalAddress *)LibVEX_Alloc_Bytes(&main_heap, sizeof(PhysicalAddress));
 		*newPas = pa;
 		root = VAMapEntry::alloc(start, end, newPas);
 		return;
@@ -222,7 +222,7 @@ void VAMap::addTranslation(unsigned long start,
 				       vme->start, vme->end);
 #endif
 				PhysicalAddress *newPas =
-					(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress));
+					(PhysicalAddress *)LibVEX_Alloc_Bytes(&main_heap, sizeof(PhysicalAddress));
 				*newPas = pa;
 				newVme = VAMapEntry::alloc(start, end, newPas);
 				vme->prev = newVme;
@@ -238,7 +238,7 @@ void VAMap::addTranslation(unsigned long start,
 				       vme->start, vme->end);
 #endif
 				PhysicalAddress *newPas =
-					(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(PhysicalAddress));
+					(PhysicalAddress *)LibVEX_Alloc_Bytes(&main_heap, sizeof(PhysicalAddress));
 				*newPas = pa;
 				newVme = VAMapEntry::alloc(start, end, newPas);
 				vme->succ = newVme;
@@ -270,7 +270,7 @@ void VAMap::VAMapEntry::split(unsigned long at)
 	if (!prev) {
 		newVme = alloc(start, at, pa);
 		start = at;
-		pa = (PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(pa[0]) * dchunk(start, end));
+		pa = (PhysicalAddress *)LibVEX_Alloc_Bytes(&main_heap, sizeof(pa[0]) * dchunk(start, end));
 		memcpy(pa,
 		       newVme->pa + dchunk(newVme->start, newVme->end),
 		       sizeof(pa[0]) * dchunk(start, end));
@@ -281,7 +281,7 @@ void VAMap::VAMapEntry::split(unsigned long at)
 		prev = newVme;
 	} else {
 		PhysicalAddress *newPas =
-			(PhysicalAddress *)LibVEX_Alloc_Bytes(sizeof(pa[0]) * dchunk(at, end));
+			(PhysicalAddress *)LibVEX_Alloc_Bytes(&main_heap, sizeof(pa[0]) * dchunk(at, end));
 		memcpy(newPas,
 		       pa + dchunk(start, at),
 		       sizeof(pa[0]) * dchunk(at, end));

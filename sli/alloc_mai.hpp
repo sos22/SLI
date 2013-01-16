@@ -9,9 +9,9 @@ class MaiMap : public GarbageCollected<MaiMap, &ir_heap> {
 	MaiMap()
 		: nextId(1), maiCorrespondence(new std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> >())
 	{}
-	MaiMap(int _nextId, std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> > *_corr)
+	MaiMap(int _nextId, const std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> > *_corr)
 		: nextId(_nextId),
-		  maiCorrespondence(_corr)
+		  maiCorrespondence(new std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> >(*_corr))
 	{}
 	void operator = (const MaiMap &o); /* DNI */
 	MaiMap(const MaiMap &o); /* DNI */
@@ -23,9 +23,7 @@ public:
 	static MaiMap *empty() { return new MaiMap(); }
 	MaiMap *dupe() const
 	{
-		return new MaiMap(
-			nextId,
-			new std::map<MemoryAccessIdentifier, std::vector<const CFGNode *> >(*maiCorrespondence));
+		return new MaiMap(nextId, maiCorrespondence);
 	}
 
 	MemoryAccessIdentifier operator()(unsigned tid, const CFGNode *node);

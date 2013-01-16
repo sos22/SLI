@@ -934,7 +934,8 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		target = ((StateMachineSideEffecting *)target)->target;
 	}
 
-	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
+	if (sideEffect &&
+	    sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    target->type == StateMachineState::Terminal) {
 		StateMachineSideEffectAssertFalse *se = (StateMachineSideEffectAssertFalse *)sideEffect;
 		StateMachineTerminal *term = (StateMachineTerminal *)target;
@@ -1033,8 +1034,10 @@ MaiMap::operator()(unsigned tid, const CFGNode *node)
 {
 	MemoryAccessIdentifier res(nextId, tid);
 	nextId++;
+	std::vector<const CFGNode *> value;
+	value.push_back(node);
 	assert(!maiCorrespondence->count(res));
-	(*maiCorrespondence)[res].push_back(node);
+	maiCorrespondence->insert(std::pair<MemoryAccessIdentifier, std::vector<const CFGNode *> >(res, value));
 	return res;
 }
 
