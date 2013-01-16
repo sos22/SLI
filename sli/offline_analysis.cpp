@@ -337,6 +337,15 @@ _optimiseStateMachine(SMScopes *scopes,
 			predecessor_map pred(sm);
 			control_dependence_graph cdg(sm, &scopes->bools);
 
+			p = false;
+			sm = cdgOptimise(scopes, sm, cdg, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("cdgOptimise:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+
+			p = false;
 			sm = phiElimination(scopes, sm, pred, cdg, &p);
 			if (debugOptimiseStateMachine && p) {
 				printf("phiElimination:\n");

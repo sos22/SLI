@@ -157,19 +157,7 @@ build_selection_bdd(SMScopes *scopes,
 			bool failed = false;
 			for (auto it = pred.begin(); !failed && it != pred.end(); it++) {
 				bbdd *ass = assumption;
-				bbdd *condition = cdg.domOf(*it);
-				if ( (*it)->type == StateMachineState::Bifurcate &&
-				     ((StateMachineBifurcate *)*it)->trueTarget !=
-				     ((StateMachineBifurcate *)*it)->falseTarget ) {
-					if ( ((StateMachineBifurcate *)*it)->trueTarget == state ) {
-						condition = bbdd::And(&scopes->bools, condition,
-								      ((StateMachineBifurcate *)*it)->condition);
-					} else {
-						assert(((StateMachineBifurcate *)*it)->falseTarget == state);
-						condition = bbdd::And(&scopes->bools, condition,
-								      bbdd::invert(&scopes->bools, ((StateMachineBifurcate *)*it)->condition));
-					}
-				}
+				bbdd *condition = cdg.edgeCondition(scopes, *it, state);
 				condition = bbdd::assume(&scopes->bools, condition, ass);
 				exprbdd *res = exprbdd::assume(&scopes->exprs, m[*it], ass);
 				exprbdd **slot = enabling.getSlot(condition, res);
