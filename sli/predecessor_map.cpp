@@ -12,6 +12,9 @@ predecessor_map::predecessor_map(StateMachine *sm)
 		for (auto it2 = ss.begin(); it2 != ss.end(); it2++)
 			content[*it2].insert(*it);
 	}
+
+	std::set<StateMachineState *> empty;
+	content.insert(std::pair<StateMachineState *, std::set<StateMachineState *> >(sm->root, empty));
 }
 
 void
