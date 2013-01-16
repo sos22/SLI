@@ -179,9 +179,9 @@ cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg, b
 	for (auto it = states.begin(); !TIMEOUT && it != states.end(); it++) {
 		std::vector<StateMachineState **> targs;
 		(*it)->targets(targs);
-		for (auto it2 = targs.begin(); it2 != targs.end(); it2++) {
+		for (auto it2 = targs.begin(); !TIMEOUT && it2 != targs.end(); it2++) {
 			bbdd *dom = cdg.edgeCondition(scopes, *it, **it2);
-			if (dom->isLeaf() && dom->leaf() == false) {
+			if (!TIMEOUT && dom->isLeaf() && dom->leaf() == false) {
 				/* This edge can never be taken. */
 				if (debug_control_dependence) {
 					killedEdges.push_back(
