@@ -141,7 +141,7 @@ control_dependence_graph::edgeCondition(SMScopes *scopes,
 					const StateMachineState *a,
 					const StateMachineState *b) const
 {
-	bbdd *base = domOf(b);
+	bbdd *base = domOf(a);
 	bbdd *res = base;
 	if (a->type == StateMachineState::Bifurcate) {
 		const StateMachineBifurcate *smb = (const StateMachineBifurcate *)a;
