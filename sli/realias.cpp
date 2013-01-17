@@ -1330,13 +1330,17 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		}
 		ptt = ptt2;
 
-		at.refine(scopes, ptt, stackLayout, sm, &p, stateLabels);
-		if (!p)
-			break;
-		if (debug_refine_alias_table) {
+		bool p2 = false;
+		at.refine(scopes, ptt, stackLayout, sm, &p2, stateLabels);
+		p |= p2;
+
+		if (p2 && debug_refine_alias_table) {
 			printf("Refined alias table:\n");
 			at.prettyPrint(stdout, stateLabels);
 		}
+
+		if (!p)
+			break;
 	}
 	if (any_debug) {
 		printf("Final points-to table:\n");
