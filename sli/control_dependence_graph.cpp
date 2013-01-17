@@ -166,7 +166,9 @@ control_dependence_graph::edgeCondition(SMScopes *scopes,
 			res = bbdd::And(
 				&scopes->bools,
 				base,
-				((StateMachineSideEffectAssertFalse *)sme->sideEffect)->value);
+				bbdd::invert(
+					&scopes->bools,
+					((StateMachineSideEffectAssertFalse *)sme->sideEffect)->value));
 		}
 	}
 	return res;
