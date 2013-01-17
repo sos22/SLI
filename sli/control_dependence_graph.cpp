@@ -109,9 +109,21 @@ control_dependence_graph::control_dependence_graph(const StateMachine *sm,
 		}
 		case StateMachineState::SideEffecting: {
 			const StateMachineSideEffecting *sme = (const StateMachineSideEffecting *)s;
-			addPath(content[sme->target],
-				dom,
-				sme->target);
+			if (sme->sideEffect &&
+			    sme->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+				addPath(content[sme->target],
+					bbdd::And(
+						scope,
+						dom,
+						bbdd::invert(
+							scope,
+							((StateMachineSideEffectAssertFalse *)sme->sideEffect)->value)),
+					sme->target);
+			} else {
+				addPath(content[sme->target],
+					dom,
+					sme->target);
+			}
 			if (debug_control_dependence) {
 				printf("Update l%d to:\n", labels[sme->target]);
 				content[sme->target]->prettyPrint(stdout);
@@ -146,6 +158,15 @@ control_dependence_graph::edgeCondition(SMScopes *scopes,
 					base,
 					bbdd::invert(&scopes->bools, smb->condition));
 			}
+		}
+	} else if (a->type == StateMachineState::SideEffecting) {
+		const StateMachineSideEffecting *sme = (const StateMachineSideEffecting *)a;
+		assert(b == sme->target);
+		if (sme->sideEffect && sme->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+			res = bbdd::And(
+				&scopes->bools,
+				base,
+				((StateMachineSideEffectAssertFalse *)sme->sideEffect)->value);
 		}
 	}
 	return res;
