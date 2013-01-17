@@ -4,6 +4,14 @@
 
 predecessor_map::predecessor_map(StateMachine *sm)
 {
+	recompute(sm);
+}
+
+void
+predecessor_map::recompute(StateMachine *sm)
+{
+	content.clear();
+
 	/* Root state is special; make sure it's present, even if we
 	   never find a predecessor for it (which we won't, if the
 	   machine is acyclic). */

@@ -342,6 +342,8 @@ _optimiseStateMachine(SMScopes *scopes,
 				printf("cdgOptimise:\n");
 				printStateMachine(sm, stdout);
 			}
+			if (p)
+				pred.recompute(sm);
 			done_something |= p;
 
 			sm = functionAliasAnalysis(scopes, *mai, sm, opt,
