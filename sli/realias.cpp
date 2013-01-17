@@ -19,6 +19,7 @@ static bool debug_refine_points_to_table = false;
 static bool debug_build_alias_table = false;
 static bool debug_refine_alias_table = false;
 static bool debug_use_alias_table = false;
+static bool debug_enum_backwards = false;
 static void enable_debug() __attribute__((unused, used));
 static void enable_debug() {
 	debug_build_stack_layout = true;
@@ -27,6 +28,7 @@ static void enable_debug() {
 	debug_build_alias_table = true;
 	debug_refine_alias_table = true;
 	debug_use_alias_table = true;
+	debug_enum_backwards = true;
 }
 #else
 #define debug_build_stack_layout false
@@ -35,8 +37,9 @@ static void enable_debug() {
 #define debug_build_alias_table false
 #define debug_refine_alias_table false
 #define debug_use_alias_table false
+#define debug_enum_backwards false
 #endif
-#define any_debug (debug_build_stack_layout || debug_build_points_to_table || debug_refine_points_to_table || debug_build_alias_table || debug_refine_alias_table || debug_use_alias_table)
+#define any_debug (debug_build_stack_layout || debug_build_points_to_table || debug_refine_points_to_table || debug_build_alias_table || debug_refine_alias_table || debug_use_alias_table || debug_enum_backwards)
 
 class AliasTable;
 
@@ -1136,8 +1139,14 @@ static void
 breadthFirstEnumBackwards(const predecessor_map &pm,
 			  StateMachineState *startFrom,
 			  StateMachineState *root,
-			  std::vector<StateMachineState *> &out)
+			  std::vector<StateMachineState *> &out,
+			  std::map<const StateMachineState *, int> &labels)
 {
+	if (debug_enum_backwards) {
+		printf("Enum backwards from l%d to l%d\n", labels[startFrom],
+		       labels[root]);
+	}
+
 	/* Map from states to the number of predecessors of that node
 	   which have not yet been enumerated.  Only contains entries
 	   for states which can reach @startFrom. */
@@ -1157,8 +1166,14 @@ breadthFirstEnumBackwards(const predecessor_map &pm,
 		std::vector<StateMachineState *> pred;
 		pm.getPredecessors(s, pred);
 		it->second = pred.size();
-		if (pred.size() == 0)
+		if (pred.size() == 0) {
 			assert(s == root);
+		}
+		if (debug_enum_backwards) {
+			printf("l%d has %zd predecessors\n", 
+			       labels[s], pred.size());
+		}
+
 		for (auto it = pred.begin(); it != pred.end(); it++)
 			pending.push_back(*it);
 	}
@@ -1181,6 +1196,11 @@ breadthFirstEnumBackwards(const predecessor_map &pm,
 		emitted.insert(s);
 #endif
 		out.push_back(s);
+
+		if (debug_enum_backwards) {
+			printf("Emit l%d\n", labels[s]);
+		}
+
 		std::vector<StateMachineState *> targs;
 		s->targets(targs);
 		for (auto it = targs.begin(); it != targs.end(); it++) {
@@ -1193,6 +1213,12 @@ breadthFirstEnumBackwards(const predecessor_map &pm,
 			}
 			assert(it2->second > 0);
 			it2->second--;
+			if (debug_enum_backwards) {
+				printf("Dismiss l%d -> l%d; l%d has %d predecessors left\n",
+				       labels[s], labels[target],
+				       labels[target],
+				       it2->second);
+			}
 			if (it2->second == 0) {
 				/* All predecessors of this target
 				   emitted -> emit the target. */
@@ -1200,8 +1226,31 @@ breadthFirstEnumBackwards(const predecessor_map &pm,
 			}
 		}
 	}
+
 #ifndef NDEBUG
-	assert(emitted.size() == neededPredecessors.size());
+	if (emitted.size() != neededPredecessors.size()) {
+		printf("Whoops, failed to emit all needed states\n");
+		printf("Emitted extras: ");
+		for (auto it = emitted.begin(); it != emitted.end(); it++) {
+			if (!neededPredecessors.count(*it)) {
+				printf("l%d ", labels[*it]);
+			}
+		}
+		printf("\nFailed to emit: ");
+		for (auto it = neededPredecessors.begin(); it != neededPredecessors.end(); it++) {
+			if (!emitted.count(it->first)) {
+				printf("l%d ", labels[it->first]);
+			}
+		}
+		printf("\nLeft-over predecessors: ");
+		for (auto it = neededPredecessors.begin(); it != neededPredecessors.end(); it++) {
+			if (it->second != 0) {
+				printf("l%d(%d) ", labels[it->first], it->second);
+			}
+		}
+		printf("\n");
+		abort();
+	}
 #endif
 }
 
@@ -1437,7 +1486,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		/* Figure out what order to visit states in so as to
 		 * avoid revisiting any states. */
 		std::vector<StateMachineState *> statesToVisit;
-		breadthFirstEnumBackwards(predMap, it->first, sm->root, statesToVisit);
+		breadthFirstEnumBackwards(predMap, it->first, sm->root, statesToVisit, stateLabels);
 
 		if (debug_use_alias_table) {
 			printf("State visit order: ");
