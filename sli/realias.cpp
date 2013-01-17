@@ -1542,22 +1542,31 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			     it3 != predecessors.end();
 			     it3++) {
 				StateMachineState *predState = *it3;
-				bbdd *condition;
+				bbdd *condition, *c;
 				if (predState) {
 					condition = cdg.edgeCondition(scopes, predState, state);
 				} else {
 					condition = scopes->bools.cnst(true);
 				}
+				c = condition;
+				/* Should have already applied CDG
+				 * optimisation to remove these
+				 * edges. */
+				assert(condition != scopes->bools.cnst(false));
 				condition = bbdd::assume(&scopes->bools, condition, assumption);
 				if (!condition) {
 					/* Can't actually take this edge. */
 					continue;
 				}
+				/* If there's a path from A to B then
+				   knowing that B is reached shouldn't
+				   imply that A is unreachable. */
+				assert(condition != scopes->bools.cnst(false));
+
 				assert(replacements.count(predState));
 				exprbdd **slot = tabAtStartOfState.getSlot(
 					condition,
 					replacements[predState]);
-				assert(*slot == replacements[predState]);
 				if (debug_use_alias_table) {
 					printf("Consider edge l%d -> l%d\n",
 					       stateLabels[predState],
@@ -1567,6 +1576,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 					printf("Value ");
 					replacements[predState]->prettyPrint(stdout);
 				}
+				assert(*slot == replacements[predState]);
 			}
 			if (TIMEOUT) {
 				return sm;
