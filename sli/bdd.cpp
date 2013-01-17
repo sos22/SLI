@@ -744,6 +744,9 @@ public:
 	bool isAnd;
 	bbdd *first;
 	bbdd *second;
+	void move(binary_zip_internal &o) const {
+		o = *this;
+	}
 	const bdd_rank &bestCond(IRExpr **cond) const {
 		assert(!(first->isLeaf() && second->isLeaf()));
 		if (first->isLeaf()) {
@@ -830,12 +833,14 @@ public:
 bbdd *
 bbdd::And(scope *scope, bbdd *a, bbdd *b)
 {
-	return zip(scope, binary_zip_internal(true, a, b));
+	binary_zip_internal f(true, a, b);
+	return zip(scope, f);
 }
 bbdd *
 bbdd::Or(scope *scope, bbdd *a, bbdd *b)
 {
-	return zip(scope, binary_zip_internal(false, a, b));
+	binary_zip_internal f(false, a, b);
+	return zip(scope, f);
 }
 
 bbdd *

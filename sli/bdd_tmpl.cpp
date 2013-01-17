@@ -40,6 +40,12 @@
    beyond those needed for std::map to work.
 
 
+   void move(zipInternalT &o);
+
+   Set o to be a copy of *this, with the hint that this will never be
+   referenced again except to run its destructor.
+
+
    static subtreeT *fixup(subtreeT *what);
 
    Called for each node in the BDD once we've fixed its contents.  It
@@ -60,6 +66,9 @@ template <typename subtreeT> class assume_zip_internal {
 public:
 	subtreeT *thing;
 	bbdd *assumption;
+	void move(assume_zip_internal &o) const {
+		o = *this;
+	}
 	assume_zip_internal(subtreeT *_thing, bbdd *_assumption)
 		: thing(_thing), assumption(_assumption)
 	{}
@@ -126,7 +135,8 @@ public:
 template <typename constT, typename subtreeT> template <typename scopeT> subtreeT *
 _bdd<constT, subtreeT>::assume(scopeT *scope, subtreeT *thing, bbdd *assumption)
 {
-	return zip(scope, assume_zip_internal<subtreeT>(thing, assumption));
+	assume_zip_internal<subtreeT> f(thing, assumption);
+	return zip(scope, f);
 }
 
 #define INTBDD_DONT_CARE ((subtreeT *)0x1)
@@ -135,6 +145,10 @@ class from_enabling_internal {
 public:
 	bool failed;
 	typename subtreeT::enablingTableT table;
+	void move(from_enabling_internal &o) {
+		o.failed = failed;
+		table.move(o.table);
+	}
 	from_enabling_internal(const typename subtreeT::enablingTableT &_table)
 		: failed(false)
 	{
@@ -250,7 +264,8 @@ template <typename constT, typename subtreeT> template <typename scopeT>
 subtreeT *
 _bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp, subtreeT *defaultValue)
 {
-	subtreeT *res = zip(scope, from_enabling_internal<subtreeT, scopeT>(inp));
+	from_enabling_internal<subtreeT, scopeT> f(inp);
+	subtreeT *res = zip(scope, f);
 	if (res == INTBDD_DONT_CARE)
 		return defaultValue;
 	else
@@ -663,6 +678,9 @@ template <typename subtreeT, typename scopeT> class ifelse_zip_internal {
 	subtreeT *ifTrue;
 	subtreeT *ifFalse;
 public:
+	void move(ifelse_zip_internal &o) const {
+		o = *this;
+	}
 	ifelse_zip_internal(bbdd *_cond, subtreeT *_ifTrue, subtreeT *_ifFalse)
 		: cond(_cond), ifTrue(_ifTrue), ifFalse(_ifFalse)
 	{}
@@ -731,7 +749,8 @@ _bdd<constT, subtreeT>::ifelse(scopeT *scope,
 			       subtreeT *ifTrue,
 			       subtreeT *ifFalse)
 {
-	return zip(scope, ifelse_zip_internal<subtreeT, scopeT>(cond, ifTrue, ifFalse));
+	ifelse_zip_internal<subtreeT, scopeT> f(cond, ifTrue, ifFalse);
+	return zip(scope, f);
 }
 
 template <typename constT, typename subtreeT> subtreeT *
@@ -819,9 +838,95 @@ _bdd<constT, subtreeT>::reduceBdd(scopeT *scope, std::map<subtreeT *, subtreeT *
 	return it->second;
 }
 
+template <typename subtreeT, typename zipInternalT>
+class reloc_queue {
+	struct entryT {
+		subtreeT **slot;
+		zipInternalT element;
+	};
+	static const unsigned entriesPerSlab = 128;
+	static const unsigned nrInline = 4;
+
+	struct slabT : public GarbageCollected<slabT, &ir_heap> {
+		struct slabT *prev;
+		unsigned char _entries[entriesPerSlab * sizeof(entryT)];
+		entryT &entries(int idx) {
+			return ((entryT *)_entries)[idx];
+		}
+
+		void visit(HeapVisitor &) { abort(); }
+		NAMED_CLASS
+	};
+
+	unsigned char _inlineEntries[nrInline * sizeof(entryT)];
+	struct entryT &inlineEntry(int idx) {
+		return ((entryT *)_inlineEntries)[idx];
+	}
+	unsigned inline_idx;
+
+	struct slabT *curSlab;
+	unsigned slab_idx;
+public:
+	reloc_queue()
+		: inline_idx(0), curSlab(NULL), slab_idx(entriesPerSlab)
+	{}
+#ifndef NDEBUG
+	~reloc_queue()
+	{
+		if (TIMEOUT)
+			return;
+		assert(!curSlab);
+		assert(slab_idx == entriesPerSlab || slab_idx == 0);
+		assert(inline_idx == 0);
+	}
+#endif
+	void push(subtreeT **slot, zipInternalT &element) {
+		if (inline_idx < nrInline) {
+			inlineEntry(inline_idx).slot = slot;
+			element.move(inlineEntry(inline_idx).element);
+			inline_idx++;
+		} else {
+			if (slab_idx == entriesPerSlab) {
+				slabT *newSlab = new slabT();
+				newSlab->prev = curSlab;
+				curSlab = newSlab;
+				slab_idx = 0;
+			}
+			assert(curSlab);
+			curSlab->entries(slab_idx).slot = slot;
+			element.move(curSlab->entries(slab_idx).element);
+			slab_idx++;
+		}
+	}
+	bool empty() const {
+		return inline_idx == 0;
+	}
+	const zipInternalT &next(subtreeT ***slot) {
+	top:
+		if (curSlab) {
+			assert(inline_idx == nrInline);
+			if (slab_idx == 0) {
+				slabT *nextSlab = curSlab->prev;
+				LibVEX_free(curSlab);
+				curSlab = nextSlab;
+				slab_idx = entriesPerSlab;
+				goto top;
+			}
+			slab_idx--;
+			*slot = curSlab->entries(slab_idx).slot;
+			return curSlab->entries(slab_idx).element;
+		} else {
+			assert(inline_idx != 0);
+			inline_idx--;
+			*slot = inlineEntry(inline_idx).slot;
+			return inlineEntry(inline_idx).element;
+		}
+	}
+};
+
 template <typename constT, typename subtreeT> template <typename scopeT, typename zipInternalT>
 subtreeT *
-_bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
+_bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 {
 	if (TIMEOUT)
 		return NULL;
@@ -830,15 +935,14 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 		return rootZip.leafzip();
 
 	subtreeT *newRoot;
-	typedef std::pair<subtreeT **, zipInternalT> relocT;
 	typedef std::pair<const bdd_rank &, IRExpr *> relocKeyT;
-	std::map<relocKeyT, std::vector<relocT> > relocs;
+	std::map<relocKeyT, reloc_queue<subtreeT, zipInternalT> > relocs;
 
 	/* Set up root relocation */
 	{
 		IRExpr *rootCond;
 		const bdd_rank &rootRank(rootZip.bestCond(&rootCond));
-		relocs[relocKeyT(rootRank, rootCond)].push_back(relocT(&newRoot, rootZip));
+		relocs[relocKeyT(rootRank, rootCond)].push(&newRoot, rootZip);
 	}
 
 	/* Resolve relocs.  This is a little bit cunning.  The idea is
@@ -870,7 +974,7 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 
 	/* Leaves are special, because they don't test any
 	   expressions.  Process them last. */
-	std::vector<relocT> leafRelocs;
+	reloc_queue<subtreeT, zipInternalT> leafRelocs;
 
 	while (!relocs.empty()) {
 		if (TIMEOUT)
@@ -878,15 +982,15 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 
 		auto it = relocs.begin();
 		const relocKeyT key(it->first);
-		const std::vector<relocT> &rq(it->second);
+		reloc_queue<subtreeT, zipInternalT> &rq(it->second);
 
 		/* Construct all nodes which test key.first. */
 		assert(key.first == scope->ordering->rankVariable(key.second));
 
 		std::map<zipInternalT, subtreeT *> memo;
-		for (auto it2 = rq.begin(); it2 != rq.end(); it2++) {
-			subtreeT **relocPtr = it2->first;
-			const zipInternalT &relocWhere(it2->second);
+		while (!rq.empty()) {
+			subtreeT **relocPtr;
+			const zipInternalT &relocWhere(rq.next(&relocPtr));
 			assert(!relocWhere.isLeaf());
 #ifndef NDEBUG
 			{
@@ -912,20 +1016,20 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 				/* Set up relocations for the true and
 				 * false branches */
 				if (trueSucc.isLeaf()) {
-					leafRelocs.push_back(relocT(&newNode->unsafe_internal().trueBranch, trueSucc));
+					leafRelocs.push(&newNode->unsafe_internal().trueBranch, trueSucc);
 				} else {
 					IRExpr *cond;
 					const bdd_rank &rank(trueSucc.bestCond(&cond));
 					assert(key.first < rank);
-					relocs[relocKeyT(rank, cond)].push_back(relocT(&newNode->unsafe_internal().trueBranch, trueSucc));
+					relocs[relocKeyT(rank, cond)].push(&newNode->unsafe_internal().trueBranch, trueSucc);
 				}
 				if (falseSucc.isLeaf()) {
-					leafRelocs.push_back(relocT(&newNode->unsafe_internal().falseBranch, falseSucc));
+					leafRelocs.push(&newNode->unsafe_internal().falseBranch, falseSucc);
 				} else {
 					IRExpr *cond;
 					const bdd_rank &rank(falseSucc.bestCond(&cond));
 					assert(key.first < rank);
-					relocs[relocKeyT(rank, cond)].push_back(relocT(&newNode->unsafe_internal().falseBranch, falseSucc));
+					relocs[relocKeyT(rank, cond)].push(&newNode->unsafe_internal().falseBranch, falseSucc);
 				}
 
 				it3->second = newNode;
@@ -945,12 +1049,12 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 	/* Now process leaf relocations */
 	std::map<zipInternalT, subtreeT *> leafMemo;
 
-	for (auto it = leafRelocs.begin(); it != leafRelocs.end(); it++) {
+	while (!leafRelocs.empty()) {
 		if (TIMEOUT)
 			return NULL;
 
-		subtreeT **relocPtr = it->first;
-		const zipInternalT &relocWhere(it->second);
+		subtreeT **relocPtr;
+		const zipInternalT &relocWhere(leafRelocs.next(&relocPtr));
 		assert(relocWhere.isLeaf());
 		auto it2_did_insert = leafMemo.insert(std::pair<zipInternalT, subtreeT *>(relocWhere, (subtreeT *)NULL));
 		auto it2 = it2_did_insert.first;

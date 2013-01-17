@@ -218,7 +218,7 @@ protected:
 
 	template <typename scopeT, typename zipInternalT> static _subtreeT *zip(
 		scopeT *scp,
-		const zipInternalT &where);
+		zipInternalT &where);
 
 	~_bdd()
 	{
