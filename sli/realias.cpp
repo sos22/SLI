@@ -544,7 +544,6 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 			   see the intermediate state due to phase
 			   ordering problems.  Just do something
 			   vaguely sensible. */
-			warning("%s:%s:%d: Use of uninitialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
 			return PointerAliasingSet::nothing;
 		} else {
 			return content[iex->reg];
