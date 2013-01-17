@@ -533,12 +533,26 @@ public:
    tables, making it fast to set up when you don't have very many
    items while only being slightly slower for larger tables. */
 template <typename _key, typename _value, int nr_small = 4,
-	  int nr_heads = 2043, int nr_per_elem = 4> class HashedMapSmall {
+	  int nr_heads = 64, int nr_per_elem = 4> class HashedMapSmall {
 	typedef HashedMap<_key, _value, nr_heads, nr_per_elem> largeT;
 	largeT *large;
 	int nr_small_used;
 	std::pair<_key, _value> small[nr_small];
 public:
+	/* Turn @o into a copy of *this and simultaneously clear
+	 * *this. */
+	void move(HashedMapSmall &o) {
+		new (&o) HashedMapSmall();
+		if (large) {
+			o.large = large;
+			large = NULL;
+		} else {
+			o.nr_small_used = nr_small_used;
+			for (int i = 0; i < o.nr_small_used; i++)
+				new (&o.small[i]) std::pair<_key, _value>(small[i]);
+			nr_small_used = 0;
+		}
+	}
 	HashedMapSmall()
 		: large(NULL),
 		  nr_small_used(0)
