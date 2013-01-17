@@ -28,7 +28,9 @@ static void enable_debug() {
 	debug_build_alias_table = true;
 	debug_refine_alias_table = true;
 	debug_use_alias_table = true;
-	debug_enum_backwards = true;
+	/* This one is loud enough that if you want it you have to
+	 * enable it explicitly: */
+	/*debug_enum_backwards = true;*/
 }
 #else
 #define debug_build_stack_layout false
