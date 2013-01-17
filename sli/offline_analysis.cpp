@@ -235,6 +235,20 @@ _optimiseStateMachine(SMScopes *scopes,
 	OptimisationRecorder optrec;
 	optrec.start(scopes, mai, sm, is_ssa, opt);
 
+	/* Pull-to-root doesn't need to take part in the iteration to
+	   a fixed point, because none of the other optimisations make
+	   it any more likely to succeed. */
+	if (is_ssa) {
+		bool p = false;
+		sm = pullImportsToRoot(scopes, sm, &p);
+		if (debugOptimiseStateMachine && p) {
+			printf("Pull imports to root:\n");
+			printStateMachine(sm, stdout);
+		}
+		if (progress)
+			*progress |= p;
+	}
+
 	bool done_something;
 	do {
 		if (TIMEOUT)

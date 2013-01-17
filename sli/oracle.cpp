@@ -3500,6 +3500,28 @@ PointerAliasingSet::operator|=(const PointerAliasingSet &o)
 	return res;
 }
 
+bool
+PointerAliasingSet::operator <(const PointerAliasingSet &o) const
+{
+	if (valid < o.valid)
+		return true;
+	if (valid > o.valid || !valid)
+		return false;
+	if (nonPointer < o.nonPointer)
+		return true;
+	if (nonPointer > o.nonPointer)
+		return false;
+	if (nonStckPointer < o.nonStckPointer)
+		return true;
+	if (nonStckPointer > o.nonStckPointer)
+		return false;
+	if (otherStackPointer < o.otherStackPointer)
+		return true;
+	if (otherStackPointer)
+		return false;
+	return stackPointers < o.stackPointers;
+}
+
 /* Compute the offset from RSP to the function's return address. */
 unsigned
 stack_offset(Oracle *oracle, unsigned long rip)
