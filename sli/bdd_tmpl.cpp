@@ -863,24 +863,32 @@ class reloc_queue {
 		return ((entryT *)_inlineEntries)[idx];
 	}
 	unsigned inline_idx;
+	bool consuming;
 
 	struct slabT *curSlab;
 	unsigned slab_idx;
 public:
 	reloc_queue()
-		: inline_idx(0), curSlab(NULL), slab_idx(entriesPerSlab)
+		: inline_idx(0), consuming(false), curSlab(NULL), slab_idx(entriesPerSlab)
 	{}
-#ifndef NDEBUG
 	~reloc_queue()
 	{
+		if (consuming) {
+			if (curSlab) {
+				curSlab->entries(slab_idx).element.~zipInternalT();
+			} else {
+				inlineEntry(inline_idx).element.~zipInternalT();
+			}
+		}
+
 		if (TIMEOUT)
 			return;
 		assert(!curSlab);
 		assert(slab_idx == entriesPerSlab || slab_idx == 0);
 		assert(inline_idx == 0);
 	}
-#endif
 	void push(subtreeT **slot, zipInternalT &element) {
+		assert(!consuming);
 		if (inline_idx < nrInline) {
 			inlineEntry(inline_idx).slot = slot;
 			element.move(inlineEntry(inline_idx).element);
@@ -902,6 +910,14 @@ public:
 		return inline_idx == 0;
 	}
 	const zipInternalT &next(subtreeT ***slot) {
+		if (consuming) {
+			if (curSlab) {
+				curSlab->entries(slab_idx).element.~zipInternalT();
+			} else {
+				inlineEntry(inline_idx).element.~zipInternalT();
+			}
+		}
+		consuming = true;
 	top:
 		if (curSlab) {
 			assert(inline_idx == nrInline);

@@ -538,6 +538,7 @@ template <typename _key, typename _value, int nr_small = 4,
 	largeT *large;
 	int nr_small_used;
 	std::pair<_key, _value> small[nr_small];
+	void operator=(const HashedMapSmall &o); /* Not implemented */
 public:
 	/* Turn @o into a copy of *this and simultaneously clear
 	 * *this. */
