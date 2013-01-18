@@ -932,6 +932,14 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 		if (TIMEOUT)
 			return NULL;
 
+		/* Somewhat arbitrary limit to avoid running out of
+		 * memory. */
+		if (relocs.size() >= 250000) {
+			warning("Hit arbitrary limit in %s, forcing it to fail!\n", __func__);
+			_timed_out = true;
+			return NULL;
+		}
+
 		auto it = relocs.begin();
 		const relocKeyT &key(it->first);
 		const std::vector<subtreeT **> &dests(it->second);
