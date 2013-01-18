@@ -838,105 +838,41 @@ _bdd<constT, subtreeT>::reduceBdd(scopeT *scope, std::map<subtreeT *, subtreeT *
 	return it->second;
 }
 
-template <typename subtreeT, typename zipInternalT>
-class reloc_queue {
-	struct entryT {
-		subtreeT **slot;
-		zipInternalT element;
-	};
-	static const unsigned entriesPerSlab = 128;
-	static const unsigned nrInline = 4;
-
-	struct slabT : public GarbageCollected<slabT, &ir_heap> {
-		struct slabT *prev;
-		unsigned char _entries[entriesPerSlab * sizeof(entryT)];
-		entryT &entries(int idx) {
-			return ((entryT *)_entries)[idx];
-		}
-
-		void visit(HeapVisitor &) { abort(); }
-		NAMED_CLASS
-	};
-
-	unsigned char _inlineEntries[nrInline * sizeof(entryT)];
-	struct entryT &inlineEntry(int idx) {
-		return ((entryT *)_inlineEntries)[idx];
-	}
-	unsigned inline_idx;
-	bool consuming;
-
-	struct slabT *curSlab;
-	unsigned slab_idx;
+template <typename zipInternalT> class _relocKeyT {
+	void operator=(const _relocKeyT &o); /* NI */
 public:
-	reloc_queue()
-		: inline_idx(0), consuming(false), curSlab(NULL), slab_idx(entriesPerSlab)
-	{}
-	~reloc_queue()
+	const bdd_rank &rank;
+	IRExpr *const expr;
+	unsigned char __target[sizeof(zipInternalT)];
+	const zipInternalT &target() const {
+		return *(const zipInternalT *)__target;
+	}
+	_relocKeyT(const _relocKeyT &o)
+		: rank(o.rank), expr(o.expr)
 	{
-		if (consuming) {
-			if (curSlab) {
-				curSlab->entries(slab_idx).element.~zipInternalT();
-			} else {
-				inlineEntry(inline_idx).element.~zipInternalT();
-			}
-		}
-
-		if (TIMEOUT)
-			return;
-		assert(!curSlab);
-		assert(slab_idx == entriesPerSlab || slab_idx == 0);
-		assert(inline_idx == 0);
+		new ((zipInternalT *)&target()) zipInternalT(o.target());
 	}
-	void push(subtreeT **slot, zipInternalT &element) {
-		assert(!consuming);
-		if (inline_idx < nrInline) {
-			inlineEntry(inline_idx).slot = slot;
-			element.move(inlineEntry(inline_idx).element);
-			inline_idx++;
-		} else {
-			if (slab_idx == entriesPerSlab) {
-				slabT *newSlab = new slabT();
-				newSlab->prev = curSlab;
-				curSlab = newSlab;
-				slab_idx = 0;
-			}
-			assert(curSlab);
-			curSlab->entries(slab_idx).slot = slot;
-			element.move(curSlab->entries(slab_idx).element);
-			slab_idx++;
-		}
+	_relocKeyT(const bdd_rank &_rank,
+		   IRExpr *_expr,
+		   zipInternalT &_target)
+		: rank(_rank), expr(_expr)
+	{
+		_target.move(*(zipInternalT *)&target());
 	}
-	bool empty() const {
-		return inline_idx == 0;
+	~_relocKeyT()
+	{
+		target().~zipInternalT();
 	}
-	const zipInternalT &next(subtreeT ***slot) {
-		if (consuming) {
-			if (curSlab) {
-				curSlab->entries(slab_idx).element.~zipInternalT();
-			} else {
-				inlineEntry(inline_idx).element.~zipInternalT();
-			}
+	bool operator<(const _relocKeyT &o) const {
+		switch (rank.compare(o.rank)) {
+		case bdd_rank::lt:
+			return true;
+		case bdd_rank::gt:
+			return false;
+		case bdd_rank::eq:
+			return target() < o.target();
 		}
-		consuming = true;
-	top:
-		if (curSlab) {
-			assert(inline_idx == nrInline);
-			if (slab_idx == 0) {
-				slabT *nextSlab = curSlab->prev;
-				LibVEX_free(curSlab);
-				curSlab = nextSlab;
-				slab_idx = entriesPerSlab;
-				goto top;
-			}
-			slab_idx--;
-			*slot = curSlab->entries(slab_idx).slot;
-			return curSlab->entries(slab_idx).element;
-		} else {
-			assert(inline_idx != 0);
-			inline_idx--;
-			*slot = inlineEntry(inline_idx).slot;
-			return inlineEntry(inline_idx).element;
-		}
+		abort();
 	}
 };
 
@@ -951,14 +887,14 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 		return rootZip.leafzip();
 
 	subtreeT *newRoot;
-	typedef std::pair<const bdd_rank &, IRExpr *> relocKeyT;
-	std::map<relocKeyT, reloc_queue<subtreeT, zipInternalT> > relocs;
+	typedef _relocKeyT<zipInternalT> relocKeyT;
+	std::map<relocKeyT, std::vector<subtreeT **> > relocs;
 
 	/* Set up root relocation */
 	{
 		IRExpr *rootCond;
 		const bdd_rank &rootRank(rootZip.bestCond(&rootCond));
-		relocs[relocKeyT(rootRank, rootCond)].push(&newRoot, rootZip);
+		relocs[relocKeyT(rootRank, rootCond, rootZip)].push_back(&newRoot);
 	}
 
 	/* Resolve relocs.  This is a little bit cunning.  The idea is
@@ -990,98 +926,72 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 
 	/* Leaves are special, because they don't test any
 	   expressions.  Process them last. */
-	reloc_queue<subtreeT, zipInternalT> leafRelocs;
+	std::map<zipInternalT, std::vector<subtreeT **> > leafRelocs;
 
 	while (!relocs.empty()) {
 		if (TIMEOUT)
 			return NULL;
 
 		auto it = relocs.begin();
-		const relocKeyT key(it->first);
-		reloc_queue<subtreeT, zipInternalT> &rq(it->second);
+		const relocKeyT &key(it->first);
+		const std::vector<subtreeT **> &dests(it->second);
+		const zipInternalT &relocWhere(key.target());
 
-		/* Construct all nodes which test key.first. */
-		assert(key.first == scope->ordering->rankVariable(key.second));
+		assert(key.rank == scope->ordering->rankVariable(key.expr));
+		assert(!relocWhere.isLeaf());
 
-		std::map<zipInternalT, subtreeT *> memo;
-		while (!rq.empty()) {
-			subtreeT **relocPtr;
-			const zipInternalT &relocWhere(rq.next(&relocPtr));
-			assert(!relocWhere.isLeaf());
 #ifndef NDEBUG
-			{
-				IRExpr *relocExpr;
-				const bdd_rank relocRank(relocWhere.bestCond(&relocExpr));
-				assert(relocRank == key.first);
-				assert(physicallyEqual(relocExpr, key.second));
-			}
+		IRExpr *relocExpr;
+		const bdd_rank relocRank(relocWhere.bestCond(&relocExpr));
+		assert(relocRank == key.rank);
+		assert(physicallyEqual(relocExpr, key.expr));
 #endif
-			auto it3_did_insert = memo.insert(std::pair<zipInternalT, subtreeT *>(relocWhere, (subtreeT *)NULL));
-			auto it3 = it3_did_insert.first;
-			auto did_insert = it3_did_insert.second;
-			if (did_insert) {
-				/* Not encounted this zip point
-				 * before, figure out what we're doing
-				 * next. */
-				zipInternalT trueSucc(relocWhere.trueSucc(key.first));
-				zipInternalT falseSucc(relocWhere.falseSucc(key.first));
 
-				/* Construct a new node */
-				subtreeT *newNode = new subtreeT(key.first, key.second,
-								 NULL, NULL);
-				/* Set up relocations for the true and
-				 * false branches */
-				if (trueSucc.isLeaf()) {
-					leafRelocs.push(&newNode->unsafe_internal().trueBranch, trueSucc);
-				} else {
-					IRExpr *cond;
-					const bdd_rank &rank(trueSucc.bestCond(&cond));
-					assert(key.first < rank);
-					relocs[relocKeyT(rank, cond)].push(&newNode->unsafe_internal().trueBranch, trueSucc);
-				}
-				if (falseSucc.isLeaf()) {
-					leafRelocs.push(&newNode->unsafe_internal().falseBranch, falseSucc);
-				} else {
-					IRExpr *cond;
-					const bdd_rank &rank(falseSucc.bestCond(&cond));
-					assert(key.first < rank);
-					relocs[relocKeyT(rank, cond)].push(&newNode->unsafe_internal().falseBranch, falseSucc);
-				}
+		zipInternalT trueSucc(relocWhere.trueSucc(key.rank));
+		zipInternalT falseSucc(relocWhere.falseSucc(key.rank));
+		
+		subtreeT *newNode = new subtreeT(key.rank, key.expr, NULL, NULL);
 
-				it3->second = newNode;
-			} else {
-				/* Already have a node for this zip point, so just
-				   reuse it. */
-			}
-			assert(it3->second);
-			*relocPtr = it3->second;
-		}
+		/* Patch it into the BDD we've built up so far. */
+		for (auto it2 = dests.begin(); it2 != dests.end(); it2++)
+			**it2 = newNode;
 
 		relocs.erase(it);
+
+		/* Set up relocations for the true and
+		 * false branches */
+		if (trueSucc.isLeaf()) {
+			leafRelocs[trueSucc].push_back(&newNode->unsafe_internal().trueBranch);
+		} else {
+			IRExpr *cond;
+			const bdd_rank &rank(trueSucc.bestCond(&cond));
+			assert(relocRank < rank);
+			relocs[relocKeyT(rank, cond, trueSucc)].push_back(&newNode->unsafe_internal().trueBranch);
+		}
+		if (falseSucc.isLeaf()) {
+			leafRelocs[falseSucc].push_back(&newNode->unsafe_internal().falseBranch);
+		} else {
+			IRExpr *cond;
+			const bdd_rank &rank(falseSucc.bestCond(&cond));
+			assert(relocRank < rank);
+			relocs[relocKeyT(rank, cond, falseSucc)].push_back(&newNode->unsafe_internal().falseBranch);
+		}
 	}
 
 	std::map<subtreeT *, subtreeT *> reduced;
 
-	/* Now process leaf relocations */
-	std::map<zipInternalT, subtreeT *> leafMemo;
-
 	while (!leafRelocs.empty()) {
 		if (TIMEOUT)
 			return NULL;
-
-		subtreeT **relocPtr;
-		const zipInternalT &relocWhere(leafRelocs.next(&relocPtr));
-		assert(relocWhere.isLeaf());
-		auto it2_did_insert = leafMemo.insert(std::pair<zipInternalT, subtreeT *>(relocWhere, (subtreeT *)NULL));
-		auto it2 = it2_did_insert.first;
-		auto did_insert = it2_did_insert.second;
-		if (did_insert) {
-			it2->second = relocWhere.leafzip();
-			/* We rely on the zip type returning fully
-			 * reduced leaves. */
-			reduced[it2->second] = it2->second;
-		}
-		*relocPtr = it2->second;
+		auto it = leafRelocs.begin();
+		const zipInternalT &leafNode(it->first);
+		const std::vector<subtreeT **> &relocs(it->second);
+		assert(leafNode.isLeaf());
+		subtreeT *l = leafNode.leafzip();
+		reduced[l] = l;
+		for (auto it2 = relocs.begin(); it2 != relocs.end(); it2++)
+			**it2 = l;
+		leafRelocs.erase(it);
 	}
 
 	/* Now use the scope to fully reduce it. */
