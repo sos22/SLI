@@ -549,8 +549,11 @@ public:
 			large = NULL;
 		} else {
 			o.nr_small_used = nr_small_used;
-			for (int i = 0; i < o.nr_small_used; i++)
+			for (int i = 0; i < o.nr_small_used; i++) {
 				new (&o.small[i]) std::pair<_key, _value>(small[i]);
+				typedef std::pair<_key, _value> foo;
+				small[i].~foo();
+			}
 			nr_small_used = 0;
 		}
 	}
