@@ -973,7 +973,9 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 		} else {
 			IRExpr *cond;
 			const bdd_rank &rank(trueSucc.bestCond(&cond));
+#ifndef NDEBUG
 			assert(relocRank < rank);
+#endif
 			relocs[relocKeyT(rank, cond, trueSucc)].push_back(&newNode->unsafe_internal().trueBranch);
 		}
 		if (falseSucc.isLeaf()) {
@@ -981,7 +983,9 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 		} else {
 			IRExpr *cond;
 			const bdd_rank &rank(falseSucc.bestCond(&cond));
+#ifndef NDEBUG
 			assert(relocRank < rank);
+#endif
 			relocs[relocKeyT(rank, cond, falseSucc)].push_back(&newNode->unsafe_internal().falseBranch);
 		}
 	}
