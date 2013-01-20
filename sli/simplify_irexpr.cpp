@@ -2389,7 +2389,7 @@ top:
 			break;
 		}
 		/* If a op b commutes, sort the arguments. */
-		if (operationCommutes(op) &&  sortIRExprs(r, l)) {
+		if (operationCommutes(op) && sortIRExprs(r, l)) {
 			IRExpr *t = l;
 			l = r;
 			r = t;
@@ -2545,7 +2545,6 @@ top:
 
 			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
 			if (l->tag != Iex_Const && op == Iop_CmpEQ64) {
-				l = IRExpr_Const_U64(0);
 				r = IRExpr_Binop(
 					Iop_Add64,
 					r,
@@ -2553,6 +2552,7 @@ top:
 						Iop_Neg64,
 						l));
 				r = optimiseIRExpr(r, opt);
+				l = IRExpr_Const_U64(0);
 			}
 
 			/* Special case: const:64 == {b}to64(X)
