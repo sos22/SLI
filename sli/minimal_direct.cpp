@@ -311,8 +311,12 @@ main(int argc, char *argv[])
 	argc -= 4;
 
 	bool assert_mode = false;
+	bool double_free_mode = false;
 	if (!strcmp(argv[argc - 1], "assertions")) {
 		assert_mode = true;
+		argc--;
+	} else if (!strcmp(argv[argc - 1], "doublefree")) {
+		double_free_mode = true;
 		argc--;
 	}
 
@@ -343,8 +347,10 @@ main(int argc, char *argv[])
 		.enableassumePrivateStack()
 		.setAddressSpace(oracle->ms->addressSpace)
 		.enablenoExtend();
-	if (assert_mode)
+	if (assert_mode || double_free_mode)
 		opt = opt.enableallPointersGood();
+	if (double_free_mode)
+		opt = opt.enablefreeMightRace();
 
 	if (argc == 1) {
 		DynAnalysisRip vr;
@@ -365,6 +371,9 @@ main(int argc, char *argv[])
 	unsigned long total_instructions;
 	if (assert_mode) {
 		oracle->findAssertions(assertions);
+		total_instructions = assertions.size();
+	} else if (double_free_mode) {
+		oracle->findFrees(assertions);
 		total_instructions = assertions.size();
 	} else {
 		instrIterator = oracle->type_db->enumerateAllInstructions();
@@ -387,7 +396,7 @@ main(int argc, char *argv[])
 	unsigned long cntr = 0;
 
 	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, timings, opt);
-	if (assert_mode) {
+	if (assert_mode || double_free_mode) {
 		for (unsigned long idx = start_instr; idx < end_instr; idx++) {
 			ic(oracle, df, assertions[idx], cntr);
 			cntr++;

@@ -38,3 +38,13 @@
 #ifndef CONFIG_DISCARD_FLOATING_POINT
 #define CONFIG_DISCARD_FLOATING_POINT 0
 #endif
+
+/* Bit of a hack: the free() template stores the last free()d address
+   here, so that the double_free stub can find it and decide whether
+   we've suffered a double free bug.  The precise value doesn't
+   matter, provided it doesn't overlap with any addresses which the
+   program actually accesses.  A denormal address satisfies that
+   nicely. */
+#ifndef CONFIG_LASTFREE_ADDR
+#define CONFIG_LASTFREE_ADDR 0x800000000008
+#endif

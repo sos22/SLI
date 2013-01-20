@@ -107,8 +107,60 @@ getProximalCause(SMScopes *scopes,
 	if (idx == irsb->stmts_used) {
 		if (!irsb->next_is_const) {
 			crashIfBadPtr(irsb->next_nonconst);
-		} else if (oracle->isCrashingAddr(irsb->next_const.rip))
+		} else if (oracle->isCrashingAddr(irsb->next_const.rip)) {
 			work = new StateMachineTerminal(rip, scopes->smrs.cnst(smr_crash));
+		} else if (oracle->isFreeAddr(irsb->next_const.rip)) {
+			/* free(x) turns into:
+
+			   LOAD *last_freed_addr -> x;
+			   if (x && x == y)
+			       crash();
+			   else
+			       survive();
+
+			   last_free_address is written to by the
+			   library template for free().
+			*/
+			IRTemp t = newIRTemp(irsb->tyenv);
+			threadAndRegister tr = threadAndRegister::temp(tid, t, 0);
+			IRExpr *y = IRExpr_Get(tr, Ity_I64);
+			IRExpr *x = IRExpr_Get(threadAndRegister::reg(tid, OFFSET_amd64_RDI, 0), Ity_I64);
+			StateMachineTerminal *term =
+				new StateMachineTerminal(
+					rip,
+					smrbdd::ifelse(
+						&scopes->smrs,
+						bbdd::And(
+							&scopes->bools,
+							bbdd::invert(
+								&scopes->bools,
+								bbdd::var(
+									&scopes->bools,
+									IRExpr_Binop(
+										Iop_CmpEQ64,
+										x,
+										IRExpr_Const_U64(0)))),
+							bbdd::var(
+								&scopes->bools,
+								IRExpr_Binop(
+									Iop_CmpEQ64,
+									x,
+									y))),
+						scopes->smrs.cnst(smr_crash),
+						scopes->smrs.cnst(smr_survive)));
+			work = new StateMachineSideEffecting(
+				rip,
+				new StateMachineSideEffectLoad(
+					tr,
+					exprbdd::var(
+						&scopes->exprs,
+						&scopes->bools,
+						IRExpr_Const_U64(CONFIG_LASTFREE_ADDR)),
+					mkPendingMai(where),
+					Ity_I64,
+					MemoryTag::last_free()),
+				term);
+		}
 	}
 
 	idx--;
