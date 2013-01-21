@@ -1292,8 +1292,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		printStateMachine(sm, stdout, stateLabels);
 	}
 	if (!stackLayout.build(sm)) {
-		if (any_debug)
-			printf("Failed to build stack layout!\n");
+		warning("Failed to build stack layout!\n");
 		return sm;
 	}
 	if (debug_build_stack_layout) {
@@ -1303,8 +1302,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 
 	PointsToTable ptt;
 	if (!ptt.build(sm)) {
-		if (any_debug)
-			printf("Failed to build points-to table!\n");
+		warning("Failed to build points-to table!\n");
 		return sm;
 	}
 	if (debug_build_points_to_table) {
@@ -1314,8 +1312,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 
 	AliasTable at;
 	if (!at.build(decode, sm, stateLabels, opt, oracle)) {
-		if (any_debug)
-			printf("Failed to build alias table!\n");
+		warning("Failed to build alias table!\n");
 		return sm;
 	}
 	if (debug_build_alias_table) {
@@ -1532,7 +1529,8 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 					printf("Failed because state l%d is unreachable?\n",
 					       stateLabels[state]);
 				}
-				assert(TIMEOUT);
+				if (!TIMEOUT)
+					abort();
 				return sm;
 			}
 			if (state == sm->root) {
@@ -1638,7 +1636,8 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		}
 		exprbdd *repl = replacements[it->first];
 		if (!repl) {
-			assert(TIMEOUT);
+			if (!TIMEOUT)
+				abort();
 		} else {
 			if (debug_use_alias_table) {
 				printf("Mux for l%d is:\n", stateLabels[it->first]);
