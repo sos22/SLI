@@ -889,7 +889,8 @@ bdd_ordering::rankVariable(const IRExpr *a)
 		for (auto it2 = variableRankings.begin();
 		     !dupe && it2 != variableRankings.end();
 		     it2++) {
-			if (a != it2->first && physicallyEqual(a, it2->first)) {
+			const IRExpr *lookupKey = it2->first;
+			if (a != it2->first && physicallyEqual(a, lookupKey)) {
 				it->second = it2->second;
 				dupe = true;
 			}
@@ -990,6 +991,9 @@ bdd_ordering::parse(const char *buf, const char **end)
 		    !parseThisChar('\n', buf, &buf))
 			break;
 		variableRankings[key] = rank;
+		if (nextRanking[rank.cls] >= rank.val) {
+			nextRanking[rank.cls] = rank.val - 1;
+		}
 	}
 	*end = buf;
 	return true;
