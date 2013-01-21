@@ -423,6 +423,14 @@ bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 	assert(a->isLeaf() || ordering->before(cond, a));
 	assert(b->isLeaf() || ordering->before(cond, b));
 
+	if (cond->tag == Iex_EntryPoint &&
+	    !a->isLeaf() &&
+	    a->internal().condition->tag == Iex_EntryPoint &&
+	    ((IRExprEntryPoint *)a->internal().condition)->thread == ((IRExprEntryPoint *)cond)->thread) {
+		assert(((IRExprEntryPoint *)a->internal().condition)->label != ((IRExprEntryPoint *)cond)->label);
+		a = a->internal().falseBranch;
+	}
+
 	if (cond->tag == Iex_ControlFlow &&
 	    !a->isLeaf() &&
 	    a->internal().condition->tag == Iex_ControlFlow &&
