@@ -1654,25 +1654,25 @@ IRExprConst* IRExpr_Const_U1 ( bool bit )
    vassert(bit == False || bit == True);
    IRExprConst::_Ico c;
    c.U1 = bit;
-   return new IRExprConst(Ity_I1, c);
+   return IRExprConst::mk(Ity_I1, c);
 }
 IRExprConst* IRExpr_Const_U8 ( unsigned char u8)
 {
    IRExprConst::_Ico c;
    c.U8 = u8;
-   return new IRExprConst(Ity_I8, c);
+   return IRExprConst::mk(Ity_I8, c);
 }
 IRExprConst* IRExpr_Const_U16 ( unsigned short u16 )
 {
    IRExprConst::_Ico c;
    c.U16 = u16;
-   return new IRExprConst(Ity_I16, c);
+   return IRExprConst::mk(Ity_I16, c);
 }
 IRExprConst* IRExpr_Const_U32 ( unsigned u32 )
 {
    IRExprConst::_Ico c;
    c.U32 = u32;
-   return new IRExprConst(Ity_I32, c);
+   return IRExprConst::mk(Ity_I32, c);
 }
 static VexPtr<IRExprConst, &ir_heap> magicConstant0;
 IRExprConst* IRExpr_Const_U64 ( unsigned long u64 )
@@ -1681,17 +1681,17 @@ IRExprConst* IRExpr_Const_U64 ( unsigned long u64 )
    c.U64 = u64;
    if (u64 == 0) {
      if (!magicConstant0)
-       magicConstant0 = new IRExprConst(Ity_I64, c);
+       magicConstant0 = IRExprConst::mk(Ity_I64, c);
      return magicConstant0;
    }
 
-   return new IRExprConst(Ity_I64, c);
+   return IRExprConst::mk(Ity_I64, c);
 }
 IRExprConst* IRExpr_Const_F64 ( Double f64 )
 {
    IRExprConst::_Ico c;
    *(double *)&c.U64 = f64;
-   return new IRExprConst(Ity_I64, c);
+   return IRExprConst::mk(Ity_I64, c);
 }
 IRExprConst* IRExpr_Const_F64i ( unsigned long f64i )
 {
@@ -1706,14 +1706,14 @@ IRExprConst* IRExpr_Const_V128 ( unsigned short con )
    IRExprConst::_Ico c;
    c.U128.lo = a;
    c.U128.hi = a;
-   return new IRExprConst(Ity_I128, c);
+   return IRExprConst::mk(Ity_I128, c);
 }
 IRExprConst* IRExpr_Const_U128 ( unsigned long hi, unsigned long lo )
 {
    IRExprConst::_Ico c;
    c.U128.lo = lo;
    c.U128.hi = hi;
-   return new IRExprConst(Ity_I128, c);
+   return IRExprConst::mk(Ity_I128, c);
 }
 
 /* Constructors -- IRCallee */

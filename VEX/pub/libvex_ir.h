@@ -1727,6 +1727,7 @@ struct IRExprConst : public IRExpr {
       } U128;
    } Ico;
 
+private:
    IRExprConst(const IRType _ty, const _Ico &content)
        : IRExpr(Iex_Const), ty(_ty), Ico(content)
    {
@@ -1734,6 +1735,11 @@ struct IRExprConst : public IRExpr {
 	  so just set the flag saying that it's already been fully
 	  optimised. */
        optimisationsApplied = ~0u;
+   }
+public:
+   static IRExprConst *mk(const IRType ty, const _Ico &content)
+   {
+      return new IRExprConst(ty, content);
    }
    void visit(HeapVisitor &) { }
    unsigned long hashval() const { return Ico.U64; }
