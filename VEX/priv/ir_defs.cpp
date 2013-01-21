@@ -2801,7 +2801,7 @@ field_iter(name)(__apply_args1, __apply_args1, __apply_args2)
 #define __mk_hash_check(type, name)					\
 	if (name < o.name) {						\
 		return true;						\
-	} else if (name > o.name) {					\
+	} else if (o.name < name) {					\
 		return false;						\
 	}
 #define mk_hash_checks(name)						\
@@ -2851,6 +2851,7 @@ class gc_map : public GcCallback<&ir_heap>, public std::map<key, value> {
 
 mk_memoised_constructor(IRCallee)
 mk_memoised_constructor(IRRegArray)
+mk_memoised_constructor(IRExprGet)
 
 /*---------------------------------------------------------------*/
 /*--- end                                           ir_defs.c ---*/

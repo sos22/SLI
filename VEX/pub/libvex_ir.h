@@ -1342,22 +1342,23 @@ public:
   iter(R15)					\
   iter(RIP)
 
+#define mk_irexpr(name)							\
+ field_iter(IRExpr## name)(__mk_struct_fields, __mk_struct_fields, __mk_struct_fields) \
+ private:								\
+ IRExpr ## name(field_iter(IRExpr ## name)(__mk_constructor1, __mk_constructor1, __mk_constructor2)) \
+ : IRExpr(Iex_ ## name),						\
+   field_iter(IRExpr ## name)(__mk_constructor3, __mk_constructor3, __mk_constructor4) \
+ {}									\
+public:									\
+ static IRExpr ## name *mk(field_iter(IRExpr ## name)(__mk_constructor1, __mk_constructor1, __mk_constructor2));
+
 /* Read a guest register, at a fixed offset in the guest state.
    ppIRExpr output: GET:<ty>(<offset>), eg. GET:I32(0) */
-class IRExprGet : public IRExpr {
-public:
-   const threadAndRegister reg;
-   const IRType ty;
-
-private:
-   IRExprGet(threadAndRegister _reg, IRType _ty)
-	   : IRExpr(Iex_Get), reg(_reg), ty(_ty)
-   {}
-public:
-   static IRExprGet *mk(threadAndRegister reg, IRType ty)
-   {
-      return new IRExprGet(reg, ty);
-   }
+struct IRExprGet : public IRExpr {
+#define IRExprGet_fields(i1, i2, i3)		\
+    i1(threadAndRegister, reg)			\
+    i3(IRType, ty)
+    mk_irexpr(Get)
    void visit(HeapVisitor &) {}
    unsigned long hashval() const { return reg.hash() + ty * 3; }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const {
