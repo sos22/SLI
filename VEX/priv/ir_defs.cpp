@@ -2850,6 +2850,7 @@ class gc_map : public GcCallback<&ir_heap>, public std::map<key, value> {
 	}
 
 mk_memoised_constructor(IRCallee)
+mk_memoised_constructor(IRRegArray)
 
 /*---------------------------------------------------------------*/
 /*--- end                                           ir_defs.c ---*/

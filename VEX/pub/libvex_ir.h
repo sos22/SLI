@@ -1224,29 +1224,21 @@ extern void ppIRCallee ( IRCallee*, FILE* );
 /* This describes a section of the guest state that we want to
    be able to index at run time, so as to be able to describe 
    indexed or rotating register files on the guest. */
-typedef
-class _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
-      _IRRegArray(Int _base, IRType _elemTy, Int _nElems)
-	  : base(_base), elemTy(_elemTy), nElems(_nElems)
-      {}
-public:
-      static _IRRegArray *mk(Int base, IRType elemTy, Int nElems)
-      {
-	 return new _IRRegArray(base, elemTy, nElems);
-      }
-      const Int    base;   /* guest state offset of start of indexed area */
-      const IRType elemTy; /* type of each element in the indexed area */
-      const Int    nElems; /* number of elements in the indexed area */
-      void visit(HeapVisitor &) {}
-      unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
-      void sanity_check() const {
-	 assert(base < nElems);
-	 assert(nElems >= 0);
-	 sanity_check_irtype(elemTy);
-      }
-      NAMED_CLASS
+struct IRRegArray : public GarbageCollected<IRRegArray, &ir_heap> {
+#define IRRegArray_fields(first_iter, middle_iter, last_iter)	\
+   first_iter(Int, base)					\
+   middle_iter(IRType, elemTy)					\
+   last_iter(Int, nElems)
+   mk_struct(IRRegArray)
+   void visit(HeapVisitor &) {}
+   unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
+   void sanity_check() const {
+      assert(base < nElems);
+      assert(nElems >= 0);
+      sanity_check_irtype(elemTy);
    }
-   IRRegArray;
+   NAMED_CLASS
+};
 
 extern IRRegArray* mkIRRegArray ( Int, IRType, Int );
 
