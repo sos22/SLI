@@ -905,7 +905,6 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, const zipInternalT &rootZip)
 				 * next. */
 				zipInternalT trueSucc(relocWhere.trueSucc(key.first));
 				zipInternalT falseSucc(relocWhere.falseSucc(key.first));
-				assert(trueSucc < falseSucc || falseSucc < trueSucc);
 
 				/* Construct a new node */
 				subtreeT *newNode = new subtreeT(key.first, key.second,

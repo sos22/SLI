@@ -3403,6 +3403,41 @@ PointerAliasingSet::operator |(const PointerAliasingSet &o) const
 	return res;
 }
 
+PointerAliasingSet
+PointerAliasingSet::operator &(const PointerAliasingSet &o) const
+{
+	if (!valid)
+		return o;
+	if (!o.valid)
+		return *this;
+	PointerAliasingSet res;
+	res.valid = true;
+	res.nonPointer = nonPointer & o.nonPointer;
+	res.nonStckPointer = nonPointer & o.nonStckPointer;
+	res.otherStackPointer = otherStackPointer & o.otherStackPointer;
+	if (otherStackPointer && o.otherStackPointer) {
+	} else if (otherStackPointer && !o.otherStackPointer) {
+		res.stackPointers = o.stackPointers;
+	} else if (!otherStackPointer && o.otherStackPointer) {
+		res.stackPointers = stackPointers;
+	} else { /* !otherStackPointers && !o.otherStackPointers */
+		for (auto it1 = stackPointers.begin();
+		     it1 != stackPointers.end();
+		     it1++) {
+			bool found = false;
+			for (auto it2 = o.stackPointers.begin();
+			     !found && it2 != o.stackPointers.end();
+			     it2++) {
+				found |= *it1 == *it2;
+			}
+			if (found)
+				res.stackPointers.push_back(*it1);
+		}
+	}
+	return res;
+					
+}
+
 bool
 PointerAliasingSet::operator == (const PointerAliasingSet &o) const
 {
@@ -3489,6 +3524,28 @@ PointerAliasingSet::operator|=(const PointerAliasingSet &o)
 	if (res)
 		clearName();
 	return res;
+}
+
+bool
+PointerAliasingSet::operator <(const PointerAliasingSet &o) const
+{
+	if (valid < o.valid)
+		return true;
+	if (valid > o.valid || !valid)
+		return false;
+	if (nonPointer < o.nonPointer)
+		return true;
+	if (nonPointer > o.nonPointer)
+		return false;
+	if (nonStckPointer < o.nonStckPointer)
+		return true;
+	if (nonStckPointer > o.nonStckPointer)
+		return false;
+	if (otherStackPointer < o.otherStackPointer)
+		return true;
+	if (otherStackPointer)
+		return false;
+	return stackPointers < o.stackPointers;
 }
 
 /* Compute the offset from RSP to the function's return address. */

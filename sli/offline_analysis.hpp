@@ -247,6 +247,7 @@ StateMachine *phiElimination(SMScopes *scopes, StateMachine *sm,
 			     predecessor_map &pred,
 			     control_dependence_graph &cdg,
 			     bool *done_something);
+StateMachine *pullImportsToRoot(SMScopes *scopes, StateMachine *sm, bool *progress);
 
 StateMachine *removeAnnotations(SMScopes *scopes,
 				VexPtr<MaiMap, &ir_heap> &mai,

@@ -18,6 +18,7 @@ public:
 	/* Update map to note that @predecessor is now a predecessor
 	 * of @state. */
 	void addPredecessor(StateMachineState *state, StateMachineState *predecessor);
+	void recompute(StateMachine *sm);
 };
 
 #endif /* !PREDECESSOR_MAP_HPP__ */

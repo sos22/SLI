@@ -109,9 +109,21 @@ control_dependence_graph::control_dependence_graph(const StateMachine *sm,
 		}
 		case StateMachineState::SideEffecting: {
 			const StateMachineSideEffecting *sme = (const StateMachineSideEffecting *)s;
-			addPath(content[sme->target],
-				dom,
-				sme->target);
+			if (sme->sideEffect &&
+			    sme->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+				addPath(content[sme->target],
+					bbdd::And(
+						scope,
+						dom,
+						bbdd::invert(
+							scope,
+							((StateMachineSideEffectAssertFalse *)sme->sideEffect)->value)),
+					sme->target);
+			} else {
+				addPath(content[sme->target],
+					dom,
+					sme->target);
+			}
 			if (debug_control_dependence) {
 				printf("Update l%d to:\n", labels[sme->target]);
 				content[sme->target]->prettyPrint(stdout);
@@ -129,7 +141,7 @@ control_dependence_graph::edgeCondition(SMScopes *scopes,
 					const StateMachineState *a,
 					const StateMachineState *b) const
 {
-	bbdd *base = domOf(b);
+	bbdd *base = domOf(a);
 	bbdd *res = base;
 	if (a->type == StateMachineState::Bifurcate) {
 		const StateMachineBifurcate *smb = (const StateMachineBifurcate *)a;
@@ -146,6 +158,17 @@ control_dependence_graph::edgeCondition(SMScopes *scopes,
 					base,
 					bbdd::invert(&scopes->bools, smb->condition));
 			}
+		}
+	} else if (a->type == StateMachineState::SideEffecting) {
+		const StateMachineSideEffecting *sme = (const StateMachineSideEffecting *)a;
+		assert(b == sme->target);
+		if (sme->sideEffect && sme->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+			res = bbdd::And(
+				&scopes->bools,
+				base,
+				bbdd::invert(
+					&scopes->bools,
+					((StateMachineSideEffectAssertFalse *)sme->sideEffect)->value));
 		}
 	}
 	return res;
@@ -176,12 +199,12 @@ cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg, b
 	std::vector<std::pair<StateMachineState *, StateMachineState *> > killedEdges;
 	std::vector<StateMachineState *> states;
 	enumStates(sm, &states);
-	for (auto it = states.begin(); it != states.end(); it++) {
+	for (auto it = states.begin(); !TIMEOUT && it != states.end(); it++) {
 		std::vector<StateMachineState **> targs;
 		(*it)->targets(targs);
-		for (auto it2 = targs.begin(); it2 != targs.end(); it2++) {
+		for (auto it2 = targs.begin(); !TIMEOUT && it2 != targs.end(); it2++) {
 			bbdd *dom = cdg.edgeCondition(scopes, *it, **it2);
-			if (dom->isLeaf() && dom->leaf() == false) {
+			if (!TIMEOUT && dom->isLeaf() && dom->leaf() == false) {
 				/* This edge can never be taken. */
 				if (debug_control_dependence) {
 					killedEdges.push_back(

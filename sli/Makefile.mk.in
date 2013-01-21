@@ -16,7 +16,7 @@ targets="${targets} direct_cd merge_type_tables summary_to_fix static timing"
 #targets="${targets} canonicalise_crash_summary"
 
 defvars() {
-	echo SLIR_SOURCES= ${input_base}/{ssa,transform_expr,machinestate}.cpp
+	echo SLIR_SOURCES= ${input_base}/{ssa,transform_expr,machinestate,pull_import_to_root}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{util,memorychunk,nd_chooser,visitor}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{addressspace,crash_summary,phi_elimination}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap,interpreter,coredump}.cpp

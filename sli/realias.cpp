@@ -19,6 +19,7 @@ static bool debug_refine_points_to_table = false;
 static bool debug_build_alias_table = false;
 static bool debug_refine_alias_table = false;
 static bool debug_use_alias_table = false;
+static bool debug_enum_backwards = false;
 static void enable_debug() __attribute__((unused, used));
 static void enable_debug() {
 	debug_build_stack_layout = true;
@@ -27,6 +28,9 @@ static void enable_debug() {
 	debug_build_alias_table = true;
 	debug_refine_alias_table = true;
 	debug_use_alias_table = true;
+	/* This one is loud enough that if you want it you have to
+	 * enable it explicitly: */
+	/*debug_enum_backwards = true;*/
 }
 #else
 #define debug_build_stack_layout false
@@ -35,8 +39,9 @@ static void enable_debug() {
 #define debug_build_alias_table false
 #define debug_refine_alias_table false
 #define debug_use_alias_table false
+#define debug_enum_backwards false
 #endif
-#define any_debug (debug_build_stack_layout || debug_build_points_to_table || debug_refine_points_to_table || debug_build_alias_table || debug_refine_alias_table || debug_use_alias_table)
+#define any_debug (debug_build_stack_layout || debug_build_points_to_table || debug_refine_points_to_table || debug_build_alias_table || debug_refine_alias_table || debug_use_alias_table || debug_enum_backwards)
 
 class AliasTable;
 
@@ -544,7 +549,6 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 			   see the intermediate state due to phase
 			   ordering problems.  Just do something
 			   vaguely sensible. */
-			warning("%s:%s:%d: Use of uninitialised temporary in %s\n", __FILE__, __func__, __LINE__, nameIRExpr(iex));
 			return PointerAliasingSet::nothing;
 		} else {
 			return content[iex->reg];
@@ -1062,8 +1066,10 @@ PointsToTable::refine(SMScopes *scopes,
 			/* These aren't supposed to define registers */
 			abort();
 		}
+		newPts = newPts & it->second;
 		if (newPts != it->second)
 			*done_something = true;
+		assert(!res.content.count(it->first));
 		res.content.insert(std::pair<threadAndRegister, PointerAliasingSet>(it->first, newPts));
 	}
 	return res;
@@ -1091,8 +1097,8 @@ AliasTable::refine(SMScopes *scopes,
 				slt,
 				sm));
 		if (debug_refine_alias_table)
-			printf("Examining alias table for state %d\n",
-			       labels[it->first]);
+			printf("Examining alias table for state %d (currently %s)\n",
+			       labels[it->first], loadPts.name());
 		for (auto it2 = it->second.stores.begin();
 		     it2 != it->second.stores.end();
 			) {
@@ -1135,8 +1141,14 @@ static void
 breadthFirstEnumBackwards(const predecessor_map &pm,
 			  StateMachineState *startFrom,
 			  StateMachineState *root,
-			  std::vector<StateMachineState *> &out)
+			  std::vector<StateMachineState *> &out,
+			  std::map<const StateMachineState *, int> &labels)
 {
+	if (debug_enum_backwards) {
+		printf("Enum backwards from l%d to l%d\n", labels[startFrom],
+		       labels[root]);
+	}
+
 	/* Map from states to the number of predecessors of that node
 	   which have not yet been enumerated.  Only contains entries
 	   for states which can reach @startFrom. */
@@ -1156,8 +1168,14 @@ breadthFirstEnumBackwards(const predecessor_map &pm,
 		std::vector<StateMachineState *> pred;
 		pm.getPredecessors(s, pred);
 		it->second = pred.size();
-		if (pred.size() == 0)
+		if (pred.size() == 0) {
 			assert(s == root);
+		}
+		if (debug_enum_backwards) {
+			printf("l%d has %zd predecessors\n", 
+			       labels[s], pred.size());
+		}
+
 		for (auto it = pred.begin(); it != pred.end(); it++)
 			pending.push_back(*it);
 	}
@@ -1180,6 +1198,11 @@ breadthFirstEnumBackwards(const predecessor_map &pm,
 		emitted.insert(s);
 #endif
 		out.push_back(s);
+
+		if (debug_enum_backwards) {
+			printf("Emit l%d\n", labels[s]);
+		}
+
 		std::vector<StateMachineState *> targs;
 		s->targets(targs);
 		for (auto it = targs.begin(); it != targs.end(); it++) {
@@ -1192,6 +1215,12 @@ breadthFirstEnumBackwards(const predecessor_map &pm,
 			}
 			assert(it2->second > 0);
 			it2->second--;
+			if (debug_enum_backwards) {
+				printf("Dismiss l%d -> l%d; l%d has %d predecessors left\n",
+				       labels[s], labels[target],
+				       labels[target],
+				       it2->second);
+			}
 			if (it2->second == 0) {
 				/* All predecessors of this target
 				   emitted -> emit the target. */
@@ -1199,8 +1228,31 @@ breadthFirstEnumBackwards(const predecessor_map &pm,
 			}
 		}
 	}
+
 #ifndef NDEBUG
-	assert(emitted.size() == neededPredecessors.size());
+	if (emitted.size() != neededPredecessors.size()) {
+		printf("Whoops, failed to emit all needed states\n");
+		printf("Emitted extras: ");
+		for (auto it = emitted.begin(); it != emitted.end(); it++) {
+			if (!neededPredecessors.count(*it)) {
+				printf("l%d ", labels[*it]);
+			}
+		}
+		printf("\nFailed to emit: ");
+		for (auto it = neededPredecessors.begin(); it != neededPredecessors.end(); it++) {
+			if (!emitted.count(it->first)) {
+				printf("l%d ", labels[it->first]);
+			}
+		}
+		printf("\nLeft-over predecessors: ");
+		for (auto it = neededPredecessors.begin(); it != neededPredecessors.end(); it++) {
+			if (it->second != 0) {
+				printf("l%d(%d) ", labels[it->first], it->second);
+			}
+		}
+		printf("\n");
+		abort();
+	}
 #endif
 }
 
@@ -1280,13 +1332,17 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		}
 		ptt = ptt2;
 
-		at.refine(scopes, ptt, stackLayout, sm, &p, stateLabels);
-		if (!p)
-			break;
-		if (debug_refine_alias_table) {
+		bool p2 = false;
+		at.refine(scopes, ptt, stackLayout, sm, &p2, stateLabels);
+		p |= p2;
+
+		if (p2 && debug_refine_alias_table) {
 			printf("Refined alias table:\n");
 			at.prettyPrint(stdout, stateLabels);
 		}
+
+		if (!p)
+			break;
 	}
 	if (any_debug) {
 		printf("Final points-to table:\n");
@@ -1306,6 +1362,11 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		if (it->second.mightHaveExternalStores) {
 			killedAllLoads = false;
 			continue;
+		}
+
+		if (debug_use_alias_table) {
+			printf("Trying to remove load at l%d\n",
+			       stateLabels[it->first]);
 		}
 
 		/* A couple of easy special cases: */
@@ -1418,11 +1479,6 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		   load immediately after that state. */
 		std::map<StateMachineState *, exprbdd *> replacements;
 
-		if (debug_use_alias_table) {
-			printf("Trying to remove load at l%d\n",
-			       stateLabels[it->first]);
-		}
-
 		/* Bit of a hack: treat NULL as a special initial
 		   state which executes immediately before the machine
 		   starts. */
@@ -1436,7 +1492,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		/* Figure out what order to visit states in so as to
 		 * avoid revisiting any states. */
 		std::vector<StateMachineState *> statesToVisit;
-		breadthFirstEnumBackwards(predMap, it->first, sm->root, statesToVisit);
+		breadthFirstEnumBackwards(predMap, it->first, sm->root, statesToVisit, stateLabels);
 
 		if (debug_use_alias_table) {
 			printf("State visit order: ");
@@ -1486,22 +1542,31 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			     it3 != predecessors.end();
 			     it3++) {
 				StateMachineState *predState = *it3;
-				bbdd *condition;
+				bbdd *condition, *c;
 				if (predState) {
 					condition = cdg.edgeCondition(scopes, predState, state);
 				} else {
 					condition = scopes->bools.cnst(true);
 				}
+				c = condition;
+				/* Should have already applied CDG
+				 * optimisation to remove these
+				 * edges. */
+				assert(condition != scopes->bools.cnst(false));
 				condition = bbdd::assume(&scopes->bools, condition, assumption);
 				if (!condition) {
 					/* Can't actually take this edge. */
 					continue;
 				}
+				/* If there's a path from A to B then
+				   knowing that B is reached shouldn't
+				   imply that A is unreachable. */
+				assert(condition != scopes->bools.cnst(false));
+
 				assert(replacements.count(predState));
 				exprbdd **slot = tabAtStartOfState.getSlot(
 					condition,
 					replacements[predState]);
-				assert(*slot == replacements[predState]);
 				if (debug_use_alias_table) {
 					printf("Consider edge l%d -> l%d\n",
 					       stateLabels[predState],
@@ -1511,6 +1576,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 					printf("Value ");
 					replacements[predState]->prettyPrint(stdout);
 				}
+				assert(*slot == replacements[predState]);
 			}
 			if (TIMEOUT) {
 				return sm;
