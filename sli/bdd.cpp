@@ -1029,6 +1029,9 @@ exprbdd::sanity_check(bdd_ordering *ordering) const
 exprbdd *
 exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
 {
+	if (TIMEOUT)
+		return NULL;
+
 	if (what->tag == Iex_Mux0X)
 		return ifelse(
 			scope,

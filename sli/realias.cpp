@@ -197,6 +197,8 @@ compare_expressions(const exprbdd *a, const exprbdd *b)
 bool
 StackLayout::identifyFrameFromPtr(exprbdd *ptr, FrameId *out)
 {
+	if (TIMEOUT)
+		return false;
 	*out = FrameId();
 	bool definitelyStack = false;
 	assert(ptr->type() == Ity_I64);
