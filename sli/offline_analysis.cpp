@@ -346,6 +346,7 @@ _optimiseStateMachine(SMScopes *scopes,
 			done_something |= p;
 		}
 
+#if CONFIG_LOAD_ELIMINATION || CONFIG_PHI_ELIMINATION
 		if (!done_something && is_ssa) {
 			predecessor_map pred(sm);
 			control_dependence_graph cdg(sm, &scopes->bools);
@@ -360,6 +361,7 @@ _optimiseStateMachine(SMScopes *scopes,
 				pred.recompute(sm);
 			done_something |= p;
 
+#if CONFIG_LOAD_ELIMINATION
 			sm = functionAliasAnalysis(scopes, *mai, sm, opt,
 						   oracle, cdg, pred, &p);
 			if (debugOptimiseStateMachine && p) {
@@ -367,6 +369,7 @@ _optimiseStateMachine(SMScopes *scopes,
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
+#endif
 
 #if CONFIG_PHI_ELIMINATION
 			p = false;
@@ -378,6 +381,7 @@ _optimiseStateMachine(SMScopes *scopes,
 			done_something |= p;
 #endif
 		}
+#endif
 
 		if (progress)
 			*progress |= done_something;
