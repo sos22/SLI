@@ -1418,28 +1418,13 @@ struct IRExprGet : public IRExpr {
    ppIRExpr output: GETI<descr>[<ix>,<bias]
    eg. GETI(128:8xI8)[t1,0]
 */
-class IRExprGetI : public IRExpr {
-public:
-   IRRegArray* const descr; /* Part of guest state treated as circular */
-   IRExpr*     const ix;    /* Variable part of index into array */
-   Int         const bias;  /* Constant offset part of index into array */
-   unsigned    const tid;     /* The thread whose register is to be read */
-private:
-   IRExprGetI(IRRegArray *_descr,
-	      IRExpr *_ix,
-	      Int _bias,
-	      unsigned _tid)
-       : IRExpr(Iex_GetI),
-	 descr(_descr),
-	 ix(_ix),
-	 bias(_bias),
-	 tid(_tid)
-   {}
-public:
-   static IRExpr *mk(IRRegArray *descr, IRExpr *ix, Int bias, unsigned tid)
-   {
-      return new IRExprGetI(descr, ix, bias, tid);
-   }
+struct IRExprGetI : public IRExpr {
+#define IRExprGetI_fields(i1, i2, i3)		\
+    i1(IRRegArray *, descr)			\
+    i2(IRExpr *, ix)				\
+    i2(Int, bias)				\
+    i3(unsigned, tid)
+    mk_irexpr(GetI)
    static IRExpr *mk(const IRExprGetI *base, IRExpr *_ix)
    {
       return mk(base->descr, _ix, base->bias, base->tid);
@@ -1472,28 +1457,9 @@ public:
    eg. MAddF64r32(t1, t2, t3, t4)
 */
 struct IRExprQop : public IRExpr {
-   IROp const op;          /* op-code   */
-   IRExpr* const arg1;     /* operand 1 */
-   IRExpr* const arg2;     /* operand 2 */
-   IRExpr* const arg3;     /* operand 3 */
-   IRExpr* const arg4;     /* operand 4 */
-
-private:
-    IRExprQop(IROp _op, IRExpr *_arg1, IRExpr *_arg2,
-	      IRExpr *_arg3, IRExpr *_arg4)
-       : IRExpr(Iex_Qop),
-	 op(_op),
-	 arg1(_arg1),
-	 arg2(_arg2),
-	 arg3(_arg3),
-	 arg4(_arg4)
-   {}
-public:
-   static IRExpr *mk(IROp op, IRExpr *arg1, IRExpr *arg2,
-		     IRExpr *arg3, IRExpr *arg4)
-   {
-      return new IRExprQop(op, arg1, arg2, arg3, arg4);
-   }
+#define IRExprQop_fields(i1, i2, i3)					\
+    i1(IROp, op) i2(IRExpr *, arg1) i2(IRExpr *, arg2) i2(IRExpr *, arg3) i3(IRExpr *, arg4)
+    mk_irexpr(Qop)
    void visit(HeapVisitor &hv) {
        hv(arg1);
        hv(arg2);
@@ -1542,21 +1508,9 @@ public:
    eg. MulF64(1, 2.0, 3.0)
 */
 struct IRExprTriop : public IRExpr {
-   IROp const op;          /* op-code   */
-   IRExpr* const arg1;     /* operand 1 */
-   IRExpr* const arg2;     /* operand 2 */
-   IRExpr* const arg3;     /* operand 3 */
-private:
-   IRExprTriop(IROp _op, IRExpr *_arg1, IRExpr *_arg2,
-	       IRExpr *_arg3)
-       : IRExpr(Iex_Triop), op(_op),
-	 arg1(_arg1), arg2(_arg2), arg3(_arg3)
-   {}
-public:
-   static IRExpr *mk(IROp op, IRExpr *arg1, IRExpr *arg2, IRExpr *arg3)
-   {
-      return new IRExprTriop(op, arg1, arg2, arg3);
-   }
+#define IRExprTriop_fields(i1, i2, i3)					\
+    i1(IROp, op) i2(IRExpr *, arg1) i2(IRExpr *, arg2) i3(IRExpr *, arg3)
+    mk_irexpr(Triop)
    void visit(HeapVisitor &hv) {
        hv(arg1);
        hv(arg2);
@@ -1599,22 +1553,12 @@ public:
    ppIRExpr output: <op>(<arg1>, <arg2>), eg. Add32(t1,t2)
 */
 struct IRExprBinop : public IRExpr {
-   IROp const op;          /* op-code   */
-   IRExpr* const arg1;     /* operand 1 */
-   IRExpr* const arg2;     /* operand 2 */
-
-private:
-   IRExprBinop(IROp _op, IRExpr *_arg1, IRExpr *_arg2)
-       : IRExpr(Iex_Binop), op(_op), arg1(_arg1), arg2(_arg2)
-   {}
-public:
-   static IRExpr *mk(IROp op, IRExpr *arg1, IRExpr *arg2)
-   {
-      return new IRExprBinop(op, arg1, arg2);
-   }
+#define IRExprBinop_fields(i1, i2, i3)			\
+    i1(IROp, op) i2(IRExpr *, arg1) i3(IRExpr *, arg2)
+    mk_irexpr(Binop)
    static IRExpr *mk(const IRExprBinop *base, IROp op)
    {
-      return mk(op, base->arg1, base->arg2);
+       return mk(op, base->arg1, base->arg2);
    }
 
    void visit(HeapVisitor &hv) {
@@ -1646,18 +1590,9 @@ public:
    ppIRExpr output: <op>(<arg>), eg. Neg8(t1)
 */
 struct IRExprUnop : public IRExpr {
-   IROp    const op;       /* op-code */
-   IRExpr* const arg;      /* operand */
-
-private:
-   IRExprUnop(IROp _op, IRExpr *_arg)
-       : IRExpr(Iex_Unop), op(_op), arg(_arg)
-   {}
-public:
-   static IRExpr *mk(IROp op, IRExpr *arg)
-   {
-      return new IRExprUnop(op, arg);
-   }
+#define IRExprUnop_fields(i1, i2, i3)		\
+    i1(IROp, op) i3(IRExpr *, arg)
+    mk_irexpr(Unop)
 
    void visit(HeapVisitor &hv) {
        hv(arg);
@@ -1694,18 +1629,9 @@ public:
    ppIRExpr output: LD<end>:<ty>(<addr>), eg. LDle:I32(t1)
 */
 struct IRExprLoad : public IRExpr {
-   IRType    const ty;     /* Type of the loaded value */
-   IRExpr*   const addr;   /* Address being loaded from */
-
-private:
-   IRExprLoad(IRType _ty, IRExpr *_addr)
-       : IRExpr(Iex_Load), ty(_ty), addr(_addr)
-   {}
-public:
-   static IRExpr *mk(IRType ty, IRExpr *addr)
-   {
-      return new IRExprLoad(ty, addr);
-   }
+#define IRExprLoad_fields(i1, i2, i3)		\
+    i1(IRType, ty) i3(IRExpr *, addr)
+    mk_irexpr(Load)
    void visit(HeapVisitor &hv) { hv(addr); }
    unsigned long hashval() const {
        return ty + addr->hashval() * 97;
@@ -1736,22 +1662,11 @@ struct IRExprConst : public IRExpr {
 	 ULong hi;
       } U128;
     } content;
+      bool operator<(const _Ico &o) const;
   };
-  const _Ico Ico;
-private:
-   IRExprConst(const _Ico &content)
-       : IRExpr(Iex_Const), Ico(content)
-   {
-       /* There's not much point in attempting to optimise constants,
-	  so just set the flag saying that it's already been fully
-	  optimised. */
-       optimisationsApplied = ~0u;
-   }
-public:
-   static IRExprConst *mk(const _Ico &content)
-   {
-      return new IRExprConst(content);
-   }
+#define IRExprConst_fields(i1, i2, i3)		\
+    i3(IRExprConst::_Ico, Ico)
+    mk_irexpr(Const)
    void visit(HeapVisitor &) { }
    unsigned long hashval() const { return Ico.content.U64; }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
@@ -1801,18 +1716,11 @@ Bool eqIRExprConst ( const IRExprConst* c1, const IRExprConst* c2 );
    eg. foo{0x80489304}(t1, t2):I32
 */
 struct IRExprCCall : public IRExpr {
-   IRCallee* const cee;    /* Function to call. */
-   IRType    const retty;  /* Type of return value. */
-   IRExpr*const *  const args;   /* Vector of argument expressions. */
-private:
-   IRExprCCall(IRCallee *_cee, IRType _retty, IRExpr *const* _args)
-       : IRExpr(Iex_CCall), cee(_cee), retty(_retty), args(_args)
-   {}
-public:
-   static IRExpr *mk(IRCallee *cee, IRType retty, IRExpr *const* args)
-   {
-      return new IRExprCCall(cee, retty, args);
-   }
+#define IRExprCCall_fields(i1, i2, i3)			\
+    i1(IRCallee*, cee)    /* Function to call. */	\
+    i2(IRType, retty)  /* Type of return value. */			\
+    i3(IRExpr*const *, args)   /* Vector of argument expressions. */
+    mk_irexpr(CCall)
 
    void visit(HeapVisitor &hv) {
        hv(cee);
@@ -1843,19 +1751,11 @@ public:
    eg. Mux0X(t6,t7,t8)
 */
 struct IRExprMux0X : public IRExpr {
-   IRExpr* const cond;     /* Condition */
-   IRExpr* const expr0;    /* True expression */
-   IRExpr* const exprX;    /* False expression */
-private:
-   IRExprMux0X(IRExpr *_cond, IRExpr *_expr0, IRExpr *_exprX)
-       : IRExpr(Iex_Mux0X), cond(_cond), expr0(_expr0),
-	 exprX(_exprX)
-   {}
-public:
-   static IRExpr *mk(IRExpr *cond, IRExpr *expr0, IRExpr *exprX)
-   {
-      return new IRExprMux0X(cond, expr0, exprX);
-   }
+#define IRExprMux0X_fields(i1, i2, i3)		\
+    i1(IRExpr*, cond)     /* Condition */		\
+    i2(IRExpr*, expr0)    /* True expression */		\
+    i3(IRExpr*, exprX)    /* False expression */
+    mk_irexpr(Mux0X)
    void visit(HeapVisitor &hv) {
        hv(cond);
        hv(expr0);
@@ -1881,21 +1781,11 @@ public:
    Because it's associative, the exact nesting order doesn't
    matter. */
 struct IRExprAssociative : public IRExpr {
-   IROp const op;
-   int const nr_arguments;
-   IRExpr *const *const contents;
-private:
-   IRExprAssociative(IROp _op, int _nr_arguments, IRExpr *const *_contents)
-       : IRExpr(Iex_Associative),
-	 op(_op),
-	 nr_arguments(_nr_arguments),
-	 contents(_contents)
-   {}
-public:
-   static IRExprAssociative *mk(IROp op, int nr_args, IRExpr *const *contents)
-   {
-      return new IRExprAssociative(op, nr_args, contents);
-   }
+#define IRExprAssociative_fields(i1, i2, i3)	\
+    i1(IROp, op)				\
+    i2(int, nr_arguments)			\
+    i3(IRExpr *const *, contents)
+    mk_irexpr(Associative)
    void visit(HeapVisitor &hv) {
        hv(contents);
        for (int i = 0; i < nr_arguments; i++)
@@ -1930,21 +1820,10 @@ public:
 };
 
 struct IRExprHappensBefore : public IRExpr {
-    MemoryAccessIdentifier const before;
-    MemoryAccessIdentifier const after;
-private:
-    IRExprHappensBefore(const MemoryAccessIdentifier &_before,
-			const MemoryAccessIdentifier &_after)
-	: IRExpr(Iex_HappensBefore),
-	  before(_before),
-	  after(_after)
-    {}
-public:
-   static IRExpr *mk(const MemoryAccessIdentifier &before,
-		     const MemoryAccessIdentifier &after)
-   {
-      return new IRExprHappensBefore(before, after);
-   }
+#define IRExprHappensBefore_fields(i1, i2, i3)	\
+    i1(MemoryAccessIdentifier, before)		\
+    i3(MemoryAccessIdentifier, after)
+    mk_irexpr(HappensBefore)
     void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 19; }
     void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
@@ -1957,18 +1836,11 @@ public:
 };
 
 struct IRExprFreeVariable : public IRExpr {
-    MemoryAccessIdentifier const id;
-    IRType const ty;
-    bool const isUnique;
-private:
-    IRExprFreeVariable(const MemoryAccessIdentifier _id, IRType _ty, bool _isUnique)
-	: IRExpr(Iex_FreeVariable), id(_id), ty(_ty), isUnique(_isUnique)
-    {}
-public:
-   static IRExprFreeVariable *mk(const MemoryAccessIdentifier _id, IRType _ty, bool _isUnique)
-   {
-      return new IRExprFreeVariable(_id, _ty, _isUnique);
-   }
+#define IRExprFreeVariable_fields(i1, i2, i3)	\
+    i1(MemoryAccessIdentifier, id)		\
+    i2(IRType, ty)				\
+    i3(bool, isUnique)
+    mk_irexpr(FreeVariable)
     void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 1045239 * id.hash(); }
     void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const {
@@ -1986,19 +1858,10 @@ public:
 };
 
 struct IRExprEntryPoint : public IRExpr {
-    unsigned const thread;
-    CfgLabel const label;
-private:
-    IRExprEntryPoint(unsigned _thread, const CfgLabel &_label)
-	: IRExpr(Iex_EntryPoint), thread(_thread), label(_label)
-    {
-    }
-    IRExprEntryPoint(const IRExprEntryPoint &o); /* DNI */
-public:
-   static IRExpr *mk(unsigned thread, const CfgLabel &label)
-   {
-      return new IRExprEntryPoint(thread, label);
-   }
+#define IRExprEntryPoint_fields(i1, i2, i3)	\
+    i1(unsigned, thread)			\
+    i3(CfgLabel, label)
+    mk_irexpr(EntryPoint)
     void visit(HeapVisitor &) {}
     unsigned long hashval() const {
 	return label.hash() ^ thread;
@@ -2024,20 +1887,9 @@ public:
 };
 
 struct IRExprControlFlow : public IRExpr {
-    unsigned const thread;
-    CfgLabel const cfg1;
-    CfgLabel const cfg2;
-private:
-    IRExprControlFlow(unsigned _thread, const CfgLabel &_cfg1, const CfgLabel &_cfg2)
-	: IRExpr(Iex_ControlFlow), thread(_thread), cfg1(_cfg1), cfg2(_cfg2)
-    {
-    }
-   IRExprControlFlow(const IRExprControlFlow &o); /* DNI */
-public:
-   static IRExpr *mk(unsigned thread, const CfgLabel &label1, const CfgLabel &label2)
-   {
-      return new IRExprControlFlow(thread, label1, label2);
-   }
+#define IRExprControlFlow_fields(i1, i2, i3)	\
+    i1(unsigned, thread) i2(CfgLabel, cfg1) i3(CfgLabel, cfg2)
+    mk_irexpr(ControlFlow)
     void visit(HeapVisitor &) {}
     unsigned long hashval() const {
 	return cfg1.hash() ^ thread ^ (cfg2.hash() * 7);

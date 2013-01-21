@@ -2807,6 +2807,36 @@ CfgLabelAllocator::reset()
 	cntr = 1;
 }
 
+bool
+IRExprConst::_Ico::operator<(const _Ico &o) const
+{
+  if (ty < o.ty)
+    return true;
+  if (ty > o.ty)
+    return false;
+  switch (ty) {
+  case Ity_I1:
+    return content.U1 < o.content.U1;
+  case Ity_I8:
+    return content.U8 < o.content.U8;
+  case Ity_I16:
+    return content.U16 < o.content.U16;
+  case Ity_I32:
+    return content.U32 < o.content.U32;
+  case Ity_I64:
+    return content.U64 < o.content.U64;
+  case Ity_I128:
+    if (content.U128.hi < o.content.U128.hi)
+      return true;
+    if (content.U128.hi > o.content.U128.hi)
+      return false;
+    return content.U128.lo < o.content.U128.lo;
+  case Ity_INVALID:
+    abort();
+  }
+  abort();
+}
+
 #define __mk_proto(type, name) type const &name,
 #define __mk_proto_last(type, name) type const &name
 #define __apply_args1(type, name) name,
@@ -2867,7 +2897,8 @@ class gc_map : public GcCallback<&ir_heap>, public std::map<key, value> {
 
 mk_memoised_constructor(IRCallee)
 mk_memoised_constructor(IRRegArray)
-mk_memoised_constructor(IRExprGet)
+#define mk(n) mk_memoised_constructor(IRExpr ## n)
+IREXPR_TYPES(mk)
 
 /*---------------------------------------------------------------*/
 /*--- end                                           ir_defs.c ---*/
