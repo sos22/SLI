@@ -689,7 +689,7 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 		probeMachine,
 		oracle,
 		assumption,
-		optIn.enablepreferCrash(),
+		atomicSurvivalOptimisations(optIn.enablepreferCrash()),
 		token);
 
 	if (!assumption) {
