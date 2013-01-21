@@ -368,6 +368,7 @@ _optimiseStateMachine(SMScopes *scopes,
 			}
 			done_something |= p;
 
+#if CONFIG_PHI_ELIMINATION
 			p = false;
 			sm = phiElimination(scopes, sm, pred, cdg, &p);
 			if (debugOptimiseStateMachine && p) {
@@ -375,6 +376,7 @@ _optimiseStateMachine(SMScopes *scopes,
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
+#endif
 		}
 
 		if (progress)
