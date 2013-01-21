@@ -253,15 +253,9 @@ getLibraryStateMachine(SMScopes *scopes,
 	}
 	case LibraryFunctionTemplate::_ZdlPv:
 	case LibraryFunctionTemplate::free: {
-		acc = end;
-		for (int i = 0; i < 8; i++) {
-			SMBPtr<SMBExpression> fv(smb_expr(mkPendingFreeVar(Ity_I64, cfgnode, false)));
-			acc = (*(smb_reg(arg1, Ity_I64) + smb_const64(i * 8)) <<= fv) >>
-				acc;
-		}
 		acc = If(smb_reg(arg1, Ity_I64) == smb_const64(0),
 			 end,
-			 acc);
+			 Store(*smb_const64(CONFIG_LASTFREE_ADDR), smb_reg(arg1, Ity_I64), MemoryTag::last_free()) >> end);
 		break;
 	}
 	case LibraryFunctionTemplate::pthread_mutex_lock: {

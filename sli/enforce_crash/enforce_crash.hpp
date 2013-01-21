@@ -173,21 +173,21 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, s
 		IRExpr *transformIex(IRExprGet *e) {
 			if (!availExprs.count(e))
 				failed();
-			return NULL;
+			return e;
 		}
-		IRExpr *transformIex(IRExprHappensBefore *) {
+		IRExpr *transformIex(IRExprHappensBefore *e) {
 			failed();
-			return NULL;
+			return e;
 		}
 		IRExpr *transformIex(IRExprEntryPoint *e) {
 			if (!availExprs.count(e))
 				failed();
-			return NULL;
+			return e;
 		}
 		IRExpr *transformIex(IRExprControlFlow *e) {
 			if (!availExprs.count(e))
 				failed();
-			return NULL;
+			return e;
 		}
 	public:
 		bool isGood;

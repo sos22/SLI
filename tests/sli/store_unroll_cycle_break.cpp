@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <queue>
+#include <string>
 
 #include "sli.h"
 #include "cfgnode.hpp"

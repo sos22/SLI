@@ -1115,9 +1115,9 @@ static bbdd *
 stripFloatingPoint(bbdd::scope *scope, bbdd *what, bool *done_something,
 		   std::map<bbdd *, bbdd *> &memo)
 {
-	if (what->isLeaf)
+	if (what->isLeaf())
 		return what;
-	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(what, NULL));
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(what, (bbdd *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {

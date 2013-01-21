@@ -153,6 +153,21 @@ EOF
     _emit_rules_for_exe "$1" "$2"
 }
 
+emit_rules_for_exe_dfree() {
+    local exename="${MD_TEST_DIR}/$1"
+    local static_files="${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db"
+    cat <<EOF
+${exename}.summaries: minimal_direct ${static_files} machines
+	rm -rf \$@ crash_summaries induction.log logs generated_patch.c && \\
+	mkdir logs && \\
+	mkdir crash_summaries && \\
+	SOS22_MINIMAL_DIRECT_TIMEOUT=600 ./minimal_direct ${static_files} doublefree && \\
+	mv crash_summaries ${exename}.summaries
+clean_dirs += ${exename}.summaries
+EOF
+    _emit_rules_for_exe "$1" "$2"
+}
+
 rules() {
     cat <<EOF
 ${MD_TEST_DIR}:
@@ -168,6 +183,10 @@ EOF
     for bug in 11 12 13
     do
 	emit_rules_for_exe_assert bug${bug} 1
+    done
+    for bug in 14
+    do
+	emit_rules_for_exe_dfree bug${bug} 1
     done
     for bug in 9
     do

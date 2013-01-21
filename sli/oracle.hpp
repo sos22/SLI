@@ -224,10 +224,12 @@ private:
 
 	std::vector<StaticRip> terminalFunctions;
 	std::vector<StaticRip> crashingFunctions;
+	std::vector<StaticRip> freeFunctions;
 	void findNoReturnFunctions();
 public:
 	bool functionNeverReturns(const StaticRip &rip);
 	void findAssertions(std::vector<DynAnalysisRip> &out);
+	void findFrees(std::vector<DynAnalysisRip> &out);
 	static void loadCallGraph(VexPtr<Oracle> &ths, const char *cg_path,
 				  const char *db_fname, GarbageCollectionToken token);
 	void visit(HeapVisitor &hv) {
@@ -297,6 +299,7 @@ public:
 	LibraryFunctionType identifyLibraryCall(const VexRip &vr);
 
 	bool isCrashingAddr(const VexRip &vr) const;
+	bool isFreeAddr(const VexRip &vr) const;
 
 	~Oracle() { }
 	Oracle(MachineState *_ms, Thread *_thr, const char *tags)

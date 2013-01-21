@@ -513,15 +513,13 @@ ssaDeadCode(SMScopes *scopes, StateMachine *sm, bool *done_something)
 				*done_something = true;
 				(*it)->sideEffect =
 					new StateMachineSideEffectAssertFalse(
-						bbdd::invert(
+						exprbdd::to_bbdd(
 							&scopes->bools,
-							exprbdd::to_bbdd(
+							exprbdd::unop(
+								&scopes->exprs,
 								&scopes->bools,
-								exprbdd::unop(
-									&scopes->exprs,
-									&scopes->bools,
-									Iop_BadPtr,
-									smsel->addr))),
+								Iop_BadPtr,
+								smsel->addr)),
 						true);
 			}
 			break;
@@ -594,15 +592,13 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something, bo
 					(StateMachineSideEffectLoad *)e;
 				if (!alive.registerLiveData(smsel->target))
 					newEffect = new StateMachineSideEffectAssertFalse(
-						bbdd::invert(
+						exprbdd::to_bbdd(
 							&scopes->bools,
-							exprbdd::to_bbdd(
+							exprbdd::unop(
+								&scopes->exprs,
 								&scopes->bools,
-								exprbdd::unop(
-									&scopes->exprs,
-									&scopes->bools,
-									Iop_BadPtr,
-									smsel->addr))),
+								Iop_BadPtr,
+								smsel->addr)),
 						true);
 				break;
 			}

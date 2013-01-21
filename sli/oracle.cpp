@@ -221,6 +221,13 @@ Oracle::findConflictingStores(const MaiMap &mai,
 			if (!it->is_private)
 				out.insert(it->rip);
 	}
+
+	if (smsel->tag == MemoryTag::last_free()) {
+		std::vector<DynAnalysisRip> frees;
+		findFrees(frees);
+		for (auto it = frees.begin(); it != frees.end(); it++)
+			out.insert(*it);
+	}
 }
 
 bool
@@ -259,6 +266,8 @@ Oracle::hasConflictingRemoteStores(const MaiMap &mai, const AllowableOptimisatio
 {
 	if (opt.assumeNoInterferingStores())
 		return false;
+	if (access->tag == MemoryTag::last_free() && opt.freeMightRace())
+		return true;
 	for (auto it = mai.begin(access->rip); !it.finished(); it.advance()) {
 		if (access->type == StateMachineSideEffect::Load &&
 		    opt.nonLocalLoads() &&
@@ -412,6 +421,8 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 {
 	if (smsel->tag != smses->tag)
 		return false;
+	if (smsel->tag == MemoryTag::last_free())
+		return true;
 
 	if (definitelyNotEqual(smsel->addr, smses->addr, opt))
 		return false;
@@ -477,6 +488,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 	if (smsel1->tag != smsel2->tag)
 		return false;
 
+	if (smsel1->tag == MemoryTag::last_free())
+		return true;
+
 	if (definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
 		return false;
 
@@ -524,6 +538,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 {
 	if (smses1->tag != smses2->tag)
 		return false;
+
+	if (smses1->tag == MemoryTag::last_free())
+		return true;
 
 	if (definitelyNotEqual(smses1->addr, smses2->addr, opt))
 		return false;
@@ -1741,6 +1758,9 @@ Oracle::findNoReturnFunctions()
 
 		  "_ZSt9terminatev", "_ZSt10unexpectedv",
 		  NULL };
+	/* Functions which act like free(). */
+	static const char *const freers[] =
+		{ "free", "_ZdlPv", NULL };
 	for (int i = 0; crashers[i]; i++) {
 		unsigned long r;
 		r = ms->elfData->getPltAddress(ms->addressSpace, crashers[i]);
@@ -1754,6 +1774,12 @@ Oracle::findNoReturnFunctions()
 		r = ms->elfData->getPltAddress(ms->addressSpace, terminals[i]);
 		if (r)
 			terminalFunctions.push_back(StaticRip(r));
+	}
+	for (int i = 0; freers[i]; i++) {
+		unsigned long r;
+		r = ms->elfData->getPltAddress(ms->addressSpace, freers[i]);
+		if (r)
+			freeFunctions.push_back(StaticRip(r));
 	}
 }
 
@@ -3644,6 +3670,15 @@ Oracle::isCrashingAddr(const VexRip &vr) const
 	return false;
 }
 
+bool
+Oracle::isFreeAddr(const VexRip &vr) const
+{
+	for (auto it = freeFunctions.begin(); it != freeFunctions.end(); it++)
+		if (*it == StaticRip(vr))
+			return true;
+	return false;
+}
+
 void
 Oracle::findAssertions(std::vector<DynAnalysisRip> &drs)
 {
@@ -3659,10 +3694,27 @@ Oracle::findAssertions(std::vector<DynAnalysisRip> &drs)
 	}
 }
 
+void
+Oracle::findFrees(std::vector<DynAnalysisRip> &drs)
+{
+	static sqlite3_stmt *stmt;
+	if (!stmt)
+		stmt = prepare_statement("SELECT rip FROM callRips WHERE dest = ?");
+	for (auto it = freeFunctions.begin(); it != freeFunctions.end(); it++) {
+		bind_oraclerip(stmt, 1, *it);
+		std::vector<StaticRip> res;
+		extract_oraclerip_column(stmt, 0, res);
+		for (auto it = res.begin(); it != res.end(); it++)
+			drs.push_back(DynAnalysisRip(VexRip::invent_vex_rip(it->rip)));
+	}
+}
+
 bool
 OracleInterface::memoryAccessesMightAlias(const MaiMap &decode, const IRExprOptimisations &opt,
 					  StateMachineSideEffectMemoryAccess *a,
-					  StateMachineSideEffectMemoryAccess *b) {
+					  StateMachineSideEffectMemoryAccess *b)
+{
+	
 	if (a->type == StateMachineSideEffect::Load) {
 		if (b->type == StateMachineSideEffect::Load)
 			return memoryAccessesMightAlias(decode, opt, (StateMachineSideEffectLoad *)a, (StateMachineSideEffectLoad *)b);

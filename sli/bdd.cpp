@@ -917,14 +917,44 @@ bdd_ordering::runGc(HeapVisitor &hv)
 void
 bdd_rank::prettyPrint(FILE *f) const
 {
-	fprintf(f, "r%ld", val);
+	switch (cls.tag) {
+	case clsT::cls_entry:
+		fprintf(f, "e%ld", val);
+		return;
+	case clsT::cls_hb:
+		fprintf(f, "hb%d:%d:%ld",
+			cls.hb1, cls.hb2,
+			val);
+		return;
+	case clsT::cls_norm:
+		fprintf(f, "r%ld", val);
+		return;
+	}
+	abort();
 }
 
 bool
 bdd_rank::parse(const char *buf, const char **end)
 {
-	return parseThisChar('r', buf, &buf) &&
-		parseDecimalLong(&val, buf, end);
+	if (parseThisChar('e', buf, &buf) &&
+	    parseDecimalLong(&val, buf, end)) {
+		cls.tag = clsT::cls_entry;
+		return true;
+	} else if (parseThisString("hb", buf, &buf) &&
+		   parseDecimalInt(&cls.hb1, buf, &buf) &&
+		   parseThisChar(':', buf, &buf) &&
+		   parseDecimalInt(&cls.hb2, buf, &buf) &&
+		   parseThisChar(':', buf, &buf) &&
+		   parseDecimalLong(&val, buf, end)) {
+		cls.tag = clsT::cls_hb;
+		return true;
+	} else if (parseThisChar('r', buf, &buf) &&
+		   parseDecimalLong(&val, buf, end)) {
+		cls.tag = clsT::cls_norm;
+		return true;
+	} else {
+		return false;
+	}
 }
 
 void

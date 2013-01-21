@@ -59,7 +59,10 @@
 			   to <crash>.
 
    allPointersGood -- If true, BadPtr(x) is always assumed to be false.
-		  
+
+   freeMightRace -- True if we need to consider races on the LASTFREED
+                    address, false otherwise.
+
    Other fields:
 
    interestingStores -- Bit of a hack: sometimes, only some side
@@ -122,7 +125,7 @@ public:
 	   to false and return true.  If we can't be sure, return
 	   false. */
 	bool addressAccessible(unsigned long addr, bool *res) const {
-		if (_allPointersGood) {
+		if (_allPointersGood || addr == CONFIG_LASTFREE_ADDR) {
 			*res = true;
 			return true;
 		}
@@ -207,7 +210,8 @@ class AllowableOptimisations : public IRExprOptimisations {
 	f(noExtend,bool)						\
 	f(preferCrash,bool)						\
 	f(noLocalSurvival,bool)						\
-	f(mustStoreBeforeCrash,bool)
+	f(mustStoreBeforeCrash,bool)					\
+	f(freeMightRace,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\

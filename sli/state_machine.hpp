@@ -82,16 +82,18 @@ public:
 	MemoryTag() : id(-1) {}
 	static MemoryTag normal() { return MemoryTag(1); }
 	static MemoryTag mutex() { return MemoryTag(2); }
+	static MemoryTag last_free() { return MemoryTag(3); }
 	const char *name() const {
 		switch (id) {
 		case -1: return "BadTag";
 		case 1: return "normal";
 		case 2: return "mutex";
+		case 3: return "last_free";
 		default: abort();
 		}
 	}
 	void sanity_check() const {
-		assert(id == 1 || id == 2);
+		assert(id == 1 || id == 2 || id == 3);
 	}
 	bool parse(const char *str, const char **suffix) {
 		if (parseThisString("BadTag", str, suffix)) {
@@ -100,6 +102,8 @@ public:
 			id = 1;
 		} else if (parseThisString("mutex", str, suffix)) {
 			id = 2;
+		} else if (parseThisString("last_free", str, suffix)) {
+			id = 3;
 		} else {
 			return false;
 		}
