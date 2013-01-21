@@ -152,7 +152,6 @@ test_expression(IRExpr *what, int nr_vars)
 static void
 test_at_size(int nr_vars)
 {
-	static internIRExprTable intern;
 	static std::set<IRExpr *> alreadyDone;
 
 	printf("Test with %d variables...\r", nr_vars);
@@ -162,7 +161,6 @@ test_at_size(int nr_vars)
 			       nr_vars,
 			       100 * i / ((1 << nr_vars) * iters_per_test_size));
 		IRExpr *e = r_expr(nr_vars, 0.5);
-		e = internIRExpr(e, intern);
 		if (!alreadyDone.insert(e).second) {
 			i--;
 			continue;

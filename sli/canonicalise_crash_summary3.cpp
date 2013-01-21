@@ -748,7 +748,6 @@ findBooleanMultiplicity(IRExpr *input, std::map<IRExpr *, int> &r)
  */
 static IRExpr *
 functionalUnderspecification(IRExpr *input,
-			     internIRExprTable &intern,
 			     const reg_set_t &targetRegisters,
 			     int depth)
 {
@@ -771,8 +770,6 @@ functionalUnderspecification(IRExpr *input,
 			printf("%d: Input is constant -> nothing to do\n", depth);
 		return input;
 	}
-
-	input = internIRExpr(input, intern);
 
 	/* Decide what we're going to case split on. */
 	IRExpr *splitOn;
@@ -880,7 +877,6 @@ functionalUnderspecification(IRExpr *input,
 			       nameIRExpr(i));
 
 		i = functionalUnderspecification(i,
-						 intern,
 						 newTargets,
 						 depth + 1);
 
@@ -899,11 +895,9 @@ functionalUnderspecification(IRExpr *input,
 
 	/* Recursively consider doing another case split. */
 	assumingTrue = functionalUnderspecification(assumingTrue,
-						    intern,
 						    newTargets,
 						    depth + 1);
 	assumingFalse = functionalUnderspecification(assumingFalse,
-						     intern,
 						     newTargets,
 						     depth + 1);
 
@@ -923,9 +917,7 @@ functionalUnderspecification(IRExpr *input,
 				Iop_Not1,
 				splitOn),
 			assumingFalse));
-	res = internIRExpr(
-		simplifyIRExpr(res, AllowableOptimisations::defaultOptimisations),
-		intern);
+	res = simplifyIRExpr(res, AllowableOptimisations::defaultOptimisations);
 
 	if (debug_functional_underspecification)
 		printf("%d: Final result: %s\n\n", depth, nameIRExpr(res));
@@ -1212,11 +1204,9 @@ functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
 {
 	reg_set_t targetRegisters;
 	if (findTargetRegisters(summary, oracle, &targetRegisters, token)) {
-		internIRExprTable intern;
 		IRExpr *e = 
 			functionalUnderspecification(
 				bbdd::to_irexpr(summary->verificationCondition),
-				intern,
 				targetRegisters,
 				1);
 		if (e == underspecExpression)

@@ -4,7 +4,6 @@
 #include "allowable_optimisations.hpp"
 #include "maybe.hpp"
 #include "control_dependence_graph.hpp"
-#include "sat_checker.hpp"
 #include "alloc_mai.hpp"
 #include "predecessor_map.hpp"
 

@@ -3,7 +3,7 @@
 
 #include "state_machine.hpp"
 
-class internStateMachineTable : public internIRExprTable {
+class internStateMachineTable {
 	void _runGc(HeapVisitor &hv);
 public:
 	std::map<StateMachineSideEffect *, StateMachineSideEffect *> sideEffects;
@@ -27,13 +27,10 @@ public:
 	std::map<exprbdd *, exprbdd *> exprbdds;
 };
 
-IRExpr *internIRExpr(IRExpr *x);
 StateMachine *internStateMachine(StateMachine *sm);
 StateMachine *internStateMachine(
 	StateMachine *sm,
 	internStateMachineTable &t);
-bbdd *intern_bbdd(SMScopes *scopes, bbdd *bbdd, internIRExprTable &t);
-smrbdd *intern_smrbdd(SMScopes *scopes, smrbdd *smrbdd, internIRExprTable &t);
 
 #endif /* !INTERN_HPP__ */
 

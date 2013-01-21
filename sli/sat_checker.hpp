@@ -38,7 +38,6 @@ class sat_enumerator {
 		}
 	};
 	std::vector<stack_entry> stack;
-	internIRExprTable intern;
 	bool _finished;
 	const IRExprOptimisations &opt;
 	void skipToSatisfying(void);

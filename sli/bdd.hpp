@@ -579,7 +579,6 @@ class exprbdd_scope : public bdd_scope<exprbdd>, private GcCallback<&ir_heap> {
 	friend class exprbdd;
 
 	std::map<IRExpr *, exprbdd *> leaves;
-	internIRExprTable tab;
 
 	void runGc(HeapVisitor &hv);
 	exprbdd *cnst(IRExpr *what);

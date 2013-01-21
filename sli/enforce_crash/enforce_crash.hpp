@@ -21,12 +21,8 @@ class internmentState {
 public:
 	std::set<happensBeforeEdge *> hbes;
 	internStateMachineTable exprs;
-	IRExpr *intern(IRExpr *e) { return internIRExpr(e, exprs); }
-	IRExprGet *intern(IRExprGet *e) {
-		IRExpr *res = internIRExpr(e, exprs);
-		assert(res->tag == Iex_Get);
-		return (IRExprGet *)res;
-	}
+	IRExpr *intern(IRExpr *e) { return e; }
+	IRExprGet *intern(IRExprGet *e) { return e; }
 	AbstractThread intern(const AbstractThread &x) { return x; }
 	exprEvalPoint intern(const exprEvalPoint &);
 	template <typename a, typename b> std::pair<a, b> intern(const std::pair<a, b> &x) {

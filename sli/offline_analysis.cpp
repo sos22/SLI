@@ -16,7 +16,6 @@
 #include "libvex_prof.hpp"
 #include "cfgnode.hpp"
 #include "alloc_mai.hpp"
-#include "sat_checker.hpp"
 #include "allowable_optimisations.hpp"
 #include "predecessor_map.hpp"
 #include "control_dependence_graph.hpp"

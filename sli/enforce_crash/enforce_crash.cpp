@@ -753,7 +753,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	IRExpr *requirement = bbdd::to_irexpr(summary->verificationCondition);
 	int ignore;
 	requirement = removeFreeVariables(requirement, ERROR_POSITIVE, &ignore);
-	requirement = internIRExpr(simplify_via_anf(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations)));
+	requirement = simplify_via_anf(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
 	fprintf(_logfile, "After free variable removal:\n");
 	ppIRExpr(requirement, _logfile);
 	fprintf(_logfile, "\n");

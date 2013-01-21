@@ -219,16 +219,15 @@ check_and_normal_form(const IRExpr *e)
    not Iop_Or1.  It's not quite as powerful as CNF, but converting to
    it is *much* cheaper. */
 static IRExpr *
-and_normal_form(IRExpr *e, internIRExprTable &intern)
+and_normal_form(IRExpr *e)
 {
 	if (TIMEOUT)
 		return NULL;
 
-	e = internIRExpr(e, intern);
 	if (e->tag == Iex_Unop) {
 		IRExprUnop *ieu = (IRExprUnop *)e;
 		if (ieu->op == Iop_Not1) {
-			IRExpr *arg2 = and_normal_form(ieu->arg, intern);
+			IRExpr *arg2 = and_normal_form(ieu->arg);
 			if (!arg2)
 				return NULL;
 			if (arg2->tag == Iex_Unop) {
@@ -237,10 +236,9 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 					e = ieu2->arg;
 			} else {
 				if (arg2 != ieu->arg)
-					e = internIRExpr(IRExpr_Unop(
-								 Iop_Not1,
-								 arg2),
-							 intern);
+					e = IRExpr_Unop(
+						Iop_Not1,
+						arg2);
 			}
 		}
 	} else if (e->tag == Iex_Associative) {
@@ -248,12 +246,12 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 		if (iea->op == Iop_And1) {
 			IRExpr *newArgs[iea->nr_arguments];
 			for (int x = 0; x < iea->nr_arguments; x++)
-				newArgs[x] = and_normal_form(iea->contents[x], intern);
+				newArgs[x] = and_normal_form(iea->contents[x]);
 			if (TIMEOUT)
 				return NULL;
 			sort_and_arguments(newArgs, iea->nr_arguments);
 			IRExpr *res = IRExpr_Associative_Copy(iea->op, iea->nr_arguments, newArgs);
-			e = internIRExpr(res, intern);
+			e = res;
 		} else if (iea->op == Iop_Or1) {
 			IRExpr *newArgs[iea->nr_arguments];
 			for (int x = 0; x < iea->nr_arguments; x++)
@@ -261,13 +259,12 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 					and_normal_form(
 						IRExpr_Unop(
 							Iop_Not1,
-							iea->contents[x]),
-						intern);
+							iea->contents[x]));
 			sort_and_arguments(newArgs, iea->nr_arguments);
 			if (TIMEOUT)
 				return NULL;
 			IRExprAssociative *res = IRExpr_Associative_Copy(Iop_And1, iea->nr_arguments, newArgs);
-			e = internIRExpr(IRExpr_Unop(Iop_Not1, res), intern);
+			e = IRExpr_Unop(Iop_Not1, res);
 		}
 	}
 	check_and_normal_form(e);
@@ -275,7 +272,6 @@ and_normal_form(IRExpr *e, internIRExprTable &intern)
 }
 
 class anf_context {
-	internIRExprTable &intern;
 	std::set<std::pair<IRExpr *, IRExpr *> > eqRules;
 	std::set<IRExpr *> definitelyTrue;
 	std::set<IRExpr *> definitelyFalse;
@@ -285,8 +281,7 @@ class anf_context {
 	void introduceEqRule(IRExpr *a, IRExpr *b);
 	bool loadsBadPointer(IRExpr *a) const;
 public:
-	anf_context(internIRExprTable &_intern, IRExpr *assumption)
-		: intern(_intern)
+	anf_context(IRExpr *assumption)
 	{
 		if (assumption)
 			addAssumption(assumption);
@@ -447,10 +442,9 @@ anf_context::matches(const IRExpr *a, const IRExpr *b) const
 }
 
 static IRExpr *
-pureSimplify(IRExpr *what, internIRExprTable &internTable)
+pureSimplify(IRExpr *what)
 {
 	struct : public IRExprTransformer {
-		internIRExprTable *internTable;
 		IRExpr *transformIex(IRExprAssociative *ieb) {
 			if (ieb->op == Iop_Add64 &&
 			    ieb->nr_arguments == 2 &&
@@ -490,19 +484,12 @@ pureSimplify(IRExpr *what, internIRExprTable &internTable)
 				return IRExpr_Const_U1(true);
 			return IRExprTransformer::transformIex(ieb);
 		}
-		IRExpr *transformIRExpr(IRExpr *a)
-		{
-			IRExpr *res = IRExprTransformer::transformIRExpr(a);
-			return internIRExpr(res, *internTable);
-		}
 	} doit;
-	doit.internTable = &internTable;
-	IRExpr *a = doit.doit(what);
-	return internIRExpr(a, internTable);
+	return doit.doit(what);
 }
 
 static IRExpr *
-rewriteIRExpr(IRExpr *what, IRExpr *from, IRExpr *to, internIRExprTable &internTable)
+rewriteIRExpr(IRExpr *what, IRExpr *from, IRExpr *to)
 {
 	struct : public IRExprTransformer {
 		IRExpr *from;
@@ -515,7 +502,7 @@ rewriteIRExpr(IRExpr *what, IRExpr *from, IRExpr *to, internIRExprTable &internT
 	} doit;
 	doit.from = from;
 	doit.to = to;
-	return pureSimplify(doit.doit(what), internTable);
+	return pureSimplify(doit.doit(what));
 }
 
 void
@@ -590,15 +577,15 @@ anf_context::simplify(IRExpr *a)
 	if (TIMEOUT)
 		return a;
 
-	a = pureSimplify(a, intern);
+	a = pureSimplify(a);
 
 	/* If we have a == k, for any constant k, go and do the
 	 * rewrite. */
 	for (auto it = eqRules.begin(); it != eqRules.end(); it++) {
 		if (it->second->tag == Iex_Const)
-			a = rewriteIRExpr(a, it->first, it->second, intern);
+			a = rewriteIRExpr(a, it->first, it->second);
 		if (it->first->tag == Iex_Const)
-			a = rewriteIRExpr(a, it->second, it->first, intern);
+			a = rewriteIRExpr(a, it->second, it->first);
 	}
 
 	/* Icky special case: rewrite a + -b to just 0 if we know that
@@ -613,7 +600,7 @@ anf_context::simplify(IRExpr *a)
 				for (auto it = eqRules.begin(); it != eqRules.end(); it++) {
 					if ( (it->first == ieb->contents[0] && it->second == ieu->arg) ||
 					     (it->second == ieb->contents[0] && it->first == ieu->arg) )
-						return internIRExpr(IRExpr_Const_U64(0), intern);
+						return IRExpr_Const_U64(0);
 				}
 			}
 		}
@@ -622,15 +609,15 @@ anf_context::simplify(IRExpr *a)
 	if (a->type() != Ity_I1)
 		return a;
 	if (definitelyTrue.count(a))
-		return internIRExpr(IRExpr_Const_U1(true), intern);
+		return IRExpr_Const_U1(true);
 	if (definitelyFalse.count(a))
-		return internIRExpr(IRExpr_Const_U1(false), intern);
+		return IRExpr_Const_U1(false);
 	for (auto it = definitelyTrue.begin(); it != definitelyTrue.end(); it++)
 		if (matches(a, *it))
-			return internIRExpr(IRExpr_Const_U1(true), intern);
+			return IRExpr_Const_U1(true);
 	for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++)
 		if (matches(a, *it))
-			return internIRExpr(IRExpr_Const_U1(false), intern);
+			return IRExpr_Const_U1(false);
 
 	if (!badPointers.empty() && loadsBadPointer(a))
 		return UNEVALUATABLE;
@@ -644,7 +631,7 @@ anf_context::simplify(IRExpr *a)
 			return UNEVALUATABLE;
 		if (arg->tag == Iex_Const) {
 			IRExprConst *iec = (IRExprConst *)arg;
-			return internIRExpr(IRExpr_Const_U1(!iec->Ico.content.U1), intern);
+			return IRExpr_Const_U1(!iec->Ico.content.U1);
 		}
 		if (arg->tag == Iex_Unop &&
 		    ((IRExprUnop *)arg)->op == Iop_Not1)
@@ -658,11 +645,9 @@ anf_context::simplify(IRExpr *a)
 		   here.  Likewise, if it matched with definitely
 		   false, arg would have matched with definitely
 		   true. */
-		return internIRExpr(
-			IRExpr_Unop(
-				Iop_Not1,
-				arg),
-			intern);
+		return IRExpr_Unop(
+			Iop_Not1,
+			arg);
 	} else if (a->tag == Iex_Associative) {
 		IRExprAssociative *iea = (IRExprAssociative *)a;
 		assert(iea->op != Iop_Or1);
@@ -705,11 +690,10 @@ anf_context::simplify(IRExpr *a)
 		if (newNrArgs == 1)
 			return newArgs[0];
 		if (newNrArgs == 0)
-			return internIRExpr(IRExpr_Const_U1(true), intern);
+			return IRExpr_Const_U1(true);
 		sort_and_arguments(newArgs, newNrArgs);
 
-		IRExprAssociative *res = IRExpr_Associative_Copy(Iop_And1, newNrArgs, newArgs);
-		a = internIRExpr(res, intern);
+		a = IRExpr_Associative_Copy(Iop_And1, newNrArgs, newArgs);
 
 		/* Don't need to check against the definitely true
 		   list, because this is an and expression and they
@@ -718,7 +702,7 @@ anf_context::simplify(IRExpr *a)
 		   definitely false, though. */
 		for (auto it = definitelyFalse.begin(); it != definitelyFalse.end(); it++)
 			if (matches(a, *it))
-				return internIRExpr(IRExpr_Const_U1(false), intern);
+				return IRExpr_Const_U1(false);
 		return a;
 	} else {
 		return a;
@@ -729,11 +713,10 @@ anf_context::simplify(IRExpr *a)
  * and Iop_Not1 operators, but not Iop_Or1).  See if there are any
  * interesting simplifications we can do based on that. */
 static IRExpr *
-anf_simplify(IRExpr *a, IRExpr *assumption, internIRExprTable &intern)
+anf_simplify(IRExpr *a, IRExpr *assumption)
 {
-	a = internIRExpr(a, intern);
 	while (!TIMEOUT) {
-		anf_context ctxt(intern, assumption);
+		anf_context ctxt(assumption);
 		IRExpr *a2 = ctxt.simplify(a);
 		if (a2 == UNEVALUATABLE || a == a2)
 			break;
@@ -745,15 +728,13 @@ anf_simplify(IRExpr *a, IRExpr *assumption, internIRExprTable &intern)
 static IRExpr *
 simplify_via_anf(IRExpr *a, IRExpr *assumption = NULL)
 {
-	internIRExprTable table;
-	a = internIRExpr(a, table);
-	IRExpr *normed = and_normal_form(a, table);
+	IRExpr *normed = and_normal_form(a);
 	if (!normed)
 		return a;
 	IRExpr *normed_ass = NULL;
 	if (assumption)
-		normed_ass = and_normal_form(internIRExpr(assumption, table), table);
-	return anf_simplify(normed, normed_ass, table);
+		normed_ass = and_normal_form(assumption);
+	return anf_simplify(normed, normed_ass);
 }
 
 /* Is a rewrite from @from to @to preferred over one from @to to
@@ -1079,11 +1060,9 @@ sat_enumerator::skipToSatisfying()
 		stack.reserve(stack.size() + 1);
 		stack_entry &frame(stack.back());
 		frame.remainder =
-			internIRExpr(
-				simplifyIRExpr(
-					frame.remainder,
-					opt),
-				intern);
+			simplifyIRExpr(
+				frame.remainder,
+				opt);
 		if (debug_satisfier) {
 			printf("Try to advance satisfier from:\n");
 			frame.prettyPrint(stdout);
@@ -1318,7 +1297,7 @@ satisfier::prettyPrint(FILE *f) const
 sat_enumerator::sat_enumerator(IRExpr *what, const IRExprOptimisations &_opt)
 	: opt(_opt)
 {
-	stack.push_back(stack_entry(satisfier(), internIRExpr(what, intern)));
+	stack.push_back(stack_entry(satisfier(), what));
 	skipToSatisfying();
 }
 

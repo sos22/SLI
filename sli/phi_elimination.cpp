@@ -250,7 +250,6 @@ phiElimination(SMScopes *scopes, StateMachine *sm,
 		cdg.prettyPrint(stdout, labels);
 
 	std::set<StateMachineSideEffectPhi *> phiEffects;
-	internIRExprTable intern;
 	enumSideEffects(sm, phiEffects);
 	for (auto it = phiEffects.begin(); !TIMEOUT && it != phiEffects.end(); it++) {
 		StateMachineSideEffectPhi *phi = *it;

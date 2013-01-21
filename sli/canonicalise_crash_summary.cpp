@@ -135,7 +135,6 @@ class SplitSsaGenerations : public StateMachineTransformer {
 	std::map<IRExprLoad *, threadAndRegister> canonLoadTable;
 	std::map<IRExprConst *, threadAndRegister> canonConstTable;
 	std::map<unsigned, unsigned> next_temp_id;
-	internIRExprTable &internTable;
 
 	unsigned alloc_temp_id(unsigned tid) {
 		auto it_did_insert = next_temp_id.insert(std::pair<unsigned, unsigned>(tid, 1));
@@ -206,12 +205,6 @@ class SplitSsaGenerations : public StateMachineTransformer {
 		}
 		return IRExpr_Get(canon_const(iec), iec->type());
 	}
-	IRExpr *transformIRExpr(IRExpr *e) {
-		IRExpr *res = IRExprTransformer::transformIRExpr(e);
-		if (!res)
-			return NULL;
-		return internIRExpr(res, internTable);
-	}
 	StateMachineSideEffectLoad *transformOneSideEffect(
 		SMScopes *scopes, StateMachineSideEffectLoad *smsel, bool *done_something)
 	{
@@ -252,11 +245,9 @@ class SplitSsaGenerations : public StateMachineTransformer {
 public:
 	SplitSsaGenerations(
 		std::set<threadAndRegister> &_phiRegs,
-		std::set<threadAndRegister> &_generatedRegisters,
-		internIRExprTable &_internTable)
+		std::set<threadAndRegister> &_generatedRegisters)
 		: phiRegs(_phiRegs),
-		  generatedRegisters(_generatedRegisters),
-		  internTable(_internTable)
+		  generatedRegisters(_generatedRegisters)
 	{}
 };
 
@@ -488,7 +479,6 @@ canonicalise_crash_summary(CrashSummary *input)
 	internStateMachineTable t;
 	input->loadMachine = internStateMachine(input->scopes, input->loadMachine, t);
 	input->storeMachine = internStateMachine(input->scopes, input->storeMachine, t);
-	input->verificationCondition = internIRExpr(input->verificationCondition, t);
 
 	if (TIMEOUT)
 		return input;

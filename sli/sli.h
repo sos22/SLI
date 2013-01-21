@@ -277,17 +277,6 @@ IRSB *instrument_func(unsigned tid,
 		      IRType gWordTy,
 		      IRType hWordTy);
 
-class internIRExprTable : public GcCallback<&ir_heap> {
-	void runGc(HeapVisitor &hv);
-protected:
-	virtual void _runGc(HeapVisitor &) {}
-public:
-	static const int nr_entries = 17;
-	std::map<IRExpr *, IRExpr *> lookups[nr_entries];
-	internIRExprTable() : GcCallback<&ir_heap>(true) {};
-};
-IRExpr *internIRExpr(IRExpr *e, internIRExprTable &lookupTable);
-
 char *nameIRExpr(IRExpr *a);
 void my_system(const char *arg1, ...);
 char *flattenStringFragmentsMalloc(std::vector<const char *> fragments, const char *sep = "",
