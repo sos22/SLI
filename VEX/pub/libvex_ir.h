@@ -1183,31 +1183,34 @@ extern void typeOfPrimop ( IROp op,
    (hence "x" in "mcx") from definedness checking.  
 */
 
-typedef
-   struct _IRCallee : public GarbageCollected<_IRCallee, &ir_heap>{
-      Int    const regparms;
-      const char* const name;
-      void*  const addr;
-      UInt   const mcx_mask;
-      void visit(HeapVisitor &) {}
-      unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
-      void sanity_check() const {}
-private:
-      _IRCallee(Int _regparms, const char *_name,
-		void *_addr, UInt _mcx_mask)
-	  : regparms(_regparms), name(_name),
-	    addr(_addr), mcx_mask(_mcx_mask)
-      {}
-public:
-      static _IRCallee *mk(Int regparms, const char *name,
-			   void *addr, UInt mcx_mask)
-      {
-	 return new _IRCallee(regparms, name, addr, mcx_mask);
-      }
+#define field_iter(name) name ## _fields
+#define __mk_struct_fields(type, name) type const name;
+#define __mk_constructor1(type, name) type const &mk_constructor_ ## name,
+#define __mk_constructor2(type, name) type const &mk_constructor_ ## name
+#define __mk_constructor3(type, name) name(mk_constructor_ ## name),
+#define __mk_constructor4(type, name) name(mk_constructor_ ## name)
+#define mk_struct(name)							\
+ field_iter(name)(__mk_struct_fields, __mk_struct_fields, __mk_struct_fields) \
+ private:								\
+ name(field_iter(name)(__mk_constructor1, __mk_constructor1, __mk_constructor2)) \
+ : field_iter(name)(__mk_constructor3, __mk_constructor3, __mk_constructor4) \
+ {}									\
+public:									\
+ static name *mk(field_iter(name)(__mk_constructor1, __mk_constructor1, __mk_constructor2));
 
-      NAMED_CLASS
-   }
-   IRCallee;
+struct IRCallee : public GarbageCollected<IRCallee, &ir_heap>{
+#define IRCallee_fields(first_iter, middle_iter, last_iter)	\
+   first_iter(Int, regparms)					\
+   middle_iter(const char *, name)				\
+   middle_iter(void *, addr)					\
+   last_iter(UInt, mcx_mask)
+   mk_struct(IRCallee)
+
+   void visit(HeapVisitor &) {}
+   unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
+   void sanity_check() const {}
+   NAMED_CLASS
+};
 
 /* Create an IRCallee. */
 extern IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr, UInt mcx_mask );

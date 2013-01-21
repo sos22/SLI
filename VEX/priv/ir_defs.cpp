@@ -2791,6 +2791,66 @@ CfgLabelAllocator::reset()
 	cntr = 1;
 }
 
+#define __mk_proto(type, name) type const &name,
+#define __mk_proto_last(type, name) type const &name
+#define __apply_args1(type, name) name,
+#define __apply_args2(type, name) name
+#define apply_args(name)					\
+field_iter(name)(__apply_args1, __apply_args1, __apply_args2)
+
+#define __mk_hash_check(type, name)					\
+	if (name < o.name) {						\
+		return true;						\
+	} else if (name > o.name) {					\
+		return false;						\
+	}
+#define mk_hash_checks(name)						\
+field_iter(name)(__mk_hash_check, __mk_hash_check, __mk_hash_check)
+
+/* Weak map where the key is non-GC and the value is in the IR
+ * heap. */
+template <typename key, typename value>
+class gc_map : public GcCallback<&ir_heap>, public std::map<key, value> {
+	void runGc(HeapVisitor &hv) {
+		for (auto it = this->begin(); it != this->end(); ) {
+			it->second = hv.visited(it->second);
+			if (!it->second) {
+				this->erase(it++);
+			} else {
+				it++;
+			}
+		}
+	}
+};
+
+#define mk_memoised_constructor(name)					\
+	struct name ## _hash_key {					\
+		field_iter(name)(__mk_struct_fields, __mk_struct_fields, __mk_struct_fields) \
+		name ## _hash_key(field_iter(name)(__mk_constructor1, __mk_constructor1, __mk_constructor2)) \
+		: field_iter(name)(__mk_constructor3, __mk_constructor3, __mk_constructor4) \
+		{}							\
+		bool operator<(const name## _hash_key &o) const		\
+		{							\
+			mk_hash_checks(name)				\
+			return false;					\
+		}							\
+	};								\
+	name *name::mk(field_iter(name)(__mk_proto, __mk_proto, __mk_proto_last)) \
+	{								\
+		static gc_map<name ## _hash_key, name *> memo;		\
+		auto it_did_insert = memo.insert(			\
+			std::pair<name ## _hash_key, name *>(		\
+				name ## _hash_key(apply_args(name)),	\
+				(name *)NULL));				\
+		auto it = it_did_insert.first;				\
+		auto did_insert = it_did_insert.second;			\
+		if (did_insert)						\
+			it->second = new name(apply_args(name));	\
+		return it->second;					\
+	}
+
+mk_memoised_constructor(IRCallee)
+
 /*---------------------------------------------------------------*/
 /*--- end                                           ir_defs.c ---*/
 /*---------------------------------------------------------------*/
