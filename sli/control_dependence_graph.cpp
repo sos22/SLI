@@ -203,6 +203,13 @@ cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg, b
 		std::vector<StateMachineState **> targs;
 		(*it)->targets(targs);
 		for (auto it2 = targs.begin(); !TIMEOUT && it2 != targs.end(); it2++) {
+			const StateMachineState *os = **it2;
+			if (os->type == StateMachineState::Terminal &&
+			    ((StateMachineTerminal *)os)->res == scopes->smrs.cnst(smr_unreached)) {
+				/* Don't consider edges which already
+				 * go straight to smr_unreached. */
+				continue;
+			}
 			bbdd *dom = cdg.edgeCondition(scopes, *it, **it2);
 			if (!TIMEOUT && dom->isLeaf() && dom->leaf() == false) {
 				/* This edge can never be taken. */
