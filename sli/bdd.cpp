@@ -7,8 +7,9 @@
 /* Convert @what so that it uses muxes wherever possible (i.e. no
    And1, Or1, or Not1 operators) and so that all muxes are at top
    level. */
+static IRExpr *muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo);
 static IRExpr *
-muxify(IRExpr *what)
+_muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo)
 {
 	if (TIMEOUT)
 		return what;
@@ -19,7 +20,7 @@ muxify(IRExpr *what)
 		abort();
 	case Iex_Qop: {
 		IRExprQop *w = (IRExprQop *)what;
-		IRExpr *a = muxify(w->arg1);
+		IRExpr *a = muxify(w->arg1, memo);
 		if (a->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)a)->cond,
@@ -28,14 +29,16 @@ muxify(IRExpr *what)
 					       ((IRExprMux0X *)a)->expr0,
 					       w->arg2,
 					       w->arg3,
-					       w->arg4)),
+					       w->arg4),
+				       memo),
 				muxify(IRExpr_Qop(
 					       w->op,
 					       ((IRExprMux0X *)a)->exprX,
 					       w->arg2,
 					       w->arg3,
-					       w->arg4)));
-		IRExpr *b = muxify(w->arg2);
+					       w->arg4),
+				       memo));
+		IRExpr *b = muxify(w->arg2, memo);
 		if (b->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)b)->cond,
@@ -44,14 +47,16 @@ muxify(IRExpr *what)
 					       a,
 					       ((IRExprMux0X *)b)->expr0,
 					       w->arg3,
-					       w->arg4)),
+					       w->arg4),
+				       memo),
 				muxify(IRExpr_Qop(
 					       w->op,
 					       a,
 					       ((IRExprMux0X *)b)->exprX,
 					       w->arg3,
-					       w->arg4)));
-		IRExpr *c = muxify(w->arg3);
+					       w->arg4),
+				       memo));
+		IRExpr *c = muxify(w->arg3, memo);
 		if (c->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)c)->cond,
@@ -60,14 +65,16 @@ muxify(IRExpr *what)
 					       a,
 					       b,
 					       ((IRExprMux0X *)c)->expr0,
-					       w->arg4)),
+					       w->arg4),
+				       memo),
 				muxify(IRExpr_Qop(
 					       w->op,
 					       a,
 					       b,
 					       ((IRExprMux0X *)c)->exprX,
-					       w->arg4)));
-		IRExpr *d = muxify(w->arg4);
+					       w->arg4),
+				       memo));
+		IRExpr *d = muxify(w->arg4, memo);
 		if (d->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)c)->cond,
@@ -76,19 +83,21 @@ muxify(IRExpr *what)
 					       a,
 					       b,
 					       c,
-					       ((IRExprMux0X *)d)->expr0)),
+					       ((IRExprMux0X *)d)->expr0),
+				       memo),
 				muxify(IRExpr_Qop(
 					       w->op,
 					       a,
 					       b,
 					       c,
-					       ((IRExprMux0X *)d)->exprX)));
+					       ((IRExprMux0X *)d)->exprX),
+				       memo));
 		assert(a == w->arg1 && b == w->arg2 && c == w->arg3 && d == w->arg4);
 		return what;
 	}
 	case Iex_Triop: {
 		IRExprTriop *w = (IRExprTriop *)what;
-		IRExpr *a = muxify(w->arg1);
+		IRExpr *a = muxify(w->arg1, memo);
 		if (a->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)a)->cond,
@@ -96,13 +105,15 @@ muxify(IRExpr *what)
 					       w->op,
 					       ((IRExprMux0X *)a)->expr0,
 					       w->arg2,
-					       w->arg3)),
+					       w->arg3),
+				       memo),
 				muxify(IRExpr_Triop(
 					       w->op,
 					       ((IRExprMux0X *)a)->exprX,
 					       w->arg2,
-					       w->arg3)));
-		IRExpr *b = muxify(w->arg2);
+					       w->arg3),
+				       memo));
+		IRExpr *b = muxify(w->arg2, memo);
 		if (b->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)b)->cond,
@@ -110,13 +121,15 @@ muxify(IRExpr *what)
 					       w->op,
 					       a,
 					       ((IRExprMux0X *)b)->expr0,
-					       w->arg3)),
+					       w->arg3),
+				       memo),
 				muxify(IRExpr_Triop(
 					       w->op,
 					       a,
 					       ((IRExprMux0X *)b)->exprX,
-					       w->arg3)));
-		IRExpr *c = muxify(w->arg3);
+					       w->arg3),
+				       memo));
+		IRExpr *c = muxify(w->arg3, memo);
 		if (c->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)c)->cond,
@@ -124,12 +137,14 @@ muxify(IRExpr *what)
 					       w->op,
 					       a,
 					       b,
-					       ((IRExprMux0X *)c)->expr0)),
+					       ((IRExprMux0X *)c)->expr0),
+				       memo),
 				muxify(IRExpr_Triop(
 					       w->op,
 					       a,
 					       b,
-					       ((IRExprMux0X *)c)->exprX)));
+					       ((IRExprMux0X *)c)->exprX),
+				       memo));
 		if (a == w->arg1 && b == w->arg2 && c == w->arg3)
 			return what;
 		else
@@ -137,45 +152,51 @@ muxify(IRExpr *what)
 	}
 	case Iex_Binop: {
 		IRExprBinop *w = (IRExprBinop *)what;
-		IRExpr *a = muxify(w->arg1);
+		IRExpr *a = muxify(w->arg1, memo);
 		if (a->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)a)->cond,
 				muxify(IRExpr_Binop(
 					       w->op,
 					       ((IRExprMux0X *)a)->expr0,
-					       w->arg2)),
+					       w->arg2),
+				       memo),
 				muxify(IRExpr_Binop(
 					       w->op,
 					       ((IRExprMux0X *)a)->exprX,
-					       w->arg2)));
-		IRExpr *b = muxify(w->arg2);
+					       w->arg2),
+				       memo));
+		IRExpr *b = muxify(w->arg2, memo);
 		if (b->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)b)->cond,
 				muxify(IRExpr_Binop(
 					       w->op,
 					       a,
-					       ((IRExprMux0X *)b)->expr0)),
+					       ((IRExprMux0X *)b)->expr0),
+				       memo),
 				muxify(IRExpr_Binop(
 					       w->op,
 					       a,
-					       ((IRExprMux0X *)b)->exprX)));
+					       ((IRExprMux0X *)b)->exprX),
+				       memo));
 		assert(a == w->arg1 && b == w->arg2);
 		return what;
 	}
 	case Iex_Unop: {
 		IRExprUnop *w = (IRExprUnop *)what;
-		IRExpr *a = muxify(w->arg);
+		IRExpr *a = muxify(w->arg, memo);
 		if (a->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)a)->cond,
 				muxify(IRExpr_Unop(
 					       w->op,
-					       ((IRExprMux0X *)a)->expr0)),
+					       ((IRExprMux0X *)a)->expr0),
+				       memo),
 				muxify(IRExpr_Unop(
 					       w->op,
-					       ((IRExprMux0X *)a)->exprX)));
+					       ((IRExprMux0X *)a)->exprX),
+				       memo));
 		if (w->op == Iop_Not1)
 			return IRExpr_Mux0X(
 				a,
@@ -188,9 +209,9 @@ muxify(IRExpr *what)
 		return what;
 	case Iex_Mux0X: {
 		IRExprMux0X *m = (IRExprMux0X *)what;
-		IRExpr *cond = muxify(m->cond);
-		IRExpr *expr0 = muxify(m->expr0);
-		IRExpr *exprX = muxify(m->exprX);
+		IRExpr *cond = muxify(m->cond, memo);
+		IRExpr *expr0 = muxify(m->expr0, memo);
+		IRExpr *exprX = muxify(m->exprX, memo);
 		if (cond == m->cond && expr0 == m->expr0 && exprX == m->exprX)
 			return what;
 		else
@@ -205,7 +226,7 @@ muxify(IRExpr *what)
 		a = (IRExpr *)0xf001;
 
 		for (i = 0; cee->args[i]; i++) {
-			a = muxify(cee->args[i]);
+		  a = muxify(cee->args[i], memo);
 			if (a->tag == Iex_Mux0X)
 				break;
 			assert(a == cee->args[i]);
@@ -225,7 +246,8 @@ muxify(IRExpr *what)
 			IRExpr_Mux0X(
 				((IRExprMux0X *)a)->cond,
 				IRExpr_CCall(cee->cee, cee->retty, newArgs0),
-				IRExpr_CCall(cee->cee, cee->retty, newArgsX)));
+				IRExpr_CCall(cee->cee, cee->retty, newArgsX)),
+			memo);
 	}
 	case Iex_Associative: {
 		IRExprAssociative *iea = (IRExprAssociative *)what;
@@ -234,7 +256,7 @@ muxify(IRExpr *what)
 			IRExpr *fls = IRExpr_Const_U1(false);
 			for (int i = 0; i < iea->nr_arguments; i++)
 				acc = IRExpr_Mux0X(
-					muxify(iea->contents[i]),
+					muxify(iea->contents[i], memo),
 					fls,
 					acc);
 			return acc;
@@ -243,7 +265,7 @@ muxify(IRExpr *what)
 			IRExpr *tru = IRExpr_Const_U1(true);
 			for (int i = 0; i < iea->nr_arguments; i++)
 				acc = IRExpr_Mux0X(
-					muxify(iea->contents[i]),
+					muxify(iea->contents[i], memo),
 					acc,
 					tru);
 			return acc;
@@ -253,7 +275,7 @@ muxify(IRExpr *what)
 		IRExpr *a = (IRExpr *)0xdead;
 		int i;
 		for (i = 0; i < iea->nr_arguments; i++) {
-			a = muxify(iea->contents[i]);
+			a = muxify(iea->contents[i], memo);
 			if (a->tag == Iex_Mux0X)
 				break;
 			assert(a == iea->contents[i]);
@@ -272,21 +294,24 @@ muxify(IRExpr *what)
 			IRExpr_Mux0X(
 				((IRExprMux0X *)a)->cond,
 				exp0,
-				expX));
+				expX),
+			memo);
 	}
 		
 	case Iex_Load: {
 		IRExprLoad *l = (IRExprLoad *)what;
-		IRExpr *a = muxify(l->addr);
+		IRExpr *a = muxify(l->addr, memo);
 		if (a->tag == Iex_Mux0X)
 			return IRExpr_Mux0X(
 				((IRExprMux0X *)a)->cond,
 				muxify(IRExpr_Load(
 					       l->ty,
-					       ((IRExprMux0X *)a)->expr0)),
+					       ((IRExprMux0X *)a)->expr0),
+				       memo),
 				muxify(IRExpr_Load(
 					       l->ty,
-					       ((IRExprMux0X *)a)->exprX)));
+					       ((IRExprMux0X *)a)->exprX),
+				       memo));
 		assert(a == l->addr);
 		return what;
 	}
@@ -302,18 +327,30 @@ muxify(IRExpr *what)
 	abort();
 }
 
+static IRExpr *
+muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, IRExpr *>(what, NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert)
+		it->second = _muxify(what, memo);
+	return it->second;
+}
+
 /* Some very quick simplifications which are always applied to the
  * condition of BDD internal nodes.  This isn't much more than just
  * constant folding. */
+static IRExpr *quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo);
 static IRExpr *
-quickSimplify(IRExpr *a)
+_quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 {
 	if (a->optimisationsApplied || TIMEOUT)
 		return a;
 	switch (a->tag) {
 	case Iex_Unop: {
 		IRExprUnop *au = (IRExprUnop *)a;
-		auto arg = quickSimplify(au->arg);
+		auto arg = quickSimplify(au->arg, memo);
 		if (arg->tag != Iex_Const) {
 			if (arg == au->arg)
 				return au;
@@ -400,8 +437,8 @@ quickSimplify(IRExpr *a)
 	}
 	case Iex_Binop: {
 		IRExprBinop *_ieb = (IRExprBinop *)a;
-		auto arg1 = quickSimplify(_ieb->arg1);
-		auto arg2 = quickSimplify(_ieb->arg2);
+		auto arg1 = quickSimplify(_ieb->arg1, memo);
+		auto arg2 = quickSimplify(_ieb->arg2, memo);
 		if (arg1->tag == Iex_Const &&
 		    arg2->tag == Iex_Const) {
 			IRExprConst *arg1c = (IRExprConst *)arg1;
@@ -522,7 +559,7 @@ quickSimplify(IRExpr *a)
 		}
 		acc = defaultValue;
 		for (int i = 0; i < nr_arguments; i++) {
-			simpleArgs[i] = quickSimplify(_iea->contents[i]);
+			simpleArgs[i] = quickSimplify(_iea->contents[i], memo);
 			if (simpleArgs[i] != _iea->contents[i])
 				realloc = true;
 			if (simpleArgs[i]->tag == Iex_Const) {
@@ -655,9 +692,9 @@ quickSimplify(IRExpr *a)
 	}
 	case Iex_Mux0X: {
 		IRExprMux0X *m = (IRExprMux0X *)a;
-		auto cond = quickSimplify(m->cond);
-		auto expr0 = quickSimplify(m->expr0);
-		auto exprX = quickSimplify(m->exprX);
+		auto cond = quickSimplify(m->cond, memo);
+		auto expr0 = quickSimplify(m->expr0, memo);
+		auto exprX = quickSimplify(m->exprX, memo);
 		if (cond != m->cond || expr0 != m->expr0 ||
 		    exprX != m->exprX)
 			a = IRExprMux0X::mk(cond, expr0, exprX);
@@ -665,7 +702,7 @@ quickSimplify(IRExpr *a)
 	}
 	case Iex_Load: {
 		IRExprLoad *l = (IRExprLoad *)a;
-		auto addr = quickSimplify(l->addr);
+		auto addr = quickSimplify(l->addr, memo);
 		if (addr != l->addr)
 			a = IRExprLoad::mk(l->ty, addr);
 		break;
@@ -680,19 +717,19 @@ quickSimplify(IRExpr *a)
 		break;
 	case Iex_Qop: {
 		IRExprQop *q = (IRExprQop *)a;
-		auto a1 = quickSimplify(q->arg1);
-		auto a2 = quickSimplify(q->arg2);
-		auto a3 = quickSimplify(q->arg3);
-		auto a4 = quickSimplify(q->arg4);
+		auto a1 = quickSimplify(q->arg1, memo);
+		auto a2 = quickSimplify(q->arg2, memo);
+		auto a3 = quickSimplify(q->arg3, memo);
+		auto a4 = quickSimplify(q->arg4, memo);
 		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3 || a4 != q->arg4)
 			a = IRExprQop::mk(q->op, a1, a2, a3, a4);
 		break;
 	}
 	case Iex_Triop: {
 		IRExprTriop *q = (IRExprTriop *)a;
-		auto a1 = quickSimplify(q->arg1);
-		auto a2 = quickSimplify(q->arg2);
-		auto a3 = quickSimplify(q->arg3);
+		auto a1 = quickSimplify(q->arg1, memo);
+		auto a2 = quickSimplify(q->arg2, memo);
+		auto a3 = quickSimplify(q->arg3, memo);
 		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3)
 			a = IRExprTriop::mk(q->op, a1, a2, a3);
 		break;
@@ -706,7 +743,7 @@ quickSimplify(IRExpr *a)
 		newArgs[nr_args] = NULL;
 		bool realloc = false;
 		for (int i = 0; i < nr_args; i++) {
-			newArgs[i] = quickSimplify(c->args[i]);
+			newArgs[i] = quickSimplify(c->args[i], memo);
 			if (newArgs[i] != c->args[i])
 				realloc = true;
 		}
@@ -720,6 +757,18 @@ quickSimplify(IRExpr *a)
 	}
 	return a;
 }
+
+static IRExpr *
+quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, IRExpr *>(a, (IRExpr *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert)
+		it->second = _quickSimplify(a, memo);
+	return it->second;
+}
+
 
 bbdd *
 bbdd::_var(scope *scope, IRExpr *a)
@@ -738,7 +787,15 @@ bbdd::_var(scope *scope, IRExpr *a)
 bbdd *
 bbdd::var(scope *scope, IRExpr *a)
 {
-	return _var(scope, quickSimplify(muxify(quickSimplify(a))));
+	std::map<IRExpr *, IRExpr *> qsMemo;
+	std::map<IRExpr *, IRExpr *> muxMemo;
+	return _var(
+		scope,
+		quickSimplify(
+			muxify(
+				quickSimplify(a, qsMemo),
+				muxMemo),
+			qsMemo));
 }
 
 class binary_zip_internal {
@@ -1051,7 +1108,9 @@ exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
 exprbdd *
 exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
 {
-	return _var(scope, bscope, quickSimplify(muxify(quickSimplify(what))));
+	std::map<IRExpr *, IRExpr *> qsMemo;
+	std::map<IRExpr *, IRExpr *> muxMemo;
+	return _var(scope, bscope, quickSimplify(muxify(quickSimplify(what, qsMemo), muxMemo), qsMemo));
 }
 
 IRExpr *
