@@ -1508,7 +1508,7 @@ top:
 			IRExpr **nargs = alloc_irexpr_array(nr_args + 1);
 			memcpy(nargs, args, sizeof(nargs[0]) * nr_args);
 			nargs[nr_args] = NULL;
-			res = new IRExprCCall(c->cee, c->retty, nargs);
+			res = IRExprCCall::mk(c->cee, c->retty, nargs);
 		}
 		break;
 	}
@@ -3035,7 +3035,7 @@ top:
 
 		if (cond != _e->cond || expr0 != _e->expr0 ||
 		    exprX != _e->exprX)
-			res = new IRExprMux0X(cond, expr0, exprX);
+			res = IRExprMux0X::mk(cond, expr0, exprX);
 		break;
 	}
 

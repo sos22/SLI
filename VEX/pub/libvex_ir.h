@@ -1793,9 +1793,16 @@ struct IRExprCCall : public IRExpr {
    IRCallee* const cee;    /* Function to call. */
    IRType    const retty;  /* Type of return value. */
    IRExpr*const *  const args;   /* Vector of argument expressions. */
+private:
    IRExprCCall(IRCallee *_cee, IRType _retty, IRExpr *const* _args)
        : IRExpr(Iex_CCall), cee(_cee), retty(_retty), args(_args)
    {}
+public:
+   static IRExpr *mk(IRCallee *cee, IRType retty, IRExpr *const* args)
+   {
+      return new IRExprCCall(cee, retty, args);
+   }
+
    void visit(HeapVisitor &hv) {
        hv(cee);
        hv(args);
@@ -1828,10 +1835,16 @@ struct IRExprMux0X : public IRExpr {
    IRExpr* const cond;     /* Condition */
    IRExpr* const expr0;    /* True expression */
    IRExpr* const exprX;    /* False expression */
+private:
    IRExprMux0X(IRExpr *_cond, IRExpr *_expr0, IRExpr *_exprX)
        : IRExpr(Iex_Mux0X), cond(_cond), expr0(_expr0),
 	 exprX(_exprX)
    {}
+public:
+   static IRExpr *mk(IRExpr *cond, IRExpr *expr0, IRExpr *exprX)
+   {
+      return new IRExprMux0X(cond, expr0, exprX);
+   }
    void visit(HeapVisitor &hv) {
        hv(cond);
        hv(expr0);

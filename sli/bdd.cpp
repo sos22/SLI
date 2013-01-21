@@ -660,7 +660,7 @@ quickSimplify(IRExpr *a)
 		auto exprX = quickSimplify(m->exprX);
 		if (cond != m->cond || expr0 != m->expr0 ||
 		    exprX != m->exprX)
-			a = new IRExprMux0X(cond, expr0, exprX);
+			a = IRExprMux0X::mk(cond, expr0, exprX);
 		break;
 	}
 	case Iex_Load: {

@@ -1886,10 +1886,10 @@ IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
   return IRExprLoad::mk(ty, addr);
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
-   return new IRExprCCall(cee, retty, args);
+  return IRExprCCall::mk(cee, retty, args);
 }
 IRExpr* IRExpr_Mux0X ( IRExpr* cond, IRExpr* expr0, IRExpr* exprX ) {
-   return new IRExprMux0X(cond, expr0, exprX);
+   return IRExprMux0X::mk(cond, expr0, exprX);
 }
 IRExpr* IRExpr_Associative_V(IROp op, ...)
 {

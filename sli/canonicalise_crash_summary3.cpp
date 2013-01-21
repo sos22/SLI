@@ -1042,7 +1042,7 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 		if (exprX == FP_EXPRESSION)
 			return expr0;
 		if (cond != i->cond || expr0 != i->expr0 || exprX != i->exprX)
-			return new IRExprMux0X(cond, expr0, exprX);
+			return IRExprMux0X::mk(cond, expr0, exprX);
 		return i;
 	}
 	case Iex_CCall: {
@@ -1064,7 +1064,7 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 			IRExpr **new_args = alloc_irexpr_array(nr_args + 1);
 			new_args[nr_args] = NULL;
 			memcpy(new_args, args, nr_args * sizeof(IRExpr *));
-			return new IRExprCCall(cee->cee, cee->retty, new_args);
+			return IRExprCCall::mk(cee->cee, cee->retty, new_args);
 		} else {
 			return cee;
 		}
