@@ -56,6 +56,8 @@ public:
 			struct cache_entry *e = &cache[i];
 			unsigned in_idx = 0;
 			unsigned out_idx = 0;
+			assert(e->nr_entries <= ASSOCIATIVITY);
+			assert(e->prod_idx <= e->nr_entries);
 			while (in_idx < e->nr_entries) {
 				e->p[in_idx].a = hv.visited(e->p[in_idx].a);
 				if (e->p[in_idx].a) {
@@ -68,7 +70,7 @@ public:
 				in_idx++;
 			}
 			e->nr_entries = out_idx;
-			e->prod_idx = out_idx;
+			e->prod_idx = out_idx % ASSOCIATIVITY;
 		}
 	}
 
@@ -103,6 +105,8 @@ public:
 		} else {
 			nr_assoc_discards++;
 		}
+		assert(e->nr_entries <= ASSOCIATIVITY);
+		assert(e->prod_idx < ASSOCIATIVITY);
 		e->p[e->prod_idx] = p(a, b, res);
 		e->prod_idx = (e->prod_idx + 1) % ASSOCIATIVITY;
 	}
