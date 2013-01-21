@@ -954,7 +954,7 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 			return FP_EXPRESSION;
 		if (ix == i->ix)
 			return i;
-		return new IRExprGetI(i, ix);
+		return IRExprGetI::mk(i, ix);
 	}
 	case Iex_Qop: {
 		IRExprQop *i = (IRExprQop *)expr;

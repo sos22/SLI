@@ -3043,7 +3043,7 @@ top:
 		IRExprGetI *g = (IRExprGetI *)src;
 		IRExpr *ix = optimiseIRExpr(g->ix, opt);
 		if (ix != g->ix)
-			res = new IRExprGetI(g, ix);
+			res = IRExprGetI::mk(g, ix);
 		break;
 	}
 

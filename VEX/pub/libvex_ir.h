@@ -1336,13 +1336,20 @@ public:
 
 /* Read a guest register, at a fixed offset in the guest state.
    ppIRExpr output: GET:<ty>(<offset>), eg. GET:I32(0) */
-struct IRExprGet : public IRExpr {
+class IRExprGet : public IRExpr {
+public:
    const threadAndRegister reg;
    const IRType ty;
 
+private:
    IRExprGet(threadAndRegister _reg, IRType _ty)
 	   : IRExpr(Iex_Get), reg(_reg), ty(_ty)
    {}
+public:
+   static IRExprGet *mk(threadAndRegister reg, IRType ty)
+   {
+      return new IRExprGet(reg, ty);
+   }
    void visit(HeapVisitor &) {}
    unsigned long hashval() const { return reg.hash() + ty * 3; }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const {
@@ -1402,12 +1409,13 @@ struct IRExprGet : public IRExpr {
    ppIRExpr output: GETI<descr>[<ix>,<bias]
    eg. GETI(128:8xI8)[t1,0]
 */
-struct IRExprGetI : public IRExpr {
+class IRExprGetI : public IRExpr {
+public:
    IRRegArray* const descr; /* Part of guest state treated as circular */
    IRExpr*     const ix;    /* Variable part of index into array */
    Int         const bias;  /* Constant offset part of index into array */
    unsigned    const tid;     /* The thread whose register is to be read */
-
+private:
    IRExprGetI(IRRegArray *_descr,
 	      IRExpr *_ix,
 	      Int _bias,
@@ -1418,16 +1426,15 @@ struct IRExprGetI : public IRExpr {
 	 bias(_bias),
 	 tid(_tid)
    {}
-   
-   IRExprGetI(const IRExprGetI *base,
-	      IRExpr *_ix)
-       : IRExpr(Iex_GetI),
-	 descr(base->descr),
-	 ix(_ix),
-	 bias(base->bias),
-	 tid(base->tid)
-   {}
-
+public:
+   static IRExpr *mk(IRRegArray *descr, IRExpr *ix, Int bias, unsigned tid)
+   {
+      return new IRExprGetI(descr, ix, bias, tid);
+   }
+   static IRExpr *mk(const IRExprGetI *base, IRExpr *_ix)
+   {
+      return mk(base->descr, _ix, base->bias, base->tid);
+   }
    void visit(HeapVisitor &hv) {
        hv(descr);
        hv(ix);

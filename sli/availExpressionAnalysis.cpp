@@ -584,7 +584,7 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 				newEffect =
 					new StateMachineSideEffectCopy(
 						smsel->target,
-						exprbdd::var(&scopes->exprs, &scopes->bools, new IRExprGet(smsel2->target, smsel->type)));
+						exprbdd::var(&scopes->exprs, &scopes->bools, IRExprGet::mk(smsel2->target, smsel->type)));
 			}
 		}
 		if (!newEffect && doit)
