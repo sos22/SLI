@@ -156,11 +156,6 @@ consider_rip(const DynAnalysisRip &my_rip,
 
 	__warning_tag = my_rip.name();
 
-	if (oracle->isPltCall(my_rip.toVexRip())) {
-		fprintf(_logfile, "Is in PLT, so ignore\n");
-		return;
-	}
-
 	df.dr = my_rip;
 
 	LibVEX_maybe_gc(token);
@@ -178,7 +173,11 @@ consider_rip(const DynAnalysisRip &my_rip,
 	struct timeval start;
 	gettimeofday(&start, NULL);
 
-	checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, opt, token);
+	if (oracle->isPltCall(my_rip.toVexRip())) {
+		fprintf(_logfile, "Is in PLT, so ignore\n");
+	} else {
+		checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, opt, token);
+	}
 
 	struct timeval end;
 	gettimeofday(&end, NULL);
@@ -421,7 +420,7 @@ main(int argc, char *argv[])
 	      same range as a...c i.e. no duplicates or gaps.
 	*/
 	unsigned long start_instr = (total_instructions * start_percentage) / 100;
-	unsigned long end_instr = end_percentage == 100 ? total_instructions : (total_instructions * end_percentage) / 100 - 1;
+	unsigned long end_instr = end_percentage == 100 ? total_instructions - 1: (total_instructions * end_percentage) / 100 - 1;
 	unsigned long instructions_to_process = end_instr - start_instr;
 
 	printf("Processing instructions %ld to %ld\n", start_instr, end_instr);
@@ -430,7 +429,7 @@ main(int argc, char *argv[])
 
 	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, timings, opt);
 	if (use_schedule) {
-		for (unsigned long idx = start_instr; idx < end_instr; idx++) {
+		for (unsigned long idx = start_instr; idx <= end_instr; idx++) {
 			ic(oracle, df, schedule[idx], cntr);
 			cntr++;
 		}
