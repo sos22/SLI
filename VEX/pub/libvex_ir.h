@@ -1192,11 +1192,19 @@ typedef
       void visit(HeapVisitor &) {}
       unsigned long hashval() const { return regparms + (unsigned long)name * 73; }
       void sanity_check() const {}
+private:
       _IRCallee(Int _regparms, const char *_name,
 		void *_addr, UInt _mcx_mask)
 	  : regparms(_regparms), name(_name),
 	    addr(_addr), mcx_mask(_mcx_mask)
       {}
+public:
+      static _IRCallee *mk(Int regparms, const char *name,
+			   void *addr, UInt mcx_mask)
+      {
+	 return new _IRCallee(regparms, name, addr, mcx_mask);
+      }
+
       NAMED_CLASS
    }
    IRCallee;
@@ -1214,10 +1222,15 @@ extern void ppIRCallee ( IRCallee*, FILE* );
    be able to index at run time, so as to be able to describe 
    indexed or rotating register files on the guest. */
 typedef
-struct _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
+class _IRRegArray : public GarbageCollected<_IRRegArray, &ir_heap> {
       _IRRegArray(Int _base, IRType _elemTy, Int _nElems)
 	  : base(_base), elemTy(_elemTy), nElems(_nElems)
       {}
+public:
+      static _IRRegArray *mk(Int base, IRType elemTy, Int nElems)
+      {
+	 return new _IRRegArray(base, elemTy, nElems);
+      }
       const Int    base;   /* guest state offset of start of indexed area */
       const IRType elemTy; /* type of each element in the indexed area */
       const Int    nElems; /* number of elements in the indexed area */

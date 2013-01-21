@@ -247,7 +247,7 @@ static bool parseIRCallee(IRCallee **out, const char *str, const char **suffix)
     return false;
   if (!parseThisChar('}', str, suffix))
     return false;
-  *out = new IRCallee(regparms, name, (void *)addr, mcx_mask);
+  *out = IRCallee::mk(regparms, name, (void *)addr, mcx_mask);
   return true;      
 }
 
@@ -1722,7 +1722,7 @@ IRCallee* mkIRCallee ( Int regparms, const char* name, void* addr, UInt mcx_mask
 {
    vassert(regparms >= 0 && regparms <= 3);
    vassert(name != NULL);
-   return new IRCallee(regparms, name, addr, mcx_mask);
+   return IRCallee::mk(regparms, name, addr, mcx_mask);
 }
 
 
@@ -1733,7 +1733,7 @@ IRRegArray* mkIRRegArray ( Int base, IRType elemTy, Int nElems )
    vassert(!(base < 0 || base > 10000 /* somewhat arbitrary */));
    vassert(!(elemTy == Ity_I1));
    vassert(!(nElems <= 0 || nElems > 500 /* somewhat arbitrary */));
-   return new IRRegArray(base, elemTy, nElems);
+   return IRRegArray::mk(base, elemTy, nElems);
 }
 
 
