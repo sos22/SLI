@@ -1873,12 +1873,18 @@ struct IRExprAssociative : public IRExpr {
    IROp const op;
    int const nr_arguments;
    IRExpr *const *const contents;
+private:
    IRExprAssociative(IROp _op, int _nr_arguments, IRExpr *const *_contents)
        : IRExpr(Iex_Associative),
 	 op(_op),
 	 nr_arguments(_nr_arguments),
 	 contents(_contents)
    {}
+public:
+   static IRExprAssociative *mk(IROp op, int nr_args, IRExpr *const *contents)
+   {
+      return new IRExprAssociative(op, nr_args, contents);
+   }
    void visit(HeapVisitor &hv) {
        hv(contents);
        for (int i = 0; i < nr_arguments; i++)
@@ -1915,12 +1921,19 @@ struct IRExprAssociative : public IRExpr {
 struct IRExprHappensBefore : public IRExpr {
     MemoryAccessIdentifier const before;
     MemoryAccessIdentifier const after;
+private:
     IRExprHappensBefore(const MemoryAccessIdentifier &_before,
 			const MemoryAccessIdentifier &_after)
 	: IRExpr(Iex_HappensBefore),
 	  before(_before),
 	  after(_after)
     {}
+public:
+   static IRExpr *mk(const MemoryAccessIdentifier &before,
+		     const MemoryAccessIdentifier &after)
+   {
+      return new IRExprHappensBefore(before, after);
+   }
     void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 19; }
     void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
@@ -1936,9 +1949,15 @@ struct IRExprFreeVariable : public IRExpr {
     MemoryAccessIdentifier const id;
     IRType const ty;
     bool const isUnique;
+private:
     IRExprFreeVariable(const MemoryAccessIdentifier _id, IRType _ty, bool _isUnique)
 	: IRExpr(Iex_FreeVariable), id(_id), ty(_ty), isUnique(_isUnique)
     {}
+public:
+   static IRExprFreeVariable *mk(const MemoryAccessIdentifier _id, IRType _ty, bool _isUnique)
+   {
+      return new IRExprFreeVariable(_id, _ty, _isUnique);
+   }
     void visit(HeapVisitor &) {}
     unsigned long hashval() const { return 1045239 * id.hash(); }
     void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const {
@@ -1958,14 +1977,17 @@ struct IRExprFreeVariable : public IRExpr {
 struct IRExprEntryPoint : public IRExpr {
     unsigned const thread;
     CfgLabel const label;
+private:
     IRExprEntryPoint(unsigned _thread, const CfgLabel &_label)
 	: IRExpr(Iex_EntryPoint), thread(_thread), label(_label)
     {
     }
-    IRExprEntryPoint(const IRExprEntryPoint &o)
-	: IRExpr(Iex_EntryPoint), thread(o.thread), label(o.label)
-    {
-    }
+    IRExprEntryPoint(const IRExprEntryPoint &o); /* DNI */
+public:
+   static IRExpr *mk(unsigned thread, const CfgLabel &label)
+   {
+      return new IRExprEntryPoint(thread, label);
+   }
     void visit(HeapVisitor &) {}
     unsigned long hashval() const {
 	return label.hash() ^ thread;
@@ -1994,14 +2016,17 @@ struct IRExprControlFlow : public IRExpr {
     unsigned const thread;
     CfgLabel const cfg1;
     CfgLabel const cfg2;
+private:
     IRExprControlFlow(unsigned _thread, const CfgLabel &_cfg1, const CfgLabel &_cfg2)
 	: IRExpr(Iex_ControlFlow), thread(_thread), cfg1(_cfg1), cfg2(_cfg2)
     {
     }
-    IRExprControlFlow(const IRExprControlFlow &o)
-	: IRExpr(Iex_ControlFlow), thread(o.thread), cfg1(o.cfg1), cfg2(o.cfg2)
-    {
-    }
+   IRExprControlFlow(const IRExprControlFlow &o); /* DNI */
+public:
+   static IRExpr *mk(unsigned thread, const CfgLabel &label1, const CfgLabel &label2)
+   {
+      return new IRExprControlFlow(thread, label1, label2);
+   }
     void visit(HeapVisitor &) {}
     unsigned long hashval() const {
 	return cfg1.hash() ^ thread ^ (cfg2.hash() * 7);
@@ -2059,8 +2084,8 @@ extern IRExprAssociative* IRExpr_Associative_Claim (IROp op, int nr_arguments, I
 extern IRExprAssociative* IRExpr_Associative_Copy (IROp op, int nr_arguments, IRExpr *const *contents);
 extern IRExpr* IRExpr_HappensBefore (const MemoryAccessIdentifier &before,
 				     const MemoryAccessIdentifier &after);
-static inline IRExprFreeVariable *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty, bool isUnique) {
-    return new IRExprFreeVariable(id, ty, isUnique);
+static inline IRExpr *IRExpr_FreeVariable(const MemoryAccessIdentifier &id, IRType ty, bool isUnique) {
+   return IRExprFreeVariable::mk(id, ty, isUnique);
 }
 
 /* Pretty-print an IRExpr. */

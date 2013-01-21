@@ -1113,7 +1113,7 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 	  !label.parse(str, &str) ||
 	  !parseThisChar(')', str, suffix))
 	return false;
-      *out = new IRExprEntryPoint(thread, label);
+      *out = IRExprEntryPoint::mk(thread, label);
       return true;
     }
   } else if (str[0] == 'F') {
@@ -1219,7 +1219,7 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
 	  !cfg2.parse(str, &str) ||
 	  !parseThisChar(')', str, suffix))
 	return false;
-      *out = new IRExprControlFlow(thread, cfg1, cfg2);
+      *out = IRExprControlFlow::mk(thread, cfg1, cfg2);
       return true;
     }
   }
@@ -1958,19 +1958,19 @@ IRExpr* IRExpr_Associative_V(IROp op, ...)
 }
 IRExprAssociative* IRExpr_Associative_Claim(IROp op, int nr_arguments, IRExpr *const *contents)
 {
-  return new IRExprAssociative(op, nr_arguments, contents);
+  return IRExprAssociative::mk(op, nr_arguments, contents);
 }
 IRExprAssociative* IRExpr_Associative_Copy(IROp op, int nr_arguments, IRExpr *const *contents)
 {
   IRExpr **c = alloc_irexpr_array(nr_arguments);
   memcpy(c, contents, sizeof(c[0]) * nr_arguments);
-  return new IRExprAssociative(op, nr_arguments, c);
+  return IRExprAssociative::mk(op, nr_arguments, c);
 }
 IRExpr* IRExpr_HappensBefore ( const MemoryAccessIdentifier &before,
 			       const MemoryAccessIdentifier &after )
 
 {
-  return new IRExprHappensBefore(before, after);
+  return IRExprHappensBefore::mk(before, after);
 }
 
 /* Constructors for NULL-terminated IRExpr expression vectors,

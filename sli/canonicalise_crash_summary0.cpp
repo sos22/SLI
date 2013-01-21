@@ -253,7 +253,7 @@ rewriteEntryPointExpressions(CrashSummary *cs, const std::map<std::pair<unsigned
 			std::pair<unsigned, CfgLabel> key(iep->thread, iep->label);
 			auto it = rules->find(key);
 			if (it != rules->end())
-				return new IRExprEntryPoint(it->second.first, it->second.second);
+				return IRExprEntryPoint::mk(it->second.first, it->second.second);
 			return iep;
 		}
 		bool rewriteNewStates() const { return false; }

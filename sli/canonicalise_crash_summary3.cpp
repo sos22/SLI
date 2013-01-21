@@ -1351,7 +1351,7 @@ LoadCanonicaliser::LoadCanonicaliser(CrashSummary *cs)
 		}
 		if (!allowSubst)
 			continue;
-		IRExprFreeVariable *fv = new IRExprFreeVariable(
+		IRExprFreeVariable *fv = IRExprFreeVariable::mk(
 			(*cs->mai)(-1, NULL), k.second->ty, false);
 		for (auto it = definitelyAliasLds.begin();
 		     it != definitelyAliasLds.end();

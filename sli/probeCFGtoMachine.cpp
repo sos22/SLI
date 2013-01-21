@@ -59,7 +59,7 @@ ndChoiceState(SMScopes *scopes,
 						&scopes->bools,
 						IRExpr_Unop(
 							Iop_Not1,
-							new IRExprControlFlow(
+							IRExprControlFlow::mk(
 								vr.thread,
 								node->label,
 								targets[0]->label))),
@@ -77,7 +77,7 @@ ndChoiceState(SMScopes *scopes,
 					vr.rip,
 					bbdd::var(
 						&scopes->bools,
-						new IRExprControlFlow(
+						IRExprControlFlow::mk(
 							vr.thread,
 							node->label,
 							targets[x]->label)),
@@ -117,7 +117,7 @@ entryState(SMScopes *scopes,
 						&scopes->bools,
 						IRExpr_Unop(
 							Iop_Not1,
-							new IRExprEntryPoint(thread, targets[0].first->label))),
+							IRExprEntryPoint::mk(thread, targets[0].first->label))),
 					true),
 				targets[0].second);
 		StateMachineState *acc = r;
@@ -125,7 +125,7 @@ entryState(SMScopes *scopes,
 			StateMachineBifurcate *b = 
 				new StateMachineBifurcate(
 					targets[0].first->rip,
-					bbdd::var(&scopes->bools, new IRExprEntryPoint(thread, targets[x].first->label)),
+					bbdd::var(&scopes->bools, IRExprEntryPoint::mk(thread, targets[x].first->label)),
 					targets[x].second,
 					acc);
 			acc = b;
