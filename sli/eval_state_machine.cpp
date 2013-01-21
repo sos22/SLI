@@ -317,6 +317,8 @@ public:
 			  exprbdd *e,
 			  bbdd **assumption,
 			  const IRExprOptimisations &opt) {
+		if (TIMEOUT)
+			return;
 		register_val &rv(registers[reg]);
 		switch (e->type()) {
 		case Ity_I8:

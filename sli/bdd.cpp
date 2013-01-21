@@ -10,6 +10,8 @@
 static IRExpr *
 muxify(IRExpr *what)
 {
+	if (TIMEOUT)
+		return what;
 	switch (what->tag) {
 	case Iex_Get:
 		return what;
@@ -306,7 +308,7 @@ muxify(IRExpr *what)
 static IRExpr *
 quickSimplify(IRExpr *a)
 {
-	if (a->optimisationsApplied)
+	if (a->optimisationsApplied || TIMEOUT)
 		return a;
 	switch (a->tag) {
 	case Iex_Unop: {
