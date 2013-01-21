@@ -291,6 +291,26 @@ InstructionConsumer::operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAn
 	free(times);
 }
 
+static void
+loadSchedule(const char *path, std::vector<DynAnalysisRip> &out)
+{
+	int fd = open(path, O_RDONLY);
+	if (fd < 0)
+		err(1, "opening %s", path);
+	char *cont = readfile(fd);
+	close(fd);
+	if (!cont)
+		err(1, "reading %s", path);
+	DynAnalysisRip dr;
+	const char *buf = cont;
+	while (parseDynAnalysisRip(&dr, buf, &buf) &&
+	       parseThisChar('\n', buf, &buf))
+		out.push_back(dr);
+	if (buf[0] != 0)
+		errx(1, "junk at end of %s", path);
+	free(cont);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -366,19 +386,32 @@ main(int argc, char *argv[])
 
 	FILE *timings = fopen("timings.txt", "w");
 
-	std::vector<DynAnalysisRip> assertions;
+	std::vector<DynAnalysisRip> schedule;
 	VexPtr<TypesDb::all_instrs_iterator> instrIterator;
 	unsigned long total_instructions;
-	if (assert_mode) {
-		oracle->findAssertions(assertions);
-		total_instructions = assertions.size();
+	bool use_schedule = false;
+
+	/* Shut compiler up */
+	total_instructions = -1;
+
+	if (getenv("SOS22_MINIMAL_DIRECT_INSTR_SCHEDULE")) {
+		loadSchedule(getenv("SOS22_MINIMAL_DIRECT_INSTR_SCHEDULE"),
+			     schedule);
+		use_schedule = true;
+	} else if (assert_mode) {
+		oracle->findAssertions(schedule);
+		use_schedule = true;
 	} else if (double_free_mode) {
-		oracle->findFrees(assertions);
-		total_instructions = assertions.size();
+		oracle->findFrees(schedule);
+		use_schedule = true;
 	} else {
 		instrIterator = oracle->type_db->enumerateAllInstructions();
 		total_instructions = oracle->type_db->nrDistinctInstructions();
 	}
+
+	if (use_schedule)
+		total_instructions = schedule.size();
+
 	printf("%ld instructions to protect\n", total_instructions);
 
 	/* There are a couple of important properties here:
@@ -387,8 +420,8 @@ main(int argc, char *argv[])
 	   -- a...b and b...c must, between them, cover precisely the
 	      same range as a...c i.e. no duplicates or gaps.
 	*/
-	unsigned long start_instr = total_instructions / 100 * start_percentage;
-	unsigned long end_instr = end_percentage == 100 ? total_instructions : total_instructions / 100 * end_percentage - 1;
+	unsigned long start_instr = (total_instructions * start_percentage) / 100;
+	unsigned long end_instr = end_percentage == 100 ? total_instructions : (total_instructions * end_percentage) / 100 - 1;
 	unsigned long instructions_to_process = end_instr - start_instr;
 
 	printf("Processing instructions %ld to %ld\n", start_instr, end_instr);
@@ -396,9 +429,9 @@ main(int argc, char *argv[])
 	unsigned long cntr = 0;
 
 	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, timings, opt);
-	if (assert_mode || double_free_mode) {
+	if (use_schedule) {
 		for (unsigned long idx = start_instr; idx < end_instr; idx++) {
-			ic(oracle, df, assertions[idx], cntr);
+			ic(oracle, df, schedule[idx], cntr);
 			cntr++;
 		}
 	} else {

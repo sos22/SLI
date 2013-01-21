@@ -1,5 +1,5 @@
 subdirs="enforce_crash"
-targets="minimal_direct dump_types_db check_types_index"
+targets="minimal_direct dump_types_db check_types_index build_schedule"
 targets="${targets} canonicalise_types_table canonicalise_crash_summary2"
 targets="${targets} remove_non_badptrs canonicalise_crash_summary3 canonicalise_crash_summary0 canonicalise_crash_summary4"
 targets="${targets} case_split_summaries memloc_split_summaries dump_alias_db check_cfg_generation"
