@@ -264,21 +264,21 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 	case Iex_Const: {
 		IRExprConst *iec = (IRExprConst *)expr;
 		bytecode_op(f, "push_const", iec->type());
-		switch (iec->ty) {
+		switch (iec->type()) {
 		case Ity_I1:
-			bytecode_const1(f, iec->Ico.U1);
+			bytecode_const1(f, iec->Ico.content.U1);
 			break;
 		case Ity_I8:
-			bytecode_const8(f, iec->Ico.U8);
+			bytecode_const8(f, iec->Ico.content.U8);
 			break;
 		case Ity_I16:
-			bytecode_const16(f, iec->Ico.U16);
+			bytecode_const16(f, iec->Ico.content.U16);
 			break;
 		case Ity_I32:
-			bytecode_const32(f, iec->Ico.U32);
+			bytecode_const32(f, iec->Ico.content.U32);
 			break;
 		case Ity_I64:
-			bytecode_const64(f, iec->Ico.U64);
+			bytecode_const64(f, iec->Ico.content.U64);
 			break;
 		default:
 			abort();

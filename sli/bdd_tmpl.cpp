@@ -509,7 +509,7 @@ bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
 	if (a == b)
 		return a;
 	if (cond->tag == Iex_Const) {
-		if ( ((IRExprConst *)cond)->Ico.U1 )
+		if ( ((IRExprConst *)cond)->Ico.content.U1 )
 			return a;
 		else
 			return b;

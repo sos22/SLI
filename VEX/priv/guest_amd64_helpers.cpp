@@ -874,8 +874,8 @@ static Bool isU64 ( IRExpr* e, ULong n )
 {
   IRExprConst *c = dynamic_cast<IRExprConst *>(e);
   return toBool( c
-		 && c->ty == Ity_I64
-		 && c->Ico.U64 == n );
+		 && c->type() == Ity_I64
+		 && c->Ico.content.U64 == n );
 }
 
 IRExpr* guest_amd64_spechelper ( const char* function_name,

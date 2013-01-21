@@ -75,7 +75,7 @@ getProximalCause(SMScopes *scopes,
 			e = simplifyIRExpr(e, opt);
 			assert(e->type() == Ity_I1);
 			if (e->tag == Iex_Const) {
-				if ( ((IRExprConst *)e)->Ico.U1 )
+			  if ( ((IRExprConst *)e)->Ico.content.U1 )
 					work = new StateMachineTerminal(vr, scopes->smrs.cnst(smr_crash));
 				return;
 			}

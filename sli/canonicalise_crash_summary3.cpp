@@ -349,7 +349,7 @@ clauseUnderspecified(IRExpr *clause,
 			    ((IRExprUnop *)ieb->arg1)->arg->tag == Iex_Binop &&
 			    ((IRExprBinop *)((IRExprUnop *)ieb->arg1)->arg)->op == Iop_CmpF32 &&
 			    ieb->arg2->tag == Iex_Const &&
-			    ((IRExprConst *)ieb->arg2)->Ico.U8 == 6)
+			    ((IRExprConst *)ieb->arg2)->Ico.content.U8 == 6)
 				return true;
 		case Iop_Shr32:
 		case Iop_Shl64:
@@ -568,7 +568,7 @@ extractDefinitelyTrueFalse(std::set<IRExpr *> *definitelyTrue,
 	}
 
 	if (expr->tag == Iex_Const) {
-		assert(((IRExprConst *)expr)->Ico.U1 == exprIsTrue);
+		assert(((IRExprConst *)expr)->Ico.content.U1 == exprIsTrue);
 		return;
 	}
 

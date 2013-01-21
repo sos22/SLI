@@ -273,7 +273,7 @@ top:
 	/* First rule: 0 == a - b -> a == b */
 	ieb = (IRExprBinop *)e;
 	if (ieb->arg1->tag == Iex_Const &&
-	    ((IRExprConst *)ieb->arg1)->Ico.U64 == 0 &&
+	    ((IRExprConst *)ieb->arg1)->Ico.content.U64 == 0 &&
 	    ieb->arg2->tag == Iex_Associative &&
 	    ((IRExprAssociative *)ieb->arg2)->op == Iop_Add64 &&
 	    ((IRExprAssociative *)ieb->arg2)->nr_arguments == 2 &&
@@ -302,9 +302,9 @@ top:
 					 * overflow. */
 				if (r->arg2->tag == Iex_Const &&
 				    l->arg2->tag == Iex_Const &&
-				    ((IRExprConst *)r->arg2)->Ico.U8 ==
-				         ((IRExprConst *)l->arg2)->Ico.U8 &&
-				    ((IRExprConst *)l->arg2)->Ico.U8 < 8) {
+				    ((IRExprConst *)r->arg2)->Ico.content.U8 ==
+				         ((IRExprConst *)l->arg2)->Ico.content.U8 &&
+				    ((IRExprConst *)l->arg2)->Ico.content.U8 < 8) {
 					e = IRExprBinop::mk(ieb->op,
 							    l->arg1,
 							    r->arg1);
@@ -771,7 +771,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		) {
 		it->leftOver = heuristicSimplify(it->leftOver);
 		if ( (it->leftOver->tag != Iex_Const ||
-		      ((IRExprConst *)it->leftOver)->Ico.U1) &&
+		      ((IRExprConst *)it->leftOver)->Ico.content.U1) &&
 		     !consistentOrdering(*it) ) {
 			it++;
 		} else {

@@ -1069,8 +1069,8 @@ struct RspCanonicalisationState : public Named {
 		}
 		case Iex_Const: {
 			IRExprConst *iec = (IRExprConst *)a;
-			if (iec->ty == Ity_I64)
-				res = eval_res::cnst(iec->Ico.U64);
+			if (iec->type() == Ity_I64)
+				res = eval_res::cnst(iec->Ico.content.U64);
 			break;
 		}
 		case Iex_Get: {

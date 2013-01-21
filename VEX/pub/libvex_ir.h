@@ -1723,8 +1723,9 @@ public:
    ppIRExpr output: <con>, eg. 0x4:I32
 */
 struct IRExprConst : public IRExpr {
-   const IRType ty;
-   const union _Ico {
+  struct _Ico {
+    IRType ty;
+    union {
       Bool   U1;
       UChar  U8;
       UShort U16;
@@ -1734,11 +1735,12 @@ struct IRExprConst : public IRExpr {
 	 ULong lo;
 	 ULong hi;
       } U128;
-   } Ico;
-
+    } content;
+  };
+  const _Ico Ico;
 private:
-   IRExprConst(const IRType _ty, const _Ico &content)
-       : IRExpr(Iex_Const), ty(_ty), Ico(content)
+   IRExprConst(const _Ico &content)
+       : IRExpr(Iex_Const), Ico(content)
    {
        /* There's not much point in attempting to optimise constants,
 	  so just set the flag saying that it's already been fully
@@ -1746,14 +1748,14 @@ private:
        optimisationsApplied = ~0u;
    }
 public:
-   static IRExprConst *mk(const IRType ty, const _Ico &content)
+   static IRExprConst *mk(const _Ico &content)
    {
-      return new IRExprConst(ty, content);
+      return new IRExprConst(content);
    }
    void visit(HeapVisitor &) { }
-   unsigned long hashval() const { return Ico.U64; }
+   unsigned long hashval() const { return Ico.content.U64; }
    void _prettyPrint(FILE *f, std::map<IRExpr *, unsigned> &) const;
-   IRType type() const { return ty; }
+   IRType type() const { return Ico.ty; }
  private:
    void _sanity_check(unsigned) const {
    }

@@ -396,6 +396,6 @@ extract_call_follower(IRSB *irsb)
 		idx--;
 	assert(idx >= 0);
 	VexRip r( ((IRStmtIMark *)irsb->stmts[idx])->addr.rip );
-	r.jump(((IRExprConst *)s->data)->Ico.U64);
+	r.jump(((IRExprConst *)s->data)->Ico.content.U64);
 	return r;
 }

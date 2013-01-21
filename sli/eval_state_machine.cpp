@@ -9,7 +9,6 @@
 #include "libvex_prof.hpp"
 #include "typesdb.hpp"
 #include "allowable_optimisations.hpp"
-#include "sat_checker.hpp"
 #include "alloc_mai.hpp"
 #include "bdd.hpp"
 #include "ssa.hpp"

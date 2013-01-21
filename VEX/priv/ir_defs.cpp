@@ -125,13 +125,13 @@ bool parseIRType(IRType *out, const char *str, const char **suffix)
 static void ppIRConst ( const IRExprConst *con, FILE* f )
 {
    vassert(sizeof(ULong) == sizeof(Double));
-   switch (con->ty) {
-      case Ity_I1:   fprintf(f,  "%d:I1",        con->Ico.U1 ? 1 : 0); return;
-      case Ity_I8:   fprintf(f,  "0x%x:I8",      (UInt)(con->Ico.U8)); return;
-      case Ity_I16:  fprintf(f,  "0x%x:I16",     (UInt)(con->Ico.U16)); return;
-      case Ity_I32:  fprintf(f,  "0x%x:I32",     (UInt)(con->Ico.U32)); return;
-      case Ity_I64:  fprintf(f,  "0x%llx:I64",   (ULong)(con->Ico.U64)); return;
-      case Ity_I128: fprintf(f,  "U128{0x%llx, 0x%llx}", con->Ico.U128.hi, con->Ico.U128.lo); return;
+   switch (con->Ico.ty) {
+      case Ity_I1:   fprintf(f,  "%d:I1",        con->Ico.content.U1 ? 1 : 0); return;
+      case Ity_I8:   fprintf(f,  "0x%x:I8",      (UInt)(con->Ico.content.U8)); return;
+      case Ity_I16:  fprintf(f,  "0x%x:I16",     (UInt)(con->Ico.content.U16)); return;
+      case Ity_I32:  fprintf(f,  "0x%x:I32",     (UInt)(con->Ico.content.U32)); return;
+      case Ity_I64:  fprintf(f,  "0x%llx:I64",   (ULong)(con->Ico.content.U64)); return;
+      case Ity_I128: fprintf(f,  "U128{0x%llx, 0x%llx}", con->Ico.content.U128.hi, con->Ico.content.U128.lo); return;
       case Ity_INVALID:
 	break;
    }
@@ -1653,45 +1653,57 @@ IRExprConst* IRExpr_Const_U1 ( bool bit )
 {
    vassert(bit == False || bit == True);
    IRExprConst::_Ico c;
-   c.U1 = bit;
-   return IRExprConst::mk(Ity_I1, c);
+   bzero(&c, sizeof(c));
+   c.ty = Ity_I1;
+   c.content.U1 = bit;
+   return IRExprConst::mk(c);
 }
 IRExprConst* IRExpr_Const_U8 ( unsigned char u8)
 {
    IRExprConst::_Ico c;
-   c.U8 = u8;
-   return IRExprConst::mk(Ity_I8, c);
+   bzero(&c, sizeof(c));
+   c.ty = Ity_I8;
+   c.content.U8 = u8;
+   return IRExprConst::mk(c);
 }
 IRExprConst* IRExpr_Const_U16 ( unsigned short u16 )
 {
    IRExprConst::_Ico c;
-   c.U16 = u16;
-   return IRExprConst::mk(Ity_I16, c);
+   bzero(&c, sizeof(c));
+   c.ty = Ity_I16;
+   c.content.U16 = u16;
+   return IRExprConst::mk(c);
 }
 IRExprConst* IRExpr_Const_U32 ( unsigned u32 )
 {
    IRExprConst::_Ico c;
-   c.U32 = u32;
-   return IRExprConst::mk(Ity_I32, c);
+   bzero(&c, sizeof(c));
+   c.ty = Ity_I32;
+   c.content.U32 = u32;
+   return IRExprConst::mk(c);
 }
 static VexPtr<IRExprConst, &ir_heap> magicConstant0;
 IRExprConst* IRExpr_Const_U64 ( unsigned long u64 )
 {
    IRExprConst::_Ico c;
-   c.U64 = u64;
+   bzero(&c, sizeof(c));
+   c.ty = Ity_I64;
+   c.content.U64 = u64;
    if (u64 == 0) {
      if (!magicConstant0)
-       magicConstant0 = IRExprConst::mk(Ity_I64, c);
+       magicConstant0 = IRExprConst::mk(c);
      return magicConstant0;
    }
 
-   return IRExprConst::mk(Ity_I64, c);
+   return IRExprConst::mk(c);
 }
 IRExprConst* IRExpr_Const_F64 ( Double f64 )
 {
    IRExprConst::_Ico c;
-   *(double *)&c.U64 = f64;
-   return IRExprConst::mk(Ity_I64, c);
+   bzero(&c, sizeof(c));
+   c.ty = Ity_I64;
+   *(double *)&c.content.U64 = f64;
+   return IRExprConst::mk(c);
 }
 IRExprConst* IRExpr_Const_F64i ( unsigned long f64i )
 {
@@ -1704,16 +1716,20 @@ IRExprConst* IRExpr_Const_V128 ( unsigned short con )
    a |= con;
    a = a | (a << 32);
    IRExprConst::_Ico c;
-   c.U128.lo = a;
-   c.U128.hi = a;
-   return IRExprConst::mk(Ity_I128, c);
+   bzero(&c, sizeof(c));
+   c.ty = Ity_I128;
+   c.content.U128.lo = a;
+   c.content.U128.hi = a;
+   return IRExprConst::mk(c);
 }
 IRExprConst* IRExpr_Const_U128 ( unsigned long hi, unsigned long lo )
 {
    IRExprConst::_Ico c;
-   c.U128.lo = lo;
-   c.U128.hi = hi;
-   return IRExprConst::mk(Ity_I128, c);
+   bzero(&c, sizeof(c));
+   c.ty = Ity_I128;
+   c.content.U128.lo = lo;
+   c.content.U128.hi = hi;
+   return IRExprConst::mk(c);
 }
 
 /* Constructors -- IRCallee */
@@ -1928,7 +1944,7 @@ IRExpr* IRExpr_Associative_V(IROp op, ...)
        if (argsL[src]->tag == Iex_Const) {
 	 IRExprConst *iec = (IRExprConst *)argsL[src];
 	 foundConstant = iec;
-	 acc += iec->Ico.U64;
+	 acc += iec->Ico.content.U64;
        } else {
 	 argsL[dest] = argsL[src];
 	 dest--;
@@ -2634,7 +2650,7 @@ IRTemp newIRTemp ( IRTypeEnv* env )
 
 IRType typeOfIRExprConst ( IRExprConst* con )
 {
-   switch (con->ty) {
+    switch (con->Ico.ty) {
       case Ity_I1:    return Ity_I1;
       case Ity_I8:    return Ity_I8;
       case Ity_I16:   return Ity_I16;
@@ -2705,18 +2721,18 @@ void sanityCheckFail ( IRSB* bb, IRStmt* stmt, const char* what )
 
 Bool eqIRExprConst ( const IRExprConst* c1, const IRExprConst* c2 )
 {
-   if (c1->ty != c2->ty)
+    if (c1->Ico.ty != c2->Ico.ty)
       return False;
 
-   switch (c1->ty) {
-      case Ity_I1:  return toBool( (1 & c1->Ico.U1) == (1 & c2->Ico.U1) );
-      case Ity_I8:  return toBool( c1->Ico.U8  == c2->Ico.U8 );
-      case Ity_I16: return toBool( c1->Ico.U16 == c2->Ico.U16 );
-      case Ity_I32: return toBool( c1->Ico.U32 == c2->Ico.U32 );
-      case Ity_I64: return toBool( c1->Ico.U64 == c2->Ico.U64 );
+   switch (c1->Ico.ty) {
+      case Ity_I1:  return toBool( (1 & c1->Ico.content.U1) == (1 & c2->Ico.content.U1) );
+      case Ity_I8:  return toBool( c1->Ico.content.U8  == c2->Ico.content.U8 );
+      case Ity_I16: return toBool( c1->Ico.content.U16 == c2->Ico.content.U16 );
+      case Ity_I32: return toBool( c1->Ico.content.U32 == c2->Ico.content.U32 );
+      case Ity_I64: return toBool( c1->Ico.content.U64 == c2->Ico.content.U64 );
       case Ity_I128:
-	return toBool( c1->Ico.U128.hi == c2->Ico.U128.hi &&
-		       c1->Ico.U128.lo == c2->Ico.U128.lo );
+	return toBool( c1->Ico.content.U128.hi == c2->Ico.content.U128.hi &&
+		       c1->Ico.content.U128.lo == c2->Ico.content.U128.lo );
       case Ity_INVALID: break;
    }
   vpanic("eqIRExprConst");

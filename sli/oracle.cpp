@@ -693,10 +693,10 @@ irexprAliasingClass(IRExpr *expr,
 	}
 	case Iex_Const: {
 		IRExprConst *con = (IRExprConst *)expr;
-		if (con->Ico.U64 < 4096)
+		if (con->Ico.content.U64 < 4096)
 			return PointerAliasingSet::notAPointer;
 		bool t;
-		if (opt.addressAccessible(((IRExprConst *)expr)->Ico.U64, &t) && !t)
+		if (opt.addressAccessible(((IRExprConst *)expr)->Ico.content.U64, &t) && !t)
 			return PointerAliasingSet::notAPointer;
 		else
 			return PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
@@ -799,7 +799,7 @@ irexprAliasingClass(IRExpr *expr,
 				/* Special case: if X points at space
 				   Y then X + k points at Y as well,
 				   if k is a small constant. */
-				long k = ((IRExprConst *)e->contents[0])->Ico.U64;
+				long k = ((IRExprConst *)e->contents[0])->Ico.content.U64;
 				if (k >= -4096 && k < 4096) {
 					return irexprAliasingClass(e->contents[1],
 								   config,
@@ -2221,12 +2221,12 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 			    a->contents[1]->tag == Iex_Get) {
 				IRExprGet *base = (IRExprGet *)a->contents[1];
 				if (base->reg.asReg() == OFFSET_amd64_RSP) {
-					delta_offset = ((IRExprConst *)a->contents[0])->Ico.U64;
+					delta_offset = ((IRExprConst *)a->contents[0])->Ico.content.U64;
 					if (debug_static_rbp_offsets)
 						printf("Set RSP = RSP+%ld\n", delta_offset);
 					goto join_predecessors;
 				} else if (base->reg.asReg() == OFFSET_amd64_RBP) {
-					offset = ((IRExprConst *)a->contents[0])->Ico.U64;
+					offset = ((IRExprConst *)a->contents[0])->Ico.content.U64;
 					state = RbpToRspOffsetStateValid;
 					if (debug_static_rbp_offsets)
 						printf("Set RSP = RBP+%ld\n", offset);
@@ -2261,12 +2261,12 @@ Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, b
 				IRExprGet *base = (IRExprGet *)a->contents[1];
 				IRExprConst *o = (IRExprConst *)a->contents[0];
 				if (base->reg.asReg() == OFFSET_amd64_RBP) {
-					delta_offset = -o->Ico.U64;
+					delta_offset = -o->Ico.content.U64;
 					if (debug_static_rbp_offsets)
 						printf("Set RBP + RBP+%ld\n", -delta_offset);
 					goto join_predecessors;
 				} else if (base->reg.asReg() == OFFSET_amd64_RSP) {
-					offset = -o->Ico.U64;
+					offset = -o->Ico.content.U64;
 					state = RbpToRspOffsetStateValid;
 					if (debug_static_rbp_offsets)
 						printf("Set RBP = RSP+%ld\n", -offset);
@@ -3604,7 +3604,7 @@ stack_offset(Oracle *oracle, unsigned long rip)
 					    ((IRExprGet *)iea->contents[1])->reg != p->target) {
 						failed = true;
 					} else {
-						q.second -= ((IRExprConst *)iea->contents[0])->Ico.U64;
+						q.second -= ((IRExprConst *)iea->contents[0])->Ico.content.U64;
 					}
 					break;
 				}
