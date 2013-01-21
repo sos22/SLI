@@ -264,13 +264,14 @@ consistentOrdering(const expr_slice &slice)
 static IRExpr *
 heuristicSimplify(IRExpr *e)
 {
-	bool done_something = false;
+	IRExprBinop *ieb;
+top:
 	if (e->tag != Iex_Binop ||
 	    ((IRExprBinop *)e)->op != Iop_CmpEQ64)
 		return e;
 
 	/* First rule: 0 == a - b -> a == b */
-	IRExprBinop *ieb = (IRExprBinop *)e;
+	ieb = (IRExprBinop *)e;
 	if (ieb->arg1->tag == Iex_Const &&
 	    ((IRExprConst *)ieb->arg1)->Ico.U64 == 0 &&
 	    ieb->arg2->tag == Iex_Associative &&
@@ -278,10 +279,10 @@ heuristicSimplify(IRExpr *e)
 	    ((IRExprAssociative *)ieb->arg2)->nr_arguments == 2 &&
 	    ((IRExprAssociative *)ieb->arg2)->contents[1]->tag == Iex_Unop &&
 	    ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->op == Iop_Neg64) {
-		ieb = new IRExprBinop(ieb->op,
-				      ((IRExprAssociative *)ieb->arg2)->contents[0],
-				      ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->arg);
-		done_something = true;
+		e = IRExprBinop::mk(ieb->op,
+				    ((IRExprAssociative *)ieb->arg2)->contents[0],
+				    ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->arg);
+		goto top;
 	}
 
 	/* Second rule: f(a) == f(b) -> a == b, if f is sufficiently
@@ -304,10 +305,10 @@ heuristicSimplify(IRExpr *e)
 				    ((IRExprConst *)r->arg2)->Ico.U8 ==
 				         ((IRExprConst *)l->arg2)->Ico.U8 &&
 				    ((IRExprConst *)l->arg2)->Ico.U8 < 8) {
-					ieb = new IRExprBinop(ieb->op,
-							      l->arg1,
-							      r->arg1);
-					done_something = true;
+					e = IRExprBinop::mk(ieb->op,
+							    l->arg1,
+							    r->arg1);
+					goto top;
 				}
 				break;
 			default:
@@ -323,9 +324,8 @@ heuristicSimplify(IRExpr *e)
 			switch (l->op) {
 			case Iop_32Sto64:
 				/* This one actually is injective */
-				ieb = new IRExprBinop(ieb->op, l->arg, r->arg);
-				done_something = true;
-				break;
+				e = IRExprBinop::mk(ieb->op, l->arg, r->arg);
+				goto top;
 			default:
 				break;
 			}
@@ -336,8 +336,6 @@ heuristicSimplify(IRExpr *e)
 		}
 	}
 
-	if (done_something)
-		return heuristicSimplify(e);
 	return e;
 }
 

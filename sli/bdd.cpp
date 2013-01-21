@@ -318,7 +318,7 @@ quickSimplify(IRExpr *a)
 			if (arg == au->arg)
 				return au;
 			else
-				return new IRExprUnop(au->op, arg);
+				return IRExprUnop::mk(au->op, arg);
 		}
 		IRExprConst *argc = (IRExprConst *)arg;
 		switch (au->op) {
@@ -373,7 +373,7 @@ quickSimplify(IRExpr *a)
 			if (arg == au->arg)
 				return au;
 			else
-				return new IRExprUnop(au->op, arg);
+				return IRExprUnop::mk(au->op, arg);
 			break;
 		case Iop_Neg8:
 			return IRExpr_Const_U8(-argc->Ico.U8);
@@ -489,7 +489,7 @@ quickSimplify(IRExpr *a)
 			return IRExpr_Binop(_ieb->op, newArg1, newArg2);
 		}
 		if (arg1 != _ieb->arg1 || arg2 != _ieb->arg2)
-			a = new IRExprBinop(_ieb->op, arg1, arg2);
+			a = IRExprBinop::mk(_ieb->op, arg1, arg2);
 		break;
 	}
 	case Iex_Associative: {
@@ -685,7 +685,7 @@ quickSimplify(IRExpr *a)
 		auto a3 = quickSimplify(q->arg3);
 		auto a4 = quickSimplify(q->arg4);
 		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3 || a4 != q->arg4)
-			a = new IRExprQop(q->op, a1, a2, a3, a4);
+			a = IRExprQop::mk(q->op, a1, a2, a3, a4);
 		break;
 	}
 	case Iex_Triop: {
@@ -694,7 +694,7 @@ quickSimplify(IRExpr *a)
 		auto a2 = quickSimplify(q->arg2);
 		auto a3 = quickSimplify(q->arg3);
 		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3)
-			a = new IRExprTriop(q->op, a1, a2, a3);
+			a = IRExprTriop::mk(q->op, a1, a2, a3);
 		break;
 	}
 	case Iex_CCall: {

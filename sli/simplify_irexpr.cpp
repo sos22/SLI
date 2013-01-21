@@ -2360,7 +2360,7 @@ top:
 				break;
 		}
 		if (op != _e->op || arg != _e->arg)
-			res = new IRExprUnop(op, arg);
+			res = IRExprUnop::mk(op, arg);
 		break;
 	}
 	
@@ -2953,7 +2953,7 @@ top:
 		}
 
 		if (op != _e->op || l != _e->arg1 || r != _e->arg2)
-			res = new IRExprBinop(op, l, r);
+			res = IRExprBinop::mk(op, l, r);
 		break;
 	}
 
@@ -3063,7 +3063,7 @@ top:
 		auto arg4 = optimiseIRExpr(q->arg4, opt);
 		if (arg1 != q->arg1 || arg2 != q->arg2 ||
 		    arg3 != q->arg3 || arg4 != q->arg4)
-			res = new IRExprQop(q->op, arg1, arg2, arg3, arg4);
+			res = IRExprQop::mk(q->op, arg1, arg2, arg3, arg4);
 		break;
 	}
 
@@ -3073,7 +3073,7 @@ top:
 		auto arg2 = optimiseIRExpr(t->arg2, opt);
 		auto arg3 = optimiseIRExpr(t->arg3, opt);
 		if (arg1 != t->arg1 || arg2 != t->arg2 || arg3 != t->arg3)
-			res = new IRExprTriop(t->op, arg1, arg2, arg3);
+			res = IRExprTriop::mk(t->op, arg1, arg2, arg3);
 		break;
 	}
 

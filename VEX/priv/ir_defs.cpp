@@ -1753,11 +1753,11 @@ IRExpr* IRExpr_RdTmp ( IRTemp tmp, IRType ty, unsigned tid, unsigned generation 
 }
 IRExpr* IRExpr_Qop ( IROp op, IRExpr* arg1, IRExpr* arg2, 
                               IRExpr* arg3, IRExpr* arg4 ) {
-   return new IRExprQop(op, arg1, arg2, arg3, arg4);
+  return IRExprQop::mk(op, arg1, arg2, arg3, arg4);
 }
 IRExpr* IRExpr_Triop  ( IROp op, IRExpr* arg1, 
                                  IRExpr* arg2, IRExpr* arg3 ) {
-   return new IRExprTriop(op, arg1, arg2, arg3);
+  return IRExprTriop::mk(op, arg1, arg2, arg3);
 }
 IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
    assert(arg1);
@@ -1785,7 +1785,7 @@ IRExpr* IRExpr_Binop ( IROp op, IRExpr* arg1, IRExpr* arg2 ) {
      }
    }
 
-   return new IRExprBinop(op, arg1, arg2);
+   return IRExprBinop::mk(op, arg1, arg2);
 }
 
 /* Check whether a(b(X)) can be converted to a single operator c(X).
@@ -1880,7 +1880,7 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
      if (shortCircuitableUnops(op, argu->op, &ss))
        return IRExpr_Unop(ss, argu->arg);
    }
-   return new IRExprUnop(op, arg);
+   return IRExprUnop::mk(op, arg);
 }
 IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
    return new IRExprLoad(ty, addr);

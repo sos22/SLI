@@ -972,7 +972,7 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 			return FP_EXPRESSION;
 		if (arg1 != i->arg1 || arg2 != i->arg2 ||
 		    arg3 != i->arg3 || arg4 != i->arg4)
-			return new IRExprQop(i->op,
+			return IRExprQop::mk(i->op,
 					     arg1,
 					     arg2,
 					     arg3,
@@ -993,7 +993,7 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 			return FP_EXPRESSION;
 		if (arg1 != i->arg1 || arg2 != i->arg2 ||
 		    arg3 != i->arg3)
-			return new IRExprTriop(i->op,
+			return IRExprTriop::mk(i->op,
 					       arg1,
 					       arg2,
 					       arg3);
@@ -1008,7 +1008,7 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 		if (arg2 == FP_EXPRESSION)
 			return FP_EXPRESSION;
 		if (arg1 != i->arg1 || arg2 != i->arg2)
-			return new IRExprBinop(i->op,
+			return IRExprBinop::mk(i->op,
 					       arg1,
 					       arg2);
 		return expr;
@@ -1022,7 +1022,7 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 		if (arg == i->arg)
 			return expr;
 		else
-			return new IRExprUnop(i->op, arg);
+			return IRExprUnop::mk(i->op, arg);
 	}
 	case Iex_Const:
 		return expr;

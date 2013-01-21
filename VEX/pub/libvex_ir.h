@@ -1469,6 +1469,7 @@ struct IRExprQop : public IRExpr {
    IRExpr* const arg3;     /* operand 3 */
    IRExpr* const arg4;     /* operand 4 */
 
+private:
     IRExprQop(IROp _op, IRExpr *_arg1, IRExpr *_arg2,
 	      IRExpr *_arg3, IRExpr *_arg4)
        : IRExpr(Iex_Qop),
@@ -1478,6 +1479,12 @@ struct IRExprQop : public IRExpr {
 	 arg3(_arg3),
 	 arg4(_arg4)
    {}
+public:
+   static IRExpr *mk(IROp op, IRExpr *arg1, IRExpr *arg2,
+		     IRExpr *arg3, IRExpr *arg4)
+   {
+      return new IRExprQop(op, arg1, arg2, arg3, arg4);
+   }
    void visit(HeapVisitor &hv) {
        hv(arg1);
        hv(arg2);
@@ -1530,11 +1537,17 @@ struct IRExprTriop : public IRExpr {
    IRExpr* const arg1;     /* operand 1 */
    IRExpr* const arg2;     /* operand 2 */
    IRExpr* const arg3;     /* operand 3 */
+private:
    IRExprTriop(IROp _op, IRExpr *_arg1, IRExpr *_arg2,
 	       IRExpr *_arg3)
        : IRExpr(Iex_Triop), op(_op),
 	 arg1(_arg1), arg2(_arg2), arg3(_arg3)
    {}
+public:
+   static IRExpr *mk(IROp op, IRExpr *arg1, IRExpr *arg2, IRExpr *arg3)
+   {
+      return new IRExprTriop(op, arg1, arg2, arg3);
+   }
    void visit(HeapVisitor &hv) {
        hv(arg1);
        hv(arg2);
@@ -1581,15 +1594,20 @@ struct IRExprBinop : public IRExpr {
    IRExpr* const arg1;     /* operand 1 */
    IRExpr* const arg2;     /* operand 2 */
 
+private:
    IRExprBinop(IROp _op, IRExpr *_arg1, IRExpr *_arg2)
        : IRExpr(Iex_Binop), op(_op), arg1(_arg1), arg2(_arg2)
    {}
-   IRExprBinop(const IRExprBinop *base, IROp _op)
-       : IRExpr(Iex_Binop),
-	 op(_op),
-	 arg1(base->arg1),
-	 arg2(base->arg2)
-   {}
+public:
+   static IRExpr *mk(IROp op, IRExpr *arg1, IRExpr *arg2)
+   {
+      return new IRExprBinop(op, arg1, arg2);
+   }
+   static IRExpr *mk(const IRExprBinop *base, IROp op)
+   {
+      return mk(op, base->arg1, base->arg2);
+   }
+
    void visit(HeapVisitor &hv) {
        hv(arg1);
        hv(arg2);
@@ -1622,9 +1640,16 @@ struct IRExprUnop : public IRExpr {
    IROp    const op;       /* op-code */
    IRExpr* const arg;      /* operand */
 
+private:
    IRExprUnop(IROp _op, IRExpr *_arg)
        : IRExpr(Iex_Unop), op(_op), arg(_arg)
    {}
+public:
+   static IRExpr *mk(IROp op, IRExpr *arg)
+   {
+      return new IRExprUnop(op, arg);
+   }
+
    void visit(HeapVisitor &hv) {
        hv(arg);
    }
