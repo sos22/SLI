@@ -2845,27 +2845,85 @@ IRExprConst::_Ico::operator<(const _Ico &o) const
 field_iter(name)(__apply_args1, __apply_args1, __apply_args2)
 
 #define __mk_hash_check(type, name)					\
-	if (name < o.name) {						\
+	if (name < o.name)						\
 		return true;						\
-	} else if (o.name < name) {					\
-		return false;						\
-	}
+	else if (o.name < name)						\
+		return false;
 #define mk_hash_checks(name)						\
 field_iter(name)(__mk_hash_check, __mk_hash_check, __mk_hash_check)
 
+static void
+__field_visitor(IRExpr *const& what, HeapVisitor &hv)
+{
+	assert(hv.visited(what));
+	hv(what);
+}
+static void
+__field_visitor(IRCallee *const & what, HeapVisitor &hv)
+{
+	assert(hv.visited(what));
+	hv(what);
+}
+static void
+__field_visitor(IRRegArray *const & what, HeapVisitor &hv)
+{
+	assert(hv.visited(what));
+	hv(what);
+}
+static void
+__field_visitor(IRExpr *const *const & what, HeapVisitor &hv)
+{
+	assert(hv.visited(what));
+	hv(what);
+}
+static void
+__field_visitor(Int const &, HeapVisitor &)
+{
+}
+static void
+__field_visitor(const char * const &, HeapVisitor &)
+{
+}
+static void
+__field_visitor(threadAndRegister const &, HeapVisitor &)
+{
+}
+static void
+__field_visitor(IRExprConst::_Ico const &, HeapVisitor &)
+{
+}
+static void
+__field_visitor(MemoryAccessIdentifier const &, HeapVisitor &)
+{
+}
+static void
+__field_visitor(CfgLabel const &, HeapVisitor &)
+{
+}
+static void
+__field_visitor(void *const &, HeapVisitor &)
+{
+}
+
+#define __visit_field(type, name)		\
+	__field_visitor(name, hv);
 /* Weak map where the key is non-GC and the value is in the IR
  * heap. */
 template <typename key, typename value>
 class gc_map : public GcCallback<&ir_heap>, public std::map<key, value> {
 	void runGc(HeapVisitor &hv) {
-		for (auto it = this->begin(); it != this->end(); ) {
+		std::map<key, value> nw;
+		for (auto it = this->begin(); it != this->end(); it++) {
 			it->second = hv.visited(it->second);
-			if (!it->second) {
-				this->erase(it++);
-			} else {
-				it++;
+			if (it->second) {
+				key k(it->first);
+				k.visit(hv);
+				nw[k] = it->second;
 			}
 		}
+		this->clear();
+		for (auto it = nw.begin(); it != nw.end(); it++)
+			(*this)[it->first] = it->second;
 	}
 };
 
@@ -2879,6 +2937,12 @@ class gc_map : public GcCallback<&ir_heap>, public std::map<key, value> {
 		{							\
 			mk_hash_checks(name)				\
 			return false;					\
+		}							\
+		void visit(HeapVisitor &hv) const			\
+		{							\
+			field_iter(name)(__visit_field,			\
+					 __visit_field,			\
+					 __visit_field);		\
 		}							\
 	};								\
 	name *name::mk(field_iter(name)(__mk_proto, __mk_proto, __mk_proto_last)) \
@@ -2897,8 +2961,128 @@ class gc_map : public GcCallback<&ir_heap>, public std::map<key, value> {
 
 mk_memoised_constructor(IRCallee)
 mk_memoised_constructor(IRRegArray)
-#define mk(n) mk_memoised_constructor(IRExpr ## n)
-IREXPR_TYPES(mk)
+
+mk_memoised_constructor(IRExprGet)
+mk_memoised_constructor(IRExprGetI)
+mk_memoised_constructor(IRExprQop)
+mk_memoised_constructor(IRExprTriop)
+mk_memoised_constructor(IRExprBinop)
+mk_memoised_constructor(IRExprUnop)
+mk_memoised_constructor(IRExprConst)
+mk_memoised_constructor(IRExprMux0X)
+mk_memoised_constructor(IRExprLoad)
+mk_memoised_constructor(IRExprHappensBefore)
+mk_memoised_constructor(IRExprFreeVariable)
+mk_memoised_constructor(IRExprEntryPoint)
+mk_memoised_constructor(IRExprControlFlow)
+
+struct IRExprAssociative_hash_key {
+	field_iter(IRExprAssociative)(__mk_struct_fields, __mk_struct_fields, __mk_struct_fields)
+	IRExprAssociative_hash_key(field_iter(IRExprAssociative)(__mk_constructor1, __mk_constructor1, __mk_constructor2))
+	: field_iter(IRExprAssociative)(__mk_constructor3, __mk_constructor3, __mk_constructor4)
+	{}
+	bool operator<(const IRExprAssociative_hash_key &o) const
+	{
+		if (op < o.op) {
+			return true;
+		}
+		if (op > o.op) {
+			return false;
+		}
+		if (nr_arguments < o.nr_arguments) {
+			return true;
+		}
+		if (nr_arguments > o.nr_arguments) {
+			return true;
+		}
+		for (int i = 0; i < nr_arguments; i++) {
+			if (contents[i] < o.contents[i]) {
+				return true;
+			} else if (contents[i] > o.contents[i]) {
+				return false;
+			}
+		}
+		return false;
+	}
+	void visit(HeapVisitor &hv) const
+	{
+		field_iter(IRExprAssociative)(__visit_field,
+					      __visit_field,
+					      __visit_field);
+	}
+};
+
+IRExprAssociative *
+IRExprAssociative::mk(field_iter(IRExprAssociative)(__mk_proto, __mk_proto, __mk_proto_last))
+{
+	static gc_map<IRExprAssociative_hash_key, IRExprAssociative *> memo;
+	auto it_did_insert = memo.insert(
+		std::pair<IRExprAssociative_hash_key, IRExprAssociative *>(
+			IRExprAssociative_hash_key(apply_args(IRExprAssociative)),
+			(IRExprAssociative *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert)
+		it->second = new IRExprAssociative(apply_args(IRExprAssociative));
+	return it->second;
+}
+
+struct IRExprCCall_hash_key {
+	field_iter(IRExprCCall)(__mk_struct_fields, __mk_struct_fields, __mk_struct_fields)
+	IRExprCCall_hash_key(field_iter(IRExprCCall)(__mk_constructor1, __mk_constructor1, __mk_constructor2))
+	: field_iter(IRExprCCall)(__mk_constructor3, __mk_constructor3, __mk_constructor4)
+	{}
+	bool operator<(const IRExprCCall_hash_key &o) const
+	{
+		if (cee < o.cee) {
+			return true;
+		}
+		if (cee > o.cee) {
+			return false;
+		}
+		if (retty < o.retty) {
+			return true;
+		}
+		if (retty > o.retty) {
+			return true;
+		}
+		for (int i = 0; 1; i++) {
+			if (!o.args[i]) {
+				return false;
+			}
+			if (!args[i]) {
+				return true;
+			}
+			if (args[i] < o.args[i]) {
+				return true;
+			} else if (args[i] > o.args[i]) {
+				return false;
+			}
+		}
+		return false;
+	}
+	void visit(HeapVisitor &hv) const
+	{
+		field_iter(IRExprCCall)(__visit_field,
+					      __visit_field,
+					      __visit_field);
+	}
+};
+
+IRExprCCall *
+IRExprCCall::mk(field_iter(IRExprCCall)(__mk_proto, __mk_proto, __mk_proto_last))
+{
+	static gc_map<IRExprCCall_hash_key, IRExprCCall *> memo;
+	auto it_did_insert = memo.insert(
+		std::pair<IRExprCCall_hash_key, IRExprCCall *>(
+			IRExprCCall_hash_key(apply_args(IRExprCCall)),
+			(IRExprCCall *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert)
+		it->second = new IRExprCCall(apply_args(IRExprCCall));
+	return it->second;
+}
 
 /*---------------------------------------------------------------*/
 /*--- end                                           ir_defs.c ---*/
