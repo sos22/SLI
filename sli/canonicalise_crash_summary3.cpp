@@ -1100,7 +1100,7 @@ stripFloatingPoint(IRExpr *expr, bool *p)
 		if (a == l->addr)
 			return a;
 		else
-			return new IRExprLoad(l->ty, a);
+			return IRExprLoad::mk(l->ty, a);
 	}
 	case Iex_HappensBefore:
 	case Iex_FreeVariable:

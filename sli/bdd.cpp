@@ -667,7 +667,7 @@ quickSimplify(IRExpr *a)
 		IRExprLoad *l = (IRExprLoad *)a;
 		auto addr = quickSimplify(l->addr);
 		if (addr != l->addr)
-			a = new IRExprLoad(l->ty, addr);
+			a = IRExprLoad::mk(l->ty, addr);
 		break;
 	}
 	case Iex_Get:

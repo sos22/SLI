@@ -1883,7 +1883,7 @@ IRExpr* IRExpr_Unop ( IROp op, IRExpr* arg ) {
    return IRExprUnop::mk(op, arg);
 }
 IRExpr* IRExpr_Load ( IRType ty, IRExpr* addr ) {
-   return new IRExprLoad(ty, addr);
+  return IRExprLoad::mk(ty, addr);
 }
 IRExpr* IRExpr_CCall ( IRCallee* cee, IRType retty, IRExpr** args ) {
    return new IRExprCCall(cee, retty, args);

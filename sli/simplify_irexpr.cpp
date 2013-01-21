@@ -3051,7 +3051,7 @@ top:
 		IRExprLoad *l = (IRExprLoad *)src;
 		auto addr = optimiseIRExpr(l->addr, opt);
 		if (addr != l->addr)
-			res = new IRExprLoad(l->ty, addr);
+			res = IRExprLoad::mk(l->ty, addr);
 		break;
 	}
 

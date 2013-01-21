@@ -1688,9 +1688,15 @@ struct IRExprLoad : public IRExpr {
    IRType    const ty;     /* Type of the loaded value */
    IRExpr*   const addr;   /* Address being loaded from */
 
+private:
    IRExprLoad(IRType _ty, IRExpr *_addr)
        : IRExpr(Iex_Load), ty(_ty), addr(_addr)
    {}
+public:
+   static IRExpr *mk(IRType ty, IRExpr *addr)
+   {
+      return new IRExprLoad(ty, addr);
+   }
    void visit(HeapVisitor &hv) { hv(addr); }
    unsigned long hashval() const {
        return ty + addr->hashval() * 97;
