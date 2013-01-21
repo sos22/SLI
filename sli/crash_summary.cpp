@@ -95,8 +95,7 @@ parseCrashSummary(SMScopes *scopes,
 	    !parseThisString("Store Machine:\n", buf, &buf) ||
 	    !parseStateMachine(scopes, &storeMachine, buf, &buf, labels) ||
 	    !parseThisString("Verification condition: ", buf, &buf) ||
-	    !bbdd::parse(&scopes->bools, &verificationCondition, buf, &buf) ||
-	    !parseThisChar('\n', buf, &buf))
+	    !bbdd::parse(&scopes->bools, &verificationCondition, buf, &buf))
 		return false;
 	if (parseThisString("Remote macro sections:\n", buf, &buf)) {
 		/* This is an old version of the format which we no
