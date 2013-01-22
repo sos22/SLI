@@ -3326,11 +3326,7 @@ Oracle::identifyLibraryCall(const VexRip &vr)
 			vr.name());
 		return LibraryFunctionTemplate::none;
 	}
-	LibraryFunctionType res = LibraryFunctionTemplate::parse(name);
-	if (res == LibraryFunctionTemplate::none)
-		warning("Warning: Ignoring call to %s at %s\n",
-			name, vr.name());
-	return res;
+	return LibraryFunctionTemplate::parse(name);
 }
 
 PointerAliasingSet
