@@ -82,6 +82,22 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		return new StateMachineTerminal(dbg_origin, n);
 	}
 
+	if (trueTarget->type == StateMachineState::SideEffecting &&
+	    falseTarget->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)trueTarget)->sideEffect ==
+		((StateMachineSideEffecting *)falseTarget)->sideEffect &&
+	    ((StateMachineSideEffecting *)trueTarget)->sideEffect &&
+	    ((StateMachineSideEffecting *)trueTarget)->sideEffect->type == StateMachineSideEffect::StackLayout) {
+		*done_something = true;
+		return new StateMachineSideEffecting(
+			trueTarget->dbg_origin,
+			((StateMachineSideEffecting *)trueTarget)->sideEffect,
+			new StateMachineBifurcate(
+				dbg_origin,
+				condition,
+				((StateMachineSideEffecting *)trueTarget)->target,
+				((StateMachineSideEffecting *)falseTarget)->target));
+	}
 	if (falseTarget->type == StateMachineState::Bifurcate) {
 		StateMachineBifurcate *falseBifur = (StateMachineBifurcate *)falseTarget;
 		if (falseTarget != falseBifur->falseTarget &&
@@ -833,7 +849,8 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    target->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)target)->sideEffect &&
-	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+	    (((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic ||
+	     ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::StackLayout)) {
 		StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
 		assert(sideEffect->type != StateMachineSideEffect::EndAtomic);
 		*done_something = true;
