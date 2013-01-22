@@ -1469,6 +1469,13 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			}
 		}
 
+		if (CONFIG_REALIAS_SIMPLE_ONLY) {
+			if (debug_use_alias_table) {
+				printf("Simple rules failed, giving up.\n");
+			}
+			continue;
+		}
+
 		if (debug_use_alias_table) {
 			printf("All simple rules failed, applying full load elimination rule.\n");
 		}
