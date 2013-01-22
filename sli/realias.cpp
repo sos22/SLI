@@ -1850,6 +1850,121 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 	return sm;
 }
 
+/* We've pushed realias as far as it can go.  Remove the annotations. */
+static StateMachine *
+zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
+{
+	std::map<std::pair<int, int>, threadAndRegister> preservedImports;
+	std::map<StateMachineState *, int> pendingPredecessors;
+	std::vector<StateMachineState *> states;
+	enumStates(sm, &states);
+	pendingPredecessors[sm->root] = 0;
+	for (auto it = states.begin(); it != states.end(); it++) {
+		std::vector<StateMachineState *> targ;
+		(*it)->targets(targ);
+		for (auto it2 = targ.begin(); it2 != targ.end(); it2++) {
+			pendingPredecessors[*it2]++;
+		}
+	}
+	states.clear();
+	states.push_back(sm->root);
+	while (!states.empty()) {
+		StateMachineState *s = states.back();
+		states.pop_back();
+		assert(pendingPredecessors.count(s));
+		assert(pendingPredecessors[s] == 0);
+		switch (s->type) {
+		case StateMachineState::Bifurcate: {
+			auto smb = (StateMachineBifurcate *)s;
+			if (--pendingPredecessors[smb->trueTarget] == 0) {
+				states.push_back(smb->trueTarget);
+			}
+			if (--pendingPredecessors[smb->falseTarget] == 0) {
+				states.push_back(smb->falseTarget);
+			}
+			break;
+		}
+		case StateMachineState::Terminal:
+			break;
+		case StateMachineState::SideEffecting: {
+			auto sme = (StateMachineSideEffecting *)s;
+			if (--pendingPredecessors[sme->target] == 0) {
+				states.push_back(sme->target);
+			}
+			if (sme->sideEffect) {
+				switch (sme->sideEffect->type) {
+					/* These ones are pure
+					 * annotations, so can just be
+					 * killed off. */
+				case StateMachineSideEffect::StartFunction:
+				case StateMachineSideEffect::EndFunction:
+				case StateMachineSideEffect::StackLayout:
+					sme->sideEffect = NULL;
+					*done_something = true;
+					break;
+
+					/* Imports are more tricky,
+					   because they contain both
+					   annotation-like and
+					   side-effect-like behaviour,
+					   and we need to preserve the
+					   side effect while killing
+					   the annotation.  The
+					   approach is fairly simple:
+					   the first import of a
+					   particular
+					   (thread,vex_offset) pair
+					   remains an import, with a
+					   references-anything PAS,
+					   and everything else turns
+					   into copies of that one.
+					   The order in which we
+					   process states is chosen so
+					   that we process states in
+					   the order in which they'll
+					   execute, so figuring out
+					   which one to keep is
+					   trivial. */
+				case StateMachineSideEffect::ImportRegister: {
+					auto smi = (StateMachineSideEffectImportRegister *)sme->sideEffect;
+					auto it_did_insert =
+						preservedImports.insert(
+							std::pair<std::pair<int, int>, threadAndRegister>(
+								std::pair<int, int>(smi->tid, smi->vex_offset),
+								smi->reg));
+					auto it = it_did_insert.first;
+					auto did_insert = it_did_insert.second;
+					if (did_insert) {
+						if (smi->set != PointerAliasingSet::anything) {
+							sme->sideEffect = new StateMachineSideEffectImportRegister(
+								smi->reg,
+								smi->tid,
+								smi->vex_offset,
+								PointerAliasingSet::anything);
+							*done_something = true;
+						}
+					} else {
+						sme->sideEffect = new StateMachineSideEffectCopy(
+							smi->reg,
+							exprbdd::var(
+								&scopes->exprs,
+								&scopes->bools,
+								IRExpr_Get(it->second, Ity_I64)));
+						*done_something = true;
+					}
+					break;
+				}
+				default:
+					break;
+				}
+			}
+		}
+		}
+	}
+	return sm;
+}
+
+
 /* End of namespace */
 }
 
@@ -1861,3 +1976,10 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *mach
 {
 	return _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdg, pm, done_something);
 }
+
+StateMachine *
+zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
+{
+	return _realias::zapRealiasInfo(scopes, sm, done_something);
+}
+

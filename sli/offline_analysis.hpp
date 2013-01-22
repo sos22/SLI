@@ -243,6 +243,7 @@ StateMachine *functionAliasAnalysis(SMScopes *scopes,
 				    control_dependence_graph &cdg,
 				    predecessor_map &pred,
 				    bool *done_something);
+StateMachine *zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something);
 StateMachine *phiElimination(SMScopes *scopes, StateMachine *sm,
 			     predecessor_map &pred,
 			     control_dependence_graph &cdg,

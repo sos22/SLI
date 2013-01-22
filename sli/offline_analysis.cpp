@@ -234,6 +234,8 @@ _optimiseStateMachine(SMScopes *scopes,
 	OptimisationRecorder optrec;
 	optrec.start(scopes, mai, sm, is_ssa, opt);
 
+	bool zapped_realias_info = false;
+
 	bool done_something;
 	do {
 		if (TIMEOUT)
@@ -346,15 +348,15 @@ _optimiseStateMachine(SMScopes *scopes,
 				pred.recompute(sm);
 			done_something |= p;
 
-#if CONFIG_LOAD_ELIMINATION
-			sm = functionAliasAnalysis(scopes, *mai, sm, opt,
-						   oracle, cdg, pred, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("functionAliasAnalysis:\n");
-				printStateMachine(sm, stdout);
+			if (CONFIG_LOAD_ELIMINATION && !zapped_realias_info) {
+				sm = functionAliasAnalysis(scopes, *mai, sm, opt,
+							   oracle, cdg, pred, &p);
+				if (debugOptimiseStateMachine && p) {
+					printf("functionAliasAnalysis:\n");
+					printStateMachine(sm, stdout);
+				}
+				done_something |= p;
 			}
-			done_something |= p;
-#endif
 
 #if CONFIG_PHI_ELIMINATION
 			p = false;
@@ -367,6 +369,17 @@ _optimiseStateMachine(SMScopes *scopes,
 #endif
 		}
 #endif
+
+		if (opt.noExtend() && is_ssa && !done_something && !zapped_realias_info) {
+			p = false;
+			sm = zapRealiasInfo(scopes, sm, &p);
+			if (debugOptimiseStateMachine && p) {
+				printf("zapRealiasInfo:\n");
+				printStateMachine(sm, stdout);
+			}
+			done_something |= p;
+			zapped_realias_info = true;
+		}
 
 		if (progress)
 			*progress |= done_something;
