@@ -639,7 +639,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		}
 		if (acc != defaultValue)
 			new_nr_args++;
-		if (new_nr_args == 1) {
+		if (new_nr_args == 1 && !realloc) {
 			for (int i = 0; i < nr_arguments; i++)
 				if (simpleArgs[i]->tag != Iex_Const)
 					return simpleArgs[i];
