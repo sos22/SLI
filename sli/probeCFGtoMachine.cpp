@@ -1131,12 +1131,13 @@ struct RspCanonicalisationState : public Named {
  * state.  Subtracting that out from RSP at the start tends to make it
  * much easier to merge machines which start in different places. */
 static bool
-getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *delta)
+getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *delta,
+			    const CfgLabel &entryLabel)
 {
 	std::map<const StateMachineState *, int> stateLabels;
 	if (debug_rsp_canonicalisation) {
-		printf("Getting RSP canonicalisation delta for:\n");
-		printStateMachine(root, stdout, stateLabels);
+		printf("Getting RSP canonicalisation delta for entry point %s\n",
+		       entryLabel.name());
 	}
 
 	std::map<StateMachineState *, RspCanonicalisationState> res;
@@ -1289,7 +1290,9 @@ getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *del
 }
 
 static StateMachineState *
-addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachineState *final, const std::vector<FrameId> &entryStack, const VexRip &vr)
+addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachineState *final,
+		    const std::vector<FrameId> &entryStack, const VexRip &vr,
+		    const CfgLabel &entryLabel)
 {
 	StateMachineState *cursor = final;
 	long delta;
@@ -1312,7 +1315,7 @@ addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachine
 			cursor);
 	}
 
-	if (getRspCanonicalisationDelta(scopes, final, &delta)) {
+	if (getRspCanonicalisationDelta(scopes, final, &delta, entryLabel)) {
 		cursor = new StateMachineSideEffecting(
 			vr,
 			new StateMachineSideEffectCopy(
@@ -2253,7 +2256,8 @@ probeCFGsToMachine(SMScopes *scopes,
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		CFGNode *cfgnode = *it;
 		StateMachineState *root = results[*it];
-		root = addEntrySideEffects(scopes, oracle, tid, root, entryStacks[root], cfgnode->rip);
+		root = addEntrySideEffects(scopes, oracle, tid, root, entryStacks[root],
+					   cfgnode->rip, cfgnode->label);
 		roots_this_sm2.push_back(std::pair<CFGNode *, StateMachineState *>(cfgnode, root));
 	}
 
@@ -2312,7 +2316,8 @@ storeCFGsToMachine(SMScopes *scopes,
 		tid,
 		s,
 		entryStacks[s],
-		root->rip);
+		root->rip,
+		root->label);
 	return new StateMachine(
 		importRegisters(s),
 		roots);
