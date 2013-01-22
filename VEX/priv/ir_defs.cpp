@@ -2993,7 +2993,7 @@ struct IRExprAssociative_hash_key {
 			return true;
 		}
 		if (nr_arguments > o.nr_arguments) {
-			return true;
+			return false;
 		}
 		for (int i = 0; i < nr_arguments; i++) {
 			if (contents[i] < o.contents[i]) {
