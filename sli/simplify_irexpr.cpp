@@ -2568,7 +2568,7 @@ top:
 			    op == Iop_CmpEQ64) {
 				IRExprConst *lc = (IRExprConst *)l;
 				IRExprUnop *ru = (IRExprUnop *)r;
-				assert(lc->ty == Ity_I64);
+				assert(lc->type() == Ity_I64);
 				/* Only consider the cases b =
 				 * 1U and b = 32U */
 				if (ru->op == Iop_1Uto64) {
