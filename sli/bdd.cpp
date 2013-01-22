@@ -771,31 +771,40 @@ quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 
 
 bbdd *
-bbdd::_var(scope *scope, IRExpr *a)
+bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo)
 {
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, bbdd *>(a, NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert)
+		return it->second;
 	if (a->tag == Iex_Mux0X)
-		return ifelse(
+		it->second = ifelse(
 			scope,
-			_var(scope, ((IRExprMux0X *)a)->cond),
-			_var(scope, ((IRExprMux0X *)a)->exprX),
-			_var(scope, ((IRExprMux0X *)a)->expr0));
+			_var(scope, ((IRExprMux0X *)a)->cond, memo),
+			_var(scope, ((IRExprMux0X *)a)->exprX, memo),
+			_var(scope, ((IRExprMux0X *)a)->expr0, memo));
 	else
-		return scope->makeInternal(a,
-					   scope->cnst(true),
-					   scope->cnst(false));
+		it->second = scope->makeInternal(
+			a,
+			scope->cnst(true),
+			scope->cnst(false));
+	return it->second;
 }
 bbdd *
 bbdd::var(scope *scope, IRExpr *a)
 {
 	std::map<IRExpr *, IRExpr *> qsMemo;
 	std::map<IRExpr *, IRExpr *> muxMemo;
+	std::map<IRExpr *, bbdd *> vMemo;
 	return _var(
 		scope,
 		quickSimplify(
 			muxify(
 				quickSimplify(a, qsMemo),
 				muxMemo),
-			qsMemo));
+			qsMemo),
+		vMemo);
 }
 
 class binary_zip_internal {
@@ -1084,25 +1093,32 @@ exprbdd::sanity_check(bdd_ordering *ordering) const
 }
 
 exprbdd *
-exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
+exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what, std::map<IRExpr *, exprbdd *> &memo)
 {
 	if (TIMEOUT)
 		return NULL;
 
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, exprbdd *>(what, NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert)
+		return it->second;
+
 	if (what->tag == Iex_Mux0X)
-		return ifelse(
+		it->second = ifelse(
 			scope,
 			bbdd::var(bscope, ((IRExprMux0X *)what)->cond),
-			_var(scope, bscope, ((IRExprMux0X *)what)->exprX),
-			_var(scope, bscope, ((IRExprMux0X *)what)->expr0));
+			_var(scope, bscope, ((IRExprMux0X *)what)->exprX, memo),
+			_var(scope, bscope, ((IRExprMux0X *)what)->expr0, memo));
 	else if (what->type() == Ity_I1)
-		return ifelse(
+		it->second = ifelse(
 			scope,
 			bbdd::var(bscope, what),
 			scope->cnst(IRExpr_Const_U1(true)),
 			scope->cnst(IRExpr_Const_U1(false)));
 	else
-		return scope->cnst(what);
+		it->second = scope->cnst(what);
+	return it->second;
 }
 
 exprbdd *
@@ -1110,7 +1126,8 @@ exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
 {
 	std::map<IRExpr *, IRExpr *> qsMemo;
 	std::map<IRExpr *, IRExpr *> muxMemo;
-	return _var(scope, bscope, quickSimplify(muxify(quickSimplify(what, qsMemo), muxMemo), qsMemo));
+	std::map<IRExpr *, exprbdd *> vMemo;
+	return _var(scope, bscope, quickSimplify(muxify(quickSimplify(what, qsMemo), muxMemo), qsMemo), vMemo);
 }
 
 IRExpr *

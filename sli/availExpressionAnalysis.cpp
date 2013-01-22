@@ -1058,6 +1058,8 @@ static bbdd *
 ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 		      sane_map<std::pair<IRExpr *, substTableT>, bbdd *> &memo)
 {
+	if (TIMEOUT)
+		return NULL;
 	auto it_did_insert = memo.insert(std::pair<IRExpr *, substTableT>(e, t),
 					 NULL);
 	auto it = it_did_insert.first;

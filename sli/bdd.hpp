@@ -479,7 +479,7 @@ class bbdd : public const_bdd<bool, bbdd> {
 	static IRExpr *mkConst(bool b) {
 		return IRExpr_Const_U1(b);
 	}
-	static bbdd *_var(scope *, IRExpr *a);
+	static bbdd *_var(scope *, IRExpr *a, std::map<IRExpr *, bbdd *> &memo);
 	static bbdd *invert(scope *, bbdd *a, std::map<bbdd *, bbdd *> &memo);
 public:
 	static bbdd *Or(scope *, bbdd *a, bbdd *b);
@@ -619,7 +619,7 @@ private:
 	exprbdd(leafT b)
 		: parentT(b)
 	{}
-	static exprbdd *_var(scope *scope, bbdd::scope *, IRExpr *);
+	static exprbdd *_var(scope *scope, bbdd::scope *, IRExpr *, std::map<IRExpr *, exprbdd *> &memo);
 	static IRExpr *to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo);
 	static bbdd *to_bbdd(bbdd::scope *scope, exprbdd *, std::map<exprbdd *, bbdd *> &);
 
