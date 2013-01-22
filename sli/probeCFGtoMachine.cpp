@@ -1290,9 +1290,15 @@ getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *del
 }
 
 static StateMachineState *
-addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachineState *final,
-		    const std::vector<FrameId> &entryStack, const VexRip &vr,
-		    const CfgLabel &entryLabel)
+addEntrySideEffects(SMScopes *scopes,
+		    Oracle *oracle,
+		    unsigned tid,
+		    StateMachineState *final,
+		    const std::vector<FrameId> &entryStack,
+		    const VexRip &vr,
+		    const CfgLabel &entryLabel,
+		    std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports,
+		    int entryIdx)
 {
 	StateMachineState *cursor = final;
 	long delta;
@@ -1430,13 +1436,18 @@ addEntrySideEffects(SMScopes *scopes, Oracle *oracle, unsigned tid, StateMachine
 			}
 			v |= framesInRegisters;
 		}
+		threadAndRegister tr(threadAndRegister::reg(tid, i * 8, entryIdx));
+		neededImports[std::pair<int, PointerAliasingSet>(i, v)].insert(entryIdx);
 		cursor = new StateMachineSideEffecting(
 			vr,
-			new StateMachineSideEffectImportRegister(
+			new StateMachineSideEffectCopy(
 				threadAndRegister::reg(tid, i * 8, 0),
-				tid,
-				i * 8,
-				v),
+				exprbdd::var(
+					&scopes->exprs,
+					&scopes->bools,
+					IRExpr_Get(
+						threadAndRegister::reg(tid, i * 8, entryIdx),
+						Ity_I64))),
 			cursor);
 	}
 	return cursor;
@@ -1895,8 +1906,42 @@ findUsedRegs(smrbdd *expr, std::set<threadAndRegister> &tr)
 }
 
 static StateMachineState *
-importRegisters(StateMachineState *root)
+importRegisters(StateMachineState *root,
+		SMScopes *scopes,
+		std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports,
+		int tid)
 {
+	for (auto it = neededImports.begin(); it != neededImports.end(); it++) {
+		int vex_offset = it->first.first * 8;
+		const PointerAliasingSet &pas(it->first.second);
+		const std::set<int> &neededGenerations(it->second);
+		assert(!neededGenerations.empty());
+		auto it2 = neededGenerations.begin();
+		threadAndRegister canonReg(threadAndRegister::reg(tid, vex_offset, *it2));
+		exprbdd *canonExpr = exprbdd::var(
+			&scopes->exprs,
+			&scopes->bools,
+			IRExpr_Get(canonReg, Ity_I64));
+		it2++;
+		while (it2 != neededGenerations.end()) {
+			root = new StateMachineSideEffecting(
+				root->dbg_origin,
+				new StateMachineSideEffectCopy(
+					threadAndRegister::reg(tid, vex_offset, *it2),
+					canonExpr),
+				root);
+			it2++;
+		}
+		root = new StateMachineSideEffecting(
+			root->dbg_origin,
+			new StateMachineSideEffectImportRegister(
+				canonReg,
+				tid,
+				vex_offset,
+				pas),
+			root);
+	}
+
 	std::map<StateMachineState *, int> nrMissingPredecessors;
 	std::set<StateMachineState *> visited;
 	std::vector<StateMachineState *> q;
@@ -2253,11 +2298,14 @@ probeCFGsToMachine(SMScopes *scopes,
 		assignFrameIds(roots_this_sm1, tid, entryStacks);
 	}
 	std::vector<std::pair<CFGNode *, StateMachineState *> > roots_this_sm2;
+	std::map<std::pair<int, PointerAliasingSet>, std::set<int> > neededImports;
+	int entryIdx = 1;
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		CFGNode *cfgnode = *it;
 		StateMachineState *root = results[*it];
 		root = addEntrySideEffects(scopes, oracle, tid, root, entryStacks[root],
-					   cfgnode->rip, cfgnode->label);
+					   cfgnode->rip, cfgnode->label,
+					   neededImports, entryIdx++);
 		roots_this_sm2.push_back(std::pair<CFGNode *, StateMachineState *>(cfgnode, root));
 	}
 
@@ -2266,7 +2314,7 @@ probeCFGsToMachine(SMScopes *scopes,
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
 	StateMachineState *root = entryState(scopes, VexRip(), roots_this_sm2, tid, false);
-	root = importRegisters(root);
+	root = importRegisters(root, scopes, neededImports, tid);
 	if (TIMEOUT)
 		return NULL;
 	setMais(scopes, root, tid, mai);
@@ -2310,6 +2358,7 @@ storeCFGsToMachine(SMScopes *scopes,
 	if (TIMEOUT)
 		return NULL;
 	setMais(scopes, s, tid, mai);
+	std::map<std::pair<int, PointerAliasingSet>, std::set<int> > neededImports;
 	s = addEntrySideEffects(
 		scopes,
 		oracle,
@@ -2317,9 +2366,11 @@ storeCFGsToMachine(SMScopes *scopes,
 		s,
 		entryStacks[s],
 		root->rip,
-		root->label);
+		root->label,
+		neededImports,
+		0);
 	return new StateMachine(
-		importRegisters(s),
+		importRegisters(s, scopes, neededImports, tid),
 		roots);
 }
 
