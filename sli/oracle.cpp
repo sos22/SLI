@@ -1680,6 +1680,9 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b)
 	static sqlite3_stmt *stmt;
 	int rc;
 
+	if (CONFIG_NO_STATIC_ALIASING)
+		return ThreadRegisterAliasingConfiguration::unknown;
+
 	if (!stmt)
 		stmt = prepare_statement(
 			"SELECT alias0, alias1, alias2, alias3, alias4, alias5, alias6, alias7, alias8, alias9, alias10, alias11, alias12, alias13, alias14, alias15, stackEscape FROM instructionAttributes WHERE rip = ?");
