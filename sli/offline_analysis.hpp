@@ -272,4 +272,6 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 MemoryAccessIdentifier mkPendingMai(const CFGNode *node);
 StateMachineState *getProximalCause(SMScopes *scopes, MachineState *ms, Oracle *oracle, const CFGNode *where, const VexRip &rip, int tid);
 
+StateMachine *mapUnreached(smrbdd::scope *scope, StateMachine *inp, StateMachineRes res);
+
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

@@ -500,6 +500,16 @@ singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, State
 	return true;
 }
 
+StateMachine *
+mapUnreached(smrbdd::scope *scope, StateMachine *inp, StateMachineRes res)
+{
+	std::vector<StateMachineTerminal *> terminals;
+	enumStates(inp, &terminals);
+	for (auto it = terminals.begin(); it != terminals.end(); it++)
+		(*it)->set_res(smrbdd::replaceTerminal(scope, smr_unreached, res, (*it)->res));
+	return inp;
+}
+
 static bbdd *
 atomicSurvivalConstraint(SMScopes *scopes,
 			 VexPtr<MaiMap, &ir_heap> &mai,
@@ -511,6 +521,7 @@ atomicSurvivalConstraint(SMScopes *scopes,
 {
 	VexPtr<StateMachine, &ir_heap> atomicMachine;
 	atomicMachine = duplicateStateMachine(machine);
+	atomicMachine = mapUnreached(&scopes->smrs, machine, smr_crash);
 	atomicMachine = optimiseStateMachine(scopes, mai, atomicMachine, opt, oracle, true, token);
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;

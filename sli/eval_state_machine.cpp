@@ -1279,6 +1279,7 @@ buildCrossProductMachine(SMScopes *scopes,
 			 MaiMap *&maiOut,
 			 int *next_fake_free_variable,
 			 const IRExprOptimisations &opt,
+			 StateMachineRes unreachedIs,
 			 std::map<threadAndRegister, threadAndRegister> &ssaCorrespondence)
 {
 	maiOut = maiIn.dupe();
@@ -1399,7 +1400,7 @@ buildCrossProductMachine(SMScopes *scopes,
 					crossState.p->dbg_origin,
 					crossState.store_issued_store ?
 						((StateMachineTerminal *)crossState.p)->res :
-						scopes->smrs.cnst(smr_unreached));
+						scopes->smrs.cnst(unreachedIs));
 			} else if (crossState.s->type == StateMachineState::Terminal) {
 				/* If the store machine terminates at
 				   <survive> or <unreached> then we
@@ -1415,7 +1416,7 @@ buildCrossProductMachine(SMScopes *scopes,
 				   well. */
 				newState = new StateMachineTerminal(
 					crossState.s->dbg_origin,
-					scopes->smrs.cnst(smr_unreached));
+					scopes->smrs.cnst(unreachedIs));
 				if (crossState.probe_issued_access) {
 					std::map<StateMachineRes, bbdd *> selectors(
 						smrbdd::to_selectors(
@@ -1642,6 +1643,8 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 	strippedProbe = stripUninterpretableAnnotations(probeMachine);
 	strippedStore = stripUninterpretableAnnotations(storeMachine);
 #endif
+	strippedProbe = mapUnreached(&scopes->smrs, strippedProbe, smr_survive);
+	strippedStore = mapUnreached(&scopes->smrs, strippedStore, smr_survive);
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
 			scopes,
@@ -1652,6 +1655,7 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			decode.get(),
 			&fake_cntr,
 			opt,
+			smr_survive,
 			ssaCorrespondence));
 	if (!crossProductMachine)
 		return NULL;
@@ -1704,7 +1708,8 @@ struct concat_machines_state {
 	{}
 };
 static StateMachine *
-concatenateStateMachinesCrashing(SMScopes *scopes, const StateMachine *machine, const StateMachine *to)
+concatenateStateMachinesCrashing(SMScopes *scopes, const StateMachine *machine, const StateMachine *to,
+				 StateMachineRes unreachedIs)
 {
 	typedef std::pair<StateMachineState **, concat_machines_state> relocT;
 	std::map<concat_machines_state, StateMachineState *> newStates;
@@ -1730,7 +1735,7 @@ concatenateStateMachinesCrashing(SMScopes *scopes, const StateMachine *machine, 
 					StateMachineState *unreached =
 						new StateMachineTerminal(
 							inp_smt->dbg_origin,
-							scopes->smrs.cnst(smr_unreached));
+							scopes->smrs.cnst(unreachedIs));
 					if (sel.count(smr_crash)) {
 						StateMachineBifurcate *smb =
 							new StateMachineBifurcate(
@@ -1828,8 +1833,10 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 	combinedMachine = concatenateStateMachinesCrashing(
 		scopes,
 		writeMachine,
-		readMachine);
+		readMachine,
+		smr_crash);
 	combinedMachine->assertAcyclic();
+	combinedMachine = mapUnreached(&scopes->smrs, combinedMachine, smr_crash);
 	combinedMachine = optimiseStateMachine(scopes,
 					       mai,
 					       combinedMachine,
