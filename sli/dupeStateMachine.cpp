@@ -45,93 +45,6 @@ public:
 	}
 };
 
-static StateMachineSideEffectLoad *
-rawDupeS(const StateMachineSideEffectLoad *l)
-{
-	return new StateMachineSideEffectLoad(l, l->addr);
-}
-
-static StateMachineSideEffectStore *
-rawDupeS(const StateMachineSideEffectStore *l)
-{
-	return new StateMachineSideEffectStore(l, l->addr, l->data);
-}
-
-static StateMachineSideEffectUnreached *
-rawDupeS(const StateMachineSideEffectUnreached *)
-{
-	return StateMachineSideEffectUnreached::get();
-}
-
-static StateMachineSideEffectStartAtomic *
-rawDupeS(const StateMachineSideEffectStartAtomic *)
-{
-	return StateMachineSideEffectStartAtomic::get();
-}
-
-static StateMachineSideEffectEndAtomic *
-rawDupeS(const StateMachineSideEffectEndAtomic *)
-{
-	return StateMachineSideEffectEndAtomic::get();
-}
-
-static StateMachineSideEffectAssertFalse *
-rawDupeS(const StateMachineSideEffectAssertFalse *l)
-{
-	return new StateMachineSideEffectAssertFalse(l->value, l->reflectsActualProgram);
-}
-
-static StateMachineSideEffectCopy *
-rawDupeS(const StateMachineSideEffectCopy *l)
-{
-	return new StateMachineSideEffectCopy(l->target, l->value);
-}
-
-static StateMachineSideEffectPhi *
-rawDupeS(const StateMachineSideEffectPhi *l)
-{
-	return new StateMachineSideEffectPhi(l->reg, l->ty, l->generations);
-}
-
-static StateMachineSideEffectStartFunction *
-rawDupeS(const StateMachineSideEffectStartFunction *l)
-{
-	return new StateMachineSideEffectStartFunction(l->rsp, l->frame);
-}
-
-static StateMachineSideEffectEndFunction *
-rawDupeS(const StateMachineSideEffectEndFunction *l)
-{
-	return new StateMachineSideEffectEndFunction(l->rsp, l->frame);
-}
-
-static StateMachineSideEffectImportRegister *
-rawDupeS(const StateMachineSideEffectImportRegister *l)
-{
-	return new StateMachineSideEffectImportRegister(*l);
-}
-
-static StateMachineSideEffectStackLayout *
-rawDupeS(const StateMachineSideEffectStackLayout *l)
-{
-	return new StateMachineSideEffectStackLayout(l->functions);
-}
-
-static StateMachineSideEffect *
-rawDupe(const StateMachineSideEffect *smse)
-{
-	switch (smse->type) {
-#define do_case(n)							\
-		case StateMachineSideEffect::n:				\
-			return rawDupeS((const StateMachineSideEffect ## n *)smse);
-		all_side_effect_types(do_case);
-#undef do_case
-	}
-	abort();
-}
-
-static StateMachineState *rawDupe(duplication_context &ctxt, const StateMachineState *inp);
-
 static StateMachineState *
 rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 {
@@ -146,7 +59,7 @@ rawDupe(duplication_context &ctxt, const StateMachineState *inp)
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)inp;
 		StateMachineSideEffecting *res = new StateMachineSideEffecting(sme->dbg_origin,
-									       sme->sideEffect ? rawDupe(sme->sideEffect) : NULL,
+									       sme->sideEffect,
 									       NULL);
 		ctxt(&res->target, sme->target, rawDupe);
 		return res;
