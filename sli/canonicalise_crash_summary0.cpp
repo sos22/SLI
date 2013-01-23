@@ -9,6 +9,12 @@
 
 #include "cfgnode_tmpl.cpp"
 
+#ifndef NDEBUG
+static bool debug_root_reduce = false;
+#else
+#define debug_root_reduce false
+#endif
+
 template <typename t>
 class _saneIterator {
 	t cursor;
@@ -319,9 +325,16 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		std::set<MemoryAccessIdentifier> mais;
 		cs->loadMachine->root->enumerateMentionedMemoryAccesses(mais);
 		cs->storeMachine->root->enumerateMentionedMemoryAccesses(mais);
-		for (auto it = mais.begin(); it != mais.end(); it++)
-			for (auto it2 = cs->mai->begin(*it); !it2.finished(); it2.advance())
+		for (auto it = mais.begin(); it != mais.end(); it++) {
+			for (auto it2 = cs->mai->begin(*it); !it2.finished(); it2.advance()) {
+				if (debug_root_reduce) {
+					printf("Root %s is needed because of %s\n",
+					       it2.node()->label.name(),
+					       it->name());
+				}
 				needed.insert(it2.node());
+			}
+		}
 	}
 
 	/* Find references of the second sense */
@@ -340,8 +353,13 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 			for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
 						       saneIterator(cs->storeMachine->cfg_roots));
 			     !it.finished();
-			     it++)
+			     it++) {
+				if (debug_root_reduce) {
+					printf("%s is needed because of register reference\n",
+					       it->second->label.name());
+				}
 				needed.insert(it->second);
+			}
 		}
 	}
 
@@ -432,6 +450,11 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 					break;
 				}
 			}
+		}
+		if (debug_root_reduce) {
+			printf("Root rewrite: %d:%s -> %d:%s\n",
+			       it->first, it->second->label.name(),
+			       it->first, n->label.name());
 		}
 		rootRewrites.insert(
 			std::pair<std::pair<unsigned, CfgLabel>,

@@ -10,19 +10,19 @@ public:
 	{}
 	IRExpr *transformIex(IRExprGet *e) {
 		out.insert(e);
-		return NULL;
+		return e;
 	}
 	IRExpr *transformIex(IRExprHappensBefore *e) {
 		out.insert(e);
-		return NULL;
+		return e;
 	}
 	IRExpr *transformIex(IRExprEntryPoint *e) {
 		out.insert(e);
-		return NULL;
+		return e;
 	}
 	IRExpr *transformIex(IRExprControlFlow *e) {
 		out.insert(e);
-		return NULL;
+		return e;
 	}
 };
 void
