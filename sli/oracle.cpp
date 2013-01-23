@@ -234,6 +234,8 @@ bool
 Oracle::hasConflictingRemoteStores(const DynAnalysisRip &dr)
 {
 	__set_profiling(hasConflictingRemoteStores);
+	if (CONFIG_NO_DYNAMIC_ALIASING)
+		return true;
 	std::vector<TypesDb::types_entry> loads;
 	std::vector<TypesDb::types_entry> stores;
 	if (!type_db->lookupEntry(dr, loads, stores))
@@ -338,6 +340,9 @@ Oracle::alias_query(const DynAnalysisRip &dr1,
 Oracle::mam_result
 Oracle::memoryAccessesMightAliasLS(const DynAnalysisRip &smsel_dr, const DynAnalysisRip &smses_dr)
 {
+	if (CONFIG_NO_DYNAMIC_ALIASING)
+		return mam_might_alias;
+
 	__set_profiling(might_alias_load_store);
 	std::vector<TypesDb::types_entry> load_loads;
 	std::vector<TypesDb::types_entry> load_stores;
@@ -463,6 +468,8 @@ Oracle::memoryAccessesMightAliasCrossThread(const DynAnalysisRip &smsel_dr, cons
 Oracle::mam_result
 Oracle::memoryAccessesMightAliasLL(const DynAnalysisRip &dr1, const DynAnalysisRip &dr2)
 {
+	if (CONFIG_NO_DYNAMIC_ALIASING)
+		return mam_might_alias;
 	__set_profiling(might_alias_load_load);
 	std::vector<TypesDb::types_entry> l1_loads;
 	std::vector<TypesDb::types_entry> l1_stores;
@@ -514,6 +521,8 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 Oracle::mam_result
 Oracle::memoryAccessesMightAliasSS(const DynAnalysisRip &dr1, const DynAnalysisRip &dr2)
 {
+	if (CONFIG_NO_DYNAMIC_ALIASING)
+		return mam_might_alias;
 	__set_profiling(might_alias_load_load);
 	std::vector<TypesDb::types_entry> s1_loads;
 	std::vector<TypesDb::types_entry> s1_stores;
