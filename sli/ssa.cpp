@@ -180,13 +180,16 @@ replaceRegs(SMScopes *scopes,
 		return NULL;
 	switch (what->type) {
 	case StateMachineSideEffect::Unreached:
-	case StateMachineSideEffect::StackLayout:
 	case StateMachineSideEffect::Store:
 	case StateMachineSideEffect::AssertFalse:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
+#if !CONFIG_NO_STATIC_ALIASING
+	case StateMachineSideEffect::StackLayout:
 	case StateMachineSideEffect::StartFunction:
-	case StateMachineSideEffect::EndFunction: {
+	case StateMachineSideEffect::EndFunction:
+#endif
+	{
 		replaceInputRegsT trans(regSets, newInputs, usedGenerations);
 		bool b = false;
 		StateMachineSideEffect *n = trans.transformSideEffect(scopes, (StateMachineSideEffect *)what, &b);

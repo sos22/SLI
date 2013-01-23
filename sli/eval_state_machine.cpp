@@ -794,9 +794,6 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		assert(atomic);
 		atomic = false;
 		break;
-	case StateMachineSideEffect::StartFunction:
-	case StateMachineSideEffect::EndFunction:
-
 	case StateMachineSideEffect::ImportRegister: {
 		StateMachineSideEffectImportRegister *p =
 			(StateMachineSideEffectImportRegister *)smse;
@@ -809,6 +806,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					   IRExpr_Get(tr, Ity_I64)),
 				   &pathConstraint,
 				   opt);
+#if !CONFIG_NO_STATIC_ALIASING
 		/* The only use we make of a PointerAliasing side
 		   effect is to say that things which aliasing says
 		   are definitely valid pointers really are definitely
@@ -824,12 +822,17 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			    opt)) {
 			return esme_escape;
 		}
+#endif
 		break;
 	}
 
 		/* Todo: could maybe use this to improve aliasing. */
+#if !CONFIG_NO_STATIC_ALIASING
+	case StateMachineSideEffect::StartFunction:
+	case StateMachineSideEffect::EndFunction:
 	case StateMachineSideEffect::StackLayout:
 		break;
+#endif
 	}
 	return esme_normal;
 }
@@ -1231,10 +1234,12 @@ definitelyDoesntRace(const MaiMap &decode,
 		case StateMachineSideEffect::Copy:
 		case StateMachineSideEffect::Phi:
 		case StateMachineSideEffect::Unreached:
+#if !CONFIG_NO_STATIC_ALIASING
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
-		case StateMachineSideEffect::ImportRegister:
 		case StateMachineSideEffect::StackLayout:
+#endif
+		case StateMachineSideEffect::ImportRegister:
 			return true;
 		}
 	}
@@ -1531,6 +1536,7 @@ buildCrossProductMachine(SMScopes *scopes,
         return convertToSSA(scopes, new StateMachine(crossMachineRoot, cfg_roots), ssaCorrespondence);
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 static StateMachine *
 stripUninterpretableAnnotations(StateMachine *inp)
 {
@@ -1589,6 +1595,7 @@ stripUninterpretableAnnotations(StateMachine *inp)
 	}
 	return new StateMachine(inp, newRoot);
 }
+#endif
 
 static bbdd *
 deSsa(bbdd::scope *scope, bbdd *what, const std::map<threadAndRegister, threadAndRegister> &correspondence)
@@ -1629,12 +1636,18 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 		    .enablenoExtend();
 	VexPtr<MaiMap, &ir_heap> decode;
 	std::map<threadAndRegister, threadAndRegister> ssaCorrespondence;
+	StateMachine *strippedProbe = probeMachine;
+	StateMachine *strippedStore = storeMachine;
+#if !CONFIG_NO_STATIC_ALIASING
+	strippedProbe = stripUninterpretableAnnotations(probeMachine);
+	strippedStore = stripUninterpretableAnnotations(storeMachine);
+#endif
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
 			scopes,
 			*mai,
-			stripUninterpretableAnnotations(probeMachine),
-			stripUninterpretableAnnotations(storeMachine),
+			strippedProbe,
+			strippedStore,
 			oracle,
 			decode.get(),
 			&fake_cntr,

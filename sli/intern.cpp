@@ -111,6 +111,7 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 			t.name.insert(sf);				\
 			return s;					\
 		} while (0)
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StartFunction: {
 		StateMachineSideEffectStartFunction *sf = (StateMachineSideEffectStartFunction *)s;
 		do_search(StartFunction);
@@ -119,13 +120,14 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 		StateMachineSideEffectEndFunction *sf = (StateMachineSideEffectEndFunction *)s;
 		do_search(EndFunction);
 	}
-	case StateMachineSideEffect::ImportRegister: {
-		auto sf = (StateMachineSideEffectImportRegister *)s;
-		do_search(ImportRegister);
-	}
 	case StateMachineSideEffect::StackLayout: {
 		auto sf = (StateMachineSideEffectStackLayout *)s;
 		do_search(StackLayout);
+	}
+#endif
+	case StateMachineSideEffect::ImportRegister: {
+		auto sf = (StateMachineSideEffectImportRegister *)s;
+		do_search(ImportRegister);
 	}
 #undef do_search
 
@@ -282,9 +284,11 @@ internStateMachineTable::_runGc(HeapVisitor &hv)
 	do_set(StateMachineSideEffectAssertFalse *, asserts);
 #define ds(n)					\
 	do_set(StateMachineSideEffect ## n *, n)
+#if !CONFIG_NO_STATIC_ALIASING
 	ds(StartFunction);
 	ds(EndFunction);
 	ds(StackLayout);
+#endif
 	ds(ImportRegister);
 #undef ds
 	do_set(StateMachineBifurcate *, states_bifurcate);

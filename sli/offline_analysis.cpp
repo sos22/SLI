@@ -370,6 +370,7 @@ _optimiseStateMachine(SMScopes *scopes,
 		}
 #endif
 
+#if !CONFIG_NO_STATIC_ALIASING
 		if (opt.noExtend() && is_ssa && !done_something && !zapped_realias_info) {
 			p = false;
 			sm = zapRealiasInfo(scopes, sm, &p);
@@ -380,6 +381,7 @@ _optimiseStateMachine(SMScopes *scopes,
 			done_something |= p;
 			zapped_realias_info = true;
 		}
+#endif
 
 		if (progress)
 			*progress |= done_something;
@@ -545,9 +547,11 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 			case StateMachineSideEffect::ImportRegister:
 				return false;
 			case StateMachineSideEffect::AssertFalse:
+#if !CONFIG_NO_STATIC_ALIASING
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
 			case StateMachineSideEffect::StackLayout:
+#endif
 				return true;
 			}
 			abort();

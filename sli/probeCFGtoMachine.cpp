@@ -674,29 +674,32 @@ cfgNodeToState(SMScopes *scopes,
 	std::vector<CFGNode *> targets;
 	if (i == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Call) {
-			StateMachineSideEffecting *smp =
-				new StateMachineSideEffecting(
-					target->rip,
-					new StateMachineSideEffectStartFunction(
-						exprbdd::var(
-							&scopes->exprs,
-							&scopes->bools,
-							IRExpr_Get(
-								threadAndRegister::reg(
-									tid,
-									OFFSET_amd64_RSP,
-									0),
-								Ity_I64)),
-						FrameId()),
-					NULL);
+			StateMachineSideEffecting *smp;
+#if !CONFIG_NO_STATIC_ALIASING
+			smp = new StateMachineSideEffecting(
+				target->rip,
+				new StateMachineSideEffectStartFunction(
+					exprbdd::var(
+						&scopes->exprs,
+						&scopes->bools,
+						IRExpr_Get(
+							threadAndRegister::reg(
+								tid,
+								OFFSET_amd64_RSP,
+								0),
+							Ity_I64)),
+					FrameId()),
+				NULL);
 			*cursor = smp;
 			cursor = &smp->target;
+#endif
 
 			if (target->getDefault() &&
 			    target->getDefault()->instr &&
 			    target->getDefault()->instr->rip == extract_call_follower(irsb)) {
 				/* Skip this call */
 				targets.push_back(target->getDefault()->instr);
+#if !CONFIG_NO_STATIC_ALIASING
 				smp = new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectEndFunction(
@@ -716,6 +719,7 @@ cfgNodeToState(SMScopes *scopes,
 					NULL);
 				*cursor = smp;
 				cursor = &smp->target;
+#endif
 				smp = new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectCopy(
@@ -740,6 +744,7 @@ cfgNodeToState(SMScopes *scopes,
 				cursor = &smp->target;
 			}
 		} else if (irsb->jumpkind == Ijk_Ret) {
+#if !CONFIG_NO_STATIC_ALIASING
 			StateMachineSideEffecting *smp =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -760,6 +765,7 @@ cfgNodeToState(SMScopes *scopes,
 					NULL);
 			*cursor = smp;
 			cursor = &smp->target;
+#endif
 		}
 
 		if (irsb->next_is_const) {
@@ -1195,6 +1201,7 @@ getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *del
 				break;
 			}
 
+#if !CONFIG_NO_STATIC_ALIASING
 			case StateMachineSideEffect::EndFunction: {
 				StateMachineSideEffectEndFunction *see = (StateMachineSideEffectEndFunction *)se;
 				RspCanonicalisationState::eval_res rspDelta = entryState.eval(see->rsp);
@@ -1221,6 +1228,7 @@ getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *del
 				}
 				break;
 			}
+#endif
 
 			case StateMachineSideEffect::ImportRegister: {
 				StateMachineSideEffectImportRegister *r = (StateMachineSideEffectImportRegister *)se;
@@ -1232,9 +1240,11 @@ getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *del
 			case StateMachineSideEffect::Unreached:
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
-			case StateMachineSideEffect::StackLayout:
 			case StateMachineSideEffect::AssertFalse:
+#if !CONFIG_NO_STATIC_ALIASING
+			case StateMachineSideEffect::StackLayout:
 			case StateMachineSideEffect::StartFunction:
+#endif
 				break;
 
 				/* Shouldn't have Phi states yet. */
@@ -1294,11 +1304,14 @@ addEntrySideEffects(SMScopes *scopes,
 		    Oracle *oracle,
 		    unsigned tid,
 		    StateMachineState *final,
-		    const std::vector<FrameId> &entryStack,
 		    const VexRip &vr,
-		    const CfgLabel &entryLabel,
-		    std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports,
-		    int entryIdx)
+		    const CfgLabel &entryLabel
+#if !CONFIG_NO_STATIC_ALIASING
+		    , const std::vector<FrameId> &entryStack,
+		    , std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports,
+		    int entryIdx
+#endif
+	)
 {
 	StateMachineState *cursor = final;
 	long delta;
@@ -1341,6 +1354,7 @@ addEntrySideEffects(SMScopes *scopes,
 		warning("Failed to get RSP canonicalisation delta\n");
 	}
 
+#if !CONFIG_NO_STATIC_ALIASING
 	std::set<FrameId> pointAtSelf;
 	std::set<FrameId> pointedAtByOthers;
 
@@ -1450,9 +1464,12 @@ addEntrySideEffects(SMScopes *scopes,
 						Ity_I64))),
 			cursor);
 	}
+#endif
+
 	return cursor;
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 typedef std::vector<FrameId> callStackT;
 
 class StackEqConstraint : public std::pair<callStackT *, callStackT *> {
@@ -1876,6 +1893,7 @@ assignFrameIds(const std::set<StateMachineState *> &roots,
 		printStateMachine(roots2, stdout, stateLabels);
 	}
 }
+#endif
 
 static visit_result
 findUsedRegs__Get(std::set<threadAndRegister> *s, const IRExprGet *ieg)
@@ -1906,11 +1924,15 @@ findUsedRegs(smrbdd *expr, std::set<threadAndRegister> &tr)
 }
 
 static StateMachineState *
-importRegisters(StateMachineState *root,
-		SMScopes *scopes,
+importRegisters(StateMachineState *root
+#if !CONFIG_NO_STATIC_ALIASING
+		, SMScopes *scopes,
 		std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports,
-		int tid)
+		int tid
+#endif
+	)
 {
+#if !CONFIG_NO_STATIC_ALIASING
 	for (auto it = neededImports.begin(); it != neededImports.end(); it++) {
 		int vex_offset = it->first.first * 8;
 		const PointerAliasingSet &pas(it->first.second);
@@ -1941,6 +1963,7 @@ importRegisters(StateMachineState *root,
 				pas),
 			root);
 	}
+#endif
 
 	std::map<StateMachineState *, int> nrMissingPredecessors;
 	std::set<StateMachineState *> visited;
@@ -2010,15 +2033,17 @@ importRegisters(StateMachineState *root,
 						findUsedRegs(it->val, usedRegs);
 					break;
 				}
+#if !CONFIG_NO_STATIC_ALIASING
 				case StateMachineSideEffect::StartFunction:
 					findUsedRegs( ((StateMachineSideEffectStartFunction *)se)->rsp, usedRegs );
 					break;
 				case StateMachineSideEffect::EndFunction:
 					findUsedRegs( ((StateMachineSideEffectEndFunction *)se)->rsp, usedRegs );
 					break;
-				case StateMachineSideEffect::ImportRegister:
-					break;
 				case StateMachineSideEffect::StackLayout:
+					break;
+#endif
+				case StateMachineSideEffect::ImportRegister:
 					break;
 				case StateMachineSideEffect::Unreached:
 					break;
@@ -2069,8 +2094,11 @@ importRegisters(StateMachineState *root,
 			new StateMachineSideEffectImportRegister(
 				*it,
 				it->tid(),
-				it->asReg(),
-				PointerAliasingSet::anything),
+				it->asReg()
+#if !CONFIG_NO_STATIC_ALIASING
+				, PointerAliasingSet::anything
+#endif
+				),
 			root);
 	}
 
@@ -2154,10 +2182,13 @@ assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
 	case StateMachineSideEffect::ImportRegister:
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StackLayout:
+#endif
 		return se;
 	case StateMachineSideEffect::Phi:
 		abort();
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StartFunction: {
 		auto l = (StateMachineSideEffectStartFunction *)se;
 		return new StateMachineSideEffectStartFunction(
@@ -2170,6 +2201,7 @@ assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 			l,
 			assignMais(scopes, l->rsp, tid, mm));
 	}
+#endif
 	}
 	abort();
 }
@@ -2290,6 +2322,7 @@ probeCFGsToMachine(SMScopes *scopes,
 	if (TIMEOUT)
 		return NULL;
 
+#if !CONFIG_NO_STATIC_ALIASING
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	{
 		std::set<StateMachineState *> roots_this_sm1;
@@ -2297,15 +2330,20 @@ probeCFGsToMachine(SMScopes *scopes,
 			roots_this_sm1.insert(results[*it]);
 		assignFrameIds(roots_this_sm1, tid, entryStacks);
 	}
+#endif
 	std::vector<std::pair<CFGNode *, StateMachineState *> > roots_this_sm2;
+#if !CONFIG_NO_STATIC_ALIASING
 	std::map<std::pair<int, PointerAliasingSet>, std::set<int> > neededImports;
 	int entryIdx = 1;
+#endif
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		CFGNode *cfgnode = *it;
 		StateMachineState *root = results[*it];
-		root = addEntrySideEffects(scopes, oracle, tid, root, entryStacks[root],
-					   cfgnode->rip, cfgnode->label,
-					   neededImports, entryIdx++);
+		root = addEntrySideEffects(scopes, oracle, tid, root, cfgnode->rip, cfgnode->label
+#if !CONFIG_NO_STATIC_ALIASING
+					   , entryStacks[root], neededImports, entryIdx++
+#endif
+			);
 		roots_this_sm2.push_back(std::pair<CFGNode *, StateMachineState *>(cfgnode, root));
 	}
 
@@ -2314,7 +2352,11 @@ probeCFGsToMachine(SMScopes *scopes,
 		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
 
 	StateMachineState *root = entryState(scopes, VexRip(), roots_this_sm2, tid, false);
-	root = importRegisters(root, scopes, neededImports, tid);
+	root = importRegisters(root
+#if !CONFIG_NO_STATIC_ALIASING
+			       , scopes, neededImports, tid
+#endif
+		);
 	if (TIMEOUT)
 		return NULL;
 	setMais(scopes, root, tid, mai);
@@ -2353,24 +2395,35 @@ storeCFGsToMachine(SMScopes *scopes,
 		return NULL;
 	std::set<StateMachineState *> sm_roots;
 	sm_roots.insert(s);
+#if !CONFIG_NO_STATIC_ALIASING
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	assignFrameIds(sm_roots, tid, entryStacks);
 	if (TIMEOUT)
 		return NULL;
+#endif
 	setMais(scopes, s, tid, mai);
+#if !CONFIG_NO_STATIC_ALIASING
 	std::map<std::pair<int, PointerAliasingSet>, std::set<int> > neededImports;
+#endif
 	s = addEntrySideEffects(
 		scopes,
 		oracle,
 		tid,
 		s,
-		entryStacks[s],
 		root->rip,
-		root->label,
+		root->label
+#if !CONFIG_NO_STATIC_ALIASING
+		, entryStacks[s],
 		neededImports,
-		0);
+		0
+#endif
+		);
 	return new StateMachine(
-		importRegisters(s, scopes, neededImports, tid),
+		importRegisters(s
+#if !CONFIG_NO_STATIC_ALIASING
+				, scopes, neededImports, tid
+#endif
+			),
 		roots);
 }
 

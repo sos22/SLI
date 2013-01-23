@@ -31,6 +31,7 @@ struct SMScopes {
 	void prettyPrint(FILE *f) const;
 };
 
+#if !CONFIG_NO_STATIC_ALIASING
 class FrameId : public Named {
 	unsigned id;
 public:
@@ -72,6 +73,7 @@ public:
 		return id < o.id || (id == o.id && tid < o.tid);
 	}
 };
+#endif
 
 class MemoryTag {
 	int id;
@@ -114,6 +116,7 @@ public:
 	bool operator!=(const MemoryTag &o) const { return !(*this == o); }
 };
 
+#if !CONFIG_NO_STATIC_ALIASING
 /* Pointer aliasing stuff.  Note that ``stack'' in this
    context means the *current* stack frame: a pointer without
    the stack bit set could still point into a *calling*
@@ -281,6 +284,7 @@ public:
 		return true;
 	}
 };
+#endif
 
 class StateMachineState;
 
@@ -398,6 +402,18 @@ public:
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap> {
 	StateMachineSideEffect(); /* DNE */
 public:
+#if CONFIG_NO_STATIC_ALIASING
+#define all_side_effect_types(f)		\
+	f(Load)					\
+	f(Store)				\
+	f(Copy)					\
+	f(Unreached)				\
+	f(AssertFalse)				\
+	f(Phi)					\
+	f(StartAtomic)				\
+	f(EndAtomic)				\
+	f(ImportRegister)
+#else
 #define all_side_effect_types(f)		\
 	f(Load)					\
 	f(Store)				\
@@ -411,6 +427,7 @@ public:
 	f(EndFunction)				\
 	f(ImportRegister)			\
 	f(StackLayout)
+#endif
 	enum sideEffectType {
 #define mk_one(n) n,
 		all_side_effect_types(mk_one)
@@ -1040,6 +1057,7 @@ public:
 		return true;
 	}
 };
+#if !CONFIG_NO_STATIC_ALIASING
 class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
 public:
 	StateMachineSideEffectStartFunction(exprbdd *_rsp, FrameId _frame)
@@ -1132,26 +1150,37 @@ public:
 		return rsp == o.rsp && frame == o.frame;
 	}
 };
+#endif
 class StateMachineSideEffectImportRegister : public StateMachineSideEffect {
 public:
 	threadAndRegister const reg;
 	unsigned const tid;
 	unsigned const vex_offset;
+#if !CONFIG_NO_STATIC_ALIASING
 	PointerAliasingSet const set;
+#endif
 	StateMachineSideEffectImportRegister(
 		const threadAndRegister &_reg,
 		unsigned _tid,
-		unsigned _vex_offset,
-		const PointerAliasingSet &_set)
+		unsigned _vex_offset
+#if !CONFIG_NO_STATIC_ALIASING
+		, const PointerAliasingSet &_set
+#endif
+					     )
 		: StateMachineSideEffect(StateMachineSideEffect::ImportRegister),
-		  reg(_reg), tid(_tid), vex_offset(_vex_offset), set(_set)
+		  reg(_reg), tid(_tid), vex_offset(_vex_offset)
+#if !CONFIG_NO_STATIC_ALIASING
+		, set(_set)
+#endif
 	{}
 	StateMachineSideEffectImportRegister(
 		const StateMachineSideEffectImportRegister *base,
 		const threadAndRegister &_reg)
 		: StateMachineSideEffect(StateMachineSideEffect::ImportRegister),
-		  reg(_reg), tid(base->tid), vex_offset(base->vex_offset),
-		  set(base->set)
+		  reg(_reg), tid(base->tid), vex_offset(base->vex_offset)
+#if !CONFIG_NO_STATIC_ALIASING
+		, set(base->set)
+#endif
 	{}
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations&) { return this; }
@@ -1161,34 +1190,56 @@ public:
 		return true;
 	}
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "INITIALVALUE %s = %d:0x%x:%s",
-			reg.name(), tid, vex_offset, set.name());
+		fprintf(f, "INITIALVALUE %s = %d:0x%x"
+#if !CONFIG_NO_STATIC_ALIASING
+			":%s"
+#endif
+			,reg.name(), tid, vex_offset
+#if !CONFIG_NO_STATIC_ALIASING
+			, set.name()
+#endif
+			);
 	}
 	static bool parse(SMScopes *, StateMachineSideEffectImportRegister **out, const char *str, const char **suffix)
 	{
 		threadAndRegister reg(threadAndRegister::invalid());
 		unsigned tid;
 		unsigned long vex_offset;
+#if !CONFIG_NO_STATIC_ALIASING
 		PointerAliasingSet set(PointerAliasingSet::nothing);
-
+#endif
 		if (parseThisString("INITIALVALUE ", str, &str) &&
 		    parseThreadAndRegister(&reg, str, &str) &&
 		    parseThisString(" = ", str, &str) &&
 		    parseDecimalUInt(&tid, str, &str) &&
 		    parseThisChar(':', str, &str) &&
+#if !CONFIG_NO_STATIC_ALIASING
 		    parseHexUlong(&vex_offset, str, &str) &&
 		    parseThisChar(':', str, &str) &&
-		    set.parse(str, suffix)) {
-			*out = new StateMachineSideEffectImportRegister(reg, tid, vex_offset, set);
+		    set.parse(str, suffix)
+#else
+		    parseHexUlong(&vex_offset, str, suffix)
+#endif
+		    ) {
+			*out = new StateMachineSideEffectImportRegister(reg, tid, vex_offset
+#if !CONFIG_NO_STATIC_ALIASING
+									, set
+#endif
+									);
 			return true;
 		}
 		return false;
 	}
 	bool operator==(const StateMachineSideEffectImportRegister &o) const {
-		return reg == o.reg && tid == o.tid && vex_offset == o.vex_offset && set == o.set;
+		return reg == o.reg && tid == o.tid && vex_offset == o.vex_offset
+#if !CONFIG_NO_STATIC_ALIASING
+			&& set == o.set
+#endif
+			;
 	}
 
 };
+#if !CONFIG_NO_STATIC_ALIASING
 class StateMachineSideEffectStackLayout : public StateMachineSideEffect {
 public:
 	class entry : public Named {
@@ -1319,8 +1370,8 @@ public:
 	bool operator==(const StateMachineSideEffectStackLayout &o) const {
 		return functions == o.functions;
 	}
-
 };
+#endif
 
 void printStateMachine(const StateMachine *sm, FILE *f);
 void printStateMachine(const StateMachine *sm, FILE *f,

@@ -167,10 +167,12 @@ equalModuloVariables(const StateMachineSideEffect *smse1,
 			equalModuloVariables(smsea1->value, smsea2->value);
 	}
 
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
-	case StateMachineSideEffect::ImportRegister:
 	case StateMachineSideEffect::StackLayout:
+#endif
+	case StateMachineSideEffect::ImportRegister:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
 	case StateMachineSideEffect::Unreached:

@@ -426,10 +426,12 @@ updateAvailSetForSideEffect(SMScopes *scopes,
 		   doesn't actually make much difference in any of the
 		   places where we use atomic blocks. */
 		break;
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
-	case StateMachineSideEffect::ImportRegister:
 	case StateMachineSideEffect::StackLayout:
+#endif
+	case StateMachineSideEffect::ImportRegister:
 		break;
 	}
 
@@ -612,7 +614,9 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 	case StateMachineSideEffect::Unreached:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StackLayout:
+#endif
 	case StateMachineSideEffect::ImportRegister:
 		newEffect = smse;
 		break;
@@ -675,6 +679,7 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 		newEffect = new StateMachineSideEffectPhi(phi, inputs);
 		break;
 	}
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StartFunction: {
 		StateMachineSideEffectStartFunction *sf =
 			(StateMachineSideEffectStartFunction *)smse;
@@ -703,6 +708,7 @@ buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
 		}
 		break;
 	}
+#endif
 	}
 	if (debug_substitutions) {
 		printf("New side effect ");
@@ -1337,6 +1343,7 @@ ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectEndAtomic *inp)
 {
 	return inp;
 }
+#if !CONFIG_NO_STATIC_ALIASING
 static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStartFunction *inp)
 {
@@ -1354,12 +1361,13 @@ ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectEndFunction *inp)
 	return new StateMachineSideEffectEndFunction(inp, rsp);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *inp)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStackLayout *inp)
 {
 	return inp;
 }
+#endif
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStackLayout *inp)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *inp)
 {
 	return inp;
 }

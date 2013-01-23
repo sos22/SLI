@@ -145,6 +145,7 @@ _visit_side_effect(void *ctxt,
 			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, it->val);
 		return res;
 	}
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StartFunction: {
 		auto s = (const StateMachineSideEffectStartFunction *)sme;
 		if (visitor->StartFunction)
@@ -161,6 +162,7 @@ _visit_side_effect(void *ctxt,
 			_visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->rsp);
 		return res;
 	}
+#endif
 #define do_simple(name)							\
 		case StateMachineSideEffect::name:			\
 			if (visitor->name)				\
@@ -172,7 +174,9 @@ _visit_side_effect(void *ctxt,
 		do_simple(StartAtomic)
 		do_simple(EndAtomic)
 		do_simple(ImportRegister)
+#if !CONFIG_NO_STATIC_ALIASING
 		do_simple(StackLayout)
+#endif
 #undef do_simple
 	}
 	abort();
