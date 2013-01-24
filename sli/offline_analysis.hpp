@@ -142,15 +142,17 @@ protected:
 	}
 	virtual StateMachineSideEffectPhi *transformOneSideEffect(
 		SMScopes *, StateMachineSideEffectPhi *, bool *);
+#if !CONFIG_NO_STATIC_ALIASING
 	virtual StateMachineSideEffectStartFunction *transformOneSideEffect(
 		SMScopes *, StateMachineSideEffectStartFunction *, bool *);
 	virtual StateMachineSideEffectEndFunction *transformOneSideEffect(
 		SMScopes *, StateMachineSideEffectEndFunction *, bool *);
-	virtual StateMachineSideEffectImportRegister *transformOneSideEffect(
-		SMScopes *, StateMachineSideEffectImportRegister *, bool *)
-	{ return NULL; }
 	virtual StateMachineSideEffectStackLayout *transformOneSideEffect(
 		SMScopes *, StateMachineSideEffectStackLayout *, bool *)
+	{ return NULL; }
+#endif
+	virtual StateMachineSideEffectImportRegister *transformOneSideEffect(
+		SMScopes *, StateMachineSideEffectImportRegister *, bool *)
 	{ return NULL; }
 	virtual StateMachineTerminal *transformOneState(SMScopes *scopes,
 							StateMachineTerminal *smt,
@@ -243,7 +245,9 @@ StateMachine *functionAliasAnalysis(SMScopes *scopes,
 				    control_dependence_graph &cdg,
 				    predecessor_map &pred,
 				    bool *done_something);
+#if !CONFIG_NO_STATIC_ALIASING
 StateMachine *zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something);
+#endif
 StateMachine *phiElimination(SMScopes *scopes, StateMachine *sm,
 			     predecessor_map &pred,
 			     control_dependence_graph &cdg,
@@ -267,5 +271,8 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 
 MemoryAccessIdentifier mkPendingMai(const CFGNode *node);
 StateMachineState *getProximalCause(SMScopes *scopes, MachineState *ms, Oracle *oracle, const CFGNode *where, const VexRip &rip, int tid);
+
+StateMachine *mapUnreached(smrbdd::scope *scope, StateMachine *inp, StateMachineRes res);
+void optimiseAssuming(SMScopes *scopes, StateMachine *sm, bbdd *condition, bool *done_something);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */

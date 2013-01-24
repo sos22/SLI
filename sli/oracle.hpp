@@ -90,8 +90,9 @@ public:
 		char *mkName() const;
 	};
 
+#if !CONFIG_NO_STATIC_ALIASING
 	class ThreadRegisterAliasingConfiguration;
-
+#endif
 	class Function : public Named {
 		friend class Oracle;
 
@@ -127,9 +128,11 @@ public:
 			: rip(_rip)
 		{}
 
+#if !CONFIG_NO_STATIC_ALIASING
 		ThreadRegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip);
 		ThreadRegisterAliasingConfiguration aliasConfigOnEntryToInstruction(const StaticRip &rip, bool *b);
 		void setAliasConfigOnEntryToInstruction(const StaticRip &rip, const ThreadRegisterAliasingConfiguration &config);
+#endif
 		void resolveCallGraph(Oracle *oracle);
 		void calculateRegisterLiveness(Oracle *oracle, AddressSpace *as, bool *done_something);
 		void calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle);
@@ -139,6 +142,7 @@ public:
 		NAMED_CLASS
 	};
 
+#if !CONFIG_NO_STATIC_ALIASING
 	class ThreadRegisterAliasingConfiguration {
 		friend ThreadRegisterAliasingConfiguration Function::aliasConfigOnEntryToInstruction(const StaticRip &rip,
 											       bool *b);
@@ -190,6 +194,7 @@ public:
 
 		void prettyPrint(FILE *) const;
 	};
+#endif
 
 	struct callgraph_entry {
 		bool is_call;
@@ -275,13 +280,18 @@ public:
 				     GarbageCollectionToken token);
 	void getFunctions(std::vector<StaticRip> &out);
 
+#if !CONFIG_NO_STATIC_ALIASING
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const StaticRip &rip);
+#endif
 
 private:
 	bool getRbpToRspDelta(const StaticRip &rip, long *out);
 public:
 
+#if !CONFIG_NO_STATIC_ALIASING
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const VexRip &rip);
+#endif
+
 	bool getRbpToRspDelta(const VexRip &rip, long *out);
 
 	void getInstrCallees(const VexRip &vr, std::vector<VexRip> &out);
@@ -311,12 +321,6 @@ public:
 			findNoReturnFunctions();
 	}
 };
-
-StateMachine *introduceFreeVariables(StateMachine *sm,
-				     const Oracle::RegisterAliasingConfiguration *alias,
-				     const AllowableOptimisations &opt,
-				     Oracle *oracle,
-				     bool *done_something);
 
 unsigned getInstructionSize(AddressSpace *as, const StaticRip &rip);
 unsigned stack_offset(Oracle *oracle, unsigned long rip);

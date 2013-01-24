@@ -58,6 +58,7 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 }
 
 #warning Fuck, this is incorrect for multi-threaded machines.  Need to have one StackLayout for each thread.
+#if !CONFIG_NO_STATIC_ALIASING
 class StackLayout {
 public:
 	std::vector<FrameId> functions;
@@ -669,6 +670,7 @@ PointsToTable::prettyPrint(FILE *f)
 	for (auto it = content.begin(); it != content.end(); it++)
 		fprintf(f, "\t%s\t%s\n", it->first.name(), it->second.name());
 }
+#endif
 
 class AliasTableEntry {
 public:
@@ -752,12 +754,14 @@ public:
 		assert(it != content.end());
 		return it->second;
 	}
+#if !CONFIG_NO_STATIC_ALIASING
 	void refine(SMScopes *scopes,
 		    PointsToTable &ptt,
 		    StackLayoutTable &slt,
 		    StateMachine *sm,
 		    bool *done_something,
 		    stateLabelT &labels);
+#endif
 };
 
 static bool
@@ -948,6 +952,7 @@ AliasTable::prettyPrint(FILE *f, stateLabelT &labels) const
 	}
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 static StateMachineSideEffecting *
 sideEffectDefiningRegister(StateMachine *sm, const threadAndRegister &tr)
 {
@@ -1103,9 +1108,9 @@ AliasTable::refine(SMScopes *scopes,
 		for (auto it2 = it->second.stores.begin();
 		     it2 != it->second.stores.end();
 			) {
-			Maybe<StackLayout> *sl2 = slt.forState(*it2);
 			assert( (*it2)->getSideEffect() );
 			assert( (*it2)->getSideEffect()->type == StateMachineSideEffect::Store );
+			Maybe<StackLayout> *sl2 = slt.forState(*it2);
 			PointerAliasingSet storePts(
 				ptt.pointsToSetForExpr( scopes,
 							((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
@@ -1130,6 +1135,7 @@ AliasTable::refine(SMScopes *scopes,
 		}
 	}
 }
+#endif
 
 /* Enumerate all of the states which can reach @startFrom, starting
    from the root, such that by the time state T is enumerated all of
@@ -1285,12 +1291,13 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		      predecessor_map &predMap,
 		      bool *done_something)
 {
-	StackLayoutTable stackLayout;
 	stateLabelT stateLabels;
 	if (any_debug) {
 		printf("%s, input:\n", __func__);
 		printStateMachine(sm, stdout, stateLabels);
 	}
+#if !CONFIG_NO_STATIC_ALIASING
+	StackLayoutTable stackLayout;
 	if (!stackLayout.build(sm)) {
 		warning("Failed to build stack layout!\n");
 		return sm;
@@ -1309,6 +1316,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		printf("Points-to table:\n");
 		ptt.prettyPrint(stdout);
 	}
+#endif
 
 	AliasTable at;
 	if (!at.build(decode, sm, stateLabels, opt, oracle)) {
@@ -1320,6 +1328,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		at.prettyPrint(stdout, stateLabels);
 	}
 
+#if !CONFIG_NO_STATIC_ALIASING
 	while (1) {
 		bool p = false;
 		PointsToTable ptt2 = ptt.refine(scopes, at, sm, stackLayout, &p);
@@ -1348,6 +1357,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		printf("Final alias table:\n");
 		at.prettyPrint(stdout, stateLabels);
 	}
+#endif
 
 	bool progress = false;
 	bool killedAllLoads = true;
@@ -1674,6 +1684,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		}
 	}
 
+#if !CONFIG_NO_STATIC_ALIASING
 	/* Figure out which frames might actually be accessed by the
 	   machine.  There's not much point in keeping any of the
 	   other ones hanging around. */
@@ -1723,6 +1734,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		}
 		printf("}\n");
 	}
+#endif
 
 	/* Let's also have a go at ripping out redundant stores and
 	   stack annotations. */
@@ -1769,6 +1781,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			}
 			break;
 		}
+#if !CONFIG_NO_STATIC_ALIASING
 		case StateMachineSideEffect::StartFunction: {
 			StateMachineSideEffectStartFunction *s = (StateMachineSideEffectStartFunction *)sideEffect;
 			if (!allFramesLive && !liveFrames.count(s->frame)) {
@@ -1825,6 +1838,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			}
 			break;
 		}
+#endif
 			/* Don't do anything with these. */
 		case StateMachineSideEffect::ImportRegister:
 		case StateMachineSideEffect::Load:
@@ -1850,6 +1864,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 	return sm;
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 /* We've pushed realias as far as it can go.  Remove the annotations. */
 static StateMachine *
 zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
@@ -1963,7 +1978,7 @@ zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
 	}
 	return sm;
 }
-
+#endif
 
 /* End of namespace */
 }
@@ -1977,9 +1992,10 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *mach
 	return _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdg, pm, done_something);
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 StateMachine *
 zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
 	return _realias::zapRealiasInfo(scopes, sm, done_something);
 }
-
+#endif

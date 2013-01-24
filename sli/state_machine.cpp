@@ -82,6 +82,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		return new StateMachineTerminal(dbg_origin, n);
 	}
 
+#if !CONFIG_NO_STATIC_ALIASING
 	if (trueTarget->type == StateMachineState::SideEffecting &&
 	    falseTarget->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)trueTarget)->sideEffect ==
@@ -98,6 +99,8 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 				((StateMachineSideEffecting *)trueTarget)->target,
 				((StateMachineSideEffecting *)falseTarget)->target));
 	}
+#endif
+
 	if (falseTarget->type == StateMachineState::Bifurcate) {
 		StateMachineBifurcate *falseBifur = (StateMachineBifurcate *)falseTarget;
 		if (falseTarget != falseBifur->falseTarget &&
@@ -201,6 +204,7 @@ StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOpt
 	return new StateMachineSideEffectAssertFalse(this, value);
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 StateMachineSideEffect *
 StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
@@ -218,6 +222,7 @@ StateMachineSideEffectEndFunction::optimise(SMScopes *scopes, const AllowableOpt
 		return this;
 	return new StateMachineSideEffectEndFunction(this, rsp);
 }
+#endif
 
 StateMachineSideEffect *
 StateMachineSideEffectStartAtomic::optimise(SMScopes *, const AllowableOptimisations &opt)
@@ -849,8 +854,11 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    target->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)target)->sideEffect &&
-	    (((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic ||
-	     ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::StackLayout)) {
+	    (((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic
+#if !CONFIG_NO_STATIC_ALIASING
+	     || ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::StackLayout
+#endif
+	     )) {
 		StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
 		assert(sideEffect->type != StateMachineSideEffect::EndAtomic);
 		*done_something = true;
@@ -915,6 +923,7 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		}
 	}
 
+#if !CONFIG_NO_STATIC_ALIASING
 	if (sideEffect->type == StateMachineSideEffect::StartFunction &&
 	    target->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)target)->sideEffect &&
@@ -924,6 +933,7 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		*done_something = true;
 		return ((StateMachineSideEffecting *)target)->target;
 	}
+#endif
 
 	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
 	    target->type == StateMachineState::SideEffecting &&

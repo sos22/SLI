@@ -370,6 +370,7 @@ _optimiseStateMachine(SMScopes *scopes,
 		}
 #endif
 
+#if !CONFIG_NO_STATIC_ALIASING
 		if (opt.noExtend() && is_ssa && !done_something && !zapped_realias_info) {
 			p = false;
 			sm = zapRealiasInfo(scopes, sm, &p);
@@ -380,6 +381,7 @@ _optimiseStateMachine(SMScopes *scopes,
 			done_something |= p;
 			zapped_realias_info = true;
 		}
+#endif
 
 		if (progress)
 			*progress |= done_something;
@@ -438,7 +440,7 @@ getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::s
  * thing becomes very easy. */
 static bool
 singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, StateMachine *probeMachine,
-			    const AllowableOptimisations &opt, OracleInterface *oracle)
+			    const IRExprOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineSideEffectStore *> storeMachineStores;
 	std::set<StateMachineSideEffectMemoryAccess *> probeMachineAccesses;
@@ -498,6 +500,16 @@ singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, State
 	return true;
 }
 
+StateMachine *
+mapUnreached(smrbdd::scope *scope, StateMachine *inp, StateMachineRes res)
+{
+	std::vector<StateMachineTerminal *> terminals;
+	enumStates(inp, &terminals);
+	for (auto it = terminals.begin(); it != terminals.end(); it++)
+		(*it)->set_res(smrbdd::replaceTerminal(scope, smr_unreached, res, (*it)->res));
+	return inp;
+}
+
 static bbdd *
 atomicSurvivalConstraint(SMScopes *scopes,
 			 VexPtr<MaiMap, &ir_heap> &mai,
@@ -509,6 +521,7 @@ atomicSurvivalConstraint(SMScopes *scopes,
 {
 	VexPtr<StateMachine, &ir_heap> atomicMachine;
 	atomicMachine = duplicateStateMachine(machine);
+	atomicMachine = mapUnreached(&scopes->smrs, machine, smr_crash);
 	atomicMachine = optimiseStateMachine(scopes, mai, atomicMachine, opt, oracle, true, token);
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;
@@ -545,9 +558,11 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 			case StateMachineSideEffect::ImportRegister:
 				return false;
 			case StateMachineSideEffect::AssertFalse:
+#if !CONFIG_NO_STATIC_ALIASING
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
 			case StateMachineSideEffect::StackLayout:
+#endif
 				return true;
 			}
 			abort();
@@ -638,63 +653,33 @@ removeAnnotations(SMScopes *scopes,
 static bbdd *
 verificationConditionForStoreMachine(SMScopes *scopes,
 				     VexPtr<StateMachine, &ir_heap> &storeMachine,
-				     VexPtr<StateMachine, &ir_heap> probeMachine,
+				     VexPtr<StateMachine, &ir_heap> &probeMachine,
+				     VexPtr<bbdd, &ir_heap> &atomicSurvivalConstraint,
 				     VexPtr<OracleInterface> &oracle,
 				     VexPtr<MaiMap, &ir_heap> &mai,
-				     const AllowableOptimisations &optIn,
+				     const AllowableOptimisations &opt,
 				     GarbageCollectionToken token)
 {
 	__set_profiling(verificationConditionForStoreMachine);
-	AllowableOptimisations storeOptimisations =
-		optIn.
-		   enableassumeExecutesAtomically().
-		   enableassumeNoInterferingStores();
-	AllowableOptimisations probeOptimisations =
-		optIn.
-		   enableignoreSideEffects();
 
-	VexPtr<StateMachine, &ir_heap> sm;
-	sm = duplicateStateMachine(storeMachine);
-	sm = optimiseStateMachine(scopes, mai, sm, storeOptimisations, oracle, true, token);
-
-	fprintf(_logfile, "\t\tStore machine:\n");
-	printStateMachine(sm, _logfile);
-
-	probeMachine = optimiseStateMachine(scopes, mai, probeMachine, probeOptimisations, oracle, true, token);
-
-	fprintf(_logfile, "\t\tAssertion-free probe machine:\n");
-	printStateMachine(probeMachine, _logfile);
-
-	/* Special case: if the only possible interaction between the
-	   probe machine and the store machine is a single load in the
-	   probe machine and a single store in the store machine then
-	   we don't need to do anything. */
-	if (singleLoadVersusSingleStore(*mai, storeMachine, probeMachine, optIn, oracle)) {
-		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
-		return NULL;
-	}
-
-	VexPtr<bbdd, &ir_heap> assumption;
-	assumption = atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracle,
-					      atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
-					      token);
-	if (!assumption)
-		return NULL;
-
-	assumption = writeMachineSuitabilityConstraint(
-		scopes,
-		mai,
-		sm,
-		probeMachine,
-		oracle,
-		assumption,
-		atomicSurvivalOptimisations(optIn.enablepreferCrash()),
-		token);
+	VexPtr<bbdd, &ir_heap> assumption =
+		writeMachineSuitabilityConstraint(
+			scopes,
+			mai,
+			storeMachine,
+			probeMachine,
+			oracle,
+			atomicSurvivalConstraint,
+			atomicSurvivalOptimisations(opt.enablepreferCrash()),
+			token);
 
 	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
 		return NULL;
 	}
+
+	VexPtr<StateMachine, &ir_heap> sm;
+	sm = duplicateStateMachine(storeMachine);
 
 	/* Figure out when the cross product machine will be at risk
 	 * of crashing. */
@@ -705,7 +690,7 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 			sm,
 			oracle,
 			assumption,
-			optIn.disablepreferCrash(),
+			opt.disablepreferCrash(),
 			mai,
 			token);
 	if (!crash_constraint) {
@@ -909,12 +894,112 @@ localiseLoads(SMScopes *scopes,
 		done_something);
 }
 
+static StateMachineSideEffect *
+optimiseAssuming(SMScopes *scopes, StateMachineSideEffect *se, bbdd *assumption)
+{
+	switch (se->type) {
+	case StateMachineSideEffect::Load: {
+		auto sml = (StateMachineSideEffectLoad *)se;
+		auto addr = exprbdd::assume(&scopes->exprs, sml->addr, assumption);
+		if (addr == sml->addr)
+			return sml;
+		else
+			return new StateMachineSideEffectLoad(sml, addr);
+	}
+	case StateMachineSideEffect::Store: {
+		auto sms = (StateMachineSideEffectStore *)se;
+		auto addr = exprbdd::assume(&scopes->exprs, sms->addr, assumption);
+		auto data = exprbdd::assume(&scopes->exprs, sms->data, assumption);
+		if (addr == sms->addr && data == sms->data)
+			return sms;
+		else
+			return new StateMachineSideEffectStore(sms, addr, data);
+	}
+	case StateMachineSideEffect::Copy: {
+		auto smc = (StateMachineSideEffectCopy *)se;
+		auto data = exprbdd::assume(&scopes->exprs, smc->value, assumption);
+		if (data == smc->value)
+			return smc;
+		else
+			return new StateMachineSideEffectCopy(smc, data);
+	}
+	case StateMachineSideEffect::AssertFalse: {
+		auto sma = (StateMachineSideEffectAssertFalse *)se;
+		auto data = bbdd::assume(&scopes->bools, sma->value, assumption);
+		if (data == sma->value)
+			return sma;
+		else
+			return new StateMachineSideEffectAssertFalse(sma, data);
+	}
+	case StateMachineSideEffect::StartAtomic:
+	case StateMachineSideEffect::EndAtomic:
+	case StateMachineSideEffect::Unreached:
+	case StateMachineSideEffect::ImportRegister:
+		return se;
+	case StateMachineSideEffect::Phi: {
+		auto smp = (StateMachineSideEffectPhi *)se;
+		unsigned i;
+		exprbdd *v;
+		for (i = 0; i < smp->generations.size(); i++) {
+			v = exprbdd::assume(&scopes->exprs, smp->generations[i].val, assumption);
+			if (v != smp->generations[i].val)
+				break;
+		}
+		if (i == smp->generations.size())
+			return se;
+		std::vector<StateMachineSideEffectPhi::input> inputs(smp->generations);
+		inputs[i].val = v;
+		for (i++; i < inputs.size(); i++) {
+			inputs[i].val = exprbdd::assume(&scopes->exprs, inputs[i].val, assumption);
+		}
+		return new StateMachineSideEffectPhi(smp, inputs);
+	}
+		
+	}
+	abort();
+}
+
+/* Simple optimisation if we know that @condition must be true. */
+void
+optimiseAssuming(SMScopes *scopes, StateMachine *sm, bbdd *condition, bool *done_something)
+{
+	std::vector<StateMachineState *> states;
+	enumStates(sm, &states);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		StateMachineState *s = *it;
+		switch (s->type) {
+		case StateMachineState::Bifurcate: {
+			auto smb = (StateMachineBifurcate *)s;
+			*done_something |= smb->set_condition(
+				bbdd::assume(&scopes->bools, smb->condition, condition));
+			break;
+		}
+		case StateMachineState::Terminal: {
+			auto smt = (StateMachineTerminal *)s;
+			*done_something |= smt->set_res(
+				smrbdd::assume(&scopes->smrs, smt->res, condition));
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			auto sme = (StateMachineSideEffecting *)s;
+			if (sme->sideEffect) {
+				auto newSe = optimiseAssuming(scopes, sme->sideEffect, condition);
+				*done_something |= (newSe != sme->sideEffect);
+				sme->sideEffect = newSe;
+			}
+			break;
+		}
+		}
+	}
+}
+
 static CrashSummary *
 considerStoreCFG(SMScopes *scopes,
 		 const DynAnalysisRip &target_rip,
 		 const VexPtr<CFGNode, &ir_heap> cfg,
 		 const VexPtr<Oracle> &oracle,
 		 VexPtr<StateMachine, &ir_heap> probeMachine,
+		 VexPtr<bbdd, &ir_heap> atomicSurvival,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
 		 const VexPtr<MaiMap, &ir_heap> &maiIn,
@@ -959,26 +1044,64 @@ considerStoreCFG(SMScopes *scopes,
 		oracle,
 		true,
 		token);
+
 	probeMachine = duplicateStateMachine(probeMachine);
+	bool redoAtomicSurvival = false;
 	probeMachine = localiseLoads(scopes,
 				     mai,
 				     probeMachine,
 				     sm_ssa,
 				     probeOptimisations,
 				     oracleI,
-				     token);
+				     token,
+				     &redoAtomicSurvival);
 	if (TIMEOUT)
 		return NULL;
 
-	VexPtr<bbdd, &ir_heap> base_verification_condition(
+	fprintf(_logfile, "\t\tLocalised probe machine:\n");
+	printStateMachine(probeMachine, _logfile);
+	fprintf(_logfile, "\t\tStore machine:\n");
+	printStateMachine(sm_ssa, _logfile);
+
+	/* Special case: if the only possible interaction between the
+	   probe machine and the store machine is a single load in the
+	   probe machine and a single store in the store machine then
+	   we don't need to do anything. */
+	if (singleLoadVersusSingleStore(*mai, sm_ssa, probeMachine, probeOptimisations, oracle)) {
+		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
+		return NULL;
+	}
+
+	if (redoAtomicSurvival) {
+		atomicSurvival = atomicSurvivalConstraint(
+			scopes,
+			mai,
+			probeMachine,
+			NULL,
+			oracleI,
+			atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
+			token);
+		if (!atomicSurvival) {
+			return NULL;
+		}
+		bool needReopt = false;
+		optimiseAssuming(scopes, probeMachine, atomicSurvival, &needReopt);
+		if (needReopt) {
+			probeMachine = optimiseStateMachine(scopes, mai, probeMachine, probeOptimisations, oracle, true, token);
+		}
+	}
+
+	VexPtr<bbdd, &ir_heap> base_verification_condition;
+	base_verification_condition =
 		verificationConditionForStoreMachine(
 			scopes,
 			sm_ssa,
 			probeMachine,
+			atomicSurvival,
 			oracleI,
 			mai,
 			optIn,
-			token));
+			token);
 	if (!base_verification_condition || TIMEOUT)
 		return NULL;
 
@@ -1030,10 +1153,23 @@ considerStoreCFG(SMScopes *scopes,
 					probeMachine,
 					inductionAccesses[x]));
 			truncatedMachine = optimiseStateMachine(scopes, mai, truncatedMachine, optIn, oracle, true, token);
+			VexPtr<bbdd, &ir_heap> truncAtomicSurvival(
+				atomicSurvivalConstraint(
+					scopes,
+					mai,
+					truncatedMachine,
+					NULL,
+					oracleI,
+					atomicSurvivalOptimisations(optIn.enablepreferCrash()),
+					token));
+			if (!truncAtomicSurvival) {
+				return NULL;
+			}
 			bbdd *t = verificationConditionForStoreMachine(
 				scopes,
 				sm_ssa,
 				truncatedMachine,
+				truncAtomicSurvival,
 				oracleI,
 				mai,
 				optIn,
@@ -1161,6 +1297,7 @@ probeMachineToSummary(SMScopes *scopes,
 		      CfgLabelAllocator &allocLabel,
 		      const DynAnalysisRip &targetRip,
 		      const VexPtr<StateMachine, &ir_heap> &probeMachine,
+		      const VexPtr<bbdd, &ir_heap> &atomicSurvival,
 		      const VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
@@ -1207,6 +1344,7 @@ probeMachineToSummary(SMScopes *scopes,
 					   storeCFG,
 					   oracle,
 					   probeMachine,
+					   atomicSurvival,
 					   STORING_THREAD + i,
 					   optIn.setinterestingStores(&potentiallyConflictingStores),
 					   maiIn,
@@ -1310,10 +1448,27 @@ diagnoseCrash(SMScopes *scopes,
 		return NULL;
 	}
 
+	VexPtr<bbdd, &ir_heap> atomicSurvival;
+	atomicSurvival = atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracleI,
+						  atomicSurvivalOptimisations(optIn.enablepreferCrash()),
+						  token);
+	if (!atomicSurvival) {
+		return NULL;
+	}
+
+	bool needReopt = false;
+	optimiseAssuming(scopes, probeMachine, atomicSurvival, &needReopt);
+	if (needReopt) {
+		probeMachine = optimiseStateMachine(scopes, mai, probeMachine,
+						    optIn.enableignoreSideEffects(),
+						    oracle, true, token);
+	}
+
 	return probeMachineToSummary(scopes,
 				     allocLabel,
 				     targetRip,
 				     probeMachine,
+				     atomicSurvival,
 				     reducedProbeMachine,
 				     oracle,
 				     df,

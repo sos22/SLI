@@ -3170,11 +3170,13 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 	return res;
 }
 
-#define mk_exprbdd(name)						\
+#define mk_exprbdd(name, res_if_eq)					\
 	static bool							\
 	name(exprbdd *a, exprbdd *b, const IRExprOptimisations &opt,	\
 	     std::set<std::pair<exprbdd *, exprbdd *> > &memo)		\
 	{								\
+		if (a == b)						\
+			return res_if_eq;				\
 		if (a->isLeaf() && b->isLeaf())				\
 			return name(a->leaf(), b->leaf(), opt);		\
 		if (!memo.insert(std::pair<exprbdd *, exprbdd *>(a, b)).second)	\
@@ -3200,8 +3202,8 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 		std::set<std::pair<exprbdd *, exprbdd *> > memo;	\
 		return name(a, b, opt, memo);				\
 	}
-mk_exprbdd(definitelyEqual)
-mk_exprbdd(definitelyNotEqual)
+mk_exprbdd(definitelyEqual, true)
+mk_exprbdd(definitelyNotEqual, false)
 #undef mk_exprbdd
 
 bool

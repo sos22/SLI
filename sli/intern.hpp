@@ -14,9 +14,11 @@ public:
 	std::set<StateMachineSideEffectCopy *> copies;
 	std::set<StateMachineSideEffectPhi *> phis;
 	std::set<StateMachineSideEffectAssertFalse *> asserts;
+#if !CONFIG_NO_STATIC_ALIASING
 	std::set<StateMachineSideEffectStartFunction *> StartFunction;
 	std::set<StateMachineSideEffectEndFunction *> EndFunction;
 	std::set<StateMachineSideEffectStackLayout *> StackLayout;
+#endif
 	std::set<StateMachineSideEffectImportRegister *> ImportRegister;
 	std::set<StateMachineBifurcate *> states_bifurcate;
 	std::set<StateMachineSideEffecting *> states_side_effect;

@@ -332,19 +332,22 @@ public:
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::StartAtomic:
 		case StateMachineSideEffect::EndAtomic:
+#if !CONFIG_NO_STATIC_ALIASING
 		case StateMachineSideEffect::StackLayout:
+#endif
 		case StateMachineSideEffect::ImportRegister:
 			break;
 		case StateMachineSideEffect::AssertFalse:
 			useExpressionData( ((StateMachineSideEffectAssertFalse *)smse)->value );
 			break;
+#if !CONFIG_NO_STATIC_ALIASING
 		case StateMachineSideEffect::StartFunction:
 			useExpressionData( ((StateMachineSideEffectStartFunction *)smse)->rsp );
 			break;
 		case StateMachineSideEffect::EndFunction:
 			useExpressionData( ((StateMachineSideEffectEndFunction *)smse)->rsp );
 			break;
-
+#endif
 		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *smsep =
 				(StateMachineSideEffectPhi *)smse;
@@ -606,10 +609,12 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something, bo
 			case StateMachineSideEffect::Unreached:
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
+#if !CONFIG_NO_STATIC_ALIASING
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
-			case StateMachineSideEffect::AssertFalse:
 			case StateMachineSideEffect::StackLayout:
+#endif
+			case StateMachineSideEffect::AssertFalse:
 				break;
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec =

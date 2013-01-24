@@ -107,6 +107,7 @@ Oracle::LivenessSet::define(threadAndRegister r)
 		return LivenessSet(mask & ~(1ul << (r.asReg() / 8)));
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 const PointerAliasingSet PointerAliasingSet::nothing(0);
 const PointerAliasingSet PointerAliasingSet::notAPointer(1);
 const PointerAliasingSet PointerAliasingSet::stackPointer(2);
@@ -181,6 +182,7 @@ Oracle::RegisterAliasingConfiguration::prettyPrint(FILE *f) const
 		it->second.prettyPrint(f);
 	}
 }
+#endif
 
 unsigned
 getInstructionSize(AddressSpace *as, const StaticRip &rip)
@@ -632,6 +634,7 @@ Oracle::calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken tok
 	}
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 void
 Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 {
@@ -656,6 +659,7 @@ Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
 			       it - functions.begin(), functions.size());
 	}
 }
+#endif
 
 static Oracle::LivenessSet
 irexprUsedValues(Oracle::LivenessSet old, const IRExpr *w)
@@ -676,6 +680,7 @@ irexprUsedValues(Oracle::LivenessSet old, const IRExpr *w)
 	return res;
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 static PointerAliasingSet
 irexprAliasingClass(IRExpr *expr,
 		    const Oracle::RegisterAliasingConfiguration &config,
@@ -890,6 +895,7 @@ Oracle::getAliasingConfigurationForRip(const VexRip &rip)
 {
 	return getAliasingConfigurationForRip(StaticRip(rip));
 }
+#endif
 
 enum read_cg_vexrip_res {
 	read_cg_vexrip_error,
@@ -1527,8 +1533,10 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 
 	printf("Calculate register liveness...\n");
 	calculateRegisterLiveness(ths, token);
+#if !CONFIG_NO_STATIC_ALIASING
 	printf("Calculate aliasing map...\n");
 	calculateAliasing(ths, token);
+#endif
 	printf("Calculate RBP map...\n");
 	calculateRbpToRspOffsets(ths, token);
 	printf("Done static analysis phase\n");
@@ -1634,6 +1642,7 @@ Oracle::Function::liveOnEntry(const StaticRip &rip, bool isHead)
 	return LivenessSet(r);
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 static PointerAliasingSet
 PointerAliasingSet_from_int(int r)
 {
@@ -1729,6 +1738,7 @@ Oracle::Function::aliasConfigOnEntryToInstruction(const StaticRip &rip)
 	bool ign;
 	return aliasConfigOnEntryToInstruction(rip, &ign);
 }
+#endif
 
 bool
 Oracle::functionNeverReturns(const StaticRip &sr)
@@ -1901,6 +1911,7 @@ Oracle::Function::calculateRegisterLiveness(Oracle *oracle, AddressSpace *as, bo
 	}
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 void
 Oracle::Function::calculateAliasing(AddressSpace *as, Oracle *oracle, bool *done_something)
 {
@@ -1942,6 +1953,7 @@ Oracle::Function::calculateAliasing(AddressSpace *as, Oracle *oracle, bool *done
 				    rip.rip);
 	}
 }
+#endif
 
 void
 Oracle::Function::updateLiveOnEntry(Oracle *oracle, const StaticRip &rip, AddressSpace *as, bool *changed)
@@ -2380,6 +2392,7 @@ impossible_clean:
 	goto done;
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 void
 Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 						      AddressSpace *as,
@@ -2610,6 +2623,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		}
 	}
 }
+#endif
 
 void
 Oracle::Function::addPredecessorsDirect(const StaticRip &rip, std::vector<StaticRip> &out)
@@ -2711,6 +2725,7 @@ Oracle::Function::getSuccessors(const StaticRip &rip, std::vector<StaticRip> &su
 	extract_oraclerip_column(stmt3, 0, succ);
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 void
 Oracle::Function::setAliasConfigOnEntryToInstruction(const StaticRip &r,
 						     const ThreadRegisterAliasingConfiguration &config)
@@ -2737,6 +2752,7 @@ Oracle::Function::setAliasConfigOnEntryToInstruction(const StaticRip &r,
 	assert(rc == SQLITE_DONE);
 	sqlite3_reset(stmt);
 }
+#endif
 
 void
 Oracle::Function::getInstructionCallees(const StaticRip &rip, std::vector<StaticRip> &out)
@@ -2915,6 +2931,7 @@ Oracle::setRbpToRspOffset(const StaticRip &r,
 }
 
 
+#if !CONFIG_NO_STATIC_ALIASING
 void
 Oracle::Function::setAliasingConfigCorrect(bool x)
 {
@@ -2930,6 +2947,7 @@ Oracle::Function::setAliasingConfigCorrect(bool x)
 	rc = sqlite3_reset(stmt);
 	assert(rc == SQLITE_OK);
 }
+#endif
 
 StaticRip
 Oracle::functionHeadForInstruction(const StaticRip &rip)
@@ -3341,6 +3359,7 @@ Oracle::identifyLibraryCall(const VexRip &vr)
 	return LibraryFunctionTemplate::parse(name);
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 PointerAliasingSet
 Oracle::RegisterAliasingConfiguration::lookupRegister(const threadAndRegister &r, bool buildingAliasTable) const
 {
@@ -3555,6 +3574,7 @@ PointerAliasingSet::operator <(const PointerAliasingSet &o) const
 		return false;
 	return stackPointers < o.stackPointers;
 }
+#endif
 
 /* Compute the offset from RSP to the function's return address. */
 unsigned

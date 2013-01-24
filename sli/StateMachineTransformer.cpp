@@ -39,6 +39,7 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 	}
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 StateMachineSideEffectStartFunction *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectStartFunction *a, bool *d)
 {
@@ -62,6 +63,7 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 		return NULL;
 	}
 }
+#endif
 
 StateMachineSideEffectCopy *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectCopy *c, bool *d)
