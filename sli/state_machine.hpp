@@ -291,10 +291,27 @@ class StateMachineState;
 class StateMachine : public GarbageCollected<StateMachine, &ir_heap> {
 public:
 	StateMachineState *root;
-	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots;
+	struct entry_point {
+		unsigned thread;
+		const CFGNode *node;
+		entry_point(unsigned _thread, const CFGNode *_node)
+			: thread(_thread), node(_node)
+		{}
+		bool operator ==(const entry_point &o) const {
+			return thread == o.thread && node == o.node;
+		}
+		bool operator <(const entry_point &o) const {
+			if (thread < o.thread)
+				return true;
+			if (thread > o.thread)
+				return false;
+			return node->label < o.node->label;
+		}
+	};
+	std::vector<entry_point> cfg_roots;
 
 	StateMachine(StateMachineState *_root,
-		     const std::vector<std::pair<unsigned, const CFGNode *> > &_cfg_roots)
+		     const std::vector<entry_point> &_cfg_roots)
 		: root(_root), cfg_roots(_cfg_roots)
 	{
 	}
@@ -310,7 +327,7 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(root);
 		for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++)
-			hv(it->second);
+			hv(it->node);
 	}
 #ifdef NDEBUG
 	void sanityCheck(const MaiMap &, SMScopes * = NULL) const {}

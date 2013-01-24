@@ -318,7 +318,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 				       saneIterator(cs->storeMachine->cfg_roots));
 	     !it.finished();
 	     it++)
-		enumerateCFG(const_cast<CFGNode *>(it->second), allNodes);
+		enumerateCFG(const_cast<CFGNode *>(it->node), allNodes);
 
 	/* Find references of the first sense */
 	{
@@ -356,9 +356,9 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 			     it++) {
 				if (debug_root_reduce) {
 					printf("%s is needed because of register reference\n",
-					       it->second->label.name());
+					       it->node->label.name());
 				}
-				needed.insert(it->second);
+				needed.insert(it->node);
 			}
 		}
 	}
@@ -435,7 +435,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 				       saneIterator(cs->storeMachine->cfg_roots));
 	     !it.finished();
 	     it++) {
-		CFGNode *n = const_cast<CFGNode *>(it->second);
+		CFGNode *n = const_cast<CFGNode *>(it->node);
 		while (!needed.count(n)) {
 			int nr_successors = 0;
 			for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++) {
@@ -453,15 +453,15 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		}
 		if (debug_root_reduce) {
 			printf("Root rewrite: %d:%s -> %d:%s\n",
-			       it->first, it->second->label.name(),
-			       it->first, n->label.name());
+			       it->thread, it->node->label.name(),
+			       it->thread, n->label.name());
 		}
 		rootRewrites.insert(
 			std::pair<std::pair<unsigned, CfgLabel>,
 			          std::pair<unsigned, CfgLabel> >(
-					  std::pair<unsigned, CfgLabel>(it->first, it->second->label),
-					  std::pair<unsigned, CfgLabel>(it->first, n->label)));
-		it->second = n;
+					  std::pair<unsigned, CfgLabel>(it->thread, it->node->label),
+					  std::pair<unsigned, CfgLabel>(it->thread, n->label)));
+		it->node = n;
 	}
 
 	cs = rewriteEntryPointExpressions(cs, rootRewrites);
@@ -473,7 +473,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		bool reachesNeededInstr = false;
 		std::queue<const CFGNode *> pending;
 		std::set<const CFGNode *> visited;
-		pending.push(it->second);
+		pending.push(it->node);
 		while (!reachesNeededInstr && !pending.empty()) {
 			const CFGNode *n = pending.front();
 			pending.pop();
@@ -496,7 +496,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		bool reachesNeededInstr = false;
 		std::queue<const CFGNode *> pending;
 		std::set<const CFGNode *> visited;
-		pending.push(it->second);
+		pending.push(it->node);
 		while (!reachesNeededInstr && !pending.empty()) {
 			const CFGNode *n = pending.front();
 			pending.pop();
@@ -535,7 +535,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		   instruction I' is also a dominator then every path
 		   from I' to a needed instruction must pass through
 		   I. */
-		CFGNode *root = const_cast<CFGNode *>(s->cfg_roots[0].second);
+		CFGNode *root = const_cast<CFGNode *>(s->cfg_roots[0].node);
 		HashedSet<HashedPtr<CFGNode> > nodes;
 		enumerateCFG(root, nodes);
 		std::set<CFGNode *> nodesSet;
@@ -617,9 +617,9 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		rootRewrites.insert(
 			std::pair<std::pair<unsigned, CfgLabel>,
 			          std::pair<unsigned, CfgLabel> >(
-					  std::pair<unsigned, CfgLabel>(s->cfg_roots[0].first, s->cfg_roots[0].second->label),
-					  std::pair<unsigned, CfgLabel>(s->cfg_roots[0].first, result->label)));
-		s->cfg_roots[0].second = result;
+					  std::pair<unsigned, CfgLabel>(s->cfg_roots[0].thread, s->cfg_roots[0].node->label),
+					  std::pair<unsigned, CfgLabel>(s->cfg_roots[0].thread, result->label)));
+		s->cfg_roots[0].node = result;
 	}
 
 	cs = rewriteEntryPointExpressions(cs, rootRewrites);
@@ -631,7 +631,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 				       saneIterator(cs->storeMachine->cfg_roots));
 	     !it.finished();
 	     it++)
-		enumerateCFG(const_cast<CFGNode *>(it->second), remainingNodes);
+		enumerateCFG(const_cast<CFGNode *>(it->node), remainingNodes);
 	for (auto it = mai->begin(); !it.finished(); ) {
 		for (auto it2 = it.begin(); !it2.finished(); ) {
 			if (remainingNodes.contains(const_cast<CFGNode *>(it2.node())))

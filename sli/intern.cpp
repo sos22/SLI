@@ -231,7 +231,7 @@ internStateMachine(StateMachine *sm, internStateMachineTable &t)
 {
 	__set_profiling(internStateMachine);
 	for (auto it = sm->cfg_roots.begin(); !TIMEOUT && it != sm->cfg_roots.end(); it++)
-		it->second = internCFG(it->second, t);
+		it->node = internCFG(it->node, t);
 	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }

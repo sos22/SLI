@@ -1525,7 +1525,7 @@ buildCrossProductMachine(SMScopes *scopes,
 		*r.first = newState;
 	}
 
-	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots(probeMachine->cfg_roots);
+	std::vector<StateMachine::entry_point> cfg_roots(probeMachine->cfg_roots);
 	for (auto it = storeMachine->cfg_roots.begin(); it != storeMachine->cfg_roots.end(); it++) {
 		bool already_present = false;
 		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++)
@@ -1804,7 +1804,7 @@ concatenateStateMachinesCrashing(SMScopes *scopes, const StateMachine *machine, 
 		*reloc.first = it->second;
 	}
 
-	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots(machine->cfg_roots);
+	std::vector<StateMachine::entry_point> cfg_roots(machine->cfg_roots);
 	for (auto it = to->cfg_roots.begin(); it != to->cfg_roots.end(); it++) {
 		bool already_present = false;
 		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++)

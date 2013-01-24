@@ -2347,9 +2347,10 @@ probeCFGsToMachine(SMScopes *scopes,
 		roots_this_sm2.push_back(std::pair<CFGNode *, StateMachineState *>(cfgnode, root));
 	}
 
-	std::vector<std::pair<unsigned, const CFGNode *> > cfg_roots_this_sm;
-	for (auto it = roots.begin(); !it.finished(); it.advance())
-		cfg_roots_this_sm.push_back(std::pair<unsigned, const CFGNode *>(tid, *it));
+	std::vector<StateMachine::entry_point> cfg_roots_this_sm;
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
+		cfg_roots_this_sm.push_back(StateMachine::entry_point(tid, *it));
+	}
 
 	StateMachineState *root = entryState(scopes, VexRip(), roots_this_sm2, tid, false);
 	root = importRegisters(root
@@ -2381,8 +2382,8 @@ storeCFGsToMachine(SMScopes *scopes,
 		}
 	} doOne;
 	std::map<CFGNode *, StateMachineState *> results;
-	std::vector<std::pair<unsigned, const CFGNode *> > roots;
-	roots.push_back(std::pair<unsigned, const CFGNode *>(tid, root));
+	std::vector<StateMachine::entry_point> roots;
+	roots.push_back(StateMachine::entry_point(tid, root));
 	StateMachineState *s =
 		performTranslation(
 			scopes,
