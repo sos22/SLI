@@ -654,6 +654,7 @@ static bbdd *
 verificationConditionForStoreMachine(SMScopes *scopes,
 				     VexPtr<StateMachine, &ir_heap> &storeMachine,
 				     VexPtr<StateMachine, &ir_heap> &probeMachine,
+				     VexPtr<bbdd, &ir_heap> &atomicSurvivalConstraint,
 				     VexPtr<OracleInterface> &oracle,
 				     VexPtr<MaiMap, &ir_heap> &mai,
 				     const AllowableOptimisations &opt,
@@ -661,30 +662,16 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 {
 	__set_profiling(verificationConditionForStoreMachine);
 
-	/* Special case: if the only possible interaction between the
-	   probe machine and the store machine is a single load in the
-	   probe machine and a single store in the store machine then
-	   we don't need to do anything. */
-	if (singleLoadVersusSingleStore(*mai, storeMachine, probeMachine, opt, oracle)) {
-		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
-		return NULL;
-	}
-
-	VexPtr<bbdd, &ir_heap> assumption(atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracle,
-								   atomicSurvivalOptimisations(opt.enablepreferCrash()),
-								   token));
-	if (!assumption)
-		return NULL;
-
-	assumption = writeMachineSuitabilityConstraint(
-		scopes,
-		mai,
-		storeMachine,
-		probeMachine,
-		oracle,
-		assumption,
-		atomicSurvivalOptimisations(opt.enablepreferCrash()),
-		token);
+	VexPtr<bbdd, &ir_heap> assumption =
+		writeMachineSuitabilityConstraint(
+			scopes,
+			mai,
+			storeMachine,
+			probeMachine,
+			oracle,
+			atomicSurvival,
+			atomicSurvivalOptimisations(opt.enablepreferCrash()),
+			token);
 
 	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
@@ -974,12 +961,28 @@ considerStoreCFG(SMScopes *scopes,
 	fprintf(_logfile, "\t\tStore machine:\n");
 	printStateMachine(sm_ssa, _logfile);
 
+	/* Special case: if the only possible interaction between the
+	   probe machine and the store machine is a single load in the
+	   probe machine and a single store in the store machine then
+	   we don't need to do anything. */
+	if (singleLoadVersusSingleStore(*mai, sm_ssa, probeMachine, opt, oracle)) {
+		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
+		return NULL;
+	}
+
+	VexPtr<bbdd, &ir_heap> atomicSurvival(atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracle,
+								       atomicSurvivalOptimisations(opt.enablepreferCrash()),
+								       token));
+	if (!atomicSurvival) {
+		return NULL;
+	}
 	VexPtr<bbdd, &ir_heap> base_verification_condition;
 	base_verification_condition =
 		verificationConditionForStoreMachine(
 			scopes,
 			sm_ssa,
 			probeMachine,
+			atomicSurvival,
 			oracleI,
 			mai,
 			optIn,
@@ -1035,10 +1038,23 @@ considerStoreCFG(SMScopes *scopes,
 					probeMachine,
 					inductionAccesses[x]));
 			truncatedMachine = optimiseStateMachine(scopes, mai, truncatedMachine, optIn, oracle, true, token);
+			VexPtr<bbdd, &ir_heap> truncAtomicSurvival(
+				atomicSurvivalConstraint(
+					scopes,
+					mai,
+					truncatedMachine,
+					NULL,
+					oracle,
+					atomicSurvivalOptimisations(opt.enablepreferCrash()),
+					token));
+			if (!truncatedSurvival) {
+				return NULL;
+			}
 			bbdd *t = verificationConditionForStoreMachine(
 				scopes,
 				sm_ssa,
 				truncatedMachine,
+				truncatedSurvival,
 				oracleI,
 				mai,
 				optIn,
