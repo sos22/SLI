@@ -518,7 +518,7 @@ CrashCfg::init(crashEnforcementRoots &roots,
 
 	std::vector<ThreadCfgLabel> pending;
 	for (auto it = roots.begin(); !it.finished(); it.advance())
-		pending.push_back(it.get());
+		pending.push_back(it.threadCfgLabel());
 
 	while (!pending.empty()) {
 		ThreadCfgLabel label(pending.back());

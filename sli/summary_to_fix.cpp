@@ -1516,7 +1516,7 @@ buildPatchStrategy(Oracle *oracle,
 	patchStrategy initPs;
 
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
-		Instruction<ThreadCfgLabel> *instr = cfg.findInstr(it.get());
+		Instruction<ThreadCfgLabel> *instr = cfg.findInstr(it.threadCfgLabel());
 		assert(instr);
 		const AbstractThread &absThread(instr->rip.thread);
 		ConcreteThread concThread(roots.lookupAbsThread(absThread));
@@ -1553,7 +1553,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 	summaryRootsT summaryRoots;
 	{
 		ThreadAbstracter absThread;
-		std::map<ConcreteThread, std::set<CfgLabel> > cfgRoots;
+		std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > cfgRoots;
 		for (auto it = summaries.begin();
 		     it != summaries.end();
 		     it++) {
@@ -1571,12 +1571,12 @@ buildPatchForCrashSummary(Oracle *oracle,
 			for (auto it = summary->loadMachine->cfg_roots.begin();
 			     it != summary->loadMachine->cfg_roots.end();
 			     it++) {
-				cfgRoots[ConcreteThread(summaryId, it->first.thread)].insert(it->first.node->label);
+				cfgRoots[ConcreteThread(summaryId, it->first.thread)].insert(std::pair<CfgLabel, long>(it->first.node->label, it->second.rsp_delta));
 			}
 			for (auto it = summary->storeMachine->cfg_roots.begin();
 			     it != summary->storeMachine->cfg_roots.end();
 			     it++) {
-				cfgRoots[ConcreteThread(summaryId, it->first.thread)].insert(it->first.node->label);
+				cfgRoots[ConcreteThread(summaryId, it->first.thread)].insert(std::pair<CfgLabel, long>(it->first.node->label, it->second.rsp_delta));
 			}
 
 			summaryRoots[summaryId] = summary->loadMachine->cfg_roots;

@@ -690,7 +690,7 @@ public:
 			     const MaiMap &mai,
 			     std::set<IRExpr *> &neededExpressions,
 			     ThreadAbstracter &abs,
-			     std::map<ConcreteThread, std::set<CfgLabel> > &_roots,
+			     std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &_roots,
 			     DNF_Conjunction &conj,
 			     int &next_hb_id,
 			     CrashSummary *summary,

@@ -125,6 +125,7 @@ struct cep_entry_ctxt {
 	unsigned nr_simslots;
 	unsigned nr_stack_slots;
 	int cntr;
+	long rsp_delta;
 	struct {
 		unsigned offset;
 		unsigned long expected_value;

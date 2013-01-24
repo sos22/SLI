@@ -140,6 +140,8 @@ struct low_level_state {
 
 	int *mbox; /* Futex mbox */
 
+	long rsp_delta;
+
 	/* Once we've received a message from an LLS, we become bound
 	 * to that LLS and in future will only receive messages from
 	 * them.  Can be BOUND_LLS_EXITED if we've bound to a thread
@@ -428,12 +430,13 @@ new_low_level_state(struct high_level_state *hls, int nr_simslots)
 }
 
 static void
-start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label, int nr_simslots)
+start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label, long rsp_delta, int nr_simslots)
 {
 	struct low_level_state *lls = new_low_level_state(hls, nr_simslots);
 	int i;
 
 	lls->cfg_node = starting_label;
+	lls->rsp_delta = rsp_delta;
 	low_level_state_push(&hls->ll_states, lls);
 	sanity_check_low_level_state(lls, 1);
 #ifdef KEEP_LLS_HISTORY
@@ -2143,6 +2146,7 @@ check_for_ll_thread_start(struct high_level_state *hls, struct reg_struct *regs)
 				plan.entry_points[i]->ctxts[j]->cntr++;
 				start_low_level_thread(
 					hls,
+					plan.entry_points[i]->ctxts[j]->rsp_delta,
 					plan.entry_points[i]->ctxts[j]->cfg_label,
 					plan.entry_points[i]->ctxts[j]->nr_simslots);
 			}
@@ -2464,7 +2468,7 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 					do_case(1, rcx);
 					do_case(2, rdx);
 					do_case(3, rbx);
-					do_case(4, rsp);
+					/* rsp is special */
 					do_case(5, rbp);
 					do_case(6, rsi);
 					do_case(7, rdi);
@@ -2477,6 +2481,10 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 					do_case(14, r14);
 					do_case(15, r15);
 #undef do_case
+					/* Apply the delta to RSP */
+				case 4:
+					*slot = regs->rsp - lls->rsp_delta;
+					break;
 				case 16:
 					*slot = fetch_fs_base();
 					break;

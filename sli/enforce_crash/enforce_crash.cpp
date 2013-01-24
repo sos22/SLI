@@ -183,7 +183,7 @@ struct expr_slice {
 static bool
 buildCED(const SummaryId &summaryId,
 	 const expr_slice &c,
-	 std::map<ConcreteThread, std::set<CfgLabel> > &rootsCfg,
+	 std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &rootsCfg,
 	 CrashSummary *summary,
 	 crashEnforcementData *out,
 	 ThreadAbstracter &abs,
@@ -782,16 +782,16 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	printf("After simplifying down:\n");
 	sliced_by_hb.prettyPrint(stdout);
 
-	std::map<ConcreteThread, std::set<CfgLabel> > rootsCfg;
+	std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > rootsCfg;
 	for (auto it = summary->loadMachine->cfg_roots.begin();
 	     it != summary->loadMachine->cfg_roots.end();
 	     it++) {
-		rootsCfg[ConcreteThread(summaryId, it->first.thread)].insert(it->first.node->label);
+		rootsCfg[ConcreteThread(summaryId, it->first.thread)].insert(std::pair<CfgLabel, long>(it->first.node->label, it->second.rsp_delta));
 	}
 	for (auto it = summary->storeMachine->cfg_roots.begin();
 	     it != summary->storeMachine->cfg_roots.end();
 	     it++) {
-		rootsCfg[ConcreteThread(summaryId, it->first.thread)].insert(it->first.node->label);
+		rootsCfg[ConcreteThread(summaryId, it->first.thread)].insert(std::pair<CfgLabel, long>(it->first.node->label, it->second.rsp_delta));
 	}
 
 	crashEnforcementData accumulator;
@@ -927,8 +927,8 @@ optimiseCfg(crashEnforcementData &ced)
 	} hasSideEffect = {&ced};
 	crashEnforcementRoots newRoots;
 	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
-		const AbstractThread thread(it.get().thread);
-		auto root = ced.crashCfg.findInstr(it.get());
+		const AbstractThread thread(it.threadCfgLabel().thread);
+		auto root = ced.crashCfg.findInstr(it.threadCfgLabel());
 		while (1) {
 			/* We can advance a root if it has a single
 			   successor, and it has no stash points, and
@@ -973,9 +973,9 @@ optimiseCfg(crashEnforcementData &ced)
 		}
 		if (haveFirstSideEffect) {
 			if (failed)
-				newRoots.insert(it.concrete_tid(), it.get());
+				newRoots.insert(it.concrete_tid(), it.rspDelta(), it.threadCfgLabel());
 			else
-				newRoots.insert(it.concrete_tid(), firstSideEffect);
+				newRoots.insert(it.concrete_tid(), it.rspDelta(), firstSideEffect);
 		}
 	}
 	ced.roots = newRoots;
@@ -984,8 +984,9 @@ optimiseCfg(crashEnforcementData &ced)
 	 * from the CFG. */
 	std::set<Instruction<ThreadCfgLabel> *> retain;
 	std::queue<Instruction<ThreadCfgLabel> *> pending;
-	for (auto it = ced.roots.begin(); !it.finished(); it.advance())
-		pending.push(ced.crashCfg.findInstr(it.get()));
+	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
+		pending.push(ced.crashCfg.findInstr(it.threadCfgLabel()));
+	}
 	while (!pending.empty()) {
 		auto n = pending.front();
 		pending.pop();
@@ -1187,7 +1188,7 @@ buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 	patchStrategy initPs;
 
 	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
-		Instruction<ThreadCfgLabel> *instr = ced.crashCfg.findInstr(it.get());
+		Instruction<ThreadCfgLabel> *instr = ced.crashCfg.findInstr(it.threadCfgLabel());
 		assert(instr);
 		const AbstractThread &absThread(instr->rip.thread);
 		ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));

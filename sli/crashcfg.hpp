@@ -347,10 +347,10 @@ public:
 class crashEnforcementRoots {
 	std::map<ConcreteThread, std::set<AbstractThread> > threadAbs;
 public:
-	std::map<AbstractThread, std::set<CfgLabel> > content;
+	std::map<AbstractThread, std::set<std::pair<CfgLabel, long> > > content;
 	crashEnforcementRoots() {}
 
-	crashEnforcementRoots(std::map<ConcreteThread, std::set<CfgLabel> > &roots, ThreadAbstracter &abs) {
+	crashEnforcementRoots(std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &roots, ThreadAbstracter &abs) {
 		for (auto it = roots.begin(); it != roots.end(); it++) {
 			assert(!threadAbs.count(it->first));
 			AbstractThread tid(abs.newThread(it->first));
@@ -359,10 +359,10 @@ public:
 		}
 	}
 
-	void insert(ConcreteThread concrete_tid, const ThreadCfgLabel &root)
+	void insert(ConcreteThread concrete_tid, long rspDelta, const ThreadCfgLabel &root)
 	{
 		threadAbs[concrete_tid].insert(root.thread);
-		content[root.thread].insert(root.label);
+		content[root.thread].insert(std::pair<CfgLabel, long>(root.label, rspDelta));
 	}
 
 	void operator|=(const crashEnforcementRoots &cer) {
@@ -397,7 +397,7 @@ public:
 			     it2++) {
 				if (it2 != it->second.begin())
 					fprintf(f, ",");
-				fprintf(f, "%s", it2->name());
+				fprintf(f, "%s(%ld)", it2->first.name(), it2->second);
 			}
 			fprintf(f, "}");
 		}
@@ -438,12 +438,15 @@ public:
 			    content.count(abs) ||
 			    !parseThisString(" = {", str, &str))
 				return false;
-			std::set<CfgLabel> &roots(content[abs]);
+			std::set<std::pair<CfgLabel, long> > &roots(content[abs]);
 			while (1) {
 				CfgLabel a(CfgLabel::uninitialised());
-				if (!a.parse(str, &str))
+				long rspDelta;
+				if (!a.parse(str, &str) ||
+				    !parseThisChar(':', str, &str) ||
+				    !parseDecimalLong(&rspDelta, str, &str))
 					return false;
-				roots.insert(a);
+				roots.insert(std::pair<CfgLabel, long>(a, rspDelta));
 				if (parseThisString("}", str, &str))
 					break;
 				if (!parseThisChar(',', str, &str))
@@ -461,10 +464,10 @@ public:
 	 * concrete tid. */
 	class conc_iterator {
 		const std::set<AbstractThread> *i2set;
-		const std::map<AbstractThread, std::set<CfgLabel> > *content;
-		const std::set<CfgLabel> *i3set;
+		const std::map<AbstractThread, std::set<std::pair<CfgLabel, long> > > *content;
+		const std::set<std::pair<CfgLabel, long> > *i3set;
 		std::set<AbstractThread>::const_iterator it2;
-		std::set<CfgLabel>::const_iterator it3;
+		std::set<std::pair<CfgLabel, long> >::const_iterator it3;
 
 	public:
 		bool finished() const { return it2 == i2set->end(); }
@@ -481,10 +484,11 @@ public:
 				it3 = i3set->begin();
 			}
 		}
-		ThreadCfgLabel get() const { return ThreadCfgLabel(*it2, *it3); }
+		ThreadCfgLabel threadCfgLabel() const { return ThreadCfgLabel(*it2, it3->first); }
+		long rspDelta() const { return it3->second; }
 		const AbstractThread &abstract_tid() const { return *it2; }
 		conc_iterator(const std::set<AbstractThread> *_i2set,
-			      const std::map<AbstractThread, std::set<CfgLabel> > &_content)
+			      const std::map<AbstractThread, std::set<std::pair<CfgLabel, long> > > &_content)
 			: i2set(_i2set), content(&_content)
 		{
 			it2 = i2set->begin();
@@ -522,7 +526,7 @@ public:
 		std::map<ConcreteThread, std::set<AbstractThread> >::const_iterator it1;
 		conc_iterator it2;
 
-		const std::map<AbstractThread, std::set<CfgLabel> > &content;
+		const std::map<AbstractThread, std::set<std::pair<CfgLabel, long> > > &content;
 	public:
 		bool finished() const { return it1 == threadAbs.end(); }
 		void advance() {
@@ -535,11 +539,12 @@ public:
 				it2 = conc_iterator(&it1->second, content);
 			}
 		}
-		ThreadCfgLabel get() const { return it2.get(); }
+		ThreadCfgLabel threadCfgLabel() const { return it2.threadCfgLabel(); }
+		long rspDelta() const { return it2.rspDelta(); }
 		ConcreteThread concrete_tid() const { return it1->first; }
 		const AbstractThread &abstract_tid() const { return it2.abstract_tid(); }
 		iterator(const std::map<ConcreteThread, std::set<AbstractThread> > &_threadAbs,
-			 const std::map<AbstractThread, std::set<CfgLabel> > &_content)
+			 const std::map<AbstractThread, std::set<std::pair<CfgLabel, long> > > &_content)
 			: threadAbs(_threadAbs),
 			  content(_content)
 		{

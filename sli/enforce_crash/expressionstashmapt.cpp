@@ -19,7 +19,7 @@ expressionStashMapT::expressionStashMapT(const SummaryId &summary,
 			IRExprGet *ieg = (IRExprGet *)e;
 			if (ieg->reg.isReg()) {
 				for (auto it2 = roots.begin(ConcreteThread(summary, ieg->reg.tid())); !it2.finished(); it2.advance())
-					(*this)[it2.get()].insert(ieg);
+					(*this)[it2.threadCfgLabel()].insert(ieg);
 			} else {
 				neededTemporaries.insert(ieg);
 			}

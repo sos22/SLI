@@ -113,14 +113,16 @@ compute_entry_point_list(Oracle *oracle,
 			 const slotMapT &slotMap,
 			 const char *ident)
 {
-	std::map<ThreadCfgLabel, int> ctxts;
+	/* label -> <idx, rspDelta> */
+	std::map<ThreadCfgLabel, std::pair<int, long> > ctxts;
 	{
 		int next_idx;
 		next_idx = 1;
 		for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
-			ThreadCfgLabel l(it.get());
-			if (!ctxts.count(l))
-				ctxts[l] = next_idx++;
+			ThreadCfgLabel l(it.threadCfgLabel());
+			if (!ctxts.count(l)) {
+				ctxts[l] = std::pair<int, long>(next_idx++, it.rspDelta());
+			}
 		}
 	}
 	for (auto it = ctxts.begin(); it != ctxts.end(); it++) {
@@ -130,10 +132,11 @@ compute_entry_point_list(Oracle *oracle,
 		ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));
 		ConcreteCfgLabel concCfgLabel(concThread.summary(), n->rip.label);
 		const VexRip &v(ced.crashCfg.labelToRip(concCfgLabel));
-		fprintf(f, "static struct cep_entry_ctxt entry_ctxt%d = {\n", it->second);
+		fprintf(f, "static struct cep_entry_ctxt entry_ctxt%d = {\n", it->second.first);
 		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
 		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(slotMap) + 1);
 		fprintf(f, "    .nr_stack_slots = %zd,\n", v.stack.size() - 1);
+		fprintf(f, "    .rsp_delta = %ldl,\n", it->second.second);
 		fprintf(f, "    .stack = {\n");
 		stack_validation_table(oracle, f, v);
 		fprintf(f, "    },\n");
@@ -141,7 +144,7 @@ compute_entry_point_list(Oracle *oracle,
 	}
 	std::map<unsigned long, std::set<ThreadCfgLabel> > entryPoints;
 	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
-		ThreadCfgLabel l(it.get());
+		ThreadCfgLabel l(it.threadCfgLabel());
 		auto n = ced.crashCfg.findInstr(l);
 		const AbstractThread &absThread(n->rip.thread);
 		ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));
@@ -156,7 +159,7 @@ compute_entry_point_list(Oracle *oracle,
 		fprintf(f, "    .nr_entry_ctxts = %zd,\n", it->second.size());
 		fprintf(f, "    .ctxts = {\n");
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-			fprintf(f, "        &entry_ctxt%d,\n", ctxts[*it2]);
+			fprintf(f, "        &entry_ctxt%d,\n", ctxts[*it2].first);
 		fprintf(f, "   },\n");
 		fprintf(f, "};\n");
 	}
@@ -498,8 +501,9 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 {
 	{
 		std::queue<ThreadCfgLabel> pending;
-		for (auto it = ced.roots.begin(); !it.finished(); it.advance())
-			pending.push(it.get());
+		for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
+			pending.push(it.threadCfgLabel());
+		}
 		while (!pending.empty()) {
 			ThreadCfgLabel l(pending.front());
 			pending.pop();
