@@ -960,7 +960,7 @@ optimiseAssuming(SMScopes *scopes, StateMachineSideEffect *se, bbdd *assumption)
 }
 
 /* Simple optimisation if we know that @condition must be true. */
-static void
+void
 optimiseAssuming(SMScopes *scopes, StateMachine *sm, bbdd *condition, bool *done_something)
 {
 	std::vector<StateMachineState *> states;

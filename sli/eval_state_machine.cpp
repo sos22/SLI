@@ -1659,6 +1659,8 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			ssaCorrespondence));
 	if (!crossProductMachine)
 		return NULL;
+	bool ignore;
+	optimiseAssuming(scopes, crossProductMachine, initialStateCondition, &ignore);
 	crossProductMachine =
 		optimiseStateMachine(
 			scopes,

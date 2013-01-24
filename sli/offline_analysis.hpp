@@ -273,5 +273,6 @@ MemoryAccessIdentifier mkPendingMai(const CFGNode *node);
 StateMachineState *getProximalCause(SMScopes *scopes, MachineState *ms, Oracle *oracle, const CFGNode *where, const VexRip &rip, int tid);
 
 StateMachine *mapUnreached(smrbdd::scope *scope, StateMachine *inp, StateMachineRes res);
+void optimiseAssuming(SMScopes *scopes, StateMachine *sm, bbdd *condition, bool *done_something);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */
