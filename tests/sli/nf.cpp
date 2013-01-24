@@ -96,7 +96,7 @@ eval_expression(IRExpr *what, const variable_assignment *var)
 		return acc;
 	}
 	if (what->tag == Iex_Const)
-		return ((IRExprConst *)what)->Ico.U1;
+		return ((IRExprConst *)what)->Ico.content.U1;
 
 	assert(what->tag == Iex_Get);
 	IRExprGet *ieg = (IRExprGet *)what;
