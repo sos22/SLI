@@ -669,7 +669,7 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 			storeMachine,
 			probeMachine,
 			oracle,
-			atomicSurvival,
+			atomicSurvivalConstraint,
 			atomicSurvivalOptimisations(opt.enablepreferCrash()),
 			token);
 
@@ -900,6 +900,7 @@ considerStoreCFG(SMScopes *scopes,
 		 const VexPtr<CFGNode, &ir_heap> cfg,
 		 const VexPtr<Oracle> &oracle,
 		 VexPtr<StateMachine, &ir_heap> probeMachine,
+		 VexPtr<bbdd, &ir_heap> atomicSurvival,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
 		 const VexPtr<MaiMap, &ir_heap> &maiIn,
@@ -946,13 +947,15 @@ considerStoreCFG(SMScopes *scopes,
 		token);
 
 	probeMachine = duplicateStateMachine(probeMachine);
+	bool redoAtomicSurvival = false;
 	probeMachine = localiseLoads(scopes,
 				     mai,
 				     probeMachine,
 				     sm_ssa,
 				     probeOptimisations,
 				     oracleI,
-				     token);
+				     token,
+				     &redoAtomicSurvival);
 	if (TIMEOUT)
 		return NULL;
 
@@ -965,17 +968,25 @@ considerStoreCFG(SMScopes *scopes,
 	   probe machine and the store machine is a single load in the
 	   probe machine and a single store in the store machine then
 	   we don't need to do anything. */
-	if (singleLoadVersusSingleStore(*mai, sm_ssa, probeMachine, opt, oracle)) {
+	if (singleLoadVersusSingleStore(*mai, sm_ssa, probeMachine, probeOptimisations, oracle)) {
 		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
 		return NULL;
 	}
 
-	VexPtr<bbdd, &ir_heap> atomicSurvival(atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracle,
-								       atomicSurvivalOptimisations(opt.enablepreferCrash()),
-								       token));
-	if (!atomicSurvival) {
-		return NULL;
+	if (redoAtomicSurvival) {
+		atomicSurvival = atomicSurvivalConstraint(
+			scopes,
+			mai,
+			probeMachine,
+			NULL,
+			oracleI,
+			atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
+			token);
+		if (!atomicSurvival) {
+			return NULL;
+		}
 	}
+
 	VexPtr<bbdd, &ir_heap> base_verification_condition;
 	base_verification_condition =
 		verificationConditionForStoreMachine(
@@ -1044,17 +1055,17 @@ considerStoreCFG(SMScopes *scopes,
 					mai,
 					truncatedMachine,
 					NULL,
-					oracle,
-					atomicSurvivalOptimisations(opt.enablepreferCrash()),
+					oracleI,
+					atomicSurvivalOptimisations(optIn.enablepreferCrash()),
 					token));
-			if (!truncatedSurvival) {
+			if (!truncAtomicSurvival) {
 				return NULL;
 			}
 			bbdd *t = verificationConditionForStoreMachine(
 				scopes,
 				sm_ssa,
 				truncatedMachine,
-				truncatedSurvival,
+				truncAtomicSurvival,
 				oracleI,
 				mai,
 				optIn,
@@ -1182,6 +1193,7 @@ probeMachineToSummary(SMScopes *scopes,
 		      CfgLabelAllocator &allocLabel,
 		      const DynAnalysisRip &targetRip,
 		      const VexPtr<StateMachine, &ir_heap> &probeMachine,
+		      const VexPtr<bbdd, &ir_heap> &atomicSurvival,
 		      const VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
@@ -1228,6 +1240,7 @@ probeMachineToSummary(SMScopes *scopes,
 					   storeCFG,
 					   oracle,
 					   probeMachine,
+					   atomicSurvival,
 					   STORING_THREAD + i,
 					   optIn.setinterestingStores(&potentiallyConflictingStores),
 					   maiIn,
@@ -1331,10 +1344,19 @@ diagnoseCrash(SMScopes *scopes,
 		return NULL;
 	}
 
+	VexPtr<bbdd, &ir_heap> atomicSurvival;
+	atomicSurvival = atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracleI,
+						  atomicSurvivalOptimisations(optIn.enablepreferCrash()),
+						  token);
+	if (!atomicSurvival) {
+		return NULL;
+	}
+
 	return probeMachineToSummary(scopes,
 				     allocLabel,
 				     targetRip,
 				     probeMachine,
+				     atomicSurvival,
 				     reducedProbeMachine,
 				     oracle,
 				     df,
