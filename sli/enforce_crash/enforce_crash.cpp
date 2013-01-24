@@ -785,12 +785,14 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	std::map<ConcreteThread, std::set<CfgLabel> > rootsCfg;
 	for (auto it = summary->loadMachine->cfg_roots.begin();
 	     it != summary->loadMachine->cfg_roots.end();
-	     it++)
-		rootsCfg[ConcreteThread(summaryId, it->thread)].insert(it->node->label);
+	     it++) {
+		rootsCfg[ConcreteThread(summaryId, it->first.thread)].insert(it->first.node->label);
+	}
 	for (auto it = summary->storeMachine->cfg_roots.begin();
 	     it != summary->storeMachine->cfg_roots.end();
-	     it++)
-		rootsCfg[ConcreteThread(summaryId, it->thread)].insert(it->node->label);
+	     it++) {
+		rootsCfg[ConcreteThread(summaryId, it->first.thread)].insert(it->first.node->label);
+	}
 
 	crashEnforcementData accumulator;
 	for (auto it = sliced_by_hb.begin(); it != sliced_by_hb.end(); it++) {

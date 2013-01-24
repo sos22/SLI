@@ -308,10 +308,27 @@ public:
 			return node->label < o.node->label;
 		}
 	};
-	std::vector<entry_point> cfg_roots;
+	class entry_point_ctxt : public Named {
+		char *mkName() const { return my_asprintf("%ld", rsp_delta); }
+	public:
+		long rsp_delta;
+		entry_point_ctxt(long _rsp_delta)
+			: rsp_delta(_rsp_delta)
+		{}
+		static entry_point_ctxt uninitialised() {
+			return entry_point_ctxt(-99);
+		}
+		bool operator !=(const entry_point_ctxt &o) const {
+			return rsp_delta != o.rsp_delta;
+		}
+		bool parse(const char *buf, const char **end) {
+			return parseDecimalLong(&rsp_delta, buf, end);
+		}
+	};
+	std::map<entry_point, entry_point_ctxt> cfg_roots;
 
 	StateMachine(StateMachineState *_root,
-		     const std::vector<entry_point> &_cfg_roots)
+		     const std::map<entry_point, entry_point_ctxt> &_cfg_roots)
 		: root(_root), cfg_roots(_cfg_roots)
 	{
 	}
@@ -326,8 +343,13 @@ public:
 			       bool *done_something);
 	void visit(HeapVisitor &hv) {
 		hv(root);
-		for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++)
-			hv(it->node);
+		std::map<entry_point, entry_point_ctxt> newRoots;
+		for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++) {
+			entry_point ep(it->first);
+			hv(ep.node);
+			newRoots.insert(std::pair<entry_point, entry_point_ctxt>(ep, it->second));
+		}
+		cfg_roots = newRoots;
 	}
 #ifdef NDEBUG
 	void sanityCheck(const MaiMap &, SMScopes * = NULL) const {}

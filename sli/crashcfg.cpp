@@ -492,12 +492,14 @@ CrashCfg::init(crashEnforcementRoots &roots,
 		std::vector<const CFGNode *> nodesToExplore;
 		for (auto it = summary->loadMachine->cfg_roots.begin();
 		     it != summary->loadMachine->cfg_roots.end();
-		     it++)
-			nodesToExplore.push_back(it->node);
+		     it++) {
+			nodesToExplore.push_back(it->first.node);
+		}
 		for (auto it = summary->storeMachine->cfg_roots.begin();
 		     it != summary->storeMachine->cfg_roots.end();
-		     it++)
-			nodesToExplore.push_back(it->node);
+		     it++) {
+			nodesToExplore.push_back(it->first.node);
+		}
 		while (!nodesToExplore.empty()) {
 			const CFGNode *n = nodesToExplore.back();
 			nodesToExplore.pop_back();

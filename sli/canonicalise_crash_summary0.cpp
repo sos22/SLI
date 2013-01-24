@@ -39,10 +39,10 @@ saneIterator(const t &begin, const t &end)
 {
 	return _saneIterator<t>(begin, end);
 }
-template <typename t> _saneIterator<typename std::vector<t>::iterator>
-saneIterator(std::vector<t> &v)
+template <typename k, typename v> _saneIterator<typename std::map<k, v>::iterator>
+saneIterator(std::map<k, v> &m)
 {
-	return saneIterator(v.begin(), v.end());
+	return saneIterator(m.begin(), m.end());
 }
 
 template <typename underlying_it1, typename underlying_it2>
@@ -85,7 +85,7 @@ public:
 			abort();
 		}
 	}
-	typename underlying_it1::value_type &operator*() {
+	const typename underlying_it1::value_type &operator*() {
 		switch (phase) {
 		case ph_1:
 			return *cursor1;
@@ -96,7 +96,7 @@ public:
 		}
 		abort();
 	}
-	typename underlying_it1::value_type *operator->() {
+	const typename underlying_it1::value_type *operator->() {
 		switch (phase) {
 		case ph_1:
 			return &*cursor1;
@@ -268,6 +268,47 @@ rewriteEntryPointExpressions(CrashSummary *cs, const std::map<std::pair<unsigned
 	return transformCrashSummary(cs, doit);
 }
 
+static void
+findMinimalRoots(StateMachine *sm,
+		 const std::set<const CFGNode *> &needed,
+		 std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > &rootRewrites)
+{
+	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> newRoots;
+	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++) {
+		CFGNode *n = const_cast<CFGNode *>(it->first.node);
+		while (!needed.count(n)) {
+			int nr_successors = 0;
+			for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++) {
+				if (it2->instr)
+					nr_successors++;
+			}
+			if (nr_successors != 1)
+				break;
+			for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++) {
+				if (it2->instr) {
+					n = it2->instr;
+					break;
+				}
+			}
+		}
+		if (debug_root_reduce) {
+			printf("Root rewrite: %d:%s -> %d:%s\n",
+			       it->first.thread, it->first.node->label.name(),
+			       it->first.thread, n->label.name());
+		}
+		rootRewrites.insert(
+			std::pair<std::pair<unsigned, CfgLabel>,
+			          std::pair<unsigned, CfgLabel> >(
+					  std::pair<unsigned, CfgLabel>(it->first.thread, it->first.node->label),
+					  std::pair<unsigned, CfgLabel>(it->first.thread, n->label)));
+		newRoots.insert(std::pair<StateMachine::entry_point,
+				          StateMachine::entry_point_ctxt>
+				(StateMachine::entry_point(it->first.thread, n),
+				 it->second));
+	}
+	sm->cfg_roots = newRoots;
+}
+
 static CrashSummary *
 optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		       const VexPtr<OracleInterface> &oracle,
@@ -317,8 +358,9 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 	for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
 				       saneIterator(cs->storeMachine->cfg_roots));
 	     !it.finished();
-	     it++)
-		enumerateCFG(const_cast<CFGNode *>(it->node), allNodes);
+	     it++) {
+		enumerateCFG(const_cast<CFGNode *>(it->first.node), allNodes);
+	}
 
 	/* Find references of the first sense */
 	{
@@ -356,9 +398,9 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 			     it++) {
 				if (debug_root_reduce) {
 					printf("%s is needed because of register reference\n",
-					       it->node->label.name());
+					       it->first.node->label.name());
 				}
-				needed.insert(it->node);
+				needed.insert(it->first.node);
 			}
 		}
 	}
@@ -431,38 +473,8 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 	   Be conservative for now: if a root isn't needed and it has
 	   a single successor, replace it with that successor. */
 	std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > rootRewrites;
-	for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
-				       saneIterator(cs->storeMachine->cfg_roots));
-	     !it.finished();
-	     it++) {
-		CFGNode *n = const_cast<CFGNode *>(it->node);
-		while (!needed.count(n)) {
-			int nr_successors = 0;
-			for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++) {
-				if (it2->instr)
-					nr_successors++;
-			}
-			if (nr_successors != 1)
-				break;
-			for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++) {
-				if (it2->instr) {
-					n = it2->instr;
-					break;
-				}
-			}
-		}
-		if (debug_root_reduce) {
-			printf("Root rewrite: %d:%s -> %d:%s\n",
-			       it->thread, it->node->label.name(),
-			       it->thread, n->label.name());
-		}
-		rootRewrites.insert(
-			std::pair<std::pair<unsigned, CfgLabel>,
-			          std::pair<unsigned, CfgLabel> >(
-					  std::pair<unsigned, CfgLabel>(it->thread, it->node->label),
-					  std::pair<unsigned, CfgLabel>(it->thread, n->label)));
-		it->node = n;
-	}
+	findMinimalRoots(cs->loadMachine, needed, rootRewrites);
+	findMinimalRoots(cs->storeMachine, needed, rootRewrites);
 
 	cs = rewriteEntryPointExpressions(cs, rootRewrites);
 
@@ -473,7 +485,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		bool reachesNeededInstr = false;
 		std::queue<const CFGNode *> pending;
 		std::set<const CFGNode *> visited;
-		pending.push(it->node);
+		pending.push(it->first.node);
 		while (!reachesNeededInstr && !pending.empty()) {
 			const CFGNode *n = pending.front();
 			pending.pop();
@@ -488,7 +500,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		if (reachesNeededInstr)
 			it++;
 		else
-			it = cs->loadMachine->cfg_roots.erase(it);
+			cs->loadMachine->cfg_roots.erase(it++);
 	}
 	for (auto it = cs->storeMachine->cfg_roots.begin();
 	     it != cs->storeMachine->cfg_roots.end();
@@ -496,7 +508,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		bool reachesNeededInstr = false;
 		std::queue<const CFGNode *> pending;
 		std::set<const CFGNode *> visited;
-		pending.push(it->node);
+		pending.push(it->first.node);
 		while (!reachesNeededInstr && !pending.empty()) {
 			const CFGNode *n = pending.front();
 			pending.pop();
@@ -511,7 +523,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		if (reachesNeededInstr)
 			it++;
 		else
-			it = cs->storeMachine->cfg_roots.erase(it);
+			cs->storeMachine->cfg_roots.erase(it++);
 	}
 
 	rootRewrites.clear();
@@ -535,7 +547,8 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		   instruction I' is also a dominator then every path
 		   from I' to a needed instruction must pass through
 		   I. */
-		CFGNode *root = const_cast<CFGNode *>(s->cfg_roots[0].node);
+		unsigned thread = s->cfg_roots.begin()->first.thread;
+		CFGNode *root = const_cast<CFGNode *>(s->cfg_roots.begin()->first.node);
 		HashedSet<HashedPtr<CFGNode> > nodes;
 		enumerateCFG(root, nodes);
 		std::set<CFGNode *> nodesSet;
@@ -617,9 +630,13 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		rootRewrites.insert(
 			std::pair<std::pair<unsigned, CfgLabel>,
 			          std::pair<unsigned, CfgLabel> >(
-					  std::pair<unsigned, CfgLabel>(s->cfg_roots[0].thread, s->cfg_roots[0].node->label),
-					  std::pair<unsigned, CfgLabel>(s->cfg_roots[0].thread, result->label)));
-		s->cfg_roots[0].node = result;
+					  std::pair<unsigned, CfgLabel>(thread, root->label),
+					  std::pair<unsigned, CfgLabel>(thread, result->label)));
+		std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> newRoots;
+		newRoots.insert(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
+				(StateMachine::entry_point(thread, result),
+				 s->cfg_roots.begin()->second));
+		s->cfg_roots = newRoots;
 	}
 
 	cs = rewriteEntryPointExpressions(cs, rootRewrites);
@@ -630,8 +647,9 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 	for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
 				       saneIterator(cs->storeMachine->cfg_roots));
 	     !it.finished();
-	     it++)
-		enumerateCFG(const_cast<CFGNode *>(it->node), remainingNodes);
+	     it++) {
+		enumerateCFG(const_cast<CFGNode *>(it->first.node), remainingNodes);
+	}
 	for (auto it = mai->begin(); !it.finished(); ) {
 		for (auto it2 = it.begin(); !it2.finished(); ) {
 			if (remainingNodes.contains(const_cast<CFGNode *>(it2.node())))

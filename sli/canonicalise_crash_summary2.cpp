@@ -43,11 +43,11 @@ optimiseStateMachineAssuming(SMScopes *scopes,
 		for (auto it = sm->cfg_roots.begin();
 		     it != sm->cfg_roots.end();
 			) {
-			unsigned tid = it->thread;
-			const CFGNode *root = it->node;
+			unsigned tid = it->first.thread;
+			const CFGNode *root = it->first.node;
 			if ( tid == a->thread &&
 			     assumptionIsTrue != (root->label == a->label) ) {
-				it = sm->cfg_roots.erase(it);
+				sm->cfg_roots.erase(it++);
 			} else {
 				it++;
 			}
@@ -114,12 +114,14 @@ enumCfgNodes(CrashSummary *input, std::set<const CFGNode *> &out)
 	std::vector<const CFGNode *> q;
 	for (auto it = input->loadMachine->cfg_roots.begin();
 	     it != input->loadMachine->cfg_roots.end();
-	     it++)
-		q.push_back(it->node);
+	     it++) {
+		q.push_back(it->first.node);
+	}
 	for (auto it = input->storeMachine->cfg_roots.begin();
 	     it != input->storeMachine->cfg_roots.end();
-	     it++)
-		q.push_back(it->node);
+	     it++) {
+		q.push_back(it->first.node);
+	}
 	while (!q.empty()) {
 		const CFGNode *n = q.back();
 		q.pop_back();
@@ -187,13 +189,14 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 	std::set<std::pair<unsigned, CfgLabel> > machineRoots;
 	for (auto it = input->loadMachine->cfg_roots.begin();
 	     it != input->loadMachine->cfg_roots.end();
-	     it++)
-		machineRoots.insert(std::pair<unsigned, CfgLabel>(it->thread, it->node->label));
+	     it++) {
+		machineRoots.insert(std::pair<unsigned, CfgLabel>(it->first.thread, it->first.node->label));
+	}
 	for (auto it = input->storeMachine->cfg_roots.begin();
 	     it != input->storeMachine->cfg_roots.end();
-	     it++)
-		machineRoots.insert(std::pair<unsigned, CfgLabel>(it->thread, it->node->label));
-
+	     it++) {
+		machineRoots.insert(std::pair<unsigned, CfgLabel>(it->first.thread, it->first.node->label));
+	}
 	input->verificationCondition = removeImpossibleRoots(&input->scopes->bools, input->verificationCondition, machineRoots);
 
 	std::set<MemoryAccessIdentifier> neededMais;

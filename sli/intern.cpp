@@ -230,8 +230,13 @@ StateMachine *
 internStateMachine(StateMachine *sm, internStateMachineTable &t)
 {
 	__set_profiling(internStateMachine);
-	for (auto it = sm->cfg_roots.begin(); !TIMEOUT && it != sm->cfg_roots.end(); it++)
-		it->node = internCFG(it->node, t);
+	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> newRoots;
+	for (auto it = sm->cfg_roots.begin(); !TIMEOUT && it != sm->cfg_roots.end(); it++) {
+		newRoots.insert(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>(
+					StateMachine::entry_point(it->first.thread, internCFG(it->first.node, t)),
+					it->second));
+	}
+	sm->cfg_roots = newRoots;
 	sm->root = internStateMachineState(sm->root, t);
 	return sm;
 }

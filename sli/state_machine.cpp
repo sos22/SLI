@@ -282,21 +282,24 @@ printContainer(const cont &v, FILE *f)
 static void
 printCFGRootedAt(const CFGNode *root, FILE *f,
 		 std::set<const CFGNode *> &done,
-		 const std::vector<StateMachine::entry_point> &roots)
+		 const std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> &roots)
 {
 	if (!done.insert(root).second)
 		return;
-	std::set<unsigned> rootOf;
-	for (auto it = roots.begin(); it != roots.end(); it++)
-		if (root == it->node)
-			rootOf.insert(it->thread);
+	std::map<unsigned, StateMachine::entry_point_ctxt> rootOf;
+	for (auto it = roots.begin(); it != roots.end(); it++) {
+		if (root == it->first.node) {
+			rootOf.insert(std::pair<unsigned, StateMachine::entry_point_ctxt>(it->first.thread, it->second));
+		}
+	}
 	if (!rootOf.empty()) {
 		int printed = 1;
 		fprintf(f, "-");
 		for (auto it = rootOf.begin(); it != rootOf.end(); it++) {
-			if (it != rootOf.begin())
+			if (it != rootOf.begin()) {
 				printed += fprintf(f, ",");
-			printed += fprintf(f, "%d", *it);
+			}
+			printed += fprintf(f, "%d:%s", it->first, it->second.name());
 		}
 		if (printed < 9) {
 			char buf[] = "----------";
@@ -379,7 +382,7 @@ printStateMachinePair(const char *label1, const StateMachine *sm1, const char *l
 		fprintf(f, "CFG:\n");
 		std::set<const CFGNode *> done_cfg;
 		for (auto it = sm1->cfg_roots.begin(); it != sm1->cfg_roots.end(); it++)
-			printCFGRootedAt(it->node, f, done_cfg, sm1->cfg_roots);
+			printCFGRootedAt(it->first.node, f, done_cfg, sm1->cfg_roots);
 		std::vector<const StateMachineState *> states;
 		enumStates(sm1, &states);
 		for (auto it = states.begin(); it != states.end(); it++) {
@@ -395,7 +398,7 @@ printStateMachinePair(const char *label1, const StateMachine *sm1, const char *l
 		fprintf(f, "CFG:\n");
 		std::set<const CFGNode *> done_cfg;
 		for (auto it = sm2->cfg_roots.begin(); it != sm2->cfg_roots.end(); it++)
-			printCFGRootedAt(it->node, f, done_cfg, sm2->cfg_roots);
+			printCFGRootedAt(it->first.node, f, done_cfg, sm2->cfg_roots);
 		std::vector<const StateMachineState *> states;
 		enumStates(sm2, &states);
 		for (auto it = states.begin(); it != states.end(); it++) {
@@ -420,7 +423,7 @@ printStateMachine(const StateMachine *sm, FILE *f, std::map<const StateMachineSt
 	fprintf(f, "CFG:\n");
 	std::set<const CFGNode *> done_cfg;
 	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++)
-		printCFGRootedAt(it->node, f, done_cfg, sm->cfg_roots);
+		printCFGRootedAt(it->first.node, f, done_cfg, sm->cfg_roots);
 	printStateMachine(sm->root, f, labels);
 	fprintf(f, "Root: l%d\n", labels[sm->root]);
 }
@@ -567,19 +570,23 @@ parseSucc(succ *out, const char *str, const char **suffix)
 }
 
 static bool
-parseCFG(std::vector<StateMachine::entry_point> &roots,
+parseCFG(std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> &roots,
 	 const char *str, const char **suffix,
 	 std::map<CfgLabel, const CFGNode *> &cfg_labels)
 {
 	std::map<CFGNode *, std::vector<succ> > relocations;
 	while (1) {
-		std::set<unsigned> rootOf;
+		std::map<unsigned, StateMachine::entry_point_ctxt> rootOf;
 		if (parseThisChar('-', str, &str)) {
 			while (1) {
 				unsigned v;
-				if (!parseDecimalUInt(&v, str, &str))
+				StateMachine::entry_point_ctxt ctxt(StateMachine::entry_point_ctxt::uninitialised());
+				if (!parseDecimalUInt(&v, str, &str) ||
+				    !parseThisChar(':', str, &str) ||
+				    !ctxt.parse(str, &str)) {
 					return false;
-				rootOf.insert(v);
+				}
+				rootOf.insert(std::pair<unsigned, StateMachine::entry_point_ctxt>(v, ctxt));
 				if (parseThisChar(',', str, &str))
 					continue;
 				if (!parseThisChar('-', str, &str))
@@ -618,8 +625,12 @@ parseCFG(std::vector<StateMachine::entry_point> &roots,
 		if (!parseThisChar('\n', str, &str))
 			return false;
 		cfg_labels[label] = work;
-		for (auto it = rootOf.begin(); it != rootOf.end(); it++)
-			roots.push_back(StateMachine::entry_point(*it, work));
+		for (auto it = rootOf.begin(); it != rootOf.end(); it++) {
+			roots.insert(std::pair<StateMachine::entry_point,
+				               StateMachine::entry_point_ctxt>(
+						       StateMachine::entry_point(it->first, work),
+						       it->second));
+		}
 	}
 	for (auto it = relocations.begin(); it != relocations.end(); it++) {
 		CFGNode *n = it->first;
@@ -650,7 +661,7 @@ parseStateMachine(SMScopes *scopes,
 	   returns true. */
 	root = (StateMachineState *)0xf001deadbeeful; 
 
-	std::vector<StateMachine::entry_point> cfg_roots;
+	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> cfg_roots;
 	if (!parseThisString("CFG:\n", str, &str) ||
 	    !parseCFG(cfg_roots, str, &str, labelToNode) ||
 	    !parseStateMachine(scopes, &root, str, suffix, labelToState))
@@ -1043,7 +1054,7 @@ StateMachine::sanityCheck(const MaiMap &mai, SMScopes *scopes) const
 
 	std::queue<const CFGNode *> pending;
 	for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++)
-		pending.push(it->node);
+		pending.push(it->first.node);
 	while (!pending.empty()) {
 		const CFGNode *n = pending.front();
 		pending.pop();
@@ -1156,11 +1167,13 @@ MaiMap::fromFile(const StateMachine *sm1, const StateMachine *sm2, const char *f
 {
 	std::map<CfgLabel, const CFGNode *> lookup;
 	std::queue<const CFGNode *> pending;
-	for (auto it = sm1->cfg_roots.begin(); it != sm1->cfg_roots.end(); it++)
-		pending.push(it->node);
+	for (auto it = sm1->cfg_roots.begin(); it != sm1->cfg_roots.end(); it++) {
+		pending.push(it->first.node);
+	}
 	if (sm2) {
-		for (auto it = sm2->cfg_roots.begin(); it != sm2->cfg_roots.end(); it++)
-			pending.push(it->node);
+		for (auto it = sm2->cfg_roots.begin(); it != sm2->cfg_roots.end(); it++) {
+			pending.push(it->first.node);
+		}
 	}
 	while (!pending.empty()) {
 		const CFGNode *n = pending.front();

@@ -14,10 +14,14 @@
 #include "libvex_guest_offsets.h"
 
 #ifndef NDEBUG
+#if !CONFIG_NO_STATIC_ALIASING
 static bool debug_assign_frame_ids = false;
+#endif
 static bool debug_rsp_canonicalisation = false;
 #else
+#if !CONFIG_NO_STATIC_ALIASING
 #define debug_assign_frame_ids false
+#endif
 #define debug_rsp_canonicalisation false
 #endif
 
@@ -1308,9 +1312,10 @@ addEntrySideEffects(SMScopes *scopes,
 		    const CfgLabel &entryLabel
 #if !CONFIG_NO_STATIC_ALIASING
 		    , const std::vector<FrameId> &entryStack,
-		    , std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports,
-		    int entryIdx
+		    , std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports
+		    , int entryIdx
 #endif
+		    , long *rsp_delta
 	)
 {
 	StateMachineState *cursor = final;
@@ -1334,7 +1339,7 @@ addEntrySideEffects(SMScopes *scopes,
 			cursor);
 	}
 
-	if (getRspCanonicalisationDelta(scopes, final, &delta, entryLabel)) {
+	if (getRspCanonicalisationDelta(scopes, final, rsp_delta, entryLabel)) {
 		cursor = new StateMachineSideEffecting(
 			vr,
 			new StateMachineSideEffectCopy(
@@ -1344,7 +1349,7 @@ addEntrySideEffects(SMScopes *scopes,
 					&scopes->bools,
 					IRExpr_Associative_V(
 						Iop_Add64,
-						IRExpr_Const_U64(-delta),
+						IRExpr_Const_U64(-*rsp_delta),
 						IRExpr_Get(
 							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
 							Ity_I64),
@@ -2336,20 +2341,22 @@ probeCFGsToMachine(SMScopes *scopes,
 	std::map<std::pair<int, PointerAliasingSet>, std::set<int> > neededImports;
 	int entryIdx = 1;
 #endif
+	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> cfg_roots_this_sm;
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		CFGNode *cfgnode = *it;
 		StateMachineState *root = results[*it];
+		long rsp_delta;
 		root = addEntrySideEffects(scopes, oracle, tid, root, cfgnode->rip, cfgnode->label
 #if !CONFIG_NO_STATIC_ALIASING
 					   , entryStacks[root], neededImports, entryIdx++
 #endif
+					   , &rsp_delta
 			);
 		roots_this_sm2.push_back(std::pair<CFGNode *, StateMachineState *>(cfgnode, root));
-	}
-
-	std::vector<StateMachine::entry_point> cfg_roots_this_sm;
-	for (auto it = roots.begin(); !it.finished(); it.advance()) {
-		cfg_roots_this_sm.push_back(StateMachine::entry_point(tid, *it));
+		cfg_roots_this_sm.insert(
+			std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
+			(StateMachine::entry_point(tid, *it),
+			 StateMachine::entry_point_ctxt(rsp_delta)));
 	}
 
 	StateMachineState *root = entryState(scopes, VexRip(), roots_this_sm2, tid, false);
@@ -2382,8 +2389,6 @@ storeCFGsToMachine(SMScopes *scopes,
 		}
 	} doOne;
 	std::map<CFGNode *, StateMachineState *> results;
-	std::vector<StateMachine::entry_point> roots;
-	roots.push_back(StateMachine::entry_point(tid, root));
 	StateMachineState *s =
 		performTranslation(
 			scopes,
@@ -2394,18 +2399,17 @@ storeCFGsToMachine(SMScopes *scopes,
 			doOne);
 	if (TIMEOUT)
 		return NULL;
+#if !CONFIG_NO_STATIC_ALIASING
 	std::set<StateMachineState *> sm_roots;
 	sm_roots.insert(s);
-#if !CONFIG_NO_STATIC_ALIASING
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	assignFrameIds(sm_roots, tid, entryStacks);
 	if (TIMEOUT)
 		return NULL;
-#endif
-	setMais(scopes, s, tid, mai);
-#if !CONFIG_NO_STATIC_ALIASING
 	std::map<std::pair<int, PointerAliasingSet>, std::set<int> > neededImports;
 #endif
+	setMais(scopes, s, tid, mai);
+	long rsp_delta;
 	s = addEntrySideEffects(
 		scopes,
 		oracle,
@@ -2414,11 +2418,16 @@ storeCFGsToMachine(SMScopes *scopes,
 		root->rip,
 		root->label
 #if !CONFIG_NO_STATIC_ALIASING
-		, entryStacks[s],
-		neededImports,
-		0
+		, entryStacks[s]
+		, neededImports
+		, 0
 #endif
+		, &rsp_delta
 		);
+	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> roots;
+	roots.insert(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
+		     (StateMachine::entry_point(tid, root),
+		      StateMachine::entry_point_ctxt(rsp_delta)));
 	return new StateMachine(
 		importRegisters(s
 #if !CONFIG_NO_STATIC_ALIASING

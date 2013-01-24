@@ -35,7 +35,11 @@ trimCfg(StateMachine *machine, const std::set<std::pair<unsigned, CfgLabel> > &n
 	std::set<StateMachine::entry_point> neededNodes;
 	std::set<StateMachine::entry_point> allNodes;
 
-	std::vector<StateMachine::entry_point> q(machine->cfg_roots);
+	std::vector<StateMachine::entry_point> q;
+	q.reserve(machine->cfg_roots.size());
+	for (auto it = machine->cfg_roots.begin(); it != machine->cfg_roots.end(); it++) {
+		q.push_back(it->first);
+	}
 	while (!q.empty()) {
 		if (!allNodes.insert(q.back()).second) {
 			q.pop_back();
@@ -94,26 +98,42 @@ trimCfg(StateMachine *machine, const std::set<std::pair<unsigned, CfgLabel> > &n
 	/* Now we need to find a new root set for the machine, by
 	   advancing the existing roots until they reach something in
 	   desired. */
-	std::set<StateMachine::entry_point> possibleRoots(machine->cfg_roots.begin(), machine->cfg_roots.end());
-	std::set<StateMachine::entry_point> newRoots;
+	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> possibleRoots(machine->cfg_roots);
+	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> newRoots;
 	while (!possibleRoots.empty()) {
-		StateMachine::entry_point e = *possibleRoots.begin();
-		possibleRoots.erase(e);
+		auto it = possibleRoots.begin();
+		StateMachine::entry_point e(it->first);
+		StateMachine::entry_point_ctxt ctxt(it->second);
+		possibleRoots.erase(it);
 		if (desired.count(e)) {
-			newRoots.insert(e);
+			auto r = newRoots.insert(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>(e, ctxt));
+			if (r.first->second != ctxt) {
+				abort();
+			}
 		} else {
 			for (auto it = e.node->successors.begin();
 			     it != e.node->successors.end();
-			     it++)
-				if (it->instr)
-					possibleRoots.insert(StateMachine::entry_point(e.thread, it->instr));
+			     it++) {
+				if (it->instr) {
+					auto r = possibleRoots.insert(
+						std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
+						(StateMachine::entry_point(e.thread, it->instr),
+						 ctxt));
+					if (r.first->second != ctxt) {
+						abort();
+					}
+				}
+			}
 		}
 	}
 
 	/* @newRoots is now the new root set.  Remove anything
 	 * reachable which shouldn't be reachable. */
 	std::vector<StateMachine::entry_point> pending;
-	pending.insert(pending.begin(), newRoots.begin(), newRoots.end());
+	pending.reserve(newRoots.size());
+	for (auto it = newRoots.begin(); it != newRoots.end(); it++) {
+		pending.push_back(it->first);
+	}
 	while (!pending.empty()) {
 		StateMachine::entry_point e = pending.back();
 		pending.pop_back();
@@ -131,8 +151,7 @@ trimCfg(StateMachine *machine, const std::set<std::pair<unsigned, CfgLabel> > &n
 
 	/* Done */
 	machine->cfg_roots.clear();
-	machine->cfg_roots.insert(machine->cfg_roots.begin(),
-				  newRoots.begin(),
+	machine->cfg_roots.insert(newRoots.begin(),
 				  newRoots.end());
 }
 
@@ -782,7 +801,7 @@ stackValidatedEntryPoints(Oracle *oracle,
 	assert(ctxt.relocs.empty());
 }
 
-typedef std::map<SummaryId, std::vector<StateMachine::entry_point> > summaryRootsT;
+typedef std::map<SummaryId, std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> > summaryRootsT;
 static void
 findEntryLabels(unsigned long rip,
 		std::set<InstructionLabel::entry> &entryPoints,
@@ -791,13 +810,14 @@ findEntryLabels(unsigned long rip,
 	for (auto it = summaryRoots.begin(); it != summaryRoots.end(); it++) {
 		SummaryId summary(it->first);
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
-			unsigned thread = it2->thread;
-			const CFGNode *n = it2->node;
-			if (n->rip.unwrap_vexrip() == rip)
+			unsigned thread = it2->first.thread;
+			const CFGNode *n = it2->first.node;
+			if (n->rip.unwrap_vexrip() == rip) {
 				entryPoints.insert(
 					InstructionLabel::entry(summary,
 								thread,
 								n));
+			}
 		}
 	}
 }
@@ -1550,16 +1570,17 @@ buildPatchForCrashSummary(Oracle *oracle,
 
 			for (auto it = summary->loadMachine->cfg_roots.begin();
 			     it != summary->loadMachine->cfg_roots.end();
-			     it++)
-				cfgRoots[ConcreteThread(summaryId, it->thread)].insert(it->node->label);
+			     it++) {
+				cfgRoots[ConcreteThread(summaryId, it->first.thread)].insert(it->first.node->label);
+			}
 			for (auto it = summary->storeMachine->cfg_roots.begin();
 			     it != summary->storeMachine->cfg_roots.end();
-			     it++)
-				cfgRoots[ConcreteThread(summaryId, it->thread)].insert(it->node->label);
+			     it++) {
+				cfgRoots[ConcreteThread(summaryId, it->first.thread)].insert(it->first.node->label);
+			}
 
 			summaryRoots[summaryId] = summary->loadMachine->cfg_roots;
 			summaryRoots[summaryId].insert(
-				summaryRoots[summaryId].end(),
 				summary->storeMachine->cfg_roots.begin(),
 				summary->storeMachine->cfg_roots.end());
 		}
