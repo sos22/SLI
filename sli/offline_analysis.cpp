@@ -894,6 +894,105 @@ localiseLoads(SMScopes *scopes,
 		done_something);
 }
 
+static StateMachineSideEffect *
+optimiseAssuming(SMScopes *scopes, StateMachineSideEffect *se, bbdd *assumption)
+{
+	switch (se->type) {
+	case StateMachineSideEffect::Load: {
+		auto sml = (StateMachineSideEffectLoad *)se;
+		auto addr = exprbdd::assume(&scopes->exprs, sml->addr, assumption);
+		if (addr == sml->addr)
+			return sml;
+		else
+			return new StateMachineSideEffectLoad(sml, addr);
+	}
+	case StateMachineSideEffect::Store: {
+		auto sms = (StateMachineSideEffectStore *)se;
+		auto addr = exprbdd::assume(&scopes->exprs, sms->addr, assumption);
+		auto data = exprbdd::assume(&scopes->exprs, sms->data, assumption);
+		if (addr == sms->addr && data == sms->data)
+			return sms;
+		else
+			return new StateMachineSideEffectStore(sms, addr, data);
+	}
+	case StateMachineSideEffect::Copy: {
+		auto smc = (StateMachineSideEffectCopy *)se;
+		auto data = exprbdd::assume(&scopes->exprs, smc->value, assumption);
+		if (data == smc->value)
+			return smc;
+		else
+			return new StateMachineSideEffectCopy(smc, data);
+	}
+	case StateMachineSideEffect::AssertFalse: {
+		auto sma = (StateMachineSideEffectAssertFalse *)se;
+		auto data = bbdd::assume(&scopes->bools, sma->value, assumption);
+		if (data == sma->value)
+			return sma;
+		else
+			return new StateMachineSideEffectAssertFalse(sma, data);
+	}
+	case StateMachineSideEffect::StartAtomic:
+	case StateMachineSideEffect::EndAtomic:
+	case StateMachineSideEffect::Unreached:
+	case StateMachineSideEffect::ImportRegister:
+		return se;
+	case StateMachineSideEffect::Phi: {
+		auto smp = (StateMachineSideEffectPhi *)se;
+		unsigned i;
+		exprbdd *v;
+		for (i = 0; i < smp->generations.size(); i++) {
+			v = exprbdd::assume(&scopes->exprs, smp->generations[i].val, assumption);
+			if (v != smp->generations[i].val)
+				break;
+		}
+		if (i == smp->generations.size())
+			return se;
+		std::vector<StateMachineSideEffectPhi::input> inputs(smp->generations);
+		inputs[i].val = v;
+		for (i++; i < inputs.size(); i++) {
+			inputs[i].val = exprbdd::assume(&scopes->exprs, inputs[i].val, assumption);
+		}
+		return new StateMachineSideEffectPhi(smp, inputs);
+	}
+		
+	}
+	abort();
+}
+
+/* Simple optimisation if we know that @condition must be true. */
+static void
+optimiseAssuming(SMScopes *scopes, StateMachine *sm, bbdd *condition, bool *done_something)
+{
+	std::vector<StateMachineState *> states;
+	enumStates(sm, &states);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		StateMachineState *s = *it;
+		switch (s->type) {
+		case StateMachineState::Bifurcate: {
+			auto smb = (StateMachineBifurcate *)s;
+			*done_something |= smb->set_condition(
+				bbdd::assume(&scopes->bools, smb->condition, condition));
+			break;
+		}
+		case StateMachineState::Terminal: {
+			auto smt = (StateMachineTerminal *)s;
+			*done_something |= smt->set_res(
+				smrbdd::assume(&scopes->smrs, smt->res, condition));
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			auto sme = (StateMachineSideEffecting *)s;
+			if (sme->sideEffect) {
+				auto newSe = optimiseAssuming(scopes, sme->sideEffect, condition);
+				*done_something |= (newSe != sme->sideEffect);
+				sme->sideEffect = newSe;
+			}
+			break;
+		}
+		}
+	}
+}
+
 static CrashSummary *
 considerStoreCFG(SMScopes *scopes,
 		 const DynAnalysisRip &target_rip,
@@ -984,6 +1083,11 @@ considerStoreCFG(SMScopes *scopes,
 			token);
 		if (!atomicSurvival) {
 			return NULL;
+		}
+		bool needReopt = false;
+		optimiseAssuming(scopes, probeMachine, atomicSurvival, &needReopt);
+		if (needReopt) {
+			probeMachine = optimiseStateMachine(scopes, mai, probeMachine, probeOptimisations, oracle, true, token);
 		}
 	}
 
@@ -1350,6 +1454,14 @@ diagnoseCrash(SMScopes *scopes,
 						  token);
 	if (!atomicSurvival) {
 		return NULL;
+	}
+
+	bool needReopt = false;
+	optimiseAssuming(scopes, probeMachine, atomicSurvival, &needReopt);
+	if (needReopt) {
+		probeMachine = optimiseStateMachine(scopes, mai, probeMachine,
+						    optIn.enableignoreSideEffects(),
+						    oracle, true, token);
 	}
 
 	return probeMachineToSummary(scopes,

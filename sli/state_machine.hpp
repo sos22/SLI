@@ -465,10 +465,12 @@ public:
 		assert(res);
 	}
 	smrbdd *const res;
-	void set_res(smrbdd *_res)
+	bool set_res(smrbdd *_res)
 	{
+		bool r = res != _res;
 		assert(_res);
 		*(smrbdd **)&res = _res;
+		return r;
 	}
 
 	StateMachineState *optimise(SMScopes *, const AllowableOptimisations &, bool *);
@@ -599,10 +601,12 @@ public:
 	}
 
 	bbdd *const condition;
-	void set_condition(bbdd *_cond)
+	bool set_condition(bbdd *_cond)
 	{
+		bool res = condition != _cond;
 		assert(_cond);
 		*(bbdd **)&condition = _cond;
+		return res;
 	}
 
 	StateMachineState *trueTarget;
