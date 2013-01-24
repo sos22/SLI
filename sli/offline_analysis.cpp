@@ -440,7 +440,7 @@ getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::s
  * thing becomes very easy. */
 static bool
 singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, StateMachine *probeMachine,
-			    const AllowableOptimisations &opt, OracleInterface *oracle)
+			    const IRExprOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineSideEffectStore *> storeMachineStores;
 	std::set<StateMachineSideEffectMemoryAccess *> probeMachineAccesses;
@@ -653,63 +653,46 @@ removeAnnotations(SMScopes *scopes,
 static bbdd *
 verificationConditionForStoreMachine(SMScopes *scopes,
 				     VexPtr<StateMachine, &ir_heap> &storeMachine,
-				     VexPtr<StateMachine, &ir_heap> probeMachine,
+				     VexPtr<StateMachine, &ir_heap> &probeMachine,
 				     VexPtr<OracleInterface> &oracle,
 				     VexPtr<MaiMap, &ir_heap> &mai,
-				     const AllowableOptimisations &optIn,
+				     const AllowableOptimisations &opt,
 				     GarbageCollectionToken token)
 {
 	__set_profiling(verificationConditionForStoreMachine);
-	AllowableOptimisations storeOptimisations =
-		optIn.
-		   enableassumeExecutesAtomically().
-		   enableassumeNoInterferingStores();
-	AllowableOptimisations probeOptimisations =
-		optIn.
-		   enableignoreSideEffects();
-
-	VexPtr<StateMachine, &ir_heap> sm;
-	sm = duplicateStateMachine(storeMachine);
-	sm = optimiseStateMachine(scopes, mai, sm, storeOptimisations, oracle, true, token);
-
-	fprintf(_logfile, "\t\tStore machine:\n");
-	printStateMachine(sm, _logfile);
-
-	probeMachine = optimiseStateMachine(scopes, mai, probeMachine, probeOptimisations, oracle, true, token);
-
-	fprintf(_logfile, "\t\tAssertion-free probe machine:\n");
-	printStateMachine(probeMachine, _logfile);
 
 	/* Special case: if the only possible interaction between the
 	   probe machine and the store machine is a single load in the
 	   probe machine and a single store in the store machine then
 	   we don't need to do anything. */
-	if (singleLoadVersusSingleStore(*mai, storeMachine, probeMachine, optIn, oracle)) {
+	if (singleLoadVersusSingleStore(*mai, storeMachine, probeMachine, opt, oracle)) {
 		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
 		return NULL;
 	}
 
-	VexPtr<bbdd, &ir_heap> assumption;
-	assumption = atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracle,
-					      atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
-					      token);
+	VexPtr<bbdd, &ir_heap> assumption(atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracle,
+								   atomicSurvivalOptimisations(opt.enablepreferCrash()),
+								   token));
 	if (!assumption)
 		return NULL;
 
 	assumption = writeMachineSuitabilityConstraint(
 		scopes,
 		mai,
-		sm,
+		storeMachine,
 		probeMachine,
 		oracle,
 		assumption,
-		atomicSurvivalOptimisations(optIn.enablepreferCrash()),
+		atomicSurvivalOptimisations(opt.enablepreferCrash()),
 		token);
 
 	if (!assumption) {
 		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
 		return NULL;
 	}
+
+	VexPtr<StateMachine, &ir_heap> sm;
+	sm = duplicateStateMachine(storeMachine);
 
 	/* Figure out when the cross product machine will be at risk
 	 * of crashing. */
@@ -720,7 +703,7 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 			sm,
 			oracle,
 			assumption,
-			optIn.disablepreferCrash(),
+			opt.disablepreferCrash(),
 			mai,
 			token);
 	if (!crash_constraint) {
@@ -974,6 +957,7 @@ considerStoreCFG(SMScopes *scopes,
 		oracle,
 		true,
 		token);
+
 	probeMachine = duplicateStateMachine(probeMachine);
 	probeMachine = localiseLoads(scopes,
 				     mai,
@@ -985,7 +969,13 @@ considerStoreCFG(SMScopes *scopes,
 	if (TIMEOUT)
 		return NULL;
 
-	VexPtr<bbdd, &ir_heap> base_verification_condition(
+	fprintf(_logfile, "\t\tLocalised probe machine:\n");
+	printStateMachine(probeMachine, _logfile);
+	fprintf(_logfile, "\t\tStore machine:\n");
+	printStateMachine(sm_ssa, _logfile);
+
+	VexPtr<bbdd, &ir_heap> base_verification_condition;
+	base_verification_condition =
 		verificationConditionForStoreMachine(
 			scopes,
 			sm_ssa,
@@ -993,7 +983,7 @@ considerStoreCFG(SMScopes *scopes,
 			oracleI,
 			mai,
 			optIn,
-			token));
+			token);
 	if (!base_verification_condition || TIMEOUT)
 		return NULL;
 
