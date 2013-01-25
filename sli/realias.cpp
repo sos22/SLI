@@ -921,6 +921,9 @@ AliasTable::build(const MaiMap &decode,
 
 	/* Now convert that into an actual aliasing table. */
 	for (auto it = reaching.begin(); it != reaching.end(); it++) {
+		if (TIMEOUT) {
+			return false;
+		}
 		assert(it->first->type == StateMachineState::SideEffecting);
 		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)it->first;
 		StateMachineSideEffect *se = smse->getSideEffect();

@@ -1843,6 +1843,8 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 		writeMachine,
 		readMachine,
 		smr_crash);
+	if (TIMEOUT)
+		return NULL;
 	combinedMachine->assertAcyclic();
 	combinedMachine = mapUnreached(&scopes->smrs, combinedMachine, smr_crash);
 	combinedMachine = optimiseStateMachine(scopes,

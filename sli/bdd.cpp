@@ -792,6 +792,8 @@ quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 bbdd *
 bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo)
 {
+	if (TIMEOUT)
+		return NULL;
 	auto it_did_insert = memo.insert(std::pair<IRExpr *, bbdd *>(a, (bbdd *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
