@@ -44,6 +44,11 @@ saneIterator(std::map<k, v> &m)
 {
 	return saneIterator(m.begin(), m.end());
 }
+template <typename k> _saneIterator<typename std::vector<k>::iterator>
+saneIterator(std::vector<k> &m)
+{
+	return saneIterator(m.begin(), m.end());
+}
 
 template <typename underlying_it1, typename underlying_it2>
 class concatIterator {
@@ -273,7 +278,6 @@ findMinimalRoots(StateMachine *sm,
 		 const std::set<const CFGNode *> &needed,
 		 std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > &rootRewrites)
 {
-	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> newRoots;
 	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++) {
 		CFGNode *n = const_cast<CFGNode *>(it->first.node);
 		while (!needed.count(n)) {
@@ -301,12 +305,8 @@ findMinimalRoots(StateMachine *sm,
 			          std::pair<unsigned, CfgLabel> >(
 					  std::pair<unsigned, CfgLabel>(it->first.thread, it->first.node->label),
 					  std::pair<unsigned, CfgLabel>(it->first.thread, n->label)));
-		newRoots.insert(std::pair<StateMachine::entry_point,
-				          StateMachine::entry_point_ctxt>
-				(StateMachine::entry_point(it->first.thread, n),
-				 it->second));
+		it->first.node = n;
 	}
-	sm->cfg_roots = newRoots;
 }
 
 static CrashSummary *
@@ -633,10 +633,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 					  std::pair<unsigned, CfgLabel>(thread, root->label),
 					  std::pair<unsigned, CfgLabel>(thread, result->label)));
 		std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> newRoots;
-		newRoots.insert(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
-				(StateMachine::entry_point(thread, result),
-				 s->cfg_roots.begin()->second));
-		s->cfg_roots = newRoots;
+		s->cfg_roots.begin()->first.node = result;
 	}
 
 	cs = rewriteEntryPointExpressions(cs, rootRewrites);

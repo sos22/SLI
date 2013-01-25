@@ -98,30 +98,24 @@ trimCfg(StateMachine *machine, const std::set<std::pair<unsigned, CfgLabel> > &n
 	/* Now we need to find a new root set for the machine, by
 	   advancing the existing roots until they reach something in
 	   desired. */
-	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> possibleRoots(machine->cfg_roots);
-	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> newRoots;
+	std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > possibleRoots(machine->cfg_roots);
+	std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > newRoots;
 	while (!possibleRoots.empty()) {
 		auto it = possibleRoots.begin();
 		StateMachine::entry_point e(it->first);
 		StateMachine::entry_point_ctxt ctxt(it->second);
 		possibleRoots.erase(it);
 		if (desired.count(e)) {
-			auto r = newRoots.insert(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>(e, ctxt));
-			if (r.first->second != ctxt) {
-				abort();
-			}
+			newRoots.push_back(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>(e, ctxt));
 		} else {
 			for (auto it = e.node->successors.begin();
 			     it != e.node->successors.end();
 			     it++) {
 				if (it->instr) {
-					auto r = possibleRoots.insert(
+					possibleRoots.push_back(
 						std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
 						(StateMachine::entry_point(e.thread, it->instr),
 						 ctxt));
-					if (r.first->second != ctxt) {
-						abort();
-					}
 				}
 			}
 		}
@@ -150,9 +144,7 @@ trimCfg(StateMachine *machine, const std::set<std::pair<unsigned, CfgLabel> > &n
 	}
 
 	/* Done */
-	machine->cfg_roots.clear();
-	machine->cfg_roots.insert(newRoots.begin(),
-				  newRoots.end());
+	machine->cfg_roots = newRoots;
 }
 
 class InstructionLabel : public Named {
@@ -801,7 +793,7 @@ stackValidatedEntryPoints(Oracle *oracle,
 	assert(ctxt.relocs.empty());
 }
 
-typedef std::map<SummaryId, std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> > summaryRootsT;
+typedef std::map<SummaryId, std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > > summaryRootsT;
 static void
 findEntryLabels(unsigned long rip,
 		std::set<InstructionLabel::entry> &entryPoints,
@@ -1581,6 +1573,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 
 			summaryRoots[summaryId] = summary->loadMachine->cfg_roots;
 			summaryRoots[summaryId].insert(
+				summaryRoots[summaryId].end(),
 				summary->storeMachine->cfg_roots.begin(),
 				summary->storeMachine->cfg_roots.end());
 		}
