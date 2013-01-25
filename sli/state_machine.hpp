@@ -325,10 +325,12 @@ public:
 			return parseDecimalLong(&rsp_delta, buf, end);
 		}
 	};
-	std::map<entry_point, entry_point_ctxt> cfg_roots;
+	/* Semantically, this is a map (i.e. no repeats on it->first),
+	   but that can't be embedded in a GC'd structure. */
+	std::vector<std::pair<entry_point, entry_point_ctxt> > cfg_roots;
 
 	StateMachine(StateMachineState *_root,
-		     const std::map<entry_point, entry_point_ctxt> &_cfg_roots)
+		     const std::vector<std::pair<entry_point, entry_point_ctxt> > &_cfg_roots)
 		: root(_root), cfg_roots(_cfg_roots)
 	{
 	}
@@ -343,13 +345,9 @@ public:
 			       bool *done_something);
 	void visit(HeapVisitor &hv) {
 		hv(root);
-		std::map<entry_point, entry_point_ctxt> newRoots;
 		for (auto it = cfg_roots.begin(); it != cfg_roots.end(); it++) {
-			entry_point ep(it->first);
-			hv(ep.node);
-			newRoots.insert(std::pair<entry_point, entry_point_ctxt>(ep, it->second));
+			hv(it->first.node);
 		}
-		cfg_roots = newRoots;
 	}
 #ifdef NDEBUG
 	void sanityCheck(const MaiMap &, SMScopes * = NULL) const {}

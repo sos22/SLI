@@ -1525,7 +1525,7 @@ buildCrossProductMachine(SMScopes *scopes,
 		*r.first = newState;
 	}
 
-	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> cfg_roots(probeMachine->cfg_roots);
+	std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > cfg_roots(probeMachine->cfg_roots);
 	for (auto it = storeMachine->cfg_roots.begin(); it != storeMachine->cfg_roots.end(); it++) {
 		bool already_present = false;
 		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++) {
@@ -1534,7 +1534,7 @@ buildCrossProductMachine(SMScopes *scopes,
 			}
 		}
 		if (!already_present) {
-			cfg_roots.insert(*it);
+			cfg_roots.push_back(*it);
 		}
 	}
         return convertToSSA(scopes, new StateMachine(crossMachineRoot, cfg_roots), ssaCorrespondence);
@@ -1807,7 +1807,7 @@ concatenateStateMachinesCrashing(SMScopes *scopes, const StateMachine *machine, 
 		*reloc.first = it->second;
 	}
 
-	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> cfg_roots(machine->cfg_roots);
+	std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > cfg_roots(machine->cfg_roots);
 	for (auto it = to->cfg_roots.begin(); it != to->cfg_roots.end(); it++) {
 		bool already_present = false;
 		for (auto it2 = cfg_roots.begin(); !already_present && it2 != cfg_roots.end(); it2++) {
@@ -1816,7 +1816,7 @@ concatenateStateMachinesCrashing(SMScopes *scopes, const StateMachine *machine, 
 			}
 		}
 		if (!already_present) {
-			cfg_roots.insert(*it);
+			cfg_roots.push_back(*it);
 		}
 	}
 	return new StateMachine(newRoot, cfg_roots);

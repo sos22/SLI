@@ -282,7 +282,7 @@ printContainer(const cont &v, FILE *f)
 static void
 printCFGRootedAt(const CFGNode *root, FILE *f,
 		 std::set<const CFGNode *> &done,
-		 const std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> &roots)
+		 const std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > &roots)
 {
 	if (!done.insert(root).second)
 		return;
@@ -570,7 +570,7 @@ parseSucc(succ *out, const char *str, const char **suffix)
 }
 
 static bool
-parseCFG(std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> &roots,
+parseCFG(std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > &roots,
 	 const char *str, const char **suffix,
 	 std::map<CfgLabel, const CFGNode *> &cfg_labels)
 {
@@ -626,10 +626,11 @@ parseCFG(std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> &ro
 			return false;
 		cfg_labels[label] = work;
 		for (auto it = rootOf.begin(); it != rootOf.end(); it++) {
-			roots.insert(std::pair<StateMachine::entry_point,
-				               StateMachine::entry_point_ctxt>(
-						       StateMachine::entry_point(it->first, work),
-						       it->second));
+			roots.push_back(
+				std::pair<StateMachine::entry_point,
+					  StateMachine::entry_point_ctxt>(
+						  StateMachine::entry_point(it->first, work),
+						  it->second));
 		}
 	}
 	for (auto it = relocations.begin(); it != relocations.end(); it++) {
@@ -661,7 +662,7 @@ parseStateMachine(SMScopes *scopes,
 	   returns true. */
 	root = (StateMachineState *)0xf001deadbeeful; 
 
-	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> cfg_roots;
+	std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > cfg_roots;
 	if (!parseThisString("CFG:\n", str, &str) ||
 	    !parseCFG(cfg_roots, str, &str, labelToNode) ||
 	    !parseStateMachine(scopes, &root, str, suffix, labelToState))

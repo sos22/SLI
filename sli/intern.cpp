@@ -245,13 +245,9 @@ void
 internStateMachineCfg(StateMachine *sm)
 {
 	internStateMachineTable t;
-	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> newRoots;
 	for (auto it = sm->cfg_roots.begin(); !TIMEOUT && it != sm->cfg_roots.end(); it++) {
-		newRoots.insert(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>(
-					StateMachine::entry_point(it->first.thread, internCFG(it->first.node, t)),
-					it->second));
+		it->first.node = internCFG(it->first.node, t);
 	}
-	sm->cfg_roots = newRoots;
 }
 
 void

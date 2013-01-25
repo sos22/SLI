@@ -2342,7 +2342,7 @@ probeCFGsToMachine(SMScopes *scopes,
 	std::map<std::pair<int, PointerAliasingSet>, std::set<int> > neededImports;
 	int entryIdx = 1;
 #endif
-	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> cfg_roots_this_sm;
+	std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > cfg_roots_this_sm;
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		CFGNode *cfgnode = *it;
 		StateMachineState *root = results[*it];
@@ -2354,7 +2354,7 @@ probeCFGsToMachine(SMScopes *scopes,
 					   , &rsp_delta
 			);
 		roots_this_sm2.push_back(std::pair<CFGNode *, StateMachineState *>(cfgnode, root));
-		cfg_roots_this_sm.insert(
+		cfg_roots_this_sm.push_back(
 			std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
 			(StateMachine::entry_point(tid, *it),
 			 StateMachine::entry_point_ctxt(rsp_delta)));
@@ -2427,10 +2427,10 @@ storeCFGsToMachine(SMScopes *scopes,
 #endif
 		, &rsp_delta
 		);
-	std::map<StateMachine::entry_point, StateMachine::entry_point_ctxt> roots;
-	roots.insert(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
-		     (StateMachine::entry_point(tid, root),
-		      StateMachine::entry_point_ctxt(rsp_delta)));
+	std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > roots;
+	roots.push_back(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
+			(StateMachine::entry_point(tid, root),
+			 StateMachine::entry_point_ctxt(rsp_delta)));
 	StateMachine *res = new StateMachine(
 		importRegisters(s
 #if !CONFIG_NO_STATIC_ALIASING
