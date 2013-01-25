@@ -1145,7 +1145,7 @@ bool parseIRExpr(IRExpr **out, const char *str, const char **suffix)
     }
 
     /* Fall through and try to parse as a prefix irop. */
-  } else if ((str[0] >= '0' && str[0] <= '9') || str[0] == 'V' || str[0] == '-') {
+  } else if ((str[0] >= '0' && str[0] <= '9') || str[0] == 'V' || str[0] == '-' || str[0] == 'U') {
     /* Constant of some sort. */
     IRExprConst *c;
     if (parseIRConst(&c, str, suffix)) {
