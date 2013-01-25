@@ -10,6 +10,7 @@
 #include "smb_builder.hpp"
 #include "maybe.hpp"
 #include "visitor.hpp"
+#include "intern.hpp"
 
 #include "libvex_guest_offsets.h"
 
@@ -2368,7 +2369,9 @@ probeCFGsToMachine(SMScopes *scopes,
 	if (TIMEOUT)
 		return NULL;
 	setMais(scopes, root, tid, mai);
-	return new StateMachine(root, cfg_roots_this_sm);
+	StateMachine *res = new StateMachine(root, cfg_roots_this_sm);
+	internStateMachineCfg(res);
+	return res;
 }
 
 static StateMachine *
@@ -2428,13 +2431,15 @@ storeCFGsToMachine(SMScopes *scopes,
 	roots.insert(std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt>
 		     (StateMachine::entry_point(tid, root),
 		      StateMachine::entry_point_ctxt(rsp_delta)));
-	return new StateMachine(
+	StateMachine *res = new StateMachine(
 		importRegisters(s
 #if !CONFIG_NO_STATIC_ALIASING
 				, scopes, neededImports, tid
 #endif
 			),
 		roots);
+	internStateMachineCfg(res);
+	return res;
 }
 
 /* End of namespace */

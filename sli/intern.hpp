@@ -33,6 +33,7 @@ StateMachine *internStateMachine(StateMachine *sm);
 StateMachine *internStateMachine(
 	StateMachine *sm,
 	internStateMachineTable &t);
+void internStateMachineCfg(StateMachine *sm);
 
 #endif /* !INTERN_HPP__ */
 
