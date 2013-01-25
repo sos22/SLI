@@ -400,6 +400,8 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 #undef do_downconv
 		case Iop_128to64:
 			return IRExpr_Const_U64(argc->Ico.content.U128.lo);
+		case Iop_128HIto64:
+			return IRExpr_Const_U64(argc->Ico.content.U128.hi);
 		case Iop_64UtoV128:
 			return IRExpr_Const_U128(0, argc->Ico.content.U64);
 		case Iop_BadPtr:
@@ -488,6 +490,23 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				return IRExpr_Const_U128(arg1c->Ico.content.U64, arg2c->Ico.content.U64);
 			case Iop_DivModU128to64: {
 				__uint128_t num;
+				unsigned long denom = arg2c->Ico.content.U64;
+				num = arg1c->Ico.content.U128.hi;
+				num <<= 64;
+				num |= arg1c->Ico.content.U128.lo;
+				if (denom == 0) {
+					warning("Constant division by zero (%ld:%ld/%ld)?\n",
+						(unsigned long)(num >> 64),
+						(unsigned long)num,
+						denom);
+					break;
+				}
+				unsigned long div = num / denom;
+				unsigned long mod = num % denom;
+				return IRExpr_Const_U128(mod, div);
+			}
+			case Iop_DivModS128to64: {
+				__int128_t num;
 				unsigned long denom = arg2c->Ico.content.U64;
 				num = arg1c->Ico.content.U128.hi;
 				num <<= 64;
