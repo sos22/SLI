@@ -807,21 +807,10 @@ StateMachine::assertSSA() const
 			continue;
 		threadAndRegister tr(threadAndRegister::invalid());
 		if (smse->definesRegister(tr)) {
-			assert(tr.gen() != 0);
 			if (!discoveredAssignments.insert(tr).second)
 				abort();
 		}
 	}
-
-	struct {
-		static visit_result Get(void *, const IRExprGet *ieg) {
-			assert(ieg->reg.gen() != 0);
-			return visit_continue;
-		}
-	} foo;
-	static irexpr_visitor<void> visitor;
-	visitor.Get = foo.Get;
-	visit_state_machine((void *)NULL, &visitor, this);
 }
 #endif
 

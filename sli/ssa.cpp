@@ -12,462 +12,519 @@ namespace SSA {
 }
 #endif
 
-#ifndef NDEBUG
-static bool debug_ssa_conversion = false;
-#else
-#define debug_ssa_conversion false
-#endif
-
-typedef std::map<threadAndRegister, std::set<unsigned>, threadAndRegister::partialCompare> usedGenerationsT;
+/* Map from a source register to the set of output registers which
+   might represent it. */
+typedef std::map<threadAndRegister, std::set<threadAndRegister> > reachingAssignmentsT;
+/* Map from register name post-conversion back to pre-conversion
+ * name. */
+typedef std::map<threadAndRegister, threadAndRegister> ssaCorrespondenceT;
+/* Standard reloc queue */
+typedef std::vector<std::pair<StateMachineState **, StateMachineState *> > relocQT;
 
 static threadAndRegister
-allocTemporary(usedGenerationsT &usedMap, const threadAndRegister &what)
+allocTemporary(const threadAndRegister &base,
+	       ssaCorrespondenceT &correspondence,
+	       reachingAssignmentsT &reaching)
 {
-	auto it = usedMap.find(what);
-	assert(it != usedMap.end());
-	const std::set<unsigned> &used(it->second);
-	assert(!used.empty());
-	assert(!used.count(*used.rbegin() + 1));
-	threadAndRegister res(what.setGen(*used.rbegin() + 1));
-	assert(!it->second.count(res.gen()));
-	it->second.insert(res.gen());
+	unsigned gen = 0;
+	for (auto it = correspondence.begin(); it != correspondence.end(); it++) {
+		if (base.isTemp() == it->first.isTemp() &&
+		    base.tid() == it->first.tid() &&
+		    (base.isTemp() ? (base.asTemp() == it->first.asTemp()) : (base.asReg() == it->first.asReg())) &&
+		    gen <= it->first.gen()) {
+			gen = it->first.gen() + 1;
+		}
+	}
+	threadAndRegister res(
+		base.isTemp() ?
+		threadAndRegister::temp(base.tid(), base.asTemp(), gen) :
+		threadAndRegister::reg(base.tid(), base.asReg(), gen));
+	assert(!correspondence.count(res));
+	correspondence[res] = base;
+	reaching[base].clear();
+	reaching[base].insert(res);
 	return res;
 }
 
-/* Figure out which register-defining side-effects need to be given
-   new registers and what that new register should be. */
-/* This also builds the initial usedGenerations table. */
-static void
-buildRegOutputReplacementTable(const StateMachine *sm,
-			       usedGenerationsT &usedGenerations,
-			       std::map<const StateMachineSideEffecting *, threadAndRegister> &newOutputVars)
+class ConvertExprTrans : public IRExprTransformer {
+	reachingAssignmentsT &reaching;
+	ssaCorrespondenceT &correspondence;
+	std::vector<StateMachineSideEffectPhi *> &neededPhis;
+	std::map<threadAndRegister, IRType> &typeMap;
+	SMScopes *const scopes;
+	void note_type(const threadAndRegister &reg, IRType ty) {
+		auto it = typeMap.insert(std::pair<threadAndRegister, IRType>(reg, ty)).first;
+		if (it->second < ty)
+			it->second = ty;
+	}
+public:
+	ConvertExprTrans(reachingAssignmentsT &_reaching,
+			 ssaCorrespondenceT &_correspondence,
+			 std::vector<StateMachineSideEffectPhi *> &_neededPhis,
+			 std::map<threadAndRegister, IRType> &_typeMap,
+			 SMScopes *_scopes)
+		: reaching(_reaching), correspondence(_correspondence),
+		  neededPhis(_neededPhis), typeMap(_typeMap),
+		  scopes(_scopes)
+	{}
+	IRExpr *transformIex(IRExprGet *);
+};
+
+IRExpr *
+ConvertExprTrans::transformIex(IRExprGet *iex)
 {
-	std::set<const StateMachineSideEffecting *> sideEffects;
-	enumStates(sm, &sideEffects);
-	std::map<threadAndRegister, std::set<const StateMachineSideEffecting *> > definitions;
-	for (auto it = sideEffects.begin();
-	     it != sideEffects.end();
-	     it++) {
-		const StateMachineSideEffecting *state = *it;
-		const StateMachineSideEffect *se = state->sideEffect;
-		if (!se)
-			continue;
-		threadAndRegister tr(threadAndRegister::invalid());
-		if (se->definesRegister(tr)) {
-			definitions[tr].insert(state);
-			usedGenerations[tr].insert(tr.gen());
-		}
+	auto it = reaching.find(iex->reg);
+	if (it == reaching.end() || it->second.size() == 0) {
+		/* No reaching assignments for this get, so just
+		 * ignore it. */
+		return iex;
 	}
-	for (auto it = definitions.begin();
-	     it != definitions.end();
-	     it++) {
-		const threadAndRegister &reg(it->first);
-		for (auto it2 = it->second.begin();
-		     it2 != it->second.end();
-		     it2++) {
-			const StateMachineSideEffecting *state = *it2;
-			threadAndRegister newReg(allocTemporary(usedGenerations, reg));
-			assert(!newOutputVars.count(state));
-			newOutputVars[state] = newReg;
-		}
+	if (it->second.size() == 1) {
+		note_type(*it->second.begin(), iex->ty);
+		return IRExprGet::mk(*it->second.begin(), iex->ty);
 	}
+	std::vector<StateMachineSideEffectPhi::input> inputs;
+	for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+		inputs.push_back(
+			StateMachineSideEffectPhi::input(
+				*it2,
+				exprbdd::var(&scopes->exprs, &scopes->bools,
+					     IRExpr_Get(*it2, iex->ty))));
+	}
+	threadAndRegister newReg(allocTemporary(iex->reg, correspondence, reaching));
+	note_type(newReg, iex->ty);
+	neededPhis.push_back(
+		new StateMachineSideEffectPhi(
+			newReg,
+			iex->ty,
+			inputs));
+	return IRExprGet::mk(newReg, iex->ty);
 }
 
-/* Mapping from a register to a set of registers such that y is a
-   member of regSet[x] precisely if an assignment to x has been
-   replaced by one to y. i.e. regSet[x] is the set of versions of
-   x. */
-typedef std::map<threadAndRegister, std::set<threadAndRegister> > regSetsT;
-
-/* A thing to capture the Phi operations needed by an expression.
-
-   The idea is that if you need to replace register x at type ty with
-   register y, and y should be a phi over {a,b,c}, you make
-   neededPhisT[x,ty] be (y, {a,b,c}).
-
-   (The extra level of indirection in @inputs is so that we can share
-   the sets with the input regSetsT) */
-struct neededPhisEntry {
-	const std::set<threadAndRegister> *inputs;
-	threadAndRegister newReg;
-
-	/* This is just a cache of IRExpr_Get(newReg, type). */
-	IRExprGet *iex;
-
-	neededPhisEntry(const std::set<threadAndRegister> *_inputs,
-			const threadAndRegister &_newReg,
-			IRExprGet *_iex)
-		: inputs(_inputs), newReg(_newReg), iex(_iex)
-	{}
-
-};
-typedef std::map<std::pair<threadAndRegister, IRType>, neededPhisEntry> neededPhisT;
-
-class replaceInputRegsT : public StateMachineTransformer {
-	const regSetsT &rs;
-	neededPhisT &out;
-	usedGenerationsT &usedRegs;
-	IRExpr *transformIex(IRExprGet *ieg) {
-		auto it = rs.find(ieg->reg);
-		if (it == rs.end())
-			return ieg;
-		if (it->second.size() == 1)
-			return IRExpr_Get(*it->second.begin(), ieg->ty);
-		auto it2 = out.find(std::pair<threadAndRegister, IRType>
-				    (ieg->reg, ieg->ty));
-		if (it2 != out.end())
-			return it2->second.iex;
-		threadAndRegister newReg(allocTemporary(usedRegs, ieg->reg));
-		neededPhisEntry npe(&it->second,
-				    newReg,
-				    IRExpr_Get(newReg, ieg->ty));
-		out.insert(std::pair<std::pair<threadAndRegister, IRType>,
-			             neededPhisEntry>
-			(std::pair<threadAndRegister, IRType>(ieg->reg, ieg->ty),
-			 npe));
-		return npe.iex;
-	}
-	bool rewriteNewStates() const { return false; }
-public:
-	replaceInputRegsT(const regSetsT &_rs,
-			  neededPhisT &_out,
-			  usedGenerationsT &_usedRegs)
-		: rs(_rs), out(_out), usedRegs(_usedRegs)
-	{}
-};
-static bbdd *
-replaceInputRegs(bbdd::scope *scope,
-		 const bbdd *what,
-		 const regSetsT &regSets,
-		 usedGenerationsT &usedGenerations,
-		 neededPhisT &newInputs)
+static exprbdd *
+convertExprBdd(SMScopes *scopes,
+	       exprbdd *what,
+	       reachingAssignmentsT &reaching,
+	       ssaCorrespondenceT &correspondence,
+	       std::vector<StateMachineSideEffectPhi *> &neededPhis,
+	       std::map<threadAndRegister, IRType> &typeMap)
 {
-	replaceInputRegsT trans(regSets, newInputs, usedGenerations);
-	return trans.transform_bbdd(scope, (bbdd *)what);
+	ConvertExprTrans trans(reaching, correspondence, neededPhis, typeMap, scopes);
+	return trans.transform_exprbdd(&scopes->bools, &scopes->exprs, what);
 }
 static smrbdd *
-replaceInputRegs(bbdd::scope *scope,
-		 smrbdd::scope *scope2,
-		 const smrbdd *what,
-		 const regSetsT &regSets,
-		 usedGenerationsT &usedGenerations,
-		 neededPhisT &newInputs)
+convertSmrBdd(SMScopes *scopes,
+	      smrbdd *what,
+	      reachingAssignmentsT &reaching,
+	      ssaCorrespondenceT &correspondence,
+	      std::vector<StateMachineSideEffectPhi *> &neededPhis,
+	      std::map<threadAndRegister, IRType> &typeMap)
 {
-	replaceInputRegsT trans(regSets, newInputs, usedGenerations);
-	return trans.transform_smrbdd(scope, scope2, (smrbdd *)what);
+	ConvertExprTrans trans(reaching, correspondence, neededPhis, typeMap, scopes);
+	return trans.transform_smrbdd(&scopes->bools, &scopes->smrs, what);
 }
-static exprbdd *
-replaceInputRegs(bbdd::scope *scope,
-		 exprbdd::scope *scope2,
-		 const exprbdd *what,
-		 const regSetsT &regSets,
-		 usedGenerationsT &usedGenerations,
-		 neededPhisT &newInputs)
+static bbdd *
+convertBBdd(SMScopes *scopes,
+	    bbdd *what,
+	    reachingAssignmentsT &reaching,
+	    ssaCorrespondenceT &correspondence,
+	    std::vector<StateMachineSideEffectPhi *> &neededPhis,
+	    std::map<threadAndRegister, IRType> &typeMap)
 {
-	replaceInputRegsT trans(regSets, newInputs, usedGenerations);
-	return trans.transform_exprbdd(scope, scope2, (exprbdd *)what);
-}
-
-static StateMachineSideEffect *
-replaceRegs(SMScopes *scopes,
-	    const StateMachineSideEffect *what,
-	    const regSetsT &regSets,
-	    usedGenerationsT &usedGenerations,
-	    neededPhisT &newInputs,
-	    const threadAndRegister *newOutput)
-{
-	if (TIMEOUT)
-		return NULL;
-	switch (what->type) {
-	case StateMachineSideEffect::Unreached:
-	case StateMachineSideEffect::Store:
-	case StateMachineSideEffect::AssertFalse:
-	case StateMachineSideEffect::StartAtomic:
-	case StateMachineSideEffect::EndAtomic:
-#if !CONFIG_NO_STATIC_ALIASING
-	case StateMachineSideEffect::StackLayout:
-	case StateMachineSideEffect::StartFunction:
-	case StateMachineSideEffect::EndFunction:
-#endif
-	{
-		replaceInputRegsT trans(regSets, newInputs, usedGenerations);
-		bool b = false;
-		StateMachineSideEffect *n = trans.transformSideEffect(scopes, (StateMachineSideEffect *)what, &b);
-		if (n)
-			return n;
-		else
-			return (StateMachineSideEffect *)what;
-	}
-	case StateMachineSideEffect::Load:
-		return new StateMachineSideEffectLoad(
-			(const StateMachineSideEffectLoad *)what,
-			newOutput ? *newOutput : ((const StateMachineSideEffectLoad *)what)->target,
-			replaceInputRegs(&scopes->bools, &scopes->exprs,
-					 ((const StateMachineSideEffectLoad *)what)->addr,
-					 regSets, usedGenerations, newInputs));
-	case StateMachineSideEffect::Copy:
-		return new StateMachineSideEffectCopy(
-			newOutput ? *newOutput : ((const StateMachineSideEffectCopy *)what)->target,
-			replaceInputRegs(&scopes->bools, &scopes->exprs,
-					 ((const StateMachineSideEffectCopy *)what)->value,
-					 regSets, usedGenerations, newInputs));
-	case StateMachineSideEffect::Phi: {
-		const StateMachineSideEffectPhi *ph = (const StateMachineSideEffectPhi *)what;
-		std::vector<StateMachineSideEffectPhi::input> inputs;
-		for (auto it = ph->generations.begin();
-		     it != ph->generations.end();
-		     it++) {
-			StateMachineSideEffectPhi::input newInp;
-			auto it2 = regSets.find(it->reg);
-			if (it2 == regSets.end()) {
-				newInp.reg = it->reg;
-			} else if (it2->second.size() == 1) {
-				newInp.reg = *it2->second.begin();
-			} else {
-				auto it3 = newInputs.find(std::pair<threadAndRegister, IRType>
-							  (it->reg, ph->ty));
-				if (it3 == newInputs.end()) {
-					threadAndRegister newReg(allocTemporary(usedGenerations, ph->reg));
-					neededPhisEntry npe(&it2->second,
-							    newReg,
-							    IRExpr_Get(newReg, ph->ty));
-					newInputs.insert(
-						std::pair<std::pair<threadAndRegister, IRType>,
-						          neededPhisEntry>
-						(std::pair<threadAndRegister, IRType>(it->reg, ph->ty),
-						 npe));
-					newInp.reg = newReg;
-				} else {
-					newInp.reg = it3->second.newReg;
-				}
-			}
-			newInp.val = replaceInputRegs(&scopes->bools, &scopes->exprs, it->val, regSets, usedGenerations, newInputs);
-			inputs.push_back(newInp);
-		}
-		return new StateMachineSideEffectPhi(
-			newOutput ? *newOutput : ph->reg,
-			ph->ty,
-			inputs);
-	}
-	case StateMachineSideEffect::ImportRegister:
-		return new StateMachineSideEffectImportRegister(
-			(const StateMachineSideEffectImportRegister *)what,
-			newOutput ? *newOutput : ((const StateMachineSideEffectImportRegister *)what)->reg);
-	}
-	abort();
+	ConvertExprTrans trans(reaching, correspondence, neededPhis, typeMap, scopes);
+	return trans.transform_bbdd(&scopes->bools, what);
 }
 
 static StateMachineState *
-addPhiPrefix(SMScopes *scopes, StateMachineState *end, const neededPhisT &neededPhis)
+addPhis(StateMachineState *suffix, const std::vector<StateMachineSideEffectPhi *> &neededPhis)
 {
-	StateMachineState *res = end;
-	for (auto it = neededPhis.begin();
-	     it != neededPhis.end();
-	     it++) {
-		const neededPhisEntry &npe(it->second);
-		std::vector<StateMachineSideEffectPhi::input> inp;
-		inp.reserve(npe.inputs->size());
-		for (auto it2 = npe.inputs->begin();
-		     it2 != npe.inputs->end();
-		     it2++) {
-			StateMachineSideEffectPhi::input item;
-			item.reg = *it2;
-			item.val = exprbdd::var(&scopes->exprs,
-						&scopes->bools,
-						IRExpr_Get(*it2, it->first.second));
-			inp.push_back(item);
-		}
+	StateMachineState *res = suffix;
+	for (auto it = neededPhis.begin(); it != neededPhis.end(); it++) {
 		res = new StateMachineSideEffecting(
 			res->dbg_origin,
-			new StateMachineSideEffectPhi(
-				npe.newReg,
-				it->first.second,
-				inp),
+			*it,
 			res);
 	}
 	return res;
 }
 
-typedef std::pair<StateMachineState **, const StateMachineState *> relocT;
-
-static StateMachineState *
-buildReplacement(SMScopes *scopes,
-		 const StateMachineBifurcate *smb,
-		 std::vector<relocT> &relocs,
-		 usedGenerationsT &usedGens,
-		 const regSetsT &regSets,
-		 const std::map<const StateMachineSideEffecting *, threadAndRegister> &)
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *scopes,
+		   StateMachineSideEffectLoad *sml,
+		   reachingAssignmentsT &reaching,
+		   ssaCorrespondenceT &correspondence,
+		   std::vector<StateMachineSideEffectPhi *> &neededPhis,
+		   std::map<threadAndRegister, IRType> &typeMap)
 {
-	neededPhisT neededPhis;
-	bbdd *cond = replaceInputRegs(&scopes->bools, smb->condition,
-				      regSets, usedGens, neededPhis);
-	if (TIMEOUT)
-		return NULL;
-	StateMachineBifurcate *res =
-		new StateMachineBifurcate(
-			smb->dbg_origin,
-			cond,
-			NULL,
-			NULL);
-	relocs.push_back(relocT(&res->trueTarget, smb->trueTarget));
-	relocs.push_back(relocT(&res->falseTarget, smb->falseTarget));
-	return addPhiPrefix(scopes, res, neededPhis);
+	auto addr = convertExprBdd(scopes, sml->addr, reaching, correspondence, neededPhis, typeMap);
+	return new StateMachineSideEffectLoad(
+		sml,
+		allocTemporary(sml->target, correspondence, reaching),
+		addr);
 }
-
-static StateMachineState *
-buildReplacement(SMScopes *scopes,
-		 const StateMachineTerminal *smt,
-		 std::vector<relocT> &,
-		 usedGenerationsT &usedGens,
-		 const regSetsT &regSets,
-		 const std::map<const StateMachineSideEffecting *, threadAndRegister> &)
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *scopes,
+		   StateMachineSideEffectStore *sms,
+		   reachingAssignmentsT &reaching,
+		   ssaCorrespondenceT &correspondence,
+		   std::vector<StateMachineSideEffectPhi *> &neededPhis,
+		   std::map<threadAndRegister, IRType> &typeMap)
 {
-	neededPhisT neededPhis;
-	smrbdd *r = replaceInputRegs(&scopes->bools, &scopes->smrs, smt->res, regSets, usedGens, neededPhis);
-	if (TIMEOUT)
-		return NULL;
-	StateMachineTerminal *res = new StateMachineTerminal(smt->dbg_origin, r);
-	return addPhiPrefix(scopes, res, neededPhis);
+	return new StateMachineSideEffectStore(
+		sms,
+		convertExprBdd(scopes, sms->addr, reaching, correspondence, neededPhis, typeMap),
+		convertExprBdd(scopes, sms->data, reaching, correspondence, neededPhis, typeMap));
 }
-
-static StateMachineState *
-buildReplacement(SMScopes *scopes,
-		 const StateMachineSideEffecting *sme,
-		 std::vector<relocT> &relocs,
-		 usedGenerationsT &usedGens,
-		 const regSetsT &regSets,
-		 const std::map<const StateMachineSideEffecting *, threadAndRegister> &rewrites)
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *scopes,
+		   StateMachineSideEffectCopy *smc,
+		   reachingAssignmentsT &reaching,
+		   ssaCorrespondenceT &correspondence,
+		   std::vector<StateMachineSideEffectPhi *> &neededPhis,
+		   std::map<threadAndRegister, IRType> &typeMap)
 {
-	neededPhisT neededPhis;
-	StateMachineSideEffect *newSe;
-	if (sme->sideEffect) {
-		auto it = rewrites.find(sme);
-		newSe =	replaceRegs(
-			scopes,
-			sme->sideEffect,
-			regSets,
-			usedGens,
-			neededPhis,
-			it == rewrites.end() ? NULL : &it->second);
-	} else {
-		newSe = NULL;
+	auto val = convertExprBdd(scopes, smc->value, reaching, correspondence, neededPhis, typeMap);
+	return new StateMachineSideEffectCopy(
+		allocTemporary(smc->target, correspondence, reaching),
+		val);
+}
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *scopes,
+		   StateMachineSideEffectAssertFalse *smaf,
+		   reachingAssignmentsT &reaching,
+		   ssaCorrespondenceT &correspondence,
+		   std::vector<StateMachineSideEffectPhi *> &neededPhis,
+		   std::map<threadAndRegister, IRType> &typeMap)
+{
+	return new StateMachineSideEffectAssertFalse(
+		smaf,
+		convertBBdd(scopes, smaf->value, reaching, correspondence, neededPhis, typeMap));
+}
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *,
+		   StateMachineSideEffectStartAtomic *smsa,
+		   reachingAssignmentsT &,
+		   ssaCorrespondenceT &,
+		   std::vector<StateMachineSideEffectPhi *> &,
+		   std::map<threadAndRegister, IRType> &)
+{
+	return smsa;
+}
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *,
+		   StateMachineSideEffectEndAtomic *smea,
+		   reachingAssignmentsT &,
+		   ssaCorrespondenceT &,
+		   std::vector<StateMachineSideEffectPhi *> &,
+		   std::map<threadAndRegister, IRType> &)
+{
+	return smea;
+}
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *,
+		   StateMachineSideEffectUnreached *smu,
+		   reachingAssignmentsT &,
+		   ssaCorrespondenceT &,
+		   std::vector<StateMachineSideEffectPhi *> &,
+		   std::map<threadAndRegister, IRType> &)
+{
+	return smu;
+}
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *scopes,
+		   StateMachineSideEffectPhi *smep,
+		   reachingAssignmentsT &reaching,
+		   ssaCorrespondenceT &correspondence,
+		   std::vector<StateMachineSideEffectPhi *> &neededPhis,
+		   std::map<threadAndRegister, IRType> &typeMap)
+{
+	/* This is a little tricky.  The old phi selects whichever old
+	 * register R has been assigned to most recently out of some
+	 * set {R0, R1, R2, ..., Rn}.  For each entry in that set Ri,
+	 * @reaching will contain a set of registers {Ri_0, ..., Ri_m},
+	 * and Ri is the most recently assigned member of that set.
+	 * The phi therefore selects the most recently assigned member
+	 * of any of the Ri sets.
+	 *
+	 * The phi also contains expressions showing the value of the
+	 * expression when we select that register.  Those are more
+	 * tricky, because there might be multiple, inconsistent,
+	 * definitions in the various Ri.  We try to preserve the
+	 * value whenever possible, but occasionally fail and fall back
+	 * to the safe IRExpr_Get() alternative.
+	 */
+	std::map<threadAndRegister, exprbdd *> newInputs;
+	for (auto it = smep->generations.begin(); it != smep->generations.end(); it++) {
+		const threadAndRegister &oldReg(it->reg);
+		exprbdd *oldVal = it->val;
+
+		if (!reaching.count(oldReg)) {
+			/* There is no way to select this input, so
+			 * just drop it. */
+			continue;
+		}
+		const std::set<threadAndRegister> &reach(reaching[oldReg]);
+		if (reach.empty()) {
+			/* No reaching assignments -> drop input */
+			continue;
+		}
+		for (auto it2 = reach.begin(); it2 != reach.end(); it2++) {
+			const threadAndRegister &newReg(*it2);
+			auto it3_did_insert = newInputs.insert(std::pair<threadAndRegister, exprbdd *>(newReg, oldVal));
+			auto it3 = it3_did_insert.first;
+			auto did_insert = it3_did_insert.second;
+			if (did_insert && it3->second != oldVal) {
+				/* Inconsistent assignments -> use fallback */
+				it3->second = NULL;
+			}
+		}
 	}
-	StateMachineSideEffecting *res =
-		new StateMachineSideEffecting(
-			sme->dbg_origin,
-			newSe,
-			NULL);
-	relocs.push_back(relocT(&res->target, sme->target));
-	return addPhiPrefix(scopes, res, neededPhis);
+
+	/* Flatten the map to a vector and generate the phis for the
+	 * input expressions. */
+	std::vector<StateMachineSideEffectPhi::input> inputs;
+	for (auto it = newInputs.begin(); it != newInputs.end(); it++) {
+		const threadAndRegister &reg(it->first);
+		exprbdd *val = it->second;
+		if (val) {
+			val = convertExprBdd(scopes, val, reaching, correspondence,
+					     neededPhis, typeMap);
+		} else {
+			val = exprbdd::var(&scopes->exprs,
+					   &scopes->bools,
+					   IRExpr_Get(reg, smep->ty));
+		}
+		inputs.push_back(StateMachineSideEffectPhi::input(reg, val));
+	}
+
+	return new StateMachineSideEffectPhi(
+		allocTemporary(smep->reg, correspondence, reaching),
+		smep->ty,
+		inputs);
 }
-	
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *,
+		   StateMachineSideEffectImportRegister *smei,
+		   reachingAssignmentsT &reaching,
+		   ssaCorrespondenceT &correspondence,
+		   std::vector<StateMachineSideEffectPhi *> &,
+		   std::map<threadAndRegister, IRType> &)
+{
+	return new StateMachineSideEffectImportRegister(
+		smei,
+		allocTemporary(smei->reg, correspondence, reaching));
+}
+
+static StateMachineSideEffect *
+convertSideEffect(SMScopes *scopes,
+		  StateMachineSideEffect *inp,
+		  reachingAssignmentsT &reaching,
+		  ssaCorrespondenceT &correspondence,
+		  std::vector<StateMachineSideEffectPhi *> &neededPhis,
+		  std::map<threadAndRegister, IRType> &typeMap)
+{
+	switch (inp->type) {
+#define CASE(name)						\
+	case StateMachineSideEffect:: name :			\
+		return _convertSideEffect(			\
+			scopes,					\
+			(StateMachineSideEffect ## name *)inp,	\
+			reaching,				\
+			correspondence,				\
+			neededPhis,				\
+			typeMap);
+	all_side_effect_types(CASE)
+#undef CASE
+	}
+	abort();
+}
+
+static StateMachineState *
+_convertState(SMScopes *scopes,
+	      StateMachineTerminal *smt,
+	      reachingAssignmentsT &reaching,
+	      relocQT &,
+	      ssaCorrespondenceT &correspondence,
+	      std::map<threadAndRegister, IRType> &typeMap)
+{
+	std::vector<StateMachineSideEffectPhi *> neededPhis;
+	smt->set_res(convertSmrBdd(scopes, smt->res, reaching, correspondence, neededPhis, typeMap));
+	return addPhis(smt, neededPhis);
+}
+
+static StateMachineState *
+_convertState(SMScopes *scopes,
+	      StateMachineBifurcate *smb,
+	      reachingAssignmentsT &reaching,
+	      relocQT &relocs,
+	      ssaCorrespondenceT &correspondence,
+	      std::map<threadAndRegister, IRType> &typeMap)
+{
+	std::vector<StateMachineSideEffectPhi *> neededPhis;
+	smb->set_condition(convertBBdd(scopes, smb->condition, reaching, correspondence, neededPhis, typeMap));
+	relocs.push_back(std::pair<StateMachineState **, StateMachineState *>(&smb->trueTarget, smb->trueTarget));
+	relocs.push_back(std::pair<StateMachineState **, StateMachineState *>(&smb->falseTarget, smb->falseTarget));
+	return addPhis(smb, neededPhis);
+}
+
+static StateMachineState *
+_convertState(SMScopes *scopes,
+	      StateMachineSideEffecting *sme,
+	      reachingAssignmentsT &reaching,
+	      relocQT &relocs,
+	      ssaCorrespondenceT &correspondence,
+	      std::map<threadAndRegister, IRType> &typeMap)
+{
+	std::vector<StateMachineSideEffectPhi *> neededPhis;
+	if (sme->sideEffect)
+		sme->sideEffect = convertSideEffect(scopes, sme->sideEffect, reaching, correspondence, neededPhis, typeMap);
+	relocs.push_back(std::pair<StateMachineState **, StateMachineState *>(&sme->target, sme->target));
+	return addPhis(sme, neededPhis);
+}
+
+static StateMachineState *
+convertState(SMScopes *scopes,
+	     StateMachineState *state,
+	     reachingAssignmentsT &reaching,
+	     std::vector<std::pair<StateMachineState **, StateMachineState *> > &relocs,
+	     std::map<threadAndRegister, threadAndRegister> &correspondence,
+	     std::map<threadAndRegister, IRType> &typeMap)
+{
+	switch (state->type) {
+#define CASE(name)					\
+	case StateMachineState:: name :			\
+		return _convertState(			\
+			scopes,				\
+			(StateMachine ## name *)state,	\
+			reaching,			\
+			relocs,				\
+			correspondence,			\
+			typeMap);
+	all_state_types(CASE)
+#undef CASE
+	}
+	abort();
+}
+	     
+static void
+fixupPhiTypes(SMScopes *scopes, StateMachine *inp, const std::map<threadAndRegister, IRType> &typeMap)
+{
+	std::vector<StateMachineSideEffecting *> states;
+	enumStates(inp, &states);
+	for (auto it = states.begin(); it != states.end(); it++) {
+		StateMachineSideEffecting *s = *it;
+		if (!s->sideEffect ||
+		    s->sideEffect->type != StateMachineSideEffect::Phi) {
+			continue;
+		}
+		StateMachineSideEffectPhi *phi =
+			(StateMachineSideEffectPhi *)s->sideEffect;
+		auto it2 = typeMap.find(phi->reg);
+		if (it2 == typeMap.end() ||
+		    phi->ty == it2->second) {
+			continue;
+		}
+		std::vector<StateMachineSideEffectPhi::input> newInputs;
+		newInputs.reserve(phi->generations.size());
+		for (auto it3 = phi->generations.begin(); it3 != phi->generations.end(); it3++) {
+			newInputs.push_back(
+				StateMachineSideEffectPhi::input(
+					it3->reg,
+					exprbdd::var(
+						&scopes->exprs,
+						&scopes->bools,
+						IRExprGet::mk(
+							it3->reg,
+							it2->second))));
+		}
+		s->sideEffect =
+			new StateMachineSideEffectPhi(
+				phi, newInputs);
+	}
+}
+
+/* @correspondence is a map from the new register name to the old
+ * one. */
 static StateMachine *
 convertToSSA(SMScopes *scopes, StateMachine *inp, std::map<threadAndRegister, threadAndRegister> &correspondence)
 {
-	std::map<const StateMachineState *, int> labels;
-	if (debug_ssa_conversion) {
-		printf("Convert to SSA, input machine:\n");
-		printStateMachine(inp, stdout, labels);
+	std::map<StateMachineState *, int> nrPendingPredecessors;
+	std::map<StateMachineState *, std::set<StateMachineState *> > predecessors;
+	std::vector<StateMachineState *> states;
+	enumStates(inp, &states);
+	nrPendingPredecessors[inp->root] = 0;
+	predecessors[inp->root]; /* Allocate with an empty set as
+				  * value */
+	for (auto it = states.begin(); it != states.end(); it++) {
+		std::vector<StateMachineState *> targs;
+		(*it)->targets(targs);
+		for (auto it2 = targs.begin(); it2 != targs.end(); it2++) {
+			nrPendingPredecessors[*it2]++;
+			predecessors[*it2].insert(*it);
+		}
 	}
 
-	std::map<const StateMachineSideEffecting *, threadAndRegister> replacements;
-	usedGenerationsT usedGens;
-	buildRegOutputReplacementTable(inp, usedGens, replacements);
-	if (replacements.empty())
-		return inp;
+	/* Map from old states to new states */
+	std::map<StateMachineState *, StateMachineState *> stateMap;
+	/* Pending relocations */
+	std::vector<std::pair<StateMachineState **, StateMachineState *> > relocs;
+	/* State at each node in the machine, built as we go along. */
+	std::map<StateMachineState *, reachingAssignmentsT> reachingTable;
+	/* Queue of states to process */
+	std::vector<StateMachineState *> pending;
 
-	if (debug_ssa_conversion) {
-		printf("Replacement table:\n");
-		for (auto it = replacements.begin(); it != replacements.end(); it++)
-			printf("l%d -> %s\n", labels[it->first], it->second.name());
-		printf("Gens table:\n");
-		for (auto it = usedGens.begin(); it != usedGens.end(); it++) {
-			printf("%s -> {", it->first.name());
-			for (auto it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++) {
-				if (it2 != it->second.begin())
-					printf(", ");
-				printf("%d", *it2);
+	StateMachineState *newRoot;
+	relocs.push_back(std::pair<StateMachineState **, StateMachineState *>(&newRoot, inp->root));
+	pending.push_back(inp->root);
+
+	std::map<threadAndRegister, IRType> typeMap;
+	while (!pending.empty()) {
+		StateMachineState *s = pending.back();
+		pending.pop_back();
+		assert(predecessors.count(s));
+		assert(nrPendingPredecessors.count(s));
+		assert(nrPendingPredecessors[s] == 0);
+		assert(!reachingTable.count(s));
+		assert(!stateMap.count(s));
+
+		reachingAssignmentsT &thisStateReaching(reachingTable[s]);
+		const std::set<StateMachineState *> &pred(predecessors[s]);
+		for (auto it = pred.begin(); it != pred.end(); it++) {
+			assert(reachingTable.count(*it));
+			assert(stateMap.count(*it));
+			const reachingAssignmentsT &predReaching(reachingTable[*it]);
+			for (auto it2 = predReaching.begin(); it2 != predReaching.end(); it2++) {
+				const threadAndRegister &r(it2->first);
+				const std::set<threadAndRegister> &inp_reaching(it2->second);
+				std::set<threadAndRegister> &out_reaching(thisStateReaching[r]);
+				for (auto it3 = inp_reaching.begin(); it3 != inp_reaching.end(); it3++) {
+					out_reaching.insert(*it3);
+				}
 			}
-			printf("}\n");
 		}
-	}
 
-	regSetsT subRegisters;
-	for (auto it = replacements.begin(); it != replacements.end(); it++) {
-		const StateMachineSideEffect *se = it->first->sideEffect;
-		assert(se != NULL);
-		threadAndRegister tr(threadAndRegister::invalid());
-		if (se->definesRegister(tr)) {
-			subRegisters[tr].insert(it->second);
-			assert(!correspondence.count(it->second));
-			correspondence[it->second] = tr;
-		}
-	}
+		stateMap[s] = convertState(scopes, s, thisStateReaching, relocs, correspondence, typeMap);
 
-	if (debug_ssa_conversion) {
-		printf("Register families:\n");
-		for (auto it = subRegisters.begin();
-		     it != subRegisters.end();
-		     it++) {
-			printf("%s: {", it->first.name());
-			for (auto it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++) {
-				if (it2 != it->second.begin())
-					printf(", ");
-				printf("%s", it2->name());
+		std::vector<StateMachineState *> targets;
+		s->targets(targets);
+		for (auto it = targets.begin(); it != targets.end(); it++) {
+			assert(nrPendingPredecessors.count(*it));
+			assert(nrPendingPredecessors[*it] != 0);
+			if (--nrPendingPredecessors[*it] == 0) {
+				pending.push_back(*it);
 			}
-			printf("}\n");
 		}
 	}
 
-	std::set<const StateMachineState *> allStates;
-	enumStates(inp, &allStates);
-	std::map<const StateMachineState *, StateMachineState *> rewrites;
-	std::vector<std::pair<StateMachineState **, const StateMachineState *> > relocs;
+	for (auto it = relocs.begin(); it != relocs.end(); it++) {
+		assert(stateMap.count(it->second));
+		assert(stateMap[it->second]);
+		*it->first = stateMap[it->second];
+	}
 
-	if (TIMEOUT)
-		return NULL;
+	fixupPhiTypes(scopes, inp, typeMap);
 
-	for (auto it = allStates.begin(); it != allStates.end(); it++) {
-		const StateMachineState *inpState = *it;
-		StateMachineState *outState = (StateMachineState *)0xdead;
-		switch (inpState->type) {
-#define do_state_type(name)						\
-			case StateMachineState::name:			\
-				outState = buildReplacement(		\
-					scopes,				\
-					(const StateMachine ## name *)inpState,	\
-					relocs,				\
-					usedGens,			\
-					subRegisters,			\
-					replacements);			\
-				break;
-			all_state_types(do_state_type);
-#undef do_state_type
-		}
-		rewrites[inpState] = outState;
-		if (debug_ssa_conversion) {
-			printf("Rewrite.  State l%d ->\n", labels[inpState]);
-			printStateMachine(outState, stdout);
-		}
-	}
-	if (TIMEOUT)
-		return NULL;
-	for (auto it = relocs.begin();
-	     it != relocs.end();
-	     it++) {
-		assert(rewrites.count(it->second));
-		*it->first = rewrites[it->second];
-	}
-	assert(rewrites.count(inp->root));
-	if (debug_ssa_conversion) {
-		printf("Result of SSA conversion:\n");
-		printStateMachine(rewrites[inp->root], stdout);
-	}
-	return new StateMachine(inp, rewrites[inp->root]);
+	return inp;
 }
 
 /* End of namespace SSA */

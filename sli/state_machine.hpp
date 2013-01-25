@@ -854,7 +854,7 @@ public:
 };
 class StateMachineSideEffectCopy : public StateMachineSideEffect {
 public:
-	StateMachineSideEffectCopy(threadAndRegister k, exprbdd *_value)
+	StateMachineSideEffectCopy(const threadAndRegister &k, exprbdd *_value)
 		: StateMachineSideEffect(StateMachineSideEffect::Copy),
 		  target(k), value(_value)
 	{
