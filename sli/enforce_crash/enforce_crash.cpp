@@ -347,7 +347,9 @@ top:
 #define ERROR_NEGATIVE 2
 
 /* We can't get at the values of free variables from the run-time
-   enforcer, so we might as well remove them now. */
+   enforcer, so we might as well remove them now.  Also remove a
+   couple of other un-checkable expressions, like floating point
+   operations. */
 /* Return value is either NULL, if we can't compute any approximation
    to @what with the desired error types, or an expression which
    approximates @what.  In the latter case, *@errors_produced will be
@@ -422,7 +424,7 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 	case Iex_Binop: {
 		auto i = (IRExprBinop *)what;
 		if (i->op == Iop_CmpF32 || i->op == Iop_CmpF64 ||
-		    i->op == Iop_64HLtoV128)
+		    i->op == Iop_64HLtoV128 || i->op == Iop_64HLto128)
 			return NULL;
 		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
 		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
@@ -430,21 +432,7 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 			return what;
 		if (arg1 && arg2)
 			return IRExpr_Binop(i->op, arg1, arg2);
-		switch (i->op) {
-		case Iop_CmpEQ8:
-		case Iop_CmpEQ16:
-		case Iop_CmpEQ32:
-		case Iop_CmpEQ64:
-		case Iop_CmpLT8U:
-		case Iop_CmpLT16U:
-		case Iop_CmpLT32U:
-		case Iop_CmpLT64U:
-		case Iop_Shr64:
-			return NULL;
-		default:
-			abort();
-		}
-		break;
+		return NULL;
 	}
 	case Iex_Unop: {
 		auto i = (IRExprUnop *)what;
