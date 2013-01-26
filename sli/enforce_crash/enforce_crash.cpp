@@ -808,7 +808,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	expressionStashMapT newMap;
 	for (auto it = ced.exprStashPoints.begin();
 	     it != ced.exprStashPoints.end();
-	     it++) {
+		) {
 		const ThreadCfgLabel &label(it->first);
 		typedef std::pair<Instruction<ThreadCfgLabel> *, IRExpr *> entryT;
 		std::set<entryT> frozenStashPoints;
@@ -817,7 +817,12 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 		{
 			Instruction<ThreadCfgLabel> *n = ced.crashCfg.findInstr(label);
 			const std::set<IRExpr *> &exprsToStash(it->second);
-			assert(n);
+			if (!n) {
+				/* This stash point cannot be reached
+				 * by any root -> kill it off. */
+				ced.exprStashPoints.erase(it++);
+				continue;
+			}
 			for (auto it = exprsToStash.begin(); it != exprsToStash.end(); it++)
 				unfrozenStashPoints.insert(entryT(n, *it));
 		}
@@ -895,6 +900,8 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 			ThreadCfgLabel label(it->first.thread, node->label);
 			newMap[label].insert(expr);
 		}
+
+		it++;
 	}
 
 	ced.exprStashPoints = newMap;
