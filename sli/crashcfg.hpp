@@ -443,9 +443,11 @@ public:
 				CfgLabel a(CfgLabel::uninitialised());
 				long rspDelta;
 				if (!a.parse(str, &str) ||
-				    !parseThisChar(':', str, &str) ||
-				    !parseDecimalLong(&rspDelta, str, &str))
+				    !parseThisChar('(', str, &str) ||
+				    !parseDecimalLong(&rspDelta, str, &str) ||
+				    !parseThisChar(')', str, &str)) {
 					return false;
+				}
 				roots.insert(std::pair<CfgLabel, long>(a, rspDelta));
 				if (parseThisString("}", str, &str))
 					break;
