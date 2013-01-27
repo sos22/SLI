@@ -738,6 +738,10 @@ public:
 	}
 
 	void prettyPrint(FILE *f, bool verbose = false) {
+		if (roots.empty()) {
+			fprintf(f, "<empty>\n");
+			return;
+		}
 		fprintf(f, "Crash enforcement data:\n");
 		roots.prettyPrint(f);
 		crashCfg.prettyPrint(f, verbose);

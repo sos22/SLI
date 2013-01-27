@@ -359,6 +359,10 @@ public:
 		}
 	}
 
+	bool empty() const {
+		return content.empty();
+	}
+
 	void insert(ConcreteThread concrete_tid, long rspDelta, const ThreadCfgLabel &root)
 	{
 		threadAbs[concrete_tid].insert(root.thread);
