@@ -1411,10 +1411,16 @@ LoadCanonicaliser::canonicalise(CrashSummary *cs)
 CrashSummary *
 LoadCanonicaliser::decanonicalise(CrashSummary *cs)
 {
+	auto a = decanonicalise(cs->scopes, cs->loadMachine);
+	auto b = decanonicalise(cs->scopes, cs->storeMachine);
+	auto c = decanonicalise(&cs->scopes->bools, cs->verificationCondition);
+	if (!a || !b || !c) {
+		return cs;
+	}
 	return new CrashSummary(cs->scopes,
-				decanonicalise(cs->scopes, cs->loadMachine),
-				decanonicalise(cs->scopes, cs->storeMachine),
-				decanonicalise(&cs->scopes->bools, cs->verificationCondition),
+				a,
+				b,
+				c,
 				cs->aliasing,
 				cs->mai);
 }
@@ -1452,16 +1458,19 @@ main(int argc, char *argv[])
 				summary,
 				oracleI,
 				ALLOW_GC);
-		summary = lc->decanonicalise(summary);
+		if (!TIMEOUT) {
+			summary = lc->decanonicalise(summary);
+		}
 	}
 
-	if (TIMEOUT)
+	if (TIMEOUT) {
 		fprintf(stderr, "timeout processing %s\n", argv[1]);
+	} else {
+		FILE *f = fopen(argv[4], "w");
+		fprintf(f, "%s\n", first_line);
+		printCrashSummary(summary, f);
+		fclose(f);
+	}
 
-	FILE *f = fopen(argv[4], "w");
-	fprintf(f, "%s\n", first_line);
-	printCrashSummary(summary, f);
-	fclose(f);
-	
 	return 0;
 }

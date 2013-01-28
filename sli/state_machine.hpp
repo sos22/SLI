@@ -617,7 +617,7 @@ public:
 		  trueTarget(t),
 		  falseTarget(f)
 	{
-		assert(condition);
+		assert(condition || TIMEOUT);
 	}
 	StateMachineBifurcate(StateMachineBifurcate *base,
 			      bbdd *_condition)
@@ -626,7 +626,7 @@ public:
 		  trueTarget(base->trueTarget),
 		  falseTarget(base->falseTarget)
 	{
-		assert(condition);
+		assert(condition || TIMEOUT);
 	}
 	StateMachineBifurcate(StateMachineBifurcate *base)
 		: StateMachineState(base->dbg_origin, StateMachineState::Bifurcate),
@@ -634,7 +634,7 @@ public:
 		  trueTarget(base->trueTarget),
 		  falseTarget(base->falseTarget)
 	{
-		assert(condition);
+		assert(condition || TIMEOUT);
 	}
 
 	bbdd *const condition;

@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include "sli.h"
 #include "enforce_crash.hpp"
+#include "maybe.hpp"
 
 unsigned long
 __trivial_hash_function(const VexRip &vr)
@@ -38,11 +39,14 @@ public:
 			next_label++;
 		return did_insert;
 	}
-	int operator()(const ThreadCfgLabel &l) const
+	Maybe<int> operator()(const ThreadCfgLabel &l) const
 	{
 		auto it = content.find(l);
-		assert(it != content.end());
-		return it->second;
+		if (it == content.end()) {
+			return Maybe<int>::nothing();
+		} else {
+			return Maybe<int>::just(it->second);
+		}
 	}
 };
 
@@ -132,8 +136,12 @@ compute_entry_point_list(Oracle *oracle,
 		ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));
 		ConcreteCfgLabel concCfgLabel(concThread.summary(), n->rip.label);
 		const VexRip &v(ced.crashCfg.labelToRip(concCfgLabel));
+		Maybe<int> cfg_label(cfgLabels(it->first));
+		if (!cfg_label.valid) {
+			continue;
+		}
 		fprintf(f, "static struct cep_entry_ctxt entry_ctxt%d = {\n", it->second.first);
-		fprintf(f, "    .cfg_label = %d,\n", cfgLabels(it->first));
+		fprintf(f, "    .cfg_label = %d,\n", cfg_label.content);
 		fprintf(f, "    .nr_simslots = %d,\n", max_simslot(slotMap) + 1);
 		fprintf(f, "    .nr_stack_slots = %zd,\n", v.stack.size() - 1);
 		fprintf(f, "    .rsp_delta = %ldl,\n", it->second.second);
@@ -150,7 +158,9 @@ compute_entry_point_list(Oracle *oracle,
 		ConcreteThread concThread(ced.roots.lookupAbsThread(absThread));
 		ConcreteCfgLabel concCfgLabel(concThread.summary(), n->rip.label);
 		const VexRip &v(ced.crashCfg.labelToRip(concCfgLabel));
-		entryPoints[v.unwrap_vexrip()].insert(l);
+		if (cfgLabels(l).valid) {
+			entryPoints[v.unwrap_vexrip()].insert(l);
+		}
 	}
 	int next_idx = 0;
 	for (auto it = entryPoints.begin(); it != entryPoints.end(); it++) {
@@ -547,7 +557,10 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		for (auto it = instr->successors.begin(); it != instr->successors.end(); it++) {
 			if (it->instr) {
 				ThreadCfgLabel nextLabel(oldLabel.thread, it->instr->label);
-				fprintf(f, "%d, ", relabeller(nextLabel));
+				Maybe<int> nextLabelIdx(relabeller(nextLabel));
+				if (nextLabelIdx.valid) {
+					fprintf(f, "%d, ", nextLabelIdx.content);
+				}
 			}
 		}
 		fprintf(f, "};\n");
@@ -580,8 +593,10 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				if ( (*it2)->tag == Iex_ControlFlow ) {
 					IRExprControlFlow *e = (IRExprControlFlow *)*it2;
 					simulationSlotT simSlot(slots(e));
-					int goingTo = relabeller(ThreadCfgLabel(oldLabel.thread, e->cfg2));
-					fprintf(f, "    { .next_node = %d, .slot = %d },\n", goingTo, simSlot.idx);
+					Maybe<int> goingTo(relabeller(ThreadCfgLabel(oldLabel.thread, e->cfg2)));
+					if (goingTo.valid) {
+						fprintf(f, "    { .next_node = %d, .slot = %d },\n", goingTo.content, simSlot.idx);
+					}
 				}
 			}
 			fprintf(f, "};\n");

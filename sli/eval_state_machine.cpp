@@ -1537,6 +1537,9 @@ buildCrossProductMachine(SMScopes *scopes,
 			cfg_roots.push_back(*it);
 		}
 	}
+	if (TIMEOUT) {
+		return NULL;
+	}
         return convertToSSA(scopes, new StateMachine(crossMachineRoot, cfg_roots), ssaCorrespondence);
 }
 
