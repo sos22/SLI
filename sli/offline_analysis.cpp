@@ -954,7 +954,29 @@ optimiseAssuming(SMScopes *scopes, StateMachineSideEffect *se, bbdd *assumption)
 		}
 		return new StateMachineSideEffectPhi(smp, inputs);
 	}
-		
+
+#if !CONFIG_NO_STATIC_ALIASING
+	case StateMachineSideEffect::StackLayout:
+		return se;
+	case StateMachineSideEffect::StartFunction: {
+		auto smsf = (StateMachineSideEffectStartFunction *)se;
+		auto rsp = exprbdd::assume(&scopes->exprs, smsf->rsp, assumption);
+		if (rsp == smsf->rsp) {
+			return se;
+		} else {
+			return new StateMachineSideEffectStartFunction(smsf, rsp);
+		}
+	}
+	case StateMachineSideEffect::EndFunction: {
+		auto smsf = (StateMachineSideEffectEndFunction *)se;
+		auto rsp = exprbdd::assume(&scopes->exprs, smsf->rsp, assumption);
+		if (rsp == smsf->rsp) {
+			return se;
+		} else {
+			return new StateMachineSideEffectEndFunction(smsf, rsp);
+		}
+	}
+#endif
 	}
 	abort();
 }
