@@ -1483,6 +1483,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			if (debug_use_alias_table) {
 				printf("Simple rules failed, giving up.\n");
 			}
+			killedAllLoads = false;
 			continue;
 		}
 
