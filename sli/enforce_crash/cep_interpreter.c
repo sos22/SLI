@@ -2146,8 +2146,8 @@ check_for_ll_thread_start(struct high_level_state *hls, struct reg_struct *regs)
 				plan.entry_points[i]->ctxts[j]->cntr++;
 				start_low_level_thread(
 					hls,
-					plan.entry_points[i]->ctxts[j]->rsp_delta,
 					plan.entry_points[i]->ctxts[j]->cfg_label,
+					plan.entry_points[i]->ctxts[j]->rsp_delta,
 					plan.entry_points[i]->ctxts[j]->nr_simslots);
 			}
 		}
