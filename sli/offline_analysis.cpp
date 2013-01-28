@@ -521,7 +521,7 @@ atomicSurvivalConstraint(SMScopes *scopes,
 {
 	VexPtr<StateMachine, &ir_heap> atomicMachine;
 	atomicMachine = duplicateStateMachine(machine);
-	atomicMachine = mapUnreached(&scopes->smrs, machine, smr_crash);
+	atomicMachine = mapUnreached(&scopes->smrs, atomicMachine, smr_crash);
 	atomicMachine = optimiseStateMachine(scopes, mai, atomicMachine, opt, oracle, true, token);
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;
