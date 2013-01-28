@@ -500,7 +500,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		if (reachesNeededInstr)
 			it++;
 		else
-			cs->loadMachine->cfg_roots.erase(it++);
+			it = cs->loadMachine->cfg_roots.erase(it);
 	}
 	for (auto it = cs->storeMachine->cfg_roots.begin();
 	     it != cs->storeMachine->cfg_roots.end();
