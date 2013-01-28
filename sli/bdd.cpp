@@ -400,6 +400,8 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 #undef do_downconv
 		case Iop_128to64:
 			return IRExpr_Const_U64(argc->Ico.content.U128.lo);
+		case Iop_128HIto64:
+			return IRExpr_Const_U64(argc->Ico.content.U128.hi);
 		case Iop_64UtoV128:
 			return IRExpr_Const_U128(0, argc->Ico.content.U64);
 		case Iop_BadPtr:
@@ -484,6 +486,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			}
 			case Iop_Mul64:
 				return IRExpr_Const_U64(arg1c->Ico.content.U64 * arg2c->Ico.content.U64);
+			case Iop_MullS64: {
+				__int128_t a = arg1c->Ico.content.U64;
+				__int128_t b = arg2c->Ico.content.U64;
+				__int128_t res = a * b;
+				return IRExpr_Const_U128(res >> 64, res);
+			}
 			case Iop_64HLto128:
 				return IRExpr_Const_U128(arg1c->Ico.content.U64, arg2c->Ico.content.U64);
 			case Iop_DivModU128to64: {
