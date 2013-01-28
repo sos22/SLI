@@ -315,6 +315,43 @@ _convertSideEffect(SMScopes *,
 		allocTemporary(smei->reg, correspondence, reaching));
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *scopes,
+		   StateMachineSideEffectStartFunction *smesf,
+		   reachingAssignmentsT &reaching,
+		   ssaCorrespondenceT &correspondence,
+		   std::vector<StateMachineSideEffectPhi *> &neededPhis,
+		   std::map<threadAndRegister, IRType> &typeMap)
+{
+	return new StateMachineSideEffectStartFunction(
+		smesf,
+		convertExprBdd(scopes, smesf->rsp, reaching, correspondence, neededPhis, typeMap));
+}
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *scopes,
+		   StateMachineSideEffectEndFunction *smeef,
+		   reachingAssignmentsT &reaching,
+		   ssaCorrespondenceT &correspondence,
+		   std::vector<StateMachineSideEffectPhi *> &neededPhis,
+		   std::map<threadAndRegister, IRType> &typeMap)
+{
+	return new StateMachineSideEffectEndFunction(
+		smeef,
+		convertExprBdd(scopes, smeef->rsp, reaching, correspondence, neededPhis, typeMap));
+}
+static StateMachineSideEffect *
+_convertSideEffect(SMScopes *,
+		   StateMachineSideEffectStackLayout *smesl,
+		   reachingAssignmentsT &,
+		   ssaCorrespondenceT &,
+		   std::vector<StateMachineSideEffectPhi *> &,
+		   std::map<threadAndRegister, IRType> &)
+{
+	return smesl;
+}
+#endif
+
 static StateMachineSideEffect *
 convertSideEffect(SMScopes *scopes,
 		  StateMachineSideEffect *inp,

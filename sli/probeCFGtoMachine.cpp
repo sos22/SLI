@@ -1312,7 +1312,7 @@ addEntrySideEffects(SMScopes *scopes,
 		    const VexRip &vr,
 		    const CfgLabel &entryLabel
 #if !CONFIG_NO_STATIC_ALIASING
-		    , const std::vector<FrameId> &entryStack,
+		    , const std::vector<FrameId> &entryStack
 		    , std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports
 		    , int entryIdx
 #endif
