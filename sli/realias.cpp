@@ -1486,6 +1486,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			if (debug_use_alias_table) {
 				printf("Simple rules failed, giving up.\n");
 			}
+			killedAllLoads = false;
 			continue;
 		}
 
@@ -1868,11 +1869,55 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 }
 
 #if !CONFIG_NO_STATIC_ALIASING
+
+class partial_import {
+	int tid;
+	int vex_offset;
+	bool mightBePointer;
+	bool mightBeNonPointer;
+public:
+	partial_import(StateMachineSideEffectImportRegister *smi)
+		: tid(smi->tid),
+		  vex_offset(smi->vex_offset),
+		  mightBePointer(smi->set.mightPoint()),
+		  mightBeNonPointer(smi->set.mightBeNonPointer())
+	{
+	}
+	PointerAliasingSet to_pas() const {
+		if (mightBePointer && mightBeNonPointer) {
+			return PointerAliasingSet::anything;
+		} else if (mightBePointer && !mightBeNonPointer) {
+			return PointerAliasingSet::stackPointer |
+				PointerAliasingSet::nonStackPointer;
+		} else if (!mightBePointer && mightBeNonPointer) {
+			return PointerAliasingSet::notAPointer;
+		} else {
+			/* !mightBePointer && !mightBeNonPointer */
+			return PointerAliasingSet::nothing;
+		}
+	}
+	bool operator <(const partial_import &o) const {
+		if (tid < o.tid)
+			return true;
+		if (tid > o.tid)
+			return false;
+		if (vex_offset < o.vex_offset)
+			return true;
+		if (vex_offset > o.vex_offset)
+			return false;
+		if (mightBePointer < o.mightBePointer)
+			return true;
+		if (mightBePointer > o.mightBePointer)
+			return true;
+		return mightBeNonPointer < o.mightBeNonPointer;
+	}
+};
+
 /* We've pushed realias as far as it can go.  Remove the annotations. */
 static StateMachine *
 zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
 {
-	std::map<std::pair<int, int>, threadAndRegister> preservedImports;
+	std::map<partial_import, threadAndRegister> preservedImports;
 	std::map<StateMachineState *, int> pendingPredecessors;
 	std::vector<StateMachineState *> states;
 	enumStates(sm, &states);
@@ -1947,8 +1992,8 @@ zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
 					auto smi = (StateMachineSideEffectImportRegister *)sme->sideEffect;
 					auto it_did_insert =
 						preservedImports.insert(
-							std::pair<std::pair<int, int>, threadAndRegister>(
-								std::pair<int, int>(smi->tid, smi->vex_offset),
+							std::pair<partial_import, threadAndRegister>(
+								partial_import(smi),
 								smi->reg));
 					auto it = it_did_insert.first;
 					auto did_insert = it_did_insert.second;
@@ -1958,7 +2003,7 @@ zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
 								smi->reg,
 								smi->tid,
 								smi->vex_offset,
-								PointerAliasingSet::anything);
+								it->first.to_pas());
 							*done_something = true;
 						}
 					} else {

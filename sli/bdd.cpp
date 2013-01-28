@@ -469,7 +469,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			case Iop_Shr64:
 				return IRExpr_Const_U64(arg1c->Ico.content.U64 >> arg2c->Ico.content.U8);
 			case Iop_Sar64:
-			  return IRExpr_Const_U64((long)arg1c->Ico.content.U64 >> arg2c->Ico.content.U8);
+				return IRExpr_Const_U64((long)arg1c->Ico.content.U64 >> arg2c->Ico.content.U8);
 			case Iop_32HLto64:
 				return IRExpr_Const_U64(arg1c->Ico.content.U32 | ((unsigned long)arg2c->Ico.content.U32 << 32));
 			case Iop_DivModU64to32: {
@@ -486,6 +486,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			}
 			case Iop_Mul64:
 				return IRExpr_Const_U64(arg1c->Ico.content.U64 * arg2c->Ico.content.U64);
+			case Iop_MullS64: {
+				__int128_t a = arg1c->Ico.content.U64;
+				__int128_t b = arg2c->Ico.content.U64;
+				__int128_t res = a * b;
+				return IRExpr_Const_U128(res >> 64, res);
+			}
 			case Iop_64HLto128:
 				return IRExpr_Const_U128(arg1c->Ico.content.U64, arg2c->Ico.content.U64);
 			case Iop_DivModU128to64: {
@@ -526,6 +532,56 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				abort();
 			}
 		}
+		if (arg2->tag == Iex_Const &&
+		    _ieb->op >= Iop_Shl8 &&
+		    _ieb->op <= Iop_Shl64) {
+			IRExprConst *arg2c = (IRExprConst *)arg2;
+			unsigned shift = arg2c->Ico.content.U8;
+			/* Replace shift left by constant with an
+			 * unsigned multiply.  Be careful not to
+			 * overflow the shift types!*/
+			switch (_ieb->op) {
+			case Iop_Shl64:
+				if (shift >= 64) {
+					return IRExpr_Const_U64(0);
+				} else {
+					return IRExpr_Binop(
+						Iop_Mul64,
+						arg1,
+						IRExpr_Const_U64(1ul << shift));
+				}
+			case Iop_Shl32:
+				if (shift >= 32) {
+					return IRExpr_Const_U32(0);
+				} else {
+					return IRExpr_Binop(
+						Iop_Mul32,
+						arg1,
+						IRExpr_Const_U32(1ul << shift));
+				}
+			case Iop_Shl16:
+				if (shift >= 16) {
+					return IRExpr_Const_U16(0);
+				} else {
+					return IRExpr_Binop(
+						Iop_Mul16,
+						arg1,
+						IRExpr_Const_U16(1ul << shift));
+				}
+			case Iop_Shl8:
+				if (shift >= 8) {
+					return IRExpr_Const_U8(0);
+				} else {
+					return IRExpr_Binop(
+						Iop_Mul8,
+						arg1,
+						IRExpr_Const_U8(1ul << shift));
+				}
+			default:
+				abort();
+			}
+		}
+
 		if (_ieb->op == Iop_CmpEQ32 &&
 		    arg1->tag == Iex_Const &&
 		    arg2->tag == Iex_Associative &&
@@ -572,6 +628,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		case Iop_Xor16: case Iop_Or16: case Iop_Add16: mask = 0xffff; defaultValue = 0; break;
 		case Iop_Xor32: case Iop_Or32: case Iop_Add32: mask = ~0u;    defaultValue = 0; break;
 		case Iop_Xor64: case Iop_Or64: case Iop_Add64: mask = ~0ul;   defaultValue = 0; break;
+		case Iop_Mul8:                                 mask = 0xff;   defaultValue = 1; break;
+		case Iop_Mul16:                                mask = 0xffff; defaultValue = 1; break;
+		case Iop_Mul32:                                mask = ~0u;    defaultValue = 1; break;
+		case Iop_Mul64:                                mask = ~0ul;   defaultValue = 1; break;
 			break;
 		default:
 			abort();
@@ -599,6 +659,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				case Iop_Add32: case Iop_Add64:
 					acc += ((IRExprConst *)simpleArgs[i])->Ico.content.U64;
 					break;
+				case Iop_Mul8: case Iop_Mul16:
+				case Iop_Mul32: case Iop_Mul64:
+					acc *= ((IRExprConst *)simpleArgs[i])->Ico.content.U64;
+					break;
 				default:
 					abort();
 				}
@@ -625,6 +689,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 						case Iop_Add32: case Iop_Add64:
 							acc += ((IRExprConst *)arg->contents[j])->Ico.content.U64;
 							break;
+						case Iop_Mul8: case Iop_Mul16:
+						case Iop_Mul32: case Iop_Mul64:
+							acc *= ((IRExprConst *)arg->contents[j])->Ico.content.U64;
+							break;
 						default:
 							abort();
 						}
@@ -641,6 +709,16 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			return IRExpr_Const_U1(false);
 		if (op == Iop_Or1 && acc == 1)
 			return IRExpr_Const_U1(true);
+		if (acc == 0 && op >= Iop_Mul8 && op <= Iop_Mul64) {
+			switch (op) {
+			case Iop_Mul8: return IRExpr_Const_U8(0);
+			case Iop_Mul16: return IRExpr_Const_U16(0);
+			case Iop_Mul32: return IRExpr_Const_U32(0);
+			case Iop_Mul64: return IRExpr_Const_U64(0);
+			default: abort();
+			}
+		}
+
 		if (new_nr_args == 0) {
 			switch (_iea->type()) {
 #define do_ty(n)							\
