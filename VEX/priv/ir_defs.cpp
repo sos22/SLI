@@ -75,7 +75,8 @@ operationAssociates(IROp op)
 {
 	return (op >= Iop_Add8 && op <= Iop_Add64) || (op == Iop_And1) ||
 		(op >= Iop_And8 && op <= Iop_And64) || (op >= Iop_Xor8 && op <= Iop_Xor64) ||
-		(op >= Iop_Or8 && op <= Iop_Or64) || (op == Iop_Or1);
+		(op >= Iop_Or8 && op <= Iop_Or64) || (op == Iop_Or1) ||
+		(op >= Iop_Mul8 && op <= Iop_Mul64);
 }
 
 /*---------------------------------------------------------------*/

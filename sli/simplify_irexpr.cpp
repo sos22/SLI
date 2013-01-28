@@ -29,6 +29,7 @@ operationCommutes(IROp op)
 		(op >= Iop_And8 && op <= Iop_And64) ||
 		(op >= Iop_Or8 && op <= Iop_Or64) ||
 		(op >= Iop_Xor8 && op <= Iop_Xor64) ||
+		(op >= Iop_Mul8 && op <= Iop_Mul64) ||
 		(op == Iop_And1) ||
 		(op == Iop_Or1) ||
 		(op == Iop_CmpEQ1);
@@ -1631,6 +1632,7 @@ top:
 						do_op(And, &);
 						do_op(Or, |);
 						do_op(Xor, ^);
+						do_op(Mul, *);
 #undef do_op
 #undef do_sized_op
 					case Iop_And1:
@@ -1814,6 +1816,200 @@ top:
 						realloc = true;
 					contents[idx2] = e;
 				}
+		}
+
+		/* Normalise (x + y) * (w + z) into (x * w) + (x * z)
+		 * + (y * w) + (y * z) */
+		if (op >= Iop_Mul8 && op <= Iop_Mul64) {
+			int nr_addition_args = 1;
+			for (int idx = 0; idx < nr_arguments; idx++) {
+				IRExpr *arg = contents[idx];
+				if (arg->tag == Iex_Associative &&
+				    ((IRExprAssociative *)arg)->op >= Iop_Add8 &&
+				    ((IRExprAssociative *)arg)->op <= Iop_Add64) {
+					nr_addition_args *= ((IRExprAssociative *)arg)->nr_arguments;
+				}
+			}
+			if (nr_addition_args != 1) {
+				/* Need to convert to a sum of multiplications. */
+				IRExpr **args = alloc_irexpr_array(nr_addition_args);
+				int indexes[nr_arguments];
+				memset(indexes, 0, sizeof(int) * nr_arguments);
+				for (int i = 0; i < nr_addition_args; i++) {
+					IRExpr **subargs = alloc_irexpr_array(nr_arguments);
+					for (int j = 0; j < nr_arguments; j++) {
+						IRExpr *inputArg = contents[j];
+						if (inputArg->tag == Iex_Associative &&
+						    ((IRExprAssociative *)inputArg)->op >= Iop_Add8 &&
+						    ((IRExprAssociative *)inputArg)->op <= Iop_Add64) {
+							subargs[j] = ((IRExprAssociative *)inputArg)->contents[indexes[j]];
+						} else {
+							subargs[j] = inputArg;
+						}
+					}
+					args[i] = IRExpr_Associative_Claim(
+						op,
+						nr_arguments,
+						subargs);
+					args[i] = optimiseIRExpr(args[i], opt);
+					int j;
+					for (j = nr_arguments - 1; j >= 0; j--) {
+						IRExpr *inputArg = contents[j];
+						if (inputArg->tag == Iex_Associative &&
+						    ((IRExprAssociative *)inputArg)->op >= Iop_Add8 &&
+						    ((IRExprAssociative *)inputArg)->op <= Iop_Add64) {
+							indexes[j] = (indexes[j] + 1) %
+								((IRExprAssociative *)inputArg)->nr_arguments;
+							if (indexes[j] != 0) {
+								break;
+							}
+						}
+					}
+					assert(j >= 0 || i == nr_addition_args - 1);
+				}
+				res = IRExpr_Associative_Claim(
+					(IROp)(op - Iop_Mul8 + Iop_Add8),
+					nr_addition_args,
+					args);
+				break;
+			}
+		}
+
+		/* Now try to convert x + x into 2 * x,
+		   x + (k * x) into (k + 1) * x, and k * x + k' * x into
+		   (k + k') * x */
+		if (op >= Iop_Add8 && op <= Iop_Add64 && nr_arguments >= 2) {
+			/* Convert x + x into 2 * x, x + x + x into 3 *
+			 * x, etc. */
+			for (int idx1 = 0; idx1 < nr_arguments; idx1++) {
+				IRExpr *arg1 = contents[idx1];
+				int nr_dupes;
+				for (nr_dupes = 1;
+				     nr_dupes + idx1 < nr_arguments && contents[nr_dupes+idx1] == arg1;
+				     nr_dupes++)
+					;
+				if (nr_dupes == 1)
+					continue;
+				switch (op) {
+				case Iop_Add8:
+					contents[idx1] = IRExpr_Binop(
+						Iop_Mul8,
+						arg1,
+						IRExpr_Const_U8(nr_dupes));
+					break;
+				case Iop_Add16:
+					contents[idx1] = IRExpr_Binop(
+						Iop_Mul16,
+						arg1,
+						IRExpr_Const_U16(nr_dupes));
+					break;
+				case Iop_Add32:
+					contents[idx1] = IRExpr_Binop(
+						Iop_Mul32,
+						arg1,
+						IRExpr_Const_U32(nr_dupes));
+					break;
+				case Iop_Add64:
+					contents[idx1] = IRExpr_Binop(
+						Iop_Mul64,
+						arg1,
+						IRExpr_Const_U64(nr_dupes));
+					break;
+				default:
+					abort();
+				}
+				nr_arguments -= nr_dupes - 1;
+				realloc = true;
+			}
+				     
+			/* Replace x + (k * x) with (k + 1) * x, if k
+			 * is a constant. */
+			/* Also turn (k * x) + (k' * x) into (k + k') * x */
+			for (int mulIdx = 0; mulIdx < nr_arguments; mulIdx++) {
+				if (contents[mulIdx]->tag != Iex_Associative)
+					continue;
+				IRExprAssociative *mul = (IRExprAssociative *)contents[mulIdx];
+				if (mul->op < Iop_Mul8 ||
+				    mul->op > Iop_Mul64 ||
+				    mul->nr_arguments != 2 ||
+				    mul->contents[0]->tag != Iex_Const) {
+					continue;
+				}
+				IRExpr *x = mul->contents[1];
+				IRExprConst *oldK = (IRExprConst *)mul->contents[0];
+				unsigned long nr_dupes = 0;
+				for (int plusIdx = 0; plusIdx < nr_arguments; plusIdx++) {
+					if (contents[plusIdx] == x) {
+						nr_dupes++;
+					} else if (plusIdx > mulIdx &&
+						   contents[plusIdx]->tag == Iex_Associative &&
+						   ((IRExprAssociative *)contents[plusIdx])->op == mul->op &&
+						   ((IRExprAssociative *)contents[plusIdx])->nr_arguments == 2 &&
+						   ((IRExprAssociative *)contents[plusIdx])->contents[1] == x &&
+						   ((IRExprAssociative *)contents[plusIdx])->contents[0]->tag == Iex_Const) {
+						switch (op) {
+						case Iop_Add8:
+							nr_dupes += ((IRExprConst *)((IRExprAssociative *)contents[plusIdx])->contents[0])->Ico.content.U8;
+							break;
+						case Iop_Add16:
+							nr_dupes += ((IRExprConst *)((IRExprAssociative *)contents[plusIdx])->contents[0])->Ico.content.U16;
+							break;
+						case Iop_Add32:
+							nr_dupes += ((IRExprConst *)((IRExprAssociative *)contents[plusIdx])->contents[0])->Ico.content.U32;
+							break;
+						case Iop_Add64:
+							nr_dupes += ((IRExprConst *)((IRExprAssociative *)contents[plusIdx])->contents[0])->Ico.content.U64;
+							break;
+						default:
+							abort();
+						}
+					}
+				}
+				if (nr_dupes != 0) {
+					realloc = true;
+					IRExprConst *newK;
+					switch (op) {
+					case Iop_Add8:
+						newK = IRExpr_Const_U8(oldK->Ico.content.U8 + nr_dupes);
+						break;
+					case Iop_Add16:
+						newK = IRExpr_Const_U16(oldK->Ico.content.U16 + nr_dupes);
+						break;
+					case Iop_Add32:
+						newK = IRExpr_Const_U32(oldK->Ico.content.U32 + nr_dupes);
+						break;
+					case Iop_Add64:
+						newK = IRExpr_Const_U64(oldK->Ico.content.U64 + nr_dupes);
+						break;
+					default:
+						abort();
+					}
+					contents[mulIdx] =
+						IRExpr_Binop(
+							mul->op,
+							newK,
+							x);
+					/* Remove all the old instances of x. */
+					for (int idx = 0; idx < nr_arguments; idx++) {
+						if (contents[idx] == x ||
+						    (idx > mulIdx &&
+						     contents[idx]->tag == Iex_Associative &&
+						     ((IRExprAssociative *)contents[idx])->op == mul->op &&
+						     ((IRExprAssociative *)contents[idx])->nr_arguments == 2 &&
+						     ((IRExprAssociative *)contents[idx])->contents[1] == x &&
+						     ((IRExprAssociative *)contents[idx])->contents[0]->tag == Iex_Const)) {
+							memmove(contents + idx,
+								contents + idx + 1,
+								sizeof(contents[0]) * (nr_arguments - idx - 1));
+							nr_arguments--;
+							assert(mulIdx != idx);
+							if (mulIdx > idx)
+								mulIdx--;
+							idx--;
+						    }
+					}
+				}
+			}
 		}
 
 		/* x + -x -> 0, for any plus-like operator, so remove
@@ -2069,6 +2265,7 @@ top:
 			bool isAnd = arga->op >= Iop_And8 && arga->op <= Iop_And64;
 			bool isXor = arga->op >= Iop_Xor8 && arga->op <= Iop_Xor64;
 			bool isAdd = arga->op >= Iop_Add8 && arga->op <= Iop_Add64;
+			bool isMul = arga->op >= Iop_Mul8 && arga->op <= Iop_Mul64;
 			bool isDowncast = 
 				op == Iop_64to32 || op == Iop_64to16 || op == Iop_64to8 ||
 				op == Iop_32to16 || op == Iop_32to8 ||
@@ -2078,9 +2275,9 @@ top:
 				op == Iop_16Uto64 || op == Iop_16Uto32 ||
 				op == Iop_32Uto64;
 
-			if ( (isDowncast && (isOr || isAnd || isXor || isAdd) ) ||
+			if ( (isDowncast && (isOr || isAnd || isXor || isAdd || isMul) ) ||
 			     (isUnsignedUpcast && (isOr || isAnd || isXor) ) ) {
-				/* Push downcasts through and/or/xor/add operations,
+				/* Push downcasts through and/or/xor/add/mul operations,
 				   and unsigned upcasts through and/or/xor ones. */
 				IRExpr *newArgs[arga->nr_arguments];
 				for (int i = 0; i < arga->nr_arguments; i++)
@@ -2099,6 +2296,7 @@ top:
 				do_op(And);
 				do_op(Xor);
 				do_op(Add);
+				do_op(Mul);
 #undef do_op
 				assert(base_op != Iop_INVALID);
 				IROp op = Iop_INVALID;
