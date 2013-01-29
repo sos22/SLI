@@ -106,7 +106,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->Load)
 			res = visitor->Load(ctxt, l);
 		if (res == visit_continue)
-			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, l->addr);
+			res = _visit_bdd(ctxt, &visitor->bdd, _visit_irexpr, l->addr);
 		return res;
 	}
 	case StateMachineSideEffect::Store: {
@@ -114,9 +114,9 @@ _visit_side_effect(void *ctxt,
 		if (visitor->Store)
 			res = visitor->Store(ctxt, s);
 		if (res == visit_continue)
-			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->addr);
+			res = _visit_bdd(ctxt, &visitor->bdd, _visit_irexpr, s->addr);
 		if (res == visit_continue)
-			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->data);
+			res = _visit_bdd(ctxt, &visitor->bdd, _visit_irexpr, s->data);
 		return res;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -124,7 +124,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->Copy)
 			res = visitor->Copy(ctxt, c);
 		if (res == visit_continue)
-			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, c->value);
+			res = _visit_bdd(ctxt, &visitor->bdd, _visit_irexpr, c->value);
 		return res;
 	}
 	case StateMachineSideEffect::AssertFalse: {
@@ -132,7 +132,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->AssertFalse)
 			res = visitor->AssertFalse(ctxt, c);
 		if (res == visit_continue)
-			res = visit_bdd(ctxt, &visitor->irexpr, c->value);
+			res = visit_bdd(ctxt, &visitor->bdd, c->value);
 		return res;
 	}
 	case StateMachineSideEffect::Phi: {
@@ -142,7 +142,7 @@ _visit_side_effect(void *ctxt,
 		for (auto it = p->generations.begin();
 		     res == visit_continue && it != p->generations.end();
 		     it++)
-			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, it->val);
+			res = _visit_bdd(ctxt, &visitor->bdd, _visit_irexpr, it->val);
 		return res;
 	}
 #if !CONFIG_NO_STATIC_ALIASING
@@ -151,7 +151,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->StartFunction)
 			res = visitor->StartFunction(ctxt, s);
 		if (res == visit_continue)
-			res = _visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->rsp);
+			res = _visit_bdd(ctxt, &visitor->bdd, _visit_irexpr, s->rsp);
 		return res;
 	}
 	case StateMachineSideEffect::EndFunction: {
@@ -159,7 +159,7 @@ _visit_side_effect(void *ctxt,
 		if (visitor->EndFunction)
 			res = visitor->EndFunction(ctxt, s);
 		if (res == visit_continue)
-			_visit_bdd(ctxt, &visitor->irexpr, _visit_irexpr, s->rsp);
+			_visit_bdd(ctxt, &visitor->bdd, _visit_irexpr, s->rsp);
 		return res;
 	}
 #endif
@@ -194,7 +194,7 @@ _visit_one_state(void *ctxt,
 		if (visitor->Terminal)
 			res = visitor->Terminal(ctxt, smt);
 		if (res == visit_continue)
-			res = _visit_bdd(ctxt, &visitor->irexpr, (visit_result (*)(void *, const irexpr_visitor<void> *, StateMachineRes))NULL, smt->res);
+			res = _visit_bdd(ctxt, &visitor->bdd, (visit_result (*)(void *, const irexpr_visitor<void> *, StateMachineRes))NULL, smt->res);
 		return res;
 	}
 	case StateMachineState::Bifurcate: {
@@ -202,7 +202,7 @@ _visit_one_state(void *ctxt,
 		if (visitor->Bifurcate)
 			res = visitor->Bifurcate(ctxt, smb);
 		if (res == visit_continue)
-			res = _visit_bdd(ctxt, &visitor->irexpr, (visit_result (*)(void *, const irexpr_visitor<void> *, bool))NULL, smb->condition);
+			res = _visit_bdd(ctxt, &visitor->bdd, (visit_result (*)(void *, const irexpr_visitor<void> *, bool))NULL, smb->condition);
 		return res;
 	}
 	case StateMachineState::SideEffecting: {
@@ -232,7 +232,7 @@ _visit_state_machine(void *ctxt,
 		if (visitor->Terminal)
 			res = visitor->Terminal(ctxt, smt);
 		if (res == visit_continue)
-			res = visit_const_bdd(ctxt, &visitor->irexpr, smt->res);
+			res = visit_const_bdd(ctxt, &visitor->bdd, smt->res);
 		return res;
 	}
 	case StateMachineState::Bifurcate: {
@@ -240,7 +240,7 @@ _visit_state_machine(void *ctxt,
 		if (visitor->Bifurcate)
 			res = visitor->Bifurcate(ctxt, smb);
 		if (res == visit_continue)
-			res = visit_const_bdd(ctxt, &visitor->irexpr, smb->condition);
+			res = visit_const_bdd(ctxt, &visitor->bdd, smb->condition);
 		if (res == visit_continue)
 			res = _visit_state_machine(ctxt, visitor, smb->trueTarget, memo);
 		if (res == visit_continue)
@@ -272,44 +272,55 @@ visit_state_machine(void *ctxt,
 
 template <typename constT, typename subtreeT> static visit_result
 _visit_bdd(void *ctxt,
-	   const irexpr_visitor<void> *visitor,
+	   const bdd_visitor<void> *visitor,
 	   visit_result (*visitLeaf)(void *ctxt, const irexpr_visitor<void> *, constT cnst),
 	   const subtreeT *bdd,
-	   std::set<const subtreeT *> &visited)
+	   std::set<const subtreeT *> &visited,
+	   std::set<bdd_rank> &visitedRanks)
 {
 	if (!visited.insert(bdd).second)
 		return visit_continue;
 	visit_result res = visit_continue;
 	if (bdd->isLeaf()) {
 		if (visitLeaf)
-			res = visitLeaf(ctxt, visitor, bdd->leaf());
+			res = visitLeaf(ctxt, &visitor->irexpr, bdd->leaf());
 	} else {
-		res = _visit_irexpr(ctxt, visitor, bdd->internal().condition);
-		if (res == visit_continue)
-			res = _visit_bdd(ctxt, visitor, visitLeaf, bdd->internal().trueBranch, visited);
-		if (res == visit_continue)
-			res = _visit_bdd(ctxt, visitor, visitLeaf, bdd->internal().falseBranch, visited);
+		if (visitedRanks.insert(bdd->internal().rank).second) {
+			if (visitor->rank) {
+				res = visitor->rank(ctxt, bdd->internal().rank);
+			}
+			if (res == visit_continue) {
+				res = _visit_irexpr(ctxt, &visitor->irexpr, bdd->internal().condition);
+			}
+		}
+		if (res == visit_continue) {
+			res = _visit_bdd(ctxt, visitor, visitLeaf, bdd->internal().trueBranch, visited, visitedRanks);
+		}
+		if (res == visit_continue) {
+			res = _visit_bdd(ctxt, visitor, visitLeaf, bdd->internal().falseBranch, visited, visitedRanks);
+		}
 	}
 	return res;
 }
 
 template <typename constT, typename subtreeT> visit_result
 _visit_bdd(void *ctxt,
-	   const irexpr_visitor<void> *visitor,
+	   const bdd_visitor<void> *visitor,
 	   visit_result (*visitLeaf)(void *ctxt, const irexpr_visitor<void> *, constT cnst),
 	   const subtreeT *bdd)
 {
 	std::set<const subtreeT *> visited;
-	return _visit_bdd(ctxt, visitor, visitLeaf, bdd, visited);
+	std::set<bdd_rank> visitedRanks;
+	return _visit_bdd(ctxt, visitor, visitLeaf, bdd, visited, visitedRanks);
 }
 
 template visit_result _visit_bdd<bool, bbdd>(
 	void *,
-	const irexpr_visitor<void> *,
+	const bdd_visitor<void> *,
 	visit_result (*visitLeaf)(void *, const irexpr_visitor<void> *, bool),
 	const bbdd *);
 template visit_result _visit_bdd<StateMachineRes, smrbdd>(
 	void *,
-	const irexpr_visitor<void> *,
+	const bdd_visitor<void> *,
 	visit_result (*visitLeaf)(void *, const irexpr_visitor<void> *, StateMachineRes),
 	const smrbdd *);

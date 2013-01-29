@@ -28,7 +28,7 @@ struct SMScopes {
 	{}
 	bool read(const char *fname);
 	bool parse(const char *buf, const char **end);
-	void prettyPrint(FILE *f) const;
+	void prettyPrint(FILE *f, const std::set<bdd_rank> *) const;
 };
 
 #if !CONFIG_NO_STATIC_ALIASING

@@ -255,7 +255,7 @@ avail_t::invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMach
 			       const StateMachineSideEffect *se)
 		{
 			static state_machine_visitor<ctxt> visitor;
-			visitor.irexpr.Get = Get;
+			visitor.bdd.irexpr.Get = Get;
 			visitor.Load = Load;
 			visitor.Copy = Copy;
 			visitor.Phi = Phi;
@@ -1402,8 +1402,8 @@ definitionClosure(ssa_avail_state &state)
 				return visit_continue;
 		}
 	} foo;
-	static irexpr_visitor<ssa_avail_state> visitor;
-	visitor.Get = foo.Get;
+	static bdd_visitor<ssa_avail_state> visitor;
+	visitor.irexpr.Get = foo.Get;
 	for (auto it = state.defs.begin();
 	     it != state.defs.end();
 		) {

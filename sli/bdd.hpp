@@ -144,7 +144,7 @@ public:
 		: GcCallback<&ir_heap>(true)
 	{
 	}
-	void prettyPrint(FILE *) const;
+	void prettyPrint(FILE *, const std::set<bdd_rank> *needed) const;
 	bool parse(const char *buf, const char **end);
 };
 

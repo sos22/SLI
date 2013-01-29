@@ -21,44 +21,48 @@ visit_irexpr(ctxtT *ctxt,
 	return _visit_irexpr( (void *)ctxt, (const irexpr_visitor<void> *)visitor, expr);
 }
 
+template <typename ctxtT> struct bdd_visitor {
+	irexpr_visitor<ctxtT> irexpr;
+	visit_result (*rank)(ctxtT *ctxt, const bdd_rank &br);
+};
 template <typename constT, typename subtreeT> visit_result _visit_bdd(
 	void *ctxt,
-	const irexpr_visitor<void> *visitor,
+	const bdd_visitor<void> *visitor,
 	visit_result (*visitLeaf)(void *ctxt, const irexpr_visitor<void> *, constT cnst),
 	const subtreeT *bdd);
 template <typename constT, typename subtreeT, typename ctxtT> static visit_result
 visit_bdd(ctxtT *ctxt,
-	  const irexpr_visitor<ctxtT> *visitor,
+	  const bdd_visitor<ctxtT> *visitor,
 	  visit_result (*visitLeaf)(ctxtT *ctxt, const irexpr_visitor<ctxtT> *, constT cnst),
 	  const subtreeT *bdd)
 {
 	return _visit_bdd( (void *)ctxt,
-			   (const irexpr_visitor<void> *)visitor,
+			   (const bdd_visitor<void> *)visitor,
 			   (visit_result(*)(void *, const irexpr_visitor<void> *, constT))visitLeaf,
 			   bdd );
 }
 template <typename subtreeT, typename ctxtT> static visit_result
 visit_const_bdd(ctxtT *ctxt,
-		const irexpr_visitor<ctxtT> *visitor,
+		const bdd_visitor<ctxtT> *visitor,
 		const subtreeT *bdd)
 {
 	return _visit_bdd( (void *)ctxt,
-			   (const irexpr_visitor<void> *)visitor,
+			   (const bdd_visitor<void> *)visitor,
 			   (visit_result (*)(void *, const irexpr_visitor<void> *, typename subtreeT::leafT))NULL,
 			   bdd );
 }
 template <typename subtreeT, typename ctxtT> static visit_result
 visit_bdd(ctxtT *ctxt,
-	  const irexpr_visitor<ctxtT> *visitor,
+	  const bdd_visitor<ctxtT> *visitor,
 	  const subtreeT *bdd) {
 	return _visit_bdd( (void *)ctxt,
-			   (const irexpr_visitor<void> *)visitor,
+			   (const bdd_visitor<void> *)visitor,
 			   (visit_result (*)(void *, const irexpr_visitor<void> *, typename subtreeT::leafT))NULL,
 			   bdd );
 }
 
 template <typename ctxtT> struct state_machine_visitor {
-	struct irexpr_visitor<ctxtT> irexpr;
+	struct bdd_visitor<ctxtT> bdd;
 #define iter_state(name)						\
 	visit_result (*name)(ctxtT *ctxt, const StateMachine ## name *);
 	all_state_types(iter_state);
@@ -121,6 +125,7 @@ visit_state_machine(ctxtT *ctxt,
 	return visit_state_machine(ctxt, visitor, sm->root);
 }
 
+
 template <typename ctxtT> static visit_result
 visit_state_machine(ctxtT *ctxt,
 		    const irexpr_visitor<ctxtT> *visitor,
@@ -128,7 +133,7 @@ visit_state_machine(ctxtT *ctxt,
 		    std::set<const StateMachineState *> &memo)
 {
 	state_machine_visitor<ctxtT> vis = {};
-	vis.irexpr = *visitor;
+	vis.bdd.irexpr = *visitor;
 	return visit_state_machine(ctxt, &vis, sm, memo);
 }
 template <typename ctxtT> static visit_result
@@ -137,10 +142,9 @@ visit_state_machine(ctxtT *ctxt,
 		    const StateMachineState *sm)
 {
 	state_machine_visitor<ctxtT> vis = {};
-	vis.irexpr = *visitor;
+	vis.bdd.irexpr = *visitor;
 	return visit_state_machine(ctxt, &vis, sm);
 }
-
 template <typename ctxtT> static visit_result
 visit_state_machine(ctxtT *ctxt,
 		    const irexpr_visitor<ctxtT> *visitor,
@@ -152,6 +156,41 @@ visit_state_machine(ctxtT *ctxt,
 template <typename ctxtT> static visit_result
 visit_state_machine(ctxtT *ctxt,
 		    const irexpr_visitor<ctxtT> *visitor,
+		    const StateMachine *sm)
+{
+	return visit_state_machine(ctxt, visitor, sm->root);
+}
+
+template <typename ctxtT> static visit_result
+visit_state_machine(ctxtT *ctxt,
+		    const bdd_visitor<ctxtT> *visitor,
+		    const StateMachineState *sm,
+		    std::set<const StateMachineState *> &memo)
+{
+	state_machine_visitor<ctxtT> vis = {};
+	vis.bdd = *visitor;
+	return visit_state_machine(ctxt, &vis, sm, memo);
+}
+template <typename ctxtT> static visit_result
+visit_state_machine(ctxtT *ctxt,
+		    const bdd_visitor<ctxtT> *visitor,
+		    const StateMachineState *sm)
+{
+	state_machine_visitor<ctxtT> vis = {};
+	vis.bdd = *visitor;
+	return visit_state_machine(ctxt, &vis, sm);
+}
+template <typename ctxtT> static visit_result
+visit_state_machine(ctxtT *ctxt,
+		    const bdd_visitor<ctxtT> *visitor,
+		    const StateMachine *sm,
+		    std::set<const StateMachineState *> &memo)
+{
+	return visit_state_machine(ctxt, visitor, sm->root, memo);
+}
+template <typename ctxtT> static visit_result
+visit_state_machine(ctxtT *ctxt,
+		    const bdd_visitor<ctxtT> *visitor,
 		    const StateMachine *sm)
 {
 	return visit_state_machine(ctxt, visitor, sm->root);

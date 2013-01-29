@@ -1910,22 +1910,22 @@ findUsedRegs__Get(std::set<threadAndRegister> *s, const IRExprGet *ieg)
 static void
 findUsedRegs(exprbdd *expr, std::set<threadAndRegister> &tr)
 {
-	static struct irexpr_visitor<std::set<threadAndRegister> > visitor;
-	visitor.Get = findUsedRegs__Get;
+	static struct bdd_visitor<std::set<threadAndRegister> > visitor;
+	visitor.irexpr.Get = findUsedRegs__Get;
 	visit_bdd(&tr, &visitor, visit_irexpr<std::set<threadAndRegister> >, expr);
 }
 static void
 findUsedRegs(bbdd *expr, std::set<threadAndRegister> &tr)
 {
-	static struct irexpr_visitor<std::set<threadAndRegister> > visitor;
-	visitor.Get = findUsedRegs__Get;
+	static struct bdd_visitor<std::set<threadAndRegister> > visitor;
+	visitor.irexpr.Get = findUsedRegs__Get;
 	visit_bdd(&tr, &visitor, expr);
 }
 static void
 findUsedRegs(smrbdd *expr, std::set<threadAndRegister> &tr)
 {
-	static struct irexpr_visitor<std::set<threadAndRegister> > visitor;
-	visitor.Get = findUsedRegs__Get;
+	static struct bdd_visitor<std::set<threadAndRegister> > visitor;
+	visitor.irexpr.Get = findUsedRegs__Get;
 	visit_bdd(&tr, &visitor, expr);
 }
 
