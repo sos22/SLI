@@ -1106,7 +1106,7 @@ public:
 		  rsp(_rsp), frame(_frame)
 	{
 	}
-	StateMachineSideEffectStartFunction(StateMachineSideEffectStartFunction *base, exprbdd *_rsp)
+	StateMachineSideEffectStartFunction(const StateMachineSideEffectStartFunction *base, exprbdd *_rsp)
 		: StateMachineSideEffect(StateMachineSideEffect::StartFunction),
 		  rsp(_rsp), frame(base->frame)
 	{
@@ -1152,7 +1152,7 @@ public:
 		  rsp(_rsp), frame(_frame)
 	{
 	}
-	StateMachineSideEffectEndFunction(StateMachineSideEffectEndFunction *base, exprbdd *_rsp)
+	StateMachineSideEffectEndFunction(const StateMachineSideEffectEndFunction *base, exprbdd *_rsp)
 		: StateMachineSideEffect(StateMachineSideEffect::EndFunction),
 		  rsp(_rsp), frame(base->frame)
 	{
