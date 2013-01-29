@@ -1587,10 +1587,12 @@ stripUninterpretableAnnotations(StateMachine *inp)
 						old->dbg_origin,
 						old->sideEffect,
 						NULL);
-				if (old->sideEffect->type == StateMachineSideEffect::StackLayout ||
-				    old->sideEffect->type == StateMachineSideEffect::StartFunction ||
-				    old->sideEffect->type == StateMachineSideEffect::EndFunction)
+				if (old->sideEffect &&
+				    (old->sideEffect->type == StateMachineSideEffect::StackLayout ||
+				     old->sideEffect->type == StateMachineSideEffect::StartFunction ||
+				     old->sideEffect->type == StateMachineSideEffect::EndFunction)) {
 					nw->sideEffect = NULL;
+				}
 				relocs.push_back(relocT(old->target, &nw->target));
 				it->second = nw;
 				break;
