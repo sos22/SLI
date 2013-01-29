@@ -738,7 +738,11 @@ enforceCrashForMachine(const SummaryId &summaryId,
 
 	VexPtr<OracleInterface> oracleI(oracle);
 
-	IRExpr *requirement = bbdd::to_irexpr(summary->verificationCondition);
+	IRExpr *requirement = bbdd::to_irexpr(
+		bbdd::assume(
+			&summary->scopes->bools,
+			summary->crashCondition,
+			summary->inferredAssumption));
 	int ignore;
 	requirement = removeFreeVariables(requirement, ERROR_POSITIVE, &ignore);
 	requirement = simplify_via_anf(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
@@ -1544,11 +1548,13 @@ namespace rewriteSummaryCrossScopeWorkers{
 						     NULL,
 						     NULL,
 						     NULL,
+						     NULL,
 						     inp->aliasing,
 						     inp->mai);
 		r(pending, &res->loadMachine, inp->loadMachine);
 		r(pending, &res->storeMachine, inp->storeMachine);
-		r(pending, &res->verificationCondition, inp->verificationCondition);
+		r(pending, &res->inferredAssumption, inp->inferredAssumption);
+		r(pending, &res->crashCondition, inp->crashCondition);
 		return res;
 	}
 	template <typename t>

@@ -1157,25 +1157,52 @@ nonFunctionalSimplifications(
 		p = true;
 		while (!TIMEOUT && p) {
 			p = false;
-			summary->verificationCondition =
-				stripFloatingPoint(&summary->scopes->bools, summary->verificationCondition, &p);
-			summary->verificationCondition =
+			summary->crashCondition =
+				stripFloatingPoint(&summary->scopes->bools, summary->crashCondition, &p);
+			summary->crashCondition =
 				simplifyAssumingMachineSurvives(
 					summary->scopes,
 					summary->mai,
 					summary->loadMachine,
 					true,
-					summary->verificationCondition,
+					summary->crashCondition,
 					oracle,
 					&p,
 					token);
-			summary->verificationCondition =
+			summary->crashCondition =
 				simplifyAssumingMachineSurvives(
 					summary->scopes,
 					summary->mai,
 					summary->storeMachine,
 					false,
-					summary->verificationCondition,
+					summary->crashCondition,
+					oracle,
+					&p,
+					token);
+			progress |= p;
+		}
+		p = true;
+		while (!TIMEOUT && p) {
+			p = false;
+			summary->inferredAssumption =
+				stripFloatingPoint(&summary->scopes->bools, summary->inferredAssumption, &p);
+			summary->inferredAssumption =
+				simplifyAssumingMachineSurvives(
+					summary->scopes,
+					summary->mai,
+					summary->loadMachine,
+					true,
+					summary->inferredAssumption,
+					oracle,
+					&p,
+					token);
+			summary->inferredAssumption =
+				simplifyAssumingMachineSurvives(
+					summary->scopes,
+					summary->mai,
+					summary->storeMachine,
+					false,
+					summary->inferredAssumption,
 					oracle,
 					&p,
 					token);
@@ -1183,11 +1210,19 @@ nonFunctionalSimplifications(
 		}
 		reg_set_t targetRegisters;
 		if (findTargetRegisters(summary, oracle, &targetRegisters, token)) {
-			summary->verificationCondition =
+			summary->crashCondition =
 				bbdd::var(
 					&summary->scopes->bools,
 					simplifyUsingUnderspecification(
-						bbdd::to_irexpr(summary->verificationCondition),
+						bbdd::to_irexpr(summary->crashCondition),
+						targetRegisters,
+						IRExpr_Const_U1(true),
+						&progress));
+			summary->inferredAssumption =
+				bbdd::var(
+					&summary->scopes->bools,
+					simplifyUsingUnderspecification(
+						bbdd::to_irexpr(summary->inferredAssumption),
 						targetRegisters,
 						IRExpr_Const_U1(true),
 						&progress));
@@ -1206,13 +1241,13 @@ functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
 	if (findTargetRegisters(summary, oracle, &targetRegisters, token)) {
 		IRExpr *e = 
 			functionalUnderspecification(
-				bbdd::to_irexpr(summary->verificationCondition),
+				bbdd::to_irexpr(summary->crashCondition),
 				targetRegisters,
 				1);
 		if (e == underspecExpression)
-			summary->verificationCondition = summary->scopes->bools.cnst(true);
+			summary->crashCondition = summary->scopes->bools.cnst(true);
 		else
-			summary->verificationCondition = bbdd::var(&summary->scopes->bools, simplify_via_anf(e));
+			summary->crashCondition = bbdd::var(&summary->scopes->bools, simplify_via_anf(e));
 	}
 	return summary;
 }
@@ -1399,10 +1434,12 @@ LoadCanonicaliser::canonicalise(CrashSummary *cs)
 {
 	StateMachine *loadM = canonicalise(cs->scopes, cs->loadMachine);
 	StateMachine *storeM = canonicalise(cs->scopes, cs->storeMachine);
-	bbdd *cond = canonicalise(&cs->scopes->bools, cs->verificationCondition);
+	bbdd *cond = canonicalise(&cs->scopes->bools, cs->crashCondition);
+	bbdd *ass = canonicalise(&cs->scopes->bools, cs->inferredAssumption);
 	return new CrashSummary(cs->scopes,
 				loadM,
 				storeM,
+				ass,
 				cond,
 				cs->aliasing,
 				cs->mai);
@@ -1413,13 +1450,15 @@ LoadCanonicaliser::decanonicalise(CrashSummary *cs)
 {
 	auto a = decanonicalise(cs->scopes, cs->loadMachine);
 	auto b = decanonicalise(cs->scopes, cs->storeMachine);
-	auto c = decanonicalise(&cs->scopes->bools, cs->verificationCondition);
-	if (!a || !b || !c) {
+	auto c = decanonicalise(&cs->scopes->bools, cs->crashCondition);
+	auto d = decanonicalise(&cs->scopes->bools, cs->inferredAssumption);
+	if (!a || !b || !c || !d) {
 		return cs;
 	}
 	return new CrashSummary(cs->scopes,
 				a,
 				b,
+				d,
 				c,
 				cs->aliasing,
 				cs->mai);

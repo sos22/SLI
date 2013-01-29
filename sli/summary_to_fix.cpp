@@ -1553,7 +1553,7 @@ buildPatchForCrashSummary(Oracle *oracle,
 			const SummaryId &summaryId(it->first);
 
 			std::set<MemoryAccessIdentifier> relevant_mais;
-			findRelevantMais(summary->verificationCondition, relevant_mais);
+			findRelevantMais(summary->crashCondition, relevant_mais);
 			std::set<std::pair<unsigned, CfgLabel> > relevant_cfgs;
 			findRelevantCfgs(summary->mai, relevant_mais, relevant_cfgs);
 

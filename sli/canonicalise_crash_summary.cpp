@@ -443,8 +443,8 @@ canonicaliseAliasingInformation(CrashSummary *cs)
 						it->second));
 		}
 		assoc->contents[assoc->nr_arguments++] =
-			cs->verificationCondition;
-		cs->verificationCondition = assoc;
+			cs->inferredAssumption;
+		cs->inferredAssumption = assoc;
 	}
 
 	cs->aliasing.clear();
@@ -455,6 +455,7 @@ canonicalise_crash_summary(CrashSummary *input)
 {
 	canonicaliseAliasingInformation(input);
 	input->verificationCondition = canonicaliseIRExpr(input->verificationCondition);
+	input->inferredAssumption = canonicaliseIRExpr(input->inferredAssumption);
 
 	CanonicaliseThreadIds thread_canon;
 	input = transformCrashSummary(input, thread_canon);
@@ -510,8 +511,8 @@ canonicalise_crash_summary(CrashSummary *input)
 					IRExpr_Get(it->second, Ity_I64),
 					it->first);
 		}
-		newCond->contents[newCond->nr_arguments++] = input->verificationCondition;
-		input->verificationCondition = newCond;
+		newCond->contents[newCond->nr_arguments++] = input->inferredAssumption;
+		input->inferredAssumption = newCond;
 	}
 
 	return input;

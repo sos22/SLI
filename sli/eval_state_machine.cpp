@@ -534,7 +534,7 @@ public:
 class EvalContext : public GcCallback<&ir_heap> {
 	enum trool { tr_true, tr_false, tr_unknown };
 public:
-	bbdd *pathConstraint;
+	bbdd *justPathConstraint;
 private:
 	threadState state;
 	memLogT memlog;
@@ -546,16 +546,16 @@ private:
 		state.visit(hv);
 		memlog.visit(hv);
 		hv(currentState);
-		hv(pathConstraint);
+		hv(justPathConstraint);
 	}
 
-	trool evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt);
-	void evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
+	trool evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt);
+	void evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
 			    smrbdd *&result, StateMachineRes unreachedIs, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
 
 	EvalContext(const EvalContext &o, StateMachineState *sms)
-		: pathConstraint(o.pathConstraint),
+		: justPathConstraint(o.justPathConstraint),
 		  state(o.state),
 		  memlog(o.memlog),
 		  atomic(o.atomic),
@@ -563,12 +563,12 @@ private:
 	{
 	}
 	/* Create a new context which is like this one, but with an
-	   extra assumption. */
+	   extra constraint. */
 	EvalContext(SMScopes *scopes,
 		    const EvalContext &o,
 		    StateMachineState *sms,
-		    bbdd *assume)
-		: pathConstraint(bbdd::And(&scopes->bools, o.pathConstraint, assume)),
+		    bbdd *constraint)
+		: justPathConstraint(bbdd::And(&scopes->bools, o.justPathConstraint, constraint)),
 		  state(o.state),
 		  memlog(o.memlog),
 		  atomic(o.atomic),
@@ -582,17 +582,19 @@ private:
 	};
 	evalStateMachineSideEffectRes evalStateMachineSideEffect(
 		SMScopes *scopes,
+		bbdd *assumption,
 		const MaiMap &decode,
 		StateMachine *thisMachine,
 		StateMachineSideEffect *smse,
 		NdChooser &chooser,
 		OracleInterface *oracle,
 		const IRExprOptimisations &opt);
-	bool expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
-	bool expressionIsTrue(SMScopes *scopes, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
-	bool evalExpressionsEqual(SMScopes *scopes, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool expressionIsTrue(SMScopes *scopes, bbdd *assumption, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool expressionIsTrue(SMScopes *scopes, bbdd *assumption, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
+	bool evalExpressionsEqual(SMScopes *scopes, bbdd *assumption, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
 public:
 	void advance(SMScopes *scopes,
+		     bbdd *assumption,
 		     const MaiMap &decode,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
@@ -601,21 +603,21 @@ public:
 		     StateMachine *sm,
 		     smrbdd *&result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
-		: pathConstraint(_pathConstraint),
+		: justPathConstraint(_pathConstraint),
 		  atomic(false),
 		  currentState(sm->root)
 	{
-		assert(pathConstraint);
+		assert(justPathConstraint);
 	}
 };
 
 bool
-EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
+EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *assumption, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
 {
 	if (TIMEOUT)
 		return true;
 	bbdd *simplified;
-	switch (evalBooleanExpression(scopes, exp, &simplified, opt)) {
+	switch (evalBooleanExpression(scopes, assumption, exp, &simplified, opt)) {
 	case tr_true:
 		return true;
 	case tr_false:
@@ -624,18 +626,18 @@ EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, c
 		/* Can't prove it one way or another.  Use the
 		   non-deterministic chooser to guess. */
 		if (chooser.nd_choice(2) == 0) {
-			pathConstraint =
+			justPathConstraint =
 				bbdd::And(
 					&scopes->bools,
 					simplified,
-					pathConstraint);
+					justPathConstraint);
 			return true;
 		} else {
-			pathConstraint =
+			justPathConstraint =
 				bbdd::And(
 					&scopes->bools,
 					bbdd::invert(&scopes->bools, simplified),
-					pathConstraint);
+					justPathConstraint);
 			return false;
 		}
 	}
@@ -643,16 +645,17 @@ EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *exp, NdChooser &chooser, c
 }
 
 bool
-EvalContext::expressionIsTrue(SMScopes *scopes, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
+EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *assumption, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
 {
-	return expressionIsTrue(scopes, exprbdd::to_bbdd(&scopes->bools, exp), chooser, opt);
+	return expressionIsTrue(scopes, assumption, exprbdd::to_bbdd(&scopes->bools, exp), chooser, opt);
 }
 
 bool
-EvalContext::evalExpressionsEqual(SMScopes *scopes, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt)
+EvalContext::evalExpressionsEqual(SMScopes *scopes, bbdd *assumption, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt)
 {
 	return expressionIsTrue(
 		scopes,
+		assumption,
 		exprbdd::binop(
 			&scopes->exprs,
 			&scopes->bools,
@@ -665,6 +668,7 @@ EvalContext::evalExpressionsEqual(SMScopes *scopes, exprbdd *exp1, exprbdd *exp2
 
 EvalContext::evalStateMachineSideEffectRes
 EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
+					bbdd *assumption,
 					const MaiMap &decode,
 					StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
@@ -687,8 +691,9 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		if (TIMEOUT)
 			return esme_escape;
 		assert(a);
-		if (expressionIsTrue(scopes, a, chooser, opt))
+		if (expressionIsTrue(scopes, assumption, a, chooser, opt)) {
 			return esme_escape;
+		}
 	}
 
 	switch (smse->type) {
@@ -732,7 +737,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 
 			if (!oracle->memoryAccessesMightAlias(decode, opt, smsel, smses))
 				continue;
-			if (evalExpressionsEqual(scopes, smses->addr, addr, chooser, opt)) {
+			if (evalExpressionsEqual(scopes, assumption, smses->addr, addr, chooser, opt)) {
 				satisfier = smses;
 				satisfierMachine = it->first;
 				break;
@@ -749,7 +754,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			val = exprbdd::load(&scopes->exprs, &scopes->bools, smsel->type, addr);
 		}
 		if (!TIMEOUT)
-			state.set_register(scopes, smsel->target, val, &pathConstraint, opt);
+			state.set_register(scopes, smsel->target, val, &justPathConstraint, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -759,7 +764,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		state.set_register(scopes,
 				   smsec->target,
 				   state.specialiseIRExpr(scopes, smsec->value),
-				   &pathConstraint,
+				   &justPathConstraint,
 				   opt);
 		break;
 	}
@@ -770,6 +775,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
 		if (expressionIsTrue(
 			    scopes,
+			    assumption,
 			    state.specialiseIRExpr(scopes, smseaf->value),
 			    chooser,
 			    opt)) {
@@ -783,7 +789,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *smsep =
 			(StateMachineSideEffectPhi *)(smse);
-		state.eval_phi(scopes, smsep, &pathConstraint, opt);
+		state.eval_phi(scopes, smsep, &justPathConstraint, opt);
 		break;
 	}
 	case StateMachineSideEffect::StartAtomic:
@@ -804,7 +810,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					   &scopes->exprs,
 					   &scopes->bools,
 					   IRExpr_Get(tr, Ity_I64)),
-				   &pathConstraint,
+				   &justPathConstraint,
 				   opt);
 #if !CONFIG_NO_STATIC_ALIASING
 		/* The only use we make of a PointerAliasing side
@@ -815,6 +821,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		if (!p->set.mightBeNonPointer() &&
 		    expressionIsTrue(
 			    scopes,
+			    assumption,
 			    bbdd::var(&scopes->bools, IRExpr_Unop(
 					      Iop_BadPtr,
 					      IRExpr_Get(tr, Ity_I64))),
@@ -838,17 +845,25 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 }
 
 EvalContext::trool
-EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt)
+EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt)
 {
 	bbdd *simplifiedCondition =
 		bbdd::assume(
 			&scopes->bools,
 			what,
-			pathConstraint);
+			justPathConstraint);
 	if (!simplifiedCondition) {
 		/* @what is a contradiction when combined with
 		 * @pathConstraint.  That means we can say whatever we
 		 * like and it won't actually matter. */
+		return tr_true;
+	}
+	simplifiedCondition =
+		bbdd::assume(
+			&scopes->bools,
+			what,
+			assumption);
+	if (!simplifiedCondition) {
 		return tr_true;
 	}
 	simplifiedCondition = simplifyBDD(&scopes->bools, simplifiedCondition, opt);
@@ -869,9 +884,10 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *what, bbdd **simplifi
 }
 
 void
-EvalContext::evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
-			    smrbdd *&result, StateMachineRes unreached, std::vector<EvalContext> &pendingStates,
-			    StateMachineSideEffect *smse, const IRExprOptimisations &opt)
+EvalContext::evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode, StateMachine *sm,
+			    OracleInterface *oracle, smrbdd *&result, StateMachineRes unreached,
+			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
+			    const IRExprOptimisations &opt)
 {
 	NdChooser chooser;
 
@@ -879,6 +895,7 @@ EvalContext::evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine
 		EvalContext newContext(*this);
 		evalStateMachineSideEffectRes res =
 			newContext.evalStateMachineSideEffect(scopes,
+							      assumption,
 							      decode,
 							      sm,
 							      smse,
@@ -893,7 +910,7 @@ EvalContext::evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine
 			break;
 		case esme_escape:
 			result = smrbdd::ifelse(&scopes->smrs,
-						newContext.pathConstraint,
+						newContext.justPathConstraint,
 						scopes->smrs.cnst(unreached),
 						result);
 			break;
@@ -908,6 +925,7 @@ EvalContext::evalSideEffect(SMScopes *scopes, const MaiMap &decode, StateMachine
    much bigger, which'd be kind of annoying. */
 void
 EvalContext::advance(SMScopes *scopes,
+		     bbdd *assumption,
 		     const MaiMap &decode,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
@@ -921,7 +939,7 @@ EvalContext::advance(SMScopes *scopes,
 		auto smt = (StateMachineTerminal *)currentState;
 		result = smrbdd::ifelse(
 			&scopes->smrs,
-			pathConstraint,
+			justPathConstraint,
 			state.specialiseIRExpr(
 				scopes,
 				smrbdd::replaceTerminal(
@@ -936,7 +954,7 @@ EvalContext::advance(SMScopes *scopes,
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
 		currentState = sme->target;
 		if (sme->sideEffect) {
-			evalSideEffect(scopes, decode, sm, oracle, result,
+			evalSideEffect(scopes, assumption, decode, sm, oracle, result,
 				       unreachedIs, pendingStates,
 				       sme->sideEffect, opt);
 		} else {
@@ -948,7 +966,7 @@ EvalContext::advance(SMScopes *scopes,
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
 		bbdd *cond = state.specialiseIRExpr(scopes, smb->condition);
 		bbdd *scond;
-		trool res = evalBooleanExpression(scopes, cond, &scond, opt);
+		trool res = evalBooleanExpression(scopes, assumption, cond, &scond, opt);
 		switch (res) {
 		case tr_true:
 			pendingStates.push_back(EvalContext(
@@ -998,14 +1016,15 @@ enumEvalPaths(SMScopes *scopes,
 
 	result = scopes->smrs.cnst(unreachedIs);
 
-	pendingStates.push_back(EvalContext(sm, assumption ? assumption.get() : scopes->bools.cnst(true)));
-
+	bbdd *t = scopes->bools.cnst(true);
+	pendingStates.push_back(EvalContext(sm, t));
+	VexPtr<bbdd, &ir_heap> ass(assumption ? assumption : t);
 	while (!TIMEOUT && !pendingStates.empty()) {
 		LibVEX_maybe_gc(token);
 
 		EvalContext ctxt(pendingStates.back());
 		pendingStates.pop_back();
-		ctxt.advance(scopes, *decode, oracle, opt, pendingStates, unreachedIs, sm, result);
+		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, unreachedIs, sm, result);
 		if (loud && cntr++ % 100 == 0)
 			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
 	}
@@ -1863,7 +1882,7 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 					       oracle,
 					       true,
 					       token);
-	return survivalConstraintIfExecutedAtomically(
+	auto res = survivalConstraintIfExecutedAtomically(
 		scopes,
 		mai,
 		combinedMachine,
@@ -1872,6 +1891,10 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 		false,
 		opt,
 		token);
+	if (res) {
+		res = bbdd::And(&scopes->bools, res, assumption);
+	}
+	return res;
 }
 
 /* Just collect all of the constraints which the symbolic execution
