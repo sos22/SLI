@@ -1676,7 +1676,7 @@ static void
 get_max_wait_time(struct timeval *end_wait)
 {
 	gettimeofday(end_wait, NULL);
-	end_wait->tv_usec += MAX_DELAY_US;
+	end_wait->tv_usec += MAX_DELAY_US * 2;
 	while (end_wait->tv_usec >= 1000000) {
 		end_wait->tv_sec++;
 		end_wait->tv_usec -= 1000000;
