@@ -1629,3 +1629,12 @@ main(int argc, char *argv[])
 	return 0;
 }
 
+/* For reasons which aren't terribly clear, the linker won't pick up
+   nf.o unless there's a reference to it in this file.  Make sure
+   there is one. */
+void
+force_linkage()
+{
+	NF_Term foo;
+	foo.prettyPrint(stdout, "");
+}
