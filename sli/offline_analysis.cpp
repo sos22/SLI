@@ -673,7 +673,7 @@ verificationConditionForStoreMachine(SMScopes *scopes,
 			atomicSurvivalOptimisations(opt.enablepreferCrash()),
 			token);
 
-	if (!assumption) {
+	if (!assumption || assumption == scopes->bools.cnst(false)) {
 		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
 		return NULL;
 	}
