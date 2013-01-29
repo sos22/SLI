@@ -2095,6 +2095,7 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 			debug("%p(%s): no viable successors\n", lls, current_cfg_node->id);
 			hls->ll_states.content[i] = NULL;
 			if (current_cfg_node->nr_successors == 0) {
+				printf("Completed enforcement plan!\n");
 				if (lls->last_operation_is_send) {
 					/* If the last operation in a
 					   thread is a send, that
