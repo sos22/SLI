@@ -1,12 +1,24 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 
+#ifndef NDEBUG
+static bool debug_edm = false;
+#else
+#define debug_edm false
+#endif
+
 expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 						 expressionStashMapT &stash,
 						 instructionDominatorMapT &idom,
 						 predecessorMapT &pred,
 						 happensAfterMapT &happensBefore)
 {
+	if (debug_edm) {
+		printf("Build expression dominator map.\n");
+		printf("Conjunction: ");
+		c.prettyPrint(stdout, " || ");
+	}
+
 	/* First, figure out where the various expressions could in
 	   principle be evaluated. */
 	expressionDominatorMapT evalable;
@@ -25,9 +37,50 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 			     it++)
 				availExprs.insert(*it);
 		}
-		for (unsigned x = 0; x < c.size(); x++)
-			if (evaluatable(c[x].second, availExprs))
+		if (debug_edm) {
+			printf("\nAvailable at %s: ", it->first->label.name());
+			for (auto it = availExprs.begin();
+			     it != availExprs.end();
+			     it++) {
+				if (it != availExprs.begin()) {
+					printf(", ");
+				}
+				printf("%s", nameIRExpr(*it));
+			}
+			printf("\n");
+		}
+		for (unsigned x = 0; x < c.size(); x++) {
+			if (evaluatable(c[x].second, availExprs)) {
+				if (debug_edm) {
+					printf("%s -> evalable\n", nameIRExpr(c[x].second));
+				}
 				evalable[it->first].insert(c[x]);
+			} else {
+				if (debug_edm) {
+					printf("%s -> not evalable\n", nameIRExpr(c[x].second));
+				}
+			}
+		}
+	}
+
+	if (debug_edm) {
+		printf("evalable map:\n");
+		for (auto it = evalable.begin();
+		     it != evalable.end();
+		     it++) {
+			printf("%s -> ", it->first->label.name());
+			for (auto it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++) {
+				if (it2 != it->second.begin()) {
+					printf(", ");
+				}
+				printf("%s (%s)",
+				       nameIRExpr(it2->second),
+				       it2->first ? "true" : "false");
+			}
+			printf("\n");
+		}
 	}
 
 	/* Just find all of the things which are evaluatable at X but

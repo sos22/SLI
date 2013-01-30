@@ -18,8 +18,9 @@ addAssumption(bbdd::scope *scope,
 		what->storeMachine,
 		bbdd::And(
 			scope,
-			what->verificationCondition,
+			what->inferredAssumption,
 			isTrue ? assumption : bbdd::invert(scope, assumption)),
+		what->crashCondition,
 		what->aliasing,
 		what->mai);
 }

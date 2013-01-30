@@ -516,6 +516,7 @@ atomicSurvivalConstraint(SMScopes *scopes,
 			 VexPtr<StateMachine, &ir_heap> &machine,
 			 StateMachine **_atomicMachine,
 			 VexPtr<OracleInterface> &oracle,
+			 const VexPtr<bbdd, &ir_heap> &assumption,
 			 const AllowableOptimisations &opt,
 			 GarbageCollectionToken token)
 {
@@ -525,8 +526,7 @@ atomicSurvivalConstraint(SMScopes *scopes,
 	atomicMachine = optimiseStateMachine(scopes, mai, atomicMachine, opt, oracle, true, token);
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;
-	VexPtr<bbdd, &ir_heap> nullexpr(NULL);
-	bbdd *survive = survivalConstraintIfExecutedAtomically(scopes, mai, atomicMachine, nullexpr, oracle, false, opt, token);
+	bbdd *survive = survivalConstraintIfExecutedAtomically(scopes, mai, atomicMachine, assumption, oracle, false, opt, token);
 	if (!survive)
 		fprintf(_logfile, "\tTimed out computing survival constraint\n");
 	return survive;
@@ -648,70 +648,6 @@ removeAnnotations(SMScopes *scopes,
 			break;
 	}
 	return sm;
-}
-      
-static bbdd *
-verificationConditionForStoreMachine(SMScopes *scopes,
-				     VexPtr<StateMachine, &ir_heap> &storeMachine,
-				     VexPtr<StateMachine, &ir_heap> &probeMachine,
-				     VexPtr<bbdd, &ir_heap> &atomicSurvivalConstraint,
-				     VexPtr<OracleInterface> &oracle,
-				     VexPtr<MaiMap, &ir_heap> &mai,
-				     const AllowableOptimisations &opt,
-				     GarbageCollectionToken token)
-{
-	__set_profiling(verificationConditionForStoreMachine);
-
-	VexPtr<bbdd, &ir_heap> assumption =
-		writeMachineSuitabilityConstraint(
-			scopes,
-			mai,
-			storeMachine,
-			probeMachine,
-			oracle,
-			atomicSurvivalConstraint,
-			atomicSurvivalOptimisations(opt.enablepreferCrash()),
-			token);
-
-	if (!assumption || assumption == scopes->bools.cnst(false)) {
-		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
-		return NULL;
-	}
-
-	VexPtr<StateMachine, &ir_heap> sm;
-	sm = duplicateStateMachine(storeMachine);
-
-	/* Figure out when the cross product machine will be at risk
-	 * of crashing. */
-	bbdd *crash_constraint =
-		crossProductSurvivalConstraint(
-			scopes,
-			probeMachine,
-			sm,
-			oracle,
-			assumption,
-			opt.disablepreferCrash(),
-			mai,
-			token);
-	if (!crash_constraint) {
-		fprintf(_logfile, "\t\tfailed to build crash constraint\n");
-		return NULL;
-	}
-
-	/* And we hope that that will lead to a contradiction when
-	   combined with the assumption.  The verification condition
-	   is (assumption) & ~(crash_condition), and is 1 in precisely
-	   those states which might suffer a bug of the desired
-	   kind. */
-	bbdd *a = bbdd::invert(&scopes->bools, crash_constraint);
-	if (!a) return NULL;
-	a = bbdd::And(&scopes->bools, a, assumption);
-	if (!a) return NULL;
-
-	fprintf(_logfile, "\t\tVerification condition:\n");
-	a->prettyPrint(_logfile);
-
-	return a;
 }
 
 static StateMachine *
@@ -954,7 +890,29 @@ optimiseAssuming(SMScopes *scopes, StateMachineSideEffect *se, bbdd *assumption)
 		}
 		return new StateMachineSideEffectPhi(smp, inputs);
 	}
-		
+
+#if !CONFIG_NO_STATIC_ALIASING
+	case StateMachineSideEffect::StackLayout:
+		return se;
+	case StateMachineSideEffect::StartFunction: {
+		auto smsf = (StateMachineSideEffectStartFunction *)se;
+		auto rsp = exprbdd::assume(&scopes->exprs, smsf->rsp, assumption);
+		if (rsp == smsf->rsp) {
+			return se;
+		} else {
+			return new StateMachineSideEffectStartFunction(smsf, rsp);
+		}
+	}
+	case StateMachineSideEffect::EndFunction: {
+		auto smsf = (StateMachineSideEffectEndFunction *)se;
+		auto rsp = exprbdd::assume(&scopes->exprs, smsf->rsp, assumption);
+		if (rsp == smsf->rsp) {
+			return se;
+		} else {
+			return new StateMachineSideEffectEndFunction(smsf, rsp);
+		}
+	}
+#endif
 	}
 	abort();
 }
@@ -1079,6 +1037,7 @@ considerStoreCFG(SMScopes *scopes,
 			probeMachine,
 			NULL,
 			oracleI,
+			atomicSurvival,
 			atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
 			token);
 		if (!atomicSurvival) {
@@ -1091,26 +1050,62 @@ considerStoreCFG(SMScopes *scopes,
 		}
 	}
 
-	VexPtr<bbdd, &ir_heap> base_verification_condition;
-	base_verification_condition =
-		verificationConditionForStoreMachine(
+	atomicSurvival =
+		writeMachineSuitabilityConstraint(
 			scopes,
+			mai,
 			sm_ssa,
 			probeMachine,
-			atomicSurvival,
 			oracleI,
-			mai,
-			optIn,
+			atomicSurvival,
+			atomicSurvivalOptimisations(optIn.enablepreferCrash()),
 			token);
-	if (!base_verification_condition || TIMEOUT)
+	if (!atomicSurvival) {
+		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
 		return NULL;
+	}
 
-	if (base_verification_condition == scopes->bools.cnst(false)) {
+	fprintf(_logfile, "\t\tInferred assumption:\n");
+	atomicSurvival->prettyPrint(_logfile);
+
+	VexPtr<bbdd, &ir_heap> crash_constraint;
+	{
+		VexPtr<StateMachine, &ir_heap> dupe_store_machine;
+		dupe_store_machine = duplicateStateMachine(sm_ssa);
+		crash_constraint =
+			crossProductSurvivalConstraint(
+				scopes,
+				probeMachine,
+				sm,
+				oracleI,
+				atomicSurvival,
+				optIn.disablepreferCrash(),
+				mai,
+				token);
+		if (!crash_constraint) {
+			fprintf(_logfile, "\t\tFailed to derive crash condition\n");
+			return NULL;
+		}
+		crash_constraint = bbdd::invert(&scopes->bools, crash_constraint);
+		if (!crash_constraint || TIMEOUT) {
+			return NULL;
+		}
+	}
+
+	VexPtr<bbdd, &ir_heap> verification_condition;
+	verification_condition =
+		bbdd::And(&scopes->bools, crash_constraint, atomicSurvival);
+	if (!verification_condition || TIMEOUT) {
+		return NULL;
+	}
+	if (verification_condition == scopes->bools.cnst(false)) {
 		fprintf(_logfile, "\t\tCrash impossible.\n");
 		return NULL;
 	}
 
-	VexPtr<bbdd, &ir_heap> residual_verification_condition(base_verification_condition);
+	fprintf(_logfile, "\t\tVerification condition:\n");
+	verification_condition->prettyPrint(_logfile);
+
 	if (CONFIG_USE_INDUCTION && !optIn.allPointersGood()) {
 		/* Now have a look at whether we have anything we can use the
 		 * induction rule on.  That means look at the probe machine
@@ -1160,47 +1155,84 @@ considerStoreCFG(SMScopes *scopes,
 					truncatedMachine,
 					NULL,
 					oracleI,
+					atomicSurvival,
 					atomicSurvivalOptimisations(optIn.enablepreferCrash()),
 					token));
 			if (!truncAtomicSurvival) {
-				return NULL;
-			}
-			bbdd *t = verificationConditionForStoreMachine(
-				scopes,
-				sm_ssa,
-				truncatedMachine,
-				truncAtomicSurvival,
-				oracleI,
-				mai,
-				optIn,
-				token);
-			if (!t || t == residual_verification_condition ||
-			    t == scopes->bools.cnst(false))
 				continue;
-			fprintf(_logfile, "Induction probe machine:\n");
-			printStateMachine(truncatedMachine, _logfile);
-			fprintf(_logfile, "Induction rule: ");
+			}
+			truncAtomicSurvival =
+				writeMachineSuitabilityConstraint(
+					scopes,
+					mai,
+					sm_ssa,
+					truncatedMachine,
+					oracleI,
+					truncAtomicSurvival,
+					atomicSurvivalOptimisations(optIn.enablepreferCrash()),
+					token);
+			if (!truncAtomicSurvival) {
+				continue;
+			}
+
+			bbdd *truncCrashConstraint;
+			{
+				VexPtr<StateMachine, &ir_heap> dupe_store_machine;
+				dupe_store_machine = duplicateStateMachine(sm_ssa);
+				truncCrashConstraint =
+					crossProductSurvivalConstraint(
+						scopes,
+						probeMachine,
+						sm,
+						oracleI,
+						truncAtomicSurvival,
+						optIn.disablepreferCrash(),
+						mai,
+						token);
+				if (!truncCrashConstraint ||
+				    truncCrashConstraint->isLeaf()) {
+					continue;
+				}
+			}
+
+			auto t = bbdd::Or(&scopes->bools, truncAtomicSurvival, truncCrashConstraint);
+			if (!t) {
+				continue;
+			}
+			t = bbdd::invert(&scopes->bools, t);
+			if (!t) {
+				continue;
+			}
+			fprintf(_logfile, "Induction rule for %s\n",
+				inductionAccesses[x]->rip.name());
 			t->prettyPrint(_logfile);
-			fprintf(_logfile, "\n");
-			residual_verification_condition =
-				bbdd::assume(&scopes->bools,
-					     residual_verification_condition,
-					     bbdd::invert(&scopes->bools, t));
-			fprintf(_logfile, "After simplification: ");
-			residual_verification_condition->prettyPrint(_logfile);
-			fprintf(_logfile, "\n");
+
+			t = bbdd::And(&scopes->bools, t, atomicSurvival);
+			if (!t) {
+				continue;
+			}
+			atomicSurvival = t;
 			for (auto it = mai->begin(inductionAccesses[x]->rip); !it.finished(); it.advance())
 				logUseOfInduction(target_rip, it.dr());
-			if (residual_verification_condition == scopes->bools.cnst(false)) {
-				fprintf(_logfile, "\t\tCrash impossible.\n");
-				return NULL;
-			}
 		}
+
+		verification_condition =
+			bbdd::And(&scopes->bools, crash_constraint, atomicSurvival);
+		if (!verification_condition || TIMEOUT) {
+			return NULL;
+		}
+		if (verification_condition == scopes->bools.cnst(false)) {
+			fprintf(_logfile, "\t\tCrash blocked by induction.\n");
+			return NULL;
+		}
+
+		fprintf(_logfile, "\t\tInduction reduced verification condition:\n");
+		verification_condition->prettyPrint(_logfile);
 	}
 
 	/* Okay, the expanded machine crashes.  That means we have to
 	 * generate a fix. */
-	return new CrashSummary(scopes, probeMachine, sm_ssa, residual_verification_condition, oracle, mai);
+	return new CrashSummary(scopes, probeMachine, sm_ssa, atomicSurvival, crash_constraint, oracle, mai);
 }
 
 StateMachine *
@@ -1449,7 +1481,9 @@ diagnoseCrash(SMScopes *scopes,
 	}
 
 	VexPtr<bbdd, &ir_heap> atomicSurvival;
+	VexPtr<bbdd, &ir_heap> nullExpr(NULL);
 	atomicSurvival = atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracleI,
+						  nullExpr,
 						  atomicSurvivalOptimisations(optIn.enablepreferCrash()),
 						  token);
 	if (!atomicSurvival) {

@@ -18,18 +18,23 @@ public:
 	SMScopes *scopes;
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
-	bbdd *verificationCondition;
+	bbdd *inferredAssumption;
+	bbdd *crashCondition;
 	typedef std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> aliasingEntryT;
 	std::vector<aliasingEntryT> aliasing;
 	MaiMap *mai;
-	CrashSummary(SMScopes *_scopes, StateMachine *_loadMachine,
+	CrashSummary(SMScopes *_scopes,
+		     StateMachine *_loadMachine,
 		     StateMachine *_storeMachine,
-		     bbdd *_verificationCondition, Oracle *oracle,
+		     bbdd *_inferredAssumption,
+		     bbdd *_crashCondition,
+		     Oracle *oracle,
 		     MaiMap *_mai)
 		: scopes(_scopes),
 		  loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
-		  verificationCondition(_verificationCondition),
+		  inferredAssumption(_inferredAssumption),
+		  crashCondition(_crashCondition),
 		  mai(_mai)
 	{
 		buildAliasingTable(oracle);
@@ -38,13 +43,15 @@ public:
 	CrashSummary(SMScopes *_scopes,
 		     StateMachine *_loadMachine,
 		     StateMachine *_storeMachine,
-		     bbdd *_verificationCondition,
+		     bbdd *_inferredAssumption,
+		     bbdd *_crashCondition,
 		     const std::vector<aliasingEntryT> &_aliasing,
 		     MaiMap *_mai)
 		: scopes(_scopes),
 		  loadMachine(_loadMachine),
 		  storeMachine(_storeMachine),
-		  verificationCondition(_verificationCondition),
+		  inferredAssumption(_inferredAssumption),
+		  crashCondition(_crashCondition),
 		  aliasing(_aliasing),
 		  mai(_mai)
 	{}
@@ -52,7 +59,8 @@ public:
 	void visit(HeapVisitor &hv) {
 		hv(loadMachine);
 		hv(storeMachine);
-		hv(verificationCondition);
+		hv(inferredAssumption);
+		hv(crashCondition);
 		hv(mai);
 	}
 	NAMED_CLASS
@@ -106,11 +114,16 @@ visit_crash_summary(ctxtT *ctxt,
 {
 	std::set<const StateMachineState *> memo;
 	visit_result res;
-	res = visit_const_bdd(ctxt, &visitor->bdd, sm->verificationCondition);
-	if (res == visit_continue)
+	res = visit_const_bdd(ctxt, &visitor->bdd, sm->inferredAssumption);
+	if (res == visit_continue) {
+		res = visit_const_bdd(ctxt, &visitor->bdd, sm->crashCondition);
+	}
+	if (res == visit_continue) {
 		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
-	if (res == visit_continue)
+	}
+	if (res == visit_continue) {
 		res = visit_state_machine(ctxt, visitor, sm->storeMachine, memo);
+	}
 	return res;
 }
 template <typename ctxtT> static visit_result
@@ -120,11 +133,16 @@ visit_crash_summary(ctxtT *ctxt,
 {
 	std::set<const StateMachineState *> memo;
 	visit_result res;
-	res = visit_const_bdd(ctxt, visitor, sm->verificationCondition);
-	if (res == visit_continue)
+	res = visit_const_bdd(ctxt, visitor, sm->inferredAssumption);
+	if (res == visit_continue) {
+		res = visit_const_bdd(ctxt, visitor, sm->crashCondition);
+	}
+	if (res == visit_continue) {
 		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
-	if (res == visit_continue)
+	}
+	if (res == visit_continue) {
 		res = visit_state_machine(ctxt, visitor, sm->storeMachine, memo);
+	}
 	return res;
 }
 

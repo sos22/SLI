@@ -442,6 +442,12 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 			case Iop_Xor64:
 				bytecode_op(f, "xor", iea->type());
 				break;
+			case Iop_Mul8:
+			case Iop_Mul16:
+			case Iop_Mul32:
+			case Iop_Mul64:
+				bytecode_op(f, "mul", iea->type());
+				break;
 			default:
 				abort();
 			}
@@ -921,4 +927,14 @@ main(int argc, char *argv[])
 	fclose(f);
 
 	return 0;
+}
+
+/* For reasons which aren't terribly clear, the linker won't pick up
+   nf.o unless there's a reference to it in this file.  Make sure
+   there is one. */
+void
+force_linkage()
+{
+	NF_Term foo;
+	foo.prettyPrint(stdout, "");
 }

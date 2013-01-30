@@ -36,8 +36,12 @@ printCrashSummary(CrashSummary *summary, FILE *f)
 			      summary->storeMachine,
 			      f);
 
-	fprintf(f, "Verification condition: ");
-	summary->verificationCondition->prettyPrint(f);
+	fprintf(f, "Inferred assumption: ");
+	summary->inferredAssumption->prettyPrint(f);
+	fprintf(f, "\n");
+
+	fprintf(f, "Crash condition: ");
+	summary->crashCondition->prettyPrint(f);
 	fprintf(f, "\n");
 
 	if (summary->aliasing.size() == 0) {
@@ -102,7 +106,8 @@ parseCrashSummary(SMScopes *scopes,
 {
 	StateMachine *loadMachine;
 	StateMachine *storeMachine;
-	bbdd *verificationCondition;
+	bbdd *inferredAssumption;
+	bbdd *crashCondition;
 	std::map<CfgLabel, const CFGNode *> labels;
 	if (!parseThisString("Scopes:\n", buf, &buf) ||
 	    !scopes->parse(buf, &buf) ||
@@ -110,8 +115,10 @@ parseCrashSummary(SMScopes *scopes,
 	    !parseStateMachine(scopes, &loadMachine, buf, &buf, labels) ||
 	    !parseThisString("Store Machine:\n", buf, &buf) ||
 	    !parseStateMachine(scopes, &storeMachine, buf, &buf, labels) ||
-	    !parseThisString("Verification condition: ", buf, &buf) ||
-	    !bbdd::parse(&scopes->bools, &verificationCondition, buf, &buf))
+	    !parseThisString("Inferred assumption: ", buf, &buf) ||
+	    !bbdd::parse(&scopes->bools, &inferredAssumption, buf, &buf) ||
+	    !parseThisString("Crash condition: ", buf, &buf) ||
+	    !bbdd::parse(&scopes->bools, &crashCondition, buf, &buf))
 		return false;
 	if (parseThisString("Remote macro sections:\n", buf, &buf)) {
 		/* This is an old version of the format which we no
@@ -142,7 +149,7 @@ parseCrashSummary(SMScopes *scopes,
 	if (!mai)
 		return false;
 	*succ = buf;
-	*out = new CrashSummary(scopes, loadMachine, storeMachine, verificationCondition, aliasing, mai);
+	*out = new CrashSummary(scopes, loadMachine, storeMachine, inferredAssumption, crashCondition, aliasing, mai);
 	return true;
 }
 
@@ -206,10 +213,16 @@ transformCrashSummary(CrashSummary *input, StateMachineTransformer &trans, bool 
 	if (!done_something) done_something = &b;
 	input->loadMachine = trans.transform(input->scopes, input->loadMachine, done_something);
 	input->storeMachine = trans.transform(input->scopes, input->storeMachine, done_something);
-	auto vc = trans.transform_bbdd(&input->scopes->bools, input->verificationCondition);
-	if (vc != input->verificationCondition)
+	auto ia = trans.transform_bbdd(&input->scopes->bools, input->inferredAssumption);
+	if (ia != input->inferredAssumption)
 		*done_something = true;
-	input->verificationCondition = vc;
+	input->inferredAssumption = ia;
+
+	auto cc = trans.transform_bbdd(&input->scopes->bools, input->crashCondition);
+	if (cc != input->crashCondition)
+		*done_something = true;
+	input->crashCondition = cc;
+
 	return input;
 }
 

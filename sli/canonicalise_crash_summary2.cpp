@@ -156,7 +156,7 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 {
 	VexPtr<StateMachine, &ir_heap> sm;
 	{
-		IRExpr *cond = bbdd::to_irexpr(input->verificationCondition);
+		IRExpr *cond = bbdd::to_irexpr(input->crashCondition);
 		IRExpr *cnf_condition;
 		cnf_condition = convert_to_cnf(cond);
 		if (!cnf_condition)
@@ -197,7 +197,8 @@ canonicalise_crash_summary(VexPtr<CrashSummary, &ir_heap> input,
 	     it++) {
 		machineRoots.insert(std::pair<unsigned, CfgLabel>(it->first.thread, it->first.node->label));
 	}
-	input->verificationCondition = removeImpossibleRoots(&input->scopes->bools, input->verificationCondition, machineRoots);
+	input->inferredAssumption = removeImpossibleRoots(&input->scopes->bools, input->inferredAssumption, machineRoots);
+	input->crashCondition = removeImpossibleRoots(&input->scopes->bools, input->crashCondition, machineRoots);
 
 	std::set<MemoryAccessIdentifier> neededMais;
 	findAllMais(input, neededMais);

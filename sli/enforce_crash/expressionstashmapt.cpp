@@ -26,10 +26,13 @@ expressionStashMapT::expressionStashMapT(const SummaryId &summary,
 		} else if (e->tag == Iex_HappensBefore) {
 			/* These don't really get stashed in any useful sense */
 		} else if (e->tag == Iex_EntryPoint) {
-			/* These are always stashed at the nominated node. */
+			/* These are always stashed at every entry
+			 * point node of the relevant thread. */
 			IRExprEntryPoint *ep = (IRExprEntryPoint *)e;
-			for (auto it = abs.begin(ConcreteThread(summary, ep->thread), ep->label); !it.finished(); it.advance())
-				(*this)[it.get()].insert(ep);
+			ConcreteThread ct(summary, ep->thread);
+			for (auto it = roots.begin(ct); !it.finished(); it.advance()) {
+				(*this)[it.threadCfgLabel()].insert(ep);
+			}
 		} else if (e->tag == Iex_ControlFlow) {
 			/* These are always stashed at the first
 			 * nominated node. */
