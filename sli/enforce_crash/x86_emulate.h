@@ -392,7 +392,7 @@ struct x86_emulate_ctxt
  * x86_emulate: Emulate an instruction.
  * Returns -1 on failure, 0 on success.
  */
-int
+STATIC int
 x86_emulate(
     struct x86_emulate_ctxt *ctxt,
     const struct x86_emulate_ops *ops);
@@ -402,7 +402,7 @@ x86_emulate(
  * pointer into the block that addresses the relevant register.
  * @highbyte_regs specifies whether to decode AH,CH,DH,BH.
  */
-void *
+STATIC void *
 decode_register(
     uint8_t modrm_reg, struct cpu_user_regs *regs, int highbyte_regs);
 

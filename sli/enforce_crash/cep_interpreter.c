@@ -74,7 +74,7 @@ typedef unsigned long uint64_t;
 #define BOUND_LLS_EXITED ((struct low_level_state *)1)
 
 #if USE_STATS
-struct {
+static struct {
 #define enum_stats(iter)			\
 	iter(lls_created)			\
 	iter(hls_created)			\
@@ -1066,6 +1066,7 @@ init_high_level_state(struct high_level_state *hls)
 }
 
 #define cpu_user_regs reg_struct
+#define STATIC static
 #include "x86_emulate.h"
 #include "../x86_emulate.c"
 #undef cpu_user_regs

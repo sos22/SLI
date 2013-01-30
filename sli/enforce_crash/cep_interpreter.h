@@ -155,8 +155,8 @@ struct crash_enforcement_plan {
 		int allocated;						\
 		struct name **content;					\
 	};								\
-	void name ## _push(struct name ## _array *arr,			\
-			   struct name *elem)				\
+	static void name ## _push(struct name ## _array *arr,		\
+				  struct name *elem)			\
 	{								\
 		if (arr->sz == arr->allocated) {			\
 			arr->allocated += 8;				\
@@ -167,8 +167,8 @@ struct crash_enforcement_plan {
 		arr->content[arr->sz] = elem;				\
 		arr->sz++;						\
 	}								\
-	void name ## _erase_first(struct name ## _array *arr,		\
-				  struct name *elem)			\
+	static void name ## _erase_first(struct name ## _array *arr,	\
+					 struct name *elem)		\
 	{								\
 		int i;							\
 		for (i = 0; i < arr->sz; i++) {				\
@@ -182,8 +182,8 @@ struct crash_enforcement_plan {
 		}							\
 		abort();						\
 	}								\
-	void name ## _erase_idx(struct name ## _array *arr,		\
-				int idx)				\
+	static void name ## _erase_idx(struct name ## _array *arr,	\
+				       int idx)				\
 	{								\
 		assert(idx < arr->sz);					\
 		assert(idx >= 0);					\
@@ -192,12 +192,12 @@ struct crash_enforcement_plan {
 			sizeof(arr->content[0]) * (arr->sz - idx - 1));	\
 		arr->sz--;						\
 	}								\
-	void name ## _arr_cleanup(struct name ## _array *arr)		\
+	static void name ## _arr_cleanup(struct name ## _array *arr)	\
 	{								\
 		cep_free(arr->content);					\
 	}								\
-	void name ## _arr_swizzle(struct name ## _array *dest,		\
-				  struct name ## _array *src)		\
+	static void name ## _arr_swizzle(struct name ## _array *dest,	\
+					 struct name ## _array *src)	\
 	{								\
 		int i;							\
 		for (i = 0; i < dest->sz; i++)				\

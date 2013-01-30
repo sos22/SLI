@@ -20,6 +20,10 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
+#ifndef STATIC
+#define STATIC
+#endif
+
 #include "x86_opcodes.c"
 
 /* Type, address-of, and value of an instruction's operand. */
@@ -913,7 +917,7 @@ load_seg(
     return realmode_load_seg(seg, sel, ctxt, ops);
 }
 
-void *
+STATIC void *
 decode_register(
     uint8_t modrm_reg, struct cpu_user_regs *regs, int highbyte_regs)
 {
@@ -970,7 +974,7 @@ decode_segment(uint8_t modrm_reg)
     return decode_segment_failed;
 }
 
-int
+STATIC int
 x86_emulate(
     struct x86_emulate_ctxt *ctxt,
     const struct x86_emulate_ops  *ops)
