@@ -1946,6 +1946,25 @@ restart_interpreter(void)
 	abort();
 }
 
+/* Emulate a single instruction in a patch epilogue. */
+static void
+exit_emul(struct entry_patch *patch)
+{
+	struct exit_emulation_ctxt ctxt = {
+		.ctxt = {
+			.regs = &find_pts()->client_regs,
+			.addr_size = 64,
+			.sp_size = 64,
+			.force_writeback = 0,
+		}
+	};
+	int r;
+	ctxt.patch = patch;
+	EVENT(exit_emulate);
+	r = x86_emulate(&ctxt.ctxt, &exit_emulator_ops);
+	assert(r == X86EMUL_OKAY);
+}
+
 static void
 exit_interpreter(void)
 {
@@ -1954,15 +1973,6 @@ exit_interpreter(void)
 	int i;
 	int j;
 	int hit_patch;
-	int r;
-	struct exit_emulation_ctxt ctxt = {
-		.ctxt = {
-			.regs = &pts->client_regs,
-			.addr_size = 64,
-			.sp_size = 64,
-			.force_writeback = 0,
-		}
-	};
 	debug("Exit to %lx, rax %lx, rbp %lx\n",
 	      pts->client_regs.rip,
 	      pts->client_regs.rax,
@@ -1970,8 +1980,14 @@ exit_interpreter(void)
 	hit_patch = 1;
 	while (hit_patch) {
 		hit_patch = 0;
+		/* Check whether we've hit another entry point. */
+		for (j = 0; j < plan.nr_entry_points; j++) {
+			if (plan.entry_points[j]->orig_rip == pts->client_regs.rip) {
+				restart_interpreter();
+			}
+		}
 		for (i = 0; i < nr_entry_patches; i++) {
-			while (pts->client_regs.rip >= entry_patches[i].start &&
+			if (pts->client_regs.rip >= entry_patches[i].start &&
 			       pts->client_regs.rip < entry_patches[i].start + entry_patches[i].size) {
 				/* We're in danger of exiting into the
 				   middle of an instruction which we
@@ -1983,15 +1999,8 @@ exit_interpreter(void)
 				      entry_patches[i].start,
 				      entry_patches[i].start + entry_patches[i].size);
 				hit_patch = 1;
-				ctxt.patch = &entry_patches[i];
-				EVENT(exit_emulate);
-				r = x86_emulate(&ctxt.ctxt, &exit_emulator_ops);
-				assert(r == X86EMUL_OKAY);
-				/* Check whether we've hit another
-				 * entry point. */
-				for (j = 0; j < plan.nr_entry_points; j++)
-					if (plan.entry_points[j]->orig_rip == pts->client_regs.rip)
-						restart_interpreter();
+				exit_emul(&entry_patches[i]);
+				break;
 			}
 		}
 		if (hit_patch)
@@ -2005,14 +2014,7 @@ exit_interpreter(void)
 				debug("Destination RIP %lx matches force_interpret slot %d\n",
 				      pts->client_regs.rip, i);
 				hit_patch = 1;
-				ctxt.patch = NULL;
-				r = x86_emulate(&ctxt.ctxt, &exit_emulator_ops);
-				assert(r == X86EMUL_OKAY);
-				/* Check whether we've hit another
-				 * entry point. */
-				for (j = 0; j < plan.nr_entry_points; j++)
-					if (plan.entry_points[j]->orig_rip == pts->client_regs.rip)
-						restart_interpreter();
+				exit_emul(NULL);
 				break;
 			}
 		}
