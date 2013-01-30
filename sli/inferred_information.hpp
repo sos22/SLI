@@ -106,21 +106,7 @@ visit_crash_summary(ctxtT *ctxt,
 {
 	std::set<const StateMachineState *> memo;
 	visit_result res;
-	res = visit_const_bdd(ctxt, &visitor->irexpr, sm->verificationCondition);
-	if (res == visit_continue)
-		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
-	if (res == visit_continue)
-		res = visit_state_machine(ctxt, visitor, sm->storeMachine, memo);
-	return res;
-}
-template <typename ctxtT> static visit_result
-visit_crash_summary(ctxtT *ctxt,
-		    const irexpr_visitor<ctxtT> *visitor,
-		    const CrashSummary *sm)
-{
-	std::set<const StateMachineState *> memo;
-	visit_result res;
-	res = visit_const_bdd(ctxt, visitor, sm->verificationCondition);
+	res = visit_const_bdd(ctxt, &visitor->bdd, sm->verificationCondition);
 	if (res == visit_continue)
 		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
 	if (res == visit_continue)

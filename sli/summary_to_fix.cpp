@@ -1374,8 +1374,8 @@ findRelevantMais(const bbdd *iex, std::set<MemoryAccessIdentifier> &out)
 			return visit_continue;
 		}
 	} foo;
-	static irexpr_visitor<std::set<MemoryAccessIdentifier> > visitor;
-	visitor.HappensBefore = foo.HappensBefore;
+	static bdd_visitor<std::set<MemoryAccessIdentifier> > visitor;
+	visitor.irexpr.HappensBefore = foo.HappensBefore;
 	visit_const_bdd(&out, &visitor, iex);
 }
 

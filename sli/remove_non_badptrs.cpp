@@ -20,8 +20,8 @@ irexprUsesBadPtr(const bbdd *e)
 			return visit_continue;
 		}
 	} foo;
-	static irexpr_visitor<void> visitor;
-	visitor.Unop = foo.Unop;
+	static bdd_visitor<void> visitor;
+	visitor.irexpr.Unop = foo.Unop;
 	return visit_const_bdd((void *)NULL, &visitor, e) == visit_abort;
 }
 
