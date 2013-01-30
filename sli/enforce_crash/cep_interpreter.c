@@ -16,7 +16,9 @@
 #include <dlfcn.h>
 #include <err.h>
 #include <errno.h>
+#include <math.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +31,7 @@
 #define KEEP_LLS_HISTORY 0
 #define LLS_HISTORY 8
 #define USE_STATS 1
+#define VERY_LOUD 0
 
 /* Define _PAGE_SIZE and _STACK_SIZE which don't include the ul
  * suffix, because that makes it easier to use them in inline
@@ -252,8 +255,11 @@ nr_queued_wakes;
 static int *
 queued_wakes[8];
 
-//#define debug(fmt, ...) printf("%d:%f: " fmt, gettid(), now(), ##__VA_ARGS__)
+#if VERY_LOUD
+#define debug(fmt, ...) dbg_msg("%d:%f: " fmt, gettid(), now(), ##__VA_ARGS__)
+#else
 #define debug(...) do {} while (0)
+#endif
 
 /* Bit of a hack: the last-freed address is nominally in unaccessible
    memory.  Just shadow it here. */
@@ -282,6 +288,221 @@ now(void)
 	if (start == 0)
 		start = res;
 	return res - start;
+}
+#endif
+
+static void
+safe_write(int fd, const void *buf, size_t buf_size)
+{
+	ssize_t s;
+	while (buf_size != 0) {
+		s = write(fd, buf, buf_size);
+		if (s < 0) {
+			err(1,
+			    "writing %zd bytes to fd %d",
+			    buf_size, fd);
+		}
+		if (s == 0) {
+			errx(1, "EOF on fd %d while writing?", fd);
+		}
+		buf += s;
+		buf_size -= s;
+	}
+}
+
+#if VERY_LOUD
+static void
+reverse(char *start_ptr, char *end_ptr)
+{
+	while (start_ptr <= end_ptr) {
+		char t = *start_ptr;
+		*start_ptr = *end_ptr;
+		*end_ptr = t;
+		start_ptr++;
+		end_ptr--;
+	}
+}
+
+static void dbg_msg(const char *fmt, ...) __attribute__((format (printf, 1, 2)));
+static void
+dbg_msg(const char *fmt, ...)
+{
+	/* We're under the big lock, so no need to worry about
+	 * synchronisation. */
+	static char buf[1024];
+	static const char fmt_int_chars[] = "0123456789abcdefZZZ";
+	unsigned prod_idx;
+	unsigned cons_idx;
+	va_list args;
+
+	int flags;
+	unsigned long arg_ulong;
+	int arg_int;
+	const char *arg_str;
+	double arg_double;
+	int start_idx;
+	char fmt_char;
+	int arg_idx;
+	unsigned base;
+
+	va_start(args, fmt);
+
+#define FLAG_L 1
+#define FLAG_Z 2
+	prod_idx = 0;
+	cons_idx = 0;
+	while (1) {
+		/* Make sure that there's always enough space for
+		   ``simple'' escapes. */
+		if (prod_idx >= sizeof(buf) - 32) {
+			safe_write(1, buf, prod_idx);
+			prod_idx = 0;
+		}
+
+		if (fmt[cons_idx] == 0) {
+			/* Messages should be \n terminated. */
+			assert(prod_idx == 0);
+			va_end(args);
+			return;
+		}
+		if (fmt[cons_idx] == '\n') {
+			buf[prod_idx++] = '\n';
+			safe_write(1, buf, prod_idx);
+			prod_idx = 0;
+			cons_idx++;
+			continue;
+		}
+		if (fmt[cons_idx] != '%') {
+			buf[prod_idx++] = fmt[cons_idx++];
+			continue;
+		}
+		/* Okay, we have a percento.  Deal with it. */
+		cons_idx++;
+		/* Formats which we need to handle:
+
+		   %lx
+		   %p
+		   %s
+		   %d
+		   %x
+		   %ld
+		   %zx
+		   %f
+		*/
+		flags = 0;
+		while (1) {
+			if (fmt[cons_idx] == 'l') {
+				flags |= FLAG_L;
+				cons_idx++;
+			} else if (fmt[cons_idx] == 'z') {
+				flags |= FLAG_Z;
+				cons_idx++;
+			} else {
+				break;
+			}
+		}
+		fmt_char = fmt[cons_idx++];
+		if (fmt_char == 'p') {
+			/* %p == 0x%lx */
+			buf[prod_idx++] = '0';
+			buf[prod_idx++] = 'x';
+			flags = FLAG_L;
+			fmt_char = 'x';
+		}
+		switch (fmt_char) {
+		case 'x':
+		case 'd':
+			switch (flags & (FLAG_L | FLAG_Z)) {
+			case 0:
+				arg_int = va_arg(args, int);
+				if (fmt_char == 'd' && arg_int < 0) {
+					buf[prod_idx++] = '-';
+					arg_ulong = -arg_int;
+				} else {
+					arg_ulong = (unsigned)arg_int;
+				}
+				break;
+			case FLAG_L:
+				arg_ulong = va_arg(args, unsigned long);
+				if (fmt_char == 'd' && (long)arg_ulong < 0) {
+					buf[prod_idx++] = '-';
+					arg_ulong = -arg_ulong;
+				}
+				break;
+			case FLAG_Z:
+				arg_ulong = va_arg(args, size_t);
+				break;
+			default:
+				abort();
+			}
+			if (arg_ulong == 0) {
+				buf[prod_idx++] = '0';
+				break;
+			}
+			if (fmt_char == 'x') {
+				base = 16;
+			} else {
+				base = 10;
+			}
+			start_idx = prod_idx;
+			while (arg_ulong != 0) {
+				buf[prod_idx++] = fmt_int_chars[arg_ulong % base];
+				arg_ulong /= base;
+			}
+			reverse(buf + start_idx, buf + prod_idx - 1);
+			break;
+		case 's':
+			arg_str = va_arg(args, const char *);
+			for (arg_idx = 0; arg_str[arg_idx]; arg_idx++) {
+				buf[prod_idx++] = arg_str[arg_idx];
+				if (prod_idx == sizeof(buf)) {
+					safe_write(1, buf, prod_idx);
+					prod_idx = 0;
+				}
+			}
+			break;
+		case 'f':
+			arg_double = va_arg(args, double);
+			if (isnan(arg_double)) {
+				buf[prod_idx++] = 'N';
+				buf[prod_idx++] = 'a';
+				buf[prod_idx++] = 'N';
+				break;
+			}
+			if (arg_double < 0) {
+				buf[prod_idx++] = '-';
+				arg_double = -arg_double;
+			}
+			if (isinf(arg_double)) {
+				buf[prod_idx++] = 'i';
+				buf[prod_idx++] = 'n';
+				buf[prod_idx++] = 'f';
+				break;
+			}
+			arg_ulong = (unsigned long)arg_double;
+			arg_double -= arg_ulong;
+			if (arg_ulong == 0) {
+				buf[prod_idx++] = '0';
+			} else {
+				start_idx = prod_idx;
+				while (arg_ulong >= 1) {
+					buf[prod_idx++] = fmt_int_chars[arg_ulong % 10];
+					arg_ulong /= 10;
+				}
+				reverse(buf + start_idx, buf + prod_idx - 1);
+			}
+			buf[prod_idx++] = '.';
+			for (arg_idx = 0; arg_idx < 6; arg_idx++) {
+				assert(arg_double < 1);
+				arg_double *= 10;
+				buf[prod_idx++] = fmt_int_chars[(int)arg_double];
+				arg_double -= (int)arg_double;
+			}
+			break;
+		default:
+			abort();
+		}
+	}
 }
 #endif
 
@@ -695,8 +916,8 @@ release_big_lock(void)
 	big_lock_owned_by = 0;
 #endif
 	if (wake) {
-		store_release(&big_lock, 0);
 		debug("Run queued wake on %p\n", wake);
+		store_release(&big_lock, 0);
 		futex(wake, FUTEX_WAKE, 1, NULL);
 	} else {
 		old_lock = xchg(&big_lock, 0);
@@ -2627,16 +2848,17 @@ start_interpreting(void)
 	EVENT(enter_interpreter);
 
 	entry_point = plan.entry_points[entrypoint_idx];
+	init_high_level_state(&hls);
+	pts->client_regs.rip = entry_point->orig_rip;
+	acquire_big_lock();
 	debug("Start interpreting idx %d, pts at %p, regs at %p\n",
 	      entrypoint_idx,
 	      pts,
 	      &pts->client_regs);
-	init_high_level_state(&hls);
-	pts->client_regs.rip = entry_point->orig_rip;
 	while (1) {
-		acquire_big_lock();
 		advance_hl_interpreter(&hls, &pts->client_regs);
 		release_big_lock();
+		acquire_big_lock();
 	}
 	abort();
 }
