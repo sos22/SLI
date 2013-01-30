@@ -976,6 +976,7 @@ decode_segment(uint8_t modrm_reg)
 
 STATIC int
 x86_emulate(
+    struct high_level_state *hls,
     struct x86_emulate_ctxt *ctxt,
     const struct x86_emulate_ops  *ops)
 {
@@ -1882,29 +1883,9 @@ x86_emulate(
         }
         break;
 
-    case 0x9a: /* call (far, absolute) */ {
-        struct segment_register reg;
-        uint16_t sel;
-        uint32_t eip;
-
-        generate_exception_if(mode_64bit(), EXC_UD, -1);
-        fail_if(ops->read_segment == NULL);
-
-        eip = insn_fetch_bytes(op_bytes);
-        sel = insn_fetch_type(uint16_t);
-
-        if ( (rc = ops->read_segment(x86_seg_cs, &reg, ctxt)) ||
-             (rc = ops->write(x86_seg_ss, sp_pre_dec(op_bytes),
-                              &reg.sel, op_bytes, ctxt)) ||
-             (rc = ops->write(x86_seg_ss, sp_pre_dec(op_bytes),
-                              &_regs.eip, op_bytes, ctxt)) )
-            goto done;
-
-        if ( (rc = load_seg(x86_seg_cs, sel, ctxt, ops)) != 0 )
-            goto done;
-        _regs.eip = eip;
+    case 0x9a:
+	abort();
         break;
-    }
 
     case 0x9b:  /* wait/fwait */
         emulate_fpu_insn("fwait");
@@ -2850,8 +2831,9 @@ x86_emulate(
                    : insn_fetch_type(int32_t));
         op_bytes = ((op_bytes == 4) && mode_64bit()) ? 8 : op_bytes;
         src.val = _regs.eip;
-        jmp_rel(rel);
-        goto push;
+	dst.type = OP_NONE;
+	emulate_call(hls, _regs.eip + rel, src.val, &_regs);
+	break;
     }
 
     case 0xe9: /* jmp (near) */ {
@@ -3154,9 +3136,11 @@ x86_emulate(
             }
             src.val = _regs.eip;
             _regs.eip = dst.val;
-            if ( (modrm_reg & 7) == 2 )
-                goto push; /* call */
             dst.type = OP_NONE;
+            if ( (modrm_reg & 7) == 2 ) {
+		emulate_call(hls, dst.val, src.val, &_regs);
+		break;
+	    }
             break;
         case 3: /* call (far, absolute indirect) */
         case 5: /* jmp (far, absolute indirect) */ {

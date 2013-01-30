@@ -389,15 +389,6 @@ struct x86_emulate_ctxt
 };
 
 /*
- * x86_emulate: Emulate an instruction.
- * Returns -1 on failure, 0 on success.
- */
-STATIC int
-x86_emulate(
-    struct x86_emulate_ctxt *ctxt,
-    const struct x86_emulate_ops *ops);
-
-/*
  * Given the 'reg' portion of a ModRM byte, and a register block, return a
  * pointer into the block that addresses the relevant register.
  * @highbyte_regs specifies whether to decode AH,CH,DH,BH.

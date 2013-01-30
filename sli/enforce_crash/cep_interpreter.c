@@ -46,6 +46,9 @@
 #define PAGE_MASK (~(PAGE_SIZE - 1))
 #define MAX_DELAY_US (100000)
 
+#define str2(x) # x
+#define str(x) str2(x)
+
 static unsigned long prng_state = 0xe6b16c0386053e31;
 static int disable_sideconditions;
 static int force_delay; /* -1 -> on send, 0 -> use rebalancer, 1 -> on receive */
@@ -246,6 +249,8 @@ static struct low_level_state_array message_receivers;
 
 typedef void exit_routine_t(struct reg_struct *);
 static exit_routine_t *find_exit_stub(unsigned long rip);
+static void acquire_big_lock(void);
+static void release_big_lock(void);
 
 static int
 have_cloned;
@@ -1065,6 +1070,212 @@ init_high_level_state(struct high_level_state *hls)
 	EVENT(hls_created);
 }
 
+static struct per_thread_state *
+find_pts(void)
+{
+	unsigned long initial_interpreter_stack;
+	struct per_thread_state *res;
+	asm("movq %%gs:0, %0\n"
+	    : "=r" (initial_interpreter_stack)
+		);
+	res = (struct per_thread_state *)(initial_interpreter_stack - offsetof(struct per_thread_state, client_regs.rsp));
+	assert(res->initial_interpreter_rsp == initial_interpreter_stack);
+	return res;
+}
+
+asm(
+"__trampoline_call_native_start:\n"
+/* Save interpreter registers */
+"    pushq %rbx\n"
+"    pushq %rbp\n"
+"    pushq %r12\n"
+"    pushq %r13\n"
+"    pushq %r14\n"
+"    pushq %r15\n"
+/* Stash a pointer to the client regs struct so that we can find it
+ * later */
+"    pushq %rdi\n"
+/* Save interpreter stack in $gs */
+"    movq %rsp, %gs:0\n"
+/* Set RSP = the client regs struct */
+"    movq %rdi, %rsp\n"
+/* Restore client registers from the client regs struct */
+"    popq %rax\n"          /* RIP, but we have another plan for restoring that */
+"    popq %rax\n"
+"    popq %rdx\n"
+"    popq %rcx\n"
+"    popq %rbx\n"
+"    popq %rbp\n"
+"    popq %rsi\n"
+"    popq %rdi\n"
+"    popq %r8\n"
+"    popq %r9\n"
+"    popq %r10\n"
+"    popq %r11\n"
+"    popq %r12\n"
+"    popq %r13\n"
+"    popq %r14\n"
+"    popq %r15\n"
+"    popf\n"
+/* Restore client rsp */
+"    popq %rsp\n"
+/* Actually do the jump to the target function */
+"__trampoline_call_native_jmp_client:\n"
+".byte 0xe9\n"
+".byte 0\n"
+".byte 0\n"
+".byte 0\n"
+".byte 0\n"
+"__trampoline_call_native_end:\n"
+	);
+void __trampoline_call_native_start(void) __attribute__((visibility ("hidden")));
+void __trampoline_call_native_jmp_client(void) __attribute__((visibility ("hidden")));
+void __trampoline_call_native_end(void) __attribute__((visibility ("hidden")));
+asm(
+"__call_native_return:\n"
+/* Currently on client stack with all client registers loaded. */
+"    xchgq %rsp, %gs:0\n"
+/* Now on interpreter stack with client regs loaded and client stack
+   pointer in %gs:0. */
+"    movq %r15, %gs:(" str(_STACK_SIZE) " - 32)\n"
+"    movq %rsp, %r15\n"
+/* r15 is now a pointer to the client register structure and rsp is a
+ * pointer to the top of the interpreter stack. */
+"    popq %rsp\n"
+/* rsp now points at the bottom of the client regs struct. */
+"    lea 144(%rsp), %rsp\n"
+/* rsp now points at the top of the client regs struct.  Now we can go
+   and stash the client registers. */
+"    pushq %gs:(0)\n" /* rsp */
+"    pushf\n"
+"    lea -8(%rsp), %rsp\n" /* r15 */
+"    pushq %r14\n"
+"    pushq %r13\n"
+"    pushq %r12\n"
+"    pushq %r11\n"
+"    pushq %r10\n"
+"    pushq %r9\n"
+"    pushq %r8\n"
+"    pushq %rdi\n"
+"    pushq %rsi\n"
+"    pushq %rbp\n"
+"    pushq %rbx\n"
+"    pushq %rcx\n"
+"    pushq %rdx\n"
+"    pushq %rax\n"
+/* Return to the interpreter stack. */
+"    lea 8(%r15), %rsp\n"
+/* Restore interpreter registers */
+"    popq %r15\n"
+"    popq %r14\n"
+"    popq %r13\n"
+"    popq %r12\n"
+"    popq %rbp\n"
+"    popq %rbx\n"
+/* And we're done. */
+"    ret\n"
+	);
+void __call_native_return(void) __attribute__((visibility ("hidden")));
+struct call_native_exit_trampoline {
+	struct call_native_exit_trampoline *next;
+	unsigned long callee;
+};
+static void
+call_native(unsigned long called, struct reg_struct *regs)
+{
+	struct per_thread_state *pts;
+	static struct call_native_exit_trampoline *head_exit;
+	struct call_native_exit_trampoline *exit;
+	exit_routine_t *doit;
+	long delta;
+
+	/* Okay, so we need to arrange to call @called on the client
+	   stack with all of the client registers, but so that we'll
+	   regain control when it returns. */
+	/* First build the trampoline for transferring control to the
+	   called function. */
+	for (exit = head_exit; exit && exit->callee != called; exit = exit->next) {
+		/* nop */
+	}
+	if (!exit) {
+		/* Don't have an exit trampoline yet.  Build one. */
+		void *trampoline;
+		void *jmp_instr;
+		exit = alloc_executable(
+			sizeof(*exit) +
+			__trampoline_call_native_end -
+			    __trampoline_call_native_start);
+		trampoline = exit + 1;
+		memcpy(trampoline,
+		       __trampoline_call_native_start,
+		       __trampoline_call_native_end -
+		           __trampoline_call_native_start);
+		jmp_instr = trampoline +
+			(unsigned long)__trampoline_call_native_jmp_client -
+			(unsigned long)__trampoline_call_native_start;
+		delta = called - (unsigned long)jmp_instr - 5;
+		assert(delta == (int)delta);
+		*(int *)(jmp_instr + 1) = delta;
+		exit->callee = called;
+		exit->next = head_exit;
+		head_exit = exit;
+	}
+
+	doit = (exit_routine_t *)(exit + 1);
+	/* Now set the return address to point at __call_native_return. */
+	regs->rsp -= 8;
+	*(unsigned long *)regs->rsp = (unsigned long)__call_native_return;
+
+	pts = find_pts();
+	assert(pts->initial_interpreter_rsp == (unsigned long)&pts->client_regs.rsp);
+
+	//release_big_lock();
+	doit(regs);
+	//acquire_big_lock();
+	pts->initial_interpreter_rsp = (unsigned long)&pts->client_regs.rsp;
+}
+
+static int
+continue_emulating(struct high_level_state *hls, unsigned long next_rip)
+{
+	int i, j;
+	for (i = 0; i < hls->ll_states.sz; i++) {
+		struct low_level_state *lls = hls->ll_states.content[i];
+		cfg_label_t cur_label = lls->cfg_node;
+		struct cfg_instr *current_cfg_node = &plan.cfg_nodes[cur_label];
+		for (j = 0; j < current_cfg_node->nr_successors; j++) {
+			if (next_rip == plan.cfg_nodes[current_cfg_node->successors[j]].rip) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static int
+emulate_call(struct high_level_state *hls, unsigned long called,
+	     unsigned long return_addr, struct reg_struct *regs)
+{
+	if (hls &&
+	    continue_emulating(hls, return_addr) &&
+	    !continue_emulating(hls, called)) {
+		/* We want to run the called function for real but
+		   arrange to return to the emulator when it's
+		   finished.  This is a bit tricky, and involves some
+		   rather nasty trampolining. */
+		call_native(called, regs);
+	} else {
+		/* Easy version: either we're exiting the emulator
+		   right now or we're going to run the whole function
+		   in the emulator, and in either case all we need to
+		   do is emulate the instruction directly. */
+		regs->_eip = called;
+		regs->rsp -= 8;
+		*(unsigned long *)regs->rsp = return_addr;
+	}
+	return 0;
+}
+
 #define cpu_user_regs reg_struct
 #define STATIC static
 #include "x86_emulate.h"
@@ -1326,19 +1537,6 @@ static void
 release_lls(struct low_level_state *lls)
 {
 	cep_free(lls);
-}
-
-static struct per_thread_state *
-find_pts(void)
-{
-	unsigned long initial_interpreter_stack;
-	struct per_thread_state *res;
-	asm("movq %%gs:0, %0\n"
-	    : "=r" (initial_interpreter_stack)
-		);
-	res = (struct per_thread_state *)(initial_interpreter_stack - offsetof(struct per_thread_state, client_regs.rsp));
-	assert(res->initial_interpreter_rsp == initial_interpreter_stack);
-	return res;
 }
 
 static unsigned long
@@ -1933,14 +2131,14 @@ restart_interpreter(void)
 	debug("Restart interpreter at %lx (stack %lx).\n",
 	      find_pts()->client_regs.rip,
 	      find_pts()->initial_interpreter_rsp);
+	assert(find_pts()->initial_interpreter_rsp == (unsigned long)&find_pts()->client_regs.rsp);
 	EVENT(restart_interpreter);
 	release_big_lock();
 	asm volatile (
-		"    mov %%gs:0, %%rsp\n"      /* Reset the stack */
-		"    subq %0, %%rsp\n"         /* Make sure we don't tread on stashed registers */
+		"    mov %0, %%rsp\n"          /* Reset the stack */
 		"    jmp start_interpreting\n" /* Restart the interpreter */
 		:
-		: "i" (sizeof(struct reg_struct) + 8)
+		: "r" (find_pts()->interpreter_stack + sizeof(find_pts()->interpreter_stack))
 		);
 	debug("Huh?  Restart interpreter didn't work\n");
 	abort();
@@ -1961,7 +2159,7 @@ exit_emul(struct entry_patch *patch)
 	int r;
 	ctxt.patch = patch;
 	EVENT(exit_emulate);
-	r = x86_emulate(&ctxt.ctxt, &exit_emulator_ops);
+	r = x86_emulate(NULL, &ctxt.ctxt, &exit_emulator_ops);
 	assert(r == X86EMUL_OKAY);
 }
 
@@ -1973,15 +2171,18 @@ exit_interpreter(void)
 	int i;
 	int j;
 	int hit_patch;
+	int advanced;
+
 	debug("Exit to %lx, rax %lx, rbp %lx\n",
 	      pts->client_regs.rip,
 	      pts->client_regs.rax,
 	      pts->client_regs.rbp);
 	hit_patch = 1;
+	advanced = 0;
 	while (hit_patch) {
 		hit_patch = 0;
 		/* Check whether we've hit another entry point. */
-		for (j = 0; j < plan.nr_entry_points; j++) {
+		for (j = 0; advanced && j < plan.nr_entry_points; j++) {
 			if (plan.entry_points[j]->orig_rip == pts->client_regs.rip) {
 				restart_interpreter();
 			}
@@ -2000,6 +2201,7 @@ exit_interpreter(void)
 				      entry_patches[i].start + entry_patches[i].size);
 				hit_patch = 1;
 				exit_emul(&entry_patches[i]);
+				advanced = 1;
 				break;
 			}
 		}
@@ -2015,12 +2217,14 @@ exit_interpreter(void)
 				      pts->client_regs.rip, i);
 				hit_patch = 1;
 				exit_emul(NULL);
+				advanced = 1;
 				break;
 			}
 		}
 	}
 	exit_routine = find_exit_stub(pts->client_regs.rip);
 	EVENT(exit_interpreter);
+	assert(pts->initial_interpreter_rsp == (unsigned long)&pts->client_regs.rsp);
 	release_big_lock();
 	exit_routine(&pts->client_regs);
 	/* shouldn't get here */
@@ -2803,7 +3007,7 @@ emulate_underlying_instruction(struct high_level_state *hls, struct reg_struct *
 
 	debug("Emulate from %lx\n", regs->rip);
 	EVENT(emul_underlying);
-	r = x86_emulate(&emul_ctxt.ctxt, &emulator_ops);
+	r = x86_emulate(hls, &emul_ctxt.ctxt, &emulator_ops);
 	assert(r == X86EMUL_OKAY);
 }
 
@@ -3262,9 +3466,6 @@ start_interpreting(void)
 	}
 	abort();
 }
-
-#define str2(x) # x
-#define str(x) str2(x)
 
 /* We have two types of trampolines, one for transitioning from client
    code into the interpreter and one for going from the interpreter to
