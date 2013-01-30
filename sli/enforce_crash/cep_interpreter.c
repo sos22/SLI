@@ -13,6 +13,7 @@
 #include <sys/mman.h>
 #include <sys/ucontext.h>
 #include <assert.h>
+#include <dlfcn.h>
 #include <err.h>
 #include <errno.h>
 #include <signal.h>
@@ -22,6 +23,8 @@
 #include <string.h>
 #include <ucontext.h>
 #include <unistd.h>
+
+#include "../../config.h"
 
 #define KEEP_LLS_HISTORY 0
 #define LLS_HISTORY 8
@@ -251,6 +254,10 @@ queued_wakes[8];
 
 //#define debug(fmt, ...) printf("%d:%f: " fmt, gettid(), now(), ##__VA_ARGS__)
 #define debug(...) do {} while (0)
+
+/* Bit of a hack: the last-freed address is nominally in unaccessible
+   memory.  Just shadow it here. */
+static unsigned long last_freed;
 
 static void
 futex(int *ptr, int op, int val, struct timespec *timeout)
@@ -1174,10 +1181,14 @@ eval_bytecode(const unsigned short *bytecode,
 		case bcop_load: {
 			unsigned long addr = bytecode_pop(&stack, bct_long);
 			unsigned char buf[16];
-			if (!__fetch_guest(bct_size(type), buf, addr)) {
-				debug("fault fetching from %lx!\n", addr);
-				res = 0;
-				goto out;
+			if (addr == CONFIG_LASTFREE_ADDR) {
+				memcpy(buf, &last_freed, 8);
+			} else {
+				if (!__fetch_guest(bct_size(type), buf, addr)) {
+					debug("fault fetching from %lx!\n", addr);
+					res = 0;
+					goto out;
+				}
 			}
 			if (type == bct_longlong) {
 				bytecode_push_longlong(&stack, buf);
@@ -2948,6 +2959,8 @@ dump_stats(void)
 }
 #endif
 
+static void (*real_free)(void *);
+
 static void
 activate(void)
 {
@@ -2956,13 +2969,17 @@ activate(void)
 	ssize_t s;
 	struct sigaction act;
 
+	real_free = dlsym(RTLD_NEXT, "free");
+	if (!real_free) {
+		printf("Huh?  Can't find free()\n");
+		abort();
+	}
+
 	s = readlink("/proc/self/exe", buf, sizeof(buf)-1);
 	if (s == -1) {
 		printf("Can't access /proc/self/exe; patch disabled\n");
 		return;
 	}
-	buf[s] = 0;
-
 	buf[s] = 0;
 	for (x = s; x > 0 && buf[x] != '/'; x--)
 		;
@@ -3015,6 +3032,15 @@ activate(void)
 		patch_entry_point(plan.patch_points[x], alloc_trampoline(plan.patch_points[x]));
 
 	hook_clone();
+}
+
+void free(void *ptr)
+{
+	if (ptr != NULL) {
+		debug("free %p; last_freed %lx\n", ptr, last_freed);
+		last_freed = (unsigned long)ptr;
+	}
+	real_free(ptr);
 }
 
 static void (*__init_activate)(void) __attribute__((section(".ctors"), unused, used)) = activate;

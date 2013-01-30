@@ -14,7 +14,7 @@ emit_rules_for_bug() {
     fi
     cat <<EOF
 ${bugname}.interp.so: ${bugname}.cep.c cep_interpreter.o
-	gcc -shared -Isli/enforce_crash \$^ -o \$@
+	gcc -ldl -shared -Isli/enforce_crash \$^ -o \$@
 ALL_MD_TESTS+=${bugname}.interp.so
 
 ${bugname}.fix.so: ${bugname}.fix.c sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c
