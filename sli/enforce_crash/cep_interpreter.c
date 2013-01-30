@@ -16,6 +16,7 @@
 #include <dlfcn.h>
 #include <err.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -243,12 +244,6 @@ static exit_routine_t *find_exit_stub(unsigned long rip);
 static int
 have_cloned;
 
-static int
-big_lock;
-#ifndef NDEBUG
-static int
-big_lock_owned_by;
-#endif
 static int
 nr_queued_wakes;
 #define MAX_QUEUED_WAKES 8
@@ -867,35 +862,39 @@ queue_wake(int *ptr)
 	}
 }
 
+union big_lock_t {
+	int word;
+	struct {
+		short prod;
+		short cons;
+	};
+} big_lock;
+
 static void
 acquire_big_lock(void)
 {
-	int val;
+	union big_lock_t old;
+	union big_lock_t new;
+	union big_lock_t seen;
+	short ticket;
+	old = big_lock;
 	while (1) {
-		val = big_lock;
-		switch (val) {
-		case 0:
-			val = cmpxchg(&big_lock, 0, 1);
-			if (val == 0)
-				goto got_lock;
-			continue;
-		case 1:
-			val = cmpxchg(&big_lock, 1, 2);
-			if (val != 1)
-				continue;
-			/* fall through */
-		case 2:
-			futex(&big_lock, FUTEX_WAIT, 2, NULL);
+		new = old;
+		new.prod++;
+		seen.word = cmpxchg(&big_lock.word, old.word, new.word);
+		if (seen.word == old.word) {
 			break;
-		default:
-			abort();
 		}
+		old = seen;
 	}
-got_lock:
-#ifndef NDEBUG
-	assert(big_lock_owned_by == 0);
-	big_lock_owned_by = gettid();
-#endif
+	ticket = new.prod - 1;
+	while (1) {
+		old = big_lock;
+		if (old.cons == ticket) {
+			break;
+		}
+		futex(&big_lock.word, FUTEX_WAIT, old.word, NULL);
+	}
 }
 static void
 release_big_lock(void)
@@ -905,25 +904,34 @@ release_big_lock(void)
 	 * lock, because whoever we wake will immediately acquire the
 	 * lock, and so there's no point in having lots of people wake
 	 * up just to contend for the lock. */
-	int *wake = NULL;
-	int old_lock;
+	union big_lock_t old;
+	union big_lock_t new;
+	union big_lock_t seen;
+	int *wake;
+
 	if (nr_queued_wakes != 0) {
 		nr_queued_wakes--;
 		wake = queued_wakes[nr_queued_wakes];
-	}
-#ifndef NDEBUG
-	assert(big_lock_owned_by == gettid());
-	big_lock_owned_by = 0;
-#endif
-	if (wake) {
-		debug("Run queued wake on %p\n", wake);
-		store_release(&big_lock, 0);
-		futex(wake, FUTEX_WAKE, 1, NULL);
 	} else {
-		old_lock = xchg(&big_lock, 0);
-		assert(old_lock == 1 || old_lock == 2);
-		if (old_lock == 2)
-			futex(&big_lock, FUTEX_WAKE, 1, NULL);
+		wake = NULL;
+	}
+
+	old = big_lock;
+	while (1) {
+		new = old;
+		new.cons++;
+		seen.word = cmpxchg(&big_lock.word, old.word, new.word);
+		if (seen.word != old.word) {
+			old = seen;
+			continue;
+		}
+		if (new.cons != new.prod) {
+			futex(&big_lock.word, FUTEX_WAKE, INT_MAX, NULL);
+		}
+		if (wake) {
+			futex(wake, FUTEX_WAKE, 1, NULL);
+		}
+		return;
 	}
 }
 
