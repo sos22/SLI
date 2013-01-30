@@ -33,6 +33,7 @@
 #define LLS_HISTORY 8
 #define USE_STATS 1
 #define VERY_LOUD 0
+#define USE_CUSTOM_MALLOC 1
 
 /* Define _PAGE_SIZE and _STACK_SIZE which don't include the ul
  * suffix, because that makes it easier to use them in inline
@@ -53,6 +54,10 @@ extern void clone(void);
 static void (*__GI__exit)(int res);
 void arch_prctl(int, unsigned long);
 static void clone_hook_c(int (*fn)(void *), void *fn_arg) __attribute__((unused));
+
+static void *cep_realloc(void *ptr, size_t new_sz);
+static void *cep_malloc(size_t sz);
+static void cep_free(const void *what);
 
 /* For some reason, if this is non-static, gcc generates a very odd
    relocation for it, and we fail.  I don't understand why, or why the
@@ -498,6 +503,329 @@ dbg_msg(const char *fmt, ...)
 			abort();
 		}
 	}
+#undef FLAG_L
+#undef FLAG_Z
+}
+#endif
+
+#if USE_CUSTOM_MALLOC
+/* Simple malloc() implementation.  We don't really want to call into
+   libc's malloc because that makes figuring out what's going on with
+   double free bugs kind of tricky. */
+struct alloc_hdr {
+#define ALLOC_FLAG_FREE 1ul
+#define ALLOC_FLAG_PREV_FREE 2ul
+#define ALLOC_FLAG_FIRST 4ul
+#define ALLOC_FLAG_LAST 8ul
+/* Size includes header and padding. */
+#define ALLOC_SIZE_MASK (~15ul)
+
+	size_t sz_and_flags;
+};
+
+struct free_chunk {
+	struct free_chunk *next;
+	struct free_chunk **pprev;
+};
+
+struct alloc_arena {
+	size_t sz; /* Min size of chunks in this arena */
+	struct free_chunk free_chunks;
+};
+
+#define NR_ARENAS 8
+#define MIN_ALLOC_SIZE (sizeof(struct free_chunk) + sizeof(struct alloc_hdr))
+#define ALLOC_CHUNK_SIZE 4194304ul
+
+static struct alloc_arena malloc_arenas[NR_ARENAS];
+
+static void
+init_allocator(void)
+{
+	int i;
+	for (i = 0; i < NR_ARENAS; i++) {
+		malloc_arenas[i].free_chunks.next = &malloc_arenas[i].free_chunks;
+		malloc_arenas[i].free_chunks.pprev = &malloc_arenas[i].free_chunks.next;
+	}
+
+	malloc_arenas[0].sz = 32;
+	malloc_arenas[1].sz = 64;
+	malloc_arenas[2].sz = 128;
+	malloc_arenas[3].sz = 256;
+	malloc_arenas[4].sz = 512;
+	malloc_arenas[5].sz = 1024;
+	malloc_arenas[6].sz = 2048;
+	malloc_arenas[7].sz = 4096;
+}
+
+static void
+unregister_free_chunk(struct alloc_hdr *hdr)
+{
+	struct free_chunk *fc = (struct free_chunk *)(hdr + 1);
+	size_t sz = hdr->sz_and_flags & ALLOC_SIZE_MASK;
+	struct alloc_hdr *footer = (struct alloc_hdr *)((unsigned long)hdr + sz) - 1;
+
+	assert(footer->sz_and_flags == hdr->sz_and_flags);
+	assert(hdr->sz_and_flags & ALLOC_FLAG_FREE);
+	assert(!(hdr->sz_and_flags & ALLOC_FLAG_PREV_FREE));
+	fc->next->pprev = fc->pprev;
+	*fc->pprev = fc->next;
+}
+static void
+register_free_chunk(struct alloc_hdr *hdr)
+{
+	/* This is responsible for creating the footer */
+	struct free_chunk *fc = (struct free_chunk *)(hdr + 1);
+	size_t sz = hdr->sz_and_flags & ALLOC_SIZE_MASK;
+	struct alloc_hdr *footer = (struct alloc_hdr *)((unsigned long)hdr + sz) - 1;
+	int arena_idx;
+
+#ifndef NDEBUG
+	memset(hdr + 1, 0xab, sz - sizeof(*hdr));
+#endif
+
+	assert(hdr->sz_and_flags & ALLOC_FLAG_FREE);
+	assert(!(hdr->sz_and_flags & ALLOC_FLAG_PREV_FREE));
+	footer->sz_and_flags = hdr->sz_and_flags;
+	for (arena_idx = 0; arena_idx < NR_ARENAS; arena_idx++) {
+		if (arena_idx == NR_ARENAS - 1 ||
+		    malloc_arenas[arena_idx+1].sz > sz) {
+			malloc_arenas[arena_idx].free_chunks.next->pprev = &fc->next;
+			fc->next = malloc_arenas[arena_idx].free_chunks.next;
+			fc->pprev = &malloc_arenas[arena_idx].free_chunks.next;
+			*fc->pprev = fc;
+			return;
+		}
+	}
+	abort();
+}
+static void *
+cep_realloc(void *ptr, size_t new_sz)
+{
+	size_t orig_sz = new_sz;
+	struct alloc_hdr *hdr;
+	size_t old_sz;
+	void *n;
+
+	if (new_sz == 0) {
+		cep_free(ptr);
+		return NULL;
+	}
+
+	if (!ptr) {
+		return cep_malloc(new_sz);
+	}
+
+	/* Add space for the header and round up size. */
+	new_sz += sizeof(struct alloc_hdr);
+	new_sz = (new_sz + ~ALLOC_SIZE_MASK) & ALLOC_SIZE_MASK;
+	if (new_sz < MIN_ALLOC_SIZE) {
+		new_sz = MIN_ALLOC_SIZE;
+	}
+
+	hdr = ptr;
+	hdr--;
+	assert(!(hdr->sz_and_flags & ALLOC_FLAG_FREE));
+	old_sz = hdr->sz_and_flags & ALLOC_SIZE_MASK;
+	if ( old_sz >= new_sz ) {
+		/* We never trim blocks during realloc, so shrinking
+		 * is a no-op. */
+		debug("realloc(%p, %zd) -> %p (shrink from %zd)\n",
+		       ptr, new_sz, ptr, old_sz);
+		return ptr;
+	}
+	/* Can we satisfy the request by taking the next chunk? */
+	if ( !(hdr->sz_and_flags & ALLOC_FLAG_LAST) ) {
+		struct alloc_hdr *next = (struct alloc_hdr *)((unsigned long)hdr + old_sz);
+		if (next->sz_and_flags & ALLOC_FLAG_FREE) {
+			size_t next_sz = next->sz_and_flags & ALLOC_SIZE_MASK;
+			size_t slop;
+			if (old_sz + next_sz >= new_sz) {
+				/* We can satisfy the realloc by
+				 * expanding the current chunk into
+				 * the next one. */
+				unregister_free_chunk(next);
+
+				slop = old_sz + next_sz - new_sz;
+				assert(!(slop & ~ALLOC_SIZE_MASK));
+				if (slop < 64) {
+					if (!(next->sz_and_flags & ALLOC_FLAG_LAST)) {
+						struct alloc_hdr *nextnext =
+							(struct alloc_hdr *)((unsigned long)next + next_sz);
+						assert(nextnext->sz_and_flags & ALLOC_FLAG_PREV_FREE);
+						assert(!(nextnext->sz_and_flags & ALLOC_FLAG_FREE));
+						nextnext->sz_and_flags &= ~ALLOC_FLAG_PREV_FREE;
+					}
+					new_sz = old_sz + next_sz;
+				} else {
+					struct alloc_hdr *slophdr =
+						(struct alloc_hdr *)((unsigned long)hdr + new_sz);
+					slophdr->sz_and_flags =
+						slop |
+						ALLOC_FLAG_FREE |
+						(next->sz_and_flags & ALLOC_FLAG_LAST);
+					register_free_chunk(slophdr);
+				}
+				hdr->sz_and_flags &= ~ALLOC_SIZE_MASK;
+				assert(!(new_sz & ALLOC_SIZE_MASK));
+				hdr->sz_and_flags |= new_sz;
+				debug("realloc(%p, %zd) -> %p (merge up)\n",
+				       ptr, new_sz, ptr);
+				return ptr;
+			}
+		}
+	}
+
+	debug("realloc(%p, %zd) -> via malloc\n", ptr, new_sz);
+	/* Can't do it by expanding this chunk.  Allocate a new
+	 * one. */
+	n = cep_malloc(orig_sz);
+	if (orig_sz < old_sz) {
+		memcpy(n, ptr, orig_sz);
+	} else {
+		memcpy(n, ptr, old_sz);
+	}
+	cep_free(ptr);
+	return n;
+}
+static void *
+cep_malloc(size_t sz)
+{
+	int arena_idx;
+	struct alloc_hdr *hdr;
+	struct free_chunk *fc;
+	size_t chunk_size;
+	size_t slop;
+
+	/* Add space for the header and round up size. */
+	sz += sizeof(struct alloc_hdr);
+	sz = (sz + ~ALLOC_SIZE_MASK) & ALLOC_SIZE_MASK;
+	if (sz < MIN_ALLOC_SIZE) {
+		sz = MIN_ALLOC_SIZE;
+	}
+
+	assert(sz <= ALLOC_CHUNK_SIZE);
+
+	/* Find the arena. */
+	for (arena_idx = 0;
+	     arena_idx < NR_ARENAS &&
+		     (malloc_arenas[arena_idx].sz < sz ||
+		      malloc_arenas[arena_idx].free_chunks.next ==
+		          &malloc_arenas[arena_idx].free_chunks);
+	     arena_idx++) {
+		/* nop */
+	}
+
+	if (arena_idx == NR_ARENAS) {
+		/* No sufficiently large free chunks, so invent one. */
+		void *new_chunk = mmap(NULL, ALLOC_CHUNK_SIZE, PROT_READ | PROT_WRITE,
+				       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		struct alloc_hdr *new_hdr = new_chunk;
+		new_hdr->sz_and_flags =
+			ALLOC_CHUNK_SIZE |
+			ALLOC_FLAG_FREE |
+			ALLOC_FLAG_FIRST |
+			ALLOC_FLAG_LAST;
+		register_free_chunk(new_hdr);
+		arena_idx = NR_ARENAS - 1;
+	}
+
+	fc = malloc_arenas[arena_idx].free_chunks.next;
+	assert(fc != &malloc_arenas[arena_idx].free_chunks);
+	hdr = (struct alloc_hdr *)fc - 1;
+
+	assert(hdr->sz_and_flags & ALLOC_FLAG_FREE);
+	chunk_size = hdr->sz_and_flags & ALLOC_SIZE_MASK;
+	assert(chunk_size >= sz);
+
+	unregister_free_chunk(hdr);
+	hdr->sz_and_flags &= ~ALLOC_FLAG_FREE;
+	slop = chunk_size - sz;
+	if (slop >= 64) {
+		struct alloc_hdr *slophdr = (struct alloc_hdr *)((unsigned long)hdr + sz);
+		slophdr->sz_and_flags =
+			slop |
+			ALLOC_FLAG_FREE |
+			(hdr->sz_and_flags & ALLOC_FLAG_LAST);
+		register_free_chunk(slophdr);
+		hdr->sz_and_flags &= ~ALLOC_SIZE_MASK;
+		hdr->sz_and_flags |= sz;
+	} else if (!(hdr->sz_and_flags & ALLOC_FLAG_LAST)) {
+		struct alloc_hdr *nexthdr = (struct alloc_hdr *)((unsigned long)hdr + chunk_size);
+		assert(nexthdr->sz_and_flags & ALLOC_FLAG_PREV_FREE);
+		assert(!(nexthdr->sz_and_flags & ALLOC_FLAG_FREE));
+		nexthdr->sz_and_flags &= ~ALLOC_FLAG_PREV_FREE;
+	}
+
+	debug("malloc(%zd) -> %p\n", sz, hdr + 1);
+	return hdr + 1;
+}
+static void
+cep_free(const void *ptr)
+{
+	struct alloc_hdr *hdr;
+	size_t sz;
+
+	hdr = (struct alloc_hdr *)ptr;
+	hdr--;
+
+	assert(!(hdr->sz_and_flags & ALLOC_FLAG_FREE));
+	sz = hdr->sz_and_flags & ALLOC_SIZE_MASK;
+	assert(sz >= MIN_ALLOC_SIZE);
+
+	debug("free(%p), sz %zd\n", ptr, sz);
+
+	if (!(hdr->sz_and_flags & ALLOC_FLAG_LAST)) {
+		struct alloc_hdr *nexthdr = (struct alloc_hdr *)((unsigned long)hdr + sz);
+		assert(!(nexthdr->sz_and_flags & ALLOC_FLAG_PREV_FREE));
+		if (nexthdr->sz_and_flags & ALLOC_FLAG_FREE) {
+			unregister_free_chunk(nexthdr);
+			sz += nexthdr->sz_and_flags & ALLOC_SIZE_MASK;
+		} else {
+			nexthdr->sz_and_flags |= ALLOC_FLAG_PREV_FREE;
+		}
+	}
+	if (!(hdr->sz_and_flags & ALLOC_FLAG_FIRST) &&
+	    (hdr->sz_and_flags & ALLOC_FLAG_PREV_FREE)) {
+		struct alloc_hdr *footer = (struct alloc_hdr *)(hdr - 1);
+		struct alloc_hdr *prevhdr;
+		assert(footer->sz_and_flags & ALLOC_FLAG_FREE);
+		assert(!(footer->sz_and_flags & ALLOC_FLAG_PREV_FREE));
+		assert(!(footer->sz_and_flags & ALLOC_FLAG_LAST));
+		prevhdr = (struct alloc_hdr *)((unsigned long)hdr - (footer->sz_and_flags & ALLOC_SIZE_MASK));
+		assert(prevhdr->sz_and_flags == footer->sz_and_flags);
+		unregister_free_chunk(prevhdr);
+		sz += prevhdr->sz_and_flags & ALLOC_SIZE_MASK;
+		prevhdr->sz_and_flags |= hdr->sz_and_flags & ALLOC_FLAG_LAST;
+		hdr = prevhdr;
+	}
+
+	hdr->sz_and_flags |= ALLOC_FLAG_FREE;
+	assert(!(hdr->sz_and_flags & ALLOC_FLAG_PREV_FREE));
+	hdr->sz_and_flags &= ~ALLOC_SIZE_MASK;
+	assert(!(sz & ~ALLOC_SIZE_MASK));
+	hdr->sz_and_flags |= sz;
+	register_free_chunk(hdr);
+}
+#else
+static void
+init_allocator(void)
+{
+}
+static void *
+cep_malloc(size_t sz)
+{
+	return malloc(sz);
+}
+static void *
+cep_realloc(void *what, size_t sz)
+{
+	return realloc(what, sz);
+}
+static void
+cep_free(const void *what)
+{
+	free((void *)what);
 }
 #endif
 
@@ -644,7 +972,8 @@ ctxt_matches(const struct cep_entry_ctxt *ctxt, const struct reg_struct *regs)
 static struct low_level_state *
 new_low_level_state(struct high_level_state *hls, int nr_simslots)
 {
-	struct low_level_state *lls = calloc(sizeof(struct low_level_state) + nr_simslots * sizeof(lls->simslots[0]), 1);
+	struct low_level_state *lls = cep_malloc(sizeof(*lls) + nr_simslots * sizeof(lls->simslots[0]));
+	memset(lls, 0, sizeof(*lls) + nr_simslots * sizeof(lls->simslots[0]));
 	lls->nr_simslots = nr_simslots;
 	lls->hls = hls;
 	sanity_check_low_level_state(lls, 0);
@@ -938,7 +1267,7 @@ release_big_lock(void)
 static void
 release_lls(struct low_level_state *lls)
 {
-	free(lls);
+	cep_free(lls);
 }
 
 static struct per_thread_state *
@@ -1042,6 +1371,7 @@ bytecode_fetch_slot(const unsigned short **bytecode,
 }
 
 /* malloc()ed bytecode stack regions */
+/* Make each overflow area be one page */
 #define NR_STACK_SLOTS_PER_OVERFLOW 128
 struct stack_overflow {
 	struct stack_overflow *prev;
@@ -1078,7 +1408,7 @@ cleanup_stack(const struct bytecode_stack *_stack)
 	struct stack_overflow *a, *b;
 	for (a = stack->overflow; a; a = b) {
 		b = a->next;
-		free(a);
+		cep_free(a);
 	}
 }
 
@@ -1093,7 +1423,7 @@ bytecode_push(struct bytecode_stack *stack, unsigned long val, enum byte_code_ty
 			if (stack->overflow) {
 				o = stack->overflow;
 			} else {
-				o = malloc(sizeof(*o));
+				o = cep_malloc(sizeof(*o));
 				o->next = NULL;
 				o->prev = NULL;
 				stack->overflow = o;
@@ -1105,7 +1435,7 @@ bytecode_push(struct bytecode_stack *stack, unsigned long val, enum byte_code_ty
 			if (old_o->next) {
 				o = old_o->next;
 			} else {
-				o = malloc(sizeof(*o));
+				o = cep_malloc(sizeof(*o));
 				o->next = NULL;
 				o->prev = old_o;
 				old_o->next = o;
@@ -2335,7 +2665,9 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 			debug("%p(%s): no viable successors\n", lls, current_cfg_node->id);
 			hls->ll_states.content[i] = NULL;
 			if (current_cfg_node->nr_successors == 0) {
-				printf("Completed enforcement plan!\n");
+				safe_write(1,
+					   "Completed enforcement plan!\n",
+					   sizeof("Completed enforcement plan!"));
 				if (lls->last_operation_is_send) {
 					/* If the last operation in a
 					   thread is a send, that
@@ -2998,6 +3330,10 @@ find_exit_stub(unsigned long rip)
 
 /* This gets invoked only for segvs generated by our infrastructure,
  * so all it needs to do is fix up the RIP and get out. */
+#if 0
+static void segv_sigaction_c(int signum, siginfo_t *info, ucontext_t *ctxt,
+			     unsigned long recovery_addr) __attribute__((used, unused));
+#endif
 static void
 segv_sigaction_c(int signum, siginfo_t *info, ucontext_t *ctxt, unsigned long recovery_addr)
 {
@@ -3006,6 +3342,10 @@ segv_sigaction_c(int signum, siginfo_t *info, ucontext_t *ctxt, unsigned long re
 
 /* This gets invoked if we receive a signal but then need to send it
  * back to the client.  Trickier */
+#if 0
+static void deliver_signal_client(int signum, siginfo_t *info, ucontext_t *ctxt,
+				  unsigned long delivery_rsp) __attribute__((used, unused));
+#endif
 static void
 deliver_signal_client(int signum, siginfo_t *info, ucontext_t *ctxt, unsigned long delivery_rsp)
 {
@@ -3198,6 +3538,8 @@ activate(void)
 	char buf[4096];
 	ssize_t s;
 	struct sigaction act;
+
+	init_allocator();
 
 	real_free = dlsym(RTLD_NEXT, "free");
 	if (!real_free) {

@@ -160,7 +160,7 @@ struct crash_enforcement_plan {
 	{								\
 		if (arr->sz == arr->allocated) {			\
 			arr->allocated += 8;				\
-			arr->content = realloc(				\
+			arr->content = cep_realloc(			\
 				arr->content,				\
 				sizeof(arr->content[0])*arr->allocated); \
 		}							\
@@ -194,7 +194,7 @@ struct crash_enforcement_plan {
 	}								\
 	void name ## _arr_cleanup(struct name ## _array *arr)		\
 	{								\
-		free(arr->content);					\
+		cep_free(arr->content);					\
 	}								\
 	void name ## _arr_swizzle(struct name ## _array *dest,		\
 				  struct name ## _array *src)		\
@@ -202,7 +202,7 @@ struct crash_enforcement_plan {
 		int i;							\
 		for (i = 0; i < dest->sz; i++)				\
 			assert(dest->content[i] == NULL);		\
-		free(dest->content);					\
+		cep_free(dest->content);				\
 		*dest = *src;						\
 		memset(src, 0, sizeof(*src));				\
 	}
