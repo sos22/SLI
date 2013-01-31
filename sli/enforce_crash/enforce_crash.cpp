@@ -357,7 +357,8 @@ top:
 static IRExpr *
 removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 {
-	if (errors_allowed == (ERROR_POSITIVE | ERROR_NEGATIVE))
+	if (errors_allowed == (ERROR_POSITIVE | ERROR_NEGATIVE) ||
+	    what->type() == Ity_I128)
 		return NULL;
 	if (errors_allowed != 0) {
 		assert(errors_produced != NULL);
@@ -570,6 +571,10 @@ removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 				case Iop_Add16:
 				case Iop_Add32:
 				case Iop_Add64:
+				case Iop_Mul8:
+				case Iop_Mul16:
+				case Iop_Mul32:
+				case Iop_Mul64:
 					/* k + x, where x is
 					 * completely unknown, is
 					 * itself unknown. */

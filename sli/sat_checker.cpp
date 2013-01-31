@@ -654,19 +654,7 @@ anf_context::simplify(IRExpr *a)
 		if (iea->op != Iop_And1)
 			return a;
 		anf_context sub_context(*this);
-		int nr_args_needed = 0;
-		for (int i = 0; i < iea->nr_arguments; i++) {
-			IRExpr *arg = iea->contents[i];
-			if (arg->tag == Iex_Const) {
-			} else if (arg->tag == Iex_Associative &&
-				   ((IRExprAssociative *)arg)->op == Iop_And1) {
-				nr_args_needed += ((IRExprAssociative *)arg)->nr_arguments;
-			} else {
-				nr_args_needed++;
-			}
-		}
-		IRExpr *newArgs[nr_args_needed];
-		int newNrArgs = 0;
+		std::vector<IRExpr *> newArgs;
 		for (int i = 0; i < iea->nr_arguments; i++) {
 			IRExpr *arg = sub_context.simplify(iea->contents[i]);
 			if (arg != UNEVALUATABLE) {
@@ -679,21 +667,25 @@ anf_context::simplify(IRExpr *a)
 					IRExprAssociative *argA = (IRExprAssociative *)arg;
 					for (int i = 0; i < argA->nr_arguments; i++) {
 						sub_context.addAssumption(argA->contents[i]);
-						newArgs[newNrArgs++] = argA->contents[i];
+						newArgs.push_back(argA->contents[i]);
 					}
 				} else {
 					sub_context.addAssumption(arg);
-					newArgs[newNrArgs++] = arg;
+					newArgs.push_back(arg);
 				}
 			}
 		}
-		if (newNrArgs == 1)
+		if (newArgs.size() == 1)
 			return newArgs[0];
-		if (newNrArgs == 0)
+		if (newArgs.empty())
 			return IRExpr_Const_U1(true);
-		sort_and_arguments(newArgs, newNrArgs);
+		IRExpr *newArgs2[newArgs.size()];
+		for (unsigned x = 0; x < newArgs.size(); x++) {
+			newArgs2[x] = newArgs[x];
+		}
+		sort_and_arguments(newArgs2, newArgs.size());
 
-		a = IRExpr_Associative_Copy(Iop_And1, newNrArgs, newArgs);
+		a = IRExpr_Associative_Copy(Iop_And1, newArgs.size(), newArgs2);
 
 		/* Don't need to check against the definitely true
 		   list, because this is an and expression and they

@@ -1030,7 +1030,7 @@ StateMachine::sanityCheck(const MaiMap &mai, SMScopes *scopes) const
 		}
 	} foo;
 	static state_machine_visitor<std::set<MemoryAccessIdentifier> > visitor;
-	visitor.irexpr.HappensBefore = foo.HappensBefore;
+	visitor.bdd.irexpr.HappensBefore = foo.HappensBefore;
 	visitor.Load = foo.Load;
 	visitor.Store = foo.Store;
 	std::set<MemoryAccessIdentifier> neededMais;
