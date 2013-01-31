@@ -15,8 +15,9 @@ thr_main(void *ign)
 		STOP_ANALYSIS();
 		free(the_ptr);
 		the_ptr = NULL;
-		read_cntr++;
 		STOP_ANALYSIS();
+		read_cntr++;
+		usleep(1000);
 	}
 
 	return NULL;
@@ -31,6 +32,7 @@ main()
 	int forever = 0;
 
 	pthread_create(&thr1, NULL, thr_main, NULL);
+	usleep(100);
 	pthread_create(&thr2, NULL, thr_main, NULL);
 
 	if (getenv("SOS22_RUN_FOREVER"))
