@@ -9,11 +9,27 @@
 #include "offline_analysis.hpp"
 #include "intern.hpp"
 
+static void
+enumRanks(CrashSummary *summary, std::set<bdd_rank> &ranks)
+{
+	struct {
+		static visit_result visitRank(std::set<bdd_rank> *ctxt, const bdd_rank &what) {
+			ctxt->insert(what);
+			return visit_continue;
+		}
+	} foo;
+	struct bdd_visitor<std::set<bdd_rank> > visitor = {};
+	visitor.rank = foo.visitRank;
+	visit_crash_summary<std::set<bdd_rank> >(&ranks, &visitor, summary);
+}
+
 void
 printCrashSummary(CrashSummary *summary, FILE *f)
 {
+	std::set<bdd_rank> neededRanks;
+	enumRanks(summary, neededRanks);
 	fprintf(f, "Scopes:\n");
-	summary->scopes->prettyPrint(f);
+	summary->scopes->prettyPrint(f, &neededRanks);
 	printStateMachinePair("Load Machine:\n",
 			      summary->loadMachine,
 			      "Store Machine:\n",

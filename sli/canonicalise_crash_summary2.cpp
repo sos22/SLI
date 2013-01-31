@@ -102,9 +102,9 @@ findAllMais(const CrashSummary *summary, std::set<MemoryAccessIdentifier> &out)
 			return visit_continue;
 		}
 	} foo;
-	static irexpr_visitor<std::set<MemoryAccessIdentifier> > visitor;
-	visitor.HappensBefore = foo.HappensBefore;
-	visitor.FreeVariable = foo.FreeVariable;
+	static bdd_visitor<std::set<MemoryAccessIdentifier> > visitor;
+	visitor.irexpr.HappensBefore = foo.HappensBefore;
+	visitor.irexpr.FreeVariable = foo.FreeVariable;
 	visit_crash_summary(&out, &visitor, summary);
 }
 

@@ -243,8 +243,8 @@ public:
 				return visit_continue;
 			}
 		} foo;
-		static irexpr_visitor<LivenessEntry> visitor;
-		visitor.Get = foo.f;
+		static bdd_visitor<LivenessEntry> visitor;
+		visitor.irexpr.Get = foo.f;
 		visit_const_bdd(this, &visitor, e);
 	}
 	void useExpressionData(const smrbdd *e)
@@ -256,8 +256,8 @@ public:
 				return visit_continue;
 			}
 		} foo;
-		static irexpr_visitor<LivenessEntry> visitor;
-		visitor.Get = foo.f;
+		static bdd_visitor<LivenessEntry> visitor;
+		visitor.irexpr.Get = foo.f;
 		visit_const_bdd(this, &visitor, e);
 	}
 	void useExpressionData(const exprbdd *e)
@@ -269,8 +269,8 @@ public:
 				return visit_continue;
 			}
 		} foo;
-		static irexpr_visitor<LivenessEntry> visitor;
-		visitor.Get = foo.f;
+		static bdd_visitor<LivenessEntry> visitor;
+		visitor.irexpr.Get = foo.f;
 		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
 	}
 	void useExpressionData(const IRExpr *e)
@@ -308,8 +308,8 @@ public:
 				return visit_continue;
 			}
 		} foo;
-		static irexpr_visitor<LivenessEntry> visitor;
-		visitor.Get = foo.f;
+		static bdd_visitor<LivenessEntry> visitor;
+		visitor.irexpr.Get = foo.f;
 		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
 	}
 
@@ -489,7 +489,7 @@ ssaDeadCode(SMScopes *scopes, StateMachine *sm, bool *done_something)
 		}
 	} foo;
 	static state_machine_visitor<std::set<threadAndRegister> > visitor;
-	visitor.irexpr.Get = foo.Get;
+	visitor.bdd.irexpr.Get = foo.Get;
 	visitor.Phi = foo.Phi;
 	for (auto it = states.begin(); !TIMEOUT && it != states.end(); it++)
 		visit_one_state(&refed_regs, &visitor, *it);

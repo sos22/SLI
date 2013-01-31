@@ -528,6 +528,11 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				unsigned long mod = num % denom;
 				return IRExpr_Const_U128(mod, div);
 			}
+			case Iop_F64toI64: {
+				/* It's not worth trying to constant
+				 * fold these ones. */
+				return a;
+			}
 			default:
 				abort();
 			}
@@ -1126,14 +1131,15 @@ bdd_rank::parse(const char *buf, const char **end)
 }
 
 void
-bdd_ordering::prettyPrint(FILE *f) const
+bdd_ordering::prettyPrint(FILE *f, const std::set<bdd_rank> *neededRanks) const
 {
 	std::set<bdd_rank> printed;
 	fprintf(f, "Variable rankings:\n");
 	for (auto it = variableRankings.begin();
 	     it != variableRankings.end();
 	     it++) {
-		if (!printed.insert(it->second).second)
+		if ((neededRanks && !neededRanks->count(it->second)) ||
+		    !printed.insert(it->second).second)
 			continue;
 		fprintf(f, "\t");
 		ppIRExpr(it->first, f);

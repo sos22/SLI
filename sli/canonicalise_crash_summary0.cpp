@@ -389,8 +389,8 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 					return visit_continue;
 			}
 		} foo;
-		static irexpr_visitor<void> visitor;
-		visitor.Get = foo.Get;
+		static bdd_visitor<void> visitor;
+		visitor.irexpr.Get = foo.Get;
 		if (visit_crash_summary((void *)NULL, &visitor, cs) == visit_abort) {
 			for (auto it = concatIterators(saneIterator(cs->loadMachine->cfg_roots),
 						       saneIterator(cs->storeMachine->cfg_roots));

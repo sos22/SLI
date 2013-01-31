@@ -114,9 +114,9 @@ visit_crash_summary(ctxtT *ctxt,
 {
 	std::set<const StateMachineState *> memo;
 	visit_result res;
-	res = visit_const_bdd(ctxt, &visitor->irexpr, sm->inferredAssumption);
+	res = visit_const_bdd(ctxt, &visitor->bdd, sm->inferredAssumption);
 	if (res == visit_continue) {
-		res = visit_const_bdd(ctxt, &visitor->irexpr, sm->crashCondition);
+		res = visit_const_bdd(ctxt, &visitor->bdd, sm->crashCondition);
 	}
 	if (res == visit_continue) {
 		res = visit_state_machine(ctxt, visitor, sm->loadMachine, memo);
@@ -128,7 +128,7 @@ visit_crash_summary(ctxtT *ctxt,
 }
 template <typename ctxtT> static visit_result
 visit_crash_summary(ctxtT *ctxt,
-		    const irexpr_visitor<ctxtT> *visitor,
+		    const bdd_visitor<ctxtT> *visitor,
 		    const CrashSummary *sm)
 {
 	std::set<const StateMachineState *> memo;

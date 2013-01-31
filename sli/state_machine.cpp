@@ -1324,9 +1324,9 @@ SMScopes::read(const char *fname)
 }
 
 void
-SMScopes::prettyPrint(FILE *f) const
+SMScopes::prettyPrint(FILE *f, const std::set<bdd_rank> *needed) const
 {
-	ordering.prettyPrint(f);
+	ordering.prettyPrint(f, needed);
 }
 
 bool
