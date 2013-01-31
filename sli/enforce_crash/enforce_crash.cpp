@@ -357,7 +357,8 @@ top:
 static IRExpr *
 removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
 {
-	if (errors_allowed == (ERROR_POSITIVE | ERROR_NEGATIVE))
+	if (errors_allowed == (ERROR_POSITIVE | ERROR_NEGATIVE) ||
+	    what->type() == Ity_I128)
 		return NULL;
 	if (errors_allowed != 0) {
 		assert(errors_produced != NULL);
