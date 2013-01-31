@@ -3794,6 +3794,7 @@ dump_stats(void)
 #endif
 
 static void (*real_free)(void *);
+static void *(*real_malloc)(size_t sz);
 
 static void
 activate(void)
@@ -3806,8 +3807,9 @@ activate(void)
 	init_allocator();
 
 	real_free = dlsym(RTLD_NEXT, "free");
-	if (!real_free) {
-		printf("Huh?  Can't find free()\n");
+	real_malloc = dlsym(RTLD_NEXT, "malloc");
+	if (!real_free || !real_malloc) {
+		printf("Huh?  Can't find free() or malloc()\n");
 		abort();
 	}
 
@@ -3870,13 +3872,25 @@ activate(void)
 	hook_clone();
 }
 
-void free(void *ptr)
+void
+free(void *ptr)
 {
 	if (ptr != NULL) {
 		debug("free %p; last_freed %lx\n", ptr, last_freed);
 		last_freed = (unsigned long)ptr;
 	}
 	real_free(ptr);
+}
+
+void *
+malloc(size_t sz)
+{
+	void *res = real_malloc(sz);
+	if (last_freed == (unsigned long)res) {
+		debug("malloc %p; last_freed %lx\n", res, last_freed);
+		last_freed = 0;
+	}
+	return res;
 }
 
 static void (*__init_activate)(void) __attribute__((section(".ctors"), unused, used)) = activate;
