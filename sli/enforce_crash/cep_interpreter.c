@@ -1229,9 +1229,12 @@ call_native(unsigned long called, struct reg_struct *regs)
 	pts = find_pts();
 	assert(pts->initial_interpreter_rsp == (unsigned long)&pts->client_regs.rsp);
 
-	//release_big_lock();
+	debug("Attempting native call of %lx on behalf of %lx\n",
+	      called, regs->rip);
+
+	release_big_lock();
 	doit(regs);
-	//acquire_big_lock();
+	acquire_big_lock();
 	pts->initial_interpreter_rsp = (unsigned long)&pts->client_regs.rsp;
 }
 
