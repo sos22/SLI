@@ -2832,7 +2832,7 @@ x86_emulate(
         op_bytes = ((op_bytes == 4) && mode_64bit()) ? 8 : op_bytes;
         src.val = _regs.eip;
 	dst.type = OP_NONE;
-	emulate_call(hls, _regs.eip + rel, src.val, &_regs);
+	rc = emulate_call(hls, _regs.eip + rel, src.val, &_regs);
 	break;
     }
 
@@ -3138,8 +3138,7 @@ x86_emulate(
             _regs.eip = dst.val;
             dst.type = OP_NONE;
             if ( (modrm_reg & 7) == 2 ) {
-		emulate_call(hls, dst.val, src.val, &_regs);
-		break;
+		rc = emulate_call(hls, dst.val, src.val, &_regs);
 	    }
             break;
         case 3: /* call (far, absolute indirect) */

@@ -182,6 +182,7 @@ struct low_level_state {
 mk_flex_array(low_level_state);
 
 struct high_level_state {
+	int has_advanced_since_entry;
 	struct low_level_state_array ll_states;
 };
 
@@ -1272,7 +1273,7 @@ emulate_call(struct high_level_state *hls, unsigned long called,
 		   right now or we're going to run the whole function
 		   in the emulator, and in either case all we need to
 		   do is emulate the instruction directly. */
-		regs->_eip = called;
+		regs->rip = called;
 		regs->rsp -= 8;
 		*(unsigned long *)regs->rsp = return_addr;
 	}
@@ -2167,27 +2168,31 @@ exit_emul(struct entry_patch *patch)
 }
 
 static void
-exit_interpreter(void)
+exit_interpreter(struct high_level_state *hls)
 {
 	struct per_thread_state *pts = find_pts();
 	exit_routine_t *exit_routine;
 	int i;
-	int j;
 	int hit_patch;
-	int advanced;
 
 	debug("Exit to %lx, rax %lx, rbp %lx\n",
 	      pts->client_regs.rip,
 	      pts->client_regs.rax,
 	      pts->client_regs.rbp);
 	hit_patch = 1;
-	advanced = 0;
 	while (hit_patch) {
 		hit_patch = 0;
-		/* Check whether we've hit another entry point. */
-		for (j = 0; advanced && j < plan.nr_entry_points; j++) {
-			if (plan.entry_points[j]->orig_rip == pts->client_regs.rip) {
-				restart_interpreter();
+		/* Check whether we've hit another entry point.  We
+		   only want to do this if the thread has executed at
+		   least one instruction since entering, to avoid an
+		   infinite loop. */
+		if (hls->has_advanced_since_entry) {
+			for (i = 0;
+			     i < plan.nr_entry_points;
+			     i++) {
+				if (plan.entry_points[i]->orig_rip == pts->client_regs.rip) {
+					restart_interpreter();
+				}
 			}
 		}
 		for (i = 0; i < nr_entry_patches; i++) {
@@ -2204,7 +2209,7 @@ exit_interpreter(void)
 				      entry_patches[i].start + entry_patches[i].size);
 				hit_patch = 1;
 				exit_emul(&entry_patches[i]);
-				advanced = 1;
+				hls->has_advanced_since_entry = 1;
 				break;
 			}
 		}
@@ -2220,13 +2225,14 @@ exit_interpreter(void)
 				      pts->client_regs.rip, i);
 				hit_patch = 1;
 				exit_emul(NULL);
-				advanced = 1;
+				hls->has_advanced_since_entry = 1;
 				break;
 			}
 		}
 	}
 	exit_routine = find_exit_stub(pts->client_regs.rip);
 	EVENT(exit_interpreter);
+	debug("Really exiting to %lx; trampoline %p\n", pts->client_regs.rip, exit_routine);
 	assert(pts->initial_interpreter_rsp == (unsigned long)&pts->client_regs.rsp);
 	release_big_lock();
 	exit_routine(&pts->client_regs);
@@ -3012,6 +3018,7 @@ emulate_underlying_instruction(struct high_level_state *hls, struct reg_struct *
 	EVENT(emul_underlying);
 	r = x86_emulate(hls, &emul_ctxt.ctxt, &emulator_ops);
 	assert(r == X86EMUL_OKAY);
+	hls->has_advanced_since_entry = 1;
 }
 
 static void
@@ -3396,7 +3403,7 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 
 	check_for_ll_thread_start(hls, regs);
 	if (hls->ll_states.sz == 0)
-		exit_interpreter();
+		exit_interpreter(hls);
 	sanity_check_high_level_state(hls);
 
 	stash_registers(hls, regs);
@@ -3404,29 +3411,29 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 
 	check_pre_conditions(hls);
 	if (hls->ll_states.sz == 0)
-		exit_interpreter();
+		exit_interpreter(hls);
 	sanity_check_high_level_state(hls);
 
 	receive_messages(hls);
 	if (hls->ll_states.sz == 0)
-		exit_interpreter();
+		exit_interpreter(hls);
 	sanity_check_high_level_state(hls);
 
 	wait_for_bound_exits(hls);
 	if (hls->ll_states.sz == 0)
-		exit_interpreter();
+		exit_interpreter(hls);
 
 	emulate_underlying_instruction(hls, regs);
 	sanity_check_high_level_state(hls);
 
 	check_eval_conditions(hls);
 	if (hls->ll_states.sz == 0)
-		exit_interpreter();
+		exit_interpreter(hls);
 	sanity_check_high_level_state(hls);
 
 	send_messages(hls);
 	if (hls->ll_states.sz == 0)
-		exit_interpreter();
+		exit_interpreter(hls);
 	sanity_check_high_level_state(hls);
 
 	advance_through_cfg(hls, regs->rip);
@@ -3449,7 +3456,8 @@ start_interpreting(void)
 		acquire_big_lock();
 		debug("Start with a dummy entry point\n");
 		EVENT(dummy_entry_point);
-		exit_interpreter();
+		hls.has_advanced_since_entry = 0;
+		exit_interpreter(&hls);
 	}
 
 	EVENT(enter_interpreter);
@@ -3877,6 +3885,10 @@ free(void *ptr)
 {
 	if (ptr != NULL) {
 		debug("free %p; last_freed %lx\n", ptr, last_freed);
+		if ((unsigned long)ptr == last_freed) {
+			safe_write(1, "Double free!\n", sizeof("Double free!"));
+			abort();
+		}
 		last_freed = (unsigned long)ptr;
 	}
 	real_free(ptr);
