@@ -34,6 +34,7 @@
 #define USE_STATS 1
 #define VERY_LOUD 0
 #define USE_CUSTOM_MALLOC 1
+#define SANITY_CHECK_ALLOCATOR 0
 
 /* Define _PAGE_SIZE and _STACK_SIZE which don't include the ul
  * suffix, because that makes it easier to use them in inline
@@ -540,6 +541,45 @@ struct alloc_arena {
 static struct alloc_arena malloc_arenas[NR_ARENAS];
 
 static void
+sanity_check_allocator(void)
+{
+	int i;
+	const struct free_chunk *fc;
+
+	if (!SANITY_CHECK_ALLOCATOR) {
+		return;
+	}
+	for (i = 0; i < NR_ARENAS; i++) {
+		assert(malloc_arenas[i].sz >= MIN_ALLOC_SIZE);
+		if (i != 0) {
+			assert(malloc_arenas[i].sz > malloc_arenas[i-1].sz);
+		}
+		for (fc = malloc_arenas[i].free_chunks.next;
+		     fc != &malloc_arenas[i].free_chunks;
+		     fc = fc->next) {
+			const struct alloc_hdr *hdr = (const struct alloc_hdr *)fc - 1;
+			const struct alloc_hdr *footer;
+			size_t sz;
+			assert(hdr->sz_and_flags & ALLOC_FLAG_FREE);
+			assert(!(hdr->sz_and_flags & ALLOC_FLAG_PREV_FREE));
+			sz = hdr->sz_and_flags & ALLOC_SIZE_MASK;
+			assert(sz >= malloc_arenas[i].sz);
+			footer = (const struct alloc_hdr *)((unsigned long)hdr + sz - sizeof(struct alloc_hdr));
+			assert(footer->sz_and_flags == hdr->sz_and_flags);
+			if (!(hdr->sz_and_flags & ALLOC_FLAG_LAST)) {
+				const struct alloc_hdr *next = footer + 1;
+				assert(!(next->sz_and_flags & ALLOC_FLAG_FREE));
+				assert(!(next->sz_and_flags & ALLOC_FLAG_FIRST));
+				assert(next->sz_and_flags & ALLOC_FLAG_PREV_FREE);
+			}
+			if (hdr->sz_and_flags & ALLOC_FLAG_FIRST) {
+				assert( ((unsigned long)hdr & ~PAGE_MASK) == 0);
+			}
+		}
+	}
+}
+
+static void
 init_allocator(void)
 {
 	int i;
@@ -556,6 +596,8 @@ init_allocator(void)
 	malloc_arenas[5].sz = 1024;
 	malloc_arenas[6].sz = 2048;
 	malloc_arenas[7].sz = 4096;
+
+	sanity_check_allocator();
 }
 
 static void
@@ -641,6 +683,8 @@ cep_realloc(void *ptr, size_t new_sz)
 			size_t next_sz = next->sz_and_flags & ALLOC_SIZE_MASK;
 			size_t slop;
 			if (old_sz + next_sz >= new_sz) {
+				sanity_check_allocator();
+
 				/* We can satisfy the realloc by
 				 * expanding the current chunk into
 				 * the next one. */
@@ -671,6 +715,7 @@ cep_realloc(void *ptr, size_t new_sz)
 				hdr->sz_and_flags |= new_sz;
 				debug("realloc(%p, %zd) -> %p (merge up)\n",
 				       ptr, new_sz, ptr);
+				sanity_check_allocator();
 				return ptr;
 			}
 		}
@@ -696,6 +741,8 @@ cep_malloc(size_t sz)
 	struct free_chunk *fc;
 	size_t chunk_size;
 	size_t slop;
+
+	sanity_check_allocator();
 
 	/* Add space for the header and round up size. */
 	sz += sizeof(struct alloc_hdr);
@@ -736,6 +783,7 @@ cep_malloc(size_t sz)
 
 	assert(hdr->sz_and_flags & ALLOC_FLAG_FREE);
 	chunk_size = hdr->sz_and_flags & ALLOC_SIZE_MASK;
+	assert(chunk_size >= malloc_arenas[arena_idx].sz);
 	assert(chunk_size >= sz);
 
 	unregister_free_chunk(hdr);
@@ -757,6 +805,7 @@ cep_malloc(size_t sz)
 		nexthdr->sz_and_flags &= ~ALLOC_FLAG_PREV_FREE;
 	}
 
+	sanity_check_allocator();
 	debug("malloc(%zd) -> %p\n", sz, hdr + 1);
 	return hdr + 1;
 }
@@ -768,6 +817,8 @@ cep_free(const void *ptr)
 
 	hdr = (struct alloc_hdr *)ptr;
 	hdr--;
+
+	sanity_check_allocator();
 
 	assert(!(hdr->sz_and_flags & ALLOC_FLAG_FREE));
 	sz = hdr->sz_and_flags & ALLOC_SIZE_MASK;
@@ -785,10 +836,10 @@ cep_free(const void *ptr)
 			nexthdr->sz_and_flags |= ALLOC_FLAG_PREV_FREE;
 		}
 	}
-	if (!(hdr->sz_and_flags & ALLOC_FLAG_FIRST) &&
-	    (hdr->sz_and_flags & ALLOC_FLAG_PREV_FREE)) {
+	if (hdr->sz_and_flags & ALLOC_FLAG_PREV_FREE) {
 		struct alloc_hdr *footer = (struct alloc_hdr *)(hdr - 1);
 		struct alloc_hdr *prevhdr;
+		assert(!(hdr->sz_and_flags & ALLOC_FLAG_FIRST));
 		assert(footer->sz_and_flags & ALLOC_FLAG_FREE);
 		assert(!(footer->sz_and_flags & ALLOC_FLAG_PREV_FREE));
 		assert(!(footer->sz_and_flags & ALLOC_FLAG_LAST));
@@ -806,8 +857,14 @@ cep_free(const void *ptr)
 	assert(!(sz & ~ALLOC_SIZE_MASK));
 	hdr->sz_and_flags |= sz;
 	register_free_chunk(hdr);
+
+	sanity_check_allocator();
 }
 #else
+static void
+sanity_check_allocator(void)
+{
+}
 static void
 init_allocator(void)
 {
