@@ -618,6 +618,7 @@ private:
 	bool expressionIsTrue(SMScopes *scopes, bbdd *assumption, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
 	bool expressionIsTrue(SMScopes *scopes, bbdd *assumption, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
 	bool evalExpressionsEqual(SMScopes *scopes, bbdd *assumption, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
+	void assertFalse(bbdd::scope *scope, bbdd *what, const IRExprOptimisations &opt);
 public:
 	void advance(SMScopes *scopes,
 		     bbdd *assumption,
@@ -719,6 +720,24 @@ EvalContext::evalExpressionsEqual(SMScopes *scopes, bbdd *assumption, exprbdd *e
 		opt);
 }
 
+void
+EvalContext::assertFalse(bbdd::scope *scope, bbdd *what, const IRExprOptimisations &opt)
+{
+	what = simplifyBDD(scope, what, opt);
+	if (what) {
+		auto isGood = bbdd::invert(scope, what);
+		if (isGood) {
+			bbdd *newConstraint =
+				bbdd::And(scope,
+					  justPathConstraint,
+					  isGood);
+			if (newConstraint) {
+				justPathConstraint = newConstraint;
+			}
+		}
+	}
+}
+
 EvalContext::evalStateMachineSideEffectRes
 EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					bbdd *assumption,
@@ -744,9 +763,11 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		if (TIMEOUT)
 			return esme_escape;
 		assert(a);
-		if (expressionIsTrue(scopes, assumption, a, chooser, opt)) {
+		bbdd *isBad = exprbdd::to_bbdd(&scopes->bools, addr);
+		if (!isBad) {
 			return esme_escape;
 		}
+		assertFalse(&scopes->bools, isBad, opt);
 	}
 
 	switch (smse->type) {
@@ -826,17 +847,12 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 	case StateMachineSideEffect::AssertFalse: {
 		StateMachineSideEffectAssertFalse *smseaf =
 			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
-		if (expressionIsTrue(
-			    scopes,
-			    assumption,
-			    state.specialiseIRExpr(scopes, smseaf->value),
-			    chooser,
-			    opt)) {
-			if (smseaf->reflectsActualProgram)
-				return esme_escape;
-			else
-				return esme_ignore_path;
-		}
+		assertFalse(
+			&scopes->bools,
+			state.specialiseIRExpr(
+				scopes,
+				smseaf->value),
+			opt);
 		break;
 	}
 	case StateMachineSideEffect::Phi: {
