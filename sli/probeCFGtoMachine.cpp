@@ -56,26 +56,11 @@ ndChoiceState(SMScopes *scopes,
 		pendingRelocs.push_back(
 			reloc_t(slot, targets[0]));
 	} else {
-		StateMachineSideEffecting *r =
-			new StateMachineSideEffecting(
-				vr.rip,
-				new StateMachineSideEffectAssertFalse(
-					bbdd::var(
-						&scopes->bools,
-						IRExpr_Unop(
-							Iop_Not1,
-							IRExprControlFlow::mk(
-								vr.thread,
-								node->label,
-								targets[0]->label))),
-					true),
-				NULL);
-		assert(targets[0] != NULL);
-		pendingRelocs.push_back(
-			reloc_t(&r->target, targets[0]));
-		if (usedExits)
-			usedExits->insert(targets[0]);
-		StateMachineState *acc = r;
+		StateMachineState *acc;
+
+		/* Shut compiler up. */
+		acc = (StateMachineState *)0xf001;
+
 		for (unsigned x = 1; x < targets.size(); x++) {
 			StateMachineBifurcate *b = 
 				new StateMachineBifurcate(
@@ -88,11 +73,22 @@ ndChoiceState(SMScopes *scopes,
 							targets[x]->label)),
 					NULL,
 					acc);
+
+			assert(targets[x] != NULL);
 			pendingRelocs.push_back(
 				reloc_t(&b->trueTarget, targets[x]));
-			assert(targets[x] != NULL);
-			if (usedExits)
+			if (usedExits) {
 				usedExits->insert(targets[x]);
+			}
+
+			if (x == 1) {
+				assert(targets[0] != NULL);
+				pendingRelocs.push_back(
+					reloc_t(&b->falseTarget, targets[0]));
+				if (usedExits) {
+					usedExits->insert(targets[0]);
+				}
+			}
 			acc = b;
 		}
 		*slot = acc;
@@ -114,18 +110,8 @@ entryState(SMScopes *scopes,
 	} else if (targets.size() == 1) {
 		return targets[0].second;
 	} else {
-		StateMachineSideEffecting *r =
-			new StateMachineSideEffecting(
-				targets[0].first->rip,
-				new StateMachineSideEffectAssertFalse(
-					bbdd::var(
-						&scopes->bools,
-						IRExpr_Unop(
-							Iop_Not1,
-							IRExprEntryPoint::mk(thread, targets[0].first->label))),
-					true),
-				targets[0].second);
-		StateMachineState *acc = r;
+		StateMachineState *acc;
+		acc = targets[0].second;
 		for (unsigned x = 1; x < targets.size(); x++) {
 			StateMachineBifurcate *b = 
 				new StateMachineBifurcate(
