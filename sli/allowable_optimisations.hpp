@@ -63,6 +63,8 @@
    freeMightRace -- True if we need to consider races on the LASTFREED
                     address, false otherwise.
 
+   ignoreUnreached -- Discard any paths to an <unreached> terminal.
+		  
    Other fields:
 
    interestingStores -- Bit of a hack: sometimes, only some side
@@ -211,7 +213,8 @@ class AllowableOptimisations : public IRExprOptimisations {
 	f(preferCrash,bool)						\
 	f(noLocalSurvival,bool)						\
 	f(mustStoreBeforeCrash,bool)					\
-	f(freeMightRace,bool)
+	f(freeMightRace,bool)						\
+	f(ignoreUnreached,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\

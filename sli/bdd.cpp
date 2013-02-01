@@ -1518,6 +1518,66 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr)
 	return to_bbdd(scope, expr, memo);
 }
 
+class ignore_unreached_internal {
+	smrbdd *what;
+public:
+	ignore_unreached_internal(smrbdd *_what)
+		: what(_what)
+	{}
+	void move(ignore_unreached_internal &o) const {
+		o = *this;
+	}
+	const bdd_rank &bestCond(IRExpr **cond) const {
+		assert(!what->isLeaf());
+		*cond = what->internal().condition;
+		return what->internal().rank;
+	}
+	ignore_unreached_internal trueSucc(const bdd_rank &) const {
+		assert(!what->isLeaf());
+		return ignore_unreached_internal(what->internal().trueBranch);
+	}
+	ignore_unreached_internal falseSucc(const bdd_rank &) const {
+		assert(!what->isLeaf());
+		return ignore_unreached_internal(what->internal().falseBranch);
+	}
+	bool isLeaf() const {
+		return what->isLeaf();
+	}
+	smrbdd *leafzip() const {
+		assert(what->isLeaf());
+		if (what->leaf() == smr_unreached) {
+			return NULL;
+		} else {
+			return what;
+		}
+	}
+	static smrbdd *fixup(smrbdd *what) {
+		if (what->isLeaf()) {
+			return what;
+		}
+		if (!what->internal().trueBranch) {
+			return what->internal().falseBranch;
+		}
+		if (!what->internal().falseBranch) {
+			return what->internal().trueBranch;
+		}
+		return what;
+	}
+	static bool badPtr(smrbdd *what) {
+		return what == NULL;
+	}
+	bool operator<(const ignore_unreached_internal &o) const {
+		return what < o.what;
+	}
+};
+
+smrbdd *
+smrbdd::ignore_unreached(scope *scp, smrbdd *what)
+{
+	ignore_unreached_internal f(what);
+	return zip(scp, f);
+}
+
 template void _bdd<bool, bbdd>::prettyPrint(FILE *);
 template bbdd *_bdd<bool, bbdd>::assume(const_bdd_scope<bbdd> *, bbdd *, bbdd*);
 template IRExpr *const_bdd<bool, bbdd>::to_irexpr<bbdd::mkConst>(bbdd *);

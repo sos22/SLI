@@ -571,6 +571,7 @@ public:
 	static bool parse(scope *scp, smrbdd **out, const char *str, const char **suffix) {
 		return _bdd<StateMachineRes, smrbdd>::_parse<scope, parseLeaf>(scp, out, str, suffix);
 	}
+	static smrbdd *ignore_unreached(scope *scp, smrbdd *what);
 };
 
 class exprbdd;

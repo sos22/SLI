@@ -642,8 +642,8 @@ removeAnnotations(SMScopes *scopes,
 		if (!done_something)
 			break;
 		done_something = false;
-		sm = optimiseStateMachine(scopes, mai, sm, opt, oracle, is_ssa,
-					  token, &done_something);
+		sm = optimiseStateMachine(scopes, mai, sm, opt.enableignoreUnreached(),
+					  oracle, is_ssa, token, &done_something);
 		if (!done_something)
 			break;
 	}

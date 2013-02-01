@@ -82,6 +82,21 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		return new StateMachineTerminal(dbg_origin, n);
 	}
 
+	if (opt.ignoreUnreached()) {
+		if (trueTarget->type == StateMachineState::Terminal &&
+		    ((StateMachineTerminal *)trueTarget)->res->isLeaf() &&
+		    ((StateMachineTerminal *)trueTarget)->res->leaf() == smr_unreached) {
+			*done_something = true;
+			return falseTarget;
+		}
+		if (falseTarget->type == StateMachineState::Terminal &&
+		    ((StateMachineTerminal *)falseTarget)->res->isLeaf() &&
+		    ((StateMachineTerminal *)falseTarget)->res->leaf() == smr_unreached) {
+			*done_something = true;
+			return trueTarget;
+		}
+	}
+
 #if !CONFIG_NO_STATIC_ALIASING
 	if (trueTarget->type == StateMachineState::SideEffecting &&
 	    falseTarget->type == StateMachineState::SideEffecting &&
@@ -192,8 +207,11 @@ StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisati
 StateMachineSideEffect *
 StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
+	if (opt.ignoreUnreached()) {
+		return NULL;
+	}
 	bbdd *value = simplifyBDD(&scopes->bools, this->value, opt);
-	if (TIMEOUT || value == this->value)
+	if (TIMEOUT)
 		return this;
 	if (value->isLeaf()) {
 		if (value->leaf())
@@ -201,7 +219,11 @@ StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOpt
 		else
 			return NULL;
 	}
-	return new StateMachineSideEffectAssertFalse(this, value);
+	if (value == this->value) {
+		return this;
+	} else {
+		return new StateMachineSideEffectAssertFalse(this, value);
+	}
 }
 
 #if !CONFIG_NO_STATIC_ALIASING
@@ -1336,12 +1358,18 @@ SMScopes::parse(const char *buf, const char **end)
 }
 
 StateMachineState *
-StateMachineTerminal::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *)
+StateMachineTerminal::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
 	if (current_optimisation_gen == last_optimisation_gen)
 		return this;
 	last_optimisation_gen = current_optimisation_gen;
 
-	set_res(simplifyBDD(&scopes->smrs, &scopes->bools, res, opt));
+	if (opt.ignoreUnreached()) {
+		smrbdd *newRes = smrbdd::ignore_unreached(&scopes->smrs, res);
+		if (newRes) {
+			*done_something |= set_res(newRes);
+		}
+	}
+	*done_something |= set_res(simplifyBDD(&scopes->smrs, &scopes->bools, res, opt));
 	return this;
 }
