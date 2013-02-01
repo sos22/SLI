@@ -983,6 +983,11 @@ EvalContext::advance(SMScopes *scopes,
 		     StateMachine *sm,
 		     smrbdd *&result)
 {
+	if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
+		/* This path is dead. */
+		return;
+	}
+
 	switch (_currentState->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)_currentState;
