@@ -642,6 +642,10 @@ public:
 			atomic ? "true" : "false",
 			labels[_currentState]);
 		justPathConstraint->prettyPrint(f);
+		printHistory(f,labels);
+	}
+	void printHistory(FILE *f, std::map<const StateMachineState *, int> &labels)
+	{
 #ifndef NDEBUG
 		if (debug_survival_constraint) {
 			fprintf(f, "History: ");
@@ -1089,9 +1093,7 @@ enumEvalPaths(SMScopes *scopes,
 		pendingStates.pop_back();
 
 		if (debug_survival_constraint) {
-			printf("Intermediate result:\n");
-			result->prettyPrint(stdout);
-			ctxt.prettyPrint(stdout, labels);
+			ctxt.printHistory(stdout, labels);
 		}
 
 		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, unreachedIs, sm, result);
