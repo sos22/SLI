@@ -1,6 +1,7 @@
 #include "sli.h"
 #include "control_dependence_graph.hpp"
 #include "state_machine.hpp"
+#include "offline_analysis.hpp"
 
 #ifndef NDEBUG
 static bool debug_control_dependence = false;
@@ -196,47 +197,77 @@ control_dependence_graph::introduceState(StateMachineState *s, bbdd *cond)
 StateMachine *
 cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg, bool *done_something)
 {
-	std::vector<std::pair<StateMachineState *, StateMachineState *> > killedEdges;
+	std::map<const StateMachineState *, int> labels;
+
+	if (debug_control_dependence) {
+		printf("cdgOptimise, input:");
+		printStateMachine(sm, stdout, labels);
+	}
+
+	bool p;
+
 	std::vector<StateMachineState *> states;
 	enumStates(sm, &states);
 	for (auto it = states.begin(); !TIMEOUT && it != states.end(); it++) {
-		std::vector<StateMachineState **> targs;
-		(*it)->targets(targs);
-		for (auto it2 = targs.begin(); !TIMEOUT && it2 != targs.end(); it2++) {
-			const StateMachineState *os = **it2;
-			if (os->type == StateMachineState::Terminal &&
-			    ((StateMachineTerminal *)os)->res == scopes->smrs.cnst(smr_unreached)) {
-				/* Don't consider edges which already
-				 * go straight to smr_unreached. */
-				continue;
+		StateMachineState *state = *it;
+		bbdd *stateDom = cdg.domOf(state);
+		if (stateDom->isLeaf()) {
+			continue;
+		}
+		switch (state->type) {
+		case StateMachineState::SideEffecting: {
+			auto e = (StateMachineSideEffecting *)state;
+			if (e->sideEffect) {
+				auto newSe = optimiseAssuming(scopes, e->sideEffect, stateDom);
+				if (newSe != e->sideEffect) {
+					if (debug_control_dependence) {
+						printf("CDG rewrites side effect:\n");
+						e->sideEffect->prettyPrint(stdout);
+						printf(" -> ");
+						if (newSe) {
+							newSe->prettyPrint(stdout);
+						} else {
+							printf("<null>\n");
+						}
+					}
+					*done_something = true;
+					e->sideEffect = newSe;
+				}
 			}
-			bbdd *dom = cdg.edgeCondition(scopes, *it, **it2);
-			if (!TIMEOUT && dom->isLeaf() && dom->leaf() == false) {
-				/* This edge can never be taken. */
+			break;
+		}
+		case StateMachineState::Terminal: {
+			auto t = (StateMachineTerminal *)state;
+			auto newRes = smrbdd::assume(&scopes->smrs, t->res, stateDom);
+			if (!newRes) {
+				newRes = scopes->smrs.cnst(smr_unreached);
+			}
+			p = t->set_res(newRes);
+			if (p) {
 				if (debug_control_dependence) {
-					killedEdges.push_back(
-						std::pair<StateMachineState *, StateMachineState *>
-						(*it, **it2));
+					printf("Terminal l%d changes:\n", labels[state]);
+					newRes->prettyPrint(stdout);
 				}
 				*done_something = true;
-				StateMachineState *ns =
-					new StateMachineTerminal(
-						(*it)->dbg_origin,
-						scopes->smrs.cnst(smr_unreached));
-				**it2 = ns;
-				cdg.introduceState(ns, dom);
 			}
+			break;
 		}
-	}
-
-	if (debug_control_dependence && !killedEdges.empty()) {
-		std::map<const StateMachineState *, int> labels;
-		printf("cdgOptimise:\n");
-		printStateMachine(sm, stdout, labels);
-		for (auto it = killedEdges.begin(); it != killedEdges.end(); it++) {
-			printf("Killed edge l%d -> l%d\n",
-			       labels[it->first],
-			       labels[it->second]);
+		case StateMachineState::Bifurcate: {
+			auto b = (StateMachineBifurcate *)state;
+			auto newCond = bbdd::assume(&scopes->bools, b->condition, stateDom);
+			if (newCond) {
+				p = b->set_condition(newCond);
+				if (p) {
+					if (debug_control_dependence) {
+						printf("Bifurcate l%d condition changes:\n",
+						       labels[state]);
+						newCond->prettyPrint(stdout);
+					}
+					*done_something = true;
+				}
+			}
+			break;
+		}
 		}
 	}
 

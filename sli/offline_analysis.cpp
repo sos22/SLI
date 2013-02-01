@@ -830,7 +830,7 @@ localiseLoads(SMScopes *scopes,
 		done_something);
 }
 
-static StateMachineSideEffect *
+StateMachineSideEffect *
 optimiseAssuming(SMScopes *scopes, StateMachineSideEffect *se, bbdd *assumption)
 {
 	switch (se->type) {

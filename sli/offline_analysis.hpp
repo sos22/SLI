@@ -274,5 +274,6 @@ StateMachineState *getProximalCause(SMScopes *scopes, MachineState *ms, Oracle *
 
 StateMachine *mapUnreached(smrbdd::scope *scope, StateMachine *inp, StateMachineRes res);
 void optimiseAssuming(SMScopes *scopes, StateMachine *sm, bbdd *condition, bool *done_something);
+StateMachineSideEffect *optimiseAssuming(SMScopes *scopes, StateMachineSideEffect *se, bbdd *assumption);
 
 #endif /* !OFFLINE_ANALYSIS_HPP__ */
