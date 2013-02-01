@@ -577,6 +577,17 @@ bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 			 ((IRExprUnop *)a->internal().condition)->arg)) {
 		a = a->internal().falseBranch;
 	}
+	/* Likewise, if we just dereferenced X then we know that X
+	   can't be a small constant. */
+	if (!a->isLeaf() &&
+	    a->internal().condition->tag == Iex_Binop &&
+	    ((IRExprBinop *)a->internal().condition)->op == Iop_CmpEQ64 &&
+	    ((IRExprBinop *)a->internal().condition)->arg1->tag == Iex_Const &&
+	    ((IRExprConst *)((IRExprBinop *)a->internal().condition)->arg1)->Ico.content.U64 <= (1 << 10) &&
+	    dereferences(cond,
+			 ((IRExprBinop *)a->internal().condition)->arg2)) {
+		a = a->internal().falseBranch;
+	}
 
 	/* Similar trick on the false branch: ifelse(cond, A,
 	   ifelse(BadPtr(X), B, C)) -> ifelse(cond, A, C) if cond
@@ -586,6 +597,15 @@ bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 	    ((IRExprUnop *)b->internal().condition)->op == Iop_BadPtr &&
 	    dereferences(cond,
 			 ((IRExprUnop *)b->internal().condition)->arg)) {
+		b = b->internal().falseBranch;
+	}
+	if (!b->isLeaf() &&
+	    b->internal().condition->tag == Iex_Binop &&
+	    ((IRExprBinop *)b->internal().condition)->op == Iop_CmpEQ64 &&
+	    ((IRExprBinop *)b->internal().condition)->arg1->tag == Iex_Const &&
+	    ((IRExprConst *)((IRExprBinop *)b->internal().condition)->arg1)->Ico.content.U64 <= (1 << 10) &&
+	    dereferences(cond,
+			 ((IRExprBinop *)b->internal().condition)->arg2)) {
 		b = b->internal().falseBranch;
 	}
 }
