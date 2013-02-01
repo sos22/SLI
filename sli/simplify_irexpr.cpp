@@ -3417,8 +3417,11 @@ isBadAddress(exprbdd *e)
 
 template <typename treeT, typename scopeT> static treeT *
 simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
-	    std::map<treeT *, treeT *> &memo)
+	    bool isAddress, std::map<treeT *, treeT *> &memo)
 {
+	/* Only expr BDDs can be addresses, and they should be using
+	 * the specialisation below. */
+	assert(!isAddress);
 	if (TIMEOUT)
 		return bdd;
 	if (bdd->isLeaf())
@@ -3433,12 +3436,12 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisa
 	assert(cond->type() == Ity_I1);
 	if (cond->tag == Iex_Const) {
 		if (((IRExprConst *)cond)->Ico.content.U1)
-			res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, memo);
+			res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, false, memo);
 		else
-			res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, memo);
+			res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, false, memo);
 	} else {
-		treeT *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, memo);
-		treeT *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, memo);
+		treeT *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, false, memo);
+		treeT *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, false, memo);
 		if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
 			res = bdd;
 		else
@@ -3451,12 +3454,13 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisa
 	it_did_insert.first->second = res;
 	return res;
 }
+
 /* Hideous hack: the normal template is actually *incorrect* at
    exprbdds, so supply an explicit instantiation which does the right
    thing.  Ulch. */
 template <> exprbdd *
 simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IRExprOptimisations &opt,
-	    std::map<exprbdd *, exprbdd *> &memo)
+	    bool isAddress, std::map<exprbdd *, exprbdd *> &memo)
 {
 	if (TIMEOUT)
 		return bdd;
@@ -3467,29 +3471,45 @@ simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IREx
 
         if (bdd->isLeaf()) {
 		IRExpr *r = optimiseIRExprFP(bdd->leaf(), opt);
-		if (r == bdd->leaf())
+		bool acc;
+		if (isAddress &&
+		    r->tag == Iex_Const &&
+		    opt.addressAccessible(((IRExprConst *)r)->Ico.content.U64, &acc) &&
+		    !acc) {
+			/* Following this branch would lead to a definite bad pointer
+			   dereference, so we can't follow it. */
+			res = INACCESSIBLE_ADDRESS;
+		} else if (r == bdd->leaf()) {
 			res = bdd;
-		else
+		} else {
 			res = exprbdd::var(scope, bscope, r);
+		}
 	} else {
 		IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt);
 		assert(cond->type() == Ity_I1);
 		if (cond->tag == Iex_Const) {
 			if (((IRExprConst *)cond)->Ico.content.U1)
-				res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, memo);
+				res = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, isAddress, memo);
 			else
-				res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, memo);
+				res = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, isAddress, memo);
 		} else {
-			exprbdd *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, memo);
-			exprbdd *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, memo);
-			if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
+			exprbdd *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, isAddress, memo);
+			exprbdd *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, isAddress, memo);
+			if (t == INACCESSIBLE_ADDRESS) {
+				res = f;
+			} else if (f == INACCESSIBLE_ADDRESS) {
+				res = t;
+			} else if (cond == bdd->internal().condition &&
+				   t == bdd->internal().trueBranch &&
+				   f == bdd->internal().falseBranch) {
 				res = bdd;
-			else
+			} else {
 				res = exprbdd::ifelse(
 					scope,
 					bbdd::var(bscope, cond),
 					t,
 					f);
+			}
 		}
 	}
 	it_did_insert.first->second = res;
@@ -3497,12 +3517,12 @@ simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IREx
 }
 
 template <typename treeT, typename scopeT> static treeT *
-simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt)
+simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, bool isAddress, const IRExprOptimisations &opt)
 {
 	std::map<treeT *, treeT *> memo;
-	return simplifyBDD(scope, bscope, bdd, opt, memo);
+	return simplifyBDD(scope, bscope, bdd, opt, isAddress, memo);
 }
 
-template bbdd   *simplifyBDD(bbdd::scope *,   bbdd::scope *, bbdd *,   const IRExprOptimisations &);
-template smrbdd *simplifyBDD(smrbdd::scope *, bbdd::scope *, smrbdd *, const IRExprOptimisations &);
-template exprbdd *simplifyBDD(exprbdd::scope *, bbdd::scope *, exprbdd *, const IRExprOptimisations &);
+template bbdd    *simplifyBDD(bbdd::scope *,    bbdd::scope *, bbdd *,    bool, const IRExprOptimisations &);
+template smrbdd  *simplifyBDD(smrbdd::scope *,  bbdd::scope *, smrbdd *,  bool, const IRExprOptimisations &);
+template exprbdd *simplifyBDD(exprbdd::scope *, bbdd::scope *, exprbdd *, bool, const IRExprOptimisations &);
