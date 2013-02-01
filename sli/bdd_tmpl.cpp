@@ -414,6 +414,84 @@ _bdd<leafT, subtreeT>::_parse(scopeT *scope, subtreeT **root, const char *str, c
 	}
 }
 
+/* Both IRExpr arguments are really const, but I only mark one so as
+   to make it a bit easier to be sure I haven't mixed them up later
+   on. */
+static bool
+_dereferences(IRExpr *expr, const IRExpr *addr, std::set<IRExpr *> &memo)
+{
+	if (!memo.insert(expr).second) {
+		return false;
+	}
+	switch (expr->tag) {
+	case Iex_Get:
+	case Iex_GetI:
+	case Iex_Const:
+	case Iex_HappensBefore:
+	case Iex_FreeVariable:
+	case Iex_EntryPoint:
+	case Iex_ControlFlow:
+		return false;
+	case Iex_Mux0X:
+		abort();
+	case Iex_Qop:
+		return _dereferences(((IRExprQop *)expr)->arg1, addr, memo) ||
+			_dereferences(((IRExprQop *)expr)->arg2, addr, memo) ||
+			_dereferences(((IRExprQop *)expr)->arg3, addr, memo) ||
+			_dereferences(((IRExprQop *)expr)->arg4, addr, memo);
+	case Iex_Triop:
+		return _dereferences(((IRExprTriop *)expr)->arg1, addr, memo) ||
+			_dereferences(((IRExprTriop *)expr)->arg2, addr, memo) ||
+			_dereferences(((IRExprTriop *)expr)->arg3, addr, memo);
+	case Iex_Binop:
+		return _dereferences(((IRExprBinop *)expr)->arg1, addr, memo) ||
+			_dereferences(((IRExprBinop *)expr)->arg2, addr, memo);
+	case Iex_Unop:
+		return _dereferences(((IRExprUnop *)expr)->arg, addr, memo);
+	case Iex_Load: {
+		IRExprLoad *l = (IRExprLoad *)expr;
+		if ( l->addr == addr ) {
+			return true;
+		}
+		if ( l->addr->tag == Iex_Associative &&
+		     ((IRExprAssociative *)l->addr)->op == Iop_Add64 &&
+		     ((IRExprAssociative *)l->addr)->nr_arguments == 2 &&
+		     ((IRExprAssociative *)l->addr)->contents[0]->tag == Iex_Const &&
+		     ((IRExprConst *)((IRExprAssociative *)l->addr)->contents[0])->Ico.content.U64 <= (1 << 10) &&
+		     ((IRExprAssociative *)l->addr)->contents[1] == addr ) {
+			return true;
+		}
+		return _dereferences(l->addr, addr, memo);
+	}
+	case Iex_CCall: {
+		IRExprCCall *e = (IRExprCCall *)expr;
+		for (int i = 0; e->args[i]; i++) {
+			if (_dereferences(e->args[i], addr, memo)) {
+				return true;
+			}
+		}
+		return false;
+	}
+	case Iex_Associative: {
+		IRExprAssociative *e = (IRExprAssociative *)expr;
+		for (int i = 0; i < e->nr_arguments; i++) {
+			if (_dereferences(e->contents[i], addr, memo)) {
+				return true;
+			}
+		}
+		return false;
+	}
+	}
+	abort();
+}
+
+static bool
+dereferences(IRExpr *expr, const IRExpr *addr)
+{
+	std::set<IRExpr *> memo;
+	return _dereferences(expr, addr, memo);
+}
+
 template <typename t> void
 bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 {
@@ -487,6 +565,28 @@ bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 			   with @a->trueBranch. */
 			a = a->internal().trueBranch;
 		}
+	}
+
+	/* We have ifelse(cond1, ifelse(BadPtr(X), A, B), C).  If
+	   cond1 dereferences BadPtr then we can simplify that down to
+	   ifelse(cond1, B, C). */
+	if (!a->isLeaf() &&
+	    a->internal().condition->tag == Iex_Unop &&
+	    ((IRExprUnop *)a->internal().condition)->op == Iop_BadPtr &&
+	    dereferences(cond,
+			 ((IRExprUnop *)a->internal().condition)->arg)) {
+		a = a->internal().falseBranch;
+	}
+
+	/* Similar trick on the false branch: ifelse(cond, A,
+	   ifelse(BadPtr(X), B, C)) -> ifelse(cond, A, C) if cond
+	   depends on LD(X). */
+	if (!b->isLeaf() &&
+	    b->internal().condition->tag == Iex_Unop &&
+	    ((IRExprUnop *)b->internal().condition)->op == Iop_BadPtr &&
+	    dereferences(cond,
+			 ((IRExprUnop *)b->internal().condition)->arg)) {
+		b = b->internal().falseBranch;
 	}
 }
 
