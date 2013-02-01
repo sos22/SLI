@@ -540,13 +540,33 @@ private:
 	memLogT memlog;
 public:
 	bool atomic;
-	StateMachineState *currentState;
+private:
+	StateMachineState *_currentState;
+public:
+#ifndef NDEBUG
+	std::vector<StateMachineState *> history;
+#endif
+
+	void setState(StateMachineState *s) {
+#ifndef NDEBUG
+		if (debug_survival_constraint) {
+			history.push_back(s);
+		}
+#endif
+		_currentState = s;
+	}
+
 private:
 	void runGc(HeapVisitor &hv) {
 		state.visit(hv);
 		memlog.visit(hv);
-		hv(currentState);
+		hv(_currentState);
 		hv(justPathConstraint);
+#ifndef NDEBUG
+		for (auto it = history.begin(); it != history.end(); it++) {
+			hv(*it);
+		}
+#endif
 	}
 
 	trool evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt);
@@ -555,12 +575,15 @@ private:
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
 
 	EvalContext(const EvalContext &o, StateMachineState *sms)
-		: justPathConstraint(o.justPathConstraint),
-		  state(o.state),
-		  memlog(o.memlog),
-		  atomic(o.atomic),
-		  currentState(sms)
+		: justPathConstraint(o.justPathConstraint)
+		, state(o.state)
+		, memlog(o.memlog)
+		, atomic(o.atomic)
+#ifndef NDEBUG
+		, history(o.history)
+#endif
 	{
+		setState(sms);
 	}
 	/* Create a new context which is like this one, but with an
 	   extra constraint. */
@@ -568,12 +591,15 @@ private:
 		    const EvalContext &o,
 		    StateMachineState *sms,
 		    bbdd *constraint)
-		: justPathConstraint(bbdd::And(&scopes->bools, o.justPathConstraint, constraint)),
-		  state(o.state),
-		  memlog(o.memlog),
-		  atomic(o.atomic),
-		  currentState(sms)
+		: justPathConstraint(bbdd::And(&scopes->bools, o.justPathConstraint, constraint))
+		, state(o.state)
+		, memlog(o.memlog)
+		, atomic(o.atomic)
+#ifndef NDEBUG
+		, history(o.history)
+#endif
 	{
+		setState(sms);
 	}
 	enum evalStateMachineSideEffectRes {
 		esme_normal,
@@ -603,12 +629,35 @@ public:
 		     StateMachine *sm,
 		     smrbdd *&result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
-		: justPathConstraint(_pathConstraint),
-		  atomic(false),
-		  currentState(sm->root)
+		: justPathConstraint(_pathConstraint)
+		, atomic(false)
 	{
 		assert(justPathConstraint);
+		setState(sm->root);
 	}
+
+	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels)
+	{
+		fprintf(f, "EvalContext(atomic = %s, current = l%d)\n",
+			atomic ? "true" : "false",
+			labels[_currentState]);
+		justPathConstraint->prettyPrint(f);
+#ifndef NDEBUG
+		if (debug_survival_constraint) {
+			fprintf(f, "History: ");
+			for (auto it = history.begin();
+			     it != history.end();
+			     it++) {
+				if (it != history.begin()) {
+					fprintf(f, ", ");
+				}
+				fprintf(f, "l%d", labels[*it]);
+			}
+			fprintf(f, "\n");
+		}
+#endif
+	}
+
 };
 
 bool
@@ -934,9 +983,9 @@ EvalContext::advance(SMScopes *scopes,
 		     StateMachine *sm,
 		     smrbdd *&result)
 {
-	switch (currentState->type) {
+	switch (_currentState->type) {
 	case StateMachineState::Terminal: {
-		auto smt = (StateMachineTerminal *)currentState;
+		auto smt = (StateMachineTerminal *)_currentState;
 		result = smrbdd::ifelse(
 			&scopes->smrs,
 			justPathConstraint,
@@ -951,8 +1000,8 @@ EvalContext::advance(SMScopes *scopes,
 		return;
 	}
 	case StateMachineState::SideEffecting: {
-		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)currentState;
-		currentState = sme->target;
+		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)_currentState;
+		setState(sme->target);
 		if (sme->sideEffect) {
 			evalSideEffect(scopes, assumption, decode, sm, oracle, result,
 				       unreachedIs, pendingStates,
@@ -963,7 +1012,7 @@ EvalContext::advance(SMScopes *scopes,
 		return;
 	}
 	case StateMachineState::Bifurcate: {
-		StateMachineBifurcate *smb = (StateMachineBifurcate *)currentState;
+		StateMachineBifurcate *smb = (StateMachineBifurcate *)_currentState;
 		bbdd *cond = state.specialiseIRExpr(scopes, smb->condition);
 		bbdd *scond;
 		trool res = evalBooleanExpression(scopes, assumption, cond, &scond, opt);
@@ -1007,12 +1056,21 @@ enumEvalPaths(SMScopes *scopes,
 	      const VexPtr<OracleInterface> &oracle,
 	      const IRExprOptimisations &opt,
 	      StateMachineRes unreachedIs,
-	      GarbageCollectionToken &token,
-	      bool loud = false)
+	      GarbageCollectionToken &token)
 {
-	int cntr = 0;
 	std::vector<EvalContext> pendingStates;
 	VexPtr<smrbdd, &ir_heap> result;
+	std::map<const StateMachineState *, int> labels;
+
+	if (debug_survival_constraint) {
+		printf("%s(sm = ..., assumption = %s, unreachedIs = %s)\n",
+		       __func__,
+		       assumption ? "..." : "<null>",
+		       nameSmr(unreachedIs));
+		if (assumption)
+			assumption->prettyPrint(stdout);
+		printStateMachine(sm->root, stdout, labels);
+	}
 
 	result = scopes->smrs.cnst(unreachedIs);
 
@@ -1024,9 +1082,14 @@ enumEvalPaths(SMScopes *scopes,
 
 		EvalContext ctxt(pendingStates.back());
 		pendingStates.pop_back();
+
+		if (debug_survival_constraint) {
+			printf("Intermediate result:\n");
+			result->prettyPrint(stdout);
+			ctxt.prettyPrint(stdout, labels);
+		}
+
 		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, unreachedIs, sm, result);
-		if (loud && cntr++ % 100 == 0)
-			printf("Processed %d states; %zd in queue\n", cntr, pendingStates.size());
 	}
 	return result;
 }
@@ -1043,18 +1106,6 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 					GarbageCollectionToken token)
 {
 	__set_profiling(survivalConstraintIfExecutedAtomically);
-
-	if (debug_survival_constraint) {
-		printf("%s(sm = ..., assumption = %s, escapingStatesSurvive = %s, wantCrash = %s, opt = %s)\n",
-		       __func__,
-		       assumption ? "..." : "<null>",
-		       escapingStatesSurvive ? "true" : "false",
-		       wantCrash ? "true" : "false",
-		       opt.name());
-		if (assumption)
-			assumption->prettyPrint(stdout);
-		printStateMachine(sm, stdout);
-	}
 
 	smrbdd *smr = enumEvalPaths(scopes, mai, sm, assumption, oracle, opt,
 				    escapingStatesSurvive ? smr_survive : smr_crash,
@@ -1912,6 +1963,6 @@ collectConstraints(SMScopes *scopes,
 		   std::vector<IRExpr *> &out,
 		   GarbageCollectionToken token)
 {
-	enumEvalPaths(scopes, mai, sm, scopes->bools.cnst(true), oracle, opt, smr_unreached, token, true);
+	enumEvalPaths(scopes, mai, sm, scopes->bools.cnst(true), oracle, opt, smr_unreached, token);
 	scopes->ordering.enumVariables(out);
 }
