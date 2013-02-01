@@ -136,7 +136,7 @@ avail_t::dereference(SMScopes *scopes, exprbdd *addr, const AllowableOptimisatio
 		addr);
 	if (!badPtr)
 		return;
-	badPtr = simplifyBDD(&scopes->exprs, &scopes->bools, badPtr, opt);
+	badPtr = simplifyBDD(&scopes->exprs, &scopes->bools, badPtr, false, opt);
 	makeFalse(&scopes->bools, exprbdd::to_bbdd(&scopes->bools, badPtr));
 }
 
