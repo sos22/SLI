@@ -763,7 +763,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		if (TIMEOUT)
 			return esme_escape;
 		assert(a);
-		bbdd *isBad = exprbdd::to_bbdd(&scopes->bools, addr);
+		bbdd *isBad = exprbdd::to_bbdd(&scopes->bools, a);
 		if (!isBad) {
 			return esme_escape;
 		}
@@ -790,45 +790,82 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			dynamic_cast<StateMachineSideEffectLoad *>(smse);
 		assert(smsel);
 		assert(addr);
-		StateMachineSideEffectStore *satisfier;
-		StateMachine *satisfierMachine;
-		satisfier = NULL;
-		satisfierMachine = NULL;
-		for (memLogT::reverse_iterator it = memlog.rbegin();
-		     it != memlog.rend();
+		exprbdd *acc = exprbdd::load(&scopes->exprs, &scopes->bools, smsel->type, addr);
+		for (auto it = memlog.begin();
+		     it != memlog.end();
 		     it++) {
-			StateMachineSideEffectStore *smses = it->second;
+			StateMachineSideEffectStore *store = it->second;
 			/* We only accept stores which define the
 			 * entire thing which we're looking for.  If
 			 * something's stored as 64 bits then we'll
 			 * take a load of 32 bits, but if it's stored
 			 * as 32 bits then we won't take a load of 64
 			 * bits. */
-			if (smses->data->type() < smsel->type) {
+			if (store->data->type() < smsel->type) {
 #warning This is unsound
 				continue;
 			}
 
-			if (!oracle->memoryAccessesMightAlias(decode, opt, smsel, smses))
+			if (!oracle->memoryAccessesMightAlias(decode, opt, smsel, store))
 				continue;
-			if (evalExpressionsEqual(scopes, assumption, smses->addr, addr, chooser, opt)) {
-				satisfier = smses;
-				satisfierMachine = it->first;
-				break;
+			exprbdd *addressesEq =
+				exprbdd::binop(
+					&scopes->exprs,
+					&scopes->bools,
+					Iop_CmpEQ64,
+					smsel->addr,
+					store->addr);
+			if (!addressesEq) {
+				return esme_escape;
+			}
+			/* The order of the next few operations
+			   (convert to BBDD, apply assumption, apply
+			   justPathConstraint) only matters for
+			   performance, and not for correctness. */
+			addressesEq = exprbdd::assume(
+				&scopes->exprs,
+				addressesEq,
+				assumption);
+			if (!addressesEq) {
+				return esme_escape;
+			}
+			bbdd *addressEqBool =
+				exprbdd::to_bbdd(&scopes->bools, addressesEq);
+			if (!addressEqBool) {
+				return esme_escape;
+			}
+			addressEqBool = bbdd::assume(
+				&scopes->bools,
+				addressEqBool,
+				justPathConstraint);
+			if (!addressEqBool) {
+				return esme_escape;
+			}
+			addressEqBool = simplifyBDD(&scopes->bools, addressEqBool, opt);
+			if (!addressEqBool) {
+				return esme_escape;
+			}
+			/* End of block where ordering doesn't matter */
+
+			exprbdd *val =
+				exprbdd::coerceTypes(
+					&scopes->exprs,
+					&scopes->bools,
+					smsel->type,
+					store->data);
+			if (!val) {
+				return esme_escape;
+			}
+			acc = exprbdd::ifelse(
+				&scopes->exprs,
+				addressEqBool,
+				val,
+				acc);
+			if (!acc) {
+				return esme_escape;
 			}
 		}
-		exprbdd *val;
-		if (satisfier) {
-			val = exprbdd::coerceTypes(
-				&scopes->exprs,
-				&scopes->bools,
-				smsel->type,
-				satisfier->data);
-		} else {
-			val = exprbdd::load(&scopes->exprs, &scopes->bools, smsel->type, addr);
-		}
-		if (!TIMEOUT)
-			state.set_register(scopes, smsel->target, val, &justPathConstraint, opt);
+		state.set_register(scopes, smsel->target, acc, &justPathConstraint, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
