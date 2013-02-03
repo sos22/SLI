@@ -538,9 +538,6 @@ public:
 private:
 	threadState state;
 	memLogT memlog;
-public:
-	bool atomic;
-private:
 	StateMachineState *_currentState;
 public:
 #ifndef NDEBUG
@@ -578,7 +575,6 @@ private:
 		: justPathConstraint(o.justPathConstraint)
 		, state(o.state)
 		, memlog(o.memlog)
-		, atomic(o.atomic)
 #ifndef NDEBUG
 		, history(o.history)
 #endif
@@ -594,7 +590,6 @@ private:
 		: justPathConstraint(bbdd::And(&scopes->bools, o.justPathConstraint, constraint))
 		, state(o.state)
 		, memlog(o.memlog)
-		, atomic(o.atomic)
 #ifndef NDEBUG
 		, history(o.history)
 #endif
@@ -630,7 +625,6 @@ public:
 		     smrbdd *&result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
 		: justPathConstraint(_pathConstraint)
-		, atomic(false)
 	{
 		assert(justPathConstraint);
 		setState(sm->root);
@@ -638,8 +632,7 @@ public:
 
 	void prettyPrint(FILE *f, std::map<const StateMachineState *, int> &labels)
 	{
-		fprintf(f, "EvalContext(atomic = %s, current = l%d)\n",
-			atomic ? "true" : "false",
+		fprintf(f, "EvalContext(current = l%d)\n",
 			labels[_currentState]);
 		justPathConstraint->prettyPrint(f);
 		printHistory(f,labels);
@@ -846,12 +839,8 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		break;
 	}
 	case StateMachineSideEffect::StartAtomic:
-		assert(!atomic);
-		atomic = true;
 		break;
 	case StateMachineSideEffect::EndAtomic:
-		assert(atomic);
-		atomic = false;
 		break;
 	case StateMachineSideEffect::ImportRegister: {
 		StateMachineSideEffectImportRegister *p =
@@ -1209,8 +1198,16 @@ shallowCloneState(StateMachineState *s)
 		return s;
 	case StateMachineState::Bifurcate:
 		return new StateMachineBifurcate(*(StateMachineBifurcate *)s);
-	case StateMachineState::SideEffecting:
-		return new StateMachineSideEffecting(*(StateMachineSideEffecting *)s);
+	case StateMachineState::SideEffecting: {
+		auto sme = (StateMachineSideEffecting *)s;
+		if (!sme->sideEffect ||
+		    sme->sideEffect->type == StateMachineSideEffect::StartAtomic ||
+		    sme->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+			return new StateMachineSideEffecting(s->dbg_origin, NULL, sme->target);
+		} else {
+			return new StateMachineSideEffecting(sme);
+		}
+	}
 	}
 	abort();
 }
