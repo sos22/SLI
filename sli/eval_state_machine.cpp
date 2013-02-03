@@ -521,12 +521,11 @@ threadState::specialiseIRExpr(SMScopes *scopes, exprbdd *smrbdd)
 	return s.transform_exprbdd(&scopes->bools, &scopes->exprs, smrbdd);
 }
 
-class memLogT : public std::vector<std::pair<StateMachine *, StateMachineSideEffectStore *> > {
+class memLogT : public std::vector<StateMachineSideEffectStore *> {
 public:
 	void visit(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
-			hv(it->first);
-			hv(it->second);
+			hv(*it);
 		}
 	}
 };
@@ -567,7 +566,7 @@ private:
 	}
 
 	trool evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt);
-	void evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode, StateMachine *sm, OracleInterface *oracle,
+	void evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode, OracleInterface *oracle,
 			    smrbdd *&result, StateMachineRes unreachedIs, std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
 
@@ -605,7 +604,6 @@ private:
 		SMScopes *scopes,
 		bbdd *assumption,
 		const MaiMap &decode,
-		StateMachine *thisMachine,
 		StateMachineSideEffect *smse,
 		NdChooser &chooser,
 		OracleInterface *oracle,
@@ -735,7 +733,6 @@ EvalContext::evalStateMachineSideEffectRes
 EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					bbdd *assumption,
 					const MaiMap &decode,
-					StateMachine *thisMachine,
 					StateMachineSideEffect *smse,
 					NdChooser &chooser,
 					OracleInterface *oracle,
@@ -770,12 +767,10 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		assert(smses);
 		assert(addr);
 		memlog.push_back(
-			std::pair<StateMachine *, StateMachineSideEffectStore *>
-			(thisMachine,
-			 new StateMachineSideEffectStore(
-				 smses,
-				 state.specialiseIRExpr(scopes, addr),
-				 state.specialiseIRExpr(scopes, smses->data))));
+			new StateMachineSideEffectStore(
+				smses,
+				state.specialiseIRExpr(scopes, addr),
+				state.specialiseIRExpr(scopes, smses->data)));
 		break;
 	}
 	case StateMachineSideEffect::Load: {
@@ -787,7 +782,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		for (auto it = memlog.begin();
 		     it != memlog.end();
 		     it++) {
-			StateMachineSideEffectStore *store = it->second;
+			StateMachineSideEffectStore *store = *it;
 			/* We only accept stores which define the
 			 * entire thing which we're looking for.  If
 			 * something's stored as 64 bits then we'll
@@ -979,7 +974,7 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *wha
 }
 
 void
-EvalContext::evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode, StateMachine *sm,
+EvalContext::evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode,
 			    OracleInterface *oracle, smrbdd *&result, StateMachineRes unreached,
 			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
 			    const IRExprOptimisations &opt)
@@ -992,7 +987,6 @@ EvalContext::evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &de
 			newContext.evalStateMachineSideEffect(scopes,
 							      assumption,
 							      decode,
-							      sm,
 							      smse,
 							      chooser,
 							      oracle,
@@ -1054,7 +1048,7 @@ EvalContext::advance(SMScopes *scopes,
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)_currentState;
 		setState(sme->target);
 		if (sme->sideEffect) {
-			evalSideEffect(scopes, assumption, decode, sm, oracle, result,
+			evalSideEffect(scopes, assumption, decode, oracle, result,
 				       unreachedIs, pendingStates,
 				       sme->sideEffect, opt);
 		} else {
