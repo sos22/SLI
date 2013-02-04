@@ -317,8 +317,12 @@ public:
 	{
 		if (tags)
 			loadTagTable(tags);
-		if (ms->elfData)
+		if (ms->elfData) {
 			findNoReturnFunctions();
+		} else {
+		  crashingFunctions.push_back(StaticRip(0x400ea8));
+		  terminalFunctions.push_back(StaticRip(0x400ea8));
+		}
 	}
 };
 
