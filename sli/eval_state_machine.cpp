@@ -1797,6 +1797,7 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			oracle,
 			true,
 			token);
+	crossProductMachine = mapUnreached(&scopes->smrs, crossProductMachine, smr_survive);
 
 	bbdd *res_ssa = survivalConstraintIfExecutedAtomically(
 		scopes,
