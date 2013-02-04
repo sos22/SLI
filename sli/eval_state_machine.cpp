@@ -1582,6 +1582,20 @@ buildCrossProductMachine(SMScopes *scopes,
 								advanceProbeMachine(crossState, pendingRelocs),
 								newState);
 				}
+			} else if (crossState.p->type == StateMachineState::Bifurcate &&
+				   crossState.s->type != StateMachineState::Bifurcate &&
+				   (!store_effect ||
+				    storeDefinitelyDoesntRace(*maiOut, store_effect, crossState.p, opt, oracle))) {
+				/* If it's a choice between a
+				   bifurcate and a non-bifurcate then
+				   always issue the non-bifurcate
+				   first, because that tends to lead
+				   to fewer states in total.  */
+				/* (The symmetrical case, where the
+				   store is a bifurcate and the probe
+				   isn't, is subsumed by the next
+				   case) */
+				newState = advanceStoreMachine(crossState, pendingRelocs);
 			} else if (!probe_effect ||
 				   probeDefinitelyDoesntRace(*maiOut, probe_effect, crossState.s, opt, oracle)) {
 				/* If the probe effect definitely
