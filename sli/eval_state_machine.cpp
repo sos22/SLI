@@ -620,7 +620,6 @@ public:
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachineRes unreachedIs,
-		     StateMachine *sm,
 		     smrbdd *&result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
 		: justPathConstraint(_pathConstraint)
@@ -1020,7 +1019,6 @@ EvalContext::advance(SMScopes *scopes,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachineRes unreachedIs,
-		     StateMachine *sm,
 		     smrbdd *&result)
 {
 	if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
@@ -1132,7 +1130,7 @@ enumEvalPaths(SMScopes *scopes,
 			ctxt.printHistory(stdout, labels);
 		}
 
-		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, unreachedIs, sm, result);
+		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, unreachedIs, result);
 	}
 	return result;
 }
