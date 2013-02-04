@@ -78,7 +78,11 @@ class threadState {
 	   appears at most once in here. */
 	std::vector<threadAndRegister> assignmentOrder;
 
-	void bump_register_in_assignment_order(const threadAndRegister &reg) {
+	void bump_register_in_assignment_order(const threadAndRegister &reg,
+					       bool havePhis) {
+		if (!havePhis) {
+			return;
+		}
 		for (auto it = assignmentOrder.begin();
 		     it != assignmentOrder.end();
 		     it++) {
@@ -315,6 +319,7 @@ public:
 			  const threadAndRegister &reg,
 			  exprbdd *e,
 			  bbdd **assumption,
+			  bool havePhis,
 			  const IRExprOptimisations &opt) {
 		if (TIMEOUT)
 			return;
@@ -342,7 +347,8 @@ public:
 			/* Bit of a hack.  We only have 64 bit
 			   registers, so if we have to store a 128 bit
 			   value we just truncate it down. */
-			set_register(scopes, reg, exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_128to64, e), assumption, opt);
+			set_register(scopes, reg, exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_128to64, e), assumption,
+				     havePhis, opt);
 			return;
 		default:
 			abort();
@@ -351,12 +357,16 @@ public:
 		if (reg.isTemp())
 			*assumption = setTemporary(scopes, reg, *assumption, opt);
 
-		bump_register_in_assignment_order(reg);
+		bump_register_in_assignment_order(reg, havePhis);
 	}
 	void eval_phi(SMScopes *scopes,
 		      StateMachineSideEffectPhi *phi,
 		      bbdd **assumption,
+		      bool havePhis,
 		      const IRExprOptimisations &opt) {
+		if (!havePhis) {
+			abort();
+		}
 		for (auto it = assignmentOrder.rbegin();
 		     it != assignmentOrder.rend();
 		     it++) {
@@ -367,7 +377,7 @@ public:
 					registers[phi->reg] = registers[*it];
 					if (phi->reg.isTemp())
 						*assumption = setTemporary(scopes, phi->reg, *assumption, opt);
-					bump_register_in_assignment_order(phi->reg);
+					bump_register_in_assignment_order(phi->reg, havePhis);
 					return;
 				}
 			}
@@ -400,7 +410,7 @@ public:
 		}
 		set_register(scopes, phi->reg,
 			     exprbdd::var(&scopes->exprs, &scopes->bools, c),
-			     assumption, opt);
+			     assumption, havePhis, opt);
 		return;
 	}
 
@@ -568,7 +578,7 @@ private:
 	trool evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt);
 	void evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode, OracleInterface *oracle,
 			    smrbdd *&result, StateMachineRes unreachedIs, std::vector<EvalContext> &pendingStates,
-			    StateMachineSideEffect *smse, const IRExprOptimisations &opt);
+			    StateMachineSideEffect *smse, bool havePhis, const IRExprOptimisations &opt);
 
 	EvalContext(const EvalContext &o, StateMachineState *sms)
 		: justPathConstraint(o.justPathConstraint)
@@ -607,6 +617,7 @@ private:
 		StateMachineSideEffect *smse,
 		NdChooser &chooser,
 		OracleInterface *oracle,
+		bool havePhis,
 		const IRExprOptimisations &opt);
 	bool expressionIsTrue(SMScopes *scopes, bbdd *assumption, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
 	bool expressionIsTrue(SMScopes *scopes, bbdd *assumption, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
@@ -620,6 +631,7 @@ public:
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachineRes unreachedIs,
+		     bool havePhis,
 		     smrbdd *&result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
 		: justPathConstraint(_pathConstraint)
@@ -735,6 +747,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					StateMachineSideEffect *smse,
 					NdChooser &chooser,
 					OracleInterface *oracle,
+					bool havePhis,
 					const IRExprOptimisations &opt)
 {
 	exprbdd *addr = NULL;
@@ -852,7 +865,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				return esme_escape;
 			}
 		}
-		state.set_register(scopes, smsel->target, acc, &justPathConstraint, opt);
+		state.set_register(scopes, smsel->target, acc, &justPathConstraint, havePhis, opt);
 		break;
 	}
 	case StateMachineSideEffect::Copy: {
@@ -863,6 +876,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				   smsec->target,
 				   state.specialiseIRExpr(scopes, smsec->value),
 				   &justPathConstraint,
+				   havePhis,
 				   opt);
 		break;
 	}
@@ -882,7 +896,8 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 	case StateMachineSideEffect::Phi: {
 		StateMachineSideEffectPhi *smsep =
 			(StateMachineSideEffectPhi *)(smse);
-		state.eval_phi(scopes, smsep, &justPathConstraint, opt);
+		assert(havePhis);
+		state.eval_phi(scopes, smsep, &justPathConstraint, havePhis, opt);
 		break;
 	}
 	case StateMachineSideEffect::StartAtomic:
@@ -900,6 +915,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					   &scopes->bools,
 					   IRExpr_Get(tr, Ity_I64)),
 				   &justPathConstraint,
+				   havePhis,
 				   opt);
 #if !CONFIG_NO_STATIC_ALIASING
 		/* The only use we make of a PointerAliasing side
@@ -976,7 +992,7 @@ void
 EvalContext::evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode,
 			    OracleInterface *oracle, smrbdd *&result, StateMachineRes unreached,
 			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
-			    const IRExprOptimisations &opt)
+			    bool havePhis, const IRExprOptimisations &opt)
 {
 	NdChooser chooser;
 
@@ -989,6 +1005,7 @@ EvalContext::evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &de
 							      smse,
 							      chooser,
 							      oracle,
+							      havePhis,
 							      opt);
 		switch (res) {
 		case esme_normal:
@@ -1019,6 +1036,7 @@ EvalContext::advance(SMScopes *scopes,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     StateMachineRes unreachedIs,
+		     bool havePhis,
 		     smrbdd *&result)
 {
 	if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
@@ -1048,7 +1066,7 @@ EvalContext::advance(SMScopes *scopes,
 		if (sme->sideEffect) {
 			evalSideEffect(scopes, assumption, decode, oracle, result,
 				       unreachedIs, pendingStates,
-				       sme->sideEffect, opt);
+				       sme->sideEffect, havePhis, opt);
 		} else {
 			pendingStates.push_back(*this);
 		}
@@ -1091,6 +1109,19 @@ EvalContext::advance(SMScopes *scopes,
 	abort();
 }
 
+static bool
+hasPhis(StateMachine *sm)
+{
+	struct {
+		static visit_result Phi(void *, const StateMachineSideEffectPhi *) {
+			return visit_abort;
+		}
+	} foo;
+	static struct state_machine_visitor<void> visitor;
+	visitor.Phi = foo.Phi;
+	return visit_state_machine((void *)NULL, &visitor, sm) == visit_abort;
+}
+
 static smrbdd *
 enumEvalPaths(SMScopes *scopes,
 	      const VexPtr<MaiMap, &ir_heap> &decode,
@@ -1115,6 +1146,8 @@ enumEvalPaths(SMScopes *scopes,
 		printStateMachine(sm->root, stdout, labels);
 	}
 
+	bool havePhis = hasPhis(sm);
+
 	result = scopes->smrs.cnst(unreachedIs);
 
 	bbdd *t = scopes->bools.cnst(true);
@@ -1130,7 +1163,7 @@ enumEvalPaths(SMScopes *scopes,
 			ctxt.printHistory(stdout, labels);
 		}
 
-		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, unreachedIs, result);
+		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, unreachedIs, havePhis, result);
 	}
 	return result;
 }
