@@ -801,7 +801,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					&scopes->exprs,
 					&scopes->bools,
 					Iop_CmpEQ64,
-					smsel->addr,
+					addr,
 					store->addr);
 			if (!addressesEq) {
 				return esme_escape;
