@@ -10,6 +10,22 @@
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
 #include "../VEX/priv/guest_amd64_defs.h"
 
+static void
+fixupThreadForAssertionFailure(const MachineState *ms, Thread *thr)
+{
+	if (thr->regs.rip() != 0x7fd43ce1ab25) {
+		return;
+	}
+	thr->regs.set_reg(REGISTER_IDX(RSP),
+			  thr->regs.rsp() + 432);
+	thr->regs.set_reg(REGISTER_IDX(RIP),
+			  ms->addressSpace->fetch<unsigned long>(thr->regs.rsp()) - 5);
+	thr->regs.set_reg(REGISTER_IDX(RSP),
+			  thr->regs.rsp() + 8);
+	printf("Thread %d fixed up to %lx\n",
+	       thr->tid._tid(), thr->regs.rip());
+}
+
 MachineState *
 MachineState::readCoredump(const char *path)
 {
@@ -139,6 +155,10 @@ MachineState::readCoredump(const char *path)
 					note->n_descsz;
 			}
 		}
+	}
+
+	for (auto it = work->threads.begin(); it != work->threads.end(); it++) {
+		fixupThreadForAssertionFailure(work, *it);
 	}
 
 	return work;
