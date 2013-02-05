@@ -520,17 +520,15 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		std::map<bbdd *, bbdd *> memo;
 		requirement = removeFreeVariables(&summary->scopes->bools, requirement, memo);
 	}
-	IRExpr *requirement_e = bbdd::to_irexpr(requirement);
-	requirement_e = simplify_via_anf(simplifyIRExpr(requirement_e, AllowableOptimisations::defaultOptimisations));
 	fprintf(_logfile, "After free variable removal:\n");
-	ppIRExpr(requirement_e, _logfile);
+	requirement->prettyPrint(_logfile);
 	fprintf(_logfile, "\n");
 	if (TIMEOUT) {
 		fprintf(_logfile, "Killed by a timeout during simplification\n");
 		exit(1);
 	}
 
-	sliced_expr sliced_by_hb(slice_by_hb(requirement_e));
+	sliced_expr sliced_by_hb(slice_by_hb(bbdd::to_irexpr(requirement)));
 	printf("Sliced requirement:\n");
 	sliced_by_hb.prettyPrint(stdout);
 
