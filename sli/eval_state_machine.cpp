@@ -354,8 +354,7 @@ public:
 			abort();
 		}
 
-		if (reg.isTemp())
-			*assumption = setTemporary(scopes, reg, *assumption, opt);
+		*assumption = setTemporary(scopes, reg, *assumption, opt);
 
 		bump_register_in_assignment_order(reg, havePhis);
 	}
@@ -375,8 +374,7 @@ public:
 			     it2++) {
 				if (it2->reg == *it) {
 					registers[phi->reg] = registers[*it];
-					if (phi->reg.isTemp())
-						*assumption = setTemporary(scopes, phi->reg, *assumption, opt);
+					*assumption = setTemporary(scopes, phi->reg, *assumption, opt);
 					bump_register_in_assignment_order(phi->reg, havePhis);
 					return;
 				}
