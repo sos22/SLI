@@ -21,26 +21,6 @@ class internmentState {
 public:
 	std::set<happensBeforeEdge *> hbes;
 	internStateMachineTable exprs;
-	IRExpr *intern(IRExpr *e) { return e; }
-	IRExprGet *intern(IRExprGet *e) { return e; }
-	AbstractThread intern(const AbstractThread &x) { return x; }
-	exprEvalPoint intern(const exprEvalPoint &);
-	template <typename a, typename b> std::pair<a, b> intern(const std::pair<a, b> &x) {
-		return std::pair<a, b>(intern(x.first), intern(x.second));
-	}
-	template <typename a> std::set<a> intern(const std::set<a> &x) {
-		std::set<a> out;
-		for (auto it = x.begin(); it != x.end(); it++)
-			out.insert(intern(*it));
-		return out;
-	}
-	template <typename a> std::vector<a> intern(const std::vector<a> &in) {
-		std::vector<a> out;
-		out.reserve(in.size());
-		for (auto it = in.begin(); it != in.end(); it++)
-			out.push_back(intern(*it));
-		return out;
-	}
 };
 
 class instrToInstrSetMap : public std::map<Instruction<ThreadCfgLabel> *, std::set<Instruction<ThreadCfgLabel> *> > {
@@ -147,14 +127,6 @@ public:
 				fprintf(f, ", ");
 			}
 			fprintf(f, "}\n");
-		}
-	}
-	void internSelf(internmentState &state) {
-		for (auto it = begin(); it != end(); it++) {
-			std::set<IRExpr *> out;
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-				out.insert(state.intern(*it2));
-			it->second = out;
 		}
 	}
 };
@@ -275,7 +247,6 @@ public:
 	unsigned msg_id;
 
 	happensBeforeEdge *intern(internmentState &state) {
-		content = state.intern(content);
 		for (auto it = state.hbes.begin(); it != state.hbes.end(); it++) {
 			if ( (*it)->msg_id == msg_id &&
 			     (*it)->before == before &&
@@ -348,14 +319,6 @@ public:
 		auto it = find(e);
 		assert(it != end());
 		return it->second;
-	}
-
-	void internSelf(internmentState &state) {
-		std::map<IRExpr *, simulationSlotT> work;
-		for (auto it = begin(); it != end(); it++)
-			work[state.intern(it->first)] = it->second;
-		clear();
-		insert(work.begin(), work.end());
 	}
 
 	slotMapT() { }
@@ -482,11 +445,6 @@ class expressionEvalMapT : public std::map<ThreadCfgLabel, std::set<exprEvalPoin
 		}
 	}
 public:
-
-	void internSelf(internmentState &state) {
-		for (auto it = begin(); it != end(); it++)
-			it->second = state.intern(it->second);
-	}
 
 	expressionEvalMapT(expressionDominatorMapT &exprDominatorMap) {
 		for (expressionDominatorMapT::iterator it = exprDominatorMap.begin();
@@ -668,9 +626,7 @@ public:
 
 class crashEnforcementData {
 	void internSelf(internmentState &state) {
-		exprStashPoints.internSelf(state);
 		happensBeforePoints.internSelf(state);
-		expressionEvalPoints.internSelf(state);
 	}
 public:
 	crashEnforcementRoots roots;
