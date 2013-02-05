@@ -1192,7 +1192,7 @@ _bdd<leafT, subtreeT>::dotPrintNodes(FILE *f, std::set<const _bdd *> &memo) cons
 		_prettyPrint(f, leaf());
 		fprintf(f, "\", shape=oval];\n");
 	} else {
-		ppIRExpr(internal().condition, f);
+		internal().rank.prettyPrint(f);
 		fprintf(f, "\", shape=box];\n");
 		internal().trueBranch->dotPrintNodes(f, memo);
 		internal().falseBranch->dotPrintNodes(f, memo);
