@@ -68,7 +68,7 @@ public:
 	void visit(HeapVisitor &hv) const;
 };
 
-void enumerateNeededExpressions(const IRExpr *e, std::set<const IRExpr *> &out);
+void enumerateNeededExpressions(const bbdd *e, std::set<const IRExpr *> &out);
 
 struct exprEvalPoint;
 class happensBeforeEdge;

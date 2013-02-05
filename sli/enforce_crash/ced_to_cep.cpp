@@ -5,6 +5,7 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 #include "maybe.hpp"
+#include "visitor.hpp"
 
 unsigned long
 __trivial_hash_function(const VexRip &vr)
@@ -50,42 +51,52 @@ public:
 	}
 };
 
+struct expr_depends_on_state {
+	const std::set<const IRExpr *> *d;
+	bool includeRegisters;
+};
 static bool
-expressionDependsOn(IRExpr *what, const std::set<const IRExpr *> &d, bool includeRegisters)
+expressionDependsOn(const IRExpr *what, const std::set<const IRExpr *> &d, bool includeRegisters)
 {
-	struct : public IRExprTransformer {
-		bool res;
-		const std::set<const IRExpr *> *d;
-		bool includeRegisters;
-		IRExpr *transformIex(IRExprGet *e) {
-			if (e->reg.isReg() && !includeRegisters)
-				return e;
-			if (d->count(e)) {
-				res = true;
-				abortTransform();
+	struct foo {
+		static visit_result Get(const expr_depends_on_state *state, const IRExprGet *ieg)
+		{
+			if ((state->includeRegisters || !ieg->reg.isReg()) &&
+			    state->d->count(ieg)) {
+				return visit_abort;
+			} else {
+				return visit_continue;
 			}
-			return e;
 		}
-		IRExpr *transformIex(IRExprEntryPoint *e) {
-			if (d->count(e)) {
-				res = true;
-				abortTransform();
+		static visit_result EntryPoint(const expr_depends_on_state *state,
+					       const IRExprEntryPoint *ee)
+		{
+			if (state->d->count(ee)) {
+				return visit_abort;
+			} else {
+				return visit_continue;
 			}
-			return e;
 		}
-		IRExpr *transformIex(IRExprControlFlow *e) {
-			if (d->count(e)) {
-				res = true;
-				abortTransform();
+		static visit_result ControlFlow(const expr_depends_on_state *state,
+						const IRExprControlFlow *ee)
+		{
+			if (state->d->count(ee)) {
+				return visit_abort;
+			} else {
+				return visit_continue;
 			}
-			return e;
 		}
-	} doit;
-	doit.res = false;
-	doit.d = &d;
-	doit.includeRegisters = includeRegisters;
-	doit.doit(what);
-	return doit.res;
+	};
+	static struct irexpr_visitor<const expr_depends_on_state> visitor;
+	visitor.Get = foo::Get;
+	visitor.EntryPoint = foo::EntryPoint;
+	visitor.ControlFlow = foo::ControlFlow;
+	struct expr_depends_on_state state;
+	state.d = &d;
+	state.includeRegisters = includeRegisters;
+	return visit_irexpr(const_cast<const expr_depends_on_state *>(&state),
+			    &visitor,
+			    what) == visit_abort;
 }
 
 static int
@@ -578,7 +589,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "static const struct cfg_instr_stash instr_%d_stash[] = {\n", newLabel);
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
 				if ( (*it2)->tag == Iex_Get ) {
-					IRExprGet *e = (IRExprGet *)*it2;
+					const IRExprGet *e = (const IRExprGet *)*it2;
 					simulationSlotT simSlot(slots(e));
 					fprintf(f, "    { .reg = %d, .slot = %d },\n",
 						e->reg.isReg() ? getRegisterIdx(e->reg.asReg()) : -1,

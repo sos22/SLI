@@ -3,7 +3,7 @@
 #include "offline_analysis.hpp"
 
 void
-enumerateNeededExpressions(const IRExpr *e, std::set<const IRExpr *> &out)
+enumerateNeededExpressions(const bbdd *e, std::set<const IRExpr *> &out)
 {
 	struct v {
 		static visit_result Iex(std::set<const IRExpr *> *state,
@@ -17,7 +17,7 @@ enumerateNeededExpressions(const IRExpr *e, std::set<const IRExpr *> &out)
 			return visit_continue;
 		}
 	};
-	static irexpr_visitor<std::set<const IRExpr *> > visitor;
-	visitor.Iex = v::Iex;
-	visit_irexpr(&out, &visitor, e);
+	static bdd_visitor<std::set<const IRExpr *> > visitor;
+	visitor.irexpr.Iex = v::Iex;
+	visit_const_bdd(&out, &visitor, e);
 }
