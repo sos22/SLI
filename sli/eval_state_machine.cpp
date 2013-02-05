@@ -1247,12 +1247,13 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		StateMachineSideEffectImportRegister *p =
 			(StateMachineSideEffectImportRegister *)smse;
 		threadAndRegister tr(threadAndRegister::reg(p->tid, p->vex_offset, -1));
+		IRExpr *g = IRExpr_Get(tr, Ity_I64);
 		state.set_register(scopes,
 				   p->reg,
 				   exprbdd::var(
 					   &scopes->exprs,
 					   &scopes->bools,
-					   IRExpr_Get(tr, Ity_I64)),
+					   g),
 				   &justPathConstraint,
 				   havePhis,
 				   opt);
@@ -1262,16 +1263,17 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		   are definitely valid pointers really are definitely
 		   valid pointers.  Todo: could do much better
 		   here. */
-		if (!p->set.mightBeNonPointer() &&
-		    expressionIsTrue(
-			    scopes,
-			    assumption,
-			    bbdd::var(&scopes->bools, IRExpr_Unop(
-					      Iop_BadPtr,
-					      IRExpr_Get(tr, Ity_I64))),
-			    chooser,
-			    opt)) {
-			return esme_escape;
+		if (!p->set.mightBeNonPointer()) {
+			auto b = bbdd::var(&scopes->bools,
+					   IRExpr_Unop(
+						   Iop_BadPtr,
+						   g));
+			if (b) {
+				assertFalse(
+					&scopes->bools,
+					b,
+					opt);
+			}
 		}
 #endif
 		break;
