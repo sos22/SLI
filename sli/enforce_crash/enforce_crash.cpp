@@ -147,7 +147,7 @@ optimiseHBContent(crashEnforcementData &ced)
 struct expr_slice {
 	std::set<const IRExpr *> trueSlice;
 	std::set<const IRExpr *> falseSlice;
-	mutable IRExpr *leftOver;
+	mutable bbdd *leftOver;
 	bool operator <(const expr_slice &o) const {
 		if (trueSlice < o.trueSlice)
 			return true;
@@ -176,7 +176,7 @@ struct expr_slice {
 			ppIRExpr(*it, f);
 		}
 		fprintf(f, "} -> ");
-		ppIRExpr(leftOver, f);
+		leftOver->prettyPrint(f);
 		fprintf(f, "\n");		
 	}
 };
@@ -191,21 +191,22 @@ buildCED(const SummaryId &summaryId,
 	 int &next_hb_id,
 	 AddressSpace *as)
 {
+	IRExpr *leftOver = bbdd::to_irexpr(c.leftOver);
 	/* Figure out what we actually need to keep track of */
 	std::set<IRExpr *> neededExpressions;
-	enumerateNeededExpressions(c.leftOver, neededExpressions);
+	enumerateNeededExpressions(leftOver, neededExpressions);
 
 	DNF_Conjunction conj;
 	for (auto it = c.trueSlice.begin(); it != c.trueSlice.end(); it++)
 		conj.push_back(NF_Atom(false, const_cast<IRExpr *>(*it)));
 	for (auto it = c.falseSlice.begin(); it != c.falseSlice.end(); it++)
 		conj.push_back(NF_Atom(true, const_cast<IRExpr *>(*it)));
-	if (c.leftOver->tag == Iex_Associative) {
-		IRExprAssociative *assoc = (IRExprAssociative *)c.leftOver;
+	if (leftOver->tag == Iex_Associative) {
+		IRExprAssociative *assoc = (IRExprAssociative *)leftOver;
 		for (int i = 0; i < assoc->nr_arguments; i++)
 			conj.push_back(NF_Atom(false, assoc->contents[i]));
 	} else {
-		conj.push_back(NF_Atom(false, c.leftOver));
+		conj.push_back(NF_Atom(false, leftOver));
 	}
 	*out = crashEnforcementData(summaryId, *summary->mai, neededExpressions, abs, rootsCfg, conj, next_hb_id, summary, as);
 	optimiseHBContent(*out);
@@ -262,83 +263,111 @@ consistentOrdering(const expr_slice &slice)
    the eval much easier, but shouldn't push things too far. */
 /* Generally, taking a true expression and making it false is more
    dangerous than taking a false expression and making it true */
-static IRExpr *
-heuristicSimplify(IRExpr *e)
+static bbdd *
+heuristicSimplify(bbdd::scope *scope, bbdd *e, std::map<bbdd *, bbdd *> &memo)
 {
-	IRExprBinop *ieb;
-top:
-	if (e->tag != Iex_Binop ||
-	    ((IRExprBinop *)e)->op != Iop_CmpEQ64)
+	if (e->isLeaf()) {
 		return e;
-
-	/* First rule: 0 == a - b -> a == b */
-	ieb = (IRExprBinop *)e;
-	if (ieb->arg1->tag == Iex_Const &&
-	    ((IRExprConst *)ieb->arg1)->Ico.content.U64 == 0 &&
-	    ieb->arg2->tag == Iex_Associative &&
-	    ((IRExprAssociative *)ieb->arg2)->op == Iop_Add64 &&
-	    ((IRExprAssociative *)ieb->arg2)->nr_arguments == 2 &&
-	    ((IRExprAssociative *)ieb->arg2)->contents[1]->tag == Iex_Unop &&
-	    ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->op == Iop_Neg64) {
-		e = IRExprBinop::mk(ieb->op,
-				    ((IRExprAssociative *)ieb->arg2)->contents[0],
-				    ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->arg);
-		goto top;
 	}
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(e, (bbdd *)0xf001));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		/* it->second is already correct */
+	} else {
+		auto t = heuristicSimplify(scope, e->internal().trueBranch, memo);
+		auto f = heuristicSimplify(scope, e->internal().falseBranch, memo);
 
-	/* Second rule: f(a) == f(b) -> a == b, if f is sufficiently
-	   injective. */
-	if (ieb->arg1->tag == ieb->arg2->tag) {
-		switch (ieb->arg1->tag) {
-		case Iex_Binop: {
-			IRExprBinop *l = (IRExprBinop *)ieb->arg1;
-			IRExprBinop *r = (IRExprBinop *)ieb->arg2;
-			if (l->op != r->op)
-				break;
-			switch (l->op) {
-			case Iop_Shl64: /* x << k is treated as
-					 * injective if k is a small
-					 * constant, because most of
-					 * the time you don't get
-					 * overflow. */
-				if (r->arg2->tag == Iex_Const &&
-				    l->arg2->tag == Iex_Const &&
-				    ((IRExprConst *)r->arg2)->Ico.content.U8 ==
-				         ((IRExprConst *)l->arg2)->Ico.content.U8 &&
-				    ((IRExprConst *)l->arg2)->Ico.content.U8 < 8) {
-					e = IRExprBinop::mk(ieb->op,
-							    l->arg1,
-							    r->arg1);
-					goto top;
+		IRExpr *cond = e->internal().condition;
+		if (cond->tag == Iex_Binop &&
+		    ((IRExprBinop *)cond)->op == Iop_CmpEQ64) {
+			IRExprBinop *ieb;
+
+			ieb = (IRExprBinop *)cond;
+
+		retry:
+			/* First rule: 0 == a - b -> a == b */
+			if (ieb->arg1->tag == Iex_Const &&
+			    ((IRExprConst *)ieb->arg1)->Ico.content.U64 == 0 &&
+			    ieb->arg2->tag == Iex_Associative &&
+			    ((IRExprAssociative *)ieb->arg2)->op == Iop_Add64 &&
+			    ((IRExprAssociative *)ieb->arg2)->nr_arguments == 2 &&
+			    ((IRExprAssociative *)ieb->arg2)->contents[1]->tag == Iex_Unop &&
+			    ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->op == Iop_Neg64) {
+				ieb = IRExprBinop::mk(ieb->op,
+						      ((IRExprAssociative *)ieb->arg2)->contents[0],
+						      ((IRExprUnop *)((IRExprAssociative *)ieb->arg2)->contents[1])->arg);
+			}
+
+			/* Second rule: f(a) == f(b) -> a == b, if f
+			   is sufficiently injective. */
+			if (ieb->arg1->tag == ieb->arg2->tag) {
+				switch (ieb->arg1->tag) {
+				case Iex_Binop: {
+					IRExprBinop *l = (IRExprBinop *)ieb->arg1;
+					IRExprBinop *r = (IRExprBinop *)ieb->arg2;
+					if (l->op != r->op)
+						break;
+					switch (l->op) {
+					case Iop_Shl64: /* x << k is treated as
+							 * injective if k is a small
+							 * constant, because most of
+							 * the time you don't get
+							 * overflow. */
+						if (r->arg2->tag == Iex_Const &&
+						    l->arg2->tag == Iex_Const &&
+						    ((IRExprConst *)r->arg2)->Ico.content.U8 ==
+						    ((IRExprConst *)l->arg2)->Ico.content.U8 &&
+						    ((IRExprConst *)l->arg2)->Ico.content.U8 < 8) {
+							ieb = IRExprBinop::mk(ieb->op,
+									    l->arg1,
+									    r->arg1);
+							goto retry;
+						}
+						break;
+					default:
+						break;
+					}
+					break;
 				}
-				break;
-			default:
-				break;
+				case Iex_Unop: {
+					IRExprUnop *l = (IRExprUnop *)ieb->arg1;
+					IRExprUnop *r = (IRExprUnop *)ieb->arg2;
+					if (l->op != r->op)
+						break;
+					switch (l->op) {
+					case Iop_32Sto64:
+						/* This one actually is injective */
+						ieb = IRExprBinop::mk(ieb->op, l->arg, r->arg);
+						goto retry;
+					default:
+						break;
+					}
+					break;
+				}
+				default:
+					break;
+				}
 			}
-			break;
+			cond = ieb;
 		}
-		case Iex_Unop: {
-			IRExprUnop *l = (IRExprUnop *)ieb->arg1;
-			IRExprUnop *r = (IRExprUnop *)ieb->arg2;
-			if (l->op != r->op)
-				break;
-			switch (l->op) {
-			case Iop_32Sto64:
-				/* This one actually is injective */
-				e = IRExprBinop::mk(ieb->op, l->arg, r->arg);
-				goto top;
-			default:
-				break;
-			}
-			break;
-		}
-		default:
-			break;
+
+		if (cond == e->internal().condition &&
+		    t == e->internal().trueBranch &&
+		    f == e->internal().falseBranch) {
+			it->second = e;
+		} else {
+			it->second =
+				bbdd::ifelse(
+					scope,
+					bbdd::var(scope, cond),
+					t,
+					f);
 		}
 	}
-
-	return e;
+	return it->second;
 }
+
 
 /* We can't get at the values of free variables from the run-time
    enforcer, so we might as well remove them now.  Also remove a
@@ -505,11 +534,7 @@ slice_by_exprs(bbdd::scope *scope, bbdd *expr, const std::set<const IRExpr *> &s
 {
 	if (sliceby.empty() || expr->isLeaf()) {
 		expr_slice theSlice;
-		theSlice.leftOver =
-			simplify_via_anf(
-				simplifyIRExpr(
-					bbdd::to_irexpr(expr),
-					AllowableOptimisations::defaultOptimisations));
+		theSlice.leftOver = expr;
 		sliced_expr s;
 		s.insert(theSlice);
 		return s;
@@ -581,16 +606,18 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	printf("Sliced requirement:\n");
 	sliced_by_hb.prettyPrint(stdout);
 
-	for (auto it = sliced_by_hb.begin();
-	     it != sliced_by_hb.end();
-		) {
-		it->leftOver = heuristicSimplify(it->leftOver);
-		if ( (it->leftOver->tag != Iex_Const ||
-		      ((IRExprConst *)it->leftOver)->Ico.content.U1) &&
-		     !consistentOrdering(*it) ) {
-			it++;
-		} else {
-			sliced_by_hb.erase(it++);
+	{
+		std::map<bbdd *, bbdd *> memo;
+		for (auto it = sliced_by_hb.begin();
+		     it != sliced_by_hb.end();
+			) {
+			it->leftOver = heuristicSimplify(&summary->scopes->bools, it->leftOver, memo);
+			if ( (!it->leftOver->isLeaf() || it->leftOver->leaf()) &&
+			     !consistentOrdering(*it) ) {
+				it++;
+			} else {
+				sliced_by_hb.erase(it++);
+			}
 		}
 	}
 
