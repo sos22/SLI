@@ -615,7 +615,6 @@ public:
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
-		     StateMachineRes unreachedIs,
 		     bool havePhis,
 		     smrbdd *&result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
@@ -918,6 +917,65 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *wha
 	return tr_unknown;
 }
 
+static bool
+usesUninit(const IRExpr *what)
+{
+	struct v {
+		static visit_result Get(void *, const IRExprGet *ieg) {
+			if (ieg->reg.isReg() &&
+			    ieg->reg.gen() == (unsigned)-1) {
+				return visit_continue;
+			} else {
+				return visit_abort;
+			}
+		}
+	};
+	static irexpr_visitor<void> visitor;
+	visitor.Get = v::Get;
+	return visit_irexpr((void *)NULL, &visitor, what) == visit_abort;
+}
+
+static smrbdd *
+suppressUninit(smrbdd::scope *scope, smrbdd *input, std::map<smrbdd *, smrbdd *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<smrbdd *, smrbdd *>(input, (smrbdd *)0xf001));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+
+	if (!did_insert) {
+		/* it->second is already correct */
+	} else if (input->isLeaf()) {
+		it->second = input;
+	} else {
+		auto t = suppressUninit(scope, input->internal().trueBranch, memo);
+		auto f = suppressUninit(scope, input->internal().falseBranch, memo);
+		if (t == f || (t->isLeaf() && t->leaf() == smr_unreached)) {
+			it->second = f;
+		} else if (f->isLeaf() && f->leaf() == smr_unreached) {
+			it->second = t;
+		} else if (usesUninit(input->internal().condition)) {
+			it->second = scope->cnst(smr_unreached);
+		} else if (t == input->internal().trueBranch &&
+			   f == input->internal().falseBranch) {
+			it->second = input;
+		} else {
+			it->second = scope->makeInternal(
+				input->internal().condition,
+				input->internal().rank,
+				t,
+				f);
+		}
+	}
+	return it->second;
+}
+
+static smrbdd *
+suppressUninit(smrbdd::scope *scope, smrbdd *input)
+{
+	std::map<smrbdd *, smrbdd *> memo;
+	return suppressUninit(scope, input, memo);
+}
+
 /* You might that we could stash things like @oracle, @opt, and @sm in
    the EvalContext itself and not have to pass them around all the
    time.  That'd work, but it'd mean duplicating those pointers in
@@ -930,7 +988,6 @@ EvalContext::advance(SMScopes *scopes,
 		     OracleInterface *oracle,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
-		     StateMachineRes unreachedIs,
 		     bool havePhis,
 		     smrbdd *&result)
 {
@@ -946,13 +1003,7 @@ EvalContext::advance(SMScopes *scopes,
 		result = smrbdd::ifelse(
 			&scopes->smrs,
 			justPathConstraint,
-			state.specialiseIRExpr(
-				scopes,
-				smrbdd::replaceTerminal(
-					&scopes->smrs,
-					smr_unreached,
-					unreachedIs,
-					smt->res)),
+			suppressUninit(&scopes->smrs, state.specialiseIRExpr(scopes, smt->res)),
 			result);
 		/* Caution: this will de-initialise *this, and might
 		   deallocate it, so once you've done this you can't
@@ -1053,7 +1104,10 @@ enumEvalPaths(SMScopes *scopes,
 	bbdd *t = scopes->bools.cnst(true);
 	pendingStates.push_back(EvalContext(sm, t));
 	VexPtr<bbdd, &ir_heap> ass(assumption ? assumption : t);
-	while (!TIMEOUT && !pendingStates.empty()) {
+	while (!pendingStates.empty()) {
+		if (TIMEOUT) {
+			return NULL;
+		}
 		LibVEX_maybe_gc(token);
 
 		/* Make sure we don't need to realloc pendingStates at
@@ -1066,8 +1120,21 @@ enumEvalPaths(SMScopes *scopes,
 			ctxt.printHistory(stdout, labels);
 		}
 
-		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, unreachedIs, havePhis, result);
+		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, havePhis, result);
 	}
+
+	if (debug_survival_constraint) {
+		printf("Result of symbolic execution:\n");
+		result->prettyPrint(stdout);
+	}
+
+	result = smrbdd::replaceTerminal(&scopes->smrs, smr_unreached, unreachedIs, result);
+
+	if (debug_survival_constraint && result) {
+		printf("Unreached suppressed:\n");
+		result->prettyPrint(stdout);
+	}
+
 	return result;
 }
 
