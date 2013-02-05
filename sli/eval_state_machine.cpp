@@ -574,9 +574,6 @@ private:
 	}
 
 	trool evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt);
-	void evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode, OracleInterface *oracle,
-			    std::vector<EvalContext> &pendingStates,
-			    StateMachineSideEffect *smse, bool havePhis, const IRExprOptimisations &opt);
 
 	EvalContext(const EvalContext &o, StateMachineState *sms)
 		: justPathConstraint(o.justPathConstraint)
@@ -980,29 +977,6 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *wha
 	return tr_unknown;
 }
 
-void
-EvalContext::evalSideEffect(SMScopes *scopes,
-			    bbdd *assumption,
-			    const MaiMap &decode,
-			    OracleInterface *oracle,
-			    std::vector<EvalContext> &pendingStates,
-			    StateMachineSideEffect *smse,
-			    bool havePhis, const IRExprOptimisations &opt)
-{
-	EvalContext newContext(*this);
-	newContext.evalStateMachineSideEffect(scopes,
-					      assumption,
-					      decode,
-					      smse,
-					      oracle,
-					      havePhis,
-					      opt);
-	if (TIMEOUT) {
-		return;
-	}
-	pendingStates.push_back(newContext);
-}
-
 /* You might that we could stash things like @oracle, @opt, and @sm in
    the EvalContext itself and not have to pass them around all the
    time.  That'd work, but it'd mean duplicating those pointers in
@@ -1024,6 +998,7 @@ EvalContext::advance(SMScopes *scopes,
 		return;
 	}
 
+	assert(this == &pendingStates.back());
 	switch (_currentState->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)_currentState;
@@ -1038,17 +1013,23 @@ EvalContext::advance(SMScopes *scopes,
 					unreachedIs,
 					smt->res)),
 			result);
+		/* Caution: this will de-initialise *this, and might
+		   deallocate it, so once you've done this you can't
+		   access any member variables any more. */
+		pendingStates.pop_back();
 		return;
 	}
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)_currentState;
 		setState(sme->target);
 		if (sme->sideEffect) {
-			evalSideEffect(scopes, assumption, decode, oracle,
-				       pendingStates, sme->sideEffect,
-				       havePhis, opt);
-		} else {
-			pendingStates.push_back(*this);
+			evalStateMachineSideEffect(scopes,
+						   assumption,
+						   decode,
+						   sme->sideEffect,
+						   oracle,
+						   havePhis,
+						   opt);
 		}
 		return;
 	}
@@ -1059,16 +1040,17 @@ EvalContext::advance(SMScopes *scopes,
 		trool res = evalBooleanExpression(scopes, assumption, cond, &scond, opt);
 		switch (res) {
 		case tr_true:
-			pendingStates.push_back(EvalContext(
-							*this,
-							smb->trueTarget));
+			setState(smb->trueTarget);
 			break;
 		case tr_false:
-			pendingStates.push_back(EvalContext(
-							*this,
-							smb->falseTarget));
+			setState(smb->falseTarget);
 			break;
 		case tr_unknown:
+			/* We rely on the caller to have reserved
+			   enough space in @pendingStates that this
+			   doesn't cause a realloc (which would
+			   invalidate the @this pointer, which would
+			   be bad). */
 			pendingStates.push_back(EvalContext(
 							scopes,
 							*this,
@@ -1076,11 +1058,8 @@ EvalContext::advance(SMScopes *scopes,
 							bbdd::invert(
 								&scopes->bools,
 								scond)));
-			pendingStates.push_back(EvalContext(
-							scopes,
-							*this,
-							smb->trueTarget,
-							scond));
+			setState(smb->trueTarget);
+			justPathConstraint = bbdd::And(&scopes->bools, justPathConstraint, scond);
 			break;
 		}
 		return;
@@ -1136,8 +1115,11 @@ enumEvalPaths(SMScopes *scopes,
 	while (!TIMEOUT && !pendingStates.empty()) {
 		LibVEX_maybe_gc(token);
 
-		EvalContext ctxt(pendingStates.back());
-		pendingStates.pop_back();
+		/* Make sure we don't need to realloc pendingStates at
+		 * a bad place. */
+		pendingStates.reserve(pendingStates.size() + 1);
+
+		EvalContext &ctxt(pendingStates.back());
 
 		if (debug_survival_constraint) {
 			ctxt.printHistory(stdout, labels);
