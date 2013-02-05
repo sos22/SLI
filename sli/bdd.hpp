@@ -15,6 +15,8 @@ template <typename _leafT, typename _subtreeT> class _bdd;
    stashed in a union in _bdd, so it can't have any constructors, so
    we can't enforce it with the type system.  Just have to be
    careful. */
+/* Note that enforce_crash.cpp::setVariable() depends on the details
+   of the BDD ordering for correctness! */
 class bdd_rank {
 	friend class bdd_ordering;
 	long val;

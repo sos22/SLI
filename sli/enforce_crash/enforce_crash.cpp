@@ -15,6 +15,7 @@
 #include "allowable_optimisations.hpp"
 #include "alloc_mai.hpp"
 #include "sat_checker.hpp"
+#include "visitor.hpp"
 
 #ifndef NDEBUG
 static bool debug_declobber_instructions = false;
@@ -144,8 +145,8 @@ optimiseHBContent(crashEnforcementData &ced)
 }
 
 struct expr_slice {
-	std::set<IRExpr *> trueSlice;
-	std::set<IRExpr *> falseSlice;
+	std::set<const IRExpr *> trueSlice;
+	std::set<const IRExpr *> falseSlice;
 	mutable IRExpr *leftOver;
 	bool operator <(const expr_slice &o) const {
 		if (trueSlice < o.trueSlice)
@@ -196,9 +197,9 @@ buildCED(const SummaryId &summaryId,
 
 	DNF_Conjunction conj;
 	for (auto it = c.trueSlice.begin(); it != c.trueSlice.end(); it++)
-		conj.push_back(NF_Atom(false, *it));
+		conj.push_back(NF_Atom(false, const_cast<IRExpr *>(*it)));
 	for (auto it = c.falseSlice.begin(); it != c.falseSlice.end(); it++)
-		conj.push_back(NF_Atom(true, *it));
+		conj.push_back(NF_Atom(true, const_cast<IRExpr *>(*it)));
 	if (c.leftOver->tag == Iex_Associative) {
 		IRExprAssociative *assoc = (IRExprAssociative *)c.leftOver;
 		for (int i = 0; i < assoc->nr_arguments; i++)
@@ -430,7 +431,7 @@ public:
 		for (auto it = begin(); it != end(); it++)
 			it->prettyPrint(f);
 	}
-	sliced_expr setTrue(IRExpr *e) const
+	sliced_expr setTrue(const IRExpr *e) const
 	{
 		sliced_expr res;
 		for (auto it = begin();
@@ -442,7 +443,7 @@ public:
 		}
 		return res;
 	}
-	sliced_expr setFalse(IRExpr *e) const
+	sliced_expr setFalse(const IRExpr *e) const
 	{
 		sliced_expr res;
 		for (auto it = begin();
@@ -456,42 +457,90 @@ public:
 	}
 };
 
-static sliced_expr
-slice_by_exprs(IRExpr *expr, const std::set<IRExpr *> &sliceby)
+static bbdd *
+setVariable(bbdd::scope *scope, bbdd *what, const IRExpr *expr,
+	    bool val, std::map<bbdd *, bbdd *> &memo)
 {
-	if (sliceby.empty() || expr->tag == Iex_Const) {
+	assert(expr->tag == Iex_HappensBefore);
+	if (what->isLeaf()) {
+		return what;
+	}
+	/* This is safe because of the BDD ordering. */
+	if (what->internal().condition->tag != Iex_EntryPoint &&
+	    what->internal().condition->tag != Iex_HappensBefore) {
+		return what;
+	}
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(what, (bbdd *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		/* it->second already correct */
+	} else {
+		auto t = setVariable(scope, what->internal().trueBranch, expr, val, memo);
+		auto f = setVariable(scope, what->internal().falseBranch, expr, val, memo);
+		if (what->internal().condition == expr) {
+			if (val) {
+				it->second = t;
+			} else {
+				it->second = f;
+			}
+		} else if (t == f) {
+			it->second = t;
+		} else if (t == what->internal().trueBranch &&
+			   f == what->internal().falseBranch) {
+			it->second = what;
+		} else {
+			it->second = scope->makeInternal(
+				what->internal().condition,
+				what->internal().rank,
+				t,
+				f);
+		}
+	}
+	return it->second;
+}
+
+static sliced_expr
+slice_by_exprs(bbdd::scope *scope, bbdd *expr, const std::set<const IRExpr *> &sliceby)
+{
+	if (sliceby.empty() || expr->isLeaf()) {
 		expr_slice theSlice;
 		theSlice.leftOver =
 			simplify_via_anf(
 				simplifyIRExpr(
-					expr,
+					bbdd::to_irexpr(expr),
 					AllowableOptimisations::defaultOptimisations));
 		sliced_expr s;
 		s.insert(theSlice);
 		return s;
 	}
-	IRExpr *e = *sliceby.begin();
-	std::set<IRExpr *> others(sliceby);
+	const IRExpr *e = *sliceby.begin();
+	std::set<const IRExpr *> others(sliceby);
 	others.erase(e);
+	std::map<bbdd *, bbdd *> memo1;
 	sliced_expr trueSlice(
-		slice_by_exprs(setVariable(expr, e, true), others));
+		slice_by_exprs(scope, setVariable(scope, expr, e, true, memo1), others));
+	std::map<bbdd *, bbdd *> memo2;
 	sliced_expr falseSlice(
-		slice_by_exprs(setVariable(expr, e, false), others));
+		slice_by_exprs(scope, setVariable(scope, expr, e, false, memo2), others));
 	return trueSlice.setTrue(e) | falseSlice.setFalse(e);
 }
 
 static sliced_expr
-slice_by_hb(IRExpr *expr)
+slice_by_hb(bbdd::scope *scope, bbdd *expr)
 {
-	struct : public IRExprTransformer {
-		std::set<IRExpr *> hbEdges;
-		IRExpr *transformIex(IRExprHappensBefore *e) {
-			hbEdges.insert(e);
-			return e;
-		};
-	} findAllEdges;
-	findAllEdges.doit(expr);
-	return slice_by_exprs(expr, findAllEdges.hbEdges);
+	struct foo {
+		static visit_result HappensBefore(std::set<const IRExpr *> *state,
+						  const IRExprHappensBefore *expr) {
+			state->insert(expr);
+			return visit_continue;
+		}
+	};
+	static struct bdd_visitor<std::set<const IRExpr *> > visitor;
+	visitor.irexpr.HappensBefore = foo::HappensBefore;
+	std::set<const IRExpr *> hbEdges;
+	visit_const_bdd(&hbEdges, &visitor, const_cast<const bbdd *>(expr));
+	return slice_by_exprs(scope, expr, hbEdges);
 }
 
 static crashEnforcementData
@@ -528,7 +577,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		exit(1);
 	}
 
-	sliced_expr sliced_by_hb(slice_by_hb(bbdd::to_irexpr(requirement)));
+	sliced_expr sliced_by_hb(slice_by_hb(&summary->scopes->bools, requirement));
 	printf("Sliced requirement:\n");
 	sliced_by_hb.prettyPrint(stdout);
 
