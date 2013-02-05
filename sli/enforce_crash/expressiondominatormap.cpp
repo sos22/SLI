@@ -134,27 +134,40 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	}
 }
 
-happensAfterMapT::happensAfterMapT(const SummaryId &summary, DNF_Conjunction &c, ThreadAbstracter &abs, CrashCfg &cfg, const MaiMap &mai)
+happensAfterMapT::happensAfterMapT(const SummaryId &summary,
+				   const std::set<const IRExprHappensBefore *> &trueHb,
+				   const std::set<const IRExprHappensBefore *> &falseHb,
+				   ThreadAbstracter &abs,
+				   CrashCfg &cfg,
+				   const MaiMap &mai)
 {
-	for (unsigned x = 0; x < c.size(); x++) {
-		if (c[x].second->tag == Iex_HappensBefore) {
-			IRExprHappensBefore *e = (IRExprHappensBefore *)c[x].second;
-			for (auto before_it = abs.begin(summary, mai, e->before, cfg); !before_it.finished(); before_it.advance()) {
-				Instruction<ThreadCfgLabel> *const before = before_it.get();
-				if (!before)
+	for (auto it = trueHb.begin(); it != trueHb.end(); it++) {
+		const IRExprHappensBefore *e = *it;
+		for (auto before_it = abs.begin(summary, mai, e->before, cfg); !before_it.finished(); before_it.advance()) {
+			Instruction<ThreadCfgLabel> *const before = before_it.get();
+			if (!before)
+				continue;
+			for (auto after_it = abs.begin(summary, mai, e->after, cfg); !after_it.finished(); after_it.advance()) {
+				auto after = after_it.get();
+				if (!after)
 					continue;
-				for (auto after_it = abs.begin(summary, mai, e->after, cfg); !after_it.finished(); after_it.advance()) {
-					auto after = after_it.get();
-					if (!after)
-						continue;
-					if (c[x].first) {
-						happensAfter[after].insert(before);
-						happensBefore[before].insert(after);
-					} else {
-						happensAfter[before].insert(after);
-						happensBefore[after].insert(before);
-					}
-				}
+				happensAfter[before].insert(after);
+				happensBefore[after].insert(before);
+			}
+		}
+	}
+	for (auto it = falseHb.begin(); it != falseHb.end(); it++) {
+		const IRExprHappensBefore *e = *it;
+		for (auto before_it = abs.begin(summary, mai, e->before, cfg); !before_it.finished(); before_it.advance()) {
+			Instruction<ThreadCfgLabel> *const before = before_it.get();
+			if (!before)
+				continue;
+			for (auto after_it = abs.begin(summary, mai, e->after, cfg); !after_it.finished(); after_it.advance()) {
+				auto after = after_it.get();
+				if (!after)
+					continue;
+				happensAfter[after].insert(before);
+				happensBefore[before].insert(after);
 			}
 		}
 	}

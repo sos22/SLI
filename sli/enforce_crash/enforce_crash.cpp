@@ -208,7 +208,9 @@ buildCED(const SummaryId &summaryId,
 	} else {
 		conj.push_back(NF_Atom(false, leftOver));
 	}
-	*out = crashEnforcementData(summaryId, *summary->mai, neededExpressions, abs, rootsCfg, conj, next_hb_id, summary, as);
+	*out = crashEnforcementData(summaryId, *summary->mai, neededExpressions, abs,
+				    rootsCfg, c.trueSlice, c.falseSlice, conj, next_hb_id,
+				    summary, as);
 	optimiseHBContent(*out);
 	return true;
 }

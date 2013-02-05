@@ -45,7 +45,12 @@ public:
 	instrToInstrSetMap happensBefore;
 	/* happensBefore[i] -> the set of all instructions ordered after i */
 	instrToInstrSetMap happensAfter;
-	happensAfterMapT(const SummaryId &summary, DNF_Conjunction &c, ThreadAbstracter &abs, CrashCfg &cfg, const MaiMap &mai);
+	happensAfterMapT(const SummaryId &summary,
+			 const std::set<const IRExprHappensBefore *> &trueHb,
+			 const std::set<const IRExprHappensBefore *> &falseHb,
+			 ThreadAbstracter &abs,
+			 CrashCfg &cfg,
+			 const MaiMap &mai);
 	happensAfterMapT() {}
 	void print(FILE *f) {
 		fprintf(f, "before:\n");
@@ -647,13 +652,15 @@ public:
 			     std::set<IRExpr *> &neededExpressions,
 			     ThreadAbstracter &abs,
 			     std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &_roots,
+			     const std::set<const IRExprHappensBefore *> &trueHb,
+			     const std::set<const IRExprHappensBefore *> &falseHb,
 			     DNF_Conjunction &conj,
 			     int &next_hb_id,
 			     CrashSummary *summary,
 			     AddressSpace *as)
 		: roots(_roots, abs),
 		  crashCfg(roots, summaryId, summary, as, false, abs),
-		  happensBefore(summaryId, conj, abs, crashCfg, mai),
+		  happensBefore(summaryId, trueHb, falseHb, abs, crashCfg, mai),
 		  predecessorMap(crashCfg),
 		  idom(crashCfg, predecessorMap, happensBefore),
 		  exprStashPoints(summaryId, neededExpressions, abs, summary->loadMachine, summary->storeMachine, roots, mai),
