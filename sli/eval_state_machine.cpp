@@ -575,7 +575,7 @@ private:
 
 	trool evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *what, bbdd **simplified, const IRExprOptimisations &opt);
 	void evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode, OracleInterface *oracle,
-			    smrbdd *&result, StateMachineRes unreachedIs, std::vector<EvalContext> &pendingStates,
+			    std::vector<EvalContext> &pendingStates,
 			    StateMachineSideEffect *smse, bool havePhis, const IRExprOptimisations &opt);
 
 	EvalContext(const EvalContext &o, StateMachineState *sms)
@@ -603,17 +603,11 @@ private:
 	{
 		setState(sms);
 	}
-	enum evalStateMachineSideEffectRes {
-		esme_normal,
-		esme_escape,
-		esme_ignore_path
-	};
-	evalStateMachineSideEffectRes evalStateMachineSideEffect(
+	void evalStateMachineSideEffect(
 		SMScopes *scopes,
 		bbdd *assumption,
 		const MaiMap &decode,
 		StateMachineSideEffect *smse,
-		NdChooser &chooser,
 		OracleInterface *oracle,
 		bool havePhis,
 		const IRExprOptimisations &opt);
@@ -738,12 +732,11 @@ EvalContext::assertFalse(bbdd::scope *scope, bbdd *what, const IRExprOptimisatio
 	}
 }
 
-EvalContext::evalStateMachineSideEffectRes
+void
 EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					bbdd *assumption,
 					const MaiMap &decode,
 					StateMachineSideEffect *smse,
-					NdChooser &chooser,
 					OracleInterface *oracle,
 					bool havePhis,
 					const IRExprOptimisations &opt)
@@ -761,11 +754,11 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				    Iop_BadPtr,
 				    addr);
 		if (TIMEOUT)
-			return esme_escape;
+			return;
 		assert(a);
 		bbdd *isBad = exprbdd::to_bbdd(&scopes->bools, a);
-		if (!isBad) {
-			return esme_escape;
+		if (TIMEOUT) {
+			return;
 		}
 		assertFalse(&scopes->bools, isBad, opt);
 	}
@@ -813,8 +806,8 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					Iop_CmpEQ64,
 					addr,
 					store->addr);
-			if (!addressesEq) {
-				return esme_escape;
+			if (TIMEOUT) {
+				return;
 			}
 			/* The order of the next few operations
 			   (convert to BBDD, apply assumption, apply
@@ -824,24 +817,24 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				&scopes->exprs,
 				addressesEq,
 				assumption);
-			if (!addressesEq) {
-				return esme_escape;
+			if (TIMEOUT) {
+				return;
 			}
 			bbdd *addressEqBool =
 				exprbdd::to_bbdd(&scopes->bools, addressesEq);
-			if (!addressEqBool) {
-				return esme_escape;
+			if (TIMEOUT) {
+				return;
 			}
 			addressEqBool = bbdd::assume(
 				&scopes->bools,
 				addressEqBool,
 				justPathConstraint);
-			if (!addressEqBool) {
-				return esme_escape;
+			if (TIMEOUT) {
+				return;
 			}
 			addressEqBool = simplifyBDD(&scopes->bools, addressEqBool, opt);
-			if (!addressEqBool) {
-				return esme_escape;
+			if (TIMEOUT) {
+				return;
 			}
 			/* End of block where ordering doesn't matter */
 
@@ -851,16 +844,16 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					&scopes->bools,
 					smsel->type,
 					store->data);
-			if (!val) {
-				return esme_escape;
+			if (TIMEOUT) {
+				return;
 			}
 			acc = exprbdd::ifelse(
 				&scopes->exprs,
 				addressEqBool,
 				val,
 				acc);
-			if (!acc) {
-				return esme_escape;
+			if (TIMEOUT) {
+				return;
 			}
 		}
 		state.set_register(scopes, smsel->target, acc, &justPathConstraint, havePhis, opt);
@@ -946,7 +939,6 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		break;
 #endif
 	}
-	return esme_normal;
 }
 
 EvalContext::trool
@@ -989,38 +981,26 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *wha
 }
 
 void
-EvalContext::evalSideEffect(SMScopes *scopes, bbdd *assumption, const MaiMap &decode,
-			    OracleInterface *oracle, smrbdd *&result, StateMachineRes unreached,
-			    std::vector<EvalContext> &pendingStates, StateMachineSideEffect *smse,
+EvalContext::evalSideEffect(SMScopes *scopes,
+			    bbdd *assumption,
+			    const MaiMap &decode,
+			    OracleInterface *oracle,
+			    std::vector<EvalContext> &pendingStates,
+			    StateMachineSideEffect *smse,
 			    bool havePhis, const IRExprOptimisations &opt)
 {
-	NdChooser chooser;
-
-	do {
-		EvalContext newContext(*this);
-		evalStateMachineSideEffectRes res =
-			newContext.evalStateMachineSideEffect(scopes,
-							      assumption,
-							      decode,
-							      smse,
-							      chooser,
-							      oracle,
-							      havePhis,
-							      opt);
-		switch (res) {
-		case esme_normal:
-			pendingStates.push_back(newContext);
-			break;
-		case esme_ignore_path:
-			break;
-		case esme_escape:
-			result = smrbdd::ifelse(&scopes->smrs,
-						newContext.justPathConstraint,
-						scopes->smrs.cnst(unreached),
-						result);
-			break;
-		}
-	} while (chooser.advance());
+	EvalContext newContext(*this);
+	newContext.evalStateMachineSideEffect(scopes,
+					      assumption,
+					      decode,
+					      smse,
+					      oracle,
+					      havePhis,
+					      opt);
+	if (TIMEOUT) {
+		return;
+	}
+	pendingStates.push_back(newContext);
 }
 
 /* You might that we could stash things like @oracle, @opt, and @sm in
@@ -1064,9 +1044,9 @@ EvalContext::advance(SMScopes *scopes,
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)_currentState;
 		setState(sme->target);
 		if (sme->sideEffect) {
-			evalSideEffect(scopes, assumption, decode, oracle, result,
-				       unreachedIs, pendingStates,
-				       sme->sideEffect, havePhis, opt);
+			evalSideEffect(scopes, assumption, decode, oracle,
+				       pendingStates, sme->sideEffect,
+				       havePhis, opt);
 		} else {
 			pendingStates.push_back(*this);
 		}
