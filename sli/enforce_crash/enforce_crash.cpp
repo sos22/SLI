@@ -339,313 +339,82 @@ top:
 	return e;
 }
 
-/* We're allowed to make errors where the approximation returns 1 and
-   the true value is 0 */
-#define ERROR_POSITIVE 1
-/* Allow errors where the approximation returns 0 and the true value
-   is 1. */
-#define ERROR_NEGATIVE 2
-
 /* We can't get at the values of free variables from the run-time
    enforcer, so we might as well remove them now.  Also remove a
    couple of other un-checkable expressions, like floating point
    operations. */
-/* Return value is either NULL, if we can't compute any approximation
-   to @what with the desired error types, or an expression which
-   approximates @what.  In the latter case, *@errors_produced will be
-   set to a mask of the types of errors introduced. */
-static IRExpr *
-removeFreeVariables(IRExpr *what, int errors_allowed, int *errors_produced)
+/* If we have to introduce an error, we always prefer to return 1 when
+   we should return 0 (rather than returning 0 when we should return
+   1) */
+static bool
+irexprUsesFreeVariable(const IRExpr *expr)
 {
-	if (errors_allowed == (ERROR_POSITIVE | ERROR_NEGATIVE) ||
-	    what->type() == Ity_I128)
-		return NULL;
-	if (errors_allowed != 0) {
-		assert(errors_produced != NULL);
-		*errors_produced = 0;
-	}
-	switch (what->tag) {
-	case Iex_Get: {
-		auto *i = (IRExprGet *)what;
-		/* Interpreters can only get at the ``normal'' integer
-		   registers, plus FS_ZERO, so we need to treat the
-		   other ones as being free. */
-		if (i->reg.isReg() &&
-		    (unsigned)i->reg.asReg() > offsetof(VexGuestAMD64State, guest_R15) &&
-		    (unsigned)i->reg.asReg() != offsetof(VexGuestAMD64State, guest_FS_ZERO))
-			return NULL;
-		return what;
-	}
-	case Iex_GetI: {
-		auto *i = (IRExprGetI *)what;
-		IRExpr *ix = removeFreeVariables(i->ix, 0, NULL);
-		if (!ix)
-			return NULL;
-		if (ix == i->ix)
-			return i;
-		return IRExpr_GetI(i->descr, ix,  i->bias, i->tid);
-	}
-	case Iex_Qop: {
-		abort();
-		auto *i = (IRExprQop *)what;
-		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
-		if (!arg1)
-			return NULL;
-		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
-		if (!arg2)
-			return NULL;
-		auto arg3 = removeFreeVariables(i->arg3, 0, NULL);
-		if (!arg3)
-			return NULL;
-		auto arg4 = removeFreeVariables(i->arg4, 0, NULL);
-		if (!arg4)
-			return NULL;
-		if (arg1 == i->arg1 && arg2 == i->arg2 && arg3 == i->arg3 && arg4 == i->arg4)
-			return i;
-		return IRExpr_Qop(
-			i->op, arg1, arg2, arg3, arg4);
-	}
-	case Iex_Triop: {
-		abort();
-		auto *i = (IRExprTriop *)what;
-		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
-		if (!arg1)
-			return NULL;
-		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
-		if (!arg2)
-			return NULL;
-		auto arg3 = removeFreeVariables(i->arg3, 0, NULL);
-		if (!arg3)
-			return NULL;
-		if (arg1 == i->arg1 && arg2 == i->arg2 && arg3 == i->arg3)
-			return i;
-		return IRExpr_Triop(
-			i->op, arg1, arg2, arg3);
-	}
-	case Iex_Binop: {
-		auto i = (IRExprBinop *)what;
-		if (i->op == Iop_CmpF32 || i->op == Iop_CmpF64 ||
-		    i->op == Iop_64HLtoV128 || i->op == Iop_64HLto128)
-			return NULL;
-		auto arg1 = removeFreeVariables(i->arg1, 0, NULL);
-		auto arg2 = removeFreeVariables(i->arg2, 0, NULL);
-		if (arg1 == i->arg1 && arg2 == i->arg2)
-			return what;
-		if (arg1 && arg2)
-			return IRExpr_Binop(i->op, arg1, arg2);
-		return NULL;
-	}
-	case Iex_Unop: {
-		auto i = (IRExprUnop *)what;
-		if (i->op == Iop_V128to64 || i->op == Iop_ReinterpI32asF32)
-			return NULL;
-		int errors2;
-		int errors3;
-		switch (errors_allowed) {
-		case 0:
-			errors2 = 0;
-			break;
-		case ERROR_POSITIVE:
-			errors2 = ERROR_NEGATIVE;
-			break;
-		case ERROR_NEGATIVE:
-			errors2 = ERROR_POSITIVE;
-			break;
-		default:
-			abort();
+	struct foo {
+		static visit_result FreeVariable(void *, const IRExprFreeVariable *) {
+			return visit_abort;
 		}
-		auto arg = removeFreeVariables(i->arg, errors2, &errors3);
-		if (!arg)
-			return NULL;
-		if (arg == i->arg)
-			return i;
-		if (errors_produced) {
-			*errors_produced = 0;
-			if (errors3 & ERROR_NEGATIVE)
-				*errors_produced |= ERROR_POSITIVE;
-			if (errors3 & ERROR_POSITIVE)
-				*errors_produced |= ERROR_NEGATIVE;
-		}
-		return IRExpr_Unop(i->op, arg);
-	}
-	case Iex_Load: {
-		auto i = (IRExprLoad *)what;
-		auto addr = removeFreeVariables(i->addr, 0, NULL);
-		if (!addr)
-			return NULL;
-		if (addr == i->addr)
-			return what;
-		return IRExpr_Load(i->ty, addr);
-	}
-	case Iex_Const:
-		return what;
-	case Iex_CCall:
-		/* The interpreter can't evaluate these, so might as
-		   well get rid of them as well. */
-		return NULL;
-	case Iex_Mux0X: {
-		/* mux0x is unevaluatable if any of the arguments are
-		   unevaluatable.  That's not ideal; it'd be better to
-		   try to preserve whichever arguments are eval-able.
-		   The problem is that we don't have any ``preferred''
-		   value at this stage, so we can't put in a sensible
-		   default for the other one. */
-		auto i = (IRExprMux0X *)what;
-		auto cond = removeFreeVariables(i->cond, 0, NULL);
-		int err0, errX;
-		auto expr0 = removeFreeVariables(i->expr0, errors_allowed, &err0);
-		auto exprX = removeFreeVariables(i->exprX, errors_allowed, &errX);
-		if (cond == i->cond && expr0 == i->expr0 && exprX == i->exprX)
-			return i;
-		if (errors_allowed == 0 && (expr0 == NULL || exprX == NULL || cond == NULL))
-			return NULL;
-		if (!expr0 && !exprX)
-			return NULL;
-		*errors_produced = err0 | errX;
-		if (errors_allowed && (!expr0 || !exprX) && expr0->type() == Ity_I1) {
-			IRExpr *def;
-			if (errors_allowed & ERROR_POSITIVE) {
-				def = IRExpr_Const_U1(true);
-				*errors_produced |= ERROR_POSITIVE;
+		static visit_result Binop(void *, const IRExprBinop *ieb) {
+			if (ieb->op == Iop_CmpF32 || ieb->op == Iop_CmpF64 ||
+			    ieb->op == Iop_64HLtoV128 || ieb->op == Iop_64HLto128) {
+				return visit_abort;
 			} else {
-				def = IRExpr_Const_U1(false);
-				*errors_produced |= ERROR_NEGATIVE;
-			}
-			if (!expr0)
-				expr0 = def;
-			if (!exprX)
-				exprX = def;
-			
-		}
-		if (!cond && expr0->type() == Ity_I1) {
-			/* mux0x(cond, expr0, exprx) = (cond && exprX) || (!cond && expr0).
-			   If cond is unknown then that can be approximated to
-			   either exprX && expr0 or exprX || expr0, depending on
-			   the type of error allowed. */
-			if (errors_allowed & ERROR_NEGATIVE) {
-				*errors_produced |= ERROR_NEGATIVE;
-				return IRExpr_Binop(
-					Iop_And1,
-					expr0,
-					exprX);
-			} else {
-				*errors_produced |= ERROR_POSITIVE;
-				return IRExpr_Binop(
-					Iop_Or1,
-					expr0,
-					exprX);
+				return visit_continue;
 			}
 		}
-		
-		if (!cond || !expr0 || !exprX) {
-			/* Out of ideas */
-			return NULL;
-		}
-
-		return IRExpr_Mux0X(cond, expr0, exprX);
-	}
-	case Iex_Associative: {
-		auto i = (IRExprAssociative *)what;
-		int idx;
-		IRExpr *a = (IRExpr *)0xf001; /* shut compiler up */
-		int err_a;
-		assert(i->nr_arguments != 0);
-		for (idx = 0; idx < i->nr_arguments; idx++) {
-			a = removeFreeVariables(i->contents[idx], errors_allowed, &err_a);
-			if (a != i->contents[idx])
-				break;
-		}
-		if (idx == i->nr_arguments)
-			return i;
-		IRExpr **args = alloc_irexpr_array(i->nr_arguments);
-		memcpy(args, i->contents, idx * sizeof(IRExpr *));
-		int idx2 = idx;
-		goto l1;
-
-		while (idx < i->nr_arguments) {
-			a = removeFreeVariables(i->contents[idx], errors_allowed, &err_a);
-		l1:
-			if (!a || err_a) {
-				switch (i->op) {
-				case Iop_Add8:
-				case Iop_Add16:
-				case Iop_Add32:
-				case Iop_Add64:
-				case Iop_Mul8:
-				case Iop_Mul16:
-				case Iop_Mul32:
-				case Iop_Mul64:
-					/* k + x, where x is
-					 * completely unknown, is
-					 * itself unknown. */
-					return NULL;
-				case Iop_And1:
-				case Iop_And8:
-				case Iop_And16:
-				case Iop_And32:
-				case Iop_And64:
-					if (!a) {
-						/* k & x, where x is
-						 * completely unknown.
-						 * Approximate it by
-						 * just k with a
-						 * positive error. */
-						if (errors_allowed & ERROR_POSITIVE)
-							*errors_produced |= ERROR_POSITIVE;
-						else
-							return NULL;
-					} else {
-						assert(err_a == errors_allowed);
-						*errors_produced |= err_a;
-						args[idx2] = a;
-						idx2++;
-					}
-					break;
-				case Iop_Or1:
-				case Iop_Or8:
-				case Iop_Or16:
-				case Iop_Or32:
-				case Iop_Or64:
-					if (!a) {
-						/* k | x, where x is
-						 * completely unknown.
-						 * Approximate it by
-						 * just k with a
-						 * negative error. */
-						if (errors_allowed & ERROR_NEGATIVE)
-							*errors_produced |= ERROR_NEGATIVE;
-						else
-							return NULL;
-					} else {
-						assert(err_a == errors_allowed);
-						*errors_produced |= err_a;
-						args[idx2] = a;
-						idx2++;
-					}
-					break;
-				default:
-					abort();
-				}
+		static visit_result Unop(void *, const IRExprUnop *i) {
+			if (i->op == Iop_V128to64 || i->op == Iop_ReinterpI32asF32) {
+				return visit_abort;
 			} else {
-				args[idx2] = a;
-				idx2++;
+				return visit_continue;
 			}
-			idx++;
 		}
-		if (idx2 == 0)
-			return NULL;
-		return IRExpr_Associative_Claim(i->op, i->nr_arguments, args);
+	};
+	static irexpr_visitor<void> visitor;
+	visitor.FreeVariable = foo::FreeVariable;
+	visitor.Binop = foo::Binop;
+	visitor.Unop = foo::Unop;
+	return visit_irexpr((void *)NULL, &visitor, expr) == visit_abort;
+}
+static bbdd *
+removeFreeVariables(bbdd::scope *scope, bbdd *what, std::map<bbdd *, bbdd *> &memo)
+{
+	if (what->isLeaf()) {
+		return what;
 	}
-	case Iex_HappensBefore:
-		return what;
-	case Iex_FreeVariable:
-		return NULL;
-	case Iex_EntryPoint:
-		return what;
-	case Iex_ControlFlow:
-		return what;
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(what, (bbdd *)0xf001));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		/* it->second is already correct */
+	} else if (what->isLeaf()) {
+		it->second = what;
+	} else {
+		auto t = removeFreeVariables(scope, what->internal().trueBranch, memo);
+		auto f = removeFreeVariables(scope, what->internal().falseBranch, memo);
+		if (t == f) {
+			it->second = t;
+		} else if (irexprUsesFreeVariable(what->internal().condition)) {
+			/* We can't tell whether we want to go down
+			   the t branch or the f one.  We're allowed
+			   to make positive approximations
+			   (i.e. return 1 when we should return 0) so
+			   just use t || f. */
+			it->second = bbdd::Or(
+				scope,
+				t,
+				f);
+		} else if (t == what->internal().trueBranch &&
+			   f == what->internal().falseBranch) {
+			it->second = what;
+		} else {
+			it->second = scope->makeInternal(
+				what->internal().condition,
+				what->internal().rank,
+				t,
+				f);
+		}
 	}
-	abort();
+	return it->second;
 }
 
 class sliced_expr : public std::set<expr_slice> {
@@ -743,23 +512,25 @@ enforceCrashForMachine(const SummaryId &summaryId,
 
 	VexPtr<OracleInterface> oracleI(oracle);
 
-	IRExpr *requirement = bbdd::to_irexpr(
-		bbdd::assume(
-			&summary->scopes->bools,
-			summary->crashCondition,
-			summary->inferredAssumption));
-	int ignore;
-	requirement = removeFreeVariables(requirement, ERROR_POSITIVE, &ignore);
-	requirement = simplify_via_anf(simplifyIRExpr(requirement, AllowableOptimisations::defaultOptimisations));
+	bbdd *requirement = bbdd::assume(
+		&summary->scopes->bools,
+		summary->crashCondition,
+		summary->inferredAssumption);
+	{
+		std::map<bbdd *, bbdd *> memo;
+		requirement = removeFreeVariables(&summary->scopes->bools, requirement, memo);
+	}
+	IRExpr *requirement_e = bbdd::to_irexpr(requirement);
+	requirement_e = simplify_via_anf(simplifyIRExpr(requirement_e, AllowableOptimisations::defaultOptimisations));
 	fprintf(_logfile, "After free variable removal:\n");
-	ppIRExpr(requirement, _logfile);
+	ppIRExpr(requirement_e, _logfile);
 	fprintf(_logfile, "\n");
 	if (TIMEOUT) {
 		fprintf(_logfile, "Killed by a timeout during simplification\n");
 		exit(1);
 	}
 
-	sliced_expr sliced_by_hb(slice_by_hb(requirement));
+	sliced_expr sliced_by_hb(slice_by_hb(requirement_e));
 	printf("Sliced requirement:\n");
 	sliced_by_hb.prettyPrint(stdout);
 
