@@ -1180,3 +1180,49 @@ _bdd<leafT, subtreeT>::restructure_zip(scopeT *scope, bscopeT *bscope, const zip
 	std::map<zipT, subtreeT *> memo;
 	return restructure_zip(scope, bscope, root, memo);
 }
+
+template <typename leafT, typename subtreeT> void
+_bdd<leafT, subtreeT>::dotPrintNodes(FILE *f, std::set<const _bdd *> &memo) const
+{
+	if (!memo.insert(this).second) {
+		return;
+	}
+	fprintf(f, "\tnode%p [label=\"", this);
+	if (isLeaf()) {
+		_prettyPrint(f, leaf());
+		fprintf(f, "\", shape=oval];\n");
+	} else {
+		ppIRExpr(internal().condition, f);
+		fprintf(f, "\", shape=box];\n");
+		internal().trueBranch->dotPrintNodes(f, memo);
+		internal().falseBranch->dotPrintNodes(f, memo);
+	}
+}
+
+template <typename leafT, typename subtreeT> void
+_bdd<leafT, subtreeT>::dotPrintEdges(FILE *f, std::set<const _bdd *> &memo) const
+{
+	if (isLeaf()) {
+		return;
+	}
+	if (!memo.insert(this).second) {
+		return;
+	}
+	fprintf(f, "\tnode%p -> node%p;\n", this, internal().trueBranch);
+	fprintf(f, "\tnode%p -> node%p [style=dotted];\n", this, internal().falseBranch);
+	internal().trueBranch->dotPrintEdges(f, memo);
+	internal().falseBranch->dotPrintEdges(f, memo);
+}
+
+/* Print the BDD in DOT format, because that makes it a bit easier to
+ * read its structure. */
+template <typename leafT, typename subtreeT> void
+_bdd<leafT, subtreeT>::dotPrint(FILE *f) const
+{
+	fprintf(f, "digraph {\n");
+	std::set<const _bdd *> memo;
+	dotPrintNodes(f, memo);
+	memo.clear();
+	dotPrintEdges(f, memo);
+	fprintf(f, "}\n");
+}

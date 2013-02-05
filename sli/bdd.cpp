@@ -1603,3 +1603,7 @@ template bool _bdd<IRExpr *, exprbdd>::_parse<exprbdd_scope, exprbdd::parseLeaf>
 template exprbdd *_bdd<IRExpr *, exprbdd>::assume(exprbdd_scope *, exprbdd *, bbdd*);
 template std::map<IRExpr *, bbdd *> _bdd<IRExpr *, exprbdd>::to_selectors(const_bdd_scope<bbdd> *, exprbdd *);
 template exprbdd *_bdd<IRExpr *, exprbdd>::from_enabling(exprbdd_scope *, const enablingTableT &, exprbdd *);
+
+template void _bdd<IRExpr *, exprbdd>::dotPrint(FILE *f) const;
+template void _bdd<bool, bbdd>::dotPrint(FILE *f) const;
+template void _bdd<StateMachineRes, smrbdd>::dotPrint(FILE *f) const;

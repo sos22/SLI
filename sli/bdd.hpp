@@ -188,6 +188,8 @@ private:
 		bscopeT *bscope,
 		const zipT &root,
 		std::map<zipT, _subtreeT *> &memo);
+	void dotPrintNodes(FILE *f, std::set<const _bdd *> &) const;
+	void dotPrintEdges(FILE *f, std::set<const _bdd *> &) const;
 public:
 	internalT &unsafe_internal() {
 		assert(!isLeaf());
@@ -325,6 +327,8 @@ public:
 			(unsigned long)internal().trueBranch * 57352199 +
 			(unsigned long)internal().falseBranch * 57356099;
 	}
+
+	void dotPrint(FILE *f) const;
 
 	void visit(HeapVisitor &hv) {
 		/* Bit of a hack: content is const except for things
