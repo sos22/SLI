@@ -1,7 +1,6 @@
 #include "sli.h"
 #include "state_machine.hpp"
 #include "oracle.hpp"
-#include "nd_chooser.h"
 #include "eval_state_machine.hpp"
 #include "offline_analysis.hpp"
 #include "inferred_information.hpp"
@@ -608,9 +607,6 @@ private:
 		OracleInterface *oracle,
 		bool havePhis,
 		const IRExprOptimisations &opt);
-	bool expressionIsTrue(SMScopes *scopes, bbdd *assumption, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
-	bool expressionIsTrue(SMScopes *scopes, bbdd *assumption, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt);
-	bool evalExpressionsEqual(SMScopes *scopes, bbdd *assumption, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt);
 	void assertFalse(bbdd::scope *scope, bbdd *what, const IRExprOptimisations &opt);
 public:
 	void advance(SMScopes *scopes,
@@ -655,61 +651,6 @@ public:
 	}
 
 };
-
-bool
-EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *assumption, bbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
-{
-	if (TIMEOUT)
-		return true;
-	bbdd *simplified;
-	switch (evalBooleanExpression(scopes, assumption, exp, &simplified, opt)) {
-	case tr_true:
-		return true;
-	case tr_false:
-		return false;
-	case tr_unknown:
-		/* Can't prove it one way or another.  Use the
-		   non-deterministic chooser to guess. */
-		if (chooser.nd_choice(2) == 0) {
-			justPathConstraint =
-				bbdd::And(
-					&scopes->bools,
-					simplified,
-					justPathConstraint);
-			return true;
-		} else {
-			justPathConstraint =
-				bbdd::And(
-					&scopes->bools,
-					bbdd::invert(&scopes->bools, simplified),
-					justPathConstraint);
-			return false;
-		}
-	}
-	abort();
-}
-
-bool
-EvalContext::expressionIsTrue(SMScopes *scopes, bbdd *assumption, exprbdd *exp, NdChooser &chooser, const IRExprOptimisations &opt)
-{
-	return expressionIsTrue(scopes, assumption, exprbdd::to_bbdd(&scopes->bools, exp), chooser, opt);
-}
-
-bool
-EvalContext::evalExpressionsEqual(SMScopes *scopes, bbdd *assumption, exprbdd *exp1, exprbdd *exp2, NdChooser &chooser, const IRExprOptimisations &opt)
-{
-	return expressionIsTrue(
-		scopes,
-		assumption,
-		exprbdd::binop(
-			&scopes->exprs,
-			&scopes->bools,
-			Iop_CmpEQ64,
-			exp1,
-			exp2),
-		chooser,
-		opt);
-}
 
 void
 EvalContext::assertFalse(bbdd::scope *scope, bbdd *what, const IRExprOptimisations &opt)
