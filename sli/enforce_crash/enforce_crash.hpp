@@ -541,42 +541,13 @@ public:
 	happensBeforeMapT() {}
 	happensBeforeMapT(const SummaryId &summary,
 			  const MaiMap &mai,
-			  DNF_Conjunction &c,
+			  const std::set<const IRExprHappensBefore *> &trueHb,
+			  const std::set<const IRExprHappensBefore *> &falseHb,
 			  instructionDominatorMapT &idom,
 			  CrashCfg &cfg,
 			  expressionStashMapT &exprStashPoints,
 			  ThreadAbstracter &abs,
-			  int &next_hb_id)
-	{
-		for (unsigned x = 0; x < c.size(); x++) {
-			IRExpr *e = c[x].second;
-			bool invert = c[x].first;
-			if (e->tag == Iex_HappensBefore) {
-				IRExprHappensBefore *hb = (IRExprHappensBefore *)e;
-				const MemoryAccessIdentifier &beforeMai(invert ? hb->after : hb->before);
-				const MemoryAccessIdentifier &afterMai(invert ? hb->before : hb->after);
-				for (auto before_it = abs.begin(summary, mai, beforeMai, cfg); !before_it.finished(); before_it.advance()) {
-					Instruction<ThreadCfgLabel> *beforeInstr = before_it.get();
-					if (!beforeInstr)
-						continue;
-					for (auto after_it = abs.begin(summary, mai, afterMai, cfg); !after_it.finished(); after_it.advance()) {
-						Instruction<ThreadCfgLabel> *afterInstr = after_it.get();
-						if (!afterInstr)
-							continue;
-						happensBeforeEdge *hbe =
-							new happensBeforeEdge(
-								beforeInstr,
-								afterInstr,
-								idom,
-								exprStashPoints,
-								next_hb_id++);
-						(*this)[hbe->before->rip].insert(hbe);
-						(*this)[hbe->after->rip].insert(hbe);
-					}
-				}
-			}
-		}
-	}
+			  int &next_hb_id);
 	void operator|=(const happensBeforeMapT &hbm) {
 		for (auto it = hbm.begin(); it != hbm.end(); it++) {
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
@@ -665,7 +636,7 @@ public:
 		  idom(crashCfg, predecessorMap, happensBefore),
 		  exprStashPoints(summaryId, neededExpressions, abs, summary->loadMachine, summary->storeMachine, roots, mai),
 		  exprDominatorMap(conj, exprStashPoints, idom, predecessorMap, happensBefore),
-		  happensBeforePoints(summaryId, mai, conj, idom, crashCfg, exprStashPoints, abs, next_hb_id),
+		  happensBeforePoints(summaryId, mai, trueHb, falseHb, idom, crashCfg, exprStashPoints, abs, next_hb_id),
 		  expressionEvalPoints(exprDominatorMap)
 	{}
 

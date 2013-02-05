@@ -188,3 +188,63 @@ expressionDominatorMapT::prettyPrint(FILE *f) const
 		fprintf(f, "}\n");
 	}
 }
+
+happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
+			  const MaiMap &mai,
+			  const std::set<const IRExprHappensBefore *> &trueHb,
+			  const std::set<const IRExprHappensBefore *> &falseHb,
+			  instructionDominatorMapT &idom,
+			  CrashCfg &cfg,
+			  expressionStashMapT &exprStashPoints,
+			  ThreadAbstracter &abs,
+			  int &next_hb_id)
+{
+	for (auto it = trueHb.begin(); it != trueHb.end(); it++) {
+		auto hb = *it;
+		const MemoryAccessIdentifier &beforeMai(hb->before);
+		const MemoryAccessIdentifier &afterMai(hb->after);
+		for (auto before_it = abs.begin(summary, mai, beforeMai, cfg); !before_it.finished(); before_it.advance()) {
+			Instruction<ThreadCfgLabel> *beforeInstr = before_it.get();
+			if (!beforeInstr)
+				continue;
+			for (auto after_it = abs.begin(summary, mai, afterMai, cfg); !after_it.finished(); after_it.advance()) {
+				Instruction<ThreadCfgLabel> *afterInstr = after_it.get();
+				if (!afterInstr)
+					continue;
+				happensBeforeEdge *hbe =
+					new happensBeforeEdge(
+						beforeInstr,
+						afterInstr,
+						idom,
+						exprStashPoints,
+						next_hb_id++);
+				(*this)[hbe->before->rip].insert(hbe);
+				(*this)[hbe->after->rip].insert(hbe);
+			}
+		}
+	}
+	for (auto it = falseHb.begin(); it != falseHb.end(); it++) {
+		auto hb = *it;
+		const MemoryAccessIdentifier &beforeMai(hb->after);
+		const MemoryAccessIdentifier &afterMai(hb->before);
+		for (auto before_it = abs.begin(summary, mai, beforeMai, cfg); !before_it.finished(); before_it.advance()) {
+			Instruction<ThreadCfgLabel> *beforeInstr = before_it.get();
+			if (!beforeInstr)
+				continue;
+			for (auto after_it = abs.begin(summary, mai, afterMai, cfg); !after_it.finished(); after_it.advance()) {
+				Instruction<ThreadCfgLabel> *afterInstr = after_it.get();
+				if (!afterInstr)
+					continue;
+				happensBeforeEdge *hbe =
+					new happensBeforeEdge(
+						beforeInstr,
+						afterInstr,
+						idom,
+						exprStashPoints,
+						next_hb_id++);
+				(*this)[hbe->before->rip].insert(hbe);
+				(*this)[hbe->after->rip].insert(hbe);
+			}
+		}
+	}
+}
