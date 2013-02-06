@@ -9,6 +9,15 @@ FILE *fopenf(const char *mode, const char *fmt, ...) __attribute__((__format__ (
 
 char *readfile(int fd);
 
+template <typename k, typename v>
+class sane_map : public std::map<k, v> {
+public:
+	std::pair<typename std::map<k,v>::iterator, bool> insert(const k &a, const v &b)
+	{
+		return std::map<k,v>::insert(std::pair<k, v>(a, b));
+	}
+};
+
 class ThreadId {
 	unsigned tid;
 public:

@@ -994,14 +994,6 @@ availExpressionAnalysis(SMScopes *scopes,
 
 typedef std::map<threadAndRegister, exprbdd *> regDefT;
 
-template <typename k, typename v> class sane_map : public std::map<k, v> {
-public:
-	std::pair<typename std::map<k,v>::iterator, bool> insert(const k &a, const v &b)
-	{
-		return std::map<k,v>::insert(std::pair<k, v>(a, b));
-	}
-};
-
 struct ssa_avail_state {
 	SMScopes *scopes;
 	regDefT defs;
