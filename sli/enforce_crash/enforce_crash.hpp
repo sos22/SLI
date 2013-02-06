@@ -66,7 +66,7 @@ public:
 	instructionDominatorMapT() {}
 };
 
-class expressionStashMapT : public std::map<ThreadCfgLabel, std::set<IRExpr *> >,
+class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<IRExpr *> >,
 			    private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
