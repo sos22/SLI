@@ -12,6 +12,62 @@
 #include "inferred_information.hpp"
 #include "crashcfg.hpp"
 
+template <typename t> class sane_vector {
+	unsigned nr_elems;
+	unsigned nr_elems_allocated;
+	void *content;
+public:
+	sane_vector();
+	sane_vector(const sane_vector &o);
+	sane_vector(sane_vector &&o);
+	~sane_vector();
+	void operator =(const sane_vector &o);
+	void operator =(const sane_vector &&o);
+
+	class iterator {
+		friend class sane_vector;
+		sane_vector *owner;
+		unsigned idx;
+		iterator(sane_vector *_owner);
+	public:
+		const t &get() const;
+
+		void set(const t &);
+		/* Erase the current element from the vector.  The
+		   iterator remains valid and now points at the next
+		   thing in the vector (or it'll be finished). */
+		void erase();
+
+		bool finished() const;
+		bool started() const; /* True if advance() has ever been called */
+		void advance();
+	};
+	iterator begin();
+
+	class const_iterator {
+		friend class sane_vector;
+		const sane_vector *owner;
+		unsigned idx;
+		const_iterator(const sane_vector *_owner);
+	public:
+		const t &get() const;
+		bool finished() const;
+		bool started() const;
+		void advance();
+	};
+	const_iterator begin() const;
+
+	bool operator ==(const sane_vector &o) const;
+
+	void push_back(const t &what);
+	size_t size() const;
+
+	/* The vector itself doesn't need visiting, but the elements
+	   in it might.  If so, you need to arrange for this to get
+	   called at an appropriate point. */
+	void visit(HeapVisitor &hv) const;
+};
+
 void enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out);
 
 struct exprEvalPoint;
@@ -217,7 +273,7 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
 	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
 			  Instruction<ThreadCfgLabel> *_after,
-			  const std::vector<IRExpr *> &_content,
+			  const sane_vector<IRExpr *> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
 	{}
@@ -228,8 +284,8 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 					    msg_id,
 					    before->rip.name(),
 					    after->rip.name()));
-		for (auto it = content.begin(); it != content.end(); it++) {
-			fragments.push_back(nameIRExpr(*it));
+		for (auto it = content.begin(); !it.finished(); it.advance()) {
+			fragments.push_back(nameIRExpr(it.get()));
 			fragments.push_back(", ");
 		}
 		fragments.push_back("}");
@@ -245,7 +301,7 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 public:
 	Instruction<ThreadCfgLabel> *before;
 	Instruction<ThreadCfgLabel> *after;
-	std::vector<IRExpr *> content;
+	sane_vector<IRExpr *> content;
 	unsigned msg_id;
 
 	happensBeforeEdge *intern(internmentState &state) {
@@ -287,7 +343,7 @@ public:
 	}
 	static happensBeforeEdge *parse(CrashCfg &cfg, const char *str, const char **suffix);
 	void visit(HeapVisitor &hv) {
-		visit_container(content, hv);
+		content.visit(hv);
 	}
 	NAMED_CLASS
 };
@@ -350,8 +406,9 @@ public:
 			     it2 != s.end();
 			     it2++) {
 				happensBeforeEdge *hb = *it2;
-				for (unsigned x = 0; x < hb->content.size(); x++)
-					assert(count(hb->content[x]));
+				for (auto it = hb->content.begin(); !it.finished(); it.advance()) {
+					assert(count(it.get()));
+				}
 			}
 		}
 	}

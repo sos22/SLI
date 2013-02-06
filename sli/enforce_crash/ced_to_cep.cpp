@@ -656,8 +656,11 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
 					happensBeforeEdge *hb = *it2;
 					if (hb->after->rip == oldLabel) {
-						for (unsigned x = 0; x < hb->content.size(); x++)
-							rxed.insert(hb->content[x]);
+						for (auto it = hb->content.begin();
+						     !it.finished();
+						     it.advance()) {
+							rxed.insert(it.get());
+						}
 					}
 				}
 			}
@@ -744,10 +747,11 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		fprintf(f, "    .pair = &msg_template_%x_tx,\n", hb->msg_id);
 		fprintf(f, "    .payload_size = %zd,\n", hb->content.size());
 		fprintf(f, "    .payload = {");
-		for (unsigned x = 0; x < hb->content.size(); x++) {
-			if (x != 0)
+		for (auto it = hb->content.begin(); !it.finished(); it.advance()) {
+			if (it.started()) {
 				fprintf(f, ", ");
-			fprintf(f, "%d", slots(hb->content[x]).idx);
+			}
+			fprintf(f, "%d", slots(it.get()).idx);
 		}
 		fprintf(f, "}\n};\n");
 		fprintf(f, "static struct msg_template msg_template_%x_tx = {\n", hb->msg_id);
@@ -756,10 +760,11 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		fprintf(f, "    .pair = &msg_template_%x_rx,\n", hb->msg_id);
 		fprintf(f, "    .payload_size = %zd,\n", hb->content.size());
 		fprintf(f, "    .payload = {");
-		for (unsigned x = 0; x < hb->content.size(); x++) {
-			if (x != 0)
+		for (auto it = hb->content.begin(); !it.finished(); it.advance()) {
+			if (it.started()) {
 				fprintf(f, ", ");
-			fprintf(f, "%d", slots(hb->content[x]).idx);
+			}
+			fprintf(f, "%d", slots(it.get()).idx);
 		}
 		fprintf(f, "}\n};\n");
 	}

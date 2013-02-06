@@ -84,10 +84,11 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExpr *expr, crashEnforcement
 				happensBeforeEdge *hbe = *it2;
 				if (hbe->before->rip == instr->rip) {
 					for (auto it3 = hbe->content.begin();
-					     it3 != hbe->content.end();
-					     it3++) {
-						if (*it3 == expr)
+					     !it3.finished();
+					     it3.advance()) {
+						if (it3.get() == expr) {
 							return true;
+						}
 					}
 				}
 			}
@@ -121,22 +122,23 @@ optimiseHBContent(crashEnforcementData &ced)
 		progress = false;
 		for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
 			happensBeforeEdge *hbe = *it;
-			for (unsigned x = 0; x < hbe->content.size(); ) {
+			for (auto it = hbe->content.begin(); !it.finished(); ) {
 				bool must_keep = false;
 				std::queue<Instruction<ThreadCfgLabel> *> pending;
 				pending.push(hbe->after);
 				while (!must_keep && !pending.empty()) {
 					Instruction<ThreadCfgLabel> *l = pending.front();
 					pending.pop();
-					if (instrUsesExpr(l, hbe->content[x], ced))
+					if (instrUsesExpr(l, it.get(), ced)) {
 						must_keep = true;
+					}
 					for (unsigned y = 0; y < l->successors.size(); y++)
 						pending.push(l->successors[y].instr);
 				}
 				if (must_keep) {
-					x++;
+					it.advance();
 				} else {
-					hbe->content.erase(hbe->content.begin() + x);
+					it.erase();
 					progress = true;
 				}
 			}
