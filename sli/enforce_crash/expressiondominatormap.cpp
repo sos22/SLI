@@ -7,6 +7,55 @@ static bool debug_edm = false;
 #define debug_edm false
 #endif
 
+static bool
+evaluatable(const IRExpr *e, const std::set<input_expression> &availExprs)
+{
+	struct foo {
+		static visit_result Get(const std::set<input_expression> *state,
+					const IRExprGet *ieg)
+		{
+			if (state->count(input_expression::registr(ieg))) {
+				return visit_continue;
+			} else {
+				return visit_abort;
+			}
+		}
+		static visit_result EntryPoint(const std::set<input_expression> *state,
+					       const IRExprEntryPoint *ieg)
+		{
+			if (state->count(input_expression::entry_point(ieg))) {
+				return visit_continue;
+			} else {
+				return visit_abort;
+			}
+		}
+		static visit_result ControlFlow(const std::set<input_expression> *state,
+						const IRExprControlFlow *ieg)
+		{
+			if (state->count(input_expression::control_flow(ieg))) {
+				return visit_continue;
+			} else {
+				return visit_abort;
+			}
+		}
+		static visit_result HappensBefore(const std::set<input_expression> *state,
+						  const IRExprHappensBefore *ieg)
+		{
+			if (state->count(input_expression::happens_before(ieg))) {
+				return visit_continue;
+			} else {
+				return visit_abort;
+			}
+		}
+	};
+	static irexpr_visitor<const std::set<input_expression> > visitor;
+	visitor.Get = foo::Get;
+	visitor.EntryPoint = foo::EntryPoint;
+	visitor.ControlFlow = foo::ControlFlow;
+	visitor.HappensBefore = foo::HappensBefore;
+	return visit_irexpr(&availExprs, &visitor, e) == visit_continue;
+}
+
 expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 						 expressionStashMapT &stash,
 						 instructionDominatorMapT &idom,

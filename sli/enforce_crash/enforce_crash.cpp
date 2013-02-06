@@ -681,15 +681,14 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 			input_expression expr(it->second);
 			unfrozenStashPoints.erase(it);
 
-			if (expr.unwrap()->tag == Iex_EntryPoint ||
-			    expr.unwrap()->tag == Iex_ControlFlow) {
-				/* Can never advance stash of entry
-				 * point expressions. */
+			if (expr.tag == input_expression::inp_entry_point ||
+			    expr.tag == input_expression::inp_control_flow) {
+				/* Can never advance stash of
+				 * entry point expressions. */
 				frozenStashPoints.insert(entryT(node, expr));
 				continue;
 			}
-			assert(expr.unwrap()->tag == Iex_Get);
-
+			assert(expr.tag == input_expression::inp_register);
 			const ThreadCfgLabel &label(node->rip);
 
 			/* Can't be an eval point */
@@ -726,8 +725,11 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 			bool modifies = false;
 			for (int x = 0; !modifies && x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 				if (irsb->stmts[x]->tag == Ist_Put &&
-				    ((IRStmtPut *)irsb->stmts[x])->target == ((const IRExprGet *)expr.unwrap())->reg)
+				    ((IRStmtPut *)irsb->stmts[x])->target.tid() == expr.thread &&
+				    ((IRStmtPut *)irsb->stmts[x])->target.isReg() &&
+				    ((IRStmtPut *)irsb->stmts[x])->target.asReg() == (int)expr.vex_offset) {
 					modifies = true;
+				}
 			}
 			if (modifies) {
 				frozenStashPoints.insert(entryT(node, expr));

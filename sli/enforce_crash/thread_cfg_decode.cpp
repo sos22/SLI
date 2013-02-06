@@ -30,8 +30,9 @@ happensBeforeEdge::parse(CrashCfg &cfg, const char *str, const char **suffix)
 	    !before.parse(str, &str) ||
 	    !parseThisString(" <-< ", str, &str) ||
 	    !after.parse(str, &str) ||
-	    !parseThisString(" {", str, &str))
+	    !parseThisString(" {", str, &str)) {
 		return NULL;
+	}
 	sane_vector<input_expression> content;
 	if (!parseThisChar('}', str, &str)) {
 		while (1) {
