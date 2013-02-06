@@ -87,10 +87,7 @@ public:
 	expressionStashMapT(const SummaryId &summary,
 			    std::set<IRExpr *> &neededExpressions,
 			    ThreadAbstracter &abs,
-			    StateMachine *probeMachine,
-			    StateMachine *storeMachine,
-			    crashEnforcementRoots &roots,
-			    const MaiMap &mai);
+			    crashEnforcementRoots &roots);
 
 	void operator|=(const expressionStashMapT &esm) {
 		for (auto it = esm.begin(); it != esm.end(); it++) {
@@ -634,7 +631,7 @@ public:
 		  happensBefore(summaryId, trueHb, falseHb, abs, crashCfg, mai),
 		  predecessorMap(crashCfg),
 		  idom(crashCfg, predecessorMap, happensBefore),
-		  exprStashPoints(summaryId, neededExpressions, abs, summary->loadMachine, summary->storeMachine, roots, mai),
+		  exprStashPoints(summaryId, neededExpressions, abs, roots),
 		  exprDominatorMap(conj, exprStashPoints, idom, predecessorMap, happensBefore),
 		  happensBeforePoints(summaryId, mai, trueHb, falseHb, idom, crashCfg, exprStashPoints, abs, next_hb_id),
 		  expressionEvalPoints(exprDominatorMap)
