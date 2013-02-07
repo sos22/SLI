@@ -188,7 +188,7 @@ __nameIRExpr_write(void *cookie, const char *buffer, size_t sz)
 	return sz;
 }
 char *
-nameIRExpr(IRExpr *a)
+nameIRExpr(const IRExpr *a)
 {
 	cookie_io_functions_t functionTable;
 	memset(&functionTable, 0, sizeof(functionTable));

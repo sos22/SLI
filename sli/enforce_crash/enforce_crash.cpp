@@ -73,7 +73,7 @@ exprUsesRegister(IRExpr *e, const IRExpr *e2)
 }
 
 static bool
-instrUsesExpr(Instruction<ThreadCfgLabel> *instr, IRExpr *expr, crashEnforcementData &ced)
+instrUsesExpr(Instruction<ThreadCfgLabel> *instr, const IRExpr *expr, crashEnforcementData &ced)
 {
 	{
 		auto it = ced.happensBeforePoints.find(instr->rip);
@@ -668,13 +668,13 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	     it != ced.exprStashPoints.end();
 		) {
 		const ThreadCfgLabel &label(it->first);
-		typedef std::pair<Instruction<ThreadCfgLabel> *, IRExpr *> entryT;
+		typedef std::pair<Instruction<ThreadCfgLabel> *, const IRExpr *> entryT;
 		std::set<entryT> frozenStashPoints;
 		std::set<entryT> unfrozenStashPoints;
 
 		{
 			Instruction<ThreadCfgLabel> *n = ced.crashCfg.findInstr(label);
-			const std::set<IRExpr *> &exprsToStash(it->second);
+			const std::set<const IRExpr *> &exprsToStash(it->second);
 			if (!n) {
 				/* This stash point cannot be reached
 				 * by any root -> kill it off. */
@@ -686,11 +686,11 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 		}
 		while (!unfrozenStashPoints.empty()) {
 			Instruction<ThreadCfgLabel> *node;
-			IRExprGet *expr;
+			const IRExprGet *expr;
 			{
 				auto it = unfrozenStashPoints.begin();
 				node = it->first;
-				IRExpr *e = it->second;
+				auto e = it->second;
 				unfrozenStashPoints.erase(it);
 
 				if (e->tag == Iex_EntryPoint ||
@@ -701,7 +701,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 					continue;
 				}
 				assert(e->tag == Iex_Get);
-				expr = (IRExprGet *)e;
+				expr = (const IRExprGet *)e;
 			}
 			const ThreadCfgLabel &label(node->rip);
 

@@ -286,7 +286,7 @@ IRSB *instrument_func(unsigned tid,
 		      IRType gWordTy,
 		      IRType hWordTy);
 
-char *nameIRExpr(IRExpr *a);
+char *nameIRExpr(const IRExpr *a);
 void my_system(const char *arg1, ...);
 char *flattenStringFragmentsMalloc(std::vector<const char *> fragments, const char *sep = "",
 				   const char *prefix = "", const char *suffix = "");

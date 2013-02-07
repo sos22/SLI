@@ -32,7 +32,7 @@ happensBeforeEdge::parse(CrashCfg &cfg, const char *str, const char **suffix)
 	    !after.parse(str, &str) ||
 	    !parseThisString(" {", str, &str))
 		return NULL;
-	sane_vector<IRExpr *> content;
+	sane_vector<const IRExpr *> content;
 	while (1) {
 		IRExpr *a;
 		if (!parseIRExpr(&a, str, &str))

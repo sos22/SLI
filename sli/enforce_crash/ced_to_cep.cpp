@@ -574,7 +574,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		struct cfg_annotation_summary summary;
 		memset(&summary, 0, sizeof(summary));
 		if (ced.exprStashPoints.count(oldLabel)) {
-			const std::set<IRExpr *> &toStash(ced.exprStashPoints[oldLabel]);
+			const std::set<const IRExpr *> &toStash(ced.exprStashPoints[oldLabel]);
 			fprintf(f, "static const struct cfg_instr_stash instr_%d_stash[] = {\n", newLabel);
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
 				if ( (*it2)->tag == Iex_Get ) {
@@ -665,9 +665,9 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				}
 			}
 			if (ced.exprStashPoints.count(oldLabel)) {
-				const std::set<IRExpr *> &toStash(ced.exprStashPoints[oldLabel]);
+				const std::set<const IRExpr *> &toStash(ced.exprStashPoints[oldLabel]);
 				for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
-					IRExpr *e = *it2;
+					auto e = *it2;
 					if ( e->tag == Iex_Get ) {
 						stashedData.insert(e);
 					} else if ( e->tag == Iex_ControlFlow ) {

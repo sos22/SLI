@@ -202,24 +202,24 @@ sane_vector<t>::visit(HeapVisitor &hv) const
 	}
 }
 
-template sane_vector<IRExpr *>::sane_vector();
-template sane_vector<IRExpr *>::sane_vector(sane_vector<IRExpr *> const &);
-template sane_vector<IRExpr *>::~sane_vector();
-template void sane_vector<IRExpr *>::visit(HeapVisitor &) const;
+template sane_vector<const IRExpr *>::sane_vector();
+template sane_vector<const IRExpr *>::sane_vector(sane_vector<const IRExpr *> const &);
+template sane_vector<const IRExpr *>::~sane_vector();
+template void sane_vector<const IRExpr *>::visit(HeapVisitor &) const;
 
-template sane_vector<IRExpr *>::iterator sane_vector<IRExpr *>::begin();
-template void sane_vector<IRExpr *>::iterator::erase();
-template IRExpr *const &sane_vector<IRExpr *>::iterator::get() const;
-template bool sane_vector<IRExpr *>::iterator::finished() const;
-template bool sane_vector<IRExpr *>::iterator::started() const;
-template void sane_vector<IRExpr *>::iterator::advance();
+template sane_vector<const IRExpr *>::iterator sane_vector<const IRExpr *>::begin();
+template void sane_vector<const IRExpr *>::iterator::erase();
+template const IRExpr *const &sane_vector<const IRExpr *>::iterator::get() const;
+template bool sane_vector<const IRExpr *>::iterator::finished() const;
+template bool sane_vector<const IRExpr *>::iterator::started() const;
+template void sane_vector<const IRExpr *>::iterator::advance();
 
-template sane_vector<IRExpr *>::const_iterator sane_vector<IRExpr *>::begin() const;
-template IRExpr *const &sane_vector<IRExpr *>::const_iterator::get() const;
-template bool sane_vector<IRExpr *>::const_iterator::finished() const;
-template void sane_vector<IRExpr *>::const_iterator::advance();
+template sane_vector<const IRExpr *>::const_iterator sane_vector<const IRExpr *>::begin() const;
+template const IRExpr *const &sane_vector<const IRExpr *>::const_iterator::get() const;
+template bool sane_vector<const IRExpr *>::const_iterator::finished() const;
+template void sane_vector<const IRExpr *>::const_iterator::advance();
 
-template void sane_vector<IRExpr *>::push_back(IRExpr *const&);
+template void sane_vector<const IRExpr *>::push_back(const IRExpr *const&);
 
-template size_t sane_vector<IRExpr *>::size() const;
-template bool sane_vector<IRExpr *>::operator ==(const sane_vector<IRExpr *> &) const;
+template size_t sane_vector<const IRExpr *>::size() const;
+template bool sane_vector<const IRExpr *>::operator ==(const sane_vector<const IRExpr *> &) const;

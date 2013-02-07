@@ -127,11 +127,11 @@ public:
 	instructionDominatorMapT() {}
 };
 
-class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<IRExpr *> >,
+class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<const IRExpr *> >,
 			    private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
-			std::vector<IRExpr *> f(it->second.begin(), it->second.end());
+			std::vector<const IRExpr *> f(it->second.begin(), it->second.end());
 			for (auto it2 = f.begin(); it2 != f.end(); it2++)
 				hv(*it2);
 			it->second.clear();
@@ -160,7 +160,7 @@ public:
 			if (!where.parse(str, &str) ||
 			    !parseThisString(" -> {", str, &str))
 				break;
-			std::set<IRExpr *> b;
+			std::set<const IRExpr *> b;
 			while (1) {
 				IRExpr * s;
 				if (!parseIRExpr(&s, str, &str) ||
@@ -191,7 +191,7 @@ public:
 
 class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > {
 	class trans1 : public IRExprTransformer {
-		std::set<IRExpr *> &availExprs;
+		std::set<const IRExpr *> &availExprs;
 		void failed() {
 			isGood = false;
 			abortTransform();
@@ -217,13 +217,13 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, s
 		}
 	public:
 		bool isGood;
-		trans1(std::set<IRExpr *> &_availExprs)
+		trans1(std::set<const IRExpr *> &_availExprs)
 			: availExprs(_availExprs),
 			  isGood(true)
 		{}
 	};
 	static bool evaluatable(IRExpr *e,
-				std::set<IRExpr *> &availExprs) {
+				std::set<const IRExpr *> &availExprs) {
 		trans1 t(availExprs);
 		t.doit(e);
 		return t.isGood;
@@ -273,7 +273,7 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
 	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
 			  Instruction<ThreadCfgLabel> *_after,
-			  const sane_vector<IRExpr *> &_content,
+			  const sane_vector<const IRExpr *> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
 	{}
@@ -301,7 +301,7 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 public:
 	Instruction<ThreadCfgLabel> *before;
 	Instruction<ThreadCfgLabel> *after;
-	sane_vector<IRExpr *> content;
+	sane_vector<const IRExpr *> content;
 	unsigned msg_id;
 
 	happensBeforeEdge *intern(internmentState &state) {
@@ -330,7 +330,7 @@ public:
 		     it != liveInstructions.end();
 		     it++) {
 			auto *i = *it;
-			std::set<IRExpr *> &exprs(stashMap[i->rip]);
+			std::set<const IRExpr *> &exprs(stashMap[i->rip]);
 			for (auto it2 = exprs.begin();
 			     it2 != exprs.end();
 			     it2++)
@@ -382,7 +382,7 @@ public:
 
 	slotMapT() { }
 
-	slotMapT(std::map<ThreadCfgLabel, std::set<IRExpr *> > &neededExpressions,
+	slotMapT(std::map<ThreadCfgLabel, std::set<const IRExpr *> > &neededExpressions,
 		 std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore)
 	{
 		simulationSlotT next_slot(1);
@@ -391,7 +391,7 @@ public:
 		for (auto it = neededExpressions.begin();
 		     it != neededExpressions.end();
 		     it++) {
-			std::set<IRExpr *> &s((*it).second);
+			std::set<const IRExpr *> &s((*it).second);
 			for (auto it2 = s.begin(); it2 != s.end(); it2++)
 				mk_slot(*it2, next_slot);
 		}
