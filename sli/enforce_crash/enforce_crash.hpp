@@ -348,9 +348,9 @@ public:
 	NAMED_CLASS
 };
 
-class slotMapT : public sane_map<IRExpr *, simulationSlotT>,
+class slotMapT : public sane_map<const IRExpr *, simulationSlotT>,
 		 private GcCallback<&ir_heap> {
-	void mk_slot(IRExpr *e, simulationSlotT &next_slot) {
+	void mk_slot(const IRExpr *e, simulationSlotT &next_slot) {
 		if (!count(e)) {
 			insert(e, allocateSlot(next_slot));
 		}
@@ -359,7 +359,7 @@ class slotMapT : public sane_map<IRExpr *, simulationSlotT>,
 		slotMapT n(*this);
 		clear();
 		for (auto it = n.begin(); it != n.end(); it++) {
-			IRExpr *e = it->first;
+			auto e = it->first;
 			hv(e);
 			insert(e, it->second);
 		}
@@ -374,7 +374,7 @@ public:
 		return r;
 	}
 
-	simulationSlotT operator()(IRExpr *e) const {
+	simulationSlotT operator()(const IRExpr *e) const {
 		auto it = find(e);
 		assert(it != end());
 		return it->second;
