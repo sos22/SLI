@@ -215,18 +215,9 @@ sane_vector<t>::size() const
 	return nr_elems;
 }
 
-template <typename t> void
-sane_vector<t>::visit(HeapVisitor &hv)
-{
-	for (unsigned i = 0; i < nr_elems; i++) {
-		((t *)content)[i].visit(hv);
-	}
-}
-
 template sane_vector<input_expression>::sane_vector();
 template sane_vector<input_expression>::sane_vector(sane_vector<input_expression> const &);
 template sane_vector<input_expression>::~sane_vector();
-template void sane_vector<input_expression>::visit(HeapVisitor &);
 
 template sane_vector<input_expression>::iterator sane_vector<input_expression>::begin();
 template void sane_vector<input_expression>::iterator::erase();

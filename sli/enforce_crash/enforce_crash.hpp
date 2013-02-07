@@ -65,12 +65,6 @@ public:
 	void push_back(const t &what);
 	void clear();
 	size_t size() const;
-
-	/* The vector itself doesn't need visiting, but the elements
-	   in it might.  If so, you need to arrange for this to get
-	   called at an appropriate point. */
-	void visit(HeapVisitor &hv);
-
 };
 
 struct exprEvalPoint;
@@ -179,22 +173,9 @@ public:
 	static input_expression control_flow(const IRExprControlFlow *);
 	static input_expression entry_point(const IRExprEntryPoint *);
 	static input_expression happens_before(const IRExprHappensBefore *);
-
-	void visit(HeapVisitor &hv);
 };
 
-class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<input_expression> >,
-			    public GcCallback<&ir_heap> {
-	void runGc(HeapVisitor &hv) {
-		for (auto it = begin(); it != end(); it++) {
-			std::vector<input_expression> f(it->second.begin(), it->second.end());
-			for (auto it2 = f.begin(); it2 != f.end(); it2++) {
-				it2->visit(hv);
-			}
-			it->second.clear();
-			it->second.insert(f.begin(), f.end());
-		}
-	}
+class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<input_expression> > {
 public:
 	expressionStashMapT() {}
 	expressionStashMapT(const SummaryId &summary,
@@ -379,20 +360,10 @@ public:
 	NAMED_CLASS
 };
 
-class slotMapT : public sane_map<input_expression, simulationSlotT>,
-		 private GcCallback<&ir_heap> {
+class slotMapT : public sane_map<input_expression, simulationSlotT> {
 	void mk_slot(const input_expression &e, simulationSlotT &next_slot) {
 		if (!count(e)) {
 			insert(e, allocateSlot(next_slot));
-		}
-	}
-	void runGc(HeapVisitor &hv) {
-		slotMapT n(*this);
-		clear();
-		for (auto it = n.begin(); it != n.end(); it++) {
-			auto e = it->first;
-			e.visit(hv);
-			insert(e, it->second);
 		}
 	}
 public:

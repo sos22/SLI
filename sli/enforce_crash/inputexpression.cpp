@@ -235,8 +235,3 @@ input_expression::happens_before(const IRExprHappensBefore *ieg)
 {
 	return input_expression(ieg->before, ieg->after);
 }
-
-void
-input_expression::visit(HeapVisitor &hv)
-{
-}
