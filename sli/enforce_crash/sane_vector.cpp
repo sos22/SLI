@@ -217,6 +217,7 @@ template void sane_vector<const IRExpr *>::iterator::advance();
 template sane_vector<const IRExpr *>::const_iterator sane_vector<const IRExpr *>::begin() const;
 template const IRExpr *const &sane_vector<const IRExpr *>::const_iterator::get() const;
 template bool sane_vector<const IRExpr *>::const_iterator::finished() const;
+template bool sane_vector<const IRExpr *>::const_iterator::started() const;
 template void sane_vector<const IRExpr *>::const_iterator::advance();
 
 template void sane_vector<const IRExpr *>::push_back(const IRExpr *const&);

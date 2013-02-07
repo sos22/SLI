@@ -33,16 +33,21 @@ happensBeforeEdge::parse(CrashCfg &cfg, const char *str, const char **suffix)
 	    !parseThisString(" {", str, &str))
 		return NULL;
 	sane_vector<const IRExpr *> content;
-	while (1) {
-		IRExpr *a;
-		if (!parseIRExpr(&a, str, &str))
-			break;
-		if (!parseThisString(", ", str, &str))
-			return NULL;
-		content.push_back(a);
+	if (!parseThisChar('}', str, &str)) {
+		while (1) {
+			IRExpr *a;
+			if (!parseIRExpr(&a, str, &str)) {
+				break;
+			}
+			content.push_back(a);
+			if (parseThisChar('}', str, &str)) {
+				break;
+			}
+			if (!parseThisString(", ", str, &str)) {
+				return NULL;
+			}
+		}
 	}
-	if (!parseThisChar('}', str, &str))
-		return NULL;
 	*suffix = str;
 	return new happensBeforeEdge(cfg.findInstr(before), cfg.findInstr(after), content, msg_id);
 }

@@ -161,17 +161,27 @@ public:
 			    !parseThisString(" -> {", str, &str))
 				break;
 			std::set<const IRExpr *> b;
-			while (1) {
-				IRExpr * s;
-				if (!parseIRExpr(&s, str, &str) ||
-				    !parseThisString(", ", str, &str))
-					break;
-				b.insert(s);
+			if (!parseThisString("}", str, &str)) {
+				while (1) {
+					IRExpr * s;
+					if (!parseIRExpr(&s, str, &str)) {
+						return false;
+					}
+					b.insert(s);
+					if (!parseThisString(", ", str, &str)) {
+						if (parseThisString("}", str, &str)) {
+							break;
+						} else {
+							return false;
+						}
+					}
+				}
 			}
-			if (!parseThisString("}\n", str, &str))
+			if (!parseThisChar('\n', str, &str))
 				return false;
 			assert(b.size() > 0);
-			(*this)[where] = b;
+			assert(!count(where));
+			insert(where, b);
 		}
 		*suffix = str;
 		return true;
@@ -181,8 +191,10 @@ public:
 		for (auto it = begin(); it != end(); it++) {
 			fprintf(f, "\t\t%s -> {", it->first.name());
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin()) {
+					fprintf(f, ", ");
+				}
 				ppIRExpr(*it2, f);
-				fprintf(f, ", ");
 			}
 			fprintf(f, "}\n");
 		}
@@ -285,8 +297,10 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 					    before->rip.name(),
 					    after->rip.name()));
 		for (auto it = content.begin(); !it.finished(); it.advance()) {
+			if (it.started()) {
+				fragments.push_back(", ");
+			}
 			fragments.push_back(nameIRExpr(it.get()));
-			fragments.push_back(", ");
 		}
 		fragments.push_back("}");
 
