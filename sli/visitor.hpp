@@ -7,6 +7,7 @@
 enum visit_result { visit_continue, visit_abort };
 
 template <typename ctxtT> struct irexpr_visitor {
+	visit_result (*Iex)(ctxtT *ctxt, const IRExpr *);
 #define iter_type(name)						\
 	visit_result (*name)(ctxtT *ctxt, const IRExpr ## name *);
 	IREXPR_TYPES(iter_type)

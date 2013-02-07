@@ -7,6 +7,12 @@ _visit_irexpr(void *ctxt,
 	      const IRExpr *expr)
 {
 	visit_result res = visit_continue;
+	if (visitor->Iex) {
+		res = visitor->Iex(ctxt, expr);
+		if (res != visit_continue) {
+			return res;
+		}
+	}
 	switch (expr->tag) {
 #define do_head(name)							\
 		case Iex_ ## name :					\
