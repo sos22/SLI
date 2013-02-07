@@ -51,11 +51,11 @@ public:
 };
 
 static bool
-expressionDependsOn(IRExpr *what, const std::set<IRExpr *> &d, bool includeRegisters)
+expressionDependsOn(IRExpr *what, const std::set<const IRExpr *> &d, bool includeRegisters)
 {
 	struct : public IRExprTransformer {
 		bool res;
-		const std::set<IRExpr *> *d;
+		const std::set<const IRExpr *> *d;
 		bool includeRegisters;
 		IRExpr *transformIex(IRExprGet *e) {
 			if (e->reg.isReg() && !includeRegisters)
@@ -650,7 +650,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		if (ced.expressionEvalPoints.count(oldLabel)) {
 			const std::set<exprEvalPoint> &sideConditions(ced.expressionEvalPoints[oldLabel]);
 			std::set<exprEvalPoint> pre_validate, rx_validate, eval_validate, control_validate;
-			std::set<IRExpr *> rxed, stashedData, stashedControl;
+			std::set<const IRExpr *> rxed, stashedData, stashedControl;
 			if (ced.happensBeforePoints.count(oldLabel)) {
 				const std::set<happensBeforeEdge *> &hbEdges(ced.happensBeforePoints[oldLabel]);
 				for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
