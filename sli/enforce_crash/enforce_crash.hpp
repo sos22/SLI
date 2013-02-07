@@ -348,11 +348,12 @@ public:
 	NAMED_CLASS
 };
 
-class slotMapT : public std::map<IRExpr *, simulationSlotT>,
+class slotMapT : public sane_map<IRExpr *, simulationSlotT>,
 		 private GcCallback<&ir_heap> {
 	void mk_slot(IRExpr *e, simulationSlotT &next_slot) {
-		if (!count(e))
-			insert(std::pair<IRExpr *, simulationSlotT>(e, allocateSlot(next_slot)));
+		if (!count(e)) {
+			insert(e, allocateSlot(next_slot));
+		}
 	}
 	void runGc(HeapVisitor &hv) {
 		slotMapT n(*this);
@@ -360,7 +361,7 @@ class slotMapT : public std::map<IRExpr *, simulationSlotT>,
 		for (auto it = n.begin(); it != n.end(); it++) {
 			IRExpr *e = it->first;
 			hv(e);
-			insert(std::pair<IRExpr *, simulationSlotT>(e, it->second));
+			insert(e, it->second);
 		}
 	}
 public:
@@ -416,7 +417,7 @@ public:
 	void operator|=(const slotMapT &sm) {
 		for (auto it = sm.begin(); it != sm.end(); it++)
 			if (!count(it->first))
-				insert(*it);
+				insert(it->first, it->second);
 	}
 
 	void prettyPrint(FILE *f) const {
