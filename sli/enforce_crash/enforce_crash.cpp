@@ -46,30 +46,21 @@ instrToInstrSetMap::print(FILE *f) const
 }
 
 static bool
-exprUsesRegister(IRExpr *e, const IRExpr *e2)
+exprUsesInput(const IRExpr *haystack, const IRExpr *needle)
 {
-	struct : public IRExprTransformer {
-		const IRExpr *needle;
-		bool res;
-		IRExpr *transformIex(IRExprGet *ieg) {
-			if (ieg == needle) {
-				res = true;
-				abortTransform();
-			}
-			return ieg;
-		}
-		IRExpr *transformIex(IRExprEntryPoint *ieg) {
-			if (ieg == needle) {
-				res = true;
-				abortTransform();
-			}
-			return ieg;
-		}
-	} doit;
-	doit.needle = e2;
-	doit.res = false;
-	doit.doit(e);
-	return doit.res;
+	struct v {
+		static visit_result Iex(const IRExpr *needle,
+					const IRExpr *iex) {
+			if (needle == iex) {
+				return visit_abort;
+			} else {
+				return visit_continue;
+                        }
+                }
+	};
+	static struct irexpr_visitor<const IRExpr> visitor;
+	visitor.Iex = v::Iex;
+	return visit_irexpr(needle, &visitor, haystack);
 }
 
 static bool
@@ -101,7 +92,7 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, const IRExpr *expr, crashEnfor
 			for (auto it2 = it->second.begin();
 			     it2 != it->second.end();
 			     it2++) {
-				if (exprUsesRegister(it2->e, expr))
+				if (exprUsesInput(it2->e, expr))
 					return true;
 			}
 		}
@@ -685,24 +676,20 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 				unfrozenStashPoints.insert(entryT(n, *it));
 		}
 		while (!unfrozenStashPoints.empty()) {
-			Instruction<ThreadCfgLabel> *node;
-			const IRExprGet *expr;
-			{
-				auto it = unfrozenStashPoints.begin();
-				node = it->first;
-				auto e = it->second;
-				unfrozenStashPoints.erase(it);
+			auto it = unfrozenStashPoints.begin();
+			Instruction<ThreadCfgLabel> *node = it->first;
+			const IRExpr *exprGen = it->second;
+			unfrozenStashPoints.erase(it);
 
-				if (e->tag == Iex_EntryPoint ||
-				    e->tag == Iex_ControlFlow) {
-					/* Can never advance stash of
-					 * entry point expressions. */
-					frozenStashPoints.insert(entryT(node, e));
-					continue;
-				}
-				assert(e->tag == Iex_Get);
-				expr = (const IRExprGet *)e;
+			if (exprGen->tag == Iex_EntryPoint ||
+			    exprGen->tag == Iex_ControlFlow) {
+				/* Can never advance stash of entry
+				 * point expressions. */
+				frozenStashPoints.insert(entryT(node, exprGen));
+				continue;
 			}
+			assert(exprGen->tag == Iex_Get);
+			const IRExprGet *expr = (const IRExprGet *)exprGen;
 			const ThreadCfgLabel &label(node->rip);
 
 			/* Can't be an eval point */
