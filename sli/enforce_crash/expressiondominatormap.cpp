@@ -38,14 +38,10 @@ evaluatable(const IRExpr *e, const std::set<input_expression> &availExprs)
 				return visit_abort;
 			}
 		}
-		static visit_result HappensBefore(const std::set<input_expression> *state,
-						  const IRExprHappensBefore *ieg)
+		static visit_result HappensBefore(const std::set<input_expression> *,
+						  const IRExprHappensBefore *)
 		{
-			if (state->count(input_expression::happens_before(ieg))) {
-				return visit_continue;
-			} else {
-				return visit_abort;
-			}
+			return visit_abort;
 		}
 	};
 	static irexpr_visitor<const std::set<input_expression> > visitor;

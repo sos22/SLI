@@ -24,17 +24,10 @@ enumerateNeededExpressions(const bbdd *e, std::set<input_expression> &out)
 			state->insert(input_expression::control_flow(ieg));
 			return visit_continue;
 		}
-		static visit_result HappensBefore(std::set<input_expression> *state,
-						  const IRExprHappensBefore *ieg)
-		{
-			state->insert(input_expression::happens_before(ieg));
-			return visit_continue;
-		}
 	};
 	static bdd_visitor<std::set<input_expression> > visitor;
 	visitor.irexpr.Get = v::Get;
 	visitor.irexpr.EntryPoint = v::EntryPoint;
 	visitor.irexpr.ControlFlow = v::ControlFlow;
-	visitor.irexpr.HappensBefore = v::HappensBefore;
 	visit_const_bdd(&out, &visitor, e);
 }

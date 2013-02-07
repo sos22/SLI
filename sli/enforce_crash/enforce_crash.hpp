@@ -136,7 +136,6 @@ public:
 		inp_entry_point,
 		inp_control_flow,
 		inp_register,
-		inp_happens_before,
 	};
 	const inp_type tag;
 
@@ -148,10 +147,6 @@ public:
 	const CfgLabel label1;
 	/* Only for tag == inp_control_flow */
 	const CfgLabel label2;
-	/* Only for tag == inp_happens_before */
-	const MemoryAccessIdentifier before;
-	/* Only for tag == inp_happens_after */
-	const MemoryAccessIdentifier after;
 
 	bool operator < (const input_expression &) const;
 	bool operator ==(const input_expression &) const;
@@ -164,15 +159,12 @@ public:
 		  thread(-1),
 		  vex_offset(-1),
 		  label1(CfgLabel::uninitialised()),
-		  label2(CfgLabel::uninitialised()),
-		  before(MemoryAccessIdentifier::uninitialised()),
-		  after(MemoryAccessIdentifier::uninitialised())
+		  label2(CfgLabel::uninitialised())
 	{}
 
 	static input_expression registr(const IRExprGet *);
 	static input_expression control_flow(const IRExprControlFlow *);
 	static input_expression entry_point(const IRExprEntryPoint *);
-	static input_expression happens_before(const IRExprHappensBefore *);
 };
 
 class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<input_expression> > {

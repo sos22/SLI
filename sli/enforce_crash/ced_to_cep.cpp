@@ -695,11 +695,6 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 						   and doesn't affect where we can do the eval,
 						   so we can just ignore it. */
 						break;
-					case input_expression::inp_happens_before:
-						/* Should have already
-						 * been filtered
-						 * out. */
-						abort();
 					}
 				}
 			}

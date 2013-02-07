@@ -17,9 +17,6 @@ expressionStashMapT::expressionStashMapT(const SummaryId &summary,
 				(*this)[it2.threadCfgLabel()].insert(*it);
 			}
 			break;
-		case input_expression::inp_happens_before: 
-			/* These don't really get stashed in any useful sense */
-			break;
 		case input_expression::inp_entry_point:
 			/* These are always stashed at every entry
 			 * point node of the relevant thread. */
