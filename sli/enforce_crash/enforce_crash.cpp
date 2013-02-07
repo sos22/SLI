@@ -46,25 +46,25 @@ instrToInstrSetMap::print(FILE *f) const
 }
 
 static bool
-exprUsesInput(const IRExpr *haystack, const IRExpr *needle)
+exprUsesInput(const IRExpr *haystack, const input_expression &needle)
 {
 	struct v {
-		static visit_result Iex(const IRExpr *needle,
+		static visit_result Iex(const input_expression *needle,
 					const IRExpr *iex) {
-			if (needle == iex) {
+			if (needle->matches(iex)) {
 				return visit_abort;
 			} else {
 				return visit_continue;
                         }
                 }
 	};
-	static struct irexpr_visitor<const IRExpr> visitor;
+	static struct irexpr_visitor<const input_expression> visitor;
 	visitor.Iex = v::Iex;
-	return visit_irexpr(needle, &visitor, haystack);
+	return visit_irexpr(&needle, &visitor, haystack);
 }
 
 static bool
-instrUsesExpr(Instruction<ThreadCfgLabel> *instr, const IRExpr *expr, crashEnforcementData &ced)
+instrUsesExpr(Instruction<ThreadCfgLabel> *instr, const input_expression &expr, crashEnforcementData &ced)
 {
 	{
 		auto it = ced.happensBeforePoints.find(instr->rip);
@@ -186,7 +186,7 @@ buildCED(const SummaryId &summaryId,
 {
 	IRExpr *leftOver = bbdd::to_irexpr(c.leftOver);
 	/* Figure out what we actually need to keep track of */
-	std::set<const IRExpr *> neededExpressions;
+	std::set<input_expression> neededExpressions;
 	enumerateNeededExpressions(c.leftOver, neededExpressions);
 
 	DNF_Conjunction conj;
@@ -659,13 +659,13 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 	     it != ced.exprStashPoints.end();
 		) {
 		const ThreadCfgLabel &label(it->first);
-		typedef std::pair<Instruction<ThreadCfgLabel> *, const IRExpr *> entryT;
+		typedef std::pair<Instruction<ThreadCfgLabel> *, input_expression> entryT;
 		std::set<entryT> frozenStashPoints;
 		std::set<entryT> unfrozenStashPoints;
 
 		{
 			Instruction<ThreadCfgLabel> *n = ced.crashCfg.findInstr(label);
-			const std::set<const IRExpr *> &exprsToStash(it->second);
+			const std::set<input_expression> &exprsToStash(it->second);
 			if (!n) {
 				/* This stash point cannot be reached
 				 * by any root -> kill it off. */
@@ -678,18 +678,18 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 		while (!unfrozenStashPoints.empty()) {
 			auto it = unfrozenStashPoints.begin();
 			Instruction<ThreadCfgLabel> *node = it->first;
-			const IRExpr *exprGen = it->second;
+			input_expression expr(it->second);
 			unfrozenStashPoints.erase(it);
 
-			if (exprGen->tag == Iex_EntryPoint ||
-			    exprGen->tag == Iex_ControlFlow) {
+			if (expr.unwrap()->tag == Iex_EntryPoint ||
+			    expr.unwrap()->tag == Iex_ControlFlow) {
 				/* Can never advance stash of entry
 				 * point expressions. */
-				frozenStashPoints.insert(entryT(node, exprGen));
+				frozenStashPoints.insert(entryT(node, expr));
 				continue;
 			}
-			assert(exprGen->tag == Iex_Get);
-			const IRExprGet *expr = (const IRExprGet *)exprGen;
+			assert(expr.unwrap()->tag == Iex_Get);
+
 			const ThreadCfgLabel &label(node->rip);
 
 			/* Can't be an eval point */
@@ -726,7 +726,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 			bool modifies = false;
 			for (int x = 0; !modifies && x < irsb->stmts_used && irsb->stmts[x]->tag != Ist_IMark; x++) {
 				if (irsb->stmts[x]->tag == Ist_Put &&
-				    ((IRStmtPut *)irsb->stmts[x])->target == expr->reg)
+				    ((IRStmtPut *)irsb->stmts[x])->target == ((const IRExprGet *)expr.unwrap())->reg)
 					modifies = true;
 			}
 			if (modifies) {

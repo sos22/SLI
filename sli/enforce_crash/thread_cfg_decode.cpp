@@ -32,14 +32,14 @@ happensBeforeEdge::parse(CrashCfg &cfg, const char *str, const char **suffix)
 	    !after.parse(str, &str) ||
 	    !parseThisString(" {", str, &str))
 		return NULL;
-	sane_vector<const IRExpr *> content;
+	sane_vector<input_expression> content;
 	if (!parseThisChar('}', str, &str)) {
 		while (1) {
-			IRExpr *a;
-			if (!parseIRExpr(&a, str, &str)) {
-				break;
+			std::pair<input_expression, bool> a(input_expression::parse(str, &str));
+			if (!a.second) {
+				return NULL;
 			}
-			content.push_back(a);
+			content.push_back(a.first);
 			if (parseThisChar('}', str, &str)) {
 				break;
 			}

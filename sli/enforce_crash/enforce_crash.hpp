@@ -68,8 +68,6 @@ public:
 	void visit(HeapVisitor &hv) const;
 };
 
-void enumerateNeededExpressions(const bbdd *e, std::set<const IRExpr *> &out);
-
 struct exprEvalPoint;
 class happensBeforeEdge;
 
@@ -127,13 +125,30 @@ public:
 	instructionDominatorMapT() {}
 };
 
-class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<const IRExpr *> >,
+class input_expression : public Named {
+	char *mkName() const;
+	const IRExpr *content;
+	input_expression();
+	void operator =(const input_expression &o);
+public:
+	bool operator <(const input_expression &o) const;
+	bool operator==(const input_expression &o) const;
+
+	bool matches(const IRExpr *what) const;
+	const IRExpr *unwrap() const;
+	static input_expression wrap(const IRExpr *e);
+
+	static std::pair<input_expression, bool> parse(const char *, const char **);
+	void visit(HeapVisitor &hv);
+};
+class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<input_expression> >,
 			    private GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv) {
 		for (auto it = begin(); it != end(); it++) {
-			std::vector<const IRExpr *> f(it->second.begin(), it->second.end());
-			for (auto it2 = f.begin(); it2 != f.end(); it2++)
-				hv(*it2);
+			std::vector<input_expression> f(it->second.begin(), it->second.end());
+			for (auto it2 = f.begin(); it2 != f.end(); it2++) {
+				it2->visit(hv);
+			}
 			it->second.clear();
 			it->second.insert(f.begin(), f.end());
 		}
@@ -141,7 +156,7 @@ class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<const IRExp
 public:
 	expressionStashMapT() {}
 	expressionStashMapT(const SummaryId &summary,
-			    std::set<const IRExpr *> &neededExpressions,
+			    std::set<input_expression> &neededExpressions,
 			    ThreadAbstracter &abs,
 			    crashEnforcementRoots &roots);
 
@@ -160,14 +175,14 @@ public:
 			if (!where.parse(str, &str) ||
 			    !parseThisString(" -> {", str, &str))
 				break;
-			std::set<const IRExpr *> b;
+			std::set<input_expression> b;
 			if (!parseThisString("}", str, &str)) {
 				while (1) {
-					IRExpr * s;
-					if (!parseIRExpr(&s, str, &str)) {
+					std::pair<input_expression, bool> s(input_expression::parse(str, &str));
+					if (!s.second) {
 						return false;
 					}
-					b.insert(s);
+					b.insert(s.first);
 					if (!parseThisString(", ", str, &str)) {
 						if (parseThisString("}", str, &str)) {
 							break;
@@ -194,7 +209,7 @@ public:
 				if (it2 != it->second.begin()) {
 					fprintf(f, ", ");
 				}
-				ppIRExpr(*it2, f);
+				fprintf(f, "%s", it2->name());
 			}
 			fprintf(f, "}\n");
 		}
@@ -203,13 +218,13 @@ public:
 
 class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > {
 	class trans1 : public IRExprTransformer {
-		std::set<const IRExpr *> &availExprs;
+		std::set<input_expression> &availExprs;
 		void failed() {
 			isGood = false;
 			abortTransform();
 		}
 		IRExpr *transformIex(IRExprGet *e) {
-			if (!availExprs.count(e))
+			if (!availExprs.count(input_expression::wrap(e)))
 				failed();
 			return e;
 		}
@@ -218,24 +233,24 @@ class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, s
 			return e;
 		}
 		IRExpr *transformIex(IRExprEntryPoint *e) {
-			if (!availExprs.count(e))
+			if (!availExprs.count(input_expression::wrap(e)))
 				failed();
 			return e;
 		}
 		IRExpr *transformIex(IRExprControlFlow *e) {
-			if (!availExprs.count(e))
+			if (!availExprs.count(input_expression::wrap(e)))
 				failed();
 			return e;
 		}
 	public:
 		bool isGood;
-		trans1(std::set<const IRExpr *> &_availExprs)
+		trans1(std::set<input_expression> &_availExprs)
 			: availExprs(_availExprs),
 			  isGood(true)
 		{}
 	};
 	static bool evaluatable(IRExpr *e,
-				std::set<const IRExpr *> &availExprs) {
+				std::set<input_expression> &availExprs) {
 		trans1 t(availExprs);
 		t.doit(e);
 		return t.isGood;
@@ -285,7 +300,7 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
 	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
 			  Instruction<ThreadCfgLabel> *_after,
-			  const sane_vector<const IRExpr *> &_content,
+			  const sane_vector<input_expression> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), content(_content), msg_id(_msg_id)
 	{}
@@ -300,7 +315,7 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 			if (it.started()) {
 				fragments.push_back(", ");
 			}
-			fragments.push_back(nameIRExpr(it.get()));
+			fragments.push_back(it.get().name());
 		}
 		fragments.push_back("}");
 
@@ -315,7 +330,7 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, 
 public:
 	Instruction<ThreadCfgLabel> *before;
 	Instruction<ThreadCfgLabel> *after;
-	sane_vector<const IRExpr *> content;
+	sane_vector<input_expression> content;
 	unsigned msg_id;
 
 	happensBeforeEdge *intern(internmentState &state) {
@@ -344,7 +359,7 @@ public:
 		     it != liveInstructions.end();
 		     it++) {
 			auto *i = *it;
-			std::set<const IRExpr *> &exprs(stashMap[i->rip]);
+			std::set<input_expression> &exprs(stashMap[i->rip]);
 			for (auto it2 = exprs.begin();
 			     it2 != exprs.end();
 			     it2++)
@@ -362,9 +377,9 @@ public:
 	NAMED_CLASS
 };
 
-class slotMapT : public sane_map<const IRExpr *, simulationSlotT>,
+class slotMapT : public sane_map<input_expression, simulationSlotT>,
 		 private GcCallback<&ir_heap> {
-	void mk_slot(const IRExpr *e, simulationSlotT &next_slot) {
+	void mk_slot(const input_expression &e, simulationSlotT &next_slot) {
 		if (!count(e)) {
 			insert(e, allocateSlot(next_slot));
 		}
@@ -374,7 +389,7 @@ class slotMapT : public sane_map<const IRExpr *, simulationSlotT>,
 		clear();
 		for (auto it = n.begin(); it != n.end(); it++) {
 			auto e = it->first;
-			hv(e);
+			e.visit(hv);
 			insert(e, it->second);
 		}
 	}
@@ -388,7 +403,7 @@ public:
 		return r;
 	}
 
-	simulationSlotT operator()(const IRExpr *e) const {
+	simulationSlotT operator()(const input_expression &e) const {
 		auto it = find(e);
 		assert(it != end());
 		return it->second;
@@ -396,7 +411,7 @@ public:
 
 	slotMapT() { }
 
-	slotMapT(std::map<ThreadCfgLabel, std::set<const IRExpr *> > &neededExpressions,
+	slotMapT(std::map<ThreadCfgLabel, std::set<input_expression> > &neededExpressions,
 		 std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore)
 	{
 		simulationSlotT next_slot(1);
@@ -405,7 +420,7 @@ public:
 		for (auto it = neededExpressions.begin();
 		     it != neededExpressions.end();
 		     it++) {
-			std::set<const IRExpr *> &s((*it).second);
+			const std::set<input_expression> &s(it->second);
 			for (auto it2 = s.begin(); it2 != s.end(); it2++)
 				mk_slot(*it2, next_slot);
 		}
@@ -437,9 +452,8 @@ public:
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "\tSlot map:\n");
 		for (auto it = begin(); it != end(); it++) {
-			fprintf(f, "\t\t");
-			ppIRExpr(it->first, f);
-			fprintf(f, " -> %d\n", it->second.idx);
+			fprintf(f, "\t\t%s -> %d\n",
+				it->first.name(), it->second.idx);
 		}
 	}
 	bool parse(const char *str, const char **suffix) {
@@ -448,13 +462,14 @@ public:
 		clear();
 		while (1) {
 			simulationSlotT value;
-			IRExpr *k;
-			if (!parseIRExpr(&k, str, &str) ||
+			std::pair<input_expression, bool> k(input_expression::parse(str, &str));
+			if (!k.second ||
 			    !parseThisString(" -> ", str, &str) ||
 			    !parseDecimalInt(&value.idx, str, &str) ||
 			    !parseThisChar('\n', str, &str))
 				break;
-			(*this)[k] = value;
+			assert(!count(k.first));
+			insert(k.first, value);
 		}
 		*suffix = str;
 		return true;
@@ -689,7 +704,7 @@ public:
 	crashEnforcementData() {}
 	crashEnforcementData(const SummaryId &summaryId,
 			     const MaiMap &mai,
-			     std::set<const IRExpr *> &neededExpressions,
+			     std::set<input_expression> &neededExpressions,
 			     ThreadAbstracter &abs,
 			     std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &_roots,
 			     const std::set<const IRExprHappensBefore *> &trueHb,
@@ -776,5 +791,7 @@ public:
 		interpretInstrs.insert(ced.interpretInstrs.begin(), ced.interpretInstrs.end());
 	}
 };
+
+void enumerateNeededExpressions(const bbdd *e, std::set<input_expression> &out);
 
 #endif /* !enforceCrash_hpp__ */

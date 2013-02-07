@@ -26,12 +26,12 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 	     it != idom.end();
 	     it++) {
 		evalable[it->first].clear();
-		std::set<const IRExpr *> availExprs;
+		std::set<input_expression> availExprs;
 		for (auto it2 = it->second.begin();
 		     it2 != it->second.end();
 		     it2++) {
 			Instruction<ThreadCfgLabel> *dominating = *it2;
-			const std::set<const IRExpr *> &stashed(stash[dominating->rip]);
+			const std::set<input_expression> &stashed(stash[dominating->rip]);
 			for (auto it = stashed.begin();
 			     it != stashed.end();
 			     it++)
@@ -45,7 +45,7 @@ expressionDominatorMapT::expressionDominatorMapT(DNF_Conjunction &c,
 				if (it != availExprs.begin()) {
 					printf(", ");
 				}
-				printf("%s", nameIRExpr(*it));
+				printf("%s", it->name());
 			}
 			printf("\n");
 		}

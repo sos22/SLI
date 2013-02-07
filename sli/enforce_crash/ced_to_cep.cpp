@@ -52,17 +52,17 @@ public:
 };
 
 struct expr_depends_on_state {
-	const std::set<const IRExpr *> *d;
+	const std::set<input_expression> *d;
 	bool includeRegisters;
 };
 static bool
-expressionDependsOn(const IRExpr *what, const std::set<const IRExpr *> &d, bool includeRegisters)
+expressionDependsOn(const IRExpr *what, const std::set<input_expression> &d, bool includeRegisters)
 {
 	struct foo {
 		static visit_result Get(const expr_depends_on_state *state, const IRExprGet *ieg)
 		{
 			if ((state->includeRegisters || !ieg->reg.isReg()) &&
-			    state->d->count(ieg)) {
+			    state->d->count(input_expression::wrap(ieg))) {
 				return visit_abort;
 			} else {
 				return visit_continue;
@@ -71,7 +71,7 @@ expressionDependsOn(const IRExpr *what, const std::set<const IRExpr *> &d, bool 
 		static visit_result EntryPoint(const expr_depends_on_state *state,
 					       const IRExprEntryPoint *ee)
 		{
-			if (state->d->count(ee)) {
+			if (state->d->count(input_expression::wrap(ee))) {
 				return visit_abort;
 			} else {
 				return visit_continue;
@@ -80,7 +80,7 @@ expressionDependsOn(const IRExpr *what, const std::set<const IRExpr *> &d, bool 
 		static visit_result ControlFlow(const expr_depends_on_state *state,
 						const IRExprControlFlow *ee)
 		{
-			if (state->d->count(ee)) {
+			if (state->d->count(input_expression::wrap(ee))) {
 				return visit_abort;
 			} else {
 				return visit_continue;
@@ -312,7 +312,7 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 	case Iex_Get:
 	case Iex_ControlFlow:
 	case Iex_EntryPoint: {
-		simulationSlotT slot = slots(expr);
+		simulationSlotT slot = slots(input_expression::wrap(expr));
 		bytecode_op(f, "push_slot", expr->type());
 		bytecode_const32(f, slot.idx);
 		break;
@@ -585,12 +585,12 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		struct cfg_annotation_summary summary;
 		memset(&summary, 0, sizeof(summary));
 		if (ced.exprStashPoints.count(oldLabel)) {
-			const std::set<const IRExpr *> &toStash(ced.exprStashPoints[oldLabel]);
+			const std::set<input_expression> &toStash(ced.exprStashPoints[oldLabel]);
 			fprintf(f, "static const struct cfg_instr_stash instr_%d_stash[] = {\n", newLabel);
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
-				if ( (*it2)->tag == Iex_Get ) {
-					const IRExprGet *e = (const IRExprGet *)*it2;
-					simulationSlotT simSlot(slots(e));
+				if ( it2->unwrap()->tag == Iex_Get ) {
+					const IRExprGet *e = (const IRExprGet *)it2->unwrap();
+					simulationSlotT simSlot(slots(*it2));
 					fprintf(f, "    { .reg = %d, .slot = %d },\n",
 						e->reg.isReg() ? getRegisterIdx(e->reg.asReg()) : -1,
 						simSlot.idx);
@@ -599,7 +599,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "};\n");
 			fprintf(f, "static const struct cfg_instr_set_entry instr_%d_set_entry[] = {\n", newLabel);
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
-				if ( (*it2)->tag == Iex_EntryPoint ) {
+				if ( it2->unwrap()->tag == Iex_EntryPoint ) {
 					simulationSlotT simSlot(slots(*it2));
 					fprintf(f, "    { .slot = %d },\n", simSlot.idx);
 				}
@@ -607,9 +607,9 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "};\n");
 			fprintf(f, "static const struct cfg_instr_set_control instr_%d_set_control[] = {\n", newLabel);
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
-				if ( (*it2)->tag == Iex_ControlFlow ) {
-					IRExprControlFlow *e = (IRExprControlFlow *)*it2;
-					simulationSlotT simSlot(slots(e));
+				if ( it2->unwrap()->tag == Iex_ControlFlow ) {
+					IRExprControlFlow *e = (IRExprControlFlow *)it2->unwrap();
+					simulationSlotT simSlot(slots(*it2));
 					Maybe<int> goingTo(relabeller(ThreadCfgLabel(oldLabel.thread, e->cfg2)));
 					if (goingTo.valid) {
 						fprintf(f, "    { .next_node = %d, .slot = %d },\n", goingTo.content, simSlot.idx);
@@ -661,7 +661,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		if (ced.expressionEvalPoints.count(oldLabel)) {
 			const std::set<exprEvalPoint> &sideConditions(ced.expressionEvalPoints[oldLabel]);
 			std::set<exprEvalPoint> pre_validate, rx_validate, eval_validate, control_validate;
-			std::set<const IRExpr *> rxed, stashedData, stashedControl;
+			std::set<input_expression> rxed, stashedData, stashedControl;
 			if (ced.happensBeforePoints.count(oldLabel)) {
 				const std::set<happensBeforeEdge *> &hbEdges(ced.happensBeforePoints[oldLabel]);
 				for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
@@ -676,14 +676,14 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 				}
 			}
 			if (ced.exprStashPoints.count(oldLabel)) {
-				const std::set<const IRExpr *> &toStash(ced.exprStashPoints[oldLabel]);
+				const std::set<input_expression> &toStash(ced.exprStashPoints[oldLabel]);
 				for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
 					auto e = *it2;
-					if ( e->tag == Iex_Get ) {
+					if ( e.unwrap()->tag == Iex_Get ) {
 						stashedData.insert(e);
-					} else if ( e->tag == Iex_ControlFlow ) {
+					} else if ( e.unwrap()->tag == Iex_ControlFlow ) {
 						stashedControl.insert(e);
-					} else if ( e->tag == Iex_EntryPoint ) {
+					} else if ( e.unwrap()->tag == Iex_EntryPoint ) {
 						/* This is arguably a control-flow stash,
 						   but it happens right at the start of the
 						   instruction rather than right at the end,
