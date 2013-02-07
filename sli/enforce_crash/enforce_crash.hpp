@@ -68,7 +68,7 @@ public:
 	void visit(HeapVisitor &hv) const;
 };
 
-void enumerateNeededExpressions(IRExpr *e, std::set<IRExpr *> &out);
+void enumerateNeededExpressions(const IRExpr *e, std::set<const IRExpr *> &out);
 
 struct exprEvalPoint;
 class happensBeforeEdge;
@@ -141,7 +141,7 @@ class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<const IRExp
 public:
 	expressionStashMapT() {}
 	expressionStashMapT(const SummaryId &summary,
-			    std::set<IRExpr *> &neededExpressions,
+			    std::set<const IRExpr *> &neededExpressions,
 			    ThreadAbstracter &abs,
 			    crashEnforcementRoots &roots);
 
@@ -675,7 +675,7 @@ public:
 	crashEnforcementData() {}
 	crashEnforcementData(const SummaryId &summaryId,
 			     const MaiMap &mai,
-			     std::set<IRExpr *> &neededExpressions,
+			     std::set<const IRExpr *> &neededExpressions,
 			     ThreadAbstracter &abs,
 			     std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &_roots,
 			     const std::set<const IRExprHappensBefore *> &trueHb,

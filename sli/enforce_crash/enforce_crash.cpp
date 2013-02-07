@@ -195,7 +195,7 @@ buildCED(const SummaryId &summaryId,
 {
 	IRExpr *leftOver = bbdd::to_irexpr(c.leftOver);
 	/* Figure out what we actually need to keep track of */
-	std::set<IRExpr *> neededExpressions;
+	std::set<const IRExpr *> neededExpressions;
 	enumerateNeededExpressions(leftOver, neededExpressions);
 
 	DNF_Conjunction conj;
