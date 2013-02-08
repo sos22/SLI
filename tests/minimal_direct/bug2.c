@@ -37,6 +37,8 @@ main()
 	int idx;
 	int forever = 0;
 
+	srandom(start_time);
+
 	pthread_create(&thr, NULL, thr_main, NULL);
 	for (idx = 0; idx < NR_PTRS; idx++)
 		global_ptrs[idx] = &t;
