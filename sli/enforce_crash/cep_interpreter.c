@@ -278,7 +278,7 @@ futex(int *ptr, int op, int val, struct timespec *timeout)
 	syscall(__NR_futex, (unsigned long)ptr, (unsigned long)op, (unsigned long)val, (unsigned long)timeout);
 }
 
-#ifndef NDEBUG
+#if VERY_LOUD
 static int
 gettid(void)
 {
@@ -1419,17 +1419,6 @@ cmpxchg(int *what, int oldval, int newval)
 	return seen;
 }
 
-static int
-xchg(int *what, int newval)
-{
-	int seen;
-	asm ("xchg %0, %1\n"
-	     : "=r" (seen), "=m" (*what)
-	     : "0" (newval)
-	     : "memory");
-	return seen;
-}
-
 /* Note that this is non-atomic!  That's okay, because all of the
  * callers are under the big lock. */
 static int
@@ -1438,12 +1427,6 @@ na_xchg(int *val, int newval)
 	int oldval = *val;
 	*val = newval;
 	return oldval;
-}
-
-static void
-store_release(int *what, int val)
-{
-	*(volatile int *)what = val;
 }
 
 /* Arrange that we will perform a futex wake on @ptr the next time we
