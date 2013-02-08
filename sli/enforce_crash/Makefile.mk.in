@@ -1,8 +1,9 @@
 targets="enforce_crash ced_to_cep cep_interpreter.o"
 # foo={a,b,c} turns out not to do brace expansion; not sure why.  $()
 # expansion does, though, so use that instead.  Meh.
-sources=$(echo {simplify_ordering,enumNeededExpressions,expressiondominatormap,instructiondominatormap}.cpp)
+sources=$(echo {simplify_ordering,enumNeededExpressions,instructiondominatormap}.cpp)
 sources+=$(echo "" {thread_cfg_decode,expressionstashmapt,sane_vector,inputexpression}.cpp)
+sources+=" expressionevalmapt.cpp"
 
 defvars() {
     cat <<EOF

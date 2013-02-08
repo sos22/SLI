@@ -46,8 +46,11 @@ instrToInstrSetMap::print(FILE *f) const
 }
 
 static bool
-exprUsesInput(const IRExpr *haystack, const input_expression &needle)
+exprUsesInput(const bbdd *haystack, const input_expression &needle)
 {
+	if (!haystack) {
+		return false;
+	}
 	struct v {
 		static visit_result Iex(const input_expression *needle,
 					const IRExpr *iex) {
@@ -58,9 +61,9 @@ exprUsesInput(const IRExpr *haystack, const input_expression &needle)
                         }
                 }
 	};
-	static struct irexpr_visitor<const input_expression> visitor;
-	visitor.Iex = v::Iex;
-	return visit_irexpr(&needle, &visitor, haystack);
+	static struct bdd_visitor<const input_expression> visitor;
+	visitor.irexpr.Iex = v::Iex;
+	return visit_const_bdd(&needle, &visitor, haystack);
 }
 
 static bool
@@ -81,21 +84,17 @@ instrUsesExpr(Instruction<ThreadCfgLabel> *instr, const input_expression &expr, 
 							return true;
 						}
 					}
+					if (exprUsesInput(hbe->sideCondition, expr)) {
+						return true;
+					}
 				}
 			}
 		}
 	}
 
-	{
-		auto it = ced.expressionEvalPoints.find(instr->rip);
-		if (it != ced.expressionEvalPoints.end()) {
-			for (auto it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++) {
-				if (exprUsesInput(it2->e, expr))
-					return true;
-			}
-		}
+	if (exprUsesInput(ced.expressionEvalPoints.after_regs(instr->rip), expr) ||
+	    exprUsesInput(ced.expressionEvalPoints.after_control_flow(instr->rip), expr)) {
+		return true;
 	}
 	return false;
 }
@@ -116,6 +115,10 @@ optimiseHBContent(crashEnforcementData &ced)
 			for (auto it = hbe->content.begin(); !it.finished(); ) {
 				bool must_keep = false;
 				std::queue<Instruction<ThreadCfgLabel> *> pending;
+				if (hbe->sideCondition &&
+				    exprUsesInput(hbe->sideCondition, it.get())) {
+					must_keep = true;
+				}
 				pending.push(hbe->after);
 				while (!must_keep && !pending.empty()) {
 					Instruction<ThreadCfgLabel> *l = pending.front();
@@ -184,26 +187,22 @@ buildCED(const SummaryId &summaryId,
 	 int &next_hb_id,
 	 AddressSpace *as)
 {
-	IRExpr *leftOver = bbdd::to_irexpr(c.leftOver);
 	/* Figure out what we actually need to keep track of */
 	std::set<input_expression> neededExpressions;
 	enumerateNeededExpressions(c.leftOver, neededExpressions);
 
-	DNF_Conjunction conj;
-	for (auto it = c.trueSlice.begin(); it != c.trueSlice.end(); it++)
-		conj.push_back(NF_Atom(false, const_cast<IRExprHappensBefore *>(*it)));
-	for (auto it = c.falseSlice.begin(); it != c.falseSlice.end(); it++)
-		conj.push_back(NF_Atom(true, const_cast<IRExprHappensBefore *>(*it)));
-	if (leftOver->tag == Iex_Associative) {
-		IRExprAssociative *assoc = (IRExprAssociative *)leftOver;
-		for (int i = 0; i < assoc->nr_arguments; i++)
-			conj.push_back(NF_Atom(false, assoc->contents[i]));
-	} else {
-		conj.push_back(NF_Atom(false, leftOver));
-	}
-	*out = crashEnforcementData(summaryId, *summary->mai, neededExpressions, abs,
-				    rootsCfg, c.trueSlice, c.falseSlice, conj, next_hb_id,
-				    summary, as);
+	*out = crashEnforcementData(&summary->scopes->bools,
+				    summaryId,
+				    *summary->mai,
+				    neededExpressions,
+				    abs,
+				    rootsCfg,
+				    c.trueSlice,
+				    c.falseSlice,
+				    c.leftOver,
+				    next_hb_id,
+				    summary,
+				    as);
 	optimiseHBContent(*out);
 	return true;
 }

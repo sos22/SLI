@@ -84,6 +84,7 @@ public:
 		return id * 10113569ul + summary_id.hash() * 10118387ul;
 	}
 	const SummaryId &summary() const { return summary_id; }
+	unsigned raw_id() const { return id; }
 };
 
 class AbstractThread : public Named {

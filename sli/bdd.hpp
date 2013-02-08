@@ -17,6 +17,7 @@ template <typename _leafT, typename _subtreeT> class _bdd;
    careful. */
 /* Note that enforce_crash.cpp::setVariable() depends on the details
    of the BDD ordering for correctness! */
+/* So does expressionevalmapt.cpp::setEntryPoint(). */
 class bdd_rank {
 	friend class bdd_ordering;
 	long val;

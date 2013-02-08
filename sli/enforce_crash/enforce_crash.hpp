@@ -65,9 +65,9 @@ public:
 	void push_back(const t &what);
 	void clear();
 	size_t size() const;
+	bool empty() const { return size() == 0; }
 };
 
-struct exprEvalPoint;
 class happensBeforeEdge;
 
 class internmentState {
@@ -231,17 +231,6 @@ public:
 	}
 };
 
-class expressionDominatorMapT : public std::map<Instruction<ThreadCfgLabel> *, std::set<std::pair<bool, IRExpr *> > > {
-public:
-	expressionDominatorMapT() {};
-	expressionDominatorMapT(DNF_Conjunction &,
-				expressionStashMapT &,
-				instructionDominatorMapT &,
-				predecessorMapT &,
-				happensAfterMapT &);
-	void prettyPrint(FILE *f) const;
-};
-
 class simulationSlotT {
 public:
 	int idx;
@@ -274,39 +263,21 @@ visit_set(std::set<t> &s, HeapVisitor &hv)
 		s.insert(*it2);
 }
 
-class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap>, public Named {
+class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap> {
 	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
 			  Instruction<ThreadCfgLabel> *_after,
+			  bbdd *_sideCondition,
 			  const sane_vector<input_expression> &_content,
 			  unsigned _msg_id)
-		: before(_before), after(_after), content(_content), msg_id(_msg_id)
+		: before(_before), after(_after), sideCondition(_sideCondition),
+		  content(_content), msg_id(_msg_id)
 	{}
-	char *mkName() const {
-		std::vector<const char *> fragments;
-		fragments.push_back(my_asprintf(
-					    "%d: %s <-< %s {",
-					    msg_id,
-					    before->rip.name(),
-					    after->rip.name()));
-		for (auto it = content.begin(); !it.finished(); it.advance()) {
-			if (it.started()) {
-				fragments.push_back(", ");
-			}
-			fragments.push_back(it.get().name());
-		}
-		fragments.push_back("}");
-
-		char *res_vex = flattenStringFragments(fragments);
-		char *res_malloc = strdup(res_vex);
-		_LibVEX_free(&main_heap, res_vex);
-		free((void *)fragments[0]);
-		for (unsigned x = 1; x < fragments.size() - 1; x += 2)
-			_LibVEX_free(&main_heap, (void *)fragments[x]);
-		return res_malloc;
-	}
 public:
 	Instruction<ThreadCfgLabel> *before;
 	Instruction<ThreadCfgLabel> *after;
+	/* Note that sideCondition gets set from expressionEvalMapT's
+	   constructor, which is perhaps slightly surprising. */
+	bbdd *sideCondition;
 	sane_vector<input_expression> content;
 	unsigned msg_id;
 
@@ -315,6 +286,7 @@ public:
 			if ( (*it)->msg_id == msg_id &&
 			     (*it)->before == before &&
 			     (*it)->after == after &&
+			     (*it)->sideCondition == sideCondition &&
 			     (*it)->content == content )
 				return (*it);
 		}
@@ -328,27 +300,26 @@ public:
 			  unsigned _msg_id)
 		: before(_before),
 		  after(_after),
+		  sideCondition(NULL),
 		  msg_id(_msg_id)
 	{
-		std::set<Instruction<ThreadCfgLabel> *> &liveInstructions(
-			idom[before]);
+		std::set<input_expression> _content;
+		const std::set<Instruction<ThreadCfgLabel> *> &liveInstructions =
+			idom[before];
 		for (auto it = liveInstructions.begin();
 		     it != liveInstructions.end();
 		     it++) {
 			auto *i = *it;
-			const std::set<input_expression> &exprs(stashMap[i->rip]);
-			for (auto it2 = exprs.begin();
-			     it2 != exprs.end();
-			     it2++)
-				content.push_back(*it2);
+			_content |= stashMap[i->rip];
+		}
+		for (auto it = _content.begin(); it != _content.end(); it++) {
+			content.push_back(*it);
 		}
 	}
 
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "%s", name());
-	}
-	static happensBeforeEdge *parse(CrashCfg &cfg, const char *str, const char **suffix);
-	void visit(HeapVisitor &) {}
+	void prettyPrint(FILE *f) const;
+	static happensBeforeEdge *parse(bbdd::scope *scope, CrashCfg &cfg, const char *str, const char **suffix);
+	void visit(HeapVisitor &hv) { hv(sideCondition); }
 	NAMED_CLASS
 };
 
@@ -441,125 +412,35 @@ public:
 	}
 };
 
-/* Note that this needs manual visiting (from the IR heap), despite
- * not being GC allocated itself! */
-struct exprEvalPoint {
-	bool invert;
-	IRExpr *e;
+class happensBeforeMapT;
 
-	void visit(HeapVisitor &hv) {
-		hv(e);
-	}
-
-	exprEvalPoint(bool _invert,
-		      IRExpr *_e)
-		: invert(_invert), e(_e)
-	{}
-	bool operator <(const exprEvalPoint &o) const {
-		if (invert < o.invert)
-			return true;
-		if (o.invert < invert)
-			return false;
-		return e < o.e;
-	}
-
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "%s", invert ? "¬" : "");
-		ppIRExpr(e, f);
-	}
-	bool parse(const char *str, const char **suffix) {
-		bool inv = false;
-		if (parseThisChar('¬', str, &str))
-			inv = true;
-		if (!parseIRExpr(&e, str, &str))
-			return false;
-		invert = inv;
-		*suffix = str;
-		return true;
-	}
-
-	/* partially instantiating an exprEvalPoint is bad news, but
-	   it's okay if done temporarily before calling parse().
-	   Discourage people from hitting it by accident. */
-	class YesIReallyMeanIt {};
-	exprEvalPoint(const YesIReallyMeanIt &) {}
-};
-
-class expressionEvalMapT : public std::map<ThreadCfgLabel, std::set<exprEvalPoint> >,
-			   private GcCallback<&ir_heap> {
-	void runGc(HeapVisitor &hv) {
-		for (auto it = begin(); it != end(); it++) {
-			std::vector<exprEvalPoint> n;
-			setToVector(it->second, n);
-			it->second.clear();
-			for (auto it2 = n.begin(); it2 != n.end(); it2++) {
-				it2->visit(hv);
-				it->second.insert(*it2);
-			}
-		}
-	}
+class expressionEvalMapT : private GcCallback<&ir_heap> {
+	struct eval_sequence {
+		bbdd *after_regs;
+		bbdd *after_control_flow;
+		eval_sequence()
+			: after_regs(NULL),
+			  after_control_flow(NULL)
+		{}
+	};
+	sane_map<ThreadCfgLabel, eval_sequence> evalAt;
+	void runGc(HeapVisitor &hv);
 public:
+	expressionEvalMapT();
+	expressionEvalMapT(bbdd::scope *scope,
+			   CrashCfg &cfg,
+			   crashEnforcementRoots &roots,
+			   expressionStashMapT &stashMap,
+			   happensBeforeMapT &hbMap,
+			   ThreadAbstracter &abs,
+			   bbdd *sideCondition);
+	void operator|=(const expressionEvalMapT &eem);
+	void prettyPrint(FILE *f) const;
+	bool parse(bbdd::scope *scope, const char *str, const char **suffix);
 
-	expressionEvalMapT(expressionDominatorMapT &exprDominatorMap) {
-		for (expressionDominatorMapT::iterator it = exprDominatorMap.begin();
-		     it != exprDominatorMap.end();
-		     it++) {
-			for (std::set<std::pair<bool, IRExpr *> >::iterator it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++)
-				(*this)[it->first->rip].insert(
-					exprEvalPoint(
-						it2->first,
-						it2->second));
-		}
-	}
-	expressionEvalMapT() {}
-	void operator|=(const expressionEvalMapT &eem) {
-		for (auto it = eem.begin(); it != eem.end(); it++)
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-				(*this)[it->first].insert(*it2);
-	}
-
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "\tEval map:\n");
-		for (auto it = begin(); it != end(); it++) {
-			fprintf(f, "\t\t%s -> {", it->first.name());
-			for (auto it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++) {
-				it2->prettyPrint(f);
-				fprintf(f, ", ");
-			}
-			fprintf(f, "}\n");
-		}
-	}
-	bool parse(const char *str, const char **suffix) {
-		if (!parseThisString("Eval map:\n", str, &str))
-			return false;
-		clear();
-		while (1) {
-			ThreadCfgLabel key;
-			std::set<exprEvalPoint> value;
-			const char *a;
-			if (!key.parse(str, &a) ||
-			    !parseThisString(" -> {", a, &str))
-				break;
-			while (1) {
-				exprEvalPoint::YesIReallyMeanIt y;
-				exprEvalPoint p(y);
-				if (!p.parse(str, &str))
-					break;
-				if (!parseThisString(", ", str, &str))
-					return false;
-				value.insert(p);
-			}
-			if (!parseThisString("}\n", str, &str))
-				return false;
-			(*this)[key] = value;
-		}
-		*suffix = str;
-		return true;
-	}
+	bbdd *after_regs(const ThreadCfgLabel &) const;
+	bbdd *after_control_flow(const ThreadCfgLabel &) const;
+	bool count(const ThreadCfgLabel &) const;
 };
 
 class EnforceCrashCFG : public CFG<ThreadCfgLabel> {
@@ -603,42 +484,8 @@ public:
 				(*this)[it->first].insert(*it2);
 		}
 	}
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "\tHappens before map:\n");
-		for (auto it = begin(); it != end(); it++) {
-			fprintf(f, "\t\t%s -> {", it->first.name());
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
-				(*it2)->prettyPrint(f);
-				fprintf(f, ", ");
-			}
-			fprintf(f, "}\n");
-		}
-	}
-	bool parse(CrashCfg &cfg, const char *str, const char **suffix) {
-		if (!parseThisString("Happens before map:\n", str, &str))
-			return false;
-		clear();
-		while (1) {
-			ThreadCfgLabel addr;
-			std::set<happensBeforeEdge *> edges;
-			if (!addr.parse(str, &str) ||
-			    !parseThisString(" -> {", str, &str))
-				break;
-			while (1) {
-				happensBeforeEdge *edge = happensBeforeEdge::parse(cfg, str, &str);
-				if (!edge)
-					break;
-				edges.insert(edge);
-				if (!parseThisString(", ", str, &str))
-					return false;
-			}
-			if (!parseThisString("}\n", str, &str))
-				return false;
-			(*this)[addr] = edges;
-		}
-		*suffix = str;
-		return true;
-	}
+	void prettyPrint(FILE *f) const;
+	bool parse(bbdd::scope *scope, CrashCfg &cfg, const char *str, const char **suffix);
 	void internSelf(internmentState &state) {
 		for (auto it = begin(); it != end(); it++) {
 			std::set<happensBeforeEdge *> out;
@@ -660,21 +507,21 @@ public:
 	predecessorMapT predecessorMap;
 	instructionDominatorMapT idom;
 	expressionStashMapT exprStashPoints;
-	expressionDominatorMapT exprDominatorMap;
 	happensBeforeMapT happensBeforePoints;
 	expressionEvalMapT expressionEvalPoints;
 	std::set<unsigned long> patchPoints;
 	std::set<unsigned long> interpretInstrs;
 
 	crashEnforcementData() {}
-	crashEnforcementData(const SummaryId &summaryId,
+	crashEnforcementData(bbdd::scope *scope,
+			     const SummaryId &summaryId,
 			     const MaiMap &mai,
 			     std::set<input_expression> &neededExpressions,
 			     ThreadAbstracter &abs,
 			     std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &_roots,
 			     const std::set<const IRExprHappensBefore *> &trueHb,
 			     const std::set<const IRExprHappensBefore *> &falseHb,
-			     DNF_Conjunction &conj,
+			     bbdd *sideCondition,
 			     int &next_hb_id,
 			     CrashSummary *summary,
 			     AddressSpace *as)
@@ -684,18 +531,18 @@ public:
 		  predecessorMap(crashCfg),
 		  idom(crashCfg, predecessorMap, happensBefore),
 		  exprStashPoints(summaryId, neededExpressions, abs, roots),
-		  exprDominatorMap(conj, exprStashPoints, idom, predecessorMap, happensBefore),
 		  happensBeforePoints(summaryId, mai, trueHb, falseHb, idom, crashCfg, exprStashPoints, abs, next_hb_id),
-		  expressionEvalPoints(exprDominatorMap)
+		  expressionEvalPoints(scope, crashCfg, roots, exprStashPoints,
+				       happensBeforePoints, abs, sideCondition)
 	{}
 
-	bool parse(AddressSpace *as, const char *str, const char **suffix) {
+	bool parse(bbdd::scope *scope, AddressSpace *as, const char *str, const char **suffix) {
 		if (!parseThisString("Crash enforcement data:\n", str, &str) ||
 		    !roots.parse(str, &str) ||
 		    !crashCfg.parse(roots, as, false, str, &str) ||
 		    !exprStashPoints.parse(str, &str) ||
-		    !happensBeforePoints.parse(crashCfg, str, &str) ||
-		    !expressionEvalPoints.parse(str, &str) ||
+		    !happensBeforePoints.parse(scope, crashCfg, str, &str) ||
+		    !expressionEvalPoints.parse(scope, str, &str) ||
 		    !parseThisString("Patch points = [", str, &str))
 			return false;
 		while (!parseThisString("], contInterpret = [", str, &str)) {

@@ -1036,7 +1036,8 @@ static struct low_level_state *
 new_low_level_state(struct high_level_state *hls, int nr_simslots)
 {
 	struct low_level_state *lls = cep_malloc(sizeof(*lls) + nr_simslots * sizeof(lls->simslots[0]));
-	memset(lls, 0, sizeof(*lls) + nr_simslots * sizeof(lls->simslots[0]));
+	memset(lls, 0, sizeof(*lls));
+	memset(lls->simslots, 0xab, nr_simslots * sizeof(lls->simslots[0]));
 	lls->nr_simslots = nr_simslots;
 	lls->hls = hls;
 	sanity_check_low_level_state(lls, 0);
@@ -1527,34 +1528,36 @@ release_lls(struct low_level_state *lls)
 }
 
 static unsigned long
-bytecode_fetch_const(const unsigned short **bytecode,
+bytecode_fetch_const(const unsigned short *bytecode,
+		     unsigned *offset,
 		     enum byte_code_type type)
 {
 	unsigned long res;
 
 	switch (type) {
 	case bct_bit:
-		res = (*bytecode)[0] & 1;
-		(*bytecode)++;
+		res = bytecode[*offset] & 1;
+		(*offset)++;
 		break;
 	case bct_byte:
-		res = (*bytecode)[0] & 0xff;
-		(*bytecode)++;
+		res = bytecode[*offset] & 0xff;
+		(*offset)++;
 		break;
 	case bct_short:
-		res = (*bytecode)[0];
-		(*bytecode)++;
+		res = bytecode[*offset];
+		(*offset)++;
 		break;
 	case bct_int:
-		res = (*bytecode)[0] | ((unsigned)(*bytecode)[1] << 16);
-		(*bytecode) += 2;
+		res = (unsigned)bytecode[*offset] |
+			((unsigned)bytecode[*offset + 1] << 16);
+		(*offset) += 2;
 		break;
 	case bct_long:
-		res = (*bytecode)[0] |
-			((unsigned long)(*bytecode)[1] << 16) |
-			((unsigned long)(*bytecode)[2] << 32) |
-			((unsigned long)(*bytecode)[3] << 48);
-		(*bytecode) += 4;
+		res = (unsigned long)bytecode[*offset] |
+			((unsigned long)bytecode[*offset+1] << 16) |
+			((unsigned long)bytecode[*offset+2] << 32) |
+			((unsigned long)bytecode[*offset+3] << 48);
+		(*offset) += 4;
 		break;
 	case bct_longlong:
 		/* Can't just return these as longs */
@@ -1585,14 +1588,15 @@ bytecode_mask(unsigned long val, enum byte_code_type type)
 }
 
 static unsigned long
-bytecode_fetch_slot(const unsigned short **bytecode,
+bytecode_fetch_slot(const unsigned short *bytecode,
+		    unsigned *offset,
 		    enum byte_code_type type,
 		    const struct low_level_state *lls,
 		    const struct msg_template *rx_template,
 		    const struct msg_template *tx_template,
 		    const struct low_level_state *tx_lls)
 {
-	simslot_t idx = bytecode_fetch_const(bytecode, bct_int);
+	simslot_t idx = bytecode_fetch_const(bytecode, offset, bct_int);
 	int msg_slot;
 
 	assert(idx < lls->nr_simslots);
@@ -1748,7 +1752,7 @@ bct_size(enum byte_code_type type)
 /* Returns 1 if the bytecode finishes with bcop_succeed and 0
  * otherwise. */
 static int
-eval_bytecode(const unsigned short *bytecode,
+eval_bytecode(const unsigned short *const bytecode,
 	      const struct low_level_state *lls,
 	      const struct msg_template *rx_template,
 	      const struct msg_template *tx_message,
@@ -1758,6 +1762,7 @@ eval_bytecode(const unsigned short *bytecode,
 	enum byte_code_op op;
 	enum byte_code_type type;
 	int res;
+	unsigned offset = 0;
 
 	if (disable_sideconditions || !bytecode)
 		return 1;
@@ -1766,15 +1771,15 @@ eval_bytecode(const unsigned short *bytecode,
 
 	init_bytecode_stack(&stack);
 	while (1) {
-		op = bytecode_op(*bytecode);
-		type = bytecode_type(*bytecode);
-		bytecode++;
+		op = bytecode_op(bytecode[offset]);
+		type = bytecode_type(bytecode[offset]);
+		offset++;
 		switch (op) {
 		case bcop_push_const:
-			bytecode_push(&stack, bytecode_fetch_const(&bytecode, type), type);
+			bytecode_push(&stack, bytecode_fetch_const(bytecode, &offset, type), type);
 			break;
 		case bcop_push_slot:
-			bytecode_push(&stack, bytecode_fetch_slot(&bytecode, type, lls, rx_template, tx_message, tx_lls), type);
+			bytecode_push(&stack, bytecode_fetch_slot(bytecode, &offset, type, lls, rx_template, tx_message, tx_lls), type);
 			break;
 
 		case bcop_cmp_eq:
@@ -2011,26 +2016,27 @@ eval_bytecode(const unsigned short *bytecode,
 			break;
 		}
 
-		case bcop_mux0x: {
+		case bcop_branch: {
+			unsigned targTrue;
+			unsigned targFalse;
 			unsigned cond = bytecode_pop(&stack, bct_bit);
-			unsigned long zero = bytecode_pop(&stack, type);
-			unsigned long nzero = bytecode_pop(&stack, type);
-			unsigned long res = cond ? nzero : zero;
-			bytecode_push(&stack, res, type);
-			debug("bcop_mux0x: %d ? %lx : %lx -> %lx\n", cond,
-			      nzero, zero, res);
-			break;
-		}
-
-		case bcop_fail_if: {
-			if (bytecode_pop(&stack, bct_bit)) {
-				res = 0;
-				goto out;
+			targTrue = bytecode_fetch_const(bytecode, &offset, bct_short);
+			targFalse = bytecode_fetch_const(bytecode, &offset, bct_short);
+			if (cond) {
+				offset = targTrue;
+			} else {
+				offset = targFalse;
 			}
 			break;
 		}
+
 		case bcop_succeed: {
 			res = 1;
+			goto out;
+		}
+
+		case bcop_fail: {
+			res = 0;
 			goto out;
 		}
 		}
@@ -2487,13 +2493,17 @@ rx_message_filter(struct low_level_state *rx_lls,
 		  struct low_level_state *tx_lls,
 		  struct msg_template *tx_msg)
 {
-	const unsigned short *filter = plan.cfg_nodes[rx_lls->cfg_node].rx_validate;
+	const unsigned short *filter = rx_msg->side_condition;
 	int res;
-	res = eval_bytecode(filter, rx_lls, rx_msg,
-			    tx_msg, tx_lls);
-	if (!res) {
-		debug("%p: failed RX message filter!\n", rx_lls);
-		EVENT(message_filter_failed);
+	if (filter) {
+		res = eval_bytecode(filter, rx_lls, rx_msg,
+				    tx_msg, tx_lls);
+		if (!res) {
+			debug("%p: failed RX message filter %x!\n", rx_lls, rx_msg->msg_id);
+			EVENT(message_filter_failed);
+		}
+	} else {
+		res = 1;
 	}
 	return res;
 }
@@ -2870,8 +2880,8 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 					    current_cfg_node->successors[j])
 						lls->simslots[current_cfg_node->set_control[k].slot] = 1;
 				}
-				if (current_cfg_node->control_flow_validate &&
-				    !eval_bytecode(current_cfg_node->control_flow_validate,
+				if (current_cfg_node->after_control_flow &&
+				    !eval_bytecode(current_cfg_node->after_control_flow,
 						   lls, NULL, NULL, NULL)) {
 					debug("%p(%s): Reject %s due to control-flow side condition\n",
 					      lls, current_cfg_node->id,
@@ -3364,14 +3374,9 @@ check_conditions(struct high_level_state *hls, const char *message, unsigned off
 	}
 }
 static void
-check_pre_conditions(struct high_level_state *hls)
+check_after_regs_condition(struct high_level_state *hls)
 {
-	check_conditions(hls, "pre", offsetof(struct cfg_instr, pre_validate));
-}
-static void
-check_eval_conditions(struct high_level_state *hls)
-{
-	check_conditions(hls, "eval", offsetof(struct cfg_instr, eval_validate));
+	check_conditions(hls, "pre", offsetof(struct cfg_instr, after_regs));
 }
 
 static void
@@ -3392,7 +3397,7 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 	stash_registers(hls, regs);
 	sanity_check_high_level_state(hls);
 
-	check_pre_conditions(hls);
+	check_after_regs_condition(hls);
 	if (hls->ll_states.sz == 0)
 		exit_interpreter(hls);
 	sanity_check_high_level_state(hls);
@@ -3407,11 +3412,6 @@ advance_hl_interpreter(struct high_level_state *hls, struct reg_struct *regs)
 		exit_interpreter(hls);
 
 	emulate_underlying_instruction(hls, regs);
-	sanity_check_high_level_state(hls);
-
-	check_eval_conditions(hls);
-	if (hls->ll_states.sz == 0)
-		exit_interpreter(hls);
 	sanity_check_high_level_state(hls);
 
 	send_messages(hls);

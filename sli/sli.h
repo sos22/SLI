@@ -323,4 +323,31 @@ operator &=(std::set<t> &a, const std::set<t> &b)
 	return res;
 }
 
+template <typename t> std::set<t>
+operator |(const std::set<t> &a1, const std::set<t> &a2)
+{
+	std::set<t> res(a1);
+	for (auto it = a2.begin(); it != a2.end(); it++) {
+		res.insert(*it);
+	}
+	return res;
+}
+
+template <typename t> std::set<t>
+operator ^(const std::set<t> &a1, const std::set<t> &a2)
+{
+	std::set<t> res;
+	for (auto it = a1.begin(); it != a1.end(); it++) {
+		if (!a2.count(*it)) {
+			res.insert(*it);
+		}
+	}
+	for (auto it = a2.begin(); it != a2.end(); it++) {
+		if (!a1.count(*it)) {
+			res.insert(*it);
+		}
+	}
+	return res;
+}
+
 #endif /* !SLI_H__ */

@@ -14,11 +14,11 @@ __trivial_hash_function(const VexRip &vr)
 }
 
 static void
-loadCrashEnforcementData(crashEnforcementData &ced, AddressSpace *as, int fd)
+loadCrashEnforcementData(bbdd::scope *scope, crashEnforcementData &ced, AddressSpace *as, int fd)
 {
 	char *buf = readfile(fd);
 	const char *suffix;
-	if (!ced.parse(as, buf, &suffix))
+	if (!ced.parse(scope, as, buf, &suffix))
 		errx(1, "cannot parse crash enforcement data");
 	if (*suffix)
 		errx(1, "junk after crash enforcement data: %s", suffix);
@@ -50,54 +50,6 @@ public:
 		}
 	}
 };
-
-struct expr_depends_on_state {
-	const std::set<input_expression> *d;
-	bool includeRegisters;
-};
-static bool
-expressionDependsOn(const IRExpr *what, const std::set<input_expression> &d, bool includeRegisters)
-{
-	struct foo {
-		static visit_result Get(const expr_depends_on_state *state, const IRExprGet *ieg)
-		{
-			if ((state->includeRegisters || !ieg->reg.isReg()) &&
-			    state->d->count(input_expression::registr(ieg))) {
-				return visit_abort;
-			} else {
-				return visit_continue;
-			}
-		}
-		static visit_result EntryPoint(const expr_depends_on_state *state,
-					       const IRExprEntryPoint *ee)
-		{
-			if (state->d->count(input_expression::entry_point(ee))) {
-				return visit_abort;
-			} else {
-				return visit_continue;
-			}
-		}
-		static visit_result ControlFlow(const expr_depends_on_state *state,
-						const IRExprControlFlow *ee)
-		{
-			if (state->d->count(input_expression::control_flow(ee))) {
-				return visit_abort;
-			} else {
-				return visit_continue;
-			}
-		}
-	};
-	static struct irexpr_visitor<const expr_depends_on_state> visitor;
-	visitor.Get = foo::Get;
-	visitor.EntryPoint = foo::EntryPoint;
-	visitor.ControlFlow = foo::ControlFlow;
-	struct expr_depends_on_state state;
-	state.d = &d;
-	state.includeRegisters = includeRegisters;
-	return visit_irexpr(const_cast<const expr_depends_on_state *>(&state),
-			    &visitor,
-			    what) == visit_abort;
-}
 
 static int
 max_simslot(const slotMapT &sm)
@@ -239,70 +191,64 @@ vex_type_to_bytecode_type(IRType ty)
 }
 
 static void
-bytecode_op(FILE *f, const char *op, IRType ty)
+emit_bytecode_op(std::vector<const char *> &bytecode,
+		 const char *op,
+		 IRType ty)
 {
-	fprintf(f, "    (unsigned short)(bcop_%s | (%s << bytecode_type_shift)),\n",
-		op,
-		vex_type_to_bytecode_type(ty)
-		);
+	bytecode.push_back(
+		my_asprintf("(unsigned short)bcop_%s | ((unsigned short)%s << bytecode_type_shift)",
+			    op,
+			    vex_type_to_bytecode_type(ty)));
 }
 static void
-bytecode_const64(FILE *f, unsigned long val)
+bytecode_const64(std::vector<const char *> &bytecode, unsigned long val)
 {
-	fprintf(f, "    %d,\n", (unsigned short)val);
-	fprintf(f, "    %d,\n", (unsigned short)(val >> 16));
-	fprintf(f, "    %d,\n", (unsigned short)(val >> 32));
-	fprintf(f, "    %d,\n", (unsigned short)(val >> 48));
+	bytecode.push_back(my_asprintf("%d", (unsigned short)val));
+	bytecode.push_back(my_asprintf("%d", (unsigned short)(val >> 16)));
+	bytecode.push_back(my_asprintf("%d", (unsigned short)(val >> 32)));
+	bytecode.push_back(my_asprintf("%d", (unsigned short)(val >> 48)));
 }
 static void
-bytecode_const32(FILE *f, unsigned val)
+bytecode_const32(std::vector<const char *> &bytecode, unsigned val)
 {
-	fprintf(f, "    %d,\n", (unsigned short)val);
-	fprintf(f, "    %d,\n", (unsigned short)(val >> 16));
+	bytecode.push_back(my_asprintf("%d", (unsigned short)val));
+	bytecode.push_back(my_asprintf("%d", (unsigned short)(val >> 16)));
 }
 static void
-bytecode_const16(FILE *f, unsigned short val)
+bytecode_const16(std::vector<const char *> &bytecode, unsigned short val)
 {
-	fprintf(f, "    %d,\n", (unsigned short)val);
+	bytecode.push_back(my_asprintf("%d", (unsigned short)val));
 }
 static void
-bytecode_const8(FILE *f, unsigned char val)
+bytecode_const8(std::vector<const char *> &bytecode, unsigned char val)
 {
 	/* ``Bytecode'' format actually works in terms of shorts, so
 	   just zero-extend the byte to 16 bits. */
-	fprintf(f, "    %d,\n", (unsigned short)val);
-}
-static void
-bytecode_const1(FILE *f, bool val)
-{
-	if (val)
-		fprintf(f, "    1,\n");
-	else
-		fprintf(f, "    0,\n");
+	bytecode.push_back(my_asprintf("%d", (unsigned short)val));
 }
 
 static void
-bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotMapT &slots)
+bytecode_eval_expr(std::vector<const char *> &bytecode, IRExpr *expr, const slotMapT &slots)
 {
 	switch (expr->tag) {
 	case Iex_Const: {
 		IRExprConst *iec = (IRExprConst *)expr;
-		bytecode_op(f, "push_const", iec->type());
+		emit_bytecode_op(bytecode, "push_const", iec->type());
 		switch (iec->type()) {
 		case Ity_I1:
-			bytecode_const1(f, iec->Ico.content.U1);
+			abort();
 			break;
 		case Ity_I8:
-			bytecode_const8(f, iec->Ico.content.U8);
+			bytecode_const8(bytecode, iec->Ico.content.U8);
 			break;
 		case Ity_I16:
-			bytecode_const16(f, iec->Ico.content.U16);
+			bytecode_const16(bytecode, iec->Ico.content.U16);
 			break;
 		case Ity_I32:
-			bytecode_const32(f, iec->Ico.content.U32);
+			bytecode_const32(bytecode, iec->Ico.content.U32);
 			break;
 		case Ity_I64:
-			bytecode_const64(f, iec->Ico.content.U64);
+			bytecode_const64(bytecode, iec->Ico.content.U64);
 			break;
 		default:
 			abort();
@@ -316,62 +262,62 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 			expr->tag == Iex_Get ? input_expression::registr((const IRExprGet *)expr) :
 			expr->tag == Iex_ControlFlow ? input_expression::control_flow((const IRExprControlFlow *)expr) :
 			input_expression::entry_point((const IRExprEntryPoint *)expr));
-		bytecode_op(f, "push_slot", expr->type());
-		bytecode_const32(f, slot.idx);
+		emit_bytecode_op(bytecode, "push_slot", expr->type());
+		bytecode_const32(bytecode, slot.idx);
 		break;
 	}
 
 	case Iex_Unop: {
 		IRExprUnop *ieu = (IRExprUnop *)expr;
-		bytecode_eval_expr(f, ieu->arg, ced, slots);
+		bytecode_eval_expr(bytecode, ieu->arg, slots);
 		switch (ieu->op) {
 		case Iop_Not1:
 		case Iop_Not8:
 		case Iop_Not16:
 		case Iop_Not32:
 		case Iop_Not64:
-			bytecode_op(f, "not", ieu->arg->type());
+			emit_bytecode_op(bytecode, "not", ieu->arg->type());
 			break;
 		case Iop_Neg8:
 		case Iop_Neg16:
 		case Iop_Neg32:
 		case Iop_Neg64:
-			bytecode_op(f, "neg", ieu->arg->type());
+			emit_bytecode_op(bytecode, "neg", ieu->arg->type());
 			break;
 		case Iop_8Sto64:
 		case Iop_16Sto64:
 		case Iop_32Sto64:
-			bytecode_op(f, "sign_extend64", ieu->arg->type());
+			emit_bytecode_op(bytecode, "sign_extend64", ieu->arg->type());
 			break;
 		case Iop_8Sto32:
 		case Iop_16Sto32:
-			bytecode_op(f, "sign_extend32", ieu->arg->type());
+			emit_bytecode_op(bytecode, "sign_extend32", ieu->arg->type());
 			break;
 		case Iop_1Uto8:
 		case Iop_16to8:
 		case Iop_32to8:
 		case Iop_64to8:
-			bytecode_op(f, "zero_extend8", ieu->arg->type());
+			emit_bytecode_op(bytecode, "zero_extend8", ieu->arg->type());
 			break;
 		case Iop_8Uto16:
 		case Iop_32to16:
 		case Iop_64to16:
-			bytecode_op(f, "zero_extend16", ieu->arg->type());
+			emit_bytecode_op(bytecode, "zero_extend16", ieu->arg->type());
 			break;
 		case Iop_1Uto32:
 		case Iop_8Uto32:
 		case Iop_16Uto32:
 		case Iop_64to32:
-			bytecode_op(f, "zero_extend32", ieu->arg->type());
+			emit_bytecode_op(bytecode, "zero_extend32", ieu->arg->type());
 			break;
 		case Iop_1Uto64:
 		case Iop_8Uto64:
 		case Iop_16Uto64:
 		case Iop_32Uto64:
-			bytecode_op(f, "zero_extend64", ieu->arg->type());
+			emit_bytecode_op(bytecode, "zero_extend64", ieu->arg->type());
 			break;
 		case Iop_BadPtr:
-			bytecode_op(f, "badptr", Ity_I64);
+			emit_bytecode_op(bytecode, "badptr", Ity_I64);
 			break;
 		default:
 			abort();
@@ -381,41 +327,41 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 
 	case Iex_Binop: {
 		IRExprBinop *ieb = (IRExprBinop *)expr;
-		bytecode_eval_expr(f, ieb->arg1, ced, slots);
-		bytecode_eval_expr(f, ieb->arg2, ced, slots);
+		bytecode_eval_expr(bytecode, ieb->arg1, slots);
+		bytecode_eval_expr(bytecode, ieb->arg2, slots);
 		switch (ieb->op) {
 		case Iop_CmpEQ8:
 		case Iop_CmpEQ16:
 		case Iop_CmpEQ32:
 		case Iop_CmpEQ64:
-			bytecode_op(f, "cmp_eq", ieb->arg1->type());
+			emit_bytecode_op(bytecode, "cmp_eq", ieb->arg1->type());
 			break;
 		case Iop_Mul8:
 		case Iop_Mul16:
 		case Iop_Mul32:
 		case Iop_Mul64:
-			bytecode_op(f, "mul", ieb->arg1->type());
+			emit_bytecode_op(bytecode, "mul", ieb->arg1->type());
 			break;
 		case Iop_CmpLT8U:
 		case Iop_CmpLT16U:
 		case Iop_CmpLT32U:
 		case Iop_CmpLT64U:
-			bytecode_op(f, "cmp_ltu", ieb->arg1->type());
+			emit_bytecode_op(bytecode, "cmp_ltu", ieb->arg1->type());
 			break;
 		case Iop_CmpLT8S:
 		case Iop_CmpLT16S:
 		case Iop_CmpLT32S:
 		case Iop_CmpLT64S:
-			bytecode_op(f, "cmp_lts", ieb->arg1->type());
+			emit_bytecode_op(bytecode, "cmp_lts", ieb->arg1->type());
 			break;
 		case Iop_Shl64:
-			bytecode_op(f, "shl", ieb->arg1->type());
+			emit_bytecode_op(bytecode, "shl", ieb->arg1->type());
 			break;
 		case Iop_Shr64:
-			bytecode_op(f, "shr", ieb->arg1->type());
+			emit_bytecode_op(bytecode, "shr", ieb->arg1->type());
 			break;
 		case Iop_Sar64:
-			bytecode_op(f, "sar", ieb->arg1->type());
+			emit_bytecode_op(bytecode, "sar", ieb->arg1->type());
 			break;
 		default:
 			abort();
@@ -426,41 +372,41 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 	case Iex_Associative: {
 		IRExprAssociative *const iea = (IRExprAssociative *)expr;
 		assert(iea->nr_arguments != 0);
-		bytecode_eval_expr(f, iea->contents[0], ced, slots);
+		bytecode_eval_expr(bytecode, iea->contents[0], slots);
 		for (int i = 1; i < iea->nr_arguments; i++) {
-			bytecode_eval_expr(f, iea->contents[i], ced, slots);
+			bytecode_eval_expr(bytecode, iea->contents[i], slots);
 			switch (iea->op) {
 			case Iop_Add8:
 			case Iop_Add16:
 			case Iop_Add32:
 			case Iop_Add64:
-				bytecode_op(f, "add", iea->type());
+				emit_bytecode_op(bytecode, "add", iea->type());
 				break;
 			case Iop_And1:
 			case Iop_And8:
 			case Iop_And16:
 			case Iop_And32:
 			case Iop_And64:
-				bytecode_op(f, "and", iea->type());
+				emit_bytecode_op(bytecode, "and", iea->type());
 				break;
 			case Iop_Or1:
 			case Iop_Or8:
 			case Iop_Or16:
 			case Iop_Or32:
 			case Iop_Or64:
-				bytecode_op(f, "or", iea->type());
+				emit_bytecode_op(bytecode, "or", iea->type());
 				break;
 			case Iop_Xor8:
 			case Iop_Xor16:
 			case Iop_Xor32:
 			case Iop_Xor64:
-				bytecode_op(f, "xor", iea->type());
+				emit_bytecode_op(bytecode, "xor", iea->type());
 				break;
 			case Iop_Mul8:
 			case Iop_Mul16:
 			case Iop_Mul32:
 			case Iop_Mul64:
-				bytecode_op(f, "mul", iea->type());
+				emit_bytecode_op(bytecode, "mul", iea->type());
 				break;
 			default:
 				abort();
@@ -470,16 +416,8 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 	}
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)expr;
-		bytecode_eval_expr(f, iel->addr, ced, slots);
-		bytecode_op(f, "load", iel->ty);
-		break;
-	}
-	case Iex_Mux0X: {
-		IRExprMux0X *m = (IRExprMux0X *)expr;
-		bytecode_eval_expr(f, m->exprX, ced, slots);
-		bytecode_eval_expr(f, m->expr0, ced, slots);
-		bytecode_eval_expr(f, m->cond, ced, slots);
-		bytecode_op(f, "mux0x", m->expr0->type());
+		bytecode_eval_expr(bytecode, iel->addr, slots);
+		emit_bytecode_op(bytecode, "load", iel->ty);
 		break;
 	}
 	default:
@@ -488,19 +426,73 @@ bytecode_eval_expr(FILE *f, IRExpr *expr, crashEnforcementData &ced, const slotM
 }
 
 static void
-emit_validation(FILE *f, int ident, const char *name, const std::set<exprEvalPoint> &condition,
-		crashEnforcementData &ced, const slotMapT &slots)
+emit_validation(FILE *f,
+		const char *tag,
+		int ident,
+		const char *name,
+		bbdd *condition,
+		const slotMapT &slots)
 {
-	fprintf(f, "static const unsigned short instr_%d_%s[] = {\n", ident, name);
-	for (auto it = condition.begin();
-	     it != condition.end();
-	     it++) {
-		bytecode_eval_expr(f, it->e, ced, slots);
-		if (!it->invert)
-			bytecode_op(f, "not", Ity_I1);
-		fprintf(f, "    (unsigned short)bcop_fail_if,\n");
+	std::vector<const char *> bytecode;
+	sane_map<bbdd *, unsigned> validationOffsets;
+	std::vector<std::pair<bbdd *, unsigned> > relocs;
+	const char *branch = "bcop_branch";
+	const char *succeed = "bcop_succeed";
+	const char *fail = "bcop_fail";
+
+	assert(!condition->isLeaf());
+
+	bytecode_eval_expr(bytecode, condition->internal().condition, slots);
+
+	bytecode.push_back(branch);
+	relocs.push_back(std::pair<bbdd *, unsigned>(condition->internal().trueBranch,
+						     bytecode.size()));
+	bytecode.push_back((const char *)0xf001);
+	relocs.push_back(std::pair<bbdd *, unsigned>(condition->internal().falseBranch,
+						     bytecode.size()));
+	bytecode.push_back((const char *)0xf002);
+
+	while (!relocs.empty()) {
+		auto targ = relocs.back().first;
+		auto offset = relocs.back().second;
+		relocs.pop_back();
+
+		auto it_did_insert = validationOffsets.insert(targ, 0xcafe);
+		auto it = it_did_insert.first;
+		auto did_insert = it_did_insert.second;
+		if (did_insert) {
+			it->second = bytecode.size();
+			if (targ->isLeaf()) {
+				if (targ->leaf()) {
+					bytecode.push_back(succeed);
+				} else {
+					bytecode.push_back(fail);
+				}
+			} else {
+				bytecode_eval_expr(bytecode, targ->internal().condition, slots);
+				bytecode.push_back(branch);
+				relocs.push_back(std::pair<bbdd *, unsigned>
+						 (targ->internal().trueBranch,
+						  bytecode.size()));
+				bytecode.push_back((const char *)0xf003);
+				relocs.push_back(std::pair<bbdd *, unsigned>
+						 (targ->internal().falseBranch,
+						  bytecode.size()));
+				bytecode.push_back((const char *)0xf004);
+			}
+		}
+		bytecode[offset] = my_asprintf("%d", it->second);
 	}
-	fprintf(f, "    (unsigned short)bcop_succeed\n};\n");
+	fprintf(f, "static const unsigned short %s_%d_%s[] = {\n", tag, ident, name);
+	for (unsigned x = 0; x < bytecode.size(); x++) {
+		fprintf(f, "/* %3d */   %s,\n", x, bytecode[x]);
+		if (bytecode[x] != branch &&
+		    bytecode[x] != succeed &&
+		    bytecode[x] != fail) {
+			free((void *)bytecode[x]);
+		}
+	}
+	fprintf(f, "};\n");
 }
 
 struct cfg_annotation_summary {
@@ -508,10 +500,8 @@ struct cfg_annotation_summary {
 	unsigned rx_msg;
 	unsigned tx_msg;
 	unsigned long rip;
-	bool has_pre_validate;
-	bool has_rx_validate;
-	bool has_eval_validate;
-	bool has_control_validate;
+	bool has_after_regs;
+	bool has_after_control_flow;
 	const char *id;
 };
 
@@ -661,80 +651,17 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 		}
 		if (ced.expressionEvalPoints.count(oldLabel)) {
-			const std::set<exprEvalPoint> &sideConditions(ced.expressionEvalPoints[oldLabel]);
-			std::set<exprEvalPoint> pre_validate, rx_validate, eval_validate, control_validate;
-			std::set<input_expression> rxed, stashedData, stashedControl;
-			if (ced.happensBeforePoints.count(oldLabel)) {
-				const std::set<happensBeforeEdge *> &hbEdges(ced.happensBeforePoints[oldLabel]);
-				for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
-					happensBeforeEdge *hb = *it2;
-					if (hb->after->rip == oldLabel) {
-						for (auto it = hb->content.begin();
-						     !it.finished();
-						     it.advance()) {
-							rxed.insert(it.get());
-						}
-					}
-				}
+			bbdd *after_regs = ced.expressionEvalPoints.after_regs(oldLabel);
+			bbdd *after_control_flow = ced.expressionEvalPoints.after_control_flow(oldLabel);
+
+			assert(after_regs || after_control_flow);
+			if (after_regs) {
+				summary.has_after_regs = true;
+				emit_validation(f, "instr", newLabel, "after_regs", after_regs, slots);
 			}
-			if (ced.exprStashPoints.count(oldLabel)) {
-				const std::set<input_expression> &toStash(ced.exprStashPoints[oldLabel]);
-				for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
-					switch (it2->tag) {
-					case input_expression::inp_register:
-						stashedData.insert(*it2);
-						break;
-					case input_expression::inp_control_flow:
-						stashedControl.insert(*it2);
-						break;
-					case input_expression::inp_entry_point:
-						/* This is arguably a control-flow stash,
-						   but it happens right at the start of the
-						   instruction rather than right at the end,
-						   so it's available throughout the instruction
-						   and doesn't affect where we can do the eval,
-						   so we can just ignore it. */
-						break;
-					}
-				}
-			}
-			/* We need to decide where in the instruction
-			   cycle to evaluate this side-condition.  The
-			   options are at the very start, during
-			   message RX, after performing the data
-			   stash, or after performing the control flow
-			   stash.  We pick the earliest point at which
-			   we have all necessary information. */
-			/* (The instruction cycle always does RX
-			   before stash.) */
-			for (auto it = sideConditions.begin();
-			     it != sideConditions.end();
-			     it++) {
-				if (expressionDependsOn(it->e, stashedControl, false))
-					control_validate.insert(*it);
-				else if (expressionDependsOn(it->e, stashedData, false))
-					eval_validate.insert(*it);
-				else if (expressionDependsOn(it->e, rxed, true))
-					rx_validate.insert(*it);
-				else
-					pre_validate.insert(*it);
-			}
-			assert(!(pre_validate.empty() && rx_validate.empty() && eval_validate.empty() && control_validate.empty()));
-			if (!pre_validate.empty()) {
-				summary.has_pre_validate = true;
-				emit_validation(f, newLabel, "pre_validate", pre_validate, ced, slots);
-			}
-			if (!rx_validate.empty()) {
-				summary.has_rx_validate = true;
-				emit_validation(f, newLabel, "rx_validate", rx_validate, ced, slots);
-			}
-			if (!eval_validate.empty()) {
-				summary.has_eval_validate = true;
-				emit_validation(f, newLabel, "eval_validate", eval_validate, ced, slots);
-			}
-			if (!control_validate.empty()) {
-				summary.has_control_validate = true;
-				emit_validation(f, newLabel, "control_validate", control_validate, ced, slots);
+			if (after_control_flow) {
+				summary.has_after_control_flow = true;
+				emit_validation(f, "instr", newLabel, "after_control_flow", after_control_flow, slots);
 			}
 		}
 
@@ -749,16 +676,24 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 
 	/* Now for the message templates. */
 	std::set<happensBeforeEdge *> allHbEdges;
-	for (auto it = ced.happensBeforePoints.begin(); it != ced.happensBeforePoints.end(); it++)
-		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++)
-			allHbEdges.insert(*it2);
+	for (auto it = ced.happensBeforePoints.begin(); it != ced.happensBeforePoints.end(); it++) {
+		allHbEdges |= it->second;
+	}
 	for (auto it = allHbEdges.begin(); it != allHbEdges.end(); it++) {
 		happensBeforeEdge *hb = *it;
+		if (hb->sideCondition) {
+			emit_validation(f, "msg_filter", hb->msg_id, "filt",
+					hb->sideCondition, slots);
+		}
 		fprintf(f, "static struct msg_template msg_template_%x_tx;\n", hb->msg_id);
 		fprintf(f, "static struct msg_template msg_template_%x_rx = {\n", hb->msg_id);
 		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);
 		fprintf(f, "    .event_count = 0,\n");
 		fprintf(f, "    .pair = &msg_template_%x_tx,\n", hb->msg_id);
+		if (hb->sideCondition) {
+			fprintf(f, "    .side_condition = msg_filter_%d_filt,\n",
+				hb->msg_id);
+		}
 		fprintf(f, "    .payload_size = %zd,\n", hb->content.size());
 		fprintf(f, "    .payload = {");
 		for (auto it = hb->content.begin(); !it.finished(); it.advance()) {
@@ -818,22 +753,14 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "        .nr_tx_msg = 0,\n");
 			fprintf(f, "        .tx_msgs = NULL,\n");
 		}
-		if (it->second.has_pre_validate)
-			fprintf(f, "        .pre_validate = instr_%d_pre_validate,\n", it->first);
+		if (it->second.has_after_regs)
+			fprintf(f, "        .after_regs = instr_%d_after_regs,\n", it->first);
 		else
-			fprintf(f, "        .pre_validate = NULL,\n");
-		if (it->second.has_rx_validate)
-			fprintf(f, "        .rx_validate = instr_%d_rx_validate,\n", it->first);
+			fprintf(f, "        .after_regs = NULL,\n");
+		if (it->second.has_after_control_flow)
+			fprintf(f, "        .after_control_flow = instr_%d_after_control_flow,\n", it->first);
 		else
-			fprintf(f, "        .rx_validate = NULL,\n");
-		if (it->second.has_eval_validate)
-			fprintf(f, "        .eval_validate = instr_%d_eval_validate,\n", it->first);
-		else
-			fprintf(f, "        .eval_validate = NULL,\n");
-		if (it->second.has_control_validate)
-			fprintf(f, "        .control_flow_validate = instr_%d_control_validate,\n", it->first);
-		else
-			fprintf(f, "        .control_flow_validate = NULL,\n");
+			fprintf(f, "        .after_control_flow = NULL,\n");
 		fprintf(f, "        .id = \"%s\",\n", it->second.id);
 	}
 	fprintf(f, "    }\n};\n");
@@ -895,8 +822,9 @@ main(int argc, char *argv[])
 	int fd = open(ced_path, O_RDONLY);
 	if (fd < 0)
 		err(1, "open(%s)", ced_path);
+	SMScopes scopes;
 	crashEnforcementData ced;
-	loadCrashEnforcementData(ced, ms->addressSpace, fd);
+	loadCrashEnforcementData(&scopes.bools, ced, ms->addressSpace, fd);
 	close(fd);
 
 	FILE *f = fopen(output, "w");

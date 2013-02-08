@@ -51,9 +51,15 @@ enum byte_code_op {
 	/* Specials */
 	bcop_load,
 	bcop_badptr,
-	bcop_mux0x,
 
-	bcop_fail_if,
+	/* Two-way conditional branch.  Takes the top thing on the
+	   stack, which must be a bct_bit, and two immediate
+	   arguments.  The immediate arguments are offsets into the
+	   current bytecode program.  If the bit is one we jump to the
+	   first offset and if the bit is zero we jump to the second
+	   one. */
+	bcop_branch,
+	bcop_fail,
 	bcop_succeed,
 };
 
@@ -67,6 +73,8 @@ struct msg_template {
 	   compile-time, but this is the most convenient place to
 	   stash it. */
 	int event_count;
+
+	const unsigned short *side_condition;
 
 	/* For RX templates, this is the matching TX template.  For TX
 	   templates, it's the matching RX one. */
@@ -104,17 +112,10 @@ struct cfg_instr {
 	struct msg_template **rx_msgs;
 	int nr_tx_msg;
 	struct msg_template **tx_msgs;
-	/* Side conditions can be evaluated at one of four points:
 
-	   -- At the very beginning of the instruction.
-	   -- Just after receiving a message.
-	   -- Just after evaluating the original instruction.
-	   -- Just after doing control-flow stashes.
-	*/
-	const unsigned short *pre_validate;
-	const unsigned short *rx_validate;
-	const unsigned short *eval_validate;
-	const unsigned short *control_flow_validate;
+	/* Side condition checking points */
+	const unsigned short *after_regs;
+	const unsigned short *after_control_flow;
 
 	const char *id; /* Just for debug */
 	int cntr;
