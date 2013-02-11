@@ -117,6 +117,18 @@ happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 
 typedef Instruction<ThreadCfgLabel> *instr_t;
 
+static void
+print_expr_set(const std::set<input_expression> &s, FILE *f)
+{
+	fprintf(f, "{");
+	for (auto it = s.begin(); it != s.end(); it++) {
+		fprintf(f, "%s%s",
+			it == s.begin() ? "" : ", ",
+			it->name());
+	}
+	fprintf(f, "}");
+}
+
 /* Simplify a BBDD given that we know precisely where we're going to
    enter it.  We rely on the fact that any entry point expressions
    will always be at the root of the BDD. */
@@ -814,14 +826,9 @@ splitExpressionOnAvailability(bbdd::scope *scope,
 {
 	unordered_bbdd::reset();
 	if (debug_ubbdd) {
-		printf("Split expression, avail {");
-		for (auto it = avail.begin(); it != avail.end(); it++) {
-			if (it != avail.begin()) {
-				printf(", ");
-			}
-			printf("%s", it->name());
-		}
-		printf("}\n");
+		printf("Split expression, avail ");
+		print_expr_set(avail, stdout);
+		printf("\n");
 		what->prettyPrint(stdout);
 	}
 
@@ -1009,16 +1016,9 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		for (auto it = availabilityMap.begin();
 		     it != availabilityMap.end();
 		     it++) {
-			printf("\t%s -> {", it->first->rip.name());
-			for (auto it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++) {
-				if (it2 != it->second.begin()) {
-					printf(", ");
-				}
-				printf("%s", it2->name());
-			}
-			printf("}\n");
+			printf("\t%s -> ", it->first->rip.name());
+			print_expr_set(it->second, stdout);
+			printf("\n");
 		}
 	}
 
@@ -1061,16 +1061,9 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		for (auto it = availabilityMap.begin();
 		     it != availabilityMap.end();
 		     it++) {
-			printf("\t%s -> {", it->first->rip.name());
-			for (auto it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++) {
-				if (it2 != it->second.begin()) {
-					printf(", ");
-				}
-				printf("%s", it2->name());
-			}
-			printf("}\n");
+			printf("\t%s -> ", it->first->rip.name());
+			print_expr_set(it->second, stdout);
+			printf("\n");
 		}
 	}
 
@@ -1201,15 +1194,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 						  availabilityMap,
 						  stashMap));
 		if (debug_eem) {
-			printf("Avail with local stashes only: {");
-			for (auto it = availExprs.begin();
-			     it != availExprs.end();
-			     it++) {
-				if (it != availExprs.begin()) {
-					printf(", ");
-				}
-				printf("%s", it->name());
-			}
+			printf("Avail with local stashes only: ");
+			print_expr_set(availExprs, stdout);
 			printf("\n");
 		}
 
@@ -1236,103 +1222,134 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		   stashes in that state. */
 		if (hbMap.count(i->rip)) {
 			const std::set<happensBeforeEdge *> &hbEdges(hbMap[i->rip]);
-			happensBeforeEdge *rxed_edge = NULL;
-			happensBeforeEdge *txed_edge = NULL;
+
+			/* Process incoming messages first. */
+			bool haveIncomingEdge = false;
+			std::set<input_expression> rxed_expressions;
+			bbdd *rx_checked = scope->cnst(false);
 			for (auto it = hbEdges.begin();
 			     it != hbEdges.end();
 			     it++) {
 				auto hb = *it;
-				if (hb->after == i) {
-					assert(rxed_edge == NULL);
-					rxed_edge = hb;
+				if (hb->after != i) {
+					continue;
+				}
+				if (debug_eem) {
+					printf("RX edge:\n");
+					hb->prettyPrint(stdout);
+				}
+				if (haveIncomingEdge) {
+					rxed_expressions &= availOnEntryAndLocalStash(
+						hb->before,
+						predecessors,
+						availabilityMap,
+						stashMap);
 				} else {
-					assert(hb->before == i);
-					assert(txed_edge == NULL);
-					txed_edge = hb;
+					haveIncomingEdge = true;
+					rxed_expressions = availOnEntryAndLocalStash(
+						hb->before,
+						predecessors,
+						availabilityMap,
+						stashMap);
 				}
-			}
-
-			if (rxed_edge) {
-				availExprs |= availOnEntryAndLocalStash(rxed_edge->before,
-									predecessors,
-									availabilityMap,
-									stashMap);
-				if (debug_eem) {
-					printf("Avail with RX effects: {");
-					for (auto it = availExprs.begin();
-					     it != availExprs.end();
-					     it++) {
-						if (it != availExprs.begin()) {
-							printf(", ");
-						}
-						printf("%s", it->name());
-					}
-					printf("\n");
-				}
-
-				/* Anything evaluated as part of the
-				   edge can be discarded from our
-				   pending set without any further
-				   thought. */
-				if (rxed_edge->sideCondition) {
-					if (debug_eem) {
-						printf("Allow for on-edge evaluation of:\n");
-						rxed_edge->sideCondition->prettyPrint(stdout);
-					}
-					leftover = bbdd::assume(
+				if (hb->sideCondition) {
+					rx_checked = bbdd::Or(
 						scope,
-						leftover,
-						rxed_edge->sideCondition);
-					assert(leftover != NULL);
-					if (debug_eem) {
-						printf("New leftover:\n");
-						leftover->prettyPrint(stdout);
-					}
+						rx_checked,
+						hb->sideCondition);
+				} else {
+					rx_checked = scope->cnst(true);
 				}
 			}
 
-			if (txed_edge) {
-				/* Okay, figure out what the filter on
-				   this message is supposed to be. */
-				availExprs |= availOnEntryAndLocalStash(txed_edge->after,
-									predecessors,
-									availabilityMap,
-									stashMap);
-				if (debug_eem) {
-					printf("Avail with TX effects: {");
-					for (auto it = availExprs.begin();
-					     it != availExprs.end();
-					     it++) {
-						if (it != availExprs.begin()) {
-							printf(", ");
-						}
-						printf("%s", it->name());
-					}
-					printf("\n");
-				}
-
-				/* And now try doing another split to
-				   figure out what gets evaled in the
-				   message filter. */
-				auto split2 = splitExpressionOnAvailability(
+			if (haveIncomingEdge) {
+				availExprs |= rxed_expressions;
+				leftover = bbdd::assume(
 					scope,
 					leftover,
-					availExprs);
+					rx_checked);
+
 				if (debug_eem) {
-					printf("Left over after TX:\n");
-					split2.first->prettyPrint(stdout);
-					printf("Eval here after TX:\n");
-					split2.second->prettyPrint(stdout);
+					printf("Avail with RX effects: ");
+					print_expr_set(availExprs, stdout);
+					printf("\nrx_checked:\n");
+					rx_checked->prettyPrint(stdout);
+					printf("leftover:\n");
+					leftover->prettyPrint(stdout);
 				}
-				leftover = split2.first;
-				if (!split2.second->isLeaf()) {
-					assert(!txed_edge->sideCondition);
-					txed_edge->sideCondition = split2.second;
+			}
+
+
+			/* Now process message transmits */
+			std::set<input_expression> acquired_by_tx;
+			bool have_tx_edge = false;
+			bbdd *tx_leftover = NULL;
+
+			for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
+				auto hb = *it;
+				if (hb->before != i) {
+					continue;
 				}
 
-				assert(pendingPredecessors[txed_edge->after] > 0);
-				if (--pendingPredecessors[txed_edge->after] == 0) {
-					pendingInstrs.push_back(txed_edge->after);
+				if (debug_eem) {
+					printf("Consider TX edge:\n");
+					hb->prettyPrint(stdout);
+				}
+				assert(!hb->sideCondition);
+
+				std::set<input_expression> availOnOtherSide(
+					availOnEntryAndLocalStash(
+						hb->after,
+						predecessors,
+						availabilityMap,
+						stashMap));
+				if (have_tx_edge) {
+					acquired_by_tx &= availOnOtherSide;
+				} else {
+					acquired_by_tx = availOnOtherSide;
+					have_tx_edge = true;
+				}
+
+				std::set<input_expression> availForThisMessage(availExprs);
+				availForThisMessage |= availOnOtherSide;
+
+				/* What can we evaluate on this edge? */
+				auto split = splitExpressionOnAvailability(
+					scope,
+					leftover,
+					availForThisMessage);
+				if (debug_eem) {
+					printf("Eval here after TX:\n");
+					split.second->prettyPrint(stdout);
+				}
+				if (!split.second->isLeaf()) {
+					hb->sideCondition = split.second;
+				}
+				if (tx_leftover) {
+					tx_leftover = bbdd::Or(
+						scope,
+						tx_leftover,
+						split.first);
+				} else {
+					tx_leftover = split.first;
+				}
+
+				/* That might unblock our successor. */
+				assert(pendingPredecessors[hb->after] > 0);
+				if (--pendingPredecessors[hb->after] == 0) {
+					pendingInstrs.push_back(hb->after);
+				}
+			}
+
+			if (have_tx_edge) {
+				assert(tx_leftover);
+				availExprs |= acquired_by_tx;
+				leftover = tx_leftover;
+				if (debug_eem) {
+					printf("Avail with TX effects: ");
+					print_expr_set(availExprs, stdout);
+					printf("\ntx_leftover:\n");
+					tx_leftover->prettyPrint(stdout);
 				}
 			}
 		}
@@ -1340,15 +1357,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		/* Finally, look at control-flow related stashes */
 		availExprs = availabilityMap[i];
 		if (debug_eem) {
-			printf("Final avail: {");
-			for (auto it = availExprs.begin();
-			     it != availExprs.end();
-			     it++) {
-				if (it != availExprs.begin()) {
-					printf(", ");
-				}
-				printf("%s", it->name());
-			}
+			printf("Final avail: ");
+			print_expr_set(availExprs, stdout);
 			printf("\n");
 		}
 		auto split3 = splitExpressionOnAvailability(
@@ -1356,9 +1366,9 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			leftover,
 			availExprs);
 		if (debug_eem) {
-			printf("Left over after RX:\n");
+			printf("Left over after control flow:\n");
 			split3.first->prettyPrint(stdout);
-			printf("Eval here after RX:\n");
+			printf("Eval here after control flow:\n");
 			split3.second->prettyPrint(stdout);
 		}
 		leftover = split3.first;
