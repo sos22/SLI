@@ -537,6 +537,7 @@ reorder_for_avail(const unordered_bbdd *expr,
 	auto t = reorder_for_avail(expr->trueBranch, avail, memo);
 	auto f = reorder_for_avail(expr->falseBranch, avail, memo);
 	if (t == f) {
+		it->second = t;
 		return t;
 	}
 
