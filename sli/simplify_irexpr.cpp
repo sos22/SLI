@@ -2460,6 +2460,9 @@ top:
 			case Iop_64to32:
 				res = IRExpr_Const_U32(c->Ico.content.U64);
 				break;
+			case Iop_64HIto32:
+				res = IRExpr_Const_U32(c->Ico.content.U64 >> 32);
+				break;
 			case Iop_64to16:
 				res = IRExpr_Const_U16(c->Ico.content.U64);
 				break;
@@ -3139,6 +3142,12 @@ top:
 				res = IRExpr_Const_U128(
 					((IRExprConst *)l)->Ico.content.U64,
 					((IRExprConst *)r)->Ico.content.U64);
+				break;
+
+			case Iop_MullU32:
+				res = IRExpr_Const_U64(
+					(unsigned long)((IRExprConst *)l)->Ico.content.U32 *
+					(unsigned long)((IRExprConst *)r)->Ico.content.U32);
 				break;
 
 			default:
