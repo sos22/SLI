@@ -1597,6 +1597,7 @@ template std::map<StateMachineRes, bbdd *> _bdd<StateMachineRes, smrbdd>::to_sel
 template smrbdd *_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, smrbdd *);
 template smrbdd *const_bdd<StateMachineRes, smrbdd>::replaceTerminal(const_bdd_scope<smrbdd> *, StateMachineRes, StateMachineRes, smrbdd *);
 template void const_bdd_scope<smrbdd>::runGc(HeapVisitor &hv);
+template smrbdd *bdd_scope<smrbdd>::makeInternal(IRExpr *, const bdd_rank &, smrbdd *, smrbdd *);
 
 template void _bdd<IRExpr *, exprbdd>::prettyPrint(FILE *);
 template bool _bdd<IRExpr *, exprbdd>::_parse<exprbdd_scope, exprbdd::parseLeaf>(exprbdd_scope *, exprbdd **, const char *, const char **);
