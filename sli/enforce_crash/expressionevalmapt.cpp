@@ -633,7 +633,6 @@ fix_ordering(const reorder_bbdd *expr,
 	const reorder_bbdd *f = fix_ordering(expr->falseBranch, memo);
 	if (t == f) {
 		it->second = t;
-		sanity_check_reorder(it->second);
 		return it->second;
 	}
 
@@ -743,7 +742,6 @@ fix_ordering(const reorder_bbdd *expr,
 		}
 	}
 
-	sanity_check_reorder(it->second);
 	return it->second;
 }
 
