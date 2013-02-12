@@ -732,6 +732,7 @@ irexprAliasingClass(IRExpr *expr,
 		case Iop_Not64:
 		case Iop_Neg64:
 		case Iop_F32toF64:
+		case Iop_I32toF64:
 			return PointerAliasingSet::notAPointer;
 		default:
 			break;

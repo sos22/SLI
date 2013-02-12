@@ -3426,7 +3426,11 @@ isBadAddress(exprbdd *e)
 
 template <typename treeT, typename scopeT> static treeT *
 simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
-	    bool isAddress, std::map<treeT *, treeT *> &memo)
+	    bool
+#ifndef NDEBUG
+	    isAddress
+#endif
+	    , std::map<treeT *, treeT *> &memo)
 {
 	/* Only expr BDDs can be addresses, and they should be using
 	 * the specialisation below. */
