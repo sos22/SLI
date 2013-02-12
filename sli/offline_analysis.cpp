@@ -505,8 +505,9 @@ mapUnreached(smrbdd::scope *scope, StateMachine *inp, StateMachineRes res)
 {
 	std::vector<StateMachineTerminal *> terminals;
 	enumStates(inp, &terminals);
-	for (auto it = terminals.begin(); it != terminals.end(); it++)
+	for (auto it = terminals.begin(); !TIMEOUT && it != terminals.end(); it++) {
 		(*it)->set_res(smrbdd::replaceTerminal(scope, smr_unreached, res, (*it)->res));
+	}
 	return inp;
 }
 
@@ -1068,7 +1069,10 @@ considerStoreCFG(SMScopes *scopes,
 		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
 		return NULL;
 	}
-
+	if (atomicSurvival == scopes->bools.cnst(false)) {
+		fprintf(_logfile, "\t\tWrite machine constraint is false!\n");
+		return NULL;
+	}
 	fprintf(_logfile, "\t\tInferred assumption:\n");
 	atomicSurvival->prettyPrint(_logfile);
 

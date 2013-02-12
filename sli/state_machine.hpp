@@ -493,19 +493,25 @@ public:
 		: StateMachineState(vr, StateMachineState::Terminal),
 		  res(_res)
 	{
-		assert(res);
+		if (res == NULL && !TIMEOUT) {
+			abort();
+		}
 	}
 	StateMachineTerminal(StateMachineTerminal *base, smrbdd *_res)
 		: StateMachineState(base->dbg_origin, StateMachineState::Terminal),
 		  res(_res)
 	{
-		assert(res);
+		if (res == NULL && !TIMEOUT) {
+			abort();
+		}
 	}
 	smrbdd *const res;
 	bool set_res(smrbdd *_res)
 	{
 		bool r = res != _res;
-		assert(_res);
+		if (_res == NULL && !TIMEOUT) {
+			abort();
+		}
 		*(smrbdd **)&res = _res;
 		return r;
 	}

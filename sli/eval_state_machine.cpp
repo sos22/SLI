@@ -1413,7 +1413,9 @@ enumEvalPaths(SMScopes *scopes,
 		result->prettyPrint(stdout);
 	}
 
-	result = smrbdd::replaceTerminal(&scopes->smrs, smr_unreached, unreachedIs, result);
+	if (!TIMEOUT) {
+		result = smrbdd::replaceTerminal(&scopes->smrs, smr_unreached, unreachedIs, result);
+	}
 
 	if (debug_survival_constraint && result) {
 		printf("Unreached suppressed:\n");
