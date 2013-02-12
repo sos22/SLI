@@ -528,6 +528,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				unsigned long mod = num % denom;
 				return IRExpr_Const_U128(mod, div);
 			}
+			case Iop_CmpF64:
 			case Iop_F64toI64: {
 				/* It's not worth trying to constant
 				 * fold these ones. */
