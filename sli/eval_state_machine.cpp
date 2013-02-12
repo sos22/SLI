@@ -962,6 +962,9 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			return;
 		}
 		assertFalse(&scopes->bools, isBad, opt);
+		if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
+			return;
+		}
 	}
 
 	switch (smse->type) {
