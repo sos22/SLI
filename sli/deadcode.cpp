@@ -4,6 +4,7 @@
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
 #include "visitor.hpp"
+#include "stacked_cdf.hpp"
 
 namespace _deadCode {
 /* unconfuse emacs */
@@ -705,6 +706,9 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something, bo
 StateMachine *
 deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something, bool is_ssa)
 {
-	return _deadCode::deadCodeElimination(scopes, sm, done_something, is_ssa);
+	stackedCdf::startDeadcode();
+	auto res = _deadCode::deadCodeElimination(scopes, sm, done_something, is_ssa);
+	stackedCdf::stopDeadcode();
+	return res;
 }
 

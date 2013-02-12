@@ -8,6 +8,7 @@
 #include "allowable_optimisations.hpp"
 #include "visitor.hpp"
 #include "either.hpp"
+#include "stacked_cdf.hpp"
 
 /* Debug options: */
 #ifdef NDEBUG
@@ -1470,8 +1471,13 @@ availExpressionAnalysis(SMScopes *scopes,
 			OracleInterface *oracle,
 			bool *done_something)
 {
-	if (is_ssa)
-		return _availExpressionAnalysis::ssaAvailAnalysis(scopes, sm, done_something);
-	else
-		return _availExpressionAnalysis::availExpressionAnalysis(scopes, decode, sm, opt, oracle, done_something);
+	StateMachine *res;
+	stackedCdf::startAvailExpression();
+	if (is_ssa) {
+		res =_availExpressionAnalysis::ssaAvailAnalysis(scopes, sm, done_something);
+	} else {
+		res = _availExpressionAnalysis::availExpressionAnalysis(scopes, decode, sm, opt, oracle, done_something);
+	}
+	stackedCdf::stopAvailExpression();
+	return res;
 }

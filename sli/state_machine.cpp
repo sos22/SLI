@@ -10,6 +10,7 @@
 #include "alloc_mai.hpp"
 #include "allowable_optimisations.hpp"
 #include "visitor.hpp"
+#include "stacked_cdf.hpp"
 
 #include "libvex_parse.h"
 
@@ -29,12 +30,14 @@ AllowableOptimisations AllowableOptimisations::defaultOptimisations(7.3);
 StateMachine *
 StateMachine::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
+	stackedCdf::startLocalOptimise();
 	current_optimisation_gen++;
 	if (current_optimisation_gen == 0)
 		current_optimisation_gen = 1;
 
 	bool b = false;
 	StateMachineState *new_root = root->optimise(scopes, opt, &b);
+	stackedCdf::stopLocalOptimise();
 	if (b) {
 		*done_something = true;
 		return new StateMachine(new_root, cfg_roots);

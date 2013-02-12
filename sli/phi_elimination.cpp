@@ -11,6 +11,7 @@
 #include "bdd.hpp"
 #include "predecessor_map.hpp"
 #include "control_dependence_graph.hpp"
+#include "stacked_cdf.hpp"
 
 #ifndef NDEBUG
 static bool debug_build_paths = false;
@@ -318,5 +319,8 @@ phiElimination(SMScopes *scopes, StateMachine *sm,
 	       predecessor_map &pred, control_dependence_graph &cdg,
 	       bool *done_something)
 {
-	return _phi_elimination::phiElimination(scopes, sm, pred, cdg, done_something);
+	stackedCdf::startPhiElimination();
+	auto res = _phi_elimination::phiElimination(scopes, sm, pred, cdg, done_something);
+	stackedCdf::stopPhiElimination();
+	return res;
 }

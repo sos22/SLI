@@ -16,6 +16,7 @@
 #include "timers.hpp"
 #include "profile.hpp"
 #include "allowable_optimisations.hpp"
+#include "stacked_cdf.hpp"
 
 extern const char *__warning_tag;
 
@@ -170,6 +171,7 @@ consider_rip(const DynAnalysisRip &my_rip,
 	timeoutTimer.nextDue = now() + timeout;
 	timeoutTimer.schedule();
 
+	stackedCdf::start();
 	struct timeval start;
 	gettimeofday(&start, NULL);
 
@@ -181,6 +183,8 @@ consider_rip(const DynAnalysisRip &my_rip,
 
 	struct timeval end;
 	gettimeofday(&end, NULL);
+
+	stackedCdf::stop();
 
 	timeoutTimer.cancel();
 

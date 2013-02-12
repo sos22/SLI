@@ -6,6 +6,7 @@
 #include "control_dependence_graph.hpp"
 #include "alloc_mai.hpp"
 #include "predecessor_map.hpp"
+#include "stacked_cdf.hpp"
 
 namespace _realias {
 
@@ -2037,7 +2038,10 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *mach
 		      control_dependence_graph &cdg, predecessor_map &pm,
 		      bool *done_something)
 {
-	return _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdg, pm, done_something);
+	stackedCdf::startLoadElimination();
+	auto res = _realias::functionAliasAnalysis(scopes, decode, machine, opt, oracle, cdg, pm, done_something);
+	stackedCdf::stopLoadElimination();
+	return res;
 }
 
 #if !CONFIG_NO_STATIC_ALIASING

@@ -2,6 +2,7 @@
 #include "control_dependence_graph.hpp"
 #include "state_machine.hpp"
 #include "offline_analysis.hpp"
+#include "stacked_cdf.hpp"
 
 #ifndef NDEBUG
 static bool debug_control_dependence = false;
@@ -20,6 +21,7 @@ control_dependence_graph::domOf(const StateMachineState *s) const
 control_dependence_graph::control_dependence_graph(const StateMachine *sm,
 						   bbdd::scope *scope)
 {
+	stackedCdf::startBuildCDG();
 	std::map<const StateMachineState *, int> labels;
 
 	if (debug_control_dependence) {
@@ -135,6 +137,7 @@ control_dependence_graph::control_dependence_graph(const StateMachine *sm,
 			break;
 		}
 	}
+	stackedCdf::stopBuildCDG();
 }
 
 bbdd *

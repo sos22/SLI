@@ -1,6 +1,7 @@
 #include "sli.h"
 #include "bdd.hpp"
 #include "simplify_irexpr.hpp"
+#include "stacked_cdf.hpp"
 
 #include "bdd_tmpl.cpp"
 
@@ -1261,7 +1262,10 @@ exprbdd::to_irexpr(exprbdd *what)
 	if (!what)
 		return NULL;
 	std::map<exprbdd *, IRExpr *> memo;
-	return to_irexpr(what, memo);
+	stackedCdf::startBDD();
+	auto res = to_irexpr(what, memo);
+	stackedCdf::stopBDD();
+	return res;
 }
 
 exprbdd *
@@ -1515,7 +1519,10 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr)
 		return NULL;
 	assert(expr->type() == Ity_I1);
 	std::map<exprbdd *, bbdd *> memo;
-	return to_bbdd(scope, expr, memo);
+	stackedCdf::startBDD();
+	auto res = to_bbdd(scope, expr, memo);
+	stackedCdf::stopBDD();
+	return res;
 }
 
 class ignore_unreached_internal {

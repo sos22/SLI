@@ -11,6 +11,7 @@
 #include "alloc_mai.hpp"
 #include "bdd.hpp"
 #include "ssa.hpp"
+#include "stacked_cdf.hpp"
 
 #ifdef NDEBUG
 #define debug_survival_constraint false
@@ -2055,6 +2056,7 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			       const VexPtr<MaiMap, &ir_heap> &mai,
 			       GarbageCollectionToken token)
 {
+	stackedCdf::startCrashConstraint();
 	int fake_cntr = 0; /* a counter of fakes, not a fake counter */
 	__set_profiling(evalCrossProductMachine);
 
@@ -2068,12 +2070,15 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 	std::map<threadAndRegister, threadAndRegister> ssaCorrespondence;
 	StateMachine *strippedProbe = probeMachine;
 	StateMachine *strippedStore = storeMachine;
+	stackedCdf::startCrashConstraintResimplify();
 #if !CONFIG_NO_STATIC_ALIASING
 	strippedProbe = stripUninterpretableAnnotations(probeMachine);
 	strippedStore = stripUninterpretableAnnotations(storeMachine);
 #endif
 	strippedProbe = mapUnreached(&scopes->smrs, strippedProbe, smr_survive);
 	strippedStore = mapUnreached(&scopes->smrs, strippedStore, smr_survive);
+	stackedCdf::stopCrashConstraintResimplify();
+	stackedCdf::startCrashConstraintBuildCross();
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
 			scopes,
@@ -2086,9 +2091,13 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			opt,
 			smr_survive,
 			ssaCorrespondence));
-	if (!crossProductMachine)
+	stackedCdf::stopCrashConstraintBuildCross();
+	if (!crossProductMachine) {
+		stackedCdf::stopCrashConstraint();
 		return NULL;
+	}
 	bool ignore;
+	stackedCdf::startCrashConstraintResimplify();
 	optimiseAssuming(scopes, crossProductMachine, initialStateCondition, &ignore);
 	crossProductMachine =
 		optimiseStateMachine(
@@ -2100,7 +2109,9 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			true,
 			token);
 	crossProductMachine = mapUnreached(&scopes->smrs, crossProductMachine, smr_survive);
+	stackedCdf::stopCrashConstraintResimplify();
 
+	stackedCdf::startCrashConstraintSymbolicExecute();
 	bbdd *res_ssa = survivalConstraintIfExecutedAtomically(
 		scopes,
 		decode,
@@ -2110,10 +2121,14 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 		true,
 		opt,
 		token);
-	if (!res_ssa)
+	stackedCdf::stopCrashConstraintSymbolicExecute();
+	if (!res_ssa) {
+		stackedCdf::stopCrashConstraint();
 		return NULL;
-
-	return deSsa(&scopes->bools, res_ssa, ssaCorrespondence);
+	}
+	auto res = deSsa(&scopes->bools, res_ssa, ssaCorrespondence);
+	stackedCdf::stopCrashConstraint();
+	return res;
 }
 
 /* Transform @machine so that wherever it would previously branch to
@@ -2259,20 +2274,26 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 				  const AllowableOptimisations &opt,
 				  GarbageCollectionToken token)
 {
+	stackedCdf::startBuildWAtomic();
 	__set_profiling(writeMachineSuitabilityConstraint);
 
 	VexPtr<StateMachine, &ir_heap> combinedMachine;
 
 	writeMachine->assertAcyclic();
 	readMachine->assertAcyclic();
+	stackedCdf::startBuildWAtomicMachine();
 	combinedMachine = concatenateStateMachinesCrashing(
 		scopes,
 		writeMachine,
 		readMachine,
 		smr_crash);
-	if (TIMEOUT)
+	stackedCdf::stopBuildWAtomicMachine();
+	if (TIMEOUT) {
+		stackedCdf::stopBuildWAtomic();
 		return NULL;
+	}
 	combinedMachine->assertAcyclic();
+	stackedCdf::startBuildWAtomicResimplify();
 	combinedMachine = mapUnreached(&scopes->smrs, combinedMachine, smr_crash);
 	combinedMachine = optimiseStateMachine(scopes,
 					       mai,
@@ -2285,6 +2306,8 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 					       oracle,
 					       true,
 					       token);
+	stackedCdf::stopBuildWAtomicResimplify();
+	stackedCdf::startBuildWAtomicSymbolicExecute();
 	auto res = survivalConstraintIfExecutedAtomically(
 		scopes,
 		mai,
@@ -2294,9 +2317,11 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 		false,
 		opt,
 		token);
+	stackedCdf::stopBuildWAtomicSymbolicExecute();
 	if (res) {
 		res = bbdd::And(&scopes->bools, res, assumption);
 	}
+	stackedCdf::stopBuildWAtomic();
 	return res;
 }
 

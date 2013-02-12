@@ -703,7 +703,10 @@ template <typename constT, typename subtreeT> template <IRExpr *mkConst(constT)>
 const_bdd<constT, subtreeT>::to_irexpr(subtreeT *what)
 {
 	std::map<subtreeT *, IRExpr *> memo;
-	return to_irexpr<mkConst>(what, memo);
+	stackedCdf::startBDD();
+	auto res = to_irexpr<mkConst>(what, memo);
+	stackedCdf::stopBDD();
+	return res;
 }
 
 template <typename constT, typename subtreeT> template <typename scopeT> const std::map<constT, bbdd *> &
@@ -798,7 +801,10 @@ template <typename constT, typename subtreeT> template <typename scopeT> std::ma
 _bdd<constT, subtreeT>::to_selectors(scopeT *scope, subtreeT *what)
 {
 	std::map<subtreeT *, std::map<constT, bbdd *> > memo;
-	return to_selectors(scope, what, memo);
+	stackedCdf::startBDD();
+	auto res = to_selectors(scope, what, memo);
+	stackedCdf::stopBDD();
+	return res;
 }
 
 template <typename subtreeT, typename scopeT> class ifelse_zip_internal {
@@ -916,7 +922,10 @@ const_bdd<constT, subtreeT>::replaceTerminal(scope *scp,
 					     subtreeT *in)
 {
 	std::map<subtreeT *, subtreeT *> memo;
-	return replaceTerminal(scp, from, to, in, memo);
+	stackedCdf::startBDD();
+	auto res = replaceTerminal(scp, from, to, in, memo);
+	stackedCdf::stopBDD();
+	return res;
 }
 
 template <typename t> void
@@ -1014,6 +1023,7 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 	if (rootZip.isLeaf())
 		return rootZip.leafzip();
 
+	stackedCdf::startBDD();
 	subtreeT *newRoot;
 	typedef _relocKeyT<zipInternalT> relocKeyT;
 	std::map<relocKeyT, std::vector<subtreeT **> > relocs;
@@ -1057,14 +1067,17 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 	std::map<zipInternalT, std::vector<subtreeT **> > leafRelocs;
 
 	while (!relocs.empty()) {
-		if (TIMEOUT)
+		if (TIMEOUT) {
+			stackedCdf::stopBDD();
 			return NULL;
+		}
 
 		/* Somewhat arbitrary limit to avoid running out of
 		 * memory. */
 		if (relocs.size() >= 250000) {
 			warning("Hit arbitrary limit in %s, forcing it to fail!\n", __func__);
 			_timed_out = true;
+			stackedCdf::stopBDD();
 			return NULL;
 		}
 
@@ -1121,8 +1134,10 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 	std::map<subtreeT *, subtreeT *> reduced;
 
 	while (!leafRelocs.empty()) {
-		if (TIMEOUT)
+		if (TIMEOUT) {
+			stackedCdf::stopBDD();
 			return NULL;
+		}
 		auto it = leafRelocs.begin();
 		const zipInternalT &leafNode(it->first);
 		const std::vector<subtreeT **> &relocs(it->second);
@@ -1136,6 +1151,8 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 
 	/* Now use the scope to fully reduce it. */
 	newRoot = reduceBdd<scopeT, zipInternalT>(scope, reduced, newRoot);
+
+	stackedCdf::stopBDD();
 
 	return newRoot;
 }

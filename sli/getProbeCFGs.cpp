@@ -4,6 +4,7 @@
 #include "oracle.hpp"
 #include "cfgnode.hpp"
 #include "hash_table.hpp"
+#include "stacked_cdf.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -691,14 +692,19 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 
 bool
 getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const VexRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
-	     HashedSet<HashedPtr<const CFGNode> > &targetNodes)
+	     HashedSet<HashedPtr<const CFGNode> > &targetNodes, int threshold)
 {
-	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, PROBE_CLUSTER_THRESHOLD);
+	bool res;
+	stackedCdf::startGetProbeCFGs();
+	res = _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, threshold);
+	stackedCdf::stopGetProbeCFGs();
+	return res;
 }
 
 bool
 getProbeCFGs(CfgLabelAllocator &allocLabel, Oracle *oracle, const VexRip &vr, HashedSet<HashedPtr<CFGNode> > &out,
-	     HashedSet<HashedPtr<const CFGNode> > &targetNodes, int threshold)
+	     HashedSet<HashedPtr<const CFGNode> > &targetNodes)
 {
-	return _getProbeCFGs::getProbeCFG(allocLabel, oracle, vr, out, targetNodes, threshold);
+	return getProbeCFGs(allocLabel, oracle, vr, out, targetNodes, PROBE_CLUSTER_THRESHOLD);
 }
+
