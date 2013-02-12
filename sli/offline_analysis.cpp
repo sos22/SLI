@@ -1043,6 +1043,10 @@ considerStoreCFG(SMScopes *scopes,
 		if (!atomicSurvival) {
 			return NULL;
 		}
+		if (atomicSurvival == scopes->bools.cnst(false)) {
+			fprintf(_logfile, "\t\tCannot survive when run atomically -> give up\n");
+			return NULL;
+		}
 		bool needReopt = false;
 		optimiseAssuming(scopes, probeMachine, atomicSurvival, &needReopt);
 		if (needReopt) {
@@ -1489,7 +1493,10 @@ diagnoseCrash(SMScopes *scopes,
 	if (!atomicSurvival) {
 		return NULL;
 	}
-
+	if (atomicSurvival == scopes->bools.cnst(false)) {
+		fprintf(_logfile, "\t\tAtomic constraint of reduced machine is <false> -> no crash possible\n");
+		return NULL;
+	}
 	bool needReopt = false;
 	optimiseAssuming(scopes, probeMachine, atomicSurvival, &needReopt);
 	if (needReopt) {
