@@ -543,7 +543,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 		if (r) {
 			it->second = exprbdd::to_irexpr(r);
 		} else {
-			it->second = NULL;
+			it->second = what;
 		}
 		break;
 	}
