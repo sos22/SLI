@@ -8,9 +8,11 @@
 
 #ifndef NDEBUG
 static bool debug_eem = false;
+static bool debug_eem_schedule = false;
 static bool debug_ubbdd = false;
 #else
 #define debug_eem false
+#define debug_eem_schedule false
 #define debug_ubbdd false
 #endif
 
@@ -254,19 +256,62 @@ evaluatable(IRExpr *what, const std::set<input_expression> &avail)
 	return visit_irexpr(&avail, &visitor, what) == visit_continue;
 }
 
-/* Like a BBDD, but doesn't immediately fail if you violate the
- * ordering constraints. */
-/* Maintaining ordering is still useful from a performance point of
-   view, especially if you're later going to convert it back to a
-   BBDD */
-class unordered_bbdd : public GarbageCollected<unordered_bbdd, &ir_heap> {
+/* These represent variables in the new BDD ordering. */
+class reorder_bbdd_cond : public Named {
+	reorder_bbdd_cond()
+		: rank(),
+		  cond((IRExpr *)0xf001),
+		  evaluatable((bool)97)
+	{}
+	char *mkName() const {
+		return my_asprintf("expr = %s, %sevaluatable",
+				   nameIRExpr(cond),
+				   evaluatable ? "" : "not ");
+	}
+public:
+	const bdd_rank rank;
+	IRExpr *const cond;
+	const bool evaluatable;
+
+	static reorder_bbdd_cond leaf() {
+		return reorder_bbdd_cond();
+	}
+	reorder_bbdd_cond(const bdd_rank &_rank,
+			  IRExpr *_cond,
+			  bool _evaluatable)
+		: rank(_rank), cond(_cond), evaluatable(_evaluatable)
+	{
+	}
+
+	bool operator ==(const reorder_bbdd_cond &o) const {
+		if (cond != o.cond) {
+			return false;
+		}
+		assert(rank == o.rank);
+		assert(evaluatable == o.evaluatable);
+		return true;
+	}
+	bool operator <(const reorder_bbdd_cond &o) const {
+		if (evaluatable < o.evaluatable) {
+			return false;
+		} else if (evaluatable > o.evaluatable) {
+			return true;
+		} else {
+			return rank < o.rank;
+		}
+	}
+};
+
+/* Like BBDD, but order according to reorder_bbdd_cond rather than the
+   simple bdd_rank. */
+class reorder_bbdd : public GarbageCollected<reorder_bbdd, &ir_heap> {
 	struct memo_key {
 		IRExpr *cond;
-		const unordered_bbdd *trueBranch;
-		const unordered_bbdd *falseBranch;
+		const reorder_bbdd *trueBranch;
+		const reorder_bbdd *falseBranch;
 		memo_key(IRExpr *_cond,
-			 const unordered_bbdd *_trueBranch,
-			 const unordered_bbdd *_falseBranch)
+			 const reorder_bbdd *_trueBranch,
+			 const reorder_bbdd *_falseBranch)
 			: cond(_cond),
 			  trueBranch(_trueBranch),
 			  falseBranch(_falseBranch)
@@ -285,31 +330,39 @@ class unordered_bbdd : public GarbageCollected<unordered_bbdd, &ir_heap> {
 			}
 		}
 	};
-	static sane_map<memo_key, unordered_bbdd *> memo;
-	static const unordered_bbdd *trueConst;
-	static const unordered_bbdd *falseConst;
+	static sane_map<memo_key, reorder_bbdd *> memo;
+	static const reorder_bbdd *trueConst;
+	static const reorder_bbdd *falseConst;
 
-	explicit unordered_bbdd(bool v)
+	explicit reorder_bbdd(bool v)
 		: in_table(false),
 		  isLeaf(true),
 		  leaf(v),
-		  condition((IRExpr *)0xf001),
-		  trueBranch((unordered_bbdd *)0xdead),
-		  falseBranch((unordered_bbdd *)0xbeef)
+		  cond(reorder_bbdd_cond::leaf()),
+		  trueBranch((const reorder_bbdd *)0xfead),
+		  falseBranch((const reorder_bbdd *)0xb00f)
 	{}
 
-	unordered_bbdd *_intern()
+	reorder_bbdd *_intern()
 	{
 		if (isLeaf || in_table) {
 			return this;
 		}
-		trueBranch = const_cast<unordered_bbdd *>(trueBranch)->_intern();
-		falseBranch = const_cast<unordered_bbdd *>(falseBranch)->_intern();
-		auto it_did_insert = memo.insert(memo_key(condition, trueBranch, falseBranch), this);
+		trueBranch = const_cast<reorder_bbdd *>(trueBranch)->_intern();
+		falseBranch = const_cast<reorder_bbdd *>(falseBranch)->_intern();
+		assert(trueBranch->isLeaf || trueBranch->in_table);
+		assert(falseBranch->isLeaf || falseBranch->in_table);
+		auto it_did_insert = memo.insert(memo_key(cond.cond, trueBranch, falseBranch), this);
 		auto it = it_did_insert.first;
 		auto did_insert = it_did_insert.second;
 		if (did_insert) {
 			in_table = true;
+		} else {
+			auto r = it->second;
+			assert(r->cond == cond);
+			assert(r->trueBranch == trueBranch);
+			assert(r->falseBranch == falseBranch);
+			assert(r->in_table);
 		}
 		return it->second;
 	}
@@ -318,53 +371,67 @@ class unordered_bbdd : public GarbageCollected<unordered_bbdd, &ir_heap> {
 public:
 	bool isLeaf;
 	bool leaf;
-	IRExpr *condition;
-	bdd_rank rank;
-	const unordered_bbdd *trueBranch;
-	const unordered_bbdd *falseBranch;
+	reorder_bbdd_cond cond;
+	const reorder_bbdd *trueBranch;
+	const reorder_bbdd *falseBranch;
 
-	unordered_bbdd()
-		: in_table(false)
+	reorder_bbdd(const reorder_bbdd_cond &_cond,
+		     const reorder_bbdd *_trueBranch,
+		     const reorder_bbdd *_falseBranch)
+		: in_table(false), isLeaf(false), leaf(bool(96)), cond(_cond),
+		  trueBranch(_trueBranch), falseBranch(_falseBranch)
 	{}
-
-	static const unordered_bbdd *Leaf(bool l) {
+	static const reorder_bbdd *Leaf(bool l) {
 		if (l) {
 			return trueConst;
 		} else {
 			return falseConst;
 		}
 	}
-	static const unordered_bbdd *Node(IRExpr *condition,
-					  const bdd_rank &rank,
-					  const unordered_bbdd *t,
-					  const unordered_bbdd *f)
+	static const reorder_bbdd *Node(const reorder_bbdd_cond &cond,
+					const reorder_bbdd *t,
+					const reorder_bbdd *f)
 	{
+		assert(t->isLeaf || t->in_table);
+		assert(f->isLeaf || f->in_table);
+		if (t->cond == cond) {
+			t = t->trueBranch;
+			assert(t->isLeaf || !(t->cond == cond));
+		}
+		if (f->cond == cond) {
+			f = f->falseBranch;
+			assert(f->isLeaf || !(f->cond == cond));
+		}
+		if (t == f) {
+			return t;
+		}
 		auto it_did_insert =
-			memo.insert(memo_key(condition, t, f), (unordered_bbdd *)0xcafe);
+			memo.insert(memo_key(cond.cond, t, f), (reorder_bbdd *)0xcafe);
 		auto it = it_did_insert.first;
 		auto did_insert = it_did_insert.second;
 		if (!did_insert) {
+			assert(it->second->in_table);
+			assert(!it->second->isLeaf);
+			assert(it->second->cond == cond);
+			assert(it->second->trueBranch == t);
+			assert(it->second->falseBranch == f);
 			return it->second;
 		}
-		unordered_bbdd *res = new unordered_bbdd();
-		res->in_table = true;
-		res->isLeaf = false;
-		res->leaf = (bool)99;
-		res->condition = condition;
-		res->rank = rank;
-		res->trueBranch = t;
-		res->falseBranch = f;
+		reorder_bbdd *res = new reorder_bbdd(cond, t, f);
 		it->second = res;
-		return res;
+		res->in_table = true;
+		const reorder_bbdd *res2 = res->intern();
+		assert(res2->in_table);
+		return res2;
 	}
-	const unordered_bbdd *intern()
+	const reorder_bbdd *intern()
 	{
 		return _intern();
 	}
 	static void reset() {
 		memo.clear();
-		trueConst = new unordered_bbdd(true);
-		falseConst = new unordered_bbdd(false);
+		trueConst = new reorder_bbdd(true);
+		falseConst = new reorder_bbdd(false);
 	}
 	void visit(HeapVisitor &) {
 		/* These should never be live at GC time. */
@@ -372,21 +439,21 @@ public:
 	}
 	NAMED_CLASS
 };
-sane_map<unordered_bbdd::memo_key, unordered_bbdd *> unordered_bbdd::memo;
-const unordered_bbdd *unordered_bbdd::trueConst;
-const unordered_bbdd *unordered_bbdd::falseConst;
+sane_map<reorder_bbdd::memo_key, reorder_bbdd *> reorder_bbdd::memo;
+const reorder_bbdd *reorder_bbdd::trueConst;
+const reorder_bbdd *reorder_bbdd::falseConst;
 
-/* Print an unordered_bbdd to stdout, for debugging. */
+/* Print a reorder_bbdd to stdout, for debugging. */
 #ifndef NDEBUG
 static void
-pp_unordered(const unordered_bbdd *bbdd)
+pp_reorder(const reorder_bbdd *bbdd)
 {
-	sane_map<const unordered_bbdd *, int> labels;
+	sane_map<const reorder_bbdd *, int> labels;
 	int next_label = 1;
-	std::vector<const unordered_bbdd *> pending;
+	std::vector<const reorder_bbdd *> pending;
 	pending.push_back(bbdd);
 	while (!pending.empty()) {
-		const unordered_bbdd *q = pending.back();
+		const reorder_bbdd *q = pending.back();
 		pending.pop_back();
 		if (!q) {
 			continue;
@@ -416,9 +483,9 @@ pp_unordered(const unordered_bbdd *bbdd)
 		}
 	}
 
-	std::set<const unordered_bbdd *> printed;
-	std::vector<std::pair<const unordered_bbdd *, int> > pqueue;
-	pqueue.push_back(std::pair<const unordered_bbdd *, int>(bbdd, 0));
+	std::set<const reorder_bbdd *> printed;
+	std::vector<std::pair<const reorder_bbdd *, int> > pqueue;
+	pqueue.push_back(std::pair<const reorder_bbdd *, int>(bbdd, 0));
 	while (!pqueue.empty()) {
 		auto q = pqueue.back();
 		pqueue.pop_back();
@@ -452,58 +519,86 @@ pp_unordered(const unordered_bbdd *bbdd)
 				printf("false");
 			}
 		} else {
-			printf("ife %s", nameIRExpr(q.first->condition));
-			pqueue.push_back(std::pair<const unordered_bbdd *, int>(q.first->falseBranch, q.second + 1));
-			pqueue.push_back(std::pair<const unordered_bbdd *, int>(q.first->trueBranch, q.second + 1));
+			printf("ife %s", q.first->cond.name());
+			pqueue.push_back(std::pair<const reorder_bbdd *, int>(q.first->falseBranch, q.second + 1));
+			pqueue.push_back(std::pair<const reorder_bbdd *, int>(q.first->trueBranch, q.second + 1));
 		}
 		printf("\n");
 	}
 }
+static void
+sanity_check_reorder(const reorder_bbdd *what)
+{
+	std::set<const reorder_bbdd *> visited;
+	std::vector<const reorder_bbdd *> q;
+
+	q.push_back(what);
+	while (!q.empty()) {
+		auto i = q.back();
+		q.pop_back();
+		if (i->isLeaf) {
+			continue;
+		}
+		if (!visited.insert(i).second) {
+			continue;
+		}
+		assert(i->trueBranch != what);
+		assert(i->falseBranch != what);
+		assert(i->trueBranch != i->falseBranch);
+		assert(i->trueBranch->isLeaf || i->cond < i->trueBranch->cond);
+		assert(i->falseBranch->isLeaf || i->cond < i->falseBranch->cond);
+		q.push_back(i->trueBranch);
+		q.push_back(i->falseBranch);
+	}
+}
 #else
 static void
-pp_unordered(const unordered_bbdd *)
+pp_reorder(const reorder_bbdd *)
+{
+}
+static void
+sanity_check_reorder(const reorder_bbdd *)
 {
 }
 #endif
 
 /* Convert @what to an unordered BBDD */
-static const unordered_bbdd *
-bbdd_to_unordered(bbdd *what)
+static const reorder_bbdd *
+bbdd_to_reorder(bbdd *what, const std::set<input_expression> &avail)
 {
-	std::map<bbdd *, unordered_bbdd *> memo;
-	std::vector<std::pair<const unordered_bbdd **, bbdd *> > relocs;
-	unordered_bbdd *newRoot;
+	sane_map<bbdd *, reorder_bbdd *> memo;
+	std::vector<std::pair<const reorder_bbdd **, bbdd *> > relocs;
+	reorder_bbdd *newRoot;
 
 	/* Shut compiler up */
-	newRoot = (unordered_bbdd *)0xf001;
+	newRoot = (reorder_bbdd *)0xf001;
 
-	relocs.push_back(std::pair<const unordered_bbdd **, bbdd *>(
-				 const_cast<const unordered_bbdd **>(&newRoot),
+	relocs.push_back(std::pair<const reorder_bbdd **, bbdd *>(
+				 const_cast<const reorder_bbdd **>(&newRoot),
 				 what));
 	while (!relocs.empty()) {
 		auto a = relocs.back();
 		relocs.pop_back();
-		auto it_did_insert = memo.insert(std::pair<bbdd *, unordered_bbdd *>(a.second, (unordered_bbdd *)0xdead));
+		auto it_did_insert = memo.insert(a.second, (reorder_bbdd *)0xdead);
 		auto it = it_did_insert.first;
 		auto did_insert = it_did_insert.second;
 		if (did_insert) {
-			unordered_bbdd *res;
+			reorder_bbdd *res;
 			if (a.second->isLeaf()) {
-				res = (unordered_bbdd *)unordered_bbdd::Leaf(a.second->leaf());
+				res = (reorder_bbdd *)reorder_bbdd::Leaf(a.second->leaf());
 			} else {
-				res = new unordered_bbdd();
-				res->isLeaf = false;
-				res->leaf = (bool)98;
-				res->condition = a.second->internal().condition;
-				res->rank = a.second->internal().rank;
-				res->trueBranch = (unordered_bbdd *)0xf001;
-				res->falseBranch = (unordered_bbdd *)0xbabe;
+				res = new reorder_bbdd(
+					reorder_bbdd_cond(a.second->internal().rank,
+							  a.second->internal().condition,
+							  evaluatable(a.second->internal().condition, avail)),
+					(reorder_bbdd *)0xf001,
+					(reorder_bbdd *)0xbabe);
 				relocs.push_back(
-					std::pair<const unordered_bbdd **, bbdd *>
+					std::pair<const reorder_bbdd **, bbdd *>
 					(&res->trueBranch,
 					 a.second->internal().trueBranch));
 				relocs.push_back(
-					std::pair<const unordered_bbdd **, bbdd *>
+					std::pair<const reorder_bbdd **, bbdd *>
 					(&res->falseBranch,
 					 a.second->internal().falseBranch));
 			}
@@ -514,19 +609,19 @@ bbdd_to_unordered(bbdd *what)
 	return newRoot->intern();
 }
 
-/* Restructre @expr so that any expressions which can be evaluated
-   using only @avail will be evaluated before any which cannot be so
-   evaluated. */
-static const unordered_bbdd *
-reorder_for_avail(const unordered_bbdd *expr,
-		  const std::set<input_expression> &avail,
-		  sane_map<const unordered_bbdd *, const unordered_bbdd *> &memo)
+/* Fix up @expr to use the correct ordering. */
+static const reorder_bbdd *
+fix_ordering(const reorder_bbdd *expr,
+	     sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo)
 {
 	if (expr->isLeaf ||
 	    (expr->trueBranch->isLeaf && expr->falseBranch->isLeaf)) {
 		return expr;
 	}
-	auto it_did_insert = memo.insert(expr, (const unordered_bbdd *)0xfee1);
+	assert(expr->trueBranch != expr->falseBranch);
+	assert(expr->trueBranch->isLeaf || !(expr->cond == expr->trueBranch->cond));
+	assert(expr->falseBranch->isLeaf || !(expr->cond == expr->falseBranch->cond));
+	auto it_did_insert = memo.insert(expr, (const reorder_bbdd *)0xfee1);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -534,199 +629,139 @@ reorder_for_avail(const unordered_bbdd *expr,
 	}
 
 	/* Convert child trees first */
-	auto t = reorder_for_avail(expr->trueBranch, avail, memo);
-	auto f = reorder_for_avail(expr->falseBranch, avail, memo);
+	const reorder_bbdd *t = fix_ordering(expr->trueBranch, memo);
+	const reorder_bbdd *f = fix_ordering(expr->falseBranch, memo);
 	if (t == f) {
-		return t;
+		it->second = t;
+		sanity_check_reorder(it->second);
+		return it->second;
 	}
 
-	/* ife(a, b, c) -> construct a node taking the condition from
-	   a.  The true and false branches are b and c */
-	struct {
-		const unordered_bbdd *operator()(
-			const unordered_bbdd *key_from,
-			const unordered_bbdd *t,
-			const unordered_bbdd *f) {
-			if (t == f) {
-				return t;
+	const reorder_bbdd *res;
+	if (!t->isLeaf && t->cond < expr->cond) {
+		/* We have an ordering violation on the true branch */
+		if (!f->isLeaf && f->cond < expr->cond) {
+			/* Ordering violation on the false branch as
+			 * well. */
+			if (t->cond < f->cond) {
+				res = reorder_bbdd::Node(
+					t->cond,
+					reorder_bbdd::Node(
+						f->cond,
+						reorder_bbdd::Node(
+							expr->cond,
+							t->trueBranch,
+							f->trueBranch),
+						reorder_bbdd::Node(
+							expr->cond,
+							t->trueBranch,
+							f->falseBranch)),
+					reorder_bbdd::Node(
+						f->cond,
+						reorder_bbdd::Node(
+							expr->cond,
+							t->falseBranch,
+							f->trueBranch),
+						reorder_bbdd::Node(
+							expr->cond,
+							t->falseBranch,
+							f->falseBranch)));
+			} else if (t->cond == f->cond) {
+				res = reorder_bbdd::Node(
+					t->cond,
+					reorder_bbdd::Node(
+						expr->cond,
+						t->trueBranch,
+						f->trueBranch),
+					reorder_bbdd::Node(
+						expr->cond,
+						t->falseBranch,
+						f->trueBranch));
 			} else {
-				return unordered_bbdd::Node(
-					key_from->condition,
-					key_from->rank,
-					t,
-					f);
+				assert(f->cond < t->cond);
+				res = reorder_bbdd::Node(
+					f->cond,
+					reorder_bbdd::Node(
+						t->cond,
+						reorder_bbdd::Node(
+							expr->cond,
+							t->trueBranch,
+							f->trueBranch),
+						reorder_bbdd::Node(
+							expr->cond,
+							t->falseBranch,
+							f->trueBranch)),
+					reorder_bbdd::Node(
+						t->cond,
+						reorder_bbdd::Node(
+							expr->cond,
+							t->trueBranch,
+							f->falseBranch),
+						reorder_bbdd::Node(
+							expr->cond,
+							t->falseBranch,
+							f->falseBranch)));
 			}
-		}
-	} ife;
-
-	/* recur(a, b, c) -> like ife(a, b, c), except that we
-	   recursively reorder in the result.  i.e. this is valid if
-	   the a->b or a->c edges might include a monotonicity
-	   violation, whereas ife isn't. */
-	struct {
-		const std::set<input_expression> *avail;
-		sane_map<const unordered_bbdd *, const unordered_bbdd *> *memo;
-		const unordered_bbdd *operator()(
-			const unordered_bbdd *key_from,
-			const unordered_bbdd *t,
-			const unordered_bbdd *f)
-		{
-			if (t == f) {
-				return t;
-			} else {
-				return reorder_for_avail(
-					unordered_bbdd::Node(
-						key_from->condition,
-						key_from->rank,
-						t,
-						f),
-					*avail,
-					*memo);
-			}
-		}
-	} recur;
-	recur.avail = &avail;
-	recur.memo = &memo;
-
-	/* So now we know that the children are monotone, so that if
-	   any nodes test something in @avail then the root of the
-	   child must test something in @avail.  Therefore, the only
-	   way that this node or any of its children could violate the
-	   monotone property is if we do not test an available
-	   expression but one of our children does.  Check for that
-	   case and fix it up if necessary. */
-	if (evaluatable(expr->condition, avail)) {
-		/* We test an avail expression, so cannot violate
-		 * monotonicity. */
-		if (t == expr->trueBranch && f == expr->falseBranch) {
-			it->second = expr;
 		} else {
-			it->second = unordered_bbdd::Node(
-				expr->condition,
-				expr->rank,
+			/* Ordering violation only on the true branch. */
+			res = reorder_bbdd::Node(
+				t->cond,
+				reorder_bbdd::Node(
+					expr->cond,
+					t->trueBranch,
+					f),
+				reorder_bbdd::Node(
+					expr->cond,
+					t->falseBranch,
+					f));
+		}
+		it->second = fix_ordering(res, memo);
+	} else if (!f->isLeaf && f->cond < expr->cond) {
+		/* Ordering violation on the false branch only */
+		res = reorder_bbdd::Node(
+			f->cond,
+			reorder_bbdd::Node(
+				expr->cond,
 				t,
-				f);
-		}
-	} else if (!t->isLeaf && evaluatable(t->condition, avail)) {
-		/* Uh oh.  We violate the property on the true branch */
-		if (!f->isLeaf && evaluatable(f->condition, avail)) {
-			/* Violate on both branches.  Tricky. */
-			/* If the ordering is current <our_cond> <true_cond> <false_cond>
-			   then we want to go to <true_cond> <false_cond> <our_cond>
-			   i.e. swap with true branch first and then false branch.
-			   If it's <our_cond> <false_cond> <true_cond>
-			   then we want to go to <false_cond> <true_cond> <our_cond>
-			   i.e. swap with false branch first. */
-			auto tt = t->trueBranch;
-			auto tf = t->falseBranch;
-			auto ft = f->trueBranch;
-			auto ff = f->falseBranch;
-			auto a = expr;
-			auto b = t;
-			auto c = f;
-			assert(tt != tf);
-			assert(ft != ff);
-			if (t->rank < f->rank) {
-				it->second =
-					ife(b,
-					    ife(c,
-						recur(a,
-						      tt,
-						      ft),
-						recur(a,
-						      tt,
-						      ff)),
-					    ife(c,
-						recur(a,
-						      tf,
-						      ft),
-						recur(a,
-						      tf,
-						      ff)));
-			} else if (t->rank == f->rank) {
-				it->second =
-					ife(b,
-					    recur(a, tt, ft),
-					    recur(a, tf, ff));
-			} else {
-				it->second =
-					ife(c,
-					    ife(b,
-						recur(a,
-						      tt,
-						      ft),
-						recur(a,
-						      tf,
-						      ft)),
-					    ife(b,
-						recur(a,
-						      tt,
-						      ff),
-						recur(a,
-						      tf,
-						      ff)));
-			}
-		} else {
-			/* Only a violation on the true branch.  We
-			   have ife(a, ife(b, X, Y), Z) and
-			   we need to turn it into
-			   ife(b, ife(a, X, Y), ife(a, Y, Z)) */
-			auto a = expr;
-			auto b = expr->trueBranch;
-			auto X = b->trueBranch;
-			auto Y = b->falseBranch;
-			auto Z = a->falseBranch;
-			it->second =
-				ife(b,
-				    recur(a, X, Z),
-				    recur(a, Y, Z));
-		}
-	} else if (!f->isLeaf && evaluatable(f->condition, avail)) {
-		/* Violation on the false branch.  Turn
-		   ife(a, X, ife(b, Y, Z)) into
-		   ife(b, ife(a, X, Y), ife(a, X, Z))
-		*/
-		auto a = expr;
-		auto b = expr->falseBranch;
-		auto X = a->trueBranch;
-		auto Y = b->trueBranch;
-		auto Z = b->falseBranch;
-		it->second =
-			ife(b,
-			    recur(a, X, Y),
-			    recur(a, X, Z));
+				f->trueBranch),
+			reorder_bbdd::Node(
+				expr->cond,
+				t,
+				f->falseBranch));
+		it->second = fix_ordering(res, memo);
 	} else {
-		/* Neither branch violates the ordering constraint.
-		   Phew. */
+		/* No ordering violations */
 		if (t == expr->trueBranch && f == expr->falseBranch) {
+			/* Avoid a hash lookup when we know what
+			   ::Node is going to return. */
+			assert(expr == reorder_bbdd::Node(expr->cond, t, f));
 			it->second = expr;
 		} else {
-			it->second = unordered_bbdd::Node(
-				expr->condition,
-				expr->rank,
-				t,
-				f);
+			it->second = reorder_bbdd::Node(expr->cond,
+							t,
+							f);
 		}
 	}
 
+	sanity_check_reorder(it->second);
 	return it->second;
 }
 
 /* Given that @what is reordered to have the monotonicity property,
    find the strongest condition A which only tests expressions
    evaluatable using inputs @avail such that @what implies A */
-static const unordered_bbdd *
-availCondition(const unordered_bbdd *what,
+static const reorder_bbdd *
+availCondition(const reorder_bbdd *what,
 	       const std::set<input_expression> &avail,
-	       sane_map<const unordered_bbdd *, const unordered_bbdd *> &memo)
+	       sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo)
 {
 	if (what->isLeaf) {
 		return what;
 	}
-	if (!evaluatable(what->condition, avail)) {
-		return unordered_bbdd::Leaf(true);
+	if (!what->cond.evaluatable) {
+		return reorder_bbdd::Leaf(true);
 	}
-	auto it_did_insert = memo.insert(what, (const unordered_bbdd *)0xf001);
+	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -739,9 +774,8 @@ availCondition(const unordered_bbdd *what,
 	} else if (t == what->trueBranch && f == what->falseBranch) {
 		it->second = what;
 	} else {
-		it->second = unordered_bbdd::Node(
-			what->condition,
-			what->rank,
+		it->second = reorder_bbdd::Node(
+			what->cond,
 			t,
 			f);
 	}
@@ -751,18 +785,18 @@ availCondition(const unordered_bbdd *what,
 /* Given that @what is reordered to have the monotonicity property,
    find a condition B such that
    @what = B && availCondition(what, avail) */
-static const unordered_bbdd *
-unavailCondition(const unordered_bbdd *what,
+static const reorder_bbdd *
+unavailCondition(const reorder_bbdd *what,
 		 const std::set<input_expression> &avail,
-		 sane_map<const unordered_bbdd *, const unordered_bbdd *> &memo)
+		 sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo)
 {
 	if (what->isLeaf) {
 		return what;
 	}
-	if (!evaluatable(what->condition, avail)) {
+	if (!what->cond.evaluatable) {
 		return what;
 	}
-	auto it_did_insert = memo.insert(what, (const unordered_bbdd *)0xf001);
+	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -777,9 +811,8 @@ unavailCondition(const unordered_bbdd *what,
 	} else if (t == what->trueBranch && f == what->falseBranch) {
 		it->second = what;
 	} else {
-		it->second = unordered_bbdd::Node(
-			what->condition,
-			what->rank,
+		it->second = reorder_bbdd::Node(
+			what->cond,
 			t,
 			f);
 	}
@@ -788,8 +821,8 @@ unavailCondition(const unordered_bbdd *what,
 
 /* Convert an unordered BBDD back into an ordinary BBDD */
 static bbdd *
-unordered_to_bbdd(bbdd::scope *scope, const unordered_bbdd *src,
-		  sane_map<const unordered_bbdd *, bbdd *> &memo)
+reorder_to_bbdd(bbdd::scope *scope, const reorder_bbdd *src,
+		sane_map<const reorder_bbdd *, bbdd *> &memo)
 {
 	auto it_did_insert = memo.insert(src, (bbdd *)0xdead);
 	auto it = it_did_insert.first;
@@ -800,9 +833,9 @@ unordered_to_bbdd(bbdd::scope *scope, const unordered_bbdd *src,
 		} else {
 			it->second = bbdd::ifelse(
 				scope,
-				bbdd::var(scope, src->condition),
-				unordered_to_bbdd(scope, src->trueBranch, memo),
-				unordered_to_bbdd(scope, src->falseBranch, memo));
+				bbdd::var(scope, src->cond.cond),
+				reorder_to_bbdd(scope, src->trueBranch, memo),
+				reorder_to_bbdd(scope, src->falseBranch, memo));
 		}
 	}
 	return it->second;
@@ -824,7 +857,7 @@ splitExpressionOnAvailability(bbdd::scope *scope,
 			      bbdd *what,
 			      const std::set<input_expression> &avail)
 {
-	unordered_bbdd::reset();
+	reorder_bbdd::reset();
 	if (debug_ubbdd) {
 		printf("Split expression, avail ");
 		print_expr_set(avail, stdout);
@@ -832,44 +865,49 @@ splitExpressionOnAvailability(bbdd::scope *scope,
 		what->prettyPrint(stdout);
 	}
 
-	const unordered_bbdd *u_what = bbdd_to_unordered(what);
+	const reorder_bbdd *u_what = bbdd_to_reorder(what, avail);
 	if (debug_ubbdd) {
 		printf("Converted to UBBDD:\n");
-		pp_unordered(u_what);
+		pp_reorder(u_what);
 	}
-
 	{
-		sane_map<const unordered_bbdd *, const unordered_bbdd *> memo;
-		u_what = reorder_for_avail(u_what, avail, memo);
+		sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
+		u_what = fix_ordering(u_what, memo);
 		if (debug_ubbdd) {
 			printf("Reordered:\n");
-			pp_unordered(u_what);
+			pp_reorder(u_what);
 		}
 	}
-	const unordered_bbdd *u_avail;
+	sanity_check_reorder(u_what);
+
+	const reorder_bbdd *u_avail;
 	{
-		sane_map<const unordered_bbdd *, const unordered_bbdd *> memo;
+		sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
 		u_avail = availCondition(u_what, avail, memo);
 		if (debug_ubbdd) {
 			printf("Available fragment:\n");
-			pp_unordered(u_avail);
+			pp_reorder(u_avail);
 		}
 	}
-	const unordered_bbdd *u_unavail;
+	sanity_check_reorder(u_avail);
+
+	const reorder_bbdd *u_unavail;
 	{
-		sane_map<const unordered_bbdd *, const unordered_bbdd *> memo;
+		sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
 		u_unavail = unavailCondition(u_what, avail, memo);
 		if (debug_ubbdd) {
 			printf("Unavailable fragment:\n");
-			pp_unordered(u_unavail);
+			pp_reorder(u_unavail);
 		}
 	}
+	sanity_check_reorder(u_unavail);
+
 	bbdd *b_avail;
 	bbdd *unavail;
 	{
-		sane_map<const unordered_bbdd *, bbdd *> memo;
-		b_avail = unordered_to_bbdd(scope, u_avail, memo);
-		unavail = unordered_to_bbdd(scope, u_unavail, memo);
+		sane_map<const reorder_bbdd *, bbdd *> memo;
+		b_avail = reorder_to_bbdd(scope, u_avail, memo);
+		unavail = reorder_to_bbdd(scope, u_unavail, memo);
 		if (debug_ubbdd) {
 			printf("Convert back to BBDD; avail =\n");
 			b_avail->prettyPrint(stdout);
@@ -934,6 +972,13 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		hbMap.prettyPrint(stdout);
 		printf("Side condition:\n");
 		sideCondition->prettyPrint(stdout);
+	}
+
+	if (debug_eem_schedule && !debug_eem) {
+		printf("expressionEvalMapT:\n");
+		cfg.prettyPrint(stdout);
+		roots.prettyPrint(stdout);
+		hbMap.prettyPrint(stdout);
 	}
 
 	/* Count the predecessors for each instruction, so that we
@@ -1082,7 +1127,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	for (auto it = hbMap.begin(); it != hbMap.end(); it++) {
 		allEdges |= it->second;
 	}
-	if (debug_eem) {
+	if (debug_eem || debug_eem_schedule) {
 		printf("Local predecessor count map:\n");
 		for (auto it = pendingPredecessors.begin();
 		     it != pendingPredecessors.end();
@@ -1103,7 +1148,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		pendingPredecessors[hb->before] +=
 			predecessors[hb->after].size();
 	}
-	if (debug_eem) {
+	if (debug_eem || debug_eem_schedule) {
 		printf("Predecessor count map:\n");
 		for (auto it = pendingPredecessors.begin();
 		     it != pendingPredecessors.end();
@@ -1126,7 +1171,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		assert(pendingPredecessors.count(i));
 		assert(pendingPredecessors[i] == 0);
 
-		if (debug_eem) {
+		if (debug_eem || debug_eem_schedule) {
 			printf("Consider %s\n", i->rip.name());
 		}
 
@@ -1339,6 +1384,11 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				if (--pendingPredecessors[hb->after] == 0) {
 					pendingInstrs.push_back(hb->after);
 				}
+				if (debug_eem_schedule) {
+					printf("Unblock %s via HB edge (%d left)\n",
+					       hb->after->rip.name(),
+					       pendingPredecessors[hb->after]);
+				}
 			}
 
 			if (have_tx_edge) {
@@ -1385,6 +1435,11 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				if (--pendingPredecessors[it->instr] == 0) {
 					pendingInstrs.push_back(it->instr);
 				}
+				if (debug_eem_schedule) {
+					printf("Unblock direct successor %s (%d left)\n",
+					       it->instr->rip.name(),
+					       pendingPredecessors[it->instr]);
+				}
 				if (hbMap.count(it->instr->rip)) {
 					const std::set<happensBeforeEdge *> &hbEdges(hbMap[it->instr->rip]);
 					for (auto it2 = hbEdges.begin();
@@ -1396,6 +1451,12 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 							if (--pendingPredecessors[hb->before] == 0) {
 								pendingInstrs.push_back(hb->before);
 							}
+							if (debug_eem_schedule) {
+								printf("Unblock %s via hb edge (%d left)\n",
+								       hb->before->rip.name(),
+								       pendingPredecessors[hb->before]);
+								hb->prettyPrint(stdout);
+							}
 						}
 					}
 				}
@@ -1403,6 +1464,9 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
+		assert(it->second == 0);
+	}
 }
 
 bbdd *

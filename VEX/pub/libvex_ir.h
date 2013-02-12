@@ -359,10 +359,10 @@ class MemoryAccessIdentifier : public Named {
 	char *mkName() const {
 		return my_asprintf("mai%d:%d", tid, id);
 	}
+public:
 	MemoryAccessIdentifier(int _id, int _tid)
 		: id(_id), tid(_tid)
 	{}
-public:
 	int id;
 	int tid;
 

@@ -543,16 +543,14 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 		if (r) {
 			it->second = exprbdd::to_irexpr(r);
 		} else {
-			it->second = NULL;
+			it->second = what;
 		}
 		break;
 	}
 	case Iex_GetI: {
 		auto g = (IRExprGetI *)what;
 		auto ix = specialiseIRExpr(scopes, g->ix, memo);
-		if (ix == NULL) {
-			it->second = NULL;
-		} else if (ix == g->ix) {
+		if (ix == g->ix) {
 			it->second = what;
 		} else {
 			it->second = IRExprGetI::mk(g, ix);
@@ -562,25 +560,9 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 	case Iex_Qop: {
 		auto g = (IRExprQop *)what;
 		auto a = specialiseIRExpr(scopes, g->arg1, memo);
-		if (a == NULL) {
-			it->second = NULL;
-			break;
-		}
 		auto b = specialiseIRExpr(scopes, g->arg2, memo);
-		if (b == NULL) {
-			it->second = NULL;
-			break;
-		}
 		auto c = specialiseIRExpr(scopes, g->arg3, memo);
-		if (c == NULL) {
-			it->second = NULL;
-			break;
-		}
 		auto d = specialiseIRExpr(scopes, g->arg4, memo);
-		if (d == NULL) {
-			it->second = NULL;
-			break;
-		}
 		if (a == g->arg1 && b == g->arg2 &&
 		    c == g->arg3 && d == g->arg4) {
 			it->second = g;
@@ -592,20 +574,8 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 	case Iex_Triop: {
 		auto g = (IRExprTriop *)what;
 		auto a = specialiseIRExpr(scopes, g->arg1, memo);
-		if (a == NULL) {
-			it->second = NULL;
-			break;
-		}
 		auto b = specialiseIRExpr(scopes, g->arg2, memo);
-		if (b == NULL) {
-			it->second = NULL;
-			break;
-		}
 		auto c = specialiseIRExpr(scopes, g->arg3, memo);
-		if (c == NULL) {
-			it->second = NULL;
-			break;
-		}
 		if (a == g->arg1 && b == g->arg2 && c == g->arg3) {
 			it->second = g;
 		} else {
@@ -616,15 +586,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 	case Iex_Binop: {
 		auto g = (IRExprBinop *)what;
 		auto a = specialiseIRExpr(scopes, g->arg1, memo);
-		if (a == NULL) {
-			it->second = NULL;
-			break;
-		}
 		auto b = specialiseIRExpr(scopes, g->arg2, memo);
-		if (b == NULL) {
-			it->second = NULL;
-			break;
-		}
 		if (a == g->arg1 && b == g->arg2) {
 			it->second = g;
 		} else {
@@ -635,9 +597,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 	case Iex_Unop: {
 		auto g = (IRExprUnop *)what;
 		auto a = specialiseIRExpr(scopes, g->arg, memo);
-		if (a == NULL) {
-			it->second = NULL;
-		} else if (a == g->arg) {
+		if (a == g->arg) {
 			it->second = g;
 		} else {
 			it->second = IRExprUnop::mk(g->op, a);
@@ -666,18 +626,13 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 		}
 		IRExpr *c[nr_args];
 		bool realloc = false;
-		bool nulled = false;
-		for (int i = 0; !nulled && i < nr_args; i++) {
+		for (int i = 0; i < nr_args; i++) {
 			c[i] = specialiseIRExpr(scopes, g->args[i], memo);
-			if (c[i] == NULL) {
-				nulled = true;
-			} else if (c[i] != g->args[i]) {
+			if (c[i] != g->args[i]) {
 				realloc = true;
 			}
 		}
-		if (nulled) {
-			it->second = NULL;
-		} else if (!realloc) {
+		if (!realloc) {
 			it->second = g;
 		} else {
 			IRExpr **newArgs = alloc_irexpr_array(nr_args + 1);
@@ -690,19 +645,14 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 	case Iex_Associative: {
 		auto g = (IRExprAssociative *)what;
 		IRExpr *newArgs[g->nr_arguments];
-		bool nulled = false;
 		bool realloc = false;
-		for (int i = 0; !nulled && i < g->nr_arguments; i++) {
+		for (int i = 0; i < g->nr_arguments; i++) {
 			newArgs[i] = specialiseIRExpr(scopes, g->contents[i], memo);
-			if (!newArgs[i]) {
-				nulled = true;
-			} else if (newArgs[i] != g->contents[i]) {
+			if (newArgs[i] != g->contents[i]) {
 				realloc = true;
 			}
 		}
-		if (nulled) {
-			it->second = NULL;
-		} else if (!realloc) {
+		if (!realloc) {
 			it->second = g;
 		} else {
 			it->second = IRExpr_Associative_Copy(g->op, g->nr_arguments, newArgs);
@@ -712,9 +662,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 	case Iex_Load: {
 		auto g = (IRExprLoad *)what;
 		auto addr = specialiseIRExpr(scopes, g->addr, memo);
-		if (!addr) {
-			it->second = NULL;
-		} else if (addr == g->addr) {
+		if (addr == g->addr) {
 			it->second = g;
 		} else {
 			it->second = IRExprLoad::mk(g->ty, addr);
@@ -739,12 +687,8 @@ threadState::specialiseIRExpr(SMScopes *scopes, bbdd *what, std::map<bbdd *, bbd
 		IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 		bbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 		bbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
-		if (!t || t == f) {
-			it->second = f;
-		} else if (!f) {
+		if (t == f) {
 			it->second = t;
-		} else if (cond == NULL) {
-			it->second = NULL;
 		} else if (cond == what->internal().condition &&
 			   t == what->internal().trueBranch &&
 			   f == what->internal().falseBranch) {
@@ -777,12 +721,8 @@ threadState::specialiseIRExpr(SMScopes *scopes, smrbdd *what, std::map<smrbdd *,
 		IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 		smrbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 		smrbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
-		if (!t || t == f) {
-			it->second = f;
-		} else if (!f) {
+		if (t == f) {
 			it->second = t;
-		} else if (cond == NULL) {
-			it->second = NULL;
 		} else if (cond == what->internal().condition &&
 			   t == what->internal().trueBranch &&
 			   f == what->internal().falseBranch) {
@@ -811,9 +751,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, exprbdd *what, std::map<exprbdd 
 	if (did_insert) {
 		if (what->isLeaf()) {
 			IRExpr *l = specialiseIRExpr(scopes, what->leaf(), exprMemo);
-			if (l == NULL) {
-				it->second = NULL;
-			} else if (l == what->leaf()) {
+			if (l == what->leaf()) {
 				it->second = what;
 			} else {
 				it->second = exprbdd::var(
@@ -825,12 +763,8 @@ threadState::specialiseIRExpr(SMScopes *scopes, exprbdd *what, std::map<exprbdd 
 			IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 			exprbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 			exprbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
-			if (!t || t == f) {
-				it->second = f;
-			} else if (!f) {
+			if (t == f) {
 				it->second = t;
-			} else if (cond == NULL) {
-				it->second = NULL;
 			} else if (cond == what->internal().condition &&
 				   t == what->internal().trueBranch &&
 				   f == what->internal().falseBranch) {
@@ -1371,12 +1305,7 @@ EvalContext::advance(SMScopes *scopes,
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)_currentState;
 		bbdd *cond = state.specialiseIRExpr(scopes, smb->condition);
-		if (!cond) {
-			result = smrbdd::ifelse(
-				&scopes->smrs,
-				justPathConstraint,
-				scopes->smrs.cnst(smr_unreached),
-				result);
+		if (TIMEOUT) {
 			return;
 		}
 		bbdd *scond;

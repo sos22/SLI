@@ -19,8 +19,10 @@
 
 #ifndef NDEBUG
 static bool debug_declobber_instructions = false;
+static bool debug_expr_slice = false;
 #else
 #define debug_declobber_instructions false
+#define debug_expr_slice false
 #endif
 
 unsigned long
@@ -175,7 +177,255 @@ struct expr_slice {
 		leftOver->prettyPrint(f);
 		fprintf(f, "\n");		
 	}
+	bool simplifyAndCheckForContradiction();
 };
+
+bool
+expr_slice::simplifyAndCheckForContradiction()
+{
+	if (debug_expr_slice) {
+		printf("%s\n", __func__);
+		prettyPrint(stdout);
+	}
+	if (leftOver->isLeaf() && !leftOver->leaf()) {
+		if (debug_expr_slice) {
+			printf("Leftover is a contradiction\n");
+			return true;
+		}
+	}
+	sane_map<MemoryAccessIdentifier, std::set<MemoryAccessIdentifier> > happensAfter;
+	for (auto it = trueSlice.begin(); it != trueSlice.end(); it++) {
+		auto hb = *it;
+		happensAfter[hb->before].insert(hb->after);
+	}
+	for (auto it = falseSlice.begin(); it != falseSlice.end(); it++) {
+		auto hb = *it;
+		happensAfter[hb->after].insert(hb->before);
+	}
+	/* Add in the implicit control-flow edges */
+	std::map<int, std::set<int> > mais;
+	for (auto it = happensAfter.begin(); it != happensAfter.end(); it++) {
+		const MemoryAccessIdentifier &before(it->first);
+		mais[before.tid].insert(before.id);
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			const MemoryAccessIdentifier &after(*it2);
+			mais[after.tid].insert(after.id);
+		}
+	}
+	if (debug_expr_slice) {
+		printf("MAI map:\n");
+		for (auto it = mais.begin(); it != mais.end(); it++) {
+			printf("\t%d -> {", it->first);
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin()) {
+					printf(", ");
+				}
+				printf("%d", *it2);
+			}
+			printf("}\n");
+		}
+	}
+	if (!mais.empty()) {
+		for (auto it = mais.begin(); it != mais.end(); it++) {
+			int tid = it->first;
+			const std::set<int> &ids(it->second);
+			if (ids.empty()) {
+				continue;
+			}
+			auto it2 = ids.begin();
+			auto it3 = it2;
+			it3++;
+			while (it3 != ids.end()) {
+				MemoryAccessIdentifier before(*it2, tid);
+				MemoryAccessIdentifier after(*it3, tid);
+				if (debug_expr_slice) {
+					printf("Add control-flow edge %s -> %s\n",
+					       before.name(), after.name());
+				}
+				happensAfter[before].insert(after);
+				it3++;
+				it2++;
+			}
+		}
+	}
+
+	if (debug_expr_slice) {
+		printf("Edges:\n");
+		for (auto it = happensAfter.begin(); it != happensAfter.end(); it++) {
+			printf("\t%s -> {", it->first.name());
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin()) {
+					printf(", ");
+				}
+				printf("%s", it2->name());
+			}
+			printf("}\n");
+		}
+	}
+
+	/* Topo sort to check for cycles. */
+	sane_map<MemoryAccessIdentifier, int> nrPredecessors;
+	std::set<MemoryAccessIdentifier> unsorted;
+	for (auto it = happensAfter.begin(); it != happensAfter.end(); it++) {
+		const MemoryAccessIdentifier &before(it->first);
+		nrPredecessors[before] = 0;
+		mais[before.tid].insert(before.id);
+		unsorted.insert(before);
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			const MemoryAccessIdentifier &after(*it2);
+			nrPredecessors[after] = 0;
+			unsorted.insert(after);
+		}
+	}
+	for (auto it = happensAfter.begin(); it != happensAfter.end(); it++) {
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			nrPredecessors[*it2]++;
+		}
+	}
+	if (debug_expr_slice) {
+		printf("Toposort predecessor count:\n");
+		for (auto it = nrPredecessors.begin(); it != nrPredecessors.end(); it++) {
+			printf("\t%s -> %d\n", it->first.name(), it->second);
+		}
+	}
+
+	std::vector<MemoryAccessIdentifier> q;
+	for (auto it = nrPredecessors.begin(); it != nrPredecessors.end(); it++) {
+		if (it->second == 0) {
+			q.push_back(it->first);
+		}
+	}
+	while (!q.empty()) {
+		const MemoryAccessIdentifier mai(q.back());
+		q.pop_back();
+		if (debug_expr_slice) {
+			printf("Toposort reaches %s\n", mai.name());
+		}
+		assert(nrPredecessors.count(mai));
+		assert(nrPredecessors[mai] == 0);
+		assert(unsorted.count(mai));
+		unsorted.erase(mai);
+		const std::set<MemoryAccessIdentifier> &after(happensAfter[mai]);
+		for (auto it = after.begin(); it != after.end(); it++) {
+			assert(nrPredecessors.count(*it));
+			assert(nrPredecessors[*it] > 0);
+			if (--nrPredecessors[*it] == 0) {
+				q.push_back(*it);
+			}
+		}
+	}
+	if (!unsorted.empty()) {
+		/* Can't complete toposort -> HB graph has a cycle */
+		if (debug_expr_slice) {
+			printf("Toposort failed\n");
+		}
+		return true;
+	}
+
+	/* The graph is acyclic, so it is in principle possible to
+	   enforce it.  Now do a transitive reduction to remove
+	   redundant edges.  This is a bit of a hack: just consider
+	   every edge in turn and check whether it's transitively
+	   redundant, and then remove it if it is.*/
+	for (auto it = happensAfter.begin(); it != happensAfter.end(); it++) {
+		const MemoryAccessIdentifier &before(it->first);
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			const MemoryAccessIdentifier &after(*it2);
+			if (before.tid == after.tid) {
+				/* Intra-thread edges are never redundant. */
+				continue;
+			}
+			if (debug_expr_slice) {
+				printf("Check %s->%s for transitive redundancy\n",
+				       before.name(), after.name());
+			}
+			std::set<MemoryAccessIdentifier> reachableFromBefore;
+			bool redundant = false;
+			q.clear();
+			q.push_back(before);
+			reachableFromBefore.insert(before);
+			while (!redundant && !q.empty()) {
+				MemoryAccessIdentifier edgeStart(q.back());
+				q.pop_back();
+				if (debug_expr_slice) {
+					printf("\tExpand from %s\n", edgeStart.name());
+				}
+				assert(reachableFromBefore.count(edgeStart));
+				const std::set<MemoryAccessIdentifier> &edgeEnds(happensAfter[edgeStart]);
+				for (auto it3 = edgeEnds.begin(); it3 != edgeEnds.end(); it3++) {
+					const MemoryAccessIdentifier &edgeEnd(*it3);
+					if (edgeStart == before && edgeEnd == after) {
+						/* We don't want to
+						   include the edge
+						   which we're testing
+						   for redundancy in
+						   the reachability
+						   test. */
+						continue;
+					}
+					if (debug_expr_slice) {
+						printf("\tConsider %s->%s\n",
+						       edgeStart.name(), edgeEnd.name());
+					}
+					if (edgeEnd == after) {
+						/* Any other edge to
+						   @after makes the
+						   before->after edge
+						   redundant. */
+						redundant = true;
+						break;
+					}
+					if (reachableFromBefore.insert(edgeEnd).second) {
+						/* edgeEnd is new, so
+						   have to explore
+						   from here as
+						   well. */
+						if (debug_expr_slice) {
+							printf("\tDiscover %s\n",
+							       edgeEnd.name());
+						}
+						q.push_back(edgeEnd);
+					}
+				}
+			}
+
+			if (redundant) {
+				/* Yep, this is a redundant edge. */
+				if (debug_expr_slice) {
+					printf("Edge is redundant!\n");
+				}
+				for (auto it = trueSlice.begin();
+				     it != trueSlice.end();
+					) {
+					auto hb = *it;
+					if (hb->before == before &&
+					    hb->after == after) {
+						trueSlice.erase(it++);
+					} else {
+						it++;
+					}
+				}
+				for (auto it = falseSlice.begin();
+				     it != falseSlice.end();
+					) {
+					auto hb = *it;
+					if (hb->after == before &&
+					    hb->before == after) {
+						falseSlice.erase(it++);
+					} else {
+						it++;
+					}
+				}
+			}
+		}
+	}
+
+	if (debug_expr_slice) {
+		printf("%s finished\n", __func__);
+		prettyPrint(stdout);
+	}
+	return false;
+}
 
 static bool
 buildCED(const SummaryId &summaryId,
@@ -462,7 +712,9 @@ public:
 		     it++) {
 			expr_slice a(*it);
 			a.trueSlice.insert(e);
-			res.insert(a);
+			if (!a.simplifyAndCheckForContradiction()) {
+				res.insert(a);
+			}
 		}
 		return res;
 	}
@@ -474,7 +726,9 @@ public:
 		     it++) {
 			expr_slice a(*it);
 			a.falseSlice.insert(e);
-			res.insert(a);
+			if (!a.simplifyAndCheckForContradiction()) {
+				res.insert(a);
+			}
 		}
 		return res;
 	}
