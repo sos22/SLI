@@ -1442,6 +1442,9 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
+		assert(it->second == 0);
+	}
 }
 
 bbdd *
