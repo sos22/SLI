@@ -8,9 +8,11 @@
 
 #ifndef NDEBUG
 static bool debug_eem = false;
+static bool debug_eem_schedule = false;
 static bool debug_ubbdd = false;
 #else
 #define debug_eem false
+#define debug_eem_schedule false
 #define debug_ubbdd false
 #endif
 
@@ -972,6 +974,13 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		sideCondition->prettyPrint(stdout);
 	}
 
+	if (debug_eem_schedule && !debug_eem) {
+		printf("expressionEvalMapT:\n");
+		cfg.prettyPrint(stdout);
+		roots.prettyPrint(stdout);
+		hbMap.prettyPrint(stdout);
+	}
+
 	/* Count the predecessors for each instruction, so that we
 	 * know when it's safe to process it. */
 	std::map<instr_t, unsigned> pendingPredecessors;
@@ -1118,7 +1127,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	for (auto it = hbMap.begin(); it != hbMap.end(); it++) {
 		allEdges |= it->second;
 	}
-	if (debug_eem) {
+	if (debug_eem || debug_eem_schedule) {
 		printf("Local predecessor count map:\n");
 		for (auto it = pendingPredecessors.begin();
 		     it != pendingPredecessors.end();
@@ -1139,7 +1148,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		pendingPredecessors[hb->before] +=
 			predecessors[hb->after].size();
 	}
-	if (debug_eem) {
+	if (debug_eem || debug_eem_schedule) {
 		printf("Predecessor count map:\n");
 		for (auto it = pendingPredecessors.begin();
 		     it != pendingPredecessors.end();
@@ -1162,7 +1171,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		assert(pendingPredecessors.count(i));
 		assert(pendingPredecessors[i] == 0);
 
-		if (debug_eem) {
+		if (debug_eem || debug_eem_schedule) {
 			printf("Consider %s\n", i->rip.name());
 		}
 
@@ -1375,6 +1384,11 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				if (--pendingPredecessors[hb->after] == 0) {
 					pendingInstrs.push_back(hb->after);
 				}
+				if (debug_eem_schedule) {
+					printf("Unblock %s via HB edge (%d left)\n",
+					       hb->after->rip.name(),
+					       pendingPredecessors[hb->after]);
+				}
 			}
 
 			if (have_tx_edge) {
@@ -1421,6 +1435,11 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				if (--pendingPredecessors[it->instr] == 0) {
 					pendingInstrs.push_back(it->instr);
 				}
+				if (debug_eem_schedule) {
+					printf("Unblock direct successor %s (%d left)\n",
+					       it->instr->rip.name(),
+					       pendingPredecessors[it->instr]);
+				}
 				if (hbMap.count(it->instr->rip)) {
 					const std::set<happensBeforeEdge *> &hbEdges(hbMap[it->instr->rip]);
 					for (auto it2 = hbEdges.begin();
@@ -1431,6 +1450,12 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 							assert(pendingPredecessors[hb->before] > 0);
 							if (--pendingPredecessors[hb->before] == 0) {
 								pendingInstrs.push_back(hb->before);
+							}
+							if (debug_eem_schedule) {
+								printf("Unblock %s via hb edge (%d left)\n",
+								       hb->before->rip.name(),
+								       pendingPredecessors[hb->before]);
+								hb->prettyPrint(stdout);
 							}
 						}
 					}
