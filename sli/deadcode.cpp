@@ -338,12 +338,7 @@ public:
 		case StateMachineSideEffect::ImportRegister:
 			break;
 		case StateMachineSideEffect::AssertFalse:
-			/* We deliberately don't considere references
-			   in AssertFalse expressions when doing
-			   deadcode, because if the only thing keeping
-			   a variable alive is an assertion then we
-			   should just kill it. */
-			//useExpressionData( ((StateMachineSideEffectAssertFalse *)smse)->value );
+			useExpressionData( ((StateMachineSideEffectAssertFalse *)smse)->value );
 			break;
 #if !CONFIG_NO_STATIC_ALIASING
 		case StateMachineSideEffect::StartFunction:

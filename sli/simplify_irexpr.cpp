@@ -2460,6 +2460,9 @@ top:
 			case Iop_64to32:
 				res = IRExpr_Const_U32(c->Ico.content.U64);
 				break;
+			case Iop_64HIto32:
+				res = IRExpr_Const_U32(c->Ico.content.U64 >> 32);
+				break;
 			case Iop_64to16:
 				res = IRExpr_Const_U16(c->Ico.content.U64);
 				break;
@@ -3141,6 +3144,12 @@ top:
 					((IRExprConst *)r)->Ico.content.U64);
 				break;
 
+			case Iop_MullU32:
+				res = IRExpr_Const_U64(
+					(unsigned long)((IRExprConst *)l)->Ico.content.U32 *
+					(unsigned long)((IRExprConst *)r)->Ico.content.U32);
+				break;
+
 			default:
 				warning("cannot constant fold binop %d\n", op);
 				printf("Cannot constant fold binop %d (", op);
@@ -3417,7 +3426,11 @@ isBadAddress(exprbdd *e)
 
 template <typename treeT, typename scopeT> static treeT *
 simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisations &opt,
-	    bool isAddress, std::map<treeT *, treeT *> &memo)
+	    bool
+#ifndef NDEBUG
+	    isAddress
+#endif
+	    , std::map<treeT *, treeT *> &memo)
 {
 	/* Only expr BDDs can be addresses, and they should be using
 	 * the specialisation below. */

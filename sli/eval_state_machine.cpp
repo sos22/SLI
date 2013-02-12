@@ -888,9 +888,9 @@ public:
 		justPathConstraint->prettyPrint(f);
 		printHistory(f,labels);
 	}
+#ifndef NDEBUG
 	void printHistory(FILE *f, std::map<const StateMachineState *, int> &labels)
 	{
-#ifndef NDEBUG
 		if (debug_survival_constraint) {
 			fprintf(f, "History: ");
 			for (auto it = history.begin();
@@ -903,8 +903,11 @@ public:
 			}
 			fprintf(f, "\n");
 		}
-#endif
 	}
+#else
+	void printHistory(FILE *, std::map<const StateMachineState *, int> &) {
+	}
+#endif
 
 };
 
@@ -959,6 +962,9 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			return;
 		}
 		assertFalse(&scopes->bools, isBad, opt);
+		if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
+			return;
+		}
 	}
 
 	switch (smse->type) {
