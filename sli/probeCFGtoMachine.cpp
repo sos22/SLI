@@ -310,12 +310,15 @@ getLibraryStateMachine(SMScopes *scopes,
 		acc = Load(!rax,
 			   *(smb_reg(arg1, Ity_I64) * smb_const64(8) +
 			     smb_reg(threadAndRegister::reg(tid, offsetof(VexGuestAMD64State, pthread_specific_base), 0), Ity_I64)),
-			   Ity_I64) >>
+			   Ity_I64,
+			   MemoryTag::pthread_specific()) >>
 			end;
 		break;
 	case LibraryFunctionTemplate::pthread_setspecific:
-		acc = (*(smb_reg(arg1, Ity_I64) * smb_const64(8) +
-			 smb_reg(threadAndRegister::reg(tid, offsetof(VexGuestAMD64State, pthread_specific_base), 0), Ity_I64)) <<= smb_reg(arg2, Ity_I64)) >>
+		acc = Store( *(smb_reg(arg1, Ity_I64) * smb_const64(8) +
+			       smb_reg(threadAndRegister::reg(tid, offsetof(VexGuestAMD64State, pthread_specific_base), 0), Ity_I64)),
+			     smb_reg(arg2, Ity_I64),
+			     MemoryTag::pthread_specific()) >>
 			end;
 		break;
 	case LibraryFunctionTemplate::none:

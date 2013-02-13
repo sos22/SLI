@@ -1396,24 +1396,26 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 						&scopes->bools,
 						l->type,
 						l->addr));
-			StateMachineState *t =
-				new StateMachineSideEffecting(
-					it->first->dbg_origin,
-					new StateMachineSideEffectAssertFalse(
-						exprbdd::to_bbdd(
-							&scopes->bools,
-							exprbdd::unop(
-								&scopes->exprs,
+			if (!l->tag.neverBadPtr()) {
+				StateMachineState *t =
+					new StateMachineSideEffecting(
+						it->first->dbg_origin,
+						new StateMachineSideEffectAssertFalse(
+							exprbdd::to_bbdd(
 								&scopes->bools,
-								Iop_BadPtr,
-								l->addr)),
-						true),
-					it->first->target);
-			predMap.removePredecessor(it->first->target, it->first);
-			predMap.addPredecessor(t, it->first);
-			predMap.addPredecessor(it->first->target, t);
-			cdg.introduceState(t, cdg.domOf(it->first));
-			it->first->target = t;
+								exprbdd::unop(
+									&scopes->exprs,
+									&scopes->bools,
+									Iop_BadPtr,
+									l->addr)),
+							true),
+						it->first->target);
+				predMap.removePredecessor(it->first->target, it->first);
+				predMap.addPredecessor(t, it->first);
+				predMap.addPredecessor(it->first->target, t);
+				cdg.introduceState(t, cdg.domOf(it->first));
+				it->first->target = t;
+			}
 			continue;
 		} else if (it->second.stores.size() == 1 &&
 			   !it->second.mightLoadInitial) {
@@ -1667,23 +1669,25 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			it->first->sideEffect = new StateMachineSideEffectCopy(
 				l->target,
 				repl);
-			StateMachineState *t = new StateMachineSideEffecting(
-				it->first->dbg_origin,
-				new StateMachineSideEffectAssertFalse(
-					exprbdd::to_bbdd(
-						&scopes->bools,
-						exprbdd::unop(
-							&scopes->exprs,
+			if (!l->tag.neverBadPtr()) {
+				StateMachineState *t = new StateMachineSideEffecting(
+					it->first->dbg_origin,
+					new StateMachineSideEffectAssertFalse(
+						exprbdd::to_bbdd(
 							&scopes->bools,
-							Iop_BadPtr,
-							l->addr)),
-					true),
-				it->first->target);
-			predMap.removePredecessor(it->first->target, it->first);
-			predMap.addPredecessor(t, it->first);
-			predMap.addPredecessor(it->first->target, t);
-			cdg.introduceState(t, cdg.domOf(it->first));
-			it->first->target = t;
+							exprbdd::unop(
+								&scopes->exprs,
+								&scopes->bools,
+								Iop_BadPtr,
+								l->addr)),
+						true),
+					it->first->target);
+				predMap.removePredecessor(it->first->target, it->first);
+				predMap.addPredecessor(t, it->first);
+				predMap.addPredecessor(it->first->target, t);
+				cdg.introduceState(t, cdg.domOf(it->first));
+				it->first->target = t;
+			}
 			progress = true;
 		}
 	}
@@ -1771,16 +1775,20 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 				if (debug_use_alias_table)
 					printf("Remove store l%d\n",
 					       stateLabels[*it]);
-				(*it)->sideEffect = 
-					new StateMachineSideEffectAssertFalse(
-						exprbdd::to_bbdd(
-							&scopes->bools,
-							exprbdd::unop(
-								&scopes->exprs,
+				if (s->tag.neverBadPtr()) {
+					(*it)->sideEffect = NULL;
+				} else {
+					(*it)->sideEffect = 
+						new StateMachineSideEffectAssertFalse(
+							exprbdd::to_bbdd(
 								&scopes->bools,
-								Iop_BadPtr,
-								s->addr)),
-						true);
+								exprbdd::unop(
+									&scopes->exprs,
+									&scopes->bools,
+									Iop_BadPtr,
+									s->addr)),
+							true);
+				}
 				progress = true;
 			}
 			break;
