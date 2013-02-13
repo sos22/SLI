@@ -267,22 +267,25 @@ _optimiseStateMachine(SMScopes *scopes,
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
-		}
-		p = false;
-		sm = sm->optimise(scopes, opt, &p);
-		if (p) {
-			if (is_ssa) {
-				/* Local optimisation only maintains SSA form if interned */
-				sm = internStateMachine(sm);
-				if (TIMEOUT)
-					return sm;
+
+			if (p) {
+				p = false;
+				sm = sm->optimise(scopes, opt, &p);
+				if (p) {
+					if (is_ssa) {
+						/* Local optimisation only maintains SSA form if interned */
+						sm = internStateMachine(sm);
+						if (TIMEOUT)
+							return sm;
+					}
+					if (debugOptimiseStateMachine) {
+						printf("Local optimise 2:\n");
+						printStateMachine(sm, stdout);
+					}
+				}
+				done_something |= p;
 			}
-			if (debugOptimiseStateMachine) {
-				printf("Local optimise 2:\n");
-				printStateMachine(sm, stdout);
-			}
 		}
-		done_something |= p;
 
 		LibVEX_maybe_gc(token);
 
