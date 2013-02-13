@@ -14,11 +14,11 @@ __trivial_hash_function(const VexRip &vr)
 }
 
 static void
-loadCrashEnforcementData(bbdd::scope *scope, crashEnforcementData &ced, AddressSpace *as, int fd)
+loadCrashEnforcementData(SMScopes *scopes, crashEnforcementData &ced, AddressSpace *as, int fd)
 {
 	char *buf = readfile(fd);
 	const char *suffix;
-	if (!ced.parse(scope, as, buf, &suffix))
+	if (!ced.parse(scopes, as, buf, &suffix))
 		errx(1, "cannot parse crash enforcement data");
 	if (*suffix)
 		errx(1, "junk after crash enforcement data: %s", suffix);
@@ -824,7 +824,7 @@ main(int argc, char *argv[])
 		err(1, "open(%s)", ced_path);
 	SMScopes scopes;
 	crashEnforcementData ced;
-	loadCrashEnforcementData(&scopes.bools, ced, ms->addressSpace, fd);
+	loadCrashEnforcementData(&scopes, ced, ms->addressSpace, fd);
 	close(fd);
 
 	FILE *f = fopen(output, "w");

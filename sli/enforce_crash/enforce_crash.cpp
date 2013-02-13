@@ -889,7 +889,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		crashEnforcementData tmp;
 		if (buildCED(summaryId, *it, rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
 			printf("Intermediate CED:\n");
-			tmp.prettyPrint(stdout, true);
+			tmp.prettyPrint(summary->scopes, stdout, true);
 			accumulator |= tmp;
 		}
 	}
@@ -1724,8 +1724,8 @@ main(int argc, char *argv[])
 	buildPatchStrategy(accumulator, oracle);
 
 	FILE *f = fopen(argv[5], "w");
-	accumulator.prettyPrint(f);
-	accumulator.prettyPrint(stdout);
+	accumulator.prettyPrint(&scopes, f);
+	accumulator.prettyPrint(&scopes, stdout);
 	fclose(f);
 
 	return 0;
