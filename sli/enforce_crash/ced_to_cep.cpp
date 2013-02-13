@@ -830,6 +830,12 @@ main(int argc, char *argv[])
 	FILE *f = fopen(output, "w");
 	CfgRelabeller relabeller;
 
+	fprintf(f, "/* Enforcer for %s. */\n", binary);
+	fprintf(f, "/* Compile as:\n");
+	fprintf(f, "gcc -ldl -Isli/enforce_crash -shared cep_interpreter.o -x c %s -o %s.interp.so\n",
+		output, binary);
+	fprintf(f, "*/\n\n");
+
 	fprintf(f, "#include \"cep_interpreter.h\"\n");
 	fprintf(f, "#include <stddef.h>\n"); /* For NULL */
 	fprintf(f, "\n");
