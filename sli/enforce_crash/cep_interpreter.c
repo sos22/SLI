@@ -35,6 +35,7 @@
 #define VERY_LOUD 0
 #define USE_CUSTOM_MALLOC 1
 #define SANITY_CHECK_ALLOCATOR 0
+#define USE_LAST_FREE_DETECTOR 0
 
 /* Define _PAGE_SIZE and _STACK_SIZE which don't include the ul
  * suffix, because that makes it easier to use them in inline
@@ -3863,6 +3864,7 @@ activate(void)
 	hook_clone();
 }
 
+#if USE_LAST_FREE_DETECTOR
 void
 free(void *ptr)
 {
@@ -3887,5 +3889,6 @@ malloc(size_t sz)
 	}
 	return res;
 }
+#endif
 
 static void (*__init_activate)(void) __attribute__((section(".ctors"), unused, used)) = activate;
