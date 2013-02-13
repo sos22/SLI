@@ -765,7 +765,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 				if (unifyExpressions(scopes, sm, stateLabels, addr, is_ssa, representative->dbg_origin, &nextTmp, &suffix, &unifiedAddr, &replacementHead)) {
 					StateMachineSideEffectLoad *l =
 						(StateMachineSideEffectLoad *)rep->sideEffect;
-					MemoryAccessIdentifier newMai(mai.merge(l->rip.tid, mais));
+					MemoryAccessIdentifier newMai(mai.mergeMax(mais));
 					*suffix = new StateMachineSideEffecting(
 						representative->dbg_origin,
 						new StateMachineSideEffectLoad(
