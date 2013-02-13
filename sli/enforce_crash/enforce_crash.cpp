@@ -642,11 +642,23 @@ irexprUsesFreeVariable(const IRExpr *expr)
 				return visit_continue;
 			}
 		}
+		static visit_result Get(void *, const IRExprGet *i) {
+			/* The enforcer machinery only tracks the
+			   normal registers, plus FS_ZERO. */
+			assert(i->reg.isReg());
+			if (i->reg.asReg() > OFFSET_amd64_R15 &&
+			    i->reg.asReg() != offsetof(VexGuestAMD64State, guest_FS_ZERO)) {
+				return visit_abort;
+			} else {
+				return visit_continue;
+			}
+		}
 	};
 	static irexpr_visitor<void> visitor;
 	visitor.FreeVariable = foo::FreeVariable;
 	visitor.Binop = foo::Binop;
 	visitor.Unop = foo::Unop;
+	visitor.Get = foo::Get;
 	return visit_irexpr((void *)NULL, &visitor, expr) == visit_abort;
 }
 static bbdd *
