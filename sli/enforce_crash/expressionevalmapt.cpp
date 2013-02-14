@@ -284,11 +284,10 @@ public:
 	}
 
 	bool operator ==(const reorder_bbdd_cond &o) const {
-		if (cond != o.cond) {
+		if (cond != o.cond || evaluatable != o.evaluatable) {
 			return false;
 		}
 		assert(rank == o.rank);
-		assert(evaluatable == o.evaluatable);
 		return true;
 	}
 	bool operator <(const reorder_bbdd_cond &o) const {
@@ -306,13 +305,16 @@ public:
    simple bdd_rank. */
 class reorder_bbdd : public GarbageCollected<reorder_bbdd, &ir_heap> {
 	struct memo_key {
-		IRExpr *cond;
-		const reorder_bbdd *trueBranch;
-		const reorder_bbdd *falseBranch;
+		IRExpr *const cond;
+		bool const evaluatable;
+		const reorder_bbdd *const trueBranch;
+		const reorder_bbdd *const falseBranch;
 		memo_key(IRExpr *_cond,
+			 bool _evaluatable,
 			 const reorder_bbdd *_trueBranch,
 			 const reorder_bbdd *_falseBranch)
 			: cond(_cond),
+			  evaluatable(_evaluatable),
 			  trueBranch(_trueBranch),
 			  falseBranch(_falseBranch)
 		{}
@@ -320,6 +322,10 @@ class reorder_bbdd : public GarbageCollected<reorder_bbdd, &ir_heap> {
 			if (cond < o.cond) {
 				return true;
 			} else if (cond > o.cond) {
+				return false;
+			} else if (evaluatable < o.evaluatable) {
+				return true;
+			} else if (evaluatable > o.evaluatable) {
 				return false;
 			} else if (trueBranch < o.trueBranch) {
 				return true;
@@ -348,11 +354,13 @@ class reorder_bbdd : public GarbageCollected<reorder_bbdd, &ir_heap> {
 		if (isLeaf || in_table) {
 			return this;
 		}
+		assert(trueBranch);
+		assert(falseBranch);
 		trueBranch = const_cast<reorder_bbdd *>(trueBranch)->_intern();
 		falseBranch = const_cast<reorder_bbdd *>(falseBranch)->_intern();
 		assert(trueBranch->isLeaf || trueBranch->in_table);
 		assert(falseBranch->isLeaf || falseBranch->in_table);
-		auto it_did_insert = memo.insert(memo_key(cond.cond, trueBranch, falseBranch), this);
+		auto it_did_insert = memo.insert(memo_key(cond.cond, cond.evaluatable, trueBranch, falseBranch), this);
 		auto it = it_did_insert.first;
 		auto did_insert = it_did_insert.second;
 		if (did_insert) {
@@ -364,6 +372,7 @@ class reorder_bbdd : public GarbageCollected<reorder_bbdd, &ir_heap> {
 			assert(r->falseBranch == falseBranch);
 			assert(r->in_table);
 		}
+		assert(it->second);
 		return it->second;
 	}
 
@@ -406,7 +415,7 @@ public:
 			return t;
 		}
 		auto it_did_insert =
-			memo.insert(memo_key(cond.cond, t, f), (reorder_bbdd *)0xcafe);
+			memo.insert(memo_key(cond.cond, cond.evaluatable, t, f), (reorder_bbdd *)0xcafe);
 		auto it = it_did_insert.first;
 		auto did_insert = it_did_insert.second;
 		if (!did_insert) {
@@ -855,7 +864,6 @@ splitExpressionOnAvailability(bbdd::scope *scope,
 			      bbdd *what,
 			      const std::set<input_expression> &avail)
 {
-	reorder_bbdd::reset();
 	if (debug_ubbdd) {
 		printf("Split expression, avail ");
 		print_expr_set(avail, stdout);
@@ -978,6 +986,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		roots.prettyPrint(stdout);
 		hbMap.prettyPrint(stdout);
 	}
+
+	reorder_bbdd::reset();
 
 	/* Count the predecessors for each instruction, so that we
 	 * know when it's safe to process it. */
@@ -1461,6 +1471,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			}
 		}
 	}
+
+	reorder_bbdd::reset();
 
 	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
 		assert(it->second == 0);
