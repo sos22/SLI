@@ -1258,6 +1258,28 @@ suppressUninit(smrbdd::scope *scope, smrbdd *input)
 	return suppressUninit(scope, input, memo);
 }
 
+static void
+assertClosed(smrbdd *what)
+{
+#ifndef NDEBUG
+	std::set<smrbdd *> visited;
+	std::vector<smrbdd *> pending;
+	pending.push_back(what);
+	while (!pending.empty()) {
+		what = pending.back();
+		pending.pop_back();
+		if (!visited.insert(what).second) {
+			continue;
+		}
+		if (!what->isLeaf()) {
+			pending.push_back(what->internal().trueBranch);
+			pending.push_back(what->internal().falseBranch);
+			assert(!usesUninit(what->internal().condition));
+		}
+	}
+#endif
+}
+
 /* You might that we could stash things like @oracle, @opt, and @sm in
    the EvalContext itself and not have to pass them around all the
    time.  That'd work, but it'd mean duplicating those pointers in
@@ -1290,24 +1312,24 @@ EvalContext::advance(SMScopes *scopes,
 		if (TIMEOUT) {
 			return;
 		}
+		res = suppressUninit(&scopes->smrs, res);
 		if (debug_survival_constraint) {
 			printf("Terminal, result:\n");
 			res->prettyPrint(stdout);
 		}
-		auto res2 = suppressUninit(&scopes->smrs, res);
-		if (debug_survival_constraint && res != res2) {
-			printf("With uninits suppressed:\n");
-			res2->prettyPrint(stdout);
-		}
 		result = smrbdd::ifelse(
 			&scopes->smrs,
 			justPathConstraint,
-			res2,
+			res,
 			result);
+		result = suppressUninit(&scopes->smrs, result);
 		if (debug_survival_constraint) {
 			printf("New overall result:\n");
 			result->prettyPrint(stdout);
 		}
+
+		assertClosed(result);
+
 		/* Caution: this will de-initialise *this, and might
 		   deallocate it, so once you've done this you can't
 		   access any member variables any more. */
