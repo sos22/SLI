@@ -575,6 +575,9 @@ PointsToTable::pointsToSetForExprNL(IRExpr *e,
 				res |= pointsToSetForExprNL(iex->contents[i], sl, slt, machine);
 			return res;
 		}
+		if (iex->op == Iop_Mul64) {
+			return PointerAliasingSet::nothing;
+		}
 
 		break;
 	}
