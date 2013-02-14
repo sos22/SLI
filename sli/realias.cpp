@@ -19,6 +19,7 @@ static bool debug_refine_points_to_table = false;
 static bool debug_build_alias_table = false;
 static bool debug_refine_alias_table = false;
 static bool debug_use_alias_table = false;
+static bool debug_gc_frames = false;
 static bool debug_enum_backwards = false;
 static void enable_debug() __attribute__((unused, used));
 static void enable_debug() {
@@ -28,6 +29,7 @@ static void enable_debug() {
 	debug_build_alias_table = true;
 	debug_refine_alias_table = true;
 	debug_use_alias_table = true;
+	debug_gc_frames = true;
 	/* This one is loud enough that if you want it you have to
 	 * enable it explicitly: */
 	/*debug_enum_backwards = true;*/
@@ -39,9 +41,10 @@ static void enable_debug() {
 #define debug_build_alias_table false
 #define debug_refine_alias_table false
 #define debug_use_alias_table false
+#define debug_gc_frames false
 #define debug_enum_backwards false
 #endif
-#define any_debug (debug_build_stack_layout || debug_build_points_to_table || debug_refine_points_to_table || debug_build_alias_table || debug_refine_alias_table || debug_use_alias_table || debug_enum_backwards)
+#define any_debug (debug_build_stack_layout || debug_build_points_to_table || debug_refine_points_to_table || debug_build_alias_table || debug_refine_alias_table || debug_use_alias_table || debug_enum_backwards || debug_gc_frames)
 
 class AliasTable;
 
@@ -1664,11 +1667,20 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		    it->first->getSideEffect()->type != StateMachineSideEffect::Load)
 			continue;
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
+		if (debug_gc_frames) {
+			printf("Check l%d for effects on frame GC\n",
+			       stateLabels[it->first]);
+		}
 		PointerAliasingSet pas(ptt.pointsToSetForExpr(
 					       l->addr,
 					       stackLayout.forState(it->first),
 					       stackLayout,
 					       sm));
+		if (debug_gc_frames) {
+			printf("PAS for l%d is %s\n",
+			       stateLabels[it->first],
+			       pas.name());
+		}
 		if (pas.otherStackPointer || !pas.valid) {
 			Maybe<StackLayout> *sl = stackLayout.forState(it->first);
 			if (!sl || !sl->valid) {
@@ -1704,7 +1716,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			}
 		}
 	}
-	if (any_debug) {
+	if (debug_gc_frames) {
 		if (allFramesLive) {
 			printf("All frames are live!\n");
 		} else {
@@ -1768,9 +1780,10 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		case StateMachineSideEffect::StartFunction: {
 			StateMachineSideEffectStartFunction *s = (StateMachineSideEffectStartFunction *)sideEffect;
 			if (!allFramesLive && !liveFrames.count(s->frame)) {
-				if (debug_use_alias_table)
+				if (debug_gc_frames) {
 					printf("Remove start function l%d\n",
 					       stateLabels[*it]);
+				}
 				(*it)->sideEffect = NULL;
 				progress = true;
 			}
@@ -1779,9 +1792,10 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		case StateMachineSideEffect::EndFunction: {
 			StateMachineSideEffectEndFunction *s = (StateMachineSideEffectEndFunction *)sideEffect;
 			if (!allFramesLive && !liveFrames.count(s->frame)) {
-				if (debug_use_alias_table)
+				if (debug_gc_frames) {
 					printf("Remove end function l%d\n",
 					       stateLabels[*it]);
+				}
 				(*it)->sideEffect = NULL;
 				progress = true;
 			}
@@ -1802,15 +1816,16 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 						newFunctions.push_back(*it2);
 				}
 				if (newFunctions.empty()) {
-					if (debug_use_alias_table)
+					if (debug_gc_frames) {
 						printf("Stack layout l%d is dead\n",
 						       stateLabels[*it]);
+					}
 					(*it)->sideEffect = NULL;
 				} else {
 					(*it)->sideEffect =
 						new StateMachineSideEffectStackLayout(
 							newFunctions);
-					if (debug_use_alias_table) {
+					if (debug_gc_frames) {
 						printf("Shrink stack layout l%d to ", stateLabels[*it]);
 						(*it)->sideEffect->prettyPrint(stdout);
 						printf("\n");
