@@ -446,23 +446,19 @@ StackLayoutTable::build(StateMachine *inp)
 
 class PointsToTable {
 	std::map<threadAndRegister, PointerAliasingSet> content;
-	PointerAliasingSet getInitialLoadAliasing(SMScopes *scopes,
-						  IRExpr *addr,
+	PointerAliasingSet getInitialLoadAliasing(IRExpr *addr,
 						  StackLayoutTable &slt,
 						  StateMachine *machine);
-	PointerAliasingSet getInitialLoadAliasing(SMScopes *scopes,
-						  exprbdd *addr,
+	PointerAliasingSet getInitialLoadAliasing(exprbdd *addr,
 						  StackLayoutTable &slt,
 						  StateMachine *machine);
 
-	PointerAliasingSet pointsToSetForExpr(SMScopes *scopes,
-					      IRExpr *e,
+	PointerAliasingSet pointsToSetForExpr(IRExpr *e,
 					      Maybe<StackLayout> *sl,
 					      StackLayoutTable &slt,
 					      StateMachine *machine);
 public:
-	PointerAliasingSet pointsToSetForExpr(SMScopes *scopes,
-					      exprbdd *e,
+	PointerAliasingSet pointsToSetForExpr(exprbdd *e,
 					      Maybe<StackLayout> *sl,
 					      StackLayoutTable &slt,
 					      StateMachine *machine);
@@ -472,22 +468,19 @@ public:
 		for (auto it = content.begin(); it != content.end(); it++)
 			assert(it->first.isValid());
 	}
-	PointsToTable refine(SMScopes *scopes,
-			     AliasTable &at,
+	PointsToTable refine(AliasTable &at,
 			     StateMachine *sm,
 			     StackLayoutTable &slt,
 			     bool *done_something);
 };
 
 PointerAliasingSet
-PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
-				      IRExpr *addr,
+PointsToTable::getInitialLoadAliasing(IRExpr *addr,
 				      StackLayoutTable &slt,
 				      StateMachine *machine)
 {
 	Maybe<StackLayout> *sl = slt.initialStackLayout(machine);
-	PointerAliasingSet addrPts(pointsToSetForExpr(scopes,
-						      addr,
+	PointerAliasingSet addrPts(pointsToSetForExpr(addr,
 						      sl,
 						      slt,
 						      machine));
@@ -515,8 +508,7 @@ PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
 }
 
 PointerAliasingSet
-PointsToTable::pointsToSetForExpr(SMScopes *scopes,
-				  IRExpr *e,
+PointsToTable::pointsToSetForExpr(IRExpr *e,
 				  Maybe<StackLayout> *sl,
 				  StackLayoutTable &slt,
 				  StateMachine *machine)
@@ -547,7 +539,7 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 
 	case Iex_Load: {
 		IRExprLoad *iel = (IRExprLoad *)e;
-		return getInitialLoadAliasing(scopes, iel->addr, slt, machine);
+		return getInitialLoadAliasing(iel->addr, slt, machine);
 	}
 	case Iex_Const:
 		return PointerAliasingSet::notAPointer | PointerAliasingSet::nonStackPointer;
@@ -568,7 +560,7 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 		if (iex->op == Iop_Add64) {
 			PointerAliasingSet res(PointerAliasingSet::nothing);
 			for (int i = 0; i < iex->nr_arguments; i++)
-				res |= pointsToSetForExpr(scopes, iex->contents[i], sl, slt, machine);
+				res |= pointsToSetForExpr(iex->contents[i], sl, slt, machine);
 			return res;
 		}
 
@@ -581,8 +573,7 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 }
 
 PointerAliasingSet
-PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
-				      exprbdd *addr,
+PointsToTable::getInitialLoadAliasing(exprbdd *addr,
 				      StackLayoutTable &slt,
 				      StateMachine *machine)
 {
@@ -596,8 +587,7 @@ PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
 		if (!visited.insert(ee).second)
 			continue;
 		if (ee->isLeaf()) {
-			acc |= getInitialLoadAliasing(scopes, ee->leaf(),
-						      slt, machine);
+			acc |= getInitialLoadAliasing(ee->leaf(), slt, machine);
 		} else {
 			q.push_back(ee->internal().trueBranch);
 			q.push_back(ee->internal().falseBranch);
@@ -607,8 +597,7 @@ PointsToTable::getInitialLoadAliasing(SMScopes *scopes,
 }
 
 PointerAliasingSet
-PointsToTable::pointsToSetForExpr(SMScopes *scopes,
-				  exprbdd *e,
+PointsToTable::pointsToSetForExpr(exprbdd *e,
 				  Maybe<StackLayout> *sl,
 				  StackLayoutTable &slt,
 				  StateMachine *machine)
@@ -623,8 +612,7 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 		if (!visited.insert(ee).second)
 			continue;
 		if (ee->isLeaf()) {
-			acc |= pointsToSetForExpr(scopes, ee->leaf(), sl,
-						  slt, machine);
+			acc |= pointsToSetForExpr(ee->leaf(), sl, slt, machine);
 		} else {
 			q.push_back(ee->internal().trueBranch);
 			q.push_back(ee->internal().falseBranch);
@@ -741,8 +729,7 @@ public:
 		return it->second;
 	}
 #if !CONFIG_NO_STATIC_ALIASING
-	void refine(SMScopes *scopes,
-		    PointsToTable &ptt,
+	void refine(PointsToTable &ptt,
 		    StackLayoutTable &slt,
 		    StateMachine *sm,
 		    bool *done_something,
@@ -958,8 +945,7 @@ sideEffectDefiningRegister(StateMachine *sm, const threadAndRegister &tr)
 }
 
 PointsToTable
-PointsToTable::refine(SMScopes *scopes,
-		      AliasTable &at,
+PointsToTable::refine(AliasTable &at,
 		      StateMachine *sm,
 		      StackLayoutTable &slt,
 		      bool *done_something)
@@ -986,8 +972,7 @@ PointsToTable::refine(SMScopes *scopes,
 			if (e.mightHaveExternalStores)
 				newPts |= PointerAliasingSet::nonStackPointer;
 			if (e.mightLoadInitial)
-				newPts |= getInitialLoadAliasing( scopes,
-								  ((StateMachineSideEffectLoad *)effect)->addr,
+				newPts |= getInitialLoadAliasing( ((StateMachineSideEffectLoad *)effect)->addr,
 								  slt, sm);
 			for (auto it2 = e.stores.begin(); it2 != e.stores.end(); it2++) {
 				StateMachineSideEffecting *satisfierState = *it2;
@@ -996,7 +981,6 @@ PointsToTable::refine(SMScopes *scopes,
 				assert(satisfier->type == StateMachineSideEffect::Store);
 				newPts |=
 					pointsToSetForExpr(
-						scopes,
 						((StateMachineSideEffectStore *)satisfier)->data,
 						sl,
 						slt,
@@ -1031,7 +1015,7 @@ PointsToTable::refine(SMScopes *scopes,
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(scopes, c->value, sl, slt, sm);
+			newPts = pointsToSetForExpr(c->value, sl, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
@@ -1039,7 +1023,7 @@ PointsToTable::refine(SMScopes *scopes,
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
 			     it++)
-				newPts |= pointsToSetForExpr(scopes, it->val, sl, slt, sm);
+				newPts |= pointsToSetForExpr(it->val, sl, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::ImportRegister: {
@@ -1070,8 +1054,7 @@ PointsToTable::refine(SMScopes *scopes,
 }
 
 void
-AliasTable::refine(SMScopes *scopes,
-		   PointsToTable &ptt,
+AliasTable::refine(PointsToTable &ptt,
 		   StackLayoutTable &slt,
 		   StateMachine *sm,
 		   bool *done_something,
@@ -1084,7 +1067,6 @@ AliasTable::refine(SMScopes *scopes,
 		Maybe<StackLayout> *sl = slt.forState(it->first);
 		PointerAliasingSet loadPts(
 			ptt.pointsToSetForExpr(
-				scopes,
 				l->addr,
 				sl,
 				slt,
@@ -1099,8 +1081,7 @@ AliasTable::refine(SMScopes *scopes,
 			assert( (*it2)->getSideEffect()->type == StateMachineSideEffect::Store );
 			Maybe<StackLayout> *sl2 = slt.forState(*it2);
 			PointerAliasingSet storePts(
-				ptt.pointsToSetForExpr( scopes,
-							((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
+				ptt.pointsToSetForExpr( ((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
 							sl2,
 							slt,
 							sm));
@@ -1317,7 +1298,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 #if !CONFIG_NO_STATIC_ALIASING
 	while (1) {
 		bool p = false;
-		PointsToTable ptt2 = ptt.refine(scopes, at, sm, stackLayout, &p);
+		PointsToTable ptt2 = ptt.refine(at, sm, stackLayout, &p);
 
 		if (p && debug_refine_points_to_table) {
 			printf("Refined points-to table:\n");
@@ -1326,7 +1307,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		ptt = ptt2;
 
 		bool p2 = false;
-		at.refine(scopes, ptt, stackLayout, sm, &p2, stateLabels);
+		at.refine(ptt, stackLayout, sm, &p2, stateLabels);
 		p |= p2;
 
 		if (p2 && debug_refine_alias_table) {
@@ -1684,7 +1665,6 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			continue;
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
 		PointerAliasingSet pas(ptt.pointsToSetForExpr(
-					       scopes,
 					       l->addr,
 					       stackLayout.forState(it->first),
 					       stackLayout,
