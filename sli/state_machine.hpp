@@ -188,7 +188,7 @@ public:
 		res.stackPointers.push_back(fid);
 		return res;
 	}
-	static PointerAliasingSet frames(const std::set<FrameId> &inp);
+	static PointerAliasingSet frames(const PointerAliasingSet *base, const std::set<FrameId> &inp);
 	PointerAliasingSet operator |(const PointerAliasingSet &o) const;
 	PointerAliasingSet operator &(const PointerAliasingSet &o) const;
 	bool overlaps(const PointerAliasingSet &o) const;
@@ -1223,6 +1223,17 @@ public:
 		, set(base->set)
 #endif
 	{}
+
+#if !CONFIG_NO_STATIC_ALIASING
+	StateMachineSideEffectImportRegister(
+		const StateMachineSideEffectImportRegister *base,
+		const PointerAliasingSet &_set)
+		: StateMachineSideEffect(StateMachineSideEffect::ImportRegister),
+		  reg(base->reg), tid(base->tid), vex_offset(base->vex_offset),
+		  set(_set)
+	{}
+#endif
+
 	void visit(HeapVisitor &) {}
 	StateMachineSideEffect *optimise(SMScopes *, const AllowableOptimisations&) { return this; }
 	void sanityCheck(SMScopes *) const {}

@@ -1844,9 +1844,42 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			}
 			break;
 		}
+		case StateMachineSideEffect::ImportRegister: {
+			StateMachineSideEffectImportRegister *imp = (StateMachineSideEffectImportRegister *)sideEffect;
+			if (allFramesLive ||
+			    !imp->set.valid ||
+			    imp->set.otherStackPointer) {
+				break;
+			}
+			std::set<FrameId> newFrames;
+			bool repl = false;
+			for (auto it2 = imp->set.stackPointers.begin(); it2 != imp->set.stackPointers.end(); it2++) {
+				if (liveFrames.count(*it2)) {
+					newFrames.insert(*it2);
+				} else {
+					repl = true;
+				}
+			}
+			if (repl) {
+				progress = true;
+				(*it)->sideEffect = new StateMachineSideEffectImportRegister(
+					imp,
+					PointerAliasingSet::frames(&imp->set, newFrames));
+				if (debug_gc_frames) {
+					printf("Import register l%d points-to set shrinks:",
+					       stateLabels[*it]);
+					(*it)->sideEffect->prettyPrint(stdout);
+					printf("\n");
+				}
+			}
+			break;
+		}
 #endif
+
 			/* Don't do anything with these. */
+#if CONFIG_NO_STATIC_ALIASING
 		case StateMachineSideEffect::ImportRegister:
+#endif
 		case StateMachineSideEffect::Load:
 		case StateMachineSideEffect::Copy:
 		case StateMachineSideEffect::Unreached:

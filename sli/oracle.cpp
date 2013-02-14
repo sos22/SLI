@@ -3576,6 +3576,22 @@ PointerAliasingSet::operator <(const PointerAliasingSet &o) const
 		return false;
 	return stackPointers < o.stackPointers;
 }
+
+PointerAliasingSet
+PointerAliasingSet::frames(const PointerAliasingSet *base, const std::set<FrameId> &frames)
+{
+	if (!base->valid) {
+		return *base;
+	}
+	PointerAliasingSet res(*base);
+	res.otherStackPointer = false;
+	res.stackPointers.clear();
+	res.stackPointers.insert(res.stackPointers.end(),
+				 frames.begin(),
+				 frames.end());
+	res.clearName();
+	return res;
+}
 #endif
 
 /* Compute the offset from RSP to the function's return address. */
