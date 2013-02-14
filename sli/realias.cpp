@@ -517,7 +517,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 				  StateMachine *machine)
 {
 	if (e->type() != Ity_I64)
-		return PointerAliasingSet();
+		return PointerAliasingSet::nothing;
 	switch (e->tag) {
 	case Iex_Get: {
 		IRExprGet *iex = (IRExprGet *)e;
