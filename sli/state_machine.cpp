@@ -963,6 +963,57 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		*done_something = true;
 		return ((StateMachineSideEffecting *)target)->target;
 	}
+
+	if (sideEffect->type == StateMachineSideEffect::ImportRegister &&
+	    target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect &&
+	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::ImportRegister) {
+		auto targ = (StateMachineSideEffecting *)target;
+		auto thisEffect = (StateMachineSideEffectImportRegister *)sideEffect;
+		auto otherEffect = (StateMachineSideEffectImportRegister *)targ->sideEffect;
+		if (thisEffect->tid == otherEffect->tid &&
+		    thisEffect->vex_offset == otherEffect->vex_offset) {
+			/* Sort effects so that if two effects import
+			   the same register with the same aliasing
+			   set they end up together, and then remove
+			   any duplicates. */
+			/* (The way machines are constructed ensures
+			   that effects with the same tid and
+			   vex_offset always occur together, but we
+			   need to make sure that the ordering is
+			   reasonable wrt the aliasing set, which can
+			   change during state machine
+			   simplification) */
+			if (thisEffect->set == otherEffect->set) {
+				/* These two are dupes; remove the
+				 * second one. */
+				*done_something = true;
+				/* I want to just go
+				   target->sideEffect = Copy(otherEffect->reg, thisEffect->reg),
+				   but I can't because target might be
+				   shared with some other part of the
+				   machine, so duplicate it. */
+				target = new StateMachineSideEffecting(
+					target->dbg_origin,
+					new StateMachineSideEffectCopy(
+						otherEffect->reg,
+						exprbdd::var(&scopes->exprs, &scopes->bools,
+							     IRExpr_Get(thisEffect->reg, Ity_I64))),
+					targ->target);
+				return this;
+			} else if (otherEffect->set < thisEffect->set) {
+				/* Sort the effects */
+				*done_something = true;
+				return new StateMachineSideEffecting(
+					target->dbg_origin,
+					otherEffect,
+					new StateMachineSideEffecting(
+						dbg_origin,
+						thisEffect,
+						targ->target));
+			}
+		}
+	}
 #endif
 
 	if (sideEffect->type == StateMachineSideEffect::AssertFalse &&
@@ -989,6 +1040,9 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 			((StateMachineSideEffectAssertFalse *)sideEffect)->reflectsActualProgram);
 		sideEffect = sideEffect->optimise(scopes, opt);
 		target = ((StateMachineSideEffecting *)target)->target;
+		if (!sideEffect) {
+			return target;
+		}
 	}
 
 	if (sideEffect &&
@@ -1005,6 +1059,7 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 				scopes->smrs.cnst(smr_unreached),
 				term->res));
 	}
+
 	return this;
 }
 
