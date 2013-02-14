@@ -298,8 +298,8 @@ _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 			}
 			seen.insert(l);
 			if (!l->isLeaf()) {
-				pending.push_back(l->internal().trueBranch);
 				pending.push_back(l->internal().falseBranch);
+				pending.push_back(l->internal().trueBranch);
 			}
 		}
 	}
