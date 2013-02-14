@@ -1074,7 +1074,7 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 
 		/* Somewhat arbitrary limit to avoid running out of
 		 * memory. */
-		if (relocs.size() >= 250000) {
+		if (relocs.size() >= 25000000) {
 			warning("Hit arbitrary limit in %s, forcing it to fail!\n", __func__);
 			_timed_out = true;
 			stackedCdf::stopBDD();
