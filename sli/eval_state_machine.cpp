@@ -1273,6 +1273,9 @@ EvalContext::advance(SMScopes *scopes,
 {
 	if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
 		/* This path is dead. */
+		if (debug_survival_constraint) {
+			printf("Path is dead\n");
+		}
 		return;
 	}
 
@@ -1284,11 +1287,24 @@ EvalContext::advance(SMScopes *scopes,
 		if (TIMEOUT) {
 			return;
 		}
+		if (debug_survival_constraint) {
+			printf("Terminal, result:\n");
+			res->prettyPrint(stdout);
+		}
+		auto res2 = suppressUninit(&scopes->smrs, res);
+		if (debug_survival_constraint && res != res2) {
+			printf("With uninits suppressed:\n");
+			res2->prettyPrint(stdout);
+		}
 		result = smrbdd::ifelse(
 			&scopes->smrs,
 			justPathConstraint,
-			suppressUninit(&scopes->smrs, res),
+			res2,
 			result);
+		if (debug_survival_constraint) {
+			printf("New overall result:\n");
+			result->prettyPrint(stdout);
+		}
 		/* Caution: this will de-initialise *this, and might
 		   deallocate it, so once you've done this you can't
 		   access any member variables any more. */
