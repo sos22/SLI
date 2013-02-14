@@ -107,7 +107,7 @@ public:
 		return !(*this == o);
 	}
 	
-	bool identifyFrameFromPtr(exprbdd *ptr, FrameId *out);
+	bool identifyFrameFromPtr(IRExpr *ptr, FrameId *out);
 	size_t size() { return rsps.size(); }
 };
 
@@ -121,7 +121,7 @@ enum compare_expressions_res {
 /* This has to be non-static because it's invoked from a template.
    Why do template parameters have to be non-static?  Nobody seems to
    know. */
-compare_expressions_res
+static compare_expressions_res
 compare_expressions(IRExpr *a, IRExpr *b)
 {
 	assert(a->type() == Ity_I64);
@@ -159,44 +159,36 @@ compare_expressions(IRExpr *a, IRExpr *b)
 		return compare_expressions_gt;
 }
 
-template <typename bdd1, typename bdd2, typename rt,
-	  rt (*zip)(typename bdd1::leafT, typename bdd2::leafT),
-	  rt (*fold)(rt, rt)>
-static rt
-foldzipbdds(const bdd1 *a, const bdd2 *b)
-{
-	if (a->isLeaf() && b->isLeaf())
-		return zip(a->leaf(), b->leaf());
-	if (a->isLeaf())
-		return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().trueBranch),
-			    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().falseBranch));
-	if (b->isLeaf() || a->internal().rank < b->internal().rank)
-		return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().trueBranch, b),
-			    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().falseBranch, b));
-	if (a->internal().rank == b->internal().rank)
-		return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().trueBranch, b->internal().trueBranch),
-			    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a->internal().falseBranch, b->internal().falseBranch));
-	return fold(foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().trueBranch),
-		    foldzipbdds<bdd1, bdd2, rt, zip, fold>(a, b->internal().falseBranch));
-}
-/* Like compare_expressions(IRExpr *, IRExpr *), only non-static to
-   work around language bugs. */
-compare_expressions_res
-combine_expression_res(compare_expressions_res a,
-		       compare_expressions_res b) {
-	if (a == b)
-		return a;
-	else
-		return compare_expressions_unknown;
-}
 static compare_expressions_res
-compare_expressions(const exprbdd *a, const exprbdd *b)
+compare_expressions(IRExpr *a, const exprbdd *b)
 {
-	return foldzipbdds<exprbdd, exprbdd, compare_expressions_res, compare_expressions, combine_expression_res>(a, b);
+	compare_expressions_res r = compare_expressions_unknown;
+	std::set<const exprbdd *> visited;
+	std::vector<const exprbdd *> q;
+	q.push_back(b);
+	while (!q.empty()) {
+		const exprbdd *n = q.back();
+		q.pop_back();
+		if (!visited.insert(n).second) {
+			continue;
+		}
+		if (n->isLeaf()) {
+			compare_expressions_res r2 = compare_expressions(a, n->leaf());
+			if (r != compare_expressions_unknown) {
+				r = r2;
+			} else if (r != r2) {
+				return compare_expressions_unknown;
+			}
+		} else {
+			q.push_back(n->internal().trueBranch);
+			q.push_back(n->internal().falseBranch);
+		}
+	}
+	return r;
 }
 
 bool
-StackLayout::identifyFrameFromPtr(exprbdd *ptr, FrameId *out)
+StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
 {
 	if (TIMEOUT)
 		return false;
@@ -570,7 +562,7 @@ PointsToTable::pointsToSetForExpr(SMScopes *scopes,
 		    ((IRExprGet *)iex->contents[1])->reg.isReg() &&
 		    ((IRExprGet *)iex->contents[1])->reg.asReg() == OFFSET_amd64_RSP) {
 			FrameId f;
-			if (sl->content.identifyFrameFromPtr(exprbdd::var(&scopes->exprs, &scopes->bools, iex), &f))
+			if (sl->content.identifyFrameFromPtr(iex, &f))
 				return PointerAliasingSet::frame(f);
 		}
 		if (iex->op == Iop_Add64) {
