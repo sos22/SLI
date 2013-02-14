@@ -1709,7 +1709,20 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 					       stackLayout,
 					       sm));
 		if (pas.otherStackPointer || !pas.valid) {
-			allFramesLive = true;
+			Maybe<StackLayout> *sl = stackLayout.forState(it->first);
+			if (!sl || !sl->valid) {
+				allFramesLive = true;
+				if (any_debug) {
+					printf("l%d forces all stack frames to be live\n",
+					       stateLabels[it->first]);
+				}
+			} else {
+				for (auto it = sl->content.functions.begin();
+				     it != sl->content.functions.end();
+				     it++) {
+					liveFrames.insert(*it);
+				}
+			}
 		} else {
 			Maybe<StackLayout> *sl = stackLayout.forState(it->first);
 			if (sl && sl->valid) {
@@ -1731,13 +1744,17 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		}
 	}
 	if (any_debug) {
-		printf("Live frames: {");
-		for (auto it = liveFrames.begin(); it != liveFrames.end(); it++) {
-			if (it != liveFrames.begin())
-				printf(", ");
-			printf("%s", it->name());
+		if (allFramesLive) {
+			printf("All frames are live!\n");
+		} else {
+			printf("Live frames: {");
+			for (auto it = liveFrames.begin(); it != liveFrames.end(); it++) {
+				if (it != liveFrames.begin())
+					printf(", ");
+				printf("%s", it->name());
+			}
+			printf("}\n");
 		}
-		printf("}\n");
 	}
 #endif
 
