@@ -456,15 +456,24 @@ class PointsToTable {
 						  StackLayoutTable &slt,
 						  StateMachine *machine);
 
-	PointerAliasingSet pointsToSetForExpr(IRExpr *e,
+	/* NL = no location i.e. we don't take into account the fact
+	   that only certain frames could possibly be live at this
+	   point */
+	PointerAliasingSet pointsToSetForExprNL(IRExpr *e,
+						Maybe<StackLayout> *sl,
+						StackLayoutTable &slt,
+						StateMachine *machine);
+	PointerAliasingSet pointsToSetForExprNL(exprbdd *e,
 					      Maybe<StackLayout> *sl,
 					      StackLayoutTable &slt,
 					      StateMachine *machine);
 public:
-	PointerAliasingSet pointsToSetForExpr(exprbdd *e,
-					      Maybe<StackLayout> *sl,
-					      StackLayoutTable &slt,
-					      StateMachine *machine);
+	/* Loc = location i.e. we only return frames which could
+	   possibly be live at this point in the machine. */
+	PointerAliasingSet pointsToSetForExprLoc(exprbdd *e,
+						 Maybe<StackLayout> *sl,
+						 StackLayoutTable &slt,
+						 StateMachine *machine);
 	bool build(StateMachine *sm);
 	void prettyPrint(FILE *f);
 	void sanity_check() const {
@@ -483,10 +492,10 @@ PointsToTable::getInitialLoadAliasing(IRExpr *addr,
 				      StateMachine *machine)
 {
 	Maybe<StackLayout> *sl = slt.initialStackLayout(machine);
-	PointerAliasingSet addrPts(pointsToSetForExpr(addr,
-						      sl,
-						      slt,
-						      machine));
+	PointerAliasingSet addrPts(pointsToSetForExprNL(addr,
+							sl,
+							slt,
+							machine));
 	PointerAliasingSet res = PointerAliasingSet::nonStackPointer | PointerAliasingSet::notAPointer;
 	if (!addrPts.valid || addrPts.otherStackPointer) {
 		for (auto it = slt.initialLoadAliasing.begin();
@@ -511,10 +520,10 @@ PointsToTable::getInitialLoadAliasing(IRExpr *addr,
 }
 
 PointerAliasingSet
-PointsToTable::pointsToSetForExpr(IRExpr *e,
-				  Maybe<StackLayout> *sl,
-				  StackLayoutTable &slt,
-				  StateMachine *machine)
+PointsToTable::pointsToSetForExprNL(IRExpr *e,
+				    Maybe<StackLayout> *sl,
+				    StackLayoutTable &slt,
+				    StateMachine *machine)
 {
 	if (e->type() != Ity_I64)
 		return PointerAliasingSet::nothing;
@@ -563,7 +572,7 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		if (iex->op == Iop_Add64) {
 			PointerAliasingSet res(PointerAliasingSet::nothing);
 			for (int i = 0; i < iex->nr_arguments; i++)
-				res |= pointsToSetForExpr(iex->contents[i], sl, slt, machine);
+				res |= pointsToSetForExprNL(iex->contents[i], sl, slt, machine);
 			return res;
 		}
 
@@ -573,6 +582,41 @@ PointsToTable::pointsToSetForExpr(IRExpr *e,
 		break;
 	}
 	return PointerAliasingSet::anything;
+}
+
+PointerAliasingSet
+PointsToTable::pointsToSetForExprLoc(exprbdd *e,
+				     Maybe<StackLayout> *sl,
+				     StackLayoutTable &slt,
+				     StateMachine *machine)
+{
+	PointerAliasingSet base(pointsToSetForExprNL(e, sl, slt, machine));
+	if (!sl || !sl->valid) {
+		return base;
+	}
+	assert(base.valid);
+	if (base.otherStackPointer) {
+		base.otherStackPointer = false;
+		base.stackPointers = sl->content.functions;
+	} else {
+		for (auto it = base.stackPointers.begin();
+		     it != base.stackPointers.end();
+			) {
+			bool present = false;
+			for (auto it2 = sl->content.functions.begin();
+			     !present && it2 != sl->content.functions.end();
+			     it2++) {
+				present |= *it2 == *it;
+			}
+			if (!present) {
+				it = base.stackPointers.erase(it);
+			} else {
+				it++;
+			}
+		}
+	}
+	base.clearName();
+	return base;
 }
 
 PointerAliasingSet
@@ -600,10 +644,10 @@ PointsToTable::getInitialLoadAliasing(exprbdd *addr,
 }
 
 PointerAliasingSet
-PointsToTable::pointsToSetForExpr(exprbdd *e,
-				  Maybe<StackLayout> *sl,
-				  StackLayoutTable &slt,
-				  StateMachine *machine)
+PointsToTable::pointsToSetForExprNL(exprbdd *e,
+				    Maybe<StackLayout> *sl,
+				    StackLayoutTable &slt,
+				    StateMachine *machine)
 {
 	PointerAliasingSet acc(PointerAliasingSet::nothing);
 	std::set<exprbdd *> visited;
@@ -615,7 +659,7 @@ PointsToTable::pointsToSetForExpr(exprbdd *e,
 		if (!visited.insert(ee).second)
 			continue;
 		if (ee->isLeaf()) {
-			acc |= pointsToSetForExpr(ee->leaf(), sl, slt, machine);
+			acc |= pointsToSetForExprNL(ee->leaf(), sl, slt, machine);
 		} else {
 			q.push_back(ee->internal().trueBranch);
 			q.push_back(ee->internal().falseBranch);
@@ -983,50 +1027,27 @@ PointsToTable::refine(AliasTable &at,
 				assert(satisfier);
 				assert(satisfier->type == StateMachineSideEffect::Store);
 				newPts |=
-					pointsToSetForExpr(
+					pointsToSetForExprLoc(
 						((StateMachineSideEffectStore *)satisfier)->data,
 						sl,
 						slt,
 						sm);
 			}
 
-			/* A load can only load from a frame if the
-			   frame is actually live at the time of the
-			   load. */
-			if (newPts.valid &&
-			    !newPts.otherStackPointer &&
-			    sl &&
-			    sl->valid) {
-				for (auto it = newPts.stackPointers.begin();
-				     it != newPts.stackPointers.end();
-					) {
-					bool present = false;
-					for (auto it2 = sl->content.functions.begin();
-					     !present && it2 != sl->content.functions.end();
-					     it2++) {
-						if (*it2 == *it)
-							present = true;
-					}
-					if (present) {
-						it++;
-					} else {
-						it = newPts.stackPointers.erase(it);
-					}
-				}
-			}
 			break;
 		}
 		case StateMachineSideEffect::Copy: {
 			StateMachineSideEffectCopy *c = (StateMachineSideEffectCopy *)effect;
-			newPts = pointsToSetForExpr(c->value, sl, slt, sm);
+			newPts = pointsToSetForExprNL(c->value, sl, slt, sm);
 			break;
 		}
 		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *p = (StateMachineSideEffectPhi *)effect;
 			for (auto it = p->generations.begin();
 			     it != p->generations.end();
-			     it++)
-				newPts |= pointsToSetForExpr(it->val, sl, slt, sm);
+			     it++) {
+				newPts |= pointsToSetForExprNL(it->val, sl, slt, sm);
+			}
 			break;
 		}
 		case StateMachineSideEffect::ImportRegister: {
@@ -1069,7 +1090,7 @@ AliasTable::refine(PointsToTable &ptt,
 		StateMachineSideEffectLoad *l = (StateMachineSideEffectLoad *)it->first->getSideEffect();
 		Maybe<StackLayout> *sl = slt.forState(it->first);
 		PointerAliasingSet loadPts(
-			ptt.pointsToSetForExpr(
+			ptt.pointsToSetForExprLoc(
 				l->addr,
 				sl,
 				slt,
@@ -1084,10 +1105,10 @@ AliasTable::refine(PointsToTable &ptt,
 			assert( (*it2)->getSideEffect()->type == StateMachineSideEffect::Store );
 			Maybe<StackLayout> *sl2 = slt.forState(*it2);
 			PointerAliasingSet storePts(
-				ptt.pointsToSetForExpr( ((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
-							sl2,
-							slt,
-							sm));
+				ptt.pointsToSetForExprLoc( ((StateMachineSideEffectStore *)(*it2)->getSideEffect())->addr,
+							   sl2,
+							   slt,
+							   sm));
 			if (storePts.overlaps(loadPts)) {
 				if (debug_refine_alias_table)
 					printf("\tPreserve l%d: %s vs %s\n",
@@ -1671,7 +1692,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			printf("Check l%d for effects on frame GC\n",
 			       stateLabels[it->first]);
 		}
-		PointerAliasingSet pas(ptt.pointsToSetForExpr(
+		PointerAliasingSet pas(ptt.pointsToSetForExprLoc(
 					       l->addr,
 					       stackLayout.forState(it->first),
 					       stackLayout,
@@ -1682,37 +1703,21 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			       pas.name());
 		}
 		if (pas.otherStackPointer || !pas.valid) {
-			Maybe<StackLayout> *sl = stackLayout.forState(it->first);
-			if (!sl || !sl->valid) {
-				allFramesLive = true;
-				if (any_debug) {
-					printf("l%d forces all stack frames to be live\n",
-					       stateLabels[it->first]);
-				}
-			} else {
-				for (auto it = sl->content.functions.begin();
-				     it != sl->content.functions.end();
-				     it++) {
-					liveFrames.insert(*it);
-				}
+			allFramesLive = true;
+			if (debug_gc_frames) {
+				printf("l%d forces all stack frames to be live\n",
+				       stateLabels[it->first]);
 			}
 		} else {
-			Maybe<StackLayout> *sl = stackLayout.forState(it->first);
-			if (sl && sl->valid) {
-				for (auto it = pas.stackPointers.begin();
-				     it != pas.stackPointers.end();
-				     it++) {
-					bool live = false;
-					for (auto it2 = sl->content.functions.begin();
-					     !live && it2 != sl->content.functions.end();
-					     it2++)
-						if (*it2 == *it)
-							live = true;
-					if (live)
-						liveFrames.insert(*it);
+			for (auto it2 = pas.stackPointers.begin();
+			     it2 != pas.stackPointers.end();
+			     it2++) {
+				liveFrames.insert(*it2);
+				if (debug_gc_frames) {
+					printf("l%d keeps %s live\n",
+					       stateLabels[it->first],
+					       it2->name());
 				}
-			} else {
-				liveFrames.insert(pas.stackPointers.begin(), pas.stackPointers.end());
 			}
 		}
 	}
