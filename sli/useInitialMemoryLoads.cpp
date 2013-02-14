@@ -173,23 +173,29 @@ useInitialMemoryLoads(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, con
 			}
 			if (hasConflictingStores)
 				continue;
-			rewrites[s] = new StateMachineSideEffecting(
-				s->dbg_origin,
-				new StateMachineSideEffectAssertFalse(
-					exprbdd::to_bbdd(
-						&scopes->bools,
-						exprbdd::unop(
-							&scopes->exprs,
-							&scopes->bools,
-							Iop_BadPtr,
-							load->addr)),
-					true),
+			auto cpy = 
 				new StateMachineSideEffecting(
 					s->dbg_origin,
 					new StateMachineSideEffectCopy(
 						load->target,
 						exprbdd::load(&scopes->exprs, &scopes->bools, load->type, load->addr)),
-					s->target));
+					s->target);
+			if (load->tag.neverBadPtr()) {
+				rewrites[s] = cpy;
+			} else {
+				rewrites[s] = new StateMachineSideEffecting(
+					s->dbg_origin,
+					new StateMachineSideEffectAssertFalse(
+						exprbdd::to_bbdd(
+							&scopes->bools,
+							exprbdd::unop(
+								&scopes->exprs,
+								&scopes->bools,
+								Iop_BadPtr,
+								load->addr)),
+						true),
+					cpy);
+			}
 		}
 	}
 

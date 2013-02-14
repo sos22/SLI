@@ -1276,6 +1276,35 @@ MaiMap::fromFile(const StateMachine *sm1, const char *fname)
 	return fromFile(sm1, NULL, fname);
 }
 
+MemoryAccessIdentifier
+MaiMap::mergeMax(const std::set<MemoryAccessIdentifier> &mais)
+{
+	assert(!mais.empty());
+	auto it = mais.begin();
+	int tid = it->tid;
+	int bestId = it->id;
+	for (it++; it != mais.end(); it++) {
+		assert(it->tid == tid);
+		if (it->id > bestId) {
+			bestId = it->id;
+		}
+	}
+	MemoryAccessIdentifier res(bestId, tid);
+	assert(mais.count(res));
+	std::set<const CFGNode *> newAliasingTable;
+	for (auto it = mais.begin(); it != mais.end(); it++) {
+		assert(maiCorrespondence->count(*it));
+		const std::vector<const CFGNode *> &entry2( (*maiCorrespondence)[*it] );
+		newAliasingTable |= std::set<const CFGNode *>(entry2.begin(), entry2.end());
+	}
+	std::vector<const CFGNode *> &entry1( (*maiCorrespondence)[res] );
+	entry1.clear();
+	entry1.insert(entry1.end(),
+		      newAliasingTable.begin(),
+		      newAliasingTable.end());
+	return res;
+}
+
 void
 dumpStateMachine(const StateMachine *sm, const char *fname)
 {

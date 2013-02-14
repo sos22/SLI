@@ -536,13 +536,15 @@ public:
 				       happensBeforePoints, abs, sideCondition)
 	{}
 
-	bool parse(bbdd::scope *scope, AddressSpace *as, const char *str, const char **suffix) {
-		if (!parseThisString("Crash enforcement data:\n", str, &str) ||
+	bool parse(SMScopes *scopes, AddressSpace *as, const char *str, const char **suffix) {
+		if (!parseThisString("Scopes:\n", str, &str) ||
+		    !scopes->parse(str, &str) ||
+		    !parseThisString("Crash enforcement data:\n", str, &str) ||
 		    !roots.parse(str, &str) ||
 		    !crashCfg.parse(roots, as, false, str, &str) ||
 		    !exprStashPoints.parse(str, &str) ||
-		    !happensBeforePoints.parse(scope, crashCfg, str, &str) ||
-		    !expressionEvalPoints.parse(scope, str, &str) ||
+		    !happensBeforePoints.parse(&scopes->bools, crashCfg, str, &str) ||
+		    !expressionEvalPoints.parse(&scopes->bools, str, &str) ||
 		    !parseThisString("Patch points = [", str, &str))
 			return false;
 		while (!parseThisString("], contInterpret = [", str, &str)) {
@@ -567,10 +569,14 @@ public:
 		return true;
 	}
 
-	void prettyPrint(FILE *f, bool verbose = false) {
+	void prettyPrint(SMScopes *scopes, FILE *f, bool verbose = false) {
 		if (roots.empty()) {
 			fprintf(f, "<empty>\n");
 			return;
+		}
+		if (scopes) {
+			fprintf(f, "Scopes:\n");
+			scopes->prettyPrint(f, NULL);
 		}
 		fprintf(f, "Crash enforcement data:\n");
 		roots.prettyPrint(f);

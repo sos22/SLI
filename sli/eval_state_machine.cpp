@@ -949,22 +949,24 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		if (TIMEOUT) {
 			return;
 		}
-		exprbdd *a = exprbdd::unop(
-				    &scopes->exprs,
-				    &scopes->bools,
-				    Iop_BadPtr,
-				    addr);
-		if (TIMEOUT) {
-			return;
-		}
-		assert(a);
-		bbdd *isBad = exprbdd::to_bbdd(&scopes->bools, a);
-		if (TIMEOUT) {
-			return;
-		}
-		assertFalse(&scopes->bools, isBad, opt);
-		if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
-			return;
+		if (!smsema->tag.neverBadPtr()) {
+			exprbdd *a = exprbdd::unop(
+				&scopes->exprs,
+				&scopes->bools,
+				Iop_BadPtr,
+				addr);
+			if (TIMEOUT) {
+				return;
+			}
+			assert(a);
+			bbdd *isBad = exprbdd::to_bbdd(&scopes->bools, a);
+			if (TIMEOUT) {
+				return;
+			}
+			assertFalse(&scopes->bools, isBad, opt);
+			if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
+				return;
+			}
 		}
 	}
 
@@ -1276,6 +1278,7 @@ EvalContext::advance(SMScopes *scopes,
 		if (debug_survival_constraint) {
 			printf("Path is dead\n");
 		}
+		pendingStates.pop_back();
 		return;
 	}
 
@@ -1430,7 +1433,9 @@ enumEvalPaths(SMScopes *scopes,
 		result->prettyPrint(stdout);
 	}
 
-	result = smrbdd::replaceTerminal(&scopes->smrs, smr_unreached, unreachedIs, result);
+	if (!TIMEOUT) {
+		result = smrbdd::replaceTerminal(&scopes->smrs, smr_unreached, unreachedIs, result);
+	}
 
 	if (debug_survival_constraint && result) {
 		printf("Unreached suppressed:\n");

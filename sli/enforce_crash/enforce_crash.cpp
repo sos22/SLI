@@ -642,11 +642,23 @@ irexprUsesFreeVariable(const IRExpr *expr)
 				return visit_continue;
 			}
 		}
+		static visit_result Get(void *, const IRExprGet *i) {
+			/* The enforcer machinery only tracks the
+			   normal registers, plus FS_ZERO. */
+			assert(i->reg.isReg());
+			if (i->reg.asReg() > OFFSET_amd64_R15 &&
+			    i->reg.asReg() != offsetof(VexGuestAMD64State, guest_FS_ZERO)) {
+				return visit_abort;
+			} else {
+				return visit_continue;
+			}
+		}
 	};
 	static irexpr_visitor<void> visitor;
 	visitor.FreeVariable = foo::FreeVariable;
 	visitor.Binop = foo::Binop;
 	visitor.Unop = foo::Unop;
+	visitor.Get = foo::Get;
 	return visit_irexpr((void *)NULL, &visitor, expr) == visit_abort;
 }
 static bbdd *
@@ -889,7 +901,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		crashEnforcementData tmp;
 		if (buildCED(summaryId, *it, rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
 			printf("Intermediate CED:\n");
-			tmp.prettyPrint(stdout, true);
+			tmp.prettyPrint(summary->scopes, stdout, true);
 			accumulator |= tmp;
 		}
 	}
@@ -1724,8 +1736,8 @@ main(int argc, char *argv[])
 	buildPatchStrategy(accumulator, oracle);
 
 	FILE *f = fopen(argv[5], "w");
-	accumulator.prettyPrint(f);
-	accumulator.prettyPrint(stdout);
+	accumulator.prettyPrint(&scopes, f);
+	accumulator.prettyPrint(&scopes, stdout);
 	fclose(f);
 
 	return 0;

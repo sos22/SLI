@@ -85,12 +85,14 @@ public:
 	static MemoryTag normal() { return MemoryTag(1); }
 	static MemoryTag mutex() { return MemoryTag(2); }
 	static MemoryTag last_free() { return MemoryTag(3); }
+	static MemoryTag pthread_specific() { return MemoryTag(4); }
 	const char *name() const {
 		switch (id) {
 		case -1: return "BadTag";
 		case 1: return "normal";
 		case 2: return "mutex";
 		case 3: return "last_free";
+		case 4: return "pthread_specific";
 		default: abort();
 		}
 	}
@@ -106,6 +108,8 @@ public:
 			id = 2;
 		} else if (parseThisString("last_free", str, suffix)) {
 			id = 3;
+		} else if (parseThisString("pthread_specific", str, suffix)) {
+			id = 4;
 		} else {
 			return false;
 		}
@@ -114,6 +118,10 @@ public:
 
 	bool operator==(const MemoryTag &o) const { return id == o.id; }
 	bool operator!=(const MemoryTag &o) const { return !(*this == o); }
+
+	bool neverBadPtr() const {
+		return (*this) == last_free() || (*this) == pthread_specific();
+	}
 };
 
 #if !CONFIG_NO_STATIC_ALIASING
@@ -493,19 +501,25 @@ public:
 		: StateMachineState(vr, StateMachineState::Terminal),
 		  res(_res)
 	{
-		assert(res);
+		if (res == NULL && !TIMEOUT) {
+			abort();
+		}
 	}
 	StateMachineTerminal(StateMachineTerminal *base, smrbdd *_res)
 		: StateMachineState(base->dbg_origin, StateMachineState::Terminal),
 		  res(_res)
 	{
-		assert(res);
+		if (res == NULL && !TIMEOUT) {
+			abort();
+		}
 	}
 	smrbdd *const res;
 	bool set_res(smrbdd *_res)
 	{
 		bool r = res != _res;
-		assert(_res);
+		if (_res == NULL && !TIMEOUT) {
+			abort();
+		}
 		*(smrbdd **)&res = _res;
 		return r;
 	}

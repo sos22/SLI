@@ -273,24 +273,25 @@ _optimiseStateMachine(SMScopes *scopes,
 				printStateMachine(sm, stdout);
 			}
 			done_something |= p;
-		}
-		p = false;
-		sm = sm->optimise(scopes, opt, &p);
-		if (p) {
-			if (is_ssa) {
-				/* Local optimisation only maintains SSA form if interned */
-				sm = internStateMachine(sm);
-				if (TIMEOUT) {
-					stackedCdf::stopOptimise();
-					return sm;
+
+			if (p) {
+				p = false;
+				sm = sm->optimise(scopes, opt, &p);
+				if (p) {
+					if (is_ssa) {
+						/* Local optimisation only maintains SSA form if interned */
+						sm = internStateMachine(sm);
+						if (TIMEOUT)
+							return sm;
+					}
+					if (debugOptimiseStateMachine) {
+						printf("Local optimise 2:\n");
+						printStateMachine(sm, stdout);
+					}
 				}
-			}
-			if (debugOptimiseStateMachine) {
-				printf("Local optimise 2:\n");
-				printStateMachine(sm, stdout);
+				done_something |= p;
 			}
 		}
-		done_something |= p;
 
 		LibVEX_maybe_gc(token);
 
@@ -514,8 +515,9 @@ mapUnreached(smrbdd::scope *scope, StateMachine *inp, StateMachineRes res)
 {
 	std::vector<StateMachineTerminal *> terminals;
 	enumStates(inp, &terminals);
-	for (auto it = terminals.begin(); it != terminals.end(); it++)
+	for (auto it = terminals.begin(); !TIMEOUT && it != terminals.end(); it++) {
 		(*it)->set_res(smrbdd::replaceTerminal(scope, smr_unreached, res, (*it)->res));
+	}
 	return inp;
 }
 
@@ -1091,7 +1093,10 @@ considerStoreCFG(SMScopes *scopes,
 		fprintf(_logfile, "\t\tCannot derive write machine suitability constraint\n");
 		return NULL;
 	}
-
+	if (atomicSurvival == scopes->bools.cnst(false)) {
+		fprintf(_logfile, "\t\tWrite machine constraint is false!\n");
+		return NULL;
+	}
 	fprintf(_logfile, "\t\tInferred assumption:\n");
 	atomicSurvival->prettyPrint(_logfile);
 

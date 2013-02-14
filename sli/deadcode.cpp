@@ -515,16 +515,20 @@ ssaDeadCode(SMScopes *scopes, StateMachine *sm, bool *done_something)
 				(StateMachineSideEffectLoad *)effect;
 			if (!refed_regs.count(smsel->target)) {
 				*done_something = true;
-				(*it)->sideEffect =
-					new StateMachineSideEffectAssertFalse(
-						exprbdd::to_bbdd(
-							&scopes->bools,
-							exprbdd::unop(
-								&scopes->exprs,
+				if (smsel->tag.neverBadPtr()) {
+					(*it)->sideEffect = NULL;
+				} else {
+					(*it)->sideEffect =
+						new StateMachineSideEffectAssertFalse(
+							exprbdd::to_bbdd(
 								&scopes->bools,
-								Iop_BadPtr,
-								smsel->addr)),
-						true);
+								exprbdd::unop(
+									&scopes->exprs,
+									&scopes->bools,
+									Iop_BadPtr,
+									smsel->addr)),
+							true);
+				}
 			}
 			break;
 		}
@@ -594,16 +598,21 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something, bo
 			case StateMachineSideEffect::Load: {
 				StateMachineSideEffectLoad *smsel =
 					(StateMachineSideEffectLoad *)e;
-				if (!alive.registerLiveData(smsel->target))
-					newEffect = new StateMachineSideEffectAssertFalse(
-						exprbdd::to_bbdd(
-							&scopes->bools,
-							exprbdd::unop(
-								&scopes->exprs,
+				if (!alive.registerLiveData(smsel->target)) {
+					if (smsel->tag.neverBadPtr()) {
+						newEffect = NULL;
+					} else {
+						newEffect = new StateMachineSideEffectAssertFalse(
+							exprbdd::to_bbdd(
 								&scopes->bools,
-								Iop_BadPtr,
-								smsel->addr)),
-						true);
+								exprbdd::unop(
+									&scopes->exprs,
+									&scopes->bools,
+									Iop_BadPtr,
+									smsel->addr)),
+							true);
+					}
+				}
 				break;
 			}
 			case StateMachineSideEffect::Store:

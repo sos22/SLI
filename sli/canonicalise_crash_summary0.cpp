@@ -336,6 +336,9 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		oracle,
 		true,
 		token);
+	cs->crashCondition = bbdd::assume(&cs->scopes->bools,
+					  cs->crashCondition,
+					  cs->inferredAssumption);
 	cs->mai = mai;
 
 	/* The only reason we maintain the CFG is so that we can
