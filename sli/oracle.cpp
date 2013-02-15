@@ -906,43 +906,65 @@ enum read_cg_vexrip_res {
 };
 
 static read_cg_vexrip_res
-read_cg_vexrip(FILE *f, DynAnalysisRip *out, AddressSpace *as, bool *is_private)
+read_cg_vexrip(FILE *f, DynAnalysisRip *out, AddressSpace *as, bool *is_call,
+	       bool new_format)
 {
-	unsigned long rip;
-	unsigned nr_entries;
-	std::vector<unsigned long> stack;
+	if (!new_format) {
+		unsigned long rip;
+		unsigned nr_entries;
+		std::vector<unsigned long> stack;
 
-	if (fread(&rip, sizeof(rip), 1, f) != 1 ||
-	    fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
-		return read_cg_vexrip_error;
-	stack.reserve(nr_entries);
-	for (unsigned x = 0; x < nr_entries; x++) {
-		unsigned long a;
-		if (fread(&a, sizeof(a), 1, f) != 1)
+		if (fread(&rip, sizeof(rip), 1, f) != 1 ||
+		    fread(&nr_entries, sizeof(nr_entries), 1, f) != 1)
 			return read_cg_vexrip_error;
-		if (as->isReadable(a))
-			stack.push_back(a);
-	}
-	if (rip & (1ul << 63)) {
-		*is_private = true;
-		rip &= ~(1ul << 63);
-	} else {
-		*is_private = false;
-	}
-	read_cg_vexrip_res res;
-	if (as->isReadable(rip)) {
-		stack.push_back(rip);
-		res = read_cg_vexrip_take;
-	} else {
-		res = read_cg_vexrip_skip;
-	}
+		stack.reserve(nr_entries);
+		for (unsigned x = 0; x < nr_entries; x++) {
+			unsigned long a;
+			if (fread(&a, sizeof(a), 1, f) != 1)
+				return read_cg_vexrip_error;
+			if (as->isReadable(a))
+				stack.push_back(a);
+		}
+		if (rip & (1ul << 63)) {
+			*is_call = true;
+			rip &= ~(1ul << 63);
+		} else {
+			*is_call = false;
+		}
+		read_cg_vexrip_res res;
+		if (as->isReadable(rip)) {
+			stack.push_back(rip);
+			res = read_cg_vexrip_take;
+		} else {
+			res = read_cg_vexrip_skip;
+		}
 	
-	out->nr_rips = stack.size();
-	if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH)
-		out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
-	for (int x = 0; x < out->nr_rips; x++)
-		out->rips[out->nr_rips - x - 1] = stack[stack.size() - x - 1];
-	return res;
+		out->nr_rips = stack.size();
+		if (out->nr_rips > DynAnalysisRip::DATABASE_RIP_DEPTH)
+			out->nr_rips = DynAnalysisRip::DATABASE_RIP_DEPTH;
+		for (int x = 0; x < out->nr_rips; x++)
+			out->rips[out->nr_rips - x - 1] = stack[stack.size() - x - 1];
+		return res;
+	} else {
+		unsigned long rip;
+		if (fread(&rip, sizeof(rip), 1, f) != 1) {
+			return read_cg_vexrip_error;
+		}
+		printf("rip %lx\n", rip);
+		if (rip & (1ul << 63)) {
+			*is_call = true;
+			rip &= ~(1ul << 63);
+		} else {
+			*is_call = false;
+		}
+		out->nr_rips = 1;
+		out->rips[0] = rip;
+		if (as->isReadable(rip)) {
+			return read_cg_vexrip_take;
+		} else {
+			return read_cg_vexrip_skip;
+		}
+	}
 }
 
 static sqlite3 *_database;
@@ -1037,11 +1059,19 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 	callgraph_t callgraph; 
 	std::vector<StaticRip> roots;
 	FILE *f = fopen(cg_fname, "r");
+	unsigned long magic = 0;
+	fread(&magic, sizeof(magic), 1, f);
+	bool new_format;
+	if (magic == 0xaabbccddeeff) {
+		new_format = true;
+	} else {
+		fseeko(f, 0, SEEK_SET);
+	}
 	while (!feof(f)) {
 		callgraph_entry ce;
 		bool is_call;
 		DynAnalysisRip branch_rip;
-		auto res = read_cg_vexrip(f, &branch_rip, ths->ms->addressSpace, &is_call);
+		auto res = read_cg_vexrip(f, &branch_rip, ths->ms->addressSpace, &is_call, new_format);
 		if (res == read_cg_vexrip_error) {
 			if (feof(f))
 				break;
@@ -1050,25 +1080,14 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 		unsigned nr_callees;
 		if (fread(&nr_callees, sizeof(nr_callees), 1, f) != 1)
 			err(1, "reading number of callees from %s\n", cg_fname);
-		bool is_first = true;
-		is_call = false;
+		printf("%s has %d callees (is_call = %d)\n", branch_rip.name(), nr_callees,
+			is_call);
 		for (unsigned x = 0; x < nr_callees; x++) {
 			unsigned long callee;
-			bool ic;
 			if (fread(&callee, sizeof(callee), 1, f) != 1)
 				err(1, "reading callee rip from %s", cg_fname);
-			if (callee & (1ul << 63)) {
-				ic = true;
-				callee &= ~(1ul << 63);
-			} else {
-				ic = false;
-			}
-			if (is_first) {
-				is_call = ic;
-				is_first = false;
-			} else {
-				assert(is_call == ic);
-			}
+			callee &= ~(1ul << 63);
+			printf("Callee %lx\n", callee);
 			ce.targets.insert(callee);
 		}
 
@@ -1101,6 +1120,7 @@ public:
 	unsigned nr_ranges() const { return content.size(); }
 	underlying min() const { assert(!content.empty()); return content.front().first; }
 	underlying max() const { assert(!content.empty()); return content.back().first; }
+	bool empty() const { return content.empty(); }
 	void sanity_check() const {
 		/* These are expensive, so turn them off by default
 		 * even in debug builds. */
@@ -1308,7 +1328,7 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 		unsigned long rip(pendingInstrs.back());
 		pendingInstrs.pop_back();
 
-		if (++cntr % 1000 == 0) {
+		if (!covered.empty() && ++cntr % 1000 == 0) {
 			printf("Current coverage %f%% [%lx, %lx); %zd in queue, %d ranges, %zd known heads\n",
 			       covered.coverage() * 100,
 			       covered.min(),

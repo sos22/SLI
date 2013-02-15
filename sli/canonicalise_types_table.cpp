@@ -16,7 +16,7 @@ static void
 copy_rip(FILE *input, sane_write_file &output)
 {
 	rip_t r;
-	r.read(input, NULL);
+	r.read(input, NULL, false);
 	r.write(output);
 }
 

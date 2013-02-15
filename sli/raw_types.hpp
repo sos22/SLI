@@ -25,7 +25,7 @@ struct sane_write_file {
 struct rip_t {
 	int is_private;
 	std::vector<unsigned long> stack;
-	bool read(FILE *f, AddressSpace *as);
+	bool read(FILE *f, AddressSpace *as, bool new_format);
 	bool operator<(const rip_t &o) const {
 		if (stack < o.stack)
 			return true;
@@ -43,7 +43,7 @@ struct input_record {
 	rip_t rip;
 	std::vector<rip_t> loads;
 	std::vector<rip_t> stores;
-	bool read(FILE *f, AddressSpace *as);
+	bool read(FILE *f, AddressSpace *as, bool new_format);
 	void write(sane_write_file &f) const;
 	bool operator<(const input_record &o) const {
 		if (rip < o.rip)
