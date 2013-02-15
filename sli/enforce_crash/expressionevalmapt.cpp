@@ -547,6 +547,203 @@ sanity_check_reorder(const reorder_bbdd *)
 }
 #endif
 
+struct fix_order_memo_key {
+	reorder_bbdd_cond cond;
+	const reorder_bbdd *trueBranch;
+	const reorder_bbdd *falseBranch;
+	fix_order_memo_key(const reorder_bbdd_cond &_cond,
+			   const reorder_bbdd *_trueBranch,
+			   const reorder_bbdd *_falseBranch)
+		: cond(_cond), trueBranch(_trueBranch), falseBranch(_falseBranch)
+	{}
+	bool operator<(const fix_order_memo_key &o) const {
+		if (trueBranch < o.trueBranch) {
+			return true;
+		} else if (trueBranch > o.trueBranch) {
+			return false;
+		} else if (falseBranch < o.falseBranch) {
+			return true;
+		} else if (falseBranch > o.falseBranch) {
+			return false;
+		} else {
+			return cond < o.cond;
+		}
+	}
+};
+
+static sane_map<fix_order_memo_key, const reorder_bbdd *> fix_order_memo;
+/* Fix up @expr to use the correct ordering. */
+static const reorder_bbdd *
+fix_ordering(const reorder_bbdd_cond &cond,
+	     const reorder_bbdd *trueBranch,
+	     const reorder_bbdd *falseBranch,
+	     bbdd *equiv_bbdd)
+{
+	if ( trueBranch->isLeaf && falseBranch->isLeaf) {
+		return reorder_bbdd::Node(cond, trueBranch, falseBranch, equiv_bbdd);
+	}
+	if (trueBranch == falseBranch) {
+		if (!trueBranch->equiv_bbdd) {
+			trueBranch->equiv_bbdd = equiv_bbdd;
+		}
+		return trueBranch;
+	}
+	if (!trueBranch->isLeaf && cond == trueBranch->cond) {
+		trueBranch = trueBranch->trueBranch;
+	}
+	if (!falseBranch->isLeaf && cond == falseBranch->cond) {
+		falseBranch = falseBranch->falseBranch;
+	}
+	assert(trueBranch->isLeaf || !(cond == trueBranch->cond));
+	assert(falseBranch->isLeaf || !(cond == falseBranch->cond));
+	auto it_did_insert = fix_order_memo.insert(fix_order_memo_key(cond, trueBranch, falseBranch), (const reorder_bbdd *)0xfee1);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+
+	/* Convert child trees first */
+	const reorder_bbdd *t;
+	if (trueBranch->isLeaf ||
+	    (trueBranch->trueBranch->isLeaf && trueBranch->falseBranch->isLeaf)) {
+		t = trueBranch;
+	} else {
+		t = fix_ordering(trueBranch->cond, trueBranch->trueBranch, trueBranch->falseBranch, trueBranch->equiv_bbdd);
+	}
+	const reorder_bbdd *f;
+	if (falseBranch->isLeaf ||
+	    (falseBranch->trueBranch->isLeaf && falseBranch->falseBranch->isLeaf)) {
+		f = falseBranch;
+	} else {
+		f = fix_ordering(falseBranch->cond, falseBranch->trueBranch, falseBranch->falseBranch, falseBranch->equiv_bbdd);
+	}
+	if (t == f) {
+		it->second = t;
+		return it->second;
+	}
+
+	bool reorder_true = !t->isLeaf && t->cond < cond;
+	bool reorder_false = !f->isLeaf && f->cond < cond;
+	if (reorder_true && reorder_false) {
+		/* Ordering violation on both branches. */
+		if (t->cond < f->cond) {
+			it->second = fix_ordering(
+				t->cond,
+				fix_ordering(
+					f->cond,
+					fix_ordering(
+						cond,
+						t->trueBranch,
+						f->trueBranch,
+						NULL),
+					fix_ordering(
+						cond,
+						t->trueBranch,
+						f->falseBranch,
+						NULL),
+					NULL),
+				fix_ordering(
+					f->cond,
+					fix_ordering(
+						cond,
+						t->falseBranch,
+						f->trueBranch,
+						NULL),
+					fix_ordering(
+						cond,
+						t->falseBranch,
+						f->falseBranch,
+						NULL),
+					NULL),
+				equiv_bbdd);
+		} else if (t->cond == f->cond) {
+			it->second = fix_ordering(
+				t->cond,
+				fix_ordering(
+					cond,
+					t->trueBranch,
+					f->trueBranch,
+					NULL),
+				fix_ordering(
+					cond,
+					t->falseBranch,
+					f->trueBranch,
+					NULL),
+				equiv_bbdd);
+		} else {
+			assert(f->cond < t->cond);
+			it->second = fix_ordering(
+				f->cond,
+				fix_ordering(
+					t->cond,
+					fix_ordering(
+						cond,
+						t->trueBranch,
+						f->trueBranch,
+						NULL),
+					fix_ordering(
+						cond,
+						t->falseBranch,
+						f->trueBranch,
+						NULL),
+					NULL),
+				fix_ordering(
+					t->cond,
+					fix_ordering(
+						cond,
+						t->trueBranch,
+						f->falseBranch,
+						NULL),
+					fix_ordering(
+						cond,
+						t->falseBranch,
+						f->falseBranch,
+						NULL),
+					NULL),
+				equiv_bbdd);
+		}
+	} else if (reorder_true && !reorder_false) {
+		/* Ordering violation only on the true branch. */
+		it->second = fix_ordering(
+			t->cond,
+			fix_ordering(
+				cond,
+				t->trueBranch,
+				f,
+				NULL),
+			fix_ordering(
+				cond,
+				t->falseBranch,
+				f,
+				NULL),
+			equiv_bbdd);
+	} else if (!reorder_true && reorder_false) {
+		/* Ordering violation on the false branch only */
+		it->second = fix_ordering(
+			f->cond,
+			fix_ordering(
+				cond,
+				t,
+				f->trueBranch,
+				NULL),
+			fix_ordering(
+				cond,
+				t,
+				f->falseBranch,
+				NULL),
+			equiv_bbdd);
+	} else {
+		/* No ordering violations */
+		it->second = reorder_bbdd::Node(cond,
+						t,
+						f,
+						equiv_bbdd);
+	}
+
+	return it->second;
+}
+
 const reorder_bbdd *
 reorder_bbdd::fixupEvalable(const std::set<input_expression> &avail,
 			    sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo) const
@@ -568,13 +765,14 @@ reorder_bbdd::fixupEvalable(const std::set<input_expression> &avail,
 	    f == falseBranch) {
 		it->second = this;
 	} else {
-		it->second = Node(
-			reorder_bbdd_cond(cond.rank,
-					  cond.cond,
-					  shouldBeEval),
-			t,
-			f,
-			equiv_bbdd);
+		it->second =
+			fix_ordering(
+				reorder_bbdd_cond(cond.rank,
+						  cond.cond,
+						  shouldBeEval),
+				t,
+				f,
+				equiv_bbdd);
 	}
 	return it->second;
 }
@@ -598,13 +796,14 @@ reorder_bbdd::from_bbdd(bbdd *what,
 	if (!did_insert) {
 		return it->second->fixupEvalable(avail, availMemo);
 	}
-	it->second = Node(
-		reorder_bbdd_cond(what->internal().rank,
-				  what->internal().condition,
-				  evaluatable(what->internal().condition, avail)),
-		from_bbdd(what->internal().trueBranch, avail, availMemo),
-		from_bbdd(what->internal().falseBranch, avail, availMemo),
-		what);
+	it->second =
+		fix_ordering(
+			reorder_bbdd_cond(what->internal().rank,
+					  what->internal().condition,
+					  evaluatable(what->internal().condition, avail)),
+			from_bbdd(what->internal().trueBranch, avail, availMemo),
+			from_bbdd(what->internal().falseBranch, avail, availMemo),
+			what);
 	return it->second;
 }
 
@@ -623,166 +822,6 @@ reorder_bbdd::to_bbdd(bbdd::scope *scope) const
 			falseBranch->to_bbdd(scope));
 	}
 	return equiv_bbdd;
-}
-
-/* Fix up @expr to use the correct ordering. */
-static const reorder_bbdd *
-fix_ordering(const reorder_bbdd *expr,
-	     sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo)
-{
-	if (expr->isLeaf ||
-	    (expr->trueBranch->isLeaf && expr->falseBranch->isLeaf)) {
-		return expr;
-	}
-	assert(expr->trueBranch != expr->falseBranch);
-	assert(expr->trueBranch->isLeaf || !(expr->cond == expr->trueBranch->cond));
-	assert(expr->falseBranch->isLeaf || !(expr->cond == expr->falseBranch->cond));
-	auto it_did_insert = memo.insert(expr, (const reorder_bbdd *)0xfee1);
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (!did_insert) {
-		return it->second;
-	}
-
-	/* Convert child trees first */
-	const reorder_bbdd *t = fix_ordering(expr->trueBranch, memo);
-	const reorder_bbdd *f = fix_ordering(expr->falseBranch, memo);
-	if (t == f) {
-		it->second = t;
-		return it->second;
-	}
-
-	const reorder_bbdd *res;
-	if (!t->isLeaf && t->cond < expr->cond) {
-		/* We have an ordering violation on the true branch */
-		if (!f->isLeaf && f->cond < expr->cond) {
-			/* Ordering violation on the false branch as
-			 * well. */
-			if (t->cond < f->cond) {
-				res = reorder_bbdd::Node(
-					t->cond,
-					reorder_bbdd::Node(
-						f->cond,
-						reorder_bbdd::Node(
-							expr->cond,
-							t->trueBranch,
-							f->trueBranch,
-							NULL),
-						reorder_bbdd::Node(
-							expr->cond,
-							t->trueBranch,
-							f->falseBranch,
-							NULL),
-						NULL),
-					reorder_bbdd::Node(
-						f->cond,
-						reorder_bbdd::Node(
-							expr->cond,
-							t->falseBranch,
-							f->trueBranch,
-							NULL),
-						reorder_bbdd::Node(
-							expr->cond,
-							t->falseBranch,
-							f->falseBranch,
-							NULL),
-						NULL),
-					expr->equiv_bbdd);
-			} else if (t->cond == f->cond) {
-				res = reorder_bbdd::Node(
-					t->cond,
-					reorder_bbdd::Node(
-						expr->cond,
-						t->trueBranch,
-						f->trueBranch,
-						NULL),
-					reorder_bbdd::Node(
-						expr->cond,
-						t->falseBranch,
-						f->trueBranch,
-						NULL),
-					expr->equiv_bbdd);
-			} else {
-				assert(f->cond < t->cond);
-				res = reorder_bbdd::Node(
-					f->cond,
-					reorder_bbdd::Node(
-						t->cond,
-						reorder_bbdd::Node(
-							expr->cond,
-							t->trueBranch,
-							f->trueBranch,
-							NULL),
-						reorder_bbdd::Node(
-							expr->cond,
-							t->falseBranch,
-							f->trueBranch,
-							NULL),
-						NULL),
-					reorder_bbdd::Node(
-						t->cond,
-						reorder_bbdd::Node(
-							expr->cond,
-							t->trueBranch,
-							f->falseBranch,
-							NULL),
-						reorder_bbdd::Node(
-							expr->cond,
-							t->falseBranch,
-							f->falseBranch,
-							NULL),
-						NULL),
-					expr->equiv_bbdd);
-			}
-		} else {
-			/* Ordering violation only on the true branch. */
-			res = reorder_bbdd::Node(
-				t->cond,
-				reorder_bbdd::Node(
-					expr->cond,
-					t->trueBranch,
-					f,
-					NULL),
-				reorder_bbdd::Node(
-					expr->cond,
-					t->falseBranch,
-					f,
-					NULL),
-				expr->equiv_bbdd);
-		}
-		it->second = fix_ordering(res, memo);
-	} else if (!f->isLeaf && f->cond < expr->cond) {
-		/* Ordering violation on the false branch only */
-		res = reorder_bbdd::Node(
-			f->cond,
-			reorder_bbdd::Node(
-				expr->cond,
-				t,
-				f->trueBranch,
-				NULL),
-			reorder_bbdd::Node(
-				expr->cond,
-				t,
-				f->falseBranch,
-				NULL),
-			expr->equiv_bbdd);
-		it->second = fix_ordering(res, memo);
-	} else {
-		/* No ordering violations */
-		if (t == expr->trueBranch && f == expr->falseBranch) {
-			/* Avoid a hash lookup when we know what
-			   ::Node is going to return. */
-			assert(expr == reorder_bbdd::Node(expr->cond, t, f, NULL));
-			it->second = expr;
-		} else {
-			it->second = reorder_bbdd::Node(expr->cond,
-							t,
-							f,
-							expr->equiv_bbdd);
-		}
-	}
-
-	return it->second;
 }
 
 /* Given that @what is reordered to have the monotonicity property,
@@ -883,18 +922,11 @@ splitExpressionOnAvailability(bbdd::scope *scope,
 	}
 
 	sane_map<const reorder_bbdd *, const reorder_bbdd *> availMemo;
+	fix_order_memo.clear();
 	const reorder_bbdd *u_what = reorder_bbdd::from_bbdd(what, avail, availMemo);
 	if (debug_ubbdd) {
 		printf("Converted to UBBDD:\n");
 		pp_reorder(u_what);
-	}
-	{
-		sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
-		u_what = fix_ordering(u_what, memo);
-		if (debug_ubbdd) {
-			printf("Reordered:\n");
-			pp_reorder(u_what);
-		}
 	}
 	sanity_check_reorder(u_what);
 
