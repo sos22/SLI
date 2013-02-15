@@ -1293,7 +1293,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		leftover = split1.first;
 		if (!split1.second->isLeaf()) {
-			evalAt[i->rip].after_regs = split1.second;
+			evalAt[i->rip].after_regs = subst_eq(scope, split1.second);
 		}
 
 		/* What about once we've done the RX operations? */
@@ -1404,7 +1404,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 					split.second->prettyPrint(stdout);
 				}
 				if (!split.second->isLeaf()) {
-					hb->sideCondition = split.second;
+					hb->sideCondition = subst_eq(scope, split.second);
 				}
 				if (tx_leftover) {
 					tx_leftover = bbdd::Or(
@@ -1459,7 +1459,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		leftover = split3.first;
 		if (!split3.second->isLeaf()) {
-			evalAt[i->rip].after_control_flow = split3.second;
+			evalAt[i->rip].after_control_flow = subst_eq(scope, split3.second);
 		}
 
 		/* Anything left after that is really leftover. */

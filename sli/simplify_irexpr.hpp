@@ -28,4 +28,6 @@ static inline bbdd *simplifyBDD(bbdd::scope *scope, bbdd *bdd, const IRExprOptim
 void sanity_check_irexpr_sorter(void);
 void sanity_check_optimiser(void);
 
+bbdd *subst_eq(bbdd::scope *scope, bbdd *what);
+
 #endif /* !SIMPLIFY_IREXPR_HPP__ */

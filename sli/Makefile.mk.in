@@ -28,7 +28,7 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{getStoreCFGs,dupeStateMachine,control_dependence_graph}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{cfgnode,getProbeCFGs,probeCFGtoMachine,useInitialMemoryLoads}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{sat_checker,smb_builder,predecessor_map}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{raw_types,crashcfg,bdd,stacked_cdf}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{raw_types,crashcfg,bdd,stacked_cdf,subst_eq}.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 ifeq (\$(SELECTIVE_PROFILING),y)
