@@ -116,8 +116,10 @@ happensBeforeMapT::parse(bbdd::scope *scope, CrashCfg &cfg, const char *str, con
 		if (!hbe) {
 			break;
 		}
-		(*this)[hbe->before->rip].insert(hbe);
-		(*this)[hbe->after->rip].insert(hbe);
+		if (hbe->before && hbe->after) {
+			(*this)[hbe->before->rip].insert(hbe);
+			(*this)[hbe->after->rip].insert(hbe);
+		}
 	}
 	*suffix = str;
 	return true;

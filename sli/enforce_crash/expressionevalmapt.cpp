@@ -8,10 +8,12 @@
 
 #ifndef NDEBUG
 static bool debug_eem = false;
+static bool debug_eem_dead = false;
 static bool debug_eem_schedule = false;
 static bool debug_ubbdd = false;
 #else
 #define debug_eem false
+#define debug_eem_dead false
 #define debug_eem_schedule false
 #define debug_ubbdd false
 #endif
@@ -1201,6 +1203,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	std::set<instr_t> deadStates;
 	while (!pendingInstrs.empty()) {
 		auto i = pendingInstrs.back();
 		pendingInstrs.pop_back();
@@ -1293,7 +1296,19 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		leftover = split1.first;
 		if (!split1.second->isLeaf()) {
-			evalAt[i->rip].after_regs = subst_eq(scope, split1.second);
+			auto simpl = subst_eq(scope, split1.second);
+			if (simpl->isLeaf()) {
+				if (simpl->leaf() == false) {
+					if (debug_eem_dead) {
+						printf("Side condition for %s is unsatisfiable!\n",
+						       i->rip.name());
+					}
+					deadStates.insert(i);
+					continue;
+				}
+			} else {
+				evalAt[i->rip].after_regs = simpl;
+			}
 		}
 
 		/* What about once we've done the RX operations? */
@@ -1349,6 +1364,21 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 					scope,
 					leftover,
 					rx_checked);
+
+				if (!leftover) {
+					/* There's no way for the RX
+					   condition to be satisfied.
+					   That means this state can
+					   never be reached.  Arrange
+					   for it to be killed off
+					   later. */
+					deadStates.insert(i);
+					if (debug_eem_dead) {
+						printf("rx_checked is unsatisfiable, killing %s!\n",
+						       i->rip.name());
+					}
+					continue;
+				}
 
 				if (debug_eem) {
 					printf("Avail with RX effects: ");
@@ -1459,7 +1489,12 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		leftover = split3.first;
 		if (!split3.second->isLeaf()) {
-			evalAt[i->rip].after_control_flow = subst_eq(scope, split3.second);
+			auto simpl = subst_eq(scope, split3.second);
+			if (!simpl->isLeaf()) {
+				evalAt[i->rip].after_control_flow = simpl;
+			} else if (simpl->leaf() == false) {
+				deadStates.insert(i);
+			}
 		}
 
 		/* Anything left after that is really leftover. */
@@ -1500,8 +1535,117 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
-	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
-		assert(it->second == 0);
+	if (deadStates.empty()) {
+		for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
+			assert(it->second == 0);
+		}
+	}
+
+	/* Now deal with the dead states.  These are states which we
+	   can definitely never reach due to the side conditions being
+	   provably false, so go and kill them all off. */
+	while (1) {
+		std::set<instr_t> newDead;
+		newDead.clear();
+		/* Remove control-flow dead states */
+		for (auto it = deadStates.begin(); it != deadStates.end(); it++) {
+			instr_t dead = *it;
+			if (debug_eem_dead) {
+				printf("Trying to remove dead instruction %s...\n", dead->rip.name());
+			}
+			const std::set<instr_t> &pred(predecessors[dead]);
+			for (auto it2 = pred.begin(); it2 != pred.end(); it2++) {
+				instr_t pred = *it2;
+				bool found = false;
+				/* Remove all edges to dead successors */
+				for (auto it3 = pred->successors.begin();
+				     it3 != pred->successors.end();
+					) {
+					if (it3->instr == dead) {
+						if (debug_eem_dead) {
+							printf("Kill %s->%s edge\n",
+							       pred->rip.name(),
+							       dead->rip.name());
+						}
+						it3 = pred->successors.erase(it3);
+						found = true;
+					} else {
+						it3++;
+					}
+				}
+				/* If that killed off all the
+				   successors of this state then this
+				   state also becomes dead. */
+				if (found && pred->successors.empty()) {
+					if (debug_eem_dead) {
+						printf("Killed off all successors of %s.\n", pred->rip.name());
+					}
+					newDead.insert(pred);
+				}
+			}
+
+			/* Remove hb-dead states.  If the source or
+			   destination of an edge are dead then the other end
+			   is dead as well. */
+			const std::set<happensBeforeEdge *> &hbs(hbMap[dead->rip]);
+			for (auto it2 = hbs.begin(); it2 != hbs.end(); it2++) {
+				auto hb = *it2;
+				if (debug_eem_dead) {
+					printf("Kill hb edge:\n");
+					hb->prettyPrint(stdout);
+				}
+				if (hb->before == dead) {
+					/* This dead instruction is
+					   sending a message.  The
+					   receive must receive some
+					   message, so if we're the
+					   only sender then the
+					   receiver is dead as
+					   well. */
+					std::set<happensBeforeEdge *> &other(hbMap[hb->after->rip]);
+					other.erase(hb);
+					bool keep = false;
+					for (auto it = other.begin(); !keep && it != other.end(); it++) {
+						if ( (*it)->after == hb->after ) {
+							keep = true;
+						}
+					}
+					if (!keep) {
+						if (debug_eem_dead) {
+							printf("HB kills %s\n", hb->after->rip.name());
+						}
+						newDead.insert(hb->after);
+					}
+				} else {
+					/* Conversely: dead is
+					   receiving a message, so see
+					   if the transmitted is also
+					   dead. */
+					std::set<happensBeforeEdge *> &other(hbMap[hb->before->rip]);
+					other.erase(hb);
+					bool keep = false;
+					for (auto it = other.begin(); !keep && it != other.end(); it++) {
+						if ( (*it)->before == hb->before ) {
+							keep = true;
+						}
+					}
+					if (!keep) {
+						if (debug_eem_dead) {
+							printf("HB kills %s\n", hb->before->rip.name());
+						}
+						newDead.insert(hb->before);
+					}
+				}
+			}
+
+			/* This thing is dead, so needs to be culled
+			 * from the HB map. */
+			hbMap.erase(dead->rip);
+		}
+		if (deadStates == newDead) {
+			break;
+		}
+		deadStates = newDead;
 	}
 }
 
