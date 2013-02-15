@@ -32,7 +32,7 @@ public:
 	struct wr_core *headVisitedWeakRef;
 	unsigned long heap_used;
 	bool redirection_tags_set;
-	std::set<__GcCallback *> callbacks;
+	__GcCallback *callbacks;
 };
 
 extern Heap main_heap;
@@ -61,33 +61,62 @@ public:
 class __GcCallback {
 	Heap *h;
 	bool is_late;
+	__GcCallback *next;
+	__GcCallback *prev;
+	void add_to_list() {
+		prev = NULL;
+		next = h->callbacks;
+		if (h->callbacks) {
+			h->callbacks->prev = this;
+		}
+		h->callbacks = this;
+	}
+	void remove_from_list() {
+		if (next) {
+			next->prev = prev;
+		}
+		if (prev) {
+			prev->next = next;
+		}
+		if (this == h->callbacks) {
+			h->callbacks = next;
+		}	
+	}
 protected:
 	__GcCallback(Heap *_h, bool _is_late)
 		: h(_h), is_late(_is_late)
 	{
-		h->callbacks.insert(this);
+		add_to_list();
 	}
 	~__GcCallback()
 	{
-		h->callbacks.erase(this);
+		remove_from_list();
 	}
 	__GcCallback(const __GcCallback &o)
 		: h(o.h), is_late(o.is_late)
 	{
-		h->callbacks.insert(this);
+		add_to_list();
 	}
 	void operator=(const __GcCallback &o)
 	{
 		if (h != o.h) {
-			h->callbacks.erase(this);
-			o.h->callbacks.insert(this);
+			remove_from_list();
+			h = o.h;
+			add_to_list();
 		}
-		h = o.h;
 		is_late = o.is_late;
 	}
 	virtual void runGc(HeapVisitor &hv) = 0;
 public:
 	void operator()(HeapVisitor &hv, bool late) { if (late == is_late) runGc(hv); }
+
+	/* This should only be called from LibVEX_gc. */
+	void runChain(HeapVisitor &hv, bool late) {
+		(*this)(hv, late);
+		if (next) {
+			next->runChain(hv, late);
+		}
+	}
 };
 
 template <Heap *heap = &main_heap>
