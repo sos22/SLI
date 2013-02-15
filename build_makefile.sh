@@ -19,11 +19,11 @@ link() {
     cat <<EOF
 ifeq (\$(VERBOSE),y)
 ${prog}: ${objs}
-	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm \$^ -o \$@
+	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm -Wl,-\( \$^ -Wl,-\) -o \$@
 else
 ${prog}: ${objs}
 	@printf "Link [%-43s]\\n" \$@ ; \\
-	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm \$^ -o \$@
+	gcc -lsqlite3 -lrt \$(PROFILE_FLAGS) -lgcc -lstdc++ -lm -Wl,-\( \$^ -Wl,-\) -o \$@
 endif
 EOF
 }
