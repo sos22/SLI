@@ -440,7 +440,14 @@ emit_validation(FILE *f,
 	const char *succeed = "bcop_succeed";
 	const char *fail = "bcop_fail";
 
-	assert(!condition->isLeaf());
+	if (condition->isLeaf()) {
+		if (condition->leaf()) {
+			bytecode.push_back(succeed);
+		} else {
+			bytecode.push_back(fail);
+		}
+		goto emit;
+	}
 
 	bytecode_eval_expr(bytecode, condition->internal().condition, slots);
 
@@ -483,6 +490,7 @@ emit_validation(FILE *f,
 		}
 		bytecode[offset] = my_asprintf("%d", it->second);
 	}
+emit:
 	fprintf(f, "static const unsigned short %s_%d_%s[] = {\n", tag, ident, name);
 	for (unsigned x = 0; x < bytecode.size(); x++) {
 		fprintf(f, "/* %3d */   %s,\n", x, bytecode[x]);
