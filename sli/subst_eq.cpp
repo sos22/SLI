@@ -8,59 +8,6 @@
 
 namespace substeq {
 
-class eq_set {
-	std::set<IRExpr *> trueExprs;
-	std::set<IRExpr *> falseExprs;
-	std::map<IRExpr *, IRExpr *> rewrites;
-	enum rewrite_order {
-		rewrite_l2r, rewrite_eq, rewrite_r2l
-	};
-	static rewrite_order rewriteOrder(IRExpr *a, IRExpr *b);
-public:
-	void setTrue(IRExpr *);
-	void setFalse(IRExpr *expr) {
-		falseExprs.insert(expr);
-	}
-	void clear() {
-		trueExprs.clear();
-		falseExprs.clear();
-		rewrites.clear();
-	}
-	void intersectPlusTrue(const eq_set &o, IRExpr *cond) {
-		for (auto it = trueExprs.begin(); it != trueExprs.end(); ) {
-			if (cond == *it || o.trueExprs.count(*it)) {
-				it++;
-			} else {
-				trueExprs.erase(it++);
-			}
-		}
-		for (auto it = falseExprs.begin(); it != falseExprs.end(); ) {
-			if (o.falseExprs.count(*it)) {
-				it++;
-			} else {
-				falseExprs.erase(it++);
-			}
-		}		
-	}
-	void intersectPlusFalse(const eq_set &o, IRExpr *cond) {
-		for (auto it = trueExprs.begin(); it != trueExprs.end(); ) {
-			if (o.trueExprs.count(*it)) {
-				it++;
-			} else {
-				trueExprs.erase(it++);
-			}
-		}
-		for (auto it = falseExprs.begin(); it != falseExprs.end(); ) {
-			if (cond == *it || o.falseExprs.count(*it)) {
-				it++;
-			} else {
-				falseExprs.erase(it++);
-			}
-		}		
-	}
-	IRExpr *rewrite(IRExpr *) const;
-};
-
 /* Estimate of the amount of bytecode we need to emit to validate
    @what, or nothing if the expression can't be bytecode evaled. */
 static Maybe<int>
@@ -160,11 +107,15 @@ complexity(IRExpr *what, sane_map<IRExpr *, Maybe<int> > &memo)
 	return it->second;
 }
 
+enum rewrite_order {
+	rewrite_l2r, rewrite_eq, rewrite_r2l
+};
+
 /* Decide whether we want to rewrite from l to r or from r to l.  The
    aim here is to reduce the amount of bytecode we need to emit in
    order to validate them.  */
-eq_set::rewrite_order
-eq_set::rewriteOrder(IRExpr *l, IRExpr *r)
+static rewrite_order
+rewriteOrder(IRExpr *l, IRExpr *r)
 {
 	if (l == r) {
 		return rewrite_eq;
@@ -194,44 +145,32 @@ eq_set::rewriteOrder(IRExpr *l, IRExpr *r)
 	}
 }
 
-void
-eq_set::setTrue(IRExpr *what)
+/* Set @out to @out & (in1 + in2) */
+template<typename t> static void
+intersectPlus(std::set<t> &out, const std::set<t> &in1, t in2)
 {
-	trueExprs.insert(what);
-	if (what->tag != Iex_Binop) {
-		return;
-	}
-	IRExprBinop *eq = (IRExprBinop *)what;
-	if (eq->op < Iop_CmpEQ8 || eq->op > Iop_CmpEQ64) {
-		return;
-	}
-	assert(eq->arg1 != eq->arg2);
-	switch (rewriteOrder(eq->arg1, eq->arg2)) {
-	case rewrite_l2r:
-		if (!rewrites.count(eq->arg1)) {
-			rewrites[eq->arg1] = eq->arg2;
+	for (auto it = out.begin(); it != out.end(); ) {
+		if (*it == in2 || in1.count(*it)) {
+			it++;
+		} else {
+			out.erase(it++);
 		}
-		return;
-	case rewrite_r2l:
-		if (rewrites.count(eq->arg2)) {
-			rewrites[eq->arg2] = eq->arg1;
-		}
-		return;
-	case rewrite_eq:
-		abort();
 	}
-	abort();
 }
 
-IRExpr *
-eq_set::rewrite(IRExpr *what) const
+static bool
+isEqConstraint(IRExpr *what)
 {
-	if (trueExprs.count(what)) {
-		return IRExpr_Const_U1(true);
+	if (what->tag != Iex_Binop) {
+		return false;
 	}
-	if (falseExprs.count(what)) {
-		return IRExpr_Const_U1(false);
-	}
+	IROp op = ((IRExprBinop *)what)->op;
+	return op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64;
+}
+
+static IRExpr *
+do_rewrite(IRExpr *what, const std::map<IRExpr *, IRExpr *> &rewrites)
+{
 	struct : public IRExprTransformer {
 		const std::map<IRExpr *, IRExpr *> *rewrites;
 		IRExpr *transformIRExpr(IRExpr *e) {
@@ -247,8 +186,8 @@ eq_set::rewrite(IRExpr *what) const
 }
 
 static bbdd *
-do_eq_rewrites(bbdd::scope *scope, bbdd *what, const std::map<bbdd *, eq_set> &constraints,
-	       sane_map<bbdd *, bbdd *> &memo)
+eq_rewrites(bbdd::scope *scope, bbdd *what, const std::map<bbdd *, std::map<IRExpr *, IRExpr *> > &rewrites,
+	    sane_map<bbdd *, bbdd *> &memo)
 {
 	if (what->isLeaf()) {
 		return what;
@@ -259,54 +198,60 @@ do_eq_rewrites(bbdd::scope *scope, bbdd *what, const std::map<bbdd *, eq_set> &c
 	if (!did_insert) {
 		return it->second;
 	}
-	auto it2 = constraints.find(what);
-
-	IRExpr *newCond;
-	if (it2 == constraints.end()) {
-		newCond = what->internal().condition;
+	auto r_it = rewrites.find(what);
+	assert(r_it != rewrites.end());
+	auto newCond = do_rewrite(what->internal().condition, r_it->second);
+	auto t = eq_rewrites(scope, what->internal().trueBranch, rewrites, memo);
+	auto f = eq_rewrites(scope, what->internal().falseBranch, rewrites, memo);
+	if (newCond == what->internal().condition &&
+	    t == what->internal().trueBranch &&
+	    f == what->internal().falseBranch) {
+		it->second = what;
 	} else {
-		newCond = it2->second.rewrite(what->internal().condition);
-	}
-	if (newCond->tag == Iex_Const) {
-		IRExprConst *iec = (IRExprConst *)newCond;
-		if (iec->Ico.content.U1) {
-			it->second = do_eq_rewrites(scope, what->internal().trueBranch, constraints, memo);
-		} else {
-			it->second = do_eq_rewrites(scope, what->internal().falseBranch, constraints, memo);
-		}
-	} else {
-		auto t = do_eq_rewrites(scope, what->internal().trueBranch, constraints, memo);
-		auto f = do_eq_rewrites(scope, what->internal().falseBranch, constraints, memo);
-
-		if (newCond == what->internal().condition &&
-		    t == what->internal().trueBranch &&
-		    f == what->internal().falseBranch) {
-			it->second = what;
-		} else {
-			it->second = bbdd::ifelse(
-				scope,
-				bbdd::var(scope, newCond),
-				t,
-				f);
-		}
+		it->second = bbdd::ifelse(
+			scope,
+			bbdd::var(scope, newCond),
+			t,
+			f);
 	}
 	return it->second;
 }
 
+static void
+addRewritesFor(std::map<IRExpr *, IRExpr *> &rules, IRExpr *expr)
+{
+	assert(isEqConstraint(expr));
+	IRExpr *arg1 = ((IRExprBinop *)expr)->arg1;
+	IRExpr *arg2 = ((IRExprBinop *)expr)->arg2;
+	assert(arg1 != arg2);
+	switch (rewriteOrder(arg1, arg2)) {
+	case rewrite_l2r:
+		rules[arg1] = arg2;
+		return;
+	case rewrite_r2l:
+		rules[arg2] = arg1;
+		return;
+	case rewrite_eq:
+		abort();
+	}
+	abort();
+}
+
 /* Build a mapping from bbdd nodes to expressions which are definitely
-   true in that node and those which are definitely false, then try to
-   use that mapping to simplify the bbdd a little bit. */
+   true in that node, then try to use that mapping to simplify the
+   bbdd a little bit. */
 /* Note that this isn't context sensitive, to avoid horrible
  * exponential blow-ups. */
 static bbdd *
 subst_eq(bbdd::scope *scope, bbdd *what)
 {
-	std::map<bbdd *, int> neededPredecessors;
+	std::map<bbdd *, std::set<bbdd *> > predecessors;
 
-	/* Figure out what order we're going to visit nodes in */
+	/* Build a map from nodes to the set of nodes which
+	   immediately preceed them on paths from the root. */
 	std::vector<bbdd *> q;
 	std::set<bbdd *> visited;
-	neededPredecessors[what] = 0;
+	predecessors[what].clear();
 	q.push_back(what);
 	while (!q.empty()) {
 		bbdd *n = q.back();
@@ -315,20 +260,23 @@ subst_eq(bbdd::scope *scope, bbdd *what)
 		    !visited.insert(n).second) {
 			continue;
 		}
-		neededPredecessors[n->internal().trueBranch]++;
-		neededPredecessors[n->internal().falseBranch]++;
+		predecessors[n->internal().trueBranch].insert(n);
+		predecessors[n->internal().falseBranch].insert(n);
 		q.push_back(n->internal().trueBranch);
 		q.push_back(n->internal().falseBranch);
 	}
 
-	/* Map from nodes to expressions which are known to be true or
-	   false when we reach that node. */
-	sane_map<bbdd *, eq_set> constrainedContext;
+	/* Map from nodes to expressions which are known to be true
+	 * when we reach that node, starting from the root. */
+	sane_map<bbdd *, std::set<IRExpr *> > forwardConstraint;
 
-	bool do_rewrite = false;
-
-	/* Build the constainedContext map. */
-	constrainedContext[what].clear();
+	/* Build forwardConstraint using a consistent advance. */
+	forwardConstraint[what].clear();
+	std::map<bbdd *, int> neededPredecessors;
+	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+		neededPredecessors[it->first] = it->second.size();
+	}
+	neededPredecessors[what] = 0;
 	q.push_back(what);
 	while (!q.empty()) {
 		bbdd *n = q.back();
@@ -336,54 +284,26 @@ subst_eq(bbdd::scope *scope, bbdd *what)
 		if (n->isLeaf()) {
 			continue;
 		}
+		assert(n->internal().condition->tag != Iex_Const);
 		assert(neededPredecessors.count(n));
 		assert(neededPredecessors[n] == 0);
-		if (!constrainedContext.count(n)) {
-			/* We've managed to eliminate all paths to
-			   this node.  Go us. */
-			continue;
-		}
-		const eq_set &ctxt(constrainedContext[n]);
-		IRExpr *newCond = ctxt.rewrite(n->internal().condition);
+		assert(forwardConstraint.count(n));
 
-		assert(n->internal().condition->tag != Iex_Const);
-
-		do_rewrite |= (newCond != n->internal().condition);
-
-		bool condIsTrue;
-		bool condIsFalse;
-		if (newCond->tag == Iex_Const) {
-			IRExprConst *iec = (IRExprConst *)newCond;
-			if (iec->Ico.content.U1) {
-				condIsTrue = true;
-				condIsFalse = false;
-			} else {
-				condIsTrue = false;
-				condIsFalse = true;
+		const std::set<IRExpr *> &ctxt(forwardConstraint[n]);
+		assert(!ctxt.count(n->internal().condition));
+		auto t_it_did_insert = forwardConstraint.insert(n->internal().trueBranch, ctxt);
+		if (t_it_did_insert.second) {
+			if (isEqConstraint(n->internal().condition)) {
+				t_it_did_insert.first->second.insert(n->internal().condition);
 			}
 		} else {
-			condIsTrue = false;
-			condIsFalse = false;
+			std::set<IRExpr *> &trueCtxt(t_it_did_insert.first->second);
+			intersectPlus(trueCtxt, ctxt, n->internal().condition);
 		}
-
-		if (!condIsFalse) {
-			auto t_it_did_insert = constrainedContext.insert(n->internal().trueBranch, ctxt);
-			if (t_it_did_insert.second) {
-				t_it_did_insert.first->second.setTrue(newCond);
-			} else {
-				eq_set &trueCtxt(t_it_did_insert.first->second);
-				trueCtxt.intersectPlusTrue(ctxt, newCond);
-			}
-		}
-
-		if (!condIsTrue) {
-			auto f_it_did_insert = constrainedContext.insert(n->internal().falseBranch, ctxt);
-			if (f_it_did_insert.second) {
-				f_it_did_insert.first->second.setFalse(newCond);
-			} else {
-				eq_set &falseCtxt(f_it_did_insert.first->second);
-				falseCtxt.intersectPlusFalse(ctxt, newCond);
-			}
+		auto f_it_did_insert = forwardConstraint.insert(n->internal().falseBranch, ctxt);
+		if (!t_it_did_insert.second) {
+			std::set<IRExpr *> &falseCtxt(f_it_did_insert.first->second);
+			falseCtxt &= ctxt;
 		}
 
 		assert(neededPredecessors.count(n->internal().trueBranch));
@@ -398,13 +318,76 @@ subst_eq(bbdd::scope *scope, bbdd *what)
 		}
 	}
 
-	if (!do_rewrite) {
-		/* No point in trying this */
-		return what;
+	/* Converse of forwardConstraint: all of the conditions which
+	   are definitely true on any path from a node to the true
+	   leaf. */
+	std::map<bbdd *, std::set<IRExpr *> > backwardConstraint;
+	std::map<bbdd *, int> neededSuccessors;
+	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+		if ( it->first->isLeaf()) {
+			q.push_back(it->first);
+			backwardConstraint[it->first].clear();
+			neededSuccessors[it->first] = 0;
+		} else {
+			neededSuccessors[it->first] = 2;
+		}
+	}
+	while (!q.empty()) {
+		bbdd *n = q.back();
+		q.pop_back();
+
+		assert(neededSuccessors.count(n));
+		assert(neededSuccessors[n] == 0);
+
+		if (!n->isLeaf()) {
+			assert(backwardConstraint.count(n->internal().trueBranch));
+			assert(backwardConstraint.count(n->internal().falseBranch));
+			assert(!backwardConstraint.count(n));
+			const std::set<IRExpr *> &trueB(backwardConstraint[n->internal().trueBranch]);
+			const std::set<IRExpr *> &falseB(backwardConstraint[n->internal().falseBranch]);
+			std::set<IRExpr *> &res(backwardConstraint[n]);
+			if (n->internal().falseBranch->isLeaf() &&
+			    !n->internal().falseBranch->leaf()) {
+				res = trueB;
+				if (isEqConstraint(n->internal().condition)) {
+					res.insert(n->internal().condition);
+				}
+			} else {
+				res = trueB & falseB;
+			}
+		}
+
+		assert(predecessors.count(n));
+		const std::set<bbdd *> &pred(predecessors[n]);
+		for (auto it = pred.begin(); it != pred.end(); it++) {
+			bbdd *b = *it;
+			assert(neededSuccessors.count(b));
+			assert(neededSuccessors[b] > 0);
+			assert(neededSuccessors[b] <= 2);
+			if (--neededSuccessors[b] == 0) {
+				q.push_back(b);
+			}
+		}
 	}
 
+	std::map<bbdd *, std::map<IRExpr *, IRExpr *> > rewriteRules;
+	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+		bbdd *n = it->first;
+		assert(forwardConstraint.count(n));
+		assert(backwardConstraint.count(n));
+		assert(!rewriteRules.count(n));
+		std::map<IRExpr *, IRExpr *> &rules(rewriteRules[n]);
+		const std::set<IRExpr *> ctxt1(forwardConstraint[n]);
+		const std::set<IRExpr *> ctxt2(backwardConstraint[n]);
+		for (auto it2 = ctxt1.begin(); it2 != ctxt1.end(); it2++) {
+			addRewritesFor(rules, *it2);
+		}
+		for (auto it2 = ctxt2.begin(); it2 != ctxt2.end(); it2++) {
+			addRewritesFor(rules, *it2);
+		}
+	}
 	sane_map<bbdd *, bbdd *> memo;
-	return do_eq_rewrites(scope, what, constrainedContext, memo);
+	return eq_rewrites(scope, what, rewriteRules, memo);
 }
 
 

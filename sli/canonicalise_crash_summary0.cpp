@@ -240,11 +240,6 @@ struct intersectSets {
 				b.begin(), b.end());
 	}
 };
-template <typename t> intersectSets<t>
-operator &(const std::set<t> &_a, const std::set<t> &_b)
-{
-	return intersectSets<t>(_a, _b);
-}
 
 template <typename t, typename s> void
 operator |=(std::set<t> &dest, const s &other)
@@ -456,7 +451,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 
 		/* We need anything in the intersection of those two
 		 * sets. */
-		needed |= reachableFromReferencedNode & reachesReferencedNode;
+		needed |= intersectSets<const CFGNode *>(reachableFromReferencedNode, reachesReferencedNode);
 	}
 
 
