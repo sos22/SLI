@@ -705,6 +705,10 @@ irexprAliasingClass(IRExpr *expr,
 			return config.lookupRegister(e->reg, buildingAliasTable);
 		}
 	}
+	case Iex_GetI:
+		/* x86 decoder never uses GetI for anything which is
+		   likely to contain a pointer. */
+		return PointerAliasingSet::notAPointer;
 	case Iex_Const: {
 		IRExprConst *con = (IRExprConst *)expr;
 		if (con->Ico.content.U64 < 4096)
