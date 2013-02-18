@@ -322,7 +322,12 @@ addRewritesFor(std::map<IRExpr *, IRExpr *> &rules,
 	assert(isEqConstraint(expr));
 	IRExpr *arg1 = ((IRExprBinop *)expr)->arg1;
 	IRExpr *arg2 = ((IRExprBinop *)expr)->arg2;
-	assert(arg1 != arg2);
+
+	if (arg1 == arg2) {
+		/* Special case, to avoid a potential infinite loop. */
+		rules[expr] = IRExpr_Const_U1(1);
+		return;
+	}
 
 	if (arg1->tag == Iex_Const &&
 	    arg2->tag == Iex_Associative &&
