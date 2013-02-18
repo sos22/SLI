@@ -293,23 +293,48 @@ eq_rewrites(bbdd::scope *scope,
 	assert(r_it != rewrites.end());
 	auto newCond = do_rewrite(what->internal().condition, r_it->second);
 	newCond = quickSimplify(newCond, simplMemo);
-	auto t = eq_rewrites(scope, what->internal().trueBranch, rewrites, simplMemo, memo, labels);
-	auto f = eq_rewrites(scope, what->internal().falseBranch, rewrites, simplMemo, memo, labels);
-	if (debug_subst_eq && newCond != what->internal().condition) {
-		printf("l%d: %s -> %s\n", labels[what],
-		       nameIRExpr(what->internal().condition),
-		       nameIRExpr(newCond));
-	}
-	if (newCond == what->internal().condition &&
-	    t == what->internal().trueBranch &&
-	    f == what->internal().falseBranch) {
-		it->second = what;
+	if (newCond->tag == Iex_Const) {
+		if ( ((IRExprConst *)newCond)->Ico.content.U1 ) {
+			if (debug_subst_eq) {
+				printf("l%d: condition is true\n",
+				       labels[what]);
+			}
+			it->second = eq_rewrites(scope, what->internal().trueBranch, rewrites, simplMemo, memo, labels);
+		} else {
+			if (debug_subst_eq) {
+				printf("l%d: condition is false\n",
+				       labels[what]);
+			}
+			it->second = eq_rewrites(scope, what->internal().falseBranch, rewrites, simplMemo, memo, labels);
+		}
 	} else {
-		it->second = bbdd::ifelse(
-			scope,
-			bbdd::var(scope, newCond),
-			t,
-			f);
+		auto t = eq_rewrites(scope, what->internal().trueBranch, rewrites, simplMemo, memo, labels);
+		auto f = eq_rewrites(scope, what->internal().falseBranch, rewrites, simplMemo, memo, labels);
+		if (debug_subst_eq && newCond != what->internal().condition) {
+			printf("l%d: %s -> %s\n", labels[what],
+			       nameIRExpr(what->internal().condition),
+			       nameIRExpr(newCond));
+		}
+		if (t == what->internal().trueBranch &&
+		    f == what->internal().falseBranch) {
+			it->second = what;
+		} else {
+			/* Note that we only make use of the
+			   substitution if it can reduce the condition
+			   all the way to a constant.  If it just
+			   simplifies it a little, but not all the
+			   way, we throw it away.  That's because
+			   applying the simplification here tends to
+			   screw up the variable ordering, which makes
+			   the BDD exponentially bigger, which more
+			   than outweighs the benefits of slightly
+			   simpler conditions. */
+			it->second = scope->makeInternal(
+				what->internal().condition,
+				what->internal().rank,
+				t,
+				f);
+		}
 	}
 	return it->second;
 }
