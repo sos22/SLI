@@ -40,6 +40,8 @@ rip_t::read(FILE *f, AddressSpace *as, bool new_format)
 		if (c & (1ul << 63)) {
 			is_private = 1;
 			c &= ~(1ul << 63);
+		} else {
+			is_private = 0;
 		}
 		if (as && !as->isReadable(c))
 			return false;
@@ -103,8 +105,10 @@ void
 rip_t::write(sane_write_file &output) const
 {
 	unsigned nr_entries = stack.size();
-	if (is_private)
+	if (is_private) {
+		assert(is_private == 1);
 		nr_entries |= PRIVATE_RIP_FLAG;
+	}
 	output.write(nr_entries);
 	for (auto it = stack.begin(); it != stack.end(); it++)
 		output.write(*it);
