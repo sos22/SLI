@@ -352,6 +352,24 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		IRExprUnop *au = (IRExprUnop *)a;
 		auto arg = quickSimplify(au->arg, memo);
 		if (arg->tag != Iex_Const) {
+			if (au->op >= Iop_Neg8 &&
+			    au->op <= Iop_Neg64 &&
+			    arg->tag == Iex_Associative &&
+			    ((IRExprAssociative *)arg)->op >= Iop_Add8 &&
+			    ((IRExprAssociative *)arg)->op <= Iop_Add64) {
+				/* Turn -(x + y) into -x + -y */
+				IRExprAssociative *argA = (IRExprAssociative *)arg;
+				IRExpr *args[argA->nr_arguments];
+				for (int i = 0; i < argA->nr_arguments; i++) {
+					args[i] = quickSimplify(IRExpr_Unop(au->op, argA->contents[i]), memo);
+				}
+				return quickSimplify(
+					IRExpr_Associative_Copy(
+						argA->op,
+						argA->nr_arguments,
+						args),
+					memo);
+			}
 			if (arg == au->arg)
 				return au;
 			else
