@@ -763,6 +763,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		}
 
 		if (new_nr_args == 0) {
+		result_is_zero:
 			switch (_iea->type()) {
 #define do_ty(n)							\
 			case Ity_I ## n :				\
@@ -821,13 +822,29 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 						outIdx++;
 					}
 				}
+			} else if (op >= Iop_Add8 &&
+				   op <= Iop_Add64 &&
+				   i + 1 < nr_arguments &&
+				   simpleArgs[i+1]->tag == Iex_Unop &&
+				   ((IRExprUnop *)simpleArgs[i+1])->op >= Iop_Neg8 &&
+				   ((IRExprUnop *)simpleArgs[i+1])->op <= Iop_Neg64 &&
+				   ((IRExprUnop *)simpleArgs[i+1])->arg == simpleArgs[i]) {
+				/* x - x == 0 */
+				outIdx--;
 			} else {
 				newArgs[outIdx] = simpleArgs[i];
 				outIdx++;
 			}
 		}
-		assert(outIdx == new_nr_args);
-		a = IRExpr_Associative_Claim(op, new_nr_args, newArgs);
+		assert(outIdx <= new_nr_args);
+		if (outIdx == 0) {
+			goto result_is_zero;
+		}
+		if (outIdx == 1) {
+			a = newArgs[0];
+		} else {
+			a = IRExpr_Associative_Claim(op, outIdx, newArgs);
+		}
 		break;
 	}
 	case Iex_Mux0X: {
