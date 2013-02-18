@@ -342,7 +342,6 @@ muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo)
 /* Some very quick simplifications which are always applied to the
  * condition of BDD internal nodes.  This isn't much more than just
  * constant folding. */
-static IRExpr *quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo);
 static IRExpr *
 _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 {
@@ -863,7 +862,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 	return a;
 }
 
-static IRExpr *
+IRExpr *
 quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 {
 	auto it_did_insert = memo.insert(std::pair<IRExpr *, IRExpr *>(a, (IRExpr *)NULL));
@@ -873,7 +872,6 @@ quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		it->second = _quickSimplify(a, memo);
 	return it->second;
 }
-
 
 bbdd *
 bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo)

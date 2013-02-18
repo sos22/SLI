@@ -655,4 +655,6 @@ public:
 	static bbdd *to_bbdd(bbdd::scope *scope, exprbdd *);
 };
 
+IRExpr *quickSimplify(IRExpr *, std::map<IRExpr *, IRExpr *> &memo);
+
 #endif /* !BDD_HPP__ */
