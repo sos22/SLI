@@ -3,13 +3,13 @@
 #define MAYBE_HPP__
 
 template <typename t> class Maybe {
+public:
 	Maybe(const t &x)
 		: valid(true), content(x)
 	{}
 	Maybe()
 		: valid(false), content()
 	{}
-public:
 	bool valid;
 	t content;
 	static Maybe just(const t &x)

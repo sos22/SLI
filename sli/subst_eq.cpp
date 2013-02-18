@@ -61,235 +61,136 @@ public:
 	IRExpr *rewrite(IRExpr *) const;
 };
 
-/* Decide whether we want to rewrite from l to r or from r to l.  The
-   rules are:
+/* Estimate of the amount of bytecode we need to emit to validate
+   @what, or nothing if the expression can't be bytecode evaled. */
+static Maybe<int>
+complexity(IRExpr *what, sane_map<IRExpr *, Maybe<int> > &memo)
+{
+	/* A couple of easy cases without looking in the hash
+	   table. */
+	if (what->tag == Iex_EntryPoint) {
+		/* EntryPoints can usually be done at compile time
+		   without any bytecode at all. */
+		return 0;
+	}
+	if (what->tag == Iex_Get || what->tag == Iex_Const ||
+	    what->tag == Iex_HappensBefore || what->tag == Iex_ControlFlow) {
+		return 1;
+	}
+	if (what->tag == Iex_CCall || what->tag == Iex_FreeVariable ||
+	    what->tag == Iex_GetI) {
+		return Maybe<int>::nothing();
+	}
+	auto it_did_insert = memo.insert(what, -99999);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+	switch (what->tag) {
+	case Iex_Get:
+	case Iex_GetI:
+		abort();
+	case Iex_Qop: {
+		IRExprQop *q = (IRExprQop *)what;
+		it->second = complexity(q->arg1, memo) +
+			complexity(q->arg2, memo) +
+			complexity(q->arg3, memo) +
+			complexity(q->arg4, memo) +
+			1;
+		break;
+	}
+	case Iex_Triop: {
+		IRExprTriop *q = (IRExprTriop *)what;
+		it->second = complexity(q->arg1, memo) +
+			complexity(q->arg2, memo) +
+			complexity(q->arg3, memo) +
+			1;
+		break;
+	}
+	case Iex_Binop: {
+		IRExprBinop *q = (IRExprBinop *)what;
+		it->second = complexity(q->arg1, memo) +
+			complexity(q->arg2, memo) +
+			1;
+		break;
+	}
+	case Iex_Unop: {
+		IRExprUnop *q = (IRExprUnop *)what;
+		it->second = complexity(q->arg, memo) +
+			1;
+		break;
+	}
+	case Iex_Const:
+		abort();
+	case Iex_Mux0X:
+		/* Shouldn't be any, because this is pulled out of a BDD */
+		abort();
+	case Iex_CCall:
+		abort();
+	case Iex_Associative: {
+		IRExprAssociative *q = (IRExprAssociative *)what;
+		Maybe<int> acc(0);
+		if ((q->op >= Iop_And8 && q->op <= Iop_And64) ||
+		    (q->op >= Iop_Or8 && q->op <= Iop_Or64) ||
+		    q->op == Iop_Or1 || q->op == Iop_And1) {
+			for (int i = 0; i < q->nr_arguments; i++) {
+				auto j(complexity(q->contents[i], memo));
+				if (j.valid) {
+					acc = acc + j;
+				}
+			}
+		} else {
+			for (int i = 0; i < q->nr_arguments; i++) {
+				acc = acc + complexity(q->contents[i], memo);
+			}
+		}
+		it->second = acc;
+		break;
+	}
+	case Iex_Load:
+		it->second = complexity(((IRExprLoad *)what)->addr, memo) + 1;
+		break;
+	case Iex_HappensBefore:
+	case Iex_FreeVariable:
+	case Iex_EntryPoint:
+	case Iex_ControlFlow:
+		abort();
+	}
+	return it->second;
+}
 
-   -- If they're both Gets, we rewrite to reduce the register number,
-   -- If one's a Get and the other isn't, we rewrite the non-Get to
-      turn it into a Get.
-   -- If one's an arithmetic op (associative, binop, unop, etc) and
-      other's a load, we rewrite the arithmetic op into the load.
-*/
+/* Decide whether we want to rewrite from l to r or from r to l.  The
+   aim here is to reduce the amount of bytecode we need to emit in
+   order to validate them.  */
 eq_set::rewrite_order
 eq_set::rewriteOrder(IRExpr *l, IRExpr *r)
 {
 	if (l == r) {
 		return rewrite_eq;
 	}
-	if (l->tag == Iex_Const) {
-		if (r->tag == Iex_Const) {
-			/* Rewriting a const into a const is an
-			   interesting idea.  Don't do it. */
-			return rewrite_eq;
-		} else {
+	sane_map<IRExpr *, Maybe<int> > complex_memo;
+	auto l_complex = complexity(l, complex_memo);
+	auto r_complex = complexity(r, complex_memo);
+	if (l_complex.valid && r_complex.valid) {
+		if (l_complex.content < r_complex.content) {
 			return rewrite_r2l;
+		} else if (r_complex.content < l_complex.content) {
+			return rewrite_l2r;
 		}
-	}
-	if (r->tag == Iex_Const) {
-		return rewrite_l2r;
-	}
-	if (l->tag == Iex_Get) {
-		IRExprGet *lg = (IRExprGet *)l;
-		if (r->tag == Iex_Get) {
-			IRExprGet *rg = (IRExprGet *)r;
-			if (lg->tag < rg->tag) {
-				return rewrite_r2l;
-			} else {
-				return rewrite_l2r;
-			}
-		} else {
-			return rewrite_r2l;
-		}
-	}
-	if (r->tag == Iex_Get) {
-		return rewrite_l2r;
-	}
-
-	if (l->tag == Iex_Load) {
-		if (r->tag == Iex_Load) {
-			return rewriteOrder( ((IRExprLoad *)l)->addr,
-					     ((IRExprLoad *)r)->addr );
-		} else {
-			return rewrite_r2l;
-		}
-	} else if (r->tag == Iex_Load) {
+		/* Note fall-through */
+	} else if (l_complex.valid && !r_complex.valid) {
 		return rewrite_r2l;
+	} else if (!l_complex.valid && r_complex.valid) {
+		return rewrite_l2r;
+	} else {
+		assert(!l_complex.valid && !r_complex.valid);
 	}
 
-	switch (l->tag) {
-	case Iex_Qop: {
-		auto *lq = (IRExprQop *)l;
-		switch (r->tag) {
-		case Iex_Qop:{
-			auto *rq = (IRExprQop *)r;
-			if (rq->op < lq->op) {
-				return rewrite_l2r;
-			} else if (rq->op > lq->op) {
-				return rewrite_r2l;
-			}
-			auto a = rewriteOrder(lq->arg1, rq->arg1);
-			if (a != rewrite_eq) {
-				return a;
-			}
-			a = rewriteOrder(lq->arg2, rq->arg2);
-			if (a != rewrite_eq) {
-				return a;
-			}
-			a = rewriteOrder(lq->arg3, rq->arg3);
-			if (a != rewrite_eq) {
-				return a;
-			}
-			return rewriteOrder(lq->arg4, rq->arg4);
-		}
-		default:
-			return rewrite_l2r;
-		}
-	}
-	case Iex_Triop: {
-		auto *lq = (IRExprTriop *)l;
-		switch (r->tag) {
-		case Iex_Qop:
-			return rewrite_r2l;
-		case Iex_Triop: {
-			auto *rq = (IRExprTriop *)r;
-			if (rq->op < lq->op) {
-				return rewrite_l2r;
-			} else if (rq->op > lq->op) {
-				return rewrite_r2l;
-			}
-			auto a = rewriteOrder(lq->arg1, rq->arg1);
-			if (a != rewrite_eq) {
-				return a;
-			}
-			a = rewriteOrder(lq->arg2, rq->arg2);
-			if (a != rewrite_eq) {
-				return a;
-			}
-			return rewriteOrder(lq->arg3, rq->arg3);
-		}
-		default:
-			return rewrite_l2r;
-		}
-	}
-	case Iex_CCall: {
-		auto *lq = (IRExprCCall *)l;
-		int l_nr_args;
-		for (l_nr_args = 0; lq->args[l_nr_args]; l_nr_args++) {
-		}
-		switch (r->tag) {
-		case Iex_Qop:
-		case Iex_Triop:
-			return rewrite_r2l;
-		case Iex_CCall: {
-			auto *rq = (IRExprCCall *)r;
-			int r_nr_args;
-			for (r_nr_args = 0; rq->args[r_nr_args]; r_nr_args++) {
-			}
-			if (r_nr_args < l_nr_args) {
-				return rewrite_l2r;
-			} else if (r_nr_args > l_nr_args) {
-				return rewrite_r2l;
-			}
-			for (int i = 0; i < l_nr_args; i++) {
-				auto a = rewriteOrder(lq->args[i], rq->args[i]);
-				if (a != rewrite_eq) {
-					return a;
-				}
-			}
-			if (rq->cee->addr < lq->cee->addr) {
-				return rewrite_l2r;
-			} else if (rq->cee->addr > lq->cee->addr) {
-				return rewrite_r2l;
-			} else {
-				return rewrite_eq;
-			}
-		}
-		default:
-			return rewrite_l2r;
-		}
-	}
-	case Iex_Binop: {
-		auto *lq = (IRExprBinop *)l;
-		switch (r->tag) {
-		case Iex_Qop:
-		case Iex_Triop:
-		case Iex_CCall:
-			return rewrite_r2l;
-		case Iex_Binop: {
-			auto *rq = (IRExprBinop *)r;
-			if (rq->op < lq->op) {
-				return rewrite_l2r;
-			} else if (rq->op > lq->op) {
-				return rewrite_r2l;
-			}
-			auto a = rewriteOrder(lq->arg1, rq->arg1);
-			if (a != rewrite_eq) {
-				return a;
-			}
-			return rewriteOrder(lq->arg2, rq->arg2);
-		}
-		default:
-			return rewrite_l2r;
-		}
-	}
-	case Iex_Associative: {
-		auto *lq = (IRExprAssociative *)l;
-		switch (r->tag) {
-		case Iex_Qop:
-		case Iex_Triop:
-		case Iex_CCall:
-		case Iex_Binop:
-			return rewrite_r2l;
-		case Iex_Associative: {
-			auto *rq = (IRExprAssociative *)r;
-			if (rq->nr_arguments < lq->nr_arguments) {
-				return rewrite_l2r;
-			} else if (rq->nr_arguments > lq->nr_arguments) {
-				return rewrite_r2l;
-			}
-			for (int i = 0; i < lq->nr_arguments; i++) {
-				auto a = rewriteOrder(lq->contents[i],
-						      rq->contents[i]);
-				if (a != rewrite_eq) {
-					return a;
-				}
-			}
-			if (lq->op < rq->op) {
-				return rewrite_l2r;
-			} else if (lq->op > rq->op) {
-				return rewrite_r2l;
-			} else {
-				return rewrite_eq;
-			}
-		}
-		default:
-			return rewrite_r2l;
-		}
-	}
-	case Iex_Unop: {
-		auto *lq = (IRExprUnop *)l;
-		switch (r->tag) {
-		case Iex_Qop:
-		case Iex_Triop:
-		case Iex_CCall:
-		case Iex_Binop:
-		case Iex_Associative:
-			return rewrite_r2l;
-		case Iex_Unop: {
-			auto *rq = (IRExprUnop *)r;
-			if (rq->op < lq->op) {
-				return rewrite_l2r;
-			} else if (rq->op > lq->op) {
-				return rewrite_r2l;
-			}
-			return rewriteOrder(lq->arg, rq->arg);
-		}
-		default:
-			abort();
-		}
-	}
-	default:
-		abort();
+	if (l < r) {
+		return rewrite_r2l;
+	} else {
+		return rewrite_l2r;
 	}
 }
 
