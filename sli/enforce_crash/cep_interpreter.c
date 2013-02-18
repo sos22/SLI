@@ -36,6 +36,7 @@
 #define USE_CUSTOM_MALLOC 1
 #define SANITY_CHECK_ALLOCATOR 0
 #define USE_LAST_FREE_DETECTOR 0
+#define DISABLE_DELAYS 0
 
 /* Define _PAGE_SIZE and _STACK_SIZE which don't include the ul
  * suffix, because that makes it easier to use them in inline
@@ -2513,10 +2514,12 @@ static void
 get_max_wait_time(struct timeval *end_wait)
 {
 	gettimeofday(end_wait, NULL);
-	end_wait->tv_usec += MAX_DELAY_US * 2;
-	while (end_wait->tv_usec >= 1000000) {
-		end_wait->tv_sec++;
-		end_wait->tv_usec -= 1000000;
+	if (!DISABLE_DELAYS) {
+		end_wait->tv_usec += MAX_DELAY_US * 2;
+		while (end_wait->tv_usec >= 1000000) {
+			end_wait->tv_sec++;
+			end_wait->tv_usec -= 1000000;
+		}
 	}
 }
 
@@ -2582,7 +2585,9 @@ gen_random(void)
 static void
 random_delay(void)
 {
-	usleep((gen_random() % MAX_DELAY_US) + MAX_DELAY_US);
+	if (!DISABLE_DELAYS) {
+		usleep((gen_random() % MAX_DELAY_US) + MAX_DELAY_US);
+	}
 }
 
 /* This is quite fiddly.  We have a bunch of low-level threads, some
