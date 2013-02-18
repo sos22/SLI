@@ -643,6 +643,11 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			}
 			return IRExpr_Binop(_ieb->op, newArg1, newArg2);
 		}
+		if (_ieb->op >= Iop_CmpEQ8 &&
+		    _ieb->op <= Iop_CmpEQ64 &&
+		    arg1 == arg2) {
+			return IRExpr_Const_U1(true);
+		}
 		if (arg1 != _ieb->arg1 || arg2 != _ieb->arg2)
 			a = IRExprBinop::mk(_ieb->op, arg1, arg2);
 		break;
