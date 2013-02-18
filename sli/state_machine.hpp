@@ -130,9 +130,9 @@ public:
    the stack bit set could still point into a *calling*
    functions' stack frame, and that wouldn't be a bug. */
 class PointerAliasingSet : public Named {
+public:
 	bool nonPointer;
 	bool nonStckPointer;
-public:
 	bool otherStackPointer;
 	bool valid;
 	std::vector<FrameId> stackPointers;

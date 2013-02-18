@@ -2418,6 +2418,28 @@ impossible_clean:
 	goto done;
 }
 
+/* We know that @what is definitely a valid pointer.  Try to update
+   @config so that irexprAliasingClass will say that as well. */
+static void
+makeValidPointer(Oracle::ThreadRegisterAliasingConfiguration &config,
+		 IRExpr *what)
+{
+	if (what->tag == Iex_Get &&
+	    ((IRExprGet *)what)->reg.isReg() &&
+	    ((IRExprGet *)what)->reg.asReg() < Oracle::NR_REGS * 8) {
+		int idx = ((IRExprGet *)what)->reg.asReg() / 8;
+		config.v[idx].nonPointer = false;
+		config.v[idx].clearName();
+	} else if (what->tag == Iex_Associative &&
+		   ((IRExprAssociative *)what)->op == Iop_Add64 &&
+		   ((IRExprAssociative *)what)->nr_arguments == 2 &&
+		   ((IRExprAssociative *)what)->contents[0]->tag == Iex_Const) {
+		makeValidPointer(config, ((IRExprAssociative *)what)->contents[1]);
+	} else {
+		/* Can't do anything with these. */
+	}
+}
+
 #if !CONFIG_NO_STATIC_ALIASING
 void
 Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
@@ -2500,6 +2522,7 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 				tconfig.stackInMemory |= addr.mightPointAtNonStack();
 				tconfig.stackInStack  |= addr.mightPointAtStack();
 			}
+			makeValidPointer(tconfig, ((IRStmtStore *)st)->addr);
 			break;
 		case Ist_CAS: {
 			IRStmtCAS *s = (IRStmtCAS *)st;
@@ -2516,12 +2539,14 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 		case Ist_Dirty:
 			if (((IRStmtDirty *)st)->details->tmp.isValid()) {
 				PointerAliasingSet res;
+				IRExpr *add = NULL;
 				if ((tconfig.stackInStack && tconfig.stackInMemory) ||
 				    strcmp(((IRStmtDirty *)st)->details->cee->name, "helper_load_64")) {
 					res = PointerAliasingSet::anything;
 				} else {
+					add = ((IRStmtDirty *)st)->details->args[0];
 					PointerAliasingSet addr(
-						irexprAliasingClass(((IRStmtDirty *)st)->details->args[0],
+						irexprAliasingClass(add,
 								    config,
 								    &temporaryAliases,
 								    opt,
@@ -2536,6 +2561,10 @@ Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 					std::pair<threadAndRegister, PointerAliasingSet>(
 						((IRStmtDirty *)st)->details->tmp,
 						res));
+
+				if (add) {
+					makeValidPointer(tconfig, add);
+				}
 			}
 			break;
 		case Ist_MBE:
