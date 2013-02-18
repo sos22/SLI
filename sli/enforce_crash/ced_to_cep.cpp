@@ -483,11 +483,13 @@ emit_validation(FILE *f,
 				relocs.push_back(std::pair<bbdd *, unsigned>
 						 (targ->internal().trueBranch,
 						  bytecode.size()));
-				bytecode.push_back((const char *)0xf003);
+				bytecode.push_back((const char *)0xf005);
+				bytecode.push_back((const char *)0xf006);
 				relocs.push_back(std::pair<bbdd *, unsigned>
 						 (targ->internal().falseBranch,
 						  bytecode.size()));
-				bytecode.push_back((const char *)0xf004);
+				bytecode.push_back((const char *)0xf007);
+				bytecode.push_back((const char *)0xf008);
 			}
 		}
 		bytecode[offset] = my_asprintf("%d", it->second & 0xffff);
