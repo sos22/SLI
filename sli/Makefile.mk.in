@@ -3,14 +3,12 @@ targets="minimal_direct dump_types_db check_types_index build_schedule"
 targets="${targets} canonicalise_types_table canonicalise_crash_summary2"
 targets="${targets} remove_non_badptrs canonicalise_crash_summary3 canonicalise_crash_summary0 canonicalise_crash_summary4"
 targets="${targets} case_split_summaries memloc_split_summaries dump_alias_db check_cfg_generation"
-targets="${targets} direct_cd merge_type_tables summary_to_fix static timing"
+targets="${targets} direct_cd merge_type_tables summary_to_fix static timing compare_crash_summaries"
 
 # Disabled targets:
 
 # Relies on comparing machines generated in different scopes, which
 # isn't allowed.
-#targets="${targets} compare_crash_summaries"
-# Likewise
 #targets="${targets} cross_check_machines"
 # Don't know how to convert the load canonicalisation step to exprbdds.
 #targets="${targets} canonicalise_crash_summary"

@@ -1,6 +1,7 @@
 /* Compare two (canonicalised) crash summaries and try to guess
    whether they represent the same underlying bug. */
 #include <dirent.h>
+#include <errno.h>
 
 #include "sli.h"
 #include "oracle.hpp"
@@ -17,22 +18,49 @@ localSimilarity(IRExpr *a, IRExpr *b)
 		definitelyEqual(a, b, AllowableOptimisations::defaultOptimisations);
 }
 
-static bool
-localSimilarity(bbdd *a, bbdd *b)
+template <typename t> static bool
+_bddSimilarity(t *a, t *b)
 {
 	if (a == b)
 		return true;
-	if (a->isLeaf || b->isLeaf)
+	if (a->isLeaf() || b->isLeaf())
 		return false;
-	return localSimilarity(a->content.condition, b->content.condition) &&
-		localSimilarity(a->content.trueBranch, b->content.trueBranch) &&
-		localSimilarity(a->content.falseBranch, b->content.falseBranch);
+	return localSimilarity(a->internal().condition, b->internal().condition) &&
+		_bddSimilarity(a->internal().trueBranch, b->internal().trueBranch) &&
+		_bddSimilarity(a->internal().falseBranch, b->internal().falseBranch);
+}
+
+static bool
+bddSimilarity(bbdd *a, bbdd *b)
+{
+	return _bddSimilarity(a, b);
+}
+static bool
+bddSimilarity(smrbdd *a, smrbdd *b)
+{
+	return _bddSimilarity(a, b);
+}
+static bool
+bddSimilarity(exprbdd *a, exprbdd *b)
+{
+	if (a == b) {
+		return true;
+	}
+	if (a->isLeaf() && b->isLeaf()) {
+		return localSimilarity(a->leaf(), b->leaf());
+	}
+	if (a->isLeaf() || b->isLeaf()) {
+		return false;
+	}
+	return localSimilarity(a->internal().condition, b->internal().condition) &&
+		bddSimilarity(a->internal().trueBranch, b->internal().trueBranch) &&
+		bddSimilarity(a->internal().falseBranch, b->internal().falseBranch);
 }
 
 static bool
 localSimilarity2(StateMachineSideEffectLoad *smsel1, StateMachineSideEffectLoad *smsel2)
 {
-	return localSimilarity(smsel1->addr, smsel2->addr) &&
+	return bddSimilarity(smsel1->addr, smsel2->addr) &&
 		smsel1->target == smsel2->target &&
 		smsel1->type == smsel2->type;
 }
@@ -40,21 +68,21 @@ localSimilarity2(StateMachineSideEffectLoad *smsel1, StateMachineSideEffectLoad 
 static bool
 localSimilarity2(StateMachineSideEffectStore *smsel1, StateMachineSideEffectStore *smsel2)
 {
-	return localSimilarity(smsel1->addr, smsel2->addr) &&
-		localSimilarity(smsel1->data, smsel2->data);
+	return bddSimilarity(smsel1->addr, smsel2->addr) &&
+		bddSimilarity(smsel1->data, smsel2->data);
 }
 
 static bool
 localSimilarity2(StateMachineSideEffectCopy *smsel1, StateMachineSideEffectCopy *smsel2)
 {
-	return localSimilarity(smsel1->value, smsel2->value) &&
+	return bddSimilarity(smsel1->value, smsel2->value) &&
 		smsel1->target == smsel2->target;
 }
 
 static bool
 localSimilarity2(StateMachineSideEffectAssertFalse *smsel1, StateMachineSideEffectAssertFalse *smsel2)
 {
-	return localSimilarity(smsel1->value, smsel2->value) &&
+	return bddSimilarity(smsel1->value, smsel2->value) &&
 		smsel1->reflectsActualProgram == smsel2->reflectsActualProgram;
 }
 
@@ -103,17 +131,17 @@ localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2)
 static bool
 localSimilarity2(StateMachineSideEffectStartFunction *smsesf1, StateMachineSideEffectStartFunction *smsesf2)
 {
-	return localSimilarity(smsesf1->rsp, smsesf2->rsp);
+	return bddSimilarity(smsesf1->rsp, smsesf2->rsp);
 }
 
 static bool
 localSimilarity2(StateMachineSideEffectEndFunction *smsesf1, StateMachineSideEffectEndFunction *smsesf2)
 {
-	return localSimilarity(smsesf1->rsp, smsesf2->rsp);
+	return bddSimilarity(smsesf1->rsp, smsesf2->rsp);
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectPointerAliasing *smsesf1, StateMachineSideEffectPointerAliasing *smsesf2)
+localSimilarity2(StateMachineSideEffectImportRegister *smsesf1, StateMachineSideEffectImportRegister *smsesf2)
 {
 	return *smsesf1 == *smsesf2;
 }
@@ -143,7 +171,7 @@ localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2)
 static bool
 localSimilarity(StateMachineTerminal *a, StateMachineTerminal *b)
 {
-	return a->res == b->res;
+	return bddSimilarity(a->res, b->res);
 }
 
 static bool
@@ -159,7 +187,7 @@ localSimilarity(StateMachineSideEffecting *sm1, StateMachineSideEffecting *sm2)
 static bool
 localSimilarity(StateMachineBifurcate *sm1, StateMachineBifurcate *sm2)
 {
-	return localSimilarity(sm1->condition, sm2->condition);
+	return bddSimilarity(sm1->condition, sm2->condition);
 }
 
 static bool
@@ -206,7 +234,8 @@ crashSummariesTheSame(CrashSummary *summary1,
 {
 	return stateMachinesTheSame(summary1->loadMachine, summary2->loadMachine) &&
 		stateMachinesTheSame(summary1->storeMachine, summary2->storeMachine) &&
-		localSimilarity(summary1->verificationCondition, summary2->verificationCondition) &&
+		bddSimilarity(summary1->inferredAssumption, summary2->inferredAssumption) &&
+		bddSimilarity(summary1->crashCondition, summary2->crashCondition) &&
 		summary1->aliasing == summary2->aliasing;
 }
 
@@ -219,8 +248,10 @@ main(int argc, char *argv[])
 
 	if (argc == 3) {
 		CrashSummary *summary1, *summary2;
-		summary1 = readBugReport(argv[1], NULL);
-		summary2 = readBugReport(argv[2], NULL);
+		SMScopes scope1;
+		summary1 = readBugReport(&scope1, argv[1], NULL);
+		SMScopes scope2;
+		summary2 = readBugReport(&scope2, argv[2], NULL);
 
 		if (crashSummariesTheSame(summary1, summary2)){
 			printf("The same\n");
@@ -245,7 +276,8 @@ main(int argc, char *argv[])
 		}
 		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
 			continue;
-		CrashSummary *summary = readBugReport(de->d_name, NULL);
+		SMScopes scope1;
+		CrashSummary *summary = readBugReport(&scope1, de->d_name, NULL);
 		bool found_dupe = false;
 		for (auto it = summaries.begin(); !found_dupe && it != summaries.end(); it++) {
 			if (crashSummariesTheSame(summary, it->second)) {
