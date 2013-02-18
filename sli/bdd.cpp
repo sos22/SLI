@@ -607,21 +607,39 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			}
 		}
 
-		if (_ieb->op == Iop_CmpEQ32 &&
+		if (_ieb->op >= Iop_CmpEQ8 &&
+		    _ieb->op <= Iop_CmpEQ64 &&
 		    arg1->tag == Iex_Const &&
 		    arg2->tag == Iex_Associative &&
-		    ((IRExprAssociative *)arg2)->op == Iop_Add32 &&
+		    ((IRExprAssociative *)arg2)->op >= Iop_Add8 &&
+		    ((IRExprAssociative *)arg2)->op <= Iop_Add64 &&
 		    ((IRExprAssociative *)arg2)->nr_arguments >= 2 &&
 		    ((IRExprAssociative *)arg2)->contents[0]->tag == Iex_Const) {
 			IRExprConst *arg1c = (IRExprConst *)arg1;
 			IRExprAssociative *arg2a = (IRExprAssociative *)arg2;
 			IRExprConst *arg2c = (IRExprConst *)arg2a->contents[0];
-			IRExprConst *newArg1 = IRExpr_Const_U32(arg1c->Ico.content.U32 - arg2c->Ico.content.U32);
+			IRExprConst *newArg1;
+			switch (_ieb->op) {
+			case Iop_CmpEQ8:
+				newArg1 = IRExpr_Const_U8(arg1c->Ico.content.U8 - arg2c->Ico.content.U8);
+				break;
+			case Iop_CmpEQ16:
+				newArg1 = IRExpr_Const_U16(arg1c->Ico.content.U16 - arg2c->Ico.content.U16);
+				break;
+			case Iop_CmpEQ32:
+				newArg1 = IRExpr_Const_U32(arg1c->Ico.content.U32 - arg2c->Ico.content.U32);
+				break;
+			case Iop_CmpEQ64:
+				newArg1 = IRExpr_Const_U64(arg1c->Ico.content.U64 - arg2c->Ico.content.U64);
+				break;
+			default:
+				abort();
+			}
 			IRExpr *newArg2;
 			if (arg2a->nr_arguments == 2) {
 				newArg2 = arg2a->contents[1];
 			} else {
-				newArg2 = IRExpr_Associative_Copy(Iop_Add32, arg2a->nr_arguments - 1, arg2a->contents + 1);
+				newArg2 = IRExpr_Associative_Copy(arg2a->op, arg2a->nr_arguments - 1, arg2a->contents + 1);
 			}
 			return IRExpr_Binop(_ieb->op, newArg1, newArg2);
 		}
