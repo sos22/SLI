@@ -2021,8 +2021,8 @@ eval_bytecode(const unsigned short *const bytecode,
 			unsigned targTrue;
 			unsigned targFalse;
 			unsigned cond = bytecode_pop(&stack, bct_bit);
-			targTrue = bytecode_fetch_const(bytecode, &offset, bct_short);
-			targFalse = bytecode_fetch_const(bytecode, &offset, bct_short);
+			targTrue = bytecode_fetch_const(bytecode, &offset, bct_int);
+			targFalse = bytecode_fetch_const(bytecode, &offset, bct_int);
 			if (cond) {
 				offset = targTrue;
 			} else {

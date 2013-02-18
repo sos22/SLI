@@ -455,9 +455,11 @@ emit_validation(FILE *f,
 	relocs.push_back(std::pair<bbdd *, unsigned>(condition->internal().trueBranch,
 						     bytecode.size()));
 	bytecode.push_back((const char *)0xf001);
+	bytecode.push_back((const char *)0xf002);
 	relocs.push_back(std::pair<bbdd *, unsigned>(condition->internal().falseBranch,
 						     bytecode.size()));
-	bytecode.push_back((const char *)0xf002);
+	bytecode.push_back((const char *)0xf003);
+	bytecode.push_back((const char *)0xf004);
 
 	while (!relocs.empty()) {
 		auto targ = relocs.back().first;
@@ -488,7 +490,8 @@ emit_validation(FILE *f,
 				bytecode.push_back((const char *)0xf004);
 			}
 		}
-		bytecode[offset] = my_asprintf("%d", it->second);
+		bytecode[offset] = my_asprintf("%d", it->second & 0xffff);
+		bytecode[offset+1] = my_asprintf("%d", (it->second >> 16) & 0xffff);
 	}
 emit:
 	fprintf(f, "static const unsigned short %s_%d_%s[] = {\n", tag, ident, name);
