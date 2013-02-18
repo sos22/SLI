@@ -1233,7 +1233,6 @@ struct IRRegArray : public GarbageCollected<IRRegArray, &ir_heap> {
    void visit(HeapVisitor &) {}
    unsigned long hashval() const { return base + elemTy * 7 + nElems * 13; }
    void sanity_check() const {
-      assert(base < nElems);
       assert(nElems >= 0);
       sanity_check_irtype(elemTy);
    }
