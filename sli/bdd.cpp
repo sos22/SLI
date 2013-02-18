@@ -822,21 +822,50 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 						outIdx++;
 					}
 				}
-			} else if (op >= Iop_Add8 &&
-				   op <= Iop_Add64 &&
-				   i + 1 < nr_arguments &&
-				   simpleArgs[i+1]->tag == Iex_Unop &&
-				   ((IRExprUnop *)simpleArgs[i+1])->op >= Iop_Neg8 &&
-				   ((IRExprUnop *)simpleArgs[i+1])->op <= Iop_Neg64 &&
-				   ((IRExprUnop *)simpleArgs[i+1])->arg == simpleArgs[i]) {
-				/* x - x == 0 */
-				outIdx--;
 			} else {
 				newArgs[outIdx] = simpleArgs[i];
 				outIdx++;
 			}
 		}
-		assert(outIdx <= new_nr_args);
+		assert(outIdx == new_nr_args);
+		if (op >= Iop_Add8 &&
+		    op <= Iop_Add64) {
+			/* Find anything which goes x - x and remove it. */
+			for (int i = 0; i < outIdx; i++) {
+				if (newArgs[i]->tag != Iex_Unop) {
+					continue;
+				}
+				IRExprUnop *ieu = (IRExprUnop *)newArgs[i];
+				if (ieu->op < Iop_Neg8 || ieu->op > Iop_Neg64) {
+					continue;
+				}
+				IRExpr *k = ieu->arg;
+				for (int j = 0; j < outIdx; j++) {
+					if (newArgs[j] == k) {
+						assert(j != i);
+						/* Need to remove both i and j from the list */
+						if (i < j) {
+							memmove(newArgs + i,
+								newArgs + i + 1,
+								sizeof(IRExpr *) * (j - i) - 1);
+							memmove(newArgs + j - 1,
+								newArgs + j + 1,
+								sizeof(IRExpr *) * (outIdx - j - 1));
+						} else {
+							memmove(newArgs + j,
+								newArgs + j + 1,
+								sizeof(IRExpr *) * (i - j) - 1);
+							memmove(newArgs + i - 1,
+								newArgs + i + 1,
+								sizeof(IRExpr *) * (outIdx - i - 1));
+							i--;
+						}
+						outIdx -= 2;
+						break;
+					}
+				}
+			}
+		}
 		if (outIdx == 0) {
 			goto result_is_zero;
 		}
