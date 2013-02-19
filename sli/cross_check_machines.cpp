@@ -134,6 +134,9 @@ public:
 		lmr_unknown_state
 	};
 	loadMemoryRes loadMemory(unsigned long addr, unsigned long *value) const {
+		if (addr < 4096) {
+			return lmr_bad_ptr;
+		}
 		for (auto it = badPtrs.begin(); it != badPtrs.end(); it++) {
 			if (addr + BAD_PTR_FUZZ >= *it &&
 			    *it + BAD_PTR_FUZZ >= addr)
