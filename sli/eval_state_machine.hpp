@@ -80,11 +80,14 @@ bbdd *writeMachineSuitabilityConstraint(SMScopes *scopes,
 					const VexPtr<bbdd, &ir_heap> &assumption,
 					const AllowableOptimisations &opt,
 					GarbageCollectionToken token);
-void collectConstraints(const VexPtr<MaiMap, &ir_heap> &mai,
-			const VexPtr<StateMachine, &ir_heap> &sm,
-			VexPtr<OracleInterface> &oracle,
-			const IRExprOptimisations &opt,
-			std::vector<IRExpr *> &out,
-			GarbageCollectionToken token);
+void
+collectConstraints(SMScopes *scopes,
+		   const VexPtr<MaiMap, &ir_heap> &mai,
+		   const VexPtr<StateMachine, &ir_heap> &sm,
+		   VexPtr<OracleInterface> &oracle,
+		   const IRExprOptimisations &opt,
+		   std::vector<IRExpr *> &out,
+		   GarbageCollectionToken token);
+
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */

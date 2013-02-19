@@ -1,5 +1,5 @@
 subdirs="enforce_crash"
-targets="minimal_direct dump_types_db check_types_index build_schedule"
+targets="minimal_direct dump_types_db check_types_index build_schedule cross_check_machines"
 targets="${targets} canonicalise_types_table canonicalise_crash_summary2"
 targets="${targets} remove_non_badptrs canonicalise_crash_summary3 canonicalise_crash_summary0 canonicalise_crash_summary4"
 targets="${targets} case_split_summaries memloc_split_summaries dump_alias_db check_cfg_generation"
@@ -7,9 +7,6 @@ targets="${targets} direct_cd merge_type_tables summary_to_fix static timing com
 
 # Disabled targets:
 
-# Relies on comparing machines generated in different scopes, which
-# isn't allowed.
-#targets="${targets} cross_check_machines"
 # Don't know how to convert the load canonicalisation step to exprbdds.
 #targets="${targets} canonicalise_crash_summary"
 
@@ -27,6 +24,7 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{cfgnode,getProbeCFGs,probeCFGtoMachine,useInitialMemoryLoads}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{sat_checker,smb_builder,predecessor_map}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{raw_types,crashcfg,bdd,stacked_cdf,subst_eq}.cpp
+	echo SLIR_SOURCES+= ${input_base}/rewriteCrossScope.cpp
 	echo SLIR_TARGETS=${targets}
 	cat <<EOF
 ifeq (\$(SELECTIVE_PROFILING),y)

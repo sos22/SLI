@@ -75,6 +75,7 @@ CrashSummary *transformCrashSummary(CrashSummary *input,
 				    StateMachineTransformer &trans,
 				    bool *done_something = NULL);
 CrashSummary *internCrashSummary(CrashSummary *cs);
+CrashSummary *rewriteSummaryCrossScope(const CrashSummary *oldSummary, SMScopes *newScopes);
 
 class FixConsumer {
 public:

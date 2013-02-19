@@ -254,6 +254,7 @@ class EvalCtxt : public GcCallback<&ir_heap> {
 		for (auto it = logmsgs.begin(); it != logmsgs.end(); it++)
 			hv(it->first);
 	}
+	unsigned long eval(IRExpr *e);
 public:
 	EvalState currentState;
 	std::vector<threadAndRegister> regOrder;
@@ -273,7 +274,11 @@ public:
 		for (auto it = logmsgs.begin(); it != logmsgs.end(); it++)
 			free(it->second);
 	}
-	unsigned long eval(IRExpr *e);
+
+	unsigned long eval(exprbdd *);
+	bool eval(bbdd *);
+	StateMachineRes eval(smrbdd *);
+
 	bool eval(const StateMachineState *, StateMachineSideEffect *effect);
 	evalRes eval(VexPtr<StateMachineState, &ir_heap> state,
 		     const AllowableOptimisations &opt,
@@ -320,6 +325,46 @@ EvalCtxt::eval(IRExpr *e)
 	if (!res.unpack(&l))
 		abort();
 	return l;
+}
+
+unsigned long
+EvalCtxt::eval(exprbdd *e)
+{
+	if (e->isLeaf()) {
+		return eval(e->leaf());
+	} else {
+		if (eval(e->internal().condition)) {
+			return eval(e->internal().trueBranch);
+		} else {
+			return eval(e->internal().falseBranch);
+		}
+	}
+}
+bool
+EvalCtxt::eval(bbdd *e)
+{
+	if (e->isLeaf()) {
+		return e->leaf();
+	} else {
+		if (eval(e->internal().condition)) {
+			return eval(e->internal().trueBranch);
+		} else {
+			return eval(e->internal().falseBranch);
+		}
+	}
+}
+StateMachineRes
+EvalCtxt::eval(smrbdd *e)
+{
+	if (e->isLeaf()) {
+		return e->leaf();
+	} else {
+		if (eval(e->internal().condition)) {
+			return eval(e->internal().trueBranch);
+		} else {
+			return eval(e->internal().falseBranch);
+		}
+	}
 }
 
 void
@@ -457,11 +502,11 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		}
 		abort();
 	}
+	case StateMachineSideEffect::ImportRegister:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
-	case StateMachineSideEffect::PointerAliasing:
 	case StateMachineSideEffect::StackLayout:
 		log(state, "ignored side effect");
 		return true;
@@ -502,7 +547,7 @@ top:
 		goto top;
 	}
 	case StateMachineState::Terminal:
-		switch ( ((StateMachineTerminal *)state.get())->res ) {
+		switch ( eval(((StateMachineTerminal *)state.get())->res) ) {
 		case smr_unreached:
 			log(state, "unreached");
 			return evalRes::unreached();
@@ -552,16 +597,13 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			abort();
 		}
 		IRExpr *transformIex(IRExprLoad *e) {
-			bool b;
-			IRExpr *addr = transformIRExpr(e->addr, &b);
-			if (!addr)
-				addr = e->addr;
+			IRExpr *addr = transformIRExpr(e->addr);
 			addr = simplifyIRExpr(addr, AllowableOptimisations::defaultOptimisations);
 			if (addr->tag != Iex_Const)
 				return IRExpr_Load(e->ty, addr);
 			assert(addr->tag == Iex_Const);
 			assert(addr->type() == Ity_I64);
-			unsigned long address = ((IRExprConst *)addr)->Ico.U64;
+			unsigned long address = ((IRExprConst *)addr)->Ico.content.U64;
 			unsigned long val;
 			switch (ctxt->loadMemory(address, &val)) {
 			case EvalState::lmr_bad_ptr:
@@ -626,10 +668,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			return e;
 		}
 		IRExpr *transformIex(IRExprUnop *e) {
-			bool b;
-			IRExpr *arg = transformIRExpr(e->arg, &b);
-			if (!arg)
-				arg = e->arg;
+			IRExpr *arg = transformIRExpr(e->arg);
 			if (aborted)
 				return e;
 			if (e->op != Iop_BadPtr)
@@ -639,7 +678,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 				return IRExpr_Unop(e->op, arg);
 			assert(arg->tag == Iex_Const);
 			assert(arg->type() == Ity_I64);
-			unsigned long address = ((IRExprConst *)arg)->Ico.U64;
+			unsigned long address = ((IRExprConst *)arg)->Ico.content.U64;
 			evalExprRes err(ctxt->badPtr(address));
 			unsigned long res;
 			if (err.unpack(&res))
@@ -670,7 +709,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 	IRExpr *a = trans.doit(what);
 	a = simplifyIRExpr(a, AllowableOptimisations::defaultOptimisations);
 	if (a->tag == Iex_Const)
-		return evalExprRes::success(((IRExprConst *)a)->Ico.U64);
+		return evalExprRes::success(((IRExprConst *)a)->Ico.content.U64);
 	else
 		return evalExprRes::failed();
 }
@@ -1042,9 +1081,9 @@ static bool
 makeEq(EvalState &res, IRExpr *arg1, IRExpr *arg2, bool wantTrue, bool *usedRandom)
 {
 	if (arg1->tag == Iex_Const)
-		return makeEqConst(res, ((IRExprConst *)arg1)->Ico.U64, arg2, wantTrue, usedRandom);
+		return makeEqConst(res, ((IRExprConst *)arg1)->Ico.content.U64, arg2, wantTrue, usedRandom);
 	else if (arg2->tag == Iex_Const)
-		return makeEqConst(res, ((IRExprConst *)arg2)->Ico.U64, arg1, wantTrue, usedRandom);
+		return makeEqConst(res, ((IRExprConst *)arg2)->Ico.content.U64, arg1, wantTrue, usedRandom);
 	else
 		return makeEqConst(res, 0, arg1, true, usedRandom) &&
 			makeEqConst(res, 0, arg2, wantTrue, usedRandom);
@@ -1266,9 +1305,13 @@ main(int argc, char *argv[])
 	oracle->loadCallGraph(oracle, argv[3], argv[4], ALLOW_GC);
 
 	VexPtr<OracleInterface> oracleI(oracle);
-	VexPtr<StateMachine, &ir_heap> machine1(readStateMachine(argv[5]));
+	SMScopes scopes;
+	VexPtr<StateMachine, &ir_heap> machine1(readStateMachine(&scopes, argv[5]));
 	VexPtr<MaiMap, &ir_heap> mai1(MaiMap::fromFile(machine1, argv[6]));
-	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(argv[7]));
+	SMScopes scopes2;
+	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(&scopes2, argv[7]));
+	machine2 = rewriteMachineCrossScope(machine2, &scopes);
+
 	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, argv[8]));
 	std::set<DynAnalysisRip> nonLocalLoads;
 	std::set<DynAnalysisRip> interestingStores;
@@ -1284,10 +1327,10 @@ main(int argc, char *argv[])
 		AllowableOptimisations::defaultOptimisations.
 		setAddressSpace(oracle->ms->addressSpace).
 		enableassumePrivateStack());
-	collectConstraints(mai1, machine1, oracleI, opt2, constraints, ALLOW_GC);
+	collectConstraints(&scopes, mai1, machine1, oracleI, opt2, constraints, ALLOW_GC);
 
 	for (auto it = constraints.begin(); it != constraints.end(); ) {
-		*it = sat_simplify(*it, AllowableOptimisations::defaultOptimisations);
+		*it = simplifyIRExpr(*it, AllowableOptimisations::defaultOptimisations);
 		if ((*it)->tag == Iex_Const) {
 			/* These are generally pretty useless, so remove them now. */
 			it = constraints.erase(it);
@@ -1344,7 +1387,7 @@ main(int argc, char *argv[])
 	/* Should also try to make all of the conditions be
 	 * non-satisfied at least once. */
 	for (auto it = constraints.begin(); it != constraints.end(); it++) {
-		IRExpr *a = sat_simplify(IRExpr_Unop(Iop_Not1, *it), AllowableOptimisations::defaultOptimisations);
+		IRExpr *a = simplifyIRExpr(IRExpr_Unop(Iop_Not1, *it), AllowableOptimisations::defaultOptimisations);
 
 		bool found_one = false;
 		for (auto it2 = initialCtxts.begin();

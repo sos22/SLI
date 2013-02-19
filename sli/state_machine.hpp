@@ -1473,6 +1473,8 @@ static inline bool parseStateMachine(SMScopes *scopes,
 StateMachine *readStateMachine(SMScopes *scopes, int fd);
 StateMachine *readStateMachine(SMScopes *scopes, const char *fname);
 
+StateMachine *rewriteMachineCrossScope(const StateMachine *oldMachine, SMScopes *newScopes);
+
 StateMachine *duplicateStateMachine(const StateMachine *inp);
 
 template <typename t> t
