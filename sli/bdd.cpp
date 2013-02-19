@@ -351,14 +351,13 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 	case Iex_Unop: {
 		IRExprUnop *au = (IRExprUnop *)a;
 		auto arg = quickSimplify(au->arg, memo);
-		if (arg->tag != Iex_Const) {
+		if (arg->tag == Iex_Associative) {
+			IRExprAssociative *argA = (IRExprAssociative *)arg;
 			if (au->op >= Iop_Neg8 &&
 			    au->op <= Iop_Neg64 &&
-			    arg->tag == Iex_Associative &&
-			    ((IRExprAssociative *)arg)->op >= Iop_Add8 &&
-			    ((IRExprAssociative *)arg)->op <= Iop_Add64) {
+			    argA->op >= Iop_Add8 &&
+			    argA->op <= Iop_Add64) {
 				/* Turn -(x + y) into -x + -y */
-				IRExprAssociative *argA = (IRExprAssociative *)arg;
 				IRExpr *args[argA->nr_arguments];
 				for (int i = 0; i < argA->nr_arguments; i++) {
 					args[i] = quickSimplify(IRExpr_Unop(au->op, argA->contents[i]), memo);
@@ -370,90 +369,123 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 						args),
 					memo);
 			}
-			if (arg == au->arg)
-				return au;
-			else
-				return IRExprUnop::mk(au->op, arg);
+			if (au->op == Iop_BadPtr &&
+			    argA->op == Iop_Add64 &&
+			    argA->contents[0]->tag == Iex_Const) {
+				IRExprConst *cnst = (IRExprConst *)argA->contents[0];
+				unsigned long c = cnst->Ico.content.U64;
+				unsigned long newC = c & ~((1ul << 22) - 1);
+				if (c != newC) {
+					if (newC == 0) {
+						if (argA->nr_arguments == 2) {
+							arg = argA->contents[1];
+						} else {
+							arg = quickSimplify(
+								IRExpr_Associative_Copy(
+									Iop_Add64,
+									argA->nr_arguments - 1,
+									argA->contents + 1),
+								memo);
+						}
+					} else {
+						IRExpr *newCnst = IRExpr_Const_U64(newC);
+						IRExpr *newArgs[argA->nr_arguments];
+						memcpy(newArgs, argA->contents, sizeof(newArgs[0]) * argA->nr_arguments);
+						newArgs[0] = newCnst;
+						arg = quickSimplify(
+							IRExpr_Associative_Copy(
+								Iop_Add64,
+								argA->nr_arguments,
+								newArgs),
+							memo);
+					}
+				}
+			}
 		}
-		IRExprConst *argc = (IRExprConst *)arg;
-		switch (au->op) {
+		if (arg->tag == Iex_Const) {
+			IRExprConst *argc = (IRExprConst *)arg;
+			switch (au->op) {
 #define do_uconv(_from, _to)						\
-			case Iop_ ## _from ## Uto ## _to:		\
-				return IRExpr_Const_U ## _to (argc->Ico.content.U ## _from)
-			do_uconv(1, 8);
-			//do_uconv(1, 16); /*1Uto16 doesn't exist, for some reason */
-			do_uconv(1, 32);
-			do_uconv(1, 64);
-			do_uconv(8, 16);
-			do_uconv(8, 32);
-			do_uconv(8, 64);
-			do_uconv(16, 32);
-			do_uconv(16, 64);
-			do_uconv(32, 64);
+				case Iop_ ## _from ## Uto ## _to:	\
+					return IRExpr_Const_U ## _to (argc->Ico.content.U ## _from)
+				do_uconv(1, 8);
+				//do_uconv(1, 16); /*1Uto16 doesn't exist, for some reason */
+				do_uconv(1, 32);
+				do_uconv(1, 64);
+				do_uconv(8, 16);
+				do_uconv(8, 32);
+				do_uconv(8, 64);
+				do_uconv(16, 32);
+				do_uconv(16, 64);
+				do_uconv(32, 64);
 #undef do_uconv
 #define do_sconv(_from, _fromt, _to, _tot)				\
-			case Iop_ ## _from ## Sto ## _to:		\
-				return IRExpr_Const_U ## _to (		\
-					(_tot)(_fromt)argc->Ico.content.U ## _from )
-			do_sconv(8, char, 16, short);
-			do_sconv(8, char, 32, int);
-			do_sconv(8, char, 64, long);
-			do_sconv(16, short, 32, int);
-			do_sconv(16, short, 64, long);
-			do_sconv(32, int, 64, long);
+				case Iop_ ## _from ## Sto ## _to:	\
+					return IRExpr_Const_U ## _to (	\
+						(_tot)(_fromt)argc->Ico.content.U ## _from )
+				do_sconv(8, char, 16, short);
+				do_sconv(8, char, 32, int);
+				do_sconv(8, char, 64, long);
+				do_sconv(16, short, 32, int);
+				do_sconv(16, short, 64, long);
+				do_sconv(32, int, 64, long);
 #undef do_sconv
 #define do_downconv(_from, _to)						\
-			case Iop_ ## _from ## to ## _to:		\
-				return IRExpr_Const_U ## _to (argc->Ico.content.U ## _from)
-			do_downconv(64, 1);
-			do_downconv(64, 8);
-			do_downconv(64, 16);
-			do_downconv(64, 32);
-			do_downconv(32, 1);
-			do_downconv(32, 8);
-			do_downconv(32, 16);
-			do_downconv(16, 1);
-			do_downconv(16, 8);
-			do_downconv(8, 1);
+				case Iop_ ## _from ## to ## _to:	\
+					return IRExpr_Const_U ## _to (argc->Ico.content.U ## _from)
+				do_downconv(64, 1);
+				do_downconv(64, 8);
+				do_downconv(64, 16);
+				do_downconv(64, 32);
+				do_downconv(32, 1);
+				do_downconv(32, 8);
+				do_downconv(32, 16);
+				do_downconv(16, 1);
+				do_downconv(16, 8);
+				do_downconv(8, 1);
 #undef do_downconv
-		case Iop_128to64:
-			return IRExpr_Const_U64(argc->Ico.content.U128.lo);
-		case Iop_128HIto64:
-			return IRExpr_Const_U64(argc->Ico.content.U128.hi);
-		case Iop_64UtoV128:
-			return IRExpr_Const_U128(0, argc->Ico.content.U64);
-		case Iop_BadPtr:
-			/* Can't constant fold these without an
-			 * IRExprOptimisations struct. */
-			if (argc->Ico.content.U64 < 4096)
-				return IRExpr_Const_U1(true);
-			if (arg == au->arg)
-				return au;
-			else
-				return IRExprUnop::mk(au->op, arg);
-			break;
-		case Iop_Neg8:
-			return IRExpr_Const_U8(-argc->Ico.content.U8);
-		case Iop_Neg16:
-			return IRExpr_Const_U16(-argc->Ico.content.U16);
-		case Iop_Neg32:
-			return IRExpr_Const_U32(-argc->Ico.content.U32);
-		case Iop_Neg64:
-			return IRExpr_Const_U64(-argc->Ico.content.U64);
-		case Iop_Not1:
-			return IRExpr_Const_U1(!argc->Ico.content.U1);
-		case Iop_Not8:
-			return IRExpr_Const_U8(~argc->Ico.content.U8);
-		case Iop_Not16:
-			return IRExpr_Const_U16(~argc->Ico.content.U16);
-		case Iop_Not32:
-			return IRExpr_Const_U32(~argc->Ico.content.U32);
-		case Iop_Not64:
-			return IRExpr_Const_U64(~argc->Ico.content.U64);
-		default:
-			abort();
+			case Iop_128to64:
+				return IRExpr_Const_U64(argc->Ico.content.U128.lo);
+			case Iop_128HIto64:
+				return IRExpr_Const_U64(argc->Ico.content.U128.hi);
+			case Iop_64UtoV128:
+				return IRExpr_Const_U128(0, argc->Ico.content.U64);
+			case Iop_BadPtr:
+				/* Can't constant fold these without an
+				 * IRExprOptimisations struct. */
+				if (argc->Ico.content.U64 < 4096)
+					return IRExpr_Const_U1(true);
+				if (arg == au->arg)
+					return au;
+				else
+					return IRExprUnop::mk(au->op, arg);
+				break;
+			case Iop_Neg8:
+				return IRExpr_Const_U8(-argc->Ico.content.U8);
+			case Iop_Neg16:
+				return IRExpr_Const_U16(-argc->Ico.content.U16);
+			case Iop_Neg32:
+				return IRExpr_Const_U32(-argc->Ico.content.U32);
+			case Iop_Neg64:
+				return IRExpr_Const_U64(-argc->Ico.content.U64);
+			case Iop_Not1:
+				return IRExpr_Const_U1(!argc->Ico.content.U1);
+			case Iop_Not8:
+				return IRExpr_Const_U8(~argc->Ico.content.U8);
+			case Iop_Not16:
+				return IRExpr_Const_U16(~argc->Ico.content.U16);
+			case Iop_Not32:
+				return IRExpr_Const_U32(~argc->Ico.content.U32);
+			case Iop_Not64:
+				return IRExpr_Const_U64(~argc->Ico.content.U64);
+			default:
+				abort();
+			}
 		}
-		break;
+		if (arg == au->arg)
+			return au;
+		else
+			return IRExprUnop::mk(au->op, arg);
 	}
 	case Iex_Binop: {
 		IRExprBinop *_ieb = (IRExprBinop *)a;
