@@ -1258,10 +1258,10 @@ suppressUninit(smrbdd::scope *scope, smrbdd *input)
 	return suppressUninit(scope, input, memo);
 }
 
+#ifndef NDEBUG
 static void
 assertClosed(smrbdd *what)
 {
-#ifndef NDEBUG
 	std::set<smrbdd *> visited;
 	std::vector<smrbdd *> pending;
 	pending.push_back(what);
@@ -1277,8 +1277,13 @@ assertClosed(smrbdd *what)
 			assert(!usesUninit(what->internal().condition));
 		}
 	}
-#endif
 }
+#else
+static void
+assertClosed(smrbdd *)
+{
+}
+#endif
 
 /* You might that we could stash things like @oracle, @opt, and @sm in
    the EvalContext itself and not have to pass them around all the
@@ -1405,7 +1410,7 @@ static smrbdd *
 enumEvalPaths(SMScopes *scopes,
 	      const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<StateMachine, &ir_heap> &sm,
-	      const VexPtr<bbdd, &ir_heap> &assumption,
+	      VexPtr<bbdd, &ir_heap> assumption,
 	      const VexPtr<OracleInterface> &oracle,
 	      const IRExprOptimisations &opt,
 	      StateMachineRes unreachedIs,
@@ -1429,9 +1434,10 @@ enumEvalPaths(SMScopes *scopes,
 
 	result = scopes->smrs.cnst(unreachedIs);
 
-	bbdd *t = scopes->bools.cnst(true);
-	pendingStates.push_back(EvalContext(sm, t));
-	VexPtr<bbdd, &ir_heap> ass(assumption ? assumption : t);
+	pendingStates.push_back(EvalContext(sm, scopes->bools.cnst(true)));
+	if (!assumption) {
+		assumption = scopes->bools.cnst(true);
+	}
 	while (!pendingStates.empty()) {
 		if (TIMEOUT) {
 			return NULL;
@@ -1447,7 +1453,7 @@ enumEvalPaths(SMScopes *scopes,
 			ctxt.printHistory(stdout, labels);
 		}
 
-		ctxt.advance(scopes, ass, *decode, oracle, opt, pendingStates, havePhis, result);
+		ctxt.advance(scopes, assumption, *decode, oracle, opt, pendingStates, havePhis, result);
 	}
 
 	if (debug_survival_constraint) {
@@ -2368,6 +2374,17 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 	return res;
 }
 
+template <typename bddT> static void
+enumVariables(bddT *src, std::set<IRExpr *> &out, std::set<bddT *> &memo)
+{
+	if (src->isLeaf() || !memo.insert(src).second) {
+		return;
+	}
+	out.insert(src->internal().condition);
+	enumVariables(src->internal().trueBranch, out, memo);
+	enumVariables(src->internal().falseBranch, out, memo);
+}
+
 /* Just collect all of the constraints which the symbolic execution
  * engine spits out.  The idea is that if you generate a set of input
  * states X such that, for every condition Y which this emits some
@@ -2380,9 +2397,26 @@ collectConstraints(SMScopes *scopes,
 		   const VexPtr<StateMachine, &ir_heap> &sm,
 		   VexPtr<OracleInterface> &oracle,
 		   const IRExprOptimisations &opt,
-		   std::vector<IRExpr *> &out,
+		   GcSet<IRExpr, &ir_heap> &out,
 		   GarbageCollectionToken token)
 {
-	enumEvalPaths(scopes, mai, sm, scopes->bools.cnst(true), oracle, opt, smr_unreached, token);
-	scopes->ordering.enumVariables(out);
+	bool havePhis = hasPhis(sm);
+	std::vector<EvalContext> pendingStates;
+
+	VexPtr<smrbdd, &ir_heap> result(scopes->smrs.cnst(smr_unreached));
+	WeakSet<bbdd, &ir_heap> memo;
+
+	pendingStates.push_back(EvalContext(sm, scopes->bools.cnst(true)));
+	while (!pendingStates.empty()) {
+		LibVEX_maybe_gc(token);
+
+		pendingStates.reserve(pendingStates.size() + 1);
+
+		EvalContext &ctxt(pendingStates.back());
+		enumVariables(ctxt.justPathConstraint, out, memo);
+		ctxt.advance(scopes, scopes->bools.cnst(true), *mai, oracle, opt, pendingStates, havePhis, result);
+	}
+
+	std::set<smrbdd *> memo2;
+	enumVariables(result.get(), out, memo2);
 }

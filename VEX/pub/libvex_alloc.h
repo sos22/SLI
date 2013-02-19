@@ -326,4 +326,54 @@ static inline char *my_asprintf(const char *fmt, ...)
 	return r;
 }
 
+template <typename t, Heap *heap>
+class WeakSet :
+	public std::set<t *>, GcCallback<heap>
+{
+	void runGc(HeapVisitor &hv) {
+		std::set<t *> n;
+		for (auto it = this->begin(); it != this->end(); it++) {
+			t *res = hv.visited(*it);
+			if (res) {
+				n.insert(res);
+			}
+		}
+		this->clear();
+		this->insert(n.begin(), n.end());
+	}
+public:
+	WeakSet()
+		: GcCallback<heap>(true)
+	{}
+	void operator = (const std::set<t *> &o) {
+		this->clear();
+		this->insert(o.begin(), o.end());
+	}
+};
+
+template <typename t, Heap *heap>
+class GcSet :
+	public std::set<t *>, GcCallback<heap>
+{
+	void runGc(HeapVisitor &hv) {
+		std::set<t *> n;
+		for (auto it = this->begin(); it != this->end(); it++) {
+			t *res = *it;
+			hv(res);
+			n.insert(res);
+		}
+		this->clear();
+		this->insert(n.begin(), n.end());
+	}
+public:
+	GcSet()
+		: GcCallback<heap>(false)
+	{}
+	void operator = (const std::set<t *> &o) {
+		this->clear();
+		this->insert(o.begin(), o.end());
+	}
+};
+
+
 #endif /* !__LIBVEX_ALLOC_H */

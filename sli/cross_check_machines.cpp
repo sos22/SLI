@@ -285,6 +285,8 @@ public:
 		     GarbageCollectionToken token);
 	void log(const StateMachineState *, const char *fmt, ...) __attribute__((__format__( __printf__, 3, 4)));
 	void printLog(FILE *f, const std::map<const StateMachineState *, int> &labels) const;
+
+	void prettyPrint(FILE *f) const;
 };
 
 static unsigned long
@@ -306,8 +308,9 @@ static IRExpr *mk_const(unsigned long val, IRType ty)
 		return IRExpr_Const_U32(val);
 	case Ity_I64:
 		return IRExpr_Const_U64(val);
-	case Ity_INVALID:
 	case Ity_I1:
+		return IRExpr_Const_U1(val);
+	case Ity_INVALID:
 	case Ity_I128:
 		break;
 	}
@@ -315,6 +318,32 @@ static IRExpr *mk_const(unsigned long val, IRType ty)
 }
 
 static evalExprRes evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom);
+
+template <typename ty> static void
+printNamedContainer(FILE *f, const ty &tr)
+{
+	fprintf(f, "{");
+	for (auto it = tr.begin(); it != tr.end(); it++) {
+		if (it == tr.begin()) {
+			fprintf(f, ", ");
+		}
+		fprintf(f, "%s", it->name());
+	}
+	fprintf(f, "}");
+}
+
+void
+EvalCtxt::prettyPrint(FILE *f) const
+{
+	currentState.prettyPrint(f);
+	fprintf(f, "regOrder: ");
+	printNamedContainer(f, regOrder);
+	fprintf(f, "\n");
+	fprintf(f, "log:\n");
+	for (auto it = logmsgs.begin(); it != logmsgs.end(); it++) {
+		fprintf(f, "\t%s\n", it->second);
+	}
+}
 
 unsigned long
 EvalCtxt::eval(IRExpr *e)
@@ -568,14 +597,6 @@ top:
 	}
 	abort();
 }
-
-template <typename t, Heap *h>
-class gc_vector : public std::vector<t *>, public GcCallback<h> {
-	void runGc(HeapVisitor &hv) {
-		for (auto it = this->begin(); it != this->end(); it++)
-			hv(*it);
-	}
-};
 
 static evalExprRes
 evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
@@ -1322,21 +1343,22 @@ main(int argc, char *argv[])
 			oracle->ms->addressSpace,
 			argv[9]));
 
-	gc_vector<IRExpr, &ir_heap> constraints;
+	GcSet<IRExpr, &ir_heap> constraints;
 	AllowableOptimisations opt2(
 		AllowableOptimisations::defaultOptimisations.
 		setAddressSpace(oracle->ms->addressSpace).
 		enableassumePrivateStack());
 	collectConstraints(&scopes, mai1, machine1, oracleI, opt2, constraints, ALLOW_GC);
 
-	for (auto it = constraints.begin(); it != constraints.end(); ) {
-		*it = simplifyIRExpr(*it, AllowableOptimisations::defaultOptimisations);
-		if ((*it)->tag == Iex_Const) {
-			/* These are generally pretty useless, so remove them now. */
-			it = constraints.erase(it);
-		} else {
-			it++;
+	{
+		std::set<IRExpr *> constraints2;
+		for (auto it = constraints.begin(); it != constraints.end(); it++) {
+			IRExpr *e = simplifyIRExpr(*it, AllowableOptimisations::defaultOptimisations);
+			if (e->tag != Iex_Const) {
+				constraints2.insert(e);
+			}
 		}
+		constraints = constraints2;
 	}
 
 	printf("Constraints:\n");

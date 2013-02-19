@@ -86,7 +86,7 @@ collectConstraints(SMScopes *scopes,
 		   const VexPtr<StateMachine, &ir_heap> &sm,
 		   VexPtr<OracleInterface> &oracle,
 		   const IRExprOptimisations &opt,
-		   std::vector<IRExpr *> &out,
+		   GcSet<IRExpr, &ir_heap> &out,
 		   GarbageCollectionToken token);
 
 
