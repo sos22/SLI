@@ -186,7 +186,7 @@ public:
 			fprintf(f, "false\n");
 		fclose(f);
 		f = fopenf("w", "%s/pre_scopes", prefix);
-		scopes->prettyPrint(f);
+		scopes->prettyPrint(f, NULL);
 		fclose(f);
 		fprintf(_logfile, "Optimisation log: %s\n", prefix);
 	}
@@ -201,7 +201,7 @@ public:
 		printStateMachine(sm, f);
 		fclose(f);
 		f = fopenf("w", "%s/post_scopes", prefix);
-		scopes->prettyPrint(f);
+		scopes->prettyPrint(f, NULL);
 		fclose(f);
 	}
 #else
