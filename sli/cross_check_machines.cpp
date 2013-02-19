@@ -13,6 +13,12 @@
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
 #include "../VEX/priv/guest_amd64_defs.h"
 
+#ifndef NDEBUG
+static bool debug_gen_contexts = false;
+#else
+#define debug_gen_contexts false
+#endif
+
 #define BAD_PTR_FUZZ 10000000
 
 class evalRes : public Named {
@@ -1297,6 +1303,10 @@ addSatisfier(std::vector<EvalState> &initialCtxts, IRExpr *a)
 		bool res;
 		res = generateConcreteSatisfier(ctxt, sat.get(), &random);
 		if (res) {
+			if (debug_gen_contexts) {
+				printf("New context:\n");
+				ctxt.prettyPrint(stdout);
+			}
 			initialCtxts.push_back(ctxt);
 			done = true;
 		} else if (random) {
@@ -1306,6 +1316,10 @@ addSatisfier(std::vector<EvalState> &initialCtxts, IRExpr *a)
 				res = generateConcreteSatisfier(ctxt, sat.get(), &random);
 				assert(random);
 				if (res) {
+					if (debug_gen_contexts) {
+						printf("New random context:\n");
+						ctxt.prettyPrint(stdout);
+					}
 					initialCtxts.push_back(ctxt);
 					done = true;
 				}
@@ -1377,6 +1391,12 @@ main(int argc, char *argv[])
 		/* Find some concrete configuration which satisfies
 		 * this constraint. */
 
+		if (debug_gen_contexts) {
+			printf("Find satisfier for ");
+			ppIRExpr(*it, stdout);
+			printf("\n");
+		}
+
 		/* First check whether we've already got one. */
 		bool have_satisfying = false;
 		for (auto it2 = initialCtxts.begin();
@@ -1384,8 +1404,14 @@ main(int argc, char *argv[])
 		     it2++) {
 			auto res = evalExpr(*it2, *it, NULL);
 			unsigned long v;
-			if (res.unpack(&v) && v)
+			if (res.unpack(&v) && v) {
 				have_satisfying = true;
+				if (debug_gen_contexts) {
+					ppIRExpr(*it, stdout);
+					printf(" is satisfied by:\n");
+					it2->prettyPrint(stdout);
+				}
+			}
 		}
 
 		if (have_satisfying) {
@@ -1420,8 +1446,15 @@ main(int argc, char *argv[])
 		     it2++) {
 			auto res = evalExpr(*it2, a, NULL);
 			unsigned long v;
-			if (res.unpack(&v) && v)
+			if (res.unpack(&v) && v) {
+				if (debug_gen_contexts) {
+					ppIRExpr(*it, stdout);
+					printf(" is not satisfied by:\n");
+					it2->prettyPrint(stdout);
+
+				}
 				found_one = true;
+			}
 		}
 
 		if (found_one)
