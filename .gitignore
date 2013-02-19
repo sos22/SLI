@@ -4,6 +4,7 @@
 *~
 .#*
 \#*#
+md_test_dir
 Makefile.mk
 core
 vgcore.*
@@ -24,3 +25,14 @@ timing.txt
 static
 machines/
 patches/
+canonicalise_crash_summary0
+canonicalise_crash_summary2
+canonicalise_crash_summary3
+canonicalise_crash_summary4
+case_split_summaries
+compare_crash_summaries
+cross_check_machines
+build_schedule
+canonicalise_types_table
+ced_to_cep
+
