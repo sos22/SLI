@@ -1406,7 +1406,7 @@ hasPhis(StateMachine *sm)
 	return visit_state_machine((void *)NULL, &visitor, sm) == visit_abort;
 }
 
-static smrbdd *
+smrbdd *
 enumEvalPaths(SMScopes *scopes,
 	      const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<StateMachine, &ir_heap> &sm,
@@ -1414,7 +1414,7 @@ enumEvalPaths(SMScopes *scopes,
 	      const VexPtr<OracleInterface> &oracle,
 	      const IRExprOptimisations &opt,
 	      StateMachineRes unreachedIs,
-	      GarbageCollectionToken &token)
+	      GarbageCollectionToken token)
 {
 	std::vector<EvalContext> pendingStates;
 	VexPtr<smrbdd, &ir_heap> result;

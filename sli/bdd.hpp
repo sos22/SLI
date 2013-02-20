@@ -81,6 +81,10 @@ public:
 	{
 		return compare(o) == eq;
 	}
+	bool operator!=(const bdd_rank &o) const
+	{
+		return compare(o) != eq;
+	}
 	bool parse(const char *, const char **);
 
 	/* You might think that this should be a Named class, rather

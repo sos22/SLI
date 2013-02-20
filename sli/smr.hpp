@@ -11,6 +11,18 @@ nameSmr(StateMachineRes smr) {
 	}
 	abort();
 }
+static inline void
+sanity_check_smr(StateMachineRes r)
+{
+	switch (r) {
+	case smr_crash:
+	case smr_survive:
+	case smr_unreached:
+		return;
+	}
+	abort();
+}
+
 bool parseSmr(StateMachineRes *out, const char *str, const char **suffix);
 
 #endif /* !SMR_HPP__ */

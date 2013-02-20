@@ -80,14 +80,21 @@ bbdd *writeMachineSuitabilityConstraint(SMScopes *scopes,
 					const VexPtr<bbdd, &ir_heap> &assumption,
 					const AllowableOptimisations &opt,
 					GarbageCollectionToken token);
-void
-collectConstraints(SMScopes *scopes,
-		   const VexPtr<MaiMap, &ir_heap> &mai,
-		   const VexPtr<StateMachine, &ir_heap> &sm,
-		   VexPtr<OracleInterface> &oracle,
-		   const IRExprOptimisations &opt,
-		   GcSet<IRExpr, &ir_heap> &out,
-		   GarbageCollectionToken token);
+void collectConstraints(SMScopes *scopes,
+			const VexPtr<MaiMap, &ir_heap> &mai,
+			const VexPtr<StateMachine, &ir_heap> &sm,
+			VexPtr<OracleInterface> &oracle,
+			const IRExprOptimisations &opt,
+			GcSet<IRExpr, &ir_heap> &out,
+			GarbageCollectionToken token);
 
+smrbdd *enumEvalPaths(SMScopes *scopes,
+		      const VexPtr<MaiMap, &ir_heap> &decode,
+		      const VexPtr<StateMachine, &ir_heap> &sm,
+		      VexPtr<bbdd, &ir_heap> assumption,
+		      const VexPtr<OracleInterface> &oracle,
+		      const IRExprOptimisations &opt,
+		      StateMachineRes unreachedIs,
+		      GarbageCollectionToken token);
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */
