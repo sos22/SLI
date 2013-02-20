@@ -954,7 +954,6 @@ read_cg_vexrip(FILE *f, DynAnalysisRip *out, AddressSpace *as, bool *is_call,
 		if (fread(&rip, sizeof(rip), 1, f) != 1) {
 			return read_cg_vexrip_error;
 		}
-		printf("rip %lx\n", rip);
 		if (rip & (1ul << 63)) {
 			*is_call = true;
 			rip &= ~(1ul << 63);
@@ -1084,14 +1083,11 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 		unsigned nr_callees;
 		if (fread(&nr_callees, sizeof(nr_callees), 1, f) != 1)
 			err(1, "reading number of callees from %s\n", cg_fname);
-		printf("%s has %d callees (is_call = %d)\n", branch_rip.name(), nr_callees,
-			is_call);
 		for (unsigned x = 0; x < nr_callees; x++) {
 			unsigned long callee;
 			if (fread(&callee, sizeof(callee), 1, f) != 1)
 				err(1, "reading callee rip from %s", cg_fname);
 			callee &= ~(1ul << 63);
-			printf("Callee %lx\n", callee);
 			ce.targets.insert(callee);
 		}
 
