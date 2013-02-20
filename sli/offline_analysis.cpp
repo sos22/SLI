@@ -346,9 +346,11 @@ _optimiseStateMachine(SMScopes *scopes,
 		if (!done_something && is_ssa) {
 			predecessor_map pred(sm);
 			control_dependence_graph cdg(sm, &scopes->bools);
+			bool invalidate_cdg;
 
 			p = false;
-			sm = cdgOptimise(scopes, sm, cdg, &p);
+			invalidate_cdg = false;
+			sm = cdgOptimise(scopes, sm, cdg, &p, &invalidate_cdg);
 			if (debugOptimiseStateMachine && p) {
 				printf("cdgOptimise:\n");
 				printStateMachine(sm, stdout);
@@ -357,7 +359,7 @@ _optimiseStateMachine(SMScopes *scopes,
 				pred.recompute(sm);
 			done_something |= p;
 
-			if (CONFIG_LOAD_ELIMINATION && !zapped_realias_info) {
+			if (CONFIG_LOAD_ELIMINATION && !invalidate_cdg && !zapped_realias_info) {
 				sm = functionAliasAnalysis(scopes, *mai, sm, opt,
 							   oracle, cdg, pred, &p);
 				if (debugOptimiseStateMachine && p) {
@@ -367,15 +369,15 @@ _optimiseStateMachine(SMScopes *scopes,
 				done_something |= p;
 			}
 
-#if CONFIG_PHI_ELIMINATION
-			p = false;
-			sm = phiElimination(scopes, sm, pred, cdg, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("phiElimination:\n");
-				printStateMachine(sm, stdout);
+			if (CONFIG_PHI_ELIMINATION && !invalidate_cdg) {
+				p = false;
+				sm = phiElimination(scopes, sm, pred, cdg, &p);
+				if (debugOptimiseStateMachine && p) {
+					printf("phiElimination:\n");
+					printStateMachine(sm, stdout);
+				}
+				done_something |= p;
 			}
-			done_something |= p;
-#endif
 		}
 #endif
 
