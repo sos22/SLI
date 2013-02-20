@@ -113,7 +113,7 @@ class threadState {
 public:
 	exprbdd *register_value(SMScopes *scopes,
 				const threadAndRegister &reg,
-			       IRType type) {
+				IRType type) {
 		auto it = registers.find(reg);
 		if (it == registers.end())
 			return NULL;
@@ -857,6 +857,7 @@ private:
 	{
 		setState(sms);
 	}
+	template <typename paramT>
 	void evalStateMachineSideEffect(
 		SMScopes *scopes,
 		bbdd *assumption,
@@ -864,9 +865,15 @@ private:
 		StateMachineSideEffect *smse,
 		OracleInterface *oracle,
 		bool havePhis,
+		typename paramT::resultT &result,
 		const IRExprOptimisations &opt);
-	void assertFalse(bbdd::scope *scope, bbdd *what, const IRExprOptimisations &opt);
+	template <typename paramT>
+	void assertFalse(bbdd::scope *scope,
+			 bbdd *what,
+			 const IRExprOptimisations &opt,
+			 typename paramT::resultT &result);
 public:
+	template <typename paramT>
 	void advance(SMScopes *scopes,
 		     bbdd *assumption,
 		     const MaiMap &decode,
@@ -874,8 +881,7 @@ public:
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     bool havePhis,
-		     bool kill_smr_unreached,
-		     smrbdd *&result);
+		     typename paramT::resultT &result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
 		: justPathConstraint(_pathConstraint)
 	{
@@ -913,11 +919,13 @@ public:
 
 };
 
-void
-EvalContext::assertFalse(bbdd::scope *scope, bbdd *what, const IRExprOptimisations &opt)
+template <typename paramT> void
+EvalContext::assertFalse(bbdd::scope *scope, bbdd *what, const IRExprOptimisations &opt,
+			 typename paramT::resultT &result)
 {
 	what = simplifyBDD(scope, what, opt);
 	if (what) {
+		paramT::addPathToUnreached(scope, result, justPathConstraint, what);
 		auto isGood = bbdd::invert(scope, what);
 		if (isGood) {
 			bbdd *newConstraint =
@@ -931,13 +939,14 @@ EvalContext::assertFalse(bbdd::scope *scope, bbdd *what, const IRExprOptimisatio
 	}
 }
 
-void
+template <typename paramT> void
 EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					bbdd *assumption,
 					const MaiMap &decode,
 					StateMachineSideEffect *smse,
 					OracleInterface *oracle,
 					bool havePhis,
+					typename paramT::resultT &result,
 					const IRExprOptimisations &opt)
 {
 	exprbdd *addr = NULL;
@@ -964,7 +973,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			if (TIMEOUT) {
 				return;
 			}
-			assertFalse(&scopes->bools, isBad, opt);
+			assertFalse<paramT>(&scopes->bools, isBad, opt, result);
 			if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
 				return;
 			}
@@ -1098,10 +1107,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		if (TIMEOUT) {
 			return;
 		}
-		assertFalse(
-			&scopes->bools,
-			v,
-			opt);
+		assertFalse<paramT>(&scopes->bools, v, opt, result);
 		break;
 	}
 	case StateMachineSideEffect::Phi: {
@@ -1141,10 +1147,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 						   Iop_BadPtr,
 						   g));
 			if (b) {
-				assertFalse(
-					&scopes->bools,
-					b,
-					opt);
+				assertFalse<paramT>(&scopes->bools, b, opt, result);
 			}
 		}
 #endif
@@ -1294,7 +1297,7 @@ assertClosed(smrbdd *)
    time.  That'd work, but it'd mean duplicating those pointers in
    every item in the pending state queue, which would make that queue
    much bigger, which'd be kind of annoying. */
-void
+template <typename paramT> void
 EvalContext::advance(SMScopes *scopes,
 		     bbdd *assumption,
 		     const MaiMap &decode,
@@ -1302,8 +1305,7 @@ EvalContext::advance(SMScopes *scopes,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     bool havePhis,
-		     bool kill_smr_unreached,
-		     smrbdd *&result)
+		     typename paramT::resultT &result)
 {
 	if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
 		/* This path is dead. */
@@ -1322,30 +1324,7 @@ EvalContext::advance(SMScopes *scopes,
 		if (TIMEOUT) {
 			return;
 		}
-		res = suppressUninit(&scopes->smrs, kill_smr_unreached, res);
-		if (!res) {
-			if (debug_survival_constraint) {
-				printf("Reached terminal is unreachable?\n");
-			}
-		} else {
-			if (debug_survival_constraint) {
-				printf("Terminal, result:\n");
-				res->prettyPrint(stdout);
-			}
-			result = smrbdd::ifelse(
-				&scopes->smrs,
-				justPathConstraint,
-				res,
-				result);
-			result = suppressUninit(&scopes->smrs, kill_smr_unreached, result);
-			assert(result != NULL);
-			if (debug_survival_constraint) {
-				printf("New overall result:\n");
-				result->prettyPrint(stdout);
-			}
-		}
-
-		assertClosed(result);
+		paramT::addPathToTerminal(scopes, result, res, justPathConstraint);
 
 		/* Caution: this will de-initialise *this, and might
 		   deallocate it, so once you've done this you can't
@@ -1357,13 +1336,14 @@ EvalContext::advance(SMScopes *scopes,
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)_currentState;
 		setState(sme->target);
 		if (sme->sideEffect) {
-			evalStateMachineSideEffect(scopes,
-						   assumption,
-						   decode,
-						   sme->sideEffect,
-						   oracle,
-						   havePhis,
-						   opt);
+			evalStateMachineSideEffect<paramT>(scopes,
+							   assumption,
+							   decode,
+							   sme->sideEffect,
+							   oracle,
+							   havePhis,
+							   result,
+							   opt);
 		}
 		return;
 	}
@@ -1418,7 +1398,7 @@ hasPhis(StateMachine *sm)
 	return visit_state_machine((void *)NULL, &visitor, sm) == visit_abort;
 }
 
-smrbdd *
+template <typename paramT> static typename paramT::resultT
 enumEvalPaths(SMScopes *scopes,
 	      const VexPtr<MaiMap, &ir_heap> &decode,
 	      const VexPtr<StateMachine, &ir_heap> &sm,
@@ -1429,7 +1409,7 @@ enumEvalPaths(SMScopes *scopes,
 	      GarbageCollectionToken token)
 {
 	std::vector<EvalContext> pendingStates;
-	VexPtr<smrbdd, &ir_heap> result;
+	typename paramT::resultT result;
 	std::map<const StateMachineState *, int> labels;
 
 	if (debug_survival_constraint) {
@@ -1444,7 +1424,7 @@ enumEvalPaths(SMScopes *scopes,
 
 	bool havePhis = hasPhis(sm);
 
-	result = scopes->smrs.cnst(unreachedIs);
+	result = paramT::initialResult(scopes, unreachedIs);
 
 	pendingStates.push_back(EvalContext(sm, scopes->bools.cnst(true)));
 	if (!assumption) {
@@ -1465,7 +1445,8 @@ enumEvalPaths(SMScopes *scopes,
 			ctxt.printHistory(stdout, labels);
 		}
 
-		ctxt.advance(scopes, assumption, *decode, oracle, opt, pendingStates, havePhis, unreachedIs != smr_unreached, result);
+		ctxt.advance<paramT>(scopes, assumption, *decode, oracle, opt, pendingStates, havePhis,
+				     result);
 	}
 
 	if (debug_survival_constraint) {
@@ -1473,8 +1454,8 @@ enumEvalPaths(SMScopes *scopes,
 		result->prettyPrint(stdout);
 	}
 
-	if (unreachedIs != smr_unreached && !TIMEOUT) {
-		result = smrbdd::replaceTerminal(&scopes->smrs, smr_unreached, unreachedIs, result);
+	if (!TIMEOUT) {
+		paramT::suppressUnreached(scopes, unreachedIs, result);
 	}
 
 	if (debug_survival_constraint && result) {
@@ -1484,6 +1465,54 @@ enumEvalPaths(SMScopes *scopes,
 
 	return result;
 }
+
+struct normalEvalParams {
+	typedef VexPtr<smrbdd, &ir_heap> resultT;
+	static smrbdd *initialResult(SMScopes *scopes, StateMachineRes unreachedIs) {
+		return scopes->smrs.cnst(unreachedIs);
+	}
+	static void addPathToTerminal(SMScopes *scopes,
+				      resultT &result,
+				      smrbdd *termRes,
+				      bbdd *justPathConstraint) {
+		termRes = suppressUninit(&scopes->smrs, true, termRes);
+		if (!termRes) {
+			if (debug_survival_constraint) {
+				printf("Reached terminal is unreachable?\n");
+			}
+		} else {
+			if (debug_survival_constraint) {
+				printf("Terminal, result:\n");
+				termRes->prettyPrint(stdout);
+			}
+			result = smrbdd::ifelse(
+				&scopes->smrs,
+				justPathConstraint,
+				termRes,
+				result);
+			result = suppressUninit(&scopes->smrs, true, result);
+			assert(result != NULL);
+			if (debug_survival_constraint) {
+				printf("New overall result:\n");
+				result->prettyPrint(stdout);
+			}
+		}
+
+		assertClosed(result);
+	}
+	static void addPathToUnreached(bbdd::scope *,
+				       resultT &,
+				       bbdd *,
+				       bbdd *) {
+		/* Does nothing: for normal interpretation, paths to
+		   unreached need to be suppressed. */
+	}
+	static void suppressUnreached(SMScopes *scopes,
+				      StateMachineRes unreachedIs,
+				      resultT &result) {
+		result = smrbdd::replaceTerminal(&scopes->smrs, smr_unreached, unreachedIs, result);
+	}
+};
 
 static bbdd *
 _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
@@ -1498,9 +1527,10 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 {
 	__set_profiling(survivalConstraintIfExecutedAtomically);
 
-	smrbdd *smr = enumEvalPaths(scopes, mai, sm, assumption, oracle, opt,
-				    escapingStatesSurvive ? smr_survive : smr_crash,
-				    token);
+	smrbdd *smr = enumEvalPaths<normalEvalParams>(
+		scopes, mai, sm, assumption, oracle, opt,
+		escapingStatesSurvive ? smr_survive : smr_crash,
+		token);
 	if (!smr)
 		return NULL;
 	std::map<StateMachineRes, bbdd *> selectors(smrbdd::to_selectors(&scopes->bools, smr));
@@ -2397,6 +2427,42 @@ enumVariables(bddT *src, std::set<IRExpr *> &out, std::set<bddT *> &memo)
 	enumVariables(src->internal().falseBranch, out, memo);
 }
 
+struct collectConstraintsParams {
+	struct resultT {
+		std::set<IRExpr *> &exprs;
+		GcSet<bbdd, &ir_heap> memo1;
+		GcSet<smrbdd, &ir_heap> memo2;
+		resultT(std::set<IRExpr *> &_exprs)
+			: exprs(_exprs)
+		{}
+	};
+
+	static void addPathToTerminal(SMScopes *scopes, resultT &result,
+				      smrbdd *res, bbdd *pathConstraint) {
+		enumVariables(pathConstraint, result.exprs, result.memo1);
+		res = suppressUninit(&scopes->smrs, false, res);
+		if (!res) {
+			if (debug_survival_constraint) {
+				printf("Reached terminal is unreachable?\n");
+			}
+		} else {
+			if (debug_survival_constraint) {
+				printf("Terminal, result:\n");
+				res->prettyPrint(stdout);
+			}
+			enumVariables(res, result.exprs, result.memo2);
+               }
+	}
+	static void addPathToUnreached(bbdd::scope *,
+				       resultT &result,
+				       bbdd *pathConstraint,
+				       bbdd *unreachedIf)
+	{
+		enumVariables(pathConstraint, result.exprs, result.memo1);
+		enumVariables(unreachedIf, result.exprs, result.memo1);
+	}
+};
+
 /* Just collect all of the constraints which the symbolic execution
  * engine spits out.  The idea is that if you generate a set of input
  * states X such that, for every condition Y which this emits some
@@ -2415,7 +2481,8 @@ collectConstraints(SMScopes *scopes,
 	bool havePhis = hasPhis(sm);
 	std::vector<EvalContext> pendingStates;
 
-	VexPtr<smrbdd, &ir_heap> result(scopes->smrs.cnst(smr_unreached));
+	collectConstraintsParams::resultT results(out);
+
 	WeakSet<bbdd, &ir_heap> memo;
 
 	pendingStates.push_back(EvalContext(sm, scopes->bools.cnst(true)));
@@ -2426,9 +2493,170 @@ collectConstraints(SMScopes *scopes,
 
 		EvalContext &ctxt(pendingStates.back());
 		enumVariables(ctxt.justPathConstraint, out, memo);
-		ctxt.advance(scopes, scopes->bools.cnst(true), *mai, oracle, opt, pendingStates, havePhis, false, result);
+		ctxt.advance<collectConstraintsParams>(scopes, scopes->bools.cnst(true), *mai, oracle, opt, pendingStates, havePhis, results);
+	}
+}
+
+#include "bdd_tmpl.cpp"
+
+typedef Maybe<StateMachineRes> msmr;
+
+class msmrbdd : public const_bdd<msmr, msmrbdd> {
+	friend class const_bdd_scope<msmrbdd>;
+	friend class bdd_scope<msmrbdd>;
+	friend class _bdd<msmr, msmrbdd>;
+#ifdef NDEBUG
+	void _sanity_check(msmr) const {}
+#else
+	void _sanity_check(msmr r) const {
+		if (r.valid) {
+			sanity_check_smr(r.content);
+		}
+	}
+#endif
+	void _prettyPrint(FILE *f, msmr r) const {
+		if (r.valid) {
+			fprintf(f, "<%s>", nameSmr(r.content));
+		} else {
+			fprintf(f, "<missing>");
+		}
 	}
 
-	std::set<smrbdd *> memo2;
-	enumVariables(result.get(), out, memo2);
+	msmrbdd(bdd_rank rank, IRExpr *cond, msmrbdd *trueB, msmrbdd *falseB)
+		: const_bdd<msmr, msmrbdd>(rank, cond, trueB, falseB)
+	{}
+	msmrbdd(const msmr &b)
+		: const_bdd<msmr, msmrbdd>(b)
+	{}
+	static smrbdd *ignore_invalid(smrbdd::scope *scp, msmrbdd *what, sane_map<msmrbdd *, smrbdd *> &memo);
+	static msmrbdd *from_smrbdd(scope *scp, smrbdd *what, sane_map<smrbdd *, msmrbdd *> &memo);
+public:
+	smrbdd *ignore_invalid(smrbdd::scope *scp);
+	static msmrbdd *from_smrbdd(scope *scp, smrbdd *what);
+};
+
+msmrbdd *
+msmrbdd::from_smrbdd(scope *scp, smrbdd *what, sane_map<smrbdd *, msmrbdd *> &memo)
+{
+	if (what->isLeaf()) {
+		return scp->cnst(what->leaf());
+	}
+	auto it_did_insert = memo.insert(what, (msmrbdd *)0xf001);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+	auto t = from_smrbdd(scp, what->internal().trueBranch, memo);
+	auto f = from_smrbdd(scp, what->internal().falseBranch, memo);
+	it->second = scp->makeInternal(
+		what->internal().condition,
+		what->internal().rank,
+		t,
+		f);
+	return it->second;
+}
+
+msmrbdd *
+msmrbdd::from_smrbdd(scope *scp, smrbdd *what)
+{
+	sane_map<smrbdd *, msmrbdd *> memo;
+	return from_smrbdd(scp, what, memo);
+}
+
+smrbdd *
+msmrbdd::ignore_invalid(smrbdd::scope *scp, msmrbdd *what, sane_map<msmrbdd *, smrbdd *> &memo)
+{
+	if (what->isLeaf()) {
+		if (what->leaf().valid) {
+			return scp->cnst(what->leaf().content);
+		} else {
+			return NULL;
+		}
+	}
+	auto it_did_insert = memo.insert(what, (smrbdd *)0xbeef);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+	auto t = ignore_invalid(scp, what->internal().trueBranch, memo);
+	auto f = ignore_invalid(scp, what->internal().falseBranch, memo);
+	if (!t) {
+		it->second = f;
+	} else if (!f) {
+		it->second = t;
+	} else {
+		it->second = scp->makeInternal(what->internal().condition,
+					       what->internal().rank,
+					       t,
+					       f);
+	}
+	return it->second;
+}
+smrbdd *
+msmrbdd::ignore_invalid(smrbdd::scope *scp)
+{
+	sane_map<msmrbdd *, smrbdd *> memo;
+	return ignore_invalid(scp, this, memo);
+}
+
+/* Bit of a hack */
+static msmrbdd::scope *global_msmr_scope;
+
+struct compileMachineToBddParams {
+	typedef msmrbdd *resultT;
+	static msmrbdd *initialResult(SMScopes *, StateMachineRes) {
+		return global_msmr_scope->cnst(Maybe<StateMachineRes>());
+	}
+	static void suppressUnreached(SMScopes *,
+				      StateMachineRes,
+				      const resultT &) {
+	}
+	static void addPathToTerminal(SMScopes *,
+				      resultT &result,
+				      smrbdd *stateRes,
+				      bbdd *pathConstraint) {
+		result = msmrbdd::ifelse(
+			global_msmr_scope,
+			pathConstraint,
+			msmrbdd::from_smrbdd(global_msmr_scope, stateRes),
+			result);
+	}
+	static void addPathToUnreached(bbdd::scope *bscope,
+				       resultT &result,
+				       bbdd *pathConstraint,
+				       bbdd *branchConstraint) {
+		result = msmrbdd::ifelse(
+			global_msmr_scope,
+			bbdd::And(bscope, pathConstraint, branchConstraint),
+			global_msmr_scope->cnst(smr_unreached),
+			result);
+	}
+};
+
+/* Compile a state machine down to an msmrbdd which tells you what
+   would happen if you ran it atomically in some initial state. */
+smrbdd *
+compileMachineToBdd(SMScopes *scopes,
+		    const VexPtr<MaiMap, &ir_heap> &mai,
+		    const VexPtr<StateMachine, &ir_heap> &sm,
+		    VexPtr<OracleInterface> &oracle,
+		    const IRExprOptimisations &opt,
+		    GarbageCollectionToken token)
+{
+	msmrbdd::scope msmr_scope(&scopes->ordering);
+	global_msmr_scope = &msmr_scope;
+	compileMachineToBddParams::resultT res;
+	res = enumEvalPaths<compileMachineToBddParams>(scopes,
+						       mai,
+						       sm,
+						       scopes->bools.cnst(true),
+						       oracle,
+						       opt,
+						       smr_unreached,
+						       token);
+	global_msmr_scope = NULL;
+	return res->msmrbdd::ignore_invalid(&scopes->smrs);
+	
 }

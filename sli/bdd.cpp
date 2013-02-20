@@ -5,6 +5,8 @@
 
 #include "bdd_tmpl.cpp"
 
+bool bdd_use_dereferences;
+
 /* Convert @what so that it uses muxes wherever possible (i.e. no
    And1, Or1, or Not1 operators) and so that all muxes are at top
    level. */

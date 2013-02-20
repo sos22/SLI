@@ -8,6 +8,8 @@
 #include "smr.hpp"
 #include "hash_table.hpp"
 
+extern bool bdd_use_dereferences;
+
 class bbdd;
 template <typename _leafT, typename _subtreeT> class _bdd;
 

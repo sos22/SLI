@@ -88,13 +88,11 @@ void collectConstraints(SMScopes *scopes,
 			GcSet<IRExpr, &ir_heap> &out,
 			GarbageCollectionToken token);
 
-smrbdd *enumEvalPaths(SMScopes *scopes,
-		      const VexPtr<MaiMap, &ir_heap> &decode,
-		      const VexPtr<StateMachine, &ir_heap> &sm,
-		      VexPtr<bbdd, &ir_heap> assumption,
-		      const VexPtr<OracleInterface> &oracle,
-		      const IRExprOptimisations &opt,
-		      StateMachineRes unreachedIs,
-		      GarbageCollectionToken token);
+smrbdd *compileMachineToBdd(SMScopes *scopes,
+			    const VexPtr<MaiMap, &ir_heap> &mai,
+			    const VexPtr<StateMachine, &ir_heap> &sm,
+			    VexPtr<OracleInterface> &oracle,
+			    const IRExprOptimisations &opt,
+			    GarbageCollectionToken token);
 
 #endif /* !EVAL_STATE_MACHINE_HPP__ */

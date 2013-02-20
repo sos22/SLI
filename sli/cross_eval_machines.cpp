@@ -181,6 +181,8 @@ main(int argc, char *argv[])
 
 	init_sli();
 
+	bdd_use_dereferences = false;
+
 	const char *base = strip_suffix(bin, ".exe");
 	
 	VexPtr<Oracle> oracle;
@@ -220,22 +222,18 @@ main(int argc, char *argv[])
 			vex_asprintf("%s/opt", data)));
 
 	VexPtr<bbdd, &ir_heap> truth(scopes.bools.cnst(true));
-	VexPtr<smrbdd, &ir_heap> smr1(enumEvalPaths(&scopes,
-						    mai1,
-						    machine1,
-						    truth,
-						    oracleI,
-						    opt,
-						    smr_unreached,
-						    ALLOW_GC));
-	VexPtr<smrbdd, &ir_heap> smr2(enumEvalPaths(&scopes,
-						    mai2,
-						    machine2,
-						    truth,
-						    oracleI,
-						    opt,
-						    smr_unreached,
-						    ALLOW_GC));
+	VexPtr<smrbdd, &ir_heap> smr1(compileMachineToBdd(&scopes,
+							  mai1,
+							  machine1,
+							  oracleI,
+							  opt,
+							  ALLOW_GC));
+	VexPtr<smrbdd, &ir_heap> smr2(compileMachineToBdd(&scopes,
+							  mai2,
+							  machine2,
+							  oracleI,
+							  opt,
+							  ALLOW_GC));
 	if (smr1 == smr2) {
 		printf("Pass.\n");
 		return 0;

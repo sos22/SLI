@@ -488,6 +488,9 @@ _dereferences(IRExpr *expr, const IRExpr *addr, std::set<IRExpr *> &memo)
 static bool
 dereferences(IRExpr *expr, const IRExpr *addr)
 {
+	if (!bdd_use_dereferences) {
+		return false;
+	}
 	std::set<IRExpr *> memo;
 	return _dereferences(expr, addr, memo);
 }
