@@ -543,9 +543,11 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 	case StateMachineSideEffect::ImportRegister:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
 	case StateMachineSideEffect::StackLayout:
+#endif
 		log(state, "ignored side effect");
 		return true;
 	}

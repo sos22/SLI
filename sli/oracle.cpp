@@ -2428,6 +2428,7 @@ impossible_clean:
 	goto done;
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 /* We know that @what is definitely a valid pointer.  Try to update
    @config so that irexprAliasingClass will say that as well. */
 static void
@@ -2450,7 +2451,6 @@ makeValidPointer(Oracle::ThreadRegisterAliasingConfiguration &config,
 	}
 }
 
-#if !CONFIG_NO_STATIC_ALIASING
 void
 Oracle::Function::updateSuccessorInstructionsAliasing(const StaticRip &rip,
 						      AddressSpace *as,
