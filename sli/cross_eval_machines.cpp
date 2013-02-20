@@ -16,6 +16,9 @@ class deltasmr {
 	StateMachineRes res1;
 	StateMachineRes res2;
 public:
+	bool isSafe() const {
+		return res1 == res2 || res1 == smr_unreached;
+	}
 	void sanity_check() const {
 		sanity_check_smr(res1);
 		sanity_check_smr(res2);
@@ -142,6 +145,34 @@ strip_suffix(const char *what, const char *suffix)
 	return res;
 }
 
+static bbdd *
+err_if(bbdd::scope *scp, deltasmrbdd *delta, sane_map<deltasmrbdd *, bbdd *> &memo)
+{
+	auto it_did_insert = memo.insert(delta, (bbdd *)0xf001);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+	if (delta->isLeaf()) {
+		it->second = scp->cnst(!delta->leaf().isSafe());
+	} else {
+		it->second = scp->makeInternal(
+			delta->internal().condition,
+			delta->internal().rank,
+			err_if(scp, delta->internal().trueBranch, memo),
+			err_if(scp, delta->internal().falseBranch, memo));
+	}
+	return it->second;
+}
+
+static bbdd *
+err_if(bbdd::scope *scp, deltasmrbdd *delta)
+{
+	sane_map<deltasmrbdd *, bbdd *> memo;
+	return err_if(scp, delta, memo);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -227,6 +258,12 @@ main(int argc, char *argv[])
 
 	deltasmrbdd::scope dscope(&scopes.ordering);
 	deltasmrbdd *delta = deltasmrbdd::diff(&dscope, smr1, smr2);
+
+	bbdd *errorIf = err_if(&scopes.bools, delta);
+	if (errorIf == scopes.bools.cnst(false)) {
+		printf("Pass.\n");
+		return 0;
+	}
 
 	printf("smr1:\n");
 	smr1->prettyPrint(stdout);
