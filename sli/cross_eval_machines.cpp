@@ -127,28 +127,52 @@ deltasmrbdd::diff(scope *scp,
 	return zip(scp, f);
 }
 
+static const char *
+strip_suffix(const char *what, const char *suffix)
+{
+	size_t what_len = strlen(what);
+	size_t suffix_len = strlen(suffix);
+	if (what_len < suffix_len ||
+	    memcmp(what + what_len - suffix_len, suffix, suffix_len)) {
+		return what;
+	}
+	char *res = (char *)malloc(what_len - suffix_len + 1);
+	memcpy(res, what, what_len - suffix_len);
+	res[what_len-suffix_len] = 0;
+	return res;
+}
+
 int
 main(int argc, char *argv[])
 {
+	const char *bin = argv[1];
+	const char *data = argv[2];
+
 	init_sli();
 
+	const char *base = strip_suffix(bin, ".exe");
+	
 	VexPtr<Oracle> oracle;
 	{
-		MachineState *ms = MachineState::readELFExec(argv[1]);
+		MachineState *ms = MachineState::readELFExec(bin);
 		Thread *thr = ms->findThread(ThreadId(1));
-		oracle = new Oracle(ms, thr, argv[2]);
+		oracle = new Oracle(ms, thr, vex_asprintf("%s.types.canon", base));
 	}
-	oracle->loadCallGraph(oracle, argv[3], argv[4], ALLOW_GC);
+	oracle->loadCallGraph(oracle,
+			      my_asprintf("%s.bcg", base),
+			      my_asprintf("%s.db", base),
+			      ALLOW_GC);
 
 	VexPtr<OracleInterface> oracleI(oracle);
 	SMScopes scopes;
-	VexPtr<StateMachine, &ir_heap> machine1(readStateMachine(&scopes, argv[5]));
-	VexPtr<MaiMap, &ir_heap> mai1(MaiMap::fromFile(machine1, argv[6]));
-	SMScopes scopes2;
-	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(&scopes2, argv[7]));
-	machine2 = rewriteMachineCrossScope(machine2, &scopes);
+	VexPtr<StateMachine, &ir_heap> machine1(readStateMachine(&scopes, vex_asprintf("%s/pre_machine", data)));
+	VexPtr<MaiMap, &ir_heap> mai1(MaiMap::fromFile(machine1, vex_asprintf("%s/pre_mai", data)));
 
-	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, argv[8]));
+	SMScopes scopes2;
+	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(&scopes2, vex_asprintf("%s/post_machine", data)));
+	machine2 = rewriteMachineCrossScope(machine2, &scopes);
+	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, vex_asprintf("%s/post_mai", data)));
+
 	std::set<DynAnalysisRip> nonLocalLoads;
 	std::set<DynAnalysisRip> interestingStores;
 	AllowableOptimisations opt(
@@ -156,7 +180,7 @@ main(int argc, char *argv[])
 			&interestingStores,
 			&nonLocalLoads,
 			oracle->ms->addressSpace,
-			argv[9]));
+			vex_asprintf("%s/opt", data)));
 
 	VexPtr<bbdd, &ir_heap> truth(scopes.bools.cnst(true));
 	VexPtr<smrbdd, &ir_heap> smr1(enumEvalPaths(&scopes,
