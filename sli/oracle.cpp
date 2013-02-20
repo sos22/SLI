@@ -272,6 +272,9 @@ Oracle::hasConflictingRemoteStores(const MaiMap &mai, const AllowableOptimisatio
 		return false;
 	if (access->tag == MemoryTag::last_free() && opt.freeMightRace())
 		return true;
+	if (access->tag == MemoryTag::mutex()) {
+		return true;
+	}
 	for (auto it = mai.begin(access->rip); !it.finished(); it.advance()) {
 		if (access->type == StateMachineSideEffect::Load &&
 		    opt.nonLocalLoads() &&
@@ -428,8 +431,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 {
 	if (smsel->tag != smses->tag)
 		return false;
-	if (smsel->tag == MemoryTag::last_free())
+	if (smsel->tag == MemoryTag::last_free() || smsel->tag == MemoryTag::mutex()) {
 		return true;
+	}
 
 	if (definitelyNotEqual(smsel->addr, smses->addr, opt))
 		return false;
@@ -497,8 +501,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 	if (smsel1->tag != smsel2->tag)
 		return false;
 
-	if (smsel1->tag == MemoryTag::last_free())
+	if (smsel1->tag == MemoryTag::last_free() || smsel1->tag == MemoryTag::mutex()) {
 		return true;
+	}
 
 	if (definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
 		return false;
@@ -550,8 +555,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 	if (smses1->tag != smses2->tag)
 		return false;
 
-	if (smses1->tag == MemoryTag::last_free())
+	if (smses1->tag == MemoryTag::last_free() || smses1->tag == MemoryTag::mutex()) {
 		return true;
+	}
 
 	if (definitelyNotEqual(smses1->addr, smses2->addr, opt))
 		return false;

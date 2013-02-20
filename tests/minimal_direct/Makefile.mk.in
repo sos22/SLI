@@ -230,7 +230,11 @@ EOF
     do
 	emit_rules_for_exe_assert bug${bug} 2
     done
-
+    for bug in 15
+    do
+	emit_rules_for_exe_segv bug${bug} 0
+    done
+	
     # And now the harness
     cat <<EOF
 ${MD_TEST_DIR}/harness: ./tests/minimal_direct/harness.c

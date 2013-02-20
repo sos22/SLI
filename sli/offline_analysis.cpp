@@ -431,9 +431,11 @@ optimiseStateMachine(SMScopes *scopes,
 }
 
 static void
-getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores)
+getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores,
+		     bool &haveMuxOps)
 {
 	std::set<StateMachineSideEffectLoad *> allLoads;
+	haveMuxOps = false;
 	enumSideEffects(sm, allLoads);
 	if (allLoads.size() == 0) {
 		fprintf(_logfile, "\t\tNo loads left in store machine?\n");
@@ -441,8 +443,12 @@ getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::s
 	}
 	for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 	     it != allLoads.end();
-	     it++)
+	     it++) {
+		if ( (*it)->tag == MemoryTag::mutex() ) {
+			haveMuxOps = true;
+		}
 		oracle->findConflictingStores(mai, *it, potentiallyConflictingStores);
+	}
 }
 
 /* If there's precisely one interesting store in the store machine and
@@ -1374,6 +1380,7 @@ probeMachineToSummary(SMScopes *scopes,
 		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
+		      bool preserveMux,
 		      const AllowableOptimisations &optIn,
 		      const VexPtr<MaiMap, &ir_heap> &maiIn,
 		      GarbageCollectionToken token)
@@ -1420,7 +1427,9 @@ probeMachineToSummary(SMScopes *scopes,
 					   probeMachine,
 					   atomicSurvival,
 					   STORING_THREAD + i,
-					   optIn.setinterestingStores(&potentiallyConflictingStores),
+					   optIn
+					        .setinterestingStores(&potentiallyConflictingStores)
+					        .setmutexStoresInteresting(preserveMux),
 					   maiIn,
 					   token);
 		if (summary)
@@ -1472,6 +1481,7 @@ diagnoseCrash(SMScopes *scopes,
 	   (very occasionally) show that a particular load is not
 	   interesting, and hence change the conflicting stores set.
 	   Avoid the issue by just iterating to a fixed point. */
+	bool haveMuxOps;
 	std::set<DynAnalysisRip> potentiallyConflictingStores;
 	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
 
@@ -1482,7 +1492,7 @@ diagnoseCrash(SMScopes *scopes,
 		stackedCdf::stopFindConflictingStores();
 		return NULL;
 	}
-	getConflictingStores(*mai, reducedProbeMachine, oracle, potentiallyConflictingStores);
+	getConflictingStores(*mai, reducedProbeMachine, oracle, potentiallyConflictingStores, haveMuxOps);
 	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 		stackedCdf::stopFindConflictingStores();
@@ -1505,7 +1515,7 @@ diagnoseCrash(SMScopes *scopes,
 				stackedCdf::stopFindConflictingStores();
 				return NULL;
 			}
-			getConflictingStores(*mai, reducedProbeMachine, oracle, newPotentiallyConflictingStores);
+			getConflictingStores(*mai, reducedProbeMachine, oracle, newPotentiallyConflictingStores, haveMuxOps);
 			if (potentiallyConflictingStores.size() == 0) {
 				fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 				stackedCdf::stopFindConflictingStores();
@@ -1562,6 +1572,7 @@ diagnoseCrash(SMScopes *scopes,
 				     oracle,
 				     df,
 				     potentiallyConflictingStores,
+				     haveMuxOps,
 				     optIn,
 				     mai,
 				     token);

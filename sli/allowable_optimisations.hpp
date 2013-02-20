@@ -65,6 +65,10 @@
 
    ignoreUnreached -- Discard any paths to an <unreached> terminal.
 		  
+   mutexStoresInteresting -- If true, consider all STOREs with a mutex
+                             tag to be interesting, regardless of what
+                             interestingStores says
+
    Other fields:
 
    interestingStores -- Bit of a hack: sometimes, only some side
@@ -214,7 +218,8 @@ class AllowableOptimisations : public IRExprOptimisations {
 	f(noLocalSurvival,bool)						\
 	f(mustStoreBeforeCrash,bool)					\
 	f(freeMightRace,bool)						\
-	f(ignoreUnreached,bool)
+	f(ignoreUnreached,bool)						\
+	f(mutexStoresInteresting,bool)
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
 	f(interestingStores, const std::set<DynAnalysisRip> *)		\
@@ -349,14 +354,7 @@ public:
 					      IRExprOptimisations::enableallPointersGood());
 	}
 
-	bool ignoreStore(const VexRip &rip) const {
-		if (_ignoreSideEffects)
-			return true;
-		if (_interestingStores &&
-		    !_interestingStores->count(DynAnalysisRip(rip)))
-			return true;
-		return false;
-	}
+	bool ignoreStore(const MaiMap &decode, StateMachineSideEffectStore *s) const;
 
 	bool parse(std::set<DynAnalysisRip> *is, std::set<DynAnalysisRip> *nll,
 		   AddressSpace *as, const char *buf, const char **suffix)
