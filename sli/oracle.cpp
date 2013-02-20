@@ -1069,6 +1069,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 		new_format = true;
 	} else {
 		fseeko(f, 0, SEEK_SET);
+		new_format = false;
 	}
 	while (!feof(f)) {
 		callgraph_entry ce;
@@ -1087,6 +1088,19 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 			unsigned long callee;
 			if (fread(&callee, sizeof(callee), 1, f) != 1)
 				err(1, "reading callee rip from %s", cg_fname);
+			if (x == 0) {
+				if (callee & (1ul << 63)) {
+					is_call = true;
+				} else {
+					is_call = false;
+				}
+			} else {
+				if (callee & (1ul << 63)) {
+					assert(is_call);
+				} else {
+					assert(!is_call);
+				}
+			}
 			callee &= ~(1ul << 63);
 			ce.targets.insert(callee);
 		}
