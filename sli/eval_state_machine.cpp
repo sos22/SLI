@@ -874,6 +874,7 @@ public:
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     bool havePhis,
+		     bool kill_smr_unreached,
 		     smrbdd *&result);
 	EvalContext(StateMachine *sm, bbdd *_pathConstraint)
 		: justPathConstraint(_pathConstraint)
@@ -1218,7 +1219,8 @@ usesUninit(const IRExpr *what)
 }
 
 static smrbdd *
-suppressUninit(smrbdd::scope *scope, smrbdd *input, std::map<smrbdd *, smrbdd *> &memo)
+suppressUninit(smrbdd::scope *scope, smrbdd *input, bool kill_smr_unreached,
+	       std::map<smrbdd *, smrbdd *> &memo)
 {
 	auto it_did_insert = memo.insert(std::pair<smrbdd *, smrbdd *>(input, (smrbdd *)0xf001));
 	auto it = it_did_insert.first;
@@ -1229,14 +1231,16 @@ suppressUninit(smrbdd::scope *scope, smrbdd *input, std::map<smrbdd *, smrbdd *>
 	} else if (input->isLeaf()) {
 		it->second = input;
 	} else {
-		auto t = suppressUninit(scope, input->internal().trueBranch, memo);
-		auto f = suppressUninit(scope, input->internal().falseBranch, memo);
-		if (t == f || (t->isLeaf() && t->leaf() == smr_unreached)) {
+		auto t = suppressUninit(scope, input->internal().trueBranch, kill_smr_unreached, memo);
+		auto f = suppressUninit(scope, input->internal().falseBranch, kill_smr_unreached, memo);
+		if (t == f ||
+		    !t ||
+		    (kill_smr_unreached && t->isLeaf() && t->leaf() == smr_unreached)) {
 			it->second = f;
-		} else if (f->isLeaf() && f->leaf() == smr_unreached) {
+		} else if (!f || (kill_smr_unreached && f->isLeaf() && f->leaf() == smr_unreached)) {
 			it->second = t;
 		} else if (usesUninit(input->internal().condition)) {
-			it->second = scope->cnst(smr_unreached);
+			it->second = NULL;
 		} else if (t == input->internal().trueBranch &&
 			   f == input->internal().falseBranch) {
 			it->second = input;
@@ -1252,10 +1256,10 @@ suppressUninit(smrbdd::scope *scope, smrbdd *input, std::map<smrbdd *, smrbdd *>
 }
 
 static smrbdd *
-suppressUninit(smrbdd::scope *scope, smrbdd *input)
+suppressUninit(smrbdd::scope *scope, bool kill_smr_unreached, smrbdd *input)
 {
 	std::map<smrbdd *, smrbdd *> memo;
-	return suppressUninit(scope, input, memo);
+	return suppressUninit(scope, input, kill_smr_unreached, memo);
 }
 
 #ifndef NDEBUG
@@ -1298,6 +1302,7 @@ EvalContext::advance(SMScopes *scopes,
 		     const IRExprOptimisations &opt,
 		     std::vector<EvalContext> &pendingStates,
 		     bool havePhis,
+		     bool kill_smr_unreached,
 		     smrbdd *&result)
 {
 	if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
@@ -1317,20 +1322,27 @@ EvalContext::advance(SMScopes *scopes,
 		if (TIMEOUT) {
 			return;
 		}
-		res = suppressUninit(&scopes->smrs, res);
-		if (debug_survival_constraint) {
-			printf("Terminal, result:\n");
-			res->prettyPrint(stdout);
-		}
-		result = smrbdd::ifelse(
-			&scopes->smrs,
-			justPathConstraint,
-			res,
-			result);
-		result = suppressUninit(&scopes->smrs, result);
-		if (debug_survival_constraint) {
-			printf("New overall result:\n");
-			result->prettyPrint(stdout);
+		res = suppressUninit(&scopes->smrs, kill_smr_unreached, res);
+		if (!res) {
+			if (debug_survival_constraint) {
+				printf("Reached terminal is unreachable?\n");
+			}
+		} else {
+			if (debug_survival_constraint) {
+				printf("Terminal, result:\n");
+				res->prettyPrint(stdout);
+			}
+			result = smrbdd::ifelse(
+				&scopes->smrs,
+				justPathConstraint,
+				res,
+				result);
+			result = suppressUninit(&scopes->smrs, kill_smr_unreached, result);
+			assert(result != NULL);
+			if (debug_survival_constraint) {
+				printf("New overall result:\n");
+				result->prettyPrint(stdout);
+			}
 		}
 
 		assertClosed(result);
@@ -1453,7 +1465,7 @@ enumEvalPaths(SMScopes *scopes,
 			ctxt.printHistory(stdout, labels);
 		}
 
-		ctxt.advance(scopes, assumption, *decode, oracle, opt, pendingStates, havePhis, result);
+		ctxt.advance(scopes, assumption, *decode, oracle, opt, pendingStates, havePhis, unreachedIs != smr_unreached, result);
 	}
 
 	if (debug_survival_constraint) {
@@ -1461,7 +1473,7 @@ enumEvalPaths(SMScopes *scopes,
 		result->prettyPrint(stdout);
 	}
 
-	if (!TIMEOUT) {
+	if (unreachedIs != smr_unreached && !TIMEOUT) {
 		result = smrbdd::replaceTerminal(&scopes->smrs, smr_unreached, unreachedIs, result);
 	}
 
@@ -2414,7 +2426,7 @@ collectConstraints(SMScopes *scopes,
 
 		EvalContext &ctxt(pendingStates.back());
 		enumVariables(ctxt.justPathConstraint, out, memo);
-		ctxt.advance(scopes, scopes->bools.cnst(true), *mai, oracle, opt, pendingStates, havePhis, result);
+		ctxt.advance(scopes, scopes->bools.cnst(true), *mai, oracle, opt, pendingStates, havePhis, false, result);
 	}
 
 	std::set<smrbdd *> memo2;

@@ -228,7 +228,11 @@ main(int argc, char *argv[])
 	deltasmrbdd::scope dscope(&scopes.ordering);
 	deltasmrbdd *delta = deltasmrbdd::diff(&dscope, smr1, smr2);
 
-	printf("Delta:\n");
+	printf("smr1:\n");
+	smr1->prettyPrint(stdout);
+	printf("\nsmr2:\n");
+	smr2->prettyPrint(stdout);
+	printf("\nDelta:\n");
 	delta->prettyPrint(stdout);
 
 	return 1;
