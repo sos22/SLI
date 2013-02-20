@@ -3329,7 +3329,7 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 #undef do_case
 					/* Apply the delta to RSP */
 				case 4:
-					*slot = regs->rsp - lls->rsp_delta;
+					*slot = regs->rsp + lls->rsp_delta;
 					break;
 				case 16:
 					*slot = fetch_fs_base();
