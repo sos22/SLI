@@ -88,6 +88,8 @@ void collectConstraints(SMScopes *scopes,
 			GcSet<IRExpr, &ir_heap> &out,
 			GarbageCollectionToken token);
 
+class smrbdd;
+
 smrbdd *compileMachineToBdd(SMScopes *scopes,
 			    const VexPtr<MaiMap, &ir_heap> &mai,
 			    const VexPtr<StateMachine, &ir_heap> &sm,
