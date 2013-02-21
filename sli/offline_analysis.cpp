@@ -260,38 +260,13 @@ _optimiseStateMachine(SMScopes *scopes,
 			return sm;
 		}
 
-		{
-			bool d;
-			p = false;
-			do {
-				d = false;
-				sm = deadCodeElimination(scopes, sm, &d, is_ssa);
-				p |= d;
-			} while (d);
-			if (debugOptimiseStateMachine && p) {
-				printf("deadCodeElimination:\n");
-				printStateMachine(sm, stdout);
-			}
-			done_something |= p;
-
-			if (p) {
-				p = false;
-				sm = sm->optimise(scopes, opt, &p);
-				if (p) {
-					if (is_ssa) {
-						/* Local optimisation only maintains SSA form if interned */
-						sm = internStateMachine(sm);
-						if (TIMEOUT)
-							return sm;
-					}
-					if (debugOptimiseStateMachine) {
-						printf("Local optimise 2:\n");
-						printStateMachine(sm, stdout);
-					}
-				}
-				done_something |= p;
-			}
+		p = false;
+		sm = deadCodeElimination(scopes, sm, &p, is_ssa, opt);
+		if (debugOptimiseStateMachine && p) {
+			printf("deadCodeElimination:\n");
+			printStateMachine(sm, stdout);
 		}
+		done_something |= p;
 
 		LibVEX_maybe_gc(token);
 
