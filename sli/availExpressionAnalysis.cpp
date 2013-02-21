@@ -10,14 +10,10 @@
 #include "either.hpp"
 #include "stacked_cdf.hpp"
 
-/* Debug options: */
 #ifdef NDEBUG
-#define dump_avail_table 0 /* Dump the available expression table
-			    * after we build it */
-#define debug_substitutions 0 /* Debug to do with actually using the
-				 table. */
+#define debug_avail false
 #else
-static int dump_avail_table = 0, debug_substitutions = 0;
+static bool debug_avail = false;
 #endif
 
 namespace _availExpressionAnalysis {
@@ -26,812 +22,466 @@ namespace _availExpressionAnalysis {
 }
 #endif
 
-/* We allow at most 5 assertions to be available at any given point in
- * the state machines, so as to reduce the risk of dependency
- * explosion.  If we go over that then we keep the ones which are
- * earlier in the machine, for two reasons:
- *
- * 1) It's often most useful, as the earlier assumptions are generally
- * ones which have been recently introduced, while later ones have
- * been there a while so have probably already been used as we move
- * backwards through the program.
- * 2) It's much easier to implement.
- */
-#define MAX_LIVE_ASSERTIONS 5
+class availExprSet {
+	bbdd *definitelyTrue;
+	std::set<StateMachineSideEffectMemoryAccess *> memory;
+	std::map<threadAndRegister, exprbdd *> fixedRegs;
 
-class avail_t {
-	std::set<StateMachineSideEffect *> sideEffects;
-public:
-	std::set<StateMachineSideEffect *>::iterator beginSideEffects() { return sideEffects.begin(); }
-	std::set<StateMachineSideEffect *>::iterator endSideEffects() { return sideEffects.end(); }
-	void insertSideEffect(StateMachineSideEffect *smse) {
-		sideEffects.insert(smse);
-	}
-	void eraseSideEffect(std::set<StateMachineSideEffect *>::iterator it) {
-		sideEffects.erase(it);
-	}
-
-	bbdd *assumption;
-	struct registerMapEntry {
-		exprbdd *e;
-		registerMapEntry()
-			: e(NULL)
-		{}
-		registerMapEntry(exprbdd *_e)
-			: e(_e)
-		{}
-	};
-	std::map<threadAndRegister, registerMapEntry> _registers;
-
-	void clear() { sideEffects.clear(); assumption = NULL; _registers.clear(); }
-	void makeFalse(bbdd::scope *, bbdd *expr);
-	void dereference(SMScopes *scope, exprbdd *ptr, const AllowableOptimisations &opt);
-	/* Merge @other into the current availability set.  Returns
-	   true if we do anything, and false otherwise. */
-	bool mergeIntersection(bbdd::scope *scope, const avail_t &other);
-	bool mergeUnion(bbdd::scope *scope, const avail_t &other);
-
-	void calcRegisterMap(bbdd::scope *scope);
-
-	void invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMachineSideEffect *preserve);
-
-	int nr_asserts() const {
-		int cntr = 0;
-		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++)
-			if ((*it)->type == StateMachineSideEffect::AssertFalse)
-				cntr++;
-		return cntr;
-	}
-	void print(FILE *f);
-};
-
-void
-avail_t::print(FILE *f)
-{
-	if (!sideEffects.empty()) {
-		fprintf(f, "\tAvailable side effects:\n");
-		for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
-			fprintf(f, "\t\t");
-			(*it)->prettyPrint(f);
-			fprintf(f, "\n");
-		}
-	}
-	if (assumption) {
-		fprintf(f, "\tAssumption:\n");
-		assumption->prettyPrint(f);
-	}
-	if (!_registers.empty()) {
-		fprintf(f, "\tRegister map:\n");
-		for (auto it = _registers.begin(); it != _registers.end(); it++) {
-			fprintf(f, "\t\t");
-			it->first.prettyPrint(f);
-			fprintf(f, " -> ");
-			it->second.e->prettyPrint(f);
-		}
-	}
-}
-
-void
-avail_t::makeFalse(bbdd::scope *scope, bbdd *expr)
-{
-	expr = bbdd::invert(scope, expr);
-	if (assumption)
-		assumption =
-			bbdd::And(
-				scope,
-				assumption,
-				expr);
-	else
-		assumption = expr;
-}
-
-void
-avail_t::dereference(SMScopes *scopes, exprbdd *addr, const AllowableOptimisations &opt)
-{
-	if (TIMEOUT)
-		return;
-	exprbdd *badPtr = exprbdd::unop(
-		&scopes->exprs,
-		&scopes->bools,
-		Iop_BadPtr,
-		addr);
-	if (!badPtr)
-		return;
-	badPtr = simplifyBDD(&scopes->exprs, &scopes->bools, badPtr, false, opt);
-	makeFalse(&scopes->bools, exprbdd::to_bbdd(&scopes->bools, badPtr));
-}
-
-bool
-avail_t::mergeIntersection(bbdd::scope *scope,
-			   const avail_t &other)
-{
-	bool res;
-	res = false;
-	auto it1 = sideEffects.begin();
-	auto it2 = other.sideEffects.begin();
-	while (it1 != sideEffects.end() && it2 != other.sideEffects.end()) {
-		if (*it1 == *it2) {
-			it1++;
-			it2++;
-		} else if (*it1 < *it2) {
-			sideEffects.erase(it1++);
-			res = true;
-		} else {
-			assert(*it2 < *it1);
-			it2++;
-		}
-	}
-	while (it1 != sideEffects.end()) {
-		res = true;
-		sideEffects.erase(it1++);
-	}
-
-	/* We're supposed to take the intersection of the two sets
-	   i.e. we can only assume things which are true in both input
-	   sets, and so the new assumption is the union of the two
-	   input assumptions. */
-	bbdd *newAssumption;
-	if (assumption && other.assumption)
-		newAssumption = bbdd::Or(
-			scope,
-			assumption,
-			other.assumption);
-	else
-		newAssumption = NULL;
-	if (newAssumption != assumption) {
-		res = true;
-		assumption = newAssumption;
-	}
-	return res;
-}
-
-bool
-avail_t::mergeUnion(bbdd::scope *scope, const avail_t &other)
-{
-	bool res;
-	res = false;
-	for (auto it = other.sideEffects.begin(); it != other.sideEffects.end(); it++)
-		res |= sideEffects.insert(*it).second;
-	/* We're taking the union of the two avail_ts, so can assume
-	   anything which is known to be true in either of them
-	   i.e. we take the intersection of the two assumptions. */
-	if (assumption && other.assumption)
-		assumption = bbdd::And(
-			scope,
-			assumption,
-			other.assumption);
-	else if (other.assumption)
-		assumption = other.assumption;
-	return res;
-}
-
-/* Remove any references to register @reg from the available set.
-   Most of the time, that includes side effects which either use or
-   define @reg.  The exception is the side-effect @preserve, which is
-   only purged if it uses @reg (i.e. it'll be left in place if its
-   only reference to @reg is to use it). */
-struct avail_inv_reg_ctxt {
-	threadAndRegister reg;
-	const StateMachineSideEffect *preserve;
-};
-void
-avail_t::invalidateRegister(bbdd::scope *scope, threadAndRegister reg, StateMachineSideEffect *preserve)
-{
-	class {
-		typedef avail_inv_reg_ctxt ctxt;
-		static visit_result Get(ctxt *ctxt, const IRExprGet *e) {
-			if (e->reg == ctxt->reg)
-				return visit_abort;
-			else
-				return visit_continue;
-		}
-		static visit_result Load(ctxt *ctxt, const StateMachineSideEffectLoad *l)
-		{
-			if (l != ctxt->preserve && l->target == ctxt->reg)
-				return visit_abort;
-			else
-				return visit_continue;
-		}
-		static visit_result Copy(ctxt *ctxt, const StateMachineSideEffectCopy *c)
-		{
-			if (c != ctxt->preserve && c->target == ctxt->reg)
-				return visit_abort;
-			else
-				return visit_continue;
-		}
-		static visit_result Phi(ctxt *ctxt, const StateMachineSideEffectPhi *phi)
-		{
-			if (phi == ctxt->preserve)
-				return visit_continue;
-			if (phi->reg == ctxt->reg)
-				return visit_abort;
-			for (auto it = phi->generations.begin(); it != phi->generations.end(); it++)
-				if (it->reg == ctxt->reg)
-					return visit_abort;
-			return visit_continue;
-		}
-		std::map<bbdd *, bbdd *> memo;
-	public:
-		bool isPresent(const threadAndRegister &reg, const StateMachineSideEffect *preserve,
-			       const StateMachineSideEffect *se)
-		{
-			static state_machine_visitor<ctxt> visitor;
-			visitor.bdd.irexpr.Get = Get;
-			visitor.Load = Load;
-			visitor.Copy = Copy;
-			visitor.Phi = Phi;
-			ctxt ctxt;
-			ctxt.reg = reg;
-			ctxt.preserve = preserve;
-			if (visit_side_effect(&ctxt, &visitor, se) == visit_abort)
-				return true;
-			else
-				return false;
-		}
-		bbdd *invalidateRegister(bbdd::scope *scope,
-					 const threadAndRegister reg,
-					 bbdd *expr)
-		{
-			if (expr->isLeaf())
-				return expr;
-			auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(expr, (bbdd *)NULL));
-			auto it = it_did_insert.first;
-			auto did_insert = it_did_insert.second;
-			if (!did_insert)
-				return it->second;
-			bbdd *t = invalidateRegister(scope, reg, expr->internal().trueBranch);
-			bbdd *f = invalidateRegister(scope, reg, expr->internal().falseBranch);
-			if (t == f) {
-				it->second = t;
-				return t;
-			}
-			static irexpr_visitor<ctxt> visitor;
-			visitor.Get = Get;
-			ctxt ctxt;
-			ctxt.reg = reg;
-			ctxt.preserve = NULL;
-			if (visit_irexpr(&ctxt, &visitor, expr->internal().condition) == visit_abort) {
-				/* Behaviour depends on the register
-				   which we're trying to kill -> can't
-				   do anything */
-				it->second = scope->cnst(true);
-			} else {
-				if (t == expr->internal().trueBranch &&
-				    f == expr->internal().falseBranch) {
-					it->second = expr;
-				} else {
-					it->second = scope->makeInternal(expr->internal().condition, t, f);
+	class SubstRegsTransform : public IRExprTransformer {
+		const std::map<threadAndRegister, exprbdd *> &fixedRegs;
+		IRExpr *transformIex(IRExprGet *e) {
+			auto it = fixedRegs.find(e->reg);
+			if (it != fixedRegs.end()) {
+				if (it->second->type() >= e->type()) {
+					return coerceTypes(e->type(), exprbdd::to_irexpr(it->second));
 				}
 			}
-			return it->second;
+			return IRExprTransformer::transformIex(e);
 		}
-	} f;
+	public:
+		SubstRegsTransform(const std::map<threadAndRegister, exprbdd *> &_fixedRegs)
+			: fixedRegs(_fixedRegs)
+		{}
+	};
+	static visit_result mr_visit_Get(const threadAndRegister *tr,
+					 const IRExprGet *ieg) {
+		if (ieg->reg == *tr) {
+			return visit_abort;
+		} else {
+			return visit_continue;
+		}
+	}
+	static struct bdd_visitor<const threadAndRegister> mr_visitor;
 
-	for (auto it = sideEffects.begin(); it != sideEffects.end(); ) {
-		if (f.isPresent(reg, preserve, *it)) {
-			sideEffects.erase(it++);
+	static bool mentionsRegister(IRExpr *, const threadAndRegister &);
+	static bool mentionsRegister(exprbdd *, const threadAndRegister &);
+	static bbdd *bddPurgeRegister(SMScopes *, bbdd *, const threadAndRegister &, sane_map<bbdd *, bbdd *> &);
+	static bbdd *bddPurgeRegister(SMScopes *, bbdd *, const threadAndRegister &);
+
+	smrbdd *simplifySmrbdd(SMScopes *, smrbdd *) const;
+	bbdd *simplifyBbdd(SMScopes *, bbdd *) const;
+	exprbdd *simplifyExprbdd(SMScopes *, exprbdd *) const;
+#define mk_proto(name)							\
+	StateMachineSideEffect *simplifySE(SMScopes *, StateMachineSideEffect ## name *) const;
+	all_side_effect_types(mk_proto)
+#undef mk_proto
+	StateMachineSideEffect *simplifySideEffect(SMScopes *, StateMachineSideEffect *) const;
+
+public:
+	void clear(SMScopes *scopes) {
+		definitelyTrue = scopes->bools.cnst(true);
+		memory.clear();
+	}
+
+	void simplifyState(SMScopes *scopes, StateMachineState *, bool *) const;
+
+	void updateForSideEffect(SMScopes *, OracleInterface *, const MaiMap &m, const AllowableOptimisations &, StateMachineSideEffect *);
+	void assertTrue(SMScopes *, bbdd *);
+	void assertFalse(SMScopes *, bbdd *);
+	void merge(SMScopes *, const availExprSet &o);
+
+	void print() const;
+};
+struct bdd_visitor<const threadAndRegister> availExprSet::mr_visitor;
+
+bool
+availExprSet::mentionsRegister(IRExpr *what, const threadAndRegister &tr)
+{
+	mr_visitor.irexpr.Get = mr_visit_Get;
+	return visit_irexpr(&tr, &mr_visitor.irexpr, what) == visit_abort;
+}
+
+bool
+availExprSet::mentionsRegister(exprbdd *what, const threadAndRegister &tr)
+{
+	mr_visitor.irexpr.Get = mr_visit_Get;
+	return visit_bdd(&tr, &mr_visitor, visit_irexpr<const threadAndRegister>, what) == visit_abort;
+}
+
+bbdd *
+availExprSet::bddPurgeRegister(SMScopes *scopes, bbdd *what, const threadAndRegister &reg,
+			       sane_map<bbdd *, bbdd *> &memo)
+{
+	if (what->isLeaf()) {
+		return what;
+	}
+	auto it_did_insert = memo.insert(what, (bbdd *)0xf001);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+	auto t = bddPurgeRegister(scopes, what->internal().trueBranch, reg, memo);
+	auto f = bddPurgeRegister(scopes, what->internal().falseBranch, reg, memo);
+	if (t == f) {
+		it->second = t;
+	} else if (mentionsRegister(what->internal().condition, reg)) {
+		it->second = scopes->bools.cnst(true);
+	} else if (t == what->internal().trueBranch &&
+		   f == what->internal().falseBranch) {
+		it->second = what;
+	} else {
+		it->second = scopes->bools.makeInternal(
+			what->internal().condition,
+			what->internal().rank,
+			t,
+			f);
+	}
+	return it->second;
+}
+
+bbdd *
+availExprSet::bddPurgeRegister(SMScopes *scopes, bbdd *what, const threadAndRegister &reg)
+{
+	sane_map<bbdd *, bbdd *> memo;
+	return bddPurgeRegister(scopes, what, reg, memo);
+}
+
+
+smrbdd *
+availExprSet::simplifySmrbdd(SMScopes *scopes, smrbdd *smr) const
+{
+	SubstRegsTransform trans(fixedRegs);
+	return trans.transform_smrbdd(&scopes->bools, &scopes->smrs, smrbdd::assume(&scopes->smrs, smr, definitelyTrue));
+}
+
+bbdd *
+availExprSet::simplifyBbdd(SMScopes *scopes, bbdd *b) const
+{
+	SubstRegsTransform trans(fixedRegs);
+	return trans.transform_bbdd(&scopes->bools, bbdd::assume(&scopes->bools, b, definitelyTrue));
+}
+
+exprbdd *
+availExprSet::simplifyExprbdd(SMScopes *scopes, exprbdd *b) const
+{
+	SubstRegsTransform trans(fixedRegs);
+	return trans.transform_exprbdd(&scopes->bools, &scopes->exprs, exprbdd::assume(&scopes->exprs, b, definitelyTrue));
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectLoad *l) const
+{
+	auto b = simplifyExprbdd(scopes, l->addr);
+	if (TIMEOUT) {
+		return l;
+	}
+	for (auto it = memory.begin(); it != memory.end(); it++) {
+		StateMachineSideEffectMemoryAccess *other = *it;
+		if (other->addr == b) {
+			exprbdd *exp;
+			if (other->type == StateMachineSideEffect::Store) {
+				exp = ((StateMachineSideEffectStore *)other)->data;
+			} else {
+				auto o = (StateMachineSideEffectLoad *)other;
+				exp = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(o->target, l->type));
+			}
+			return new StateMachineSideEffectCopy(
+				l->target,
+				exp);
+		}
+	}
+	if (b == l->addr) {
+		return l;
+	} else {
+		return new StateMachineSideEffectLoad(l, b);
+	}
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectStore *s) const
+{
+	auto a = simplifyExprbdd(scopes, s->addr);
+	auto d = simplifyExprbdd(scopes, s->data);
+	if (TIMEOUT || (a == s->addr && d == s->data)) {
+		return s;
+	} else {
+		return new StateMachineSideEffectStore(s, a, d);
+	}
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectCopy *c) const
+{
+	auto d = simplifyExprbdd(scopes, c->value);
+	if (TIMEOUT || d == c->value) {
+		return c;
+	} else {
+		return new StateMachineSideEffectCopy(c, d);
+	}
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *, StateMachineSideEffectUnreached *c) const
+{
+	return c;
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectAssertFalse *a) const
+{
+	auto d = simplifyBbdd(scopes, a->value);
+	if (TIMEOUT || d == a->value) {
+		return a;
+	} else {
+		return new StateMachineSideEffectAssertFalse(a, d);
+	}
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *, StateMachineSideEffectPhi *p) const
+{
+	/* We could do a little bit better here, but Phi effects in
+	   non-SSA machines are so rare that it's not worth worrying
+	   about. */
+	return p;
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *, StateMachineSideEffectStartAtomic *c) const
+{
+	return c;
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *, StateMachineSideEffectEndAtomic *c) const
+{
+	return c;
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *, StateMachineSideEffectImportRegister *c) const
+{
+	return c;
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectStartFunction *s) const
+{
+	auto rsp = simplifyExprbdd(scopes, s->rsp);
+	if (TIMEOUT || rsp == s->rsp) {
+		return s;
+	} else {
+		return new StateMachineSideEffectStartFunction(s, rsp);
+	}
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectEndFunction *s) const
+{
+	auto rsp = simplifyExprbdd(scopes, s->rsp);
+	if (TIMEOUT || rsp == s->rsp) {
+		return s;
+	} else {
+		return new StateMachineSideEffectEndFunction(s, rsp);
+	}
+}
+
+StateMachineSideEffect *
+availExprSet::simplifySE(SMScopes *, StateMachineSideEffectStackLayout *c) const
+{
+	return c;
+}
+
+
+StateMachineSideEffect *
+availExprSet::simplifySideEffect(SMScopes *scopes, StateMachineSideEffect *se) const
+{
+	switch (se->type) {
+#define do_case(name)							\
+		case StateMachineSideEffect::name :			\
+			return simplifySE(scopes,			\
+					  (StateMachineSideEffect ## name *)se);
+		all_side_effect_types(do_case)
+#undef do_case
+	}
+	abort();
+}
+
+void
+availExprSet::simplifyState(SMScopes *scopes, StateMachineState *s, bool *done_something) const
+{
+	switch (s->type) {
+	case StateMachineState::Terminal: {
+		auto smt = (StateMachineTerminal *)s;
+		auto res = simplifySmrbdd(scopes, smt->res);
+		if (!TIMEOUT) {
+			if (debug_avail && res != smt->res) {
+				printf("Terminal:\n");
+				smt->res->prettyPrint(stdout);
+				printf("--------->\n");
+				res->prettyPrint(stdout);
+			}
+			*done_something |= smt->set_res(res);
+		}
+		return;
+	}
+	case StateMachineState::Bifurcate: {
+		auto smb = (StateMachineBifurcate *)s;
+		auto c = simplifyBbdd(scopes, smb->condition);
+		if (!TIMEOUT) {
+			if (debug_avail && c != smb->condition) {
+				printf("Condition:\n");
+				smb->condition->prettyPrint(stdout);
+				printf("------------>\n");
+				c->prettyPrint(stdout);
+			}
+			*done_something |= smb->set_condition(c);
+		}
+		return;
+	}
+	case StateMachineState::SideEffecting: {
+		auto sme = (StateMachineSideEffecting *)s;
+		if (!sme->sideEffect) {
+			return;
+		}
+		auto s = simplifySideEffect(scopes, sme->sideEffect);
+		if (!TIMEOUT) {
+			if (debug_avail && s != sme->sideEffect) {
+				printf("Side effect:\n");
+				sme->sideEffect->prettyPrint(stdout);
+				printf("\n------------>\n");
+				s->prettyPrint(stdout);
+			}
+			*done_something |= s != sme->sideEffect;
+			sme->sideEffect = s;
+		}
+		return;
+	}
+	}
+	abort();
+}
+
+void
+availExprSet::updateForSideEffect(SMScopes *scopes, OracleInterface *oracle, const MaiMap &decode, const AllowableOptimisations &opt, StateMachineSideEffect *se)
+{
+	if (!se) {
+		return;
+	}
+
+	/* Does this kill off any memory accesses? */
+	if (se->type == StateMachineSideEffect::Store) {
+		auto sms = (StateMachineSideEffectStore *)se;
+		for (auto it = memory.begin(); it != memory.end(); ) {
+			if (oracle->memoryAccessesMightAlias(decode, opt, *it, (StateMachineSideEffectMemoryAccess *)sms) &&
+			    !definitelyNotEqual(sms->addr, (*it)->addr, opt)) {
+				memory.erase(it++);
+			} else {
+				it++;
+			}
+		}
+	}
+
+	/* Make its effects available */
+	if (se->type == StateMachineSideEffect::Store ||
+	    se->type == StateMachineSideEffect::Load) {
+		auto ma = (StateMachineSideEffectMemoryAccess *)se;
+		memory.insert(ma);
+		definitelyTrue = bbdd::And(
+			&scopes->bools,
+			definitelyTrue,
+			bbdd::invert(
+				&scopes->bools,
+				exprbdd::to_bbdd(
+					&scopes->bools,
+					exprbdd::unop(
+						&scopes->exprs,
+						&scopes->bools,
+						Iop_BadPtr,
+						ma->addr))));
+	}
+	if (se->type == StateMachineSideEffect::Copy) {
+		auto cp = (StateMachineSideEffectCopy *)se;
+		fixedRegs[cp->target] = cp->value;
+	}
+	if (se->type == StateMachineSideEffect::AssertFalse) {
+		auto af = (StateMachineSideEffectAssertFalse *)se;
+		definitelyTrue = bbdd::And(
+			&scopes->bools,
+			definitelyTrue,
+			bbdd::invert(
+				&scopes->bools,
+				af->value));
+	}
+
+	/* And now remove any effects which we just invalidated. */
+	threadAndRegister r(threadAndRegister::invalid());
+	if (se->definesRegister(r)) {
+		definitelyTrue = bddPurgeRegister(scopes, definitelyTrue, r);
+		for (auto it = memory.begin(); it != memory.end(); ) {
+			auto ma = *it;
+			bool kill;
+			if (ma->type == StateMachineSideEffect::Load) {
+				auto l = (StateMachineSideEffectLoad *)ma;
+				kill = l->target == r || mentionsRegister(l->addr, r);
+			} else {
+				auto s = (StateMachineSideEffectStore *)ma;
+				kill = mentionsRegister(s->addr, r) ||
+					mentionsRegister(s->data, r);
+			}
+			if (kill) {
+				memory.erase(it++);
+			} else {
+				it++;
+			}
+		}
+		for (auto it = fixedRegs.begin(); it != fixedRegs.end(); ) {
+			if (mentionsRegister(it->second, r)) {
+				fixedRegs.erase(it++);
+			} else {
+				it++;
+			}
+		}
+	}
+}
+
+void
+availExprSet::assertTrue(SMScopes *scopes, bbdd *what)
+{
+	definitelyTrue = bbdd::And(&scopes->bools,
+				   what,
+				   definitelyTrue);
+}
+
+void
+availExprSet::assertFalse(SMScopes *scopes, bbdd *what)
+{
+	definitelyTrue = bbdd::And(&scopes->bools,
+				   bbdd::invert(&scopes->bools, what),
+				   definitelyTrue);
+}
+
+void
+availExprSet::merge(SMScopes *scopes, const availExprSet &o)
+{
+	definitelyTrue = bbdd::Or(&scopes->bools,
+				  definitelyTrue,
+				  o.definitelyTrue);
+	for (auto it = fixedRegs.begin(); it != fixedRegs.end(); ) {
+		auto it2 = o.fixedRegs.find(it->first);
+		if (it2 == o.fixedRegs.end() || it2->second != it->second) {
+			fixedRegs.erase(it++);
 		} else {
 			it++;
 		}
 	}
-	if (assumption)
-		assumption = f.invalidateRegister(scope, reg, assumption);
+	memory &= o.memory;
 }
 
 void
-avail_t::calcRegisterMap(bbdd::scope *scope)
+availExprSet::print() const
 {
-	_registers.clear();
-	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
-		StateMachineSideEffect *se = *it;
-		if (se->type == StateMachineSideEffect::Copy) {
-			StateMachineSideEffectCopy *sep = (StateMachineSideEffectCopy *)se;
-			/* It's really bad news if we have two
-			   available expressions which both define the
-			   same register. */
-			assert(!_registers.count(sep->target));
-			_registers[sep->target] = avail_t::registerMapEntry(sep->value);
-		} else if (se->type == StateMachineSideEffect::AssertFalse) {
-			StateMachineSideEffectAssertFalse *seaf = (StateMachineSideEffectAssertFalse *)se;
-			makeFalse(scope, seaf->value);
-		} else if (se->type == StateMachineSideEffect::Phi) {
-			StateMachineSideEffectPhi *smsep = (StateMachineSideEffectPhi *)se;
-			assert(!smsep->generations.empty());
-			if (smsep->generations.size() == 1)
-				_registers[smsep->reg] = registerMapEntry(smsep->generations[0].val);
-		}
-	}
-}
-
-static void
-updateAvailSetForSideEffect(SMScopes *scopes,
-			    const MaiMap &decode,
-			    avail_t &outputAvail,
-			    StateMachineSideEffect *smse,
-			    const AllowableOptimisations &opt,
-			    OracleInterface *oracle)
-{
-	if (TIMEOUT)
-		return;
-	switch (smse->type) {
-	case StateMachineSideEffect::Store: {
-		StateMachineSideEffectStore *smses =
-			dynamic_cast<StateMachineSideEffectStore *>(smse);
-		assert(smses);
-		/* Eliminate anything which is killed */
-		for (auto it = outputAvail.beginSideEffects();
-		     it != outputAvail.endSideEffects();
-			) {
-			StateMachineSideEffectStore *smses2 =
-				dynamic_cast<StateMachineSideEffectStore *>(*it);
-			StateMachineSideEffectLoad *smsel2 =
-				dynamic_cast<StateMachineSideEffectLoad *>(*it);
-			exprbdd *addr;
-			if (smses2)
-				addr = smses2->addr;
-			else if (smsel2)
-				addr = smsel2->addr;
-			else
-				addr = NULL;
-
-			if ( addr &&
-			     ((smses2 && oracle->memoryAccessesMightAlias(decode, opt, smses2, smses)) ||
-			      (smsel2 && oracle->memoryAccessesMightAlias(decode, opt, smsel2, smses))) &&
-			     !definitelyNotEqual( addr,
-						  smses->addr,
-						  opt) )
-				outputAvail.eraseSideEffect(it++);
-			else
-				it++;
-		}
-		/* Introduce the store which was generated. */
-		if (!oracle->hasConflictingRemoteStores(decode, opt, smses))
-			outputAvail.insertSideEffect(smses);
-		outputAvail.dereference(scopes, smses->addr, opt);
-		break;
-	}
-	case StateMachineSideEffect::Copy: {
-		StateMachineSideEffectCopy *smsec =
-			dynamic_cast<StateMachineSideEffectCopy *>(smse);
-		assert(smsec);
-		outputAvail.insertSideEffect(smsec);
-		break;
-	}
-	case StateMachineSideEffect::Load: {
-		StateMachineSideEffectLoad *smsel =
-			dynamic_cast<StateMachineSideEffectLoad *>(smse);
-		if (!oracle->hasConflictingRemoteStores(decode, opt, smsel))
-			outputAvail.insertSideEffect(smsel);
-		outputAvail.dereference(scopes, smsel->addr, opt);
-		break;
-	}
-	case StateMachineSideEffect::AssertFalse: {
-		StateMachineSideEffectAssertFalse *smseaf =
-			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
-		outputAvail.makeFalse(&scopes->bools, smseaf->value);
-		break;
-	}
-	case StateMachineSideEffect::Unreached:
-		break;
-	case StateMachineSideEffect::Phi: {
-		StateMachineSideEffectPhi *p =
-			(StateMachineSideEffectPhi *)smse;
-		outputAvail.insertSideEffect(p);
-		break;
-	}
-	case StateMachineSideEffect::StartAtomic:
-	case StateMachineSideEffect::EndAtomic:
-		/* XXX we could be a bit more cunning here and keep
-		   loads to shared locations available until the end
-		   of the atomic section, but that's a bit tricky and
-		   doesn't actually make much difference in any of the
-		   places where we use atomic blocks. */
-		break;
-#if !CONFIG_NO_STATIC_ALIASING
-	case StateMachineSideEffect::StartFunction:
-	case StateMachineSideEffect::EndFunction:
-	case StateMachineSideEffect::StackLayout:
-#endif
-	case StateMachineSideEffect::ImportRegister:
-		break;
-	}
-
-	threadAndRegister r(threadAndRegister::invalid());
-	if (smse->definesRegister(r))
-		outputAvail.invalidateRegister(&scopes->bools, r, smse);
-}
-
-class applyAvailTransformer : public IRExprTransformer {
-	const avail_t &avail;
-	IRExpr *transformIex(IRExprGet *e) {
-		auto it = avail._registers.find(e->reg);
-		if (it != avail._registers.end()) {
-			if (it->second.e->type() >= e->type())
-				return coerceTypes(e->type(), exprbdd::to_irexpr(it->second.e));
-		}
-		return IRExprTransformer::transformIex(e);
-	}
-public:
-	applyAvailTransformer(const avail_t &_avail)
-		: avail(_avail)
-	{}
-};
-static bbdd *
-applyAvailSet(bbdd::scope *scope, const avail_t &avail, bbdd *expr, bool *done_something)
-{
-	applyAvailTransformer aat(avail);
-	bbdd *e = aat.transform_bbdd(scope, expr);
-	if (e != expr)
-		*done_something = true;
-	if (!avail.assumption)
-		return e;
-	bbdd *e2 = bbdd::assume(
-		scope,
-		e,
-		avail.assumption);
-	if (e2 != e)
-		*done_something = true;
-	return e2;
-}
-static smrbdd *
-applyAvailSet(SMScopes *scopes, const avail_t &avail, smrbdd *expr, bool *done_something)
-{
-	applyAvailTransformer aat(avail);
-	smrbdd *e = aat.transform_smrbdd(&scopes->bools, &scopes->smrs, expr);
-	if (e != expr)
-		*done_something = true;
-	if (!avail.assumption)
-		return e;
-	smrbdd *e2 = smrbdd::assume(
-		&scopes->smrs,
-		e,
-		avail.assumption);
-	if (e2 != e)
-		*done_something = true;
-	return e2;
-}
-static exprbdd *
-applyAvailSet(SMScopes *scopes, const avail_t &avail, exprbdd *expr, bool *done_something)
-{
-	applyAvailTransformer aat(avail);
-	exprbdd *e = aat.transform_exprbdd(&scopes->bools, &scopes->exprs, expr);
-	if (e != expr)
-		*done_something = true;
-	if (!avail.assumption)
-		return e;
-	exprbdd *e2 = exprbdd::assume(
-		&scopes->exprs,
-		e,
-		avail.assumption);
-	if (e2 != e)
-		*done_something = true;
-	return e2;
-}
-
-/* Slightly misnamed: this also propagates copy operations.  Also, it
-   doesn't so much eliminate loads are replace them with copies of
-   already-loaded values. */
-static StateMachineSideEffect *
-buildNewStateMachineWithLoadsEliminated(SMScopes *scopes,
-					const MaiMap &decode,
-					StateMachineSideEffect *smse,
-					avail_t &currentlyAvailable,
-					OracleInterface *oracle,
-					bool *done_something,
-					const AllowableOptimisations &opt)
-{
-	StateMachineSideEffect *newEffect;
-
-	if (debug_substitutions) {
-		printf("Side effect ");
-		smse->prettyPrint(stdout);
+	printf("Definitely true:\n");
+	definitelyTrue->prettyPrint(stdout);
+	printf("memory:\n");
+	for (auto it = memory.begin(); it != memory.end(); it++) {
+		printf("\t");
+		(*it)->prettyPrint(stdout);
 		printf("\n");
 	}
-
-	if (currentlyAvailable.assumption &&
-	    currentlyAvailable.assumption == scopes->bools.cnst(false))
-		return StateMachineSideEffectUnreached::get();
-
-	newEffect = NULL;
-	switch (smse->type) {
-	case StateMachineSideEffect::Store: {
-		StateMachineSideEffectStore *smses =
-			dynamic_cast<StateMachineSideEffectStore *>(smse);
-		exprbdd *newAddr;
-		exprbdd *newData;
-		bool doit = false;
-		newAddr = applyAvailSet(scopes, currentlyAvailable, smses->addr, &doit);
-		newData = applyAvailSet(scopes, currentlyAvailable, smses->data, &doit);
-		if (doit) {
-			newEffect = new StateMachineSideEffectStore(
-				smses, newAddr, newData);
-			*done_something = true;
-		} else {
-			newEffect = smses;
-		}
-		break;
-	}
-	case StateMachineSideEffect::Load: {
-		StateMachineSideEffectLoad *smsel =
-			dynamic_cast<StateMachineSideEffectLoad *>(smse);
-		exprbdd *newAddr;
-		bool doit = false;
-		newAddr = applyAvailSet(scopes, currentlyAvailable, smsel->addr, &doit);
-		if (TIMEOUT) {
-			newEffect = smse;
-			break;
-		}
-		for (auto it2 = currentlyAvailable.beginSideEffects();
-		     !newEffect && it2 != currentlyAvailable.endSideEffects();
-		     it2++) {
-			StateMachineSideEffectStore *smses2 =
-				dynamic_cast<StateMachineSideEffectStore *>(*it2);
-			StateMachineSideEffectLoad *smsel2 =
-				dynamic_cast<StateMachineSideEffectLoad *>(*it2);
-			if ( smses2 &&
-			     smsel->type <= smses2->data->type() &&
-			     smsel->tag == smses2->tag &&
-			     definitelyEqual(smses2->addr, newAddr, opt) ) {
-				newEffect =
-					new StateMachineSideEffectCopy(
-						smsel->target,
-						exprbdd::coerceTypes(
-							&scopes->exprs,
-							&scopes->bools,
-							smsel->type,
-							smses2->data));
-			} else if ( smsel2 &&
-				    smsel->type <= smsel2->type &&
-				    smsel->tag == smsel2->tag &&
-				    definitelyEqual(smsel2->addr, newAddr, opt) ) {
-				newEffect =
-					new StateMachineSideEffectCopy(
-						smsel->target,
-						exprbdd::var(&scopes->exprs, &scopes->bools, IRExprGet::mk(smsel2->target, smsel->type)));
-			}
-		}
-		if (!newEffect && doit)
-			newEffect = new StateMachineSideEffectLoad(smsel, newAddr);
-		if (!newEffect)
-			newEffect = smse;
-		if (newEffect != smse)
-			*done_something = true;
-		break;
-	}
-	case StateMachineSideEffect::Copy: {
-		StateMachineSideEffectCopy *smsec =
-			dynamic_cast<StateMachineSideEffectCopy *>(smse);
-		exprbdd *newValue;
-		bool doit = false;
-		newValue = applyAvailSet(scopes, currentlyAvailable, smsec->value, &doit);
-		if (doit) {
-			*done_something = true;
-			newEffect = new StateMachineSideEffectCopy(
-				smsec->target, newValue);
-		} else
-			newEffect = smse;
-		break;
-	}
-	case StateMachineSideEffect::Unreached:
-	case StateMachineSideEffect::StartAtomic:
-	case StateMachineSideEffect::EndAtomic:
-#if !CONFIG_NO_STATIC_ALIASING
-	case StateMachineSideEffect::StackLayout:
-#endif
-	case StateMachineSideEffect::ImportRegister:
-		newEffect = smse;
-		break;
-	case StateMachineSideEffect::AssertFalse: {
-		StateMachineSideEffectAssertFalse *smseaf =
-			dynamic_cast<StateMachineSideEffectAssertFalse *>(smse);
-		bbdd *newVal;
-		bool doit = false;
-		if (currentlyAvailable.nr_asserts() < MAX_LIVE_ASSERTIONS) {
-			newVal = applyAvailSet(&scopes->bools, currentlyAvailable, smseaf->value, &doit);
-		} else {
-			/* We have too many live assertions.
-			   That can lead to them holding
-			   enormous number of variables live,
-			   which isn't much use, so turn this
-			   one into a no-op.  It'll get
-			   optimised out again later. */
-			newVal = NULL;
-			doit = true;
-		}
-		if (doit) {
-			if (newVal)
-				newEffect = new StateMachineSideEffectAssertFalse(newVal, smseaf->reflectsActualProgram);
-			else
-				newEffect = NULL;
-			*done_something = true;
-		} else
-			newEffect = smse;
-		break;
-	}
-	case StateMachineSideEffect::Phi: {
-		StateMachineSideEffectPhi *phi =
-			(StateMachineSideEffectPhi *)smse;
-		unsigned x = 0;
-		exprbdd *e;
-		e = (exprbdd *)0xdead; /* shut compiler up */
-		while (x < phi->generations.size()) {
-			bool t = false;
-			e = applyAvailSet(scopes,
-					  currentlyAvailable,
-					  phi->generations[x].val,
-					  &t);
-			*done_something |= t;
-			if (e != phi->generations[x].val)
-				break;
-			x++;
-		}
-		if (x == phi->generations.size()) {
-			newEffect = phi;
-			break;
-		}
-		std::vector<StateMachineSideEffectPhi::input> inputs(phi->generations);
-		inputs[x].val = e;
-		for (x++; x < phi->generations.size(); x++)
-			inputs[x].val = applyAvailSet(scopes,
-						      currentlyAvailable,
-						      phi->generations[x].val,
-						      done_something);
-		*done_something = true;
-		newEffect = new StateMachineSideEffectPhi(phi, inputs);
-		break;
-	}
-#if !CONFIG_NO_STATIC_ALIASING
-	case StateMachineSideEffect::StartFunction: {
-		StateMachineSideEffectStartFunction *sf =
-			(StateMachineSideEffectStartFunction *)smse;
-		bool doit = false;
-		exprbdd *newRsp;
-		newRsp = applyAvailSet(scopes, currentlyAvailable, sf->rsp, &doit);
-		if (doit) {
-			newEffect = new StateMachineSideEffectStartFunction(newRsp, sf->frame);
-			*done_something = true;
-		} else {
-			newEffect = smse;
-		}
-		break;
-	}
-	case StateMachineSideEffect::EndFunction: {
-		StateMachineSideEffectEndFunction *sf =
-			(StateMachineSideEffectEndFunction *)smse;
-		bool doit = false;
-		exprbdd *newRsp;
-		newRsp = applyAvailSet(scopes, currentlyAvailable, sf->rsp, &doit);
-		if (doit) {
-			newEffect = new StateMachineSideEffectEndFunction(newRsp, sf->frame);
-			*done_something = true;
-		} else {
-			newEffect = smse;
-		}
-		break;
-	}
-#endif
-	}
-	if (debug_substitutions) {
-		printf("New side effect ");
-		newEffect->prettyPrint(stdout);
-		printf("\n");
-	}
-	if (!*done_something) assert(newEffect == smse);
-	if (newEffect)
-		updateAvailSetForSideEffect(scopes, decode, currentlyAvailable, newEffect, opt, oracle);
-	currentlyAvailable.calcRegisterMap(&scopes->bools);
-	if (debug_substitutions) {
-		printf("New available set:\n");
-		currentlyAvailable.print(stdout);
-	}
-
-	return newEffect;
-}
-
-static StateMachineState *
-buildNewStateMachineWithLoadsEliminated(
-	SMScopes *scopes,
-	const MaiMap &decode,
-	StateMachineState *sm,
-	std::map<StateMachineState *, avail_t> &availMap,
-	std::map<StateMachineState *, StateMachineState *> &memo,
-	const AllowableOptimisations &opt,
-	OracleInterface *oracle,
-	bool *done_something,
-	std::map<const StateMachineState *, int> &edgeLabels)
-{
-	if (memo.count(sm)) {
-		/* We rely on whoever it was that set memo[sm] having
-		 * also set *done_something if appropriate. */
-		return memo[sm];
-	}
-	avail_t avail(availMap[sm]);
-
-	StateMachineState *res;
-	/* Shut compiler up */
-	res = (StateMachineState *)0xf001ul;
-	avail.calcRegisterMap(&scopes->bools);
-	if (avail.assumption == scopes->bools.cnst(false)) {
-		res = new StateMachineTerminal(
-			sm->dbg_origin,
-			scopes->smrs.cnst(smr_unreached));
-	} else {
-		switch (sm->type) {
-		case StateMachineState::Bifurcate: {
-			StateMachineBifurcate *smb = (StateMachineBifurcate *)sm;
-			bbdd *newCond = applyAvailSet(&scopes->bools, avail, smb->condition, done_something);
-			if (newCond)
-				res = new StateMachineBifurcate(smb, newCond);
-			else
-				res = smb;
-			break;
-		}
-		case StateMachineState::SideEffecting: {
-			StateMachineSideEffecting *smp = (StateMachineSideEffecting *)sm;
-			StateMachineSideEffect *newEffect;
-			if (smp->sideEffect)
-				newEffect = buildNewStateMachineWithLoadsEliminated(scopes,
-										    decode,
-										    smp->sideEffect,
-										    avail,
-										    oracle,
-										    done_something,
-										    opt);
-			else
-				newEffect = NULL;
-			res = new StateMachineSideEffecting(smp, newEffect);
-			break;
-		}
-		case StateMachineState::Terminal: {
-			StateMachineTerminal *smt = (StateMachineTerminal *)sm;
-			smrbdd *newres = applyAvailSet(scopes, avail, smt->res, done_something);
-			if (newres)
-				res = new StateMachineTerminal(smt, newres);
-			else
-				res = smt;
-			break;
-		}
-		}
-	}
-
-	memo[sm] = res;
-	std::vector<StateMachineState **> targets;
-	res->targets(targets);
-	for (auto it = targets.begin(); it != targets.end(); it++) {
-		**it = buildNewStateMachineWithLoadsEliminated(
-			scopes, decode, **it, availMap, memo, opt, oracle,
-			done_something, edgeLabels);
-	}
-	return res;
-}
-
-static StateMachine *
-buildNewStateMachineWithLoadsEliminated(
-	SMScopes *scopes,
-	const MaiMap &decode,
-	StateMachine *sm,
-	std::map<StateMachineState *, avail_t> &availMap,
-	const AllowableOptimisations &opt,
-	OracleInterface *oracle,
-	bool *done_something,
-	std::map<const StateMachineState *, int> &edgeLabels)
-{
-	std::map<StateMachineState *, StateMachineState *> memo;
-	bool d = false;
-	StateMachineState *new_root = buildNewStateMachineWithLoadsEliminated(scopes,
-									      decode,
-									      sm->root,
-									      availMap,
-									      memo,
-									      opt,
-									      oracle,
-									      &d,
-									      edgeLabels);
-	if (d) {
-		*done_something = true;
-		return new StateMachine(sm, new_root);
-	} else {
-		return sm;
+	for (auto it = fixedRegs.begin(); it != fixedRegs.end(); it++) {
+		printf("Fixed reg %s ->\n", it->first.name());
+		it->second->prettyPrint(stdout);
 	}
 }
 
@@ -843,154 +493,100 @@ availExpressionAnalysis(SMScopes *scopes,
 			OracleInterface *oracle,
 			bool *done_something)
 {
-	std::map<const StateMachineState *, int> edgeLabels;
-	if (dump_avail_table || debug_substitutions) {
-		printf("Avail analysis on state machine:\n");
-		printStateMachine(sm, stdout, edgeLabels);
+	std::map<const StateMachineState *, int> labels;
+	if (debug_avail) {
+		printf("Avail analysis:\n");
+		printStateMachine(sm, stdout, labels);
 	}
 
-	__set_profiling(availExpressionAnalysis);
-
-	std::set<StateMachineState *> allStates;
-	enumStates(sm, &allStates);
-
-	std::map<StateMachineState *, avail_t> availOnEntry;
-
-	static class _ {
-	public:
-		int nr_avail_calls;
-		int nr_phase1_iters;
-		int nr_phase2_iters;
-		int nr_useful_phase2;
-		_()
-			: nr_avail_calls(0),
-			  nr_phase1_iters(0),
-			  nr_phase2_iters(0),
-			  nr_useful_phase2(0)
-		{}
-		~_() {
-			printf("Avail analysis: invoked %d times, %d phase 1 iters (%f per), %d phase 2 (%f per), %d phase2 useful (%f%%)\n",
-			       nr_avail_calls,
-			       nr_phase1_iters,
-			       (double)nr_phase1_iters / nr_avail_calls,
-			       nr_phase2_iters,
-			       (double)nr_phase2_iters / nr_avail_calls,
-			       nr_useful_phase2,
-			       nr_useful_phase2 * 100.0 / nr_avail_calls);
-		}
-	} stats;
-
-	stats.nr_avail_calls++;
-
-	/* We use a two-phase building process here.  In the first
-	 * phase, we build an availability map using unions at
-	 * path-join, which is an overapproximation.  We then refine
-	 * it using intersections at path-join, which is an
-	 * underapproximation.  This ends up being equivalant to
-	 * starting with an initial state in which everything is
-	 * available everywhere and then going straight to the
-	 * intersection phase, except that it means you don't need to
-	 * build the full O(n^2) everything-everywhere availability
-	 * table. */
-	std::queue<StateMachineState *> statesNeedingRefresh;
-	for (auto it = allStates.begin(); it != allStates.end(); it++)
-		statesNeedingRefresh.push(*it);
-	while (!statesNeedingRefresh.empty() && !TIMEOUT) {
-		StateMachineState *state = statesNeedingRefresh.front();
-		statesNeedingRefresh.pop();
-
-		avail_t outputAvail(availOnEntry[state]);
-		if ( state->type == StateMachineState::SideEffecting ) {
-			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
-			if (se)
-				updateAvailSetForSideEffect(scopes, decode, outputAvail,
-							    se, opt, oracle);
-		}
-
-		std::vector<StateMachineState *> edges;
-		state->targets(edges);
-		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
-			if (availOnEntry[*it2].mergeUnion(&scopes->bools, outputAvail))
-				statesNeedingRefresh.push(*it2);
-		}
-		stats.nr_phase1_iters++;
-	}
-
-	if (TIMEOUT)
-		return sm;
-
-	if (dump_avail_table) {
-		printf("Availability map after phase one:\n");
-		for (auto it = availOnEntry.begin();
-		     it != availOnEntry.end();
-		     it++) {
-			printf("Edge %d:\n", edgeLabels[it->first]);
-			it->second.print(stdout);
+	std::vector<StateMachineState *> states;
+	enumStates(sm, &states);
+	std::map<const StateMachineState *, int> nrPredecessors;
+	nrPredecessors[sm->root] = 0;
+	for (auto it = states.begin(); it != states.end(); it++) {
+		std::vector<StateMachineState *> targ;
+		(*it)->targets(targ);
+		for (auto it2 = targ.begin(); it2 != targ.end(); it2++) {
+			nrPredecessors[*it2]++;
 		}
 	}
 
-	bool phase2_useful = false;
+	sane_map<StateMachineState *, availExprSet> availMap;
+	availMap[sm->root].clear(scopes);
 
-	/* Now do it using intersections. */
-	for (auto it = allStates.begin(); it != allStates.end(); it++)
-		statesNeedingRefresh.push(*it);
-	while (!statesNeedingRefresh.empty() && !TIMEOUT) {
-		StateMachineState *state = statesNeedingRefresh.front();
-		statesNeedingRefresh.pop();
+	std::vector<StateMachineState *> pending;
+	pending.push_back(sm->root);
+	while (!TIMEOUT && !pending.empty()) {
+		StateMachineState *s = pending.back();
+		pending.pop_back();
 
-		avail_t outputAvail(availOnEntry[state]);
-		if ( state->type == StateMachineState::SideEffecting ) {
-			StateMachineSideEffect *se = ((StateMachineSideEffecting *)state)->sideEffect;
-			if (se)
-				updateAvailSetForSideEffect(scopes, decode, outputAvail,
-							    se, opt, oracle);
+		assert(nrPredecessors.count(s));
+		assert(nrPredecessors[s] == 0);
+
+		auto it_avail = availMap.find(s);
+		assert(it_avail != availMap.end());
+		availExprSet availHere(it_avail->second);
+		availMap.erase(it_avail);
+
+		if (debug_avail) {
+			printf("Consider l%d, entry avail =\n", labels[s]);
+			availHere.print();
 		}
 
-		std::vector<StateMachineState *> edges;
-		state->targets(edges);
-		for (auto it2 = edges.begin(); it2 != edges.end(); it2++) {
-			if (availOnEntry[*it2].mergeIntersection(&scopes->bools, outputAvail)) {
-				phase2_useful = true;
-				statesNeedingRefresh.push(*it2);
+		availHere.simplifyState(scopes, s, done_something);
+
+		/* Update successor avail sets */
+		switch (s->type) {
+		case StateMachineState::Terminal:
+			/* No successors */
+			break;
+		case StateMachineState::Bifurcate: {
+			auto smb = (StateMachineBifurcate *)s;
+			auto t_it_did_insert = availMap.insert(smb->trueTarget, availHere);
+			if (t_it_did_insert.second) {
+				t_it_did_insert.first->second.assertTrue(scopes, smb->condition);
+			} else {
+				availExprSet tAvail(availHere);
+				tAvail.assertTrue(scopes, smb->condition);
+				t_it_did_insert.first->second.merge(scopes, tAvail);
 			}
-		}
-		stats.nr_phase2_iters++;
-	}
-
-	if (phase2_useful)
-		stats.nr_useful_phase2++;
-
-	if (dump_avail_table) {
-		if (phase2_useful) {
-			printf("Final entry availability map:\n");
-			for (auto it = availOnEntry.begin();
-			     it != availOnEntry.end();
-			     it++) {
-				printf("Edge %d:\n", edgeLabels[it->first]);
-				it->second.print(stdout);
+			auto f_it_did_insert = availMap.insert(smb->falseTarget, availHere);
+			if (f_it_did_insert.second) {
+				f_it_did_insert.first->second.assertFalse(scopes, smb->condition);
+			} else {
+				availHere.assertFalse(scopes, smb->condition);
+				f_it_did_insert.first->second.merge(scopes, availHere);
 			}
-		} else {
-			printf("Phase 2 had no effect.\n");
-		}
 
+			assert(nrPredecessors[smb->trueTarget] > 0);
+			if (--nrPredecessors[smb->trueTarget] == 0) {
+				pending.push_back(smb->trueTarget);
+			}
+			assert(nrPredecessors[smb->falseTarget] > 0);
+			if (--nrPredecessors[smb->falseTarget] == 0) {
+				pending.push_back(smb->falseTarget);
+			}
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			auto sme = (StateMachineSideEffecting *)s;
+			auto it_did_insert = availMap.insert(sme->target, availHere);
+			if (it_did_insert.second) {
+				it_did_insert.first->second.updateForSideEffect(scopes, oracle, decode, opt, sme->sideEffect);
+			} else {
+				availHere.updateForSideEffect(scopes, oracle, decode, opt, sme->sideEffect);
+				it_did_insert.first->second.merge(scopes, availHere);
+			}
+			assert(nrPredecessors[sme->target] > 0);
+			if (--nrPredecessors[sme->target] == 0) {
+				pending.push_back(sme->target);
+			}
+			break;
+		}
+		}
 	}
 
-	if (TIMEOUT)
-		return sm;
-
-	/* So after all that we now have a complete map of what's
-	   available where.  Given that, we should be able to
-	   construct a new state machine with redundant loads replaced
-	   with copy side effects. */
-	return buildNewStateMachineWithLoadsEliminated(
-		scopes,
-		decode,
-		sm,
-		availOnEntry,
-		opt,
-		oracle,
-		done_something,
-		edgeLabels);
+	return sm;
 }
 
 typedef std::map<threadAndRegister, exprbdd *> regDefT;
