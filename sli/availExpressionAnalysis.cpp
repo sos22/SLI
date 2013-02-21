@@ -142,6 +142,9 @@ smrbdd *
 availExprSet::simplifySmrbdd(SMScopes *scopes, smrbdd *smr) const
 {
 	SubstRegsTransform trans(fixedRegs);
+	if (definitelyTrue->isLeaf() && !definitelyTrue->leaf()) {
+		return scopes->smrs.cnst(smr_unreached);
+	}
 	return trans.transform_smrbdd(&scopes->bools, &scopes->smrs, smrbdd::assume(&scopes->smrs, smr, definitelyTrue));
 }
 
@@ -287,6 +290,9 @@ availExprSet::simplifySE(SMScopes *, StateMachineSideEffectStackLayout *c) const
 StateMachineSideEffect *
 availExprSet::simplifySideEffect(SMScopes *scopes, StateMachineSideEffect *se) const
 {
+	if (definitelyTrue->isLeaf() && !definitelyTrue->leaf()) {
+		return StateMachineSideEffectUnreached::get();
+	}
 	switch (se->type) {
 #define do_case(name)							\
 		case StateMachineSideEffect::name :			\
@@ -318,6 +324,14 @@ availExprSet::simplifyState(SMScopes *scopes, StateMachineState *s, bool *done_s
 	}
 	case StateMachineState::Bifurcate: {
 		auto smb = (StateMachineBifurcate *)s;
+		if (definitelyTrue->isLeaf() && !definitelyTrue->leaf()) {
+			smb->trueTarget = smb->falseTarget =
+				new StateMachineTerminal(
+					smb->dbg_origin,
+					scopes->smrs.cnst(smr_unreached));
+			*done_something = true;
+			return;
+		}
 		auto c = simplifyBbdd(scopes, smb->condition);
 		if (!TIMEOUT) {
 			if (debug_avail && c != smb->condition) {
