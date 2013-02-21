@@ -43,6 +43,7 @@ decode_instr(AddressSpace *as, unsigned long ptr, const ThreadCfgLabel &label,
 		case 0x66:
 			op_bytes = 2;
 			break;
+		case 0x2e: /* CS override */
 		case 0x64: /* FS override */
 		case 0x65: /* GS override */
 		case 0xf0: /* LOCK */
