@@ -405,6 +405,22 @@ public:
 		hv(target);
 	}
 };
+class SMBStateTerminal : public SMBState {
+	StateMachineState *_compile(std::vector<reloc_t> &,
+				    std::vector<reloc2> &,
+				    SMBCompilerState &state) const {
+		return new StateMachineTerminal(state.vr, state.scopes->smrs.cnst(term));
+	}
+public:
+	StateMachineRes const term;
+	explicit SMBStateTerminal(StateMachineRes _term)
+		: term(_term)
+	{
+	}
+	void visit(HeapVisitor &)
+	{
+	}
+};
 
 /* Introductions */
 /* Simple sequencing. */
@@ -427,6 +443,11 @@ Proxy(CFGNode *n)
 {
 	return SMBPtr<SMBState>(new SMBStateProxy(n));
 }
-
+/* StateMachine terminal states */
+static inline SMBPtr<SMBState>
+Terminal(StateMachineRes what)
+{
+	return SMBPtr<SMBState>(new SMBStateTerminal(what));
+}
 
 #endif /* !SMB_BUILDER_HPP__ */

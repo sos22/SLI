@@ -79,7 +79,7 @@ enforceMustStoreBeforeCrash(SMScopes *scopes, StateMachine *sm, bool *progress)
 
 /* Find any stores which definitely aren't loaded by this machine and
  * remove them.  This is kind of redundant with realias, except that
- * here we don't rely on havign access to stack layout information. */
+ * here we don't rely on having access to stack layout information. */
 static StateMachine *
 removeTerminalStores(const MaiMap &mai,
 		     StateMachine *sm,
@@ -97,30 +97,36 @@ removeTerminalStores(const MaiMap &mai,
 		bool mightBeLoaded = false;
 		std::queue<StateMachineState *> q;
 		((StateMachineState *)(*it))->targets(q);
-		while (!mightBeLoaded && !q.empty()) {
+		std::set<StateMachineState *> visited;
+		assert(visited.empty());
+		while (!mightBeLoaded && !q.empty() && !TIMEOUT) {
 			StateMachineState *s = q.front();
 			q.pop();
-			if (s->getSideEffect() &&
-			    s->getSideEffect()->type == StateMachineSideEffect::Load &&
+			if (!visited.insert(s).second) {
+				continue;
+			}
+			auto se = s->getSideEffect();
+			if (se &&
+			    se->type == StateMachineSideEffect::Load &&
 			    oracle->memoryAccessesMightAlias(
 				    mai,
 				    opt,
-				    (StateMachineSideEffectLoad *)s->getSideEffect(),
+				    (StateMachineSideEffectLoad *)se,
 				    store) &&
 			    !definitelyNotEqual(store->addr,
-						((StateMachineSideEffectLoad *)s->getSideEffect())->addr,
+						((StateMachineSideEffectLoad *)se)->addr,
 						opt)) {
 				/* This load might load the store. */
 				mightBeLoaded = true;
-			} else if (s->getSideEffect() &&
-				   s->getSideEffect()->type == StateMachineSideEffect::Store &&
+			} else if (se &&
+				   se->type == StateMachineSideEffect::Store &&
 				   oracle->memoryAccessesMightAlias(
 					   mai,
 					   opt,
-					   (StateMachineSideEffectStore *)s->getSideEffect(),
+					   (StateMachineSideEffectStore *)se,
 					   store) &&
 				   definitelyEqual(store->addr,
-						   ((StateMachineSideEffectStore *)s->getSideEffect())->addr,
+						   ((StateMachineSideEffectStore *)se)->addr,
 						   opt)) {
 				/* This store will clobber the results
 				   of the store we're looking at -> it
@@ -129,6 +135,9 @@ removeTerminalStores(const MaiMap &mai,
 			} else {
 				s->targets(q);
 			}
+		}
+		if (TIMEOUT) {
+			return sm;
 		}
 		if (!mightBeLoaded) {
 			*done_something = true;
@@ -321,9 +330,11 @@ _optimiseStateMachine(SMScopes *scopes,
 		if (!done_something && is_ssa) {
 			predecessor_map pred(sm);
 			control_dependence_graph cdg(sm, &scopes->bools);
+			bool invalidate_cdg;
 
 			p = false;
-			sm = cdgOptimise(scopes, sm, cdg, &p);
+			invalidate_cdg = false;
+			sm = cdgOptimise(scopes, sm, cdg, &p, &invalidate_cdg);
 			if (debugOptimiseStateMachine && p) {
 				printf("cdgOptimise:\n");
 				printStateMachine(sm, stdout);
@@ -332,7 +343,7 @@ _optimiseStateMachine(SMScopes *scopes,
 				pred.recompute(sm);
 			done_something |= p;
 
-			if (CONFIG_LOAD_ELIMINATION && !zapped_realias_info) {
+			if (CONFIG_LOAD_ELIMINATION && !invalidate_cdg && !zapped_realias_info) {
 				sm = functionAliasAnalysis(scopes, *mai, sm, opt,
 							   oracle, cdg, pred, &p);
 				if (debugOptimiseStateMachine && p) {
@@ -342,15 +353,15 @@ _optimiseStateMachine(SMScopes *scopes,
 				done_something |= p;
 			}
 
-#if CONFIG_PHI_ELIMINATION
-			p = false;
-			sm = phiElimination(scopes, sm, pred, cdg, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("phiElimination:\n");
-				printStateMachine(sm, stdout);
+			if (CONFIG_PHI_ELIMINATION && !invalidate_cdg) {
+				p = false;
+				sm = phiElimination(scopes, sm, pred, cdg, &p);
+				if (debugOptimiseStateMachine && p) {
+					printf("phiElimination:\n");
+					printStateMachine(sm, stdout);
+				}
+				done_something |= p;
 			}
-			done_something |= p;
-#endif
 		}
 #endif
 
@@ -406,9 +417,11 @@ optimiseStateMachine(SMScopes *scopes,
 }
 
 static void
-getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores)
+getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores,
+		     bool &haveMuxOps)
 {
 	std::set<StateMachineSideEffectLoad *> allLoads;
+	haveMuxOps = false;
 	enumSideEffects(sm, allLoads);
 	if (allLoads.size() == 0) {
 		fprintf(_logfile, "\t\tNo loads left in store machine?\n");
@@ -416,8 +429,12 @@ getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::s
 	}
 	for (std::set<StateMachineSideEffectLoad *>::iterator it = allLoads.begin();
 	     it != allLoads.end();
-	     it++)
+	     it++) {
+		if ( (*it)->tag == MemoryTag::mutex() ) {
+			haveMuxOps = true;
+		}
 		oracle->findConflictingStores(mai, *it, potentiallyConflictingStores);
+	}
 }
 
 /* If there's precisely one interesting store in the store machine and
@@ -1352,6 +1369,7 @@ probeMachineToSummary(SMScopes *scopes,
 		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
 		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
+		      bool preserveMux,
 		      const AllowableOptimisations &optIn,
 		      const VexPtr<MaiMap, &ir_heap> &maiIn,
 		      GarbageCollectionToken token)
@@ -1398,7 +1416,9 @@ probeMachineToSummary(SMScopes *scopes,
 					   probeMachine,
 					   atomicSurvival,
 					   STORING_THREAD + i,
-					   optIn.setinterestingStores(&potentiallyConflictingStores),
+					   optIn
+					        .setinterestingStores(&potentiallyConflictingStores)
+					        .setmutexStoresInteresting(preserveMux),
 					   maiIn,
 					   token);
 		if (summary)
@@ -1450,6 +1470,7 @@ diagnoseCrash(SMScopes *scopes,
 	   (very occasionally) show that a particular load is not
 	   interesting, and hence change the conflicting stores set.
 	   Avoid the issue by just iterating to a fixed point. */
+	bool haveMuxOps;
 	std::set<DynAnalysisRip> potentiallyConflictingStores;
 	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
 
@@ -1460,7 +1481,7 @@ diagnoseCrash(SMScopes *scopes,
 		stackedCdf::stopFindConflictingStores();
 		return NULL;
 	}
-	getConflictingStores(*mai, reducedProbeMachine, oracle, potentiallyConflictingStores);
+	getConflictingStores(*mai, reducedProbeMachine, oracle, potentiallyConflictingStores, haveMuxOps);
 	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 		stackedCdf::stopFindConflictingStores();
@@ -1483,7 +1504,7 @@ diagnoseCrash(SMScopes *scopes,
 				stackedCdf::stopFindConflictingStores();
 				return NULL;
 			}
-			getConflictingStores(*mai, reducedProbeMachine, oracle, newPotentiallyConflictingStores);
+			getConflictingStores(*mai, reducedProbeMachine, oracle, newPotentiallyConflictingStores, haveMuxOps);
 			if (potentiallyConflictingStores.size() == 0) {
 				fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 				stackedCdf::stopFindConflictingStores();
@@ -1540,6 +1561,7 @@ diagnoseCrash(SMScopes *scopes,
 				     oracle,
 				     df,
 				     potentiallyConflictingStores,
+				     haveMuxOps,
 				     optIn,
 				     mai,
 				     token);

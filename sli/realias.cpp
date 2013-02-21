@@ -1754,11 +1754,9 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		switch (sideEffect->type) {
 		case StateMachineSideEffect::Store: {
 			StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)sideEffect;
-			bool ignore = true;
-			for (auto it2 = decode.begin(s->rip); ignore && !it2.finished(); it2.advance())
-				ignore &= opt.ignoreStore(it2.node()->rip);
-			if (!ignore)
+			if (!opt.ignoreStore(decode, s)) {
 				break;
+			}
 			bool noConflictingLoads = true;
 			for (auto it2 = at.content.begin();
 			     !killedAllLoads && noConflictingLoads && it2 != at.content.end();

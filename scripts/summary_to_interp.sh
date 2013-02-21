@@ -1,6 +1,7 @@
 #! /bin/sh
 
 set -e
+set -x
 
 bin=$1
 summary=$2
@@ -12,6 +13,12 @@ ${topdir}/canonicalise_crash_summary2 $summary.canon0 $summary.canon2
 ${topdir}/canonicalise_crash_summary0 $summary.canon2 $summary.canon4
 
 ${topdir}/enforce_crash ${bin} ${bin}.tc ${bin}.bcg ${bin}.db ${summary}.ced ${summary}.canon4
+
+read ced_line < ${summary}.ced
+if [ "$ced_line" = "<empty>" ]
+then
+    exit 0
+fi
 
 ${topdir}/ced_to_cep ${bin} ${summary}.ced ${bin}.tc ${bin}.bcg ${bin}.db ${summary}.cep.c
 

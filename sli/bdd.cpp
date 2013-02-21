@@ -1127,6 +1127,9 @@ public:
 bbdd *
 bbdd::And(scope *scope, bbdd *a, bbdd *b)
 {
+	if (TIMEOUT) {
+		return NULL;
+	}
 	binary_zip_internal f(true, a, b);
 	return zip(scope, f);
 }
@@ -1470,6 +1473,9 @@ public:
 exprbdd *
 exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 {
+	if (!what) {
+		return NULL;
+	}
 	return exprbdd::restructure_zip(scope, bscope, unop_zipper(op, what));
 }
 

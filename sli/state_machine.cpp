@@ -1464,3 +1464,24 @@ StateMachineTerminal::optimise(SMScopes *scopes, const AllowableOptimisations &o
 	*done_something |= set_res(simplifyBDD(&scopes->smrs, &scopes->bools, res, false, opt));
 	return this;
 }
+
+bool
+AllowableOptimisations::ignoreStore(const MaiMap &decode, StateMachineSideEffectStore *s) const
+{
+	if (_ignoreSideEffects) {
+		return true;
+	}
+	if (!_interestingStores) {
+		return false;
+	}
+	if (_mutexStoresInteresting && s->tag == MemoryTag::mutex()) {
+		return false;
+	}
+
+	for (auto it = decode.begin(s->rip); !it.finished(); it.advance()) {
+		if (_interestingStores->count(it.dr())) {
+			return false;
+		}
+	}
+	return true;
+}

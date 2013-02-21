@@ -251,15 +251,16 @@ getLibraryStateMachine(SMScopes *scopes,
 	case LibraryFunctionTemplate::pthread_mutex_lock: {
 		threadAndRegister tmp1(threadAndRegister::temp(tid, 0, 0));
 		acc = StartAtomic() >>
-		      (Load(!tmp1,
-			    *smb_reg(arg1, Ity_I64),
-			    Ity_I8,
-			    MemoryTag::mutex()) >>
-		      (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(0)) >>
-		      (Store(*smb_reg(arg1, Ity_I64), smb_const8(1), MemoryTag::mutex()) >>
-		      (EndAtomic() >>
-		      ((!rax <<= smb_const64(0)) >>
-		      end)))));
+			(Load(!tmp1,
+			      *smb_reg(arg1, Ity_I64),
+			      Ity_I8,
+			      MemoryTag::mutex()) >>
+			 (If(smb_reg(tmp1, Ity_I8) == smb_const8(0),
+			     (Store(*smb_reg(arg1, Ity_I64), smb_const8(1), MemoryTag::mutex()) >>
+			      (EndAtomic() >>
+			       ((!rax <<= smb_const64(0)) >>
+				end))),
+			     Terminal(smr_unreached))));
 		break;
 	}
 	case LibraryFunctionTemplate::pthread_mutex_unlock: {
@@ -269,11 +270,12 @@ getLibraryStateMachine(SMScopes *scopes,
 			    *smb_reg(arg1, Ity_I64),
 			    Ity_I8,
 			    MemoryTag::mutex()) >>
-		      (AssertFalse(smb_reg(tmp1, Ity_I8) != smb_const8(1)) >>
-		      (Store(*smb_reg(arg1, Ity_I64), smb_const8(0), MemoryTag::mutex()) >>
-		      (EndAtomic() >>
-		      ((!rax <<= smb_const64(0)) >>
-		      end)))));
+		       (If(smb_reg(tmp1, Ity_I8) == smb_const8(1),
+			   (Store(*smb_reg(arg1, Ity_I64), smb_const8(0), MemoryTag::mutex()) >>
+			    (EndAtomic() >>
+			     ((!rax <<= smb_const64(0)) >>
+			      end))),
+			   Terminal(smr_unreached))));
 		break;
 	}
 	case LibraryFunctionTemplate::__stack_chk_fail:

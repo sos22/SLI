@@ -198,7 +198,8 @@ control_dependence_graph::introduceState(StateMachineState *s, bbdd *cond)
 /* Very simple optimiseation pass which just removes any states which
  * the CDG says are unreachable. */
 StateMachine *
-cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg, bool *done_something)
+cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg,
+	    bool *done_something, bool *invalidate_cdg)
 {
 	std::map<const StateMachineState *, int> labels;
 
@@ -215,6 +216,9 @@ cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg, b
 		StateMachineState *state = *it;
 		bbdd *stateDom = cdg.domOf(state);
 		if (stateDom->isLeaf()) {
+			if (!stateDom->leaf()) {
+				*invalidate_cdg = true;
+			}
 			continue;
 		}
 		switch (state->type) {
@@ -265,6 +269,9 @@ cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg, b
 						printf("Bifurcate l%d condition changes:\n",
 						       labels[state]);
 						newCond->prettyPrint(stdout);
+					}
+					if (newCond->isLeaf()) {
+						*invalidate_cdg = true;
 					}
 					*done_something = true;
 				}

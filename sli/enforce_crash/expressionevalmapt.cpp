@@ -144,28 +144,37 @@ setEntryPoint(bbdd::scope *scope,
 	      const CfgLabel &label)
 {
 	if (in->isLeaf() ||
-	    in->internal().condition->tag != Iex_EntryPoint) {
+	    (in->internal().condition->tag != Iex_EntryPoint &&
+	     in->internal().condition->tag != Iex_ControlFlow)) {
 		return in;
 	}
-	IRExprEntryPoint *c = (IRExprEntryPoint *)in->internal().condition;
-	if (c->thread != thread) {
-		/* We can use makeInternal rather than ifelse because
-		   we never change the order of expressions at all. */
+	/* We can use makeInternal rather than ifelse because we never
+	   change the order of expressions at all. */
+	if (in->internal().condition->tag == Iex_ControlFlow) {
 		return scope->makeInternal(
-			c,
+			in->internal().condition,
 			in->internal().rank,
 			setEntryPoint(scope, in->internal().trueBranch, thread, label),
 			setEntryPoint(scope, in->internal().falseBranch, thread, label));
-	} else if (c->label == label) {
-		return setEntryPoint(scope,
-				     in->internal().trueBranch,
-				     thread,
-				     label);
 	} else {
-		return setEntryPoint(scope,
-				     in->internal().falseBranch,
-				     thread,
-				     label);
+		IRExprEntryPoint *c = (IRExprEntryPoint *)in->internal().condition;
+		if (c->thread != thread) {
+			return scope->makeInternal(
+				c,
+				in->internal().rank,
+				setEntryPoint(scope, in->internal().trueBranch, thread, label),
+				setEntryPoint(scope, in->internal().falseBranch, thread, label));
+		} else if (c->label == label) {
+			return setEntryPoint(scope,
+					     in->internal().trueBranch,
+					     thread,
+					     label);
+		} else {
+			return setEntryPoint(scope,
+					     in->internal().falseBranch,
+					     thread,
+					     label);
+		}
 	}
 }
 
@@ -185,14 +194,13 @@ calcEntryNeeded(bbdd::scope *scope,
 	auto it = predecessors.find(instr);
 	assert(it != predecessors.end());
 	const std::set<instr_t> &pred(it->second);
-	if (pred.empty()) {
+	if (roots.count(instr)) {
 		/* Special handling for root instructions.
 		   Whereas most instructions take their
 		   initial condition from the union of their
 		   predecessors's left over conditions, roots
 		   take their initial conditions from this
 		   map. */
-		assert(roots.count(instr));
 		res = setEntryPoint(
 			scope,
 			entryNeeded,
@@ -200,22 +208,19 @@ calcEntryNeeded(bbdd::scope *scope,
 			instr->rip.label);
 	} else {
 		res = scope->cnst(true);
-		assert(!roots.count(instr));
-		for (auto it = pred.begin(); it != pred.end(); it++) {
-			/* Should this be And or Or?  If we
-			   use And then we're guaranteed to
-			   test every condition which needs to
-			   be tested, but we might sometimes
-			   double-test some of them.  If we
-			   use Or then we'd never double-test
-			   but might sometimes skip some
-			   conditions.  Double-testing is
-			   safer than skipping, so use And. */
-			auto it2 = leftoverCondition.find(*it);
-			assert(it2 != leftoverCondition.end());
-			assert(it2->second);
-			res = bbdd::And(scope, res, it2->second);
-		}
+	}
+	for (auto it = pred.begin(); it != pred.end(); it++) {
+		/* Should this be And or Or?  If we use And then we're
+		   guaranteed to test every condition which needs to
+		   be tested, but we might sometimes double-test some
+		   of them.  If we use Or then we'd never double-test
+		   but might sometimes skip some conditions.
+		   Double-testing is safer than skipping, so use
+		   And. */
+		auto it2 = leftoverCondition.find(*it);
+		assert(it2 != leftoverCondition.end());
+		assert(it2->second);
+		res = bbdd::And(scope, res, it2->second);
 	}
 	return res;
 }
@@ -1042,7 +1047,6 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
 			if (it->instr) {
-				assert(!rootInstrs.count(it->instr));
 				pendingPredecessors[it->instr]++;
 				predecessors[it->instr].insert(i);
 				pendingInstrs.push_back(it->instr);
@@ -1052,8 +1056,10 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 
 	/* Now figure out what inputs are available where. */
 	std::map<instr_t, std::set<input_expression> > availabilityMap;
-	for (auto it = rootInstrs.begin(); it != rootInstrs.end(); it++) {
-		pendingInstrs.push_back(*it);
+	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
+		if (it->second == 0) {
+			pendingInstrs.push_back(it->first);
+		}
 	}
 	/* First pass just finds things which are available in the
 	 * local thread. */
@@ -1641,6 +1647,9 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			/* This thing is dead, so needs to be culled
 			 * from the HB map. */
 			hbMap.erase(dead->rip);
+
+			/* Kill it from the roots list, as well. */
+			roots.erase(dead->rip);
 		}
 		if (deadStates == newDead) {
 			break;

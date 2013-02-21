@@ -23,6 +23,7 @@ public:
 	void introduceState(StateMachineState *s, bbdd *);
 };
 
-StateMachine *cdgOptimise(SMScopes *scopes, StateMachine *inp, control_dependence_graph &cdg, bool *done_something);
+StateMachine *cdgOptimise(SMScopes *scopes, StateMachine *inp, control_dependence_graph &cdg, bool *done_something,
+			  bool *invalidate_cdg);
 
 #endif /* !CONTROL_DEPENDENCE_GRAPH_HPP */

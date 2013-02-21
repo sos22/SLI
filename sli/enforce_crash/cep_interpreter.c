@@ -37,6 +37,7 @@
 #define SANITY_CHECK_ALLOCATOR 0
 #define USE_LAST_FREE_DETECTOR 0
 #define DISABLE_DELAYS 0
+#define LOG_FD 2
 
 /* Define _PAGE_SIZE and _STACK_SIZE which don't include the ul
  * suffix, because that makes it easier to use them in inline
@@ -364,7 +365,7 @@ dbg_msg(const char *fmt, ...)
 		/* Make sure that there's always enough space for
 		   ``simple'' escapes. */
 		if (prod_idx >= sizeof(buf) - 32) {
-			safe_write(1, buf, prod_idx);
+			safe_write(LOG_FD, buf, prod_idx);
 			prod_idx = 0;
 		}
 
@@ -376,7 +377,7 @@ dbg_msg(const char *fmt, ...)
 		}
 		if (fmt[cons_idx] == '\n') {
 			buf[prod_idx++] = '\n';
-			safe_write(1, buf, prod_idx);
+			safe_write(LOG_FD, buf, prod_idx);
 			prod_idx = 0;
 			cons_idx++;
 			continue;
@@ -465,7 +466,7 @@ dbg_msg(const char *fmt, ...)
 			for (arg_idx = 0; arg_str[arg_idx]; arg_idx++) {
 				buf[prod_idx++] = arg_str[arg_idx];
 				if (prod_idx == sizeof(buf)) {
-					safe_write(1, buf, prod_idx);
+					safe_write(LOG_FD, buf, prod_idx);
 					prod_idx = 0;
 				}
 			}
@@ -2937,7 +2938,7 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 			debug("%p(%s): no viable successors\n", lls, current_cfg_node->id);
 			hls->ll_states.content[i] = NULL;
 			if (current_cfg_node->nr_successors == 0) {
-				safe_write(1,
+				safe_write(LOG_FD,
 					   "Completed enforcement plan!\n",
 					   sizeof("Completed enforcement plan!"));
 				if (lls->last_operation_is_send) {
@@ -3876,7 +3877,7 @@ free(void *ptr)
 	if (ptr != NULL) {
 		debug("free %p; last_freed %lx\n", ptr, last_freed);
 		if ((unsigned long)ptr == last_freed) {
-			safe_write(1, "Double free!\n", sizeof("Double free!"));
+			safe_write(LOG_FD, "Double free!\n", sizeof("Double free!"));
 			abort();
 		}
 		last_freed = (unsigned long)ptr;

@@ -272,6 +272,9 @@ Oracle::hasConflictingRemoteStores(const MaiMap &mai, const AllowableOptimisatio
 		return false;
 	if (access->tag == MemoryTag::last_free() && opt.freeMightRace())
 		return true;
+	if (access->tag == MemoryTag::mutex()) {
+		return true;
+	}
 	for (auto it = mai.begin(access->rip); !it.finished(); it.advance()) {
 		if (access->type == StateMachineSideEffect::Load &&
 		    opt.nonLocalLoads() &&
@@ -428,8 +431,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 {
 	if (smsel->tag != smses->tag)
 		return false;
-	if (smsel->tag == MemoryTag::last_free())
+	if (smsel->tag == MemoryTag::last_free() || smsel->tag == MemoryTag::mutex()) {
 		return true;
+	}
 
 	if (definitelyNotEqual(smsel->addr, smses->addr, opt))
 		return false;
@@ -497,8 +501,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 	if (smsel1->tag != smsel2->tag)
 		return false;
 
-	if (smsel1->tag == MemoryTag::last_free())
+	if (smsel1->tag == MemoryTag::last_free() || smsel1->tag == MemoryTag::mutex()) {
 		return true;
+	}
 
 	if (definitelyNotEqual(smsel1->addr, smsel2->addr, opt))
 		return false;
@@ -550,8 +555,9 @@ Oracle::memoryAccessesMightAlias(const MaiMap &mai,
 	if (smses1->tag != smses2->tag)
 		return false;
 
-	if (smses1->tag == MemoryTag::last_free())
+	if (smses1->tag == MemoryTag::last_free() || smses1->tag == MemoryTag::mutex()) {
 		return true;
+	}
 
 	if (definitelyNotEqual(smses1->addr, smses2->addr, opt))
 		return false;
@@ -1088,17 +1094,19 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 			unsigned long callee;
 			if (fread(&callee, sizeof(callee), 1, f) != 1)
 				err(1, "reading callee rip from %s", cg_fname);
-			if (x == 0) {
-				if (callee & (1ul << 63)) {
-					is_call = true;
+			if (!new_format) {
+				if (x == 0) {
+					if (callee & (1ul << 63)) {
+						is_call = true;
+					} else {
+						is_call = false;
+					}
 				} else {
-					is_call = false;
-				}
-			} else {
-				if (callee & (1ul << 63)) {
-					assert(is_call);
-				} else {
-					assert(!is_call);
+					if (callee & (1ul << 63)) {
+						assert(is_call);
+					} else {
+						assert(!is_call);
+					}
 				}
 			}
 			callee &= ~(1ul << 63);
