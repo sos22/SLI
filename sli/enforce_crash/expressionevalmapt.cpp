@@ -144,28 +144,37 @@ setEntryPoint(bbdd::scope *scope,
 	      const CfgLabel &label)
 {
 	if (in->isLeaf() ||
-	    in->internal().condition->tag != Iex_EntryPoint) {
+	    (in->internal().condition->tag != Iex_EntryPoint &&
+	     in->internal().condition->tag != Iex_ControlFlow)) {
 		return in;
 	}
-	IRExprEntryPoint *c = (IRExprEntryPoint *)in->internal().condition;
-	if (c->thread != thread) {
-		/* We can use makeInternal rather than ifelse because
-		   we never change the order of expressions at all. */
+	/* We can use makeInternal rather than ifelse because we never
+	   change the order of expressions at all. */
+	if (in->internal().condition->tag == Iex_ControlFlow) {
 		return scope->makeInternal(
-			c,
+			in->internal().condition,
 			in->internal().rank,
 			setEntryPoint(scope, in->internal().trueBranch, thread, label),
 			setEntryPoint(scope, in->internal().falseBranch, thread, label));
-	} else if (c->label == label) {
-		return setEntryPoint(scope,
-				     in->internal().trueBranch,
-				     thread,
-				     label);
 	} else {
-		return setEntryPoint(scope,
-				     in->internal().falseBranch,
-				     thread,
-				     label);
+		IRExprEntryPoint *c = (IRExprEntryPoint *)in->internal().condition;
+		if (c->thread != thread) {
+			return scope->makeInternal(
+				c,
+				in->internal().rank,
+				setEntryPoint(scope, in->internal().trueBranch, thread, label),
+				setEntryPoint(scope, in->internal().falseBranch, thread, label));
+		} else if (c->label == label) {
+			return setEntryPoint(scope,
+					     in->internal().trueBranch,
+					     thread,
+					     label);
+		} else {
+			return setEntryPoint(scope,
+					     in->internal().falseBranch,
+					     thread,
+					     label);
+		}
 	}
 }
 

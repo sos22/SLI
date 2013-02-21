@@ -756,6 +756,7 @@ setVariable(bbdd::scope *scope, bbdd *what, const IRExpr *expr,
 	}
 	/* This is safe because of the BDD ordering. */
 	if (what->internal().condition->tag != Iex_EntryPoint &&
+	    what->internal().condition->tag != Iex_ControlFlow &&
 	    what->internal().condition->tag != Iex_HappensBefore) {
 		return what;
 	}
