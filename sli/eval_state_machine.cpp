@@ -1475,6 +1475,9 @@ struct normalEvalParams {
 				      resultT &result,
 				      smrbdd *termRes,
 				      bbdd *justPathConstraint) {
+		if (TIMEOUT) {
+			return;
+		}
 		termRes = suppressUninit(&scopes->smrs, true, termRes);
 		if (!termRes) {
 			if (debug_survival_constraint) {
@@ -1490,6 +1493,9 @@ struct normalEvalParams {
 				justPathConstraint,
 				termRes,
 				result);
+			if (TIMEOUT) {
+				return;
+			}
 			result = suppressUninit(&scopes->smrs, true, result);
 			assert(result != NULL);
 			if (debug_survival_constraint) {
@@ -2202,6 +2208,9 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 	crossProductMachine = mapUnreached(&scopes->smrs, crossProductMachine, smr_survive);
 	stackedCdf::stopCrashConstraintResimplify();
 
+	if (TIMEOUT) {
+		return NULL;
+	}
 	stackedCdf::startCrashConstraintSymbolicExecute();
 	bbdd *res_ssa = survivalConstraintIfExecutedAtomically(
 		scopes,

@@ -1008,6 +1008,9 @@ considerStoreCFG(SMScopes *scopes,
 		false,
 		token);
 	stackedCdf::stopStoreInitialSimplify();
+	if (TIMEOUT) {
+		return NULL;
+	}
 
 	std::map<threadAndRegister, threadAndRegister> ssaCorrespondence;
 	stackedCdf::startStoreConvertToSSA();
