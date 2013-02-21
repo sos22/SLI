@@ -1980,7 +1980,10 @@ importRegisters(StateMachineState *root
 	std::set<threadAndRegister> needImport;
 
 	q.push_back(root);
+	/* Map from states to the set of registers which are available
+	   at the start of that state. */
 	std::map<StateMachineState *, std::set<threadAndRegister> > definedRegs;
+	definedRegs[root].clear();
 	while (!TIMEOUT && !q.empty()) {
 		StateMachineState *s = q.back();
 		q.pop_back();
@@ -2047,7 +2050,8 @@ importRegisters(StateMachineState *root
 		}
 		}
 
-		std::set<threadAndRegister> defined(definedRegs[s]);
+		assert(definedRegs.count(s));
+		std::set<threadAndRegister> &defined(definedRegs[s]);
 		for (auto it = usedRegs.begin(); it != usedRegs.end(); it++) {
 			if (!defined.count(*it))
 				needImport.insert(*it);
@@ -2077,6 +2081,7 @@ importRegisters(StateMachineState *root
 				q.push_back(*it);
 			assert(nrMissingPredecessors[*it] >= 0);
 		}
+		definedRegs.erase(s);
 	}
 
 	for (auto it = needImport.begin();
