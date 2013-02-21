@@ -320,7 +320,7 @@ findMinimalRoots(StateMachine *sm,
 				       it->first.node->label.name());
 			}
 			rootKill.insert(std::pair<unsigned, CfgLabel>(it->first.thread, it->first.node->label));
-			sm->cfg_roots.erase(it++);
+			it = sm->cfg_roots.erase(it++);
 		}
 	}
 }
