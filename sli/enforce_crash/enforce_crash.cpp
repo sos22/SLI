@@ -47,6 +47,47 @@ instrToInstrSetMap::print(FILE *f) const
 	}
 }
 
+#ifndef NDEBUG
+/* There should be no HB edges in our side condition.  These utility
+   functions are useful for checking that. */
+static void
+assertHbEdgeFree(IRExpr *what)
+{
+	struct v {
+		static visit_result Hb(void *, const IRExprHappensBefore *) {
+			return visit_abort;
+		}
+	};
+	static irexpr_visitor<void> visitor;
+	visitor.HappensBefore = v::Hb;
+	assert(visit_irexpr((void *)NULL, &visitor, what) != visit_abort);
+}
+static void
+assertHbEdgeFree(bbdd *what, std::set<bbdd *> &memo)
+{
+	if (what->isLeaf()) {
+		return;
+	}
+	if (!memo.insert(what).second) {
+		return;
+	}
+	assertHbEdgeFree(what->internal().condition);
+	assertHbEdgeFree(what->internal().trueBranch, memo);
+	assertHbEdgeFree(what->internal().falseBranch, memo);
+}
+static void
+assertHbEdgeFree(bbdd *what)
+{
+	std::set<bbdd *> memo;
+	assertHbEdgeFree(what, memo);
+}
+#else
+static void
+assertHbEdgeFree(bbdd *)
+{
+}
+#endif
+
 static bool
 exprUsesInput(const bbdd *haystack, const input_expression &needle)
 {
@@ -872,6 +913,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		for (auto it = sliced_by_hb.begin();
 		     it != sliced_by_hb.end();
 			) {
+			assertHbEdgeFree(it->leftOver);
 			it->leftOver = heuristicSimplify(&summary->scopes->bools, it->leftOver, memo);
 			if ( (!it->leftOver->isLeaf() || it->leftOver->leaf()) &&
 			     !consistentOrdering(*it) ) {
