@@ -543,9 +543,11 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 	case StateMachineSideEffect::ImportRegister:
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
+#if !CONFIG_NO_STATIC_ALIASING
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
 	case StateMachineSideEffect::StackLayout:
+#endif
 		log(state, "ignored side effect");
 		return true;
 	}
@@ -816,6 +818,8 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		if (!cond_eval.unpack(&cond_c) ||
 		    cc_op_eval.valid()) {
 			unsigned long cc_op_c;
+			/* Shut compiler up: it's only a debug message */
+			cc_op_c = -1;
 			cc_op_eval.unpack(&cc_op_c);
 			printf("CC op %ld\n", cc_op_c);
 			break;
@@ -859,7 +863,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			if (res2.unpack(&res2c))
 				return makeEqConst(res, cnst - res2c, iea->contents[0], wantTrue, usedRandom);
 			res1 = evalExpr(res, iea->contents[0], usedRandom);
-			return makeEqConst(res, cnst - res1c, iea->contents[1], wantTrue, usedRandom);
+			return makeEqConst(res, cnst, iea->contents[1], wantTrue, usedRandom);
 		}
 		case Iop_Xor8:
 		case Iop_Xor16:
@@ -875,7 +879,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			if (res2.unpack(&res2c))
 				return makeEqConst(res, cnst ^ res2c, iea->contents[0], wantTrue, usedRandom);
 			res1 = evalExpr(res, iea->contents[0], usedRandom);
-			return makeEqConst(res, cnst ^ res1c, iea->contents[1], wantTrue, usedRandom);
+			return makeEqConst(res, cnst, iea->contents[1], wantTrue, usedRandom);
 		}
 		case Iop_And1: {
 			std::vector<IRExpr *> nonConstArgs;

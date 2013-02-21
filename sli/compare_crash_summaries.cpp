@@ -129,6 +129,13 @@ localSimilarity2(StateMachineSideEffectPhi *e1, StateMachineSideEffectPhi *e2)
 }
 
 static bool
+localSimilarity2(StateMachineSideEffectImportRegister *smsesf1, StateMachineSideEffectImportRegister *smsesf2)
+{
+	return *smsesf1 == *smsesf2;
+}
+
+#if !CONFIG_NO_STATIC_ALIASING
+static bool
 localSimilarity2(StateMachineSideEffectStartFunction *smsesf1, StateMachineSideEffectStartFunction *smsesf2)
 {
 	return bddSimilarity(smsesf1->rsp, smsesf2->rsp);
@@ -141,16 +148,11 @@ localSimilarity2(StateMachineSideEffectEndFunction *smsesf1, StateMachineSideEff
 }
 
 static bool
-localSimilarity2(StateMachineSideEffectImportRegister *smsesf1, StateMachineSideEffectImportRegister *smsesf2)
-{
-	return *smsesf1 == *smsesf2;
-}
-
-static bool
 localSimilarity2(StateMachineSideEffectStackLayout *smsesf1, StateMachineSideEffectStackLayout *smsesf2)
 {
 	return *smsesf1 == *smsesf2;
 }
+#endif
 
 static bool
 localSimilarity(StateMachineSideEffect *smse1, StateMachineSideEffect *smse2)
