@@ -79,7 +79,7 @@ enforceMustStoreBeforeCrash(SMScopes *scopes, StateMachine *sm, bool *progress)
 
 /* Find any stores which definitely aren't loaded by this machine and
  * remove them.  This is kind of redundant with realias, except that
- * here we don't rely on havign access to stack layout information. */
+ * here we don't rely on having access to stack layout information. */
 static StateMachine *
 removeTerminalStores(const MaiMap &mai,
 		     StateMachine *sm,
@@ -97,30 +97,36 @@ removeTerminalStores(const MaiMap &mai,
 		bool mightBeLoaded = false;
 		std::queue<StateMachineState *> q;
 		((StateMachineState *)(*it))->targets(q);
-		while (!mightBeLoaded && !q.empty()) {
+		std::set<StateMachineState *> visited;
+		assert(visited.empty());
+		while (!mightBeLoaded && !q.empty() && !TIMEOUT) {
 			StateMachineState *s = q.front();
 			q.pop();
-			if (s->getSideEffect() &&
-			    s->getSideEffect()->type == StateMachineSideEffect::Load &&
+			if (!visited.insert(s).second) {
+				continue;
+			}
+			auto se = s->getSideEffect();
+			if (se &&
+			    se->type == StateMachineSideEffect::Load &&
 			    oracle->memoryAccessesMightAlias(
 				    mai,
 				    opt,
-				    (StateMachineSideEffectLoad *)s->getSideEffect(),
+				    (StateMachineSideEffectLoad *)se,
 				    store) &&
 			    !definitelyNotEqual(store->addr,
-						((StateMachineSideEffectLoad *)s->getSideEffect())->addr,
+						((StateMachineSideEffectLoad *)se)->addr,
 						opt)) {
 				/* This load might load the store. */
 				mightBeLoaded = true;
-			} else if (s->getSideEffect() &&
-				   s->getSideEffect()->type == StateMachineSideEffect::Store &&
+			} else if (se &&
+				   se->type == StateMachineSideEffect::Store &&
 				   oracle->memoryAccessesMightAlias(
 					   mai,
 					   opt,
-					   (StateMachineSideEffectStore *)s->getSideEffect(),
+					   (StateMachineSideEffectStore *)se,
 					   store) &&
 				   definitelyEqual(store->addr,
-						   ((StateMachineSideEffectStore *)s->getSideEffect())->addr,
+						   ((StateMachineSideEffectStore *)se)->addr,
 						   opt)) {
 				/* This store will clobber the results
 				   of the store we're looking at -> it
@@ -129,6 +135,9 @@ removeTerminalStores(const MaiMap &mai,
 			} else {
 				s->targets(q);
 			}
+		}
+		if (TIMEOUT) {
+			return sm;
 		}
 		if (!mightBeLoaded) {
 			*done_something = true;
