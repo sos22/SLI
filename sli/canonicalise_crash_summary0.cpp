@@ -251,29 +251,38 @@ operator |=(std::set<t> &dest, const s &other)
 }
 
 static CrashSummary *
-rewriteEntryPointExpressions(CrashSummary *cs, const std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > &rules)
+rewriteEntryPointExpressions(CrashSummary *cs,
+			     const std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > &rules,
+			     const std::set<std::pair<unsigned, CfgLabel> > &kill)
 {
 	struct : public StateMachineTransformer {
 		const std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > *rules;
+		const std::set<std::pair<unsigned, CfgLabel> > *kill;
 		IRExpr *transformIex(IRExprEntryPoint *iep) {
 			std::pair<unsigned, CfgLabel> key(iep->thread, iep->label);
 			auto it = rules->find(key);
-			if (it != rules->end())
+			if (it != rules->end()) {
 				return IRExprEntryPoint::mk(it->second.first, it->second.second);
+			}
+			if (kill->count(key)) {
+				return IRExpr_Const_U1(false);
+			}
 			return iep;
 		}
 		bool rewriteNewStates() const { return false; }
 	} doit;
 	doit.rules = &rules;
+	doit.kill = &kill;
 	return transformCrashSummary(cs, doit);
 }
 
 static void
 findMinimalRoots(StateMachine *sm,
 		 const std::set<const CFGNode *> &needed,
-		 std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > &rootRewrites)
+		 std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > &rootRewrites,
+		 std::set<std::pair<unsigned, CfgLabel> > &rootKill)
 {
-	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++) {
+	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); ) {
 		CFGNode *n = const_cast<CFGNode *>(it->first.node);
 		while (!needed.count(n)) {
 			int nr_successors = 0;
@@ -290,17 +299,29 @@ findMinimalRoots(StateMachine *sm,
 				}
 			}
 		}
-		if (debug_root_reduce) {
-			printf("Root rewrite: %d:%s -> %d:%s\n",
-			       it->first.thread, it->first.node->label.name(),
-			       it->first.thread, n->label.name());
+
+		if (needed.count(n)) {
+			if (debug_root_reduce) {
+				printf("Root rewrite: %d:%s -> %d:%s\n",
+				       it->first.thread, it->first.node->label.name(),
+				       it->first.thread, n->label.name());
+			}
+			rootRewrites.insert(
+				std::pair<std::pair<unsigned, CfgLabel>,
+				std::pair<unsigned, CfgLabel> >(
+					std::pair<unsigned, CfgLabel>(it->first.thread, it->first.node->label),
+					std::pair<unsigned, CfgLabel>(it->first.thread, n->label)));
+			it->first.node = n;
+			it++;
+		} else {
+			if (debug_root_reduce) {
+				printf("Root kill: %d:%s\n",
+				       it->first.thread,
+				       it->first.node->label.name());
+			}
+			rootKill.insert(std::pair<unsigned, CfgLabel>(it->first.thread, it->first.node->label));
+			sm->cfg_roots.erase(it++);
 		}
-		rootRewrites.insert(
-			std::pair<std::pair<unsigned, CfgLabel>,
-			          std::pair<unsigned, CfgLabel> >(
-					  std::pair<unsigned, CfgLabel>(it->first.thread, it->first.node->label),
-					  std::pair<unsigned, CfgLabel>(it->first.thread, n->label)));
-		it->first.node = n;
 	}
 }
 
@@ -346,7 +367,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 	   on to nodes which are no longer referenced from anywhere.
 	   The definition of ``referenced'' is slightly subtle:
 
-	   -- Obviously, and explicit references from memory accesses
+	   -- Obviously, any explicit references from memory accesses
               count.
 	   -- Registers implicitly reference all of the roots of the
               CFG.
@@ -475,10 +496,11 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 	   Be conservative for now: if a root isn't needed and it has
 	   a single successor, replace it with that successor. */
 	std::map<std::pair<unsigned, CfgLabel>, std::pair<unsigned, CfgLabel> > rootRewrites;
-	findMinimalRoots(cs->loadMachine, needed, rootRewrites);
-	findMinimalRoots(cs->storeMachine, needed, rootRewrites);
+	std::set<std::pair<unsigned, CfgLabel> > rootKill;
+	findMinimalRoots(cs->loadMachine, needed, rootRewrites, rootKill);
+	findMinimalRoots(cs->storeMachine, needed, rootRewrites, rootKill);
 
-	cs = rewriteEntryPointExpressions(cs, rootRewrites);
+	cs = rewriteEntryPointExpressions(cs, rootRewrites, rootKill);
 
 	/* Remove any roots which can't reach needed instructions. */
 	for (auto it = cs->loadMachine->cfg_roots.begin();
@@ -638,8 +660,6 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		s->cfg_roots.begin()->first.node = result;
 	}
 
-	cs = rewriteEntryPointExpressions(cs, rootRewrites);
-
 	/* Now walk the MAI map and remove anything which has become
 	 * redundant. */
 	HashedSet<HashedPtr<CFGNode> > remainingNodes;
@@ -661,6 +681,52 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		else
 			it.advance();
 	}
+
+	/* Any root which can't reach a node mentioned in the MAI map
+	   is definitely dead. */
+	std::set<const CFGNode *> maiRefedNodes;
+	for (auto it = mai->begin(); !it.finished(); it.advance()) {
+		for (auto it2 = it.begin(); !it2.finished(); it2.advance()) {
+			maiRefedNodes.insert(it2.node());
+		}
+	}
+	for (auto it = ptrIterator<StateMachine>(cs->loadMachine, cs->storeMachine, NULL);
+	     !it.finished();
+	     it++) {
+		StateMachine *s = *it;
+		for (auto it2 = s->cfg_roots.begin(); it2 != s->cfg_roots.end(); ) {
+			std::set<const CFGNode *> reachable;
+			std::vector<const CFGNode *> q;
+			bool keep = false;
+			q.push_back(it2->first.node);
+			while (!q.empty()) {
+				const CFGNode *n = q.back();
+				q.pop_back();
+				if (maiRefedNodes.count(n)) {
+					keep = true;
+					break;
+				}
+				if (!reachable.insert(n).second) {
+					continue;
+				}
+				for (auto it3 = n->successors.begin();
+				     it3 != n->successors.end();
+				     it3++) {
+					if (it3->instr) {
+						q.push_back(it3->instr);
+					}
+				}
+			}
+			if (keep) {
+				it2++;
+			} else {
+				rootKill.insert(std::pair<unsigned, CfgLabel>(it2->first.thread, it2->first.node->label));
+				it2 = s->cfg_roots.erase(it2);
+			}
+		}
+	}
+	cs = rewriteEntryPointExpressions(cs, rootRewrites, rootKill);
+
 	return cs;
 }
 
