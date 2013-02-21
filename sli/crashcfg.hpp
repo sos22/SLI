@@ -591,6 +591,26 @@ public:
 		abort();
 #endif
 	}
+
+	void erase(const ThreadCfgLabel &tlabel) {
+		auto it = content.find(tlabel.thread);
+		assert(it != content.end());
+		bool found = false;
+		for (auto it2 = it->second.begin();
+		     it2 != it->second.end();
+			) {
+			if (it2->first == tlabel.label) {
+				assert(!found);
+				found = true;
+				it->second.erase(it2++);
+#ifdef NDEBUG
+				break;
+#endif
+			} else {
+				it2++;
+			}
+		}
+	}
 };
 
 class CrashCfg {

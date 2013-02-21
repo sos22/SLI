@@ -1647,6 +1647,9 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			/* This thing is dead, so needs to be culled
 			 * from the HB map. */
 			hbMap.erase(dead->rip);
+
+			/* Kill it from the roots list, as well. */
+			roots.erase(dead->rip);
 		}
 		if (deadStates == newDead) {
 			break;
