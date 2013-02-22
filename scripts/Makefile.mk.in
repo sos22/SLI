@@ -1,0 +1,12 @@
+targets=type_completeness
+
+defvars() {
+    echo "all_sources+=scripts/type_completeness.cpp"
+}
+
+rules() {
+    echo "scripts/type_completeness.cpp.d: CPPFLAGS+=-Isli -I\$(libvex)/pub -I\$(libvex)/priv"
+    echo "scripts/type_completeness.o: CPPFLAGS+=-Isli -I\$(libvex)/pub -I\$(libvex)/priv"
+    echo "type_completeness: slir.a libVEX.a"
+    link type_completeness scripts/type_completeness.o
+}
