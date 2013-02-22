@@ -375,5 +375,9 @@ public:
 	}
 };
 
+/* A way for things other than the main allocator to ask the GC to run
+   as soon as possible.  This is useful if you want to e.g. clear out
+   some weak references so as to trim a memo table somewhere. */
+void LibVEX_request_GC();
 
 #endif /* !__LIBVEX_ALLOC_H */

@@ -653,6 +653,9 @@ bdd_scope<t>::mkInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
 		it->second = new t(r, cond, a, b);
+		if (intern.size() > 1000000) {
+			LibVEX_request_GC();
+		}
 	}
 	return it->second;
 }
