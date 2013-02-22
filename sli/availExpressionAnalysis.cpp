@@ -666,10 +666,15 @@ applyLeafSubstTable(const substTableT &table, IRExpr *e)
    to a bbdd as we do so. */
 static bbdd *
 ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
+		      bool canEarlyOut,
 		      sane_map<std::pair<IRExpr *, substTableT>, bbdd *> &memo)
 {
 	if (TIMEOUT)
 		return NULL;
+	if (canEarlyOut && LibVEX_want_GC()) {
+		return bbdd::var(&state.scopes->bools, e);
+	}
+
 	auto it_did_insert = memo.insert(std::pair<IRExpr *, substTableT>(e, t),
 					 NULL);
 	auto it = it_did_insert.first;
@@ -700,14 +705,14 @@ ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 			it->second = state.scopes->bools.node(
 				bestCond,
 				*bestVar,
-				ssaApplyAvailExprBool(state, trueTable, e, memo),
-				ssaApplyAvailExprBool(state, falseTable, e, memo));
+				ssaApplyAvailExprBool(state, trueTable, e, canEarlyOut, memo),
+				ssaApplyAvailExprBool(state, falseTable, e, canEarlyOut, memo));
 		}
 	}
 	return it->second;
 }
 static either<bbdd *, IRExpr *>
-ssaApplyAvailExprBool(ssa_avail_state &state, IRExpr *what)
+ssaApplyAvailExprBool(ssa_avail_state &state, IRExpr *what, bool canEarlyOut)
 {
 	assert(what->type() == Ity_I1);
 	substTableT substTable;
@@ -715,7 +720,7 @@ ssaApplyAvailExprBool(ssa_avail_state &state, IRExpr *what)
 	if (substTable.empty())
 		return either<bbdd *, IRExpr *>(what);
 	sane_map<std::pair<IRExpr *, substTableT>, bbdd *> memo;
-	return either<bbdd *, IRExpr *>(ssaApplyAvailExprBool(state, substTable, what, memo));
+	return either<bbdd *, IRExpr *>(ssaApplyAvailExprBool(state, substTable, what, canEarlyOut, memo));
 }
 
 static exprbdd *
@@ -770,7 +775,7 @@ ssaApplyAvailExprExpr(ssa_avail_state &state, IRExpr *what)
 }
 
 static bbdd *
-ssaApplyAvail(ssa_avail_state &state, bbdd *inp)
+ssaApplyAvail(ssa_avail_state &state, bbdd *inp, bool *canEarlyOut)
 {
 	auto it_did_insert = state.boolMemo.insert(inp, NULL);
 	auto it = it_did_insert.first;
@@ -779,9 +784,12 @@ ssaApplyAvail(ssa_avail_state &state, bbdd *inp)
 		if (inp->isLeaf()) {
 			it->second = inp;
 		} else {
-			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
-			bbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
-			bbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
+			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition, *canEarlyOut));
+			*canEarlyOut |= (newCond.isLeft || newCond.right() != inp->internal().condition);
+			bbdd *t = ssaApplyAvail(state, inp->internal().trueBranch, canEarlyOut);
+			*canEarlyOut |= t != inp->internal().trueBranch;
+			bbdd *f = ssaApplyAvail(state, inp->internal().falseBranch, canEarlyOut);
+			*canEarlyOut |= f != inp->internal().falseBranch;
 			if (!newCond.isLeft &&
 			    newCond.right() == inp->internal().condition &&
 			    t == inp->internal().trueBranch &&
@@ -800,7 +808,7 @@ ssaApplyAvail(ssa_avail_state &state, bbdd *inp)
 }
 
 static smrbdd *
-ssaApplyAvail(ssa_avail_state &state, smrbdd *inp)
+ssaApplyAvail(ssa_avail_state &state, smrbdd *inp, bool *canEarlyOut)
 {
 	auto it_did_insert = state.smrMemo.insert(inp, NULL);
 	auto it = it_did_insert.first;
@@ -809,9 +817,12 @@ ssaApplyAvail(ssa_avail_state &state, smrbdd *inp)
 		if (inp->isLeaf()) {
 			it->second = inp;
 		} else {
-			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
-			smrbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
-			smrbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
+			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition, canEarlyOut));
+			*canEarlyOut |= (newCond.isLeft || newCond.right() != inp->internal().condition);
+			smrbdd *t = ssaApplyAvail(state, inp->internal().trueBranch, canEarlyOut);
+			*canEarlyOut |= t != inp->internal().trueBranch;
+			smrbdd *f = ssaApplyAvail(state, inp->internal().falseBranch, canEarlyOut);
+			*canEarlyOut |= f != inp->internal().falseBranch;
 			if (!newCond.isLeft &&
 			    newCond.right() == inp->internal().condition &&
 			    t == inp->internal().trueBranch &&
@@ -830,7 +841,7 @@ ssaApplyAvail(ssa_avail_state &state, smrbdd *inp)
 }
 
 static exprbdd *
-ssaApplyAvail(ssa_avail_state &state, exprbdd *inp)
+ssaApplyAvail(ssa_avail_state &state, exprbdd *inp, bool *canEarlyOut)
 {
 	auto it_did_insert = state.exprMemo.insert(inp, NULL);
 	auto it = it_did_insert.first;
@@ -848,9 +859,12 @@ ssaApplyAvail(ssa_avail_state &state, exprbdd *inp)
 					&state.scopes->bools,
 					newLeaf.right());
 		} else {
-			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
-			exprbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
-			exprbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
+			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition, canEarlyOut));
+			*canEarlyOut |= (newCond.isLeft || newCond.right() != inp->internal().condition);
+			exprbdd *t = ssaApplyAvail(state, inp->internal().trueBranch, canEarlyOut);
+			*canEarlyOut |= t != inp->internal().trueBranch;
+			exprbdd *f = ssaApplyAvail(state, inp->internal().falseBranch, canEarlyOut);
+			*canEarlyOut |= f != inp->internal().falseBranch;
 			if (!newCond.isLeft &&
 			    newCond.right() == inp->internal().condition &&
 			    t == inp->internal().trueBranch &&
@@ -871,7 +885,7 @@ ssaApplyAvail(ssa_avail_state &state, exprbdd *inp)
 template <typename t> static void
 rewrite_var(ssa_avail_state &state, t *&arg, bool *done_something)
 {
-	t *n = ssaApplyAvail(state, arg);
+	t *n = ssaApplyAvail(state, arg, done_something);
 	if (TIMEOUT)
 		return;
 	if (n != arg)
@@ -880,51 +894,51 @@ rewrite_var(ssa_avail_state &state, t *&arg, bool *done_something)
 }
 
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectLoad *inp)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectLoad *inp, bool *canEarlyOut)
 {
-	exprbdd *addr = ssaApplyAvail(state, inp->addr);
+	exprbdd *addr = ssaApplyAvail(state, inp->addr, canEarlyOut);
 	if (addr == inp->addr)
 		return inp;
 	return new StateMachineSideEffectLoad(inp, addr);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStore *inp)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStore *inp, bool *canEarlyOut)
 {
-	exprbdd *addr = ssaApplyAvail(state, inp->addr);
-	exprbdd *data = ssaApplyAvail(state, inp->data);
+	exprbdd *addr = ssaApplyAvail(state, inp->addr, canEarlyOut);
+	exprbdd *data = ssaApplyAvail(state, inp->data, canEarlyOut);
 	if (addr == inp->addr && data == inp->data)
 		return inp;
 	return new StateMachineSideEffectStore(inp, addr, data);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectCopy *inp)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectCopy *inp, bool *canEarlyOut)
 {
-	exprbdd *data = ssaApplyAvail(state, inp->value);
+	exprbdd *data = ssaApplyAvail(state, inp->value, canEarlyOut);
 	if (data == inp->value)
 		return inp;
 	return new StateMachineSideEffectCopy(inp, data);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectUnreached *inp)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectUnreached *inp, bool *)
 {
 	return inp;
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectAssertFalse *inp)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectAssertFalse *inp, bool *canEarlyOut)
 {
-	bbdd *value = ssaApplyAvail(state, inp->value);
+	bbdd *value = ssaApplyAvail(state, inp->value, canEarlyOut);
 	if (value == inp->value)
 		return inp;
 	return new StateMachineSideEffectAssertFalse(inp, value);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectPhi *inp)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectPhi *inp, bool *canEarlyOut)
 {
 	unsigned x;
 	exprbdd *e;
 	x = 0;
 	while (x < inp->generations.size()) {
-		e = ssaApplyAvail(state, inp->generations[x].val);
+		e = ssaApplyAvail(state, inp->generations[x].val, canEarlyOut);
 		if (e != inp->generations[x].val)
 			break;
 		x++;
@@ -934,50 +948,50 @@ ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectPhi *inp)
 	std::vector<StateMachineSideEffectPhi::input> inputs(inp->generations);
 	inputs[x].val = e;
 	for (x++; x < inp->generations.size(); x++)
-		inputs[x].val = ssaApplyAvail(state, inputs[x].val);
+		inputs[x].val = ssaApplyAvail(state, inputs[x].val, canEarlyOut);
 	return new StateMachineSideEffectPhi(inp, inputs);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStartAtomic *inp)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStartAtomic *inp, bool *)
 {
 	return inp;
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectEndAtomic *inp)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectEndAtomic *inp, bool *)
 {
 	return inp;
 }
 #if !CONFIG_NO_STATIC_ALIASING
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStartFunction *inp)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStartFunction *inp, bool *canEarlyOut)
 {
-	exprbdd *rsp = ssaApplyAvail(state, inp->rsp);
+	exprbdd *rsp = ssaApplyAvail(state, inp->rsp, canEarlyOut);
 	if (rsp == inp->rsp)
 		return inp;
 	return new StateMachineSideEffectStartFunction(inp, rsp);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectEndFunction *inp)
+ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectEndFunction *inp, bool *canEarlyOut)
 {
-	exprbdd *rsp = ssaApplyAvail(state, inp->rsp);
+	exprbdd *rsp = ssaApplyAvail(state, inp->rsp, canEarlyOut);
 	if (rsp == inp->rsp)
 		return inp;
 	return new StateMachineSideEffectEndFunction(inp, rsp);
 }
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStackLayout *inp)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectStackLayout *inp, bool *)
 {
 	return inp;
 }
 #endif
 static StateMachineSideEffect *
-ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *inp)
+ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectImportRegister *inp, bool *)
 {
 	return inp;
 }
 
 static StateMachineSideEffect *
-rewrite_side_effect(ssa_avail_state &state, StateMachineSideEffect *inp)
+rewrite_side_effect(ssa_avail_state &state, StateMachineSideEffect *inp, bool *canEarlyOut)
 {
 	if (!inp)
 		return NULL;
@@ -986,7 +1000,8 @@ rewrite_side_effect(ssa_avail_state &state, StateMachineSideEffect *inp)
 		case StateMachineSideEffect:: name :			\
 			return ssaApplyAvailSE(				\
 				state,					\
-				(StateMachineSideEffect ## name *)inp);
+				(StateMachineSideEffect ## name *)inp,	\
+				canEarlyOut);
 		all_side_effect_types(do_type)
 #undef do_type
 	}
@@ -1041,6 +1056,11 @@ ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
 	std::vector<StateMachineState *> states;
 	enumStates(sm, &states);
 	for (auto it = states.begin(); it != states.end(); it++) {
+		if (*done_something && LibVEX_want_GC()) {
+			/* Get out and give the GC a chance to run. */
+			break;
+		}
+
 		StateMachineState *s = *it;
 		switch (s->type) {
 		case StateMachineState::Terminal: {
@@ -1059,7 +1079,7 @@ ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
 		}
 		case StateMachineState::SideEffecting: {
 			auto sme = (StateMachineSideEffecting *)s;
-			StateMachineSideEffect *n = rewrite_side_effect(state, sme->sideEffect);
+			StateMachineSideEffect *n = rewrite_side_effect(state, sme->sideEffect, done_something);
 			if (n != sme->sideEffect)
 				*done_something = true;
 			sme->sideEffect = n;

@@ -379,5 +379,8 @@ public:
    as soon as possible.  This is useful if you want to e.g. clear out
    some weak references so as to trim a memo table somewhere. */
 void LibVEX_request_GC();
+/* You can call this every so often to get a hint about whether
+   running LibVEX_maybe_gc() would be useful. */
+bool LibVEX_want_GC();
 
 #endif /* !__LIBVEX_ALLOC_H */

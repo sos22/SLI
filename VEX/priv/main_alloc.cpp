@@ -764,6 +764,12 @@ LibVEX_request_GC()
 	force_gc = true;
 }
 
+bool
+LibVEX_want_GC()
+{
+	return force_gc || main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE;
+}
+
 /* Like my_asprintf, but allocate from the VEX GC-able heap. */
 char *
 vex_vasprintf(const char *fmt, va_list args)
