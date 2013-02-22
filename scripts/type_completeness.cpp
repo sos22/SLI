@@ -64,7 +64,9 @@ slurp_types_db(const char *filename, aliasingGraph &out)
 		err(1, "opening %s", filename);
 	}
 	unsigned long magic;
-	fread(&magic, sizeof(magic), 1, f);
+	if (fread(&magic, sizeof(magic), 1, f) != 1) {
+		errx(1, "%s is empty?", filename);
+	}
 	if (magic != 0x1122334455) {
 		errx(1, "only support new format");
 	}
@@ -91,35 +93,101 @@ slurp_types_db(const char *filename, aliasingGraph &out)
 	fclose(f);
 }
 
+#ifndef NDEBUG
+static void
+assertSubset(const aliasingGraph &sub, const aliasingGraph &super)
+{
+	bool failed = false;
+	for (auto it = sub.begin(); it != sub.end(); it++) {
+		if (!super.count(*it)) {
+			fprintf(stderr, "lost an edge: %s\n", it->name());
+			failed = true;
+		}
+	}
+	assert(!failed);
+}
+#else
+static void
+assertSubset(const aliasingGraph &, const aliasingGraph &)
+{
+}
+#endif
+
+static void
+process_log_line(const char *line, const aliasingGraph &refGraph)
+{
+	static long last_timestamp;
+	static long ts_delta;
+	const char *path;
+	long timestamp;
+
+	if (strstr(line, "== FT2, foo")) {
+		fprintf(stderr, "New logfile at %ld\n", last_timestamp);
+		ts_delta = last_timestamp;
+		return;
+	}
+	if (sscanf(line, "Writing snapshot %as at %ld", &path, &timestamp) != 2) {
+		return;
+	}
+
+	aliasingGraph graph;
+	slurp_types_db(path, graph);
+
+	assertSubset(graph, refGraph);
+
+	printf("%ld %f\n", timestamp + ts_delta, double(graph.size()) / refGraph.size());
+
+	last_timestamp = timestamp + 100000;
+	free((void *)path);
+}
+
 int
 main(int argc, char *argv[])
 {
 	init_sli();
 
-	const char *db = argv[1];
 	const char *reference = argv[2];
-
 	aliasingGraph ref;
 	slurp_types_db(reference, ref);
-	aliasingGraph thing;
-	slurp_types_db(db, thing);
 
 	if (debug_mode) {
 		printf("Reference table:\n");
 		for (auto it = ref.begin(); it != ref.end(); it++) {
 			printf("\t%s\n", it->name());
 		}
-		printf("other table:\n");
-		for (auto it = thing.begin(); it != thing.end(); it++) {
-			printf("\t%s\n", it->name());
+	}
+
+	if (!strcmp(argv[1], "-l")) {
+		const char *logfile = argv[3];
+		FILE *l = fopen(logfile, "r");
+		size_t bufsize;
+		char *line = NULL;
+		while (1) {
+			if (getline(&line, &bufsize, l) < 0) {
+				break;
+			}
+			process_log_line(line, ref);
 		}
-	}
+		if (!feof(l)) {
+			err(1, "reading from %s", logfile);
+		}
+	} else {
+		const char *db = argv[1];
 
-	for (auto it = thing.begin(); it != thing.end(); it++) {
-		assert(ref.count(*it));
-	}
+		aliasingGraph thing;
+		slurp_types_db(db, thing);
 
-	printf("%f\n", double(thing.size()) / ref.size());
+		if (debug_mode) {
+			printf("other table:\n");
+			for (auto it = thing.begin(); it != thing.end(); it++) {
+				printf("\t%s\n", it->name());
+			}
+		}
+
+		assertSubset(thing, ref);
+
+		printf("%f\n", double(thing.size()) / ref.size());
+	}
 
 	return 0;
 }
