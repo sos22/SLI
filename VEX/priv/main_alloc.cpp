@@ -47,7 +47,7 @@ FILE *_logfile = stdout;
 //#define DBG printf
 
 void dump_heap_usage(Heap *h, FILE *f);
-static bool force_gc;
+bool __libvex_force_gc;
 
 struct arena;
 
@@ -374,9 +374,9 @@ LibVEX_maybe_gc(GarbageCollectionToken t)
 	   close to limit GC the main heap.  If we're still over the
 	   limit after that we try the IR heap again, and then finally
 	   give up. */
-	if (force_gc || main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE) {
+	if (__libvex_force_gc || main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE) {
 		LibVEX_gc(&ir_heap, t);
-		force_gc = false;
+		__libvex_force_gc = false;
 	}
 	if (main_heap.heap_used >= GC_MAX_SIZE / 2)
 		LibVEX_gc(&main_heap, t);
@@ -756,18 +756,6 @@ __LibVEX_Alloc_Size(const void *ptr)
 	struct allocation_header *h = alloc_to_header(ptr);
 	assert(h->magic == ALLOCATION_HEADER_MAGIC);
 	return h->size() - sizeof(*h);
-}
-
-void
-LibVEX_request_GC()
-{
-	force_gc = true;
-}
-
-bool
-LibVEX_want_GC()
-{
-	return force_gc || main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE;
 }
 
 /* Like my_asprintf, but allocate from the VEX GC-able heap. */

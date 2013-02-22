@@ -375,12 +375,14 @@ public:
 	}
 };
 
+extern bool __libvex_force_gc;
+
 /* A way for things other than the main allocator to ask the GC to run
    as soon as possible.  This is useful if you want to e.g. clear out
    some weak references so as to trim a memo table somewhere. */
-void LibVEX_request_GC();
+static inline void LibVEX_request_GC() { __libvex_force_gc = true; }
 /* You can call this every so often to get a hint about whether
    running LibVEX_maybe_gc() would be useful. */
-bool LibVEX_want_GC();
+static inline bool LibVEX_want_GC() { return __libvex_force_gc; }
 
 #endif /* !__LIBVEX_ALLOC_H */
