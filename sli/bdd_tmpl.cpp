@@ -1251,24 +1251,18 @@ _bdd<leafT, subtreeT>::restructure_zip(scopeT *scope, bscopeT *bscope, const zip
 {
 	if (TIMEOUT)
 		return NULL;
-	auto it_did_insert = memo.insert(std::pair<zipT, subtreeT *>(what, (subtreeT *)NULL));
+	auto it_did_insert = memo.insert(std::pair<zipT, subtreeT *>(what, (subtreeT *)0xbeef));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
 		if (what.isLeaf()) {
 			it->second = what.leaf(scope, bscope);
 		} else {
-			bbdd *cond = bscope->node(what.condition(),
-						  what.rank(),
-						  bscope->cnst(true),
-						  bscope->cnst(false));
-			if (cond) {
-				subtreeT *t = restructure_zip(scope, bscope, what.trueBranch(), memo);
-				if (t) {
-					subtreeT *f = restructure_zip(scope, bscope, what.falseBranch(), memo);
-					if (f)
-						it->second = ifelse(scope, cond, t, f);
-				}
+			subtreeT *t = restructure_zip(scope, bscope, what.trueBranch(), memo);
+			if (t) {
+				subtreeT *f = restructure_zip(scope, bscope, what.falseBranch(), memo);
+				if (f)
+					it->second = scope->node(what.condition(), what.rank(), t, f);
 			}
 		}
 	}

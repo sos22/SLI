@@ -3455,14 +3455,20 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisa
 	} else {
 		treeT *t = simplifyBDD(scope, bscope, bdd->internal().trueBranch, opt, false, memo);
 		treeT *f = simplifyBDD(scope, bscope, bdd->internal().falseBranch, opt, false, memo);
-		if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch)
+		if (cond == bdd->internal().condition && t == bdd->internal().trueBranch && f == bdd->internal().falseBranch) {
 			res = bdd;
-		else
+		} else if (cond == bdd->internal().condition) {
+			res = scope->node(bdd->internal().condition,
+					  bdd->internal().rank,
+					  t,
+					  f);
+		} else {
 			res = treeT::ifelse(
 				scope,
 				bbdd::var(bscope, cond),
 				t,
 				f);
+		}
 	}
 	it_did_insert.first->second = res;
 	return res;
@@ -3516,6 +3522,11 @@ simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IREx
 				   t == bdd->internal().trueBranch &&
 				   f == bdd->internal().falseBranch) {
 				res = bdd;
+			} else if (cond == bdd->internal().condition) {
+				res = scope->node(bdd->internal().condition,
+						  bdd->internal().rank,
+						  t,
+						  f);
 			} else {
 				res = exprbdd::ifelse(
 					scope,

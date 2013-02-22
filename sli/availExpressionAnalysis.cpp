@@ -697,9 +697,9 @@ ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 			substTableT falseTable(t);
 			for (auto it2 = falseTable.begin(); it2 != falseTable.end(); it2++)
 				it2->second = it2->second->falseBranch(*bestVar);
-			it->second = bbdd::ifelse(
-				&state.scopes->bools,
-				bbdd::var(&state.scopes->bools, bestCond),
+			it->second = state.scopes->bools.node(
+				bestCond,
+				*bestVar,
 				ssaApplyAvailExprBool(state, trueTable, e, memo),
 				ssaApplyAvailExprBool(state, falseTable, e, memo));
 		}
@@ -749,9 +749,9 @@ ssaApplyAvailExprExpr(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 			substTableT falseTable(t);
 			for (auto it2 = falseTable.begin(); it2 != falseTable.end(); it2++)
 				it2->second = it2->second->falseBranch(*bestVar);
-			it->second = exprbdd::ifelse(
-				&state.scopes->exprs,
-				bbdd::var(&state.scopes->bools, bestCond),
+			it->second = state.scopes->exprs.node(
+				bestCond,
+				*bestVar,
 				ssaApplyAvailExprExpr(state, trueTable, e, memo),
 				ssaApplyAvailExprExpr(state, falseTable, e, memo));
 		}

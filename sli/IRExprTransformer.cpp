@@ -97,6 +97,11 @@ IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, std::map<bbdd 
 		    t == what->internal().trueBranch &&
 		    f == what->internal().falseBranch) {
 			res = what;
+		} else if (e == what->internal().condition) {
+			res = scope->node(what->internal().condition,
+					  what->internal().rank,
+					  t,
+					  f);
 		} else {
 			res = bbdd::ifelse(
 				scope,
@@ -125,6 +130,11 @@ IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, s
 		    t == what->internal().trueBranch &&
 		    f == what->internal().falseBranch) {
 			res = what;
+		} else if (e == what->internal().condition) {
+			res = scope->node(what->internal().condition,
+					  what->internal().rank,
+					  t,
+					  f);
 		} else {
 			res = smrbdd::ifelse(
 				scope,
@@ -156,11 +166,19 @@ IRExprTransformer::transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope,
 			if (e != what->internal().condition ||
 			    t != what->internal().trueBranch ||
 			    f != what->internal().falseBranch) {
-				res = exprbdd::ifelse(
-					scope,
-					bbdd::var(bscope, e),
-					t,
-					f);
+				if (e == what->internal().condition) {
+					res = scope->node(
+						what->internal().condition,
+						what->internal().rank,
+						t,
+						f);
+				} else {
+					res = exprbdd::ifelse(
+						scope,
+						bbdd::var(bscope, e),
+						t,
+						f);
+				}
 			}
 		}
 	}
