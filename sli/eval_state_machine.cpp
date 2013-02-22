@@ -2407,6 +2407,9 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 					       true,
 					       token);
 	stackedCdf::stopBuildWAtomicResimplify();
+	if (TIMEOUT) {
+		return NULL;
+	}
 	stackedCdf::startBuildWAtomicSymbolicExecute();
 	auto res = survivalConstraintIfExecutedAtomically(
 		scopes,

@@ -532,6 +532,9 @@ atomicSurvivalConstraint(SMScopes *scopes,
 	stackedCdf::stopDeriveRAtomicResimplify();
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;
+	if (TIMEOUT) {
+		return assumption;
+	}
 	stackedCdf::startDeriveRAtomicSymbolicExecute();
 	bbdd *survive = survivalConstraintIfExecutedAtomically(scopes, mai, atomicMachine, assumption, oracle, false, opt, token);
 	stackedCdf::stopDeriveRAtomicSymbolicExecute();
