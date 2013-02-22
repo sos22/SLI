@@ -258,6 +258,7 @@ availExprSet::simplifySE(SMScopes *, StateMachineSideEffectImportRegister *c) co
 	return c;
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 StateMachineSideEffect *
 availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectStartFunction *s) const
 {
@@ -285,7 +286,7 @@ availExprSet::simplifySE(SMScopes *, StateMachineSideEffectStackLayout *c) const
 {
 	return c;
 }
-
+#endif
 
 StateMachineSideEffect *
 availExprSet::simplifySideEffect(SMScopes *scopes, StateMachineSideEffect *se) const
