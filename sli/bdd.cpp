@@ -1004,17 +1004,19 @@ bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo)
 	auto did_insert = it_did_insert.second;
 	if (!did_insert)
 		return it->second;
-	if (a->tag == Iex_Mux0X)
+	if (a->tag == Iex_Mux0X) {
 		it->second = ifelse(
 			scope,
 			_var(scope, ((IRExprMux0X *)a)->cond, memo),
 			_var(scope, ((IRExprMux0X *)a)->exprX, memo),
 			_var(scope, ((IRExprMux0X *)a)->expr0, memo));
-	else
-		it->second = scope->makeInternal(
+	} else {
+		it->second = scope->node(
 			a,
+			scope->ordering->rankVariable(a),
 			scope->cnst(true),
 			scope->cnst(false));
+	}
 	return it->second;
 }
 bbdd *
@@ -1157,7 +1159,7 @@ bbdd::invert(scope *scope, bbdd *a, std::map<bbdd *, bbdd *> &memo)
 	bbdd *f = bbdd::invert(scope, a->internal().falseBranch, memo);
 	if (!t || !f)
 		return NULL;
-	it->second = scope->makeInternal(a->internal().condition, t, f);
+	it->second = scope->node(a->internal().condition, a->internal().rank, t, f);
 	return it->second;
 }
 
@@ -1623,13 +1625,14 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr, std::map<exprbdd *, bbdd *> 
 				it->second = scope->cnst( ((IRExprConst *)l)->Ico.content.U1);
 			} else {
 				it->second =
-					scope->makeInternal(
+					scope->node(
 						l,
+						scope->ordering->rankVariable(l),
 						scope->cnst(true),
 						scope->cnst(false));
 			}
 		} else {
-			it->second = scope->makeInternal(
+			it->second = scope->node(
 				expr->internal().condition,
 				expr->internal().rank,
 				to_bbdd(scope, expr->internal().trueBranch, memo),
@@ -1731,7 +1734,6 @@ template std::map<StateMachineRes, bbdd *> _bdd<StateMachineRes, smrbdd>::to_sel
 template smrbdd *_bdd<StateMachineRes, smrbdd>::from_enabling(const_bdd_scope<smrbdd> *, const enablingTableT &, smrbdd *);
 template smrbdd *const_bdd<StateMachineRes, smrbdd>::replaceTerminal(const_bdd_scope<smrbdd> *, StateMachineRes, StateMachineRes, smrbdd *);
 template void const_bdd_scope<smrbdd>::runGc(HeapVisitor &hv);
-template smrbdd *bdd_scope<smrbdd>::makeInternal(IRExpr *, const bdd_rank &, smrbdd *, smrbdd *);
 
 template void _bdd<IRExpr *, exprbdd>::prettyPrint(FILE *);
 template bool _bdd<IRExpr *, exprbdd>::_parse<exprbdd_scope, exprbdd::parseLeaf>(exprbdd_scope *, exprbdd **, const char *, const char **);

@@ -1248,7 +1248,7 @@ suppressUninit(smrbdd::scope *scope, smrbdd *input, bool kill_smr_unreached,
 			   f == input->internal().falseBranch) {
 			it->second = input;
 		} else {
-			it->second = scope->makeInternal(
+			it->second = scope->node(
 				input->internal().condition,
 				input->internal().rank,
 				t,
@@ -2561,7 +2561,7 @@ msmrbdd::from_smrbdd(scope *scp, smrbdd *what, sane_map<smrbdd *, msmrbdd *> &me
 	}
 	auto t = from_smrbdd(scp, what->internal().trueBranch, memo);
 	auto f = from_smrbdd(scp, what->internal().falseBranch, memo);
-	it->second = scp->makeInternal(
+	it->second = scp->node(
 		what->internal().condition,
 		what->internal().rank,
 		t,
@@ -2599,10 +2599,10 @@ msmrbdd::ignore_invalid(smrbdd::scope *scp, msmrbdd *what, sane_map<msmrbdd *, s
 	} else if (!f) {
 		it->second = t;
 	} else {
-		it->second = scp->makeInternal(what->internal().condition,
-					       what->internal().rank,
-					       t,
-					       f);
+		it->second = scp->node(what->internal().condition,
+				       what->internal().rank,
+				       t,
+				       f);
 	}
 	return it->second;
 }

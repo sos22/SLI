@@ -121,7 +121,7 @@ availExprSet::bddPurgeRegister(SMScopes *scopes, bbdd *what, const threadAndRegi
 		   f == what->internal().falseBranch) {
 		it->second = what;
 	} else {
-		it->second = scopes->bools.makeInternal(
+		it->second = scopes->bools.node(
 			what->internal().condition,
 			what->internal().rank,
 			t,

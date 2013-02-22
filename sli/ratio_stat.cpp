@@ -30,9 +30,9 @@ void
 ratio_stat::print() const
 {
 	if (denominator == 0) {
-		printf("%20s: inf\n", name);
+		printf("%60s: inf\n", name);
 	} else {
-		printf("%20s: %f%%          (%8ld/%8ld)\n",
+		printf("%60s: %f%%          (%8ld/%8ld)\n",
 		       name,
 		       100 * (double)numerator / denominator,
 		       numerator,

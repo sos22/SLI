@@ -391,7 +391,7 @@ _bdd<leafT, subtreeT>::_parse(scopeT *scope,
 		subtreeT *f = _parse<scopeT, parseLeaf>(scope, str, suffix, labels);
 		if (!f)
 			return NULL;
-		res = scope->makeInternal(a, t, f);
+		res = scope->node(a, scope->ordering->rankVariable(a), t, f);
 	} else {
 		return NULL;
 	}
@@ -501,127 +501,149 @@ bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 	assert(a);
 	assert(b);
 	assert(a->isLeaf() == true || a->isLeaf() == false);
-	assert(a->isLeaf() || ordering->before(cond, a));
-	assert(b->isLeaf() || ordering->before(cond, b));
 
-	if (cond->tag == Iex_EntryPoint &&
-	    !a->isLeaf() &&
-	    a->internal().condition->tag == Iex_EntryPoint &&
-	    ((IRExprEntryPoint *)a->internal().condition)->thread == ((IRExprEntryPoint *)cond)->thread) {
-		assert(((IRExprEntryPoint *)a->internal().condition)->label != ((IRExprEntryPoint *)cond)->label);
-		a = a->internal().falseBranch;
-	}
+	bool progress = true;
+	while (progress) {
+		progress = false;
+		if (!b->isLeaf() && cond == b->internal().condition) {
+			b = b->internal().falseBranch;
+			progress = true;
+		}
 
-	if (cond->tag == Iex_ControlFlow &&
-	    !a->isLeaf() &&
-	    a->internal().condition->tag == Iex_ControlFlow &&
-	    ((IRExprControlFlow *)a->internal().condition)->thread == ((IRExprControlFlow *)cond)->thread &&
-	    ((IRExprControlFlow *)a->internal().condition)->cfg1 == ((IRExprControlFlow *)cond)->cfg1)  {
-		assert(((IRExprControlFlow *)a->internal().condition)->cfg2 != ((IRExprControlFlow *)cond)->cfg2);
-		a = a->internal().falseBranch;
-	}
-
-	if (cond->tag == Iex_Binop &&
-	    ((IRExprBinop *)cond)->op >= Iop_CmpEQ8 &&
-	    ((IRExprBinop *)cond)->op <= Iop_CmpEQ64 &&
-	    !a->isLeaf() &&
-	    a->internal().condition->tag == Iex_Binop &&
-	    ((IRExprBinop *)a->internal().condition)->op >= Iop_CmpEQ8 &&
-	    ((IRExprBinop *)a->internal().condition)->op <= Iop_CmpEQ64 &&
-	    ((IRExprBinop *)a->internal().condition)->arg2 ==
-		((IRExprBinop *)cond)->arg2 &&
-	    ((IRExprBinop *)cond)->arg1->tag == Iex_Const &&
-	    ((IRExprBinop *)a->internal().condition)->arg1->tag == Iex_Const &&
-	    !eqIRExprConst( (IRExprConst *)((IRExprBinop *)a->internal().condition)->arg1,
-			    (IRExprConst *)((IRExprBinop *)cond)->arg1) ) {
-		assert(((IRExprBinop *)a->internal().condition)->arg1 !=
-		       ((IRExprBinop *)cond)->arg1);
-		a = a->internal().falseBranch;
-	}
-
-	if (cond->tag == Iex_HappensBefore &&
-	    !a->isLeaf() &&
-	    a->internal().condition->tag == Iex_HappensBefore) {
-		const IRExprHappensBefore *condhb =
-			(const IRExprHappensBefore *)cond;
-		const IRExprHappensBefore *ahb =
-			(const IRExprHappensBefore *)a->internal().condition;
-		if (condhb->before.tid == ahb->before.tid &&
-		    condhb->after.tid == ahb->after.tid &&
-		    condhb->before.id >= ahb->before.id &&
-		    condhb->after.id <= ahb->after.id) {
-			/* @cond is (tA:idA <-< tB:idB) and @a's first
-			   condition is (tA:idC <-< tB:idD).  We
-			   further have that idA >= idC and idB <=
-			   idD.  Because of the way we assign MAIs to
-			   memory accesses (see setMais in
-			   probeCFGstoMachine.cpp) idC <= idA implies
-			   tA:idC <-< tA:idA, and likewise
-			   idB <= idD implies tB:idB <-< tB:idD.
-			   Combining these with cond gives us
-			   
-			   tA:idC <-< tA:idA <-< tB:idB <-< tB:idD
-
-			   i.e.
-
-			   tA:idC <-< tB:idD and we can replace @a
-			   with @a->trueBranch. */
-			a = a->internal().trueBranch;
+		/* ifelse(cond, A, ifelse(BadPtr(X), B, C)) ->
+		   ifelse(cond, A, C) if cond depends on LD(X). */
+		if (!b->isLeaf() &&
+		    b->internal().condition->tag == Iex_Unop &&
+		    ((IRExprUnop *)b->internal().condition)->op == Iop_BadPtr &&
+		    dereferences(cond,
+				 ((IRExprUnop *)b->internal().condition)->arg)) {
+			b = b->internal().falseBranch;
+			progress = true;
+		}
+		if (!b->isLeaf() &&
+		    b->internal().condition->tag == Iex_Binop &&
+		    ((IRExprBinop *)b->internal().condition)->op == Iop_CmpEQ64 &&
+		    ((IRExprBinop *)b->internal().condition)->arg1->tag == Iex_Const &&
+		    ((IRExprConst *)((IRExprBinop *)b->internal().condition)->arg1)->Ico.content.U64 <= (1 << 10) &&
+		    dereferences(cond,
+				 ((IRExprBinop *)b->internal().condition)->arg2)) {
+			b = b->internal().falseBranch;
+			progress = true;
 		}
 	}
 
-	/* We have ifelse(cond1, ifelse(BadPtr(X), A, B), C).  If
-	   cond1 dereferences BadPtr then we can simplify that down to
-	   ifelse(cond1, B, C). */
-	if (!a->isLeaf() &&
-	    a->internal().condition->tag == Iex_Unop &&
-	    ((IRExprUnop *)a->internal().condition)->op == Iop_BadPtr &&
-	    dereferences(cond,
-			 ((IRExprUnop *)a->internal().condition)->arg)) {
-		a = a->internal().falseBranch;
-	}
-	/* Likewise, if we just dereferenced X then we know that X
-	   can't be a small constant. */
-	if (!a->isLeaf() &&
-	    a->internal().condition->tag == Iex_Binop &&
-	    ((IRExprBinop *)a->internal().condition)->op == Iop_CmpEQ64 &&
-	    ((IRExprBinop *)a->internal().condition)->arg1->tag == Iex_Const &&
-	    ((IRExprConst *)((IRExprBinop *)a->internal().condition)->arg1)->Ico.content.U64 <= (1 << 10) &&
-	    dereferences(cond,
-			 ((IRExprBinop *)a->internal().condition)->arg2)) {
-		a = a->internal().falseBranch;
-	}
+	progress = true;
+	while (progress) {
+		progress = false;
+		if (!a->isLeaf() &&
+		    cond == a->internal().condition) {
+			a = a->internal().trueBranch;
+			progress = true;
+		}
 
-	/* Similar trick on the false branch: ifelse(cond, A,
-	   ifelse(BadPtr(X), B, C)) -> ifelse(cond, A, C) if cond
-	   depends on LD(X). */
-	if (!b->isLeaf() &&
-	    b->internal().condition->tag == Iex_Unop &&
-	    ((IRExprUnop *)b->internal().condition)->op == Iop_BadPtr &&
-	    dereferences(cond,
-			 ((IRExprUnop *)b->internal().condition)->arg)) {
-		b = b->internal().falseBranch;
-	}
-	if (!b->isLeaf() &&
-	    b->internal().condition->tag == Iex_Binop &&
-	    ((IRExprBinop *)b->internal().condition)->op == Iop_CmpEQ64 &&
-	    ((IRExprBinop *)b->internal().condition)->arg1->tag == Iex_Const &&
-	    ((IRExprConst *)((IRExprBinop *)b->internal().condition)->arg1)->Ico.content.U64 <= (1 << 10) &&
-	    dereferences(cond,
-			 ((IRExprBinop *)b->internal().condition)->arg2)) {
-		b = b->internal().falseBranch;
+		if (!a->isLeaf() &&
+		    cond->tag == Iex_EntryPoint &&
+		    a->internal().condition->tag == Iex_EntryPoint &&
+		    ((IRExprEntryPoint *)a->internal().condition)->thread == ((IRExprEntryPoint *)cond)->thread) {
+			assert(((IRExprEntryPoint *)a->internal().condition)->label != ((IRExprEntryPoint *)cond)->label);
+			a = a->internal().falseBranch;
+			progress = true;
+		}
+
+		if (!a->isLeaf() &&
+		    cond->tag == Iex_ControlFlow &&
+		    a->internal().condition->tag == Iex_ControlFlow &&
+		    ((IRExprControlFlow *)a->internal().condition)->thread == ((IRExprControlFlow *)cond)->thread &&
+		    ((IRExprControlFlow *)a->internal().condition)->cfg1 == ((IRExprControlFlow *)cond)->cfg1)  {
+			assert(((IRExprControlFlow *)a->internal().condition)->cfg2 != ((IRExprControlFlow *)cond)->cfg2);
+			a = a->internal().falseBranch;
+			progress = true;
+		}
+
+		if (!a->isLeaf() &&
+		    cond->tag == Iex_Binop &&
+		    ((IRExprBinop *)cond)->op >= Iop_CmpEQ8 &&
+		    ((IRExprBinop *)cond)->op <= Iop_CmpEQ64 &&
+		    a->internal().condition->tag == Iex_Binop &&
+		    ((IRExprBinop *)a->internal().condition)->op >= Iop_CmpEQ8 &&
+		    ((IRExprBinop *)a->internal().condition)->op <= Iop_CmpEQ64 &&
+		    ((IRExprBinop *)a->internal().condition)->arg2 ==
+		    ((IRExprBinop *)cond)->arg2 &&
+		    ((IRExprBinop *)cond)->arg1->tag == Iex_Const &&
+		    ((IRExprBinop *)a->internal().condition)->arg1->tag == Iex_Const &&
+		    !eqIRExprConst( (IRExprConst *)((IRExprBinop *)a->internal().condition)->arg1,
+				    (IRExprConst *)((IRExprBinop *)cond)->arg1) ) {
+			assert(((IRExprBinop *)a->internal().condition)->arg1 !=
+			       ((IRExprBinop *)cond)->arg1);
+			a = a->internal().falseBranch;
+			progress = true;
+		}
+
+		if (!a->isLeaf() &&
+		    cond->tag == Iex_HappensBefore &&
+		    a->internal().condition->tag == Iex_HappensBefore) {
+			const IRExprHappensBefore *condhb =
+				(const IRExprHappensBefore *)cond;
+			const IRExprHappensBefore *ahb =
+				(const IRExprHappensBefore *)a->internal().condition;
+			if (condhb->before.tid == ahb->before.tid &&
+			    condhb->after.tid == ahb->after.tid &&
+			    condhb->before.id >= ahb->before.id &&
+			    condhb->after.id <= ahb->after.id) {
+				/* @cond is (tA:idA <-< tB:idB) and @a's first
+				   condition is (tA:idC <-< tB:idD).  We
+				   further have that idA >= idC and idB <=
+				   idD.  Because of the way we assign MAIs to
+				   memory accesses (see setMais in
+				   probeCFGstoMachine.cpp) idC <= idA implies
+				   tA:idC <-< tA:idA, and likewise
+				   idB <= idD implies tB:idB <-< tB:idD.
+				   Combining these with cond gives us
+			   
+				   tA:idC <-< tA:idA <-< tB:idB <-< tB:idD
+
+				   i.e.
+
+				   tA:idC <-< tB:idD and we can replace @a
+				   with @a->trueBranch. */
+				a = a->internal().trueBranch;
+				progress = true;
+			}
+		}
+
+		/* We have ifelse(cond1, ifelse(BadPtr(X), A, B), C).
+		   If cond1 dereferences BadPtr then we can simplify
+		   that down to ifelse(cond1, B, C). */
+		if (!a->isLeaf() &&
+		    a->internal().condition->tag == Iex_Unop &&
+		    ((IRExprUnop *)a->internal().condition)->op == Iop_BadPtr &&
+		    dereferences(cond,
+				 ((IRExprUnop *)a->internal().condition)->arg)) {
+			a = a->internal().falseBranch;
+			progress = true;
+		}
+		/* Likewise, if we just dereferenced X then we know
+		   that X can't be a small constant. */
+		if (!a->isLeaf() &&
+		    a->internal().condition->tag == Iex_Binop &&
+		    ((IRExprBinop *)a->internal().condition)->op == Iop_CmpEQ64 &&
+		    ((IRExprBinop *)a->internal().condition)->arg1->tag == Iex_Const &&
+		    ((IRExprConst *)((IRExprBinop *)a->internal().condition)->arg1)->Ico.content.U64 <= (1 << 10) &&
+		    dereferences(cond,
+				 ((IRExprBinop *)a->internal().condition)->arg2)) {
+			progress = true;
+			a = a->internal().falseBranch;
+		}
 	}
 }
 
 template <typename t> t *
-bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
+bdd_scope<t>::mkInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 {
-	if (a == b)
-		return a;
+	assert(a != b);
 	assert(cond->tag != Iex_Const);
-	normalise(cond, a, b);
-	if (a == b)
-		return a;
+	assert(a->isLeaf() || r < a->internal().rank);
+	assert(b->isLeaf() || r < b->internal().rank);
 
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
@@ -629,35 +651,90 @@ bdd_scope<t>::makeInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 			(t *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
-	if (did_insert)
+	if (did_insert) {
 		it->second = new t(r, cond, a, b);
+	}
 	return it->second;
 }
 
+/* Note that this is unmemoised, deliberately.  It used to be
+   memoised, but the memo table didn't hit often enough to be
+   worthwhile.  The mkInternal() memo table is sufficient to achieve
+   correctness, so just use that one. */
 template <typename t> t *
-bdd_scope<t>::makeInternal(IRExpr *cond, t *a, t *b)
+bdd_scope<t>::node(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 {
-	if (a == b)
-		return a;
 	if (cond->tag == Iex_Const) {
-		if ( ((IRExprConst *)cond)->Ico.content.U1 )
+		if ( ((IRExprConst *)cond)->Ico.content.U1 ) {
 			return a;
-		else
+		} else {
 			return b;
+		}
+	}
+	if (a == b) {
+		return a;
 	}
 	normalise(cond, a, b);
-	if (a == b)
+	if (a == b) {
 		return a;
-	bdd_rank r(ordering->rankVariable(cond));
-	auto it_did_insert = intern.insert(
-		std::pair<entry, t *>(
-			entry(r, a, b),
-			(t *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert)
-		it->second = new t(r, cond, a, b);
-	return it->second;
+	}
+	if (a->isLeaf() || r < a->internal().rank) {
+		/* True branch is fine */
+		if (b->isLeaf() || r < b->internal().rank) {
+			/* False branch is also fine */
+			return mkInternal(cond, r, a, b);
+		} else {
+			/* Need to re-order on false branch */
+			return node(
+				b->internal().condition,
+				b->internal().rank,
+				node(cond, r, a, b->internal().trueBranch),
+				node(cond, r, a, b->internal().falseBranch));
+		}
+	} else {
+		/* True branch must be reordered */
+		if (b->isLeaf() || r < b->internal().rank) {
+			/* Only need to re-order on true branch */
+			return node(
+				a->internal().condition,
+				a->internal().rank,
+				node(cond, r, a->internal().trueBranch, b),
+				node(cond, r, a->internal().falseBranch, b));
+		} else {
+			/* Trick case.  Need to re-order on both branches */
+			if (a->internal().rank < b->internal().rank) {
+				return node(
+					a->internal().condition,
+					a->internal().rank,
+					node(b->internal().condition,
+					     b->internal().rank,
+					     node(cond, r, a->internal().trueBranch,  b->internal().trueBranch),
+					     node(cond, r, a->internal().trueBranch,  b->internal().falseBranch)),
+					node(b->internal().condition,
+					     b->internal().rank,
+					     node(cond, r, a->internal().falseBranch, b->internal().trueBranch),
+					     node(cond, r, a->internal().falseBranch, b->internal().falseBranch)));
+			} else if (a->internal().rank == b->internal().rank) {
+				return node(
+					a->internal().condition,
+					a->internal().rank,
+					node(cond, r, a->internal().trueBranch,  b->internal().trueBranch),
+					node(cond, r, a->internal().falseBranch, b->internal().falseBranch));
+			} else {
+				return node(
+					b->internal().condition,
+					b->internal().rank,
+					node(a->internal().condition,
+					     a->internal().rank,
+					     node(cond, r, a->internal().trueBranch,  b->internal().trueBranch),
+					     node(cond, r, a->internal().falseBranch, b->internal().trueBranch)),
+					node(a->internal().condition,
+					     a->internal().rank,
+					     node(cond, r, a->internal().trueBranch,  b->internal().falseBranch),
+					     node(cond, r, a->internal().falseBranch, b->internal().falseBranch)));
+			}
+		}
+	}
 }
 
 template <typename t> t *
@@ -735,16 +812,18 @@ _bdd<constT, subtreeT>::to_selectors(scopeT *scope,
 				if (true_it != trueB.end() &&
 				    (false_it == falseB.end() || true_it->first < false_it->first)) {
 					res[true_it->first] =
-						scope->makeInternal(what->internal().condition,
-								    true_it->second,
-								    const_false);
+						scope->node(what->internal().condition,
+							    what->internal().rank,
+							    true_it->second,
+							    const_false);
 					true_it++;
 				} else if (false_it != falseB.end() &&
 					   (true_it == trueB.end() || false_it->first < true_it->first)) {
 					res[false_it->first] =
-						scope->makeInternal(what->internal().condition,
-								    const_false,
-								    false_it->second);
+						scope->node(what->internal().condition,
+							    what->internal().rank,
+							    const_false,
+							    false_it->second);
 					false_it++;
 				} else {
 					/* (true_it != trueB.end() || false_it != falseB.end()) &&
@@ -788,9 +867,10 @@ _bdd<constT, subtreeT>::to_selectors(scopeT *scope,
 					   => !finished(t) && !finished(f) && t == f
 					*/
 					res[false_it->first] =
-						scope->makeInternal(what->internal().condition,
-								    true_it->second,
-								    false_it->second);
+						scope->node(what->internal().condition,
+							    what->internal().rank,
+							    true_it->second,
+							    false_it->second);
 					true_it++;
 					false_it++;
 				}
@@ -911,7 +991,7 @@ const_bdd<constT, subtreeT>::replaceTerminal(scope *scp,
 		subtreeT *f = replaceTerminal(scp, from, to, in->internal().falseBranch, memo);
 		if (t != in->internal().trueBranch ||
 		    f != in->internal().falseBranch)
-			it->second = scp->makeInternal(in->internal().condition, t, f);
+			it->second = scp->node(in->internal().condition, in->internal().rank, t, f);
 		else
 			it->second = in;
 	}
@@ -1178,10 +1258,10 @@ _bdd<leafT, subtreeT>::restructure_zip(scopeT *scope, bscopeT *bscope, const zip
 		if (what.isLeaf()) {
 			it->second = what.leaf(scope, bscope);
 		} else {
-			bbdd *cond = bscope->makeInternal(what.condition(),
-							  what.rank(),
-							  bscope->cnst(true),
-							  bscope->cnst(false));
+			bbdd *cond = bscope->node(what.condition(),
+						  what.rank(),
+						  bscope->cnst(true),
+						  bscope->cnst(false));
 			if (cond) {
 				subtreeT *t = restructure_zip(scope, bscope, what.trueBranch(), memo);
 				if (t) {

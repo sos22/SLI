@@ -380,12 +380,13 @@ class bdd_scope {
 	};
 	std::map<entry, t *> intern;
 	void normalise(IRExpr *cond, t *&, t *&);
+	t *mkInternal(IRExpr *a, const bdd_rank &r, t *, t *);
+
 protected:
 	void runGc(HeapVisitor &hv);
 public:
-	t *makeInternal(IRExpr *a, t *, t *);
-	t *makeInternal(IRExpr *a, const bdd_rank &r, t *, t *);
 	t *internBdd(t *);
+	t *node(IRExpr *, const bdd_rank &, t *, t *);
 	bdd_ordering *ordering;
 
 	bdd_scope(bdd_ordering *_ordering)
