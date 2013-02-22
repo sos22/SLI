@@ -712,7 +712,7 @@ bisimilarityReduction(SMScopes *scopes, StateMachine *sm, bool is_ssa, MaiMap &m
 	/* Now go and build the substitution fragments for each
 	 * similarity set. */
 	std::vector<StateMachineState *> replacementFragments;
-	for (auto it = similaritySets.begin(); it != similaritySets.end(); it++) {
+	for (auto it = similaritySets.begin(); !TIMEOUT && it != similaritySets.end(); it++) {
 		std::set<StateMachineState *> &set(*it);
 		assert(!set.empty());
 		StateMachineState *representative = *set.begin();

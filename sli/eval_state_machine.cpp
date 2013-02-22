@@ -992,7 +992,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				return;
 			}
 			assertFalse<paramT>(&scopes->bools, isBad, opt, result);
-			if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
+			if ((justPathConstraint->isLeaf() && !justPathConstraint->leaf()) || TIMEOUT) {
 				return;
 			}
 		}

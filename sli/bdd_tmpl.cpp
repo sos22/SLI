@@ -266,7 +266,7 @@ _bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp, 
 {
 	from_enabling_internal<subtreeT, scopeT> f(inp);
 	subtreeT *res = zip(scope, f);
-	if (res == INTBDD_DONT_CARE)
+	if (TIMEOUT || res == INTBDD_DONT_CARE)
 		return defaultValue;
 	else
 		return res;
@@ -648,7 +648,7 @@ bdd_scope<t>::mkInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
 			entry(r, a, b),
-			(t *)NULL));
+			(t *)0xdead));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
@@ -664,6 +664,9 @@ bdd_scope<t>::mkInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 template <typename t> t *
 bdd_scope<t>::node(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 {
+	if (TIMEOUT) {
+		return a;
+	}
 	if (cond->tag == Iex_Const) {
 		if ( ((IRExprConst *)cond)->Ico.content.U1 ) {
 			return a;
@@ -761,7 +764,7 @@ bdd_scope<t>::internBdd(t *what)
 template <typename constT, typename subtreeT> template <IRExpr *mkConst(constT)> IRExpr *
 const_bdd<constT, subtreeT>::to_irexpr(subtreeT *what, std::map<subtreeT *, IRExpr *> &memo)
 {
-	auto it_did_insert = memo.insert(std::pair<subtreeT *, IRExpr *>(what, (IRExpr *)NULL));
+	auto it_did_insert = memo.insert(std::pair<subtreeT *, IRExpr *>(what, (IRExpr *)0xdead));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
@@ -967,7 +970,12 @@ _bdd<constT, subtreeT>::ifelse(scopeT *scope,
 			       subtreeT *ifFalse)
 {
 	ifelse_zip_internal<subtreeT, scopeT> f(cond, ifTrue, ifFalse);
-	return zip(scope, f);
+	auto r = zip(scope, f);
+	if (TIMEOUT) {
+		return ifTrue;
+	} else {
+		return r;
+	}
 }
 
 template <typename constT, typename subtreeT> subtreeT *
@@ -983,7 +991,7 @@ const_bdd<constT, subtreeT>::replaceTerminal(scope *scp,
 		else
 			return in;
 	}
-	auto it_did_insert = memo.insert(std::pair<subtreeT *, subtreeT *>(in, (subtreeT *)NULL));
+	auto it_did_insert = memo.insert(std::pair<subtreeT *, subtreeT *>(in, (subtreeT *)0xdead));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
@@ -1182,7 +1190,7 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 		zipInternalT trueSucc(relocWhere.trueSucc(key.rank));
 		zipInternalT falseSucc(relocWhere.falseSucc(key.rank));
 		
-		subtreeT *newNode = new subtreeT(key.rank, key.expr, NULL, NULL);
+		subtreeT *newNode = new subtreeT(key.rank, key.expr, (subtreeT *)0xb00b, (subtreeT *)0xd00d);
 
 		/* Patch it into the BDD we've built up so far. */
 		for (auto it2 = dests.begin(); it2 != dests.end(); it2++)

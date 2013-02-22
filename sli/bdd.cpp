@@ -333,7 +333,7 @@ _muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo)
 static IRExpr *
 muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo)
 {
-	auto it_did_insert = memo.insert(std::pair<IRExpr *, IRExpr *>(what, (IRExpr *)NULL));
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, IRExpr *>(what, (IRExpr *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
@@ -986,7 +986,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 IRExpr *
 quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 {
-	auto it_did_insert = memo.insert(std::pair<IRExpr *, IRExpr *>(a, (IRExpr *)NULL));
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, IRExpr *>(a, (IRExpr *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
@@ -998,8 +998,8 @@ bbdd *
 bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo)
 {
 	if (TIMEOUT)
-		return NULL;
-	auto it_did_insert = memo.insert(std::pair<IRExpr *, bbdd *>(a, (bbdd *)NULL));
+		return scope->cnst(true);
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, bbdd *>(a, (bbdd *)0xf00));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert)
@@ -1129,36 +1129,43 @@ public:
 bbdd *
 bbdd::And(scope *scope, bbdd *a, bbdd *b)
 {
-	if (TIMEOUT) {
-		return NULL;
+	if (!TIMEOUT) {
+		binary_zip_internal f(true, a, b);
+		auto r = zip(scope, f);
+		if (!TIMEOUT) {
+			return r;
+		}
 	}
-	binary_zip_internal f(true, a, b);
-	return zip(scope, f);
+	return scope->cnst(true);
 }
 bbdd *
 bbdd::Or(scope *scope, bbdd *a, bbdd *b)
 {
-	binary_zip_internal f(false, a, b);
-	return zip(scope, f);
+	if (!TIMEOUT) {
+		binary_zip_internal f(false, a, b);
+		auto r = zip(scope, f);
+		if (!TIMEOUT) {
+			return r;
+		}
+	}
+	return scope->cnst(false);
 }
 
 bbdd *
 bbdd::invert(scope *scope, bbdd *a, std::map<bbdd *, bbdd *> &memo)
 {
 	if (TIMEOUT)
-		return NULL;
+		return a;
 	if (a->isLeaf())
 		return scope->cnst(!a->leaf());
 
-	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(a, (bbdd *)NULL));
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(a, (bbdd *)0xf00));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert)
 		return it->second;
 	bbdd *t = bbdd::invert(scope, a->internal().trueBranch, memo);
 	bbdd *f = bbdd::invert(scope, a->internal().falseBranch, memo);
-	if (!t || !f)
-		return NULL;
 	it->second = scope->node(a->internal().condition, a->internal().rank, t, f);
 	return it->second;
 }
@@ -1334,7 +1341,7 @@ exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what, std::map
 	if (TIMEOUT)
 		return NULL;
 
-	auto it_did_insert = memo.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)NULL));
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert)
@@ -1371,7 +1378,7 @@ exprbdd::to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo)
 {
 	if (what->isLeaf())
 		return what->leaf();
-	auto it_did_insert = memo.insert(std::pair<exprbdd *, IRExpr *>(what, (IRExpr *)NULL));
+	auto it_did_insert = memo.insert(std::pair<exprbdd *, IRExpr *>(what, (IRExpr *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
@@ -1409,7 +1416,7 @@ exprbdd::parseLeaf(scope *scope, const char *str, const char **suffix)
 exprbdd *
 exprbdd_scope::cnst(IRExpr *what)
 {
-	auto it_did_insert = leaves.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)NULL));
+	auto it_did_insert = leaves.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
@@ -1475,10 +1482,13 @@ public:
 exprbdd *
 exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 {
-	if (!what) {
-		return NULL;
+	if (!TIMEOUT) {
+		auto r = exprbdd::restructure_zip(scope, bscope, unop_zipper(op, what));
+		if (!TIMEOUT) {
+			return r;
+		}
 	}
-	return exprbdd::restructure_zip(scope, bscope, unop_zipper(op, what));
+	return what;
 }
 
 class binop_zip {
@@ -1615,7 +1625,7 @@ exprbdd::coerceTypes(scope *scope, bbdd::scope *bscope, IRType to, exprbdd *what
 bbdd *
 exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr, std::map<exprbdd *, bbdd *> &memo)
 {
-	auto it_did_insert = memo.insert(std::pair<exprbdd *, bbdd *>(expr, (bbdd *)NULL));
+	auto it_did_insert = memo.insert(std::pair<exprbdd *, bbdd *>(expr, (bbdd *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
@@ -1645,8 +1655,9 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr, std::map<exprbdd *, bbdd *> 
 bbdd *
 exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr)
 {
-	if (TIMEOUT)
-		return NULL;
+	if (TIMEOUT) {
+		return scope->cnst(true);
+	}
 	assert(expr->type() == Ity_I1);
 	std::map<exprbdd *, bbdd *> memo;
 	stackedCdf::startBDD();
