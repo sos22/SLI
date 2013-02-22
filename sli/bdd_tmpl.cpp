@@ -136,7 +136,11 @@ template <typename constT, typename subtreeT> template <typename scopeT> subtree
 _bdd<constT, subtreeT>::assume(scopeT *scope, subtreeT *thing, bbdd *assumption)
 {
 	assume_zip_internal<subtreeT> f(thing, assumption);
-	return zip(scope, f);
+	auto r = zip(scope, f);
+	if (TIMEOUT) {
+		return thing;
+	}
+	return r;
 }
 
 #define INTBDD_DONT_CARE ((subtreeT *)0x1)
