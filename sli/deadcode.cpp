@@ -19,6 +19,12 @@ class LivenessEntry {
 	{
 		content.erase(r);
 	}
+	void useRegister(const threadAndRegister &r, IRType ty) {
+		auto it_di = content.insert(r, ty);
+		if (!it_di.second && it_di.first->second < ty) {
+			it_di.first->second = ty;
+		}
+	}
 	sane_map<threadAndRegister, IRType> content;
 	bool anyLoads;
 public:
@@ -29,7 +35,7 @@ public:
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				out->content.insert(g->reg, g->type());
+				out->useRegister(g->reg, g->type());
 				return visit_continue;
 			}
 		} foo;
@@ -41,7 +47,7 @@ public:
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				out->content.insert(g->reg, g->type());
+				out->useRegister(g->reg, g->type());
 				return visit_continue;
 			}
 		} foo;
@@ -53,7 +59,7 @@ public:
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				out->content.insert(g->reg, g->type());
+				out->useRegister(g->reg, g->type());
 				return visit_continue;
 			}
 		} foo;
@@ -65,7 +71,7 @@ public:
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				out->content.insert(g->reg, g->type());
+				out->useRegister(g->reg, g->type());
 				return visit_continue;
 			}
 		} foo;
@@ -115,7 +121,7 @@ public:
 				(StateMachineSideEffectPhi *)smse;
 			for (auto it = smsep->generations.begin(); it != smsep->generations.end(); it++) {
 				useExpression(it->val);
-				content.insert(it->reg, smsep->ty);
+				useRegister(it->reg, smsep->ty);
 			}
 			break;
 		}
