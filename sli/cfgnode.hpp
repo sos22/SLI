@@ -122,8 +122,10 @@ public:
 typedef _CFGNode<VexRip> CFGNode;
 
 void getStoreCFGs(CfgLabelAllocator &allocLabel,
-		  const std::set<DynAnalysisRip> &, Oracle *,
-		  CFGNode ***, int *);
+		  const std::map<DynAnalysisRip, IRType> &,
+		  Oracle *,
+		  CFGNode ***,
+		  int *);
 bool getProbeCFGs(CfgLabelAllocator &allocLabel,
 		  Oracle *oracle, const VexRip &vr,
 		  HashedSet<HashedPtr<CFGNode> > &out,
@@ -133,9 +135,6 @@ bool getProbeCFGs(CfgLabelAllocator &allocLabel,
 		  HashedSet<HashedPtr<CFGNode> > &out,
 		  HashedSet<HashedPtr<const CFGNode> > &targetNodes,
 		  int thresh);
-
-void trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
-			       const std::set<DynAnalysisRip> &roots);
 
 class StateMachine;
 class MaiMap;

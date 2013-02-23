@@ -812,12 +812,14 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			return IRExpr_Const_U1(false);
 		if (op == Iop_Or1 && acc == 1)
 			return IRExpr_Const_U1(true);
-		if (acc == 0 && op >= Iop_Mul8 && op <= Iop_Mul64) {
+		if (acc == 0 &&
+		    ((op >= Iop_Mul8 && op <= Iop_Mul64) ||
+		     (op >= Iop_And8 && op <= Iop_And64))) {
 			switch (op) {
-			case Iop_Mul8: return IRExpr_Const_U8(0);
-			case Iop_Mul16: return IRExpr_Const_U16(0);
-			case Iop_Mul32: return IRExpr_Const_U32(0);
-			case Iop_Mul64: return IRExpr_Const_U64(0);
+			case Iop_Mul8: case Iop_And8: return IRExpr_Const_U8(0);
+			case Iop_Mul16: case Iop_And16: return IRExpr_Const_U16(0);
+			case Iop_Mul32: case Iop_And32: return IRExpr_Const_U32(0);
+			case Iop_Mul64: case Iop_And64: return IRExpr_Const_U64(0);
 			default: abort();
 			}
 		}

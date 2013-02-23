@@ -1754,17 +1754,31 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		switch (sideEffect->type) {
 		case StateMachineSideEffect::Store: {
 			StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)sideEffect;
-			if (!opt.ignoreStore(decode, s)) {
-				break;
-			}
+			IRType maxType;
 			bool noConflictingLoads = true;
+			if (!opt.ignoreStore(decode, s, &maxType)) {
+				noConflictingLoads = false;
+			}
 			for (auto it2 = at.content.begin();
-			     !killedAllLoads && noConflictingLoads && it2 != at.content.end();
+			     !killedAllLoads && (noConflictingLoads || maxType == s->data->type()) && it2 != at.content.end();
 			     it2++) {
+				StateMachineSideEffect *se = it2->first->sideEffect;
+				assert(se);
+				if (se->type == StateMachineSideEffect::Copy) {
+					/* Already killed off this load */
+					continue;
+				}
+				assert(se->type == StateMachineSideEffect::Load);
 				if (it2->second.stores.count(*it)) {
-					if (debug_use_alias_table)
+					if (debug_use_alias_table) {
 						printf("Can't remove store l%d because of load l%d\n",
 						       stateLabels[*it], stateLabels[it2->first]);
+					}
+					IRType ty;
+					ty = ((StateMachineSideEffectLoad *)se)->type;
+					if ( ty > maxType ) {
+						maxType = ty;
+					}
 					noConflictingLoads = false;
 				}
 			}
@@ -1786,6 +1800,24 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 									s->addr)),
 							true);
 				}
+				progress = true;
+			} else if (maxType < s->data->type()) {
+				if (debug_use_alias_table) {
+					printf("Downgrade store l%d to %s\n",
+					       stateLabels[*it],
+					       nameIRType(maxType));
+				}
+				(*it)->sideEffect =
+					new StateMachineSideEffectStore(
+						s,
+						s->addr,
+						exprbdd::unop(
+							&scopes->exprs,
+							&scopes->bools,
+							coerceTypesOp(
+								s->data->type(),
+								maxType),
+							s->data));
 				progress = true;
 			}
 			break;

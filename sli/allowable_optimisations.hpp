@@ -220,10 +220,11 @@ class AllowableOptimisations : public IRExprOptimisations {
 	f(freeMightRace,bool)						\
 	f(ignoreUnreached,bool)						\
 	f(mutexStoresInteresting,bool)
+	typedef std::map<DynAnalysisRip, IRType> interestingStoresT;
 #define optimisation_flags(f)						\
 	_optimisation_flags(f)						\
-	f(interestingStores, const std::set<DynAnalysisRip> *)		\
-	f(nonLocalLoads, std::set<DynAnalysisRip> *)
+	f(interestingStores, const interestingStoresT *)		\
+	f(nonLocalLoads, const std::set<DynAnalysisRip> *)
 
 	/* The value of the argument doesn't matter, it's just there
 	   so that we can select this constructor. */
@@ -262,7 +263,9 @@ class AllowableOptimisations : public IRExprOptimisations {
 			     it++) {
 				if (it != _interestingStores->begin())
 					fragments.push_back(";");
-				fragments.push_back(it->name());
+				fragments.push_back(it->first.name());
+				fragments.push_back("->");
+				fragments.push_back(nameIRType(it->second));
 			}
 			fragments.push_back("}");
 		}
@@ -354,9 +357,10 @@ public:
 					      IRExprOptimisations::enableallPointersGood());
 	}
 
-	bool ignoreStore(const MaiMap &decode, StateMachineSideEffectStore *s) const;
+	bool ignoreStore(const MaiMap &decode, StateMachineSideEffectStore *s, IRType *maxType) const;
 
-	bool parse(std::set<DynAnalysisRip> *is, std::set<DynAnalysisRip> *nll,
+	bool parse(std::map<DynAnalysisRip, IRType> *is,
+		   std::set<DynAnalysisRip> *nll,
 		   AddressSpace *as, const char *buf, const char **suffix)
 	{
 		if (!parseThisString("opt{", buf, &buf))
@@ -383,9 +387,13 @@ public:
 			while (!parseThisString("}", buf, &buf)) {
 				parseThisString(";", buf, &buf);
 				DynAnalysisRip dr;
-				if (!parseDynAnalysisRip(&dr, buf, &buf))
+				IRType ty;
+				if (!parseDynAnalysisRip(&dr, buf, &buf) ||
+				    !parseThisString("->", buf, &buf) ||
+				    !parseIRType(&ty, buf, &buf)) {
 					return false;
-				is->insert(dr);
+				}
+				is->insert(std::pair<DynAnalysisRip, IRType>(dr, ty));
 			}
 			_interestingStores = is;
 		}
@@ -416,7 +424,8 @@ public:
 #undef _optimisation_flags
 #undef optimisation_flags
 
-	static AllowableOptimisations fromFile(std::set<DynAnalysisRip> *is, std::set<DynAnalysisRip> *nll,
+	static AllowableOptimisations fromFile(std::map<DynAnalysisRip, IRType> *is,
+					       std::set<DynAnalysisRip> *nll,
 					       AddressSpace *as, const char *path);
 };
 
