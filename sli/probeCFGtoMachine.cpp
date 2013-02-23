@@ -183,8 +183,7 @@ getLibraryStateMachine(SMScopes *scopes,
 		acc = (!rax <<= smb_const64(64)) >> end;
 		for (i = 63; i >= 0; i--) {
 			acc = Load(!tmp1,
-				   *(smb_reg(arg1, Ity_I64) + smb_const64(i)),
-				   Ity_I8) >>
+				   *(smb_reg(arg1, Ity_I64) + smb_const64(i))) >>
 				If(smb_reg(tmp1, Ity_I8) == smb_const8(0),
 				   (!rax <<= smb_const64(i)) >> end,
 				   acc);
@@ -198,8 +197,7 @@ getLibraryStateMachine(SMScopes *scopes,
 		for (int i = 7; i >= 0; i--)
 			states[i] =
 				Load(!tmp1,
-				     *(smb_reg(arg2, Ity_I64) + smb_const64((7 - i) * 8)),
-				     Ity_I64) >>
+				     *(smb_reg(arg2, Ity_I64) + smb_const64((7 - i) * 8))) >>
 				((*(smb_reg(arg1, Ity_I64) + smb_const64((7 - i) * 8)) <<= smb_reg(tmp1, Ity_I64)) >>
 				 states[i+1]);
 		for (int i = 0; i < 9; i++)
@@ -253,10 +251,9 @@ getLibraryStateMachine(SMScopes *scopes,
 		acc = StartAtomic() >>
 			(Load(!tmp1,
 			      *smb_reg(arg1, Ity_I64),
-			      Ity_I8,
 			      MemoryTag::mutex()) >>
-			 (If(smb_reg(tmp1, Ity_I8) == smb_const8(0),
-			     (Store(*smb_reg(arg1, Ity_I64), smb_const8(1), MemoryTag::mutex()) >>
+			 (If(smb_reg(tmp1, Ity_I64) == smb_const64(0),
+			     (Store(*smb_reg(arg1, Ity_I64), smb_const64(1), MemoryTag::mutex()) >>
 			      (EndAtomic() >>
 			       ((!rax <<= smb_const64(0)) >>
 				end))),
@@ -268,10 +265,9 @@ getLibraryStateMachine(SMScopes *scopes,
 		acc = StartAtomic() >>
 		      (Load(!tmp1,
 			    *smb_reg(arg1, Ity_I64),
-			    Ity_I8,
 			    MemoryTag::mutex()) >>
-		       (If(smb_reg(tmp1, Ity_I8) == smb_const8(1),
-			   (Store(*smb_reg(arg1, Ity_I64), smb_const8(0), MemoryTag::mutex()) >>
+		       (If(smb_reg(tmp1, Ity_I64) == smb_const64(1),
+			   (Store(*smb_reg(arg1, Ity_I64), smb_const64(0), MemoryTag::mutex()) >>
 			    (EndAtomic() >>
 			     ((!rax <<= smb_const64(0)) >>
 			      end))),
@@ -312,7 +308,6 @@ getLibraryStateMachine(SMScopes *scopes,
 		acc = Load(!rax,
 			   *(smb_reg(arg1, Ity_I64) * smb_const64(8) +
 			     smb_reg(threadAndRegister::reg(tid, offsetof(VexGuestAMD64State, pthread_specific_base), 0), Ity_I64)),
-			   Ity_I64,
 			   MemoryTag::pthread_specific()) >>
 			end;
 		break;
@@ -444,10 +439,50 @@ cfgNodeToState(SMScopes *scopes,
 			break;
 		case Ist_Put: {
 			IRStmtPut *isp = (IRStmtPut *)stmt;
+			IRExpr *expandedData;
+			expandedData = (IRExpr *)0xdead;
+			switch (isp->data->type()) {
+			case Ity_I1:
+			case Ity_INVALID:
+				abort();
+			case Ity_I128:
+				expandedData = IRExpr_Unop(Iop_128to64, isp->data);
+				break;
+			case Ity_I64:
+				expandedData = isp->data;
+				break;
+			case Ity_I32:
+				expandedData = IRExpr_Binop(
+					Iop_Or64,
+					IRExpr_Unop(Iop_32Uto64, isp->data),
+					IRExpr_Binop(
+						Iop_And64,
+						IRExpr_Const_U64(0xffffffff00000000ul),
+						IRExpr_Get(isp->target, Ity_I64)));
+				break;
+			case Ity_I16:
+				expandedData = IRExpr_Binop(
+					Iop_Or64,
+					IRExpr_Unop(Iop_16Uto64, isp->data),
+					IRExpr_Binop(
+						Iop_And64,
+						IRExpr_Const_U64(0xffffffffffff0000ul),
+						IRExpr_Get(isp->target, Ity_I64)));
+				break;
+			case Ity_I8:
+				expandedData = IRExpr_Binop(
+					Iop_Or64,
+					IRExpr_Unop(Iop_8Uto64, isp->data),
+					IRExpr_Binop(
+						Iop_And64,
+						IRExpr_Const_U64(0xffffffffffffff00ul),
+						IRExpr_Get(isp->target, Ity_I64)));
+				break;
+			}
 			StateMachineSideEffect *se =
 				new StateMachineSideEffectCopy(
 					isp->target,
-					exprbdd::var(&scopes->exprs, &scopes->bools, isp->data));
+					exprbdd::var(&scopes->exprs, &scopes->bools, expandedData));
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -568,24 +603,11 @@ cfgNodeToState(SMScopes *scopes,
 			IRType ity = Ity_INVALID;
 			StateMachineSideEffect *se;
 			if (!strncmp(dirty->cee->name, "helper_load_", strlen("helper_load_"))) {
-				if (!strcmp(dirty->cee->name, "helper_load_8"))
-					ity = Ity_I8;
-				else if (!strcmp(dirty->cee->name, "helper_load_16"))
-					ity = Ity_I16;
-				else if (!strcmp(dirty->cee->name, "helper_load_32"))
-					ity = Ity_I32;
-				else if (!strcmp(dirty->cee->name, "helper_load_64"))
-					ity = Ity_I64;
-				else if (!strcmp(dirty->cee->name, "helper_load_128"))
-					ity = Ity_I128;
-				else
-					abort();
-				assert(ity != Ity_INVALID);
 				auto sel = new StateMachineSideEffectLoad(
 					dirty->tmp,
 					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
 					mkPendingMai(target),
-					ity,
+					Ity_I64,
 					MemoryTag::normal());
 				se = sel;
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
