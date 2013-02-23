@@ -23,7 +23,6 @@ static int debug_state_machine_sanity_checks = 0;
 static unsigned current_optimisation_gen;
 
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
-VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> StateMachineSideEffectStartAtomic::singleton;
 VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> StateMachineSideEffectEndAtomic::singleton;
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(7.3);
 

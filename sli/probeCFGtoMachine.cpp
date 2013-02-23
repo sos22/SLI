@@ -564,7 +564,7 @@ cfgNodeToState(SMScopes *scopes,
 			StateMachineState *l0 =
 				new StateMachineSideEffecting (
 					target->rip,
-					StateMachineSideEffectStartAtomic::get(),
+					new StateMachineSideEffectStartAtomic(mkPendingMai(target)),
 					l1);
 			*cursor = l0;
 			cursor = &l5->target;
@@ -619,7 +619,7 @@ cfgNodeToState(SMScopes *scopes,
 			StateMachineSideEffecting *s =
 				new StateMachineSideEffecting(
 					target->rip,
-					StateMachineSideEffectStartAtomic::get(),
+					new StateMachineSideEffectStartAtomic(mkPendingMai(target)),
 					NULL);
 			*cursor = s;
 			cursor = &s->target;
@@ -2153,8 +2153,13 @@ assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 			l,
 			assignMais(scopes, l->value, tid, mm));
 	}
+	case StateMachineSideEffect::StartAtomic: {
+		auto l = (StateMachineSideEffectStartAtomic *)se;
+		return new StateMachineSideEffectStartAtomic(
+			assignMais(l->mai, tid, mm));
+	}
+
 	case StateMachineSideEffect::Unreached:
-	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
 	case StateMachineSideEffect::ImportRegister:
 #if !CONFIG_NO_STATIC_ALIASING

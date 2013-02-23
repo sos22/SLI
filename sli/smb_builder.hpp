@@ -236,8 +236,8 @@ public:
 	}
 };
 class SMBStatementStartAtomic : public SMBStatement {
-	StateMachineSideEffect *compile(SMBCompilerState &) const {
-		return StateMachineSideEffectStartAtomic::get();
+	StateMachineSideEffect *compile(SMBCompilerState &state) const {
+	  return new StateMachineSideEffectStartAtomic(mkPendingMai(state.where));
 	}
 public:
 	void visit(HeapVisitor &) {
