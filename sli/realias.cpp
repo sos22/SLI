@@ -64,9 +64,9 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 #warning Fuck, this is incorrect for multi-threaded machines.  Need to have one StackLayout for each thread.
 #if !CONFIG_NO_STATIC_ALIASING
 class StackLayout {
-public:
 	std::vector<FrameId> functions;
 	std::vector<exprbdd *> rsps;
+public:
 
 	void prettyPrint(FILE *f) const {
 		std::vector<const char *> fragments;
@@ -112,7 +112,77 @@ public:
 	
 	bool identifyFrameFromPtr(IRExpr *ptr, FrameId *out);
 	size_t size() { return rsps.size(); }
+
+	static Maybe<StackLayout> fromSideEffect(StateMachineSideEffectStackLayout *se,
+						 std::map<FrameId, exprbdd *> &frameBoundaries);
+	void startFunction(StateMachineSideEffectStartFunction *sf);
+	Maybe<StackLayout> endFunction(StateMachineSideEffectEndFunction *sf);
+	void trimPointerAliasingSet(PointerAliasingSet &pas);
 };
+
+Maybe<StackLayout>
+StackLayout::fromSideEffect(StateMachineSideEffectStackLayout *se, std::map<FrameId, exprbdd *> &frameBoundaries)
+{
+	StackLayout res;
+	res.functions.resize(se->functions.size(), FrameId());
+	res.rsps.resize(se->functions.size() - 1);
+	for (unsigned x = 1; x < se->functions.size(); x++) {
+		if (frameBoundaries.count(se->functions[x].frame) == 0) {
+			return Maybe<StackLayout>::nothing();
+		}
+		res.functions[x] = se->functions[x].frame;
+		res.rsps[x-1] = frameBoundaries[se->functions[x].frame];
+	}
+	res.functions[0] = se->functions.front().frame;
+	return res;
+}
+
+void
+StackLayout::startFunction(StateMachineSideEffectStartFunction *sf)
+{
+	functions.push_back(sf->frame);
+	rsps.push_back(sf->rsp);
+}
+
+Maybe<StackLayout>
+StackLayout::endFunction(StateMachineSideEffectEndFunction *sf)
+{
+	if (rsps.empty()) {
+		return Maybe<StackLayout>::nothing();
+	}
+	assert(functions.back() == sf->frame);
+	assert(rsps.back() == sf->rsp);
+	functions.pop_back();
+	rsps.pop_back();
+	return *this;
+}
+
+void
+StackLayout::trimPointerAliasingSet(PointerAliasingSet &base)
+{
+	if (base.otherStackPointer) {
+		base.otherStackPointer = false;
+		base.stackPointers = functions;
+	} else {
+		for (auto it = base.stackPointers.begin();
+		     it != base.stackPointers.end();
+			) {
+			bool present = false;
+			for (auto it2 = functions.begin();
+			     !present && it2 != functions.end();
+			     it2++) {
+				present |= *it2 == *it;
+			}
+			if (!present) {
+				it = base.stackPointers.erase(it);
+			} else {
+				it++;
+			}
+		}
+	}
+	base.clearName();
+}
+
 
 enum compare_expressions_res {
 	compare_expressions_lt,
@@ -361,25 +431,8 @@ StackLayoutTable::build(StateMachine *inp)
 		Maybe<StackLayout> exitLayout(Maybe<StackLayout>::nothing());
 		if (se && se->type == StateMachineSideEffect::StackLayout) {
 			auto l = (StateMachineSideEffectStackLayout *)se;
-			bool failed = false;
 			haveExitLayout = true;
-			exitLayout.valid = true;
-			exitLayout.content = StackLayout();
-			exitLayout.content.functions.resize(l->functions.size(), FrameId());
-			exitLayout.content.rsps.resize(l->functions.size() - 1);
-			for (unsigned x = 1; x < l->functions.size(); x++) {
-				if (frameBoundaries.count(l->functions[x].frame) == 0) {
-					failed = true;
-					break;
-				}
-				exitLayout.content.functions[x] = l->functions[x].frame;
-				exitLayout.content.rsps[x-1] = frameBoundaries[l->functions[x].frame];
-			}
-			if (failed) {
-				exitLayout.valid = false;
-			} else {
-				exitLayout.content.functions[0] = l->functions.front().frame;
-			}
+			exitLayout = StackLayout::fromSideEffect(l, frameBoundaries);
 		} else {
 			auto it = content.find(s);
 			if (it == content.end()) {
@@ -387,24 +440,13 @@ StackLayoutTable::build(StateMachine *inp)
 			} else {
 				haveExitLayout = true;
 				exitLayout = it->second;
-				if (exitLayout.valid) {
-					if (se && se->type == StateMachineSideEffect::StartFunction) {
+				if (exitLayout.valid && se) {
+					if (se->type == StateMachineSideEffect::StartFunction) {
 						auto sf = (StateMachineSideEffectStartFunction *)se;
-						exitLayout.content.functions.push_back(sf->frame);
-						exitLayout.content.rsps.push_back(sf->rsp);
-						assert(frameBoundaries.count(exitLayout.content.functions.back()));
-						assert(exitLayout.content.rsps.back() ==
-						       frameBoundaries[exitLayout.content.functions.back()]);
-					} else if (se && se->type == StateMachineSideEffect::EndFunction) {
-						if (exitLayout.content.rsps.empty()) {
-							exitLayout.valid = false;
-						} else {
-							auto sf = (StateMachineSideEffectStartFunction *)se;
-							assert(exitLayout.content.functions.back() == sf->frame);
-							assert(exitLayout.content.rsps.back() == sf->rsp);
-							exitLayout.content.functions.pop_back();
-							exitLayout.content.rsps.pop_back();
-						}
+						exitLayout.content.startFunction(sf);
+					} else if (se->type == StateMachineSideEffect::EndFunction) {
+						auto sf = (StateMachineSideEffectEndFunction *)se;
+						exitLayout = exitLayout.content.endFunction(sf);
 					}
 				}
 			}
@@ -598,27 +640,7 @@ PointsToTable::pointsToSetForExprLoc(exprbdd *e,
 		return base;
 	}
 	assert(base.valid);
-	if (base.otherStackPointer) {
-		base.otherStackPointer = false;
-		base.stackPointers = sl->content.functions;
-	} else {
-		for (auto it = base.stackPointers.begin();
-		     it != base.stackPointers.end();
-			) {
-			bool present = false;
-			for (auto it2 = sl->content.functions.begin();
-			     !present && it2 != sl->content.functions.end();
-			     it2++) {
-				present |= *it2 == *it;
-			}
-			if (!present) {
-				it = base.stackPointers.erase(it);
-			} else {
-				it++;
-			}
-		}
-	}
-	base.clearName();
+	sl->content.trimPointerAliasingSet(base);
 	return base;
 }
 
