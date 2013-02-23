@@ -412,7 +412,7 @@ calculateFixedRegsForFunction(Oracle *oracle, const StaticRip &head)
 					printf("Skip over call\n");
 				}
 				state.invalidateReg(OFFSET_amd64_RAX);
-				state.invalidateReg(OFFSET_amd64_RDX);
+				state.invalidateReg(OFFSET_amd64_RCX);
 				state.invalidateReg(OFFSET_amd64_RDX);
 				state.invalidateReg(OFFSET_amd64_RSI);
 				state.invalidateReg(OFFSET_amd64_RDI);
