@@ -723,6 +723,27 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			simpleArgs[i] = quickSimplify(_iea->contents[i], memo);
 			if (simpleArgs[i] != _iea->contents[i])
 				realloc = true;
+			if (op >= Iop_And8 &&
+			    op <= Iop_And64 &&
+			    simpleArgs[i]->tag == Iex_Unop &&
+			    ((IRExprUnop *)simpleArgs[i])->op >= Iop_8Uto16 &&
+			    ((IRExprUnop *)simpleArgs[i])->op <= Iop_32Uto64) {
+				/* We know that unsigned upcasts never set the high bits */
+				switch (simpleArgs[i]->type()) {
+				case Ity_I8:
+					acc &= 0xff;
+					break;
+				case Ity_I16:
+					acc &= 0xffff;
+					break;
+				case Ity_I32:
+					acc &= 0xffffffff;
+					break;
+				default:
+					abort();
+				}
+			}
+
 			if (simpleArgs[i]->tag == Iex_Const) {
 				switch (op) {
 				case Iop_And1: case Iop_And8: case Iop_And16:
