@@ -216,31 +216,19 @@ public:
 class LivenessEntry {
 	void killRegister(threadAndRegister r)
 	{
-		liveDataOnly.erase(r);
-		livePointer.erase(r);
+		content.erase(r);
 	}
-	/* We track two different kinds of liveness: live for data and
-	 * live as a pointer.  The idea is that if something is never
-	 * used as a pointer then we can kill off its aliasing
-	 * information, even if it's still live as a data value. */
-	/* A register is added to livePointer if it's used to compute
-	 * a pointer.  It's added to liveDataOnly if it's used to
-	 * compute something which isn't a pointer.  Anything where
-	 * the value computed might be used as a pointer, but we're
-	 * not sure, goes in livePointer. */
-	small_set<threadAndRegister, 8> liveDataOnly;
-	small_set<threadAndRegister, 8> livePointer;
+	small_set<threadAndRegister, 8> content;
 	bool anyLoads;
 public:
 	LivenessEntry()
 		: anyLoads(false)
 	{}
-	void useExpressionData(const bbdd *e)
+	void useExpression(const bbdd *e)
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				if (!out->livePointer.contains(g->reg))
-					out->liveDataOnly.insert(g->reg);
+				out->content.insert(g->reg);
 				return visit_continue;
 			}
 		} foo;
@@ -248,12 +236,11 @@ public:
 		visitor.irexpr.Get = foo.f;
 		visit_const_bdd(this, &visitor, e);
 	}
-	void useExpressionData(const smrbdd *e)
+	void useExpression(const smrbdd *e)
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				if (!out->livePointer.contains(g->reg))
-					out->liveDataOnly.insert(g->reg);
+				out->content.insert(g->reg);
 				return visit_continue;
 			}
 		} foo;
@@ -261,12 +248,11 @@ public:
 		visitor.irexpr.Get = foo.f;
 		visit_const_bdd(this, &visitor, e);
 	}
-	void useExpressionData(const exprbdd *e)
+	void useExpression(const exprbdd *e)
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				if (!out->livePointer.contains(g->reg))
-					out->liveDataOnly.insert(g->reg);
+				out->content.insert(g->reg);
 				return visit_continue;
 			}
 		} foo;
@@ -274,44 +260,17 @@ public:
 		visitor.irexpr.Get = foo.f;
 		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
 	}
-	void useExpressionData(const IRExpr *e)
+	void useExpression(const IRExpr *e)
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				if (!out->livePointer.contains(g->reg))
-					out->liveDataOnly.insert(g->reg);
+				out->content.insert(g->reg);
 				return visit_continue;
 			}
 		} foo;
 		static irexpr_visitor<LivenessEntry> visitor;
 		visitor.Get = foo.f;
 		visit_irexpr(this, &visitor, e);
-	}
-	void useExpressionPointer(IRExpr *e)
-	{
-		struct {
-			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				out->livePointer.insert(g->reg);
-				out->liveDataOnly.erase(g->reg);
-				return visit_continue;
-			}
-		} foo;
-		static irexpr_visitor<LivenessEntry> visitor;
-		visitor.Get = foo.f;
-		visit_irexpr(this, &visitor, e);
-	}
-	void useExpressionPointer(const exprbdd *e)
-	{
-		struct {
-			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				out->livePointer.insert(g->reg);
-				out->liveDataOnly.erase(g->reg);
-				return visit_continue;
-			}
-		} foo;
-		static bdd_visitor<LivenessEntry> visitor;
-		visitor.irexpr.Get = foo.f;
-		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
 	}
 
 	void useSideEffect(StateMachineSideEffect *smse)
@@ -321,15 +280,15 @@ public:
 			killRegister(def);
 		switch (smse->type) {
 		case StateMachineSideEffect::Load:
-			useExpressionPointer( ((StateMachineSideEffectLoad *)smse)->addr);
+			useExpression( ((StateMachineSideEffectLoad *)smse)->addr);
 			anyLoads = true;
 			break;
 		case StateMachineSideEffect::Store:
-			useExpressionPointer( ((StateMachineSideEffectStore *)smse)->addr);
-			useExpressionPointer( ((StateMachineSideEffectStore *)smse)->data);
+			useExpression( ((StateMachineSideEffectStore *)smse)->addr);
+			useExpression( ((StateMachineSideEffectStore *)smse)->data);
 			break;
 		case StateMachineSideEffect::Copy:
-			useExpressionData( ((StateMachineSideEffectCopy *)smse)->value);
+			useExpression( ((StateMachineSideEffectCopy *)smse)->value);
 			break;
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::StartAtomic:
@@ -340,22 +299,22 @@ public:
 		case StateMachineSideEffect::ImportRegister:
 			break;
 		case StateMachineSideEffect::AssertFalse:
-			useExpressionData( ((StateMachineSideEffectAssertFalse *)smse)->value );
+			useExpression( ((StateMachineSideEffectAssertFalse *)smse)->value );
 			break;
 #if !CONFIG_NO_STATIC_ALIASING
 		case StateMachineSideEffect::StartFunction:
-			useExpressionData( ((StateMachineSideEffectStartFunction *)smse)->rsp );
+			useExpression( ((StateMachineSideEffectStartFunction *)smse)->rsp );
 			break;
 		case StateMachineSideEffect::EndFunction:
-			useExpressionData( ((StateMachineSideEffectEndFunction *)smse)->rsp );
+			useExpression( ((StateMachineSideEffectEndFunction *)smse)->rsp );
 			break;
 #endif
 		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *smsep =
 				(StateMachineSideEffectPhi *)smse;
 			for (auto it = smsep->generations.begin(); it != smsep->generations.end(); it++) {
-				useExpressionData(it->val);
-				livePointer.insert(it->reg);
+				useExpression(it->val);
+				content.insert(it->reg);
 			}
 			break;
 		}
@@ -364,15 +323,10 @@ public:
 
 	bool merge(const LivenessEntry &other) {
 		bool res = false;
-		for (auto it = other.livePointer.begin(); !it.finished(); it.advance()) {
-			if (livePointer.insert(*it)) {
-				liveDataOnly.erase(*it);
-				res = true;
+		for (auto it = other.content.begin(); !it.finished(); it.advance()) {
+			if (content.contains(*it)) {
+				res |= content.insert(*it);
 			}
-		}
-		for (auto it = other.liveDataOnly.begin(); !it.finished(); it.advance()) {
-			if (!livePointer.contains(*it))
-				res |= liveDataOnly.insert(*it);
 		}
 		if (other.anyLoads && !anyLoads) {
 			res = true;
@@ -381,19 +335,12 @@ public:
 		return res;
 	}
 
-	bool registerLiveData(threadAndRegister reg) const { return liveDataOnly.contains(reg) || livePointer.contains(reg); }
-	bool registerLivePointer(threadAndRegister reg) const { return livePointer.contains(reg); }
+	bool registerLive(threadAndRegister reg) const { return content.contains(reg); }
 	bool mightLoadAnything() const { return anyLoads; }
 
 	void print() const {
-		printf("dataOnly = {");
-		for (auto it = liveDataOnly.begin(); !it.finished(); it.advance()) {
-			if (it.started())
-				printf(", ");
-			printf("%s", it->name());
-		}
-		printf("}, pointer = {");
-		for (auto it = livePointer.begin(); !it.finished(); it.advance()) {
+		printf("content = {");
+		for (auto it = content.begin(); !it.finished(); it.advance()) {
 			if (it.started())
 				printf(", ");
 			printf("%s", it->name());
@@ -561,7 +508,7 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 
 		switch (s->type) {
 		case StateMachineState::Terminal:
-			le.useExpressionData( ((StateMachineTerminal *)s)->res );
+			le.useExpression( ((StateMachineTerminal *)s)->res );
 			if (debug_deadcode) {
 				printf("Terminal; liveness = ");
 				le.print();
@@ -585,7 +532,7 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 				printf("Bifurcate; exit liveness = ");
 				le.print();
 			}
-			le.useExpressionData(smb->condition);
+			le.useExpression(smb->condition);
 			if (debug_deadcode) {
 				printf("; entry liveness = ");
 				le.print();
@@ -619,7 +566,7 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 			case StateMachineSideEffect::Load: {
 				StateMachineSideEffectLoad *smsel =
 					(StateMachineSideEffectLoad *)newEffect;
-				if (!le.registerLiveData(smsel->target)) {
+				if (!le.registerLive(smsel->target)) {
 					if (smsel->tag.neverBadPtr()) {
 						newEffect = NULL;
 					} else {
@@ -667,7 +614,7 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 					   what liveness analysis
 					   proper might say. */
 					newEffect = NULL;
-				} else if (!le.registerLiveData(smsec->target)) {
+				} else if (!le.registerLive(smsec->target)) {
 					newEffect = NULL;
 				}
 				break;
@@ -675,14 +622,14 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 			case StateMachineSideEffect::Phi: {
 				StateMachineSideEffectPhi *p =
 					(StateMachineSideEffectPhi *)newEffect;
-				if (!le.registerLiveData(p->reg)) {
+				if (!le.registerLive(p->reg)) {
 					newEffect = NULL;
 				}
 				break;
 			}
 			case StateMachineSideEffect::ImportRegister: {
 				auto *p = (StateMachineSideEffectImportRegister *)newEffect;
-				if (!le.registerLiveData(p->reg)) {
+				if (!le.registerLive(p->reg)) {
 					newEffect = NULL;
 				}
 				break;
