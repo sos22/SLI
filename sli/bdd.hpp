@@ -382,6 +382,8 @@ class bdd_scope {
 	void normalise(IRExpr *cond, t *&, t *&);
 	t *mkInternal(IRExpr *a, const bdd_rank &r, t *, t *);
 
+	void checkInternSize() const;
+
 protected:
 	void runGc(HeapVisitor &hv);
 public:

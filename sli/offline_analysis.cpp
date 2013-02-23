@@ -280,7 +280,7 @@ _optimiseStateMachine(SMScopes *scopes,
 		LibVEX_maybe_gc(token);
 
 		p = false;
-		sm = availExpressionAnalysis(scopes, *mai, sm, opt, is_ssa, oracle, &p);
+		sm = availExpressionAnalysis(scopes, *mai, sm, opt, is_ssa, oracle, done_something, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("availExpressionAnalysis:\n");
 			printStateMachine(sm, stdout);

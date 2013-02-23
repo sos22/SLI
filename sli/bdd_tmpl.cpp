@@ -500,6 +500,17 @@ dereferences(IRExpr *expr, const IRExpr *addr)
 }
 
 template <typename t> void
+bdd_scope<t>::checkInternSize() const
+{
+	if (intern.size() >= 10000000) {
+		fprintf(_logfile, "%s forcing a timeout\n", __PRETTY_FUNCTION__);
+		_timed_out = true;
+	} else if (intern.size() >= 1000000) {
+		LibVEX_request_GC();
+	} 
+}
+
+template <typename t> void
 bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 {
 	assert(a);
@@ -657,9 +668,7 @@ bdd_scope<t>::mkInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
 		it->second = new t(r, cond, a, b);
-		if (intern.size() > 1000000) {
-			LibVEX_request_GC();
-		}
+		checkInternSize();
 	}
 	return it->second;
 }
@@ -765,6 +774,9 @@ bdd_scope<t>::internBdd(t *what)
 			      what->internal().trueBranch,
 			      what->internal().falseBranch),
 			what));
+	if (it_did_insert.second) {
+		checkInternSize();
+	}
 	return it_did_insert.first->second;
 }
 
