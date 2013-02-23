@@ -12,7 +12,7 @@ targets="${targets} cross_eval_machines"
 #targets="${targets} canonicalise_crash_summary"
 
 defvars() {
-	echo SLIR_SOURCES= ${input_base}/{ssa,transform_expr,machinestate}.cpp
+	echo SLIR_SOURCES= ${input_base}/{fixed_regs,ssa,transform_expr,machinestate}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{util,memorychunk,nd_chooser,visitor}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{addressspace,crash_summary,phi_elimination}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{pmap,vamap,interpreter,coredump}.cpp

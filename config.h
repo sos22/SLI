@@ -72,3 +72,7 @@
 #ifndef CONFIG_STACKED_CDF
 #define CONFIG_STACKED_CDF 0
 #endif
+
+#ifndef CONFIG_FIXED_REGS
+#define CONFIG_FIXED_REGS 1
+#endif

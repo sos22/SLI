@@ -22,10 +22,8 @@
 
 #ifndef NDEBUG
 static bool debug_static_alias = false;
-static bool debug_static_rbp_offsets = false;
 #else
 #define debug_static_alias false
-#define debug_static_rbp_offsets false
 #endif
 
 void dbg_database_query(const char *query);
@@ -622,24 +620,6 @@ Oracle::calculateRegisterLiveness(VexPtr<Oracle> &ths,
 	} while (done_something);
 }
 
-void
-Oracle::calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token)
-{
-	std::vector<StaticRip> functions;
-	int cntr = 0;
-	ths->getFunctions(functions);
-	for (auto it = functions.begin();
-	     it != functions.end();
-	     it++) {
-		LibVEX_maybe_gc(token);
-		Function f(*it);
-		f.calculateRbpToRspOffsets(ths->ms->addressSpace, ths);
-		if (cntr++ % 100 == 0)
-			printf("RBP map progress: %zd/%zd\n",
-			       it - functions.begin(), functions.size());
-	}
-}
-
 #if !CONFIG_NO_STATIC_ALIASING
 void
 Oracle::calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token)
@@ -1023,8 +1003,6 @@ open_database(const char *path)
 			  "alias14 INTEGER,"
 			  "alias15 INTEGER,"
 			  "stackEscape INTEGER," /* 0 or NULL -> false, 1 -> true */
-			  "rbpToRspDeltaState INTEGER NOT NULL DEFAULT 0,"  /* 0 -> unknown, 1 -> known, 2 -> incalculable */
-			  "rbpToRspDelta INTEGER NOT NULL DEFAULT 0,"
 			  "functionHead INTEGER)",
 			  NULL,
 			  NULL,
@@ -1040,7 +1018,10 @@ open_database(const char *path)
 	assert(rc == SQLITE_OK);
 	rc = sqlite3_exec(_database, "CREATE TABLE returnRips (rip INTEGER, dest INTEGER)", NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
-	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, rbpOffsetCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
+	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
+			  NULL, NULL, NULL);
+	assert(rc == SQLITE_OK);
+	rc = sqlite3_exec(_database, "CREATE TABLE fixedRegs (rip INTEGER PRIMARY KEY, content TEXT)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
 
@@ -1314,6 +1295,10 @@ public:
 	void bindInt64(int idx, unsigned long val) {
 		bind_int64(stmt, idx, val);
 	}
+	void bindString(int idx, const char *what) {
+		int rc = sqlite3_bind_text(stmt, idx, what, strlen(what), SQLITE_TRANSIENT);
+		assert(rc == SQLITE_OK);
+	}
 	void run() {
 		int r;
 		do {
@@ -1581,8 +1566,10 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 	printf("Calculate aliasing map...\n");
 	calculateAliasing(ths, token);
 #endif
-	printf("Calculate RBP map...\n");
-	calculateRbpToRspOffsets(ths, token);
+#if CONFIG_FIXED_REGS
+	printf("Calculate fixed regs...\n");
+	calculateFixedRegs(ths, token);
+#endif
 	printf("Done static analysis phase\n");
 }
 
@@ -1850,54 +1837,6 @@ Oracle::findNoReturnFunctions()
 }
 
 void
-Oracle::Function::calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle)
-{
-	if (rbpToRspOffsetsCorrect())
-		return;
-
-	if (debug_static_rbp_offsets)
-		printf("Calculate RBP->RSP offsets for %s\n", rip.name());
-
-	/* The correct answer for the function head instruction is
-	   always ``impossible'' */
-	oracle->setRbpToRspOffset(rip, RbpToRspOffsetStateImpossible, 0);
-
-	std::vector<StaticRip> instrsToRecalculate1;
-	std::vector<StaticRip> instrsToRecalculate2;
-
-	getInstructionsInFunction(instrsToRecalculate1);
-
-	while (1) {
-		for (auto it = instrsToRecalculate1.begin();
-		     it != instrsToRecalculate1.end();
-		     it++) {
-			bool t = false;
-			updateRbpToRspOffset(*it, as, &t, oracle);
-			if (t)
-				getSuccessors(*it, instrsToRecalculate2);
-		}
-		instrsToRecalculate1.clear();
-		if (instrsToRecalculate2.empty())
-			break;
-
-		for (auto it = instrsToRecalculate2.begin();
-		     it != instrsToRecalculate2.end();
-		     it++) {
-			bool t = false;
-			updateRbpToRspOffset(*it, as, &t, oracle);
-			if (t)
-				getSuccessors(*it, instrsToRecalculate1);
-		}
-
-		instrsToRecalculate2.clear();
-		if (instrsToRecalculate1.empty())
-			break;
-	}
-
-	setRbpToRspOffsetsCorrect(true);
-}
-
-void
 Oracle::Function::calculateRegisterLiveness(Oracle *oracle, AddressSpace *as, bool *done_something)
 {
 	bool changed;
@@ -2113,327 +2052,6 @@ Oracle::Function::updateLiveOnEntry(Oracle *oracle, const StaticRip &rip, Addres
 		assert(rc == SQLITE_DONE);
 		sqlite3_reset(stmt);
 	}
-}
-
-class RewriteRegisterExpr : public IRExprTransformer {
-	threadAndRegister idx;
-	IRExpr *to;
-protected:
-	IRExpr *transformIex(IRExprGet *what) {
-		if (what->reg == idx)
-			return to;
-		else
-			return what;
-	}
-public:
-	RewriteRegisterExpr(threadAndRegister _idx, IRExpr *_to)
-		: idx(_idx), to(_to)
-	{
-	}
-};
-static IRExpr *
-rewriteRegister(IRExpr *expr, threadAndRegister offset, IRExpr *to)
-{
-	RewriteRegisterExpr rre(offset, to);
-	return rre.doit(expr);
-}
-
-void
-Oracle::Function::updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, bool *changed, Oracle *oracle)
-{
-	RbpToRspOffsetState current_state;
-	unsigned long current_offset;
-	RbpToRspOffsetState state;
-	unsigned long offset = -99999999; /* Shut the compiler up. */
-
-	oracle->getRbpToRspOffset(rip, &current_state, &current_offset);
-	if (debug_static_rbp_offsets)
-		printf("updateRbpToRspOffset(%s); current state %d, %ld\n",
-		       rip.name(),
-		       current_state,
-		       current_offset);
-
-	if (current_state == RbpToRspOffsetStateImpossible) {
-		/* By monotonicity, the result will be
-		   RbpToRspOffsetStateImpossible, so bypass and get
-		   out early. */
-		return;
-	}
-
-	/* Try to figure out what this instruction actually does. */
-	IRSB *irsb = getIRSBForRip(as, rip, true);
-	if (!irsb)
-		return;
-	IRStmt **statements = irsb->stmts;
-	int nr_statements;
-	for (nr_statements = 1;
-	     nr_statements < irsb->stmts_used && statements[nr_statements]->tag != Ist_IMark;
-	     nr_statements++)
-		;
-
-	if (debug_static_rbp_offsets)
-		ppIRSB(irsb, stdout);
-
-	long delta_offset = 0;
-	IRExpr *rbp = NULL;
-	IRExpr *rsp = NULL;
-	int j;
-
-	/* We assume called functions never change rsp or rbp, so
-	 * treat calls as nops. */
-	if (nr_statements == irsb->stmts_used &&
-	    irsb->jumpkind == Ijk_Call) {
-		if (debug_static_rbp_offsets)
-			printf("Call; treat as nop\n");
-		goto join_predecessors;
-	}
-	/* Scan backwards through the instruction for any writes to
-	   either of the registers of interest. */
-	for (j = nr_statements - 1; j >= 0; j--) {
-		IRStmt *stmt = statements[j];
-		if (stmt->tag == Ist_Put) {
-			IRStmtPut *p = (IRStmtPut *)stmt;
-			if (p->target.isReg()) {
-				if (p->target.asReg() == OFFSET_amd64_RSP && !rsp)
-					rsp = IRExpr_Get(OFFSET_amd64_RSP, Ity_I64, STATIC_THREAD, 0);
-				if (p->target.asReg() == OFFSET_amd64_RBP && !rbp)
-					rbp = IRExpr_Get(OFFSET_amd64_RBP, Ity_I64, STATIC_THREAD, 0);
-			}
-			if (rsp)
-				rsp = rewriteRegister(rsp,
-						      p->target,
-						      p->data);
-			if (rbp)
-				rbp = rewriteRegister(rbp,
-						      p->target,
-						      p->data);
-		} else if (stmt->tag == Ist_CAS) {
-			if (((IRStmtCAS *)stmt)->details->oldLo.isReg() &&
-			    (((IRStmtCAS *)stmt)->details->oldLo.asReg() == OFFSET_amd64_RSP ||
-			     ((IRStmtCAS *)stmt)->details->oldLo.asReg() == OFFSET_amd64_RBP))
-				goto impossible;
-		} else if (stmt->tag == Ist_Dirty) {
-			threadAndRegister tmp(((IRStmtDirty *)stmt)->details->tmp);
-			IRType t = Ity_I1;
-			if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-				    "helper_load_128"))
-				t = Ity_I128;
-			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-				    "helper_load_64"))
-				t = Ity_I64;
-			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-					 "helper_load_32"))
-				t = Ity_I32;
-			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-					 "helper_load_16"))
-				t = Ity_I16;
-			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-					 "helper_load_8"))
-				t = Ity_I8;
-			else if (!strcmp(((IRStmtDirty *)stmt)->details->cee->name,
-					 "amd64g_dirtyhelper_RDTSC")) {
-				if (debug_static_rbp_offsets)
-					printf("Can't handle RDTSC\n");
-				goto impossible_clean;
-			} else
-				goto impossible;
-			IRExpr *v = IRExpr_Load(t,
-						((IRStmtDirty *)stmt)->details->args[0]);
-			if (rsp)
-				rsp = rewriteRegister(rsp, tmp, v);
-			if (rbp)
-				rbp = rewriteRegister(rbp, tmp, v);
-		}
-	}
-
-	if (rsp)
-		rsp = simplifyIRExpr(rsp, AllowableOptimisations::defaultOptimisations);
-	if (rbp)
-		rbp = simplifyIRExpr(rbp, AllowableOptimisations::defaultOptimisations);
-	if (rsp && rsp->tag == Iex_Get && ((IRExprGet *)rsp)->reg.asReg() == OFFSET_amd64_RSP)
-		rsp = NULL;
-	if (rbp && rbp->tag == Iex_Get && ((IRExprGet *)rbp)->reg.asReg() == OFFSET_amd64_RBP)
-		rbp = NULL;
-	if (debug_static_rbp_offsets)
-		printf("RBP = %s, RSP = %s\n",
-		       rbp ? nameIRExpr(rbp) : "<null>",
-		       rsp ? nameIRExpr(rsp) : "<null>");
-	if (!rsp && !rbp) {
-		if (debug_static_rbp_offsets)
-			printf("No modifications to RBP or RSP -> join predecessors\n");
-		goto join_predecessors;
-	}
-	if (rsp && rbp) {
-		if (debug_static_rbp_offsets)
-			printf("Disallowed odifications to both RBP and RSP -> impossible\n");
-		goto impossible_clean;
-	}
-	
-	if (rsp) {
-		if (rsp->tag == Iex_Get) {
-			IRExprGet *g = (IRExprGet *)rsp;
-			if (g->reg.asReg() == OFFSET_amd64_RSP) {
-				abort();
-			} else if (g->reg.asReg() == OFFSET_amd64_RBP) {
-				offset = 0;
-				state = RbpToRspOffsetStateValid;
-				if (debug_static_rbp_offsets)
-					printf("Set RSP = RBP\n");
-				goto done;
-			}
-		} else if (rsp->tag == Iex_Associative) {
-			IRExprAssociative *a = (IRExprAssociative *)rsp;
-			if (a->op == Iop_Add64 &&
-			    a->nr_arguments >= 2 &&
-			    a->contents[0]->tag == Iex_Const &&
-			    a->contents[1]->tag == Iex_Get) {
-				IRExprGet *base = (IRExprGet *)a->contents[1];
-				if (base->reg.asReg() == OFFSET_amd64_RSP) {
-					delta_offset = ((IRExprConst *)a->contents[0])->Ico.content.U64;
-					if (debug_static_rbp_offsets)
-						printf("Set RSP = RSP+%ld\n", delta_offset);
-					goto join_predecessors;
-				} else if (base->reg.asReg() == OFFSET_amd64_RBP) {
-					offset = ((IRExprConst *)a->contents[0])->Ico.content.U64;
-					state = RbpToRspOffsetStateValid;
-					if (debug_static_rbp_offsets)
-						printf("Set RSP = RBP+%ld\n", offset);
-					goto done;
-				}
-			}
-		}
-
-		if (debug_static_rbp_offsets)
-			printf("Unhandleable update to rsp\n");
-		goto impossible_clean;
-	} else {
-		assert(rbp);
-
-		if (rbp->tag == Iex_Get) {
-			IRExprGet *g = (IRExprGet *)rbp;
-			if (g->reg.asReg() == OFFSET_amd64_RBP) {
-				abort();
-			} else if (g->reg.asReg() == OFFSET_amd64_RSP) {
-				offset = 0;
-				state = RbpToRspOffsetStateValid;
-				if (debug_static_rbp_offsets)
-					printf("Set RBP = RSP\n");
-				goto done;
-			}
-		} else if (rbp->tag == Iex_Associative) {
-			IRExprAssociative *a = (IRExprAssociative *)rbp;
-			if (a->op == Iop_Add64 &&
-			    a->nr_arguments >= 2 &&
-			    a->contents[0]->tag == Iex_Const &&
-			    a->contents[1]->tag == Iex_Get) {
-				IRExprGet *base = (IRExprGet *)a->contents[1];
-				IRExprConst *o = (IRExprConst *)a->contents[0];
-				if (base->reg.asReg() == OFFSET_amd64_RBP) {
-					delta_offset = -o->Ico.content.U64;
-					if (debug_static_rbp_offsets)
-						printf("Set RBP + RBP+%ld\n", -delta_offset);
-					goto join_predecessors;
-				} else if (base->reg.asReg() == OFFSET_amd64_RSP) {
-					offset = -o->Ico.content.U64;
-					state = RbpToRspOffsetStateValid;
-					if (debug_static_rbp_offsets)
-						printf("Set RBP = RSP+%ld\n", -offset);
-					goto done;
-				}
-			}
-		}
-
-		if (debug_static_rbp_offsets)
-			printf("Unhandleable update to rbp\n");
-
-		/* If the compiler's done base pointer elimination
-		   then RBP can contain almost anything and it's not
-		   worth trying to warn about it. */
-		goto impossible_clean;
-	}
-
-join_predecessors:
-	state = RbpToRspOffsetStateUnknown;
-	{
-		std::vector<StaticRip> predecessors;
-		addPredecessorsNonCall(rip, predecessors);
-
-		for (auto it = predecessors.begin();
-		     it != predecessors.end();
-		     it++) {
-			enum RbpToRspOffsetState pred_state;
-			unsigned long pred_offset;
-			oracle->getRbpToRspOffset(*it, &pred_state, &pred_offset);
-			if (pred_state == RbpToRspOffsetStateImpossible) {
-				if (debug_static_rbp_offsets)
-					printf("Predecessor %s -> impossible, give up\n", it->name());
-				goto impossible_clean;
-			}
-			if (pred_state == RbpToRspOffsetStateUnknown) {
-				if (debug_static_rbp_offsets)
-					printf("Predecessor %s -> unknown, continue\n", it->name());
-				continue;
-			}
-			assert(pred_state == RbpToRspOffsetStateValid);
-			if (state == RbpToRspOffsetStateUnknown) {
-				state = RbpToRspOffsetStateValid;
-				offset = pred_offset;
-				if (debug_static_rbp_offsets)
-					printf("Predecesor %s valid at %ld, current unknown, take predecessor\n",
-					       it->name(), offset);
-				continue;
-			}
-			assert(state == RbpToRspOffsetStateValid);
-			if (offset != pred_offset) {
-				if (debug_static_rbp_offsets)
-					printf("Predecessor %s has incompatible offset %ld\n",
-					       it->name(), pred_offset);
-				goto impossible_clean;
-			}
-			if (debug_static_rbp_offsets)
-				printf("Predecessor %s has compatible offset %ld\n",
-				       it->name(), pred_offset);
-		}
-	}
-	if (state == RbpToRspOffsetStateUnknown) {
-		/* Predecessor state is still unknown, nothing
-		 * we can do. */
-		if (debug_static_rbp_offsets)
-			printf("Ultimate state is unknown\n");
-		return;
-	}
-
-	offset += delta_offset;
-
-done:
-	if (current_state == state && current_offset == offset) {
-		/* Already correct, nothing to do */
-		if (debug_static_rbp_offsets)
-			printf("Achieved nothing; state %d, offset %ld\n",
-			       state, offset);
-		return;
-	}
-
-	if (debug_static_rbp_offsets)
-		printf("Update state\n");
-	*changed = true;
-	oracle->setRbpToRspOffset(rip, state, offset);
-	return;
-
-impossible:
-	printf("Cannot do stack offset calculations in first instruction of: ");
-	ppIRSB(irsb, stdout);
-
-	warning("Whoops, screwed up stack offset calculation in %s\n", rip.name());
-
-	dbg_break("badness");
-
-impossible_clean:
-	if (debug_static_rbp_offsets)
-		printf("Ended in an impossible state\n");
-	state = RbpToRspOffsetStateImpossible;
-	offset = 0;
-	goto done;
 }
 
 #if !CONFIG_NO_STATIC_ALIASING
@@ -2875,21 +2493,6 @@ Oracle::Function::registerLivenessCorrect() const
 }
 
 bool
-Oracle::Function::rbpToRspOffsetsCorrect() const
-{
-	static sqlite3_stmt *stmt;
-	if (!stmt)
-		stmt = prepare_statement("SELECT rbpOffsetCorrect FROM functionAttribs WHERE functionHead = ?");
-	bind_oraclerip(stmt, 1, rip);
-	std::vector<unsigned long> a;
-	extract_int64_column(stmt, 0, a);
-	if (a.size() == 0)
-		return false;
-	assert(a.size() == 1);
-	return !!a[0];
-}
-
-bool
 Oracle::Function::aliasingConfigCorrect() const
 {
 	static sqlite3_stmt *stmt;
@@ -2909,7 +2512,7 @@ Oracle::Function::setRegisterLivenessCorrect(bool x)
 {
 	static sqlite3_stmt *stmt;
 	if (!stmt)
-		stmt = prepare_statement("INSERT OR REPLACE INTO functionAttribs (functionHead, registerLivenessCorrect, rbpOffsetCorrect, aliasingCorrect) VALUES (?, ?, 0, 0)");
+		stmt = prepare_statement("INSERT OR REPLACE INTO functionAttribs (functionHead, registerLivenessCorrect, aliasingCorrect) VALUES (?, ?, 0)");
 	bind_oraclerip(stmt, 1, rip);
 	bind_int64(stmt, 2, x);
 
@@ -2919,90 +2522,6 @@ Oracle::Function::setRegisterLivenessCorrect(bool x)
 	rc = sqlite3_reset(stmt);
 	assert(rc == SQLITE_OK);
 }
-
-void
-Oracle::Function::setRbpToRspOffsetsCorrect(bool x)
-{
-	static sqlite3_stmt *stmt;
-	if (!stmt)
-		stmt = prepare_statement("UPDATE functionAttribs SET rbpOffsetCorrect = ? WHERE functionHead = ?");
-	bind_oraclerip(stmt, 2, rip);
-	bind_int64(stmt, 1, x);
-
-	int rc;
-	rc = sqlite3_step(stmt);
-	assert(rc == SQLITE_DONE);
-	rc = sqlite3_reset(stmt);
-	assert(rc == SQLITE_OK);
-}
-
-void
-Oracle::getRbpToRspOffset(const StaticRip &rip, enum RbpToRspOffsetState *state, unsigned long *offset)
-{
-	static sqlite3_stmt *stmt;
-	if (!stmt)
-		stmt = prepare_statement("SELECT rbpToRspDeltaState,rbpToRspDelta FROM instructionAttributes WHERE rip = ?");
-	bind_oraclerip(stmt, 1, rip);
-	int rc = sqlite3_step(stmt);
-	if (rc == SQLITE_DONE) {
-		/* Not entered in database yet */
-		*state = RbpToRspOffsetStateUnknown;
-		*offset = 0;
-	} else {
-		assert(rc == SQLITE_ROW);
-		assert(sqlite3_column_type(stmt, 0) == SQLITE_INTEGER);
-		assert(sqlite3_column_type(stmt, 1) == SQLITE_INTEGER);
-		switch (sqlite3_column_int64(stmt, 0)) {
-		case 0:
-			*state = RbpToRspOffsetStateUnknown;
-			break;
-		case 1:
-			*state = RbpToRspOffsetStateValid;
-			break;
-		case 2:
-			*state = RbpToRspOffsetStateImpossible;
-			break;
-		default:
-			abort();
-		}
-		*offset = sqlite3_column_int64(stmt, 1);
-		rc = sqlite3_step(stmt);
-		assert(rc == SQLITE_DONE);
-	}
-	sqlite3_reset(stmt);
-}
-
-void
-Oracle::setRbpToRspOffset(const StaticRip &r,
-			  RbpToRspOffsetState state,
-			  unsigned long offset)
-{
-	static sqlite3_stmt *stmt;
-	int rc;
-
-	if (!stmt)
-		stmt = prepare_statement(
-			"UPDATE instructionAttributes SET rbpToRspDeltaState = ?, rbpToRspDelta = ? WHERE rip = ?");
-	switch (state) {
-	case RbpToRspOffsetStateUnknown:
-		bind_int64(stmt, 1, 0);
-		break;
-	case RbpToRspOffsetStateValid:
-		bind_int64(stmt, 1, 1);
-		break;
-	case RbpToRspOffsetStateImpossible:
-		bind_int64(stmt, 1, 2);
-		break;
-	default:
-		abort();
-	}
-	bind_int64(stmt, 2, offset);
-	bind_oraclerip(stmt, 3, r);
-	rc = sqlite3_step(stmt);
-	assert(rc == SQLITE_DONE);
-	sqlite3_reset(stmt);
-}
-
 
 #if !CONFIG_NO_STATIC_ALIASING
 void
@@ -3036,94 +2555,6 @@ Oracle::functionHeadForInstruction(const StaticRip &rip)
 		return StaticRip(0);
 	assert(x.size() == 1);
 	return x[0];
-}
-
-/* Hackety hackety hack: getRbpToRspDelta() returns the RBP->RSP delta
-   at the *start* of an instruction, whereas getRbpToRspOffset()
-   returns it at the end. */
-bool
-Oracle::getRbpToRspDelta(const StaticRip &rip, long *out)
-{
-	std::vector<StaticRip> pred;
-	Function(StaticRip(rip)).addPredecessorsNonCall(rip, pred);
-	if (pred.size() == 0) {
-		/* Can't do anything if we don't have any
-		 * predecessors. */
-		return false;
-	}
-	RbpToRspOffsetState state;
-	unsigned long o;
-	getRbpToRspOffset(pred[0], &state, &o);
-	if (state != RbpToRspOffsetStateValid)
-		return false;
-	for (unsigned x = 1; x < pred.size(); x++) {
-		unsigned long o2;
-		getRbpToRspOffset(pred[x], &state, &o2);
-		if (state != RbpToRspOffsetStateValid ||
-		    o2 != o)
-			return false;
-	}
-	*out = o;
-	return true;
-}
-bool
-Oracle::getRbpToRspDelta(const VexRip &rip, long *out)
-{
-	if (getRbpToRspDelta(StaticRip(rip), out))
-		return true;
-
-	/* Bit of a hack, but not really.  If we're at the start of a
-	   function, and the enclosing function has a known delta, we
-	   can quite easily calculate the delta for this function from
-	   the delta for the enclosing one. */
-	if (rip.stack.size() > 1 && isFunctionHead(StaticRip(rip))) {
-		long d2;
-		VexRip parentVr(rip);
-		parentVr.rtrn();
-		if (!getRbpToRspDelta(StaticRip(parentVr), &d2))
-			return false;
-		*out = d2 - 8;
-		return true;
-	}
-	/* Another hack: if we're right at the end of a function
-	   (i.e. right on the ret instruction) then we can also grab
-	   the caller's delta. */
-	if (rip.stack.size() > 1) {
-		IRSB *irsb = getIRSBForRip(rip, false);
-		assert(irsb);
-		int nr_marks = 0;
-		for (int i = 0; i < irsb->stmts_used && nr_marks < 2; i++)
-			if (irsb->stmts[i]->tag == Ist_IMark)
-				nr_marks++;
-		if (irsb->jumpkind == Ijk_Ret && nr_marks == 1) {
-			VexRip parentVr(rip);
-			long d2;
-			parentVr.rtrn();
-			if (!getRbpToRspDelta(StaticRip(parentVr), &d2))
-				return false;
-			*out = d2 - 8;
-			return true;
-		}
-	}
-	/* One more hack: try to do something sensible for the initial
-	 * ``push rbp'' instruction. */
-	StaticRip head(functionHeadForInstruction(StaticRip(rip)));
-	if (rip.unwrap_vexrip() == head.rip + 1 &&
-	    ms->addressSpace->fetch<unsigned char>(head.rip) == 0x55) {
-		/* The first instruction in the function is push rbp,
-		   and we're the second instruction -> can calculate
-		   our delta from the parent function's delta. */
-		VexRip parentVr(rip);
-		long d2;
-		parentVr.rtrn();
-		if (!getRbpToRspDelta(StaticRip(parentVr), &d2))
-			return false;
-		*out = d2 - 16;
-		return true;
-	}
-
-	/* Give up */
-	return false;
 }
 
 void
@@ -3201,8 +2632,8 @@ dbg_database_query(const char *query)
 	} else {
 		int cwidth = 225 / nr_columns;
 		int wide_columns = 225 % nr_columns;
-		if (cwidth > 20) {
-			cwidth = 20;
+		if (cwidth > 40) {
+			cwidth = 40;
 			wide_columns = 0;
 		}
 		for (int i = 0; i < nr_columns; i++)
@@ -3890,4 +3321,33 @@ Oracle::LivenessSet::mkName() const
 	acc2 = my_asprintf("%s>", acc);
 	free(acc);
 	return acc2;
+}
+
+void
+Oracle::setFixedRegs(const StaticRip &vr, const FixedRegs &fr)
+{
+	static prepared_stmt stmt("INSERT INTO fixedRegs (rip, content) VALUES (?, ?)");
+	stmt.bindOracleRip(1, vr);
+	stmt.bindString(2, fr.name());
+	stmt.run();
+}
+
+bool
+Oracle::getFixedRegs(const StaticRip &sr, FixedRegs *out)
+{
+	static prepared_stmt stmt("SELECT content FROM fixedRegs WHERE rip = ?");
+	stmt.bindOracleRip(1, sr);
+	int r = sqlite3_step(stmt.stmt);
+	if (r == SQLITE_DONE) {
+		sqlite3_reset(stmt.stmt);
+		return false;
+	}
+	assert(r == SQLITE_ROW);
+	const unsigned char *t = sqlite3_column_text(stmt.stmt, 0);
+	const char *e;
+	bool r2 = out->parse((const char *)t, &e);
+	assert(r2);
+	assert(*e == '\0');
+	sqlite3_reset(stmt.stmt);
+	return true;
 }

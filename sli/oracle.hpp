@@ -103,7 +103,6 @@ public:
 		char *mkName() const { return my_asprintf("function_%s", rip.name()); }
 		void getInstructionsInFunction(std::vector<StaticRip> &out) const;
 		void updateLiveOnEntry(Oracle *oracle, const StaticRip &rip, AddressSpace *as, bool *changed);
-		void updateRbpToRspOffset(const StaticRip &rip, AddressSpace *as, bool *changed, Oracle *oracle);
 		void addPredecessorsDirect(const StaticRip &rip, std::vector<StaticRip> &out);
 		void addPredecessorsNonCall(const StaticRip &rip, std::vector<StaticRip> &out);
 		void addPredecessorsCall(const StaticRip &rip, std::vector<StaticRip> &out);
@@ -118,8 +117,6 @@ public:
 		void getFunctionCallers(std::vector<StaticRip> &out);
 		bool registerLivenessCorrect() const;
 		void setRegisterLivenessCorrect(bool v);
-		bool rbpToRspOffsetsCorrect() const;
-		void setRbpToRspOffsetsCorrect(bool v);
 		bool aliasingConfigCorrect() const;
 		void setAliasingConfigCorrect(bool v);
 		LivenessSet liveOnEntry(const StaticRip &, bool);
@@ -135,7 +132,6 @@ public:
 #endif
 		void resolveCallGraph(Oracle *oracle);
 		void calculateRegisterLiveness(Oracle *oracle, AddressSpace *as, bool *done_something);
-		void calculateRbpToRspOffsets(AddressSpace *as, Oracle *oracle);
 		void calculateAliasing(AddressSpace *as, Oracle *oracle, bool *done_something);
 
 		void visit(HeapVisitor &) { }
@@ -208,25 +204,42 @@ public:
 	static IRSB *getIRSBForRip(AddressSpace *as, const VexRip &sr, bool singleInstr);
 	IRSB *getIRSBForRip(const VexRip &vr, bool singleInstr);
 
+	class FixedRegs : public Named {
+		char *mkName() const;
+	public:
+		struct rs {
+			enum { invalid, cnst, reg_offset } type;
+			unsigned base_reg;
+			long offset_or_cnst;
+		};
+		rs content[NR_REGS];
+		enum df_state {
+			plus_one,
+			unknown,
+			minus_one
+		};
+		df_state dfs;
+		FixedRegs();
+		bbdd *transform_bbdd(bbdd::scope *, bbdd *) const;
+		smrbdd *transform_smrbdd(bbdd::scope *scope1, smrbdd::scope *, smrbdd *) const;
+		StateMachineSideEffect *transformSideEffect(SMScopes *, StateMachineSideEffect *) const;
+
+		bool parse(const char *, const char **);
+	};
+	bool getFixedRegs(const StaticRip &vr, FixedRegs *out);
+	void setFixedRegs(const StaticRip &vr, const FixedRegs &fr);
 private:
 
 	void buildReturnAddressTable();
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
-	static void calculateRbpToRspOffsets(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token);
+	static void calculateFixedRegs(VexPtr<Oracle> &ths, GarbageCollectionToken token);
+
 	void loadTagTable(const char *path);
 	void findPossibleJumpTargets(const StaticRip &from, const callgraph_t &callgraph_table, std::vector<StaticRip> &targets);
 public:
 	StaticRip functionHeadForInstruction(const StaticRip &rip);
 private:
-	enum RbpToRspOffsetState {
-		RbpToRspOffsetStateImpossible,
-		RbpToRspOffsetStateValid,
-		RbpToRspOffsetStateUnknown
-	};
-	void getRbpToRspOffset(const StaticRip &rip, RbpToRspOffsetState *state, unsigned long *offset);
-	void setRbpToRspOffset(const StaticRip &rip, RbpToRspOffsetState state, unsigned long offset);
-
 	std::vector<StaticRip> terminalFunctions;
 	std::vector<StaticRip> crashingFunctions;
 	std::vector<StaticRip> freeFunctions;
@@ -282,17 +295,8 @@ public:
 
 #if !CONFIG_NO_STATIC_ALIASING
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const StaticRip &rip);
-#endif
-
-private:
-	bool getRbpToRspDelta(const StaticRip &rip, long *out);
-public:
-
-#if !CONFIG_NO_STATIC_ALIASING
 	ThreadRegisterAliasingConfiguration getAliasingConfigurationForRip(const VexRip &rip);
 #endif
-
-	bool getRbpToRspDelta(const VexRip &rip, long *out);
 
 	void getInstrCallees(const VexRip &vr, std::vector<VexRip> &out);
 	void getInstrFallThroughs(const VexRip &vr, std::vector<VexRip> &out);

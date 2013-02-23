@@ -12,6 +12,7 @@ bool parseDecimalInt(int *out, const char *str, const char **suffix);
 bool parseDecimalLong(long *out, const char *str, const char **suffix);
 bool parseDecimalUInt(unsigned int *out, const char *str, const char **suffix);
 bool parseHexUlong(unsigned long *out, const char *str, const char **suffix);
+bool parseHexLong(long *out, const char *str, const char **suffix);
 
 template <typename c> bool
 parseContainer(c *out, bool (*parseItem)(typename c::value_type *out, const char *str, const char **suffix),

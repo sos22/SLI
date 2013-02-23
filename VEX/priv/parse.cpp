@@ -94,6 +94,15 @@ bool parseHexUlong(unsigned long *out, const char *str, const char **suffix)
   return true;
 }
 
+bool parseHexLong(long *out, const char *str, const char **suffix)
+{
+  errno = 0;
+  *out = strtol(str, (char **)suffix, 16);
+  if (errno != 0 || *suffix == str)
+    return false;
+  return true;
+}
+
 bool parseThreadRip(ThreadRip *out, const char *str, const char **suffix)
 {
   int tid;

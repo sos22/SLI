@@ -332,70 +332,42 @@ getLibraryStateMachine(SMScopes *scopes,
 }
 
 static void
-canonicaliseRbp(SMScopes *scopes, StateMachineState *root, const VexRip &rip, Oracle *oracle)
+canonicaliseRegs(SMScopes *scopes, StateMachineState *root, const VexRip &rip, Oracle *oracle)
 {
-	long delta;
-	if (oracle->getRbpToRspDelta(rip, &delta)) {
-		/* Rewrite any references to RBP to be references to
-		   RSP-delta wherever possible. */
-		struct : public StateMachineTransformer {
-			long delta;
-			IRExpr *canonedRbp;
-			IRExpr *transformIex(IRExprGet *ieg) {
-				if (ieg->ty == Ity_I64 &&
-				    ieg->reg.isReg() &&
-				    ieg->reg.asReg() == OFFSET_amd64_RBP) {
-					if (!canonedRbp)
-						canonedRbp =
-							IRExpr_Binop(
-								Iop_Add64,
-								IRExpr_Const_U64(-delta),
-								IRExpr_Get(
-									threadAndRegister::reg(
-										ieg->reg.tid(),
-										OFFSET_amd64_RSP,
-										0),
-									Ity_I64));
-					return canonedRbp;
-				}
-				return IRExprTransformer::transformIex(ieg);
-			}
-			bool rewriteNewStates() const { return false; }
-		} doit;
-		doit.delta = delta;
-		doit.canonedRbp = NULL;
+	Oracle::FixedRegs ofr;
+	if (!oracle->getFixedRegs(StaticRip(rip), &ofr)) {
+		return;
+	}
 
-		/* Can't use normal state machine transformer because
-		   some of the targets are still NULL pointers. */
-		std::vector<StateMachineState *> pendingStates;
-		pendingStates.push_back(root);
-		while (!pendingStates.empty()) {
-			StateMachineState *s = pendingStates.back();
-			pendingStates.pop_back();
-			if (!s)
-				continue;
-			s->targets(pendingStates);
-			switch (s->type) {
-			case StateMachineState::Bifurcate: {
-				StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
-				smb->set_condition(doit.transform_bbdd(&scopes->bools, smb->condition));
-				break;
+	/* Can't use normal state machine transformer because some of
+	   the targets are still NULL pointers. */
+	std::vector<StateMachineState *> pendingStates;
+	pendingStates.push_back(root);
+	while (!pendingStates.empty()) {
+		StateMachineState *s = pendingStates.back();
+		pendingStates.pop_back();
+		if (!s) {
+			continue;
+		}
+		s->targets(pendingStates);
+		switch (s->type) {
+		case StateMachineState::Bifurcate: {
+			StateMachineBifurcate *smb = (StateMachineBifurcate *)s;
+			smb->set_condition(ofr.transform_bbdd(&scopes->bools, smb->condition));
+			break;
+		}
+		case StateMachineState::Terminal: {
+			StateMachineTerminal *smt = (StateMachineTerminal *)s;
+			smt->set_res(ofr.transform_smrbdd(&scopes->bools, &scopes->smrs, smt->res));
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			StateMachineSideEffecting *smse = (StateMachineSideEffecting *)s;
+			if (smse->sideEffect) {
+				smse->sideEffect = ofr.transformSideEffect(scopes, smse->sideEffect);
 			}
-			case StateMachineState::Terminal:
-				break;
-			case StateMachineState::SideEffecting: {
-				StateMachineSideEffect *smse = s->getSideEffect();
-				if (smse) {
-					bool b;
-					StateMachineSideEffect *new_smse =
-						doit.transformSideEffect(scopes, smse, &b);
-					if (new_smse)
-						((StateMachineSideEffecting *)s)->sideEffect =
-							new_smse;
-				}
-				break;
-			}
-			}
+			break;
+		}
 		}
 	}
 }
@@ -600,7 +572,6 @@ cfgNodeToState(SMScopes *scopes,
 		}
 		case Ist_Dirty: {
 			IRDirty *dirty = ((IRStmtDirty *)stmt)->details;
-			IRType ity = Ity_INVALID;
 			StateMachineSideEffect *se;
 			if (!strncmp(dirty->cee->name, "helper_load_", strlen("helper_load_"))) {
 				auto sel = new StateMachineSideEffectLoad(
@@ -686,7 +657,7 @@ cfgNodeToState(SMScopes *scopes,
 
 	assert(*cursor == NULL);
 
-	canonicaliseRbp(scopes, root, target->rip, oracle);
+	canonicaliseRegs(scopes, root, target->rip, oracle);
 
 	std::vector<CFGNode *> targets;
 	if (i == irsb->stmts_used) {
@@ -1332,25 +1303,6 @@ addEntrySideEffects(SMScopes *scopes,
 	)
 {
 	StateMachineState *cursor = final;
-	long delta;
-
-	if (oracle->getRbpToRspDelta(vr, &delta)) {
-		cursor = new StateMachineSideEffecting(
-			vr,
-			new StateMachineSideEffectCopy(
-				threadAndRegister::reg(tid, OFFSET_amd64_RBP, 0),
-				exprbdd::var(
-					&scopes->exprs,
-					&scopes->bools,
-					IRExpr_Associative_V(
-						Iop_Add64,
-						IRExpr_Const_U64(-delta),
-						IRExpr_Get(
-							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
-							Ity_I64),
-						NULL))),
-			cursor);
-	}
 
 	if (getRspCanonicalisationDelta(scopes, final, rsp_delta, entryLabel)) {
 		cursor = new StateMachineSideEffecting(
