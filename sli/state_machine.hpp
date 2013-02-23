@@ -816,6 +816,10 @@ public:
 		: StateMachineSideEffectMemoryAccess(base->addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(_reg), type(base->type)
 	{}
+	StateMachineSideEffectLoad(StateMachineSideEffectLoad *base, IRType _type)
+		: StateMachineSideEffectMemoryAccess(base->addr, base->rip, base->tag, StateMachineSideEffect::Load),
+		  target(base->target), type(_type)
+	{}
 	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, const threadAndRegister &_reg, exprbdd *_addr)
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(_reg), type(base->type)
