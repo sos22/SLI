@@ -826,6 +826,23 @@ public:
 	std::vector<StateMachineState *> history;
 #endif
 
+	bool isMagicState(std::map<const StateMachineState *, int> &labels) {
+#if 0
+		static const int desired[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 12, 0};
+		unsigned idx = 0;
+		while (1) {
+			if (desired[idx] == 0) {
+				return true;
+			}
+			if (idx == history.size() || labels[history[idx]] != desired[idx]) {
+				return false;
+			}
+			idx++;
+		}
+#else
+		return false;
+#endif
+	}
 	void setState(StateMachineState *s) {
 #ifndef NDEBUG
 		if (debug_survival_constraint) {
@@ -1461,6 +1478,9 @@ enumEvalPaths(SMScopes *scopes,
 		EvalContext &ctxt(pendingStates.back());
 		if (debug_survival_constraint) {
 			ctxt.printHistory(stdout, labels);
+			if (ctxt.isMagicState(labels)) {
+				dbg_break("Here");
+			}
 		}
 
 		ctxt.advance<paramT>(scopes, assumption, *decode, oracle, opt, pendingStates, havePhis,
