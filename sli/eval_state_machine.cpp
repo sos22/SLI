@@ -2058,22 +2058,13 @@ buildCrossProductMachine(SMScopes *scopes,
 					   which makes things a bit
 					   easier. */
 				}
-				IRExpr *fv;
-				if (probe_access && store_access) {
-					fv = IRExpr_HappensBefore(
-						probe_access->rip,
-						store_access->rip);
-				} else {
-					ThreadRip tr(-1, VexRip::invent_vex_rip((*next_fake_free_variable)++));
-					fv = maiOut->freeVariable(
-						Ity_I1,
-						-1,
-						NULL,
-						false);
-				}
+				assert(probe_access || probe_effect->type == StateMachineSideEffect::StartAtomic);
+				assert(store_access || store_effect->type == StateMachineSideEffect::StartAtomic);
+				const MemoryAccessIdentifier &probeMai(probe_access ? probe_access->rip : ((StateMachineSideEffectStartAtomic *)probe_effect)->mai);
+				const MemoryAccessIdentifier &storeMai(store_access ? store_access->rip : ((StateMachineSideEffectStartAtomic *)store_effect)->mai);
 				newState = new StateMachineBifurcate(
 					VexRip(),
-					bbdd::var(&scopes->bools, fv),
+					bbdd::var(&scopes->bools, IRExpr_HappensBefore(probeMai, storeMai)),
 					nextProbe,
 					nextStore);
 			}
