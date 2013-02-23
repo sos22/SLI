@@ -121,7 +121,7 @@ availExprSet::bddPurgeRegister(SMScopes *scopes, bbdd *what, const threadAndRegi
 		   f == what->internal().falseBranch) {
 		it->second = what;
 	} else {
-		it->second = scopes->bools.makeInternal(
+		it->second = scopes->bools.node(
 			what->internal().condition,
 			what->internal().rank,
 			t,
@@ -142,6 +142,9 @@ smrbdd *
 availExprSet::simplifySmrbdd(SMScopes *scopes, smrbdd *smr) const
 {
 	SubstRegsTransform trans(fixedRegs);
+	if (definitelyTrue->isLeaf() && !definitelyTrue->leaf()) {
+		return scopes->smrs.cnst(smr_unreached);
+	}
 	return trans.transform_smrbdd(&scopes->bools, &scopes->smrs, smrbdd::assume(&scopes->smrs, smr, definitelyTrue));
 }
 
@@ -255,6 +258,7 @@ availExprSet::simplifySE(SMScopes *, StateMachineSideEffectImportRegister *c) co
 	return c;
 }
 
+#if !CONFIG_NO_STATIC_ALIASING
 StateMachineSideEffect *
 availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectStartFunction *s) const
 {
@@ -282,11 +286,14 @@ availExprSet::simplifySE(SMScopes *, StateMachineSideEffectStackLayout *c) const
 {
 	return c;
 }
-
+#endif
 
 StateMachineSideEffect *
 availExprSet::simplifySideEffect(SMScopes *scopes, StateMachineSideEffect *se) const
 {
+	if (definitelyTrue->isLeaf() && !definitelyTrue->leaf()) {
+		return StateMachineSideEffectUnreached::get();
+	}
 	switch (se->type) {
 #define do_case(name)							\
 		case StateMachineSideEffect::name :			\
@@ -318,6 +325,14 @@ availExprSet::simplifyState(SMScopes *scopes, StateMachineState *s, bool *done_s
 	}
 	case StateMachineState::Bifurcate: {
 		auto smb = (StateMachineBifurcate *)s;
+		if (definitelyTrue->isLeaf() && !definitelyTrue->leaf()) {
+			smb->trueTarget = smb->falseTarget =
+				new StateMachineTerminal(
+					smb->dbg_origin,
+					scopes->smrs.cnst(smr_unreached));
+			*done_something = true;
+			return;
+		}
 		auto c = simplifyBbdd(scopes, smb->condition);
 		if (!TIMEOUT) {
 			if (debug_avail && c != smb->condition) {
@@ -593,6 +608,7 @@ typedef std::map<threadAndRegister, exprbdd *> regDefT;
 
 struct ssa_avail_state {
 	SMScopes *scopes;
+	bool canEarlyOut;
 	regDefT defs;
 	sane_map<bbdd *, bbdd *> boolMemo;
 	sane_map<smrbdd *, smrbdd *> smrMemo;
@@ -653,8 +669,10 @@ static bbdd *
 ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 		      sane_map<std::pair<IRExpr *, substTableT>, bbdd *> &memo)
 {
-	if (TIMEOUT)
+	if (TIMEOUT || (state.canEarlyOut && LibVEX_want_GC())) {
 		return NULL;
+	}
+
 	auto it_did_insert = memo.insert(std::pair<IRExpr *, substTableT>(e, t),
 					 NULL);
 	auto it = it_did_insert.first;
@@ -682,11 +700,17 @@ ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 			substTableT falseTable(t);
 			for (auto it2 = falseTable.begin(); it2 != falseTable.end(); it2++)
 				it2->second = it2->second->falseBranch(*bestVar);
-			it->second = bbdd::ifelse(
-				&state.scopes->bools,
-				bbdd::var(&state.scopes->bools, bestCond),
-				ssaApplyAvailExprBool(state, trueTable, e, memo),
-				ssaApplyAvailExprBool(state, falseTable, e, memo));
+			auto tt = ssaApplyAvailExprBool(state, trueTable, e, memo);
+			auto ff = ssaApplyAvailExprBool(state, falseTable, e, memo);
+			if (tt && ff) {
+				it->second = state.scopes->bools.node(
+					bestCond,
+					*bestVar,
+					tt,
+					ff);
+			} else {
+				it->second = NULL;
+			}
 		}
 	}
 	return it->second;
@@ -734,9 +758,9 @@ ssaApplyAvailExprExpr(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 			substTableT falseTable(t);
 			for (auto it2 = falseTable.begin(); it2 != falseTable.end(); it2++)
 				it2->second = it2->second->falseBranch(*bestVar);
-			it->second = exprbdd::ifelse(
-				&state.scopes->exprs,
-				bbdd::var(&state.scopes->bools, bestCond),
+			it->second = state.scopes->exprs.node(
+				bestCond,
+				*bestVar,
 				ssaApplyAvailExprExpr(state, trueTable, e, memo),
 				ssaApplyAvailExprExpr(state, falseTable, e, memo));
 		}
@@ -765,19 +789,23 @@ ssaApplyAvail(ssa_avail_state &state, bbdd *inp)
 			it->second = inp;
 		} else {
 			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
-			bbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
-			bbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
-			if (!newCond.isLeft &&
-			    newCond.right() == inp->internal().condition &&
-			    t == inp->internal().trueBranch &&
-			    f == inp->internal().falseBranch) {
+			if (newCond.isLeft && !newCond.left()) {
 				it->second = inp;
 			} else {
-				it->second = bbdd::ifelse(
-					&state.scopes->bools,
-					newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
-					t,
-					f);
+				bbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
+				bbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
+				if (!newCond.isLeft &&
+				    newCond.right() == inp->internal().condition &&
+				    t == inp->internal().trueBranch &&
+				    f == inp->internal().falseBranch) {
+					it->second = inp;
+				} else {
+					it->second = bbdd::ifelse(
+						&state.scopes->bools,
+						newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
+						t,
+						f);
+				}
 			}
 		}
 	}
@@ -795,19 +823,23 @@ ssaApplyAvail(ssa_avail_state &state, smrbdd *inp)
 			it->second = inp;
 		} else {
 			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
-			smrbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
-			smrbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
-			if (!newCond.isLeft &&
-			    newCond.right() == inp->internal().condition &&
-			    t == inp->internal().trueBranch &&
-			    f == inp->internal().falseBranch) {
+			if (newCond.isLeft && !newCond.left()) {
 				it->second = inp;
 			} else {
-				it->second = smrbdd::ifelse(
-					&state.scopes->smrs,
-					newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
-					t,
-					f);
+				smrbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
+				smrbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
+				if (!newCond.isLeft &&
+				    newCond.right() == inp->internal().condition &&
+				    t == inp->internal().trueBranch &&
+				    f == inp->internal().falseBranch) {
+					it->second = inp;
+				} else {
+					it->second = smrbdd::ifelse(
+						&state.scopes->smrs,
+						newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
+						t,
+						f);
+				}
 			}
 		}
 	}
@@ -834,19 +866,23 @@ ssaApplyAvail(ssa_avail_state &state, exprbdd *inp)
 					newLeaf.right());
 		} else {
 			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
-			exprbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
-			exprbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
-			if (!newCond.isLeft &&
-			    newCond.right() == inp->internal().condition &&
-			    t == inp->internal().trueBranch &&
-			    f == inp->internal().falseBranch) {
+			if (newCond.isLeft && !newCond.left()) {
 				it->second = inp;
 			} else {
-				it->second = exprbdd::ifelse(
-					&state.scopes->exprs,
-					newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
-					t,
-					f);
+				exprbdd *t = ssaApplyAvail(state, inp->internal().trueBranch);
+				exprbdd *f = ssaApplyAvail(state, inp->internal().falseBranch);
+				if (!newCond.isLeft &&
+				    newCond.right() == inp->internal().condition &&
+				    t == inp->internal().trueBranch &&
+				    f == inp->internal().falseBranch) {
+					it->second = inp;
+				} else {
+					it->second = exprbdd::ifelse(
+						&state.scopes->exprs,
+						newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
+						t,
+						f);
+				}
 			}
 		}
 	}
@@ -1007,10 +1043,11 @@ definitionClosure(ssa_avail_state &state)
 }
 
 static StateMachine *
-ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
+ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool canEarlyOut, bool *done_something)
 {
 	ssa_avail_state state;
 	state.scopes = scopes;
+	state.canEarlyOut = canEarlyOut;
 	std::set<StateMachineSideEffectCopy *> sideEffects;
 	enumSideEffects(sm, sideEffects);
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
@@ -1026,6 +1063,12 @@ ssaAvailAnalysis(SMScopes *scopes, StateMachine *sm, bool *done_something)
 	std::vector<StateMachineState *> states;
 	enumStates(sm, &states);
 	for (auto it = states.begin(); it != states.end(); it++) {
+		state.canEarlyOut |= *done_something;
+		if (state.canEarlyOut && LibVEX_want_GC()) {
+			/* Get out and give the GC a chance to run. */
+			break;
+		}
+
 		StateMachineState *s = *it;
 		switch (s->type) {
 		case StateMachineState::Terminal: {
@@ -1065,12 +1108,13 @@ availExpressionAnalysis(SMScopes *scopes,
 			const AllowableOptimisations &opt,
 			bool is_ssa,
 			OracleInterface *oracle,
+			bool canEarlyOut,
 			bool *done_something)
 {
 	StateMachine *res;
 	stackedCdf::startAvailExpression();
 	if (is_ssa) {
-		res =_availExpressionAnalysis::ssaAvailAnalysis(scopes, sm, done_something);
+		res =_availExpressionAnalysis::ssaAvailAnalysis(scopes, sm, canEarlyOut, done_something);
 	} else {
 		res = _availExpressionAnalysis::availExpressionAnalysis(scopes, decode, sm, opt, oracle, done_something);
 	}

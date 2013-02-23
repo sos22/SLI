@@ -329,7 +329,7 @@ eq_rewrites(bbdd::scope *scope,
 			   the BDD exponentially bigger, which more
 			   than outweighs the benefits of slightly
 			   simpler conditions. */
-			it->second = scope->makeInternal(
+			it->second = scope->node(
 				what->internal().condition,
 				what->internal().rank,
 				t,

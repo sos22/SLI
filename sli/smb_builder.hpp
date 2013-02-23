@@ -197,13 +197,12 @@ class SMBStatementLoad : public SMBStatement {
 			target.content->compile(),
 			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
 			mkPendingMai(state.where),
-			type,
+			Ity_I64,
 			tag);
 	}
 public:
 	SMBPtr<SMBRegisterReference> target;
 	SMBPtr<SMBMemoryReference> addr;
-	IRType type;
 	MemoryTag tag;
 
 	void visit(HeapVisitor &hv) {
@@ -212,9 +211,8 @@ public:
 	}
 	explicit SMBStatementLoad(SMBPtr<SMBRegisterReference> _target,
 				  SMBPtr<SMBMemoryReference> _addr,
-				  IRType _type,
 				  const MemoryTag &_tag)
-		: target(_target), addr(_addr), type(_type), tag(_tag)
+		: target(_target), addr(_addr), tag(_tag)
 	{
 	}
 };
@@ -283,14 +281,14 @@ operator <<=(SMBPtr<SMBMemoryReference> target, SMBPtr<SMBExpression> value)
 /* Load a value from memory into a register.  No operator because you
    need the addition ty and tag arguments */
 static inline SMBPtr<SMBStatement>
-Load(SMBPtr<SMBRegisterReference> target, SMBPtr<SMBMemoryReference> addr, IRType ty, const MemoryTag &tag)
+Load(SMBPtr<SMBRegisterReference> target, SMBPtr<SMBMemoryReference> addr, const MemoryTag &tag)
 {
-	return SMBPtr<SMBStatement>(new SMBStatementLoad(target, addr, ty, tag));
+	return SMBPtr<SMBStatement>(new SMBStatementLoad(target, addr, tag));
 }
 static inline SMBPtr<SMBStatement>
-Load(SMBPtr<SMBRegisterReference> target, SMBPtr<SMBMemoryReference> addr, IRType ty)
+Load(SMBPtr<SMBRegisterReference> target, SMBPtr<SMBMemoryReference> addr)
 {
-	return Load(target, addr, ty, MemoryTag::normal());
+	return Load(target, addr, MemoryTag::normal());
 }
 /* Assert that x is false */
 static inline SMBPtr<SMBStatement>

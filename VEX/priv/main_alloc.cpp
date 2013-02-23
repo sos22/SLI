@@ -47,6 +47,7 @@ FILE *_logfile = stdout;
 //#define DBG printf
 
 void dump_heap_usage(Heap *h, FILE *f);
+bool __libvex_force_gc;
 
 struct arena;
 
@@ -373,8 +374,10 @@ LibVEX_maybe_gc(GarbageCollectionToken t)
 	   close to limit GC the main heap.  If we're still over the
 	   limit after that we try the IR heap again, and then finally
 	   give up. */
-	if (main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE)
+	if (__libvex_force_gc || main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE) {
 		LibVEX_gc(&ir_heap, t);
+		__libvex_force_gc = false;
+	}
 	if (main_heap.heap_used >= GC_MAX_SIZE / 2)
 		LibVEX_gc(&main_heap, t);
 	if (main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE)

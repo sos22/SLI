@@ -385,7 +385,11 @@ _convertState(SMScopes *scopes,
 	      std::map<threadAndRegister, IRType> &typeMap)
 {
 	std::vector<StateMachineSideEffectPhi *> neededPhis;
-	smt->set_res(convertSmrBdd(scopes, smt->res, reaching, correspondence, neededPhis, typeMap));
+	auto rr = convertSmrBdd(scopes, smt->res, reaching, correspondence, neededPhis, typeMap);
+	if (TIMEOUT) {
+		return smt;
+	}
+	smt->set_res(rr);
 	return addPhis(smt, neededPhis);
 }
 
@@ -398,7 +402,11 @@ _convertState(SMScopes *scopes,
 	      std::map<threadAndRegister, IRType> &typeMap)
 {
 	std::vector<StateMachineSideEffectPhi *> neededPhis;
-	smb->set_condition(convertBBdd(scopes, smb->condition, reaching, correspondence, neededPhis, typeMap));
+	auto cc = convertBBdd(scopes, smb->condition, reaching, correspondence, neededPhis, typeMap);
+	if (TIMEOUT) {
+		return smb;
+	}
+	smb->set_condition(cc);
 	relocs.push_back(std::pair<StateMachineState **, StateMachineState *>(&smb->trueTarget, smb->trueTarget));
 	relocs.push_back(std::pair<StateMachineState **, StateMachineState *>(&smb->falseTarget, smb->falseTarget));
 	return addPhis(smb, neededPhis);
@@ -515,7 +523,7 @@ convertToSSA(SMScopes *scopes, StateMachine *inp, std::map<threadAndRegister, th
 	pending.push_back(inp->root);
 
 	std::map<threadAndRegister, IRType> typeMap;
-	while (!pending.empty()) {
+	while (!TIMEOUT && !pending.empty()) {
 		StateMachineState *s = pending.back();
 		pending.pop_back();
 		assert(predecessors.count(s));

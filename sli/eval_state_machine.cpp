@@ -464,13 +464,19 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *
 	bbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt, memo);
 	bbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt, memo);
 	bbdd *res;
-	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch)
+	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch) {
 		res = e;
-	else
+	} else if (cond == e->internal().condition) {
+		res = scopes->bools.node(e->internal().condition,
+					 e->internal().rank,
+					 trueB,
+					 falseB);
+	} else {
 		res = bbdd::ifelse(&scopes->bools,
 				   bbdd::var(&scopes->bools, cond),
 				   trueB,
 				   falseB);
+	}
 	it->second = res;
 	return res;
 }
@@ -490,13 +496,19 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbd
 	exprbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt, memo);
 	exprbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt, memo);
 	exprbdd *res;
-	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch)
+	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch) {
 		res = e;
-	else
+	} else if (cond == e->internal().condition) {
+		res = scopes->exprs.node(e->internal().condition,
+					 e->internal().rank,
+					 trueB,
+					 falseB);
+	} else {
 		res = exprbdd::ifelse(&scopes->exprs,
 				      bbdd::var(&scopes->bools, cond),
 				      trueB,
 				      falseB);
+	}
 	it->second = res;
 	return res;
 }
@@ -688,22 +700,24 @@ threadState::specialiseIRExpr(SMScopes *scopes, bbdd *what, std::map<bbdd *, bbd
 		IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 		bbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 		bbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
-		if (t == f) {
+		if (TIMEOUT) {
+			it->second = what;
+		} else if (t == f) {
 			it->second = t;
 		} else if (cond == what->internal().condition &&
 			   t == what->internal().trueBranch &&
 			   f == what->internal().falseBranch) {
 			it->second = what;
+		} else if (cond == what->internal().condition) {
+			it->second = scopes->bools.node(what->internal().condition,
+							what->internal().rank,
+							t,
+							f);
 		} else {
-			bbdd *c = bbdd::var(&scopes->bools, cond);
-			if (c) {
-				it->second = bbdd::ifelse(&scopes->bools,
-							  c,
-							  t,
-							  f);
-			} else {
-				assert(TIMEOUT);
-			}
+			it->second = bbdd::ifelse(&scopes->bools,
+						  bbdd::var(&scopes->bools, cond),
+						  t,
+						  f);
 		}
 	}
 	return it->second;
@@ -722,22 +736,24 @@ threadState::specialiseIRExpr(SMScopes *scopes, smrbdd *what, std::map<smrbdd *,
 		IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 		smrbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 		smrbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
-		if (t == f) {
+		if (TIMEOUT) {
+			it->second = what;
+		} else if (t == f) {
 			it->second = t;
 		} else if (cond == what->internal().condition &&
 			   t == what->internal().trueBranch &&
 			   f == what->internal().falseBranch) {
 			it->second = what;
+		} else if (cond == what->internal().condition) {
+			it->second = scopes->smrs.node(what->internal().condition,
+						       what->internal().rank,
+						       t,
+						       f);
 		} else {
-			bbdd *c = bbdd::var(&scopes->bools, cond);
-			if (c) {
-				it->second = smrbdd::ifelse(&scopes->smrs,
-							    c,
-							    t,
-							    f);
-			} else {
-				assert(TIMEOUT);
-			}
+			it->second = smrbdd::ifelse(&scopes->smrs,
+						    bbdd::var(&scopes->bools, cond),
+						    t,
+						    f);
 		}
 	}
 	return it->second;
@@ -764,22 +780,24 @@ threadState::specialiseIRExpr(SMScopes *scopes, exprbdd *what, std::map<exprbdd 
 			IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 			exprbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 			exprbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
-			if (t == f) {
+			if (TIMEOUT) {
+				it->second = what;
+			} else if (t == f) {
 				it->second = t;
 			} else if (cond == what->internal().condition &&
 				   t == what->internal().trueBranch &&
 				   f == what->internal().falseBranch) {
 				it->second = what;
+			} else if (cond == what->internal().condition) {
+				it->second = scopes->exprs.node(what->internal().condition,
+								what->internal().rank,
+								t,
+								f);
 			} else {
-				bbdd *c = bbdd::var(&scopes->bools, cond);
-				if (c) {
-					it->second = exprbdd::ifelse(&scopes->exprs,
-								     c,
-								     t,
-								     f);
-				} else {
-					assert(TIMEOUT);
-				}
+				it->second = exprbdd::ifelse(&scopes->exprs,
+							     bbdd::var(&scopes->bools, cond),
+							     t,
+							     f);
 			}
 		}
 	}
@@ -808,6 +826,23 @@ public:
 	std::vector<StateMachineState *> history;
 #endif
 
+	bool isMagicState(std::map<const StateMachineState *, int> &labels) {
+#if 0
+		static const int desired[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 12, 0};
+		unsigned idx = 0;
+		while (1) {
+			if (desired[idx] == 0) {
+				return true;
+			}
+			if (idx == history.size() || labels[history[idx]] != desired[idx]) {
+				return false;
+			}
+			idx++;
+		}
+#else
+		return false;
+#endif
+	}
 	void setState(StateMachineState *s) {
 #ifndef NDEBUG
 		if (debug_survival_constraint) {
@@ -974,7 +1009,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				return;
 			}
 			assertFalse<paramT>(&scopes->bools, isBad, opt, result);
-			if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
+			if ((justPathConstraint->isLeaf() && !justPathConstraint->leaf()) || TIMEOUT) {
 				return;
 			}
 		}
@@ -1248,7 +1283,7 @@ suppressUninit(smrbdd::scope *scope, smrbdd *input, bool kill_smr_unreached,
 			   f == input->internal().falseBranch) {
 			it->second = input;
 		} else {
-			it->second = scope->makeInternal(
+			it->second = scope->node(
 				input->internal().condition,
 				input->internal().rank,
 				t,
@@ -1443,6 +1478,9 @@ enumEvalPaths(SMScopes *scopes,
 		EvalContext &ctxt(pendingStates.back());
 		if (debug_survival_constraint) {
 			ctxt.printHistory(stdout, labels);
+			if (ctxt.isMagicState(labels)) {
+				dbg_break("Here");
+			}
 		}
 
 		ctxt.advance<paramT>(scopes, assumption, *decode, oracle, opt, pendingStates, havePhis,
@@ -2407,6 +2445,9 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 					       true,
 					       token);
 	stackedCdf::stopBuildWAtomicResimplify();
+	if (TIMEOUT) {
+		return NULL;
+	}
 	stackedCdf::startBuildWAtomicSymbolicExecute();
 	auto res = survivalConstraintIfExecutedAtomically(
 		scopes,
@@ -2558,7 +2599,7 @@ msmrbdd::from_smrbdd(scope *scp, smrbdd *what, sane_map<smrbdd *, msmrbdd *> &me
 	}
 	auto t = from_smrbdd(scp, what->internal().trueBranch, memo);
 	auto f = from_smrbdd(scp, what->internal().falseBranch, memo);
-	it->second = scp->makeInternal(
+	it->second = scp->node(
 		what->internal().condition,
 		what->internal().rank,
 		t,
@@ -2596,10 +2637,10 @@ msmrbdd::ignore_invalid(smrbdd::scope *scp, msmrbdd *what, sane_map<msmrbdd *, s
 	} else if (!f) {
 		it->second = t;
 	} else {
-		it->second = scp->makeInternal(what->internal().condition,
-					       what->internal().rank,
-					       t,
-					       f);
+		it->second = scp->node(what->internal().condition,
+				       what->internal().rank,
+				       t,
+				       f);
 	}
 	return it->second;
 }

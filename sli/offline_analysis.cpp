@@ -23,8 +23,10 @@
 
 #ifndef NDEBUG
 static bool debugOptimiseStateMachine = false;
+static bool debug_localise_loads = false;
 #else
 #define debugOptimiseStateMachine false
+#define debug_localise_loads false
 #endif
 
 static StateMachine *
@@ -280,7 +282,7 @@ _optimiseStateMachine(SMScopes *scopes,
 		LibVEX_maybe_gc(token);
 
 		p = false;
-		sm = availExpressionAnalysis(scopes, *mai, sm, opt, is_ssa, oracle, &p);
+		sm = availExpressionAnalysis(scopes, *mai, sm, opt, is_ssa, oracle, done_something, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("availExpressionAnalysis:\n");
 			printStateMachine(sm, stdout);
@@ -532,6 +534,9 @@ atomicSurvivalConstraint(SMScopes *scopes,
 	stackedCdf::stopDeriveRAtomicResimplify();
 	if (_atomicMachine)
 		*_atomicMachine = atomicMachine;
+	if (TIMEOUT) {
+		return assumption;
+	}
 	stackedCdf::startDeriveRAtomicSymbolicExecute();
 	bbdd *survive = survivalConstraintIfExecutedAtomically(scopes, mai, atomicMachine, assumption, oracle, false, opt, token);
 	stackedCdf::stopDeriveRAtomicSymbolicExecute();
@@ -756,15 +761,19 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 }
 
 static StateMachine *
-localiseLoads(SMScopes *scopes,
-	      VexPtr<MaiMap, &ir_heap> &mai,
-	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
-	      const VexPtr<StateMachine, &ir_heap> &storeMachine,
-	      const AllowableOptimisations &opt,
-	      const VexPtr<OracleInterface> &oracle,
-	      GarbageCollectionToken token,
-	      bool *done_something = NULL)
+localiseLoads1(SMScopes *scopes,
+	       VexPtr<MaiMap, &ir_heap> &mai,
+	       const VexPtr<StateMachine, &ir_heap> &probeMachine,
+	       const VexPtr<StateMachine, &ir_heap> &storeMachine,
+	       const AllowableOptimisations &opt,
+	       const VexPtr<OracleInterface> &oracle,
+	       GarbageCollectionToken token,
+	       bool *done_something = NULL)
 {
+	if (debug_localise_loads) {
+		printf("%s\n", __PRETTY_FUNCTION__);
+	}
+
 	std::set<DynAnalysisRip> nonLocalLoads;
 	{
 		std::set<StateMachineSideEffectStore *> stores;
@@ -773,19 +782,45 @@ localiseLoads(SMScopes *scopes,
 		enumSideEffects(probeMachine, loads);
 		for (auto it = loads.begin(); !TIMEOUT && it != loads.end(); it++) {
 			StateMachineSideEffectLoad *load = *it;
+			if (debug_localise_loads) {
+				printf("Load %s\n", load->rip.name());
+			}
 			for (auto it2 = mai->begin(load->rip); !TIMEOUT && !it2.finished(); it2.advance()) {
 				DynAnalysisRip dr(it2.dr());
 				bool found_one = false;
+				if (debug_localise_loads) {
+					printf("    Sub-load %s\n", dr.name());
+				}
 				for (auto it3 = stores.begin(); !found_one && it3 != stores.end(); it3++) {
 					StateMachineSideEffectStore *store = *it3;
+					if (debug_localise_loads) {
+						printf("        Store %s\n", store->rip.name());
+					}
 					if (store->tag != load->tag)
 						continue;
-					for (auto it4 = mai->begin(store->rip); !found_one && !it4.finished(); it4.advance())
-						if (oracle->memoryAccessesMightAliasCrossThread(dr, it4.dr()))
+					for (auto it4 = mai->begin(store->rip); !found_one && !it4.finished(); it4.advance()) {
+						if (oracle->memoryAccessesMightAliasCrossThread(dr, it4.dr())) {
+							if (debug_localise_loads) {
+								printf("            Sub-store %s aliases\n", it4.dr().name());
+							}
 							found_one = true;
+						} else {
+							if (debug_localise_loads) {
+								printf("            Sub-store %s no alias\n", it4.dr().name());
+							}
+						}
+					}
 				}
-				if (found_one)
+				if (found_one) {
+					if (debug_localise_loads) {
+						printf("    Sub-load %s is non-local\n", dr.name());
+					}
 					nonLocalLoads.insert(dr);
+				} else {
+					if (debug_localise_loads) {
+						printf("    Sub-load %s is local\n", dr.name());
+					}
+				}
 			}
 		}
 	}
@@ -801,30 +836,55 @@ localiseLoads(SMScopes *scopes,
 }
 
 static StateMachine *
-localiseLoads(SMScopes *scopes,
-	      VexPtr<MaiMap, &ir_heap> &mai,
-	      const VexPtr<StateMachine, &ir_heap> &probeMachine,
-	      const std::set<DynAnalysisRip> &stores,
-	      const AllowableOptimisations &opt,
-	      const VexPtr<OracleInterface> &oracle,
-	      GarbageCollectionToken token,
-	      bool *done_something = NULL)
+localiseLoads2(SMScopes *scopes,
+	       VexPtr<MaiMap, &ir_heap> &mai,
+	       const VexPtr<StateMachine, &ir_heap> &probeMachine,
+	       const std::set<DynAnalysisRip> &stores,
+	       const AllowableOptimisations &opt,
+	       const VexPtr<OracleInterface> &oracle,
+	       GarbageCollectionToken token,
+	       bool *done_something = NULL)
 {
 	std::set<DynAnalysisRip> nonLocalLoads;
 	{
 		std::set<StateMachineSideEffectLoad *> loads;
 		enumSideEffects(probeMachine, loads);
+		if (debug_localise_loads && loads.empty()) {
+			printf("localiseLoads: loads set is empty?\n");
+		}
 		for (auto it = loads.begin(); !TIMEOUT && it != loads.end(); it++) {
 			StateMachineSideEffectLoad *load = *it;
+			if (debug_localise_loads) {
+				printf("Check whether %s is local...\n", load->rip.name());
+			}
 			for (auto it3 = mai->begin(load->rip); !TIMEOUT && !it3.finished(); it3.advance()) {
 				bool found_one = false;
+				if (debug_localise_loads) {
+					printf("    Load %s\n", it3.dr().name());
+				}
 				for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
 					DynAnalysisRip store = *it2;
-					if (oracle->memoryAccessesMightAliasCrossThread(it3.dr(), store))
+					if (oracle->memoryAccessesMightAliasCrossThread(it3.dr(), store)) {
+						if (debug_localise_loads) {
+							printf("       Store %s -> alias\n", store.name());
+						}
 						found_one = true;
+					} else {
+						if (debug_localise_loads) {
+							printf("        Store %s -> no alias\n", store.name());
+						}
+					}
 				}
-				if (found_one)
+				if (found_one) {
+					if (debug_localise_loads) {
+						printf("    %s is non-local\n", it3.dr().name());
+					}
 					nonLocalLoads.insert(it3.dr());
+				} else {
+					if (debug_localise_loads) {
+						printf("    %s is local\n", it3.dr().name());
+					}
+				}
 			}
 		}
 	}
@@ -1025,14 +1085,14 @@ considerStoreCFG(SMScopes *scopes,
 
 	probeMachine = duplicateStateMachine(probeMachine);
 	bool redoAtomicSurvival = false;
-	probeMachine = localiseLoads(scopes,
-				     mai,
-				     probeMachine,
-				     sm_ssa,
-				     probeOptimisations,
-				     oracleI,
-				     token,
-				     &redoAtomicSurvival);
+	probeMachine = localiseLoads1(scopes,
+				      mai,
+				      probeMachine,
+				      sm_ssa,
+				      probeOptimisations,
+				      oracleI,
+				      token,
+				      &redoAtomicSurvival);
 	if (TIMEOUT)
 		return NULL;
 
@@ -1488,14 +1548,14 @@ diagnoseCrash(SMScopes *scopes,
 		return NULL;
 	}
 	bool localised_loads = false;
-	probeMachine = localiseLoads(scopes,
-				     mai,
-				     probeMachine,
-				     potentiallyConflictingStores,
-				     optIn.enableignoreSideEffects(),
-				     oracleI,
-				     token,
-				     &localised_loads);
+	probeMachine = localiseLoads2(scopes,
+				      mai,
+				      probeMachine,
+				      potentiallyConflictingStores,
+				      optIn.enableignoreSideEffects(),
+				      oracleI,
+				      token,
+				      &localised_loads);
 	if (localised_loads) {
 		std::set<DynAnalysisRip> newPotentiallyConflictingStores;
 		while (1) {
@@ -1514,10 +1574,10 @@ diagnoseCrash(SMScopes *scopes,
 				break;
 			potentiallyConflictingStores = newPotentiallyConflictingStores;
 			localised_loads = false;
-			probeMachine = localiseLoads(scopes, mai, probeMachine,
-						     potentiallyConflictingStores,
-						     optIn.enableignoreSideEffects(),
-						     oracleI, token, &localised_loads);
+			probeMachine = localiseLoads2(scopes, mai, probeMachine,
+						      potentiallyConflictingStores,
+						      optIn.enableignoreSideEffects(),
+						      oracleI, token, &localised_loads);
 			if (!localised_loads)
 				break;
 		}

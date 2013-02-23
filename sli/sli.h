@@ -362,4 +362,27 @@ operator ^(const std::set<t> &a1, const std::set<t> &a2)
 	return res;
 }
 
+/* A simple statistic counter which gets dumped when we exit. */
+class ratio_stat {
+#ifdef NDEBUG
+public:
+	ratio_stat(const char *, ...) {}
+	void bump_numerator() { }
+	void bump_denom() { }
+	void print() const { }
+	void reset() {}
+#else
+	unsigned long numerator;
+	unsigned long denominator;
+	const char *name;
+public:
+	ratio_stat(const char *name, ...) __attribute__((__format__ (printf, 2, 3)));
+	~ratio_stat();
+	void print() const;
+	void reset();
+	void bump_numerator() { numerator++; }
+	void bump_denom() { denominator++; }
+#endif
+};
+
 #endif /* !SLI_H__ */

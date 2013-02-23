@@ -230,6 +230,7 @@ StateMachine *availExpressionAnalysis(SMScopes *,
 				      const AllowableOptimisations &opt,
 				      bool is_ssa,
 				      OracleInterface *oracle,
+				      bool canEarlyOut,
 				      bool *done_something);
 StateMachine *deadCodeElimination(SMScopes *, StateMachine *sm, bool *done_something, bool is_ssa, const AllowableOptimisations &opt);
 StateMachine *bisimilarityReduction(SMScopes *, StateMachine *sm, bool is_ssa, MaiMap &mai, bool *done_something);

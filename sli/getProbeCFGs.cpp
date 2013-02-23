@@ -284,8 +284,6 @@ unrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 			assert(cycle_edge_idx < (int)cycle_edge_start->successors.size());
 			CFGNode *cycle_edge_end = cycle_edge_start->successors[cycle_edge_idx].instr;
 			assert(cycle_edge_end);
-			if (cycle_edge_start->rip == cycle_edge_end->rip)
-				dbg_break("break self-edge");
 		
 			/* Remove the dead edge before we duplicate incoming
 			 * edges.  This only makes a difference for
