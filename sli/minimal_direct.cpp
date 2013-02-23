@@ -368,8 +368,7 @@ main(int argc, char *argv[])
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
-		.setAddressSpace(oracle->ms->addressSpace)
-		.enablenoExtend();
+		.setAddressSpace(oracle->ms->addressSpace);
 	if (assert_mode || double_free_mode)
 		opt = opt.enableallPointersGood();
 	if (double_free_mode)
