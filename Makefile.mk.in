@@ -1,4 +1,4 @@
-subdirs="VEX tests sli"
+subdirs="VEX tests sli scripts"
 
 rules() {
 	cat <<EOF
