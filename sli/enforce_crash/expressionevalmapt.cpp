@@ -1441,6 +1441,10 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				}
 				if (!split.second->isLeaf()) {
 					hb->sideCondition = subst_eq(scope, split.second);
+					if (debug_eem && hb->sideCondition != split.second) {
+						printf("subst_eq reduces edge condition to:\n");
+						hb->sideCondition->prettyPrint(stdout);
+					}
 				}
 				if (tx_leftover) {
 					tx_leftover = bbdd::Or(

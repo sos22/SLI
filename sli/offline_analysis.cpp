@@ -419,7 +419,8 @@ optimiseStateMachine(SMScopes *scopes,
 }
 
 static void
-getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::set<DynAnalysisRip> &potentiallyConflictingStores,
+getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle,
+		     sane_map<DynAnalysisRip, IRType> &potentiallyConflictingStores,
 		     bool &haveMuxOps)
 {
 	std::set<StateMachineSideEffectLoad *> allLoads;
@@ -435,7 +436,14 @@ getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle, std::s
 		if ( (*it)->tag == MemoryTag::mutex() ) {
 			haveMuxOps = true;
 		}
-		oracle->findConflictingStores(mai, *it, potentiallyConflictingStores);
+		std::set<DynAnalysisRip> ss;
+		oracle->findConflictingStores(mai, *it, ss);
+		for (auto it2 = ss.begin(); it2 != ss.end(); it2++) {
+			auto it_di = potentiallyConflictingStores.insert(*it2, (*it)->type);
+			if (!it_di.second && it_di.first->second < (*it)->type) {
+				it_di.first->second = (*it)->type;
+			}
+		}
 	}
 }
 
@@ -839,7 +847,7 @@ static StateMachine *
 localiseLoads2(SMScopes *scopes,
 	       VexPtr<MaiMap, &ir_heap> &mai,
 	       const VexPtr<StateMachine, &ir_heap> &probeMachine,
-	       const std::set<DynAnalysisRip> &stores,
+	       const std::map<DynAnalysisRip, IRType> &stores,
 	       const AllowableOptimisations &opt,
 	       const VexPtr<OracleInterface> &oracle,
 	       GarbageCollectionToken token,
@@ -863,7 +871,7 @@ localiseLoads2(SMScopes *scopes,
 					printf("    Load %s\n", it3.dr().name());
 				}
 				for (auto it2 = stores.begin(); !found_one && it2 != stores.end(); it2++) {
-					DynAnalysisRip store = *it2;
+					DynAnalysisRip store = it2->first;
 					if (oracle->memoryAccessesMightAliasCrossThread(it3.dr(), store)) {
 						if (debug_localise_loads) {
 							printf("       Store %s -> alias\n", store.name());
@@ -1428,7 +1436,7 @@ probeMachineToSummary(SMScopes *scopes,
 		      const VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
-		      std::set<DynAnalysisRip> &potentiallyConflictingStores,
+		      std::map<DynAnalysisRip, IRType> &potentiallyConflictingStores,
 		      bool preserveMux,
 		      const AllowableOptimisations &optIn,
 		      const VexPtr<MaiMap, &ir_heap> &maiIn,
@@ -1531,7 +1539,7 @@ diagnoseCrash(SMScopes *scopes,
 	   interesting, and hence change the conflicting stores set.
 	   Avoid the issue by just iterating to a fixed point. */
 	bool haveMuxOps;
-	std::set<DynAnalysisRip> potentiallyConflictingStores;
+	sane_map<DynAnalysisRip, IRType> potentiallyConflictingStores;
 	VexPtr<StateMachine, &ir_heap> reducedProbeMachine(probeMachine);
 
 	stackedCdf::startFindConflictingStores();
@@ -1557,7 +1565,7 @@ diagnoseCrash(SMScopes *scopes,
 				      token,
 				      &localised_loads);
 	if (localised_loads) {
-		std::set<DynAnalysisRip> newPotentiallyConflictingStores;
+		sane_map<DynAnalysisRip, IRType> newPotentiallyConflictingStores;
 		while (1) {
 			reducedProbeMachine = removeAnnotations(scopes, mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 			if (!reducedProbeMachine) {

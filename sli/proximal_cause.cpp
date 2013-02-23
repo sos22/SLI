@@ -259,7 +259,7 @@ getProximalCause(SMScopes *scopes,
 			StateMachineSideEffecting *l2 =
 				new StateMachineSideEffecting(
 					rip,
-					StateMachineSideEffectStartAtomic::get(),
+					new StateMachineSideEffectStartAtomic(mkPendingMai(where)),
 					l3);
 			work = l2;
 			crashIfBadPtr(cas->addr);

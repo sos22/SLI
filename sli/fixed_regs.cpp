@@ -528,25 +528,26 @@ Oracle::FixedRegs::parse(const char *buf, const char **end)
 		if (parseThisChar('r', buf, &buf) &&
 		    parseDecimalInt(&reg, buf, &buf) &&
 		    parseThisString("->", buf, &buf)) {
-			long offset;
+			long offset_l;
+			unsigned long offset_ul;
 			int base;
 			if (reg < 0 || reg > NR_REGS) {
 				return false;
 			}
 			if (parseThisString("0x", buf, &buf) &&
-			    parseHexLong(&offset, buf, &buf)) {
+			    parseHexUlong(&offset_ul, buf, &buf)) {
 				content[reg].type = rs::cnst;
-				content[reg].offset_or_cnst = offset;
+				content[reg].offset_or_cnst = offset_ul;
 			} else if (parseThisChar('r', buf, &buf) &&
 				   parseDecimalInt(&base, buf, &buf) &&
 				   parseThisChar('+', buf, &buf) &&
-				   parseDecimalLong(&offset, buf, &buf)) {
+				   parseDecimalLong(&offset_l, buf, &buf)) {
 				if (base < 0 || base > NR_REGS) {
 					return false;
 				}
 				content[reg].type = rs::reg_offset;
 				content[reg].base_reg = base;
-				content[reg].offset_or_cnst = offset;
+				content[reg].offset_or_cnst = offset_l;
 			} else {
 				return false;
 			}

@@ -14,233 +14,22 @@ namespace _deadCode {
 static bool debug_deadcode = false;
 #endif
 
-template <typename content, int nr_inline> class small_set {
-	unsigned long inline_mask;
-	content inlined[nr_inline];
-	std::set<content> *out_of_line;
-public:
-	small_set(const small_set &o)
-		: inline_mask(o.inline_mask),
-		  inlined(o.inlined),
-		  out_of_line(o.out_of_line ? new std::set<content>(*o.out_of_line) : NULL)
-	{
-	}
-	small_set()
-		: inline_mask(0), out_of_line(NULL)
-	{}
-	void operator=(const small_set &o) {
-		if (out_of_line) {
-			if (o.out_of_line) {
-				*out_of_line = *o.out_of_line;
-			} else {
-				delete out_of_line;
-				out_of_line = NULL;
-			}
-		} else {
-			if (o.out_of_line)
-				out_of_line = new std::set<content>(*o.out_of_line);
-		}
-		inline_mask = o.inline_mask;
-		std::copy(o.inlined, o.inlined + nr_inline, inlined);
-	}
-	~small_set()
-	{
-		if (out_of_line)
-			delete out_of_line;
-	}
-	class iterator {
-		small_set *owner;
-		int inline_idx;
-		typename std::set<content>::iterator it;
-		bool _started;
-	public:
-		iterator(small_set *_owner)
-			: owner(_owner),
-			  inline_idx(-1)
-		{
-			advance();
-			_started = false;
-		}
-		void advance() {
-			_started = true;
-			if (inline_idx == nr_inline) {
-				it++;
-				if (it == owner->out_of_line->end())
-					inline_idx = nr_inline + 1;
-				return;
-			}
-			do {
-				inline_idx++;
-			} while (inline_idx < nr_inline && !(owner->inline_mask & (1ul << inline_idx)));
-			if (inline_idx == nr_inline) {
-				if (owner->out_of_line) {
-					it = owner->out_of_line->begin();
-					if (it == owner->out_of_line->end())
-						inline_idx = nr_inline + 1;
-				} else {
-					inline_idx = nr_inline + 1;
-				}
-			}
-		}
-		bool finished() const {
-			return inline_idx == nr_inline + 1;
-		}
-		bool started() const {
-			return _started;
-		}
-		const content &operator*() const {
-			assert(inline_idx <= nr_inline);
-			if (inline_idx == nr_inline)
-				return *it;
-			else
-				return owner->inlined[inline_idx];
-		}
-		const content *operator->() const {
-			assert(inline_idx <= nr_inline);
-			if (inline_idx == nr_inline)
-				return &*it;
-			else
-				return &owner->inlined[inline_idx];
-		}
-		void erase() {
-			if (inline_idx == nr_inline) {
-				owner->out_of_line->erase(it++);
-			} else {
-				owner->inline_mask &= (1ul << inline_idx);
-				advance();
-			}
-		}
-	};
-	iterator begin() { return iterator(this); }
-	class const_iterator {
-		const small_set *owner;
-		int inline_idx;
-		typename std::set<content>::iterator it;
-		bool _started;
-	public:
-		const_iterator(const small_set *_owner)
-			: owner(_owner),
-			  inline_idx(-1)
-		{
-			advance();
-			_started = false;
-		}
-		void advance() {
-			_started = true;
-			if (inline_idx == nr_inline) {
-				it++;
-				if (it == owner->out_of_line->end())
-					inline_idx = nr_inline + 1;
-				return;
-			}
-			do {
-				inline_idx++;
-			} while (inline_idx < nr_inline && !(owner->inline_mask & (1ul << inline_idx)));
-			if (inline_idx == nr_inline) {
-				if (owner->out_of_line) {
-					it = owner->out_of_line->begin();
-					if (it == owner->out_of_line->end())
-						inline_idx = nr_inline + 1;
-				} else {
-					inline_idx = nr_inline + 1;
-				}
-			}
-		}
-		bool finished() const {
-			return inline_idx == nr_inline + 1;
-		}
-		bool started() const {
-			return _started;
-		}
-		const content &operator*() const {
-			assert(inline_idx <= nr_inline);
-			if (inline_idx == nr_inline)
-				return *it;
-			else
-				return owner->inlined[inline_idx];
-		}
-		const content *operator->() const {
-			assert(inline_idx <= nr_inline);
-			if (inline_idx == nr_inline)
-				return &*it;
-			else
-				return &owner->inlined[inline_idx];
-		}
-	};
-	const_iterator begin() const { return const_iterator(this); }
-	bool insert(const content &k) {
-		for (int i = 0; i < nr_inline; i++) {
-			if (inline_mask & (1ul << i)) {
-				if (inlined[i] == k)
-					return false;
-			}
-		}
-		if (out_of_line && out_of_line->count(k))
-			return false;
-		for (int i = 0; i < nr_inline; i++) {
-			if (!(inline_mask & (1ul << i))) {
-				inlined[i] = k;
-				inline_mask |= 1ul << i;
-				return true;
-			}
-		}
-		if (!out_of_line)
-			out_of_line = new std::set<content>();
-		out_of_line->insert(k);
-		return true;
-	}
-	void erase(const content &k) {
-		for (int i = 0; i < nr_inline; i++) {
-			if ( (inline_mask & (1ul << i)) &&
-			     inlined[i] == k ) {
-				inline_mask &= ~(1ul << i);
-				return;
-			}
-		}
-		if (out_of_line)
-			out_of_line->erase(k);
-	}
-	bool contains(const content &k) const {
-		for (int i = 0; i < nr_inline; i++) {
-			if (inline_mask & (1ul << i)) {
-				if (inlined[i] == k)
-					return true;
-			}
-		}
-		if (out_of_line)
-			return out_of_line->count(k) != 0;
-		return false;
-	}
-};
-
 class LivenessEntry {
 	void killRegister(threadAndRegister r)
 	{
-		liveDataOnly.erase(r);
-		livePointer.erase(r);
+		content.erase(r);
 	}
-	/* We track two different kinds of liveness: live for data and
-	 * live as a pointer.  The idea is that if something is never
-	 * used as a pointer then we can kill off its aliasing
-	 * information, even if it's still live as a data value. */
-	/* A register is added to livePointer if it's used to compute
-	 * a pointer.  It's added to liveDataOnly if it's used to
-	 * compute something which isn't a pointer.  Anything where
-	 * the value computed might be used as a pointer, but we're
-	 * not sure, goes in livePointer. */
-	small_set<threadAndRegister, 8> liveDataOnly;
-	small_set<threadAndRegister, 8> livePointer;
+	sane_map<threadAndRegister, IRType> content;
 	bool anyLoads;
 public:
 	LivenessEntry()
 		: anyLoads(false)
 	{}
-	void useExpressionData(const bbdd *e)
+	void useExpression(const bbdd *e)
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				if (!out->livePointer.contains(g->reg))
-					out->liveDataOnly.insert(g->reg);
+				out->content.insert(g->reg, g->type());
 				return visit_continue;
 			}
 		} foo;
@@ -248,12 +37,11 @@ public:
 		visitor.irexpr.Get = foo.f;
 		visit_const_bdd(this, &visitor, e);
 	}
-	void useExpressionData(const smrbdd *e)
+	void useExpression(const smrbdd *e)
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				if (!out->livePointer.contains(g->reg))
-					out->liveDataOnly.insert(g->reg);
+				out->content.insert(g->reg, g->type());
 				return visit_continue;
 			}
 		} foo;
@@ -261,12 +49,11 @@ public:
 		visitor.irexpr.Get = foo.f;
 		visit_const_bdd(this, &visitor, e);
 	}
-	void useExpressionData(const exprbdd *e)
+	void useExpression(const exprbdd *e)
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				if (!out->livePointer.contains(g->reg))
-					out->liveDataOnly.insert(g->reg);
+				out->content.insert(g->reg, g->type());
 				return visit_continue;
 			}
 		} foo;
@@ -274,44 +61,17 @@ public:
 		visitor.irexpr.Get = foo.f;
 		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
 	}
-	void useExpressionData(const IRExpr *e)
+	void useExpression(const IRExpr *e)
 	{
 		struct {
 			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				if (!out->livePointer.contains(g->reg))
-					out->liveDataOnly.insert(g->reg);
+				out->content.insert(g->reg, g->type());
 				return visit_continue;
 			}
 		} foo;
 		static irexpr_visitor<LivenessEntry> visitor;
 		visitor.Get = foo.f;
 		visit_irexpr(this, &visitor, e);
-	}
-	void useExpressionPointer(IRExpr *e)
-	{
-		struct {
-			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				out->livePointer.insert(g->reg);
-				out->liveDataOnly.erase(g->reg);
-				return visit_continue;
-			}
-		} foo;
-		static irexpr_visitor<LivenessEntry> visitor;
-		visitor.Get = foo.f;
-		visit_irexpr(this, &visitor, e);
-	}
-	void useExpressionPointer(const exprbdd *e)
-	{
-		struct {
-			static visit_result f(LivenessEntry *out, const IRExprGet *g) {
-				out->livePointer.insert(g->reg);
-				out->liveDataOnly.erase(g->reg);
-				return visit_continue;
-			}
-		} foo;
-		static bdd_visitor<LivenessEntry> visitor;
-		visitor.irexpr.Get = foo.f;
-		visit_bdd(this, &visitor, visit_irexpr<LivenessEntry>, e);
 	}
 
 	void useSideEffect(StateMachineSideEffect *smse)
@@ -321,15 +81,15 @@ public:
 			killRegister(def);
 		switch (smse->type) {
 		case StateMachineSideEffect::Load:
-			useExpressionPointer( ((StateMachineSideEffectLoad *)smse)->addr);
+			useExpression( ((StateMachineSideEffectLoad *)smse)->addr);
 			anyLoads = true;
 			break;
 		case StateMachineSideEffect::Store:
-			useExpressionPointer( ((StateMachineSideEffectStore *)smse)->addr);
-			useExpressionPointer( ((StateMachineSideEffectStore *)smse)->data);
+			useExpression( ((StateMachineSideEffectStore *)smse)->addr);
+			useExpression( ((StateMachineSideEffectStore *)smse)->data);
 			break;
 		case StateMachineSideEffect::Copy:
-			useExpressionData( ((StateMachineSideEffectCopy *)smse)->value);
+			useExpression( ((StateMachineSideEffectCopy *)smse)->value);
 			break;
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::StartAtomic:
@@ -340,22 +100,22 @@ public:
 		case StateMachineSideEffect::ImportRegister:
 			break;
 		case StateMachineSideEffect::AssertFalse:
-			useExpressionData( ((StateMachineSideEffectAssertFalse *)smse)->value );
+			useExpression( ((StateMachineSideEffectAssertFalse *)smse)->value );
 			break;
 #if !CONFIG_NO_STATIC_ALIASING
 		case StateMachineSideEffect::StartFunction:
-			useExpressionData( ((StateMachineSideEffectStartFunction *)smse)->rsp );
+			useExpression( ((StateMachineSideEffectStartFunction *)smse)->rsp );
 			break;
 		case StateMachineSideEffect::EndFunction:
-			useExpressionData( ((StateMachineSideEffectEndFunction *)smse)->rsp );
+			useExpression( ((StateMachineSideEffectEndFunction *)smse)->rsp );
 			break;
 #endif
 		case StateMachineSideEffect::Phi: {
 			StateMachineSideEffectPhi *smsep =
 				(StateMachineSideEffectPhi *)smse;
 			for (auto it = smsep->generations.begin(); it != smsep->generations.end(); it++) {
-				useExpressionData(it->val);
-				livePointer.insert(it->reg);
+				useExpression(it->val);
+				content.insert(it->reg, smsep->ty);
 			}
 			break;
 		}
@@ -364,15 +124,15 @@ public:
 
 	bool merge(const LivenessEntry &other) {
 		bool res = false;
-		for (auto it = other.livePointer.begin(); !it.finished(); it.advance()) {
-			if (livePointer.insert(*it)) {
-				liveDataOnly.erase(*it);
+		for (auto it = other.content.begin(); it != other.content.end(); it++) {
+			auto it2 = content.find(it->first);
+			if (it2 == content.end()) {
+				content.insert(it->first, it->second);
+				res = true;
+			} else if (it2->second < it->second) {
+				it2->second = it->second;
 				res = true;
 			}
-		}
-		for (auto it = other.liveDataOnly.begin(); !it.finished(); it.advance()) {
-			if (!livePointer.contains(*it))
-				res |= liveDataOnly.insert(*it);
 		}
 		if (other.anyLoads && !anyLoads) {
 			res = true;
@@ -381,22 +141,23 @@ public:
 		return res;
 	}
 
-	bool registerLiveData(threadAndRegister reg) const { return liveDataOnly.contains(reg) || livePointer.contains(reg); }
-	bool registerLivePointer(threadAndRegister reg) const { return livePointer.contains(reg); }
+	bool registerLive(threadAndRegister reg, IRType *maxType) const {
+		auto it = content.find(reg);
+		if (it == content.end()) {
+			return false;
+		}
+		*maxType = it->second;
+		return true;
+	}
 	bool mightLoadAnything() const { return anyLoads; }
 
 	void print() const {
-		printf("dataOnly = {");
-		for (auto it = liveDataOnly.begin(); !it.finished(); it.advance()) {
-			if (it.started())
+		printf("content = {");
+		for (auto it = content.begin(); it != content.end(); it++) {
+			if (it != content.begin()) {
 				printf(", ");
-			printf("%s", it->name());
-		}
-		printf("}, pointer = {");
-		for (auto it = livePointer.begin(); !it.finished(); it.advance()) {
-			if (it.started())
-				printf(", ");
-			printf("%s", it->name());
+			}
+			printf("%s:%s", it->first.name(), nameIRType(it->second));
 		}
 		printf("}, anyLoads = %s", anyLoads ? "true" : "false");
 		
@@ -561,7 +322,7 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 
 		switch (s->type) {
 		case StateMachineState::Terminal:
-			le.useExpressionData( ((StateMachineTerminal *)s)->res );
+			le.useExpression( ((StateMachineTerminal *)s)->res );
 			if (debug_deadcode) {
 				printf("Terminal; liveness = ");
 				le.print();
@@ -585,7 +346,7 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 				printf("Bifurcate; exit liveness = ");
 				le.print();
 			}
-			le.useExpressionData(smb->condition);
+			le.useExpression(smb->condition);
 			if (debug_deadcode) {
 				printf("; entry liveness = ");
 				le.print();
@@ -619,7 +380,8 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 			case StateMachineSideEffect::Load: {
 				StateMachineSideEffectLoad *smsel =
 					(StateMachineSideEffectLoad *)newEffect;
-				if (!le.registerLiveData(smsel->target)) {
+				IRType maxType;
+				if (!le.registerLive(smsel->target, &maxType)) {
 					if (smsel->tag.neverBadPtr()) {
 						newEffect = NULL;
 					} else {
@@ -633,6 +395,10 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 									smsel->addr)),
 							true);
 					}
+				} else if (maxType < smsel->type) {
+					newEffect = new StateMachineSideEffectLoad(
+						smsel,
+						maxType);
 				}
 				break;
 			}
@@ -658,6 +424,7 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 			case StateMachineSideEffect::Copy: {
 				StateMachineSideEffectCopy *smsec =
 					(StateMachineSideEffectCopy *)newEffect;
+				IRType maxType;
 				if (smsec->value->isLeaf() &&
 				    smsec->value->leaf()->tag == Iex_Get &&
 				    ((IRExprGet *)smsec->value->leaf())->reg == smsec->target) {
@@ -667,22 +434,50 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 					   what liveness analysis
 					   proper might say. */
 					newEffect = NULL;
-				} else if (!le.registerLiveData(smsec->target)) {
+				} else if (!le.registerLive(smsec->target, &maxType)) {
 					newEffect = NULL;
+				} else if (maxType < smsec->value->type()) {
+					newEffect = new StateMachineSideEffectCopy(
+						smsec,
+						exprbdd::unop(
+							&scopes->exprs,
+							&scopes->bools,
+							coerceTypesOp(
+								smsec->value->type(),
+								maxType),
+							smsec->value));
 				}
 				break;
 			}
 			case StateMachineSideEffect::Phi: {
 				StateMachineSideEffectPhi *p =
 					(StateMachineSideEffectPhi *)newEffect;
-				if (!le.registerLiveData(p->reg)) {
+				IRType maxType;
+				if (!le.registerLive(p->reg, &maxType)) {
 					newEffect = NULL;
+				} else if (maxType < p->ty) {
+					std::vector<StateMachineSideEffectPhi::input> gen(p->generations);
+					IROp c = coerceTypesOp(p->ty, maxType);
+					for (auto it = gen.begin();
+					     it != gen.end();
+					     it++) {
+						it->val = exprbdd::unop(
+							&scopes->exprs,
+							&scopes->bools,
+							c,
+							it->val);
+					}
+					newEffect = new StateMachineSideEffectPhi(
+						p->reg,
+						maxType,
+						gen);
 				}
 				break;
 			}
 			case StateMachineSideEffect::ImportRegister: {
 				auto *p = (StateMachineSideEffectImportRegister *)newEffect;
-				if (!le.registerLiveData(p->reg)) {
+				IRType maxT;
+				if (!le.registerLive(p->reg, &maxT)) {
 					newEffect = NULL;
 				}
 				break;

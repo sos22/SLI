@@ -652,7 +652,9 @@ _subst_eq(bbdd::scope *scope, bbdd *what)
 			addRewritesFor(rules, simplMemo, *it2);
 		}
 		for (auto it2 = ctxt2.begin(); it2 != ctxt2.end(); it2++) {
-			addRewritesFor(rules, simplMemo, *it2);
+			if (*it2 != n->internal().condition) {
+				addRewritesFor(rules, simplMemo, *it2);
+			}
 		}
 	}
 	sane_map<bbdd *, bbdd *> memo;

@@ -23,7 +23,6 @@ static int debug_state_machine_sanity_checks = 0;
 static unsigned current_optimisation_gen;
 
 VexPtr<StateMachineSideEffectUnreached, &ir_heap> StateMachineSideEffectUnreached::_this;
-VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> StateMachineSideEffectStartAtomic::singleton;
 VexPtr<StateMachineSideEffectEndAtomic, &ir_heap> StateMachineSideEffectEndAtomic::singleton;
 AllowableOptimisations AllowableOptimisations::defaultOptimisations(7.3);
 
@@ -1336,7 +1335,8 @@ MaiMap::restrict(const std::set<const CFGNode *> &cfgNodes,
 }
 
 AllowableOptimisations
-AllowableOptimisations::fromFile(std::set<DynAnalysisRip> *is, std::set<DynAnalysisRip> *nll,
+AllowableOptimisations::fromFile(std::map<DynAnalysisRip, IRType> *is,
+				 std::set<DynAnalysisRip> *nll,
 				 AddressSpace *as, const char *path)
 {
 	int fd = open(path, O_RDONLY);
@@ -1466,8 +1466,11 @@ StateMachineTerminal::optimise(SMScopes *scopes, const AllowableOptimisations &o
 }
 
 bool
-AllowableOptimisations::ignoreStore(const MaiMap &decode, StateMachineSideEffectStore *s) const
+AllowableOptimisations::ignoreStore(const MaiMap &decode,
+				    StateMachineSideEffectStore *s,
+				    IRType *maxType) const
 {
+	*maxType = s->data->type();
 	if (_ignoreSideEffects) {
 		return true;
 	}
@@ -1479,7 +1482,9 @@ AllowableOptimisations::ignoreStore(const MaiMap &decode, StateMachineSideEffect
 	}
 
 	for (auto it = decode.begin(s->rip); !it.finished(); it.advance()) {
-		if (_interestingStores->count(it.dr())) {
+		auto it2 = _interestingStores->find(it.dr());
+		if (it2 != _interestingStores->end()) {
+			*maxType = it2->second;
 			return false;
 		}
 	}

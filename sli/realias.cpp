@@ -61,41 +61,74 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 	return res;
 }
 
-#warning Fuck, this is incorrect for multi-threaded machines.  Need to have one StackLayout for each thread.
 #if !CONFIG_NO_STATIC_ALIASING
 class StackLayout {
+	struct thread_data {
+		unsigned thread; /* or 0 for invalid */
+		std::vector<FrameId> functions;
+		std::vector<exprbdd *> rsps;
+		void prettyPrint(FILE *f) const {
+			if (!thread) {
+				return;
+			}
+			fprintf(f, "t%d: ", thread);
+			auto it1 = rsps.begin();
+			auto it2 = functions.begin();
+			while (it1 != rsps.end()) {
+				fprintf(f, "%s --- ", it2->name());
+				(*it1)->prettyPrint(f);
+				it1++;
+				it2++;
+			}
+			fprintf(f, "%s\n", it2->name());
+		}
+		void sanity_check() const {
+#ifndef NDEBUG
+			if (thread == 0) {
+				assert(functions.empty());
+				assert(rsps.empty());
+			} else {
+				assert(functions.size() == rsps.size() + 1);
+			}
+			/* No dupes */
+			for (auto it1 = functions.begin();
+			     it1 != functions.end();
+			     it1++) {
+				for (auto it2 = it1 + 1;
+				     it2 != functions.end();
+				     it2++) {
+					assert(*it1 != *it2);
+				}
+			}
+			for (auto it = rsps.begin(); it != rsps.end(); it++) {
+				assert(*it);
+			}
+#endif
+		}
+		thread_data()
+			: thread(0)
+		{}
+		bool operator==(const thread_data &o) const {
+			if (thread != o.thread) {
+				return false;
+			}
+			return thread == 0 || (o.functions == functions && o.rsps == rsps);
+		}
+	};
+	/* Bit of a hack: relies on the fact that there are at most
+	   two threads in any given machine. */
+	struct thread_data t1;
+	struct thread_data t2;
 public:
-	std::vector<FrameId> functions;
-	std::vector<exprbdd *> rsps;
 
 	void prettyPrint(FILE *f) const {
-		std::vector<const char *> fragments;
-		auto it1 = rsps.begin();
-		auto it2 = functions.begin();
-		while (it1 != rsps.end()) {
-			fprintf(f, "%s --- ", it2->name());
-			(*it1)->prettyPrint(f);
-			it1++;
-			it2++;
-		}
-		fprintf(f, "%s\n", it2->name());
+		t1.prettyPrint(f);
+		t2.prettyPrint(f);
 	}
 
 	void sanity_check() const {
-#ifndef NDEBUG
-		assert(functions.size() == rsps.size() + 1);
-		/* No dupes */
-		for (auto it1 = functions.begin();
-		     it1 != functions.end();
-		     it1++) {
-			for (auto it2 = it1 + 1;
-			     it2 != functions.end();
-			     it2++)
-				assert(*it1 != *it2);
-		}
-		for (auto it = rsps.begin(); it != rsps.end(); it++)
-			assert(*it);
-#endif
+		t1.sanity_check();
+		t2.sanity_check();
 	}
 
 	StackLayout()
@@ -103,7 +136,8 @@ public:
 
 	bool operator==(const StackLayout &o) const
 	{
-		return o.functions == functions && o.rsps == rsps;
+		return (t1 == o.t1 && t2 == o.t2) ||
+			(t1 == o.t2 && t2 == o.t1);
 	}
 	bool operator!=(const StackLayout &o) const
 	{
@@ -111,47 +145,208 @@ public:
 	}
 	
 	bool identifyFrameFromPtr(IRExpr *ptr, FrameId *out);
-	size_t size() { return rsps.size(); }
+
+	static Maybe<StackLayout> fromSideEffect(StateMachineSideEffectStackLayout *se,
+						 std::map<FrameId, exprbdd *> &frameBoundaries);
+	static Maybe<StackLayout> merge(const StackLayout &a, const StackLayout &b);
+	Maybe<StackLayout> startFunction(StateMachineSideEffectStartFunction *sf);
+	Maybe<StackLayout> endFunction(StateMachineSideEffectEndFunction *sf);
+	void trimPointerAliasingSet(PointerAliasingSet &pas);
 };
+
+Maybe<StackLayout>
+StackLayout::merge(const StackLayout &a, const StackLayout &b)
+{
+	assert(a.t1.thread != a.t2.thread);
+	assert(b.t1.thread != b.t2.thread);
+	if (a == b) {
+		return a;
+	}
+	if (a.t1.thread == 0 && a.t2.thread == 0) {
+		return b;
+	}
+	if (b.t1.thread == 0 && b.t2.thread == 0) {
+		return a;
+	}
+	StackLayout res;
+	thread_data *td[] = {&res.t1, &res.t2};
+	int idx = 0;
+	if (a.t1.thread) {
+		*td[0] = a.t1;
+		idx++;
+	}
+	if (a.t2.thread) {
+		*td[idx++] = a.t2;
+	}
+	if (b.t1.thread) {
+		int i;
+		for (i = 0; i < idx; i++) {
+			if (td[i]->thread == b.t1.thread) {
+				if (!(*td[i] == b.t1)) {
+					goto failed;
+				}
+				goto done1;
+			}
+		}
+		if (idx == 2) {
+			goto failed;
+		}
+		*td[idx++] = b.t1;
+	done1:
+		;
+	}
+	if (b.t2.thread) {
+		int i;
+		for (i = 0; i < idx; i++) {
+			if (td[i]->thread == b.t2.thread) {
+				if (!(*td[i] == b.t2)) {
+					goto failed;
+				}
+				goto done2;
+			}
+		}
+		if (idx == 2) {
+			goto failed;
+		}
+		*td[idx++] = b.t1;
+	done2:
+		;
+	}
+	res.sanity_check();
+	return res;
+failed:
+	return Maybe<StackLayout>();
+}
+
+Maybe<StackLayout>
+StackLayout::fromSideEffect(StateMachineSideEffectStackLayout *se, std::map<FrameId, exprbdd *> &frameBoundaries)
+{
+	if (se->functions.empty()) {
+		return Maybe<StackLayout>();
+	}
+
+	StackLayout res;
+	res.t1.thread = se->functions.begin()->frame.tid;
+	res.t1.functions.resize(se->functions.size(), FrameId());
+	res.t1.rsps.resize(se->functions.size() - 1);
+	for (unsigned x = 1; x < se->functions.size(); x++) {
+		if (frameBoundaries.count(se->functions[x].frame) == 0) {
+			return Maybe<StackLayout>::nothing();
+		}
+		res.t1.functions[x] = se->functions[x].frame;
+		res.t1.rsps[x-1] = frameBoundaries[se->functions[x].frame];
+	}
+	res.t1.functions[0] = se->functions.front().frame;
+	res.sanity_check();
+	return res;
+}
+
+Maybe<StackLayout>
+StackLayout::startFunction(StateMachineSideEffectStartFunction *sf)
+{
+	if (sf->frame.tid == t1.thread) {
+		t1.functions.push_back(sf->frame);
+		t1.rsps.push_back(sf->rsp);
+	} else if (sf->frame.tid == t2.thread) {
+		t2.functions.push_back(sf->frame);
+		t2.rsps.push_back(sf->rsp);
+	} else {
+		return Maybe<StackLayout>::nothing();
+	}
+	sanity_check();
+	return *this;
+}
+
+Maybe<StackLayout>
+StackLayout::endFunction(StateMachineSideEffectEndFunction *sf)
+{
+	if (sf->frame.tid == t1.thread && !t1.rsps.empty()) {
+		assert(t1.functions.back() == sf->frame);
+		assert(t1.rsps.back() == sf->rsp);
+		t1.functions.pop_back();
+		t1.rsps.pop_back();
+	} else if (sf->frame.tid == t2.thread && !t2.rsps.empty()) {
+		assert(t2.functions.back() == sf->frame);
+		assert(t2.rsps.back() == sf->rsp);
+		t2.functions.pop_back();
+		t2.rsps.pop_back();
+	} else {
+		return Maybe<StackLayout>::nothing();
+	}
+	sanity_check();
+	return *this;
+}
+
+void
+StackLayout::trimPointerAliasingSet(PointerAliasingSet &base)
+{
+	if (base.otherStackPointer) {
+		base.otherStackPointer = false;
+		base.stackPointers = t1.functions;
+		base.stackPointers.insert(base.stackPointers.end(),
+					  t2.functions.begin(),
+					  t2.functions.end());
+	} else {
+		for (auto it = base.stackPointers.begin();
+		     it != base.stackPointers.end();
+			) {
+			bool present = false;
+			for (auto it2 = t1.functions.begin();
+			     !present && it2 != t1.functions.end();
+			     it2++) {
+				present |= *it2 == *it;
+			}
+			for (auto it2 = t2.functions.begin();
+			     !present && it2 != t2.functions.end();
+			     it2++) {
+				present |= *it2 == *it;
+			}
+			if (!present) {
+				it = base.stackPointers.erase(it);
+			} else {
+				it++;
+			}
+		}
+	}
+	base.clearName();
+}
+
 
 enum compare_expressions_res {
 	compare_expressions_lt,
 	compare_expressions_eq,
 	compare_expressions_gt,
-	compare_expressions_unknown
+	compare_expressions_unknown,
 };
 
-/* This has to be non-static because it's invoked from a template.
-   Why do template parameters have to be non-static?  Nobody seems to
-   know. */
-static compare_expressions_res
-compare_expressions(IRExpr *a, IRExpr *b)
-{
-	assert(a->type() == Ity_I64);
-	assert(b->type() == Ity_I64);
-	struct reg_plus_offset {
-		threadAndRegister tr;
-		long offset;
-		reg_plus_offset(const IRExpr *ex)
-			: tr(threadAndRegister::invalid()),
-			  offset(0)
-		{
-			if (ex->tag == Iex_Get) {
-				tr = ((IRExprGet *)ex)->reg;
-			} else if (ex->tag == Iex_Associative) {
-				IRExprAssociative *a = (IRExprAssociative *)ex;
-				if (a->nr_arguments == 2 &&
-				    a->op == Iop_Add64 &&
-				    a->contents[0]->tag == Iex_Const &&
-				    a->contents[1]->tag == Iex_Get) {
-					tr = ((IRExprGet *)a->contents[1])->reg;
-					offset = ((IRExprConst *)a->contents[0])->Ico.content.U64;
-				}
+struct reg_plus_offset {
+	threadAndRegister tr;
+	long offset;
+	reg_plus_offset(const IRExpr *ex)
+		: tr(threadAndRegister::invalid()),
+		  offset(0)
+	{
+		if (ex->tag == Iex_Get) {
+			tr = ((IRExprGet *)ex)->reg;
+		} else if (ex->tag == Iex_Associative) {
+			IRExprAssociative *a = (IRExprAssociative *)ex;
+			if (a->nr_arguments == 2 &&
+			    a->op == Iop_Add64 &&
+			    a->contents[0]->tag == Iex_Const &&
+			    a->contents[1]->tag == Iex_Get) {
+				tr = ((IRExprGet *)a->contents[1])->reg;
+				offset = ((IRExprConst *)a->contents[0])->Ico.content.U64;
 			}
 		}
-	} as(a), bs(b);
-	if (!as.tr.isValid() ||
-	    !bs.tr.isValid() ||
+	}
+};
+
+static compare_expressions_res
+compare_expressions(const reg_plus_offset &as, IRExpr *b)
+{
+	assert(b->type() == Ity_I64);
+	reg_plus_offset bs(b);
+	if (!bs.tr.isValid() ||
 	    as.tr != bs.tr)
 		return compare_expressions_unknown;
 	if (as.offset < bs.offset)
@@ -163,7 +358,7 @@ compare_expressions(IRExpr *a, IRExpr *b)
 }
 
 static compare_expressions_res
-compare_expressions(IRExpr *a, const exprbdd *b)
+compare_expressions(const reg_plus_offset &a, const exprbdd *b)
 {
 	compare_expressions_res r = compare_expressions_unknown;
 	std::set<const exprbdd *> visited;
@@ -196,12 +391,25 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
 	if (TIMEOUT)
 		return false;
 	*out = FrameId();
+	reg_plus_offset ptrs(ptr);
+	if (!ptrs.tr.isValid() ||
+	    !ptrs.tr.isReg()) {
+		return false;
+	}
+	struct thread_data *td;
+	if (ptrs.tr.tid() == t1.thread) {
+		td = &t1;
+	} else if (ptrs.tr.tid() == t2.thread) {
+		td = &t2;
+	} else {
+		return false;
+	}
 	bool definitelyStack = false;
 	assert(ptr->type() == Ity_I64);
-	auto it2 = functions.begin();
-	for (auto it = rsps.begin(); it != rsps.end(); it++) {
+	auto it2 = td->functions.begin();
+	for (auto it = td->rsps.begin(); it != td->rsps.end(); it++) {
 		exprbdd *rsp = *it;
-		switch (compare_expressions(ptr, rsp)) {
+		switch (compare_expressions(ptrs, rsp)) {
 		case compare_expressions_gt:
 		case compare_expressions_eq:
 			*out = *it2;
@@ -214,11 +422,11 @@ StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
 		}
 		it2++;
 	}
-	if (rsps.size() == 0 || definitelyStack) {
+	if (td->rsps.size() == 0 || definitelyStack) {
 		/* It's definitely on the stack, and it doesn't fit
 		   into any of the delimited frames -> it must be the
 		   root frame. */
-		*out = functions.back();
+		*out = td->functions.back();
 		return true;
 	}
 
@@ -286,9 +494,11 @@ StackLayoutTable::updateLayout(StateMachineState *s, const Maybe<StackLayout> &n
 		it->second = newLayout;
 		return true;
 	}
-	if (it->second.content == newLayout.content)
+	Maybe<StackLayout> n = StackLayout::merge(it->second.content, newLayout.content);
+	if (it->second == n) {
 		return false;
-	it->second = Maybe<StackLayout>::nothing();
+	}
+	it->second = n;
 	return true;
 }
 
@@ -361,25 +571,8 @@ StackLayoutTable::build(StateMachine *inp)
 		Maybe<StackLayout> exitLayout(Maybe<StackLayout>::nothing());
 		if (se && se->type == StateMachineSideEffect::StackLayout) {
 			auto l = (StateMachineSideEffectStackLayout *)se;
-			bool failed = false;
 			haveExitLayout = true;
-			exitLayout.valid = true;
-			exitLayout.content = StackLayout();
-			exitLayout.content.functions.resize(l->functions.size(), FrameId());
-			exitLayout.content.rsps.resize(l->functions.size() - 1);
-			for (unsigned x = 1; x < l->functions.size(); x++) {
-				if (frameBoundaries.count(l->functions[x].frame) == 0) {
-					failed = true;
-					break;
-				}
-				exitLayout.content.functions[x] = l->functions[x].frame;
-				exitLayout.content.rsps[x-1] = frameBoundaries[l->functions[x].frame];
-			}
-			if (failed) {
-				exitLayout.valid = false;
-			} else {
-				exitLayout.content.functions[0] = l->functions.front().frame;
-			}
+			exitLayout = StackLayout::fromSideEffect(l, frameBoundaries);
 		} else {
 			auto it = content.find(s);
 			if (it == content.end()) {
@@ -387,24 +580,13 @@ StackLayoutTable::build(StateMachine *inp)
 			} else {
 				haveExitLayout = true;
 				exitLayout = it->second;
-				if (exitLayout.valid) {
-					if (se && se->type == StateMachineSideEffect::StartFunction) {
+				if (exitLayout.valid && se) {
+					if (se->type == StateMachineSideEffect::StartFunction) {
 						auto sf = (StateMachineSideEffectStartFunction *)se;
-						exitLayout.content.functions.push_back(sf->frame);
-						exitLayout.content.rsps.push_back(sf->rsp);
-						assert(frameBoundaries.count(exitLayout.content.functions.back()));
-						assert(exitLayout.content.rsps.back() ==
-						       frameBoundaries[exitLayout.content.functions.back()]);
-					} else if (se && se->type == StateMachineSideEffect::EndFunction) {
-						if (exitLayout.content.rsps.empty()) {
-							exitLayout.valid = false;
-						} else {
-							auto sf = (StateMachineSideEffectStartFunction *)se;
-							assert(exitLayout.content.functions.back() == sf->frame);
-							assert(exitLayout.content.rsps.back() == sf->rsp);
-							exitLayout.content.functions.pop_back();
-							exitLayout.content.rsps.pop_back();
-						}
+						exitLayout = exitLayout.content.startFunction(sf);
+					} else if (se->type == StateMachineSideEffect::EndFunction) {
+						auto sf = (StateMachineSideEffectEndFunction *)se;
+						exitLayout = exitLayout.content.endFunction(sf);
 					}
 				}
 			}
@@ -598,27 +780,7 @@ PointsToTable::pointsToSetForExprLoc(exprbdd *e,
 		return base;
 	}
 	assert(base.valid);
-	if (base.otherStackPointer) {
-		base.otherStackPointer = false;
-		base.stackPointers = sl->content.functions;
-	} else {
-		for (auto it = base.stackPointers.begin();
-		     it != base.stackPointers.end();
-			) {
-			bool present = false;
-			for (auto it2 = sl->content.functions.begin();
-			     !present && it2 != sl->content.functions.end();
-			     it2++) {
-				present |= *it2 == *it;
-			}
-			if (!present) {
-				it = base.stackPointers.erase(it);
-			} else {
-				it++;
-			}
-		}
-	}
-	base.clearName();
+	sl->content.trimPointerAliasingSet(base);
 	return base;
 }
 
@@ -1754,17 +1916,31 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		switch (sideEffect->type) {
 		case StateMachineSideEffect::Store: {
 			StateMachineSideEffectStore *s = (StateMachineSideEffectStore *)sideEffect;
-			if (!opt.ignoreStore(decode, s)) {
-				break;
-			}
+			IRType maxType;
 			bool noConflictingLoads = true;
+			if (!opt.ignoreStore(decode, s, &maxType)) {
+				noConflictingLoads = false;
+			}
 			for (auto it2 = at.content.begin();
-			     !killedAllLoads && noConflictingLoads && it2 != at.content.end();
+			     !killedAllLoads && (noConflictingLoads || maxType == s->data->type()) && it2 != at.content.end();
 			     it2++) {
+				StateMachineSideEffect *se = it2->first->sideEffect;
+				assert(se);
+				if (se->type == StateMachineSideEffect::Copy) {
+					/* Already killed off this load */
+					continue;
+				}
+				assert(se->type == StateMachineSideEffect::Load);
 				if (it2->second.stores.count(*it)) {
-					if (debug_use_alias_table)
+					if (debug_use_alias_table) {
 						printf("Can't remove store l%d because of load l%d\n",
 						       stateLabels[*it], stateLabels[it2->first]);
+					}
+					IRType ty;
+					ty = ((StateMachineSideEffectLoad *)se)->type;
+					if ( ty > maxType ) {
+						maxType = ty;
+					}
 					noConflictingLoads = false;
 				}
 			}
@@ -1786,6 +1962,24 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 									s->addr)),
 							true);
 				}
+				progress = true;
+			} else if (maxType < s->data->type()) {
+				if (debug_use_alias_table) {
+					printf("Downgrade store l%d to %s\n",
+					       stateLabels[*it],
+					       nameIRType(maxType));
+				}
+				(*it)->sideEffect =
+					new StateMachineSideEffectStore(
+						s,
+						s->addr,
+						exprbdd::unop(
+							&scopes->exprs,
+							&scopes->bools,
+							coerceTypesOp(
+								s->data->type(),
+								maxType),
+							s->data));
 				progress = true;
 			}
 			break;

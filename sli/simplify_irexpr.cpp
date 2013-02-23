@@ -1660,29 +1660,43 @@ top:
 				}
 			}
 		}
-		/* Some special cases for And1: 1 & x -> x, 0 & x -> 0 */
-		/* Likewise for Or1 */
-		if (op == Iop_And1 || op == Iop_Or1) {
-			__set_profiling(optimise_assoc_and1);
-			/* If there are any constants, they'll be at the start. */
-			if (nr_arguments > 1 &&
-			    contents[0]->tag == Iex_Const) {
-				auto c = (IRExprConst *)contents[0];
-				if (c->Ico.content.U1 == (op == Iop_And1)) {
-					memmove(contents, contents + 1, sizeof(IRExpr *) * (nr_arguments - 1));
-					nr_arguments--;
-					realloc = true;
-				} else {
-					res = contents[0];
+		/* 0 + x == x, 0 | x == x, 0 & x = 0 */
+		if (((op >= Iop_Add8 && op <= Iop_Add64) ||
+		     (op >= Iop_Or8 && op <= Iop_Or64) ||
+		     (op >= Iop_And8 && op <= Iop_And64) ||
+		     (op >= Iop_Mul8 && op <= Iop_Mul64) ||
+		     (op == Iop_And1) ||
+		     (op == Iop_Or1)) &&
+		    nr_arguments > 1 &&
+		    contents[0]->tag == Iex_Const) {
+			bool doit;
+			IRExprConst *c = (IRExprConst *)contents[0];
+			switch (c->type()) {
+			case Ity_I1:
+				doit = c->Ico.content.U1 == 0;
+				break;
+			case Ity_I8:
+				doit = c->Ico.content.U8 == 0;
+				break;
+			case Ity_I16:
+				doit = c->Ico.content.U16 == 0;
+				break;
+			case Ity_I32:
+				doit = c->Ico.content.U32 == 0;
+				break;
+			case Ity_I64:
+				doit = c->Ico.content.U64 == 0;
+				break;
+			default:
+				abort();
+			}
+			if (doit) {
+				if (op == Iop_And1 ||
+				    (op >= Iop_And8 && op <= Iop_And64) ||
+				    (op >= Iop_Mul8 && op <= Iop_Mul64)) {
+					res = c;
 					break;
 				}
-			}
-		}
-		/* And for Add */
-		if (op == Iop_Add64) {
-			if (nr_arguments > 1 &&
-			    contents[0]->tag == Iex_Const &&
-			    ((IRExprConst *)contents[0])->Ico.content.U64 == 0) {
 				memmove(contents, contents + 1, sizeof(IRExpr *) * (nr_arguments - 1));
 				nr_arguments--;
 				realloc = true;

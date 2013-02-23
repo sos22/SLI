@@ -72,7 +72,7 @@ debug_dump(const HashedSet<t> &what, const char *prefix)
 static bool
 initialExplorationRoot(
 	const VexRip &root,
-	const std::set<DynAnalysisRip> &dr_roots,
+	const std::map<DynAnalysisRip, IRType> &dr_roots,
 	Oracle *oracle,
 	CfgLabelAllocator &allocLabel,
 	unsigned maxPathLength,
@@ -191,7 +191,7 @@ initialExplorationRoot(
 }
 
 static void
-initialExploration(const std::set<DynAnalysisRip> &roots,
+initialExploration(const std::map<DynAnalysisRip, IRType> &roots,
 		   std::map<const CFGNode *, cfgflavour_store_t> &flavours,
 		   CfgLabelAllocator &allocLabel,
 		   unsigned maxPathLength,
@@ -204,7 +204,7 @@ initialExploration(const std::set<DynAnalysisRip> &roots,
 
 	std::set<VexRip> vr_roots;
 	for (auto it = roots.begin(); it != roots.end(); it++)
-		vr_roots.insert(it->toVexRip());
+		vr_roots.insert(it->first.toVexRip());
 
 	while (!TIMEOUT) {
 		std::map<VexRip, std::pair<unsigned, CFGNode *> > doneSoFar;
@@ -1170,8 +1170,65 @@ removeRedundantContext(CfgLabelAllocator &allocLabel,
 	}
 }
 
+/* Remove any nodes in @m which cannot ever reach something in
+ * @roots. */
 static void
-buildCFG(CfgLabelAllocator &allocLabel, const std::set<DynAnalysisRip> &dyn_roots,
+trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
+			  const std::map<DynAnalysisRip, IRType> &roots)
+{
+	/* First, figure out which nodes are interesting. */
+	std::set<CFGNode *> interesting;
+	/* Anything in @roots is interesting. */
+	for (auto it = m.begin(); !TIMEOUT && it != m.end(); it++) {
+		const VexRip &vr(it->first);
+		for (auto it2 = roots.begin(); !TIMEOUT && it2 != roots.end(); it2++) {
+			const DynAnalysisRip &dr(it2->first);
+			if (dr == DynAnalysisRip(vr)) {
+				interesting.insert(it->second);
+				break;
+			}
+		}
+	}
+	/* Anything which can reach an interesting node is itself
+	 * interesting. */
+	bool progress = true;
+	while (progress) {
+		if (TIMEOUT)
+			return;
+		progress = false;
+		for (auto it = m.begin(); it != m.end(); it++) {
+			CFGNode *n = it->second;
+			assert(n);
+			if (interesting.count(n))
+				continue;
+			bool isInteresting = false;
+			for (auto it = n->successors.begin(); !isInteresting && it != n->successors.end(); it++)
+				if (it->instr && interesting.count(it->instr))
+					isInteresting = true;
+			if (isInteresting) {
+				interesting.insert(n);
+				progress = true;
+			}
+		}
+	}
+
+	/* So now we know which nodes we want to keep.  Go through and
+	   remove all the ones which we don't want. */
+	for (auto it = m.begin(); it != m.end(); ) {
+		CFGNode *n = it->second;
+		if (!interesting.count(n)) {
+			m.erase(it++);
+			continue;
+		}
+		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
+			if (it2->instr && !interesting.count(it2->instr))
+				it2->instr = NULL;
+		it++;
+	}
+}
+
+static void
+buildCFG(CfgLabelAllocator &allocLabel, const std::map<DynAnalysisRip, IRType> &dyn_roots,
 	 unsigned maxPathLength, Oracle *oracle, HashedSet<HashedPtr<CFGNode> > &roots)
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
@@ -1265,7 +1322,7 @@ sortByRip(CFGNode **roots, int nr_roots)
 /* Build all of the store machines */
 static void
 getStoreCFGs(CfgLabelAllocator &allocLabel,
-	     const std::set<DynAnalysisRip> &conflictingStores,
+	     const std::map<DynAnalysisRip, IRType> &conflictingStores,
 	     Oracle *oracle,
 	     CFGNode ***roots,
 	     int *nr_roots)
@@ -1273,7 +1330,7 @@ getStoreCFGs(CfgLabelAllocator &allocLabel,
 	if (_getStoreCFGs::debug_top_level) {
 		printf("getStoreCFGs, input ");
 		for (auto it = conflictingStores.begin(); it != conflictingStores.end(); it++)
-			printf("%s, ", it->name());
+			printf("%s, ", it->first.name());
 		printf("\n");
 	}
 
@@ -1313,7 +1370,7 @@ getStoreCFGs(CfgLabelAllocator &allocLabel,
 
 void
 getStoreCFGs(CfgLabelAllocator &allocLabel,
-	     const std::set<DynAnalysisRip> &conflictingStores,
+	     const std::map<DynAnalysisRip, IRType> &conflictingStores,
 	     Oracle *oracle,
 	     CFGNode ***roots,
 	     int *nr_roots)

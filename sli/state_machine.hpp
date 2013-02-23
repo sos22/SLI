@@ -816,6 +816,10 @@ public:
 		: StateMachineSideEffectMemoryAccess(base->addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(_reg), type(base->type)
 	{}
+	StateMachineSideEffectLoad(StateMachineSideEffectLoad *base, IRType _type)
+		: StateMachineSideEffectMemoryAccess(base->addr, base->rip, base->tag, StateMachineSideEffect::Load),
+		  target(base->target), type(_type)
+	{}
 	StateMachineSideEffectLoad(const StateMachineSideEffectLoad *base, const threadAndRegister &_reg, exprbdd *_addr)
 		: StateMachineSideEffectMemoryAccess(_addr, base->rip, base->tag, StateMachineSideEffect::Load),
 		  target(_reg), type(base->type)
@@ -963,23 +967,22 @@ public:
 	}
 };
 class StateMachineSideEffectStartAtomic : public StateMachineSideEffect {
-	StateMachineSideEffectStartAtomic()
-		: StateMachineSideEffect(StateMachineSideEffect::StartAtomic)
-	{}
-	static VexPtr<StateMachineSideEffectStartAtomic, &ir_heap> singleton;
 public:
-	static StateMachineSideEffectStartAtomic *get() {
-		if (!singleton)
-			singleton = new StateMachineSideEffectStartAtomic();
-		return singleton;
-	}
+	StateMachineSideEffectStartAtomic(const MemoryAccessIdentifier &_mai)
+		: StateMachineSideEffect(StateMachineSideEffect::StartAtomic),
+		  mai(_mai)
+	{}
+	MemoryAccessIdentifier const mai;
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "START_ATOMIC");
+		fprintf(f, "START_ATOMIC(%s)", mai.name());
 	}
 	static bool parse(SMScopes *, StateMachineSideEffectStartAtomic **out, const char *str, const char **suffix)
 	{
-		if (parseThisString("START_ATOMIC", str, suffix)) {
-			*out = StateMachineSideEffectStartAtomic::get();
+		MemoryAccessIdentifier m(-1,-1);
+		if (parseThisString("START_ATOMIC(", str, &str) &&
+		    m.parse(str, &str) &&
+		    parseThisChar(')', str, suffix)) {
+			*out = new StateMachineSideEffectStartAtomic(m);
 			return true;
 		}
 		return false;

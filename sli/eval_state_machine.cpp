@@ -826,7 +826,7 @@ public:
 	std::vector<StateMachineState *> history;
 #endif
 
-	bool isMagicState(std::map<const StateMachineState *, int> &labels) {
+	bool isMagicState(std::map<const StateMachineState *, int> &) {
 #if 0
 		static const int desired[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 12, 0};
 		unsigned idx = 0;
@@ -1820,7 +1820,6 @@ buildCrossProductMachine(SMScopes *scopes,
 			 StateMachine *storeMachine,
 			 OracleInterface *oracle,
 			 MaiMap *&maiOut,
-			 int *next_fake_free_variable,
 			 const IRExprOptimisations &opt,
 			 StateMachineRes unreachedIs,
 			 std::map<threadAndRegister, threadAndRegister> &ssaCorrespondence)
@@ -2058,22 +2057,13 @@ buildCrossProductMachine(SMScopes *scopes,
 					   which makes things a bit
 					   easier. */
 				}
-				IRExpr *fv;
-				if (probe_access && store_access) {
-					fv = IRExpr_HappensBefore(
-						probe_access->rip,
-						store_access->rip);
-				} else {
-					ThreadRip tr(-1, VexRip::invent_vex_rip((*next_fake_free_variable)++));
-					fv = maiOut->freeVariable(
-						Ity_I1,
-						-1,
-						NULL,
-						false);
-				}
+				assert(probe_access || probe_effect->type == StateMachineSideEffect::StartAtomic);
+				assert(store_access || store_effect->type == StateMachineSideEffect::StartAtomic);
+				const MemoryAccessIdentifier &probeMai(probe_access ? probe_access->rip : ((StateMachineSideEffectStartAtomic *)probe_effect)->mai);
+				const MemoryAccessIdentifier &storeMai(store_access ? store_access->rip : ((StateMachineSideEffectStartAtomic *)store_effect)->mai);
 				newState = new StateMachineBifurcate(
 					VexRip(),
-					bbdd::var(&scopes->bools, fv),
+					bbdd::var(&scopes->bools, IRExpr_HappensBefore(probeMai, storeMai)),
 					nextProbe,
 					nextStore);
 			}
@@ -2192,7 +2182,6 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			       GarbageCollectionToken token)
 {
 	stackedCdf::startCrashConstraint();
-	int fake_cntr = 0; /* a counter of fakes, not a fake counter */
 	__set_profiling(evalCrossProductMachine);
 
 	AllowableOptimisations opt =
@@ -2222,7 +2211,6 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			strippedStore,
 			oracle,
 			decode.get(),
-			&fake_cntr,
 			opt,
 			smr_survive,
 			ssaCorrespondence));
