@@ -729,7 +729,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			    ((IRExprUnop *)simpleArgs[i])->op >= Iop_8Uto16 &&
 			    ((IRExprUnop *)simpleArgs[i])->op <= Iop_32Uto64) {
 				/* We know that unsigned upcasts never set the high bits */
-				switch (simpleArgs[i]->type()) {
+				switch (((IRExprUnop *)simpleArgs[i])->arg->type()) {
 				case Ity_I8:
 					acc &= 0xff;
 					break;
