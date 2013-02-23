@@ -1557,6 +1557,11 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 	
 	create_index("instructionAttributesFunctionHead", "instructionAttributes", "functionHead");
 
+#if CONFIG_FIXED_REGS
+	printf("Calculate fixed regs...\n");
+	calculateFixedRegs(ths, token);
+#endif
+
 	ths->buildReturnAddressTable();
 	create_index("returnDest", "returnRips", "dest");
 
@@ -1565,10 +1570,6 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 #if !CONFIG_NO_STATIC_ALIASING
 	printf("Calculate aliasing map...\n");
 	calculateAliasing(ths, token);
-#endif
-#if CONFIG_FIXED_REGS
-	printf("Calculate fixed regs...\n");
-	calculateFixedRegs(ths, token);
 #endif
 	printf("Done static analysis phase\n");
 }
