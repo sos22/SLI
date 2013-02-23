@@ -485,19 +485,105 @@ cfgNodeToState(SMScopes *scopes,
 				   all functions by inlining), and it's
 				   sometimes a pain to optimise
 				   out later. */
-				StateMachineSideEffectStore *se =
-					new StateMachineSideEffectStore(
-						exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
-						exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
-						mkPendingMai(target),
-						MemoryTag::normal());
-				StateMachineSideEffecting *smse =
-					new StateMachineSideEffecting(
+				if (ist->data->type() == Ity_I64 ||
+				    ist->data->type() == Ity_I128) {
+					IRExpr *downcast;
+					if (ist->data->type() == Ity_I128) {
+						downcast = IRExpr_Unop(Iop_128to64, ist->data);
+					} else {
+						downcast = ist->data;
+					}
+					StateMachineSideEffectStore *se =
+						new StateMachineSideEffectStore(
+							exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
+							exprbdd::var(&scopes->exprs, &scopes->bools, downcast),
+							mkPendingMai(target),
+							MemoryTag::normal());
+					StateMachineSideEffecting *smse =
+						new StateMachineSideEffecting(
+							target->rip,
+							se,
+							NULL);
+					*cursor = smse;
+					cursor = &smse->target;
+				} else {
+					/* Do less-than-word-size
+					 * stores as explicit
+					 * load-modify-write
+					 * cycles. */
+					IRTemp t = newIRTemp(irsb->tyenv);
+					threadAndRegister tempreg = threadAndRegister::temp(tid, t, 0);
+					/* Want to produce:
+
+					   STARTATOMIC
+					   tempreg <- load(addr, Ity_I64)
+					   store(addr, (tmp & mask1) | data)
+					   ENDATOMIC
+					*/
+					unsigned long mask;
+					IROp upcast;
+					switch (ist->data->type()) {
+					case Ity_I8:
+						mask = ~0xfful;
+						upcast = Iop_8Uto64;
+						break;
+					case Ity_I16:
+						mask = ~0xfffful;
+						upcast = Iop_16Uto64;
+						break;
+					case Ity_I32:
+						mask = ~0xfffffffful;
+						upcast = Iop_32Uto64;
+						break;
+					default:
+						abort();
+					}
+					IRExpr *storeExpr =
+						IRExpr_Binop(
+							Iop_Or64,
+							IRExpr_Binop(
+								Iop_And64,
+								IRExpr_Get(tempreg, Ity_I64),
+								IRExpr_Const_U64(mask)),
+							IRExpr_Unop(
+								upcast,
+								ist->data));
+					exprbdd *addr = exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr);
+					StateMachineSideEffectStartAtomic *sa =
+						new StateMachineSideEffectStartAtomic(mkPendingMai(target));
+					StateMachineSideEffectLoad *load =
+						new StateMachineSideEffectLoad(
+							tempreg,
+							addr,
+							mkPendingMai(target),
+							Ity_I64,
+							MemoryTag::normal());
+					StateMachineSideEffectStore *store =
+						new StateMachineSideEffectStore(
+							addr,
+							exprbdd::var(&scopes->exprs, &scopes->bools, storeExpr),
+							mkPendingMai(target),
+							MemoryTag::normal());
+					StateMachineSideEffectEndAtomic *ea =
+						StateMachineSideEffectEndAtomic::get();
+					StateMachineSideEffecting *ea_e =
+						new StateMachineSideEffecting(
+							target->rip,
+							ea,
+							NULL);
+					*cursor = new StateMachineSideEffecting(
 						target->rip,
-						se,
-						NULL);
-				*cursor = smse;
-				cursor = &smse->target;
+						sa,
+						new StateMachineSideEffecting(
+							target->rip,
+							load,
+							new StateMachineSideEffecting(
+								target->rip,
+								store,
+								ea_e)));
+					cursor = &ea_e->target;
+				}
+					
 			}
 			break;
 		}
