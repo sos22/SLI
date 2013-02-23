@@ -151,7 +151,7 @@ setEntryPoint(bbdd::scope *scope,
 	/* We can use makeInternal rather than ifelse because we never
 	   change the order of expressions at all. */
 	if (in->internal().condition->tag == Iex_ControlFlow) {
-		return scope->makeInternal(
+		return scope->node(
 			in->internal().condition,
 			in->internal().rank,
 			setEntryPoint(scope, in->internal().trueBranch, thread, label),
@@ -159,8 +159,8 @@ setEntryPoint(bbdd::scope *scope,
 	} else {
 		IRExprEntryPoint *c = (IRExprEntryPoint *)in->internal().condition;
 		if (c->thread != thread) {
-			return scope->makeInternal(
-				c,
+			return scope->node(
+				in->internal().condition,
 				in->internal().rank,
 				setEntryPoint(scope, in->internal().trueBranch, thread, label),
 				setEntryPoint(scope, in->internal().falseBranch, thread, label));

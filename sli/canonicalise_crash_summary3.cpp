@@ -1127,7 +1127,7 @@ stripFloatingPoint(bbdd::scope *scope, bbdd *what, bool *done_something,
 			it->second = FP_BBDD;
 		} else {
 			*done_something = true;
-			it->second = scope->makeInternal(nCond, t, f);
+			it->second = scope->node(nCond, scope->ordering->rankVariable(nCond), t, f);
 		}
 	}
 	return it->second;

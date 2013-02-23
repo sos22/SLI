@@ -734,7 +734,7 @@ removeFreeVariables(bbdd::scope *scope, bbdd *what, std::map<bbdd *, bbdd *> &me
 			   f == what->internal().falseBranch) {
 			it->second = what;
 		} else {
-			it->second = scope->makeInternal(
+			it->second = scope->node(
 				what->internal().condition,
 				what->internal().rank,
 				t,
@@ -821,7 +821,7 @@ setVariable(bbdd::scope *scope, bbdd *what, const IRExpr *expr,
 			   f == what->internal().falseBranch) {
 			it->second = what;
 		} else {
-			it->second = scope->makeInternal(
+			it->second = scope->node(
 				what->internal().condition,
 				what->internal().rank,
 				t,

@@ -157,7 +157,7 @@ err_if(bbdd::scope *scp, deltasmrbdd *delta, sane_map<deltasmrbdd *, bbdd *> &me
 	if (delta->isLeaf()) {
 		it->second = scp->cnst(!delta->leaf().isSafe());
 	} else {
-		it->second = scp->makeInternal(
+		it->second = scp->node(
 			delta->internal().condition,
 			delta->internal().rank,
 			err_if(scp, delta->internal().trueBranch, memo),
