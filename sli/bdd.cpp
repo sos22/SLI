@@ -229,7 +229,7 @@ _muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo)
 		a = (IRExpr *)0xf001;
 
 		for (i = 0; cee->args[i]; i++) {
-		  a = muxify(cee->args[i], memo);
+			a = muxify(cee->args[i], memo);
 			if (a->tag == Iex_Mux0X)
 				break;
 			assert(a == cee->args[i]);
@@ -404,9 +404,23 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				}
 			}
 		}
+
+		IROp op = au->op;
+		if (arg->tag == Iex_Unop) {
+			IRExprUnop *argU = (IRExprUnop *)arg;
+			if (inverseUnops(au->op, argU->op)) {
+				return argU->arg;
+			}
+			IROp c;
+			if (shortCircuitableUnops(au->op, argU->op, &c)) {
+				arg = argU->arg;
+				op = c;
+			}
+		}
+
 		if (arg->tag == Iex_Const) {
 			IRExprConst *argc = (IRExprConst *)arg;
-			switch (au->op) {
+			switch (op) {
 #define do_uconv(_from, _to)						\
 				case Iop_ ## _from ## Uto ## _to:	\
 					return IRExpr_Const_U ## _to (argc->Ico.content.U ## _from)
@@ -484,15 +498,41 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				abort();
 			}
 		}
-		if (arg == au->arg)
+		if (arg == au->arg && au->op == op)
 			return au;
 		else
-			return IRExprUnop::mk(au->op, arg);
+			return IRExprUnop::mk(op, arg);
 	}
 	case Iex_Binop: {
 		IRExprBinop *_ieb = (IRExprBinop *)a;
 		auto arg1 = quickSimplify(_ieb->arg1, memo);
 		auto arg2 = quickSimplify(_ieb->arg2, memo);
+		/* x < 0 is always false, for unsigned comparisons. */
+		if (_ieb->op >= Iop_CmpLT8U &&
+		    _ieb->op <= Iop_CmpLT64U &&
+		    arg2->tag == Iex_Const) {
+			IRExprConst *cnst = (IRExprConst *)arg2;
+			bool doit;
+			switch (_ieb->op) {
+			case Iop_CmpLT8U:
+				doit = cnst->Ico.content.U8 == 0;
+				break;
+			case Iop_CmpLT16U:
+				doit = cnst->Ico.content.U16 == 0;
+				break;
+			case Iop_CmpLT32U:
+				doit = cnst->Ico.content.U32 == 0;
+				break;
+			case Iop_CmpLT64U:
+				doit = cnst->Ico.content.U64 == 0;
+				break;
+			default:
+				abort();
+			}
+			if (doit) {
+				return IRExpr_Const_U1(0);
+			}
+		}
 		if (arg1->tag == Iex_Const &&
 		    arg2->tag == Iex_Const) {
 			IRExprConst *arg1c = (IRExprConst *)arg1;
@@ -994,6 +1034,19 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			newArgs[i] = quickSimplify(c->args[i], memo);
 			if (newArgs[i] != c->args[i])
 				realloc = true;
+		}
+		if (nr_args == 5 &&
+		    newArgs[0]->tag == Iex_Const &&
+		    newArgs[1]->tag == Iex_Const &&
+		    !strcmp(c->cee->name, "amd64g_calculate_condition")) {
+			auto r = optimise_condition_calculation(
+				newArgs[0],
+				newArgs[1],
+				newArgs[2],
+				newArgs[3]);
+			if (r->tag != Iex_CCall) {
+				return _quickSimplify(r, memo);
+			}
 		}
 		if (realloc) {
 			IRExpr **n = alloc_irexpr_array(nr_args+1);

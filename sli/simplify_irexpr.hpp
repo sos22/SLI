@@ -17,6 +17,10 @@ bool physicallyEqual(const IRExpr *a, const IRExpr *b);
 IRExpr *coerceTypes(IRType, IRExpr *);
 IROp coerceTypesOp(IRType from, IRType to);
 IRExpr *expr_eq(IRExpr *, IRExpr *);
+IRExpr *optimise_condition_calculation(IRExpr *_cond,
+				       IRExpr *cc_op,
+				       IRExpr *dep1,
+				       IRExpr *dep2);
 
 #define INACCESSIBLE_ADDRESS ((exprbdd *)0xf001)
 template <typename treeT, typename scopeT> treeT *simplifyBDD(scopeT *scope, bbdd::scope *, treeT *bdd, bool isAddress, const IRExprOptimisations &opt);

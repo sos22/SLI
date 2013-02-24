@@ -151,7 +151,7 @@ physicallyEqual(const IRExpr *_a, const IRExpr *_b)
 	abort();
 }
 
-static IRExpr *
+IRExpr *
 optimise_condition_calculation(
 	IRExpr *_cond,
 	IRExpr *cc_op,
