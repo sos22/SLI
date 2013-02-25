@@ -573,11 +573,9 @@ availExpressionAnalysis(SMScopes *scopes,
 				f_it_did_insert.first->second.merge(scopes, availHere);
 			}
 
-			assert(nrPredecessors[smb->trueTarget] > 0);
 			if (--nrPredecessors[smb->trueTarget] == 0) {
 				pending.push_back(smb->trueTarget);
 			}
-			assert(nrPredecessors[smb->falseTarget] > 0);
 			if (--nrPredecessors[smb->falseTarget] == 0) {
 				pending.push_back(smb->falseTarget);
 			}
