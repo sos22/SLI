@@ -32,12 +32,26 @@ public:
 		sanity_check_smr(res2);
 	}
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "%s -> %s", nameSmr(res1), nameSmr(res2));
+		if (res1 == res2) {
+			fprintf(f, "<same>");
+		} else {
+			fprintf(f, "%s -> %s", nameSmr(res1), nameSmr(res2));
+		}
 	}
 	deltasmr(StateMachineRes _res1, StateMachineRes _res2)
 		: res1(_res1), res2(_res2)
 	{}
 	bool operator <(const deltasmr &a) const {
+		if (res1 == res2) {
+			if (a.res1 == a.res2) {
+				return false;
+			} else {
+				return true;
+			}
+		}
+		if (a.res1 == a.res2) {
+			return false;
+		}
 		if (res1 < a.res1) {
 			return true;
 		} else if (a.res1 < res1) {
