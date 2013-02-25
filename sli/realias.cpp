@@ -2077,7 +2077,9 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 #endif
 
 			/* Don't do anything with these. */
+#if !TRACK_FRAMES
 		case StateMachineSideEffect::ImportRegister:
+#endif
 		case StateMachineSideEffect::Load:
 		case StateMachineSideEffect::Copy:
 		case StateMachineSideEffect::Unreached:

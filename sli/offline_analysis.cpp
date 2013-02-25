@@ -1,4 +1,6 @@
 /* A load of random stuff which doesn't really belong anywhere. */
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <limits.h>
 #include <queue>
 #include <sys/time.h>
