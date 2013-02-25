@@ -205,10 +205,10 @@ public:
 		return *(internalT *)content._internal;
 	}
 
+	virtual void _prettyPrint(FILE *f, leafT what) const = 0;
 protected:
 	virtual void _visit(HeapVisitor &hv, leafT &leaf) const = 0;
 	virtual void _sanity_check(leafT leaf) const = 0;
-	virtual void _prettyPrint(FILE *f, leafT what) const = 0;
 
 	explicit _bdd(leafT leaf)
 		: _isLeaf(true), content()
@@ -474,9 +474,11 @@ class bbdd : public const_bdd<bool, bbdd> {
 		assert(b == true || b == false);
 	}
 #endif
+public:
 	void _prettyPrint(FILE *f, bool b) const {
 		fprintf(f, "%s", b ? "<true>" : "<false>");
 	}
+private:
 	static bbdd *parseBool(bbdd::scope *scope, const char *str, const char **suffix) {
 		if (parseThisString("<true>", str, suffix)) {
 			return scope->cnst(true);

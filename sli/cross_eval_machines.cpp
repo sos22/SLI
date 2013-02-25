@@ -12,6 +12,7 @@
 #include "timers.hpp"
 
 #include "bdd_tmpl.cpp"
+#include "subst_eq_tmpl.cpp"
 
 class TimeoutTimer : public Timer {
 public:
@@ -42,12 +43,15 @@ public:
 		: res1(_res1), res2(_res2)
 	{}
 	bool operator <(const deltasmr &a) const {
-		if (res1 == res2) {
-			if (a.res1 == a.res2) {
+		if (isSafe()) {
+			if (a.isSafe()) {
 				return false;
 			} else {
 				return true;
 			}
+		}
+		if (a.isSafe()) {
+			return false;
 		}
 		if (a.res1 == a.res2) {
 			return false;
@@ -68,9 +72,6 @@ class deltasmrbdd : public const_bdd<deltasmr, deltasmrbdd> {
 	friend class _bdd<deltasmr, deltasmrbdd>;
 
 	void _sanity_check(deltasmr a) const { a.sanity_check(); }
-	void _prettyPrint(FILE *f, deltasmr a) const {
-		a.prettyPrint(f);
-	}
 	deltasmrbdd(bdd_rank rank, IRExpr *cond, deltasmrbdd *trueB, deltasmrbdd *falseB)
 		: const_bdd<deltasmr, deltasmrbdd>(rank, cond, trueB, falseB)
 	{}
@@ -78,6 +79,9 @@ class deltasmrbdd : public const_bdd<deltasmr, deltasmrbdd> {
 		: const_bdd<deltasmr, deltasmrbdd>(b)
 	{}
 public:
+	void _prettyPrint(FILE *f, deltasmr a) const {
+		a.prettyPrint(f);
+	}
 	static deltasmrbdd *diff(scope *scope, smrbdd *a, smrbdd *b);
 };
 
@@ -195,6 +199,13 @@ err_if(bbdd::scope *scp, deltasmrbdd *delta)
 	return err_if(scp, delta, memo);
 }
 
+bool
+dsmrbdd_fbf(deltasmrbdd *delta)
+{
+	return delta->internal().falseBranch->isLeaf() &&
+		delta->internal().falseBranch->leaf().isSafe();
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -295,6 +306,8 @@ main(int argc, char *argv[])
 
 	deltasmrbdd::scope dscope(&scopes.ordering);
 	deltasmrbdd *delta = deltasmrbdd::diff(&dscope, smr1, smr2);
+
+	delta = tmpl_subst_eq<deltasmrbdd::scope, deltasmrbdd, dsmrbdd_fbf>(&dscope, delta);
 
 	bbdd *errorIf = err_if(&scopes.bools, delta);
 	if (TIMEOUT) {
