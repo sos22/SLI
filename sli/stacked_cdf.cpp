@@ -72,17 +72,17 @@ print_time_tree(const node *root, int depth, FILE *f)
 }
 
 static void
-transfer_to_cache(const node *_root)
+transfer_to_cache(const node *_root, bool allow_non_reported)
 {
 	node *root = const_cast<node *>(_root);
-	assert(root->reported);
+	assert(allow_non_reported || root->reported);
 	root->nextSibling = nodeCache.content;
 	node *cur;
 	node *next;
 	cur = root->headChild;
 	while (cur) {
 		next = cur->nextSibling;
-		transfer_to_cache(cur);
+		transfer_to_cache(cur, allow_non_reported);
 		cur = next;
 	}
 	root->parent = (node *)0xbeef;
@@ -219,8 +219,13 @@ start()
 }
 
 void
-stop()
+stop(bool timed_out)
 {
+	if (timed_out) {
+		transfer_to_cache(currentNode, true);
+		currentNode = NULL;
+		return;
+	}
 	static int cntr;
 
 	node *root = currentNode;
@@ -299,9 +304,8 @@ stop()
 
 	fprintf(f, "BDD: %f\n", sum_time_nodes(root, cdf_BDD, cdf_root));
 
-	transfer_to_cache(root);
+	transfer_to_cache(root, false);
 }
-
 
 };
 

@@ -184,9 +184,9 @@ consider_rip(const DynAnalysisRip &my_rip,
 	struct timeval end;
 	gettimeofday(&end, NULL);
 
-	stackedCdf::stop();
-
 	timeoutTimer.cancel();
+
+	stackedCdf::stop(_timed_out);
 
 	double time_taken = end.tv_sec - start.tv_sec;
 	time_taken += (end.tv_usec - start.tv_usec) * 1e-6;
