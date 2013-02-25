@@ -1044,7 +1044,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				newArgs[1],
 				newArgs[2],
 				newArgs[3]);
-			if (r->tag != Iex_CCall) {
+			if (r) {
 				return _quickSimplify(r, memo);
 			}
 		}
