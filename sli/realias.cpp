@@ -61,7 +61,7 @@ setUnion(std::set<t> &dest, const std::set<t> &src)
 	return res;
 }
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 class StackLayout {
 	struct thread_data {
 		unsigned thread; /* or 0 for invalid */
@@ -940,7 +940,7 @@ public:
 		assert(it != content.end());
 		return it->second;
 	}
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	void refine(PointsToTable &ptt,
 		    StackLayoutTable &slt,
 		    StateMachine *sm,
@@ -1140,7 +1140,7 @@ AliasTable::prettyPrint(FILE *f, stateLabelT &labels) const
 	}
 }
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 static StateMachineSideEffecting *
 sideEffectDefiningRegister(StateMachine *sm, const threadAndRegister &tr)
 {
@@ -1452,7 +1452,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		printf("%s, input:\n", __func__);
 		printStateMachine(sm, stdout, stateLabels);
 	}
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	StackLayoutTable stackLayout;
 	if (!stackLayout.build(sm)) {
 		warning("Failed to build stack layout!\n");
@@ -1484,7 +1484,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		at.prettyPrint(stdout, stateLabels);
 	}
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	while (1) {
 		bool p = false;
 		PointsToTable ptt2 = ptt.refine(at, sm, stackLayout, &p);
@@ -1845,7 +1845,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		}
 	}
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	/* Figure out which frames might actually be accessed by the
 	   machine.  There's not much point in keeping any of the
 	   other ones hanging around. */
@@ -1984,7 +1984,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 			}
 			break;
 		}
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 		case StateMachineSideEffect::StartFunction: {
 			StateMachineSideEffectStartFunction *s = (StateMachineSideEffectStartFunction *)sideEffect;
 			if (!allFramesLive && !liveFrames.count(s->frame)) {
@@ -2077,9 +2077,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 #endif
 
 			/* Don't do anything with these. */
-#if CONFIG_NO_STATIC_ALIASING
 		case StateMachineSideEffect::ImportRegister:
-#endif
 		case StateMachineSideEffect::Load:
 		case StateMachineSideEffect::Copy:
 		case StateMachineSideEffect::Unreached:
@@ -2194,12 +2192,14 @@ zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
 					/* These ones are pure
 					 * annotations, so can just be
 					 * killed off. */
+#if TRACK_FRAMES
 				case StateMachineSideEffect::StartFunction:
 				case StateMachineSideEffect::EndFunction:
 				case StateMachineSideEffect::StackLayout:
 					sme->sideEffect = NULL;
 					*done_something = true;
 					break;
+#endif
 
 					/* Imports are more tricky,
 					   because they contain both

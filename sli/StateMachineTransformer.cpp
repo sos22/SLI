@@ -39,7 +39,7 @@ StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSi
 	}
 }
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 StateMachineSideEffectStartFunction *
 StateMachineTransformer::transformOneSideEffect(SMScopes *scopes, StateMachineSideEffectStartFunction *a, bool *d)
 {

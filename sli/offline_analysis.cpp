@@ -579,7 +579,7 @@ duplicateStateMachineNoAnnotations(StateMachine *inp, bool *done_something)
 			case StateMachineSideEffect::ImportRegister:
 				return false;
 			case StateMachineSideEffect::AssertFalse:
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
 			case StateMachineSideEffect::StackLayout:
@@ -967,7 +967,7 @@ optimiseAssuming(SMScopes *scopes, StateMachineSideEffect *se, bbdd *assumption)
 		return new StateMachineSideEffectPhi(smp, inputs);
 	}
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	case StateMachineSideEffect::StackLayout:
 		return se;
 	case StateMachineSideEffect::StartFunction: {

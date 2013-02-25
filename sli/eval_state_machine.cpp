@@ -1190,7 +1190,7 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 	}
 
 		/* Todo: could maybe use this to improve aliasing. */
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
 	case StateMachineSideEffect::StackLayout:
@@ -1777,7 +1777,7 @@ definitelyDoesntRace(const MaiMap &decode,
 		case StateMachineSideEffect::Copy:
 		case StateMachineSideEffect::Phi:
 		case StateMachineSideEffect::Unreached:
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 		case StateMachineSideEffect::StartFunction:
 		case StateMachineSideEffect::EndFunction:
 		case StateMachineSideEffect::StackLayout:
@@ -2090,7 +2090,7 @@ buildCrossProductMachine(SMScopes *scopes,
         return convertToSSA(scopes, new StateMachine(crossMachineRoot, cfg_roots), ssaCorrespondence);
 }
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 static StateMachine *
 stripUninterpretableAnnotations(StateMachine *inp)
 {
@@ -2195,7 +2195,7 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 	StateMachine *strippedProbe = probeMachine;
 	StateMachine *strippedStore = storeMachine;
 	stackedCdf::startCrashConstraintResimplify();
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	strippedProbe = stripUninterpretableAnnotations(probeMachine);
 	strippedStore = stripUninterpretableAnnotations(storeMachine);
 #endif

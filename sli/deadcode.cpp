@@ -100,7 +100,7 @@ public:
 		case StateMachineSideEffect::Unreached:
 		case StateMachineSideEffect::StartAtomic:
 		case StateMachineSideEffect::EndAtomic:
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 		case StateMachineSideEffect::StackLayout:
 #endif
 		case StateMachineSideEffect::ImportRegister:
@@ -108,7 +108,7 @@ public:
 		case StateMachineSideEffect::AssertFalse:
 			useExpression( ((StateMachineSideEffectAssertFalse *)smse)->value );
 			break;
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 		case StateMachineSideEffect::StartFunction:
 			useExpression( ((StateMachineSideEffectStartFunction *)smse)->rsp );
 			break;
@@ -419,7 +419,7 @@ deadCodeElimination(SMScopes *scopes, StateMachine *sm, bool *done_something,
 			case StateMachineSideEffect::Unreached:
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
 			case StateMachineSideEffect::StackLayout:

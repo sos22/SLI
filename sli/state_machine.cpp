@@ -99,7 +99,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		}
 	}
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	if (trueTarget->type == StateMachineState::SideEffecting &&
 	    falseTarget->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)trueTarget)->sideEffect ==
@@ -226,7 +226,7 @@ StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOpt
 	}
 }
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 StateMachineSideEffect *
 StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
@@ -884,7 +884,7 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 	    target->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)target)->sideEffect &&
 	    (((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	     || ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::StackLayout
 #endif
 	     )) {
@@ -952,7 +952,7 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		}
 	}
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	if (sideEffect->type == StateMachineSideEffect::StartFunction &&
 	    target->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)target)->sideEffect &&
@@ -962,7 +962,9 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		*done_something = true;
 		return ((StateMachineSideEffecting *)target)->target;
 	}
+#endif
 
+#ifndef CONFIG_NO_STATIC_ANALYSIS
 	if (sideEffect->type == StateMachineSideEffect::ImportRegister &&
 	    target->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)target)->sideEffect &&

@@ -315,7 +315,7 @@ _convertSideEffect(SMScopes *,
 		allocTemporary(smei->reg, correspondence, reaching));
 }
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 static StateMachineSideEffect *
 _convertSideEffect(SMScopes *scopes,
 		   StateMachineSideEffectStartFunction *smesf,

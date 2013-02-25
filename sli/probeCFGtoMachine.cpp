@@ -15,12 +15,12 @@
 #include "libvex_guest_offsets.h"
 
 #ifndef NDEBUG
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 static bool debug_assign_frame_ids = false;
 #endif
 static bool debug_rsp_canonicalisation = false;
 #else
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 #define debug_assign_frame_ids false
 #endif
 #define debug_rsp_canonicalisation false
@@ -749,7 +749,7 @@ cfgNodeToState(SMScopes *scopes,
 	if (i == irsb->stmts_used) {
 		if (irsb->jumpkind == Ijk_Call) {
 			StateMachineSideEffecting *smp;
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 			smp = new StateMachineSideEffecting(
 				target->rip,
 				new StateMachineSideEffectStartFunction(
@@ -773,7 +773,7 @@ cfgNodeToState(SMScopes *scopes,
 			    target->getDefault()->instr->rip == extract_call_follower(irsb)) {
 				/* Skip this call */
 				targets.push_back(target->getDefault()->instr);
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 				smp = new StateMachineSideEffecting(
 					target->rip,
 					new StateMachineSideEffectEndFunction(
@@ -818,7 +818,7 @@ cfgNodeToState(SMScopes *scopes,
 				cursor = &smp->target;
 			}
 		} else if (irsb->jumpkind == Ijk_Ret) {
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 			StateMachineSideEffecting *smp =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -1275,7 +1275,7 @@ getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *del
 				break;
 			}
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 			case StateMachineSideEffect::EndFunction: {
 				StateMachineSideEffectEndFunction *see = (StateMachineSideEffectEndFunction *)se;
 				RspCanonicalisationState::eval_res rspDelta = entryState.eval(see->rsp);
@@ -1315,7 +1315,7 @@ getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *del
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
 			case StateMachineSideEffect::AssertFalse:
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 			case StateMachineSideEffect::StackLayout:
 			case StateMachineSideEffect::StartFunction:
 #endif
@@ -1374,13 +1374,15 @@ getRspCanonicalisationDelta(SMScopes *scopes, StateMachineState *root, long *del
 }
 
 static StateMachineState *
-addEntrySideEffects(SMScopes *scopes,
-		    Oracle *oracle,
-		    unsigned tid,
-		    StateMachineState *final,
-		    const VexRip &vr,
-		    const CfgLabel &entryLabel
-#if !CONFIG_NO_STATIC_ALIASING
+addEntrySideEffects(SMScopes *scopes
+#if TRACK_FRAMES
+		    , Oracle *oracle
+#endif
+		    , unsigned tid
+		    , StateMachineState *final
+		    , const VexRip &vr
+		    , const CfgLabel &entryLabel
+#if TRACK_FRAMES
 		    , const std::vector<FrameId> &entryStack
 		    , std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports
 		    , int entryIdx
@@ -1410,7 +1412,7 @@ addEntrySideEffects(SMScopes *scopes,
 		warning("Failed to get RSP canonicalisation delta\n");
 	}
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	std::set<FrameId> pointAtSelf;
 	std::set<FrameId> pointedAtByOthers;
 
@@ -1525,7 +1527,7 @@ addEntrySideEffects(SMScopes *scopes,
 	return cursor;
 }
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 typedef std::vector<FrameId> callStackT;
 
 class StackEqConstraint : public std::pair<callStackT *, callStackT *> {
@@ -1981,14 +1983,14 @@ findUsedRegs(smrbdd *expr, std::set<threadAndRegister> &tr)
 
 static StateMachineState *
 importRegisters(StateMachineState *root
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 		, SMScopes *scopes,
 		std::map<std::pair<int, PointerAliasingSet>, std::set<int> > &neededImports,
 		int tid
 #endif
 	)
 {
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	for (auto it = neededImports.begin(); it != neededImports.end(); it++) {
 		int vex_offset = it->first.first * 8;
 		const PointerAliasingSet &pas(it->first.second);
@@ -2092,7 +2094,7 @@ importRegisters(StateMachineState *root
 						findUsedRegs(it->val, usedRegs);
 					break;
 				}
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 				case StateMachineSideEffect::StartFunction:
 					findUsedRegs( ((StateMachineSideEffectStartFunction *)se)->rsp, usedRegs );
 					break;
@@ -2248,13 +2250,13 @@ assignMais(SMScopes *scopes, StateMachineSideEffect *se, int tid, MaiMap &mm)
 	case StateMachineSideEffect::Unreached:
 	case StateMachineSideEffect::EndAtomic:
 	case StateMachineSideEffect::ImportRegister:
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	case StateMachineSideEffect::StackLayout:
 #endif
 		return se;
 	case StateMachineSideEffect::Phi:
 		abort();
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	case StateMachineSideEffect::StartFunction: {
 		auto l = (StateMachineSideEffectStartFunction *)se;
 		return new StateMachineSideEffectStartFunction(
@@ -2388,7 +2390,7 @@ probeCFGsToMachine(SMScopes *scopes,
 	if (TIMEOUT)
 		return NULL;
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	{
 		std::set<StateMachineState *> roots_this_sm1;
@@ -2398,7 +2400,7 @@ probeCFGsToMachine(SMScopes *scopes,
 	}
 #endif
 	std::vector<std::pair<CFGNode *, StateMachineState *> > roots_this_sm2;
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	std::map<std::pair<int, PointerAliasingSet>, std::set<int> > neededImports;
 	int entryIdx = 1;
 #endif
@@ -2407,8 +2409,12 @@ probeCFGsToMachine(SMScopes *scopes,
 		CFGNode *cfgnode = *it;
 		StateMachineState *root = results[*it];
 		long rsp_delta;
-		root = addEntrySideEffects(scopes, oracle, tid, root, cfgnode->rip, cfgnode->label
-#if !CONFIG_NO_STATIC_ALIASING
+		root = addEntrySideEffects(scopes
+#if TRACK_FRAMES
+					   , oracle
+#endif
+					   , tid, root, cfgnode->rip, cfgnode->label
+#if TRACK_FRAMES
 					   , entryStacks[root], neededImports, entryIdx++
 #endif
 					   , &rsp_delta
@@ -2422,7 +2428,7 @@ probeCFGsToMachine(SMScopes *scopes,
 
 	StateMachineState *root = entryState(scopes, VexRip(), roots_this_sm2, tid, false);
 	root = importRegisters(root
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 			       , scopes, neededImports, tid
 #endif
 		);
@@ -2462,7 +2468,7 @@ storeCFGsToMachine(SMScopes *scopes,
 			doOne);
 	if (TIMEOUT)
 		return NULL;
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	std::set<StateMachineState *> sm_roots;
 	sm_roots.insert(s);
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
@@ -2475,12 +2481,14 @@ storeCFGsToMachine(SMScopes *scopes,
 	long rsp_delta;
 	s = addEntrySideEffects(
 		scopes,
+#if TRACK_FRAMES
 		oracle,
+#endif
 		tid,
 		s,
 		root->rip,
 		root->label
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 		, entryStacks[s]
 		, neededImports
 		, 0
@@ -2493,7 +2501,7 @@ storeCFGsToMachine(SMScopes *scopes,
 			 StateMachine::entry_point_ctxt(rsp_delta)));
 	StateMachine *res = new StateMachine(
 		importRegisters(s
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 				, scopes, neededImports, tid
 #endif
 			),

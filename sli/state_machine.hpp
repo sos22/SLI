@@ -31,7 +31,7 @@ struct SMScopes {
 	void prettyPrint(FILE *f, const std::set<bdd_rank> *) const;
 };
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 class FrameId : public Named {
 	unsigned id;
 public:
@@ -135,7 +135,9 @@ public:
 	bool nonStckPointer;
 	bool otherStackPointer;
 	bool valid;
+#if TRACK_FRAMES
 	std::vector<FrameId> stackPointers;
+#endif
 private:
 	char *mkName() const {
 		if (!valid) {
@@ -148,12 +150,15 @@ private:
 				fragments.push_back("non-stack-pointer");
 			if (otherStackPointer) {
 				fragments.push_back("any-stack");
-			} else {
+			}
+#if TRACK_FRAMES
+			else {
 				for (auto it = stackPointers.begin();
 				     it != stackPointers.end();
 				     it++)
 					fragments.push_back(it->name());
 			}
+#endif
 			return flattenStringFragmentsMalloc(fragments, "|", "(", ")");
 		}
 	}
@@ -191,12 +196,14 @@ public:
 	static const PointerAliasingSet stackPointer;
 	static const PointerAliasingSet anything;
 	static const PointerAliasingSet nothing;
+#if TRACK_FRAMES
 	static PointerAliasingSet frame(const FrameId &fid) {
 		PointerAliasingSet res(nothing);
 		res.stackPointers.push_back(fid);
 		return res;
 	}
 	static PointerAliasingSet frames(const PointerAliasingSet *base, const std::set<FrameId> &inp);
+#endif
 	PointerAliasingSet operator |(const PointerAliasingSet &o) const;
 	PointerAliasingSet operator &(const PointerAliasingSet &o) const;
 	bool overlaps(const PointerAliasingSet &o) const;
@@ -209,6 +216,7 @@ public:
 
 	bool operator <(const PointerAliasingSet &o) const;
 
+#if TRACK_FRAMES
 	bool mightPointAt(const FrameId fid) const {
 		if (!valid || otherStackPointer)
 			return true;
@@ -217,8 +225,13 @@ public:
 				return true;
 		return false;
 	}
+#endif
 	bool mightPointAtStack() const {
-		return !valid || otherStackPointer || !stackPointers.empty();
+		return !valid || otherStackPointer
+#if TRACK_FRAMES
+		  || !stackPointers.empty()
+#endif
+		  ;
 	}
 	bool mightPointAtNonStack() const {
 		return !valid || nonStckPointer;
@@ -227,17 +240,27 @@ public:
 		return !valid || nonPointer;
 	}
 	bool mightPoint() const {
-		return !valid || nonStckPointer || otherStackPointer || !stackPointers.empty();
+		return !valid || nonStckPointer || otherStackPointer
+#if TRACK_FRAMES
+		  || !stackPointers.empty()
+#endif
+		  ;
 	}
 	bool pointsAtFrames() const {
-		return !valid || !stackPointers.empty();
+		return !valid
+#if TRACK_FRAMES
+		  || !stackPointers.empty()
+#endif
+		  ;
 	}
 	bool parse(const char *str, const char **suffix) {
 		bool nonPointer = false;
 		bool nonStackPointer = false;
 		bool anyStack = false;
 		bool valid;
+#if TRACK_FRAMES
 		std::vector<FrameId> stackPointers;
+#endif
 		if (parseThisString("(<invalid>)", str, suffix)) {
 			valid = false;
 		} else {
@@ -255,10 +278,16 @@ public:
 							return false;
 						nonStackPointer = true;
 					} else if (parseThisString("any-stack", str, &str)) {
-						if (anyStack || !stackPointers.empty())
+						if (anyStack
+#if TRACK_FRAMES
+						    || !stackPointers.empty()
+#endif
+							) {
 							return false;
+						}
 						anyStack = true;
 					} else {
+#if TRACK_FRAMES
 						FrameId f;
 						if (FrameId::parse(&f, str, &str)) {
 							if (anyStack)
@@ -275,6 +304,9 @@ public:
 						} else {
 							return false;
 						}
+#else
+						return false;
+#endif
 					}
 					if (parseThisChar(')', str, suffix))
 						break;
@@ -286,7 +318,9 @@ public:
 		this->nonPointer = nonPointer;
 		this->nonStckPointer = nonStackPointer;
 		this->otherStackPointer = anyStack;
+#if TRACK_FRAMES
 		this->stackPointers = stackPointers;
+#endif
 		this->valid = valid;
 		clearName();
 		return true;
@@ -447,7 +481,7 @@ public:
 class StateMachineSideEffect : public GarbageCollected<StateMachineSideEffect, &ir_heap> {
 	StateMachineSideEffect(); /* DNE */
 public:
-#if CONFIG_NO_STATIC_ALIASING
+#if !TRACK_FRAMES
 #define all_side_effect_types(f)		\
 	f(Load)					\
 	f(Store)				\
@@ -1115,7 +1149,7 @@ public:
 		return true;
 	}
 };
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 class StateMachineSideEffectStartFunction : public StateMachineSideEffect {
 public:
 	StateMachineSideEffectStartFunction(exprbdd *_rsp, FrameId _frame)
@@ -1308,7 +1342,7 @@ public:
 	}
 
 };
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 class StateMachineSideEffectStackLayout : public StateMachineSideEffect {
 public:
 	class entry : public Named {

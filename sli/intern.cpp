@@ -111,7 +111,7 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 			t.name.insert(sf);				\
 			return s;					\
 		} while (0)
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	case StateMachineSideEffect::StartFunction: {
 		StateMachineSideEffectStartFunction *sf = (StateMachineSideEffectStartFunction *)s;
 		do_search(StartFunction);
@@ -291,7 +291,7 @@ internStateMachineTable::_runGc(HeapVisitor &hv)
 	do_set(StateMachineSideEffectAssertFalse *, asserts);
 #define ds(n)					\
 	do_set(StateMachineSideEffect ## n *, n)
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	ds(StartFunction);
 	ds(EndFunction);
 	ds(StackLayout);

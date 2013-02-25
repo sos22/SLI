@@ -258,7 +258,7 @@ availExprSet::simplifySE(SMScopes *, StateMachineSideEffectImportRegister *c) co
 	return c;
 }
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 StateMachineSideEffect *
 availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectStartFunction *s) const
 {
@@ -968,7 +968,7 @@ ssaApplyAvailSE(ssa_avail_state &, StateMachineSideEffectEndAtomic *inp)
 {
 	return inp;
 }
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 static StateMachineSideEffect *
 ssaApplyAvailSE(ssa_avail_state &state, StateMachineSideEffectStartFunction *inp)
 {

@@ -2924,6 +2924,7 @@ PointerAliasingSet::operator |(const PointerAliasingSet &o) const
 	res.nonPointer = nonPointer | o.nonPointer;
 	res.nonStckPointer = nonStckPointer | o.nonStckPointer;
 	res.otherStackPointer = otherStackPointer | o.otherStackPointer;
+#if TRACK_FRAMES
 	if (!res.otherStackPointer) {
 		res.stackPointers.insert(res.stackPointers.end(), stackPointers.begin(), stackPointers.end());
 		res.stackPointers.insert(res.stackPointers.end(), o.stackPointers.begin(), o.stackPointers.end());
@@ -2931,6 +2932,7 @@ PointerAliasingSet::operator |(const PointerAliasingSet &o) const
 		auto i = std::unique(res.stackPointers.begin(), res.stackPointers.end());
 		res.stackPointers.erase(i, res.stackPointers.end());
 	}
+#endif
 	res.valid = true;
 	return res;
 }
@@ -2947,6 +2949,7 @@ PointerAliasingSet::operator &(const PointerAliasingSet &o) const
 	res.nonPointer = nonPointer & o.nonPointer;
 	res.nonStckPointer = nonPointer & o.nonStckPointer;
 	res.otherStackPointer = otherStackPointer & o.otherStackPointer;
+#if TRACK_FRAMES
 	if (otherStackPointer && o.otherStackPointer) {
 	} else if (otherStackPointer && !o.otherStackPointer) {
 		res.stackPointers = o.stackPointers;
@@ -2966,6 +2969,7 @@ PointerAliasingSet::operator &(const PointerAliasingSet &o) const
 				res.stackPointers.push_back(*it1);
 		}
 	}
+#endif
 	return res;
 					
 }
@@ -2981,9 +2985,11 @@ PointerAliasingSet::operator == (const PointerAliasingSet &o) const
 	    nonStckPointer != o.nonStckPointer ||
 	    otherStackPointer != o.otherStackPointer)
 		return false;
+#if TRACK_FRAMES
 	if (!otherStackPointer &&
 	    stackPointers != o.stackPointers)
 		return false;
+#endif
 	return true;
 }
 
@@ -2997,6 +3003,7 @@ PointerAliasingSet::overlaps(const PointerAliasingSet &o) const
 		return true;
 	if (otherStackPointer && o.otherStackPointer)
 		return true;
+#if TRACK_FRAMES
 	if (otherStackPointer && !o.stackPointers.empty())
 		return true;
 	if (o.otherStackPointer && !stackPointers.empty())
@@ -3004,6 +3011,7 @@ PointerAliasingSet::overlaps(const PointerAliasingSet &o) const
 	for (auto it = stackPointers.begin(); it != stackPointers.end(); it++)
 		if (o.mightPointAt(*it))
 			return true;
+#endif
 	return false;
 }
 
@@ -3037,6 +3045,7 @@ PointerAliasingSet::operator|=(const PointerAliasingSet &o)
 		otherStackPointer = true;
 	}
 
+#if TRACK_FRAMES
 	if (otherStackPointer) {
 		/* stackPointers should be empty if otherStackPointers
 		   is set, so this must be a no-op unless res is
@@ -3052,6 +3061,7 @@ PointerAliasingSet::operator|=(const PointerAliasingSet &o)
 		auto it = std::unique(stackPointers.begin(), stackPointers.end());
 		stackPointers.erase(it, stackPointers.end());
 	}
+#endif
 
 	if (res)
 		clearName();
@@ -3077,9 +3087,14 @@ PointerAliasingSet::operator <(const PointerAliasingSet &o) const
 		return true;
 	if (otherStackPointer)
 		return false;
+#if TRACK_FRAMES
 	return stackPointers < o.stackPointers;
+#else
+	return false;
+#endif
 }
 
+#if TRACK_FRAMES
 PointerAliasingSet
 PointerAliasingSet::frames(const PointerAliasingSet *base, const std::set<FrameId> &frames)
 {
@@ -3095,6 +3110,7 @@ PointerAliasingSet::frames(const PointerAliasingSet *base, const std::set<FrameI
 	res.clearName();
 	return res;
 }
+#endif
 #endif
 
 /* Compute the offset from RSP to the function's return address. */

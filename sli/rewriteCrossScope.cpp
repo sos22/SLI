@@ -166,7 +166,7 @@ static StateMachineSideEffectPhi *_doit(const StateMachineSideEffectPhi *inp,
 	}
 	return new StateMachineSideEffectPhi(inp, inputs);
 }
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 static StateMachineSideEffectStartFunction *_doit(const StateMachineSideEffectStartFunction *inp,
 						  std::vector<relocT> &relocs,
 						  state &state)

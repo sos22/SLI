@@ -151,7 +151,7 @@ _visit_side_effect(void *ctxt,
 			res = _visit_bdd(ctxt, &visitor->bdd, _visit_irexpr, it->val);
 		return res;
 	}
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	case StateMachineSideEffect::StartFunction: {
 		auto s = (const StateMachineSideEffectStartFunction *)sme;
 		if (visitor->StartFunction)
@@ -180,7 +180,7 @@ _visit_side_effect(void *ctxt,
 		do_simple(StartAtomic)
 		do_simple(EndAtomic)
 		do_simple(ImportRegister)
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 		do_simple(StackLayout)
 #endif
 #undef do_simple

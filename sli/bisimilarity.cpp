@@ -167,7 +167,7 @@ equalModuloVariables(const StateMachineSideEffect *smse1,
 			equalModuloVariables(smsea1->value, smsea2->value);
 	}
 
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	case StateMachineSideEffect::StartFunction:
 	case StateMachineSideEffect::EndFunction:
 	case StateMachineSideEffect::StackLayout:

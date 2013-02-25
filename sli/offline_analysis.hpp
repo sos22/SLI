@@ -142,7 +142,7 @@ protected:
 	}
 	virtual StateMachineSideEffectPhi *transformOneSideEffect(
 		SMScopes *, StateMachineSideEffectPhi *, bool *);
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	virtual StateMachineSideEffectStartFunction *transformOneSideEffect(
 		SMScopes *, StateMachineSideEffectStartFunction *, bool *);
 	virtual StateMachineSideEffectEndFunction *transformOneSideEffect(

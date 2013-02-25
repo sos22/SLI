@@ -14,7 +14,7 @@ public:
 	std::set<StateMachineSideEffectCopy *> copies;
 	std::set<StateMachineSideEffectPhi *> phis;
 	std::set<StateMachineSideEffectAssertFalse *> asserts;
-#if !CONFIG_NO_STATIC_ALIASING
+#if TRACK_FRAMES
 	std::set<StateMachineSideEffectStartFunction *> StartFunction;
 	std::set<StateMachineSideEffectEndFunction *> EndFunction;
 	std::set<StateMachineSideEffectStackLayout *> StackLayout;
