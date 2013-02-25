@@ -304,6 +304,8 @@ stop(bool timed_out)
 
 	fprintf(f, "BDD: %f\n", sum_time_nodes(root, cdf_BDD, cdf_root));
 
+	fclose(f);
+
 	transfer_to_cache(root, false);
 }
 
