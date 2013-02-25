@@ -2605,6 +2605,9 @@ msmrbdd::from_smrbdd(scope *scp, smrbdd *what)
 smrbdd *
 msmrbdd::ignore_invalid(smrbdd::scope *scp, msmrbdd *what, sane_map<msmrbdd *, smrbdd *> &memo)
 {
+	if (!what) {
+		return NULL;
+	}
 	if (what->isLeaf()) {
 		if (what->leaf().valid) {
 			return scp->cnst(what->leaf().content);
