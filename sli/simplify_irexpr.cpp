@@ -2758,18 +2758,6 @@ top:
 				l = cnst;
 			}
 
-			/* Otherwise, a == b -> 0 == b - a, provided that a is not a constant. */
-			if (l->tag != Iex_Const && op == Iop_CmpEQ64) {
-				r = IRExpr_Binop(
-					Iop_Add64,
-					r,
-					IRExpr_Unop(
-						Iop_Neg64,
-						l));
-				r = optimiseIRExpr(r, opt);
-				l = IRExpr_Const_U64(0);
-			}
-
 			/* Special case: const:64 == {b}to64(X)
 			   can be optimised a bit by
 			   converting the constant to type b

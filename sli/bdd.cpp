@@ -341,14 +341,35 @@ muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo)
 	return it->second;
 }
 
+static bool
+isZero(IRExprConst *iec)
+{
+	switch (iec->Ico.ty) {
+	case Ity_I1:
+		return iec->Ico.content.U1 == 0;
+	case Ity_I8:
+		return iec->Ico.content.U8 == 0;
+	case Ity_I16:
+		return iec->Ico.content.U16 == 0;
+	case Ity_I32:
+		return iec->Ico.content.U32 == 0;
+	case Ity_I64:
+		return iec->Ico.content.U64 == 0;
+	case Ity_I128:
+		return iec->Ico.content.U128.lo == 0 &&
+			iec->Ico.content.U128.hi == 0;
+	case Ity_INVALID:
+		abort();
+	}
+	abort();
+}
+
 /* Some very quick simplifications which are always applied to the
  * condition of BDD internal nodes.  This isn't much more than just
  * constant folding. */
 static IRExpr *
 _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 {
-	if (a->optimisationsApplied || TIMEOUT)
-		return a;
 	switch (a->tag) {
 	case Iex_Unop: {
 		IRExprUnop *au = (IRExprUnop *)a;
@@ -507,65 +528,49 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		IRExprBinop *_ieb = (IRExprBinop *)a;
 		auto arg1 = quickSimplify(_ieb->arg1, memo);
 		auto arg2 = quickSimplify(_ieb->arg2, memo);
+
+		IRExprConst *arg1C = (arg1->tag == Iex_Const) ? (IRExprConst *)arg1 : NULL;
+		IRExprConst *arg2C = (arg2->tag == Iex_Const) ? (IRExprConst *)arg2 : NULL;
+		IRExprAssociative *arg2A = (arg2->tag == Iex_Associative) ? (IRExprAssociative *)arg2 : NULL;
+		IRExprUnop *arg2U = (arg2->tag == Iex_Unop) ? (IRExprUnop *)arg2 : NULL;
+		bool is_eq = _ieb->op >= Iop_CmpEQ8 && _ieb->op <= Iop_CmpEQ64;
+
 		/* x < 0 is always false, for unsigned comparisons. */
 		if (_ieb->op >= Iop_CmpLT8U &&
 		    _ieb->op <= Iop_CmpLT64U &&
-		    arg2->tag == Iex_Const) {
-			IRExprConst *cnst = (IRExprConst *)arg2;
-			bool doit;
-			switch (_ieb->op) {
-			case Iop_CmpLT8U:
-				doit = cnst->Ico.content.U8 == 0;
-				break;
-			case Iop_CmpLT16U:
-				doit = cnst->Ico.content.U16 == 0;
-				break;
-			case Iop_CmpLT32U:
-				doit = cnst->Ico.content.U32 == 0;
-				break;
-			case Iop_CmpLT64U:
-				doit = cnst->Ico.content.U64 == 0;
-				break;
-			default:
-				abort();
-			}
-			if (doit) {
-				return IRExpr_Const_U1(0);
-			}
+		    arg2C &&
+		    isZero(arg2C)) {
+			return IRExpr_Const_U1(0);
 		}
-		if (_ieb->op >= Iop_CmpEQ8 &&
-		    _ieb->op <= Iop_CmpEQ64 &&
-		    arg1->tag == Iex_Const &&
-		    arg2->tag == Iex_Associative &&
-		    ((IRExprAssociative *)arg2)->contents[0]->tag == Iex_Const) {
-			IRExprAssociative *arg2A = (IRExprAssociative *)arg2;
-			IRExprConst *cnst1 = (IRExprConst *)arg1;
+		/* We can sometimes simplify a bit if we have k1 == (k2 & x)
+		   or k1 == (k2 | x) */
+		if (is_eq && arg1C && arg2A && arg2A->contents[0]->tag == Iex_Const) {
 			IRExprConst *cnst2 = (IRExprConst *)arg2A->contents[0];
 			bool doit = false;
 			switch (arg2A->op) {
 			case Iop_Or8:
-				doit = !!(cnst2->Ico.content.U8 & ~cnst1->Ico.content.U8);
+				doit = !!(cnst2->Ico.content.U8 & ~arg1C->Ico.content.U8);
 				break;
 			case Iop_Or16:
-				doit = !!(cnst2->Ico.content.U16 & ~cnst1->Ico.content.U16);
+				doit = !!(cnst2->Ico.content.U16 & ~arg1C->Ico.content.U16);
 				break;
 			case Iop_Or32:
-				doit = !!(cnst2->Ico.content.U32 & ~cnst1->Ico.content.U32);
+				doit = !!(cnst2->Ico.content.U32 & ~arg1C->Ico.content.U32);
 				break;
 			case Iop_Or64:
-				doit = !!(cnst2->Ico.content.U64 & ~cnst1->Ico.content.U64);
+				doit = !!(cnst2->Ico.content.U64 & ~arg1C->Ico.content.U64);
 				break;
 			case Iop_And8:
-				doit = !!(cnst1->Ico.content.U8 & ~cnst2->Ico.content.U8);
+				doit = !!(arg1C->Ico.content.U8 & ~cnst2->Ico.content.U8);
 				break;
 			case Iop_And16:
-				doit = !!(cnst1->Ico.content.U16 & ~cnst2->Ico.content.U16);
+				doit = !!(arg1C->Ico.content.U16 & ~cnst2->Ico.content.U16);
 				break;
 			case Iop_And32:
-				doit = !!(cnst1->Ico.content.U32 & ~cnst2->Ico.content.U32);
+				doit = !!(arg1C->Ico.content.U32 & ~cnst2->Ico.content.U32);
 				break;
 			case Iop_And64:
-				doit = !!(cnst1->Ico.content.U64 & ~cnst2->Ico.content.U64);
+				doit = !!(arg1C->Ico.content.U64 & ~cnst2->Ico.content.U64);
 				break;
 			default:
 				doit = false;
@@ -575,6 +580,199 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				return IRExpr_Const_U1(false);
 			}
 		}
+		/* k1 == k2 + x -> k1 - k2 == x */
+		if (is_eq && arg1C && arg2A && arg2A->op >= Iop_Add8 && arg2A->op <= Iop_Add64 &&
+		    arg2A->contents[0]->tag == Iex_Const) {
+			IRExprConst *k2 = (IRExprConst *)arg2A->contents[0];
+			IRExpr *newR;
+			if (arg2A->nr_arguments == 2) {
+				newR = arg2A->contents[1];
+			} else {
+				newR = IRExpr_Associative_Copy(
+					arg2A->op,
+					arg2A->nr_arguments - 1,
+					arg2A->contents + 1);
+			}
+			IRExpr *newL;
+			switch (_ieb->op) {
+			case Iop_CmpEQ8:
+				newL = IRExpr_Const_U8(arg1C->Ico.content.U8 - k2->Ico.content.U8);
+				break;
+			case Iop_CmpEQ16:
+				newL = IRExpr_Const_U16(arg1C->Ico.content.U16 - k2->Ico.content.U16);
+				break;
+			case Iop_CmpEQ32:
+				newL = IRExpr_Const_U32(arg1C->Ico.content.U32 - k2->Ico.content.U32);
+				break;
+			case Iop_CmpEQ64:
+				newL = IRExpr_Const_U64(arg1C->Ico.content.U64 - k2->Ico.content.U64);
+				break;
+			default:
+				abort();
+			}
+			return quickSimplify(IRExpr_Binop(_ieb->op, newL, newR), memo);						
+		}
+		/* Turn 0 == x - y into x == y */
+		if (is_eq && arg1C && isZero(arg1C) &&
+		    arg2A && arg2A->op >= Iop_Add8 && arg2A->op <= Iop_Add64 &&
+		    arg2A->contents[1]->tag == Iex_Unop) {
+			IRExprUnop *uu = (IRExprUnop *)arg2A->contents[1];
+			if (uu->op >= Iop_Neg8 && uu->op <= Iop_Neg64) {
+				return quickSimplify(
+					IRExpr_Binop(_ieb->op, arg2A->contents[0], uu->arg),
+					memo);
+			}
+		}
+		/* Turn k == -(x) into just -k == x */
+		if (is_eq && arg1C && arg2U && arg2U->op >= Iop_Neg8 && arg2U->op <= Iop_Neg64) {
+			IRExpr *newR = arg2U->arg;
+			IRExpr *newL;
+			switch (_ieb->op) {
+			case Iop_CmpEQ8:
+				newL = IRExpr_Const_U8(-arg1C->Ico.content.U8);
+				break;
+			case Iop_CmpEQ16:
+				newL = IRExpr_Const_U16(-arg1C->Ico.content.U16);
+				break;
+			case Iop_CmpEQ32:
+				newL = IRExpr_Const_U32(-arg1C->Ico.content.U32);
+				break;
+			case Iop_CmpEQ64:
+				newL = IRExpr_Const_U64(-arg1C->Ico.content.U64);
+				break;
+			default:
+				abort();
+			}
+			return quickSimplify(IRExpr_Binop(_ieb->op, newL, newR), memo);
+		}
+		/* k == widen(X) can be dealt with early */
+		if (is_eq && arg1C && arg2U && arg2U->op >= Iop_8Uto16 && arg2U->op <= Iop_32Sto64) {
+			switch (arg2U->op) {
+			case Iop_8Uto16:
+				if (arg1C->Ico.content.U16 & 0xff00) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ8,
+							     IRExpr_Const_U8(arg1C->Ico.content.U16 & 0xff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_8Uto32:
+				if (arg1C->Ico.content.U32 & 0xffffff00) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ8,
+							     IRExpr_Const_U8(arg1C->Ico.content.U32 & 0xff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_8Uto64:
+				if (arg1C->Ico.content.U64 & ~0xfful) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ8,
+							     IRExpr_Const_U8(arg1C->Ico.content.U64 & 0xff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_16Uto32:
+				if (arg1C->Ico.content.U32 & 0xffff0000) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ16,
+							     IRExpr_Const_U16(arg1C->Ico.content.U32 & 0xffff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_16Uto64:
+				if (arg1C->Ico.content.U64 & ~0xfffful) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ16,
+							     IRExpr_Const_U16(arg1C->Ico.content.U64 & 0xffff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_32Uto64:
+				if (arg1C->Ico.content.U64 & ~0xfffffffful) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ32,
+							     IRExpr_Const_U32(arg1C->Ico.content.U64 & 0xffffffff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_8Sto16:
+				if ((char)arg1C->Ico.content.U16 != arg1C->Ico.content.U16) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ8,
+							     IRExpr_Const_U8(arg1C->Ico.content.U16 & 0xff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_8Sto32:
+				if ((unsigned)(int)(char)arg1C->Ico.content.U32 != arg1C->Ico.content.U32) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ8,
+							     IRExpr_Const_U8(arg1C->Ico.content.U32 & 0xff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_8Sto64:
+				if ((unsigned long)(long)(char)arg1C->Ico.content.U64 != arg1C->Ico.content.U64) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ8,
+							     IRExpr_Const_U8(arg1C->Ico.content.U64 & 0xff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_16Sto32:
+				if ((unsigned)(int)(short)arg1C->Ico.content.U32 != arg1C->Ico.content.U32) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ16,
+							     IRExpr_Const_U16(arg1C->Ico.content.U32 & 0xffff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_16Sto64:
+				if ((unsigned long)(long)(short)arg1C->Ico.content.U64 != arg1C->Ico.content.U64) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ16,
+							     IRExpr_Const_U16(arg1C->Ico.content.U64 & 0xffff),
+							     arg2U->arg),
+						memo);
+				}
+			case Iop_32Sto64:
+				if ((unsigned long)(long)(int)arg1C->Ico.content.U64 != arg1C->Ico.content.U64) {
+					return IRExpr_Const_U1(false);
+				} else {
+					return quickSimplify(
+						IRExpr_Binop(Iop_CmpEQ32,
+							     IRExpr_Const_U32(arg1C->Ico.content.U64 & 0xffffffff),
+							     arg2U->arg),
+						memo);
+				}
+			default:
+				abort();
+			}
+		}
+
 		if (arg1->tag == Iex_Const &&
 		    arg2->tag == Iex_Const) {
 			IRExprConst *arg1c = (IRExprConst *)arg1;
