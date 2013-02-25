@@ -1112,12 +1112,14 @@ availExpressionAnalysis(SMScopes *scopes,
 			bool *done_something)
 {
 	StateMachine *res;
-	stackedCdf::startAvailExpression();
 	if (is_ssa) {
+		stackedCdf::startAvailExpressionSSA();
 		res =_availExpressionAnalysis::ssaAvailAnalysis(scopes, sm, canEarlyOut, done_something);
+		stackedCdf::stopAvailExpressionSSA();
 	} else {
+		stackedCdf::startAvailExpressionBase();
 		res = _availExpressionAnalysis::availExpressionAnalysis(scopes, decode, sm, opt, oracle, done_something);
+		stackedCdf::stopAvailExpressionBase();
 	}
-	stackedCdf::stopAvailExpression();
 	return res;
 }

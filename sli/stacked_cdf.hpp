@@ -6,7 +6,8 @@ namespace stackedCdf {
 #define CdfKeys(iter)				\
 	iter(Optimise)				\
 	iter(Deadcode)				\
-	iter(AvailExpression)			\
+	iter(AvailExpressionBase)		\
+	iter(AvailExpressionSSA)		\
 	iter(LocalOptimise)			\
 	iter(PhiElimination)			\
 	iter(LoadElimination)			\

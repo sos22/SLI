@@ -298,11 +298,18 @@ stop(bool timed_out)
 	fprintf(f, "Simplify:Phi: %f\n", sum_time_nodes(root, cdf_Optimise, cdf_PhiElimination, cdf_root));
 	fprintf(f, "Simplify:Load: %f\n", sum_time_nodes(root, cdf_Optimise, cdf_LoadElimination, cdf_root));
 	fprintf(f, "Simplify:CDG: %f\n", sum_time_nodes(root, cdf_Optimise, cdf_BuildCDG, cdf_root));
-	fprintf(f, "Simplify:Avail: %f\n", sum_time_nodes(root, cdf_Optimise, cdf_AvailExpression, cdf_root));
+	fprintf(f, "Simplify:Avail: %f\n",
+		sum_time_nodes(root, cdf_Optimise, cdf_AvailExpressionSSA, cdf_root) +
+		sum_time_nodes(root, cdf_Optimise, cdf_AvailExpressionBase, cdf_root));
+	fprintf(f, "Simplify:Avail:Base: %f\n",
+		sum_time_nodes(root, cdf_Optimise, cdf_AvailExpressionBase, cdf_root));
+	fprintf(f, "Simplify:Avail:SSA: %f\n",
+		sum_time_nodes(root, cdf_Optimise, cdf_AvailExpressionSSA, cdf_root));
 	fprintf(f, "Simplify:DeadCode: %f\n", sum_time_nodes(root, cdf_Optimise, cdf_Deadcode, cdf_root));
 	fprintf(f, "Simplify:Peephole: %f\n", sum_time_nodes(root, cdf_Optimise, cdf_LocalOptimise, cdf_root));
 
 	fprintf(f, "BDD: %f\n", sum_time_nodes(root, cdf_BDD, cdf_root));
+	fprintf(f, "GC: %f\n", sum_time_nodes(root, cdf_GC, cdf_root));
 
 	fclose(f);
 
