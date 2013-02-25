@@ -168,8 +168,8 @@ useInitialMemoryLoads(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, con
 			for (auto it = potentiallyRelevantStores.begin();
 			     !hasConflictingStores && it != potentiallyRelevantStores.end();
 			     it++) {
-			if (oracle->memoryAccessesMightAlias(mai, opt, load, (StateMachineSideEffectStore *)*it))
-				hasConflictingStores = true;
+				if (oracle->memoryAccessesMightAlias(mai, opt, load, (StateMachineSideEffectStore *)*it))
+					hasConflictingStores = true;
 			}
 			if (hasConflictingStores)
 				continue;

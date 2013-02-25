@@ -299,15 +299,14 @@ _optimiseStateMachine(SMScopes *scopes,
 		}
 		done_something |= p;
 
-		if (opt.noExtend()) {
-			p = false;
-			sm = useInitialMemoryLoads(scopes, *mai, sm, opt, oracle, &p);
-			if (debugOptimiseStateMachine && p) {
-				printf("useInitialMemoryLoads:\n");
-				printStateMachine(sm, stdout);
-			}
-			done_something |= p;
+		p = false;
+		sm = useInitialMemoryLoads(scopes, *mai, sm, opt, oracle, &p);
+		if (debugOptimiseStateMachine && p) {
+			printf("useInitialMemoryLoads:\n");
+			printStateMachine(sm, stdout);
 		}
+		done_something |= p;
+
 		if (opt.mustStoreBeforeCrash()) {
 			p = false;
 			sm = enforceMustStoreBeforeCrash(scopes, sm, &p);
