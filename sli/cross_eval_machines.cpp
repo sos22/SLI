@@ -213,7 +213,7 @@ main(int argc, char *argv[])
 	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, vex_asprintf("%s/post_mai", data)));
 
 	std::set<DynAnalysisRip> nonLocalLoads;
-	std::set<DynAnalysisRip> interestingStores;
+	sane_map<DynAnalysisRip, IRType> interestingStores;
 	AllowableOptimisations opt(
 		AllowableOptimisations::fromFile(
 			&interestingStores,
