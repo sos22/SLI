@@ -413,43 +413,47 @@ cfgNodeToState(SMScopes *scopes,
 			IRStmtPut *isp = (IRStmtPut *)stmt;
 			IRExpr *expandedData;
 			expandedData = (IRExpr *)0xdead;
-			switch (isp->data->type()) {
-			case Ity_I1:
-			case Ity_INVALID:
-				abort();
-			case Ity_I128:
-				expandedData = IRExpr_Unop(Iop_128to64, isp->data);
-				break;
-			case Ity_I64:
+			if (isp->target.isReg()) {
+				switch (isp->data->type()) {
+				case Ity_I1:
+				case Ity_INVALID:
+					abort();
+				case Ity_I128:
+					expandedData = IRExpr_Unop(Iop_128to64, isp->data);
+					break;
+				case Ity_I64:
+					expandedData = isp->data;
+					break;
+				case Ity_I32:
+					expandedData = IRExpr_Binop(
+						Iop_Or64,
+						IRExpr_Unop(Iop_32Uto64, isp->data),
+						IRExpr_Binop(
+							Iop_And64,
+							IRExpr_Const_U64(0xffffffff00000000ul),
+							IRExpr_Get(isp->target, Ity_I64)));
+					break;
+				case Ity_I16:
+					expandedData = IRExpr_Binop(
+						Iop_Or64,
+						IRExpr_Unop(Iop_16Uto64, isp->data),
+						IRExpr_Binop(
+							Iop_And64,
+							IRExpr_Const_U64(0xffffffffffff0000ul),
+							IRExpr_Get(isp->target, Ity_I64)));
+					break;
+				case Ity_I8:
+					expandedData = IRExpr_Binop(
+						Iop_Or64,
+						IRExpr_Unop(Iop_8Uto64, isp->data),
+						IRExpr_Binop(
+							Iop_And64,
+							IRExpr_Const_U64(0xffffffffffffff00ul),
+							IRExpr_Get(isp->target, Ity_I64)));
+					break;
+				}
+			} else {
 				expandedData = isp->data;
-				break;
-			case Ity_I32:
-				expandedData = IRExpr_Binop(
-					Iop_Or64,
-					IRExpr_Unop(Iop_32Uto64, isp->data),
-					IRExpr_Binop(
-						Iop_And64,
-						IRExpr_Const_U64(0xffffffff00000000ul),
-						IRExpr_Get(isp->target, Ity_I64)));
-				break;
-			case Ity_I16:
-				expandedData = IRExpr_Binop(
-					Iop_Or64,
-					IRExpr_Unop(Iop_16Uto64, isp->data),
-					IRExpr_Binop(
-						Iop_And64,
-						IRExpr_Const_U64(0xffffffffffff0000ul),
-						IRExpr_Get(isp->target, Ity_I64)));
-				break;
-			case Ity_I8:
-				expandedData = IRExpr_Binop(
-					Iop_Or64,
-					IRExpr_Unop(Iop_8Uto64, isp->data),
-					IRExpr_Binop(
-						Iop_And64,
-						IRExpr_Const_U64(0xffffffffffffff00ul),
-						IRExpr_Get(isp->target, Ity_I64)));
-				break;
 			}
 			StateMachineSideEffect *se =
 				new StateMachineSideEffectCopy(
