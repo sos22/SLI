@@ -2646,7 +2646,7 @@ msmrbdd::ignore_invalid(smrbdd::scope *scp)
 static msmrbdd::scope *global_msmr_scope;
 
 struct compileMachineToBddParams {
-	typedef msmrbdd *resultT;
+	typedef VexPtr<msmrbdd, &ir_heap> resultT;
 	static msmrbdd *initialResult(SMScopes *, StateMachineRes) {
 		return global_msmr_scope->cnst(Maybe<StateMachineRes>());
 	}
