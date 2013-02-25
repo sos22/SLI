@@ -533,6 +533,48 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				return IRExpr_Const_U1(0);
 			}
 		}
+		if (_ieb->op >= Iop_CmpEQ8 &&
+		    _ieb->op <= Iop_CmpEQ64 &&
+		    arg1->tag == Iex_Const &&
+		    arg2->tag == Iex_Associative &&
+		    ((IRExprAssociative *)arg2)->contents[0]->tag == Iex_Const) {
+			IRExprAssociative *arg2A = (IRExprAssociative *)arg2;
+			IRExprConst *cnst1 = (IRExprConst *)arg1;
+			IRExprConst *cnst2 = (IRExprConst *)arg2A->contents[0];
+			bool doit = false;
+			switch (arg2A->op) {
+			case Iop_Or8:
+				doit = !!(cnst2->Ico.content.U8 & ~cnst1->Ico.content.U8);
+				break;
+			case Iop_Or16:
+				doit = !!(cnst2->Ico.content.U16 & ~cnst1->Ico.content.U16);
+				break;
+			case Iop_Or32:
+				doit = !!(cnst2->Ico.content.U32 & ~cnst1->Ico.content.U32);
+				break;
+			case Iop_Or64:
+				doit = !!(cnst2->Ico.content.U64 & ~cnst1->Ico.content.U64);
+				break;
+			case Iop_And8:
+				doit = !!(cnst1->Ico.content.U8 & ~cnst2->Ico.content.U8);
+				break;
+			case Iop_And16:
+				doit = !!(cnst1->Ico.content.U16 & ~cnst2->Ico.content.U16);
+				break;
+			case Iop_And32:
+				doit = !!(cnst1->Ico.content.U32 & ~cnst2->Ico.content.U32);
+				break;
+			case Iop_And64:
+				doit = !!(cnst1->Ico.content.U64 & ~cnst2->Ico.content.U64);
+				break;
+			default:
+				doit = false;
+				break;
+			}
+			if (doit) {
+				return IRExpr_Const_U1(false);
+			}
+		}
 		if (arg1->tag == Iex_Const &&
 		    arg2->tag == Iex_Const) {
 			IRExprConst *arg1c = (IRExprConst *)arg1;
