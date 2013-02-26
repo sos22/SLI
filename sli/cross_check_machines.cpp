@@ -277,6 +277,13 @@ public:
 	}
 };
 
+struct EvalArgs {
+	EvalState *randomAcc;
+	VexPtr<OracleInterface, &ir_heap> oracle;
+	VexPtr<MaiMap, &ir_heap> decode;
+	const AllowableOptimisations *opt;
+};
+
 class EvalCtxt : public GcCallback<&ir_heap> {
 	EvalCtxt(const EvalCtxt &o);
 	void operator =(const EvalCtxt &o);
@@ -289,6 +296,7 @@ public:
 	EvalState currentState;
 	std::vector<threadAndRegister> regOrder;
 	std::vector<std::pair<const StateMachineState *, char *> > logmsgs;
+	std::map<unsigned long, std::set<StateMachineSideEffectMemoryAccess *> > accesses;
 
 	void reset(const EvalState &s) {
 		currentState = s;
@@ -309,11 +317,10 @@ public:
 	Maybe<bool> eval(bbdd *, EvalState *randomAcc);
 	Maybe<StateMachineRes> eval(smrbdd *, EvalState *randomAcc);
 
-	bool eval(const StateMachineState *, StateMachineSideEffect *effect, EvalState *randomAcc);
+	bool eval(const StateMachineState *, StateMachineSideEffect *effect, const EvalArgs &randomAcc);
 	evalRes eval(VexPtr<StateMachineState, &ir_heap> state,
-		     const AllowableOptimisations &opt,
 		     GarbageCollectionToken token,
-		     EvalState *randomAcc = NULL);
+		     const EvalArgs &args);
 	void log(const StateMachineState *, const char *fmt, ...) __attribute__((__format__( __printf__, 3, 4)));
 	void printLog(FILE *f, const std::map<const StateMachineState *, int> &labels) const;
 
@@ -348,8 +355,6 @@ static IRExpr *mk_const(unsigned long val, IRType ty)
 	abort();
 }
 
-static evalExprRes evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom, EvalState *randomAcc);
-
 template <typename ty> static void
 printNamedContainer(FILE *f, const ty &tr)
 {
@@ -375,6 +380,8 @@ EvalCtxt::prettyPrint(FILE *f) const
 		fprintf(f, "\t%s\n", it->second);
 	}
 }
+
+static evalExprRes evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom, EvalState *randomAcc);
 
 evalExprRes
 EvalCtxt::eval(IRExpr *e, EvalState *randomAcc)
@@ -459,16 +466,25 @@ EvalCtxt::printLog(FILE *f, const std::map<const StateMachineState *, int> &labe
 }
 
 bool
-EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, EvalState *randomAcc)
+EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, const EvalArgs &args)
 {
 	switch (effect->type) {
 	case StateMachineSideEffect::Load: {
 		auto *l = (StateMachineSideEffectLoad *)effect;
-		evalExprRes addr1(eval(l->addr, randomAcc));
+		evalExprRes addr1(eval(l->addr, args.randomAcc));
 		unsigned long addr;
 		if (!addr1.unpack(&addr)) {
 			return false;
 		}
+
+		std::set<StateMachineSideEffectMemoryAccess *> &accesses(this->accesses[addr]);
+		for (auto it = accesses.begin(); it != accesses.end(); it++) {
+			if (!args.oracle->memoryAccessesMightAlias(*args.decode, *args.opt, *it, l)) {
+				return false;
+			}
+		}
+		accesses.insert(l);
+
 		unsigned long res;
 		switch (currentState.loadMemory(addr, &res)) {
 		case EvalState::lmr_bad_ptr:
@@ -481,8 +497,8 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, E
 		case EvalState::lmr_unknown_state:
 			res = genRandomUlong();
 			currentState.memory[addr] = res;
-			if (randomAcc) {
-				randomAcc->memory[addr] = res;
+			if (args.randomAcc) {
+				args.randomAcc->memory[addr] = res;
 			}
 			log(state, "load(%lx) -> %lx, freshly generated", addr, res);
 			break;
@@ -493,11 +509,20 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, E
 	}
 	case StateMachineSideEffect::Store: {
 		auto *s = (StateMachineSideEffectStore *)effect;
-		evalExprRes addr1(eval(s->addr, randomAcc));
+		evalExprRes addr1(eval(s->addr, args.randomAcc));
 		unsigned long addr;
 		if (!addr1.unpack(&addr)) {
 			return false;
 		}
+
+		std::set<StateMachineSideEffectMemoryAccess *> &accesses(this->accesses[addr]);
+		for (auto it = accesses.begin(); it != accesses.end(); it++) {
+			if (!args.oracle->memoryAccessesMightAlias(*args.decode, *args.opt, *it, s)) {
+				return false;
+			}
+		}
+		accesses.insert(s);
+
 		evalExprRes err(currentState.badPtr(addr));
 		unsigned long isBadPtr;
 		if (err.unpack(&isBadPtr) && isBadPtr) {
@@ -508,7 +533,7 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, E
 			   positives that it's not worth it. */
 			return true;
 		}
-		evalExprRes data1(eval(s->data, randomAcc));
+		evalExprRes data1(eval(s->data, args.randomAcc));
 		unsigned long data;
 		if (!data1.unpack(&data)) {
 			return false;
@@ -520,7 +545,7 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, E
 	}
 	case StateMachineSideEffect::Copy: {
 		auto *c = (StateMachineSideEffectCopy *)effect;
-		evalExprRes val1(eval(c->value, randomAcc));
+		evalExprRes val1(eval(c->value, args.randomAcc));
 		unsigned long val;
 		if (!val1.unpack(&val)) {
 			return false;
@@ -535,7 +560,7 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, E
 		return false;
 	case StateMachineSideEffect::AssertFalse: {
 		auto *a = (StateMachineSideEffectAssertFalse *)effect;
-		Maybe<bool> v = eval(a->value, randomAcc);
+		Maybe<bool> v = eval(a->value, args.randomAcc);
 		log(state, "AssertFalse(%s)", v.valid ? (v.content ? "true" : "false") : "unreached");
 		if (v.valid && !v.content)
 			return true;
@@ -567,8 +592,8 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, E
 					    "phi satisfied by initial load of %s, randomly generated %lx",
 					    it->reg.name(),
 					    currentState.regs[it->reg]);
-					if (randomAcc) {
-						randomAcc->regs[it->reg] = genRandomUlong();
+					if (args.randomAcc) {
+						args.randomAcc->regs[it->reg] = genRandomUlong();
 					}
 				} else {
 					log(state,
@@ -602,16 +627,15 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, E
 
 evalRes
 EvalCtxt::eval(VexPtr<StateMachineState, &ir_heap> state,
-	       const AllowableOptimisations &opt,
 	       GarbageCollectionToken token,
-	       EvalState *randomHolder)
+	       const EvalArgs &args)
 {
 top:
 	LibVEX_maybe_gc(token);
 	switch (state->type) {
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)state.get();
-		Maybe<bool> c(eval(smb->condition, randomHolder));
+		Maybe<bool> c(eval(smb->condition, args.randomAcc));
 		if (!c.valid) {
 			log(state, "condition is uneval");
 			return evalRes::unreached();
@@ -628,7 +652,7 @@ top:
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)state.get();
 		if (sme->sideEffect) {
-			if (!eval(state, sme->sideEffect, randomHolder)) {
+			if (!eval(state, sme->sideEffect, args)) {
 				log(state, "eval side effect failed");
 				return evalRes::unreached();
 			}
@@ -639,7 +663,8 @@ top:
 		goto top;
 	}
 	case StateMachineState::Terminal: {
-		Maybe<StateMachineRes> r(eval(((StateMachineTerminal *)state.get())->res, randomHolder));
+		auto smt = (StateMachineTerminal *)state.get();
+		Maybe<StateMachineRes> r(eval(smt->res, args.randomAcc));
 		if (!r.valid) {
 			log(state, "uneval terminal");
 			return evalRes::unreached();
@@ -652,7 +677,7 @@ top:
 			log(state, "crash");
 			if (!currentState.consistent())
 				return evalRes::unreached();
-			if (opt.mustStoreBeforeCrash())
+			if (args.opt->mustStoreBeforeCrash())
 				return evalRes::survive();
 			return evalRes::crash();
 		case smr_survive:
@@ -1626,21 +1651,32 @@ main(int argc, char *argv[])
 	for (auto it = initialCtxts.begin(); it != initialCtxts.end(); it++) {
 		EvalCtxt ctxt1(*it);
 		EvalState extended_init_ctxt(*it);
-		evalRes machine1res = ctxt1.eval(machine1->root, opt, ALLOW_GC, &extended_init_ctxt);
+		EvalArgs eval1args;
+		eval1args.randomAcc = &extended_init_ctxt;
+		eval1args.oracle = oracle;
+		eval1args.decode = mai1;
+		eval1args.opt = &opt;
+		evalRes machine1res = ctxt1.eval(machine1->root, ALLOW_GC, eval1args);
 		int i;
 		for (i = 0; i < 100 && machine1res == evalRes::unreached(); i++) {
 			ctxt1.reset(*it);
-			machine1res = ctxt1.eval(machine1->root, opt, ALLOW_GC);
+			extended_init_ctxt = *it;
+			machine1res = ctxt1.eval(machine1->root, ALLOW_GC, eval1args);
 		}
 		if (machine1res == evalRes::unreached()) {
 			nr_m1_unreached++;
 			continue;
 		}
 		EvalCtxt ctxt2(extended_init_ctxt);
-		evalRes machine2res = ctxt2.eval(machine2->root, opt, ALLOW_GC);
+		EvalArgs eval2args;
+		eval2args.randomAcc = NULL;
+		eval2args.oracle = oracle;
+		eval2args.decode = mai2;
+		eval2args.opt = &opt;
+		evalRes machine2res = ctxt2.eval(machine2->root, ALLOW_GC, eval2args);
 		for (i = 0; i < 100 && machine2res == evalRes::unreached(); i++) {
 			ctxt2.reset(extended_init_ctxt);
-			machine2res = ctxt2.eval(machine2->root, opt, ALLOW_GC);
+			machine2res = ctxt2.eval(machine2->root, ALLOW_GC, eval2args);
 		}
 
 		bool failed = machine1res != machine2res;
