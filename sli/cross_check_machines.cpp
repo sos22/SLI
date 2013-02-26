@@ -92,6 +92,9 @@ public:
 	std::set<unsigned long> badPtrs;
 	std::map<unsigned, CfgLabel> entryPoints;
 	std::map<unsigned, std::set<CfgLabel> > nonEntryPoints;
+	sane_map<std::pair<unsigned, CfgLabel>, CfgLabel> controlFlow;
+	std::map<std::pair<unsigned, CfgLabel>, std::set<CfgLabel> > nonControlFlow;
+
 	/* (a, b) in hbEdges -> a must happen before b */
 	std::vector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier> > hbEdges;
 	bool hasIssuedStore;
@@ -117,6 +120,22 @@ public:
 			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
 				if (it2 != it->second.begin())
 					fprintf(f, ", ");
+				fprintf(f, "%s", it2->name());
+			}
+			fprintf(f, "}\n");
+		}
+		fprintf(f, "controlFlow:\n");
+		for (auto it = controlFlow.begin(); it != controlFlow.end(); it++) {
+			fprintf(f, "\t(%d,%s) -> %s\n", it->first.first,
+				it->first.second.name(), it->second.name());
+		}
+		fprintf(f, "nonControlFlow:\n");
+		for (auto it = nonControlFlow.begin(); it != nonControlFlow.end(); it++) {
+			fprintf(f, "\t(%d,%s) -> {", it->first.first, it->first.second.name());
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				if (it2 != it->second.begin()) {
+					fprintf(f, ", ");
+				}
 				fprintf(f, "%s", it2->name());
 			}
 			fprintf(f, "}\n");
@@ -238,6 +257,8 @@ public:
 		badPtrs.clear();
 		entryPoints.clear();
 		nonEntryPoints.clear();
+		controlFlow.clear();
+		nonControlFlow.clear();
 		hbEdges.clear();
 		hasIssuedStore = false;
 	}
@@ -765,6 +786,32 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom, EvalState *randomAcc)
 			}
 			return e;
 		}
+		IRExpr *transformIex(IRExprControlFlow *e) {
+			std::pair<unsigned, CfgLabel> k(e->thread, e->cfg1);
+			auto it = ctxt->controlFlow.find(k);
+			if (it != ctxt->controlFlow.end())
+				return mk_const(it->second == e->cfg2, Ity_I1);
+			if (ctxt->nonControlFlow[k].count(e->cfg2))
+				return mk_const(0, Ity_I1);
+			if (usedRandom) {
+				*usedRandom = true;
+				bool res = random() % 2 == 0;
+				if (res) {
+					assert(!ctxt->controlFlow.count(k));
+					ctxt->controlFlow.insert(k, e->cfg2);
+					if (randomAcc) {
+						randomAcc->controlFlow.insert(k, e->cfg2);
+					}
+				} else {
+					ctxt->nonControlFlow[k].insert(e->cfg2);
+					if (randomAcc) {
+						randomAcc->nonControlFlow[k].insert(e->cfg2);
+					}
+				}
+				return mk_const(res, Ity_I1);
+			}
+			return e;
+		}
 		IRExpr *transformIex(IRExprUnop *e) {
 			IRExpr *arg = transformIRExpr(e->arg);
 			if (aborted)
@@ -1277,6 +1324,24 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom, EvalStat
 			res.entryPoints.insert(std::pair<unsigned, CfgLabel>(iee->thread, iee->label));
 		else
 			res.nonEntryPoints[iee->thread].insert(iee->label);
+		return true;
+	}
+	case Iex_ControlFlow: {
+		auto iee = (IRExprControlFlow *)expr;
+		std::pair<unsigned, CfgLabel> k(iee->thread, iee->cfg1);
+		auto it = res.controlFlow.find(k);
+		if (it != res.controlFlow.end())
+			return wantTrue == (it->second == iee->cfg2);
+		if (res.nonControlFlow.count(k)) {
+			if (res.nonControlFlow[k].count(iee->cfg2)) {
+				return !wantTrue;
+			}
+		}
+		if (wantTrue) {
+			res.controlFlow.insert(k, iee->cfg2);
+		} else {
+			res.nonControlFlow[k].insert(iee->cfg2);
+		}
 		return true;
 	}
 
