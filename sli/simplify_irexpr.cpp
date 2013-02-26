@@ -35,122 +35,6 @@ operationCommutes(IROp op)
 		(op == Iop_CmpEQ1);
 }
 
-static bool
-physicallyEqual(const IRRegArray *a, const IRRegArray *b)
-{
-	return a->base == b->base && a->elemTy == b->elemTy && a->nElems == b->nElems;
-}
-
-static bool
-physicallyEqual(const IRCallee *a, const IRCallee *b)
-{
-	return a->addr == b->addr;
-}
-
-bool
-physicallyEqual(const IRExpr *_a, const IRExpr *_b)
-{
-	if (_a == _b)
-		return true;
-	if (_a->tag != _b->tag)
-		return false;
-	switch (_a->tag) {
-#define hdr(type)							\
-	case Iex_ ## type : {					        \
-		const IRExpr ## type *a = (const IRExpr ## type *)_a,	\
-			*b = (const IRExpr ## type *)_b;
-#define footer() }
-	hdr(Get)
-		return a->reg == b->reg && a->ty == b->ty;
-	footer()
-	hdr(FreeVariable)
-		return a->id == b->id && a->ty == b->ty;
-	footer()
-	hdr(EntryPoint)
-		return *a == *b;
-	footer()
-	hdr(ControlFlow)
-		return *a == *b;
-	footer()
-	hdr(GetI)
-		return a->bias == b->bias &&
-			physicallyEqual(a->descr,
-					b->descr) &&
-			physicallyEqual(a->ix,
-					b->ix);
-	footer()
-	hdr(Qop)
-		return a->op == b->op &&
-		       physicallyEqual(a->arg1, b->arg1) &&
-		       physicallyEqual(a->arg2, b->arg2) &&
-		       physicallyEqual(a->arg3, b->arg3) &&
-		       physicallyEqual(a->arg4, b->arg4);
-	footer()
-	hdr(Triop)
-		return a->op == b->op &&
-		       physicallyEqual(a->arg1, b->arg1) &&
-		       physicallyEqual(a->arg2, b->arg2) &&
-		       physicallyEqual(a->arg3, b->arg3);
-	footer()
-	hdr(Binop)
-		return a->op == b->op &&
-		       physicallyEqual(a->arg1, b->arg1) &&
-		       physicallyEqual(a->arg2, b->arg2);
-	footer()
-	hdr(Unop)
-		return a->op == b->op &&
-		       physicallyEqual(a->arg, b->arg);
-	footer()
-	hdr(Load)
-		return a->ty == b->ty &&
-			physicallyEqual(a->addr, b->addr);
-	footer();
-	hdr(Const)
-		return eqIRExprConst(a, b);
-	footer()
-	hdr(CCall)
-		if (a->retty != b->retty || !physicallyEqual(a->cee, b->cee))
-			return false;
-		int x;
-		for (x = 0; a->args[x]; x++) {
-			if (!b->args[x])
-				return false;
-			if (!physicallyEqual(a->args[x],
-					     b->args[x]))
-				return false;
-		}
-		if (b->args[x])
-			return false;
-		return true;
-	footer()
-	hdr(Mux0X)
-		return physicallyEqual(a->cond,
-				       b->cond) &&
-			physicallyEqual(a->expr0,
-					b->expr0) &&
-			physicallyEqual(a->exprX,
-					b->exprX);
-	footer()
-	hdr(Associative)
-		if (a->op != b->op ||
-		    a->nr_arguments != b->nr_arguments)
-			return false;
-		for (int x = 0; x < a->nr_arguments; x++)
-			if (!physicallyEqual(a->contents[x],
-					     b->contents[x]))
-				return false;
-		return true;
-	footer()
-	hdr(HappensBefore)
-		return a->before == b->before &&
-			a->after == b->after;
-	footer()
-#undef footer
-#undef hdr
-	}
-	abort();
-}
-
 IRExpr *
 optimise_condition_calculation(
 	IRExpr *_cond,
@@ -1414,12 +1298,12 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp)
 		IRExpr *rewriteFrom;
 		IRExpr *rewriteTo;
 		IRExpr *transformIRExpr(IRExpr *e) {
-			if (physicallyEqual(e, from)) {
+			if (e == from) {
 				if (!_to)
 					_to = IRExpr_Const_U1(to);
 				return _to;
 			}
-			if (rewriteFrom && physicallyEqual(e, rewriteFrom))
+			if (e == rewriteFrom)
 				return rewriteTo;
 			if (to &&
 			    from->tag == Iex_EntryPoint &&
@@ -2060,8 +1944,9 @@ top:
 							} else {
 								purge = false;
 							}
-							if (purge)
-								purge = physicallyEqual(l, ((IRExprUnop *)r)->arg);
+							if (purge) {
+								purge = l == ((IRExprUnop *)r)->arg;
+							}
 						} else if (and_like) {
 							if (r->tag == Iex_Unop) {
 								IROp op = ((IRExprUnop *)r)->op;
@@ -2070,11 +1955,12 @@ top:
 									op == Iop_Not1;
 							} else
 								purge = false;
-							if (purge)
-								purge = physicallyEqual(l, ((IRExprUnop *)r)->arg);
+							if (purge) {
+								purge = l == ((IRExprUnop *)r)->arg;
+							}
 						} else {
 							assert(xor_like);
-							purge = physicallyEqual(l, r);
+							purge = l == r;
 						}
 
 						if (purge) {
@@ -2628,7 +2514,7 @@ top:
 		      op == Iop_CmpEQI128 ||
 		      op == Iop_CmpEQV128 ||
 		      (op >= Iop_CmpEQ8 && op <= Iop_CmpEQ64)) &&
-		     physicallyEqual(l, r) ) {
+		     l == r ) {
 			res = IRExpr_Const_U1(true);
 			break;
 		}
@@ -2646,7 +2532,7 @@ top:
 		/* x < x -> false */
 		if ( op >= Iop_CmpLT8S &&
 		     op <= Iop_CmpLT64S &&
-		     physicallyEqual(l, r) ) {
+		     l == r ) {
 			res = IRExpr_Const_U1(false);
 			break;
 		}
@@ -2674,7 +2560,7 @@ top:
 		}
 
 		if ( (op == Iop_CmpF32 || op == Iop_CmpF64) &&
-		     physicallyEqual(l, r) ) {
+		     l == r ) {
 			res = IRExpr_Const_U32(0x40);
 			break;
 		}
@@ -2987,7 +2873,7 @@ top:
 			IRExprMux0X *lm = (IRExprMux0X *)l;
 			if (r->tag == Iex_Mux0X) {
 				IRExprMux0X *rm = (IRExprMux0X *)r;
-				if (physicallyEqual(lm->cond, rm->cond)) {
+				if (lm->cond ==  rm->cond) {
 					res = IRExpr_Mux0X(
 						lm->cond,
 						optimiseIRExpr(
@@ -3213,8 +3099,8 @@ top:
 		    exprX->tag == Iex_Mux0X) {
 			IRExprMux0X *e0 = (IRExprMux0X *)expr0;
 			IRExprMux0X *eX = (IRExprMux0X *)exprX;
-			if (physicallyEqual(e0->expr0, eX->expr0) &&
-			    physicallyEqual(e0->exprX, eX->exprX)) {
+			if (e0->expr0 == eX->expr0 &&
+			    e0->exprX == eX->exprX) {
 				/* Rewrite Mux0X(a, Mux0X(b, x, y), Mux0X(c, x, y))
 				   to Mux0X( (!a && !b) || (a && !c), x, y) */
 				res = IRExpr_Mux0X(
@@ -3350,7 +3236,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 		/* Special fast path for comparing two constants. */
 		IRExprConst *ac = (IRExprConst *)a;
 		IRExprConst *bc = (IRExprConst *)b;
-		return physicallyEqual(ac, bc);
+		return ac == bc;
 	}
 	int idx = definitelyEqualCache.hash(a, b);
 	bool res;

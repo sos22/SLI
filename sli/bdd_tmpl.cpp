@@ -697,6 +697,8 @@ bdd_scope<t>::node(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	if (a == b) {
 		return a;
 	}
+	assert(a->isLeaf() || r < a->internal().rank || a->internal().rank < r);
+	assert(b->isLeaf() || r < b->internal().rank || b->internal().rank < r);
 	if (a->isLeaf() || r < a->internal().rank) {
 		/* True branch is fine */
 		if (b->isLeaf() || r < b->internal().rank) {
@@ -1203,7 +1205,7 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 		IRExpr *relocExpr;
 		const bdd_rank relocRank(relocWhere.bestCond(&relocExpr));
 		assert(relocRank == key.rank);
-		assert(physicallyEqual(relocExpr, key.expr));
+		assert(relocExpr == key.expr);
 #endif
 
 		zipInternalT trueSucc(relocWhere.trueSucc(key.rank));

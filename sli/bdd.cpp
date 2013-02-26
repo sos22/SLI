@@ -1512,7 +1512,7 @@ bdd_ordering::rankVariable(const IRExpr *a)
 		     !dupe && it2 != variableRankings.end();
 		     it2++) {
 			const IRExpr *lookupKey = it2->first;
-			if (a != it2->first && physicallyEqual(a, lookupKey)) {
+			if (a != it2->first && a == lookupKey) {
 				it->second = it2->second;
 				dupe = true;
 			}
