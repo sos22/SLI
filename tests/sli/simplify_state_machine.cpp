@@ -30,9 +30,14 @@ main(int argc, char *argv[])
 	oracle->loadCallGraph(oracle, argv[3], argv[4], ALLOW_GC);
 	VexPtr<MaiMap, &ir_heap> mai(MaiMap::fromFile(sm, argv[5]));
 
-	AllowableOptimisations opt =
-		AllowableOptimisations::defaultOptimisations
-		.enableassumePrivateStack();
+	std::map<DynAnalysisRip, IRType> interestingStores;
+	std::set<DynAnalysisRip> nonLocalLoads;
+	AllowableOptimisations opt(
+		AllowableOptimisations::fromFile(
+			&interestingStores,
+			&nonLocalLoads,
+			ms->addressSpace,
+			argv[7]));
 	sm = optimiseStateMachine(&scopes, mai, sm, opt, oracle, true, ALLOW_GC);
 	printStateMachine(sm, stdout);
 
