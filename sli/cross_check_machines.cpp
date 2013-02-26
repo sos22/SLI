@@ -81,6 +81,15 @@ public:
 		}
 	}
 	bool valid() { return !_failed; }
+	bool operator==(const evalExprRes &o) const {
+		if (_failed != o._failed) {
+			return false;
+		}
+		if (_failed) {
+			return true;
+		}
+		return val == o.val;
+	}
 };
 
 class EvalState {
@@ -400,7 +409,13 @@ EvalCtxt::eval(exprbdd *e, EvalState *randomAcc)
 		evalExprRes r(eval(e->internal().condition, randomAcc));
 		unsigned long r2;
 		if (!r.unpack(&r2)) {
-			return evalExprRes::failed();
+			auto a = eval(e->internal().trueBranch, randomAcc);
+			auto b = eval(e->internal().falseBranch, randomAcc);
+			if (a == b) {
+				return a;
+			} else {
+				return evalExprRes::failed();
+			}
 		} else if (r2) {
 			return eval(e->internal().trueBranch, randomAcc);
 		} else {
@@ -417,7 +432,13 @@ EvalCtxt::eval(bbdd *e, EvalState *randomAcc)
 		evalExprRes r(eval(e->internal().condition, randomAcc));
 		unsigned long r2;
 		if (!r.unpack(&r2)) {
-			return Maybe<bool>::nothing();
+			auto a = eval(e->internal().trueBranch, randomAcc);
+			auto b = eval(e->internal().falseBranch, randomAcc);
+			if (a == b) {
+				return a;
+			} else {
+				return Maybe<bool>::nothing();
+			}
 		} else if (r2) {
 			return eval(e->internal().trueBranch, randomAcc);
 		} else {
@@ -434,7 +455,13 @@ EvalCtxt::eval(smrbdd *e, EvalState *randomAcc)
 		evalExprRes r(eval(e->internal().condition, randomAcc));
 		unsigned long r2;
 		if (!r.unpack(&r2)) {
-			return Maybe<StateMachineRes>::nothing();
+			auto a = eval(e->internal().trueBranch, randomAcc);
+			auto b = eval(e->internal().falseBranch, randomAcc);
+			if (a == b) {
+				return a;
+			} else {
+				return Maybe<StateMachineRes>::nothing();
+			}
 		} else if (r2) {
 			return eval(e->internal().trueBranch, randomAcc);
 		} else {
