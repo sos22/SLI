@@ -263,7 +263,7 @@ class EvalCtxt : public GcCallback<&ir_heap> {
 		for (auto it = logmsgs.begin(); it != logmsgs.end(); it++)
 			hv(it->first);
 	}
-	unsigned long eval(IRExpr *e);
+	evalExprRes eval(IRExpr *e, EvalState *randomAcc);
 public:
 	EvalState currentState;
 	std::vector<threadAndRegister> regOrder;
@@ -284,14 +284,15 @@ public:
 			free(it->second);
 	}
 
-	unsigned long eval(exprbdd *);
-	bool eval(bbdd *);
-	StateMachineRes eval(smrbdd *);
+	evalExprRes eval(exprbdd *, EvalState *randomAcc);
+	Maybe<bool> eval(bbdd *, EvalState *randomAcc);
+	Maybe<StateMachineRes> eval(smrbdd *, EvalState *randomAcc);
 
-	bool eval(const StateMachineState *, StateMachineSideEffect *effect);
+	bool eval(const StateMachineState *, StateMachineSideEffect *effect, EvalState *randomAcc);
 	evalRes eval(VexPtr<StateMachineState, &ir_heap> state,
 		     const AllowableOptimisations &opt,
-		     GarbageCollectionToken token);
+		     GarbageCollectionToken token,
+		     EvalState *randomAcc = NULL);
 	void log(const StateMachineState *, const char *fmt, ...) __attribute__((__format__( __printf__, 3, 4)));
 	void printLog(FILE *f, const std::map<const StateMachineState *, int> &labels) const;
 
@@ -326,7 +327,7 @@ static IRExpr *mk_const(unsigned long val, IRType ty)
 	abort();
 }
 
-static evalExprRes evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom);
+static evalExprRes evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom, EvalState *randomAcc);
 
 template <typename ty> static void
 printNamedContainer(FILE *f, const ty &tr)
@@ -354,53 +355,62 @@ EvalCtxt::prettyPrint(FILE *f) const
 	}
 }
 
-unsigned long
-EvalCtxt::eval(IRExpr *e)
+evalExprRes
+EvalCtxt::eval(IRExpr *e, EvalState *randomAcc)
 {
 	bool b;
-	unsigned long l;
-	evalExprRes res(evalExpr(currentState, e, &b));
-	if (!res.unpack(&l))
-		abort();
-	return l;
+	evalExprRes res(evalExpr(currentState, e, &b, randomAcc));
+	return res;
 }
 
-unsigned long
-EvalCtxt::eval(exprbdd *e)
+evalExprRes
+EvalCtxt::eval(exprbdd *e, EvalState *randomAcc)
 {
 	if (e->isLeaf()) {
-		return eval(e->leaf());
+		return eval(e->leaf(), randomAcc);
 	} else {
-		if (eval(e->internal().condition)) {
-			return eval(e->internal().trueBranch);
+		evalExprRes r(eval(e->internal().condition, randomAcc));
+		unsigned long r2;
+		if (!r.unpack(&r2)) {
+			return evalExprRes::failed();
+		} else if (r2) {
+			return eval(e->internal().trueBranch, randomAcc);
 		} else {
-			return eval(e->internal().falseBranch);
+			return eval(e->internal().falseBranch, randomAcc);
 		}
 	}
 }
-bool
-EvalCtxt::eval(bbdd *e)
+Maybe<bool>
+EvalCtxt::eval(bbdd *e, EvalState *randomAcc)
 {
 	if (e->isLeaf()) {
 		return e->leaf();
 	} else {
-		if (eval(e->internal().condition)) {
-			return eval(e->internal().trueBranch);
+		evalExprRes r(eval(e->internal().condition, randomAcc));
+		unsigned long r2;
+		if (!r.unpack(&r2)) {
+			return Maybe<bool>::nothing();
+		} else if (r2) {
+			return eval(e->internal().trueBranch, randomAcc);
 		} else {
-			return eval(e->internal().falseBranch);
+			return eval(e->internal().falseBranch, randomAcc);
 		}
 	}
 }
-StateMachineRes
-EvalCtxt::eval(smrbdd *e)
+Maybe<StateMachineRes>
+EvalCtxt::eval(smrbdd *e, EvalState *randomAcc)
 {
 	if (e->isLeaf()) {
 		return e->leaf();
 	} else {
-		if (eval(e->internal().condition)) {
-			return eval(e->internal().trueBranch);
+		evalExprRes r(eval(e->internal().condition, randomAcc));
+		unsigned long r2;
+		if (!r.unpack(&r2)) {
+			return Maybe<StateMachineRes>::nothing();
+		} else if (r2) {
+			return eval(e->internal().trueBranch, randomAcc);
 		} else {
-			return eval(e->internal().falseBranch);
+			return eval(e->internal().falseBranch, randomAcc);
 		}
 	}
 }
@@ -428,12 +438,16 @@ EvalCtxt::printLog(FILE *f, const std::map<const StateMachineState *, int> &labe
 }
 
 bool
-EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
+EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, EvalState *randomAcc)
 {
 	switch (effect->type) {
 	case StateMachineSideEffect::Load: {
 		auto *l = (StateMachineSideEffectLoad *)effect;
-		unsigned long addr = eval(l->addr);
+		evalExprRes addr1(eval(l->addr, randomAcc));
+		unsigned long addr;
+		if (!addr1.unpack(&addr)) {
+			return false;
+		}
 		unsigned long res;
 		switch (currentState.loadMemory(addr, &res)) {
 		case EvalState::lmr_bad_ptr:
@@ -446,6 +460,9 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		case EvalState::lmr_unknown_state:
 			res = genRandomUlong();
 			currentState.memory[addr] = res;
+			if (randomAcc) {
+				randomAcc->memory[addr] = res;
+			}
 			log(state, "load(%lx) -> %lx, freshly generated", addr, res);
 			break;
 		}
@@ -455,7 +472,11 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 	}
 	case StateMachineSideEffect::Store: {
 		auto *s = (StateMachineSideEffectStore *)effect;
-		unsigned long addr = eval(s->addr);
+		evalExprRes addr1(eval(s->addr, randomAcc));
+		unsigned long addr;
+		if (!addr1.unpack(&addr)) {
+			return false;
+		}
 		evalExprRes err(currentState.badPtr(addr));
 		unsigned long isBadPtr;
 		if (err.unpack(&isBadPtr) && isBadPtr) {
@@ -466,7 +487,11 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 			   positives that it's not worth it. */
 			return true;
 		}
-		unsigned long data = eval(s->data);
+		evalExprRes data1(eval(s->data, randomAcc));
+		unsigned long data;
+		if (!data1.unpack(&data)) {
+			return false;
+		}
 		currentState.memory[addr] = data;
 		currentState.hasIssuedStore = true;
 		log(state, "store %lx -> %lx", data, addr);
@@ -474,7 +499,11 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 	}
 	case StateMachineSideEffect::Copy: {
 		auto *c = (StateMachineSideEffectCopy *)effect;
-		unsigned long val = eval(c->value);
+		evalExprRes val1(eval(c->value, randomAcc));
+		unsigned long val;
+		if (!val1.unpack(&val)) {
+			return false;
+		}
 		currentState.regs[c->target] = val;
 		regOrder.push_back(c->target);
 		log(state, "copy %lx", val);
@@ -485,9 +514,9 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 		return false;
 	case StateMachineSideEffect::AssertFalse: {
 		auto *a = (StateMachineSideEffectAssertFalse *)effect;
-		unsigned long v = eval(a->value);
-		log(state, "AssertFalse(%lx)", v);
-		if (v == 0)
+		Maybe<bool> v = eval(a->value, randomAcc);
+		log(state, "AssertFalse(%s)", v.valid ? (v.content ? "true" : "false") : "unreached");
+		if (v.valid && !v.content)
 			return true;
 		else
 			return false;
@@ -498,7 +527,6 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 			for (auto it2 = p->generations.begin(); it2 != p->generations.end(); it2++) {
 				if (it2->reg == *it) {
 					assert(currentState.regs.count(it2->reg));
-					assert(eval(it2->val) == currentState.regs[it2->reg]);
 					currentState.regs[p->reg] = currentState.regs[it2->reg];
 					regOrder.push_back(p->reg);
 					log(state, "phi satisfied by %s (%lx)",
@@ -527,6 +555,9 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 					    "phi satisfied by initial load of %s, randomly generated %lx",
 					    it->reg.name(),
 					    currentState.regs[it->reg]);
+					if (randomAcc) {
+						randomAcc->regs[it->reg] = genRandomUlong();
+					}
 				} else {
 					log(state,
 					    "phi satisfied by initial load of %s, already set to %lx",
@@ -557,14 +588,20 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect)
 evalRes
 EvalCtxt::eval(VexPtr<StateMachineState, &ir_heap> state,
 	       const AllowableOptimisations &opt,
-	       GarbageCollectionToken token)
+	       GarbageCollectionToken token,
+	       EvalState *randomHolder)
 {
 top:
 	LibVEX_maybe_gc(token);
 	switch (state->type) {
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)state.get();
-		if (eval(smb->condition)) {
+		Maybe<bool> c(eval(smb->condition, randomHolder));
+		if (!c.valid) {
+			log(state, "condition is uneval");
+			return evalRes::unreached();
+		}
+		if (c.content) {
 			log(state, "condition is true");
 			state = smb->trueTarget;
 		} else {
@@ -576,7 +613,7 @@ top:
 	case StateMachineState::SideEffecting: {
 		StateMachineSideEffecting *sme = (StateMachineSideEffecting *)state.get();
 		if (sme->sideEffect) {
-			if (!eval(state, sme->sideEffect)) {
+			if (!eval(state, sme->sideEffect, randomHolder)) {
 				log(state, "eval side effect failed");
 				return evalRes::unreached();
 			}
@@ -586,8 +623,13 @@ top:
 		state = sme->target;
 		goto top;
 	}
-	case StateMachineState::Terminal:
-		switch ( eval(((StateMachineTerminal *)state.get())->res) ) {
+	case StateMachineState::Terminal: {
+		Maybe<StateMachineRes> r(eval(((StateMachineTerminal *)state.get())->res, randomHolder));
+		if (!r.valid) {
+			log(state, "uneval terminal");
+			return evalRes::unreached();
+		}
+		switch (r.content) {
 		case smr_unreached:
 			log(state, "unreached");
 			return evalRes::unreached();
@@ -606,20 +648,25 @@ top:
 		}
 		abort();
 	}
+	}
 	abort();
 }
 
 static evalExprRes
-evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
+evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom, EvalState *randomAcc)
 {
 	struct : public IRExprTransformer {
 		EvalState *ctxt;
+		EvalState *randomAcc;
 		bool *usedRandom;
 		IRExpr *transformIex(IRExprGet *ieg) {
 			if (!ctxt->regs.count(ieg->reg) &&
 			    usedRandom) {
 				*usedRandom = true;
 				ctxt->regs[ieg->reg] = genRandomUlong();
+				if (randomAcc) {
+					randomAcc->regs[ieg->reg] = ctxt->regs[ieg->reg];
+				}
 			}
 			if (ctxt->regs.count(ieg->reg))
 				return mk_const(ctxt->regs[ieg->reg], ieg->type());
@@ -648,6 +695,9 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 					break;
 				*usedRandom = true;
 				ctxt->memory[address] = genRandomUlong();
+				if (randomAcc) {
+					randomAcc->memory[address] = ctxt->memory[address];
+				}
 				return mk_const(ctxt->memory[address], e->type());
 			}
 			return IRExpr_Load(e->ty, addr);
@@ -662,10 +712,17 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			if (usedRandom) {
 				*usedRandom = true;
 				bool res = random() % 2 == 0;
-				if (res)
+				if (res) {
 					ctxt->hbEdges.push_back(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>(e->before, e->after));
-				else
+					if (randomAcc) {
+						randomAcc->hbEdges.push_back(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>(e->before, e->after));
+					}
+				} else {
 					ctxt->hbEdges.push_back(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>(e->after, e->before));
+					if (randomAcc) {
+						randomAcc->hbEdges.push_back(std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>(e->after, e->before));
+					}
+				}
 				return mk_const(res, Ity_I1);
 			}
 			return e;
@@ -676,6 +733,9 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			if (usedRandom) {
 				*usedRandom = true;
 				ctxt->freeVars[e->id] = genRandomUlong();
+				if (randomAcc) {
+					randomAcc->freeVars[e->id] = ctxt->freeVars[e->id];
+				}
 				return mk_const(ctxt->freeVars[e->id], e->ty);
 			}
 			return e;
@@ -692,8 +752,14 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 				if (res) {
 					assert(!ctxt->entryPoints.count(e->thread));
 					ctxt->entryPoints.insert(std::pair<unsigned, CfgLabel>(e->thread, e->label));
+					if (randomAcc) {
+						randomAcc->entryPoints.insert(std::pair<unsigned, CfgLabel>(e->thread, e->label));
+					}
 				} else {
 					ctxt->nonEntryPoints[e->thread].insert(e->label);
+					if (randomAcc) {
+						randomAcc->nonEntryPoints[e->thread].insert(e->label);
+					}
 				}
 				return mk_const(res, Ity_I1);
 			}
@@ -718,6 +784,9 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 			if (usedRandom) {
 				*usedRandom = true;
 				ctxt->memory[address] = genRandomUlong();
+				if (randomAcc) {
+					randomAcc->memory[address] = ctxt->memory[address];
+				}
 				return mk_const(0, Ity_I1);
 			}
 			return IRExpr_Unop(Iop_BadPtr, arg);
@@ -738,6 +807,7 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 	} trans;
 	trans.ctxt = &ctxt;
 	trans.usedRandom = usedRandom;
+	trans.randomAcc = randomAcc;
 	IRExpr *a = trans.doit(what);
 	a = simplifyIRExpr(a, AllowableOptimisations::defaultOptimisations);
 	if (a->tag == Iex_Const)
@@ -746,11 +816,12 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom)
 		return evalExprRes::failed();
 }
 
-static bool makeEq(EvalState &res, IRExpr *arg1, IRExpr *arg2, bool wantTrue, bool *usedRandom);
+static bool makeEq(EvalState &res, IRExpr *arg1, IRExpr *arg2, bool wantTrue, bool *usedRandom, EvalState *randomAcc);
 
 /* Returns true on success and false otherwise. */
 static bool
-makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, bool *usedRandom)
+makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, bool *usedRandom,
+	    EvalState *randomAcc)
 {
 	switch (what->tag) {
 	case Iex_FreeVariable: {
@@ -783,7 +854,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 	}
 	case Iex_Load: {
 		auto *iel = (IRExprLoad *)what;
-		evalExprRes addr(evalExpr(res, iel->addr, usedRandom));
+		evalExprRes addr(evalExpr(res, iel->addr, usedRandom, randomAcc));
 		unsigned long addr_c;
 		if (!addr.unpack(&addr_c))
 			return false;
@@ -812,8 +883,8 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		cc_op = iec->args[1];
 		dep1 = iec->args[2];
 		dep2 = iec->args[3];
-		evalExprRes cond_eval(evalExpr(res, cond, NULL));
-		evalExprRes cc_op_eval(evalExpr(res, cc_op, NULL));
+		evalExprRes cond_eval(evalExpr(res, cond, NULL, randomAcc));
+		evalExprRes cc_op_eval(evalExpr(res, cc_op, NULL, randomAcc));
 		unsigned long cond_c;
 		if (!cond_eval.unpack(&cond_c) ||
 		    cc_op_eval.valid()) {
@@ -829,20 +900,20 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		switch (cond_c) {
 		case AMD64CondZ:
 		case AMD64CondLE:
-			return makeEqConst(res, AMD64G_CC_OP_SUBQ, cc_op, true, usedRandom) &&
-				makeEq(res, dep1, dep2, wantTrue, usedRandom);
+			return makeEqConst(res, AMD64G_CC_OP_SUBQ, cc_op, true, usedRandom, randomAcc) &&
+				makeEq(res, dep1, dep2, wantTrue, usedRandom, randomAcc);
 		case AMD64CondNZ:
-			return makeEqConst(res, AMD64G_CC_OP_SUBQ, cc_op, true, usedRandom) &&
-				makeEq(res, dep1, dep2, !wantTrue, usedRandom);
+			return makeEqConst(res, AMD64G_CC_OP_SUBQ, cc_op, true, usedRandom, randomAcc) &&
+				makeEq(res, dep1, dep2, !wantTrue, usedRandom, randomAcc);
 		case AMD64CondNLE:
 			if (wantTrue) {
-				return makeEqConst(res, AMD64G_CC_OP_SUBQ, cc_op, true, usedRandom) &&
-					makeEqConst(res, 128, dep1, true, usedRandom) &&
-					makeEqConst(res, 0, dep2, true, usedRandom);
+				return makeEqConst(res, AMD64G_CC_OP_SUBQ, cc_op, true, usedRandom, randomAcc) &&
+					makeEqConst(res, 128, dep1, true, usedRandom, randomAcc) &&
+					makeEqConst(res, 0, dep2, true, usedRandom, randomAcc);
 			} else {
-				return makeEqConst(res, AMD64G_CC_OP_SUBQ, cc_op, true, usedRandom) &&
-					makeEqConst(res, 128, dep2, true, usedRandom) &&
-					makeEqConst(res, 0, dep1, true, usedRandom);
+				return makeEqConst(res, AMD64G_CC_OP_SUBQ, cc_op, true, usedRandom, randomAcc) &&
+					makeEqConst(res, 128, dep2, true, usedRandom, randomAcc) &&
+					makeEqConst(res, 0, dep1, true, usedRandom, randomAcc);
 			}
 		default:
 			break;
@@ -855,15 +926,15 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		case Iop_Add64: {
 			if (iea->nr_arguments != 2)
 				break;
-			evalExprRes res1(evalExpr(res, iea->contents[0], NULL));
-			evalExprRes res2(evalExpr(res, iea->contents[1], NULL));
+			evalExprRes res1(evalExpr(res, iea->contents[0], NULL, randomAcc));
+			evalExprRes res2(evalExpr(res, iea->contents[1], NULL, randomAcc));
 			unsigned long res1c, res2c;
 			if (res1.unpack(&res1c))
-				return makeEqConst(res, cnst - res1c, iea->contents[1], wantTrue, usedRandom);
+				return makeEqConst(res, cnst - res1c, iea->contents[1], wantTrue, usedRandom, randomAcc);
 			if (res2.unpack(&res2c))
-				return makeEqConst(res, cnst - res2c, iea->contents[0], wantTrue, usedRandom);
-			res1 = evalExpr(res, iea->contents[0], usedRandom);
-			return makeEqConst(res, cnst, iea->contents[1], wantTrue, usedRandom);
+				return makeEqConst(res, cnst - res2c, iea->contents[0], wantTrue, usedRandom, randomAcc);
+			res1 = evalExpr(res, iea->contents[0], usedRandom, randomAcc);
+			return makeEqConst(res, cnst, iea->contents[1], wantTrue, usedRandom, randomAcc);
 		}
 		case Iop_Xor8:
 		case Iop_Xor16:
@@ -871,20 +942,20 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		case Iop_Xor64: {
 			if (iea->nr_arguments != 2)
 				break;
-			evalExprRes res1(evalExpr(res, iea->contents[0], NULL));
-			evalExprRes res2(evalExpr(res, iea->contents[1], NULL));
+			evalExprRes res1(evalExpr(res, iea->contents[0], NULL, randomAcc));
+			evalExprRes res2(evalExpr(res, iea->contents[1], NULL, randomAcc));
 			unsigned long res1c, res2c;
 			if (res1.unpack(&res1c))
-				return makeEqConst(res, cnst ^ res1c, iea->contents[1], wantTrue, usedRandom);
+				return makeEqConst(res, cnst ^ res1c, iea->contents[1], wantTrue, usedRandom, randomAcc);
 			if (res2.unpack(&res2c))
-				return makeEqConst(res, cnst ^ res2c, iea->contents[0], wantTrue, usedRandom);
-			res1 = evalExpr(res, iea->contents[0], usedRandom);
-			return makeEqConst(res, cnst, iea->contents[1], wantTrue, usedRandom);
+				return makeEqConst(res, cnst ^ res2c, iea->contents[0], wantTrue, usedRandom, randomAcc);
+			res1 = evalExpr(res, iea->contents[0], usedRandom, randomAcc);
+			return makeEqConst(res, cnst, iea->contents[1], wantTrue, usedRandom, randomAcc);
 		}
 		case Iop_And1: {
 			std::vector<IRExpr *> nonConstArgs;
 			for (int i = 0; i < iea->nr_arguments; i++) {
-				evalExprRes eer(evalExpr(res, iea->contents[i], NULL));
+				evalExprRes eer(evalExpr(res, iea->contents[i], NULL, randomAcc));
 				unsigned long a;
 				if (eer.unpack(&a)) {
 					if (!a) {
@@ -911,7 +982,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 				for (auto it = nonConstArgs.begin();
 				     it != nonConstArgs.end();
 				     it++) {
-					if (!makeEqConst(res, 1, *it, true, usedRandom))
+					if (!makeEqConst(res, 1, *it, true, usedRandom, randomAcc))
 						return false;
 				}
 				return true;
@@ -922,7 +993,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 				for (unsigned x = 0; x < nonConstArgs.size() - 1; x++) {
 					EvalState r2(res);
 					bool ur = false;
-					if (makeEqConst(r2, 0, nonConstArgs[x], true, usedRandom ? &ur : NULL)) {
+					if (makeEqConst(r2, 0, nonConstArgs[x], true, usedRandom ? &ur : NULL, randomAcc)) {
 						res = r2;
 						if (ur) {
 							assert(usedRandom);
@@ -942,7 +1013,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			std::vector<IRExpr *> nonConstArgs;
 			unsigned long consts = ~0ul;
 			for (int i = 0; i < iea->nr_arguments; i++) {
-				evalExprRes eer(evalExpr(res, iea->contents[i], NULL));
+				evalExprRes eer(evalExpr(res, iea->contents[i], NULL, randomAcc));
 				unsigned long a;
 				if (eer.unpack(&a)) {
 					consts &= a;
@@ -962,7 +1033,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			for (unsigned x = 0; x < nonConstArgs.size() - 1; x++) {
 				EvalState r2(res);
 				bool ur = false;
-				if (makeEqConst(r2, cnst, nonConstArgs[x], wantTrue, usedRandom ? &ur : NULL)) {
+				if (makeEqConst(r2, cnst, nonConstArgs[x], wantTrue, usedRandom ? &ur : NULL, randomAcc)) {
 					res = r2;
 					if (ur) {
 						assert(usedRandom);
@@ -971,7 +1042,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 					return true;
 				}
 			}
-			return makeEqConst(res, cnst, nonConstArgs.back(), wantTrue, usedRandom);
+			return makeEqConst(res, cnst, nonConstArgs.back(), wantTrue, usedRandom, randomAcc);
 		}
 		default:
 			break;
@@ -982,37 +1053,37 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		auto *ieu = (IRExprUnop *)what;
 		switch (ieu->op) {
 		case Iop_Neg64:
-			return makeEqConst(res, -cnst, ieu->arg, wantTrue, usedRandom);
+			return makeEqConst(res, -cnst, ieu->arg, wantTrue, usedRandom, randomAcc);
 		case Iop_Not1:
-			return makeEqConst(res, !cnst, ieu->arg, wantTrue, usedRandom);
+			return makeEqConst(res, !cnst, ieu->arg, wantTrue, usedRandom, randomAcc);
 		case Iop_16to8:
 		case Iop_32to8:
 		case Iop_64to8: {
 			if (cnst & ~0xfful)
 				return !wantTrue;
-			return makeEqConst(res, cnst & 0xff, ieu->arg, wantTrue, usedRandom);
+			return makeEqConst(res, cnst & 0xff, ieu->arg, wantTrue, usedRandom, randomAcc);
 		}
 		case Iop_32to16:
 		case Iop_64to16: {
 			if (cnst & ~0xfffful)
 				return !wantTrue;
-			return makeEqConst(res, cnst & 0xffff, ieu->arg, wantTrue, usedRandom);
+			return makeEqConst(res, cnst & 0xffff, ieu->arg, wantTrue, usedRandom, randomAcc);
 		}
 		case Iop_64to32: {
 			if (cnst & ~0xfffffffful)
 				return !wantTrue;
-			return makeEqConst(res, cnst & 0xffffffff, ieu->arg, wantTrue, usedRandom);
+			return makeEqConst(res, cnst & 0xffffffff, ieu->arg, wantTrue, usedRandom, randomAcc);
 		}
 		case Iop_1Uto64: {
 			if (cnst & ~1ul)
 				return !wantTrue;
-			return makeEqConst(res, cnst & 1, ieu->arg, wantTrue, usedRandom);
+			return makeEqConst(res, cnst & 1, ieu->arg, wantTrue, usedRandom, randomAcc);
 		}
 		case Iop_8Sto32: {
 			if ( (cnst & 0xffffff80) != 0xffffff80 &&
 			     (cnst & 0xffffff80) != 0)
 				return !wantTrue;
-			return makeEqConst(res, cnst & 0xff, ieu->arg, wantTrue, usedRandom);
+			return makeEqConst(res, cnst & 0xff, ieu->arg, wantTrue, usedRandom, randomAcc);
 		}
 		default:
 			break;
@@ -1023,8 +1094,8 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 		auto *ieb = (IRExprBinop *)what;
 		switch (ieb->op) {
 		case Iop_Shl64: {
-			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL));
-			evalExprRes arg2(evalExpr(res, ieb->arg2, NULL));
+			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL, randomAcc));
+			evalExprRes arg2(evalExpr(res, ieb->arg2, NULL, randomAcc));
 			unsigned long arg1c, arg2c;
 			if (arg1.unpack(&arg1c)) {
 				if (arg2.unpack(&arg2c)) {
@@ -1033,7 +1104,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 				} else {
 					for (arg2c = 0; arg2c < 63; arg2c++) {
 						if ( ((arg1c << arg2c) == cnst) == wantTrue )
-							return makeEqConst(res, arg2c, ieb->arg2, true, usedRandom);
+							return makeEqConst(res, arg2c, ieb->arg2, true, usedRandom, randomAcc);
 					}
 					return false;
 				}
@@ -1041,25 +1112,25 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 				arg1c = cnst >> arg2c;
 				if ( (arg1c << arg2c) != cnst)
 					return !wantTrue;
-				return makeEqConst(res, arg1c, ieb->arg1, wantTrue, usedRandom);
+				return makeEqConst(res, arg1c, ieb->arg1, wantTrue, usedRandom, randomAcc);
 			} else {
-				return makeEqConst(res, cnst, ieb->arg1, wantTrue, usedRandom) &&
-					makeEqConst(res, 0, ieb->arg2, true, usedRandom);
+				return makeEqConst(res, cnst, ieb->arg1, wantTrue, usedRandom, randomAcc) &&
+					makeEqConst(res, 0, ieb->arg2, true, usedRandom, randomAcc);
 			}
 			abort();
 		}
 		case Iop_CmpEQ64: {
-			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL));
-			evalExprRes arg2(evalExpr(res, ieb->arg2, NULL));
+			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL, randomAcc));
+			evalExprRes arg2(evalExpr(res, ieb->arg2, NULL, randomAcc));
 			unsigned long arg1c, arg2c;
 			if (!cnst)
 				wantTrue = !wantTrue;
 			if (arg1.unpack(&arg1c)) {
 				if (arg2.unpack(&arg2c))
 					return (arg1c == arg2c) == wantTrue;
-				return makeEqConst(res, arg1c, ieb->arg2, wantTrue, usedRandom);
+				return makeEqConst(res, arg1c, ieb->arg2, wantTrue, usedRandom, randomAcc);
 			} else if (arg2.unpack(&arg2c)) {
-				return makeEqConst(res, arg2c, ieb->arg1, wantTrue, usedRandom);
+				return makeEqConst(res, arg2c, ieb->arg1, wantTrue, usedRandom, randomAcc);
 			}
 			if (usedRandom) {
 				arg1c = genRandomUlong();
@@ -1067,13 +1138,13 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 			} else {
 				arg1c = 0;
 			}
-			if (!makeEqConst(res, arg1c, ieb->arg1, true, usedRandom))
+			if (!makeEqConst(res, arg1c, ieb->arg1, true, usedRandom, randomAcc))
 				return false;
-			return makeEqConst(res, arg1c, ieb->arg2, wantTrue, usedRandom);
+			return makeEqConst(res, arg1c, ieb->arg2, wantTrue, usedRandom, randomAcc);
 		}
 		case Iop_CmpLT64U: {
-			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL));
-			evalExprRes arg2(evalExpr(res, ieb->arg1, NULL));
+			evalExprRes arg1(evalExpr(res, ieb->arg1, NULL, randomAcc));
+			evalExprRes arg2(evalExpr(res, ieb->arg1, NULL, randomAcc));
 			unsigned long arg1c, arg2c;
 			if (arg1.unpack(&arg1c)) {
 				if (arg2.unpack(&arg2c))
@@ -1084,7 +1155,7 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 				if (arg2.unpack(&arg2c)) {
 					if (arg2c == 0)
 						return (0 == cnst) == wantTrue;
-					return makeEqConst(res, arg2c - 1, ieb->arg1, wantTrue, usedRandom);
+					return makeEqConst(res, arg2c - 1, ieb->arg1, wantTrue, usedRandom, randomAcc);
 				}
 				if (usedRandom) {
 					do {
@@ -1094,10 +1165,10 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 				} else {
 					arg1c = 0;
 				}
-				if (!makeEqConst(res, arg1c, ieb->arg1, true, usedRandom))
+				if (!makeEqConst(res, arg1c, ieb->arg1, true, usedRandom, randomAcc))
 					return false;
 			}
-			return makeEqConst(res, arg1c + 1, ieb->arg2, wantTrue, usedRandom);
+			return makeEqConst(res, arg1c + 1, ieb->arg2, wantTrue, usedRandom, randomAcc);
 		}
 		default:
 			break;
@@ -1112,20 +1183,20 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 }
 
 static bool
-makeEq(EvalState &res, IRExpr *arg1, IRExpr *arg2, bool wantTrue, bool *usedRandom)
+makeEq(EvalState &res, IRExpr *arg1, IRExpr *arg2, bool wantTrue, bool *usedRandom, EvalState *randomAcc)
 {
 	if (arg1->tag == Iex_Const)
-		return makeEqConst(res, ((IRExprConst *)arg1)->Ico.content.U64, arg2, wantTrue, usedRandom);
+		return makeEqConst(res, ((IRExprConst *)arg1)->Ico.content.U64, arg2, wantTrue, usedRandom, randomAcc);
 	else if (arg2->tag == Iex_Const)
-		return makeEqConst(res, ((IRExprConst *)arg2)->Ico.content.U64, arg1, wantTrue, usedRandom);
+		return makeEqConst(res, ((IRExprConst *)arg2)->Ico.content.U64, arg1, wantTrue, usedRandom, randomAcc);
 	else
-		return makeEqConst(res, 0, arg1, true, usedRandom) &&
-			makeEqConst(res, 0, arg2, wantTrue, usedRandom);
+		return makeEqConst(res, 0, arg1, true, usedRandom, randomAcc) &&
+			makeEqConst(res, 0, arg2, wantTrue, usedRandom, randomAcc);
 
 }
 
 static bool
-makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
+makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom, EvalState *randomAcc)
 {
 	switch (expr->tag) {
 	case Iex_Binop: {
@@ -1135,7 +1206,7 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 		case Iop_CmpEQ16:
 		case Iop_CmpEQ32:
 		case Iop_CmpEQ64:
-			return makeEq(res, ieb->arg1, ieb->arg2, wantTrue, usedRandom);
+			return makeEq(res, ieb->arg1, ieb->arg2, wantTrue, usedRandom, randomAcc);
 			/* Cheat a little bit and ignore overflow here */
 		case Iop_CmpLT8U:
 		case Iop_CmpLT16U:
@@ -1153,7 +1224,8 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 						ieb->arg2),
 					AllowableOptimisations::defaultOptimisations),
 				wantTrue,
-				usedRandom);
+				usedRandom,
+				randomAcc);
 		default:
 			break;
 		}
@@ -1163,9 +1235,9 @@ makeTrue(EvalState &res, IRExpr *expr, bool wantTrue, bool *usedRandom)
 		auto *ieu = (IRExprUnop *)expr;
 		switch (ieu->op) {
 		case Iop_64to1:
-			return makeEqConst(res, wantTrue, ieu->arg, true, usedRandom);
+			return makeEqConst(res, wantTrue, ieu->arg, true, usedRandom, randomAcc);
 		case Iop_BadPtr: {
-			evalExprRes addr(evalExpr(res, ieu->arg, usedRandom));
+			evalExprRes addr(evalExpr(res, ieu->arg, usedRandom, randomAcc));
 			unsigned long addr_c;
 			if (!addr.unpack(&addr_c))
 				return false;
@@ -1238,7 +1310,7 @@ shuffle(std::vector<t> &what)
 }
 	
 static bool
-generateConcreteSatisfier(EvalState &res, const satisfier &abstract_sat, bool *usedRandom)
+generateConcreteSatisfier(EvalState &res, const satisfier &abstract_sat, bool *usedRandom, EvalState *randomAcc)
 {
 	std::vector<IRExpr *> truePrimaries;
 	std::vector<IRExpr *> falsePrimaries;
@@ -1275,21 +1347,21 @@ generateConcreteSatisfier(EvalState &res, const satisfier &abstract_sat, bool *u
 	/* True primaries tend to be easier to deal with, so do them
 	 * first. */
 	for (auto it = truePrimaries.begin(); it != truePrimaries.end(); it++) {
-		if (!makeTrue(res, *it, true, usedRandom))
+		if (!makeTrue(res, *it, true, usedRandom, randomAcc))
 			return false;
 	}
 	for (auto it = falsePrimaries.begin(); it != falsePrimaries.end(); it++) {
-		if (!makeTrue(res, *it, false, usedRandom))
+		if (!makeTrue(res, *it, false, usedRandom, randomAcc))
 			return false;
 	}
 	/* BadPtr expressions are particularly tricky, so do them
 	 * last. */
 	for (auto it = trueBadPtrs.begin(); it != trueBadPtrs.end(); it++) {
-		if (!makeTrue(res, *it, true, usedRandom))
+		if (!makeTrue(res, *it, true, usedRandom, randomAcc))
 			return false;
 	}
 	for (auto it = falseBadPtrs.begin(); it != falseBadPtrs.end(); it++) {
-		if (!makeTrue(res, *it, false, usedRandom))
+		if (!makeTrue(res, *it, false, usedRandom, randomAcc))
 			return false;
 	}
 	return true;
@@ -1305,7 +1377,7 @@ addSatisfier(std::vector<EvalState> &initialCtxts, IRExpr *a)
 		EvalState ctxt;
 		bool random = false;
 		bool res;
-		res = generateConcreteSatisfier(ctxt, sat.get(), &random);
+		res = generateConcreteSatisfier(ctxt, sat.get(), &random, NULL);
 		if (res) {
 			if (debug_gen_contexts) {
 				printf("New context:\n");
@@ -1317,7 +1389,7 @@ addSatisfier(std::vector<EvalState> &initialCtxts, IRExpr *a)
 			for (int i = 0; !done && i < 100; i++) {
 				random = false;
 				ctxt.clear();
-				res = generateConcreteSatisfier(ctxt, sat.get(), &random);
+				res = generateConcreteSatisfier(ctxt, sat.get(), &random, NULL);
 				assert(random);
 				if (res) {
 					if (debug_gen_contexts) {
@@ -1356,7 +1428,7 @@ main(int argc, char *argv[])
 
 	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, argv[8]));
 	std::set<DynAnalysisRip> nonLocalLoads;
-	std::set<DynAnalysisRip> interestingStores;
+	std::map<DynAnalysisRip, IRType> interestingStores;
 	AllowableOptimisations opt(
 		AllowableOptimisations::fromFile(
 			&interestingStores,
@@ -1406,7 +1478,7 @@ main(int argc, char *argv[])
 		for (auto it2 = initialCtxts.begin();
 		     !have_satisfying && it2 != initialCtxts.end();
 		     it2++) {
-			auto res = evalExpr(*it2, *it, NULL);
+			auto res = evalExpr(*it2, *it, NULL, NULL);
 			unsigned long v;
 			if (res.unpack(&v) && v) {
 				have_satisfying = true;
@@ -1448,7 +1520,7 @@ main(int argc, char *argv[])
 		for (auto it2 = initialCtxts.begin();
 		     !found_one && it2 != initialCtxts.end();
 		     it2++) {
-			auto res = evalExpr(*it2, a, NULL);
+			auto res = evalExpr(*it2, a, NULL, NULL);
 			unsigned long v;
 			if (res.unpack(&v) && v) {
 				if (debug_gen_contexts) {
@@ -1493,16 +1565,17 @@ main(int argc, char *argv[])
 	std::map<const StateMachineState *, int> labels2;
 	for (auto it = initialCtxts.begin(); it != initialCtxts.end(); it++) {
 		EvalCtxt ctxt1(*it);
-		evalRes machine1res = ctxt1.eval(machine1->root, opt, ALLOW_GC);
+		EvalState extended_init_ctxt(*it);
+		evalRes machine1res = ctxt1.eval(machine1->root, opt, ALLOW_GC, &extended_init_ctxt);
 		int i;
 		for (i = 0; i < 100 && machine1res == evalRes::unreached(); i++) {
 			ctxt1.reset(*it);
 			machine1res = ctxt1.eval(machine1->root, opt, ALLOW_GC);
 		}
-		EvalCtxt ctxt2(*it);
+		EvalCtxt ctxt2(extended_init_ctxt);
 		evalRes machine2res = ctxt2.eval(machine2->root, opt, ALLOW_GC);
 		for (i = 0; i < 100 && machine2res == evalRes::unreached(); i++) {
-			ctxt2.reset(*it);
+			ctxt2.reset(extended_init_ctxt);
 			machine2res = ctxt2.eval(machine2->root, opt, ALLOW_GC);
 		}
 
@@ -1527,11 +1600,12 @@ main(int argc, char *argv[])
 				printedMachines = true;
 			}
 			printf("Failed: machine1res(%s) != machine2res(%s)\n", machine1res.name(), machine2res.name());
-			it->prettyPrint(stdout);
 			printf("Machine 1 log:\n");
 			ctxt1.printLog(stdout, labels1);
 			printf("Machine 2 log:\n");
 			ctxt2.printLog(stdout, labels2);
+			printf("Initial state:\n");
+			extended_init_ctxt.prettyPrint(stdout);
 
 			printf("Context %zd/%zd\n", it - initialCtxts.begin(),
 			       initialCtxts.size());

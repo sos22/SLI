@@ -747,7 +747,6 @@ expressionImpliesRewrite(IRExpr *what, IRExpr **from, IRExpr **to)
 	if (whatb->op < Iop_CmpEQ8 || whatb->op > Iop_CmpEQ64)
 		return false;
 	if (whatb->op == Iop_CmpEQ64) {
-		assert(whatb->arg1->tag == Iex_Const);
 		*to = whatb->arg1;
 		*from = whatb->arg2;
 
