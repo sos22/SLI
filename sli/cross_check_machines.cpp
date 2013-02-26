@@ -638,7 +638,28 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, c
 		regOrder.push_back(p->reg);
 		return true;
 	}
-	case StateMachineSideEffect::ImportRegister:
+	case StateMachineSideEffect::ImportRegister: {
+		auto a = (StateMachineSideEffectImportRegister *)effect;
+		threadAndRegister src(threadAndRegister::reg(a->tid, a->vex_offset, (unsigned)-1));
+		auto it_did_insert = currentState.regs.insert(std::pair<threadAndRegister, unsigned long>(src, 0xf001beefdeadbabe));
+		unsigned long v;
+		if (it_did_insert.second) {
+			v = genRandomUlong();
+			it_did_insert.first->second = v;
+			if (args.randomAcc) {
+				args.randomAcc->regs[src] = v;
+			}
+			log(state, "import %s -> generate fresh %lx",
+			    src.name(), v);
+		} else {
+			v = it_did_insert.first->second;
+			log(state, "import %s -> %lx", src.name(), v);
+		}
+		currentState.regs[a->reg] = v;
+		regOrder.push_back(a->reg);
+		return true;
+	}
+
 	case StateMachineSideEffect::StartAtomic:
 	case StateMachineSideEffect::EndAtomic:
 #if !CONFIG_NO_STATIC_ALIASING
@@ -727,7 +748,9 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom, EvalState *randomAcc)
 		EvalState *randomAcc;
 		bool *usedRandom;
 		IRExpr *transformIex(IRExprGet *ieg) {
-			if (!ctxt->regs.count(ieg->reg) &&
+			if (ieg->reg.isReg() &&
+			    ieg->reg.gen() == (unsigned)-1 &&
+			    !ctxt->regs.count(ieg->reg) &&
 			    usedRandom) {
 				*usedRandom = true;
 				ctxt->regs[ieg->reg] = genRandomUlong();
@@ -735,8 +758,9 @@ evalExpr(EvalState &ctxt, IRExpr *what, bool *usedRandom, EvalState *randomAcc)
 					randomAcc->regs[ieg->reg] = ctxt->regs[ieg->reg];
 				}
 			}
-			if (ctxt->regs.count(ieg->reg))
+			if (ctxt->regs.count(ieg->reg)) {
 				return mk_const(ctxt->regs[ieg->reg], ieg->type());
+			}
 			return ieg;
 		}
 		IRExpr *transformIex(IRExprGetI *) {
@@ -933,6 +957,9 @@ makeEqConst(EvalState &res, unsigned long cnst, IRExpr *what, bool wantTrue, boo
 	}
 	case Iex_Get: {
 		auto *ieg = (IRExprGet *)what;
+		if (!ieg->reg.isReg()) {
+			return false;
+		}
 		if (res.regs.count(ieg->reg)) {
 			if (res.regs[ieg->reg] == cnst)
 				return wantTrue;
