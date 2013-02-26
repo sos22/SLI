@@ -12,7 +12,7 @@ main(int argc, char *argv[])
 	MachineState *ms = MachineState::readELFExec(argv[1]);
 	Oracle *oracle = new Oracle(ms, NULL, NULL);
 
-	std::set<DynAnalysisRip> input;
+	std::map<DynAnalysisRip, IRType> input;
 
 	for (int x = 2; x < argc; x++) {
 		DynAnalysisRip r;
@@ -21,7 +21,7 @@ main(int argc, char *argv[])
 		    *leftovers != 0)
 			errx(1, "expected dyn analysis rip as argument, got %s",
 			     argv[x]);
-		input.insert(r);
+		input[r] = Ity_I64;
 	}
 	
 	CFGNode **roots;
