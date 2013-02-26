@@ -1618,6 +1618,7 @@ main(int argc, char *argv[])
 	int nr_demote_survival = 0;
 
 	int nr_failed = 0;
+	int nr_m1_unreached= 0;
 	int cntr = 0;
 	bool printedMachines = false;
 	std::map<const StateMachineState *, int> labels1;
@@ -1630,6 +1631,10 @@ main(int argc, char *argv[])
 		for (i = 0; i < 100 && machine1res == evalRes::unreached(); i++) {
 			ctxt1.reset(*it);
 			machine1res = ctxt1.eval(machine1->root, opt, ALLOW_GC);
+		}
+		if (machine1res == evalRes::unreached()) {
+			nr_m1_unreached++;
+			continue;
 		}
 		EvalCtxt ctxt2(extended_init_ctxt);
 		evalRes machine2res = ctxt2.eval(machine2->root, opt, ALLOW_GC);
@@ -1692,7 +1697,7 @@ main(int argc, char *argv[])
 	       failed_generate_satisfier + failed_generate_nonsat,
 	       failed_generate_satisfier,
 	       failed_generate_nonsat);
-	printf("%d survival states demoted to unreached.\n", nr_demote_survival);
+	printf("%d survival states demoted to unreached, %d machine 1 unreachable\n", nr_demote_survival, nr_m1_unreached);
 	if (nr_failed != 0) {
 		printf("Result: failed %d/%d\n", nr_failed, cntr);
 		return 1;
