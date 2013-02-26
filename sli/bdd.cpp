@@ -1507,18 +1507,7 @@ bdd_ordering::rankVariable(const IRExpr *a)
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
-		bool dupe = false;
-		for (auto it2 = variableRankings.begin();
-		     !dupe && it2 != variableRankings.end();
-		     it2++) {
-			const IRExpr *lookupKey = it2->first;
-			if (a != it2->first && a == lookupKey) {
-				it->second = it2->second;
-				dupe = true;
-			}
-		}
-		if (!dupe)
-			rankNr--;
+		rankNr--;
 	}
 	return it->second;
 }
