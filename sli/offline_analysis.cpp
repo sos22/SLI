@@ -294,14 +294,6 @@ _optimiseStateMachine(SMScopes *scopes,
 		LibVEX_maybe_gc(token);
 
 		p = false;
-		sm = bisimilarityReduction(scopes, sm, is_ssa, *mai, &p);
-		if (debugOptimiseStateMachine && p) {
-			printf("bisimilarityReduction:\n");
-			printStateMachine(sm, stdout);
-		}
-		done_something |= p;
-
-		p = false;
 		sm = useInitialMemoryLoads(scopes, *mai, sm, opt, oracle, &p);
 		if (debugOptimiseStateMachine && p) {
 			printf("useInitialMemoryLoads:\n");
