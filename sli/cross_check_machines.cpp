@@ -559,15 +559,6 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, E
 		}
 		/* Okay, so we have no assignments, so it must be an
 		 * initial value Phi. */
-#ifndef NDEBUG
-		{
-			int nr_gen_m1 = 0;
-			for (auto it = p->generations.begin(); it != p->generations.end(); it++)
-				if (it->reg.gen() == (unsigned)-1)
-					nr_gen_m1++;
-			assert(nr_gen_m1 == 1);
-		}
-#endif
 		for (auto it = p->generations.begin(); it != p->generations.end(); it++) {
 			if (it->reg.gen() == (unsigned)-1) {
 				if (!currentState.regs.count(it->reg)) {
@@ -590,7 +581,10 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, E
 				return true;
 			}
 		}
-		abort();
+		log(state, "phi is unsatisfied, using random value");
+		currentState.regs[p->reg] = genRandomUlong();
+		regOrder.push_back(p->reg);
+		return true;
 	}
 	case StateMachineSideEffect::ImportRegister:
 	case StateMachineSideEffect::StartAtomic:
