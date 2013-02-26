@@ -2960,7 +2960,6 @@ class gc_map : public GcCallback<&ir_heap>, public std::map<key, value> {
 		return it->second;					\
 	}
 
-mk_memoised_constructor(IRCallee)
 mk_memoised_constructor(IRRegArray)
 
 mk_memoised_constructor(IRExprGet)
@@ -2976,6 +2975,49 @@ mk_memoised_constructor(IRExprHappensBefore)
 mk_memoised_constructor(IRExprFreeVariable)
 mk_memoised_constructor(IRExprEntryPoint)
 mk_memoised_constructor(IRExprControlFlow)
+
+struct IRCallee_hash_key {
+	field_iter(IRCallee)(__mk_struct_fields, __mk_struct_fields, __mk_struct_fields)
+	IRCallee_hash_key(field_iter(IRCallee)(__mk_constructor1, __mk_constructor1, __mk_constructor2))
+		: field_iter(IRCallee)(__mk_constructor3, __mk_constructor3, __mk_constructor4)
+	{}
+	bool operator<(const IRCallee_hash_key &o) const
+	{
+		if (regparms < o.regparms) {
+			return true;
+		} else if (regparms > o.regparms) {
+			return false;
+		}
+		int r = strcmp(name, o.name);
+		if (r < 0) {
+			return true;
+		} else if (r > 0) {
+			return false;
+		}
+		return mcx_mask < o.mcx_mask;
+	}
+	void visit(HeapVisitor &hv) const
+	{
+		field_iter(IRCallee)(__visit_field,
+				     __visit_field,
+				     __visit_field);
+	}
+};
+IRCallee *
+IRCallee::mk(field_iter(IRCallee)(__mk_proto, __mk_proto, __mk_proto_last))
+{
+	static gc_map<IRCallee_hash_key, IRCallee *> memo;
+	auto it_did_insert = memo.insert(
+		std::pair<IRCallee_hash_key, IRCallee *>(
+			IRCallee_hash_key(apply_args(IRCallee)),
+			(IRCallee *)NULL));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (did_insert) {
+		it->second = new IRCallee(apply_args(IRCallee));
+	}
+	return it->second;
+}
 
 struct IRExprAssociative_hash_key {
 	field_iter(IRExprAssociative)(__mk_struct_fields, __mk_struct_fields, __mk_struct_fields)
