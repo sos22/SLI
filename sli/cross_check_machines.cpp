@@ -358,8 +358,9 @@ static IRExpr *mk_const(unsigned long val, IRType ty)
 		return IRExpr_Const_U64(val);
 	case Ity_I1:
 		return IRExpr_Const_U1(val);
-	case Ity_INVALID:
 	case Ity_I128:
+		return IRExpr_Const_U128(0, val);
+	case Ity_INVALID:
 		break;
 	}
 	abort();
