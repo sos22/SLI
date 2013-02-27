@@ -824,6 +824,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				__int128_t res = a * b;
 				return IRExpr_Const_U128(res >> 64, res);
 			}
+			case Iop_MullU64: {
+				__uint128_t a = arg1c->Ico.content.U64;
+				__uint128_t b = arg2c->Ico.content.U64;
+				__uint128_t res = a * b;
+				return IRExpr_Const_U128(res >> 64, res);
+			}
 			case Iop_64HLto128:
 				return IRExpr_Const_U128(arg1c->Ico.content.U64, arg2c->Ico.content.U64);
 			case Iop_DivModU128to64: {
