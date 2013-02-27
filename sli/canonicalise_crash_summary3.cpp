@@ -63,12 +63,6 @@ operator==(const IRExpr *a, const reg_or_free_var &b)
 
 typedef std::set<reg_or_free_var> reg_set_t;
 
-class TimeoutTimer : public Timer {
-public:
-	void fired() {
-		_timed_out = true;
-	}
-};
 static TimeoutTimer timeoutTimer;
 
 static void
@@ -1474,8 +1468,7 @@ main(int argc, char *argv[])
 	VexPtr<CrashSummary, &ir_heap> summary;
 	char *first_line;
 
-	timeoutTimer.nextDue = now() + 30;
-	timeoutTimer.schedule();
+	timeoutTimer.timeoutAfterSeconds(30);
 
 	SMScopes scopes;
 	summary = readBugReport(&scopes, argv[1], &first_line);

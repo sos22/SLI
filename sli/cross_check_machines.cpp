@@ -9,6 +9,7 @@
 #include "alloc_mai.hpp"
 #include "sat_checker.hpp"
 #include "simplify_irexpr.hpp"
+#include "timers.hpp"
 
 #include "../VEX/priv/guest_generic_bb_to_IR.h"
 #include "../VEX/priv/guest_amd64_defs.h"
@@ -1579,7 +1580,22 @@ main(int argc, char *argv[])
 		AllowableOptimisations::defaultOptimisations.
 		setAddressSpace(oracle->ms->addressSpace).
 		enableassumePrivateStack());
-	collectConstraints(&scopes, mai1, machine1, oracleI, opt2, constraints, ALLOW_GC);
+
+	/* collectConstraints can take a while, especially on
+	   unoptimised machines.  Kill it after a ten minute
+	   timeout. */
+	{
+		TimeoutTimer timeoutTimer;
+		timeoutTimer.timeoutAfterSeconds(600);
+		collectConstraints(&scopes, mai1, machine1, oracleI, opt2, constraints, ALLOW_GC);
+	}
+
+	if (TIMEOUT) {
+		printf("Timeout!\n");
+		return 0;
+	}
+
+	/* The rest of of this has no timeout */
 
 	{
 		std::set<IRExpr *> constraints2;

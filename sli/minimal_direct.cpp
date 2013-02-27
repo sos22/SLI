@@ -135,13 +135,6 @@ open_logfile(size_t sz, const char *fmt, ...)
 	return res;
 }
 
-class TimeoutTimer : public Timer {
-public:
-	void fired() {
-		_timed_out = true;
-	}
-};
-
 static TimeoutTimer timeoutTimer;
 
 static void
@@ -168,8 +161,7 @@ consider_rip(const DynAnalysisRip &my_rip,
 		timeout = atoi(getenv("SOS22_MINIMAL_DIRECT_TIMEOUT"));
 	else
 		timeout = 45;
-	timeoutTimer.nextDue = now() + timeout;
-	timeoutTimer.schedule();
+	timeoutTimer.timeoutAfterSeconds(timeout);
 
 	stackedCdf::start();
 	struct timeval start;

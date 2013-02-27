@@ -14,13 +14,6 @@
 #include "bdd_tmpl.cpp"
 #include "subst_eq_tmpl.cpp"
 
-class TimeoutTimer : public Timer {
-public:
-	void fired() {
-		_timed_out = true;
-	}
-};
-
 class deltasmr {
 	StateMachineRes res1;
 	StateMachineRes res2;
@@ -257,8 +250,7 @@ main(int argc, char *argv[])
 	VexPtr<bbdd, &ir_heap> truth(scopes.bools.cnst(true));
 
 	TimeoutTimer timeoutTimer;
-	timeoutTimer.nextDue = now() + 60;
-	timeoutTimer.schedule();
+	timeoutTimer.timeoutAfterSeconds(60);
 
 	VexPtr<smrbdd, &ir_heap> smr1(compileMachineToBdd(&scopes,
 							  mai1,

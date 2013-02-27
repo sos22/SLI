@@ -2524,7 +2524,7 @@ collectConstraints(SMScopes *scopes,
 	WeakSet<bbdd, &ir_heap> memo;
 
 	pendingStates.push_back(EvalContext(sm, scopes->bools.cnst(true)));
-	while (!pendingStates.empty()) {
+	while (!pendingStates.empty() && !TIMEOUT) {
 		LibVEX_maybe_gc(token);
 
 		pendingStates.reserve(pendingStates.size() + 1);

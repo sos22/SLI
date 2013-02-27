@@ -23,4 +23,16 @@ public:
 
 void initialise_timers();
 
+extern volatile bool _timed_out;
+class TimeoutTimer : public Timer {
+public:
+	void fired() {
+		_timed_out = true;
+	}
+	void timeoutAfterSeconds(double seconds) {
+		nextDue = now() + seconds;
+		schedule();
+	}
+};
+
 #endif /* !TIMERS_HPP__ */
