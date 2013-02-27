@@ -1828,6 +1828,19 @@ bool shortCircuitableUnops(IROp a, IROp b, IROp *c)
   rule(Iop_16Uto32, Iop_8Uto16, Iop_8Uto32);
   rule(Iop_8Uto32, Iop_1Uto8, Iop_1Uto32);
 
+  rule(Iop_32Sto64, Iop_16Sto32, Iop_16Sto64);
+  rule(Iop_32Sto64, Iop_8Sto32, Iop_8Sto64);
+  rule(Iop_32Sto64, Iop_1Sto32, Iop_1Sto64);
+  rule(Iop_16Sto64, Iop_8Sto16, Iop_8Sto64);
+  rule(Iop_16Sto64, Iop_1Sto16, Iop_1Sto64);
+  rule(Iop_8Sto64, Iop_1Sto8, Iop_1Sto64);
+
+  rule(Iop_16Sto32, Iop_8Sto16, Iop_8Sto32);
+  rule(Iop_16Sto32, Iop_1Sto16, Iop_1Sto32);
+  rule(Iop_8Sto32, Iop_1Sto8, Iop_1Sto32);
+
+  rule(Iop_8Sto16, Iop_1Sto8, Iop_1Sto16);
+
   /* An upcast immediately followed by a stronger downcast can be
      eliminated. */
   rule(Iop_64to1, Iop_32Uto64, Iop_32to1);
@@ -1839,6 +1852,28 @@ bool shortCircuitableUnops(IROp a, IROp b, IROp *c)
   rule(Iop_64to32, Iop_8Uto64, Iop_8Uto32);
   rule(Iop_64to32, Iop_16Uto64, Iop_16Uto32);
 
+  rule(Iop_64to1, Iop_32Sto64, Iop_32to1);
+  rule(Iop_64to1, Iop_16Sto64, Iop_16to1);
+  rule(Iop_64to1, Iop_8Sto64, Iop_8to1);
+  rule(Iop_64to8, Iop_16Sto64, Iop_16to8);
+  rule(Iop_64to8, Iop_32Sto64, Iop_32to8);
+  rule(Iop_64to16, Iop_32Sto64, Iop_32to16);
+
+  rule(Iop_64to8, Iop_1Sto64, Iop_1Sto8);
+  rule(Iop_32to8, Iop_1Sto32, Iop_1Sto8);
+  rule(Iop_16to8, Iop_1Sto16, Iop_1Sto8);
+  rule(Iop_64to16, Iop_1Sto64, Iop_1Sto16);
+  rule(Iop_32to16, Iop_1Sto32, Iop_1Sto16);
+  rule(Iop_64to32, Iop_1Sto64, Iop_1Sto32);
+  rule(Iop_16to8, Iop_8Sto16, Iop_1Sto8);
+  rule(Iop_16to1, Iop_8Sto16, Iop_8to1);
+  rule(Iop_32to16, Iop_8Sto32, Iop_8Sto16);
+  rule(Iop_32to1, Iop_8Sto32, Iop_8to1);
+
+  rule(Iop_32to1, Iop_16Sto32, Iop_16to1);
+  rule(Iop_32to8, Iop_16Sto32, Iop_16to8);
+
+  /* Compose downcasts. */
   rule(Iop_32to8, Iop_64to32, Iop_64to8);
   rule(Iop_32to16, Iop_64to32, Iop_64to16);
   rule(Iop_16to8, Iop_64to16, Iop_64to8);
