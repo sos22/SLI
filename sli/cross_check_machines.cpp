@@ -651,10 +651,10 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, c
 				args.randomAcc->regs[src] = v;
 			}
 			log(state, "import %s -> generate fresh %lx",
-			    src.name(), v);
+			    a->reg.name(), v);
 		} else {
 			v = it_did_insert.first->second;
-			log(state, "import %s -> %lx", src.name(), v);
+			log(state, "import %s -> %lx", a->reg.name(), v);
 		}
 		currentState.regs[a->reg] = v;
 		regOrder.push_back(a->reg);
