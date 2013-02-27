@@ -387,11 +387,51 @@ availExprSet::updateForSideEffect(SMScopes *scopes, OracleInterface *oracle, con
 		}
 	}
 
+	/* Does it kill anything by means of changing a register? */
+	threadAndRegister definedReg(threadAndRegister::invalid());
+	if (se->definesRegister(definedReg)) {
+		definitelyTrue = bddPurgeRegister(scopes, definitelyTrue, definedReg);
+		for (auto it = memory.begin(); it != memory.end(); ) {
+			auto ma = *it;
+			bool kill;
+			if (ma->type == StateMachineSideEffect::Load) {
+				auto l = (StateMachineSideEffectLoad *)ma;
+				kill = l->target == definedReg || mentionsRegister(l->addr, definedReg);
+			} else {
+				auto s = (StateMachineSideEffectStore *)ma;
+				kill = mentionsRegister(s->addr, definedReg) ||
+					mentionsRegister(s->data, definedReg);
+			}
+			if (kill) {
+				memory.erase(it++);
+			} else {
+				it++;
+			}
+		}
+		for (auto it = fixedRegs.begin(); it != fixedRegs.end(); ) {
+			if (it->first == definedReg ||
+			    mentionsRegister(it->second, definedReg)) {
+				fixedRegs.erase(it++);
+			} else {
+				it++;
+			}
+		}
+	}
+
 	/* Make its effects available */
 	if (se->type == StateMachineSideEffect::Store ||
 	    se->type == StateMachineSideEffect::Load) {
 		auto ma = (StateMachineSideEffectMemoryAccess *)se;
-		memory.insert(ma);
+		bool doit;
+		if (se->type == StateMachineSideEffect::Store) {
+			doit = true;
+		} else {
+			auto l = (StateMachineSideEffectLoad *)ma;
+			doit = !mentionsRegister(l->addr, definedReg);
+		}
+		if (doit) {
+			memory.insert(ma);
+		}
 		definitelyTrue = bbdd::And(
 			&scopes->bools,
 			definitelyTrue,
@@ -407,7 +447,9 @@ availExprSet::updateForSideEffect(SMScopes *scopes, OracleInterface *oracle, con
 	}
 	if (se->type == StateMachineSideEffect::Copy) {
 		auto cp = (StateMachineSideEffectCopy *)se;
-		fixedRegs[cp->target] = cp->value;
+		if (!mentionsRegister(cp->value, cp->target)) {
+			fixedRegs[cp->target] = cp->value;
+		}
 	}
 	if (se->type == StateMachineSideEffect::AssertFalse) {
 		auto af = (StateMachineSideEffectAssertFalse *)se;
@@ -417,36 +459,6 @@ availExprSet::updateForSideEffect(SMScopes *scopes, OracleInterface *oracle, con
 			bbdd::invert(
 				&scopes->bools,
 				af->value));
-	}
-
-	/* And now remove any effects which we just invalidated. */
-	threadAndRegister r(threadAndRegister::invalid());
-	if (se->definesRegister(r)) {
-		definitelyTrue = bddPurgeRegister(scopes, definitelyTrue, r);
-		for (auto it = memory.begin(); it != memory.end(); ) {
-			auto ma = *it;
-			bool kill;
-			if (ma->type == StateMachineSideEffect::Load) {
-				auto l = (StateMachineSideEffectLoad *)ma;
-				kill = l->target == r || mentionsRegister(l->addr, r);
-			} else {
-				auto s = (StateMachineSideEffectStore *)ma;
-				kill = mentionsRegister(s->addr, r) ||
-					mentionsRegister(s->data, r);
-			}
-			if (kill) {
-				memory.erase(it++);
-			} else {
-				it++;
-			}
-		}
-		for (auto it = fixedRegs.begin(); it != fixedRegs.end(); ) {
-			if (mentionsRegister(it->second, r)) {
-				fixedRegs.erase(it++);
-			} else {
-				it++;
-			}
-		}
 	}
 }
 
