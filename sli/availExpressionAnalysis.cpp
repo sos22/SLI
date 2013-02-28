@@ -431,19 +431,19 @@ availExprSet::updateForSideEffect(SMScopes *scopes, OracleInterface *oracle, con
 		}
 		if (doit) {
 			memory.insert(ma);
-		}
-		definitelyTrue = bbdd::And(
-			&scopes->bools,
-			definitelyTrue,
-			bbdd::invert(
+			definitelyTrue = bbdd::And(
 				&scopes->bools,
-				exprbdd::to_bbdd(
+				definitelyTrue,
+				bbdd::invert(
 					&scopes->bools,
-					exprbdd::unop(
-						&scopes->exprs,
+					exprbdd::to_bbdd(
 						&scopes->bools,
-						Iop_BadPtr,
-						ma->addr))));
+						exprbdd::unop(
+							&scopes->exprs,
+							&scopes->bools,
+							Iop_BadPtr,
+							ma->addr))));
+		}
 	}
 	if (se->type == StateMachineSideEffect::Copy) {
 		auto cp = (StateMachineSideEffectCopy *)se;
