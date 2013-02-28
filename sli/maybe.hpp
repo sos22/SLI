@@ -18,8 +18,12 @@ public:
 	{ return Maybe(); }	
 
 	bool operator==(const Maybe<t> &o) const {
-		if (!valid)
-			return !o.valid;
+		if (!valid && !o.valid) {
+			return true;
+		}
+		if (!valid || !o.valid) {
+			return false;
+		}
 		return content == o.content;
 	}
 	bool operator!=(const Maybe<t> &o) const {
