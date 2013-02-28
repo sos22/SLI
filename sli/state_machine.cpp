@@ -900,6 +900,22 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 					t->target)))->optimise(scopes, opt, done_something);
 	}
 
+	if (target->type == StateMachineState::SideEffecting &&
+	    ((StateMachineSideEffecting *)target)->sideEffect &&
+	    ((StateMachineSideEffecting *)target)->sideEffect->type == StateMachineSideEffect::EndAtomic &&
+	    (sideEffect->type == StateMachineSideEffect::Copy ||
+	     sideEffect->type == StateMachineSideEffect::AssertFalse)) {
+		/* Push local side effects out of atomic blocks when possible. */
+		auto t = (StateMachineSideEffecting *)target;
+		*done_something = true;
+		return (new StateMachineSideEffecting(
+				t->dbg_origin,
+				t->sideEffect,
+				new StateMachineSideEffecting(
+					dbg_origin,
+					sideEffect,
+					t->target)))->optimise(scopes, opt, done_something);
+	}
 	if (sideEffect->type == StateMachineSideEffect::StartAtomic) {
 		if (target->type == StateMachineState::SideEffecting) {
 			StateMachineSideEffecting *t = (StateMachineSideEffecting *)target;
@@ -909,7 +925,9 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 				return t->target;
 			}
 
-			if (t->sideEffect && t->sideEffect->type == StateMachineSideEffect::AssertFalse) {
+			if (t->sideEffect &&
+			    (t->sideEffect->type == StateMachineSideEffect::AssertFalse ||
+			     t->sideEffect->type == StateMachineSideEffect::Copy)) {
 				/* Pull non-memory-accesses out of
 				 * atomic blocks whenever possible. */
 				*done_something = true;
@@ -920,6 +938,21 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 							dbg_origin,
 							sideEffect,
 							t->target)))->optimise(scopes, opt, done_something);
+			}
+
+			if (t->target->type == StateMachineState::SideEffecting &&
+			    ((StateMachineSideEffecting *)t->target)->sideEffect &&
+			    ((StateMachineSideEffecting *)t->target)->sideEffect->type == StateMachineSideEffect::EndAtomic) {
+				/* We have an atomic block with a
+				   single operation in it.  That's a
+				   bit pointless; single operations
+				   are always implicitly atomic.
+				   Remove it. */
+				*done_something = true;
+				return (new StateMachineSideEffecting(
+						t->dbg_origin,
+						t->sideEffect,
+						((StateMachineSideEffecting *)t->target)->target))->optimise(scopes, opt, done_something);
 			}
 		} else if (target->type == StateMachineState::Terminal) {
 			/* START_ATOMIC followed by a terminal is a
