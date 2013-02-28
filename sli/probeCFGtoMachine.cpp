@@ -343,7 +343,7 @@ canonicaliseRegs(SMScopes *scopes, StateMachineState *root, const VexRip &rip, O
 	   the targets are still NULL pointers. */
 	std::vector<StateMachineState *> pendingStates;
 	pendingStates.push_back(root);
-	while (!pendingStates.empty()) {
+	while (!TIMEOUT && !pendingStates.empty()) {
 		StateMachineState *s = pendingStates.back();
 		pendingStates.pop_back();
 		if (!s) {
