@@ -779,8 +779,8 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			IRExprConst *arg2c = (IRExprConst *)arg2;
 			switch (_ieb->op) {
 #define do_type(sz)							\
-				case Iop_CmpEQ ## sz:			\
-					return IRExpr_Const_U1(arg1c->Ico.content.U ## sz == arg2c->Ico.content.U ## sz); \
+			case Iop_CmpEQ ## sz:				\
+				return IRExpr_Const_U1(arg1c->Ico.content.U ## sz == arg2c->Ico.content.U ## sz); \
 			case Iop_CmpLT ## sz ## U:			\
 				return IRExpr_Const_U1(arg1c->Ico.content.U ## sz < arg2c->Ico.content.U ## sz)
 				do_type(8);
@@ -796,6 +796,8 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				return IRExpr_Const_U1((int)arg1c->Ico.content.U32 < (int)arg2c->Ico.content.U32);
 			case Iop_CmpLT64S:
 				return IRExpr_Const_U1((long)arg1c->Ico.content.U64 < (long)arg2c->Ico.content.U64);
+			case Iop_CmpLE64U:
+				return IRExpr_Const_U1(arg1c->Ico.content.U64 <= arg2c->Ico.content.U64);
 			case Iop_Shl64:
 				return IRExpr_Const_U64(arg1c->Ico.content.U64 << arg2c->Ico.content.U8);
 			case Iop_Shr64:
