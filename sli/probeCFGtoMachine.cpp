@@ -1414,6 +1414,7 @@ addEntrySideEffects(SMScopes *scopes
 			cursor);
 	} else {
 		warning("Failed to get RSP canonicalisation delta\n");
+		*rsp_delta = 0;
 	}
 
 #if TRACK_FRAMES
