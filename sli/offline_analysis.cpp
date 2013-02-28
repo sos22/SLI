@@ -207,6 +207,10 @@ public:
 	{
 		if (skip)
 			return;
+		if (TIMEOUT) {
+			FILE *f = fopenf("w", "%s/timed_out", prefix);
+			fclose(f);
+		}
 		FILE *f = fopenf("w", "%s/post_mai", prefix);
 		mai->print(f);
 		fclose(f);
