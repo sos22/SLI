@@ -272,7 +272,7 @@ public:
 		hbEdges.clear();
 		hasIssuedStore = false;
 	}
-	bool consistent() const {
+	bool consistent(AddressSpace *as) const {
 		/* Not interested in anything where RSP is a bad
 		 * pointer. */
 		for (auto it = regs.begin(); it != regs.end(); it++) {
@@ -281,6 +281,13 @@ public:
 				unsigned long v;
 				if (err.unpack(&v) && v)
 					return false;
+			}
+		}
+		/* Not interested in anything where we have to unmap
+		   our own code segment. */
+		for (auto it = badPtrs.begin(); it != badPtrs.end(); it++) {
+			if (as->isReadable(*it)) {
+				return false;
 			}
 		}
 		return true;
@@ -329,6 +336,7 @@ public:
 
 	bool eval(const StateMachineState *, StateMachineSideEffect *effect, const EvalArgs &randomAcc);
 	evalRes eval(VexPtr<StateMachineState, &ir_heap> state,
+		     const VexPtr<AddressSpace> &as,
 		     GarbageCollectionToken token,
 		     const EvalArgs &args);
 	void log(const StateMachineState *, const char *fmt, ...) __attribute__((__format__( __printf__, 3, 4)));
@@ -677,6 +685,7 @@ EvalCtxt::eval(const StateMachineState *state, StateMachineSideEffect *effect, c
 
 evalRes
 EvalCtxt::eval(VexPtr<StateMachineState, &ir_heap> state,
+	       const VexPtr<AddressSpace> &as,
 	       GarbageCollectionToken token,
 	       const EvalArgs &args)
 {
@@ -725,14 +734,14 @@ top:
 			return evalRes::unreached();
 		case smr_crash:
 			log(state, "crash");
-			if (!currentState.consistent())
+			if (!currentState.consistent(as))
 				return evalRes::unreached();
 			if (args.opt->mustStoreBeforeCrash())
 				return evalRes::survive();
 			return evalRes::crash();
 		case smr_survive:
 			log(state, "no-crash");
-			if (!currentState.consistent())
+			if (!currentState.consistent(as))
 				return evalRes::unreached();
 			return evalRes::survive();
 		}
@@ -1727,12 +1736,12 @@ main(int argc, char *argv[])
 		eval1args.oracle = oracle;
 		eval1args.decode = mai1;
 		eval1args.opt = &opt;
-		evalRes machine1res = ctxt1.eval(machine1->root, ALLOW_GC, eval1args);
+		evalRes machine1res = ctxt1.eval(machine1->root, oracle->ms->addressSpace, ALLOW_GC, eval1args);
 		int i;
 		for (i = 0; i < 100 && machine1res == evalRes::unreached(); i++) {
 			ctxt1.reset(*it);
 			extended_init_ctxt = *it;
-			machine1res = ctxt1.eval(machine1->root, ALLOW_GC, eval1args);
+			machine1res = ctxt1.eval(machine1->root, oracle->ms->addressSpace, ALLOW_GC, eval1args);
 		}
 		if (machine1res == evalRes::unreached()) {
 			nr_m1_unreached++;
@@ -1744,10 +1753,10 @@ main(int argc, char *argv[])
 		eval2args.oracle = oracle;
 		eval2args.decode = mai2;
 		eval2args.opt = &opt;
-		evalRes machine2res = ctxt2.eval(machine2->root, ALLOW_GC, eval2args);
+		evalRes machine2res = ctxt2.eval(machine2->root, oracle->ms->addressSpace, ALLOW_GC, eval2args);
 		for (i = 0; i < 100 && machine2res == evalRes::unreached(); i++) {
 			ctxt2.reset(extended_init_ctxt);
-			machine2res = ctxt2.eval(machine2->root, ALLOW_GC, eval2args);
+			machine2res = ctxt2.eval(machine2->root, oracle->ms->addressSpace, ALLOW_GC, eval2args);
 		}
 
 		bool failed = machine1res != machine2res;
