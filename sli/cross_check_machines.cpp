@@ -20,7 +20,7 @@ static bool debug_gen_contexts = false;
 #define debug_gen_contexts false
 #endif
 
-#define BAD_PTR_FUZZ 10000000
+#define BAD_PTR_FUZZ 4000000
 
 class evalRes : public Named {
 	int val;
@@ -169,7 +169,7 @@ public:
 		lmr_unknown_state
 	};
 	loadMemoryRes loadMemory(unsigned long addr, unsigned long *value) const {
-		if (addr < 4096) {
+		if (addr < BAD_PTR_FUZZ) {
 			return lmr_bad_ptr;
 		}
 		for (auto it = badPtrs.begin(); it != badPtrs.end(); it++) {
