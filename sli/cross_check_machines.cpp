@@ -1559,23 +1559,29 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
+	const char *machine_base = argv[1];
+	const char *log_base = argv[2];
+
 	VexPtr<Oracle> oracle;
 	{
-		MachineState *ms = MachineState::readELFExec(argv[1]);
+		MachineState *ms = MachineState::readELFExec(vex_asprintf("%s.exe", machine_base));
 		Thread *thr = ms->findThread(ThreadId(1));
-		oracle = new Oracle(ms, thr, argv[2]);
+		oracle = new Oracle(ms, thr, vex_asprintf("%s.tc", machine_base));
 	}
-	oracle->loadCallGraph(oracle, argv[3], argv[4], ALLOW_GC);
+	oracle->loadCallGraph(oracle,
+			      my_asprintf("%s.bcg", machine_base),
+			      my_asprintf("%s.db", machine_base),
+			      ALLOW_GC);
 
 	VexPtr<OracleInterface> oracleI(oracle);
 	SMScopes scopes;
-	VexPtr<StateMachine, &ir_heap> machine1(readStateMachine(&scopes, argv[5]));
-	VexPtr<MaiMap, &ir_heap> mai1(MaiMap::fromFile(machine1, argv[6]));
+	VexPtr<StateMachine, &ir_heap> machine1(readStateMachine(&scopes, vex_asprintf("%s/pre_machine", log_base)));
+	VexPtr<MaiMap, &ir_heap> mai1(MaiMap::fromFile(machine1, vex_asprintf("%s/pre_mai", log_base)));
 	SMScopes scopes2;
-	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(&scopes2, argv[7]));
+	VexPtr<StateMachine, &ir_heap> machine2(readStateMachine(&scopes2, vex_asprintf("%s/post_machine", log_base)));
 	machine2 = rewriteMachineCrossScope(machine2, &scopes);
 
-	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, argv[8]));
+	VexPtr<MaiMap, &ir_heap> mai2(MaiMap::fromFile(machine2, vex_asprintf("%s/post_mai", log_base)));
 	std::set<DynAnalysisRip> nonLocalLoads;
 	std::map<DynAnalysisRip, IRType> interestingStores;
 	AllowableOptimisations opt(
@@ -1583,7 +1589,7 @@ main(int argc, char *argv[])
 			&interestingStores,
 			&nonLocalLoads,
 			oracle->ms->addressSpace,
-			argv[9]));
+			vex_asprintf("%s/opt", log_base)));
 
 	GcSet<IRExpr, &ir_heap> constraints;
 	AllowableOptimisations opt2(
