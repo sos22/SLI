@@ -1575,6 +1575,9 @@ main(int argc, char *argv[])
 
 	VexPtr<OracleInterface> oracleI(oracle);
 	SMScopes scopes;
+	if (!scopes.read(vex_asprintf("%s/post_scopes", log_base))) {
+		err(1, "reading pre_scopes");
+	}
 	VexPtr<StateMachine, &ir_heap> machine1(readStateMachine(&scopes, vex_asprintf("%s/pre_machine", log_base)));
 	VexPtr<MaiMap, &ir_heap> mai1(MaiMap::fromFile(machine1, vex_asprintf("%s/pre_mai", log_base)));
 	SMScopes scopes2;
