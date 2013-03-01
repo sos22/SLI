@@ -50,12 +50,12 @@ public:
 	}
 	static bool parse(FrameId *out, const char *str, const char **suffix)
 	{
-		unsigned id;
-		unsigned tid;
+		int id;
+		int tid;
 		if (parseThisString("frame", str, &str) &&
-		    parseDecimalUInt(&tid, str, &str) &&
+		    parseDecimalInt(&tid, str, &str) &&
 		    parseThisChar(':', str, &str) &&
-		    parseDecimalUInt(&id, str, suffix)) {
+		    parseDecimalInt(&id, str, suffix)) {
 			*out = FrameId(id, tid);
 			return true;
 		}
