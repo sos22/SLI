@@ -20,7 +20,7 @@ static bool debug_gen_contexts = false;
 #define debug_gen_contexts false
 #endif
 
-#define BAD_PTR_FUZZ 4000000
+#define BAD_PTR_FUZZ (1ul << 22)
 
 class evalRes : public Named {
 	int val;
