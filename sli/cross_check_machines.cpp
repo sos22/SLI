@@ -93,6 +93,72 @@ public:
 	}
 };
 
+template <typename k, typename v, void printKey(FILE *, const k &),
+	  void printValue(FILE *, const v &)> static void
+printTable(FILE *f, const std::map<k, v> &what)
+{
+	for (auto it = what.begin(); it != what.end(); it++) {
+		fprintf(f, "\t");
+		printKey(f, it->first);
+		fprintf(f, " -> ");
+		printValue(f, it->second);
+		fprintf(f, "\n");
+	}
+}
+void
+printHexUlong(FILE *f, const unsigned long &v)
+{
+	fprintf(f, "0x%lx", v);
+}
+void
+printDecimalUint(FILE *f, const unsigned &v)
+{
+	fprintf(f, "%d", v);
+}
+template <typename t> void
+printNamed(FILE *f, const t &n)
+{
+	fprintf(f, "%s", n.name());
+}
+static void printHexUlongTable(FILE *f, const std::map<unsigned long, unsigned long> &what) {
+	printTable<unsigned long, unsigned long, printHexUlong, printHexUlong>(f, what);
+}
+template <typename t>
+static void printNamedToHexUlongTable(FILE *f, const std::map<t, unsigned long> &what) {
+	printTable<t, unsigned long, printNamed, printHexUlong>(f, what);
+}
+template <typename t, void printItem(FILE *f, const t &what)> void
+printSet(FILE *f, const std::set<t> &what) {
+	fprintf(f, "{");
+	for (auto it = what.begin(); it != what.end(); it++) {
+		if (it != what.begin()) {
+			fprintf(f, ", ");
+		}
+		printItem(f, *it);
+	}
+	fprintf(f, "}");
+}
+template <typename t, void printItem(FILE *f, const t &what)> void
+printVector(FILE *f, const std::vector<t> &what) {
+	fprintf(f, "[");
+	for (auto it = what.begin(); it != what.end(); it++) {
+		if (it != what.begin()) {
+			fprintf(f, ", ");
+		}
+		printItem(f, *it);
+	}
+	fprintf(f, "]");
+}
+template <typename a, typename b, void printA(FILE *f, const a &), void printB(FILE *f, const b &)> void
+printPair(FILE *f, const std::pair<a, b> &what)
+{
+	fprintf(f, "(");
+	printA(f, what.first);
+	fprintf(f, ",");
+	printB(f, what.second);
+	fprintf(f, ")");
+}
+
 class EvalState {
 public:
 	EvalState() { clear(); }
@@ -110,50 +176,30 @@ public:
 	bool hasIssuedStore;
 	void prettyPrint(FILE *f) const {
 		fprintf(f, "Regs:\n");
-		for (auto it = regs.begin(); it != regs.end(); it++)
-			fprintf(f, "\t%s -> 0x%lx\n", it->first.name(), it->second);
+		printNamedToHexUlongTable(f, regs);
 		fprintf(f, "freeVars:\n");
-		for (auto it = freeVars.begin(); it != freeVars.end(); it++)
-			fprintf(f, "\t%s -> 0x%lx\n", it->first.name(), it->second);
+		printNamedToHexUlongTable(f, freeVars);
 		fprintf(f, "memory:\n");
-		for (auto it = memory.begin(); it != memory.end(); it++)
-			fprintf(f, "\t0x%lx -> 0x%lx\n", it->first, it->second);
-		fprintf(f, "badPtrs:\n");
-		for (auto it = badPtrs.begin(); it != badPtrs.end(); it++)
-			fprintf(f, "\t0x%lx\n", *it);
-		fprintf(f, "entryPoints:\n");
-		for (auto it = entryPoints.begin(); it != entryPoints.end(); it++)
-			fprintf(f, "\t%d -> %s\n", it->first, it->second.name());
+		printHexUlongTable(f, memory);
+		fprintf(f, "badPtrs: ");
+		printSet<unsigned long, printHexUlong>(f, badPtrs);
+		fprintf(f, "\nentryPoints:\n");
+		printTable<unsigned, CfgLabel, printDecimalUint, printNamed<CfgLabel> >(f, *(const std::map<unsigned, CfgLabel> *)&entryPoints);
 		fprintf(f, "nonEntryPoints:\n");
-		for (auto it = nonEntryPoints.begin(); it != nonEntryPoints.end(); it++) {
-			fprintf(f, "\t%d -> {", it->first);
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
-				if (it2 != it->second.begin())
-					fprintf(f, ", ");
-				fprintf(f, "%s", it2->name());
-			}
-			fprintf(f, "}\n");
-		}
+		printTable<unsigned, std::set<CfgLabel>, printDecimalUint, printSet<CfgLabel, printNamed<CfgLabel> > >(f, nonEntryPoints);
 		fprintf(f, "controlFlow:\n");
-		for (auto it = controlFlow.begin(); it != controlFlow.end(); it++) {
-			fprintf(f, "\t(%d,%s) -> %s\n", it->first.first,
-				it->first.second.name(), it->second.name());
-		}
+		printTable<std::pair<unsigned, CfgLabel>, CfgLabel,
+			   printPair<unsigned, CfgLabel, printDecimalUint, printNamed>,
+			   printNamed>(f, controlFlow);
 		fprintf(f, "nonControlFlow:\n");
-		for (auto it = nonControlFlow.begin(); it != nonControlFlow.end(); it++) {
-			fprintf(f, "\t(%d,%s) -> {", it->first.first, it->first.second.name());
-			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
-				if (it2 != it->second.begin()) {
-					fprintf(f, ", ");
-				}
-				fprintf(f, "%s", it2->name());
-			}
-			fprintf(f, "}\n");
-		}
+		printTable<std::pair<unsigned, CfgLabel>, std::set<CfgLabel>,
+			   printPair<unsigned, CfgLabel, printDecimalUint, printNamed>,
+			   printSet<CfgLabel, printNamed> >(f, nonControlFlow);
 		fprintf(f, "hbEdges:\n");
-		for (auto it = hbEdges.begin(); it != hbEdges.end(); it++)
-			fprintf(f, "\t%s <-< %s\n", it->first.name(), it->second.name());
-		fprintf(f, "hasIssuedStore: %s\n", hasIssuedStore ? "true" : "false");
+		printVector<std::pair<MemoryAccessIdentifier, MemoryAccessIdentifier>,
+			    printPair<MemoryAccessIdentifier, MemoryAccessIdentifier, printNamed, printNamed> >(
+				    f, hbEdges);
+		fprintf(f, "\nhasIssuedStore: %s\n", hasIssuedStore ? "true" : "false");
 	}
 
 	/* Possible return values:
