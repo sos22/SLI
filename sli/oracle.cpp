@@ -1021,9 +1021,11 @@ open_database(const char *path)
 	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
+#if CONFIG_FIXED_REGS
 	rc = sqlite3_exec(_database, "CREATE TABLE fixedRegs (rip INTEGER PRIMARY KEY, content TEXT)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
+#endif
 
 disable_journalling:
 	/* All of the information in the database can be regenerated
@@ -3340,6 +3342,7 @@ Oracle::LivenessSet::mkName() const
 	return acc2;
 }
 
+#if CONFIG_FIXED_REGS
 void
 Oracle::setFixedRegs(const StaticRip &vr, const FixedRegs &fr)
 {
@@ -3368,3 +3371,4 @@ Oracle::getFixedRegs(const StaticRip &sr, FixedRegs *out)
 	sqlite3_reset(stmt.stmt);
 	return true;
 }
+#endif

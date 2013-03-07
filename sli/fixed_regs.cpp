@@ -1,3 +1,5 @@
+#if CONFIG_FIXED_REGS
+
 /* Simple static analysis pass which finds out if some register can be
    expressed as either a constant or another register plus a
    constant. */
@@ -642,3 +644,4 @@ Oracle::FixedRegs::transformSideEffect(SMScopes *scopes, StateMachineSideEffect 
 	}
 }
 
+#endif /* CONFIG_FIXED_REGS */

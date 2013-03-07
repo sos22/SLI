@@ -331,6 +331,7 @@ getLibraryStateMachine(SMScopes *scopes,
 	return acc.content->compile(pendingRelocs, state);
 }
 
+#if CONFIG_FIXED_REGS
 static void
 canonicaliseRegs(SMScopes *scopes, StateMachineState *root, const VexRip &rip, Oracle *oracle)
 {
@@ -371,6 +372,12 @@ canonicaliseRegs(SMScopes *scopes, StateMachineState *root, const VexRip &rip, O
 		}
 	}
 }
+#else
+static void
+canonicaliseRegs(SMScopes *, StateMachineState *, const VexRip &, Oracle *)
+{
+}
+#endif
 
 static StateMachineState *
 cfgNodeToState(SMScopes *scopes,

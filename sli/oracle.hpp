@@ -204,6 +204,7 @@ public:
 	static IRSB *getIRSBForRip(AddressSpace *as, const VexRip &sr, bool singleInstr);
 	IRSB *getIRSBForRip(const VexRip &vr, bool singleInstr);
 
+#if CONFIG_FIXED_REGS
 	class FixedRegs : public Named {
 		char *mkName() const;
 	public:
@@ -228,12 +229,15 @@ public:
 	};
 	bool getFixedRegs(const StaticRip &vr, FixedRegs *out);
 	void setFixedRegs(const StaticRip &vr, const FixedRegs &fr);
+#endif
 private:
 
 	void buildReturnAddressTable();
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token);
+#if CONFIG_FIXED_REGS
 	static void calculateFixedRegs(VexPtr<Oracle> &ths, GarbageCollectionToken token);
+#endif
 
 	void loadTagTable(const char *path);
 	void findPossibleJumpTargets(const StaticRip &from, const callgraph_t &callgraph_table, std::vector<StaticRip> &targets);
