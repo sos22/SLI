@@ -995,9 +995,6 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 		*done_something = true;
 		return ((StateMachineSideEffecting *)target)->target;
 	}
-#endif
-
-#ifndef CONFIG_NO_STATIC_ANALYSIS
 	if (sideEffect->type == StateMachineSideEffect::ImportRegister &&
 	    target->type == StateMachineState::SideEffecting &&
 	    ((StateMachineSideEffecting *)target)->sideEffect &&
