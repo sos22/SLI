@@ -81,6 +81,8 @@ ${bugname}.perf_dists: ${MD_TEST_DIR}/harness ${exename}.exe ${bugname}.fix.so .
 clean_files += ${bugname}.perf_dists ${bugname}.perf_data
 MD_PERF_FILES += ${bugname}.perf_dists
 EOF
+    else
+	echo "# no perf stuff: $include_perf, nr_bugs = $nr_bugs"
     fi
     for p in interp.so fix.c fix.so ced summary{,.canon0,.canon2,.canon3,.canon4} cep.c
     do
@@ -110,13 +112,6 @@ ${exename}.db.timing: ${exename}.exe ${exename}.types.canon ${exename}.bcg stati
 .PRECIOUS: ${exename}.exe ${exename}.types ${exename}.bcg
 EOF
 
-    if [ "$nr_summaries" -eq 1 ]
-    then
-	single_bug=y
-    else
-	single_bug=""
-    fi
-
     for i in $(seq 0 $((${nr_summaries} - 1)) )
     do
 	cat <<EOF
@@ -124,7 +119,7 @@ ${exename}~${i}.summary: ${exename}.summaries
 	! [ -e $</${nr_summaries} ] && [ -e $</${i} ] && cp \$</${i} \$@
 clean_files += ${exename}~${i}.summary
 EOF
-	emit_rules_for_bug "$1~$i" "$1" "$single_bug"
+	emit_rules_for_bug "$1~$i" "$1" "$nr_summaries"
     done
 
     if [ "$nr_summaries" -ne 1 ]
