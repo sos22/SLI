@@ -401,11 +401,8 @@ Oracle::memoryAccessesMightAliasLS(const DynAnalysisRip &smsel_dr, const DynAnal
 	if (!private_store && !shared_store)
 		return mam_no_alias;
 
-	/* If the load is definitely shared and the store is
-	   definitely private then they can't alias, and
-	   vice-versa. */
-	if (!private_load && !shared_store)
-		return mam_no_alias;
+	/* If the store is definitely shared and the load is
+	   definitely private then they can't alias. */
 	if (!shared_load && !private_store)
 		return mam_no_alias;
 
