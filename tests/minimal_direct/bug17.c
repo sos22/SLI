@@ -7,7 +7,7 @@
 
 #include "test.h"
 
-#define NR_ATTEMPTS 100
+#define NR_ATTEMPTS 5
 
 struct the_struct {
 	struct the_struct *chain;
