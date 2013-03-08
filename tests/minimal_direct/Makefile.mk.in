@@ -209,7 +209,7 @@ EOF
     do
 	emit_rules_for_exe_segv bug${bug} 1
     done
-    for bug in 11 12 13
+    for bug in 5 11 12 13
     do
 	emit_rules_for_exe_assert bug${bug} 1
     done
@@ -221,10 +221,10 @@ EOF
     do
 	emit_rules_for_exe_segv bug${bug} 2
     done
-    for bug in 5
-    do
-	emit_rules_for_exe_assert bug${bug} 2
-    done
+#    for bug in 5
+#    do#
+#	emit_rules_for_exe_assert bug${bug} 2
+#    done
     for bug in 15
     do
 	emit_rules_for_exe_segv bug${bug} 0
