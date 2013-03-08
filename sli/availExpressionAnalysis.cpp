@@ -22,6 +22,13 @@ namespace _availExpressionAnalysis {
 }
 #endif
 
+struct se_state {
+	SMScopes *scopes;
+	OracleInterface *oracle;
+	const MaiMap *decode;
+	const AllowableOptimisations *opt;
+};
+
 class availExprSet {
 	bbdd *definitelyTrue;
 	std::set<StateMachineSideEffectMemoryAccess *> memory;
@@ -61,11 +68,12 @@ class availExprSet {
 	smrbdd *simplifySmrbdd(SMScopes *, smrbdd *) const;
 	bbdd *simplifyBbdd(SMScopes *, bbdd *) const;
 	exprbdd *simplifyExprbdd(SMScopes *, exprbdd *) const;
+
 #define mk_proto(name)							\
-	StateMachineSideEffect *simplifySE(SMScopes *, StateMachineSideEffect ## name *) const;
+	StateMachineSideEffect *simplifySE(se_state *, StateMachineSideEffect ## name *) const;
 	all_side_effect_types(mk_proto)
 #undef mk_proto
-	StateMachineSideEffect *simplifySideEffect(SMScopes *, StateMachineSideEffect *) const;
+	StateMachineSideEffect *simplifySideEffect(se_state *state, StateMachineSideEffect *) const;
 
 public:
 	void clear(SMScopes *scopes) {
@@ -73,7 +81,7 @@ public:
 		memory.clear();
 	}
 
-	void simplifyState(SMScopes *scopes, StateMachineState *, bool *) const;
+	void simplifyState(se_state *state, StateMachineState *, bool *) const;
 
 	void updateForSideEffect(SMScopes *, OracleInterface *, const MaiMap &m, const AllowableOptimisations &, StateMachineSideEffect *);
 	void assertTrue(SMScopes *, bbdd *);
@@ -163,25 +171,27 @@ availExprSet::simplifyExprbdd(SMScopes *scopes, exprbdd *b) const
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectLoad *l) const
+availExprSet::simplifySE(se_state *state, StateMachineSideEffectLoad *l) const
 {
-	auto b = simplifyExprbdd(scopes, l->addr);
+	auto b = simplifyExprbdd(state->scopes, l->addr);
 	if (TIMEOUT) {
 		return l;
 	}
-	for (auto it = memory.begin(); it != memory.end(); it++) {
-		StateMachineSideEffectMemoryAccess *other = *it;
-		if (other->addr == b) {
-			exprbdd *exp;
-			if (other->type == StateMachineSideEffect::Store) {
-				exp = ((StateMachineSideEffectStore *)other)->data;
-			} else {
-				auto o = (StateMachineSideEffectLoad *)other;
-				exp = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(o->target, l->type));
+	if (!state->oracle->hasConflictingRemoteStores(*state->decode, *state->opt, l)) {
+		for (auto it = memory.begin(); it != memory.end(); it++) {
+			StateMachineSideEffectMemoryAccess *other = *it;
+			if (other->addr == b) {
+				exprbdd *exp;
+				if (other->type == StateMachineSideEffect::Store) {
+					exp = ((StateMachineSideEffectStore *)other)->data;
+				} else {
+					auto o = (StateMachineSideEffectLoad *)other;
+					exp = exprbdd::var(&state->scopes->exprs, &state->scopes->bools, IRExpr_Get(o->target, l->type));
+				}
+				return new StateMachineSideEffectCopy(
+					l->target,
+					exp);
 			}
-			return new StateMachineSideEffectCopy(
-				l->target,
-				exp);
 		}
 	}
 	if (b == l->addr) {
@@ -192,10 +202,10 @@ availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectLoad *l) const
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectStore *s) const
+availExprSet::simplifySE(se_state *state, StateMachineSideEffectStore *s) const
 {
-	auto a = simplifyExprbdd(scopes, s->addr);
-	auto d = simplifyExprbdd(scopes, s->data);
+	auto a = simplifyExprbdd(state->scopes, s->addr);
+	auto d = simplifyExprbdd(state->scopes, s->data);
 	if (TIMEOUT || (a == s->addr && d == s->data)) {
 		return s;
 	} else {
@@ -204,9 +214,9 @@ availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectStore *s) const
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectCopy *c) const
+availExprSet::simplifySE(se_state *state, StateMachineSideEffectCopy *c) const
 {
-	auto d = simplifyExprbdd(scopes, c->value);
+	auto d = simplifyExprbdd(state->scopes, c->value);
 	if (TIMEOUT || d == c->value) {
 		return c;
 	} else {
@@ -215,15 +225,15 @@ availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectCopy *c) const
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *, StateMachineSideEffectUnreached *c) const
+availExprSet::simplifySE(se_state *, StateMachineSideEffectUnreached *c) const
 {
 	return c;
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectAssertFalse *a) const
+availExprSet::simplifySE(se_state *state, StateMachineSideEffectAssertFalse *a) const
 {
-	auto d = simplifyBbdd(scopes, a->value);
+	auto d = simplifyBbdd(state->scopes, a->value);
 	if (TIMEOUT || d == a->value) {
 		return a;
 	} else {
@@ -232,7 +242,7 @@ availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectAssertFalse *a)
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *, StateMachineSideEffectPhi *p) const
+availExprSet::simplifySE(se_state *, StateMachineSideEffectPhi *p) const
 {
 	/* We could do a little bit better here, but Phi effects in
 	   non-SSA machines are so rare that it's not worth worrying
@@ -241,28 +251,28 @@ availExprSet::simplifySE(SMScopes *, StateMachineSideEffectPhi *p) const
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *, StateMachineSideEffectStartAtomic *c) const
+availExprSet::simplifySE(se_state *, StateMachineSideEffectStartAtomic *c) const
 {
 	return c;
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *, StateMachineSideEffectEndAtomic *c) const
+availExprSet::simplifySE(se_state *, StateMachineSideEffectEndAtomic *c) const
 {
 	return c;
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *, StateMachineSideEffectImportRegister *c) const
+availExprSet::simplifySE(se_state *, StateMachineSideEffectImportRegister *c) const
 {
 	return c;
 }
 
 #if TRACK_FRAMES
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectStartFunction *s) const
+availExprSet::simplifySE(se_state *state, StateMachineSideEffectStartFunction *s) const
 {
-	auto rsp = simplifyExprbdd(scopes, s->rsp);
+	auto rsp = simplifyExprbdd(state->scopes, s->rsp);
 	if (TIMEOUT || rsp == s->rsp) {
 		return s;
 	} else {
@@ -271,9 +281,9 @@ availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectStartFunction *
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectEndFunction *s) const
+availExprSet::simplifySE(se_state *state, StateMachineSideEffectEndFunction *s) const
 {
-	auto rsp = simplifyExprbdd(scopes, s->rsp);
+	auto rsp = simplifyExprbdd(state->scopes, s->rsp);
 	if (TIMEOUT || rsp == s->rsp) {
 		return s;
 	} else {
@@ -282,14 +292,14 @@ availExprSet::simplifySE(SMScopes *scopes, StateMachineSideEffectEndFunction *s)
 }
 
 StateMachineSideEffect *
-availExprSet::simplifySE(SMScopes *, StateMachineSideEffectStackLayout *c) const
+availExprSet::simplifySE(se_state *, StateMachineSideEffectStackLayout *c) const
 {
 	return c;
 }
 #endif
 
 StateMachineSideEffect *
-availExprSet::simplifySideEffect(SMScopes *scopes, StateMachineSideEffect *se) const
+availExprSet::simplifySideEffect(se_state *state, StateMachineSideEffect *se) const
 {
 	if (definitelyTrue->isLeaf() && !definitelyTrue->leaf()) {
 		return StateMachineSideEffectUnreached::get();
@@ -297,7 +307,7 @@ availExprSet::simplifySideEffect(SMScopes *scopes, StateMachineSideEffect *se) c
 	switch (se->type) {
 #define do_case(name)							\
 		case StateMachineSideEffect::name :			\
-			return simplifySE(scopes,			\
+			return simplifySE(state,			\
 					  (StateMachineSideEffect ## name *)se);
 		all_side_effect_types(do_case)
 #undef do_case
@@ -306,12 +316,12 @@ availExprSet::simplifySideEffect(SMScopes *scopes, StateMachineSideEffect *se) c
 }
 
 void
-availExprSet::simplifyState(SMScopes *scopes, StateMachineState *s, bool *done_something) const
+availExprSet::simplifyState(se_state *state, StateMachineState *s, bool *done_something) const
 {
 	switch (s->type) {
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)s;
-		auto res = simplifySmrbdd(scopes, smt->res);
+		auto res = simplifySmrbdd(state->scopes, smt->res);
 		if (!TIMEOUT) {
 			if (debug_avail && res != smt->res) {
 				printf("Terminal:\n");
@@ -329,11 +339,11 @@ availExprSet::simplifyState(SMScopes *scopes, StateMachineState *s, bool *done_s
 			smb->trueTarget = smb->falseTarget =
 				new StateMachineTerminal(
 					smb->dbg_origin,
-					scopes->smrs.cnst(smr_unreached));
+					state->scopes->smrs.cnst(smr_unreached));
 			*done_something = true;
 			return;
 		}
-		auto c = simplifyBbdd(scopes, smb->condition);
+		auto c = simplifyBbdd(state->scopes, smb->condition);
 		if (!TIMEOUT) {
 			if (debug_avail && c != smb->condition) {
 				printf("Condition:\n");
@@ -350,7 +360,7 @@ availExprSet::simplifyState(SMScopes *scopes, StateMachineState *s, bool *done_s
 		if (!sme->sideEffect) {
 			return;
 		}
-		auto s = simplifySideEffect(scopes, sme->sideEffect);
+		auto s = simplifySideEffect(state, sme->sideEffect);
 		if (!TIMEOUT) {
 			if (debug_avail && s != sme->sideEffect) {
 				printf("Side effect:\n");
@@ -541,6 +551,13 @@ availExpressionAnalysis(SMScopes *scopes,
 	sane_map<StateMachineState *, availExprSet> availMap;
 	availMap[sm->root].clear(scopes);
 
+	se_state ses;
+
+	ses.scopes = scopes;
+	ses.oracle = oracle;
+	ses.decode = &decode;
+	ses.opt = &opt;
+
 	std::vector<StateMachineState *> pending;
 	pending.push_back(sm->root);
 	while (!TIMEOUT && !pending.empty()) {
@@ -560,7 +577,7 @@ availExpressionAnalysis(SMScopes *scopes,
 			availHere.print();
 		}
 
-		availHere.simplifyState(scopes, s, done_something);
+		availHere.simplifyState(&ses, s, done_something);
 
 		/* Update successor avail sets */
 		switch (s->type) {
