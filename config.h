@@ -77,8 +77,13 @@
 #define CONFIG_FIXED_REGS 1
 #endif
 
+#ifndef CONFIG_W_ISOLATION
+#define CONFIG_W_ISOLATION 1
+#endif
+
 #if !CONFIG_NO_STATIC_ALIASING && CONFIG_LOAD_ELIMINATION
 #define TRACK_FRAMES 1
 #else
 #define TRACK_FRAMES 0
 #endif
+

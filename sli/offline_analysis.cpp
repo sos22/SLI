@@ -1051,9 +1051,11 @@ considerStoreCFG(SMScopes *scopes,
 			enableassumeNoInterferingStores().
 			enableassumeExecutesAtomically().
 			enablemustStoreBeforeCrash();
-	AllowableOptimisations probeOptimisations =
-		optIn.
-			enableignoreSideEffects();
+	AllowableOptimisations probeOptimisations = optIn;
+	if (CONFIG_W_ISOLATION) {
+		probeOptimisations = probeOptimisations.enableignoreSideEffects();
+	}
+
 	VexPtr<OracleInterface> oracleI(oracle);
 	stackedCdf::startStoreInitialSimplify();
 	sm = optimiseStateMachine(
@@ -1340,8 +1342,11 @@ buildProbeMachine(SMScopes *scopes,
 	__set_profiling(buildProbeMachine);
 
 	AllowableOptimisations opt =
-		optIn
-		.enableignoreSideEffects();
+		optIn;
+
+	if (CONFIG_W_ISOLATION) {
+		opt = opt.enableignoreSideEffects();
+	}
 
 	VexPtr<StateMachine, &ir_heap> sm;
 	{
@@ -1515,6 +1520,11 @@ diagnoseCrash(SMScopes *scopes,
 	printStateMachine(probeMachine, _logfile);
 	fprintf(_logfile, "\n");
 
+	AllowableOptimisations probeOpt = optIn;
+	if (CONFIG_W_ISOLATION) {
+		probeOpt = probeOpt.enableignoreSideEffects();
+	}
+
 	/* We now need to figure out which stores are potentially
 	   conflicting, and hence which loads can be safely localised.
 	   The conflicting stores are those which might alias with
@@ -1541,6 +1551,10 @@ diagnoseCrash(SMScopes *scopes,
 
 	stackedCdf::startFindConflictingStores();
 	VexPtr<OracleInterface> oracleI(oracle);
+	/* Note that removeAnnotations always gets
+	   enableignoreSideEffects(), even in the non-W_ISOLATION
+	   case, because it's only used to find the interfering stores
+	   set. */
 	reducedProbeMachine = removeAnnotations(scopes, mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 	if (!reducedProbeMachine) {
 		stackedCdf::stopFindConflictingStores();
@@ -1557,14 +1571,14 @@ diagnoseCrash(SMScopes *scopes,
 				      mai,
 				      probeMachine,
 				      potentiallyConflictingStores,
-				      optIn.enableignoreSideEffects(),
+				      probeOpt,
 				      oracleI,
 				      token,
 				      &localised_loads);
 	if (localised_loads) {
 		sane_map<DynAnalysisRip, IRType> newPotentiallyConflictingStores;
 		while (1) {
-			reducedProbeMachine = removeAnnotations(scopes, mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
+			reducedProbeMachine = removeAnnotations(scopes, mai, probeMachine, probeOpt, oracleI, true, token);
 			if (!reducedProbeMachine) {
 				stackedCdf::stopFindConflictingStores();
 				return NULL;
@@ -1581,7 +1595,7 @@ diagnoseCrash(SMScopes *scopes,
 			localised_loads = false;
 			probeMachine = localiseLoads2(scopes, mai, probeMachine,
 						      potentiallyConflictingStores,
-						      optIn.enableignoreSideEffects(),
+						      probeOpt,
 						      oracleI, token, &localised_loads);
 			if (!localised_loads)
 				break;
@@ -1612,7 +1626,7 @@ diagnoseCrash(SMScopes *scopes,
 	if (needReopt) {
 		stackedCdf::startProbeResimplify();
 		probeMachine = optimiseStateMachine(scopes, mai, probeMachine,
-						    optIn.enableignoreSideEffects(),
+						    probeOpt,
 						    oracle, true, token);
 		stackedCdf::stopProbeResimplify();
 	}
