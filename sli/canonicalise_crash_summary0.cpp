@@ -331,14 +331,22 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		       GarbageCollectionToken token)
 {
 	VexPtr<MaiMap, &ir_heap> mai(cs->mai);
+	AllowableOptimisations probeOpts(
+		AllowableOptimisations::defaultOptimisations.
+		enableassumePrivateStack().
+		enablenoLocalSurvival());
+	AllowableOptimisations storeOpts(
+		AllowableOptimisations::defaultOptimisations.
+		enableassumePrivateStack());
+	if (CONFIG_W_ISOLATION) {
+		probeOpts = probeOpts.enableignoreSideEffects();
+		storeOpts = storeOpts.enableassumeNoInterferingStores();
+	}
 	cs->loadMachine = optimiseStateMachine(
 		cs->scopes,
 		mai,
 		cs->loadMachine,
-		AllowableOptimisations::defaultOptimisations.
-			enableassumePrivateStack().
-			enableignoreSideEffects().
-			enablenoLocalSurvival(),
+		probeOpts,
 		oracle,
 		true,
 		token);
@@ -346,9 +354,7 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		cs->scopes,
 		mai,
 		cs->storeMachine,
-		AllowableOptimisations::defaultOptimisations.
-			enableassumePrivateStack().
-			enableassumeNoInterferingStores(),
+		storeOpts,
 		oracle,
 		true,
 		token);
