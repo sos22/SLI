@@ -230,6 +230,34 @@ Oracle::findConflictingStores(const MaiMap &mai,
 	}
 }
 
+void
+Oracle::findConflictingLoads(const MaiMap &mai,
+			     StateMachineSideEffectStore *smses,
+			     std::set<DynAnalysisRip> &out)
+{
+	for (auto it = mai.begin(smses->rip); !it.finished(); it.advance()) {
+		std::vector<TypesDb::types_entry> loads;
+		std::vector<TypesDb::types_entry> stores;
+		if (!type_db->lookupEntry(it.dr(), loads, stores)) {
+			continue;
+		}
+		bool shared_stores = false;
+		for (auto it2 = stores.begin(); !shared_stores && it2 != stores.end(); it2++) {
+			if (!it2->is_private && it2->rip == it.dr()) {
+				shared_stores = true;
+			}
+		}
+		if (!shared_stores) {
+			continue;
+		}
+		for (auto it = loads.begin(); it != loads.end(); it++) {
+			if (!it->is_private) {
+				out.insert(it->rip);
+			}
+		}
+	}
+}
+
 bool
 Oracle::hasConflictingRemoteStores(const DynAnalysisRip &dr)
 {

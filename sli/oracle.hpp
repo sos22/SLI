@@ -268,6 +268,9 @@ public:
 	void findConflictingStores(const MaiMap &mai,
 				   StateMachineSideEffectLoad *smsel,
 				   std::set<DynAnalysisRip> &out);
+	void findConflictingLoads(const MaiMap &mai,
+				  StateMachineSideEffectStore *smses,
+				  std::set<DynAnalysisRip> &out);
 
 	/* True if the access doesn't appear anywhere in the tag
 	   table.  This usually indicates that the relevant

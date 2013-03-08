@@ -33,7 +33,9 @@ debug_flags(mk_debug_flag)
 #undef debug_flags
 #undef mk_debug_flag
 
-enum cfgflavour_store_t { cfgs_flavour_true = 72, cfgs_flavour_dupe, cfgs_flavour_ordinary };
+enum cfgflavour_store_t { cfgs_flavour_interfering = 72, cfgs_flavour_dupe_interfering,
+			  cfgs_flavour_communicating, cfgs_flavour_dupe_communicating,
+			  cfgs_flavour_vanilla };
 
 static void
 debug_dump(const VexRip &vr)
@@ -73,6 +75,7 @@ static bool
 initialExplorationRoot(
 	const VexRip &root,
 	const std::map<DynAnalysisRip, IRType> &dr_roots,
+	const std::set<DynAnalysisRip> &comm,
 	Oracle *oracle,
 	CfgLabelAllocator &allocLabel,
 	unsigned maxPathLength,
@@ -115,7 +118,9 @@ initialExplorationRoot(
 					it->second.first = item.first;
 					if (dr_roots.count(DynAnalysisRip(n->rip))) {
 						assert(n->rip.isValid());
-						flavours[n] = cfgs_flavour_true;
+						flavours[n] = cfgs_flavour_interfering;
+					} else if (comm.count(DynAnalysisRip(n->rip))) {
+						flavours[n] = cfgs_flavour_communicating;
 					}
 				}
 			} else {
@@ -134,10 +139,13 @@ initialExplorationRoot(
 			continue;
 		}
 		assert(work->rip.isValid());
-		if (dr_roots.count(DynAnalysisRip(vr)))
-			flavours[work] = cfgs_flavour_true;
-		else
-			flavours[work] = cfgs_flavour_ordinary;
+		if (dr_roots.count(DynAnalysisRip(vr))) {
+			flavours[work] = cfgs_flavour_interfering;
+		} else if (comm.count(DynAnalysisRip(vr))) {
+			flavours[work] = cfgs_flavour_communicating;
+		} else {
+			flavours[work] = cfgs_flavour_vanilla;
+		}
 		if (item.first != 1) {
 			const std::vector<CfgSuccessorT<VexRip> > &succ(succMap[work]);
 			for (auto it2 = succ.begin(); it2 != succ.end(); it2++) {
@@ -192,6 +200,7 @@ initialExplorationRoot(
 
 static void
 initialExploration(const std::map<DynAnalysisRip, IRType> &roots,
+		   const std::set<DynAnalysisRip> &comm,
 		   std::map<const CFGNode *, cfgflavour_store_t> &flavours,
 		   CfgLabelAllocator &allocLabel,
 		   unsigned maxPathLength,
@@ -216,7 +225,7 @@ initialExploration(const std::map<DynAnalysisRip, IRType> &roots,
 			const VexRip &root(*it);
 			assert(root.isValid());
 			succ &= initialExplorationRoot(
-				root, roots, oracle, allocLabel, maxPathLength,
+				root, roots, comm, oracle, allocLabel, maxPathLength,
 				flavours, doneSoFar, succMap, new_roots);
 		}
 
@@ -602,8 +611,10 @@ nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<_CFGNode<t> > > &roots
 				continue;
 			auto it_fl = cfgFlavours.find(n);
 			assert(it_fl != cfgFlavours.end());
-			if (it_fl->second == cfgs_flavour_true)
+			if (it_fl->second == cfgs_flavour_interfering ||
+			    it_fl->second == cfgs_flavour_communicating) {
 				initial_pending.push(n);
+			}
 			for (auto it2 = n->successors.begin();
 			     it2 != n->successors.end();
 			     it2++) {
@@ -622,9 +633,11 @@ nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<_CFGNode<t> > > &roots
 
 		auto it_fl = cfgFlavours.find(n);
 		assert(it_fl != cfgFlavours.end());
-		if (it_fl->second == cfgs_flavour_true)
+		if (it_fl->second == cfgs_flavour_interfering) {
 			(*this)[n].min_to[n] = 0;
-		assert(it_fl->second != cfgs_flavour_dupe);
+		}
+		assert(it_fl->second != cfgs_flavour_dupe_interfering &&
+		       it_fl->second != cfgs_flavour_dupe_communicating);
 
 		if (n->successors.empty())
 			continue;
@@ -646,9 +659,12 @@ nodeLabellingMap<t>::nodeLabellingMap(HashedSet<HashedPtr<_CFGNode<t> > > &roots
 
 		auto it_fl = cfgFlavours.find(n);
 		assert(it_fl != cfgFlavours.end());
-		if (it_fl->second == cfgs_flavour_true)
+		if (it_fl->second == cfgs_flavour_communicating ||
+		    it_fl->second == cfgs_flavour_interfering) {
 			(*this)[n].min_from[n] = 0;
-		assert(it_fl->second != cfgs_flavour_dupe);
+		}
+		assert(it_fl->second != cfgs_flavour_dupe_interfering &&
+		       it_fl->second != cfgs_flavour_dupe_communicating);
 
 		HashedSet<HashedPtr<_CFGNode<t> > > pred;
 		predecessors.findPredecessors(n, pred);
@@ -691,7 +707,8 @@ nodeLabellingMap<t>::recalculate_min_from(_CFGNode<t> *node)
 		newExitMap.successor(maxDepth);
 		auto it_fl = cfgFlavours.find(p);
 		assert(it_fl != cfgFlavours.end());
-		if (it_fl->second == cfgs_flavour_true)
+		if (it_fl->second == cfgs_flavour_communicating ||
+		    it_fl->second == cfgs_flavour_interfering)
 			newExitMap[p] = 0;
 		if (newExitMap != (*this)[p].min_from) {
 			/* The min_from label on this node has
@@ -780,10 +797,15 @@ performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 				new_node = new _CFGNode<t>(cycle_edge_end, allocLabel());
 				auto it_fl = cfgFlavours.find(cycle_edge_end);
 				assert(it_fl != cfgFlavours.end());
-				if (it_fl->second == cfgs_flavour_true || it_fl->second == cfgs_flavour_dupe)
-					cfgFlavours[new_node] = cfgs_flavour_dupe;
-				else
-					cfgFlavours[new_node] = cfgs_flavour_ordinary;
+				if (it_fl->second == cfgs_flavour_interfering ||
+				    it_fl->second == cfgs_flavour_dupe_interfering) {
+					cfgFlavours[new_node] = cfgs_flavour_dupe_interfering;
+				} else if (it_fl->second == cfgs_flavour_communicating ||
+					   it_fl->second == cfgs_flavour_dupe_communicating) {
+					cfgFlavours[new_node] = cfgs_flavour_dupe_communicating;
+				} else {
+					cfgFlavours[new_node] = cfgs_flavour_vanilla;
+				}
 				pred.new_node(new_node);
 				nlm[new_node] = label;
 			}
@@ -826,7 +848,8 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 	for (auto it = ripsToCFGNodes.begin(); it != ripsToCFGNodes.end(); it++) {
 		auto it_fl = flavours.find(it->second);
 		assert(it_fl != flavours.end());
-		if (it_fl->second == cfgs_flavour_true) {
+		if (it_fl->second == cfgs_flavour_communicating ||
+		    it_fl->second == cfgs_flavour_interfering) {
 			if (debug_backtrack_roots) {
 				printf("Initial root %p: ", it->second);
 				it->second->prettyPrint(stdout);
@@ -887,7 +910,7 @@ findRootsAndBacktrack(CfgLabelAllocator &allocLabel,
 				if (!have_succ)
 					succ.push_back(CfgSuccessorT<VexRip>(CfgSuccessorT<VexRip>::dflt(n->rip)));
 
-				flavours[work] = cfgs_flavour_ordinary;
+				flavours[work] = cfgs_flavour_vanilla;
 				ripsToCFGNodes[predecessor] = work;
 				n = work;
 				if (debug_backtrack_roots) {
@@ -972,8 +995,11 @@ trimUninterestingCFGNodes(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
 			bool isInteresting = false;
 			auto fl_it = flavours.find(n);
 			assert(fl_it != flavours.end());
-			if ( fl_it->second == cfgs_flavour_true ||
-			     fl_it->second == cfgs_flavour_dupe ) {
+			/* Note that dupe communicating nodes are not
+			   automatically interesting. */
+			if ( fl_it->second == cfgs_flavour_interfering ||
+			     fl_it->second == cfgs_flavour_communicating ||
+			     fl_it->second == cfgs_flavour_dupe_interfering ) {
 				if (debug_trim_uninteresting) {
 					printf("Trim uninteresting: is interesting (%d): %p ", fl_it->second, &**it);
 					(*it)->prettyPrint(stdout);
@@ -1229,12 +1255,13 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 
 static void
 buildCFG(CfgLabelAllocator &allocLabel, const std::map<DynAnalysisRip, IRType> &dyn_roots,
+	 const std::set<DynAnalysisRip> &communicating,
 	 unsigned maxPathLength, Oracle *oracle, HashedSet<HashedPtr<CFGNode> > &roots)
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
 	std::map<const CFGNode *, cfgflavour_store_t> cfgFlavours;
 	HashedSet<HashedPtr<CFGNode> > roots1;
-	initialExploration(dyn_roots, cfgFlavours, allocLabel, maxPathLength, oracle, ripsToCFGNodes);
+	initialExploration(dyn_roots, communicating, cfgFlavours, allocLabel, maxPathLength, oracle, ripsToCFGNodes);
 	if (TIMEOUT)
 		return;
 
@@ -1323,19 +1350,25 @@ sortByRip(CFGNode **roots, int nr_roots)
 static void
 getStoreCFGs(CfgLabelAllocator &allocLabel,
 	     const std::map<DynAnalysisRip, IRType> &conflictingStores,
+	     const std::set<DynAnalysisRip> &communicatingInstrs,
 	     Oracle *oracle,
 	     CFGNode ***roots,
 	     int *nr_roots)
 {
 	if (_getStoreCFGs::debug_top_level) {
-		printf("getStoreCFGs, input ");
+		printf("getStoreCFGs, conflicting = {");
 		for (auto it = conflictingStores.begin(); it != conflictingStores.end(); it++)
 			printf("%s, ", it->first.name());
-		printf("\n");
+		printf("}; communicating = {");
+		for (auto it = communicatingInstrs.begin(); it != communicatingInstrs.end(); it++) {
+			printf("%s, ", it->name());
+		}
+		printf("}\n");
 	}
 
 	HashedSet<HashedPtr<CFGNode> > cfgRoots;
-	buildCFG(allocLabel, conflictingStores, STORE_CLUSTER_THRESHOLD, oracle, cfgRoots);
+	buildCFG(allocLabel, conflictingStores, communicatingInstrs,
+		 STORE_CLUSTER_THRESHOLD, oracle, cfgRoots);
 
 	/* Need to copy that out to something in the IR heap, so that
 	   we can do garbage collection. */
@@ -1371,9 +1404,16 @@ getStoreCFGs(CfgLabelAllocator &allocLabel,
 void
 getStoreCFGs(CfgLabelAllocator &allocLabel,
 	     const std::map<DynAnalysisRip, IRType> &conflictingStores,
+#if !CONFIG_W_ISOLATION
+	     const std::set<DynAnalysisRip> &communicatingInstrs,
+#endif
 	     Oracle *oracle,
 	     CFGNode ***roots,
 	     int *nr_roots)
 {
-	_getStoreCFGs::getStoreCFGs(allocLabel, conflictingStores, oracle, roots, nr_roots);
+#if CONFIG_W_ISOLATION
+	std::set<DynAnalysisRip> communicatingInstrs;
+#endif
+	_getStoreCFGs::getStoreCFGs(allocLabel, conflictingStores, communicatingInstrs,
+				    oracle, roots, nr_roots);
 }

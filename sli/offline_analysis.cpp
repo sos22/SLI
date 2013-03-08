@@ -444,6 +444,23 @@ getConflictingStores(const MaiMap &mai, StateMachine *sm, Oracle *oracle,
 	}
 }
 
+#if !CONFIG_W_ISOLATION
+static void
+getCommunicatingInstructions(const MaiMap &mai, StateMachine *sm, Oracle *oracle,
+			     std::set<DynAnalysisRip> &out)
+{
+	std::set<StateMachineSideEffectStore *> allStores;
+	enumSideEffects(sm, allStores);
+	if (allStores.size() == 0) {
+		return;
+	}
+	for (auto it = allStores.begin(); it != allStores.end(); it++) {
+		std::set<DynAnalysisRip> ls;
+		oracle->findConflictingLoads(mai, *it, out);
+	}
+}
+#endif
+
 /* If there's precisely one interesting store in the store machine and
  * one interesting memory access in the probe machine then the whole
  * thing becomes very easy. */
@@ -1439,6 +1456,9 @@ probeMachineToSummary(SMScopes *scopes,
 		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
 		      std::map<DynAnalysisRip, IRType> &potentiallyConflictingStores,
+#if !CONFIG_W_ISOLATION
+		      const std::set<DynAnalysisRip> &communicatingInstructions,
+#endif
 		      bool preserveMux,
 		      const AllowableOptimisations &optIn,
 		      const VexPtr<MaiMap, &ir_heap> &maiIn,
@@ -1451,7 +1471,11 @@ probeMachineToSummary(SMScopes *scopes,
 	{
 		CFGNode **n;
 		stackedCdf::startBuildStoreCFGs();
-		getStoreCFGs(allocLabel, potentiallyConflictingStores, oracle, &n, &nrStoreCfgs);
+		getStoreCFGs(allocLabel, potentiallyConflictingStores,
+#if !CONFIG_W_ISOLATION
+			     communicatingInstructions,
+#endif
+			     oracle, &n, &nrStoreCfgs);
 		stackedCdf::stopBuildStoreCFGs();
 		storeCFGs = n;
 	}
@@ -1631,6 +1655,13 @@ diagnoseCrash(SMScopes *scopes,
 		stackedCdf::stopProbeResimplify();
 	}
 
+#if !CONFIG_W_ISOLATION
+	std::set<DynAnalysisRip> communicatingInstructions;
+	VexPtr<StateMachine, &ir_heap> semiReduced;
+	semiReduced = removeAnnotations(scopes, mai, probeMachine, optIn, oracleI, true, token);
+	getCommunicatingInstructions(*mai, semiReduced, oracle, communicatingInstructions);
+#endif
+
 	return probeMachineToSummary(scopes,
 				     allocLabel,
 				     targetRip,
@@ -1640,6 +1671,9 @@ diagnoseCrash(SMScopes *scopes,
 				     oracle,
 				     df,
 				     potentiallyConflictingStores,
+#if !CONFIG_W_ISOLATION
+				     communicatingInstructions,
+#endif
 				     haveMuxOps,
 				     optIn,
 				     mai,
