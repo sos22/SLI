@@ -1063,14 +1063,13 @@ considerStoreCFG(SMScopes *scopes,
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return NULL;
 	}
-	AllowableOptimisations storeOptimisations =
-		optIn.
-			enableassumeNoInterferingStores().
-			enableassumeExecutesAtomically().
-			enablemustStoreBeforeCrash();
+	AllowableOptimisations storeOptimisations = optIn.enablemustStoreBeforeCrash();
 	AllowableOptimisations probeOptimisations = optIn;
 	if (CONFIG_W_ISOLATION) {
 		probeOptimisations = probeOptimisations.enableignoreSideEffects();
+		storeOptimisations = storeOptimisations
+			.enableassumeNoInterferingStores()
+			.enableassumeExecutesAtomically();
 	}
 
 	VexPtr<OracleInterface> oracleI(oracle);
