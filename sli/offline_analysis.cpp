@@ -468,15 +468,20 @@ static bool
 singleLoadVersusSingleStore(const MaiMap &mai, StateMachine *storeMachine, StateMachine *probeMachine,
 			    const IRExprOptimisations &opt, OracleInterface *oracle)
 {
-	std::set<StateMachineSideEffectStore *> storeMachineStores;
+#if CONFIG_W_ISOLATION
+	std::set<StateMachineSideEffectStore *> storeMachineAccesses;
+#else
+	std::set<StateMachineSideEffectMemoryAccess *> storeMachineAccesses;
+#endif
 	std::set<StateMachineSideEffectMemoryAccess *> probeMachineAccesses;
-	enumSideEffects(storeMachine, storeMachineStores);
+
+	enumSideEffects(storeMachine, storeMachineAccesses);
 	enumSideEffects(probeMachine, probeMachineAccesses);
 
-	StateMachineSideEffectStore *racingStore = NULL;
+	StateMachineSideEffectMemoryAccess *racingStore = NULL;
 	StateMachineSideEffectMemoryAccess *racingLoad = NULL;
-	for (auto it = storeMachineStores.begin(); it != storeMachineStores.end(); it++) {
-		StateMachineSideEffectStore *store = *it;
+	for (auto it = storeMachineAccesses.begin(); it != storeMachineAccesses.end(); it++) {
+		auto store = *it;
 		bool races = false;
 		for (auto it2 = probeMachineAccesses.begin();
 		     !races && it2 != probeMachineAccesses.end();
@@ -782,6 +787,62 @@ logUseOfInduction(const DynAnalysisRip &used_in, const DynAnalysisRip &used)
 	fprintf(inductionLog, "%s -> %s\n", used.name(), used_in.name());
 }
 
+static void
+findNonLocalLoads(const MaiMap &mai,
+		  OracleInterface *oracle,
+		  StateMachine *storeMachine,
+		  StateMachine *probeMachine,
+		  std::set<DynAnalysisRip> &nonLocalLoads)
+{
+	std::set<StateMachineSideEffectStore *> stores;
+	enumSideEffects(storeMachine, stores);
+	std::set<StateMachineSideEffectLoad *> loads;
+	enumSideEffects(probeMachine, loads);
+	for (auto it = loads.begin(); !TIMEOUT && it != loads.end(); it++) {
+		StateMachineSideEffectLoad *load = *it;
+		if (debug_localise_loads) {
+			printf("Load %s\n", load->rip.name());
+		}
+		for (auto it2 = mai.begin(load->rip); !TIMEOUT && !it2.finished(); it2.advance()) {
+			DynAnalysisRip dr(it2.dr());
+			bool found_one = false;
+			if (debug_localise_loads) {
+				printf("    Sub-load %s\n", dr.name());
+			}
+			for (auto it3 = stores.begin(); !found_one && it3 != stores.end(); it3++) {
+				StateMachineSideEffectStore *store = *it3;
+				if (debug_localise_loads) {
+					printf("        Store %s\n", store->rip.name());
+				}
+				if (store->tag != load->tag)
+					continue;
+				for (auto it4 = mai.begin(store->rip); !found_one && !it4.finished(); it4.advance()) {
+					if (oracle->memoryAccessesMightAliasCrossThread(dr, it4.dr())) {
+						if (debug_localise_loads) {
+							printf("            Sub-store %s aliases\n", it4.dr().name());
+						}
+						found_one = true;
+					} else {
+						if (debug_localise_loads) {
+							printf("            Sub-store %s no alias\n", it4.dr().name());
+						}
+					}
+				}
+			}
+			if (found_one) {
+				if (debug_localise_loads) {
+					printf("    Sub-load %s is non-local\n", dr.name());
+				}
+				nonLocalLoads.insert(dr);
+			} else {
+				if (debug_localise_loads) {
+					printf("    Sub-load %s is local\n", dr.name());
+				}
+			}
+		}
+	}
+}
+
 static StateMachine *
 localiseLoads1(SMScopes *scopes,
 	       VexPtr<MaiMap, &ir_heap> &mai,
@@ -797,55 +858,10 @@ localiseLoads1(SMScopes *scopes,
 	}
 
 	std::set<DynAnalysisRip> nonLocalLoads;
-	{
-		std::set<StateMachineSideEffectStore *> stores;
-		enumSideEffects(storeMachine, stores);
-		std::set<StateMachineSideEffectLoad *> loads;
-		enumSideEffects(probeMachine, loads);
-		for (auto it = loads.begin(); !TIMEOUT && it != loads.end(); it++) {
-			StateMachineSideEffectLoad *load = *it;
-			if (debug_localise_loads) {
-				printf("Load %s\n", load->rip.name());
-			}
-			for (auto it2 = mai->begin(load->rip); !TIMEOUT && !it2.finished(); it2.advance()) {
-				DynAnalysisRip dr(it2.dr());
-				bool found_one = false;
-				if (debug_localise_loads) {
-					printf("    Sub-load %s\n", dr.name());
-				}
-				for (auto it3 = stores.begin(); !found_one && it3 != stores.end(); it3++) {
-					StateMachineSideEffectStore *store = *it3;
-					if (debug_localise_loads) {
-						printf("        Store %s\n", store->rip.name());
-					}
-					if (store->tag != load->tag)
-						continue;
-					for (auto it4 = mai->begin(store->rip); !found_one && !it4.finished(); it4.advance()) {
-						if (oracle->memoryAccessesMightAliasCrossThread(dr, it4.dr())) {
-							if (debug_localise_loads) {
-								printf("            Sub-store %s aliases\n", it4.dr().name());
-							}
-							found_one = true;
-						} else {
-							if (debug_localise_loads) {
-								printf("            Sub-store %s no alias\n", it4.dr().name());
-							}
-						}
-					}
-				}
-				if (found_one) {
-					if (debug_localise_loads) {
-						printf("    Sub-load %s is non-local\n", dr.name());
-					}
-					nonLocalLoads.insert(dr);
-				} else {
-					if (debug_localise_loads) {
-						printf("    Sub-load %s is local\n", dr.name());
-					}
-				}
-			}
-		}
-	}
+	findNonLocalLoads(*mai, oracle, storeMachine, probeMachine, nonLocalLoads);
+#if !CONFIG_W_ISOLATION
+	findNonLocalLoads(*mai, oracle, probeMachine, storeMachine, nonLocalLoads);
+#endif
 	return optimiseStateMachine(
 		scopes,
 		mai,
@@ -1042,6 +1058,57 @@ optimiseAssuming(SMScopes *scopes, StateMachine *sm, bbdd *condition, bool *done
 	}
 }
 
+#if !CONFIG_W_ISOLATION
+static void
+rebuildConflictingStores(const MaiMap &decode,
+			 const AllowableOptimisations &opt,
+			 OracleInterface *oracle,
+			 StateMachine *probeMachine,
+			 StateMachine *storeMachine,
+			 sane_map<DynAnalysisRip, IRType> &out)
+{
+	struct {
+		sane_map<DynAnalysisRip, IRType> *out;
+		void operator()(const DynAnalysisRip &dr, IRType ty) {
+			auto it_did_insert = out->insert(dr, ty);
+			if (it_did_insert.first->second < ty) {
+				it_did_insert.first->second = ty;
+			}
+		}
+	} add;
+	add.out = &out;
+	std::set<StateMachineSideEffectLoad *> loads;
+	std::set<StateMachineSideEffectStore *> stores;
+	enumSideEffects(probeMachine, stores);
+	enumSideEffects(storeMachine, loads);
+	for (auto it = loads.begin(); it != loads.end(); it++) {
+		auto l = *it;
+		for (auto it2 = stores.begin(); it2 != stores.end(); it2++) {
+			auto s = *it2;
+			if (l->tag != s->tag) {
+				break;
+			}
+			if (l->tag == MemoryTag::last_free() || l->tag == MemoryTag::mutex()) {
+				for (auto it3 = decode.begin(s->rip); !it3.finished(); it3.advance()) {
+					add(it3.dr(), l->type);
+				}
+				continue;
+			}
+			if (definitelyNotEqual(l->addr, s->addr, opt)) {
+				continue;
+			}
+			for (auto it3 = decode.begin(l->rip); !it3.finished(); it3.advance()) {
+				for (auto it4 = decode.begin(s->rip); !it4.finished(); it4.advance()) {
+					if (oracle->memoryAccessesMightAliasCrossThread(it3.dr(), it4.dr())) {
+						add(it4.dr(), l->type);
+					}
+				}
+			}
+		}
+	}
+}
+#endif
+
 static CrashSummary *
 considerStoreCFG(SMScopes *scopes,
 		 const DynAnalysisRip &target_rip,
@@ -1052,6 +1119,9 @@ considerStoreCFG(SMScopes *scopes,
 		 unsigned tid,
 		 const AllowableOptimisations &optIn,
 		 const VexPtr<MaiMap, &ir_heap> &maiIn,
+#if !CONFIG_W_ISOLATION
+		 const sane_map<DynAnalysisRip, IRType> &potentiallyConflictingStores,
+#endif
 		 GarbageCollectionToken token)
 {
 	__set_profiling(considerStoreCFG);
@@ -1105,6 +1175,12 @@ considerStoreCFG(SMScopes *scopes,
 		true,
 		token);
 	stackedCdf::stopStoreSecondSimplify();
+
+#if !CONFIG_W_ISOLATION
+	sane_map<DynAnalysisRip, IRType> newConflicting(potentiallyConflictingStores);
+	rebuildConflictingStores(*mai, optIn, oracle, probeMachine, sm_ssa, newConflicting);
+	probeOptimisations = probeOptimisations.setinterestingStores(&newConflicting);
+#endif
 
 	probeMachine = duplicateStateMachine(probeMachine);
 	bool redoAtomicSurvival = false;
@@ -1454,7 +1530,7 @@ probeMachineToSummary(SMScopes *scopes,
 		      const VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
 		      const VexPtr<Oracle> &oracle,
 		      FixConsumer &df,
-		      std::map<DynAnalysisRip, IRType> &potentiallyConflictingStores,
+		      const sane_map<DynAnalysisRip, IRType> &potentiallyConflictingStores,
 #if !CONFIG_W_ISOLATION
 		      const std::set<DynAnalysisRip> &communicatingInstructions,
 #endif
@@ -1510,9 +1586,14 @@ probeMachineToSummary(SMScopes *scopes,
 					   atomicSurvival,
 					   STORING_THREAD + i,
 					   optIn
+#if CONFIG_W_ISOLATION
 					        .setinterestingStores(&potentiallyConflictingStores)
+#endif
 					        .setmutexStoresInteresting(preserveMux),
 					   maiIn,
+#if !CONFIG_W_ISOLATION
+					   potentiallyConflictingStores,
+#endif
 					   token);
 		if (summary)
 			df(summary, token);
