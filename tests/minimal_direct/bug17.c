@@ -1,6 +1,7 @@
 /* A bug which doesn't work if you have W isolation turned on. */
 #include <assert.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -24,7 +25,7 @@ thr_main(void *ign)
 	struct the_struct *chain_start;
 	int i;
 
-	while (1) {
+	while (!force_quit) {
 		struct the_struct *s;
 
 		chain_start = NULL;
@@ -33,12 +34,15 @@ thr_main(void *ign)
 		pthread_barrier_wait(&the_barrier);
 
 		for (i = 0; i < NR_ATTEMPTS; i++) {
+			STOP_ANALYSIS();
 			s = malloc(sizeof(struct the_struct));
 			s->chain = chain_start;
 			chain_start = s;
 			s->v = 7;
 			global_ptr = s;
 			assert(s->v == 7);
+			STOP_ANALYSIS();
+			read_cntr++;
 		}
 
 		pthread_barrier_wait(&the_barrier);
@@ -49,6 +53,8 @@ thr_main(void *ign)
 		}
 		pthread_barrier_wait(&the_barrier);
 	}
+
+	return NULL;
 }
 
 int
@@ -72,15 +78,24 @@ main()
 		pthread_barrier_wait(&the_barrier);
 
 		for (i = 0; i < NR_ATTEMPTS; i++) {
+			STOP_ANALYSIS();
 			p = global_ptr;
 			if (p) {
 				p->v = 5;
 			}
+			STOP_ANALYSIS();
+			write_cntr++;
 		}
 
 		pthread_barrier_wait(&the_barrier);
 		pthread_barrier_wait(&the_barrier);
 	}
+
+	force_quit = true;
+	pthread_join(thr, NULL);
+
+	printf("Survived, %d read events and %d write events\n",
+	       read_cntr, write_cntr);
 
 	return 0;
 
