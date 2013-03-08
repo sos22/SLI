@@ -50,6 +50,10 @@ public:
 		}
 		return false;
 	}
+	bool memoryAccessesMightAliasCrossThreadSym(const DynAnalysisRip &load, const DynAnalysisRip &store) {
+		return memoryAccessesMightAliasCrossThread(load, store) ||
+			memoryAccessesMightAliasCrossThread(store, load);
+	}
         bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store) {
 		return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load),
 							   DynAnalysisRip(store));

@@ -49,6 +49,7 @@ public:
 				      StateMachineSideEffectMemoryAccess *a,
 				      StateMachineSideEffectMemoryAccess *b);
 	virtual bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) = 0;
+	virtual bool memoryAccessesMightAliasCrossThreadSym(const DynAnalysisRip &acc1, const DynAnalysisRip &acc2) = 0;
 	bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store){
 		return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load), DynAnalysisRip(store));
 	}
@@ -294,6 +295,7 @@ public:
 	bool memoryAccessesMightAlias(const MaiMap &,const IRExprOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(const MaiMap &,const IRExprOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store);
+	bool memoryAccessesMightAliasCrossThreadSym(const DynAnalysisRip &acc1, const DynAnalysisRip &acc2);
 
 	static void findInstructions(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads,
 				     const callgraph_t &callgraph,

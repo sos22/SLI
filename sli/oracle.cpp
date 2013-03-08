@@ -493,6 +493,13 @@ Oracle::memoryAccessesMightAliasCrossThread(const DynAnalysisRip &smsel_dr, cons
 	__set_profiling(might_alias_cross_thread);
 	return memoryAccessesMightAliasLS(smsel_dr, smses_dr) == mam_might_alias;
 }
+bool
+Oracle::memoryAccessesMightAliasCrossThreadSym(const DynAnalysisRip &acc1, const DynAnalysisRip &acc2)
+{
+	__set_profiling(might_alias_cross_thread);
+	return memoryAccessesMightAliasLS(acc1, acc2) == mam_might_alias ||
+		memoryAccessesMightAliasLS(acc2, acc1) == mam_might_alias;
+}
 
 Oracle::mam_result
 Oracle::memoryAccessesMightAliasLL(const DynAnalysisRip &dr1, const DynAnalysisRip &dr2)
