@@ -435,15 +435,15 @@ Oracle::memoryAccessesMightAliasLS(const DynAnalysisRip &smsel_dr, const DynAnal
 		return mam_no_alias;
 
 	bool have_private_alias = false;
-	for (auto it = load_stores.begin(); it != load_stores.end(); it++)
+	for (auto it = load_stores.begin(); it != load_stores.end(); it++) {
 		if (it->rip == smses_dr) {
-			if (it->is_private)
-				have_private_alias = true;
-			else
+			if (!shared_load) {
+				return mam_private;
+			} else {
 				return mam_might_alias;
+			}
 		}
-	if (have_private_alias)
-		return mam_private;
+	}
 	return mam_no_alias;
 }
 bool
