@@ -248,11 +248,13 @@ private:
 	std::vector<StaticRip> terminalFunctions;
 	std::vector<StaticRip> crashingFunctions;
 	std::vector<StaticRip> freeFunctions;
+	std::vector<DynAnalysisRip> indirectCalls;
 	void findNoReturnFunctions();
 public:
 	bool functionNeverReturns(const StaticRip &rip);
 	void findAssertions(std::vector<DynAnalysisRip> &out);
 	void findFrees(std::vector<DynAnalysisRip> &out);
+	void findIndirectCalls(std::vector<DynAnalysisRip> &out);
 	static void loadCallGraph(VexPtr<Oracle> &ths, const char *cg_path,
 				  const char *db_fname, GarbageCollectionToken token);
 	void visit(HeapVisitor &hv) {

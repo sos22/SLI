@@ -196,6 +196,20 @@ clean_dirs += ${exename}.summaries
 EOF
     _emit_rules_for_exe "$1" "$2"
 }
+emit_rules_for_exe_icall() {
+    local exename="${MD_TEST_DIR}/$1"
+    local static_files="${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db"
+    cat <<EOF
+${exename}.summaries: minimal_direct ${static_files} machines
+	rm -rf \$@ crash_summaries induction.log logs generated_patch.c && \\
+	mkdir logs && \\
+	mkdir crash_summaries && \\
+	SOS22_MINIMAL_DIRECT_TIMEOUT=600 ./minimal_direct ${static_files} icall && \\
+	mv crash_summaries ${exename}.summaries
+clean_dirs += ${exename}.summaries
+EOF
+    _emit_rules_for_exe "$1" "$2"
+}
 
 rules() {
     cat <<EOF
@@ -205,7 +219,7 @@ machines:
 	mkdir machines
 clean_dirs += machines
 EOF
-    for bug in 1 2 3 4 6 7 8 10 16 19
+    for bug in 1 2 3 4 6 7 8 10 16
     do
 	emit_rules_for_exe_segv bug${bug} 1
     done
@@ -216,6 +230,10 @@ EOF
     for bug in 14
     do
 	emit_rules_for_exe_dfree bug${bug} 1
+    done
+    for bug in 19
+    do
+	emit_rules_for_exe_icall bug${bug} 1
     done
     for bug in 9
     do
