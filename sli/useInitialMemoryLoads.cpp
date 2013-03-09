@@ -180,7 +180,7 @@ useInitialMemoryLoads(SMScopes *scopes, const MaiMap &mai, StateMachine *sm, con
 						load->target,
 						exprbdd::load(&scopes->exprs, &scopes->bools, load->type, load->addr)),
 					s->target);
-			if (load->tag.neverBadPtr()) {
+			if (load->tag.neverBadPtr() || opt.allPointersGood()) {
 				rewrites[s] = cpy;
 			} else {
 				rewrites[s] = new StateMachineSideEffecting(

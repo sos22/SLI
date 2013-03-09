@@ -975,7 +975,7 @@ mightLoadInitialValue(StateMachineSideEffecting *smse,
 			   inconsistency between here and the alias
 			   table, and that leads to lots of bad things
 			   happening. */
-			if (store->_type() == load->_type() &&
+			if (store->_type() >= load->_type() &&
 			    oracle->memoryAccessesMightAlias(decode, opt, load, store) &&
 			    definitelyEqual(store->addr, load->addr, opt)) {
 				/* This store will satisfy the load,

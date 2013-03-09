@@ -22,7 +22,7 @@ thr_main(void *ign)
 		v2 = global2;
 		assert(v1 == v2);
 		STOP_ANALYSIS();
-		usleep(10000);
+		usleep(5000);
 		read_cntr++;
 	}
 	return NULL;
@@ -43,12 +43,12 @@ main()
 	pthread_create(&thr, NULL, thr_main, NULL);
 
 	while (forever || time(NULL) < start_time + 10) {
-		usleep(100000);
 		STOP_ANALYSIS();
 		global1 = 5;
+		STOP_ANALYSIS();
 		global2 = 5;
 		STOP_ANALYSIS();
-		usleep(100000);
+		usleep(5000);
 		STOP_ANALYSIS();
 		global1 = 7;
 		global2 = 7;

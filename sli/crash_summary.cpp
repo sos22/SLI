@@ -175,6 +175,11 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 	   -- loadStore vs loadStore
 	   -- storeLoad vs storeStore
 	   -- storeStore vs storeStore
+
+	   If CONFIG_W_ISOLATION is clear, it also contains
+
+	   -- storeLoad vs loadStore
+	   -- storeStore vs loadStore
 	*/
 #define do_set(s)							\
 	for (auto it2 = s.begin(); it2 != s.end(); it2++) {		\
@@ -194,6 +199,10 @@ CrashSummary::buildAliasingTable(Oracle *oracle)
 	for (auto it = loadStores.begin(); it != loadStores.end(); it++) {
 		do_set(loadLoads);
 		do_set(loadStores);
+		if (!CONFIG_W_ISOLATION) {
+			do_set(storeLoads);
+			do_set(storeStores);
+		}
 	}
 	for (auto it = storeStores.begin(); it != storeStores.end(); it++) {
 		do_set(loadLoads);

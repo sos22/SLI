@@ -123,6 +123,9 @@ typedef _CFGNode<VexRip> CFGNode;
 
 void getStoreCFGs(CfgLabelAllocator &allocLabel,
 		  const std::map<DynAnalysisRip, IRType> &,
+#if !CONFIG_W_ISOLATION
+		  const std::set<DynAnalysisRip> &,
+#endif
 		  Oracle *,
 		  CFGNode ***,
 		  int *);

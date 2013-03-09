@@ -49,6 +49,7 @@ public:
 				      StateMachineSideEffectMemoryAccess *a,
 				      StateMachineSideEffectMemoryAccess *b);
 	virtual bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store) = 0;
+	virtual bool memoryAccessesMightAliasCrossThreadSym(const DynAnalysisRip &acc1, const DynAnalysisRip &acc2) = 0;
 	bool memoryAccessesMightAliasCrossThread(const VexRip &load, const VexRip &store){
 		return memoryAccessesMightAliasCrossThread(DynAnalysisRip(load), DynAnalysisRip(store));
 	}
@@ -204,6 +205,7 @@ public:
 	static IRSB *getIRSBForRip(AddressSpace *as, const VexRip &sr, bool singleInstr);
 	IRSB *getIRSBForRip(const VexRip &vr, bool singleInstr);
 
+#if CONFIG_FIXED_REGS
 	class FixedRegs : public Named {
 		char *mkName() const;
 	public:
@@ -228,12 +230,15 @@ public:
 	};
 	bool getFixedRegs(const StaticRip &vr, FixedRegs *out);
 	void setFixedRegs(const StaticRip &vr, const FixedRegs &fr);
+#endif
 private:
 
 	void buildReturnAddressTable();
 	static void calculateRegisterLiveness(VexPtr<Oracle> &ths, GarbageCollectionToken token);
 	static void calculateAliasing(VexPtr<Oracle> &ths, GarbageCollectionToken token);
+#if CONFIG_FIXED_REGS
 	static void calculateFixedRegs(VexPtr<Oracle> &ths, GarbageCollectionToken token);
+#endif
 
 	void loadTagTable(const char *path);
 	void findPossibleJumpTargets(const StaticRip &from, const callgraph_t &callgraph_table, std::vector<StaticRip> &targets);
@@ -264,6 +269,9 @@ public:
 	void findConflictingStores(const MaiMap &mai,
 				   StateMachineSideEffectLoad *smsel,
 				   std::set<DynAnalysisRip> &out);
+	void findConflictingLoads(const MaiMap &mai,
+				  StateMachineSideEffectStore *smses,
+				  std::set<DynAnalysisRip> &out);
 
 	/* True if the access doesn't appear anywhere in the tag
 	   table.  This usually indicates that the relevant
@@ -287,6 +295,7 @@ public:
 	bool memoryAccessesMightAlias(const MaiMap &,const IRExprOptimisations &, StateMachineSideEffectLoad *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAlias(const MaiMap &,const IRExprOptimisations &, StateMachineSideEffectStore *, StateMachineSideEffectStore *);
 	bool memoryAccessesMightAliasCrossThread(const DynAnalysisRip &load, const DynAnalysisRip &store);
+	bool memoryAccessesMightAliasCrossThreadSym(const DynAnalysisRip &acc1, const DynAnalysisRip &acc2);
 
 	static void findInstructions(VexPtr<Oracle> &ths, std::vector<StaticRip> &heads,
 				     const callgraph_t &callgraph,

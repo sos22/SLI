@@ -230,6 +230,34 @@ Oracle::findConflictingStores(const MaiMap &mai,
 	}
 }
 
+void
+Oracle::findConflictingLoads(const MaiMap &mai,
+			     StateMachineSideEffectStore *smses,
+			     std::set<DynAnalysisRip> &out)
+{
+	for (auto it = mai.begin(smses->rip); !it.finished(); it.advance()) {
+		std::vector<TypesDb::types_entry> loads;
+		std::vector<TypesDb::types_entry> stores;
+		if (!type_db->lookupEntry(it.dr(), loads, stores)) {
+			continue;
+		}
+		bool shared_stores = false;
+		for (auto it2 = stores.begin(); !shared_stores && it2 != stores.end(); it2++) {
+			if (!it2->is_private && it2->rip == it.dr()) {
+				shared_stores = true;
+			}
+		}
+		if (!shared_stores) {
+			continue;
+		}
+		for (auto it = loads.begin(); it != loads.end(); it++) {
+			if (!it->is_private) {
+				out.insert(it->rip);
+			}
+		}
+	}
+}
+
 bool
 Oracle::hasConflictingRemoteStores(const DynAnalysisRip &dr)
 {
@@ -401,24 +429,21 @@ Oracle::memoryAccessesMightAliasLS(const DynAnalysisRip &smsel_dr, const DynAnal
 	if (!private_store && !shared_store)
 		return mam_no_alias;
 
-	/* If the load is definitely shared and the store is
-	   definitely private then they can't alias, and
-	   vice-versa. */
-	if (!private_load && !shared_store)
-		return mam_no_alias;
+	/* If the store is definitely shared and the load is
+	   definitely private then they can't alias. */
 	if (!shared_load && !private_store)
 		return mam_no_alias;
 
 	bool have_private_alias = false;
-	for (auto it = load_stores.begin(); it != load_stores.end(); it++)
+	for (auto it = load_stores.begin(); it != load_stores.end(); it++) {
 		if (it->rip == smses_dr) {
-			if (it->is_private)
-				have_private_alias = true;
-			else
+			if (!shared_load) {
+				return mam_private;
+			} else {
 				return mam_might_alias;
+			}
 		}
-	if (have_private_alias)
-		return mam_private;
+	}
 	return mam_no_alias;
 }
 bool
@@ -467,6 +492,13 @@ Oracle::memoryAccessesMightAliasCrossThread(const DynAnalysisRip &smsel_dr, cons
 {
 	__set_profiling(might_alias_cross_thread);
 	return memoryAccessesMightAliasLS(smsel_dr, smses_dr) == mam_might_alias;
+}
+bool
+Oracle::memoryAccessesMightAliasCrossThreadSym(const DynAnalysisRip &acc1, const DynAnalysisRip &acc2)
+{
+	__set_profiling(might_alias_cross_thread);
+	return memoryAccessesMightAliasLS(acc1, acc2) == mam_might_alias ||
+		memoryAccessesMightAliasLS(acc2, acc1) == mam_might_alias;
 }
 
 Oracle::mam_result
@@ -1021,9 +1053,11 @@ open_database(const char *path)
 	rc = sqlite3_exec(_database, "CREATE TABLE functionAttribs (functionHead INTEGER PRIMARY KEY, registerLivenessCorrect INTEGER NOT NULL, aliasingCorrect INTEGER NOT NULL)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
+#if CONFIG_FIXED_REGS
 	rc = sqlite3_exec(_database, "CREATE TABLE fixedRegs (rip INTEGER PRIMARY KEY, content TEXT)",
 			  NULL, NULL, NULL);
 	assert(rc == SQLITE_OK);
+#endif
 
 disable_journalling:
 	/* All of the information in the database can be regenerated
@@ -3340,6 +3374,7 @@ Oracle::LivenessSet::mkName() const
 	return acc2;
 }
 
+#if CONFIG_FIXED_REGS
 void
 Oracle::setFixedRegs(const StaticRip &vr, const FixedRegs &fr)
 {
@@ -3368,3 +3403,4 @@ Oracle::getFixedRegs(const StaticRip &sr, FixedRegs *out)
 	sqlite3_reset(stmt.stmt);
 	return true;
 }
+#endif

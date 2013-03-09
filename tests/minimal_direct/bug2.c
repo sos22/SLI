@@ -7,7 +7,10 @@
 
 #include "test.h"
 
+#ifndef NR_PTRS
 #define NR_PTRS 100
+#endif
+
 static int *volatile global_ptrs[NR_PTRS];
 
 static void *
