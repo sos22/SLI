@@ -424,6 +424,73 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					}
 				}
 			}
+			/* Narrowing operations should usually be
+			   pushed through associative ones. */
+			bool simple_narrowing =
+				(au->op == Iop_64to8 ||
+				 au->op == Iop_64to16 ||
+				 au->op == Iop_64to32 ||
+				 au->op == Iop_32to8 ||
+				 au->op == Iop_32to16 ||
+				 au->op == Iop_16to8);
+			bool lane_narrowing =
+				(au->op == Iop_16HIto8 ||
+				 au->op == Iop_32HIto16 ||
+				 au->op == Iop_64HIto32 ||
+				 au->op == Iop_128HIto64);
+			bool mul = argA->op >= Iop_Mul8 && argA->op <= Iop_Mul64;
+			bool otherSafe = (argA->op >= Iop_Add8 && argA->op <= Iop_Add64) ||
+				(argA->op >= Iop_And8 && argA->op <= Iop_And64) ||
+				(argA->op >= Iop_Or8 && argA->op <= Iop_Or64);
+			if ((simple_narrowing && mul) ||
+			    ((simple_narrowing || lane_narrowing) &&
+			     (mul || otherSafe))) {
+				IRExpr *args[argA->nr_arguments];
+				for (int i = 0; i < argA->nr_arguments; i++) {
+					args[i] = quickSimplify(IRExpr_Unop(au->op, argA->contents[i]),
+								memo);
+				}
+				int op = (int)argA->op;
+				switch (argA->type()) {
+				case Ity_I8:
+					break;
+				case Ity_I16:
+					op--;
+					break;
+				case Ity_I32:
+					op -= 2;
+					break;
+				case Ity_I64:
+					op -= 3;
+					break;
+				case Ity_INVALID:
+				case Ity_I1:
+				case Ity_I128:
+					abort();
+				}
+				switch (au->type()) {
+				case Ity_I8:
+					break;
+				case Ity_I16:
+					op++;
+					break;
+				case Ity_I32:
+					op+=2;
+					break;
+				case Ity_I64:
+					op+=3;
+					break;
+				case Ity_INVALID:
+				case Ity_I1:
+				case Ity_I128:
+					abort();
+				}
+				return quickSimplify(IRExpr_Associative_Copy(
+							     (IROp)op,
+							     argA->nr_arguments,
+							     args),
+						     memo);
+			}
 		}
 
 		IROp op = au->op;
