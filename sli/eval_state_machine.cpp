@@ -1751,8 +1751,14 @@ maisMightRace(const MaiMap &decode,
 	return false;
 }
 
-static bool
-definitelyDoesntRace(const MaiMap &decode,
+typedef Maybe<bbdd *> ddr_res;
+
+/* This returns either nothing(), if it definitely can't ever race, or
+   just(x) it can race but only when x is true, or just(NULL) if it
+   can race but we can't tell when. */
+static ddr_res
+definitelyDoesntRace(SMScopes *scopes,
+		     const MaiMap &decode,
 		     StateMachineSideEffect *queryEffect,
 		     StateMachineState *otherMachine,
 		     const IRExprOptimisations &opt,
@@ -1761,7 +1767,7 @@ definitelyDoesntRace(const MaiMap &decode,
 		     std::set<StateMachineState *> &memo)
 {
 	if (!memo.insert(otherMachine).second)
-		return true;
+		return ddr_res::nothing();
 	StateMachineSideEffect *otherEffect = otherMachine->getSideEffect();
 	if (otherEffect) {
 		switch (queryEffect->type) {
@@ -1775,7 +1781,7 @@ definitelyDoesntRace(const MaiMap &decode,
 					    oracle,
 					    queryMai,
 					    ((StateMachineSideEffectStartAtomic *)otherEffect)->mai)) {
-					return false;
+					return ddr_res::just(NULL);
 				}
 				break;
 			case StateMachineSideEffect::Load:
@@ -1784,7 +1790,7 @@ definitelyDoesntRace(const MaiMap &decode,
 					    oracle,
 					    queryMai,
 					    ((StateMachineSideEffectLoad *)otherEffect)->rip)) {
-					return false;
+					return ddr_res::just(NULL);
 				}
 				break;
 			case StateMachineSideEffect::Store:
@@ -1793,7 +1799,7 @@ definitelyDoesntRace(const MaiMap &decode,
 					    oracle,
 					    queryMai,
 					    ((StateMachineSideEffectStore *)otherEffect)->rip)) {
-					return false;
+					return ddr_res::just(NULL);
 				}
 				break;
 			default:
@@ -1801,34 +1807,52 @@ definitelyDoesntRace(const MaiMap &decode,
 			}
 			break;
 		}
-		case StateMachineSideEffect::Load:
-			if (otherEffect->type == StateMachineSideEffect::Store &&
-			    oracle->memoryAccessesMightAlias(
-				    decode,
-				    opt,
-				    (StateMachineSideEffectLoad *)queryEffect,
-				    (StateMachineSideEffectStore *)otherEffect))
-				return false;
-			break;
-		case StateMachineSideEffect::Store:
-			if (otherEffect->type == StateMachineSideEffect::Load &&
-			    allowStoreLoadRaces) {
+		case StateMachineSideEffect::Load: {
+			auto l = (StateMachineSideEffectLoad *)queryEffect;
+			if (otherEffect->type == StateMachineSideEffect::Store) {
+				auto s = (StateMachineSideEffectStore *)otherEffect;
 				if (oracle->memoryAccessesMightAlias(
 					    decode,
 					    opt,
-					    (StateMachineSideEffectLoad *)otherEffect,
-					    (StateMachineSideEffectStore *)queryEffect))
-					return false;
-			} else if (otherEffect->type == StateMachineSideEffect::Store) {
-				if (oracle->memoryAccessesMightAlias(
-					    decode,
-					    opt,
-					    (StateMachineSideEffectStore *)otherEffect,
-					    (StateMachineSideEffectStore *)queryEffect))
-					return false;
+					    l,
+					    s)) {
+					return ddr_res::just(
+						exprbdd::to_bbdd(
+							&scopes->bools,
+							exprbdd::binop(
+								&scopes->exprs,
+								&scopes->bools,
+								Iop_CmpEQ64,
+								l->addr,
+								s->addr)));
+				}
 			}
 			break;
-
+		}
+		case StateMachineSideEffect::Store: {
+			auto q = (StateMachineSideEffectStore *)queryEffect;
+			if (otherEffect->type == StateMachineSideEffect::Load ||
+			    otherEffect->type == StateMachineSideEffect::Store) {
+				auto o = (StateMachineSideEffectMemoryAccess *)otherEffect;
+				if ((allowStoreLoadRaces || o->type == StateMachineSideEffect::Store) &&
+				    oracle->memoryAccessesMightAlias(
+						decode,
+						opt,
+						o,
+						q)) {
+					return ddr_res::just(
+						exprbdd::to_bbdd(
+							&scopes->bools,
+							exprbdd::binop(
+								&scopes->exprs,
+								&scopes->bools,
+								Iop_CmpEQ64,
+								q->addr,
+								o->addr)));
+				}
+			}
+			break;
+		}
 			/* Purely local side-effects never race.
 			   These should arguably be filtered out
 			   before we get here; nevermind. */
@@ -1843,34 +1867,45 @@ definitelyDoesntRace(const MaiMap &decode,
 		case StateMachineSideEffect::StackLayout:
 #endif
 		case StateMachineSideEffect::ImportRegister:
-			return true;
+			return ddr_res::nothing();
 		}
 	}
 	std::vector<StateMachineState *> targets;
 	otherMachine->targets(targets);
-	for (auto it = targets.begin(); it != targets.end(); it++)
-		if (!definitelyDoesntRace(decode, queryEffect, *it, opt, allowStoreLoadRaces, oracle, memo))
-			return false;
-	return true;
+	ddr_res acc;
+	for (auto it = targets.begin(); it != targets.end(); it++) {
+		auto r(definitelyDoesntRace(scopes, decode, queryEffect, *it, opt, allowStoreLoadRaces, oracle, memo));
+		if (r.valid) {
+			if (!r.content) {
+				return r;
+			}
+			if (!acc.valid) {
+				acc = r;
+			} else {
+				acc = bbdd::Or(&scopes->bools, acc.content, r.content);
+			}
+		}
+	}
+	return acc;
 }
 
 /* Returns true if there are any stores in @machine which might
    conceivably race with @probeEffect. */
-static bool
-probeDefinitelyDoesntRace(const MaiMap &decode, StateMachineSideEffect *probeEffect,
+static ddr_res
+probeDefinitelyDoesntRace(SMScopes *scopes, const MaiMap &decode, StateMachineSideEffect *probeEffect,
 			  StateMachineState *storeMachine,
 			  const IRExprOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineState *> memo;
-	return definitelyDoesntRace(decode, probeEffect, storeMachine, opt, false || !CONFIG_W_ISOLATION, oracle, memo);
+	return definitelyDoesntRace(scopes, decode, probeEffect, storeMachine, opt, false || !CONFIG_W_ISOLATION, oracle, memo);
 }
-static bool
-storeDefinitelyDoesntRace(const MaiMap &decode, StateMachineSideEffect *storeEffect,
+static ddr_res
+storeDefinitelyDoesntRace(SMScopes *scopes, const MaiMap &decode, StateMachineSideEffect *storeEffect,
 			  StateMachineState *probeMachine,
 			  const IRExprOptimisations &opt, OracleInterface *oracle)
 {
 	std::set<StateMachineState *> memo;
-	return definitelyDoesntRace(decode, storeEffect, probeMachine, opt, true, oracle, memo);
+	return definitelyDoesntRace(scopes, decode, storeEffect, probeMachine, opt, true, oracle, memo);
 }
 
 static StateMachine *
@@ -2005,103 +2040,146 @@ buildCrossProductMachine(SMScopes *scopes,
 				printf("\tStore is atomic\n");
 			}
 			newState = advanceStoreMachine(crossState, pendingRelocs);
+		} else if (crossState.p->type == StateMachineState::Terminal) {
+			/* The probe machine has reached its end.  The
+			   result is the result of the whole
+			   machine. */
+			/* Exception: we don't consider the case where
+			   the probe machine crashes before the store
+			   machine has issued any stores, so that just
+			   turns into Unreached. */
+			if (debug_cross_product) {
+				printf("\tProbe has finished\n");
+			}
+			newState = new StateMachineTerminal(
+				crossState.p->dbg_origin,
+				crossState.store_issued_access ?
+				((StateMachineTerminal *)crossState.p)->res :
+				scopes->smrs.cnst(unreachedIs));
+		} else 	if (crossState.s->type == StateMachineState::Terminal) {
+			/* If the store machine terminates at
+			   <survive> or <unreached> then we should
+			   ignore this path.  If it terminates at
+			   <crash> then we need to run the probe
+			   machine to completion to see what's
+			   what. */
+			/* Another exception: we don't want to
+			   consider the case where the store machine
+			   completes before the load machine has
+			   issued any loads, so turn that into
+			   <unreached> as well. */
+			if (debug_cross_product) {
+				printf("\tStore has finished\n");
+			}
+			newState = new StateMachineTerminal(
+				crossState.s->dbg_origin,
+				scopes->smrs.cnst(unreachedIs));
+			if (crossState.probe_issued_access) {
+				std::map<StateMachineRes, bbdd *> selectors(
+					smrbdd::to_selectors(
+						&scopes->bools,
+						((StateMachineTerminal *)crossState.s)->res));
+				if (selectors.count(smr_crash))
+					newState =
+						new StateMachineBifurcate(
+							crossState.s->dbg_origin,
+							selectors[smr_crash],
+							advanceProbeMachine(crossState, pendingRelocs),
+							newState);
+			}
 		} else {
 			/* Neither machine is in an atomic block, need
 			 * to race them. */
 			StateMachineSideEffect *probe_effect = crossState.p->getSideEffect();
 			StateMachineSideEffect *store_effect = crossState.s->getSideEffect();
 
-			if (crossState.p->type == StateMachineState::Terminal) {
-				/* The probe machine has reached its
-				   end.  The result is the result of
-				   the whole machine. */
-				/* Exception: we don't consider the
-				   case where the probe machine
-				   crashes before the store machine
-				   has issued any stores, so that just
-				   turns into Unreached. */
+			enum { advance_store, advance_probe, race} do_what;
+			do_what = race;
+
+			ddr_res raceIf;
+
+			/* Local accesses don't need an HB edge. */
+			bool storeIsLocal;
+			if (!store_effect) {
+				storeIsLocal = true;
+			} else {
+				raceIf = storeDefinitelyDoesntRace(scopes, *maiOut, store_effect, crossState.p, opt, oracle);
+				if (!raceIf.valid) {
+					storeIsLocal = true;
+				} else {
+					storeIsLocal = false;
+				}
+			}
+			if (storeIsLocal && crossState.p->type == StateMachineState::Bifurcate) {
 				if (debug_cross_product) {
-					printf("\tProbe has finished\n");
+					printf("Store is local, probe is bifurcate, advance store.\n");
 				}
-				newState = new StateMachineTerminal(
-					crossState.p->dbg_origin,
-					crossState.store_issued_access ?
-						((StateMachineTerminal *)crossState.p)->res :
-						scopes->smrs.cnst(unreachedIs));
-			} else if (crossState.s->type == StateMachineState::Terminal) {
-				/* If the store machine terminates at
-				   <survive> or <unreached> then we
-				   should ignore this path.  If it
-				   terminates at <crash> then we need
-				   to run the probe machine to
-				   completion to see what's what. */
-				/* Another exception: we don't want to
-				   consider the case where the store
-				   machine completes before the load
-				   machine has issued any loads, so
-				   turn that into <unreached> as
-				   well. */
-				if (debug_cross_product) {
-					printf("\tStore has finished\n");
+				do_what = advance_store;
+			}
+			if (do_what == race) {
+				bool probeIsLocal;
+				if (!probe_effect) {
+					probeIsLocal = true;
+				} else {
+					auto r = probeDefinitelyDoesntRace(scopes, *maiOut, probe_effect, crossState.s, opt, oracle);
+					if (!r.valid) {
+						probeIsLocal = true;
+					} else {
+						probeIsLocal = false;
+
+						if (raceIf.valid) {
+							if (raceIf.content) {
+								if (r.content) {
+									raceIf.content = bbdd::Or(&scopes->bools,
+												  raceIf.content,
+												  r.content);
+								} else {
+									raceIf.content = NULL;
+								}
+							} else {
+								/* raceIf.content = NULL -> result is
+								   NULL, regardless of r */
+							}
+						} else {
+							raceIf = r;
+						}
+					}
 				}
-				newState = new StateMachineTerminal(
-					crossState.s->dbg_origin,
-					scopes->smrs.cnst(unreachedIs));
-				if (crossState.probe_issued_access) {
-					std::map<StateMachineRes, bbdd *> selectors(
-						smrbdd::to_selectors(
-							&scopes->bools,
-							((StateMachineTerminal *)crossState.s)->res));
-					if (selectors.count(smr_crash))
-						newState =
-							new StateMachineBifurcate(
-								crossState.s->dbg_origin,
-								selectors[smr_crash],
-								advanceProbeMachine(crossState, pendingRelocs),
-								newState);
+				if (probeIsLocal) {
+					if (debug_cross_product) {
+						printf("Probe local -> advance probe\n");
+					}
+					do_what = advance_probe;
+				} else if (storeIsLocal) {
+					if (debug_cross_product) {
+						printf("Store local, probe non-local -> advance store\n");
+					}
+					do_what = advance_store;
 				}
-			} else if (crossState.p->type == StateMachineState::Bifurcate &&
-				   crossState.s->type != StateMachineState::Bifurcate &&
-				   (!store_effect ||
-				    storeDefinitelyDoesntRace(*maiOut, store_effect, crossState.p, opt, oracle))) {
+			}
+			if (crossState.p->type == StateMachineState::Bifurcate &&
+			    crossState.s->type != StateMachineState::Bifurcate) {
 				/* If it's a choice between a
 				   bifurcate and a non-bifurcate then
 				   always issue the non-bifurcate
 				   first, because that tends to lead
 				   to fewer states in total.  */
-				/* (The symmetrical case, where the
-				   store is a bifurcate and the probe
-				   isn't, is subsumed by the next
-				   case) */
-				if (debug_cross_product) {
-					printf("\tAdvance store machine\n");
+				if (!store_effect) {
+					if (debug_cross_product) {
+						printf("Probe is bifurcate, store is no-op -> advance store\n");
+					}
+					do_what = advance_store;
+				} else {
 				}
+			}
+
+			if (do_what == advance_store) {
 				newState = advanceStoreMachine(crossState, pendingRelocs);
-			} else if (!probe_effect ||
-				   probeDefinitelyDoesntRace(*maiOut, probe_effect, crossState.s, opt, oracle)) {
-				/* If the probe effect definitely
-				   cannot race with anything left in
-				   the store machine then we should
-				   issue it unconditionally. */
-				if (debug_cross_product) {
-					printf("\tAdvance probe machine\n");
-				}
+			} else if (do_what == advance_probe) {
 				newState = advanceProbeMachine(crossState, pendingRelocs);
-			} else if (!store_effect ||
-				   storeDefinitelyDoesntRace(*maiOut, store_effect, crossState.p, opt, oracle)) {
-				/* Likewise, if a store effect isn't a
-				 * memory access then it's definitely
-				 * not going to race, so we can issue
-				 * it unconditionally. */
-				if (debug_cross_product) {
-					printf("\tStore access doesn't race; advance it\n");
-				}
-				newState = advanceStoreMachine(crossState, pendingRelocs);
 			} else {
-				StateMachineSideEffectMemoryAccess *probe_access =
-					dynamic_cast<StateMachineSideEffectMemoryAccess *>(probe_effect);
-				StateMachineSideEffectMemoryAccess *store_access =
-					dynamic_cast<StateMachineSideEffectMemoryAccess *>(store_effect);
+				assert(do_what == race);
+
 				/* Both machines want to issue side
 				   effects, and there's some
 				   possibility of an interesting race.
@@ -2117,10 +2195,12 @@ buildCrossProductMachine(SMScopes *scopes,
 				StateMachineState *nextProbe =
 					advanceProbeMachine(crossState, pendingRelocs);
 
+				assert(raceIf.valid);
+
 				/* Second possibility: let the store
 				   machine go first. */
 				StateMachineState *nextStore = advanceStoreMachine(crossState, pendingRelocs);
-				if (probe_access && store_access) {
+				if (raceIf.content) {
 					/* If we're racing memory
 					   accesses against each
 					   other, then when the two
@@ -2140,14 +2220,7 @@ buildCrossProductMachine(SMScopes *scopes,
 						new StateMachineSideEffectAssertFalse(
 							bbdd::invert(
 								&scopes->bools,
-								exprbdd::to_bbdd(
-									&scopes->bools,
-									exprbdd::binop(
-										&scopes->exprs,
-										&scopes->bools,
-										Iop_CmpEQ64,
-										probe_access->addr,
-										store_access->addr))),
+								raceIf.content),
 							false),
 						nextStore);
 				} else {
@@ -2158,6 +2231,10 @@ buildCrossProductMachine(SMScopes *scopes,
 					   which makes things a bit
 					   easier. */
 				}
+				StateMachineSideEffectMemoryAccess *probe_access =
+					dynamic_cast<StateMachineSideEffectMemoryAccess *>(probe_effect);
+				StateMachineSideEffectMemoryAccess *store_access =
+					dynamic_cast<StateMachineSideEffectMemoryAccess *>(store_effect);
 				assert(probe_access || probe_effect->type == StateMachineSideEffect::StartAtomic);
 				assert(store_access || store_effect->type == StateMachineSideEffect::StartAtomic);
 				const MemoryAccessIdentifier &probeMai(probe_access ? probe_access->rip : ((StateMachineSideEffectStartAtomic *)probe_effect)->mai);
