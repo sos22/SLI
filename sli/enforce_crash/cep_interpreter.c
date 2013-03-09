@@ -32,7 +32,7 @@
 #define KEEP_LLS_HISTORY 0
 #define LLS_HISTORY 8
 #define USE_STATS 1
-#define VERY_LOUD 0
+#define VERY_LOUD 1
 #define USE_CUSTOM_MALLOC 1
 #define SANITY_CHECK_ALLOCATOR 0
 #define USE_LAST_FREE_DETECTOR 0
@@ -2566,8 +2566,8 @@ delay_bias(const struct cfg_instr *instr, int is_tx)
 	}
 	res = 0;
 	for (j = 0; j < nr; j++) {
-		res += msgs[j]->event_count;
-		res -= msgs[j]->pair->event_count;
+		res += msgs[j]->event_count + msgs[j]->busy * 4;
+		res -= msgs[j]->pair->event_count + msgs[j]->pair->busy * 4;
 		msgs[j]->event_count++;
 	}
 	return res;
@@ -2721,6 +2721,11 @@ receive_messages(struct high_level_state *hls)
 			   relevant. */
 			lls->nr_unbound_receiving_messages = instr->nr_rx_msg;
 			lls->unbound_receiving_messages = instr->rx_msgs;
+
+			for (i = 0; i < lls->nr_unbound_receiving_messages; i++) {
+				lls->unbound_receiving_messages[i]->busy++;
+			}
+
 			for (j = 0; j < message_senders.sz; j++) {
 				struct low_level_state *tx_lls = message_senders.content[j];
 				int tx_idx;
@@ -2843,6 +2848,10 @@ receive_messages(struct high_level_state *hls)
 		hls->ll_states.content[i] = NULL;
 		lls->mbox = NULL;
 		if (lls->nr_unbound_receiving_messages != 0) {
+			for (i = 0; i < lls->nr_unbound_receiving_messages; i++) {
+				lls->unbound_receiving_messages[i]->busy--;
+			}
+
 			lls->unbound_receiving_messages = NULL;
 			lls->nr_unbound_receiving_messages = 0;
 			low_level_state_erase_first(&message_receivers, lls);
@@ -3128,6 +3137,9 @@ send_messages(struct high_level_state *hls)
 			/* Perform a general send. */
 			lls->nr_unbound_sending_messages = instr->nr_tx_msg;
 			lls->unbound_sending_messages = instr->tx_msgs;
+			for (i = 0; i < lls->nr_unbound_sending_messages; i++) {
+				lls->unbound_sending_messages[i]->busy++;
+			}
 			for (j = 0; j < message_receivers.sz; j++) {
 				struct low_level_state *rx_lls = message_receivers.content[j];
 
@@ -3233,6 +3245,9 @@ send_messages(struct high_level_state *hls)
 			continue;
 		hls->ll_states.content[i] = NULL;
 		if (lls->nr_unbound_sending_messages != 0) {
+			for (i = 0; i < lls->nr_unbound_sending_messages; i++) {
+				lls->unbound_sending_messages[i]->busy--;
+			}
 			lls->unbound_sending_messages = NULL;
 			lls->nr_unbound_sending_messages = 0;
 			low_level_state_erase_first(&message_senders, lls);
@@ -3780,13 +3795,15 @@ dump_stats(void)
 		       plan.cfg_nodes[i].id,
 		       plan.cfg_nodes[i].cntr);
 		for (j = 0; j < plan.cfg_nodes[i].nr_rx_msg; j++)
-			printf("\tRX %x %d times\n",
+			printf("\tRX %x %d times, busy %d\n",
 			       plan.cfg_nodes[i].rx_msgs[j]->msg_id,
-			       plan.cfg_nodes[i].rx_msgs[j]->event_count);
+			       plan.cfg_nodes[i].rx_msgs[j]->event_count,
+			       plan.cfg_nodes[i].rx_msgs[j]->busy);
 		for (j = 0; j < plan.cfg_nodes[i].nr_tx_msg; j++)
-			printf("\tTX %x %d times\n",
+			printf("\tTX %x %d times, busy %d\n",
 			       plan.cfg_nodes[i].tx_msgs[j]->msg_id,
-			       plan.cfg_nodes[i].tx_msgs[j]->event_count);
+			       plan.cfg_nodes[i].tx_msgs[j]->event_count,
+			       plan.cfg_nodes[i].tx_msgs[j]->busy);
 	}
 }
 #endif
