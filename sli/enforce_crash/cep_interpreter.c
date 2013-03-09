@@ -964,9 +964,9 @@ __fetch_guest(size_t sz, void *dst, unsigned long addr)
 				"movq %[t2], %%gs:8\n"			\
 				"mov %[addr], %[tmpreg]\n"		\
 				"mov %[tmpreg], %[dst]\n"		\
-				"movq $0, %%gs:8\n"			\
 				"mov $1, %[res]\n"			\
 				"2:\n"					\
+				"movq $0, %%gs:8\n"			\
 				".section .text.fault_handlers\n"	\
 				"1: mov $0, %[res]\n"			\
 				"jmp 2b\n"				\
