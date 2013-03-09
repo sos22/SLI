@@ -32,7 +32,7 @@
 #define KEEP_LLS_HISTORY 0
 #define LLS_HISTORY 8
 #define USE_STATS 1
-#define VERY_LOUD 1
+#define VERY_LOUD 0
 #define USE_CUSTOM_MALLOC 1
 #define SANITY_CHECK_ALLOCATOR 0
 #define USE_LAST_FREE_DETECTOR 0
@@ -2545,12 +2545,13 @@ get_timeout(const struct timeval *end_wait, struct timespec *timeout)
 }
 
 static long
-delay_bias(const struct cfg_instr *instr, int is_tx)
+delay_bias(const struct cfg_instr *instr, int is_tx, int *is_first)
 {
 	struct msg_template **msgs = is_tx ? instr->tx_msgs : instr->rx_msgs;
 	int nr = is_tx ? instr->nr_tx_msg : instr->nr_rx_msg;
 	long res;
 	int j;
+	*is_first = 0;
 	if (force_delay) {
 		if (force_delay == -1) {
 			if (is_tx)
@@ -2568,6 +2569,7 @@ delay_bias(const struct cfg_instr *instr, int is_tx)
 	for (j = 0; j < nr; j++) {
 		res += msgs[j]->event_count + msgs[j]->busy * 4;
 		res -= msgs[j]->pair->event_count + msgs[j]->pair->busy * 4;
+		*is_first |= msgs[j]->event_count;
 		msgs[j]->event_count++;
 	}
 	return res;
@@ -2644,6 +2646,7 @@ receive_messages(struct high_level_state *hls)
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
 		long db;
 		int delay_this_side;
+		int is_first;
 
 		if (lls->await_bound_lls_exit || instr->nr_rx_msg == 0) {
 			/* Threads which don't receive any messages
@@ -2654,8 +2657,8 @@ receive_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		db = delay_bias(instr, 0);
-		if (db < 0) {
+		db = delay_bias(instr, 0, &is_first);
+		if (db < 0 || (db == 0 && is_first)) {
 			debug("%p(%s): RX, delay is on RX side (bias %ld)\n",
 			      lls, instr->id, db);
 			delay_this_side = 1;
@@ -2722,8 +2725,8 @@ receive_messages(struct high_level_state *hls)
 			lls->nr_unbound_receiving_messages = instr->nr_rx_msg;
 			lls->unbound_receiving_messages = instr->rx_msgs;
 
-			for (i = 0; i < lls->nr_unbound_receiving_messages; i++) {
-				lls->unbound_receiving_messages[i]->busy++;
+			for (j = 0; j < lls->nr_unbound_receiving_messages; j++) {
+				lls->unbound_receiving_messages[j]->busy++;
 			}
 
 			for (j = 0; j < message_senders.sz; j++) {
@@ -2848,8 +2851,8 @@ receive_messages(struct high_level_state *hls)
 		hls->ll_states.content[i] = NULL;
 		lls->mbox = NULL;
 		if (lls->nr_unbound_receiving_messages != 0) {
-			for (i = 0; i < lls->nr_unbound_receiving_messages; i++) {
-				lls->unbound_receiving_messages[i]->busy--;
+			for (j = 0; j < lls->nr_unbound_receiving_messages; j++) {
+				lls->unbound_receiving_messages[j]->busy--;
 			}
 
 			lls->unbound_receiving_messages = NULL;
@@ -3061,6 +3064,7 @@ send_messages(struct high_level_state *hls)
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
 		int delay_this_side;
 		long bias;
+		int is_first;
 
 		if (instr->nr_tx_msg == 0) {
 			low_level_state_push(&new_llsa, lls);
@@ -3069,8 +3073,8 @@ send_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		bias = delay_bias(instr, 1);
-		if (bias < 0) {
+		bias = delay_bias(instr, 1, &is_first);
+		if (bias < 0 || (bias == 0 && is_first)) {
 			debug("%p(%s): TX, delay is on TX side (bias %ld)\n",
 			      lls, instr->id, bias);
 			delay_this_side = 1;
@@ -3137,8 +3141,8 @@ send_messages(struct high_level_state *hls)
 			/* Perform a general send. */
 			lls->nr_unbound_sending_messages = instr->nr_tx_msg;
 			lls->unbound_sending_messages = instr->tx_msgs;
-			for (i = 0; i < lls->nr_unbound_sending_messages; i++) {
-				lls->unbound_sending_messages[i]->busy++;
+			for (j = 0; j < lls->nr_unbound_sending_messages; j++) {
+				lls->unbound_sending_messages[j]->busy++;
 			}
 			for (j = 0; j < message_receivers.sz; j++) {
 				struct low_level_state *rx_lls = message_receivers.content[j];
@@ -3245,8 +3249,8 @@ send_messages(struct high_level_state *hls)
 			continue;
 		hls->ll_states.content[i] = NULL;
 		if (lls->nr_unbound_sending_messages != 0) {
-			for (i = 0; i < lls->nr_unbound_sending_messages; i++) {
-				lls->unbound_sending_messages[i]->busy--;
+			for (j = 0; j < lls->nr_unbound_sending_messages; j++) {
+				lls->unbound_sending_messages[j]->busy--;
 			}
 			lls->unbound_sending_messages = NULL;
 			lls->nr_unbound_sending_messages = 0;
