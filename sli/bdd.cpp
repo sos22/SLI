@@ -773,6 +773,19 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			}
 		}
 
+		/* Unique free variables can never be equal to
+		   constants, LDs, or the initial value of a
+		   register. */
+		if (is_eq &&
+		    arg2->tag == Iex_FreeVariable &&
+		    ((IRExprFreeVariable *)arg2)->isUnique &&
+		    (arg1->tag == Iex_Const ||
+		     arg1->tag == Iex_Load ||
+		     (arg1->tag == Iex_Get &&
+		      ((IRExprGet *)arg1)->reg.gen() == (unsigned)-1))) {
+			return IRExpr_Const_U1(false);
+		}
+
 		if (arg1->tag == Iex_Const &&
 		    arg2->tag == Iex_Const) {
 			IRExprConst *arg1c = (IRExprConst *)arg1;
