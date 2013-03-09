@@ -38,7 +38,6 @@ thr_main(void *ign)
 			s = malloc(sizeof(struct the_struct));
 			s->chain = chain_start;
 			chain_start = s;
-			s->v = 7;
 			global_ptr = s;
 			s->v = 5;
 			STOP_ANALYSIS();
