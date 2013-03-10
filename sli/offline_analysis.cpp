@@ -1081,7 +1081,7 @@ rebuildConflictingStores(const MaiMap &decode,
 	std::set<StateMachineSideEffectStore *> stores;
 	enumSideEffects(probeMachine, stores);
 	enumSideEffects(storeMachine, loads);
-	for (auto it = loads.begin(); it != loads.end(); it++) {
+	for (auto it = loads.begin(); !TIMEOUT && it != loads.end(); it++) {
 		auto l = *it;
 		for (auto it2 = stores.begin(); it2 != stores.end(); it2++) {
 			auto s = *it2;
