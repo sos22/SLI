@@ -35,4 +35,15 @@ public:
 	}
 };
 
+class Stopwatch {
+	double started;
+public:
+	Stopwatch()
+		: started(now())
+	{}
+	double sample() {
+		return now() - started;
+	}
+};
+
 #endif /* !TIMERS_HPP__ */

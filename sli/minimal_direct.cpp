@@ -135,14 +135,11 @@ open_logfile(size_t sz, const char *fmt, ...)
 	return res;
 }
 
-static TimeoutTimer timeoutTimer;
-
 static void
 consider_rip(const DynAnalysisRip &my_rip,
 	     unsigned tid,
 	     VexPtr<Oracle> &oracle,
 	     DumpFix &df,
-	     FILE *timings,
 	     const AllowableOptimisations &opt,
 	     GarbageCollectionToken token)
 {
@@ -156,43 +153,13 @@ consider_rip(const DynAnalysisRip &my_rip,
 
 	fprintf(_logfile, "Considering %s...\n", my_rip.name());
 
-	int timeout;
-	if (getenv("SOS22_MINIMAL_DIRECT_TIMEOUT"))
-		timeout = atoi(getenv("SOS22_MINIMAL_DIRECT_TIMEOUT"));
-	else
-		timeout = 45;
-	timeoutTimer.timeoutAfterSeconds(timeout);
-
 	stackedCdf::start();
-	struct timeval start;
-	gettimeofday(&start, NULL);
-
 	if (oracle->isPltCall(my_rip.toVexRip())) {
 		fprintf(_logfile, "Is in PLT, so ignore\n");
 	} else {
 		checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, opt, token);
 	}
-
-	struct timeval end;
-	gettimeofday(&end, NULL);
-
-	timeoutTimer.cancel();
-
 	stackedCdf::stop(_timed_out);
-
-	double time_taken = end.tv_sec - start.tv_sec;
-	time_taken += (end.tv_usec - start.tv_usec) * 1e-6;
-	if (_timed_out) {
-		if (timings)
-			fprintf(timings, "%s timed out after %f\n", my_rip.name(), time_taken);
-		printf("%s timed out after %f\n", my_rip.name(), time_taken);
-	} else {
-		if (timings)
-			fprintf(timings, "%s took %f\n", my_rip.name(), time_taken);
-		printf("%s took %f\n", my_rip.name(), time_taken);
-	}
-	_timed_out = false;
-	__timer_message_filter::reset();
 
 	fflush(NULL);
 
@@ -206,7 +173,6 @@ class InstructionConsumer {
 	unsigned long instructions_to_process;
 	unsigned long instructions_processed;
 	unsigned long total_instructions;
-	FILE *timings;
 	double start;
 	double low_end_time;
 	double high_end_time;
@@ -214,11 +180,10 @@ class InstructionConsumer {
 	const AllowableOptimisations &opt;
 public:
 	InstructionConsumer(unsigned long _start_instr, unsigned long _instructions_to_process,
-			    unsigned long _total_instructions, FILE *_timings,
-			    const AllowableOptimisations &_opt)
+			    unsigned long _total_instructions, const AllowableOptimisations &_opt)
 		: start_instr(_start_instr), instructions_to_process(_instructions_to_process),
 		  instructions_processed(0), total_instructions(_total_instructions),
-		  timings(_timings), start(now()), first(true), opt(_opt)
+		  start(now()), first(true), opt(_opt)
 	{}
 	void operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAnalysisRip &dar, unsigned long cntr);
 };
@@ -232,7 +197,7 @@ InstructionConsumer::operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAn
 	fprintf(_logfile, "Log for %s:\n", dar.name());
 	fflush(0);
 
-	consider_rip(dar, 1, oracle, df, timings, opt, ALLOW_GC);
+	consider_rip(dar, 1, oracle, df, opt, ALLOW_GC);
 	fclose(_logfile);
 	_logfile = stdout;
 
@@ -370,15 +335,13 @@ main(int argc, char *argv[])
 		DynAnalysisRip vr;
 		const char *succ;
 		if (parseDynAnalysisRip(&vr, argv[0], &succ)) {
-			consider_rip(vr, 1, oracle, df, NULL, opt, ALLOW_GC);
+			consider_rip(vr, 1, oracle, df, opt, ALLOW_GC);
 			df.finish();
 			return 0;
 		}
 		if (sscanf(argv[0], "%d...%d", &start_percentage, &end_percentage) != 2)
 			errx(1, "expect final argument to be either a VexRip or s...d where s and d are start and end percentages");
 	}
-
-	FILE *timings = fopen("timings.txt", "w");
 
 	std::vector<DynAnalysisRip> schedule;
 	VexPtr<TypesDb::all_instrs_iterator> instrIterator;
@@ -422,7 +385,7 @@ main(int argc, char *argv[])
 
 	unsigned long cntr = 0;
 
-	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, timings, opt);
+	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, opt);
 	if (use_schedule) {
 		for (unsigned long idx = start_instr; idx <= end_instr; idx++) {
 			ic(oracle, df, schedule[idx], cntr);
