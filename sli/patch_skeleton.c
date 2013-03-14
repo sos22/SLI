@@ -73,24 +73,17 @@ sigtrap_sigaction(int sig, siginfo_t *info, void *_ctxt)
 	unsigned long rip = ctxt->uc_mcontext.gregs[REG_RIP];
 	unsigned x;
 
-	pthread_mutex_lock(&mux);
+	//pthread_mutex_lock(&mux);
 
 	ctxt->__fpregs_mem.mxcsr &= 0xffff;
 	for (x = 0; x < patch.nr_entry_points; x++) {
-		if (rip == patch.entry_points[x]) {
+		if (rip == patch.entry_points[x].rip) {
 			/* This is one of ours, so we are allowed to
 			 * redirect. */
-			for (x = 0; x < patch.nr_translations; x++) {
-			  if (patch.trans_table[x].rip == rip) {
-					ctxt->uc_mcontext.gregs[REG_RIP] =
-						(unsigned long)actual_patch +
-						patch.trans_table[x].offset;
-					my_setcontext(ctxt);
-					abort();
-				}
-			}
-			/* Shouldn't have an entry point which isn't
-			   present in the patch. */
+			ctxt->uc_mcontext.gregs[REG_RIP] =
+				(unsigned long)actual_patch +
+				patch.entry_points[x].offset;
+			my_setcontext(ctxt);
 			abort();
 		}
 	}
@@ -103,6 +96,18 @@ activate(void)
 	unsigned x;
 	struct sigaction sigact;
 	pid_t child;
+	char pathbuf[4097];
+
+	readlink("/proc/self/exe", pathbuf, sizeof(pathbuf));
+	for (x = 0; pathbuf[x]; x++)
+		;
+	while (x > 0 && pathbuf[x] != '/')
+		x--;
+	if (strcmp(pathbuf + x, "/" BINARY_PATCH_FOR)) {
+		printf("This is a patch for %s, but this is %s; disabled\n",
+		       BINARY_PATCH_FOR, pathbuf + x + 1);
+		return;
+	}
 
 	pthread_mutex_init(&mux, NULL);
 
@@ -134,11 +139,11 @@ activate(void)
 			err(1, "waiting for parent to stop");
 
 		for (x = 0; x < patch.nr_entry_points; x++) {
-			printf("Add fixup %d %lx\n", x, patch.entry_points[x]);
+			printf("Add fixup %d %lx\n", x, patch.entry_points[x].rip);
 			if (ptrace(PTRACE_POKEUSER,
 				   parent,
 				   offsetof(struct user, u_debugreg[x]),
-				   patch.entry_points[x]) < 0)
+				   patch.entry_points[x].rip) < 0)
 				err(1, "ptrace %d", x);
 
 			/* Enable the register.  They're in
