@@ -8,18 +8,27 @@ emit_rules_for_bug() {
     local nr_bugs="$3"
     local static_files="${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db"
     local include_perf
-    if [ "$nr_bugs" = 1 ]
+    # Bug 16 can never reproduce, which makes the performance tests
+    # run forever.  Exclude it from the perf tests.
+    if [ "$nr_bugs" = 1 ] && [ "$2" != 16 ] && [ "$2" != 12 ]  && [ "$2" != 13 ]
     then
 	include_perf=y
     fi
+
+    # Bug 17 only works in some very specific configurations,
+    # deliberately.  Don't include it in the default test set.
+    if [ "$bugname" != 17 ]
+    then
+	ALL_MD_TESTS+=${bugname}.interp.so
+	ALL_MD_TESTS+=${bugname}.fix.so
+    fi
+
     cat <<EOF
 ${bugname}.interp.so: ${bugname}.cep.c cep_interpreter.o
 	gcc -ldl -shared -Isli/enforce_crash \$^ -o \$@
-ALL_MD_TESTS+=${bugname}.interp.so
 
 ${bugname}.fix.so: ${bugname}.fix.c sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c
 	gcc -Wall -g -shared -fPIC -Isli \$< -o \$@
-ALL_MD_TESTS+=${bugname}.fix.so
 
 ${bugname}.cep.c: ${bugname}.ced ced_to_cep ${static_files}
 	./ced_to_cep ${exename}.exe ${bugname}.ced ${exename}.types.canon ${exename}.bcg ${exename}.db ${bugname}.cep.c
@@ -69,8 +78,6 @@ clean_files += ${bugname}.build_interp_time
 ${bugname}.build_fix_time: timing sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c summary_to_fix ${static_files} ${bugname}.summary.canon4 ./tests/minimal_direct/build_fix.sh
 	./timing 10 ${bugname}.build_fix_time ./tests/minimal_direct/build_fix.sh ${bugname}
 clean_files += ${bugname}.build_fix_time
-
-MD_PERF_FILES+=${bugname}.crash_times_dist ${bugname}.S.crash_times_dist ${bugname}.build_interp_time
 EOF
     fi
     if ! [ -z "$include_perf" ]
@@ -81,6 +88,11 @@ ${bugname}.perf_dists: ${MD_TEST_DIR}/harness ${exename}.exe ${bugname}.fix.so .
 clean_files += ${bugname}.perf_dists ${bugname}.perf_data
 MD_PERF_FILES += ${bugname}.perf_dists
 EOF
+
+	if [ "$bugname" != "${exename}" ]
+	then
+	    echo "MD_PERF_FILES+=${bugname}.crash_times_dist ${bugname}.build_interp_time"
+	fi
     else
 	echo "# no perf stuff: $include_perf, nr_bugs = $nr_bugs"
     fi
@@ -243,7 +255,7 @@ EOF
     do
 	emit_rules_for_exe_segv bug${bug} 0
     done
-	
+
     # And now the harness
     cat <<EOF
 ${MD_TEST_DIR}/harness: ./tests/minimal_direct/harness.c
