@@ -322,6 +322,20 @@ safe_write(int fd, const void *buf, size_t buf_size)
 }
 
 #if VERY_LOUD
+#define LOG_SIZE (1 << 22)
+static unsigned char logbuf[LOG_SIZE];
+static unsigned log_prod;
+
+static void
+to_logbuf(int _ignore, const void *buf, size_t buf_size)
+{
+	if (buf_size + log_prod > LOG_SIZE) {
+		return;
+	}
+	memcpy(logbuf + log_prod, buf, buf_size);
+	log_prod += buf_size;
+}
+
 static void
 reverse(char *start_ptr, char *end_ptr)
 {
@@ -366,7 +380,7 @@ dbg_msg(const char *fmt, ...)
 		/* Make sure that there's always enough space for
 		   ``simple'' escapes. */
 		if (prod_idx >= sizeof(buf) - 32) {
-			safe_write(LOG_FD, buf, prod_idx);
+			to_logbuf(LOG_FD, buf, prod_idx);
 			prod_idx = 0;
 		}
 
@@ -378,7 +392,7 @@ dbg_msg(const char *fmt, ...)
 		}
 		if (fmt[cons_idx] == '\n') {
 			buf[prod_idx++] = '\n';
-			safe_write(LOG_FD, buf, prod_idx);
+			to_logbuf(LOG_FD, buf, prod_idx);
 			prod_idx = 0;
 			cons_idx++;
 			continue;
@@ -467,7 +481,7 @@ dbg_msg(const char *fmt, ...)
 			for (arg_idx = 0; arg_str[arg_idx]; arg_idx++) {
 				buf[prod_idx++] = arg_str[arg_idx];
 				if (prod_idx == sizeof(buf)) {
-					safe_write(LOG_FD, buf, prod_idx);
+					to_logbuf(LOG_FD, buf, prod_idx);
 					prod_idx = 0;
 				}
 			}
@@ -3713,6 +3727,9 @@ static void deliver_signal_client(int signum, siginfo_t *info, ucontext_t *ctxt,
 static void
 deliver_signal_client(int signum, siginfo_t *info, ucontext_t *ctxt, unsigned long delivery_rsp)
 {
+#if VERY_LOUD
+	safe_write(LOG_FD, logbuf, log_prod);
+#endif
 	abort();
 }
 
