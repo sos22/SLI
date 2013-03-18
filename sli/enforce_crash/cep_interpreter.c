@@ -38,6 +38,7 @@
 #define USE_LAST_FREE_DETECTOR 0
 #define DISABLE_DELAYS 0
 #define LOG_FD 2
+#define USE_FAIR_LOCK 1
 
 /* Define _PAGE_SIZE and _STACK_SIZE which don't include the ul
  * suffix, because that makes it easier to use them in inline
@@ -1451,26 +1452,26 @@ queue_wake(int *ptr)
 	}
 }
 
-union big_lock_t {
+union fair_lock_t {
 	int word;
 	struct {
 		short prod;
 		short cons;
 	};
-} big_lock;
+};
 
 static void
-acquire_big_lock(void)
+acquire_fair_lock(union fair_lock_t *lock)
 {
-	union big_lock_t old;
-	union big_lock_t new;
-	union big_lock_t seen;
+	union fair_lock_t old;
+	union fair_lock_t new;
+	union fair_lock_t seen;
 	short ticket;
-	old = big_lock;
+	old = *lock;
 	while (1) {
 		new = old;
 		new.prod++;
-		seen.word = cmpxchg(&big_lock.word, old.word, new.word);
+		seen.word = cmpxchg(&lock->word, old.word, new.word);
 		if (seen.word == old.word) {
 			break;
 		}
@@ -1478,24 +1479,24 @@ acquire_big_lock(void)
 	}
 	ticket = new.prod - 1;
 	while (1) {
-		old = big_lock;
+		old = *lock;
 		if (old.cons == ticket) {
 			break;
 		}
-		futex(&big_lock.word, FUTEX_WAIT, old.word, NULL);
+		futex(&lock->word, FUTEX_WAIT, old.word, NULL);
 	}
 }
 static void
-release_big_lock(void)
+release_fair_lock(union fair_lock_t *lock)
 {
 	/* Release the big lock, and issue a futex wake if
 	 * appropriate.  We only do one wake each time we release the
 	 * lock, because whoever we wake will immediately acquire the
 	 * lock, and so there's no point in having lots of people wake
 	 * up just to contend for the lock. */
-	union big_lock_t old;
-	union big_lock_t new;
-	union big_lock_t seen;
+	union fair_lock_t old;
+	union fair_lock_t new;
+	union fair_lock_t seen;
 	int *wake;
 
 	if (nr_queued_wakes != 0) {
@@ -1505,17 +1506,17 @@ release_big_lock(void)
 		wake = NULL;
 	}
 
-	old = big_lock;
+	old = *lock;
 	while (1) {
 		new = old;
 		new.cons++;
-		seen.word = cmpxchg(&big_lock.word, old.word, new.word);
+		seen.word = cmpxchg(&lock->word, old.word, new.word);
 		if (seen.word != old.word) {
 			old = seen;
 			continue;
 		}
 		if (new.cons != new.prod) {
-			futex(&big_lock.word, FUTEX_WAKE, INT_MAX, NULL);
+			futex(&lock->word, FUTEX_WAKE, INT_MAX, NULL);
 		}
 		if (wake) {
 			futex(wake, FUTEX_WAKE, 1, NULL);
@@ -1523,6 +1524,88 @@ release_big_lock(void)
 		return;
 	}
 }
+
+#if USE_FAIR_LOCK
+static union fair_lock_t
+big_lock;
+static void
+acquire_big_lock(void)
+{
+	return acquire_fair_lock(&big_lock);
+}
+static void
+release_big_lock(void)
+{
+	return release_fair_lock(&big_lock);
+}
+#else
+static int
+big_lock;
+#ifndef NDEBUG
+static int
+big_lock_owned_by;
+#endif
+static int
+xchg(int *what, int newval)
+{
+	int seen;
+	asm ("xchg %0, %1\n"
+	     : "=r" (seen), "=m" (*what)
+	     : "0" (newval)
+	     : "memory");
+	return seen;
+}
+static void
+store_release(int *what, int val)
+{
+	*(volatile int *)what = val;
+}
+static void
+acquire_big_lock(void)
+{
+       int val;
+       while (1) {
+               val = big_lock;
+               switch (val) {
+               case 0:
+                       val = cmpxchg(&big_lock, 0, 1);
+                       if (val == 0)
+                               return;
+                       continue;
+               case 1:
+                       val = cmpxchg(&big_lock, 1, 2);
+                       if (val != 1)
+                               continue;
+                       /* fall through */
+               case 2:
+                       futex(&big_lock, FUTEX_WAIT, 2, NULL);
+                       break;
+               default:
+                       abort();
+               }
+       }
+}
+static void
+release_big_lock(void)
+{
+	int *wake = NULL;
+	int old_lock;
+        if (nr_queued_wakes != 0) {
+                nr_queued_wakes--;
+                wake = queued_wakes[nr_queued_wakes];
+	}
+	if (wake) {
+		debug("Run queued wake on %p\n", wake);
+		store_release(&big_lock, 0);
+		futex(wake, FUTEX_WAKE, 1, NULL);
+	} else {
+		old_lock = xchg(&big_lock, 0);
+		assert(old_lock == 1 || old_lock == 2);
+		if (old_lock == 2)
+			futex(&big_lock, FUTEX_WAKE, 1, NULL);
+        }
+}
+#endif
 
 static void
 release_lls(struct low_level_state *lls)
