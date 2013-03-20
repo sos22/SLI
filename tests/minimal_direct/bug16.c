@@ -1,4 +1,5 @@
-/* A variant of bug15 in whcih we can't handle the sync. */
+/* existing_sync_invisible */
+/* A variant of bug15 in which we can't handle the sync. */
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -1334,6 +1334,7 @@ considerStoreCFG(SMScopes *scopes,
 		fprintf(better_log, "%d/%d: build VC timed out\n", idx, nrStoreCfgs);
 		return NULL;
 	}
+	verification_condition = subst_eq(&scopes->bools, verification_condition);
 	if (verification_condition == scopes->bools.cnst(false)) {
 		fprintf(_logfile, "\t\tCrash impossible.\n");
 		fprintf(better_log, "%d/%d: crash impossible (%f)\n", idx, nrStoreCfgs, s.sample());

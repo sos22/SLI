@@ -434,7 +434,6 @@ Oracle::memoryAccessesMightAliasLS(const DynAnalysisRip &smsel_dr, const DynAnal
 	if (!shared_load && !private_store)
 		return mam_no_alias;
 
-	bool have_private_alias = false;
 	for (auto it = load_stores.begin(); it != load_stores.end(); it++) {
 		if (it->rip == smses_dr) {
 			if (!shared_load) {
@@ -1129,9 +1128,13 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 		}
 
 		ce.is_call = is_call;
-		if (branch_rip.isValid())
+		if (branch_rip.isValid()) {
 			callgraph[StaticRip(branch_rip)] = ce;
-
+			if (is_call && ths->ms->addressSpace->isReadable(branch_rip.rips[branch_rip.nr_rips-1])) {
+				ths->indirectCalls.push_back(branch_rip);
+			}
+		}
+			
 		if (ce.is_call) {
 			for (auto it = ce.targets.begin(); it != ce.targets.end(); it++)
 				roots.push_back(StaticRip(*it));
@@ -3306,6 +3309,12 @@ Oracle::findFrees(std::vector<DynAnalysisRip> &drs)
 		for (auto it = res.begin(); it != res.end(); it++)
 			drs.push_back(DynAnalysisRip(VexRip::invent_vex_rip(it->rip)));
 	}
+}
+
+void
+Oracle::findIndirectCalls(std::vector<DynAnalysisRip> &drs)
+{
+	drs = indirectCalls;
 }
 
 bool

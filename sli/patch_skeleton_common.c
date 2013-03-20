@@ -38,6 +38,42 @@ release_lock:\n\
 	ret\n\
 ");
 
+void acquire_lock_c(void) __attribute__((visibility ("hidden")));
+
+void
+acquire_lock_c(void)
+{
+	pthread_mutex_lock(&mux);
+}
+
+asm ("\
+	/* We're called from the patch without saving any registers except rsi.\
+	We are outside the stack redzone, though.  Go and save all the\
+	call-clobbered registers and get into C. */\
+	\
+acquire_lock:\n\
+	pushf\n\
+	push %rax\n\
+	push %rcx\n\
+	push %rdx\n\
+	push %rdi\n\
+	push %r8\n\
+	push %r9\n\
+	push %r10\n\
+	push %r11\n\
+	call acquire_lock_c\n\
+	pop %r11\n\
+	pop %r10\n\
+	pop %r9\n\
+	pop %r8\n\
+	pop %rdi\n\
+	pop %rdx\n\
+	pop %rcx\n\
+	pop %rax\n\
+	popf\n\
+	ret\n\
+");
+
 static void *
 malloc_executable(size_t s)
 {

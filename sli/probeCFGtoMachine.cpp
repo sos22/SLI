@@ -180,8 +180,8 @@ getLibraryStateMachine(SMScopes *scopes,
 	case LibraryFunctionTemplate::strlen: {
 		int i;
 		threadAndRegister tmp1(threadAndRegister::temp(tid, 0, 0));
-		acc = (!rax <<= smb_const64(64)) >> end;
-		for (i = 63; i >= 0; i--) {
+		acc = (!rax <<= smb_const64(8)) >> end;
+		for (i = 8; i >= 0; i--) {
 			acc = Load(!tmp1,
 				   *(smb_reg(arg1, Ity_I64) + smb_const64(i))) >>
 				If(smb_reg(tmp1, Ity_I8) == smb_const8(0),

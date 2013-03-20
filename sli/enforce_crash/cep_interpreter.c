@@ -38,6 +38,7 @@
 #define USE_LAST_FREE_DETECTOR 0
 #define DISABLE_DELAYS 0
 #define LOG_FD 2
+#define USE_FAIR_LOCK 1
 
 /* Define _PAGE_SIZE and _STACK_SIZE which don't include the ul
  * suffix, because that makes it easier to use them in inline
@@ -321,6 +322,20 @@ safe_write(int fd, const void *buf, size_t buf_size)
 }
 
 #if VERY_LOUD
+#define LOG_SIZE (1 << 22)
+static unsigned char logbuf[LOG_SIZE];
+static unsigned log_prod;
+
+static void
+to_logbuf(int _ignore, const void *buf, size_t buf_size)
+{
+	if (buf_size + log_prod > LOG_SIZE) {
+		return;
+	}
+	memcpy(logbuf + log_prod, buf, buf_size);
+	log_prod += buf_size;
+}
+
 static void
 reverse(char *start_ptr, char *end_ptr)
 {
@@ -365,7 +380,7 @@ dbg_msg(const char *fmt, ...)
 		/* Make sure that there's always enough space for
 		   ``simple'' escapes. */
 		if (prod_idx >= sizeof(buf) - 32) {
-			safe_write(LOG_FD, buf, prod_idx);
+			to_logbuf(LOG_FD, buf, prod_idx);
 			prod_idx = 0;
 		}
 
@@ -377,7 +392,7 @@ dbg_msg(const char *fmt, ...)
 		}
 		if (fmt[cons_idx] == '\n') {
 			buf[prod_idx++] = '\n';
-			safe_write(LOG_FD, buf, prod_idx);
+			to_logbuf(LOG_FD, buf, prod_idx);
 			prod_idx = 0;
 			cons_idx++;
 			continue;
@@ -466,7 +481,7 @@ dbg_msg(const char *fmt, ...)
 			for (arg_idx = 0; arg_str[arg_idx]; arg_idx++) {
 				buf[prod_idx++] = arg_str[arg_idx];
 				if (prod_idx == sizeof(buf)) {
-					safe_write(LOG_FD, buf, prod_idx);
+					to_logbuf(LOG_FD, buf, prod_idx);
 					prod_idx = 0;
 				}
 			}
@@ -964,9 +979,9 @@ __fetch_guest(size_t sz, void *dst, unsigned long addr)
 				"movq %[t2], %%gs:8\n"			\
 				"mov %[addr], %[tmpreg]\n"		\
 				"mov %[tmpreg], %[dst]\n"		\
-				"movq $0, %%gs:8\n"			\
 				"mov $1, %[res]\n"			\
 				"2:\n"					\
+				"movq $0, %%gs:8\n"			\
 				".section .text.fault_handlers\n"	\
 				"1: mov $0, %[res]\n"			\
 				"jmp 2b\n"				\
@@ -1451,26 +1466,26 @@ queue_wake(int *ptr)
 	}
 }
 
-union big_lock_t {
+union fair_lock_t {
 	int word;
 	struct {
 		short prod;
 		short cons;
 	};
-} big_lock;
+};
 
 static void
-acquire_big_lock(void)
+acquire_fair_lock(union fair_lock_t *lock)
 {
-	union big_lock_t old;
-	union big_lock_t new;
-	union big_lock_t seen;
+	union fair_lock_t old;
+	union fair_lock_t new;
+	union fair_lock_t seen;
 	short ticket;
-	old = big_lock;
+	old = *lock;
 	while (1) {
 		new = old;
 		new.prod++;
-		seen.word = cmpxchg(&big_lock.word, old.word, new.word);
+		seen.word = cmpxchg(&lock->word, old.word, new.word);
 		if (seen.word == old.word) {
 			break;
 		}
@@ -1478,24 +1493,24 @@ acquire_big_lock(void)
 	}
 	ticket = new.prod - 1;
 	while (1) {
-		old = big_lock;
+		old = *lock;
 		if (old.cons == ticket) {
 			break;
 		}
-		futex(&big_lock.word, FUTEX_WAIT, old.word, NULL);
+		futex(&lock->word, FUTEX_WAIT, old.word, NULL);
 	}
 }
 static void
-release_big_lock(void)
+release_fair_lock(union fair_lock_t *lock)
 {
 	/* Release the big lock, and issue a futex wake if
 	 * appropriate.  We only do one wake each time we release the
 	 * lock, because whoever we wake will immediately acquire the
 	 * lock, and so there's no point in having lots of people wake
 	 * up just to contend for the lock. */
-	union big_lock_t old;
-	union big_lock_t new;
-	union big_lock_t seen;
+	union fair_lock_t old;
+	union fair_lock_t new;
+	union fair_lock_t seen;
 	int *wake;
 
 	if (nr_queued_wakes != 0) {
@@ -1505,17 +1520,17 @@ release_big_lock(void)
 		wake = NULL;
 	}
 
-	old = big_lock;
+	old = *lock;
 	while (1) {
 		new = old;
 		new.cons++;
-		seen.word = cmpxchg(&big_lock.word, old.word, new.word);
+		seen.word = cmpxchg(&lock->word, old.word, new.word);
 		if (seen.word != old.word) {
 			old = seen;
 			continue;
 		}
 		if (new.cons != new.prod) {
-			futex(&big_lock.word, FUTEX_WAKE, INT_MAX, NULL);
+			futex(&lock->word, FUTEX_WAKE, INT_MAX, NULL);
 		}
 		if (wake) {
 			futex(wake, FUTEX_WAKE, 1, NULL);
@@ -1523,6 +1538,118 @@ release_big_lock(void)
 		return;
 	}
 }
+
+#if USE_FAIR_LOCK
+static union fair_lock_t
+big_lock;
+static void
+acquire_big_lock(void)
+{
+	return acquire_fair_lock(&big_lock);
+}
+static void
+release_big_lock(void)
+{
+	return release_fair_lock(&big_lock);
+}
+#else
+static int
+big_lock;
+#ifndef NDEBUG
+static int
+big_lock_owned_by;
+#endif
+static int
+xchg(int *what, int newval)
+{
+	int seen;
+	asm ("xchg %0, %1\n"
+	     : "=r" (seen), "=m" (*what)
+	     : "0" (newval)
+	     : "memory");
+	return seen;
+}
+static void
+store_release(int *what, int val)
+{
+	*(volatile int *)what = val;
+}
+static void
+acquire_big_lock(void)
+{
+       int val;
+       int obs;
+       val = big_lock;
+
+top:
+       if (!(val & 1)) {
+	       obs = cmpxchg(&big_lock, val, val | 1);
+	       if (obs == val) {
+		       /* Uncontended acquire */
+		       return;
+	       }
+       }
+       /* Lock is already held, register as a waiter. */
+       obs = cmpxchg(&big_lock, val, val + 2);
+       if (obs != val) {
+	       /* Failed to register, try again. */
+	       val = obs;
+	       goto top;
+       }
+       assert(obs & 1);
+
+       /* Registered as waiter.  Do the main sleep lock loop. */
+       while (1) {
+	       futex(&big_lock, FUTEX_WAIT, obs, NULL);
+	       val = big_lock;
+	       if (!(val & 1)) {
+		       /* Lock is available, pick it up and deregister
+			  as a waiter. */
+		       obs = cmpxchg(&big_lock, val, (val - 2) | 1);
+		       if (obs == val) {
+			       /* We're done */
+			       return;
+		       }
+		       /* Damn, lost the race. */
+	       } else {
+		       obs = val;
+	       }
+	       /* Lock is still in use.  Go round again */
+       }
+}
+static void
+release_big_lock(void)
+{
+	int *wake = NULL;
+	int obs;
+	int val;
+        if (nr_queued_wakes != 0) {
+                nr_queued_wakes--;
+                wake = queued_wakes[nr_queued_wakes];
+	}
+	if (wake) {
+		/* There's someone waiting on @wake, and they're
+		   guaranteed to try to acquire the lock as soon as
+		   they wake up.  Give it to them. */
+		debug("Run queued wake on %p\n", wake);
+		store_release(&big_lock, 0);
+		futex(wake, FUTEX_WAKE, 1, NULL);
+	} else {
+		while (1) {
+			obs = big_lock;
+			assert(obs & 1);
+			val = cmpxchg(&big_lock, obs, obs - 1);
+			if (val == obs) {
+				break;
+			}
+		}
+		if (val != 1) {
+			/* Contended release */
+			futex(&big_lock, FUTEX_WAKE, 1, NULL);
+		}
+        }
+}
+#endif
 
 static void
 release_lls(struct low_level_state *lls)
@@ -2545,12 +2672,13 @@ get_timeout(const struct timeval *end_wait, struct timespec *timeout)
 }
 
 static long
-delay_bias(const struct cfg_instr *instr, int is_tx)
+delay_bias(const struct cfg_instr *instr, int is_tx, int *is_first)
 {
 	struct msg_template **msgs = is_tx ? instr->tx_msgs : instr->rx_msgs;
 	int nr = is_tx ? instr->nr_tx_msg : instr->nr_rx_msg;
 	long res;
 	int j;
+	*is_first = 0;
 	if (force_delay) {
 		if (force_delay == -1) {
 			if (is_tx)
@@ -2566,8 +2694,9 @@ delay_bias(const struct cfg_instr *instr, int is_tx)
 	}
 	res = 0;
 	for (j = 0; j < nr; j++) {
-		res += msgs[j]->event_count;
-		res -= msgs[j]->pair->event_count;
+		res += msgs[j]->event_count + msgs[j]->busy * 4;
+		res -= msgs[j]->pair->event_count + msgs[j]->pair->busy * 4;
+		*is_first |= msgs[j]->event_count;
 		msgs[j]->event_count++;
 	}
 	return res;
@@ -2644,6 +2773,7 @@ receive_messages(struct high_level_state *hls)
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
 		long db;
 		int delay_this_side;
+		int is_first;
 
 		if (lls->await_bound_lls_exit || instr->nr_rx_msg == 0) {
 			/* Threads which don't receive any messages
@@ -2654,8 +2784,8 @@ receive_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		db = delay_bias(instr, 0);
-		if (db < 0) {
+		db = delay_bias(instr, 0, &is_first);
+		if (db < 0 || (db == 0 && is_first)) {
 			debug("%p(%s): RX, delay is on RX side (bias %ld)\n",
 			      lls, instr->id, db);
 			delay_this_side = 1;
@@ -2721,6 +2851,11 @@ receive_messages(struct high_level_state *hls)
 			   relevant. */
 			lls->nr_unbound_receiving_messages = instr->nr_rx_msg;
 			lls->unbound_receiving_messages = instr->rx_msgs;
+
+			for (j = 0; j < lls->nr_unbound_receiving_messages; j++) {
+				lls->unbound_receiving_messages[j]->busy++;
+			}
+
 			for (j = 0; j < message_senders.sz; j++) {
 				struct low_level_state *tx_lls = message_senders.content[j];
 				int tx_idx;
@@ -2843,6 +2978,10 @@ receive_messages(struct high_level_state *hls)
 		hls->ll_states.content[i] = NULL;
 		lls->mbox = NULL;
 		if (lls->nr_unbound_receiving_messages != 0) {
+			for (j = 0; j < lls->nr_unbound_receiving_messages; j++) {
+				lls->unbound_receiving_messages[j]->busy--;
+			}
+
 			lls->unbound_receiving_messages = NULL;
 			lls->nr_unbound_receiving_messages = 0;
 			low_level_state_erase_first(&message_receivers, lls);
@@ -3052,6 +3191,7 @@ send_messages(struct high_level_state *hls)
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
 		int delay_this_side;
 		long bias;
+		int is_first;
 
 		if (instr->nr_tx_msg == 0) {
 			low_level_state_push(&new_llsa, lls);
@@ -3060,8 +3200,8 @@ send_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		bias = delay_bias(instr, 1);
-		if (bias < 0) {
+		bias = delay_bias(instr, 1, &is_first);
+		if (bias < 0 || (bias == 0 && is_first)) {
 			debug("%p(%s): TX, delay is on TX side (bias %ld)\n",
 			      lls, instr->id, bias);
 			delay_this_side = 1;
@@ -3128,6 +3268,9 @@ send_messages(struct high_level_state *hls)
 			/* Perform a general send. */
 			lls->nr_unbound_sending_messages = instr->nr_tx_msg;
 			lls->unbound_sending_messages = instr->tx_msgs;
+			for (j = 0; j < lls->nr_unbound_sending_messages; j++) {
+				lls->unbound_sending_messages[j]->busy++;
+			}
 			for (j = 0; j < message_receivers.sz; j++) {
 				struct low_level_state *rx_lls = message_receivers.content[j];
 
@@ -3233,6 +3376,9 @@ send_messages(struct high_level_state *hls)
 			continue;
 		hls->ll_states.content[i] = NULL;
 		if (lls->nr_unbound_sending_messages != 0) {
+			for (j = 0; j < lls->nr_unbound_sending_messages; j++) {
+				lls->unbound_sending_messages[j]->busy--;
+			}
 			lls->unbound_sending_messages = NULL;
 			lls->nr_unbound_sending_messages = 0;
 			low_level_state_erase_first(&message_senders, lls);
@@ -3611,6 +3757,9 @@ static void deliver_signal_client(int signum, siginfo_t *info, ucontext_t *ctxt,
 static void
 deliver_signal_client(int signum, siginfo_t *info, ucontext_t *ctxt, unsigned long delivery_rsp)
 {
+#if VERY_LOUD
+	safe_write(LOG_FD, logbuf, log_prod);
+#endif
 	abort();
 }
 
@@ -3780,13 +3929,15 @@ dump_stats(void)
 		       plan.cfg_nodes[i].id,
 		       plan.cfg_nodes[i].cntr);
 		for (j = 0; j < plan.cfg_nodes[i].nr_rx_msg; j++)
-			printf("\tRX %x %d times\n",
+			printf("\tRX %x %d times, busy %d\n",
 			       plan.cfg_nodes[i].rx_msgs[j]->msg_id,
-			       plan.cfg_nodes[i].rx_msgs[j]->event_count);
+			       plan.cfg_nodes[i].rx_msgs[j]->event_count,
+			       plan.cfg_nodes[i].rx_msgs[j]->busy);
 		for (j = 0; j < plan.cfg_nodes[i].nr_tx_msg; j++)
-			printf("\tTX %x %d times\n",
+			printf("\tTX %x %d times, busy %d\n",
 			       plan.cfg_nodes[i].tx_msgs[j]->msg_id,
-			       plan.cfg_nodes[i].tx_msgs[j]->event_count);
+			       plan.cfg_nodes[i].tx_msgs[j]->event_count,
+			       plan.cfg_nodes[i].tx_msgs[j]->busy);
 	}
 }
 #endif

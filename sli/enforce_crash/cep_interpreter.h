@@ -74,6 +74,11 @@ struct msg_template {
 	   stash it. */
 	int event_count;
 
+	/* A flag saying whether anyone is currently waiting for this
+	   message, since we probably want to avoid adding more
+	   threads to it. */
+	int busy;
+
 	const unsigned short *side_condition;
 
 	/* For RX templates, this is the matching TX template.  For TX
