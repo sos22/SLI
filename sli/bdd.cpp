@@ -1050,6 +1050,11 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		    arg1 == arg2) {
 			return IRExpr_Const_U1(true);
 		}
+		if (arg1 == arg2 &&
+		    ((_ieb->op >= Iop_CmpLT8U && _ieb->op <= Iop_CmpLT64U) ||
+		     (_ieb->op >= Iop_CmpLT8S && _ieb->op <= Iop_CmpLT64S))) {
+			return IRExpr_Const_U1(false);
+		}
 		if (arg1 != _ieb->arg1 || arg2 != _ieb->arg2)
 			a = IRExprBinop::mk(_ieb->op, arg1, arg2);
 		break;
