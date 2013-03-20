@@ -1951,6 +1951,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	}
 	better_log = fopenf("w", "%s.log", targetRip.name());
 
+	_timed_out = false;
+
 	VexPtr<MaiMap, &ir_heap> mai(MaiMap::empty());
 
 	VexPtr<StateMachine, &ir_heap> probeMachine;
