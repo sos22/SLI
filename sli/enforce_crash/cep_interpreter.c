@@ -1578,45 +1578,75 @@ static void
 acquire_big_lock(void)
 {
        int val;
+       int obs;
+       val = big_lock;
+
+top:
+       if (!(val & 1)) {
+	       obs = cmpxchg(&big_lock, val, val | 1);
+	       if (obs == val) {
+		       /* Uncontended acquire */
+		       return;
+	       }
+       }
+       /* Lock is already held, register as a waiter. */
+       obs = cmpxchg(&big_lock, val, val + 2);
+       if (obs != val) {
+	       /* Failed to register, try again. */
+	       val = obs;
+	       goto top;
+       }
+       assert(obs & 1);
+
+       /* Registered as waiter.  Do the main sleep lock loop. */
        while (1) {
-               val = big_lock;
-               switch (val) {
-               case 0:
-                       val = cmpxchg(&big_lock, 0, 1);
-                       if (val == 0)
-                               return;
-                       continue;
-               case 1:
-                       val = cmpxchg(&big_lock, 1, 2);
-                       if (val != 1)
-                               continue;
-                       /* fall through */
-               case 2:
-                       futex(&big_lock, FUTEX_WAIT, 2, NULL);
-                       break;
-               default:
-                       abort();
-               }
+	       futex(&big_lock, FUTEX_WAIT, obs, NULL);
+	       val = big_lock;
+	       if (!(val & 1)) {
+		       /* Lock is available, pick it up and deregister
+			  as a waiter. */
+		       obs = cmpxchg(&big_lock, val, (val - 2) | 1);
+		       if (obs == val) {
+			       /* We're done */
+			       return;
+		       }
+		       /* Damn, lost the race. */
+	       } else {
+		       obs = val;
+	       }
+	       /* Lock is still in use.  Go round again */
        }
 }
 static void
 release_big_lock(void)
 {
 	int *wake = NULL;
-	int old_lock;
+	int obs;
+	int val;
         if (nr_queued_wakes != 0) {
                 nr_queued_wakes--;
                 wake = queued_wakes[nr_queued_wakes];
 	}
 	if (wake) {
+		/* There's someone waiting on @wake, and they're
+		   guaranteed to try to acquire the lock as soon as
+		   they wake up.  Give it to them. */
 		debug("Run queued wake on %p\n", wake);
 		store_release(&big_lock, 0);
 		futex(wake, FUTEX_WAKE, 1, NULL);
 	} else {
-		old_lock = xchg(&big_lock, 0);
-		assert(old_lock == 1 || old_lock == 2);
-		if (old_lock == 2)
-			futex(&big_lock, FUTEX_WAKE, 128, NULL);
+		while (1) {
+			obs = big_lock;
+			assert(obs & 1);
+			val = cmpxchg(&big_lock, obs, obs - 1);
+			if (val == obs) {
+				break;
+			}
+		}
+		if (val != 1) {
+			/* Contended release */
+			futex(&big_lock, FUTEX_WAKE, 1, NULL);
+		}
         }
 }
 #endif
