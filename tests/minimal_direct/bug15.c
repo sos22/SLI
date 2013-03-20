@@ -1,3 +1,4 @@
+/* existing_sync_visible */
 /* An example showing that we can process certain kinds of sync. */
 #include <pthread.h>
 #include <stdio.h>

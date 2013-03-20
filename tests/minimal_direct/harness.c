@@ -37,6 +37,9 @@ main(int argc, char *argv[])
 	bool usedc = false;
 	long nr_iters = 0;
 	int i;
+	FILE *logfile;
+
+	logfile = stdout;
 
 	argv++;
 	argc--;
@@ -54,6 +57,15 @@ main(int argc, char *argv[])
 			argc--;
 			if (!sane_strtol(argv[0], &nr_iters))
 				errx(1, "expected argument to -n to be an integer");
+			argv++;
+			argc--;
+		} else if (!strcmp(argv[0], "-l")) {
+			argv++;
+			argc--;
+			logfile = fopen(argv[0], "w");
+			if (!logfile) {
+				err(1, "opening %s", argv[0]);
+			}
 			argv++;
 			argc--;
 		} else {
@@ -132,10 +144,10 @@ main(int argc, char *argv[])
 			end.tv_usec += 1000000;
 		}
 		if (exited == timeout)
-			printf("%ld.%06ld T\n", end.tv_sec, end.tv_usec);
+			fprintf(logfile, "%ld.%06ld T\n", end.tv_sec, end.tv_usec);
 		else
-			printf("%ld.%06ld\n", end.tv_sec, end.tv_usec);
-		fflush(stdout);
+			fprintf(logfile, "%ld.%06ld\n", end.tv_sec, end.tv_usec);
+		fflush(logfile);
 
 		if (exited == timeout)
 			kill(-child, 9);

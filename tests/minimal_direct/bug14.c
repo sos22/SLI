@@ -1,4 +1,5 @@
-/* Aim of this one is to demonstrate that you can do somethign
+/* double_free */
+/* Aim of this one is to demonstrate that you can do something
    interesting with double-frees. */
 #include <pthread.h>
 #include <stdio.h>

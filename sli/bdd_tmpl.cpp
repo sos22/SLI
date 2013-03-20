@@ -545,6 +545,46 @@ bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 			b = b->internal().falseBranch;
 			progress = true;
 		}
+
+		/* ifelse(k1<x,A,ifelse(k2 == X, B, C)) -> ifelse(k1<x,A,C) if k2 > k1 */
+		/* ifelse(k1<x,A,ifelse(k2<x,B,C)) -> ifelse(k1<x,A,C) if k2 > k1 */
+		if (!b->isLeaf() &&
+		    cond->tag == Iex_Binop &&
+		    ((IRExprBinop *)cond)->op >= Iop_CmpLT8U &&
+		    ((IRExprBinop *)cond)->op <= Iop_CmpLT64U &&
+		    ((IRExprBinop *)cond)->arg1->tag == Iex_Const &&
+		    b->internal().condition->tag == Iex_Binop &&
+		    ((((IRExprBinop *)b->internal().condition)->op >= Iop_CmpEQ8 &&
+		      ((IRExprBinop *)b->internal().condition)->op <= Iop_CmpEQ64) ||
+		     (((IRExprBinop *)b->internal().condition)->op >= Iop_CmpLT8U &&
+		      ((IRExprBinop *)b->internal().condition)->op <= Iop_CmpLT64U)) &&
+		    ((IRExprBinop *)b->internal().condition)->arg1->tag == Iex_Const &&
+		    ((IRExprBinop *)b->internal().condition)->arg2 ==
+		            ((IRExprBinop *)cond)->arg2) {
+			IRExprConst *k1 = (IRExprConst *)((IRExprBinop *)cond)->arg1;
+			IRExprConst *k2 = (IRExprConst *)((IRExprBinop *)b->internal().condition)->arg1;
+			bool doit;
+			switch (((IRExprBinop *)cond)->op) {
+			case Iop_CmpLT8U:
+				doit = k2->Ico.content.U8 > k1->Ico.content.U8;
+				break;
+			case Iop_CmpLT16U:
+				doit = k2->Ico.content.U16 > k1->Ico.content.U16;
+				break;
+			case Iop_CmpLT32U:
+				doit = k2->Ico.content.U32 > k1->Ico.content.U32;
+				break;
+			case Iop_CmpLT64U:
+				doit = k2->Ico.content.U64 > k1->Ico.content.U64;
+				break;
+			default:
+				abort();
+			}
+			if (doit) {
+				b = b->internal().falseBranch;
+				progress = true;
+			}
+		}
 	}
 
 	progress = true;

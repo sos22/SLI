@@ -292,11 +292,15 @@ main(int argc, char *argv[])
 
 	bool assert_mode = false;
 	bool double_free_mode = false;
+	bool indirect_call_mode = false;
 	if (!strcmp(argv[argc - 1], "assertions")) {
 		assert_mode = true;
 		argc--;
 	} else if (!strcmp(argv[argc - 1], "doublefree")) {
 		double_free_mode = true;
+		argc--;
+	} else if (!strcmp(argv[argc - 1], "icall")) {
+		indirect_call_mode = true;
 		argc--;
 	}
 
@@ -360,6 +364,9 @@ main(int argc, char *argv[])
 		use_schedule = true;
 	} else if (double_free_mode) {
 		oracle->findFrees(schedule);
+		use_schedule = true;
+	} else if (indirect_call_mode) {
+		oracle->findIndirectCalls(schedule);
 		use_schedule = true;
 	} else {
 		instrIterator = oracle->type_db->enumerateAllInstructions();
