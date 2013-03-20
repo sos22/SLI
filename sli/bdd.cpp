@@ -598,6 +598,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 
 		IRExprConst *arg1C = (arg1->tag == Iex_Const) ? (IRExprConst *)arg1 : NULL;
 		IRExprConst *arg2C = (arg2->tag == Iex_Const) ? (IRExprConst *)arg2 : NULL;
+		IRExprAssociative *arg1A = (arg1->tag == Iex_Associative) ? (IRExprAssociative *)arg1 : NULL;
 		IRExprAssociative *arg2A = (arg2->tag == Iex_Associative) ? (IRExprAssociative *)arg2 : NULL;
 		IRExprUnop *arg2U = (arg2->tag == Iex_Unop) ? (IRExprUnop *)arg2 : NULL;
 		bool is_eq = _ieb->op >= Iop_CmpEQ8 && _ieb->op <= Iop_CmpEQ64;
@@ -851,6 +852,42 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		     (arg1->tag == Iex_Get &&
 		      ((IRExprGet *)arg1)->reg.gen() == (unsigned)-1))) {
 			return IRExpr_Const_U1(false);
+		}
+
+		if (_ieb->op >= Iop_CmpLT8U && _ieb->op <= Iop_CmpLT64U) {
+			if (arg1A && arg1A->nr_arguments == 2 &&
+			    arg1A->op >= Iop_Add8 && arg1A->op <= Iop_Add64 &&
+			    arg1A->contents[1] == arg2) {
+				/* k + X < X => intmax - k - 1 < x */
+				IRExpr *k = arg1A->contents[0];
+				IRExprConst *kc = k->tag == Iex_Const ? (IRExprConst *)k : NULL;
+				switch (arg1A->op) {
+#define mk_size(sz, max)						\
+					case Iop_Add ## sz :		\
+						if (kc) {		\
+							arg1 = IRExpr_Const_U ## sz (max - kc->Ico.content.U ## sz); \
+						} else {		\
+							arg1 = IRExpr_Associative_V( \
+								Iop_Add ## sz, \
+								IRExpr_Const_U ## sz (max), \
+								quickSimplify( \
+									IRExpr_Unop( \
+										Iop_Neg ## sz, \
+										k), \
+									memo), \
+								NULL);	\
+							arg1 = quickSimplify(arg1, memo); \
+						}			\
+						break
+					mk_size(8, 255);
+					mk_size(16, 65535);
+					mk_size(32, ~0u);
+					mk_size(64, ~0ul);
+#undef mk_size
+				default:
+					abort();
+				}
+			}
 		}
 
 		if (arg1->tag == Iex_Const &&
