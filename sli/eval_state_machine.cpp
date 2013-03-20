@@ -1302,6 +1302,47 @@ suppressUninit(smrbdd::scope *scope, bool kill_smr_unreached, smrbdd *input)
 	return suppressUninit(scope, input, kill_smr_unreached, memo);
 }
 
+static bbdd *
+suppressUninit(bbdd::scope *scope, bbdd *input, std::map<bbdd *, bbdd *> &memo)
+{
+	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(input, (bbdd *)0xf001));
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+
+	if (!did_insert) {
+		/* it->second is already correct */
+	} else if (input->isLeaf()) {
+		it->second = input;
+	} else {
+		auto t = suppressUninit(scope, input->internal().trueBranch, memo);
+		auto f = suppressUninit(scope, input->internal().falseBranch, memo);
+		if (t == f || !t) {
+			it->second = f;
+		} else if (!f) {
+			it->second = t;
+		} else if (usesUninit(input->internal().condition)) {
+			it->second = NULL;
+		} else if (t == input->internal().trueBranch &&
+			   f == input->internal().falseBranch) {
+			it->second = input;
+		} else {
+			it->second = scope->node(
+				input->internal().condition,
+				input->internal().rank,
+				t,
+				f);
+		}
+	}
+	return it->second;
+}
+
+static bbdd *
+suppressUninit(bbdd::scope *scope, bbdd *input)
+{
+	std::map<bbdd *, bbdd *> memo;
+	return suppressUninit(scope, input, memo);
+}
+
 #ifndef NDEBUG
 static void
 assertClosed(smrbdd *what)
@@ -1487,6 +1528,9 @@ enumEvalPaths(SMScopes *scopes,
 
 		ctxt.advance<paramT>(scopes, assumption, *decode, oracle, opt, pendingStates, havePhis,
 				     result);
+		if (!result) {
+			abort();
+		}
 	}
 
 	if (debug_survival_constraint) {
@@ -1528,6 +1572,13 @@ struct normalEvalParams {
 				printf("Terminal, result:\n");
 				termRes->prettyPrint(stdout);
 			}
+			justPathConstraint = suppressUninit(&scopes->bools, justPathConstraint);
+			if (!justPathConstraint) {
+				if (debug_survival_constraint) {
+					printf("Path constraint is completely unspecified?\n");
+				}
+				return;
+			}
 			result = smrbdd::ifelse(
 				&scopes->smrs,
 				justPathConstraint,
@@ -1536,8 +1587,11 @@ struct normalEvalParams {
 			if (TIMEOUT) {
 				return;
 			}
-			result = suppressUninit(&scopes->smrs, true, result);
-			assert(result != NULL);
+			auto r = suppressUninit(&scopes->smrs, true, result);
+			if (r == NULL) {
+				abort();
+			}
+			result = r;
 			if (debug_survival_constraint) {
 				printf("New overall result:\n");
 				result->prettyPrint(stdout);

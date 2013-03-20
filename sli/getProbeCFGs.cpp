@@ -396,7 +396,7 @@ trimExcessNodes(Oracle *oracle,
 		if (oracle->isFunctionHead(n->rip))
 			pending.insert(n);
 	}
-	while (!pending.empty()) {
+	while (!TIMEOUT && !pending.empty()) {
 		HashedSet<HashedPtr<CFGNode> > newPending;
 		for (auto it = pending.begin(); !it.finished(); it.advance()) {
 			CFGNode *n = *it;
@@ -410,7 +410,7 @@ trimExcessNodes(Oracle *oracle,
 	}
 
 	HashedSet<HashedPtr<CFGNode> > nodesToKill;
-	for (auto it = nodes.begin(); !it.finished(); it.advance()) {
+	for (auto it = nodes.begin(); !TIMEOUT && !it.finished(); it.advance()) {
 		/* We keep the node if either it's reachable from the
 		 * function head or a root... */
 		if (reachableFromFunctionHead.contains(*it)) {
@@ -440,11 +440,11 @@ trimExcessNodes(Oracle *oracle,
 		nodesToKill.insert(*it);
 	}
 
-	if (nodesToKill.empty())
+	if (nodesToKill.empty() || TIMEOUT)
 		return;
 
 	/* Now go back and remove all the nodes in nodesToKill. */
-	for (auto it = nodes.begin(); !it.finished(); ) {
+	for (auto it = nodes.begin(); !TIMEOUT && !it.finished(); ) {
 		CFGNode *n = *it;
 		if (nodesToKill.contains(n)) {
 			it.erase();
@@ -675,6 +675,10 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	}
 
 	trimExcessNodes(oracle, nodes, targetNodes, maxPathLength);
+
+	if (TIMEOUT) {
+		return false;
+	}
 
 	findRoots(nodes, targetNodes, out, false);
 	if (debug_exploration) {
