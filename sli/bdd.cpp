@@ -552,6 +552,8 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				return IRExpr_Const_U64(argc->Ico.content.U128.lo);
 			case Iop_128HIto64:
 				return IRExpr_Const_U64(argc->Ico.content.U128.hi);
+			case Iop_64HIto32:
+			  return IRExpr_Const_U32(argc->Ico.content.U64 >> 32);
 			case Iop_64UtoV128:
 				return IRExpr_Const_U128(0, argc->Ico.content.U64);
 			case Iop_BadPtr:
@@ -911,6 +913,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				__uint128_t b = arg2c->Ico.content.U64;
 				__uint128_t res = a * b;
 				return IRExpr_Const_U128(res >> 64, res);
+			}
+			case Iop_MullU32: {
+				uint64_t a = arg1c->Ico.content.U32;
+				uint64_t b = arg2c->Ico.content.U32;
+				uint64_t res = a * b;
+				return IRExpr_Const_U64(res);
 			}
 			case Iop_64HLto128:
 				return IRExpr_Const_U128(arg1c->Ico.content.U64, arg2c->Ico.content.U64);
