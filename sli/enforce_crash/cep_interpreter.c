@@ -1616,7 +1616,7 @@ release_big_lock(void)
 		old_lock = xchg(&big_lock, 0);
 		assert(old_lock == 1 || old_lock == 2);
 		if (old_lock == 2)
-			futex(&big_lock, FUTEX_WAKE, 1, NULL);
+			futex(&big_lock, FUTEX_WAKE, 128, NULL);
         }
 }
 #endif
