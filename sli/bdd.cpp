@@ -364,6 +364,40 @@ isZero(IRExprConst *iec)
 	abort();
 }
 
+/* Check if something is ``small''.  BadPtr(k + x) == BadPtr(x)
+   whenever k is small. */
+static bool
+isSmall64(IRExpr *what)
+{
+	if (what->tag == Iex_Const) {
+		IRExprConst *ico = (IRExprConst *)what;
+		assert(ico->Ico.ty == Ity_I64);
+		return ico->Ico.content.U64 < (1ul << 22);
+	}
+	if (what->tag == Iex_Unop) {
+		IRExprUnop *u = (IRExprUnop *)what;
+		return u->op == Iop_8Uto64 ||
+			u->op == Iop_16Uto64;
+	}
+	return false;
+}
+/* Check if something is a small mask.  BadPtr(k & x) == BadPtr(x)
+   whenever k is a small mask. */
+static bool
+isSmallMask64(IRExpr *what)
+{
+	if (what->tag == Iex_Const) {
+		IRExprConst *ico = (IRExprConst *)what;
+		assert(ico->Ico.ty == Ity_I64);
+		return ~ico->Ico.content.U64 < (1ul << 22);
+	}
+	if (what->tag == Iex_Unop) {
+		IRExprUnop *u = (IRExprUnop *)what;
+		return u->op == Iop_Not64 && isSmall64(u->arg);
+	}
+	return false;
+}
+
 /* Some very quick simplifications which are always applied to the
  * condition of BDD internal nodes.  This isn't much more than just
  * constant folding. */
@@ -374,6 +408,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 	case Iex_Unop: {
 		IRExprUnop *au = (IRExprUnop *)a;
 		auto arg = quickSimplify(au->arg, memo);
+		top_unop:
 		if (arg->tag == Iex_Associative) {
 			IRExprAssociative *argA = (IRExprAssociative *)arg;
 			if (au->op >= Iop_Neg8 &&
@@ -393,37 +428,56 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					memo);
 			}
 			if (au->op == Iop_BadPtr &&
-			    argA->op == Iop_Add64 &&
-			    argA->contents[0]->tag == Iex_Const) {
-				IRExprConst *cnst = (IRExprConst *)argA->contents[0];
-				unsigned long c = cnst->Ico.content.U64;
-				unsigned long newC = c & ~((1ul << 22) - 1);
-				if (c != newC) {
-					if (newC == 0) {
-						if (argA->nr_arguments == 2) {
-							arg = argA->contents[1];
-						} else {
-							arg = quickSimplify(
-								IRExpr_Associative_Copy(
-									Iop_Add64,
-									argA->nr_arguments - 1,
-									argA->contents + 1),
-								memo);
-						}
+			    (argA->op == Iop_Add64 || argA->op == Iop_Or64)) {
+				if (isSmall64(argA->contents[0])) {
+					if (argA->nr_arguments == 2) {
+						arg = argA->contents[1];
 					} else {
+						arg = quickSimplify(
+							IRExpr_Associative_Copy(
+								argA->op,
+								argA->nr_arguments - 1,
+								argA->contents + 1),
+							memo);
+					}
+					goto top_unop;
+				} else if (argA->contents[0]->tag == Iex_Const) {
+					IRExprConst *cnst = (IRExprConst *)argA->contents[0];
+					unsigned long c = cnst->Ico.content.U64;
+					unsigned long newC = c & ~((1ul << 22) - 1);
+					if (c != newC) {
+						assert(newC != 0);
 						IRExpr *newCnst = IRExpr_Const_U64(newC);
 						IRExpr *newArgs[argA->nr_arguments];
 						memcpy(newArgs, argA->contents, sizeof(newArgs[0]) * argA->nr_arguments);
 						newArgs[0] = newCnst;
 						arg = quickSimplify(
 							IRExpr_Associative_Copy(
-								Iop_Add64,
+								argA->op,
 								argA->nr_arguments,
 								newArgs),
 							memo);
+						goto top_unop;
 					}
 				}
 			}
+
+			if (au->op == Iop_BadPtr &&
+			    argA->op == Iop_And64 &&
+			    isSmallMask64(argA->contents[0])) {
+				if (argA->nr_arguments == 2) {
+					arg = argA->contents[1];
+				} else {
+					arg = quickSimplify(
+						IRExpr_Associative_Copy(
+							argA->op,
+							argA->nr_arguments - 1,
+							argA->contents + 1),
+						memo);
+				}
+				goto top_unop;
+			}
+
 			/* Narrowing operations should usually be
 			   pushed through associative ones. */
 			bool simple_narrowing =
@@ -839,6 +893,23 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			default:
 				abort();
 			}
+		}
+
+		/* k | (m & x) == m & x' where k & m == 0, k != 0 -> false */
+		if (is_eq &&
+		    arg1A &&
+		    arg1A->op >= Iop_Or8 && arg1A->op <= Iop_Or64 &&
+		    arg2A &&
+		    arg2A->op >= Iop_And8 && arg2A->op <= Iop_And64 &&
+		    arg1A->contents[0]->tag == Iex_Const &&
+		    arg1A->contents[1]->tag == Iex_Associative &&
+		    ((IRExprAssociative *)arg1A->contents[1])->op == arg2A->op &&
+		    arg2A->contents[0] == ((IRExprAssociative *)arg1A->contents[1])->contents[0]) {
+			auto k = (IRExprConst *)arg1A->contents[0];
+			auto m = (IRExprConst *)arg2A->contents[0];
+			assert(k->Ico.content.U64);
+			assert(!(k->Ico.content.U64 & m->Ico.content.U64));
+			return IRExpr_Const_U1(false);
 		}
 
 		/* Unique free variables can never be equal to
@@ -1354,8 +1425,46 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				}
 			}
 		}
+
 		if (outIdx == 0) {
 			goto result_is_zero;
+		}
+		/* k | (k2 & x) -> k | ((k2 & ~k) & x) */
+		if (outIdx > 1 &&
+		    op >= Iop_Or8 && op <= Iop_Or16 && outIdx > 1 &&
+		    newArgs[0]->tag == Iex_Const &&
+		    newArgs[1]->tag == Iex_Associative &&
+		    ((IRExprAssociative *)newArgs[1])->op >= Iop_And8 &&
+		    ((IRExprAssociative *)newArgs[1])->op <= Iop_And64 &&
+		    ((IRExprAssociative *)newArgs[1])->contents[0]->tag == Iex_Const) {
+			IRExprConst *k = (IRExprConst *)newArgs[0];
+			IRExprAssociative *kOwner = (IRExprAssociative *)newArgs[1];
+			IRExprConst *k2 = (IRExprConst *)kOwner->contents[0];
+			IRExpr *newC;
+			switch (op) {
+#define do_size(sz)							\
+				case Iop_Or ## sz:			\
+					if ( (k2->Ico.content.U ## sz & ~k->Ico.content.U ## sz) == k2->Ico.content.U ## sz) { \
+						newC = k2;		\
+					} else {			\
+						newC = IRExpr_Const_U8(k2->Ico.content.U ## sz & ~k->Ico.content.U ## sz); \
+					}				\
+					break
+				do_size(8);
+				do_size(16);
+				do_size(32);
+				do_size(64);
+#undef do_size
+			default:
+				abort();
+			}
+			if (newC != k2) {
+				IRExpr *cc[kOwner->nr_arguments];
+				memcpy(cc, kOwner->contents, sizeof(IRExpr *) * kOwner->nr_arguments);
+				cc[0] = newC;
+				newArgs[1] = quickSimplify(IRExpr_Associative_Copy(kOwner->op, kOwner->nr_arguments, cc),
+							   memo);
+			}
 		}
 		if (outIdx == 1) {
 			a = newArgs[0];
