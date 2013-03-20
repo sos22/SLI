@@ -888,6 +888,30 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					abort();
 				}
 			}
+			arg1C = (arg1->tag == Iex_Const) ? (IRExprConst *)arg1 : NULL;
+			arg1A = (arg1->tag == Iex_Associative) ? (IRExprAssociative *)arg1 : NULL;
+
+			if (arg1C) {
+#define mk_size(sz, max)						\
+				if (_ieb->op == Iop_CmpLT ## sz ## U && \
+				    arg1C->Ico.content.U ## sz == max) { \
+					return IRExpr_Const_U1(false);	\
+				}					\
+				if (_ieb->op == Iop_CmpLT ## sz ## U && \
+				    arg1C->Ico.content.U ## sz  == max - 1) { \
+					return quickSimplify(		\
+						IRExpr_Binop(		\
+							Iop_CmpEQ ## sz, \
+							IRExpr_Const_U ## sz(max), \
+							arg2),		\
+						memo);			\
+				}
+				mk_size(8, 255);
+				mk_size(16, 65535);
+				mk_size(32, ~0u);
+				mk_size(64, ~0ul);
+#undef mk_size
+			}
 		}
 
 		if (arg1->tag == Iex_Const &&
