@@ -914,42 +914,39 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			}
 		}
 
-		if (arg1->tag == Iex_Const &&
-		    arg2->tag == Iex_Const) {
-			IRExprConst *arg1c = (IRExprConst *)arg1;
-			IRExprConst *arg2c = (IRExprConst *)arg2;
+		if (arg1C && arg2C) {
 			switch (_ieb->op) {
 #define do_type(sz)							\
 			case Iop_CmpEQ ## sz:				\
-				return IRExpr_Const_U1(arg1c->Ico.content.U ## sz == arg2c->Ico.content.U ## sz); \
+				return IRExpr_Const_U1(arg1C->Ico.content.U ## sz == arg2C->Ico.content.U ## sz); \
 			case Iop_CmpLT ## sz ## U:			\
-				return IRExpr_Const_U1(arg1c->Ico.content.U ## sz < arg2c->Ico.content.U ## sz)
+				return IRExpr_Const_U1(arg1C->Ico.content.U ## sz < arg2C->Ico.content.U ## sz)
 				do_type(8);
 				do_type(16);
 				do_type(32);
 				do_type(64);
 #undef do_type
 			case Iop_CmpLT8S:
-				return IRExpr_Const_U1((char)arg1c->Ico.content.U8 < (char)arg2c->Ico.content.U8);
+				return IRExpr_Const_U1((char)arg1C->Ico.content.U8 < (char)arg2C->Ico.content.U8);
 			case Iop_CmpLT16S:
-				return IRExpr_Const_U1((short)arg1c->Ico.content.U16 < (short)arg2c->Ico.content.U16);
+				return IRExpr_Const_U1((short)arg1C->Ico.content.U16 < (short)arg2C->Ico.content.U16);
 			case Iop_CmpLT32S:
-				return IRExpr_Const_U1((int)arg1c->Ico.content.U32 < (int)arg2c->Ico.content.U32);
+				return IRExpr_Const_U1((int)arg1C->Ico.content.U32 < (int)arg2C->Ico.content.U32);
 			case Iop_CmpLT64S:
-				return IRExpr_Const_U1((long)arg1c->Ico.content.U64 < (long)arg2c->Ico.content.U64);
+				return IRExpr_Const_U1((long)arg1C->Ico.content.U64 < (long)arg2C->Ico.content.U64);
 			case Iop_CmpLE64U:
-				return IRExpr_Const_U1(arg1c->Ico.content.U64 <= arg2c->Ico.content.U64);
+				return IRExpr_Const_U1(arg1C->Ico.content.U64 <= arg2C->Ico.content.U64);
 			case Iop_Shl64:
-				return IRExpr_Const_U64(arg1c->Ico.content.U64 << arg2c->Ico.content.U8);
+				return IRExpr_Const_U64(arg1C->Ico.content.U64 << arg2C->Ico.content.U8);
 			case Iop_Shr64:
-				return IRExpr_Const_U64(arg1c->Ico.content.U64 >> arg2c->Ico.content.U8);
+				return IRExpr_Const_U64(arg1C->Ico.content.U64 >> arg2C->Ico.content.U8);
 			case Iop_Sar64:
-				return IRExpr_Const_U64((long)arg1c->Ico.content.U64 >> arg2c->Ico.content.U8);
+				return IRExpr_Const_U64((long)arg1C->Ico.content.U64 >> arg2C->Ico.content.U8);
 			case Iop_32HLto64:
-				return IRExpr_Const_U64(arg1c->Ico.content.U32 | ((unsigned long)arg2c->Ico.content.U32 << 32));
+				return IRExpr_Const_U64(arg1C->Ico.content.U32 | ((unsigned long)arg2C->Ico.content.U32 << 32));
 			case Iop_DivModU64to32: {
-				unsigned long num = arg1c->Ico.content.U64;
-				unsigned long denom = arg2c->Ico.content.U32;
+				unsigned long num = arg1C->Ico.content.U64;
+				unsigned long denom = arg2C->Ico.content.U32;
 				if (denom == 0) {
 					warning("Constant division by zero (%ld/%ld)?\n",
 						num, denom);
@@ -960,27 +957,27 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				return IRExpr_Const_U64((div << 32) | (mod & 0xffffffff));
 			}
 			case Iop_Mul64:
-				return IRExpr_Const_U64(arg1c->Ico.content.U64 * arg2c->Ico.content.U64);
+				return IRExpr_Const_U64(arg1C->Ico.content.U64 * arg2C->Ico.content.U64);
 			case Iop_MullS64: {
-				__int128_t a = arg1c->Ico.content.U64;
-				__int128_t b = arg2c->Ico.content.U64;
+				__int128_t a = arg1C->Ico.content.U64;
+				__int128_t b = arg2C->Ico.content.U64;
 				__int128_t res = a * b;
 				return IRExpr_Const_U128(res >> 64, res);
 			}
 			case Iop_MullU64: {
-				__uint128_t a = arg1c->Ico.content.U64;
-				__uint128_t b = arg2c->Ico.content.U64;
+				__uint128_t a = arg1C->Ico.content.U64;
+				__uint128_t b = arg2C->Ico.content.U64;
 				__uint128_t res = a * b;
 				return IRExpr_Const_U128(res >> 64, res);
 			}
 			case Iop_64HLto128:
-				return IRExpr_Const_U128(arg1c->Ico.content.U64, arg2c->Ico.content.U64);
+				return IRExpr_Const_U128(arg1C->Ico.content.U64, arg2C->Ico.content.U64);
 			case Iop_DivModU128to64: {
 				__uint128_t num;
-				unsigned long denom = arg2c->Ico.content.U64;
-				num = arg1c->Ico.content.U128.hi;
+				unsigned long denom = arg2C->Ico.content.U64;
+				num = arg1C->Ico.content.U128.hi;
 				num <<= 64;
-				num |= arg1c->Ico.content.U128.lo;
+				num |= arg1C->Ico.content.U128.lo;
 				if (denom == 0) {
 					warning("Constant division by zero (%ld:%ld/%ld)?\n",
 						(unsigned long)(num >> 64),
@@ -994,10 +991,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			}
 			case Iop_DivModS128to64: {
 				__int128_t num;
-				unsigned long denom = arg2c->Ico.content.U64;
-				num = arg1c->Ico.content.U128.hi;
+				unsigned long denom = arg2C->Ico.content.U64;
+				num = arg1C->Ico.content.U128.hi;
 				num <<= 64;
-				num |= arg1c->Ico.content.U128.lo;
+				num |= arg1C->Ico.content.U128.lo;
 				if (denom == 0) {
 					warning("Constant division by zero (%ld:%ld/%ld)?\n",
 						(unsigned long)(num >> 64),
@@ -1020,11 +1017,8 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				abort();
 			}
 		}
-		if (arg2->tag == Iex_Const &&
-		    _ieb->op >= Iop_Shl8 &&
-		    _ieb->op <= Iop_Shl64) {
-			IRExprConst *arg2c = (IRExprConst *)arg2;
-			unsigned shift = arg2c->Ico.content.U8;
+		if (arg2C && _ieb->op >= Iop_Shl8 && _ieb->op <= Iop_Shl64) {
+			unsigned shift = arg2C->Ico.content.U8;
 			/* Replace shift left by constant with an
 			 * unsigned multiply.  Be careful not to
 			 * overflow the shift types!*/
@@ -1072,37 +1066,35 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 
 		if (_ieb->op >= Iop_CmpEQ8 &&
 		    _ieb->op <= Iop_CmpEQ64 &&
-		    arg1->tag == Iex_Const &&
-		    arg2->tag == Iex_Associative &&
-		    ((IRExprAssociative *)arg2)->op >= Iop_Add8 &&
-		    ((IRExprAssociative *)arg2)->op <= Iop_Add64 &&
-		    ((IRExprAssociative *)arg2)->nr_arguments >= 2 &&
-		    ((IRExprAssociative *)arg2)->contents[0]->tag == Iex_Const) {
-			IRExprConst *arg1c = (IRExprConst *)arg1;
-			IRExprAssociative *arg2a = (IRExprAssociative *)arg2;
-			IRExprConst *arg2c = (IRExprConst *)arg2a->contents[0];
+		    arg1C &&
+		    arg2A &&
+		    arg2A->op >= Iop_Add8 &&
+		    arg2A->op <= Iop_Add64 &&
+		    arg2A->nr_arguments >= 2 &&
+		    arg2A->contents[0]->tag == Iex_Const) {
+			IRExprConst *arg2C = (IRExprConst *)arg2A->contents[0];
 			IRExprConst *newArg1;
 			switch (_ieb->op) {
 			case Iop_CmpEQ8:
-				newArg1 = IRExpr_Const_U8(arg1c->Ico.content.U8 - arg2c->Ico.content.U8);
+				newArg1 = IRExpr_Const_U8(arg1C->Ico.content.U8 - arg2C->Ico.content.U8);
 				break;
 			case Iop_CmpEQ16:
-				newArg1 = IRExpr_Const_U16(arg1c->Ico.content.U16 - arg2c->Ico.content.U16);
+				newArg1 = IRExpr_Const_U16(arg1C->Ico.content.U16 - arg2C->Ico.content.U16);
 				break;
 			case Iop_CmpEQ32:
-				newArg1 = IRExpr_Const_U32(arg1c->Ico.content.U32 - arg2c->Ico.content.U32);
+				newArg1 = IRExpr_Const_U32(arg1C->Ico.content.U32 - arg2C->Ico.content.U32);
 				break;
 			case Iop_CmpEQ64:
-				newArg1 = IRExpr_Const_U64(arg1c->Ico.content.U64 - arg2c->Ico.content.U64);
+				newArg1 = IRExpr_Const_U64(arg1C->Ico.content.U64 - arg2C->Ico.content.U64);
 				break;
 			default:
 				abort();
 			}
 			IRExpr *newArg2;
-			if (arg2a->nr_arguments == 2) {
-				newArg2 = arg2a->contents[1];
+			if (arg2A->nr_arguments == 2) {
+				newArg2 = arg2A->contents[1];
 			} else {
-				newArg2 = IRExpr_Associative_Copy(arg2a->op, arg2a->nr_arguments - 1, arg2a->contents + 1);
+				newArg2 = IRExpr_Associative_Copy(arg2A->op, arg2A->nr_arguments - 1, arg2A->contents + 1);
 			}
 			return IRExpr_Binop(_ieb->op, newArg1, newArg2);
 		}
