@@ -1284,6 +1284,7 @@ considerStoreCFG(SMScopes *scopes,
 	if (!verification_condition || TIMEOUT) {
 		return NULL;
 	}
+	verification_condition = subst_eq(&scopes->bools, verification_condition);
 	if (verification_condition == scopes->bools.cnst(false)) {
 		fprintf(_logfile, "\t\tCrash impossible.\n");
 		return NULL;
