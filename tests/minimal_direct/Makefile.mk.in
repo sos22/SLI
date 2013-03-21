@@ -19,8 +19,8 @@ emit_rules_for_bug() {
     # deliberately.  Don't include it in the default test set.
     if [ "$bugname" != 17 ]
     then
-	ALL_MD_TESTS+=${bugname}.interp.so
-	ALL_MD_TESTS+=${bugname}.fix.so
+	echo "ALL_MD_TESTS+=${bugname}.interp.so"
+	echo "ALL_MD_TESTS+=${bugname}.fix.so"
     fi
 
     cat <<EOF
