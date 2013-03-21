@@ -883,9 +883,6 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		exit(1);
 	}
 
-	printf("Machines to enforce:\n");
-	printCrashSummary(summary, stdout);
-
 	VexPtr<OracleInterface> oracleI(oracle);
 
 	bbdd *requirement = bbdd::assume(
