@@ -647,7 +647,7 @@ register_free_chunk(struct alloc_hdr *hdr)
 	int arena_idx;
 
 #ifndef NDEBUG
-	memset(hdr + 1, 0xab, sz - sizeof(*hdr));
+	memset(hdr + 1, 0xac, sz - sizeof(*hdr));
 #endif
 
 	assert(hdr->sz_and_flags & ALLOC_FLAG_FREE);
@@ -1770,7 +1770,7 @@ static void
 init_bytecode_stack(struct bytecode_stack *stack)
 {
 #ifndef NDEBUG
-	memset(stack, 0xab, sizeof(*stack));
+	memset(stack, 0xad, sizeof(*stack));
 #endif
 	stack->ptr = stack->inlne;
 	stack->underflow_limit = stack->inlne;
