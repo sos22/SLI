@@ -63,9 +63,7 @@ happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 				     const MaiMap &mai,
 				     const std::set<const IRExprHappensBefore *> &trueHb,
 				     const std::set<const IRExprHappensBefore *> &falseHb,
-				     instructionDominatorMapT &idom,
 				     CrashCfg &cfg,
-				     expressionStashMapT &exprStashPoints,
 				     ThreadAbstracter &abs,
 				     int &next_hb_id)
 {
@@ -85,8 +83,6 @@ happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 					new happensBeforeEdge(
 						beforeInstr,
 						afterInstr,
-						idom,
-						exprStashPoints,
 						next_hb_id++);
 				(*this)[hbe->before->rip].insert(hbe);
 				(*this)[hbe->after->rip].insert(hbe);
@@ -109,8 +105,6 @@ happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 					new happensBeforeEdge(
 						beforeInstr,
 						afterInstr,
-						idom,
-						exprStashPoints,
 						next_hb_id++);
 				(*this)[hbe->before->rip].insert(hbe);
 				(*this)[hbe->after->rip].insert(hbe);
@@ -1354,6 +1348,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 						availabilityMap,
 						stashMap);
 				}
+				hb->content |= availExprs;
 				if (hb->sideCondition) {
 					rx_checked = bbdd::Or(
 						scope,
@@ -1426,6 +1421,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 					acquired_by_tx = availOnOtherSide;
 					have_tx_edge = true;
 				}
+
+				hb->content |= availExprs;
 
 				std::set<input_expression> availForThisMessage(availExprs);
 				availForThisMessage |= availOnOtherSide;
