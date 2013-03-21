@@ -2142,7 +2142,11 @@ eval_bytecode(const unsigned short *const bytecode,
 			unsigned long addr = bytecode_pop(&stack, bct_long);
 			unsigned char buf;
 			int res;
-			res = !fetch_guest(&buf, addr);
+			if (addr < 4096) {
+				res = 1;
+			} else {
+				res = !fetch_guest(&buf, addr);
+			}
 			bytecode_push(&stack, res, bct_bit);
 			break;
 		}
