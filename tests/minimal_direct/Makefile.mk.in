@@ -17,7 +17,7 @@ emit_rules_for_bug() {
 
     # Bug 17 only works in some very specific configurations,
     # deliberately.  Don't include it in the default test set.
-    if [ "$bugname" != 17 ]
+    if [ "$1" != "bug17~0" ] && [ "$1" != "bug15~0" ] && [ "$1" != "bug15" ]
     then
 	echo "ALL_MD_TESTS+=${bugname}.interp.so"
 	echo "ALL_MD_TESTS+=${bugname}.fix.so"
