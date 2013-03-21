@@ -55,7 +55,7 @@
 
 static unsigned long prng_state = 0xe6b16c0386053e31;
 static int disable_sideconditions;
-static int force_delay; /* -1 -> on send, 0 -> use rebalancer, 1 -> on receive */
+static int force_delay; /* -1 -> on send, 0 -> use rebalancer, 1 -> on receive, 2 -> always delay */
 static int skip_context_check;
 
 extern void clone(void);
@@ -2679,6 +2679,7 @@ delay_bias(const struct cfg_instr *instr, int is_tx, int *is_first)
 	long res;
 	int j;
 	*is_first = 0;
+	assert(force_delay != 2);
 	if (force_delay) {
 		if (force_delay == -1) {
 			if (is_tx)
@@ -2784,15 +2785,19 @@ receive_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		db = delay_bias(instr, 0, &is_first);
-		if (db < 0 || (db == 0 && is_first)) {
-			debug("%p(%s): RX, delay is on RX side (bias %ld)\n",
-			      lls, instr->id, db);
+		if (force_delay == 2) {
 			delay_this_side = 1;
 		} else {
-			debug("%p(%s): RX, delay is on TX side (bias %ld)\n",
-			      lls, instr->id, db);
-			delay_this_side = 0;
+			db = delay_bias(instr, 0, &is_first);
+			if (db < 0 || (db == 0 && is_first)) {
+				debug("%p(%s): RX, delay is on RX side (bias %ld)\n",
+				      lls, instr->id, db);
+				delay_this_side = 1;
+			} else {
+				debug("%p(%s): RX, delay is on TX side (bias %ld)\n",
+				      lls, instr->id, db);
+				delay_this_side = 0;
+			}
 		}
 
 		if (lls->bound_lls == BOUND_LLS_EXITED) {
@@ -3200,15 +3205,19 @@ send_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		bias = delay_bias(instr, 1, &is_first);
-		if (bias < 0 || (bias == 0 && is_first)) {
-			debug("%p(%s): TX, delay is on TX side (bias %ld)\n",
-			      lls, instr->id, bias);
+		if (force_delay == 2) {
 			delay_this_side = 1;
 		} else {
-			debug("%p(%s): TX, delay is on RX side (bias %ld)\n",
-			      lls, instr->id, bias);
-			delay_this_side = 0;
+			bias = delay_bias(instr, 1, &is_first);
+			if (bias < 0 || (bias == 0 && is_first)) {
+				debug("%p(%s): TX, delay is on TX side (bias %ld)\n",
+				      lls, instr->id, bias);
+				delay_this_side = 1;
+			} else {
+				debug("%p(%s): TX, delay is on RX side (bias %ld)\n",
+				      lls, instr->id, bias);
+				delay_this_side = 0;
+			}
 		}
 
 		if (lls->bound_lls == BOUND_LLS_EXITED) {
@@ -3998,6 +4007,9 @@ activate(void)
 		force_delay = -1;
 	else if (getenv("SOS22_DELAY_RX"))
 		force_delay = 1;
+	else if (getenv("SOS22_DELAY_ALWAYS"))
+		force_delay = 2;
+
 	if (getenv("SOS22_DISABLE_CTXT_CHECK"))
 		skip_context_check = 1;
 
