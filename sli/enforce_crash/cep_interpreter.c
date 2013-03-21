@@ -1067,6 +1067,7 @@ static void
 start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label, long rsp_delta, int nr_simslots)
 {
 	struct low_level_state *lls = new_low_level_state(hls, nr_simslots);
+	const struct cfg_instr *starting_node = &plan.cfg_nodes[starting_label];
 	int i;
 
 	lls->cfg_node = starting_label;
@@ -1076,11 +1077,11 @@ start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label,
 #ifdef KEEP_LLS_HISTORY
 	lls->history[LLS_HISTORY-1] = starting_label;
 #endif
-	debug("%p(%s): Start new LLS\n",
-	      lls,
-	      plan.cfg_nodes[starting_label].id);
-	for (i = 0; i < plan.cfg_nodes[starting_label].nr_set_entry; i++)
-		lls->simslots[plan.cfg_nodes[starting_label].set_entry[i].slot] = 1;
+	debug("%p(%s): Start new LLS\n", lls, starting_node->id);
+	for (i = 0; i < starting_node->nr_set_entry; i++) {
+		const struct cfg_instr_set_entry *se = &starting_node->set_entry[i];
+		lls->simslots[se->slot] = se->set;
+	}
 }
 
 static void

@@ -94,6 +94,7 @@ struct cfg_instr_stash {
 
 struct cfg_instr_set_entry {
 	simslot_t slot;
+	int set; /* 1 to set, 0 to clear */
 };
 
 struct cfg_instr_set_control {

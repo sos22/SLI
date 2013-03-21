@@ -603,11 +603,11 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 			fprintf(f, "};\n");
 			fprintf(f, "static const struct cfg_instr_set_entry instr_%d_set_entry[] = {\n", newLabel);
-#warning This isn't quite right: building the CED sets a stash for every entry point expression at every point node, but the interpreter always responds to one of those stashes by storing 1 in the slot. '
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
 				if ( it2->tag == input_expression::inp_entry_point ) {
 					simulationSlotT simSlot(slots(*it2));
-					fprintf(f, "    { .slot = %d },\n", simSlot.idx);
+					fprintf(f, "    { .slot = %d, .set = %d },\n", simSlot.idx,
+						it2->label1 == oldLabel.label);
 				}
 			}
 			fprintf(f, "};\n");
