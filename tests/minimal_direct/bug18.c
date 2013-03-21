@@ -71,7 +71,7 @@ main()
 		forever = 1;
 	}
 
-	while (forever || time(NULL) < start_time + 10) {
+	while (!force_quit) {
 		struct the_struct *p;
 
 		pthread_barrier_wait(&the_barrier);
@@ -87,10 +87,12 @@ main()
 		}
 
 		pthread_barrier_wait(&the_barrier);
+		if (!forever && time(NULL) >= start_time + 10) {
+			force_quit = true;
+		}
 		pthread_barrier_wait(&the_barrier);
 	}
 
-	force_quit = true;
 	pthread_join(thr, NULL);
 
 	printf("Survived, %d read events and %d write events\n",
