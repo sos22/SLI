@@ -1240,6 +1240,20 @@ emitLockedInstruction(const InstructionLabel &start,
 		return handleReturnInstr(p, start);
 	}
 
+	bool isPltCall = false;
+	if (newInstr->content[0] == 0xe8) {
+		int offset = newInstr->content[1] |
+			(newInstr->content[2] << 8) |
+			(newInstr->content[3] << 16) |
+			(newInstr->content[4] << 24);
+		unsigned long target = rip + offset;
+		if (oracle->isPltCall(VexRip::invent_vex_rip(target))) {
+			/* Calls to library functions need special
+			   handling to transform the relocations. */
+			isPltCall= true;
+		}
+	}
+
 	std::vector<unsigned long> succInstructions;
 	for (auto it = newInstr->relocs.begin();
 	     it != newInstr->relocs.end();
@@ -1247,7 +1261,7 @@ emitLockedInstruction(const InstructionLabel &start,
 		RipRelativeBlindRelocation<ThreadCfgLabel> *r = 
 			dynamic_cast<RipRelativeBlindRelocation<ThreadCfgLabel> *>(*it);
 		assert(r);
-		if (!r->is_branch) {
+		if (!r->is_branch || isPltCall) {
 			p.lateRelocs.push_back(
 				new LateRelocation(
 					r->offset + p.content.size(),
