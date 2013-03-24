@@ -1,8 +1,10 @@
 /* multi_bugs */
+#include <err.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 static int *volatile global_ptr1;
@@ -95,7 +97,7 @@ main(int argc, char *argv[])
 		global_ptr1 = BAD_PTR;
 		STOP_ANALYSIS();
 		write_events++;
-		usleep(1);
+		usleep(1000000);
 	}
 
 	printf("Survived, %d read events and %d write events\n", read_events[0] + read_events[1], write_events);

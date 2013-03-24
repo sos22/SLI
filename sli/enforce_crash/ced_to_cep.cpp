@@ -348,6 +348,28 @@ bytecode_eval_expr(std::vector<const char *> &bytecode, IRExpr *expr, const slot
 		case Iop_CmpLT64U:
 			emit_bytecode_op(bytecode, "cmp_ltu", ieb->arg1->type());
 			break;
+		case Iop_32HLto64:
+			bytecode_const8(bytecode, 0);
+			emit_bytecode_op(bytecode, "swap", Ity_I32);
+			bytecode_const8(bytecode, 32);
+			emit_bytecode_op(bytecode, "shl", Ity_I64);
+			emit_bytecode_op(bytecode, "or", Ity_I64);
+			break;
+		case Iop_DivModS64to32:
+			bytecode_const8(bytecode, 1);
+			emit_bytecode_op(bytecode, "dupe", Ity_I64);
+			bytecode_const8(bytecode, 1);
+			emit_bytecode_op(bytecode, "dupe", Ity_I32);
+			emit_bytecode_op(bytecode, "modS", Ity_I64);
+			bytecode_const8(bytecode, 32);
+			emit_bytecode_op(bytecode, "shl", Ity_I64);
+			bytecode_const8(bytecode, 1);
+			emit_bytecode_op(bytecode, "swap", Ity_I64);
+			bytecode_const8(bytecode, 0);
+			emit_bytecode_op(bytecode, "swap", Ity_I64);
+			emit_bytecode_op(bytecode, "divS", Ity_I64);
+			emit_bytecode_op(bytecode, "or", Ity_I64);
+			break;
 		case Iop_CmpLT8S:
 		case Iop_CmpLT16S:
 		case Iop_CmpLT32S:

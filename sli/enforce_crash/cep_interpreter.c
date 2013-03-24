@@ -1866,6 +1866,46 @@ bytecode_pop(struct bytecode_stack *stack, enum byte_code_type type)
 	return bytecode_mask(res, type);
 }
 
+static unsigned long *
+bytecode_get_slot(const struct bytecode_stack *stack, unsigned offset)
+{
+	const unsigned long *ptr = stack->ptr;
+	const unsigned long *underflow_ptr = stack->underflow_limit;
+	unsigned avail;
+	const struct stack_overflow *overflow;
+
+	while (1) {
+		avail = ptr - underflow_ptr;
+		if (avail > offset) {
+			return (unsigned long *)(ptr - offset - 1);
+		}
+		assert(!(ptr >= stack->inlne && ptr < stack->inlne + NR_STACK_SLOTS_INLINE));
+		offset -= avail;
+		overflow = (struct stack_overflow *)((unsigned long)underflow_ptr -
+						     offsetof(struct stack_overflow, base[0]));
+		if (overflow->prev) {
+			overflow = overflow->prev;
+			ptr = overflow->base + NR_STACK_SLOTS_PER_OVERFLOW;
+			underflow_ptr = overflow->base;
+		} else {
+			ptr = stack->inlne + NR_STACK_SLOTS_INLINE;
+			underflow_ptr = stack->inlne;
+		}
+	}
+}
+
+static unsigned long
+bytecode_peek(const struct bytecode_stack *stack, unsigned offset, enum byte_code_type type)
+{
+	return bytecode_mask(*bytecode_get_slot(stack, offset), type);
+}
+static void
+bytecode_poke(struct bytecode_stack *stack, unsigned offset, unsigned long val, enum byte_code_type type)
+{
+	*(unsigned long *)bytecode_get_slot(stack, offset) = bytecode_mask(val, type);
+}
+
+
 static size_t
 bct_size(enum byte_code_type type)
 {
@@ -1913,6 +1953,21 @@ eval_bytecode(const unsigned short *const bytecode,
 			bytecode_push(&stack, bytecode_fetch_slot(bytecode, &offset, type, lls, rx_template, tx_message, tx_lls), type);
 			break;
 
+		case bcop_swap: {
+			unsigned long offset = bytecode_pop(&stack, bct_byte);
+			unsigned long top = bytecode_peek(&stack, 0, type);
+			unsigned long other = bytecode_peek(&stack, offset + 1, type);
+			bytecode_poke(&stack, offset + 1, top, type);
+			bytecode_poke(&stack, 0, other, type);
+			break;
+		}
+		case bcop_dupe: {
+			unsigned long offset = bytecode_pop(&stack, bct_byte);
+			unsigned long val = bytecode_peek(&stack, offset, type);
+			bytecode_push(&stack, val, type);
+			break;
+		}
+
 		case bcop_cmp_eq:
 			bytecode_push(&stack, bytecode_pop(&stack, type) == bytecode_pop(&stack, type), bct_bit);
 			break;
@@ -1952,6 +2007,34 @@ eval_bytecode(const unsigned short *const bytecode,
 			debug("bcop_add: %lx + %lx -> %lx\n", arg1, arg2, arg1 + arg2);
 			break;
 		}
+		case bcop_divS: {
+			int arg2 = bytecode_pop(&stack, bct_int);
+			long arg1 = bytecode_pop(&stack, bct_long);
+			unsigned long rs;
+			if (arg2 == 0) {
+				debug("division by zero (%lx / %d)!\n", arg1, arg2);
+				res = 0;
+				goto out;
+			}
+			rs = arg1 / arg2;
+			bytecode_push(&stack, rs, bct_long);
+			debug("bcop_divS: %ld / %d -> %ld\n", arg1, arg2, rs);
+			break;
+		}
+		case bcop_modS: {
+			int arg2 = bytecode_pop(&stack, bct_int);
+			long arg1 = bytecode_pop(&stack, bct_long);
+			unsigned long rs;
+			if (arg2 == 0) {
+				debug("division by zero (%lx %% %d)!\n", arg1, arg2);
+				res = 0;
+				goto out;
+			}
+			rs = arg1 % arg2;
+			bytecode_push(&stack, rs, bct_long);
+			debug("bcop_modS: %ld %% %d -> %ld\n", arg1, arg2, rs);
+			break;
+		}
 		case bcop_and: {
 			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, type);
@@ -1981,10 +2064,10 @@ eval_bytecode(const unsigned short *const bytecode,
 			break;
 		}
 		case bcop_shl: {
-			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, bct_byte);
-			debug("bcop_shl: %lx << %lx -> %lx\n", arg1, arg2, arg2 << arg1);
-			bytecode_push(&stack, arg2 << arg1, type);
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			debug("bcop_shl: %lx << %lx -> %lx\n", arg1, arg2, arg1 << arg2);
+			bytecode_push(&stack, arg1 << arg2, type);
 			break;
 		}
 		case bcop_shr: {
