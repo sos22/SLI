@@ -162,7 +162,8 @@ static uint8_t twobyte_table[256] = {
     ModRM, ModRM,
     ModRM, ModRM,
     /* 0x50 - 0x5F */
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0,     ModRM, ModRM, ModRM, ModRM, ModRM, ModRM, ModRM,
+    ModRM, ModRM, ModRM, ModRM, ModRM, ModRM, ModRM, ModRM,
     /* 0x60 - 0x6F */
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ModRM,
     /* 0x70 - 0x7F */
