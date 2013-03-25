@@ -1543,8 +1543,16 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	}
 
 	if (deadStates.empty()) {
+		bool failed = false;
 		for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
-			assert(it->second == 0);
+			if (it->second != 0) {
+				printf("Failed; %s is still live (%d)\n",
+				       it->first->rip.name(), it->second);
+				failed = true;
+			}
+		}
+		if (failed) {
+			fprintf(stderr, "WARNING: HB graph becomes cyclic when messages are synchronous!\n");
 		}
 	}
 
