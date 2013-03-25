@@ -133,6 +133,8 @@ public:
 /* Set by the SIGALRM (or whatever) signal handler when it wants us to
    finish what we're doing and get out quickly. */
 extern volatile bool _timed_out;
+extern bool timeout_means_death;
+
 extern FILE *_logfile;
 class __timer_message_filter {
 	static __timer_message_filter *head;
@@ -165,9 +167,16 @@ public:
 #define TIMEOUT								\
 	({								\
 		static __timer_message_filter filter;			\
-		if (_timed_out && filter())				\
-			fprintf(_logfile, "%s timed out at %s:%d\n",	\
-				__func__, __FILE__, __LINE__);		\
+		if (_timed_out) {					\
+			if (timeout_means_death) {			\
+				errx(1, "%s timed out at %s:%d\n",	\
+				     __func__, __FILE__, __LINE__);	\
+			} else if (filter()) {				\
+				fprintf(_logfile,			\
+					"%s timed out at %s:%d\n",	\
+					__func__, __FILE__, __LINE__);	\
+			}						\
+		}							\
 		_timed_out;						\
 	})
 
