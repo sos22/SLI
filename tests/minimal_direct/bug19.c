@@ -14,6 +14,8 @@ static int volatile
 done_init;
 static pthread_barrier_t
 the_barrier;
+static pthread_barrier_t
+b2;
 
 static void
 _forcedunwind_impl(void)
@@ -35,7 +37,7 @@ _Unwind_ForcedUnwind(void)
 static void *
 thr_main(void *ign)
 {
-	while (!force_quit) {
+	while (1) {
 		pthread_barrier_wait(&the_barrier);
 		STOP_ANALYSIS();
 		_Unwind_ForcedUnwind();
@@ -43,6 +45,13 @@ thr_main(void *ign)
 		pthread_barrier_wait(&the_barrier);
 		done_init = 0;
 		forcedunwind = NULL;
+		read_cntr++;
+
+		pthread_barrier_wait(&b2);
+		if (force_quit) {
+			break;
+		}
+		pthread_barrier_wait(&b2);
 	}
 	return NULL;
 }
@@ -55,6 +64,7 @@ main()
 	int forever = 0;
 
 	pthread_barrier_init(&the_barrier, NULL, 2);
+	pthread_barrier_init(&b2, NULL, 3);
 	pthread_create(&thr1, NULL, thr_main, NULL);
 	pthread_create(&thr2, NULL, thr_main, NULL);
 
@@ -63,12 +73,17 @@ main()
 	if (getenv("SOS22_RUN_FOREVER"))
 		forever = 1;
 	while (forever || time(NULL) < start_time + 10) {
-		sleep(1);
+		pthread_barrier_wait(&b2);
+		pthread_barrier_wait(&b2);
 	}
 
 	force_quit = true;
+	pthread_barrier_wait(&b2);
 	pthread_join(thr1, NULL);
 	pthread_join(thr2, NULL);
+
+	printf("Survived, %d read events and %d write events\n",
+	       read_cntr, write_cntr);
 
 	return 0;
 }

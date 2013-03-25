@@ -16,6 +16,7 @@
 #include "alloc_mai.hpp"
 #include "sat_checker.hpp"
 #include "visitor.hpp"
+#include "timers.hpp"
 
 #ifndef NDEBUG
 static bool debug_declobber_instructions = false;
@@ -883,15 +884,16 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		exit(1);
 	}
 
-	printf("Machines to enforce:\n");
-	printCrashSummary(summary, stdout);
-
 	VexPtr<OracleInterface> oracleI(oracle);
 
 	bbdd *requirement = bbdd::assume(
 		&summary->scopes->bools,
 		summary->crashCondition,
 		summary->inferredAssumption);
+	if (!requirement) {
+		errx(1, "timeout");
+	}
+
 	{
 		std::map<bbdd *, bbdd *> memo;
 		requirement = removeFreeVariables(&summary->scopes->bools, requirement, memo);
@@ -1452,6 +1454,11 @@ main(int argc, char *argv[])
 	SMScopes scopes;
 	ThreadAbstracter abs;
 	crashEnforcementData accumulator;
+
+	timeout_means_death = true;
+
+	TimeoutTimer tt;
+	tt.timeoutAfterSeconds(60);
 	for (int i = 6; i < argc; i++) {
 		CrashSummary *summary;
 

@@ -560,6 +560,23 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			}
 		}
 
+		if (au->op == Iop_64to32 && arg->tag == Iex_Binop) {
+			IRExprBinop *ieb = (IRExprBinop *)arg;
+			if (ieb->op == Iop_DivModS64to32) {
+				arg = quickSimplify(IRExpr_Binop(
+							    Iop_DivS64,
+							    ieb->arg1,
+							    ieb->arg2),
+						    memo);
+			} else if (ieb->op == Iop_DivModU64to32) {
+				arg = quickSimplify(IRExpr_Binop(
+							    Iop_DivU64,
+							    ieb->arg1,
+							    ieb->arg2),
+						    memo);
+			}
+		}
+
 		if (arg->tag == Iex_Const) {
 			IRExprConst *argc = (IRExprConst *)arg;
 			switch (op) {

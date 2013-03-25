@@ -348,6 +348,31 @@ bytecode_eval_expr(std::vector<const char *> &bytecode, IRExpr *expr, const slot
 		case Iop_CmpLT64U:
 			emit_bytecode_op(bytecode, "cmp_ltu", ieb->arg1->type());
 			break;
+		case Iop_32HLto64:
+			bytecode_const8(bytecode, 0);
+			emit_bytecode_op(bytecode, "swap", Ity_I32);
+			bytecode_const8(bytecode, 32);
+			emit_bytecode_op(bytecode, "shl", Ity_I64);
+			emit_bytecode_op(bytecode, "or", Ity_I64);
+			break;
+		case Iop_DivModS64to32:
+			bytecode_const8(bytecode, 1);
+			emit_bytecode_op(bytecode, "dupe", Ity_I64);
+			bytecode_const8(bytecode, 1);
+			emit_bytecode_op(bytecode, "dupe", Ity_I32);
+			emit_bytecode_op(bytecode, "modS", Ity_I64);
+			bytecode_const8(bytecode, 32);
+			emit_bytecode_op(bytecode, "shl", Ity_I64);
+			bytecode_const8(bytecode, 1);
+			emit_bytecode_op(bytecode, "swap", Ity_I64);
+			bytecode_const8(bytecode, 0);
+			emit_bytecode_op(bytecode, "swap", Ity_I64);
+			emit_bytecode_op(bytecode, "divS", Ity_I64);
+			emit_bytecode_op(bytecode, "or", Ity_I64);
+			break;
+		case Iop_DivS64:
+			emit_bytecode_op(bytecode, "divS", Ity_I64);
+			break;
 		case Iop_CmpLT8S:
 		case Iop_CmpLT16S:
 		case Iop_CmpLT32S:
@@ -364,6 +389,7 @@ bytecode_eval_expr(std::vector<const char *> &bytecode, IRExpr *expr, const slot
 			emit_bytecode_op(bytecode, "sar", ieb->arg1->type());
 			break;
 		default:
+			printIRExpr(expr);
 			abort();
 		}
 		break;
@@ -603,11 +629,11 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			}
 			fprintf(f, "};\n");
 			fprintf(f, "static const struct cfg_instr_set_entry instr_%d_set_entry[] = {\n", newLabel);
-#warning This isn't quite right: building the CED sets a stash for every entry point expression at every point node, but the interpreter always responds to one of those stashes by storing 1 in the slot. '
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
 				if ( it2->tag == input_expression::inp_entry_point ) {
 					simulationSlotT simSlot(slots(*it2));
-					fprintf(f, "    { .slot = %d },\n", simSlot.idx);
+					fprintf(f, "    { .slot = %d, .set = %d },\n", simSlot.idx,
+						it2->label1 == oldLabel.label);
 				}
 			}
 			fprintf(f, "};\n");

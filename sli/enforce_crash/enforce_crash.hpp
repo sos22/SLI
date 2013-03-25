@@ -62,6 +62,8 @@ public:
 
 	bool operator ==(const sane_vector &o) const;
 
+	bool operator |=(const std::set<t> &o);
+
 	void push_back(const t &what);
 	void clear();
 	size_t size() const;
@@ -113,17 +115,6 @@ public:
 	}
 };
 
-/* A map from Instruction * to the set of instructions which must
- * complete before that instruction, based purely on the control flow
- * graph. */
-class instructionDominatorMapT : public instrToInstrSetMap {
-public:
-	instructionDominatorMapT(CrashCfg &cfg,
-				 predecessorMapT &predecessors,
-				 happensAfterMapT &happensAfter);
-	instructionDominatorMapT() {}
-};
-
 class input_expression : public Named {
 	char *mkName() const;
 	input_expression(unsigned thread, unsigned vex_offset);
@@ -150,6 +141,7 @@ public:
 
 	bool operator < (const input_expression &) const;
 	bool operator ==(const input_expression &) const;
+	bool operator !=(const input_expression &) const;
 	bool matches(const IRExpr *) const;
 
 	static std::pair<input_expression, bool> parse(const char *, const char **);
@@ -295,26 +287,12 @@ public:
 	}
 	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
 			  Instruction<ThreadCfgLabel> *_after,
-			  instructionDominatorMapT &idom,
-			  expressionStashMapT &stashMap,
 			  unsigned _msg_id)
 		: before(_before),
 		  after(_after),
 		  sideCondition(NULL),
 		  msg_id(_msg_id)
 	{
-		std::set<input_expression> _content;
-		const std::set<Instruction<ThreadCfgLabel> *> &liveInstructions =
-			idom[before];
-		for (auto it = liveInstructions.begin();
-		     it != liveInstructions.end();
-		     it++) {
-			auto *i = *it;
-			_content |= stashMap[i->rip];
-		}
-		for (auto it = _content.begin(); it != _content.end(); it++) {
-			content.push_back(*it);
-		}
 	}
 
 	void prettyPrint(FILE *f) const;
@@ -433,7 +411,8 @@ public:
 			   expressionStashMapT &stashMap,
 			   happensBeforeMapT &hbMap,
 			   ThreadAbstracter &abs,
-			   bbdd *sideCondition);
+			   bbdd *sideCondition,
+			   bbdd *assumption);
 	void operator|=(const expressionEvalMapT &eem);
 	void prettyPrint(FILE *f) const;
 	bool parse(bbdd::scope *scope, const char *str, const char **suffix);
@@ -473,9 +452,7 @@ public:
 			  const MaiMap &mai,
 			  const std::set<const IRExprHappensBefore *> &trueHb,
 			  const std::set<const IRExprHappensBefore *> &falseHb,
-			  instructionDominatorMapT &idom,
 			  CrashCfg &cfg,
-			  expressionStashMapT &exprStashPoints,
 			  ThreadAbstracter &abs,
 			  int &next_hb_id);
 	void operator|=(const happensBeforeMapT &hbm) {
@@ -505,7 +482,6 @@ public:
 	CrashCfg crashCfg;
 	happensAfterMapT happensBefore;
 	predecessorMapT predecessorMap;
-	instructionDominatorMapT idom;
 	expressionStashMapT exprStashPoints;
 	happensBeforeMapT happensBeforePoints;
 	expressionEvalMapT expressionEvalPoints;
@@ -529,11 +505,11 @@ public:
 		  crashCfg(roots, summaryId, summary, as, false, abs),
 		  happensBefore(summaryId, trueHb, falseHb, abs, crashCfg, mai),
 		  predecessorMap(crashCfg),
-		  idom(crashCfg, predecessorMap, happensBefore),
 		  exprStashPoints(summaryId, neededExpressions, abs, roots),
-		  happensBeforePoints(summaryId, mai, trueHb, falseHb, idom, crashCfg, exprStashPoints, abs, next_hb_id),
+		  happensBeforePoints(summaryId, mai, trueHb, falseHb, crashCfg, abs, next_hb_id),
 		  expressionEvalPoints(scope, crashCfg, roots, exprStashPoints,
-				       happensBeforePoints, abs, sideCondition)
+				       happensBeforePoints, abs, sideCondition,
+				       summary->inferredAssumption)
 	{}
 
 	bool parse(SMScopes *scopes, AddressSpace *as, const char *str, const char **suffix) {

@@ -88,6 +88,11 @@ input_expression::operator ==(const input_expression &o) const
 	}
 	abort();
 }
+bool
+input_expression::operator !=(const input_expression &o) const
+{
+	return !(*this == o);
+}
 
 bool
 input_expression::matches(const IRExpr *what) const

@@ -737,6 +737,39 @@ bdd_scope<t>::node(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	if (a == b) {
 		return a;
 	}
+	if (cond->tag == Iex_HappensBefore &&
+	    !b->isLeaf() &&
+	    b->internal().condition->tag == Iex_HappensBefore &&
+	    a == b->internal().trueBranch) {
+		auto *condhb = (IRExprHappensBefore *)cond;
+		auto *bhb = (IRExprHappensBefore *)b->internal().condition;
+		if (condhb->before.tid == bhb->before.tid &&
+		    condhb->after.tid == bhb->after.tid &&
+		    condhb->before.id >= bhb->before.id &&
+		    condhb->after.id <= bhb->after.id) {
+			/* The idea here is to consider rewriting
+			   ifelse(cond, X, ifelse(b->cond, X, Y)) to
+			   ifelse(b->cond, X, ifelse(cond, X, Y)).
+			   Normally, that would violate the ordering
+			   constraints, except that the HB edges give
+			   us enough structure to fix it up.  @cond is
+			   (tA:idA <-< tB:idB) and @b's condition is
+			   (tA:idC <-< tB:idD).  We also have idC <=
+			   idA and idB <= idD.  The way we assign MAIs
+			   ensures that idA >= idC implies tA:idA >=> tA:idB,
+			   so we have tB:idB <=< tB:idD and
+			   tA:idC <=< tA:idA.  If @b's condition is
+			   false then we also have tB:idD <-< tA:idC.
+			   Combining them all gives
+			   tB:idB <=< tB:idB <-< tA:idC <=< tA:idA
+			   which implies tB:idB <-< tA:idA.
+			   i.e. if @b's condition is false then
+			   so is @cond.  We can therefore rewrite
+			   to ifelse(b->cond, X, Y) = b. */
+			return b;
+		}
+	}
+
 	assert(a->isLeaf() || r < a->internal().rank || a->internal().rank < r);
 	assert(b->isLeaf() || r < b->internal().rank || b->internal().rank < r);
 	if (a->isLeaf() || r < a->internal().rank) {
@@ -762,7 +795,7 @@ bdd_scope<t>::node(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 				node(cond, r, a->internal().trueBranch, b),
 				node(cond, r, a->internal().falseBranch, b));
 		} else {
-			/* Trick case.  Need to re-order on both branches */
+			/* Tricky case.  Need to re-order on both branches */
 			if (a->internal().rank < b->internal().rank) {
 				return node(
 					a->internal().condition,
@@ -810,6 +843,24 @@ bdd_scope<t>::internBdd(t *what)
 		  what->unsafe_internal().falseBranch);
 	if (what->internal().trueBranch == what->internal().falseBranch)
 		return what->internal().trueBranch;
+
+	auto cond = what->internal().condition;
+	auto b = what->internal().falseBranch;
+	auto a = what->internal().trueBranch;
+	if (cond->tag == Iex_HappensBefore &&
+	    !b->isLeaf() &&
+	    b->internal().condition->tag == Iex_HappensBefore &&
+	    a == b->internal().trueBranch) {
+		auto *condhb = (IRExprHappensBefore *)cond;
+		auto *bhb = (IRExprHappensBefore *)b->internal().condition;
+		if (condhb->before.tid == bhb->before.tid &&
+		    condhb->after.tid == bhb->after.tid &&
+		    condhb->before.id >= bhb->before.id &&
+		    condhb->after.id <= bhb->after.id) {
+			return b;
+		}
+	}
+
 	auto it_did_insert = intern.insert(
 		std::pair<entry, t *>(
 			entry(what->internal().rank,

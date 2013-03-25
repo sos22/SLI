@@ -215,6 +215,23 @@ sane_vector<t>::size() const
 	return nr_elems;
 }
 
+template <typename t> bool
+sane_vector<t>::operator |=(const std::set<t> &o)
+{
+	bool res = false;
+	for (auto it1 = o.begin(); it1 != o.end(); it1++) {
+		bool doit = true;
+		for (auto it2 = begin(); doit && !it2.finished(); it2.advance()) {
+			doit &= it2.get() != *it1;
+		}
+		if (doit) {
+			push_back(*it1);
+			res = true;
+		}
+	}
+	return res;
+}
+
 template sane_vector<input_expression>::sane_vector();
 template sane_vector<input_expression>::sane_vector(sane_vector<input_expression> const &);
 template sane_vector<input_expression>::~sane_vector();
@@ -236,3 +253,4 @@ template void sane_vector<input_expression>::push_back(const input_expression &)
 
 template size_t sane_vector<input_expression>::size() const;
 template bool sane_vector<input_expression>::operator ==(const sane_vector<input_expression> &) const;
+template bool sane_vector<input_expression>::operator |=(const std::set<input_expression> &);

@@ -62,7 +62,7 @@ main(int argc, char *argv[])
 		} else if (!strcmp(argv[0], "-l")) {
 			argv++;
 			argc--;
-			logfile = fopen(argv[0], "w");
+			logfile = fopen(argv[0], "a");
 			if (!logfile) {
 				err(1, "opening %s", argv[0]);
 			}

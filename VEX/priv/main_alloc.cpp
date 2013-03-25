@@ -41,6 +41,7 @@
 #include "main_util.h"
 
 volatile bool _timed_out;
+bool timeout_means_death;
 FILE *_logfile = stdout;
 
 #define DBG(...) do {} while (0)

@@ -4,22 +4,29 @@ set -e
 set -x
 
 bin=$1
-summary=$2
+shift
+output=$1
+shift
+summaries=$*
 
 topdir=/local/scratch/sos22/sli
 
-${topdir}/canonicalise_crash_summary0 $summary $summary.canon0
-${topdir}/canonicalise_crash_summary2 $summary.canon0 $summary.canon2
-${topdir}/canonicalise_crash_summary0 $summary.canon2 $summary.canon4
+canon=""
+for summary in $summaries
+do
+    ${topdir}/canonicalise_crash_summary0 $summary $summary.canon0
+    ${topdir}/canonicalise_crash_summary2 $summary.canon0 $summary.canon2
+    ${topdir}/canonicalise_crash_summary0 $summary.canon2 $summary.canon4
+    canon="$canon ${summary}.canon4"
+done
 
-${topdir}/enforce_crash ${bin} ${bin}.tc ${bin}.bcg ${bin}.db ${summary}.ced ${summary}.canon4
-
-read ced_line < ${summary}.ced
+${topdir}/enforce_crash ${bin} ${bin}.tc ${bin}.bcg ${bin}.db ${output}.ced ${canon}
+read ced_line < ${output}.ced
 if [ "$ced_line" = "<empty>" ]
 then
     exit 0
 fi
 
-${topdir}/ced_to_cep ${bin} ${summary}.ced ${bin}.tc ${bin}.bcg ${bin}.db ${summary}.cep.c
+${topdir}/ced_to_cep ${bin} ${output}.ced ${bin}.tc ${bin}.bcg ${bin}.db ${output}.cep.c
 
-gcc -Wall -ldl -I ${topdir}/sli/enforce_crash -shared ${topdir}/cep_interpreter.o -x c ${summary}.cep.c -o ${summary}.interp.so
+gcc -g -Wall -ldl -I ${topdir}/sli/enforce_crash -shared ${topdir}/cep_interpreter.o -x c ${output}.cep.c -o ${output}.interp.so

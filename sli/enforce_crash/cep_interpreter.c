@@ -55,7 +55,7 @@
 
 static unsigned long prng_state = 0xe6b16c0386053e31;
 static int disable_sideconditions;
-static int force_delay; /* -1 -> on send, 0 -> use rebalancer, 1 -> on receive */
+static int force_delay; /* -1 -> on send, 0 -> use rebalancer, 1 -> on receive, 2 -> always delay */
 static int skip_context_check;
 
 extern void clone(void);
@@ -647,7 +647,7 @@ register_free_chunk(struct alloc_hdr *hdr)
 	int arena_idx;
 
 #ifndef NDEBUG
-	memset(hdr + 1, 0xab, sz - sizeof(*hdr));
+	memset(hdr + 1, 0xac, sz - sizeof(*hdr));
 #endif
 
 	assert(hdr->sz_and_flags & ALLOC_FLAG_FREE);
@@ -1067,6 +1067,7 @@ static void
 start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label, long rsp_delta, int nr_simslots)
 {
 	struct low_level_state *lls = new_low_level_state(hls, nr_simslots);
+	const struct cfg_instr *starting_node = &plan.cfg_nodes[starting_label];
 	int i;
 
 	lls->cfg_node = starting_label;
@@ -1076,11 +1077,11 @@ start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label,
 #ifdef KEEP_LLS_HISTORY
 	lls->history[LLS_HISTORY-1] = starting_label;
 #endif
-	debug("%p(%s): Start new LLS\n",
-	      lls,
-	      plan.cfg_nodes[starting_label].id);
-	for (i = 0; i < plan.cfg_nodes[starting_label].nr_set_entry; i++)
-		lls->simslots[plan.cfg_nodes[starting_label].set_entry[i].slot] = 1;
+	debug("%p(%s): Start new LLS\n", lls, starting_node->id);
+	for (i = 0; i < starting_node->nr_set_entry; i++) {
+		const struct cfg_instr_set_entry *se = &starting_node->set_entry[i];
+		lls->simslots[se->slot] = se->set;
+	}
 }
 
 static void
@@ -1770,7 +1771,7 @@ static void
 init_bytecode_stack(struct bytecode_stack *stack)
 {
 #ifndef NDEBUG
-	memset(stack, 0xab, sizeof(*stack));
+	memset(stack, 0xad, sizeof(*stack));
 #endif
 	stack->ptr = stack->inlne;
 	stack->underflow_limit = stack->inlne;
@@ -1865,6 +1866,46 @@ bytecode_pop(struct bytecode_stack *stack, enum byte_code_type type)
 	return bytecode_mask(res, type);
 }
 
+static unsigned long *
+bytecode_get_slot(const struct bytecode_stack *stack, unsigned offset)
+{
+	const unsigned long *ptr = stack->ptr;
+	const unsigned long *underflow_ptr = stack->underflow_limit;
+	unsigned avail;
+	const struct stack_overflow *overflow;
+
+	while (1) {
+		avail = ptr - underflow_ptr;
+		if (avail > offset) {
+			return (unsigned long *)(ptr - offset - 1);
+		}
+		assert(!(ptr >= stack->inlne && ptr < stack->inlne + NR_STACK_SLOTS_INLINE));
+		offset -= avail;
+		overflow = (struct stack_overflow *)((unsigned long)underflow_ptr -
+						     offsetof(struct stack_overflow, base[0]));
+		if (overflow->prev) {
+			overflow = overflow->prev;
+			ptr = overflow->base + NR_STACK_SLOTS_PER_OVERFLOW;
+			underflow_ptr = overflow->base;
+		} else {
+			ptr = stack->inlne + NR_STACK_SLOTS_INLINE;
+			underflow_ptr = stack->inlne;
+		}
+	}
+}
+
+static unsigned long
+bytecode_peek(const struct bytecode_stack *stack, unsigned offset, enum byte_code_type type)
+{
+	return bytecode_mask(*bytecode_get_slot(stack, offset), type);
+}
+static void
+bytecode_poke(struct bytecode_stack *stack, unsigned offset, unsigned long val, enum byte_code_type type)
+{
+	*(unsigned long *)bytecode_get_slot(stack, offset) = bytecode_mask(val, type);
+}
+
+
 static size_t
 bct_size(enum byte_code_type type)
 {
@@ -1912,6 +1953,21 @@ eval_bytecode(const unsigned short *const bytecode,
 			bytecode_push(&stack, bytecode_fetch_slot(bytecode, &offset, type, lls, rx_template, tx_message, tx_lls), type);
 			break;
 
+		case bcop_swap: {
+			unsigned long offset = bytecode_pop(&stack, bct_byte);
+			unsigned long top = bytecode_peek(&stack, 0, type);
+			unsigned long other = bytecode_peek(&stack, offset + 1, type);
+			bytecode_poke(&stack, offset + 1, top, type);
+			bytecode_poke(&stack, 0, other, type);
+			break;
+		}
+		case bcop_dupe: {
+			unsigned long offset = bytecode_pop(&stack, bct_byte);
+			unsigned long val = bytecode_peek(&stack, offset, type);
+			bytecode_push(&stack, val, type);
+			break;
+		}
+
 		case bcop_cmp_eq:
 			bytecode_push(&stack, bytecode_pop(&stack, type) == bytecode_pop(&stack, type), bct_bit);
 			break;
@@ -1951,6 +2007,34 @@ eval_bytecode(const unsigned short *const bytecode,
 			debug("bcop_add: %lx + %lx -> %lx\n", arg1, arg2, arg1 + arg2);
 			break;
 		}
+		case bcop_divS: {
+			int arg2 = bytecode_pop(&stack, bct_int);
+			long arg1 = bytecode_pop(&stack, bct_long);
+			unsigned long rs;
+			if (arg2 == 0) {
+				debug("division by zero (%lx / %d)!\n", arg1, arg2);
+				res = 0;
+				goto out;
+			}
+			rs = arg1 / arg2;
+			bytecode_push(&stack, rs, bct_long);
+			debug("bcop_divS: %ld / %d -> %ld\n", arg1, arg2, rs);
+			break;
+		}
+		case bcop_modS: {
+			int arg2 = bytecode_pop(&stack, bct_int);
+			long arg1 = bytecode_pop(&stack, bct_long);
+			unsigned long rs;
+			if (arg2 == 0) {
+				debug("division by zero (%lx %% %d)!\n", arg1, arg2);
+				res = 0;
+				goto out;
+			}
+			rs = arg1 % arg2;
+			bytecode_push(&stack, rs, bct_long);
+			debug("bcop_modS: %ld %% %d -> %ld\n", arg1, arg2, rs);
+			break;
+		}
 		case bcop_and: {
 			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, type);
@@ -1980,10 +2064,10 @@ eval_bytecode(const unsigned short *const bytecode,
 			break;
 		}
 		case bcop_shl: {
-			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, bct_byte);
-			debug("bcop_shl: %lx << %lx -> %lx\n", arg1, arg2, arg2 << arg1);
-			bytecode_push(&stack, arg2 << arg1, type);
+			unsigned long arg1 = bytecode_pop(&stack, type);
+			debug("bcop_shl: %lx << %lx -> %lx\n", arg1, arg2, arg1 << arg2);
+			bytecode_push(&stack, arg1 << arg2, type);
 			break;
 		}
 		case bcop_shr: {
@@ -2141,7 +2225,11 @@ eval_bytecode(const unsigned short *const bytecode,
 			unsigned long addr = bytecode_pop(&stack, bct_long);
 			unsigned char buf;
 			int res;
-			res = !fetch_guest(&buf, addr);
+			if (addr < 4096) {
+				res = 1;
+			} else {
+				res = !fetch_guest(&buf, addr);
+			}
 			bytecode_push(&stack, res, bct_bit);
 			break;
 		}
@@ -2679,6 +2767,7 @@ delay_bias(const struct cfg_instr *instr, int is_tx, int *is_first)
 	long res;
 	int j;
 	*is_first = 0;
+	assert(force_delay != 2);
 	if (force_delay) {
 		if (force_delay == -1) {
 			if (is_tx)
@@ -2784,15 +2873,19 @@ receive_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		db = delay_bias(instr, 0, &is_first);
-		if (db < 0 || (db == 0 && is_first)) {
-			debug("%p(%s): RX, delay is on RX side (bias %ld)\n",
-			      lls, instr->id, db);
+		if (force_delay == 2) {
 			delay_this_side = 1;
 		} else {
-			debug("%p(%s): RX, delay is on TX side (bias %ld)\n",
-			      lls, instr->id, db);
-			delay_this_side = 0;
+			db = delay_bias(instr, 0, &is_first);
+			if (db < 0 || (db == 0 && is_first)) {
+				debug("%p(%s): RX, delay is on RX side (bias %ld)\n",
+				      lls, instr->id, db);
+				delay_this_side = 1;
+			} else {
+				debug("%p(%s): RX, delay is on TX side (bias %ld)\n",
+				      lls, instr->id, db);
+				delay_this_side = 0;
+			}
 		}
 
 		if (lls->bound_lls == BOUND_LLS_EXITED) {
@@ -3200,15 +3293,19 @@ send_messages(struct high_level_state *hls)
 			continue;
 		}
 
-		bias = delay_bias(instr, 1, &is_first);
-		if (bias < 0 || (bias == 0 && is_first)) {
-			debug("%p(%s): TX, delay is on TX side (bias %ld)\n",
-			      lls, instr->id, bias);
+		if (force_delay == 2) {
 			delay_this_side = 1;
 		} else {
-			debug("%p(%s): TX, delay is on RX side (bias %ld)\n",
-			      lls, instr->id, bias);
-			delay_this_side = 0;
+			bias = delay_bias(instr, 1, &is_first);
+			if (bias < 0 || (bias == 0 && is_first)) {
+				debug("%p(%s): TX, delay is on TX side (bias %ld)\n",
+				      lls, instr->id, bias);
+				delay_this_side = 1;
+			} else {
+				debug("%p(%s): TX, delay is on RX side (bias %ld)\n",
+				      lls, instr->id, bias);
+				delay_this_side = 0;
+			}
 		}
 
 		if (lls->bound_lls == BOUND_LLS_EXITED) {
@@ -3998,6 +4095,9 @@ activate(void)
 		force_delay = -1;
 	else if (getenv("SOS22_DELAY_RX"))
 		force_delay = 1;
+	else if (getenv("SOS22_DELAY_ALWAYS"))
+		force_delay = 2;
+
 	if (getenv("SOS22_DISABLE_CTXT_CHECK"))
 		skip_context_check = 1;
 
