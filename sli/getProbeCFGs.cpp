@@ -75,10 +75,10 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 		printf("Exploring from %s...\n", startingVexRip.name());
 	pendingAtCurrentDepth.push_back(startingVexRip);
 	depth = 0;
-	while (depth < maxPathLength) {
+	while (!TIMEOUT && depth < maxPathLength) {
 		if (debug_exploration)
 			printf("\tAt depth %d/%d\n", depth, maxPathLength);
-		while (!pendingAtCurrentDepth.empty()) {
+		while (!TIMEOUT && !pendingAtCurrentDepth.empty()) {
 			VexRip vr(pendingAtCurrentDepth.back());
 			pendingAtCurrentDepth.pop_back();
 			if (out.count(vr))
@@ -168,7 +168,7 @@ initialExploration(CfgLabelAllocator &allocLabel,
 		if (debug_exploration)
 			printf("initialExploration with %zd RIPs available\n",
 			       startingRips.size());
-		for (auto it = startingRips.begin(); it != startingRips.end(); it++) {
+		for (auto it = startingRips.begin(); !TIMEOUT && it != startingRips.end(); it++) {
 			if (exploreForStartingRip(allocLabel,
 						  oracle,
 						  *it,
@@ -181,6 +181,9 @@ initialExploration(CfgLabelAllocator &allocLabel,
 			} else {
 				newStartingRips.insert(*it);
 			}
+		}
+		if (TIMEOUT) {
+			return;
 		}
 		if (!failed) {
 			resolveReferences(succMap, out);
@@ -649,6 +652,9 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
 	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength);
+	if (TIMEOUT) {
+		return false;
+	}
 
 	if (debug_exploration) {
 		printf("Initial ripsToCFGNodes table:\n");
