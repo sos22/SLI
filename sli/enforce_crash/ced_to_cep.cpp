@@ -370,6 +370,9 @@ bytecode_eval_expr(std::vector<const char *> &bytecode, IRExpr *expr, const slot
 			emit_bytecode_op(bytecode, "divS", Ity_I64);
 			emit_bytecode_op(bytecode, "or", Ity_I64);
 			break;
+		case Iop_DivS64:
+			emit_bytecode_op(bytecode, "divS", Ity_I64);
+			break;
 		case Iop_CmpLT8S:
 		case Iop_CmpLT16S:
 		case Iop_CmpLT32S:
@@ -386,6 +389,7 @@ bytecode_eval_expr(std::vector<const char *> &bytecode, IRExpr *expr, const slot
 			emit_bytecode_op(bytecode, "sar", ieb->arg1->type());
 			break;
 		default:
+			printIRExpr(expr);
 			abort();
 		}
 		break;
