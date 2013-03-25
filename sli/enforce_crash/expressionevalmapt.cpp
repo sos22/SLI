@@ -999,7 +999,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				       expressionStashMapT &stashMap,
 				       happensBeforeMapT &hbMap,
 				       ThreadAbstracter &abs,
-				       bbdd *sideCondition)
+				       bbdd *sideCondition,
+				       bbdd *assumption)
 {
 	if (debug_eem) {
 		printf("expressionEvalMapT()\n");
@@ -1010,6 +1011,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		printf("Side condition:\n");
 		sideCondition->prettyPrint(stdout);
 	}
+
+	assumption = scope->cnst(true);
 
 	if (debug_eem_schedule && !debug_eem) {
 		printf("expressionEvalMapT:\n");
@@ -1157,6 +1160,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	   component which has to be deferred
 	   (@leftoverCondition).  */
 	std::map<instr_t, bbdd *> leftoverCondition;
+	/* And the condition which we've already evaluated */
+	sane_map<instr_t, bbdd *> alreadyEvaled;
 
 	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
 		pendingPredecessors[it->first] = it->second.size();
@@ -1197,6 +1202,11 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	/* Assumption at the roots comes from the crash summary */
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
+		alreadyEvaled[cfg.findInstr(it.threadCfgLabel())] = assumption;
+	}
+
 	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
 		if (it->second == 0) {
 			pendingInstrs.push_back(it->first);
@@ -1212,6 +1222,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 
 		if (debug_eem || debug_eem_schedule) {
 			printf("Consider %s\n", i->rip.name());
+			dbg_break("hello");
 		}
 
 		/* At the start of the instruction, we have to check
@@ -1221,6 +1232,23 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		entryNeeded = calcEntryNeeded(scope, i, abs, predecessors,
 					      rootInstrs, sideCondition,
 					      leftoverCondition);
+		bbdd *entryAssumption = alreadyEvaled[i];
+		assert(i);
+		{
+			bbdd *entryNeeded2 = bbdd::assume(scope, entryNeeded, entryAssumption);
+			if (debug_eem && entryNeeded != entryNeeded2) {
+				printf("Entry assumption:\n");
+				entryAssumption->prettyPrint(stdout);
+				printf("reduces needed from:\n");
+				entryNeeded->prettyPrint(stdout);
+				printf("to:\n");
+				entryNeeded2->prettyPrint(stdout);
+			}
+			entryNeeded = entryNeeded2;
+		}
+
+		bbdd *currentAssumption = entryAssumption;
+
 		if (hbMap.count(i->rip)) {
 			if (debug_eem) {
 				printf("Entry needed without HBs:\n");
@@ -1296,7 +1324,12 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		leftover = split1.first;
 		if (!split1.second->isLeaf()) {
-			auto simpl = subst_eq(scope, split1.second);
+			auto simpl = bbdd::assume(scope, split1.second, currentAssumption);
+			simpl = subst_eq(scope, simpl);
+			if (simpl != split1.second && debug_eem) {
+				printf("Resimplify:\n");
+				simpl->prettyPrint(stdout);
+			}
 			if (simpl->isLeaf()) {
 				if (simpl->leaf() == false) {
 					if (debug_eem_dead) {
@@ -1308,6 +1341,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				}
 			} else {
 				evalAt[i->rip].after_regs = simpl;
+				currentAssumption = bbdd::And(scope, currentAssumption, simpl);
 			}
 		}
 
@@ -1361,6 +1395,10 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 
 			if (haveIncomingEdge) {
 				availExprs |= rxed_expressions;
+				currentAssumption = bbdd::And(
+					scope,
+					currentAssumption,
+					rx_checked);
 				leftover = bbdd::assume(
 					scope,
 					leftover,
@@ -1457,6 +1495,14 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				if (--pendingPredecessors[hb->after] == 0) {
 					pendingInstrs.push_back(hb->after);
 				}
+				{
+					auto it2_did_insert = alreadyEvaled.insert(hb->after, currentAssumption);
+					auto it2 = it2_did_insert.first;
+					auto did_insert = it2_did_insert.second;
+					if (!did_insert) {
+						it2->second = bbdd::And(scope, it2->second, currentAssumption);
+					}
+				}
 				if (debug_eem_schedule) {
 					printf("Unblock %s via HB edge (%d left)\n",
 					       hb->after->rip.name(),
@@ -1496,9 +1542,18 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		leftover = split3.first;
 		if (!split3.second->isLeaf()) {
-			auto simpl = subst_eq(scope, split3.second);
+			dbg_break("here\n");
+			auto simpl = bbdd::assume(scope, split3.second, currentAssumption);
+			simpl = subst_eq(scope, simpl);
+			if (simpl != split3.second && debug_eem) {
+				printf("Simplifies to:\n");
+				simpl->prettyPrint(stdout);
+			}
 			if (!simpl->isLeaf()) {
 				evalAt[i->rip].after_control_flow = simpl;
+				currentAssumption = bbdd::And(scope,
+							      currentAssumption,
+							      simpl);
 			} else if (simpl->leaf() == false) {
 				deadStates.insert(i);
 			}
@@ -1509,6 +1564,15 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 
 		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
 			if (it->instr) {
+				{
+					auto it2_did_insert = alreadyEvaled.insert(it->instr, currentAssumption);
+					auto it2 = it2_did_insert.first;
+					auto did_insert = it2_did_insert.second;
+					if (!did_insert) {
+						it2->second = bbdd::Or(scope, it2->second, currentAssumption);
+					}
+				}
+
 				assert(pendingPredecessors[it->instr] > 0);
 				if (--pendingPredecessors[it->instr] == 0) {
 					pendingInstrs.push_back(it->instr);
