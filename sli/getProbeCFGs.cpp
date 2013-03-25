@@ -272,6 +272,14 @@ unrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 		HashedSet<HashedPtr<const CFGNode> > cycle_free;
 
 		while (1) {
+			if (predecessorMap.size() > 100000) {
+				/* This is never going to work.  Avoid
+				   angering the OOM killer by giving
+				   up early. */
+				fprintf(_logfile, "unrollAndCycleBreak() hit limit on number of nodes in a CFG.\n");
+				_timed_out = true;
+				return;
+			}
 			CFGNode *cycle_edge_start;
 			int cycle_edge_idx;
 			int discoveryDepth;
@@ -674,6 +682,9 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	}
 
 	unrollAndCycleBreak(allocLabel, nodes, targetNodes, out, maxPathLength);
+	if (TIMEOUT) {
+		return false;
+	}
 
 	if (debug_exploration) {
 		printf("Before trimming:\n");
