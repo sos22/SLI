@@ -1012,8 +1012,6 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		sideCondition->prettyPrint(stdout);
 	}
 
-	assumption = scope->cnst(true);
-
 	if (debug_eem_schedule && !debug_eem) {
 		printf("expressionEvalMapT:\n");
 		cfg.prettyPrint(stdout);
