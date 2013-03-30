@@ -169,7 +169,7 @@ public:
 		static __timer_message_filter filter;			\
 		if (_timed_out) {					\
 			if (timeout_means_death) {			\
-				errx(1, "%s timed out at %s:%d\n",	\
+				errx(2, "%s timed out at %s:%d\n",	\
 				     __func__, __FILE__, __LINE__);	\
 			} else if (filter()) {				\
 				fprintf(_logfile,			\
