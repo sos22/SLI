@@ -1236,6 +1236,14 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		assert(i);
 		{
 			bbdd *entryNeeded2 = bbdd::assume(scope, entryNeeded, entryAssumption);
+			if (!entryNeeded2) {
+				deadStates.insert(i);
+				if (debug_eem_dead) {
+					printf("entryNeeded is unsatisfiable, killing %s!\n",
+					       i->rip.name());
+				}
+				continue;
+			}
 			if (debug_eem && entryNeeded != entryNeeded2) {
 				printf("Entry assumption:\n");
 				entryAssumption->prettyPrint(stdout);
@@ -1325,6 +1333,14 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		leftover = split1.first;
 		if (!split1.second->isLeaf()) {
 			auto simpl = bbdd::assume(scope, split1.second, currentAssumption);
+			if (!simpl) {
+				deadStates.insert(i);
+				if (debug_eem_dead) {
+					printf("Register and entry point condition is unsatisfiable, killing %s!\n",
+					       i->rip.name());
+				}
+				continue;
+			}
 			simpl = subst_eq(scope, simpl);
 			if (simpl != split1.second && debug_eem) {
 				printf("Resimplify:\n");
@@ -1542,8 +1558,15 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		leftover = split3.first;
 		if (!split3.second->isLeaf()) {
-			dbg_break("here\n");
 			auto simpl = bbdd::assume(scope, split3.second, currentAssumption);
+			if (!simpl) {
+				if (debug_eem_dead) {
+					printf("post-control-flow condition is unsatisfiable, killing %s\n",
+					       i->rip.name());
+				}
+				deadStates.insert(i);
+				continue;
+			}
 			simpl = subst_eq(scope, simpl);
 			if (simpl != split3.second && debug_eem) {
 				printf("Simplifies to:\n");
