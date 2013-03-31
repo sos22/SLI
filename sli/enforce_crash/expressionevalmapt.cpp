@@ -999,8 +999,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				       expressionStashMapT &stashMap,
 				       happensBeforeMapT &hbMap,
 				       ThreadAbstracter &abs,
-				       bbdd *sideCondition,
-				       bbdd *assumption)
+				       bbdd *sideCondition)
 {
 	if (debug_eem) {
 		printf("expressionEvalMapT()\n");
@@ -1011,6 +1010,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		printf("Side condition:\n");
 		sideCondition->prettyPrint(stdout);
 	}
+
+	bbdd *assumption = scope->cnst(true);
 
 	if (debug_eem_schedule && !debug_eem) {
 		printf("expressionEvalMapT:\n");

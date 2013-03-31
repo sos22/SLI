@@ -411,8 +411,7 @@ public:
 			   expressionStashMapT &stashMap,
 			   happensBeforeMapT &hbMap,
 			   ThreadAbstracter &abs,
-			   bbdd *sideCondition,
-			   bbdd *assumption);
+			   bbdd *sideCondition);
 	void operator|=(const expressionEvalMapT &eem);
 	void prettyPrint(FILE *f) const;
 	bool parse(bbdd::scope *scope, const char *str, const char **suffix);
@@ -508,8 +507,7 @@ public:
 		  exprStashPoints(summaryId, neededExpressions, abs, roots),
 		  happensBeforePoints(summaryId, mai, trueHb, falseHb, crashCfg, abs, next_hb_id),
 		  expressionEvalPoints(scope, crashCfg, roots, exprStashPoints,
-				       happensBeforePoints, abs, sideCondition,
-				       summary->inferredAssumption)
+				       happensBeforePoints, abs, sideCondition)
 	{}
 
 	bool parse(SMScopes *scopes, AddressSpace *as, const char *str, const char **suffix) {
