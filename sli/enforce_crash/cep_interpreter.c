@@ -1954,10 +1954,10 @@ eval_bytecode(const unsigned short *const bytecode,
 			break;
 
 		case bcop_swap: {
-			unsigned long offset = bytecode_pop(&stack, bct_byte);
+			unsigned long off = bytecode_pop(&stack, bct_byte);
 			unsigned long top = bytecode_peek(&stack, 0, type);
-			unsigned long other = bytecode_peek(&stack, offset + 1, type);
-			bytecode_poke(&stack, offset + 1, top, type);
+			unsigned long other = bytecode_peek(&stack, off + 1, type);
+			bytecode_poke(&stack, off + 1, top, type);
 			bytecode_poke(&stack, 0, other, type);
 			break;
 		}
@@ -2035,6 +2035,34 @@ eval_bytecode(const unsigned short *const bytecode,
 			debug("bcop_modS: %ld %% %d -> %ld\n", arg1, arg2, rs);
 			break;
 		}
+		case bcop_divU: {
+			unsigned arg2 = bytecode_pop(&stack, bct_int);
+			unsigned long arg1 = bytecode_pop(&stack, bct_long);
+			unsigned long rs;
+			if (arg2 == 0) {
+				debug("unsigned division by zero (%lx / %d)!\n", arg1, arg2);
+				res = 0;
+				goto out;
+			}
+			rs = arg1 / arg2;
+			bytecode_push(&stack, rs, bct_long);
+			debug("bcop_divU: %ld / %d -> %ld\n", arg1, arg2, rs);
+			break;
+		}
+		case bcop_modU: {
+			unsigned arg2 = bytecode_pop(&stack, bct_int);
+			unsigned long arg1 = bytecode_pop(&stack, bct_long);
+			unsigned long rs;
+			if (arg2 == 0) {
+				debug("unsigned division by zero (%lx %% %d)!\n", arg1, arg2);
+				res = 0;
+				goto out;
+			}
+			rs = arg1 % arg2;
+			bytecode_push(&stack, rs, bct_long);
+			debug("bcop_modU: %ld %% %d -> %ld\n", arg1, arg2, rs);
+			break;
+		}
 		case bcop_and: {
 			unsigned long arg1 = bytecode_pop(&stack, type);
 			unsigned long arg2 = bytecode_pop(&stack, type);
@@ -2063,6 +2091,20 @@ eval_bytecode(const unsigned short *const bytecode,
 			debug("bcop_mul: %lx * %lx -> %lx\n", arg1, arg2, arg1 * arg2);
 			break;
 		}
+		case bcop_mullU64: {
+			__uint128_t arg1 = bytecode_pop(&stack, type);
+			__uint128_t arg2 = bytecode_pop(&stack, type);
+			__uint128_t res = arg1 * arg2;
+			debug("bcop_mullu64: %lx * %lx -> %lx:%lx\n", arg1, arg2, (unsigned long)(res >> 64), (unsigned long)res);
+			bytecode_push_longlong(&stack, (const unsigned char *)&res);
+			break;
+		}
+		case bcop_discard: {
+			uint64_t arg = bytecode_pop(&stack,type);
+			debug("bcop_discard %lx\n", arg);
+			break;
+		}
+
 		case bcop_shl: {
 			unsigned long arg2 = bytecode_pop(&stack, bct_byte);
 			unsigned long arg1 = bytecode_pop(&stack, type);
