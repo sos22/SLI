@@ -124,6 +124,7 @@ process_log_line(const char *line, const aliasingGraph &refGraph)
 	if (strstr(line, "== FT2, foo")) {
 		fprintf(stderr, "New logfile at %ld\n", last_timestamp);
 		ts_delta = last_timestamp;
+		printf("new_series\n");
 		return;
 	}
 	if (sscanf(line, "Writing snapshot %as at %ld", &path, &timestamp) != 2) {
@@ -137,7 +138,7 @@ process_log_line(const char *line, const aliasingGraph &refGraph)
 
 	printf("%ld %f\n", timestamp + ts_delta, double(graph.size()) / refGraph.size());
 
-	last_timestamp = timestamp + 100000;
+	last_timestamp = timestamp + 5000;
 	free((void *)path);
 }
 
@@ -170,6 +171,23 @@ main(int argc, char *argv[])
 		}
 		if (!feof(l)) {
 			err(1, "reading from %s", logfile);
+		}
+	} else if (!strcmp(argv[1], "-m")) {
+		size_t bufsize;
+		char *line = NULL;
+		int idx;
+
+		while (1) {
+			if (getline(&line, &bufsize, stdin) < 0) {
+				break;
+			}
+			for (idx = strlen(line)-1; idx >= 0 && line[idx] == '\n'; idx--)
+				;
+			line[idx+1] = 0;
+			aliasingGraph thing;
+			slurp_types_db(line, thing);
+			printf("%f\n", double(thing.size()) / ref.size());
+			fflush(stdout);
 		}
 	} else {
 		const char *db = argv[1];
