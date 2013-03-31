@@ -136,6 +136,7 @@ static StateMachineState *
 getLibraryStateMachine(SMScopes *scopes,
 		       CFGNode *cfgnode,
 		       unsigned tid,
+		       StateMachineRes terminal,
 		       std::vector<reloc_t> &pendingRelocs)
 {
 	threadAndRegister rax(threadAndRegister::reg(tid, OFFSET_amd64_RAX, 0));
@@ -153,8 +154,7 @@ getLibraryStateMachine(SMScopes *scopes,
 	}
 	if (lib == LibraryFunctionTemplate::none)
 		return NULL;
-	assert(fallThrough);
-	SMBPtr<SMBState> end(Proxy(fallThrough));
+	SMBPtr<SMBState> end(fallThrough ? Proxy(fallThrough) : Terminal(terminal));
 	SMBPtr<SMBState> acc(NULL);
 	switch (lib) {
 	case LibraryFunctionTemplate::__cxa_atexit: {
@@ -393,7 +393,7 @@ cfgNodeToState(SMScopes *scopes,
 	ThreadRip tr(tid, target->rip);
 
 	StateMachineState *root;
-	root = getLibraryStateMachine(scopes, target, tid, pendingRelocs);
+	root = getLibraryStateMachine(scopes, target, tid, storeLike ? smr_crash : smr_survive, pendingRelocs);
 	if (root)
 		return root;
 
