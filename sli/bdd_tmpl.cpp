@@ -520,6 +520,40 @@ bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 	bool progress = true;
 	while (progress) {
 		progress = false;
+		if (!b->isLeaf() &&
+		    b->internal().condition->tag == Iex_Unop &&
+		    ((IRExprUnop *)b->internal().condition)->op == Iop_BadPtr &&
+		    !a->isLeaf() &&
+		    a->internal().condition->tag == Iex_Unop &&
+		    ((IRExprUnop *)a->internal().condition)->op == Iop_BadPtr &&
+		    ((IRExprUnop *)a->internal().condition)->arg ==
+			((IRExprUnop *)b->internal().condition)->arg &&
+		    dereferences(cond, ((IRExprUnop *)a->internal().condition)->arg)) {
+			/* @cond dereferences X, and both a and b are
+			   BadPtr tests of x.  That implies that A ==
+			   C in this context, so see if we can do any
+			   simplifications based on that. */
+			t *A = a->internal().trueBranch;
+			t *B = a->internal().falseBranch;
+			t *C = b->internal().trueBranch;
+			t *D = b->internal().falseBranch;
+			if (B == C) {
+				/* A == B -> true branch becomes trivial */
+				a = A;
+				progress = true;
+			}
+			if (A == D) {
+				/* C == D -> false branch becomes trivial */
+				b = C;
+				progress = true;
+			}
+		}
+	}
+
+redo_b:
+	progress = true;
+	while (progress) {
+		progress = false;
 		if (!b->isLeaf() && cond == b->internal().condition) {
 			b = b->internal().falseBranch;
 			progress = true;
@@ -583,6 +617,21 @@ bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 			if (doit) {
 				b = b->internal().falseBranch;
 				progress = true;
+			}
+		}
+
+		if (!b->isLeaf() &&
+		    b->internal().condition->tag == Iex_Unop &&
+		    ((IRExprUnop *)b->internal().condition)->op == Iop_BadPtr &&
+		    dereferences(cond, ((IRExprUnop *)b->internal().condition)->arg)) {
+			/* We know that a == b->true, so try to simplify a bit based on that. */
+			if (a == b->internal().falseBranch) {
+				b = b->internal().falseBranch;
+				progress = true;
+			} else {
+				a = b->internal().trueBranch;
+				/* Don't set progress: we're updating
+				 * @a, not @b. */
 			}
 		}
 	}
@@ -688,6 +737,19 @@ bdd_scope<t>::normalise(IRExpr *cond, t *&a, t *&b)
 				 ((IRExprBinop *)a->internal().condition)->arg2)) {
 			progress = true;
 			a = a->internal().falseBranch;
+		}
+
+		if (!a->isLeaf() &&
+		    a->internal().condition->tag == Iex_Unop &&
+		    ((IRExprUnop *)a->internal().condition)->op == Iop_BadPtr &&
+		    dereferences(cond, ((IRExprUnop *)a->internal().condition)->arg)) {
+			/* We know that a->true == b, so try to simplify a bit based on that. */
+			if (b == a->internal().falseBranch) {
+				a = a->internal().falseBranch;
+			} else {
+				b = a->internal().trueBranch;
+				goto redo_b;
+			}
 		}
 	}
 }
