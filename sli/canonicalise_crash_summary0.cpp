@@ -325,6 +325,28 @@ findMinimalRoots(StateMachine *sm,
 	}
 }
 
+static void
+enumMais(bbdd *what, std::set<MemoryAccessIdentifier> &mais, std::set<bbdd *> &visited)
+{
+	if (what->isLeaf() || !visited.insert(what).second) {
+		return;
+	}
+	IRExpr *e = what->internal().condition;
+	if (e->tag == Iex_HappensBefore) {
+		auto hb = (IRExprHappensBefore *)e;
+		mais.insert(hb->before);
+		mais.insert(hb->after);
+	}
+	enumMais(what->internal().trueBranch, mais, visited);
+	enumMais(what->internal().falseBranch, mais, visited);
+}
+static void
+enumMais(bbdd *what, std::set<MemoryAccessIdentifier> &mais)
+{
+	std::set<bbdd *> visited;
+	enumMais(what, mais, visited);
+}
+
 static CrashSummary *
 optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		       const VexPtr<OracleInterface> &oracle,
@@ -396,6 +418,9 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		std::set<MemoryAccessIdentifier> mais;
 		cs->loadMachine->root->enumerateMentionedMemoryAccesses(mais);
 		cs->storeMachine->root->enumerateMentionedMemoryAccesses(mais);
+		/* And those in the crash constraint and inferred assumption */
+		enumMais(cs->inferredAssumption, mais);
+		enumMais(cs->crashCondition, mais);
 		for (auto it = mais.begin(); it != mais.end(); it++) {
 			for (auto it2 = cs->mai->begin(*it); !it2.finished(); it2.advance()) {
 				if (debug_root_reduce) {

@@ -960,12 +960,16 @@ mightLoadInitialValue(StateMachineSideEffecting *smse,
 	assert(smse->getSideEffect()->type == StateMachineSideEffect::Load);
 	StateMachineSideEffectLoad *load = (StateMachineSideEffectLoad *)smse->getSideEffect();
 	std::queue<StateMachineState *> q;
+	std::set<StateMachineState *> clean;
 	q.push(sm->root);
 	while (!q.empty()) {
 		StateMachineState *s = q.front();
 		q.pop();
 		if (s == smse)
 			return true;
+		if (!clean.insert(s).second) {
+			continue;
+		}
 		if (s->getSideEffect() &&
 		    s->getSideEffect()->type == StateMachineSideEffect::Store) {
 			StateMachineSideEffectMemoryAccess *store = (StateMachineSideEffectMemoryAccess *)s->getSideEffect();

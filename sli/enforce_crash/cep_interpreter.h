@@ -36,6 +36,10 @@ enum byte_code_op {
 
 	bcop_divS,
 	bcop_modS,
+	bcop_divU,
+	bcop_modU,
+
+	bcop_mullU64,
 
 	/* Unary ops */
 	bcop_not,
@@ -50,6 +54,8 @@ enum byte_code_op {
 	bcop_zero_extend16,
 	bcop_zero_extend32,
 	bcop_zero_extend64,
+
+	bcop_discard,
 
 	bcop_swap,
 	bcop_dupe,

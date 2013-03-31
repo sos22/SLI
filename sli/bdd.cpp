@@ -624,7 +624,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			case Iop_128HIto64:
 				return IRExpr_Const_U64(argc->Ico.content.U128.hi);
 			case Iop_64HIto32:
-			  return IRExpr_Const_U32(argc->Ico.content.U64 >> 32);
+				return IRExpr_Const_U32(argc->Ico.content.U64 >> 32);
 			case Iop_64UtoV128:
 				return IRExpr_Const_U128(0, argc->Ico.content.U64);
 			case Iop_BadPtr:
@@ -1046,6 +1046,17 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				unsigned long mod = num % denom;
 				return IRExpr_Const_U64((div << 32) | (mod & 0xffffffff));
 			}
+			case Iop_DivU64: {
+				unsigned long num = arg1C->Ico.content.U64;
+				unsigned long denom = arg2C->Ico.content.U32;
+				if (denom == 0) {
+					warning("Constant division by zero (%ld/%ld)?\n",
+						num, denom);
+					break;
+				}
+				unsigned long div = num / denom;
+				return IRExpr_Const_U64(div);
+			}
 			case Iop_Mul64:
 				return IRExpr_Const_U64(arg1C->Ico.content.U64 * arg2C->Ico.content.U64);
 			case Iop_MullS64: {
@@ -1064,6 +1075,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				unsigned long a = arg1C->Ico.content.U32;
 				unsigned long b = arg2C->Ico.content.U32;
 				unsigned long res = a * b;
+				return IRExpr_Const_U64(res);
+			}
+			case Iop_MullS32: {
+				long a = arg1C->Ico.content.U32;
+				long b = arg2C->Ico.content.U32;
+				long res = a * b;
 				return IRExpr_Const_U64(res);
 			}
 			case Iop_64HLto128:
