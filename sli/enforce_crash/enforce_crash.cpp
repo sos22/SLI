@@ -842,6 +842,9 @@ slice_by_exprs(bbdd::scope *scope, bbdd *expr, const std::set<const IRExprHappen
 		s.insert(theSlice);
 		return s;
 	}
+	if (TIMEOUT) {
+		return sliced_expr();
+	}
 	const IRExprHappensBefore *e = *sliceby.begin();
 	std::set<const IRExprHappensBefore *> others(sliceby);
 	others.erase(e);
