@@ -693,7 +693,7 @@ cep_realloc(void *ptr, size_t new_sz)
 	hdr--;
 	assert(!(hdr->sz_and_flags & ALLOC_FLAG_FREE));
 	old_sz = hdr->sz_and_flags & ALLOC_SIZE_MASK;
-	if ( old_sz >= new_sz ) {
+	if ( old_sz  - sizeof(*hdr) >= new_sz ) {
 		/* We never trim blocks during realloc, so shrinking
 		 * is a no-op. */
 		debug("realloc(%p, %zd) -> %p (shrink from %zd)\n",
@@ -749,10 +749,10 @@ cep_realloc(void *ptr, size_t new_sz)
 	/* Can't do it by expanding this chunk.  Allocate a new
 	 * one. */
 	n = cep_malloc(orig_sz);
-	if (orig_sz < old_sz) {
+	if (orig_sz < old_sz - sizeof(*hdr)) {
 		memcpy(n, ptr, orig_sz);
 	} else {
-		memcpy(n, ptr, old_sz);
+		memcpy(n, ptr, old_sz - sizeof(*hdr));
 	}
 	cep_free(ptr);
 	return n;
@@ -1311,6 +1311,14 @@ struct cep_emulate_ctxt {
 	struct high_level_state *hls;
 };
 
+static unsigned long
+fetch_fs_base(void)
+{
+	unsigned long res;
+	arch_prctl(ARCH_GET_FS, (unsigned long)&res);
+	return res;
+}
+
 static int
 emulator_read(enum x86_segment seg,
 	      unsigned long offset,
@@ -1326,7 +1334,12 @@ emulator_read(enum x86_segment seg,
 	struct high_level_state *hls = ctxt->hls;
 	int i, j;
 
-	assert(seg == x86_seg_ds || seg == x86_seg_ss);
+	if (seg == x86_seg_fs) {
+		/* fix up TLS access */
+		offset += fetch_fs_base();
+	} else {
+		assert(seg == x86_seg_ds || seg == x86_seg_ss);
+	}
 	memcpy(p_data, (const void *)offset, bytes);
 	assert(hls);
 	for (i = 0; i < hls->ll_states.sz; i++) {
@@ -1385,7 +1398,11 @@ emulator_write(enum x86_segment seg,
 	       struct x86_emulate_ctxt *ctxt)
 {
 	/* XXX should trap any faults */
-	assert(seg == x86_seg_ds || seg == x86_seg_ss);
+	if (seg == x86_seg_fs) {
+		offset += fetch_fs_base();
+	} else {
+		assert(seg == x86_seg_ds || seg == x86_seg_ss);
+	}
 	memcpy((void *)offset, (const void *)p_data, bytes);
 	return X86EMUL_OKAY;
 }
@@ -1409,6 +1426,40 @@ emulator_cmpxchg(enum x86_segment seg,
 		      "m" (*(unsigned char *)offset)
 		    : "memory"
 			);
+		break;
+	}
+	case 2: {
+		unsigned short prev;
+		asm("lock cmpxchg %2, %3\n"
+		    : "=a" (prev)
+		    : "0" (*(unsigned short *)p_old),
+		      "r" (*(unsigned short *)p_new),
+		      "m" (*(unsigned short *)offset)
+		    : "memory"
+			);
+		break;
+	}
+	case 4: {
+		unsigned prev;
+		asm("lock cmpxchg %2, %3\n"
+		    : "=a" (prev)
+		    : "0" (*(unsigned *)p_old),
+		      "r" (*(unsigned *)p_new),
+		      "m" (*(unsigned *)offset)
+		    : "memory"
+			);
+		break;
+	}
+	case 8: {
+		unsigned long prev;
+		asm("lock cmpxchg %2, %3\n"
+		    : "=a" (prev)
+		    : "0" (*(unsigned long *)p_old),
+		      "r" (*(unsigned long *)p_new),
+		      "m" (*(unsigned long *)offset)
+		    : "memory"
+			);
+		break;
 	}
 	default:
 		abort();
@@ -2304,14 +2355,6 @@ eval_bytecode(const unsigned short *const bytecode,
 
 out:
 	cleanup_stack(&stack);
-	return res;
-}
-
-static unsigned long
-fetch_fs_base(void)
-{
-	unsigned long res;
-	arch_prctl(ARCH_GET_FS, (unsigned long)&res);
 	return res;
 }
 
