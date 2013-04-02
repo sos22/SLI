@@ -77,6 +77,13 @@ main(int argc, char *argv[])
 		crashEnforcementData acc = enforceCrashForMachine(SummaryId(1), summary,
 								  oracle, abs, next_hb_id);
 
+		if (TIMEOUT) {
+			fprintf(bubble_plot_log, "%f: stop build enforcer\n", now());
+			_timed_out = false;
+			free((void *)summary_fname);
+			continue;
+		}
+
 		fprintf(bubble_plot_log, "%f: start simplify plan\n", now());		
 		optimiseHBEdges(acc);
 		optimiseStashPoints(acc, oracle);

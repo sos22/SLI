@@ -912,8 +912,20 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	}
 
 	fprintf(bubble_plot_log, "%f: start slice by hb\n", now());
-	sliced_expr sliced_by_hb(slice_by_hb(&summary->scopes->bools, requirement));
+	sliced_expr sliced_by_hb;
+	{
+		TimeoutTimer tmr;
+		tmr.timeoutAfterSeconds(60);
+		sliced_by_hb = slice_by_hb(&summary->scopes->bools, requirement);
+		tmr.cancel();
+	}
 	fprintf(bubble_plot_log, "%f: stop slice by hb\n", now());
+
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed slice by hb\n", now());
+		return crashEnforcementData();
+	}
+
 	printf("Sliced requirement:\n");
 	sliced_by_hb.prettyPrint(stdout);
 
