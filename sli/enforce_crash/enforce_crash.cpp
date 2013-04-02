@@ -1354,7 +1354,7 @@ patchSearch(Oracle *oracle,
 void
 buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 {
-	patchStrategy initPs;
+	patchStrategy currentPs;
 
 	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
 		Instruction<ThreadCfgLabel> *instr = ced.crashCfg.findInstr(it.threadCfgLabel());
@@ -1367,34 +1367,45 @@ buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 		unsigned long r = vr.unwrap_vexrip();
 		if (debug_declobber_instructions)
 			printf("%lx is a root\n", r);
-		initPs.MustInterpret.insert(r);
-	}
-
-	std::set<patchStrategy> visited;
-	patchQueueT pses;
-	pses.push(initPs);
-	while (!TIMEOUT && !pses.empty()) {
-		patchStrategy next(pses.top());
-		pses.pop();
-		if (!visited.insert(next).second)
+		if (currentPs.Cont.count(r)) {
+			if (debug_declobber_instructions) {
+				printf("... but it's already been handled elsewhere\n");
+			}
 			continue;
-		if (patchSearch(oracle, next, pses)) {
-			/* We have a solution. */
-			ced.patchPoints = next.Patch;
-			ced.interpretInstrs = next.Cont;
-
-			/* Minor optimisation: anything within five bytes of a patch
-			   point is implicitly cont, so remove them. */
-			for (auto it = ced.patchPoints.begin(); it != ced.patchPoints.end(); it++)
-				for (unsigned x = 0; x < 5; x++)
-					ced.interpretInstrs.erase(*it + x);
-			return;
+		}
+		currentPs.MustInterpret.insert(r);
+		std::set<patchStrategy> visited;
+		patchQueueT pses;
+		pses.push(currentPs);
+		while (true) {
+			if (TIMEOUT) {
+				return;
+			}
+			if (pses.empty()) {
+				errx(1, "cannot build patch strategy");
+			}
+			patchStrategy next(pses.top());
+			pses.pop();
+			if (!visited.insert(next).second)
+				continue;
+			if (patchSearch(oracle, next, pses)) {
+				/* We have a solution for this entry
+				 * point.  Update currentPs and move
+				 * on. */
+				currentPs = next;
+				break;
+			}
 		}
 	}
-	if (TIMEOUT) {
-		return;
-	}
-	errx(1, "Cannot solve patch problem");
+
+	ced.patchPoints = currentPs.Patch;
+	ced.interpretInstrs = currentPs.Cont;
+
+	/* Minor optimisation: anything within five bytes of a patch
+	   point is implicitly cont, so remove them. */
+	for (auto it = ced.patchPoints.begin(); it != ced.patchPoints.end(); it++)
+		for (unsigned x = 0; x < 5; x++)
+			ced.interpretInstrs.erase(*it + x);
 }
 
 void
