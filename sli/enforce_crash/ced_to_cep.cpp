@@ -7,12 +7,6 @@
 #include "maybe.hpp"
 #include "visitor.hpp"
 
-unsigned long
-__trivial_hash_function(const VexRip &vr)
-{
-	return vr.hash();
-}
-
 static void
 loadCrashEnforcementData(SMScopes *scopes, crashEnforcementData &ced, AddressSpace *as, int fd)
 {

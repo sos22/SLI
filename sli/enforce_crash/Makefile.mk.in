@@ -1,7 +1,7 @@
-targets="enforce_crash ced_to_cep cep_interpreter.o"
+targets="ec_driver ced_to_cep cep_interpreter.o"
 # foo={a,b,c} turns out not to do brace expansion; not sure why.  $()
 # expansion does, though, so use that instead.  Meh.
-sources=$(echo {simplify_ordering,enumNeededExpressions}.cpp)
+sources=$(echo {simplify_ordering,enumNeededExpressions,enforce_crash}.cpp)
 sources+=$(echo "" {thread_cfg_decode,expressionstashmapt,sane_vector,inputexpression}.cpp)
 sources+=" expressionevalmapt.cpp"
 
@@ -27,7 +27,7 @@ cep_interpreter.o: ${input_base}/cep_interpreter.h ${input_base}/cep_interpreter
 ${input_base}/cep_interpreter.cpp.o.d: # Silly hack to keep build system happy
 	touch ${input_base}$@
 EOF
-	for t in enforce_crash ced_to_patch ced_to_cep
+	for t in ec_driver ced_to_patch ced_to_cep
 	do
 		echo "$t: \$(ECRASH_COMMON_OBJECTS)"
 		link $t ${input_base}/$t.o

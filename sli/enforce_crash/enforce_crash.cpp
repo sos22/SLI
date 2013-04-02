@@ -874,7 +874,7 @@ slice_by_hb(bbdd::scope *scope, bbdd *expr)
 	return slice_by_exprs(scope, expr, hbEdges);
 }
 
-static crashEnforcementData
+crashEnforcementData
 enforceCrashForMachine(const SummaryId &summaryId,
 		       VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
@@ -964,7 +964,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
    -- We don't try to eval anything at the node.
    -- The node isn't the before end of a happens-before edge
 */
-static void
+void
 optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 {
 	expressionStashMapT newMap;
@@ -1069,7 +1069,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 
 /* We sometimes find that the CFG has a prefix which is completely
    irrelevant.  Try to remove it. */
-static void
+void
 optimiseCfg(crashEnforcementData &ced)
 {
 	struct {
@@ -1337,7 +1337,7 @@ patchSearch(Oracle *oracle,
 	return false;
 }
 
-static void
+void
 buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 {
 	patchStrategy initPs;
@@ -1380,7 +1380,7 @@ buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 	errx(1, "Cannot solve patch problem");
 }
 
-static void
+void
 optimiseHBEdges(crashEnforcementData &ced)
 {
 	/* If an instruction receives a message from thread X then it
@@ -1442,49 +1442,3 @@ optimiseHBEdges(crashEnforcementData &ced)
 	}
 }
 
-int
-main(int argc, char *argv[])
-{
-	init_sli();
-
-	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
-	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
-	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
-	oracle->loadCallGraph(oracle, argv[3], argv[4], ALLOW_GC);
-
-	int next_hb_id = 0xaabb;
-
-	SMScopes scopes;
-	ThreadAbstracter abs;
-	crashEnforcementData accumulator;
-
-	timeout_means_death = true;
-
-	TimeoutTimer tt;
-	tt.timeoutAfterSeconds(60);
-	for (int i = 6; i < argc; i++) {
-		CrashSummary *summary;
-
-		if (i == 6) {
-			summary = readBugReport(&scopes, argv[i], NULL);
-		} else {
-			SMScopes _scopes;
-			summary = readBugReport(&_scopes, argv[i], NULL);
-			summary = rewriteSummaryCrossScope(summary, &scopes);
-		}
-		crashEnforcementData acc = enforceCrashForMachine(SummaryId(i - 5), summary, oracle, abs, next_hb_id);
-		optimiseHBEdges(acc);
-		optimiseStashPoints(acc, oracle);
-		optimiseCfg(acc);
-		accumulator |= acc;
-	}
-
-	buildPatchStrategy(accumulator, oracle);
-
-	FILE *f = fopen(argv[5], "w");
-	accumulator.prettyPrint(&scopes, f);
-	accumulator.prettyPrint(&scopes, stdout);
-	fclose(f);
-
-	return 0;
-}
