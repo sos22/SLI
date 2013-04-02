@@ -1,6 +1,8 @@
 #ifndef DUMMY_ORACLE_HPP__
 #define DUMMY_ORACLE_HPP__
 
+#include "oracle.hpp"
+
 class DummyOracle : public OracleInterface {
 	CrashSummary *summary;
 	void visit(HeapVisitor &hv) {

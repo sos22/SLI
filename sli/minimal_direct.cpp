@@ -18,10 +18,8 @@
 #include "allowable_optimisations.hpp"
 #include "stacked_cdf.hpp"
 
-FILE *
-bubble_plot_log;
-FILE *
-bubble_plot2_log;
+extern FILE *bubble_plot_log;
+extern FILE *bubble_plot2_log;
 
 extern const char *__warning_tag;
 

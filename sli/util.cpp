@@ -11,6 +11,11 @@
 #include "profile.hpp"
 #include "map.h"
 
+FILE *
+bubble_plot_log;
+FILE *
+bubble_plot2_log;
+
 static __attribute__ ((noreturn)) void
 failure_exit(void)
 {
