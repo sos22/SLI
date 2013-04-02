@@ -38,6 +38,7 @@ namespace stackedCdf {
 	iter(ProbeSecondSimplify)		\
 	iter(ProbeResimplify)			\
 	iter(BDD)				\
+	iter(GC)				\
 	iter(root)
 
 	enum stackedCdfBucket {

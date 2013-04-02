@@ -18,6 +18,11 @@
 #include "allowable_optimisations.hpp"
 #include "stacked_cdf.hpp"
 
+FILE *
+bubble_plot_log;
+FILE *
+bubble_plot2_log;
+
 extern const char *__warning_tag;
 
 struct size_limited_file {
@@ -154,11 +159,14 @@ consider_rip(const DynAnalysisRip &my_rip,
 	fprintf(_logfile, "Considering %s...\n", my_rip.name());
 
 	stackedCdf::start();
+	fprintf(bubble_plot_log, "%f: start crashing thread\n", now());
 	if (oracle->isPltCall(my_rip.toVexRip())) {
+		fprintf(bubble_plot_log, "%f: Dismiss early, PLT\n", now());
 		fprintf(_logfile, "Is in PLT, so ignore\n");
 	} else {
 		checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, opt, token);
 	}
+	fprintf(bubble_plot_log, "%f: finish crashing thread\n", now());
 	stackedCdf::stop(_timed_out);
 
 	fflush(NULL);
@@ -209,8 +217,6 @@ InstructionConsumer::operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAn
 	double endd = total_estimated + start;
 	if (isinf(endd))
 		return;
-
-	dump_profiling_data();
 
 	time_t end = endd;
 	char *times;
@@ -392,12 +398,19 @@ main(int argc, char *argv[])
 
 	unsigned long cntr = 0;
 
+	bubble_plot_log = fopen("bubble_data.log", "w");
+	bubble_plot2_log = fopen("bubble_data2.log", "w");
+
 	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, opt);
 	if (use_schedule) {
+		initialise_profiling();
+		start_profiling();
 		for (unsigned long idx = start_instr; idx <= end_instr; idx++) {
 			ic(oracle, df, schedule[idx], cntr);
 			cntr++;
 		}
+		stop_profiling();
+		dump_profiling_data();
 	} else {
 		/* Skip the ones we've been told to skip. */
 		for (unsigned long a = 0; a < start_instr; a++)
@@ -410,6 +423,7 @@ main(int argc, char *argv[])
 			instrIterator->advance();
 			ic(oracle, df, dar, cntr);
 			cntr++;
+
 		}
 	}
 

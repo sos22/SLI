@@ -139,7 +139,7 @@ ProfTimer::fired()
 }
 
 static void
-handle_sigsegv(int signr)
+handle_sigsegv(int)
 {
 	/* backtrace() can sometimes segfault if there's code on the
 	 * stack without frame pointers (e.g. all of libstdc++).  The

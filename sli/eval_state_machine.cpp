@@ -12,6 +12,7 @@
 #include "bdd.hpp"
 #include "ssa.hpp"
 #include "stacked_cdf.hpp"
+#include "timers.hpp"
 
 #ifdef NDEBUG
 #define debug_survival_constraint false
@@ -20,6 +21,9 @@
 static bool debug_survival_constraint = false;
 static bool debug_cross_product = false;
 #endif
+
+extern FILE *
+bubble_plot2_log;
 
 /* All of the state needed to evaluate a single pure IRExpr. */
 /* Note that this is not GCed, but contains bare pointers to GCed
@@ -2427,14 +2431,17 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 	StateMachine *strippedProbe = probeMachine;
 	StateMachine *strippedStore = storeMachine;
 	stackedCdf::startCrashConstraintResimplify();
+	fprintf(bubble_plot2_log, "%f: start cross simplify\n", now());
 #if TRACK_FRAMES
 	strippedProbe = stripUninterpretableAnnotations(probeMachine);
 	strippedStore = stripUninterpretableAnnotations(storeMachine);
 #endif
 	strippedProbe = mapUnreached(&scopes->smrs, strippedProbe, smr_survive);
 	strippedStore = mapUnreached(&scopes->smrs, strippedStore, smr_survive);
+	fprintf(bubble_plot2_log, "%f: stop cross simplify\n", now());
 	stackedCdf::stopCrashConstraintResimplify();
 	stackedCdf::startCrashConstraintBuildCross();
+	fprintf(bubble_plot2_log, "%f: start cross build\n", now());
 	VexPtr<StateMachine, &ir_heap> crossProductMachine(
 		buildCrossProductMachine(
 			scopes,
@@ -2447,12 +2454,15 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			smr_survive,
 			ssaCorrespondence));
 	stackedCdf::stopCrashConstraintBuildCross();
+	fprintf(bubble_plot2_log, "%f: stop cross build\n", now());
 	if (!crossProductMachine) {
 		stackedCdf::stopCrashConstraint();
+		fprintf(bubble_plot2_log, "%f: failed cross build\n", now());
 		return NULL;
 	}
 	bool ignore;
 	stackedCdf::startCrashConstraintResimplify();
+	fprintf(bubble_plot2_log, "%f: start cross simplify\n", now());
 	optimiseAssuming(scopes, crossProductMachine, initialStateCondition, &ignore);
 	crossProductMachine =
 		optimiseStateMachine(
@@ -2464,12 +2474,15 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 			true,
 			token);
 	crossProductMachine = mapUnreached(&scopes->smrs, crossProductMachine, smr_survive);
+	fprintf(bubble_plot2_log, "%f: stop cross simplify\n", now());
 	stackedCdf::stopCrashConstraintResimplify();
 
 	if (TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: failed cross simplify\n", now());
 		return NULL;
 	}
 	stackedCdf::startCrashConstraintSymbolicExecute();
+	fprintf(bubble_plot2_log, "%f: start cross symbolic\n", now());
 	bbdd *res_ssa = survivalConstraintIfExecutedAtomically(
 		scopes,
 		decode,
@@ -2482,10 +2495,17 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 	stackedCdf::stopCrashConstraintSymbolicExecute();
 	if (!res_ssa) {
 		stackedCdf::stopCrashConstraint();
+		fprintf(bubble_plot2_log, "%f: stop cross symbolic\n", now());
+		fprintf(bubble_plot2_log, "%f: failed cross symbolic\n", now());
 		return NULL;
 	}
 	auto res = deSsa(&scopes->bools, res_ssa, ssaCorrespondence);
+	fprintf(bubble_plot2_log, "%f: stop cross symbolic\n", now());
 	stackedCdf::stopCrashConstraint();
+	if (TIMEOUT || !res) {
+		fprintf(bubble_plot2_log, "%f: failed cross symbolic\n", now());
+		return NULL;
+	}
 	return res;
 }
 
@@ -2640,18 +2660,22 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 	writeMachine->assertAcyclic();
 	readMachine->assertAcyclic();
 	stackedCdf::startBuildWAtomicMachine();
+	fprintf(bubble_plot2_log, "%f: start build ic-atomic\n", now());
 	combinedMachine = concatenateStateMachinesCrashing(
 		scopes,
 		writeMachine,
 		readMachine,
 		smr_crash);
+	fprintf(bubble_plot2_log, "%f: stop build ic-atomic\n", now());
 	stackedCdf::stopBuildWAtomicMachine();
 	if (TIMEOUT) {
 		stackedCdf::stopBuildWAtomic();
+		fprintf(bubble_plot2_log, "%f: failed build ic-atomic\n", now());
 		return NULL;
 	}
 	combinedMachine->assertAcyclic();
 	stackedCdf::startBuildWAtomicResimplify();
+	fprintf(bubble_plot2_log, "%f: start simplify ic-atomic\n", now());
 	combinedMachine = mapUnreached(&scopes->smrs, combinedMachine, smr_crash);
 	combinedMachine = optimiseStateMachine(scopes,
 					       mai,
@@ -2664,11 +2688,14 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 					       oracle,
 					       true,
 					       token);
+	fprintf(bubble_plot2_log, "%f: stop simplify ic-atomic\n", now());
 	stackedCdf::stopBuildWAtomicResimplify();
 	if (TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: failed simplify ic-atomic\n", now());
 		return NULL;
 	}
 	stackedCdf::startBuildWAtomicSymbolicExecute();
+	fprintf(bubble_plot2_log, "%f: start execute ic-atomic\n", now());
 	auto res = survivalConstraintIfExecutedAtomically(
 		scopes,
 		mai,
@@ -2681,6 +2708,10 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 	stackedCdf::stopBuildWAtomicSymbolicExecute();
 	if (res) {
 		res = bbdd::And(&scopes->bools, res, assumption);
+	}
+	fprintf(bubble_plot2_log, "%f: stop execute ic-atomic\n", now());
+	if (TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: failed execute ic-atomic\n", now());
 	}
 	stackedCdf::stopBuildWAtomic();
 	return res;
