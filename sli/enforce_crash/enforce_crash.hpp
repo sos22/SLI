@@ -83,29 +83,6 @@ public:
 	void print(FILE *f) const;
 };
 
-/* An encoding of the happens-before edges in a DNF clause into a map
-   over Instructions. */
-class happensAfterMapT {
-public:
-	/* happensBefore[i] -> the set of all instructions ordered before i */
-	instrToInstrSetMap happensBefore;
-	/* happensBefore[i] -> the set of all instructions ordered after i */
-	instrToInstrSetMap happensAfter;
-	happensAfterMapT(const SummaryId &summary,
-			 const std::set<const IRExprHappensBefore *> &trueHb,
-			 const std::set<const IRExprHappensBefore *> &falseHb,
-			 ThreadAbstracter &abs,
-			 CrashCfg &cfg,
-			 const MaiMap &mai);
-	happensAfterMapT() {}
-	void print(FILE *f) {
-		fprintf(f, "before:\n");
-		happensBefore.print(f);
-		fprintf(f, "after:\n");
-		happensAfter.print(f);
-	}
-};
-
 class input_expression : public Named {
 	char *mkName() const;
 	input_expression(unsigned thread, unsigned vex_offset);
@@ -470,7 +447,6 @@ class crashEnforcementData {
 public:
 	crashEnforcementRoots roots;
 	CrashCfg crashCfg;
-	happensAfterMapT happensBefore;
 	expressionStashMapT exprStashPoints;
 	happensBeforeMapT happensBeforePoints;
 	expressionEvalMapT expressionEvalPoints;
@@ -492,7 +468,6 @@ public:
 			     AddressSpace *as)
 		: roots(_roots, abs),
 		  crashCfg(roots, summaryId, summary, as, false, abs),
-		  happensBefore(summaryId, trueHb, falseHb, abs, crashCfg, mai),
 		  exprStashPoints(summaryId, neededExpressions, abs, roots),
 		  happensBeforePoints(summaryId, mai, trueHb, falseHb, crashCfg, abs, next_hb_id),
 		  expressionEvalPoints(scope, crashCfg, roots, exprStashPoints,

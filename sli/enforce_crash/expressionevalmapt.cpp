@@ -20,45 +20,6 @@ static bool debug_ubbdd = false;
 
 /* First, a couple of random bits which don't really belong here but
    which don't really belong anywhere else either. */
-happensAfterMapT::happensAfterMapT(const SummaryId &summary,
-				   const std::set<const IRExprHappensBefore *> &trueHb,
-				   const std::set<const IRExprHappensBefore *> &falseHb,
-				   ThreadAbstracter &abs,
-				   CrashCfg &cfg,
-				   const MaiMap &mai)
-{
-	for (auto it = trueHb.begin(); it != trueHb.end(); it++) {
-		const IRExprHappensBefore *e = *it;
-		for (auto before_it = abs.begin(summary, mai, e->before, cfg); !before_it.finished(); before_it.advance()) {
-			Instruction<ThreadCfgLabel> *const before = before_it.get();
-			if (!before)
-				continue;
-			for (auto after_it = abs.begin(summary, mai, e->after, cfg); !after_it.finished(); after_it.advance()) {
-				auto after = after_it.get();
-				if (!after)
-					continue;
-				happensAfter[before].insert(after);
-				happensBefore[after].insert(before);
-			}
-		}
-	}
-	for (auto it = falseHb.begin(); it != falseHb.end(); it++) {
-		const IRExprHappensBefore *e = *it;
-		for (auto before_it = abs.begin(summary, mai, e->before, cfg); !before_it.finished(); before_it.advance()) {
-			Instruction<ThreadCfgLabel> *const before = before_it.get();
-			if (!before)
-				continue;
-			for (auto after_it = abs.begin(summary, mai, e->after, cfg); !after_it.finished(); after_it.advance()) {
-				auto after = after_it.get();
-				if (!after)
-					continue;
-				happensAfter[after].insert(before);
-				happensBefore[before].insert(after);
-			}
-		}
-	}
-}
-
 happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 				     const MaiMap &mai,
 				     const std::set<const IRExprHappensBefore *> &trueHb,
