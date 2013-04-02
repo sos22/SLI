@@ -569,7 +569,7 @@ public:
 	};
 	iterator begin() const { return iterator(threadAbs, content); }
 
-	ConcreteThread lookupAbsThread(const AbstractThread &abs)
+	ConcreteThread lookupAbsThread(const AbstractThread &abs) const
 	{
 #ifndef NDEBUG
 		bool found_it = false;
@@ -617,7 +617,7 @@ class CrashCfg {
 	std::map<ThreadCfgLabel, Instruction<ThreadCfgLabel> *> content;
 	std::map<ConcreteCfgLabel, VexRip> rips;
 public:
-	Instruction<ThreadCfgLabel> *findInstr(const ThreadCfgLabel &label) {
+	Instruction<ThreadCfgLabel> *findInstr(const ThreadCfgLabel &label) const {
 		auto it = content.find(label);
 		if (it == content.end())
 			return NULL;

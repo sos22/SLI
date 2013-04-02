@@ -5,6 +5,9 @@
    unevaluatable components. */
 #include "sli.h"
 #include "enforce_crash.hpp"
+#include "timers.hpp"
+
+extern FILE *bubble_plot_log;
 
 #ifndef NDEBUG
 static bool debug_eem = false;
@@ -28,6 +31,7 @@ happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 				     ThreadAbstracter &abs,
 				     int &next_hb_id)
 {
+	fprintf(bubble_plot_log, "%f: start happensBeforeMapT() constructor\n", now());
 	for (auto it = trueHb.begin(); it != trueHb.end(); it++) {
 		auto hb = *it;
 		const MemoryAccessIdentifier &beforeMai(hb->before);
@@ -72,6 +76,7 @@ happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 			}
 		}
 	}
+	fprintf(bubble_plot_log, "%f: stop happensBeforeMapT() constructor\n", now());
 }
 
 typedef Instruction<ThreadCfgLabel> *instr_t;
@@ -222,7 +227,7 @@ evaluatable(IRExpr *what, const std::set<input_expression> &avail)
 class reorder_bbdd_cond : public Named {
 	reorder_bbdd_cond()
 		: rank(),
-		  cond((IRExpr *)0xf001),
+		  cond((IRExpr *)0xf001b),
 		  evaluatable((bool)97)
 	{}
 	char *mkName() const {
@@ -407,10 +412,12 @@ public:
 		}
 	}
 	void visit(HeapVisitor &hv) {
-		cond.reallyVisit(hv);
-		hv(trueBranch);
-		hv(falseBranch);
-		hv(equiv_bbdd);
+		if (!isLeaf) {
+			cond.reallyVisit(hv);
+			hv(trueBranch);
+			hv(falseBranch);
+			hv(equiv_bbdd);
+		}
 	}
 	NAMED_CLASS
 };
@@ -743,7 +750,7 @@ reorder_bbdd::from_bbdd(bbdd *what,
 	if (what->isLeaf()) {
 		return reorder_bbdd::Leaf(what->leaf());
 	}
-	auto it_did_insert = conv_memo.insert(what, (reorder_bbdd *)0xf001);
+	auto it_did_insert = conv_memo.insert(what, (reorder_bbdd *)0xf001a);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -790,7 +797,7 @@ availCondition(const reorder_bbdd *what,
 	if (!what->cond.evaluatable) {
 		return reorder_bbdd::Leaf(true);
 	}
-	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001);
+	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001c);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -826,7 +833,7 @@ unavailCondition(const reorder_bbdd *what,
 	if (!what->cond.evaluatable) {
 		return what;
 	}
-	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001);
+	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001d);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -981,6 +988,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		hbMap.prettyPrint(stdout);
 	}
 
+	fprintf(bubble_plot_log, "%f: start determine input availability\n", now());
 	/* Count the predecessors for each instruction, so that we
 	 * know when it's safe to process it. */
 	std::map<instr_t, unsigned> pendingPredecessors;
@@ -1113,6 +1121,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	fprintf(bubble_plot_log, "%f: stop determine input availability\n", now());
+
 	/* Now figure out what side condition we want to check at
 	   every instruction.  For each node, we take the condition at
 	   the start of the node and split it into a component which
@@ -1173,6 +1183,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	fprintf(bubble_plot_log, "%f: start place side conditions\n", now());
 	std::set<instr_t> deadStates;
 	while (!pendingInstrs.empty()) {
 		auto i = pendingInstrs.back();
@@ -1182,7 +1193,6 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 
 		if (debug_eem || debug_eem_schedule) {
 			printf("Consider %s\n", i->rip.name());
-			dbg_break("hello");
 		}
 
 		/* At the start of the instruction, we have to check
@@ -1588,6 +1598,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			}
 		}
 	}
+	fprintf(bubble_plot_log, "%f: stop place side conditions\n", now());
 
 	if (deadStates.empty()) {
 		bool failed = false;
@@ -1603,6 +1614,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	fprintf(bubble_plot_log, "%f: start simplify plan\n", now());		
 	/* Now deal with the dead states.  These are states which we
 	   can definitely never reach due to the side conditions being
 	   provably false, so go and kill them all off. */
@@ -1712,6 +1724,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		deadStates = newDead;
 	}
+	fprintf(bubble_plot_log, "%f: stop simplify plan\n", now());		
 }
 
 bbdd *

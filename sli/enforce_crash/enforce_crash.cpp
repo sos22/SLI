@@ -18,6 +18,8 @@
 #include "visitor.hpp"
 #include "timers.hpp"
 
+extern FILE *bubble_plot_log;
+
 #ifndef NDEBUG
 static bool debug_declobber_instructions = false;
 static bool debug_expr_slice = false;
@@ -909,10 +911,13 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		exit(1);
 	}
 
+	fprintf(bubble_plot_log, "%f: start slice by hb\n", now());
 	sliced_expr sliced_by_hb(slice_by_hb(&summary->scopes->bools, requirement));
+	fprintf(bubble_plot_log, "%f: stop slice by hb\n", now());
 	printf("Sliced requirement:\n");
 	sliced_by_hb.prettyPrint(stdout);
 
+	fprintf(bubble_plot_log, "%f: start heuristic simplify\n", now());
 	{
 		std::map<bbdd *, bbdd *> memo;
 		for (auto it = sliced_by_hb.begin();
@@ -928,6 +933,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 			}
 		}
 	}
+	fprintf(bubble_plot_log, "%f: stop heuristic simplify\n", now());
 
 	printf("After simplifying down:\n");
 	sliced_by_hb.prettyPrint(stdout);
@@ -1359,7 +1365,7 @@ buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 	std::set<patchStrategy> visited;
 	std::priority_queue<patchStrategy> pses;
 	pses.push(initPs);
-	while (!pses.empty()) {
+	while (!TIMEOUT && !pses.empty()) {
 		patchStrategy next(pses.top());
 		pses.pop();
 		if (!visited.insert(next).second)
@@ -1376,6 +1382,9 @@ buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 					ced.interpretInstrs.erase(*it + x);
 			return;
 		}
+	}
+	if (TIMEOUT) {
+		return;
 	}
 	errx(1, "Cannot solve patch problem");
 }

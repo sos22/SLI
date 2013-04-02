@@ -7,18 +7,6 @@
 #include "maybe.hpp"
 #include "visitor.hpp"
 
-static void
-loadCrashEnforcementData(SMScopes *scopes, crashEnforcementData &ced, AddressSpace *as, int fd)
-{
-	char *buf = readfile(fd);
-	const char *suffix;
-	if (!ced.parse(scopes, as, buf, &suffix))
-		errx(1, "cannot parse crash enforcement data");
-	if (*suffix)
-		errx(1, "junk after crash enforcement data: %s", suffix);
-	free(buf);
-}
-
 class CfgRelabeller {
 	int next_label;
 public:
@@ -68,7 +56,7 @@ stack_validation_table(Oracle *oracle, FILE *f, const VexRip &vr)
 
 static void
 compute_entry_point_list(Oracle *oracle,
-			 crashEnforcementData &ced,
+			 const crashEnforcementData &ced,
 			 FILE *f,
 			 const CfgRelabeller &cfgLabels,
 			 const slotMapT &slotMap,
@@ -575,7 +563,7 @@ getRegisterIdx(unsigned vex_offset)
 }
 
 static void
-dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller,
+dump_annotated_cfg(const crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller,
 		   const slotMapT &slots, const char *ident)
 {
 	{
@@ -636,8 +624,9 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 
 		struct cfg_annotation_summary summary;
 		memset(&summary, 0, sizeof(summary));
-		if (ced.exprStashPoints.count(oldLabel)) {
-			const std::set<input_expression> &toStash(ced.exprStashPoints[oldLabel]);
+		auto esp_it = ced.exprStashPoints.find(oldLabel);
+		if (esp_it != ced.exprStashPoints.end()) {
+			const std::set<input_expression> &toStash(esp_it->second);
 			fprintf(f, "static const struct cfg_instr_stash instr_%d_stash[] = {\n", newLabel);
 			for (auto it2 = toStash.begin(); it2 != toStash.end(); it2++) {
 				if ( it2->tag == input_expression::inp_register ) {
@@ -670,8 +659,9 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 			fprintf(f, "};\n");
 			summary.have_stash = true;
 		}
-		if (ced.happensBeforePoints.count(oldLabel)) {
-			const std::set<happensBeforeEdge *> &hbEdges(ced.happensBeforePoints[oldLabel]);
+		auto hbp_it = ced.happensBeforePoints.find(oldLabel);
+		if (hbp_it != ced.happensBeforePoints.end()) {
+			const std::set<happensBeforeEdge *> &hbEdges(hbp_it->second);
 			std::set<happensBeforeEdge *> rxMsg;
 			std::set<happensBeforeEdge *> txMsg;
 			for (auto it2 = hbEdges.begin(); it2 != hbEdges.end(); it2++) {
@@ -780,10 +770,7 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 	/* Now dump out the actual CFG table. */
 	fprintf(f, "static struct cfg_instr %s[] = {\n", ident);
 	for (auto it = summaries.begin(); it != summaries.end(); it++) {
-		if (it == summaries.begin())
-			fprintf(f, "    [%d] = {\n", it->first);
-		else
-			fprintf(f, "    }, [%d] = {\n", it->first);
+		fprintf(f, "    [%d] = {\n", it->first);
 		fprintf(f, "        .rip = 0x%lx,\n", it->second.rip);
 		add_simple_array(f, "        ", "content", "content", "content_sz", it->first);
 		add_simple_array(f, "        ", "successors", "successors", "nr_successors", it->first);
@@ -821,8 +808,9 @@ dump_annotated_cfg(crashEnforcementData &ced, FILE *f, CfgRelabeller &relabeller
 		else
 			fprintf(f, "        .after_control_flow = NULL,\n");
 		fprintf(f, "        .id = \"%s\",\n", it->second.id);
+		fprintf(f, "    },\n");
 	}
-	fprintf(f, "    }\n};\n");
+	fprintf(f, "};\n");
 }
 
 static int
@@ -863,17 +851,8 @@ highest_msg_id(const crashEnforcementData &ced)
 }
 
 int
-ced_to_cep(const char *ced_path, MachineState *ms, const char *output, const char *binary,
-	   Oracle *oracle)
+ced_to_cep(const crashEnforcementData &ced, const char *output, const char *binary, Oracle *oracle)
 {
-	int fd = open(ced_path, O_RDONLY);
-	if (fd < 0)
-		err(1, "open(%s)", ced_path);
-	SMScopes scopes;
-	crashEnforcementData ced;
-	loadCrashEnforcementData(&scopes, ced, ms->addressSpace, fd);
-	close(fd);
-
 	FILE *f = fopen(output, "w");
 	CfgRelabeller relabeller;
 

@@ -293,8 +293,8 @@ public:
 
 	slotMapT() { }
 
-	slotMapT(std::map<ThreadCfgLabel, std::set<input_expression> > &neededExpressions,
-		 std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore)
+	slotMapT(const std::map<ThreadCfgLabel, std::set<input_expression> > &neededExpressions,
+		 const std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore)
 	{
 		simulationSlotT next_slot(1);
 		/* Allocate slots for expressions which we know we're
@@ -313,10 +313,8 @@ public:
 		for (auto it = happensBefore.begin();
 		     it != happensBefore.end();
 		     it++) {
-			std::set<happensBeforeEdge *> &s(it->second);
-			for (std::set<happensBeforeEdge *>::iterator it2 = s.begin();
-			     it2 != s.end();
-			     it2++) {
+			const std::set<happensBeforeEdge *> &s(it->second);
+			for (auto it2 = s.begin(); it2 != s.end(); it2++) {
 				happensBeforeEdge *hb = *it2;
 				for (auto it = hb->content.begin(); !it.finished(); it.advance()) {
 					assert(count(it.get()));
@@ -558,7 +556,7 @@ crashEnforcementData enforceCrashForMachine(const SummaryId &summaryId,
 					    VexPtr<Oracle> &oracle,
 					    ThreadAbstracter &abs,
 					    int &next_hb_id);
-int ced_to_cep(const char *ced_path, MachineState *ms, const char *output, const char *binary,
+int ced_to_cep(const crashEnforcementData &, const char *output, const char *binary,
 	       Oracle *oracle);
 
 #endif /* !enforceCrash_hpp__ */
