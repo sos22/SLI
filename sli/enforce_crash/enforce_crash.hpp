@@ -594,5 +594,7 @@ crashEnforcementData enforceCrashForMachine(const SummaryId &summaryId,
 					    VexPtr<Oracle> &oracle,
 					    ThreadAbstracter &abs,
 					    int &next_hb_id);
+int ced_to_cep(const char *ced_path, MachineState *ms, const char *output, const char *binary,
+	       Oracle *oracle);
 
 #endif /* !enforceCrash_hpp__ */
