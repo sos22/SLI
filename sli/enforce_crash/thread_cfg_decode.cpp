@@ -7,18 +7,6 @@ ThreadAbstracter::instr_iterator::get() const
 	return cfg.findInstr(underlying.get());
 }
 
-predecessorMapT::predecessorMapT(CrashCfg &cfg)
-{
-	for (auto it = cfg.begin(); !it.finished(); it.advance()) {
-		auto v = it.instr();
-		if (!count(v))
-			(*this)[v];
-		for (auto it2 = v->successors.begin(); it2 != v->successors.end(); it2++)
-			if (it2->instr)
-				(*this)[it2->instr].insert(v);
-	}
-}
-
 void
 happensBeforeEdge::prettyPrint(FILE *f) const
 {

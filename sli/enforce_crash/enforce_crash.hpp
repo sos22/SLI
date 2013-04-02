@@ -83,15 +83,6 @@ public:
 	void print(FILE *f) const;
 };
 
-/* Map from instructions to instructions which happen immediately
-   before them, including those ordered by happens-before
-   relationships. */
-class predecessorMapT : public instrToInstrSetMap {
-public:
-	predecessorMapT() {}
-	predecessorMapT(CrashCfg &cfg);
-};
-
 /* An encoding of the happens-before edges in a DNF clause into a map
    over Instructions. */
 class happensAfterMapT {
@@ -480,7 +471,6 @@ public:
 	crashEnforcementRoots roots;
 	CrashCfg crashCfg;
 	happensAfterMapT happensBefore;
-	predecessorMapT predecessorMap;
 	expressionStashMapT exprStashPoints;
 	happensBeforeMapT happensBeforePoints;
 	expressionEvalMapT expressionEvalPoints;
@@ -503,7 +493,6 @@ public:
 		: roots(_roots, abs),
 		  crashCfg(roots, summaryId, summary, as, false, abs),
 		  happensBefore(summaryId, trueHb, falseHb, abs, crashCfg, mai),
-		  predecessorMap(crashCfg),
 		  exprStashPoints(summaryId, neededExpressions, abs, roots),
 		  happensBeforePoints(summaryId, mai, trueHb, falseHb, crashCfg, abs, next_hb_id),
 		  expressionEvalPoints(scope, crashCfg, roots, exprStashPoints,
