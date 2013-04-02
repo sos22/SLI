@@ -1224,11 +1224,17 @@ struct patchStrategy {
 	unsigned size() const {
 		return MustInterpret.size() + Cont.size();
 	}
+	class priorityOrder {
+	public:
+		bool operator ()(const patchStrategy &a, const patchStrategy &b) const {
+			if (a.size() > b.size())
+				return true;
+			if (a.size() < b.size())
+				return false;
+			return a < b;
+		}
+	};
 	bool operator<(const patchStrategy &o) const {
-		if (size() > o.size())
-			return true;
-		if (size() < o.size())
-			return false;
 		if (MustInterpret < o.MustInterpret)
 			return true;
 		if (MustInterpret > o.MustInterpret)
@@ -1262,10 +1268,12 @@ struct patchStrategy {
 	}
 };
 
+typedef std::priority_queue<patchStrategy, std::vector<patchStrategy>, patchStrategy::priorityOrder> patchQueueT;
+
 static bool
 patchSearch(Oracle *oracle,
 	    const patchStrategy &input,
-	    std::priority_queue<patchStrategy> &thingsToTry)
+	    patchQueueT &thingsToTry)
 {
 	if (input.MustInterpret.empty())
 		return true;
@@ -1363,7 +1371,7 @@ buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 	}
 
 	std::set<patchStrategy> visited;
-	std::priority_queue<patchStrategy> pses;
+	patchQueueT pses;
 	pses.push(initPs);
 	while (!TIMEOUT && !pses.empty()) {
 		patchStrategy next(pses.top());
