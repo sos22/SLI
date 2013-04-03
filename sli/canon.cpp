@@ -370,7 +370,8 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		probeOpts = probeOpts.enableignoreSideEffects();
 		storeOpts = storeOpts.enableassumeNoInterferingStores();
 	}
-	cs->loadMachine = optimiseStateMachine(
+	StateMachine *tmpMachine;
+	tmpMachine = optimiseStateMachine(
 		cs->scopes,
 		mai,
 		cs->loadMachine,
@@ -378,7 +379,11 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		oracle,
 		true,
 		token);
-	cs->storeMachine = optimiseStateMachine(
+	/* Prevent stupid bloody miscompilation */
+	asm volatile ("");
+	cs->loadMachine = tmpMachine;
+
+	tmpMachine = optimiseStateMachine(
 		cs->scopes,
 		mai,
 		cs->storeMachine,
@@ -386,6 +391,9 @@ optimise_crash_summary(VexPtr<CrashSummary, &ir_heap> cs,
 		oracle,
 		true,
 		token);
+	asm volatile ("");
+	cs->storeMachine = tmpMachine;
+
 	cs->crashCondition = bbdd::assume(&cs->scopes->bools,
 					  cs->crashCondition,
 					  cs->inferredAssumption);
