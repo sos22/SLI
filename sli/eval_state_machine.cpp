@@ -22,8 +22,8 @@ static bool debug_survival_constraint = false;
 static bool debug_cross_product = false;
 #endif
 
-extern FILE *
-bubble_plot2_log;
+extern FILE *bubble_plot2_log;
+extern const char *__warning_tag;
 
 /* All of the state needed to evaluate a single pure IRExpr. */
 /* Note that this is not GCed, but contains bare pointers to GCed
@@ -1585,7 +1585,7 @@ enumEvalPaths(SMScopes *scopes,
 	std::map<const StateMachineState *, int> labels;
 	double start;
 	static FILE *lf;
-	long start_size = scopes->bools.intern.size() + scopes->smrs.intern.size() + scopes->exprs.intern.size();
+	long start_size = scopes->bools.nr_ever + scopes->smrs.nr_ever + scopes->exprs.nr_ever;
 	if (!lf) {
 		lf = fopen("symb_times", "w");
 	}
@@ -1651,7 +1651,7 @@ enumEvalPaths(SMScopes *scopes,
 		std::set<StateMachineBifurcate *> controlFlow;
 		std::set<StateMachineSideEffectMemoryAccess *> accesses;
 		std::set<StateMachineSideEffectPhi *> phi;
-		long end_size = scopes->bools.intern.size() + scopes->smrs.intern.size() + scopes->exprs.intern.size();
+		long end_size = scopes->bools.nr_ever + scopes->smrs.nr_ever + scopes->exprs.nr_ever;
 		enumStates(sm->root, &states);
 		enumStates(sm->root, &controlFlow);
 		enumSideEffects(sm->root, accesses);
@@ -1676,16 +1676,17 @@ timeout:
 	std::set<StateMachineBifurcate *> controlFlow;
 	std::set<StateMachineSideEffectMemoryAccess *> accesses;
 	std::set<StateMachineSideEffectPhi *> phi;
-	long end_size = scopes->bools.intern.size() + scopes->smrs.intern.size() + scopes->exprs.intern.size();
+	long end_size = scopes->bools.nr_ever + scopes->smrs.nr_ever + scopes->exprs.nr_ever;
 	enumStates(sm->root, &states);
 	enumStates(sm->root, &controlFlow);
 	enumSideEffects(sm->root, accesses);
 	enumSideEffects(sm->root, phi);
-	fprintf(lf, "time = inf, nr_states = %zd, nr_control_flow = %zd, nr_accesses = %zd, phi = %zd, complex = %zd, new BDDs = %ld\n",
+	fprintf(lf, "time = inf, nr_states = %zd, nr_control_flow = %zd, nr_accesses = %zd, phi = %zd, complex = %zd, new BDDs = %ld (%s)\n",
 		states.size(), controlFlow.size(),
 		accesses.size(), phi.size(),
 		machineComplexity(sm->root),
-		end_size - start_size);
+		end_size - start_size,
+		__warning_tag);
 	fflush(lf);
 	return NULL;
 }

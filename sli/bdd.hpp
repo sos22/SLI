@@ -378,9 +378,7 @@ class bdd_scope {
 			return falseB < o.falseB;
 		}
 	};
-public:
 	std::map<entry, t *> intern;
-private:
 	void normalise(IRExpr *cond, t *&, t *&);
 	t *mkInternal(IRExpr *a, const bdd_rank &r, t *, t *);
 
@@ -389,12 +387,14 @@ private:
 protected:
 	void runGc(HeapVisitor &hv);
 public:
+	long nr_ever;
+
 	t *internBdd(t *);
 	t *node(IRExpr *, const bdd_rank &, t *, t *);
 	bdd_ordering *ordering;
 
 	bdd_scope(bdd_ordering *_ordering)
-		: ordering(_ordering)
+		: nr_ever(0), ordering(_ordering)
 	{}
 };
 

@@ -557,6 +557,15 @@ reorder_bbdd::ifelse(const reorder_bbdd_cond &cond,
 		     const reorder_bbdd *f,
 		     bbdd *equiv_bbdd)
 {
+	/* Avoid angering the OOM killer unnecessarily. */
+	if (cons_memo.size() > 10000000) {
+		if (!_timed_out) {
+			fprintf(stderr, "whoops, too many reorder_bbdds.  Forcing a timeout\n");
+		}
+		_timed_out = true;
+		return t;
+	}
+
 	if (!t->isLeaf && cond == t->cond) {
 		t = t->trueBranch;
 	}

@@ -330,6 +330,9 @@ main(int argc, char *argv[])
 	start_percentage = 0;
 	end_percentage = 100;
 
+	bubble_plot_log = fopen("bubble_data.log", "w");
+	bubble_plot2_log = fopen("bubble_data2.log", "w");
+
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
 		.enableassumePrivateStack()
@@ -395,9 +398,6 @@ main(int argc, char *argv[])
 	printf("Processing instructions %ld to %ld\n", start_instr, end_instr);
 
 	unsigned long cntr = 0;
-
-	bubble_plot_log = fopen("bubble_data.log", "w");
-	bubble_plot2_log = fopen("bubble_data2.log", "w");
 
 	InstructionConsumer ic(start_instr, instructions_to_process, total_instructions, opt);
 	if (use_schedule) {

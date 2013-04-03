@@ -770,6 +770,7 @@ bdd_scope<t>::mkInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
 		it->second = new t(r, cond, a, b);
+		nr_ever++;
 		checkInternSize();
 	}
 	return it->second;

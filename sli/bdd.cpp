@@ -2021,8 +2021,10 @@ exprbdd_scope::cnst(IRExpr *what)
 	auto it_did_insert = leaves.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
-	if (did_insert)
+	if (did_insert) {
 		it->second = new exprbdd(what);
+		nr_ever++;
+	}
 	return it->second;
 }
 
