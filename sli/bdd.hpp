@@ -668,6 +668,25 @@ public:
 	static bbdd *to_bbdd(bbdd::scope *scope, exprbdd *);
 };
 
-IRExpr *quickSimplify(IRExpr *, std::map<IRExpr *, IRExpr *> &memo);
+struct qs_args {
+	/* The expression to simplify */
+	IRExpr *what;
+	/* Mask of bits which might conceivably be interesting. */
+	unsigned long mask;
+	qs_args(IRExpr *_what, unsigned long _mask)
+		: what(_what), mask(_mask)
+	{}
+	explicit qs_args(IRExpr *);
+	bool operator<(const qs_args &o) const {
+		if (mask < o.mask) {
+			return true;
+		} else if (o.mask < mask) {
+			return false;
+		} else {
+			return what < o.what;
+		}
+	}
+};
+IRExpr *quickSimplify(const qs_args &, std::map<qs_args, IRExpr *> &memo);
 
 #endif /* !BDD_HPP__ */

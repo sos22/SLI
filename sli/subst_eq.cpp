@@ -193,7 +193,7 @@ do_rewrite(IRExpr *what, const std::map<IRExpr *, IRExpr *> &rewrites)
 
 void
 addRewritesFor(std::map<IRExpr *, IRExpr *> &rules,
-	       std::map<IRExpr *, IRExpr *> &simplMemo,
+	       std::map<qs_args, IRExpr *> &simplMemo,
 	       IRExpr *expr)
 {
 	assert(isEqConstraint(expr));
@@ -278,7 +278,7 @@ addRewritesFor(std::map<IRExpr *, IRExpr *> &rules,
 		default:
 			abort();
 		}
-		lhs = quickSimplify(lhs, simplMemo);
+		lhs = quickSimplify(qs_args(lhs), simplMemo);
 		assert(j == arg2a->nr_arguments - 1);
 		IRExprConst *arg1c = (IRExprConst *)arg1;
 		IRExprConst *transConst = NULL;
@@ -317,10 +317,10 @@ addRewritesFor(std::map<IRExpr *, IRExpr *> &rules,
 			args[j++] = transConst;
 		}
 		IRExpr *rhs = quickSimplify(
-			IRExpr_Associative_Copy(
-				arg2a->op,
-				j,
-				args),
+			qs_args(IRExpr_Associative_Copy(
+					arg2a->op,
+					j,
+					args)),
 			simplMemo);
 		rules[lhs] = rhs;
 		return;

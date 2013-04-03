@@ -94,7 +94,7 @@ template <typename scopeT, typename bddT> static bddT *
 eq_rewrites(scopeT *scope,
 	    bddT *what,
 	    const std::map<bddT *, std::map<IRExpr *, IRExpr *> > &rewrites,
-	    std::map<IRExpr *, IRExpr *> &simplMemo,
+	    std::map<qs_args, IRExpr *> &simplMemo,
 	    sane_map<bddT *, bddT *> &memo,
 	    std::map<bddT *, int> &labels)
 {
@@ -110,7 +110,7 @@ eq_rewrites(scopeT *scope,
 	auto r_it = rewrites.find(what);
 	assert(r_it != rewrites.end());
 	auto newCond = do_rewrite(what->internal().condition, r_it->second);
-	newCond = quickSimplify(newCond, simplMemo);
+	newCond = quickSimplify(qs_args(newCond), simplMemo);
 	if (newCond->tag == Iex_Const) {
 		if ( ((IRExprConst *)newCond)->Ico.content.U1 ) {
 			if (debug_subst_eq) {
@@ -306,7 +306,7 @@ _subst_eq(scopeT *scope, bddT *what)
 		}
 	}
 
-	std::map<IRExpr *, IRExpr *> simplMemo;
+	std::map<qs_args, IRExpr *> simplMemo;
 
 	std::map<bddT *, std::map<IRExpr *, IRExpr *> > rewriteRules;
 	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
