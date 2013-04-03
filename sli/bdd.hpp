@@ -24,7 +24,7 @@ class bdd_rank {
 	friend class bdd_ordering;
 	long val;
 	struct clsT {
-		enum { cls_entry, cls_hb, cls_norm, cls_badptr} tag;
+		enum { cls_entry, cls_hb, cls_norm } tag;
 		int hb1, hb2;
 		bool operator<(const clsT &o) const {
 			if (tag < o.tag)
@@ -103,14 +103,49 @@ public:
 /* Thing for specifying variable ordering. */
 class bdd_ordering : public GcCallback<&ir_heap> {
 	void runGc(HeapVisitor &hv);
-	std::map<const IRExpr *, bdd_rank> variableRankings;
-	std::map<bdd_rank::clsT, long> nextRanking;
+	sane_map<const IRExpr *, bdd_rank> variableRankings;
+
+	sane_map<bdd_rank::clsT, std::set<long> > alreadyUsed;
 public:
+	class rank_hint {
+		rank_hint() {};
+	public:
+		enum { start, near, end, never } flavour;
+		bdd_rank _near;
+		static rank_hint Start() {
+			rank_hint h;
+			h.flavour = start;
+			return h;
+		}
+		static rank_hint End() {
+			rank_hint h;
+			h.flavour = end;
+			return h;
+		}
+		static rank_hint Never() {
+			rank_hint h;
+			h.flavour = never;
+			return h;
+		}
+		static rank_hint Near(const bdd_rank &__near) {
+			rank_hint h;
+			h.flavour = near;
+			h._near = __near;
+			return h;
+		}
+		template <typename t> static rank_hint Near(t *what) {
+			if (what->isLeaf()) {
+				return Start();
+			} else {
+				return Near(what->internal().rank);
+			}
+		}
+	};
 	template <typename leafT, typename subtreeT> bdd_rank rankVariable(const _bdd<leafT, subtreeT> *a) {
 		assert(!a->isLeaf());
 		return a->internal().rank;
 	}
-	bdd_rank rankVariable(const IRExpr *e);
+	bdd_rank rankVariable(const IRExpr *e, const rank_hint &hint);
 	typedef enum { lt, eq, gt} ordT;
 	template <typename aT, typename bT>
 	ordT operator()(const aT *a, const bT *b) {
@@ -122,27 +157,6 @@ public:
 			return eq;
 		else
 			return gt;
-	}
-	template <typename aT>
-	ordT operator()(const aT *a, const aT *b) {
-		if (a == b)
-			return eq;
-		bdd_rank ra = rankVariable(a);
-		bdd_rank rb = rankVariable(b);
-		if (ra < rb)
-			return lt;
-		else if (ra == rb)
-			return eq;
-		else
-			return gt;
-	}
-	template <typename aT, typename bT>
-	bool before(const aT *a, const bT *b) {
-		return (*this)(a, b) == lt;
-	}
-	template <typename aT, typename bT>
-	bool equal(const aT *a, const bT *b) {
-		return (*this)(a, b) == eq;
 	}
 	void enumVariables(std::vector<IRExpr *> &out) {
 		out.reserve(out.size() + variableRankings.size());
@@ -261,12 +275,14 @@ public:
 			assert(internal().condition->tag != Iex_Mux0X);
 			internal().trueBranch->sanity_check(ordering);
 			internal().falseBranch->sanity_check(ordering);
+			if (!internal().trueBranch->isLeaf()) {
+				assert(internal().rank < internal().trueBranch->internal().rank);
+			}
+			if (!internal().falseBranch->isLeaf()) {
+				assert(internal().rank < internal().falseBranch->internal().rank);
+			}
 			if (ordering) {
-				assert(internal().rank == ordering->rankVariable(internal().condition));
-				if (!internal().trueBranch->isLeaf())
-					assert(ordering->before(internal().condition, internal().trueBranch->internal().condition));
-				if (!internal().falseBranch->isLeaf())
-					assert(ordering->before(internal().condition, internal().falseBranch->internal().condition));
+				assert(internal().rank == ordering->rankVariable(internal().condition, bdd_ordering::rank_hint::Never()));
 			}
 		}
 	}
@@ -499,12 +515,12 @@ private:
 	static IRExpr *mkConst(bool b) {
 		return IRExpr_Const_U1(b);
 	}
-	static bbdd *_var(scope *, IRExpr *a, std::map<IRExpr *, bbdd *> &memo);
+	static bbdd *_var(scope *, IRExpr *a, std::map<IRExpr *, bbdd *> &memo, const bdd_ordering::rank_hint &hint);
 	static bbdd *invert(scope *, bbdd *a, std::map<bbdd *, bbdd *> &memo);
 public:
 	static bbdd *Or(scope *, bbdd *a, bbdd *b);
 	static bbdd *And(scope *, bbdd *a, bbdd *b);
-	static bbdd *var(scope *, IRExpr *a);
+	static bbdd *var(scope *, IRExpr *a, const bdd_ordering::rank_hint &hint);
 	static bbdd *invert(scope *scp, bbdd *a) {
 		std::map<bbdd *, bbdd *> memo;
 		return invert(scp, a, memo);
@@ -640,7 +656,8 @@ private:
 	exprbdd(leafT b)
 		: parentT(b)
 	{}
-	static exprbdd *_var(scope *scope, bbdd::scope *, IRExpr *, std::map<IRExpr *, exprbdd *> &memo);
+	static exprbdd *_var(scope *scope, bbdd::scope *, IRExpr *, std::map<IRExpr *, exprbdd *> &memo,
+			     const bdd_ordering::rank_hint &hint);
 	static IRExpr *to_irexpr(exprbdd *what, std::map<exprbdd *, IRExpr *> &memo);
 	static bbdd *to_bbdd(bbdd::scope *scope, exprbdd *, std::map<exprbdd *, bbdd *> &);
 
@@ -651,7 +668,7 @@ public:
 		return parentT::_parse<scope, parseLeaf>(scp, out, str, suffix);
 	}
 	static IRExpr *to_irexpr(exprbdd *);
-	static exprbdd *var(scope *scope, bbdd::scope *, IRExpr *);
+	static exprbdd *var(scope *scope, bbdd::scope *, IRExpr *, const bdd_ordering::rank_hint &hint);
 	IRType type() const {
 		if (isLeaf())
 			return leaf()->type();

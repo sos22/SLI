@@ -45,7 +45,7 @@ static bbdd *doit(const bbdd *inp, std::vector<relocT> &relocs, state &state)
 		} else {
 			it->second = bbdd::ifelse(
 				&state.scopes->bools,
-				bbdd::var(&state.scopes->bools, inp->internal().condition),
+				bbdd::var(&state.scopes->bools, inp->internal().condition, bdd_ordering::rank_hint::Start()),
 				doit(inp->internal().trueBranch,
 				     relocs,
 				     state),
@@ -68,7 +68,7 @@ static smrbdd *doit(const smrbdd *inp, std::vector<relocT> &relocs, state &state
 		} else {
 			it->second = smrbdd::ifelse(
 				&state.scopes->smrs,
-				bbdd::var(&state.scopes->bools, inp->internal().condition),
+				bbdd::var(&state.scopes->bools, inp->internal().condition, bdd_ordering::rank_hint::Start()),
 				doit(inp->internal().trueBranch,
 				     relocs,
 				     state),
@@ -89,11 +89,12 @@ static exprbdd *doit(const exprbdd *inp, std::vector<relocT> &relocs, state &sta
 		if (inp->isLeaf()) {
 			it->second = exprbdd::var(&state.scopes->exprs,
 						  &state.scopes->bools,
-						  inp->leaf());
+						  inp->leaf(),
+						  bdd_ordering::rank_hint::End());
 		} else {
 			it->second = exprbdd::ifelse(
 				&state.scopes->exprs,
-				bbdd::var(&state.scopes->bools, inp->internal().condition),
+				bbdd::var(&state.scopes->bools, inp->internal().condition, bdd_ordering::rank_hint::Start()),
 				doit(inp->internal().trueBranch,
 				     relocs,
 				     state),

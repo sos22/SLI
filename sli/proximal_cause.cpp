@@ -80,7 +80,7 @@ getProximalCause(SMScopes *scopes,
 				return;
 			}
 			conditionalBranch(
-				bbdd::var(&scopes->bools, e),
+				bbdd::var(&scopes->bools, e, bdd_ordering::rank_hint::End()),
 				new StateMachineTerminal(vr, scopes->smrs.cnst(smr_crash)));
 		}
 		_3(_ &_conditionalBranch,
@@ -139,13 +139,15 @@ getProximalCause(SMScopes *scopes,
 									IRExpr_Binop(
 										Iop_CmpEQ64,
 										x,
-										IRExpr_Const_U64(0)))),
+										IRExpr_Const_U64(0)),
+									bdd_ordering::rank_hint::End())),
 							bbdd::var(
 								&scopes->bools,
 								IRExpr_Binop(
 									Iop_CmpEQ64,
 									x,
-									y))),
+									y),
+								bdd_ordering::rank_hint::End())),
 						scopes->smrs.cnst(smr_crash),
 						scopes->smrs.cnst(smr_survive)));
 			work = new StateMachineSideEffecting(
@@ -155,7 +157,8 @@ getProximalCause(SMScopes *scopes,
 					exprbdd::var(
 						&scopes->exprs,
 						&scopes->bools,
-						IRExpr_Const_U64(CONFIG_LASTFREE_ADDR)),
+						IRExpr_Const_U64(CONFIG_LASTFREE_ADDR),
+						bdd_ordering::rank_hint::End()),
 					mkPendingMai(where),
 					Ity_I64,
 					MemoryTag::last_free()),
@@ -179,7 +182,7 @@ getProximalCause(SMScopes *scopes,
 			prependSideEffect(
 				new StateMachineSideEffectCopy(
 					isp->target,
-					exprbdd::var(&scopes->exprs, &scopes->bools, isp->data)));
+					exprbdd::var(&scopes->exprs, &scopes->bools, isp->data, bdd_ordering::rank_hint::End())));
 			break;
 		}
 		case Ist_PutI:
@@ -191,8 +194,8 @@ getProximalCause(SMScopes *scopes,
 			IRStmtStore *ist = (IRStmtStore *)stmt;
 			StateMachineSideEffectStore *se =
 				new StateMachineSideEffectStore(
-					exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
-					exprbdd::var(&scopes->exprs, &scopes->bools, ist->data),
+					exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr, bdd_ordering::rank_hint::End()),
+					exprbdd::var(&scopes->exprs, &scopes->bools, ist->data, bdd_ordering::rank_hint::End()),
 					mkPendingMai(where),
 					MemoryTag::normal());
 			prependSideEffect(se);
@@ -224,7 +227,7 @@ getProximalCause(SMScopes *scopes,
 					rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
-						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr)),
+						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr, bdd_ordering::rank_hint::End())),
 					work);
 			StateMachineSideEffecting *l6 =
 				new StateMachineSideEffecting(
@@ -236,18 +239,18 @@ getProximalCause(SMScopes *scopes,
 					rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
-						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr)),
+						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr, bdd_ordering::rank_hint::End())),
 					l6);
 			StateMachineBifurcate *l4 =
 				new StateMachineBifurcate(
 					rip,
-					bbdd::var(&scopes->bools, expr_eq(t_expr, cas->expdLo)),
+					bbdd::var(&scopes->bools, expr_eq(t_expr, cas->expdLo), bdd_ordering::rank_hint::End()),
 					l5,
 					l6);
 			StateMachineSideEffectLoad *le =
 				new StateMachineSideEffectLoad(
 					tr,
-					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr, bdd_ordering::rank_hint::End()),
 					mkPendingMai(where),
 					ty,
 					MemoryTag::normal());
@@ -284,7 +287,7 @@ getProximalCause(SMScopes *scopes,
 			StateMachineSideEffectLoad *l =
 				new StateMachineSideEffectLoad(
 					dirty->tmp,
-					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
+					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0], bdd_ordering::rank_hint::End()),
 					mkPendingMai(where),
 					ity,
 					MemoryTag::normal());
@@ -299,7 +302,7 @@ getProximalCause(SMScopes *scopes,
 			   considered to be a surviving run. */
 			IRStmtExit *ise = (IRStmtExit *)stmt;
 			conditionalBranch(
-				bbdd::var(&scopes->bools, ise->guard),
+				bbdd::var(&scopes->bools, ise->guard, bdd_ordering::rank_hint::Start()),
 				new StateMachineTerminal(rip, scopes->smrs.cnst(smr_survive)));
 			break;
 		}

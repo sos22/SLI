@@ -432,7 +432,7 @@ main(int argc, char *argv[])
 }
 
 double bdd_ordering_badness(bbdd::scope *scope, bbdd *what);
-int
+void
 ___force_linkage()
 {
 	bdd_ordering_badness(NULL, NULL);

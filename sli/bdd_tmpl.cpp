@@ -395,7 +395,7 @@ _bdd<leafT, subtreeT>::_parse(scopeT *scope,
 		subtreeT *f = _parse<scopeT, parseLeaf>(scope, str, suffix, labels);
 		if (!f)
 			return NULL;
-		res = scope->node(a, scope->ordering->rankVariable(a), t, f);
+		res = scope->node(a, scope->ordering->rankVariable(a, bdd_ordering::rank_hint::Never()), t, f);
 	} else {
 		return NULL;
 	}
@@ -1352,7 +1352,7 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 		const std::vector<subtreeT **> &dests(it->second);
 		const zipInternalT &relocWhere(key.target());
 
-		assert(key.rank == scope->ordering->rankVariable(key.expr));
+		assert(key.rank == scope->ordering->rankVariable(key.expr, bdd_ordering::rank_hint::Never()));
 		assert(!relocWhere.isLeaf());
 
 #ifndef NDEBUG

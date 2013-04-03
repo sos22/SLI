@@ -89,7 +89,8 @@ ConvertExprTrans::transformIex(IRExprGet *iex)
 			StateMachineSideEffectPhi::input(
 				*it2,
 				exprbdd::var(&scopes->exprs, &scopes->bools,
-					     IRExpr_Get(*it2, iex->ty))));
+					     IRExpr_Get(*it2, iex->ty),
+					     bdd_ordering::rank_hint::Start())));
 	}
 	threadAndRegister newReg(allocTemporary(iex->reg, correspondence, reaching));
 	note_type(newReg, iex->ty);
@@ -292,7 +293,8 @@ _convertSideEffect(SMScopes *scopes,
 		} else {
 			val = exprbdd::var(&scopes->exprs,
 					   &scopes->bools,
-					   IRExpr_Get(reg, smep->ty));
+					   IRExpr_Get(reg, smep->ty),
+					   bdd_ordering::rank_hint::Start());
 		}
 		inputs.push_back(StateMachineSideEffectPhi::input(reg, val));
 	}
@@ -480,7 +482,8 @@ fixupPhiTypes(SMScopes *scopes, StateMachine *inp, const std::map<threadAndRegis
 						&scopes->bools,
 						IRExprGet::mk(
 							it3->reg,
-							it2->second))));
+							it2->second),
+						bdd_ordering::rank_hint::Near(it3->val))));
 		}
 		s->sideEffect =
 			new StateMachineSideEffectPhi(

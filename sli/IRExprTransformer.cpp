@@ -105,7 +105,7 @@ IRExprTransformer::transform_bbdd(bbdd::scope *scope, bbdd *what, std::map<bbdd 
 		} else {
 			res = bbdd::ifelse(
 				scope,
-				bbdd::var(scope, e),
+				bbdd::var(scope, e, bdd_ordering::rank_hint::Near(what)),
 				t,
 				f);
 		}
@@ -138,7 +138,7 @@ IRExprTransformer::transform_smrbdd(bbdd::scope *bscope, smrbdd::scope *scope, s
 		} else {
 			res = smrbdd::ifelse(
 				scope,
-				bbdd::var(bscope, e),
+				bbdd::var(bscope, e, bdd_ordering::rank_hint::Near(what)),
 				t,
 				f);
 		}
@@ -158,7 +158,7 @@ IRExprTransformer::transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope,
 		if (what->isLeaf()) {
 			IRExpr *newLeaf = doit(what->leaf());
 			if (what->leaf() != newLeaf)
-				res = exprbdd::var(scope, bscope, newLeaf);
+				res = exprbdd::var(scope, bscope, newLeaf, bdd_ordering::rank_hint::End());
 		} else {
 			IRExpr *e = doit(what->internal().condition);
 			exprbdd *t = transform_exprbdd(bscope, scope, what->internal().trueBranch, memo);
@@ -175,7 +175,7 @@ IRExprTransformer::transform_exprbdd(bbdd::scope *bscope, exprbdd::scope *scope,
 				} else {
 					res = exprbdd::ifelse(
 						scope,
-						bbdd::var(bscope, e),
+						bbdd::var(bscope, e, bdd_ordering::rank_hint::Near(what)),
 						t,
 						f);
 				}

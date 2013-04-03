@@ -1030,7 +1030,8 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 					new StateMachineSideEffectCopy(
 						otherEffect->reg,
 						exprbdd::var(&scopes->exprs, &scopes->bools,
-							     IRExpr_Get(thisEffect->reg, Ity_I64))),
+							     IRExpr_Get(thisEffect->reg, Ity_I64),
+							     bdd_ordering::rank_hint::Start())),
 					targ->target);
 				return this;
 			} else if (otherEffect->set < thisEffect->set) {

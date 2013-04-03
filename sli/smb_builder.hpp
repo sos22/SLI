@@ -155,7 +155,7 @@ class SMBStatementCopy : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectCopy(
 			lvalue.content->compile(),
-			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, rvalue.content->compile()));
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, rvalue.content->compile(), bdd_ordering::rank_hint::Start()));
 	}
 public:
 	SMBPtr<SMBRegisterReference> lvalue;
@@ -171,8 +171,8 @@ public:
 class SMBStatementStore : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectStore(
-			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
-			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, value.content->compile()),
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile(), bdd_ordering::rank_hint::Start()),
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, value.content->compile(), bdd_ordering::rank_hint::Start()),
 			mkPendingMai(state.where),
 			tag);
 	}
@@ -195,7 +195,7 @@ class SMBStatementLoad : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectLoad(
 			target.content->compile(),
-			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile()),
+			exprbdd::var(&state.scopes->exprs, &state.scopes->bools, addr.content->compile(), bdd_ordering::rank_hint::Start()),
 			mkPendingMai(state.where),
 			Ity_I64,
 			tag);
@@ -219,7 +219,7 @@ public:
 class SMBStatementAssertFalse : public SMBStatement {
 	StateMachineSideEffect *compile(SMBCompilerState &state) const {
 		return new StateMachineSideEffectAssertFalse(
-			bbdd::var(&state.scopes->bools, expr.content->compile()),
+			bbdd::var(&state.scopes->bools, expr.content->compile(), bdd_ordering::rank_hint::Start()),
 			realAssertion);
 	}
 public:
@@ -361,7 +361,7 @@ class SMBStateIf : public SMBState {
 		StateMachineBifurcate *smb =
 			new StateMachineBifurcate(
 				state.vr,
-				bbdd::var(&state.scopes->bools, cond.content->compile()),
+				bbdd::var(&state.scopes->bools, cond.content->compile(), bdd_ordering::rank_hint::Start()),
 				NULL,
 				NULL);
 		relocs2.push_back(reloc2(trueTarg.content, &smb->trueTarget));

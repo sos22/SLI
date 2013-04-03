@@ -1789,7 +1789,7 @@ quickSimplify(const qs_args &a, std::map<qs_args, IRExpr *> &memo)
 }
 
 bbdd *
-bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo)
+bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo, const bdd_ordering::rank_hint &hint)
 {
 	if (TIMEOUT)
 		return scope->cnst(true);
@@ -1801,20 +1801,20 @@ bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo)
 	if (a->tag == Iex_Mux0X) {
 		it->second = ifelse(
 			scope,
-			_var(scope, ((IRExprMux0X *)a)->cond, memo),
-			_var(scope, ((IRExprMux0X *)a)->exprX, memo),
-			_var(scope, ((IRExprMux0X *)a)->expr0, memo));
+			_var(scope, ((IRExprMux0X *)a)->cond, memo, hint),
+			_var(scope, ((IRExprMux0X *)a)->exprX, memo, hint),
+			_var(scope, ((IRExprMux0X *)a)->expr0, memo, hint));
 	} else {
 		it->second = scope->node(
 			a,
-			scope->ordering->rankVariable(a),
+			scope->ordering->rankVariable(a, hint),
 			scope->cnst(true),
 			scope->cnst(false));
 	}
 	return it->second;
 }
 bbdd *
-bbdd::var(scope *scope, IRExpr *a)
+bbdd::var(scope *scope, IRExpr *a, const bdd_ordering::rank_hint &hint)
 {
 	std::map<qs_args, IRExpr *> qsMemo;
 	std::map<IRExpr *, IRExpr *> muxMemo;
@@ -1827,7 +1827,8 @@ bbdd::var(scope *scope, IRExpr *a)
 					muxMemo),
 				1),
 			qsMemo),
-		vMemo);
+		vMemo,
+		hint);
 }
 
 class binary_zip_internal {
@@ -1966,8 +1967,14 @@ bbdd::invert(scope *scope, bbdd *a, std::map<bbdd *, bbdd *> &memo)
 }
 
 bdd_rank
-bdd_ordering::rankVariable(const IRExpr *a)
+bdd_ordering::rankVariable(const IRExpr *a, const rank_hint &hint)
 {
+	auto it_did_insert = variableRankings.insert(a, bdd_rank());
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
 	bdd_rank::clsT cls;
 	if (a->tag == Iex_EntryPoint || a->tag == Iex_ControlFlow) {
 		cls.tag = bdd_rank::clsT::cls_entry;
@@ -1975,34 +1982,70 @@ bdd_ordering::rankVariable(const IRExpr *a)
 		cls.tag = bdd_rank::clsT::cls_hb;
 		cls.hb1 = -((IRExprHappensBefore *)a)->before.id;
 		cls.hb2 = ((IRExprHappensBefore *)a)->after.id;
-	} else if (a->tag == Iex_Unop && ((IRExprUnop *)a)->op == Iop_BadPtr) {
-		cls.tag = bdd_rank::clsT::cls_badptr;
 	} else {
 		cls.tag = bdd_rank::clsT::cls_norm;
 	}
-	long &rankNr(nextRanking[cls]);
-	bdd_rank rank;
-	rank.cls = cls;
-	rank.val = rankNr;
-	auto it_did_insert = variableRankings.insert(std::pair<const IRExpr *, bdd_rank>(a, rank));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert) {
-		rankNr--;
+	std::set<long> &taken(alreadyUsed[cls]);
+	long rankNr;
+	if (taken.empty()) {
+		rankNr = 0;
+		taken.insert(0);
+	} else {
+		switch (hint.flavour) {
+		case rank_hint::start:
+			rankNr = *taken.begin() - 1000;
+			taken.insert(taken.begin(), rankNr);
+			break;
+		case rank_hint::end: {
+			auto it2 = taken.end();
+			it2--;
+			rankNr = *it2 + 1000;
+			taken.insert(taken.end(), rankNr);
+			break;
+		}
+		case rank_hint::never:
+			abort();
+		case rank_hint::near: {
+			if (hint._near.cls == cls) {
+				auto it2 = taken.find(hint._near.val);
+				while (1) {
+					auto next = it2;
+					next++;
+					if (next == taken.end() || *next != *it2 + 1) {
+						rankNr = *it2 + 1;
+						taken.insert(next, rankNr);
+						break;
+					}
+					it2 = next;
+				}
+			} else {
+				auto it2 = taken.end();
+				it2--;
+				rankNr = *it2 + 1000;
+				taken.insert(taken.end(), rankNr);
+			}
+			break;
+		}
+		}
 	}
-	return it->second;
+	bdd_rank r;
+	r.cls = cls;
+	r.val = rankNr;
+	it->second = r;
+	return r;
 }
 
 void
 bdd_ordering::runGc(HeapVisitor &hv)
 {
-	std::map<const IRExpr *, bdd_rank> newRankings;
+	sane_map<const IRExpr *, bdd_rank> newRankings;
 	for (auto it = variableRankings.begin();
 	     it != variableRankings.end();
 	     it++) {
 		const IRExpr *a = hv.visited(it->first);
-		if (a)
+		if (a) {
 			newRankings[a] = it->second;
+		}
 	}
 	variableRankings = newRankings;
 }
@@ -2021,9 +2064,6 @@ bdd_rank::prettyPrint(FILE *f) const
 		return;
 	case clsT::cls_norm:
 		fprintf(f, "r%ld", val);
-		return;
-	case clsT::cls_badptr:
-		fprintf(f, "bp%ld", val);
 		return;
 	}
 	abort();
@@ -2047,10 +2087,6 @@ bdd_rank::parse(const char *buf, const char **end)
 	} else if (parseThisChar('r', buf, &buf) &&
 		   parseDecimalLong(&val, buf, end)) {
 		cls.tag = clsT::cls_norm;
-		return true;
-	} else if (parseThisString("bp", buf, &buf) &&
-		   parseDecimalLong(&val, buf, end)) {
-		cls.tag = clsT::cls_badptr;
 		return true;
 	} else {
 		return false;
@@ -2091,9 +2127,7 @@ bdd_ordering::parse(const char *buf, const char **end)
 		    !parseThisChar('\n', buf, &buf))
 			break;
 		variableRankings[key] = rank;
-		if (nextRanking[rank.cls] >= rank.val) {
-			nextRanking[rank.cls] = rank.val - 1;
-		}
+		alreadyUsed[rank.cls].insert(rank.val);
 	}
 	*end = buf;
 	return true;
@@ -2129,7 +2163,9 @@ exprbdd::sanity_check(bdd_ordering *ordering) const
 }
 
 exprbdd *
-exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what, std::map<IRExpr *, exprbdd *> &memo)
+exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what,
+	      std::map<IRExpr *, exprbdd *> &memo,
+	      const bdd_ordering::rank_hint &hint)
 {
 	if (TIMEOUT)
 		return NULL;
@@ -2143,13 +2179,13 @@ exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what, std::map
 	if (what->tag == Iex_Mux0X)
 		it->second = ifelse(
 			scope,
-			bbdd::var(bscope, ((IRExprMux0X *)what)->cond),
-			_var(scope, bscope, ((IRExprMux0X *)what)->exprX, memo),
-			_var(scope, bscope, ((IRExprMux0X *)what)->expr0, memo));
+			bbdd::var(bscope, ((IRExprMux0X *)what)->cond, hint),
+			_var(scope, bscope, ((IRExprMux0X *)what)->exprX, memo, hint),
+			_var(scope, bscope, ((IRExprMux0X *)what)->expr0, memo, hint));
 	else if (what->type() == Ity_I1)
 		it->second = ifelse(
 			scope,
-			bbdd::var(bscope, what),
+			bbdd::var(bscope, what, hint),
 			scope->cnst(IRExpr_Const_U1(true)),
 			scope->cnst(IRExpr_Const_U1(false)));
 	else
@@ -2158,7 +2194,8 @@ exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what, std::map
 }
 
 exprbdd *
-exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
+exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what,
+	     const bdd_ordering::rank_hint &hint)
 {
 	unsigned long mask = fullMask(what->type());
 	std::map<qs_args, IRExpr *> qsMemo;
@@ -2174,7 +2211,8 @@ exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
 					    muxMemo),
 				    mask),
 			    qsMemo),
-		    vMemo);
+		    vMemo,
+		    hint);
 }
 
 IRExpr *
@@ -2263,7 +2301,8 @@ public:
 		return exprbdd::var(
 			scope,
 			bscope,
-			IRExpr_Unop(op, what->leaf()));
+			IRExpr_Unop(op, what->leaf()),
+			bdd_ordering::rank_hint::End());
 	}
 	IRExpr *condition() const {
 		return what->internal().condition;
@@ -2309,7 +2348,8 @@ public:
 		return a->isLeaf() && b->isLeaf();
 	}
 	exprbdd *leaf(exprbdd::scope *scope, bbdd::scope *bscope) const {
-		return exprbdd::var(scope, bscope, IRExpr_Binop(op, a->leaf(), b->leaf()));
+		return exprbdd::var(scope, bscope, IRExpr_Binop(op, a->leaf(), b->leaf()),
+				    bdd_ordering::rank_hint::End());
 	}
 	IRExpr *condition() const {
 		if (a->isLeaf()) {
@@ -2394,7 +2434,8 @@ public:
 		return exprbdd::var(
 			scope,
 			bscope,
-			IRExpr_Load(ty, what->leaf()));
+			IRExpr_Load(ty, what->leaf()),
+			bdd_ordering::rank_hint::End());
 	}
 	IRExpr *condition() const {
 		return what->internal().condition;
@@ -2443,7 +2484,7 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr, std::map<exprbdd *, bbdd *> 
 				it->second =
 					scope->node(
 						l,
-						scope->ordering->rankVariable(l),
+						scope->ordering->rankVariable(l, bdd_ordering::rank_hint::End()),
 						scope->cnst(true),
 						scope->cnst(false));
 			}

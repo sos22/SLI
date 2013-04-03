@@ -3353,7 +3353,7 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisa
 		} else {
 			res = treeT::ifelse(
 				scope,
-				bbdd::var(bscope, cond),
+				bbdd::var(bscope, cond, bdd_ordering::rank_hint::Near(bdd->internal().rank)),
 				t,
 				f);
 		}
@@ -3389,7 +3389,7 @@ simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IREx
 		} else if (r == bdd->leaf()) {
 			res = bdd;
 		} else {
-			res = exprbdd::var(scope, bscope, r);
+			res = exprbdd::var(scope, bscope, r, bdd_ordering::rank_hint::Start());
 		}
 	} else {
 		IRExpr *cond = optimiseIRExprFP(bdd->internal().condition, opt);
@@ -3418,7 +3418,7 @@ simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IREx
 			} else {
 				res = exprbdd::ifelse(
 					scope,
-					bbdd::var(bscope, cond),
+					bbdd::var(bscope, cond, bdd_ordering::rank_hint::Near(bdd->internal().rank)),
 					t,
 					f);
 			}

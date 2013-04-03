@@ -139,7 +139,8 @@ public:
 		case Ity_I16:
 			if (rv.val8) {
 				exprbdd *acc = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_8Uto16, rv.val8);
-				exprbdd *mask = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U16(0xff00));
+				exprbdd *mask = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U16(0xff00),
+							     bdd_ordering::rank_hint::End());
 				exprbdd *hi;
 				if (rv.val16) {
 					hi = rv.val16;
@@ -148,7 +149,7 @@ public:
 				} else if (rv.val64) {
 					hi = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_64to16, rv.val64);
 				} else {
-					hi = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg, type));
+					hi = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg, type), bdd_ordering::rank_hint::End());
 				}
 				acc = exprbdd::binop(
 					&scopes->exprs,
@@ -196,7 +197,8 @@ public:
 							exprbdd::var(
 								&scopes->exprs,
 								&scopes->bools,
-								IRExpr_Const_U32(mask))));
+								IRExpr_Const_U32(mask),
+								bdd_ordering::rank_hint::Near(a))));
 				else
 					res = a;
 				mask = ~0xffff;
@@ -207,7 +209,7 @@ public:
 			} else if (rv.val64) {
 				parent = exprbdd::unop(&scopes->exprs, &scopes->bools, Iop_64to32, rv.val64);
 			} else if (res) {
-				parent = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg, Ity_I32));
+				parent = exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg, Ity_I32), bdd_ordering::rank_hint::Start());
 			} else {
 				parent = NULL;
 			}
@@ -223,7 +225,8 @@ public:
 						&scopes->bools,
 						Iop_And32,
 						parent,
-						exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U32(mask))));
+						exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U32(mask),
+							     bdd_ordering::rank_hint::Near(res))));
 			else
 				res = parent;
 			rv.val8 = NULL;
@@ -252,7 +255,7 @@ public:
 							&scopes->bools,
 							Iop_And64,
 							a,
-							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask))));
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask), bdd_ordering::rank_hint::Near(a))));
 				else
 					res = a;
 				mask = ~0xfffful;
@@ -270,7 +273,7 @@ public:
 							&scopes->bools,
 							Iop_And64,
 							a,
-							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask))));
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask), bdd_ordering::rank_hint::Near(a))));
 				else
 					res = a;
 				mask = ~0xfffffffful;
@@ -287,7 +290,7 @@ public:
 							&scopes->bools,
 							Iop_And64,
 							rv.val64,
-							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask))));
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask), bdd_ordering::rank_hint::Near(res))));
 				else
 					res = rv.val64;
 			} else {
@@ -301,8 +304,8 @@ public:
 							&scopes->exprs,
 							&scopes->bools,
 							Iop_And64,
-							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg, Ity_I64)),
-							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask))));
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Get(reg, Ity_I64), bdd_ordering::rank_hint::Near(res)),
+							exprbdd::var(&scopes->exprs, &scopes->bools, IRExpr_Const_U64(mask), bdd_ordering::rank_hint::Near(res))));
 				
 			}
 			/* res might still be NULL.  That's okay; it
@@ -413,7 +416,7 @@ public:
 			break;
 		}
 		set_register(scopes, phi->reg,
-			     exprbdd::var(&scopes->exprs, &scopes->bools, c),
+			     exprbdd::var(&scopes->exprs, &scopes->bools, c, bdd_ordering::rank_hint::End()),
 			     assumption, havePhis, opt);
 		return;
 	}
@@ -479,7 +482,7 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *
 					 falseB);
 	} else {
 		res = bbdd::ifelse(&scopes->bools,
-				   bbdd::var(&scopes->bools, cond),
+				   bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(e)),
 				   trueB,
 				   falseB);
 	}
@@ -492,7 +495,8 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbd
 {
 	if (e->isLeaf())
 		return exprbdd::var(&scopes->exprs, &scopes->bools,
-				    setTemporary(scopes, reg, e->leaf(), opt));
+				    setTemporary(scopes, reg, e->leaf(), opt),
+				    bdd_ordering::rank_hint::End());
 	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(e, (exprbdd *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
@@ -511,7 +515,7 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbd
 					 falseB);
 	} else {
 		res = exprbdd::ifelse(&scopes->exprs,
-				      bbdd::var(&scopes->bools, cond),
+				      bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(e)),
 				      trueB,
 				      falseB);
 	}
@@ -721,7 +725,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, bbdd *what, std::map<bbdd *, bbd
 							f);
 		} else {
 			it->second = bbdd::ifelse(&scopes->bools,
-						  bbdd::var(&scopes->bools, cond),
+						  bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(what)),
 						  t,
 						  f);
 		}
@@ -757,7 +761,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, smrbdd *what, std::map<smrbdd *,
 						       f);
 		} else {
 			it->second = smrbdd::ifelse(&scopes->smrs,
-						    bbdd::var(&scopes->bools, cond),
+						    bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(what)),
 						    t,
 						    f);
 		}
@@ -780,7 +784,8 @@ threadState::specialiseIRExpr(SMScopes *scopes, exprbdd *what, std::map<exprbdd 
 				it->second = exprbdd::var(
 					&scopes->exprs,
 					&scopes->bools,
-					l);
+					l,
+					bdd_ordering::rank_hint::End());
 			}
 		} else {
 			IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
@@ -801,7 +806,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, exprbdd *what, std::map<exprbdd 
 								f);
 			} else {
 				it->second = exprbdd::ifelse(&scopes->exprs,
-							     bbdd::var(&scopes->bools, cond),
+							     bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(what)),
 							     t,
 							     f);
 			}
@@ -1172,7 +1177,8 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				   exprbdd::var(
 					   &scopes->exprs,
 					   &scopes->bools,
-					   g),
+					   g,
+					   bdd_ordering::rank_hint::Start()),
 				   &justPathConstraint,
 				   havePhis,
 				   opt);
@@ -1186,7 +1192,8 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			auto b = bbdd::var(&scopes->bools,
 					   IRExpr_Unop(
 						   Iop_BadPtr,
-						   g));
+						   g),
+					   bdd_ordering::rank_hint::Start());
 			if (b) {
 				assertFalse<paramT>(&scopes->bools, b, opt, result);
 			}
@@ -2436,7 +2443,7 @@ buildCrossProductMachine(SMScopes *scopes,
 				const MemoryAccessIdentifier &storeMai(store_access ? store_access->rip : ((StateMachineSideEffectStartAtomic *)store_effect)->mai);
 				newState = new StateMachineBifurcate(
 					VexRip(),
-					bbdd::var(&scopes->bools, IRExpr_HappensBefore(probeMai, storeMai)),
+					bbdd::var(&scopes->bools, IRExpr_HappensBefore(probeMai, storeMai), bdd_ordering::rank_hint::Start()),
 					nextProbe,
 					nextStore);
 			}
