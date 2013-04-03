@@ -1183,9 +1183,12 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	TimeoutTimer tmr;
+	tmr.timeoutAfterSeconds(60);
+
 	fprintf(bubble_plot_log, "%f: start place side conditions\n", now());
 	std::set<instr_t> deadStates;
-	while (!pendingInstrs.empty()) {
+	while (!TIMEOUT && !pendingInstrs.empty()) {
 		auto i = pendingInstrs.back();
 		pendingInstrs.pop_back();
 		assert(pendingPredecessors.count(i));
@@ -1598,7 +1601,13 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			}
 		}
 	}
+	tmr.cancel();
 	fprintf(bubble_plot_log, "%f: stop place side conditions\n", now());
+
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed place side conditions\n", now());
+		return;
+	}
 
 	if (deadStates.empty()) {
 		bool failed = false;

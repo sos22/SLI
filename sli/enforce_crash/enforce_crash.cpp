@@ -499,6 +499,10 @@ buildCED(const SummaryId &summaryId,
 				    next_hb_id,
 				    summary,
 				    as);
+	if (TIMEOUT) {
+		return false;
+	}
+
 	fprintf(bubble_plot_log, "%f: start simplify plan\n", now());
 	optimiseHBContent(*out);
 	fprintf(bubble_plot_log, "%f: stop simplify plan\n", now());
@@ -963,7 +967,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 
 	fprintf(bubble_plot_log, "%f: stop heuristic simplify\n", now());
 	crashEnforcementData accumulator;
-	for (auto it = sliced_by_hb.begin(); it != sliced_by_hb.end(); it++) {
+	for (auto it = sliced_by_hb.begin(); !TIMEOUT && it != sliced_by_hb.end(); it++) {
 		crashEnforcementData tmp;
 		if (buildCED(summaryId, *it, rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
 			accumulator |= tmp;
