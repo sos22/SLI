@@ -1157,9 +1157,9 @@ buildStoreMachine(SMScopes *scopes,
 	stackedCdf::startStoreConvertToSSA();
 	fprintf(bubble_plot2_log, "%f: start compiling interfering CFG\n", now());
 	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(scopes, sm, ssaCorrespondence));
+	ssaCorrespondence.clear();
 	fprintf(bubble_plot2_log, "%f: stop compiling interfering CFG\n", now());
 	stackedCdf::stopStoreConvertToSSA();
-	ssaCorrespondence.clear();
 	if (!sm_ssa || TIMEOUT) {
 		fprintf(bubble_plot2_log, "%f: failed simplifying interfering CFG\n", now());
 		return NULL;
@@ -1261,11 +1261,6 @@ considerStoreCFG(SMScopes *scopes,
 		return NULL;
 	}
 
-	fprintf(_logfile, "\t\tLocalised probe machine:\n");
-	printStateMachine(probeMachine, _logfile);
-	fprintf(_logfile, "\t\tStore machine:\n");
-	printStateMachine(sm_ssa, _logfile);
-
 	/* Special case: if the only possible interaction between the
 	   probe machine and the store machine is a single load in the
 	   probe machine and a single store in the store machine then
@@ -1313,7 +1308,6 @@ considerStoreCFG(SMScopes *scopes,
 		fprintf(bubble_plot2_log, "%f: stop rederive crashing\n", now());
 	}
 
-#if 0
 	atomicSurvival =
 		writeMachineSuitabilityConstraint(
 			scopes,
@@ -1335,15 +1329,13 @@ considerStoreCFG(SMScopes *scopes,
 		fprintf(bubble_plot2_log, "%f: ic-atomic is false\n", now());
 		return NULL;
 	}
-#endif
-
-	fprintf(_logfile, "\t\tInferred assumption:\n");
-	atomicSurvival->prettyPrint(_logfile);
 
 	VexPtr<bbdd, &ir_heap> crash_constraint;
 	{
 		VexPtr<StateMachine, &ir_heap> dupe_store_machine;
+		fprintf(bubble_plot2_log, "%f: start cross build\n", now());
 		dupe_store_machine = duplicateStateMachine(sm_ssa);
+		fprintf(bubble_plot2_log, "%f: stop cross build\n", now());
 		crash_constraint =
 			crossProductSurvivalConstraint(
 				scopes,
@@ -1359,14 +1351,16 @@ considerStoreCFG(SMScopes *scopes,
 			fprintf(better_log, "%d/%d: crash timed out\n", idx, nrStoreCfgs);
 			return NULL;
 		}
-		crash_constraint = bbdd::invert(&scopes->bools, crash_constraint);
-		if (!crash_constraint || TIMEOUT) {
-			fprintf(better_log, "%d/%d: invert crash timed out\n", idx, nrStoreCfgs);
-			return NULL;
-		}
+	}
+	fprintf(bubble_plot2_log, "%f: start sat check\n", now());
+	crash_constraint = bbdd::invert(&scopes->bools, crash_constraint);
+	if (!crash_constraint || TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: stop sat check\n", now());
+		fprintf(bubble_plot2_log, "%f: failed sat check\n", now());
+		fprintf(better_log, "%d/%d: invert crash timed out\n", idx, nrStoreCfgs);
+		return NULL;
 	}
 
-	fprintf(bubble_plot2_log, "%f: start sat check\n", now());
 	VexPtr<bbdd, &ir_heap> verification_condition;
 	verification_condition =
 		bbdd::And(&scopes->bools, crash_constraint, atomicSurvival);
@@ -1565,7 +1559,9 @@ buildProbeMachine(SMScopes *scopes,
 		return NULL;
 	}
 
+	fprintf(bubble_plot_log, "%f: start GC\n", now());
 	LibVEX_maybe_gc(token);
+	fprintf(bubble_plot_log, "%f: stop GC\n", now());
 
 	sm->sanityCheck(*mai);
 	stackedCdf::startProbeInitialSimplify();
@@ -1582,6 +1578,7 @@ buildProbeMachine(SMScopes *scopes,
 
 	if (TIMEOUT) {
 		fprintf(bubble_plot_log, "%f: failed simplify crashing machine\n", now());
+		return NULL;
 	}
 
 	std::map<threadAndRegister, threadAndRegister> ssaCorrespondence;
@@ -1686,7 +1683,6 @@ probeMachineToSummary(SMScopes *scopes,
 
 		if (TIMEOUT) {
 			fprintf(better_log, "getStoreCFGs timed out\n");
-			fprintf(bubble_plot_log, "%f: stop derive interfering CFGs\n", now());
 			fprintf(bubble_plot_log, "%f: failed derive interfering CFGs\n", now());
 			return false;
 		}
@@ -1770,10 +1766,6 @@ diagnoseCrash(SMScopes *scopes,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(diagnoseCrash);
-
-	fprintf(_logfile, "Probe machine:\n");
-	printStateMachine(probeMachine, _logfile);
-	fprintf(_logfile, "\n");
 
 	AllowableOptimisations probeOpt = optIn;
 	if (CONFIG_W_ISOLATION) {

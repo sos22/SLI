@@ -378,7 +378,9 @@ class bdd_scope {
 			return falseB < o.falseB;
 		}
 	};
+public:
 	std::map<entry, t *> intern;
+private:
 	void normalise(IRExpr *cond, t *&, t *&);
 	t *mkInternal(IRExpr *a, const bdd_rank &r, t *, t *);
 

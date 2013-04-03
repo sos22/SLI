@@ -59,7 +59,7 @@ main(int argc, char *argv[])
 		const char *summary_fname = my_asprintf("%s/%s", summarydir, de->d_name);
 		char *first_line;
 		SMScopes scopes;
-		auto summary = readBugReport(&scopes, summary_fname, &first_line);
+		VexPtr<CrashSummary, &ir_heap> summary(readBugReport(&scopes, summary_fname, &first_line));
 
 		fprintf(bubble_plot_log, "%f: start build enforcer\n", now());
 		fprintf(bubble_plot_log, "%f: start canonicalise\n", now());
@@ -70,10 +70,10 @@ main(int argc, char *argv[])
 							enablenoExtend(),
 						     ALLOW_GC);
 		summary = optimise_crash_summary(summary, oracleI, ALLOW_GC);
-		fprintf(bubble_plot_log, "%f: stop canonicalise\n", now());
 
 		ThreadAbstracter abs;
 		int next_hb_id = 10000;
+		fprintf(bubble_plot_log, "%f: stop canonicalise\n", now());
 		crashEnforcementData acc = enforceCrashForMachine(SummaryId(1), summary,
 								  oracle, abs, next_hb_id);
 
@@ -91,13 +91,13 @@ main(int argc, char *argv[])
 		fprintf(bubble_plot_log, "%f: stop simplify plan\n", now());
 
 		{
+			fprintf(bubble_plot_log, "%f: start build strategy\n", now());		
 			TimeoutTimer tmr;
 			tmr.timeoutAfterSeconds(60);
 			printf("Build patch strategy for %s\n", summary_fname);
-			fprintf(bubble_plot_log, "%f: start build strategy\n", now());		
 			buildPatchStrategy(acc, oracle);
-			fprintf(bubble_plot_log, "%f: stop build strategy\n", now());		
 			tmr.cancel();
+			fprintf(bubble_plot_log, "%f: stop build strategy\n", now());		
 			if (TIMEOUT) {
 				fprintf(bubble_plot_log, "%f: failed build strategy\n", now());
 				fprintf(bubble_plot_log, "%f: stop build enforcer\n", now());

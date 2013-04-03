@@ -482,8 +482,10 @@ buildCED(const SummaryId &summaryId,
 	 AddressSpace *as)
 {
 	/* Figure out what we actually need to keep track of */
+	fprintf(bubble_plot_log, "%f: start determine input availability\n", now());
 	std::set<input_expression> neededExpressions;
 	enumerateNeededExpressions(c.leftOver, neededExpressions);
+	fprintf(bubble_plot_log, "%f: stop determine input availability\n", now());
 
 	*out = crashEnforcementData(&summary->scopes->bools,
 				    summaryId,
@@ -497,7 +499,9 @@ buildCED(const SummaryId &summaryId,
 				    next_hb_id,
 				    summary,
 				    as);
+	fprintf(bubble_plot_log, "%f: start simplify plan\n", now());
 	optimiseHBContent(*out);
+	fprintf(bubble_plot_log, "%f: stop simplify plan\n", now());
 	return true;
 }
 
@@ -883,6 +887,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		       ThreadAbstracter &abs,
 		       int &next_hb_id)
 {
+	fprintf(bubble_plot_log, "%f: start prepare summary\n", now());
 	summary = internCrashSummary(summary);
 	if (TIMEOUT) {
 		fprintf(_logfile, "Timeout while interning summary\n");
@@ -911,6 +916,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		exit(1);
 	}
 
+	fprintf(bubble_plot_log, "%f: stop prepare summary\n", now());
 	fprintf(bubble_plot_log, "%f: start slice by hb\n", now());
 	sliced_expr sliced_by_hb;
 	{
@@ -925,9 +931,6 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		fprintf(bubble_plot_log, "%f: failed slice by hb\n", now());
 		return crashEnforcementData();
 	}
-
-	printf("Sliced requirement:\n");
-	sliced_by_hb.prettyPrint(stdout);
 
 	fprintf(bubble_plot_log, "%f: start heuristic simplify\n", now());
 	{
@@ -945,10 +948,6 @@ enforceCrashForMachine(const SummaryId &summaryId,
 			}
 		}
 	}
-	fprintf(bubble_plot_log, "%f: stop heuristic simplify\n", now());
-
-	printf("After simplifying down:\n");
-	sliced_by_hb.prettyPrint(stdout);
 
 	std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > rootsCfg;
 	for (auto it = summary->loadMachine->cfg_roots.begin();
@@ -962,12 +961,11 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		rootsCfg[ConcreteThread(summaryId, it->first.thread)].insert(std::pair<CfgLabel, long>(it->first.node->label, it->second.rsp_delta));
 	}
 
+	fprintf(bubble_plot_log, "%f: stop heuristic simplify\n", now());
 	crashEnforcementData accumulator;
 	for (auto it = sliced_by_hb.begin(); it != sliced_by_hb.end(); it++) {
 		crashEnforcementData tmp;
 		if (buildCED(summaryId, *it, rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
-			printf("Intermediate CED:\n");
-			tmp.prettyPrint(summary->scopes, stdout, true);
 			accumulator |= tmp;
 		}
 	}

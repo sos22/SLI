@@ -1480,6 +1480,96 @@ hasPhis(StateMachine *sm)
 	return visit_state_machine((void *)NULL, &visitor, sm) == visit_abort;
 }
 
+struct mc_state {
+	std::set<bbdd *> bools;
+	std::set<smrbdd *> smrs;
+	std::set<exprbdd *> exprs;
+	template <typename t> void _visit(t *what, std::set<t *> &memo) {
+		if (!memo.insert(what).second || what->isLeaf()) {
+			return;
+		}
+		_visit(what->internal().trueBranch, memo);
+		_visit(what->internal().falseBranch, memo);
+	}
+	void visit(bbdd *what) {
+		_visit(what, bools);
+	}
+	void visit(smrbdd *what) {
+		_visit(what, smrs);
+	}
+	void visit(exprbdd *what) {
+		_visit(what, exprs);
+	}
+};
+
+static size_t
+machineComplexity(StateMachineState *root)
+{
+	std::set<StateMachineState *> visited;
+	mc_state ms;
+	std::vector<StateMachineState *> q;
+	q.push_back(root);
+	while (!q.empty()) {
+		auto s = q.back();
+		q.pop_back();
+		if (!visited.insert(s).second) {
+			continue;
+		}
+		switch (s->type) {
+		case StateMachineState::Terminal:
+			ms.visit( ((StateMachineTerminal *)s)->res );
+			break;
+		case StateMachineState::Bifurcate: {
+			auto b = (StateMachineBifurcate *)s;
+			ms.visit( b->condition );
+			q.push_back(b->trueTarget);
+			q.push_back(b->falseTarget);
+			break;
+		}
+		case StateMachineState::SideEffecting: {
+			auto e = (StateMachineSideEffecting *)s;
+			q.push_back(e->target);
+			auto s = e->sideEffect;
+			if (!s) {
+				break;
+			}
+			switch (s->type) {
+			case StateMachineSideEffect::Load:
+				ms.visit( ((StateMachineSideEffectLoad *)s)->addr );
+				break;
+			case StateMachineSideEffect::Store:
+				ms.visit( ((StateMachineSideEffectStore *)s)->addr );
+				ms.visit( ((StateMachineSideEffectStore *)s)->data );
+				break;
+			case StateMachineSideEffect::Copy:
+				ms.visit( ((StateMachineSideEffectCopy *)s)->value );
+				break;
+			case StateMachineSideEffect::Unreached:
+				break;
+			case StateMachineSideEffect::AssertFalse:
+				ms.visit( ((StateMachineSideEffectAssertFalse *)s)->value );
+				break;
+			case StateMachineSideEffect::Phi: {
+				auto p = (StateMachineSideEffectPhi *)s;
+				for (auto it = p->generations.begin(); it != p->generations.end(); it++) {
+					ms.visit(it->val);
+				}
+				break;
+			}
+			case StateMachineSideEffect::StartAtomic:
+			case StateMachineSideEffect::EndAtomic:
+			case StateMachineSideEffect::StartFunction:
+			case StateMachineSideEffect::EndFunction:
+			case StateMachineSideEffect::ImportRegister:
+			case StateMachineSideEffect::StackLayout:
+				break;
+			}
+		}
+		}
+	}
+	return ms.bools.size() + ms.smrs.size() + ms.exprs.size();
+}
+
 template <typename paramT> static typename paramT::resultT
 enumEvalPaths(SMScopes *scopes,
 	      const VexPtr<MaiMap, &ir_heap> &decode,
@@ -1493,7 +1583,14 @@ enumEvalPaths(SMScopes *scopes,
 	std::vector<EvalContext> pendingStates;
 	typename paramT::resultT result;
 	std::map<const StateMachineState *, int> labels;
+	double start;
+	static FILE *lf;
+	long start_size = scopes->bools.intern.size() + scopes->smrs.intern.size() + scopes->exprs.intern.size();
+	if (!lf) {
+		lf = fopen("symb_times", "w");
+	}
 
+	start = now();
 	if (debug_survival_constraint) {
 		printf("%s(sm = ..., assumption = %s, unreachedIs = %s)\n",
 		       __func__,
@@ -1514,7 +1611,7 @@ enumEvalPaths(SMScopes *scopes,
 	}
 	while (!pendingStates.empty()) {
 		if (TIMEOUT) {
-			return NULL;
+			goto timeout;
 		}
 		LibVEX_maybe_gc(token);
 
@@ -1542,8 +1639,29 @@ enumEvalPaths(SMScopes *scopes,
 		result->prettyPrint(stdout);
 	}
 
-	if (!TIMEOUT) {
-		paramT::suppressUnreached(scopes, unreachedIs, result);
+	if (TIMEOUT) {
+		goto timeout;
+	}
+
+	paramT::suppressUnreached(scopes, unreachedIs, result);
+
+	{
+		double time_taken = now() - start;
+		std::set<StateMachineState *> states;
+		std::set<StateMachineBifurcate *> controlFlow;
+		std::set<StateMachineSideEffectMemoryAccess *> accesses;
+		std::set<StateMachineSideEffectPhi *> phi;
+		long end_size = scopes->bools.intern.size() + scopes->smrs.intern.size() + scopes->exprs.intern.size();
+		enumStates(sm->root, &states);
+		enumStates(sm->root, &controlFlow);
+		enumSideEffects(sm->root, accesses);
+		enumSideEffects(sm->root, phi);
+		fprintf(lf, "time = %f, nr_states = %zd, nr_control_flow = %zd, nr_accesses = %zd, phi = %zd, complex = %zd, new BDDs = %ld\n",
+			time_taken, states.size(), controlFlow.size(),
+			accesses.size(), phi.size(),
+			machineComplexity(sm->root),
+			end_size - start_size);
+		fflush(lf);
 	}
 
 	if (debug_survival_constraint && result) {
@@ -1552,6 +1670,24 @@ enumEvalPaths(SMScopes *scopes,
 	}
 
 	return result;
+
+timeout:
+	std::set<StateMachineState *> states;
+	std::set<StateMachineBifurcate *> controlFlow;
+	std::set<StateMachineSideEffectMemoryAccess *> accesses;
+	std::set<StateMachineSideEffectPhi *> phi;
+	long end_size = scopes->bools.intern.size() + scopes->smrs.intern.size() + scopes->exprs.intern.size();
+	enumStates(sm->root, &states);
+	enumStates(sm->root, &controlFlow);
+	enumSideEffects(sm->root, accesses);
+	enumSideEffects(sm->root, phi);
+	fprintf(lf, "time = inf, nr_states = %zd, nr_control_flow = %zd, nr_accesses = %zd, phi = %zd, complex = %zd, new BDDs = %ld\n",
+		states.size(), controlFlow.size(),
+		accesses.size(), phi.size(),
+		machineComplexity(sm->root),
+		end_size - start_size);
+	fflush(lf);
+	return NULL;
 }
 
 struct normalEvalParams {
