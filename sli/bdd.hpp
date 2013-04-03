@@ -24,7 +24,7 @@ class bdd_rank {
 	friend class bdd_ordering;
 	long val;
 	struct clsT {
-		enum { cls_entry, cls_hb, cls_norm} tag;
+		enum { cls_entry, cls_hb, cls_norm, cls_badptr} tag;
 		int hb1, hb2;
 		bool operator<(const clsT &o) const {
 			if (tag < o.tag)

@@ -1975,6 +1975,8 @@ bdd_ordering::rankVariable(const IRExpr *a)
 		cls.tag = bdd_rank::clsT::cls_hb;
 		cls.hb1 = -((IRExprHappensBefore *)a)->before.id;
 		cls.hb2 = ((IRExprHappensBefore *)a)->after.id;
+	} else if (a->tag == Iex_Unop && ((IRExprUnop *)a)->op == Iop_BadPtr) {
+		cls.tag = bdd_rank::clsT::cls_badptr;
 	} else {
 		cls.tag = bdd_rank::clsT::cls_norm;
 	}
@@ -2020,6 +2022,9 @@ bdd_rank::prettyPrint(FILE *f) const
 	case clsT::cls_norm:
 		fprintf(f, "r%ld", val);
 		return;
+	case clsT::cls_badptr:
+		fprintf(f, "bp%ld", val);
+		return;
 	}
 	abort();
 }
@@ -2042,6 +2047,10 @@ bdd_rank::parse(const char *buf, const char **end)
 	} else if (parseThisChar('r', buf, &buf) &&
 		   parseDecimalLong(&val, buf, end)) {
 		cls.tag = clsT::cls_norm;
+		return true;
+	} else if (parseThisString("bp", buf, &buf) &&
+		   parseDecimalLong(&val, buf, end)) {
+		cls.tag = clsT::cls_badptr;
 		return true;
 	} else {
 		return false;
