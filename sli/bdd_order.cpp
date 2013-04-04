@@ -176,15 +176,36 @@ optimal_reordering(scp *scope,
 		enumVars(what, remainingVars);
 		assert(!remainingVars.empty());
 
-		unsigned long bestCost = ~0ul;
 		result.isLeaf = false;
 		result.internal.key = (IRExpr *)0xd00d;
 
+		/* splits[x].first = what you get if you set x to true.
+		   splits[x].second = what you get if you set x to false. */
+		std::map<IRExpr *, std::pair<t *, t *> > splits;
 		for (auto it = remainingVars.begin(); it != remainingVars.end(); it++) {
 			auto trueB = setVariable(scope, what, *it, true);
 			auto falseB = setVariable(scope, what, *it, false);
 			assert(trueB != what);
 			assert(falseB != what);
+			if (trueB->isLeaf() || falseB->isLeaf()) {
+				/* If we have the option of making the
+				   BDD linear then that's always a
+				   good idea. */
+				result.internal.key = *it;
+				result.internal.trueB = optimal_reordering(scope, trueB, memo, intern);
+				result.internal.falseB = optimal_reordering(scope, falseB, memo, intern);
+				goto found_it;
+			}
+			splits[*it] = std::pair<t *, t *>(trueB, falseB);
+		}
+
+		/* Didn't manage to find an easy case -> do it exhaustively. */
+		unsigned long bestCost = ~0ul;
+		for (auto it = remainingVars.begin(); it != remainingVars.end(); it++) {
+			assert(splits.count(*it));
+			std::pair<t *, t *> &split(splits[*it]);
+			auto trueB = split.first;
+			auto falseB = split.second;
 			auto trueR = optimal_reordering(scope, trueB, memo, intern);
 			reordered *falseR;
 			if (trueB == falseB) {
@@ -209,7 +230,7 @@ optimal_reordering(scp *scope,
 			}
 		}
 	}
-
+found_it:
 	auto it2_di2 = intern.insert(result, (reordered *)0xbabe);
 	if (it2_di2.second) {
 		it2_di2.first->second = new reordered(result);
