@@ -9,7 +9,7 @@ extern bool debug_subst_eq;
 void printExprSet(const std::set<IRExpr *> &a, FILE *f);
 bool isEqConstraint(IRExpr *what);
 void addRewritesFor(std::map<IRExpr *, IRExpr *> &rules,
-		    std::map<IRExpr *, IRExpr *> &simplMemo,
+		    std::map<qs_args, IRExpr *> &simplMemo,
 		    IRExpr *expr);
 IRExpr *do_rewrite(IRExpr *what, const std::map<IRExpr *, IRExpr *> &rewrites);
 

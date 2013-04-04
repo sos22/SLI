@@ -656,7 +656,7 @@ heuristicSimplify(bbdd::scope *scope, bbdd *e, std::map<bbdd *, bbdd *> &memo)
 			it->second =
 				bbdd::ifelse(
 					scope,
-					bbdd::var(scope, cond),
+					bbdd::var(scope, cond, bdd_ordering::rank_hint::Near(e)),
 					t,
 					f);
 		}

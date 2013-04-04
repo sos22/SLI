@@ -785,7 +785,7 @@ reorder_bbdd::to_bbdd(bbdd::scope *scope) const
 	if (!equiv_bbdd) {
 		equiv_bbdd = bbdd::ifelse(
 			scope,
-			bbdd::var(scope, cond.cond),
+			bbdd::var(scope, cond.cond, bdd_ordering::rank_hint::Near(cond.rank)),
 			trueBranch->to_bbdd(scope),
 			falseBranch->to_bbdd(scope));
 	}

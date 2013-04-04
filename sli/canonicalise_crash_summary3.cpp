@@ -1121,7 +1121,7 @@ stripFloatingPoint(bbdd::scope *scope, bbdd *what, bool *done_something,
 			it->second = FP_BBDD;
 		} else {
 			*done_something = true;
-			it->second = scope->node(nCond, scope->ordering->rankVariable(nCond), t, f);
+			it->second = scope->node(nCond, scope->ordering->rankVariable(nCond, bdd_ordering::rank_hint::Near(what)), t, f);
 		}
 	}
 	return it->second;
@@ -1211,7 +1211,8 @@ nonFunctionalSimplifications(
 						bbdd::to_irexpr(summary->crashCondition),
 						targetRegisters,
 						IRExpr_Const_U1(true),
-						&progress));
+						&progress),
+					bdd_ordering::rank_hint::Start());
 			summary->inferredAssumption =
 				bbdd::var(
 					&summary->scopes->bools,
@@ -1219,7 +1220,8 @@ nonFunctionalSimplifications(
 						bbdd::to_irexpr(summary->inferredAssumption),
 						targetRegisters,
 						IRExpr_Const_U1(true),
-						&progress));
+						&progress),
+					bdd_ordering::rank_hint::Start());
 		}
 	}
 
@@ -1241,7 +1243,7 @@ functionalSimplifications(const VexPtr<CrashSummary, &ir_heap> &summary,
 		if (e == underspecExpression)
 			summary->crashCondition = summary->scopes->bools.cnst(true);
 		else
-			summary->crashCondition = bbdd::var(&summary->scopes->bools, simplify_via_anf(e));
+			summary->crashCondition = bbdd::var(&summary->scopes->bools, simplify_via_anf(e), bdd_ordering::rank_hint::Start());
 	}
 	return summary;
 }
