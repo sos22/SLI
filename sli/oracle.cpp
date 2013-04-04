@@ -1402,7 +1402,11 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 				done = true;
 				break;
 			}
-			covered.insert(rip, rip + mark->len);
+			if (mark->len == 0) {
+				covered.insert(rip, rip + 1);
+			} else {
+				covered.insert(rip, rip + mark->len);
+			}
 			i++;
 
 			add_attributes.bindInt64(1, rip);
