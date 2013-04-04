@@ -495,7 +495,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 									argA->op,
 									argA->nr_arguments - 1,
 									argA->contents + 1),
-								mask),
+								newMask),
 							memo);
 					}
 					goto top_unop;
@@ -515,7 +515,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 									argA->op,
 									argA->nr_arguments,
 									newArgs),
-								mask),
+								newMask),
 							memo);
 						goto top_unop;
 					}
@@ -534,7 +534,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 								argA->op,
 								argA->nr_arguments - 1,
 								argA->contents + 1),
-							mask),
+							newMask),
 						memo);
 				}
 				goto top_unop;
@@ -564,9 +564,8 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 				IRExpr *args[argA->nr_arguments];
 				for (int i = 0; i < argA->nr_arguments; i++) {
 					args[i] = quickSimplify(
-						qs_args(
-							IRExpr_Unop(au->op, argA->contents[i]),
-							mask),
+						qs_args(IRExpr_Unop(au->op, argA->contents[i]),
+							fullMask(au->type())),
 						memo);
 				}
 				int op = (int)argA->op;
@@ -609,7 +608,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 							(IROp)op,
 							argA->nr_arguments,
 							args),
-						mask),
+						fullMask(argA->type())),
 					memo);
 			}
 		}
@@ -635,7 +634,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 							Iop_DivS64,
 							ieb->arg1,
 							ieb->arg2),
-						mask),
+						fullMask(Ity_I64)),
 					memo);
 			} else if (ieb->op == Iop_DivModU64to32) {
 				arg = quickSimplify(
@@ -643,7 +642,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 							Iop_DivU64,
 							ieb->arg1,
 							ieb->arg2),
-						mask),
+						fullMask(Ity_I64)),
 					memo);
 			}
 		}
@@ -869,7 +868,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 			default:
 				abort();
 			}
-			return quickSimplify(qs_args(IRExpr_Binop(_ieb->op, newL, newR), mask), memo);						
+			return quickSimplify(qs_args(IRExpr_Binop(_ieb->op, newL, newR), fullMask(_ieb->type())), memo);
 		}
 		/* Turn 0 == x - y into x == y */
 		if (is_eq && arg1C && isZero(arg1C) &&
@@ -878,9 +877,8 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 			IRExprUnop *uu = (IRExprUnop *)arg2A->contents[1];
 			if (uu->op >= Iop_Neg8 && uu->op <= Iop_Neg64) {
 				return quickSimplify(
-					qs_args(
-						IRExpr_Binop(_ieb->op, arg2A->contents[0], uu->arg),
-						mask),
+					qs_args(IRExpr_Binop(_ieb->op, arg2A->contents[0], uu->arg),
+						fullMask(_ieb->type())),
 					memo);
 			}
 		}
@@ -904,7 +902,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 			default:
 				abort();
 			}
-			return quickSimplify(qs_args(IRExpr_Binop(_ieb->op, newL, newR), mask), memo);
+			return quickSimplify(qs_args(IRExpr_Binop(_ieb->op, newL, newR), fullMask(_ieb->type())), memo);
 		}
 		/* k == widen(X) can be dealt with early */
 		if (is_eq && arg1C && arg2U && arg2U->op >= Iop_8Uto16 && arg2U->op <= Iop_32Sto64) {
@@ -917,7 +915,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ8,
 								     IRExpr_Const_U8(arg1C->Ico.content.U16 & 0xff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_8Uto32:
@@ -928,7 +926,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ8,
 								     IRExpr_Const_U8(arg1C->Ico.content.U32 & 0xff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_8Uto64:
@@ -939,7 +937,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ8,
 								     IRExpr_Const_U8(arg1C->Ico.content.U64 & 0xff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_16Uto32:
@@ -950,7 +948,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ16,
 								     IRExpr_Const_U16(arg1C->Ico.content.U32 & 0xffff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_16Uto64:
@@ -961,7 +959,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ16,
 								     IRExpr_Const_U16(arg1C->Ico.content.U64 & 0xffff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_32Uto64:
@@ -972,7 +970,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ32,
 								     IRExpr_Const_U32(arg1C->Ico.content.U64 & 0xffffffff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_8Sto16:
@@ -983,7 +981,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ8,
 								     IRExpr_Const_U8(arg1C->Ico.content.U16 & 0xff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_8Sto32:
@@ -994,7 +992,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ8,
 								     IRExpr_Const_U8(arg1C->Ico.content.U32 & 0xff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_8Sto64:
@@ -1005,7 +1003,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ8,
 								     IRExpr_Const_U8(arg1C->Ico.content.U64 & 0xff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_16Sto32:
@@ -1016,7 +1014,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ16,
 								     IRExpr_Const_U16(arg1C->Ico.content.U32 & 0xffff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_16Sto64:
@@ -1027,7 +1025,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ16,
 								     IRExpr_Const_U16(arg1C->Ico.content.U64 & 0xffff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			case Iop_32Sto64:
@@ -1038,7 +1036,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						qs_args(IRExpr_Binop(Iop_CmpEQ32,
 								     IRExpr_Const_U32(arg1C->Ico.content.U64 & 0xffffffff),
 								     arg2U->arg),
-							mask),
+							fullMask(_ieb->type())),
 						memo);
 				}
 			default:
@@ -1129,7 +1127,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 								Iop_CmpEQ ## sz, \
 								IRExpr_Const_U ## sz(max), \
 								arg2),	\
-							mask),		\
+							fullMask(_ieb->type())),		\
 						memo);			\
 				}
 				mk_size(8, 255);
@@ -1513,7 +1511,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 			default: abort();
 			}
 		}
-		if (acc == mask &&
+		if (acc == (mask & args.mask) &&
 		    (op == Iop_Or1 ||
 		     (op >= Iop_Or8 && op <= Iop_Or64))) {
 			switch (op) {
