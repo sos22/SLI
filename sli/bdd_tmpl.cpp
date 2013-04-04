@@ -1441,11 +1441,13 @@ _bdd<leafT, subtreeT>::restructure_zip(scopeT *scope, bscopeT *bscope, const zip
 		if (what.isLeaf()) {
 			it->second = what.leaf(scope, bscope);
 		} else {
-			subtreeT *t = restructure_zip(scope, bscope, what.trueBranch(), memo);
+			IRExpr *condition;
+			bdd_rank rank(what.rank(&condition));
+			subtreeT *t = restructure_zip(scope, bscope, what.trueBranch(rank), memo);
 			if (t) {
-				subtreeT *f = restructure_zip(scope, bscope, what.falseBranch(), memo);
+				subtreeT *f = restructure_zip(scope, bscope, what.falseBranch(rank), memo);
 				if (f)
-					it->second = scope->node(what.condition(), what.rank(), t, f);
+					it->second = scope->node(condition, rank, t, f);
 			}
 		}
 	}

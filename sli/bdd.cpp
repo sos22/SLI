@@ -2288,179 +2288,299 @@ exprbdd_scope::runGc(HeapVisitor &hv)
 	bdd_scope<exprbdd>::runGc(hv);
 }
 
-class unop_zipper {
+class irop_zipper {
 	IROp op;
-	exprbdd *what;
+	IRExprTag flavour;
+	int nr_arguments;
+	void *args_inline[2];
+	void **other_args;
+	int nr_iex_args() const {
+		if (flavour == Iex_CCall) {
+			return nr_arguments - 2;
+		} else if (flavour == Iex_Load) {
+			return 1;
+		} else {
+			return nr_arguments;
+		}
+	}
+	void *argument(int i) const {
+		if (i < 2) {
+			return args_inline[i];
+		} else {
+			return other_args[i-2];
+		}
+	}
+	exprbdd *iex_arg(int i) const {
+		if (flavour == Iex_CCall) {
+			i += 2;
+		} else if (flavour == Iex_Load) {
+			assert(i == 0);
+			i = 1;
+		}
+		return (exprbdd *)argument(i);
+	}
+	void operator=(const irop_zipper &o); /* DNI */
 public:
-	unop_zipper(IROp _op, exprbdd *_what)
-		: op(_op), what(_what)
-	{}
-	bool isLeaf() const { return what->isLeaf(); }
+	~irop_zipper()
+	{
+		free(other_args);
+	}
+	irop_zipper(const irop_zipper &o)
+		: op(o.op), flavour(o.flavour), nr_arguments(o.nr_arguments)
+	{
+		args_inline[0] = o.args_inline[0];
+		args_inline[1] = o.args_inline[1];
+		if (nr_arguments > 2) {
+			other_args = (void **)malloc(sizeof(void *) * (nr_arguments - 2));
+			memcpy(other_args, o.other_args, sizeof(void *) * (nr_arguments - 2));
+		} else {
+			other_args = NULL;
+		}
+	}
+	irop_zipper(IROp _op, IRExprTag _flavour, int _nr_arguments, void **_arguments)
+		: op(_op), flavour(_flavour), nr_arguments(_nr_arguments)
+	{
+		switch (flavour) {
+		case Iex_Unop:
+			assert(nr_arguments == 1);
+			break;
+		case Iex_Binop:
+			assert(nr_arguments == 2);
+			break;
+		case Iex_Triop:
+			assert(nr_arguments == 3);
+			break;
+		case Iex_Qop:
+			assert(nr_arguments == 4);
+			break;
+		case Iex_Associative:
+			break;
+		case Iex_CCall:
+			/* First argument is retty, second argument is ccall structure */
+			assert(nr_arguments >= 2);
+			break;
+		case Iex_Load:
+			/* First argument is type, second is address */
+			assert(nr_arguments == 2);
+			break;
+		default:
+			abort();
+		}
+		if (nr_arguments > 0) {
+			args_inline[0] = _arguments[0];
+		}
+		if (nr_arguments > 1) {
+			args_inline[1] = _arguments[1];
+		}
+		if (nr_arguments > 2) {
+			other_args = (void **)malloc(sizeof(void *) * (nr_arguments - 2));
+			memcpy(other_args, _arguments + 2, sizeof(void *) * (nr_arguments - 2));
+		} else {
+			other_args = NULL;
+		}
+	}
+	bool isLeaf() const {
+		for (int i = 0; i < nr_iex_args(); i++) {
+			if (!iex_arg(i)->isLeaf()) {
+				return false;
+			}
+		}
+		return true;
+	}
 	exprbdd *leaf(exprbdd::scope *scope,
 		      bbdd::scope *bscope) const {
-		return exprbdd::var(
-			scope,
-			bscope,
-			IRExpr_Unop(op, what->leaf()),
-			bdd_ordering::rank_hint::End());
+		switch (flavour) {
+		case Iex_Unop:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Unop(op, iex_arg(0)->leaf()),
+				bdd_ordering::rank_hint::End());
+		case Iex_Binop:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Binop(op, iex_arg(0)->leaf(), iex_arg(1)->leaf()),
+				bdd_ordering::rank_hint::End());
+		case Iex_Triop:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Triop(op, iex_arg(0)->leaf(), iex_arg(1)->leaf(), iex_arg(2)->leaf()),
+				bdd_ordering::rank_hint::End());
+		case Iex_Qop:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Qop(op, iex_arg(0)->leaf(), iex_arg(1)->leaf(), iex_arg(2)->leaf(), iex_arg(3)->leaf()),
+				bdd_ordering::rank_hint::End());
+		case Iex_Associative: {
+			IRExpr *args[nr_arguments];
+			for (int i = 0; i < nr_iex_args(); i++) {
+				args[i] = iex_arg(i)->leaf();
+			}
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Associative_Copy(op, nr_arguments, args),
+				bdd_ordering::rank_hint::End());
+		}
+		case Iex_CCall: {
+			IRExpr **args = alloc_irexpr_array(nr_iex_args() + 1);
+			for (int i = 0; i < nr_iex_args(); i++) {
+				args[i] = iex_arg(i)->leaf();
+			}
+			args[nr_iex_args()] = NULL;
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExprCCall::mk( (IRCallee*)argument(1),
+						 (IRType)(unsigned long)argument(0),
+						 args),
+				bdd_ordering::rank_hint::End());
+		}
+		case Iex_Load:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExprLoad::mk( (IRType)(unsigned long)argument(0),
+						iex_arg(0)->leaf()),
+				bdd_ordering::rank_hint::End());
+		default:
+			abort();
+		}
 	}
-	IRExpr *condition() const {
-		return what->internal().condition;
+	const bdd_rank &rank(IRExpr **condition) const {
+		int i;
+		for (i = 0; i < nr_iex_args(); i++) {
+			if (!iex_arg(i)->isLeaf()) {
+				break;
+			}
+		}
+		assert(i != nr_iex_args());
+		int bestIdx = i;
+		for (i++; i < nr_iex_args(); i++) {
+			if (iex_arg(i)->isLeaf()) {
+				continue;
+			}
+			if (iex_arg(i)->internal().rank < iex_arg(bestIdx)->internal().rank) {
+				bestIdx = i;
+			}
+		}
+		*condition = iex_arg(bestIdx)->internal().condition;
+		return iex_arg(bestIdx)->internal().rank;
 	}
-	const bdd_rank &rank() const {
-		return what->internal().rank;
+	irop_zipper trueBranch(const bdd_rank &cond) const {
+		void *newArgs[nr_arguments];
+		int outIdx;
+		if (flavour == Iex_Load) {
+			newArgs[0] = argument(0);
+			outIdx = 1;
+		} else if (flavour == Iex_CCall) {
+			newArgs[0] = argument(0);
+			newArgs[1] = argument(1);
+			outIdx = 2;
+		} else {
+			outIdx = 0;
+		}
+		for (int inIdx = 0; inIdx < nr_iex_args(); inIdx++, outIdx++) {
+			newArgs[outIdx] = iex_arg(inIdx)->trueBranch(cond);
+		}
+		return irop_zipper(op, flavour, nr_arguments, newArgs);
 	}
-	unop_zipper trueBranch() const {
-		return unop_zipper(op, what->internal().trueBranch);
+	irop_zipper falseBranch(const bdd_rank &cond) const {
+		void *newArgs[nr_arguments];
+		int outIdx;
+		if (flavour == Iex_Load) {
+			newArgs[0] = argument(0);
+			outIdx = 1;
+		} else if (flavour == Iex_CCall) {
+			newArgs[0] = argument(0);
+			newArgs[1] = argument(1);
+			outIdx = 2;
+		} else {
+			outIdx = 0;
+		}
+		for (int inIdx = 0; inIdx < nr_iex_args(); inIdx++, outIdx++) {
+			newArgs[outIdx] = iex_arg(inIdx)->falseBranch(cond);
+		}
+		return irop_zipper(op, flavour, nr_arguments, newArgs);
 	}
-	unop_zipper falseBranch() const {
-		return unop_zipper(op, what->internal().falseBranch);
-	}
-	bool operator<(const unop_zipper &o) const {
-		if (what < o.what)
+	bool operator<(const irop_zipper &o) const {
+		if (flavour < o.flavour) {
 			return true;
-		if (what > o.what)
+		} else if (flavour > o.flavour) {
 			return false;
-		return op < o.op;
+		} else if (nr_arguments < o.nr_arguments) {
+			return true;
+		} else if (nr_arguments > o.nr_arguments) {
+			return false;
+		}
+		if (flavour != Iex_Load && flavour != Iex_CCall) {
+			if (op < o.op) {
+				return true;
+			} else if (op > o.op) {
+				return false;
+			}
+		}
+		for (int i = 0; i < nr_arguments; i++) {
+			if (argument(i) < o.argument(i)) {
+				return true;
+			} else if (argument(i) > o.argument(i)) {
+				return false;
+			}
+		}
+		return false;
 	}
 };
 exprbdd *
 exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 {
 	if (!TIMEOUT) {
-		auto r = exprbdd::restructure_zip(scope, bscope, unop_zipper(op, what));
+		auto r = exprbdd::restructure_zip(scope, bscope, irop_zipper(op, Iex_Unop, 1, (void **)&what));
 		if (!TIMEOUT) {
 			return r;
 		}
 	}
 	return what;
 }
-
-class binop_zip {
-	IROp op;
-	exprbdd *a;
-	exprbdd *b;
-public:
-	binop_zip(IROp _op, exprbdd *_a, exprbdd *_b)
-		: op(_op), a(_a), b(_b)
-	{}
-	bool isLeaf() const {
-		return a->isLeaf() && b->isLeaf();
-	}
-	exprbdd *leaf(exprbdd::scope *scope, bbdd::scope *bscope) const {
-		return exprbdd::var(scope, bscope, IRExpr_Binop(op, a->leaf(), b->leaf()),
-				    bdd_ordering::rank_hint::End());
-	}
-	IRExpr *condition() const {
-		if (a->isLeaf()) {
-			assert(!b->isLeaf());
-			return b->internal().condition;
-		} else if (b->isLeaf()) {
-			return a->internal().condition;
-		} else if (a->internal().rank <= b->internal().rank) {
-			return a->internal().condition;
-		} else {
-			return b->internal().condition;
-		}
-	}
-	const bdd_rank &rank() const {
-		if (a->isLeaf()) {
-			assert(!b->isLeaf());
-			return b->internal().rank;
-		} else if (b->isLeaf()) {
-			return a->internal().rank;
-		} else if (a->internal().rank <= b->internal().rank) {
-			return a->internal().rank;
-		} else {
-			return b->internal().rank;
-		}
-	}
-	binop_zip trueBranch() const {
-		if (a->isLeaf()) {
-			assert(!b->isLeaf());
-			return binop_zip(op, a, b->internal().trueBranch);
-		} else if (b->isLeaf()) {
-			return binop_zip(op, a->internal().trueBranch, b);
-		} else if (a->internal().rank < b->internal().rank) {
-			return binop_zip(op, a->internal().trueBranch, b);
-		} else if (a->internal().rank == b->internal().rank) {
-			return binop_zip(op, a->internal().trueBranch, b->internal().trueBranch);
-		} else {
-			return binop_zip(op, a, b->internal().trueBranch);
-		}
-	}
-	binop_zip falseBranch() const {
-		if (a->isLeaf()) {
-			assert(!b->isLeaf());
-			return binop_zip(op, a, b->internal().falseBranch);
-		} else if (b->isLeaf()) {
-			return binop_zip(op, a->internal().falseBranch, b);
-		} else if (a->internal().rank < b->internal().rank) {
-			return binop_zip(op, a->internal().falseBranch, b);
-		} else if (a->internal().rank == b->internal().rank) {
-			return binop_zip(op, a->internal().falseBranch, b->internal().falseBranch);
-		} else {
-			return binop_zip(op, a, b->internal().falseBranch);
-		}
-	}
-	bool operator<(const binop_zip &o) const {
-		if (a < o.a)
-			return true;
-		if (a > o.a)
-			return false;
-		if (b < o.b)
-			return true;
-		if (b > o.b)
-			return false;
-		return op < o.op;
-	}
-};
 exprbdd *
 exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b)
 {
-	return restructure_zip(scope, bscope, binop_zip(op, a, b));
+	void *args[2] = {a, b};
+	return restructure_zip(scope, bscope, irop_zipper(op, Iex_Binop, 2, args));
 }
-
-class load_zipper {
-	IRType ty;
-	exprbdd *what;
-public:
-	load_zipper(IRType _ty, exprbdd *_what)
-		: ty(_ty), what(_what)
-	{}
-	bool isLeaf() const { return what->isLeaf(); }
-	exprbdd *leaf(exprbdd::scope *scope,
-		      bbdd::scope *bscope) const {
-		return exprbdd::var(
-			scope,
-			bscope,
-			IRExpr_Load(ty, what->leaf()),
-			bdd_ordering::rank_hint::End());
-	}
-	IRExpr *condition() const {
-		return what->internal().condition;
-	}
-	const bdd_rank &rank() const {
-		return what->internal().rank;
-	}
-	load_zipper trueBranch() const {
-		return load_zipper(ty, what->internal().trueBranch);
-	}
-	load_zipper falseBranch() const {
-		return load_zipper(ty, what->internal().falseBranch);
-	}
-	bool operator<(const load_zipper &o) const {
-		if (what < o.what)
-			return true;
-		if (what > o.what)
-			return false;
-		return ty < o.ty;
-	}
-};
 exprbdd *
-exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *what)
+exprbdd::triop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b, exprbdd *c)
 {
-	return restructure_zip(scope, bscope, load_zipper(ty, what));
+	void *args[3] = {a, b, c};
+	return restructure_zip(scope, bscope, irop_zipper(op, Iex_Triop, 3, args));
+}
+exprbdd *
+exprbdd::qop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b, exprbdd *c, exprbdd *d)
+{
+	void *args[4] = {a, b, c, d};
+	return restructure_zip(scope, bscope, irop_zipper(op, Iex_Qop, 4, args));
+}
+exprbdd *
+exprbdd::associative(scope *scope, bbdd::scope *bscope, IROp op, exprbdd **args, int nr_args)
+{
+	return restructure_zip(scope, bscope, irop_zipper(op, Iex_Associative, nr_args, (void **)args));
+}
+exprbdd *
+exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *a)
+{
+	void *args[2] = {(void *)ty, a};
+	return restructure_zip(scope, bscope, irop_zipper(Iop_INVALID, Iex_Load, 2, args));
+}
+exprbdd *
+exprbdd::ccall(scope *scope, bbdd::scope *bscope, IRCallee *cee, IRType ty, exprbdd **args1, int nr_args1)
+{
+	void *args[nr_args1 + 2];
+	args[0] = (void *)ty;
+	args[1] = cee;
+	memcpy(args + 2, args1, sizeof(void *) * nr_args1);
+	return restructure_zip(scope, bscope, irop_zipper(Iop_INVALID, Iex_CCall, nr_args1 + 2, args));
 }
 
 exprbdd *

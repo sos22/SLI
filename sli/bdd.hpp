@@ -677,9 +677,13 @@ public:
 	}
 	void sanity_check(bdd_ordering *ordering = NULL) const;
 
-	static exprbdd *unop(scope *scope, bbdd::scope *, IROp, exprbdd *);
 	static exprbdd *load(scope *scope, bbdd::scope *, IRType, exprbdd *);
+	static exprbdd *unop(scope *scope, bbdd::scope *, IROp, exprbdd *);
 	static exprbdd *binop(scope *scope, bbdd::scope *, IROp, exprbdd *, exprbdd *);
+	static exprbdd *triop(scope *scope, bbdd::scope *, IROp, exprbdd *, exprbdd *, exprbdd *);
+	static exprbdd *qop(scope *scope, bbdd::scope *, IROp, exprbdd *, exprbdd *, exprbdd *, exprbdd *);
+	static exprbdd *associative(scope *scope, bbdd::scope *, IROp, exprbdd **, int);
+	static exprbdd *ccall(scope *scope, bbdd::scope *, IRCallee *, IRType, exprbdd **, int);
 	static exprbdd *coerceTypes(scope *, bbdd::scope *, IRType ty, exprbdd *);
 
 	static bbdd *to_bbdd(bbdd::scope *scope, exprbdd *);

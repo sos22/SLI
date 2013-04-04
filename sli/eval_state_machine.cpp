@@ -422,30 +422,30 @@ public:
 	}
 
 private:
-	IRExpr *specialiseIRExpr(SMScopes *scopes, IRExpr *, std::map<IRExpr *, IRExpr *> &memo);
+	exprbdd *specialiseIRExpr(SMScopes *scopes, IRExpr *, std::map<IRExpr *, exprbdd *> &memo);
 	bbdd *specialiseIRExpr(SMScopes *, bbdd *iex,
 			       std::map<bbdd *, bbdd *> &,
-			       std::map<IRExpr *, IRExpr *> &);
+			       std::map<IRExpr *, exprbdd *> &);
 	smrbdd *specialiseIRExpr(SMScopes *, smrbdd *iex,
 				 std::map<smrbdd *, smrbdd *> &,
-				 std::map<IRExpr *, IRExpr *> &);
+				 std::map<IRExpr *, exprbdd *> &);
 	exprbdd *specialiseIRExpr(SMScopes *, exprbdd *iex,
 				  std::map<exprbdd *, exprbdd *> &,
-				  std::map<IRExpr *, IRExpr *> &);
+				  std::map<IRExpr *, exprbdd *> &);
 public:
 	bbdd *specialiseIRExpr(SMScopes *scopes, bbdd *iex) {
 		std::map<bbdd *, bbdd *> memo1;
-		std::map<IRExpr *, IRExpr *> memo2;
+		std::map<IRExpr *, exprbdd *> memo2;
 		return specialiseIRExpr(scopes, iex, memo1, memo2);
 	}
 	smrbdd *specialiseIRExpr(SMScopes *scopes, smrbdd *iex) {
 		std::map<smrbdd *, smrbdd *> memo1;
-		std::map<IRExpr *, IRExpr *> memo2;
+		std::map<IRExpr *, exprbdd *> memo2;
 		return specialiseIRExpr(scopes, iex, memo1, memo2);
 	}
 	exprbdd *specialiseIRExpr(SMScopes *scopes, exprbdd *iex) {
 		std::map<exprbdd *, exprbdd *> memo1;
-		std::map<IRExpr *, IRExpr *> memo2;
+		std::map<IRExpr *, exprbdd *> memo2;
 		return specialiseIRExpr(scopes, iex, memo1, memo2);
 	}
 	void visit(HeapVisitor &hv) {
@@ -542,18 +542,18 @@ threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, IRExpr
 	return simplifyIRExpr(doit.doit(e), opt);
 }
 
-IRExpr *
-threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *, IRExpr *> &memo)
+exprbdd *
+threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *, exprbdd *> &memo)
 {
 	if (what->tag == Iex_Const ||
 	    what->tag == Iex_HappensBefore ||
 	    what->tag == Iex_FreeVariable ||
 	    what->tag == Iex_EntryPoint ||
 	    what->tag == Iex_ControlFlow) {
-		return what;
+		return exprbdd::var(&scopes->exprs, &scopes->bools, what, bdd_ordering::rank_hint::Start());
 	}
 
-	auto it_did_insert = memo.insert(std::pair<IRExpr *, IRExpr *>(what, (IRExpr *)0xf001));
+	auto it_did_insert = memo.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -564,34 +564,27 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 		auto g = (IRExprGet *)what;
 		exprbdd *r = register_value(scopes, g->reg, g->ty);
 		if (r) {
-			it->second = exprbdd::to_irexpr(r);
+			it->second = r;
 		} else {
-			it->second = what;
+			it->second = exprbdd::var(&scopes->exprs, &scopes->bools, what, bdd_ordering::rank_hint::End());
 		}
 		break;
 	}
-	case Iex_GetI: {
-		auto g = (IRExprGetI *)what;
-		auto ix = specialiseIRExpr(scopes, g->ix, memo);
-		if (ix == g->ix) {
-			it->second = what;
-		} else {
-			it->second = IRExprGetI::mk(g, ix);
-		}
-		break;
-	}
+	case Iex_GetI:
+		abort();
 	case Iex_Qop: {
 		auto g = (IRExprQop *)what;
 		auto a = specialiseIRExpr(scopes, g->arg1, memo);
 		auto b = specialiseIRExpr(scopes, g->arg2, memo);
 		auto c = specialiseIRExpr(scopes, g->arg3, memo);
 		auto d = specialiseIRExpr(scopes, g->arg4, memo);
-		if (a == g->arg1 && b == g->arg2 &&
-		    c == g->arg3 && d == g->arg4) {
-			it->second = g;
-		} else {
-			it->second = IRExprQop::mk(g->op, a, b, c, d);
-		}
+		it->second = exprbdd::qop(&scopes->exprs,
+					  &scopes->bools,
+					  g->op,
+					  a,
+					  b,
+					  c,
+					  d);
 		break;
 	}
 	case Iex_Triop: {
@@ -599,32 +592,29 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 		auto a = specialiseIRExpr(scopes, g->arg1, memo);
 		auto b = specialiseIRExpr(scopes, g->arg2, memo);
 		auto c = specialiseIRExpr(scopes, g->arg3, memo);
-		if (a == g->arg1 && b == g->arg2 && c == g->arg3) {
-			it->second = g;
-		} else {
-			it->second = IRExprTriop::mk(g->op, a, b, c);
-		}
+		it->second = exprbdd::triop(&scopes->exprs,
+					    &scopes->bools,
+					    g->op,
+					    a,
+					    b,
+					    c);
 		break;
 	}
 	case Iex_Binop: {
 		auto g = (IRExprBinop *)what;
 		auto a = specialiseIRExpr(scopes, g->arg1, memo);
 		auto b = specialiseIRExpr(scopes, g->arg2, memo);
-		if (a == g->arg1 && b == g->arg2) {
-			it->second = g;
-		} else {
-			it->second = IRExprBinop::mk(g->op, a, b);
-		}
+		it->second = exprbdd::binop(&scopes->exprs,
+					    &scopes->bools,
+					    g->op,
+					    a,
+					    b);
 		break;
 	}
 	case Iex_Unop: {
 		auto g = (IRExprUnop *)what;
 		auto a = specialiseIRExpr(scopes, g->arg, memo);
-		if (a == g->arg) {
-			it->second = g;
-		} else {
-			it->second = IRExprUnop::mk(g->op, a);
-		}
+		it->second = exprbdd::unop(&scopes->exprs, &scopes->bools, g->op, a);
 		break;
 	}
 
@@ -647,49 +637,26 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 		for (nr_args = 0; g->args[nr_args]; nr_args++) {
 			/* nop */
 		}
-		IRExpr *c[nr_args];
-		bool realloc = false;
+		exprbdd *c[nr_args];
 		for (int i = 0; i < nr_args; i++) {
 			c[i] = specialiseIRExpr(scopes, g->args[i], memo);
-			if (c[i] != g->args[i]) {
-				realloc = true;
-			}
 		}
-		if (!realloc) {
-			it->second = g;
-		} else {
-			IRExpr **newArgs = alloc_irexpr_array(nr_args + 1);
-			memcpy(newArgs, c, nr_args * sizeof(IRExpr *));
-			newArgs[nr_args] = NULL;
-			it->second = IRExprCCall::mk(g->cee, g->retty, newArgs);
-		}
+		it->second = exprbdd::ccall(&scopes->exprs, &scopes->bools, g->cee, g->retty, c, nr_args);
 		break;
 	}
 	case Iex_Associative: {
 		auto g = (IRExprAssociative *)what;
-		IRExpr *newArgs[g->nr_arguments];
-		bool realloc = false;
+		exprbdd *newArgs[g->nr_arguments];
 		for (int i = 0; i < g->nr_arguments; i++) {
 			newArgs[i] = specialiseIRExpr(scopes, g->contents[i], memo);
-			if (newArgs[i] != g->contents[i]) {
-				realloc = true;
-			}
 		}
-		if (!realloc) {
-			it->second = g;
-		} else {
-			it->second = IRExpr_Associative_Copy(g->op, g->nr_arguments, newArgs);
-		}
+		it->second = exprbdd::associative(&scopes->exprs, &scopes->bools, g->op, newArgs, g->nr_arguments);
 		break;
 	}
 	case Iex_Load: {
 		auto g = (IRExprLoad *)what;
 		auto addr = specialiseIRExpr(scopes, g->addr, memo);
-		if (addr == g->addr) {
-			it->second = g;
-		} else {
-			it->second = IRExprLoad::mk(g->ty, addr);
-		}
+		it->second = exprbdd::load(&scopes->exprs, &scopes->bools, g->ty, addr);
 		break;
 	}
 	}
@@ -698,7 +665,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *,
 
 bbdd *
 threadState::specialiseIRExpr(SMScopes *scopes, bbdd *what, std::map<bbdd *, bbdd *> &memo,
-			      std::map<IRExpr *, IRExpr *> &exprMemo)
+			      std::map<IRExpr *, exprbdd *> &exprMemo)
 {
 	if (what->isLeaf()) {
 		return what;
@@ -707,25 +674,29 @@ threadState::specialiseIRExpr(SMScopes *scopes, bbdd *what, std::map<bbdd *, bbd
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
-		IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
+		exprbdd *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 		bbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 		bbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
 		if (TIMEOUT) {
 			it->second = what;
 		} else if (t == f) {
 			it->second = t;
-		} else if (cond == what->internal().condition &&
-			   t == what->internal().trueBranch &&
-			   f == what->internal().falseBranch) {
-			it->second = what;
-		} else if (cond == what->internal().condition) {
-			it->second = scopes->bools.node(what->internal().condition,
-							what->internal().rank,
-							t,
-							f);
+		} else if (!cond->isLeaf() &&
+			   cond->internal().trueBranch->isLeaf() &&
+			   cond->internal().falseBranch->isLeaf() &&
+			   cond->internal().condition == what->internal().condition) {
+			if (t == what->internal().trueBranch &&
+			    f == what->internal().falseBranch) {
+				it->second = what;
+			} else {
+				it->second = scopes->bools.node(what->internal().condition,
+								what->internal().rank,
+								t,
+								f);
+			}
 		} else {
 			it->second = bbdd::ifelse(&scopes->bools,
-						  bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(what)),
+						  exprbdd::to_bbdd(&scopes->bools, cond),
 						  t,
 						  f);
 		}
@@ -734,7 +705,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, bbdd *what, std::map<bbdd *, bbd
 }
 smrbdd *
 threadState::specialiseIRExpr(SMScopes *scopes, smrbdd *what, std::map<smrbdd *, smrbdd *> &memo,
-			      std::map<IRExpr *, IRExpr *> &exprMemo)
+			      std::map<IRExpr *, exprbdd *> &exprMemo)
 {
 	if (what->isLeaf()) {
 		return what;
@@ -743,25 +714,29 @@ threadState::specialiseIRExpr(SMScopes *scopes, smrbdd *what, std::map<smrbdd *,
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
-		IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
+		exprbdd *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 		smrbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 		smrbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
 		if (TIMEOUT) {
 			it->second = what;
 		} else if (t == f) {
 			it->second = t;
-		} else if (cond == what->internal().condition &&
-			   t == what->internal().trueBranch &&
-			   f == what->internal().falseBranch) {
-			it->second = what;
-		} else if (cond == what->internal().condition) {
-			it->second = scopes->smrs.node(what->internal().condition,
-						       what->internal().rank,
-						       t,
-						       f);
+		} else if (!cond->isLeaf() &&
+			   cond->internal().trueBranch->isLeaf() &&
+			   cond->internal().falseBranch->isLeaf() &&
+			   cond->internal().condition == what->internal().condition) {
+			if (t == what->internal().trueBranch &&
+			    f == what->internal().falseBranch) {
+				it->second = what;
+			} else {
+				it->second = scopes->smrs.node(what->internal().condition,
+							       what->internal().rank,
+							       t,
+							       f);
+			}
 		} else {
 			it->second = smrbdd::ifelse(&scopes->smrs,
-						    bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(what)),
+						    exprbdd::to_bbdd(&scopes->bools, cond),
 						    t,
 						    f);
 		}
@@ -770,43 +745,38 @@ threadState::specialiseIRExpr(SMScopes *scopes, smrbdd *what, std::map<smrbdd *,
 }
 exprbdd *
 threadState::specialiseIRExpr(SMScopes *scopes, exprbdd *what, std::map<exprbdd *, exprbdd *> &memo,
-			      std::map<IRExpr *, IRExpr *> &exprMemo)
+			      std::map<IRExpr *, exprbdd *> &exprMemo)
 {
 	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(what, (exprbdd *)NULL));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
 		if (what->isLeaf()) {
-			IRExpr *l = specialiseIRExpr(scopes, what->leaf(), exprMemo);
-			if (l == what->leaf()) {
-				it->second = what;
-			} else {
-				it->second = exprbdd::var(
-					&scopes->exprs,
-					&scopes->bools,
-					l,
-					bdd_ordering::rank_hint::End());
-			}
+			it->second = specialiseIRExpr(scopes, what->leaf(), exprMemo);
 		} else {
-			IRExpr *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
+			exprbdd *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 			exprbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 			exprbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
 			if (TIMEOUT) {
 				it->second = what;
 			} else if (t == f) {
 				it->second = t;
-			} else if (cond == what->internal().condition &&
-				   t == what->internal().trueBranch &&
-				   f == what->internal().falseBranch) {
-				it->second = what;
-			} else if (cond == what->internal().condition) {
-				it->second = scopes->exprs.node(what->internal().condition,
-								what->internal().rank,
-								t,
-								f);
+			} else if (!cond->isLeaf() &&
+				   cond->internal().trueBranch->isLeaf() &&
+				   cond->internal().falseBranch->isLeaf() &&
+				   cond->internal().condition == what->internal().condition) {
+				if (t == what->internal().trueBranch &&
+				    f == what->internal().falseBranch) {
+					it->second = what;
+				} else {
+					it->second = scopes->exprs.node(what->internal().condition,
+									what->internal().rank,
+									t,
+									f);
+				}
 			} else {
 				it->second = exprbdd::ifelse(&scopes->exprs,
-							     bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(what)),
+							     exprbdd::to_bbdd(&scopes->bools, cond),
 							     t,
 							     f);
 			}
