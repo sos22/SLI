@@ -1515,7 +1515,7 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 		}
 		if (acc == mask &&
 		    (op == Iop_Or1 ||
-		     (op >= Iop_Or8 || op <= Iop_Or64))) {
+		     (op >= Iop_Or8 && op <= Iop_Or64))) {
 			switch (op) {
 			case Iop_Or1: return IRExpr_Const_U1(true);
 			case Iop_Or8: return IRExpr_Const_U8(mask);
