@@ -398,16 +398,70 @@ isSmallMask64(IRExpr *what)
 	return false;
 }
 
+static unsigned long
+fullMask(IRType ty)
+{
+	switch (ty) {
+	case Ity_I1: return 1;
+	case Ity_I8: return 0xff;
+	case Ity_I16: return 0xffff;
+	case Ity_I32: return 0xffffffff;
+	case Ity_I64: return ~0ul;
+	case Ity_I128: return 0xf001; /* special */
+	case Ity_INVALID: break;
+	}
+	abort();
+}
+
+qs_args::qs_args(IRExpr *_what)
+	: what(_what), mask(fullMask(_what->type()))
+{}
+
 /* Some very quick simplifications which are always applied to the
  * condition of BDD internal nodes.  This isn't much more than just
  * constant folding. */
 static IRExpr *
-_quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
+_quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 {
+	IRExpr *a = args.what;
+	unsigned long mask = args.mask;
+
 	switch (a->tag) {
 	case Iex_Unop: {
 		IRExprUnop *au = (IRExprUnop *)a;
-		auto arg = quickSimplify(au->arg, memo);
+		unsigned long newMask;
+		switch (au->op) {
+		case Iop_Not8: case Iop_Not16: case Iop_Not32: case Iop_Not64:
+			newMask = mask;
+			break;
+		case Iop_64to8: case Iop_32to8: case Iop_16to8:
+			newMask = mask & 0xff;
+			break;
+		case Iop_64to16: case Iop_32to16:
+			newMask = mask & 0xffff;
+			break;
+		case Iop_64to32:
+			newMask = mask & 0xffffffff;
+			break;
+		case Iop_16HIto8:
+			newMask = mask & 0xff00;
+			break;
+		case Iop_32HIto16:
+			newMask = mask & 0xffff0000;
+			break;
+		case Iop_64HIto32:
+			newMask = mask & ~0u;
+			break;
+		case Iop_8Uto64: case Iop_16Uto64: case Iop_32Uto64:
+		case Iop_16Uto32: case Iop_8Uto32:
+		case Iop_8Uto16:
+			newMask = mask & fullMask(au->arg->type());
+			break;
+		default:
+			newMask = fullMask(au->arg->type());
+			break;
+		}
+		auto arg = quickSimplify(qs_args(au->arg, newMask), memo);
 		top_unop:
 		if (arg->tag == Iex_Associative) {
 			IRExprAssociative *argA = (IRExprAssociative *)arg;
@@ -418,13 +472,15 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				/* Turn -(x + y) into -x + -y */
 				IRExpr *args[argA->nr_arguments];
 				for (int i = 0; i < argA->nr_arguments; i++) {
-					args[i] = quickSimplify(IRExpr_Unop(au->op, argA->contents[i]), memo);
+					args[i] = quickSimplify(qs_args(IRExpr_Unop(au->op, argA->contents[i]), mask), memo);
 				}
 				return quickSimplify(
-					IRExpr_Associative_Copy(
-						argA->op,
-						argA->nr_arguments,
-						args),
+					qs_args(
+						IRExpr_Associative_Copy(
+							argA->op,
+							argA->nr_arguments,
+							args),
+						mask),
 					memo);
 			}
 			if (au->op == Iop_BadPtr &&
@@ -434,10 +490,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 						arg = argA->contents[1];
 					} else {
 						arg = quickSimplify(
-							IRExpr_Associative_Copy(
-								argA->op,
-								argA->nr_arguments - 1,
-								argA->contents + 1),
+							qs_args(
+								IRExpr_Associative_Copy(
+									argA->op,
+									argA->nr_arguments - 1,
+									argA->contents + 1),
+								mask),
 							memo);
 					}
 					goto top_unop;
@@ -452,10 +510,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 						memcpy(newArgs, argA->contents, sizeof(newArgs[0]) * argA->nr_arguments);
 						newArgs[0] = newCnst;
 						arg = quickSimplify(
-							IRExpr_Associative_Copy(
-								argA->op,
-								argA->nr_arguments,
-								newArgs),
+							qs_args(
+								IRExpr_Associative_Copy(
+									argA->op,
+									argA->nr_arguments,
+									newArgs),
+								mask),
 							memo);
 						goto top_unop;
 					}
@@ -469,10 +529,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					arg = argA->contents[1];
 				} else {
 					arg = quickSimplify(
-						IRExpr_Associative_Copy(
-							argA->op,
-							argA->nr_arguments - 1,
-							argA->contents + 1),
+						qs_args(
+							IRExpr_Associative_Copy(
+								argA->op,
+								argA->nr_arguments - 1,
+								argA->contents + 1),
+							mask),
 						memo);
 				}
 				goto top_unop;
@@ -501,8 +563,11 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			     (mul || otherSafe))) {
 				IRExpr *args[argA->nr_arguments];
 				for (int i = 0; i < argA->nr_arguments; i++) {
-					args[i] = quickSimplify(IRExpr_Unop(au->op, argA->contents[i]),
-								memo);
+					args[i] = quickSimplify(
+						qs_args(
+							IRExpr_Unop(au->op, argA->contents[i]),
+							mask),
+						memo);
 				}
 				int op = (int)argA->op;
 				switch (argA->type()) {
@@ -539,11 +604,13 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				case Ity_I128:
 					abort();
 				}
-				return quickSimplify(IRExpr_Associative_Copy(
-							     (IROp)op,
-							     argA->nr_arguments,
-							     args),
-						     memo);
+				return quickSimplify(
+					qs_args(IRExpr_Associative_Copy(
+							(IROp)op,
+							argA->nr_arguments,
+							args),
+						mask),
+					memo);
 			}
 		}
 
@@ -563,17 +630,21 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		if (au->op == Iop_64to32 && arg->tag == Iex_Binop) {
 			IRExprBinop *ieb = (IRExprBinop *)arg;
 			if (ieb->op == Iop_DivModS64to32) {
-				arg = quickSimplify(IRExpr_Binop(
-							    Iop_DivS64,
-							    ieb->arg1,
-							    ieb->arg2),
-						    memo);
+				arg = quickSimplify(
+					qs_args(IRExpr_Binop(
+							Iop_DivS64,
+							ieb->arg1,
+							ieb->arg2),
+						mask),
+					memo);
 			} else if (ieb->op == Iop_DivModU64to32) {
-				arg = quickSimplify(IRExpr_Binop(
-							    Iop_DivU64,
-							    ieb->arg1,
-							    ieb->arg2),
-						    memo);
+				arg = quickSimplify(
+					qs_args(IRExpr_Binop(
+							Iop_DivU64,
+							ieb->arg1,
+							ieb->arg2),
+						mask),
+					memo);
 			}
 		}
 
@@ -666,11 +737,58 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 	}
 	case Iex_Binop: {
 		IRExprBinop *_ieb = (IRExprBinop *)a;
-		auto arg1 = quickSimplify(_ieb->arg1, memo);
-		auto arg2 = quickSimplify(_ieb->arg2, memo);
+		auto arg2 = quickSimplify(qs_args(_ieb->arg2, fullMask(_ieb->arg2->type())), memo);
+		IRExprConst *arg2C = (arg2->tag == Iex_Const) ? (IRExprConst *)arg2 : NULL;
+
+		unsigned long arg1Mask = fullMask(_ieb->arg1->type());
+		if (arg2C && arg2C->Ico.ty == Ity_I8) {
+			switch (_ieb->op) {
+			case Iop_Shl8: case Iop_Shl16: case Iop_Shl32: case Iop_Shl64:
+				arg1Mask = mask >> arg2C->Ico.content.U8;
+				break;
+			case Iop_Shr8: case Iop_Shr16: case Iop_Shr32: case Iop_Shr64:
+				arg1Mask = mask << arg2C->Ico.content.U8;
+				break;
+			case Iop_Sar8:
+				arg1Mask = mask << arg2C->Ico.content.U8;
+				if (mask >> (8 - arg2C->Ico.content.U8)) {
+					arg1Mask |= 0x80;
+				}
+				break;
+			case Iop_Sar16:
+				arg1Mask = mask << arg2C->Ico.content.U8;
+				if (mask >> (16 - arg2C->Ico.content.U8)) {
+					arg1Mask |= 0x8000;
+				}
+				break;
+			case Iop_Sar32:
+				arg1Mask = mask << arg2C->Ico.content.U8;
+				if (mask >> (32 - arg2C->Ico.content.U8)) {
+					arg1Mask |= 0x80000000;
+				}
+				break;
+			case Iop_Sar64:
+				arg1Mask = mask << arg2C->Ico.content.U8;
+				if (mask >> (64 - arg2C->Ico.content.U8)) {
+					arg1Mask |= (1ul << 63);
+				}
+				break;
+			default:
+				break;
+			}
+			if (arg1Mask == 0) {
+				switch (_ieb->type()) {
+				case Ity_I8: return IRExpr_Const_U8(0);
+				case Ity_I16: return IRExpr_Const_U16(0);
+				case Ity_I32: return IRExpr_Const_U32(0);
+				case Ity_I64: return IRExpr_Const_U64(0);
+				default: abort();
+				}
+			}
+		}
+		auto arg1 = quickSimplify(qs_args(_ieb->arg1, arg1Mask), memo);
 
 		IRExprConst *arg1C = (arg1->tag == Iex_Const) ? (IRExprConst *)arg1 : NULL;
-		IRExprConst *arg2C = (arg2->tag == Iex_Const) ? (IRExprConst *)arg2 : NULL;
 		IRExprAssociative *arg1A = (arg1->tag == Iex_Associative) ? (IRExprAssociative *)arg1 : NULL;
 		IRExprAssociative *arg2A = (arg2->tag == Iex_Associative) ? (IRExprAssociative *)arg2 : NULL;
 		IRExprUnop *arg2U = (arg2->tag == Iex_Unop) ? (IRExprUnop *)arg2 : NULL;
@@ -751,7 +869,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			default:
 				abort();
 			}
-			return quickSimplify(IRExpr_Binop(_ieb->op, newL, newR), memo);						
+			return quickSimplify(qs_args(IRExpr_Binop(_ieb->op, newL, newR), mask), memo);						
 		}
 		/* Turn 0 == x - y into x == y */
 		if (is_eq && arg1C && isZero(arg1C) &&
@@ -760,7 +878,9 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			IRExprUnop *uu = (IRExprUnop *)arg2A->contents[1];
 			if (uu->op >= Iop_Neg8 && uu->op <= Iop_Neg64) {
 				return quickSimplify(
-					IRExpr_Binop(_ieb->op, arg2A->contents[0], uu->arg),
+					qs_args(
+						IRExpr_Binop(_ieb->op, arg2A->contents[0], uu->arg),
+						mask),
 					memo);
 			}
 		}
@@ -784,7 +904,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			default:
 				abort();
 			}
-			return quickSimplify(IRExpr_Binop(_ieb->op, newL, newR), memo);
+			return quickSimplify(qs_args(IRExpr_Binop(_ieb->op, newL, newR), mask), memo);
 		}
 		/* k == widen(X) can be dealt with early */
 		if (is_eq && arg1C && arg2U && arg2U->op >= Iop_8Uto16 && arg2U->op <= Iop_32Sto64) {
@@ -794,9 +914,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ8,
-							     IRExpr_Const_U8(arg1C->Ico.content.U16 & 0xff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ8,
+								     IRExpr_Const_U8(arg1C->Ico.content.U16 & 0xff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_8Uto32:
@@ -804,9 +925,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ8,
-							     IRExpr_Const_U8(arg1C->Ico.content.U32 & 0xff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ8,
+								     IRExpr_Const_U8(arg1C->Ico.content.U32 & 0xff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_8Uto64:
@@ -814,9 +936,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ8,
-							     IRExpr_Const_U8(arg1C->Ico.content.U64 & 0xff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ8,
+								     IRExpr_Const_U8(arg1C->Ico.content.U64 & 0xff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_16Uto32:
@@ -824,9 +947,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ16,
-							     IRExpr_Const_U16(arg1C->Ico.content.U32 & 0xffff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ16,
+								     IRExpr_Const_U16(arg1C->Ico.content.U32 & 0xffff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_16Uto64:
@@ -834,9 +958,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ16,
-							     IRExpr_Const_U16(arg1C->Ico.content.U64 & 0xffff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ16,
+								     IRExpr_Const_U16(arg1C->Ico.content.U64 & 0xffff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_32Uto64:
@@ -844,9 +969,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ32,
-							     IRExpr_Const_U32(arg1C->Ico.content.U64 & 0xffffffff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ32,
+								     IRExpr_Const_U32(arg1C->Ico.content.U64 & 0xffffffff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_8Sto16:
@@ -854,9 +980,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ8,
-							     IRExpr_Const_U8(arg1C->Ico.content.U16 & 0xff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ8,
+								     IRExpr_Const_U8(arg1C->Ico.content.U16 & 0xff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_8Sto32:
@@ -864,9 +991,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ8,
-							     IRExpr_Const_U8(arg1C->Ico.content.U32 & 0xff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ8,
+								     IRExpr_Const_U8(arg1C->Ico.content.U32 & 0xff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_8Sto64:
@@ -874,9 +1002,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ8,
-							     IRExpr_Const_U8(arg1C->Ico.content.U64 & 0xff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ8,
+								     IRExpr_Const_U8(arg1C->Ico.content.U64 & 0xff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_16Sto32:
@@ -884,9 +1013,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ16,
-							     IRExpr_Const_U16(arg1C->Ico.content.U32 & 0xffff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ16,
+								     IRExpr_Const_U16(arg1C->Ico.content.U32 & 0xffff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_16Sto64:
@@ -894,9 +1024,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ16,
-							     IRExpr_Const_U16(arg1C->Ico.content.U64 & 0xffff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ16,
+								     IRExpr_Const_U16(arg1C->Ico.content.U64 & 0xffff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			case Iop_32Sto64:
@@ -904,9 +1035,10 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 					return IRExpr_Const_U1(false);
 				} else {
 					return quickSimplify(
-						IRExpr_Binop(Iop_CmpEQ32,
-							     IRExpr_Const_U32(arg1C->Ico.content.U64 & 0xffffffff),
-							     arg2U->arg),
+						qs_args(IRExpr_Binop(Iop_CmpEQ32,
+								     IRExpr_Const_U32(arg1C->Ico.content.U64 & 0xffffffff),
+								     arg2U->arg),
+							mask),
 						memo);
 				}
 			default:
@@ -961,12 +1093,14 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 								Iop_Add ## sz, \
 								IRExpr_Const_U ## sz (max), \
 								quickSimplify( \
-									IRExpr_Unop( \
-										Iop_Neg ## sz, \
-										k), \
+									qs_args( \
+										IRExpr_Unop( \
+											Iop_Neg ## sz, \
+											k), \
+										fullMask(k->type())), \
 									memo), \
 								NULL);	\
-							arg1 = quickSimplify(arg1, memo); \
+							arg1 = quickSimplify(qs_args(arg1, fullMask(arg1->type())), memo); \
 						}			\
 						break
 					mk_size(8, 255);
@@ -990,10 +1124,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				if (_ieb->op == Iop_CmpLT ## sz ## U && \
 				    arg1C->Ico.content.U ## sz  == max - 1) { \
 					return quickSimplify(		\
-						IRExpr_Binop(		\
-							Iop_CmpEQ ## sz, \
-							IRExpr_Const_U ## sz(max), \
-							arg2),		\
+						qs_args(		\
+							IRExpr_Binop(	\
+								Iop_CmpEQ ## sz, \
+								IRExpr_Const_U ## sz(max), \
+								arg2),	\
+							mask),		\
 						memo);			\
 				}
 				mk_size(8, 255);
@@ -1235,6 +1371,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		int new_nr_args = 0;
 		IRExpr *simpleArgs[nr_arguments];
 		bool realloc = false;
+		unsigned long argmask;
 
 		assert(nr_arguments != 0);
 
@@ -1258,8 +1395,19 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			abort();
 		}
 		acc = defaultValue;
+		if (op >= Iop_And8 && op <= Iop_And64) {
+			acc &= args.mask;
+		}
+		if (op >= Iop_Or8 && op <= Iop_Or64) {
+			acc |= ~args.mask;
+		}
+		if (op >= Iop_Mul8 && op <= Iop_Mul64) {
+			argmask = fullMask(_iea->type());
+		} else {
+			argmask = args.mask;
+		}
 		for (int i = 0; i < nr_arguments; i++) {
-			simpleArgs[i] = quickSimplify(_iea->contents[i], memo);
+			simpleArgs[i] = quickSimplify(qs_args(_iea->contents[i], argmask), memo);
 			if (simpleArgs[i] != _iea->contents[i])
 				realloc = true;
 			if (op >= Iop_And8 &&
@@ -1288,10 +1436,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				case Iop_And1: case Iop_And8: case Iop_And16:
 				case Iop_And32: case Iop_And64:
 					acc &= ((IRExprConst *)simpleArgs[i])->Ico.content.U64;
+					argmask &= ((IRExprConst *)simpleArgs[i])->Ico.content.U64;
 					break;
 				case Iop_Or1: case Iop_Or8: case Iop_Or16:
 				case Iop_Or32: case Iop_Or64:
 					acc |= ((IRExprConst *)simpleArgs[i])->Ico.content.U64;
+					argmask &= ~((IRExprConst *)simpleArgs[i])->Ico.content.U64;
 					break;
 				case Iop_Xor8: case Iop_Xor16:
 				case Iop_Xor32: case Iop_Xor64:
@@ -1318,10 +1468,12 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 						case Iop_And1: case Iop_And8: case Iop_And16:
 						case Iop_And32: case Iop_And64:
 							acc &= ((IRExprConst *)arg->contents[j])->Ico.content.U64;
+							argmask &= ((IRExprConst *)arg->contents[j])->Ico.content.U64;
 							break;
 						case Iop_Or1: case Iop_Or8: case Iop_Or16:
 						case Iop_Or32: case Iop_Or64:
 							acc |= ((IRExprConst *)arg->contents[j])->Ico.content.U64;
+							argmask &= ~((IRExprConst *)arg->contents[j])->Ico.content.U64;
 							break;
 						case Iop_Xor8: case Iop_Xor16:
 						case Iop_Xor32: case Iop_Xor64:
@@ -1347,14 +1499,13 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			}
 		}
 		acc &= mask;
-		if (op == Iop_And1 && acc == 0)
-			return IRExpr_Const_U1(false);
-		if (op == Iop_Or1 && acc == 1)
-			return IRExpr_Const_U1(true);
+		acc &= args.mask;
 		if (acc == 0 &&
 		    ((op >= Iop_Mul8 && op <= Iop_Mul64) ||
-		     (op >= Iop_And8 && op <= Iop_And64))) {
+		     (op >= Iop_And8 && op <= Iop_And64) ||
+		     op == Iop_And1)) {
 			switch (op) {
+			case Iop_And1: return IRExpr_Const_U1(false);
 			case Iop_Mul8: case Iop_And8: return IRExpr_Const_U8(0);
 			case Iop_Mul16: case Iop_And16: return IRExpr_Const_U16(0);
 			case Iop_Mul32: case Iop_And32: return IRExpr_Const_U32(0);
@@ -1362,7 +1513,18 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 			default: abort();
 			}
 		}
-
+		if (acc == mask &&
+		    (op == Iop_Or1 ||
+		     (op >= Iop_Or8 && op <= Iop_Or64))) {
+			switch (op) {
+			case Iop_Or1: return IRExpr_Const_U1(true);
+			case Iop_Or8: return IRExpr_Const_U8(mask);
+			case Iop_Or16: return IRExpr_Const_U16(mask);
+			case Iop_Or32: return IRExpr_Const_U32(mask);
+			case Iop_Or64: return IRExpr_Const_U64(mask);
+			default: abort();
+			}
+		}
 		if (new_nr_args == 0) {
 		result_is_zero:
 			switch (_iea->type()) {
@@ -1504,7 +1666,8 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				IRExpr *cc[kOwner->nr_arguments];
 				memcpy(cc, kOwner->contents, sizeof(IRExpr *) * kOwner->nr_arguments);
 				cc[0] = newC;
-				newArgs[1] = quickSimplify(IRExpr_Associative_Copy(kOwner->op, kOwner->nr_arguments, cc),
+				newArgs[1] = quickSimplify(qs_args(IRExpr_Associative_Copy(kOwner->op, kOwner->nr_arguments, cc),
+								   argmask),
 							   memo);
 			}
 		}
@@ -1517,9 +1680,9 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 	}
 	case Iex_Mux0X: {
 		IRExprMux0X *m = (IRExprMux0X *)a;
-		auto cond = quickSimplify(m->cond, memo);
-		auto expr0 = quickSimplify(m->expr0, memo);
-		auto exprX = quickSimplify(m->exprX, memo);
+		auto cond = quickSimplify(qs_args(m->cond, 1), memo);
+		auto expr0 = quickSimplify(qs_args(m->expr0, mask), memo);
+		auto exprX = quickSimplify(qs_args(m->exprX, mask), memo);
 		if (cond != m->cond || expr0 != m->expr0 ||
 		    exprX != m->exprX)
 			a = IRExprMux0X::mk(cond, expr0, exprX);
@@ -1527,7 +1690,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 	}
 	case Iex_Load: {
 		IRExprLoad *l = (IRExprLoad *)a;
-		auto addr = quickSimplify(l->addr, memo);
+		auto addr = quickSimplify(qs_args(l->addr, ~0ul), memo);
 		if (addr != l->addr)
 			a = IRExprLoad::mk(l->ty, addr);
 		break;
@@ -1542,19 +1705,19 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		break;
 	case Iex_Qop: {
 		IRExprQop *q = (IRExprQop *)a;
-		auto a1 = quickSimplify(q->arg1, memo);
-		auto a2 = quickSimplify(q->arg2, memo);
-		auto a3 = quickSimplify(q->arg3, memo);
-		auto a4 = quickSimplify(q->arg4, memo);
+		auto a1 = quickSimplify(qs_args(q->arg1, fullMask(q->arg1->type())), memo);
+		auto a2 = quickSimplify(qs_args(q->arg2, fullMask(q->arg2->type())), memo);
+		auto a3 = quickSimplify(qs_args(q->arg3, fullMask(q->arg3->type())), memo);
+		auto a4 = quickSimplify(qs_args(q->arg4, fullMask(q->arg4->type())), memo);
 		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3 || a4 != q->arg4)
 			a = IRExprQop::mk(q->op, a1, a2, a3, a4);
 		break;
 	}
 	case Iex_Triop: {
 		IRExprTriop *q = (IRExprTriop *)a;
-		auto a1 = quickSimplify(q->arg1, memo);
-		auto a2 = quickSimplify(q->arg2, memo);
-		auto a3 = quickSimplify(q->arg3, memo);
+		auto a1 = quickSimplify(qs_args(q->arg1, fullMask(q->arg1->type())), memo);
+		auto a2 = quickSimplify(qs_args(q->arg2, fullMask(q->arg2->type())), memo);
+		auto a3 = quickSimplify(qs_args(q->arg3, fullMask(q->arg3->type())), memo);
 		if (a1 != q->arg1 || a2 != q->arg2 || a3 != q->arg3)
 			a = IRExprTriop::mk(q->op, a1, a2, a3);
 		break;
@@ -1568,7 +1731,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 		newArgs[nr_args] = NULL;
 		bool realloc = false;
 		for (int i = 0; i < nr_args; i++) {
-			newArgs[i] = quickSimplify(c->args[i], memo);
+			newArgs[i] = quickSimplify(qs_args(c->args[i], fullMask(c->args[i]->type())), memo);
 			if (newArgs[i] != c->args[i])
 				realloc = true;
 		}
@@ -1582,7 +1745,7 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 				newArgs[2],
 				newArgs[3]);
 			if (r) {
-				return _quickSimplify(r, memo);
+				return _quickSimplify(qs_args(r, mask), memo);
 			}
 		}
 		if (realloc) {
@@ -1597,9 +1760,27 @@ _quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 }
 
 IRExpr *
-quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
+quickSimplify(const qs_args &a, std::map<qs_args, IRExpr *> &memo)
 {
-	auto it_did_insert = memo.insert(std::pair<IRExpr *, IRExpr *>(a, (IRExpr *)0xf001));
+	if (a.what->tag == Iex_Const || a.what->tag == Iex_Get ||
+	    a.what->tag == Iex_HappensBefore || a.what->tag == Iex_EntryPoint ||
+	    a.what->tag == Iex_ControlFlow) {
+		/* Quick out without going through the memo table if
+		   it's an op which never requires simplification. */
+		return a.what;
+	}
+	if (a.mask == 0) {
+		switch (a.what->type()) {
+		case Ity_I1: return IRExpr_Const_U1(false);
+		case Ity_I8: return IRExpr_Const_U8(0);
+		case Ity_I16: return IRExpr_Const_U16(0);
+		case Ity_I32: return IRExpr_Const_U32(0);
+		case Ity_I64: return IRExpr_Const_U64(0);
+		case Ity_I128: break;
+		case Ity_INVALID: abort();
+		}
+	}
+	auto it_did_insert = memo.insert(std::pair<qs_args, IRExpr *>(a, (IRExpr *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (did_insert)
@@ -1608,7 +1789,7 @@ quickSimplify(IRExpr *a, std::map<IRExpr *, IRExpr *> &memo)
 }
 
 bbdd *
-bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo)
+bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo, const bdd_ordering::rank_hint &hint)
 {
 	if (TIMEOUT)
 		return scope->cnst(true);
@@ -1620,32 +1801,34 @@ bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo)
 	if (a->tag == Iex_Mux0X) {
 		it->second = ifelse(
 			scope,
-			_var(scope, ((IRExprMux0X *)a)->cond, memo),
-			_var(scope, ((IRExprMux0X *)a)->exprX, memo),
-			_var(scope, ((IRExprMux0X *)a)->expr0, memo));
+			_var(scope, ((IRExprMux0X *)a)->cond, memo, hint),
+			_var(scope, ((IRExprMux0X *)a)->exprX, memo, hint),
+			_var(scope, ((IRExprMux0X *)a)->expr0, memo, hint));
 	} else {
 		it->second = scope->node(
 			a,
-			scope->ordering->rankVariable(a),
+			scope->ordering->rankVariable(a, hint),
 			scope->cnst(true),
 			scope->cnst(false));
 	}
 	return it->second;
 }
 bbdd *
-bbdd::var(scope *scope, IRExpr *a)
+bbdd::var(scope *scope, IRExpr *a, const bdd_ordering::rank_hint &hint)
 {
-	std::map<IRExpr *, IRExpr *> qsMemo;
+	std::map<qs_args, IRExpr *> qsMemo;
 	std::map<IRExpr *, IRExpr *> muxMemo;
 	std::map<IRExpr *, bbdd *> vMemo;
 	return _var(
 		scope,
 		quickSimplify(
-			muxify(
-				quickSimplify(a, qsMemo),
-				muxMemo),
+			qs_args(muxify(
+					quickSimplify(qs_args(a, 1), qsMemo),
+					muxMemo),
+				1),
 			qsMemo),
-		vMemo);
+		vMemo,
+		hint);
 }
 
 class binary_zip_internal {
@@ -1784,8 +1967,14 @@ bbdd::invert(scope *scope, bbdd *a, std::map<bbdd *, bbdd *> &memo)
 }
 
 bdd_rank
-bdd_ordering::rankVariable(const IRExpr *a)
+bdd_ordering::rankVariable(const IRExpr *a, const rank_hint &hint)
 {
+	auto it_did_insert = variableRankings.insert(a, bdd_rank());
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
 	bdd_rank::clsT cls;
 	if (a->tag == Iex_EntryPoint || a->tag == Iex_ControlFlow) {
 		cls.tag = bdd_rank::clsT::cls_entry;
@@ -1796,29 +1985,67 @@ bdd_ordering::rankVariable(const IRExpr *a)
 	} else {
 		cls.tag = bdd_rank::clsT::cls_norm;
 	}
-	long &rankNr(nextRanking[cls]);
-	bdd_rank rank;
-	rank.cls = cls;
-	rank.val = rankNr;
-	auto it_did_insert = variableRankings.insert(std::pair<const IRExpr *, bdd_rank>(a, rank));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (did_insert) {
-		rankNr--;
+	std::set<long> &taken(alreadyUsed[cls]);
+	long rankNr;
+	if (taken.empty()) {
+		rankNr = 0;
+		taken.insert(0);
+	} else {
+		switch (hint.flavour) {
+		case rank_hint::start:
+			rankNr = *taken.begin() - 1000;
+			taken.insert(taken.begin(), rankNr);
+			break;
+		case rank_hint::end: {
+			auto it2 = taken.end();
+			it2--;
+			rankNr = *it2 + 1000;
+			taken.insert(taken.end(), rankNr);
+			break;
+		}
+		case rank_hint::never:
+			abort();
+		case rank_hint::near: {
+			if (hint._near.cls == cls) {
+				auto it2 = taken.find(hint._near.val);
+				while (1) {
+					auto next = it2;
+					next++;
+					if (next == taken.end() || *next != *it2 + 1) {
+						rankNr = *it2 + 1;
+						taken.insert(next, rankNr);
+						break;
+					}
+					it2 = next;
+				}
+			} else {
+				auto it2 = taken.end();
+				it2--;
+				rankNr = *it2 + 1000;
+				taken.insert(taken.end(), rankNr);
+			}
+			break;
+		}
+		}
 	}
-	return it->second;
+	bdd_rank r;
+	r.cls = cls;
+	r.val = rankNr;
+	it->second = r;
+	return r;
 }
 
 void
 bdd_ordering::runGc(HeapVisitor &hv)
 {
-	std::map<const IRExpr *, bdd_rank> newRankings;
+	sane_map<const IRExpr *, bdd_rank> newRankings;
 	for (auto it = variableRankings.begin();
 	     it != variableRankings.end();
 	     it++) {
 		const IRExpr *a = hv.visited(it->first);
-		if (a)
+		if (a) {
 			newRankings[a] = it->second;
+		}
 	}
 	variableRankings = newRankings;
 }
@@ -1900,9 +2127,7 @@ bdd_ordering::parse(const char *buf, const char **end)
 		    !parseThisChar('\n', buf, &buf))
 			break;
 		variableRankings[key] = rank;
-		if (nextRanking[rank.cls] >= rank.val) {
-			nextRanking[rank.cls] = rank.val - 1;
-		}
+		alreadyUsed[rank.cls].insert(rank.val);
 	}
 	*end = buf;
 	return true;
@@ -1938,7 +2163,9 @@ exprbdd::sanity_check(bdd_ordering *ordering) const
 }
 
 exprbdd *
-exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what, std::map<IRExpr *, exprbdd *> &memo)
+exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what,
+	      std::map<IRExpr *, exprbdd *> &memo,
+	      const bdd_ordering::rank_hint &hint)
 {
 	if (TIMEOUT)
 		return NULL;
@@ -1952,13 +2179,13 @@ exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what, std::map
 	if (what->tag == Iex_Mux0X)
 		it->second = ifelse(
 			scope,
-			bbdd::var(bscope, ((IRExprMux0X *)what)->cond),
-			_var(scope, bscope, ((IRExprMux0X *)what)->exprX, memo),
-			_var(scope, bscope, ((IRExprMux0X *)what)->expr0, memo));
+			bbdd::var(bscope, ((IRExprMux0X *)what)->cond, hint),
+			_var(scope, bscope, ((IRExprMux0X *)what)->exprX, memo, hint),
+			_var(scope, bscope, ((IRExprMux0X *)what)->expr0, memo, hint));
 	else if (what->type() == Ity_I1)
 		it->second = ifelse(
 			scope,
-			bbdd::var(bscope, what),
+			bbdd::var(bscope, what, hint),
 			scope->cnst(IRExpr_Const_U1(true)),
 			scope->cnst(IRExpr_Const_U1(false)));
 	else
@@ -1967,12 +2194,25 @@ exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what, std::map
 }
 
 exprbdd *
-exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what)
+exprbdd::var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what,
+	     const bdd_ordering::rank_hint &hint)
 {
-	std::map<IRExpr *, IRExpr *> qsMemo;
+	unsigned long mask = fullMask(what->type());
+	std::map<qs_args, IRExpr *> qsMemo;
 	std::map<IRExpr *, IRExpr *> muxMemo;
 	std::map<IRExpr *, exprbdd *> vMemo;
-	return _var(scope, bscope, quickSimplify(muxify(quickSimplify(what, qsMemo), muxMemo), qsMemo), vMemo);
+	return _var(scope, bscope,
+		    quickSimplify(
+			    qs_args(
+				    muxify(
+					    quickSimplify(
+						    qs_args(what, mask),
+						    qsMemo),
+					    muxMemo),
+				    mask),
+			    qsMemo),
+		    vMemo,
+		    hint);
 }
 
 IRExpr *
@@ -2021,8 +2261,10 @@ exprbdd_scope::cnst(IRExpr *what)
 	auto it_did_insert = leaves.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
-	if (did_insert)
+	if (did_insert) {
 		it->second = new exprbdd(what);
+		nr_ever++;
+	}
 	return it->second;
 }
 
@@ -2046,176 +2288,299 @@ exprbdd_scope::runGc(HeapVisitor &hv)
 	bdd_scope<exprbdd>::runGc(hv);
 }
 
-class unop_zipper {
+class irop_zipper {
 	IROp op;
-	exprbdd *what;
+	IRExprTag flavour;
+	int nr_arguments;
+	void *args_inline[2];
+	void **other_args;
+	int nr_iex_args() const {
+		if (flavour == Iex_CCall) {
+			return nr_arguments - 2;
+		} else if (flavour == Iex_Load) {
+			return 1;
+		} else {
+			return nr_arguments;
+		}
+	}
+	void *argument(int i) const {
+		if (i < 2) {
+			return args_inline[i];
+		} else {
+			return other_args[i-2];
+		}
+	}
+	exprbdd *iex_arg(int i) const {
+		if (flavour == Iex_CCall) {
+			i += 2;
+		} else if (flavour == Iex_Load) {
+			assert(i == 0);
+			i = 1;
+		}
+		return (exprbdd *)argument(i);
+	}
+	void operator=(const irop_zipper &o); /* DNI */
 public:
-	unop_zipper(IROp _op, exprbdd *_what)
-		: op(_op), what(_what)
-	{}
-	bool isLeaf() const { return what->isLeaf(); }
+	~irop_zipper()
+	{
+		free(other_args);
+	}
+	irop_zipper(const irop_zipper &o)
+		: op(o.op), flavour(o.flavour), nr_arguments(o.nr_arguments)
+	{
+		args_inline[0] = o.args_inline[0];
+		args_inline[1] = o.args_inline[1];
+		if (nr_arguments > 2) {
+			other_args = (void **)malloc(sizeof(void *) * (nr_arguments - 2));
+			memcpy(other_args, o.other_args, sizeof(void *) * (nr_arguments - 2));
+		} else {
+			other_args = NULL;
+		}
+	}
+	irop_zipper(IROp _op, IRExprTag _flavour, int _nr_arguments, void **_arguments)
+		: op(_op), flavour(_flavour), nr_arguments(_nr_arguments)
+	{
+		switch (flavour) {
+		case Iex_Unop:
+			assert(nr_arguments == 1);
+			break;
+		case Iex_Binop:
+			assert(nr_arguments == 2);
+			break;
+		case Iex_Triop:
+			assert(nr_arguments == 3);
+			break;
+		case Iex_Qop:
+			assert(nr_arguments == 4);
+			break;
+		case Iex_Associative:
+			break;
+		case Iex_CCall:
+			/* First argument is retty, second argument is ccall structure */
+			assert(nr_arguments >= 2);
+			break;
+		case Iex_Load:
+			/* First argument is type, second is address */
+			assert(nr_arguments == 2);
+			break;
+		default:
+			abort();
+		}
+		if (nr_arguments > 0) {
+			args_inline[0] = _arguments[0];
+		}
+		if (nr_arguments > 1) {
+			args_inline[1] = _arguments[1];
+		}
+		if (nr_arguments > 2) {
+			other_args = (void **)malloc(sizeof(void *) * (nr_arguments - 2));
+			memcpy(other_args, _arguments + 2, sizeof(void *) * (nr_arguments - 2));
+		} else {
+			other_args = NULL;
+		}
+	}
+	bool isLeaf() const {
+		for (int i = 0; i < nr_iex_args(); i++) {
+			if (!iex_arg(i)->isLeaf()) {
+				return false;
+			}
+		}
+		return true;
+	}
 	exprbdd *leaf(exprbdd::scope *scope,
 		      bbdd::scope *bscope) const {
-		return exprbdd::var(
-			scope,
-			bscope,
-			IRExpr_Unop(op, what->leaf()));
+		switch (flavour) {
+		case Iex_Unop:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Unop(op, iex_arg(0)->leaf()),
+				bdd_ordering::rank_hint::End());
+		case Iex_Binop:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Binop(op, iex_arg(0)->leaf(), iex_arg(1)->leaf()),
+				bdd_ordering::rank_hint::End());
+		case Iex_Triop:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Triop(op, iex_arg(0)->leaf(), iex_arg(1)->leaf(), iex_arg(2)->leaf()),
+				bdd_ordering::rank_hint::End());
+		case Iex_Qop:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Qop(op, iex_arg(0)->leaf(), iex_arg(1)->leaf(), iex_arg(2)->leaf(), iex_arg(3)->leaf()),
+				bdd_ordering::rank_hint::End());
+		case Iex_Associative: {
+			IRExpr *args[nr_arguments];
+			for (int i = 0; i < nr_iex_args(); i++) {
+				args[i] = iex_arg(i)->leaf();
+			}
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExpr_Associative_Copy(op, nr_arguments, args),
+				bdd_ordering::rank_hint::End());
+		}
+		case Iex_CCall: {
+			IRExpr **args = alloc_irexpr_array(nr_iex_args() + 1);
+			for (int i = 0; i < nr_iex_args(); i++) {
+				args[i] = iex_arg(i)->leaf();
+			}
+			args[nr_iex_args()] = NULL;
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExprCCall::mk( (IRCallee*)argument(1),
+						 (IRType)(unsigned long)argument(0),
+						 args),
+				bdd_ordering::rank_hint::End());
+		}
+		case Iex_Load:
+			return exprbdd::var(
+				scope,
+				bscope,
+				IRExprLoad::mk( (IRType)(unsigned long)argument(0),
+						iex_arg(0)->leaf()),
+				bdd_ordering::rank_hint::End());
+		default:
+			abort();
+		}
 	}
-	IRExpr *condition() const {
-		return what->internal().condition;
+	const bdd_rank &rank(IRExpr **condition) const {
+		int i;
+		for (i = 0; i < nr_iex_args(); i++) {
+			if (!iex_arg(i)->isLeaf()) {
+				break;
+			}
+		}
+		assert(i != nr_iex_args());
+		int bestIdx = i;
+		for (i++; i < nr_iex_args(); i++) {
+			if (iex_arg(i)->isLeaf()) {
+				continue;
+			}
+			if (iex_arg(i)->internal().rank < iex_arg(bestIdx)->internal().rank) {
+				bestIdx = i;
+			}
+		}
+		*condition = iex_arg(bestIdx)->internal().condition;
+		return iex_arg(bestIdx)->internal().rank;
 	}
-	const bdd_rank &rank() const {
-		return what->internal().rank;
+	irop_zipper trueBranch(const bdd_rank &cond) const {
+		void *newArgs[nr_arguments];
+		int outIdx;
+		if (flavour == Iex_Load) {
+			newArgs[0] = argument(0);
+			outIdx = 1;
+		} else if (flavour == Iex_CCall) {
+			newArgs[0] = argument(0);
+			newArgs[1] = argument(1);
+			outIdx = 2;
+		} else {
+			outIdx = 0;
+		}
+		for (int inIdx = 0; inIdx < nr_iex_args(); inIdx++, outIdx++) {
+			newArgs[outIdx] = iex_arg(inIdx)->trueBranch(cond);
+		}
+		return irop_zipper(op, flavour, nr_arguments, newArgs);
 	}
-	unop_zipper trueBranch() const {
-		return unop_zipper(op, what->internal().trueBranch);
+	irop_zipper falseBranch(const bdd_rank &cond) const {
+		void *newArgs[nr_arguments];
+		int outIdx;
+		if (flavour == Iex_Load) {
+			newArgs[0] = argument(0);
+			outIdx = 1;
+		} else if (flavour == Iex_CCall) {
+			newArgs[0] = argument(0);
+			newArgs[1] = argument(1);
+			outIdx = 2;
+		} else {
+			outIdx = 0;
+		}
+		for (int inIdx = 0; inIdx < nr_iex_args(); inIdx++, outIdx++) {
+			newArgs[outIdx] = iex_arg(inIdx)->falseBranch(cond);
+		}
+		return irop_zipper(op, flavour, nr_arguments, newArgs);
 	}
-	unop_zipper falseBranch() const {
-		return unop_zipper(op, what->internal().falseBranch);
-	}
-	bool operator<(const unop_zipper &o) const {
-		if (what < o.what)
+	bool operator<(const irop_zipper &o) const {
+		if (flavour < o.flavour) {
 			return true;
-		if (what > o.what)
+		} else if (flavour > o.flavour) {
 			return false;
-		return op < o.op;
+		} else if (nr_arguments < o.nr_arguments) {
+			return true;
+		} else if (nr_arguments > o.nr_arguments) {
+			return false;
+		}
+		if (flavour != Iex_Load && flavour != Iex_CCall) {
+			if (op < o.op) {
+				return true;
+			} else if (op > o.op) {
+				return false;
+			}
+		}
+		for (int i = 0; i < nr_arguments; i++) {
+			if (argument(i) < o.argument(i)) {
+				return true;
+			} else if (argument(i) > o.argument(i)) {
+				return false;
+			}
+		}
+		return false;
 	}
 };
 exprbdd *
 exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 {
 	if (!TIMEOUT) {
-		auto r = exprbdd::restructure_zip(scope, bscope, unop_zipper(op, what));
+		auto r = exprbdd::restructure_zip(scope, bscope, irop_zipper(op, Iex_Unop, 1, (void **)&what));
 		if (!TIMEOUT) {
 			return r;
 		}
 	}
 	return what;
 }
-
-class binop_zip {
-	IROp op;
-	exprbdd *a;
-	exprbdd *b;
-public:
-	binop_zip(IROp _op, exprbdd *_a, exprbdd *_b)
-		: op(_op), a(_a), b(_b)
-	{}
-	bool isLeaf() const {
-		return a->isLeaf() && b->isLeaf();
-	}
-	exprbdd *leaf(exprbdd::scope *scope, bbdd::scope *bscope) const {
-		return exprbdd::var(scope, bscope, IRExpr_Binop(op, a->leaf(), b->leaf()));
-	}
-	IRExpr *condition() const {
-		if (a->isLeaf()) {
-			assert(!b->isLeaf());
-			return b->internal().condition;
-		} else if (b->isLeaf()) {
-			return a->internal().condition;
-		} else if (a->internal().rank <= b->internal().rank) {
-			return a->internal().condition;
-		} else {
-			return b->internal().condition;
-		}
-	}
-	const bdd_rank &rank() const {
-		if (a->isLeaf()) {
-			assert(!b->isLeaf());
-			return b->internal().rank;
-		} else if (b->isLeaf()) {
-			return a->internal().rank;
-		} else if (a->internal().rank <= b->internal().rank) {
-			return a->internal().rank;
-		} else {
-			return b->internal().rank;
-		}
-	}
-	binop_zip trueBranch() const {
-		if (a->isLeaf()) {
-			assert(!b->isLeaf());
-			return binop_zip(op, a, b->internal().trueBranch);
-		} else if (b->isLeaf()) {
-			return binop_zip(op, a->internal().trueBranch, b);
-		} else if (a->internal().rank < b->internal().rank) {
-			return binop_zip(op, a->internal().trueBranch, b);
-		} else if (a->internal().rank == b->internal().rank) {
-			return binop_zip(op, a->internal().trueBranch, b->internal().trueBranch);
-		} else {
-			return binop_zip(op, a, b->internal().trueBranch);
-		}
-	}
-	binop_zip falseBranch() const {
-		if (a->isLeaf()) {
-			assert(!b->isLeaf());
-			return binop_zip(op, a, b->internal().falseBranch);
-		} else if (b->isLeaf()) {
-			return binop_zip(op, a->internal().falseBranch, b);
-		} else if (a->internal().rank < b->internal().rank) {
-			return binop_zip(op, a->internal().falseBranch, b);
-		} else if (a->internal().rank == b->internal().rank) {
-			return binop_zip(op, a->internal().falseBranch, b->internal().falseBranch);
-		} else {
-			return binop_zip(op, a, b->internal().falseBranch);
-		}
-	}
-	bool operator<(const binop_zip &o) const {
-		if (a < o.a)
-			return true;
-		if (a > o.a)
-			return false;
-		if (b < o.b)
-			return true;
-		if (b > o.b)
-			return false;
-		return op < o.op;
-	}
-};
 exprbdd *
 exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b)
 {
-	return restructure_zip(scope, bscope, binop_zip(op, a, b));
+	void *args[2] = {a, b};
+	return restructure_zip(scope, bscope, irop_zipper(op, Iex_Binop, 2, args));
 }
-
-class load_zipper {
-	IRType ty;
-	exprbdd *what;
-public:
-	load_zipper(IRType _ty, exprbdd *_what)
-		: ty(_ty), what(_what)
-	{}
-	bool isLeaf() const { return what->isLeaf(); }
-	exprbdd *leaf(exprbdd::scope *scope,
-		      bbdd::scope *bscope) const {
-		return exprbdd::var(
-			scope,
-			bscope,
-			IRExpr_Load(ty, what->leaf()));
-	}
-	IRExpr *condition() const {
-		return what->internal().condition;
-	}
-	const bdd_rank &rank() const {
-		return what->internal().rank;
-	}
-	load_zipper trueBranch() const {
-		return load_zipper(ty, what->internal().trueBranch);
-	}
-	load_zipper falseBranch() const {
-		return load_zipper(ty, what->internal().falseBranch);
-	}
-	bool operator<(const load_zipper &o) const {
-		if (what < o.what)
-			return true;
-		if (what > o.what)
-			return false;
-		return ty < o.ty;
-	}
-};
 exprbdd *
-exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *what)
+exprbdd::triop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b, exprbdd *c)
 {
-	return restructure_zip(scope, bscope, load_zipper(ty, what));
+	void *args[3] = {a, b, c};
+	return restructure_zip(scope, bscope, irop_zipper(op, Iex_Triop, 3, args));
+}
+exprbdd *
+exprbdd::qop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b, exprbdd *c, exprbdd *d)
+{
+	void *args[4] = {a, b, c, d};
+	return restructure_zip(scope, bscope, irop_zipper(op, Iex_Qop, 4, args));
+}
+exprbdd *
+exprbdd::associative(scope *scope, bbdd::scope *bscope, IROp op, exprbdd **args, int nr_args)
+{
+	return restructure_zip(scope, bscope, irop_zipper(op, Iex_Associative, nr_args, (void **)args));
+}
+exprbdd *
+exprbdd::load(scope *scope, bbdd::scope *bscope, IRType ty, exprbdd *a)
+{
+	void *args[2] = {(void *)ty, a};
+	return restructure_zip(scope, bscope, irop_zipper(Iop_INVALID, Iex_Load, 2, args));
+}
+exprbdd *
+exprbdd::ccall(scope *scope, bbdd::scope *bscope, IRCallee *cee, IRType ty, exprbdd **args1, int nr_args1)
+{
+	void *args[nr_args1 + 2];
+	args[0] = (void *)ty;
+	args[1] = cee;
+	memcpy(args + 2, args1, sizeof(void *) * nr_args1);
+	return restructure_zip(scope, bscope, irop_zipper(Iop_INVALID, Iex_CCall, nr_args1 + 2, args));
 }
 
 exprbdd *
@@ -2239,7 +2604,7 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr, std::map<exprbdd *, bbdd *> 
 				it->second =
 					scope->node(
 						l,
-						scope->ordering->rankVariable(l),
+						scope->ordering->rankVariable(l, bdd_ordering::rank_hint::End()),
 						scope->cnst(true),
 						scope->cnst(false));
 			}
@@ -2357,3 +2722,12 @@ template exprbdd *_bdd<IRExpr *, exprbdd>::from_enabling(exprbdd_scope *, const 
 template void _bdd<IRExpr *, exprbdd>::dotPrint(FILE *f) const;
 template void _bdd<bool, bbdd>::dotPrint(FILE *f) const;
 template void _bdd<StateMachineRes, smrbdd>::dotPrint(FILE *f) const;
+
+
+/* Mostly for the benefit of the debugger */
+static IRExpr *dbg_quick_simplify(IRExpr *what, unsigned long mask) __attribute__((noinline, used, unused));
+static IRExpr *dbg_quick_simplify(IRExpr *what, unsigned long mask)
+{
+	std::map<qs_args, IRExpr *> memo;
+	return quickSimplify(qs_args(what, mask), memo);
+}

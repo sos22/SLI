@@ -57,7 +57,7 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 		return trueTarget;
 	}
 
-	set_condition(simplifyBDD(&scopes->bools, condition, opt));
+	*done_something |= set_condition(simplifyBDD(&scopes->bools, condition, opt));
 	if (TIMEOUT)
 		return this;
 	if (condition->isLeaf()) {
@@ -1025,24 +1025,26 @@ StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisatio
 				   but I can't because target might be
 				   shared with some other part of the
 				   machine, so duplicate it. */
-				target = new StateMachineSideEffecting(
-					target->dbg_origin,
-					new StateMachineSideEffectCopy(
-						otherEffect->reg,
-						exprbdd::var(&scopes->exprs, &scopes->bools,
-							     IRExpr_Get(thisEffect->reg, Ity_I64))),
-					targ->target);
+				target = (new StateMachineSideEffecting(
+						  target->dbg_origin,
+						  new StateMachineSideEffectCopy(
+							  otherEffect->reg,
+							  exprbdd::var(&scopes->exprs, &scopes->bools,
+								       IRExpr_Get(thisEffect->reg, Ity_I64),
+								       bdd_ordering::rank_hint::Start())),
+						  targ->target))->optimise(scopes, opt, done_something);
 				return this;
 			} else if (otherEffect->set < thisEffect->set) {
 				/* Sort the effects */
 				*done_something = true;
-				return new StateMachineSideEffecting(
-					target->dbg_origin,
-					otherEffect,
-					new StateMachineSideEffecting(
-						dbg_origin,
-						thisEffect,
-						targ->target));
+				return (new StateMachineSideEffecting(
+						target->dbg_origin,
+						otherEffect,
+						(new StateMachineSideEffecting(
+							dbg_origin,
+							thisEffect,
+							targ->target))->optimise(scopes, opt, done_something)))
+					->optimise(scopes, opt, done_something);
 			}
 		}
 	}

@@ -83,38 +83,6 @@ public:
 	void print(FILE *f) const;
 };
 
-/* Map from instructions to instructions which happen immediately
-   before them, including those ordered by happens-before
-   relationships. */
-class predecessorMapT : public instrToInstrSetMap {
-public:
-	predecessorMapT() {}
-	predecessorMapT(CrashCfg &cfg);
-};
-
-/* An encoding of the happens-before edges in a DNF clause into a map
-   over Instructions. */
-class happensAfterMapT {
-public:
-	/* happensBefore[i] -> the set of all instructions ordered before i */
-	instrToInstrSetMap happensBefore;
-	/* happensBefore[i] -> the set of all instructions ordered after i */
-	instrToInstrSetMap happensAfter;
-	happensAfterMapT(const SummaryId &summary,
-			 const std::set<const IRExprHappensBefore *> &trueHb,
-			 const std::set<const IRExprHappensBefore *> &falseHb,
-			 ThreadAbstracter &abs,
-			 CrashCfg &cfg,
-			 const MaiMap &mai);
-	happensAfterMapT() {}
-	void print(FILE *f) {
-		fprintf(f, "before:\n");
-		happensBefore.print(f);
-		fprintf(f, "after:\n");
-		happensAfter.print(f);
-	}
-};
-
 class input_expression : public Named {
 	char *mkName() const;
 	input_expression(unsigned thread, unsigned vex_offset);
@@ -325,8 +293,8 @@ public:
 
 	slotMapT() { }
 
-	slotMapT(std::map<ThreadCfgLabel, std::set<input_expression> > &neededExpressions,
-		 std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore)
+	slotMapT(const std::map<ThreadCfgLabel, std::set<input_expression> > &neededExpressions,
+		 const std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore)
 	{
 		simulationSlotT next_slot(1);
 		/* Allocate slots for expressions which we know we're
@@ -345,10 +313,8 @@ public:
 		for (auto it = happensBefore.begin();
 		     it != happensBefore.end();
 		     it++) {
-			std::set<happensBeforeEdge *> &s(it->second);
-			for (std::set<happensBeforeEdge *>::iterator it2 = s.begin();
-			     it2 != s.end();
-			     it2++) {
+			const std::set<happensBeforeEdge *> &s(it->second);
+			for (auto it2 = s.begin(); it2 != s.end(); it2++) {
 				happensBeforeEdge *hb = *it2;
 				for (auto it = hb->content.begin(); !it.finished(); it.advance()) {
 					assert(count(it.get()));
@@ -479,8 +445,6 @@ class crashEnforcementData {
 public:
 	crashEnforcementRoots roots;
 	CrashCfg crashCfg;
-	happensAfterMapT happensBefore;
-	predecessorMapT predecessorMap;
 	expressionStashMapT exprStashPoints;
 	happensBeforeMapT happensBeforePoints;
 	expressionEvalMapT expressionEvalPoints;
@@ -502,8 +466,6 @@ public:
 			     AddressSpace *as)
 		: roots(_roots, abs),
 		  crashCfg(roots, summaryId, summary, as, false, abs),
-		  happensBefore(summaryId, trueHb, falseHb, abs, crashCfg, mai),
-		  predecessorMap(crashCfg),
 		  exprStashPoints(summaryId, neededExpressions, abs, roots),
 		  happensBeforePoints(summaryId, mai, trueHb, falseHb, crashCfg, abs, next_hb_id),
 		  expressionEvalPoints(scope, crashCfg, roots, exprStashPoints,
@@ -585,5 +547,16 @@ public:
 };
 
 void enumerateNeededExpressions(const bbdd *e, std::set<input_expression> &out);
+void optimiseHBEdges(crashEnforcementData &ced);
+void optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle);
+void optimiseCfg(crashEnforcementData &ced);
+void buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle);
+crashEnforcementData enforceCrashForMachine(const SummaryId &summaryId,
+					    VexPtr<CrashSummary, &ir_heap> summary,
+					    VexPtr<Oracle> &oracle,
+					    ThreadAbstracter &abs,
+					    int &next_hb_id);
+int ced_to_cep(const crashEnforcementData &, const char *output, const char *binary,
+	       Oracle *oracle);
 
 #endif /* !enforceCrash_hpp__ */

@@ -69,7 +69,8 @@ ndChoiceState(SMScopes *scopes,
 						IRExprControlFlow::mk(
 							vr.thread,
 							node->label,
-							targets[x]->label)),
+							targets[x]->label),
+						bdd_ordering::rank_hint::Start()),
 					NULL,
 					acc);
 
@@ -115,7 +116,7 @@ entryState(SMScopes *scopes,
 			StateMachineBifurcate *b = 
 				new StateMachineBifurcate(
 					targets[0].first->rip,
-					bbdd::var(&scopes->bools, IRExprEntryPoint::mk(thread, targets[x].first->label)),
+					bbdd::var(&scopes->bools, IRExprEntryPoint::mk(thread, targets[x].first->label), bdd_ordering::rank_hint::Start()),
 					targets[x].second,
 					acc);
 			acc = b;
@@ -136,6 +137,7 @@ static StateMachineState *
 getLibraryStateMachine(SMScopes *scopes,
 		       CFGNode *cfgnode,
 		       unsigned tid,
+		       StateMachineRes terminal,
 		       std::vector<reloc_t> &pendingRelocs)
 {
 	threadAndRegister rax(threadAndRegister::reg(tid, OFFSET_amd64_RAX, 0));
@@ -153,8 +155,7 @@ getLibraryStateMachine(SMScopes *scopes,
 	}
 	if (lib == LibraryFunctionTemplate::none)
 		return NULL;
-	assert(fallThrough);
-	SMBPtr<SMBState> end(Proxy(fallThrough));
+	SMBPtr<SMBState> end(fallThrough ? Proxy(fallThrough) : Terminal(terminal));
 	SMBPtr<SMBState> acc(NULL);
 	switch (lib) {
 	case LibraryFunctionTemplate::__cxa_atexit: {
@@ -393,7 +394,7 @@ cfgNodeToState(SMScopes *scopes,
 	ThreadRip tr(tid, target->rip);
 
 	StateMachineState *root;
-	root = getLibraryStateMachine(scopes, target, tid, pendingRelocs);
+	root = getLibraryStateMachine(scopes, target, tid, storeLike ? smr_crash : smr_survive, pendingRelocs);
 	if (root)
 		return root;
 
@@ -465,7 +466,7 @@ cfgNodeToState(SMScopes *scopes,
 			StateMachineSideEffect *se =
 				new StateMachineSideEffectCopy(
 					isp->target,
-					exprbdd::var(&scopes->exprs, &scopes->bools, expandedData));
+					exprbdd::var(&scopes->exprs, &scopes->bools, expandedData, bdd_ordering::rank_hint::Start()));
 			StateMachineSideEffecting *smse =
 				new StateMachineSideEffecting(
 					target->rip,
@@ -506,8 +507,8 @@ cfgNodeToState(SMScopes *scopes,
 					}
 					StateMachineSideEffectStore *se =
 						new StateMachineSideEffectStore(
-							exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr),
-							exprbdd::var(&scopes->exprs, &scopes->bools, downcast),
+							exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr, bdd_ordering::rank_hint::Start()),
+							exprbdd::var(&scopes->exprs, &scopes->bools, downcast, bdd_ordering::rank_hint::Start()),
 							mkPendingMai(target),
 							MemoryTag::normal());
 					StateMachineSideEffecting *smse =
@@ -559,7 +560,7 @@ cfgNodeToState(SMScopes *scopes,
 							IRExpr_Unop(
 								upcast,
 								ist->data));
-					exprbdd *addr = exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr);
+					exprbdd *addr = exprbdd::var(&scopes->exprs, &scopes->bools, ist->addr, bdd_ordering::rank_hint::Start());
 					StateMachineSideEffectStartAtomic *sa =
 						new StateMachineSideEffectStartAtomic(mkPendingMai(target));
 					StateMachineSideEffectLoad *load =
@@ -572,7 +573,7 @@ cfgNodeToState(SMScopes *scopes,
 					StateMachineSideEffectStore *store =
 						new StateMachineSideEffectStore(
 							addr,
-							exprbdd::var(&scopes->exprs, &scopes->bools, storeExpr),
+							exprbdd::var(&scopes->exprs, &scopes->bools, storeExpr, bdd_ordering::rank_hint::Start()),
 							mkPendingMai(target),
 							MemoryTag::normal());
 					StateMachineSideEffectEndAtomic *ea =
@@ -622,7 +623,7 @@ cfgNodeToState(SMScopes *scopes,
 					target->rip,
 					new StateMachineSideEffectCopy(
 						cas->oldLo,
-						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr)),
+						exprbdd::var(&scopes->exprs, &scopes->bools, t_expr, bdd_ordering::rank_hint::Start())),
 					NULL);
 			StateMachineSideEffecting *l4 =
 				new StateMachineSideEffecting(
@@ -631,8 +632,8 @@ cfgNodeToState(SMScopes *scopes,
 					l5);
 			StateMachineSideEffectStore *l3se =
 				new StateMachineSideEffectStore(
-					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
-					exprbdd::var(&scopes->exprs, &scopes->bools, cas->dataLo),
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr, bdd_ordering::rank_hint::Start()),
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->dataLo, bdd_ordering::rank_hint::Start()),
 					mkPendingMai(target),
 					MemoryTag::normal());
 			StateMachineState *l3 =
@@ -643,13 +644,13 @@ cfgNodeToState(SMScopes *scopes,
 			StateMachineState *l2 =
 				new StateMachineBifurcate(
 					target->rip,
-					bbdd::var(&scopes->bools, expr_eq(t_expr, cas->expdLo)),
+					bbdd::var(&scopes->bools, expr_eq(t_expr, cas->expdLo), bdd_ordering::rank_hint::Start()),
 					l3,
 					l4);
 			StateMachineSideEffectLoad *l1se =
 				new StateMachineSideEffectLoad(
 					tempreg,
-					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr),
+					exprbdd::var(&scopes->exprs, &scopes->bools, cas->addr, bdd_ordering::rank_hint::Start()),
 					mkPendingMai(target),
 					ty,
 					MemoryTag::normal());
@@ -673,7 +674,7 @@ cfgNodeToState(SMScopes *scopes,
 			if (!strncmp(dirty->cee->name, "helper_load_", strlen("helper_load_"))) {
 				auto sel = new StateMachineSideEffectLoad(
 					dirty->tmp,
-					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0]),
+					exprbdd::var(&scopes->exprs, &scopes->bools, dirty->args[0], bdd_ordering::rank_hint::Start()),
 					mkPendingMai(target),
 					Ity_I64,
 					MemoryTag::normal());
@@ -681,7 +682,7 @@ cfgNodeToState(SMScopes *scopes,
 			} else if (!strcmp(dirty->cee->name, "amd64g_dirtyhelper_RDTSC")) {
 				se = new StateMachineSideEffectCopy(
 					dirty->tmp,
-					exprbdd::var(&scopes->exprs, &scopes->bools, mkPendingFreeVar(Ity_I64, target, false)));
+					exprbdd::var(&scopes->exprs, &scopes->bools, mkPendingFreeVar(Ity_I64, target, false), bdd_ordering::rank_hint::Start()));
 			} else {
 				abort();
 			}
@@ -703,7 +704,7 @@ cfgNodeToState(SMScopes *scopes,
 			StateMachineBifurcate *smb;
 			smb = new StateMachineBifurcate(
 				target->rip,
-				bbdd::var(&scopes->bools, stmt->guard),
+				bbdd::var(&scopes->bools, stmt->guard, bdd_ordering::rank_hint::Start()),
 				NULL,
 				NULL);
 			ndChoiceState(scopes, &smb->trueTarget, tr, target, pendingRelocs,
@@ -772,7 +773,8 @@ cfgNodeToState(SMScopes *scopes,
 								tid,
 								OFFSET_amd64_RSP,
 								0),
-							Ity_I64)),
+							Ity_I64),
+						bdd_ordering::rank_hint::Start()),
 					FrameId()),
 				NULL);
 			*cursor = smp;
@@ -799,7 +801,8 @@ cfgNodeToState(SMScopes *scopes,
 										OFFSET_amd64_RSP,
 										0),
 									Ity_I64),
-								IRExpr_Const_U64(-8))),
+								IRExpr_Const_U64(-8)),
+							bdd_ordering::rank_hint::Start()),
 						FrameId()),
 					NULL);
 				*cursor = smp;
@@ -823,7 +826,8 @@ cfgNodeToState(SMScopes *scopes,
 										tid,
 										OFFSET_amd64_RSP,
 										0),
-									Ity_I64)))),
+									Ity_I64)),
+							bdd_ordering::rank_hint::Start())),
 					NULL);
 				*cursor = smp;
 				cursor = &smp->target;
@@ -845,7 +849,8 @@ cfgNodeToState(SMScopes *scopes,
 										OFFSET_amd64_RSP,
 										0),
 									Ity_I64),
-								IRExpr_Const_U64(-8))),
+								IRExpr_Const_U64(-8)),
+							bdd_ordering::rank_hint::Start()),
 						FrameId()),
 					NULL);
 			*cursor = smp;
@@ -1417,7 +1422,8 @@ addEntrySideEffects(SMScopes *scopes
 						IRExpr_Get(
 							threadAndRegister::reg(tid, OFFSET_amd64_RSP, 0),
 							Ity_I64),
-						NULL))),
+						NULL),
+					bdd_ordering::rank_hint::Start())),
 			cursor);
 	} else {
 		warning("Failed to get RSP canonicalisation delta\n");
@@ -1531,7 +1537,8 @@ addEntrySideEffects(SMScopes *scopes
 					&scopes->bools,
 					IRExpr_Get(
 						threadAndRegister::reg(tid, i * 8, entryIdx),
-						Ity_I64))),
+						Ity_I64),
+					bdd_ordering::rank_hint::Start())),
 			cursor);
 	}
 #endif
@@ -2013,7 +2020,8 @@ importRegisters(StateMachineState *root
 		exprbdd *canonExpr = exprbdd::var(
 			&scopes->exprs,
 			&scopes->bools,
-			IRExpr_Get(canonReg, Ity_I64));
+			IRExpr_Get(canonReg, Ity_I64),
+			bdd_ordering::rank_hint::Start());
 		it2++;
 		while (it2 != neededGenerations.end()) {
 			root = new StateMachineSideEffecting(

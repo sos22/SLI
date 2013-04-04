@@ -186,7 +186,7 @@ availExprSet::simplifySE(se_state *state, StateMachineSideEffectLoad *l) const
 					exp = ((StateMachineSideEffectStore *)other)->data;
 				} else {
 					auto o = (StateMachineSideEffectLoad *)other;
-					exp = exprbdd::var(&state->scopes->exprs, &state->scopes->bools, IRExpr_Get(o->target, l->type));
+					exp = exprbdd::var(&state->scopes->exprs, &state->scopes->bools, IRExpr_Get(o->target, l->type), bdd_ordering::rank_hint::Start());
 				}
 				return new StateMachineSideEffectCopy(
 					l->target,
@@ -694,7 +694,8 @@ applyLeafSubstTable(const substTableT &table, IRExpr *e)
    to a bbdd as we do so. */
 static bbdd *
 ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
-		      sane_map<std::pair<IRExpr *, substTableT>, bbdd *> &memo)
+		      sane_map<std::pair<IRExpr *, substTableT>, bbdd *> &memo,
+		      const bdd_ordering::rank_hint &rank_hint)
 {
 	if (TIMEOUT || (state.canEarlyOut && LibVEX_want_GC())) {
 		return NULL;
@@ -719,7 +720,7 @@ ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 		}
 		if (bestVar == NULL) {
 			IRExpr *trans = applyLeafSubstTable(t, e);
-			it->second = bbdd::var(&state.scopes->bools, trans);
+			it->second = bbdd::var(&state.scopes->bools, trans, rank_hint);
 		} else {
 			substTableT trueTable(t);
 			for (auto it2 = trueTable.begin(); it2 != trueTable.end(); it2++)
@@ -727,8 +728,8 @@ ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 			substTableT falseTable(t);
 			for (auto it2 = falseTable.begin(); it2 != falseTable.end(); it2++)
 				it2->second = it2->second->falseBranch(*bestVar);
-			auto tt = ssaApplyAvailExprBool(state, trueTable, e, memo);
-			auto ff = ssaApplyAvailExprBool(state, falseTable, e, memo);
+			auto tt = ssaApplyAvailExprBool(state, trueTable, e, memo, rank_hint);
+			auto ff = ssaApplyAvailExprBool(state, falseTable, e, memo, rank_hint);
 			if (tt && ff) {
 				it->second = state.scopes->bools.node(
 					bestCond,
@@ -743,7 +744,7 @@ ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 	return it->second;
 }
 static either<bbdd *, IRExpr *>
-ssaApplyAvailExprBool(ssa_avail_state &state, IRExpr *what)
+ssaApplyAvailExprBool(ssa_avail_state &state, IRExpr *what, const bdd_ordering::rank_hint &hint)
 {
 	assert(what->type() == Ity_I1);
 	substTableT substTable;
@@ -751,12 +752,13 @@ ssaApplyAvailExprBool(ssa_avail_state &state, IRExpr *what)
 	if (substTable.empty())
 		return either<bbdd *, IRExpr *>(what);
 	sane_map<std::pair<IRExpr *, substTableT>, bbdd *> memo;
-	return either<bbdd *, IRExpr *>(ssaApplyAvailExprBool(state, substTable, what, memo));
+	return either<bbdd *, IRExpr *>(ssaApplyAvailExprBool(state, substTable, what, memo, hint));
 }
 
 static exprbdd *
 ssaApplyAvailExprExpr(ssa_avail_state &state, const substTableT &t, IRExpr *e,
-		      sane_map<std::pair<IRExpr *, substTableT>, exprbdd *> &memo)
+		      sane_map<std::pair<IRExpr *, substTableT>, exprbdd *> &memo,
+		      const bdd_ordering::rank_hint &rank_hint)
 {
 	auto it_did_insert = memo.insert(std::pair<IRExpr *, substTableT>(e, t),
 					 NULL);
@@ -777,7 +779,7 @@ ssaApplyAvailExprExpr(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 		}
 		if (bestVar == NULL) {
 			IRExpr *trans = applyLeafSubstTable(t, e);
-			it->second = exprbdd::var(&state.scopes->exprs, &state.scopes->bools, trans);
+			it->second = exprbdd::var(&state.scopes->exprs, &state.scopes->bools, trans, rank_hint);
 		} else {
 			substTableT trueTable(t);
 			for (auto it2 = trueTable.begin(); it2 != trueTable.end(); it2++)
@@ -788,21 +790,21 @@ ssaApplyAvailExprExpr(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 			it->second = state.scopes->exprs.node(
 				bestCond,
 				*bestVar,
-				ssaApplyAvailExprExpr(state, trueTable, e, memo),
-				ssaApplyAvailExprExpr(state, falseTable, e, memo));
+				ssaApplyAvailExprExpr(state, trueTable, e, memo, rank_hint),
+				ssaApplyAvailExprExpr(state, falseTable, e, memo, rank_hint));
 		}
 	}
 	return it->second;
 }
 static either<exprbdd *, IRExpr *>
-ssaApplyAvailExprExpr(ssa_avail_state &state, IRExpr *what)
+ssaApplyAvailExprExpr(ssa_avail_state &state, IRExpr *what, const bdd_ordering::rank_hint &hint)
 {
 	substTableT substTable;
 	ssaEnumRegs(state, what, substTable);
 	if (substTable.empty())
 		return either<exprbdd *, IRExpr *>(what);
 	sane_map<std::pair<IRExpr *, substTableT>, exprbdd *> memo;
-	return either<exprbdd *, IRExpr *>(ssaApplyAvailExprExpr(state, substTable, what, memo));
+	return either<exprbdd *, IRExpr *>(ssaApplyAvailExprExpr(state, substTable, what, memo, hint));
 }
 
 static bbdd *
@@ -815,7 +817,7 @@ ssaApplyAvail(ssa_avail_state &state, bbdd *inp)
 		if (inp->isLeaf()) {
 			it->second = inp;
 		} else {
-			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
+			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition, bdd_ordering::rank_hint::Near(inp)));
 			if (newCond.isLeft && !newCond.left()) {
 				it->second = inp;
 			} else {
@@ -829,7 +831,8 @@ ssaApplyAvail(ssa_avail_state &state, bbdd *inp)
 				} else {
 					it->second = bbdd::ifelse(
 						&state.scopes->bools,
-						newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
+						newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right(),
+											    bdd_ordering::rank_hint::Near(inp)),
 						t,
 						f);
 				}
@@ -849,7 +852,7 @@ ssaApplyAvail(ssa_avail_state &state, smrbdd *inp)
 		if (inp->isLeaf()) {
 			it->second = inp;
 		} else {
-			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
+			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition, bdd_ordering::rank_hint::Near(inp)));
 			if (newCond.isLeft && !newCond.left()) {
 				it->second = inp;
 			} else {
@@ -863,7 +866,8 @@ ssaApplyAvail(ssa_avail_state &state, smrbdd *inp)
 				} else {
 					it->second = smrbdd::ifelse(
 						&state.scopes->smrs,
-						newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
+						newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right(),
+											    bdd_ordering::rank_hint::Near(inp)),
 						t,
 						f);
 				}
@@ -881,7 +885,7 @@ ssaApplyAvail(ssa_avail_state &state, exprbdd *inp)
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
 		if (inp->isLeaf()) {
-			auto newLeaf(ssaApplyAvailExprExpr(state, inp->leaf()));
+			auto newLeaf(ssaApplyAvailExprExpr(state, inp->leaf(), bdd_ordering::rank_hint::End()));
 			if (!newLeaf.isLeft && newLeaf.right() == inp->leaf())
 				it->second = inp;
 			else if (newLeaf.isLeft)
@@ -890,9 +894,10 @@ ssaApplyAvail(ssa_avail_state &state, exprbdd *inp)
 				it->second = exprbdd::var(
 					&state.scopes->exprs,
 					&state.scopes->bools,
-					newLeaf.right());
+					newLeaf.right(),
+					bdd_ordering::rank_hint::End());
 		} else {
-			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition));
+			auto newCond(ssaApplyAvailExprBool(state, inp->internal().condition, bdd_ordering::rank_hint::Near(inp)));
 			if (newCond.isLeft && !newCond.left()) {
 				it->second = inp;
 			} else {
@@ -906,7 +911,7 @@ ssaApplyAvail(ssa_avail_state &state, exprbdd *inp)
 				} else {
 					it->second = exprbdd::ifelse(
 						&state.scopes->exprs,
-						newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right()),
+						newCond.isLeft ? newCond.left() : bbdd::var(&state.scopes->bools, newCond.right(), bdd_ordering::rank_hint::Near(inp)),
 						t,
 						f);
 				}

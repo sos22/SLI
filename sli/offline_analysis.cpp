@@ -24,6 +24,11 @@
 #include "stacked_cdf.hpp"
 #include "timers.hpp"
 
+extern FILE *
+bubble_plot_log;
+extern FILE *
+bubble_plot2_log;
+
 #ifndef NDEBUG
 static bool debugOptimiseStateMachine = false;
 static bool debug_localise_loads = false;
@@ -1122,13 +1127,17 @@ buildStoreMachine(SMScopes *scopes,
 		  GarbageCollectionToken token)
 {
 	stackedCdf::startCompileStoreMachine();
+	fprintf(bubble_plot2_log, "%f: start compiling interfering CFG\n", now());
 	VexPtr<StateMachine, &ir_heap> sm(storeCFGToMachine(scopes, oracle, tid, cfg, *mai));
+	fprintf(bubble_plot2_log, "%f: stop compiling interfering CFG\n", now());
 	stackedCdf::stopCompileStoreMachine();
 	if (!sm || TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: failed compiling interfering CFG\n", now());
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return NULL;
 	}
 	stackedCdf::startStoreInitialSimplify();
+	fprintf(bubble_plot2_log, "%f: start simplifying interfering CFG\n", now());
 	sm = optimiseStateMachine(
 		scopes,
 		mai,
@@ -1137,20 +1146,27 @@ buildStoreMachine(SMScopes *scopes,
 		oracle,
 		false,
 		token);
+	fprintf(bubble_plot2_log, "%f: stop simplifying interfering CFG\n", now());
 	stackedCdf::stopStoreInitialSimplify();
 	if (TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: failed simplifying interfering CFG\n", now());
 		return NULL;
 	}
 
 	std::map<threadAndRegister, threadAndRegister> ssaCorrespondence;
 	stackedCdf::startStoreConvertToSSA();
+	fprintf(bubble_plot2_log, "%f: start compiling interfering CFG\n", now());
 	VexPtr<StateMachine, &ir_heap> sm_ssa(convertToSSA(scopes, sm, ssaCorrespondence));
-	stackedCdf::stopStoreConvertToSSA();
 	ssaCorrespondence.clear();
-	if (!sm_ssa || TIMEOUT)
+	fprintf(bubble_plot2_log, "%f: stop compiling interfering CFG\n", now());
+	stackedCdf::stopStoreConvertToSSA();
+	if (!sm_ssa || TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: failed simplifying interfering CFG\n", now());
 		return NULL;
+	}
 
 	stackedCdf::startStoreSecondSimplify();
+	fprintf(bubble_plot2_log, "%f: start simplifying interfering CFG\n", now());
 	sm_ssa = optimiseStateMachine(
 		scopes,
 		mai,
@@ -1159,7 +1175,13 @@ buildStoreMachine(SMScopes *scopes,
 		oracle,
 		true,
 		token);
+	fprintf(bubble_plot2_log, "%f: stop simplifying interfering CFG\n", now());
 	stackedCdf::stopStoreSecondSimplify();
+
+	if (!sm_ssa || TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: failed simplifying interfering CFG\n", now());
+		return NULL;
+	}
 
 	return sm_ssa;
 }
@@ -1198,9 +1220,9 @@ considerStoreCFG(SMScopes *scopes,
 		TimeoutTimer t;
 		Stopwatch s;
 		t.timeoutAfterSeconds(30);
-		sm_ssa = (buildStoreMachine(scopes, oracle, tid, cfg,
-					    mai, storeOptimisations,
-					    token));
+		sm_ssa = buildStoreMachine(scopes, oracle, tid, cfg,
+					   mai, storeOptimisations,
+					   token);
 		if (!sm_ssa) {
 			fprintf(better_log, "%d/%d: buildStoreMachine timed out\n",
 				idx, nrStoreCfgs);
@@ -1214,6 +1236,7 @@ considerStoreCFG(SMScopes *scopes,
 	Stopwatch s;
 	t.timeoutAfterSeconds(60);
 
+	fprintf(bubble_plot2_log, "%f: start rederive crashing\n", now());
 #if !CONFIG_W_ISOLATION
 	sane_map<DynAnalysisRip, IRType> newConflicting(potentiallyConflictingStores);
 	rebuildConflictingStores(*mai, optIn, oracle, probeMachine, sm_ssa, newConflicting);
@@ -1231,28 +1254,30 @@ considerStoreCFG(SMScopes *scopes,
 				      oracleI,
 				      token,
 				      &redoAtomicSurvival);
+	fprintf(bubble_plot2_log, "%f: stop rederive crashing\n", now());
 	if (TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: fail rederive crashing\n", now());
 		fprintf(better_log, "localiseLoads1 %d/%d timed out\n", idx, nrStoreCfgs);
 		return NULL;
 	}
-
-	fprintf(_logfile, "\t\tLocalised probe machine:\n");
-	printStateMachine(probeMachine, _logfile);
-	fprintf(_logfile, "\t\tStore machine:\n");
-	printStateMachine(sm_ssa, _logfile);
 
 	/* Special case: if the only possible interaction between the
 	   probe machine and the store machine is a single load in the
 	   probe machine and a single store in the store machine then
 	   we don't need to do anything. */
+	fprintf(bubble_plot2_log, "%f: start early-out\n", now());
 	if (singleLoadVersusSingleStore(*mai, sm_ssa, probeMachine, probeOptimisations, oracle)) {
+		fprintf(bubble_plot2_log, "%f: stop early-out\n", now());
+		fprintf(bubble_plot2_log, "%f: early out\n", now());
 		fprintf(_logfile, "\t\tSingle store versus single load -> crash impossible.\n");
 		fprintf(better_log, "%d/%d: single store versus single load, after localise (%f)\n",
 			idx, nrStoreCfgs, s.sample());
 		return NULL;
 	}
+	fprintf(bubble_plot2_log, "%f: stop early-out\n", now());
 
 	if (redoAtomicSurvival) {
+		fprintf(bubble_plot2_log, "%f: start rederive crashing\n", now());
 		atomicSurvival = atomicSurvivalConstraint(
 			scopes,
 			mai,
@@ -1263,12 +1288,16 @@ considerStoreCFG(SMScopes *scopes,
 			atomicSurvivalOptimisations(probeOptimisations.enablepreferCrash()),
 			token);
 		if (!atomicSurvival) {
+			fprintf(bubble_plot2_log, "%f: stop rederive crashing\n", now());
+			fprintf(bubble_plot2_log, "%f: failed rederive crashing\n", now());
 			fprintf(better_log, "%d/%d: rederive CI atomic timed out\n", idx, nrStoreCfgs);
 			return NULL;
 		}
 		if (atomicSurvival == scopes->bools.cnst(false)) {
 			fprintf(_logfile, "\t\tCannot survive when run atomically -> give up\n");
 			fprintf(better_log, "%d/%d: rederived CI atomic is false (%f)\n", idx, nrStoreCfgs, s.sample());
+			fprintf(bubble_plot2_log, "%f: stop rederive crashing\n", now());
+			fprintf(bubble_plot2_log, "%f: ic-atomic is false\n", now());
 			return NULL;
 		}
 		bool needReopt = false;
@@ -1276,6 +1305,7 @@ considerStoreCFG(SMScopes *scopes,
 		if (needReopt) {
 			probeMachine = optimiseStateMachine(scopes, mai, probeMachine, probeOptimisations, oracle, true, token);
 		}
+		fprintf(bubble_plot2_log, "%f: stop rederive crashing\n", now());
 	}
 
 	atomicSurvival =
@@ -1296,15 +1326,16 @@ considerStoreCFG(SMScopes *scopes,
 	if (atomicSurvival == scopes->bools.cnst(false)) {
 		fprintf(_logfile, "\t\tWrite machine constraint is false!\n");
 		fprintf(better_log, "%d/%d: IC is false (%f)\n", idx, nrStoreCfgs, s.sample());
+		fprintf(bubble_plot2_log, "%f: ic-atomic is false\n", now());
 		return NULL;
 	}
-	fprintf(_logfile, "\t\tInferred assumption:\n");
-	atomicSurvival->prettyPrint(_logfile);
 
 	VexPtr<bbdd, &ir_heap> crash_constraint;
 	{
 		VexPtr<StateMachine, &ir_heap> dupe_store_machine;
+		fprintf(bubble_plot2_log, "%f: start cross build\n", now());
 		dupe_store_machine = duplicateStateMachine(sm_ssa);
+		fprintf(bubble_plot2_log, "%f: stop cross build\n", now());
 		crash_constraint =
 			crossProductSurvivalConstraint(
 				scopes,
@@ -1320,11 +1351,14 @@ considerStoreCFG(SMScopes *scopes,
 			fprintf(better_log, "%d/%d: crash timed out\n", idx, nrStoreCfgs);
 			return NULL;
 		}
-		crash_constraint = bbdd::invert(&scopes->bools, crash_constraint);
-		if (!crash_constraint || TIMEOUT) {
-			fprintf(better_log, "%d/%d: invert crash timed out\n", idx, nrStoreCfgs);
-			return NULL;
-		}
+	}
+	fprintf(bubble_plot2_log, "%f: start sat check\n", now());
+	crash_constraint = bbdd::invert(&scopes->bools, crash_constraint);
+	if (!crash_constraint || TIMEOUT) {
+		fprintf(bubble_plot2_log, "%f: stop sat check\n", now());
+		fprintf(bubble_plot2_log, "%f: failed sat check\n", now());
+		fprintf(better_log, "%d/%d: invert crash timed out\n", idx, nrStoreCfgs);
+		return NULL;
 	}
 
 	VexPtr<bbdd, &ir_heap> verification_condition;
@@ -1332,14 +1366,19 @@ considerStoreCFG(SMScopes *scopes,
 		bbdd::And(&scopes->bools, crash_constraint, atomicSurvival);
 	if (!verification_condition || TIMEOUT) {
 		fprintf(better_log, "%d/%d: build VC timed out\n", idx, nrStoreCfgs);
+		fprintf(bubble_plot2_log, "%f: stop sat check\n", now());
+		fprintf(bubble_plot2_log, "%f: failed sat check\n", now());
 		return NULL;
 	}
 	verification_condition = subst_eq(&scopes->bools, verification_condition);
+	fprintf(bubble_plot2_log, "%f: stop sat check\n", now());
 	if (verification_condition == scopes->bools.cnst(false)) {
 		fprintf(_logfile, "\t\tCrash impossible.\n");
 		fprintf(better_log, "%d/%d: crash impossible (%f)\n", idx, nrStoreCfgs, s.sample());
+		fprintf(bubble_plot2_log, "%f: unsatisfiable\n", now());
 		return NULL;
 	}
+	fprintf(bubble_plot2_log, "%f: satisfiable\n", now());
 
 	fprintf(_logfile, "\t\tVerification condition:\n");
 	verification_condition->prettyPrint(_logfile);
@@ -1498,24 +1537,35 @@ buildProbeMachine(SMScopes *scopes,
 	{
 		HashedSet<HashedPtr<CFGNode> > roots;
 		HashedSet<HashedPtr<const CFGNode> > proximalNodes;
-		if (!getProbeCFGs(allocLabel, oracle, targetRip, roots, proximalNodes)) {
+		fprintf(bubble_plot_log, "%f: start build crashing CFG\n", now());
+		auto r = getProbeCFGs(allocLabel, oracle, targetRip, roots, proximalNodes);
+		if (!r) {
+			fprintf(bubble_plot_log, "%f: failed build crashing CFG\n", now());
 			fprintf(_logfile, "Cannot get probe CFGs!\n");
 			return NULL;
 		}
+		fprintf(bubble_plot_log, "%f: stop build crashing CFG\n", now());
 		stackedCdf::startCompileProbeMachine();
+		fprintf(bubble_plot_log, "%f: start compile crashing machine\n", now());
 		sm = probeCFGsToMachine(scopes, oracle, tid._tid(),
 					roots,
 					proximalNodes,
 					*mai);
+		fprintf(bubble_plot_log, "%f: stop compile crashing machine\n", now());
 		stackedCdf::stopCompileProbeMachine();
 	}
-	if (TIMEOUT)
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed compile crashing machine\n", now());
 		return NULL;
+	}
 
+	fprintf(bubble_plot_log, "%f: start GC\n", now());
 	LibVEX_maybe_gc(token);
+	fprintf(bubble_plot_log, "%f: stop GC\n", now());
 
 	sm->sanityCheck(*mai);
 	stackedCdf::startProbeInitialSimplify();
+	fprintf(bubble_plot_log, "%f: start simplify crashing machine\n", now());
 	sm = optimiseStateMachine(scopes,
 				  mai,
 				  sm,
@@ -1523,16 +1573,27 @@ buildProbeMachine(SMScopes *scopes,
 				  oracle,
 				  false,
 				  token);
+	fprintf(bubble_plot_log, "%f: stop simplify crashing machine\n", now());
 	stackedCdf::stopProbeInitialSimplify();
-	
+
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed simplify crashing machine\n", now());
+		return NULL;
+	}
+
 	std::map<threadAndRegister, threadAndRegister> ssaCorrespondence;
 	stackedCdf::startProbeConvertSSA();
+	fprintf(bubble_plot_log, "%f: start compile crashing machine\n", now());
 	sm = convertToSSA(scopes, sm, ssaCorrespondence);
+	fprintf(bubble_plot_log, "%f: stop compile crashing machine\n", now());
 	stackedCdf::stopProbeConvertSSA();
-	if (TIMEOUT)
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed compile crashing machine\n", now());
 		return NULL;
+	}
 	sm->sanityCheck(*mai);
 	stackedCdf::startProbeSecondSimplify();
+	fprintf(bubble_plot_log, "%f: start simplify crashing machine\n", now());
 	sm = optimiseStateMachine(scopes,
 				  mai,
 				  sm,
@@ -1540,7 +1601,12 @@ buildProbeMachine(SMScopes *scopes,
 				  oracle,
 				  true,
 				  token);
+	fprintf(bubble_plot_log, "%f: stop simplify crashing machine\n", now());
 	stackedCdf::stopProbeSecondSimplify();
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed simplify crashing machine\n", now());
+	}
+
 	return sm;
 }
 
@@ -1604,20 +1670,22 @@ probeMachineToSummary(SMScopes *scopes,
 		stackedCdf::startBuildStoreCFGs();
 		TimeoutTimer t;
 		t.timeoutAfterSeconds(60);
+		fprintf(bubble_plot_log, "%f: start derive interfering CFGs\n", now());
 		getStoreCFGs(allocLabel, potentiallyConflictingStores,
 #if !CONFIG_W_ISOLATION
 			     communicatingInstructions,
 #endif
 			     oracle, &n, &nrStoreCfgs);
+		fprintf(bubble_plot_log, "%f: stop derive interfering CFGs\n", now());
 		stackedCdf::stopBuildStoreCFGs();
 		storeCFGs = n;
 		t.cancel();
 
 		if (TIMEOUT) {
 			fprintf(better_log, "getStoreCFGs timed out\n");
-		}
-		if (TIMEOUT)
+			fprintf(bubble_plot_log, "%f: failed derive interfering CFGs\n", now());
 			return false;
+		}
 		fprintf(better_log,
 			"getStoreCFGs took %f seconds, produced %d \n",
 			s.sample(),
@@ -1627,6 +1695,7 @@ probeMachineToSummary(SMScopes *scopes,
 
 	auto roughLoadCount = assertionFreeProbeMachine->root->roughLoadCount();
 
+	fprintf(bubble_plot_log, "%f: start process interfering CFGs\n", now());
 	bool foundRace;
 	foundRace = false;
 	for (int i = 0; i < nrStoreCfgs; i++) {
@@ -1650,6 +1719,7 @@ probeMachineToSummary(SMScopes *scopes,
 		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 		VexPtr<CrashSummary, &ir_heap> summary;
 
+		fprintf(bubble_plot2_log, "%f: start interfering CFG\n", now());
 		summary = considerStoreCFG(scopes,
 					   targetRip,
 					   storeCFG,
@@ -1669,6 +1739,7 @@ probeMachineToSummary(SMScopes *scopes,
 					   potentiallyConflictingStores,
 #endif
 					   token);
+		fprintf(bubble_plot2_log, "%f: stop interfering CFG\n", now());
 		_timed_out = false;
 		if (summary)
 			df(summary, token);
@@ -1678,6 +1749,7 @@ probeMachineToSummary(SMScopes *scopes,
 			break;
 		}
 	}
+	fprintf(bubble_plot_log, "%f: stop process interfering CFGs\n", now());
 
 	return foundRace;
 }
@@ -1694,10 +1766,6 @@ diagnoseCrash(SMScopes *scopes,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(diagnoseCrash);
-
-	fprintf(_logfile, "Probe machine:\n");
-	printStateMachine(probeMachine, _logfile);
-	fprintf(_logfile, "\n");
 
 	AllowableOptimisations probeOpt = optIn;
 	if (CONFIG_W_ISOLATION) {
@@ -1737,19 +1805,25 @@ diagnoseCrash(SMScopes *scopes,
 	   enableignoreSideEffects(), even in the non-W_ISOLATION
 	   case, because it's only used to find the interfering stores
 	   set. */
+	fprintf(bubble_plot_log, "%f: start derive interfering CFGs\n", now());
 	reducedProbeMachine = removeAnnotations(scopes, mai, probeMachine, optIn.enableignoreSideEffects(), oracleI, true, token);
 	if (!reducedProbeMachine) {
 		stackedCdf::stopFindConflictingStores();
+		fprintf(bubble_plot_log, "%f: stop derive interfering CFGs\n", now());
+		fprintf(bubble_plot_log, "%f: failed derive interfering CFGs\n", now());
 		fprintf(better_log, "removeAnnotations failed\n");
 		return NULL;
 	}
 	getConflictingStores(*mai, reducedProbeMachine, oracle, potentiallyConflictingStores, haveMuxOps);
+	fprintf(bubble_plot_log, "%f: stop derive interfering CFGs\n", now());
 	if (potentiallyConflictingStores.size() == 0) {
 		stackedCdf::stopFindConflictingStores();
 		fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 		fprintf(better_log, "no conflicting stores\n");
+		fprintf(bubble_plot_log, "%f: no interfering stores\n", now());
 		return NULL;
 	}
+	fprintf(bubble_plot_log, "%f: start simplify crashing machine\n", now());
 	bool localised_loads = false;
 	probeMachine = localiseLoads2(scopes,
 				      mai,
@@ -1759,30 +1833,47 @@ diagnoseCrash(SMScopes *scopes,
 				      oracleI,
 				      token,
 				      &localised_loads);
+	fprintf(bubble_plot_log, "%f: stop simplify crashing machine\n", now());
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed simplify crashing machine\n", now());
+		return NULL;
+	}
+
 	if (localised_loads) {
 		sane_map<DynAnalysisRip, IRType> newPotentiallyConflictingStores;
 		while (1) {
+			fprintf(bubble_plot_log, "%f: start derive interfering CFGs\n", now());
 			reducedProbeMachine = removeAnnotations(scopes, mai, probeMachine, probeOpt, oracleI, true, token);
 			if (!reducedProbeMachine) {
 				stackedCdf::stopFindConflictingStores();
 				fprintf(better_log, "removeAnnotations timed out (%d)\n", __LINE__);
+				fprintf(bubble_plot_log, "%f: stop derive interfering CFGs\n", now());
+				fprintf(bubble_plot_log, "%f: failed derive interfering CFGs\n", now());
 				return NULL;
 			}
 			getConflictingStores(*mai, reducedProbeMachine, oracle, newPotentiallyConflictingStores, haveMuxOps);
+			fprintf(bubble_plot_log, "%f: stop derive interfering CFGs\n", now());
 			if (potentiallyConflictingStores.size() == 0) {
 				fprintf(_logfile, "\t\tNo available conflicting stores?\n");
 				stackedCdf::stopFindConflictingStores();
 				fprintf(better_log, "No conflicting stores (%d)\n", __LINE__);
+				fprintf(bubble_plot_log, "%f: no interfering stores\n", now());
 				return NULL;
 			}
 			if (newPotentiallyConflictingStores == potentiallyConflictingStores)
 				break;
 			potentiallyConflictingStores = newPotentiallyConflictingStores;
 			localised_loads = false;
+			fprintf(bubble_plot_log, "%f: start simplify crashing machine\n", now());
 			probeMachine = localiseLoads2(scopes, mai, probeMachine,
 						      potentiallyConflictingStores,
 						      probeOpt,
 						      oracleI, token, &localised_loads);
+			fprintf(bubble_plot_log, "%f: stop simplify crashing machine\n", now());
+			if (TIMEOUT) {
+				fprintf(bubble_plot_log, "%f: failed simplify crashing machine\n", now());
+				return NULL;
+			}
 			if (!localised_loads)
 				break;
 		}
@@ -1792,6 +1883,7 @@ diagnoseCrash(SMScopes *scopes,
 	if (potentiallyConflictingStores.size() == 0) {
 		fprintf(_logfile, "\t\tNo available conflicting stores after localisation?\n");
 		fprintf(better_log, "No conflicting stores (%d)\n", __LINE__);
+		fprintf(bubble_plot_log, "%f: no interfering stores\n", now());
 		return NULL;
 	}
 
@@ -1801,13 +1893,16 @@ diagnoseCrash(SMScopes *scopes,
 		Stopwatch s;
 		TimeoutTimer t;
 		t.timeoutAfterSeconds(60);
+		fprintf(bubble_plot_log, "%f: start derive c-atomic\n", now());
 		atomicSurvival = atomicSurvivalConstraint(scopes, mai, probeMachine, NULL, oracleI,
 							  nullExpr,
 							  atomicSurvivalOptimisations(optIn.enablepreferCrash()),
 							  token);
+		fprintf(bubble_plot_log, "%f: stop derive c-atomic\n", now());
 		t.cancel();
 		if (!atomicSurvival) {
 			fprintf(better_log, "atomicSurvivalConstraint timed out\n");
+			fprintf(bubble_plot_log, "%f: failed derive c-atomic\n", now());
 			return NULL;
 		}
 		fprintf(better_log, "atomicSurvivalConstraint took %f\n", s.sample());
@@ -1815,9 +1910,11 @@ diagnoseCrash(SMScopes *scopes,
 	if (atomicSurvival == scopes->bools.cnst(false)) {
 		fprintf(_logfile, "\t\tAtomic constraint of reduced machine is <false> -> no crash possible\n");
 		fprintf(better_log, "atomicSurvivalConstraint is false\n");
+		fprintf(bubble_plot_log, "%f: c-atomic is false\n", now());
 		return NULL;
 	}
 	bool needReopt = false;
+	fprintf(bubble_plot_log, "%f: start simplify crashing machine\n", now());
 	optimiseAssuming(scopes, probeMachine, atomicSurvival, &needReopt);
 	if (needReopt) {
 		stackedCdf::startProbeResimplify();
@@ -1826,12 +1923,23 @@ diagnoseCrash(SMScopes *scopes,
 						    oracle, true, token);
 		stackedCdf::stopProbeResimplify();
 	}
+	fprintf(bubble_plot_log, "%f: stop simplify crashing machine\n", now());
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed simplify crashing machine\n", now());
+		return NULL;
+	}
 
 #if !CONFIG_W_ISOLATION
 	std::set<DynAnalysisRip> communicatingInstructions;
 	VexPtr<StateMachine, &ir_heap> semiReduced;
+	fprintf(bubble_plot_log, "%f: start derive interfering CFGs\n", now());
 	semiReduced = removeAnnotations(scopes, mai, probeMachine, optIn, oracleI, true, token);
 	getCommunicatingInstructions(*mai, semiReduced, oracle, communicatingInstructions);
+	fprintf(bubble_plot_log, "%f: stop derive interfering CFGs\n", now());
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed derive interfering CFGs\n", now());
+		return NULL;
+	}
 #endif
 
 	timer1.cancel();
@@ -1930,18 +2038,21 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	 * in isolation.  A lot can't (e.g. accesses to BSS) */
 	{
 		stackedCdf::startBuildProbeMachine();
+		fprintf(bubble_plot_log, "%f: start early-out check\n", now());
 		StateMachineState *t = getProximalCause(&scopes,
 							oracle->ms,
 							oracle,
 							NULL,
 							targetRip.toVexRip(),
 							tid);
+		fprintf(bubble_plot_log, "%f: stop early-out check\n", now());
 		stackedCdf::stopBuildProbeMachine();
 		if (t->type == StateMachineState::Terminal) {
 			auto term = (StateMachineTerminal *)t;
 			if (term->res == scopes.smrs.cnst(smr_unreached) ||
 			    term->res == scopes.smrs.cnst(smr_survive)) {
 				fprintf(_logfile, "Instruction is definitely non-crashing\n");
+				fprintf(bubble_plot_log, "%f: early out\n", now());
 				return;
 			}
 		}

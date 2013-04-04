@@ -1,6 +1,6 @@
 sli_tests="nd_chooser parse_state_machine survival_constraint simplify_irexpr"
 sli_tests="$sli_tests simplify_state_machine testgetStoreCFGs getProbeCFGs"
-sli_tests="$sli_tests nf store_unroll_cycle_break"
+sli_tests="$sli_tests nf"
 
 targets=$(echo $sli_tests | sed "s%\<%${input_base}/%g")
 

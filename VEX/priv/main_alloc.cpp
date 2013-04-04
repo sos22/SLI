@@ -253,7 +253,7 @@ _LibVEX_free(Heap *h, const void *_ptr)
 }
 
 static void
-LibVEX_gc(Heap *h, GarbageCollectionToken )
+LibVEX_gc(Heap *h, GarbageCollectionToken, bool loud)
 {
 	struct arena *old_arena;
 	struct arena *next_old;
@@ -263,7 +263,9 @@ LibVEX_gc(Heap *h, GarbageCollectionToken )
 
 	LibVEX_alloc_sanity_check(h);
 
-	printf("Major GC starts; %ld bytes in heap, %d roots\n", h->heap_used, h->nr_gc_roots);
+	if (loud) {
+		printf("Major GC starts; %ld bytes in heap, %d roots\n", h->heap_used, h->nr_gc_roots);
+	}
 
 	assert(!gc_in_progress);
 	gc_in_progress = true;
@@ -353,7 +355,9 @@ LibVEX_gc(Heap *h, GarbageCollectionToken )
 
 	LibVEX_alloc_sanity_check(h);
 
-	printf("Major GC finished; %ld bytes in heap, %d roots\n", h->heap_used, h->nr_gc_roots);
+	if (loud) {
+		printf("Major GC finished; %ld bytes in heap, %d roots\n", h->heap_used, h->nr_gc_roots);
+	}
 	gc_in_progress = false;
 }
 
@@ -361,8 +365,16 @@ void
 LibVEX_gc(GarbageCollectionToken t)
 {
 	/* Force a full GC of both heaps */
-	LibVEX_gc(&main_heap, t);
-	LibVEX_gc(&ir_heap, t);
+	LibVEX_gc(&main_heap, t, true);
+	LibVEX_gc(&ir_heap, t, true);
+}
+void
+LibVEX_gc(Heap &h)
+{
+	/* You need a token to collect the global heaps. */
+	assert(h != &main_heap);
+	assert(h != &ir_heap);
+	LibVEX_gc(&h, ALLOW_GC, false);
 }
 
 void
@@ -376,13 +388,13 @@ LibVEX_maybe_gc(GarbageCollectionToken t)
 	   limit after that we try the IR heap again, and then finally
 	   give up. */
 	if (__libvex_force_gc || main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE) {
-		LibVEX_gc(&ir_heap, t);
+		LibVEX_gc(&ir_heap, t, true);
 		__libvex_force_gc = false;
 	}
 	if (main_heap.heap_used >= GC_MAX_SIZE / 2)
-		LibVEX_gc(&main_heap, t);
+		LibVEX_gc(&main_heap, t, true);
 	if (main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE)
-		LibVEX_gc(&ir_heap, t);
+		LibVEX_gc(&ir_heap, t, true);
 	if (main_heap.heap_used + ir_heap.heap_used >= GC_MAX_SIZE) {
 		/* We're pretty much boned at this point: every
 		   vexSetAllocModeTEMP_and_clear will trigger a full

@@ -1435,7 +1435,8 @@ dataOfSideEffect(SMScopes *scopes, const StateMachineSideEffect *s_effect, IRTyp
 			&scopes->bools,
 			IRExpr_Get(
 				((StateMachineSideEffectLoad *)s_effect)->target,
-				((StateMachineSideEffectLoad *)s_effect)->type));
+				((StateMachineSideEffectLoad *)s_effect)->type),
+			bdd_ordering::rank_hint::Start());
 	} else if (s_effect->type == StateMachineSideEffect::Copy) {
 		res = ((StateMachineSideEffectCopy *)s_effect)->value;
 	} else {
@@ -2253,7 +2254,8 @@ zapRealiasInfo(SMScopes *scopes, StateMachine *sm, bool *done_something)
 							exprbdd::var(
 								&scopes->exprs,
 								&scopes->bools,
-								IRExpr_Get(it->second, Ity_I64)));
+								IRExpr_Get(it->second, Ity_I64),
+								bdd_ordering::rank_hint::Start()));
 						*done_something = true;
 					}
 					break;

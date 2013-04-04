@@ -171,6 +171,12 @@ void vexInitHeap(void);
 void LibVEX_gc(GarbageCollectionToken t);
 void LibVEX_maybe_gc(GarbageCollectionToken t);
 
+/* Force a GC of this heap.  Note that this doesn't need a GC token;
+   the intent is that you'll use it on private heaps where that isn't
+   a problem, rather than the main or IR heaps, for which it will
+   almost certainly kill you. */
+void LibVEX_gc(Heap &h);
+
 template <Heap *heap>
 class VexGcRoot {
 	void **root;

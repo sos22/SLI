@@ -395,7 +395,7 @@ _bdd<leafT, subtreeT>::_parse(scopeT *scope,
 		subtreeT *f = _parse<scopeT, parseLeaf>(scope, str, suffix, labels);
 		if (!f)
 			return NULL;
-		res = scope->node(a, scope->ordering->rankVariable(a), t, f);
+		res = scope->node(a, scope->ordering->rankVariable(a, bdd_ordering::rank_hint::Never()), t, f);
 	} else {
 		return NULL;
 	}
@@ -770,6 +770,7 @@ bdd_scope<t>::mkInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 	auto did_insert = it_did_insert.second;
 	if (did_insert) {
 		it->second = new t(r, cond, a, b);
+		nr_ever++;
 		checkInternSize();
 	}
 	return it->second;
@@ -1351,7 +1352,7 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 		const std::vector<subtreeT **> &dests(it->second);
 		const zipInternalT &relocWhere(key.target());
 
-		assert(key.rank == scope->ordering->rankVariable(key.expr));
+		assert(key.rank == scope->ordering->rankVariable(key.expr, bdd_ordering::rank_hint::Never()));
 		assert(!relocWhere.isLeaf());
 
 #ifndef NDEBUG
@@ -1440,11 +1441,13 @@ _bdd<leafT, subtreeT>::restructure_zip(scopeT *scope, bscopeT *bscope, const zip
 		if (what.isLeaf()) {
 			it->second = what.leaf(scope, bscope);
 		} else {
-			subtreeT *t = restructure_zip(scope, bscope, what.trueBranch(), memo);
+			IRExpr *condition;
+			bdd_rank rank(what.rank(&condition));
+			subtreeT *t = restructure_zip(scope, bscope, what.trueBranch(rank), memo);
 			if (t) {
-				subtreeT *f = restructure_zip(scope, bscope, what.falseBranch(), memo);
+				subtreeT *f = restructure_zip(scope, bscope, what.falseBranch(rank), memo);
 				if (f)
-					it->second = scope->node(what.condition(), what.rank(), t, f);
+					it->second = scope->node(condition, rank, t, f);
 			}
 		}
 	}

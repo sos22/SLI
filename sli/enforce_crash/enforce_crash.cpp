@@ -18,6 +18,8 @@
 #include "visitor.hpp"
 #include "timers.hpp"
 
+extern FILE *bubble_plot_log;
+
 #ifndef NDEBUG
 static bool debug_declobber_instructions = false;
 static bool debug_expr_slice = false;
@@ -480,8 +482,10 @@ buildCED(const SummaryId &summaryId,
 	 AddressSpace *as)
 {
 	/* Figure out what we actually need to keep track of */
+	fprintf(bubble_plot_log, "%f: start determine input availability\n", now());
 	std::set<input_expression> neededExpressions;
 	enumerateNeededExpressions(c.leftOver, neededExpressions);
+	fprintf(bubble_plot_log, "%f: stop determine input availability\n", now());
 
 	*out = crashEnforcementData(&summary->scopes->bools,
 				    summaryId,
@@ -495,7 +499,13 @@ buildCED(const SummaryId &summaryId,
 				    next_hb_id,
 				    summary,
 				    as);
+	if (TIMEOUT) {
+		return false;
+	}
+
+	fprintf(bubble_plot_log, "%f: start simplify plan\n", now());
 	optimiseHBContent(*out);
+	fprintf(bubble_plot_log, "%f: stop simplify plan\n", now());
 	return true;
 }
 
@@ -874,13 +884,14 @@ slice_by_hb(bbdd::scope *scope, bbdd *expr)
 	return slice_by_exprs(scope, expr, hbEdges);
 }
 
-static crashEnforcementData
+crashEnforcementData
 enforceCrashForMachine(const SummaryId &summaryId,
 		       VexPtr<CrashSummary, &ir_heap> summary,
 		       VexPtr<Oracle> &oracle,
 		       ThreadAbstracter &abs,
 		       int &next_hb_id)
 {
+	fprintf(bubble_plot_log, "%f: start prepare summary\n", now());
 	summary = internCrashSummary(summary);
 	if (TIMEOUT) {
 		fprintf(_logfile, "Timeout while interning summary\n");
@@ -909,10 +920,23 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		exit(1);
 	}
 
-	sliced_expr sliced_by_hb(slice_by_hb(&summary->scopes->bools, requirement));
-	printf("Sliced requirement:\n");
-	sliced_by_hb.prettyPrint(stdout);
+	fprintf(bubble_plot_log, "%f: stop prepare summary\n", now());
+	fprintf(bubble_plot_log, "%f: start slice by hb\n", now());
+	sliced_expr sliced_by_hb;
+	{
+		TimeoutTimer tmr;
+		tmr.timeoutAfterSeconds(60);
+		sliced_by_hb = slice_by_hb(&summary->scopes->bools, requirement);
+		tmr.cancel();
+	}
+	fprintf(bubble_plot_log, "%f: stop slice by hb\n", now());
 
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed slice by hb\n", now());
+		return crashEnforcementData();
+	}
+
+	fprintf(bubble_plot_log, "%f: start heuristic simplify\n", now());
 	{
 		std::map<bbdd *, bbdd *> memo;
 		for (auto it = sliced_by_hb.begin();
@@ -929,9 +953,6 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		}
 	}
 
-	printf("After simplifying down:\n");
-	sliced_by_hb.prettyPrint(stdout);
-
 	std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > rootsCfg;
 	for (auto it = summary->loadMachine->cfg_roots.begin();
 	     it != summary->loadMachine->cfg_roots.end();
@@ -944,12 +965,11 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		rootsCfg[ConcreteThread(summaryId, it->first.thread)].insert(std::pair<CfgLabel, long>(it->first.node->label, it->second.rsp_delta));
 	}
 
+	fprintf(bubble_plot_log, "%f: stop heuristic simplify\n", now());
 	crashEnforcementData accumulator;
-	for (auto it = sliced_by_hb.begin(); it != sliced_by_hb.end(); it++) {
+	for (auto it = sliced_by_hb.begin(); !TIMEOUT && it != sliced_by_hb.end(); it++) {
 		crashEnforcementData tmp;
 		if (buildCED(summaryId, *it, rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
-			printf("Intermediate CED:\n");
-			tmp.prettyPrint(summary->scopes, stdout, true);
 			accumulator |= tmp;
 		}
 	}
@@ -964,7 +984,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
    -- We don't try to eval anything at the node.
    -- The node isn't the before end of a happens-before edge
 */
-static void
+void
 optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 {
 	expressionStashMapT newMap;
@@ -1069,7 +1089,7 @@ optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle)
 
 /* We sometimes find that the CFG has a prefix which is completely
    irrelevant.  Try to remove it. */
-static void
+void
 optimiseCfg(crashEnforcementData &ced)
 {
 	struct {
@@ -1218,11 +1238,17 @@ struct patchStrategy {
 	unsigned size() const {
 		return MustInterpret.size() + Cont.size();
 	}
+	class priorityOrder {
+	public:
+		bool operator ()(const patchStrategy &a, const patchStrategy &b) const {
+			if (a.size() > b.size())
+				return true;
+			if (a.size() < b.size())
+				return false;
+			return a < b;
+		}
+	};
 	bool operator<(const patchStrategy &o) const {
-		if (size() > o.size())
-			return true;
-		if (size() < o.size())
-			return false;
 		if (MustInterpret < o.MustInterpret)
 			return true;
 		if (MustInterpret > o.MustInterpret)
@@ -1256,10 +1282,12 @@ struct patchStrategy {
 	}
 };
 
+typedef std::priority_queue<patchStrategy, std::vector<patchStrategy>, patchStrategy::priorityOrder> patchQueueT;
+
 static bool
 patchSearch(Oracle *oracle,
 	    const patchStrategy &input,
-	    std::priority_queue<patchStrategy> &thingsToTry)
+	    patchQueueT &thingsToTry)
 {
 	if (input.MustInterpret.empty())
 		return true;
@@ -1337,10 +1365,10 @@ patchSearch(Oracle *oracle,
 	return false;
 }
 
-static void
+void
 buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 {
-	patchStrategy initPs;
+	patchStrategy currentPs;
 
 	for (auto it = ced.roots.begin(); !it.finished(); it.advance()) {
 		Instruction<ThreadCfgLabel> *instr = ced.crashCfg.findInstr(it.threadCfgLabel());
@@ -1353,34 +1381,48 @@ buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle)
 		unsigned long r = vr.unwrap_vexrip();
 		if (debug_declobber_instructions)
 			printf("%lx is a root\n", r);
-		initPs.MustInterpret.insert(r);
-	}
-
-	std::set<patchStrategy> visited;
-	std::priority_queue<patchStrategy> pses;
-	pses.push(initPs);
-	while (!pses.empty()) {
-		patchStrategy next(pses.top());
-		pses.pop();
-		if (!visited.insert(next).second)
+		if (currentPs.Cont.count(r)) {
+			if (debug_declobber_instructions) {
+				printf("... but it's already been handled elsewhere\n");
+			}
 			continue;
-		if (patchSearch(oracle, next, pses)) {
-			/* We have a solution. */
-			ced.patchPoints = next.Patch;
-			ced.interpretInstrs = next.Cont;
-
-			/* Minor optimisation: anything within five bytes of a patch
-			   point is implicitly cont, so remove them. */
-			for (auto it = ced.patchPoints.begin(); it != ced.patchPoints.end(); it++)
-				for (unsigned x = 0; x < 5; x++)
-					ced.interpretInstrs.erase(*it + x);
-			return;
+		}
+		currentPs.MustInterpret.insert(r);
+		std::set<patchStrategy> visited;
+		patchQueueT pses;
+		pses.push(currentPs);
+		while (true) {
+			if (TIMEOUT) {
+				return;
+			}
+			if (pses.empty()) {
+				errx(1, "cannot build patch strategy");
+			}
+			patchStrategy next(pses.top());
+			pses.pop();
+			if (!visited.insert(next).second)
+				continue;
+			if (patchSearch(oracle, next, pses)) {
+				/* We have a solution for this entry
+				 * point.  Update currentPs and move
+				 * on. */
+				currentPs = next;
+				break;
+			}
 		}
 	}
-	errx(1, "Cannot solve patch problem");
+
+	ced.patchPoints = currentPs.Patch;
+	ced.interpretInstrs = currentPs.Cont;
+
+	/* Minor optimisation: anything within five bytes of a patch
+	   point is implicitly cont, so remove them. */
+	for (auto it = ced.patchPoints.begin(); it != ced.patchPoints.end(); it++)
+		for (unsigned x = 0; x < 5; x++)
+			ced.interpretInstrs.erase(*it + x);
 }
 
-static void
+void
 optimiseHBEdges(crashEnforcementData &ced)
 {
 	/* If an instruction receives a message from thread X then it
@@ -1442,49 +1484,3 @@ optimiseHBEdges(crashEnforcementData &ced)
 	}
 }
 
-int
-main(int argc, char *argv[])
-{
-	init_sli();
-
-	VexPtr<MachineState> ms(MachineState::readELFExec(argv[1]));
-	VexPtr<Thread> thr(ms->findThread(ThreadId(1)));
-	VexPtr<Oracle> oracle(new Oracle(ms, thr, argv[2]));
-	oracle->loadCallGraph(oracle, argv[3], argv[4], ALLOW_GC);
-
-	int next_hb_id = 0xaabb;
-
-	SMScopes scopes;
-	ThreadAbstracter abs;
-	crashEnforcementData accumulator;
-
-	timeout_means_death = true;
-
-	TimeoutTimer tt;
-	tt.timeoutAfterSeconds(60);
-	for (int i = 6; i < argc; i++) {
-		CrashSummary *summary;
-
-		if (i == 6) {
-			summary = readBugReport(&scopes, argv[i], NULL);
-		} else {
-			SMScopes _scopes;
-			summary = readBugReport(&_scopes, argv[i], NULL);
-			summary = rewriteSummaryCrossScope(summary, &scopes);
-		}
-		crashEnforcementData acc = enforceCrashForMachine(SummaryId(i - 5), summary, oracle, abs, next_hb_id);
-		optimiseHBEdges(acc);
-		optimiseStashPoints(acc, oracle);
-		optimiseCfg(acc);
-		accumulator |= acc;
-	}
-
-	buildPatchStrategy(accumulator, oracle);
-
-	FILE *f = fopen(argv[5], "w");
-	accumulator.prettyPrint(&scopes, f);
-	accumulator.prettyPrint(&scopes, stdout);
-	fclose(f);
-
-	return 0;
-}

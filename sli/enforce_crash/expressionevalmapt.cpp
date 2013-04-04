@@ -5,6 +5,9 @@
    unevaluatable components. */
 #include "sli.h"
 #include "enforce_crash.hpp"
+#include "timers.hpp"
+
+extern FILE *bubble_plot_log;
 
 #ifndef NDEBUG
 static bool debug_eem = false;
@@ -20,45 +23,6 @@ static bool debug_ubbdd = false;
 
 /* First, a couple of random bits which don't really belong here but
    which don't really belong anywhere else either. */
-happensAfterMapT::happensAfterMapT(const SummaryId &summary,
-				   const std::set<const IRExprHappensBefore *> &trueHb,
-				   const std::set<const IRExprHappensBefore *> &falseHb,
-				   ThreadAbstracter &abs,
-				   CrashCfg &cfg,
-				   const MaiMap &mai)
-{
-	for (auto it = trueHb.begin(); it != trueHb.end(); it++) {
-		const IRExprHappensBefore *e = *it;
-		for (auto before_it = abs.begin(summary, mai, e->before, cfg); !before_it.finished(); before_it.advance()) {
-			Instruction<ThreadCfgLabel> *const before = before_it.get();
-			if (!before)
-				continue;
-			for (auto after_it = abs.begin(summary, mai, e->after, cfg); !after_it.finished(); after_it.advance()) {
-				auto after = after_it.get();
-				if (!after)
-					continue;
-				happensAfter[before].insert(after);
-				happensBefore[after].insert(before);
-			}
-		}
-	}
-	for (auto it = falseHb.begin(); it != falseHb.end(); it++) {
-		const IRExprHappensBefore *e = *it;
-		for (auto before_it = abs.begin(summary, mai, e->before, cfg); !before_it.finished(); before_it.advance()) {
-			Instruction<ThreadCfgLabel> *const before = before_it.get();
-			if (!before)
-				continue;
-			for (auto after_it = abs.begin(summary, mai, e->after, cfg); !after_it.finished(); after_it.advance()) {
-				auto after = after_it.get();
-				if (!after)
-					continue;
-				happensAfter[after].insert(before);
-				happensBefore[before].insert(after);
-			}
-		}
-	}
-}
-
 happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 				     const MaiMap &mai,
 				     const std::set<const IRExprHappensBefore *> &trueHb,
@@ -67,6 +31,7 @@ happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 				     ThreadAbstracter &abs,
 				     int &next_hb_id)
 {
+	fprintf(bubble_plot_log, "%f: start happensBeforeMapT() constructor\n", now());
 	for (auto it = trueHb.begin(); it != trueHb.end(); it++) {
 		auto hb = *it;
 		const MemoryAccessIdentifier &beforeMai(hb->before);
@@ -111,6 +76,7 @@ happensBeforeMapT::happensBeforeMapT(const SummaryId &summary,
 			}
 		}
 	}
+	fprintf(bubble_plot_log, "%f: stop happensBeforeMapT() constructor\n", now());
 }
 
 typedef Instruction<ThreadCfgLabel> *instr_t;
@@ -261,7 +227,7 @@ evaluatable(IRExpr *what, const std::set<input_expression> &avail)
 class reorder_bbdd_cond : public Named {
 	reorder_bbdd_cond()
 		: rank(),
-		  cond((IRExpr *)0xf001),
+		  cond((IRExpr *)0xf001b),
 		  evaluatable((bool)97)
 	{}
 	char *mkName() const {
@@ -446,10 +412,12 @@ public:
 		}
 	}
 	void visit(HeapVisitor &hv) {
-		cond.reallyVisit(hv);
-		hv(trueBranch);
-		hv(falseBranch);
-		hv(equiv_bbdd);
+		if (!isLeaf) {
+			cond.reallyVisit(hv);
+			hv(trueBranch);
+			hv(falseBranch);
+			hv(equiv_bbdd);
+		}
 	}
 	NAMED_CLASS
 };
@@ -589,6 +557,15 @@ reorder_bbdd::ifelse(const reorder_bbdd_cond &cond,
 		     const reorder_bbdd *f,
 		     bbdd *equiv_bbdd)
 {
+	/* Avoid angering the OOM killer unnecessarily. */
+	if (cons_memo.size() > 10000000) {
+		if (!_timed_out) {
+			fprintf(stderr, "whoops, too many reorder_bbdds.  Forcing a timeout\n");
+		}
+		_timed_out = true;
+		return t;
+	}
+
 	if (!t->isLeaf && cond == t->cond) {
 		t = t->trueBranch;
 	}
@@ -782,7 +759,7 @@ reorder_bbdd::from_bbdd(bbdd *what,
 	if (what->isLeaf()) {
 		return reorder_bbdd::Leaf(what->leaf());
 	}
-	auto it_did_insert = conv_memo.insert(what, (reorder_bbdd *)0xf001);
+	auto it_did_insert = conv_memo.insert(what, (reorder_bbdd *)0xf001a);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -829,7 +806,7 @@ availCondition(const reorder_bbdd *what,
 	if (!what->cond.evaluatable) {
 		return reorder_bbdd::Leaf(true);
 	}
-	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001);
+	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001c);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -865,7 +842,7 @@ unavailCondition(const reorder_bbdd *what,
 	if (!what->cond.evaluatable) {
 		return what;
 	}
-	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001);
+	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001d);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
@@ -1020,6 +997,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		hbMap.prettyPrint(stdout);
 	}
 
+	fprintf(bubble_plot_log, "%f: start determine input availability\n", now());
 	/* Count the predecessors for each instruction, so that we
 	 * know when it's safe to process it. */
 	std::map<instr_t, unsigned> pendingPredecessors;
@@ -1152,6 +1130,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	fprintf(bubble_plot_log, "%f: stop determine input availability\n", now());
+
 	/* Now figure out what side condition we want to check at
 	   every instruction.  For each node, we take the condition at
 	   the start of the node and split it into a component which
@@ -1212,8 +1192,12 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	TimeoutTimer tmr;
+	tmr.timeoutAfterSeconds(60);
+
+	fprintf(bubble_plot_log, "%f: start place side conditions\n", now());
 	std::set<instr_t> deadStates;
-	while (!pendingInstrs.empty()) {
+	while (!TIMEOUT && !pendingInstrs.empty()) {
 		auto i = pendingInstrs.back();
 		pendingInstrs.pop_back();
 		assert(pendingPredecessors.count(i));
@@ -1221,7 +1205,6 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 
 		if (debug_eem || debug_eem_schedule) {
 			printf("Consider %s\n", i->rip.name());
-			dbg_break("hello");
 		}
 
 		/* At the start of the instruction, we have to check
@@ -1627,6 +1610,13 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			}
 		}
 	}
+	tmr.cancel();
+	fprintf(bubble_plot_log, "%f: stop place side conditions\n", now());
+
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed place side conditions\n", now());
+		return;
+	}
 
 	if (deadStates.empty()) {
 		bool failed = false;
@@ -1642,6 +1632,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 	}
 
+	fprintf(bubble_plot_log, "%f: start simplify plan\n", now());		
 	/* Now deal with the dead states.  These are states which we
 	   can definitely never reach due to the side conditions being
 	   provably false, so go and kill them all off. */
@@ -1751,6 +1742,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		deadStates = newDead;
 	}
+	fprintf(bubble_plot_log, "%f: stop simplify plan\n", now());		
 }
 
 bbdd *
