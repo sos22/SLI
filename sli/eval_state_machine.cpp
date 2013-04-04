@@ -99,23 +99,6 @@ class threadState {
 		}
 		assignmentOrder.push_back(reg);
 	}
-
-	IRExpr *setTemporary(SMScopes *scopes, const threadAndRegister &reg, IRExpr *inp, const IRExprOptimisations &opt);
-	bbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *inp,
-			   const IRExprOptimisations &opt,
-			   std::map<bbdd *, bbdd *> &memo);
-	exprbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *inp,
-			      const IRExprOptimisations &opt,
-			      std::map<exprbdd *, exprbdd *> &memo);
-	bbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *inp,
-			   const IRExprOptimisations &opt) {
-		std::map<bbdd *, bbdd *> memo;
-		return setTemporary(scopes, reg, inp, opt, memo);
-	}
-	exprbdd *setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *inp, const IRExprOptimisations &opt) {
-		std::map<exprbdd *, exprbdd *> memo;
-		return setTemporary(scopes, reg, inp, opt, memo);
-	}
 public:
 	exprbdd *register_value(SMScopes *scopes,
 				const threadAndRegister &reg,
@@ -363,7 +346,7 @@ public:
 			abort();
 		}
 
-		*assumption = setTemporary(scopes, reg, *assumption, opt);
+		*assumption = specialiseIRExpr(scopes, *assumption);
 
 		bump_register_in_assignment_order(reg, havePhis);
 	}
@@ -383,7 +366,7 @@ public:
 			     it2++) {
 				if (it2->reg == *it) {
 					registers[phi->reg] = registers[*it];
-					*assumption = setTemporary(scopes, phi->reg, *assumption, opt);
+					*assumption = specialiseIRExpr(scopes, *assumption);
 					bump_register_in_assignment_order(phi->reg, havePhis);
 					return;
 				}
@@ -456,91 +439,6 @@ public:
 		}
 	}
 };
-
-/* Rewrite @e now that we know the value of @reg */
-bbdd *
-threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, bbdd *e, const IRExprOptimisations &opt,
-			  std::map<bbdd *, bbdd *> &memo)
-{
-	if (e->isLeaf())
-		return e;
-	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(e, (bbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (!did_insert)
-		return it->second;
-	IRExpr *cond = setTemporary(scopes, reg, e->internal().condition, opt);
-	bbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt, memo);
-	bbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt, memo);
-	bbdd *res;
-	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch) {
-		res = e;
-	} else if (cond == e->internal().condition) {
-		res = scopes->bools.node(e->internal().condition,
-					 e->internal().rank,
-					 trueB,
-					 falseB);
-	} else {
-		res = bbdd::ifelse(&scopes->bools,
-				   bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(e)),
-				   trueB,
-				   falseB);
-	}
-	it->second = res;
-	return res;
-}
-exprbdd *
-threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, exprbdd *e, const IRExprOptimisations &opt,
-			  std::map<exprbdd *, exprbdd *> &memo)
-{
-	if (e->isLeaf())
-		return exprbdd::var(&scopes->exprs, &scopes->bools,
-				    setTemporary(scopes, reg, e->leaf(), opt),
-				    bdd_ordering::rank_hint::End());
-	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(e, (exprbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (!did_insert)
-		return it->second;
-	IRExpr *cond = setTemporary(scopes, reg, e->internal().condition, opt);
-	exprbdd *trueB = setTemporary(scopes, reg, e->internal().trueBranch, opt, memo);
-	exprbdd *falseB = setTemporary(scopes, reg, e->internal().falseBranch, opt, memo);
-	exprbdd *res;
-	if (cond == e->internal().condition && trueB == e->internal().trueBranch && falseB == e->internal().falseBranch) {
-		res = e;
-	} else if (cond == e->internal().condition) {
-		res = scopes->exprs.node(e->internal().condition,
-					 e->internal().rank,
-					 trueB,
-					 falseB);
-	} else {
-		res = exprbdd::ifelse(&scopes->exprs,
-				      bbdd::var(&scopes->bools, cond, bdd_ordering::rank_hint::Near(e)),
-				      trueB,
-				      falseB);
-	}
-	it->second = res;
-	return res;
-}
-IRExpr *
-threadState::setTemporary(SMScopes *scopes, const threadAndRegister &reg, IRExpr *e, const IRExprOptimisations &opt)
-{
-	struct _ : public IRExprTransformer {
-		const threadAndRegister &reg;
-		threadState *_this;
-		SMScopes *_scopes;
-		_(const threadAndRegister &_reg, threadState *__this, SMScopes *__scopes)
-			: reg(_reg), _this(__this), _scopes(__scopes)
-		{}
-		IRExpr *transformIex(IRExprGet *ieg) {
-			if (ieg->reg == reg)
-				return exprbdd::to_irexpr(_this->register_value(_scopes, reg, ieg->ty));
-			else
-				return IRExprTransformer::transformIex(ieg);
-		}
-	} doit(reg, this, scopes);
-	return simplifyIRExpr(doit.doit(e), opt);
-}
 
 exprbdd *
 threadState::specialiseIRExpr(SMScopes *scopes, IRExpr *what, std::map<IRExpr *, exprbdd *> &memo)
