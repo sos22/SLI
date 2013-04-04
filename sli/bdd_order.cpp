@@ -245,7 +245,7 @@ printReordered(reordered *what, int field_width, std::set<reordered *> &visited,
 {
 	if (field_width != 0) {
 		auto it = labels.find(what);
-		if (it != labels.end() && !visited.count(what)) {
+		if (it != labels.end() && !visited.count(what) && !what->content.isLeaf) {
 			printf("[%*d]", field_width - 2, it->second);
 		} else {
 			printf("%*s", field_width, "");
