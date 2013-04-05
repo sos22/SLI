@@ -5,10 +5,17 @@
 #include "weak_map.hpp"
 
 class input_expression;
+class reorder_bbdd;
 
 template <typename resT, typename argT> class oneArgClosurePure {
 public:
 	virtual resT operator()(const argT &arg) const = 0;
+	virtual void prettyPrint(FILE *f) const = 0;
+};
+
+class reorder_evaluatable : public oneArgClosurePure<bool, IRExpr *> {
+public:
+	sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
 };
 
 /* These represent variables in the new BDD ordering. */
@@ -133,9 +140,6 @@ class reorder_bbdd : public GarbageCollected<reorder_bbdd, &ir_heap> {
 		  equiv_bbdd(_equivBbdd)
 	{}
 
-	const reorder_bbdd *fixupEvalable(const oneArgClosurePure<bool, IRExpr *> &evalable,
-					  sane_map<const reorder_bbdd *, const reorder_bbdd *> &) const;
-
 public:
 	bool isLeaf;
 	bool leaf;
@@ -144,8 +148,9 @@ public:
 	const reorder_bbdd *falseBranch;
 	mutable bbdd *equiv_bbdd;
 
-	static const reorder_bbdd *from_bbdd(bbdd *, const oneArgClosurePure<bool, IRExpr *> &evalable,
-					     sane_map<const reorder_bbdd *, const reorder_bbdd *> &);
+	static const reorder_bbdd *from_bbdd(bbdd *, reorder_evaluatable &evalable);
+	const reorder_bbdd *fixupEvalable(reorder_evaluatable &evalable) const;
+
 	bbdd *to_bbdd(bbdd::scope *) const;
 
 	static const reorder_bbdd *ifelse(const reorder_bbdd_cond &cond,
@@ -176,6 +181,8 @@ public:
 	}
 	NAMED_CLASS
 };
+
+std::pair<const reorder_bbdd *, const reorder_bbdd *> splitExpressionOnAvailability(const reorder_bbdd *what);
 
 void pp_reorder(const reorder_bbdd *bbdd);
 

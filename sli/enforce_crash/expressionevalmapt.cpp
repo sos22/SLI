@@ -188,12 +188,16 @@ calcEntryNeeded(bbdd::scope *scope,
 
 /* Can this expression be evaluated if we only have access to the
    input expressions in @avail? */
-class evaluatable : public oneArgClosurePure<bool, IRExpr *> {
+class evaluatable : public reorder_evaluatable {
 	const std::set<input_expression> &avail;
 public:
 	evaluatable(const std::set<input_expression> &_avail)
 		: avail(_avail)
 	{}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "avail: ");
+		print_expr_set(avail, f);
+	}
 	bool operator()(IRExpr *const &arg) const;
 };
 bool
@@ -232,146 +236,6 @@ evaluatable::operator()(IRExpr *const &what) const
 	return visit_irexpr(&avail, &visitor, what) == visit_continue;
 }
 
-/* Given that @what is reordered to have the monotonicity property,
-   find the strongest condition A which only tests expressions
-   evaluatable using inputs @avail such that @what implies A */
-static const reorder_bbdd *
-availCondition(const reorder_bbdd *what,
-	       const std::set<input_expression> &avail,
-	       sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo)
-{
-	if (what->isLeaf) {
-		return what;
-	}
-	if (!what->cond.evaluatable) {
-		return reorder_bbdd::Leaf(true);
-	}
-	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001c);
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (!did_insert) {
-		return it->second;
-	}
-	auto t = availCondition(what->trueBranch, avail, memo);
-	auto f = availCondition(what->falseBranch, avail, memo);
-	if (t == f) {
-		it->second = t;
-	} else if (t == what->trueBranch && f == what->falseBranch) {
-		it->second = what;
-	} else {
-		it->second = reorder_bbdd::ifelse(
-			what->cond,
-			t,
-			f,
-			NULL);
-	}
-	return it->second;
-}
-
-/* Given that @what is reordered to have the monotonicity property,
-   find a condition B such that
-   @what = B && availCondition(what, avail) */
-static const reorder_bbdd *
-unavailCondition(const reorder_bbdd *what,
-		 const std::set<input_expression> &avail,
-		 sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo)
-{
-	if (what->isLeaf) {
-		return what;
-	}
-	if (!what->cond.evaluatable) {
-		return what;
-	}
-	auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001d);
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (!did_insert) {
-		return it->second;
-	}
-	auto t = unavailCondition(what->trueBranch, avail, memo);
-	auto f = unavailCondition(what->falseBranch, avail, memo);
-	if (t == f || (t->isLeaf && !t->leaf)) {
-		it->second = f;
-	} else if (f->isLeaf && !f->leaf) {
-		it->second = t;
-	} else if (t == what->trueBranch && f == what->falseBranch) {
-		it->second = what;
-	} else {
-		it->second = reorder_bbdd::ifelse(
-			what->cond,
-			t,
-			f,
-			NULL);
-	}
-	return it->second;
-}
-
-/* Split a BDD X into components A and B such that X == A.B and A only
-   relies on expressions in @avail.  The intent is that A should be as
-   strong (i.e. unlikely to be true) as possible, but that's not
-   really formalised. */
-/* The trick here is to reorder @what so that all of the expressions
-   which can be evaluated using @avail are checked before all of the
-   expressions which can't be.  We can then build A by taking that
-   expression and replacing all branches from an evaluatable
-   expression to an unevaluatable one with branches to 1.  We build B
-   by taking the reordered expression and completely removing any
-   branches from an evaluatable node to the constant false leaf. */
-static std::pair<bbdd *, bbdd *>
-splitExpressionOnAvailability(bbdd::scope *scope,
-			      bbdd *what,
-			      const std::set<input_expression> &avail)
-{
-	if (debug_ubbdd) {
-		printf("Split expression, avail ");
-		print_expr_set(avail, stdout);
-		printf("\n");
-		what->prettyPrint(stdout);
-	}
-
-	sane_map<const reorder_bbdd *, const reorder_bbdd *> availMemo;
-	const reorder_bbdd *u_what = reorder_bbdd::from_bbdd(what, evaluatable(avail), availMemo);
-	if (debug_ubbdd) {
-		printf("Converted to UBBDD:\n");
-		pp_reorder(u_what);
-	}
-	sanity_check_reorder(u_what);
-
-	const reorder_bbdd *u_avail;
-	{
-		sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
-		u_avail = availCondition(u_what, avail, memo);
-		if (debug_ubbdd) {
-			printf("Available fragment:\n");
-			pp_reorder(u_avail);
-		}
-	}
-	sanity_check_reorder(u_avail);
-
-	const reorder_bbdd *u_unavail;
-	{
-		sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
-		u_unavail = unavailCondition(u_what, avail, memo);
-		if (debug_ubbdd) {
-			printf("Unavailable fragment:\n");
-			pp_reorder(u_unavail);
-		}
-	}
-	sanity_check_reorder(u_unavail);
-
-	bbdd *b_avail;
-	bbdd *unavail;
-	b_avail = u_avail->to_bbdd(scope);
-	unavail = u_unavail->to_bbdd(scope);
-	if (debug_ubbdd) {
-		printf("Convert back to BBDD; avail =\n");
-		b_avail->prettyPrint(stdout);
-		printf("Unavail =\n");
-		unavail->prettyPrint(stdout);
-	}
-	return std::pair<bbdd *, bbdd *>(unavail, b_avail);
-}
-
 static std::set<input_expression>
 availOnEntryAndLocalStash(instr_t i,
 			  const std::map<instr_t, std::set<instr_t> > &predecessors,
@@ -402,6 +266,38 @@ availOnEntryAndLocalStash(instr_t i,
 		}
 	}
 	return res;
+}
+
+static std::pair<bbdd *, bbdd *>
+splitExpressionOnAvailability(bbdd::scope *scope, bbdd *what, const std::set<input_expression> &avail)
+{
+	if (debug_ubbdd) {
+		printf("Split expression, avail ");
+		print_expr_set(avail, stdout);
+		printf("\n");
+		what->prettyPrint(stdout);
+	}
+
+	evaluatable evalable(avail);
+	const reorder_bbdd *u_what = reorder_bbdd::from_bbdd(what, evalable);
+	if (debug_ubbdd) {
+		printf("Converted to UBBDD:\n");
+		pp_reorder(u_what);
+	}
+	sanity_check_reorder(u_what);
+	auto pair = splitExpressionOnAvailability(u_what);
+	auto u_unavail = pair.first;
+	auto u_avail = pair.second;
+
+	auto b_avail = u_avail->to_bbdd(scope);
+	auto unavail = u_unavail->to_bbdd(scope);
+	if (debug_ubbdd) {
+		printf("Convert back to BBDD; avail =\n");
+		b_avail->prettyPrint(stdout);
+		printf("Unavail =\n");
+		unavail->prettyPrint(stdout);
+	}
+	return std::pair<bbdd *, bbdd *>(unavail, b_avail);
 }
 
 /* Constructor for the eval map.  Figure out precisely where we're

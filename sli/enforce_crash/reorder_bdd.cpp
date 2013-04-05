@@ -291,20 +291,19 @@ reorder_bbdd::ifelse(const reorder_bbdd_cond &cond,
    set has now changed.  Convert everything over to the new set.  This
    will re-use the old structure whenever possible. */
 const reorder_bbdd *
-reorder_bbdd::fixupEvalable(const oneArgClosurePure<bool, IRExpr *> &evaluatable,
-			    sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo) const
+reorder_bbdd::fixupEvalable(reorder_evaluatable &evaluatable) const
 {
 	if (isLeaf) {
 		return this;
 	}
-	auto it_did_insert = memo.insert(this, (reorder_bbdd *)0xbabe);
+	auto it_did_insert = evaluatable.memo.insert(this, (reorder_bbdd *)0xbabe);
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
 		return it->second;
 	}
-	auto t = trueBranch->fixupEvalable(evaluatable, memo);
-	auto f = falseBranch->fixupEvalable(evaluatable, memo);
+	auto t = trueBranch->fixupEvalable(evaluatable);
+	auto f = falseBranch->fixupEvalable(evaluatable);
 	bool shouldBeEval = evaluatable(cond.cond);
 	if (shouldBeEval == cond.evaluatable &&
 	    t == trueBranch &&
@@ -325,9 +324,7 @@ reorder_bbdd::fixupEvalable(const oneArgClosurePure<bool, IRExpr *> &evaluatable
 
 /* Convert @what to an unordered BBDD */
 const reorder_bbdd *
-reorder_bbdd::from_bbdd(bbdd *what,
-			const oneArgClosurePure<bool, IRExpr *> &evalable,
-			sane_map<const reorder_bbdd *, const reorder_bbdd *> &availMemo)
+reorder_bbdd::from_bbdd(bbdd *what, reorder_evaluatable &evalable)
 {
 	if (what->isLeaf()) {
 		return reorder_bbdd::Leaf(what->leaf());
@@ -336,14 +333,14 @@ reorder_bbdd::from_bbdd(bbdd *what,
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
 	if (!did_insert) {
-		return it->second->fixupEvalable(evalable, availMemo);
+		return it->second->fixupEvalable(evalable);
 	}
 	it->second =
 		ifelse(reorder_bbdd_cond(what->internal().rank,
 					 what->internal().condition,
 					 evalable(what->internal().condition)),
-		       from_bbdd(what->internal().trueBranch, evalable, availMemo),
-		       from_bbdd(what->internal().falseBranch, evalable, availMemo),
+		       from_bbdd(what->internal().trueBranch, evalable),
+		       from_bbdd(what->internal().falseBranch, evalable),
 		       what);
 	return it->second;
 }
@@ -365,3 +362,105 @@ reorder_bbdd::to_bbdd(bbdd::scope *scope) const
 	return equiv_bbdd;
 }
 
+/* Given that @what is reordered to have the monotonicity property,
+   find the strongest condition A which only tests expressions
+   evaluatable using inputs @avail such that @what implies A */
+static const reorder_bbdd *
+availCondition(const reorder_bbdd *what,
+	       sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo)
+{
+       if (what->isLeaf) {
+               return what;
+       }
+       if (!what->cond.evaluatable) {
+               return reorder_bbdd::Leaf(true);
+       }
+       auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001c);
+       auto it = it_did_insert.first;
+       auto did_insert = it_did_insert.second;
+       if (!did_insert) {
+               return it->second;
+       }
+       auto t = availCondition(what->trueBranch, memo);
+       auto f = availCondition(what->falseBranch, memo);
+       if (t == f) {
+               it->second = t;
+       } else if (t == what->trueBranch && f == what->falseBranch) {
+               it->second = what;
+       } else {
+               it->second = reorder_bbdd::ifelse(
+                       what->cond,
+                       t,
+                       f,
+                       NULL);
+       }
+       return it->second;
+}
+
+/* Given that @what is reordered to have the monotonicity property,
+   find a condition B such that
+   @what = B && availCondition(what, avail) */
+static const reorder_bbdd *
+unavailCondition(const reorder_bbdd *what,
+                sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo)
+{
+       if (what->isLeaf) {
+               return what;
+       }
+       if (!what->cond.evaluatable) {
+               return what;
+       }
+       auto it_did_insert = memo.insert(what, (const reorder_bbdd *)0xf001d);
+       auto it = it_did_insert.first;
+       auto did_insert = it_did_insert.second;
+       if (!did_insert) {
+               return it->second;
+       }
+       auto t = unavailCondition(what->trueBranch, memo);
+       auto f = unavailCondition(what->falseBranch, memo);
+       if (t == f || (t->isLeaf && !t->leaf)) {
+               it->second = f;
+       } else if (f->isLeaf && !f->leaf) {
+               it->second = t;
+       } else if (t == what->trueBranch && f == what->falseBranch) {
+               it->second = what;
+       } else {
+               it->second = reorder_bbdd::ifelse(
+                       what->cond,
+                       t,
+                       f,
+                       NULL);
+       }
+       return it->second;
+}
+
+/* Split a BDD X into components A and B such that X == A.B and A only
+   relies on expressions in @avail.  The intent is that A should be as
+   strong (i.e. unlikely to be true) as possible, but that's not
+   really formalised. */
+/* The trick here is to reorder @what so that all of the expressions
+   which can be evaluated using @avail are checked before all of the
+   expressions which can't be.  We can then build A by taking that
+   expression and replacing all branches from an evaluatable
+   expression to an unevaluatable one with branches to 1.  We build B
+   by taking the reordered expression and completely removing any
+   branches from an evaluatable node to the constant false leaf. */
+std::pair<const reorder_bbdd *, const reorder_bbdd *>
+splitExpressionOnAvailability(const reorder_bbdd *what)
+{
+	const reorder_bbdd *avail;
+	{
+		sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
+		avail = availCondition(what, memo);
+	}
+	sanity_check_reorder(avail);
+
+	const reorder_bbdd *unavail;
+	{
+		sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
+		unavail = unavailCondition(what, memo);
+	}
+	sanity_check_reorder(unavail);
+
+	return std::pair<const reorder_bbdd *, const reorder_bbdd *>(unavail, avail);
+}
