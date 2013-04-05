@@ -428,7 +428,7 @@ public:
 	}
 };
 
-void enumerateNeededExpressions(const bbdd *e, std::set<input_expression> &out);
+void enumerateNeededExpressions(const reorder_bbdd *e, std::set<input_expression> &out);
 void optimiseHBEdges(crashEnforcementData &ced);
 void optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle);
 void optimiseCfg(crashEnforcementData &ced);

@@ -51,98 +51,44 @@ instrToInstrSetMap::print(FILE *f) const
 	}
 }
 
-#ifndef NDEBUG
-/* There should be no HB edges in our side condition.  These utility
-   functions are useful for checking that. */
-static void
-assertHbEdgeFree(IRExpr *what)
-{
-	struct v {
-		static visit_result Hb(void *, const IRExprHappensBefore *) {
-			return visit_abort;
-		}
-	};
-	static irexpr_visitor<void> visitor;
-	visitor.HappensBefore = v::Hb;
-	assert(visit_irexpr((void *)NULL, &visitor, what) != visit_abort);
-}
-static void
-assertHbEdgeFree(bbdd *what, std::set<bbdd *> &memo)
-{
-	if (what->isLeaf()) {
-		return;
-	}
-	if (!memo.insert(what).second) {
-		return;
-	}
-	assertHbEdgeFree(what->internal().condition);
-	assertHbEdgeFree(what->internal().trueBranch, memo);
-	assertHbEdgeFree(what->internal().falseBranch, memo);
-}
-static void
-assertHbEdgeFree(bbdd *what)
-{
-	std::set<bbdd *> memo;
-	assertHbEdgeFree(what, memo);
-}
-#else
-static void
-assertHbEdgeFree(bbdd *)
-{
-}
-#endif
-
 struct expr_slice {
 	std::set<const IRExprHappensBefore *> trueSlice;
 	std::set<const IRExprHappensBefore *> falseSlice;
-	mutable bbdd *leftOver;
-	bool operator <(const expr_slice &o) const {
-		if (trueSlice < o.trueSlice)
+	const reorder_bbdd *leftOver;
+
+	expr_slice(const std::set<const IRExprHappensBefore *> &_trueSlice,
+		   const std::set<const IRExprHappensBefore *> &_falseSlice,
+		   const reorder_bbdd *_leftOver)
+		: trueSlice(_trueSlice), falseSlice(_falseSlice),
+		  leftOver(_leftOver)
+	{}
+
+	bool operator<(const expr_slice &o) const {
+		if (leftOver < o.leftOver) {
 			return true;
-		if (trueSlice > o.trueSlice)
+		} else if (leftOver > o.leftOver) {
 			return false;
-		return falseSlice < o.falseSlice;
-	}
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "\t{");
-		bool comma = false;
-		for (auto it = trueSlice.begin();
-		     it != trueSlice.end();
-		     it++) {
-			if (comma)
-				fprintf(f, ", ");
-			comma = true;
-			ppIRExpr(*it, f);
+		} else if (trueSlice < o.trueSlice) {
+			return true;
+		} else if (trueSlice > o.trueSlice) {
+			return false;
+		} else {
+			return falseSlice < o.falseSlice;
 		}
-		for (auto it = falseSlice.begin();
-		     it != falseSlice.end();
-		     it++) {
-			if (comma)
-				fprintf(f, ", ");
-			comma = true;
-			fprintf(f, "¬");
-			ppIRExpr(*it, f);
-		}
-		fprintf(f, "} -> ");
-		leftOver->prettyPrint(f);
-		fprintf(f, "\n");		
 	}
+
 	bool simplifyAndCheckForContradiction();
 };
 
 bool
 expr_slice::simplifyAndCheckForContradiction()
 {
-	if (debug_expr_slice) {
-		printf("%s\n", __func__);
-		prettyPrint(stdout);
-	}
-	if (leftOver->isLeaf() && !leftOver->leaf()) {
+	if (leftOver->isLeaf && !leftOver->leaf) {
 		if (debug_expr_slice) {
 			printf("Leftover is a contradiction\n");
-			return true;
-		}
-	}
+                        return true;
+                }
+        }
 	sane_map<MemoryAccessIdentifier, std::set<MemoryAccessIdentifier> > happensAfter;
 	for (auto it = trueSlice.begin(); it != trueSlice.end(); it++) {
 		auto hb = *it;
@@ -369,23 +315,9 @@ expr_slice::simplifyAndCheckForContradiction()
 			}
 		}
 	}
-
-	if (debug_expr_slice) {
-		printf("%s finished\n", __func__);
-		prettyPrint(stdout);
-	}
 	return false;
 }
 
-class never_evaluatable : public reorder_evaluatable {
-public:
-	bool operator()(IRExpr *const &) const {
-		return false;
-	}
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "<nothing evaluatable>");
-	}
-};
 static bool
 buildCED(const SummaryId &summaryId,
 	 const expr_slice &c,
@@ -402,8 +334,6 @@ buildCED(const SummaryId &summaryId,
 	enumerateNeededExpressions(c.leftOver, neededExpressions);
 	fprintf(bubble_plot_log, "%f: stop determine input availability\n", now());
 
-	never_evaluatable ne;
-	auto sideCondition = reorder_bbdd::from_bbdd(c.leftOver, ne);
 	*out = crashEnforcementData(&summary->scopes->bools,
 				    summaryId,
 				    *summary->mai,
@@ -412,7 +342,7 @@ buildCED(const SummaryId &summaryId,
 				    rootsCfg,
 				    c.trueSlice,
 				    c.falseSlice,
-				    sideCondition,
+				    c.leftOver,
 				    next_hb_id,
 				    summary,
 				    as);
@@ -437,31 +367,27 @@ consistentOrdering(const expr_slice &slice)
 	thread_b = -99;
 
 	for (auto it = slice.trueSlice.begin(); it != slice.trueSlice.end(); it++) {
-		if ((*it)->tag == Iex_HappensBefore) {
-			IRExprHappensBefore *e = (IRExprHappensBefore *)*it;
-			if (!found_a_thread) {
-				thread_a = e->before.tid;
-				thread_b = e->after.tid;
-				found_a_thread = true;
-			} else {
-				if (thread_a != e->before.tid ||
-				    thread_b != e->after.tid)
-					return false;
-			}
+		IRExprHappensBefore *e = (IRExprHappensBefore *)*it;
+		if (!found_a_thread) {
+			thread_a = e->before.tid;
+			thread_b = e->after.tid;
+			found_a_thread = true;
+		} else {
+			if (thread_a != e->before.tid ||
+			    thread_b != e->after.tid)
+				return false;
 		}
 	}
 	for (auto it = slice.falseSlice.begin(); it != slice.falseSlice.end(); it++) {
-		if ((*it)->tag == Iex_HappensBefore) {
-			IRExprHappensBefore *e = (IRExprHappensBefore *)*it;
-			if (!found_a_thread) {
-				thread_a = e->after.tid;
-				thread_b = e->before.tid;
-				found_a_thread = true;
-			} else {
-				if (thread_a != e->after.tid ||
-				    thread_b != e->before.tid)
-					return false;
-			}
+		IRExprHappensBefore *e = (IRExprHappensBefore *)*it;
+		if (!found_a_thread) {
+			thread_a = e->after.tid;
+			thread_b = e->before.tid;
+			found_a_thread = true;
+		} else {
+			if (thread_a != e->after.tid ||
+			    thread_b != e->before.tid)
+				return false;
 		}
 	}
 	return true;
@@ -695,133 +621,106 @@ removeFreeVariables(bbdd::scope *scope, bbdd *what, std::map<bbdd *, bbdd *> &me
 	return it->second;
 }
 
-class sliced_expr : public std::set<expr_slice> {
+class only_hb_evaluatable : public reorder_evaluatable {
 public:
-	sliced_expr operator |(const sliced_expr &a) const
-	{
-		sliced_expr res(*this);
-		res.insert(a.begin(), a.end());
-		return res;
+	bool operator()(IRExpr *const &ex) const {
+		return ex->tag == Iex_HappensBefore;
 	}
 	void prettyPrint(FILE *f) const {
-		fprintf(f, "Sliced expr:\n");
-		for (auto it = begin(); it != end(); it++)
-			it->prettyPrint(f);
-	}
-	sliced_expr setTrue(const IRExprHappensBefore *e) const
-	{
-		sliced_expr res;
-		for (auto it = begin();
-		     it != end();
-		     it++) {
-			expr_slice a(*it);
-			a.trueSlice.insert(e);
-			if (!a.simplifyAndCheckForContradiction()) {
-				res.insert(a);
-			}
-		}
-		return res;
-	}
-	sliced_expr setFalse(const IRExprHappensBefore *e) const
-	{
-		sliced_expr res;
-		for (auto it = begin();
-		     it != end();
-		     it++) {
-			expr_slice a(*it);
-			a.falseSlice.insert(e);
-			if (!a.simplifyAndCheckForContradiction()) {
-				res.insert(a);
-			}
-		}
-		return res;
+		fprintf(f, "HB only");
 	}
 };
 
-static bbdd *
-setVariable(bbdd::scope *scope, bbdd *what, const IRExpr *expr,
-	    bool val, std::map<bbdd *, bbdd *> &memo)
+template <typename t> static void
+print_expr_set(FILE *f, const std::set<t *> &what)
 {
-	assert(expr->tag == Iex_HappensBefore);
-	if (what->isLeaf()) {
-		return what;
+	fprintf(f, "{");
+	for (auto it = what.begin(); it != what.end(); it++) {
+		if (it != what.begin()) {
+			fprintf(f, ", ");
+		}
+		ppIRExpr(*it, f);
 	}
-	/* This is safe because of the BDD ordering. */
-	if (what->internal().condition->tag != Iex_EntryPoint &&
-	    what->internal().condition->tag != Iex_ControlFlow &&
-	    what->internal().condition->tag != Iex_HappensBefore) {
-		return what;
-	}
-	auto it_did_insert = memo.insert(std::pair<bbdd *, bbdd *>(what, (bbdd *)NULL));
-	auto it = it_did_insert.first;
-	auto did_insert = it_did_insert.second;
-	if (!did_insert) {
-		/* it->second already correct */
-	} else {
-		auto t = setVariable(scope, what->internal().trueBranch, expr, val, memo);
-		auto f = setVariable(scope, what->internal().falseBranch, expr, val, memo);
-		if (what->internal().condition == expr) {
-			if (val) {
-				it->second = t;
-			} else {
-				it->second = f;
+	fprintf(f, "}");
+}
+
+static void
+enumHbOrderings(const reorder_bbdd *what,
+		const std::set<const IRExprHappensBefore *> &trueExprs,
+		const std::set<const IRExprHappensBefore *> &falseExprs,
+		std::set<expr_slice> &acc)
+{
+	if (what->isLeaf || !what->cond.evaluatable) {
+		if (debug_expr_slice) {
+			printf("Found an HB ordering.  True: ");
+			print_expr_set(stdout, trueExprs);
+			printf(", False: ");
+			print_expr_set(stdout, falseExprs);
+			printf("\nLeftover:\n");
+			pp_reorder(what);
+		}
+
+		expr_slice candidate(trueExprs, falseExprs, what);
+		if (candidate.simplifyAndCheckForContradiction()) {
+			return;
+		}
+		if (consistentOrdering(candidate)) {
+			if (debug_expr_slice) {
+				printf("Consistent ordering -> reject\n");
 			}
-		} else if (t == f) {
-			it->second = t;
-		} else if (t == what->internal().trueBranch &&
-			   f == what->internal().falseBranch) {
-			it->second = what;
-		} else {
-			it->second = scope->node(
-				what->internal().condition,
-				what->internal().rank,
-				t,
-				f);
+			return;
 		}
+		if (debug_expr_slice) {
+			printf("Accept\n");
+		}
+		acc.insert(expr_slice(trueExprs, falseExprs, what));
+		return;
 	}
-	return it->second;
+	assert(what->cond.cond->tag == Iex_HappensBefore);
+	std::set<const IRExprHappensBefore *> aT(trueExprs);
+	aT.insert((IRExprHappensBefore *)what->cond.cond);
+	enumHbOrderings(what->trueBranch, aT, falseExprs, acc);
+
+	std::set<const IRExprHappensBefore *> aF(falseExprs);
+	aF.insert((IRExprHappensBefore *)what->cond.cond);
+	enumHbOrderings(what->falseBranch, trueExprs, aF, acc);
 }
 
-static sliced_expr
-slice_by_exprs(bbdd::scope *scope, bbdd *expr, const std::set<const IRExprHappensBefore *> &sliceby)
+static void
+slice_by_hb(bbdd *expr, std::set<expr_slice> &out)
 {
-	if (sliceby.empty() || expr->isLeaf()) {
-		expr_slice theSlice;
-		theSlice.leftOver = expr;
-		sliced_expr s;
-		s.insert(theSlice);
-		return s;
+	only_hb_evaluatable ohb;
+	auto r_expr = reorder_bbdd::from_bbdd(expr, ohb);
+	if (debug_expr_slice) {
+		printf("slice_by_hb; expression:\n");
+		pp_reorder(r_expr);
 	}
-	if (TIMEOUT) {
-		return sliced_expr();
-	}
-	const IRExprHappensBefore *e = *sliceby.begin();
-	std::set<const IRExprHappensBefore *> others(sliceby);
-	others.erase(e);
-	std::map<bbdd *, bbdd *> memo1;
-	sliced_expr trueSlice(
-		slice_by_exprs(scope, setVariable(scope, expr, e, true, memo1), others));
-	std::map<bbdd *, bbdd *> memo2;
-	sliced_expr falseSlice(
-		slice_by_exprs(scope, setVariable(scope, expr, e, false, memo2), others));
-	return trueSlice.setTrue(e) | falseSlice.setFalse(e);
-}
 
-static sliced_expr
-slice_by_hb(bbdd::scope *scope, bbdd *expr)
-{
-	struct foo {
-		static visit_result HappensBefore(std::set<const IRExprHappensBefore *> *state,
-						  const IRExprHappensBefore *expr) {
-			state->insert(expr);
-			return visit_continue;
+	std::set<const IRExprHappensBefore *> empty;
+	enumHbOrderings(r_expr, empty, empty, out);
+
+	if (debug_expr_slice) {
+		std::map<const reorder_bbdd *, std::set<expr_slice> > inverted;
+		for (auto it = out.begin(); it != out.end(); it++) {
+			inverted[it->leftOver].insert(*it);
 		}
-	};
-	static struct bdd_visitor<std::set<const IRExprHappensBefore *> > visitor;
-	visitor.irexpr.HappensBefore = foo::HappensBefore;
-	std::set<const IRExprHappensBefore *> hbEdges;
-	visit_const_bdd(&hbEdges, &visitor, const_cast<const bbdd *>(expr));
-	return slice_by_exprs(scope, expr, hbEdges);
+
+		for (auto it = inverted.begin(); it != inverted.end(); it++) {
+			if (it != inverted.begin()) {
+				printf("------------------------\n");
+			}
+			printf("Leftover:\n");
+			pp_reorder(it->first);
+			printf("Options:\n");
+			for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+				printf("\tTrue: ");
+				print_expr_set(stdout, it2->trueSlice);
+				printf("; False: ");
+				print_expr_set(stdout, it2->falseSlice);
+				printf("\n");
+			}
+		}
+	}
 }
 
 crashEnforcementData
@@ -852,45 +751,10 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		std::map<bbdd *, bbdd *> memo;
 		requirement = removeFreeVariables(&summary->scopes->bools, requirement, memo);
 	}
-	fprintf(_logfile, "After free variable removal:\n");
-	requirement->prettyPrint(_logfile);
-	fprintf(_logfile, "\n");
-	if (TIMEOUT) {
-		fprintf(_logfile, "Killed by a timeout during simplification\n");
-		exit(1);
-	}
 
-	fprintf(bubble_plot_log, "%f: stop prepare summary\n", now());
-	fprintf(bubble_plot_log, "%f: start slice by hb\n", now());
-	sliced_expr sliced_by_hb;
-	{
-		TimeoutTimer tmr;
-		tmr.timeoutAfterSeconds(60);
-		sliced_by_hb = slice_by_hb(&summary->scopes->bools, requirement);
-		tmr.cancel();
-	}
-	fprintf(bubble_plot_log, "%f: stop slice by hb\n", now());
-
-	if (TIMEOUT) {
-		fprintf(bubble_plot_log, "%f: failed slice by hb\n", now());
-		return crashEnforcementData();
-	}
-
-	fprintf(bubble_plot_log, "%f: start heuristic simplify\n", now());
 	{
 		std::map<bbdd *, bbdd *> memo;
-		for (auto it = sliced_by_hb.begin();
-		     it != sliced_by_hb.end();
-			) {
-			assertHbEdgeFree(it->leftOver);
-			it->leftOver = heuristicSimplify(&summary->scopes->bools, it->leftOver, memo);
-			if ( (!it->leftOver->isLeaf() || it->leftOver->leaf()) &&
-			     !consistentOrdering(*it) ) {
-				it++;
-			} else {
-				sliced_by_hb.erase(it++);
-			}
-		}
+		requirement = heuristicSimplify(&summary->scopes->bools, requirement, memo);
 	}
 
 	std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > rootsCfg;
@@ -905,7 +769,30 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		rootsCfg[ConcreteThread(summaryId, it->first.thread)].insert(std::pair<CfgLabel, long>(it->first.node->label, it->second.rsp_delta));
 	}
 
-	fprintf(bubble_plot_log, "%f: stop heuristic simplify\n", now());
+	fprintf(_logfile, "After free variable removal:\n");
+	requirement->prettyPrint(_logfile);
+	fprintf(_logfile, "\n");
+	if (TIMEOUT) {
+		fprintf(_logfile, "Killed by a timeout during simplification\n");
+		exit(1);
+	}
+
+	fprintf(bubble_plot_log, "%f: stop prepare summary\n", now());
+	fprintf(bubble_plot_log, "%f: start slice by hb\n", now());
+	std::set<expr_slice> sliced_by_hb;
+	{
+		TimeoutTimer tmr;
+		tmr.timeoutAfterSeconds(60);
+		slice_by_hb(requirement, sliced_by_hb);
+		tmr.cancel();
+	}
+	fprintf(bubble_plot_log, "%f: stop slice by hb\n", now());
+
+	if (TIMEOUT) {
+		fprintf(bubble_plot_log, "%f: failed slice by hb\n", now());
+		return crashEnforcementData();
+	}
+
 	crashEnforcementData accumulator;
 	for (auto it = sliced_by_hb.begin(); !TIMEOUT && it != sliced_by_hb.end(); it++) {
 		crashEnforcementData tmp;
