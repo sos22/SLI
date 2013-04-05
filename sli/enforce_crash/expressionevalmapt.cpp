@@ -485,6 +485,151 @@ buildInputAvailabilityMap(std::map<instr_t, std::set<instr_t> > &predecessors,
 	}
 }
 
+class node_schedule {
+	std::map<instr_t, unsigned> pendingPredecessors;
+	std::vector<instr_t> pendingInstrs;
+public:
+	void build(const std::map<instr_t, std::set<instr_t> > &predecessors,
+		   const std::set<happensBeforeEdge *> &allEdges);
+	void unblock(instr_t what);
+	bool finished() const;
+	instr_t next();
+	void finishEdgeBefore(happensBeforeEdge *e);
+	void finishEdgeAfter(happensBeforeEdge *e);
+	void finishControlPredecessor(Instruction<ThreadCfgLabel>::successor_t&);
+	void check_cycles() const;
+};
+
+void
+node_schedule::build(const std::map<instr_t, std::set<instr_t> > &predecessors,
+		     const std::set<happensBeforeEdge *> &allEdges)
+{
+	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+		pendingPredecessors[it->first] = it->second.size();
+	}
+
+	if (debug_eem || debug_eem_schedule) {
+		printf("Local predecessor count map:\n");
+		for (auto it = pendingPredecessors.begin();
+		     it != pendingPredecessors.end();
+		     it++) {
+			printf("\t%s -> %d\n",
+			       it->first->rip.name(),
+			       it->second);
+		}
+	}
+	for (auto it = allEdges.begin(); it != allEdges.end(); it++) {
+		auto hb = *it;
+		assert(pendingPredecessors.count(hb->before));
+		assert(pendingPredecessors.count(hb->after));
+		pendingPredecessors[hb->after]++;
+	}
+	for (auto it = allEdges.begin(); it != allEdges.end(); it++) {
+		auto hb = *it;
+		auto it2 = predecessors.find(hb->after);
+		assert(it2 != predecessors.end());
+		pendingPredecessors[hb->before] += it2->second.size();
+	}
+	if (debug_eem || debug_eem_schedule) {
+		printf("Predecessor count map:\n");
+		for (auto it = pendingPredecessors.begin();
+		     it != pendingPredecessors.end();
+		     it++) {
+			printf("\t%s -> %d\n",
+			       it->first->rip.name(),
+			       it->second);
+		}
+	}
+
+	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
+		if (it->second == 0) {
+			pendingInstrs.push_back(it->first);
+		}
+	}
+}
+
+bool
+node_schedule::finished() const
+{
+	return pendingInstrs.empty();
+}
+
+instr_t
+node_schedule::next()
+{
+	instr_t res;
+	res = pendingInstrs.back();
+	assert(pendingPredecessors.count(res));
+	assert(pendingPredecessors[res] == 0);
+	pendingInstrs.pop_back();
+	pendingPredecessors.erase(res);
+
+	if (debug_eem || debug_eem_schedule) {
+		printf("Consider %s\n", res->rip.name());
+	}
+
+	return res;
+}
+
+void
+node_schedule::unblock(instr_t ins)
+{
+	assert(pendingPredecessors.count(ins));
+	assert(pendingPredecessors[ins] > 0);
+	if (--pendingPredecessors[ins] == 0) {
+		pendingInstrs.push_back(ins);
+	}
+}
+
+void
+node_schedule::finishEdgeBefore(happensBeforeEdge *hb)
+{
+	unblock(hb->after);
+	if (debug_eem_schedule) {
+		printf("Unblock %s via HB edge (%d left)\n",
+		       hb->after->rip.name(),
+		       pendingPredecessors[hb->after]);
+	}
+}
+
+void
+node_schedule::finishEdgeAfter(happensBeforeEdge *hb)
+{
+	unblock(hb->before);
+	if (debug_eem_schedule) {
+		printf("Unblock %s via HB edge (%d left) (after)\n",
+		       hb->before->rip.name(),
+		       pendingPredecessors[hb->before]);
+		hb->prettyPrint(stdout);
+	}
+}
+
+void
+node_schedule::finishControlPredecessor(Instruction<ThreadCfgLabel>::successor_t &i)
+{
+	unblock(i.instr);
+	if (debug_eem_schedule) {
+		printf("Unblock direct successor %s (%d left)\n",
+		       i.instr->rip.name(),
+		       pendingPredecessors[i.instr]);
+	}
+}
+
+void
+node_schedule::check_cycles() const
+{
+	bool failed = false;
+	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
+		assert(it->second != 0);
+		printf("Failed; %s is still live (%d)\n",
+		       it->first->rip.name(), it->second);
+		failed = true;
+	}
+	if (failed) {
+		fprintf(stderr, "WARNING: HB graph becomes cyclic when messages are synchronous!\n");
+	}
+}
+
 /* Constructor for the eval map.  Figure out precisely where we're
    going to eval the side condition (which may involve splitting it up
    into several places to do incremental eval). */
@@ -527,6 +672,12 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	buildInputAvailabilityMap(predecessors, stashMap, hbMap, availabilityMap);
 	fprintf(bubble_plot_log, "%f: stop determine input availability\n", now());
 
+
+	std::set<happensBeforeEdge *> allEdges;
+	for (auto it = hbMap.begin(); it != hbMap.end(); it++) {
+		allEdges |= it->second;
+	}
+
 	/* Now figure out what side condition we want to check at
 	   every instruction.  For each node, we take the condition at
 	   the start of the node and split it into a component which
@@ -537,56 +688,12 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	/* And the condition which we've already evaluated */
 	sane_map<instr_t, bbdd *> alreadyEvaled;
 
-	std::map<instr_t, unsigned> pendingPredecessors;
-	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
-		pendingPredecessors[it->first] = it->second.size();
-	}
-	std::set<happensBeforeEdge *> allEdges;
-	for (auto it = hbMap.begin(); it != hbMap.end(); it++) {
-		allEdges |= it->second;
-	}
-	if (debug_eem || debug_eem_schedule) {
-		printf("Local predecessor count map:\n");
-		for (auto it = pendingPredecessors.begin();
-		     it != pendingPredecessors.end();
-		     it++) {
-			printf("\t%s -> %d\n",
-			       it->first->rip.name(),
-			       it->second);
-		}
-	}
-	for (auto it = allEdges.begin(); it != allEdges.end(); it++) {
-		auto hb = *it;
-		assert(pendingPredecessors.count(hb->before));
-		assert(pendingPredecessors.count(hb->after));
-		pendingPredecessors[hb->after]++;
-	}
-	for (auto it = allEdges.begin(); it != allEdges.end(); it++) {
-		auto hb = *it;
-		pendingPredecessors[hb->before] +=
-			predecessors[hb->after].size();
-	}
-	if (debug_eem || debug_eem_schedule) {
-		printf("Predecessor count map:\n");
-		for (auto it = pendingPredecessors.begin();
-		     it != pendingPredecessors.end();
-		     it++) {
-			printf("\t%s -> %d\n",
-			       it->first->rip.name(),
-			       it->second);
-		}
-	}
+	node_schedule schedule;
+	schedule.build(predecessors, allEdges);
 
 	/* Assumption at the roots comes from the crash summary */
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		alreadyEvaled[cfg.findInstr(it.threadCfgLabel())] = assumption;
-	}
-
-	std::vector<instr_t> pendingInstrs;
-	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
-		if (it->second == 0) {
-			pendingInstrs.push_back(it->first);
-		}
 	}
 
 	TimeoutTimer tmr;
@@ -594,15 +701,8 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 
 	fprintf(bubble_plot_log, "%f: start place side conditions\n", now());
 	std::set<instr_t> deadStates;
-	while (!TIMEOUT && !pendingInstrs.empty()) {
-		auto i = pendingInstrs.back();
-		pendingInstrs.pop_back();
-		assert(pendingPredecessors.count(i));
-		assert(pendingPredecessors[i] == 0);
-
-		if (debug_eem || debug_eem_schedule) {
-			printf("Consider %s\n", i->rip.name());
-		}
+	while (!TIMEOUT && !schedule.finished()) {
+		auto i = schedule.next();
 
 		/* At the start of the instruction, we have to check
 		   everything which hasn't been checked by one of our
@@ -886,10 +986,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				}
 
 				/* That might unblock our successor. */
-				assert(pendingPredecessors[hb->after] > 0);
-				if (--pendingPredecessors[hb->after] == 0) {
-					pendingInstrs.push_back(hb->after);
-				}
+				schedule.finishEdgeBefore(hb);
 				{
 					auto it2_did_insert = alreadyEvaled.insert(hb->after, currentAssumption);
 					auto it2 = it2_did_insert.first;
@@ -897,11 +994,6 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 					if (!did_insert) {
 						it2->second = bbdd::And(scope, it2->second, currentAssumption);
 					}
-				}
-				if (debug_eem_schedule) {
-					printf("Unblock %s via HB edge (%d left)\n",
-					       hb->after->rip.name(),
-					       pendingPredecessors[hb->after]);
 				}
 			}
 
@@ -975,15 +1067,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 					}
 				}
 
-				assert(pendingPredecessors[it->instr] > 0);
-				if (--pendingPredecessors[it->instr] == 0) {
-					pendingInstrs.push_back(it->instr);
-				}
-				if (debug_eem_schedule) {
-					printf("Unblock direct successor %s (%d left)\n",
-					       it->instr->rip.name(),
-					       pendingPredecessors[it->instr]);
-				}
+				schedule.finishControlPredecessor(*it);
 				if (hbMap.count(it->instr->rip)) {
 					const std::set<happensBeforeEdge *> &hbEdges(hbMap[it->instr->rip]);
 					for (auto it2 = hbEdges.begin();
@@ -991,16 +1075,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 					     it2++) {
 						auto hb = *it2;
 						if (hb->after == it->instr) {
-							assert(pendingPredecessors[hb->before] > 0);
-							if (--pendingPredecessors[hb->before] == 0) {
-								pendingInstrs.push_back(hb->before);
-							}
-							if (debug_eem_schedule) {
-								printf("Unblock %s via hb edge (%d left)\n",
-								       hb->before->rip.name(),
-								       pendingPredecessors[hb->before]);
-								hb->prettyPrint(stdout);
-							}
+							schedule.finishEdgeAfter(hb);
 						}
 					}
 				}
@@ -1016,17 +1091,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	}
 
 	if (deadStates.empty()) {
-		bool failed = false;
-		for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
-			if (it->second != 0) {
-				printf("Failed; %s is still live (%d)\n",
-				       it->first->rip.name(), it->second);
-				failed = true;
-			}
-		}
-		if (failed) {
-			fprintf(stderr, "WARNING: HB graph becomes cyclic when messages are synchronous!\n");
-		}
+		schedule.check_cycles();
 	}
 
 	fprintf(bubble_plot_log, "%f: start simplify plan\n", now());		
