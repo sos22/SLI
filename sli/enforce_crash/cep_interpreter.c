@@ -326,7 +326,7 @@ static unsigned char logbuf[LOG_SIZE];
 static unsigned log_prod;
 
 static void
-to_logbuf(int _ignore, const void *buf, size_t buf_size)
+to_logbuf(int fd, const void *buf, size_t buf_size)
 {
 	if (buf_size + log_prod > LOG_SIZE) {
 		return;
@@ -3615,6 +3615,9 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
+		if (lls->await_bound_lls_exit) {
+			continue;
+		}
 		for (j = 0; j < instr->nr_stash; j++) {
 			EVENT(stash_reg);
 			if (instr->stash[j].reg != -1) {
@@ -3661,7 +3664,7 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 }
 
 static void
-check_conditions(struct high_level_state *hls, const char *message, unsigned offset)
+check_after_regs_condition(struct high_level_state *hls)
 {
 	int i;
 	int j;
@@ -3671,9 +3674,12 @@ check_conditions(struct high_level_state *hls, const char *message, unsigned off
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *cfg = &plan.cfg_nodes[lls->cfg_node];
-		const unsigned short *condition = *(const unsigned short **)((unsigned long)cfg + offset);
+		const unsigned short *condition = cfg->after_regs;
+		if (lls->await_bound_lls_exit) {
+			continue;
+		}
 		if (!eval_bytecode(condition, lls, NULL)) {
-			debug("%p(%s) failed a %s side-condition\n", lls, cfg->id, message);
+			debug("%p(%s) failed a ptr side-condition\n", lls, cfg->id);
 			hls->ll_states.content[i] = NULL;
 			exit_thread(lls);
 			killed = 1;
@@ -3693,11 +3699,6 @@ check_conditions(struct high_level_state *hls, const char *message, unsigned off
 		}
 		hls->ll_states.sz = j;
 	}
-}
-static void
-check_after_regs_condition(struct high_level_state *hls)
-{
-	check_conditions(hls, "pre", offsetof(struct cfg_instr, after_regs));
 }
 
 static void
