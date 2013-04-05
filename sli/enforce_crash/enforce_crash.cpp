@@ -500,6 +500,33 @@ heuristicSimplify(bbdd::scope *scope, bbdd *e, std::map<bbdd *, bbdd *> &memo)
 			   is sufficiently injective. */
 			if (ieb->arg1->tag == ieb->arg2->tag) {
 				switch (ieb->arg1->tag) {
+				case Iex_Associative: {
+					auto l = (IRExprAssociative *)ieb->arg1;
+					auto r = (IRExprAssociative *)ieb->arg2;
+					if (l->op != r->op ||
+					    l->nr_arguments != r->nr_arguments ||
+					    l->nr_arguments != 2 ||
+					    l->contents[0]->tag != Iex_Const ||
+					    l->contents[0] != r->contents[0]) {
+						break;
+					}
+					IRExprConst *c = (IRExprConst *)l->contents[0];
+					switch (l->op) {
+					case Iop_Mul64:
+						/* Multiplication by a
+						   small constant
+						   doesn't usually
+						   overflow. */
+						if (c->Ico.content.U64 >= 1024)
+							break;
+						ieb = IRExprBinop::mk(ieb->op, l->contents[1], r->contents[1]);
+						goto retry;
+					default:
+						break;
+					}
+					break;
+				}
+
 				case Iex_Binop: {
 					IRExprBinop *l = (IRExprBinop *)ieb->arg1;
 					IRExprBinop *r = (IRExprBinop *)ieb->arg2;
