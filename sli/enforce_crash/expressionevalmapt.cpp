@@ -630,6 +630,280 @@ node_schedule::check_cycles() const
 	}
 }
 
+/* Figure out what bits of the condition we can evaluate at the start
+ * of the instruction. */
+struct instrEntryPhaseRes {
+	bool dead;
+	bbdd *remainder;
+	bbdd *evalHere;
+	bbdd *newAssumption;
+};
+static instrEntryPhaseRes
+instrEntryPhase(bbdd::scope *scope,
+		bbdd *const entryCondition,
+		bbdd *const entryAssumption,
+		const std::set<input_expression> &availExprs)
+{
+	auto split1 = splitExpressionOnAvailability(
+		scope,
+		entryCondition,
+		availExprs);
+	if (debug_eem) {
+		printf("Left over after register and entry point:\n");
+		split1.first->prettyPrint(stdout);
+		printf("Eval here after register and entry point:\n");
+		split1.second->prettyPrint(stdout);
+	}
+	instrEntryPhaseRes res;
+	res.newAssumption = entryAssumption;
+	if (split1.second->isLeaf()) {
+		if (split1.second->leaf() == false) {
+			res.dead = true;
+		} else {
+			res.dead = false;
+			res.remainder = entryCondition;
+			res.evalHere = split1.second;
+		}
+		return res;
+	}
+
+	auto simpl = bbdd::assume(scope, split1.second, entryAssumption);
+	if (!simpl) {
+		instrEntryPhaseRes res;
+		res.dead = true;
+		return res;
+	}
+
+	simpl = subst_eq(scope, simpl);
+	if (simpl != split1.second && debug_eem) {
+		printf("Resimplify:\n");
+		simpl->prettyPrint(stdout);
+	}
+	if (simpl->isLeaf()) {
+		if (simpl->leaf() == false) {
+			res.dead = true;
+			return res;
+		}
+	} else {
+		res.newAssumption = bbdd::And(scope, entryAssumption, simpl);
+		res.remainder = split1.first;
+	}
+	res.evalHere = simpl;
+	res.dead = false;
+	return res;
+}
+
+/* Update our state to reflect having received messages. */
+struct instrRxPhaseRes {
+	std::set<input_expression> rxed_expressions;
+	bbdd *checkedHere;
+};
+static instrRxPhaseRes
+instrRxPhase(bbdd::scope *scope,
+	     instr_t i,
+	     const std::set<happensBeforeEdge *> &hbEdges,
+	     const std::map<instr_t, std::set<instr_t> > &predecessors,
+	     const std::map<instr_t, std::set<input_expression> > &availabilityMap,
+	     const expressionStashMapT &stashMap,
+	     const std::set<input_expression> &availExprs)
+{
+	/* What about once we've done the RX operations? */
+	/* Figure out what's available.  The message includes
+	   everything which was available at the start of the
+	   sending state, plus register and entry point
+	   stashes in that state. */
+
+	/* Process incoming messages first. */
+	bool haveIncomingEdge = false;
+	std::set<input_expression> rxed_expressions;
+	bbdd *rx_checked = scope->cnst(false);
+	for (auto it = hbEdges.begin();
+	     it != hbEdges.end();
+	     it++) {
+		auto hb = *it;
+		if (hb->after != i) {
+			continue;
+		}
+		if (debug_eem) {
+			printf("RX edge:\n");
+			hb->prettyPrint(stdout);
+		}
+		if (haveIncomingEdge) {
+			rxed_expressions &= availOnEntryAndLocalStash(
+				hb->before,
+				predecessors,
+				availabilityMap,
+				stashMap);
+		} else {
+			haveIncomingEdge = true;
+			rxed_expressions = availOnEntryAndLocalStash(
+				hb->before,
+				predecessors,
+				availabilityMap,
+				stashMap);
+		}
+		hb->content |= availExprs;
+		if (hb->sideCondition) {
+			rx_checked = bbdd::Or(
+				scope,
+				rx_checked,
+				hb->sideCondition);
+		} else {
+			rx_checked = scope->cnst(true);
+		}
+	}
+	
+	instrRxPhaseRes res;
+	if (haveIncomingEdge) {
+		res.rxed_expressions = rxed_expressions;
+		res.checkedHere = rx_checked;
+	} else {
+		res.checkedHere = NULL;
+	}
+	return res;
+}
+
+static void
+instrTxPhase(bbdd::scope *scope,
+	     instr_t i,
+	     const std::set<happensBeforeEdge *> &hbEdges,
+	     const std::map<instr_t, std::set<instr_t> > &predecessors,
+	     const std::map<instr_t, std::set<input_expression> > &availabilityMap,
+	     const expressionStashMapT &stashMap,
+	     bbdd *const entryNeeded,
+	     bbdd *const entryAssumption,
+	     bbdd *&exitNeeded,
+	     std::set<input_expression> &availExprs,
+	     node_schedule &schedule,
+	     sane_map<instr_t, bbdd *> &alreadyEvaled)
+{
+	/* Now process message transmits */
+	std::set<input_expression> acquired_by_tx;
+	bool have_tx_edge = false;
+	bbdd *tx_leftover = NULL;
+
+	for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
+		auto hb = *it;
+		if (hb->before != i) {
+			continue;
+		}
+
+		if (debug_eem) {
+			printf("Consider TX edge:\n");
+			hb->prettyPrint(stdout);
+		}
+		assert(!hb->sideCondition);
+
+		std::set<input_expression> availOnOtherSide(
+			availOnEntryAndLocalStash(
+				hb->after,
+				predecessors,
+				availabilityMap,
+				stashMap));
+		if (have_tx_edge) {
+			acquired_by_tx &= availOnOtherSide;
+		} else {
+			acquired_by_tx = availOnOtherSide;
+			have_tx_edge = true;
+		}
+
+		hb->content |= availExprs;
+
+		std::set<input_expression> availForThisMessage(availExprs);
+		availForThisMessage |= availOnOtherSide;
+
+		/* What can we evaluate on this edge? */
+		auto split = splitExpressionOnAvailability(
+			scope,
+			entryNeeded,
+			availForThisMessage);
+		if (debug_eem) {
+			printf("Eval here after TX:\n");
+			split.second->prettyPrint(stdout);
+		}
+		if (!split.second->isLeaf()) {
+			hb->sideCondition = subst_eq(scope, split.second);
+			if (debug_eem && hb->sideCondition != split.second) {
+				printf("subst_eq reduces edge condition to:\n");
+				hb->sideCondition->prettyPrint(stdout);
+			}
+		}
+		if (tx_leftover) {
+			tx_leftover = bbdd::Or(
+				scope,
+				tx_leftover,
+				split.first);
+		} else {
+			tx_leftover = split.first;
+		}
+
+		/* That might unblock our successor. */
+		schedule.finishEdgeBefore(hb);
+		{
+			auto it2_did_insert = alreadyEvaled.insert(hb->after, entryAssumption);
+			auto it2 = it2_did_insert.first;
+			auto did_insert = it2_did_insert.second;
+			if (!did_insert) {
+				it2->second = bbdd::And(scope, it2->second, entryAssumption);
+			}
+		}
+	}
+
+	if (have_tx_edge) {
+		assert(tx_leftover);
+		availExprs |= acquired_by_tx;
+		exitNeeded = tx_leftover;
+		if (debug_eem) {
+			printf("Avail with TX effects: ");
+			print_expr_set(availExprs, stdout);
+			printf("\ntx_leftover:\n");
+			exitNeeded->prettyPrint(stdout);
+		}
+	}
+}
+
+/* What can we do once we know what our successor instruction is? */
+static std::pair<bbdd *, bbdd *>
+instrCfPhase(bbdd::scope *scope,
+	     instr_t i,
+	     const std::map<instr_t, std::set<input_expression> > &availabilityMap,
+	     bbdd *entryNeeded,
+	     bbdd *currentAssumption)
+{
+	auto it = availabilityMap.find(i);
+	assert(it != availabilityMap.end());
+	const std::set<input_expression> &availExprs(it->second);
+	if (debug_eem) {
+		printf("Final avail: ");
+		print_expr_set(availExprs, stdout);
+		printf("\n");
+	}
+	auto split3 = splitExpressionOnAvailability(
+		scope,
+		entryNeeded,
+		availExprs);
+	if (debug_eem) {
+		printf("Left over after control flow:\n");
+		split3.first->prettyPrint(stdout);
+		printf("Eval here after control flow:\n");
+		split3.second->prettyPrint(stdout);
+	}
+	std::pair<bbdd *, bbdd *> res;
+	res.first = split3.first;
+	res.second = split3.second;
+	if (!split3.second->isLeaf()) {
+		res.second = bbdd::assume(scope, split3.second, currentAssumption);
+		if (res.second) {
+			res.second = subst_eq(scope, res.second);
+			if (res.second != split3.second && debug_eem) {
+				printf("Simplifies to:\n");
+				res.second->prettyPrint(stdout);
+			}
+		}
+	}
+	return res;
+}
+
 /* Constructor for the eval map.  Figure out precisely where we're
    going to eval the side condition (which may involve splitting it up
    into several places to do incremental eval). */
@@ -773,16 +1047,6 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			entryNeeded->prettyPrint(stdout);
 		}
 
-		/* The expression needs to be split into four phases:
-
-		   -- Things which can be evaled once we've done
-		      register stashes.
-		   -- Things which can be evaled once we've done
-		      RX.
-		   -- Things which can be evaled once we've done
-		      control flow
-		   -- Things which have to be deferred.
-		*/
 		bbdd *leftover;
 		leftover = entryNeeded;
 
@@ -798,263 +1062,104 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			printf("\n");
 		}
 
-		/* What can we evaluate with that? */
-		auto split1 = splitExpressionOnAvailability(
-			scope,
-			leftover,
-			availExprs);
-		if (debug_eem) {
-			printf("Left over after register and entry point:\n");
-			split1.first->prettyPrint(stdout);
-			printf("Eval here after register and entry point:\n");
-			split1.second->prettyPrint(stdout);
+		/* Figure out what we can do as soon as we start the
+		 * instruction */
+		auto entryPhase = instrEntryPhase(scope, leftover, currentAssumption, availExprs);
+		if (entryPhase.dead) {
+			deadStates.insert(i);
+			if (debug_eem_dead) {
+				printf("Register and entry point condition is unsatisfiable, killing %s!\n",
+				       i->rip.name());
+			}
+			continue;
 		}
-		leftover = split1.first;
-		if (!split1.second->isLeaf()) {
-			auto simpl = bbdd::assume(scope, split1.second, currentAssumption);
-			if (!simpl) {
-				deadStates.insert(i);
-				if (debug_eem_dead) {
-					printf("Register and entry point condition is unsatisfiable, killing %s!\n",
-					       i->rip.name());
-				}
-				continue;
-			}
-			simpl = subst_eq(scope, simpl);
-			if (simpl != split1.second && debug_eem) {
-				printf("Resimplify:\n");
-				simpl->prettyPrint(stdout);
-			}
-			if (simpl->isLeaf()) {
-				if (simpl->leaf() == false) {
-					if (debug_eem_dead) {
-						printf("Side condition for %s is unsatisfiable!\n",
-						       i->rip.name());
-					}
-					deadStates.insert(i);
-					continue;
-				}
-			} else {
-				evalAt[i->rip].after_regs = simpl;
-				currentAssumption = bbdd::And(scope, currentAssumption, simpl);
-			}
-		}
+		leftover = entryPhase.remainder;
+		evalAt[i->rip].after_regs = entryPhase.evalHere;
+		currentAssumption = entryPhase.newAssumption;
 
-		/* What about once we've done the RX operations? */
-		/* Figure out what's available.  The message includes
-		   everything which was available at the start of the
-		   sending state, plus register and entry point
-		   stashes in that state. */
-		if (hbMap.count(i->rip)) {
-			const std::set<happensBeforeEdge *> &hbEdges(hbMap[i->rip]);
-
-			/* Process incoming messages first. */
-			bool haveIncomingEdge = false;
-			std::set<input_expression> rxed_expressions;
-			bbdd *rx_checked = scope->cnst(false);
-			for (auto it = hbEdges.begin();
-			     it != hbEdges.end();
-			     it++) {
-				auto hb = *it;
-				if (hb->after != i) {
-					continue;
-				}
-				if (debug_eem) {
-					printf("RX edge:\n");
-					hb->prettyPrint(stdout);
-				}
-				if (haveIncomingEdge) {
-					rxed_expressions &= availOnEntryAndLocalStash(
-						hb->before,
-						predecessors,
-						availabilityMap,
-						stashMap);
-				} else {
-					haveIncomingEdge = true;
-					rxed_expressions = availOnEntryAndLocalStash(
-						hb->before,
-						predecessors,
-						availabilityMap,
-						stashMap);
-				}
-				hb->content |= availExprs;
-				if (hb->sideCondition) {
-					rx_checked = bbdd::Or(
-						scope,
-						rx_checked,
-						hb->sideCondition);
-				} else {
-					rx_checked = scope->cnst(true);
-				}
-			}
-
-			if (haveIncomingEdge) {
-				availExprs |= rxed_expressions;
-				currentAssumption = bbdd::And(
+		{
+			auto hb_it = hbMap.find(i->rip);
+			if (hb_it != hbMap.end()) {
+				/* Figure out what we can do once
+				 * we've received incoming messages */
+				auto rxPhase = instrRxPhase(
 					scope,
+					i,
+					hb_it->second,
+					predecessors,
+					availabilityMap,
+					stashMap,
+					availExprs);
+				availExprs |= rxPhase.rxed_expressions;
+				if (rxPhase.checkedHere) {
+					currentAssumption = bbdd::And(
+						scope,
+						currentAssumption,
+						rxPhase.checkedHere);
+					leftover = bbdd::assume(
+						scope,
+						leftover,
+						rxPhase.checkedHere);
+					if (!leftover) {
+						deadStates.insert(i);
+						if (debug_eem_dead) {
+							printf("RX condition is unsatisfiable, killing %s!\n",
+							       i->rip.name());
+						}
+						continue;
+					}
+					if (debug_eem) {
+						printf("Avail with RX effects: ");
+						print_expr_set(availExprs, stdout);
+						printf("\nrx_checked:\n");
+						rxPhase.checkedHere->prettyPrint(stdout);
+						printf("leftover:\n");
+						leftover->prettyPrint(stdout);
+					}
+				}
+
+				/* Figure out what we can do once
+				 * we've transmitted outgoing
+				 * messages. */
+				instrTxPhase(
+					scope,
+					i,
+					hb_it->second,
+					predecessors,
+					availabilityMap,
+					stashMap,
+					leftover,
 					currentAssumption,
-					rx_checked);
-				leftover = bbdd::assume(
-					scope,
 					leftover,
-					rx_checked);
-
-				if (!leftover) {
-					/* There's no way for the RX
-					   condition to be satisfied.
-					   That means this state can
-					   never be reached.  Arrange
-					   for it to be killed off
-					   later. */
-					deadStates.insert(i);
-					if (debug_eem_dead) {
-						printf("rx_checked is unsatisfiable, killing %s!\n",
-						       i->rip.name());
-					}
-					continue;
-				}
-
-				if (debug_eem) {
-					printf("Avail with RX effects: ");
-					print_expr_set(availExprs, stdout);
-					printf("\nrx_checked:\n");
-					rx_checked->prettyPrint(stdout);
-					printf("leftover:\n");
-					leftover->prettyPrint(stdout);
-				}
-			}
-
-
-			/* Now process message transmits */
-			std::set<input_expression> acquired_by_tx;
-			bool have_tx_edge = false;
-			bbdd *tx_leftover = NULL;
-
-			for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
-				auto hb = *it;
-				if (hb->before != i) {
-					continue;
-				}
-
-				if (debug_eem) {
-					printf("Consider TX edge:\n");
-					hb->prettyPrint(stdout);
-				}
-				assert(!hb->sideCondition);
-
-				std::set<input_expression> availOnOtherSide(
-					availOnEntryAndLocalStash(
-						hb->after,
-						predecessors,
-						availabilityMap,
-						stashMap));
-				if (have_tx_edge) {
-					acquired_by_tx &= availOnOtherSide;
-				} else {
-					acquired_by_tx = availOnOtherSide;
-					have_tx_edge = true;
-				}
-
-				hb->content |= availExprs;
-
-				std::set<input_expression> availForThisMessage(availExprs);
-				availForThisMessage |= availOnOtherSide;
-
-				/* What can we evaluate on this edge? */
-				auto split = splitExpressionOnAvailability(
-					scope,
-					leftover,
-					availForThisMessage);
-				if (debug_eem) {
-					printf("Eval here after TX:\n");
-					split.second->prettyPrint(stdout);
-				}
-				if (!split.second->isLeaf()) {
-					hb->sideCondition = subst_eq(scope, split.second);
-					if (debug_eem && hb->sideCondition != split.second) {
-						printf("subst_eq reduces edge condition to:\n");
-						hb->sideCondition->prettyPrint(stdout);
-					}
-				}
-				if (tx_leftover) {
-					tx_leftover = bbdd::Or(
-						scope,
-						tx_leftover,
-						split.first);
-				} else {
-					tx_leftover = split.first;
-				}
-
-				/* That might unblock our successor. */
-				schedule.finishEdgeBefore(hb);
-				{
-					auto it2_did_insert = alreadyEvaled.insert(hb->after, currentAssumption);
-					auto it2 = it2_did_insert.first;
-					auto did_insert = it2_did_insert.second;
-					if (!did_insert) {
-						it2->second = bbdd::And(scope, it2->second, currentAssumption);
-					}
-				}
-			}
-
-			if (have_tx_edge) {
-				assert(tx_leftover);
-				availExprs |= acquired_by_tx;
-				leftover = tx_leftover;
-				if (debug_eem) {
-					printf("Avail with TX effects: ");
-					print_expr_set(availExprs, stdout);
-					printf("\ntx_leftover:\n");
-					tx_leftover->prettyPrint(stdout);
-				}
+					availExprs,
+					schedule,
+					alreadyEvaled);
 			}
 		}
 
-		/* Finally, look at control-flow related stashes */
-		availExprs = availabilityMap[i];
-		if (debug_eem) {
-			printf("Final avail: ");
-			print_expr_set(availExprs, stdout);
-			printf("\n");
-		}
-		auto split3 = splitExpressionOnAvailability(
+		/* Figure out what we can do once we've figure out
+		 * where we're going next. */
+		std::pair<bbdd *, bbdd *>instrCf = instrCfPhase(
 			scope,
+			i,
+			availabilityMap,
 			leftover,
-			availExprs);
-		if (debug_eem) {
-			printf("Left over after control flow:\n");
-			split3.first->prettyPrint(stdout);
-			printf("Eval here after control flow:\n");
-			split3.second->prettyPrint(stdout);
+			currentAssumption);
+		if (!instrCf.second || (instrCf.second->isLeaf() && !instrCf.second->leaf())) {
+			if (debug_eem_dead) {
+				printf("post-control-flow condition is unsatisfiable, killing %s\n",
+				       i->rip.name());
+			}
+			deadStates.insert(i);
+			continue;
 		}
-		leftover = split3.first;
-		if (!split3.second->isLeaf()) {
-			auto simpl = bbdd::assume(scope, split3.second, currentAssumption);
-			if (!simpl) {
-				if (debug_eem_dead) {
-					printf("post-control-flow condition is unsatisfiable, killing %s\n",
-					       i->rip.name());
-				}
-				deadStates.insert(i);
-				continue;
-			}
-			simpl = subst_eq(scope, simpl);
-			if (simpl != split3.second && debug_eem) {
-				printf("Simplifies to:\n");
-				simpl->prettyPrint(stdout);
-			}
-			if (!simpl->isLeaf()) {
-				evalAt[i->rip].after_control_flow = simpl;
-				currentAssumption = bbdd::And(scope,
-							      currentAssumption,
-							      simpl);
-			} else if (simpl->leaf() == false) {
-				deadStates.insert(i);
-			}
+		if (!instrCf.second->isLeaf()) {
+			evalAt[i->rip].after_control_flow = instrCf.second;
+			currentAssumption = bbdd::And(scope,
+						      currentAssumption,
+						      instrCf.second);
 		}
-
-		/* Anything left after that is really leftover. */
-		leftoverCondition[i] = leftover;
+		leftoverCondition[i] = instrCf.first;
 
 		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
 			if (it->instr) {
@@ -1066,7 +1171,6 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 						it2->second = bbdd::Or(scope, it2->second, currentAssumption);
 					}
 				}
-
 				schedule.finishControlPredecessor(*it);
 				if (hbMap.count(it->instr->rip)) {
 					const std::set<happensBeforeEdge *> &hbEdges(hbMap[it->instr->rip]);
