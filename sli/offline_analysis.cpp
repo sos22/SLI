@@ -1613,13 +1613,13 @@ buildProbeMachine(SMScopes *scopes,
 					*mai);
 		fprintf(bubble_plot_log, "%f: stop compile crashing machine\n", now());
 		stackedCdf::stopCompileProbeMachine();
-		fprintf(better_log, "Initial crashing machine has %d states\n",
-			countMachineStates(sm));
 	}
 	if (TIMEOUT) {
 		fprintf(bubble_plot_log, "%f: failed compile crashing machine\n", now());
 		return NULL;
 	}
+	fprintf(better_log, "Initial crashing machine has %d states\n",
+		countMachineStates(sm));
 
 	fprintf(bubble_plot_log, "%f: start GC\n", now());
 	LibVEX_maybe_gc(token);
