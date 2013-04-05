@@ -1117,10 +1117,63 @@ rebuildConflictingStores(const MaiMap &decode,
 }
 #endif
 
+static int
+countMachineStates(StateMachine *sm)
+{
+	std::set<StateMachineState *> states;
+	enumStates(sm, &states);
+	return states.size();
+}
+
+static int
+countCfgInstructions(const CFGNode *root)
+{
+	std::set<const CFGNode *> visited;
+	std::vector<const CFGNode *> q;
+	q.push_back(root);
+	while (!q.empty()) {
+		const CFGNode *n = q.back();
+		q.pop_back();
+		if (!visited.insert(n).second) {
+			continue;
+		}
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
+			if (it->instr) {
+				q.push_back(it->instr);
+			}
+		}
+	}
+	return visited.size();
+}
+static int
+countCfgInstructions(const HashedSet<HashedPtr<CFGNode> > &roots)
+{
+	std::set<const CFGNode *> visited;
+	std::vector<const CFGNode *> q;
+	for (auto it = roots.begin(); !it.finished(); it.advance()) {
+		q.push_back(*it);
+	}
+	while (!q.empty()) {
+		const CFGNode *n = q.back();
+		q.pop_back();
+		if (!visited.insert(n).second) {
+			continue;
+		}
+		for (auto it = n->successors.begin(); it != n->successors.end(); it++) {
+			if (it->instr) {
+				q.push_back(it->instr);
+			}
+		}
+	}
+	return visited.size();
+}
+
 static StateMachine *
 buildStoreMachine(SMScopes *scopes,
 		  const VexPtr<Oracle> &oracle,
 		  unsigned tid,
+		  unsigned idx,
+		  unsigned nrStoreCfgs,
 		  const VexPtr<CFGNode, &ir_heap> &cfg,
 		  VexPtr<MaiMap, &ir_heap> &mai,
 		  const AllowableOptimisations &storeOptimisations,
@@ -1136,6 +1189,8 @@ buildStoreMachine(SMScopes *scopes,
 		fprintf(_logfile, "Cannot build store machine!\n");
 		return NULL;
 	}
+	fprintf(better_log, "%d/%d: Initial interfering StateMachine has %d states\n",
+		idx, nrStoreCfgs, countMachineStates(sm));
 	stackedCdf::startStoreInitialSimplify();
 	fprintf(bubble_plot2_log, "%f: start simplifying interfering CFG\n", now());
 	sm = optimiseStateMachine(
@@ -1183,6 +1238,9 @@ buildStoreMachine(SMScopes *scopes,
 		return NULL;
 	}
 
+	fprintf(better_log, "%d/%d: Simplified interfering StateMachine has %d states\n",
+		idx, nrStoreCfgs, countMachineStates(sm_ssa));
+
 	return sm_ssa;
 }
 
@@ -1220,7 +1278,7 @@ considerStoreCFG(SMScopes *scopes,
 		TimeoutTimer t;
 		Stopwatch s;
 		t.timeoutAfterSeconds(30);
-		sm_ssa = buildStoreMachine(scopes, oracle, tid, cfg,
+		sm_ssa = buildStoreMachine(scopes, oracle, tid, idx, nrStoreCfgs, cfg,
 					   mai, storeOptimisations,
 					   token);
 		if (!sm_ssa) {
@@ -1545,6 +1603,8 @@ buildProbeMachine(SMScopes *scopes,
 			return NULL;
 		}
 		fprintf(bubble_plot_log, "%f: stop build crashing CFG\n", now());
+		fprintf(better_log, "Crashing CFG has %d instructions\n",
+			countCfgInstructions(roots));
 		stackedCdf::startCompileProbeMachine();
 		fprintf(bubble_plot_log, "%f: start compile crashing machine\n", now());
 		sm = probeCFGsToMachine(scopes, oracle, tid._tid(),
@@ -1553,6 +1613,8 @@ buildProbeMachine(SMScopes *scopes,
 					*mai);
 		fprintf(bubble_plot_log, "%f: stop compile crashing machine\n", now());
 		stackedCdf::stopCompileProbeMachine();
+		fprintf(better_log, "Initial crashing machine has %d states\n",
+			countMachineStates(sm));
 	}
 	if (TIMEOUT) {
 		fprintf(bubble_plot_log, "%f: failed compile crashing machine\n", now());
@@ -1605,8 +1667,10 @@ buildProbeMachine(SMScopes *scopes,
 	stackedCdf::stopProbeSecondSimplify();
 	if (TIMEOUT) {
 		fprintf(bubble_plot_log, "%f: failed simplify crashing machine\n", now());
+	} else {
+		fprintf(better_log, "Simplified crashing machine has %d states\n",
+			countMachineStates(sm));
 	}
-
 	return sm;
 }
 
@@ -1699,10 +1763,12 @@ probeMachineToSummary(SMScopes *scopes,
 	bool foundRace;
 	foundRace = false;
 	for (int i = 0; i < nrStoreCfgs; i++) {
+		fprintf(better_log, "%d/%d: Interfering CFG has %d instructions\n",
+			i, nrStoreCfgs, countCfgInstructions(storeCFGs[i]));
 		bool singleNodeCfg = isSingleNodeCfg(storeCFGs[i]);
 		if (CONFIG_W_ISOLATION && roughLoadCount == StateMachineState::singleLoad && singleNodeCfg) {
 			fprintf(_logfile, "Single store versus single load -> no race possible\n");
-			fprintf(better_log, "store CFG %d/%d: single store versus single load\n",
+			fprintf(better_log, "%d/%d: single store versus single load\n",
 				i, nrStoreCfgs);
 			continue;
 		}
@@ -1711,7 +1777,7 @@ probeMachineToSummary(SMScopes *scopes,
 		    singleNodeCfg &&
 		    machineHasOneRacingLoad(*maiIn, assertionFreeProbeMachine, storeCFGs[i]->rip, oracle)) {
 			fprintf(_logfile, "Single store versus single shared load -> no race possible\n");
-			fprintf(better_log, "store CFG %d/%d: single store versus single shared load\n",
+			fprintf(better_log, "%d/%d: single store versus single shared load\n",
 				i, nrStoreCfgs);
 			continue;
 		}
