@@ -11,66 +11,10 @@
 #include "intern.hpp"
 #include "inferred_information.hpp"
 #include "crashcfg.hpp"
-
-template <typename t> class sane_vector {
-	unsigned nr_elems;
-	unsigned nr_elems_allocated;
-	void *content;
-
-	/* Only needed for the name() method when @t is Named */
-	mutable const char * _name;
-public:
-	sane_vector();
-	sane_vector(const sane_vector &o);
-	sane_vector(sane_vector &&o);
-	~sane_vector();
-	void operator =(const sane_vector &o);
-	void operator =(const sane_vector &&o);
-
-	class iterator {
-		friend class sane_vector;
-		sane_vector *owner;
-		unsigned idx;
-		iterator(sane_vector *_owner);
-	public:
-		const t &get() const;
-
-		void set(const t &);
-		/* Erase the current element from the vector.  The
-		   iterator remains valid and now points at the next
-		   thing in the vector (or it'll be finished). */
-		void erase();
-
-		bool finished() const;
-		bool started() const; /* True if advance() has ever been called */
-		void advance();
-	};
-	iterator begin();
-
-	class const_iterator {
-		friend class sane_vector;
-		const sane_vector *owner;
-		unsigned idx;
-		const_iterator(const sane_vector *_owner);
-	public:
-		const t &get() const;
-		bool finished() const;
-		bool started() const;
-		void advance();
-	};
-	const_iterator begin() const;
-
-	bool operator ==(const sane_vector &o) const;
-
-	bool operator |=(const std::set<t> &o);
-
-	void push_back(const t &what);
-	void clear();
-	size_t size() const;
-	bool empty() const { return size() == 0; }
-};
+#include "input_expression.hpp"
 
 class happensBeforeEdge;
+class reorder_bbdd;
 
 class internmentState {
 public:
@@ -81,50 +25,6 @@ public:
 class instrToInstrSetMap : public std::map<Instruction<ThreadCfgLabel> *, std::set<Instruction<ThreadCfgLabel> *> > {
 public:
 	void print(FILE *f) const;
-};
-
-class input_expression : public Named {
-	char *mkName() const;
-	input_expression(unsigned thread, unsigned vex_offset);
-	input_expression(unsigned thread, const CfgLabel &);
-	input_expression(unsigned thread, const CfgLabel &, const CfgLabel &);
-	input_expression(const MemoryAccessIdentifier &before, const MemoryAccessIdentifier &after);
-	void operator=(const input_expression &o); /* DNI */
-public:
-	enum inp_type {
-		inp_entry_point,
-		inp_control_flow,
-		inp_register,
-	};
-	const inp_type tag;
-
-	/* For all tags except inp_happens_before */
-	const unsigned thread;
-	/* Only for tag == inp_register */
-	const unsigned vex_offset;
-	/* Only for tag == inp_entry_point and tag == inp_control_flow */
-	const CfgLabel label1;
-	/* Only for tag == inp_control_flow */
-	const CfgLabel label2;
-
-	bool operator < (const input_expression &) const;
-	bool operator ==(const input_expression &) const;
-	bool operator !=(const input_expression &) const;
-	bool matches(const IRExpr *) const;
-
-	static std::pair<input_expression, bool> parse(const char *, const char **);
-
-	input_expression()
-		: tag((inp_type)-1),
-		  thread(-1),
-		  vex_offset(-1),
-		  label1(CfgLabel::uninitialised()),
-		  label2(CfgLabel::uninitialised())
-	{}
-
-	static input_expression registr(const IRExprGet *);
-	static input_expression control_flow(const IRExprControlFlow *);
-	static input_expression entry_point(const IRExprEntryPoint *);
 };
 
 class expressionStashMapT : public sane_map<ThreadCfgLabel, std::set<input_expression> > {
@@ -227,10 +127,9 @@ class happensBeforeEdge : public GarbageCollected<happensBeforeEdge, &ir_heap> {
 	happensBeforeEdge(Instruction<ThreadCfgLabel> *_before,
 			  Instruction<ThreadCfgLabel> *_after,
 			  bbdd *_sideCondition,
-			  const sane_vector<input_expression> &_content,
 			  unsigned _msg_id)
 		: before(_before), after(_after), sideCondition(_sideCondition),
-		  content(_content), msg_id(_msg_id)
+		  msg_id(_msg_id)
 	{}
 public:
 	Instruction<ThreadCfgLabel> *before;
@@ -238,7 +137,6 @@ public:
 	/* Note that sideCondition gets set from expressionEvalMapT's
 	   constructor, which is perhaps slightly surprising. */
 	bbdd *sideCondition;
-	sane_vector<input_expression> content;
 	unsigned msg_id;
 
 	happensBeforeEdge *intern(internmentState &state) {
@@ -246,9 +144,9 @@ public:
 			if ( (*it)->msg_id == msg_id &&
 			     (*it)->before == before &&
 			     (*it)->after == after &&
-			     (*it)->sideCondition == sideCondition &&
-			     (*it)->content == content )
+			     (*it)->sideCondition == sideCondition ) {
 				return (*it);
+			}
 		}
 		state.hbes.insert(this);
 		return this;
@@ -293,8 +191,7 @@ public:
 
 	slotMapT() { }
 
-	slotMapT(const std::map<ThreadCfgLabel, std::set<input_expression> > &neededExpressions,
-		 const std::map<ThreadCfgLabel, std::set<happensBeforeEdge *> > &happensBefore)
+	slotMapT(const std::map<ThreadCfgLabel, std::set<input_expression> > &neededExpressions)
 	{
 		simulationSlotT next_slot(1);
 		/* Allocate slots for expressions which we know we're
@@ -305,21 +202,6 @@ public:
 			const std::set<input_expression> &s(it->second);
 			for (auto it2 = s.begin(); it2 != s.end(); it2++)
 				mk_slot(*it2, next_slot);
-		}
-		/* That should also cover all of the stuff we're going
-		   to receive over HB edges: if we receive it then
-		   someone must have stashed it, and we'll have
-		   allocated a slot at the stash point. */
-		for (auto it = happensBefore.begin();
-		     it != happensBefore.end();
-		     it++) {
-			const std::set<happensBeforeEdge *> &s(it->second);
-			for (auto it2 = s.begin(); it2 != s.end(); it2++) {
-				happensBeforeEdge *hb = *it2;
-				for (auto it = hb->content.begin(); !it.finished(); it.advance()) {
-					assert(count(it.get()));
-				}
-			}
 		}
 	}
 
@@ -377,7 +259,7 @@ public:
 			   expressionStashMapT &stashMap,
 			   happensBeforeMapT &hbMap,
 			   ThreadAbstracter &abs,
-			   bbdd *sideCondition);
+			   const reorder_bbdd *sideCondition);
 	void operator|=(const expressionEvalMapT &eem);
 	void prettyPrint(FILE *f) const;
 	bool parse(bbdd::scope *scope, const char *str, const char **suffix);
@@ -460,7 +342,7 @@ public:
 			     std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &_roots,
 			     const std::set<const IRExprHappensBefore *> &trueHb,
 			     const std::set<const IRExprHappensBefore *> &falseHb,
-			     bbdd *sideCondition,
+			     const reorder_bbdd *sideCondition,
 			     int &next_hb_id,
 			     CrashSummary *summary,
 			     AddressSpace *as)
@@ -546,7 +428,7 @@ public:
 	}
 };
 
-void enumerateNeededExpressions(const bbdd *e, std::set<input_expression> &out);
+void enumerateNeededExpressions(const reorder_bbdd *e, std::set<input_expression> &out);
 void optimiseHBEdges(crashEnforcementData &ced);
 void optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle);
 void optimiseCfg(crashEnforcementData &ced);

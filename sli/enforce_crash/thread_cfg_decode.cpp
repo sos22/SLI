@@ -10,15 +10,8 @@ ThreadAbstracter::instr_iterator::get() const
 void
 happensBeforeEdge::prettyPrint(FILE *f) const
 {
-	fprintf(f, "\t\thb%d: %s <-< %s {", msg_id, before->rip.name(),
+	fprintf(f, "\t\thb%d: %s <-< %s\n", msg_id, before->rip.name(),
 		after->rip.name());
-	for (auto it = content.begin(); !it.finished(); it.advance()) {
-		if (it.started()) {
-			fprintf(f, ", ");
-		}
-		fprintf(f, "%s", it.get().name());
-	}
-	fprintf(f, "}\n");
 	if (sideCondition) {
 		fprintf(f, "\t\tSide condition =\n");
 		sideCondition->prettyPrint(f);
@@ -39,32 +32,15 @@ happensBeforeEdge::parse(bbdd::scope *scope, CrashCfg &cfg, const char *str, con
 	    !before.parse(str, &str) ||
 	    !parseThisString(" <-< ", str, &str) ||
 	    !after.parse(str, &str) ||
-	    !parseThisString(" {", str, &str)) {
+	    !parseThisString("\n", str, &str)) {
 		return NULL;
 	}
-	sane_vector<input_expression> content;
-	if (!parseThisChar('}', str, &str)) {
-		while (1) {
-			std::pair<input_expression, bool> a(input_expression::parse(str, &str));
-			if (!a.second) {
-				return NULL;
-			}
-			content.push_back(a.first);
-			if (parseThisChar('}', str, &str)) {
-				break;
-			}
-			if (!parseThisString(", ", str, &str)) {
-				return NULL;
-			}
-		}
-	}
-
 	bbdd *cond;
-	if (parseThisString("\nSide condition =\n", str, &str)) {
+	if (parseThisString("Side condition =\n", str, &str)) {
 		if (!bbdd::parse(scope, &cond, str, &str)) {
 			return NULL;
 		}
-	} else if (parseThisString("\nNo side condition\n", str, &str)) {
+	} else if (parseThisString("No side condition\n", str, &str)) {
 		cond = NULL;
 	} else {
 		return NULL;
@@ -73,7 +49,6 @@ happensBeforeEdge::parse(bbdd::scope *scope, CrashCfg &cfg, const char *str, con
 	return new happensBeforeEdge(cfg.findInstr(before),
 				     cfg.findInstr(after),
 				     cond,
-				     content,
 				     msgId);
 }
 	    

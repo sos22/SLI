@@ -2,6 +2,8 @@
 #include "enforce_crash.hpp"
 #include "timers.hpp"
 
+extern FILE *bubble_plot_log;
+
 int
 main(int argc, char *argv[])
 {
@@ -17,6 +19,8 @@ main(int argc, char *argv[])
 	SMScopes scopes;
 	ThreadAbstracter abs;
 	crashEnforcementData accumulator;
+
+	bubble_plot_log = fopen("ec_driver_bubbles.log", "w");
 
 	timeout_means_death = true;
 

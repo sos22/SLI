@@ -151,7 +151,7 @@ static struct {
 struct low_level_state {
 	cfg_label_t cfg_node;
 
-	int nr_simslots;
+	int __nr_simslots;
 
 	int last_operation_is_send;
 	int await_bound_lls_exit;
@@ -181,7 +181,6 @@ struct low_level_state {
 #ifdef KEEP_LLS_HISTORY
 	cfg_label_t history[LLS_HISTORY];
 #endif
-	unsigned long simslots[];
 };
 mk_flex_array(low_level_state);
 
@@ -327,7 +326,7 @@ static unsigned char logbuf[LOG_SIZE];
 static unsigned log_prod;
 
 static void
-to_logbuf(int _ignore, const void *buf, size_t buf_size)
+to_logbuf(int fd, const void *buf, size_t buf_size)
 {
 	if (buf_size + log_prod > LOG_SIZE) {
 		return;
@@ -1050,14 +1049,46 @@ ctxt_matches(const struct cep_entry_ctxt *ctxt, const struct reg_struct *regs)
 	return 1;
 }
 
+static unsigned long *
+get_simslots(struct low_level_state *lls)
+{
+	return (unsigned long *)(lls + 1);
+}
+static unsigned long *
+get_simslot_validities(struct low_level_state *lls)
+{
+	return get_simslots(lls) + lls->__nr_simslots;
+}
+static int
+get_simslot_valid(const struct low_level_state *lls, int idx)
+{
+	assert(idx < lls->__nr_simslots);
+	return !!(get_simslot_validities((struct low_level_state *)lls)[idx / 64] & (1ul << (idx % 64)));
+}
+static unsigned long
+get_simslot(const struct low_level_state *lls, int idx)
+{
+	assert(idx < lls->__nr_simslots);
+	assert(get_simslot_valid(lls, idx));
+	return get_simslots((struct low_level_state *)lls)[idx];
+}
+static void
+set_simslot(struct low_level_state *lls, int idx, unsigned long val)
+{
+	assert(!get_simslot_valid(lls, idx));
+	get_simslots(lls)[idx] = val;
+	get_simslot_validities(lls)[idx / 64] |= (1ul << (idx % 64));
+}
+
 static struct low_level_state *
 new_low_level_state(struct high_level_state *hls, int nr_simslots)
 {
-	struct low_level_state *lls = cep_malloc(sizeof(*lls) + nr_simslots * sizeof(lls->simslots[0]));
+	struct low_level_state *lls = cep_malloc(sizeof(*lls) + (nr_simslots  + (nr_simslots + 63) / 64) * 8);
 	memset(lls, 0, sizeof(*lls));
-	memset(lls->simslots, 0xab, nr_simslots * sizeof(lls->simslots[0]));
-	lls->nr_simslots = nr_simslots;
+	lls->__nr_simslots = nr_simslots;
 	lls->hls = hls;
+	memset(get_simslots(lls), 0xab, nr_simslots * 8);
+	memset(get_simslot_validities(lls), 0, (nr_simslots + 63) / 64 * 8);
 	sanity_check_low_level_state(lls, 0);
 	EVENT(lls_created);
 	return lls;
@@ -1080,7 +1111,7 @@ start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label,
 	debug("%p(%s): Start new LLS\n", lls, starting_node->id);
 	for (i = 0; i < starting_node->nr_set_entry; i++) {
 		const struct cfg_instr_set_entry *se = &starting_node->set_entry[i];
-		lls->simslots[se->slot] = se->set;
+		set_simslot(lls, se->slot, se->set);
 	}
 }
 
@@ -1347,11 +1378,10 @@ emulator_read(enum x86_segment seg,
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
 		for (j = 0; j < instr->nr_stash; j++) {
 			if (instr->stash[j].reg == -1) {
+				unsigned long buf = 0;
 				assert(bytes <= 8);
-				lls->simslots[instr->stash[j].slot] = 0;
-				memcpy(&lls->simslots[instr->stash[j].slot],
-				       p_data,
-				       bytes);
+				memcpy(&buf, p_data, bytes);
+				set_simslot(lls, instr->stash[j].slot, buf);
 				break;
 			}
 		}
@@ -1773,30 +1803,21 @@ static unsigned long
 bytecode_fetch_slot(const unsigned short *bytecode,
 		    unsigned *offset,
 		    enum byte_code_type type,
-		    const struct low_level_state *lls,
-		    const struct msg_template *rx_template,
-		    const struct msg_template *tx_template,
-		    const struct low_level_state *tx_lls)
+		    const struct low_level_state *local_lls,
+		    const struct low_level_state *remote_lls)
 {
 	simslot_t idx = bytecode_fetch_const(bytecode, offset, bct_int);
-	int msg_slot;
+	unsigned long res;
 
-	assert(idx < lls->nr_simslots);
-	/* Is the slot overridden by the message? */
-	if (rx_template) {
-		assert(tx_lls);
-		assert(rx_template->payload_size == tx_template->payload_size);
-		for (msg_slot = 0; msg_slot < rx_template->payload_size; msg_slot++) {
-			if (rx_template->payload[msg_slot] == idx) {
-				/* Yes */
-				assert(tx_template->payload[msg_slot] < tx_lls->nr_simslots);
-				return bytecode_mask(
-					tx_lls->simslots[tx_template->payload[msg_slot]],
-					type);
-			}
-		}
+	assert(idx < local_lls->__nr_simslots);
+	if (get_simslot_valid(local_lls, idx)) {
+		/* Use the local data */
+		res = get_simslot(local_lls, idx);
+	} else {
+		/* No local data, use remote data */
+		res = get_simslot(remote_lls, idx);
 	}
-	return bytecode_mask(lls->simslots[idx], type);
+	return bytecode_mask(res, type);
 }
 
 /* malloc()ed bytecode stack regions */
@@ -1975,10 +1996,8 @@ bct_size(enum byte_code_type type)
  * otherwise. */
 static int
 eval_bytecode(const unsigned short *const bytecode,
-	      const struct low_level_state *lls,
-	      const struct msg_template *rx_template,
-	      const struct msg_template *tx_message,
-	      const struct low_level_state *tx_lls)
+	      const struct low_level_state *local_lls,
+	      const struct low_level_state *remote_lls)
 {
 	struct bytecode_stack stack;
 	enum byte_code_op op;
@@ -2001,7 +2020,7 @@ eval_bytecode(const unsigned short *const bytecode,
 			bytecode_push(&stack, bytecode_fetch_const(bytecode, &offset, type), type);
 			break;
 		case bcop_push_slot:
-			bytecode_push(&stack, bytecode_fetch_slot(bytecode, &offset, type, lls, rx_template, tx_message, tx_lls), type);
+			bytecode_push(&stack, bytecode_fetch_slot(bytecode, &offset, type, local_lls, remote_lls), type);
 			break;
 
 		case bcop_swap: {
@@ -2146,12 +2165,12 @@ eval_bytecode(const unsigned short *const bytecode,
 			__uint128_t arg1 = bytecode_pop(&stack, type);
 			__uint128_t arg2 = bytecode_pop(&stack, type);
 			__uint128_t res = arg1 * arg2;
-			debug("bcop_mullu64: %lx * %lx -> %lx:%lx\n", arg1, arg2, (unsigned long)(res >> 64), (unsigned long)res);
+			debug("bcop_mullu64: %lx * %lx -> %lx:%lx\n", (unsigned long)arg1, (unsigned long)arg2, (unsigned long)(res >> 64), (unsigned long)res);
 			bytecode_push_longlong(&stack, (const unsigned char *)&res);
 			break;
 		}
 		case bcop_discard: {
-			uint64_t arg = bytecode_pop(&stack,type);
+			unsigned long arg = bytecode_pop(&stack,type);
 			debug("bcop_discard %lx\n", arg);
 			break;
 		}
@@ -2308,7 +2327,7 @@ eval_bytecode(const unsigned short *const bytecode,
 				bytecode_push_longlong(&stack, buf);
 			} else {
 				unsigned long data = bytecode_mask(*(unsigned long *)buf, type);
-				debug("%p(%s): load(%lx) -> %lx\n", lls, plan.cfg_nodes[lls->cfg_node].id, addr, data);
+				debug("%p(%s): load(%lx) -> %lx\n", local_lls, plan.cfg_nodes[local_lls->cfg_node].id, addr, data);
 				bytecode_push(&stack, data, type);
 			}
 			break;
@@ -2547,28 +2566,34 @@ exit_thread(struct low_level_state *ll)
 	release_lls(ll);
 }
 
+static struct low_level_state *
+copy_lls(const struct low_level_state *lls)
+{
+	struct low_level_state *nc_lls = (struct low_level_state *)lls;
+	struct low_level_state *new_lls = new_low_level_state(lls->hls, lls->__nr_simslots);
+	new_lls->cfg_node = lls->cfg_node;
+	memcpy(get_simslots(new_lls), get_simslots(nc_lls), lls->__nr_simslots * 8);
+	memcpy(get_simslot_validities(new_lls), get_simslot_validities(nc_lls), (lls->__nr_simslots + 63) / 64 * 8);
+#ifdef KEEP_LLS_HISTORY
+	memcpy(new_lls->history, lls->history, sizeof(lls->history));
+#endif
+	return new_lls;
+}
+
 /* Clone an LLS, including duplicating any bound thread. */
 static struct low_level_state *
 clone_lls(struct low_level_state *lls)
 {
-	struct low_level_state *new_lls = new_low_level_state(lls->hls, lls->nr_simslots);
-	new_lls->cfg_node = lls->cfg_node;
-	memcpy(new_lls->simslots, lls->simslots, sizeof(new_lls->simslots[0]) * new_lls->nr_simslots);
-	new_lls->bound_lls = lls->bound_lls;
+	struct low_level_state *new_lls = copy_lls(lls);
 	assert(!lls->bound_sending_messages);
 	assert(!lls->bound_receiving_messages);
 	assert(!lls->unbound_sending_messages);
 	assert(!lls->unbound_receiving_messages);
 
-#ifdef KEEP_LLS_HISTORY
-	memcpy(new_lls->history, lls->history, sizeof(lls->history));
-#endif
 	if (lls->bound_lls && lls->bound_lls != BOUND_LLS_EXITED) {
-		struct low_level_state *new_bound_lls = new_low_level_state(lls->hls, lls->bound_lls->nr_simslots);
-		new_bound_lls->cfg_node = lls->bound_lls->cfg_node;
+		struct low_level_state *new_bound_lls = copy_lls(lls->bound_lls);
 		new_bound_lls->bound_lls = new_lls;
 		new_lls->bound_lls = new_bound_lls;
-		memcpy(new_bound_lls->simslots, lls->bound_lls->simslots, sizeof(new_bound_lls->simslots[0]) * new_bound_lls->nr_simslots);
 		new_bound_lls->nr_bound_receiving_messages = lls->bound_lls->nr_bound_receiving_messages;
 		new_bound_lls->nr_bound_sending_messages = lls->bound_lls->nr_bound_sending_messages;
 		new_bound_lls->bound_receiving_messages = lls->bound_lls->bound_receiving_messages;
@@ -2578,11 +2603,9 @@ clone_lls(struct low_level_state *lls)
 		 * the global sender and receiver arrays, because the
 		 * new LLS is bound. */
 
-#ifdef KEEP_LLS_HISTORY
-		memcpy(new_bound_lls->history, lls->bound_lls->history, sizeof(lls->bound_lls->history));
-#endif
-
 		low_level_state_push(&new_bound_lls->hls->ll_states, new_bound_lls);
+	} else {
+		new_lls->bound_lls = lls->bound_lls;
 	}
 
 	low_level_state_push(&new_lls->hls->ll_states, new_lls);
@@ -2593,21 +2616,27 @@ clone_lls(struct low_level_state *lls)
 }
 
 static void
-discharge_message(struct low_level_state *tx_lls,
-		  struct msg_template *tx_template,
-		  struct low_level_state *rx_lls,
-		  struct msg_template *rx_template)
+discharge_message(struct low_level_state *rx_lls,
+		  struct low_level_state *tx_lls)
 {
 	int x;
 
 	tx_lls->last_operation_is_send = 1;
-	assert(tx_template->pair == rx_template);
-	assert(rx_template->pair == tx_template);
-	assert(rx_template->payload_size == tx_template->payload_size);
-	for (x = 0; x < rx_template->payload_size; x++) {
-		assert(rx_template->payload[x] < rx_lls->nr_simslots);
-		assert(tx_template->payload[x] < tx_lls->nr_simslots);
-		rx_lls->simslots[rx_template->payload[x]] = tx_lls->simslots[tx_template->payload[x]];
+	assert(rx_lls->__nr_simslots == tx_lls->__nr_simslots);
+	for (x = 0; x < rx_lls->__nr_simslots; x++) {
+		if (get_simslot_valid(rx_lls, x)) {
+			if (get_simslot_valid(tx_lls, x)) {
+				continue;
+			} else {
+				set_simslot(tx_lls, x, get_simslot(rx_lls, x));
+			}
+		} else {
+			if (get_simslot_valid(tx_lls, x)) {
+				set_simslot(rx_lls, x, get_simslot(tx_lls, x));
+			} else {
+				continue;
+			}
+		}
 	}
 	EVENT(discharge_message);
 
@@ -2646,12 +2675,7 @@ dupe_lls(struct low_level_state *input)
 
 	assert(!input->mbox);
 
-	new_bound = new_low_level_state(old_bound->hls, old_bound->nr_simslots);
-	new_bound->cfg_node = old_bound->cfg_node;
-#ifdef KEEP_LLS_HISTORY
-	memcpy(new_bound->history, old_bound->history, sizeof(new_bound->history));
-#endif
-	memcpy(new_bound->simslots, old_bound->simslots, sizeof(new_bound->simslots[0]) * new_bound->nr_simslots);
+	new_bound = copy_lls(old_bound);
 	new_bound->last_operation_is_send = old_bound->last_operation_is_send;
 	new_bound->mbox = old_bound->mbox;
 	new_bound->nr_bound_sending_messages = old_bound->nr_bound_sending_messages;
@@ -2659,12 +2683,7 @@ dupe_lls(struct low_level_state *input)
 	new_bound->nr_bound_receiving_messages = old_bound->nr_bound_receiving_messages;
 	new_bound->bound_receiving_messages = old_bound->bound_receiving_messages;
 
-	output = new_low_level_state(input->hls, input->nr_simslots);
-	output->cfg_node = input->cfg_node;
-#ifdef KEEP_LLS_HISTORY
-	memcpy(output->history, input->history, sizeof(output->history));
-#endif
-	memcpy(output->simslots, input->simslots, sizeof(output->simslots[0]) * output->nr_simslots);
+	output = copy_lls(input);
 	output->last_operation_is_send = input->last_operation_is_send;
 	output->nr_bound_sending_messages   = input->nr_bound_sending_messages;
 	output->bound_sending_messages      = input->bound_sending_messages;
@@ -2682,16 +2701,9 @@ dupe_lls(struct low_level_state *input)
 static void
 rendezvous_threads(struct low_level_state_array *llsa,
 		   int tx_is_local,
-		   struct msg_template *tx_template,
 		   struct low_level_state *tx_lls,
-		   struct msg_template *rx_template,
 		   struct low_level_state *rx_lls)
 {
-	int x;
-
-	assert(rx_template == tx_template->pair);
-	assert(tx_template == rx_template->pair);
-
 	assert(!rx_lls->unbound_sending_messages);
 	assert(!tx_lls->unbound_receiving_messages);
 
@@ -2714,18 +2726,8 @@ rendezvous_threads(struct low_level_state_array *llsa,
 	if (tx_lls->bound_lls || tx_lls->bound_lls == BOUND_LLS_EXITED) {
 		/* The transmitting LLS is already bound, so dupe it
 		   and bind to the dupe instead. */
-		struct low_level_state *dupe_tx_lls;
-
 		assert(tx_lls->bound_lls != rx_lls);
-
-		dupe_tx_lls = new_low_level_state(tx_lls->hls, tx_lls->nr_simslots);
-		dupe_tx_lls->cfg_node = tx_lls->cfg_node;
-#ifdef KEEP_LLS_HISTORY
-		memcpy(dupe_tx_lls->history, tx_lls->history, sizeof(tx_lls->history));
-#endif
-		memcpy(dupe_tx_lls->simslots, tx_lls->simslots, sizeof(dupe_tx_lls->simslots[0]) * tx_lls->nr_simslots);
-
-		tx_lls = dupe_tx_lls;
+		tx_lls = copy_lls(tx_lls);
 		if (!tx_is_local)
 			low_level_state_push(&tx_lls->hls->ll_states, tx_lls);
 		else
@@ -2734,18 +2736,9 @@ rendezvous_threads(struct low_level_state_array *llsa,
 	if (rx_lls->bound_lls || rx_lls->bound_lls == BOUND_LLS_EXITED) {
 		/* We are already bound, so dupe ourselves and have
 		   the dupe bind instead. */
-		struct low_level_state *dupe_rx_lls;
-
 		assert(rx_lls->bound_lls != tx_lls);
+		rx_lls = copy_lls(rx_lls);
 
-		dupe_rx_lls = new_low_level_state(rx_lls->hls, rx_lls->nr_simslots);
-		dupe_rx_lls->cfg_node = rx_lls->cfg_node;
-		memcpy(dupe_rx_lls->simslots, rx_lls->simslots, sizeof(dupe_rx_lls->simslots[0]) * rx_lls->nr_simslots);
-#ifdef KEEP_LLS_HISTORY
-		memcpy(dupe_rx_lls->history, rx_lls->history, sizeof(rx_lls->history));
-#endif
-
-		rx_lls = dupe_rx_lls;
 		if (tx_is_local)
 			low_level_state_push(&rx_lls->hls->ll_states, rx_lls);
 		else
@@ -2757,37 +2750,26 @@ rendezvous_threads(struct low_level_state_array *llsa,
 	rx_lls->bound_lls = tx_lls;
 	tx_lls->bound_lls = rx_lls;
 
-	assert(rx_template->payload_size == tx_template->payload_size);
-	for (x = 0; x < rx_template->payload_size; x++) {
-		assert(rx_template->payload[x] < rx_lls->nr_simslots);
-		assert(tx_template->payload[x] < tx_lls->nr_simslots);
-		rx_lls->simslots[rx_template->payload[x]] = tx_lls->simslots[tx_template->payload[x]];
-	}
-
-	discharge_message(tx_lls, tx_template, rx_lls, rx_template);
+	discharge_message(tx_lls, rx_lls);
 }
 
 static void
 rendezvous_threads_tx(struct low_level_state_array *llsa,
-		      struct msg_template *tx_msg,
 		      struct low_level_state *tx_lls,
-		      struct msg_template *rx_msg,
 		      struct low_level_state *rx_lls)
 {
 	sanity_check_low_level_state(rx_lls, 1);
 	sanity_check_low_level_state(tx_lls, 1);
-	rendezvous_threads(llsa, 1, tx_msg, tx_lls, rx_msg, rx_lls);
+	rendezvous_threads(llsa, 1, tx_lls, rx_lls);
 }
 static void
 rendezvous_threads_rx(struct low_level_state_array *llsa,
-		      struct msg_template *rx_msg,
 		      struct low_level_state *rx_lls,
-		      struct msg_template *tx_msg,
 		      struct low_level_state *tx_lls)
 {
 	sanity_check_low_level_state(rx_lls, 1);
 	sanity_check_low_level_state(tx_lls, 1);
-	rendezvous_threads(llsa, 0, tx_msg, tx_lls, rx_msg, rx_lls);
+	rendezvous_threads(llsa, 0, tx_lls, rx_lls);
 }
 
 static int
@@ -2799,8 +2781,7 @@ rx_message_filter(struct low_level_state *rx_lls,
 	const unsigned short *filter = rx_msg->side_condition;
 	int res;
 	if (filter) {
-		res = eval_bytecode(filter, rx_lls, rx_msg,
-				    tx_msg, tx_lls);
+		res = eval_bytecode(filter, rx_lls, tx_lls);
 		if (!res) {
 			debug("%p: failed RX message filter %x!\n", rx_lls, rx_msg->msg_id);
 			EVENT(message_filter_failed);
@@ -2949,6 +2930,8 @@ receive_messages(struct high_level_state *hls)
 		int delay_this_side;
 		int is_first;
 
+		assert(!lls->last_operation_is_send);
+
 		if (lls->await_bound_lls_exit || instr->nr_rx_msg == 0) {
 			/* Threads which don't receive any messages
 			 * don't need to do anything. */
@@ -2997,8 +2980,7 @@ receive_messages(struct high_level_state *hls)
 							debug("%p(%s): Receive from bound thread %p\n", lls, instr->id, lls->bound_lls);
 							if (keep)
 								lls = dupe_lls(lls);
-							discharge_message(lls->bound_lls, tx_msg,
-									  lls, rx_msg);
+							discharge_message(lls, lls->bound_lls);
 							lls->bound_lls->bound_sending_messages = NULL;
 							lls->bound_lls->nr_bound_sending_messages = 0;
 							low_level_state_push(&new_llsa, lls);
@@ -3047,7 +3029,7 @@ receive_messages(struct high_level_state *hls)
 						    rx_message_filter(lls, rx_msg, tx_lls, tx_msg)) {
 							debug("%p(%s): late rx from remote LLS %p\n", lls,
 							      instr->id, tx_lls);
-							rendezvous_threads_rx(&new_llsa, rx_msg, lls, tx_msg, tx_lls);
+							rendezvous_threads_rx(&new_llsa, lls, tx_lls);
 							EVENT(rx_unbound_early);
 						}
 					}
@@ -3110,6 +3092,7 @@ receive_messages(struct high_level_state *hls)
 					struct low_level_state *lls = hls->ll_states.content[i];
 					if (!lls)
 						continue;
+					assert(!lls->last_operation_is_send);
 					if (lls->nr_unbound_receiving_messages != 0) {
 						/* We allow unbound
 						   receives to keep
@@ -3201,12 +3184,14 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 				struct low_level_state *newLls;
 				for (k = 0; k < current_cfg_node->nr_set_control; k++) {
 					if (current_cfg_node->set_control[k].next_node ==
-					    current_cfg_node->successors[j])
-						lls->simslots[current_cfg_node->set_control[k].slot] = 1;
+					    current_cfg_node->successors[j]) {
+						set_simslot(lls, current_cfg_node->set_control[k].slot, 1);
+					} else {
+						set_simslot(lls, current_cfg_node->set_control[k].slot, 0);
+					}
 				}
 				if (current_cfg_node->after_control_flow &&
-				    !eval_bytecode(current_cfg_node->after_control_flow,
-						   lls, NULL, NULL, NULL)) {
+				    !eval_bytecode(current_cfg_node->after_control_flow, lls, NULL)) {
 					debug("%p(%s): Reject %s due to control-flow side condition\n",
 					      lls, current_cfg_node->id,
 					      plan.cfg_nodes[current_cfg_node->successors[j]].id);
@@ -3419,7 +3404,7 @@ send_messages(struct high_level_state *hls)
 							      lls->bound_lls);
 							if (keep)
 								lls = dupe_lls(lls);
-							discharge_message(lls, tx_msg, lls->bound_lls, rx_msg);
+							discharge_message(lls->bound_lls, lls);
 							lls->bound_lls->bound_receiving_messages = NULL;
 							lls->bound_lls->nr_bound_receiving_messages = 0;
 							low_level_state_push(&new_llsa, lls);
@@ -3467,7 +3452,7 @@ send_messages(struct high_level_state *hls)
 						    rx_message_filter(rx_lls, rx_msg, lls, tx_msg)) {
 							debug("%p(%s): inject message into remote LLS %p\n",
 							      lls, instr->id, rx_lls);
-							rendezvous_threads_tx(&new_llsa, tx_msg, lls, rx_msg, rx_lls);
+							rendezvous_threads_tx(&new_llsa, lls, rx_lls);
 							EVENT(tx_unbound_early);
 						}
 					}
@@ -3630,14 +3615,17 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *instr = &plan.cfg_nodes[lls->cfg_node];
+		if (lls->await_bound_lls_exit) {
+			continue;
+		}
 		for (j = 0; j < instr->nr_stash; j++) {
 			EVENT(stash_reg);
 			if (instr->stash[j].reg != -1) {
-				unsigned long *slot = &lls->simslots[instr->stash[j].slot];
+				unsigned long val;
 				switch (instr->stash[j].reg) {
 #define do_case(idx, r)							\
 					case idx:			\
-						*slot = regs-> r;	\
+						val = regs-> r;		\
 						break
 					do_case(0, rax);
 					do_case(1, rcx);
@@ -3658,24 +3646,25 @@ stash_registers(struct high_level_state *hls, struct reg_struct *regs)
 #undef do_case
 					/* Apply the delta to RSP */
 				case 4:
-					*slot = regs->rsp + lls->rsp_delta;
+					val = regs->rsp + lls->rsp_delta;
 					break;
 				case 16:
-					*slot = fetch_fs_base();
+					val = fetch_fs_base();
 					break;
 				default:
 					abort();
 				}
+				set_simslot(lls, instr->stash[j].slot, val);
 				debug("%p(%s) stashed r%d = %lx in slot %d\n",
 				      lls, instr->id, instr->stash[j].reg,
-				      *slot, instr->stash[j].slot);
+				      val, instr->stash[j].slot);
 			}
 		}
 	}
 }
 
 static void
-check_conditions(struct high_level_state *hls, const char *message, unsigned offset)
+check_after_regs_condition(struct high_level_state *hls)
 {
 	int i;
 	int j;
@@ -3685,9 +3674,12 @@ check_conditions(struct high_level_state *hls, const char *message, unsigned off
 	for (i = 0; i < hls->ll_states.sz; i++) {
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *cfg = &plan.cfg_nodes[lls->cfg_node];
-		const unsigned short *condition = *(const unsigned short **)((unsigned long)cfg + offset);
-		if (!eval_bytecode(condition, lls, NULL, NULL, NULL)) {
-			debug("%p(%s) failed a %s side-condition\n", lls, cfg->id, message);
+		const unsigned short *condition = cfg->after_regs;
+		if (lls->await_bound_lls_exit) {
+			continue;
+		}
+		if (!eval_bytecode(condition, lls, NULL)) {
+			debug("%p(%s) failed a ptr side-condition\n", lls, cfg->id);
 			hls->ll_states.content[i] = NULL;
 			exit_thread(lls);
 			killed = 1;
@@ -3707,11 +3699,6 @@ check_conditions(struct high_level_state *hls, const char *message, unsigned off
 		}
 		hls->ll_states.sz = j;
 	}
-}
-static void
-check_after_regs_condition(struct high_level_state *hls)
-{
-	check_conditions(hls, "pre", offsetof(struct cfg_instr, after_regs));
 }
 
 static void

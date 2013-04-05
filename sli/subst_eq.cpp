@@ -6,6 +6,8 @@
 #include "bdd.hpp"
 #include "allowable_optimisations.hpp"
 
+#include "subst_eq_tmpl.cpp"
+
 namespace substeq {
 
 #ifndef NDEBUG
@@ -348,8 +350,6 @@ bbdd_fbf(bbdd *n)
 
 /* End of namespace */
 }
-
-#include "subst_eq_tmpl.cpp"
 
 bbdd *
 subst_eq(bbdd::scope *scope, bbdd *what)

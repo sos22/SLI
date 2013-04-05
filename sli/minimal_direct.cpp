@@ -324,11 +324,11 @@ main(int argc, char *argv[])
 
 	LibVEX_gc(ALLOW_GC);
 
-	int start_permille;
-	int end_permille;
+	int start_percentage;
+	int end_percentage;
 
-	start_permille = 0;
-	end_permille = 1000;
+	start_percentage = 0;
+	end_percentage = 100;
 
 	bubble_plot_log = fopen("bubble_data.log", "w");
 	bubble_plot2_log = fopen("bubble_data2.log", "w");
@@ -350,8 +350,8 @@ main(int argc, char *argv[])
 			df.finish();
 			return 0;
 		}
-		if (sscanf(argv[0], "%d...%d", &start_permille, &end_permille) != 2)
-			errx(1, "expect final argument to be either a VexRip or s...d where s and d are start and end permilles");
+		if (sscanf(argv[0], "%d...%d", &start_percentage, &end_percentage) != 2)
+			errx(1, "expect final argument to be either a VexRip or s...d where s and d are start and end percentages");
 	}
 
 	std::vector<DynAnalysisRip> schedule;
@@ -391,8 +391,8 @@ main(int argc, char *argv[])
 	   -- a...b and b...c must, between them, cover precisely the
 	      same range as a...c i.e. no duplicates or gaps.
 	*/
-	unsigned long start_instr = (total_instructions * start_permille) / 1000;
-	unsigned long end_instr = end_permille == 1000 ? total_instructions - 1: (total_instructions * end_permille) / 1000 - 1;
+	unsigned long start_instr = (total_instructions * start_percentage) / 100;
+	unsigned long end_instr = end_percentage == 100 ? total_instructions - 1: (total_instructions * end_percentage) / 100 - 1;
 	unsigned long instructions_to_process = end_instr - start_instr;
 
 	printf("Processing instructions %ld to %ld\n", start_instr, end_instr);

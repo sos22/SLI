@@ -1083,7 +1083,9 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 	std::vector<StaticRip> roots;
 	FILE *f = fopen(cg_fname, "r");
 	unsigned long magic = 0;
-	fread(&magic, sizeof(magic), 1, f);
+	if (fread(&magic, sizeof(magic), 1, f) != 1) {
+		err(1, "reading header from %s", cg_fname);
+	}
 	bool new_format;
 	if (magic == 0xaabbccddeeff) {
 		new_format = true;
@@ -1095,15 +1097,23 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 		callgraph_entry ce;
 		bool is_call;
 		DynAnalysisRip branch_rip;
+
+		/* Shut compiler up */
+		is_call = 3;
+
 		auto res = read_cg_vexrip(f, &branch_rip, ths->ms->addressSpace, &is_call, new_format);
 		if (res == read_cg_vexrip_error) {
 			if (feof(f))
 				break;
 			err(1, "reading rip from %s", cg_fname);
 		}
+
+		assert(is_call != 3);
+
 		unsigned nr_callees;
 		if (fread(&nr_callees, sizeof(nr_callees), 1, f) != 1)
 			err(1, "reading number of callees from %s\n", cg_fname);
+		assert(nr_callees != 0);
 		for (unsigned x = 0; x < nr_callees; x++) {
 			unsigned long callee;
 			if (fread(&callee, sizeof(callee), 1, f) != 1)

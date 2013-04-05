@@ -647,6 +647,22 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 			}
 		}
 
+		if ((arg->tag == Iex_Get || arg->tag == Iex_Load) &&
+		    (au->op == Iop_64to32 || au->op == Iop_64to16 || au->op == Iop_64to8 ||
+		     au->op == Iop_32to16 || au->op == Iop_32to8 ||
+		     au->op == Iop_32to8)) {
+			IRExpr *reduced;
+			IRType newType = au->type();
+			if (arg->tag == Iex_Get) {
+				reduced = IRExprGet::mk(((IRExprGet *)arg)->reg, newType);
+			} else {
+				reduced = IRExprLoad::mk(newType, ((IRExprLoad *)arg)->addr);
+			}
+			return quickSimplify(
+				qs_args(reduced, mask & fullMask(newType)),
+				memo);
+		}
+
 		if (arg->tag == Iex_Const) {
 			IRExprConst *argc = (IRExprConst *)arg;
 			switch (op) {
