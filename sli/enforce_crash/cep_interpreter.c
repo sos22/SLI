@@ -1062,6 +1062,7 @@ get_simslot_validities(struct low_level_state *lls)
 static int
 get_simslot_valid(const struct low_level_state *lls, int idx)
 {
+	assert(idx < lls->__nr_simslots);
 	return !!(get_simslot_validities((struct low_level_state *)lls)[idx / 64] & (1ul << (idx % 64)));
 }
 static unsigned long
@@ -1082,11 +1083,12 @@ set_simslot(struct low_level_state *lls, int idx, unsigned long val)
 static struct low_level_state *
 new_low_level_state(struct high_level_state *hls, int nr_simslots)
 {
-	struct low_level_state *lls = cep_malloc(sizeof(*lls) + nr_simslots * 8);
+	struct low_level_state *lls = cep_malloc(sizeof(*lls) + (nr_simslots  + (nr_simslots + 63) / 64) * 8);
 	memset(lls, 0, sizeof(*lls));
 	lls->__nr_simslots = nr_simslots;
 	lls->hls = hls;
 	memset(get_simslots(lls), 0xab, nr_simslots * 8);
+	memset(get_simslot_validities(lls), 0, (nr_simslots + 63) / 64 * 8);
 	sanity_check_low_level_state(lls, 0);
 	EVENT(lls_created);
 	return lls;
@@ -1801,30 +1803,21 @@ static unsigned long
 bytecode_fetch_slot(const unsigned short *bytecode,
 		    unsigned *offset,
 		    enum byte_code_type type,
-		    const struct low_level_state *lls,
-		    const struct msg_template *rx_template,
-		    const struct msg_template *tx_template,
-		    const struct low_level_state *tx_lls)
+		    const struct low_level_state *local_lls,
+		    const struct low_level_state *remote_lls)
 {
 	simslot_t idx = bytecode_fetch_const(bytecode, offset, bct_int);
-	int msg_slot;
+	unsigned long res;
 
-	assert(idx < lls->__nr_simslots);
-	/* Is the slot overridden by the message? */
-	if (rx_template) {
-		assert(tx_lls);
-		assert(rx_template->payload_size == tx_template->payload_size);
-		for (msg_slot = 0; msg_slot < rx_template->payload_size; msg_slot++) {
-			if (rx_template->payload[msg_slot] == idx) {
-				/* Yes */
-				assert(tx_template->payload[msg_slot] < tx_lls->__nr_simslots);
-				return bytecode_mask(
-					get_simslot(tx_lls, tx_template->payload[msg_slot]),
-					type);
-			}
-		}
+	assert(idx < local_lls->__nr_simslots);
+	if (get_simslot_valid(local_lls, idx)) {
+		/* Use the local data */
+		res = get_simslot(local_lls, idx);
+	} else {
+		/* No local data, use remote data */
+		res = get_simslot(remote_lls, idx);
 	}
-	return bytecode_mask(get_simslot(lls, idx), type);
+	return bytecode_mask(res, type);
 }
 
 /* malloc()ed bytecode stack regions */
@@ -2003,10 +1996,8 @@ bct_size(enum byte_code_type type)
  * otherwise. */
 static int
 eval_bytecode(const unsigned short *const bytecode,
-	      const struct low_level_state *lls,
-	      const struct msg_template *rx_template,
-	      const struct msg_template *tx_message,
-	      const struct low_level_state *tx_lls)
+	      const struct low_level_state *local_lls,
+	      const struct low_level_state *remote_lls)
 {
 	struct bytecode_stack stack;
 	enum byte_code_op op;
@@ -2029,7 +2020,7 @@ eval_bytecode(const unsigned short *const bytecode,
 			bytecode_push(&stack, bytecode_fetch_const(bytecode, &offset, type), type);
 			break;
 		case bcop_push_slot:
-			bytecode_push(&stack, bytecode_fetch_slot(bytecode, &offset, type, lls, rx_template, tx_message, tx_lls), type);
+			bytecode_push(&stack, bytecode_fetch_slot(bytecode, &offset, type, local_lls, remote_lls), type);
 			break;
 
 		case bcop_swap: {
@@ -2174,7 +2165,7 @@ eval_bytecode(const unsigned short *const bytecode,
 			__uint128_t arg1 = bytecode_pop(&stack, type);
 			__uint128_t arg2 = bytecode_pop(&stack, type);
 			__uint128_t res = arg1 * arg2;
-			debug("bcop_mullu64: %lx * %lx -> %lx:%lx\n", arg1, arg2, (unsigned long)(res >> 64), (unsigned long)res);
+			debug("bcop_mullu64: %lx * %lx -> %lx:%lx\n", (unsigned long)arg1, (unsigned long)arg2, (unsigned long)(res >> 64), (unsigned long)res);
 			bytecode_push_longlong(&stack, (const unsigned char *)&res);
 			break;
 		}
@@ -2336,7 +2327,7 @@ eval_bytecode(const unsigned short *const bytecode,
 				bytecode_push_longlong(&stack, buf);
 			} else {
 				unsigned long data = bytecode_mask(*(unsigned long *)buf, type);
-				debug("%p(%s): load(%lx) -> %lx\n", lls, plan.cfg_nodes[lls->cfg_node].id, addr, data);
+				debug("%p(%s): load(%lx) -> %lx\n", local_lls, plan.cfg_nodes[local_lls->cfg_node].id, addr, data);
 				bytecode_push(&stack, data, type);
 			}
 			break;
@@ -2625,22 +2616,27 @@ clone_lls(struct low_level_state *lls)
 }
 
 static void
-discharge_message(struct low_level_state *tx_lls,
-		  struct msg_template *tx_template,
-		  struct low_level_state *rx_lls,
-		  struct msg_template *rx_template)
+discharge_message(struct low_level_state *rx_lls,
+		  struct low_level_state *tx_lls)
 {
 	int x;
 
 	tx_lls->last_operation_is_send = 1;
-	assert(tx_template->pair == rx_template);
-	assert(rx_template->pair == tx_template);
-	assert(rx_template->payload_size == tx_template->payload_size);
-	for (x = 0; x < rx_template->payload_size; x++) {
-		assert(rx_template->payload[x] < rx_lls->__nr_simslots);
-		assert(tx_template->payload[x] < tx_lls->__nr_simslots);
-		set_simslot(rx_lls, rx_template->payload[x],
-			    get_simslot(tx_lls, rx_template->payload[x]));
+	assert(rx_lls->__nr_simslots == tx_lls->__nr_simslots);
+	for (x = 0; x < rx_lls->__nr_simslots; x++) {
+		if (get_simslot_valid(rx_lls, x)) {
+			if (get_simslot_valid(tx_lls, x)) {
+				continue;
+			} else {
+				set_simslot(tx_lls, x, get_simslot(rx_lls, x));
+			}
+		} else {
+			if (get_simslot_valid(tx_lls, x)) {
+				set_simslot(rx_lls, x, get_simslot(tx_lls, x));
+			} else {
+				continue;
+			}
+		}
 	}
 	EVENT(discharge_message);
 
@@ -2705,16 +2701,9 @@ dupe_lls(struct low_level_state *input)
 static void
 rendezvous_threads(struct low_level_state_array *llsa,
 		   int tx_is_local,
-		   struct msg_template *tx_template,
 		   struct low_level_state *tx_lls,
-		   struct msg_template *rx_template,
 		   struct low_level_state *rx_lls)
 {
-	int x;
-
-	assert(rx_template == tx_template->pair);
-	assert(tx_template == rx_template->pair);
-
 	assert(!rx_lls->unbound_sending_messages);
 	assert(!tx_lls->unbound_receiving_messages);
 
@@ -2761,38 +2750,26 @@ rendezvous_threads(struct low_level_state_array *llsa,
 	rx_lls->bound_lls = tx_lls;
 	tx_lls->bound_lls = rx_lls;
 
-	assert(rx_template->payload_size == tx_template->payload_size);
-	for (x = 0; x < rx_template->payload_size; x++) {
-		assert(rx_template->payload[x] < rx_lls->__nr_simslots);
-		assert(tx_template->payload[x] < tx_lls->__nr_simslots);
-		set_simslot(rx_lls, rx_template->payload[x],
-			    get_simslot(tx_lls, tx_template->payload[x]));
-	}
-
-	discharge_message(tx_lls, tx_template, rx_lls, rx_template);
+	discharge_message(tx_lls, rx_lls);
 }
 
 static void
 rendezvous_threads_tx(struct low_level_state_array *llsa,
-		      struct msg_template *tx_msg,
 		      struct low_level_state *tx_lls,
-		      struct msg_template *rx_msg,
 		      struct low_level_state *rx_lls)
 {
 	sanity_check_low_level_state(rx_lls, 1);
 	sanity_check_low_level_state(tx_lls, 1);
-	rendezvous_threads(llsa, 1, tx_msg, tx_lls, rx_msg, rx_lls);
+	rendezvous_threads(llsa, 1, tx_lls, rx_lls);
 }
 static void
 rendezvous_threads_rx(struct low_level_state_array *llsa,
-		      struct msg_template *rx_msg,
 		      struct low_level_state *rx_lls,
-		      struct msg_template *tx_msg,
 		      struct low_level_state *tx_lls)
 {
 	sanity_check_low_level_state(rx_lls, 1);
 	sanity_check_low_level_state(tx_lls, 1);
-	rendezvous_threads(llsa, 0, tx_msg, tx_lls, rx_msg, rx_lls);
+	rendezvous_threads(llsa, 0, tx_lls, rx_lls);
 }
 
 static int
@@ -2804,8 +2781,7 @@ rx_message_filter(struct low_level_state *rx_lls,
 	const unsigned short *filter = rx_msg->side_condition;
 	int res;
 	if (filter) {
-		res = eval_bytecode(filter, rx_lls, rx_msg,
-				    tx_msg, tx_lls);
+		res = eval_bytecode(filter, rx_lls, tx_lls);
 		if (!res) {
 			debug("%p: failed RX message filter %x!\n", rx_lls, rx_msg->msg_id);
 			EVENT(message_filter_failed);
@@ -2954,6 +2930,8 @@ receive_messages(struct high_level_state *hls)
 		int delay_this_side;
 		int is_first;
 
+		assert(!lls->last_operation_is_send);
+
 		if (lls->await_bound_lls_exit || instr->nr_rx_msg == 0) {
 			/* Threads which don't receive any messages
 			 * don't need to do anything. */
@@ -3002,8 +2980,7 @@ receive_messages(struct high_level_state *hls)
 							debug("%p(%s): Receive from bound thread %p\n", lls, instr->id, lls->bound_lls);
 							if (keep)
 								lls = dupe_lls(lls);
-							discharge_message(lls->bound_lls, tx_msg,
-									  lls, rx_msg);
+							discharge_message(lls, lls->bound_lls);
 							lls->bound_lls->bound_sending_messages = NULL;
 							lls->bound_lls->nr_bound_sending_messages = 0;
 							low_level_state_push(&new_llsa, lls);
@@ -3052,7 +3029,7 @@ receive_messages(struct high_level_state *hls)
 						    rx_message_filter(lls, rx_msg, tx_lls, tx_msg)) {
 							debug("%p(%s): late rx from remote LLS %p\n", lls,
 							      instr->id, tx_lls);
-							rendezvous_threads_rx(&new_llsa, rx_msg, lls, tx_msg, tx_lls);
+							rendezvous_threads_rx(&new_llsa, lls, tx_lls);
 							EVENT(rx_unbound_early);
 						}
 					}
@@ -3115,6 +3092,7 @@ receive_messages(struct high_level_state *hls)
 					struct low_level_state *lls = hls->ll_states.content[i];
 					if (!lls)
 						continue;
+					assert(!lls->last_operation_is_send);
 					if (lls->nr_unbound_receiving_messages != 0) {
 						/* We allow unbound
 						   receives to keep
@@ -3213,8 +3191,7 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 					}
 				}
 				if (current_cfg_node->after_control_flow &&
-				    !eval_bytecode(current_cfg_node->after_control_flow,
-						   lls, NULL, NULL, NULL)) {
+				    !eval_bytecode(current_cfg_node->after_control_flow, lls, NULL)) {
 					debug("%p(%s): Reject %s due to control-flow side condition\n",
 					      lls, current_cfg_node->id,
 					      plan.cfg_nodes[current_cfg_node->successors[j]].id);
@@ -3427,7 +3404,7 @@ send_messages(struct high_level_state *hls)
 							      lls->bound_lls);
 							if (keep)
 								lls = dupe_lls(lls);
-							discharge_message(lls, tx_msg, lls->bound_lls, rx_msg);
+							discharge_message(lls->bound_lls, lls);
 							lls->bound_lls->bound_receiving_messages = NULL;
 							lls->bound_lls->nr_bound_receiving_messages = 0;
 							low_level_state_push(&new_llsa, lls);
@@ -3475,7 +3452,7 @@ send_messages(struct high_level_state *hls)
 						    rx_message_filter(rx_lls, rx_msg, lls, tx_msg)) {
 							debug("%p(%s): inject message into remote LLS %p\n",
 							      lls, instr->id, rx_lls);
-							rendezvous_threads_tx(&new_llsa, tx_msg, lls, rx_msg, rx_lls);
+							rendezvous_threads_tx(&new_llsa, lls, rx_lls);
 							EVENT(tx_unbound_early);
 						}
 					}
@@ -3695,7 +3672,7 @@ check_conditions(struct high_level_state *hls, const char *message, unsigned off
 		struct low_level_state *lls = hls->ll_states.content[i];
 		const struct cfg_instr *cfg = &plan.cfg_nodes[lls->cfg_node];
 		const unsigned short *condition = *(const unsigned short **)((unsigned long)cfg + offset);
-		if (!eval_bytecode(condition, lls, NULL, NULL, NULL)) {
+		if (!eval_bytecode(condition, lls, NULL)) {
 			debug("%p(%s) failed a %s side-condition\n", lls, cfg->id, message);
 			hls->ll_states.content[i] = NULL;
 			exit_thread(lls);
