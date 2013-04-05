@@ -743,28 +743,12 @@ dump_annotated_cfg(const crashEnforcementData &ced, FILE *f, CfgRelabeller &rela
 			fprintf(f, "    .side_condition = msg_filter_%d_filt,\n",
 				hb->msg_id);
 		}
-		fprintf(f, "    .payload_size = %zd,\n", hb->content.size());
-		fprintf(f, "    .payload = {");
-		for (auto it = hb->content.begin(); !it.finished(); it.advance()) {
-			if (it.started()) {
-				fprintf(f, ", ");
-			}
-			fprintf(f, "%d", slots(it.get()).idx);
-		}
-		fprintf(f, "}\n};\n");
+		fprintf(f, "};\n");
 		fprintf(f, "static struct msg_template msg_template_%x_tx = {\n", hb->msg_id);
 		fprintf(f, "    .msg_id = 0x%x,\n", hb->msg_id);
 		fprintf(f, "    .event_count = 0,\n");
 		fprintf(f, "    .pair = &msg_template_%x_rx,\n", hb->msg_id);
-		fprintf(f, "    .payload_size = %zd,\n", hb->content.size());
-		fprintf(f, "    .payload = {");
-		for (auto it = hb->content.begin(); !it.finished(); it.advance()) {
-			if (it.started()) {
-				fprintf(f, ", ");
-			}
-			fprintf(f, "%d", slots(it.get()).idx);
-		}
-		fprintf(f, "}\n};\n");
+		fprintf(f, "};\n");
 	}
 
 	/* Now dump out the actual CFG table. */
@@ -866,7 +850,7 @@ ced_to_cep(const crashEnforcementData &ced, const char *output, const char *bina
 	fprintf(f, "#include <stddef.h>\n"); /* For NULL */
 	fprintf(f, "\n");
 
-	slotMapT slots(ced.exprStashPoints, ced.happensBeforePoints);
+	slotMapT slots(ced.exprStashPoints);
 
 	fprintf(f, "/*\n");
 	slots.prettyPrint(f);

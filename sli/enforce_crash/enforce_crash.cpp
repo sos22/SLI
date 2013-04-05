@@ -91,101 +91,6 @@ assertHbEdgeFree(bbdd *)
 }
 #endif
 
-static bool
-exprUsesInput(const bbdd *haystack, const input_expression &needle)
-{
-	if (!haystack) {
-		return false;
-	}
-	struct v {
-		static visit_result Iex(const input_expression *needle,
-					const IRExpr *iex) {
-			if (needle->matches(iex)) {
-				return visit_abort;
-			} else {
-				return visit_continue;
-                        }
-                }
-	};
-	static struct bdd_visitor<const input_expression> visitor;
-	visitor.irexpr.Iex = v::Iex;
-	return visit_const_bdd(&needle, &visitor, haystack);
-}
-
-static bool
-instrUsesExpr(Instruction<ThreadCfgLabel> *instr, const input_expression &expr, crashEnforcementData &ced)
-{
-	{
-		auto it = ced.happensBeforePoints.find(instr->rip);
-		if (it != ced.happensBeforePoints.end()) {
-			for (auto it2 = it->second.begin();
-			     it2 != it->second.end();
-			     it2++) {
-				happensBeforeEdge *hbe = *it2;
-				if (hbe->before->rip == instr->rip) {
-					for (auto it3 = hbe->content.begin();
-					     !it3.finished();
-					     it3.advance()) {
-						if (it3.get() == expr) {
-							return true;
-						}
-					}
-					if (exprUsesInput(hbe->sideCondition, expr)) {
-						return true;
-					}
-				}
-			}
-		}
-	}
-
-	if (exprUsesInput(ced.expressionEvalPoints.after_regs(instr->rip), expr) ||
-	    exprUsesInput(ced.expressionEvalPoints.after_control_flow(instr->rip), expr)) {
-		return true;
-	}
-	return false;
-}
-
-static void
-optimiseHBContent(crashEnforcementData &ced)
-{
-	std::set<happensBeforeEdge *> hbEdges;
-	for (auto it = ced.happensBeforePoints.begin();
-	     it != ced.happensBeforePoints.end();
-	     it++)
-		hbEdges.insert(it->second.begin(), it->second.end());
-	bool progress = true;
-	while (progress) {
-		progress = false;
-		for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
-			happensBeforeEdge *hbe = *it;
-			for (auto it = hbe->content.begin(); !it.finished(); ) {
-				bool must_keep = false;
-				std::queue<Instruction<ThreadCfgLabel> *> pending;
-				if (hbe->sideCondition &&
-				    exprUsesInput(hbe->sideCondition, it.get())) {
-					must_keep = true;
-				}
-				pending.push(hbe->after);
-				while (!must_keep && !pending.empty()) {
-					Instruction<ThreadCfgLabel> *l = pending.front();
-					pending.pop();
-					if (instrUsesExpr(l, it.get(), ced)) {
-						must_keep = true;
-					}
-					for (unsigned y = 0; y < l->successors.size(); y++)
-						pending.push(l->successors[y].instr);
-				}
-				if (must_keep) {
-					it.advance();
-				} else {
-					it.erase();
-					progress = true;
-				}
-			}
-		}
-	}
-}
-
 struct expr_slice {
 	std::set<const IRExprHappensBefore *> trueSlice;
 	std::set<const IRExprHappensBefore *> falseSlice;
@@ -502,10 +407,6 @@ buildCED(const SummaryId &summaryId,
 	if (TIMEOUT) {
 		return false;
 	}
-
-	fprintf(bubble_plot_log, "%f: start simplify plan\n", now());
-	optimiseHBContent(*out);
-	fprintf(bubble_plot_log, "%f: stop simplify plan\n", now());
 	return true;
 }
 

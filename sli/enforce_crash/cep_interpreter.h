@@ -77,7 +77,6 @@ enum byte_code_op {
 
 struct msg_template {
 	int msg_id;
-	unsigned payload_size;
 
 	/* The number of times this message has been sent (for TX
 	   templates) or received (for RX templates).  This isn't
@@ -96,7 +95,6 @@ struct msg_template {
 	/* For RX templates, this is the matching TX template.  For TX
 	   templates, it's the matching RX one. */
 	struct msg_template *pair;
-	const simslot_t payload[];
 };
 
 struct cfg_instr_stash {

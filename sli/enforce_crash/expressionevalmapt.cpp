@@ -722,7 +722,6 @@ instrRxPhase(bbdd::scope *scope,
 				availabilityMap,
 				stashMap);
 		}
-		hb->content |= availExprs;
 		if (hb->sideCondition) {
 			rx_checked = bbdd::Or(
 				scope,
@@ -786,8 +785,6 @@ instrTxPhase(bbdd::scope *scope,
 			acquired_by_tx = availOnOtherSide;
 			have_tx_edge = true;
 		}
-
-		hb->content |= availExprs;
 
 		std::set<input_expression> availForThisMessage(availExprs);
 		availForThisMessage |= availOnOtherSide;
