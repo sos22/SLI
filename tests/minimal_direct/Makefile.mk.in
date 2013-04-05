@@ -30,14 +30,14 @@ ${bugname}.interp.so: ${bugname}.cep.c cep_interpreter.o
 ${bugname}.fix.so: ${bugname}.fix.c sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c
 	gcc -Wall -g -shared -fPIC -Isli \$< -o \$@
 
-${bugname}.cep.c: ${bugname}.ced ced_to_cep ${static_files}
-	./ced_to_cep ${exename}.exe ${bugname}.ced ${exename}.types.canon ${exename}.bcg ${exename}.db ${bugname}.cep.c
+${bugname}.cep.c: ${bugname}.ced ctoc_driver ${static_files}
+	./ctoc_driver ${exename}.exe ${bugname}.ced ${exename}.types.canon ${exename}.bcg ${exename}.db ${bugname}.cep.c
 EOF
     if [ "${bugname}" != "${exename}" ]
     then
 	cat <<EOF
-${bugname}.ced: ${bugname}.summary.canon4  enforce_crash ${static_files}
-	./enforce_crash ${static_files} \$@ \$<
+${bugname}.ced: ${bugname}.summary.canon4  ec_driver ${static_files}
+	./ec_driver ${static_files} \$@ \$<
 ${bugname}.summary.canon4: canonicalise_crash_summary0 ${bugname}.summary.canon2
 	./canonicalise_crash_summary0 ${bugname}.summary.canon2 ${bugname}.summary.canon4
 ${bugname}.summary.canon2: canonicalise_crash_summary2 ${bugname}.summary.canon0
@@ -54,8 +54,8 @@ EOF
 	    summaries="${summaries} ${exename}~${i}.summary.canon4"
 	done
 	cat <<EOF
-${bugname}.ced: ${summaries}  enforce_crash ${static_files}
-	./enforce_crash ${static_files} \$@ ${summaries}
+${bugname}.ced: ${summaries}  ec_driver ${static_files}
+	./ec_driver ${static_files} \$@ ${summaries}
 ${bugname}.fix.c: summary_to_fix ${static_files} ${summaries}
 	./summary_to_fix ${static_files} ${bugname}.fix.c ${summaries}
 EOF
@@ -71,7 +71,7 @@ ${bugname}.S.crash_times_dist: ${MD_TEST_DIR}/harness ${exename}.exe ${bugname}.
 	./tests/minimal_direct/crash_times_dist.sh ${exename}.exe ${bugname}.interp.so "-s" ${bugname}.S.crash_times_data > ${bugname}.S.crash_times_dist
 clean_files += ${bugname}.S.crash_times_dist ${bugname}.S.crash_times_data
 
-${bugname}.build_interp_time: timing ced_to_cep enforce_crash cep_interpreter.o ${static_files} ${bugname}.summary.canon4 ./tests/minimal_direct/build_interp.sh
+${bugname}.build_interp_time: timing ctoc_driver ec_driver cep_interpreter.o ${static_files} ${bugname}.summary.canon4 ./tests/minimal_direct/build_interp.sh
 	./timing 10 ${bugname}.build_interp_time ./tests/minimal_direct/build_interp.sh ${bugname}
 clean_files += ${bugname}.build_interp_time
 
