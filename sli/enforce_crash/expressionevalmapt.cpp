@@ -684,8 +684,7 @@ instrRxPhase(bbdd::scope *scope,
 	     const std::set<happensBeforeEdge *> &hbEdges,
 	     const std::map<instr_t, std::set<instr_t> > &predecessors,
 	     const std::map<instr_t, std::set<input_expression> > &availabilityMap,
-	     const expressionStashMapT &stashMap,
-	     const std::set<input_expression> &availExprs)
+	     const expressionStashMapT &stashMap)
 {
 	/* What about once we've done the RX operations? */
 	/* Figure out what's available.  The message includes
@@ -869,7 +868,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				       expressionStashMapT &stashMap,
 				       happensBeforeMapT &hbMap,
 				       ThreadAbstracter &abs,
-				       bbdd *_sideCondition)
+				       const reorder_bbdd *sideCondition)
 {
 	if (debug_eem) {
 		printf("expressionEvalMapT()\n");
@@ -878,7 +877,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		stashMap.prettyPrint(stdout);
 		hbMap.prettyPrint(stdout);
 		printf("Side condition:\n");
-		_sideCondition->prettyPrint(stdout);
+		pp_reorder(sideCondition);
 	}
 
 	bbdd *assumption = scope->cnst(true);
@@ -921,13 +920,6 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	/* Assumption at the roots comes from the crash summary */
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		alreadyEvaled[cfg.findInstr(it.threadCfgLabel())] = assumption;
-	}
-
-	const reorder_bbdd *sideCondition;
-	{
-		std::set<input_expression> empty;
-		evaluatable evalable(empty);
-		sideCondition = reorder_bbdd::from_bbdd(_sideCondition, evalable);
 	}
 
 	TimeoutTimer tmr;
@@ -1031,8 +1023,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 					hb_it->second,
 					predecessors,
 					availabilityMap,
-					stashMap,
-					availExprs);
+					stashMap);
 				availExprs |= rxPhase.rxed_expressions;
 				if (rxPhase.checkedHere) {
 					currentAssumption = bbdd::And(

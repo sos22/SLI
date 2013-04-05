@@ -17,6 +17,7 @@
 #include "sat_checker.hpp"
 #include "visitor.hpp"
 #include "timers.hpp"
+#include "reorder_bdd.hpp"
 
 extern FILE *bubble_plot_log;
 
@@ -376,6 +377,15 @@ expr_slice::simplifyAndCheckForContradiction()
 	return false;
 }
 
+class never_evaluatable : public reorder_evaluatable {
+public:
+	bool operator()(IRExpr *const &) const {
+		return false;
+	}
+	void prettyPrint(FILE *f) const {
+		fprintf(f, "<nothing evaluatable>");
+	}
+};
 static bool
 buildCED(const SummaryId &summaryId,
 	 const expr_slice &c,
@@ -392,6 +402,8 @@ buildCED(const SummaryId &summaryId,
 	enumerateNeededExpressions(c.leftOver, neededExpressions);
 	fprintf(bubble_plot_log, "%f: stop determine input availability\n", now());
 
+	never_evaluatable ne;
+	auto sideCondition = reorder_bbdd::from_bbdd(c.leftOver, ne);
 	*out = crashEnforcementData(&summary->scopes->bools,
 				    summaryId,
 				    *summary->mai,
@@ -400,7 +412,7 @@ buildCED(const SummaryId &summaryId,
 				    rootsCfg,
 				    c.trueSlice,
 				    c.falseSlice,
-				    c.leftOver,
+				    sideCondition,
 				    next_hb_id,
 				    summary,
 				    as);

@@ -14,6 +14,7 @@
 #include "input_expression.hpp"
 
 class happensBeforeEdge;
+class reorder_bbdd;
 
 class internmentState {
 public:
@@ -258,7 +259,7 @@ public:
 			   expressionStashMapT &stashMap,
 			   happensBeforeMapT &hbMap,
 			   ThreadAbstracter &abs,
-			   bbdd *sideCondition);
+			   const reorder_bbdd *sideCondition);
 	void operator|=(const expressionEvalMapT &eem);
 	void prettyPrint(FILE *f) const;
 	bool parse(bbdd::scope *scope, const char *str, const char **suffix);
@@ -341,7 +342,7 @@ public:
 			     std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &_roots,
 			     const std::set<const IRExprHappensBefore *> &trueHb,
 			     const std::set<const IRExprHappensBefore *> &falseHb,
-			     bbdd *sideCondition,
+			     const reorder_bbdd *sideCondition,
 			     int &next_hb_id,
 			     CrashSummary *summary,
 			     AddressSpace *as)
