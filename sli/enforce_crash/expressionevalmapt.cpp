@@ -101,61 +101,74 @@ print_expr_set(const std::set<input_expression> &s, FILE *f)
 /* Simplify a BBDD given that we know precisely where we're going to
    enter it.  We rely on the fact that any entry point expressions
    will always be at the root of the BDD. */
-/* (Update comment to bdd.hpp::bdd_rank if that changes) */
-static bbdd *
-setEntryPoint(bbdd::scope *scope,
-	      bbdd *in,
+static const reorder_bbdd *
+setEntryPoint(const reorder_bbdd *in,
 	      unsigned thread,
-	      const CfgLabel &label)
+	      const CfgLabel &label,
+	      reorder_evaluatable &evalable,
+	      sane_map<const reorder_bbdd *, const reorder_bbdd *> &memo)
 {
-	if (in->isLeaf() ||
-	    (in->internal().condition->tag != Iex_EntryPoint &&
-	     in->internal().condition->tag != Iex_ControlFlow)) {
+	if (in->isLeaf) {
 		return in;
 	}
-	/* We can use makeInternal rather than ifelse because we never
-	   change the order of expressions at all. */
-	if (in->internal().condition->tag == Iex_ControlFlow) {
-		return scope->node(
-			in->internal().condition,
-			in->internal().rank,
-			setEntryPoint(scope, in->internal().trueBranch, thread, label),
-			setEntryPoint(scope, in->internal().falseBranch, thread, label));
-	} else {
-		IRExprEntryPoint *c = (IRExprEntryPoint *)in->internal().condition;
-		if (c->thread != thread) {
-			return scope->node(
-				in->internal().condition,
-				in->internal().rank,
-				setEntryPoint(scope, in->internal().trueBranch, thread, label),
-				setEntryPoint(scope, in->internal().falseBranch, thread, label));
-		} else if (c->label == label) {
-			return setEntryPoint(scope,
-					     in->internal().trueBranch,
-					     thread,
-					     label);
-		} else {
-			return setEntryPoint(scope,
-					     in->internal().falseBranch,
-					     thread,
-					     label);
+
+	auto it_did_insert = memo.insert(in, (const reorder_bbdd *)0xcafe);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+
+	bool done = false;
+	if (in->cond.cond->tag == Iex_EntryPoint) {
+		IRExprEntryPoint *c = (IRExprEntryPoint *)in->cond.cond;
+		if (c->thread == thread) {
+			if (c->label == label) {
+				it->second = setEntryPoint(in->trueBranch, thread, label, evalable, memo);
+			} else {
+				it->second = setEntryPoint(in->falseBranch, thread, label, evalable, memo);
+			}
+			done = true;
 		}
 	}
+	if (!done) {
+		auto t = setEntryPoint(in->trueBranch, thread, label, evalable, memo);
+		auto f = setEntryPoint(in->falseBranch, thread, label, evalable, memo);
+		bool shouldBeEval = evalable(in->cond.cond);
+		if (t == f) {
+			it->second = t;
+		} else if (shouldBeEval == in->cond.evaluatable &&
+			   t == in->trueBranch &&
+			   f == in->falseBranch) {
+			it->second = in;
+		} else {
+			it->second = reorder_bbdd::ifelse(reorder_bbdd_cond(in->cond.rank,
+									    in->cond.cond,
+									    shouldBeEval),
+							  t,
+							  f,
+							  NULL);
+		}
+	}
+
+	it->second = it->second->fixupEvalable(evalable);
+
+	return it->second;
 }
 
 /* Figure out the side-condition which needs to be checked at the
    start of an instruction, given the side conditions at all of its
    predecessors (or the entry side condition, if this is a root). */
-static bbdd *
-calcEntryNeeded(bbdd::scope *scope,
-		instr_t instr,
+static const reorder_bbdd *
+calcEntryNeeded(instr_t instr,
 		const ThreadAbstracter &abs,
 		const std::map<instr_t, std::set<instr_t> > &predecessors,
 		const std::set<instr_t> &roots,
-		bbdd *entryNeeded,
-		const std::map<instr_t, bbdd *> &leftoverCondition)
+		const reorder_bbdd *entryNeeded,
+		const std::map<instr_t, const reorder_bbdd *> &leftoverCondition,
+		reorder_evaluatable &evalable)
 {
-	bbdd *res;
+	const reorder_bbdd *res;
 	auto it = predecessors.find(instr);
 	assert(it != predecessors.end());
 	const std::set<instr_t> &pred(it->second);
@@ -166,13 +179,15 @@ calcEntryNeeded(bbdd::scope *scope,
 		   predecessors's left over conditions, roots
 		   take their initial conditions from this
 		   map. */
+		sane_map<const reorder_bbdd *, const reorder_bbdd *> memo;
 		res = setEntryPoint(
-			scope,
 			entryNeeded,
 			abs.lookup(instr->rip.thread).raw_id(),
-			instr->rip.label);
+			instr->rip.label,
+			evalable,
+			memo);
 	} else {
-		res = scope->cnst(true);
+		res = reorder_bbdd::Leaf(true);
 	}
 	for (auto it = pred.begin(); it != pred.end(); it++) {
 		/* Should this be And or Or?  If we use And then we're
@@ -185,7 +200,7 @@ calcEntryNeeded(bbdd::scope *scope,
 		auto it2 = leftoverCondition.find(*it);
 		assert(it2 != leftoverCondition.end());
 		assert(it2->second);
-		res = bbdd::And(scope, res, it2->second);
+		res = reorder_bbdd::And(res, it2->second->fixupEvalable(evalable));
 	}
 	return res;
 }
@@ -270,38 +285,6 @@ availOnEntryAndLocalStash(instr_t i,
 		}
 	}
 	return res;
-}
-
-static std::pair<bbdd *, bbdd *>
-splitExpressionOnAvailability(bbdd::scope *scope, bbdd *what, const std::set<input_expression> &avail)
-{
-	if (debug_ubbdd) {
-		printf("Split expression, avail ");
-		print_expr_set(avail, stdout);
-		printf("\n");
-		what->prettyPrint(stdout);
-	}
-
-	evaluatable evalable(avail);
-	const reorder_bbdd *u_what = reorder_bbdd::from_bbdd(what, evalable);
-	if (debug_ubbdd) {
-		printf("Converted to UBBDD:\n");
-		pp_reorder(u_what);
-	}
-	sanity_check_reorder(u_what);
-	auto pair = splitExpressionOnAvailability(u_what);
-	auto u_unavail = pair.first;
-	auto u_avail = pair.second;
-
-	auto b_avail = u_avail->to_bbdd(scope);
-	auto unavail = u_unavail->to_bbdd(scope);
-	if (debug_ubbdd) {
-		printf("Convert back to BBDD; avail =\n");
-		b_avail->prettyPrint(stdout);
-		printf("Unavail =\n");
-		unavail->prettyPrint(stdout);
-	}
-	return std::pair<bbdd *, bbdd *>(unavail, b_avail);
 }
 
 static void
@@ -634,48 +617,45 @@ node_schedule::check_cycles() const
  * of the instruction. */
 struct instrEntryPhaseRes {
 	bool dead;
-	bbdd *remainder;
+	const reorder_bbdd *remainder;
 	bbdd *evalHere;
 	bbdd *newAssumption;
 };
 static instrEntryPhaseRes
 instrEntryPhase(bbdd::scope *scope,
-		bbdd *const entryCondition,
+		const reorder_bbdd *entryCondition,
 		bbdd *const entryAssumption,
 		const std::set<input_expression> &availExprs)
 {
-	auto split1 = splitExpressionOnAvailability(
-		scope,
-		entryCondition,
-		availExprs);
+	evaluatable evalable(availExprs);
+	auto split1 = splitExpressionOnAvailability(entryCondition);
 	if (debug_eem) {
 		printf("Left over after register and entry point:\n");
-		split1.first->prettyPrint(stdout);
+		pp_reorder(split1.first);
 		printf("Eval here after register and entry point:\n");
-		split1.second->prettyPrint(stdout);
+		pp_reorder(split1.second);
 	}
 	instrEntryPhaseRes res;
 	res.newAssumption = entryAssumption;
-	if (split1.second->isLeaf()) {
-		if (split1.second->leaf() == false) {
+	if (split1.second->isLeaf) {
+		if (split1.second->leaf == false) {
 			res.dead = true;
 		} else {
 			res.dead = false;
 			res.remainder = entryCondition;
-			res.evalHere = split1.second;
+			res.evalHere = NULL;
 		}
 		return res;
 	}
 
-	auto simpl = bbdd::assume(scope, split1.second, entryAssumption);
+	auto evalHereBBDD = split1.second->to_bbdd(scope);
+	auto simpl = bbdd::assume(scope, evalHereBBDD, entryAssumption);
 	if (!simpl) {
-		instrEntryPhaseRes res;
 		res.dead = true;
 		return res;
 	}
-
 	simpl = subst_eq(scope, simpl);
-	if (simpl != split1.second && debug_eem) {
+	if (simpl != evalHereBBDD && debug_eem) {
 		printf("Resimplify:\n");
 		simpl->prettyPrint(stdout);
 	}
@@ -770,9 +750,9 @@ instrTxPhase(bbdd::scope *scope,
 	     const std::map<instr_t, std::set<instr_t> > &predecessors,
 	     const std::map<instr_t, std::set<input_expression> > &availabilityMap,
 	     const expressionStashMapT &stashMap,
-	     bbdd *const entryNeeded,
+	     const reorder_bbdd *const entryNeeded,
 	     bbdd *const entryAssumption,
-	     bbdd *&exitNeeded,
+	     const reorder_bbdd *&exitNeeded,
 	     std::set<input_expression> &availExprs,
 	     node_schedule &schedule,
 	     sane_map<instr_t, bbdd *> &alreadyEvaled)
@@ -780,7 +760,7 @@ instrTxPhase(bbdd::scope *scope,
 	/* Now process message transmits */
 	std::set<input_expression> acquired_by_tx;
 	bool have_tx_edge = false;
-	bbdd *tx_leftover = NULL;
+	const reorder_bbdd *tx_leftover = NULL;
 
 	for (auto it = hbEdges.begin(); it != hbEdges.end(); it++) {
 		auto hb = *it;
@@ -812,26 +792,25 @@ instrTxPhase(bbdd::scope *scope,
 		std::set<input_expression> availForThisMessage(availExprs);
 		availForThisMessage |= availOnOtherSide;
 
+		evaluatable evalable(availForThisMessage);
 		/* What can we evaluate on this edge? */
 		auto split = splitExpressionOnAvailability(
-			scope,
-			entryNeeded,
-			availForThisMessage);
+			entryNeeded->fixupEvalable(evalable));
 		if (debug_eem) {
 			printf("Eval here after TX:\n");
-			split.second->prettyPrint(stdout);
+			pp_reorder(split.second);
 		}
-		if (!split.second->isLeaf()) {
-			hb->sideCondition = subst_eq(scope, split.second);
-			if (debug_eem && hb->sideCondition != split.second) {
+		if (!split.second->isLeaf) {
+			auto evalHereBBDD = split.second->to_bbdd(scope);
+			hb->sideCondition = subst_eq(scope, evalHereBBDD);
+			if (debug_eem && hb->sideCondition != evalHereBBDD) {
 				printf("subst_eq reduces edge condition to:\n");
 				hb->sideCondition->prettyPrint(stdout);
 			}
 		}
 		if (tx_leftover) {
-			tx_leftover = bbdd::Or(
-				scope,
-				tx_leftover,
+			tx_leftover = reorder_bbdd::Or(
+				tx_leftover->fixupEvalable(evalable),
 				split.first);
 		} else {
 			tx_leftover = split.first;
@@ -857,17 +836,17 @@ instrTxPhase(bbdd::scope *scope,
 			printf("Avail with TX effects: ");
 			print_expr_set(availExprs, stdout);
 			printf("\ntx_leftover:\n");
-			exitNeeded->prettyPrint(stdout);
+			pp_reorder(exitNeeded);
 		}
 	}
 }
 
 /* What can we do once we know what our successor instruction is? */
-static std::pair<bbdd *, bbdd *>
+static instrEntryPhaseRes
 instrCfPhase(bbdd::scope *scope,
 	     instr_t i,
 	     const std::map<instr_t, std::set<input_expression> > &availabilityMap,
-	     bbdd *entryNeeded,
+	     const reorder_bbdd *entryNeeded,
 	     bbdd *currentAssumption)
 {
 	auto it = availabilityMap.find(i);
@@ -878,30 +857,7 @@ instrCfPhase(bbdd::scope *scope,
 		print_expr_set(availExprs, stdout);
 		printf("\n");
 	}
-	auto split3 = splitExpressionOnAvailability(
-		scope,
-		entryNeeded,
-		availExprs);
-	if (debug_eem) {
-		printf("Left over after control flow:\n");
-		split3.first->prettyPrint(stdout);
-		printf("Eval here after control flow:\n");
-		split3.second->prettyPrint(stdout);
-	}
-	std::pair<bbdd *, bbdd *> res;
-	res.first = split3.first;
-	res.second = split3.second;
-	if (!split3.second->isLeaf()) {
-		res.second = bbdd::assume(scope, split3.second, currentAssumption);
-		if (res.second) {
-			res.second = subst_eq(scope, res.second);
-			if (res.second != split3.second && debug_eem) {
-				printf("Simplifies to:\n");
-				res.second->prettyPrint(stdout);
-			}
-		}
-	}
-	return res;
+	return instrEntryPhase(scope, entryNeeded, currentAssumption, availExprs);
 }
 
 /* Constructor for the eval map.  Figure out precisely where we're
@@ -916,7 +872,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 				       expressionStashMapT &stashMap,
 				       happensBeforeMapT &hbMap,
 				       ThreadAbstracter &abs,
-				       bbdd *sideCondition)
+				       bbdd *_sideCondition)
 {
 	if (debug_eem) {
 		printf("expressionEvalMapT()\n");
@@ -925,7 +881,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		stashMap.prettyPrint(stdout);
 		hbMap.prettyPrint(stdout);
 		printf("Side condition:\n");
-		sideCondition->prettyPrint(stdout);
+		_sideCondition->prettyPrint(stdout);
 	}
 
 	bbdd *assumption = scope->cnst(true);
@@ -958,7 +914,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	   can be evaluated at that instruction (this->evalAt) and a
 	   component which has to be deferred
 	   (@leftoverCondition).  */
-	std::map<instr_t, bbdd *> leftoverCondition;
+	std::map<instr_t, const reorder_bbdd *> leftoverCondition;
 	/* And the condition which we've already evaluated */
 	sane_map<instr_t, bbdd *> alreadyEvaled;
 
@@ -970,6 +926,13 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		alreadyEvaled[cfg.findInstr(it.threadCfgLabel())] = assumption;
 	}
 
+	const reorder_bbdd *sideCondition;
+	{
+		std::set<input_expression> empty;
+		evaluatable evalable(empty);
+		sideCondition = reorder_bbdd::from_bbdd(_sideCondition, evalable);
+	}
+
 	TimeoutTimer tmr;
 	tmr.timeoutAfterSeconds(60);
 
@@ -978,84 +941,65 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	while (!TIMEOUT && !schedule.finished()) {
 		auto i = schedule.next();
 
-		/* At the start of the instruction, we have to check
-		   everything which hasn't been checked by one of our
-		   predecessors. */
-		bbdd *entryNeeded;
-		entryNeeded = calcEntryNeeded(scope, i, abs, predecessors,
-					      rootInstrs, sideCondition,
-					      leftoverCondition);
-		bbdd *entryAssumption = alreadyEvaled[i];
-		assert(i);
-		{
-			bbdd *entryNeeded2 = bbdd::assume(scope, entryNeeded, entryAssumption);
-			if (!entryNeeded2) {
-				deadStates.insert(i);
-				if (debug_eem_dead) {
-					printf("entryNeeded is unsatisfiable, killing %s!\n",
-					       i->rip.name());
-				}
-				continue;
-			}
-			if (debug_eem && entryNeeded != entryNeeded2) {
-				printf("Entry assumption:\n");
-				entryAssumption->prettyPrint(stdout);
-				printf("reduces needed from:\n");
-				entryNeeded->prettyPrint(stdout);
-				printf("to:\n");
-				entryNeeded2->prettyPrint(stdout);
-			}
-			entryNeeded = entryNeeded2;
-		}
-
-		bbdd *currentAssumption = entryAssumption;
-
-		if (hbMap.count(i->rip)) {
-			if (debug_eem) {
-				printf("Entry needed without HBs:\n");
-				entryNeeded->prettyPrint(stdout);
-			}
-			const std::set<happensBeforeEdge *> &hbEdges(hbMap[i->rip]);
-			for (auto it = hbEdges.begin();
-			     it != hbEdges.end();
-			     it++) {
-				auto hb = *it;
-				/* If something is tested by the other
-				   end of a control flow edge then we
-				   don't need to test it at this
-				   end. */
-				entryNeeded = bbdd::Or(
-					scope,
-					entryNeeded,
-					calcEntryNeeded(
-						scope,
-						hb->before == i ?
-							hb->after :
-							hb->before,
-						abs,
-						predecessors,
-						rootInstrs,
-						sideCondition,
-						leftoverCondition));
-				if (debug_eem) {
-					printf("With HB edge %p:\n", hb);
-					entryNeeded->prettyPrint(stdout);
-				}
-			}
-		} else if (debug_eem) {
-			printf("Non-HB entry needed:\n");
-			entryNeeded->prettyPrint(stdout);
-		}
-
-		bbdd *leftover;
-		leftover = entryNeeded;
-
 		/* What's available at the start of the
 		 * instruction? */
 		std::set<input_expression> availExprs(
 			availOnEntryAndLocalStash(i, predecessors,
 						  availabilityMap,
 						  stashMap));
+
+		/* At the start of the instruction, we have to check
+		   everything which hasn't been checked by one of our
+		   predecessors. */
+		const reorder_bbdd *entryNeeded;
+		{
+			evaluatable evalable(availExprs);
+			entryNeeded = calcEntryNeeded(i, abs, predecessors,
+						      rootInstrs, sideCondition,
+						      leftoverCondition,
+						      evalable);
+			
+			if (hbMap.count(i->rip)) {
+				if (debug_eem) {
+					printf("Entry needed without HBs:\n");
+					pp_reorder(entryNeeded);
+				}
+				const std::set<happensBeforeEdge *> &hbEdges(hbMap[i->rip]);
+				for (auto it = hbEdges.begin();
+				     it != hbEdges.end();
+				     it++) {
+					auto hb = *it;
+					/* If something is tested by
+					   the other end of a control
+					   flow edge then we don't
+					   need to test it at this
+					   end. */
+					entryNeeded = reorder_bbdd::Or(
+						entryNeeded,
+						calcEntryNeeded(
+							hb->before == i ?
+								hb->after :
+								hb->before,
+							abs,
+							predecessors,
+							rootInstrs,
+							sideCondition,
+							leftoverCondition,
+							evalable));
+					if (debug_eem) {
+						printf("With HB edge %p:\n", hb);
+						pp_reorder(entryNeeded);
+					}
+				}
+			} else if (debug_eem) {
+				printf("Non-HB entry needed:\n");
+				pp_reorder(entryNeeded);
+			}
+		}
+
+		bbdd *currentAssumption = alreadyEvaled[i];
+		const reorder_bbdd *leftover = entryNeeded;
+
 		if (debug_eem) {
 			printf("Avail with local stashes only: ");
 			print_expr_set(availExprs, stdout);
@@ -1074,7 +1018,9 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			continue;
 		}
 		leftover = entryPhase.remainder;
-		evalAt[i->rip].after_regs = entryPhase.evalHere;
+		if (entryPhase.evalHere) {
+			evalAt[i->rip].after_regs = entryPhase.evalHere;
+		}
 		currentAssumption = entryPhase.newAssumption;
 
 		{
@@ -1096,25 +1042,11 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 						scope,
 						currentAssumption,
 						rxPhase.checkedHere);
-					leftover = bbdd::assume(
-						scope,
-						leftover,
-						rxPhase.checkedHere);
-					if (!leftover) {
-						deadStates.insert(i);
-						if (debug_eem_dead) {
-							printf("RX condition is unsatisfiable, killing %s!\n",
-							       i->rip.name());
-						}
-						continue;
-					}
 					if (debug_eem) {
 						printf("Avail with RX effects: ");
 						print_expr_set(availExprs, stdout);
 						printf("\nrx_checked:\n");
 						rxPhase.checkedHere->prettyPrint(stdout);
-						printf("leftover:\n");
-						leftover->prettyPrint(stdout);
 					}
 				}
 
@@ -1139,27 +1071,25 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 
 		/* Figure out what we can do once we've figure out
 		 * where we're going next. */
-		std::pair<bbdd *, bbdd *>instrCf = instrCfPhase(
+		auto cfPhase = instrCfPhase(
 			scope,
 			i,
 			availabilityMap,
 			leftover,
 			currentAssumption);
-		if (!instrCf.second || (instrCf.second->isLeaf() && !instrCf.second->leaf())) {
+		if (cfPhase.dead) {
+			deadStates.insert(i);
 			if (debug_eem_dead) {
-				printf("post-control-flow condition is unsatisfiable, killing %s\n",
+				printf("Control flow condition is unsatisfiable, killing %s!\n",
 				       i->rip.name());
 			}
-			deadStates.insert(i);
 			continue;
 		}
-		if (!instrCf.second->isLeaf()) {
-			evalAt[i->rip].after_control_flow = instrCf.second;
-			currentAssumption = bbdd::And(scope,
-						      currentAssumption,
-						      instrCf.second);
+		leftoverCondition[i] = cfPhase.remainder;
+		if (cfPhase.evalHere) {
+			evalAt[i->rip].after_control_flow = cfPhase.evalHere;
 		}
-		leftoverCondition[i] = instrCf.first;
+		currentAssumption = cfPhase.newAssumption;
 
 		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
 			if (it->instr) {

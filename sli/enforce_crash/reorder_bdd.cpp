@@ -464,3 +464,142 @@ splitExpressionOnAvailability(const reorder_bbdd *what)
 
 	return std::pair<const reorder_bbdd *, const reorder_bbdd *>(unavail, avail);
 }
+
+const reorder_bbdd *
+reorder_bbdd::And(const reorder_bbdd *a, const reorder_bbdd *b,
+		  sane_map<std::pair<const reorder_bbdd *, const reorder_bbdd *>, const reorder_bbdd *> &memo)
+{
+	if (a == b) {
+		return a;
+	}
+	if (a->isLeaf) {
+		if (a->leaf) {
+			return b;
+		} else {
+			return a;
+		}
+	}
+	if (b->isLeaf) {
+		if (b->leaf) {
+			return a;
+		} else {
+			return b;
+		}
+	}
+
+	auto it_did_insert = memo.insert(std::pair<const reorder_bbdd *, const reorder_bbdd *>(a, b), (const reorder_bbdd *)0xd00d);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+
+	if (a->cond.cond == b->cond.cond) {
+		assert(a->cond == b->cond);
+	}
+
+	if (a->cond < b->cond) {
+		auto t = And(a->trueBranch, b, memo);
+		auto f = And(a->falseBranch, b, memo);
+		if (t == a->trueBranch && f == a->falseBranch) {
+			it->second = a;
+		} else {
+			it->second = ifelse(a->cond, t, f, NULL);
+		}
+	} else if (a->cond == b->cond) {
+		auto t = And(a->trueBranch, b->trueBranch, memo);
+		auto f = And(a->falseBranch, b->falseBranch, memo);
+		if (t == a->trueBranch && f == a->falseBranch) {
+			it->second = a;
+		} else if (t == b->trueBranch && f == b->falseBranch) {
+			it->second = b;
+		} else {
+			it->second = ifelse(a->cond, t, f, NULL);
+		}
+	} else {
+		assert(b->cond < a->cond);
+		auto t = And(a, b->trueBranch, memo);
+		auto f = And(a, b->falseBranch, memo);
+		if (t == b->trueBranch && f == b->falseBranch) {
+			it->second = a;
+		} else {
+			it->second = ifelse(b->cond, t, f, NULL);
+		}
+	}
+	return it->second;
+}
+const reorder_bbdd *
+reorder_bbdd::And(const reorder_bbdd *a, const reorder_bbdd *b)
+{
+	sane_map<std::pair<const reorder_bbdd *, const reorder_bbdd *>, const reorder_bbdd *> memo;
+	return And(a, b, memo);
+}
+
+const reorder_bbdd *
+reorder_bbdd::Or(const reorder_bbdd *a, const reorder_bbdd *b, sane_map<std::pair<const reorder_bbdd *, const reorder_bbdd *>, const reorder_bbdd *> &memo)
+{
+	if (a == b) {
+		return a;
+	}
+	if (a->isLeaf) {
+		if (a->leaf) {
+			return a;
+		} else {
+			return b;
+		}
+	}
+	if (b->isLeaf) {
+		if (b->leaf) {
+			return b;
+		} else {
+			return a;
+		}
+	}
+
+	auto it_did_insert = memo.insert(std::pair<const reorder_bbdd *, const reorder_bbdd *>(a, b), (const reorder_bbdd *)0xd00d);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+
+	if (a->cond.cond == b->cond.cond) {
+		assert(a->cond == b->cond);
+	}
+
+	if (a->cond < b->cond) {
+		auto t = Or(a->trueBranch, b, memo);
+		auto f = Or(a->falseBranch, b, memo);
+		if (t == a->trueBranch && f == a->falseBranch) {
+			it->second = a;
+		} else {
+			it->second = ifelse(a->cond, t, f, NULL);
+		}
+	} else if (a->cond == b->cond) {
+		auto t = Or(a->trueBranch, b->trueBranch, memo);
+		auto f = Or(a->falseBranch, b->falseBranch, memo);
+		if (t == a->trueBranch && f == a->falseBranch) {
+			it->second = a;
+		} else if (t == b->trueBranch && f == b->falseBranch) {
+			it->second = b;
+		} else {
+			it->second = ifelse(a->cond, t, f, NULL);
+		}
+	} else {
+		assert(b->cond < a->cond);
+		auto t = Or(a, b->trueBranch, memo);
+		auto f = Or(a, b->falseBranch, memo);
+		if (t == b->trueBranch && f == b->falseBranch) {
+			it->second = a;
+		} else {
+			it->second = ifelse(b->cond, t, f, NULL);
+		}
+	}
+	return it->second;
+}
+const reorder_bbdd *
+reorder_bbdd::Or(const reorder_bbdd *a, const reorder_bbdd *b)
+{
+	sane_map<std::pair<const reorder_bbdd *, const reorder_bbdd *>, const reorder_bbdd *> memo;
+	return Or(a, b, memo);
+}

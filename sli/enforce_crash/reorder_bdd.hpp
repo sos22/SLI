@@ -140,6 +140,11 @@ class reorder_bbdd : public GarbageCollected<reorder_bbdd, &ir_heap> {
 		  equiv_bbdd(_equivBbdd)
 	{}
 
+	static const reorder_bbdd *And(const reorder_bbdd *a, const reorder_bbdd *b,
+				       sane_map<std::pair<const reorder_bbdd *, const reorder_bbdd *>, const reorder_bbdd *> &memo);
+	static const reorder_bbdd *Or(const reorder_bbdd *a, const reorder_bbdd *b,
+				      sane_map<std::pair<const reorder_bbdd *, const reorder_bbdd *>, const reorder_bbdd *> &memo);
+
 public:
 	bool isLeaf;
 	bool leaf;
@@ -152,6 +157,10 @@ public:
 	const reorder_bbdd *fixupEvalable(reorder_evaluatable &evalable) const;
 
 	bbdd *to_bbdd(bbdd::scope *) const;
+
+	/* @a and @b must use the same ordering! */
+	static const reorder_bbdd *And(const reorder_bbdd *a, const reorder_bbdd *b);
+	static const reorder_bbdd *Or(const reorder_bbdd *a, const reorder_bbdd *b);
 
 	static const reorder_bbdd *ifelse(const reorder_bbdd_cond &cond,
 					  const reorder_bbdd *trueBranch,
