@@ -12,11 +12,15 @@ extern FILE *bubble_plot_log;
 
 #ifndef NDEBUG
 static bool debug_eem = false;
+static bool debug_eem_predecessors = false;
+static bool debug_eem_availability = false;
 static bool debug_eem_dead = false;
 static bool debug_eem_schedule = false;
 static bool debug_ubbdd = false;
 #else
 #define debug_eem false
+#define debug_eem_predecessors false
+#define debug_eem_availability false
 #define debug_eem_dead false
 #define debug_eem_schedule false
 #define debug_ubbdd false
@@ -300,55 +304,24 @@ splitExpressionOnAvailability(bbdd::scope *scope, bbdd *what, const std::set<inp
 	return std::pair<bbdd *, bbdd *>(unavail, b_avail);
 }
 
-/* Constructor for the eval map.  Figure out precisely where we're
-   going to eval the side condition (which may involve splitting it up
-   into several places to do incremental eval). */
-/* Note that this is responsible for setting
-   happensBeforeEdge::sideCondition, in addition to constructing
-   itself. */
-expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
-				       CrashCfg &cfg,
-				       crashEnforcementRoots &roots,
-				       expressionStashMapT &stashMap,
-				       happensBeforeMapT &hbMap,
-				       ThreadAbstracter &abs,
-				       bbdd *sideCondition)
+static void
+buildPredecessorMap(const CrashCfg &cfg,
+		    const crashEnforcementRoots &roots,
+		    std::map<instr_t, std::set<instr_t> > &predecessors,
+		    std::set<instr_t> &rootInstrs)
 {
-	if (debug_eem) {
-		printf("expressionEvalMapT()\n");
-		cfg.prettyPrint(stdout);
-		roots.prettyPrint(stdout);
-		stashMap.prettyPrint(stdout);
-		hbMap.prettyPrint(stdout);
-		printf("Side condition:\n");
-		sideCondition->prettyPrint(stdout);
-	}
+	assert(predecessors.empty());
+	assert(rootInstrs.empty());
 
-	bbdd *assumption = scope->cnst(true);
-
-	if (debug_eem_schedule && !debug_eem) {
-		printf("expressionEvalMapT:\n");
-		cfg.prettyPrint(stdout);
-		roots.prettyPrint(stdout);
-		hbMap.prettyPrint(stdout);
-	}
-
-	fprintf(bubble_plot_log, "%f: start determine input availability\n", now());
-	/* Count the predecessors for each instruction, so that we
-	 * know when it's safe to process it. */
-	std::map<instr_t, unsigned> pendingPredecessors;
-	std::map<instr_t, std::set<instr_t> > predecessors;
 	std::vector<instr_t> pendingInstrs;
-	std::set<instr_t> seen;
-	std::set<instr_t> rootInstrs;
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
 		auto i = cfg.findInstr(it.threadCfgLabel());
 		assert(i);
 		pendingInstrs.push_back(i);
-		pendingPredecessors[i] = 0;
-		predecessors[i].clear();
 		rootInstrs.insert(i);
+		predecessors[i].clear();
 	}
+	std::set<instr_t> seen;
 	while (!pendingInstrs.empty()) {
 		auto i = pendingInstrs.back();
 		pendingInstrs.pop_back();
@@ -357,32 +330,60 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		}
 		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
 			if (it->instr) {
-				pendingPredecessors[it->instr]++;
 				predecessors[it->instr].insert(i);
 				pendingInstrs.push_back(it->instr);
 			}
 		}
 	}
 
-	/* Now figure out what inputs are available where. */
-	std::map<instr_t, std::set<input_expression> > availabilityMap;
-	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
-		if (it->second == 0) {
+	if (debug_eem_predecessors) {
+		printf("Predecessor map:\n");
+		for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+			printf("\t%s -> [", it->first->rip.name());
+			for (auto it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++) {
+				if (it2 != it->second.begin()) {
+					printf(", ");
+				}
+				printf("%s", (*it2)->rip.name());
+			}
+			printf("]\n");
+		}
+	}
+}
+
+static void
+buildInputAvailabilityMap(std::map<instr_t, std::set<instr_t> > &predecessors,
+			  expressionStashMapT &stashMap,
+			  happensBeforeMapT &hbMap,
+			  std::map<instr_t, std::set<input_expression> > &availabilityMap)
+{
+	/* First pass just finds things which are available in the
+	 * local thread. */
+	std::map<instr_t, unsigned> nrPendingPredecessors;
+	std::vector<instr_t> pendingInstrs;
+	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
+		nrPendingPredecessors[it->first] = it->second.size();
+		if (it->second.size() == 0) {
 			pendingInstrs.push_back(it->first);
 		}
 	}
-	/* First pass just finds things which are available in the
-	 * local thread. */
 	while (!pendingInstrs.empty()) {
 		auto i = pendingInstrs.back();
 		pendingInstrs.pop_back();
-		assert(pendingPredecessors.count(i));
-		assert(pendingPredecessors[i] == 0);
-
+		assert(nrPendingPredecessors.count(i));
+		assert(nrPendingPredecessors[i] == 0);
+#ifndef NDEBUG
+		nrPendingPredecessors.erase(i);
+#endif
 		assert(!availabilityMap.count(i));
 		std::set<input_expression> &avail(availabilityMap[i]);
 		assert(avail.empty());
 
+		if (debug_eem_availability) {
+			printf("Calc availability at %s\n", i->rip.name());
+		}
 		/* Entry availability is intersection of all of the
 		   predecessor exit availabilities. */
 		const std::set<instr_t> &pred(predecessors[i]);
@@ -395,20 +396,37 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			}
 		}
 
+		if (debug_eem_availability) {
+			printf("\tLocal entry avail: ");
+			print_expr_set(avail, stdout);
+			printf("\n");
+		}
+
 		/* Now use that to calculate exit availability. */
 		auto stashit = stashMap.find(i->rip);
 		if (stashit != stashMap.end()) {
 			avail |= stashit->second;
 		}
 
+		if (debug_eem_availability) {
+			printf("\tLocal exit avail: ");
+			print_expr_set(avail, stdout);
+			printf("\n");
+		}
+
 		availabilityMap[i] = avail;
 
 		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
-			if (it->instr && --pendingPredecessors[it->instr] == 0) {
-				pendingInstrs.push_back(it->instr);
+			if (it->instr) {
+				assert(nrPendingPredecessors.count(it->instr));
+				assert(nrPendingPredecessors[it->instr] > 0);
+				if (--nrPendingPredecessors[it->instr] == 0) {
+					pendingInstrs.push_back(it->instr);
+				}
 			}
 		}
 	}
+	assert(nrPendingPredecessors.empty());
 
 	if (debug_eem) {
 		printf("Thread-local availability map:\n");
@@ -465,7 +483,48 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 			printf("\n");
 		}
 	}
+}
 
+/* Constructor for the eval map.  Figure out precisely where we're
+   going to eval the side condition (which may involve splitting it up
+   into several places to do incremental eval). */
+/* Note that this is responsible for setting
+   happensBeforeEdge::sideCondition, in addition to constructing
+   itself. */
+expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
+				       CrashCfg &cfg,
+				       crashEnforcementRoots &roots,
+				       expressionStashMapT &stashMap,
+				       happensBeforeMapT &hbMap,
+				       ThreadAbstracter &abs,
+				       bbdd *sideCondition)
+{
+	if (debug_eem) {
+		printf("expressionEvalMapT()\n");
+		cfg.prettyPrint(stdout);
+		roots.prettyPrint(stdout);
+		stashMap.prettyPrint(stdout);
+		hbMap.prettyPrint(stdout);
+		printf("Side condition:\n");
+		sideCondition->prettyPrint(stdout);
+	}
+
+	bbdd *assumption = scope->cnst(true);
+
+	if (debug_eem_schedule && !debug_eem) {
+		printf("expressionEvalMapT:\n");
+		cfg.prettyPrint(stdout);
+		roots.prettyPrint(stdout);
+		hbMap.prettyPrint(stdout);
+	}
+
+	std::map<instr_t, std::set<instr_t> > predecessors;
+	std::set<instr_t> rootInstrs;
+	std::map<instr_t, std::set<input_expression> > availabilityMap;
+
+	fprintf(bubble_plot_log, "%f: start determine input availability\n", now());
+	buildPredecessorMap(cfg, roots, predecessors, rootInstrs);
+	buildInputAvailabilityMap(predecessors, stashMap, hbMap, availabilityMap);
 	fprintf(bubble_plot_log, "%f: stop determine input availability\n", now());
 
 	/* Now figure out what side condition we want to check at
@@ -478,6 +537,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	/* And the condition which we've already evaluated */
 	sane_map<instr_t, bbdd *> alreadyEvaled;
 
+	std::map<instr_t, unsigned> pendingPredecessors;
 	for (auto it = predecessors.begin(); it != predecessors.end(); it++) {
 		pendingPredecessors[it->first] = it->second.size();
 	}
@@ -522,6 +582,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 		alreadyEvaled[cfg.findInstr(it.threadCfgLabel())] = assumption;
 	}
 
+	std::vector<instr_t> pendingInstrs;
 	for (auto it = pendingPredecessors.begin(); it != pendingPredecessors.end(); it++) {
 		if (it->second == 0) {
 			pendingInstrs.push_back(it->first);
