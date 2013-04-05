@@ -3,7 +3,7 @@ targets="ec_driver ctoc_driver driver cep_interpreter.o"
 # expansion does, though, so use that instead.  Meh.
 sources=$(echo {simplify_ordering,enumNeededExpressions,enforce_crash,ced_to_cep}.cpp)
 sources+=$(echo "" {thread_cfg_decode,expressionstashmapt,sane_vector,inputexpression}.cpp)
-sources+=" expressionevalmapt.cpp"
+sources+=$(echo "" {expressionevalmapt,reorder_bdd}.cpp)
 
 defvars() {
     cat <<EOF
