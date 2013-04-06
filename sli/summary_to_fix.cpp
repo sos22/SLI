@@ -533,7 +533,7 @@ public:
 	stack_context stripOne() const {
 		assert(!context.empty());
 		stack_context res(*this);
-		res.context.pop_back();
+		res.context.erase(res.context.begin());
 		res.clearName();
 		return res;
 	}
