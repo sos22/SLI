@@ -378,7 +378,7 @@ public:
 			if (restoreRedzone < o.restoreRedzone)
 				return true;
 			if (restoreRedzone > o.restoreRedzone)
-				return true;
+				return false;
 			return finishCallSequence < o.finishCallSequence;
 		case fl_unlocked:
 			return rip < o.rip;
@@ -1348,6 +1348,7 @@ buildPatch(patch &p,
 				       n.name(), p.content.size());
 			assert(!p.offsets.count(n));
 			p.offsets[n] = p.content.size();
+			assert(p.offsets.count(n));
 			p.transTable.push_back(
 				trans_table_entry(
 					p.content.size(),
