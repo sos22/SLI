@@ -659,6 +659,8 @@ public:
 	};
 	iterator begin() const { return iterator(content.begin(), content.end()); }
 	const VexRip &labelToRip(const ConcreteCfgLabel &l) const;
+
+	size_t size() const { return content.size(); }
 };
 
 Instruction<ThreadCfgLabel> *decode_instr(AddressSpace *as, unsigned long ptr, const ThreadCfgLabel &label,

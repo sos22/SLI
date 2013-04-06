@@ -18,6 +18,7 @@
 #include "crashcfg.hpp"
 #include "offline_analysis.hpp"
 #include "visitor.hpp"
+#include "timers.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -1551,13 +1552,17 @@ buildPatchStrategy(Oracle *oracle,
 	errx(1, "Cannot solve patch problem");
 }
 
-static char *
-buildPatchForCrashSummary(Oracle *oracle,
+char *
+buildPatchForCrashSummary(FILE *log,
+			  Oracle *oracle,
 			  const std::map<SummaryId, CrashSummary *> &summaries)
 {
 	std::set<unsigned long> patchPoints;
 	std::set<unsigned long> clobbered;
 	summaryRootsT summaryRoots;
+	if (log) {
+		fprintf(log, "%f: start identify critical sections\n", now());
+	}
 	{
 		ThreadAbstracter absThread;
 		std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > cfgRoots;
@@ -1594,9 +1599,20 @@ buildPatchForCrashSummary(Oracle *oracle,
 		}
 		crashEnforcementRoots cer(cfgRoots, absThread);
 		CrashCfg cfg(cer, summaries, oracle->ms->addressSpace, true, absThread);
+		if (log) {
+			fprintf(log, "%f: stop identify critical sections\n", now());
+			fprintf(log, "%f: protect %zd instructions\n", now(), cfg.size());
+			fprintf(log, "%f: start build stratgy\n", now());
+		}
 		buildPatchStrategy(oracle, cer, cfg, patchPoints, clobbered);
+		if (log) {
+			fprintf(log, "%f: stop build stratgy\n", now());
+		}
 	}
 
+	if (log) {
+		fprintf(log, "%f: start recompile\n", now());
+	}
 	/* Now go and flatten the CFG fragments into patches. */
 	patch p;
 	buildPatch(p, patchPoints, clobbered, summaryRoots,oracle);
@@ -1639,42 +1655,19 @@ buildPatchForCrashSummary(Oracle *oracle,
 	fragments.push_back("\t.entry_points = entry_points,\n");
 	fragments.push_back("\t.nr_entry_points = sizeof(entry_points)/sizeof(entry_points[0]),\n");
 	fragments.push_back("};\n");
-	return flattenStringFragmentsMalloc(fragments, "", "", "");
+	char *res = flattenStringFragmentsMalloc(fragments, "", "", "");
+	if (log) {
+		fprintf(log, "%f: stop recompile\n", now());
+	}
+	return res;
 }
 
-int
-main(int argc, char *const argv[])
+void
+writePatchToFile(const char *output_fname,
+		 const char *binary,
+		 const std::map<SummaryId, CrashSummary *> &summaries,
+		 const char *patch)
 {
-	if (argc < 7)
-		errx(1, "need at least six arguments: binary, types table, callgraph, static db, output filename, and at least one summary");
-
-	const char *binary = argv[1];
-	const char *types_table = argv[2];
-	const char *callgraph = argv[3];
-	const char *staticdb = argv[4];
-	const char *output_fname = argv[5];
-	const char *const *summary_fnames = argv + 6;
-	int nr_summaries = argc - 6;
-
-	init_sli();
-
-	VexPtr<Oracle> oracle;
-	{
-		MachineState *ms = MachineState::readELFExec(binary);
-		Thread *thr = ms->findThread(ThreadId(1));
-		oracle = new Oracle(ms, thr, types_table);
-	}
-	oracle->loadCallGraph(oracle, callgraph, staticdb, ALLOW_GC);
-
-	std::map<SummaryId, CrashSummary *> summaries;
-	SMScopes scopes;
-	for (int i = 0; i < nr_summaries; i++) {
-		summaries[SummaryId(i + 1)] = readBugReport(&scopes, summary_fnames[i], NULL);
-	}
-
-	char *patch = buildPatchForCrashSummary(oracle, summaries);
-	printf("Patch is:\n%s\n", patch);
-
 	FILE *output = fopen(output_fname, "w");
 	fprintf(output, "/* SLI fix generated for %s */\n", binary);
 	fprintf(output,
@@ -1694,5 +1687,4 @@ main(int argc, char *const argv[])
 	fprintf(output, "#include \"patch_skeleton_jump.c\"\n");
 	if (fclose(output) == EOF)
 		err(1, "writing output");
-	return 0;
 }

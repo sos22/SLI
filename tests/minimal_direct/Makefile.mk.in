@@ -44,8 +44,8 @@ ${bugname}.summary.canon2: canonicalise_crash_summary2 ${bugname}.summary.canon0
 	./canonicalise_crash_summary2 ${bugname}.summary.canon0 ${bugname}.summary.canon2
 ${bugname}.summary.canon0: canonicalise_crash_summary0 ${bugname}.summary
 	./canonicalise_crash_summary0 ${bugname}.summary ${bugname}.summary.canon0
-${bugname}.fix.c: summary_to_fix ${static_files} ${bugname}.summary.canon4
-	./summary_to_fix ${static_files} ${bugname}.fix.c ${bugname}.summary.canon4
+${bugname}.fix.c: s2f_driver ${static_files} ${bugname}.summary.canon4
+	./s2f_driver ${static_files} ${bugname}.fix.c ${bugname}.summary.canon4
 EOF
     else
 	local summaries=""
@@ -56,8 +56,8 @@ EOF
 	cat <<EOF
 ${bugname}.ced: ${summaries}  ec_driver ${static_files}
 	./ec_driver ${static_files} \$@ ${summaries}
-${bugname}.fix.c: summary_to_fix ${static_files} ${summaries}
-	./summary_to_fix ${static_files} ${bugname}.fix.c ${summaries}
+${bugname}.fix.c: s2f_driver ${static_files} ${summaries}
+	./s2f_driver ${static_files} ${bugname}.fix.c ${summaries}
 EOF
     fi
 
@@ -75,7 +75,7 @@ ${bugname}.build_interp_time: timing ctoc_driver ec_driver cep_interpreter.o ${s
 	./timing 10 ${bugname}.build_interp_time ./tests/minimal_direct/build_interp.sh ${bugname}
 clean_files += ${bugname}.build_interp_time
 
-${bugname}.build_fix_time: timing sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c summary_to_fix ${static_files} ${bugname}.summary.canon4 ./tests/minimal_direct/build_fix.sh
+${bugname}.build_fix_time: timing sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c s2f_driver ${static_files} ${bugname}.summary.canon4 ./tests/minimal_direct/build_fix.sh
 	./timing 10 ${bugname}.build_fix_time ./tests/minimal_direct/build_fix.sh ${bugname}
 clean_files += ${bugname}.build_fix_time
 EOF
