@@ -61,7 +61,7 @@ main(int argc, char *argv[])
 		SMScopes scopes;
 		VexPtr<CrashSummary, &ir_heap> summary(readBugReport(&scopes, summary_fname, &first_line));
 
-		fprintf(bubble_plot_log, "%f: start build enforcer\n", now());
+		fprintf(bubble_plot_log, "%f: start build enforcer %s\n", now(), summary_fname);
 		fprintf(bubble_plot_log, "%f: start canonicalise\n", now());
 		summary = optimise_crash_summary(summary, oracleI, ALLOW_GC);
 		summary = canonicalise_crash_summary(summary, oracleI,

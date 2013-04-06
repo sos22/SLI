@@ -650,6 +650,9 @@ enumHbOrderings(const reorder_bbdd *what,
 		const std::set<const IRExprHappensBefore *> &falseExprs,
 		std::set<expr_slice> &acc)
 {
+	if (TIMEOUT) {
+		return;
+	}
 	if (what->isLeaf || !what->cond.evaluatable) {
 		if (debug_expr_slice) {
 			printf("Found an HB ordering.  True: ");
