@@ -242,6 +242,7 @@ public:
 		res.rip = _rip;
 		res.checkForEntry = true;
 		res.locked = locked;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel rawDoneEntryCheck(unsigned long _rip, bool locked)
@@ -251,17 +252,20 @@ public:
 		res.rip = _rip;
 		res.checkForEntry = false;
 		res.locked = locked;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel compound(const std::set<entry> &_content, bool locked)
 	{
 		InstructionLabel res;
+		assert(!_content.empty());
 		res.flavour = fl_locked;
 		res.content = _content;
 		res.restoreRedzone = false;
 		res.checkForEntry = true;
 		res.locked = locked;
 		res.finishCallSequence = 0;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel compoundRestoreRedZone(const std::set<entry> &_content, bool locked)
@@ -272,6 +276,7 @@ public:
 		res.restoreRedzone = true;
 		res.checkForEntry = true;
 		res.locked = locked;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel compoundRestoreRedZoneSkipEntry(const std::set<entry> &_content, bool locked)
@@ -283,6 +288,7 @@ public:
 		res.checkForEntry = false;
 		res.locked = locked;
 		res.finishCallSequence = 0;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel compoundSkipEntry(const std::set<entry> &_content, bool locked)
@@ -294,6 +300,7 @@ public:
 		res.checkForEntry = false;
 		res.locked = locked;
 		res.finishCallSequence = 0;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel simple(const entry &_content, bool locked)
@@ -307,6 +314,7 @@ public:
 		InstructionLabel res = *this;
 		res.restoreRedzone = false;
 		res.clearName();
+		res.sanity_check();
 		return res;
 	}
 	InstructionLabel clearFinishCallSequence() const {
@@ -314,6 +322,7 @@ public:
 		res.finishCallSequence = false;
 		assert(!res.restoreRedzone);
 		res.clearName();
+		res.sanity_check();
 		return res;
 	}
 
@@ -321,15 +330,43 @@ public:
 		InstructionLabel res = *this;
 		res.locked = true;
 		res.clearName();
+		res.sanity_check();
 		return res;
 	}
 	InstructionLabel releasedLock() const {
 		InstructionLabel res = *this;
 		res.locked = false;
 		res.clearName();
+		res.sanity_check();
 		return res;
 	}
 
+	void sanity_check() const {
+#ifndef NDEBUG
+		switch (flavour) {
+		case fl_locked: {
+			assert(!content.empty());
+			auto it = content.begin();
+			const VexRip &vr1(it->node->rip);
+			for (it++; it != content.end(); it++) {
+				for (unsigned x = 0;
+				     x < vr1.stack.size() && x < it->node->rip.stack.size();
+				     x++) {
+					assert(vr1.stack[vr1.stack.size() - x - 1] ==
+					       it->node->rip.stack[it->node->rip.stack.size() - x - 1]);
+				}
+			}
+			return;
+		}
+		case fl_unlocked:
+			assert(rip != 0);
+			return;
+		case fl_bad:
+			abort();
+		}
+		abort();
+#endif
+	}
 	unsigned long getRip() const {
 		switch (flavour) {
 		case fl_locked: {
@@ -346,6 +383,20 @@ public:
 		}
 		case fl_unlocked:
 			return rip;
+		case fl_bad:
+			abort();
+		}
+		abort();
+	}
+	VexRip getVexRip() const {
+		sanity_check();
+		switch (flavour) {
+		case fl_locked: {
+			auto it = content.begin();
+			return it->node->rip;
+		}
+		case fl_unlocked:
+			return VexRip::invent_vex_rip(rip);
 		case fl_bad:
 			abort();
 		}
@@ -796,7 +847,7 @@ stackValidatedEntryPoints(Oracle *oracle,
 
 typedef std::map<SummaryId, std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > > summaryRootsT;
 static void
-findEntryLabels(unsigned long rip,
+findEntryLabels(const VexRip &rip,
 		std::set<InstructionLabel::entry> &entryPoints,
 		const summaryRootsT &summaryRoots)
 {
@@ -805,7 +856,24 @@ findEntryLabels(unsigned long rip,
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
 			unsigned thread = it2->first.thread;
 			const CFGNode *n = it2->first.node;
-			if (n->rip.unwrap_vexrip() == rip) {
+			bool accept = true;
+			const VexRip &otherRip(n->rip);
+			for (unsigned x = 0; x < otherRip.stack.size(); x++) {
+				if (x >= rip.stack.size()) {
+					/* Entire context matches,
+					 * have to do run-time
+					 * validation. */
+					break;
+				}
+				if (rip.stack[rip.stack.size() - x - 1] !=
+				    otherRip.stack[otherRip.stack.size() - x - 1]) {
+					/* Context mismatch -> no
+					 * run-time validation. */
+					accept = false;
+					break;
+				}
+			}
+			if (accept) {
 				entryPoints.insert(
 					InstructionLabel::entry(summary,
 								thread,
@@ -863,7 +931,7 @@ emitUnlockedInstruction(const InstructionLabel &rip,
 	if (rip.checkForEntry) {
 		/* Do we need to move to locked mode? */
 		std::set<InstructionLabel::entry> entries;
-		findEntryLabels(rip.getRip(), entries, summaryRoots);
+		findEntryLabels(rip.getVexRip(), entries, summaryRoots);
 		if (!entries.empty()) {
 			if (entries.size() == 1 &&
 			    entries.begin()->node->rip.stack.size() == 1) {
@@ -950,7 +1018,7 @@ emitUnlockedInstruction(const InstructionLabel &rip,
 static InstructionLabel
 succRipToLabel(unsigned long nextRip, const InstructionLabel &start)
 {
-	InstructionLabel nextLabel(InstructionLabel::compound(std::set<InstructionLabel::entry>(), start.locked));
+	std::set<InstructionLabel::entry> nextContent;
 	for (auto it = start.content.begin();
 	     it != start.content.end();
 	     it++) {
@@ -964,17 +1032,16 @@ succRipToLabel(unsigned long nextRip, const InstructionLabel &start)
 			if (potentialSuccessor->rip.unwrap_vexrip() != nextRip)
 				continue;
 			/* Take this successor */
-			nextLabel.content.insert(
+			nextContent.insert(
 				InstructionLabel::entry(
 					it->summary,
 					it->tid,
 					potentialSuccessor));
 		}
 	}
-	if (nextLabel.content.empty())
+	if (nextContent.empty())
 		return InstructionLabel::raw(nextRip, start.locked);
-	nextLabel.clearName();
-	return nextLabel;
+	return InstructionLabel::compound(nextContent, start.locked);
 }
 
 static Maybe<InstructionLabel>
@@ -985,9 +1052,6 @@ handleIndirectCall(patch &p,
 {
 	unsigned long rip = start.getRip();
 	unsigned long next_rip = rip + len;
-	InstructionLabel emptyLabel(InstructionLabel::compound(std::set<InstructionLabel::entry>(), start.locked));
-	emptyLabel.finishCallSequence = next_rip;
-	emptyLabel.clearName();
 
 	/* Where might we be going next? */
 	std::map<unsigned long, InstructionLabel> whereToNext;
@@ -1005,13 +1069,20 @@ handleIndirectCall(patch &p,
 			auto it3_did_insert = whereToNext.insert(
 				std::pair<unsigned long, InstructionLabel>(
 					rip,
-					emptyLabel));
-			InstructionLabel &nextLabel(it3_did_insert.first->second);
-			nextLabel.content.insert(
-				InstructionLabel::entry(
-					it->summary,
-					it->tid,
-					potentialSuccessor));
+					InstructionLabel()));
+			auto it3 = it3_did_insert.first;
+			auto did_insert = it3_did_insert.second;
+			InstructionLabel &nextLabel(it3->second);
+			InstructionLabel::entry nextEntry(it->summary, it->tid, potentialSuccessor);
+			if (did_insert) {
+				std::set<InstructionLabel::entry> nextContent;
+				nextContent.insert(nextEntry);
+				nextLabel = InstructionLabel::compound(nextContent, start.locked);
+				nextLabel.finishCallSequence = next_rip;
+			} else {
+				nextLabel.content.insert(nextEntry);
+				nextLabel.clearName();
+			}
 		}
 	}
 
@@ -1111,7 +1182,7 @@ handleReturnInstr(patch &p, const InstructionLabel &start)
 	   the control structure of the patch via implicit inlining.
 	   All we need to do is calculate the successor and adjust the
 	   stack. */
-	InstructionLabel nextLabel(InstructionLabel::compound(std::set<InstructionLabel::entry>(), start.locked));
+	std::set<InstructionLabel::entry> nextContent;
 	for (auto it = start.content.begin();
 	     it != start.content.end();
 	     it++) {
@@ -1122,15 +1193,13 @@ handleReturnInstr(patch &p, const InstructionLabel &start)
 			const CFGNode *potentialSuccessor = it2->instr;
 			if (!potentialSuccessor)
 				continue;
-			nextLabel.content.insert(
+			nextContent.insert(
 				InstructionLabel::entry(
 					it->summary,
 					it->tid,
 					potentialSuccessor));
 		}
 	}
-	nextLabel.clearName();
-	assert(!nextLabel.content.empty());
 	/* Restore stack pointer with an lea. */
 	p.content.push_back(0x48);
 	p.content.push_back(0x8d);
@@ -1138,7 +1207,7 @@ handleReturnInstr(patch &p, const InstructionLabel &start)
 	p.content.push_back(0x24);
 	p.content.push_back(0x08);
 	/* Go wherever we need to go next */
-	return Maybe<InstructionLabel>::just(nextLabel);
+	return Maybe<InstructionLabel>::just(InstructionLabel::compound(nextContent, start.locked));
 }
 
 static Maybe<InstructionLabel>
@@ -1179,7 +1248,7 @@ emitLockedInstruction(const InstructionLabel &start,
 	if (start.checkForEntry) {
 		/* Do we need to start any more CFG fragments? */
 		std::set<InstructionLabel::entry> entries;
-		findEntryLabels(rip, entries, summaryRoots);
+		findEntryLabels(start.getVexRip(), entries, summaryRoots);
 		if (!entries.empty()) {
 			InstructionLabel newStart(start);
 			if (entries.size() == 1 &&
