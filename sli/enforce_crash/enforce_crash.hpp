@@ -432,7 +432,6 @@ void enumerateNeededExpressions(const reorder_bbdd *e, std::set<input_expression
 void optimiseHBEdges(crashEnforcementData &ced);
 void optimiseStashPoints(crashEnforcementData &ced, Oracle *oracle);
 void optimiseCfg(crashEnforcementData &ced);
-void buildPatchStrategy(crashEnforcementData &ced, Oracle *oracle);
 crashEnforcementData enforceCrashForMachine(const SummaryId &summaryId,
 					    VexPtr<CrashSummary, &ir_heap> summary,
 					    VexPtr<Oracle> &oracle,

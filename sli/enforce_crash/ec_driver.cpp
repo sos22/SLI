@@ -1,6 +1,7 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 #include "timers.hpp"
+#include "patch_strategy.hpp"
 
 extern FILE *bubble_plot_log;
 
@@ -43,7 +44,8 @@ main(int argc, char *argv[])
 		accumulator |= acc;
 	}
 
-	buildPatchStrategy(accumulator, oracle);
+	buildPatchStrategy(accumulator.roots, accumulator.crashCfg, oracle,
+			   accumulator.patchPoints, accumulator.interpretInstrs);
 
 	FILE *f = fopen(argv[5], "w");
 	accumulator.prettyPrint(&scopes, f);

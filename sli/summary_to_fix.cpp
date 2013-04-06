@@ -19,6 +19,7 @@
 #include "offline_analysis.hpp"
 #include "visitor.hpp"
 #include "timers.hpp"
+#include "patch_strategy.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -1475,152 +1476,6 @@ findRelevantCfgs(MaiMap *mai,
 	}
 }
 
-struct patchStrategy {
-	std::set<unsigned long> MustInterpret;
-	std::set<unsigned long> Patch;
-	std::set<unsigned long> Cont;
-	unsigned size() const {
-		return MustInterpret.size() + Cont.size();
-	}
-	bool operator<(const patchStrategy &o) const {
-		return size() > o.size();
-	}
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "MI: {");
-		for (auto it = MustInterpret.begin(); it != MustInterpret.end(); it++) {
-			if (it != MustInterpret.begin())
-				fprintf(f, ",");
-			fprintf(f, "0x%lx", *it);
-		}
-		fprintf(f, "}; P {");
-		for (auto it = Patch.begin(); it != Patch.end(); it++) {
-			if (it != Patch.begin())
-				fprintf(f, ",");
-			fprintf(f, "0x%lx", *it);
-		}
-		fprintf(f, "}; C {");
-		for (auto it = Cont.begin(); it != Cont.end(); it++) {
-			if (it != Cont.begin())
-				fprintf(f, ",");
-			fprintf(f, "0x%lx", *it);
-		}
-		fprintf(f, "}\n");
-	}
-};
-
-static bool
-patchSearch(Oracle *oracle,
-	    const patchStrategy &input,
-	    std::priority_queue<patchStrategy> &thingsToTry)
-{
-	if (input.MustInterpret.empty())
-		return true;
-
-	input.prettyPrint(stdout);
-	unsigned long needed = *input.MustInterpret.begin();
-
-	printf("\tLook at %lx\n", needed);
-	patchStrategy c(input);
-	/* @needed is definitely going to be interpreted after
-	 * this. */
-	c.Cont.insert(needed);
-	c.MustInterpret.erase(needed);
-
-	/* Decide which maneuver to use here.  We need to either patch
-	   @needed itself or bring all of its predecessors into the
-	   patch. */
-
-	/* Figure out which instructions might get clobbered by the
-	 * patch */
-	std::set<unsigned long> clobbered_by_patch;
-	unsigned offset = 0;
-	offset += getInstructionSize(oracle->ms->addressSpace, StaticRip(needed));
-	while (offset < 5) {
-		clobbered_by_patch.insert(needed + offset);
-		offset += getInstructionSize(oracle->ms->addressSpace, StaticRip(needed + offset));
-	}
-
-	/* Can't use patch if that would clobber an external. */
-	bool can_use_patch = true;
-	for (auto it = clobbered_by_patch.begin(); can_use_patch && it != clobbered_by_patch.end(); it++) {
-		if (oracle->isFunctionHead(StaticRip(*it)))
-			can_use_patch = false;
-	}
-	/* Can't use patch if that would clobber/be clobbered by an
-	   existing patch point. */
-	for (auto it = input.Patch.begin(); can_use_patch && it != input.Patch.end(); it++) {
-		if (needed > *it - 5 && needed < *it + 5)
-			can_use_patch = false;
-	}
-
-	if (can_use_patch) {
-		/* Try using a patch. */
-		patchStrategy patched(c);
-		patched.Patch.insert(needed);
-		for (auto it = clobbered_by_patch.begin();
-		     it != clobbered_by_patch.end();
-		     it++) {
-			std::set<unsigned long> predecessors;
-			oracle->findPredecessors(*it, predecessors);
-			for (unsigned long y = needed; y < *it; y++)
-				predecessors.erase(y);
-			patched.Cont.insert(*it);
-			patched.MustInterpret.erase(*it);
-			patched.MustInterpret.insert(predecessors.begin(), predecessors.end());
-		}
-		thingsToTry.push(patched);
-		printf("Patch to: ");
-		patched.prettyPrint(stdout);
-	}
-
-	/* Try expanding to predecessors. */
-	std::set<unsigned long> predecessors;
-	oracle->findPredecessors(needed, predecessors);
-	c.MustInterpret.insert(predecessors.begin(), predecessors.end());
-	thingsToTry.push(c);
-	printf("Unpatched: ");
-	c.prettyPrint(stdout);
-	return false;
-}
-
-static void
-buildPatchStrategy(Oracle *oracle,
-		   crashEnforcementRoots &roots,
-		   CrashCfg &cfg,
-		   std::set<unsigned long> &patchPoints,
-		   std::set<unsigned long> &clobbered)
-{
-	patchStrategy initPs;
-
-	for (auto it = roots.begin(); !it.finished(); it.advance()) {
-		Instruction<ThreadCfgLabel> *instr = cfg.findInstr(it.threadCfgLabel());
-		assert(instr);
-		const AbstractThread &absThread(instr->rip.thread);
-		ConcreteThread concThread(roots.lookupAbsThread(absThread));
-		ConcreteCfgLabel concCfgLabel(concThread.summary(), instr->rip.label);
-		const VexRip &vr(cfg.labelToRip(concCfgLabel));
-
-		unsigned long r = vr.unwrap_vexrip();
-		initPs.MustInterpret.insert(r);
-	}
-
-	std::priority_queue<patchStrategy> pses;
-	pses.push(initPs);
-	while (!pses.empty()) {
-		patchStrategy next(pses.top());
-		pses.pop();
-		if (patchSearch(oracle, next, pses)) {
-			/* We have a solution. */
-			printf("Patch solution:\n");
-			next.prettyPrint(stdout);
-			patchPoints = next.Patch;
-			clobbered = next.Cont;
-			return;
-		}
-	}
-	errx(1, "Cannot solve patch problem");
-}
-
 char *
 buildPatchForCrashSummary(FILE *log,
 			  Oracle *oracle,
@@ -1673,7 +1528,7 @@ buildPatchForCrashSummary(FILE *log,
 			fprintf(log, "%f: protect %zd instructions\n", now(), cfg.size());
 			fprintf(log, "%f: start build stratgy\n", now());
 		}
-		buildPatchStrategy(oracle, cer, cfg, patchPoints, clobbered);
+		buildPatchStrategy(cer, cfg, oracle, patchPoints, clobbered);
 		if (log) {
 			fprintf(log, "%f: stop build stratgy\n", now());
 		}

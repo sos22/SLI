@@ -7,6 +7,7 @@
 #include "canon.hpp"
 #include "timers.hpp"
 #include "allowable_optimisations.hpp"
+#include "patch_strategy.hpp"
 
 extern FILE *bubble_plot_log;
 
@@ -95,7 +96,8 @@ main(int argc, char *argv[])
 			TimeoutTimer tmr;
 			tmr.timeoutAfterSeconds(60);
 			printf("Build patch strategy for %s\n", summary_fname);
-			buildPatchStrategy(acc, oracle);
+			buildPatchStrategy(acc.roots, acc.crashCfg, oracle,
+					   acc.patchPoints, acc.interpretInstrs);
 			tmr.cancel();
 			fprintf(bubble_plot_log, "%f: stop build strategy\n", now());		
 			if (TIMEOUT) {
