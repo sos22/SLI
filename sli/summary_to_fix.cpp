@@ -1597,6 +1597,7 @@ writePatchToFile(const char *output_fname,
 	fprintf(output,
 		"/* Compile as gcc -Wall -g -shared -fPIC -Isli %s -o %s.so */\n",
 		output_fname, binary);
+#if 0
 	fprintf(output, "/* Crash summaries:\n");
 	for (auto it = summaries.begin(); it != summaries.end(); it++) {
 		fprintf(output, "  Summary %s:\n", it->first.name());
@@ -1604,6 +1605,7 @@ writePatchToFile(const char *output_fname,
 		fprintf(output, "\n\n\n");
 	}
 	fprintf(output, "*/\n");
+#endif
 	fprintf(output, "#define BINARY_PATCH_FOR \"%s\"\n",
 		basename(binary));
 	fprintf(output, "#include \"patch_head.h\"\n\n");
