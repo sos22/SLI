@@ -17,6 +17,7 @@
 #include "inferred_information.hpp"
 #include "offline_analysis.hpp"
 #include "allowable_optimisations.hpp"
+#include "timers.hpp"
 
 static VexRip
 getThreadRip(Oracle *oracle, unsigned long rip, unsigned long rsp)
@@ -114,9 +115,10 @@ main(int argc, char *argv[])
 					 ALLOW_GC);
 
 	DumpFix df(argv[5], DynAnalysisRip(vr));
+	TimeoutTimer ignTimer;
 	diagnoseCrash(&scopes, allocLabel, DynAnalysisRip(vr),
 		      probeMachine, oracle, df,
-		      opt, mai, ALLOW_GC);
+		      opt, mai, ignTimer, ALLOW_GC);
 
 	return 0;
 }
