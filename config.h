@@ -88,25 +88,14 @@
 #endif
 
 
-/* Timeouts: */
-#ifndef TIMEOUT_BUILD_PROBE_MACHINE1
-#define TIMEOUT_BUILD_PROBE_MACHINE1 60
+/* How long do we have to do the per-crashing-thread bits, in seconds? */
+#ifndef CONFIG_TIMEOUT1
+#define CONFIG_TIMEOUT1 60
 #endif
-#ifndef TIMEOUT_BUILD_PROBE_MACHINE2
-#define TIMEOUT_BUILD_PROBE_MACHINE2 60
+#ifndef CONFIG_TIMEOUT2
+#define CONFIG_TIMEOUT2 60
 #endif
-#ifndef TIMEOUT_BUILD_STORE_CFGS1
-#define TIMEOUT_BUILD_STORE_CFGS1 60
-#endif
-#ifndef TIMEOUT_BUILD_STORE_CFGS2
-#define TIMEOUT_BUILD_STORE_CFGS2 60
-#endif
-#ifndef TIMEOUT_BUILD_STORE_MACHINE
-#define TIMEOUT_BUILD_STORE_MACHINE 30
-#endif
-#ifndef TIMEOUT_CHECK_STORE_MACHINE
-#define TIMEOUT_CHECK_STORE_MACHINE 60
-#endif
+
 #ifndef TIMEOUT_EC_STRATEGY
 #define TIMEOUT_EC_STRATEGY 60
 #endif
