@@ -783,7 +783,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	std::set<expr_slice> sliced_by_hb;
 	{
 		TimeoutTimer tmr;
-		tmr.timeoutAfterSeconds(60);
+		tmr.timeoutAfterSeconds(TIMEOUT_EC_SLICE_HB);
 		slice_by_hb(requirement, sliced_by_hb);
 		tmr.cancel();
 	}

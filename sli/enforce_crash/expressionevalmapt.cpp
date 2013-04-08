@@ -923,7 +923,7 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	}
 
 	TimeoutTimer tmr;
-	tmr.timeoutAfterSeconds(60);
+	tmr.timeoutAfterSeconds(TIMEOUT_EC_PLACE);
 
 	fprintf(bubble_plot_log, "%f: start place side conditions\n", now());
 	std::set<instr_t> deadStates;

@@ -57,6 +57,11 @@ main(int argc, char *argv[])
 		if (!strcmp(".", de->d_name) || !strcmp("..", de->d_name)) {
 			continue;
 		}
+
+		if (run_in_child(bubble_plot_log, ALLOW_GC)) {
+			continue;
+		}
+
 		const char *summary_fname = my_asprintf("%s/%s", summarydir, de->d_name);
 		char *first_line;
 		SMScopes scopes;
@@ -78,13 +83,6 @@ main(int argc, char *argv[])
 		crashEnforcementData acc = enforceCrashForMachine(SummaryId(1), summary,
 								  oracle, abs, next_hb_id);
 
-		if (TIMEOUT) {
-			fprintf(bubble_plot_log, "%f: stop build enforcer\n", now());
-			_timed_out = false;
-			free((void *)summary_fname);
-			continue;
-		}
-
 		fprintf(bubble_plot_log, "%f: start simplify plan\n", now());		
 		optimiseHBEdges(acc);
 		optimiseStashPoints(acc, oracle);
@@ -94,19 +92,12 @@ main(int argc, char *argv[])
 		{
 			fprintf(bubble_plot_log, "%f: start build strategy\n", now());		
 			TimeoutTimer tmr;
-			tmr.timeoutAfterSeconds(60);
+			tmr.timeoutAfterSeconds(TIMEOUT_EC_STRATEGY);
 			printf("Build patch strategy for %s\n", summary_fname);
 			buildPatchStrategy(acc.roots, acc.crashCfg, oracle,
 					   acc.patchPoints, acc.interpretInstrs);
 			tmr.cancel();
 			fprintf(bubble_plot_log, "%f: stop build strategy\n", now());		
-			if (TIMEOUT) {
-				fprintf(bubble_plot_log, "%f: failed build strategy\n", now());
-				fprintf(bubble_plot_log, "%f: stop build enforcer\n", now());
-				_timed_out = false;
-				free((void *)summary_fname);
-				continue;
-			}
 		}
 
 		fprintf(bubble_plot_log, "%f: start compile\n", now());		
@@ -123,6 +114,8 @@ main(int argc, char *argv[])
 		free((void *)summary_fname);
 		unlink("temp.cep.c");
 		unlink("temp.interp.so");
+
+		exit(0);
 	}
 
 	return 0;

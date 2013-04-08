@@ -130,55 +130,7 @@ public:
 	}
 };
 
-/* Set by the SIGALRM (or whatever) signal handler when it wants us to
-   finish what we're doing and get out quickly. */
-extern volatile bool _timed_out;
-extern bool timeout_means_death;
-
-extern FILE *_logfile;
-class __timer_message_filter {
-	static __timer_message_filter *head;
-	__timer_message_filter *next;
-	int cntr;
-	bool registered;
-public:
-	bool operator()() {
-		if (!registered) {
-			/* Do this here rather than in the constructor
-			   so as to avoid acquiring static
-			   initialisation lock on every timeout
-			   check. */
-			next = head;
-			head = this;
-			registered = true;
-		}
-		if (cntr > 10)
-			return false;
-		if (cntr == 10)
-			fprintf(_logfile, "suppress further messages: ");
-		cntr++;
-		return true;
-	}
-	static void reset() {
-		for (auto it = head; it; it = it->next)
-			it->cntr = 0;
-	}
-};
-#define TIMEOUT								\
-	({								\
-		static __timer_message_filter filter;			\
-		if (_timed_out) {					\
-			if (timeout_means_death) {			\
-				errx(2, "%s timed out at %s:%d\n",	\
-				     __func__, __FILE__, __LINE__);	\
-			} else if (filter()) {				\
-				fprintf(_logfile,			\
-					"%s timed out at %s:%d\n",	\
-					__func__, __FILE__, __LINE__);	\
-			}						\
-		}							\
-		_timed_out;						\
-	})
+#define TIMEOUT false
 
 class threadAndRegister : public Named {
 	std::pair<unsigned, int> content;
@@ -2697,6 +2649,8 @@ extern Bool isPlausibleIRType ( IRType ty );
 bool parseThreadAndRegister(threadAndRegister *out, const char *str, const char **suffix);
 
 bool operationAssociates(IROp op);
+
+extern FILE *_logfile;
 
 #endif /* ndef __LIBVEX_IR_H */
 

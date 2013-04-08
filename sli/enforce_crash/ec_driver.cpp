@@ -23,10 +23,8 @@ main(int argc, char *argv[])
 
 	bubble_plot_log = fopen("ec_driver_bubbles.log", "w");
 
-	timeout_means_death = true;
-
 	TimeoutTimer tt;
-	tt.timeoutAfterSeconds(60);
+	tt.timeoutAfterSeconds(TIMEOUT_EC_DRIVER);
 	for (int i = 6; i < argc; i++) {
 		CrashSummary *summary;
 

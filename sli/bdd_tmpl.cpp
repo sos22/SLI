@@ -502,12 +502,9 @@ dereferences(IRExpr *expr, const IRExpr *addr)
 template <typename t> void
 bdd_scope<t>::checkInternSize() const
 {
-	if (intern.size() >= 10000000) {
-		fprintf(_logfile, "%s forcing a timeout\n", __PRETTY_FUNCTION__);
-		_timed_out = true;
-	} else if (intern.size() >= 1000000) {
+	if (intern.size() >= 1000000) {
 		LibVEX_request_GC();
-	} 
+	}
 }
 
 template <typename t> void
@@ -1334,15 +1331,6 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 
 	while (!relocs.empty()) {
 		if (TIMEOUT) {
-			stackedCdf::stopBDD();
-			return NULL;
-		}
-
-		/* Somewhat arbitrary limit to avoid running out of
-		 * memory. */
-		if (relocs.size() >= 10000000) {
-			warning("Hit arbitrary limit in %s, forcing it to fail!\n", __func__);
-			_timed_out = true;
 			stackedCdf::stopBDD();
 			return NULL;
 		}

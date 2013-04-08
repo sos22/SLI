@@ -92,7 +92,7 @@ StateMachine *buildProbeMachine(SMScopes *scopes,
 				const AllowableOptimisations &opt,
 				VexPtr<MaiMap, &ir_heap> &mai,
 				GarbageCollectionToken token);
-bool diagnoseCrash(SMScopes *scopes,
+void diagnoseCrash(SMScopes *scopes,
 		   CfgLabelAllocator &allocLabel,
 		   const DynAnalysisRip &,
 		   VexPtr<StateMachine, &ir_heap> probeMachine,

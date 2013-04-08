@@ -1,6 +1,8 @@
 #ifndef TIMERS_HPP__
 #define TIMERS_HPP__
 
+#include <unistd.h>
+
 class TimerSet;
 
 double now();
@@ -23,11 +25,10 @@ public:
 
 void initialise_timers();
 
-extern volatile bool _timed_out;
 class TimeoutTimer : public Timer {
 public:
 	void fired() {
-		_timed_out = true;
+		_exit(1);
 	}
 	void timeoutAfterSeconds(double seconds) {
 		nextDue = now() + seconds;

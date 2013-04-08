@@ -219,13 +219,8 @@ start()
 }
 
 void
-stop(bool timed_out)
+stop(void)
 {
-	if (timed_out) {
-		transfer_to_cache(currentNode, true);
-		currentNode = NULL;
-		return;
-	}
 	static int cntr;
 
 	node *root = currentNode;
