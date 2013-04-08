@@ -18,6 +18,8 @@
 #include "crashcfg.hpp"
 #include "offline_analysis.hpp"
 #include "visitor.hpp"
+#include "timers.hpp"
+#include "patch_strategy.hpp"
 
 #include "cfgnode_tmpl.cpp"
 
@@ -241,6 +243,7 @@ public:
 		res.rip = _rip;
 		res.checkForEntry = true;
 		res.locked = locked;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel rawDoneEntryCheck(unsigned long _rip, bool locked)
@@ -250,17 +253,20 @@ public:
 		res.rip = _rip;
 		res.checkForEntry = false;
 		res.locked = locked;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel compound(const std::set<entry> &_content, bool locked)
 	{
 		InstructionLabel res;
+		assert(!_content.empty());
 		res.flavour = fl_locked;
 		res.content = _content;
 		res.restoreRedzone = false;
 		res.checkForEntry = true;
 		res.locked = locked;
 		res.finishCallSequence = 0;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel compoundRestoreRedZone(const std::set<entry> &_content, bool locked)
@@ -271,6 +277,7 @@ public:
 		res.restoreRedzone = true;
 		res.checkForEntry = true;
 		res.locked = locked;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel compoundRestoreRedZoneSkipEntry(const std::set<entry> &_content, bool locked)
@@ -282,6 +289,7 @@ public:
 		res.checkForEntry = false;
 		res.locked = locked;
 		res.finishCallSequence = 0;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel compoundSkipEntry(const std::set<entry> &_content, bool locked)
@@ -293,6 +301,7 @@ public:
 		res.checkForEntry = false;
 		res.locked = locked;
 		res.finishCallSequence = 0;
+		res.sanity_check();
 		return res;
 	}
 	static InstructionLabel simple(const entry &_content, bool locked)
@@ -306,6 +315,7 @@ public:
 		InstructionLabel res = *this;
 		res.restoreRedzone = false;
 		res.clearName();
+		res.sanity_check();
 		return res;
 	}
 	InstructionLabel clearFinishCallSequence() const {
@@ -313,6 +323,7 @@ public:
 		res.finishCallSequence = false;
 		assert(!res.restoreRedzone);
 		res.clearName();
+		res.sanity_check();
 		return res;
 	}
 
@@ -320,15 +331,43 @@ public:
 		InstructionLabel res = *this;
 		res.locked = true;
 		res.clearName();
+		res.sanity_check();
 		return res;
 	}
 	InstructionLabel releasedLock() const {
 		InstructionLabel res = *this;
 		res.locked = false;
 		res.clearName();
+		res.sanity_check();
 		return res;
 	}
 
+	void sanity_check() const {
+#ifndef NDEBUG
+		switch (flavour) {
+		case fl_locked: {
+			assert(!content.empty());
+			auto it = content.begin();
+			const VexRip &vr1(it->node->rip);
+			for (it++; it != content.end(); it++) {
+				for (unsigned x = 0;
+				     x < vr1.stack.size() && x < it->node->rip.stack.size();
+				     x++) {
+					assert(vr1.stack[vr1.stack.size() - x - 1] ==
+					       it->node->rip.stack[it->node->rip.stack.size() - x - 1]);
+				}
+			}
+			return;
+		}
+		case fl_unlocked:
+			assert(rip != 0);
+			return;
+		case fl_bad:
+			abort();
+		}
+		abort();
+#endif
+	}
 	unsigned long getRip() const {
 		switch (flavour) {
 		case fl_locked: {
@@ -345,6 +384,20 @@ public:
 		}
 		case fl_unlocked:
 			return rip;
+		case fl_bad:
+			abort();
+		}
+		abort();
+	}
+	VexRip getVexRip() const {
+		sanity_check();
+		switch (flavour) {
+		case fl_locked: {
+			auto it = content.begin();
+			return it->node->rip;
+		}
+		case fl_unlocked:
+			return VexRip::invent_vex_rip(rip);
 		case fl_bad:
 			abort();
 		}
@@ -378,7 +431,7 @@ public:
 			if (restoreRedzone < o.restoreRedzone)
 				return true;
 			if (restoreRedzone > o.restoreRedzone)
-				return true;
+				return false;
 			return finishCallSequence < o.finishCallSequence;
 		case fl_unlocked:
 			return rip < o.rip;
@@ -420,11 +473,19 @@ public:
 	std::vector<trans_table_entry> transTable;
 	std::vector<Relocation *> relocs;
 	std::vector<LateRelocation *> lateRelocs;
+
+	unsigned nr_instrs;
+	unsigned nr_locks;
+	unsigned nr_unlocks;
+	patch()
+		: nr_instrs(0), nr_locks(0), nr_unlocks(0)
+	{}
 };
 
 static void
 exitRedZone(patch &p)
 {
+	p.nr_instrs++;
 	p.content.push_back(0x48);
 	p.content.push_back(0x8d);
 	p.content.push_back(0x64);
@@ -434,6 +495,7 @@ exitRedZone(patch &p)
 static void
 restoreRedZone(patch &p)
 {
+	p.nr_instrs++;
 	p.content.push_back(0x48);
 	p.content.push_back(0x8d);
 	p.content.push_back(0xa4);
@@ -447,6 +509,7 @@ restoreRedZone(patch &p)
 static void
 emitBranchToHost(patch &p, unsigned long rip)
 {
+	p.nr_instrs++;
 	p.content.push_back(0xe9);
 	p.content.push_back(0);
 	p.content.push_back(0);
@@ -481,7 +544,7 @@ public:
 	stack_context stripOne() const {
 		assert(!context.empty());
 		stack_context res(*this);
-		res.context.pop_back();
+		res.context.erase(res.context.begin());
 		res.clearName();
 		return res;
 	}
@@ -518,6 +581,7 @@ static void
 emitInternalJump(patch &p, unsigned to)
 {
 	long delta = to - p.content.size();
+	p.nr_instrs++;
 	/* Try with an 8-bit jump */
 	if (delta >= -126 && delta < 130) {
 		p.content.push_back(0xeb);
@@ -536,6 +600,7 @@ emitInternalJump(patch &p, unsigned to)
 static void
 emitInternalJump(patch &p, const InstructionLabel &to)
 {
+	p.nr_instrs++;
 	if (p.offsets.count(to)) {
 		emitInternalJump(p, p.offsets[to]);
 	} else {
@@ -671,6 +736,7 @@ emitValidater(patch &p,
 			abort();
 		}
 		/* cmpq imm32, offset(%rsp) */
+		p.nr_instrs++;
 		p.content.push_back(0x48);
 		p.content.push_back(0x81);
 		p.content.push_back(0xbc);
@@ -684,6 +750,7 @@ emitValidater(patch &p,
 		p.content.push_back(expected >> 16);
 		p.content.push_back(expected >> 24);
 		/* je rel32 */
+		p.nr_instrs++;
 		p.content.push_back(0x0f);
 		p.content.push_back(0x84);
 		p.content.push_back(1);
@@ -713,16 +780,10 @@ emitValidater(patch &p,
 	/* Don't have anything -> get out */
 
 	/* popf */
+	p.nr_instrs++;
 	p.content.push_back(0x9d);
-	/* Restore red zone */
-	p.content.push_back(0x48);
-	p.content.push_back(0x8d);
-	p.content.push_back(0xa4);
-	p.content.push_back(0x24);
-	p.content.push_back(0x80);
-	p.content.push_back(0x00);
-	p.content.push_back(0x00);
-	p.content.push_back(0x00);
+
+	restoreRedZone(p);
 
 	ctxt.flush(p);
 	if (!ctxt.pending.empty()) {
@@ -766,7 +827,9 @@ stackValidatedEntryPoints(Oracle *oracle,
 
 	/* Get out of the red zone. */
 	exitRedZone(p);
+
 	/* pushf */
+	p.nr_instrs++;
 	p.content.push_back(0x9c);
 
 	validation_machine validater;
@@ -795,7 +858,7 @@ stackValidatedEntryPoints(Oracle *oracle,
 
 typedef std::map<SummaryId, std::vector<std::pair<StateMachine::entry_point, StateMachine::entry_point_ctxt> > > summaryRootsT;
 static void
-findEntryLabels(unsigned long rip,
+findEntryLabels(const VexRip &rip,
 		std::set<InstructionLabel::entry> &entryPoints,
 		const summaryRootsT &summaryRoots)
 {
@@ -804,7 +867,24 @@ findEntryLabels(unsigned long rip,
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
 			unsigned thread = it2->first.thread;
 			const CFGNode *n = it2->first.node;
-			if (n->rip.unwrap_vexrip() == rip) {
+			bool accept = true;
+			const VexRip &otherRip(n->rip);
+			for (unsigned x = 0; x < otherRip.stack.size(); x++) {
+				if (x >= rip.stack.size()) {
+					/* Entire context matches,
+					 * have to do run-time
+					 * validation. */
+					break;
+				}
+				if (rip.stack[rip.stack.size() - x - 1] !=
+				    otherRip.stack[otherRip.stack.size() - x - 1]) {
+					/* Context mismatch -> no
+					 * run-time validation. */
+					accept = false;
+					break;
+				}
+			}
+			if (accept) {
 				entryPoints.insert(
 					InstructionLabel::entry(summary,
 								thread,
@@ -839,6 +919,8 @@ emitCallSequence(patch &p, const char *target)
 	     cursor++)
 		p.content.push_back(*cursor);
 
+	p.nr_instrs += 6;
+
 	p.lateRelocs.push_back(
 		new LateRelocation(
 			start_sz + __call_sequence_template_load_rsi - __call_sequence_template_start + 2,
@@ -857,12 +939,13 @@ emitUnlockedInstruction(const InstructionLabel &rip,
 {
 	if (rip.locked) {
 		emitCallSequence(p, "(unsigned long)release_lock");
+		p.nr_unlocks++;
 		return Maybe<InstructionLabel>::just(rip.releasedLock());
 	}
 	if (rip.checkForEntry) {
 		/* Do we need to move to locked mode? */
 		std::set<InstructionLabel::entry> entries;
-		findEntryLabels(rip.getRip(), entries, summaryRoots);
+		findEntryLabels(rip.getVexRip(), entries, summaryRoots);
 		if (!entries.empty()) {
 			if (entries.size() == 1 &&
 			    entries.begin()->node->rip.stack.size() == 1) {
@@ -931,6 +1014,8 @@ emitUnlockedInstruction(const InstructionLabel &rip,
 	for (unsigned x = 0; x < newInstr->len; x++)
 		p.content.push_back(newInstr->content[x]);
 
+	p.nr_instrs ++;
+
 	/* Figure out whether we have a fall-through successor.
 	   Assuming we have a fallthrough when we don't is safe but
 	   inefficient; assuming we don't have one when we do is
@@ -949,7 +1034,7 @@ emitUnlockedInstruction(const InstructionLabel &rip,
 static InstructionLabel
 succRipToLabel(unsigned long nextRip, const InstructionLabel &start)
 {
-	InstructionLabel nextLabel(InstructionLabel::compound(std::set<InstructionLabel::entry>(), start.locked));
+	std::set<InstructionLabel::entry> nextContent;
 	for (auto it = start.content.begin();
 	     it != start.content.end();
 	     it++) {
@@ -963,17 +1048,16 @@ succRipToLabel(unsigned long nextRip, const InstructionLabel &start)
 			if (potentialSuccessor->rip.unwrap_vexrip() != nextRip)
 				continue;
 			/* Take this successor */
-			nextLabel.content.insert(
+			nextContent.insert(
 				InstructionLabel::entry(
 					it->summary,
 					it->tid,
 					potentialSuccessor));
 		}
 	}
-	if (nextLabel.content.empty())
+	if (nextContent.empty())
 		return InstructionLabel::raw(nextRip, start.locked);
-	nextLabel.clearName();
-	return nextLabel;
+	return InstructionLabel::compound(nextContent, start.locked);
 }
 
 static Maybe<InstructionLabel>
@@ -984,9 +1068,6 @@ handleIndirectCall(patch &p,
 {
 	unsigned long rip = start.getRip();
 	unsigned long next_rip = rip + len;
-	InstructionLabel emptyLabel(InstructionLabel::compound(std::set<InstructionLabel::entry>(), start.locked));
-	emptyLabel.finishCallSequence = next_rip;
-	emptyLabel.clearName();
 
 	/* Where might we be going next? */
 	std::map<unsigned long, InstructionLabel> whereToNext;
@@ -1004,18 +1085,27 @@ handleIndirectCall(patch &p,
 			auto it3_did_insert = whereToNext.insert(
 				std::pair<unsigned long, InstructionLabel>(
 					rip,
-					emptyLabel));
-			InstructionLabel &nextLabel(it3_did_insert.first->second);
-			nextLabel.content.insert(
-				InstructionLabel::entry(
-					it->summary,
-					it->tid,
-					potentialSuccessor));
+					InstructionLabel()));
+			auto it3 = it3_did_insert.first;
+			auto did_insert = it3_did_insert.second;
+			InstructionLabel &nextLabel(it3->second);
+			InstructionLabel::entry nextEntry(it->summary, it->tid, potentialSuccessor);
+			if (did_insert) {
+				std::set<InstructionLabel::entry> nextContent;
+				nextContent.insert(nextEntry);
+				nextLabel = InstructionLabel::compound(nextContent, start.locked);
+				nextLabel.finishCallSequence = next_rip;
+			} else {
+				nextLabel.content.insert(nextEntry);
+				nextLabel.clearName();
+			}
 		}
 	}
 
 	exitRedZone(p);
+	p.nr_instrs ++;
 	p.content.push_back(0x57); /* push rdi */
+	p.nr_instrs ++;
 	p.content.push_back(0x9c); /* pushf */
 
 	/* The instruction is call modrm.  We want to turn it into mov
@@ -1039,10 +1129,13 @@ handleIndirectCall(patch &p,
 	for (unsigned i = skip + 2; i < instr->len; i++)
 		p.content.push_back(instr->content[i]);
 
+	p.nr_instrs ++;
+
 	/* Now emit the validation stuff */
 	for (auto it = whereToNext.begin(); it != whereToNext.end(); it++) {
 		assert(it->first < 0x100000000ul);
 		/* cmpq $imm32, %rdi */
+		p.nr_instrs ++;
 		p.content.push_back(0x48);
 		p.content.push_back(0x81);
 		p.content.push_back(0xff);
@@ -1051,6 +1144,7 @@ handleIndirectCall(patch &p,
 		p.content.push_back(it->first >> 16);
 		p.content.push_back(it->first >> 32);
 		/* je rel32 */
+		p.nr_instrs ++;
 		p.content.push_back(0x0f);
 		p.content.push_back(0x84);
 		p.content.push_back(1);
@@ -1072,6 +1166,7 @@ handleIndirectCall(patch &p,
 		emitCallSequence(p, "(unsigned long)release_lock");
 	/* movq imm32, 0x88(%rsp) -- save the return address */
 	assert(next_rip <= 0x100000000ul);
+	p.nr_instrs ++;
 	p.content.push_back(0x48);
 	p.content.push_back(0xc7);
 	p.content.push_back(0x84);
@@ -1085,8 +1180,10 @@ handleIndirectCall(patch &p,
 	p.content.push_back(next_rip >> 16);
 	p.content.push_back(next_rip >> 24);
 	/* popf */
+	p.nr_instrs ++;
 	p.content.push_back(0x9d);
 	/* xchg %rdi, (%rsp) -- restores rdi and pushes the address we want to go to next. */
+	p.nr_instrs ++;
 	p.content.push_back(0x48);
 	p.content.push_back(0x87);
 	p.content.push_back(0x3c);
@@ -1095,6 +1192,7 @@ handleIndirectCall(patch &p,
 	   the whole thing, because the return address of the function
 	   we're calling is effectively the first 8 bytes of the
 	   redzone. */
+	p.nr_instrs ++;
 	p.content.push_back(0xc2);
 	p.content.push_back(0x78);
 	p.content.push_back(0x00);
@@ -1110,7 +1208,7 @@ handleReturnInstr(patch &p, const InstructionLabel &start)
 	   the control structure of the patch via implicit inlining.
 	   All we need to do is calculate the successor and adjust the
 	   stack. */
-	InstructionLabel nextLabel(InstructionLabel::compound(std::set<InstructionLabel::entry>(), start.locked));
+	std::set<InstructionLabel::entry> nextContent;
 	for (auto it = start.content.begin();
 	     it != start.content.end();
 	     it++) {
@@ -1121,23 +1219,22 @@ handleReturnInstr(patch &p, const InstructionLabel &start)
 			const CFGNode *potentialSuccessor = it2->instr;
 			if (!potentialSuccessor)
 				continue;
-			nextLabel.content.insert(
+			nextContent.insert(
 				InstructionLabel::entry(
 					it->summary,
 					it->tid,
 					potentialSuccessor));
 		}
 	}
-	nextLabel.clearName();
-	assert(!nextLabel.content.empty());
 	/* Restore stack pointer with an lea. */
+	p.nr_instrs ++;
 	p.content.push_back(0x48);
 	p.content.push_back(0x8d);
 	p.content.push_back(0x64);
 	p.content.push_back(0x24);
 	p.content.push_back(0x08);
 	/* Go wherever we need to go next */
-	return Maybe<InstructionLabel>::just(nextLabel);
+	return Maybe<InstructionLabel>::just(InstructionLabel::compound(nextContent, start.locked));
 }
 
 static Maybe<InstructionLabel>
@@ -1150,13 +1247,16 @@ emitLockedInstruction(const InstructionLabel &start,
 
 	if (start.finishCallSequence) {
 		/* popf */
+		p.nr_instrs ++;
 		p.content.push_back(0x9d);
 		/* pop rdi */
+		p.nr_instrs ++;
 		p.content.push_back(0x5f);
 		/* restore red zone */
 		restoreRedZone(p);
 		/* pushq $imm64 */
 		assert(start.finishCallSequence < 0x100000000ul);
+		p.nr_instrs ++;
 		p.content.push_back(0x68);
 		p.content.push_back(start.finishCallSequence);
 		p.content.push_back(start.finishCallSequence >> 8);
@@ -1166,6 +1266,7 @@ emitLockedInstruction(const InstructionLabel &start,
 	}
 	if (start.restoreRedzone) {
 		/* popf */
+		p.nr_instrs ++;
 		p.content.push_back(0x9d);
 		restoreRedZone(p);
 		return Maybe<InstructionLabel>::just(start.clearRestoreRedZone());
@@ -1173,12 +1274,13 @@ emitLockedInstruction(const InstructionLabel &start,
 
 	if (!start.locked) {
 		emitCallSequence(p, "(unsigned long)acquire_lock");
+		p.nr_locks++;
 		return Maybe<InstructionLabel>::just(start.acquiredLock());
 	}
 	if (start.checkForEntry) {
 		/* Do we need to start any more CFG fragments? */
 		std::set<InstructionLabel::entry> entries;
-		findEntryLabels(rip, entries, summaryRoots);
+		findEntryLabels(start.getVexRip(), entries, summaryRoots);
 		if (!entries.empty()) {
 			InstructionLabel newStart(start);
 			if (entries.size() == 1 &&
@@ -1285,6 +1387,7 @@ emitLockedInstruction(const InstructionLabel &start,
 	assert(newInstr->lateRelocs.empty());
 	for (unsigned x = 0; x < newInstr->len; x++)
 		p.content.push_back(newInstr->content[x]);
+	p.nr_instrs ++;
 
 	/* Figure out whether we have a fall-through successor.
 	   Assuming we have a fallthrough when we don't is safe but
@@ -1348,6 +1451,7 @@ buildPatch(patch &p,
 				       n.name(), p.content.size());
 			assert(!p.offsets.count(n));
 			p.offsets[n] = p.content.size();
+			assert(p.offsets.count(n));
 			p.transTable.push_back(
 				trans_table_entry(
 					p.content.size(),
@@ -1404,159 +1508,17 @@ findRelevantCfgs(MaiMap *mai,
 	}
 }
 
-struct patchStrategy {
-	std::set<unsigned long> MustInterpret;
-	std::set<unsigned long> Patch;
-	std::set<unsigned long> Cont;
-	unsigned size() const {
-		return MustInterpret.size() + Cont.size();
-	}
-	bool operator<(const patchStrategy &o) const {
-		return size() > o.size();
-	}
-	void prettyPrint(FILE *f) const {
-		fprintf(f, "MI: {");
-		for (auto it = MustInterpret.begin(); it != MustInterpret.end(); it++) {
-			if (it != MustInterpret.begin())
-				fprintf(f, ",");
-			fprintf(f, "0x%lx", *it);
-		}
-		fprintf(f, "}; P {");
-		for (auto it = Patch.begin(); it != Patch.end(); it++) {
-			if (it != Patch.begin())
-				fprintf(f, ",");
-			fprintf(f, "0x%lx", *it);
-		}
-		fprintf(f, "}; C {");
-		for (auto it = Cont.begin(); it != Cont.end(); it++) {
-			if (it != Cont.begin())
-				fprintf(f, ",");
-			fprintf(f, "0x%lx", *it);
-		}
-		fprintf(f, "}\n");
-	}
-};
-
-static bool
-patchSearch(Oracle *oracle,
-	    const patchStrategy &input,
-	    std::priority_queue<patchStrategy> &thingsToTry)
-{
-	if (input.MustInterpret.empty())
-		return true;
-
-	input.prettyPrint(stdout);
-	unsigned long needed = *input.MustInterpret.begin();
-
-	printf("\tLook at %lx\n", needed);
-	patchStrategy c(input);
-	/* @needed is definitely going to be interpreted after
-	 * this. */
-	c.Cont.insert(needed);
-	c.MustInterpret.erase(needed);
-
-	/* Decide which maneuver to use here.  We need to either patch
-	   @needed itself or bring all of its predecessors into the
-	   patch. */
-
-	/* Figure out which instructions might get clobbered by the
-	 * patch */
-	std::set<unsigned long> clobbered_by_patch;
-	unsigned offset = 0;
-	offset += getInstructionSize(oracle->ms->addressSpace, StaticRip(needed));
-	while (offset < 5) {
-		clobbered_by_patch.insert(needed + offset);
-		offset += getInstructionSize(oracle->ms->addressSpace, StaticRip(needed + offset));
-	}
-
-	/* Can't use patch if that would clobber an external. */
-	bool can_use_patch = true;
-	for (auto it = clobbered_by_patch.begin(); can_use_patch && it != clobbered_by_patch.end(); it++) {
-		if (oracle->isFunctionHead(StaticRip(*it)))
-			can_use_patch = false;
-	}
-	/* Can't use patch if that would clobber/be clobbered by an
-	   existing patch point. */
-	for (auto it = input.Patch.begin(); can_use_patch && it != input.Patch.end(); it++) {
-		if (needed > *it - 5 && needed < *it + 5)
-			can_use_patch = false;
-	}
-
-	if (can_use_patch) {
-		/* Try using a patch. */
-		patchStrategy patched(c);
-		patched.Patch.insert(needed);
-		for (auto it = clobbered_by_patch.begin();
-		     it != clobbered_by_patch.end();
-		     it++) {
-			std::set<unsigned long> predecessors;
-			oracle->findPredecessors(*it, predecessors);
-			for (unsigned long y = needed; y < *it; y++)
-				predecessors.erase(y);
-			patched.Cont.insert(*it);
-			patched.MustInterpret.erase(*it);
-			patched.MustInterpret.insert(predecessors.begin(), predecessors.end());
-		}
-		thingsToTry.push(patched);
-		printf("Patch to: ");
-		patched.prettyPrint(stdout);
-	}
-
-	/* Try expanding to predecessors. */
-	std::set<unsigned long> predecessors;
-	oracle->findPredecessors(needed, predecessors);
-	c.MustInterpret.insert(predecessors.begin(), predecessors.end());
-	thingsToTry.push(c);
-	printf("Unpatched: ");
-	c.prettyPrint(stdout);
-	return false;
-}
-
-static void
-buildPatchStrategy(Oracle *oracle,
-		   crashEnforcementRoots &roots,
-		   CrashCfg &cfg,
-		   std::set<unsigned long> &patchPoints,
-		   std::set<unsigned long> &clobbered)
-{
-	patchStrategy initPs;
-
-	for (auto it = roots.begin(); !it.finished(); it.advance()) {
-		Instruction<ThreadCfgLabel> *instr = cfg.findInstr(it.threadCfgLabel());
-		assert(instr);
-		const AbstractThread &absThread(instr->rip.thread);
-		ConcreteThread concThread(roots.lookupAbsThread(absThread));
-		ConcreteCfgLabel concCfgLabel(concThread.summary(), instr->rip.label);
-		const VexRip &vr(cfg.labelToRip(concCfgLabel));
-
-		unsigned long r = vr.unwrap_vexrip();
-		initPs.MustInterpret.insert(r);
-	}
-
-	std::priority_queue<patchStrategy> pses;
-	pses.push(initPs);
-	while (!pses.empty()) {
-		patchStrategy next(pses.top());
-		pses.pop();
-		if (patchSearch(oracle, next, pses)) {
-			/* We have a solution. */
-			printf("Patch solution:\n");
-			next.prettyPrint(stdout);
-			patchPoints = next.Patch;
-			clobbered = next.Cont;
-			return;
-		}
-	}
-	errx(1, "Cannot solve patch problem");
-}
-
-static char *
-buildPatchForCrashSummary(Oracle *oracle,
+char *
+buildPatchForCrashSummary(FILE *log,
+			  Oracle *oracle,
 			  const std::map<SummaryId, CrashSummary *> &summaries)
 {
 	std::set<unsigned long> patchPoints;
 	std::set<unsigned long> clobbered;
 	summaryRootsT summaryRoots;
+	if (log) {
+		fprintf(log, "%f: start identify critical sections\n", now());
+	}
 	{
 		ThreadAbstracter absThread;
 		std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > cfgRoots;
@@ -1593,9 +1555,20 @@ buildPatchForCrashSummary(Oracle *oracle,
 		}
 		crashEnforcementRoots cer(cfgRoots, absThread);
 		CrashCfg cfg(cer, summaries, oracle->ms->addressSpace, true, absThread);
-		buildPatchStrategy(oracle, cer, cfg, patchPoints, clobbered);
+		if (log) {
+			fprintf(log, "%f: stop identify critical sections\n", now());
+			fprintf(log, "%f: protect %zd instructions\n", now(), cfg.size());
+			fprintf(log, "%f: start build stratgy\n", now());
+		}
+		buildPatchStrategy(cer, cfg, oracle, patchPoints, clobbered);
+		if (log) {
+			fprintf(log, "%f: stop build stratgy\n", now());
+		}
 	}
 
+	if (log) {
+		fprintf(log, "%f: start recompile\n", now());
+	}
 	/* Now go and flatten the CFG fragments into patches. */
 	patch p;
 	buildPatch(p, patchPoints, clobbered, summaryRoots,oracle);
@@ -1638,47 +1611,34 @@ buildPatchForCrashSummary(Oracle *oracle,
 	fragments.push_back("\t.entry_points = entry_points,\n");
 	fragments.push_back("\t.nr_entry_points = sizeof(entry_points)/sizeof(entry_points[0]),\n");
 	fragments.push_back("};\n");
-	return flattenStringFragmentsMalloc(fragments, "", "", "");
+	char *res = flattenStringFragmentsMalloc(fragments, "", "", "");
+	if (log) {
+		fprintf(log, "%f: stop recompile\n", now());
+		fprintf(log, "%f: %zd patch points, %zd clobbered, %zd late relocations, %d instrs, %zd bytes, %d locks, %d unlocks\n",
+			now(),
+			patchPoints.size(),
+			clobbered.size(),
+			p.lateRelocs.size(),
+			p.nr_instrs,
+			p.content.size(),
+			p.nr_locks,
+			p.nr_unlocks);
+	}
+	return res;
 }
 
-int
-main(int argc, char *const argv[])
+void
+writePatchToFile(const char *output_fname,
+		 const char *binary,
+		 const std::map<SummaryId, CrashSummary *> &summaries,
+		 const char *patch)
 {
-	if (argc < 7)
-		errx(1, "need at least six arguments: binary, types table, callgraph, static db, output filename, and at least one summary");
-
-	const char *binary = argv[1];
-	const char *types_table = argv[2];
-	const char *callgraph = argv[3];
-	const char *staticdb = argv[4];
-	const char *output_fname = argv[5];
-	const char *const *summary_fnames = argv + 6;
-	int nr_summaries = argc - 6;
-
-	init_sli();
-
-	VexPtr<Oracle> oracle;
-	{
-		MachineState *ms = MachineState::readELFExec(binary);
-		Thread *thr = ms->findThread(ThreadId(1));
-		oracle = new Oracle(ms, thr, types_table);
-	}
-	oracle->loadCallGraph(oracle, callgraph, staticdb, ALLOW_GC);
-
-	std::map<SummaryId, CrashSummary *> summaries;
-	SMScopes scopes;
-	for (int i = 0; i < nr_summaries; i++) {
-		summaries[SummaryId(i + 1)] = readBugReport(&scopes, summary_fnames[i], NULL);
-	}
-
-	char *patch = buildPatchForCrashSummary(oracle, summaries);
-	printf("Patch is:\n%s\n", patch);
-
 	FILE *output = fopen(output_fname, "w");
 	fprintf(output, "/* SLI fix generated for %s */\n", binary);
 	fprintf(output,
 		"/* Compile as gcc -Wall -g -shared -fPIC -Isli %s -o %s.so */\n",
 		output_fname, binary);
+#if 0
 	fprintf(output, "/* Crash summaries:\n");
 	for (auto it = summaries.begin(); it != summaries.end(); it++) {
 		fprintf(output, "  Summary %s:\n", it->first.name());
@@ -1686,6 +1646,7 @@ main(int argc, char *const argv[])
 		fprintf(output, "\n\n\n");
 	}
 	fprintf(output, "*/\n");
+#endif
 	fprintf(output, "#define BINARY_PATCH_FOR \"%s\"\n",
 		basename(binary));
 	fprintf(output, "#include \"patch_head.h\"\n\n");
@@ -1693,5 +1654,4 @@ main(int argc, char *const argv[])
 	fprintf(output, "#include \"patch_skeleton_jump.c\"\n");
 	if (fclose(output) == EOF)
 		err(1, "writing output");
-	return 0;
 }

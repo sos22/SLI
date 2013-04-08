@@ -923,11 +923,11 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	}
 
 	TimeoutTimer tmr;
-	tmr.timeoutAfterSeconds(60);
+	tmr.timeoutAfterSeconds(TIMEOUT_EC_PLACE);
 
 	fprintf(bubble_plot_log, "%f: start place side conditions\n", now());
 	std::set<instr_t> deadStates;
-	while (!TIMEOUT && !schedule.finished()) {
+	while (!schedule.finished()) {
 		auto i = schedule.next();
 
 		/* What's available at the start of the
@@ -1106,11 +1106,6 @@ expressionEvalMapT::expressionEvalMapT(bbdd::scope *scope,
 	}
 	tmr.cancel();
 	fprintf(bubble_plot_log, "%f: stop place side conditions\n", now());
-
-	if (TIMEOUT) {
-		fprintf(bubble_plot_log, "%f: failed place side conditions\n", now());
-		return;
-	}
 
 	if (deadStates.empty()) {
 		schedule.check_cycles();

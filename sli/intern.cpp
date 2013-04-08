@@ -138,8 +138,6 @@ internStateMachineSideEffect(StateMachineSideEffect *s, internStateMachineTable 
 static StateMachineState *
 internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 {
-	if (TIMEOUT)
-		return start;
 	if (t.states.count(start))
 		return t.states[start];
 	t.states[start] = start; /* Cycle breaking */
@@ -202,9 +200,6 @@ internStateMachineState(StateMachineState *start, internStateMachineTable &t)
 static const CFGNode *
 internCFG(const CFGNode *inp, internStateMachineTable &t)
 {
-	if (TIMEOUT)
-		return inp;
-
 	auto it_did_insert = t.cfgNodes.insert(std::pair<const CFGNode *, const CFGNode *>(inp, inp));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
@@ -245,7 +240,7 @@ void
 internStateMachineCfg(StateMachine *sm)
 {
 	internStateMachineTable t;
-	for (auto it = sm->cfg_roots.begin(); !TIMEOUT && it != sm->cfg_roots.end(); it++) {
+	for (auto it = sm->cfg_roots.begin(); it != sm->cfg_roots.end(); it++) {
 		it->first.node = internCFG(it->first.node, t);
 	}
 }

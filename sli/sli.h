@@ -385,4 +385,6 @@ public:
 #endif
 };
 
+bool run_in_child(FILE *lf, GarbageCollectionToken token) __attribute__((warn_unused_result));
+
 #endif /* !SLI_H__ */

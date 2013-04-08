@@ -87,3 +87,24 @@
 #define TRACK_FRAMES 0
 #endif
 
+
+/* How long do we have to do the per-crashing-thread bits, in seconds? */
+#ifndef CONFIG_TIMEOUT1
+#define CONFIG_TIMEOUT1 60
+#endif
+#ifndef CONFIG_TIMEOUT2
+#define CONFIG_TIMEOUT2 60
+#endif
+
+#ifndef TIMEOUT_EC_STRATEGY
+#define TIMEOUT_EC_STRATEGY 60
+#endif
+#ifndef TIMEOUT_EC_DRIVER
+#define TIMEOUT_EC_DRIVER 60
+#endif
+#ifndef TIMEOUT_EC_SLICE_HB
+#define TIMEOUT_EC_SLICE_HB 60
+#endif
+#ifndef TIMEOUT_EC_PLACE
+#define TIMEOUT_EC_PLACE 60
+#endif

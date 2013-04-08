@@ -88,8 +88,6 @@ initialExplorationRoot(
 	pending.push(std::pair<unsigned, VexRip>(maxPathLength, root));
 	assert(root.isValid());
 	while (!pending.empty()) {
-		if (TIMEOUT)
-			return false;
 		std::pair<unsigned, VexRip> item(pending.front());
 		pending.pop();
 
@@ -215,7 +213,7 @@ initialExploration(const std::map<DynAnalysisRip, IRType> &roots,
 	for (auto it = roots.begin(); it != roots.end(); it++)
 		vr_roots.insert(it->first.toVexRip());
 
-	while (!TIMEOUT) {
+	while (1) {
 		std::map<VexRip, std::pair<unsigned, CFGNode *> > doneSoFar;
 		CfgSuccMap<VexRip, VexRip> succMap;
 
@@ -277,11 +275,11 @@ initialExploration(const std::map<DynAnalysisRip, IRType> &roots,
 		   full VexRips makes that trivial, but using
 		   DynamicAnalysisRips makes it really hard. */
 
-		for (auto it = doneSoFar.begin(); !TIMEOUT && it != doneSoFar.end(); it++) {
+		for (auto it = doneSoFar.begin(); it != doneSoFar.end(); it++) {
 			const VexRip &discoveredRip(it->first);
 			if (vr_roots.count(discoveredRip))
 				continue;
-			for (auto it2 = vr_roots.begin(); !TIMEOUT && it2 != vr_roots.end(); it2++) {
+			for (auto it2 = vr_roots.begin(); it2 != vr_roots.end(); it2++) {
 				const VexRip &rootRip(*it2);
 				
 				/* We create a new root for @discoveredRip if
@@ -354,7 +352,7 @@ removeRedundantRoots(const std::map<VexRip, CFGNode *> &m,
 		     HashedSet<HashedPtr<CFGNode> > &roots)
 {
 	bool res = false;
-	for (auto it = roots.begin(); !TIMEOUT && !it.finished(); ) {
+	for (auto it = roots.begin(); !it.finished(); ) {
 		const VexRip &rootRip((*it)->rip);
 		bool redundant = false;
 		for (auto it2 = m.begin(); !redundant && it2 != m.end(); it2++) {
@@ -390,8 +388,6 @@ removeUnreachableCFGNodes(std::map<VexRip, CFGNode *> &m, const HashedSet<Hashed
 				pending.push_back(it->instr);
 	}
 	while (!pending.empty()) {
-		if (TIMEOUT)
-			return;
 		CFGNode *n = pending.back();
 		pending.pop_back();
 		assert(n);
@@ -780,7 +776,7 @@ performUnrollAndCycleBreak(CfgLabelAllocator &allocLabel,
 	nodeLabellingMap<t> nlm(roots, pred, cfgFlavours, maxPathLength);
 
 	for (auto it = roots.begin(); !it.finished(); it.advance()) {
-		while (!TIMEOUT) {
+		while (1) {
 			_CFGNode<t> *cycle_edge_start, *cycle_edge_end;
 			if (!selectEdgeForCycleBreak(&**it, &cycle_edge_start, &cycle_edge_end)) {
 				/* No cycles left in the graph rooted
@@ -975,7 +971,7 @@ trimUninterestingCFGNodes(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
 {
 	HashedSet<HashedPtr<_CFGNode<t> > > interesting(roots);
 	HashedSet<HashedPtr<_CFGNode<t> > > allCFGNodes;
-	for (auto it = roots.begin(); !TIMEOUT && !it.finished(); it.advance())
+	for (auto it = roots.begin(); !it.finished(); it.advance())
 		cfgnode_tmpl::enumerateCFG(&**it, allCFGNodes);
 	bool progress = true;
 	if (debug_trim_uninteresting) {
@@ -986,7 +982,7 @@ trimUninterestingCFGNodes(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
 			printf("\t%s -> %d\n", (*it)->label.name(), it_fl->second);
 		}
 	}
-	while (!TIMEOUT && progress) {
+	while (progress) {
 		progress = false;
 		for (auto it = allCFGNodes.begin(); !it.finished(); it.advance()) {
 			_CFGNode<t> *n = *it;
@@ -1024,7 +1020,7 @@ trimUninterestingCFGNodes(HashedSet<HashedPtr<_CFGNode<t> > > &roots,
 		}
 	}
 
-	for (auto it = allCFGNodes.begin(); !TIMEOUT && !it.finished(); it.advance()) {
+	for (auto it = allCFGNodes.begin(); !it.finished(); it.advance()) {
 		_CFGNode<t> *n = *it;
 		for (auto it2 = n->successors.begin(); it2 != n->successors.end(); it2++)
 			if (it2->instr && !interesting.contains(it2->instr))
@@ -1205,9 +1201,9 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 	/* First, figure out which nodes are interesting. */
 	std::set<CFGNode *> interesting;
 	/* Anything in @roots is interesting. */
-	for (auto it = m.begin(); !TIMEOUT && it != m.end(); it++) {
+	for (auto it = m.begin(); it != m.end(); it++) {
 		const VexRip &vr(it->first);
-		for (auto it2 = roots.begin(); !TIMEOUT && it2 != roots.end(); it2++) {
+		for (auto it2 = roots.begin(); it2 != roots.end(); it2++) {
 			const DynAnalysisRip &dr(it2->first);
 			if (dr == DynAnalysisRip(vr)) {
 				interesting.insert(it->second);
@@ -1219,8 +1215,6 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 	 * interesting. */
 	bool progress = true;
 	while (progress) {
-		if (TIMEOUT)
-			return;
 		progress = false;
 		for (auto it = m.begin(); it != m.end(); it++) {
 			CFGNode *n = it->second;
@@ -1262,8 +1256,6 @@ buildCFG(CfgLabelAllocator &allocLabel, const std::map<DynAnalysisRip, IRType> &
 	std::map<const CFGNode *, cfgflavour_store_t> cfgFlavours;
 	HashedSet<HashedPtr<CFGNode> > roots1;
 	initialExploration(dyn_roots, communicating, cfgFlavours, allocLabel, maxPathLength, oracle, ripsToCFGNodes);
-	if (TIMEOUT)
-		return;
 
 	if (debug_initial_exploration) {
 		printf("Results of initial exploration:\n");
@@ -1389,7 +1381,7 @@ getStoreCFGs(CfgLabelAllocator &allocLabel,
 	*nr_roots = nrCfgRoots;
 
 
-	if (!TIMEOUT && _getStoreCFGs::debug_top_level) {
+	if (_getStoreCFGs::debug_top_level) {
 		printf("Results:\n");
 		for (int x = 0; x < *nr_roots; x++) {
 			printf("%d/%d:\n", x, *nr_roots);

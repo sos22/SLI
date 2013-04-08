@@ -216,7 +216,7 @@ removeRedundantClauses(IRExpr *verificationCondition,
 	int nr_kept = 0;
 	bool progress;
 	progress = true;
-	while (progress && !TIMEOUT) {
+	while (progress) {
 		progress = false;
 		for (int i = 0; i < nr_verification_clauses; i++) {
 			if (precious[i])
@@ -474,13 +474,6 @@ removeUnderspecifiedClauses(IRExpr *input,
 	for (auto it = targetRegisters.begin(); it != targetRegisters.end(); it++)
 		mult[*it]++;
 
-	if (TIMEOUT) {
-		/* Need to check here because if we've timed out then
-		   mult will be wrong, which will then screw up
-		   clauseUnderspecified. */
-		return input;
-	}
-
 	int nr_clauses;
 	IRExpr *const *clauses;
 	if (input->tag == Iex_Associative &&
@@ -695,7 +688,7 @@ simplifyUsingUnderspecification(
 {
 	bool p;
 	p = true;
-	while (!TIMEOUT && p && expr != underspecified_result) {
+	while (p && expr != underspecified_result) {
 		p = false;
 		expr = removeRedundantClauses(
 			expr,
@@ -828,12 +821,6 @@ functionalUnderspecification(IRExpr *input,
 		newTargets,
 		underspecExpression,
 		&p);
-
-	if (TIMEOUT) {
-		if (debug_functional_underspecification)
-			printf("%d: Timed out!\n", depth);
-		return input;
-	}
 
 	if (assumingTrue == underspecExpression ||
 	    assumingFalse == underspecExpression) {
@@ -1145,11 +1132,11 @@ nonFunctionalSimplifications(
 {
 	bool progress;
 	progress = true;
-	while (!TIMEOUT && progress) {
+	while (progress) {
 		progress = false;
 		bool p;
 		p = true;
-		while (!TIMEOUT && p) {
+		while (p) {
 			p = false;
 			summary->crashCondition =
 				stripFloatingPoint(&summary->scopes->bools, summary->crashCondition, &p);
@@ -1176,7 +1163,7 @@ nonFunctionalSimplifications(
 			progress |= p;
 		}
 		p = true;
-		while (!TIMEOUT && p) {
+		while (p) {
 			p = false;
 			summary->inferredAssumption =
 				stripFloatingPoint(&summary->scopes->bools, summary->inferredAssumption, &p);
@@ -1480,31 +1467,21 @@ main(int argc, char *argv[])
 
 	summary = internCrashSummary(summary);
 
-	if (!TIMEOUT) {
-		VexPtr<LoadCanonicaliser, &ir_heap> lc(new LoadCanonicaliser(summary));
-		summary = lc->canonicalise(summary);
-		VexPtr<OracleInterface> oracleI(oracle);
-		summary = nonFunctionalSimplifications(summary, oracleI, ALLOW_GC);
-		if (!TIMEOUT)
-			summary = functionalSimplifications(summary, oracleI, ALLOW_GC);
-		if (!TIMEOUT)
-			summary = nonFunctionalSimplifications(
-				summary,
-				oracleI,
-				ALLOW_GC);
-		if (!TIMEOUT) {
-			summary = lc->decanonicalise(summary);
-		}
-	}
+	VexPtr<LoadCanonicaliser, &ir_heap> lc(new LoadCanonicaliser(summary));
+	summary = lc->canonicalise(summary);
+	VexPtr<OracleInterface> oracleI(oracle);
+	summary = nonFunctionalSimplifications(summary, oracleI, ALLOW_GC);
+	summary = functionalSimplifications(summary, oracleI, ALLOW_GC);
+	summary = nonFunctionalSimplifications(
+		summary,
+		oracleI,
+		ALLOW_GC);
+	summary = lc->decanonicalise(summary);
 
-	if (TIMEOUT) {
-		fprintf(stderr, "timeout processing %s\n", argv[1]);
-	} else {
-		FILE *f = fopen(argv[4], "w");
-		fprintf(f, "%s\n", first_line);
-		printCrashSummary(summary, f);
-		fclose(f);
-	}
+	FILE *f = fopen(argv[4], "w");
+	fprintf(f, "%s\n", first_line);
+	printCrashSummary(summary, f);
+	fclose(f);
 
 	return 0;
 }

@@ -181,8 +181,6 @@ build_selection_bdd(SMScopes *scopes,
 					it.value()->prettyPrint(stdout);
 				}
 			}
-			if (TIMEOUT)
-				return NULL;
 			exprbdd *flattened = exprbdd::from_enabling(&scopes->exprs, enabling, 0);
 			if (!flattened) {
 				if (debug_build_paths)
@@ -252,7 +250,7 @@ phiElimination(SMScopes *scopes, StateMachine *sm,
 
 	std::set<StateMachineSideEffectPhi *> phiEffects;
 	enumSideEffects(sm, phiEffects);
-	for (auto it = phiEffects.begin(); !TIMEOUT && it != phiEffects.end(); it++) {
+	for (auto it = phiEffects.begin(); it != phiEffects.end(); it++) {
 		StateMachineSideEffectPhi *phi = *it;
 
 		if (debug_toplevel) {

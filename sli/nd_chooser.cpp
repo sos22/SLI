@@ -86,8 +86,6 @@ NdChooser::nd_choice(int nr_options, bool *isNew)
 bool
 NdChooser::advance(void)
 {
-	if (TIMEOUT)
-		return false;
 	assert(current_stack_index == stack.size());
 
 	finish_stack();

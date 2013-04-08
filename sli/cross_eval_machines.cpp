@@ -258,18 +258,12 @@ main(int argc, char *argv[])
 							  oracleI,
 							  opt,
 							  ALLOW_GC));
-	if (TIMEOUT) {
-		return 0;
-	}
 	VexPtr<smrbdd, &ir_heap> smr2(compileMachineToBdd(&scopes,
 							  mai2,
 							  machine2,
 							  oracleI,
 							  opt,
 							  ALLOW_GC));
-	if (TIMEOUT) {
-		return 0;
-	}
 	if (smr1 == smr2) {
 		printf("Pass.\n");
 		return 0;
@@ -280,17 +274,11 @@ main(int argc, char *argv[])
 						  smr1,
 						  false,
 						  opt);
-	if (TIMEOUT) {
-		return 0;
-	}
 	smr2 = simplifyBDD<smrbdd, smrbdd::scope>(&scopes.smrs,
 						  &scopes.bools,
 						  smr2,
 						  false,
 						  opt);
-	if (TIMEOUT) {
-		return 0;
-	}
 	if (smr1 == smr2) {
 		printf("Pass.\n");
 		return 0;
@@ -302,9 +290,6 @@ main(int argc, char *argv[])
 	delta = tmpl_subst_eq<deltasmrbdd::scope, deltasmrbdd, dsmrbdd_fbf>(&dscope, delta);
 
 	bbdd *errorIf = err_if(&scopes.bools, delta);
-	if (TIMEOUT) {
-		return 0;
-	}
 	if (errorIf == scopes.bools.cnst(false)) {
 		printf("Pass.\n");
 		return 0;

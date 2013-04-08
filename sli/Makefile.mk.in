@@ -3,8 +3,8 @@ targets="minimal_direct dump_types_db check_types_index build_schedule cross_che
 targets="${targets} canonicalise_types_table canonicalise_crash_summary2"
 targets="${targets} remove_non_badptrs canonicalise_crash_summary3 canonicalise_crash_summary0 canonicalise_crash_summary4"
 targets="${targets} case_split_summaries memloc_split_summaries dump_alias_db check_cfg_generation"
-targets="${targets} direct_cd merge_type_tables summary_to_fix static timing compare_crash_summaries"
-targets="${targets} cross_eval_machines merge_call_graphs"
+targets="${targets} direct_cd merge_type_tables s2f_driver static timing compare_crash_summaries"
+targets="${targets} cross_eval_machines merge_call_graphs s2f_perf"
 
 # Disabled targets:
 
@@ -19,8 +19,8 @@ defvars() {
 	echo SLIR_SOURCES+= ${input_base}/{state_machine,oracle,simplify_irexpr,eval_state_machine}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{mapping,elf_exec,offline_analysis,intern}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{StateMachineTransformer,IRExprTransformer,proximal_cause}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{availExpressionAnalysis,deadcode}.cpp
-	echo SLIR_SOURCES+= ${input_base}/{nf,typesdb,timers,realias,canon}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{availExpressionAnalysis,deadcode,patch_strategy}.cpp
+	echo SLIR_SOURCES+= ${input_base}/{nf,typesdb,timers,realias,canon,summary_to_fix}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{getStoreCFGs,dupeStateMachine,control_dependence_graph}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{cfgnode,getProbeCFGs,probeCFGtoMachine,useInitialMemoryLoads}.cpp
 	echo SLIR_SOURCES+= ${input_base}/{sat_checker,smb_builder,predecessor_map}.cpp

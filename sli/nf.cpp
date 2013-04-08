@@ -676,7 +676,7 @@ nf_countermerge(const NF_Expression &this_one, NF_Expression &out)
 {
 	NF_Expression new_out;
 	extra_sanity(out);
-	if (TIMEOUT || out.size() * this_one.size() > NF_MAX_EXPRESSION)
+	if (out.size() * this_one.size() > NF_MAX_EXPRESSION)
 		return false;
 	new_out.reserve(out.size() * this_one.size());
 	for (unsigned x = 0; x < out.size(); x++) {
@@ -717,8 +717,6 @@ nf_counterjoin(IRExpr *const*fragments, int nr_fragments, NF_Expression &out,
 	       IROp expressionOp, IROp termOp)
 {
 top:
-	if (TIMEOUT)
-		return false;
 	if (nr_fragments == 0) {
 		sanity_check(out);
 		return true;
@@ -793,8 +791,6 @@ nf_invert(const NF_Expression &in, NF_Expression &out)
 	   the first x clauses only. */
 	for (unsigned x = 1; x < in.size(); x++) {
 		NF_Expression r;
-		if (TIMEOUT)
-			return false;
 		nf_invert(in[x], r);
 		assert(!r.isContradiction());
 
@@ -832,8 +828,6 @@ convert_to_nf(IRExpr *e, NF_Expression &out, IROp expressionOp, IROp termOp)
 	if (e->tag == Iex_Associative) {
 		if (((IRExprAssociative *)e)->op == expressionOp) {
 			for (int x = 0; x < ((IRExprAssociative *)e)->nr_arguments; x++) {
-				if (TIMEOUT)
-					return false;
 				NF_Expression r;
 				if (!__nf::convert_to_nf(((IRExprAssociative *)e)->contents[x],
 							 r,
@@ -891,8 +885,6 @@ optimise_nf(NF_Expression &e)
 
 	for (auto it1 = e.begin(); it1 != e.end(); it1++) {
 		for (auto it2 = it1 + 1; it2 != e.end(); ) {
-			if (TIMEOUT)
-				return false;
 			switch (compare_nf_terms(*it1, *it2)) {
 			case nf_subset:
 				/* *it1 is a subset of *it2.  If we're

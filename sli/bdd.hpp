@@ -265,8 +265,6 @@ public:
 		return *(const internalT *)content._internal;
 	}
 	void sanity_check(bdd_ordering *ordering = NULL) const {
-		if (TIMEOUT)
-			return;
 		if (isLeaf()) {
 			_sanity_check(leaf());
 		} else {

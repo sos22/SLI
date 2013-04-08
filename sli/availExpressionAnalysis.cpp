@@ -174,9 +174,6 @@ StateMachineSideEffect *
 availExprSet::simplifySE(se_state *state, StateMachineSideEffectLoad *l) const
 {
 	auto b = simplifyExprbdd(state->scopes, l->addr);
-	if (TIMEOUT) {
-		return l;
-	}
 	if (!state->oracle->hasConflictingRemoteStores(*state->decode, *state->opt, l)) {
 		for (auto it = memory.begin(); it != memory.end(); it++) {
 			StateMachineSideEffectMemoryAccess *other = *it;
@@ -206,7 +203,7 @@ availExprSet::simplifySE(se_state *state, StateMachineSideEffectStore *s) const
 {
 	auto a = simplifyExprbdd(state->scopes, s->addr);
 	auto d = simplifyExprbdd(state->scopes, s->data);
-	if (TIMEOUT || (a == s->addr && d == s->data)) {
+	if (a == s->addr && d == s->data) {
 		return s;
 	} else {
 		return new StateMachineSideEffectStore(s, a, d);
@@ -217,7 +214,7 @@ StateMachineSideEffect *
 availExprSet::simplifySE(se_state *state, StateMachineSideEffectCopy *c) const
 {
 	auto d = simplifyExprbdd(state->scopes, c->value);
-	if (TIMEOUT || d == c->value) {
+	if (d == c->value) {
 		return c;
 	} else {
 		return new StateMachineSideEffectCopy(c, d);
@@ -234,7 +231,7 @@ StateMachineSideEffect *
 availExprSet::simplifySE(se_state *state, StateMachineSideEffectAssertFalse *a) const
 {
 	auto d = simplifyBbdd(state->scopes, a->value);
-	if (TIMEOUT || d == a->value) {
+	if (d == a->value) {
 		return a;
 	} else {
 		return new StateMachineSideEffectAssertFalse(a, d);
@@ -273,7 +270,7 @@ StateMachineSideEffect *
 availExprSet::simplifySE(se_state *state, StateMachineSideEffectStartFunction *s) const
 {
 	auto rsp = simplifyExprbdd(state->scopes, s->rsp);
-	if (TIMEOUT || rsp == s->rsp) {
+	if (rsp == s->rsp) {
 		return s;
 	} else {
 		return new StateMachineSideEffectStartFunction(s, rsp);
@@ -284,7 +281,7 @@ StateMachineSideEffect *
 availExprSet::simplifySE(se_state *state, StateMachineSideEffectEndFunction *s) const
 {
 	auto rsp = simplifyExprbdd(state->scopes, s->rsp);
-	if (TIMEOUT || rsp == s->rsp) {
+	if (rsp == s->rsp) {
 		return s;
 	} else {
 		return new StateMachineSideEffectEndFunction(s, rsp);
@@ -322,15 +319,13 @@ availExprSet::simplifyState(se_state *state, StateMachineState *s, bool *done_so
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)s;
 		auto res = simplifySmrbdd(state->scopes, smt->res);
-		if (!TIMEOUT) {
-			if (debug_avail && res != smt->res) {
-				printf("Terminal:\n");
-				smt->res->prettyPrint(stdout);
-				printf("--------->\n");
-				res->prettyPrint(stdout);
-			}
-			*done_something |= smt->set_res(res);
+		if (debug_avail && res != smt->res) {
+			printf("Terminal:\n");
+			smt->res->prettyPrint(stdout);
+			printf("--------->\n");
+			res->prettyPrint(stdout);
 		}
+		*done_something |= smt->set_res(res);
 		return;
 	}
 	case StateMachineState::Bifurcate: {
@@ -344,15 +339,13 @@ availExprSet::simplifyState(se_state *state, StateMachineState *s, bool *done_so
 			return;
 		}
 		auto c = simplifyBbdd(state->scopes, smb->condition);
-		if (!TIMEOUT) {
-			if (debug_avail && c != smb->condition) {
-				printf("Condition:\n");
-				smb->condition->prettyPrint(stdout);
-				printf("------------>\n");
-				c->prettyPrint(stdout);
-			}
-			*done_something |= smb->set_condition(c);
+		if (debug_avail && c != smb->condition) {
+			printf("Condition:\n");
+			smb->condition->prettyPrint(stdout);
+			printf("------------>\n");
+			c->prettyPrint(stdout);
 		}
+		*done_something |= smb->set_condition(c);
 		return;
 	}
 	case StateMachineState::SideEffecting: {
@@ -361,16 +354,14 @@ availExprSet::simplifyState(se_state *state, StateMachineState *s, bool *done_so
 			return;
 		}
 		auto s = simplifySideEffect(state, sme->sideEffect);
-		if (!TIMEOUT) {
-			if (debug_avail && s != sme->sideEffect) {
-				printf("Side effect:\n");
-				sme->sideEffect->prettyPrint(stdout);
-				printf("\n------------>\n");
-				s->prettyPrint(stdout);
-			}
-			*done_something |= s != sme->sideEffect;
-			sme->sideEffect = s;
+		if (debug_avail && s != sme->sideEffect) {
+			printf("Side effect:\n");
+			sme->sideEffect->prettyPrint(stdout);
+			printf("\n------------>\n");
+			s->prettyPrint(stdout);
 		}
+		*done_something |= s != sme->sideEffect;
+		sme->sideEffect = s;
 		return;
 	}
 	}
@@ -560,7 +551,7 @@ availExpressionAnalysis(SMScopes *scopes,
 
 	std::vector<StateMachineState *> pending;
 	pending.push_back(sm->root);
-	while (!TIMEOUT && !pending.empty()) {
+	while (!pending.empty()) {
 		StateMachineState *s = pending.back();
 		pending.pop_back();
 
@@ -697,7 +688,7 @@ ssaApplyAvailExprBool(ssa_avail_state &state, const substTableT &t, IRExpr *e,
 		      sane_map<std::pair<IRExpr *, substTableT>, bbdd *> &memo,
 		      const bdd_ordering::rank_hint &rank_hint)
 {
-	if (TIMEOUT || (state.canEarlyOut && LibVEX_want_GC())) {
+	if (state.canEarlyOut && LibVEX_want_GC()) {
 		return NULL;
 	}
 
@@ -925,8 +916,6 @@ template <typename t> static void
 rewrite_var(ssa_avail_state &state, t *&arg, bool *done_something)
 {
 	t *n = ssaApplyAvail(state, arg);
-	if (TIMEOUT)
-		return;
 	if (n != arg)
 		*done_something = n;
 	arg = n;

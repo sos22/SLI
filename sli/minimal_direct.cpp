@@ -32,12 +32,10 @@ class DumpFix : public FixConsumer {
 public:
 	VexPtr<Oracle> &oracle;
 	int cntr;
-	FILE *output;
 	DynAnalysisRip dr;
-	DumpFix(VexPtr<Oracle> &_oracle, FILE *_output)
-		: oracle(_oracle), cntr(0), output(_output)
+	DumpFix(VexPtr<Oracle> &_oracle)
+		: oracle(_oracle), cntr(0)
 	{
-		fputs("#include \"patch_head.h\"\n", output);
 	}
 	void finish(void);
 	void operator()(VexPtr<CrashSummary, &ir_heap> &probeMachine,
@@ -77,10 +75,6 @@ DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 void
 DumpFix::finish(void)
 {
-	fprintf(output, "static const struct patch *const patches[] = {\n");
-	for (int x = 0; x < cntr; x++)
-		fprintf(output, "\t&patch%d,\n", x);
-	fprintf(output, "};\n\n#include \"patch_skeleton_jump.c\"\n");
 }
 
 static ssize_t
@@ -122,14 +116,14 @@ open_logfile(size_t sz, const char *fmt, ...)
 	int r = vasprintf(&path, fmt, args);
 	(void)r;
 	va_end(args);
-	FILE *f = fopen(path, "w");
+	FILE *f = fopen(path, "a");
 	free(path);
 	if (!f)
 		return NULL;
 	struct size_limited_file *slf = (struct size_limited_file *)malloc(sizeof(struct size_limited_file));
 	slf->remaining_quota = sz;
 	slf->f = f;
-	FILE *res = fopencookie(slf, "w", funcs);
+	FILE *res = fopencookie(slf, "a", funcs);
 	if (!res) {
 		fclose(f);
 		free(slf);
@@ -165,7 +159,7 @@ consider_rip(const DynAnalysisRip &my_rip,
 		checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, opt, token);
 	}
 	fprintf(bubble_plot_log, "%f: finish crashing thread\n", now());
-	stackedCdf::stop(_timed_out);
+	stackedCdf::stop();
 
 	fflush(NULL);
 
@@ -319,8 +313,7 @@ main(int argc, char *argv[])
 	}
 	oracle->loadCallGraph(oracle, callgraph, staticdb, ALLOW_GC);
 
-	FILE *output = fopen("generated_patch.c", "w");
-	DumpFix df(oracle, output);
+	DumpFix df(oracle);
 
 	LibVEX_gc(ALLOW_GC);
 
@@ -330,8 +323,12 @@ main(int argc, char *argv[])
 	start_percentage = 0;
 	end_percentage = 100;
 
-	bubble_plot_log = fopen("bubble_data.log", "w");
-	bubble_plot2_log = fopen("bubble_data2.log", "w");
+	unlink("bubble_data.log");
+	unlink("bubble_data2.log");
+	bubble_plot_log = fopen("bubble_data.log", "a");
+	bubble_plot2_log = fopen("bubble_data2.log", "a");
+	setlinebuf(bubble_plot_log);
+	setlinebuf(bubble_plot2_log);
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations
@@ -426,7 +423,6 @@ main(int argc, char *argv[])
 	}
 
 	df.finish();
-	fclose(output);
 
 	return 0;
 }

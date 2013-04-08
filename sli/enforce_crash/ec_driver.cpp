@@ -1,6 +1,7 @@
 #include "sli.h"
 #include "enforce_crash.hpp"
 #include "timers.hpp"
+#include "patch_strategy.hpp"
 
 extern FILE *bubble_plot_log;
 
@@ -22,10 +23,8 @@ main(int argc, char *argv[])
 
 	bubble_plot_log = fopen("ec_driver_bubbles.log", "w");
 
-	timeout_means_death = true;
-
 	TimeoutTimer tt;
-	tt.timeoutAfterSeconds(60);
+	tt.timeoutAfterSeconds(TIMEOUT_EC_DRIVER);
 	for (int i = 6; i < argc; i++) {
 		CrashSummary *summary;
 
@@ -43,7 +42,8 @@ main(int argc, char *argv[])
 		accumulator |= acc;
 	}
 
-	buildPatchStrategy(accumulator, oracle);
+	buildPatchStrategy(accumulator.roots, accumulator.crashCfg, oracle,
+			   accumulator.patchPoints, accumulator.interpretInstrs);
 
 	FILE *f = fopen(argv[5], "w");
 	accumulator.prettyPrint(&scopes, f);

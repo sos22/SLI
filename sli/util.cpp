@@ -15,6 +15,8 @@ FILE *
 bubble_plot_log;
 FILE *
 bubble_plot2_log;
+FILE *
+better_log;
 
 static __attribute__ ((noreturn)) void
 failure_exit(void)
@@ -345,6 +347,69 @@ warning(const char *fmt, ...)
 	fprintf(_logfile, "%s", f2);
 	free(f1);
 	free(f2);
+}
+
+bool
+run_in_child(FILE *lf, GarbageCollectionToken token)
+{
+	/* Do most of the work in a child process, so as to protect us
+	 * from the OOM killer. */
+	pid_t child = fork();
+	if (child == -1) {
+		err(1, "fork() for %s", __func__);
+	}
+	if (child != 0) {
+		/* We are the parent.  All we need to do is wait for
+		 * the child to finish. */
+
+		/* Might as well do a GC while we're waiting.  This
+		   should be very quick; it's not like the parent does
+		   much memory allocation. */
+		LibVEX_gc(token);
+
+		int status;
+		pid_t c = waitpid(child, &status, 0);
+		if (c == -1) {
+			err(1, "waitpid() for %s", __func__);
+		}
+		if (WIFEXITED(status)) {
+			int e = WEXITSTATUS(status);
+			if (e == 0) {
+				/* Success */
+			} else if (e == 1) {
+				fprintf(_logfile, "Child timed out in %s\n", __func__);
+				if (better_log) {
+					fprintf(better_log, "Child timed out in %s\n", __func__);
+				}
+				fprintf(lf, "%f: timeout\n", now());
+			} else {
+				errx(1, "child returned %d in %s", e, __func__);
+			}
+			return true;
+		}
+		if (WIFSIGNALED(status)) {
+			int sig = WTERMSIG(status);
+			if (sig == SIGKILL) {
+				/* Almost certainly an OOM kill */
+				fprintf(_logfile, "OOM kill in checkWhetherInstructionCanCrash()\n");
+				if (better_log) {
+					fprintf(better_log, "OOM kill in checkWhetherInstructionCanCrash()\n");
+				}
+				fprintf(lf, "%f: out of memory\n", now());
+			} else {
+				fprintf(_logfile, "%s child died with signal %d\n",
+					__func__, sig);
+				if (better_log) {
+					fprintf(better_log, "Child failed in %s, signal %d\n", __func__, sig);
+				}
+				fprintf(lf, "%f: %s crashed, signal %d\n",
+					now(), __func__, sig);
+			}
+			return true;
+		}
+		errx(1, "Weird status %x from waitpid() (%s)", status, __func__);
+	}
+	return false;
 }
 
 /* fopen with C++ calling convention, so that gdb can tell that it has

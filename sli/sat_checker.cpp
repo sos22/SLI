@@ -221,9 +221,6 @@ check_and_normal_form(const IRExpr *e)
 static IRExpr *
 and_normal_form(IRExpr *e)
 {
-	if (TIMEOUT)
-		return NULL;
-
 	if (e->tag == Iex_Unop) {
 		IRExprUnop *ieu = (IRExprUnop *)e;
 		if (ieu->op == Iop_Not1) {
@@ -247,8 +244,6 @@ and_normal_form(IRExpr *e)
 			IRExpr *newArgs[iea->nr_arguments];
 			for (int x = 0; x < iea->nr_arguments; x++)
 				newArgs[x] = and_normal_form(iea->contents[x]);
-			if (TIMEOUT)
-				return NULL;
 			sort_and_arguments(newArgs, iea->nr_arguments);
 			IRExpr *res = IRExpr_Associative_Copy(iea->op, iea->nr_arguments, newArgs);
 			e = res;
@@ -261,8 +256,6 @@ and_normal_form(IRExpr *e)
 							Iop_Not1,
 							iea->contents[x]));
 			sort_and_arguments(newArgs, iea->nr_arguments);
-			if (TIMEOUT)
-				return NULL;
 			IRExprAssociative *res = IRExpr_Associative_Copy(Iop_And1, iea->nr_arguments, newArgs);
 			e = IRExpr_Unop(Iop_Not1, res);
 		}
@@ -574,9 +567,6 @@ anf_context::addAssumption(IRExpr *a)
 IRExpr *
 anf_context::simplify(IRExpr *a)
 {
-	if (TIMEOUT)
-		return a;
-
 	a = pureSimplify(a);
 
 	/* If we have a == k, for any constant k, go and do the
@@ -707,14 +697,14 @@ anf_context::simplify(IRExpr *a)
 static IRExpr *
 anf_simplify(IRExpr *a, IRExpr *assumption)
 {
-	while (!TIMEOUT) {
+	while (1) {
 		anf_context ctxt(assumption);
 		IRExpr *a2 = ctxt.simplify(a);
-		if (a2 == UNEVALUATABLE || a == a2)
-			break;
+		if (a2 == UNEVALUATABLE || a == a2) {
+			return a;
+		}
 		a = a2;
 	}
-	return a;
 }
 
 static IRExpr *
@@ -1101,7 +1091,7 @@ sat_enumerator::skipToSatisfying()
 					done_something = true;
 				}
 			}
-			if (done_something && !TIMEOUT) {
+			if (done_something) {
 				if (debug_satisfier)
 					printf("Advance by setting top-level simples\n");
 				continue;
@@ -1128,11 +1118,6 @@ sat_enumerator::skipToSatisfying()
 		 */
 		std::set<IRExpr *> allBooleans;
 		_sat_checker::findBooleans(frame.remainder, allBooleans);
-		if (TIMEOUT) {
-			/* Give up */
-			stack.clear();
-			return;
-		}
 		/* Other simplifications can sometimes mean that we
 		   end up with with things in the remainder which we
 		   know to be true or false.  e.g. if we have the

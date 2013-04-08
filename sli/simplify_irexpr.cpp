@@ -1357,9 +1357,6 @@ rewriteBoolean(IRExpr *expr, bool val, IRExpr *inp)
 static IRExpr *
 optimiseIRExpr(IRExpr *src, const IRExprOptimisations &opt)
 {
-	if (TIMEOUT)
-		return src;
-
 	if (!(opt.asUnsigned() & ~src->optimisationsApplied))
 		return src;
 
@@ -3244,8 +3241,7 @@ definitelyEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 		return res;
 	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
 	res = (r->tag == Iex_Const && ((IRExprConst *)r)->Ico.content.U1);
-	if (!TIMEOUT)
-		definitelyEqualCache.set(a, b, idx, res);
+	definitelyEqualCache.set(a, b, idx, res);
 	return res;
 }
 bool
@@ -3260,8 +3256,7 @@ definitelyNotEqual(IRExpr *a, IRExpr *b, const IRExprOptimisations &opt)
 		return res;
 	IRExpr *r = simplifyIRExpr(expr_eq(a, b), opt);
 	res = (r->tag == Iex_Const && !((IRExprConst *)r)->Ico.content.U1);
-	if (!TIMEOUT)
-		definitelyNotEqualCache.set(a, b, idx, res);
+	definitelyNotEqualCache.set(a, b, idx, res);
 	return res;
 }
 
@@ -3323,8 +3318,6 @@ simplifyBDD(scopeT *scope, bbdd::scope *bscope, treeT *bdd, const IRExprOptimisa
 	/* Only expr BDDs can be addresses, and they should be using
 	 * the specialisation below. */
 	assert(!isAddress);
-	if (TIMEOUT)
-		return bdd;
 	if (bdd->isLeaf())
 		return bdd;
 	typedef typename std::pair<treeT *, treeT *> treePairT;
@@ -3369,8 +3362,6 @@ template <> exprbdd *
 simplifyBDD(exprbdd::scope *scope, bbdd::scope *bscope, exprbdd *bdd, const IRExprOptimisations &opt,
 	    bool isAddress, std::map<exprbdd *, exprbdd *> &memo)
 {
-	if (TIMEOUT)
-		return bdd;
 	auto it_did_insert = memo.insert(std::pair<exprbdd *, exprbdd *>(bdd, (exprbdd *)NULL));
 	if (!it_did_insert.second)
 		return it_did_insert.first->second;

@@ -90,9 +90,6 @@ ReachingMap::initialise(const MaiMap &decode,
 	 * there is any possibility that the store might satisfy a
 	 * load at X. */
 	while (!needsUpdate.empty()) {
-		if (TIMEOUT)
-			return false;
-
 		const StateMachineState *s = needsUpdate.back();
 		needsUpdate.pop_back();
 

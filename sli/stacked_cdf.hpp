@@ -52,12 +52,12 @@ namespace stackedCdf {
 	void stacked_cdf_start(stackedCdfBucket);
 	void stacked_cdf_stop(stackedCdfBucket);
 	void start(void);
-	void stop(bool);
+	void stop(void);
 #else
 	static inline void stacked_cdf_start(stackedCdfBucket) {}
 	static inline void stacked_cdf_stop(stackedCdfBucket) {}
 	static inline void start(void) {}
-	static inline void stop(bool) {}
+	static inline void stop(void) {}
 #endif
 
 #define mk_stubs(name)					\

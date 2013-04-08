@@ -19,7 +19,6 @@ activate(void)
 	char *body;
 	unsigned x;
 	long delta;
-	unsigned y;
 	char pathbuf[4097];
 
 	readlink("/proc/self/exe", pathbuf, sizeof(pathbuf));

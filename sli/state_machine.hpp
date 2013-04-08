@@ -535,7 +535,7 @@ public:
 		: StateMachineState(vr, StateMachineState::Terminal),
 		  res(_res)
 	{
-		if (res == NULL && !TIMEOUT) {
+		if (res == NULL) {
 			abort();
 		}
 	}
@@ -543,7 +543,7 @@ public:
 		: StateMachineState(base->dbg_origin, StateMachineState::Terminal),
 		  res(_res)
 	{
-		if (res == NULL && !TIMEOUT) {
+		if (res == NULL) {
 			abort();
 		}
 	}
@@ -551,7 +551,7 @@ public:
 	bool set_res(smrbdd *_res)
 	{
 		bool r = res != _res;
-		if (_res == NULL && !TIMEOUT) {
+		if (_res == NULL) {
 			abort();
 		}
 		*(smrbdd **)&res = _res;
@@ -665,7 +665,7 @@ public:
 		  trueTarget(t),
 		  falseTarget(f)
 	{
-		assert(condition || TIMEOUT);
+		assert(condition);
 	}
 	StateMachineBifurcate(StateMachineBifurcate *base,
 			      bbdd *_condition)
@@ -674,7 +674,7 @@ public:
 		  trueTarget(base->trueTarget),
 		  falseTarget(base->falseTarget)
 	{
-		assert(condition || TIMEOUT);
+		assert(condition);
 	}
 	StateMachineBifurcate(StateMachineBifurcate *base)
 		: StateMachineState(base->dbg_origin, StateMachineState::Bifurcate),
@@ -682,7 +682,7 @@ public:
 		  trueTarget(base->trueTarget),
 		  falseTarget(base->falseTarget)
 	{
-		assert(condition || TIMEOUT);
+		assert(condition);
 	}
 
 	bbdd *const condition;

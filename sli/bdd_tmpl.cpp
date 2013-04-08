@@ -136,11 +136,7 @@ template <typename constT, typename subtreeT> template <typename scopeT> subtree
 _bdd<constT, subtreeT>::assume(scopeT *scope, subtreeT *thing, bbdd *assumption)
 {
 	assume_zip_internal<subtreeT> f(thing, assumption);
-	auto r = zip(scope, f);
-	if (TIMEOUT) {
-		return thing;
-	}
-	return r;
+	return zip(scope, f);
 }
 
 #define INTBDD_DONT_CARE ((subtreeT *)0x1)
@@ -270,7 +266,7 @@ _bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp, 
 {
 	from_enabling_internal<subtreeT, scopeT> f(inp);
 	subtreeT *res = zip(scope, f);
-	if (TIMEOUT || res == INTBDD_DONT_CARE)
+	if (res == INTBDD_DONT_CARE)
 		return defaultValue;
 	else
 		return res;
@@ -502,12 +498,9 @@ dereferences(IRExpr *expr, const IRExpr *addr)
 template <typename t> void
 bdd_scope<t>::checkInternSize() const
 {
-	if (intern.size() >= 10000000) {
-		fprintf(_logfile, "%s forcing a timeout\n", __PRETTY_FUNCTION__);
-		_timed_out = true;
-	} else if (intern.size() >= 1000000) {
+	if (intern.size() >= 1000000) {
 		LibVEX_request_GC();
-	} 
+	}
 }
 
 template <typename t> void
@@ -783,9 +776,6 @@ bdd_scope<t>::mkInternal(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 template <typename t> t *
 bdd_scope<t>::node(IRExpr *cond, const bdd_rank &r, t *a, t *b)
 {
-	if (TIMEOUT) {
-		return a;
-	}
 	if (cond->tag == Iex_Const) {
 		if ( ((IRExprConst *)cond)->Ico.content.U1 ) {
 			return a;
@@ -1145,12 +1135,7 @@ _bdd<constT, subtreeT>::ifelse(scopeT *scope,
 			       subtreeT *ifFalse)
 {
 	ifelse_zip_internal<subtreeT, scopeT> f(cond, ifTrue, ifFalse);
-	auto r = zip(scope, f);
-	if (TIMEOUT) {
-		return ifTrue;
-	} else {
-		return r;
-	}
+	return zip(scope, f);
 }
 
 template <typename constT, typename subtreeT> subtreeT *
@@ -1283,9 +1268,6 @@ template <typename constT, typename subtreeT> template <typename scopeT, typenam
 subtreeT *
 _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 {
-	if (TIMEOUT)
-		return NULL;
-
 	if (rootZip.isLeaf())
 		return rootZip.leafzip();
 
@@ -1333,20 +1315,6 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 	std::map<zipInternalT, std::vector<subtreeT **> > leafRelocs;
 
 	while (!relocs.empty()) {
-		if (TIMEOUT) {
-			stackedCdf::stopBDD();
-			return NULL;
-		}
-
-		/* Somewhat arbitrary limit to avoid running out of
-		 * memory. */
-		if (relocs.size() >= 10000000) {
-			warning("Hit arbitrary limit in %s, forcing it to fail!\n", __func__);
-			_timed_out = true;
-			stackedCdf::stopBDD();
-			return NULL;
-		}
-
 		auto it = relocs.begin();
 		const relocKeyT &key(it->first);
 		const std::vector<subtreeT **> &dests(it->second);
@@ -1400,10 +1368,6 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 	std::map<subtreeT *, subtreeT *> reduced;
 
 	while (!leafRelocs.empty()) {
-		if (TIMEOUT) {
-			stackedCdf::stopBDD();
-			return NULL;
-		}
 		auto it = leafRelocs.begin();
 		const zipInternalT &leafNode(it->first);
 		const std::vector<subtreeT **> &relocs(it->second);
@@ -1432,8 +1396,6 @@ _bdd<constT, subtreeT>::zip(scopeT *scope, zipInternalT &rootZip)
 template <typename leafT, typename subtreeT> template <typename scopeT, typename bscopeT, typename zipT> subtreeT *
 _bdd<leafT, subtreeT>::restructure_zip(scopeT *scope, bscopeT *bscope, const zipT &what, std::map<zipT, subtreeT *> &memo)
 {
-	if (TIMEOUT)
-		return NULL;
 	auto it_did_insert = memo.insert(std::pair<zipT, subtreeT *>(what, (subtreeT *)0xbeef));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;

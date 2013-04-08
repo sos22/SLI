@@ -92,7 +92,7 @@ StateMachine *buildProbeMachine(SMScopes *scopes,
 				const AllowableOptimisations &opt,
 				VexPtr<MaiMap, &ir_heap> &mai,
 				GarbageCollectionToken token);
-bool diagnoseCrash(SMScopes *scopes,
+void diagnoseCrash(SMScopes *scopes,
 		   CfgLabelAllocator &allocLabel,
 		   const DynAnalysisRip &,
 		   VexPtr<StateMachine, &ir_heap> probeMachine,
@@ -146,5 +146,14 @@ visit_crash_summary(ctxtT *ctxt,
 	}
 	return res;
 }
+
+class SummaryId;
+char *buildPatchForCrashSummary(FILE *log,
+				Oracle *oracle,
+				const std::map<SummaryId, CrashSummary *> &summaries);
+void writePatchToFile(const char *output_fname,
+		      const char *binary,
+		      const std::map<SummaryId, CrashSummary *> &summaries,
+		      const char *patch);
 
 #endif /* !INFERRED_INFORMATION_HPP__ */

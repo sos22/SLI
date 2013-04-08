@@ -313,8 +313,6 @@ public:
 			  bbdd **assumption,
 			  bool havePhis,
 			  const IRExprOptimisations &opt) {
-		if (TIMEOUT)
-			return;
 		register_val &rv(registers[reg]);
 		switch (e->type()) {
 		case Ity_I8:
@@ -575,9 +573,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, bbdd *what, std::map<bbdd *, bbd
 		exprbdd *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 		bbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 		bbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
-		if (TIMEOUT) {
-			it->second = what;
-		} else if (t == f) {
+		if (t == f) {
 			it->second = t;
 		} else if (!cond->isLeaf() &&
 			   cond->internal().trueBranch->isLeaf() &&
@@ -615,9 +611,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, smrbdd *what, std::map<smrbdd *,
 		exprbdd *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 		smrbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 		smrbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
-		if (TIMEOUT) {
-			it->second = what;
-		} else if (t == f) {
+		if (t == f) {
 			it->second = t;
 		} else if (!cond->isLeaf() &&
 			   cond->internal().trueBranch->isLeaf() &&
@@ -655,9 +649,7 @@ threadState::specialiseIRExpr(SMScopes *scopes, exprbdd *what, std::map<exprbdd 
 			exprbdd *cond = specialiseIRExpr(scopes, what->internal().condition, exprMemo);
 			exprbdd *t = specialiseIRExpr(scopes, what->internal().trueBranch, memo, exprMemo);
 			exprbdd *f = specialiseIRExpr(scopes, what->internal().falseBranch, memo, exprMemo);
-			if (TIMEOUT) {
-				it->second = what;
-			} else if (t == f) {
+			if (t == f) {
 				it->second = t;
 			} else if (!cond->isLeaf() &&
 				   cond->internal().trueBranch->isLeaf() &&
@@ -870,25 +862,16 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			dynamic_cast<StateMachineSideEffectMemoryAccess *>(smse);
 		assert(smsema);
 		addr = state.specialiseIRExpr(scopes, smsema->addr);
-		if (TIMEOUT) {
-			return;
-		}
 		if (!smsema->tag.neverBadPtr()) {
 			exprbdd *a = exprbdd::unop(
 				&scopes->exprs,
 				&scopes->bools,
 				Iop_BadPtr,
 				addr);
-			if (TIMEOUT) {
-				return;
-			}
 			assert(a);
 			bbdd *isBad = exprbdd::to_bbdd(&scopes->bools, a);
-			if (TIMEOUT) {
-				return;
-			}
 			assertFalse<paramT>(&scopes->bools, isBad, opt, result);
-			if ((justPathConstraint->isLeaf() && !justPathConstraint->leaf()) || TIMEOUT) {
+			if (justPathConstraint->isLeaf() && !justPathConstraint->leaf()) {
 				return;
 			}
 		}
@@ -901,9 +884,6 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		assert(smses);
 		assert(addr);
 		auto data = state.specialiseIRExpr(scopes, smses->data);
-		if (TIMEOUT) {
-			return;
-		}
 		memlog.push_back(
 			new StateMachineSideEffectStore(
 				smses,
@@ -941,9 +921,6 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					Iop_CmpEQ64,
 					addr,
 					store->addr);
-			if (TIMEOUT) {
-				return;
-			}
 			/* The order of the next few operations
 			   (convert to BBDD, apply assumption, apply
 			   justPathConstraint) only matters for
@@ -952,25 +929,13 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 				&scopes->exprs,
 				addressesEq,
 				assumption);
-			if (TIMEOUT) {
-				return;
-			}
 			bbdd *addressEqBool =
 				exprbdd::to_bbdd(&scopes->bools, addressesEq);
-			if (TIMEOUT) {
-				return;
-			}
 			addressEqBool = bbdd::assume(
 				&scopes->bools,
 				addressEqBool,
 				justPathConstraint);
-			if (TIMEOUT) {
-				return;
-			}
 			addressEqBool = simplifyBDD(&scopes->bools, addressEqBool, opt);
-			if (TIMEOUT) {
-				return;
-			}
 			/* End of block where ordering doesn't matter */
 
 			exprbdd *val =
@@ -979,17 +944,11 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 					&scopes->bools,
 					smsel->type,
 					store->data);
-			if (TIMEOUT) {
-				return;
-			}
 			acc = exprbdd::ifelse(
 				&scopes->exprs,
 				addressEqBool,
 				val,
 				acc);
-			if (TIMEOUT) {
-				return;
-			}
 		}
 		state.set_register(scopes, smsel->target, acc, &justPathConstraint, havePhis, opt);
 		break;
@@ -999,9 +958,6 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 			dynamic_cast<StateMachineSideEffectCopy *>(smse);
 		assert(smsec);
 		auto val = state.specialiseIRExpr(scopes, smsec->value);
-		if (TIMEOUT) {
-			return;
-		}
 		state.set_register(scopes,
 				   smsec->target,
 				   val,
@@ -1018,9 +974,6 @@ EvalContext::evalStateMachineSideEffect(SMScopes *scopes,
 		auto v = state.specialiseIRExpr(
 			scopes,
 			smseaf->value);
-		if (TIMEOUT) {
-			return;
-		}
 		assertFalse<paramT>(&scopes->bools, v, opt, result);
 		break;
 	}
@@ -1103,10 +1056,6 @@ EvalContext::evalBooleanExpression(SMScopes *scopes, bbdd *assumption, bbdd *wha
 		return tr_true;
 	}
 	simplifiedCondition = simplifyBDD(&scopes->bools, simplifiedCondition, opt);
-	if (TIMEOUT) {
-		/* Guess; we'll ignore the result, anyway. */
-		return tr_true;
-	}
 	if (simplifiedCondition->isLeaf()) {
 		if (simplifiedCondition->leaf())
 			return tr_true;
@@ -1278,9 +1227,6 @@ EvalContext::advance(SMScopes *scopes,
 	case StateMachineState::Terminal: {
 		auto smt = (StateMachineTerminal *)_currentState;
 		auto res = state.specialiseIRExpr(scopes, smt->res);
-		if (TIMEOUT) {
-			return;
-		}
 		paramT::addPathToTerminal(scopes, result, res, justPathConstraint);
 
 		/* Caution: this will de-initialise *this, and might
@@ -1307,9 +1253,6 @@ EvalContext::advance(SMScopes *scopes,
 	case StateMachineState::Bifurcate: {
 		StateMachineBifurcate *smb = (StateMachineBifurcate *)_currentState;
 		bbdd *cond = state.specialiseIRExpr(scopes, smb->condition);
-		if (TIMEOUT) {
-			return;
-		}
 		bbdd *scond;
 		trool res = evalBooleanExpression(scopes, assumption, cond, &scond, opt);
 		switch (res) {
@@ -1485,9 +1428,6 @@ enumEvalPaths(SMScopes *scopes,
 		assumption = scopes->bools.cnst(true);
 	}
 	while (!pendingStates.empty()) {
-		if (TIMEOUT) {
-			goto timeout;
-		}
 		LibVEX_maybe_gc(token);
 
 		/* Make sure we don't need to realloc pendingStates at
@@ -1512,10 +1452,6 @@ enumEvalPaths(SMScopes *scopes,
 	if (debug_survival_constraint) {
 		printf("Result of symbolic execution:\n");
 		result->prettyPrint(stdout);
-	}
-
-	if (TIMEOUT) {
-		goto timeout;
 	}
 
 	paramT::suppressUnreached(scopes, unreachedIs, result);
@@ -1545,25 +1481,6 @@ enumEvalPaths(SMScopes *scopes,
 	}
 
 	return result;
-
-timeout:
-	std::set<StateMachineState *> states;
-	std::set<StateMachineBifurcate *> controlFlow;
-	std::set<StateMachineSideEffectMemoryAccess *> accesses;
-	std::set<StateMachineSideEffectPhi *> phi;
-	long end_size = scopes->bools.nr_ever + scopes->smrs.nr_ever + scopes->exprs.nr_ever;
-	enumStates(sm->root, &states);
-	enumStates(sm->root, &controlFlow);
-	enumSideEffects(sm->root, accesses);
-	enumSideEffects(sm->root, phi);
-	fprintf(lf, "time = inf, nr_states = %zd, nr_control_flow = %zd, nr_accesses = %zd, phi = %zd, complex = %zd, new BDDs = %ld (%s)\n",
-		states.size(), controlFlow.size(),
-		accesses.size(), phi.size(),
-		machineComplexity(sm->root),
-		end_size - start_size,
-		__warning_tag);
-	fflush(lf);
-	return NULL;
 }
 
 struct normalEvalParams {
@@ -1575,9 +1492,6 @@ struct normalEvalParams {
 				      resultT &result,
 				      smrbdd *termRes,
 				      bbdd *justPathConstraint) {
-		if (TIMEOUT) {
-			return;
-		}
 		termRes = suppressUninit(&scopes->smrs, true, termRes);
 		if (!termRes) {
 			if (debug_survival_constraint) {
@@ -1600,9 +1514,6 @@ struct normalEvalParams {
 				justPathConstraint,
 				termRes,
 				result);
-			if (TIMEOUT) {
-				return;
-			}
 			auto r = suppressUninit(&scopes->smrs, true, result);
 			if (r == NULL) {
 				abort();
@@ -1678,8 +1589,6 @@ _survivalConstraintIfExecutedAtomically(SMScopes *scopes,
 		resBdd->prettyPrint(stdout);
 	}
 	
-	if (TIMEOUT)
-		return NULL;
 	return resBdd;
 }
 
@@ -2332,9 +2241,6 @@ buildCrossProductMachine(SMScopes *scopes,
 			cfg_roots.push_back(*it);
 		}
 	}
-	if (TIMEOUT) {
-		return NULL;
-	}
         return convertToSSA(scopes, new StateMachine(crossMachineRoot, cfg_roots), ssaCorrespondence);
 }
 
@@ -2489,10 +2395,6 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 	fprintf(bubble_plot2_log, "%f: stop cross simplify\n", now());
 	stackedCdf::stopCrashConstraintResimplify();
 
-	if (TIMEOUT) {
-		fprintf(bubble_plot2_log, "%f: failed cross simplify\n", now());
-		return NULL;
-	}
 	stackedCdf::startCrashConstraintSymbolicExecute();
 	fprintf(bubble_plot2_log, "%f: start cross symbolic\n", now());
 	bbdd *res_ssa = survivalConstraintIfExecutedAtomically(
@@ -2514,10 +2416,6 @@ crossProductSurvivalConstraint(SMScopes *scopes,
 	auto res = deSsa(&scopes->bools, res_ssa, ssaCorrespondence);
 	fprintf(bubble_plot2_log, "%f: stop cross symbolic\n", now());
 	stackedCdf::stopCrashConstraint();
-	if (TIMEOUT || !res) {
-		fprintf(bubble_plot2_log, "%f: failed cross symbolic\n", now());
-		return NULL;
-	}
 	return res;
 }
 
@@ -2680,11 +2578,6 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 		smr_crash);
 	fprintf(bubble_plot2_log, "%f: stop build ic-atomic\n", now());
 	stackedCdf::stopBuildWAtomicMachine();
-	if (TIMEOUT) {
-		stackedCdf::stopBuildWAtomic();
-		fprintf(bubble_plot2_log, "%f: failed build ic-atomic\n", now());
-		return NULL;
-	}
 	combinedMachine->assertAcyclic();
 	stackedCdf::startBuildWAtomicResimplify();
 	fprintf(bubble_plot2_log, "%f: start simplify ic-atomic\n", now());
@@ -2702,10 +2595,6 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 					       token);
 	fprintf(bubble_plot2_log, "%f: stop simplify ic-atomic\n", now());
 	stackedCdf::stopBuildWAtomicResimplify();
-	if (TIMEOUT) {
-		fprintf(bubble_plot2_log, "%f: failed simplify ic-atomic\n", now());
-		return NULL;
-	}
 	stackedCdf::startBuildWAtomicSymbolicExecute();
 	fprintf(bubble_plot2_log, "%f: start execute ic-atomic\n", now());
 	auto res = survivalConstraintIfExecutedAtomically(
@@ -2722,9 +2611,6 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 		res = bbdd::And(&scopes->bools, res, assumption);
 	}
 	fprintf(bubble_plot2_log, "%f: stop execute ic-atomic\n", now());
-	if (TIMEOUT) {
-		fprintf(bubble_plot2_log, "%f: failed execute ic-atomic\n", now());
-	}
 	stackedCdf::stopBuildWAtomic();
 	return res;
 }
@@ -2799,7 +2685,7 @@ collectConstraints(SMScopes *scopes,
 	WeakSet<bbdd, &ir_heap> memo;
 
 	pendingStates.push_back(EvalContext(sm, scopes->bools.cnst(true)));
-	while (!pendingStates.empty() && !TIMEOUT) {
+	while (!pendingStates.empty()) {
 		LibVEX_maybe_gc(token);
 
 		pendingStates.reserve(pendingStates.size() + 1);

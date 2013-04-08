@@ -356,8 +356,6 @@ introduceCompoundFunctions(CrashSummary *summary,
 			   bool *done_something)
 {
 	summary = internCrashSummary(summary);
-	if (TIMEOUT)
-		return summary;
 
 	reg_set_t constRegisters;
 	{
