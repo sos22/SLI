@@ -92,6 +92,7 @@ StateMachine *buildProbeMachine(SMScopes *scopes,
 				const AllowableOptimisations &opt,
 				VexPtr<MaiMap, &ir_heap> &mai,
 				GarbageCollectionToken token);
+class TimeoutTimer;
 void diagnoseCrash(SMScopes *scopes,
 		   CfgLabelAllocator &allocLabel,
 		   const DynAnalysisRip &,
@@ -100,6 +101,7 @@ void diagnoseCrash(SMScopes *scopes,
 		   FixConsumer &df,
 		   const AllowableOptimisations &opt,
 		   VexPtr<MaiMap, &ir_heap> &mai,
+		   TimeoutTimer &tmr,
 		   GarbageCollectionToken token);
 void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 VexPtr<Oracle> &oracle,
