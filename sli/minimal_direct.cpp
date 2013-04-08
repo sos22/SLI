@@ -325,6 +325,8 @@ main(int argc, char *argv[])
 
 	bubble_plot_log = fopen("bubble_data.log", "a");
 	bubble_plot2_log = fopen("bubble_data2.log", "a");
+	setlinebuf(bubble_plot_log);
+	setlinebuf(bubble_plot2_log);
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations

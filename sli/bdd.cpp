@@ -14,8 +14,6 @@ static IRExpr *muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo);
 static IRExpr *
 _muxify(IRExpr *what, std::map<IRExpr *, IRExpr *> &memo)
 {
-	if (TIMEOUT)
-		return what;
 	switch (what->tag) {
 	case Iex_Get:
 		return what;
@@ -1805,8 +1803,6 @@ quickSimplify(const qs_args &a, std::map<qs_args, IRExpr *> &memo)
 bbdd *
 bbdd::_var(scope *scope, IRExpr *a, std::map<IRExpr *, bbdd *> &memo, const bdd_ordering::rank_hint &hint)
 {
-	if (TIMEOUT)
-		return scope->cnst(true);
 	auto it_did_insert = memo.insert(std::pair<IRExpr *, bbdd *>(a, (bbdd *)0xf00));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
@@ -1939,33 +1935,19 @@ public:
 bbdd *
 bbdd::And(scope *scope, bbdd *a, bbdd *b)
 {
-	if (!TIMEOUT) {
-		binary_zip_internal f(true, a, b);
-		auto r = zip(scope, f);
-		if (!TIMEOUT) {
-			return r;
-		}
-	}
-	return scope->cnst(true);
+	binary_zip_internal f(true, a, b);
+	return zip(scope, f);
 }
 bbdd *
 bbdd::Or(scope *scope, bbdd *a, bbdd *b)
 {
-	if (!TIMEOUT) {
-		binary_zip_internal f(false, a, b);
-		auto r = zip(scope, f);
-		if (!TIMEOUT) {
-			return r;
-		}
-	}
-	return scope->cnst(false);
+	binary_zip_internal f(false, a, b);
+	return zip(scope, f);
 }
 
 bbdd *
 bbdd::invert(scope *scope, bbdd *a, std::map<bbdd *, bbdd *> &memo)
 {
-	if (TIMEOUT)
-		return a;
 	if (a->isLeaf())
 		return scope->cnst(!a->leaf());
 
@@ -2181,9 +2163,6 @@ exprbdd::_var(exprbdd::scope *scope, bbdd::scope *bscope, IRExpr *what,
 	      std::map<IRExpr *, exprbdd *> &memo,
 	      const bdd_ordering::rank_hint &hint)
 {
-	if (TIMEOUT)
-		return NULL;
-
 	auto it_did_insert = memo.insert(std::pair<IRExpr *, exprbdd *>(what, (exprbdd *)0xf001));
 	auto it = it_did_insert.first;
 	auto did_insert = it_did_insert.second;
@@ -2550,13 +2529,7 @@ public:
 exprbdd *
 exprbdd::unop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *what)
 {
-	if (!TIMEOUT) {
-		auto r = exprbdd::restructure_zip(scope, bscope, irop_zipper(op, Iex_Unop, 1, (void **)&what));
-		if (!TIMEOUT) {
-			return r;
-		}
-	}
-	return what;
+	return restructure_zip(scope, bscope, irop_zipper(op, Iex_Unop, 1, (void **)&what));
 }
 exprbdd *
 exprbdd::binop(scope *scope, bbdd::scope *bscope, IROp op, exprbdd *a, exprbdd *b)
@@ -2636,9 +2609,6 @@ exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr, std::map<exprbdd *, bbdd *> 
 bbdd *
 exprbdd::to_bbdd(bbdd::scope *scope, exprbdd *expr)
 {
-	if (TIMEOUT) {
-		return scope->cnst(true);
-	}
 	assert(expr->type() == Ity_I1);
 	std::map<exprbdd *, bbdd *> memo;
 	stackedCdf::startBDD();

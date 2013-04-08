@@ -235,9 +235,6 @@ buildPatchStrategy(crashEnforcementRoots &roots,
 		patchQueueT pses;
 		pses.push(currentPs);
 		while (true) {
-			if (TIMEOUT) {
-				return;
-			}
 			if (pses.empty()) {
 				errx(1, "cannot build patch strategy");
 			}

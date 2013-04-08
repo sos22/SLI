@@ -64,7 +64,7 @@ control_dependence_graph::control_dependence_graph(const StateMachine *sm,
 	int nr_complete = 0;
 	content[sm->root] = scope->cnst(true);
 	pending.push_back(sm->root);
-	while (!TIMEOUT && !pending.empty()) {
+	while (!pending.empty()) {
 		const StateMachineState *s = pending.back();
 		pending.pop_back();
 		assert(pendingParents.count(s));
@@ -83,8 +83,6 @@ control_dependence_graph::control_dependence_graph(const StateMachine *sm,
 			bbdd *cond = smb->condition;
 			bbdd *trueCond = bbdd::And(scope, dom, cond);
 			bbdd *falseCond = bbdd::And(scope, dom, bbdd::invert(scope, cond));
-			if (TIMEOUT)
-				break;
 			assert(trueCond);
 			assert(falseCond);
 			addPath(content[smb->trueTarget],
@@ -212,7 +210,7 @@ cdgOptimise(SMScopes *scopes, StateMachine *sm, control_dependence_graph &cdg,
 
 	std::vector<StateMachineState *> states;
 	enumStates(sm, &states);
-	for (auto it = states.begin(); !TIMEOUT && it != states.end(); it++) {
+	for (auto it = states.begin(); it != states.end(); it++) {
 		StateMachineState *state = *it;
 		bbdd *stateDom = cdg.domOf(state);
 		if (stateDom->isLeaf()) {

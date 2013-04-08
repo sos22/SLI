@@ -316,7 +316,7 @@ expr_slice::simplifyAndCheckForContradiction()
 	return false;
 }
 
-static bool
+static void
 buildCED(const SummaryId &summaryId,
 	 const expr_slice &c,
 	 std::map<ConcreteThread, std::set<std::pair<CfgLabel, long> > > &rootsCfg,
@@ -344,10 +344,6 @@ buildCED(const SummaryId &summaryId,
 				    next_hb_id,
 				    summary,
 				    as);
-	if (TIMEOUT) {
-		return false;
-	}
-	return true;
 }
 
 /* Check whether the ordering in @slice is consistent with a total
@@ -648,9 +644,6 @@ enumHbOrderings(const reorder_bbdd *what,
 		const std::set<const IRExprHappensBefore *> &falseExprs,
 		std::set<expr_slice> &acc)
 {
-	if (TIMEOUT) {
-		return;
-	}
 	if (what->isLeaf || !what->cond.evaluatable) {
 		if (debug_expr_slice) {
 			printf("Found an HB ordering.  True: ");
@@ -733,10 +726,6 @@ enforceCrashForMachine(const SummaryId &summaryId,
 {
 	fprintf(bubble_plot_log, "%f: start prepare summary\n", now());
 	summary = internCrashSummary(summary);
-	if (TIMEOUT) {
-		fprintf(_logfile, "Timeout while interning summary\n");
-		exit(1);
-	}
 
 	VexPtr<OracleInterface> oracleI(oracle);
 
@@ -745,7 +734,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 		summary->crashCondition,
 		summary->inferredAssumption);
 	if (!requirement) {
-		errx(1, "timeout");
+		errx(1, "impossible assumption?");
 	}
 
 	{
@@ -773,10 +762,6 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	fprintf(_logfile, "After free variable removal:\n");
 	requirement->prettyPrint(_logfile);
 	fprintf(_logfile, "\n");
-	if (TIMEOUT) {
-		fprintf(_logfile, "Killed by a timeout during simplification\n");
-		exit(1);
-	}
 
 	fprintf(bubble_plot_log, "%f: stop prepare summary\n", now());
 	fprintf(bubble_plot_log, "%f: start slice by hb\n", now());
@@ -789,17 +774,11 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	}
 	fprintf(bubble_plot_log, "%f: stop slice by hb\n", now());
 
-	if (TIMEOUT) {
-		fprintf(bubble_plot_log, "%f: failed slice by hb\n", now());
-		return crashEnforcementData();
-	}
-
 	crashEnforcementData accumulator;
-	for (auto it = sliced_by_hb.begin(); !TIMEOUT && it != sliced_by_hb.end(); it++) {
+	for (auto it = sliced_by_hb.begin(); it != sliced_by_hb.end(); it++) {
 		crashEnforcementData tmp;
-		if (buildCED(summaryId, *it, rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace)) {
-			accumulator |= tmp;
-		}
+		buildCED(summaryId, *it, rootsCfg, summary, &tmp, abs, next_hb_id, oracle->ms->addressSpace);
+		accumulator |= tmp;
 	}
 	return accumulator;
 }

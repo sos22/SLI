@@ -1667,11 +1667,6 @@ main(int argc, char *argv[])
 
 	collectConstraints(&scopes, mai1, machine1, oracleI, opt2, constraints, ALLOW_GC);
 
-	if (TIMEOUT) {
-		printf("Timeout!\n");
-		return 0;
-	}
-
 	{
 		std::set<IRExpr *> constraints2;
 		for (auto it = constraints.begin(); it != constraints.end(); it++) {
@@ -1692,7 +1687,7 @@ main(int argc, char *argv[])
 	int satisfier_contexts = 0;
 	int non_satisfier_contexts = 0;
 	std::vector<EvalState> initialCtxts;
-	for (auto it = constraints.begin(); !TIMEOUT && it != constraints.end(); it++) {
+	for (auto it = constraints.begin(); it != constraints.end(); it++) {
 		/* Find some concrete configuration which satisfies
 		 * this constraint. */
 
@@ -1742,7 +1737,7 @@ main(int argc, char *argv[])
 
 	/* Should also try to make all of the conditions be
 	 * non-satisfied at least once. */
-	for (auto it = constraints.begin(); !TIMEOUT && it != constraints.end(); it++) {
+	for (auto it = constraints.begin(); it != constraints.end(); it++) {
 		IRExpr *a = simplifyIRExpr(IRExpr_Unop(Iop_Not1, *it), AllowableOptimisations::defaultOptimisations);
 
 		bool found_one = false;
@@ -1782,11 +1777,6 @@ main(int argc, char *argv[])
 		it->prettyPrint(stdout);
 	}
 
-	if (TIMEOUT) {
-		printf("Timeout!\n");
-		return 0;
-	}
-
 	int nr_crash = 0;
 	int nr_nocrash = 0;
 	int nr_escape = 0;
@@ -1798,7 +1788,7 @@ main(int argc, char *argv[])
 	bool printedMachines = false;
 	std::map<const StateMachineState *, int> labels1;
 	std::map<const StateMachineState *, int> labels2;
-	for (auto it = initialCtxts.begin(); !TIMEOUT && it != initialCtxts.end(); it++) {
+	for (auto it = initialCtxts.begin(); it != initialCtxts.end(); it++) {
 		EvalCtxt ctxt1(*it);
 		EvalState extended_init_ctxt(*it);
 		EvalArgs eval1args;
@@ -1874,10 +1864,6 @@ main(int argc, char *argv[])
 				abort();
 		}
 		cntr++;
-	}
-	if (TIMEOUT) {
-		printf("Timeout!\n");
-		return 0;
 	}
 
 	printf("%zd constraints generated, %d contexts total (%d sat, %d non-sat), %d failures to generate contexts (%d sat, %d non-sat)\n",

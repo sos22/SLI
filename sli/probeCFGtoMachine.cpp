@@ -345,7 +345,7 @@ canonicaliseRegs(SMScopes *scopes, StateMachineState *root, const VexRip &rip, O
 	   the targets are still NULL pointers. */
 	std::vector<StateMachineState *> pendingStates;
 	pendingStates.push_back(root);
-	while (!TIMEOUT && !pendingStates.empty()) {
+	while (!pendingStates.empty()) {
 		StateMachineState *s = pendingStates.back();
 		pendingStates.pop_back();
 		if (!s) {
@@ -388,9 +388,6 @@ cfgNodeToState(SMScopes *scopes,
 	       bool storeLike,
 	       std::vector<reloc_t> &pendingRelocs)
 {
-	if (TIMEOUT)
-		return NULL;
-
 	ThreadRip tr(tid, target->rip);
 
 	StateMachineState *root;
@@ -2068,7 +2065,7 @@ importRegisters(StateMachineState *root
 	   at the start of that state. */
 	std::map<StateMachineState *, std::set<threadAndRegister> > definedRegs;
 	definedRegs[root].clear();
-	while (!TIMEOUT && !q.empty()) {
+	while (!q.empty()) {
 		StateMachineState *s = q.back();
 		q.pop_back();
 #ifndef NDEBUG
@@ -2407,9 +2404,6 @@ probeCFGsToMachine(SMScopes *scopes,
 	for (auto it = roots.begin(); !it.finished(); it.advance())
 		performTranslation(scopes, results, *it, oracle, tid, doOne);
 
-	if (TIMEOUT)
-		return NULL;
-
 #if TRACK_FRAMES
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	{
@@ -2452,8 +2446,6 @@ probeCFGsToMachine(SMScopes *scopes,
 			       , scopes, neededImports, tid
 #endif
 		);
-	if (TIMEOUT)
-		return NULL;
 	setMais(scopes, root, tid, mai);
 	StateMachine *res = new StateMachine(root, cfg_roots_this_sm);
 	internStateMachineCfg(res);
@@ -2486,15 +2478,11 @@ storeCFGsToMachine(SMScopes *scopes,
 			oracle,
 			tid,
 			doOne);
-	if (TIMEOUT)
-		return NULL;
 #if TRACK_FRAMES
 	std::set<StateMachineState *> sm_roots;
 	sm_roots.insert(s);
 	std::map<StateMachineState *, std::vector<FrameId> > entryStacks;
 	assignFrameIds(sm_roots, tid, entryStacks);
-	if (TIMEOUT)
-		return NULL;
 	std::map<std::pair<int, PointerAliasingSet>, std::set<int> > neededImports;
 #endif
 	setMais(scopes, s, tid, mai);

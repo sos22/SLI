@@ -58,8 +58,6 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 	}
 
 	*done_something |= set_condition(simplifyBDD(&scopes->bools, condition, opt));
-	if (TIMEOUT)
-		return this;
 	if (condition->isLeaf()) {
 		*done_something = true;
 		if (condition->leaf())
@@ -79,8 +77,6 @@ StateMachineBifurcate::optimise(SMScopes *scopes, const AllowableOptimisations &
 				condition,
 				((StateMachineTerminal *)trueTarget)->res,
 				((StateMachineTerminal *)falseTarget)->res);
-		if (TIMEOUT)
-			return this;
 		return new StateMachineTerminal(dbg_origin, n);
 	}
 
@@ -178,8 +174,9 @@ StateMachineSideEffectStore::optimise(SMScopes *scopes, const AllowableOptimisat
 		return StateMachineSideEffectUnreached::get();
 	}
 	exprbdd *data = simplifyBDD(&scopes->exprs, &scopes->bools, this->data, false, opt);
-	if (TIMEOUT || (addr == this->addr && data == this->data))
+	if (addr == this->addr && data == this->data) {
 		return this;
+	}
 	return new StateMachineSideEffectStore(this, addr, data);
 }
 
@@ -190,8 +187,9 @@ StateMachineSideEffectLoad::optimise(SMScopes *scopes, const AllowableOptimisati
 	if (addr == INACCESSIBLE_ADDRESS) {
 		return StateMachineSideEffectUnreached::get();
 	}
-	if (TIMEOUT || addr == this->addr)
+	if (addr == this->addr) {
 		return this;
+	}
 	return new StateMachineSideEffectLoad(this, addr);
 }
 
@@ -199,8 +197,9 @@ StateMachineSideEffect *
 StateMachineSideEffectCopy::optimise(SMScopes *scopes, const AllowableOptimisations &opt)
 {
 	exprbdd *value = simplifyBDD(&scopes->exprs, &scopes->bools, this->value, false, opt);
-	if (TIMEOUT || value == this->value)
+	if (value == this->value) {
 		return this;
+	}
 	return new StateMachineSideEffectCopy(this, value);
 }
 
@@ -211,8 +210,6 @@ StateMachineSideEffectAssertFalse::optimise(SMScopes *scopes, const AllowableOpt
 		return NULL;
 	}
 	bbdd *value = simplifyBDD(&scopes->bools, this->value, opt);
-	if (TIMEOUT)
-		return this;
 	if (value->isLeaf()) {
 		if (value->leaf())
 			return StateMachineSideEffectUnreached::get();
@@ -234,8 +231,9 @@ StateMachineSideEffectStartFunction::optimise(SMScopes *scopes, const AllowableO
 	if (rsp == INACCESSIBLE_ADDRESS) {
 		return StateMachineSideEffectUnreached::get();
 	}
-	if (TIMEOUT || rsp == this->rsp)
+	if (rsp == this->rsp) {
 		return this;
+	}
 	return new StateMachineSideEffectStartFunction(this, rsp);
 }
 
@@ -246,8 +244,9 @@ StateMachineSideEffectEndFunction::optimise(SMScopes *scopes, const AllowableOpt
 	if (rsp == INACCESSIBLE_ADDRESS) {
 		return StateMachineSideEffectUnreached::get();
 	}
-	if (TIMEOUT || rsp == this->rsp)
+	if (rsp == this->rsp) {
 		return this;
+	}
 	return new StateMachineSideEffectEndFunction(this, rsp);
 }
 #endif
@@ -854,7 +853,7 @@ StateMachineSideEffecting::prependSideEffect(StateMachineSideEffect *se)
 StateMachineState *
 StateMachineSideEffecting::optimise(SMScopes *scopes, const AllowableOptimisations &opt, bool *done_something)
 {
-	if (current_optimisation_gen == last_optimisation_gen || TIMEOUT)
+	if (current_optimisation_gen == last_optimisation_gen)
 		return this;
 	last_optimisation_gen = current_optimisation_gen;
 	if (!sideEffect) {

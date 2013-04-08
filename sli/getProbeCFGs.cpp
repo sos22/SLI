@@ -75,10 +75,10 @@ exploreForStartingRip(CfgLabelAllocator &allocLabel,
 		printf("Exploring from %s...\n", startingVexRip.name());
 	pendingAtCurrentDepth.push_back(startingVexRip);
 	depth = 0;
-	while (!TIMEOUT && depth < maxPathLength) {
+	while (depth < maxPathLength) {
 		if (debug_exploration)
 			printf("\tAt depth %d/%d\n", depth, maxPathLength);
-		while (!TIMEOUT && !pendingAtCurrentDepth.empty()) {
+		while (!pendingAtCurrentDepth.empty()) {
 			VexRip vr(pendingAtCurrentDepth.back());
 			pendingAtCurrentDepth.pop_back();
 			if (out.count(vr))
@@ -168,7 +168,7 @@ initialExploration(CfgLabelAllocator &allocLabel,
 		if (debug_exploration)
 			printf("initialExploration with %zd RIPs available\n",
 			       startingRips.size());
-		for (auto it = startingRips.begin(); !TIMEOUT && it != startingRips.end(); it++) {
+		for (auto it = startingRips.begin(); it != startingRips.end(); it++) {
 			if (exploreForStartingRip(allocLabel,
 						  oracle,
 						  *it,
@@ -181,9 +181,6 @@ initialExploration(CfgLabelAllocator &allocLabel,
 			} else {
 				newStartingRips.insert(*it);
 			}
-		}
-		if (TIMEOUT) {
-			return;
 		}
 		if (!failed) {
 			resolveReferences(succMap, out);
@@ -399,7 +396,7 @@ trimExcessNodes(Oracle *oracle,
 		if (oracle->isFunctionHead(n->rip))
 			pending.insert(n);
 	}
-	while (!TIMEOUT && !pending.empty()) {
+	while (!pending.empty()) {
 		HashedSet<HashedPtr<CFGNode> > newPending;
 		for (auto it = pending.begin(); !it.finished(); it.advance()) {
 			CFGNode *n = *it;
@@ -413,7 +410,7 @@ trimExcessNodes(Oracle *oracle,
 	}
 
 	HashedSet<HashedPtr<CFGNode> > nodesToKill;
-	for (auto it = nodes.begin(); !TIMEOUT && !it.finished(); it.advance()) {
+	for (auto it = nodes.begin(); !it.finished(); it.advance()) {
 		/* We keep the node if either it's reachable from the
 		 * function head or a root... */
 		if (reachableFromFunctionHead.contains(*it)) {
@@ -443,11 +440,11 @@ trimExcessNodes(Oracle *oracle,
 		nodesToKill.insert(*it);
 	}
 
-	if (nodesToKill.empty() || TIMEOUT)
+	if (nodesToKill.empty())
 		return;
 
 	/* Now go back and remove all the nodes in nodesToKill. */
-	for (auto it = nodes.begin(); !TIMEOUT && !it.finished(); ) {
+	for (auto it = nodes.begin(); !it.finished(); ) {
 		CFGNode *n = *it;
 		if (nodesToKill.contains(n)) {
 			it.erase();
@@ -498,8 +495,6 @@ removeReachable(HashedSet<HashedPtr<CFGNode> > &out, const CFGNode *n)
 	while (!pending.empty()) {
 		const CFGNode *n = pending.back();
 		pending.pop_back();
-		if (TIMEOUT)
-			return;
 		if (!out.erase(const_cast<CFGNode *>(n))) {
 			/* Already not-present */
 			continue;
@@ -566,11 +561,11 @@ findRoots(const HashedSet<HashedPtr<CFGNode> > &allNodes,
 	removeReachable(currentlyUnrooted, newRoots);
 	roots.extend(newRoots);
 
-	if (!allow_cycles && !currentlyUnrooted.empty() && !TIMEOUT) {
+	if (!allow_cycles && !currentlyUnrooted.empty()) {
 		printf("Unexpected cycle in CFG!\n");
 		abort();
 	}
-	while (!TIMEOUT && !currentlyUnrooted.empty()) {
+	while (!currentlyUnrooted.empty()) {
 		/* Nasty case: everything in @currentlyUnrooted is
 		   part of a cycle in @currentlyUnrooted.  Try to grab
 		   something which is as far as possible away from the
@@ -608,8 +603,6 @@ trimUninterestingCFGNodes(std::map<VexRip, CFGNode *> &m,
 	 * interesting. */
 	bool progress = true;
 	while (progress) {
-		if (TIMEOUT)
-			return;
 		progress = false;
 		for (auto it = m.begin(); it != m.end(); it++) {
 			const CFGNode *n = it->second;
@@ -652,9 +645,6 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 {
 	std::map<VexRip, CFGNode *> ripsToCFGNodes;
 	initialExploration(allocLabel, oracle, targetInstr, ripsToCFGNodes, targetNodes, maxPathLength);
-	if (TIMEOUT) {
-		return false;
-	}
 
 	if (debug_exploration) {
 		printf("Initial ripsToCFGNodes table:\n");
@@ -674,9 +664,6 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	}
 
 	unrollAndCycleBreak(allocLabel, nodes, targetNodes, out, maxPathLength);
-	if (TIMEOUT) {
-		return false;
-	}
 
 	if (debug_exploration) {
 		printf("Before trimming:\n");
@@ -684,10 +671,6 @@ getProbeCFG(CfgLabelAllocator &allocLabel,
 	}
 
 	trimExcessNodes(oracle, nodes, targetNodes, maxPathLength);
-
-	if (TIMEOUT) {
-		return false;
-	}
 
 	findRoots(nodes, targetNodes, out, false);
 	if (debug_exploration) {

@@ -388,8 +388,6 @@ compare_expressions(const reg_plus_offset &a, const exprbdd *b)
 bool
 StackLayout::identifyFrameFromPtr(IRExpr *ptr, FrameId *out)
 {
-	if (TIMEOUT)
-		return false;
 	*out = FrameId();
 	reg_plus_offset ptrs(ptr);
 	if (!ptrs.tr.isValid() ||
@@ -839,8 +837,6 @@ PointsToTable::build(StateMachine *sm)
 	PointerAliasingSet defaultTmpPointsTo(PointerAliasingSet::anything);
 	std::set<StateMachineSideEffect *> sideEffects;
 	enumSideEffects(sm, sideEffects);
-	if (TIMEOUT)
-		return false;
 	for (auto it = sideEffects.begin(); it != sideEffects.end(); it++) {
 		threadAndRegister tr(threadAndRegister::invalid());
 		if ( (*it)->definesRegister(tr) )
@@ -1110,9 +1106,6 @@ AliasTable::build(const MaiMap &decode,
 
 	/* Now convert that into an actual aliasing table. */
 	for (auto it = reaching.begin(); it != reaching.end(); it++) {
-		if (TIMEOUT) {
-			return false;
-		}
 		assert(it->first->type == StateMachineState::SideEffecting);
 		StateMachineSideEffecting *smse = (StateMachineSideEffecting *)it->first;
 		StateMachineSideEffect *se = smse->getSideEffect();
@@ -1706,13 +1699,9 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 				   unreachable.  Hmm.  That should
 				   have been dealt with by the CDG
 				   optimisation already. */
-				if (debug_use_alias_table) {
-					printf("Failed because state l%d is unreachable?\n",
-					       stateLabels[state]);
-				}
-				if (!TIMEOUT)
-					abort();
-				return sm;
+				printf("Failed because state l%d is unreachable?\n",
+				       stateLabels[state]);
+				abort();
 			}
 			if (state == sm->root) {
 				predecessors.push_back(NULL);
@@ -1758,9 +1747,6 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 				}
 				assert(*slot == replacements[predState]);
 			}
-			if (TIMEOUT) {
-				return sm;
-			}
 			/* What would be loaded at the start of this state? */
 			exprbdd *startOfState = exprbdd::from_enabling(&scopes->exprs,
 								       tabAtStartOfState,
@@ -1800,7 +1786,7 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 							l->addr)),
 					st->data,
 					startOfState);
-				if (debug_use_alias_table && !TIMEOUT) {
+				if (debug_use_alias_table) {
 					printf("endOfState for l%d:\n",
 					       stateLabels[state]);
 					endOfState->prettyPrint(stdout);
@@ -1817,8 +1803,8 @@ functionAliasAnalysis(SMScopes *scopes, const MaiMap &decode, StateMachine *sm,
 		}
 		exprbdd *repl = replacements[it->first];
 		if (!repl) {
-			if (!TIMEOUT)
-				abort();
+			printf("replacement is unexpectedly null?\n");
+			abort();
 		} else {
 			if (debug_use_alias_table) {
 				printf("Mux for l%d is:\n", stateLabels[it->first]);

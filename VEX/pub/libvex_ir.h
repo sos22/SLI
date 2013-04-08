@@ -130,8 +130,6 @@ public:
 	}
 };
 
-#define TIMEOUT false
-
 class threadAndRegister : public Named {
 	std::pair<unsigned, int> content;
 	bool valid;
@@ -1765,8 +1763,6 @@ struct IRExprAssociative : public IRExpr {
    }
  private:
    void _sanity_check(unsigned m) const {
-      if (TIMEOUT)
-	 return;
       sanity_check_irop(op);
       assert(nr_arguments >= 0);
       IRType a, b, c, d, e;
