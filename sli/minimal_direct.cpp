@@ -138,6 +138,8 @@ consider_rip(const DynAnalysisRip &my_rip,
 	     VexPtr<Oracle> &oracle,
 	     DumpFix &df,
 	     const AllowableOptimisations &opt,
+	     int only_store_cfg,
+	     int expected_nr_store_cfgs,
 	     GarbageCollectionToken token)
 {
 	__set_profiling(consider_rip);
@@ -156,7 +158,7 @@ consider_rip(const DynAnalysisRip &my_rip,
 		fprintf(bubble_plot_log, "%f: Dismiss early, PLT\n", now());
 		fprintf(_logfile, "Is in PLT, so ignore\n");
 	} else {
-		checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, opt, token);
+		checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, opt, only_store_cfg, expected_nr_store_cfgs, token);
 	}
 	fprintf(bubble_plot_log, "%f: finish crashing thread\n", now());
 	stackedCdf::stop();
@@ -197,7 +199,7 @@ InstructionConsumer::operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAn
 	fprintf(_logfile, "Log for %s:\n", dar.name());
 	fflush(0);
 
-	consider_rip(dar, 1, oracle, df, opt, ALLOW_GC);
+	consider_rip(dar, 1, oracle, df, opt, -1, -1, ALLOW_GC);
 	fclose(_logfile);
 	_logfile = stdout;
 
@@ -302,7 +304,7 @@ main(int argc, char *argv[])
 		argc--;
 	}
 
-	if (argc > 1)
+	if (argc > 2)
 		errx(1, "Too many arguments");
 
 	VexPtr<Oracle> oracle;
@@ -339,16 +341,29 @@ main(int argc, char *argv[])
 	if (double_free_mode)
 		opt = opt.enablefreeMightRace();
 
-	if (argc == 1) {
+	if (argc == 1 || argc == 2) {
 		DynAnalysisRip vr;
 		const char *succ;
 		if (parseDynAnalysisRip(&vr, argv[0], &succ)) {
-			consider_rip(vr, 1, oracle, df, opt, ALLOW_GC);
+			int only_store_cfg = -1;
+			int expected_nr_store_cfgs = -1;
+			argc--;
+			argv++;
+			if (argc == 1) {
+				if (sscanf(argv[0], "%d/%d", &only_store_cfg, &expected_nr_store_cfgs) != 2 ||
+				    only_store_cfg < 0 ||
+				    expected_nr_store_cfgs <= 0 ||
+				    only_store_cfg >= expected_nr_store_cfgs) {
+					errx(1, "expected final argument to be <store_cfg>/<nr_store_cfgs>, not %s", argv[0]);
+				}
+			}
+			consider_rip(vr, 1, oracle, df, opt, only_store_cfg, expected_nr_store_cfgs, ALLOW_GC);
 			df.finish();
 			return 0;
 		}
-		if (sscanf(argv[0], "%d...%d", &start_percentage, &end_percentage) != 2)
-			errx(1, "expect final argument to be either a VexRip or s...d where s and d are start and end percentages");
+		if (argc != 1 ||
+		    sscanf(argv[0], "%d...%d", &start_percentage, &end_percentage) != 2)
+			errx(1, "expect argument to be either a VexRip or s...d where s and d are start and end percentages, not %s", argv[0]);
 	}
 
 	std::vector<DynAnalysisRip> schedule;

@@ -267,6 +267,8 @@ void checkWhetherInstructionCanCrash(const DynAnalysisRip &rip,
 				     const VexPtr<Oracle> &oracle,
 				     FixConsumer &df,
 				     const AllowableOptimisations &opt,
+				     int only_store_cfg,
+				     int expected_nr_store_cfgs,
 				     GarbageCollectionToken token);
 
 MemoryAccessIdentifier mkPendingMai(const CFGNode *node);

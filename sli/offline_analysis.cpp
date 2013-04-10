@@ -1626,6 +1626,82 @@ machineHasOneRacingLoad(const MaiMap &mai, StateMachine *sm, const VexRip &vr, O
 }
 
 static void
+processOneStoreCfg(SMScopes *scopes,
+		   const DynAnalysisRip &targetRip,
+		   const VexPtr<CFGNode *, &ir_heap> &storeCFGs,
+		   int i,
+		   int nrStoreCfgs,
+		   enum StateMachineState::RoughLoadCount roughLoadCount,
+		   const VexPtr<StateMachine, &ir_heap> &probeMachine,
+		   const VexPtr<bbdd, &ir_heap> &atomicSurvival,
+		   const VexPtr<StateMachine, &ir_heap> &assertionFreeProbeMachine,
+		   const VexPtr<Oracle> &oracle,
+		   FixConsumer &df,
+		   const sane_map<DynAnalysisRip, IRType> &potentiallyConflictingStores,
+#if !CONFIG_W_ISOLATION
+		   const std::set<DynAnalysisRip> &communicatingInstructions,
+#endif
+		   bool preserveMux,
+		   const AllowableOptimisations &optIn,
+		   const VexPtr<MaiMap, &ir_heap> &maiIn,
+		   GarbageCollectionToken token)
+{
+	fprintf(better_log, "%d/%d: Interfering CFG has %d instructions\n",
+		i, nrStoreCfgs, countCfgInstructions(storeCFGs[i]));
+	bool singleNodeCfg = isSingleNodeCfg(storeCFGs[i]);
+	if (CONFIG_W_ISOLATION && roughLoadCount == StateMachineState::singleLoad && singleNodeCfg) {
+		fprintf(_logfile, "Single store versus single load -> no race possible\n");
+		fprintf(better_log, "%d/%d: single store versus single load\n",
+			i, nrStoreCfgs);
+		return;
+	}
+
+	if (CONFIG_W_ISOLATION &&
+	    singleNodeCfg &&
+	    machineHasOneRacingLoad(*maiIn, assertionFreeProbeMachine, storeCFGs[i]->rip, oracle)) {
+		fprintf(_logfile, "Single store versus single shared load -> no race possible\n");
+		fprintf(better_log, "%d/%d: single store versus single shared load\n",
+			i, nrStoreCfgs);
+		return;
+	}
+
+	VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
+	VexPtr<CrashSummary, &ir_heap> summary;
+
+	if (run_in_child(bubble_plot2_log, token)) {
+		return;
+	}
+
+	TimeoutTimer timer2;
+	timer2.timeoutAfterSeconds(CONFIG_TIMEOUT2);
+	fprintf(bubble_plot2_log, "%f: start interfering CFG\n", now());
+	summary = considerStoreCFG(scopes,
+				   targetRip,
+				   storeCFG,
+				   oracle,
+				   probeMachine,
+				   atomicSurvival,
+				   STORING_THREAD + i,
+				   i,
+				   nrStoreCfgs,
+				   optIn
+#if CONFIG_W_ISOLATION
+				   .setinterestingStores(&potentiallyConflictingStores)
+#endif
+				   .setmutexStoresInteresting(preserveMux),
+				   maiIn,
+#if !CONFIG_W_ISOLATION
+				   potentiallyConflictingStores,
+#endif
+				   token);
+	fprintf(bubble_plot2_log, "%f: stop interfering CFG\n", now());
+	if (summary)
+		df(summary, token);
+
+	exit(0);
+}
+
+static void
 probeMachineToSummary(SMScopes *scopes,
 		      CfgLabelAllocator &allocLabel,
 		      const DynAnalysisRip &targetRip,
@@ -1642,6 +1718,8 @@ probeMachineToSummary(SMScopes *scopes,
 		      const AllowableOptimisations &optIn,
 		      const VexPtr<MaiMap, &ir_heap> &maiIn,
 		      TimeoutTimer &timer,
+		      int only_store_cfg,
+		      int expected_nr_store_cfgs,
 		      GarbageCollectionToken token)
 {
 	assert(potentiallyConflictingStores.size() > 0);
@@ -1670,65 +1748,35 @@ probeMachineToSummary(SMScopes *scopes,
 	}
 	assert(nrStoreCfgs != 0);
 
+	if (expected_nr_store_cfgs != -1 && expected_nr_store_cfgs != nrStoreCfgs) {
+		errx(1, "Expected %d store CFGs, found %d",
+		     expected_nr_store_cfgs, nrStoreCfgs);
+	}
 	auto roughLoadCount = assertionFreeProbeMachine->root->roughLoadCount();
 
 	timer.cancel();
 
 	fprintf(bubble_plot_log, "%f: start process interfering CFGs\n", now());
-	for (int i = 0; i < nrStoreCfgs; i++) {
-		fprintf(better_log, "%d/%d: Interfering CFG has %d instructions\n",
-			i, nrStoreCfgs, countCfgInstructions(storeCFGs[i]));
-		bool singleNodeCfg = isSingleNodeCfg(storeCFGs[i]);
-		if (CONFIG_W_ISOLATION && roughLoadCount == StateMachineState::singleLoad && singleNodeCfg) {
-			fprintf(_logfile, "Single store versus single load -> no race possible\n");
-			fprintf(better_log, "%d/%d: single store versus single load\n",
-				i, nrStoreCfgs);
-			continue;
-		}
-
-		if (CONFIG_W_ISOLATION &&
-		    singleNodeCfg &&
-		    machineHasOneRacingLoad(*maiIn, assertionFreeProbeMachine, storeCFGs[i]->rip, oracle)) {
-			fprintf(_logfile, "Single store versus single shared load -> no race possible\n");
-			fprintf(better_log, "%d/%d: single store versus single shared load\n",
-				i, nrStoreCfgs);
-			continue;
-		}
-
-		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
-		VexPtr<CrashSummary, &ir_heap> summary;
-
-		if (run_in_child(bubble_plot2_log, token)) {
-			continue;
-		}
-
-		TimeoutTimer timer2;
-		timer2.timeoutAfterSeconds(CONFIG_TIMEOUT2);
-		fprintf(bubble_plot2_log, "%f: start interfering CFG\n", now());
-		summary = considerStoreCFG(scopes,
-					   targetRip,
-					   storeCFG,
-					   oracle,
-					   probeMachine,
-					   atomicSurvival,
-					   STORING_THREAD + i,
-					   i,
-					   nrStoreCfgs,
-					   optIn
-#if CONFIG_W_ISOLATION
-					        .setinterestingStores(&potentiallyConflictingStores)
-#endif
-					        .setmutexStoresInteresting(preserveMux),
-					   maiIn,
-#if !CONFIG_W_ISOLATION
+	if (only_store_cfg == -1) {
+		for (int i = 0; i < nrStoreCfgs; i++) {
+			processOneStoreCfg(scopes, targetRip, storeCFGs, i, nrStoreCfgs,
+					   roughLoadCount, probeMachine, atomicSurvival,
+					   assertionFreeProbeMachine, oracle, df,
 					   potentiallyConflictingStores,
+#if !CONFIG_W_ISOLATION
+					   communicatingInstructions,
 #endif
-					   token);
-		fprintf(bubble_plot2_log, "%f: stop interfering CFG\n", now());
-		if (summary)
-			df(summary, token);
-
-		exit(0);
+					   preserveMux, optIn, maiIn, token);
+		}
+	} else {
+		processOneStoreCfg(scopes, targetRip, storeCFGs, only_store_cfg, nrStoreCfgs,
+				   roughLoadCount, probeMachine, atomicSurvival,
+				   assertionFreeProbeMachine, oracle, df,
+				   potentiallyConflictingStores,
+#if !CONFIG_W_ISOLATION
+				   communicatingInstructions,
+#endif
+				   preserveMux, optIn, maiIn, token);
 	}
 	fprintf(bubble_plot_log, "%f: stop process interfering CFGs\n", now());
 }
@@ -1743,6 +1791,8 @@ diagnoseCrash(SMScopes *scopes,
 	      const AllowableOptimisations &optIn,
 	      VexPtr<MaiMap, &ir_heap> &mai,
 	      TimeoutTimer &timer,
+	      int only_store_cfg,
+	      int expected_nr_store_cfgs,
 	      GarbageCollectionToken token)
 {
 	__set_profiling(diagnoseCrash);
@@ -1909,6 +1959,8 @@ diagnoseCrash(SMScopes *scopes,
 			      optIn,
 			      mai,
 			      timer,
+			      only_store_cfg,
+			      expected_nr_store_cfgs,
 			      token);
 }
 			    
@@ -1980,6 +2032,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				const VexPtr<Oracle> &oracle,
 				FixConsumer &df,
 				const AllowableOptimisations &opt,
+				int only_store_cfg,
+				int expected_nr_store_cfgs,
 				GarbageCollectionToken token)
 {
 	if (better_log) {
@@ -2046,7 +2100,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	}
 
 	diagnoseCrash(&scopes, allocLabel, targetRip, probeMachine, oracle,
-		      df, opt.enablenoLocalSurvival(), mai, timer1, token);
+		      df, opt.enablenoLocalSurvival(), mai, timer1, only_store_cfg,
+		      expected_nr_store_cfgs, token);
 	exit(0);
 }
 
