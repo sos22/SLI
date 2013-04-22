@@ -178,7 +178,7 @@ struct low_level_state {
 	int nr_unbound_receiving_messages;
 	struct msg_template **unbound_receiving_messages;
 
-#ifdef KEEP_LLS_HISTORY
+#if KEEP_LLS_HISTORY
 	cfg_label_t history[LLS_HISTORY];
 #endif
 };
@@ -1075,7 +1075,6 @@ get_simslot(const struct low_level_state *lls, int idx)
 static void
 set_simslot(struct low_level_state *lls, int idx, unsigned long val)
 {
-	assert(!get_simslot_valid(lls, idx));
 	get_simslots(lls)[idx] = val;
 	get_simslot_validities(lls)[idx / 64] |= (1ul << (idx % 64));
 }
@@ -1105,7 +1104,7 @@ start_low_level_thread(struct high_level_state *hls, cfg_label_t starting_label,
 	lls->rsp_delta = rsp_delta;
 	low_level_state_push(&hls->ll_states, lls);
 	sanity_check_low_level_state(lls, 1);
-#ifdef KEEP_LLS_HISTORY
+#if KEEP_LLS_HISTORY
 	lls->history[LLS_HISTORY-1] = starting_label;
 #endif
 	debug("%p(%s): Start new LLS\n", lls, starting_node->id);
@@ -2574,7 +2573,7 @@ copy_lls(const struct low_level_state *lls)
 	new_lls->cfg_node = lls->cfg_node;
 	memcpy(get_simslots(new_lls), get_simslots(nc_lls), lls->__nr_simslots * 8);
 	memcpy(get_simslot_validities(new_lls), get_simslot_validities(nc_lls), (lls->__nr_simslots + 63) / 64 * 8);
-#ifdef KEEP_LLS_HISTORY
+#if KEEP_LLS_HISTORY
 	memcpy(new_lls->history, lls->history, sizeof(lls->history));
 #endif
 	return new_lls;
@@ -3215,7 +3214,7 @@ advance_through_cfg(struct high_level_state *hls, unsigned long rip)
 					EVENT(adv_malloc);
 				}
 				newLls->cfg_node = current_cfg_node->successors[j];
-#ifdef KEEP_LLS_HISTORY
+#if KEEP_LLS_HISTORY
 				memmove(newLls->history, newLls->history + 1, sizeof(newLls->history[0]) * (LLS_HISTORY-1));
 				newLls->history[LLS_HISTORY-1] = current_cfg_node->successors[j];
 #endif
