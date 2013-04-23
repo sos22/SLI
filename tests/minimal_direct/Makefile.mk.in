@@ -117,12 +117,17 @@ ${exename}.types.canon: ${exename}.exe ${exename}.types canonicalise_types_table
 	./canonicalise_types_table ${exename}.exe ${exename}.types \$@
 ${exename}.db: ${exename}.exe ${exename}.types.canon ${exename}.bcg static
 	./static ${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db
-${exename}.exe: tests/minimal_direct/$1.c
-	gcc -O -pthread -Wall -g \$< -o \$@
 ${exename}.db.timing: ${exename}.exe ${exename}.types.canon ${exename}.bcg static timing
 	./timing 10 ${exename}.db.timing ./static ${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db
 .PRECIOUS: ${exename}.exe ${exename}.types ${exename}.bcg
 EOF
+    if [ -z "$3" ]
+    then
+	cat <<EOF
+${exename}.exe: tests/minimal_direct/$1.c
+	gcc -O -pthread -Wall -g \$< -o \$@
+EOF
+    fi
 
     for i in $(seq 0 $((${nr_summaries} - 1)) )
     do
@@ -191,7 +196,7 @@ ${exename}.summaries: minimal_direct ${static_files} machines
 	mv crash_summaries ${exename}.summaries
 clean_dirs += ${exename}.summaries
 EOF
-    _emit_rules_for_exe "$1" "$2"
+    _emit_rules_for_exe "$1" "$2" "$3"
 }
 
 emit_rules_for_exe_dfree() {
@@ -254,6 +259,32 @@ EOF
     for bug in 15
     do
 	emit_rules_for_exe_segv bug${bug} 0
+    done
+
+    for i in `seq 3 2 100`
+    do
+	cat <<EOF
+${MD_TEST_DIR}/complex_hb_${i}.c: ./tests/minimal_direct/mk_complex_hb.sh
+	./tests/minimal_direct/mk_complex_hb.sh ${i} > \$@
+${MD_TEST_DIR}/complex_hb_${i}.exe: ${MD_TEST_DIR}/complex_hb_${i}.c
+	gcc -O -pthread -Wall -g \$< -o \$@
+EOF
+	emit_rules_for_exe_assert complex_hb_${i} 1 "no_exe"
+    done
+
+    for nr_reads in `seq 1 10`
+    do
+	for nr_writes in `seq 1 10`
+	do
+	    exe=complex_alias_${nr_reads}_${nr_writes}
+	    cat <<EOF
+${MD_TEST_DIR}/${exe}.c: ./tests/minimal_direct/mk_complex_aliasing.sh
+	./tests/minimal_direct/mk_complex_aliasing.sh ${nr_writes} ${nr_reads} > \$@
+${MD_TEST_DIR}/${exe}.exe: ${MD_TEST_DIR}/${exe}.c
+	gcc -O -pthread -Wall -g \$< -o \$@
+EOF
+	    emit_rules_for_exe_assert ${exe} 1 "no_exe"
+	done
     done
 
     # And now the harness
