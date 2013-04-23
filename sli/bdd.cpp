@@ -1444,6 +1444,9 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 			}
 
 			if (simpleArgs[i]->tag == Iex_Const) {
+				if (i != 0) {
+					realloc = true;
+				}
 				switch (op) {
 				case Iop_And1: case Iop_And8: case Iop_And16:
 				case Iop_And32: case Iop_And64:
