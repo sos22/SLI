@@ -20,13 +20,13 @@ do
     canon="$canon ${summary}.canon4"
 done
 
-${topdir}/enforce_crash ${bin} ${bin}.tc ${bin}.bcg ${bin}.db ${output}.ced ${canon}
+${topdir}/ec_driver ${bin} ${bin}.tc ${bin}.bcg ${bin}.db ${output}.ced ${canon}
 read ced_line < ${output}.ced
 if [ "$ced_line" = "<empty>" ]
 then
     exit 0
 fi
 
-${topdir}/ced_to_cep ${bin} ${output}.ced ${bin}.tc ${bin}.bcg ${bin}.db ${output}.cep.c
+${topdir}/ctoc_driver ${bin} ${output}.ced ${bin}.tc ${bin}.bcg ${bin}.db ${output}.cep.c
 
 gcc -g -Wall -ldl -I ${topdir}/sli/enforce_crash -shared ${topdir}/cep_interpreter.o -x c ${output}.cep.c -o ${output}.interp.so
