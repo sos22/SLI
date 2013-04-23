@@ -241,6 +241,10 @@ _optimiseStateMachine(SMScopes *scopes,
 		      GarbageCollectionToken token,
 		      bool *progress)
 {
+	if (!CONFIG_SIMPLIFIER) {
+		return sm;
+	}
+
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck(*mai);
 	sm->assertAcyclic();
@@ -1380,9 +1384,6 @@ considerStoreCFG(SMScopes *scopes,
 	}
 	fprintf(bubble_plot2_log, "%f: satisfiable\n", now());
 
-	fprintf(_logfile, "\t\tVerification condition:\n");
-	verification_condition->prettyPrint(_logfile);
-
 	if (CONFIG_USE_INDUCTION && !optIn.allPointersGood()) {
 		/* Now have a look at whether we have anything we can use the
 		 * induction rule on.  That means look at the probe machine
@@ -1667,6 +1668,8 @@ probeMachineToSummary(SMScopes *scopes,
 			"getStoreCFGs took %f seconds, produced %d \n",
 			s.sample(),
 			nrStoreCfgs);
+		fprintf(bubble_plot_log, "%f: produced %d interfering CFGs\n", now(),
+			nrStoreCfgs);
 	}
 	assert(nrStoreCfgs != 0);
 
@@ -1675,6 +1678,7 @@ probeMachineToSummary(SMScopes *scopes,
 	timer.cancel();
 
 	fprintf(bubble_plot_log, "%f: start process interfering CFGs\n", now());
+	fprintf(bubble_plot2_log, "%f: start crashing %s\n", now(), targetRip.name());
 	for (int i = 0; i < nrStoreCfgs; i++) {
 		fprintf(better_log, "%d/%d: Interfering CFG has %d instructions\n",
 			i, nrStoreCfgs, countCfgInstructions(storeCFGs[i]));
@@ -1730,6 +1734,7 @@ probeMachineToSummary(SMScopes *scopes,
 
 		exit(0);
 	}
+	fprintf(bubble_plot2_log, "%f: stop crashing %s\n", now(), targetRip.name());
 	fprintf(bubble_plot_log, "%f: stop process interfering CFGs\n", now());
 }
 
