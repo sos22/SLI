@@ -111,3 +111,7 @@
 #ifndef TIMEOUT_EC_PLACE
 #define TIMEOUT_EC_PLACE 60
 #endif
+
+#ifndef CONFIG_USE_CHILDREN
+#define CONFIG_USE_CHILDREN 1
+#endif

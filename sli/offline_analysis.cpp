@@ -1702,7 +1702,7 @@ probeMachineToSummary(SMScopes *scopes,
 		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 		VexPtr<CrashSummary, &ir_heap> summary;
 
-		if (run_in_child(bubble_plot2_log, token)) {
+		if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot2_log, token)) {
 			continue;
 		}
 
@@ -1732,7 +1732,9 @@ probeMachineToSummary(SMScopes *scopes,
 		if (summary)
 			df(summary, token);
 
-		exit(0);
+		if (CONFIG_USE_CHILDREN) {
+			exit(0);
+		}
 	}
 	fprintf(bubble_plot2_log, "%f: stop crashing %s\n", now(), targetRip.name());
 	fprintf(bubble_plot_log, "%f: stop process interfering CFGs\n", now());
@@ -2000,7 +2002,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		setlinebuf(better_log);
 	}
 
-	if (run_in_child(bubble_plot_log, token)) {
+	if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot_log, token)) {
 		return;
 	}
 
@@ -2052,6 +2054,8 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 
 	diagnoseCrash(&scopes, allocLabel, targetRip, probeMachine, oracle,
 		      df, opt.enablenoLocalSurvival(), mai, timer1, token);
-	exit(0);
+	if (CONFIG_USE_CHILDREN) {
+		exit(0);
+	}
 }
 
