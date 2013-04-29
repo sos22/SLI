@@ -130,6 +130,9 @@ new_arena(Heap *h, size_t content_size)
 	h->head_arena = r;
 
 	h->heap_used += content_size;
+	if (h->heap_used >= h->high_water) {
+		h->high_water = h->heap_used;
+	}
 
 	return r;
 }

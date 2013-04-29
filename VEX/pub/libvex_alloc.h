@@ -31,6 +31,7 @@ public:
 	struct _VexAllocType *headType;
 	struct wr_core *headVisitedWeakRef;
 	unsigned long heap_used;
+	unsigned long high_water;
 	bool redirection_tags_set;
 	__GcCallback *callbacks;
 };

@@ -1733,6 +1733,7 @@ probeMachineToSummary(SMScopes *scopes,
 			df(summary, token);
 
 		if (CONFIG_USE_CHILDREN) {
+			fprintf(bubble_plot2_log, "%f: high water: %ld, %ld\n", now(), main_heap.high_water, ir_heap.high_water);
 			exit(0);
 		}
 	}
@@ -2054,6 +2055,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 
 	diagnoseCrash(&scopes, allocLabel, targetRip, probeMachine, oracle,
 		      df, opt.enablenoLocalSurvival(), mai, timer1, token);
+	fprintf(bubble_plot_log, "%f: high water: %ld, %ld\n", now(), main_heap.high_water, ir_heap.high_water);
 	if (CONFIG_USE_CHILDREN) {
 		exit(0);
 	}
