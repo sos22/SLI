@@ -1368,7 +1368,7 @@ emulator_read(enum x86_segment seg,
 		/* fix up TLS access */
 		offset += fetch_fs_base();
 	} else {
-		assert(seg == x86_seg_ds || seg == x86_seg_ss);
+		assert(seg == x86_seg_ds || seg == x86_seg_ss || seg == x86_seg_es);
 	}
 	memcpy(p_data, (const void *)offset, bytes);
 	assert(hls);
@@ -1430,7 +1430,7 @@ emulator_write(enum x86_segment seg,
 	if (seg == x86_seg_fs) {
 		offset += fetch_fs_base();
 	} else {
-		assert(seg == x86_seg_ds || seg == x86_seg_ss);
+		assert(seg == x86_seg_ds || seg == x86_seg_ss || seg == x86_seg_es);
 	}
 	memcpy((void *)offset, (const void *)p_data, bytes);
 	return X86EMUL_OKAY;
