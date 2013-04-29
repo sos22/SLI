@@ -349,6 +349,7 @@ warning(const char *fmt, ...)
 	free(f2);
 }
 
+#if CONFIG_USE_CHILDREN
 bool
 run_in_child(FILE *lf, GarbageCollectionToken token)
 {
@@ -411,6 +412,7 @@ run_in_child(FILE *lf, GarbageCollectionToken token)
 	}
 	return false;
 }
+#endif
 
 /* fopen with C++ calling convention, so that gdb can tell that it has
    a 64 bit return, because that just makes everything easier. */
@@ -419,3 +421,26 @@ dbg_fopen(const char *fname, const char *name)
 {
 	return fopen(fname, name);
 }
+
+IRExpr *
+dbg_parseIRExpr(const char *str)
+{
+	const char *end;
+	IRExpr *res;
+	if (!parseIRExpr(&res, str, &end)) {
+		printf("Failed to parse %s as IRExpr\n", str);
+		return NULL;
+	}
+	if (*end) {
+		printf("WARNING: Unparsed suffix %s\n", end);
+	}
+	return res;
+}
+
+IRExpr *
+dbg_quickSimplify(IRExpr *what)
+{
+	std::map<qs_args, IRExpr *> memo;
+	return quickSimplify(qs_args(what), memo);
+}
+

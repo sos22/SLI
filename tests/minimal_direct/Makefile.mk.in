@@ -19,35 +19,11 @@ emit_rules_for_bug() {
     # deliberately.  Don't include it in the default test set.
     if [ "$1" != "bug17~0" ] && [ "$1" != "bug15~0" ] && [ "$1" != "bug15" ]
     then
-	echo "ALL_MD_TESTS+=${bugname}.interp.so"
-	echo "ALL_MD_TESTS+=${bugname}.fix.so"
+	echo "ALL_MD_TESTS+=${bugname}.interp.so ${bugname}.fix.so"
     fi
 
-    cat <<EOF
-${bugname}.interp.so: ${bugname}.cep.c cep_interpreter.o
-	gcc -ldl -shared -Isli/enforce_crash \$^ -o \$@
-
-${bugname}.fix.so: ${bugname}.fix.c sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c
-	gcc -Wall -g -shared -fPIC -Isli \$< -o \$@
-
-${bugname}.cep.c: ${bugname}.ced ctoc_driver ${static_files}
-	./ctoc_driver ${exename}.exe ${bugname}.ced ${exename}.types.canon ${exename}.bcg ${exename}.db ${bugname}.cep.c
-EOF
-    if [ "${bugname}" != "${exename}" ]
+    if [ "${bugname}" = "${exename}" ]
     then
-	cat <<EOF
-${bugname}.ced: ${bugname}.summary.canon4  ec_driver ${static_files}
-	./ec_driver ${static_files} \$@ \$<
-${bugname}.summary.canon4: canonicalise_crash_summary0 ${bugname}.summary.canon2
-	./canonicalise_crash_summary0 ${bugname}.summary.canon2 ${bugname}.summary.canon4
-${bugname}.summary.canon2: canonicalise_crash_summary2 ${bugname}.summary.canon0
-	./canonicalise_crash_summary2 ${bugname}.summary.canon0 ${bugname}.summary.canon2
-${bugname}.summary.canon0: canonicalise_crash_summary0 ${bugname}.summary
-	./canonicalise_crash_summary0 ${bugname}.summary ${bugname}.summary.canon0
-${bugname}.fix.c: s2f_driver ${static_files} ${bugname}.summary.canon4
-	./s2f_driver ${static_files} ${bugname}.fix.c ${bugname}.summary.canon4
-EOF
-    else
 	local summaries=""
 	for i in $(seq 1 $((${nr_bugs} - 1)) )
 	do
@@ -61,30 +37,9 @@ ${bugname}.fix.c: s2f_driver ${static_files} ${summaries}
 EOF
     fi
 
-    if [ "$bugname" != "${exename}" ]
-    then
-	cat <<EOF
-${bugname}.crash_times_dist: ${MD_TEST_DIR}/harness ${exename}.exe ${bugname}.interp.so ./tests/minimal_direct/crash_times_dist.sh /home/sos22/bin/check_dist
-	./tests/minimal_direct/crash_times_dist.sh ${exename}.exe ${bugname}.interp.so "" ${bugname}.crash_times_data > ${bugname}.crash_times_dist
-clean_files += ${bugname}.crash_times_dist ${bugname}.crash_times_data
-${bugname}.S.crash_times_dist: ${MD_TEST_DIR}/harness ${exename}.exe ${bugname}.interp.so ./tests/minimal_direct/crash_times_dist.sh /home/sos22/bin/check_dist
-	./tests/minimal_direct/crash_times_dist.sh ${exename}.exe ${bugname}.interp.so "-s" ${bugname}.S.crash_times_data > ${bugname}.S.crash_times_dist
-clean_files += ${bugname}.S.crash_times_dist ${bugname}.S.crash_times_data
-
-${bugname}.build_interp_time: timing ctoc_driver ec_driver cep_interpreter.o ${static_files} ${bugname}.summary.canon4 ./tests/minimal_direct/build_interp.sh
-	./timing 10 ${bugname}.build_interp_time ./tests/minimal_direct/build_interp.sh ${bugname}
-clean_files += ${bugname}.build_interp_time
-
-${bugname}.build_fix_time: timing sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c s2f_driver ${static_files} ${bugname}.summary.canon4 ./tests/minimal_direct/build_fix.sh
-	./timing 10 ${bugname}.build_fix_time ./tests/minimal_direct/build_fix.sh ${bugname}
-clean_files += ${bugname}.build_fix_time
-EOF
-    fi
     if ! [ -z "$include_perf" ]
     then
 	cat <<EOF
-${bugname}.perf_dists: ${MD_TEST_DIR}/harness ${exename}.exe ${bugname}.fix.so ./tests/minimal_direct/perf_dist.sh /home/sos22/bin/check_dist /home/sos22/bin/discard_outliers.py
-	./tests/minimal_direct/perf_dist.sh ${exename}.exe "${bugname}.fix.so" ${bugname}.perf_data > ${bugname}.perf_dists
 clean_files += ${bugname}.perf_dists ${bugname}.perf_data
 MD_PERF_FILES += ${bugname}.perf_dists
 EOF
@@ -96,10 +51,7 @@ EOF
     else
 	echo "# no perf stuff: $include_perf, nr_bugs = $nr_bugs"
     fi
-    for p in interp.so fix.c fix.so ced summary{,.canon0,.canon2,.canon3,.canon4} cep.c
-    do
-	echo "clean_files+=${bugname}.${p}"
-    done
+    echo clean_files+=${bugname}.{interp.so,fix.c,fix.so,ced,summary{,.canon0,.canon2,.canon3,.canon4},cep.c}
 }
 
 _emit_rules_for_exe() {
@@ -109,18 +61,6 @@ _emit_rules_for_exe() {
 
     local static_files="${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db"
     cat <<EOF
-${exename}.types: ${exename}.exe ./tests/minimal_direct/build_types_table.sh /local/scratch/sos22/valgrind-ft-stage3/bin/valgrind
-	./tests/minimal_direct/build_types_table.sh ./\$<
-${exename}.bcg: ${exename}.exe ./tests/minimal_direct/build_call_graph.sh ./tests/minimal_direct/build_types_table.sh /local/scratch/sos22/valgrind-ft-stage3/bin/valgrind
-	./tests/minimal_direct/build_call_graph.sh ./\$<
-${exename}.types.canon: ${exename}.exe ${exename}.types canonicalise_types_table
-	./canonicalise_types_table ${exename}.exe ${exename}.types \$@
-${exename}.db: ${exename}.exe ${exename}.types.canon ${exename}.bcg static
-	./static ${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db
-${exename}.exe: tests/minimal_direct/$1.c
-	gcc -O -pthread -Wall -g \$< -o \$@
-${exename}.db.timing: ${exename}.exe ${exename}.types.canon ${exename}.bcg static timing
-	./timing 10 ${exename}.db.timing ./static ${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db
 .PRECIOUS: ${exename}.exe ${exename}.types ${exename}.bcg
 EOF
 
@@ -148,20 +88,8 @@ cat <<EOF
 ${exename}.build_summary_time: ./timing ${exename}.exe ${exename}.types.canon ${exename}.bcg ${exename}.db ./tests/minimal_direct/build_summary.sh canonicalise_crash_summary0 canonicalise_crash_summary2 canonicalise_crash_summary3 minimal_direct
 	./timing 10 ${exename}.build_summary_time ./tests/minimal_direct/build_summary.sh ${exename}
 clean_files += ${exename}.build_summary_time
-${exename}.crash_times_dist: ${MD_TEST_DIR}/harness ${exename}.exe ./tests/minimal_direct/crash_times_dist.sh /home/sos22/bin/check_dist
-	./tests/minimal_direct/crash_times_dist.sh ${exename}.exe '<none>' "" ${exename}.crash_times_data > ${exename}.crash_times_dist
-clean_files += ${exename}.crash_times_dist ${exename}.crash_times_data
-${exename}.dc.crash_times_dist: ${MD_TEST_DIR}/harness ${exename}.exe ./tests/minimal_direct/crash_times_dist.sh
-	./tests/minimal_direct/crash_times_dist.sh ${exename}.exe '<dc>' "" ${exename}.dc.crash_times_data > ${exename}.dc.crash_times_dist
-clean_files += ${exename}.dc.crash_times_dist ${exename}.dc.crash_times_data
-
-${exename}.perf_dists: ${MD_TEST_DIR}/harness ${exename}.exe ./tests/minimal_direct/perf_dist.sh /home/sos22/bin/check_dist /home/sos22/bin/discard_outliers.py
-	./tests/minimal_direct/perf_dist.sh ${exename}.exe "" ${exename}.perf_data > ${exename}.perf_dists
-clean_files += ${exename}.perf_dists ${exename}.perf_data
-
-MD_PERF_FILES+=${exename}.build_summary_time ${exename}.crash_times_dist ${exename}.dc.crash_times_dist ${exename}.perf_dists ${exename}.db.timing
+MD_PERF_FILES+=${exename}.build_summary_time
 EOF
-
 }
 
 emit_rules_for_exe_segv() {
@@ -191,7 +119,7 @@ ${exename}.summaries: minimal_direct ${static_files} machines
 	mv crash_summaries ${exename}.summaries
 clean_dirs += ${exename}.summaries
 EOF
-    _emit_rules_for_exe "$1" "$2"
+    _emit_rules_for_exe "$1" "$2" "$3"
 }
 
 emit_rules_for_exe_dfree() {
@@ -254,6 +182,61 @@ EOF
     for bug in 15
     do
 	emit_rules_for_exe_segv bug${bug} 0
+    done
+
+    for i in `seq 3 2 100`
+    do
+	cat <<EOF
+${MD_TEST_DIR}/complex_hb_${i}.c: ./tests/minimal_direct/mk_complex_hb.sh
+	./tests/minimal_direct/mk_complex_hb.sh ${i} > \$@
+${MD_TEST_DIR}/complex_hb_${i}.exe: ${MD_TEST_DIR}/complex_hb_${i}.c
+	gcc -O -pthread -Wall -g "\$<" -o "\$@"
+EOF
+	emit_rules_for_exe_assert complex_hb_${i} 1 "no_exe"
+    done
+
+    # Rules for building things.
+    cat <<EOF
+${MD_TEST_DIR}/%.interp.so: ${MD_TEST_DIR}/%.cep.c cep_interpreter.o
+	gcc -ldl -shared -Isli/enforce_crash \$^ -o \$@
+${MD_TEST_DIR}/%.fix.so: ${MD_TEST_DIR}/%.fix.c sli/patch_head.h sli/patch_skeleton_jump.c sli/patch_skeleton_common.c
+	gcc -Wall -g -shared -fPIC -Isli \$< -o \$@
+
+${MD_TEST_DIR}/%.types: ${MD_TEST_DIR}/%.exe ./tests/minimal_direct/build_types_table.sh /local/scratch/sos22/valgrind-ft-stage3/bin/valgrind
+	./tests/minimal_direct/build_types_table.sh "./\$<"
+${MD_TEST_DIR}/%.bcg: ${MD_TEST_DIR}/%.exe ./tests/minimal_direct/build_call_graph.sh ./tests/minimal_direct/build_types_table.sh /local/scratch/sos22/valgrind-ft-stage3/bin/valgrind
+	./tests/minimal_direct/build_call_graph.sh "./\$<"
+${MD_TEST_DIR}/%.types.canon: ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types canonicalise_types_table
+	./canonicalise_types_table "\$<" "${MD_TEST_DIR}/\$*.types" "\$@"
+${MD_TEST_DIR}/%.db: ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types.canon ${MD_TEST_DIR}/%.bcg static
+	./static "\$<" "${MD_TEST_DIR}/\$*.types.canon" "${MD_TEST_DIR}/\$*.bcg" "\$@"
+${MD_TEST_DIR}/%.db.timing: ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types.canon ${MD_TEST_DIR}/%.bcg static timing
+	./timing 10 \$@ ./static \$<.exe \$*.types.canon \$*.bcg \$*.db
+${MD_TEST_DIR}/%.exe: ${MD_TEST_DIR}/%.c
+	gcc -O -pthread -Wall -g "\$<" -o "\$@"
+${MD_TEST_DIR}/bug%.exe: tests/minimal_direct/bug%.c
+	gcc -O -pthread -Wall -g "\$<" -o "\$@"
+EOF
+    # Per-bug rules.  Relies on the fact that no test will ever
+    # generate more than three bugs.
+    for i in `seq 0 2`
+    do
+	cat <<EOF
+${MD_TEST_DIR}/%~${i}.cep.c: ${MD_TEST_DIR}/%~${i}.ced ctoc_driver ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types.canon ${MD_TEST_DIR}/%.bcg ${MD_TEST_DIR}/%.db
+	./ctoc_driver ${MD_TEST_DIR}/\$*.exe \$< ${MD_TEST_DIR}/\$*.types.canon ${MD_TEST_DIR}/\$*.bcg ${MD_TEST_DIR}/\$*.db \$@
+${MD_TEST_DIR}/%~${i}.ced: ${MD_TEST_DIR}/%~${i}.summary.canon4 ec_driver ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types.canon ${MD_TEST_DIR}/%.bcg ${MD_TEST_DIR}/%.db
+	./ec_driver ${MD_TEST_DIR}/\$*.exe ${MD_TEST_DIR}/\$*.types.canon ${MD_TEST_DIR}/\$*.bcg ${MD_TEST_DIR}/\$*.db \$@ \$<
+${MD_TEST_DIR}/%~${i}.summary.canon4: ${MD_TEST_DIR}/%~${i}.summary.canon2 canonicalise_crash_summary0
+	./canonicalise_crash_summary0 \$< \$@
+${MD_TEST_DIR}/%~${i}.summary.canon2: ${MD_TEST_DIR}/%~${i}.summary.canon0 canonicalise_crash_summary2
+	./canonicalise_crash_summary2 \$< \$@
+${MD_TEST_DIR}/%~${i}.summary.canon0: ${MD_TEST_DIR}/%~${i}.summary canonicalise_crash_summary0
+	./canonicalise_crash_summary0 \$< \$@
+${MD_TEST_DIR}/%~${i}.fix.c: ${MD_TEST_DIR}/%~${i}.summary.canon4 s2f_driver ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types.canon ${MD_TEST_DIR}/%.bcg ${MD_TEST_DIR}/%.db
+	./s2f_driver ${MD_TEST_DIR}/\$*.exe ${MD_TEST_DIR}/\$*.types.canon ${MD_TEST_DIR}/\$*.bcg ${MD_TEST_DIR}/\$*.db \$@ \$<
+${MD_TEST_DIR}/%~${i}.perf_dists: ${MD_TEST_DIR}/harness ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%~0.fix.so ./tests/minimal_direct/perf_dist.sh /home/sos22/bin/check_dist /home/sos22/bin/discard_outliers.py
+	./tests/minimal_direct/perf_dist.sh ${MD_TEST_DIR}/\$*.exe "${MD_TEST_DIR}/\$*~$i.fix.so" ${MD_TEST_DIR}/\$*~${i}.perf_data > ${MD_TEST_DIR}/\$*~${i}.perf_dists
+EOF
     done
 
     # And now the harness

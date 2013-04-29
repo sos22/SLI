@@ -241,6 +241,10 @@ _optimiseStateMachine(SMScopes *scopes,
 		      GarbageCollectionToken token,
 		      bool *progress)
 {
+	if (!CONFIG_SIMPLIFIER) {
+		return sm;
+	}
+
 	__set_profiling(optimiseStateMachine);
 	sm->sanityCheck(*mai);
 	sm->assertAcyclic();
@@ -1380,9 +1384,6 @@ considerStoreCFG(SMScopes *scopes,
 	}
 	fprintf(bubble_plot2_log, "%f: satisfiable\n", now());
 
-	fprintf(_logfile, "\t\tVerification condition:\n");
-	verification_condition->prettyPrint(_logfile);
-
 	if (CONFIG_USE_INDUCTION && !optIn.allPointersGood()) {
 		/* Now have a look at whether we have anything we can use the
 		 * induction rule on.  That means look at the probe machine
@@ -1668,7 +1669,7 @@ processOneStoreCfg(SMScopes *scopes,
 	VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 	VexPtr<CrashSummary, &ir_heap> summary;
 
-	if (run_in_child(bubble_plot2_log, token)) {
+	if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot2_log, token)) {
 		return;
 	}
 
@@ -1698,7 +1699,10 @@ processOneStoreCfg(SMScopes *scopes,
 	if (summary)
 		df(summary, token);
 
-	exit(0);
+	if (CONFIG_USE_CHILDREN) {
+		fprintf(bubble_plot2_log, "%f: high water: %ld, %ld\n", now(), main_heap.high_water, ir_heap.high_water);
+		exit(0);
+	}
 }
 
 static void
@@ -1745,6 +1749,8 @@ probeMachineToSummary(SMScopes *scopes,
 			"getStoreCFGs took %f seconds, produced %d \n",
 			s.sample(),
 			nrStoreCfgs);
+		fprintf(bubble_plot_log, "%f: produced %d interfering CFGs\n", now(),
+			nrStoreCfgs);
 	}
 	assert(nrStoreCfgs != 0);
 
@@ -1778,6 +1784,7 @@ probeMachineToSummary(SMScopes *scopes,
 #endif
 				   preserveMux, optIn, maiIn, token);
 	}
+	fprintf(bubble_plot2_log, "%f: stop crashing %s\n", now(), targetRip.name());
 	fprintf(bubble_plot_log, "%f: stop process interfering CFGs\n", now());
 }
 
@@ -2049,7 +2056,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		setlinebuf(better_log);
 	}
 
-	if (run_in_child(bubble_plot_log, token)) {
+	if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot_log, token)) {
 		return;
 	}
 
@@ -2102,6 +2109,9 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 	diagnoseCrash(&scopes, allocLabel, targetRip, probeMachine, oracle,
 		      df, opt.enablenoLocalSurvival(), mai, timer1, only_store_cfg,
 		      expected_nr_store_cfgs, token);
-	exit(0);
+	fprintf(bubble_plot_log, "%f: high water: %ld, %ld\n", now(), main_heap.high_water, ir_heap.high_water);
+	if (CONFIG_USE_CHILDREN) {
+		exit(0);
+	}
 }
 

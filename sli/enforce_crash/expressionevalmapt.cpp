@@ -449,7 +449,16 @@ buildInputAvailabilityMap(std::map<instr_t, std::set<instr_t> > &predecessors,
 		const std::set<input_expression> &avail(availabilityMap[i]);
 		for (auto it = i->successors.begin(); it != i->successors.end(); it++) {
 			if (it->instr) {
-				if (availabilityMap[it->instr] |= avail) {
+				std::set<input_expression> availAt(avail);
+				assert(predecessors.count(it->instr));
+				const std::set<instr_t> &pred(predecessors[it->instr]);
+				for (auto it2 = pred.begin(); it2 != pred.end(); it2++) {
+					instr_t pred = *it2;
+					if (pred != i) {
+						availAt &= availabilityMap[pred];
+					}
+				}
+				if (availabilityMap[it->instr] |= availAt) {
 					pendingInstrs.push_back(it->instr);
 				}
 			}

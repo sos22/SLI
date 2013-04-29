@@ -28,10 +28,12 @@ main(int argc, char *argv[])
 	VexPtr<OracleInterface> oracleI(oracle);
 	oracle->loadCallGraph(oracle, callgraph, staticdb, ALLOW_GC);
 
-	bubble_plot_log = fopen("enf_bubble.log", "w");
+	unlink("enf_bubble.log");
+	bubble_plot_log = fopen("enf_bubble.log", "a");
 	if (!bubble_plot_log) {
 		err(1, "opening bubble log");
 	}
+	setlinebuf(bubble_plot_log);
 
 	const char *inc_dir = my_asprintf("-I%s/sli/enforce_crash", topdir);
 	const char *interpreter = my_asprintf("%s/cep_interpreter.o", topdir);

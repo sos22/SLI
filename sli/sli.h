@@ -385,6 +385,14 @@ public:
 #endif
 };
 
+#if CONFIG_USE_CHILDREN
 bool run_in_child(FILE *lf, GarbageCollectionToken token) __attribute__((warn_unused_result));
+#else
+static inline bool
+run_in_child(FILE *, GarbageCollectionToken)
+{
+	abort();
+}
+#endif
 
 #endif /* !SLI_H__ */
