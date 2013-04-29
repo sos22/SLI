@@ -4,6 +4,8 @@ set -e
 
 nr_stores="$1"
 nr_loads="$2"
+wild_stores="$3"
+wild_loads="$4"
 
 cat <<EOF
 #include <pthread.h>
@@ -14,11 +16,12 @@ cat <<EOF
 #include <time.h>
 #include <unistd.h>
 
-#define NR_SLOTS 1000
-static volatile int slots[NR_SLOTS];
+#define NR_SLOTS 10
+static volatile unsigned long slots[NR_SLOTS];
 
 #define STOP_ANALYSIS()					\
 	asm (".fill 1000,1,0x90\n")
+
 static volatile int
 global;
 static volatile bool
@@ -28,30 +31,35 @@ static void *
 thr_main(void *ign)
 {
 EOF
-for i in `seq 1 $nr_stores`
+for i in `seq 1 $wild_stores`
 do
-    echo "        unsigned long store_idx$i;"
+    echo "        volatile unsigned long store_idx$i;"
 done
-for i in `seq 1 $nr_loads`
+for i in `seq 1 $wild_loads`
 do
-    echo "        unsigned long load_idx$i;"
+    echo "        volatile unsigned long load_idx$i;"
 done
 cat <<EOF
 
 	while (!force_quit) {
 EOF
-for i in `seq 1 $nr_stores`
+for i in `seq 1 $wild_stores`
 do
     echo "                store_idx$i = random() % NR_SLOTS;"
 done
-for i in `seq 1 $nr_loads`
+for i in `seq 1 $wild_loads`
 do
     echo "                load_idx$i = random() % NR_SLOTS;"
 done
 echo "                STOP_ANALYSIS();"
 for i in `seq 1 $nr_stores`
 do
-    echo "                slots[store_idx${i}] = 1;"
+    if [ "$i" -le $wild_stores ]
+    then
+	echo "                slots[store_idx${i}] = 1;"
+    else
+	echo "                slots[${i}] = 1;"
+    fi
 done
 echo -n "                assert("
 for i in `seq 1 $nr_loads`
@@ -60,7 +68,12 @@ do
     then
 	echo -n " && "
     fi
-    echo -n "slots[load_idx${i}] != 2"
+    if [ "$i" -le $wild_loads ]
+    then
+	echo -n "slots[load_idx${i}] != 2"
+    else
+	echo -n "slots[${i}] != 2"
+    fi
 done
 echo ");"
 cat <<EOF
@@ -78,22 +91,18 @@ main()
 	time_t start_time = time(NULL);
 	int forever = 0;
         int i;
-        int j;
-
-        confuse_compiler = 1;
-        j = confuse_compiler;
-        STOP_ANALYSIS();
 
 	pthread_create(&thr, NULL, thr_main, NULL);
+
+        i = random() % NR_SLOTS;
+        STOP_ANALYSIS();
+        slots[i] = 1;
+        STOP_ANALYSIS();
 
 	if (getenv("SOS22_RUN_FOREVER"))
 		forever = 1;
 
-        for (i = 0; i < NR_SLOTS; i++) {
-                slots[i] = j;
-        }
-
-	while (forever || time(NULL) < start_time + 10) {
+	while (forever || time(NULL) < start_time + 2) {
                 sleep(1);
         }
 
