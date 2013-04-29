@@ -10,8 +10,8 @@
 #include "inferred_information.hpp"
 #include "visitor.hpp"
 
-static bool
-irexprUsesBadPtr(const bbdd *e)
+template <typename t> static bool
+irexprUsesBadPtr(const t *e)
 {
 	struct {
 		static visit_result Unop(void *, const IRExprUnop *ieg) {
@@ -29,9 +29,15 @@ static bool
 machineUsesBadPtr(const StateMachine *sm)
 {
 	std::vector<const StateMachineBifurcate *> s;
+	std::vector<const StateMachineTerminal *> s2;
 	enumStates(sm, &s);
 	for (auto it = s.begin(); it != s.end(); it++) {
 		if (irexprUsesBadPtr( (*it)->condition) )
+			return true;
+	}
+	enumStates(sm, &s2);
+	for (auto it = s2.begin(); it != s2.end(); it++) {
+		if (irexprUsesBadPtr( (*it)->res) )
 			return true;
 	}
 	return false;
@@ -49,9 +55,8 @@ main(int argc, char *argv[])
 {
 	init_sli();
 
-	SMScopes scopes;
-
 	if (argc == 2) {
+		SMScopes scopes;
 		CrashSummary *summary;
 		summary = readBugReport(&scopes, argv[1], NULL);
 
@@ -69,6 +74,7 @@ main(int argc, char *argv[])
 	if (!d)
 		err(1, "opening ./");
 	while (1) {
+		SMScopes scopes;
 		errno = 0;
 		struct dirent *de = readdir(d);
 		if (!de) {
