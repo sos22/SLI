@@ -190,22 +190,9 @@ EOF
 ${MD_TEST_DIR}/complex_hb_${i}.c: ./tests/minimal_direct/mk_complex_hb.sh
 	./tests/minimal_direct/mk_complex_hb.sh ${i} > \$@
 ${MD_TEST_DIR}/complex_hb_${i}.exe: ${MD_TEST_DIR}/complex_hb_${i}.c
-	gcc -O -pthread -Wall -g \$< -o \$@
+	gcc -O -pthread -Wall -g "\$<" -o "\$@"
 EOF
 	emit_rules_for_exe_assert complex_hb_${i} 1 "no_exe"
-    done
-
-    for nr_reads in `seq 1 20`
-    do
-	for nr_writes in `seq 1 20`
-	do
-	    exe=complex_alias_${nr_reads}_${nr_writes}
-	    cat <<EOF
-${MD_TEST_DIR}/${exe}.c: ./tests/minimal_direct/mk_complex_aliasing.sh
-	./tests/minimal_direct/mk_complex_aliasing.sh ${nr_writes} ${nr_reads} > \$@
-EOF
-	    emit_rules_for_exe_assert ${exe} 0 "no_exe"
-	done
     done
 
     # Rules for building things.
@@ -216,19 +203,19 @@ ${MD_TEST_DIR}/%.fix.so: ${MD_TEST_DIR}/%.fix.c sli/patch_head.h sli/patch_skele
 	gcc -Wall -g -shared -fPIC -Isli \$< -o \$@
 
 ${MD_TEST_DIR}/%.types: ${MD_TEST_DIR}/%.exe ./tests/minimal_direct/build_types_table.sh /local/scratch/sos22/valgrind-ft-stage3/bin/valgrind
-	./tests/minimal_direct/build_types_table.sh ./\$<
+	./tests/minimal_direct/build_types_table.sh "./\$<"
 ${MD_TEST_DIR}/%.bcg: ${MD_TEST_DIR}/%.exe ./tests/minimal_direct/build_call_graph.sh ./tests/minimal_direct/build_types_table.sh /local/scratch/sos22/valgrind-ft-stage3/bin/valgrind
-	./tests/minimal_direct/build_call_graph.sh ./\$<
+	./tests/minimal_direct/build_call_graph.sh "./\$<"
 ${MD_TEST_DIR}/%.types.canon: ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types canonicalise_types_table
-	./canonicalise_types_table \$< ${MD_TEST_DIR}/\$*.types \$@
+	./canonicalise_types_table "\$<" "${MD_TEST_DIR}/\$*.types" "\$@"
 ${MD_TEST_DIR}/%.db: ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types.canon ${MD_TEST_DIR}/%.bcg static
-	./static \$< ${MD_TEST_DIR}/\$*.types.canon ${MD_TEST_DIR}/\$*.bcg \$@
+	./static "\$<" "${MD_TEST_DIR}/\$*.types.canon" "${MD_TEST_DIR}/\$*.bcg" "\$@"
 ${MD_TEST_DIR}/%.db.timing: ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types.canon ${MD_TEST_DIR}/%.bcg static timing
 	./timing 10 \$@ ./static \$<.exe \$*.types.canon \$*.bcg \$*.db
 ${MD_TEST_DIR}/%.exe: ${MD_TEST_DIR}/%.c
-	gcc -O -pthread -Wall -g \$< -o \$@
+	gcc -O -pthread -Wall -g "\$<" -o "\$@"
 ${MD_TEST_DIR}/bug%.exe: tests/minimal_direct/bug%.c
-	gcc -O -pthread -Wall -g \$< -o \$@
+	gcc -O -pthread -Wall -g "\$<" -o "\$@"
 EOF
     # Per-bug rules.  Relies on the fact that no test will ever
     # generate more than three bugs.

@@ -11,6 +11,6 @@ do
 	echo "Cannot run $*!"
 	exit 1
     fi
-    $valgrind --tool=bcg $program && break
+    $valgrind --tool=bcg "$program" && break
 done
 mv callgraph1.dat ${1/.exe/.bcg}
