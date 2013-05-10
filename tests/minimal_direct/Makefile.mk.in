@@ -206,12 +206,16 @@ ${MD_TEST_DIR}/%.types: ${MD_TEST_DIR}/%.exe ./tests/minimal_direct/build_types_
 	./tests/minimal_direct/build_types_table.sh "./\$<"
 ${MD_TEST_DIR}/%.bcg: ${MD_TEST_DIR}/%.exe ./tests/minimal_direct/build_call_graph.sh ./tests/minimal_direct/build_types_table.sh /local/scratch/sos22/valgrind-ft-stage3/bin/valgrind
 	./tests/minimal_direct/build_call_graph.sh "./\$<"
+# These take long enough to build that we really don't want to discard
+# them by accident.
+.PRECIOUS: ${MD_TEST_DIR}/%.types
+.SECONDARY: ${MD_TEST_DIR}/%.types
 ${MD_TEST_DIR}/%.types.canon: ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types canonicalise_types_table
 	./canonicalise_types_table "\$<" "${MD_TEST_DIR}/\$*.types" "\$@"
 ${MD_TEST_DIR}/%.db: ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types.canon ${MD_TEST_DIR}/%.bcg static
 	./static "\$<" "${MD_TEST_DIR}/\$*.types.canon" "${MD_TEST_DIR}/\$*.bcg" "\$@"
 ${MD_TEST_DIR}/%.db.timing: ${MD_TEST_DIR}/%.exe ${MD_TEST_DIR}/%.types.canon ${MD_TEST_DIR}/%.bcg static timing
-	./timing 10 \$@ ./static \$<.exe \$*.types.canon \$*.bcg \$*.db
+	./timing 10 \$@ ./static \$< ${MD_TEST_DIR}/\$*.types.canon ${MD_TEST_DIR}/\$*.bcg ${MD_TEST_DIR}/\$*.db
 ${MD_TEST_DIR}/%.exe: ${MD_TEST_DIR}/%.c
 	gcc -O -pthread -Wall -g "\$<" -o "\$@"
 ${MD_TEST_DIR}/bug%.exe: tests/minimal_direct/bug%.c
