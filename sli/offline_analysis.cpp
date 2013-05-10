@@ -1324,6 +1324,7 @@ considerStoreCFG(SMScopes *scopes,
 		fprintf(bubble_plot2_log, "%f: stop rederive crashing\n", now());
 	}
 
+#if !CONFIG_NO_W_ATOMIC
 	atomicSurvival =
 		writeMachineSuitabilityConstraint(
 			scopes,
@@ -1339,6 +1340,7 @@ considerStoreCFG(SMScopes *scopes,
 		fprintf(better_log, "%d/%d: IC atomic timed out\n", idx, nrStoreCfgs);
 		return NULL;
 	}
+#endif
 	if (atomicSurvival == scopes->bools.cnst(false)) {
 		fprintf(_logfile, "\t\tWrite machine constraint is false!\n");
 		fprintf(better_log, "%d/%d: IC is false (%f)\n", idx, nrStoreCfgs, s.sample());
@@ -1437,6 +1439,7 @@ considerStoreCFG(SMScopes *scopes,
 			if (!truncAtomicSurvival) {
 				continue;
 			}
+#if !CONFIG_NO_W_ATOMIC
 			truncAtomicSurvival =
 				writeMachineSuitabilityConstraint(
 					scopes,
@@ -1450,6 +1453,7 @@ considerStoreCFG(SMScopes *scopes,
 			if (!truncAtomicSurvival) {
 				continue;
 			}
+#endif
 
 			bbdd *truncCrashConstraint;
 			{
