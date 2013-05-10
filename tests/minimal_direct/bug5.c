@@ -23,7 +23,7 @@ thr_main(void *ign)
 		v2 = global2;
 		assert(v1 == v2);
 		STOP_ANALYSIS();
-		usleep(1000);
+		usleep(500);
 		read_cntr++;
 	}
 	return NULL;
@@ -49,7 +49,7 @@ main()
 		STOP_ANALYSIS();
 		global2 = 5;
 		STOP_ANALYSIS();
-		usleep(1000);
+		usleep(500);
 		STOP_ANALYSIS();
 		global1 = 7;
 		global2 = 7;
