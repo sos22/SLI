@@ -1,3 +1,4 @@
+#include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <err.h>
@@ -362,11 +363,6 @@ run_in_child(FILE *lf, GarbageCollectionToken token)
 	if (child != 0) {
 		/* We are the parent.  All we need to do is wait for
 		 * the child to finish. */
-
-		/* Might as well do a GC while we're waiting.  This
-		   should be very quick; it's not like the parent does
-		   much memory allocation. */
-		LibVEX_gc(token);
 
 		int status;
 		pid_t c = waitpid(child, &status, 0);
