@@ -119,3 +119,7 @@
 #ifndef CONFIG_NO_W_ATOMIC
 #define CONFIG_NO_W_ATOMIC 0
 #endif
+
+#ifndef CONFIG_NO_SELF_RACE
+#define CONFIG_NO_SELF_RACE 0
+#endif

@@ -217,9 +217,18 @@ Oracle::findConflictingStores(const MaiMap &mai,
 				shared_loads = true;
 		if (!shared_loads)
 			continue;
-		for (auto it = stores.begin(); it != stores.end(); it++)
-			if (!it->is_private)
-				out.insert(it->rip);
+		for (auto it2 = stores.begin(); it2 != stores.end(); it2++) {
+			if (!it2->is_private) {
+				if (CONFIG_NO_SELF_RACE) {
+					unsigned long s = it2->rip.rips[it2->rip.nr_rips - 1];
+					unsigned long r = it.dr().rips[it.dr().nr_rips - 1];
+					if (s <= r + 1000 && s >= r - 1000) {
+						continue;
+					}
+				}
+				out.insert(it2->rip);
+			}
+		}
 	}
 
 	if (smsel->tag == MemoryTag::last_free()) {
