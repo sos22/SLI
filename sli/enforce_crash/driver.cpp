@@ -60,7 +60,7 @@ main(int argc, char *argv[])
 			continue;
 		}
 
-		if (run_in_child(bubble_plot_log, ALLOW_GC)) {
+		if (run_in_child(bubble_plot_log)) {
 			continue;
 		}
 

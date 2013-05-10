@@ -1710,7 +1710,7 @@ probeMachineToSummary(SMScopes *scopes,
 		VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 		VexPtr<CrashSummary, &ir_heap> summary;
 
-		if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot2_log, token)) {
+		if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot2_log)) {
 			continue;
 		}
 
@@ -2015,7 +2015,7 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 		setlinebuf(better_log);
 	}
 
-	if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot_log, token)) {
+	if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot_log)) {
 		fprintf(bubble_plot_log, "%f: parent woke up\n", now());
 		return;
 	}

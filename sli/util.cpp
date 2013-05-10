@@ -352,7 +352,7 @@ warning(const char *fmt, ...)
 
 #if CONFIG_USE_CHILDREN
 bool
-run_in_child(FILE *lf, GarbageCollectionToken token)
+run_in_child(FILE *lf)
 {
 	/* Do most of the work in a child process, so as to protect us
 	 * from the OOM killer. */
