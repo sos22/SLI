@@ -6,27 +6,38 @@ set -x
 function tp() {
     local nr_loads="$1"
     local nr_stores="$2"
-    echo -n "md_test_dir/complex_alias:nr_loads=${nr_loads};nr_stores=${nr_stores};max_loads=${max_loads};max_stores=${max_stores}"
+    local easy_version="$3"
+    echo -n "md_test_dir/complex_alias:nr_loads=${nr_loads};nr_stores=${nr_stores};max_loads=${max_loads};max_stores=${max_stores};easy=${easy_version}"
 }
 
-max_loads=100
-max_stores=100
+if [ "$1" = "easy" ]
+then
+    max_loads=100
+    max_stores=100
+    easy_version=y
+else
+    max_loads=10
+    max_stores=10
+    easy_version=n
+fi
+
 nr_reps=1
 discards=0
 
 cat > extra_config.h <<EOF
 #define CONFIG_CLUSTER_THRESHOLD 500
-#define CONFIG_TIMEOUT1 300
-#define CONFIG_TIMEOUT2 300
+#define CONFIG_TIMEOUT1 3600
+#define CONFIG_TIMEOUT2 3600
+#define CONFIG_NO_SELF_RACE 1
 EOF
-make OPTIMIZE=y minimal_direct static canonicalise_types_table
+make OPTIMIZE=y -j8 minimal_direct static canonicalise_types_table
 for nr_loads in `seq 1 ${max_loads}`
 do
     for nr_stores in `seq 1 ${max_stores}`
     do
 	# Make sure that all of the needed files have been generated
 	# before we start
-	t=$(tp $nr_loads $nr_stores)
+	t=$(tp $nr_loads $nr_stores $easy_version)
 	if ! [ -f ${t}.c ] || [ tests/minimal_direct/mk_complex_aliasing.sh -nt ${t}.c ]
 	then
 	    ./tests/minimal_direct/mk_complex_aliasing.sh ${max_stores} ${max_loads} ${nr_stores} ${nr_loads} > "${t}.c"
