@@ -153,7 +153,8 @@ class SummaryId;
 char *buildPatchForCrashSummary(FILE *log,
 				Oracle *oracle,
 				const std::map<SummaryId, CrashSummary *> &summaries);
-void writePatchToFile(const char *output_fname,
+void writePatchToFile(bool full_banner,
+		      const char *output_fname,
 		      const char *binary,
 		      const std::map<SummaryId, CrashSummary *> &summaries,
 		      const char *patch);

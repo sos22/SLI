@@ -1628,7 +1628,8 @@ buildPatchForCrashSummary(FILE *log,
 }
 
 void
-writePatchToFile(const char *output_fname,
+writePatchToFile(bool full_banner,
+		 const char *output_fname,
 		 const char *binary,
 		 const std::map<SummaryId, CrashSummary *> &summaries,
 		 const char *patch)
@@ -1638,15 +1639,17 @@ writePatchToFile(const char *output_fname,
 	fprintf(output,
 		"/* Compile as gcc -Wall -g -shared -fPIC -Isli %s -o %s.so */\n",
 		output_fname, binary);
-#if 0
-	fprintf(output, "/* Crash summaries:\n");
-	for (auto it = summaries.begin(); it != summaries.end(); it++) {
-		fprintf(output, "  Summary %s:\n", it->first.name());
-		printCrashSummary(it->second, output);
-		fprintf(output, "\n\n\n");
+	/* This is really useful debug, but also kind of expensive, so
+	 * make sure we can turn it off when doing perf stuff. */
+	if (full_banner) {
+		fprintf(output, "/* Crash summaries:\n");
+		for (auto it = summaries.begin(); it != summaries.end(); it++) {
+			fprintf(output, "  Summary %s:\n", it->first.name());
+			printCrashSummary(it->second, output);
+			fprintf(output, "\n\n\n");
+		}
+		fprintf(output, "*/\n");
 	}
-	fprintf(output, "*/\n");
-#endif
 	fprintf(output, "#define BINARY_PATCH_FOR \"%s\"\n",
 		basename(binary));
 	fprintf(output, "#include \"patch_head.h\"\n\n");
