@@ -222,7 +222,7 @@ Oracle::findConflictingStores(const MaiMap &mai,
 				if (CONFIG_NO_SELF_RACE) {
 					unsigned long s = it2->rip.rips[it2->rip.nr_rips - 1];
 					unsigned long r = it.dr().rips[it.dr().nr_rips - 1];
-					if (s <= r + 1000 && s >= r - 1000) {
+					if (s <= r + 10000 && s >= r - 10000) {
 						continue;
 					}
 				}

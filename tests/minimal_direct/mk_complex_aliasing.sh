@@ -2,11 +2,9 @@
 
 set -e
 
-nr_stores="$1"
-nr_loads="$2"
-wild_stores="$3"
-wild_loads="$4"
-easy_version="$5"
+wild_stores="$1"
+wild_loads="$2"
+easy_version="$3"
 
 cat <<EOF
 #include <pthread.h>
@@ -21,7 +19,7 @@ cat <<EOF
 static volatile unsigned long slots[NR_SLOTS];
 
 #define STOP_ANALYSIS()					\
-	asm (".fill 1000,1,0x90\n")
+	asm (".fill 10000,1,0x90\n")
 
 static volatile int
 global;
@@ -53,51 +51,42 @@ do
     echo "                load_idx$i = random() % NR_SLOTS;"
 done
 echo "                STOP_ANALYSIS();"
-for i in `seq 1 $nr_stores`
+for i in `seq 1 $wild_stores`
 do
-    if [ "$i" -le $wild_stores ]
+    if [ "$easy_version" = "y" ]
     then
-	echo "                slots[store_idx${i}] = 1;"
+	echo "                slots[store_idx${i}] = $i;"
     else
-	echo "                slots[${i}] = 1;"
+	echo "                slots[store_idx${i}] = ${i};"
     fi
 done
 if [ "$easy_version" = "n" ]
 then
     echo -n "                assert(("
-    for i in `seq 1 $nr_loads`
+    for i in `seq 1 $wild_loads`
     do
 	if [ "$i" != 1 ]
 	then
 	    echo -n " + "
 	fi
-	if [ "$i" -le "$wild_loads" ]
-	then
-	    echo -n "slots[load_idx${i}]"
-	else
-	    echo -n "slots[${i}]"
-	fi
+	echo -n "slots[load_idx${i}]"
     done
-    echo ") != $(($nr_loads + 1)));"
+    echo ") != ($wild_loads * ($wild_stores + 1) + 1));"
 elif [ "$easy_version" = "y" ]
 then
     echo -n "                assert("
-    for i in `seq 1 $nr_loads`
+    for i in `seq 1 $wild_loads`
     do
 	if [ "$i" != 1 ]
 	then
 	    echo -n " && "
 	fi
-	if [ "$i" -le $wild_loads ]
-	then
-	    echo -n "slots[load_idx${i}] != 2"
-	else
-	    echo -n "slots[${i}] != 2"
-	fi
+	echo -n "slots[load_idx${i}] != $(($wild_stores + 1 + $i))"
     done
     echo ");"
 else
-    echo "Final argument should be either y (for the easy version of the test) or n (for the hard version)"
+    echo "Final argument should be either y (for the easy version of the test) or n (for the hard version)" >&2
+    exit 1
 fi
 cat <<EOF
                 STOP_ANALYSIS();
@@ -119,7 +108,14 @@ main()
 
         i = random() % NR_SLOTS;
         STOP_ANALYSIS();
-        slots[i] = 1;
+EOF
+if [ "$easy_version" = "y" ]
+then
+    echo "        slots[i] = 0;"
+else
+    echo "        slots[i] = $wild_stores + 1;"
+fi
+cat <<EOF
         STOP_ANALYSIS();
 
 	if (getenv("SOS22_RUN_FOREVER"))
