@@ -163,7 +163,7 @@ EOF
     do
 	emit_rules_for_exe_segv bug${bug} 1
     done
-    for bug in 5 11 12 13 17 18
+    for bug in 5 11 12 13 17 18 21
     do
 	emit_rules_for_exe_assert bug${bug} 1
     done
@@ -186,12 +186,6 @@ EOF
 
     for i in `seq 3 2 100`
     do
-	cat <<EOF
-${MD_TEST_DIR}/complex_hb_${i}.c: ./tests/minimal_direct/mk_complex_hb.sh
-	./tests/minimal_direct/mk_complex_hb.sh ${i} > \$@
-${MD_TEST_DIR}/complex_hb_${i}.exe: ${MD_TEST_DIR}/complex_hb_${i}.c
-	gcc -O -pthread -Wall -g "\$<" -o "\$@"
-EOF
 	emit_rules_for_exe_assert complex_hb_${i} 1 "no_exe"
     done
 
@@ -250,6 +244,17 @@ ${MD_TEST_DIR}/harness: ./tests/minimal_direct/harness.c
 clean_files += ${MD_TEST_DIR}/harness
 EOF
 
+cat <<EOF
+${MD_TEST_DIR}/indexed_toctou%.summaries: ./minimal_direct ${MD_TEST_DIR}/indexed_toctou%.exe ${MD_TEST_DIR}/indexed_toctou%.types.canon ${MD_TEST_DIR}/indexed_toctou%.bcg ${MD_TEST_DIR}/indexed_toctou%.db
+	rm -rf \$@ crash_summaries induction.log logs generated_patch.c && \\
+	mkdir -p machines && \\
+	mkdir logs && \\
+	mkdir crash_summaries && \\
+	./\$^ && \\
+	mv crash_summaries \$@
+${MD_TEST_DIR}/indexed_toctou%~0.summary: ${MD_TEST_DIR}/indexed_toctou%.summaries
+	! [ -e $</1 ] && [ -e $</0 ] && cp \$</0 \$@
+EOF
     cat <<EOF
 all_md_tests: \$(ALL_MD_TESTS)
 all_md_perf: \$(MD_PERF_FILES)

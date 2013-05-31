@@ -21,25 +21,21 @@ global;
 static volatile bool
 force_quit;
 
-static void *
-thr_main(void *ign)
+static void
+worker(void)
 {
 EOF
-
 nr_vars=$(( $((nr_edges / 2)) ))
 for i in `seq 0 $nr_vars`
 do
     echo "        int x$i;"
 done
-cat <<EOF
-	while (!force_quit) {
-		STOP_ANALYSIS();
-EOF
+echo "        STOP_ANALYSIS();"
 for i in `seq 0 $nr_vars`
 do
-    echo "                x$i = global;"
+    echo "        x$i = global;"
 done
-echo -n "                assert(!("
+echo -n "        assert(!("
 for i in `seq 0 $nr_vars`
 do
     if [ "$i" != 0 ]
@@ -50,7 +46,15 @@ do
 done
 echo "));"
 cat <<EOF
-                STOP_ANALYSIS();
+        STOP_ANALYSIS();
+}
+static void worker(void) __attribute__((noinline));
+
+static void *
+thr_main(void *ign)
+{
+	while (!force_quit) {
+                worker();
         }
         return NULL;
 }

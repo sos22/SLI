@@ -7,6 +7,7 @@
 md_test_dir
 Makefile.mk
 .depends
+DynRip[*].log
 
 /patches
 
