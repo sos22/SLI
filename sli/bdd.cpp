@@ -481,6 +481,18 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 						mask),
 					memo);
 			}
+			/* BadPtr(k + RSP) and BadPtr(k + FS_ZERO) are
+			 * always false. */
+			if (au->op == Iop_BadPtr &&
+			    argA->op == Iop_Add64 &&
+			    argA->nr_arguments == 2 &&
+			    argA->contents[0]->tag == Iex_Const &&
+			    argA->contents[1]->tag == Iex_Get &&
+			    ((IRExprGet *)argA->contents[1])->reg.isReg() &&
+			    (((IRExprGet *)argA->contents[1])->reg.asReg() == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
+			     ((IRExprGet *)argA->contents[1])->reg.asReg() == offsetof(VexGuestAMD64State, guest_RSP))) {
+				return IRExpr_Const_U1(false);
+			}
 			if (au->op == Iop_BadPtr &&
 			    (argA->op == Iop_Add64 || argA->op == Iop_Or64)) {
 				if (isSmall64(argA->contents[0])) {
@@ -659,6 +671,16 @@ _quickSimplify(const qs_args &args, std::map<qs_args, IRExpr *> &memo)
 			return quickSimplify(
 				qs_args(reduced, mask & fullMask(newType)),
 				memo);
+		}
+
+		if (au->op == Iop_BadPtr &&
+		    arg->tag == Iex_Get &&
+		    ((IRExprGet *)arg)->reg.isReg() &&
+		    (((IRExprGet *)arg)->reg.asReg() == offsetof(VexGuestAMD64State, guest_FS_ZERO) ||
+		     ((IRExprGet *)arg)->reg.asReg() == offsetof(VexGuestAMD64State, guest_RSP))) {
+			/* BadPtr(RSP) and BadPtr(FS_ZERO) are always
+			 * false. */
+			return IRExpr_Const_U1(false);
 		}
 
 		if (arg->tag == Iex_Const) {
