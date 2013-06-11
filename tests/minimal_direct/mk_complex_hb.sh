@@ -71,7 +71,7 @@ main()
 	if (getenv("SOS22_RUN_FOREVER"))
 		forever = 1;
 
-	while (forever || time(NULL) < start_time + 10) {
+	while (forever || time(NULL) < start_time + 60) {
 		STOP_ANALYSIS();
 EOF
 for i in `seq 0 $nr_vars`

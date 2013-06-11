@@ -11,16 +11,16 @@ function mem_usage() {
     sed 's/^[0-9.]*: high water: \([0-9]*\), \([0-9]*\)$/\1 \2 + p/p;d' "$1" | dc
 }
 
-max_nr_accs=5
+max_nr_accs=81
 acc_step=2 # Must be even
-nr_reps=1
+nr_reps=11
 discards=0
 
 # Build everything we need before we start.
 cat > extra_config2.h <<EOF
 #define CONFIG_CLUSTER_THRESHOLD 500
-#define CONFIG_TIMEOUT1 300
-#define CONFIG_TIMEOUT2 300
+#define CONFIG_TIMEOUT1 600
+#define CONFIG_TIMEOUT2 600
 EOF
 if ! cmp -s extra_config.h extra_config2.h
 then
@@ -71,11 +71,10 @@ do
 	./minimal_direct ${t}.{exe,types.canon,bcg,db} assertions
 	# And check that it produced the expected set of summaries
    	# (i.e. none at all for easy mode, one for hard)
-	if [ -r "crash_summaries/0" ]
+	if ! [ -r "crash_summaries/0" ] || [ -r "crash_summaries/1" ]
 	then
 	    echo "${t} produced a summary (rep ${rep})?"
-	    echo "$nr_accs $rep" >> ${summarylog}
-	    ls crash_summaries >> ${summarylog}
+	    echo "$nr_accs $rep" crash_summaries/* >> ${summarylog}
 	fi
 	# Discard first sample to reduce risk of outliers.
 	if [ $rep -le $discards ]
