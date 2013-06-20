@@ -18,54 +18,54 @@ then
 	local nr_loads="$1"
 	if [ "$nr_loads" -le 6 ]
 	then
-	    echo 161
+	    echo 166
 	elif [ "$nr_loads" -le 11 ]
 	then
-	    echo 101
+	    echo 106
 	elif [ "$nr_loads" -le 16 ]
 	then
-	    echo 81
+	    echo 86
 	elif [ "$nr_loads" -le 21 ]
 	then
-	    echo 71
+	    echo 76
 	elif [ "$nr_loads" -le 26 ]
 	then
-	    echo 66
+	    echo 71
 	elif [ "$nr_loads" -le 31 ]
 	then
-	    echo 61
+	    echo 66
 	elif [ "$nr_loads" -le 36 ]
 	then
-	    echo 56
+	    echo 61
 	elif [ "$nr_loads" -le 41 ]
 	then
-	    echo 51
+	    echo 56
 	elif [ "$nr_loads" -le 46 ]
 	then
-	    echo 46
+	    echo 51
 	elif [ "$nr_loads" -le 56 ]
 	then
-	    echo 41
+	    echo 46
 	elif [ "$nr_loads" -le 66 ]
 	then
-	    echo 36
+	    echo 41
 	elif [ "$nr_loads" -le 76 ]
 	then
-	    echo 31
+	    echo 36
 	elif [ "$nr_loads" -le 91 ]
 	then
-	    echo 26
+	    echo 31
 	elif [ "$nr_loads" -le 111 ]
 	then
-	    echo 21
+	    echo 26
 	elif [ "$nr_loads" -le 141 ]
 	then
-	    echo 16
+	    echo 21
 	elif [ "$nr_loads" -le 196 ]
 	then
-	    echo 11
+	    echo 16
 	else
-	    echo 6
+	    echo 11
 	fi
     }
     sstep=5
