@@ -2051,7 +2051,11 @@ checkWhetherInstructionCanCrash(const DynAnalysisRip &targetRip,
 				fprintf(bubble_plot_log, "%f: early out\n", now());
 				fprintf(bubble_plot_log, "%f: high water: %ld, %ld\n", now(), main_heap.high_water, ir_heap.high_water);
 				fprintf(better_log, "Early out\n");
-				_exit(0);
+				if (CONFIG_USE_CHILDREN) {
+					_exit(0);
+				} else {
+					return;
+				}
 			}
 		}
 	}
