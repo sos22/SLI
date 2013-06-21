@@ -75,6 +75,16 @@ void AddressSpace::readMemory(unsigned long _start, unsigned size,
 			      unsigned long *contents)
 {
 	unsigned long start = _start;
+	/* Hackity hackity hack: subst in an alternative version of
+	 * stat64, fstat64, and lstat64, since the glibc ones confuse
+	 * the static analysis.
+	 */
+	if (start == 0xa33590 || start == 0xa335a0 || start == 0xa335b0) {
+		for (unsigned x = 0; x < size; x++) {
+			contents[x] = 0xc3;
+		}
+		return;
+	}
 	while (size != 0) {
 		PhysicalAddress pa;
 		if (vamap->translate(start, &pa)) {

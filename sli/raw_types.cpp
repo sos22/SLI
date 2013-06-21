@@ -79,7 +79,9 @@ input_database::read(FILE *f, AddressSpace *as)
 {
 	unsigned long magic = 0;
 	bool new_format;
-	fread(&magic, sizeof(magic), 1, f);
+	if (fread(&magic, sizeof(magic), 1, f) != 1) {
+		err(1, "cannot head of types database");
+	}
 	if (magic == 0x1122334455) {
 		printf("New format\n");
 		new_format = true;

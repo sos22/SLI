@@ -217,9 +217,18 @@ Oracle::findConflictingStores(const MaiMap &mai,
 				shared_loads = true;
 		if (!shared_loads)
 			continue;
-		for (auto it = stores.begin(); it != stores.end(); it++)
-			if (!it->is_private)
-				out.insert(it->rip);
+		for (auto it2 = stores.begin(); it2 != stores.end(); it2++) {
+			if (!it2->is_private) {
+				if (CONFIG_NO_SELF_RACE) {
+					unsigned long s = it2->rip.rips[it2->rip.nr_rips - 1];
+					unsigned long r = it.dr().rips[it.dr().nr_rips - 1];
+					if (s <= r + 10000 && s >= r - 10000) {
+						continue;
+					}
+				}
+				out.insert(it2->rip);
+			}
+		}
 	}
 
 	if (smsel->tag == MemoryTag::last_free()) {
@@ -1081,7 +1090,31 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 
 	callgraph_t callgraph; 
 	std::vector<StaticRip> roots;
-	FILE *f = fopen(cg_fname, "r");
+
+	std::map<unsigned long, std::set<std::pair<bool, unsigned long> > > extra_edges;
+	FILE *f = fopen("extra_edges", "r");
+	if (f != NULL) {
+		fprintf(stderr, "Using extra edges\n");
+		while (1) {
+			unsigned long rip1, rip2;
+			int is_call;
+			int r;
+			r = fscanf(f, "%lx %lx %d\n", &rip1, &rip2, &is_call);
+			if (r <= 0) {
+				if (feof(f)) {
+					break;
+				}
+				err(1, "reading extra_edges");
+			}
+			if (is_call != 0 && is_call != 1) {
+				errx(1, "extra_edges: unexpected is_call %d (0x%x)", is_call, is_call);
+			}
+			extra_edges[rip1].insert(std::pair<bool, unsigned long>(is_call, rip2));
+		}
+		fclose(f);
+	}
+
+	f = fopen(cg_fname, "r");
 	unsigned long magic = 0;
 	if (fread(&magic, sizeof(magic), 1, f) != 1) {
 		err(1, "reading header from %s", cg_fname);
@@ -1093,6 +1126,7 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 		fseeko(f, 0, SEEK_SET);
 		new_format = false;
 	}
+	
 	while (!feof(f)) {
 		callgraph_entry ce;
 		bool is_call;
@@ -1137,6 +1171,19 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 			ce.targets.insert(callee);
 		}
 
+		unsigned long r;
+		r = branch_rip.rips[branch_rip.nr_rips-1];
+		auto it = extra_edges.find(r);
+		if (it != extra_edges.end()) {
+			for (auto it2 = it->second.begin();
+			     it2 != it->second.end();
+			     it2++) {
+				assert(is_call == it2->first);
+				ce.targets.insert(it2->second);
+			}
+			extra_edges.erase(it);
+		}
+
 		ce.is_call = is_call;
 		if (branch_rip.isValid()) {
 			callgraph[StaticRip(branch_rip)] = ce;
@@ -1151,10 +1198,51 @@ Oracle::loadCallGraph(VexPtr<Oracle> &ths,
 		}
 	}
 
+	for (auto it = extra_edges.begin(); it != extra_edges.end(); it++) {
+		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
+			auto it3 = callgraph.find(StaticRip(it->first));
+			if (it3 == callgraph.end()) {
+				callgraph[StaticRip(it->first)].is_call = it2->first;
+				callgraph[StaticRip(it->first)].targets.insert(it2->second);
+			} else {
+				assert(callgraph[StaticRip(it->first)].is_call == it2->first);
+				callgraph[StaticRip(it->first)].targets.insert(it2->second);
+			}
+			if (it2->first) {
+				roots.push_back(StaticRip(it2->second));
+			}
+		}
+	}
+
 	fclose(f);
 
 	bool need_rebuild_database = open_database(db_fname);
 	if (need_rebuild_database) {
+		f = fopen("extra_roots", "r");
+		if (f != NULL) {
+			printf("Using extra roots\n");
+			while (1) {
+				unsigned long r;
+				int i = fscanf(f, "%lx\n", &r);
+				if (i == 0) {
+					if (feof(f)) {
+						break;
+					}
+					errx(1, "cannot parse extra_roots");
+				}
+				if (i < 0) {
+					if (feof(f)) {
+						break;
+					}
+					err(1, "reading extra_roots");
+				}
+				roots.push_back(StaticRip(r));
+			}
+			fclose(f);
+		} else {
+			printf("No extra roots\n");
+		}
+
 		make_unique(roots);
 		Oracle::findInstructions(ths, roots, callgraph, token);
 	}
@@ -1498,6 +1586,13 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 	}
 
 	sqlite3_exec(database(), "END TRANSACTION", NULL, NULL, NULL);
+
+	printf("Final coverage %f%% [%lx, %lx); %d ranges, %zd known heads\n",
+	       covered.coverage() * 100,
+	       covered.min(),
+	       covered.max(),
+	       covered.nr_ranges(),
+	       known_heads.size());
 
 	printf("Building indices...\n");
 	create_index("branchDest", "branchRips", "dest");

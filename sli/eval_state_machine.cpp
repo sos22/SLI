@@ -2552,6 +2552,7 @@ concatenateStateMachinesCrashing(SMScopes *scopes, const StateMachine *machine, 
 	return new StateMachine(newRoot, cfg_roots);
 }
 
+#if !CONFIG_NO_W_ATOMIC
 bbdd *
 writeMachineSuitabilityConstraint(SMScopes *scopes,
 				  VexPtr<MaiMap, &ir_heap> &mai,
@@ -2614,6 +2615,7 @@ writeMachineSuitabilityConstraint(SMScopes *scopes,
 	stackedCdf::stopBuildWAtomic();
 	return res;
 }
+#endif
 
 template <typename bddT> static void
 enumVariables(bddT *src, std::set<IRExpr *> &out, std::set<bddT *> &memo)

@@ -1,4 +1,4 @@
-/* multi_variable */
+/* non_race */
 #include <pthread.h>
 #include <assert.h>
 #include <stdbool.h>
@@ -9,6 +9,7 @@
 
 static int volatile global1;
 static int volatile global2;
+static pthread_mutex_t mux = PTHREAD_MUTEX_INITIALIZER;
 
 #include "test.h"
 
@@ -19,11 +20,15 @@ thr_main(void *ign)
 		int v1;
 		int v2;
 		STOP_ANALYSIS();
+		pthread_mutex_lock(&mux);
 		v1 = global1;
+		pthread_mutex_unlock(&mux);
+		pthread_mutex_lock(&mux);
 		v2 = global2;
+		pthread_mutex_unlock(&mux);
 		assert(v1 == v2);
 		STOP_ANALYSIS();
-		usleep(500);
+		usleep(1000);
 		read_cntr++;
 	}
 	return NULL;
@@ -45,14 +50,18 @@ main()
 
 	while (forever || time(NULL) < start_time + 10) {
 		STOP_ANALYSIS();
+		pthread_mutex_lock(&mux);
 		global1 = 5;
 		STOP_ANALYSIS();
 		global2 = 5;
+		pthread_mutex_unlock(&mux);
 		STOP_ANALYSIS();
-		usleep(500);
+		usleep(1000);
 		STOP_ANALYSIS();
+		pthread_mutex_lock(&mux);
 		global1 = 7;
 		global2 = 7;
+		pthread_mutex_unlock(&mux);
 		STOP_ANALYSIS();
 		write_cntr++;
 	}

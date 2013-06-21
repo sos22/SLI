@@ -36,7 +36,7 @@ main(int argc, char *const argv[])
 	char *patch = buildPatchForCrashSummary(NULL, oracle, summaries);
 	printf("Patch is:\n%s\n", patch);
 
-	writePatchToFile(output_fname, binary, summaries, patch);
+	writePatchToFile(true, output_fname, binary, summaries, patch);
 
 	return 0;
 }

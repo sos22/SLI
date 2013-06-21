@@ -72,6 +72,7 @@ bbdd *crossProductSurvivalConstraint(SMScopes *scopes,
 				     const AllowableOptimisations &opt,
 				     const VexPtr<MaiMap, &ir_heap> &mai,
 				     GarbageCollectionToken token);
+#if !CONFIG_NO_W_ATOMIC
 bbdd *writeMachineSuitabilityConstraint(SMScopes *scopes,
 					VexPtr<MaiMap, &ir_heap> &mai,
 					const VexPtr<StateMachine, &ir_heap> &writeMachine,
@@ -80,6 +81,7 @@ bbdd *writeMachineSuitabilityConstraint(SMScopes *scopes,
 					const VexPtr<bbdd, &ir_heap> &assumption,
 					const AllowableOptimisations &opt,
 					GarbageCollectionToken token);
+#endif
 void collectConstraints(SMScopes *scopes,
 			const VexPtr<MaiMap, &ir_heap> &mai,
 			const VexPtr<StateMachine, &ir_heap> &sm,

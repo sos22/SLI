@@ -39,7 +39,7 @@ main(int argc, char *const argv[])
 		char *patch = buildPatchForCrashSummary(logfile, oracle, summaries);
 
 		fprintf(logfile, "%f: start system compile\n", now());
-		writePatchToFile("s2f_perf.genfix.c", binary, summaries, patch);
+		writePatchToFile(false, "s2f_perf.genfix.c", binary, summaries, patch);
 		my_system("/usr/bin/gcc-4.4", "-Wall", "-O", "-shared", "-fPIC", "-I", slidir, "s2f_perf.genfix.c", "-o", "s2f_perf.genfix.so", NULL);
 		fprintf(logfile, "%f: stop system compile\n", now());
 

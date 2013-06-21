@@ -12,6 +12,7 @@ static void *volatile the_ptr;
 static void *
 thr_main(void *ign)
 {
+	usleep(random() % 100000);
 	while (!force_quit) {
 		STOP_ANALYSIS();
 		free(the_ptr);
@@ -33,7 +34,6 @@ main()
 	int forever = 0;
 
 	pthread_create(&thr1, NULL, thr_main, NULL);
-	usleep(100);
 	pthread_create(&thr2, NULL, thr_main, NULL);
 
 	if (getenv("SOS22_RUN_FOREVER"))

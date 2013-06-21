@@ -9,4 +9,5 @@ rules() {
     echo "scripts/type_completeness.o: CPPFLAGS+=-Isli -I\$(libvex)/pub -I\$(libvex)/priv"
     echo "type_completeness: slir.a libVEX.a"
     link type_completeness scripts/type_completeness.o
+    link sane_time scripts/sane_time.o
 }

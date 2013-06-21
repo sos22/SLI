@@ -386,10 +386,10 @@ public:
 };
 
 #if CONFIG_USE_CHILDREN
-bool run_in_child(FILE *lf, GarbageCollectionToken token) __attribute__((warn_unused_result));
+bool run_in_child(FILE *lf) __attribute__((warn_unused_result));
 #else
 static inline bool
-run_in_child(FILE *, GarbageCollectionToken)
+run_in_child(FILE *)
 {
 	abort();
 }

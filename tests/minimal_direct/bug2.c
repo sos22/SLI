@@ -39,6 +39,7 @@ main()
 	int t;
 	int idx;
 	int forever = 0;
+	int del;
 
 	srandom(start_time);
 
@@ -49,7 +50,14 @@ main()
 	if (getenv("SOS22_RUN_FOREVER"))
 		forever = 1;
 
-	while (forever || time(NULL) < start_time + 10) {
+	if (NR_PTRS < 5000) {
+		del = 20;
+	} else if (NR_PTRS < 100000) {
+		del = 60;
+	} else {
+		del = 240;
+	}
+	while (forever || time(NULL) < start_time + del) {
 		idx = random() % NR_PTRS;
 		STOP_ANALYSIS();
 		global_ptrs[idx] = NULL;

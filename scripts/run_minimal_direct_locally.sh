@@ -16,4 +16,4 @@ mkdir ${jobid}
 cd ${jobid}
 mkdir logs
 mkdir crash_summaries
-SOS22_MINIMAL_DIRECT_TIMEOUT=180 SOS22_MINIMAL_DIRECT_INSTR_SCHEDULE=../../reduced_schedule ../../../minimal_direct ../../mysqld ../../mysqld.tc ../../mysqld.bcg ../../mysqld.db ${start}...${end}
+SOS22_MINIMAL_DIRECT_TIMEOUT=180 SOS22_MINIMAL_DIRECT_INSTR_SCHEDULE=../../reduced_schedule ../../../minimal_direct ../../mysqld ../../mysqld.tc ../../merged2.bcg ../../mysqld.db ${start}...${end}

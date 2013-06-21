@@ -1,3 +1,4 @@
+#include <sys/mman.h>
 #include <sys/time.h>
 #include <err.h>
 #include <errno.h>
@@ -148,16 +149,20 @@ consider_rip(const DynAnalysisRip &my_rip,
 
 	df.dr = my_rip;
 
-	LibVEX_maybe_gc(token);
+	/* Force a GC, for sanity. */
+	LibVEX_gc(token);
 
 	fprintf(_logfile, "Considering %s...\n", my_rip.name());
 
 	stackedCdf::start();
 	fprintf(bubble_plot_log, "%f: start crashing thread\n", now());
+	fprintf(bubble_plot_log, "%f: start early out\n", now());
 	if (oracle->isPltCall(my_rip.toVexRip())) {
+		fprintf(bubble_plot_log, "%f: stop early out\n", now());
 		fprintf(bubble_plot_log, "%f: Dismiss early, PLT\n", now());
 		fprintf(_logfile, "Is in PLT, so ignore\n");
 	} else {
+		fprintf(bubble_plot_log, "%f: finish early out\n", now());
 		checkWhetherInstructionCanCrash(my_rip, tid, oracle, df, opt, only_store_cfg, expected_nr_store_cfgs, token);
 	}
 	fprintf(bubble_plot_log, "%f: finish crashing thread\n", now());
