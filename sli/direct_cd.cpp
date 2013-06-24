@@ -118,7 +118,7 @@ main(int argc, char *argv[])
 	TimeoutTimer ignTimer;
 	diagnoseCrash(&scopes, allocLabel, DynAnalysisRip(vr),
 		      probeMachine, oracle, df,
-		      opt, mai, ignTimer, ALLOW_GC);
+		      opt, mai, ignTimer, -1, -1, ALLOW_GC);
 
 	return 0;
 }

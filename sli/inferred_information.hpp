@@ -102,6 +102,8 @@ void diagnoseCrash(SMScopes *scopes,
 		   const AllowableOptimisations &opt,
 		   VexPtr<MaiMap, &ir_heap> &mai,
 		   TimeoutTimer &tmr,
+		   int only_store_cfg,
+		   int expected_nr_store_cfgs,
 		   GarbageCollectionToken token);
 void considerInstructionSequence(VexPtr<StateMachine, &ir_heap> &probeMachine,
 				 VexPtr<Oracle> &oracle,
