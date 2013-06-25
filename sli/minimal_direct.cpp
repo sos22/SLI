@@ -197,7 +197,6 @@ void
 InstructionConsumer::operator()(VexPtr<Oracle> &oracle, DumpFix &df, const DynAnalysisRip &dar, unsigned long cntr)
 {
 	_logfile = open_logfile(1000000, "logs/%ld", cntr + start_instr);
-	if (!_logfile) err(1, "opening logs/%ld", cntr + start_instr);
 	printf("Considering %s, log logs/%ld\n", dar.name(), cntr + start_instr);
 	fprintf(_logfile, "Log for %s:\n", dar.name());
 	fflush(0);

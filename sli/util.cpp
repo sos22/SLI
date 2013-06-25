@@ -373,6 +373,9 @@ run_in_child(FILE *lf)
 	 * from the OOM killer. */
 	pid_t child = fork();
 	if (child == -1) {
+		if (errno == ENOMEM) {
+			raise(SIGKILL);
+		}
 		err(1, "fork() for %s", __func__);
 	}
 	if (child != 0) {
@@ -382,6 +385,9 @@ run_in_child(FILE *lf)
 		int status;
 		pid_t c = waitpid(child, &status, 0);
 		if (c == -1) {
+			if (errno == ENOMEM) {
+				raise(SIGKILL);
+			}
 			err(1, "waitpid() for %s", __func__);
 		}
 		if (c != child) {
