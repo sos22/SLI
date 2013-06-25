@@ -21,6 +21,8 @@
 
 extern FILE *bubble_plot_log;
 extern FILE *bubble_plot2_log;
+extern int bubble_cntr1;
+extern int bubble_cntr2;
 
 extern const char *__warning_tag;
 
@@ -133,6 +135,33 @@ open_logfile(size_t sz, const char *fmt, ...)
 	return res;
 }
 
+FILE *
+open_bubble_log(const char *pattern, int *cntr)
+{
+	FILE *res;
+	char *fname;
+	int fd;
+
+	while (1) {
+		fname = my_asprintf(pattern, *cntr);
+		fd = open(fname, O_WRONLY|O_APPEND|O_CREAT|O_EXCL, 0444);
+		if (fd >= 0) {
+			break;
+		}
+		if (errno != EEXIST) {
+			err(1, "opening log %s", fname);
+		}
+		(*cntr)++;
+	}
+	res = fdopen(fd, "a");
+	if (!res) {
+		err(1, "fdopen(%s = %d)", fname, fd);
+	}
+	free(fname);
+	setlinebuf(res);
+	return res;
+}
+
 static void
 consider_rip(const DynAnalysisRip &my_rip,
 	     unsigned tid,
@@ -154,8 +183,11 @@ consider_rip(const DynAnalysisRip &my_rip,
 
 	fprintf(_logfile, "Considering %s...\n", my_rip.name());
 
+	bubble_plot_log = open_bubble_log("crashing%d.bubble", &bubble_cntr1);
+	bubble_cntr2 = bubble_cntr1 * 1000;
+
 	stackedCdf::start();
-	fprintf(bubble_plot_log, "%f: start crashing thread\n", now());
+	fprintf(bubble_plot_log, "%f: start crashing thread %s\n", now(), my_rip.name());
 	fprintf(bubble_plot_log, "%f: start early out\n", now());
 	if (oracle->isPltCall(my_rip.toVexRip())) {
 		fprintf(bubble_plot_log, "%f: stop early out\n", now());
@@ -329,13 +361,6 @@ main(int argc, char *argv[])
 
 	start_percentage = 0;
 	end_percentage = 100;
-
-	unlink("bubble_data.log");
-	unlink("bubble_data2.log");
-	bubble_plot_log = fopen("bubble_data.log", "a");
-	bubble_plot2_log = fopen("bubble_data2.log", "a");
-	setlinebuf(bubble_plot_log);
-	setlinebuf(bubble_plot2_log);
 
 	AllowableOptimisations opt =
 		AllowableOptimisations::defaultOptimisations

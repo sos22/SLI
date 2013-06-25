@@ -25,10 +25,11 @@
 #include "stacked_cdf.hpp"
 #include "timers.hpp"
 
-extern FILE *
-bubble_plot_log;
-extern FILE *
-bubble_plot2_log;
+extern FILE *bubble_plot_log;
+extern FILE *bubble_plot2_log;
+extern int bubble_cntr1;
+extern int bubble_cntr2;
+FILE *open_bubble_log(const char *pattern, int *cntr);
 
 #ifndef NDEBUG
 static bool debugOptimiseStateMachine = false;
@@ -1169,8 +1170,9 @@ buildStoreMachine(SMScopes *scopes,
 	fprintf(bubble_plot2_log, "%f: stop compiling interfering CFG\n", now());
 	stackedCdf::stopCompileStoreMachine();
 
-	fprintf(better_log, "%d/%d: Initial interfering StateMachine has %d states\n",
-		idx, nrStoreCfgs, countMachineStates(sm));
+	unsigned long cnt = countMachineStates(sm);
+	fprintf(better_log, "%d/%d: Initial interfering StateMachine has %ld states\n",
+		idx, nrStoreCfgs, cnt);
 	stackedCdf::startStoreInitialSimplify();
 	fprintf(bubble_plot2_log, "%f: start simplifying interfering CFG\n", now());
 	sm = optimiseStateMachine(
@@ -1205,8 +1207,9 @@ buildStoreMachine(SMScopes *scopes,
 	fprintf(bubble_plot2_log, "%f: stop simplifying interfering CFG\n", now());
 	stackedCdf::stopStoreSecondSimplify();
 
-	fprintf(better_log, "%d/%d: Simplified interfering StateMachine has %d states\n",
-		idx, nrStoreCfgs, countMachineStates(sm_ssa));
+	cnt = countMachineStates(sm_ssa);
+	fprintf(better_log, "%d/%d: Simplified interfering StateMachine has %ld states\n",
+		idx, nrStoreCfgs, cnt);
 
 	return sm_ssa;
 }
@@ -1545,8 +1548,8 @@ buildProbeMachine(SMScopes *scopes,
 			fprintf(_logfile, "Cannot get probe CFGs!\n");
 			return NULL;
 		}
-		fprintf(better_log, "Crashing CFG has %d instructions\n",
-			countCfgInstructions(roots));
+		unsigned long cnt = countCfgInstructions(roots);
+		fprintf(better_log, "Crashing CFG has %ld instructions\n", cnt);
 		stackedCdf::startCompileProbeMachine();
 		fprintf(bubble_plot_log, "%f: stop build crashing CFG\n", now());
 		fprintf(bubble_plot_log, "%f: start compile crashing machine\n", now());
@@ -1556,8 +1559,8 @@ buildProbeMachine(SMScopes *scopes,
 					*mai);
 		stackedCdf::stopCompileProbeMachine();
 	}
-	fprintf(better_log, "Initial crashing machine has %d states\n",
-		countMachineStates(sm));
+	unsigned long cnt = countMachineStates(sm);
+	fprintf(better_log, "Initial crashing machine has %ld states\n", cnt);
 
 	fprintf(bubble_plot_log, "%f: stop compile crashing machine\n", now());
 	fprintf(bubble_plot_log, "%f: start GC\n", now());
@@ -1594,8 +1597,8 @@ buildProbeMachine(SMScopes *scopes,
 				  true,
 				  token);
 	stackedCdf::stopProbeSecondSimplify();
-	fprintf(better_log, "Simplified crashing machine has %d states\n",
-		countMachineStates(sm));
+	cnt = countMachineStates(sm);
+	fprintf(better_log, "Simplified crashing machine has %ld states\n", cnt);
 	fprintf(bubble_plot_log, "%f: stop simplify crashing machine\n", now());
 	fprintf(bubble_plot_log, "%f: start misc2\n", now());
 	return sm;
@@ -1653,8 +1656,9 @@ processOneStoreCfg(SMScopes *scopes,
 		   const VexPtr<MaiMap, &ir_heap> &maiIn,
 		   GarbageCollectionToken token)
 {
-	fprintf(better_log, "%d/%d: Interfering CFG has %d instructions\n",
-		i, nrStoreCfgs, countCfgInstructions(storeCFGs[i]));
+	unsigned long cnt = countCfgInstructions(storeCFGs[i]);
+	fprintf(better_log, "%d/%d: Interfering CFG has %ld instructions\n",
+		i, nrStoreCfgs, cnt);
 	bool singleNodeCfg = isSingleNodeCfg(storeCFGs[i]);
 	if (CONFIG_W_ISOLATION && roughLoadCount == StateMachineState::singleLoad && singleNodeCfg) {
 		fprintf(_logfile, "Single store versus single load -> no race possible\n");
@@ -1675,13 +1679,14 @@ processOneStoreCfg(SMScopes *scopes,
 	VexPtr<CFGNode, &ir_heap> storeCFG(storeCFGs[i]);
 	VexPtr<CrashSummary, &ir_heap> summary;
 
+	bubble_plot2_log = open_bubble_log("interfering%d.bubble", &bubble_cntr2);
 	if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot2_log)) {
 		return;
 	}
 
 	TimeoutTimer timer2;
 	timer2.timeoutAfterSeconds(CONFIG_TIMEOUT2);
-	fprintf(bubble_plot2_log, "%f: start interfering CFG\n", now());
+	fprintf(bubble_plot2_log, "%f: start interfering CFG %d/%d for %s\n", now(), i, nrStoreCfgs, targetRip.name());
 	summary = considerStoreCFG(scopes,
 				   targetRip,
 				   storeCFG,
@@ -1771,7 +1776,6 @@ probeMachineToSummary(SMScopes *scopes,
 	timer.cancel();
 
 	fprintf(bubble_plot_log, "%f: start process interfering CFGs\n", now());
-	fprintf(bubble_plot2_log, "%f: start crashing %s\n", now(), targetRip.name());
 	if (only_store_cfg == -1) {
 		for (int i = 0; i < nrStoreCfgs; i++) {
 			processOneStoreCfg(scopes, targetRip, storeCFGs, i, nrStoreCfgs,
@@ -1793,7 +1797,6 @@ probeMachineToSummary(SMScopes *scopes,
 #endif
 				   preserveMux, optIn, maiIn, token);
 	}
-	fprintf(bubble_plot2_log, "%f: stop crashing %s\n", now(), targetRip.name());
 	LibVEX_gc(token);
 	fprintf(bubble_plot_log, "%f: stop process interfering CFGs\n", now());
 }

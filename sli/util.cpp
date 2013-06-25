@@ -16,6 +16,10 @@ FILE *
 bubble_plot_log;
 FILE *
 bubble_plot2_log;
+int
+bubble_cntr1;
+int
+bubble_cntr2;
 FILE *
 better_log;
 
