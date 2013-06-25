@@ -1,5 +1,3 @@
-#include <err.h>
-
 #include "sli.h"
 
 void MachineState::visit(HeapVisitor &hv)
