@@ -12,7 +12,8 @@ static int nr_timers_pending;
 static bool timers_suspended;
 static bool lost_timer_event;
 
-double now()
+double
+now()
 {
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
@@ -36,6 +37,12 @@ kill_timer(Timer *t)
 		sizeof(pendingTimers[0]) * (nr_timers_pending - idx - 1));
 	nr_timers_pending--;
 	t->inserted = false;
+
+	for (idx = 0; idx < nr_timers_pending; idx++) {
+		if (pendingTimers[idx] == t) {
+			abort();
+		}
+	}
 }
 
 static void
@@ -71,6 +78,9 @@ retry:
 	double nextFire = pendingTimers[0]->nextDue;
 	for (int idx = 0; idx < nr_timers_pending; idx++) {
 		Timer *pt = pendingTimers[idx];
+		if (!pt->inserted) {
+			abort();
+		}
 		if (pt->nextDue <= n) {
 			kill_timer(pt);
 			if (pt->interval > 0) {
@@ -146,7 +156,7 @@ resume_timers(void)
 			return;
 
 		/* If we got here then we dropped a timer signal
-		 * because of the suspension.  Block timers and run
+		 * because of the suspension.  Block timers and
 		 * emulate signal delivery. */
 		suspend_timers();
 		lost_timer_event = false;

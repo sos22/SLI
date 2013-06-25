@@ -2,6 +2,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <err.h>
+#include <errno.h>
+#include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -42,6 +44,25 @@ handle_sigusr1(int )
 	exit(1);
 }
 
+static void
+exitfunc(int status, void *)
+{
+	printf("Exit, status %d\n", status);
+	fprintf(stderr, "Exit, status %d\n", status);
+	if (bubble_plot_log) {
+		fprintf(bubble_plot_log, "%f: exit, status %d\n", now(), status);
+	}
+	if (bubble_plot2_log) {
+		fprintf(bubble_plot2_log, "%f: exit, status %d\n", now(), status);
+	}
+	if (better_log) {
+		fprintf(better_log, "%f: exit, status %d\n", now(), status);
+	}
+	void *bt[20];
+	int r = backtrace(bt, 20);
+	backtrace_symbols_fd(bt, r, 1);
+}
+
 void
 init_sli(void)
 {
@@ -61,15 +82,9 @@ init_sli(void)
 
 	initialise_timers();
 	initialise_profiling();
-}
 
-#if 0
-template <> unsigned long
-__default_hash_function(const unsigned long &key)
-{
-	return key;
+	on_exit(exitfunc, NULL);
 }
-#endif
 
 char *
 readfile(int fd)
@@ -362,6 +377,9 @@ run_in_child(FILE *lf)
 	 * from the OOM killer. */
 	pid_t child = fork();
 	if (child == -1) {
+		if (errno == ENOMEM) {
+			raise(SIGKILL);
+		}
 		err(1, "fork() for %s", __func__);
 	}
 	if (child != 0) {
@@ -371,13 +389,19 @@ run_in_child(FILE *lf)
 		int status;
 		pid_t c = waitpid(child, &status, 0);
 		if (c == -1) {
+			if (errno == ENOMEM) {
+				raise(SIGKILL);
+			}
 			err(1, "waitpid() for %s", __func__);
+		}
+		if (c != child) {
+			errx(1, "waitpid() returned for unexpected child (got %d, wanted %d, status %d)?", c, child, status);
 		}
 		if (WIFEXITED(status)) {
 			int e = WEXITSTATUS(status);
 			if (e == 0) {
 				/* Success */
-			} else if (e == 1) {
+			} else if (e == 73) {
 				fprintf(_logfile, "Child timed out in %s\n", __func__);
 				if (better_log) {
 					fprintf(better_log, "Child timed out in %s\n", __func__);

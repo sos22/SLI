@@ -2,6 +2,7 @@
 #define TIMERS_HPP__
 
 #include <unistd.h>
+#include <stdlib.h>
 
 class TimerSet;
 
@@ -26,14 +27,24 @@ public:
 void initialise_timers();
 
 class TimeoutTimer : public Timer {
-public:
 	void fired() {
-		_exit(1);
+		if (reallyOff) {
+			abort();
+		}
+		_exit(73);
 	}
+public:
+	bool reallyOff;
 	void timeoutAfterSeconds(double seconds) {
+		if (reallyOff) {
+			abort();
+		}
 		nextDue = now() + seconds;
 		schedule();
 	}
+	TimeoutTimer()
+		: Timer(), reallyOff(false)
+	{}
 };
 
 class Stopwatch {
