@@ -1684,6 +1684,7 @@ probeMachineToSummary(SMScopes *scopes,
 	fprintf(bubble_plot_log, "%f: stop misc3\n", now());
 
 	timer.cancel();
+	timer.reallyOff = true;
 
 	fprintf(bubble_plot_log, "%f: start process interfering CFGs\n", now());
 	fprintf(bubble_plot2_log, "%f: start crashing %s\n", now(), targetRip.name());
