@@ -222,8 +222,9 @@ buildPatchStrategy(crashEnforcementRoots &roots,
 		const VexRip &vr(crashCfg.labelToRip(concCfgLabel));
 
 		unsigned long r = vr.unwrap_vexrip();
-		if (debug_declobber_instructions)
+		if (debug_declobber_instructions) {
 			printf("%lx is a root\n", r);
+		}
 		if (currentPs.Cont.count(r)) {
 			if (debug_declobber_instructions) {
 				printf("... but it's already been handled elsewhere\n");
@@ -242,10 +243,17 @@ buildPatchStrategy(crashEnforcementRoots &roots,
 			pses.pop();
 			if (!visited.insert(next).second)
 				continue;
+			if (debug_declobber_instructions) {
+				printf("Consider strategy ");
+				next.prettyPrint(stdout);
+			}
 			if (patchSearch(oracle, next, pses)) {
 				/* We have a solution for this entry
 				 * point.  Update currentPs and move
 				 * on. */
+				if (debug_declobber_instructions) {
+					printf("Advance to next root\n");
+				}
 				currentPs = next;
 				break;
 			}
