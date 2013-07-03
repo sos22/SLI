@@ -281,8 +281,12 @@ void
 my_system(const char *arg1, ...)
 {
 	pid_t pid = fork();
-	if (pid == -1)
+	if (pid == -1) {
+		if (errno == ENOMEM) {
+			raise(SIGKILL);
+		}
 		err(1, "fork(%s)", arg1);
+	}
 	if (pid == 0) {
 		va_list va;
 		unsigned nr_args;
@@ -301,6 +305,9 @@ my_system(const char *arg1, ...)
 				break;
 		}
 		execvp(arg1, (char *const *)args);
+		if (errno == ENOMEM) {
+			raise(SIGKILL);
+		}
 		err(1, "execvp(%s)", arg1);
 	}
 
@@ -314,8 +321,12 @@ my_system(const char *arg1, ...)
 			return;
 		errx(1, "%s returned %d", arg1, WEXITSTATUS(status));
 	}
-	if (WIFSIGNALED(status))
+	if (WIFSIGNALED(status)) {
+		if (WTERMSIG(status) == SIGKILL) {
+			raise(SIGKILL);
+		}
 		errx(1, "%s died with signal %d", arg1, WTERMSIG(status));
+	}
 	errx(1, "unknown wait status %x from %s", status, arg1);
 }
 
@@ -466,5 +477,32 @@ dbg_quickSimplify(IRExpr *what)
 {
 	std::map<qs_args, IRExpr *> memo;
 	return quickSimplify(qs_args(what), memo);
+}
+
+FILE *
+open_bubble_log(const char *pattern, int *cntr)
+{
+	FILE *res;
+	char *fname;
+	int fd;
+
+	while (1) {
+		fname = my_asprintf(pattern, *cntr);
+		fd = open(fname, O_WRONLY|O_APPEND|O_CREAT|O_EXCL, 0444);
+		if (fd >= 0) {
+			break;
+		}
+		if (errno != EEXIST) {
+			err(1, "opening log %s", fname);
+		}
+		(*cntr)++;
+	}
+	res = fdopen(fd, "a");
+	if (!res) {
+		err(1, "fdopen(%s = %d)", fname, fd);
+	}
+	free(fname);
+	setlinebuf(res);
+	return res;
 }
 

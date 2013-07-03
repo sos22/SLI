@@ -1681,6 +1681,8 @@ processOneStoreCfg(SMScopes *scopes,
 
 	bubble_plot2_log = open_bubble_log("interfering%d.bubble", &bubble_cntr2);
 	if (CONFIG_USE_CHILDREN && run_in_child(bubble_plot2_log)) {
+		fclose(bubble_plot2_log);
+		bubble_plot2_log = NULL;
 		return;
 	}
 
@@ -1713,6 +1715,9 @@ processOneStoreCfg(SMScopes *scopes,
 	if (CONFIG_USE_CHILDREN) {
 		fprintf(bubble_plot2_log, "%f: high water: %ld, %ld\n", now(), main_heap.high_water, ir_heap.high_water);
 		exit(0);
+	} else {
+		fclose(bubble_plot2_log);
+		bubble_plot2_log = NULL;
 	}
 }
 

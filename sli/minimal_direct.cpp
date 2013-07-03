@@ -26,6 +26,8 @@ extern int bubble_cntr2;
 
 extern const char *__warning_tag;
 
+FILE *open_bubble_log(const char *pattern, int *cntr);
+
 struct size_limited_file {
 	FILE *f;
 	size_t remaining_quota;
@@ -135,33 +137,6 @@ open_logfile(size_t sz, const char *fmt, ...)
 	return res;
 }
 
-FILE *
-open_bubble_log(const char *pattern, int *cntr)
-{
-	FILE *res;
-	char *fname;
-	int fd;
-
-	while (1) {
-		fname = my_asprintf(pattern, *cntr);
-		fd = open(fname, O_WRONLY|O_APPEND|O_CREAT|O_EXCL, 0444);
-		if (fd >= 0) {
-			break;
-		}
-		if (errno != EEXIST) {
-			err(1, "opening log %s", fname);
-		}
-		(*cntr)++;
-	}
-	res = fdopen(fd, "a");
-	if (!res) {
-		err(1, "fdopen(%s = %d)", fname, fd);
-	}
-	free(fname);
-	setlinebuf(res);
-	return res;
-}
-
 static void
 consider_rip(const DynAnalysisRip &my_rip,
 	     unsigned tid,
@@ -201,6 +176,8 @@ consider_rip(const DynAnalysisRip &my_rip,
 	stackedCdf::stop();
 
 	fflush(NULL);
+	fclose(bubble_plot_log);
+	bubble_plot_log = NULL;
 
 	__warning_tag = "<lost_tag>";
 }
