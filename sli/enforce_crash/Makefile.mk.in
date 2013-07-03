@@ -25,7 +25,7 @@ $targets: slir.a libVEX.a
 cep_interpreter.o: ${input_base}/cep_interpreter.h ${input_base}/cep_interpreter.c
 	gcc -g -fPIC -Wall ${input_base}/cep_interpreter.c -c -o \$@
 ${input_base}/cep_interpreter.cpp.o.d: # Silly hack to keep build system happy
-	touch ${input_base}$@
+	touch \$@
 EOF
 	for t in ec_driver ctoc_driver driver
 	do
