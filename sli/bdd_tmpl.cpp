@@ -274,6 +274,36 @@ _bdd<constT, subtreeT>::from_enabling(scopeT *scope, const enablingTableT &inp, 
 #undef INTBDD_DONT_CARE
 
 template <typename leafT, typename subtreeT> void
+_bdd<leafT, subtreeT>::labelledPrint(FILE *f, std::map<subtreeT *, int> &labels)
+{
+	int nextLabel = 1;
+	std::vector<std::pair<int, subtreeT *> > pending;
+	pending.push_back(std::pair<int, subtreeT *>(0, (subtreeT *)this));
+	while (!pending.empty()) {
+		int depth = pending.back().first;
+		subtreeT *what = pending.back().second;
+		pending.pop_back();
+		if (labels.count(what)) {
+			fprintf(f, "        %*s[->%d]", depth * 3, "", labels[what]);
+		} else {
+			fprintf(f, "[%5d] %*s", nextLabel, depth * 3, "");
+			labels[what] = nextLabel;
+			nextLabel++;
+			if (what->isLeaf()) {
+				fprintf(f, "Leaf: ");
+				what->_prettyPrint(f, what->leaf());
+			} else {
+				fprintf(f, "Mux:");
+				ppIRExpr(what->internal().condition, f);
+				pending.push_back(std::pair<int, subtreeT *>(depth + 1, what->internal().falseBranch));
+				pending.push_back(std::pair<int, subtreeT *>(depth + 1, what->internal().trueBranch));
+			}
+		}
+		fprintf(f, "\n");
+	}
+}
+
+template <typename leafT, typename subtreeT> void
 _bdd<leafT, subtreeT>::prettyPrint(FILE *f)
 {
 	int nextLabel = 0;

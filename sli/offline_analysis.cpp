@@ -34,9 +34,11 @@ FILE *open_bubble_log(const char *pattern, int *cntr);
 #ifndef NDEBUG
 static bool debugOptimiseStateMachine = false;
 static bool debug_localise_loads = false;
+static bool debug_check_asym = false;
 #else
 #define debugOptimiseStateMachine false
 #define debug_localise_loads false
+#define debug_check_asym false
 #endif
 
 extern FILE *better_log;
@@ -1214,6 +1216,266 @@ buildStoreMachine(SMScopes *scopes,
 	return sm_ssa;
 }
 
+/* The way HB edges works means that any valid path to <true> through
+   he crash constraint will involve at least one positive HB test and
+   at least one negative one.  Use that to trim some edges from the
+   condition. */
+class _concurrency_asymmetry : public Named {
+	unsigned char x;
+	explicit _concurrency_asymmetry(unsigned char _x)
+		: x(_x)
+	{}
+	char *mkName() const {
+		switch (x) {
+		case 0:
+			return strdup("{}");
+		case 1:
+			return strdup("+");
+		case 2:
+			return strdup("-");
+		case 3:
+			return strdup("+-");
+		default:
+			return my_asprintf("bad(%d)", x);
+		}
+	}
+public:
+	_concurrency_asymmetry() : x(0) {};
+	bool hasPosTest() const { return x & 1; }
+	bool hasNegTest() const { return x & 2; }
+	_concurrency_asymmetry testedTrue() const {
+		return _concurrency_asymmetry(x | 1);
+	}
+	_concurrency_asymmetry testedFalse() const {
+		return _concurrency_asymmetry(x | 2);
+	}
+	bool saturated() const { return x == 3; }
+	bool operator |=(const _concurrency_asymmetry &o) {
+		if (x == o.x) {
+			return false;
+		}
+		x |= o.x;
+		clearName();
+		return true;
+	}
+	_concurrency_asymmetry operator|(const _concurrency_asymmetry &o) const {
+		return _concurrency_asymmetry(x | o.x);
+	}
+};
+static bbdd *
+rebuild_bbdd_kill_edges(bbdd::scope *scope, bbdd *root,
+			std::set<std::pair<bbdd *, bbdd *> > &deadEdges,
+			sane_map<bbdd *, bbdd *> &memo,
+			std::map<bbdd *, int> &labels)
+{
+	if (root->isLeaf()) {
+		return root;
+	}
+	if (root->internal().condition->tag != Iex_EntryPoint &&
+	    root->internal().condition->tag != Iex_ControlFlow &&
+	    root->internal().condition->tag != Iex_HappensBefore) {
+		return root;
+	}
+	auto it_did_insert = memo.insert(root, (bbdd *)0xf001);
+	auto it = it_did_insert.first;
+	auto did_insert = it_did_insert.second;
+	if (!did_insert) {
+		return it->second;
+	}
+	bbdd *t = root->internal().trueBranch;
+	bbdd *f = root->internal().falseBranch;
+	bbdd *tt;
+	if (deadEdges.count(std::pair<bbdd *, bbdd *>(root, t))) {
+		if (debug_check_asym) {
+			printf("Kill edge %d -t-> %d\n", labels[root], labels[t]);
+		}
+		tt = scope->cnst(false);
+	} else {
+		if (debug_check_asym) {
+			printf("Keep edge %d -t-> %d\n", labels[root], labels[t]);
+		}
+		tt = rebuild_bbdd_kill_edges(scope, t, deadEdges, memo, labels);
+	}
+	bbdd *ff;
+	if (deadEdges.count(std::pair<bbdd *, bbdd *>(root, f))) {
+		if (debug_check_asym) {
+			printf("Kill edge %d -f-> %d\n", labels[root], labels[f]);
+		}
+		ff = scope->cnst(false);
+	} else {
+		if (debug_check_asym) {
+			printf("Keep edge %d -f-> %d\n", labels[root], labels[f]);
+		}
+		ff = rebuild_bbdd_kill_edges(scope, f, deadEdges, memo, labels);
+	}
+	if (tt != t || ff != f) {
+		it->second = scope->node(root->internal().condition,
+					 root->internal().rank,
+					 tt,
+					 ff);
+	} else {
+		it->second = root;
+	}
+	return it->second;
+}
+static bbdd *
+check_concurrency_asymmetry(bbdd::scope *scope, bbdd *root)
+{
+	std::map<bbdd *, int> labels;
+	if (debug_check_asym) {
+		printf("Check concurrency asymmetry:\n");
+		root->labelledPrint(stdout, labels);
+	}
+
+	/* fromRoot[x] -> information on what we must have tested
+	 * getting from the root to @x (excluding @x itself). */
+	std::map<bbdd *, _concurrency_asymmetry> fromRoot;
+	/* toLeaf[x] -> information on what we must test getting from
+	 * @x to the true leaf (excluding @x itself). */
+	std::map<bbdd *, _concurrency_asymmetry> toLeaf;
+
+	/* First build fromRoot and the ToLeaf iteration order */
+	std::vector<bbdd *> pendingToLeaf;
+	std::queue<bbdd *> pendingFromRoot;
+	fromRoot[root] = _concurrency_asymmetry();
+	pendingFromRoot.push(root);
+	while (!pendingFromRoot.empty()) {
+		bbdd *b = pendingFromRoot.front();
+		pendingFromRoot.pop();
+		if (b->isLeaf()) {
+			continue;
+		}
+		/* We build the toLeaf table in the opposite order to
+		   the one we use for the fromRoot table.  The
+		   fromRoot table is breadth first, so toLeaf visits
+		   nodes in descending order of distance from the
+		   root.  This ensures that the toLeaf computation
+		   never needs to backtrack. */
+		pendingToLeaf.push_back(b);
+		if (b->internal().condition->tag != Iex_EntryPoint &&
+		    b->internal().condition->tag != Iex_ControlFlow &&
+		    b->internal().condition->tag != Iex_HappensBefore) {
+			continue;
+		}
+		bbdd *t = b->internal().trueBranch;
+		bbdd *f = b->internal().falseBranch;
+		_concurrency_asymmetry entry(fromRoot[b]);
+		_concurrency_asymmetry exitTrue;
+		_concurrency_asymmetry exitFalse;
+		if (b->internal().condition->tag == Iex_HappensBefore) {
+			exitTrue = entry.testedTrue();
+			exitFalse = entry.testedFalse();
+		} else {
+			exitTrue = exitFalse = entry;
+		}
+		bool nt = !fromRoot.count(t);
+		nt |= (fromRoot[t] |= exitTrue); 
+		if (nt) {
+			pendingFromRoot.push(t);
+		}
+		bool nf = !fromRoot.count(f);
+		nf |= (fromRoot[f] |= exitFalse); 
+		if (nf) {
+			pendingFromRoot.push(f);
+		}
+	}
+
+	if (debug_check_asym) {
+		printf("fromRoot table:\n");
+		for (auto it = fromRoot.begin(); it != fromRoot.end(); it++) {
+			printf("\t%d -> %s\n", labels[it->first], it->second.name());
+		}
+		printf("toLeaf order:\n");
+		for (auto it = pendingToLeaf.begin(); it != pendingToLeaf.end(); it++) {
+			printf("\t%d\n", labels[*it]);
+		}
+	}
+
+	/* Now build toLeaf and figure out which edges we need to
+	 * kill. */
+	std::set<std::pair<bbdd *, bbdd *> > deadEdges;
+	while (!pendingToLeaf.empty()) {
+		bbdd *b = pendingToLeaf.back();
+		pendingToLeaf.pop_back();
+		assert(!b->isLeaf());
+		assert(!toLeaf.count(b));
+
+		if (b->internal().condition->tag != Iex_EntryPoint &&
+		    b->internal().condition->tag != Iex_ControlFlow &&
+		    b->internal().condition->tag != Iex_HappensBefore) {
+			/* Nothing after here can possibly test an HB
+			   edge, by the BDD ordering. */
+			toLeaf[b] = _concurrency_asymmetry();
+			continue;
+		}
+		assert(toLeaf.count(b->internal().trueBranch));
+		assert(toLeaf.count(b->internal().falseBranch));
+		assert(fromRoot.count(b));
+		/* Any path to here cannot test anything not in @entry */
+		_concurrency_asymmetry entry(fromRoot[b]);
+		/* Any path from here starting with the true branch
+		   cannot test anything not in @exitTrue, and
+		   symmetrically for the false branch and
+		   @exitFalse. */
+		_concurrency_asymmetry exitTrue(toLeaf[b->internal().trueBranch]);
+		_concurrency_asymmetry exitFalse(toLeaf[b->internal().falseBranch]);
+		if (b->internal().condition->tag == Iex_HappensBefore) {
+			if (b->internal().trueBranch != scope->cnst(false)) {
+				exitTrue = exitTrue.testedTrue();
+			}
+			if (b->internal().falseBranch != scope->cnst(false)) {
+				exitFalse = exitFalse.testedFalse();
+			}
+		}
+		toLeaf[b] = exitTrue | exitFalse;
+		/* Anything not in exitTrue | entry cannot possibly be
+		   tested on the true branch, and symmetrically for
+		   the false branch */
+		if (b->internal().trueBranch != scope->cnst(false) &&
+		    !(exitTrue | entry).saturated()) {
+			if (debug_check_asym) {
+				printf("%d -t-> %d is dead (%s, %s)\n",
+				       labels[b], labels[b->internal().trueBranch],
+				       exitTrue.name(), entry.name());
+			}
+			deadEdges.insert(std::pair<bbdd *, bbdd *>(b, b->internal().trueBranch));
+		}
+		if (b->internal().falseBranch != scope->cnst(false) &&
+		    !(exitFalse | entry).saturated()) {
+			if (debug_check_asym) {
+				printf("%d -f-> %d is dead (%s, %s)\n",
+				       labels[b], labels[b->internal().falseBranch],
+				       exitFalse.name(), entry.name());
+			}
+			deadEdges.insert(std::pair<bbdd *, bbdd *>(b, b->internal().falseBranch));
+		}
+	}
+
+	if (debug_check_asym) {
+		printf("toLeaf:\n");
+		for (auto it = toLeaf.begin(); it != toLeaf.end(); it++) {
+			printf("\t%d -> %s\n", labels[it->first], it->second.name());
+		}
+		printf("dead edges:\n");
+		for (auto it = deadEdges.begin(); it != deadEdges.end(); it++) {
+			printf("\t%d -> %d\n", labels[it->first], labels[it->second]);
+		}
+	}
+
+	if (deadEdges.empty()) {
+		return root;
+	}
+
+	/* Actually do the kill */
+	sane_map<bbdd *, bbdd *> memo;
+	bbdd *res = rebuild_bbdd_kill_edges(scope, root, deadEdges, memo, labels);
+	if (debug_check_asym) {
+		printf("Result:\n");
+		res->prettyPrint(stdout);
+	}
+	return res;
+}
+
 static CrashSummary *
 considerStoreCFG(SMScopes *scopes,
 		 const DynAnalysisRip &target_rip,
@@ -1375,6 +1637,7 @@ considerStoreCFG(SMScopes *scopes,
 	}
 	fprintf(bubble_plot2_log, "%f: start sat check\n", now());
 	crash_constraint = bbdd::invert(&scopes->bools, crash_constraint);
+	crash_constraint = check_concurrency_asymmetry(&scopes->bools, crash_constraint);
 
 	VexPtr<bbdd, &ir_heap> verification_condition;
 	verification_condition =

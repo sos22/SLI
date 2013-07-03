@@ -287,6 +287,7 @@ public:
 
 	void inputExpressions(std::vector<IRExpr *> &out);
 	void prettyPrint(FILE *f);
+	void labelledPrint(FILE *f, std::map<_subtreeT *, int> &labels);
 
 	/* Simplify @thing under the assumption that @assumption is
 	 * true. */
