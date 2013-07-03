@@ -774,6 +774,7 @@ enforceCrashForMachine(const SummaryId &summaryId,
 	}
 	fprintf(bubble_plot_log, "%f: stop slice by hb\n", now());
 
+	printf("Slice by HB: %zd slices\n", sliced_by_hb.size());
 	crashEnforcementData accumulator;
 	for (auto it = sliced_by_hb.begin(); it != sliced_by_hb.end(); it++) {
 		crashEnforcementData tmp;
