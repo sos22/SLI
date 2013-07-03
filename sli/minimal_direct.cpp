@@ -44,11 +44,15 @@ public:
 	}
 	void finish(void);
 	void operator()(VexPtr<CrashSummary, &ir_heap> &probeMachine,
+			int i,
+			int nrStoreCfgs,
 			GarbageCollectionToken token);
 };
 
 void
 DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
+		    int i,
+		    int nrStoreCfgs,
 		    GarbageCollectionToken )
 {
 	__set_profiling(dumpfix);
@@ -72,7 +76,7 @@ DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
 	if (!f)
 		err(1, "fdopen()");
 
-	fprintf(f, "summary from dyn rip %s\n", dr.name());
+	fprintf(f, "summary from dyn rip %s, %d/%d\n", dr.name(), i, nrStoreCfgs);
 	printCrashSummary(summary, f);
 	fclose(f);
 }

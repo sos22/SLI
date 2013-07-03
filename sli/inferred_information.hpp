@@ -80,6 +80,8 @@ CrashSummary *rewriteSummaryCrossScope(const CrashSummary *oldSummary, SMScopes 
 class FixConsumer {
 public:
 	virtual void operator()(VexPtr<CrashSummary, &ir_heap> &loadMachine,
+				int i,
+				int nrStoreCfgs,
 				GarbageCollectionToken token) = 0;
 };
 

@@ -1710,7 +1710,7 @@ processOneStoreCfg(SMScopes *scopes,
 				   token);
 	fprintf(bubble_plot2_log, "%f: stop interfering CFG\n", now());
 	if (summary)
-		df(summary, token);
+		df(summary, i, nrStoreCfgs, token);
 
 	if (CONFIG_USE_CHILDREN) {
 		fprintf(bubble_plot2_log, "%f: high water: %ld, %ld\n", now(), main_heap.high_water, ir_heap.high_water);
