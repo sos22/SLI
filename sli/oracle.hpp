@@ -86,7 +86,8 @@ public:
 		bool operator !=(const LivenessSet x) { return mask != x.mask; }
 		LivenessSet operator &(const LivenessSet x) { return LivenessSet(mask & x.mask); }
 		static LivenessSet argRegisters;
-		LivenessSet(unsigned long _m) : mask(_m) {}
+		static LivenessSet everything() { return LivenessSet(~0ul); }
+		explicit LivenessSet(unsigned long _m) : mask(_m) {}
 	private:
 		char *mkName() const;
 	};

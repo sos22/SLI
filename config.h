@@ -39,6 +39,10 @@
 #define CONFIG_DISCARD_FLOATING_POINT 0
 #endif
 
+#ifndef CONFIG_STATIC_ANALYSIS
+#define CONFIG_STATIC_ANALYSIS 1
+#endif
+
 /* Bit of a hack: the free() template stores the last free()d address
    here, so that the double_free stub can find it and decide whether
    we've suffered a double free bug.  The precise value doesn't
@@ -66,7 +70,7 @@
 #endif
 
 #ifndef CONFIG_NO_STATIC_ALIASING
-#define CONFIG_NO_STATIC_ALIASING 0
+#define CONFIG_NO_STATIC_ALIASING (!CONFIG_STATIC_ANALYSIS)
 #endif
 
 #ifndef CONFIG_STACKED_CDF
@@ -74,7 +78,7 @@
 #endif
 
 #ifndef CONFIG_FIXED_REGS
-#define CONFIG_FIXED_REGS 1
+#define CONFIG_FIXED_REGS CONFIG_STATIC_ANALYSIS
 #endif
 
 #ifndef CONFIG_W_ISOLATION

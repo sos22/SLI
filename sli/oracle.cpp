@@ -1711,8 +1711,11 @@ Oracle::findInstructions(VexPtr<Oracle> &ths,
 	ths->buildReturnAddressTable();
 	create_index("returnDest", "returnRips", "dest");
 
+#if CONFIG_STATIC_ANALYSIS
 	printf("Calculate register liveness...\n");
 	calculateRegisterLiveness(ths, token);
+#endif
+
 #if !CONFIG_NO_STATIC_ALIASING
 	printf("Calculate aliasing map...\n");
 	calculateAliasing(ths, token);
@@ -1796,6 +1799,9 @@ Oracle::buildReturnAddressTable()
 Oracle::LivenessSet
 Oracle::Function::liveOnEntry(const StaticRip &rip, bool isHead)
 {
+	if (!CONFIG_STATIC_ANALYSIS) {
+		return Oracle::LivenessSet::everything();
+	}
 	static sqlite3_stmt *stmt;
 	int rc;
 
