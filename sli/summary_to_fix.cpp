@@ -23,6 +23,26 @@
 
 #include "cfgnode_tmpl.cpp"
 
+/* There are some special modes which produce incomplete fixes, used
+   only for doing comparative performance measurements:
+
+   0 -> Gain control only, and then return as soon as we get out of
+   the cont set.
+   1 -> Normal patch, but with no synchronisation operations.
+   2 -> Skip synchronisation for the interfering thread, but sync
+   the crashing one as normal.
+   3 -> Normal patch
+*/
+#ifndef INCOMPLETE_PATCH
+#define INCOMPLETE_PATCH 3
+#endif
+
+/* Use the debug registers to gain control, rather than a patch
+ * strategy. */
+#ifndef PATCH_BY_DEBUG_REGISTER
+#define PATCH_BY_DEBUG_REGISTER 0
+#endif
+
 #ifndef NDEBUG
 static bool debug_gen_patch = false;
 static bool debug_stack_validation = false;
@@ -181,6 +201,7 @@ public:
 				tid == o.tid &&
 				node->label == o.node->label;
 		}
+		bool isCrashing() const { return tid == 1; }
 	};
 
 	enum {
@@ -439,6 +460,17 @@ public:
 			abort();
 		}
 		abort();
+	}
+	bool isCrashing() const {
+		if (flavour != fl_locked) {
+			return false;
+		}
+		for (auto it = content.begin(); it != content.end(); it++) {
+			if (it->isCrashing()) {
+				return true;
+			}
+		}
+		return false;
 	}
 };
 
@@ -862,6 +894,9 @@ findEntryLabels(const VexRip &rip,
 		std::set<InstructionLabel::entry> &entryPoints,
 		const summaryRootsT &summaryRoots)
 {
+	if (INCOMPLETE_PATCH == 0) {
+		return;
+	}
 	for (auto it = summaryRoots.begin(); it != summaryRoots.end(); it++) {
 		SummaryId summary(it->first);
 		for (auto it2 = it->second.begin(); it2 != it->second.end(); it2++) {
@@ -1162,8 +1197,9 @@ handleIndirectCall(patch &p,
 	/* Tricky part: can't re-evaluate the successor, because that
 	   would introduce a race, so have to emulate the call
 	   manually. */
-	if (start.locked)
+	if (start.locked) {
 		emitCallSequence(p, "(unsigned long)release_lock");
+	}
 	/* movq imm32, 0x88(%rsp) -- save the return address */
 	assert(next_rip <= 0x100000000ul);
 	p.nr_instrs ++;
@@ -1272,7 +1308,9 @@ emitLockedInstruction(const InstructionLabel &start,
 		return Maybe<InstructionLabel>::just(start.clearRestoreRedZone());
 	}
 
-	if (!start.locked) {
+	if (!start.locked &&
+	    (INCOMPLETE_PATCH == 3 ||
+	     (INCOMPLETE_PATCH == 2 && start.isCrashing()))) {
 		emitCallSequence(p, "(unsigned long)acquire_lock");
 		p.nr_locks++;
 		return Maybe<InstructionLabel>::just(start.acquiredLock());
@@ -1560,7 +1598,16 @@ buildPatchForCrashSummary(FILE *log,
 			fprintf(log, "%f: protect %zd instructions\n", now(), cfg.size());
 			fprintf(log, "%f: start build stratgy\n", now());
 		}
-		buildPatchStrategy(cer, cfg, oracle, patchPoints, clobbered);
+		if (PATCH_BY_DEBUG_REGISTER) {
+			for (auto it = cer.begin(); !it.finished(); it.advance()) {
+				ConcreteCfgLabel concCfgLabel(it.concrete_tid().summary(), it.threadCfgLabel().label);
+				unsigned long r = cfg.labelToRip(concCfgLabel).unwrap_vexrip();
+				patchPoints.insert(r);
+				clobbered.insert(r);
+			}
+		} else {
+			buildPatchStrategy(cer, cfg, oracle, patchPoints, clobbered);
+		}
 		if (log) {
 			fprintf(log, "%f: stop build stratgy\n", now());
 		}
@@ -1654,7 +1701,13 @@ writePatchToFile(bool full_banner,
 		basename(binary));
 	fprintf(output, "#include \"patch_head.h\"\n\n");
 	fprintf(output, "%s\n\n", patch);
-	fprintf(output, "#include \"patch_skeleton_jump.c\"\n");
+
+	if (PATCH_BY_DEBUG_REGISTER) {
+		fprintf(output, "#include \"patch_skeleton.c\"\n");
+	} else {
+		fprintf(output, "#include \"patch_skeleton_jump.c\"\n");
+	}
+
 	if (fclose(output) == EOF)
 		err(1, "writing output");
 }
