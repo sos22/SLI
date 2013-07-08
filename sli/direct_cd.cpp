@@ -49,11 +49,13 @@ public:
 	{
 	}
 	void operator()(VexPtr<CrashSummary, &ir_heap> &probeMachine,
+			int, int,
 			GarbageCollectionToken token);
 };
 
 void
 DumpFix::operator()(VexPtr<CrashSummary, &ir_heap> &summary,
+		    int, int,
 		    GarbageCollectionToken )
 {
 	printCrashSummary(summary, _logfile);
