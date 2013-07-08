@@ -177,6 +177,11 @@ patchSearch(Oracle *oracle,
 		for (auto it = clobbered_by_patch.begin();
 		     it != clobbered_by_patch.end();
 		     it++) {
+			patched.Cont.insert(*it);
+		}
+		for (auto it = clobbered_by_patch.begin();
+		     it != clobbered_by_patch.end();
+		     it++) {
 			std::set<unsigned long> predecessors;
 			oracle->findPredecessors(*it, predecessors);
 			for (unsigned long y = needed; y < *it; y++)
@@ -262,12 +267,4 @@ buildPatchStrategy(crashEnforcementRoots &roots,
 
 	patchPoints = currentPs.Patch;
 	interpretInstrs = currentPs.Cont;
-
-	/* Minor optimisation: anything within five bytes of a patch
-	   point is implicitly cont, so remove them. */
-	for (auto it = patchPoints.begin(); it != patchPoints.end(); it++) {
-		for (unsigned x = 0; x < 5; x++) {
-			interpretInstrs.erase(*it + x);
-		}
-	}
 }
