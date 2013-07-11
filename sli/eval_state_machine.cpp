@@ -1376,10 +1376,12 @@ machineComplexity(StateMachineState *root)
 			}
 			case StateMachineSideEffect::StartAtomic:
 			case StateMachineSideEffect::EndAtomic:
+#if TRACK_FRAMES
 			case StateMachineSideEffect::StartFunction:
 			case StateMachineSideEffect::EndFunction:
-			case StateMachineSideEffect::ImportRegister:
 			case StateMachineSideEffect::StackLayout:
+#endif
+			case StateMachineSideEffect::ImportRegister:
 				break;
 			}
 		}
